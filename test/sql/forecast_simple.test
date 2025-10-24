@@ -1,0 +1,58 @@
+# name: test/sql/forecast_simple.test
+# description: test anofox_forecast extension FORECAST function  
+# group: [sql]
+
+# Require statement will ensure this test is run with this extension loaded
+require anofox_forecast
+
+# Create a test table
+statement ok
+CREATE TABLE test_series (ts TIMESTAMP, value DOUBLE);
+
+statement ok
+INSERT INTO test_series VALUES 
+    ('2024-01-01 00:00:00', 100.0),
+    ('2024-01-01 01:00:00', 102.0),
+    ('2024-01-01 02:00:00', 104.0),
+    ('2024-01-01 03:00:00', 106.0),
+    ('2024-01-01 04:00:00', 108.0),
+    ('2024-01-01 05:00:00', 110.0),
+    ('2024-01-01 06:00:00', 112.0),
+    ('2024-01-01 07:00:00', 114.0),
+    ('2024-01-01 08:00:00', 116.0),
+    ('2024-01-01 09:00:00', 118.0);
+
+# Test 1: Naive model (no parameters needed) - predicts last value (118.0)
+query III
+SELECT forecast_step, point_forecast, model_name FROM FORECAST('test_series', 'ts', 'value', 'Naive', 3, NULL) ORDER BY forecast_step;
+----
+1	118.0	Naive
+2	118.0	Naive
+3	118.0	Naive
+
+# Test 2: SMA model with default window=5
+query II
+SELECT forecast_step, model_name FROM FORECAST('test_series', 'ts', 'value', 'SMA', 3, NULL) ORDER BY forecast_step;
+----
+1	SimpleMovingAverage
+2	SimpleMovingAverage
+3	SimpleMovingAverage
+
+# Test 3: Check that we get correct number of forecast steps
+query I
+SELECT COUNT(*) FROM FORECAST('test_series', 'ts', 'value', 'Naive', 10, NULL);
+----
+10
+
+# Test 4: Verify all columns are present
+query I
+SELECT COUNT(*) FROM (
+    SELECT forecast_step, point_forecast, lower_95, upper_95, model_name, fit_time_ms 
+    FROM FORECAST('test_series', 'ts', 'value', 'Naive', 5, NULL)
+);
+----
+5
+
+# Clean up
+statement ok
+DROP TABLE test_series;
