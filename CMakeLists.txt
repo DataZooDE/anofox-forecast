@@ -14,6 +14,7 @@ find_package(Threads REQUIRED)
 
 # Include anofox-time headers
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/anofox-time/include)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/anofox-time/third_party/LBFGSpp/include)
 include_directories(${EIGEN3_INCLUDE_DIR})
 
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
@@ -24,26 +25,57 @@ include_directories(src/include)
 
 # Include only the anofox-time source files we need (not all of them)
 set(ANOFOX_TIME_SOURCES
+    # Basic models
     anofox-time/src/models/sma.cpp
     anofox-time/src/models/naive.cpp
     anofox-time/src/models/seasonal_naive.cpp
     anofox-time/src/models/ses.cpp
-    anofox-time/src/models/theta.cpp
+    anofox-time/src/models/ses_optimized.cpp
+    anofox-time/src/models/random_walk_drift.cpp
+    # Holt models
     anofox-time/src/models/holt.cpp
     anofox-time/src/models/holt_winters.cpp
+    # Theta variants
+    anofox-time/src/models/theta.cpp
+    anofox-time/src/models/optimized_theta.cpp
+    anofox-time/src/models/dynamic_theta.cpp
+    anofox-time/src/models/dynamic_optimized_theta.cpp
+    # Seasonal models
+    anofox-time/src/models/seasonal_es.cpp
+    anofox-time/src/models/seasonal_es_optimized.cpp
+    anofox-time/src/models/seasonal_window_average.cpp
+    # ARIMA
+    anofox-time/src/models/arima.cpp
+    anofox-time/src/models/auto_arima.cpp
+    # State space
     anofox-time/src/models/ets.cpp
+    anofox-time/src/models/ets_core_statsforecast.cpp
     anofox-time/src/models/auto_ets.cpp
+    # Multiple seasonality
     anofox-time/src/models/mfles.cpp
     anofox-time/src/models/auto_mfles.cpp
     anofox-time/src/models/mstl_forecaster.cpp
     anofox-time/src/models/auto_mstl.cpp
-    anofox-time/src/models/arima.cpp
-    anofox-time/src/models/auto_arima.cpp
+    anofox-time/src/models/tbats.cpp
+    anofox-time/src/models/auto_tbats.cpp
+    # Intermittent demand
+    anofox-time/src/models/croston_classic.cpp
+    anofox-time/src/models/croston_optimized.cpp
+    anofox-time/src/models/croston_sba.cpp
+    anofox-time/src/models/adida.cpp
+    anofox-time/src/models/imapa.cpp
+    anofox-time/src/models/tsb.cpp
+    # Seasonality decomposition
     anofox-time/src/seasonality/stl.cpp
     anofox-time/src/seasonality/mstl.cpp
+    # Utilities
     anofox-time/src/utils/logging.cpp
     anofox-time/src/utils/metrics.cpp
     anofox-time/src/utils/nelder_mead.cpp
+    anofox-time/src/utils/intermittent_utils.cpp
+    # Optimization
+    anofox-time/src/optimization/lbfgs_optimizer.cpp
+    anofox-time/src/optimization/ets_gradients.cpp
 )
 
 # Update extension sources

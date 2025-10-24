@@ -14,20 +14,45 @@ namespace core {
 }
 namespace models {
     class IForecaster;
+    // Basic models
     class Naive;
     class SeasonalNaive;
     class SimpleMovingAverage;
     class SimpleExponentialSmoothing;
-    class Theta;
+    class SESOptimized;
+    class RandomWalkWithDrift;
+    // Holt models
     class HoltLinearTrend;
     class HoltWinters;
+    // Theta variants
+    class Theta;
+    class OptimizedTheta;
+    class DynamicTheta;
+    class DynamicOptimizedTheta;
+    // Seasonal models
+    class SeasonalExponentialSmoothing;
+    class SeasonalESOptimized;
+    class SeasonalWindowAverage;
+    // ARIMA
+    class ARIMA;
     class AutoARIMA;
+    // State space
     class ETS;
     class AutoETS;
+    // Multiple seasonality
     class MFLES;
     class AutoMFLES;
     class MSTLForecaster;
     class AutoMSTL;
+    class TBATS;
+    class AutoTBATS;
+    // Intermittent demand
+    class CrostonClassic;
+    class CrostonOptimized;
+    class CrostonSBA;
+    class ADIDA;
+    class IMAPA;
+    class TSB;
 }
 }
 
@@ -49,7 +74,7 @@ public:
     static std::unique_ptr<::anofoxtime::models::IForecaster> CreateETS(
         int error_type, int trend_type, int season_type, int season_length, 
         double alpha, double beta, double gamma, double phi);
-    static std::unique_ptr<::anofoxtime::models::IForecaster> CreateAutoETS(int season_length);
+    static std::unique_ptr<::anofoxtime::models::IForecaster> CreateAutoETS(int season_length, const std::string& model = "ZZZ");
     static std::unique_ptr<::anofoxtime::models::IForecaster> CreateMFLES(
         const std::vector<int>& seasonal_periods, int n_iterations,
         double lr_trend, double lr_season, double lr_level);
@@ -59,6 +84,46 @@ public:
         const std::vector<int>& seasonal_periods, int trend_method, int seasonal_method);
     static std::unique_ptr<::anofoxtime::models::IForecaster> CreateAutoMSTL(
         const std::vector<int>& seasonal_periods);
+    
+    // Additional basic models
+    static std::unique_ptr<::anofoxtime::models::IForecaster> CreateRandomWalkWithDrift();
+    static std::unique_ptr<::anofoxtime::models::IForecaster> CreateSESOptimized();
+    
+    // ARIMA (manual configuration)
+    static std::unique_ptr<::anofoxtime::models::IForecaster> CreateARIMA(
+        int p, int d, int q, int P, int D, int Q, int s, bool include_intercept);
+    
+    // TBATS
+    static std::unique_ptr<::anofoxtime::models::IForecaster> CreateTBATS(
+        const std::vector<int>& seasonal_periods, bool use_box_cox, double box_cox_lambda,
+        bool use_trend, bool use_damped_trend, double damping_param,
+        int ar_order, int ma_order);
+    static std::unique_ptr<::anofoxtime::models::IForecaster> CreateAutoTBATS(
+        const std::vector<int>& seasonal_periods);
+    
+    // Theta variants
+    static std::unique_ptr<::anofoxtime::models::IForecaster> CreateOptimizedTheta(
+        int seasonal_period);
+    static std::unique_ptr<::anofoxtime::models::IForecaster> CreateDynamicTheta(
+        int seasonal_period, double theta_param);
+    static std::unique_ptr<::anofoxtime::models::IForecaster> CreateDynamicOptimizedTheta(
+        int seasonal_period);
+    
+    // Seasonal exponential smoothing
+    static std::unique_ptr<::anofoxtime::models::IForecaster> CreateSeasonalES(
+        int seasonal_period, double alpha, double gamma);
+    static std::unique_ptr<::anofoxtime::models::IForecaster> CreateSeasonalESOptimized(
+        int seasonal_period);
+    static std::unique_ptr<::anofoxtime::models::IForecaster> CreateSeasonalWindowAverage(
+        int seasonal_period, int window);
+    
+    // Intermittent demand models
+    static std::unique_ptr<::anofoxtime::models::IForecaster> CreateCrostonClassic();
+    static std::unique_ptr<::anofoxtime::models::IForecaster> CreateCrostonOptimized();
+    static std::unique_ptr<::anofoxtime::models::IForecaster> CreateCrostonSBA();
+    static std::unique_ptr<::anofoxtime::models::IForecaster> CreateADIDA();
+    static std::unique_ptr<::anofoxtime::models::IForecaster> CreateIMAPA();
+    static std::unique_ptr<::anofoxtime::models::IForecaster> CreateTSB(double alpha_d, double alpha_p);
     
     // Build time series
     static std::unique_ptr<::anofoxtime::core::TimeSeries> BuildTimeSeries(

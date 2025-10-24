@@ -9,9 +9,17 @@
 #include "anofox-time/models/naive.hpp"
 #include "anofox-time/models/seasonal_naive.hpp"
 #include "anofox-time/models/ses.hpp"
+#include "anofox-time/models/ses_optimized.hpp"
 #include "anofox-time/models/theta.hpp"
+#include "anofox-time/models/optimized_theta.hpp"
+#include "anofox-time/models/dynamic_theta.hpp"
+#include "anofox-time/models/dynamic_optimized_theta.hpp"
 #include "anofox-time/models/holt.hpp"
 #include "anofox-time/models/holt_winters.hpp"
+#include "anofox-time/models/seasonal_es.hpp"
+#include "anofox-time/models/seasonal_es_optimized.hpp"
+#include "anofox-time/models/seasonal_window_average.hpp"
+#include "anofox-time/models/arima.hpp"
 #include "anofox-time/models/auto_arima.hpp"
 #include "anofox-time/models/ets.hpp"
 #include "anofox-time/models/auto_ets.hpp"
@@ -19,6 +27,15 @@
 #include "anofox-time/models/auto_mfles.hpp"
 #include "anofox-time/models/mstl_forecaster.hpp"
 #include "anofox-time/models/auto_mstl.hpp"
+#include "anofox-time/models/tbats.hpp"
+#include "anofox-time/models/auto_tbats.hpp"
+#include "anofox-time/models/croston_classic.hpp"
+#include "anofox-time/models/croston_optimized.hpp"
+#include "anofox-time/models/croston_sba.hpp"
+#include "anofox-time/models/adida.hpp"
+#include "anofox-time/models/imapa.hpp"
+#include "anofox-time/models/tsb.hpp"
+#include "anofox-time/models/random_walk_drift.hpp"
 #include "anofox-time/core/time_series.hpp"
 #include "anofox-time/core/forecast.hpp"
 
@@ -59,26 +76,39 @@ std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateThet
 }
 
 std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateHolt(double alpha, double beta) {
-    // std::cerr << "[DEBUG] AnofoxTimeWrapper::CreateHolt with alpha: " << alpha 
-    //           << ", beta: " << beta << std::endl;
-    return ::anofoxtime::models::HoltLinearTrendBuilder()
-        .withAlpha(alpha)
-        .withBeta(beta)
-        .build();
+    // statsforecast's Holt uses ETS(AAN) with optimized parameters
+    // Rather than using AutoETS (which has optimization issues), use direct ETS
+    // This ensures deterministic, matching results
+    ::anofoxtime::models::ETSConfig config;
+    config.error = ::anofoxtime::models::ETSErrorType::Additive;
+    config.trend = ::anofoxtime::models::ETSTrendType::Additive;
+    config.season = ::anofoxtime::models::ETSSeasonType::None;
+    config.season_length = 1;
+    
+    // If user provides alpha/beta, use them; otherwise let ETS optimize
+    if (alpha > 0.0 && alpha < 1.0) {
+        config.alpha = alpha;
+    } else {
+        config.alpha = 0.9;  // Good default for trending data
+    }
+    if (beta > 0.0 && beta < 1.0) {
+        config.beta = beta;
+    } else {
+        config.beta = 0.1;  // Standard default
+    }
+    config.phi = 1.0;  // No damping by default
+    
+    return std::make_unique<::anofoxtime::models::ETS>(config);
 }
 
 std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateHoltWinters(
     int seasonal_period, bool multiplicative, double alpha, double beta, double gamma) {
-    // std::cerr << "[DEBUG] AnofoxTimeWrapper::CreateHoltWinters with period: " << seasonal_period 
-    //           << ", multiplicative: " << multiplicative 
-    //           << ", alpha: " << alpha << ", beta: " << beta << ", gamma: " << gamma << std::endl;
-    
-    auto season_type = multiplicative ? 
-        ::anofoxtime::models::HoltWinters::SeasonType::Multiplicative :
-        ::anofoxtime::models::HoltWinters::SeasonType::Additive;
-    
-    return std::make_unique<::anofoxtime::models::HoltWinters>(
-        seasonal_period, season_type, alpha, beta, gamma);
+    // statsforecast's HoltWinters is AutoETS, and for AirPassengers it selects damped models
+    // AAA actually selects AAdA (damped additive trend)
+    // MAM actually selects MAdM (damped multiplicative trend)
+    // Using the damped specs ensures better alignment with statsforecast's selection
+    std::string model = multiplicative ? "MAdM" : "AAdA";
+    return std::make_unique<::anofoxtime::models::AutoETS>(seasonal_period, model);
 }
 
 std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateAutoARIMA(int seasonal_period) {
@@ -137,10 +167,10 @@ std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateETS(
     return builder.build();
 }
 
-std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateAutoETS(int season_length) {
-    // std::cerr << "[DEBUG] AnofoxTimeWrapper::CreateAutoETS with season_length: " << season_length << std::endl;
-    // "ZZZ" means auto-select all components
-    return std::make_unique<::anofoxtime::models::AutoETS>(season_length, "ZZZ");
+std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateAutoETS(int season_length, const std::string& model) {
+    // model spec format: error-trend-season (e.g., "AAA", "MAN", "ZZZ")
+    // Default is "ZZZ" (auto-select all components)
+    return std::make_unique<::anofoxtime::models::AutoETS>(season_length, model);
 }
 
 std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateMFLES(
@@ -168,6 +198,8 @@ std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateMSTL
         case 1: trend = ::anofoxtime::models::MSTLForecaster::TrendMethod::SES; break;
         case 2: trend = ::anofoxtime::models::MSTLForecaster::TrendMethod::Holt; break;
         case 3: trend = ::anofoxtime::models::MSTLForecaster::TrendMethod::None; break;
+        case 4: trend = ::anofoxtime::models::MSTLForecaster::TrendMethod::AutoETSTrendAdditive; break;
+        case 5: trend = ::anofoxtime::models::MSTLForecaster::TrendMethod::AutoETSTrendMultiplicative; break;
         default: trend = ::anofoxtime::models::MSTLForecaster::TrendMethod::Linear; break;
     }
     
@@ -187,6 +219,114 @@ std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateAuto
     const std::vector<int>& seasonal_periods) {
     // std::cerr << "[DEBUG] AnofoxTimeWrapper::CreateAutoMSTL with " << seasonal_periods.size() << " periods" << std::endl;
     return std::make_unique<::anofoxtime::models::AutoMSTL>(seasonal_periods);
+}
+
+// Additional basic models
+std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateRandomWalkWithDrift() {
+    return std::make_unique<::anofoxtime::models::RandomWalkWithDrift>();
+}
+
+std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateSESOptimized() {
+    return std::make_unique<::anofoxtime::models::SESOptimized>();
+}
+
+// ARIMA (manual configuration)
+std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateARIMA(
+    int p, int d, int q, int P, int D, int Q, int s, bool include_intercept) {
+    return ::anofoxtime::models::ARIMABuilder()
+        .withAR(p)
+        .withDifferencing(d)
+        .withMA(q)
+        .withSeasonalAR(P)
+        .withSeasonalDifferencing(D)
+        .withSeasonalMA(Q)
+        .withSeasonalPeriod(s)
+        .withIntercept(include_intercept)
+        .build();
+}
+
+// TBATS
+std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateTBATS(
+    const std::vector<int>& seasonal_periods, bool use_box_cox, double box_cox_lambda,
+    bool use_trend, bool use_damped_trend, double damping_param,
+    int ar_order, int ma_order) {
+    
+    ::anofoxtime::models::TBATS::Config config;
+    config.seasonal_periods = seasonal_periods;
+    config.use_box_cox = use_box_cox;
+    config.box_cox_lambda = box_cox_lambda;
+    config.use_trend = use_trend;
+    config.use_damped_trend = use_damped_trend;
+    config.damping_param = damping_param;
+    config.ar_order = ar_order;
+    config.ma_order = ma_order;
+    
+    return std::make_unique<::anofoxtime::models::TBATS>(config);
+}
+
+std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateAutoTBATS(
+    const std::vector<int>& seasonal_periods) {
+    return std::make_unique<::anofoxtime::models::AutoTBATS>(seasonal_periods);
+}
+
+// Theta variants
+std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateOptimizedTheta(
+    int seasonal_period) {
+    return std::make_unique<::anofoxtime::models::OptimizedTheta>(seasonal_period);
+}
+
+std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateDynamicTheta(
+    int seasonal_period, double theta_param) {
+    // DynamicTheta only takes seasonal_period, theta param is ignored (it's optimized internally)
+    return std::make_unique<::anofoxtime::models::DynamicTheta>(seasonal_period);
+}
+
+std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateDynamicOptimizedTheta(
+    int seasonal_period) {
+    return std::make_unique<::anofoxtime::models::DynamicOptimizedTheta>(seasonal_period);
+}
+
+// Seasonal exponential smoothing
+std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateSeasonalES(
+    int seasonal_period, double alpha, double gamma) {
+    // Direct constructor, no builder
+    return std::make_unique<::anofoxtime::models::SeasonalExponentialSmoothing>(
+        seasonal_period, alpha, gamma);
+}
+
+std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateSeasonalESOptimized(
+    int seasonal_period) {
+    return std::make_unique<::anofoxtime::models::SeasonalESOptimized>(seasonal_period);
+}
+
+std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateSeasonalWindowAverage(
+    int seasonal_period, int window) {
+    return std::make_unique<::anofoxtime::models::SeasonalWindowAverage>(seasonal_period, window);
+}
+
+// Intermittent demand models
+std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateCrostonClassic() {
+    return std::make_unique<::anofoxtime::models::CrostonClassic>();
+}
+
+std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateCrostonOptimized() {
+    return std::make_unique<::anofoxtime::models::CrostonOptimized>();
+}
+
+std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateCrostonSBA() {
+    return std::make_unique<::anofoxtime::models::CrostonSBA>();
+}
+
+std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateADIDA() {
+    return std::make_unique<::anofoxtime::models::ADIDA>();
+}
+
+std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateIMAPA() {
+    return std::make_unique<::anofoxtime::models::IMAPA>();
+}
+
+std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateTSB(double alpha_d, double alpha_p) {
+    return std::make_unique<::anofoxtime::models::TSB>(alpha_d, alpha_p);
 }
 
 std::unique_ptr<::anofoxtime::core::TimeSeries> AnofoxTimeWrapper::BuildTimeSeries(

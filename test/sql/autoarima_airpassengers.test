@@ -1,0 +1,61 @@
+# name: test/sql/autoarima_airpassengers.test
+# description: Test AutoARIMA with AirPassengers dataset - validates against statsforecast
+# group: [anofox_forecast]
+
+require anofox_forecast
+
+statement ok
+LOAD 'build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension';
+
+# Create AirPassengers dataset (first 132 months for training)
+statement ok
+CREATE TABLE airp_train AS
+WITH vals AS (
+SELECT UNNEST([112, 118, 132, 129, 121, 135, 148, 148, 136, 119, 104, 118, 115,
+       126, 141, 135, 125, 149, 170, 170, 158, 133, 114, 140, 145, 150,
+       178, 163, 172, 178, 199, 199, 184, 162, 146, 166, 171, 180, 193,
+       181, 183, 218, 230, 242, 209, 191, 172, 194, 196, 196, 236, 235,
+       229, 243, 264, 272, 237, 211, 180, 201, 204, 188, 235, 227, 234,
+       264, 302, 293, 259, 229, 203, 229, 242, 233, 267, 269, 270, 315,
+       364, 347, 312, 274, 237, 278, 284, 277, 317, 313, 318, 374, 413,
+       405, 355, 306, 271, 306, 315, 301, 356, 348, 355, 422, 465, 467,
+       404, 347, 305, 336, 340, 318, 362, 348, 363, 435, 491, 505, 404,
+       359, 310, 337, 360, 342, 406, 396, 420, 472, 548, 559, 463, 407,
+       362, 405])::DOUBLE AS value, 
+       UNNEST(generate_series(1, 132)) AS idx
+)
+SELECT DATE '1949-01-01' + INTERVAL ((idx-1) * 30) DAY AS date, value FROM vals;
+
+# Test AutoARIMA forecast
+query I
+WITH forecast AS (
+    SELECT TS_FORECAST(date, value, 'AutoARIMA', 12, {'seasonal_period': 12}) AS f 
+    FROM airp_train
+)
+SELECT 
+    CAST(ROUND(f.point_forecast[1], 0) AS INTEGER) AS jan,
+    CAST(ROUND(f.point_forecast[6], 0) AS INTEGER) AS jun,
+    CAST(ROUND(f.point_forecast[12], 0) AS INTEGER) AS dec
+FROM forecast;
+----
+424	536	468
+
+# Validate that forecasts are reasonable (close to actual values)
+# Actual values for months 133-144: [417, 391, 419, 461, 472, 535, 622, 606, 508, 461, 390, 432]
+# Expected from statsforecast: [424, 407, 471, 461, 485, 537, 613, 624, 528, 472, 427, 470]
+# Our implementation should be within 2% of statsforecast
+query I
+WITH forecast AS (
+    SELECT TS_FORECAST(date, value, 'AutoARIMA', 12, {'seasonal_period': 12}) AS f 
+    FROM airp_train
+)
+SELECT CASE 
+    WHEN f.point_forecast[1] BETWEEN 415 AND 435 AND
+         f.point_forecast[6] BETWEEN 525 AND 545 AND
+         f.point_forecast[12] BETWEEN 460 AND 480
+    THEN 'PASS' ELSE 'FAIL' 
+END AS validation_result
+FROM forecast;
+----
+PASS
+

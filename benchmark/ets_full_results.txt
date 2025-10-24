@@ -1,0 +1,329 @@
+
+╔════════════════════════════════════════════════════════════════════╗
+║               ETS/AutoETS Comprehensive Validation                ║
+╚════════════════════════════════════════════════════════════════════╝
+
+======================================================================
+Testing AutoETS
+======================================================================
+
+1. Running statsforecast AutoETS...
+   First 3 values: [406.65126732 401.73290813 456.28963225]
+
+2. Running anofox-time AutoETS...
+   First 3 values: [395.0788948  380.4108022  416.58341102]
+
+3. Comparison:
+   Max absolute error: 60.83
+   Max percentage error: 11.14%
+   Mean percentage error: 6.47%
+   Status: ❌ FAIL
+
+======================================================================
+Testing All ETS Model Combinations (Pegels' Taxonomy)
+======================================================================
+
+Reference: https://nixtlaverse.nixtla.io/statsforecast/docs/models/autoets.html
+
+Testing all combinations of:
+  Error: A (Additive), M (Multiplicative)
+  Trend: N (None), A (Additive), Ad (Damped Add), M (Mult), Md (Damped Mult)
+  Season: N (None), A (Additive), M (Multiplicative)
+======================================================================
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='ANN') - Simple Exponential Smoothing (SES) - Additive
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+    First 3 values: [404.99570045 404.99570045 404.99570045]
+  Running anofox-time AutoETS...
+    First 3 values: [409.07944455 413.16278067 417.24611679]
+  Max error: 12.10% - ❌
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='MNN') - Simple Exponential Smoothing (SES) - Multiplicative
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+    First 3 values: [404.99570045 404.99570045 404.99570045]
+  Running anofox-time AutoETS...
+    First 3 values: [409.07944455 413.16278067 417.24611679]
+  Max error: 12.10% - ❌
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='ANA') - No trend, Additive season
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+    First 3 values: [414.37603819 392.24381176 452.46355415]
+  Running anofox-time AutoETS...
+    First 3 values: [395.0788948  380.4108022  416.58341102]
+  Max error: 17.51% - ❌
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='MNA') - No trend, Additive season, Mult error
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+    First 3 values: [415.43663636 398.02305999 455.47710794]
+  Running anofox-time AutoETS...
+    First 3 values: [395.0788948  380.4108022  416.58341102]
+  Max error: 15.76% - ❌
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='ANM') - No trend, Multiplicative season
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+  ⚠️  statsforecast failed: Forbidden model combination
+    ❌ Failed
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='MNM') - No trend, Multiplicative season, Mult error
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+    First 3 values: [406.65126732 401.73290813 456.28963225]
+  Running anofox-time AutoETS...
+    First 3 values: [395.0788948  380.4108022  416.58341102]
+  Max error: 11.14% - ❌
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='AAN') - Holt Linear - Additive error
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+    First 3 values: [407.2220097  409.44809673 411.67418376]
+  Running anofox-time AutoETS...
+    First 3 values: [409.07944455 413.16278067 417.24611679]
+  Max error: 5.16% - ❌
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='MAN') - Holt Linear - Multiplicative error
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+    First 3 values: [409.05886201 413.12161765 417.18437329]
+  Running anofox-time AutoETS...
+    First 3 values: [409.07944455 413.16278067 417.24611679]
+  Max error: 0.05% - ✅
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='AAA') - Holt-Winters Additive
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+    First 3 values: [409.6801505  390.04406963 448.92979869]
+  Running anofox-time AutoETS...
+    First 3 values: [395.0788948  380.4108022  416.58341102]
+  Max error: 16.67% - ❌
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='MAA') - Holt-Winters Additive, Mult error
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+    First 3 values: [400.20909969 383.08760875 439.27429811]
+  Running anofox-time AutoETS...
+    First 3 values: [395.0788948  380.4108022  416.58341102]
+  Max error: 15.76% - ❌
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='AAM') - Additive trend, Mult season
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+  ⚠️  statsforecast failed: Forbidden model combination
+    ❌ Failed
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='MAM') - Holt-Winters Multiplicative
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+    First 3 values: [412.43711301 409.38451613 473.81589676]
+  Running anofox-time AutoETS...
+    First 3 values: [395.0788948  380.4108022  416.58341102]
+  Max error: 15.62% - ❌
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='AAdN') - Damped trend - Additive error
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+  ⚠️  statsforecast failed: too many values to unpack (expected 3)
+    ❌ Failed
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='MAdN') - Damped trend - Multiplicative error
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+  ⚠️  statsforecast failed: too many values to unpack (expected 3)
+    ❌ Failed
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='AAdA') - Damped trend, Additive season
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+  ⚠️  statsforecast failed: too many values to unpack (expected 3)
+    ❌ Failed
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='MAdA') - Damped trend, Additive season, Mult error
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+  ⚠️  statsforecast failed: too many values to unpack (expected 3)
+    ❌ Failed
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='AAdM') - Damped trend, Mult season
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+  ⚠️  statsforecast failed: too many values to unpack (expected 3)
+    ❌ Failed
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='MAdM') - Damped trend, Mult season, Mult error
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+  ⚠️  statsforecast failed: too many values to unpack (expected 3)
+    ❌ Failed
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='AMN') - Multiplicative trend - Additive error
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+  ⚠️  statsforecast failed: Forbidden model combination
+    ❌ Failed
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='MMN') - Multiplicative trend - Multiplicative error
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+    First 3 values: [411.33164439 417.766127   424.30126457]
+  Running anofox-time AutoETS...
+    First 3 values: [409.07944455 413.16278067 417.24611679]
+  Max error: 6.95% - ❌
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='AMA') - Mult trend, Additive season
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+  ⚠️  statsforecast failed: Forbidden model combination
+    ❌ Failed
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='MMA') - Mult trend, Additive season, Mult error
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+  ⚠️  statsforecast failed: Forbidden model combination
+    ❌ Failed
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='AMM') - Mult trend, Mult season
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+  ⚠️  statsforecast failed: Forbidden model combination
+    ❌ Failed
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='MMM') - Fully Multiplicative
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+    First 3 values: [419.16357678 416.90446314 480.24338047]
+  Running anofox-time AutoETS...
+    First 3 values: [395.0788948  380.4108022  416.58341102]
+  Max error: 17.32% - ❌
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='AMdN') - Damped Mult trend - Additive error
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+  ⚠️  statsforecast failed: too many values to unpack (expected 3)
+    ❌ Failed
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='MMdN') - Damped Mult trend - Multiplicative error
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+  ⚠️  statsforecast failed: too many values to unpack (expected 3)
+    ❌ Failed
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='AMdA') - Damped Mult trend, Add season
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+  ⚠️  statsforecast failed: too many values to unpack (expected 3)
+    ❌ Failed
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='MMdA') - Damped Mult trend, Add season, Mult error
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+  ⚠️  statsforecast failed: too many values to unpack (expected 3)
+    ❌ Failed
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='AMdM') - Damped Mult trend, Mult season
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+  ⚠️  statsforecast failed: too many values to unpack (expected 3)
+    ❌ Failed
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='MMdM') - Fully Damped Multiplicative
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+  ⚠️  statsforecast failed: too many values to unpack (expected 3)
+    ❌ Failed
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='ZZN') - Auto error/trend, no season
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+    First 3 values: [409.05886201 413.12161765 417.18437329]
+  Running anofox-time AutoETS...
+    First 3 values: [409.07944455 413.16278067 417.24611679]
+  Max error: 0.05% - ✅
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='ZZA') - Auto error/trend, additive season
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+    First 3 values: [415.43663636 398.02305999 455.47710794]
+  Running anofox-time AutoETS...
+    First 3 values: [395.0788948  380.4108022  416.58341102]
+  Max error: 15.76% - ❌
+
+──────────────────────────────────────────────────────────────────────
+Testing AutoETS(model='ZZZ') - Fully automatic
+──────────────────────────────────────────────────────────────────────
+  Running statsforecast...
+    First 3 values: [406.65126732 401.73290813 456.28963225]
+  Running anofox-time AutoETS...
+    First 3 values: [395.0788948  380.4108022  416.58341102]
+  Max error: 11.14% - ❌
+
+======================================================================
+SUMMARY
+======================================================================
+❌ AutoETS: 11.14% max error (FAIL)
+~ AutoETS(ANN): 12.10% max error - Acceptable
+~ AutoETS(MNN): 12.10% max error - Acceptable
+~ AutoETS(ANA): 17.51% max error - Acceptable
+~ AutoETS(MNA): 15.76% max error - Acceptable
+~ AutoETS(MNM): 11.14% max error - Acceptable
+~ AutoETS(AAN): 5.16% max error - Acceptable
+✅ AutoETS(MAN): 0.05% max error - EXCELLENT
+~ AutoETS(AAA): 16.67% max error - Acceptable
+~ AutoETS(MAA): 15.76% max error - Acceptable
+~ AutoETS(MAM): 15.62% max error - Acceptable
+~ AutoETS(MMN): 6.95% max error - Acceptable
+~ AutoETS(MMM): 17.32% max error - Acceptable
+✅ AutoETS(ZZN): 0.05% max error - EXCELLENT
+~ AutoETS(ZZA): 15.76% max error - Acceptable
+~ AutoETS(ZZZ): 11.14% max error - Acceptable
+
+======================================================================
+Total: 2/16 passed (<5% error), 14/16 needs improvement
+======================================================================
+
+⭐ EXCELLENT (<1% error): AutoETS(MAN), AutoETS(ZZN)
+~ ACCEPTABLE (5-20% error): AutoETS(ANN), AutoETS(MNN), AutoETS(ANA), AutoETS(MNA), AutoETS(MNM), AutoETS(AAN), AutoETS(AAA), AutoETS(MAA), AutoETS(MAM), AutoETS(MMN), AutoETS(MMM), AutoETS(ZZA), AutoETS(ZZZ)
+❌ NEEDS WORK (>20% error): AutoETS (11.1%)
+
+======================================================================
+RECOMMENDATION:
+  • For seasonal data: Use AutoARIMA (<0.5% error)
+  • For non-seasonal data: Use AutoETS(ZZN) (0.05% error)
+  • For multiple seasonalities: Use MSTL (0.1-6.8% error)
+======================================================================
+

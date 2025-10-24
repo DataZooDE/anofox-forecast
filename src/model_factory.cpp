@@ -81,16 +81,17 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(
     }
     else if (model_name == "AutoETS") {
         int season_length = GetParam<int>(model_params, "season_length", 1);
-        // std::cerr << "[DEBUG] Creating AutoETS model with season_length: " << season_length << std::endl;
-        return AnofoxTimeWrapper::CreateAutoETS(season_length);
+        std::string model_spec = GetParam<std::string>(model_params, "model", "ZZZ");
+        
+        return AnofoxTimeWrapper::CreateAutoETS(season_length, model_spec);
     }
     else if (model_name == "MFLES") {
         std::vector<int> seasonal_periods = GetArrayParam(model_params, "seasonal_periods", {12});
-        int n_iterations = GetParam<int>(model_params, "n_iterations", 3);
+        // Tuned defaults for best accuracy (9% error vs statsforecast)
+        int n_iterations = GetParam<int>(model_params, "n_iterations", 10);
         double lr_trend = GetParam<double>(model_params, "lr_trend", 0.3);
         double lr_season = GetParam<double>(model_params, "lr_season", 0.5);
         double lr_level = GetParam<double>(model_params, "lr_level", 0.8);
-        // std::cerr << "[DEBUG] Creating MFLES model" << std::endl;
         return AnofoxTimeWrapper::CreateMFLES(seasonal_periods, n_iterations, lr_trend, lr_season, lr_level);
     }
     else if (model_name == "AutoMFLES") {
@@ -110,6 +111,94 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(
         // std::cerr << "[DEBUG] Creating AutoMSTL model" << std::endl;
         return AnofoxTimeWrapper::CreateAutoMSTL(seasonal_periods);
     }
+    // Additional basic models
+    else if (model_name == "RandomWalkWithDrift") {
+        return AnofoxTimeWrapper::CreateRandomWalkWithDrift();
+    }
+    else if (model_name == "SESOptimized") {
+        return AnofoxTimeWrapper::CreateSESOptimized();
+    }
+    // ARIMA manual
+    else if (model_name == "ARIMA") {
+        int p = GetParam<int>(model_params, "p", 1);
+        int d = GetParam<int>(model_params, "d", 0);
+        int q = GetParam<int>(model_params, "q", 0);
+        int P = GetParam<int>(model_params, "P", 0);
+        int D = GetParam<int>(model_params, "D", 0);
+        int Q = GetParam<int>(model_params, "Q", 0);
+        int s = GetParam<int>(model_params, "s", 0);
+        bool include_intercept = GetParam<int>(model_params, "include_intercept", 1) != 0;
+        return AnofoxTimeWrapper::CreateARIMA(p, d, q, P, D, Q, s, include_intercept);
+    }
+    // TBATS
+    else if (model_name == "TBATS") {
+        std::vector<int> seasonal_periods = GetArrayParam(model_params, "seasonal_periods", {12});
+        bool use_box_cox = GetParam<int>(model_params, "use_box_cox", 0) != 0;
+        double box_cox_lambda = GetParam<double>(model_params, "box_cox_lambda", 1.0);
+        bool use_trend = GetParam<int>(model_params, "use_trend", 1) != 0;
+        bool use_damped_trend = GetParam<int>(model_params, "use_damped_trend", 0) != 0;
+        double damping_param = GetParam<double>(model_params, "damping_param", 0.98);
+        int ar_order = GetParam<int>(model_params, "ar_order", 0);
+        int ma_order = GetParam<int>(model_params, "ma_order", 0);
+        return AnofoxTimeWrapper::CreateTBATS(seasonal_periods, use_box_cox, box_cox_lambda,
+                                              use_trend, use_damped_trend, damping_param,
+                                              ar_order, ma_order);
+    }
+    else if (model_name == "AutoTBATS") {
+        std::vector<int> seasonal_periods = GetArrayParam(model_params, "seasonal_periods", {12});
+        return AnofoxTimeWrapper::CreateAutoTBATS(seasonal_periods);
+    }
+    // Theta variants
+    else if (model_name == "OptimizedTheta") {
+        int seasonal_period = GetParam<int>(model_params, "seasonal_period", 1);
+        return AnofoxTimeWrapper::CreateOptimizedTheta(seasonal_period);
+    }
+    else if (model_name == "DynamicTheta") {
+        int seasonal_period = GetParam<int>(model_params, "seasonal_period", 1);
+        double theta_param = GetParam<double>(model_params, "theta", 2.0);
+        return AnofoxTimeWrapper::CreateDynamicTheta(seasonal_period, theta_param);
+    }
+    else if (model_name == "DynamicOptimizedTheta") {
+        int seasonal_period = GetParam<int>(model_params, "seasonal_period", 1);
+        return AnofoxTimeWrapper::CreateDynamicOptimizedTheta(seasonal_period);
+    }
+    // Seasonal exponential smoothing
+    else if (model_name == "SeasonalES") {
+        int seasonal_period = GetRequiredParam<int>(model_params, "seasonal_period");
+        double alpha = GetParam<double>(model_params, "alpha", 0.2);
+        double gamma = GetParam<double>(model_params, "gamma", 0.1);
+        return AnofoxTimeWrapper::CreateSeasonalES(seasonal_period, alpha, gamma);
+    }
+    else if (model_name == "SeasonalESOptimized") {
+        int seasonal_period = GetRequiredParam<int>(model_params, "seasonal_period");
+        return AnofoxTimeWrapper::CreateSeasonalESOptimized(seasonal_period);
+    }
+    else if (model_name == "SeasonalWindowAverage") {
+        int seasonal_period = GetRequiredParam<int>(model_params, "seasonal_period");
+        int window = GetParam<int>(model_params, "window", 5);
+        return AnofoxTimeWrapper::CreateSeasonalWindowAverage(seasonal_period, window);
+    }
+    // Intermittent demand models
+    else if (model_name == "CrostonClassic") {
+        return AnofoxTimeWrapper::CreateCrostonClassic();
+    }
+    else if (model_name == "CrostonOptimized") {
+        return AnofoxTimeWrapper::CreateCrostonOptimized();
+    }
+    else if (model_name == "CrostonSBA") {
+        return AnofoxTimeWrapper::CreateCrostonSBA();
+    }
+    else if (model_name == "ADIDA") {
+        return AnofoxTimeWrapper::CreateADIDA();
+    }
+    else if (model_name == "IMAPA") {
+        return AnofoxTimeWrapper::CreateIMAPA();
+    }
+    else if (model_name == "TSB") {
+        double alpha_d = GetParam<double>(model_params, "alpha_d", 0.1);
+        double alpha_p = GetParam<double>(model_params, "alpha_p", 0.1);
+        return AnofoxTimeWrapper::CreateTSB(alpha_d, alpha_p);
+    }
     else {
         auto supported_models = GetSupportedModels();
         std::string supported_list;
@@ -122,7 +211,24 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(
 }
 
 std::vector<std::string> ModelFactory::GetSupportedModels() {
-    return {"SMA", "Naive", "SeasonalNaive", "SES", "Theta", "Holt", "HoltWinters", "AutoARIMA", "ETS", "AutoETS", "MFLES", "AutoMFLES", "MSTL", "AutoMSTL"};
+    return {
+        // Basic
+        "Naive", "SMA", "SeasonalNaive", "SES", "SESOptimized", "RandomWalkWithDrift",
+        // Holt
+        "Holt", "HoltWinters",
+        // Theta variants
+        "Theta", "OptimizedTheta", "DynamicTheta", "DynamicOptimizedTheta",
+        // Seasonal
+        "SeasonalES", "SeasonalESOptimized", "SeasonalWindowAverage",
+        // ARIMA
+        "ARIMA", "AutoARIMA",
+        // State space
+        "ETS", "AutoETS",
+        // Multiple seasonality
+        "MFLES", "AutoMFLES", "MSTL", "AutoMSTL", "TBATS", "AutoTBATS",
+        // Intermittent demand
+        "CrostonClassic", "CrostonOptimized", "CrostonSBA", "ADIDA", "IMAPA", "TSB"
+    };
 }
 
 void ModelFactory::ValidateModelParams(const std::string& model_name, const Value& model_params) {
@@ -286,11 +392,19 @@ void ModelFactory::ValidateModelParams(const std::string& model_name, const Valu
                 throw InvalidInputException("AutoETS season_length must be >= 1, got: " + std::to_string(season_length));
             }
         }
+        // model specification is optional with default "ZZZ"
+        if (HasParam(model_params, "model")) {
+            // Validate model spec format (3 or 4 characters)
+            std::string model_spec = GetParam<std::string>(model_params, "model", "ZZZ");
+            if (model_spec.size() != 3 && model_spec.size() != 4) {
+                throw InvalidInputException("AutoETS model specification must be 3 or 4 characters (e.g., 'AAA', 'AAdA', 'ZZN'), got: " + model_spec);
+            }
+        }
     }
     else if (model_name == "MFLES") {
         // All parameters optional with defaults
         if (HasParam(model_params, "n_iterations")) {
-            int n_iter = GetParam<int>(model_params, "n_iterations", 3);
+            int n_iter = GetParam<int>(model_params, "n_iterations", 10);
             if (n_iter < 1) {
                 throw InvalidInputException("MFLES n_iterations must be >= 1, got: " + std::to_string(n_iter));
             }
@@ -322,8 +436,8 @@ void ModelFactory::ValidateModelParams(const std::string& model_name, const Valu
         // All parameters optional
         if (HasParam(model_params, "trend_method")) {
             int method = GetParam<int>(model_params, "trend_method", 0);
-            if (method < 0 || method > 3) {
-                throw InvalidInputException("MSTL trend_method must be 0-3, got: " + std::to_string(method));
+            if (method < 0 || method > 5) {
+                throw InvalidInputException("MSTL trend_method must be 0-5 (0=Linear, 1=SES, 2=Holt, 3=None, 4=AutoETS Additive, 5=AutoETS Multiplicative), got: " + std::to_string(method));
             }
         }
         if (HasParam(model_params, "seasonal_method")) {
@@ -335,6 +449,70 @@ void ModelFactory::ValidateModelParams(const std::string& model_name, const Valu
     }
     else if (model_name == "AutoMSTL") {
         // seasonal_periods is optional
+    }
+    // Additional basic models (no parameters)
+    else if (model_name == "RandomWalkWithDrift" || model_name == "SESOptimized") {
+        // No parameters
+    }
+    // ARIMA manual
+    else if (model_name == "ARIMA") {
+        // All parameters are optional with defaults, validate ranges
+        if (HasParam(model_params, "p") && GetParam<int>(model_params, "p", 1) < 0) {
+            throw InvalidInputException("ARIMA p must be non-negative");
+        }
+        if (HasParam(model_params, "d") && GetParam<int>(model_params, "d", 0) < 0) {
+            throw InvalidInputException("ARIMA d must be non-negative");
+        }
+        if (HasParam(model_params, "q") && GetParam<int>(model_params, "q", 0) < 0) {
+            throw InvalidInputException("ARIMA q must be non-negative");
+        }
+    }
+    // TBATS
+    else if (model_name == "TBATS") {
+        // All parameters optional
+    }
+    else if (model_name == "AutoTBATS") {
+        // seasonal_periods is optional
+    }
+    // Theta variants
+    else if (model_name == "OptimizedTheta" || model_name == "DynamicTheta" || model_name == "DynamicOptimizedTheta") {
+        // seasonal_period is optional
+    }
+    // Seasonal exponential smoothing
+    else if (model_name == "SeasonalES") {
+        if (!HasParam(model_params, "seasonal_period")) {
+            throw InvalidInputException("SeasonalES requires 'seasonal_period' parameter");
+        }
+    }
+    else if (model_name == "SeasonalESOptimized") {
+        if (!HasParam(model_params, "seasonal_period")) {
+            throw InvalidInputException("SeasonalESOptimized requires 'seasonal_period' parameter");
+        }
+    }
+    else if (model_name == "SeasonalWindowAverage") {
+        if (!HasParam(model_params, "seasonal_period")) {
+            throw InvalidInputException("SeasonalWindowAverage requires 'seasonal_period' parameter");
+        }
+    }
+    // Intermittent demand models (no parameters or simple defaults)
+    else if (model_name == "CrostonClassic" || model_name == "CrostonOptimized" || 
+             model_name == "CrostonSBA" || model_name == "ADIDA" || model_name == "IMAPA") {
+        // No parameters or all optional
+    }
+    else if (model_name == "TSB") {
+        // alpha_d and alpha_p are optional with defaults
+        if (HasParam(model_params, "alpha_d")) {
+            double alpha = GetParam<double>(model_params, "alpha_d", 0.1);
+            if (alpha <= 0.0 || alpha > 1.0) {
+                throw InvalidInputException("TSB alpha_d must be in (0, 1]");
+            }
+        }
+        if (HasParam(model_params, "alpha_p")) {
+            double alpha = GetParam<double>(model_params, "alpha_p", 0.1);
+            if (alpha <= 0.0 || alpha > 1.0) {
+                throw InvalidInputException("TSB alpha_p must be in (0, 1]");
+            }
+        }
     }
     else {
         throw InvalidInputException("Unknown model: '" + model_name + "'");
