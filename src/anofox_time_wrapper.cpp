@@ -76,29 +76,10 @@ std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateThet
 }
 
 std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateHolt(double alpha, double beta) {
-    // statsforecast's Holt uses ETS(AAN) with optimized parameters
-    // Rather than using AutoETS (which has optimization issues), use direct ETS
-    // This ensures deterministic, matching results
-    ::anofoxtime::models::ETSConfig config;
-    config.error = ::anofoxtime::models::ETSErrorType::Additive;
-    config.trend = ::anofoxtime::models::ETSTrendType::Additive;
-    config.season = ::anofoxtime::models::ETSSeasonType::None;
-    config.season_length = 1;
-    
-    // If user provides alpha/beta, use them; otherwise let ETS optimize
-    if (alpha > 0.0 && alpha < 1.0) {
-        config.alpha = alpha;
-    } else {
-        config.alpha = 0.9;  // Good default for trending data
-    }
-    if (beta > 0.0 && beta < 1.0) {
-        config.beta = beta;
-    } else {
-        config.beta = 0.1;  // Standard default
-    }
-    config.phi = 1.0;  // No damping by default
-    
-    return std::make_unique<::anofoxtime::models::ETS>(config);
+    // statsforecast's Holt is actually AutoETS(model="AAN") which OPTIMIZES alpha/beta
+    // Testing confirms: alpha≈0.9999, beta≈0.0001 (not fixed 0.9/0.1)
+    // Using AutoETS ensures 100% alignment with statsforecast
+    return std::make_unique<::anofoxtime::models::AutoETS>(1, "AAN");
 }
 
 std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateHoltWinters(

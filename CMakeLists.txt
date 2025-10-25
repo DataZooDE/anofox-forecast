@@ -36,6 +36,7 @@ set(ANOFOX_TIME_SOURCES
     anofox-time/src/models/holt.cpp
     anofox-time/src/models/holt_winters.cpp
     # Theta variants
+    anofox-time/src/models/theta_pegels.cpp
     anofox-time/src/models/theta.cpp
     anofox-time/src/models/optimized_theta.cpp
     anofox-time/src/models/dynamic_theta.cpp
