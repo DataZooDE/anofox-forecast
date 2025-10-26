@@ -9,6 +9,20 @@
 #include "duckdb/planner/expression/bound_constant_expression.hpp"
 #include <iostream>
 #include <algorithm>
+#include <chrono>
+
+// Performance profiling utility - RAII timer
+class ScopedTimer {
+    std::chrono::high_resolution_clock::time_point start_;
+    std::chrono::microseconds* output_;
+public:
+    explicit ScopedTimer(std::chrono::microseconds* out) 
+        : start_(std::chrono::high_resolution_clock::now()), output_(out) {}
+    ~ScopedTimer() {
+        auto end = std::chrono::high_resolution_clock::now();
+        *output_ = std::chrono::duration_cast<std::chrono::microseconds>(end - start_);
+    }
+};
 
 // Include full anofox-time types
 #include "anofox-time/core/time_series.hpp"
@@ -44,139 +58,213 @@ struct ForecastAggregateOperation {
     // VoidFinalize version - correct signature with STATE template parameter
     template <class STATE>
     static void Finalize(STATE &state, AggregateFinalizeData &finalize_data) {
-        // std::cerr << "[DEBUG] Finalize START" << std::endl;
+        auto total_start = std::chrono::high_resolution_clock::now();
         
         if (!state.data || state.data->timestamp_micros.empty()) {
-            // std::cerr << "[DEBUG] Empty state, returning NULL" << std::endl;
             finalize_data.ReturnNull();
             return;
         }
         
-        // std::cerr << "[DEBUG] Processing " << state.data->timestamp_micros.size() << " points" << std::endl;
-        
-        // std::cerr << "[DEBUG] Getting bind data..." << std::endl;
-        // Get bind data to access model parameters
         auto &bind_data = finalize_data.input.bind_data->Cast<ForecastAggregateBindData>();
         
-        // std::cerr << "[DEBUG] Generating forecast with model: " << bind_data.model_name 
-        //           << ", horizon: " << bind_data.horizon << std::endl;
+        // Track memory: count data copies
+        state.data->copy_count = 0;
+        state.data->bytes_copied = 0;
+        size_t data_size = state.data->timestamp_micros.size();
         
-        // std::cerr << "[DEBUG] Sorting timestamps..." << std::endl;
-        // IMPORTANT: Sort data by timestamp (GROUP BY doesn't guarantee order)
-        // Create pairs of (timestamp, value) and sort by timestamp
+        // STAGE 1: SORT + DEDUP
         vector<std::pair<int64_t, double>> time_value_pairs;
-        time_value_pairs.reserve(state.data->timestamp_micros.size());
-        for (size_t i = 0; i < state.data->timestamp_micros.size(); i++) {
-            time_value_pairs.emplace_back(state.data->timestamp_micros[i], state.data->values[i]);
+        time_value_pairs.reserve(data_size);
+        {
+            ScopedTimer timer(&state.data->time_sort);
+            
+            // Copy 1: Create time_value_pairs
+            for (size_t i = 0; i < data_size; i++) {
+                time_value_pairs.emplace_back(state.data->timestamp_micros[i], state.data->values[i]);
+            }
+            state.data->copy_count++;
+            state.data->bytes_copied += data_size * sizeof(std::pair<int64_t, double>);
+            
+            // Sort by timestamp
+            std::sort(time_value_pairs.begin(), time_value_pairs.end(),
+                      [](const auto& a, const auto& b) { return a.first < b.first; });
+            
+            // Remove duplicate timestamps
+            auto last = std::unique(time_value_pairs.begin(), time_value_pairs.end(),
+                                   [](const auto& a, const auto& b) { return a.first == b.first; });
+            time_value_pairs.erase(last, time_value_pairs.end());
         }
         
-        // Sort by timestamp
-        // std::cerr << "[DEBUG] Before sort: " << time_value_pairs.size() << " pairs" << std::endl;
-        std::sort(time_value_pairs.begin(), time_value_pairs.end(),
-                  [](const auto& a, const auto& b) { return a.first < b.first; });
-        // std::cerr << "[DEBUG] After sort, removing duplicates..." << std::endl;
-        
-        // Remove duplicate timestamps (keep first occurrence)
-        auto last = std::unique(time_value_pairs.begin(), time_value_pairs.end(),
-                               [](const auto& a, const auto& b) { return a.first == b.first; });
-        time_value_pairs.erase(last, time_value_pairs.end());
-        // std::cerr << "[DEBUG] After dedup: " << time_value_pairs.size() << " unique pairs" << std::endl;
-        
-        // Convert sorted timestamps to TimePoint and extract values
+        // STAGE 2: CONVERT TO TIMEPOINTS
         vector<std::chrono::system_clock::time_point> timestamps;
         vector<double> sorted_values;
         timestamps.reserve(time_value_pairs.size());
         sorted_values.reserve(time_value_pairs.size());
-        
-        for (const auto& pair : time_value_pairs) {
-            auto duration = std::chrono::microseconds(pair.first);
-            timestamps.push_back(std::chrono::system_clock::time_point(duration));
-            sorted_values.push_back(pair.second);
+        {
+            ScopedTimer timer(&state.data->time_convert);
+            
+            // Copy 2: Split pairs into separate vectors
+            for (const auto& pair : time_value_pairs) {
+                auto duration = std::chrono::microseconds(pair.first);
+                timestamps.push_back(std::chrono::system_clock::time_point(duration));
+                sorted_values.push_back(pair.second);
+            }
+            state.data->copy_count++;
+            state.data->bytes_copied += time_value_pairs.size() * (sizeof(std::chrono::system_clock::time_point) + sizeof(double));
         }
         
-        // Build time series with sorted data
-        // std::cerr << "[DEBUG] Building time series..." << std::endl;
-        auto ts_ptr = TimeSeriesBuilder::BuildTimeSeries(timestamps, sorted_values);
+        // STAGE 3: BUILD TIMESERIES
+        std::unique_ptr<::anofoxtime::core::TimeSeries> ts_ptr;
+        {
+            ScopedTimer timer(&state.data->time_build_ts);
+            // Copy 3: Pass vectors to TimeSeries (by value, then moved internally)
+            ts_ptr = TimeSeriesBuilder::BuildTimeSeries(timestamps, sorted_values);
+            state.data->copy_count++;
+            state.data->bytes_copied += timestamps.size() * (sizeof(std::chrono::system_clock::time_point) + sizeof(double));
+        }
         
-        // std::cerr << "[DEBUG] Creating model: " << bind_data.model_name << std::endl;
-        // Create and fit model
-        auto model_ptr = ModelFactory::Create(bind_data.model_name, bind_data.model_params);
-        // std::cerr << "[DEBUG] Fitting model..." << std::endl;
-        AnofoxTimeWrapper::FitModel(model_ptr.get(), *ts_ptr);
-        // std::cerr << "[DEBUG] Model fitted successfully" << std::endl;
+        // STAGE 4: FIT MODEL
+        std::unique_ptr<::anofoxtime::models::IForecaster> model_ptr;
+        {
+            ScopedTimer timer(&state.data->time_fit);
+            model_ptr = ModelFactory::Create(bind_data.model_name, bind_data.model_params);
+            AnofoxTimeWrapper::FitModel(model_ptr.get(), *ts_ptr);
+        }
         
-        // Generate forecast with confidence intervals (95% by default)
-        auto forecast_ptr = AnofoxTimeWrapper::PredictWithConfidence(model_ptr.get(), bind_data.horizon, 0.95);
+        // STAGE 5: PREDICT
+        std::unique_ptr<::anofoxtime::core::Forecast> forecast_ptr;
+        {
+            ScopedTimer timer(&state.data->time_predict);
+            forecast_ptr = AnofoxTimeWrapper::PredictWithConfidence(model_ptr.get(), bind_data.horizon, 0.95);
+        }
         auto &primary_forecast = AnofoxTimeWrapper::GetPrimaryForecast(*forecast_ptr);
         
-        // Calculate time interval from training data for forecast timestamps
+        // STAGE 5.5: CALCULATE FORECAST TIMESTAMPS
+        std::chrono::microseconds time_timestamp_calc{0};
         int64_t interval_micros = 0;
-        if (timestamps.size() >= 2) {
-            // Calculate median interval to handle irregular spacing
-            vector<int64_t> intervals;
-            for (size_t i = 1; i < timestamps.size(); i++) {
-                auto diff = std::chrono::duration_cast<std::chrono::microseconds>(
-                    timestamps[i] - timestamps[i-1]).count();
-                intervals.push_back(diff);
+        int64_t last_timestamp_micros = 0;
+        bool generate_timestamps = true;  // Default: enabled
+        
+        // Check if user disabled timestamp generation
+        if (bind_data.model_params.type().id() == LogicalTypeId::STRUCT) {
+            auto &struct_children = StructValue::GetChildren(bind_data.model_params);
+            for (size_t i = 0; i < struct_children.size(); i++) {
+                auto &key = StructType::GetChildName(bind_data.model_params.type(), i);
+                if (key == "generate_timestamps") {
+                    generate_timestamps = struct_children[i].GetValue<bool>();
+                    break;
+                }
             }
-            // Use median interval for robustness
-            std::sort(intervals.begin(), intervals.end());
-            interval_micros = intervals[intervals.size() / 2];
         }
         
-        // Last timestamp from training data
-        int64_t last_timestamp_micros = time_value_pairs.back().first;
-        
-        // Create result struct with forecast arrays
-        child_list_t<Value> struct_values;
-        
-        vector<Value> steps, forecasts, lowers, uppers, forecast_timestamps;
-        
-        // Check if model provides prediction intervals
-        bool has_intervals = AnofoxTimeWrapper::HasLowerBound(*forecast_ptr) && 
-                            AnofoxTimeWrapper::HasUpperBound(*forecast_ptr);
-        
-        if (has_intervals) {
-            // // std::cerr << "[DEBUG] Using model's prediction intervals" << std::endl;
-            auto &lower_bound = AnofoxTimeWrapper::GetLowerBound(*forecast_ptr);
-            auto &upper_bound = AnofoxTimeWrapper::GetUpperBound(*forecast_ptr);
+        if (generate_timestamps) {
+            ScopedTimer timer(&time_timestamp_calc);
             
-            for (int32_t h = 0; h < bind_data.horizon; h++) {
-                steps.push_back(Value::INTEGER(h + 1));
-                forecasts.push_back(Value::DOUBLE(primary_forecast[h]));
-                lowers.push_back(Value::DOUBLE(lower_bound[h]));
-                uppers.push_back(Value::DOUBLE(upper_bound[h]));
-                
-                // Generate forecast timestamp
-                int64_t forecast_ts_micros = last_timestamp_micros + interval_micros * (h + 1);
-                forecast_timestamps.push_back(Value::TIMESTAMP(timestamp_t(forecast_ts_micros)));
+            // Calculate mean interval (O(1) - assumes regular, sorted data)
+            if (timestamps.size() >= 2) {
+                auto total_time = std::chrono::duration_cast<std::chrono::microseconds>(
+                    timestamps.back() - timestamps.front()).count();
+                interval_micros = total_time / (timestamps.size() - 1);
             }
-        } else {
-            // // std::cerr << "[DEBUG] Model doesn't provide intervals, using ±10% fallback" << std::endl;
-            for (int32_t h = 0; h < bind_data.horizon; h++) {
-                steps.push_back(Value::INTEGER(h + 1));
-                forecasts.push_back(Value::DOUBLE(primary_forecast[h]));
-                lowers.push_back(Value::DOUBLE(primary_forecast[h] * 0.9));
-                uppers.push_back(Value::DOUBLE(primary_forecast[h] * 1.1));
-                
-                // Generate forecast timestamp
-                int64_t forecast_ts_micros = last_timestamp_micros + interval_micros * (h + 1);
-                forecast_timestamps.push_back(Value::TIMESTAMP(timestamp_t(forecast_ts_micros)));
-            }
+            
+            // Last timestamp from training data
+            last_timestamp_micros = time_value_pairs.back().first;
         }
         
-        struct_values.push_back(make_pair("forecast_step", Value::LIST(LogicalType::INTEGER, steps)));
-        struct_values.push_back(make_pair("forecast_timestamp", Value::LIST(LogicalType::TIMESTAMP, forecast_timestamps)));
-        struct_values.push_back(make_pair("point_forecast", Value::LIST(LogicalType::DOUBLE, forecasts)));
-        struct_values.push_back(make_pair("lower_95", Value::LIST(LogicalType::DOUBLE, lowers)));
-        struct_values.push_back(make_pair("upper_95", Value::LIST(LogicalType::DOUBLE, uppers)));
-        struct_values.push_back(make_pair("model_name", Value(AnofoxTimeWrapper::GetModelName(*model_ptr))));
+        // STAGE 6: BUILD RESULT
+        {
+            ScopedTimer timer(&state.data->time_result);
+            
+            child_list_t<Value> struct_values;
+            vector<Value> steps, forecasts, lowers, uppers, forecast_timestamps;
+            
+            // Check if model provides prediction intervals
+            bool has_intervals = AnofoxTimeWrapper::HasLowerBound(*forecast_ptr) && 
+                                AnofoxTimeWrapper::HasUpperBound(*forecast_ptr);
+            
+            if (has_intervals) {
+                auto &lower_bound = AnofoxTimeWrapper::GetLowerBound(*forecast_ptr);
+                auto &upper_bound = AnofoxTimeWrapper::GetUpperBound(*forecast_ptr);
+                
+                for (int32_t h = 0; h < bind_data.horizon; h++) {
+                    steps.push_back(Value::INTEGER(h + 1));
+                    forecasts.push_back(Value::DOUBLE(primary_forecast[h]));
+                    lowers.push_back(Value::DOUBLE(lower_bound[h]));
+                    uppers.push_back(Value::DOUBLE(upper_bound[h]));
+                    
+                    if (generate_timestamps) {
+                        int64_t forecast_ts_micros = last_timestamp_micros + interval_micros * (h + 1);
+                        forecast_timestamps.push_back(Value::TIMESTAMP(timestamp_t(forecast_ts_micros)));
+                    }
+                }
+            } else {
+                for (int32_t h = 0; h < bind_data.horizon; h++) {
+                    steps.push_back(Value::INTEGER(h + 1));
+                    forecasts.push_back(Value::DOUBLE(primary_forecast[h]));
+                    lowers.push_back(Value::DOUBLE(primary_forecast[h] * 0.9));
+                    uppers.push_back(Value::DOUBLE(primary_forecast[h] * 1.1));
+                    
+                    if (generate_timestamps) {
+                        int64_t forecast_ts_micros = last_timestamp_micros + interval_micros * (h + 1);
+                        forecast_timestamps.push_back(Value::TIMESTAMP(timestamp_t(forecast_ts_micros)));
+                    }
+                }
+            }
+            
+            // Copy 4: Create DuckDB Value::LIST objects
+            state.data->copy_count++;
+            state.data->bytes_copied += bind_data.horizon * (sizeof(int32_t) + sizeof(double) * 4 + sizeof(timestamp_t));
+            
+            struct_values.push_back(make_pair("forecast_step", Value::LIST(LogicalType::INTEGER, steps)));
+            
+            // Include forecast_timestamp field (empty if disabled for schema consistency)
+            if (generate_timestamps) {
+                struct_values.push_back(make_pair("forecast_timestamp", Value::LIST(LogicalType::TIMESTAMP, forecast_timestamps)));
+            } else {
+                vector<Value> empty_timestamps;
+                struct_values.push_back(make_pair("forecast_timestamp", Value::LIST(LogicalType::TIMESTAMP, empty_timestamps)));
+            }
+            
+            struct_values.push_back(make_pair("point_forecast", Value::LIST(LogicalType::DOUBLE, forecasts)));
+            struct_values.push_back(make_pair("lower_95", Value::LIST(LogicalType::DOUBLE, lowers)));
+            struct_values.push_back(make_pair("upper_95", Value::LIST(LogicalType::DOUBLE, uppers)));
+            struct_values.push_back(make_pair("model_name", Value(AnofoxTimeWrapper::GetModelName(*model_ptr))));
+            
+            auto result_value = Value::STRUCT(std::move(struct_values));
+            finalize_data.result.SetValue(finalize_data.result_idx, result_value);
+        }
         
-        // Set the result value in the Vector
-        auto result_value = Value::STRUCT(std::move(struct_values));
-        finalize_data.result.SetValue(finalize_data.result_idx, result_value);
+        // Calculate total time
+        auto total_end = std::chrono::high_resolution_clock::now();
+        state.data->time_total = std::chrono::duration_cast<std::chrono::microseconds>(total_end - total_start);
         
-        // // std::cerr << "[DEBUG] Finalize complete" << std::endl;
+        // Print performance profile (enable with environment variable)
+        if (std::getenv("ANOFOX_PERF")) {
+            auto to_ms = [](std::chrono::microseconds us) { return us.count() / 1000.0; };
+            auto pct = [](std::chrono::microseconds part, std::chrono::microseconds total) { 
+                return total.count() > 0 ? (100.0 * part.count() / total.count()) : 0.0; 
+            };
+            
+            std::fprintf(stderr, "\n[PERF] Model=%s, Rows=%zu, Horizon=%d\n",
+                bind_data.model_name.c_str(), data_size, bind_data.horizon);
+            std::fprintf(stderr, "[PERF] Sort:    %6.2fms (%5.1f%%)\n", 
+                to_ms(state.data->time_sort), pct(state.data->time_sort, state.data->time_total));
+            std::fprintf(stderr, "[PERF] Convert: %6.2fms (%5.1f%%)\n", 
+                to_ms(state.data->time_convert), pct(state.data->time_convert, state.data->time_total));
+            std::fprintf(stderr, "[PERF] BuildTS: %6.2fms (%5.1f%%)\n", 
+                to_ms(state.data->time_build_ts), pct(state.data->time_build_ts, state.data->time_total));
+            std::fprintf(stderr, "[PERF] Fit:     %6.2fms (%5.1f%%)\n", 
+                to_ms(state.data->time_fit), pct(state.data->time_fit, state.data->time_total));
+            std::fprintf(stderr, "[PERF] Predict: %6.2fms (%5.1f%%)\n", 
+                to_ms(state.data->time_predict), pct(state.data->time_predict, state.data->time_total));
+            std::fprintf(stderr, "[PERF] TsCalc:  %6.2fms (%5.1f%%)\n", 
+                to_ms(time_timestamp_calc), pct(time_timestamp_calc, state.data->time_total));
+            std::fprintf(stderr, "[PERF] Result:  %6.2fms (%5.1f%%)\n", 
+                to_ms(state.data->time_result), pct(state.data->time_result, state.data->time_total));
+            std::fprintf(stderr, "[PERF] TOTAL:   %6.2fms\n", to_ms(state.data->time_total));
+            std::fprintf(stderr, "[PERF] Copies: %zu, Bytes: %zu KB\n", 
+                state.data->copy_count, state.data->bytes_copied / 1024);
+        }
     }
     
     template <class STATE>
@@ -192,7 +280,7 @@ struct ForecastAggregateOperation {
 // Update function: accumulate timestamp-value pairs
 static void TSForecastUpdate(Vector inputs[], AggregateInputData &aggr_input, idx_t input_count,
                              Vector &state_vector, idx_t count) {
-    // std::cerr << "[DEBUG] TSForecastUpdate with " << count << " rows, " << input_count << " inputs" << std::endl;
+    auto update_start = std::chrono::high_resolution_clock::now();
     
     // inputs[0] = timestamp column
     // inputs[1] = value column
@@ -200,24 +288,16 @@ static void TSForecastUpdate(Vector inputs[], AggregateInputData &aggr_input, id
     // inputs[3] = horizon (constant) - skip, handled in bind  
     // inputs[4] = model_params (constant, optional) - skip, handled in bind
     
-    // std::cerr << "[DEBUG] Converting inputs to unified format..." << std::endl;
     UnifiedVectorFormat ts_format, val_format;
     inputs[0].ToUnifiedFormat(count, ts_format);
     inputs[1].ToUnifiedFormat(count, val_format);
     
-    // std::cerr << "[DEBUG] Getting state pointers from FLAT vector..." << std::endl;
     // State vector is FLAT - use FlatVector::GetData
     auto states = FlatVector::GetData<ForecastAggregateState*>(state_vector);
     
-    // std::cerr << "[DEBUG] Processing " << count << " rows..." << std::endl;
     for (idx_t i = 0; i < count; i++) {
         auto ts_idx = ts_format.sel->get_index(i);
         auto val_idx = val_format.sel->get_index(i);
-        
-        if (i < 2) {  // Only print for first 2 rows
-            // std::cerr << "[DEBUG] Row " << i << ": ts_idx=" << ts_idx << ", val_idx=" << val_idx << std::endl;
-            // std::cerr << "[DEBUG] states[" << i << "] = " << (void*)states[i] << std::endl;
-        }
         
         if (!ts_format.validity.RowIsValid(ts_idx) || !val_format.validity.RowIsValid(val_idx)) {
             continue;
@@ -227,26 +307,37 @@ static void TSForecastUpdate(Vector inputs[], AggregateInputData &aggr_input, id
         auto &state = *states[i];
         
         if (!state.data) {
-            // std::cerr << "[ERROR] Row " << i << ": state.data is NULL!" << std::endl;
             continue;
         }
         
+        // Track capacity for reallocation detection
+        size_t old_cap = state.data->timestamp_micros.capacity();
+        
         // Extract timestamp as microseconds
         auto ts_val = UnifiedVectorFormat::GetData<timestamp_t>(ts_format)[ts_idx];
-        if (i < 2) {
-            // std::cerr << "[DEBUG] Row " << i << ": ts_val=" << ts_val.value << ", pushing to state at " << (void*)state.data << std::endl;
-        }
         state.data->timestamp_micros.push_back(ts_val.value);
         
         // Extract value
         auto value = UnifiedVectorFormat::GetData<double>(val_format)[val_idx];
-        if (i < 2) {
-            // std::cerr << "[DEBUG] Row " << i << ": value=" << value << std::endl;
-        }
         state.data->values.push_back(value);
         
-        if (i < 2) {
-            // std::cerr << "[DEBUG] Row " << i << ": state.data now has " << state.data->timestamp_micros.size() << " points" << std::endl;
+        // Track if reallocation happened
+        size_t new_cap = state.data->timestamp_micros.capacity();
+        if (new_cap > old_cap) {
+            state.data->peak_capacity = new_cap;
+        }
+    }
+    
+    // Accumulate update time (will be summed across all Update calls for this group)
+    auto update_end = std::chrono::high_resolution_clock::now();
+    auto update_time = std::chrono::duration_cast<std::chrono::microseconds>(update_end - update_start);
+    
+    // Add to first non-null state (they all belong to same group in GROUP BY)
+    for (idx_t i = 0; i < count; i++) {
+        auto &state = *states[i];
+        if (state.data) {
+            state.data->time_update += update_time;
+            break;
         }
     }
     

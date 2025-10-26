@@ -12,6 +12,21 @@ namespace duckdb {
 struct ForecastData {
     vector<int64_t> timestamp_micros;
     vector<double> values;
+    
+    // Performance timing breakdowns (in microseconds)
+    std::chrono::microseconds time_update{0};
+    std::chrono::microseconds time_sort{0};
+    std::chrono::microseconds time_convert{0};
+    std::chrono::microseconds time_build_ts{0};
+    std::chrono::microseconds time_fit{0};
+    std::chrono::microseconds time_predict{0};
+    std::chrono::microseconds time_result{0};
+    std::chrono::microseconds time_total{0};
+    
+    // Memory tracking
+    size_t copy_count{0};
+    size_t bytes_copied{0};
+    size_t peak_capacity{0};
 };
 
 // State for the TS_FORECAST aggregate - simple POD type with pointer to data
