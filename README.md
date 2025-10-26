@@ -20,6 +20,10 @@ A high-performance DuckDB extension that brings **31 state-of-the-art time serie
 
 ---
 
+## Roadmap
+
+
+
 ## 📦 Installation
 
 ### Prerequisites
