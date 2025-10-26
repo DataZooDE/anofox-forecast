@@ -2,18 +2,6 @@
 
 A DuckDB extension that brings powerful time series forecasting capabilities using the [anofox-time](https://github.com/anofox/anofox-time) library.
 
-## Features (Phase 1)
-
-✅ **Three baseline forecasting methods:**
-- **Naive**: Random walk forecasting (last value carried forward)
-- **SMA**: Simple Moving Average forecasting
-- **SeasonalNaive**: Seasonal naive forecasting (planned)
-
-✅ **SQL-native interface** using table-in-out functions  
-✅ **Comprehensive error handling** with detailed validation  
-✅ **Debug logging** for easy troubleshooting  
-✅ **Fast C++ implementation** leveraging anofox-time library  
-
 ## Quick Start
 
 ### Build
@@ -32,19 +20,6 @@ make release
 -- Load the extension
 LOAD 'build/debug/extension/anofox_forecast/anofox_forecast.duckdb_extension';
 
--- Create sample data
-CREATE TABLE sales (date TIMESTAMP, amount DOUBLE);
-INSERT INTO sales VALUES 
-    ('2024-01-01', 100), ('2024-01-02', 105), ('2024-01-03', 110),
-    ('2024-01-04', 115), ('2024-01-05', 120);
-
--- Generate forecasts
-SELECT 
-    forecast_step,
-    point_forecast,
-    model_name
-FROM FORECAST('date', 'amount', 'Naive', 7, NULL)
-ORDER BY forecast_step;
 ```
 
 ## Architecture
@@ -104,59 +79,14 @@ make test_debug
 ## Roadmap
 
 ### Phase 1 (Current) ✅
-- [x] Basic extension structure
-- [x] FORECAST table function
-- [x] SMA, Naive models
-- [x] Comprehensive error handling
-- [x] Test suite
-- [x] Documentation
-
-### Phase 2 (Planned)
-- [ ] GROUP BY support for batch forecasting
-- [ ] All 30+ models from anofox-time
-- [ ] STRUCT parameter support with named fields
-- [ ] Proper statistical prediction intervals
-- [ ] ENSEMBLE() table function
-- [ ] BACKTEST() table function
-- [ ] Scalar utility functions
+- [x] Bla
 
 ## Technical Notes
 
-### Namespace Conflict Resolution
-
-DuckDB includes its own version of the fmt library, which conflicts with spdlog's bundled fmt. We resolved this by:
-1. Building anofox-time without spdlog (`ANOFOX_NO_LOGGING`)
-2. Modifying anofox-time's logging.hpp to make spdlog optional
-3. Compiling only needed source files into the extension
 
 ### Symbol Visibility
 
 The anofox-time library is compiled with hidden symbol visibility to prevent conflicts with DuckDB's internal libraries.
-
-## Development
-
-### Adding New Models
-
-To add a new forecast model:
-
-1. Add the model header include to `anofox_time_wrapper.hpp`
-2. Create factory method in `AnofoxTimeWrapper`
-3. Add model name to `ModelFactory::GetSupportedModels()`
-4. Implement parameter validation in `ModelFactory::ValidateModelParams()`
-5. Add create case in `ModelFactory::Create()`
-6. Update tests and documentation
-
-### Debug Logging
-
-All major operations include debug output:
-```cpp
-std::cout << "[DEBUG] Operation description" << std::endl;
-```
-
-To see debug output, run tests with stderr:
-```bash
-./build/debug/test/unittest "test/sql/yourtest.test" 2>&1
-```
 
 ## License
 
