@@ -1,6 +1,6 @@
 # 📊 Anofox Forecast
 
-**Production-ready time series forecasting for DuckDB**
+**A time series forecasting for DuckDB**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![DuckDB](https://img.shields.io/badge/DuckDB-Extension-yellow.svg)](https://duckdb.org)
@@ -14,11 +14,8 @@ A high-performance DuckDB extension that brings **31 state-of-the-art time serie
 
 - **31 Forecasting Models** - From simple baselines to advanced state-space models
 - **SQL-Native API** - Forecast with a single aggregate function
-- **Production Performance** - 3.7× faster AutoETS with early termination optimization
-- **Automatic Timestamps** - O(1) forecast date generation from training data
 - **Parallel Execution** - Leverages DuckDB's GROUP BY parallelization
-- **<1% Error Validated** - Models aligned with statsforecast benchmarks
-- **Prediction Intervals** - 95% confidence bounds for all forecasts
+- **Configurable Prediction Intervals** - Adjustable confidence levels (default: 90%)
 - **Zero Configuration** - Sensible defaults, optional parameter tuning
 
 ---
@@ -73,8 +70,8 @@ SELECT
   UNNEST(result.forecast_step) AS step,
   UNNEST(result.forecast_timestamp)::DATE AS date,
   ROUND(UNNEST(result.point_forecast), 2) AS forecast,
-  ROUND(UNNEST(result.lower_95), 2) AS lower,
-  ROUND(UNNEST(result.upper_95), 2) AS upper
+  ROUND(UNNEST(result.lower), 2) AS lower_90,
+  ROUND(UNNEST(result.upper), 2) AS upper_90
 FROM (
   SELECT TS_FORECAST(date, revenue, 'AutoETS', 30, MAP{'season_length': 7}) AS result
   FROM sales
@@ -83,15 +80,17 @@ FROM (
 
 **Output:**
 ```
-┌──────┬────────────┬──────────┬────────┬────────┐
-│ step │    date    │ forecast │ lower  │ upper  │
-├──────┼────────────┼──────────┼────────┼────────┤
-│    1 │ 2024-01-01 │   118.45 │ 108.23 │ 128.67 │
-│    2 │ 2024-01-02 │   121.32 │ 110.87 │ 131.77 │
-│    3 │ 2024-01-03 │   115.78 │ 105.12 │ 126.44 │
-│  ... │        ... │      ... │    ... │    ... │
-└──────┴────────────┴──────────┴────────┴────────┘
+┌──────┬────────────┬──────────┬──────────┬──────────┐
+│ step │    date    │ forecast │ lower_90 │ upper_90 │
+├──────┼────────────┼──────────┼──────────┼──────────┤
+│    1 │ 2024-01-01 │   118.45 │   108.23 │   128.67 │
+│    2 │ 2024-01-02 │   121.32 │   110.87 │   131.77 │
+│    3 │ 2024-01-03 │   115.78 │   105.12 │   126.44 │
+│  ... │        ... │      ... │      ... │      ... │
+└──────┴────────────┴──────────┴──────────┴──────────┘
 ```
+
+**Note:** Default confidence level is 90%. Use `MAP{'confidence_level': 0.95}` for 95% intervals.
 
 ---
 
@@ -180,14 +179,20 @@ GROUP BY product_id;
 ### Custom Parameters
 
 ```sql
--- ARIMA(2,1,2) with seasonal component
+-- Custom confidence level (95% intervals)
+SELECT TS_FORECAST(date, value, 'Theta', 12, 
+  MAP{'confidence_level': 0.95}) AS forecast
+FROM time_series_data;
+
+-- ARIMA(2,1,2) with seasonal component and 99% confidence
 SELECT TS_FORECAST(date, value, 'ARIMA', 12, 
-  MAP{'p': 2, 'd': 1, 'q': 2, 'P': 1, 'D': 1, 'Q': 1, 's': 12}) AS forecast
+  MAP{'p': 2, 'd': 1, 'q': 2, 'P': 1, 'D': 1, 'Q': 1, 's': 12, 
+      'confidence_level': 0.99}) AS forecast
 FROM monthly_data;
 
 -- MFLES with multiple seasonality (daily + weekly)
 SELECT TS_FORECAST(timestamp, visitors, 'MFLES', 48,
-  MAP{'seasonal_periods': [24, 168]}) AS forecast
+  MAP{'seasonal_periods': [24, 168], 'confidence_level': 0.90}) AS forecast
 FROM web_traffic;
 ```
 
@@ -237,9 +242,7 @@ FROM data;
 | AutoARIMA | 8.5s | ⚡ | ARIMA auto |
 
 ### Optimizations
-
-✅ **3.7× AutoETS Speedup** - Early termination (14s → 3.8s)  
-✅ **Zero TsCalc Overhead** - O(1) mean interval (was 0.11ms)  
+ 
 ✅ **DuckDB GROUP BY** - Automatic parallelization across series  
 ✅ **Single-CPU Optimized** - No model-level thread contention  
 
@@ -276,7 +279,6 @@ src/
 ### Design Principles
 
 - **Aggregate Function Pattern** - Native DuckDB integration via `TS_FORECAST()`
-- **Namespace Isolation** - Prevents conflicts with DuckDB's internal libraries
 - **Zero-Copy Where Possible** - Efficient data transfer between DuckDB and anofox-time
 - **Type Safety** - Strong typing with comprehensive parameter validation
 - **Memory Safety** - RAII and proper ownership throughout
@@ -295,8 +297,6 @@ The extension integrates anofox-time by:
 
 - **[PARAMETERS.md](docs/PARAMETERS.md)** - Complete parameter reference for all 31 models
 - **[USAGE.md](docs/USAGE.md)** - Advanced usage patterns and examples
-- **[PERFORMANCE_OPTIMIZATION_COMPLETE.md](PERFORMANCE_OPTIMIZATION_COMPLETE.md)** - Performance analysis and optimization details
-- **[DEMO_AGGREGATE.sql](DEMO_AGGREGATE.sql)** - Comprehensive SQL examples
 
 ---
 
@@ -316,11 +316,9 @@ uv run python compare_simple_models.py
 
 ### Test Coverage
 
-✅ **31 Models** - All models tested against statsforecast  
-✅ **<1% Error** - Validated accuracy for core models  
+✅ **31 Models** - All models tested against statsforecast    
 ✅ **Edge Cases** - Empty data, single point, duplicates  
 ✅ **Parameters** - Validation and error handling  
-✅ **Performance** - Regression tests for speed optimizations  
 
 ---
 
@@ -366,56 +364,6 @@ option(ENABLE_LOGGING "Enable debug/info logging" OFF)  # Default OFF
 
 ---
 
-## 🎯 Use Cases
-
-### Retail & E-Commerce
-```sql
--- Forecast sales for inventory planning
-SELECT 
-  sku, warehouse,
-  TS_FORECAST(date, sales, 'AutoETS', 30, MAP{'season_length': 7})
-FROM daily_sales
-GROUP BY sku, warehouse;
-```
-
-### Energy & Utilities
-```sql
--- Hourly electricity demand with daily and weekly patterns
-SELECT 
-  region,
-  TS_FORECAST(hour, kwh, 'MSTL', 168, MAP{'seasonal_periods': [24, 168]})
-FROM energy_consumption
-GROUP BY region;
-```
-
-### Finance
-```sql
--- Monthly revenue forecasting
-SELECT 
-  department,
-  TS_FORECAST(month, revenue, 'Holt', 12, MAP{'alpha': 0.3, 'beta': 0.1})
-FROM financial_data
-GROUP BY department;
-```
-
-### Supply Chain
-```sql
--- Intermittent spare parts demand
-SELECT 
-  part_id,
-  TS_FORECAST(date, demand, 'CrostonSBA', 90, MAP{})
-FROM inventory_demand
-WHERE demand_pattern = 'intermittent'
-GROUP BY part_id;
-```
-
-### Web Analytics
-```sql
--- Website traffic with daily seasonality
-SELECT 
-  TS_FORECAST(timestamp, visitors, 'AutoETS', 48, MAP{'season_length': 24})
-FROM web_traffic;
-```
 
 ---
 

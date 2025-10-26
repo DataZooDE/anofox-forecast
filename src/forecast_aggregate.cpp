@@ -135,7 +135,7 @@ struct ForecastAggregateOperation {
         std::unique_ptr<::anofoxtime::core::Forecast> forecast_ptr;
         {
             ScopedTimer timer(&state.data->time_predict);
-            forecast_ptr = AnofoxTimeWrapper::PredictWithConfidence(model_ptr.get(), bind_data.horizon, 0.95);
+            forecast_ptr = AnofoxTimeWrapper::PredictWithConfidence(model_ptr.get(), bind_data.horizon, bind_data.confidence_level);
         }
         auto &primary_forecast = AnofoxTimeWrapper::GetPrimaryForecast(*forecast_ptr);
         
@@ -226,8 +226,8 @@ struct ForecastAggregateOperation {
             }
             
             struct_values.push_back(make_pair("point_forecast", Value::LIST(LogicalType::DOUBLE, forecasts)));
-            struct_values.push_back(make_pair("lower_95", Value::LIST(LogicalType::DOUBLE, lowers)));
-            struct_values.push_back(make_pair("upper_95", Value::LIST(LogicalType::DOUBLE, uppers)));
+            struct_values.push_back(make_pair("lower", Value::LIST(LogicalType::DOUBLE, lowers)));
+            struct_values.push_back(make_pair("upper", Value::LIST(LogicalType::DOUBLE, uppers)));
             struct_values.push_back(make_pair("model_name", Value(AnofoxTimeWrapper::GetModelName(*model_ptr))));
             
             auto result_value = Value::STRUCT(std::move(struct_values));
@@ -389,19 +389,37 @@ unique_ptr<FunctionData> TSForecastBind(ClientContext &context, AggregateFunctio
     
     ModelFactory::ValidateModelParams(model_name, model_params);
     
+    // Extract confidence_level parameter (default: 0.90)
+    double confidence_level = 0.90;
+    if (model_params.type().id() == LogicalTypeId::STRUCT) {
+        auto &struct_children = StructValue::GetChildren(model_params);
+        for (size_t i = 0; i < struct_children.size(); i++) {
+            auto &key = StructType::GetChildName(model_params.type(), i);
+            if (key == "confidence_level") {
+                confidence_level = struct_children[i].GetValue<double>();
+                // Validate confidence level
+                if (confidence_level <= 0.0 || confidence_level >= 1.0) {
+                    throw BinderException("confidence_level must be between 0 and 1 (got " + 
+                                        std::to_string(confidence_level) + ")");
+                }
+                break;
+            }
+        }
+    }
+    
     // Set return type
     child_list_t<LogicalType> struct_children;
     struct_children.push_back(make_pair("forecast_step", LogicalType::LIST(LogicalType::INTEGER)));
     struct_children.push_back(make_pair("forecast_timestamp", LogicalType::LIST(LogicalType::TIMESTAMP)));
     struct_children.push_back(make_pair("point_forecast", LogicalType::LIST(LogicalType::DOUBLE)));
-    struct_children.push_back(make_pair("lower_95", LogicalType::LIST(LogicalType::DOUBLE)));
-    struct_children.push_back(make_pair("upper_95", LogicalType::LIST(LogicalType::DOUBLE)));
+    struct_children.push_back(make_pair("lower", LogicalType::LIST(LogicalType::DOUBLE)));
+    struct_children.push_back(make_pair("upper", LogicalType::LIST(LogicalType::DOUBLE)));
     struct_children.push_back(make_pair("model_name", LogicalType::VARCHAR));
     
     function.return_type = LogicalType::STRUCT(std::move(struct_children));
     
     // // std::cerr << "[DEBUG] TSForecastBind complete" << std::endl;
-    return make_uniq<ForecastAggregateBindData>(model_name, horizon, model_params);
+    return make_uniq<ForecastAggregateBindData>(model_name, horizon, model_params, confidence_level);
 }
 
 AggregateFunction CreateTSForecastAggregate() {

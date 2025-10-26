@@ -41,12 +41,35 @@ These parameters work with **all models**:
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
+| `confidence_level` | DOUBLE | No | 0.90 | Confidence level for prediction intervals (0 < value < 1) |
 | `generate_timestamps` | BOOLEAN | No | true | Generate forecast timestamps based on training data intervals |
 
-**Example:**
+**Validation:**
+- `confidence_level` must be between 0 and 1 (exclusive)
+- Higher values produce wider prediction intervals
+- Common values: 0.80 (80%), 0.90 (90%), 0.95 (95%), 0.99 (99%)
+
+**Examples:**
 ```sql
+-- Default confidence level (0.90 = 90%)
+SELECT TS_FORECAST(date, value, 'Theta', 12, MAP{})
+FROM data;
+
+-- Custom confidence level (0.95 = 95%)
+SELECT TS_FORECAST(date, value, 'AutoETS', 12, MAP{'confidence_level': 0.95})
+FROM data;
+
+-- Narrow intervals for conservative estimates (0.80 = 80%)
+SELECT TS_FORECAST(date, value, 'Theta', 12, MAP{'confidence_level': 0.80})
+FROM data;
+
 -- Disable timestamp generation for maximum speed
 SELECT TS_FORECAST(date, value, 'Naive', 12, MAP{'generate_timestamps': false})
+FROM data;
+
+-- Combine multiple global parameters
+SELECT TS_FORECAST(date, value, 'AutoETS', 12, 
+       MAP{'confidence_level': 0.95, 'generate_timestamps': true, 'season_length': 7})
 FROM data;
 ```
 
