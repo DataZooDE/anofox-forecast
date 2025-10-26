@@ -109,10 +109,28 @@ struct ForecastAggregateOperation {
         auto forecast_ptr = AnofoxTimeWrapper::PredictWithConfidence(model_ptr.get(), bind_data.horizon, 0.95);
         auto &primary_forecast = AnofoxTimeWrapper::GetPrimaryForecast(*forecast_ptr);
         
+        // Calculate time interval from training data for forecast timestamps
+        int64_t interval_micros = 0;
+        if (timestamps.size() >= 2) {
+            // Calculate median interval to handle irregular spacing
+            vector<int64_t> intervals;
+            for (size_t i = 1; i < timestamps.size(); i++) {
+                auto diff = std::chrono::duration_cast<std::chrono::microseconds>(
+                    timestamps[i] - timestamps[i-1]).count();
+                intervals.push_back(diff);
+            }
+            // Use median interval for robustness
+            std::sort(intervals.begin(), intervals.end());
+            interval_micros = intervals[intervals.size() / 2];
+        }
+        
+        // Last timestamp from training data
+        int64_t last_timestamp_micros = time_value_pairs.back().first;
+        
         // Create result struct with forecast arrays
         child_list_t<Value> struct_values;
         
-        vector<Value> steps, forecasts, lowers, uppers;
+        vector<Value> steps, forecasts, lowers, uppers, forecast_timestamps;
         
         // Check if model provides prediction intervals
         bool has_intervals = AnofoxTimeWrapper::HasLowerBound(*forecast_ptr) && 
@@ -128,6 +146,10 @@ struct ForecastAggregateOperation {
                 forecasts.push_back(Value::DOUBLE(primary_forecast[h]));
                 lowers.push_back(Value::DOUBLE(lower_bound[h]));
                 uppers.push_back(Value::DOUBLE(upper_bound[h]));
+                
+                // Generate forecast timestamp
+                int64_t forecast_ts_micros = last_timestamp_micros + interval_micros * (h + 1);
+                forecast_timestamps.push_back(Value::TIMESTAMP(timestamp_t(forecast_ts_micros)));
             }
         } else {
             // // std::cerr << "[DEBUG] Model doesn't provide intervals, using ±10% fallback" << std::endl;
@@ -136,10 +158,15 @@ struct ForecastAggregateOperation {
                 forecasts.push_back(Value::DOUBLE(primary_forecast[h]));
                 lowers.push_back(Value::DOUBLE(primary_forecast[h] * 0.9));
                 uppers.push_back(Value::DOUBLE(primary_forecast[h] * 1.1));
+                
+                // Generate forecast timestamp
+                int64_t forecast_ts_micros = last_timestamp_micros + interval_micros * (h + 1);
+                forecast_timestamps.push_back(Value::TIMESTAMP(timestamp_t(forecast_ts_micros)));
             }
         }
         
         struct_values.push_back(make_pair("forecast_step", Value::LIST(LogicalType::INTEGER, steps)));
+        struct_values.push_back(make_pair("forecast_timestamp", Value::LIST(LogicalType::TIMESTAMP, forecast_timestamps)));
         struct_values.push_back(make_pair("point_forecast", Value::LIST(LogicalType::DOUBLE, forecasts)));
         struct_values.push_back(make_pair("lower_95", Value::LIST(LogicalType::DOUBLE, lowers)));
         struct_values.push_back(make_pair("upper_95", Value::LIST(LogicalType::DOUBLE, uppers)));
@@ -274,6 +301,7 @@ unique_ptr<FunctionData> TSForecastBind(ClientContext &context, AggregateFunctio
     // Set return type
     child_list_t<LogicalType> struct_children;
     struct_children.push_back(make_pair("forecast_step", LogicalType::LIST(LogicalType::INTEGER)));
+    struct_children.push_back(make_pair("forecast_timestamp", LogicalType::LIST(LogicalType::TIMESTAMP)));
     struct_children.push_back(make_pair("point_forecast", LogicalType::LIST(LogicalType::DOUBLE)));
     struct_children.push_back(make_pair("lower_95", LogicalType::LIST(LogicalType::DOUBLE)));
     struct_children.push_back(make_pair("upper_95", LogicalType::LIST(LogicalType::DOUBLE)));

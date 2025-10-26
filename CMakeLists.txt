@@ -7,6 +7,15 @@ set(TARGET_NAME anofox_forecast)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# --- Logging Control ---
+option(ENABLE_LOGGING "Enable debug/info logging output (disable for production)" OFF)
+
+if(ENABLE_LOGGING)
+    message(STATUS "anofox-forecast: Logging ENABLED (development mode)")
+else()
+    message(STATUS "anofox-forecast: Logging DISABLED (production mode)")
+endif()
+
 # DuckDB's extension distribution supports vcpkg
 find_package(OpenSSL REQUIRED)
 find_package(Eigen3 REQUIRED)
@@ -93,9 +102,11 @@ set(EXTENSION_SOURCES
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
 
-# Add compile definition to disable logging
-target_compile_definitions(${EXTENSION_NAME} PRIVATE ANOFOX_NO_LOGGING)
-target_compile_definitions(${LOADABLE_EXTENSION_NAME} PRIVATE ANOFOX_NO_LOGGING)
+# Control logging based on ENABLE_LOGGING option
+if(NOT ENABLE_LOGGING)
+    target_compile_definitions(${EXTENSION_NAME} PRIVATE ANOFOX_NO_LOGGING)
+    target_compile_definitions(${LOADABLE_EXTENSION_NAME} PRIVATE ANOFOX_NO_LOGGING)
+endif()
 
 # Link required libraries (no pre-built anofox-time needed)
 target_link_libraries(${EXTENSION_NAME} 
