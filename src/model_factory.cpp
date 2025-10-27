@@ -69,7 +69,10 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(
         int error_type = GetParam<int>(model_params, "error_type", 0);  // 0=Additive
         int trend_type = GetParam<int>(model_params, "trend_type", 0);  // 0=None
         int season_type = GetParam<int>(model_params, "season_type", 0);  // 0=None
-        int season_length = GetParam<int>(model_params, "season_length", 1);
+        // Accept both 'season_length' and 'seasonal_period' for compatibility
+        int season_length = HasParam(model_params, "season_length") 
+            ? GetParam<int>(model_params, "season_length", 1)
+            : GetParam<int>(model_params, "seasonal_period", 1);
         double alpha = GetParam<double>(model_params, "alpha", 0.2);
         double beta = GetParam<double>(model_params, "beta", 0.1);
         double gamma = GetParam<double>(model_params, "gamma", 0.1);
@@ -80,7 +83,10 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(
                                            alpha, beta, gamma, phi);
     }
     else if (model_name == "AutoETS") {
-        int season_length = GetParam<int>(model_params, "season_length", 1);
+        // Accept both 'season_length' and 'seasonal_period' for compatibility
+        int season_length = HasParam(model_params, "season_length")
+            ? GetParam<int>(model_params, "season_length", 1)
+            : GetParam<int>(model_params, "seasonal_period", 1);
         std::string model_spec = GetParam<std::string>(model_params, "model", "ZZZ");
         
         return AnofoxTimeWrapper::CreateAutoETS(season_length, model_spec);

@@ -86,6 +86,8 @@ set(ANOFOX_TIME_SOURCES
     # Optimization
     anofox-time/src/optimization/lbfgs_optimizer.cpp
     anofox-time/src/optimization/ets_gradients.cpp
+    anofox-time/src/optimization/ets_gradients_simd.cpp
+    anofox-time/src/optimization/ets_gradients_checkpointing.cpp
 )
 
 # Update extension sources
@@ -102,6 +104,15 @@ set(EXTENSION_SOURCES
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
+
+# Enable AVX2 for SIMD optimizations (if supported)
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("-mavx2" COMPILER_SUPPORTS_AVX2)
+if(COMPILER_SUPPORTS_AVX2)
+    target_compile_options(${EXTENSION_NAME} PRIVATE -mavx2 -mfma)
+    target_compile_options(${LOADABLE_EXTENSION_NAME} PRIVATE -mavx2 -mfma)
+    message(STATUS "AVX2 support enabled for anofox-forecast extension")
+endif()
 
 # Control logging based on ENABLE_LOGGING option
 if(NOT ENABLE_LOGGING)

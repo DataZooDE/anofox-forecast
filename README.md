@@ -6,7 +6,7 @@
 [![DuckDB](https://img.shields.io/badge/DuckDB-Extension-yellow.svg)](https://duckdb.org)
 [![C++17](https://img.shields.io/badge/C++-17-blue.svg)](https://en.cppreference.com/w/cpp/17)
 
-A high-performance DuckDB extension that brings **31 state-of-the-art time series forecasting models** directly into your SQL queries. Built on the battle-tested [anofox-time](https://github.com/anofox/anofox-time) library, achieving **<1% forecast error** for validated models.
+A high-performance DuckDB extension that brings **31 state-of-the-art time series forecasting models** directly into your SQL queries. Built on the battle-tested [anofox-time](https://github.com/anofox/anofox-time) library.
 
 ---
 
