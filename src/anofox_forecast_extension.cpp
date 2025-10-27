@@ -12,28 +12,80 @@
 #include "forecast_table_function.hpp"
 #include "forecast_aggregate.hpp"
 #include "metrics_function.hpp"
+#include "duckdb/catalog/default/default_functions.hpp"
+#include "duckdb/catalog/default/default_table_functions.hpp"
 
 // OpenSSL linked through vcpkg
 #include <openssl/opensslv.h>
 
 namespace duckdb {
 
+// Table macros - user-facing API with automatic UNNEST
+// New signature: TS_FORECAST_BY(table_name, group_by_columns, date_col, target_col, method, horizon, params)
+// Users get direct table output, no manual UNNEST needed!
+static const DefaultTableMacro forecast_table_macros[] = {
+    // TS_FORECAST: Single series (no GROUP BY)
+    {DEFAULT_SCHEMA, "ts_forecast", {"table_name", "date_col", "target_col", "method", "horizon", "params", nullptr}, {{nullptr, nullptr}}, R"(
+        WITH fc AS (
+            SELECT TS_FORECAST_AGG(date_col, target_col, method, horizon, params) AS result
+            FROM QUERY_TABLE(table_name)
+        )
+        SELECT 
+            UNNEST(result.forecast_step) AS forecast_step,
+            UNNEST(result.forecast_timestamp) AS forecast_timestamp,
+            UNNEST(result.point_forecast) AS point_forecast,
+            UNNEST(result.lower) AS lower,
+            UNNEST(result.upper) AS upper,
+            result.model_name AS model_name
+        FROM fc
+    )"},
+    // TS_FORECAST_BY: Multiple series (1 group column)
+    {DEFAULT_SCHEMA, "ts_forecast_by", {"table_name", "group_col", "date_col", "target_col", "method", "horizon", "params", nullptr}, {{nullptr, nullptr}}, R"(
+        WITH fc AS (
+            SELECT 
+                group_col,
+                TS_FORECAST_AGG(date_col, target_col, method, horizon, params) AS result
+            FROM QUERY_TABLE(table_name)
+            GROUP BY group_col
+        )
+        SELECT 
+            group_col,
+            UNNEST(result.forecast_step) AS forecast_step,
+            UNNEST(result.forecast_timestamp) AS forecast_timestamp,
+            UNNEST(result.point_forecast) AS point_forecast,
+            UNNEST(result.lower) AS lower,
+            UNNEST(result.upper) AS upper,
+            result.model_name AS model_name
+        FROM fc
+    )"},
+    {nullptr, nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}
+};
+
 static void LoadInternal(ExtensionLoader &loader) {
     // std::cerr << "[DEBUG] Loading anofox_forecast extension..." << std::endl;
     
-    // Register the FORECAST table function (for simple usage)
+    // Register the FORECAST table function (legacy, for compatibility)
     auto forecast_function = CreateForecastTableFunction();
     loader.RegisterFunction(*forecast_function);
     // std::cerr << "[DEBUG] FORECAST table function registered" << std::endl;
     
-    // Register the TS_FORECAST aggregate function (for GROUP BY usage)
+    // Register the TS_FORECAST_AGG aggregate function (internal, for GROUP BY)
     auto ts_forecast_agg = CreateTSForecastAggregate();
     loader.RegisterFunction(ts_forecast_agg);
-    // std::cerr << "[DEBUG] TS_FORECAST aggregate function registered" << std::endl;
+    // std::cerr << "[DEBUG] TS_FORECAST_AGG aggregate function registered" << std::endl;
     
-    // Register the TS_METRICS scalar function (for evaluation)
+    // Register the TS_METRICS scalar functions (for evaluation)
     RegisterMetricsFunction(loader);
-    // std::cerr << "[DEBUG] TS_METRICS function registered" << std::endl;
+    // std::cerr << "[DEBUG] TS_METRICS functions registered" << std::endl;
+    
+    // Register table macros (TS_FORECAST, TS_FORECAST_BY)
+    // Both handle UNNEST internally - users get clean table output!
+    // For 2+ group columns, use TS_FORECAST_AGG with manual UNNEST
+    for (idx_t index = 0; forecast_table_macros[index].name != nullptr; index++) {
+        auto table_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(forecast_table_macros[index]);
+        loader.RegisterFunction(*table_info);
+    }
+    // std::cerr << "[DEBUG] TS_FORECAST table macros registered" << std::endl;
     
     // std::cerr << "[DEBUG] All functions registered successfully" << std::endl;
 }

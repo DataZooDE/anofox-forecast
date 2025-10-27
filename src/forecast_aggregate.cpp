@@ -430,7 +430,7 @@ AggregateFunction CreateTSForecastAggregate() {
     
     // Create aggregate function - use LEGACY destructor for non-trivial state
     AggregateFunction forecast_agg(
-        "ts_forecast",  // name
+        "ts_forecast_agg",  // name (internal, use TS_FORECAST macro for user-facing API)
         {LogicalType::TIMESTAMP, LogicalType::DOUBLE, LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::ANY},  // arguments
         LogicalType::STRUCT({}),  // return_type (will be set in bind)
         AggregateFunction::StateSize<STATE>,  // state_size
