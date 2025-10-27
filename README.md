@@ -22,7 +22,11 @@ A high-performance DuckDB extension that brings **31 state-of-the-art time serie
 
 ## Roadmap
 
-
+- **Data Preparation** - Bring your time series set into shape for forecasting.
+- **EDA for Timeseries**
+- **Conformal Prediction**
+- **Outlier Detection**
+- **Ensembling**
 
 ## 📦 Installation
 
@@ -231,6 +235,22 @@ FROM data;
 -- Returns empty forecast_timestamp list (schema consistent)
 ```
 
+### Evaluate Forecast Accuracy
+
+```sql
+-- Use metric functions to evaluate forecast quality
+WITH forecast AS (
+    SELECT TS_FORECAST(date, value, 'Theta', 10, MAP{}) AS fc FROM train_data
+)
+SELECT 
+    TS_MAE(test_actuals, fc.point_forecast) AS mae,
+    TS_RMSE(test_actuals, fc.point_forecast) AS rmse,
+    TS_MAPE(test_actuals, fc.point_forecast) AS mape_percent
+FROM forecast, test_data;
+
+-- Available metrics: TS_MAE, TS_MSE, TS_RMSE, TS_MAPE, TS_SMAPE, TS_MASE, TS_R2, TS_BIAS
+```
+
 ---
 
 ## ⚡ Performance
@@ -300,6 +320,7 @@ The extension integrates anofox-time by:
 ## 📖 Documentation
 
 - **[PARAMETERS.md](docs/PARAMETERS.md)** - Complete parameter reference for all 31 models
+- **[METRICS.md](docs/METRICS.md)** - Time series evaluation metrics (MAE, RMSE, MAPE, etc.)
 - **[USAGE.md](docs/USAGE.md)** - Advanced usage patterns and examples
 
 ---

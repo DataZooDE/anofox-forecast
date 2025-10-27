@@ -11,6 +11,7 @@
 // Include our forecast functions
 #include "forecast_table_function.hpp"
 #include "forecast_aggregate.hpp"
+#include "metrics_function.hpp"
 
 // OpenSSL linked through vcpkg
 #include <openssl/opensslv.h>
@@ -29,6 +30,10 @@ static void LoadInternal(ExtensionLoader &loader) {
     auto ts_forecast_agg = CreateTSForecastAggregate();
     loader.RegisterFunction(ts_forecast_agg);
     // std::cerr << "[DEBUG] TS_FORECAST aggregate function registered" << std::endl;
+    
+    // Register the TS_METRICS scalar function (for evaluation)
+    RegisterMetricsFunction(loader);
+    // std::cerr << "[DEBUG] TS_METRICS function registered" << std::endl;
     
     // std::cerr << "[DEBUG] All functions registered successfully" << std::endl;
 }

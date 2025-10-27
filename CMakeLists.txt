@@ -93,6 +93,7 @@ set(EXTENSION_SOURCES
     src/anofox_forecast_extension.cpp
     src/forecast_table_function.cpp
     src/forecast_aggregate.cpp
+    src/metrics_function.cpp
     src/model_factory.cpp
     src/time_series_builder.cpp
     src/anofox_time_wrapper.cpp
