@@ -6,8 +6,9 @@ This document describes the evaluation metric functions available in the DuckDB 
 
 ## Overview
 
-The extension provides 8 standard time series forecasting accuracy metrics as individual SQL functions:
+The extension provides **11 time series forecasting accuracy metrics** as individual SQL functions:
 
+**Available Metrics:**
 - `TS_MAE()` - Mean Absolute Error
 - `TS_MSE()` - Mean Squared Error
 - `TS_RMSE()` - Root Mean Squared Error
@@ -16,6 +17,98 @@ The extension provides 8 standard time series forecasting accuracy metrics as in
 - `TS_MASE()` - Mean Absolute Scaled Error (requires baseline)
 - `TS_R2()` - Coefficient of Determination (R-Squared)
 - `TS_BIAS()` - Forecast Bias (systematic over/under-forecasting)
+- `TS_RMAE()` - Relative Mean Absolute Error (compares two methods)
+- `TS_QUANTILE_LOSS()` - Quantile Loss / Pinball Loss (for quantile forecasts)
+- `TS_MQLOSS()` - Multi-Quantile Loss / CRPS approximation (for distributions)
+
+---
+
+## Using Metrics with GROUP BY
+
+All metrics work seamlessly with `GROUP BY` operations using DuckDB's `LIST()` aggregate function.
+
+### Pattern
+
+**Metrics expect arrays (LIST), not individual values:**
+
+```sql
+-- ❌ WRONG - This won't work (metrics need arrays)
+SELECT product_id, TS_MAE(actual, predicted)
+FROM results
+GROUP BY product_id;
+
+-- ✅ CORRECT - Use LIST() to create arrays
+SELECT 
+    product_id,
+    TS_MAE(LIST(actual), LIST(predicted)) AS mae
+FROM results
+GROUP BY product_id;
+```
+
+### Complete Example
+
+```sql
+-- Generate forecasts for multiple products
+CREATE TEMP TABLE forecasts AS
+SELECT * FROM TS_FORECAST_BY(
+    'sales',
+    product_id,
+    date,
+    revenue,
+    'AutoETS',
+    30,
+    MAP{'season_length': 7}
+);
+
+-- Join with actuals and evaluate per product
+CREATE TEMP TABLE evaluation AS
+SELECT 
+    f.product_id,
+    a.actual_value AS actual,
+    f.point_forecast AS predicted
+FROM forecasts f
+JOIN actuals a ON f.product_id = a.product_id AND f.forecast_step = a.step;
+
+-- Calculate metrics per product using GROUP BY + LIST()
+SELECT 
+    product_id,
+    TS_MAE(LIST(actual), LIST(predicted)) AS mae,
+    TS_RMSE(LIST(actual), LIST(predicted)) AS rmse,
+    TS_MAPE(LIST(actual), LIST(predicted)) AS mape,
+    TS_BIAS(LIST(actual), LIST(predicted)) AS bias
+FROM evaluation
+GROUP BY product_id
+ORDER BY mae;  -- Best forecasts first
+```
+
+**Output**:
+```
+┌────────────┬──────┬───────┬────────┬────────┐
+│ product_id │ mae  │ rmse  │  mape  │  bias  │
+├────────────┼──────┼───────┼────────┼────────┤
+│ Widget_A   │ 2.3  │ 2.8   │  1.8   │  0.5   │
+│ Widget_B   │ 3.1  │ 3.7   │  2.1   │ -0.3   │
+│ Widget_C   │ 4.2  │ 5.1   │  3.4   │  1.2   │
+└────────────┴──────┴───────┴────────┴────────┘
+```
+
+### Compare Methods Across Products
+
+```sql
+-- Compare two forecasting methods per product
+SELECT 
+    product_id,
+    TS_RMAE(LIST(actual), LIST(method1_pred), LIST(method2_pred)) AS rmae,
+    CASE 
+        WHEN TS_RMAE(LIST(actual), LIST(method1_pred), LIST(method2_pred)) < 1.0
+        THEN 'Method 1 is better'
+        ELSE 'Method 2 is better'
+    END AS winner
+FROM method_comparison
+GROUP BY product_id;
+```
+
+**Key Insight**: Use `LIST(column)` in GROUP BY contexts to aggregate rows into arrays before passing to metric functions.
 
 ---
 
@@ -606,6 +699,137 @@ FROM quality_check;
 
 ---
 
+### TS_RMAE - Relative Mean Absolute Error
+
+```sql
+TS_RMAE(actual DOUBLE[], predicted1 DOUBLE[], predicted2 DOUBLE[]) → DOUBLE
+```
+
+**Formula**: `MAE(actual, predicted1) / MAE(actual, predicted2)`
+
+**Range**: [0, ∞)
+
+**Interpretation**:
+- Compares two forecasting methods
+- RMAE < 1: predicted1 is better than predicted2
+- RMAE > 1: predicted2 is better than predicted1
+- RMAE = 1: Both methods perform equally
+- **Use when**: Comparing two forecasting methods directly
+
+**Example**:
+```sql
+-- Compare AutoETS vs Naive forecast
+SELECT 
+    TS_MAE(actual, forecast_autoets) AS mae_autoets,
+    TS_MAE(actual, forecast_naive) AS mae_naive,
+    TS_RMAE(actual, forecast_autoets, forecast_naive) AS relative_performance,
+    CASE 
+        WHEN TS_RMAE(actual, forecast_autoets, forecast_naive) < 1.0
+        THEN 'AutoETS is better'
+        ELSE 'Naive is better'
+    END AS winner
+FROM forecast_comparison;
+
+-- Result: 
+-- mae_autoets: 2.0, mae_naive: 4.5, relative_performance: 0.44, winner: 'AutoETS is better'
+```
+
+---
+
+### TS_QUANTILE_LOSS - Quantile Loss (Pinball Loss)
+
+```sql
+TS_QUANTILE_LOSS(actual DOUBLE[], predicted DOUBLE[], q DOUBLE) → DOUBLE
+```
+
+**Formula**: `Σ[(q * (yᵢ - ŷᵢ) if yᵢ > ŷᵢ else (q - 1) * (yᵢ - ŷᵢ))] / n`
+
+**Range**: [0, ∞)
+
+**Interpretation**:
+- Evaluates quantile forecasts (prediction intervals)
+- q = 0.5 gives median (equal weight to over/under-prediction)
+- q = 0.1 gives 10th percentile (penalizes over-prediction more)
+- q = 0.9 gives 90th percentile (penalizes under-prediction more)
+- Lower values indicate better quantile forecasts
+- **Use when**: Evaluating prediction intervals or quantile forecasts
+
+**Example**:
+```sql
+-- Evaluate 10th, 50th (median), and 90th percentile forecasts
+SELECT 
+    TS_QUANTILE_LOSS(actual, lower_bound, 0.1) AS ql_lower,
+    TS_QUANTILE_LOSS(actual, median_forecast, 0.5) AS ql_median,
+    TS_QUANTILE_LOSS(actual, upper_bound, 0.9) AS ql_upper
+FROM forecasts;
+
+-- Perfect median forecast (ql_median = 0.0) means predictions exactly match actuals
+-- Lower ql_lower means better lower bound prediction
+-- Lower ql_upper means better upper bound prediction
+```
+
+---
+
+### TS_MQLOSS - Multi-Quantile Loss
+
+```sql
+TS_MQLOSS(actual DOUBLE[], predicted_quantiles DOUBLE[][], quantiles DOUBLE[]) → DOUBLE
+```
+
+**Formula**: `Average of quantile losses across all quantiles`
+
+**Range**: [0, ∞)
+
+**Interpretation**:
+- Evaluates full predictive distribution
+- Approximates Continuous Ranked Probability Score (CRPS)
+- Measures accuracy of probabilistic forecasts
+- Lower values indicate better distribution forecasts
+- **Use when**: Evaluating full forecast distributions (not just point forecasts)
+
+**Example**:
+```sql
+-- Evaluate a 5-quantile forecast distribution
+WITH distributions AS (
+    SELECT
+        [100.0, 110.0, 120.0, 130.0, 140.0] AS actual,
+        [
+            [90.0, 100.0, 110.0, 120.0, 130.0],    -- q=0.1
+            [95.0, 105.0, 115.0, 125.0, 135.0],    -- q=0.25
+            [100.0, 110.0, 120.0, 130.0, 140.0],   -- q=0.5 (median)
+            [105.0, 115.0, 125.0, 135.0, 145.0],   -- q=0.75
+            [110.0, 120.0, 130.0, 140.0, 150.0]    -- q=0.9
+        ] AS predicted_quantiles,
+        [0.1, 0.25, 0.5, 0.75, 0.9] AS quantiles
+)
+SELECT 
+    TS_MQLOSS(actual, predicted_quantiles, quantiles) AS mqloss,
+    'Lower is better - measures full distribution accuracy' AS interpretation
+FROM distributions;
+
+-- Result: mqloss = 0.9 (good distribution fit)
+```
+
+**Use Case - CRPS Approximation**:
+```sql
+-- Use many quantiles for better CRPS approximation
+WITH dense_quantiles AS (
+    SELECT
+        actual,
+        [q01, q02, q03, ... q99] AS predicted_quantiles,  -- 99 quantiles
+        [0.01, 0.02, 0.03, ... 0.99] AS quantiles
+    FROM forecast_distributions
+)
+SELECT 
+    model_name,
+    TS_MQLOSS(actual, predicted_quantiles, quantiles) AS crps_approximation
+FROM dense_quantiles
+GROUP BY model_name
+ORDER BY crps_approximation;  -- Best model first
+```
+
+---
+
 ## Error Handling
 
 All functions validate inputs:
@@ -640,6 +864,9 @@ SELECT TS_MASE([1, 2], [1, 2]);
 | `TS_MASE()` | actual, predicted, baseline | DOUBLE | vs Baseline |
 | `TS_R2()` | actual, predicted | DOUBLE | Variance explained |
 | `TS_BIAS()` | actual, predicted | DOUBLE | Systematic over/under-forecasting |
+| `TS_RMAE()` | actual, predicted1, predicted2 | DOUBLE | Compare two methods |
+| `TS_QUANTILE_LOSS()` | actual, predicted, q | DOUBLE | Quantile forecast accuracy |
+| `TS_MQLOSS()` | actual, predicted_quantiles[], quantiles[] | DOUBLE | Distribution accuracy (CRPS) |
 
 ---
 

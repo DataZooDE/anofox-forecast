@@ -67,24 +67,66 @@ SELECT
     '========================================' AS separator;
 
 
--- Group 5: ARIMA (2)
-SELECT '16. ARIMA' AS model;
-WITH forecasts AS (
-    SELECT 
-        item_id,
-        TS_FORECAST(timestamp, demand, 'ARIMA', 10, {'p': 1, 'd': 0, 'q': 0}) AS f
-    FROM m5
-    GROUP BY item_id
-)
-SELECT item_id, UNNEST(f.forecast_timestamp) AS timestamp, UNNEST(f.point_forecast) AS arima, UNNEST(f.lower_95) AS arima_lower_95, UNNEST(f.upper_95) AS arima_upper_95 FROM forecasts;
+-- Create train / test split for the last 12 months
+CREATE OR REPLACE TABLE m5_train AS
+SELECT * FROM m5 WHERE timestamp < DATE '2016-05-10';
+
+CREATE OR REPLACE TABLE m5_test AS
+SELECT * FROM m5 WHERE timestamp >= DATE '2016-05-10';
 
 
-SELECT '17. AutoARIMA' AS model;
-WITH forecasts AS (
+-- Perform baseline forecast and evaluate performance
+CREATE OR REPLACE TABLE naive_forecast AS (
+    SELECT *
+    FROM TS_FORECAST_BY('m5_train', item_id, timestamp, demand, 'Naive', 12, MAP{})
+);
+
+-- MAE and Bias of Naive Forecast
+CREATE OR REPLACE TABLE evaluation_results AS (
+SELECT 
+    item_id,
+    TS_MAE(LIST(demand), LIST(point_forecast)) AS naive_mae,
+    TS_BIAS(LIST(demand), LIST(point_forecast)) AS naive_bias
+FROM (
+    -- Join Naive Forecast with Test Data
+    SELECT 
+        m.item_id,
+        m.timestamp,
+        m.demand,
+        n.point_forecast
+    FROM naive_forecast n
+    JOIN m5_test m ON n.item_id = m.item_id AND n.forecast_timestamp = m.timestamp
+)
+GROUP BY item_id
+);
+
+
+-- Theta Forecast
+CREATE OR REPLACE TABLE theta_forecast AS (
+    SELECT *
+    FROM TS_FORECAST_BY('m5_train', item_id, timestamp, demand, 'OptimizedTheta', 12, MAP{'seasonal_period': 12})
+);
+
+
+-- Calculate MAE and Bias of Theta Forecast and append to evaluation_results
+CREATE OR REPLACE TABLE evaluation_results AS (
+    SELECT * FROM evaluation_results
+    UNION ALL
     SELECT 
         item_id,
-        TS_FORECAST(timestamp, demand, 'AutoARIMA', 10, {'seasonal_period': 12}) AS f
-    FROM m5
+        TS_MAE(LIST(demand), LIST(point_forecast)) AS theta_mae,
+        TS_BIAS(LIST(demand), LIST(point_forecast)) AS theta_bias
+    FROM (
+        -- Join Theta Forecast with Test Data
+        SELECT 
+            m.item_id,
+            m.timestamp,
+            m.demand,
+            n.point_forecast
+        FROM theta_forecast n
+        JOIN m5_test m ON n.item_id = m.item_id AND n.forecast_timestamp = m.timestamp
+    )
     GROUP BY item_id
-)
-SELECT item_id, UNNEST(f.forecast_timestamp) AS timestamp, UNNEST(f.point_forecast) AS auto_arima, UNNEST(f.lower_95) AS auto_arima_lower_95, UNNEST(f.upper_95) AS auto_arima_upper_95 FROM forecasts;
+);
+
+SELECT * FROM evaluation_results;
