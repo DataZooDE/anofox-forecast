@@ -1,0 +1,50 @@
+# CMake
+[Bb]uild/
+[Bb]uild*/
+*.db
+*.opendb
+*.sdf
+*.sln
+*.suo
+*.vcxproj*
+*.vcproj*
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+CTestTestfile.cmake
+install_manifest.txt
+Makefile
+project.Makefile
+vcpkg/
+vcpkg_installed/
+Testing
+
+# Visual Studio
+*.pdb
+*.tlog
+*.ilk
+*.obj
+*.pch
+*.user
+*.aps
+*.ncb
+*.vs/
+.vs/
+
+# General
+.ai/
+docs/
+*.swp
+*~
+*.bak
+*.tmp
+
+# macOS
+.DS_Store
+
+# Logs and caches
+*.log
+.cache/
+
+gitinges*

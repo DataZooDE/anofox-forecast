@@ -1,0 +1,10 @@
+{
+    global:
+        # Export only anofoxtime symbols
+        extern "C++" {
+            anofoxtime::*;
+        };
+    local:
+        # Hide everything else including spdlog and fmt
+        *;
+};

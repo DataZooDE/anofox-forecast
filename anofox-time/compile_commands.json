@@ -1,0 +1,164 @@
+[
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time.dir/src/utils/logging.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/src/utils/logging.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/src/utils/logging.cpp",
+  "output": "CMakeFiles/anofox-time.dir/src/utils/logging.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time.dir/src/utils/metrics.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/src/utils/metrics.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/src/utils/metrics.cpp",
+  "output": "CMakeFiles/anofox-time.dir/src/utils/metrics.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time.dir/src/validation.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/src/validation.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/src/validation.cpp",
+  "output": "CMakeFiles/anofox-time.dir/src/validation.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time.dir/src/selectors/auto_selector.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/src/selectors/auto_selector.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/src/selectors/auto_selector.cpp",
+  "output": "CMakeFiles/anofox-time.dir/src/selectors/auto_selector.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time.dir/src/models/garch.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/src/models/garch.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/src/models/garch.cpp",
+  "output": "CMakeFiles/anofox-time.dir/src/models/garch.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time.dir/src/seasonality/detector.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/src/seasonality/detector.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/src/seasonality/detector.cpp",
+  "output": "CMakeFiles/anofox-time.dir/src/seasonality/detector.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time.dir/src/seasonality/analyzer.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/src/seasonality/analyzer.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/src/seasonality/analyzer.cpp",
+  "output": "CMakeFiles/anofox-time.dir/src/seasonality/analyzer.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time.dir/src/seasonality/stl.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/src/seasonality/stl.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/src/seasonality/stl.cpp",
+  "output": "CMakeFiles/anofox-time.dir/src/seasonality/stl.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time.dir/src/models/sma.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/src/models/sma.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/src/models/sma.cpp",
+  "output": "CMakeFiles/anofox-time.dir/src/models/sma.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time.dir/src/models/ses.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/src/models/ses.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/src/models/ses.cpp",
+  "output": "CMakeFiles/anofox-time.dir/src/models/ses.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time.dir/src/models/holt.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/src/models/holt.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/src/models/holt.cpp",
+  "output": "CMakeFiles/anofox-time.dir/src/models/holt.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time.dir/src/detectors/mad.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/src/detectors/mad.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/src/detectors/mad.cpp",
+  "output": "CMakeFiles/anofox-time.dir/src/detectors/mad.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time.dir/src/models/arima.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/src/models/arima.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/src/models/arima.cpp",
+  "output": "CMakeFiles/anofox-time.dir/src/models/arima.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time-tests.dir/tests/main.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/tests/main.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/tests/main.cpp",
+  "output": "CMakeFiles/anofox-time-tests.dir/tests/main.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time-tests.dir/tests/quick/test_api.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/tests/quick/test_api.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/tests/quick/test_api.cpp",
+  "output": "CMakeFiles/anofox-time-tests.dir/tests/quick/test_api.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time-tests.dir/tests/quick/test_builder.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/tests/quick/test_builder.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/tests/quick/test_builder.cpp",
+  "output": "CMakeFiles/anofox-time-tests.dir/tests/quick/test_builder.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time-tests.dir/tests/detectors/test_mad.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/tests/detectors/test_mad.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/tests/detectors/test_mad.cpp",
+  "output": "CMakeFiles/anofox-time-tests.dir/tests/detectors/test_mad.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time-tests.dir/tests/models/test_arima.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/tests/models/test_arima.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/tests/models/test_arima.cpp",
+  "output": "CMakeFiles/anofox-time-tests.dir/tests/models/test_arima.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time-tests.dir/tests/models/test_arima_differencing.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/tests/models/test_arima_differencing.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/tests/models/test_arima_differencing.cpp",
+  "output": "CMakeFiles/anofox-time-tests.dir/tests/models/test_arima_differencing.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time-tests.dir/tests/validation/test_validation.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/tests/validation/test_validation.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/tests/validation/test_validation.cpp",
+  "output": "CMakeFiles/anofox-time-tests.dir/tests/validation/test_validation.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time-tests.dir/tests/selectors/test_auto_selector.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/tests/selectors/test_auto_selector.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/tests/selectors/test_auto_selector.cpp",
+  "output": "CMakeFiles/anofox-time-tests.dir/tests/selectors/test_auto_selector.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time-tests.dir/tests/models/test_garch.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/tests/models/test_garch.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/tests/models/test_garch.cpp",
+  "output": "CMakeFiles/anofox-time-tests.dir/tests/models/test_garch.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time-tests.dir/tests/seasonality/test_detector.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/tests/seasonality/test_detector.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/tests/seasonality/test_detector.cpp",
+  "output": "CMakeFiles/anofox-time-tests.dir/tests/seasonality/test_detector.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time-tests.dir/tests/seasonality/test_stl.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/tests/seasonality/test_stl.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/tests/seasonality/test_stl.cpp",
+  "output": "CMakeFiles/anofox-time-tests.dir/tests/seasonality/test_stl.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time-tests.dir/tests/models/test_sma.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/tests/models/test_sma.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/tests/models/test_sma.cpp",
+  "output": "CMakeFiles/anofox-time-tests.dir/tests/models/test_sma.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time-tests.dir/tests/models/test_ses.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/tests/models/test_ses.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/tests/models/test_ses.cpp",
+  "output": "CMakeFiles/anofox-time-tests.dir/tests/models/test_ses.cpp.o"
+},
+{
+  "directory": "/home/jr/Projects/tmp/tmp/anofox-time/build",
+  "command": "/usr/bin/c++ -DSPDLOG_COMPILED_LIB -DSPDLOG_FMT_EXTERNAL -I/home/jr/Projects/tmp/tmp/anofox-time/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include -isystem /home/jr/Projects/tmp/tmp/anofox-time/vcpkg_installed/x64-linux/include/eigen3 -std=gnu++17 -o CMakeFiles/anofox-time-tests.dir/tests/models/test_holt.cpp.o -c /home/jr/Projects/tmp/tmp/anofox-time/tests/models/test_holt.cpp",
+  "file": "/home/jr/Projects/tmp/tmp/anofox-time/tests/models/test_holt.cpp",
+  "output": "CMakeFiles/anofox-time-tests.dir/tests/models/test_holt.cpp.o"
+}
+]
