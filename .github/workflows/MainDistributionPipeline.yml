@@ -28,3 +28,128 @@ jobs:
       ci_tools_version: v1.4.1
       extension_name: anofox_forecast
       format_checks: 'format;tidy'
+
+  extension-tests:
+    name: Extension Test Suite
+    needs: duckdb-stable-build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        duckdb_arch: ['linux_amd64', 'linux_amd64_gcc4']
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          submodules: 'true'
+
+      - name: Install DuckDB
+        run: |
+          wget https://github.com/duckdb/duckdb/releases/download/v1.4.1/duckdb_cli-linux-amd64.zip
+          unzip duckdb_cli-linux-amd64.zip
+          chmod +x duckdb
+          sudo mv duckdb /usr/local/bin/
+
+      - name: Download extension artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: ${{ matrix.duckdb_arch }}-extensions
+          path: /tmp/extension
+
+      - name: List downloaded files
+        run: |
+          echo "Downloaded extension files:"
+          ls -lah /tmp/extension/
+
+      - name: Run test suite
+        run: |
+          set -e
+          
+          # Find the extension file
+          EXTENSION_PATH=$(find /tmp/extension -name "anofox_forecast.duckdb_extension" | head -1)
+          
+          if [ -z "$EXTENSION_PATH" ]; then
+            echo "Error: Extension file not found!"
+            echo "Available files:"
+            find /tmp/extension -type f
+            exit 1
+          fi
+          
+          echo "Found extension at: $EXTENSION_PATH"
+          
+          # Create a test script that loads the extension and runs all tests
+          cat > run_tests.sh << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          EXTENSION_PATH="$1"
+          TEST_DIR="$2"
+          FAILED_TESTS=0
+          PASSED_TESTS=0
+          
+          echo "========================================"
+          echo "Running anofox-forecast Extension Tests"
+          echo "========================================"
+          echo ""
+          
+          # Function to run a single test file
+          run_test() {
+            local test_file="$1"
+            local test_name=$(basename "$test_file")
+            
+            echo "Running: $test_name"
+            
+            if duckdb :memory: << TEST_EOF
+          INSTALL '$EXTENSION_PATH';
+          LOAD anofox_forecast;
+          .read $test_file
+          TEST_EOF
+            then
+              echo "✓ PASSED: $test_name"
+              PASSED_TESTS=$((PASSED_TESTS + 1))
+              return 0
+            else
+              echo "✗ FAILED: $test_name"
+              FAILED_TESTS=$((FAILED_TESTS + 1))
+              return 1
+            fi
+          }
+          
+          # Run all test files
+          for test_file in $(find "$TEST_DIR" -name "*.test" | sort); do
+            echo "----------------------------------------"
+            run_test "$test_file" || true
+            echo ""
+          done
+          
+          # Summary
+          echo "========================================"
+          echo "Test Summary"
+          echo "========================================"
+          echo "Passed: $PASSED_TESTS"
+          echo "Failed: $FAILED_TESTS"
+          echo "Total:  $((PASSED_TESTS + FAILED_TESTS))"
+          echo ""
+          
+          if [ $FAILED_TESTS -gt 0 ]; then
+            echo "❌ Some tests failed!"
+            exit 1
+          else
+            echo "✅ All tests passed!"
+            exit 0
+          fi
+          EOF
+          
+          chmod +x run_tests.sh
+          ./run_tests.sh "$EXTENSION_PATH" "./test/sql"
+
+      - name: Test results
+        if: always()
+        run: |
+          if [ $? -eq 0 ]; then
+            echo "✅ Extension test suite completed successfully"
+          else
+            echo "❌ Extension test suite failed"
+            exit 1
+          fi
