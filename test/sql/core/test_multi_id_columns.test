@@ -1,0 +1,179 @@
+# name: test/sql/core/test_multi_id_columns.test
+# description: Test forecasting with 3 ID columns (region, store, product)
+# group: [core]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+# Create hierarchical sales data with 3 ID columns
+statement ok
+CREATE TABLE sales_data AS
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date,
+    region,
+    store,
+    product,
+    1000.0 + region_id * 100 + store_id * 10 + product_id + i * 2.0 AS sales
+FROM (
+    SELECT 
+        i,
+        CASE WHEN i % 6 < 2 THEN 'North' ELSE 'South' END AS region,
+        CASE WHEN i % 3 = 0 THEN 'Store_A' WHEN i % 3 = 1 THEN 'Store_B' ELSE 'Store_C' END AS store,
+        CASE WHEN i % 2 = 0 THEN 'Product_X' ELSE 'Product_Y' END AS product,
+        (i % 6 < 2)::INT AS region_id,
+        (i % 3) AS store_id,
+        (i % 2) AS product_id
+    FROM generate_series(1, 60) t(i)
+);
+
+# Test: EDA with 3 ID columns - need to concatenate for single group_col
+# Create composite key
+statement ok
+CREATE TABLE sales_with_composite AS
+SELECT 
+    date,
+    region || '|' || store || '|' || product AS composite_id,
+    region,
+    store,
+    product,
+    sales
+FROM sales_data;
+
+# Test 1: ts_stats with composite ID
+statement ok
+CREATE TABLE stats_result AS
+SELECT * FROM ts_stats(sales_with_composite, composite_id, date, sales);
+
+# Verify multiple series detected
+query I
+SELECT COUNT(*) > 1
+FROM stats_result;
+----
+true
+
+# Test 2: Forecast using TS_FORECAST_AGG with manual GROUP BY on 3 columns
+statement ok
+CREATE TABLE forecasts_3id AS
+SELECT 
+    region,
+    store,
+    product,
+    TS_FORECAST_AGG(date, sales, 'Naive', 7, NULL) AS result
+FROM sales_data
+GROUP BY region, store, product;
+
+# Verify forecasts for multiple combinations
+query I
+SELECT COUNT(*) > 1
+FROM forecasts_3id;
+----
+true
+
+# Verify each forecast has correct horizon
+query I
+SELECT COUNT(*) = (SELECT COUNT(*) FROM forecasts_3id)
+FROM forecasts_3id
+WHERE len(result.point_forecast) = 7;
+----
+true
+
+# Test 3: Using ts_forecast_by with composite ID
+statement ok
+CREATE TABLE forecasts_composite AS
+SELECT *
+FROM ts_forecast_by(
+    sales_with_composite,
+    composite_id,
+    date,
+    sales,
+    'Naive',
+    7,
+    NULL
+);
+
+# Verify forecasts generated
+query I
+SELECT COUNT(*) > 0
+FROM forecasts_composite;
+----
+true
+
+# Test 4: Split composite ID back to original columns
+statement ok
+CREATE TABLE forecasts_split AS
+SELECT 
+    SPLIT_PART(composite_id, '|', 1) AS region,
+    SPLIT_PART(composite_id, '|', 2) AS store,
+    SPLIT_PART(composite_id, '|', 3) AS product,
+    forecast_step,
+    point_forecast,
+    lower,
+    upper
+FROM forecasts_composite;
+
+# Verify we can reconstruct the hierarchy
+query I
+SELECT COUNT(DISTINCT region) > 0 
+   AND COUNT(DISTINCT store) > 0
+   AND COUNT(DISTINCT product) > 0
+FROM forecasts_split;
+----
+true
+
+# Test 5: Aggregate by 2 levels (region + store) after forecasting
+statement ok
+CREATE TABLE regional_forecasts AS
+SELECT 
+    region,
+    store,
+    forecast_step,
+    SUM(point_forecast) AS total_forecast
+FROM forecasts_split
+GROUP BY region, store, forecast_step;
+
+# Verify aggregated forecasts
+query I
+SELECT COUNT(*) > 0
+FROM regional_forecasts;
+----
+true
+
+# Test 6: Data prep with 3 ID columns using composite key
+statement ok
+CREATE TABLE prepped_data AS
+SELECT * FROM ts_fill_nulls_forward(sales_with_composite, composite_id, date, sales);
+
+# Verify data prep works with composite ID
+query I
+SELECT COUNT(*) > 0
+FROM prepped_data;
+----
+true
+
+# Cleanup
+statement ok
+DROP TABLE sales_data;
+
+statement ok
+DROP TABLE sales_with_composite;
+
+statement ok
+DROP TABLE stats_result;
+
+statement ok
+DROP TABLE forecasts_3id;
+
+statement ok
+DROP TABLE forecasts_composite;
+
+statement ok
+DROP TABLE forecasts_split;
+
+statement ok
+DROP TABLE regional_forecasts;
+
+statement ok
+DROP TABLE prepped_data;
+

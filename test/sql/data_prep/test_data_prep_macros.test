@@ -1,0 +1,220 @@
+# name: test/sql/data_prep/test_data_prep_macros.test
+# description: Test data preparation table macros
+# group: [data_prep]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+# Create test data with various issues
+statement ok
+CREATE TABLE raw_data AS
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    'series_1' AS series_id,
+    CASE 
+        WHEN i BETWEEN 5 AND 7 THEN NULL  -- NULL values
+        WHEN i = 15 THEN 500.0            -- Outlier
+        ELSE 100.0 + i * 2.0
+    END AS value
+FROM generate_series(1, 30) t(i)
+WHERE i NOT IN (20, 21)  -- Create gaps (28 rows instead of 30)
+UNION ALL
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    'series_2' AS series_id,
+    50.0 AS value  -- Constant series
+FROM generate_series(1, 20) t(i)
+UNION ALL
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    'series_3' AS series_id,
+    0.0 AS value  -- All zeros
+FROM generate_series(1, 15) t(i);
+
+# Test: TS_FILL_GAPS
+statement ok
+CREATE TABLE filled_gaps AS
+SELECT * FROM ts_fill_gaps(raw_data, series_id, date_col, value);
+
+# Verify gaps filled for series_1 (28 -> 30)
+query I
+SELECT COUNT(*) = 30
+FROM filled_gaps
+WHERE group_col = 'series_1';
+----
+true
+
+# Test: TS_FILL_NULLS_FORWARD
+statement ok
+CREATE TABLE filled_forward AS
+SELECT * FROM ts_fill_nulls_forward(raw_data, series_id, date_col, value);
+
+# Verify total NULLs are reduced (originally 3 NULLs in series_1, 0 in others)
+query I
+SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END)::INT < 3
+FROM filled_forward;
+----
+true
+
+# Test: TS_FILL_NULLS_BACKWARD
+statement ok
+CREATE TABLE filled_backward AS
+SELECT * FROM ts_fill_nulls_backward(raw_data, series_id, date_col, value);
+
+# Verify total NULLs are reduced
+query I
+SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END)::INT < 3
+FROM filled_backward;
+----
+true
+
+# Test: TS_FILL_NULLS_MEAN
+statement ok
+CREATE TABLE filled_mean AS
+SELECT * FROM ts_fill_nulls_mean(raw_data, series_id, date_col, value);
+
+# Verify all NULLs are filled with mean
+query I
+SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) = 0
+FROM filled_mean;
+----
+true
+
+# Test: TS_DROP_CONSTANT
+statement ok
+CREATE TABLE no_constants AS
+SELECT * FROM ts_drop_constant(raw_data, series_id, value);
+
+# Verify constant series removed (series_2 and series_3 both constant)
+query I
+SELECT COUNT(DISTINCT series_id) = 1
+FROM no_constants;
+----
+true
+
+# Test: TS_DROP_ZEROS
+statement ok
+CREATE TABLE no_zeros AS
+SELECT * FROM ts_drop_zeros(raw_data, series_id, value);
+
+# Verify series_3 (all zeros) is removed
+query I
+SELECT COUNT(DISTINCT series_id) = 2
+FROM no_zeros;
+----
+true
+
+# Test: TS_DROP_SHORT
+statement ok
+CREATE TABLE no_short AS
+SELECT * FROM ts_drop_short(raw_data, series_id, 20);
+
+# Verify series_3 (15 rows) is removed
+query I
+SELECT COUNT(DISTINCT series_id) = 2
+FROM no_short;
+----
+true
+
+# Test: TS_DROP_LEADING_ZEROS
+statement ok
+CREATE TABLE test_leading AS
+SELECT date_col, 'lead_zeros' AS sid, CASE WHEN i <= 3 THEN 0.0 ELSE i::DOUBLE END AS val
+FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM generate_series(1, 10) t(i));
+
+statement ok
+CREATE TABLE no_leading AS
+SELECT * FROM ts_drop_leading_zeros(test_leading, sid, date_col, val);
+
+# Verify first 3 zeros removed (10 -> 7)
+query I
+SELECT COUNT(*) = 7
+FROM no_leading;
+----
+true
+
+# Test: TS_DROP_TRAILING_ZEROS
+statement ok
+CREATE TABLE test_trailing AS
+SELECT date_col, 'trail_zeros' AS sid, CASE WHEN i >= 8 THEN 0.0 ELSE i::DOUBLE END AS val
+FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM generate_series(1, 10) t(i));
+
+statement ok
+CREATE TABLE no_trailing AS
+SELECT * FROM ts_drop_trailing_zeros(test_trailing, sid, date_col, val);
+
+# Verify last 3 zeros removed (10 -> 7)
+query I
+SELECT COUNT(*) = 7
+FROM no_trailing;
+----
+true
+
+# Test: Two-step workflow (fill then drop)
+statement ok
+CREATE TABLE filled_data AS
+SELECT * FROM ts_fill_gaps(raw_data, series_id, date_col, value);
+
+statement ok
+CREATE TABLE clean_data AS
+SELECT * FROM ts_fill_nulls_forward(filled_data, group_col, date_col, value_col);
+
+# Verify workflow produces clean data
+query I
+SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) = 0
+FROM clean_data;
+----
+true
+
+# Verify all series present
+query I
+SELECT COUNT(DISTINCT group_col) = 3
+FROM clean_data;
+----
+true
+
+# Cleanup
+statement ok
+DROP TABLE raw_data;
+
+statement ok
+DROP TABLE filled_gaps;
+
+statement ok
+DROP TABLE filled_forward;
+
+statement ok
+DROP TABLE filled_backward;
+
+statement ok
+DROP TABLE filled_mean;
+
+statement ok
+DROP TABLE no_constants;
+
+statement ok
+DROP TABLE no_zeros;
+
+statement ok
+DROP TABLE no_short;
+
+statement ok
+DROP TABLE test_leading;
+
+statement ok
+DROP TABLE no_leading;
+
+statement ok
+DROP TABLE test_trailing;
+
+statement ok
+DROP TABLE no_trailing;
+
+statement ok
+DROP TABLE filled_data;
+
+statement ok
+DROP TABLE clean_data;
+

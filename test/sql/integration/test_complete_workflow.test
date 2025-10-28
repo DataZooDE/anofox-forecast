@@ -1,0 +1,164 @@
+# name: test/sql/integration/test_complete_workflow.test
+# description: Test complete workflow: EDA -> Data Prep -> Forecast
+# group: [integration]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+# Create realistic raw data with quality issues
+statement ok
+CREATE TABLE sales_data AS
+SELECT 
+    ('2023-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date,
+    'product_A' AS product_id,
+    CASE 
+        WHEN i <= 60 THEN 1000.0 + i * 5.0 + 100.0 * SIN(i * 2 * PI() / 7)
+        WHEN i BETWEEN 61 AND 65 THEN NULL
+        ELSE 1000.0 + i * 5.0 + 100.0 * SIN(i * 2 * PI() / 7)
+    END AS sales
+FROM generate_series(1, 100) t(i)
+WHERE i NOT IN (70, 71)  -- Missing days
+UNION ALL
+SELECT 
+    ('2023-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date,
+    'product_B' AS product_id,
+    500.0 + i * 3.0 + 50.0 * COS(i * 2 * PI() / 7) AS sales
+FROM generate_series(1, 100) t(i);
+
+# STEP 1: Exploratory Data Analysis
+statement ok
+CREATE TABLE eda_results AS
+SELECT * FROM ts_stats(sales_data, product_id, date, sales);
+
+# Verify EDA detected both products
+query I
+SELECT COUNT(*) = 2
+FROM eda_results;
+----
+true
+
+# Verify series_1 has issues (NULLs, gaps)
+query II
+SELECT n_null > 0, length < 100
+FROM eda_results
+WHERE series_id = 'product_A';
+----
+true	true
+
+# Verify product_B is clean
+query II
+SELECT n_null = 0, length = 100
+FROM eda_results
+WHERE series_id = 'product_B';
+----
+true	true
+
+# STEP 2: Data Preparation
+statement ok
+CREATE TABLE clean_sales AS
+WITH step1 AS (
+    SELECT * FROM ts_fill_gaps(sales_data, product_id, date, sales)
+),
+step2 AS (
+    SELECT * FROM ts_fill_nulls_forward(step1, group_col, date_col, value_col)
+)
+SELECT * FROM step2
+ORDER BY group_col, date_col;
+
+# Verify clean data has no NULLs
+query I
+SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) = 0
+FROM clean_sales;
+----
+true
+
+# Verify both products have 100 observations
+query I
+SELECT COUNT(*) = 100
+FROM clean_sales
+WHERE group_col = 'product_A';
+----
+true
+
+# STEP 3: Forecasting
+statement ok
+CREATE TABLE forecasts AS
+SELECT *
+FROM ts_forecast_by(
+    clean_sales,
+    group_col,
+    date_col,
+    value_col,
+    'AutoETS',
+    14,
+    {'season_length': 7, 'return_insample': true, 'confidence_level': 0.95}
+);
+
+# Verify forecasts for both products
+query I
+SELECT COUNT(DISTINCT group_col) = 2
+FROM forecasts;
+----
+true
+
+# Verify 14-day forecast (14 steps × 2 products = 28 rows)
+query I
+SELECT COUNT(*) = 28
+FROM forecasts;
+----
+true
+
+# Verify in-sample fitted values available
+query I
+SELECT insample_fitted IS NOT NULL AND len(insample_fitted) = 100
+FROM forecasts
+WHERE forecast_step = 1 AND group_col = 'product_A';
+----
+true
+
+# Verify confidence level
+query R
+SELECT DISTINCT confidence_level
+FROM forecasts;
+----
+0.950000
+
+# STEP 4: Final Report
+statement ok
+CREATE TABLE final_report AS
+SELECT 
+    e.series_id AS product_id,
+    e.length AS historical_points,
+    e.mean,
+    e.n_null AS nulls_in_raw,
+    f.confidence_level,
+    f.model_name
+FROM eda_results e
+JOIN (SELECT DISTINCT group_col, confidence_level, model_name FROM forecasts) f 
+ON e.series_id = f.group_col;
+
+# Verify final report
+query I
+SELECT COUNT(*) = 2
+FROM final_report;
+----
+true
+
+# Cleanup
+statement ok
+DROP TABLE sales_data;
+
+statement ok
+DROP TABLE eda_results;
+
+statement ok
+DROP TABLE clean_sales;
+
+statement ok
+DROP TABLE forecasts;
+
+statement ok
+DROP TABLE final_report;
+

@@ -1,0 +1,104 @@
+# name: test/sql/eda/test_eda_macros.test
+# description: Test EDA (Exploratory Data Analysis) table macros
+# group: [eda]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+# Create diverse test data
+statement ok
+CREATE TABLE eda_test_data AS
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    'series_1' AS series_id,
+    CASE 
+        WHEN i <= 10 THEN 100.0 + i * 2.0
+        WHEN i BETWEEN 11 AND 15 THEN NULL
+        WHEN i BETWEEN 16 AND 20 THEN 0.0
+        ELSE 100.0 + i * 2.0
+    END AS value
+FROM generate_series(1, 30) t(i)
+UNION ALL
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    'series_2' AS series_id,
+    50.0 AS value  -- Constant series
+FROM generate_series(1, 20) t(i);
+
+# Test: TS_STATS - Basic statistics
+statement ok
+CREATE TABLE stats_result AS
+SELECT * FROM ts_stats(eda_test_data, series_id, date_col, value);
+
+# Verify stats for both series
+query I
+SELECT COUNT(DISTINCT series_id) = 2
+FROM stats_result;
+----
+true
+
+# Verify series_1 has expected stats
+query II
+SELECT series_id = 'series_1', length = 30
+FROM stats_result
+WHERE series_id = 'series_1';
+----
+true	true
+
+# Verify series_1 has NULLs and zeros detected
+query II
+SELECT n_null > 0, n_zeros > 0
+FROM stats_result
+WHERE series_id = 'series_1';
+----
+true	true
+
+# Verify series_2 is flagged as constant
+query I
+SELECT is_constant = true
+FROM stats_result
+WHERE series_id = 'series_2';
+----
+true
+
+# Test: TS_DETECT_SEASONALITY_ALL
+statement ok
+CREATE TABLE seasonality_result AS
+SELECT * FROM ts_detect_seasonality_all(eda_test_data, series_id, date_col, value);
+
+# Verify seasonality detection ran for both series
+query I
+SELECT COUNT(*) = 2
+FROM seasonality_result;
+----
+true
+
+# Test: Workflow - stats then filtering
+statement ok
+CREATE TABLE quality_series AS
+SELECT series_id
+FROM stats_result
+WHERE is_constant = false AND n_null = 0;
+
+# Verify only non-constant, non-null series selected
+query I
+SELECT COUNT(*) <= 1
+FROM quality_series;
+----
+true
+
+# Cleanup
+statement ok
+DROP TABLE eda_test_data;
+
+statement ok
+DROP TABLE stats_result;
+
+statement ok
+DROP TABLE seasonality_result;
+
+statement ok
+DROP TABLE quality_series;
+
