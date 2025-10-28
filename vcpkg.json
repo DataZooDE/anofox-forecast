@@ -1,6 +1,7 @@
 {
         "dependencies": [
-                "openssl"
+                "openssl",
+                "eigen3"
         ],
         "vcpkg-configuration": {
                 "overlay-ports": [
