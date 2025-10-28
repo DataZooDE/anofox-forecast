@@ -70,7 +70,9 @@ public:
 	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateHolt(double alpha, double beta);
 	static std::unique_ptr<::anofoxtime::models::IForecaster>
 	CreateHoltWinters(int seasonal_period, bool multiplicative, double alpha, double beta, double gamma);
+#ifdef HAVE_EIGEN3
 	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateAutoARIMA(int seasonal_period);
+#endif
 	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateETS(int error_type, int trend_type, int season_type,
 	                                                                    int season_length, double alpha, double beta,
 	                                                                    double gamma, double phi);
@@ -88,9 +90,11 @@ public:
 	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateRandomWalkWithDrift();
 	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateSESOptimized();
 
+#ifdef HAVE_EIGEN3
 	// ARIMA (manual configuration)
 	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateARIMA(int p, int d, int q, int P, int D, int Q,
 	                                                                      int s, bool include_intercept);
+#endif
 
 	// TBATS
 	static std::unique_ptr<::anofoxtime::models::IForecaster>

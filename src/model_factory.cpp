@@ -51,11 +51,15 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		// std::cerr << "[DEBUG] Creating HoltWinters model with period: " << seasonal_period
 		//           << ", multiplicative: " << multiplicative << std::endl;
 		return AnofoxTimeWrapper::CreateHoltWinters(seasonal_period, multiplicative, alpha, beta, gamma);
-	} else if (model_name == "AutoARIMA") {
+	}
+#ifdef HAVE_EIGEN3
+	else if (model_name == "AutoARIMA") {
 		int seasonal_period = GetParam<int>(model_params, "seasonal_period", 0);
 		// std::cerr << "[DEBUG] Creating AutoARIMA model with period: " << seasonal_period << std::endl;
 		return AnofoxTimeWrapper::CreateAutoARIMA(seasonal_period);
-	} else if (model_name == "ETS") {
+	}
+#endif
+	else if (model_name == "ETS") {
 		int error_type = GetParam<int>(model_params, "error_type", 0);   // 0=Additive
 		int trend_type = GetParam<int>(model_params, "trend_type", 0);   // 0=None
 		int season_type = GetParam<int>(model_params, "season_type", 0); // 0=None
@@ -106,6 +110,7 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 	} else if (model_name == "SESOptimized") {
 		return AnofoxTimeWrapper::CreateSESOptimized();
 	}
+#ifdef HAVE_EIGEN3
 	// ARIMA manual
 	else if (model_name == "ARIMA") {
 		int p = GetParam<int>(model_params, "p", 1);
@@ -118,6 +123,7 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		bool include_intercept = GetParam<int>(model_params, "include_intercept", 1) != 0;
 		return AnofoxTimeWrapper::CreateARIMA(p, d, q, P, D, Q, s, include_intercept);
 	}
+#endif
 	// TBATS
 	else if (model_name == "TBATS") {
 		std::vector<int> seasonal_periods = GetArrayParam(model_params, "seasonal_periods", {12});
@@ -188,22 +194,25 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 }
 
 std::vector<std::string> ModelFactory::GetSupportedModels() {
-	return {// Basic
-	        "Naive", "SMA", "SeasonalNaive", "SES", "SESOptimized", "RandomWalkWithDrift",
-	        // Holt
-	        "Holt", "HoltWinters",
-	        // Theta variants
-	        "Theta", "OptimizedTheta", "DynamicTheta", "DynamicOptimizedTheta",
-	        // Seasonal
-	        "SeasonalES", "SeasonalESOptimized", "SeasonalWindowAverage",
-	        // ARIMA
-	        "ARIMA", "AutoARIMA",
-	        // State space
-	        "ETS", "AutoETS",
-	        // Multiple seasonality
-	        "MFLES", "AutoMFLES", "MSTL", "AutoMSTL", "TBATS", "AutoTBATS",
-	        // Intermittent demand
-	        "CrostonClassic", "CrostonOptimized", "CrostonSBA", "ADIDA", "IMAPA", "TSB"};
+	std::vector<std::string> models = {// Basic
+	                                   "Naive", "SMA", "SeasonalNaive", "SES", "SESOptimized", "RandomWalkWithDrift",
+	                                   // Holt
+	                                   "Holt", "HoltWinters",
+	                                   // Theta variants
+	                                   "Theta", "OptimizedTheta", "DynamicTheta", "DynamicOptimizedTheta",
+	                                   // Seasonal
+	                                   "SeasonalES", "SeasonalESOptimized", "SeasonalWindowAverage",
+#ifdef HAVE_EIGEN3
+	                                   // ARIMA (requires Eigen3)
+	                                   "ARIMA", "AutoARIMA",
+#endif
+	                                   // State space
+	                                   "ETS", "AutoETS",
+	                                   // Multiple seasonality
+	                                   "MFLES", "AutoMFLES", "MSTL", "AutoMSTL", "TBATS", "AutoTBATS",
+	                                   // Intermittent demand
+	                                   "CrostonClassic", "CrostonOptimized", "CrostonSBA", "ADIDA", "IMAPA", "TSB"};
+	return models;
 }
 
 void ModelFactory::ValidateModelParams(const std::string &model_name, const Value &model_params) {
@@ -293,7 +302,9 @@ void ModelFactory::ValidateModelParams(const std::string &model_name, const Valu
 				throw InvalidInputException("HoltWinters gamma must be in [0, 1], got: " + std::to_string(gamma));
 			}
 		}
-	} else if (model_name == "AutoARIMA") {
+	}
+#ifdef HAVE_EIGEN3
+	else if (model_name == "AutoARIMA") {
 		// seasonal_period is optional, defaults to 0 (non-seasonal)
 		if (HasParam(model_params, "seasonal_period")) {
 			int period = GetParam<int>(model_params, "seasonal_period", 0);
@@ -302,7 +313,9 @@ void ModelFactory::ValidateModelParams(const std::string &model_name, const Valu
 				                            std::to_string(period));
 			}
 		}
-	} else if (model_name == "ETS") {
+	}
+#endif
+	else if (model_name == "ETS") {
 		// All parameters are optional with defaults
 		if (HasParam(model_params, "error_type")) {
 			int error_type = GetParam<int>(model_params, "error_type", 0);
@@ -424,6 +437,7 @@ void ModelFactory::ValidateModelParams(const std::string &model_name, const Valu
 	else if (model_name == "RandomWalkWithDrift" || model_name == "SESOptimized") {
 		// No parameters
 	}
+#ifdef HAVE_EIGEN3
 	// ARIMA manual
 	else if (model_name == "ARIMA") {
 		// All parameters are optional with defaults, validate ranges
@@ -437,6 +451,7 @@ void ModelFactory::ValidateModelParams(const std::string &model_name, const Valu
 			throw InvalidInputException("ARIMA q must be non-negative");
 		}
 	}
+#endif
 	// TBATS
 	else if (model_name == "TBATS") {
 		// All parameters optional

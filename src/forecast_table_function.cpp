@@ -162,8 +162,8 @@ OperatorResultType ForecastInOutFunction(ExecutionContext &context, TableFunctio
 				state.values.push_back(val.GetValue<double>());
 
 				if (i < 3) { // Log first few for debugging
-					// std::cerr << "[DEBUG]   Row " << i << ": ts=" << ts_val.ToString()
-					//           << ", val=" << val.ToString() << std::endl;
+					         // std::cerr << "[DEBUG]   Row " << i << ": ts=" << ts_val.ToString()
+					         //           << ", val=" << val.ToString() << std::endl;
 				}
 			}
 		}

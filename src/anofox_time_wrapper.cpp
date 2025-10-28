@@ -91,10 +91,12 @@ std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateHolt
 	return std::make_unique<::anofoxtime::models::AutoETS>(seasonal_period, model);
 }
 
+#ifdef HAVE_EIGEN3
 std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateAutoARIMA(int seasonal_period) {
 	// std::cerr << "[DEBUG] AnofoxTimeWrapper::CreateAutoARIMA with period: " << seasonal_period << std::endl;
 	return std::make_unique<::anofoxtime::models::AutoARIMA>(seasonal_period);
 }
+#endif
 
 std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateETS(int error_type, int trend_type,
                                                                                 int season_type, int season_length,
@@ -261,6 +263,7 @@ std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateSESO
 	return std::make_unique<::anofoxtime::models::SESOptimized>();
 }
 
+#ifdef HAVE_EIGEN3
 // ARIMA (manual configuration)
 std::unique_ptr<::anofoxtime::models::IForecaster>
 AnofoxTimeWrapper::CreateARIMA(int p, int d, int q, int P, int D, int Q, int s, bool include_intercept) {
@@ -275,6 +278,7 @@ AnofoxTimeWrapper::CreateARIMA(int p, int d, int q, int P, int D, int Q, int s, 
 	    .withIntercept(include_intercept)
 	    .build();
 }
+#endif
 
 // TBATS
 std::unique_ptr<::anofoxtime::models::IForecaster>

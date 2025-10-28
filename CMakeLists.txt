@@ -18,13 +18,21 @@ endif()
 
 # DuckDB's extension distribution supports vcpkg
 find_package(OpenSSL REQUIRED)
-find_package(Eigen3 REQUIRED)
 find_package(Threads REQUIRED)
+
+# Make Eigen3 optional for clang-tidy (which doesn't use vcpkg)
+if(CLANG_TIDY)
+    find_package(Eigen3 QUIET)
+else()
+    find_package(Eigen3 REQUIRED)
+endif()
 
 # Include anofox-time headers
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/anofox-time/include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/anofox-time/third_party/LBFGSpp/include)
-include_directories(${EIGEN3_INCLUDE_DIR})
+if(Eigen3_FOUND)
+    include_directories(${EIGEN3_INCLUDE_DIR})
+endif()
 
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
 set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
@@ -54,9 +62,6 @@ set(ANOFOX_TIME_SOURCES
     anofox-time/src/models/seasonal_es.cpp
     anofox-time/src/models/seasonal_es_optimized.cpp
     anofox-time/src/models/seasonal_window_average.cpp
-    # ARIMA
-    anofox-time/src/models/arima.cpp
-    anofox-time/src/models/auto_arima.cpp
     # State space
     anofox-time/src/models/ets.cpp
     anofox-time/src/models/ets_core_statsforecast.cpp
@@ -138,18 +143,27 @@ endif()
 
 # Link required libraries (no pre-built anofox-time needed)
 target_link_libraries(${EXTENSION_NAME} 
-    Eigen3::Eigen
     Threads::Threads
     OpenSSL::SSL 
     OpenSSL::Crypto
 )
 
 target_link_libraries(${LOADABLE_EXTENSION_NAME} 
-    Eigen3::Eigen
     Threads::Threads
     OpenSSL::SSL 
     OpenSSL::Crypto
 )
+
+# Link Eigen3 if available and add compile definition
+if(Eigen3_FOUND)
+    target_link_libraries(${EXTENSION_NAME} Eigen3::Eigen)
+    target_link_libraries(${LOADABLE_EXTENSION_NAME} Eigen3::Eigen)
+    target_compile_definitions(${EXTENSION_NAME} PRIVATE HAVE_EIGEN3)
+    target_compile_definitions(${LOADABLE_EXTENSION_NAME} PRIVATE HAVE_EIGEN3)
+    message(STATUS "Eigen3 found - ARIMA models enabled")
+else()
+    message(STATUS "Eigen3 not found - ARIMA models disabled (ok for tidy-check)")
+endif()
 
 install(
   TARGETS ${EXTENSION_NAME}
