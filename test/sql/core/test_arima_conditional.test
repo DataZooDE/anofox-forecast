@@ -1,6 +1,6 @@
 # name: test/sql/core/test_arima_conditional.test
 # description: Test ARIMA models (requires Eigen3)
-# group: [core]
+# group: [anofox_forecast]
 
 # NOTE: This test will fail if Eigen3 is not available
 # ARIMA and AutoARIMA models are only available when compiled with Eigen3
