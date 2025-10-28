@@ -22,7 +22,7 @@ SELECT
     result.confidence_level >= 0.89,
     result.confidence_level <= 0.91,
     result.confidence_level = 0.90
-FROM (SELECT TS_FORECAST(value, 'Naive', 5, {}) AS result FROM test_series);
+FROM (SELECT TS_FORECAST(value, 'Naive', 5, NULL) AS result FROM test_series);
 ----
 0.900000	true	true	true
 

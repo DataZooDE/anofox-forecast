@@ -21,7 +21,7 @@ FROM generate_series(1, 50) t(i);
 # Naive
 query I
 SELECT len(result.forecast) = 12 
-FROM (SELECT TS_FORECAST(value, 'Naive', 12, {}) AS result FROM test_series);
+FROM (SELECT TS_FORECAST(value, 'Naive', 12, NULL) AS result FROM test_series);
 ----
 true
 
@@ -49,14 +49,14 @@ true
 # SESOptimized
 query I
 SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'SESOptimized', 12, {}) AS result FROM test_series);
+FROM (SELECT TS_FORECAST(value, 'SESOptimized', 12, NULL) AS result FROM test_series);
 ----
 true
 
 # RandomWalkWithDrift
 query I
 SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'RandomWalkWithDrift', 12, {}) AS result FROM test_series);
+FROM (SELECT TS_FORECAST(value, 'RandomWalkWithDrift', 12, NULL) AS result FROM test_series);
 ----
 true
 
@@ -202,42 +202,42 @@ FROM generate_series(1, 100) t(i);
 # CrostonClassic
 query I
 SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'CrostonClassic', 12, {}) AS result FROM intermittent_series);
+FROM (SELECT TS_FORECAST(value, 'CrostonClassic', 12, NULL) AS result FROM intermittent_series);
 ----
 true
 
 # CrostonOptimized
 query I
 SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'CrostonOptimized', 12, {}) AS result FROM intermittent_series);
+FROM (SELECT TS_FORECAST(value, 'CrostonOptimized', 12, NULL) AS result FROM intermittent_series);
 ----
 true
 
 # CrostonSBA
 query I
 SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'CrostonSBA', 12, {}) AS result FROM intermittent_series);
+FROM (SELECT TS_FORECAST(value, 'CrostonSBA', 12, NULL) AS result FROM intermittent_series);
 ----
 true
 
 # ADIDA
 query I
 SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'ADIDA', 12, {}) AS result FROM intermittent_series);
+FROM (SELECT TS_FORECAST(value, 'ADIDA', 12, NULL) AS result FROM intermittent_series);
 ----
 true
 
 # IMAPA
 query I
 SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'IMAPA', 12, {}) AS result FROM intermittent_series);
+FROM (SELECT TS_FORECAST(value, 'IMAPA', 12, NULL) AS result FROM intermittent_series);
 ----
 true
 
 # TSB
 query I
 SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'TSB', 12, {}) AS result FROM intermittent_series);
+FROM (SELECT TS_FORECAST(value, 'TSB', 12, NULL) AS result FROM intermittent_series);
 ----
 true
 

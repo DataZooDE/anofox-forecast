@@ -19,7 +19,7 @@ FROM generate_series(1, 20) t(i);
 # insample_fitted should be empty
 query I
 SELECT len(result.insample_fitted) = 0
-FROM (SELECT TS_FORECAST(value, 'Naive', 5, {}) AS result FROM test_series);
+FROM (SELECT TS_FORECAST(value, 'Naive', 5, NULL) AS result FROM test_series);
 ----
 true
 

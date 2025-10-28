@@ -9,20 +9,20 @@ LOAD anofox_forecast;
 
 # Test: Invalid model name
 statement error
-SELECT TS_FORECAST(value, 'NonExistentModel', 5, {})
+SELECT TS_FORECAST(value, 'NonExistentModel', 5, NULL)
 FROM (VALUES (100.0), (101.0), (102.0)) t(value);
 ----
 Unknown model
 
 # Test: Negative horizon
 statement error
-SELECT TS_FORECAST(value, 'Naive', -5, {})
+SELECT TS_FORECAST(value, 'Naive', -5, NULL)
 FROM (VALUES (100.0), (101.0), (102.0)) t(value);
 ----
 
 # Test: Zero horizon  
 statement error
-SELECT TS_FORECAST(value, 'Naive', 0, {})
+SELECT TS_FORECAST(value, 'Naive', 0, NULL)
 FROM (VALUES (100.0), (101.0), (102.0)) t(value);
 ----
 
@@ -40,14 +40,14 @@ FROM (VALUES (100.0), (101.0), (102.0)) t(value);
 
 # Test: Missing required parameter - SeasonalNaive without seasonal_period
 statement error
-SELECT TS_FORECAST(value, 'SeasonalNaive', 5, {})
+SELECT TS_FORECAST(value, 'SeasonalNaive', 5, NULL)
 FROM (VALUES (100.0), (101.0), (102.0)) t(value);
 ----
 seasonal_period
 
 # Test: Missing required parameter - HoltWinters without seasonal_period
 statement error
-SELECT TS_FORECAST(value, 'HoltWinters', 5, {})
+SELECT TS_FORECAST(value, 'HoltWinters', 5, NULL)
 FROM (VALUES (100.0), (101.0), (102.0)) t(value);
 ----
 seasonal_period
@@ -84,19 +84,19 @@ FROM (VALUES (100.0), (101.0), (102.0)) t(value);
 
 # Test: Insufficient data for model (single point)
 statement error
-SELECT TS_FORECAST(value, 'Naive', 5, {})
+SELECT TS_FORECAST(value, 'Naive', 5, NULL)
 FROM (VALUES (100.0)) t(value);
 ----
 
 # Test: All NULL values
 statement error
-SELECT TS_FORECAST(value, 'Naive', 5, {})
+SELECT TS_FORECAST(value, 'Naive', 5, NULL)
 FROM (VALUES (NULL), (NULL), (NULL)) t(value);
 ----
 
 # Test: Empty result set
 statement error
-SELECT TS_FORECAST(value, 'Naive', 5, {})
+SELECT TS_FORECAST(value, 'Naive', 5, NULL)
 FROM (SELECT NULL::DOUBLE AS value WHERE FALSE);
 ----
 
@@ -105,7 +105,7 @@ FROM (SELECT NULL::DOUBLE AS value WHERE FALSE);
 query I
 SELECT len(result.forecast) = 1000
 FROM (
-    SELECT TS_FORECAST(value, 'Naive', 1000, {}) AS result
+    SELECT TS_FORECAST(value, 'Naive', 1000, NULL) AS result
     FROM (SELECT i::DOUBLE AS value FROM generate_series(1, 100) t(i))
 );
 ----
@@ -116,7 +116,7 @@ true
 query I
 SELECT len(result.forecast) = 5
 FROM (
-    SELECT TS_FORECAST(value, 'Naive', 5, {}) AS result
+    SELECT TS_FORECAST(value, 'Naive', 5, NULL) AS result
     FROM (VALUES (100.0), (101.0), (102.0)) t(value)
 );
 ----
@@ -126,7 +126,7 @@ true
 query I
 SELECT len(result.forecast) = 5
 FROM (
-    SELECT TS_FORECAST(value, 'Naive', 5, {}) AS result
+    SELECT TS_FORECAST(value, 'Naive', 5, NULL) AS result
     FROM (SELECT 100.0 AS value FROM generate_series(1, 20))
 );
 ----
@@ -136,7 +136,7 @@ true
 query I
 SELECT len(result.forecast) = 5
 FROM (
-    SELECT TS_FORECAST(value, 'Naive', 5, {}) AS result
+    SELECT TS_FORECAST(value, 'Naive', 5, NULL) AS result
     FROM (VALUES (1e10), (1e10 + 1), (1e10 + 2), (1e10 + 3)) t(value)
 );
 ----
@@ -146,7 +146,7 @@ true
 query I
 SELECT len(result.forecast) = 5
 FROM (
-    SELECT TS_FORECAST(value, 'Naive', 5, {}) AS result
+    SELECT TS_FORECAST(value, 'Naive', 5, NULL) AS result
     FROM (VALUES (0.0001), (0.0002), (0.0003), (0.0004)) t(value)
 );
 ----
@@ -156,7 +156,7 @@ true
 query I
 SELECT len(result.forecast) = 5
 FROM (
-    SELECT TS_FORECAST(value, 'Naive', 5, {}) AS result
+    SELECT TS_FORECAST(value, 'Naive', 5, NULL) AS result
     FROM (VALUES (-100.0), (-99.0), (-98.0), (-97.0)) t(value)
 );
 ----
@@ -166,7 +166,7 @@ true
 query I
 SELECT len(result.forecast) = 5
 FROM (
-    SELECT TS_FORECAST(value, 'Naive', 5, {}) AS result
+    SELECT TS_FORECAST(value, 'Naive', 5, NULL) AS result
     FROM (VALUES (-10.0), (5.0), (-3.0), (8.0), (-2.0)) t(value)
 );
 ----
@@ -223,7 +223,7 @@ FROM generate_series(1, 20) t(i);
 # This should either work (by handling NULLs) or fail gracefully
 statement maybe
 SELECT len(result.forecast) = 5
-FROM (SELECT TS_FORECAST(value, 'Naive', 5, {}) AS result FROM series_with_nulls);
+FROM (SELECT TS_FORECAST(value, 'Naive', 5, NULL) AS result FROM series_with_nulls);
 
 # Test: Seasonal model with non-seasonal data (period mismatch)
 # Should still work, just might not be optimal
