@@ -1,6 +1,6 @@
 # name: test/sql/eda/test_eda_macros.test
 # description: Test EDA (Exploratory Data Analysis) table macros
-# group: [anofox_forecast]
+# group: [eda]
 
 require anofox_forecast
 

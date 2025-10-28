@@ -1,6 +1,6 @@
 # name: test/sql/data_prep/test_data_prep_macros.test
 # description: Test data preparation table macros
-# group: [anofox_forecast]
+# group: [data_prep]
 
 require anofox_forecast
 

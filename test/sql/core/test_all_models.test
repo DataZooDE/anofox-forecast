@@ -1,6 +1,6 @@
 # name: test/sql/core/test_all_models.test
 # description: Test that all forecasting models can be created and produce forecasts
-# group: [anofox_forecast]
+# group: [core]
 
 require anofox_forecast
 

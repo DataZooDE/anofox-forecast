@@ -1,6 +1,6 @@
 # name: test/sql/integration/test_complete_workflow.test
 # description: Test complete workflow: EDA -> Data Prep -> Forecast
-# group: [anofox_forecast]
+# group: [integration]
 
 require anofox_forecast
 

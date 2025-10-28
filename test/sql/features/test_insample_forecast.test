@@ -1,6 +1,6 @@
 # name: test/sql/features/test_insample_forecast.test
 # description: Test in-sample fitted values functionality
-# group: [anofox_forecast]
+# group: [features]
 
 require anofox_forecast
 

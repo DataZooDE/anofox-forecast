@@ -1,6 +1,6 @@
 # name: test/sql/edge_cases/test_error_handling.test
 # description: Test edge cases and error handling
-# group: [anofox_forecast]
+# group: [edge_cases]
 
 require anofox_forecast
 

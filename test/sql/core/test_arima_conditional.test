@@ -1,6 +1,6 @@
 # name: test/sql/core/test_arima_conditional.test
 # description: Test ARIMA models (conditional on Eigen3 availability)
-# group: [anofox_forecast]
+# group: [core]
 
 require anofox_forecast
 

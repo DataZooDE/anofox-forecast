@@ -1,6 +1,6 @@
 # name: test/sql/features/test_confidence_level.test
 # description: Test confidence level functionality
-# group: [anofox_forecast]
+# group: [features]
 
 require anofox_forecast
 
