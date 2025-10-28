@@ -1,0 +1,300 @@
+# name: test/sql/data_prep/test_data_prep_macros.test
+# description: Test data preparation table macros
+# group: [anofox_forecast]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+# Create test data with various issues to be fixed
+statement ok
+CREATE TABLE raw_data AS
+SELECT 
+    '2024-01-01'::DATE + INTERVAL (i) DAY AS date,
+    'series_1' AS series_id,
+    CASE 
+        WHEN i <= 10 THEN 100.0 + i * 2.0  -- Normal data
+        WHEN i BETWEEN 11 AND 15 THEN NULL  -- NULL values to fill
+        WHEN i BETWEEN 16 AND 20 THEN 0.0   -- Zero values
+        WHEN i = 25 THEN 500.0              -- Outlier to remove
+        ELSE 100.0 + i * 2.0
+    END AS value
+FROM generate_series(1, 50) t(i)
+WHERE i NOT IN (30, 31, 32)  -- Create gaps to fill
+UNION ALL
+SELECT 
+    '2024-01-01'::DATE + INTERVAL (i) DAY AS date,
+    'series_2' AS series_id,
+    50.0 AS value  -- Constant series to drop
+FROM generate_series(1, 30) t(i)
+UNION ALL
+SELECT 
+    '2024-01-01'::DATE + INTERVAL (i) DAY AS date,
+    'series_3' AS series_id,
+    0.0 AS value  -- All zeros to drop
+FROM generate_series(1, 20) t(i);
+
+# Test: TS_FILL_GAPS - Fill missing timestamps
+statement ok
+CREATE TABLE filled_gaps AS
+SELECT * FROM TS_FILL_GAPS('raw_data', 'date', 'value', 'series_id', 'DAY', 'linear');
+
+# Verify gaps are filled for series_1
+# Original had 47 points (50 - 3 gaps), filled should have 50
+query I
+SELECT COUNT(*) = 50
+FROM filled_gaps
+WHERE series_id = 'series_1';
+----
+true
+
+# Test: TS_FILL_NULLS_FORWARD - Forward fill NULL values
+statement ok
+CREATE TABLE filled_forward AS
+SELECT * FROM TS_FILL_NULLS_FORWARD('raw_data', 'date', 'value', 'series_id');
+
+# Verify NULLs are filled
+query I
+SELECT COUNT(*) = 0
+FROM filled_forward
+WHERE series_id = 'series_1' AND value IS NULL;
+----
+true
+
+# Test: TS_FILL_NULLS_BACKWARD - Backward fill NULL values
+statement ok
+CREATE TABLE filled_backward AS
+SELECT * FROM TS_FILL_NULLS_BACKWARD('raw_data', 'date', 'value', 'series_id');
+
+# Verify NULLs are filled
+query I
+SELECT COUNT(*) = 0
+FROM filled_backward
+WHERE series_id = 'series_1' AND value IS NULL;
+----
+true
+
+# Test: TS_REMOVE_OUTLIERS - Remove or cap outliers
+statement ok
+CREATE TABLE outliers_removed AS
+SELECT * FROM TS_REMOVE_OUTLIERS('raw_data', 'date', 'value', 'series_id', 3.0, 'remove');
+
+# Verify outlier (value=500) is removed from series_1
+query I
+SELECT COUNT(*) = 0
+FROM outliers_removed
+WHERE series_id = 'series_1' AND value > 400;
+----
+true
+
+# Test: TS_REMOVE_OUTLIERS with 'cap' strategy
+statement ok
+CREATE TABLE outliers_capped AS
+SELECT * FROM TS_REMOVE_OUTLIERS('raw_data', 'date', 'value', 'series_id', 3.0, 'cap');
+
+# Verify outlier is capped (not removed, but value adjusted)
+# Original had 47 non-null points for series_1, capped should have same count
+query I
+SELECT COUNT(*) >= 45
+FROM outliers_capped
+WHERE series_id = 'series_1' AND value IS NOT NULL;
+----
+true
+
+# Test: TS_NORMALIZE - Z-score normalization
+statement ok
+CREATE TABLE normalized_zscore AS
+SELECT * FROM TS_NORMALIZE('raw_data', 'date', 'value', 'series_id', 'zscore');
+
+# Verify normalized values have mean ≈ 0 and std ≈ 1 for series_1
+statement ok
+CREATE TABLE zscore_stats AS
+SELECT 
+    series_id,
+    AVG(normalized_value) AS mean,
+    STDDEV_POP(normalized_value) AS std
+FROM normalized_zscore
+WHERE series_id = 'series_1' AND normalized_value IS NOT NULL
+GROUP BY series_id;
+
+query II
+SELECT 
+    mean >= -0.1 AND mean <= 0.1 AS mean_close_to_zero,
+    std >= 0.9 AND std <= 1.1 AS std_close_to_one
+FROM zscore_stats;
+----
+true	true
+
+# Test: TS_NORMALIZE - Min-Max normalization
+statement ok
+CREATE TABLE normalized_minmax AS
+SELECT * FROM TS_NORMALIZE('raw_data', 'date', 'value', 'series_id', 'minmax');
+
+# Verify min-max normalized values are in [0, 1] range for series_1
+query II
+SELECT 
+    MIN(normalized_value) >= 0.0 AS min_valid,
+    MAX(normalized_value) <= 1.0 AS max_valid
+FROM normalized_minmax
+WHERE series_id = 'series_1' AND normalized_value IS NOT NULL;
+----
+true	true
+
+# Test: TS_DROP_CONSTANT - Remove constant series
+statement ok
+CREATE TABLE no_constants AS
+SELECT * FROM TS_DROP_CONSTANT('raw_data', 'date', 'value', 'series_id');
+
+# Verify series_2 (constant) is removed
+query I
+SELECT COUNT(DISTINCT series_id)
+FROM no_constants;
+----
+2
+
+query I
+SELECT COUNT(*) = 0
+FROM no_constants
+WHERE series_id = 'series_2';
+----
+true
+
+# Test: TS_DROP_ZEROS - Remove series with all zeros
+statement ok
+CREATE TABLE no_zeros AS
+SELECT * FROM TS_DROP_ZEROS('raw_data', 'date', 'value', 'series_id');
+
+# Verify series_3 (all zeros) is removed
+query I
+SELECT COUNT(DISTINCT series_id)
+FROM no_zeros;
+----
+2
+
+query I
+SELECT COUNT(*) = 0
+FROM no_zeros
+WHERE series_id = 'series_3';
+----
+true
+
+# Test: Complete data preparation workflow
+statement ok
+CREATE TABLE clean_data AS
+WITH step1 AS (
+    -- Fill gaps
+    SELECT * FROM TS_FILL_GAPS('raw_data', 'date', 'value', 'series_id', 'DAY', 'linear')
+),
+step2 AS (
+    -- Fill NULLs
+    SELECT * FROM TS_FILL_NULLS_FORWARD(step1, 'date', 'value', 'series_id')
+),
+step3 AS (
+    -- Remove outliers
+    SELECT * FROM TS_REMOVE_OUTLIERS(step2, 'date', 'value', 'series_id', 3.0, 'cap')
+),
+step4 AS (
+    -- Drop constant series
+    SELECT * FROM TS_DROP_CONSTANT(step3, 'date', 'value', 'series_id')
+),
+step5 AS (
+    -- Drop zero series
+    SELECT * FROM TS_DROP_ZEROS(step4, 'date', 'value', 'series_id')
+)
+SELECT * FROM step5;
+
+# Verify clean data results
+# Should only have series_1 (series_2 is constant, series_3 is all zeros)
+query I
+SELECT COUNT(DISTINCT series_id) = 1
+FROM clean_data;
+----
+true
+
+query I
+SELECT series_id = 'series_1'
+FROM clean_data
+GROUP BY series_id;
+----
+true
+
+# Verify no NULLs remain
+query I
+SELECT COUNT(*) = 0
+FROM clean_data
+WHERE value IS NULL;
+----
+true
+
+# Verify 50 points for series_1 (gaps filled)
+query I
+SELECT COUNT(*) = 50
+FROM clean_data
+WHERE series_id = 'series_1';
+----
+true
+
+# Test: Denormalize after normalize (round-trip)
+statement ok
+CREATE TABLE original_subset AS
+SELECT * FROM raw_data
+WHERE series_id = 'series_1' AND value IS NOT NULL
+ORDER BY date;
+
+statement ok
+CREATE TABLE normalized AS
+SELECT * FROM TS_NORMALIZE('original_subset', 'date', 'value', 'series_id', 'zscore');
+
+# Note: TS_DENORMALIZE would require storing normalization params
+# For now we just verify normalization works
+query I
+SELECT COUNT(*) > 0
+FROM normalized
+WHERE normalized_value IS NOT NULL;
+----
+true
+
+# Cleanup
+statement ok
+DROP TABLE raw_data;
+
+statement ok
+DROP TABLE filled_gaps;
+
+statement ok
+DROP TABLE filled_forward;
+
+statement ok
+DROP TABLE filled_backward;
+
+statement ok
+DROP TABLE outliers_removed;
+
+statement ok
+DROP TABLE outliers_capped;
+
+statement ok
+DROP TABLE normalized_zscore;
+
+statement ok
+DROP TABLE zscore_stats;
+
+statement ok
+DROP TABLE normalized_minmax;
+
+statement ok
+DROP TABLE no_constants;
+
+statement ok
+DROP TABLE no_zeros;
+
+statement ok
+DROP TABLE clean_data;
+
+statement ok
+DROP TABLE original_subset;
+
+statement ok
+DROP TABLE normalized;
+

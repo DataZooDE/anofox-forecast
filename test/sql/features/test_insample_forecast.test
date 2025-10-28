@@ -1,0 +1,108 @@
+# name: test/sql/features/test_insample_forecast.test
+# description: Test in-sample fitted values functionality
+# group: [anofox_forecast]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+# Create test data
+statement ok
+CREATE TABLE test_series AS 
+SELECT 
+    i AS idx,
+    100.0 + i * 1.0 AS value
+FROM generate_series(1, 20) t(i);
+
+# Test: Default behavior (return_insample = false)
+# insample_fitted should be empty
+query I
+SELECT len(result.insample_fitted) = 0
+FROM (SELECT TS_FORECAST(value, 'Naive', 5, {}) AS result FROM test_series);
+----
+true
+
+# Test: With return_insample = true
+# insample_fitted should have length equal to training data
+query I
+SELECT len(result.insample_fitted) = 20
+FROM (SELECT TS_FORECAST(value, 'Naive', 5, {'return_insample': true}) AS result FROM test_series);
+----
+true
+
+# Test: Naive model fitted values correctness
+# For Naive, fitted[i] should equal actual[i-1]
+statement ok
+CREATE TABLE naive_test AS
+SELECT 
+    result.insample_fitted AS fitted,
+    list(value) AS actual
+FROM (SELECT TS_FORECAST(value, 'Naive', 5, {'return_insample': true}) AS result FROM test_series);
+
+# Verify Naive fitted values: fitted[i+1] ≈ actual[i]
+# (allowing for small floating point differences)
+query I
+SELECT 
+    fitted[2] >= actual[1] - 0.01 AND fitted[2] <= actual[1] + 0.01
+FROM naive_test;
+----
+true
+
+# Test: SES model returns fitted values
+query I
+SELECT len(result.insample_fitted) = 20
+FROM (SELECT TS_FORECAST(value, 'SES', 5, {'alpha': 0.3, 'return_insample': true}) AS result FROM test_series);
+----
+true
+
+# Test: ETS model returns fitted values
+query I
+SELECT len(result.insample_fitted) = 20
+FROM (SELECT TS_FORECAST(value, 'AutoETS', 5, {'season_length': 1, 'return_insample': true}) AS result FROM test_series);
+----
+true
+
+# Test: Verify fitted values are reasonable (not NULL, not inf)
+query I
+SELECT 
+    result.insample_fitted[1] IS NOT NULL
+    AND result.insample_fitted[1] < 1000000
+    AND result.insample_fitted[1] > -1000000
+FROM (SELECT TS_FORECAST(value, 'Naive', 5, {'return_insample': true}) AS result FROM test_series);
+----
+true
+
+# Test: Multiple models with in-sample forecasts
+statement ok
+CREATE TABLE multi_model_test AS
+SELECT 
+    'Naive' AS model,
+    (SELECT TS_FORECAST(value, 'Naive', 5, {'return_insample': true}) FROM test_series) AS result
+UNION ALL
+SELECT 
+    'SES' AS model,
+    (SELECT TS_FORECAST(value, 'SES', 5, {'alpha': 0.3, 'return_insample': true}) FROM test_series) AS result
+UNION ALL
+SELECT 
+    'Holt' AS model,
+    (SELECT TS_FORECAST(value, 'Holt', 5, {'alpha': 0.3, 'beta': 0.1, 'return_insample': true}) FROM test_series) AS result;
+
+# Verify all models return fitted values of correct length
+query I
+SELECT COUNT(*) = 3
+FROM multi_model_test
+WHERE len(result.insample_fitted) = 20;
+----
+true
+
+# Cleanup
+statement ok
+DROP TABLE test_series;
+
+statement ok
+DROP TABLE naive_test;
+
+statement ok
+DROP TABLE multi_model_test;
+

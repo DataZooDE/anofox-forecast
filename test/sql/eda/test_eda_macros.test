@@ -1,0 +1,233 @@
+# name: test/sql/eda/test_eda_macros.test
+# description: Test EDA (Exploratory Data Analysis) table macros
+# group: [anofox_forecast]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+# Create diverse test data with various quality issues
+statement ok
+CREATE TABLE eda_test_data AS
+SELECT 
+    '2024-01-01'::DATE + INTERVAL (i) DAY AS date,
+    'series_1' AS series_id,
+    CASE 
+        WHEN i <= 10 THEN 100.0 + i * 2.0  -- Normal data
+        WHEN i BETWEEN 11 AND 15 THEN NULL  -- NULL values
+        WHEN i BETWEEN 16 AND 20 THEN 0.0   -- Zero values
+        WHEN i = 25 THEN 500.0              -- Outlier
+        ELSE 100.0 + i * 2.0
+    END AS value
+FROM generate_series(1, 50) t(i)
+WHERE i NOT IN (30, 31, 32)  -- Create gaps
+UNION ALL
+SELECT 
+    '2024-01-01'::DATE + INTERVAL (i) DAY AS date,
+    'series_2' AS series_id,
+    50.0 AS value  -- Constant series
+FROM generate_series(1, 30) t(i);
+
+# Test: TS_STATS - Basic statistics
+statement ok
+CREATE TABLE stats_result AS
+SELECT * FROM TS_STATS('eda_test_data', 'date', 'value', 'series_id');
+
+# Verify stats table has required columns
+query I
+SELECT COUNT(*) >= 7
+FROM (SELECT * FROM pragma_table_info('stats_result'));
+----
+true
+
+# Verify both series are in results
+query I
+SELECT COUNT(DISTINCT series_id) = 2
+FROM stats_result;
+----
+true
+
+# Test: TS_QUALITY_REPORT - Data quality analysis
+statement ok
+CREATE TABLE quality_result AS
+SELECT * FROM TS_QUALITY_REPORT('eda_test_data', 'date', 'value', 'series_id');
+
+# Verify quality report detects issues in series_1
+query I
+SELECT null_count > 0
+FROM quality_result
+WHERE series_id = 'series_1';
+----
+true
+
+query I
+SELECT zero_count > 0
+FROM quality_result
+WHERE series_id = 'series_1';
+----
+true
+
+# Verify series_2 is flagged as constant
+query I
+SELECT is_constant = true
+FROM quality_result
+WHERE series_id = 'series_2';
+----
+true
+
+# Test: TS_ANALYZE_ZEROS - Zero value analysis
+statement ok
+CREATE TABLE zeros_result AS
+SELECT * FROM TS_ANALYZE_ZEROS('eda_test_data', 'date', 'value', 'series_id');
+
+# Verify zeros are detected in series_1
+query I
+SELECT zero_count > 0
+FROM zeros_result
+WHERE series_id = 'series_1';
+----
+true
+
+# Test: TS_DETECT_GAPS - Gap detection
+statement ok
+CREATE TABLE gaps_result AS
+SELECT * FROM TS_DETECT_GAPS('eda_test_data', 'date', 'value', 'series_id', 'DAY');
+
+# Verify gaps are detected in series_1 (we intentionally excluded days 30, 31, 32)
+query I
+SELECT gap_count > 0
+FROM gaps_result
+WHERE series_id = 'series_1';
+----
+true
+
+# Test: TS_CHECK_STATIONARITY - Stationarity check
+statement ok
+CREATE TABLE stationarity_result AS
+SELECT * FROM TS_CHECK_STATIONARITY('eda_test_data', 'date', 'value', 'series_id');
+
+# Verify stationarity results exist for both series
+query I
+SELECT COUNT(*) = 2
+FROM stationarity_result;
+----
+true
+
+# Test: TS_DETECT_OUTLIERS - Outlier detection
+statement ok
+CREATE TABLE outliers_result AS
+SELECT * FROM TS_DETECT_OUTLIERS('eda_test_data', 'date', 'value', 'series_id', 3.0);
+
+# Verify outlier is detected in series_1 (value 500.0 when i=25)
+query I
+SELECT outlier_count > 0
+FROM outliers_result
+WHERE series_id = 'series_1';
+----
+true
+
+# Test: TS_DISTRIBUTION_SUMMARY - Distribution analysis
+statement ok
+CREATE TABLE distribution_result AS
+SELECT * FROM TS_DISTRIBUTION_SUMMARY('eda_test_data', 'date', 'value', 'series_id');
+
+# Verify distribution summary exists for both series
+query I
+SELECT COUNT(*) = 2
+FROM distribution_result;
+----
+true
+
+# Verify distribution metrics are reasonable
+query I
+SELECT skewness IS NOT NULL AND kurtosis IS NOT NULL
+FROM distribution_result
+WHERE series_id = 'series_1';
+----
+true
+
+# Test: EDA workflow - chain multiple analyses
+statement ok
+CREATE TABLE complete_eda AS
+WITH stats AS (
+    SELECT * FROM TS_STATS('eda_test_data', 'date', 'value', 'series_id')
+),
+quality AS (
+    SELECT * FROM TS_QUALITY_REPORT('eda_test_data', 'date', 'value', 'series_id')
+),
+gaps AS (
+    SELECT * FROM TS_DETECT_GAPS('eda_test_data', 'date', 'value', 'series_id', 'DAY')
+)
+SELECT 
+    s.series_id,
+    s.count_value AS n_points,
+    s.mean,
+    s.std_dev,
+    q.null_count,
+    q.zero_count,
+    q.is_constant,
+    g.gap_count
+FROM stats s
+JOIN quality q ON s.series_id = q.series_id
+JOIN gaps g ON s.series_id = g.series_id;
+
+# Verify complete EDA results
+query I
+SELECT COUNT(*) = 2
+FROM complete_eda;
+----
+true
+
+# Verify series_1 has data quality issues
+query I
+SELECT 
+    null_count > 0 
+    AND zero_count > 0 
+    AND gap_count > 0
+    AND is_constant = false
+FROM complete_eda
+WHERE series_id = 'series_1';
+----
+true
+
+# Verify series_2 is constant with no issues
+query I
+SELECT 
+    null_count = 0 
+    AND zero_count = 0 
+    AND gap_count = 0
+    AND is_constant = true
+FROM complete_eda
+WHERE series_id = 'series_2';
+----
+true
+
+# Cleanup
+statement ok
+DROP TABLE eda_test_data;
+
+statement ok
+DROP TABLE stats_result;
+
+statement ok
+DROP TABLE quality_result;
+
+statement ok
+DROP TABLE zeros_result;
+
+statement ok
+DROP TABLE gaps_result;
+
+statement ok
+DROP TABLE stationarity_result;
+
+statement ok
+DROP TABLE outliers_result;
+
+statement ok
+DROP TABLE distribution_result;
+
+statement ok
+DROP TABLE complete_eda;
+

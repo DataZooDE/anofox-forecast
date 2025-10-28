@@ -1,0 +1,250 @@
+# name: test/sql/core/test_all_models.test
+# description: Test that all forecasting models can be created and produce forecasts
+# group: [anofox_forecast]
+
+require anofox_forecast
+
+# Load the extension
+statement ok
+LOAD anofox_forecast;
+
+# Create test data - simple increasing series with seasonality
+statement ok
+CREATE TABLE test_series AS 
+SELECT 
+    i AS idx,
+    100.0 + i * 2.0 + 10.0 * SIN(i * 2 * PI() / 12) AS value
+FROM generate_series(1, 50) t(i);
+
+# Test: Basic Models
+
+# Naive
+query I
+SELECT len(result.forecast) = 12 
+FROM (SELECT TS_FORECAST(value, 'Naive', 12, {}) AS result FROM test_series);
+----
+true
+
+# SMA (Simple Moving Average)
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'SMA', 12, {'window': 5}) AS result FROM test_series);
+----
+true
+
+# SeasonalNaive
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'SeasonalNaive', 12, {'seasonal_period': 12}) AS result FROM test_series);
+----
+true
+
+# SES (Simple Exponential Smoothing)
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'SES', 12, {'alpha': 0.3}) AS result FROM test_series);
+----
+true
+
+# SESOptimized
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'SESOptimized', 12, {}) AS result FROM test_series);
+----
+true
+
+# RandomWalkWithDrift
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'RandomWalkWithDrift', 12, {}) AS result FROM test_series);
+----
+true
+
+# Test: Holt Models
+
+# Holt (Double Exponential Smoothing)
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'Holt', 12, {'alpha': 0.3, 'beta': 0.1}) AS result FROM test_series);
+----
+true
+
+# HoltWinters (Triple Exponential Smoothing)
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'HoltWinters', 12, {'seasonal_period': 12, 'multiplicative': 0}) AS result FROM test_series);
+----
+true
+
+# Test: Theta Variants
+
+# Theta
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'Theta', 12, {'seasonal_period': 12, 'theta_param': 2.0}) AS result FROM test_series);
+----
+true
+
+# OptimizedTheta
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'OptimizedTheta', 12, {'seasonal_period': 12}) AS result FROM test_series);
+----
+true
+
+# DynamicTheta
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'DynamicTheta', 12, {'seasonal_period': 12}) AS result FROM test_series);
+----
+true
+
+# DynamicOptimizedTheta
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'DynamicOptimizedTheta', 12, {'seasonal_period': 12}) AS result FROM test_series);
+----
+true
+
+# Test: Seasonal Models
+
+# SeasonalES
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'SeasonalES', 12, {'seasonal_period': 12}) AS result FROM test_series);
+----
+true
+
+# SeasonalESOptimized
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'SeasonalESOptimized', 12, {'seasonal_period': 12}) AS result FROM test_series);
+----
+true
+
+# SeasonalWindowAverage
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'SeasonalWindowAverage', 12, {'seasonal_period': 12, 'window_size': 3}) AS result FROM test_series);
+----
+true
+
+# Test: State Space Models
+
+# ETS
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'ETS', 12, {'error_type': 0, 'trend_type': 1, 'season_type': 1, 'season_length': 12}) AS result FROM test_series);
+----
+true
+
+# AutoETS
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'AutoETS', 12, {'season_length': 12}) AS result FROM test_series);
+----
+true
+
+# Test: Multiple Seasonality Models
+
+# MFLES
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'MFLES', 12, {'seasonal_periods': [12]}) AS result FROM test_series);
+----
+true
+
+# AutoMFLES
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'AutoMFLES', 12, {'seasonal_periods': [12]}) AS result FROM test_series);
+----
+true
+
+# MSTL
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'MSTL', 12, {'seasonal_periods': [12]}) AS result FROM test_series);
+----
+true
+
+# AutoMSTL
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'AutoMSTL', 12, {'seasonal_periods': [12]}) AS result FROM test_series);
+----
+true
+
+# TBATS
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'TBATS', 12, {'seasonal_periods': [12]}) AS result FROM test_series);
+----
+true
+
+# AutoTBATS
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'AutoTBATS', 12, {'seasonal_periods': [12]}) AS result FROM test_series);
+----
+true
+
+# Test: Intermittent Demand Models
+
+# Create intermittent demand data (many zeros)
+statement ok
+CREATE TABLE intermittent_series AS 
+SELECT 
+    i AS idx,
+    CASE WHEN random() < 0.3 THEN random() * 10 ELSE 0.0 END AS value
+FROM generate_series(1, 100) t(i);
+
+# CrostonClassic
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'CrostonClassic', 12, {}) AS result FROM intermittent_series);
+----
+true
+
+# CrostonOptimized
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'CrostonOptimized', 12, {}) AS result FROM intermittent_series);
+----
+true
+
+# CrostonSBA
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'CrostonSBA', 12, {}) AS result FROM intermittent_series);
+----
+true
+
+# ADIDA
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'ADIDA', 12, {}) AS result FROM intermittent_series);
+----
+true
+
+# IMAPA
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'IMAPA', 12, {}) AS result FROM intermittent_series);
+----
+true
+
+# TSB
+query I
+SELECT len(result.forecast) = 12
+FROM (SELECT TS_FORECAST(value, 'TSB', 12, {}) AS result FROM intermittent_series);
+----
+true
+
+# Cleanup
+statement ok
+DROP TABLE test_series;
+
+statement ok
+DROP TABLE intermittent_series;
+
