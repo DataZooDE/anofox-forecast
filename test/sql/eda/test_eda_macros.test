@@ -33,7 +33,7 @@ FROM generate_series(1, 30) t(i);
 # Signature: ts_stats(table_name, group_cols, date_col, value_col)
 statement ok
 CREATE TABLE stats_result AS
-SELECT * FROM ts_stats(eda_test_data, 'series_id', 'date', 'value');
+SELECT * FROM ts_stats(eda_test_data, series_id, date, value);
 
 # Verify stats table has data for both series
 query I
@@ -46,7 +46,7 @@ true
 # Signature: ts_quality_report(table_name, group_cols, date_col, value_col)
 statement ok
 CREATE TABLE quality_result AS
-SELECT * FROM ts_quality_report(eda_test_data, 'series_id', 'date', 'value');
+SELECT * FROM ts_quality_report(eda_test_data, series_id, date, value);
 
 # Verify quality report detects issues in series_1
 query I
@@ -75,7 +75,7 @@ true
 # Signature: ts_analyze_zeros(table_name, group_cols, date_col, value_col)
 statement ok
 CREATE TABLE zeros_result AS
-SELECT * FROM ts_analyze_zeros(eda_test_data, 'series_id', 'date', 'value');
+SELECT * FROM ts_analyze_zeros(eda_test_data, series_id, date, value);
 
 # Verify zeros are detected in series_1
 query I
@@ -89,7 +89,7 @@ true
 # Signature: ts_detect_gaps(table_name, group_cols, date_col, value_col)
 statement ok
 CREATE TABLE gaps_result AS
-SELECT * FROM ts_detect_gaps(eda_test_data, 'series_id', 'date', 'value');
+SELECT * FROM ts_detect_gaps(eda_test_data, series_id, date, value);
 
 # Verify gaps are detected in series_1 (we intentionally excluded days 30, 31, 32)
 query I
@@ -103,7 +103,7 @@ true
 # Signature: ts_check_stationarity(table_name, group_cols, date_col, value_col)
 statement ok
 CREATE TABLE stationarity_result AS
-SELECT * FROM ts_check_stationarity(eda_test_data, 'series_id', 'date', 'value');
+SELECT * FROM ts_check_stationarity(eda_test_data, series_id, date, value);
 
 # Verify stationarity results exist for both series
 query I
@@ -116,7 +116,7 @@ true
 # Signature: ts_detect_outliers(table_name, group_cols, date_col, value_col)
 statement ok
 CREATE TABLE outliers_result AS
-SELECT * FROM ts_detect_outliers(eda_test_data, 'series_id', 'date', 'value');
+SELECT * FROM ts_detect_outliers(eda_test_data, series_id, date, value);
 
 # Verify outlier is detected in series_1 (value 500.0 when i=25)
 query I
@@ -130,7 +130,7 @@ true
 # Signature: ts_distribution_summary(table_name, group_cols, date_col, value_col)
 statement ok
 CREATE TABLE distribution_result AS
-SELECT * FROM ts_distribution_summary(eda_test_data, 'series_id', 'date', 'value');
+SELECT * FROM ts_distribution_summary(eda_test_data, series_id, date, value);
 
 # Verify distribution summary exists for both series
 query I

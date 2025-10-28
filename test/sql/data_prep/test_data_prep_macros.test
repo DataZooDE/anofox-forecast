@@ -39,7 +39,7 @@ FROM generate_series(1, 20) t(i);
 # Signature: ts_fill_gaps(table_name, group_cols, date_col, value_col)
 statement ok
 CREATE TABLE filled_gaps AS
-SELECT * FROM ts_fill_gaps(raw_data, 'series_id', 'date', 'value');
+SELECT * FROM ts_fill_gaps(raw_data, series_id, date, value);
 
 # Verify gaps are filled for series_1
 # Original had 47 points (50 - 3 gaps), filled should have 50
@@ -54,7 +54,7 @@ true
 # Signature: ts_fill_nulls_forward(table_name, group_cols, date_col, value_col)
 statement ok
 CREATE TABLE filled_forward AS
-SELECT * FROM ts_fill_nulls_forward(raw_data, 'series_id', 'date', 'value');
+SELECT * FROM ts_fill_nulls_forward(raw_data, series_id, date, value);
 
 # Verify NULLs are reduced (forward fill from last known value)
 query I
@@ -68,7 +68,7 @@ true
 # Signature: ts_fill_nulls_backward(table_name, group_cols, date_col, value_col)
 statement ok
 CREATE TABLE filled_backward AS
-SELECT * FROM ts_fill_nulls_backward(raw_data, 'series_id', 'date', 'value');
+SELECT * FROM ts_fill_nulls_backward(raw_data, series_id, date, value);
 
 # Verify NULLs are reduced (backward fill from next known value)
 query I
@@ -82,7 +82,7 @@ true
 # Signature: ts_remove_outliers(table_name, group_cols, date_col, value_col)
 statement ok
 CREATE TABLE outliers_removed AS
-SELECT * FROM ts_remove_outliers(raw_data, 'series_id', 'date', 'value');
+SELECT * FROM ts_remove_outliers(raw_data, series_id, date, value);
 
 # Verify outlier (value=500) is handled in series_1
 query I
@@ -96,7 +96,7 @@ true
 # Signature: ts_normalize(table_name, group_cols, date_col, value_col)
 statement ok
 CREATE TABLE normalized AS
-SELECT * FROM ts_normalize(raw_data, 'series_id', 'date', 'value');
+SELECT * FROM ts_normalize(raw_data, series_id, date, value);
 
 # Verify normalized values exist
 query I
@@ -110,7 +110,7 @@ true
 # Signature: ts_drop_constant(table_name, group_cols, date_col, value_col)
 statement ok
 CREATE TABLE no_constants AS
-SELECT * FROM ts_drop_constant(raw_data, 'series_id', 'date', 'value');
+SELECT * FROM ts_drop_constant(raw_data, series_id, date, value);
 
 # Verify series_2 (constant) is removed
 query I
@@ -131,7 +131,7 @@ true
 # Signature: ts_drop_zeros(table_name, group_cols, date_col, value_col)
 statement ok
 CREATE TABLE no_zeros AS
-SELECT * FROM ts_drop_zeros(raw_data, 'series_id', 'date', 'value');
+SELECT * FROM ts_drop_zeros(raw_data, series_id, date, value);
 
 # Verify series_3 (all zeros) is removed
 query I
@@ -153,23 +153,23 @@ statement ok
 CREATE TABLE clean_data AS
 WITH step1 AS (
     -- Fill gaps
-    SELECT * FROM ts_fill_gaps(raw_data, 'series_id', 'date', 'value')
+    SELECT * FROM ts_fill_gaps(raw_data, series_id, date, value)
 ),
 step2 AS (
     -- Fill NULLs
-    SELECT * FROM ts_fill_nulls_forward(step1, 'series_id', 'date', 'value')
+    SELECT * FROM ts_fill_nulls_forward(step1, series_id, date, value)
 ),
 step3 AS (
     -- Remove outliers
-    SELECT * FROM ts_remove_outliers(step2, 'series_id', 'date', 'value')
+    SELECT * FROM ts_remove_outliers(step2, series_id, date, value)
 ),
 step4 AS (
     -- Drop constant series
-    SELECT * FROM ts_drop_constant(step3, 'series_id', 'date', 'value')
+    SELECT * FROM ts_drop_constant(step3, series_id, date, value)
 ),
 step5 AS (
     -- Drop zero series
-    SELECT * FROM ts_drop_zeros(step4, 'series_id', 'date', 'value')
+    SELECT * FROM ts_drop_zeros(step4, series_id, date, value)
 )
 SELECT * FROM step5;
 

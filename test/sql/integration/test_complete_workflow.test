@@ -33,16 +33,16 @@ FROM generate_series(1, 100) t(i);
 statement ok
 CREATE TABLE eda_results AS
 WITH stats AS (
-    SELECT * FROM ts_stats(sales_data, 'product_id', 'date', 'sales')
+    SELECT * FROM ts_stats(sales_data, product_id, date, sales)
 ),
 quality AS (
-    SELECT * FROM ts_quality_report(sales_data, 'product_id', 'date', 'sales')
+    SELECT * FROM ts_quality_report(sales_data, product_id, date, sales)
 ),
 gaps AS (
-    SELECT * FROM ts_detect_gaps(sales_data, 'product_id', 'date', 'sales')
+    SELECT * FROM ts_detect_gaps(sales_data, product_id, date, sales)
 ),
 outliers AS (
-    SELECT * FROM ts_detect_outliers(sales_data, 'product_id', 'date', 'sales')
+    SELECT * FROM ts_detect_outliers(sales_data, product_id, date, sales)
 )
 SELECT 
     s.series_id AS product_id,
@@ -89,15 +89,15 @@ statement ok
 CREATE TABLE clean_sales AS
 WITH step1 AS (
     -- Fill gaps in time series
-    SELECT * FROM ts_fill_gaps(sales_data, 'product_id', 'date', 'sales')
+    SELECT * FROM ts_fill_gaps(sales_data, product_id, date, sales)
 ),
 step2 AS (
     -- Fill NULL values using forward fill
-    SELECT * FROM ts_fill_nulls_forward(step1, 'product_id', 'date', 'sales')
+    SELECT * FROM ts_fill_nulls_forward(step1, product_id, date, sales)
 ),
 step3 AS (
     -- Remove outliers
-    SELECT * FROM ts_remove_outliers(step2, 'product_id', 'date', 'sales')
+    SELECT * FROM ts_remove_outliers(step2, product_id, date, sales)
 )
 SELECT * FROM step3
 ORDER BY product_id, date;

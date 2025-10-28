@@ -7,16 +7,18 @@ require anofox_forecast
 statement ok
 LOAD anofox_forecast;
 
-# Create simple test data
+# Create simple test data with TIMESTAMP
 statement ok
 CREATE TABLE test_data AS
-SELECT i::INTEGER AS step, (100.0 + i)::DOUBLE AS value
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    (100.0 + i)::DOUBLE AS value
 FROM generate_series(1, 20) t(i);
 
 # Test: TS_FORECAST_AGG aggregate function
 statement ok
 CREATE TABLE forecast_result AS
-SELECT TS_FORECAST_AGG(step, value, 'Naive', 5, NULL) AS result
+SELECT TS_FORECAST_AGG(date_col, value, 'Naive', 5, NULL) AS result
 FROM test_data;
 
 # Verify forecast was generated
@@ -26,10 +28,10 @@ FROM forecast_result;
 ----
 true
 
-# Test: ts_forecast table macro
+# Test: ts_forecast table macro (column names without quotes)
 statement ok
 CREATE TABLE macro_result AS
-SELECT * FROM ts_forecast(test_data, 'step', 'value', 'Naive', 5, NULL);
+SELECT * FROM ts_forecast(test_data, date_col, value, 'Naive', 5, NULL);
 
 # Verify macro returned 5 forecast steps
 query I
@@ -47,4 +49,3 @@ DROP TABLE forecast_result;
 
 statement ok
 DROP TABLE macro_result;
-
