@@ -6,7 +6,7 @@ This document describes the evaluation metric functions available in the DuckDB 
 
 ## Overview
 
-The extension provides **11 time series forecasting accuracy metrics** as individual SQL functions:
+The extension provides **12 time series forecasting accuracy metrics** as individual SQL functions:
 
 **Available Metrics:**
 - `TS_MAE()` - Mean Absolute Error
@@ -20,6 +20,7 @@ The extension provides **11 time series forecasting accuracy metrics** as indivi
 - `TS_RMAE()` - Relative Mean Absolute Error (compares two methods)
 - `TS_QUANTILE_LOSS()` - Quantile Loss / Pinball Loss (for quantile forecasts)
 - `TS_MQLOSS()` - Multi-Quantile Loss / CRPS approximation (for distributions)
+- `TS_COVERAGE()` - Prediction Interval Coverage (fraction within bounds)
 
 ---
 

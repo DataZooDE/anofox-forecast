@@ -443,6 +443,47 @@ static void TSQuantileLossFunction(DataChunk &args, ExpressionState &state, Vect
     }
 }
 
+// TS_COVERAGE - Prediction Interval Coverage
+static void TSCoverageFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+    auto &actual_vec = args.data[0];
+    auto &lower_vec = args.data[1];
+    auto &upper_vec = args.data[2];
+    
+    UnifiedVectorFormat actual_format, lower_format, upper_format;
+    actual_vec.ToUnifiedFormat(args.size(), actual_format);
+    lower_vec.ToUnifiedFormat(args.size(), lower_format);
+    upper_vec.ToUnifiedFormat(args.size(), upper_format);
+    
+    auto result_data = FlatVector::GetData<double>(result);
+    auto &result_validity = FlatVector::Validity(result);
+    
+    for (idx_t i = 0; i < args.size(); i++) {
+        auto actual_idx = actual_format.sel->get_index(i);
+        auto lower_idx = lower_format.sel->get_index(i);
+        auto upper_idx = upper_format.sel->get_index(i);
+        
+        if (!actual_format.validity.RowIsValid(actual_idx) || 
+            !lower_format.validity.RowIsValid(lower_idx) ||
+            !upper_format.validity.RowIsValid(upper_idx)) {
+            result_validity.SetInvalid(i);
+            continue;
+        }
+        
+        auto actual = ExtractDoubleArray(actual_vec, actual_idx, actual_format);
+        auto lower = ExtractDoubleArray(lower_vec, lower_idx, lower_format);
+        auto upper = ExtractDoubleArray(upper_vec, upper_idx, upper_format);
+        
+        if (actual.size() != lower.size() || actual.size() != upper.size()) {
+            throw InvalidInputException("actual, lower, and upper arrays must have the same length");
+        }
+        if (actual.empty()) {
+            throw InvalidInputException("arrays must not be empty");
+        }
+        
+        result_data[i] = ::anofoxtime::utils::Metrics::coverage(actual, lower, upper);
+    }
+}
+
 // TS_MQLOSS - Multi-Quantile Loss
 static void TSMQLOSSFunction(DataChunk &args, ExpressionState &state, Vector &result) {
     D_ASSERT(args.data.size() == 3);
@@ -592,6 +633,15 @@ void RegisterMetricsFunction(ExtensionLoader &loader) {
         TSMQLOSSFunction
     );
     loader.RegisterFunction(ts_mqloss);
+    
+    // TS_COVERAGE (Prediction interval coverage)
+    ScalarFunction ts_coverage("ts_coverage",
+        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE),
+         LogicalType::LIST(LogicalType::DOUBLE)},
+        LogicalType::DOUBLE,
+        TSCoverageFunction
+    );
+    loader.RegisterFunction(ts_coverage);
 }
 
 } // namespace duckdb

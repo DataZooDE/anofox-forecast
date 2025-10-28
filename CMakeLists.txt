@@ -78,6 +78,10 @@ set(ANOFOX_TIME_SOURCES
     # Seasonality decomposition
     anofox-time/src/seasonality/stl.cpp
     anofox-time/src/seasonality/mstl.cpp
+    anofox-time/src/seasonality/detector.cpp
+    anofox-time/src/seasonality/analyzer.cpp
+    # Changepoint detection
+    anofox-time/src/changepoint/bocpd.cpp
     # Utilities
     anofox-time/src/utils/logging.cpp
     anofox-time/src/utils/metrics.cpp
@@ -96,6 +100,8 @@ set(EXTENSION_SOURCES
     src/forecast_table_function.cpp
     src/forecast_aggregate.cpp
     src/metrics_function.cpp
+    src/seasonality_function.cpp
+    src/changepoint_function.cpp
     src/model_factory.cpp
     src/time_series_builder.cpp
     src/anofox_time_wrapper.cpp

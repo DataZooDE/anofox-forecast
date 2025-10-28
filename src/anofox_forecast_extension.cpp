@@ -12,6 +12,8 @@
 #include "forecast_table_function.hpp"
 #include "forecast_aggregate.hpp"
 #include "metrics_function.hpp"
+#include "seasonality_function.hpp"
+#include "changepoint_function.hpp"
 #include "duckdb/catalog/default/default_functions.hpp"
 #include "duckdb/catalog/default/default_table_functions.hpp"
 
@@ -32,7 +34,7 @@ static const DefaultTableMacro forecast_table_macros[] = {
         )
         SELECT 
             UNNEST(result.forecast_step) AS forecast_step,
-            UNNEST(result.forecast_timestamp) AS forecast_timestamp,
+            UNNEST(result.forecast_timestamp) AS date_col,
             UNNEST(result.point_forecast) AS point_forecast,
             UNNEST(result.lower) AS lower,
             UNNEST(result.upper) AS upper,
@@ -51,12 +53,52 @@ static const DefaultTableMacro forecast_table_macros[] = {
         SELECT 
             group_col,
             UNNEST(result.forecast_step) AS forecast_step,
-            UNNEST(result.forecast_timestamp) AS forecast_timestamp,
+            UNNEST(result.forecast_timestamp) AS date_col,
             UNNEST(result.point_forecast) AS point_forecast,
             UNNEST(result.lower) AS lower,
             UNNEST(result.upper) AS upper,
             result.model_name AS model_name
         FROM fc
+    )"},
+    // TS_DETECT_CHANGEPOINTS: Single series (no GROUP BY)
+    {DEFAULT_SCHEMA, "ts_detect_changepoints", {"table_name", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}}, R"(
+        WITH cp AS (
+            SELECT TS_DETECT_CHANGEPOINTS_AGG(date_col, value_col, params) AS result
+            FROM QUERY_TABLE(table_name)
+        ),
+        unnested AS (
+            SELECT UNNEST(result) AS row_data
+            FROM cp
+        )
+        SELECT 
+            row_data.timestamp AS date_col,
+            row_data.value AS value_col,
+            row_data.is_changepoint AS is_changepoint,
+            row_data.changepoint_probability AS changepoint_probability
+        FROM unnested
+    )"},
+    // TS_DETECT_CHANGEPOINTS_BY: Multiple series (1 group column)
+    {DEFAULT_SCHEMA, "ts_detect_changepoints_by", {"table_name", "group_col", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}}, R"(
+        WITH cp AS (
+            SELECT 
+                group_col,
+                TS_DETECT_CHANGEPOINTS_AGG(date_col, value_col, params) AS result
+            FROM QUERY_TABLE(table_name)
+            GROUP BY group_col
+        ),
+        unnested AS (
+            SELECT 
+                group_col,
+                UNNEST(result) AS row_data
+            FROM cp
+        )
+        SELECT 
+            group_col,
+            row_data.timestamp AS date_col,
+            row_data.value AS value_col,
+            row_data.is_changepoint AS is_changepoint,
+            row_data.changepoint_probability AS changepoint_probability
+        FROM unnested
     )"},
     {nullptr, nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}
 };
@@ -77,6 +119,14 @@ static void LoadInternal(ExtensionLoader &loader) {
     // Register the TS_METRICS scalar functions (for evaluation)
     RegisterMetricsFunction(loader);
     // std::cerr << "[DEBUG] TS_METRICS functions registered" << std::endl;
+    
+    // Register seasonality detection functions
+    RegisterSeasonalityFunction(loader);
+    // std::cerr << "[DEBUG] Seasonality functions registered" << std::endl;
+    
+    // Register changepoint detection functions
+    RegisterChangepointFunction(loader);
+    // std::cerr << "[DEBUG] Changepoint functions registered" << std::endl;
     
     // Register table macros (TS_FORECAST, TS_FORECAST_BY)
     // Both handle UNNEST internally - users get clean table output!
