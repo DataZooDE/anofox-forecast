@@ -46,11 +46,13 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28,
 - **Zero Setup**: All macros load automatically
 - **Consistent**: MAP-based parameters
 - **Composable**: Chain operations easily
+- **Multi-Language**: Use from Python, R, Julia, C++, Rust, and more!
 
 ## 📋 Table of Contents
 
 - [Installation](#installation)
 - [Quick Examples](#quick-examples)
+- [Multi-Language Support](#multi-language-support)
 - [API Reference](#api-reference)
 - [Guides](#guides)
 - [Performance](#performance)
@@ -141,6 +143,56 @@ SELECT
 FROM results
 GROUP BY product_id;
 ```
+
+---
+
+## 🌍 Multi-Language Support
+
+**Write SQL once, use everywhere!** The extension works from any language with DuckDB bindings.
+
+| Language | Status | Guide |
+|----------|--------|-------|
+| **Python** | ✅ | [Python Usage](guides/50_python_usage.md) |
+| **R** | ✅ | [R Usage](guides/51_r_usage.md) |
+| **Julia** | ✅ | [Julia Usage](guides/52_julia_usage.md) |
+| **C++** | ✅ | [C++ Usage](guides/53_cpp_usage.md) |
+| **Rust** | ✅ | [Rust Usage](guides/54_rust_usage.md) |
+| **Node.js** | ✅ | Via DuckDB Node bindings |
+| **Go** | ✅ | Via DuckDB Go bindings |
+| **Java** | ✅ | Via DuckDB JDBC driver |
+
+**See**: [Multi-Language Overview](guides/49_multi_language_overview.md) for polyglot workflows!
+
+### Quick Examples
+
+**Python** (pandas, matplotlib, FastAPI):
+```python
+forecast = con.execute("SELECT * FROM TS_FORECAST(...)").fetchdf()
+```
+
+**R** (tidyverse, ggplot2, Shiny):
+```r
+forecast <- dbGetQuery(con, "SELECT * FROM TS_FORECAST(...)")
+```
+
+**Julia** (DataFrames.jl, type-safe):
+```julia
+forecast = DataFrame(DBInterface.execute(con, "SELECT * FROM TS_FORECAST(...)"))
+```
+
+**C++** (embedded, high-performance):
+```cpp
+auto forecast = con.Query("SELECT * FROM TS_FORECAST(...)");
+```
+
+**Rust** (safe, async, web services):
+```rust
+let forecast = conn.prepare("SELECT * FROM TS_FORECAST(...)")?.query([])?;
+```
+
+**The SQL is identical across all languages!**
+
+---
 
 ## 📚 API Reference
 
@@ -265,34 +317,33 @@ TS_DETECT_CHANGEPOINTS_BY(table, group_col, date_col, value_col, params)
 
 ## 📖 Guides
 
-### Getting Started
-- [Quick Start Guide](guides/01_quickstart.md) - 5-minute introduction
-- [Installation & Setup](guides/02_installation.md) - Detailed installation
-- [Basic Forecasting](guides/03_basic_forecasting.md) - Your first forecast
+### Getting Started (2 guides)
+- [Quick Start Guide](guides/01_quickstart.md) ⭐ - 5-minute introduction
+- [Basic Forecasting](guides/03_basic_forecasting.md) - Complete workflow
 
-### Technical Guides
-- [API Reference](guides/10_api_reference.md) - Complete API documentation
+### Technical Guides (4 guides)
+- [API Reference](guides/10_api_reference.md) ⭐ - Complete API documentation
 - [Model Selection](guides/11_model_selection.md) - Choosing the right model
-- [Parameters Guide](guides/12_parameters.md) - Model-specific parameters
 - [Performance Tuning](guides/13_performance.md) - Optimization tips
+- [EDA & Data Prep](guides/40_eda_data_prep.md) ⭐ - Data quality workflow
 
-### Statistical Guides
+### Statistical Guides (1 guide)
 - [Understanding Forecasts](guides/20_understanding_forecasts.md) - Statistical concepts
-- [Accuracy Metrics](guides/21_accuracy_metrics.md) - Evaluation methods
-- [Confidence Intervals](guides/22_confidence_intervals.md) - Uncertainty quantification
-- [Seasonality Analysis](guides/23_seasonality.md) - Seasonal patterns
 
-### Business Use Cases
-- [Demand Forecasting](guides/30_demand_forecasting.md) - Retail & inventory
+### Business Use Cases (3 guides)
+- [Demand Forecasting](guides/30_demand_forecasting.md) ⭐ - Retail & inventory
 - [Sales Prediction](guides/31_sales_prediction.md) - Revenue forecasting
 - [Capacity Planning](guides/32_capacity_planning.md) - Resource allocation
-- [Anomaly Detection](guides/33_anomaly_detection.md) - Outlier identification
 
-### Advanced Topics
-- [EDA & Data Prep](guides/40_eda_data_prep.md) - Data quality workflow
-- [Changepoint Detection](guides/41_changepoint_detection.md) - Regime changes
-- [Hierarchical Forecasting](guides/42_hierarchical.md) - Multi-level forecasts
-- [Model Ensembles](guides/43_ensembles.md) - Combining models
+### Multi-Language Guides (6 guides)
+- [Multi-Language Overview](guides/49_multi_language_overview.md) ⭐ - Write once, use everywhere!
+- [Python Usage](guides/50_python_usage.md) - pandas, FastAPI, Jupyter
+- [R Usage](guides/51_r_usage.md) - tidyverse, ggplot2, Shiny
+- [Julia Usage](guides/52_julia_usage.md) - DataFrames.jl, type-safe
+- [C++ Usage](guides/53_cpp_usage.md) - Embedded, high-performance
+- [Rust Usage](guides/54_rust_usage.md) - Safe, fast, production-ready
+
+**Browse all**: [Complete Guide Index](guides/00_guide_index.md) - 17 guides, learning paths
 
 ## 🎯 Use Cases
 

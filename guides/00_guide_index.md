@@ -4,10 +4,11 @@
 
 This directory contains comprehensive guides for using anofox-forecast, organized by topic and complexity level.
 
-**Total Guides**: 10+ comprehensive documents  
-**Total Pages**: 3,500+ lines of documentation  
+**Total Guides**: 16 comprehensive documents  
+**Total Pages**: 6,500+ lines of documentation  
 **Skill Levels**: Beginner → Advanced  
-**Perspectives**: Technical, Statistical, Business  
+**Perspectives**: Technical, Statistical, Business, Multi-Language  
+**Languages**: SQL, Python, R, Julia, C++, Rust  
 
 ---
 
@@ -212,6 +213,87 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 
 ---
 
+## 🌍 Multi-Language Guides (Language Bindings)
+
+### 49. [Multi-Language Overview](49_multi_language_overview.md) ⭐
+**Write SQL once, use everywhere**
+- Language comparison
+- Integration patterns
+- Polyglot workflows
+- Performance comparison
+- Choosing the right language
+
+**Skill Level**: All levels  
+**Time**: 20 minutes  
+**Key Insight**: Same SQL works in all languages!  
+
+### 50. [Python Usage](50_python_usage.md)
+**Using from Python (pandas, polars)**
+- Installation & setup
+- DataFrame integration
+- Visualization (matplotlib, plotly)
+- API patterns (FastAPI)
+- Batch processing
+- Integration examples
+
+**Skill Level**: Intermediate  
+**Time**: 30 minutes  
+**Prerequisites**: Python basics  
+
+### 51. [R Usage](51_r_usage.md)
+**Using from R (tidyverse, ggplot2)**
+- Installation & setup
+- data.frame integration
+- Visualization (ggplot2)
+- RMarkdown reports
+- Shiny dashboards
+- Plumber APIs
+
+**Skill Level**: Intermediate  
+**Time**: 30 minutes  
+**Prerequisites**: R basics  
+
+### 52. [Julia Usage](52_julia_usage.md)
+**Using from Julia (DataFrames.jl)**
+- Installation & setup
+- DataFrame integration
+- Type-safe queries
+- Visualization (Plots.jl)
+- HTTP APIs (Oxygen.jl)
+- Scientific computing
+
+**Skill Level**: Intermediate  
+**Time**: 30 minutes  
+**Prerequisites**: Julia basics  
+
+### 53. [C++ Usage](53_cpp_usage.md)
+**Using from C++ (embedded)**
+- CMake integration
+- Type-safe results
+- Error handling
+- High-performance services
+- Prepared statements
+- Production patterns
+
+**Skill Level**: Advanced  
+**Time**: 40 minutes  
+**Prerequisites**: C++ knowledge  
+
+### 54. [Rust Usage](54_rust_usage.md)
+**Using from Rust (safe & fast)**
+- Cargo setup
+- Type-safe structures
+- Error handling (Result)
+- Async with Tokio
+- Web services (Actix)
+- CLI applications
+
+**Skill Level**: Advanced  
+**Time**: 40 minutes  
+**Prerequisites**: Rust knowledge  
+
+---
+
 ## 📋 Quick Reference by Use Case
 
 ### "I want to..."
@@ -239,6 +321,21 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 
 **...detect when demand patterns change**
 → [Changepoint Detection](41_changepoint_detection.md)
+
+**...use from Python/R/Julia/C++/Rust**
+→ [Multi-Language Overview](49_multi_language_overview.md) ⭐
+
+**...build a Python API**
+→ [Python Usage](50_python_usage.md)
+
+**...create an R Shiny dashboard**
+→ [R Usage](51_r_usage.md)
+
+**...embed in a C++ application**
+→ [C++ Usage](53_cpp_usage.md)
+
+**...build a safe Rust service**
+→ [Rust Usage](54_rust_usage.md)
 
 **...look up a specific function**
 → [API Reference](10_api_reference.md)
@@ -295,7 +392,8 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 | **Statistical** | 1 | ~600 | Concepts, metrics, intervals |
 | **Business** | 3 | ~1,200 | Demand, sales, capacity |
 | **Advanced** | 1 | ~700 | Changepoints, regimes |
-| **Total** | **11** | **~4,500** | **All aspects** |
+| **Multi-Language** | 6 | ~3,000 | Python, R, Julia, C++, Rust, Overview |
+| **Total** | **17** | **~7,500** | **All aspects** |
 
 ### Example Code
 

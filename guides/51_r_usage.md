@@ -1,0 +1,688 @@
+# Using anofox-forecast from R
+
+## Overview
+
+Use the anofox-forecast extension from R through DuckDB's R package. Perfect for R users who want production-grade forecasting without complex package dependencies.
+
+**Key Advantages**:
+- ✅ No need for forecast, fable, prophet packages
+- ✅ Faster than data.table for large datasets
+- ✅ Easy integration with tidyverse
+- ✅ SQL queries portable
+- ✅ Works seamlessly with data.frames and tibbles
+
+## Installation
+
+```r
+install.packages("duckdb")
+```
+
+**That's it!** No additional forecasting packages needed.
+
+## Quick Start
+
+```r
+library(duckdb)
+library(DBI)
+
+# Connect to DuckDB
+con <- dbConnect(duckdb::duckdb())
+
+# Load extension
+dbExecute(con, "LOAD 'path/to/anofox_forecast.duckdb_extension'")
+
+# Create sample data
+dbExecute(con, "
+    CREATE TABLE sales AS
+    SELECT 
+        DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+        100 + 20 * SIN(2 * PI() * d / 7) + random() * 10 AS amount
+    FROM generate_series(0, 89) t(d)
+")
+
+# Generate forecast
+forecast <- dbGetQuery(con, "
+    SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
+                              {'seasonal_period': 7})
+")
+
+# View results
+head(forecast)
+print(paste("Average forecast:", round(mean(forecast$point_forecast), 2)))
+
+# Disconnect
+dbDisconnect(con, shutdown = TRUE)
+```
+
+## Working with Data Frames
+
+### Load Data from R
+
+```r
+library(duckdb)
+library(DBI)
+
+# Your R data frame
+sales_df <- read.csv('sales.csv')
+sales_df$date <- as.Date(sales_df$date)
+
+# Connect
+con <- dbConnect(duckdb::duckdb())
+dbExecute(con, "LOAD 'anofox_forecast.duckdb_extension'")
+
+# Register R data frame with DuckDB
+duckdb::duckdb_register(con, "sales", sales_df)
+
+# Forecast directly from R data frame
+forecast <- dbGetQuery(con, "
+    SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28,
+                              {'seasonal_period': 7})
+")
+
+# Back to R for analysis
+summary(forecast$point_forecast)
+
+dbDisconnect(con, shutdown = TRUE)
+```
+
+### Tidyverse Integration
+
+```r
+library(duckdb)
+library(dplyr)
+library(tidyr)
+
+# Connect
+con <- dbConnect(duckdb::duckdb())
+dbExecute(con, "LOAD 'anofox_forecast.duckdb_extension'")
+
+# Load data with dplyr
+sales <- read.csv('sales.csv') %>%
+  mutate(date = as.Date(date))
+
+# Register with DuckDB
+duckdb_register(con, "sales", sales)
+
+# Forecast multiple series
+forecasts <- dbGetQuery(con, "
+    SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount,
+                                 'AutoETS', 14, {'seasonal_period': 7})
+") %>%
+  as_tibble() %>%
+  mutate(date_col = as.Date(date_col))
+
+# Tidy format
+forecasts_wide <- forecasts %>%
+  select(product_id, forecast_step, point_forecast) %>%
+  pivot_wider(names_from = product_id, values_from = point_forecast)
+
+print(forecasts_wide)
+
+dbDisconnect(con, shutdown = TRUE)
+```
+
+## Data Preparation
+
+```r
+library(duckdb)
+
+con <- dbConnect(duckdb::duckdb())
+dbExecute(con, "LOAD 'anofox_forecast.duckdb_extension'")
+
+# Load raw data
+dbExecute(con, "CREATE TABLE sales_raw AS SELECT * FROM read_csv('sales.csv')")
+
+# Analyze quality
+stats <- dbGetQuery(con, "
+    SELECT * FROM TS_STATS('sales_raw', product_id, date, amount)
+")
+
+cat(sprintf("Average quality score: %.3f\n", mean(stats$quality_score)))
+cat(sprintf("Series with issues: %d\n", sum(stats$quality_score < 0.7)))
+
+# Prepare data with SQL macros
+dbExecute(con, "
+    CREATE TABLE sales_prepared AS
+    WITH filled AS (
+        SELECT * FROM TS_FILL_GAPS('sales_raw', product_id, date, amount)
+    ),
+    cleaned AS (
+        SELECT * FROM TS_DROP_CONSTANT('filled', product_id, amount)
+    )
+    SELECT * FROM TS_FILL_NULLS_FORWARD('cleaned', product_id, date, amount)
+")
+
+# Forecast on prepared data
+forecasts <- dbGetQuery(con, "
+    SELECT * FROM TS_FORECAST_BY('sales_prepared', product_id, date, amount,
+                                 'AutoETS', 28, {'seasonal_period': 7})
+")
+
+dbDisconnect(con, shutdown = TRUE)
+```
+
+## Visualization with ggplot2
+
+```r
+library(duckdb)
+library(ggplot2)
+library(dplyr)
+
+con <- dbConnect(duckdb::duckdb())
+dbExecute(con, "LOAD 'anofox_forecast.duckdb_extension'")
+
+# Get historical data
+historical <- dbGetQuery(con, "SELECT date, amount FROM sales ORDER BY date") %>%
+  mutate(date = as.Date(date), type = 'Historical')
+
+# Get forecast
+forecast <- dbGetQuery(con, "
+    SELECT date_col AS date, point_forecast AS amount, lower, upper
+    FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
+                     {'seasonal_period': 7, 'confidence_level': 0.95})
+") %>%
+  mutate(date = as.Date(date), type = 'Forecast')
+
+# Combine for plotting
+combined <- bind_rows(
+  historical %>% select(date, amount, type),
+  forecast %>% select(date, amount, type)
+)
+
+# Plot
+ggplot() +
+  geom_line(data = combined, aes(x = date, y = amount, color = type), size = 1) +
+  geom_ribbon(data = forecast, aes(x = date, ymin = lower, ymax = upper), 
+              alpha = 0.3, fill = 'blue') +
+  labs(title = "Sales Forecast with 95% Confidence Intervals",
+       x = "Date", y = "Amount", color = "Series") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+ggsave("forecast.png", width = 10, height = 6)
+
+dbDisconnect(con, shutdown = TRUE)
+```
+
+## Evaluation & Metrics
+
+```r
+library(duckdb)
+
+con <- dbConnect(duckdb::duckdb())
+dbExecute(con, "LOAD 'anofox_forecast.duckdb_extension'")
+
+# Load actuals and forecasts
+duckdb_register(con, "actuals", actuals_df)
+duckdb_register(con, "forecasts", forecast_df)
+
+# Compute all metrics at once
+metrics <- dbGetQuery(con, "
+    WITH joined AS (
+        SELECT 
+            f.product_id,
+            LIST(a.actual ORDER BY a.date) AS actuals,
+            LIST(f.point_forecast ORDER BY f.forecast_step) AS forecasts,
+            LIST(f.lower ORDER BY f.forecast_step) AS lower_bounds,
+            LIST(f.upper ORDER BY f.forecast_step) AS upper_bounds
+        FROM forecasts f
+        JOIN actuals a ON f.product_id = a.product_id AND f.date_col = a.date
+        GROUP BY f.product_id
+    )
+    SELECT 
+        product_id,
+        ROUND(TS_MAE(actuals, forecasts), 2) AS mae,
+        ROUND(TS_RMSE(actuals, forecasts), 2) AS rmse,
+        ROUND(TS_MAPE(actuals, forecasts), 2) AS mape,
+        ROUND(TS_COVERAGE(actuals, lower_bounds, upper_bounds) * 100, 1) AS coverage_pct
+    FROM joined
+")
+
+# View metrics
+print(metrics)
+
+# Summary
+cat(sprintf("Mean MAPE: %.2f%%\n", mean(metrics$mape)))
+cat(sprintf("Mean Coverage: %.1f%%\n", mean(metrics$coverage_pct)))
+
+dbDisconnect(con, shutdown = TRUE)
+```
+
+## Shiny Dashboard Example
+
+```r
+library(shiny)
+library(duckdb)
+library(ggplot2)
+library(DBI)
+
+ui <- fluidPage(
+  titlePanel("Sales Forecast Dashboard"),
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("product", "Product:", choices = c("P001", "P002", "P003")),
+      sliderInput("horizon", "Forecast Horizon:", min = 7, max = 90, value = 28),
+      actionButton("forecast", "Generate Forecast")
+    ),
+    mainPanel(
+      plotOutput("forecastPlot"),
+      tableOutput("metricsTable")
+    )
+  )
+)
+
+server <- function(input, output, session) {
+  
+  # Initialize DuckDB connection
+  con <- dbConnect(duckdb::duckdb())
+  dbExecute(con, "LOAD 'anofox_forecast.duckdb_extension'")
+  dbExecute(con, "CREATE TABLE sales AS SELECT * FROM read_csv('sales.csv')")
+  
+  forecast_data <- eventReactive(input$forecast, {
+    dbGetQuery(con, sprintf("
+      SELECT * FROM TS_FORECAST(
+        (SELECT * FROM sales WHERE product_id = '%s'),
+        date, amount, 'AutoETS', %d, {'seasonal_period': 7}
+      )
+    ", input$product, input$horizon))
+  })
+  
+  output$forecastPlot <- renderPlot({
+    fc <- forecast_data()
+    
+    ggplot(fc, aes(x = as.Date(date_col))) +
+      geom_line(aes(y = point_forecast), color = 'blue', size = 1) +
+      geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.3, fill = 'blue') +
+      labs(title = paste("Forecast for", input$product),
+           x = "Date", y = "Amount") +
+      theme_minimal()
+  })
+  
+  output$metricsTable <- renderTable({
+    fc <- forecast_data()
+    data.frame(
+      Metric = c("Mean Forecast", "Min (Lower)", "Max (Upper)", "Avg Interval Width"),
+      Value = c(
+        round(mean(fc$point_forecast), 2),
+        round(mean(fc$lower), 2),
+        round(mean(fc$upper), 2),
+        round(mean(fc$upper - fc$lower), 2)
+      )
+    )
+  })
+  
+  onStop(function() {
+    dbDisconnect(con, shutdown = TRUE)
+  })
+}
+
+shinyApp(ui, server)
+```
+
+## RMarkdown Report
+
+````r
+---
+title: "Sales Forecast Report"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(duckdb)
+library(DBI)
+library(ggplot2)
+library(knitr)
+
+con <- dbConnect(duckdb::duckdb())
+dbExecute(con, "LOAD 'anofox_forecast.duckdb_extension'")
+dbExecute(con, "CREATE TABLE sales AS SELECT * FROM read_csv('sales.csv')")
+```
+
+## Data Quality
+
+```{r quality}
+stats <- dbGetQuery(con, "
+    SELECT * FROM TS_STATS('sales', product_id, date, amount)
+")
+
+kable(stats %>% select(series_id, length, quality_score, n_gaps, n_null))
+```
+
+## Forecast
+
+```{r forecast}
+forecast <- dbGetQuery(con, "
+    SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 
+                                 'AutoETS', 28, {'seasonal_period': 7})
+")
+
+# Plot
+ggplot(forecast, aes(x = as.Date(date_col), y = point_forecast, color = product_id)) +
+  geom_line() +
+  facet_wrap(~product_id, scales = 'free_y') +
+  theme_minimal() +
+  labs(title = "28-Day Forecasts by Product", x = "Date", y = "Forecast")
+```
+
+## Summary
+
+```{r summary}
+summary_stats <- forecast %>%
+  group_by(product_id) %>%
+  summarize(
+    mean_forecast = round(mean(point_forecast), 2),
+    total_28d = round(sum(point_forecast), 0)
+  )
+
+kable(summary_stats)
+```
+
+```{r cleanup, include=FALSE}
+dbDisconnect(con, shutdown = TRUE)
+```
+````
+
+## Best Practices for R
+
+### 1. Use dplyr for Post-Processing
+
+```r
+library(duckdb)
+library(dplyr)
+
+con <- dbConnect(duckdb::duckdb())
+dbExecute(con, "LOAD 'anofox_forecast.duckdb_extension'")
+
+# Let DuckDB do heavy lifting (forecasting)
+# Use dplyr for final shaping
+forecast <- dbGetQuery(con, "
+    SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28, 
+                                 {'seasonal_period': 7})
+") %>%
+  as_tibble() %>%
+  mutate(
+    date_col = as.Date(date_col),
+    week = lubridate::week(date_col)
+  ) %>%
+  group_by(product_id, week) %>%
+  summarize(
+    weekly_forecast = sum(point_forecast),
+    .groups = 'drop'
+  )
+
+print(forecast)
+```
+
+### 2. Function Wrappers
+
+```r
+library(duckdb)
+
+# Create reusable forecast function
+ts_forecast <- function(data, date_col, value_col, horizon = 28, 
+                        seasonal_period = 7, model = "AutoETS") {
+  
+  con <- dbConnect(duckdb::duckdb())
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  
+  dbExecute(con, "LOAD 'anofox_forecast.duckdb_extension'")
+  duckdb_register(con, "input_data", data)
+  
+  result <- dbGetQuery(con, sprintf("
+    SELECT * FROM TS_FORECAST('input_data', %s, %s, '%s', %d, 
+                              {'seasonal_period': %d})
+  ", date_col, value_col, model, horizon, seasonal_period))
+  
+  result$date_col <- as.Date(result$date_col)
+  return(as_tibble(result))
+}
+
+# Usage
+forecast <- ts_forecast(sales_df, "date", "amount", horizon = 14)
+```
+
+### 3. Batch Processing
+
+```r
+library(duckdb)
+library(purrr)
+
+con <- dbConnect(duckdb::duckdb())
+dbExecute(con, "LOAD 'anofox_forecast.duckdb_extension'")
+
+# Get product list
+products <- dbGetQuery(con, "SELECT DISTINCT product_id FROM sales")$product_id
+
+# Forecast each product
+forecasts_list <- map_dfr(products, function(pid) {
+  dbGetQuery(con, sprintf("
+    SELECT * FROM TS_FORECAST(
+      (SELECT * FROM sales WHERE product_id = '%s'),
+      date, amount, 'AutoETS', 28, {'seasonal_period': 7}
+    )
+  ", pid)) %>%
+    mutate(product_id = pid)
+})
+
+dbDisconnect(con, shutdown = TRUE)
+```
+
+## Comparison: R forecast Package vs DuckDB Extension
+
+```r
+library(duckdb)
+library(forecast)
+library(microbenchmark)
+
+# Same data
+sales_ts <- ts(sales_df$amount, frequency = 7)
+
+# Benchmark
+microbenchmark(
+  
+  # Traditional R forecast package
+  r_forecast = {
+    fit <- auto.arima(sales_ts)
+    fc <- forecast(fit, h = 28)
+  },
+  
+  # DuckDB extension
+  duckdb_forecast = {
+    con <- dbConnect(duckdb::duckdb())
+    dbExecute(con, "LOAD 'anofox_forecast.duckdb_extension'")
+    duckdb_register(con, "sales", sales_df)
+    fc <- dbGetQuery(con, "
+      SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
+                                {'seasonal_period': 7})
+    ")
+    dbDisconnect(con, shutdown = TRUE)
+  },
+  
+  times = 10
+)
+
+# For multiple series, DuckDB is MUCH faster (parallel)
+```
+
+## Working with Time Series Objects
+
+### Convert to ts Object
+
+```r
+library(duckdb)
+
+con <- dbConnect(duckdb::duckdb())
+dbExecute(con, "LOAD 'anofox_forecast.duckdb_extension'")
+
+# Get forecast as data frame
+forecast_df <- dbGetQuery(con, "
+    SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
+                              {'seasonal_period': 7})
+")
+
+# Convert to ts object if needed for R packages
+forecast_ts <- ts(
+  forecast_df$point_forecast,
+  start = c(2023, 91),  # Adjust based on your data
+  frequency = 7
+)
+
+# Now can use with standard R functions
+plot(forecast_ts)
+
+dbDisconnect(con, shutdown = TRUE)
+```
+
+## Production Deployment
+
+### Scheduled R Script (cron job)
+
+```r
+#!/usr/bin/env Rscript
+
+library(duckdb)
+library(DBI)
+library(logger)
+
+log_info("Starting daily forecast job")
+
+con <- dbConnect(duckdb::duckdb('warehouse.duckdb'))
+dbExecute(con, "LOAD 'anofox_forecast.duckdb_extension'")
+
+# Refresh data
+dbExecute(con, "
+    INSERT INTO sales 
+    SELECT * FROM read_csv('daily_sales_update.csv')
+")
+
+log_info("Data refreshed")
+
+# Generate forecasts
+dbExecute(con, "
+    CREATE OR REPLACE TABLE forecasts AS
+    SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount,
+                                 'AutoETS', 28, {'seasonal_period': 7})
+")
+
+log_info("Forecasts generated")
+
+# Export
+dbExecute(con, "
+    COPY forecasts TO 'output/forecasts.csv' (HEADER, DELIMITER ',')
+")
+
+log_info("Forecasts exported")
+
+# Get summary for email
+summary <- dbGetQuery(con, "
+    SELECT 
+        COUNT(DISTINCT product_id) AS products_forecasted,
+        COUNT(*) AS total_forecast_points
+    FROM forecasts
+")
+
+log_info(sprintf("Forecasted %d products, %d total points", 
+                 summary$products_forecasted, summary$total_forecast_points))
+
+dbDisconnect(con, shutdown = TRUE)
+
+log_info("Job complete")
+```
+
+### Plumber API
+
+```r
+library(plumber)
+library(duckdb)
+
+#* @apiTitle Sales Forecasting API
+
+# Initialize connection at startup
+con <- NULL
+
+#* @filter cors
+function(req, res) {
+  res$setHeader("Access-Control-Allow-Origin", "*")
+  plumber::forward()
+}
+
+#* Get forecast for product
+#* @param product_id Product identifier
+#* @param horizon Forecast horizon (days)
+#* @get /forecast
+function(product_id, horizon = 28) {
+  if (is.null(con)) {
+    con <<- dbConnect(duckdb::duckdb('warehouse.duckdb'))
+    dbExecute(con, "LOAD 'anofox_forecast.duckdb_extension'")
+  }
+  
+  result <- dbGetQuery(con, sprintf("
+    SELECT * FROM TS_FORECAST(
+      (SELECT * FROM sales WHERE product_id = '%s'),
+      date, amount, 'AutoETS', %d, {'seasonal_period': 7}
+    )
+  ", product_id, as.integer(horizon)))
+  
+  return(result)
+}
+
+#* Get data quality metrics
+#* @param product_id Product identifier
+#* @get /quality
+function(product_id) {
+  if (is.null(con)) {
+    con <<- dbConnect(duckdb::duckdb('warehouse.duckdb'))
+    dbExecute(con, "LOAD 'anofox_forecast.duckdb_extension'")
+  }
+  
+  result <- dbGetQuery(con, sprintf("
+    SELECT * FROM TS_STATS(
+      (SELECT * FROM sales WHERE product_id = '%s'),
+      product_id, date, amount
+    )
+  ", product_id))
+  
+  return(result)
+}
+
+# Run with: plumb("api.R")$run(port = 8000)
+```
+
+## Comparison with Other R Packages
+
+| Feature | anofox-forecast | forecast | fable | prophet |
+|---------|-----------------|----------|-------|---------|
+| **Language** | SQL (via R) | R | R | R |
+| **Multiple series** | Parallel (fast) | Loop (slow) | tsibble | Loop |
+| **Data prep** | Built-in macros | Manual | Manual | Manual |
+| **Setup** | Install DuckDB | Install forecast | Many deps | Many deps |
+| **Speed (10K series)** | Minutes | Hours | Hours | Days |
+| **Integration** | Works across languages | R only | R only | R/Python |
+
+## Summary
+
+**Why Use from R?**
+- ✅ Faster than traditional R packages for multiple series
+- ✅ Less memory usage (DuckDB's columnar storage)
+- ✅ Easy integration with tidyverse
+- ✅ Built-in data preparation (no custom R code needed)
+- ✅ Production-ready (battle-tested SQL)
+
+**Typical R Workflow**:
+```r
+data.frame → duckdb_register() → SQL forecast → data.frame → ggplot2
+```
+
+**When to Use**:
+- Forecasting 100+ series in parallel
+- Need data preparation (gaps, nulls, outliers)
+- Want faster performance than forecast/fable
+- Building production APIs (Plumber)
+- Integrating with databases
+
+---
+
+**Next**: [Julia Usage Guide](52_julia_usage.md) | [C++ Usage Guide](53_cpp_usage.md)
+
+**R + DuckDB**: The best of both worlds - R's statistical ecosystem + DuckDB's performance! 📊
+
