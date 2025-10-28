@@ -102,6 +102,8 @@ set(EXTENSION_SOURCES
     src/metrics_function.cpp
     src/seasonality_function.cpp
     src/changepoint_function.cpp
+    src/eda_macros.cpp
+    src/data_prep_macros.cpp
     src/model_factory.cpp
     src/time_series_builder.cpp
     src/anofox_time_wrapper.cpp

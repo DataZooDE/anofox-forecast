@@ -14,6 +14,8 @@
 #include "metrics_function.hpp"
 #include "seasonality_function.hpp"
 #include "changepoint_function.hpp"
+#include "eda_macros.hpp"
+#include "data_prep_macros.hpp"
 #include "duckdb/catalog/default/default_functions.hpp"
 #include "duckdb/catalog/default/default_table_functions.hpp"
 
@@ -38,7 +40,9 @@ static const DefaultTableMacro forecast_table_macros[] = {
             UNNEST(result.point_forecast) AS point_forecast,
             UNNEST(result.lower) AS lower,
             UNNEST(result.upper) AS upper,
-            result.model_name AS model_name
+            result.model_name AS model_name,
+            result.insample_fitted AS insample_fitted,
+            result.confidence_level AS confidence_level
         FROM fc
     )"},
     // TS_FORECAST_BY: Multiple series (1 group column)
@@ -57,7 +61,9 @@ static const DefaultTableMacro forecast_table_macros[] = {
             UNNEST(result.point_forecast) AS point_forecast,
             UNNEST(result.lower) AS lower,
             UNNEST(result.upper) AS upper,
-            result.model_name AS model_name
+            result.model_name AS model_name,
+            result.insample_fitted AS insample_fitted,
+            result.confidence_level AS confidence_level
         FROM fc
     )"},
     // TS_DETECT_CHANGEPOINTS: Single series (no GROUP BY)
@@ -136,6 +142,14 @@ static void LoadInternal(ExtensionLoader &loader) {
         loader.RegisterFunction(*table_info);
     }
     // std::cerr << "[DEBUG] TS_FORECAST table macros registered" << std::endl;
+    
+    // Register EDA (Exploratory Data Analysis) macros
+    RegisterEDAMacros(loader);
+    // std::cerr << "[DEBUG] EDA macros registered" << std::endl;
+    
+    // Register Data Preparation macros
+    RegisterDataPrepMacros(loader);
+    // std::cerr << "[DEBUG] Data Preparation macros registered" << std::endl;
     
     // std::cerr << "[DEBUG] All functions registered successfully" << std::endl;
 }

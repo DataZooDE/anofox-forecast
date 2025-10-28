@@ -418,4 +418,43 @@ const std::vector<double>& AnofoxTimeWrapper::GetUpperBound(const ::anofoxtime::
     return forecast.upperSeries();
 }
 
+std::vector<double> AnofoxTimeWrapper::GetFittedValues(::anofoxtime::models::IForecaster* model) {
+    // Use dynamic_cast to check if model supports fittedValues()
+    // Only include models that have public fittedValues() method
+    
+    #define TRY_GET_FITTED(ModelType) \
+        if (auto* m = dynamic_cast<::anofoxtime::models::ModelType*>(model)) { \
+            return m->fittedValues(); \
+        }
+    
+    // Models with public fittedValues() method (confirmed by grep)
+    TRY_GET_FITTED(Naive)
+    TRY_GET_FITTED(SeasonalNaive)
+    TRY_GET_FITTED(RandomWalkWithDrift)
+    TRY_GET_FITTED(SESOptimized)
+    TRY_GET_FITTED(HoltWinters)
+    TRY_GET_FITTED(Theta)
+    TRY_GET_FITTED(OptimizedTheta)
+    TRY_GET_FITTED(DynamicTheta)
+    TRY_GET_FITTED(DynamicOptimizedTheta)
+    TRY_GET_FITTED(SeasonalExponentialSmoothing)
+    TRY_GET_FITTED(SeasonalESOptimized)
+    TRY_GET_FITTED(SeasonalWindowAverage)
+    TRY_GET_FITTED(ETS)
+    TRY_GET_FITTED(AutoETS)
+    TRY_GET_FITTED(AutoARIMA)
+    TRY_GET_FITTED(MFLES)
+    TRY_GET_FITTED(TBATS)
+    TRY_GET_FITTED(CrostonClassic)
+    TRY_GET_FITTED(CrostonOptimized)
+    TRY_GET_FITTED(ADIDA)
+    TRY_GET_FITTED(IMAPA)
+    TRY_GET_FITTED(TSB)
+    
+    #undef TRY_GET_FITTED
+    
+    // Model doesn't support fitted values - return empty vector
+    return std::vector<double>();
+}
+
 } // namespace duckdb

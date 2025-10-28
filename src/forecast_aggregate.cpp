@@ -131,6 +131,17 @@ struct ForecastAggregateOperation {
             AnofoxTimeWrapper::FitModel(model_ptr.get(), *ts_ptr);
         }
         
+        // STAGE 4.5: EXTRACT FITTED VALUES (if requested)
+        std::vector<double> fitted_values;
+        if (bind_data.return_insample) {
+            try {
+                fitted_values = AnofoxTimeWrapper::GetFittedValues(model_ptr.get());
+            } catch (...) {
+                // Model doesn't support fitted values, return empty
+                fitted_values.clear();
+            }
+        }
+        
         // STAGE 5: PREDICT
         std::unique_ptr<::anofoxtime::core::Forecast> forecast_ptr;
         {
@@ -229,6 +240,18 @@ struct ForecastAggregateOperation {
             struct_values.push_back(make_pair("lower", Value::LIST(LogicalType::DOUBLE, lowers)));
             struct_values.push_back(make_pair("upper", Value::LIST(LogicalType::DOUBLE, uppers)));
             struct_values.push_back(make_pair("model_name", Value(AnofoxTimeWrapper::GetModelName(*model_ptr))));
+            
+            // Add in-sample fitted values (empty if not requested)
+            vector<Value> fitted_value_list;
+            if (bind_data.return_insample && !fitted_values.empty()) {
+                for (const auto &val : fitted_values) {
+                    fitted_value_list.push_back(Value::DOUBLE(val));
+                }
+            }
+            struct_values.push_back(make_pair("insample_fitted", Value::LIST(LogicalType::DOUBLE, fitted_value_list)));
+            
+            // Add confidence level
+            struct_values.push_back(make_pair("confidence_level", Value::DOUBLE(bind_data.confidence_level)));
             
             auto result_value = Value::STRUCT(std::move(struct_values));
             finalize_data.result.SetValue(finalize_data.result_idx, result_value);
@@ -389,8 +412,10 @@ unique_ptr<FunctionData> TSForecastBind(ClientContext &context, AggregateFunctio
     
     ModelFactory::ValidateModelParams(model_name, model_params);
     
-    // Extract confidence_level parameter (default: 0.90)
+    // Extract confidence_level and return_insample parameters
     double confidence_level = 0.90;
+    bool return_insample = false;
+    
     if (model_params.type().id() == LogicalTypeId::STRUCT) {
         auto &struct_children = StructValue::GetChildren(model_params);
         for (size_t i = 0; i < struct_children.size(); i++) {
@@ -402,7 +427,12 @@ unique_ptr<FunctionData> TSForecastBind(ClientContext &context, AggregateFunctio
                     throw BinderException("confidence_level must be between 0 and 1 (got " + 
                                         std::to_string(confidence_level) + ")");
                 }
-                break;
+            } else if (key == "return_insample") {
+                try {
+                    return_insample = struct_children[i].GetValue<bool>();
+                } catch (...) {
+                    // Keep default on error
+                }
             }
         }
     }
@@ -415,11 +445,13 @@ unique_ptr<FunctionData> TSForecastBind(ClientContext &context, AggregateFunctio
     struct_children.push_back(make_pair("lower", LogicalType::LIST(LogicalType::DOUBLE)));
     struct_children.push_back(make_pair("upper", LogicalType::LIST(LogicalType::DOUBLE)));
     struct_children.push_back(make_pair("model_name", LogicalType::VARCHAR));
+    struct_children.push_back(make_pair("insample_fitted", LogicalType::LIST(LogicalType::DOUBLE)));
+    struct_children.push_back(make_pair("confidence_level", LogicalType::DOUBLE));
     
     function.return_type = LogicalType::STRUCT(std::move(struct_children));
     
     // // std::cerr << "[DEBUG] TSForecastBind complete" << std::endl;
-    return make_uniq<ForecastAggregateBindData>(model_name, horizon, model_params, confidence_level);
+    return make_uniq<ForecastAggregateBindData>(model_name, horizon, model_params, confidence_level, return_insample);
 }
 
 AggregateFunction CreateTSForecastAggregate() {

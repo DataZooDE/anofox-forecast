@@ -160,6 +160,9 @@ public:
     static bool HasUpperBound(const ::anofoxtime::core::Forecast& forecast);
     static const std::vector<double>& GetLowerBound(const ::anofoxtime::core::Forecast& forecast);
     static const std::vector<double>& GetUpperBound(const ::anofoxtime::core::Forecast& forecast);
+    
+    // Get fitted values (in-sample predictions)
+    static std::vector<double> GetFittedValues(::anofoxtime::models::IForecaster* model);
 };
 
 } // namespace duckdb

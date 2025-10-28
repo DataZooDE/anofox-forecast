@@ -42,18 +42,21 @@ struct ForecastAggregateBindData : public FunctionData {
     int32_t horizon;
     Value model_params;
     double confidence_level;
+    bool return_insample;
     
-    explicit ForecastAggregateBindData(string model, int32_t h, Value params, double conf = 0.90)
-        : model_name(std::move(model)), horizon(h), model_params(std::move(params)), confidence_level(conf) {}
+    explicit ForecastAggregateBindData(string model, int32_t h, Value params, double conf = 0.90, bool insample = false)
+        : model_name(std::move(model)), horizon(h), model_params(std::move(params)), 
+          confidence_level(conf), return_insample(insample) {}
     
     unique_ptr<FunctionData> Copy() const override {
-        return make_uniq<ForecastAggregateBindData>(model_name, horizon, model_params, confidence_level);
+        return make_uniq<ForecastAggregateBindData>(model_name, horizon, model_params, confidence_level, return_insample);
     }
     
     bool Equals(const FunctionData &other_p) const override {
         auto &other = other_p.Cast<ForecastAggregateBindData>();
         return model_name == other.model_name && horizon == other.horizon && 
-               std::abs(confidence_level - other.confidence_level) < 1e-9;
+               std::abs(confidence_level - other.confidence_level) < 1e-9 &&
+               return_insample == other.return_insample;
     }
 };
 
