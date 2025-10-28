@@ -10,4 +10,3 @@ class ExtensionLoader;
 void RegisterChangepointFunction(ExtensionLoader &loader);
 
 } // namespace duckdb
-

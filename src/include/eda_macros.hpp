@@ -10,4 +10,3 @@ class ExtensionLoader;
 void RegisterEDAMacros(ExtensionLoader &loader);
 
 } // namespace duckdb
-

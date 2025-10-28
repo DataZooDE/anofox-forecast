@@ -10,4 +10,3 @@ class ExtensionLoader;
 void RegisterSeasonalityFunction(ExtensionLoader &loader);
 
 } // namespace duckdb
-

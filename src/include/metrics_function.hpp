@@ -10,4 +10,3 @@ class ExtensionLoader;
 void RegisterMetricsFunction(ExtensionLoader &loader);
 
 } // namespace duckdb
-

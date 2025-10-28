@@ -5,9 +5,13 @@ namespace duckdb {
 
 // Array of data preparation macros
 static const DefaultTableMacro data_prep_macros[] = {
-        
-        // TS_FILL_GAPS: Fill missing time gaps
-        {DEFAULT_SCHEMA, "ts_fill_gaps", {"table_name", "group_cols", "date_col", "value_col", nullptr}, {{nullptr, nullptr}}, R"(
+
+    // TS_FILL_GAPS: Fill missing time gaps
+    {DEFAULT_SCHEMA,
+     "ts_fill_gaps",
+     {"table_name", "group_cols", "date_col", "value_col", nullptr},
+     {{nullptr, nullptr}},
+     R"(
             WITH series_data AS (
                 SELECT * FROM QUERY_TABLE(table_name)
             ),
@@ -42,9 +46,13 @@ static const DefaultTableMacro data_prep_macros[] = {
             FROM filled
             ORDER BY group_cols, date_col
         )"},
-        
-        // TS_FILL_FORWARD: Extend series to target date
-        {DEFAULT_SCHEMA, "ts_fill_forward", {"table_name", "group_cols", "date_col", "value_col", "target_date", nullptr}, {{nullptr, nullptr}}, R"(
+
+    // TS_FILL_FORWARD: Extend series to target date
+    {DEFAULT_SCHEMA,
+     "ts_fill_forward",
+     {"table_name", "group_cols", "date_col", "value_col", "target_date", nullptr},
+     {{nullptr, nullptr}},
+     R"(
             WITH series_data AS (
                 SELECT * FROM QUERY_TABLE(table_name)
             ),
@@ -74,9 +82,9 @@ static const DefaultTableMacro data_prep_macros[] = {
             SELECT * FROM new_rows
             ORDER BY group_cols, date_col
         )"},
-        
-        // TS_DROP_CONSTANT: Drop constant series
-        {DEFAULT_SCHEMA, "ts_drop_constant", {"table_name", "group_cols", "value_col", nullptr}, {{nullptr, nullptr}}, R"(
+
+    // TS_DROP_CONSTANT: Drop constant series
+    {DEFAULT_SCHEMA, "ts_drop_constant", {"table_name", "group_cols", "value_col", nullptr}, {{nullptr, nullptr}}, R"(
             WITH series_data AS (
                 SELECT * FROM QUERY_TABLE(table_name)
             ),
@@ -93,9 +101,13 @@ static const DefaultTableMacro data_prep_macros[] = {
             INNER JOIN series_variance v 
                 ON s.group_cols = v.series_id
         )"},
-        
-        // TS_DROP_SHORT: Drop short series
-        {DEFAULT_SCHEMA, "ts_drop_short", {"table_name", "group_cols", "date_col", "min_length", nullptr}, {{nullptr, nullptr}}, R"(
+
+    // TS_DROP_SHORT: Drop short series
+    {DEFAULT_SCHEMA,
+     "ts_drop_short",
+     {"table_name", "group_cols", "date_col", "min_length", nullptr},
+     {{nullptr, nullptr}},
+     R"(
             WITH series_data AS (
                 SELECT * FROM QUERY_TABLE(table_name)
             ),
@@ -112,9 +124,13 @@ static const DefaultTableMacro data_prep_macros[] = {
             INNER JOIN series_length l 
                 ON s.group_cols = l.series_id
         )"},
-        
-        // TS_DROP_GAPPY: Drop series with excessive gaps
-        {DEFAULT_SCHEMA, "ts_drop_gappy", {"table_name", "group_cols", "date_col", "max_gap_pct", nullptr}, {{nullptr, nullptr}}, R"(
+
+    // TS_DROP_GAPPY: Drop series with excessive gaps
+    {DEFAULT_SCHEMA,
+     "ts_drop_gappy",
+     {"table_name", "group_cols", "date_col", "max_gap_pct", nullptr},
+     {{nullptr, nullptr}},
+     R"(
             WITH series_data AS (
                 SELECT * FROM QUERY_TABLE(table_name)
             ),
@@ -133,9 +149,13 @@ static const DefaultTableMacro data_prep_macros[] = {
             INNER JOIN series_gaps g 
                 ON s.group_cols = g.series_id
         )"},
-        
-        // TS_DROP_LEADING_ZEROS: Remove leading zeros
-        {DEFAULT_SCHEMA, "ts_drop_leading_zeros", {"table_name", "group_cols", "date_col", "value_col", nullptr}, {{nullptr, nullptr}}, R"(
+
+    // TS_DROP_LEADING_ZEROS: Remove leading zeros
+    {DEFAULT_SCHEMA,
+     "ts_drop_leading_zeros",
+     {"table_name", "group_cols", "date_col", "value_col", nullptr},
+     {{nullptr, nullptr}},
+     R"(
             WITH series_data AS (
                 SELECT * FROM QUERY_TABLE(table_name)
             ),
@@ -156,9 +176,13 @@ static const DefaultTableMacro data_prep_macros[] = {
             WHERE date_col >= first_nonzero_date OR first_nonzero_date IS NULL
             ORDER BY group_cols, date_col
         )"},
-        
-        // TS_DROP_TRAILING_ZEROS: Remove trailing zeros
-        {DEFAULT_SCHEMA, "ts_drop_trailing_zeros", {"table_name", "group_cols", "date_col", "value_col", nullptr}, {{nullptr, nullptr}}, R"(
+
+    // TS_DROP_TRAILING_ZEROS: Remove trailing zeros
+    {DEFAULT_SCHEMA,
+     "ts_drop_trailing_zeros",
+     {"table_name", "group_cols", "date_col", "value_col", nullptr},
+     {{nullptr, nullptr}},
+     R"(
             WITH series_data AS (
                 SELECT * FROM QUERY_TABLE(table_name)
             ),
@@ -179,9 +203,13 @@ static const DefaultTableMacro data_prep_macros[] = {
             WHERE date_col <= last_nonzero_date OR last_nonzero_date IS NULL
             ORDER BY group_cols, date_col
         )"},
-        
-        // TS_DROP_EDGE_ZEROS: Drop both leading and trailing zeros
-        {DEFAULT_SCHEMA, "ts_drop_edge_zeros", {"table_name", "group_cols", "date_col", "value_col", nullptr}, {{nullptr, nullptr}}, R"(
+
+    // TS_DROP_EDGE_ZEROS: Drop both leading and trailing zeros
+    {DEFAULT_SCHEMA,
+     "ts_drop_edge_zeros",
+     {"table_name", "group_cols", "date_col", "value_col", nullptr},
+     {{nullptr, nullptr}},
+     R"(
             WITH series_data AS (
                 SELECT * FROM QUERY_TABLE(table_name)
             ),
@@ -205,18 +233,26 @@ static const DefaultTableMacro data_prep_macros[] = {
                OR (first_nonzero_date IS NULL AND last_nonzero_date IS NULL)
             ORDER BY group_cols, date_col
         )"},
-        
-        // TS_FILL_NULLS_CONST: Fill with constant value
-        {DEFAULT_SCHEMA, "ts_fill_nulls_const", {"table_name", "group_cols", "date_col", "value_col", "fill_value", nullptr}, {{nullptr, nullptr}}, R"(
+
+    // TS_FILL_NULLS_CONST: Fill with constant value
+    {DEFAULT_SCHEMA,
+     "ts_fill_nulls_const",
+     {"table_name", "group_cols", "date_col", "value_col", "fill_value", nullptr},
+     {{nullptr, nullptr}},
+     R"(
             SELECT 
                 group_cols,
                 date_col,
                 COALESCE(value_col, fill_value) AS value_col
             FROM QUERY_TABLE(table_name)
         )"},
-        
-        // TS_FILL_NULLS_FORWARD: Forward fill (LOCF)
-        {DEFAULT_SCHEMA, "ts_fill_nulls_forward", {"table_name", "group_cols", "date_col", "value_col", nullptr}, {{nullptr, nullptr}}, R"(
+
+    // TS_FILL_NULLS_FORWARD: Forward fill (LOCF)
+    {DEFAULT_SCHEMA,
+     "ts_fill_nulls_forward",
+     {"table_name", "group_cols", "date_col", "value_col", nullptr},
+     {{nullptr, nullptr}},
+     R"(
             WITH series_data AS (
                 SELECT * FROM QUERY_TABLE(table_name)
                 ORDER BY group_cols, date_col
@@ -231,9 +267,13 @@ static const DefaultTableMacro data_prep_macros[] = {
                 ) AS value_col
             FROM series_data
         )"},
-        
-        // TS_FILL_NULLS_BACKWARD: Backward fill
-        {DEFAULT_SCHEMA, "ts_fill_nulls_backward", {"table_name", "group_cols", "date_col", "value_col", nullptr}, {{nullptr, nullptr}}, R"(
+
+    // TS_FILL_NULLS_BACKWARD: Backward fill
+    {DEFAULT_SCHEMA,
+     "ts_fill_nulls_backward",
+     {"table_name", "group_cols", "date_col", "value_col", nullptr},
+     {{nullptr, nullptr}},
+     R"(
             WITH series_data AS (
                 SELECT * FROM QUERY_TABLE(table_name)
                 ORDER BY group_cols, date_col
@@ -248,9 +288,13 @@ static const DefaultTableMacro data_prep_macros[] = {
                 ) AS value_col
             FROM series_data
         )"},
-        
-        // TS_FILL_NULLS_MEAN: Fill with series mean
-        {DEFAULT_SCHEMA, "ts_fill_nulls_mean", {"table_name", "group_cols", "date_col", "value_col", nullptr}, {{nullptr, nullptr}}, R"(
+
+    // TS_FILL_NULLS_MEAN: Fill with series mean
+    {DEFAULT_SCHEMA,
+     "ts_fill_nulls_mean",
+     {"table_name", "group_cols", "date_col", "value_col", nullptr},
+     {{nullptr, nullptr}},
+     R"(
             WITH series_data AS (
                 SELECT * FROM QUERY_TABLE(table_name)
             ),
@@ -269,18 +313,16 @@ static const DefaultTableMacro data_prep_macros[] = {
             FROM series_data s
             LEFT JOIN series_means m ON s.group_cols = m.series_id
         )"},
-        
-        // End marker
-        {nullptr, nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}
-    };
+
+    // End marker
+    {nullptr, nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}};
 
 // Register Data Preparation table macros
 void RegisterDataPrepMacros(ExtensionLoader &loader) {
-    for (idx_t index = 0; data_prep_macros[index].name != nullptr; index++) {
-        auto table_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(data_prep_macros[index]);
-        loader.RegisterFunction(*table_info);
-    }
+	for (idx_t index = 0; data_prep_macros[index].name != nullptr; index++) {
+		auto table_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(data_prep_macros[index]);
+		loader.RegisterFunction(*table_info);
+	}
 }
 
 } // namespace duckdb
-

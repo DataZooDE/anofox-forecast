@@ -5,9 +5,13 @@ namespace duckdb {
 
 // Array of EDA macros
 static const DefaultTableMacro eda_macros[] = {
-        
-        // TS_STATS: Per-series comprehensive statistics
-        {DEFAULT_SCHEMA, "ts_stats", {"table_name", "group_cols", "date_col", "value_col", nullptr}, {{nullptr, nullptr}}, R"(
+
+    // TS_STATS: Per-series comprehensive statistics
+    {DEFAULT_SCHEMA,
+     "ts_stats",
+     {"table_name", "group_cols", "date_col", "value_col", nullptr},
+     {{nullptr, nullptr}},
+     R"(
             WITH series_raw AS (
                 SELECT * FROM QUERY_TABLE(table_name)
             ),
@@ -60,9 +64,9 @@ static const DefaultTableMacro eda_macros[] = {
             FROM series_extended
             ORDER BY series_id
         )"},
-        
-        // TS_QUALITY_REPORT: Comprehensive quality checks
-        {DEFAULT_SCHEMA, "ts_quality_report", {"stats_table", "min_length", nullptr}, {{nullptr, nullptr}}, R"(
+
+    // TS_QUALITY_REPORT: Comprehensive quality checks
+    {DEFAULT_SCHEMA, "ts_quality_report", {"stats_table", "min_length", nullptr}, {{nullptr, nullptr}}, R"(
             WITH gap_check AS (
                 SELECT 
                     'Gap Analysis' AS check_type,
@@ -114,9 +118,9 @@ static const DefaultTableMacro eda_macros[] = {
             SELECT check_type, total_series, short_series, pct_short, min_length_val, max_length_val
             FROM short_check
         )"},
-        
-        // TS_DATASET_SUMMARY: Overall dataset statistics
-        {DEFAULT_SCHEMA, "ts_dataset_summary", {"stats_table", nullptr}, {{nullptr, nullptr}}, R"(
+
+    // TS_DATASET_SUMMARY: Overall dataset statistics
+    {DEFAULT_SCHEMA, "ts_dataset_summary", {"stats_table", nullptr}, {{nullptr, nullptr}}, R"(
             SELECT 
                 COUNT(*) AS total_series,
                 SUM(length) AS total_observations,
@@ -133,9 +137,9 @@ static const DefaultTableMacro eda_macros[] = {
                 SUM(CASE WHEN quality_score < 0.5 THEN 1 ELSE 0 END) AS low_quality_series
             FROM QUERY_TABLE(stats_table)
         )"},
-        
-        // TS_GET_PROBLEMATIC: Low quality series
-        {DEFAULT_SCHEMA, "ts_get_problematic", {"stats_table", "quality_threshold", nullptr}, {{nullptr, nullptr}}, R"(
+
+    // TS_GET_PROBLEMATIC: Low quality series
+    {DEFAULT_SCHEMA, "ts_get_problematic", {"stats_table", "quality_threshold", nullptr}, {{nullptr, nullptr}}, R"(
             SELECT 
                 series_id, length, n_gaps, n_null, n_nan, is_constant, quality_score,
                 CASE 
@@ -148,9 +152,13 @@ static const DefaultTableMacro eda_macros[] = {
             WHERE quality_score < quality_threshold
             ORDER BY quality_score
         )"},
-        
-        // TS_DETECT_SEASONALITY_ALL: Detect seasonality for all series
-        {DEFAULT_SCHEMA, "ts_detect_seasonality_all", {"table_name", "group_cols", "date_col", "value_col", nullptr}, {{nullptr, nullptr}}, R"(
+
+    // TS_DETECT_SEASONALITY_ALL: Detect seasonality for all series
+    {DEFAULT_SCHEMA,
+     "ts_detect_seasonality_all",
+     {"table_name", "group_cols", "date_col", "value_col", nullptr},
+     {{nullptr, nullptr}},
+     R"(
             WITH series_data AS (
                 SELECT * FROM QUERY_TABLE(table_name)
             ),
@@ -172,18 +180,16 @@ static const DefaultTableMacro eda_macros[] = {
                 LEN(TS_DETECT_SEASONALITY(values)) > 0 AS is_seasonal
             FROM series_agg
         )"},
-        
-        // End marker
-        {nullptr, nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}
-    };
+
+    // End marker
+    {nullptr, nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}};
 
 // Register EDA (Exploratory Data Analysis) table macros
 void RegisterEDAMacros(ExtensionLoader &loader) {
-    for (idx_t index = 0; eda_macros[index].name != nullptr; index++) {
-        auto table_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(eda_macros[index]);
-        loader.RegisterFunction(*table_info);
-    }
+	for (idx_t index = 0; eda_macros[index].name != nullptr; index++) {
+		auto table_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(eda_macros[index]);
+		loader.RegisterFunction(*table_info);
+	}
 }
 
 } // namespace duckdb
-
