@@ -1,10 +1,9 @@
 # name: test/sql/core/test_all_models.test
-# description: Test that all forecasting models can be created and produce forecasts
+# description: Test that all forecasting models work correctly
 # group: [core]
 
 require anofox_forecast
 
-# Load the extension
 statement ok
 LOAD anofox_forecast;
 
@@ -16,47 +15,41 @@ SELECT
     100.0 + i * 2.0 + 10.0 * SIN(i * 2 * PI() / 12) AS value
 FROM generate_series(1, 50) t(i);
 
-# Test: Basic Models
+# Test: Basic Models using table macro
 
 # Naive
 query I
-SELECT len(result.forecast) = 12 
-FROM (SELECT TS_FORECAST(value, 'Naive', 12, NULL) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'Naive', 12, NULL);
 ----
 true
 
 # SMA (Simple Moving Average)
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'SMA', 12, {'window': 5}) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'SMA', 12, {'window': 5});
 ----
 true
 
 # SeasonalNaive
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'SeasonalNaive', 12, {'seasonal_period': 12}) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'SeasonalNaive', 12, {'seasonal_period': 12});
 ----
 true
 
 # SES (Simple Exponential Smoothing)
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'SES', 12, {'alpha': 0.3}) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'SES', 12, {'alpha': 0.3});
 ----
 true
 
 # SESOptimized
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'SESOptimized', 12, NULL) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'SESOptimized', 12, NULL);
 ----
 true
 
 # RandomWalkWithDrift
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'RandomWalkWithDrift', 12, NULL) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'RandomWalkWithDrift', 12, NULL);
 ----
 true
 
@@ -64,15 +57,13 @@ true
 
 # Holt (Double Exponential Smoothing)
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'Holt', 12, {'alpha': 0.3, 'beta': 0.1}) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'Holt', 12, {'alpha': 0.3, 'beta': 0.1});
 ----
 true
 
 # HoltWinters (Triple Exponential Smoothing)
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'HoltWinters', 12, {'seasonal_period': 12, 'multiplicative': 0}) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'HoltWinters', 12, {'seasonal_period': 12, 'multiplicative': 0});
 ----
 true
 
@@ -80,29 +71,25 @@ true
 
 # Theta
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'Theta', 12, {'seasonal_period': 12, 'theta_param': 2.0}) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'Theta', 12, {'seasonal_period': 12, 'theta_param': 2.0});
 ----
 true
 
 # OptimizedTheta
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'OptimizedTheta', 12, {'seasonal_period': 12}) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'OptimizedTheta', 12, {'seasonal_period': 12});
 ----
 true
 
 # DynamicTheta
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'DynamicTheta', 12, {'seasonal_period': 12}) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'DynamicTheta', 12, {'seasonal_period': 12});
 ----
 true
 
 # DynamicOptimizedTheta
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'DynamicOptimizedTheta', 12, {'seasonal_period': 12}) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'DynamicOptimizedTheta', 12, {'seasonal_period': 12});
 ----
 true
 
@@ -110,22 +97,19 @@ true
 
 # SeasonalES
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'SeasonalES', 12, {'seasonal_period': 12}) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'SeasonalES', 12, {'seasonal_period': 12});
 ----
 true
 
 # SeasonalESOptimized
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'SeasonalESOptimized', 12, {'seasonal_period': 12}) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'SeasonalESOptimized', 12, {'seasonal_period': 12});
 ----
 true
 
 # SeasonalWindowAverage
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'SeasonalWindowAverage', 12, {'seasonal_period': 12, 'window_size': 3}) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'SeasonalWindowAverage', 12, {'seasonal_period': 12, 'window_size': 3});
 ----
 true
 
@@ -133,15 +117,13 @@ true
 
 # ETS
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'ETS', 12, {'error_type': 0, 'trend_type': 1, 'season_type': 1, 'season_length': 12}) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'ETS', 12, {'error_type': 0, 'trend_type': 1, 'season_type': 1, 'season_length': 12});
 ----
 true
 
 # AutoETS
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'AutoETS', 12, {'season_length': 12}) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'AutoETS', 12, {'season_length': 12});
 ----
 true
 
@@ -149,48 +131,41 @@ true
 
 # MFLES
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'MFLES', 12, {'seasonal_periods': [12]}) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'MFLES', 12, {'seasonal_periods': [12]});
 ----
 true
 
 # AutoMFLES
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'AutoMFLES', 12, {'seasonal_periods': [12]}) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'AutoMFLES', 12, {'seasonal_periods': [12]});
 ----
 true
 
 # MSTL
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'MSTL', 12, {'seasonal_periods': [12]}) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'MSTL', 12, {'seasonal_periods': [12]});
 ----
 true
 
 # AutoMSTL
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'AutoMSTL', 12, {'seasonal_periods': [12]}) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'AutoMSTL', 12, {'seasonal_periods': [12]});
 ----
 true
 
 # TBATS
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'TBATS', 12, {'seasonal_periods': [12]}) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'TBATS', 12, {'seasonal_periods': [12]});
 ----
 true
 
 # AutoTBATS
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'AutoTBATS', 12, {'seasonal_periods': [12]}) AS result FROM test_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(test_series, 'idx', 'value', 'AutoTBATS', 12, {'seasonal_periods': [12]});
 ----
 true
 
 # Test: Intermittent Demand Models
-
 # Create intermittent demand data (many zeros)
 statement ok
 CREATE TABLE intermittent_series AS 
@@ -201,43 +176,50 @@ FROM generate_series(1, 100) t(i);
 
 # CrostonClassic
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'CrostonClassic', 12, NULL) AS result FROM intermittent_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(intermittent_series, 'idx', 'value', 'CrostonClassic', 12, NULL);
 ----
 true
 
 # CrostonOptimized
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'CrostonOptimized', 12, NULL) AS result FROM intermittent_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(intermittent_series, 'idx', 'value', 'CrostonOptimized', 12, NULL);
 ----
 true
 
 # CrostonSBA
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'CrostonSBA', 12, NULL) AS result FROM intermittent_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(intermittent_series, 'idx', 'value', 'CrostonSBA', 12, NULL);
 ----
 true
 
 # ADIDA
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'ADIDA', 12, NULL) AS result FROM intermittent_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(intermittent_series, 'idx', 'value', 'ADIDA', 12, NULL);
 ----
 true
 
 # IMAPA
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'IMAPA', 12, NULL) AS result FROM intermittent_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(intermittent_series, 'idx', 'value', 'IMAPA', 12, NULL);
 ----
 true
 
 # TSB
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'TSB', 12, NULL) AS result FROM intermittent_series);
+SELECT COUNT(*) = 12 FROM ts_forecast(intermittent_series, 'idx', 'value', 'TSB', 12, NULL);
+----
+true
+
+# Test: Using aggregate directly
+statement ok
+CREATE TABLE agg_test AS
+SELECT TS_FORECAST_AGG(idx, value, 'Naive', 5, NULL) AS result
+FROM test_series;
+
+# Verify aggregate result structure
+query I
+SELECT len(result.point_forecast) = 5
+FROM agg_test;
 ----
 true
 
@@ -248,3 +230,5 @@ DROP TABLE test_series;
 statement ok
 DROP TABLE intermittent_series;
 
+statement ok
+DROP TABLE agg_test;

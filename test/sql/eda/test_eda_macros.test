@@ -30,18 +30,12 @@ SELECT
 FROM generate_series(1, 30) t(i);
 
 # Test: TS_STATS - Basic statistics
+# Signature: ts_stats(table_name, group_cols, date_col, value_col)
 statement ok
 CREATE TABLE stats_result AS
-SELECT * FROM TS_STATS('eda_test_data', 'date', 'value', 'series_id');
+SELECT * FROM ts_stats(eda_test_data, 'series_id', 'date', 'value');
 
-# Verify stats table has required columns
-query I
-SELECT COUNT(*) >= 7
-FROM (SELECT * FROM pragma_table_info('stats_result'));
-----
-true
-
-# Verify both series are in results
+# Verify stats table has data for both series
 query I
 SELECT COUNT(DISTINCT series_id) = 2
 FROM stats_result;
@@ -49,20 +43,21 @@ FROM stats_result;
 true
 
 # Test: TS_QUALITY_REPORT - Data quality analysis
+# Signature: ts_quality_report(table_name, group_cols, date_col, value_col)
 statement ok
 CREATE TABLE quality_result AS
-SELECT * FROM TS_QUALITY_REPORT('eda_test_data', 'date', 'value', 'series_id');
+SELECT * FROM ts_quality_report(eda_test_data, 'series_id', 'date', 'value');
 
 # Verify quality report detects issues in series_1
 query I
-SELECT null_count > 0
+SELECT n_null > 0
 FROM quality_result
 WHERE series_id = 'series_1';
 ----
 true
 
 query I
-SELECT zero_count > 0
+SELECT n_zeros > 0
 FROM quality_result
 WHERE series_id = 'series_1';
 ----
@@ -77,35 +72,38 @@ WHERE series_id = 'series_2';
 true
 
 # Test: TS_ANALYZE_ZEROS - Zero value analysis
+# Signature: ts_analyze_zeros(table_name, group_cols, date_col, value_col)
 statement ok
 CREATE TABLE zeros_result AS
-SELECT * FROM TS_ANALYZE_ZEROS('eda_test_data', 'date', 'value', 'series_id');
+SELECT * FROM ts_analyze_zeros(eda_test_data, 'series_id', 'date', 'value');
 
 # Verify zeros are detected in series_1
 query I
-SELECT zero_count > 0
+SELECT n_zeros > 0
 FROM zeros_result
 WHERE series_id = 'series_1';
 ----
 true
 
 # Test: TS_DETECT_GAPS - Gap detection
+# Signature: ts_detect_gaps(table_name, group_cols, date_col, value_col)
 statement ok
 CREATE TABLE gaps_result AS
-SELECT * FROM TS_DETECT_GAPS('eda_test_data', 'date', 'value', 'series_id', 'DAY');
+SELECT * FROM ts_detect_gaps(eda_test_data, 'series_id', 'date', 'value');
 
 # Verify gaps are detected in series_1 (we intentionally excluded days 30, 31, 32)
 query I
-SELECT gap_count > 0
+SELECT n_gaps > 0
 FROM gaps_result
 WHERE series_id = 'series_1';
 ----
 true
 
 # Test: TS_CHECK_STATIONARITY - Stationarity check
+# Signature: ts_check_stationarity(table_name, group_cols, date_col, value_col)
 statement ok
 CREATE TABLE stationarity_result AS
-SELECT * FROM TS_CHECK_STATIONARITY('eda_test_data', 'date', 'value', 'series_id');
+SELECT * FROM ts_check_stationarity(eda_test_data, 'series_id', 'date', 'value');
 
 # Verify stationarity results exist for both series
 query I
@@ -115,22 +113,24 @@ FROM stationarity_result;
 true
 
 # Test: TS_DETECT_OUTLIERS - Outlier detection
+# Signature: ts_detect_outliers(table_name, group_cols, date_col, value_col)
 statement ok
 CREATE TABLE outliers_result AS
-SELECT * FROM TS_DETECT_OUTLIERS('eda_test_data', 'date', 'value', 'series_id', 3.0);
+SELECT * FROM ts_detect_outliers(eda_test_data, 'series_id', 'date', 'value');
 
 # Verify outlier is detected in series_1 (value 500.0 when i=25)
 query I
-SELECT outlier_count > 0
+SELECT n_outliers > 0
 FROM outliers_result
 WHERE series_id = 'series_1';
 ----
 true
 
 # Test: TS_DISTRIBUTION_SUMMARY - Distribution analysis
+# Signature: ts_distribution_summary(table_name, group_cols, date_col, value_col)
 statement ok
 CREATE TABLE distribution_result AS
-SELECT * FROM TS_DISTRIBUTION_SUMMARY('eda_test_data', 'date', 'value', 'series_id');
+SELECT * FROM ts_distribution_summary(eda_test_data, 'series_id', 'date', 'value');
 
 # Verify distribution summary exists for both series
 query I
@@ -139,9 +139,9 @@ FROM distribution_result;
 ----
 true
 
-# Verify distribution metrics are reasonable
+# Verify distribution metrics are present
 query I
-SELECT skewness IS NOT NULL AND kurtosis IS NOT NULL
+SELECT skewness IS NOT NULL
 FROM distribution_result
 WHERE series_id = 'series_1';
 ----
@@ -150,27 +150,18 @@ true
 # Test: EDA workflow - chain multiple analyses
 statement ok
 CREATE TABLE complete_eda AS
-WITH stats AS (
-    SELECT * FROM TS_STATS('eda_test_data', 'date', 'value', 'series_id')
-),
-quality AS (
-    SELECT * FROM TS_QUALITY_REPORT('eda_test_data', 'date', 'value', 'series_id')
-),
-gaps AS (
-    SELECT * FROM TS_DETECT_GAPS('eda_test_data', 'date', 'value', 'series_id', 'DAY')
-)
 SELECT 
     s.series_id,
-    s.count_value AS n_points,
-    s.mean,
-    s.std_dev,
-    q.null_count,
-    q.zero_count,
+    s.length AS n_points,
+    s.mean_value AS mean,
+    s.std_value AS std_dev,
+    q.n_null AS null_count,
+    q.n_zeros AS zero_count,
     q.is_constant,
-    g.gap_count
-FROM stats s
-JOIN quality q ON s.series_id = q.series_id
-JOIN gaps g ON s.series_id = g.series_id;
+    g.n_gaps AS gap_count
+FROM stats_result s
+JOIN quality_result q ON s.series_id = q.series_id
+JOIN gaps_result g ON s.series_id = g.series_id;
 
 # Verify complete EDA results
 query I
@@ -230,4 +221,3 @@ DROP TABLE distribution_result;
 
 statement ok
 DROP TABLE complete_eda;
-

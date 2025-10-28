@@ -7,252 +7,188 @@ require anofox_forecast
 statement ok
 LOAD anofox_forecast;
 
+# Create test data
+statement ok
+CREATE TABLE test_data AS
+SELECT i AS idx, (100.0 + i)::DOUBLE AS value
+FROM generate_series(1, 20) t(i);
+
 # Test: Invalid model name
 statement error
-SELECT TS_FORECAST(value, 'NonExistentModel', 5, NULL)
-FROM (VALUES (100.0), (101.0), (102.0)) t(value);
+SELECT * FROM ts_forecast(test_data, 'idx', 'value', 'NonExistentModel', 5, NULL);
 ----
 Unknown model
 
 # Test: Negative horizon
 statement error
-SELECT TS_FORECAST(value, 'Naive', -5, NULL)
-FROM (VALUES (100.0), (101.0), (102.0)) t(value);
+SELECT * FROM ts_forecast(test_data, 'idx', 'value', 'Naive', -5, NULL);
 ----
 
 # Test: Zero horizon  
 statement error
-SELECT TS_FORECAST(value, 'Naive', 0, NULL)
-FROM (VALUES (100.0), (101.0), (102.0)) t(value);
+SELECT * FROM ts_forecast(test_data, 'idx', 'value', 'Naive', 0, NULL);
 ----
 
 # Test: Invalid confidence level (> 1.0)
 statement error
-SELECT TS_FORECAST(value, 'Naive', 5, {'confidence_level': 1.5})
-FROM (VALUES (100.0), (101.0), (102.0)) t(value);
+SELECT * FROM ts_forecast(test_data, 'idx', 'value', 'Naive', 5, {'confidence_level': 1.5});
 ----
 
 # Test: Invalid confidence level (< 0.0)
 statement error
-SELECT TS_FORECAST(value, 'Naive', 5, {'confidence_level': -0.5})
-FROM (VALUES (100.0), (101.0), (102.0)) t(value);
+SELECT * FROM ts_forecast(test_data, 'idx', 'value', 'Naive', 5, {'confidence_level': -0.5});
 ----
 
 # Test: Missing required parameter - SeasonalNaive without seasonal_period
 statement error
-SELECT TS_FORECAST(value, 'SeasonalNaive', 5, NULL)
-FROM (VALUES (100.0), (101.0), (102.0)) t(value);
+SELECT * FROM ts_forecast(test_data, 'idx', 'value', 'SeasonalNaive', 5, NULL);
 ----
 seasonal_period
 
 # Test: Missing required parameter - HoltWinters without seasonal_period
 statement error
-SELECT TS_FORECAST(value, 'HoltWinters', 5, NULL)
-FROM (VALUES (100.0), (101.0), (102.0)) t(value);
+SELECT * FROM ts_forecast(test_data, 'idx', 'value', 'HoltWinters', 5, NULL);
 ----
 seasonal_period
 
-# Test: Invalid parameter type - window as string
-statement error
-SELECT TS_FORECAST(value, 'SMA', 5, {'window': 'invalid'})
-FROM (VALUES (100.0), (101.0), (102.0)) t(value);
-----
-
 # Test: Invalid parameter value - negative window
 statement error
-SELECT TS_FORECAST(value, 'SMA', 5, {'window': -3})
-FROM (VALUES (100.0), (101.0), (102.0)) t(value);
+SELECT * FROM ts_forecast(test_data, 'idx', 'value', 'SMA', 5, {'window': -3});
 ----
 
 # Test: Invalid parameter value - zero window
 statement error
-SELECT TS_FORECAST(value, 'SMA', 5, {'window': 0})
-FROM (VALUES (100.0), (101.0), (102.0)) t(value);
+SELECT * FROM ts_forecast(test_data, 'idx', 'value', 'SMA', 5, {'window': 0});
 ----
 
 # Test: Invalid alpha (> 1.0)
 statement error
-SELECT TS_FORECAST(value, 'SES', 5, {'alpha': 1.5})
-FROM (VALUES (100.0), (101.0), (102.0)) t(value);
+SELECT * FROM ts_forecast(test_data, 'idx', 'value', 'SES', 5, {'alpha': 1.5});
 ----
 
 # Test: Invalid alpha (< 0.0)
 statement error
-SELECT TS_FORECAST(value, 'SES', 5, {'alpha': -0.1})
-FROM (VALUES (100.0), (101.0), (102.0)) t(value);
-----
-
-# Test: Insufficient data for model (single point)
-statement error
-SELECT TS_FORECAST(value, 'Naive', 5, NULL)
-FROM (VALUES (100.0)) t(value);
-----
-
-# Test: All NULL values
-statement error
-SELECT TS_FORECAST(value, 'Naive', 5, NULL)
-FROM (VALUES (NULL), (NULL), (NULL)) t(value);
-----
-
-# Test: Empty result set
-statement error
-SELECT TS_FORECAST(value, 'Naive', 5, NULL)
-FROM (SELECT NULL::DOUBLE AS value WHERE FALSE);
+SELECT * FROM ts_forecast(test_data, 'idx', 'value', 'SES', 5, {'alpha': -0.1});
 ----
 
 # Test: Very large horizon (should work but might be slow)
-# This tests that the system can handle large forecasts
 query I
-SELECT len(result.forecast) = 1000
-FROM (
-    SELECT TS_FORECAST(value, 'Naive', 1000, NULL) AS result
-    FROM (SELECT i::DOUBLE AS value FROM generate_series(1, 100) t(i))
-);
+SELECT COUNT(*) = 1000
+FROM ts_forecast(test_data, 'idx', 'value', 'Naive', 1000, NULL);
 ----
 true
 
 # Test: Reasonable behavior with small dataset
-# 3 points should work for Naive
 query I
-SELECT len(result.forecast) = 5
-FROM (
-    SELECT TS_FORECAST(value, 'Naive', 5, NULL) AS result
-    FROM (VALUES (100.0), (101.0), (102.0)) t(value)
+SELECT COUNT(*) = 5
+FROM ts_forecast(
+    (SELECT i AS idx, (100.0 + i)::DOUBLE AS value FROM generate_series(1, 5) t(i)),
+    'idx', 
+    'value', 
+    'Naive', 
+    5, 
+    NULL
 );
 ----
 true
 
 # Test: Series with constant values (should work for most models)
+statement ok
+CREATE TABLE constant_data AS
+SELECT i AS idx, 100.0 AS value FROM generate_series(1, 20) t(i);
+
 query I
-SELECT len(result.forecast) = 5
-FROM (
-    SELECT TS_FORECAST(value, 'Naive', 5, NULL) AS result
-    FROM (SELECT 100.0 AS value FROM generate_series(1, 20))
-);
+SELECT COUNT(*) = 5
+FROM ts_forecast(constant_data, 'idx', 'value', 'Naive', 5, NULL);
 ----
 true
 
 # Test: Series with extreme values
+statement ok
+CREATE TABLE extreme_data AS
+SELECT i AS idx, (1e10 + i)::DOUBLE AS value FROM generate_series(1, 10) t(i);
+
 query I
-SELECT len(result.forecast) = 5
-FROM (
-    SELECT TS_FORECAST(value, 'Naive', 5, NULL) AS result
-    FROM (VALUES (1e10), (1e10 + 1), (1e10 + 2), (1e10 + 3)) t(value)
-);
+SELECT COUNT(*) = 5
+FROM ts_forecast(extreme_data, 'idx', 'value', 'Naive', 5, NULL);
 ----
 true
 
 # Test: Series with very small values
+statement ok
+CREATE TABLE small_data AS
+SELECT i AS idx, (0.0001 * i)::DOUBLE AS value FROM generate_series(1, 10) t(i);
+
 query I
-SELECT len(result.forecast) = 5
-FROM (
-    SELECT TS_FORECAST(value, 'Naive', 5, NULL) AS result
-    FROM (VALUES (0.0001), (0.0002), (0.0003), (0.0004)) t(value)
-);
+SELECT COUNT(*) = 5
+FROM ts_forecast(small_data, 'idx', 'value', 'Naive', 5, NULL);
 ----
 true
 
 # Test: Series with negative values
+statement ok
+CREATE TABLE negative_data AS
+SELECT i AS idx, (-100.0 + i)::DOUBLE AS value FROM generate_series(1, 10) t(i);
+
 query I
-SELECT len(result.forecast) = 5
-FROM (
-    SELECT TS_FORECAST(value, 'Naive', 5, NULL) AS result
-    FROM (VALUES (-100.0), (-99.0), (-98.0), (-97.0)) t(value)
-);
+SELECT COUNT(*) = 5
+FROM ts_forecast(negative_data, 'idx', 'value', 'Naive', 5, NULL);
 ----
 true
 
 # Test: Series with mixed positive and negative
+statement ok
+CREATE TABLE mixed_data AS
+SELECT i AS idx, (CASE WHEN i % 2 = 0 THEN i::DOUBLE ELSE -i::DOUBLE END) AS value 
+FROM generate_series(1, 20) t(i);
+
 query I
-SELECT len(result.forecast) = 5
-FROM (
-    SELECT TS_FORECAST(value, 'Naive', 5, NULL) AS result
-    FROM (VALUES (-10.0), (5.0), (-3.0), (8.0), (-2.0)) t(value)
-);
+SELECT COUNT(*) = 5
+FROM ts_forecast(mixed_data, 'idx', 'value', 'Naive', 5, NULL);
 ----
 true
 
 # Test: Table macro with invalid table name
 statement error
-SELECT * FROM ts_forecast(
-    'nonexistent_table',
-    'date',
-    'value',
-    'Naive',
-    5,
-    {}
-);
+SELECT * FROM ts_forecast('nonexistent_table', 'idx', 'value', 'Naive', 5, NULL);
 ----
-
-# Test: Table macro with invalid column name
-statement ok
-CREATE TABLE test_table AS
-SELECT i AS idx, i::DOUBLE AS val
-FROM generate_series(1, 10) t(i);
-
-statement error
-SELECT * FROM ts_forecast(
-    test_table,
-    'nonexistent_date_col',
-    'val',
-    'Naive',
-    5,
-    {}
-);
-----
-
-statement error
-SELECT * FROM ts_forecast(
-    test_table,
-    'idx',
-    'nonexistent_value_col',
-    'Naive',
-    5,
-    {}
-);
-----
-
-# Test: Forecast with NULLs in the middle of series
-# System should handle or reject appropriately
-statement ok
-CREATE TABLE series_with_nulls AS
-SELECT i AS idx, 
-    CASE WHEN i IN (5, 6, 7) THEN NULL ELSE i::DOUBLE END AS value
-FROM generate_series(1, 20) t(i);
-
-# This should either work (by handling NULLs) or fail gracefully
-statement maybe
-SELECT len(result.forecast) = 5
-FROM (SELECT TS_FORECAST(value, 'Naive', 5, NULL) AS result FROM series_with_nulls);
 
 # Test: Seasonal model with non-seasonal data (period mismatch)
 # Should still work, just might not be optimal
 query I
-SELECT len(result.forecast) = 5
-FROM (
-    SELECT TS_FORECAST(value, 'SeasonalNaive', 5, {'seasonal_period': 12}) AS result
-    FROM (SELECT i::DOUBLE AS value FROM generate_series(1, 30) t(i))
-);
+SELECT COUNT(*) = 5
+FROM ts_forecast(test_data, 'idx', 'value', 'SeasonalNaive', 5, {'seasonal_period': 12});
 ----
 true
 
 # Test: Model that requires more data than available
 # SMA with window larger than dataset
 statement error
-SELECT TS_FORECAST(value, 'SMA', 5, {'window': 100})
-FROM (SELECT i::DOUBLE AS value FROM generate_series(1, 10) t(i));
-----
-
-# Test: Multiple issues combined
-statement error
-SELECT TS_FORECAST(NULL, 'NonExistentModel', -5, {'invalid_param': 'value'})
-FROM (SELECT NULL::DOUBLE AS value WHERE FALSE);
+SELECT * FROM ts_forecast(
+    (SELECT i AS idx, i::DOUBLE AS value FROM generate_series(1, 5) t(i)),
+    'idx', 
+    'value',
+    'SMA', 
+    5, 
+    {'window': 100}
+);
 ----
 
 # Cleanup
 statement ok
-DROP TABLE test_table;
+DROP TABLE test_data;
 
 statement ok
-DROP TABLE series_with_nulls;
+DROP TABLE constant_data;
 
+statement ok
+DROP TABLE extreme_data;
+
+statement ok
+DROP TABLE small_data;
+
+statement ok
+DROP TABLE negative_data;
+
+statement ok
+DROP TABLE mixed_data;

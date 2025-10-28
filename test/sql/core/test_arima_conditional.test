@@ -15,39 +15,50 @@ SELECT
     100.0 + i * 2.0 + 10.0 * SIN(i * 2 * PI() / 12) AS value
 FROM generate_series(1, 50) t(i);
 
-# Check if ARIMA is available (depends on Eigen3)
-statement ok
-CREATE TABLE arima_available AS
-SELECT COUNT(*) > 0 AS has_arima
-FROM ts_list_models()
-WHERE model_name = 'ARIMA';
-
-# Test ARIMA (manual) - only if Eigen3 available
-# This will either succeed or fail with "Unknown model" error
-# We test that it doesn't crash
+# Test ARIMA (manual) - will either succeed or fail with "Unknown model" error
+# This tests conditional compilation based on Eigen3 availability
 statement maybe
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'ARIMA', 12, {'p': 1, 'd': 1, 'q': 1, 's': 12}) AS result FROM test_series);
+SELECT COUNT(*) = 12
+FROM ts_forecast(test_series, 'idx', 'value', 'ARIMA', 12, {'p': 1, 'd': 1, 'q': 1, 's': 12});
 
-# Test Auto ARIMA - only if Eigen3 available
+# Test AutoARIMA - will either succeed or fail with "Unknown model" error
 statement maybe
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'AutoARIMA', 12, {'seasonal_period': 12}) AS result FROM test_series);
-
-# Verify that if ARIMA is not available, we get a clear error message
-# (This is tested implicitly by the maybe statements above)
+SELECT COUNT(*) = 12
+FROM ts_forecast(test_series, 'idx', 'value', 'AutoARIMA', 12, {'seasonal_period': 12});
 
 # Verify that non-ARIMA models always work regardless of Eigen3
 query I
-SELECT len(result.forecast) = 12
-FROM (SELECT TS_FORECAST(value, 'AutoETS', 12, {'season_length': 12}) AS result FROM test_series);
+SELECT COUNT(*) = 12
+FROM ts_forecast(test_series, 'idx', 'value', 'AutoETS', 12, {'season_length': 12});
 ----
 true
+
+# Test: If ARIMA works, verify it returns valid results
+statement maybe
+CREATE TABLE arima_result AS
+SELECT TS_FORECAST_AGG(idx, value, 'ARIMA', 5, {'p': 1, 'd': 1, 'q': 1}) AS result
+FROM test_series;
+
+statement maybe
+SELECT len(result.point_forecast) = 5
+FROM arima_result;
+
+statement maybe
+DROP TABLE arima_result;
+
+# Test: If AutoARIMA works, verify it returns valid results
+statement maybe
+CREATE TABLE autoarima_result AS
+SELECT TS_FORECAST_AGG(idx, value, 'AutoARIMA', 5, {'seasonal_period': 12}) AS result
+FROM test_series;
+
+statement maybe
+SELECT len(result.point_forecast) = 5
+FROM autoarima_result;
+
+statement maybe
+DROP TABLE autoarima_result;
 
 # Cleanup
 statement ok
 DROP TABLE test_series;
-
-statement ok
-DROP TABLE arima_available;
-

@@ -1,6 +1,6 @@
 # name: test/sql/simple_smoke_test.test
 # description: Simple smoke test for anofox_forecast extension
-# group: [anofox_forecast]
+# group: [sql]
 
 require anofox_forecast
 

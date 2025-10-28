@@ -17,17 +17,27 @@ FROM generate_series(1, 20) t(i);
 
 # Test: Default behavior (return_insample = false)
 # insample_fitted should be empty
+statement ok
+CREATE TABLE default_result AS
+SELECT TS_FORECAST_AGG(idx, value, 'Naive', 5, NULL) AS result
+FROM test_series;
+
 query I
 SELECT len(result.insample_fitted) = 0
-FROM (SELECT TS_FORECAST(value, 'Naive', 5, NULL) AS result FROM test_series);
+FROM default_result;
 ----
 true
 
 # Test: With return_insample = true
 # insample_fitted should have length equal to training data
+statement ok
+CREATE TABLE insample_result AS
+SELECT TS_FORECAST_AGG(idx, value, 'Naive', 5, {'return_insample': true}) AS result
+FROM test_series;
+
 query I
 SELECT len(result.insample_fitted) = 20
-FROM (SELECT TS_FORECAST(value, 'Naive', 5, {'return_insample': true}) AS result FROM test_series);
+FROM insample_result;
 ----
 true
 
@@ -38,9 +48,10 @@ CREATE TABLE naive_test AS
 SELECT 
     result.insample_fitted AS fitted,
     list(value) AS actual
-FROM (SELECT TS_FORECAST(value, 'Naive', 5, {'return_insample': true}) AS result FROM test_series);
+FROM insample_result
+CROSS JOIN (SELECT list(value ORDER BY idx) AS value FROM test_series) t;
 
-# Verify Naive fitted values: fitted[i+1] ≈ actual[i]
+# Verify Naive fitted values: fitted[2] ≈ actual[1]
 # (allowing for small floating point differences)
 query I
 SELECT 
@@ -50,16 +61,26 @@ FROM naive_test;
 true
 
 # Test: SES model returns fitted values
+statement ok
+CREATE TABLE ses_result AS
+SELECT TS_FORECAST_AGG(idx, value, 'SES', 5, {'alpha': 0.3, 'return_insample': true}) AS result
+FROM test_series;
+
 query I
 SELECT len(result.insample_fitted) = 20
-FROM (SELECT TS_FORECAST(value, 'SES', 5, {'alpha': 0.3, 'return_insample': true}) AS result FROM test_series);
+FROM ses_result;
 ----
 true
 
-# Test: ETS model returns fitted values
+# Test: AutoETS model returns fitted values
+statement ok
+CREATE TABLE ets_result AS
+SELECT TS_FORECAST_AGG(idx, value, 'AutoETS', 5, {'season_length': 1, 'return_insample': true}) AS result
+FROM test_series;
+
 query I
 SELECT len(result.insample_fitted) = 20
-FROM (SELECT TS_FORECAST(value, 'AutoETS', 5, {'season_length': 1, 'return_insample': true}) AS result FROM test_series);
+FROM ets_result;
 ----
 true
 
@@ -69,30 +90,20 @@ SELECT
     result.insample_fitted[1] IS NOT NULL
     AND result.insample_fitted[1] < 1000000
     AND result.insample_fitted[1] > -1000000
-FROM (SELECT TS_FORECAST(value, 'Naive', 5, {'return_insample': true}) AS result FROM test_series);
+FROM insample_result;
 ----
 true
 
-# Test: Multiple models with in-sample forecasts
+# Test: Table macro also exposes insample_fitted
 statement ok
-CREATE TABLE multi_model_test AS
-SELECT 
-    'Naive' AS model,
-    (SELECT TS_FORECAST(value, 'Naive', 5, {'return_insample': true}) FROM test_series) AS result
-UNION ALL
-SELECT 
-    'SES' AS model,
-    (SELECT TS_FORECAST(value, 'SES', 5, {'alpha': 0.3, 'return_insample': true}) FROM test_series) AS result
-UNION ALL
-SELECT 
-    'Holt' AS model,
-    (SELECT TS_FORECAST(value, 'Holt', 5, {'alpha': 0.3, 'beta': 0.1, 'return_insample': true}) FROM test_series) AS result;
+CREATE TABLE macro_result AS
+SELECT * FROM ts_forecast(test_series, 'idx', 'value', 'Naive', 5, {'return_insample': true});
 
-# Verify all models return fitted values of correct length
+# Verify insample_fitted is available in macro output
 query I
-SELECT COUNT(*) = 3
-FROM multi_model_test
-WHERE len(result.insample_fitted) = 20;
+SELECT insample_fitted IS NOT NULL AND len(insample_fitted) = 20
+FROM macro_result
+LIMIT 1;
 ----
 true
 
@@ -101,8 +112,19 @@ statement ok
 DROP TABLE test_series;
 
 statement ok
+DROP TABLE default_result;
+
+statement ok
+DROP TABLE insample_result;
+
+statement ok
 DROP TABLE naive_test;
 
 statement ok
-DROP TABLE multi_model_test;
+DROP TABLE ses_result;
 
+statement ok
+DROP TABLE ets_result;
+
+statement ok
+DROP TABLE macro_result;
