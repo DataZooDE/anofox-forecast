@@ -6,6 +6,3 @@
 	path = extension-ci-tools
 	url = https://github.com/duckdb/extension-ci-tools
 	branch = main
-[submodule "anofox-time"]
-	path = anofox-time
-	url = https://github.com/DataZooDE/anofox-time.git
