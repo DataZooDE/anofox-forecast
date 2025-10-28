@@ -83,7 +83,7 @@ Test that `confidence_level` is correctly returned:
 -- Test default confidence level (0.90)
 SELECT result.confidence_level 
 FROM (
-    SELECT TS_FORECAST(value, 'Naive', 5, {}) AS result
+    SELECT TS_FORECAST(value, 'Naive', 5, NULL) AS result
     FROM test_data
 );
 -- Expected: 0.90
@@ -278,7 +278,7 @@ SELECT * FROM ts_list_models() WHERE model_name LIKE '%ARIMA%';
 SELECT TS_FORECAST(value, 'ARIMA', 5, {'p': 1, 'd': 1, 'q': 1});
 -- Expected error: "Unknown model: 'ARIMA'"
 
-SELECT TS_FORECAST(value, 'AutoARIMA', 5, {});
+SELECT TS_FORECAST(value, 'AutoARIMA', 5, NULL);
 -- Expected error: "Unknown model: 'AutoARIMA'"
 
 -- Verify ARIMA models don't appear in supported list
@@ -286,7 +286,7 @@ SELECT * FROM ts_list_models() WHERE model_name LIKE '%ARIMA%';
 -- Expected: 0 rows
 
 -- Verify other models still work
-SELECT TS_FORECAST(value, 'Naive', 5, {});
+SELECT TS_FORECAST(value, 'Naive', 5, NULL);
 SELECT TS_FORECAST(value, 'AutoETS', 5, {'seasonal_period': 12});
 -- Expected: Success
 ```
@@ -295,21 +295,21 @@ SELECT TS_FORECAST(value, 'AutoETS', 5, {'seasonal_period': 12});
 
 #### 7.1 Empty Series
 ```sql
-SELECT TS_FORECAST(value, 'Naive', 5, {}) 
+SELECT TS_FORECAST(value, 'Naive', 5, NULL) 
 FROM (SELECT NULL::DOUBLE AS value WHERE FALSE);
 -- Expected: Appropriate error
 ```
 
 #### 7.2 Single Value Series
 ```sql
-SELECT TS_FORECAST(value, 'Naive', 5, {})
+SELECT TS_FORECAST(value, 'Naive', 5, NULL)
 FROM (VALUES (100.0)) t(value);
 -- Expected: Appropriate error or default behavior
 ```
 
 #### 7.3 Series with All NULLs
 ```sql
-SELECT TS_FORECAST(value, 'Naive', 5, {})
+SELECT TS_FORECAST(value, 'Naive', 5, NULL)
 FROM (VALUES (NULL), (NULL), (NULL)) t(value);
 -- Expected: Appropriate error
 ```
@@ -317,7 +317,7 @@ FROM (VALUES (NULL), (NULL), (NULL)) t(value);
 #### 7.4 Invalid Parameters
 ```sql
 -- Negative horizon
-SELECT TS_FORECAST(value, 'Naive', -5, {});
+SELECT TS_FORECAST(value, 'Naive', -5, NULL);
 -- Expected: Error
 
 -- Invalid confidence level
@@ -325,18 +325,18 @@ SELECT TS_FORECAST(value, 'Naive', 5, {'confidence_level': 1.5});
 -- Expected: Error
 
 -- Invalid model name
-SELECT TS_FORECAST(value, 'NonExistentModel', 5, {});
+SELECT TS_FORECAST(value, 'NonExistentModel', 5, NULL);
 -- Expected: Clear error message
 ```
 
 #### 7.5 Missing Required Parameters
 ```sql
 -- SeasonalNaive without seasonal_period
-SELECT TS_FORECAST(value, 'SeasonalNaive', 5, {});
+SELECT TS_FORECAST(value, 'SeasonalNaive', 5, NULL);
 -- Expected: Error about missing seasonal_period
 
 -- HoltWinters without seasonal_period
-SELECT TS_FORECAST(value, 'HoltWinters', 5, {});
+SELECT TS_FORECAST(value, 'HoltWinters', 5, NULL);
 -- Expected: Error about missing seasonal_period
 ```
 
@@ -345,7 +345,7 @@ SELECT TS_FORECAST(value, 'HoltWinters', 5, {});
 #### 8.1 Large Series
 ```sql
 -- Test with 10,000 data points
-SELECT TS_FORECAST(value, 'Naive', 100, {})
+SELECT TS_FORECAST(value, 'Naive', 100, NULL)
 FROM generate_series(1, 10000) t(idx)
 CROSS JOIN (VALUES (random() * 100)) v(value);
 ```
@@ -374,7 +374,7 @@ FROM ts_forecast_by(
 #### 9.1 Existing Queries Still Work
 ```sql
 -- Old-style aggregate call (no new parameters)
-SELECT TS_FORECAST(value, 'Naive', 5, {})
+SELECT TS_FORECAST(value, 'Naive', 5, NULL)
 FROM test_data;
 -- Expected: Success, insample_fitted is empty, confidence_level is 0.90
 

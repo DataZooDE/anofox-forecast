@@ -238,7 +238,7 @@ When adding new features, follow this pattern:
    ```sql
    query I
    SELECT len(result.forecast) = 12
-   FROM (SELECT TS_FORECAST(value, 'Naive', 12, {}) AS result FROM test_data);
+   FROM (SELECT TS_FORECAST(value, 'Naive', 12, NULL) AS result FROM test_data);
    ----
    true
    ```
