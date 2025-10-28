@@ -94,6 +94,14 @@ set(ANOFOX_TIME_SOURCES
     anofox-time/src/optimization/ets_gradients_checkpointing.cpp
 )
 
+# Add ARIMA models if Eigen3 is available
+if(Eigen3_FOUND)
+    list(APPEND ANOFOX_TIME_SOURCES
+        anofox-time/src/models/arima.cpp
+        anofox-time/src/models/auto_arima.cpp
+    )
+endif()
+
 # Update extension sources
 set(EXTENSION_SOURCES 
     src/anofox_forecast_extension.cpp

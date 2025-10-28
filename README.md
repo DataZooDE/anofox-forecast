@@ -60,18 +60,99 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28,
 
 ## 📦 Installation
 
+### Prerequisites
+
+Before building, install the required dependencies:
+
+**Manjaro/Arch Linux**:
+```bash
+sudo pacman -S base-devel cmake ninja openssl eigen
+```
+
+**Ubuntu/Debian**:
+```bash
+sudo apt update
+sudo apt install build-essential cmake ninja-build libssl-dev libeigen3-dev
+```
+
+**Fedora/RHEL**:
+```bash
+sudo dnf install gcc-c++ cmake ninja-build openssl-devel eigen3-devel
+```
+
+**macOS**:
+```bash
+brew install cmake ninja openssl eigen
+```
+
+**Windows** (Option 1 - vcpkg, recommended):
+```powershell
+# Install vcpkg
+git clone https://github.com/Microsoft/vcpkg.git
+.\vcpkg\bootstrap-vcpkg.bat
+
+# Install dependencies
+.\vcpkg\vcpkg install eigen3 openssl
+
+# Build with vcpkg toolchain
+cmake -DCMAKE_TOOLCHAIN_FILE=.\vcpkg\scripts\buildsystems\vcpkg.cmake .
+cmake --build . --config Release
+```
+
+**Windows** (Option 2 - MSYS2/MinGW):
+```bash
+# In MSYS2 MinGW64 terminal
+pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
+pacman -S mingw-w64-x86_64-openssl mingw-w64-x86_64-eigen3
+
+# Then build as normal
+make -j$(nproc)
+```
+
+**Windows** (Option 3 - WSL, easiest):
+```bash
+# Use Ubuntu in WSL
+wsl --install
+# Then follow Ubuntu instructions above
+```
+
+**Required**:
+- C++ compiler (GCC 9+ or Clang 10+)
+- CMake 3.15+
+- OpenSSL (development libraries)
+- Eigen3 (linear algebra library, required for ARIMA models)
+- Make or Ninja (build system)
+
 ### Build from Source
 
 ```bash
-git clone --recurse-submodules https://github.com/yourusername/anofox-forecast.git
+# Clone with submodules
+git clone --recurse-submodules https://github.com/DataZooDE/anofox-forecast.git
 cd anofox-forecast
-make -j$(nproc)
+
+# Build (choose one)
+make -j$(nproc)              # With Make
+GEN=ninja make release       # With Ninja (faster)
+```
+
+### Verify Installation
+
+```bash
+# Test the extension
+./build/release/duckdb -c "
+LOAD 'build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension';
+SELECT 'Extension loaded successfully! ✅' AS status;
+"
 ```
 
 ### Load Extension
 
 ```sql
+-- In DuckDB
 LOAD 'path/to/anofox_forecast.duckdb_extension';
+
+-- Verify all functions are available
+SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 7, {'seasonal_period': 7});
 ```
 
 ## 🎓 Quick Examples
