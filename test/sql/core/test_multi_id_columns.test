@@ -28,32 +28,12 @@ FROM (
     FROM generate_series(1, 60) t(i)
 );
 
-# Test: EDA with 3 ID columns - need to concatenate for single group_col
-# Create composite key
-statement ok
-CREATE TABLE sales_with_composite AS
-SELECT 
-    date,
-    region || '|' || store || '|' || product AS composite_id,
-    region,
-    store,
-    product,
-    sales
-FROM sales_data;
+# ============================================================================
+# APPROACH 1: Manual GROUP BY with TS_FORECAST_AGG (Recommended)
+# ============================================================================
+# For 3+ ID columns, use manual GROUP BY
 
-# Test 1: ts_stats with composite ID
-statement ok
-CREATE TABLE stats_result AS
-SELECT * FROM ts_stats(sales_with_composite, composite_id, date, sales);
-
-# Verify multiple series detected
-query I
-SELECT COUNT(*) > 1
-FROM stats_result;
-----
-true
-
-# Test 2: Forecast using TS_FORECAST_AGG with manual GROUP BY on 3 columns
+# Test 1: Forecast using TS_FORECAST_AGG with manual GROUP BY on 3 columns
 statement ok
 CREATE TABLE forecasts_3id AS
 SELECT 
@@ -79,7 +59,65 @@ WHERE len(result.point_forecast) = 7;
 ----
 true
 
-# Test 3: Using ts_forecast_by with composite ID
+# Test 2: Unnest the results manually for easier querying
+statement ok
+CREATE TABLE forecasts_unnested AS
+SELECT 
+    region,
+    store,
+    product,
+    UNNEST(result.forecast_step) AS forecast_step,
+    UNNEST(result.forecast_timestamp) AS forecast_date,
+    UNNEST(result.point_forecast) AS point_forecast,
+    UNNEST(result.lower) AS lower,
+    UNNEST(result.upper) AS upper,
+    result.model_name
+FROM forecasts_3id;
+
+# Verify unnested structure
+query I
+SELECT COUNT(*) > 0
+FROM forecasts_unnested;
+----
+true
+
+# Test 3: Hierarchical aggregation (roll up from product to store level)
+statement ok
+CREATE TABLE store_level_forecast AS
+SELECT 
+    region,
+    store,
+    forecast_step,
+    SUM(point_forecast) AS total_forecast
+FROM forecasts_unnested
+GROUP BY region, store, forecast_step
+ORDER BY region, store, forecast_step;
+
+# Verify store-level aggregation
+query I
+SELECT COUNT(DISTINCT store) > 0
+FROM store_level_forecast;
+----
+true
+
+# ============================================================================
+# APPROACH 2: Composite Key (Alternative)
+# ============================================================================
+# Create a single composite ID column from multiple ID columns
+
+# Test 4: Create composite key
+statement ok
+CREATE TABLE sales_with_composite AS
+SELECT 
+    date,
+    region || '|' || store || '|' || product AS composite_id,
+    region,
+    store,
+    product,
+    sales
+FROM sales_data;
+
+# Test 5: Use ts_forecast_by with composite ID
 statement ok
 CREATE TABLE forecasts_composite AS
 SELECT *
@@ -100,7 +138,7 @@ FROM forecasts_composite;
 ----
 true
 
-# Test 4: Split composite ID back to original columns
+# Test 6: Split composite ID back to original columns
 statement ok
 CREATE TABLE forecasts_split AS
 SELECT 
@@ -110,7 +148,8 @@ SELECT
     forecast_step,
     point_forecast,
     lower,
-    upper
+    upper,
+    model_name
 FROM forecasts_composite;
 
 # Verify we can reconstruct the hierarchy
@@ -122,25 +161,32 @@ FROM forecasts_split;
 ----
 true
 
-# Test 5: Aggregate by 2 levels (region + store) after forecasting
-statement ok
-CREATE TABLE regional_forecasts AS
-SELECT 
-    region,
-    store,
-    forecast_step,
-    SUM(point_forecast) AS total_forecast
-FROM forecasts_split
-GROUP BY region, store, forecast_step;
-
-# Verify aggregated forecasts
+# Test 7: Compare both approaches produce same number of forecasts
 query I
-SELECT COUNT(*) > 0
-FROM regional_forecasts;
+SELECT 
+    (SELECT COUNT(*) FROM forecasts_unnested) = 
+    (SELECT COUNT(*) FROM forecasts_composite)
+FROM (SELECT 1);
 ----
 true
 
-# Test 6: Data prep with 3 ID columns using composite key
+# ============================================================================
+# Data Prep with Multiple ID Columns
+# ============================================================================
+
+# Test 8: EDA with composite key
+statement ok
+CREATE TABLE eda_composite AS
+SELECT * FROM ts_stats(sales_with_composite, composite_id, date, sales);
+
+# Verify stats generated for multiple series
+query I
+SELECT COUNT(*) > 1
+FROM eda_composite;
+----
+true
+
+# Test 9: Data prep with composite key
 statement ok
 CREATE TABLE prepped_data AS
 SELECT * FROM ts_fill_nulls_forward(sales_with_composite, composite_id, date, sales);
@@ -152,18 +198,39 @@ FROM prepped_data;
 ----
 true
 
+# Test 10: Regional aggregation after forecasting
+statement ok
+CREATE TABLE regional_totals AS
+SELECT 
+    region,
+    forecast_step,
+    SUM(point_forecast) AS region_total_forecast
+FROM forecasts_split
+GROUP BY region, forecast_step
+ORDER BY region, forecast_step;
+
+# Verify regional aggregation
+query I
+SELECT COUNT(DISTINCT region) >= 1
+FROM regional_totals;
+----
+true
+
 # Cleanup
 statement ok
 DROP TABLE sales_data;
 
 statement ok
-DROP TABLE sales_with_composite;
-
-statement ok
-DROP TABLE stats_result;
-
-statement ok
 DROP TABLE forecasts_3id;
+
+statement ok
+DROP TABLE forecasts_unnested;
+
+statement ok
+DROP TABLE store_level_forecast;
+
+statement ok
+DROP TABLE sales_with_composite;
 
 statement ok
 DROP TABLE forecasts_composite;
@@ -172,8 +239,10 @@ statement ok
 DROP TABLE forecasts_split;
 
 statement ok
-DROP TABLE regional_forecasts;
+DROP TABLE eda_composite;
 
 statement ok
 DROP TABLE prepped_data;
 
+statement ok
+DROP TABLE regional_totals;

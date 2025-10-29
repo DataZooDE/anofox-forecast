@@ -74,6 +74,32 @@ static const DefaultTableMacro forecast_table_macros[] = {
             result.confidence_level AS confidence_level
         FROM fc
     )"},
+    // TS_FORECAST_BY_MULTI: Multiple series (multiple group columns via COLUMNS)
+    // Pass group columns as pipe-separated string: 'col1|col2|col3'
+    {DEFAULT_SCHEMA,
+     "ts_forecast_by_multi",
+     {"table_name", "group_cols", "date_col", "target_col", "method", "horizon", "params", nullptr},
+     {{nullptr, nullptr}},
+     R"(
+        WITH fc AS (
+            SELECT 
+                COLUMNS(group_cols),
+                TS_FORECAST_AGG(date_col, target_col, method, horizon, params) AS result
+            FROM QUERY_TABLE(table_name)
+            GROUP BY ALL
+        )
+        SELECT 
+            COLUMNS(group_cols),
+            UNNEST(result.forecast_step) AS forecast_step,
+            UNNEST(result.forecast_timestamp) AS date_col,
+            UNNEST(result.point_forecast) AS point_forecast,
+            UNNEST(result.lower) AS lower,
+            UNNEST(result.upper) AS upper,
+            result.model_name AS model_name,
+            result.insample_fitted AS insample_fitted,
+            result.confidence_level AS confidence_level
+        FROM fc
+    )"},
     // TS_DETECT_CHANGEPOINTS: Single series (no GROUP BY)
     {DEFAULT_SCHEMA,
      "ts_detect_changepoints",
