@@ -1,0 +1,3 @@
+   SELECT __g AS group_col FROM ...
+   ORDER BY __g  -- ✅ Works
+   ORDER BY group_col  -- ❌ Doesn't work (not yet defined)

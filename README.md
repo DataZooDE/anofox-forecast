@@ -486,6 +486,33 @@ TS_DETECT_CHANGEPOINTS_BY(table, group_col, date_col, value_col, params)
 
 ## 🔧 Development
 
+### Documentation Build System
+
+This project uses a template-based documentation system:
+
+- **Templates**: Edit files in `guides/templates/*.md.in`
+- **SQL Examples**: Separate SQL files in `test/sql/docs_examples/`
+- **Generated Docs**: Built from templates via `make docs`
+
+```bash
+# Build documentation from templates
+make docs
+
+# Test SQL examples
+make test-docs
+
+# Lint documentation
+make lint-docs
+
+# Clean generated docs
+make clean-docs
+
+# Install git hooks (auto-build on commit)
+make install-hooks
+```
+
+**Important**: Always edit template files (`*.md.in`) in `guides/templates/`, not the generated `*.md` files in `guides/`. The generated files are automatically rebuilt from templates.
+
 ### Build Options
 
 ```bash

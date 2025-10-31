@@ -1,0 +1,2 @@
+-- Note: STRUCT parameters will be supported in a future update
+-- For now, use the default seasonal_period detection

@@ -12,11 +12,15 @@ Generate your first time series forecast in under 5 minutes!
 ## Step 1: Load Extension (30 seconds)
 
 ```sql
--- Start DuckDB
-./duckdb
+-- Create a simple daily sales dataset
+CREATE TABLE my_sales AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales
+FROM generate_series(0, 89) t(d);  -- 90 days of data
 
--- Load the extension
-LOAD 'build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension';
+-- Verify data
+SELECT * FROM my_sales LIMIT 5;
 ```
 
 ## Step 2: Create Sample Data (1 minute)

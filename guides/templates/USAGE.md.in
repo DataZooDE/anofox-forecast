@@ -1,0 +1,147 @@
+# Anofox Forecast Extension - Usage Guide
+
+## Overview
+
+The `anofox_forecast` extension provides time series forecasting capabilities for DuckDB using the anofox-time library. This Phase 1 implementation supports three baseline forecasting methods: SMA, Naive, and Seasonal Naive.
+
+## Installation
+
+### Building the Extension
+
+1. **Build anofox-time library** (optional - it's included in the extension build):
+```bash
+cd anofox-time
+mkdir -p build && cd build
+cmake .. -DBUILD_PYTHON_BINDINGS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF
+make -j4
+cd ../..
+```
+
+2. **Build the DuckDB extension**:
+```bash
+make debug
+# or for release build:
+make release
+```
+
+### Loading the Extension
+
+<!-- include: test/sql/docs_examples/USAGE_example_01.sql -->
+
+Or in release mode:
+<!-- include: test/sql/docs_examples/USAGE_example_02.sql -->
+
+## FORECAST Function
+
+### Syntax
+
+<!-- include: test/sql/docs_examples/USAGE_example_03.sql -->
+
+### Parameters
+
+- `timestamp_column`: Name of the timestamp column in your data
+- `value_column`: Name of the value column to forecast
+- `model`: Model name - one of: `'SMA'`, `'Naive'`, `'SeasonalNaive'`
+- `horizon`: Number of future periods to forecast (must be positive)
+- `model_params`: STRUCT containing model-specific parameters (use NULL if none needed)
+
+### Supported Models (Phase 1)
+
+#### 1. Naive
+**Description**: Random walk model - all forecasts equal the last observed value.
+
+**Parameters**: None
+
+**Example**:
+<!-- include: test/sql/docs_examples/USAGE_example_04.sql -->
+
+#### 2. SMA (Simple Moving Average)
+**Description**: Forecasts based on the average of the last N observations.
+
+**Parameters**:
+- `window`: Number of observations to average (default: 5)
+
+**Example**:
+<!-- include: test/sql/docs_examples/USAGE_example_05.sql -->
+
+#### 3. SeasonalNaive
+**Description**: Forecasts equal to the last observed value from the same season.
+
+**Parameters**:
+- `seasonal_period`: Length of the seasonal cycle (required)
+
+**Example**:
+<!-- include: test/sql/docs_examples/USAGE_example_06.sql -->
+
+## Output Columns
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `forecast_step` | INTEGER | Forecast horizon step (1, 2, ..., horizon) |
+| `point_forecast` | DOUBLE | Point forecast value |
+| `lower_95` | DOUBLE | Lower bound of 95% prediction interval |
+| `upper_95` | DOUBLE | Upper bound of 95% prediction interval |
+| `model_name` | VARCHAR | Name of the model used |
+| `fit_time_ms` | DOUBLE | Time taken to fit the model (milliseconds) |
+
+## Examples
+
+### Simple Forecast
+
+<!-- include: test/sql/docs_examples/USAGE_example_07.sql -->
+
+### Comparing Models
+
+<!-- include: test/sql/docs_examples/USAGE_example_08.sql -->
+
+### Performance Metrics
+
+<!-- include: test/sql/docs_examples/USAGE_evaluate_09.sql -->
+
+## Current Limitations (Phase 1)
+
+1. **No GROUP BY support yet**: Batch forecasting across multiple series will be implemented in Phase 2
+2. **STRUCT parameters**: Currently only NULL is supported for model_params. Named parameters will be added in future
+3. **Prediction intervals**: Currently simplified (±10% of point forecast). Proper statistical intervals coming in Phase 2
+4. **Limited models**: Only 3 baseline methods available. 30+ models will be added in Phase 2
+
+## Phase 2 Roadmap
+
+- Full GROUP BY support for batch forecasting
+- All 30+ models from anofox-time (ARIMA, ETS, Theta, etc.)
+- ENSEMBLE() table function
+- BACKTEST() table function  
+- Proper prediction intervals
+- STRUCT parameter support with named fields
+- Scalar utility functions (detect_seasonality, etc.)
+
+## Troubleshooting
+
+### Extension Not Loading
+
+If you get "Extension not found", ensure:
+1. The extension was built successfully (`make debug` or `make release`)
+2. You're using the correct path to the `.duckdb_extension` file
+3. The file has execute permissions
+
+### Debug Output
+
+The extension includes comprehensive debug logging. To see debug output:
+```bash
+./build/debug/test/unittest "your_test.test" 2>&1
+```
+
+Debug messages show:
+- Extension loading
+- Function registration
+- Parameter validation
+- Model creation and fitting
+- Forecast generation
+
+## Support
+
+For issues or questions:
+- Check the debug output for detailed error messages
+- Verify your data types (TIMESTAMP and DOUBLE)
+- Ensure time series has sufficient data points for the model
+- Check that horizon is positive

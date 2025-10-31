@@ -1,0 +1,2 @@
+-- Is AutoARIMA or AutoTBATS slowing you down?
+-- Try AutoETS or Theta instead

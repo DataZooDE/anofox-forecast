@@ -1,0 +1,239 @@
+# Comprehensive Testing Plan for anofox-forecast Extension
+
+## Overview
+This document outlines the testing strategy to validate all functionality and ensure no regressions were introduced by recent changes.
+
+## Recent Changes to Validate
+1. **In-sample forecasts** - Added `insample_fitted` field to aggregate return
+2. **Confidence level** - Added `confidence_level` field to aggregate return  
+3. **EDA macros** - Added SQL table macros for exploratory data analysis
+4. **Data preparation macros** - Added SQL table macros for data preparation
+5. **Eigen3 optional compilation** - Made ARIMA models conditional on Eigen3
+6. **Code formatting** - Applied clang-format to all source files
+
+## Testing Strategy
+
+### 1. Core Functionality Regression Tests
+
+#### 1.1 All Models Still Work
+Test that all 31+ forecasting models can be created and produce forecasts:
+- Basic models: Naive, SMA, SeasonalNaive, SES, etc.
+- Holt models: Holt, HoltWinters
+- Theta variants: Theta, OptimizedTheta, DynamicTheta, DynamicOptimizedTheta
+- Seasonal models: SeasonalES, SeasonalESOptimized, SeasonalWindowAverage
+- ARIMA models: ARIMA, AutoARIMA (when Eigen3 available)
+- State space: ETS, AutoETS
+- Multiple seasonality: MFLES, AutoMFLES, MSTL, AutoMSTL, TBATS, AutoTBATS
+- Intermittent demand: CrostonClassic, CrostonOptimized, CrostonSBA, ADIDA, IMAPA, TSB
+
+**Test Approach:**
+<!-- include: test/sql/docs_examples/TESTING_PLAN_seasonality_01.sql -->
+
+#### 1.2 Forecast Aggregate Structure
+Verify the aggregate returns the correct structure with new fields:
+- `forecast` (LIST(DOUBLE))
+- `lower` (LIST(DOUBLE))
+- `upper` (LIST(DOUBLE))
+- `insample_fitted` (LIST(DOUBLE)) - NEW
+- `confidence_level` (DOUBLE) - NEW
+- `model_info` (STRUCT)
+
+#### 1.3 Table Macros Still Work
+- `ts_forecast` macro
+- `ts_forecast_by` macro
+
+### 2. New Features Tests
+
+#### 2.1 In-Sample Fitted Values
+Test that `insample_fitted` returns correct values:
+
+<!-- include: test/sql/docs_examples/TESTING_PLAN_multi_series_02.sql -->
+
+**Expected behaviors by model type:**
+- Naive: fitted[i] = actual[i-1]
+- SMA: fitted[i] = average of previous window
+- SES: fitted[i] = exponentially smoothed value
+- ETS: fitted values from state space model
+- ARIMA: fitted values from ARIMA model (if Eigen3 available)
+
+#### 2.2 Confidence Level
+Test that `confidence_level` is correctly returned:
+
+<!-- include: test/sql/docs_examples/TESTING_PLAN_example_03.sql -->
+
+#### 2.3 Prediction Intervals Calibration
+Test that prediction intervals match the specified confidence level:
+
+<!-- include: test/sql/docs_examples/TESTING_PLAN_example_04.sql -->
+
+### 3. EDA Macros Tests
+
+Test all new EDA table macros:
+
+#### 3.1 TS_STATS
+<!-- include: test/sql/docs_examples/TESTING_PLAN_statistics_05.sql -->
+
+#### 3.2 TS_QUALITY_REPORT
+<!-- include: test/sql/docs_examples/TESTING_PLAN_data_quality_06.sql -->
+
+#### 3.3 TS_ANALYZE_ZEROS
+<!-- include: test/sql/docs_examples/TESTING_PLAN_data_quality_07.sql -->
+
+#### 3.4 TS_DETECT_GAPS
+<!-- include: test/sql/docs_examples/TESTING_PLAN_seasonality_08.sql -->
+
+#### 3.5 TS_CHECK_STATIONARITY
+<!-- include: test/sql/docs_examples/TESTING_PLAN_seasonality_09.sql -->
+
+#### 3.6 TS_DETECT_OUTLIERS
+<!-- include: test/sql/docs_examples/TESTING_PLAN_seasonality_10.sql -->
+
+#### 3.7 TS_DISTRIBUTION_SUMMARY
+<!-- include: test/sql/docs_examples/TESTING_PLAN_seasonality_11.sql -->
+
+### 4. Data Preparation Macros Tests
+
+Test all new data preparation table macros:
+
+#### 4.1 TS_FILL_GAPS
+<!-- include: test/sql/docs_examples/TESTING_PLAN_evaluate_12.sql -->
+
+#### 4.2 TS_FILL_NULLS_FORWARD / BACKWARD
+<!-- include: test/sql/docs_examples/TESTING_PLAN_fill_gaps_13.sql -->
+
+#### 4.3 TS_REMOVE_OUTLIERS
+<!-- include: test/sql/docs_examples/TESTING_PLAN_example_14.sql -->
+
+#### 4.4 TS_NORMALIZE / TS_DENORMALIZE
+<!-- include: test/sql/docs_examples/TESTING_PLAN_example_15.sql -->
+
+#### 4.5 TS_DROP_CONSTANT / TS_DROP_ZEROS
+<!-- include: test/sql/docs_examples/TESTING_PLAN_example_16.sql -->
+
+### 5. Integration Tests
+
+#### 5.1 Complete EDA → Data Prep → Forecast Workflow
+<!-- include: test/sql/docs_examples/TESTING_PLAN_complete_example_17.sql -->
+
+#### 5.2 Multiple Groups Forecasting
+<!-- include: test/sql/docs_examples/TESTING_PLAN_example_18.sql -->
+
+#### 5.3 Metrics Calculation
+<!-- include: test/sql/docs_examples/TESTING_PLAN_evaluate_19.sql -->
+
+### 6. Conditional Compilation Tests
+
+#### 6.1 With Eigen3 Available
+<!-- include: test/sql/docs_examples/TESTING_PLAN_example_20.sql -->
+
+#### 6.2 Without Eigen3 Available
+<!-- include: test/sql/docs_examples/TESTING_PLAN_example_21.sql -->
+
+### 7. Edge Cases & Error Handling
+
+#### 7.1 Empty Series
+<!-- include: test/sql/docs_examples/TESTING_PLAN_example_22.sql -->
+
+#### 7.2 Single Value Series
+<!-- include: test/sql/docs_examples/TESTING_PLAN_example_23.sql -->
+
+#### 7.3 Series with All NULLs
+<!-- include: test/sql/docs_examples/TESTING_PLAN_example_24.sql -->
+
+#### 7.4 Invalid Parameters
+<!-- include: test/sql/docs_examples/TESTING_PLAN_example_25.sql -->
+
+#### 7.5 Missing Required Parameters
+<!-- include: test/sql/docs_examples/TESTING_PLAN_example_26.sql -->
+
+### 8. Performance Tests
+
+#### 8.1 Large Series
+<!-- include: test/sql/docs_examples/TESTING_PLAN_example_27.sql -->
+
+#### 8.2 Many Groups
+<!-- include: test/sql/docs_examples/TESTING_PLAN_forecast_28.sql -->
+
+### 9. Backwards Compatibility Tests
+
+#### 9.1 Existing Queries Still Work
+<!-- include: test/sql/docs_examples/TESTING_PLAN_example_29.sql -->
+
+## Test Implementation
+
+### Test File Organization
+```
+test/
+├── sql/
+│   ├── core/
+│   │   ├── test_all_models.test
+│   │   ├── test_aggregate_structure.test
+│   │   └── test_table_macros.test
+│   ├── features/
+│   │   ├── test_insample_forecast.test
+│   │   ├── test_confidence_level.test
+│   │   └── test_prediction_intervals.test
+│   ├── eda/
+│   │   ├── test_ts_stats.test
+│   │   ├── test_ts_quality_report.test
+│   │   ├── test_ts_analyze_zeros.test
+│   │   ├── test_ts_detect_gaps.test
+│   │   ├── test_ts_check_stationarity.test
+│   │   ├── test_ts_detect_outliers.test
+│   │   └── test_ts_distribution_summary.test
+│   ├── data_prep/
+│   │   ├── test_ts_fill_gaps.test
+│   │   ├── test_ts_fill_nulls.test
+│   │   ├── test_ts_remove_outliers.test
+│   │   ├── test_ts_normalize.test
+│   │   └── test_ts_drop_filters.test
+│   ├── integration/
+│   │   ├── test_complete_workflow.test
+│   │   ├── test_multiple_groups.test
+│   │   └── test_metrics.test
+│   ├── edge_cases/
+│   │   ├── test_empty_series.test
+│   │   ├── test_single_value.test
+│   │   ├── test_nulls.test
+│   │   └── test_invalid_params.test
+│   └── performance/
+│       ├── test_large_series.test
+│       └── test_many_groups.test
+```
+
+### Running Tests
+```bash
+# Run all tests
+make test
+
+# Run specific test suite
+duckdb < test/sql/core/test_all_models.test
+
+# Run with extension loaded
+duckdb -c "LOAD 'build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension'; .read test/sql/core/test_all_models.test"
+```
+
+## Success Criteria
+
+All tests must:
+1. ✅ Pass without errors
+2. ✅ Return expected results
+3. ✅ Complete in reasonable time (<1s for unit tests, <10s for integration tests)
+4. ✅ Provide clear error messages on failure
+
+## Continuous Integration
+
+Tests should be run:
+- On every commit
+- Before merging PRs
+- On multiple platforms (Linux, macOS, Windows)
+- With and without Eigen3 (to test conditional compilation)
+
+## Test Data
+
+Use a variety of test datasets:
+1. **Synthetic data**: Known patterns (linear, seasonal, random)
+2. **Real-world data**: AirPassengers, M4 competition samples
+3. **Edge cases**: Empty, single value, all NULLs, all constants
+4. **Large scale**: 10K+ points, 1000+ groups
+

@@ -1,0 +1,313 @@
+# Understanding Forecasts - Statistical Guide
+
+## Introduction
+
+This guide explains the statistical concepts behind time series forecasting, helping you understand what forecasts mean and how to interpret them correctly.
+
+## Time Series Components
+
+Every time series can be decomposed into:
+
+### 1. Trend (T)
+Long-term increase or decrease in the data.
+
+**Example**: Revenue growing 5% year-over-year
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_example_01.sql -->
+
+### 2. Seasonality (S)
+Regular repeating patterns at fixed intervals.
+
+**Common Periods**:
+- Weekly: period = 7
+- Monthly: period = 30
+- Quarterly: period = 90
+- Yearly: period = 365
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_seasonality_02.sql -->
+
+### 3. Remainder (R)
+Random noise that cannot be explained by trend or seasonality.
+
+**Formula**: `Y_t = T_t + S_t + R_t` (additive model)
+
+## Point Forecasts
+
+### What is a Point Forecast?
+
+The **most likely value** for a future time point, typically the mean or median of the forecast distribution.
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_seasonality_03.sql -->
+
+### Point Forecast Accuracy
+
+**Common Metrics**:
+
+| Metric | Formula | Interpretation | Good Value |
+|--------|---------|----------------|------------|
+| **MAE** | Mean(|Actual - Forecast|) | Average error | Lower is better |
+| **RMSE** | √Mean((Actual - Forecast)²) | Penalizes large errors | Lower is better |
+| **MAPE** | Mean(|Actual - Forecast|/Actual) × 100 | % error | < 20% is good |
+| **SMAPE** | Symmetric MAPE | Handles zeros better | < 20% is good |
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_evaluate_04.sql -->
+
+## Confidence Intervals
+
+### What are Confidence Intervals?
+
+A **range of plausible values** for the forecast, quantifying uncertainty.
+
+**90% CI** = We're 90% confident the actual value will be in this range
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_example_05.sql -->
+
+### How to Read Confidence Intervals
+
+```
+Day 1: Forecast = 100, CI = [95, 105]
+→ 90% sure actual will be between 95 and 105
+
+Day 7: Forecast = 100, CI = [85, 115]
+→ 90% sure actual will be between 85 and 115
+→ Note: Wider interval (more uncertainty)
+```
+
+### Interval Width Interpretation
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_example_06.sql -->
+
+### Choosing Confidence Level
+
+| Level | Use Case | Trade-off |
+|-------|----------|-----------|
+| **80%** | Aggressive planning | Narrow intervals, more misses |
+| **90%** | **Recommended default** | Balanced |
+| **95%** | Conservative planning | Wider intervals, fewer misses |
+| **99%** | Risk-averse | Very wide, rarely wrong |
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_example_07.sql -->
+
+## Coverage Analysis
+
+### What is Coverage?
+
+**Coverage** = Fraction of actual values that fall within the predicted intervals
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_example_08.sql -->
+
+### Interpreting Coverage
+
+| Coverage | Status | Meaning |
+|----------|--------|---------|
+| 95% | ✅ Excellent | Intervals well-calibrated |
+| 90% | ⚠️ Acceptable | Slightly optimistic |
+| 80% | ❌ Poor | Intervals too narrow |
+| 98% | ⚠️ Conservative | Intervals may be too wide |
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_example_09.sql -->
+
+## Residuals & Model Diagnostics
+
+### What are Residuals?
+
+**Residual** = Actual - Fitted Value
+
+Good model → Residuals should be:
+- Centered around 0 (no bias)
+- Randomly distributed (no patterns)
+- Constant variance (homoscedastic)
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_example_10.sql -->
+
+### Residual Diagnostics
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_example_11.sql -->
+
+## Forecast Horizon
+
+### How Far Can You Forecast?
+
+**Rule of Thumb**: Reliable up to 1-2 seasonal cycles
+
+| Data Frequency | Seasonal Period | Max Reliable Horizon |
+|----------------|-----------------|---------------------|
+| Daily | 7 (weekly) | 14-30 days |
+| Daily | 365 (yearly) | 2-3 months |
+| Weekly | 52 (yearly) | 12-26 weeks |
+| Monthly | 12 (yearly) | 12-24 months |
+
+### Uncertainty Growth
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_example_12.sql -->
+
+## Statistical Significance
+
+### Is the Forecast Better than Baseline?
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_example_13.sql -->
+
+### Relative Metrics
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_evaluate_14.sql -->
+
+## Model Fit Quality
+
+### R-squared (R²)
+
+**Interpretation**: Proportion of variance explained by the model
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_data_quality_15.sql -->
+
+### MASE (Mean Absolute Scaled Error)
+
+**Purpose**: Compare forecast to naive baseline
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_data_quality_16.sql -->
+
+## Bias Detection
+
+### Systematic Errors
+
+**Bias** = Average(Forecast - Actual)
+
+- Bias > 0: Systematic over-forecasting
+- Bias < 0: Systematic under-forecasting
+- Bias ≈ 0: Unbiased (good!)
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_seasonality_17.sql -->
+
+## Stationarity
+
+### What is Stationarity?
+
+A stationary series has:
+- Constant mean over time
+- Constant variance
+- No seasonality or trend
+
+**Why it matters**: Many models assume (or require) stationarity.
+
+### Making Data Stationary
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_seasonality_18.sql -->
+
+## Autocorrelation
+
+### What is Autocorrelation?
+
+Correlation of a series with itself at different lags.
+
+**Strong autocorrelation** → Predictable patterns → Better forecasts
+
+**Use Case**: Seasonality detection
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_seasonality_19.sql -->
+
+## Model Types
+
+### Exponential Smoothing (ETS)
+
+**Idea**: Recent observations weighted more heavily
+
+**Components**:
+- **E**: Error (additive/multiplicative)
+- **T**: Trend (none/additive/damped)
+- **S**: Seasonality (none/additive/multiplicative)
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_seasonality_20.sql -->
+
+### ARIMA
+
+**Idea**: Autoregressive Integrated Moving Average
+
+**Parameters**:
+- **p**: Autoregressive order (past values)
+- **d**: Differencing degree (make stationary)
+- **q**: Moving average order (past errors)
+- **P, D, Q, s**: Seasonal components
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_example_21.sql -->
+
+### Theta Method
+
+**Idea**: Decompose into trend and seasonal components with θ parameter
+
+**Best for**: Data with trend and seasonality
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_seasonality_22.sql -->
+
+## Forecast Evaluation
+
+### In-Sample vs Out-of-Sample
+
+**In-Sample**: Performance on training data  
+**Out-of-Sample**: Performance on unseen test data
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_example_23.sql -->
+
+### Rolling Window Validation
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_example_24.sql -->
+
+## Understanding Model Output
+
+### Fitted Values (In-Sample Forecasts)
+
+**Purpose**: One-step-ahead predictions on training data
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_example_25.sql -->
+
+## Statistical Tests
+
+### Residual Autocorrelation Test
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_example_26.sql -->
+
+### Heteroscedasticity Test
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_seasonality_27.sql -->
+
+## Advanced Topics
+
+### Quantile Forecasts
+
+<!-- include: test/sql/docs_examples/20_understanding_forecasts_example_28.sql -->
+
+### Prediction Intervals vs Confidence Intervals
+
+**Prediction Interval**: Range for a future observation  
+**Confidence Interval**: Range for the expected value (mean)
+
+In this extension:
+- `lower` and `upper` are **prediction intervals**
+- Wider than confidence intervals
+- What you need for planning!
+
+## Summary
+
+**Key Concepts**:
+- ✅ Point forecasts = expected values
+- ✅ Confidence intervals = uncertainty quantification
+- ✅ Coverage = interval calibration check
+- ✅ Residuals = model diagnostic tool
+- ✅ In-sample vs out-of-sample = overfitting check
+- ✅ Bias = systematic error detection
+
+**Best Practices**:
+1. Always validate with out-of-sample data
+2. Check coverage matches confidence level
+3. Analyze residuals for patterns
+4. Use rolling window validation
+5. Compare multiple models
+6. Monitor forecast accuracy over time
+
+**Next**: [Accuracy Metrics Guide](21_accuracy_metrics.md) - Deep dive into evaluation metrics
+
+---
+
+**Related**:
+- [Model Selection](11_model_selection.md) - Choose the right model
+- [Confidence Intervals](22_confidence_intervals.md) - More on uncertainty
+- [Parameters Guide](12_parameters.md) - Model configuration
+

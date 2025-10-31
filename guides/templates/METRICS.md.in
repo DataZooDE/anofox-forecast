@@ -1,0 +1,450 @@
+# Time Series Evaluation Metrics
+
+This document describes the evaluation metric functions available in the DuckDB Anofox Forecast Extension.
+
+---
+
+## Overview
+
+The extension provides **12 time series forecasting accuracy metrics** as individual SQL functions:
+
+**Available Metrics:**
+- `TS_MAE()` - Mean Absolute Error
+- `TS_MSE()` - Mean Squared Error
+- `TS_RMSE()` - Root Mean Squared Error
+- `TS_MAPE()` - Mean Absolute Percentage Error
+- `TS_SMAPE()` - Symmetric Mean Absolute Percentage Error
+- `TS_MASE()` - Mean Absolute Scaled Error (requires baseline)
+- `TS_R2()` - Coefficient of Determination (R-Squared)
+- `TS_BIAS()` - Forecast Bias (systematic over/under-forecasting)
+- `TS_RMAE()` - Relative Mean Absolute Error (compares two methods)
+- `TS_QUANTILE_LOSS()` - Quantile Loss / Pinball Loss (for quantile forecasts)
+- `TS_MQLOSS()` - Multi-Quantile Loss / CRPS approximation (for distributions)
+- `TS_COVERAGE()` - Prediction Interval Coverage (fraction within bounds)
+
+---
+
+## Using Metrics with GROUP BY
+
+All metrics work seamlessly with `GROUP BY` operations using DuckDB's `LIST()` aggregate function.
+
+### Pattern
+
+**Metrics expect arrays (LIST), not individual values:**
+
+<!-- include: test/sql/docs_examples/METRICS_evaluate_01.sql -->
+
+### Complete Example
+
+<!-- include: test/sql/docs_examples/METRICS_complete_example_02.sql -->
+
+**Output**:
+```
+┌────────────┬──────┬───────┬────────┬────────┐
+│ product_id │ mae  │ rmse  │  mape  │  bias  │
+├────────────┼──────┼───────┼────────┼────────┤
+│ Widget_A   │ 2.3  │ 2.8   │  1.8   │  0.5   │
+│ Widget_B   │ 3.1  │ 3.7   │  2.1   │ -0.3   │
+│ Widget_C   │ 4.2  │ 5.1   │  3.4   │  1.2   │
+└────────────┴──────┴───────┴────────┴────────┘
+```
+
+### Compare Methods Across Products
+
+<!-- include: test/sql/docs_examples/METRICS_example_03.sql -->
+
+**Key Insight**: Use `LIST(column)` in GROUP BY contexts to aggregate rows into arrays before passing to metric functions.
+
+---
+
+## Function Signatures
+
+### TS_MAE - Mean Absolute Error
+
+<!-- include: test/sql/docs_examples/METRICS_example_04.sql -->
+
+**Formula**: `Σ|yᵢ - ŷᵢ| / n`
+
+**Range**: [0, ∞)
+
+**Interpretation**: 
+- Average absolute difference between actual and predicted values
+- Lower is better
+- Same units as original data
+- **Use when**: Easy interpretation needed, outliers shouldn't dominate
+
+**Example**:
+<!-- include: test/sql/docs_examples/METRICS_example_05.sql -->
+
+---
+
+### TS_MSE - Mean Squared Error
+
+<!-- include: test/sql/docs_examples/METRICS_example_06.sql -->
+
+**Formula**: `Σ(yᵢ - ŷᵢ)² / n`
+
+**Range**: [0, ∞)
+
+**Interpretation**:
+- Average squared difference
+- Penalizes large errors more than small ones
+- Units are squared
+- **Use when**: Large errors are particularly costly
+
+**Example**:
+<!-- include: test/sql/docs_examples/METRICS_example_07.sql -->
+
+---
+
+### TS_RMSE - Root Mean Squared Error
+
+<!-- include: test/sql/docs_examples/METRICS_example_08.sql -->
+
+**Formula**: `√(Σ(yᵢ - ŷᵢ)² / n)`
+
+**Range**: [0, ∞)
+
+**Interpretation**:
+- Square root of MSE
+- Same units as original data
+- Penalizes outliers (but less than MSE)
+- Typically RMSE ≥ MAE
+- **Use when**: You want to penalize large errors in original units
+
+**Example**:
+<!-- include: test/sql/docs_examples/METRICS_example_09.sql -->
+
+---
+
+### TS_MAPE - Mean Absolute Percentage Error
+
+<!-- include: test/sql/docs_examples/METRICS_example_10.sql -->
+
+**Formula**: `100 × Σ|yᵢ - ŷᵢ| / |yᵢ| / n`
+
+**Range**: [0, ∞) (expressed as percentage)
+
+**Interpretation**:
+- Percentage error
+- Scale-independent (good for comparing different datasets)
+- < 10% is good, < 5% is excellent
+- **Warning**: Undefined when actual values contain zeros
+- **Use when**: Percentage errors are meaningful, all values > 0
+
+**Example**:
+<!-- include: test/sql/docs_examples/METRICS_example_11.sql -->
+
+---
+
+### TS_SMAPE - Symmetric Mean Absolute Percentage Error
+
+<!-- include: test/sql/docs_examples/METRICS_example_12.sql -->
+
+**Formula**: `100 × Σ|yᵢ - ŷᵢ| / ((|yᵢ|+|ŷᵢ|)/2) / n`
+
+**Range**: [0, 200]
+
+**Interpretation**:
+- Symmetric version of MAPE
+- Treats over-forecasting and under-forecasting equally
+- < 20% is good, < 10% is excellent
+- **Use when**: Symmetry important, can handle zeros better than MAPE
+
+**Example**:
+<!-- include: test/sql/docs_examples/METRICS_example_13.sql -->
+
+---
+
+### TS_MASE - Mean Absolute Scaled Error
+
+<!-- include: test/sql/docs_examples/METRICS_example_14.sql -->
+
+**Formula**: `MAE(predicted) / MAE(baseline)`
+
+**Range**: [0, ∞)
+
+**Interpretation**:
+- Error relative to naive baseline forecast
+- < 1.0 means model beats baseline
+- > 1.0 means baseline is better
+- Scale-independent
+- **Use when**: Comparing against baseline, zeros allowed in data
+
+**Example**:
+<!-- include: test/sql/docs_examples/METRICS_example_15.sql -->
+
+---
+
+### TS_R2 - Coefficient of Determination
+
+<!-- include: test/sql/docs_examples/METRICS_example_16.sql -->
+
+**Formula**: `1 - SS_residual / SS_total`
+
+**Range**: (-∞, 1.0]
+
+**Interpretation**:
+- Proportion of variance explained by the model
+- 1.0 = perfect fit
+- 0.0 = as good as mean baseline
+- < 0 = worse than mean baseline
+- > 0.7 is good, > 0.9 is excellent
+- **Use when**: Want to quantify explained variance
+
+**Example**:
+<!-- include: test/sql/docs_examples/METRICS_example_17.sql -->
+
+---
+
+### TS_BIAS - Forecast Bias
+
+<!-- include: test/sql/docs_examples/METRICS_example_18.sql -->
+
+**Formula**: `Σ(ŷᵢ - yᵢ) / n`
+
+**Range**: (-∞, ∞)
+
+**Interpretation**:
+- Average signed error (systematic over/under-forecasting)
+- **Positive bias** = systematic over-forecasting
+- **Negative bias** = systematic under-forecasting
+- **Zero bias** = unbiased forecast (ideal)
+- Same units as original data
+- **Use when**: Detecting systematic forecast bias
+
+**Example**:
+<!-- include: test/sql/docs_examples/METRICS_seasonality_19.sql -->
+
+**Important Notes**:
+- Bias can be zero even with large errors if they cancel out
+- Always use with MAE/RMSE to get full picture
+- Positive bias ≠ good forecasts, just systematic tendency
+
+---
+
+## Usage Examples
+
+### 1. Evaluate Single Model
+
+<!-- include: test/sql/docs_examples/METRICS_evaluate_20.sql -->
+
+---
+
+### 2. Compare Multiple Models
+
+<!-- include: test/sql/docs_examples/METRICS_example_21.sql -->
+
+---
+
+### 3. Benchmark Against Naive
+
+<!-- include: test/sql/docs_examples/METRICS_example_22.sql -->
+
+---
+
+### 4. Rolling Window Evaluation
+
+<!-- include: test/sql/docs_examples/METRICS_example_23.sql -->
+
+---
+
+### 5. Production Monitoring
+
+<!-- include: test/sql/docs_examples/METRICS_example_24.sql -->
+
+---
+
+## Metric Selection Guide
+
+### Choose MAE when:
+- ✅ You want errors in original units
+- ✅ Outliers shouldn't dominate
+- ✅ Simple interpretation needed
+- 🎯 Target: Domain-specific (e.g., <5 for sales forecast)
+
+### Choose RMSE when:
+- ✅ Large errors are particularly costly
+- ✅ You want to penalize outliers more
+- ✅ Standard deviation-like metric preferred
+- 🎯 Target: Domain-specific, typically ≥ MAE
+
+### Choose MAPE when:
+- ✅ Scale-independent comparison needed
+- ✅ All actual values are positive
+- ✅ Percentage errors are meaningful
+- ⚠️ Avoid when zeros in data
+- 🎯 Target: <10% good, <5% excellent
+
+### Choose SMAPE when:
+- ✅ Symmetric errors important
+- ✅ MAPE is too asymmetric
+- ✅ Some zeros might be present
+- 🎯 Target: <20% good, <10% excellent
+
+### Choose MASE when:
+- ✅ Comparing against naive baseline
+- ✅ Scale-independent metric needed
+- ✅ Zeros allowed in data
+- ✅ Want interpretable improvement over baseline
+- 🎯 Target: <1.0 = beats baseline
+
+### Choose R² when:
+- ✅ Variance explained is meaningful
+- ✅ Comparing models on same dataset
+- ✅ Regression-style interpretation preferred
+- 🎯 Target: >0.7 good, >0.9 excellent
+
+### Choose BIAS when:
+- ✅ Detecting systematic over/under-forecasting
+- ✅ Checking for forecast calibration
+- ✅ Identifying model tendencies
+- ⚠️ Always combine with MAE/RMSE (bias can be zero with large errors)
+- 🎯 Target: ≈0 (no systematic bias)
+
+---
+
+## Common Use Cases
+
+### Model Selection
+
+<!-- include: test/sql/docs_examples/METRICS_example_25.sql -->
+
+---
+
+### Production Alerting
+
+<!-- include: test/sql/docs_examples/METRICS_example_26.sql -->
+
+---
+
+### A/B Testing
+
+<!-- include: test/sql/docs_examples/METRICS_data_quality_27.sql -->
+
+---
+
+### Improvement vs Baseline
+
+<!-- include: test/sql/docs_examples/METRICS_example_28.sql -->
+
+---
+
+## Best Practices
+
+### 1. Use Multiple Metrics
+
+Don't rely on a single metric. Different metrics reveal different aspects:
+
+<!-- include: test/sql/docs_examples/METRICS_evaluate_29.sql -->
+
+### 2. Always Validate on Holdout Data
+
+<!-- include: test/sql/docs_examples/METRICS_example_30.sql -->
+
+### 3. Use MASE for Model Comparison
+
+<!-- include: test/sql/docs_examples/METRICS_example_31.sql -->
+
+### 4. Set Thresholds Based on Business Requirements
+
+<!-- include: test/sql/docs_examples/METRICS_example_32.sql -->
+
+---
+
+### TS_RMAE - Relative Mean Absolute Error
+
+<!-- include: test/sql/docs_examples/METRICS_data_quality_33.sql -->
+
+**Formula**: `MAE(actual, predicted1) / MAE(actual, predicted2)`
+
+**Range**: [0, ∞)
+
+**Interpretation**:
+- Compares two forecasting methods
+- RMAE < 1: predicted1 is better than predicted2
+- RMAE > 1: predicted2 is better than predicted1
+- RMAE = 1: Both methods perform equally
+- **Use when**: Comparing two forecasting methods directly
+
+**Example**:
+<!-- include: test/sql/docs_examples/METRICS_example_34.sql -->
+
+---
+
+### TS_QUANTILE_LOSS - Quantile Loss (Pinball Loss)
+
+<!-- include: test/sql/docs_examples/METRICS_example_35.sql -->
+
+**Formula**: `Σ[(q * (yᵢ - ŷᵢ) if yᵢ > ŷᵢ else (q - 1) * (yᵢ - ŷᵢ))] / n`
+
+**Range**: [0, ∞)
+
+**Interpretation**:
+- Evaluates quantile forecasts (prediction intervals)
+- q = 0.5 gives median (equal weight to over/under-prediction)
+- q = 0.1 gives 10th percentile (penalizes over-prediction more)
+- q = 0.9 gives 90th percentile (penalizes under-prediction more)
+- Lower values indicate better quantile forecasts
+- **Use when**: Evaluating prediction intervals or quantile forecasts
+
+**Example**:
+<!-- include: test/sql/docs_examples/METRICS_evaluate_36.sql -->
+
+---
+
+### TS_MQLOSS - Multi-Quantile Loss
+
+<!-- include: test/sql/docs_examples/METRICS_example_37.sql -->
+
+**Formula**: `Average of quantile losses across all quantiles`
+
+**Range**: [0, ∞)
+
+**Interpretation**:
+- Evaluates full predictive distribution
+- Approximates Continuous Ranked Probability Score (CRPS)
+- Measures accuracy of probabilistic forecasts
+- Lower values indicate better distribution forecasts
+- **Use when**: Evaluating full forecast distributions (not just point forecasts)
+
+**Example**:
+<!-- include: test/sql/docs_examples/METRICS_evaluate_38.sql -->
+
+**Use Case - CRPS Approximation**:
+<!-- include: test/sql/docs_examples/METRICS_evaluate_39.sql -->
+
+---
+
+## Error Handling
+
+All functions validate inputs:
+
+<!-- include: test/sql/docs_examples/METRICS_example_40.sql -->
+
+---
+
+## Quick Reference
+
+| Function | Arguments | Returns | Key Use |
+|----------|-----------|---------|---------|
+| `TS_MAE()` | actual, predicted | DOUBLE | General error |
+| `TS_MSE()` | actual, predicted | DOUBLE | Outlier penalty |
+| `TS_RMSE()` | actual, predicted | DOUBLE | Error in original units |
+| `TS_MAPE()` | actual, predicted | DOUBLE | Percentage error |
+| `TS_SMAPE()` | actual, predicted | DOUBLE | Symmetric % error |
+| `TS_MASE()` | actual, predicted, baseline | DOUBLE | vs Baseline |
+| `TS_R2()` | actual, predicted | DOUBLE | Variance explained |
+| `TS_BIAS()` | actual, predicted | DOUBLE | Systematic over/under-forecasting |
+| `TS_RMAE()` | actual, predicted1, predicted2 | DOUBLE | Compare two methods |
+| `TS_QUANTILE_LOSS()` | actual, predicted, q | DOUBLE | Quantile forecast accuracy |
+| `TS_MQLOSS()` | actual, predicted_quantiles[], quantiles[] | DOUBLE | Distribution accuracy (CRPS) |
+
+---
+
+## See Also
+
+- [PARAMETERS.md](PARAMETERS.md) - Model parameters guide
+- [USAGE.md](USAGE.md) - Advanced usage patterns  
+- [README.md](../README.md) - General documentation
+

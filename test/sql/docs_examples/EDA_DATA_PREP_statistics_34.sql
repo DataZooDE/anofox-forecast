@@ -1,0 +1,2 @@
+-- DuckDB automatically parallelizes GROUP BY operations
+-- Larger batches = better parallelization

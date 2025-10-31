@@ -1,0 +1,141 @@
+# Sales Prediction & Revenue Forecasting - Business Guide
+
+## Business Context
+
+**Objective**: Predict future sales and revenue for:
+- Financial planning and budgeting
+- Resource allocation
+- Target setting
+- Performance tracking
+- Strategic decision-making
+
+## Key Business Questions
+
+1. **"What will our revenue be next quarter?"**
+2. **"Which products will drive growth?"**
+3. **"Are we on track to meet targets?"**
+4. **"What's the risk range for our projections?"**
+
+## Quick Start: Revenue Forecast
+
+<!-- include: test/sql/docs_examples/31_sales_prediction_example_01.sql -->
+
+## Use Case 1: Product-Level Revenue Forecasting
+
+### Data Preparation
+
+<!-- include: test/sql/docs_examples/31_sales_prediction_example_02.sql -->
+
+### Generate Forecasts
+
+<!-- include: test/sql/docs_examples/31_sales_prediction_forecast_03.sql -->
+
+### Business Analysis
+
+<!-- include: test/sql/docs_examples/31_sales_prediction_multi_series_04.sql -->
+
+## Use Case 2: Regional Sales Forecasting
+
+<!-- include: test/sql/docs_examples/31_sales_prediction_example_05.sql -->
+
+## Use Case 3: New Product Revenue Projection
+
+<!-- include: test/sql/docs_examples/31_sales_prediction_example_06.sql -->
+
+## Business Metrics
+
+### Revenue at Risk
+
+<!-- include: test/sql/docs_examples/31_sales_prediction_evaluate_07.sql -->
+
+### Pipeline Health
+
+<!-- include: test/sql/docs_examples/31_sales_prediction_example_08.sql -->
+
+## Scenario Planning
+
+### Best/Worst/Most Likely
+
+<!-- include: test/sql/docs_examples/31_sales_prediction_example_09.sql -->
+
+### Sensitivity Analysis
+
+<!-- include: test/sql/docs_examples/31_sales_prediction_example_10.sql -->
+
+## Executive Dashboard
+
+<!-- include: test/sql/docs_examples/31_sales_prediction_evaluate_11.sql -->
+
+## Advanced Analytics
+
+### Cohort Analysis
+
+<!-- include: test/sql/docs_examples/31_sales_prediction_example_12.sql -->
+
+### Channel Attribution
+
+<!-- include: test/sql/docs_examples/31_sales_prediction_example_13.sql -->
+
+## Forecast vs Target Tracking
+
+### Real-Time Performance Monitoring
+
+<!-- include: test/sql/docs_examples/31_sales_prediction_example_14.sql -->
+
+### Month-to-Date Projections
+
+<!-- include: test/sql/docs_examples/31_sales_prediction_example_15.sql -->
+
+## Risk Management
+
+### Value at Risk (VaR)
+
+<!-- include: test/sql/docs_examples/31_sales_prediction_example_16.sql -->
+
+### Stress Testing
+
+<!-- include: test/sql/docs_examples/31_sales_prediction_example_17.sql -->
+
+## Actionable Insights
+
+### Automated Recommendations
+
+<!-- include: test/sql/docs_examples/31_sales_prediction_example_18.sql -->
+
+## Integration with Business Systems
+
+### Export for Financial Planning
+
+<!-- include: test/sql/docs_examples/31_sales_prediction_example_19.sql -->
+
+### API for Real-Time Applications
+
+<!-- include: test/sql/docs_examples/31_sales_prediction_example_20.sql -->
+
+## Summary
+
+**Revenue Forecasting Best Practices**:
+1. ✅ Prepare data carefully (30-50% accuracy improvement)
+2. ✅ Use confidence intervals for risk management
+3. ✅ Aggregate forecasts to business reporting periods (monthly, quarterly)
+4. ✅ Track forecast vs actual continuously
+5. ✅ Generate multiple scenarios (best/worst/expected)
+6. ✅ Provide actionable recommendations
+7. ✅ Integrate with existing business systems
+
+**KPIs to Monitor**:
+- Forecast accuracy (MAPE < 20% is good)
+- Forecast bias (should be near 0)
+- Interval coverage (should match confidence level)
+- Revenue at risk (downside scenario)
+- Attainment vs targets
+
+**Next Steps**:
+- [Capacity Planning](32_capacity_planning.md) - Resource optimization
+- [Demand Forecasting](30_demand_forecasting.md) - Inventory management
+- [Understanding Forecasts](20_understanding_forecasts.md) - Statistical concepts
+
+---
+
+**Business Impact**: Typical 15-25% improvement in revenue accuracy → Better planning, resource allocation, and strategic decisions!
+

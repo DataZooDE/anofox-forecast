@@ -1,0 +1,98 @@
+# Quick Start Guide - 5 Minutes to Your First Forecast
+
+## Goal
+
+Generate your first time series forecast in under 5 minutes!
+
+## Prerequisites
+
+- DuckDB installed
+- Anofox-forecast extension built
+
+## Step 1: Load Extension (30 seconds)
+
+<!-- include: test/sql/docs_examples/01_quickstart_load_extension.sql -->
+
+## Step 2: Create Sample Data (1 minute)
+
+<!-- include: test/sql/docs_examples/01_quickstart_load_extension.sql -->
+
+## Step 3: Generate Forecast (30 seconds)
+
+<!-- include: test/sql/docs_examples/01_quickstart_forecast_03.sql -->
+
+**Output**:
+```
+┌───────────────┬────────────┬────────────────┬────────┬────────┐
+│ forecast_step │  date_col  │ point_forecast │ lower  │ upper  │
+├───────────────┼────────────┼────────────────┼────────┼────────┤
+│             1 │ 2023-04-01 │         118.52 │ 109.74 │ 127.30 │
+│             2 │ 2023-04-02 │         125.43 │ 116.65 │ 134.21 │
+│             3 │ 2023-04-03 │         121.89 │ 113.11 │ 130.67 │
+│           ... │        ... │            ... │    ... │    ... │
+```
+
+## Step 4: Visualize (Optional)
+
+<!-- include: test/sql/docs_examples/01_quickstart_visualization_04.sql -->
+
+## Step 5: Multiple Series (1 minute)
+
+<!-- include: test/sql/docs_examples/01_quickstart_multi_series_05.sql -->
+
+## 🎉 You Did It!
+
+You've just:
+- ✅ Loaded the extension
+- ✅ Created sample data
+- ✅ Generated a forecast
+- ✅ Forecasted multiple series in parallel
+
+## Next Steps
+
+### Learn More
+- [Basic Forecasting Guide](03_basic_forecasting.md) - Detailed walkthrough
+- [Model Selection Guide](11_model_selection.md) - Choose the best model
+- [EDA & Data Prep](40_eda_data_prep.md) - Clean your data first
+
+### Try Different Models
+<!-- include: test/sql/docs_examples/01_quickstart_multi_series_06.sql -->
+
+### Evaluate Accuracy
+<!-- include: test/sql/docs_examples/01_quickstart_evaluate_07.sql -->
+
+### Check Data Quality
+<!-- include: test/sql/docs_examples/01_quickstart_evaluate_08.sql -->
+
+## 💡 Pro Tips
+
+1. **Always check seasonality**: Use `TS_DETECT_SEASONALITY_ALL()` first
+2. **Start with AutoETS**: Best automatic model selection
+3. **Use confidence intervals**: Check `lower` and `upper` bounds
+4. **Validate with metrics**: Use `TS_MAE()`, `TS_COVERAGE()` etc.
+5. **Prepare your data**: Use EDA macros to ensure quality
+
+## ⚠️ Common Pitfalls
+
+❌ **Insufficient data**: Need at least 2x `seasonal_period` observations  
+❌ **Missing timestamps**: Fill gaps with `TS_FILL_GAPS()`  
+❌ **Constant series**: Will fail - filter with `TS_DROP_CONSTANT()`  
+❌ **Wrong seasonality**: Auto-detect with `TS_DETECT_SEASONALITY()`  
+
+## 🆘 Troubleshooting
+
+**Error: "SeasonalNaive model requires 'seasonal_period' parameter"**
+<!-- include: test/sql/docs_examples/01_quickstart_fill_gaps_09.sql -->
+
+**Error: "Series too short"**
+<!-- include: test/sql/docs_examples/01_quickstart_example_10.sql -->
+
+**Poor forecast accuracy?**
+<!-- include: test/sql/docs_examples/01_quickstart_evaluate_11.sql -->
+
+---
+
+**Ready for more?** → [Basic Forecasting Guide](03_basic_forecasting.md)
+
+**Need help?** → Check [guides/](.) for comprehensive documentation!
+

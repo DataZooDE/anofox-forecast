@@ -1,0 +1,2 @@
+CREATE TABLE sales_step1 AS SELECT * FROM TS_FILL_GAPS(...);
+CREATE TABLE sales_step2 AS SELECT * FROM TS_DROP_CONSTANT('sales_step1', ...);
