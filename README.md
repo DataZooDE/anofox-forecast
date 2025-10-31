@@ -233,16 +233,16 @@ GROUP BY product_id;
 
 | Language | Status | Guide |
 |----------|--------|-------|
-| **Python** | ✅ | [Python Usage](guides/50_python_usage.md) |
-| **R** | ✅ | [R Usage](guides/51_r_usage.md) |
-| **Julia** | ✅ | [Julia Usage](guides/52_julia_usage.md) |
-| **C++** | ✅ | [C++ Usage](guides/53_cpp_usage.md) |
-| **Rust** | ✅ | [Rust Usage](guides/54_rust_usage.md) |
+| **Python** | ✅ | [Python Usage](guides/81_python_integration.md) |
+| **R** | ✅ | [R Usage](guides/82_r_integration.md) |
+| **Julia** | ✅ | [Julia Usage](guides/83_julia_integration.md) |
+| **C++** | ✅ | [C++ Usage](guides/84_cpp_integration.md) |
+| **Rust** | ✅ | [Rust Usage](guides/85_rust_integration.md) |
 | **Node.js** | ✅ | Via DuckDB Node bindings |
 | **Go** | ✅ | Via DuckDB Go bindings |
 | **Java** | ✅ | Via DuckDB JDBC driver |
 
-**See**: [Multi-Language Overview](guides/49_multi_language_overview.md) for polyglot workflows!
+**See**: [Multi-Language Overview](guides/80_multi_language_overview.md) for polyglot workflows!
 
 ### Quick Examples
 
@@ -398,33 +398,45 @@ TS_DETECT_CHANGEPOINTS_BY(table, group_col, date_col, value_col, params)
 
 ## 📖 Guides
 
-### Getting Started (2 guides)
+### Getting Started
 - [Quick Start Guide](guides/01_quickstart.md) ⭐ - 5-minute introduction
-- [Basic Forecasting](guides/03_basic_forecasting.md) - Complete workflow
+- [Basic Forecasting](guides/30_basic_forecasting.md) - Complete workflow
+- [Understanding Forecasts](guides/31_understanding_forecasts.md) - Statistical concepts
 
-### Technical Guides (4 guides)
-- [API Reference](guides/10_api_reference.md) ⭐ - Complete API documentation
-- [Model Selection](guides/11_model_selection.md) - Choosing the right model
-- [Performance Tuning](guides/13_performance.md) - Optimization tips
-- [EDA & Data Prep](guides/40_eda_data_prep.md) ⭐ - Data quality workflow
+### Understanding Data
+- [Exploratory Analysis](guides/11_exploratory_analysis.md) ⭐ - Data quality workflow
+- [Detecting Seasonality](guides/12_detecting_seasonality.md) - Seasonality analysis
+- [Detecting Changepoints](guides/13_detecting_changepoints.md) - Regime detection
 
-### Statistical Guides (1 guide)
-- [Understanding Forecasts](guides/20_understanding_forecasts.md) - Statistical concepts
+### Data Preparation
+- [Data Preparation](guides/20_data_preparation.md) - Cleaning and transformation
 
-### Business Use Cases (3 guides)
-- [Demand Forecasting](guides/30_demand_forecasting.md) ⭐ - Retail & inventory
-- [Sales Prediction](guides/31_sales_prediction.md) - Revenue forecasting
-- [Capacity Planning](guides/32_capacity_planning.md) - Resource allocation
+### Model Selection & Tuning
+- [Model Selection](guides/40_model_selection.md) ⭐ - Choosing the right model
+- [Model Parameters](guides/41_model_parameters.md) - Parameter tuning
+- [In-Sample Validation](guides/42_insample_validation.md) - Model validation
 
-### Multi-Language Guides (6 guides)
-- [Multi-Language Overview](guides/49_multi_language_overview.md) ⭐ - Write once, use everywhere!
-- [Python Usage](guides/50_python_usage.md) - pandas, FastAPI, Jupyter
-- [R Usage](guides/51_r_usage.md) - tidyverse, ggplot2, Shiny
-- [Julia Usage](guides/52_julia_usage.md) - DataFrames.jl, type-safe
-- [C++ Usage](guides/53_cpp_usage.md) - Embedded, high-performance
-- [Rust Usage](guides/54_rust_usage.md) - Safe, fast, production-ready
+### Evaluation & Optimization
+- [Evaluation Metrics](guides/50_evaluation_metrics.md) - Accuracy metrics
+- [Usage Guide](guides/51_usage_guide.md) - Best practices
+- [Performance Optimization](guides/60_performance_optimization.md) - Optimization tips
 
-**Browse all**: [Complete Guide Index](guides/00_guide_index.md) - 17 guides, learning paths
+### Business Use Cases
+- [Demand Forecasting](guides/70_demand_forecasting.md) ⭐ - Retail & inventory
+- [Sales Prediction](guides/71_sales_prediction.md) - Revenue forecasting
+- [Capacity Planning](guides/72_capacity_planning.md) - Resource allocation
+
+### Multi-Language Integration
+- [Multi-Language Overview](guides/80_multi_language_overview.md) ⭐ - Write once, use everywhere!
+- [Python Integration](guides/81_python_integration.md) - pandas, FastAPI, Jupyter
+- [R Integration](guides/82_r_integration.md) - tidyverse, ggplot2, Shiny
+- [Julia Integration](guides/83_julia_integration.md) - DataFrames.jl, type-safe
+- [C++ Integration](guides/84_cpp_integration.md) - Embedded, high-performance
+- [Rust Integration](guides/85_rust_integration.md) - Safe, fast, production-ready
+
+### Reference
+- [API Reference](guides/90_api_reference.md) ⭐ - Complete API documentation
+- [Complete Guide Index](guides/99_guide_index.md) - All guides with learning paths
 
 ## 🎯 Use Cases
 
@@ -542,10 +554,12 @@ anofox-forecast/
 ├── anofox-time/                  # Core forecasting library
 │   ├── include/                  # Headers
 │   └── src/                      # Implementation
-├── examples/                     # SQL examples
-├── guides/                       # User guides
+├── benchmark/                    # Performance benchmarks (M5, synthetic tests)
+├── guides/                       # User guides (generated from templates)
+│   └── templates/                # Guide templates (*.md.in - edit these)
 ├── test/                         # Tests
-└── docs/                         # Documentation
+│   └── sql/docs_examples/        # SQL examples from guides
+└── scripts/                      # Build and documentation scripts
 ```
 
 ## 📄 License
