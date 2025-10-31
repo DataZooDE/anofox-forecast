@@ -1,5 +1,14 @@
 # Capacity Planning & Resource Optimization - Business Guide
 
+> **📝 Note**: This guide presents simplified workflows to demonstrate forecasting concepts. Real-world capacity planning is significantly more complex and requires:
+> - Detailed understanding of operational constraints and costs
+> - Integration with workforce management and scheduling systems
+> - Consideration of service level agreements and quality metrics
+> - Scenario analysis and contingency planning
+> - Balance between cost optimization and service quality
+>
+> Use these examples as starting points, not production-ready solutions.
+
 ## Business Context
 
 **Challenge**: Allocate resources efficiently to meet demand without over-provisioning.

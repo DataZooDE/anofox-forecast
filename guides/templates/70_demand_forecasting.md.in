@@ -1,5 +1,14 @@
 # Demand Forecasting for Retail & Inventory - Business Guide
 
+> **📝 Note**: This guide presents simplified workflows to demonstrate forecasting concepts. Real-world demand forecasting is significantly more complex and requires:
+> - Domain expertise in retail/inventory management
+> - Careful validation and testing
+> - Business rules integration (promotions, seasonality, external factors)
+> - Continuous monitoring and adjustment
+> - Collaboration with business stakeholders
+>
+> Use these examples as starting points, not production-ready solutions.
+
 ## Business Problem
 
 **Challenge**: Optimize inventory levels to:

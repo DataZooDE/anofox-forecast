@@ -252,13 +252,30 @@ SELECT * FROM TS_FILL_NULLS_MEAN('sales', product_id, date, sales_amount);
 
 ### 2.6 Outlier Treatment
 
-**Cap outliers using IQR method**:
+> **⚠️ Warning**: Automated outlier deletion is dangerous and should be used with extreme caution!
+>
+> **Why this is risky**:
+> - "Outliers" may be legitimate extreme values (Black Friday sales, emergency demand)
+> - May indicate important business events that should be preserved
+> - Can destroy valuable signal in the data
+> - Statistical methods don't understand business context
+>
+> **Best Practices**:
+> 1. **Investigate first**: Understand why values are extreme
+> 2. **Domain expertise**: Consult business stakeholders before removing data
+> 3. **Manual review**: Flag outliers for human review rather than auto-delete
+> 4. **Cap, don't delete**: If necessary, cap values rather than removing them
+> 5. **Document decisions**: Record why outliers were handled a certain way
+>
+> The examples below are for educational purposes. In production, always validate outlier treatment with domain experts.
+
+**Cap outliers using IQR method** (safer than deletion):
 ```sql
 SELECT * FROM TS_CAP_OUTLIERS_IQR('sales', product_id, date, sales_amount, 1.5);
 -- Caps values beyond Q1-1.5*IQR and Q3+1.5*IQR
 ```
 
-**Remove outliers using Z-score**:
+**Remove outliers using Z-score** (use with extreme caution):
 ```sql
 SELECT * FROM TS_REMOVE_OUTLIERS_ZSCORE('sales', product_id, date, sales_amount, 3.0);
 -- Removes observations with |z-score| > 3.0

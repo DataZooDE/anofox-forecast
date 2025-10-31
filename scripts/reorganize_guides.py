@@ -18,7 +18,7 @@ SQL_DIR = PROJECT_ROOT / "test" / "sql" / "docs_examples"
 # Mapping: old_name → new_name
 GUIDE_MAPPING = {
     # Getting Started (00-09)
-    "README.md.in": "00_README.md.in",
+    "00_README.md.in": "README.md.in",  # GitHub auto-displays README.md
     "01_quickstart.md.in": "01_quickstart.md.in",  # Keep as-is
 
     # Understanding Data (10-19)

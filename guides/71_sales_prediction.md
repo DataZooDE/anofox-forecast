@@ -1,5 +1,14 @@
 # Sales Prediction & Revenue Forecasting - Business Guide
 
+> **📝 Note**: This guide presents simplified workflows to demonstrate forecasting concepts. Real-world sales forecasting is significantly more complex and requires:
+> - Deep understanding of sales cycles and market dynamics
+> - Integration with CRM and sales pipeline data
+> - Consideration of marketing campaigns, seasonality, and economic factors
+> - Validation against actual business outcomes
+> - Continuous model refinement based on performance
+>
+> Use these examples as starting points, not production-ready solutions.
+
 ## Business Context
 
 **Objective**: Predict future sales and revenue for:
