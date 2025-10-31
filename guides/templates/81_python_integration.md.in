@@ -1,0 +1,800 @@
+# Using anofox-forecast from Python
+
+## Overview
+
+The anofox-forecast extension works seamlessly with Python through DuckDB's Python API. Write your forecasting logic in SQL, execute from Python!
+
+**Key Advantages**:
+- ✅ No Python forecasting libraries needed (no statsforecast, prophet, etc.)
+- ✅ Faster than pandas/polars for large datasets
+- ✅ SQL queries portable across languages
+- ✅ Native parallelization
+- ✅ Easy integration with existing Python workflows
+
+## Installation
+
+```bash
+pip install duckdb
+```
+
+**That's it!** No additional forecasting libraries needed.
+
+## Quick Start
+
+```python
+import duckdb
+
+# Connect to DuckDB
+con = duckdb.connect()
+
+# Load extension
+con.execute("LOAD 'path/to/anofox_forecast.duckdb_extension'")
+
+# Create sample data
+con.execute("""
+    CREATE TABLE sales AS
+    SELECT 
+        DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+        100 + 20 * SIN(2 * PI() * d / 7) + random() * 10 AS amount
+    FROM generate_series(0, 89) t(d)
+""")
+
+# Generate forecast
+result = con.execute("""
+    SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
+                              {'seasonal_period': 7})
+""").fetchdf()
+
+# Work with pandas DataFrame
+print(result.head())
+print(f"Average forecast: {result['point_forecast'].mean():.2f}")
+```
+
+## Working with DataFrames
+
+### Load Data from Pandas
+
+```python
+import pandas as pd
+import duckdb
+
+# Your pandas DataFrame
+df = pd.read_csv('sales.csv')
+df['date'] = pd.to_datetime(df['date'])
+
+# Register DataFrame with DuckDB
+con = duckdb.connect()
+con.register('sales_df', df)
+
+# Forecast directly from pandas DataFrame
+forecast = con.execute("""
+    SELECT * FROM TS_FORECAST('sales_df', date, amount, 'AutoETS', 28,
+                              {'seasonal_period': 7})
+""").fetchdf()
+
+# Back to pandas for visualization/analysis
+print(forecast.head())
+```
+
+### Multiple Series from DataFrame
+
+```python
+import pandas as pd
+import duckdb
+
+# Multi-series data
+df = pd.DataFrame({
+    'product_id': ['P1']*90 + ['P2']*90 + ['P3']*90,
+    'date': pd.date_range('2023-01-01', periods=90).tolist() * 3,
+    'sales': np.random.randn(270) * 10 + 100
+})
+
+con = duckdb.connect()
+con.register('sales', df)
+
+# Forecast all products in parallel
+forecasts = con.execute("""
+    SELECT * FROM TS_FORECAST_BY('sales', product_id, date, sales,
+                                 'AutoETS', 14, {'seasonal_period': 7})
+""").fetchdf()
+
+# Pivot for analysis
+forecast_pivot = forecasts.pivot(
+    index='forecast_step', 
+    columns='product_id', 
+    values='point_forecast'
+)
+print(forecast_pivot)
+```
+
+## Data Preparation Workflow
+
+```python
+import duckdb
+
+con = duckdb.connect()
+con.execute("LOAD 'anofox_forecast.duckdb_extension'")
+
+# Load raw data
+con.execute("CREATE TABLE sales_raw AS SELECT * FROM read_csv('sales.csv')")
+
+# 1. Analyze data quality
+stats = con.execute("""
+    SELECT * FROM TS_STATS('sales_raw', product_id, date, amount)
+""").fetchdf()
+
+print(f"Average quality score: {stats['quality_score'].mean():.3f}")
+print(f"Series with issues: {(stats['quality_score'] < 0.7).sum()}")
+
+# 2. Prepare data
+con.execute("""
+    CREATE TABLE sales_prepared AS
+    WITH filled AS (
+        SELECT * FROM TS_FILL_GAPS('sales_raw', product_id, date, amount)
+    ),
+    cleaned AS (
+        SELECT * FROM TS_DROP_CONSTANT('filled', product_id, amount)
+    )
+    SELECT * FROM TS_FILL_NULLS_FORWARD('cleaned', product_id, date, amount)
+""")
+
+# 3. Forecast
+forecasts = con.execute("""
+    SELECT * FROM TS_FORECAST_BY('sales_prepared', product_id, date, amount,
+                                 'AutoETS', 28, {'seasonal_period': 7})
+""").fetchdf()
+
+# 4. Export results
+forecasts.to_csv('forecasts.csv', index=False)
+```
+
+## Evaluation & Validation
+
+```python
+import duckdb
+import pandas as pd
+
+con = duckdb.connect()
+con.execute("LOAD 'anofox_forecast.duckdb_extension'")
+
+# Load actual values
+actuals_df = pd.read_csv('actuals.csv')
+con.register('actuals', actuals_df)
+
+# Load forecasts
+forecasts_df = pd.read_csv('forecasts.csv')
+con.register('forecasts', forecasts_df)
+
+# Compute metrics
+metrics = con.execute("""
+    WITH joined AS (
+        SELECT 
+            f.product_id,
+            LIST(a.actual ORDER BY a.date) AS actuals,
+            LIST(f.point_forecast ORDER BY f.forecast_step) AS forecasts,
+            LIST(f.lower ORDER BY f.forecast_step) AS lower_bounds,
+            LIST(f.upper ORDER BY f.forecast_step) AS upper_bounds
+        FROM forecasts f
+        JOIN actuals a ON f.product_id = a.product_id 
+                      AND f.date_col = a.date
+        GROUP BY f.product_id
+    )
+    SELECT 
+        product_id,
+        TS_MAE(actuals, forecasts) AS mae,
+        TS_RMSE(actuals, forecasts) AS rmse,
+        TS_MAPE(actuals, forecasts) AS mape,
+        TS_COVERAGE(actuals, lower_bounds, upper_bounds) AS coverage
+    FROM joined
+""").fetchdf()
+
+print(metrics)
+```
+
+## Integration Patterns
+
+### Pattern 1: Batch Forecasting Pipeline
+
+```python
+import duckdb
+from datetime import datetime
+
+def run_forecast_pipeline(input_file, output_file):
+    """Daily forecast pipeline"""
+    con = duckdb.connect()
+    con.execute("LOAD 'anofox_forecast.duckdb_extension'")
+    
+    # Load data
+    con.execute(f"CREATE TABLE sales AS SELECT * FROM read_parquet('{input_file}')")
+    
+    # Prepare
+    con.execute("""
+        CREATE TABLE sales_prep AS
+        SELECT * FROM TS_FILL_GAPS('sales', product_id, date, amount)
+    """)
+    
+    # Forecast
+    forecasts = con.execute("""
+        SELECT 
+            product_id,
+            date_col AS forecast_date,
+            point_forecast,
+            lower AS lower_95ci,
+            upper AS upper_95ci,
+            confidence_level,
+            CURRENT_TIMESTAMP AS generated_at
+        FROM TS_FORECAST_BY('sales_prep', product_id, date, amount,
+                            'AutoETS', 28, {'seasonal_period': 7, 'confidence_level': 0.95})
+    """).fetchdf()
+    
+    # Save
+    forecasts.to_parquet(output_file)
+    print(f"Forecasted {forecasts['product_id'].nunique()} products")
+    
+    return forecasts
+
+# Run pipeline
+forecasts = run_forecast_pipeline('sales_data.parquet', 'forecasts.parquet')
+```
+
+### Pattern 2: API Endpoint
+
+```python
+from fastapi import FastAPI
+import duckdb
+
+app = FastAPI()
+
+# Initialize connection
+con = duckdb.connect()
+con.execute("LOAD 'anofox_forecast.duckdb_extension'")
+con.execute("CREATE TABLE sales AS SELECT * FROM read_parquet('sales.parquet')")
+
+@app.get("/forecast/{product_id}")
+def get_forecast(product_id: str, horizon: int = 28):
+    """Get forecast for specific product"""
+    result = con.execute(f"""
+        SELECT 
+            forecast_step,
+            date_col AS forecast_date,
+            point_forecast,
+            lower,
+            upper
+        FROM TS_FORECAST(
+            (SELECT * FROM sales WHERE product_id = '{product_id}'),
+            date, amount, 'AutoETS', {horizon},
+            {{'seasonal_period': 7}}
+        )
+    """).fetchdf()
+    
+    return result.to_dict('records')
+
+@app.get("/metrics/{product_id}")
+def get_metrics(product_id: str):
+    """Get forecast accuracy metrics"""
+    metrics = con.execute(f"""
+        WITH stats AS (
+            SELECT * FROM TS_STATS(
+                (SELECT * FROM sales WHERE product_id = '{product_id}'),
+                product_id, date, amount
+            )
+        )
+        SELECT 
+            series_id AS product_id,
+            length AS history_length,
+            quality_score,
+            trend_corr AS trend
+        FROM stats
+    """).fetchdf()
+    
+    return metrics.to_dict('records')[0]
+```
+
+### Pattern 3: Scheduled Job (Airflow/Prefect)
+
+```python
+import duckdb
+from prefect import flow, task
+from datetime import datetime
+
+@task
+def prepare_data():
+    """Data preparation task"""
+    con = duckdb.connect('warehouse.db')
+    con.execute("LOAD 'anofox_forecast.duckdb_extension'")
+    
+    con.execute("""
+        CREATE OR REPLACE TABLE sales_prepared AS
+        WITH filled AS (
+            SELECT * FROM TS_FILL_GAPS('sales_raw', product_id, date, amount)
+        )
+        SELECT * FROM TS_DROP_CONSTANT('filled', product_id, amount)
+    """)
+    
+    return "Data prepared"
+
+@task
+def generate_forecasts():
+    """Forecasting task"""
+    con = duckdb.connect('warehouse.db')
+    con.execute("LOAD 'anofox_forecast.duckdb_extension'")
+    
+    con.execute("""
+        CREATE OR REPLACE TABLE forecasts AS
+        SELECT * FROM TS_FORECAST_BY('sales_prepared', product_id, date, amount,
+                                     'AutoETS', 28, {'seasonal_period': 7})
+    """)
+    
+    # Get count for logging
+    count = con.execute("SELECT COUNT(DISTINCT product_id) FROM forecasts").fetchone()[0]
+    return f"Forecasted {count} products"
+
+@task
+def export_results():
+    """Export task"""
+    con = duckdb.connect('warehouse.db')
+    con.execute("""
+        COPY forecasts TO 's3://my-bucket/forecasts.parquet' (FORMAT PARQUET)
+    """)
+    return "Exported to S3"
+
+@flow
+def daily_forecast_flow():
+    """Daily forecasting workflow"""
+    prepare_data()
+    generate_forecasts()
+    export_results()
+
+# Schedule to run daily
+if __name__ == "__main__":
+    daily_forecast_flow()
+```
+
+## Visualization
+
+### With Matplotlib
+
+```python
+import duckdb
+import matplotlib.pyplot as plt
+
+con = duckdb.connect()
+con.execute("LOAD 'anofox_forecast.duckdb_extension'")
+
+# Get historical data
+historical = con.execute("""
+    SELECT date, amount FROM sales ORDER BY date
+""").fetchdf()
+
+# Get forecast
+forecast = con.execute("""
+    SELECT date_col, point_forecast, lower, upper
+    FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
+                     {'seasonal_period': 7, 'confidence_level': 0.95})
+""").fetchdf()
+
+# Plot
+plt.figure(figsize=(12, 6))
+plt.plot(historical['date'], historical['amount'], label='Historical', color='black')
+plt.plot(forecast['date_col'], forecast['point_forecast'], label='Forecast', color='blue')
+plt.fill_between(forecast['date_col'], forecast['lower'], forecast['upper'], 
+                 alpha=0.3, color='blue', label='95% CI')
+plt.xlabel('Date')
+plt.ylabel('Amount')
+plt.title('Sales Forecast')
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.savefig('forecast.png')
+plt.show()
+```
+
+### With Plotly (Interactive)
+
+```python
+import duckdb
+import plotly.graph_objects as go
+
+con = duckdb.connect()
+con.execute("LOAD 'anofox_forecast.duckdb_extension'")
+
+historical = con.execute("SELECT date, amount FROM sales").fetchdf()
+forecast = con.execute("""
+    SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, {'seasonal_period': 7})
+""").fetchdf()
+
+fig = go.Figure()
+
+# Historical
+fig.add_trace(go.Scatter(
+    x=historical['date'], y=historical['amount'],
+    mode='lines', name='Historical', line=dict(color='black')
+))
+
+# Forecast
+fig.add_trace(go.Scatter(
+    x=forecast['date_col'], y=forecast['point_forecast'],
+    mode='lines', name='Forecast', line=dict(color='blue')
+))
+
+# Confidence interval
+fig.add_trace(go.Scatter(
+    x=forecast['date_col'].tolist() + forecast['date_col'].tolist()[::-1],
+    y=forecast['upper'].tolist() + forecast['lower'].tolist()[::-1],
+    fill='toself', fillcolor='rgba(0,100,255,0.2)',
+    line=dict(color='rgba(255,255,255,0)'),
+    name='95% CI'
+))
+
+fig.update_layout(
+    title='Sales Forecast with Confidence Intervals',
+    xaxis_title='Date',
+    yaxis_title='Sales Amount'
+)
+
+fig.show()
+```
+
+## Advanced Usage
+
+### Parameterized Queries
+
+```python
+import duckdb
+
+def forecast_product(product_id: str, horizon: int = 28) -> pd.DataFrame:
+    """Generate forecast for specific product"""
+    con = duckdb.connect('warehouse.db')
+    con.execute("LOAD 'anofox_forecast.duckdb_extension'")
+    
+    # Use prepared statement for safety
+    result = con.execute("""
+        SELECT * FROM TS_FORECAST(
+            (SELECT * FROM sales WHERE product_id = ?),
+            date, amount, 'AutoETS', ?, {'seasonal_period': 7}
+        )
+    """, [product_id, horizon]).fetchdf()
+    
+    return result
+
+# Use it
+forecast_p1 = forecast_product('P001', horizon=14)
+forecast_p2 = forecast_product('P002', horizon=30)
+```
+
+### Batch Processing with Progress
+
+```python
+import duckdb
+from tqdm import tqdm
+
+con = duckdb.connect()
+con.execute("LOAD 'anofox_forecast.duckdb_extension'")
+
+# Get list of products
+products = con.execute("SELECT DISTINCT product_id FROM sales").fetchall()
+
+forecasts = []
+for product_id, in tqdm(products, desc="Forecasting"):
+    # Forecast one product at a time (if needed for memory)
+    fc = con.execute(f"""
+        SELECT * FROM TS_FORECAST(
+            (SELECT * FROM sales WHERE product_id = '{product_id}'),
+            date, amount, 'AutoETS', 28, {{'seasonal_period': 7}}
+        )
+    """).fetchdf()
+    fc['product_id'] = product_id
+    forecasts.append(fc)
+
+# Combine all forecasts
+import pandas as pd
+all_forecasts = pd.concat(forecasts, ignore_index=True)
+```
+
+### Integration with Scikit-learn
+
+```python
+import duckdb
+import pandas as pd
+from sklearn.ensemble import RandomForestRegressor
+
+con = duckdb.connect()
+con.execute("LOAD 'anofox_forecast.duckdb_extension'")
+
+# Get in-sample forecasts as features
+fitted = con.execute("""
+    SELECT 
+        product_id,
+        insample_fitted
+    FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 7,
+                        {'seasonal_period': 7, 'return_insample': true})
+    WHERE forecast_step = 1
+""").fetchdf()
+
+# Use forecast residuals as features for ML
+residuals = []
+for idx, row in fitted.iterrows():
+    product_sales = con.execute(f"""
+        SELECT amount FROM sales 
+        WHERE product_id = '{row['product_id']}'
+        ORDER BY date
+    """).fetchdf()['amount'].values
+    
+    fitted_values = row['insample_fitted']
+    resid = product_sales - fitted_values
+    residuals.append(resid[-7:].tolist())  # Last week
+
+# Now use residuals as features in ML model
+X = pd.DataFrame(residuals)
+y = ...  # Your target
+
+rf = RandomForestRegressor()
+rf.fit(X, y)
+```
+
+## Database Integration
+
+### SQLite to DuckDB
+
+```python
+import sqlite3
+import duckdb
+
+# Read from SQLite
+sqlite_con = sqlite3.connect('sales.db')
+df = pd.read_sql('SELECT * FROM sales', sqlite_con)
+
+# Forecast with DuckDB
+duckdb_con = duckdb.connect()
+duckdb_con.execute("LOAD 'anofox_forecast.duckdb_extension'")
+duckdb_con.register('sales', df)
+
+forecast = duckdb_con.execute("""
+    SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28, 
+                                 {'seasonal_period': 7})
+""").fetchdf()
+
+# Write back to SQLite
+forecast.to_sql('forecasts', sqlite_con, if_exists='replace', index=False)
+```
+
+### PostgreSQL to DuckDB
+
+```python
+import duckdb
+import psycopg2
+
+# DuckDB can read from PostgreSQL directly!
+con = duckdb.connect()
+con.execute("LOAD 'anofox_forecast.duckdb_extension'")
+con.execute("INSTALL postgres; LOAD postgres;")
+
+# Attach PostgreSQL database
+con.execute("""
+    ATTACH 'postgresql://user:pass@localhost:5432/mydb' AS pg (TYPE postgres)
+""")
+
+# Forecast directly from PostgreSQL table
+forecast = con.execute("""
+    SELECT * FROM TS_FORECAST_BY('pg.sales', product_id, date, amount,
+                                 'AutoETS', 28, {'seasonal_period': 7})
+""").fetchdf()
+
+# Write back to PostgreSQL
+con.execute("""
+    CREATE TABLE pg.forecasts AS SELECT * FROM forecast
+""")
+```
+
+## Best Practices
+
+### 1. Use Connection Pooling
+
+```python
+import duckdb
+from contextlib import contextmanager
+
+@contextmanager
+def get_forecast_connection():
+    """Context manager for DuckDB connections"""
+    con = duckdb.connect('warehouse.db')
+    try:
+        con.execute("LOAD 'anofox_forecast.duckdb_extension'")
+        yield con
+    finally:
+        con.close()
+
+# Usage
+with get_forecast_connection() as con:
+    forecast = con.execute("""
+        SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
+                                  {'seasonal_period': 7})
+    """).fetchdf()
+```
+
+### 2. Error Handling
+
+```python
+import duckdb
+
+def safe_forecast(product_id: str) -> pd.DataFrame:
+    """Forecast with error handling"""
+    try:
+        con = duckdb.connect()
+        con.execute("LOAD 'anofox_forecast.duckdb_extension'")
+        
+        result = con.execute(f"""
+            SELECT * FROM TS_FORECAST(
+                (SELECT * FROM sales WHERE product_id = '{product_id}'),
+                date, amount, 'AutoETS', 28, {{'seasonal_period': 7}}
+            )
+        """).fetchdf()
+        
+        return result
+        
+    except duckdb.Error as e:
+        if "too short" in str(e):
+            print(f"Product {product_id}: Insufficient data")
+        elif "constant" in str(e):
+            print(f"Product {product_id}: Constant series")
+        else:
+            print(f"Product {product_id}: Error - {e}")
+        return pd.DataFrame()  # Return empty
+```
+
+### 3. Logging
+
+```python
+import duckdb
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def forecast_with_logging(table_name: str):
+    """Forecast with detailed logging"""
+    logger.info(f"Starting forecast for {table_name}")
+    
+    con = duckdb.connect()
+    con.execute("LOAD 'anofox_forecast.duckdb_extension'")
+    
+    # Check data quality first
+    stats = con.execute(f"""
+        SELECT COUNT(*) as n_series, AVG(quality_score) as avg_quality
+        FROM TS_STATS('{table_name}', product_id, date, amount)
+    """).fetchone()
+    
+    logger.info(f"Data quality: {stats[1]:.3f} for {stats[0]} series")
+    
+    # Generate forecast
+    forecast = con.execute(f"""
+        SELECT * FROM TS_FORECAST_BY('{table_name}', product_id, date, amount,
+                                     'AutoETS', 28, {{'seasonal_period': 7}})
+    """).fetchdf()
+    
+    logger.info(f"Generated {len(forecast)} forecast points")
+    
+    return forecast
+```
+
+## Performance Tips
+
+### 1. Persistent Connection
+
+```python
+# Reuse connection for multiple queries
+con = duckdb.connect('analytics.db', read_only=False)
+con.execute("LOAD 'anofox_forecast.duckdb_extension'")
+
+# Multiple operations on same connection
+stats = con.execute("SELECT * FROM TS_STATS('sales', product_id, date, amount)").fetchdf()
+forecast = con.execute("SELECT * FROM TS_FORECAST_BY(...)").fetchdf()
+metrics = con.execute("SELECT TS_MAE(...) FROM ...").fetchdf()
+
+con.close()
+```
+
+### 2. Arrow for Large Results
+
+```python
+# For very large result sets, use Arrow (zero-copy)
+import duckdb
+
+con = duckdb.connect()
+con.execute("LOAD 'anofox_forecast.duckdb_extension'")
+
+# Returns PyArrow table (faster for large data)
+forecast_arrow = con.execute("""
+    SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28, 
+                                 {'seasonal_period': 7})
+""").fetch_arrow_table()
+
+# Convert to pandas only if needed
+forecast_df = forecast_arrow.to_pandas()
+```
+
+### 3. Parallel Python + DuckDB
+
+```python
+from concurrent.futures import ProcessPoolExecutor
+import duckdb
+
+def forecast_batch(product_ids):
+    """Forecast a batch of products"""
+    con = duckdb.connect()
+    con.execute("LOAD 'anofox_forecast.duckdb_extension'")
+    
+    # DuckDB parallelizes internally
+    return con.execute(f"""
+        SELECT * FROM TS_FORECAST_BY(
+            (SELECT * FROM sales WHERE product_id IN ({','.join(f"'{p}'" for p in product_ids)})),
+            product_id, date, amount, 'AutoETS', 28, {{'seasonal_period': 7}}
+        )
+    """).fetchdf()
+
+# Split products into batches for multi-process
+all_products = ['P001', 'P002', ..., 'P999']
+batches = [all_products[i:i+100] for i in range(0, len(all_products), 100)]
+
+with ProcessPoolExecutor(max_workers=4) as executor:
+    results = list(executor.map(forecast_batch, batches))
+
+forecasts = pd.concat(results, ignore_index=True)
+```
+
+## Jupyter Notebook Tips
+
+```python
+# In Jupyter/IPython
+
+import duckdb
+import pandas as pd
+
+# Set display options
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', None)
+
+con = duckdb.connect()
+con.execute("LOAD 'anofox_forecast.duckdb_extension'")
+
+# Create data
+con.execute("CREATE TABLE sales AS SELECT ...")
+
+# Quick forecast
+forecast = con.sql("""
+    SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, {'seasonal_period': 7})
+""").df()
+
+# Display nicely
+forecast.head(10)
+
+# Or use DuckDB's built-in display
+con.sql("SELECT * FROM TS_FORECAST(...) LIMIT 10").show()
+```
+
+## Summary
+
+**Why Use from Python?**
+- ✅ Faster than pandas/statsforecast for data prep (3-4x)
+- ✅ No need for multiple forecasting libraries
+- ✅ Portable SQL queries
+- ✅ Easy integration with existing Python workflows
+- ✅ Works with pandas, polars, arrow seamlessly
+
+**Typical Python Workflow**:
+```
+Load data (pandas) 
+  → Register with DuckDB
+  → Run SQL forecast queries
+  → Get results as DataFrame
+  → Visualize/export
+```
+
+**Performance**: For 10K series, Python + DuckDB is faster than pure pandas + statsforecast!
+
+---
+
+**Next**: [R Usage Guide](82_r_integration.md) | [Julia Usage Guide](83_julia_integration.md)
+
+**Examples**: See `examples/` directory for more SQL examples that work from Python!
+

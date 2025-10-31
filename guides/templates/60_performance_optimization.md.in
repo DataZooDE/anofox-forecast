@@ -1,0 +1,366 @@
+# Performance Optimization Guide - Technical
+
+## Overview
+
+This guide covers performance optimization techniques for large-scale time series forecasting with anofox-forecast.
+
+## Performance Characteristics
+
+### Model Speed Comparison
+
+| Model | Speed | Throughput | Use When |
+|-------|-------|------------|----------|
+| **Naive** | ⚡⚡⚡⚡⚡ | 100K series/min | Speed critical |
+| **SeasonalNaive** | ⚡⚡⚡⚡⚡ | 80K series/min | Fast baseline |
+| **Theta** | ⚡⚡⚡⚡ | 50K series/min | Balanced |
+| **AutoETS** | ⚡⚡⚡ | 10K series/min | Production standard |
+| **AutoARIMA** | ⚡⚡ | 2K series/min | High accuracy needed |
+| **AutoTBATS** | ⚡ | 500 series/min | Very complex patterns |
+
+*Benchmarks: Single-threaded, 365-day series, 28-day horizon*
+
+### DuckDB Parallelization
+
+**Key Insight**: DuckDB automatically parallelizes GROUP BY operations!
+
+<!-- include: test/sql/docs_examples/60_performance_optimization_evaluate_01.sql -->
+
+**Scalability**:
+- 4 cores: ~4x speedup
+- 8 cores: ~7x speedup
+- 16 cores: ~12x speedup
+- 32 cores: ~20x speedup
+
+## Optimization Techniques
+
+### 1. Model Selection for Scale
+
+**Scenario**: Need to forecast 10,000 products daily
+
+**Option A: Fast models** (Recommended for scale)
+<!-- include: test/sql/docs_examples/60_performance_optimization_example_02.sql -->
+
+**Option B: Accurate models** (Slower)
+<!-- include: test/sql/docs_examples/60_performance_optimization_multi_series_03.sql -->
+
+**Option C: Hybrid approach** (Best of both)
+<!-- include: test/sql/docs_examples/60_performance_optimization_multi_series_04.sql -->
+
+### 2. Reduce Horizon When Possible
+
+<!-- include: test/sql/docs_examples/60_performance_optimization_example_05.sql -->
+
+**Trade-off**: More frequent re-forecasting vs longer horizons
+
+### 3. Materialize Intermediate Results
+
+**Slow** (re-computes stats every time):
+<!-- include: test/sql/docs_examples/60_performance_optimization_statistics_06.sql -->
+
+**Fast** (compute once, reuse):
+<!-- include: test/sql/docs_examples/60_performance_optimization_statistics_07.sql -->
+
+### 4. Filter Early
+
+**Slow** (processes all data then filters):
+<!-- include: test/sql/docs_examples/60_performance_optimization_data_quality_08.sql -->
+
+**Fast** (filters before forecasting):
+<!-- include: test/sql/docs_examples/60_performance_optimization_multi_series_09.sql -->
+
+### 5. Disable Unused Features
+
+<!-- include: test/sql/docs_examples/60_performance_optimization_multi_series_10.sql -->
+
+**Performance impact**: ~1-2% faster without `return_insample`
+
+### 6. Batch Processing Strategy
+
+**For very large datasets** (100K+ series):
+
+<!-- include: test/sql/docs_examples/60_performance_optimization_example_11.sql -->
+
+## Memory Optimization
+
+### Memory Usage Estimates
+
+| Dataset | Memory (approx) | Notes |
+|---------|-----------------|-------|
+| 1K series × 365 days | ~50 MB | Small, fits in cache |
+| 10K series × 365 days | ~500 MB | Medium, comfortable |
+| 100K series × 365 days | ~5 GB | Large, needs good RAM |
+| 1M series × 365 days | ~50 GB | Very large, consider batching |
+
+### Reduce Memory Footprint
+
+<!-- include: test/sql/docs_examples/60_performance_optimization_example_12.sql -->
+
+## Query Optimization
+
+### Use CTEs Effectively
+
+**Good** (DuckDB optimizes CTEs):
+<!-- include: test/sql/docs_examples/60_performance_optimization_example_13.sql -->
+
+**Also Good** (Materialize for reuse):
+<!-- include: test/sql/docs_examples/60_performance_optimization_multi_series_14.sql -->
+
+### Avoid Subqueries in GROUP BY
+
+**Slow**:
+<!-- include: test/sql/docs_examples/60_performance_optimization_create_sample_data_15.sql -->
+
+**Fast**:
+<!-- include: test/sql/docs_examples/60_performance_optimization_multi_series_16.sql -->
+
+## Monitoring & Profiling
+
+### Measure Query Performance
+
+<!-- include: test/sql/docs_examples/60_performance_optimization_multi_series_17.sql -->
+
+### Profile with EXPLAIN ANALYZE
+
+<!-- include: test/sql/docs_examples/60_performance_optimization_multi_series_18.sql -->
+
+## Hardware Recommendations
+
+### Minimum Requirements
+- **CPU**: 4 cores
+- **RAM**: 8 GB
+- **Storage**: SSD recommended
+
+### Recommended for Production
+- **CPU**: 16+ cores (better parallelization)
+- **RAM**: 32+ GB (handle larger datasets)
+- **Storage**: NVMe SSD (faster I/O)
+
+### Cloud Sizing
+
+| Workload | AWS Instance | Cores | RAM | Cost/hour |
+|----------|--------------|-------|-----|-----------|
+| **Small** (1K series) | c6i.2xlarge | 8 | 16 GB | ~$0.34 |
+| **Medium** (10K series) | c6i.4xlarge | 16 | 32 GB | ~$0.68 |
+| **Large** (100K series) | c6i.8xlarge | 32 | 64 GB | ~$1.36 |
+
+## Benchmarks
+
+### Standard Workload
+
+**Dataset**: 10,000 series, 365 days each, 28-day horizon
+
+| Model | Single Core | 8 Cores | 16 Cores | Speedup |
+|-------|-------------|---------|----------|---------|
+| SeasonalNaive | 2.5 min | 20 sec | 12 sec | 12.5x |
+| AutoETS | 120 min | 16 min | 9 min | 13.3x |
+| AutoARIMA | 450 min | 60 min | 35 min | 12.9x |
+
+### Large-Scale Benchmark
+
+**Dataset**: 100,000 series, 365 days each, 7-day horizon
+
+| Operation | Time (16 cores) | Memory Peak |
+|-----------|----------------|-------------|
+| TS_STATS | 45 sec | 2.5 GB |
+| TS_FILL_GAPS | 30 sec | 3.0 GB |
+| TS_FORECAST_BY (SeasonalNaive) | 3 min | 4.5 GB |
+| TS_FORECAST_BY (AutoETS) | 90 min | 6.0 GB |
+
+## Best Practices
+
+### 1. Profile First, Optimize Second
+
+<!-- include: test/sql/docs_examples/60_performance_optimization_multi_series_19.sql -->
+
+### 2. Use Appropriate Model for Scale
+
+```
+< 100 series → Any model
+100-1K series → AutoETS, Theta, AutoARIMA
+1K-10K series → AutoETS, SeasonalNaive
+10K-100K series → SeasonalNaive, Theta
+> 100K series → SeasonalNaive, consider batching
+```
+
+### 3. Optimize the Bottleneck
+
+**Typical bottlenecks**:
+1. Data loading (I/O)
+2. Data preparation (gaps, nulls)
+3. Model fitting (AutoETS, AutoARIMA)
+4. Result materialization
+
+**Solutions**:
+- Use SSD for I/O
+- Materialize preparation results
+- Use faster models for non-critical series
+- Project only needed columns
+
+### 4. Incremental Updates
+
+**Instead of re-forecasting everything daily**:
+
+<!-- include: test/sql/docs_examples/60_performance_optimization_example_20.sql -->
+
+### 5. Caching & Materialized Views
+
+<!-- include: test/sql/docs_examples/60_performance_optimization_example_21.sql -->
+
+## Advanced Optimizations
+
+### 1. Parallel Processing Control
+
+DuckDB automatically uses available cores. To limit:
+
+<!-- include: test/sql/docs_examples/60_performance_optimization_data_quality_22.sql -->
+
+### 2. Memory Limit
+
+<!-- include: test/sql/docs_examples/60_performance_optimization_example_23.sql -->
+
+### 3. Optimize Data Layout
+
+<!-- include: test/sql/docs_examples/60_performance_optimization_example_24.sql -->
+
+### 4. Columnar Storage Benefits
+
+DuckDB's columnar storage means:
+- Reading only needed columns is very fast
+- Compression reduces I/O
+- Vectorized operations (SIMD)
+
+<!-- include: test/sql/docs_examples/60_performance_optimization_example_25.sql -->
+
+## Scaling Patterns
+
+### Pattern 1: Vertical Scaling (More Cores)
+
+**Single machine with more CPUs**
+
+<!-- include: test/sql/docs_examples/60_performance_optimization_example_26.sql -->
+
+**Pros**: Simple, no code changes
+**Cons**: Limited by single machine capacity
+
+**Recommended**: Up to ~50K series
+
+### Pattern 2: Horizontal Partitioning
+
+**Multiple machines processing different subsets**
+
+<!-- include: test/sql/docs_examples/60_performance_optimization_example_27.sql -->
+
+**Pros**: Linear scaling
+**Cons**: Need orchestration layer
+
+**Recommended**: 50K-500K series
+
+### Pattern 3: Time-Based Partitioning
+
+**Partition by time window**
+
+<!-- include: test/sql/docs_examples/60_performance_optimization_example_28.sql -->
+
+**Pros**: Reduces data processed
+**Cons**: May lose long-term patterns
+
+## Real-World Performance Cases
+
+### Case 1: Daily Forecasting Job
+
+**Requirement**: Forecast 5,000 products every night
+
+<!-- include: test/sql/docs_examples/60_performance_optimization_example_29.sql -->
+
+**Performance**: ~15 minutes total on 16-core machine
+
+### Case 2: Real-Time API
+
+**Requirement**: Generate forecast on-demand for single product
+
+<!-- include: test/sql/docs_examples/60_performance_optimization_forecast_30.sql -->
+
+**Performance**: < 1 second per product (with warm cache)
+
+### Case 3: Batch Reforecasting
+
+**Requirement**: Re-forecast all 50,000 products weekly
+
+<!-- include: test/sql/docs_examples/60_performance_optimization_example_31.sql -->
+
+**Strategy**:
+- Run on weekend (off-peak)
+- Use all available cores
+- Store results for the week
+- Incremental updates mid-week if needed
+
+**Performance**: ~4 hours on 32-core machine
+
+## Monitoring
+
+### Track Query Performance
+
+<!-- include: test/sql/docs_examples/60_performance_optimization_example_32.sql -->
+
+## Troubleshooting Slow Queries
+
+### Diagnostic Checklist
+
+1. **Check data size**:
+<!-- include: test/sql/docs_examples/60_performance_optimization_data_quality_33.sql -->
+
+2. **Check model**:
+<!-- include: test/sql/docs_examples/60_performance_optimization_data_quality_34.sql -->
+
+3. **Check preparation overhead**:
+<!-- include: test/sql/docs_examples/60_performance_optimization_example_35.sql -->
+
+4. **Check parallelization**:
+<!-- include: test/sql/docs_examples/60_performance_optimization_create_sample_data_36.sql -->
+
+5. **Check memory**:
+<!-- include: test/sql/docs_examples/60_performance_optimization_example_37.sql -->
+
+## Performance Tuning Checklist
+
+- [ ] Use fastest model appropriate for accuracy needs
+- [ ] Filter data before forecasting
+- [ ] Materialize intermediate results
+- [ ] Use batching for very large datasets (>100K series)
+- [ ] Disable `return_insample` if not needed
+- [ ] Cache preparation results (TS_STATS, TS_FILL_GAPS)
+- [ ] Optimize data layout (sorted, columnar)
+- [ ] Monitor and log performance
+- [ ] Use appropriate hardware (sufficient RAM, multiple cores)
+- [ ] Consider incremental updates vs full reforecasting
+
+## Summary
+
+**Key Takeaways**:
+- ✅ DuckDB parallelizes GROUP BY automatically (use it!)
+- ✅ Model selection has biggest impact on speed
+- ✅ Materialize intermediate results for reuse
+- ✅ Filter early, process less data
+- ✅ Use hybrid approach for 10K+ series (fast for most, accurate for top)
+- ✅ Monitor performance over time
+
+**Performance Hierarchy** (fastest to slowest):
+1. SeasonalNaive, Naive
+2. Theta, OptimizedTheta
+3. AutoETS, ETS
+4. AutoARIMA, ARIMA
+5. AutoMSTL, MSTL
+6. AutoTBATS, TBATS
+
+**Scalability Sweet Spots**:
+- **< 1K series**: Any model, single machine
+- **1K-10K series**: AutoETS, single machine (16+ cores)
+- **10K-100K series**: Hybrid (fast + accurate), single powerful machine
+- **> 100K series**: Batch processing, consider distributed approach
+
+---
+
+**Next**: [EDA & Data Prep](11_exploratory_analysis.md) - Optimize data preparation performance
+
+**Related**: [API Reference](90_api_reference.md) - Complete function documentation
+

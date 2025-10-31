@@ -118,9 +118,9 @@ You've just:
 ## Next Steps
 
 ### Learn More
-- [Basic Forecasting Guide](03_basic_forecasting.md) - Detailed walkthrough
-- [Model Selection Guide](11_model_selection.md) - Choose the best model
-- [EDA & Data Prep](40_eda_data_prep.md) - Clean your data first
+- [Basic Forecasting Guide](30_basic_forecasting.md) - Detailed walkthrough
+- [Model Selection Guide](40_model_selection.md) - Choose the best model
+- [EDA & Data Prep](11_exploratory_analysis.md) - Clean your data first
 
 ### Try Different Models
 ```sql
@@ -189,7 +189,7 @@ SELECT * FROM TS_DETECT_SEASONALITY_ALL('my_sales', product_id, date, sales);
 
 ---
 
-**Ready for more?** → [Basic Forecasting Guide](03_basic_forecasting.md)
+**Ready for more?** → [Basic Forecasting Guide](30_basic_forecasting.md)
 
 **Need help?** → Check [guides/](.) for comprehensive documentation!
 
