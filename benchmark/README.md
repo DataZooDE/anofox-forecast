@@ -4,6 +4,14 @@ This directory contains performance benchmarks and validation tests for the anof
 
 ## Benchmarks
 
+### ARIMA Benchmark Suite (NEW!)
+- **`arima_benchmark/`** - Comprehensive ARIMA comparison benchmark
+  - Compares anofox-forecast AutoARIMA with statsforecast, pmdarima, and prophet
+  - Uses M4 Competition datasets (Daily, Hourly, Weekly)
+  - Measures MASE, MAE, RMSE, and execution time
+  - Based on [Nixtla's statsforecast benchmark](https://github.com/Nixtla/statsforecast/tree/main/experiments/arima)
+  - **See**: `arima_benchmark/README.md` for details
+
 ### M5 Competition Dataset
 - **`m5_benchmark.py`** - M5 forecasting competition benchmark
 - **`m5_test.sql`** - SQL tests using M5 dataset
@@ -20,6 +28,17 @@ These benchmarks are used to:
 4. Identify performance regressions
 
 ## Running Benchmarks
+
+### ARIMA Benchmark (NEW!)
+```bash
+# Full benchmark on Daily data (recommended for first run)
+uv run python arima_benchmark/run_benchmark.py run --group=Daily
+
+# Run specific model
+uv run python arima_benchmark/run_benchmark.py model anofox Daily
+
+# See arima_benchmark/README.md for more options
+```
 
 ### M5 Benchmark
 ```bash
