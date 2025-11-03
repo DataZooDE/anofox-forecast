@@ -188,14 +188,22 @@ AnofoxTimeWrapper::CreateMFLES(const std::vector<int> &seasonal_periods, int n_i
                                double lr_season, double lr_level) {
 	// std::cerr << "[DEBUG] AnofoxTimeWrapper::CreateMFLES with " << seasonal_periods.size() << " periods" <<
 	// std::endl;
-	return std::make_unique<::anofoxtime::models::MFLES>(seasonal_periods, n_iterations, lr_trend, lr_season, lr_level);
+	::anofoxtime::models::MFLES::Params params;
+	params.seasonal_periods = seasonal_periods;
+	params.max_rounds = n_iterations;
+	params.lr_trend = lr_trend;
+	params.lr_season = lr_season;
+	params.lr_rs = lr_level;
+	return std::make_unique<::anofoxtime::models::MFLES>(params);
 }
 
 std::unique_ptr<::anofoxtime::models::IForecaster>
 AnofoxTimeWrapper::CreateAutoMFLES(const std::vector<int> &seasonal_periods) {
 	// std::cerr << "[DEBUG] AnofoxTimeWrapper::CreateAutoMFLES with " << seasonal_periods.size() << " periods" <<
 	// std::endl;
-	return std::make_unique<::anofoxtime::models::AutoMFLES>(seasonal_periods);
+	::anofoxtime::models::AutoMFLES::Config config;
+	config.seasonal_periods = seasonal_periods;
+	return std::make_unique<::anofoxtime::models::AutoMFLES>(config);
 }
 
 std::unique_ptr<::anofoxtime::models::IForecaster>

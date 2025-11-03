@@ -93,6 +93,8 @@ set(ANOFOX_TIME_SOURCES
     anofox-time/src/utils/metrics.cpp
     anofox-time/src/utils/nelder_mead.cpp
     anofox-time/src/utils/intermittent_utils.cpp
+    anofox-time/src/utils/robust_regression.cpp
+    anofox-time/src/utils/cross_validation.cpp
     # Optimization
     anofox-time/src/optimization/lbfgs_optimizer.cpp
     anofox-time/src/optimization/ets_gradients.cpp
