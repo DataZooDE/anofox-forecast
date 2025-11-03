@@ -15,6 +15,8 @@ add_library(anofox-time
     src/utils/logging.cpp
     src/utils/metrics.cpp
     src/utils/intermittent_utils.cpp
+    src/utils/robust_regression.cpp
+    src/utils/cross_validation.cpp
     src/validation.cpp
     src/selectors/auto_selector.cpp
     src/models/garch.cpp
@@ -53,7 +55,9 @@ add_library(anofox-time
     src/models/seasonal_es_optimized.cpp
     src/models/holt_winters.cpp
     src/models/mfles.cpp
+    src/models/mfles_v2.cpp
     src/models/auto_mfles.cpp
+    src/models/auto_mfles_v2.cpp
     src/models/mstl_forecaster.cpp
     src/models/auto_mstl.cpp
     src/models/tbats.cpp
@@ -72,12 +76,14 @@ target_include_directories(anofox-time PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_
 set_target_properties(anofox-time PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # Enable AVX2 for SIMD optimizations (if supported)
-include(CheckCXXCompilerFlag)
-check_cxx_compiler_flag("-mavx2" COMPILER_SUPPORTS_AVX2)
-if(COMPILER_SUPPORTS_AVX2)
-    target_compile_options(anofox-time PRIVATE -mavx2 -mfma)
-    message(STATUS "AVX2 support enabled for SIMD optimizations")
-endif()
+# DISABLED: Causing compatibility issues with older GCC/Eigen3
+# include(CheckCXXCompilerFlag)
+# check_cxx_compiler_flag("-mavx2" COMPILER_SUPPORTS_AVX2)
+# if(COMPILER_SUPPORTS_AVX2)
+#     target_compile_options(anofox-time PRIVATE -mavx2 -mfma)
+#     message(STATUS "AVX2 support enabled for SIMD optimizations")
+# endif()
+message(STATUS "AVX2 support DISABLED for compatibility")
 
 # --- Dependencies ---
 find_package(spdlog CONFIG)
