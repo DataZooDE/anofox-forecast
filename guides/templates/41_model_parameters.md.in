@@ -466,9 +466,9 @@ Gradient-boosted decomposition for multiple seasonal patterns.
 |-----------|------|----------|---------|-------------|
 | `seasonal_periods` | INTEGER[] | No | [12] | Array of seasonal periods |
 | `n_iterations` | INTEGER | No | 10 | Number of gradient boosting iterations |
-| `lr_trend` | DOUBLE | No | 0.3 | Learning rate for trend |
-| `lr_season` | DOUBLE | No | 0.5 | Learning rate for seasonality |
-| `lr_level` | DOUBLE | No | 0.8 | Learning rate for level |
+| `lr_trend` | DOUBLE | No | 0.3 | Learning rate for trend component |
+| `lr_season` | DOUBLE | No | 0.5 | Learning rate for seasonality component |
+| `lr_level` | DOUBLE | No | 0.8 | Learning rate for residual smoothing (ES ensemble) |
 
 **Validation:**
 - All seasonal periods must be positive
