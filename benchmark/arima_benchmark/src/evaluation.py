@@ -73,50 +73,57 @@ def evaluate_model(model_name, group):
     test_df, horizon, freq, seasonality = get_data('data', group, train=False)
     train_df, *_ = get_data('data', group, train=True)
 
-    # Load forecasts
-    forecast_file = Path(f'arima_benchmark/results/{model_name}-{group}.csv')
+    # Load forecasts (now using parquet format with standardized columns)
+    forecast_file = Path(f'arima_benchmark/results/{model_name}-{group}.parquet')
 
     if not forecast_file.exists():
         print(f"⚠️  Forecast file not found: {forecast_file}")
         return None
 
-    fcst_df = pd.read_csv(forecast_file)
+    fcst_df = pd.read_parquet(forecast_file)
 
-    # Merge forecasts with test data
-    test_df = test_df.rename(columns={'y': 'y_true'})
+    # Rename test data columns to match standardized format
+    test_df = test_df.rename(columns={
+        'unique_id': 'id_cols',
+        'ds': 'date_col',
+        'y': 'y_true'
+    })
 
-    # For statsforecast, the format is different (wide format with ds index)
-    if model_name == 'statsforecast':
-        # Statsforecast has unique_id and ds columns
-        merged = test_df.merge(fcst_df, on=['unique_id', 'ds'], how='inner')
-        y_true = merged['y_true'].values
-        y_pred = merged[model_name].values
-    else:
-        # Other models use forecast_step
-        # Add forecast_step to test data
-        test_df = test_df.sort_values(['unique_id', 'ds'])
-        test_df['forecast_step'] = test_df.groupby('unique_id').cumcount() + 1
+    # Convert test data date_col to match forecast data format
+    # M4 data uses integer indices, but forecasts use actual dates
+    test_df['date_col'] = pd.to_datetime('2020-01-01') + pd.to_timedelta(test_df['date_col'].astype(int) - 1, unit='D')
 
-        merged = test_df.merge(fcst_df, on=['unique_id', 'forecast_step'], how='inner')
-        y_true = merged['y_true'].values
-        y_pred = merged[model_name].values
+    # Merge forecasts with test data using standardized column names
+    merged = test_df.merge(fcst_df, on=['id_cols', 'date_col'], how='inner')
+
+    if len(merged) == 0:
+        print(f"⚠️  No matching data found after merge for {model_name}")
+        return None
+
+    y_true = merged['y_true'].values
+    y_pred = merged['forecast_col'].values
 
     # Calculate metrics
     mae = np.mean(np.abs(y_true - y_pred))
     rmse = np.sqrt(np.mean((y_true - y_pred) ** 2))
 
     # Calculate MASE for each series and average
-    mase_scores = []
-    for uid in merged['unique_id'].unique():
-        uid_test = merged[merged['unique_id'] == uid]
-        uid_train = train_df[train_df['unique_id'] == uid]['y'].values
+    # Rename train_df columns for consistency
+    train_df = train_df.rename(columns={'unique_id': 'id_cols'})
 
-        if model_name == 'statsforecast':
-            uid_y_true = uid_test['y_true'].values
-            uid_y_pred = uid_test[model_name].values
-        else:
-            uid_y_true = uid_test['y_true'].values
-            uid_y_pred = uid_test[model_name].values
+    # Pre-group training data by series for efficient lookup
+    train_grouped = {uid: group['y'].values for uid, group in train_df.groupby('id_cols')}
+
+    mase_scores = []
+    for uid in merged['id_cols'].unique():
+        uid_test = merged[merged['id_cols'] == uid]
+        uid_train = train_grouped.get(uid, np.array([]))
+
+        if len(uid_train) == 0:
+            continue
+
+        uid_y_true = uid_test['y_true'].values
+        uid_y_pred = uid_test['forecast_col'].values
 
         series_mase = mase(uid_y_true, uid_y_pred, uid_train, seasonality)
         if not np.isinf(series_mase):
@@ -124,10 +131,10 @@ def evaluate_model(model_name, group):
 
     avg_mase = np.mean(mase_scores)
 
-    # Load timing metrics
-    metrics_file = Path(f'arima_benchmark/results/{model_name}-{group}-metrics.csv')
+    # Load timing metrics (now using parquet)
+    metrics_file = Path(f'arima_benchmark/results/{model_name}-{group}-metrics.parquet')
     if metrics_file.exists():
-        timing_df = pd.read_csv(metrics_file)
+        timing_df = pd.read_parquet(metrics_file)
         time_seconds = timing_df['time_seconds'].values[0]
     else:
         time_seconds = np.nan
@@ -139,7 +146,7 @@ def evaluate_model(model_name, group):
         'MAE': mae,
         'RMSE': rmse,
         'time_seconds': time_seconds,
-        'series_count': merged['unique_id'].nunique(),
+        'series_count': merged['id_cols'].nunique(),
     }
 
 
@@ -190,9 +197,9 @@ def evaluate_all(group: str = 'Daily'):
     headers = ['Model', 'MASE', 'MAE', 'RMSE', 'Time', 'Series']
     print(tabulate(table_data, headers=headers, tablefmt='grid'))
 
-    # Save results
-    output_file = Path(f'arima_benchmark/results/evaluation-{group}.csv')
-    results_df.to_csv(output_file, index=False)
+    # Save results as parquet
+    output_file = Path(f'arima_benchmark/results/evaluation-{group}.parquet')
+    results_df.to_parquet(output_file, index=False)
     print(f"\nResults saved to {output_file}")
 
 

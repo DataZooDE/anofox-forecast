@@ -32,12 +32,16 @@ def run_benchmark(group: str = 'Daily'):
     print(f"Loaded {len(train_df)} rows from {train_df['unique_id'].nunique()} series")
     print(f"Forecast horizon: {horizon}, Seasonality: {seasonality}")
 
+    # Convert integer indices to actual dates for proper time series modeling
+    # M4 data uses integer indices, but statsforecast needs actual datetime values
+    print(f"Converting integer indices to dates...")
+    train_df['ds'] = pd.to_datetime('2020-01-01') + pd.to_timedelta(train_df['ds'].astype(int) - 1, unit='D')
+
     # Configure AutoARIMA model
     models = [AutoARIMA(season_length=seasonality)]
 
     # Initialize StatsForecast
     sf = StatsForecast(
-        df=train_df,
         models=models,
         freq=freq,
         n_jobs=-1,  # Use all available cores
@@ -48,7 +52,7 @@ def run_benchmark(group: str = 'Daily'):
     start_time = time.time()
 
     try:
-        fcst_df = sf.forecast(h=horizon, level=[95])
+        fcst_df = sf.forecast(df=train_df, h=horizon, level=[95])
         elapsed_time = time.time() - start_time
 
         print(f"\n✅ Forecast completed in {elapsed_time:.2f} seconds")
@@ -57,31 +61,36 @@ def run_benchmark(group: str = 'Daily'):
         # Prepare output - statsforecast returns wide format, convert to long
         fcst_df = fcst_df.reset_index()
 
-        # Rename columns to match expected format
+        # Rename columns to standardized format
         fcst_df = fcst_df.rename(columns={
-            'AutoARIMA': 'statsforecast',
+            'unique_id': 'id_cols',
+            'ds': 'date_col',
+            'AutoARIMA': 'forecast_col',
             'AutoARIMA-lo-95': 'lower',
             'AutoARIMA-hi-95': 'upper',
         })
+
+        # Keep only required columns
+        fcst_df = fcst_df[['id_cols', 'date_col', 'forecast_col', 'lower', 'upper']]
 
         # Save forecasts
         output_dir = Path('arima_benchmark/results')
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        forecast_file = output_dir / f'statsforecast-{group}.csv'
-        fcst_df.to_csv(forecast_file, index=False)
+        forecast_file = output_dir / f'statsforecast-{group}.parquet'
+        fcst_df.to_parquet(forecast_file, index=False)
         print(f"Saved forecasts to {forecast_file}")
 
         # Save timing metrics
-        metrics_file = output_dir / f'statsforecast-{group}-metrics.csv'
+        metrics_file = output_dir / f'statsforecast-{group}-metrics.parquet'
         metrics_df = pd.DataFrame({
             'model': ['statsforecast'],
             'group': [group],
             'time_seconds': [elapsed_time],
             'series_count': [train_df['unique_id'].nunique()],
-            'forecast_points': [len(fcst_df) * horizon],
+            'forecast_points': [len(fcst_df)],
         })
-        metrics_df.to_csv(metrics_file, index=False)
+        metrics_df.to_parquet(metrics_file, index=False)
         print(f"Saved metrics to {metrics_file}")
 
     except Exception as e:
