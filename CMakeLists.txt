@@ -17,7 +17,8 @@ else()
 endif()
 
 # DuckDB's extension distribution supports vcpkg
-find_package(OpenSSL REQUIRED)
+# OpenSSL made optional due to linking issues
+find_package(OpenSSL QUIET)
 find_package(Threads REQUIRED)
 
 # Make Eigen3 optional for clang-tidy (which doesn't use vcpkg)
@@ -127,13 +128,15 @@ build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
 
 # Enable AVX2 for SIMD optimizations (if supported)
-include(CheckCXXCompilerFlag)
-check_cxx_compiler_flag("-mavx2" COMPILER_SUPPORTS_AVX2)
-if(COMPILER_SUPPORTS_AVX2)
-    target_compile_options(${EXTENSION_NAME} PRIVATE -mavx2 -mfma)
-    target_compile_options(${LOADABLE_EXTENSION_NAME} PRIVATE -mavx2 -mfma)
-    message(STATUS "AVX2 support enabled for anofox-forecast extension")
-endif()
+# DISABLED: Causing compatibility issues with older GCC/Eigen3
+# include(CheckCXXCompilerFlag)
+# check_cxx_compiler_flag("-mavx2" COMPILER_SUPPORTS_AVX2)
+# if(COMPILER_SUPPORTS_AVX2)
+#     target_compile_options(${EXTENSION_NAME} PRIVATE -mavx2 -mfma)
+#     target_compile_options(${LOADABLE_EXTENSION_NAME} PRIVATE -mavx2 -mfma)
+#     message(STATUS "AVX2 support enabled for anofox-forecast extension")
+# endif()
+message(STATUS "AVX2 support DISABLED for compatibility")
 
 # Control logging based on ENABLE_LOGGING option
 if(NOT ENABLE_LOGGING)
@@ -142,17 +145,22 @@ if(NOT ENABLE_LOGGING)
 endif()
 
 # Link required libraries (no pre-built anofox-time needed)
-target_link_libraries(${EXTENSION_NAME} 
+target_link_libraries(${EXTENSION_NAME}
     Threads::Threads
-    OpenSSL::SSL 
-    OpenSSL::Crypto
 )
 
-target_link_libraries(${LOADABLE_EXTENSION_NAME} 
+target_link_libraries(${LOADABLE_EXTENSION_NAME}
     Threads::Threads
-    OpenSSL::SSL 
-    OpenSSL::Crypto
 )
+
+# Link OpenSSL if found
+if(OpenSSL_FOUND)
+    target_link_libraries(${EXTENSION_NAME} OpenSSL::SSL OpenSSL::Crypto)
+    target_link_libraries(${LOADABLE_EXTENSION_NAME} OpenSSL::SSL OpenSSL::Crypto)
+    message(STATUS "OpenSSL found and linked")
+else()
+    message(STATUS "OpenSSL not found - skipping (not currently used)")
+endif()
 
 # Link Eigen3 if available and add compile definition
 if(Eigen3_FOUND)

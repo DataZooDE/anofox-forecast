@@ -436,6 +436,7 @@ TS_DETECT_CHANGEPOINTS_BY(table, group_col, date_col, value_col, params)
 
 ### Reference
 - [API Reference](guides/90_api_reference.md) ⭐ - Complete API documentation
+- [Date Type Support](docs/DATE_TYPE_SUPPORT.md) - INTEGER, DATE, and TIMESTAMP support
 - [Complete Guide Index](guides/99_guide_index.md) - All guides with learning paths
 
 ## 🎯 Use Cases

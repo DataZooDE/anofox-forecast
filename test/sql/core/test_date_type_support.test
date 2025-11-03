@@ -1,0 +1,212 @@
+# name: test/sql/core/test_date_type_support.test
+# description: Test INTEGER, DATE, and TIMESTAMP support for date columns
+# group: [core]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+# Test 1: INTEGER date column (sequential indices)
+statement ok
+CREATE TABLE test_integer_dates AS
+SELECT
+    i AS date_col,
+    (100.0 + i * 5)::DOUBLE AS value
+FROM generate_series(1, 30) t(i);
+
+query I
+SELECT COUNT(*) = 10
+FROM ts_forecast(test_integer_dates, date_col, value, 'Naive', 10, NULL);
+----
+true
+
+# Test 2: INTEGER with TS_FORECAST_AGG
+statement ok
+CREATE TABLE integer_agg_result AS
+SELECT TS_FORECAST_AGG(date_col, value, 'Naive', 5, NULL) AS result
+FROM test_integer_dates;
+
+query I
+SELECT len(result.point_forecast) = 5
+FROM integer_agg_result;
+----
+true
+
+# Test 3: DATE column
+statement ok
+CREATE TABLE test_date_dates AS
+SELECT
+    ('2024-01-01'::DATE + INTERVAL (i) DAY)::DATE AS date_col,
+    (100.0 + i * 5)::DOUBLE AS value
+FROM generate_series(1, 30) t(i);
+
+query I
+SELECT COUNT(*) = 10
+FROM ts_forecast(test_date_dates, date_col, value, 'Naive', 10, NULL);
+----
+true
+
+# Test 4: DATE with TS_FORECAST_AGG
+statement ok
+CREATE TABLE date_agg_result AS
+SELECT TS_FORECAST_AGG(date_col, value, 'Naive', 5, NULL) AS result
+FROM test_date_dates;
+
+query I
+SELECT len(result.point_forecast) = 5
+FROM date_agg_result;
+----
+true
+
+# Test 5: TIMESTAMP column (existing behavior)
+statement ok
+CREATE TABLE test_timestamp_dates AS
+SELECT
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    (100.0 + i * 5)::DOUBLE AS value
+FROM generate_series(1, 30) t(i);
+
+query I
+SELECT COUNT(*) = 10
+FROM ts_forecast(test_timestamp_dates, date_col, value, 'Naive', 10, NULL);
+----
+true
+
+# Test 6: TIMESTAMP with TS_FORECAST_AGG
+statement ok
+CREATE TABLE timestamp_agg_result AS
+SELECT TS_FORECAST_AGG(date_col, value, 'Naive', 5, NULL) AS result
+FROM test_timestamp_dates;
+
+query I
+SELECT len(result.point_forecast) = 5
+FROM timestamp_agg_result;
+----
+true
+
+# Test 7: INTEGER with AutoARIMA model
+statement ok
+CREATE TABLE integer_arima_result AS
+SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, {'seasonal_period': 7}) AS result
+FROM test_integer_dates;
+
+query I
+SELECT len(result.point_forecast) = 5
+FROM integer_arima_result;
+----
+true
+
+# Test 8: DATE with AutoETS model
+statement ok
+CREATE TABLE date_ets_result AS
+SELECT TS_FORECAST_AGG(date_col, value, 'AutoETS', 5, {'season_length': 7}) AS result
+FROM test_date_dates;
+
+query I
+SELECT len(result.point_forecast) = 5
+FROM date_ets_result;
+----
+true
+
+# Test 9: INTEGER with TS_FORECAST_BY (multiple series)
+statement ok
+CREATE TABLE multi_integer AS
+SELECT
+    i AS date_col,
+    (i % 3)::VARCHAR AS series_id,
+    (100.0 + i * (i % 3 + 1))::DOUBLE AS value
+FROM generate_series(1, 30) t(i);
+
+query I
+SELECT COUNT(DISTINCT series_id) = 3
+FROM ts_forecast_by(multi_integer, series_id, date_col, value, 'Naive', 5, NULL);
+----
+true
+
+# Test 10: DATE with TS_FORECAST_BY (multiple series)
+statement ok
+CREATE TABLE multi_date AS
+SELECT
+    ('2024-01-01'::DATE + INTERVAL (i) DAY)::DATE AS date_col,
+    (i % 3)::VARCHAR AS series_id,
+    (100.0 + i * (i % 3 + 1))::DOUBLE AS value
+FROM generate_series(1, 30) t(i);
+
+query I
+SELECT COUNT(DISTINCT series_id) = 3
+FROM ts_forecast_by(multi_date, series_id, date_col, value, 'Naive', 5, NULL);
+----
+true
+
+# Test 11: BIGINT date column
+statement ok
+CREATE TABLE test_bigint_dates AS
+SELECT
+    i::BIGINT AS date_col,
+    (100.0 + i * 5)::DOUBLE AS value
+FROM generate_series(1, 30) t(i);
+
+query I
+SELECT COUNT(*) = 10
+FROM ts_forecast(test_bigint_dates, date_col, value, 'Naive', 10, NULL);
+----
+true
+
+# Test 12: Verify forecasts are reasonable for INTEGER input
+query I
+SELECT
+    CASE
+        WHEN result.point_forecast[1] > 0 AND result.point_forecast[1] < 1000000
+        THEN true
+        ELSE false
+    END
+FROM integer_agg_result;
+----
+true
+
+# Test 13: Verify forecasts with confidence intervals for DATE input
+query I
+SELECT
+    CASE
+        WHEN result.lower[1] < result.point_forecast[1] AND result.point_forecast[1] < result.upper[1]
+        THEN true
+        ELSE false
+    END
+FROM date_agg_result;
+----
+true
+
+# Cleanup
+statement ok
+DROP TABLE test_integer_dates;
+
+statement ok
+DROP TABLE integer_agg_result;
+
+statement ok
+DROP TABLE test_date_dates;
+
+statement ok
+DROP TABLE date_agg_result;
+
+statement ok
+DROP TABLE test_timestamp_dates;
+
+statement ok
+DROP TABLE timestamp_agg_result;
+
+statement ok
+DROP TABLE integer_arima_result;
+
+statement ok
+DROP TABLE date_ets_result;
+
+statement ok
+DROP TABLE multi_integer;
+
+statement ok
+DROP TABLE multi_date;
+
+statement ok
+DROP TABLE test_bigint_dates;

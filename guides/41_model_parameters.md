@@ -176,9 +176,47 @@ FROM trending_data;
 
 ---
 
+### 5. SeasonalWindowAverage
+
+Moving average with seasonal adjustment.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `seasonal_period` | INTEGER | **Yes** | N/A | Length of seasonal cycle |
+| `window` | INTEGER | No | 5 | Moving average window size |
+
+**Validation:**
+- `seasonal_period` must be positive
+- `window` must be positive
+
+**Use Case:** Seasonal data with noise, smoothed seasonal baseline
+
+**Examples:**
+
+```sql
+-- Weekly seasonality with default window
+SELECT TS_FORECAST(date, value, 'SeasonalWindowAverage', 14,
+       MAP{'seasonal_period': 7}) AS forecast
+FROM noisy_seasonal_data;
+
+-- Custom window size for more smoothing
+SELECT TS_FORECAST(date, value, 'SeasonalWindowAverage', 14,
+       MAP{'seasonal_period': 7, 'window': 3}) AS forecast
+FROM noisy_seasonal_data;
+
+-- Monthly seasonality with small window
+SELECT TS_FORECAST(month, value, 'SeasonalWindowAverage', 12,
+       MAP{'seasonal_period': 12, 'window': 3}) AS forecast
+FROM monthly_sales;
+```
+
+---
+
 ## Exponential Smoothing
 
-### 5. SES (Simple Exponential Smoothing)
+### 6. SES (Simple Exponential Smoothing)
 
 Exponential smoothing with fixed smoothing parameter.
 
@@ -211,7 +249,7 @@ FROM stable_data;
 
 ---
 
-### 6. SESOptimized
+### 7. SESOptimized
 
 Simple Exponential Smoothing with automatically optimized alpha parameter.
 
@@ -227,7 +265,7 @@ FROM data;
 
 ---
 
-### 7. SeasonalES
+### 8. SeasonalES
 
 Exponential smoothing with seasonality (Holt-Winters additive seasonality).
 
@@ -254,7 +292,7 @@ FROM weekly_sales;
 
 ---
 
-### 8. SeasonalESOptimized
+### 9. SeasonalESOptimized
 
 SeasonalES with automatically optimized parameters.
 
@@ -271,28 +309,6 @@ SeasonalES with automatically optimized parameters.
 SELECT TS_FORECAST(date, value, 'SeasonalESOptimized', 12, 
        MAP{'seasonal_period': 12}) AS forecast
 FROM monthly_data;
-```
-
----
-
-### 9. SeasonalWindowAverage
-
-Moving average with seasonal adjustment.
-
-**Parameters:**
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `seasonal_period` | INTEGER | **Yes** | N/A | Length of seasonal cycle |
-| `window` | INTEGER | No | 5 | Moving average window size |
-
-**Use Case:** Seasonal data with noise
-
-**Example:**
-```sql
-SELECT TS_FORECAST(date, value, 'SeasonalWindowAverage', 14, 
-       MAP{'seasonal_period': 7, 'window': 3}) AS forecast
-FROM noisy_seasonal_data;
 ```
 
 ---

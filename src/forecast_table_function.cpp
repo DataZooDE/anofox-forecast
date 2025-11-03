@@ -194,6 +194,22 @@ OperatorFinalizeResultType ForecastInOutFinal(ExecutionContext &context, TableFu
 			return OperatorFinalizeResultType::FINISHED;
 		}
 
+		// DEBUG: Log input data
+		std::cerr << "[SCALAR-DEBUG] Building TimeSeries with " << state.values.size() << " points" << std::endl;
+		std::cerr << "[SCALAR-DEBUG] Model: " << bind_data.model_name << ", Horizon: " << bind_data.horizon << std::endl;
+		if (state.values.size() > 0) {
+			std::cerr << "[SCALAR-DEBUG] First 5 values: ";
+			for (size_t i = 0; i < std::min(size_t(5), state.values.size()); i++) {
+				std::cerr << state.values[i] << " ";
+			}
+			std::cerr << std::endl;
+			std::cerr << "[SCALAR-DEBUG] Last 5 values: ";
+			for (size_t i = std::max(size_t(0), state.values.size() - 5); i < state.values.size(); i++) {
+				std::cerr << state.values[i] << " ";
+			}
+			std::cerr << std::endl;
+		}
+
 		// Build time series
 		auto ts_ptr = TimeSeriesBuilder::BuildTimeSeries(state.timestamps, state.values);
 
@@ -211,8 +227,21 @@ OperatorFinalizeResultType ForecastInOutFinal(ExecutionContext &context, TableFu
 		state.forecast_generated = true;
 		state.output_offset = 0;
 
-		// std::cerr << "[DEBUG] Forecast generated: "
-		//           << AnofoxTimeWrapper::GetForecastHorizon(*state.forecast) << " points" << std::endl;
+		// DEBUG: Log forecast output
+		auto &forecast_values = AnofoxTimeWrapper::GetPrimaryForecast(*state.forecast);
+		std::cerr << "[SCALAR-DEBUG] Forecast generated: " << forecast_values.size() << " points" << std::endl;
+		if (forecast_values.size() > 0) {
+			std::cerr << "[SCALAR-DEBUG] First 5 forecasts: ";
+			for (size_t i = 0; i < std::min(size_t(5), forecast_values.size()); i++) {
+				std::cerr << forecast_values[i] << " ";
+			}
+			std::cerr << std::endl;
+			std::cerr << "[SCALAR-DEBUG] Last 5 forecasts: ";
+			for (size_t i = std::max(size_t(0), forecast_values.size() - 5); i < forecast_values.size(); i++) {
+				std::cerr << forecast_values[i] << " ";
+			}
+			std::cerr << std::endl;
+		}
 	}
 
 	// Output forecast rows

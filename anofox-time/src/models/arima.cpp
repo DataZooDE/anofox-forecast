@@ -341,13 +341,39 @@ void ARIMA::fit(const core::TimeSeries &ts) {
 	// Store last values for integration
 	// For integration, we need to reverse the differencing:
 	// - To integrate seasonally, we need last values from the NON-SEASONALLY differenced series
-	// - To integrate non-seasonally, we need last values from the ORIGINAL series
+	// - To integrate non-seasonally with d > 1, we need last values from EACH differencing level
 	if (d_ > 0 || D_ > 0) {
-		const size_t total_diff = static_cast<size_t>(d_ + D_ * seasonal_period_);
-		const size_t retain = total_diff + static_cast<size_t>(seasonal_period_) + 1;
-		const size_t start_idx = history_.size() > retain ? history_.size() - retain : 0;
-		last_values_.assign(history_.begin() + start_idx, history_.end());
-		
+		last_values_.clear();
+
+		// For non-seasonal differencing with d > 0, we need last values for integration:
+		// Integration accesses last_values in reverse: last_values[size-level-1]
+		// - level=0 uses last_values[size-1]: needs last value of (d-1)th differenced series
+		// - level=1 uses last_values[size-2]: needs last value of (d-2)th differenced series
+		// - ...
+		// - level=d-1 uses last_values[size-d]: needs last value of original series
+		// last_values[0] is a placeholder, never accessed
+		if (d_ > 0) {
+			std::vector<double> current = history_;
+
+			// Add placeholder at index 0 (never used by integrate function)
+			last_values_.push_back(0.0);
+
+			// Store last value of original series at index 1
+			if (!current.empty()) {
+				last_values_.push_back(current.back());
+			}
+
+			// Apply differencing step by step, storing last value at each level
+			// Store values for levels 0 through d-2 (d-1 iterations)
+			// Do NOT store the final most-differenced level
+			for (int diff_level = 1; diff_level < d_; ++diff_level) {
+				current = difference(current, 1);
+				if (!current.empty()) {
+					last_values_.push_back(current.back());
+				}
+			}
+		}
+
 		// For seasonal integration, use values from the non-seasonally differenced series
 		if (D_ > 0 && seasonal_period_ > 1) {
 			const size_t seasonal_retain = static_cast<size_t>(D_ * seasonal_period_ + seasonal_period_);

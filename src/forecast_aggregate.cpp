@@ -37,15 +37,12 @@ namespace duckdb {
 struct ForecastAggregateOperation {
 	template <class STATE>
 	static void Initialize(STATE &state) {
-		// std::cerr << "[DEBUG] Initialize called, allocating data" << std::endl;
 		state.data = new ForecastData();
 	}
 
 	template <class STATE, class OP>
 	static void Combine(const STATE &source, STATE &target, AggregateInputData &) {
-		// std::cerr << "[DEBUG] Combine: merging " << source.data->timestamp_micros.size() << " points" << std::endl;
 		if (!source.data || !target.data) {
-			// std::cerr << "[ERROR] Combine called with NULL data!" << std::endl;
 			return;
 		}
 		// Simply append - we'll sort in Finalize
@@ -117,6 +114,7 @@ struct ForecastAggregateOperation {
 		std::unique_ptr<::anofoxtime::core::TimeSeries> ts_ptr;
 		{
 			ScopedTimer timer(&state.data->time_build_ts);
+
 			// Copy 3: Pass vectors to TimeSeries (by value, then moved internally)
 			ts_ptr = TimeSeriesBuilder::BuildTimeSeries(timestamps, sorted_values);
 			state.data->copy_count++;
@@ -300,7 +298,6 @@ struct ForecastAggregateOperation {
 
 	template <class STATE>
 	static void Destroy(STATE &state, AggregateInputData &) {
-		// std::cerr << "[DEBUG] Destroy called" << std::endl;
 		if (state.data) {
 			delete state.data;
 			state.data = nullptr;
@@ -313,7 +310,11 @@ static void TSForecastUpdate(Vector inputs[], AggregateInputData &aggr_input, id
                              idx_t count) {
 	auto update_start = std::chrono::high_resolution_clock::now();
 
-	// inputs[0] = timestamp column
+	// Get bind data to check input date type
+	auto &bind_data = aggr_input.bind_data->Cast<ForecastAggregateBindData>();
+	auto date_type_id = bind_data.date_type_id;
+
+	// inputs[0] = date column (INTEGER/DATE/TIMESTAMP)
 	// inputs[1] = value column
 	// inputs[2] = model name (constant) - skip, handled in bind
 	// inputs[3] = horizon (constant) - skip, handled in bind
@@ -344,9 +345,38 @@ static void TSForecastUpdate(Vector inputs[], AggregateInputData &aggr_input, id
 		// Track capacity for reallocation detection
 		size_t old_cap = state.data->timestamp_micros.capacity();
 
-		// Extract timestamp as microseconds
-		auto ts_val = UnifiedVectorFormat::GetData<timestamp_t>(ts_format)[ts_idx];
-		state.data->timestamp_micros.push_back(ts_val.value);
+		// Extract and convert timestamp based on input type
+		int64_t timestamp_micros;
+		switch (date_type_id) {
+		case LogicalTypeId::INTEGER:
+		case LogicalTypeId::BIGINT: {
+			// Treat integers as sequential indices (e.g., 1, 2, 3...)
+			// Convert to microseconds by treating as days since epoch
+			auto int_val = UnifiedVectorFormat::GetData<int64_t>(ts_format)[ts_idx];
+			// Convert day index to microseconds: (day - 1) * 86400 * 1000000
+			// Using day-1 so that day 1 = unix epoch (1970-01-01)
+			timestamp_micros = (int_val - 1) * 86400000000LL;
+			break;
+		}
+		case LogicalTypeId::DATE: {
+			// DATE is stored as days since epoch (int32)
+			auto date_val = UnifiedVectorFormat::GetData<date_t>(ts_format)[ts_idx];
+			// Convert days to microseconds
+			timestamp_micros = date_val.days * 86400000000LL;
+			break;
+		}
+		case LogicalTypeId::TIMESTAMP: {
+			// TIMESTAMP is already in microseconds
+			auto ts_val = UnifiedVectorFormat::GetData<timestamp_t>(ts_format)[ts_idx];
+			timestamp_micros = ts_val.value;
+			break;
+		}
+		default:
+			// Should not reach here due to bind validation
+			throw InternalException("Unsupported date type in TSForecastUpdate");
+		}
+
+		state.data->timestamp_micros.push_back(timestamp_micros);
 
 		// Extract value
 		auto value = UnifiedVectorFormat::GetData<double>(val_format)[val_idx];
@@ -381,7 +411,20 @@ unique_ptr<FunctionData> TSForecastBind(ClientContext &context, AggregateFunctio
 	// // std::cerr << "[DEBUG] TSForecastBind with " << arguments.size() << " arguments" << std::endl;
 
 	if (arguments.size() < 4) {
-		throw BinderException("TS_FORECAST requires at least 4 arguments: timestamp, value, model, horizon");
+		throw BinderException("TS_FORECAST requires at least 4 arguments: date, value, model, horizon");
+	}
+
+	// Detect input date type (argument 0)
+	auto &date_type = arguments[0]->return_type;
+	LogicalTypeId date_type_id = date_type.id();
+
+	// Validate date type - accept INTEGER, DATE, or TIMESTAMP
+	if (date_type_id != LogicalTypeId::INTEGER &&
+	    date_type_id != LogicalTypeId::BIGINT &&
+	    date_type_id != LogicalTypeId::DATE &&
+	    date_type_id != LogicalTypeId::TIMESTAMP) {
+		throw BinderException("First argument (date column) must be INTEGER, BIGINT, DATE, or TIMESTAMP, got " +
+		                      date_type.ToString());
 	}
 
 	// Extract constant values for model and horizon
@@ -459,7 +502,7 @@ unique_ptr<FunctionData> TSForecastBind(ClientContext &context, AggregateFunctio
 	function.return_type = LogicalType::STRUCT(std::move(struct_children));
 
 	// // std::cerr << "[DEBUG] TSForecastBind complete" << std::endl;
-	return make_uniq<ForecastAggregateBindData>(model_name, horizon, model_params, confidence_level, return_insample);
+	return make_uniq<ForecastAggregateBindData>(model_name, horizon, model_params, confidence_level, return_insample, date_type_id);
 }
 
 AggregateFunction CreateTSForecastAggregate() {
@@ -471,8 +514,8 @@ AggregateFunction CreateTSForecastAggregate() {
 	// Create aggregate function - use LEGACY destructor for non-trivial state
 	AggregateFunction forecast_agg(
 	    "ts_forecast_agg", // name (internal, use TS_FORECAST macro for user-facing API)
-	    {LogicalType::TIMESTAMP, LogicalType::DOUBLE, LogicalType::VARCHAR, LogicalType::INTEGER,
-	     LogicalType::ANY},                  // arguments
+	    {LogicalType::ANY, LogicalType::DOUBLE, LogicalType::VARCHAR, LogicalType::INTEGER,
+	     LogicalType::ANY},                  // arguments (first arg accepts INTEGER/DATE/TIMESTAMP)
 	    LogicalType::STRUCT({}),             // return_type (will be set in bind)
 	    AggregateFunction::StateSize<STATE>, // state_size
 	    AggregateFunction::StateInitialize<STATE, OP, AggregateDestructorType::LEGACY>, // initialize

@@ -44,21 +44,24 @@ struct ForecastAggregateBindData : public FunctionData {
 	Value model_params;
 	double confidence_level;
 	bool return_insample;
+	LogicalTypeId date_type_id;  // Track input date type (INTEGER, DATE, or TIMESTAMP)
 
-	explicit ForecastAggregateBindData(string model, int32_t h, Value params, double conf = 0.90, bool insample = false)
+	explicit ForecastAggregateBindData(string model, int32_t h, Value params, double conf = 0.90, bool insample = false,
+	                                    LogicalTypeId date_type = LogicalTypeId::TIMESTAMP)
 	    : model_name(std::move(model)), horizon(h), model_params(std::move(params)), confidence_level(conf),
-	      return_insample(insample) {
+	      return_insample(insample), date_type_id(date_type) {
 	}
 
 	unique_ptr<FunctionData> Copy() const override {
 		return make_uniq<ForecastAggregateBindData>(model_name, horizon, model_params, confidence_level,
-		                                            return_insample);
+		                                            return_insample, date_type_id);
 	}
 
 	bool Equals(const FunctionData &other_p) const override {
 		auto &other = other_p.Cast<ForecastAggregateBindData>();
 		return model_name == other.model_name && horizon == other.horizon &&
-		       std::abs(confidence_level - other.confidence_level) < 1e-9 && return_insample == other.return_insample;
+		       std::abs(confidence_level - other.confidence_level) < 1e-9 && return_insample == other.return_insample &&
+		       date_type_id == other.date_type_id;
 	}
 };
 

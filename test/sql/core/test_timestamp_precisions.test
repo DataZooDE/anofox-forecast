@@ -1,0 +1,152 @@
+# name: test/sql/core/test_timestamp_precisions.test
+# description: Test support for different TIMESTAMP precision types
+# group: [core]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+#############################################
+# Test TIMESTAMP (standard microsecond precision)
+#############################################
+
+statement ok
+CREATE TABLE test_timestamp AS
+SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, (100.0 + i * 5)::DOUBLE AS value
+FROM generate_series(1, 30) t(i);
+
+query I
+SELECT COUNT(*) = 10
+FROM ts_forecast(test_timestamp, date_col, value, 'Naive', 10, NULL);
+----
+true
+
+#############################################
+# Test TIMESTAMP_S (second precision)
+#############################################
+
+statement ok
+CREATE TABLE test_timestamp_s AS
+SELECT ('2024-01-01'::TIMESTAMP_S + INTERVAL (i) DAY) AS date_col, (100.0 + i * 5)::DOUBLE AS value
+FROM generate_series(1, 30) t(i);
+
+query I
+SELECT COUNT(*) = 10
+FROM ts_forecast(test_timestamp_s, date_col, value, 'Naive', 10, NULL);
+----
+true
+
+#############################################
+# Test TIMESTAMP_MS (millisecond precision)
+#############################################
+
+statement ok
+CREATE TABLE test_timestamp_ms AS
+SELECT ('2024-01-01'::TIMESTAMP_MS + INTERVAL (i) DAY) AS date_col, (100.0 + i * 5)::DOUBLE AS value
+FROM generate_series(1, 30) t(i);
+
+query I
+SELECT COUNT(*) = 10
+FROM ts_forecast(test_timestamp_ms, date_col, value, 'Naive', 10, NULL);
+----
+true
+
+#############################################
+# Test TIMESTAMP_NS (nanosecond precision)
+#############################################
+
+statement ok
+CREATE TABLE test_timestamp_ns AS
+SELECT ('2024-01-01'::TIMESTAMP_NS + INTERVAL (i) DAY) AS date_col, (100.0 + i * 5)::DOUBLE AS value
+FROM generate_series(1, 30) t(i);
+
+query I
+SELECT COUNT(*) = 10
+FROM ts_forecast(test_timestamp_ns, date_col, value, 'Naive', 10, NULL);
+----
+true
+
+#############################################
+# Test TS_FORECAST_AGG with different precisions
+#############################################
+
+# Test with TIMESTAMP_S
+statement ok
+CREATE TABLE agg_result_timestamp_s AS
+SELECT TS_FORECAST_AGG(date_col, value, 'Naive', 5, NULL) AS result
+FROM test_timestamp_s;
+
+query I
+SELECT len(result.point_forecast) = 5
+FROM agg_result_timestamp_s;
+----
+true
+
+# Test with TIMESTAMP_MS
+statement ok
+CREATE TABLE agg_result_timestamp_ms AS
+SELECT TS_FORECAST_AGG(date_col, value, 'Naive', 5, NULL) AS result
+FROM test_timestamp_ms;
+
+query I
+SELECT len(result.point_forecast) = 5
+FROM agg_result_timestamp_ms;
+----
+true
+
+# Test with TIMESTAMP_NS
+statement ok
+CREATE TABLE agg_result_timestamp_ns AS
+SELECT TS_FORECAST_AGG(date_col, value, 'Naive', 5, NULL) AS result
+FROM test_timestamp_ns;
+
+query I
+SELECT len(result.point_forecast) = 5
+FROM agg_result_timestamp_ns;
+----
+true
+
+#############################################
+# Test ts_forecast_by with different precisions
+#############################################
+
+# Create multi-series data with TIMESTAMP_NS
+statement ok
+CREATE TABLE multi_timestamp_ns AS
+SELECT ('2024-01-01'::TIMESTAMP_NS + INTERVAL (i) DAY) AS date_col, (i % 3)::VARCHAR AS series_id, (100.0 + i * (i % 3 + 1))::DOUBLE AS value
+FROM generate_series(1, 30) t(i);
+
+query I
+SELECT COUNT(DISTINCT series_id) = 3
+FROM ts_forecast_by(multi_timestamp_ns, series_id, date_col, value, 'Naive', 5, NULL);
+----
+true
+
+#############################################
+# Cleanup
+#############################################
+
+statement ok
+DROP TABLE test_timestamp;
+
+statement ok
+DROP TABLE test_timestamp_s;
+
+statement ok
+DROP TABLE test_timestamp_ms;
+
+statement ok
+DROP TABLE test_timestamp_ns;
+
+statement ok
+DROP TABLE agg_result_timestamp_s;
+
+statement ok
+DROP TABLE agg_result_timestamp_ms;
+
+statement ok
+DROP TABLE agg_result_timestamp_ns;
+
+statement ok
+DROP TABLE multi_timestamp_ns;

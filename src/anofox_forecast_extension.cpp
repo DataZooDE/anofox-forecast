@@ -20,7 +20,7 @@
 #include "duckdb/catalog/default/default_table_functions.hpp"
 
 // OpenSSL linked through vcpkg
-#include <openssl/opensslv.h>
+// #include <openssl/opensslv.h>  // Not currently used
 
 namespace duckdb {
 
