@@ -32,6 +32,13 @@ def run_benchmark(group: str = 'Daily'):
     print(f"Loaded {len(train_df)} rows from {train_df['unique_id'].nunique()} series")
     print(f"Forecast horizon: {horizon}, Seasonality: {seasonality}")
 
+    # Convert ds column to proper timestamps (M4 uses integer indices)
+    # Create timestamps starting from 2020-01-01
+    train_df['ds'] = pd.to_datetime('2020-01-01') + pd.to_timedelta(train_df['ds'].astype(int) - 1, unit='D')
+
+    # Convert to date type (not timestamp with nanoseconds)
+    train_df['ds'] = train_df['ds'].dt.date
+
     # Find the extension
     extension_path = Path(__file__).parent.parent.parent.parent / 'build' / 'release' / 'extension' / 'anofox_forecast' / 'anofox_forecast.duckdb_extension'
 
@@ -41,7 +48,7 @@ def run_benchmark(group: str = 'Daily'):
         sys.exit(1)
 
     # Connect to DuckDB and load extension
-    con = duckdb.connect(':memory:')
+    con = duckdb.connect(':memory:', config={'allow_unsigned_extensions': 'true'})
     con.execute(f"LOAD '{extension_path}'")
     print(f"Loaded extension from {extension_path}")
 
@@ -56,22 +63,21 @@ def run_benchmark(group: str = 'Daily'):
     # Run forecasts using TS_FORECAST_BY
     forecast_query = f"""
         SELECT
-            unique_id,
-            date_col AS ds,
-            point_forecast AS AutoARIMA,
+            unique_id AS id_cols,
+            date_col AS date_col,
+            point_forecast AS forecast_col,
             lower,
-            upper,
-            forecast_step
+            upper
         FROM TS_FORECAST_BY(
             'train',
-            'unique_id',
-            'ds',
-            'y',
+            unique_id,
+            ds,
+            y,
             'AutoARIMA',
             {horizon},
             {{'seasonal_period': {seasonality}, 'confidence_level': 0.95}}
         )
-        ORDER BY unique_id, forecast_step
+        ORDER BY id_cols, date_col
     """
 
     try:
@@ -79,18 +85,18 @@ def run_benchmark(group: str = 'Daily'):
         elapsed_time = time.time() - start_time
 
         print(f"\n✅ Forecast completed in {elapsed_time:.2f} seconds")
-        print(f"Generated {len(fcst_df)} forecast points for {fcst_df['unique_id'].nunique()} series")
+        print(f"Generated {len(fcst_df)} forecast points for {fcst_df['id_cols'].nunique()} series")
 
         # Save forecasts
         output_dir = Path('arima_benchmark/results')
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        forecast_file = output_dir / f'anofox-{group}.csv'
-        fcst_df.to_csv(forecast_file, index=False)
+        forecast_file = output_dir / f'anofox-{group}.parquet'
+        fcst_df.to_parquet(forecast_file, index=False)
         print(f"Saved forecasts to {forecast_file}")
 
         # Save timing metrics
-        metrics_file = output_dir / f'anofox-{group}-metrics.csv'
+        metrics_file = output_dir / f'anofox-{group}-metrics.parquet'
         metrics_df = pd.DataFrame({
             'model': ['anofox'],
             'group': [group],
@@ -98,7 +104,7 @@ def run_benchmark(group: str = 'Daily'):
             'series_count': [train_df['unique_id'].nunique()],
             'forecast_points': [len(fcst_df)],
         })
-        metrics_df.to_csv(metrics_file, index=False)
+        metrics_df.to_parquet(metrics_file, index=False)
         print(f"Saved metrics to {metrics_file}")
 
     except Exception as e:
