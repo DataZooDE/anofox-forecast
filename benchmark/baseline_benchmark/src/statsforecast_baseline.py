@@ -60,7 +60,7 @@ def run_benchmark(group: str = 'Daily'):
             n_jobs=-1,  # Use all cores
         )
 
-        fcst_df = sf.forecast(df=train_df, h=horizon, level=[95])
+        fcst_df = sf.forecast(df=train_df, h=horizon)
         elapsed_time = time.time() - start_time
 
         # Reset index to get unique_id and ds as columns

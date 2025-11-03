@@ -7,81 +7,72 @@ import sys
 from pathlib import Path
 
 import fire
-import numpy as np
-import pandas as pd
+import polars as pl
 
 # Add parent directory to path to import data module
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.data import get_data
 
 
-def mase(y_true, y_pred, y_train, seasonality):
-    """
-    Calculate Mean Absolute Scaled Error (MASE).
-
-    MASE = MAE / naive_forecast_mae
-    where naive_forecast uses the last observation or seasonal observation.
-    """
-    mae = np.mean(np.abs(y_true - y_pred))
-
-    # Use seasonal naive as scaling factor if we have enough data
-    if seasonality > 1 and len(y_train) > seasonality:
-        # Seasonal naive error: compare each value with the value from the previous season
-        naive_error = np.mean(np.abs(y_train[seasonality:] - y_train[:-seasonality]))
-    else:
-        # Regular naive error: compare each value with the previous value
-        naive_error = np.mean(np.abs(y_train[1:] - y_train[:-1]))
-
-    # Handle edge case where naive error is zero
-    if naive_error == 0:
-        return np.inf if mae > 0 else 0
-
-    return mae / naive_error
-
-
 def evaluate_model(fcst_df, test_df, train_df, model_name, seasonality):
-    """Evaluate a single model's forecasts."""
-    # Merge forecasts with test data
-    merged = fcst_df.merge(test_df, on=['unique_id', 'ds'], suffixes=('_pred', '_true'))
+    """Evaluate a single model's forecasts using Polars expressions."""
+    # Join forecasts with test data
+    merged = fcst_df.join(
+        test_df,
+        on=['unique_id', 'ds'],
+        how='inner'
+    )
 
-    # Calculate metrics for each series
-    metrics_list = []
+    # Calculate errors using expressions
+    merged = merged.with_columns([
+        (pl.col('y') - pl.col(model_name)).abs().alias('error'),
+        ((pl.col('y') - pl.col(model_name)) ** 2).alias('squared_error')
+    ])
 
-    for uid in merged['unique_id'].unique():
-        series_data = merged[merged['unique_id'] == uid].sort_values('ds')
-        y_true = series_data['y'].values
-        y_pred = series_data[model_name].values
+    # Calculate MAE and RMSE per series using group_by with expressions
+    metrics_df = merged.group_by('unique_id').agg([
+        pl.col('error').mean().alias('mae'),
+        pl.col('squared_error').mean().sqrt().alias('rmse')
+    ])
 
-        # Get training data for this series
-        train_series = train_df[train_df['unique_id'] == uid].sort_values('ds')
-        y_train = train_series['y'].values
+    # Calculate scaling factors for MASE using Polars expressions
+    # For each series, calculate naive error based on seasonality
+    if seasonality > 1:
+        # Seasonal naive: compare values with previous season
+        train_scales = train_df.sort(['unique_id', 'ds']).group_by('unique_id').agg([
+            (pl.col('y').diff(seasonality).abs().mean()).alias('scale')
+        ])
+    else:
+        # Regular naive: compare consecutive values
+        train_scales = train_df.sort(['unique_id', 'ds']).group_by('unique_id').agg([
+            (pl.col('y').diff().abs().mean()).alias('scale')
+        ])
 
-        # Calculate metrics
-        series_mase = mase(y_true, y_pred, y_train, seasonality)
-        series_mae = np.mean(np.abs(y_true - y_pred))
-        series_rmse = np.sqrt(np.mean((y_true - y_pred) ** 2))
+    # Replace zero scales with infinity to avoid division by zero
+    train_scales = train_scales.with_columns([
+        pl.when(pl.col('scale') == 0).then(pl.lit(float('inf'))).otherwise(pl.col('scale')).alias('scale')
+    ])
 
-        metrics_list.append({
-            'unique_id': uid,
-            'model': model_name,
-            'mase': series_mase,
-            'mae': series_mae,
-            'rmse': series_rmse
-        })
-
-    metrics_df = pd.DataFrame(metrics_list)
+    # Join metrics with scales and calculate MASE
+    metrics_df = metrics_df.join(train_scales, on='unique_id', how='left')
+    metrics_df = metrics_df.with_columns([
+        (pl.col('mae') / pl.col('scale')).alias('mase')
+    ])
 
     # Calculate aggregate metrics
-    avg_mase = metrics_df['mase'].mean()
-    avg_mae = metrics_df['mae'].mean()
-    avg_rmse = metrics_df['rmse'].mean()
+    summary = metrics_df.select([
+        pl.col('mase').mean().alias('avg_mase'),
+        pl.col('mae').mean().alias('avg_mae'),
+        pl.col('rmse').mean().alias('avg_rmse'),
+        pl.len().alias('series_count')
+    ]).row(0)
 
     return {
         'model': model_name,
-        'mase': avg_mase,
-        'mae': avg_mae,
-        'rmse': avg_rmse,
-        'series_count': len(metrics_df)
+        'mase': summary[0],
+        'mae': summary[1],
+        'rmse': summary[2],
+        'series_count': summary[3]
     }
 
 
@@ -96,20 +87,25 @@ def evaluate(group: str = 'Daily'):
     """
     print(f"Evaluating baseline forecasts for M4 {group} dataset...")
 
-    # Load test data
-    test_df, horizon, freq, seasonality = get_data('data', group, train=False)
-    train_df, _, _, _ = get_data('data', group, train=True)
+    # Load test data (still using pandas from get_data, then convert to polars)
+    test_df_pd, horizon, freq, seasonality = get_data('data', group, train=False)
+    train_df_pd, _, _, _ = get_data('data', group, train=True)
 
-    print(f"Loaded {len(test_df)} test rows from {test_df['unique_id'].nunique()} series")
+    # Convert pandas to polars
+    test_df = pl.from_pandas(test_df_pd)
+    train_df = pl.from_pandas(train_df_pd)
+
+    print(f"Loaded {len(test_df)} test rows from {test_df['unique_id'].n_unique()} series")
     print(f"Seasonality: {seasonality}")
 
-    # Convert ds to datetime for test data
-    test_df['ds'] = pd.to_datetime('2020-01-01') + pd.to_timedelta(test_df['ds'].astype(int) - 1, unit='D')
-    test_df['ds'] = test_df['ds'].dt.date
+    # Convert ds to date using Polars expressions
+    test_df = test_df.with_columns([
+        (pl.datetime(2020, 1, 1) + pl.duration(days=pl.col('ds').cast(pl.Int64) - 1)).dt.date().alias('ds')
+    ])
 
-    # Also convert train data
-    train_df['ds'] = pd.to_datetime('2020-01-01') + pd.to_timedelta(train_df['ds'].astype(int) - 1, unit='D')
-    train_df['ds'] = train_df['ds'].dt.date
+    train_df = train_df.with_columns([
+        (pl.datetime(2020, 1, 1) + pl.duration(days=pl.col('ds').cast(pl.Int64) - 1)).dt.date().alias('ds')
+    ])
 
     results_dir = Path('baseline_benchmark/results')
 
@@ -124,14 +120,20 @@ def evaluate(group: str = 'Daily'):
         model_name = file.stem.replace(f'anofox-', '').replace(f'-{group}', '')
         print(f"\nEvaluating anofox-{model_name}...")
 
-        fcst_df = pd.read_parquet(file)
+        fcst_df = pl.read_parquet(file)
 
         # Rename columns to match expected format
-        fcst_df = fcst_df.rename(columns={
+        fcst_df = fcst_df.rename({
             'id_cols': 'unique_id',
             'time_col': 'ds',
             'forecast_col': model_name
         })
+
+        # Convert ds to date to match test_df
+        if fcst_df['ds'].dtype in [pl.Datetime, pl.Datetime('ms'), pl.Datetime('us'), pl.Datetime('ns')]:
+            fcst_df = fcst_df.with_columns([pl.col('ds').dt.date()])
+        elif fcst_df['ds'].dtype == pl.Utf8:
+            fcst_df = fcst_df.with_columns([pl.col('ds').str.to_date().cast(pl.Date)])
 
         result = evaluate_model(fcst_df, test_df, train_df, model_name, seasonality)
         result['model'] = f'anofox-{model_name}'
@@ -142,27 +144,33 @@ def evaluate(group: str = 'Daily'):
     # Evaluate Statsforecast models
     if statsforecast_files:
         print(f"\nEvaluating statsforecast baseline models...")
-        fcst_df = pd.read_parquet(statsforecast_files[0])
+        fcst_df = pl.read_parquet(statsforecast_files[0])
+
+        # Convert ds to date to match test_df
+        if fcst_df['ds'].dtype in [pl.Datetime, pl.Datetime('ms'), pl.Datetime('us'), pl.Datetime('ns')]:
+            fcst_df = fcst_df.with_columns([pl.col('ds').dt.date()])
+        elif fcst_df['ds'].dtype == pl.Utf8:
+            fcst_df = fcst_df.with_columns([pl.col('ds').str.to_date().cast(pl.Date)])
 
         # Statsforecast returns all models in one file
-        # The columns are: unique_id, ds, Naive, SeasonalNaive, RandomWalkWithDrift, WindowAverage, SeasonalWindowAverage
-        for col in fcst_df.columns:
-            if col not in ['unique_id', 'ds']:
-                model_name = col
-                print(f"\n  Evaluating statsforecast-{model_name}...")
+        # Filter out non-model columns (unique_id, ds, index, etc.)
+        model_columns = [col for col in fcst_df.columns if col not in ['unique_id', 'ds', 'index']]
 
-                result = evaluate_model(fcst_df, test_df, train_df, model_name, seasonality)
-                result['model'] = f'statsforecast-{model_name}'
-                all_results.append(result)
+        for model_name in model_columns:
+            print(f"\n  Evaluating statsforecast-{model_name}...")
 
-                print(f"    MASE: {result['mase']:.3f}, MAE: {result['mae']:.2f}, RMSE: {result['rmse']:.2f}")
+            result = evaluate_model(fcst_df, test_df, train_df, model_name, seasonality)
+            result['model'] = f'statsforecast-{model_name}'
+            all_results.append(result)
+
+            print(f"    MASE: {result['mase']:.3f}, MAE: {result['mae']:.2f}, RMSE: {result['rmse']:.2f}")
 
     # Create results DataFrame
-    results_df = pd.DataFrame(all_results)
+    results_df = pl.DataFrame(all_results)
 
     # Save results
     output_file = results_dir / f'baseline-evaluation-{group}.parquet'
-    results_df.to_parquet(output_file, index=False)
+    results_df.write_parquet(output_file)
     print(f"\nSaved evaluation results to {output_file}")
 
     # Print summary table
@@ -172,19 +180,29 @@ def evaluate(group: str = 'Daily'):
     print(f"{'Model':<40} {'MASE':>8} {'MAE':>10} {'RMSE':>10}")
     print(f"{'-'*80}")
 
-    for _, row in results_df.iterrows():
+    for row in results_df.iter_rows(named=True):
         print(f"{row['model']:<40} {row['mase']:>8.3f} {row['mae']:>10.2f} {row['rmse']:>10.2f}")
 
     print(f"{'-'*80}")
 
     # Print comparison
-    anofox_results = results_df[results_df['model'].str.startswith('anofox-')]
-    statsforecast_results = results_df[results_df['model'].str.startswith('statsforecast-')]
+    anofox_results = results_df.filter(pl.col('model').str.starts_with('anofox-'))
+    statsforecast_results = results_df.filter(pl.col('model').str.starts_with('statsforecast-'))
 
     if len(anofox_results) > 0 and len(statsforecast_results) > 0:
         print(f"\nAverage Performance:")
-        print(f"  Anofox:        MASE={anofox_results['mase'].mean():.3f}, MAE={anofox_results['mae'].mean():.2f}, RMSE={anofox_results['rmse'].mean():.2f}")
-        print(f"  Statsforecast: MASE={statsforecast_results['mase'].mean():.3f}, MAE={statsforecast_results['mae'].mean():.2f}, RMSE={statsforecast_results['rmse'].mean():.2f}")
+        anofox_avg = anofox_results.select([
+            pl.col('mase').mean(),
+            pl.col('mae').mean(),
+            pl.col('rmse').mean()
+        ]).row(0)
+        stats_avg = statsforecast_results.select([
+            pl.col('mase').mean(),
+            pl.col('mae').mean(),
+            pl.col('rmse').mean()
+        ]).row(0)
+        print(f"  Anofox:        MASE={anofox_avg[0]:.3f}, MAE={anofox_avg[1]:.2f}, RMSE={anofox_avg[2]:.2f}")
+        print(f"  Statsforecast: MASE={stats_avg[0]:.3f}, MAE={stats_avg[1]:.2f}, RMSE={stats_avg[2]:.2f}")
 
 
 if __name__ == '__main__':
