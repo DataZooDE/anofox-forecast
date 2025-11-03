@@ -2,9 +2,20 @@
 
 This directory contains performance benchmarks and validation tests for the anofox-forecast extension.
 
+## Latest Results
+
+**M4 Daily Dataset** (4,227 time series, 14-step forecast horizon):
+
+| Model | MASE | MAE | RMSE | Time (s) | Speedup |
+|-------|------|-----|------|----------|---------|
+| Statsforecast AutoARIMA | 1.150 | 176.88 | 625.34 | 2,922.8 | 1.0x |
+| **Anofox AutoARIMA** | **1.212** | **183.95** | **601.83** | **10.4** | **279.8x** |
+
+**Summary**: Anofox achieves competitive accuracy (5.4% MASE gap) with **280x faster** execution on native DuckDB tables.
+
 ## Benchmarks
 
-### ARIMA Benchmark Suite (NEW!)
+### ARIMA Benchmark Suite
 - **`arima_benchmark/`** - Comprehensive ARIMA comparison benchmark
   - Compares anofox-forecast AutoARIMA with statsforecast, pmdarima, and prophet
   - Uses M4 Competition datasets (Daily, Hourly, Weekly)

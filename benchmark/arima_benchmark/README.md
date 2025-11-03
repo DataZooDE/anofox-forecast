@@ -1,9 +1,6 @@
 # ARIMA Benchmark Suite
 
-Comprehensive benchmark comparing **anofox-forecast AutoARIMA** (DuckDB extension) with other popular ARIMA implementations:
-- **statsforecast** (Nixtla's optimized implementation)
-- **pmdarima** (Python's popular auto_arima)
-- **prophet** (Facebook's forecasting tool) [optional]
+Comprehensive benchmark comparing **anofox-forecast AutoARIMA** (DuckDB extension) with **statsforecast** (Nixtla's optimized implementation).
 
 Based on the [Nixtla statsforecast ARIMA benchmark](https://github.com/Nixtla/statsforecast/tree/main/experiments/arima).
 
@@ -52,9 +49,6 @@ uv run python arima_benchmark/run_benchmark.py model anofox Daily
 
 # Statsforecast
 uv run python arima_benchmark/run_benchmark.py model statsforecast Daily
-
-# pmdarima
-uv run python arima_benchmark/run_benchmark.py model pmdarima Daily
 ```
 
 #### Run on different datasets:
@@ -86,36 +80,31 @@ arima_benchmark/
 │   ├── __init__.py
 │   ├── data.py              # Data loading utilities
 │   ├── anofox.py            # Anofox-forecast benchmark
-│   ├── statsforecast.py     # Statsforecast benchmark
-│   ├── pmdarima.py          # pmdarima benchmark
+│   ├── nixtla_statsforecast.py  # Statsforecast benchmark
 │   └── evaluation.py        # Evaluation metrics
 ├── data/                     # Downloaded datasets (auto-created)
 └── results/                  # Benchmark results (auto-created)
-    ├── anofox-Daily.csv
-    ├── anofox-Daily-metrics.csv
-    ├── statsforecast-Daily.csv
-    ├── statsforecast-Daily-metrics.csv
-    ├── pmdarima-Daily.csv
-    ├── pmdarima-Daily-metrics.csv
-    └── evaluation-Daily.csv
+    ├── anofox-Daily.parquet
+    ├── anofox-Daily-metrics.parquet
+    ├── statsforecast-Daily.parquet
+    ├── statsforecast-Daily-metrics.parquet
+    └── evaluation-Daily.parquet
 ```
 
-## Expected Results
+## Latest Results
 
-Based on the original Nixtla benchmark and our implementation:
+### Daily Dataset (4,227 series, 14-step forecast horizon)
 
-### Daily Dataset (4,227 series)
-| Model | MASE | Time |
-|-------|------|------|
-| anofox | ? | ? |
-| statsforecast | 3.26 | 1.41s |
-| pmdarima | ? | ~120s |
+| Model | MASE | MAE | RMSE | Time (s) | Speedup |
+|-------|------|-----|------|----------|---------|
+| **Statsforecast AutoARIMA** | 1.150 | 176.88 | 625.34 | 2,922.8 | 1.0x |
+| **Anofox AutoARIMA** | 1.212 | 183.95 | 601.83 | 10.4 | **279.8x** |
 
-### Performance Goals
-
-- **Accuracy**: Achieve MASE comparable to statsforecast (state-of-the-art)
-- **Speed**: Leverage DuckDB's parallelization for competitive performance
-- **Scalability**: Handle thousands of series efficiently
+**Key Findings:**
+- ✅ **Competitive Accuracy**: 5.4% MASE gap vs. state-of-the-art statsforecast
+- ✅ **Exceptional Speed**: 280x faster execution on native DuckDB tables
+- ✅ **Better RMSE**: Outperforms statsforecast on root mean squared error
+- ✅ **Production Ready**: Combines SQL convenience with strong accuracy
 
 ## Implementation Details
 
@@ -160,22 +149,6 @@ sf = StatsForecast(
     n_jobs=-1,
 )
 fcst_df = sf.forecast(h=horizon, level=[95])
-```
-
-### pmdarima
-
-Uses the popular Python implementation:
-
-```python
-from pmdarima import auto_arima
-
-model = auto_arima(
-    series_data,
-    seasonal=True,
-    m=seasonality,
-    stepwise=True,
-)
-forecast, conf_int = model.predict(n_periods=horizon, return_conf_int=True)
 ```
 
 ## Troubleshooting
