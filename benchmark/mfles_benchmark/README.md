@@ -1,177 +1,152 @@
-# MFLES Benchmark Suite
+# MFLES Benchmark
 
 Comprehensive benchmarking comparing MFLES (Multiple Forecast Length Exponential Smoothing) implementations from **anofox-forecast** and **statsforecast**.
 
-## Overview
+## Latest Results
 
-This benchmark suite compares MFLES implementations on the M4 competition dataset:
+**M4 Daily Dataset** (4,227 series, horizon=14, seasonality=7):
 
-- **anofox-forecast MFLES**: Enhanced implementation with gradient boosted decomposition, robust estimation, and configuration presets
-- **statsforecast MFLES**: Standard MFLES implementation from Nixtla's statsforecast library
+| Implementation | Model | MASE | MAE | RMSE | Time (s) | Note |
+|----------------|-------|------|-----|------|----------|------|
+| Statsforecast | MFLES | **1.184** | 185.38 | 217.10 | 81.4 | ⚠️ Significantly better |
+| Anofox | MFLES | 1.887 | 296.36 | 322.79 | 4.1 | Baseline |
+| Anofox | AutoMFLES | 1.888 | 297.39 | 323.55 | 547.5 | Auto-tuned |
 
-### Anofox MFLES Features
+### Key Findings
 
-- **5-Component Decomposition**: Median baseline, robust trend, weighted seasonality, ES ensemble, exogenous factors
-- **Robust Trend Methods**: OLS, Siegel Robust Regression, Piecewise Linear
-- **Weighted Fourier Seasonality**: Automatic period detection with configurable orders
-- **Multi-Alpha ES Ensemble**: Averages multiple exponential smoothing forecasts
-- **Moving Window Medians**: Adaptive baseline using recent data
-- **Configuration Presets**: Fast, Balanced, Accurate, Robust
-- **AutoMFLES**: Automatic hyperparameter selection via cross-validation
+**Performance Gap:**
+- Statsforecast MFLES achieves **MASE 1.184** vs Anofox **1.887** (37% better)
+- This significant gap requires investigation
+- Likely due to implementation differences in decomposition or smoothing
 
-## Requirements
+**AutoMFLES Performance:**
+- Successfully matches manually-tuned baseline (1.888 vs 1.887)
+- Evaluates 24 configurations via cross-validation
+- **133x overhead** for automatic parameter selection (548s vs 4.1s)
+- Trade-off: Automatic tuning convenience vs execution time
 
-1. **Build anofox-forecast extension**:
-   ```bash
-   cd /path/to/anofox-forecast
-   make release
-   ```
+**Speed Comparison:**
+- Anofox MFLES is fastest: 4.1s (manual configuration required)
+- Statsforecast MFLES: 81.4s (~20x slower, but much better accuracy)
+- Anofox AutoMFLES: 547.5s (automatic selection, matches baseline accuracy)
 
-2. **Install Python dependencies** (handled by uv):
-   - datasetsforecast
-   - pandas
-   - fire
-   - statsforecast (for statsforecast MFLES comparison)
+**Recommendations:**
+- Currently, **Statsforecast MFLES is recommended** for production use (best accuracy)
+- Anofox MFLES requires performance investigation
+- AutoMFLES useful for automatic parameter selection when accuracy matches baseline
 
-## Usage
+## Implementation Details
 
-All commands should be run from the `benchmark/` directory:
+### Anofox MFLES
 
-```bash
-cd benchmark
+**Core Features:**
+- **5-Component Decomposition**:
+  - Median baseline for robust center
+  - Gradient-boosted trend estimation
+  - Weighted Fourier seasonality with automatic period detection
+  - Multi-alpha exponential smoothing ensemble
+  - Moving window medians for adaptive baseline
+
+- **Robust Trend Methods**:
+  - OLS (Ordinary Least Squares) - Default, fast
+  - Siegel Robust Regression - Outlier-resistant
+  - Piecewise Linear - Handles changepoints
+
+- **Configurable Parameters**:
+  - `max_rounds`: Number of boosting iterations (default: 10)
+  - `seasonal_periods`: List of seasonal periods (e.g., [7, 365])
+  - `fourier_order`: Harmonics per seasonal period (default: auto)
+  - `lr_trend`, `lr_season`, `lr_rs`: Learning rates for components
+  - `trend_method`: OLS, Siegel, or Piecewise
+  - `ma_window`: Moving average window for smoothing
+  - `es_ensemble_size`: Number of ES forecasts to ensemble (default: 20)
+
+**SQL Example:**
+```sql
+SELECT * FROM TS_FORECAST_BY(
+    'sales', store_id, date, revenue,
+    'MFLES', 14,
+    {
+        'seasonal_periods': [7],
+        'max_rounds': 10,
+        'lr_trend': 0.3,
+        'lr_season': 0.5,
+        'lr_rs': 0.8
+    }
+);
 ```
 
-### Run Full Benchmark
+### Anofox AutoMFLES
 
-Runs all anofox MFLES variants and statsforecast MFLES, then evaluates:
+**Automatic Hyperparameter Optimization:**
+- Grid search over 24 configurations (statsforecast grid)
+- Parameters optimized via cross-validation:
+  - `seasonality_weights`: true/false
+  - `smoother`: true/false (ES ensemble vs MA smoothing)
+  - `ma_window`: -1 (period), -2 (period/2), -3 (none)
+  - `seasonal_period`: true/false (use seasonality)
 
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-uv run python mfles_benchmark/run_benchmark.py run --group=Daily
+- **User-Configurable Options**:
+  - `max_rounds`: Boosting iterations (default: 10, tuned)
+  - `lr_trend`, `lr_season`, `lr_rs`: Learning rates (defaults: 0.3, 0.5, 0.8)
+  - `cv_horizon`: Cross-validation forecast horizon (default: auto = season_length)
+  - `cv_n_windows`: Number of CV windows (default: 2)
+
+**SQL Example:**
+```sql
+SELECT * FROM TS_FORECAST_BY(
+    'sales', store_id, date, revenue,
+    'AutoMFLES', 14,
+    {
+        'seasonal_periods': [7],
+        'max_rounds': 20,
+        'lr_trend': 0.5,
+        'cv_n_windows': 3
+    }
+);
 ```
 
-### Run Specific Models
-
-```bash
-# Run only anofox MFLES with Fast preset
-uv run python mfles_benchmark/run_benchmark.py anofox --group=Daily --model=MFLES-Fast
-
-# Run only anofox AutoMFLES
-uv run python mfles_benchmark/run_benchmark.py anofox --group=Daily --model=AutoMFLES
-
-# Run only statsforecast MFLES
-uv run python mfles_benchmark/run_benchmark.py statsforecast --group=Daily
-```
-
-### Evaluate Existing Results
-
-```bash
-uv run python mfles_benchmark/run_benchmark.py eval --group=Daily
-```
-
-### Clean Results
-
-```bash
-uv run python mfles_benchmark/run_benchmark.py clean
-```
-
-## Available Models
-
-### Anofox MFLES Variants
-
-1. **anofox-MFLES-Fast**: Quick forecasting with minimal computation
-   - 3 boosting rounds
-   - Fourier order 3
-   - 10 ES ensemble steps
-
-2. **anofox-MFLES-Balanced** (Recommended default):
-   - 5 boosting rounds
-   - Fourier order 5
-   - 20 ES ensemble steps
-
-3. **anofox-MFLES-Accurate**: High accuracy with more computation
-   - 10 boosting rounds
-   - Fourier order 7
-   - Siegel robust trend
-   - 30 ES ensemble steps
-
-4. **anofox-MFLES-Robust**: Maximum resistance to outliers
-   - 7 boosting rounds
-   - Fourier order 5
-   - Siegel robust trend
-   - Outlier capping enabled
-
-5. **anofox-AutoMFLES**: Automatic hyperparameter optimization
-   - Grid search over trend methods, Fourier orders, max rounds
-   - Cross-validation based selection
-   - Configurable CV strategy (rolling/expanding)
+**Cross-Validation Strategy:**
+- Rolling window CV with 2 windows by default
+- Each configuration evaluated on held-out test sets
+- Best configuration selected by lowest MAE
+- Final model trained on full dataset with best parameters
 
 ### Statsforecast MFLES
 
-6. **statsforecast-MFLES**: Standard MFLES implementation from Nixtla
-   - Configurable season length
-   - Multi-core parallel processing
-   - Standard exponential smoothing approach
+**Implementation:**
+- Standard MFLES from Nixtla's statsforecast library
+- Multi-core parallel processing
+- Configurable season length
+- Standard exponential smoothing approach
 
-## Dataset Groups
+**Key Differences from Anofox:**
+- Different decomposition strategy
+- Different smoothing algorithms
+- Optimized for speed and accuracy
+- Production-tested on large datasets
 
-- **Daily**: 14-day horizon, seasonality=7 (weekly pattern)
-- **Hourly**: 48-hour horizon, seasonality=24 (daily pattern)
-- **Weekly**: 13-week horizon, seasonality=52 (yearly pattern)
+### Performance Investigation Needed
+
+The 37% accuracy gap between implementations suggests:
+1. Possible issues in Anofox decomposition logic
+2. Different hyperparameter defaults
+3. Smoothing algorithm differences
+4. Ensemble weighting differences
+
+**Next Steps:**
+- Compare decomposition outputs component-by-component
+- Verify trend estimation methods
+- Check seasonal component extraction
+- Review ES ensemble implementation
+- Test with different parameter configurations
 
 ## Evaluation Metrics
 
-- **MASE** (Mean Absolute Scaled Error): Scaled against naive seasonal baseline
-- **MAE** (Mean Absolute Error): Average forecast error
-- **RMSE** (Root Mean Squared Error): Penalizes large errors
+All benchmarks measure:
+- **MASE** (Mean Absolute Scaled Error) - Primary metric, scale-independent
+- **MAE** (Mean Absolute Error) - Absolute forecast error
+- **RMSE** (Root Mean Squared Error) - Penalizes large errors
+- **Time** - Total execution time in seconds
 
-## Output Files
-
-Results are saved to `mfles_benchmark/results/`:
-
-- `anofox-{model}-{group}.parquet`: Anofox forecast values
-- `anofox-{model}-{group}-metrics.parquet`: Anofox timing information
-- `statsforecast-MFLES-{group}.parquet`: Statsforecast forecast values
-- `statsforecast-MFLES-{group}-metrics.parquet`: Statsforecast timing information
-- `evaluation-MFLES-{group}.parquet`: Aggregated performance metrics comparing all models
-
-## Comparison with Other Methods
-
-This benchmark suite focuses on comparing MFLES implementations. For comparisons with other forecasting methods, see:
-- `arima_benchmark/` - ARIMA models
-- `theta_benchmark/` - Theta methods
-- `ets_benchmark/` - ETS models
-- `baseline_benchmark/` - Naive methods
-
-## Example Output
-
-```
-MFLES BENCHMARK RESULTS
-================================================================================
-                model  group      MASE      MAE     RMSE  time_seconds  series_count
-statsforecast-MFLES  Daily     2.156   126.45   191.12         52.34           414
-  anofox-MFLES-Fast  Daily     2.145   125.34   189.23         45.21           414
-anofox-MFLES-Balanced  Daily     2.087   119.87   182.56         98.45           414
-anofox-MFLES-Robust  Daily     2.098   121.45   185.34        156.89           414
-anofox-MFLES-Accurate  Daily     2.054   117.32   179.12        245.67           414
-anofox-AutoMFLES  Daily     2.041   116.78   178.45        312.34           414
-
-🏆 Best Model: anofox-AutoMFLES
-   MASE: 2.041
-   Time: 312.34s
-```
-
-## Architecture
-
-```
-mfles_benchmark/
-├── src/
-│   ├── __init__.py
-│   ├── data.py               # M4 data loading
-│   ├── anofox_mfles.py       # Anofox MFLES benchmarks
-│   ├── statsforecast_mfles.py # Statsforecast MFLES benchmarks
-│   └── evaluation_mfles.py   # Metrics calculation and comparison
-├── results/                   # Output directory (created automatically)
-├── run_benchmark.py          # Main entry point
-└── README.md                 # This file
-```
+MASE < 1.0 means the model beats a naive seasonal baseline.

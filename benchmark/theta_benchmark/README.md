@@ -1,201 +1,238 @@
-# Theta Benchmark Suite
+# Theta Benchmark
 
-Comprehensive benchmark comparing **Theta method variants** between Anofox-forecast (DuckDB extension) and Statsforecast.
+Comprehensive benchmark comparing Theta method variants between **Anofox-forecast** and **Statsforecast** on M4 Competition datasets.
 
-## Status
+## Latest Results
 
-**Infrastructure**: ✅ Complete and ready to use
-**Results**: ⏳ Pending (benchmarks need to be run manually due to long execution time)
+**M4 Daily Dataset** (4,227 series, horizon=14, seasonality=7):
 
-The benchmark suite is fully functional. Run the commands below to generate results on the M4 Competition datasets.
+### Point Forecasts Only (Prediction Intervals Excluded)
 
-## Theta Variants Tested
+| Implementation | Model | MASE | MAE | RMSE | Time (s) |
+|----------------|-------|------|-----|------|----------|
+| Anofox | OptimizedTheta | **1.149** | 178.08 | 209.53 | 1,033 |
+| Statsforecast | AutoTheta | **1.149** | 178.15 | 209.60 | 693 |
+| Statsforecast | OptimizedTheta | 1.151 | 178.44 | 209.91 | 693 |
+| Statsforecast | DynamicTheta | 1.153 | 178.83 | 210.33 | 693 |
+| Statsforecast | Theta | 1.154 | 178.85 | 210.36 | 693 |
+| Anofox | DynamicOptimizedTheta | 1.155 | 179.06 | 210.56 | 906 |
+| Statsforecast | DynamicOptimizedTheta | 1.156 | 178.97 | 210.52 | 693 |
+| Anofox | DynamicTheta | 1.226 | 191.41 | 221.94 | 19 |
+| Anofox | Theta | 1.226 | 191.46 | 222.00 | 20 |
 
-### Anofox-forecast (4 variants)
-- **Theta** - Standard Theta method with theta parameter = 2.0
-- **OptimizedTheta** - Auto-optimized theta parameter selection
-- **DynamicTheta** - Dynamic Theta with theta parameter = 2.0
-- **DynamicOptimizedTheta** - Dynamic with auto-optimized theta
+### Key Findings
 
-### Statsforecast (5 variants)
-- **AutoTheta** - Automatic Theta model selection
-- **Theta** - Standard Theta method
-- **OptimizedTheta** - Optimized theta parameter
-- **DynamicTheta** - Dynamic Theta
-- **DynamicOptimizedTheta** - Dynamic with optimization
+**Accuracy:**
+- **Best Overall**: anofox-OptimizedTheta and statsforecast-AutoTheta tie at MASE 1.149
+- **Top Tier**: All optimized variants achieve MASE 1.149-1.156 (within 0.6% of best)
+- **Non-optimized Anofox**: MASE 1.226 (6.7% worse, but 50x faster)
+- **All Theta variants beat Auto ARIMA** (1.212) and competitive with AutoETS (1.148)
 
-## Dataset
+**Speed:**
+- **Fastest**: Anofox non-optimized variants (19-20s) - Excellent for production
+- **Optimized Anofox**: 906-1,033s (~15-17 min) for marginal accuracy gain
+- **Statsforecast All Models**: 693s (~11.5 min) for all 5 variants combined
+- **Speed vs Accuracy**: Non-optimized Anofox 50x faster with only 6.7% accuracy loss
 
-Uses the **M4 Competition** datasets:
-- **Daily**: 4,227 series, mean length 2,371 observations
-- **Hourly**: 414 series, mean length 901 observations
-- **Weekly**: 359 series, mean length 1,035 observations
+**Implementation Comparison:**
+- **Statsforecast faster**: ~1.5x faster than Anofox for optimized variants (693s vs 900-1000s)
+- **Identical top accuracy**: Both achieve MASE 1.149
+- **Anofox advantage**: Fast non-optimized variants (19-20s) for production
 
-## Metrics
+**Practical Recommendations:**
+- **Production Default**: Anofox Theta (20s, MASE 1.226) - Fast and reliable
+- **Best Accuracy**: Anofox OptimizedTheta or Statsforecast AutoTheta (MASE 1.149)
+- **Time Budget < 1 min**: Use Anofox Theta or DynamicTheta
+- **Time Budget 10-15 min**: Use optimized variants for 6-7% accuracy improvement
 
-- **MASE** (Mean Absolute Scaled Error) - Primary metric
-- **MAE** (Mean Absolute Error)
-- **RMSE** (Root Mean Squared Error)
-- **Time** (seconds to generate forecasts)
-
-## Quick Start
-
-### Prerequisites
-
-1. **Build the extension first**:
-   ```bash
-   cd /path/to/anofox-forecast
-   make release
-   ```
-
-2. **Install Python dependencies** (already done if using uv):
-   ```bash
-   cd benchmark
-   uv sync --extra comparison
-   ```
-
-### Running Benchmarks
-
-#### Run full benchmark (all models on Daily data):
-```bash
-cd benchmark
-uv run python theta_benchmark/run_benchmark.py run --group=Daily
-```
-
-#### Run specific Anofox Theta variant:
-```bash
-# Specific variant
-uv run python theta_benchmark/run_benchmark.py anofox --group=Daily --model=OptimizedTheta
-
-# All Anofox variants
-uv run python theta_benchmark/run_benchmark.py anofox --group=Daily
-```
-
-#### Run Statsforecast Theta variants:
-```bash
-uv run python theta_benchmark/run_benchmark.py statsforecast --group=Daily
-```
-
-#### Run on different datasets:
-```bash
-# Hourly data
-uv run python theta_benchmark/run_benchmark.py run --group=Hourly
-
-# Weekly data
-uv run python theta_benchmark/run_benchmark.py run --group=Weekly
-```
-
-#### Evaluate existing results:
-```bash
-uv run python theta_benchmark/run_benchmark.py eval --group=Daily
-```
-
-#### Clean results:
-```bash
-uv run python theta_benchmark/run_benchmark.py clean
-```
-
-## Directory Structure
-
-```
-theta_benchmark/
-├── README.md                 # This file
-├── run_benchmark.py          # Main benchmark runner
-├── src/                      # Source code
-│   ├── __init__.py
-│   ├── data.py              # Data loading utilities (shared with ARIMA)
-│   ├── anofox_theta.py      # Anofox Theta benchmarks
-│   ├── statsforecast_theta.py  # Statsforecast Theta benchmarks
-│   └── evaluation_theta.py  # Evaluation metrics
-├── data/                     # Downloaded datasets (shared, auto-created)
-└── results/                  # Benchmark results (auto-created)
-    ├── anofox-Theta-Daily.parquet
-    ├── anofox-OptimizedTheta-Daily.parquet
-    ├── anofox-DynamicTheta-Daily.parquet
-    ├── anofox-DynamicOptimizedTheta-Daily.parquet
-    ├── statsforecast-Theta-Daily.parquet
-    └── evaluation-Theta-Daily.parquet
-```
+**Comparison with Other Methods:**
+- vs RandomWalkWithDrift (1.147): Theta slightly worse but competitive
+- vs AutoETS (1.148): Theta matches best complex model
+- vs AutoARIMA (1.212): Theta significantly better (5.2% improvement)
 
 ## Implementation Details
 
-### Anofox-forecast (DuckDB Extension)
+### Anofox Theta Variants
 
-Uses the `TS_FORECAST_BY` function with Theta variants:
+All Theta variants implemented using SQL-native `TS_FORECAST_BY()` function.
 
-```python
-# Example: OptimizedTheta
-forecast_query = f"""
-    SELECT
-        unique_id,
-        date_col AS ds,
-        point_forecast AS forecast,
-        lower,
-        upper
-    FROM TS_FORECAST_BY(
-        'train',
-        'unique_id',
-        'ds',
-        'y',
-        'OptimizedTheta',
-        {horizon},
-        {{'seasonal_period': {seasonality}}}
-    )
-    ORDER BY unique_id, ds
-"""
+#### 1. Theta - Standard Theta Method
+
+**Description:**
+Classic Theta method with theta=2.0. Decomposes series into long-term trend and short-term fluctuations.
+
+**SQL Example:**
+```sql
+SELECT * FROM TS_FORECAST_BY(
+    'sales', store_id, date, revenue,
+    'Theta', 14,
+    {
+        'seasonal_period': 7,
+        'theta_param': 2.0  -- Default theta value
+    }
+);
 ```
 
-### Statsforecast
+**Parameters:**
+- `seasonal_period`: Seasonal cycle length (default: auto-detect)
+- `theta_param`: Theta parameter (default: 2.0, typical range: 0-3)
 
-Uses Nixtla's optimized implementation:
+**Performance:**
+- 20s for 4,227 series (~0.005s per series)
+- MASE 1.226
+- **Fastest Theta variant**, ideal for production
 
+#### 2. OptimizedTheta - Auto-Optimized Parameter
+
+**Description:**
+Automatically optimizes theta parameter via cross-validation to find best value for each series.
+
+**SQL Example:**
+```sql
+SELECT * FROM TS_FORECAST_BY(
+    'sales', store_id, date, revenue,
+    'OptimizedTheta', 14,
+    {'seasonal_period': 7}
+);
+```
+
+**Parameters:**
+- `seasonal_period`: Seasonal cycle length (default: auto-detect)
+- Theta parameter automatically optimized per series
+
+**Performance:**
+- 1,033s for 4,227 series (~0.24s per series)
+- MASE 1.149 - **Best Anofox accuracy**
+- 50x slower than non-optimized, 6.7% accuracy gain
+
+#### 3. DynamicTheta - Dynamic Theta Method
+
+**Description:**
+Dynamic variant that adapts to changing patterns, with fixed theta=2.0.
+
+**SQL Example:**
+```sql
+SELECT * FROM TS_FORECAST_BY(
+    'sales', store_id, date, revenue,
+    'DynamicTheta', 14,
+    {
+        'seasonal_period': 7,
+        'theta_param': 2.0
+    }
+);
+```
+
+**Parameters:**
+- `seasonal_period`: Seasonal cycle length
+- `theta_param`: Theta parameter (default: 2.0)
+
+**Performance:**
+- 19s for 4,227 series (~0.004s per series)
+- MASE 1.226
+- Similar to standard Theta
+
+#### 4. DynamicOptimizedTheta - Dynamic + Optimized
+
+**Description:**
+Combines dynamic adaptation with automatic theta parameter optimization.
+
+**SQL Example:**
+```sql
+SELECT * FROM TS_FORECAST_BY(
+    'sales', store_id, date, revenue,
+    'DynamicOptimizedTheta', 14,
+    {'seasonal_period': 7}
+);
+```
+
+**Parameters:**
+- `seasonal_period`: Seasonal cycle length
+- Theta parameter automatically optimized
+
+**Performance:**
+- 906s for 4,227 series (~0.21s per series)
+- MASE 1.155
+- Slightly worse than OptimizedTheta, slightly faster
+
+### Statsforecast Theta Variants
+
+Implemented using Nixtla's Statsforecast library with parallel processing.
+
+**Models:**
 ```python
 from statsforecast import StatsForecast
-from statsforecast.models import AutoTheta, Theta, OptimizedTheta, DynamicTheta, DynamicOptimizedTheta
-
-sf = StatsForecast(
-    df=train_df,
-    models=[
-        AutoTheta(season_length=seasonality),
-        Theta(season_length=seasonality),
-        OptimizedTheta(season_length=seasonality),
-        DynamicTheta(season_length=seasonality),
-        DynamicOptimizedTheta(season_length=seasonality),
-    ],
-    freq=freq,
-    n_jobs=-1,
+from statsforecast.models import (
+    AutoTheta,
+    Theta,
+    OptimizedTheta,
+    DynamicTheta,
+    DynamicOptimizedTheta
 )
-fcst_df = sf.forecast(h=horizon)
+
+models = [
+    AutoTheta(season_length=7),
+    Theta(season_length=7),
+    OptimizedTheta(season_length=7),
+    DynamicTheta(season_length=7),
+    DynamicOptimizedTheta(season_length=7),
+]
+
+sf = StatsForecast(models=models, freq='D', n_jobs=-1)
+forecasts = sf.forecast(df=train_df, h=14, level=[95])
 ```
 
-## Troubleshooting
+**Key Variants:**
+1. **AutoTheta**: Automatic model selection - Best accuracy (MASE 1.149)
+2. **Theta**: Standard theta=2.0
+3. **OptimizedTheta**: Auto-optimized theta parameter
+4. **DynamicTheta**: Dynamic adaptation
+5. **DynamicOptimizedTheta**: Dynamic + optimization
 
-### Extension not found
-```
-ERROR: Extension not found at build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension
-```
-**Solution**: Build the extension first with `make release`
+**Characteristics:**
+- **Batch Processing**: All 5 models run together in 693s
+- **Multi-core**: Parallel processing across CPU cores
+- **Pandas-based**: Requires DataFrame conversion
+- **Prediction Intervals**: Generates confidence bounds automatically
 
-### Python version issues
-The benchmark requires Python 3.11 or 3.12 (not 3.13 due to package compatibility).
+### Theta Method Selection Guide
 
-**Solution**: Use uv's Python management:
-```bash
-uv python pin 3.12
-uv sync
-```
+| Scenario | Recommended Model | Reason |
+|----------|-------------------|--------|
+| Production, speed critical | Anofox Theta | 20s, MASE 1.226, reliable |
+| Best accuracy | Anofox OptimizedTheta | MASE 1.149, 17 min |
+| Best accuracy + fast | Statsforecast AutoTheta | MASE 1.149, 11.5 min |
+| Time budget < 1 minute | Anofox Theta/DynamicTheta | 19-20s |
+| Batch forecasting multiple models | Statsforecast | All 5 variants in 11.5 min |
+| SQL-native workflow | Anofox variants | DuckDB integration |
+| Python workflow | Statsforecast | Python ecosystem |
 
-### Missing datasets
-Datasets are automatically downloaded on first run using the `datasetsforecast` package.
-The data directory is shared with the ARIMA benchmark.
+### Theta Method Overview
 
-## References
+**What is Theta?**
+The Theta method decomposes a time series into two or more "theta lines" representing different aspects:
+- **Theta Line 0**: Long-term trend
+- **Theta Line 2**: Short-term fluctuations + seasonality
 
-- [Theta Method Paper](https://doi.org/10.1016/S0169-2070(00)00066-2)
-- [M4 Competition](https://www.sciencedirect.com/science/article/pii/S0169207019301128)
-- [Nixtla Statsforecast](https://github.com/Nixtla/statsforecast)
-- [MASE Metric](https://otexts.com/fpp3/accuracy.html)
+The forecast combines extrapolations of these lines, weighted by the theta parameter.
 
-## License
+**Why Theta Works:**
+- Robust to different data patterns
+- Simple exponential smoothing with modifications
+- Handles seasonality effectively
+- Computationally efficient (non-optimized variants)
 
-Same as parent project: Business Source License 1.1 (BSL 1.1)
+**Theta Parameter:**
+- theta < 1: More weight to short-term
+- theta = 1: Simple exponential smoothing
+- theta = 2: Standard Theta (default)
+- theta > 2: More weight to long-term trend
+
+## Evaluation Metrics
+
+All benchmarks measure:
+- **MASE** (Mean Absolute Scaled Error) - Primary metric, scale-independent
+- **MAE** (Mean Absolute Error) - Absolute forecast error
+- **RMSE** (Root Mean Squared Error) - Penalizes large errors
+- **Time** - Total execution time in seconds
+
+MASE < 1.0 means the model beats a naive seasonal baseline.

@@ -154,19 +154,55 @@ def evaluate_forecasts(
         print(f"  MASE: {result['mase']:.3f}, MAE: {result['mae']:.2f}, RMSE: {result['rmse']:.2f}")
 
     # Evaluate Statsforecast models
-    if statsforecast_files:
-        print(f"\nEvaluating statsforecast {benchmark_name} models...")
-        fcst_df = pl.read_parquet(statsforecast_files[0])
+    for sf_file in statsforecast_files:
+        # Extract potential model name from filename (e.g., "statsforecast-AutoARIMA-Daily.parquet")
+        file_stem = sf_file.stem
+        parts = file_stem.split('-')
+
+        # Try to extract model name from filename
+        # Pattern: statsforecast-[ModelName]-[Group] or just statsforecast-[Group]
+        if len(parts) == 3:
+            # statsforecast-AutoARIMA-Daily
+            filename_model = parts[1]
+        else:
+            # statsforecast-Daily -> infer from benchmark
+            filename_model = None
+
+        print(f"\nEvaluating {file_stem}...")
+        fcst_df = pl.read_parquet(sf_file)
+
+        # Check if statsforecast file uses alternative column names (from anofox runner)
+        if 'id_cols' in fcst_df.columns and 'date_col' in fcst_df.columns and 'forecast_col' in fcst_df.columns:
+            # Single model file with alternative column naming
+            # Infer model name from filename or benchmark name
+            if filename_model:
+                model_name = filename_model
+            else:
+                # Map benchmark name to default statsforecast model
+                benchmark_to_model = {
+                    'arima': 'AutoARIMA',
+                    'ets': 'AutoETS',
+                    'theta': 'AutoTheta',
+                    'mfles': 'MFLES',
+                }
+                model_name = benchmark_to_model.get(benchmark_name, benchmark_name.upper())
+
+            fcst_df = fcst_df.rename({
+                'id_cols': 'unique_id',
+                'date_col': 'ds',
+                'forecast_col': model_name
+            })
+            model_columns = [model_name]
+        else:
+            # Standard statsforecast format with multiple model columns
+            # Filter out non-model columns (unique_id, ds, index, etc.)
+            model_columns = [col for col in fcst_df.columns if col not in ['unique_id', 'ds', 'index']]
 
         # Convert ds to date to match test_df
         if fcst_df['ds'].dtype in [pl.Datetime, pl.Datetime('ms'), pl.Datetime('us'), pl.Datetime('ns')]:
             fcst_df = fcst_df.with_columns([pl.col('ds').dt.date()])
         elif fcst_df['ds'].dtype == pl.Utf8:
             fcst_df = fcst_df.with_columns([pl.col('ds').str.to_date().cast(pl.Date)])
-
-        # Statsforecast returns all models in one file
-        # Filter out non-model columns (unique_id, ds, index, etc.)
-        model_columns = [col for col in fcst_df.columns if col not in ['unique_id', 'ds', 'index']]
 
         for model_name in model_columns:
             print(f"\n  Evaluating statsforecast-{model_name}...")
