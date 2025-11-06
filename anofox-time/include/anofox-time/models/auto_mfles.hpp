@@ -26,27 +26,37 @@ class AutoMFLES : public IForecaster {
 public:
 	/**
 	 * @brief Configuration for AutoMFLES optimization
+	 * Matches statsforecast MFLES grid search for apple-to-apple comparison
 	 */
 	struct Config {
-		// CV settings
-		int cv_horizon = 6;              // Forecast horizon for CV
-		int cv_initial_window = 50;      // Initial training window
-		int cv_step = 6;                 // Step between folds
+		// CV settings (statsforecast parameters: test_size, n_windows)
+		// test_size: Forecast horizon used during CV - statsforecast recommends season_length or season_length/2
+		//            Set to -1 to auto-detect from seasonal_periods (uses first period)
+		int cv_horizon = -1;             // -1 = auto (use seasonal_periods[0]), or explicit value
+		int cv_n_windows = 2;            // Number of CV folds (statsforecast default: 2)
+		int cv_initial_window = -1;      // Initial training window (-1 = auto: 10 * cv_horizon)
+		int cv_step = -1;                // Step between folds (-1 = auto: cv_horizon)
 		utils::CVStrategy cv_strategy = utils::CVStrategy::ROLLING;
 
-		// Search space
-		std::vector<TrendMethod> trend_methods = {
-			TrendMethod::OLS,
-			TrendMethod::SIEGEL_ROBUST
-		};
-		std::vector<int> max_fourier_orders = {3, 5, 7};
-		std::vector<int> max_rounds_options = {3, 5, 7, 10};
+		// Statsforecast grid search parameters (24 configurations: 2×2×3×2)
+		std::vector<bool> seasonality_weights_options = {false, true};  // Time-varying seasonal weights
+		std::vector<bool> smoother_options = {false, true};             // ES ensemble (false) vs MA (true)
+		std::vector<int> ma_window_options = {-1, -2, -3};              // -1=period, -2=period/2, -3=None (ES ensemble)
+		std::vector<bool> seasonal_period_options = {false, true};      // false=None (no seasonality), true=use period
 
-		// Fixed parameters
+		// Fixed parameters (not optimized by statsforecast grid search)
 		std::vector<int> seasonal_periods = {12};
-		double min_alpha = 0.1;
-		double max_alpha = 0.9;
-		int es_ensemble_size = 10;
+		int max_rounds = 10;             // Tuned default (was 50 in statsforecast)
+		TrendMethod trend_method = TrendMethod::OLS;  // statsforecast uses OLS
+		int fourier_order = -1;          // statsforecast uses adaptive
+		double min_alpha = 0.05;         // statsforecast default
+		double max_alpha = 1.0;          // statsforecast default
+		int es_ensemble_size = 20;       // statsforecast default
+
+		// Learning rates (tuned defaults for best accuracy)
+		double lr_trend = 0.3;           // Trend learning rate (was 0.9 in statsforecast)
+		double lr_season = 0.5;          // Seasonal learning rate (was 0.9 in statsforecast)
+		double lr_rs = 0.8;              // Residual smoothing learning rate (was 1.0 in statsforecast)
 	};
 
 	AutoMFLES();
@@ -67,19 +77,21 @@ public:
 		return *fitted_model_;
 	}
 
-	// Get selected parameters
-	TrendMethod selectedTrendMethod() const { return best_trend_method_; }
-	int selectedFourierOrder() const { return best_fourier_order_; }
-	int selectedMaxRounds() const { return best_max_rounds_; }
+	// Get selected parameters (statsforecast grid)
+	bool selectedSeasonalityWeights() const { return best_seasonality_weights_; }
+	bool selectedSmoother() const { return best_smoother_; }
+	int selectedMAWindow() const { return best_ma_window_; }
+	bool selectedSeasonalPeriod() const { return best_seasonal_period_; }
 	double selectedCV_MAE() const { return best_cv_mae_; }
 
 	// Diagnostics
 	struct OptimizationDiagnostics {
 		int configs_evaluated = 0;
 		double best_cv_mae = 0.0;
-		TrendMethod best_trend_method = TrendMethod::OLS;
-		int best_fourier_order = 3;
-		int best_max_rounds = 5;
+		bool best_seasonality_weights = false;
+		bool best_smoother = false;
+		int best_ma_window = 7;
+		bool best_seasonal_period = true;
 		double optimization_time_ms = 0.0;
 	};
 
@@ -90,10 +102,11 @@ public:
 private:
 	Config config_;
 
-	// Selected parameters
-	TrendMethod best_trend_method_ = TrendMethod::OLS;
-	int best_fourier_order_ = 3;
-	int best_max_rounds_ = 5;
+	// Selected parameters (statsforecast grid)
+	bool best_seasonality_weights_ = false;
+	bool best_smoother_ = false;
+	int best_ma_window_ = 5;
+	bool best_seasonal_period_ = true;
 	double best_cv_mae_ = std::numeric_limits<double>::infinity();
 
 	// Fitted model
@@ -102,9 +115,10 @@ private:
 
 	// Optimization
 	struct CandidateConfig {
-		TrendMethod trend_method;
-		int fourier_order;
-		int max_rounds;
+		bool seasonality_weights;
+		bool smoother;
+		int ma_window;
+		bool seasonal_period;
 		double cv_mae;
 
 		bool operator<(const CandidateConfig& other) const {

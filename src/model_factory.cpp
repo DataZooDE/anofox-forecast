@@ -91,8 +91,14 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		return AnofoxTimeWrapper::CreateMFLES(seasonal_periods, n_iterations, lr_trend, lr_season, lr_level);
 	} else if (model_name == "AutoMFLES") {
 		std::vector<int> seasonal_periods = GetArrayParam(model_params, "seasonal_periods", {12});
-		// std::cerr << "[DEBUG] Creating AutoMFLES model" << std::endl;
-		return AnofoxTimeWrapper::CreateAutoMFLES(seasonal_periods);
+		// User-configurable parameters with tuned defaults
+		int max_rounds = GetParam<int>(model_params, "max_rounds", 10);
+		double lr_trend = GetParam<double>(model_params, "lr_trend", 0.3);
+		double lr_season = GetParam<double>(model_params, "lr_season", 0.5);
+		double lr_rs = GetParam<double>(model_params, "lr_rs", 0.8);
+		int cv_horizon = GetParam<int>(model_params, "cv_horizon", -1);
+		int cv_n_windows = GetParam<int>(model_params, "cv_n_windows", 2);
+		return AnofoxTimeWrapper::CreateAutoMFLES(seasonal_periods, max_rounds, lr_trend, lr_season, lr_rs, cv_horizon, cv_n_windows);
 	} else if (model_name == "MSTL") {
 		std::vector<int> seasonal_periods = GetArrayParam(model_params, "seasonal_periods", {12});
 		int trend_method = GetParam<int>(model_params, "trend_method", 0);       // 0=Linear
