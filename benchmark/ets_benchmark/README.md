@@ -1,6 +1,6 @@
 # ETS (Exponential Smoothing) Benchmark
 
-Comprehensive benchmark of Error-Trend-Seasonal exponential smoothing models from **anofox-forecast** on M4 Competition datasets.
+Comprehensive benchmark of Error-Trend-Seasonal exponential smoothing models from **anofox-forecast** and **statsforecast** on M4 Competition datasets.
 
 ## Latest Results
 
@@ -8,35 +8,53 @@ Comprehensive benchmark of Error-Trend-Seasonal exponential smoothing models fro
 
 | Implementation | Model | MASE | MAE | RMSE | Time (s) | Note |
 |----------------|-------|------|-----|------|----------|------|
-| Anofox | AutoETS | **1.148** | 175.79 | 207.48 | 466 | ⭐ Best complex model |
-| Anofox | HoltWinters | **1.152** | 175.92 | 207.42 | 117 | Fast & accurate |
-| Anofox | SeasonalESOptimized | 1.203 | 186.67 | 218.23 | 8.0 | Optimized parameters |
-| Anofox | SeasonalES | 1.355 | 210.88 | 240.48 | 1.1 | Basic seasonal ES |
+| Statsforecast | Holt | **1.132** | 172.86 | 204.44 | ~241 | ⭐ Best ETS accuracy |
+| Anofox | AutoETS | **1.148** | 175.79 | 207.48 | 466 | Best complex automatic |
+| Statsforecast | HoltWinters | **1.148** | 177.14 | 208.90 | ~241 | Tied best automatic |
+| Anofox | HoltWinters | 1.152 | 175.92 | 207.42 | 117 | Fast & accurate |
+| Statsforecast | SESOpt | 1.154 | 178.32 | 209.79 | ~241 | Simple optimized |
+| Anofox | SeasonalESOptimized | 1.203 | 186.67 | 218.23 | 8.0 | Very fast optimized |
+| Statsforecast | AutoETS | 1.227 | 188.14 | 227.63 | ~241 | Automatic selection |
+| Statsforecast | SES | 1.231 | 191.79 | 222.13 | ~241 | Simple exponential |
+| Anofox | SeasonalES | 1.355 | 210.88 | 240.48 | 1.1 | Fastest |
+| Statsforecast | SeasESOpt | 1.457 | 226.82 | 261.36 | ~241 | Seasonal optimized |
+| Statsforecast | SeasonalES | 1.608 | 249.17 | 278.42 | ~241 | Basic seasonal |
+
+**Note**: Statsforecast time is ~241s per model (1,687s total / 7 models)
 
 ### Key Findings
 
 **Accuracy:**
-- **AutoETS achieves MASE 1.148** - Ties for best complex model across all benchmarks!
-- **HoltWinters nearly matches** with MASE 1.152 (only 0.3% worse)
-- Both AutoETS and HoltWinters beat or match OptimizedTheta (1.149)
-- All ETS models beat seasonal baseline (MASE < 1.4)
+- **Statsforecast Holt achieves MASE 1.132** - New best ETS model, beats all previous methods!
+- **Anofox AutoETS** (1.148) - Best automatic complex model selection
+- **Top 5 models all achieve MASE < 1.155** - Excellent performance tier
+- **Anofox leads overall**: Average MASE 1.214 vs Statsforecast 1.280
+- **Anofox AutoETS beats Statsforecast AutoETS**: 1.148 vs 1.227 (6.4% better)
 
 **Speed:**
-- **SeasonalES**: Fastest at 1.1s, but lowest accuracy (MASE 1.355)
-- **SeasonalESOptimized**: Good balance at 8.0s (MASE 1.203)
-- **HoltWinters**: 117s for near-optimal accuracy (MASE 1.152)
-- **AutoETS**: 466s (~8 min) for automatic selection and best accuracy
+- **Fastest**: Anofox SeasonalES at 1.1s (MASE 1.355)
+- **Fast Optimized**: Anofox SeasonalESOptimized at 8.0s (MASE 1.203)
+- **Fast Accurate**: Anofox HoltWinters at 117s (MASE 1.152)
+- **Batch Statsforecast**: All 7 models in 1,687s (~28 min)
+- **Best Complex**: Anofox AutoETS at 466s (~8 min, MASE 1.148)
+
+**Implementation Comparison:**
+- **Anofox AutoETS > Statsforecast AutoETS**: 1.148 vs 1.227 (6.4% more accurate)
+- **Statsforecast Holt**: Best single model (1.132), but requires knowing to use Holt
+- **Anofox faster per model**: 117-466s vs ~241s, but fewer models tested
+- **Statsforecast seasonal models struggle**: SeasonalES (1.608), SeasESOpt (1.457)
 
 **Practical Recommendations:**
-- **Production Default**: AutoETS for best accuracy with automatic model selection (8 min)
-- **Fast & Accurate**: HoltWinters when you can't afford 8 minutes (117s, MASE 1.152)
-- **Quick Baseline**: SeasonalESOptimized for rapid prototyping (8s, MASE 1.203)
-- **Fastest**: SeasonalES when speed matters most (1s, MASE 1.355)
+- **Best Accuracy**: Statsforecast Holt if you know to use it (MASE 1.132)
+- **Best Automatic**: Anofox AutoETS for automatic selection (MASE 1.148, 8 min)
+- **Fast & Accurate**: Anofox HoltWinters (117s, MASE 1.152)
+- **Quick Prototyping**: Anofox SeasonalESOptimized (8s, MASE 1.203)
+- **Ultra-Fast**: Anofox SeasonalES (1s, MASE 1.355)
 
 **Comparison with Other Methods:**
-- AutoETS (1.148) ties with RandomWalkWithDrift (1.147) as overall best
-- AutoETS beats OptimizedTheta (1.149), AutoARIMA (1.212)
-- HoltWinters (1.152) competitive with best Theta variants
+- **Statsforecast Holt** (1.132): New overall best, beats RandomWalkWithDrift (1.147)!
+- **Anofox AutoETS** (1.148): Tied for 2nd best overall
+- Both beat OptimizedTheta (1.149), Statsforecast AutoARIMA (1.150)
 
 ## Implementation Details
 
@@ -183,30 +201,75 @@ SELECT * FROM TS_FORECAST_BY(
 - Known good parameters from prior tuning
 - Speed more important than accuracy
 
+### Statsforecast ETS Models
+
+**Implementation:**
+Industry-standard ETS models from Nixtla's Statsforecast library with parallel processing.
+
+**Python Example:**
+```python
+from statsforecast import StatsForecast
+from statsforecast.models import (
+    SimpleExponentialSmoothing,
+    SimpleExponentialSmoothingOptimized,
+    SeasonalExponentialSmoothing,
+    SeasonalExponentialSmoothingOptimized,
+    Holt,
+    HoltWinters,
+    AutoETS,
+)
+
+models = [
+    SimpleExponentialSmoothing(alpha=0.5),
+    SimpleExponentialSmoothingOptimized(),
+    SeasonalExponentialSmoothing(season_length=7, alpha=0.5),
+    SeasonalExponentialSmoothingOptimized(season_length=7),
+    Holt(),
+    HoltWinters(season_length=7),
+    AutoETS(season_length=7),
+]
+
+sf = StatsForecast(models=models, freq='D', n_jobs=-1)
+forecasts = sf.forecast(df=train_df, h=14)
+```
+
+**Performance:**
+- **Holt**: 1.132 MASE - **Best ETS model overall!**
+- **HoltWinters**: 1.148 MASE (tied with Anofox AutoETS)
+- **AutoETS**: 1.227 MASE (worse than Anofox AutoETS)
+- **Total time**: 1,687s (~28 min) for all 7 models
+- **Multi-core**: Parallel processing across CPU cores
+
+**Key Differences from Anofox:**
+- **Holt model**: Statsforecast Holt (1.132) outperforms all Anofox models
+- **AutoETS**: Anofox AutoETS (1.148) beats Statsforecast AutoETS (1.227) by 6.4%
+- **Seasonal models**: Statsforecast seasonal models struggle (1.457-1.608 MASE)
+- **Overall average**: Anofox wins (1.214 vs 1.280)
+
+**When to Use Statsforecast:**
+- Need absolute best ETS accuracy (use Holt model specifically)
+- Working in Python ecosystem
+- Want to test multiple ETS variants in batch
+- Can afford 28 minutes for comprehensive testing
+
+**When to Use Anofox:**
+- Need automatic model selection (AutoETS 6.4% better)
+- Want faster execution (117s vs ~241s per model)
+- SQL-native workflow
+- Speed is important (8s optimized models)
+
 ### ETS Model Selection Guide
 
 | Scenario | Recommended Model | Reason |
 |----------|-------------------|--------|
-| Best accuracy, automatic | AutoETS | Optimal selection, MASE 1.148 |
-| Fast & accurate | HoltWinters | 117s, MASE 1.152 |
-| Quick prototyping | SeasonalESOptimized | 8s, MASE 1.203 |
-| Ultra-fast, known params | SeasonalES | 1s, manual tuning |
-| Unknown seasonality | AutoETS | Auto-detection |
-| Strong trend + seasonality | HoltWinters | Triple smoothing |
-| Seasonality, no trend | SeasonalESOptimized | Simpler, faster |
-
-### Statsforecast Comparison
-
-**Status**: Not yet benchmarked
-
-Future work will compare Anofox ETS with Statsforecast implementations:
-- StatsForecast AutoETS
-- Statsforecast ETS variants
-
-Based on baseline and theta benchmarks, we expect:
-- Similar accuracy (±1-2%)
-- Statsforecast possibly faster due to optimizations
-- Anofox advantage: SQL-native, zero-copy
+| Best accuracy | Statsforecast Holt | MASE 1.132, if you know to use it |
+| Best automatic | Anofox AutoETS | MASE 1.148, auto-selects best config |
+| Fast & accurate | Anofox HoltWinters | 117s, MASE 1.152 |
+| Quick prototyping | Anofox SeasonalESOptimized | 8s, MASE 1.203 |
+| Ultra-fast | Anofox SeasonalES | 1s, manual tuning |
+| Unknown seasonality | Anofox AutoETS | Auto-detection |
+| Strong trend + seasonality | Anofox HoltWinters | Triple smoothing |
+| Python batch testing | Statsforecast | Test 7 models in 28 min |
 
 ## Evaluation Metrics
 

@@ -22,10 +22,17 @@ All models benchmarked on M4 Daily dataset, grouped by method family and separat
 | | Statsforecast | WindowAverage | 1.380 | 214.88 | 243.65 | 0.38 |
 | | Anofox | SeasonalWindowAverage | 1.961 | 300.48 | 326.69 | 0.21 |
 | | Statsforecast | SeasonalWindowAverage | 2.209 | 334.23 | 359.39 | 0.38 |
-| **ETS** | Anofox | AutoETS | **1.148** | 175.79 | 207.48 | 466 |
-| | Anofox | HoltWinters | **1.152** | 175.92 | 207.42 | 117 |
+| **ETS** | Statsforecast | Holt | **1.132** | 172.86 | 204.44 | ~241 |
+| | Anofox | AutoETS | **1.148** | 175.79 | 207.48 | 466 |
+| | Statsforecast | HoltWinters | **1.148** | 177.14 | 208.90 | ~241 |
+| | Anofox | HoltWinters | 1.152 | 175.92 | 207.42 | 117 |
+| | Statsforecast | SESOpt | 1.154 | 178.32 | 209.79 | ~241 |
 | | Anofox | SeasonalESOptimized | 1.203 | 186.67 | 218.23 | 8.0 |
+| | Statsforecast | AutoETS | 1.227 | 188.14 | 227.63 | ~241 |
+| | Statsforecast | SES | 1.231 | 191.79 | 222.13 | ~241 |
 | | Anofox | SeasonalES | 1.355 | 210.88 | 240.48 | 1.1 |
+| | Statsforecast | SeasESOpt | 1.457 | 226.82 | 261.36 | ~241 |
+| | Statsforecast | SeasonalES | 1.608 | 249.17 | 278.42 | ~241 |
 | **Theta** | Anofox | OptimizedTheta | **1.149** | 178.08 | 209.53 | 1,033 |
 | | Statsforecast | AutoTheta | **1.149** | 178.15 | 209.60 | 693 |
 | | Statsforecast | OptimizedTheta | 1.151 | 178.44 | 209.91 | 693 |
@@ -44,12 +51,14 @@ All models benchmarked on M4 Daily dataset, grouped by method family and separat
 ### Key Findings
 
 **Top Performers (MASE ≤ 1.15):**
-1. **RandomWalkWithDrift** (1.147) - Best overall, extremely fast (0.17s)
-2. **AutoETS** (1.148) - Best complex model with automatic selection
-3. **OptimizedTheta** (1.149) - Both Anofox and Statsforecast variants excel
-4. **AutoTheta** (1.149) - Statsforecast automatic Theta selection
-5. **Statsforecast AutoARIMA** (1.150) - Best ARIMA accuracy, competitive with top methods
-6. **HoltWinters** (1.152) - Fast ETS variant (117s)
+1. **Statsforecast Holt** (1.132) - **NEW overall best!** Beats all methods
+2. **RandomWalkWithDrift** (1.147) - Previous best, extremely fast (0.17s)
+3. **Anofox AutoETS** (1.148) - Best complex automatic selection
+4. **Statsforecast HoltWinters** (1.148) - Tied with Anofox AutoETS
+5. **OptimizedTheta** (1.149) - Both Anofox and Statsforecast variants excel
+6. **AutoTheta** (1.149) - Statsforecast automatic Theta selection
+7. **Statsforecast AutoARIMA** (1.150) - Best ARIMA accuracy
+8. **Anofox HoltWinters** (1.152) - Fast & accurate ETS (117s)
 
 **Speed Champions:**
 - **Fastest Overall**: SMA (0.16s, MASE 1.343)
@@ -59,6 +68,10 @@ All models benchmarked on M4 Daily dataset, grouped by method family and separat
 
 **Implementation Comparison:**
 - **Baseline Models**: Anofox and Statsforecast produce identical accuracy
+- **ETS Methods**: Mixed results - Statsforecast Holt best overall (1.132), but Anofox AutoETS (1.148) beats Statsforecast AutoETS (1.227) by 6.4%
+  - Statsforecast Holt: Best single model if you know to use it
+  - Anofox AutoETS: Best automatic selection, faster per model
+  - Anofox wins overall average: 1.214 vs 1.280
 - **Theta Methods**: Statsforecast runs ~1.5x faster (693s vs 900-1000s), similar accuracy
 - **ARIMA**: Statsforecast more accurate (1.150 vs 1.212), but Anofox **562x faster** (5.2s vs 2,923s)
   - Anofox: Best for speed-critical applications
@@ -67,11 +80,11 @@ All models benchmarked on M4 Daily dataset, grouped by method family and separat
   - Note: This gap requires investigation; likely due to implementation differences
 
 **Practical Recommendations:**
-- **Production Default**: RandomWalkWithDrift - Best accuracy + fastest speed (0.17s)
-- **Best Automatic Complex**: AutoETS - Excellent accuracy with automatic selection (8 min)
+- **Best Overall Accuracy**: Statsforecast Holt if you know to use it (MASE 1.132)
+- **Production Default**: RandomWalkWithDrift - Previous best + fastest speed (0.17s, MASE 1.147)
+- **Best Automatic Complex**: Anofox AutoETS - Excellent accuracy with automatic selection (8 min, MASE 1.148)
 - **Fastest Automatic**: Anofox AutoARIMA - Good accuracy in seconds (5.2s, MASE 1.212)
-- **Best ARIMA Accuracy**: Statsforecast AutoARIMA when you can afford 49 minutes (MASE 1.150)
-- **Best Accuracy**: OptimizedTheta when you can afford 15-17 minutes (MASE 1.149)
+- **Fast & Accurate**: Anofox HoltWinters (117s, MASE 1.152)
 - **Balanced Choice**: Anofox Theta for near-optimal accuracy in 20s (MASE 1.226)
 
 ### AutoMFLES Performance
@@ -94,10 +107,12 @@ AutoMFLES successfully implements automatic hyperparameter optimization:
 
 ### ETS Benchmark
 - **Location**: `ets_benchmark/`
-- **Models**: 4 exponential smoothing variants
-  - AutoETS, HoltWinters, SeasonalESOptimized, SeasonalES
-- **Implementations**: Anofox (Statsforecast comparison pending)
-- **Status**: ✅ Complete - AutoETS achieves best complex model accuracy (MASE 1.148)
+- **Models**: 11 exponential smoothing variants
+  - **Anofox**: AutoETS, HoltWinters, SeasonalESOptimized, SeasonalES
+  - **Statsforecast**: Holt, HoltWinters, SESOpt, AutoETS, SES, SeasESOpt, SeasonalES
+- **Implementations**: Both Anofox and Statsforecast
+- **Status**: ✅ Complete - **Statsforecast Holt achieves NEW overall best (MASE 1.132)**!
+- **Key Finding**: Anofox AutoETS (1.148) beats Statsforecast AutoETS (1.227) by 6.4%
 - **See**: [ets_benchmark/README.md](ets_benchmark/README.md)
 
 ### Theta Benchmark
