@@ -55,9 +55,7 @@ add_library(anofox-time
     src/models/seasonal_es_optimized.cpp
     src/models/holt_winters.cpp
     src/models/mfles.cpp
-    src/models/mfles_v2.cpp
     src/models/auto_mfles.cpp
-    src/models/auto_mfles_v2.cpp
     src/models/mstl_forecaster.cpp
     src/models/auto_mstl.cpp
     src/models/tbats.cpp
