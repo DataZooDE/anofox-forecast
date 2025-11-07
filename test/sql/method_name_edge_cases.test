@@ -1,0 +1,119 @@
+# name: test/sql/method_name_edge_cases.test
+# description: Test edge cases for method_name parameter
+# group: [core]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+# Create test data
+statement ok
+CREATE TABLE test_data AS
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    (100.0 + i)::DOUBLE AS value
+FROM generate_series(1, 30) t(i);
+
+# Test 1: Empty string method_name should fail
+statement error
+SELECT * FROM ts_forecast(test_data, date_col, value, 'Naive', 5, {'method_name': ''});
+----
+method_name parameter cannot be empty
+
+# Test 2: Method name with spaces
+query I
+SELECT method_name = 'My Custom Naive'
+FROM ts_forecast(test_data, date_col, value, 'Naive', 5, {'method_name': 'My Custom Naive'})
+LIMIT 1;
+----
+true
+
+# Test 3: Method name with special characters
+query I
+SELECT method_name = 'Naive-v2.0_test'
+FROM ts_forecast(test_data, date_col, value, 'Naive', 5, {'method_name': 'Naive-v2.0_test'})
+LIMIT 1;
+----
+true
+
+# Test 4: Method name with numbers
+query I
+SELECT method_name = 'Model123'
+FROM ts_forecast(test_data, date_col, value, 'Naive', 5, {'method_name': 'Model123'})
+LIMIT 1;
+----
+true
+
+# Test 5: Long method name
+query I
+SELECT method_name = 'ThisIsAVeryLongMethodNameThatShouldStillWorkCorrectlyWithoutAnyIssues'
+FROM ts_forecast(test_data, date_col, value, 'Naive', 5, {'method_name': 'ThisIsAVeryLongMethodNameThatShouldStillWorkCorrectlyWithoutAnyIssues'})
+LIMIT 1;
+----
+true
+
+# Test 6: Method name with unicode characters
+query I
+SELECT method_name = 'Naïve_Método_模型'
+FROM ts_forecast(test_data, date_col, value, 'Naive', 5, {'method_name': 'Naïve_Método_模型'})
+LIMIT 1;
+----
+true
+
+# Test 7: Method name that matches existing model name
+query I
+SELECT method_name = 'AutoETS'
+FROM ts_forecast(test_data, date_col, value, 'Naive', 5, {'method_name': 'AutoETS'})
+LIMIT 1;
+----
+true
+
+# Test 8: Verify that custom name doesn't affect forecast accuracy
+statement ok
+CREATE TABLE accuracy_test AS
+WITH default_name AS (
+    SELECT 'default' as test_type, point_forecast
+    FROM ts_forecast(test_data, date_col, value, 'Naive', 5, NULL)
+),
+custom_name AS (
+    SELECT 'custom' as test_type, point_forecast
+    FROM ts_forecast(test_data, date_col, value, 'Naive', 5, {'method_name': 'CustomNaive'})
+)
+SELECT * FROM default_name
+UNION ALL
+SELECT * FROM custom_name;
+
+# Both should produce identical forecasts
+query I
+SELECT COUNT(DISTINCT point_forecast) = 1
+FROM (
+    SELECT point_forecast, ROW_NUMBER() OVER (PARTITION BY test_type ORDER BY point_forecast) as rn
+    FROM accuracy_test
+) grouped
+WHERE rn = 1;
+----
+true
+
+# Test 9: Method name preserves through aggregation
+query I
+SELECT method_name = 'AggregatedNaive'
+FROM (
+    SELECT TS_FORECAST_AGG(date_col, value, 'Naive', 5, {'method_name': 'AggregatedNaive'}) AS result
+    FROM test_data
+) agg
+CROSS JOIN UNNEST(result.forecast_dates, result.point_forecasts) AS t(forecast_date, point_forecast);
+----
+true
+true
+true
+true
+true
+
+# Cleanup
+statement ok
+DROP TABLE test_data;
+
+statement ok
+DROP TABLE accuracy_test;
+

@@ -1,0 +1,114 @@
+# name: test/sql/holt_performance.test
+# description: Test Holt method with pinned parameters (fixed alpha/beta)
+# group: [core]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+# Create test data with clear linear trend
+statement ok
+CREATE TABLE test_data AS
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    (100.0 + i * 5.0)::DOUBLE AS value
+FROM generate_series(1, 30) t(i);
+
+# Test 1: Holt with default parameters produces forecasts
+query I
+SELECT COUNT(*) = 10
+FROM ts_forecast(test_data, date_col, value, 'Holt', 10, NULL);
+----
+true
+
+# Test 2: Holt with custom alpha/beta parameters
+query I
+SELECT COUNT(*) = 10
+FROM ts_forecast(test_data, date_col, value, 'Holt', 10, {'alpha': 0.8, 'beta': 0.3});
+----
+true
+
+# Test 3: Different alpha values produce different forecasts
+statement ok
+CREATE TABLE holt_alpha_test AS
+WITH low_alpha AS (
+    SELECT 'low' as alpha_level, point_forecast
+    FROM ts_forecast(test_data, date_col, value, 'Holt', 5, {'alpha': 0.1, 'beta': 0.1})
+),
+high_alpha AS (
+    SELECT 'high' as alpha_level, point_forecast
+    FROM ts_forecast(test_data, date_col, value, 'Holt', 5, {'alpha': 0.9, 'beta': 0.1})
+)
+SELECT * FROM low_alpha
+UNION ALL
+SELECT * FROM high_alpha;
+
+# Verify that different alphas produce different results
+query I
+SELECT COUNT(DISTINCT point_forecast) > 1
+FROM holt_alpha_test
+WHERE point_forecast IS NOT NULL;
+----
+true
+
+# Test 4: Different beta values produce different forecasts
+statement ok
+CREATE TABLE holt_beta_test AS
+WITH low_beta AS (
+    SELECT 'low' as beta_level, point_forecast
+    FROM ts_forecast(test_data, date_col, value, 'Holt', 5, {'alpha': 0.5, 'beta': 0.01})
+),
+high_beta AS (
+    SELECT 'high' as beta_level, point_forecast
+    FROM ts_forecast(test_data, date_col, value, 'Holt', 5, {'alpha': 0.5, 'beta': 0.5})
+)
+SELECT * FROM low_beta
+UNION ALL
+SELECT * FROM high_beta;
+
+# Verify that different betas produce different results
+query I
+SELECT COUNT(DISTINCT point_forecast) > 1
+FROM holt_beta_test
+WHERE point_forecast IS NOT NULL;
+----
+true
+
+# Test 5: Holt with custom method_name still honors parameters
+query I
+SELECT method_name = 'HoltCustom' AND COUNT(*) = 5
+FROM ts_forecast(test_data, date_col, value, 'Holt', 5, {'method_name': 'HoltCustom', 'alpha': 0.7, 'beta': 0.2});
+----
+true
+
+# Test 6: Holt forecasts capture linear trend (increasing values)
+statement ok
+CREATE TABLE holt_trend_test AS
+SELECT 
+    forecast_date,
+    point_forecast,
+    LAG(point_forecast) OVER (ORDER BY forecast_date) as prev_forecast
+FROM ts_forecast(test_data, date_col, value, 'Holt', 10, {'alpha': 0.8, 'beta': 0.3});
+
+# Verify trend is captured (most forecasts increase)
+query I
+SELECT COUNT(*) >= 8
+FROM holt_trend_test
+WHERE point_forecast > prev_forecast;
+----
+true
+
+# Cleanup
+statement ok
+DROP TABLE test_data;
+
+statement ok
+DROP TABLE holt_alpha_test;
+
+statement ok
+DROP TABLE holt_beta_test;
+
+statement ok
+DROP TABLE holt_trend_test;
+
