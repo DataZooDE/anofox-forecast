@@ -27,7 +27,7 @@ All models benchmarked on M4 Daily dataset, grouped by method family and separat
 | | Statsforecast | Holt | **1.132** | 172.86 | 204.44 | ~241 |
 | | Anofox | HoltWinters | 1.152 | 175.92 | 207.42 | 117 |
 | | Statsforecast | HoltWinters | **1.148** | 177.14 | 208.90 | ~241 |
-| | Statsforecast | SeasESOpt | 1.457 | 226.82 | 261.36 | ~241 |
+| | Statsforecast | SeasonalESOptimized | 1.457 | 226.82 | 261.36 | ~241 |
 | | Anofox | SeasonalES | 1.355 | 210.88 | 240.48 | 1.1 |
 | | Statsforecast | SeasonalES | 1.608 | 249.17 | 278.42 | ~241 |
 | | Anofox | SeasonalESOptimized | 1.203 | 186.67 | 218.23 | 8.0 |
@@ -73,7 +73,7 @@ All benchmarks measure:
 - **MASE** (Mean Absolute Scaled Error) - Primary metric, scale-independent
 - **MAE** (Mean Absolute Error) - Absolute forecast error in original units
 - **RMSE** (Root Mean Squared Error) - Penalizes large errors
-- **Time** - Total execution time in seconds
+- **Time** - Execution time in seconds per model (each model is timed individually for fair comparison)
 
 ### Running Benchmarks
 

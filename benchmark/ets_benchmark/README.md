@@ -17,10 +17,10 @@ Comprehensive benchmark of Error-Trend-Seasonal exponential smoothing models fro
 | Statsforecast | AutoETS | 1.227 | 188.14 | 227.63 | ~241 | Automatic selection |
 | Statsforecast | SES | 1.231 | 191.79 | 222.13 | ~241 | Simple exponential |
 | Anofox | SeasonalES | 1.355 | 210.88 | 240.48 | 1.1 | Fastest |
-| Statsforecast | SeasESOpt | 1.457 | 226.82 | 261.36 | ~241 | Seasonal optimized |
+| Statsforecast | SeasonalESOptimized | 1.457 | 226.82 | 261.36 | ~241 | Seasonal optimized |
 | Statsforecast | SeasonalES | 1.608 | 249.17 | 278.42 | ~241 | Basic seasonal |
 
-**Note**: Statsforecast time is ~241s per model (1,687s total / 7 models)
+**Note**: Statsforecast timing has been updated to measure each model individually (previously averaged across all models)
 
 ### Key Findings
 
@@ -42,7 +42,7 @@ Comprehensive benchmark of Error-Trend-Seasonal exponential smoothing models fro
 - **Anofox AutoETS > Statsforecast AutoETS**: 1.148 vs 1.227 (6.4% more accurate)
 - **Statsforecast Holt**: Best single model (1.132), but requires knowing to use Holt
 - **Anofox faster per model**: 117-466s vs ~241s, but fewer models tested
-- **Statsforecast seasonal models struggle**: SeasonalES (1.608), SeasESOpt (1.457)
+- **Statsforecast seasonal models struggle**: SeasonalES (1.608), SeasonalESOptimized (1.457)
 
 **Practical Recommendations:**
 - **Best Accuracy**: Statsforecast Holt if you know to use it (MASE 1.132)
@@ -277,6 +277,6 @@ All benchmarks measure:
 - **MASE** (Mean Absolute Scaled Error) - Primary metric, scale-independent
 - **MAE** (Mean Absolute Error) - Absolute forecast error
 - **RMSE** (Root Mean Squared Error) - Penalizes large errors
-- **Time** - Total execution time in seconds
+- **Time** - Execution time in seconds per model (each model is timed individually for fair comparison)
 
 MASE < 1.0 means the model beats a naive seasonal baseline.

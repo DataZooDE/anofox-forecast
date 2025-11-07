@@ -44,7 +44,8 @@ def get_models_config(seasonality: int, horizon: int):
         },
         {
             'model_factory': SeasonalExponentialSmoothingOptimized,
-            'params': {'season_length': seasonality}
+            'params': {'season_length': seasonality},
+            'display_name': 'SeasonalESOptimized'  # Align with Anofox naming
         },
         {
             'model_factory': Holt,
