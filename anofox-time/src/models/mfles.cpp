@@ -110,20 +110,46 @@ void MFLES::fit(const core::TimeSeries& ts) {
 			}
 		}
 
-		// Component 2: Trend (OLS, Siegel, or Piecewise)
+		// Component 2: Trend (progressive complexity if enabled)
 		if (params_.lr_trend > 0.0) {
 			std::vector<double> trend_fit;
 
-			switch (params_.trend_method) {
-				case TrendMethod::OLS:
+			if (params_.progressive_trend) {
+				// StatsForecast progressive trend: median → linear → smoother
+				if (iter == 0) {
+					// Round 0: Use median as trend baseline
+					double median_val = computeMedian(residuals);
+					trend_fit = std::vector<double>(n, median_val);
+				} else if (iter <= 3) {
+					// Rounds 1-3: Linear trend
 					trend_fit = fitLinearTrend(residuals);
-					break;
-				case TrendMethod::SIEGEL_ROBUST:
-					trend_fit = fitSiegelTrend(residuals);
-					break;
-				case TrendMethod::PIECEWISE:
-					trend_fit = fitPiecewiseTrend(residuals);
-					break;
+				} else {
+					// Rounds 4+: Use smoother (respects trend_method if set)
+					switch (params_.trend_method) {
+						case TrendMethod::OLS:
+							trend_fit = fitLinearTrend(residuals);
+							break;
+						case TrendMethod::SIEGEL_ROBUST:
+							trend_fit = fitSiegelTrend(residuals);
+							break;
+						case TrendMethod::PIECEWISE:
+							trend_fit = fitPiecewiseTrend(residuals);
+							break;
+					}
+				}
+			} else {
+				// Original behavior: fixed trend method
+				switch (params_.trend_method) {
+					case TrendMethod::OLS:
+						trend_fit = fitLinearTrend(residuals);
+						break;
+					case TrendMethod::SIEGEL_ROBUST:
+						trend_fit = fitSiegelTrend(residuals);
+						break;
+					case TrendMethod::PIECEWISE:
+						trend_fit = fitPiecewiseTrend(residuals);
+						break;
+				}
 			}
 
 			// Accumulate last 2 fitted trend values (for projecting trend in forecast)
@@ -149,13 +175,18 @@ void MFLES::fit(const core::TimeSeries& ts) {
 			}
 		}
 
-		// Component 3: Fourier seasonality (multiple periods, optionally weighted)
-		if (params_.lr_season > 0.0) {
-			for (int period : params_.seasonal_periods) {
+		// Component 3: Fourier seasonality (sequential if enabled)
+		if (params_.lr_season > 0.0 && !params_.seasonal_periods.empty()) {
+			if (params_.sequential_seasonality) {
+				// StatsForecast approach: one seasonality per round
+				// Round-robin through seasonal periods
+				int season_idx = iter % params_.seasonal_periods.size();
+				int period = params_.seasonal_periods[season_idx];
+				
 				if (n >= 2 * period) {  // Need at least 2 cycles
 					auto seasonal_fit = fitFourierSeason(residuals, period, params_.seasonality_weights);
-
-					// Accumulate Fourier coefficients
+					
+					// Accumulate Fourier coefficients for this period
 					if (accumulated_fourier.find(period) == accumulated_fourier.end()) {
 						accumulated_fourier[period] = fourier_coeffs_[period];
 						// Scale by learning rate
@@ -168,11 +199,38 @@ void MFLES::fit(const core::TimeSeries& ts) {
 							accumulated_fourier[period].cos_coeffs[k] += params_.lr_season * fourier_coeffs_[period].cos_coeffs[k];
 						}
 					}
-
+					
 					// Update components and residuals
 					for (int i = 0; i < n; ++i) {
 						seasonal_components_[period][i] += params_.lr_season * seasonal_fit[i];
 						residuals[i] -= params_.lr_season * seasonal_fit[i];
+					}
+				}
+			} else {
+				// Original behavior: fit all seasonalities simultaneously
+				for (int period : params_.seasonal_periods) {
+					if (n >= 2 * period) {  // Need at least 2 cycles
+						auto seasonal_fit = fitFourierSeason(residuals, period, params_.seasonality_weights);
+
+						// Accumulate Fourier coefficients
+						if (accumulated_fourier.find(period) == accumulated_fourier.end()) {
+							accumulated_fourier[period] = fourier_coeffs_[period];
+							// Scale by learning rate
+							for (auto& c : accumulated_fourier[period].sin_coeffs) c *= params_.lr_season;
+							for (auto& c : accumulated_fourier[period].cos_coeffs) c *= params_.lr_season;
+						} else {
+							// Add current coefficients (scaled by LR)
+							for (size_t k = 0; k < fourier_coeffs_[period].sin_coeffs.size(); ++k) {
+								accumulated_fourier[period].sin_coeffs[k] += params_.lr_season * fourier_coeffs_[period].sin_coeffs[k];
+								accumulated_fourier[period].cos_coeffs[k] += params_.lr_season * fourier_coeffs_[period].cos_coeffs[k];
+							}
+						}
+
+						// Update components and residuals
+						for (int i = 0; i < n; ++i) {
+							seasonal_components_[period][i] += params_.lr_season * seasonal_fit[i];
+							residuals[i] -= params_.lr_season * seasonal_fit[i];
+						}
 					}
 				}
 			}
@@ -374,6 +432,23 @@ double MFLES::computeCoV(const std::vector<double>& data) const {
 	}
 
 	return std / std::abs(mean);
+}
+
+double MFLES::computeMedian(const std::vector<double>& data) const {
+	// Compute median value
+	if (data.empty()) {
+		return 0.0;
+	}
+	
+	std::vector<double> sorted = data;
+	std::sort(sorted.begin(), sorted.end());
+	
+	size_t n = sorted.size();
+	if (n % 2 == 0) {
+		return (sorted[n/2-1] + sorted[n/2]) / 2.0;
+	} else {
+		return sorted[n/2];
+	}
 }
 
 // ============================================================================

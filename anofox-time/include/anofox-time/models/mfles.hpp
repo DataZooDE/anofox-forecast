@@ -76,10 +76,12 @@ public:
 		double n_changepoints_pct = 0.25; // 25% of series length
 		double lasso_alpha = 1.0;         // LASSO L1 penalty
 		double decay = -1.0;              // Adaptive decay (-1 = auto)
+		bool progressive_trend = true;    // Enable StatsForecast-style progressive trend (median→linear→smoother)
 
 		// Seasonality configuration
 		int fourier_order = -1;           // -1 = adaptive (5/10/15 based on period)
 		bool seasonality_weights = false; // Time-varying seasonal importance
+		bool sequential_seasonality = true; // One seasonality per round (StatsForecast), false = all simultaneously
 
 		// Residual smoothing configuration
 		bool smoother = false;            // false = ES ensemble, true = MA
@@ -241,6 +243,7 @@ private:
 	void postprocess(std::vector<double>& forecasts) const;
 	bool shouldUseMultiplicative(const std::vector<double>& data) const;
 	double computeCoV(const std::vector<double>& data) const;
+	double computeMedian(const std::vector<double>& data) const;
 
 	// Component fitting methods
 	std::vector<double> fitMedianComponent(const std::vector<double>& data);  // Phase 8 Fix #1: Returns vector instead of scalar
