@@ -1,0 +1,104 @@
+# name: test/sql/core/test_autoarima_constant_fallback.test
+# description: Test AutoARIMA with constant data (fallback to ARIMA(1,0,0))
+# group: [core]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+# Test 1: Constant data with INTEGER date column
+statement ok
+CREATE TABLE test_constant_integer AS
+SELECT i AS date_col, 100.0::DOUBLE AS value
+FROM generate_series(1, 100) t(i);
+
+query I
+SELECT len(result.point_forecast) = 5
+FROM (
+    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, NULL) AS result
+    FROM test_constant_integer
+) subq;
+----
+true
+
+# Verify forecast values are close to constant
+query I
+SELECT 
+    CASE 
+        WHEN ABS(result.point_forecast[1] - 100.0) < 1.0 AND
+             ABS(result.point_forecast[5] - 100.0) < 1.0
+        THEN true
+        ELSE false
+    END
+FROM (
+    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, NULL) AS result
+    FROM test_constant_integer
+) subq;
+----
+true
+
+# Test 2: Constant data with DATE column
+statement ok
+CREATE TABLE test_constant_date AS
+SELECT 
+    ('2024-01-01'::DATE + INTERVAL (i) DAY)::DATE AS date_col,
+    100.0::DOUBLE AS value
+FROM generate_series(1, 100) t(i);
+
+query I
+SELECT len(result.point_forecast) = 5
+FROM (
+    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, NULL) AS result
+    FROM test_constant_date
+) subq;
+----
+true
+
+# Test 3: Constant data with TIMESTAMP column  
+statement ok
+CREATE TABLE test_constant_timestamp AS
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    100.0::DOUBLE AS value
+FROM generate_series(1, 100) t(i);
+
+query I
+SELECT len(result.point_forecast) = 5
+FROM (
+    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, NULL) AS result
+    FROM test_constant_timestamp
+) subq;
+----
+true
+
+# Test 4: Near-constant data with tiny variations
+statement ok
+CREATE TABLE test_near_constant AS
+SELECT 
+    i AS date_col,
+    (100.0 + (i % 3 - 1) * 0.001)::DOUBLE AS value
+FROM generate_series(1, 100) t(i);
+
+query I
+SELECT len(result.point_forecast) = 5
+FROM (
+    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, NULL) AS result
+    FROM test_near_constant
+) subq;
+----
+true
+
+# Cleanup
+statement ok
+DROP TABLE test_constant_integer;
+
+statement ok
+DROP TABLE test_constant_date;
+
+statement ok
+DROP TABLE test_constant_timestamp;
+
+statement ok
+DROP TABLE test_near_constant;
+

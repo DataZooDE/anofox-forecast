@@ -1,0 +1,118 @@
+# name: test/sql/core/test_autoarima_linear_fallback.test
+# description: Test AutoARIMA with perfectly linear data (fallback to ARIMA(0,1,1) or ARIMA(1,1,0))
+# group: [core]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+# Test 1: Perfectly linear data with INTEGER date column
+statement ok
+CREATE TABLE test_linear_integer AS
+SELECT i AS date_col, (100.0 + i * 5.0)::DOUBLE AS value
+FROM generate_series(1, 100) t(i);
+
+query I
+SELECT len(result.point_forecast) = 5
+FROM (
+    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, NULL) AS result
+    FROM test_linear_integer
+) subq;
+----
+true
+
+# Verify forecast values are reasonable (finite, non-zero)
+query I
+SELECT result.point_forecast[1] > 0.0 AND result.point_forecast[1] < 1000.0
+FROM (
+    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, NULL) AS result
+    FROM test_linear_integer
+) subq;
+----
+true
+
+# Test 2: Linear data with DATE column
+statement ok
+CREATE TABLE test_linear_date AS
+SELECT 
+    ('2024-01-01'::DATE + INTERVAL (i) DAY)::DATE AS date_col,
+    (100.0 + i * 3.0)::DOUBLE AS value
+FROM generate_series(1, 100) t(i);
+
+query I
+SELECT len(result.point_forecast) = 10
+FROM (
+    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 10, NULL) AS result
+    FROM test_linear_date
+) subq;
+----
+true
+
+# Verify forecast values are reasonable
+query I
+SELECT result.point_forecast[1] > 0.0 AND len(result.point_forecast) = 10
+FROM (
+    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 10, NULL) AS result
+    FROM test_linear_date
+) subq;
+----
+true
+
+# Test 3: Linear data with TIMESTAMP column
+statement ok
+CREATE TABLE test_linear_timestamp AS
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    (100.0 + i * 2.0)::DOUBLE AS value
+FROM generate_series(1, 100) t(i);
+
+query I
+SELECT len(result.point_forecast) = 5
+FROM (
+    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, NULL) AS result
+    FROM test_linear_timestamp
+) subq;
+----
+true
+
+# Test 4: Negative slope linear data
+statement ok
+CREATE TABLE test_linear_negative AS
+SELECT 
+    i AS date_col,
+    (500.0 - i * 2.0)::DOUBLE AS value
+FROM generate_series(1, 100) t(i);
+
+query I
+SELECT len(result.point_forecast) = 5
+FROM (
+    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, NULL) AS result
+    FROM test_linear_negative
+) subq;
+----
+true
+
+# Verify forecast values are reasonable (positive, since data ranges from 500 down to 300)
+query I
+SELECT result.point_forecast[1] > 0.0 AND result.point_forecast[1] < 500.0
+FROM (
+    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, NULL) AS result
+    FROM test_linear_negative
+) subq;
+----
+true
+
+# Cleanup
+statement ok
+DROP TABLE test_linear_integer;
+
+statement ok
+DROP TABLE test_linear_date;
+
+statement ok
+DROP TABLE test_linear_timestamp;
+
+statement ok
+DROP TABLE test_linear_negative;
+

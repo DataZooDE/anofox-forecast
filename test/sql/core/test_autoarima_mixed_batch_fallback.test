@@ -1,0 +1,128 @@
+# name: test/sql/core/test_autoarima_mixed_batch_fallback.test
+# description: Test AutoARIMA with mixed batch containing constant, linear, and normal series (production scenario)
+# group: [core]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+# Create mixed dataset with constant, linear, and normal (with variance) series
+statement ok
+CREATE TABLE mixed_series AS
+SELECT 'constant' AS series_id, i::DATE AS date_col, 100.0::DOUBLE AS value
+FROM generate_series(DATE '2023-01-01', DATE '2023-04-10', INTERVAL 1 DAY) t(i)
+UNION ALL
+SELECT 'linear' AS series_id, i::DATE AS date_col, (DATEDIFF('day', DATE '2023-01-01', i) * 5.0)::DOUBLE AS value
+FROM generate_series(DATE '2023-01-01', DATE '2023-04-10', INTERVAL 1 DAY) t(i)
+UNION ALL
+SELECT 'normal' AS series_id, i::DATE AS date_col, 
+       (100.0 + DATEDIFF('day', DATE '2023-01-01', i) * 2.0 + sin(DATEDIFF('day', DATE '2023-01-01', i) / 7.0) * 10.0)::DOUBLE AS value
+FROM generate_series(DATE '2023-01-01', DATE '2023-04-10', INTERVAL 1 DAY) t(i);
+
+# Test 1: All series should forecast successfully
+query I
+SELECT COUNT(DISTINCT series_id) = 3
+FROM ts_forecast_by(mixed_series, series_id, date_col, value, 'AutoARIMA', 14, NULL);
+----
+true
+
+# Test 2: Each series should have 14 forecast points
+query I
+SELECT COUNT(*) = 3 * 14
+FROM ts_forecast_by(mixed_series, series_id, date_col, value, 'AutoARIMA', 14, NULL);
+----
+true
+
+# Test 3: Constant series should forecast near 100.0
+query I
+SELECT ABS(point_forecast - 100.0) < 5.0
+FROM ts_forecast_by(mixed_series, series_id, date_col, value, 'AutoARIMA', 14, NULL)
+WHERE series_id = 'constant' AND forecast_step = 1;
+----
+true
+
+# Test 4: Linear series should show increasing trend
+query I
+SELECT MAX(point_forecast) > MIN(point_forecast) + 50.0
+FROM ts_forecast_by(mixed_series, series_id, date_col, value, 'AutoARIMA', 14, NULL)
+WHERE series_id = 'linear';
+----
+true
+
+# Test 5: Normal series should forecast successfully
+query I
+SELECT COUNT(*) = 14
+FROM ts_forecast_by(mixed_series, series_id, date_col, value, 'AutoARIMA', 14, NULL)
+WHERE series_id = 'normal';
+----
+true
+
+# Test 6: Test with TS_FORECAST_AGG on grouped data
+statement ok
+CREATE TABLE batch_forecast_result AS
+SELECT 
+    series_id,
+    TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 10, NULL) AS result
+FROM mixed_series
+GROUP BY series_id;
+
+query I
+SELECT COUNT(*) = 3
+FROM batch_forecast_result
+WHERE len(result.point_forecast) = 10;
+----
+true
+
+# Test 7: Verify constant series forecast from aggregated result
+query I
+SELECT ABS(result.point_forecast[1] - 100.0) < 5.0 AND
+       ABS(result.point_forecast[10] - 100.0) < 5.0
+FROM batch_forecast_result
+WHERE series_id = 'constant';
+----
+true
+
+# Test 8: Mixed batch with INTEGER date columns
+statement ok
+CREATE TABLE mixed_series_integer AS
+SELECT 'const' AS series_id, i AS date_col, 50.0::DOUBLE AS value
+FROM generate_series(1, 100) t(i)
+UNION ALL
+SELECT 'linear' AS series_id, i AS date_col, (i * 3.0)::DOUBLE AS value
+FROM generate_series(1, 100) t(i)
+UNION ALL
+SELECT 'noisy' AS series_id, i AS date_col, 
+       (100.0 + i * 1.5 + (i % 7 - 3) * 5.0)::DOUBLE AS value
+FROM generate_series(1, 100) t(i);
+
+query I
+SELECT COUNT(DISTINCT series_id) = 3
+FROM ts_forecast_by(mixed_series_integer, series_id, date_col, value, 'AutoARIMA', 5, NULL);
+----
+true
+
+# Test 9: All integer-based series should have 5 forecasts
+query I
+SELECT COUNT(*) = 3 * 5
+FROM ts_forecast_by(mixed_series_integer, series_id, date_col, value, 'AutoARIMA', 5, NULL);
+----
+true
+
+# Test 10: Verify model names are returned correctly
+query I
+SELECT COUNT(DISTINCT model_name) >= 1
+FROM ts_forecast_by(mixed_series, series_id, date_col, value, 'AutoARIMA', 5, NULL);
+----
+true
+
+# Cleanup
+statement ok
+DROP TABLE mixed_series;
+
+statement ok
+DROP TABLE batch_forecast_result;
+
+statement ok
+DROP TABLE mixed_series_integer;
+
