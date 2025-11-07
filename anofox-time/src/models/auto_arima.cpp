@@ -496,6 +496,10 @@ int AutoARIMA::determineSeasonalDifferencing(const std::vector<double> &data,
 	if (seasonal_period <= 1 || !test_seasonal_) {
 		return 0;
 	}
+	// Need at least 3 complete seasonal cycles for robust seasonal modeling
+	if (data.size() < static_cast<std::size_t>(seasonal_period * 3)) {
+		return 0;
+	}
 	return nsdiffsSTL(data, seasonal_period, max_D);
 }
 
@@ -747,7 +751,21 @@ void AutoARIMA::fit(const core::TimeSeries &ts) {
 	}
 
 	if (!best_result.valid) {
-		throw std::runtime_error("AutoARIMA failed to fit any valid model.");
+		std::string error_msg = "AutoARIMA failed to fit any valid model.";
+
+		// Provide actionable feedback for common issues
+		if (seasonal_period_ > 1 && n < static_cast<std::size_t>(seasonal_period_ * 3)) {
+			error_msg += " Dataset may be too short for seasonal period " +
+			             std::to_string(seasonal_period_) +
+			             ". Recommendations: (1) use non-seasonal model (seasonal_period=0 or 1), " +
+			             "(2) reduce seasonal_period, or (3) provide more data (recommended: at least " +
+			             std::to_string(seasonal_period_ * 3) + " observations).";
+		} else if (n < 20) {
+			error_msg += " Dataset is very short (" + std::to_string(n) +
+			             " observations). Consider providing more data or using a simpler baseline model.";
+		}
+
+		throw std::runtime_error(error_msg);
 	}
 
 	// Step 4: Stepwise refinement (search neighbors iteratively)

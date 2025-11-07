@@ -1,0 +1,186 @@
+# name: test/sql/batch/test_autoarima_batch_bug.test
+# description: Test AutoARIMA batch processing bug - minimal reproduction
+# group: [batch]
+# This test documents the AutoARIMA batch processing bug where forecasts differ between batch and individual mode
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+# Phase 1.1: Minimal reproduction with 2 constant series
+# Expected: Both should forecast their constant values
+# Bug: Series may contaminate each other
+
+statement ok
+CREATE TABLE minimal_test AS
+SELECT 'Series1' AS id, i::DATE AS date, 100.0::DOUBLE AS value
+FROM generate_series(DATE '2023-01-01', DATE '2023-04-10', INTERVAL 1 DAY) t(i)
+UNION ALL
+SELECT 'Series2' AS id, i::DATE AS date, 200.0::DOUBLE AS value
+FROM generate_series(DATE '2023-01-01', DATE '2023-04-10', INTERVAL 1 DAY) t(i);
+
+# Test 1: Batch processing with AutoARIMA
+# Note: This test is expected to FAIL until the bug is fixed
+# Uncomment when ready to test AutoARIMA fix
+#statement ok
+#CREATE TABLE batch_autoarima AS
+#SELECT id, point_forecast
+#FROM TS_FORECAST_BY(minimal_test, id, date, value, 'AutoARIMA', 14, {'seasonal_period': 7})
+#ORDER BY id;
+
+# Test 2: Individual processing with AutoARIMA
+#statement ok
+#CREATE TABLE individual_autoarima AS
+#SELECT 'Series1' AS id, point_forecast
+#FROM ts_forecast(
+#    (SELECT date, value FROM minimal_test WHERE id = 'Series1'),
+#    date, value, 'AutoARIMA', 14, {'seasonal_period': 7}
+#)
+#UNION ALL
+#SELECT 'Series2' AS id, point_forecast
+#FROM ts_forecast(
+#    (SELECT date, value FROM minimal_test WHERE id = 'Series2'),
+#    date, value, 'AutoARIMA', 14, {'seasonal_period': 7}
+#);
+
+# Test 3: Verify consistency (when bug is fixed)
+# This should pass when the bug is fixed
+#query I
+#SELECT COUNT(*) = 0 AS all_match
+#FROM (
+#    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst, row_number() OVER (PARTITION BY b.id) AS rn
+#    FROM batch_autoarima b
+#    JOIN individual_autoarima i ON b.id = i.id
+#) subq
+#WHERE ABS(batch_fcst - ind_fcst) > 0.01;
+#----
+#true
+
+# Test 4: Verify no negative forecasts for positive-valued series
+#query I
+#SELECT COUNT(*) = 0 AS no_negative
+#FROM batch_autoarima
+#WHERE point_forecast < 0;
+#----
+#true
+
+# Test 5: Verify forecast ranges are reasonable (within 5x training range)
+#query I
+#SELECT COUNT(*) = 0 AS reasonable_range
+#FROM batch_autoarima b
+#WHERE b.point_forecast < 0 OR b.point_forecast > 500;  -- Training values are 100 and 200
+#----
+#true
+
+# Phase 1.2: Test order dependency
+# Test if processing order affects results
+
+statement ok
+CREATE TABLE series_forward AS
+SELECT 'A' AS id, i::DATE AS date, 100.0::DOUBLE AS value
+FROM generate_series(DATE '2023-01-01', DATE '2023-04-10', INTERVAL 1 DAY) t(i)
+UNION ALL
+SELECT 'B' AS id, i::DATE AS date, 200.0::DOUBLE AS value
+FROM generate_series(DATE '2023-01-01', DATE '2023-04-10', INTERVAL 1 DAY) t(i);
+
+statement ok
+CREATE TABLE series_reverse AS
+SELECT 'B' AS id, i::DATE AS date, 200.0::DOUBLE AS value
+FROM generate_series(DATE '2023-01-01', DATE '2023-04-10', INTERVAL 1 DAY) t(i)
+UNION ALL
+SELECT 'A' AS id, i::DATE AS date, 100.0::DOUBLE AS value
+FROM generate_series(DATE '2023-01-01', DATE '2023-04-10', INTERVAL 1 DAY) t(i);
+
+# Test 6: Process in forward order (A then B)
+#statement ok
+#CREATE TABLE batch_forward AS
+#SELECT id, point_forecast
+#FROM TS_FORECAST_BY(series_forward, id, date, value, 'AutoARIMA', 14, {'seasonal_period': 7})
+#ORDER BY id;
+
+# Test 7: Process in reverse order (B then A)
+#statement ok
+#CREATE TABLE batch_reverse AS
+#SELECT id, point_forecast
+#FROM TS_FORECAST_BY(series_reverse, id, date, value, 'AutoARIMA', 14, {'seasonal_period': 7})
+#ORDER BY id;
+
+# Test 8: Verify order independence (when bug is fixed)
+#query I
+#SELECT COUNT(*) = 0 AS order_independent
+#FROM (
+#    SELECT f.id, f.point_forecast AS forward_fcst, r.point_forecast AS reverse_fcst, row_number() OVER (PARTITION BY f.id) AS rn
+#    FROM batch_forward f
+#    JOIN batch_reverse r ON f.id = r.id
+#) subq
+#WHERE ABS(forward_fcst - reverse_fcst) > 0.01;
+#----
+#true
+
+# Phase 1.3: Test single series in batch mode
+# Test if bug occurs even with single series
+
+statement ok
+CREATE TABLE single_series AS
+SELECT 'OnlySeries' AS id, i::DATE AS date, 150.0::DOUBLE AS value
+FROM generate_series(DATE '2023-01-01', DATE '2023-04-10', INTERVAL 1 DAY) t(i);
+
+# Test 9: Single series in batch mode
+#statement ok
+#CREATE TABLE batch_single AS
+#SELECT id, point_forecast
+#FROM TS_FORECAST_BY(single_series, id, date, value, 'AutoARIMA', 14, {'seasonal_period': 7})
+#ORDER BY id;
+
+# Test 10: Same series individual mode
+#statement ok
+#CREATE TABLE individual_single AS
+#SELECT 'OnlySeries' AS id, point_forecast
+#FROM ts_forecast(
+#    (SELECT date, value FROM single_series WHERE id = 'OnlySeries'),
+#    date, value, 'AutoARIMA', 14, {'seasonal_period': 7}
+#);
+
+# Test 11: Verify single series consistency
+#query I
+#SELECT COUNT(*) = 0 AS single_series_match
+#FROM (
+#    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst, row_number() OVER (PARTITION BY b.id) AS rn
+#    FROM batch_single b
+#    JOIN individual_single i ON b.id = i.id
+#) subq
+#WHERE ABS(batch_fcst - ind_fcst) > 0.01;
+#----
+#true
+
+# Cleanup
+statement ok
+DROP TABLE minimal_test;
+
+statement ok
+DROP TABLE series_forward;
+
+statement ok
+DROP TABLE series_reverse;
+
+statement ok
+DROP TABLE single_series;
+
+#statement ok
+#DROP TABLE batch_autoarima;
+
+#statement ok
+#DROP TABLE individual_autoarima;
+
+#statement ok
+#DROP TABLE batch_forward;
+
+#statement ok
+#DROP TABLE batch_reverse;
+
+#statement ok
+#DROP TABLE batch_single;
+
+#statement ok
+#DROP TABLE individual_single;

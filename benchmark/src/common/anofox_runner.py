@@ -60,7 +60,7 @@ def run_anofox_benchmark(
 
     # Find the extension
     if extension_path is None:
-        extension_path = Path(__file__).parent.parent.parent.parent.parent / 'build' / 'release' / 'extension' / 'anofox_forecast' / 'anofox_forecast.duckdb_extension'
+        extension_path = Path(__file__).parent.parent.parent.parent / 'build' / 'release' / 'extension' / 'anofox_forecast' / 'anofox_forecast.duckdb_extension'
 
     if not extension_path.exists():
         print(f"ERROR: Extension not found at {extension_path}")

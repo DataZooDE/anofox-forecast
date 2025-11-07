@@ -1,0 +1,274 @@
+# name: test/sql/batch/test_batch_consistency.test
+# description: Test batch (TS_FORECAST_BY) vs individual (ts_forecast) consistency for all models
+# group: [batch]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+# Create synthetic test data: 3 series with different patterns
+statement ok
+CREATE TABLE test_series AS
+SELECT 'S1_constant' AS series_id, i::DATE AS date_col, 100.0::DOUBLE AS value
+FROM generate_series(DATE '2023-01-01', DATE '2023-12-31', INTERVAL 1 DAY) t(i)
+UNION ALL
+SELECT 'S2_trend' AS series_id, i::DATE AS date_col, (100.0 + (i - DATE '2023-01-01')::INT * 0.5)::DOUBLE AS value
+FROM generate_series(DATE '2023-01-01', DATE '2023-12-31', INTERVAL 1 DAY) t(i)
+UNION ALL
+SELECT 'S3_seasonal' AS series_id, i::DATE AS date_col, (100.0 + 20.0 * sin(2 * pi() * (i - DATE '2023-01-01')::INT / 7.0))::DOUBLE AS value
+FROM generate_series(DATE '2023-01-01', DATE '2023-12-31', INTERVAL 1 DAY) t(i);
+
+# Test 1: Naive - Should have perfect batch/individual consistency
+statement ok
+CREATE TABLE batch_naive AS
+SELECT series_id, point_forecast
+FROM TS_FORECAST_BY(test_series, series_id, date_col, value, 'Naive', 14, NULL)
+ORDER BY series_id;
+
+statement ok
+CREATE TABLE individual_naive AS
+SELECT 'S1_constant' AS series_id, point_forecast
+FROM ts_forecast(
+    (SELECT date_col, value FROM test_series WHERE series_id = 'S1_constant'),
+    date_col, value, 'Naive', 14, NULL
+)
+UNION ALL
+SELECT 'S2_trend' AS series_id, point_forecast
+FROM ts_forecast(
+    (SELECT date_col, value FROM test_series WHERE series_id = 'S2_trend'),
+    date_col, value, 'Naive', 14, NULL
+)
+UNION ALL
+SELECT 'S3_seasonal' AS series_id, point_forecast
+FROM ts_forecast(
+    (SELECT date_col, value FROM test_series WHERE series_id = 'S3_seasonal'),
+    date_col, value, 'Naive', 14, NULL
+);
+
+# Verify Naive forecasts match exactly
+query I
+SELECT COUNT(*) = 0 AS all_match
+FROM (
+    SELECT b.series_id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst, row_number() OVER (PARTITION BY b.series_id) AS rn
+    FROM batch_naive b
+    JOIN individual_naive i ON b.series_id = i.series_id
+) subq
+WHERE ABS(batch_fcst - ind_fcst) > 0.01;
+----
+true
+
+# Test 2: SMA - Should have perfect consistency
+statement ok
+CREATE TABLE batch_sma AS
+SELECT series_id, point_forecast
+FROM TS_FORECAST_BY(test_series, series_id, date_col, value, 'SMA', 14, {'window': 7})
+ORDER BY series_id;
+
+statement ok
+CREATE TABLE individual_sma AS
+SELECT 'S1_constant' AS series_id, point_forecast
+FROM ts_forecast(
+    (SELECT date_col, value FROM test_series WHERE series_id = 'S1_constant'),
+    date_col, value, 'SMA', 14, {'window': 7}
+)
+UNION ALL
+SELECT 'S2_trend' AS series_id, point_forecast
+FROM ts_forecast(
+    (SELECT date_col, value FROM test_series WHERE series_id = 'S2_trend'),
+    date_col, value, 'SMA', 14, {'window': 7}
+)
+UNION ALL
+SELECT 'S3_seasonal' AS series_id, point_forecast
+FROM ts_forecast(
+    (SELECT date_col, value FROM test_series WHERE series_id = 'S3_seasonal'),
+    date_col, value, 'SMA', 14, {'window': 7}
+);
+
+query I
+SELECT COUNT(*) = 0 AS all_match
+FROM (
+    SELECT b.series_id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst, row_number() OVER (PARTITION BY b.series_id) AS rn
+    FROM batch_sma b
+    JOIN individual_sma i ON b.series_id = i.series_id
+) subq
+WHERE ABS(batch_fcst - ind_fcst) > 0.01;
+----
+true
+
+# Test 3: SES - Should have perfect consistency
+statement ok
+CREATE TABLE batch_ses AS
+SELECT series_id, point_forecast
+FROM TS_FORECAST_BY(test_series, series_id, date_col, value, 'SES', 14, {'alpha': 0.3})
+ORDER BY series_id;
+
+statement ok
+CREATE TABLE individual_ses AS
+SELECT 'S1_constant' AS series_id, point_forecast
+FROM ts_forecast(
+    (SELECT date_col, value FROM test_series WHERE series_id = 'S1_constant'),
+    date_col, value, 'SES', 14, {'alpha': 0.3}
+)
+UNION ALL
+SELECT 'S2_trend' AS series_id, point_forecast
+FROM ts_forecast(
+    (SELECT date_col, value FROM test_series WHERE series_id = 'S2_trend'),
+    date_col, value, 'SES', 14, {'alpha': 0.3}
+)
+UNION ALL
+SELECT 'S3_seasonal' AS series_id, point_forecast
+FROM ts_forecast(
+    (SELECT date_col, value FROM test_series WHERE series_id = 'S3_seasonal'),
+    date_col, value, 'SES', 14, {'alpha': 0.3}
+);
+
+query I
+SELECT COUNT(*) = 0 AS all_match
+FROM (
+    SELECT b.series_id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst, row_number() OVER (PARTITION BY b.series_id) AS rn
+    FROM batch_ses b
+    JOIN individual_ses i ON b.series_id = i.series_id
+) subq
+WHERE ABS(batch_fcst - ind_fcst) > 0.01;
+----
+true
+
+# Test 4: ETS - Should have perfect consistency
+statement ok
+CREATE TABLE batch_ets AS
+SELECT series_id, point_forecast
+FROM TS_FORECAST_BY(test_series, series_id, date_col, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1})
+ORDER BY series_id;
+
+statement ok
+CREATE TABLE individual_ets AS
+SELECT 'S1_constant' AS series_id, point_forecast
+FROM ts_forecast(
+    (SELECT date_col, value FROM test_series WHERE series_id = 'S1_constant'),
+    date_col, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1}
+)
+UNION ALL
+SELECT 'S2_trend' AS series_id, point_forecast
+FROM ts_forecast(
+    (SELECT date_col, value FROM test_series WHERE series_id = 'S2_trend'),
+    date_col, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1}
+)
+UNION ALL
+SELECT 'S3_seasonal' AS series_id, point_forecast
+FROM ts_forecast(
+    (SELECT date_col, value FROM test_series WHERE series_id = 'S3_seasonal'),
+    date_col, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1}
+);
+
+query I
+SELECT COUNT(*) = 0 AS all_match
+FROM (
+    SELECT b.series_id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst, row_number() OVER (PARTITION BY b.series_id) AS rn
+    FROM batch_ets b
+    JOIN individual_ets i ON b.series_id = i.series_id
+) subq
+WHERE ABS(batch_fcst - ind_fcst) > 0.01;
+----
+true
+
+# Test 5: Croston models - Should have perfect consistency
+statement ok
+CREATE TABLE batch_croston AS
+SELECT series_id, point_forecast
+FROM TS_FORECAST_BY(test_series, series_id, date_col, value, 'CrostonClassic', 14, {'alpha': 0.1})
+ORDER BY series_id;
+
+statement ok
+CREATE TABLE individual_croston AS
+SELECT 'S1_constant' AS series_id, point_forecast
+FROM ts_forecast(
+    (SELECT date_col, value FROM test_series WHERE series_id = 'S1_constant'),
+    date_col, value, 'CrostonClassic', 14, {'alpha': 0.1}
+)
+UNION ALL
+SELECT 'S2_trend' AS series_id, point_forecast
+FROM ts_forecast(
+    (SELECT date_col, value FROM test_series WHERE series_id = 'S2_trend'),
+    date_col, value, 'CrostonClassic', 14, {'alpha': 0.1}
+)
+UNION ALL
+SELECT 'S3_seasonal' AS series_id, point_forecast
+FROM ts_forecast(
+    (SELECT date_col, value FROM test_series WHERE series_id = 'S3_seasonal'),
+    date_col, value, 'CrostonClassic', 14, {'alpha': 0.1}
+);
+
+query I
+SELECT COUNT(*) = 0 AS all_match
+FROM (
+    SELECT b.series_id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst, row_number() OVER (PARTITION BY b.series_id) AS rn
+    FROM batch_croston b
+    JOIN individual_croston i ON b.series_id = i.series_id
+) subq
+WHERE ABS(batch_fcst - ind_fcst) > 0.01;
+----
+true
+
+# Test 6: Verify no negative forecasts for positive-valued series
+query I
+SELECT COUNT(*) = 0 AS no_negative
+FROM batch_naive
+WHERE point_forecast < 0;
+----
+true
+
+query I
+SELECT COUNT(*) = 0 AS no_negative
+FROM batch_sma
+WHERE point_forecast < 0;
+----
+true
+
+query I
+SELECT COUNT(*) = 0 AS no_negative
+FROM batch_ses
+WHERE point_forecast < 0;
+----
+true
+
+query I
+SELECT COUNT(*) = 0 AS no_negative
+FROM batch_ets
+WHERE point_forecast < 0;
+----
+true
+
+# Cleanup
+statement ok
+DROP TABLE test_series;
+
+statement ok
+DROP TABLE batch_naive;
+
+statement ok
+DROP TABLE individual_naive;
+
+statement ok
+DROP TABLE batch_sma;
+
+statement ok
+DROP TABLE individual_sma;
+
+statement ok
+DROP TABLE batch_ses;
+
+statement ok
+DROP TABLE individual_ses;
+
+statement ok
+DROP TABLE batch_ets;
+
+statement ok
+DROP TABLE individual_ets;
+
+statement ok
+DROP TABLE batch_croston;
+
+statement ok
+DROP TABLE individual_croston;

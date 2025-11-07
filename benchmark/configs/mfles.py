@@ -1,27 +1,16 @@
-"""MFLES (Multi-Frequency Level-based Exponential Smoothing) models configuration."""
+"""MFLES (Multiple Fourier and Linear Exponential Smoothing) models configuration."""
 
 BENCHMARK_NAME = 'mfles'
 
 # Define models with their parameter functions
+# Note: MFLES supports 'seasonal_periods' (plural) for multiple seasonality patterns
 MODELS = [
     {
-        'name': 'MFLES-Fast',
-        'params': lambda seasonality: {'seasonal_period': seasonality}
-    },
-    {
-        'name': 'MFLES-Balanced',
-        'params': lambda seasonality: {'seasonal_period': seasonality}
-    },
-    {
-        'name': 'MFLES-Accurate',
-        'params': lambda seasonality: {'seasonal_period': seasonality}
-    },
-    {
-        'name': 'MFLES-Robust',
-        'params': lambda seasonality: {'seasonal_period': seasonality}
+        'name': 'MFLES',
+        'params': lambda seasonality: {'seasonal_periods': [seasonality]}
     },
     {
         'name': 'AutoMFLES',
-        'params': lambda seasonality: {'seasonal_period': seasonality}
+        'params': lambda seasonality: {'seasonal_periods': [seasonality]}
     },
 ]

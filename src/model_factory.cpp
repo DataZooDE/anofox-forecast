@@ -82,7 +82,16 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 
 		return AnofoxTimeWrapper::CreateAutoETS(season_length, model_spec);
 	} else if (model_name == "MFLES") {
-		std::vector<int> seasonal_periods = GetArrayParam(model_params, "seasonal_periods", {12});
+		// Check both 'seasonal_periods' (plural) and 'seasonal_period' (singular)
+		std::vector<int> seasonal_periods;
+		if (HasParam(model_params, "seasonal_periods")) {
+			seasonal_periods = GetArrayParam(model_params, "seasonal_periods", {12});
+		} else if (HasParam(model_params, "seasonal_period")) {
+			int single_period = GetParam<int>(model_params, "seasonal_period", 12);
+			seasonal_periods = {single_period};
+		} else {
+			seasonal_periods = {12};
+		}
 		// Tuned defaults for best accuracy (9% error vs statsforecast)
 		int n_iterations = GetParam<int>(model_params, "n_iterations", 10);
 		double lr_trend = GetParam<double>(model_params, "lr_trend", 0.3);
@@ -90,7 +99,16 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		double lr_level = GetParam<double>(model_params, "lr_level", 0.8);
 		return AnofoxTimeWrapper::CreateMFLES(seasonal_periods, n_iterations, lr_trend, lr_season, lr_level);
 	} else if (model_name == "AutoMFLES") {
-		std::vector<int> seasonal_periods = GetArrayParam(model_params, "seasonal_periods", {12});
+		// Check both 'seasonal_periods' (plural) and 'seasonal_period' (singular)
+		std::vector<int> seasonal_periods;
+		if (HasParam(model_params, "seasonal_periods")) {
+			seasonal_periods = GetArrayParam(model_params, "seasonal_periods", {12});
+		} else if (HasParam(model_params, "seasonal_period")) {
+			int single_period = GetParam<int>(model_params, "seasonal_period", 12);
+			seasonal_periods = {single_period};
+		} else {
+			seasonal_periods = {12};
+		}
 		// User-configurable parameters with tuned defaults
 		int max_rounds = GetParam<int>(model_params, "max_rounds", 10);
 		double lr_trend = GetParam<double>(model_params, "lr_trend", 0.3);
@@ -100,13 +118,31 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		int cv_n_windows = GetParam<int>(model_params, "cv_n_windows", 2);
 		return AnofoxTimeWrapper::CreateAutoMFLES(seasonal_periods, max_rounds, lr_trend, lr_season, lr_rs, cv_horizon, cv_n_windows);
 	} else if (model_name == "MSTL") {
-		std::vector<int> seasonal_periods = GetArrayParam(model_params, "seasonal_periods", {12});
+		// Check both 'seasonal_periods' (plural) and 'seasonal_period' (singular)
+		std::vector<int> seasonal_periods;
+		if (HasParam(model_params, "seasonal_periods")) {
+			seasonal_periods = GetArrayParam(model_params, "seasonal_periods", {12});
+		} else if (HasParam(model_params, "seasonal_period")) {
+			int single_period = GetParam<int>(model_params, "seasonal_period", 12);
+			seasonal_periods = {single_period};
+		} else {
+			seasonal_periods = {12};
+		}
 		int trend_method = GetParam<int>(model_params, "trend_method", 0);       // 0=Linear
 		int seasonal_method = GetParam<int>(model_params, "seasonal_method", 0); // 0=Cyclic
 		// std::cerr << "[DEBUG] Creating MSTL model" << std::endl;
 		return AnofoxTimeWrapper::CreateMSTL(seasonal_periods, trend_method, seasonal_method);
 	} else if (model_name == "AutoMSTL") {
-		std::vector<int> seasonal_periods = GetArrayParam(model_params, "seasonal_periods", {12});
+		// Check both 'seasonal_periods' (plural) and 'seasonal_period' (singular)
+		std::vector<int> seasonal_periods;
+		if (HasParam(model_params, "seasonal_periods")) {
+			seasonal_periods = GetArrayParam(model_params, "seasonal_periods", {12});
+		} else if (HasParam(model_params, "seasonal_period")) {
+			int single_period = GetParam<int>(model_params, "seasonal_period", 12);
+			seasonal_periods = {single_period};
+		} else {
+			seasonal_periods = {12};
+		}
 		// std::cerr << "[DEBUG] Creating AutoMSTL model" << std::endl;
 		return AnofoxTimeWrapper::CreateAutoMSTL(seasonal_periods);
 	}
@@ -132,7 +168,16 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 #endif
 	// TBATS
 	else if (model_name == "TBATS") {
-		std::vector<int> seasonal_periods = GetArrayParam(model_params, "seasonal_periods", {12});
+		// Check both 'seasonal_periods' (plural) and 'seasonal_period' (singular)
+		std::vector<int> seasonal_periods;
+		if (HasParam(model_params, "seasonal_periods")) {
+			seasonal_periods = GetArrayParam(model_params, "seasonal_periods", {12});
+		} else if (HasParam(model_params, "seasonal_period")) {
+			int single_period = GetParam<int>(model_params, "seasonal_period", 12);
+			seasonal_periods = {single_period};
+		} else {
+			seasonal_periods = {12};
+		}
 		bool use_box_cox = GetParam<int>(model_params, "use_box_cox", 0) != 0;
 		double box_cox_lambda = GetParam<double>(model_params, "box_cox_lambda", 1.0);
 		bool use_trend = GetParam<int>(model_params, "use_trend", 1) != 0;
@@ -143,7 +188,16 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		return AnofoxTimeWrapper::CreateTBATS(seasonal_periods, use_box_cox, box_cox_lambda, use_trend,
 		                                      use_damped_trend, damping_param, ar_order, ma_order);
 	} else if (model_name == "AutoTBATS") {
-		std::vector<int> seasonal_periods = GetArrayParam(model_params, "seasonal_periods", {12});
+		// Check both 'seasonal_periods' (plural) and 'seasonal_period' (singular)
+		std::vector<int> seasonal_periods;
+		if (HasParam(model_params, "seasonal_periods")) {
+			seasonal_periods = GetArrayParam(model_params, "seasonal_periods", {12});
+		} else if (HasParam(model_params, "seasonal_period")) {
+			int single_period = GetParam<int>(model_params, "seasonal_period", 12);
+			seasonal_periods = {single_period};
+		} else {
+			seasonal_periods = {12};
+		}
 		return AnofoxTimeWrapper::CreateAutoTBATS(seasonal_periods);
 	}
 	// Theta variants

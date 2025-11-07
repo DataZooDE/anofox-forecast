@@ -3,37 +3,22 @@
 BENCHMARK_NAME = 'ets'
 
 # Define models with their parameter functions
+# Note: For models without seasonality, we pass None instead of {} to avoid SQL syntax errors
 MODELS = [
     {
-        'name': 'SES',
-        'params': lambda seasonality: {}
-    },
-    {
         'name': 'SESOptimized',
-        'params': lambda seasonality: {}
-    },
-    {
-        'name': 'SeasonalES',
-        'params': lambda seasonality: {'seasonal_period': seasonality}
+        'params': lambda seasonality: None  # No parameters needed
     },
     {
         'name': 'SeasonalESOptimized',
         'params': lambda seasonality: {'seasonal_period': seasonality}
     },
     {
-        'name': 'Holt',
-        'params': lambda seasonality: {}
-    },
-    {
         'name': 'HoltWinters',
         'params': lambda seasonality: {'seasonal_period': seasonality}
     },
     {
-        'name': 'ETS',
-        'params': lambda seasonality: {}
-    },
-    {
         'name': 'AutoETS',
-        'params': lambda seasonality: {'seasonal_period': seasonality}
+        'params': lambda seasonality: {'season_length': seasonality}
     },
 ]

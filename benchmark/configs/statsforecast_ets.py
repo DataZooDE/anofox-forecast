@@ -32,7 +32,7 @@ def get_models_config(seasonality: int, horizon: int):
     return [
         {
             'model_factory': SimpleExponentialSmoothing,
-            'params': {'alpha': 0.3}
+            'params': {'alpha': 0.5}
         },
         {
             'model_factory': SimpleExponentialSmoothingOptimized,
@@ -40,7 +40,7 @@ def get_models_config(seasonality: int, horizon: int):
         },
         {
             'model_factory': SeasonalExponentialSmoothing,
-            'params': {'season_length': seasonality, 'alpha': 0.2, 'gamma': 0.1}
+            'params': {'season_length': seasonality, 'alpha': 0.5}
         },
         {
             'model_factory': SeasonalExponentialSmoothingOptimized,
@@ -60,5 +60,6 @@ def get_models_config(seasonality: int, horizon: int):
         },
     ]
 
-# ETS models use prediction intervals
-INCLUDE_PREDICTION_INTERVALS = True
+# ETS models: disable prediction intervals to avoid errors with SimpleExponentialSmoothing
+# Some ETS models don't support prediction intervals via level parameter
+INCLUDE_PREDICTION_INTERVALS = False

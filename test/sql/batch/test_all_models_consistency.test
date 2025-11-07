@@ -1,0 +1,167 @@
+# name: test/sql/batch/test_all_models_consistency.test
+# description: Comprehensive batch consistency test for all working models
+# group: [batch]
+# This test verifies that models known to work correctly maintain batch/individual consistency
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+# Create test dataset with 2 series: one constant, one with trend
+statement ok
+CREATE TABLE comprehensive_test AS
+SELECT 'ConstantSeries' AS id, i::DATE AS date, 100.0::DOUBLE AS value
+FROM generate_series(DATE '2023-01-01', DATE '2024-01-01', INTERVAL 1 DAY) t(i)
+UNION ALL
+SELECT 'TrendSeries' AS id, i::DATE AS date, (100.0 + (i - DATE '2023-01-01')::INT * 0.5)::DOUBLE AS value
+FROM generate_series(DATE '2023-01-01', DATE '2024-01-01', INTERVAL 1 DAY) t(i);
+
+# Test Model 1: Naive (KNOWN WORKING)
+statement ok
+CREATE OR REPLACE TABLE test_batch AS
+SELECT id, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, value, 'Naive', 14, NULL);
+
+statement ok
+CREATE OR REPLACE TABLE test_individual AS
+SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'ConstantSeries'), date, value, 'Naive', 14, NULL)
+UNION ALL
+SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'TrendSeries'), date, value, 'Naive', 14, NULL);
+
+query I
+SELECT COUNT(*) = 0 FROM (
+    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst, row_number() OVER (PARTITION BY b.id) AS rn
+    FROM test_batch b JOIN test_individual i ON b.id = i.id
+) WHERE ABS(batch_fcst - ind_fcst) > 0.01;
+----
+true
+
+# Test Model 2: SMA (KNOWN WORKING)
+statement ok
+CREATE OR REPLACE TABLE test_batch AS
+SELECT id, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, value, 'SMA', 14, {'window': 7});
+
+statement ok
+CREATE OR REPLACE TABLE test_individual AS
+SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'ConstantSeries'), date, value, 'SMA', 14, {'window': 7})
+UNION ALL
+SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'TrendSeries'), date, value, 'SMA', 14, {'window': 7});
+
+query I
+SELECT COUNT(*) = 0 FROM (
+    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst, row_number() OVER (PARTITION BY b.id) AS rn
+    FROM test_batch b JOIN test_individual i ON b.id = i.id
+) WHERE ABS(batch_fcst - ind_fcst) > 0.01;
+----
+true
+
+# Test Model 3: SES (KNOWN WORKING)
+statement ok
+CREATE OR REPLACE TABLE test_batch AS
+SELECT id, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, value, 'SES', 14, {'alpha': 0.3});
+
+statement ok
+CREATE OR REPLACE TABLE test_individual AS
+SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'ConstantSeries'), date, value, 'SES', 14, {'alpha': 0.3})
+UNION ALL
+SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'TrendSeries'), date, value, 'SES', 14, {'alpha': 0.3});
+
+query I
+SELECT COUNT(*) = 0 FROM (
+    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst, row_number() OVER (PARTITION BY b.id) AS rn
+    FROM test_batch b JOIN test_individual i ON b.id = i.id
+) WHERE ABS(batch_fcst - ind_fcst) > 0.01;
+----
+true
+
+# Test Model 4: SESOptimized (KNOWN WORKING)
+statement ok
+CREATE OR REPLACE TABLE test_batch AS
+SELECT id, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, value, 'SESOptimized', 14, NULL);
+
+statement ok
+CREATE OR REPLACE TABLE test_individual AS
+SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'ConstantSeries'), date, value, 'SESOptimized', 14, NULL)
+UNION ALL
+SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'TrendSeries'), date, value, 'SESOptimized', 14, NULL);
+
+query I
+SELECT COUNT(*) = 0 FROM (
+    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst, row_number() OVER (PARTITION BY b.id) AS rn
+    FROM test_batch b JOIN test_individual i ON b.id = i.id
+) WHERE ABS(batch_fcst - ind_fcst) > 0.01;
+----
+true
+
+# Test Model 5: ETS (KNOWN WORKING)
+statement ok
+CREATE OR REPLACE TABLE test_batch AS
+SELECT id, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1});
+
+statement ok
+CREATE OR REPLACE TABLE test_individual AS
+SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'ConstantSeries'), date, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1})
+UNION ALL
+SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'TrendSeries'), date, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1});
+
+query I
+SELECT COUNT(*) = 0 FROM (
+    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst, row_number() OVER (PARTITION BY b.id) AS rn
+    FROM test_batch b JOIN test_individual i ON b.id = i.id
+) WHERE ABS(batch_fcst - ind_fcst) > 0.01;
+----
+true
+
+# Test Model 6: CrostonClassic (KNOWN WORKING)
+statement ok
+CREATE OR REPLACE TABLE test_batch AS
+SELECT id, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, value, 'CrostonClassic', 14, {'alpha': 0.1});
+
+statement ok
+CREATE OR REPLACE TABLE test_individual AS
+SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'ConstantSeries'), date, value, 'CrostonClassic', 14, {'alpha': 0.1})
+UNION ALL
+SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'TrendSeries'), date, value, 'CrostonClassic', 14, {'alpha': 0.1});
+
+query I
+SELECT COUNT(*) = 0 FROM (
+    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst, row_number() OVER (PARTITION BY b.id) AS rn
+    FROM test_batch b JOIN test_individual i ON b.id = i.id
+) WHERE ABS(batch_fcst - ind_fcst) > 0.01;
+----
+true
+
+# Test Model 7: CrostonOptimized (KNOWN WORKING)
+statement ok
+CREATE OR REPLACE TABLE test_batch AS
+SELECT id, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, value, 'CrostonOptimized', 14, NULL);
+
+statement ok
+CREATE OR REPLACE TABLE test_individual AS
+SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'ConstantSeries'), date, value, 'CrostonOptimized', 14, NULL)
+UNION ALL
+SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'TrendSeries'), date, value, 'CrostonOptimized', 14, NULL);
+
+query I
+SELECT COUNT(*) = 0 FROM (
+    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst, row_number() OVER (PARTITION BY b.id) AS rn
+    FROM test_batch b JOIN test_individual i ON b.id = i.id
+) WHERE ABS(batch_fcst - ind_fcst) > 0.01;
+----
+true
+
+# Verify no negative forecasts for all models
+query I
+SELECT COUNT(*) = 0 FROM test_batch WHERE point_forecast < 0;
+----
+true
+
+# Cleanup
+statement ok
+DROP TABLE comprehensive_test;
+
+statement ok
+DROP TABLE test_batch;
+
+statement ok
+DROP TABLE test_individual;

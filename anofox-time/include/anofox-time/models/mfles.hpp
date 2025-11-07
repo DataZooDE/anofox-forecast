@@ -206,7 +206,7 @@ private:
 	std::vector<double> preprocessed_data_;
 
 	// Fitted components (accumulated over iterations)
-	double median_component_ = 0.0;
+	std::vector<double> median_component_;  // Phase 8 Fix #1: Changed from scalar to vector
 	std::vector<double> trend_component_;
 	std::map<int, std::vector<double>> seasonal_components_;
 	std::vector<double> level_component_;
@@ -222,6 +222,7 @@ private:
 	// Trend parameters
 	double trend_slope_ = 0.0;
 	double trend_intercept_ = 0.0;
+	std::vector<double> accumulated_trend_;  // Last 2 fitted trend values for forecasting (size 2)
 	std::vector<double> changepoint_coefs_;  // For piecewise trend
 	std::vector<int> changepoint_indices_;
 
@@ -242,7 +243,7 @@ private:
 	double computeCoV(const std::vector<double>& data) const;
 
 	// Component fitting methods
-	double fitMedianComponent(const std::vector<double>& data);
+	std::vector<double> fitMedianComponent(const std::vector<double>& data);  // Phase 8 Fix #1: Returns vector instead of scalar
 	std::vector<double> fitLinearTrend(const std::vector<double>& data);
 	std::vector<double> fitSiegelTrend(const std::vector<double>& data);
 	std::vector<double> fitPiecewiseTrend(const std::vector<double>& data);

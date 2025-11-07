@@ -7,3 +7,8 @@ testext
 test/python/__pycache__/
 .Rhistory
 anofox-time/build
+*.csv
+*.pyc
+*.zip
+*.parquet
+*.p

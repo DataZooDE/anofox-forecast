@@ -163,10 +163,16 @@ double AutoMFLES::evaluateConfig(const core::TimeSeries& ts, const MFLES::Params
 	}
 	cv_config.horizon = cv_horizon;
 
-	// Auto-detect initial_window: statsforecast doesn't specify, using 10x horizon as heuristic
-	cv_config.initial_window = (config_.cv_initial_window == -1)
-		? (10 * cv_horizon)
-		: config_.cv_initial_window;
+	// Auto-detect initial_window: adapt to dataset size
+	if (config_.cv_initial_window == -1) {
+		int min_required = 3 * cv_horizon;  // Minimum reasonable training size
+		int desired_initial = 10 * cv_horizon;  // Ideal training size
+		// Limit to 60% of dataset to ensure enough data for CV folds
+		int max_allowed = static_cast<int>(ts.size() * 0.6);
+		cv_config.initial_window = std::min(desired_initial, std::max(min_required, max_allowed));
+	} else {
+		cv_config.initial_window = config_.cv_initial_window;
+	}
 
 	// Auto-detect step: statsforecast uses n_windows to determine folds, step = horizon is standard
 	cv_config.step = (config_.cv_step == -1)

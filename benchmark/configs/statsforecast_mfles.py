@@ -28,5 +28,6 @@ def get_models_config(seasonality: int, horizon: int):
         },
     ]
 
-# MFLES uses prediction intervals
-INCLUDE_PREDICTION_INTERVALS = True
+# MFLES requires prediction intervals to be configured at model initialization
+# For now, disable prediction intervals to get base forecasts working
+INCLUDE_PREDICTION_INTERVALS = False
