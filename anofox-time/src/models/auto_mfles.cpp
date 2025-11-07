@@ -28,6 +28,8 @@ void AutoMFLES::fit(const core::TimeSeries& ts) {
 	best_params.min_alpha = config_.min_alpha;
 	best_params.max_alpha = config_.max_alpha;
 	best_params.es_ensemble_steps = config_.es_ensemble_size;
+	best_params.progressive_trend = config_.progressive_trend;
+	best_params.sequential_seasonality = config_.sequential_seasonality;
 
 	// Learning rates (configurable)
 	best_params.lr_trend = config_.lr_trend;
@@ -97,6 +99,8 @@ void AutoMFLES::optimizeParameters(const core::TimeSeries& ts) {
 		params.min_alpha = config_.min_alpha;
 		params.max_alpha = config_.max_alpha;
 		params.es_ensemble_steps = config_.es_ensemble_size;
+		params.progressive_trend = config_.progressive_trend;
+		params.sequential_seasonality = config_.sequential_seasonality;
 
 		// Learning rates (configurable)
 		params.lr_trend = config_.lr_trend;
@@ -129,10 +133,10 @@ void AutoMFLES::optimizeParameters(const core::TimeSeries& ts) {
 			}
 		}
 
-		candidate.cv_mae = evaluateConfig(ts, params);
+		candidate.cv_score = evaluateConfig(ts, params);
 	}
 
-	// Select best configuration (lowest CV MAE)
+	// Select best configuration (lowest CV score)
 	auto best_it = std::min_element(candidates.begin(), candidates.end());
 
 	if (best_it != candidates.end()) {
@@ -140,14 +144,14 @@ void AutoMFLES::optimizeParameters(const core::TimeSeries& ts) {
 		best_smoother_ = best_it->smoother;
 		best_ma_window_ = best_it->ma_window;
 		best_seasonal_period_ = best_it->seasonal_period;
-		best_cv_mae_ = best_it->cv_mae;
+		best_cv_score_ = best_it->cv_score;
 
 		// Update diagnostics
 		diagnostics_.best_seasonality_weights = best_seasonality_weights_;
 		diagnostics_.best_smoother = best_smoother_;
 		diagnostics_.best_ma_window = best_ma_window_;
 		diagnostics_.best_seasonal_period = best_seasonal_period_;
-		diagnostics_.best_cv_mae = best_cv_mae_;
+		diagnostics_.best_cv_score = best_cv_score_;
 	}
 }
 
@@ -189,9 +193,9 @@ double AutoMFLES::evaluateConfig(const core::TimeSeries& ts, const MFLES::Params
 	// Run CV
 	try {
 		auto cv_results = utils::CrossValidation::evaluate(ts, model_factory, cv_config);
-		return cv_results.mae;  // Use MAE as optimization criterion
+		return cv_results.getMetric(config_.cv_metric);  // Use configured metric as optimization criterion
 	} catch (const std::exception&) {
-		// If CV fails, return a very large MAE
+		// If CV fails, return a very large score
 		return std::numeric_limits<double>::infinity();
 	}
 }
@@ -211,7 +215,7 @@ std::vector<AutoMFLES::CandidateConfig> AutoMFLES::generateCandidates() const {
 					config.smoother = smoother;
 					config.ma_window = ma_window;
 					config.seasonal_period = seasonal_period;
-					config.cv_mae = std::numeric_limits<double>::infinity();
+					config.cv_score = std::numeric_limits<double>::infinity();
 					candidates.push_back(config);
 				}
 			}

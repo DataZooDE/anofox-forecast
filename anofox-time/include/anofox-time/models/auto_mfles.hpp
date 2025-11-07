@@ -37,6 +37,7 @@ public:
 		int cv_initial_window = -1;      // Initial training window (-1 = auto: 10 * cv_horizon)
 		int cv_step = -1;                // Step between folds (-1 = auto: cv_horizon)
 		utils::CVStrategy cv_strategy = utils::CVStrategy::ROLLING;
+		utils::CVMetric cv_metric = utils::CVMetric::MAE;  // Optimization metric (statsforecast default: SMAPE)
 
 		// Statsforecast grid search parameters (24 configurations: 2×2×3×2)
 		std::vector<bool> seasonality_weights_options = {false, true};  // Time-varying seasonal weights
@@ -52,6 +53,8 @@ public:
 		double min_alpha = 0.05;         // statsforecast default
 		double max_alpha = 1.0;          // statsforecast default
 		int es_ensemble_size = 20;       // statsforecast default
+		bool progressive_trend = true;        // Enable StatsForecast progressive trend
+		bool sequential_seasonality = true;   // Enable StatsForecast sequential fitting
 
 		// Learning rates (tuned defaults for best accuracy)
 		double lr_trend = 0.3;           // Trend learning rate (was 0.9 in statsforecast)
@@ -82,12 +85,12 @@ public:
 	bool selectedSmoother() const { return best_smoother_; }
 	int selectedMAWindow() const { return best_ma_window_; }
 	bool selectedSeasonalPeriod() const { return best_seasonal_period_; }
-	double selectedCV_MAE() const { return best_cv_mae_; }
+	double selectedCV_Score() const { return best_cv_score_; }
 
 	// Diagnostics
 	struct OptimizationDiagnostics {
 		int configs_evaluated = 0;
-		double best_cv_mae = 0.0;
+		double best_cv_score = 0.0;
 		bool best_seasonality_weights = false;
 		bool best_smoother = false;
 		int best_ma_window = 7;
@@ -107,7 +110,7 @@ private:
 	bool best_smoother_ = false;
 	int best_ma_window_ = 5;
 	bool best_seasonal_period_ = true;
-	double best_cv_mae_ = std::numeric_limits<double>::infinity();
+	double best_cv_score_ = std::numeric_limits<double>::infinity();
 
 	// Fitted model
 	std::unique_ptr<MFLES> fitted_model_;
@@ -119,10 +122,10 @@ private:
 		bool smoother;
 		int ma_window;
 		bool seasonal_period;
-		double cv_mae;
+		double cv_score;
 
 		bool operator<(const CandidateConfig& other) const {
-			return cv_mae < other.cv_mae;
+			return cv_score < other.cv_score;
 		}
 	};
 

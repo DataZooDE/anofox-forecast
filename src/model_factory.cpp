@@ -97,7 +97,10 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		double lr_trend = GetParam<double>(model_params, "lr_trend", 0.3);
 		double lr_season = GetParam<double>(model_params, "lr_season", 0.5);
 		double lr_level = GetParam<double>(model_params, "lr_level", 0.8);
-		return AnofoxTimeWrapper::CreateMFLES(seasonal_periods, n_iterations, lr_trend, lr_season, lr_level);
+		bool progressive_trend = GetParam<bool>(model_params, "progressive_trend", true);
+		bool sequential_seasonality = GetParam<bool>(model_params, "sequential_seasonality", true);
+		return AnofoxTimeWrapper::CreateMFLES(seasonal_periods, n_iterations, lr_trend, lr_season, lr_level,
+		                                      progressive_trend, sequential_seasonality);
 	} else if (model_name == "AutoMFLES") {
 		// Check both 'seasonal_periods' (plural) and 'seasonal_period' (singular)
 		std::vector<int> seasonal_periods;
@@ -116,8 +119,25 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		double lr_rs = GetParam<double>(model_params, "lr_rs", 0.8);
 		int cv_horizon = GetParam<int>(model_params, "cv_horizon", -1);
 		int cv_n_windows = GetParam<int>(model_params, "cv_n_windows", 2);
+		
+		// Parse optimization metric
+		std::string metric_str = GetParam<std::string>(model_params, "metric", "mae");
+		::anofoxtime::utils::CVMetric metric;
+		if (metric_str == "mae") {
+			metric = ::anofoxtime::utils::CVMetric::MAE;
+		} else if (metric_str == "rmse") {
+			metric = ::anofoxtime::utils::CVMetric::RMSE;
+		} else if (metric_str == "mape") {
+			metric = ::anofoxtime::utils::CVMetric::MAPE;
+		} else if (metric_str == "smape") {
+			metric = ::anofoxtime::utils::CVMetric::SMAPE;
+		} else {
+			throw InvalidInputException("Invalid metric: " + metric_str + 
+				". Must be one of: mae, rmse, mape, smape");
+		}
+		
 		return AnofoxTimeWrapper::CreateAutoMFLES(seasonal_periods, max_rounds, lr_trend, lr_season, lr_rs, cv_horizon,
-		                                          cv_n_windows);
+		                                          cv_n_windows, metric);
 	} else if (model_name == "MSTL") {
 		// Check both 'seasonal_periods' (plural) and 'seasonal_period' (singular)
 		std::vector<int> seasonal_periods;

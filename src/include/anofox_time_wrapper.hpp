@@ -80,10 +80,13 @@ public:
 	                                                                        const std::string &model = "ZZZ");
 	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateMFLES(const std::vector<int> &seasonal_periods,
 	                                                                      int n_iterations, double lr_trend,
-	                                                                      double lr_season, double lr_level);
+	                                                                      double lr_season, double lr_level,
+	                                                                      bool progressive_trend = true,
+	                                                                      bool sequential_seasonality = true);
 	static std::unique_ptr<::anofoxtime::models::IForecaster>
 	CreateAutoMFLES(const std::vector<int> &seasonal_periods, int max_rounds = 10, double lr_trend = 0.3,
-	                double lr_season = 0.5, double lr_rs = 0.8, int cv_horizon = -1, int cv_n_windows = 2);
+	                double lr_season = 0.5, double lr_rs = 0.8, int cv_horizon = -1, int cv_n_windows = 2,
+	                ::anofoxtime::utils::CVMetric cv_metric = ::anofoxtime::utils::CVMetric::MAE);
 	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateMSTL(const std::vector<int> &seasonal_periods,
 	                                                                     int trend_method, int seasonal_method);
 	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateAutoMSTL(const std::vector<int> &seasonal_periods);
