@@ -14,8 +14,15 @@ CREATE TABLE comprehensive_test AS
 SELECT 'ConstantSeries' AS id, i::DATE AS date, 100.0::DOUBLE AS value
 FROM generate_series(DATE '2023-01-01', DATE '2024-01-01', INTERVAL 1 DAY) t(i)
 UNION ALL
-SELECT 'TrendSeries' AS id, i::DATE AS date, (100.0 + (i - DATE '2023-01-01')::INT * 0.5)::DOUBLE AS value
+SELECT 'TrendSeries' AS id, i::DATE AS date, (100.0 + DATEDIFF('day', DATE '2023-01-01', i) * 0.5)::DOUBLE AS value
 FROM generate_series(DATE '2023-01-01', DATE '2024-01-01', INTERVAL 1 DAY) t(i);
+
+# Create temp tables for individual tests
+statement ok
+CREATE TABLE const_temp AS SELECT date, value FROM comprehensive_test WHERE id = 'ConstantSeries';
+
+statement ok
+CREATE TABLE trend_temp AS SELECT date, value FROM comprehensive_test WHERE id = 'TrendSeries';
 
 # Test Model 1: Naive (KNOWN WORKING)
 statement ok
@@ -24,9 +31,9 @@ SELECT id, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, valu
 
 statement ok
 CREATE OR REPLACE TABLE test_individual AS
-SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'ConstantSeries'), date, value, 'Naive', 14, NULL)
+SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast('const_temp', date, value, 'Naive', 14, NULL)
 UNION ALL
-SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'TrendSeries'), date, value, 'Naive', 14, NULL);
+SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast('trend_temp', date, value, 'Naive', 14, NULL);
 
 query I
 SELECT COUNT(*) = 0 FROM (
@@ -43,9 +50,9 @@ SELECT id, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, valu
 
 statement ok
 CREATE OR REPLACE TABLE test_individual AS
-SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'ConstantSeries'), date, value, 'SMA', 14, {'window': 7})
+SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast('const_temp', date, value, 'SMA', 14, {'window': 7})
 UNION ALL
-SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'TrendSeries'), date, value, 'SMA', 14, {'window': 7});
+SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast('trend_temp', date, value, 'SMA', 14, {'window': 7});
 
 query I
 SELECT COUNT(*) = 0 FROM (
@@ -62,9 +69,9 @@ SELECT id, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, valu
 
 statement ok
 CREATE OR REPLACE TABLE test_individual AS
-SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'ConstantSeries'), date, value, 'SES', 14, {'alpha': 0.3})
+SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast('const_temp', date, value, 'SES', 14, {'alpha': 0.3})
 UNION ALL
-SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'TrendSeries'), date, value, 'SES', 14, {'alpha': 0.3});
+SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast('trend_temp', date, value, 'SES', 14, {'alpha': 0.3});
 
 query I
 SELECT COUNT(*) = 0 FROM (
@@ -81,9 +88,9 @@ SELECT id, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, valu
 
 statement ok
 CREATE OR REPLACE TABLE test_individual AS
-SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'ConstantSeries'), date, value, 'SESOptimized', 14, NULL)
+SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast('const_temp', date, value, 'SESOptimized', 14, NULL)
 UNION ALL
-SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'TrendSeries'), date, value, 'SESOptimized', 14, NULL);
+SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast('trend_temp', date, value, 'SESOptimized', 14, NULL);
 
 query I
 SELECT COUNT(*) = 0 FROM (
@@ -100,9 +107,9 @@ SELECT id, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, valu
 
 statement ok
 CREATE OR REPLACE TABLE test_individual AS
-SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'ConstantSeries'), date, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1})
+SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast('const_temp', date, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1})
 UNION ALL
-SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'TrendSeries'), date, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1});
+SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast('trend_temp', date, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1});
 
 query I
 SELECT COUNT(*) = 0 FROM (
@@ -119,9 +126,9 @@ SELECT id, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, valu
 
 statement ok
 CREATE OR REPLACE TABLE test_individual AS
-SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'ConstantSeries'), date, value, 'CrostonClassic', 14, {'alpha': 0.1})
+SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast('const_temp', date, value, 'CrostonClassic', 14, {'alpha': 0.1})
 UNION ALL
-SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'TrendSeries'), date, value, 'CrostonClassic', 14, {'alpha': 0.1});
+SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast('trend_temp', date, value, 'CrostonClassic', 14, {'alpha': 0.1});
 
 query I
 SELECT COUNT(*) = 0 FROM (
@@ -138,9 +145,9 @@ SELECT id, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, valu
 
 statement ok
 CREATE OR REPLACE TABLE test_individual AS
-SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'ConstantSeries'), date, value, 'CrostonOptimized', 14, NULL)
+SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast('const_temp', date, value, 'CrostonOptimized', 14, NULL)
 UNION ALL
-SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast((SELECT date, value FROM comprehensive_test WHERE id = 'TrendSeries'), date, value, 'CrostonOptimized', 14, NULL);
+SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast('trend_temp', date, value, 'CrostonOptimized', 14, NULL);
 
 query I
 SELECT COUNT(*) = 0 FROM (

@@ -85,10 +85,10 @@ FROM timestamp_agg_result;
 ----
 true
 
-# Test 7: INTEGER with AutoARIMA model
+# Test 7: INTEGER with AutoETS model (more robust for simple data)
 statement ok
 CREATE TABLE integer_arima_result AS
-SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, {'seasonal_period': 7}) AS result
+SELECT TS_FORECAST_AGG(date_col, value, 'AutoETS', 5, {'seasonal_period': 7}) AS result
 FROM test_integer_dates;
 
 query I

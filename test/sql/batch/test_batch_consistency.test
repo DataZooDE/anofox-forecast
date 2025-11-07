@@ -13,10 +13,10 @@ CREATE TABLE test_series AS
 SELECT 'S1_constant' AS series_id, i::DATE AS date_col, 100.0::DOUBLE AS value
 FROM generate_series(DATE '2023-01-01', DATE '2023-12-31', INTERVAL 1 DAY) t(i)
 UNION ALL
-SELECT 'S2_trend' AS series_id, i::DATE AS date_col, (100.0 + (i - DATE '2023-01-01')::INT * 0.5)::DOUBLE AS value
+SELECT 'S2_trend' AS series_id, i::DATE AS date_col, (100.0 + DATEDIFF('day', DATE '2023-01-01', i) * 0.5)::DOUBLE AS value
 FROM generate_series(DATE '2023-01-01', DATE '2023-12-31', INTERVAL 1 DAY) t(i)
 UNION ALL
-SELECT 'S3_seasonal' AS series_id, i::DATE AS date_col, (100.0 + 20.0 * sin(2 * pi() * (i - DATE '2023-01-01')::INT / 7.0))::DOUBLE AS value
+SELECT 'S3_seasonal' AS series_id, i::DATE AS date_col, (100.0 + 20.0 * sin(2 * pi() * DATEDIFF('day', DATE '2023-01-01', i) / 7.0))::DOUBLE AS value
 FROM generate_series(DATE '2023-01-01', DATE '2023-12-31', INTERVAL 1 DAY) t(i);
 
 # Test 1: Naive - Should have perfect batch/individual consistency
@@ -27,24 +27,24 @@ FROM TS_FORECAST_BY(test_series, series_id, date_col, value, 'Naive', 14, NULL)
 ORDER BY series_id;
 
 statement ok
+CREATE TABLE s1_temp AS SELECT date_col, value FROM test_series WHERE series_id = 'S1_constant';
+
+statement ok
+CREATE TABLE s2_temp AS SELECT date_col, value FROM test_series WHERE series_id = 'S2_trend';
+
+statement ok
+CREATE TABLE s3_temp AS SELECT date_col, value FROM test_series WHERE series_id = 'S3_seasonal';
+
+statement ok
 CREATE TABLE individual_naive AS
 SELECT 'S1_constant' AS series_id, point_forecast
-FROM ts_forecast(
-    (SELECT date_col, value FROM test_series WHERE series_id = 'S1_constant'),
-    date_col, value, 'Naive', 14, NULL
-)
+FROM ts_forecast('s1_temp', date_col, value, 'Naive', 14, NULL)
 UNION ALL
 SELECT 'S2_trend' AS series_id, point_forecast
-FROM ts_forecast(
-    (SELECT date_col, value FROM test_series WHERE series_id = 'S2_trend'),
-    date_col, value, 'Naive', 14, NULL
-)
+FROM ts_forecast('s2_temp', date_col, value, 'Naive', 14, NULL)
 UNION ALL
 SELECT 'S3_seasonal' AS series_id, point_forecast
-FROM ts_forecast(
-    (SELECT date_col, value FROM test_series WHERE series_id = 'S3_seasonal'),
-    date_col, value, 'Naive', 14, NULL
-);
+FROM ts_forecast('s3_temp', date_col, value, 'Naive', 14, NULL);
 
 # Verify Naive forecasts match exactly
 query I
@@ -68,22 +68,13 @@ ORDER BY series_id;
 statement ok
 CREATE TABLE individual_sma AS
 SELECT 'S1_constant' AS series_id, point_forecast
-FROM ts_forecast(
-    (SELECT date_col, value FROM test_series WHERE series_id = 'S1_constant'),
-    date_col, value, 'SMA', 14, {'window': 7}
-)
+FROM ts_forecast('s1_temp', date_col, value, 'SMA', 14, {'window': 7})
 UNION ALL
 SELECT 'S2_trend' AS series_id, point_forecast
-FROM ts_forecast(
-    (SELECT date_col, value FROM test_series WHERE series_id = 'S2_trend'),
-    date_col, value, 'SMA', 14, {'window': 7}
-)
+FROM ts_forecast('s2_temp', date_col, value, 'SMA', 14, {'window': 7})
 UNION ALL
 SELECT 'S3_seasonal' AS series_id, point_forecast
-FROM ts_forecast(
-    (SELECT date_col, value FROM test_series WHERE series_id = 'S3_seasonal'),
-    date_col, value, 'SMA', 14, {'window': 7}
-);
+FROM ts_forecast('s3_temp', date_col, value, 'SMA', 14, {'window': 7});
 
 query I
 SELECT COUNT(*) = 0 AS all_match
@@ -106,22 +97,13 @@ ORDER BY series_id;
 statement ok
 CREATE TABLE individual_ses AS
 SELECT 'S1_constant' AS series_id, point_forecast
-FROM ts_forecast(
-    (SELECT date_col, value FROM test_series WHERE series_id = 'S1_constant'),
-    date_col, value, 'SES', 14, {'alpha': 0.3}
-)
+FROM ts_forecast('s1_temp', date_col, value, 'SES', 14, {'alpha': 0.3})
 UNION ALL
 SELECT 'S2_trend' AS series_id, point_forecast
-FROM ts_forecast(
-    (SELECT date_col, value FROM test_series WHERE series_id = 'S2_trend'),
-    date_col, value, 'SES', 14, {'alpha': 0.3}
-)
+FROM ts_forecast('s2_temp', date_col, value, 'SES', 14, {'alpha': 0.3})
 UNION ALL
 SELECT 'S3_seasonal' AS series_id, point_forecast
-FROM ts_forecast(
-    (SELECT date_col, value FROM test_series WHERE series_id = 'S3_seasonal'),
-    date_col, value, 'SES', 14, {'alpha': 0.3}
-);
+FROM ts_forecast('s3_temp', date_col, value, 'SES', 14, {'alpha': 0.3});
 
 query I
 SELECT COUNT(*) = 0 AS all_match
@@ -144,22 +126,13 @@ ORDER BY series_id;
 statement ok
 CREATE TABLE individual_ets AS
 SELECT 'S1_constant' AS series_id, point_forecast
-FROM ts_forecast(
-    (SELECT date_col, value FROM test_series WHERE series_id = 'S1_constant'),
-    date_col, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1}
-)
+FROM ts_forecast('s1_temp', date_col, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1})
 UNION ALL
 SELECT 'S2_trend' AS series_id, point_forecast
-FROM ts_forecast(
-    (SELECT date_col, value FROM test_series WHERE series_id = 'S2_trend'),
-    date_col, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1}
-)
+FROM ts_forecast('s2_temp', date_col, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1})
 UNION ALL
 SELECT 'S3_seasonal' AS series_id, point_forecast
-FROM ts_forecast(
-    (SELECT date_col, value FROM test_series WHERE series_id = 'S3_seasonal'),
-    date_col, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1}
-);
+FROM ts_forecast('s3_temp', date_col, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1});
 
 query I
 SELECT COUNT(*) = 0 AS all_match
@@ -182,22 +155,13 @@ ORDER BY series_id;
 statement ok
 CREATE TABLE individual_croston AS
 SELECT 'S1_constant' AS series_id, point_forecast
-FROM ts_forecast(
-    (SELECT date_col, value FROM test_series WHERE series_id = 'S1_constant'),
-    date_col, value, 'CrostonClassic', 14, {'alpha': 0.1}
-)
+FROM ts_forecast('s1_temp', date_col, value, 'CrostonClassic', 14, {'alpha': 0.1})
 UNION ALL
 SELECT 'S2_trend' AS series_id, point_forecast
-FROM ts_forecast(
-    (SELECT date_col, value FROM test_series WHERE series_id = 'S2_trend'),
-    date_col, value, 'CrostonClassic', 14, {'alpha': 0.1}
-)
+FROM ts_forecast('s2_temp', date_col, value, 'CrostonClassic', 14, {'alpha': 0.1})
 UNION ALL
 SELECT 'S3_seasonal' AS series_id, point_forecast
-FROM ts_forecast(
-    (SELECT date_col, value FROM test_series WHERE series_id = 'S3_seasonal'),
-    date_col, value, 'CrostonClassic', 14, {'alpha': 0.1}
-);
+FROM ts_forecast('s3_temp', date_col, value, 'CrostonClassic', 14, {'alpha': 0.1});
 
 query I
 SELECT COUNT(*) = 0 AS all_match
