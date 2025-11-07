@@ -75,10 +75,13 @@ std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateThet
 }
 
 std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateHolt(double alpha, double beta) {
-	// statsforecast's Holt is actually AutoETS(model="AAN") which OPTIMIZES alpha/beta
-	// Testing confirms: alpha≈0.9999, beta≈0.0001 (not fixed 0.9/0.1)
-	// Using AutoETS ensures 100% alignment with statsforecast
-	return std::make_unique<::anofoxtime::models::AutoETS>(1, "AAN");
+	// statsforecast's Holt is actually AutoETS(model="AAN")
+	// However, we pin alpha/beta parameters for better performance
+	// This avoids unnecessary optimization while maintaining statsforecast alignment
+	auto model = std::make_unique<::anofoxtime::models::AutoETS>(1, "AAN");
+	model->setPinnedAlpha(alpha);
+	model->setPinnedBeta(beta);
+	return model;
 }
 
 std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateHoltWinters(int seasonal_period,
