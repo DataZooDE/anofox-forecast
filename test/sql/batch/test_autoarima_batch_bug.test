@@ -1,6 +1,7 @@
 # name: test/sql/batch/test_autoarima_batch_bug.test
 # description: Test AutoARIMA batch processing bug - minimal reproduction
 # group: [batch]
+
 # This test documents the AutoARIMA batch processing bug where forecasts differ between batch and individual mode
 
 require anofox_forecast

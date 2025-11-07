@@ -196,7 +196,8 @@ OperatorFinalizeResultType ForecastInOutFinal(ExecutionContext &context, TableFu
 
 		// DEBUG: Log input data
 		std::cerr << "[SCALAR-DEBUG] Building TimeSeries with " << state.values.size() << " points" << std::endl;
-		std::cerr << "[SCALAR-DEBUG] Model: " << bind_data.model_name << ", Horizon: " << bind_data.horizon << std::endl;
+		std::cerr << "[SCALAR-DEBUG] Model: " << bind_data.model_name << ", Horizon: " << bind_data.horizon
+		          << std::endl;
 		if (state.values.size() > 0) {
 			std::cerr << "[SCALAR-DEBUG] First 5 values: ";
 			for (size_t i = 0; i < std::min(size_t(5), state.values.size()); i++) {

@@ -419,10 +419,8 @@ unique_ptr<FunctionData> TSForecastBind(ClientContext &context, AggregateFunctio
 	LogicalTypeId date_type_id = date_type.id();
 
 	// Validate date type - accept INTEGER, DATE, or TIMESTAMP
-	if (date_type_id != LogicalTypeId::INTEGER &&
-	    date_type_id != LogicalTypeId::BIGINT &&
-	    date_type_id != LogicalTypeId::DATE &&
-	    date_type_id != LogicalTypeId::TIMESTAMP) {
+	if (date_type_id != LogicalTypeId::INTEGER && date_type_id != LogicalTypeId::BIGINT &&
+	    date_type_id != LogicalTypeId::DATE && date_type_id != LogicalTypeId::TIMESTAMP) {
 		throw BinderException("First argument (date column) must be INTEGER, BIGINT, DATE, or TIMESTAMP, got " +
 		                      date_type.ToString());
 	}
@@ -502,7 +500,8 @@ unique_ptr<FunctionData> TSForecastBind(ClientContext &context, AggregateFunctio
 	function.return_type = LogicalType::STRUCT(std::move(struct_children));
 
 	// // std::cerr << "[DEBUG] TSForecastBind complete" << std::endl;
-	return make_uniq<ForecastAggregateBindData>(model_name, horizon, model_params, confidence_level, return_insample, date_type_id);
+	return make_uniq<ForecastAggregateBindData>(model_name, horizon, model_params, confidence_level, return_insample,
+	                                            date_type_id);
 }
 
 AggregateFunction CreateTSForecastAggregate() {

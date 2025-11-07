@@ -1,6 +1,7 @@
 # name: test/sql/batch/test_all_models_consistency.test
 # description: Comprehensive batch consistency test for all working models
 # group: [batch]
+
 # This test verifies that models known to work correctly maintain batch/individual consistency
 
 require anofox_forecast

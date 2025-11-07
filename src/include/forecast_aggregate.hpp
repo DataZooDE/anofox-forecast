@@ -44,10 +44,10 @@ struct ForecastAggregateBindData : public FunctionData {
 	Value model_params;
 	double confidence_level;
 	bool return_insample;
-	LogicalTypeId date_type_id;  // Track input date type (INTEGER, DATE, or TIMESTAMP)
+	LogicalTypeId date_type_id; // Track input date type (INTEGER, DATE, or TIMESTAMP)
 
 	explicit ForecastAggregateBindData(string model, int32_t h, Value params, double conf = 0.90, bool insample = false,
-	                                    LogicalTypeId date_type = LogicalTypeId::TIMESTAMP)
+	                                   LogicalTypeId date_type = LogicalTypeId::TIMESTAMP)
 	    : model_name(std::move(model)), horizon(h), model_params(std::move(params)), confidence_level(conf),
 	      return_insample(insample), date_type_id(date_type) {
 	}

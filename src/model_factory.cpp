@@ -116,7 +116,8 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		double lr_rs = GetParam<double>(model_params, "lr_rs", 0.8);
 		int cv_horizon = GetParam<int>(model_params, "cv_horizon", -1);
 		int cv_n_windows = GetParam<int>(model_params, "cv_n_windows", 2);
-		return AnofoxTimeWrapper::CreateAutoMFLES(seasonal_periods, max_rounds, lr_trend, lr_season, lr_rs, cv_horizon, cv_n_windows);
+		return AnofoxTimeWrapper::CreateAutoMFLES(seasonal_periods, max_rounds, lr_trend, lr_season, lr_rs, cv_horizon,
+		                                          cv_n_windows);
 	} else if (model_name == "MSTL") {
 		// Check both 'seasonal_periods' (plural) and 'seasonal_period' (singular)
 		std::vector<int> seasonal_periods;
