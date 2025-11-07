@@ -699,11 +699,21 @@ Gradient-boosted decomposition for multiple seasonal patterns.
 | `lr_trend` | DOUBLE | No | 0.3 | Learning rate for trend |
 | `lr_season` | DOUBLE | No | 0.5 | Learning rate for seasonality |
 | `lr_level` | DOUBLE | No | 0.8 | Learning rate for level |
+| `progressive_trend` | BOOLEAN | No | true | Use StatsForecast progressive trend complexity |
+| `sequential_seasonality` | BOOLEAN | No | true | Fit one seasonality per round (StatsForecast) |
 
 **Validation:**
+
 - All seasonal periods must be positive
 - Learning rates must be between 0 and 1
 - n_iterations must be positive
+
+**Algorithm Behavior:**
+
+- `progressive_trend=true`: Trend complexity increases with rounds (median→linear→advanced). Matches StatsForecast behavior.
+- `progressive_trend=false`: Use fixed trend method for all rounds. Original AnoFox behavior.
+- `sequential_seasonality=true`: Fit seasonalities one per round, rotating through list. Matches StatsForecast behavior.
+- `sequential_seasonality=false`: Fit all seasonalities simultaneously in each round. Original AnoFox behavior.
 
 **Use Case:** Complex seasonality (daily + weekly + yearly)
 
@@ -730,27 +740,74 @@ SELECT TS_FORECAST(date, value, 'MFLES', 12,
        MAP{'seasonal_periods': [12], 'n_iterations': 15,
            'lr_trend': 0.4, 'lr_season': 0.6, 'lr_level': 0.9}) AS forecast
 FROM data;
+
+-- Use original AnoFox algorithm (simultaneous seasonality, fixed trend)
+SELECT TS_FORECAST(date, value, 'MFLES', 12, 
+       MAP{'progressive_trend': false, 'sequential_seasonality': false}) AS forecast
+FROM data;
+
+-- Use StatsForecast algorithm (default - sequential seasonality, progressive trend)
+SELECT TS_FORECAST(date, value, 'MFLES', 12, MAP{}) AS forecast
+FROM data;
 ```
 
 ---
 
 ### 21. AutoMFLES
 
-MFLES with automatically optimized learning rates.
+MFLES with automatically optimized parameters via cross-validation.
 
 **Parameters:**
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `seasonal_periods` | INTEGER[] | No | [12] | Array of seasonal periods |
+| `max_rounds` | INTEGER | No | 10 | Maximum boosting iterations |
+| `lr_trend` | DOUBLE | No | 0.3 | Trend component learning rate (0-1) |
+| `lr_season` | DOUBLE | No | 0.5 | Seasonal component learning rate (0-1) |
+| `lr_rs` | DOUBLE | No | 0.8 | Residual smoothing learning rate (0-1) |
+| `cv_horizon` | INTEGER | No | -1 | CV test size (-1=auto: first seasonal_period) |
+| `cv_n_windows` | INTEGER | No | 2 | Number of cross-validation folds |
+| `metric` | VARCHAR | No | 'mae' | Optimization metric: 'mae', 'rmse', 'mape', 'smape' |
 
-**Use Case:** Multiple seasonality, optimal parameters unknown
+**Validation:**
 
-**Example:**
+- All seasonal periods must be positive
+- Learning rates must be between 0 and 1
+- cv_n_windows must be positive
+- metric must be one of: 'mae', 'rmse', 'mape', 'smape'
+
+**Use Case:** Multiple seasonality with automatic parameter optimization
+
+**Examples:**
+
 ```sql
+-- Basic usage with default metric (MAE)
 SELECT TS_FORECAST(date, value, 'AutoMFLES', 30, 
        MAP{'seasonal_periods': [7, 365]}) AS forecast
 FROM daily_data;
+
+-- Optimize for SMAPE (symmetric mean absolute percentage error)
+SELECT TS_FORECAST(date, value, 'AutoMFLES', 12, 
+       MAP{'seasonal_periods': [12], 'metric': 'smape'}) AS forecast
+FROM monthly_data;
+
+-- Optimize for RMSE with custom CV settings
+SELECT TS_FORECAST(date, value, 'AutoMFLES', 24, 
+       MAP{'seasonal_periods': [24, 168], 
+           'metric': 'rmse',
+           'cv_horizon': 48,
+           'cv_n_windows': 3}) AS forecast
+FROM hourly_data;
+
+-- Custom learning rates optimized for MAPE
+SELECT TS_FORECAST(date, value, 'AutoMFLES', 12, 
+       MAP{'seasonal_periods': [12],
+           'metric': 'mape',
+           'lr_trend': 0.4,
+           'lr_season': 0.6,
+           'lr_rs': 0.9}) AS forecast
+FROM data;
 ```
 
 ---

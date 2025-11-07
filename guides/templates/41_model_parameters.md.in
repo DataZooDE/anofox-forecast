@@ -469,11 +469,21 @@ Gradient-boosted decomposition for multiple seasonal patterns.
 | `lr_trend` | DOUBLE | No | 0.3 | Learning rate for trend component |
 | `lr_season` | DOUBLE | No | 0.5 | Learning rate for seasonality component |
 | `lr_level` | DOUBLE | No | 0.8 | Learning rate for residual smoothing (ES ensemble) |
+| `progressive_trend` | BOOLEAN | No | true | Use StatsForecast progressive trend complexity |
+| `sequential_seasonality` | BOOLEAN | No | true | Fit one seasonality per round (StatsForecast) |
 
 **Validation:**
+
 - All seasonal periods must be positive
 - Learning rates must be between 0 and 1
 - n_iterations must be positive
+
+**Algorithm Behavior:**
+
+- `progressive_trend=true`: Trend complexity increases with rounds (median→linear→advanced). Matches StatsForecast behavior.
+- `progressive_trend=false`: Use fixed trend method for all rounds. Original AnoFox behavior.
+- `sequential_seasonality=true`: Fit seasonalities one per round, rotating through list. Matches StatsForecast behavior.
+- `sequential_seasonality=false`: Fit all seasonalities simultaneously in each round. Original AnoFox behavior.
 
 **Use Case:** Complex seasonality (daily + weekly + yearly)
 
@@ -485,17 +495,32 @@ Gradient-boosted decomposition for multiple seasonal patterns.
 
 ### 21. AutoMFLES
 
-MFLES with automatically optimized learning rates.
+MFLES with automatically optimized parameters via cross-validation.
 
 **Parameters:**
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `seasonal_periods` | INTEGER[] | No | [12] | Array of seasonal periods |
+| `max_rounds` | INTEGER | No | 10 | Maximum boosting iterations |
+| `lr_trend` | DOUBLE | No | 0.3 | Trend component learning rate (0-1) |
+| `lr_season` | DOUBLE | No | 0.5 | Seasonal component learning rate (0-1) |
+| `lr_rs` | DOUBLE | No | 0.8 | Residual smoothing learning rate (0-1) |
+| `cv_horizon` | INTEGER | No | -1 | CV test size (-1=auto: first seasonal_period) |
+| `cv_n_windows` | INTEGER | No | 2 | Number of cross-validation folds |
+| `metric` | VARCHAR | No | 'mae' | Optimization metric: 'mae', 'rmse', 'mape', 'smape' |
 
-**Use Case:** Multiple seasonality, optimal parameters unknown
+**Validation:**
+
+- All seasonal periods must be positive
+- Learning rates must be between 0 and 1
+- cv_n_windows must be positive
+- metric must be one of: 'mae', 'rmse', 'mape', 'smape'
+
+**Use Case:** Multiple seasonality with automatic parameter optimization
 
 **Example:**
+
 <!-- include: test/sql/docs_examples/41_model_parameters_seasonality_24.sql -->
 
 ---

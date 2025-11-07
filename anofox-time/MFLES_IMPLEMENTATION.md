@@ -58,6 +58,94 @@ Optional enhancements for future work:
 #### Build System
 - `CMakeLists.txt` - Updated with new sources
 
+## Algorithm Modes: StatsForecast vs Original
+
+### StatsForecast Alignment (Default)
+
+AnoFox MFLES now supports two algorithm modes to match StatsForecast's implementation exactly:
+
+#### 1. Progressive Trend Complexity (`progressive_trend=true`)
+
+**StatsForecast Behavior:**
+> "The trend estimator will always go from simple to complex. Beginning with a median, then to a linear/piecewise linear, then to some sort of smoother."
+
+**Implementation:**
+- **Round 0**: Median baseline - captures global level
+- **Rounds 1-3**: Linear trend - fits simple trend
+- **Rounds 4+**: Advanced smoother - uses selected `trend_method` (OLS/Siegel/Piecewise)
+
+**Benefit:** Prevents overfitting by starting simple and only adding complexity as needed.
+
+```cpp
+// Enable StatsForecast progressive trend (default)
+MFLES::Params params;
+params.progressive_trend = true;  // median → linear → smoother
+```
+
+#### 2. Sequential Seasonality Fitting (`sequential_seasonality=true`)
+
+**StatsForecast Behavior:**
+> "Multiple seasonality is fit one seasonality per boosting round rather than simultaneously."
+
+**Implementation:**
+- Each boosting round fits **one** seasonal period
+- Rotates through `seasonal_periods` list in round-robin fashion
+- Example: With `[7, 365]`, round 0 fits period 7, round 1 fits period 365, round 2 fits period 7 again, etc.
+
+**Benefit:** Allows each seasonality to be refined incrementally across multiple rounds.
+
+```cpp
+// Enable StatsForecast sequential fitting (default)
+MFLES::Params params;
+params.sequential_seasonality = true;  // one per round
+```
+
+### Original AnoFox Behavior
+
+The original implementation can still be used:
+
+#### Fixed Trend Method (`progressive_trend=false`)
+
+- Uses the same `trend_method` for all boosting rounds
+- Simpler and more predictable
+- May be faster for some datasets
+
+#### Simultaneous Seasonality (`sequential_seasonality=false`)
+
+- Fits **all** seasonal periods in each boosting round
+- May converge faster with fewer iterations
+- Original gradient boosting approach
+
+```cpp
+// Use original AnoFox algorithm
+MFLES::Params params;
+params.progressive_trend = false;
+params.sequential_seasonality = false;
+```
+
+### Performance Implications
+
+| Mode | Iterations Needed | Speed | Accuracy | Best For |
+|------|------------------|-------|----------|----------|
+| StatsForecast (default) | More (10+) | Moderate | High | Matching statsforecast benchmarks |
+| Original AnoFox | Fewer (3-5) | Faster | Good | Speed-critical applications |
+| Mixed | Variable | Balanced | Balanced | Custom tuning |
+
+### Backward Compatibility
+
+**Default Behavior Changed:**
+- Previously: `progressive_trend=false`, `sequential_seasonality=false`
+- Now: `progressive_trend=true`, `sequential_seasonality=true`
+
+**Migration:** To preserve old behavior:
+
+```sql
+-- Use original AnoFox algorithm
+SELECT TS_FORECAST(date, value, 'MFLES', 12, 
+    MAP{'progressive_trend': false, 'sequential_seasonality': false})
+FROM data;
+```
+
 ## Key Features
 
 ### 1. Robust Trend Estimation
