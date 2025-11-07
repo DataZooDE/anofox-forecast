@@ -5,6 +5,7 @@
 
 // Need to include full types for unique_ptr destructor
 #include "anofox-time/models/iforecaster.hpp"
+#include "anofox-time/models/method_name_wrapper.hpp"
 
 namespace duckdb {
 
@@ -15,33 +16,36 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 	// Validate parameters first
 	ValidateModelParams(model_name, model_params);
 
+	// Create the base model
+	std::unique_ptr<::anofoxtime::models::IForecaster> model;
+
 	if (model_name == "SMA") {
 		int window = GetParam<int>(model_params, "window", 5);
 		// std::cerr << "[DEBUG] Creating SMA model with window: " << window << std::endl;
-		return AnofoxTimeWrapper::CreateSMA(window);
+		model = AnofoxTimeWrapper::CreateSMA(window);
 	} else if (model_name == "Naive") {
 		// std::cerr << "[DEBUG] Creating Naive model" << std::endl;
-		return AnofoxTimeWrapper::CreateNaive();
+		model = AnofoxTimeWrapper::CreateNaive();
 	} else if (model_name == "SeasonalNaive") {
 		int period = GetRequiredParam<int>(model_params, "seasonal_period");
 		// std::cerr << "[DEBUG] Creating SeasonalNaive model with period: " << period << std::endl;
-		return AnofoxTimeWrapper::CreateSeasonalNaive(period);
+		model = AnofoxTimeWrapper::CreateSeasonalNaive(period);
 	} else if (model_name == "SES") {
 		double alpha = GetParam<double>(model_params, "alpha", 0.3);
 		// std::cerr << "[DEBUG] Creating SES model with alpha: " << alpha << std::endl;
-		return AnofoxTimeWrapper::CreateSES(alpha);
+		model = AnofoxTimeWrapper::CreateSES(alpha);
 	} else if (model_name == "Theta") {
 		int seasonal_period = GetParam<int>(model_params, "seasonal_period", 1);
 		double theta_param = GetParam<double>(model_params, "theta", 2.0);
 		// std::cerr << "[DEBUG] Creating Theta model with period: " << seasonal_period
 		//           << ", theta: " << theta_param << std::endl;
-		return AnofoxTimeWrapper::CreateTheta(seasonal_period, theta_param);
+		model = AnofoxTimeWrapper::CreateTheta(seasonal_period, theta_param);
 	} else if (model_name == "Holt") {
 		double alpha = GetParam<double>(model_params, "alpha", 0.3);
 		double beta = GetParam<double>(model_params, "beta", 0.1);
 		// std::cerr << "[DEBUG] Creating Holt model with alpha: " << alpha
 		//           << ", beta: " << beta << std::endl;
-		return AnofoxTimeWrapper::CreateHolt(alpha, beta);
+		model = AnofoxTimeWrapper::CreateHolt(alpha, beta);
 	} else if (model_name == "HoltWinters") {
 		int seasonal_period = GetRequiredParam<int>(model_params, "seasonal_period");
 		bool multiplicative = GetParam<int>(model_params, "multiplicative", 0) != 0;
@@ -50,13 +54,13 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		double gamma = GetParam<double>(model_params, "gamma", 0.1);
 		// std::cerr << "[DEBUG] Creating HoltWinters model with period: " << seasonal_period
 		//           << ", multiplicative: " << multiplicative << std::endl;
-		return AnofoxTimeWrapper::CreateHoltWinters(seasonal_period, multiplicative, alpha, beta, gamma);
+		model = AnofoxTimeWrapper::CreateHoltWinters(seasonal_period, multiplicative, alpha, beta, gamma);
 	}
 #ifdef HAVE_EIGEN3
 	else if (model_name == "AutoARIMA") {
 		int seasonal_period = GetParam<int>(model_params, "seasonal_period", 0);
 		// std::cerr << "[DEBUG] Creating AutoARIMA model with period: " << seasonal_period << std::endl;
-		return AnofoxTimeWrapper::CreateAutoARIMA(seasonal_period);
+		model = AnofoxTimeWrapper::CreateAutoARIMA(seasonal_period);
 	}
 #endif
 	else if (model_name == "ETS") {
@@ -72,7 +76,7 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		double phi = GetParam<double>(model_params, "phi", 0.98);
 		// std::cerr << "[DEBUG] Creating ETS model with error:" << error_type
 		//           << ", trend:" << trend_type << ", season:" << season_type << std::endl;
-		return AnofoxTimeWrapper::CreateETS(error_type, trend_type, season_type, season_length, alpha, beta, gamma,
+		model = AnofoxTimeWrapper::CreateETS(error_type, trend_type, season_type, season_length, alpha, beta, gamma,
 		                                    phi);
 	} else if (model_name == "AutoETS") {
 		// Accept both 'season_length' and 'seasonal_period' for compatibility
@@ -80,7 +84,7 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		                                                            : GetParam<int>(model_params, "seasonal_period", 1);
 		std::string model_spec = GetParam<std::string>(model_params, "model", "ZZZ");
 
-		return AnofoxTimeWrapper::CreateAutoETS(season_length, model_spec);
+		model = AnofoxTimeWrapper::CreateAutoETS(season_length, model_spec);
 	} else if (model_name == "MFLES") {
 		// Check both 'seasonal_periods' (plural) and 'seasonal_period' (singular)
 		std::vector<int> seasonal_periods;
@@ -99,7 +103,7 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		double lr_level = GetParam<double>(model_params, "lr_level", 0.8);
 		bool progressive_trend = GetParam<bool>(model_params, "progressive_trend", true);
 		bool sequential_seasonality = GetParam<bool>(model_params, "sequential_seasonality", true);
-		return AnofoxTimeWrapper::CreateMFLES(seasonal_periods, n_iterations, lr_trend, lr_season, lr_level,
+		model = AnofoxTimeWrapper::CreateMFLES(seasonal_periods, n_iterations, lr_trend, lr_season, lr_level,
 		                                      progressive_trend, sequential_seasonality);
 	} else if (model_name == "AutoMFLES") {
 		// Check both 'seasonal_periods' (plural) and 'seasonal_period' (singular)
@@ -136,7 +140,7 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 				". Must be one of: mae, rmse, mape, smape");
 		}
 		
-		return AnofoxTimeWrapper::CreateAutoMFLES(seasonal_periods, max_rounds, lr_trend, lr_season, lr_rs, cv_horizon,
+		model = AnofoxTimeWrapper::CreateAutoMFLES(seasonal_periods, max_rounds, lr_trend, lr_season, lr_rs, cv_horizon,
 		                                          cv_n_windows, metric);
 	} else if (model_name == "MSTL") {
 		// Check both 'seasonal_periods' (plural) and 'seasonal_period' (singular)
@@ -152,7 +156,7 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		int trend_method = GetParam<int>(model_params, "trend_method", 0);       // 0=Linear
 		int seasonal_method = GetParam<int>(model_params, "seasonal_method", 0); // 0=Cyclic
 		// std::cerr << "[DEBUG] Creating MSTL model" << std::endl;
-		return AnofoxTimeWrapper::CreateMSTL(seasonal_periods, trend_method, seasonal_method);
+		model = AnofoxTimeWrapper::CreateMSTL(seasonal_periods, trend_method, seasonal_method);
 	} else if (model_name == "AutoMSTL") {
 		// Check both 'seasonal_periods' (plural) and 'seasonal_period' (singular)
 		std::vector<int> seasonal_periods;
@@ -165,13 +169,13 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 			seasonal_periods = {12};
 		}
 		// std::cerr << "[DEBUG] Creating AutoMSTL model" << std::endl;
-		return AnofoxTimeWrapper::CreateAutoMSTL(seasonal_periods);
+		model = AnofoxTimeWrapper::CreateAutoMSTL(seasonal_periods);
 	}
 	// Additional basic models
 	else if (model_name == "RandomWalkWithDrift") {
-		return AnofoxTimeWrapper::CreateRandomWalkWithDrift();
+		model = AnofoxTimeWrapper::CreateRandomWalkWithDrift();
 	} else if (model_name == "SESOptimized") {
-		return AnofoxTimeWrapper::CreateSESOptimized();
+		model = AnofoxTimeWrapper::CreateSESOptimized();
 	}
 #ifdef HAVE_EIGEN3
 	// ARIMA manual
@@ -184,7 +188,7 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		int Q = GetParam<int>(model_params, "Q", 0);
 		int s = GetParam<int>(model_params, "s", 0);
 		bool include_intercept = GetParam<int>(model_params, "include_intercept", 1) != 0;
-		return AnofoxTimeWrapper::CreateARIMA(p, d, q, P, D, Q, s, include_intercept);
+		model = AnofoxTimeWrapper::CreateARIMA(p, d, q, P, D, Q, s, include_intercept);
 	}
 #endif
 	// TBATS
@@ -206,7 +210,7 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		double damping_param = GetParam<double>(model_params, "damping_param", 0.98);
 		int ar_order = GetParam<int>(model_params, "ar_order", 0);
 		int ma_order = GetParam<int>(model_params, "ma_order", 0);
-		return AnofoxTimeWrapper::CreateTBATS(seasonal_periods, use_box_cox, box_cox_lambda, use_trend,
+		model = AnofoxTimeWrapper::CreateTBATS(seasonal_periods, use_box_cox, box_cox_lambda, use_trend,
 		                                      use_damped_trend, damping_param, ar_order, ma_order);
 	} else if (model_name == "AutoTBATS") {
 		// Check both 'seasonal_periods' (plural) and 'seasonal_period' (singular)
@@ -219,49 +223,49 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		} else {
 			seasonal_periods = {12};
 		}
-		return AnofoxTimeWrapper::CreateAutoTBATS(seasonal_periods);
+		model = AnofoxTimeWrapper::CreateAutoTBATS(seasonal_periods);
 	}
 	// Theta variants
 	else if (model_name == "OptimizedTheta") {
 		int seasonal_period = GetParam<int>(model_params, "seasonal_period", 1);
-		return AnofoxTimeWrapper::CreateOptimizedTheta(seasonal_period);
+		model = AnofoxTimeWrapper::CreateOptimizedTheta(seasonal_period);
 	} else if (model_name == "DynamicTheta") {
 		int seasonal_period = GetParam<int>(model_params, "seasonal_period", 1);
 		double theta_param = GetParam<double>(model_params, "theta", 2.0);
-		return AnofoxTimeWrapper::CreateDynamicTheta(seasonal_period, theta_param);
+		model = AnofoxTimeWrapper::CreateDynamicTheta(seasonal_period, theta_param);
 	} else if (model_name == "DynamicOptimizedTheta") {
 		int seasonal_period = GetParam<int>(model_params, "seasonal_period", 1);
-		return AnofoxTimeWrapper::CreateDynamicOptimizedTheta(seasonal_period);
+		model = AnofoxTimeWrapper::CreateDynamicOptimizedTheta(seasonal_period);
 	}
 	// Seasonal exponential smoothing
 	else if (model_name == "SeasonalES") {
 		int seasonal_period = GetRequiredParam<int>(model_params, "seasonal_period");
 		double alpha = GetParam<double>(model_params, "alpha", 0.2);
 		double gamma = GetParam<double>(model_params, "gamma", 0.1);
-		return AnofoxTimeWrapper::CreateSeasonalES(seasonal_period, alpha, gamma);
+		model = AnofoxTimeWrapper::CreateSeasonalES(seasonal_period, alpha, gamma);
 	} else if (model_name == "SeasonalESOptimized") {
 		int seasonal_period = GetRequiredParam<int>(model_params, "seasonal_period");
-		return AnofoxTimeWrapper::CreateSeasonalESOptimized(seasonal_period);
+		model = AnofoxTimeWrapper::CreateSeasonalESOptimized(seasonal_period);
 	} else if (model_name == "SeasonalWindowAverage") {
 		int seasonal_period = GetRequiredParam<int>(model_params, "seasonal_period");
 		int window = GetParam<int>(model_params, "window", 5);
-		return AnofoxTimeWrapper::CreateSeasonalWindowAverage(seasonal_period, window);
+		model = AnofoxTimeWrapper::CreateSeasonalWindowAverage(seasonal_period, window);
 	}
 	// Intermittent demand models
 	else if (model_name == "CrostonClassic") {
-		return AnofoxTimeWrapper::CreateCrostonClassic();
+		model = AnofoxTimeWrapper::CreateCrostonClassic();
 	} else if (model_name == "CrostonOptimized") {
-		return AnofoxTimeWrapper::CreateCrostonOptimized();
+		model = AnofoxTimeWrapper::CreateCrostonOptimized();
 	} else if (model_name == "CrostonSBA") {
-		return AnofoxTimeWrapper::CreateCrostonSBA();
+		model = AnofoxTimeWrapper::CreateCrostonSBA();
 	} else if (model_name == "ADIDA") {
-		return AnofoxTimeWrapper::CreateADIDA();
+		model = AnofoxTimeWrapper::CreateADIDA();
 	} else if (model_name == "IMAPA") {
-		return AnofoxTimeWrapper::CreateIMAPA();
+		model = AnofoxTimeWrapper::CreateIMAPA();
 	} else if (model_name == "TSB") {
 		double alpha_d = GetParam<double>(model_params, "alpha_d", 0.1);
 		double alpha_p = GetParam<double>(model_params, "alpha_p", 0.1);
-		return AnofoxTimeWrapper::CreateTSB(alpha_d, alpha_p);
+		model = AnofoxTimeWrapper::CreateTSB(alpha_d, alpha_p);
 	} else {
 		auto supported_models = GetSupportedModels();
 		std::string supported_list;
@@ -272,6 +276,17 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		}
 		throw InvalidInputException("Unknown model: '" + model_name + "'. Supported models: " + supported_list);
 	}
+
+	// Apply method_name wrapper if custom name was provided
+	if (HasParam(model_params, "method_name")) {
+		std::string custom_name = GetParam<std::string>(model_params, "method_name", "");
+		if (!custom_name.empty()) {
+			model = std::make_unique<::anofoxtime::models::MethodNameWrapper>(
+				std::move(model), custom_name);
+		}
+	}
+
+	return model;
 }
 
 std::vector<std::string> ModelFactory::GetSupportedModels() {
@@ -577,6 +592,14 @@ void ModelFactory::ValidateModelParams(const std::string &model_name, const Valu
 		}
 	} else {
 		throw InvalidInputException("Unknown model: '" + model_name + "'");
+	}
+
+	// Universal parameter: method_name (optional for all models)
+	if (HasParam(model_params, "method_name")) {
+		std::string method_name_str = GetParam<std::string>(model_params, "method_name", "");
+		if (method_name_str.empty()) {
+			throw InvalidInputException("method_name parameter cannot be empty");
+		}
 	}
 }
 
