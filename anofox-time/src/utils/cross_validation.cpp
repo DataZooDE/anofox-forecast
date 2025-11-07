@@ -156,4 +156,19 @@ void CVResults::computeAggregatedMetrics() {
 	smape = Metrics::smape(all_actuals, all_forecasts);
 }
 
+double CVResults::getMetric(CVMetric metric) const {
+	switch (metric) {
+		case CVMetric::MAE:
+			return mae;
+		case CVMetric::RMSE:
+			return rmse;
+		case CVMetric::MAPE:
+			return mape.value_or(std::numeric_limits<double>::infinity());
+		case CVMetric::SMAPE:
+			return smape.value_or(std::numeric_limits<double>::infinity());
+		default:
+			return std::numeric_limits<double>::infinity();
+	}
+}
+
 } // namespace anofoxtime::utils

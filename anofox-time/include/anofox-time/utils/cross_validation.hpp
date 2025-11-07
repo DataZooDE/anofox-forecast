@@ -18,6 +18,16 @@ enum class CVStrategy {
 };
 
 /**
+ * @brief Optimization metric for cross-validation
+ */
+enum class CVMetric {
+	MAE,    // Mean Absolute Error
+	RMSE,   // Root Mean Squared Error  
+	MAPE,   // Mean Absolute Percentage Error
+	SMAPE   // Symmetric Mean Absolute Percentage Error
+};
+
+/**
  * @brief Configuration for time series cross-validation
  */
 struct CVConfig {
@@ -70,6 +80,13 @@ struct CVResults {
 	 * @brief Compute aggregated metrics from all folds
 	 */
 	void computeAggregatedMetrics();
+
+	/**
+	 * @brief Get the value of a specific metric
+	 * @param metric The metric to retrieve
+	 * @return The metric value
+	 */
+	double getMetric(CVMetric metric) const;
 };
 
 /**
