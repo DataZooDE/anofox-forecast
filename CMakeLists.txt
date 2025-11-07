@@ -3,6 +3,8 @@ cmake_minimum_required(VERSION 3.5)
 # Set extension name here
 set(TARGET_NAME anofox_forecast)
 
+project(${TARGET_NAME} LANGUAGES C CXX)
+
 # Force C++17 standard (required by anofox-time)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -37,8 +39,6 @@ endif()
 
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
 set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
-
-project(${TARGET_NAME})
 include_directories(src/include)
 
 # Include only the anofox-time source files we need (not all of them)

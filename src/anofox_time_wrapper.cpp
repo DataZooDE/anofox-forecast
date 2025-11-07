@@ -1,5 +1,7 @@
 // Define this BEFORE including any anofox-time headers
+#ifndef ANOFOX_NO_LOGGING
 #define ANOFOX_NO_LOGGING
+#endif
 
 // This file isolates all anofox-time includes to prevent namespace conflicts
 #include "anofox_time_wrapper.hpp"
