@@ -6,6 +6,9 @@
 #include <chrono>
 #include <string>
 
+// Include CVMetric enum (needed for default parameter value)
+#include "anofox-time/utils/cross_validation.hpp"
+
 // Forward declare anofoxtime types in global namespace
 namespace anofoxtime {
 namespace core {
