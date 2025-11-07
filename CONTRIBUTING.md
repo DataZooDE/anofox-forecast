@@ -40,6 +40,41 @@ Thank you for your interest in contributing to Anofox Forecast! This document pr
    make test-docs
    ```
 
+5. Run code quality checks before committing:
+   ```bash
+   ./scripts/check_code_quality.sh
+   ```
+
+### Code Quality
+
+Before submitting your changes, ensure they pass all code quality checks:
+
+#### Format Checking
+
+The project uses automated code formatters:
+- **C/C++ files**: `clang-format` version 11.0.1
+- **Python files**: `black` version 24+
+- **CMake files**: `cmake-format`
+
+**Check formatting locally:**
+```bash
+./scripts/check_code_quality.sh
+```
+
+**Auto-fix formatting issues:**
+```bash
+./scripts/check_code_quality.sh --fix
+# Or use make:
+make format-fix
+```
+
+**Install formatting tools:**
+```bash
+pip install "black>=24" clang_format==11.0.1 cmake-format
+```
+
+These same checks run in GitHub Actions CI, so running them locally before pushing will catch issues early.
+
 ### Documentation
 
 - **Guide templates**: Edit files in `guides/templates/*.md.in`
