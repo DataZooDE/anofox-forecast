@@ -146,6 +146,7 @@ private:
 	bool test_seasonal_ = true;
 	bool approximation_ = false;
 	int max_iterations_ = 100;
+	bool use_simple_fallback_models_ = false;  // Set to true when constant/linear data detected
 
 	AutoARIMAComponents components_;
 	AutoARIMAParameters parameters_;

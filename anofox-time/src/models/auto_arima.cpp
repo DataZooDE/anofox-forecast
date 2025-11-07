@@ -101,6 +101,51 @@ bool checkPolynomialRoots(const Eigen::VectorXd &coeffs, double tolerance = 1.01
 	return max_eigenvalue_abs < (1.0 / tolerance);
 }
 
+// Calculate variance of data
+double calculateVariance(const std::vector<double>& data) {
+	if (data.empty()) return 0.0;
+	double mean = std::accumulate(data.begin(), data.end(), 0.0) / data.size();
+	double sq_sum = 0.0;
+	for (const auto& val : data) {
+		sq_sum += (val - mean) * (val - mean);
+	}
+	return sq_sum / data.size();
+}
+
+// Check if data is perfectly linear by fitting trend and checking residuals
+double checkLinearResiduals(const std::vector<double>& data) {
+	if (data.size() < 2) return 0.0;
+	
+	// Fit simple linear trend: y = a + b*x
+	size_t n = data.size();
+	double sum_x = 0, sum_y = 0, sum_xy = 0, sum_x2 = 0;
+	
+	for (size_t i = 0; i < n; ++i) {
+		double x = static_cast<double>(i);
+		double y = data[i];
+		sum_x += x;
+		sum_y += y;
+		sum_xy += x * y;
+		sum_x2 += x * x;
+	}
+	
+	double denom = (n * sum_x2 - sum_x * sum_x);
+	if (std::abs(denom) < 1e-10) return 0.0;
+	
+	double slope = (n * sum_xy - sum_x * sum_y) / denom;
+	double intercept = (sum_y - slope * sum_x) / n;
+	
+	// Calculate residual variance
+	double residual_sq_sum = 0.0;
+	for (size_t i = 0; i < n; ++i) {
+		double predicted = intercept + slope * static_cast<double>(i);
+		double residual = data[i] - predicted;
+		residual_sq_sum += residual * residual;
+	}
+	
+	return residual_sq_sum / n;
+}
+
 // Check if ARIMA model is admissible (AR and MA polynomials have roots outside unit circle)
 bool checkModelAdmissibility(const std::unique_ptr<anofoxtime::models::ARIMA> &model, double tolerance = 1.01) {
 	// Check AR polynomial (non-seasonal)
@@ -506,6 +551,18 @@ int AutoARIMA::determineSeasonalDifferencing(const std::vector<double> &data,
 std::vector<AutoARIMA::CandidateConfig> AutoARIMA::generateStepwiseCandidates(int d, int D) const {
 	std::vector<CandidateConfig> candidates;
 
+	// Add simple fallback models for constant/linear data
+	if (use_simple_fallback_models_) {
+		// ARIMA(1,0,0) with intercept - for constant data
+		candidates.push_back(CandidateConfig{1, 0, 0, 0, 0, 0, false, true});
+		
+		// ARIMA(0,1,1) with drift - for linear trends
+		candidates.push_back(CandidateConfig{0, 1, 1, 0, 0, 0, true, false});
+		
+		// ARIMA(1,1,0) with drift - alternative for linear trends
+		candidates.push_back(CandidateConfig{1, 1, 0, 0, 0, 0, true, false});
+	}
+
 	// Baseline models for stepwise search (matching R's auto.arima)
 	// Model 1: ARIMA(0,d,0) - white noise after differencing
 	candidates.push_back(CandidateConfig{0, d, 0, 0, D, 0, false, d == 0});
@@ -557,6 +614,18 @@ std::vector<AutoARIMA::CandidateConfig> AutoARIMA::generateStepwiseCandidates(in
 
 std::vector<AutoARIMA::CandidateConfig> AutoARIMA::generateExhaustiveCandidates(int d, int D) const {
 	std::vector<CandidateConfig> candidates;
+
+	// Add simple fallback models for constant/linear data
+	if (use_simple_fallback_models_) {
+		// ARIMA(1,0,0) with intercept - for constant data
+		candidates.push_back(CandidateConfig{1, 0, 0, 0, 0, 0, false, true});
+		
+		// ARIMA(0,1,1) with drift - for linear trends
+		candidates.push_back(CandidateConfig{0, 1, 1, 0, 0, 0, true, false});
+		
+		// ARIMA(1,1,0) with drift - alternative for linear trends
+		candidates.push_back(CandidateConfig{1, 1, 0, 0, 0, 0, true, false});
+	}
 
 	// Generate all combinations within bounds
 	for (int p = 0; p <= max_p_; ++p) {
@@ -684,6 +753,72 @@ void AutoARIMA::fit(const core::TimeSeries &ts) {
 	diagnostics_ = AutoARIMADiagnostics{};
 	diagnostics_.training_data_size = n;
 	diagnostics_.stepwise_used = stepwise_;
+
+	// Check for problematic data characteristics (constant or perfectly linear)
+	// and enable simple fallback models to ensure production-ready behavior
+	double variance = calculateVariance(data);
+	bool is_constant = (variance < 1e-10);
+	
+	// Special handling for truly constant data
+	// Constant data cannot be modeled by ARIMA (even after differencing), so we create a trivial forecast
+	if (is_constant) {
+		ANOFOX_INFO("AutoARIMA: Detected constant data (variance < 1e-10), using mean-based forecast");
+		
+		// Calculate mean
+		double mean = std::accumulate(data.begin(), data.end(), 0.0) / data.size();
+		
+		// Create trivial components (ARIMA(0,0,1) equivalent - white noise around mean)
+		components_.p = 0;
+		components_.d = 0;
+		components_.q = 1;  // Minimum required by ARIMA
+		components_.P = 0;
+		components_.D = 0;
+		components_.Q = 0;
+		components_.seasonal_period = seasonal_period_;
+		components_.include_constant = true;
+		components_.include_drift = false;
+		
+		// Set parameters
+		parameters_.ma_coefficients = {0.0};  // Zero MA coefficient = white noise
+		parameters_.intercept = mean;
+		
+		// Create fitted values (all equal to mean for constant data)
+		fitted_ = std::vector<double>(n, mean);
+		residuals_ = std::vector<double>(n, 0.0);
+		
+		// Set metrics
+		metrics_.log_likelihood = 0.0;
+		metrics_.aic = 0.0;
+		metrics_.aicc = 0.0;
+		metrics_.bic = 0.0;
+		metrics_.sigma2 = 0.0;
+		
+		// Set diagnostics
+		diagnostics_.models_evaluated = 1;
+		diagnostics_.models_failed = 0;
+		
+		// Don't create fitted_model_ for constant data - predict() will handle it specially
+		fitted_model_ = nullptr;
+		is_fitted_ = true;
+		
+		ANOFOX_INFO("AutoARIMA: Using constant forecast (mean = {:.2f})", mean);
+		return;
+	}
+	
+	bool is_linear = false;
+	if (!is_constant) {
+		double residual_variance = checkLinearResiduals(data);
+		is_linear = (residual_variance < 1e-8 * variance);
+	}
+
+	if (is_linear) {
+		// Log the detection for debugging
+		ANOFOX_INFO("AutoARIMA: Detected linear data (residual variance < 1e-8 * variance), adding simple fallback models");
+		
+		// Force inclusion of simple models in candidate list
+		// These will be added to the stepwise/exhaustive search
+		use_simple_fallback_models_ = true;
+	}
 
 	// Adjust max parameters based on series length (R's approach)
 	// This prevents overfitting on short series
@@ -871,16 +1006,36 @@ void AutoARIMA::fit(const core::TimeSeries &ts) {
 }
 
 core::Forecast AutoARIMA::predict(int horizon) {
-	if (!is_fitted_ || !fitted_model_) {
+	if (!is_fitted_) {
 		throw std::logic_error("AutoARIMA::predict called before fit.");
 	}
+	
+	// Handle constant data case (fitted_model_ is nullptr)
+	if (!fitted_model_) {
+		// Return constant forecast equal to the mean
+		core::Forecast forecast;
+		forecast.point.push_back(std::vector<double>(horizon, parameters_.intercept));
+		return forecast;
+	}
+	
 	return fitted_model_->predict(horizon);
 }
 
 core::Forecast AutoARIMA::predictWithConfidence(int horizon, double confidence) {
-	if (!is_fitted_ || !fitted_model_) {
+	if (!is_fitted_) {
 		throw std::logic_error("AutoARIMA::predictWithConfidence called before fit.");
 	}
+	
+	// Handle constant data case (fitted_model_ is nullptr)
+	if (!fitted_model_) {
+		// Return constant forecast with zero-width prediction intervals
+		core::Forecast forecast;
+		forecast.point.push_back(std::vector<double>(horizon, parameters_.intercept));
+		forecast.lower = core::Forecast::Matrix{std::vector<double>(horizon, parameters_.intercept)};
+		forecast.upper = core::Forecast::Matrix{std::vector<double>(horizon, parameters_.intercept)};
+		return forecast;
+	}
+	
 	return fitted_model_->predictWithConfidence(horizon, confidence);
 }
 
