@@ -60,17 +60,20 @@ FROM insample_result;
 ----
 true
 
-# Test 6: Custom confidence level
+# Test 6: Custom confidence level (95%)
 statement ok
 CREATE TABLE conf_result AS
 SELECT TS_FORECAST_AGG(date_col, value, 'Naive', 5, {'confidence_level': 0.95}) AS result
 FROM test_data;
 
-query R
-SELECT result.confidence_level
-FROM conf_result;
+# Verify that 95% confidence level generates lower_95 and upper_95 columns
+query I
+SELECT COUNT(*) = 5 FROM (
+    SELECT UNNEST(result.lower_95) AS lower, UNNEST(result.upper_95) AS upper
+    FROM conf_result
+);
 ----
-0.950000
+true
 
 # Test 7: Multiple series with ts_forecast_by
 statement ok

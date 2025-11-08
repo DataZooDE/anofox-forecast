@@ -118,12 +118,13 @@ WHERE forecast_step = 1 AND group_col = 'product_A';
 ----
 true
 
-# Verify confidence level
-query R
-SELECT DISTINCT confidence_level
-FROM forecasts;
+# Verify confidence intervals (95% level means lower_95 and upper_95 columns exist)
+query I
+SELECT COUNT(*) = 14
+FROM forecasts
+WHERE forecast_step <= 14 AND group_col = 'product_A' AND lower_95 IS NOT NULL AND upper_95 IS NOT NULL;
 ----
-0.950000
+true
 
 # STEP 4: Final Report
 statement ok
@@ -133,10 +134,9 @@ SELECT
     e.length AS historical_points,
     e.mean,
     e.n_null AS nulls_in_raw,
-    f.confidence_level,
     f.model_name
 FROM eda_results e
-JOIN (SELECT DISTINCT group_col, confidence_level, model_name FROM forecasts) f 
+JOIN (SELECT DISTINCT group_col, model_name FROM forecasts) f 
 ON e.series_id = f.group_col;
 
 # Verify final report

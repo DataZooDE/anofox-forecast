@@ -15,49 +15,49 @@ SELECT
     (100.0 + i * 2.5)::DOUBLE AS value
 FROM generate_series(1, 30) t(i);
 
-# Test 1: Custom method_name with Naive model
+# Test 1: Custom model_name with Naive model
 query I
-SELECT method_name = 'MyCustomNaive'
+SELECT model_name = 'MyCustomNaive'
 FROM ts_forecast(test_data, date_col, value, 'Naive', 5, {'method_name': 'MyCustomNaive'})
 LIMIT 1;
 ----
 true
 
-# Test 2: Custom method_name with SES model
+# Test 2: Custom model_name with SES model
 query I
-SELECT method_name = 'CustomSmoother'
+SELECT model_name = 'CustomSmoother'
 FROM ts_forecast(test_data, date_col, value, 'SES', 5, {'method_name': 'CustomSmoother', 'alpha': 0.3})
 LIMIT 1;
 ----
 true
 
-# Test 3: Custom method_name with Holt model
+# Test 3: Custom model_name with Holt model
 query I
-SELECT method_name = 'HoltV2'
+SELECT model_name = 'HoltV2'
 FROM ts_forecast(test_data, date_col, value, 'Holt', 5, {'method_name': 'HoltV2', 'alpha': 0.8, 'beta': 0.2})
 LIMIT 1;
 ----
 true
 
-# Test 4: Custom method_name with AutoETS model
+# Test 4: Custom model_name with AutoETS model
 query I
-SELECT method_name = 'MyAutoETS'
+SELECT model_name = 'MyAutoETS'
 FROM ts_forecast(test_data, date_col, value, 'AutoETS', 5, {'method_name': 'MyAutoETS', 'season_length': 7})
 LIMIT 1;
 ----
 true
 
-# Test 5: Custom method_name with Theta model
+# Test 5: Custom model_name with Theta model
 query I
-SELECT method_name = 'ThetaCustom'
+SELECT model_name = 'ThetaCustom'
 FROM ts_forecast(test_data, date_col, value, 'Theta', 5, {'method_name': 'ThetaCustom', 'seasonal_period': 7})
 LIMIT 1;
 ----
 true
 
-# Test 6: Custom method_name with SMA model
+# Test 6: Custom model_name with SMA model
 query I
-SELECT method_name = 'MovingAvg5'
+SELECT model_name = 'MovingAvg5'
 FROM ts_forecast(test_data, date_col, value, 'SMA', 5, {'method_name': 'MovingAvg5', 'window': 5})
 LIMIT 1;
 ----
@@ -86,10 +86,10 @@ UNION ALL
 SELECT * FROM ses_result;
 
 query II
-SELECT DISTINCT method_name, COUNT(*) 
+SELECT DISTINCT model_name, COUNT(*) 
 FROM multi_model_results 
-GROUP BY method_name 
-ORDER BY method_name;
+GROUP BY model_name 
+ORDER BY model_name;
 ----
 NaiveCustom	5
 SESCustom	5

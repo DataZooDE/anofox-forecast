@@ -169,7 +169,7 @@ true
 query I
 SELECT
     CASE
-        WHEN result.lower[1] < result.point_forecast[1] AND result.point_forecast[1] < result.upper[1]
+        WHEN result.lower_90[1] < result.point_forecast[1] AND result.point_forecast[1] < result.upper_90[1]
         THEN true
         ELSE false
     END

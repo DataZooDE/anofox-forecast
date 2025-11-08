@@ -69,8 +69,8 @@ SELECT
     UNNEST(result.forecast_step) AS forecast_step,
     UNNEST(result.forecast_timestamp) AS forecast_date,
     UNNEST(result.point_forecast) AS point_forecast,
-    UNNEST(result.lower) AS lower,
-    UNNEST(result.upper) AS upper,
+    UNNEST(result.lower_90) AS lower,
+    UNNEST(result.upper_90) AS upper,
     result.model_name
 FROM forecasts_3id;
 
@@ -147,8 +147,8 @@ SELECT
     SPLIT_PART(composite_id, '|', 3) AS product,
     forecast_step,
     point_forecast,
-    lower,
-    upper,
+    lower_90 AS lower,
+    upper_90 AS upper,
     model_name
 FROM forecasts_composite;
 

@@ -23,7 +23,7 @@ method_name parameter cannot be empty
 
 # Test 2: Method name with spaces
 query I
-SELECT method_name = 'My Custom Naive'
+SELECT model_name = 'My Custom Naive'
 FROM ts_forecast(test_data, date_col, value, 'Naive', 5, {'method_name': 'My Custom Naive'})
 LIMIT 1;
 ----
@@ -31,7 +31,7 @@ true
 
 # Test 3: Method name with special characters
 query I
-SELECT method_name = 'Naive-v2.0_test'
+SELECT model_name = 'Naive-v2.0_test'
 FROM ts_forecast(test_data, date_col, value, 'Naive', 5, {'method_name': 'Naive-v2.0_test'})
 LIMIT 1;
 ----
@@ -39,7 +39,7 @@ true
 
 # Test 4: Method name with numbers
 query I
-SELECT method_name = 'Model123'
+SELECT model_name = 'Model123'
 FROM ts_forecast(test_data, date_col, value, 'Naive', 5, {'method_name': 'Model123'})
 LIMIT 1;
 ----
@@ -47,7 +47,7 @@ true
 
 # Test 5: Long method name
 query I
-SELECT method_name = 'ThisIsAVeryLongMethodNameThatShouldStillWorkCorrectlyWithoutAnyIssues'
+SELECT model_name = 'ThisIsAVeryLongMethodNameThatShouldStillWorkCorrectlyWithoutAnyIssues'
 FROM ts_forecast(test_data, date_col, value, 'Naive', 5, {'method_name': 'ThisIsAVeryLongMethodNameThatShouldStillWorkCorrectlyWithoutAnyIssues'})
 LIMIT 1;
 ----
@@ -55,7 +55,7 @@ true
 
 # Test 6: Method name with unicode characters
 query I
-SELECT method_name = 'Naïve_Método_模型'
+SELECT model_name = 'Naïve_Método_模型'
 FROM ts_forecast(test_data, date_col, value, 'Naive', 5, {'method_name': 'Naïve_Método_模型'})
 LIMIT 1;
 ----
@@ -63,7 +63,7 @@ true
 
 # Test 7: Method name that matches existing model name
 query I
-SELECT method_name = 'AutoETS'
+SELECT model_name = 'AutoETS'
 FROM ts_forecast(test_data, date_col, value, 'Naive', 5, {'method_name': 'AutoETS'})
 LIMIT 1;
 ----
@@ -97,12 +97,14 @@ true
 
 # Test 9: Method name preserves through aggregation
 query I
-SELECT method_name = 'AggregatedNaive'
-FROM (
-    SELECT TS_FORECAST_AGG(date_col, value, 'Naive', 5, {'method_name': 'AggregatedNaive'}) AS result
+WITH expanded AS (
+    SELECT 
+        TS_FORECAST_AGG(date_col, value, 'Naive', 5, {'method_name': 'AggregatedNaive'}) AS result
     FROM test_data
-) agg
-CROSS JOIN UNNEST(result.forecast_dates, result.point_forecasts) AS t(forecast_date, point_forecast);
+)
+SELECT result.model_name = 'AggregatedNaive'
+FROM expanded
+CROSS JOIN UNNEST(result.forecast_timestamp) AS t(forecast_date);
 ----
 true
 true
