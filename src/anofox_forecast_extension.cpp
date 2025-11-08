@@ -37,17 +37,19 @@ static const DefaultTableMacro forecast_table_macros[] = {
         WITH fc AS (
             SELECT TS_FORECAST_AGG(date_col, target_col, method, horizon, params) AS result
             FROM QUERY_TABLE(table_name)
+        ),
+        expanded AS (
+            SELECT result.* FROM fc
         )
         SELECT 
-            UNNEST(result.forecast_step) AS forecast_step,
-            UNNEST(result.forecast_timestamp) AS date_col,
-            UNNEST(result.point_forecast) AS point_forecast,
-            UNNEST(result.lower) AS lower,
-            UNNEST(result.upper) AS upper,
-            result.model_name AS model_name,
-            result.insample_fitted AS insample_fitted,
-            result.confidence_level AS confidence_level
-        FROM fc
+            UNNEST(forecast_step) AS forecast_step,
+            UNNEST(forecast_timestamp) AS date,
+            UNNEST(point_forecast) AS point_forecast,
+            UNNEST(COLUMNS(c -> c LIKE 'lower_%')),
+            UNNEST(COLUMNS(c -> c LIKE 'upper_%')),
+            model_name,
+            insample_fitted
+        FROM expanded
     )"},
     // TS_FORECAST_BY: Multiple series (1 group column)
     {DEFAULT_SCHEMA,
@@ -61,18 +63,20 @@ static const DefaultTableMacro forecast_table_macros[] = {
                 TS_FORECAST_AGG(date_col, target_col, method, horizon, params) AS result
             FROM QUERY_TABLE(table_name)
             GROUP BY group_col
+        ),
+        expanded AS (
+            SELECT group_col, result.* FROM fc
         )
         SELECT 
             group_col,
-            UNNEST(result.forecast_step) AS forecast_step,
-            UNNEST(result.forecast_timestamp) AS date_col,
-            UNNEST(result.point_forecast) AS point_forecast,
-            UNNEST(result.lower) AS lower,
-            UNNEST(result.upper) AS upper,
-            result.model_name AS model_name,
-            result.insample_fitted AS insample_fitted,
-            result.confidence_level AS confidence_level
-        FROM fc
+            UNNEST(forecast_step) AS forecast_step,
+            UNNEST(forecast_timestamp) AS date,
+            UNNEST(point_forecast) AS point_forecast,
+            UNNEST(COLUMNS(c -> c LIKE 'lower_%')),
+            UNNEST(COLUMNS(c -> c LIKE 'upper_%')),
+            model_name,
+            insample_fitted
+        FROM expanded
     )"},
     // TS_DETECT_CHANGEPOINTS: Single series (no GROUP BY)
     {DEFAULT_SCHEMA,
