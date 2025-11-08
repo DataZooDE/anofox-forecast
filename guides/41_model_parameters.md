@@ -695,10 +695,10 @@ Gradient-boosted decomposition for multiple seasonal patterns.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `seasonal_periods` | INTEGER[] | No | [12] | Array of seasonal periods |
-| `n_iterations` | INTEGER | No | 10 | Number of gradient boosting iterations |
-| `lr_trend` | DOUBLE | No | 0.3 | Learning rate for trend |
-| `lr_season` | DOUBLE | No | 0.5 | Learning rate for seasonality |
-| `lr_level` | DOUBLE | No | 0.8 | Learning rate for level |
+| `n_iterations` | INTEGER | No | 50 | Number of gradient boosting iterations |
+| `lr_trend` | DOUBLE | No | 0.9 | Learning rate for trend |
+| `lr_season` | DOUBLE | No | 0.9 | Learning rate for seasonality |
+| `lr_level` | DOUBLE | No | 1.0 | Learning rate for level |
 | `progressive_trend` | BOOLEAN | No | true | Use StatsForecast progressive trend complexity |
 | `sequential_seasonality` | BOOLEAN | No | true | Fit one seasonality per round (StatsForecast) |
 
@@ -768,7 +768,7 @@ MFLES with automatically optimized parameters via cross-validation.
 | `lr_rs` | DOUBLE | No | 0.8 | Residual smoothing learning rate (0-1) |
 | `cv_horizon` | INTEGER | No | -1 | CV test size (-1=auto: first seasonal_period) |
 | `cv_n_windows` | INTEGER | No | 2 | Number of cross-validation folds |
-| `metric` | VARCHAR | No | 'mae' | Optimization metric: 'mae', 'rmse', 'mape', 'smape' |
+| `metric` | VARCHAR | No | 'smape' | Optimization metric: 'mae', 'rmse', 'mape', 'smape' |
 
 **Validation:**
 
