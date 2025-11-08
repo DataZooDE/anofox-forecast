@@ -76,8 +76,8 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		double phi = GetParam<double>(model_params, "phi", 0.98);
 		// std::cerr << "[DEBUG] Creating ETS model with error:" << error_type
 		//           << ", trend:" << trend_type << ", season:" << season_type << std::endl;
-		model = AnofoxTimeWrapper::CreateETS(error_type, trend_type, season_type, season_length, alpha, beta, gamma,
-		                                    phi);
+		model =
+		    AnofoxTimeWrapper::CreateETS(error_type, trend_type, season_type, season_length, alpha, beta, gamma, phi);
 	} else if (model_name == "AutoETS") {
 		// Accept both 'season_length' and 'seasonal_period' for compatibility
 		int season_length = HasParam(model_params, "season_length") ? GetParam<int>(model_params, "season_length", 1)
@@ -104,7 +104,7 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		bool progressive_trend = GetParam<bool>(model_params, "progressive_trend", true);
 		bool sequential_seasonality = GetParam<bool>(model_params, "sequential_seasonality", true);
 		model = AnofoxTimeWrapper::CreateMFLES(seasonal_periods, n_iterations, lr_trend, lr_season, lr_level,
-		                                      progressive_trend, sequential_seasonality);
+		                                       progressive_trend, sequential_seasonality);
 	} else if (model_name == "AutoMFLES") {
 		// Check both 'seasonal_periods' (plural) and 'seasonal_period' (singular)
 		std::vector<int> seasonal_periods;
@@ -123,7 +123,7 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		double lr_rs = GetParam<double>(model_params, "lr_rs", 0.8);
 		int cv_horizon = GetParam<int>(model_params, "cv_horizon", -1);
 		int cv_n_windows = GetParam<int>(model_params, "cv_n_windows", 2);
-		
+
 		// Parse optimization metric
 		std::string metric_str = GetParam<std::string>(model_params, "metric", "mae");
 		::anofoxtime::utils::CVMetric metric;
@@ -136,12 +136,11 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		} else if (metric_str == "smape") {
 			metric = ::anofoxtime::utils::CVMetric::SMAPE;
 		} else {
-			throw InvalidInputException("Invalid metric: " + metric_str + 
-				". Must be one of: mae, rmse, mape, smape");
+			throw InvalidInputException("Invalid metric: " + metric_str + ". Must be one of: mae, rmse, mape, smape");
 		}
-		
+
 		model = AnofoxTimeWrapper::CreateAutoMFLES(seasonal_periods, max_rounds, lr_trend, lr_season, lr_rs, cv_horizon,
-		                                          cv_n_windows, metric);
+		                                           cv_n_windows, metric);
 	} else if (model_name == "MSTL") {
 		// Check both 'seasonal_periods' (plural) and 'seasonal_period' (singular)
 		std::vector<int> seasonal_periods;
@@ -211,7 +210,7 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		int ar_order = GetParam<int>(model_params, "ar_order", 0);
 		int ma_order = GetParam<int>(model_params, "ma_order", 0);
 		model = AnofoxTimeWrapper::CreateTBATS(seasonal_periods, use_box_cox, box_cox_lambda, use_trend,
-		                                      use_damped_trend, damping_param, ar_order, ma_order);
+		                                       use_damped_trend, damping_param, ar_order, ma_order);
 	} else if (model_name == "AutoTBATS") {
 		// Check both 'seasonal_periods' (plural) and 'seasonal_period' (singular)
 		std::vector<int> seasonal_periods;
@@ -281,8 +280,7 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 	if (HasParam(model_params, "method_name")) {
 		std::string custom_name = GetParam<std::string>(model_params, "method_name", "");
 		if (!custom_name.empty()) {
-			model = std::make_unique<::anofoxtime::models::MethodNameWrapper>(
-				std::move(model), custom_name);
+			model = std::make_unique<::anofoxtime::models::MethodNameWrapper>(std::move(model), custom_name);
 		}
 	}
 

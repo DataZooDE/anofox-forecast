@@ -1,6 +1,6 @@
 # name: test/sql/holt_performance.test
 # description: Test Holt method with pinned parameters (fixed alpha/beta)
-# group: [core]
+# group: [sql]
 
 require anofox_forecast
 

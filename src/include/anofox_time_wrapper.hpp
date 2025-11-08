@@ -81,11 +81,9 @@ public:
 	                                                                    double gamma, double phi);
 	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateAutoETS(int season_length,
 	                                                                        const std::string &model = "ZZZ");
-	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateMFLES(const std::vector<int> &seasonal_periods,
-	                                                                      int n_iterations, double lr_trend,
-	                                                                      double lr_season, double lr_level,
-	                                                                      bool progressive_trend = true,
-	                                                                      bool sequential_seasonality = true);
+	static std::unique_ptr<::anofoxtime::models::IForecaster>
+	CreateMFLES(const std::vector<int> &seasonal_periods, int n_iterations, double lr_trend, double lr_season,
+	            double lr_level, bool progressive_trend = true, bool sequential_seasonality = true);
 	static std::unique_ptr<::anofoxtime::models::IForecaster>
 	CreateAutoMFLES(const std::vector<int> &seasonal_periods, int max_rounds = 10, double lr_trend = 0.3,
 	                double lr_season = 0.5, double lr_rs = 0.8, int cv_horizon = -1, int cv_n_windows = 2,

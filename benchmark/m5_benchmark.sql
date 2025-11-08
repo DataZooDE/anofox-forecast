@@ -87,7 +87,7 @@ CREATE OR REPLACE TABLE forecast_results AS (
     FROM TS_FORECAST_BY('m5_train', item_id, ds, y, 'AutoARIMA', 28, {'seasonal_period': 7})
     UNION ALL
     SELECT *
-    FROM TS_FORECAST_BY('m5_train', item_id, ds, y, 'OptimizedTheta', 28, MAP{'seasonal_period': 7})
+    FROM TS_FORECAST_BY('m5_train', item_id, ds, y, 'MFLES', 28, MAP{'seasonal_periods': [7]})
 );
 
 
@@ -113,7 +113,7 @@ GROUP BY item_id, model_name
 );
 
 -- Summarise evaluation results by model
-SELECT model_name, AVG(mae) AS avg_mae, AVG(bias) AS avg_bias FROM evaluation_results GROUP BY model_name ORDER BY avg_mae;
+SELECT model_name, AVG(mae) AS avg_mae, STDDEV(mae) AS std_mae, AVG(bias) AS avg_bias, STDDEV(bias) AS std_bias FROM evaluation_results GROUP BY model_name ORDER BY avg_mae;
 
 
 -- Create Aggregated Forecasts for all models and evaluate performance

@@ -190,8 +190,7 @@ std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateAuto
 
 std::unique_ptr<::anofoxtime::models::IForecaster>
 AnofoxTimeWrapper::CreateMFLES(const std::vector<int> &seasonal_periods, int n_iterations, double lr_trend,
-                               double lr_season, double lr_level, bool progressive_trend,
-                               bool sequential_seasonality) {
+                               double lr_season, double lr_level, bool progressive_trend, bool sequential_seasonality) {
 	// std::cerr << "[DEBUG] AnofoxTimeWrapper::CreateMFLES with " << seasonal_periods.size() << " periods" <<
 	// std::endl;
 	::anofoxtime::models::MFLES::Params params;

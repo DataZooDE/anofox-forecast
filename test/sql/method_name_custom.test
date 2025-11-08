@@ -1,6 +1,6 @@
 # name: test/sql/method_name_custom.test
 # description: Test custom method_name parameter across multiple models
-# group: [core]
+# group: [sql]
 
 require anofox_forecast
 

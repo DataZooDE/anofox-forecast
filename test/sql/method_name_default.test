@@ -1,6 +1,6 @@
 # name: test/sql/method_name_default.test
 # description: Test default method_name behavior (backward compatibility)
-# group: [core]
+# group: [sql]
 
 require anofox_forecast
 

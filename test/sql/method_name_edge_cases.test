@@ -1,6 +1,6 @@
 # name: test/sql/method_name_edge_cases.test
 # description: Test edge cases for method_name parameter
-# group: [core]
+# group: [sql]
 
 require anofox_forecast
 
