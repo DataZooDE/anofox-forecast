@@ -228,7 +228,10 @@ struct ForecastAggregateOperation {
 			state.data->bytes_copied +=
 			    bind_data.horizon * (sizeof(int32_t) + sizeof(double) * 4 + sizeof(timestamp_t));
 
-			struct_values.push_back(make_pair("forecast_step", Value::LIST(LogicalType::INTEGER, steps)));
+			// Conditionally include forecast_step
+			if (bind_data.include_forecast_step) {
+				struct_values.push_back(make_pair("forecast_step", Value::LIST(LogicalType::INTEGER, steps)));
+			}
 
 			// Include forecast_timestamp field (empty if disabled for schema consistency)
 			if (generate_timestamps) {
@@ -241,8 +244,9 @@ struct ForecastAggregateOperation {
 			}
 
 			struct_values.push_back(make_pair("point_forecast", Value::LIST(LogicalType::DOUBLE, forecasts)));
-			struct_values.push_back(make_pair("lower", Value::LIST(LogicalType::DOUBLE, lowers)));
-			struct_values.push_back(make_pair("upper", Value::LIST(LogicalType::DOUBLE, uppers)));
+			// Use dynamic column names based on confidence level
+			struct_values.push_back(make_pair(bind_data.lower_col_name, Value::LIST(LogicalType::DOUBLE, lowers)));
+			struct_values.push_back(make_pair(bind_data.upper_col_name, Value::LIST(LogicalType::DOUBLE, uppers)));
 			struct_values.push_back(make_pair("model_name", Value(AnofoxTimeWrapper::GetModelName(*model_ptr))));
 
 			// Add in-sample fitted values (empty if not requested)
@@ -254,8 +258,8 @@ struct ForecastAggregateOperation {
 			}
 			struct_values.push_back(make_pair("insample_fitted", Value::LIST(LogicalType::DOUBLE, fitted_value_list)));
 
-			// Add confidence level
-			struct_values.push_back(make_pair("confidence_level", Value::DOUBLE(bind_data.confidence_level)));
+			// Add date column name for macro to use
+			struct_values.push_back(make_pair("date_col_name", Value(bind_data.date_col_name)));
 
 			auto result_value = Value::STRUCT(std::move(struct_values));
 			finalize_data.result.SetValue(finalize_data.result_idx, result_value);
@@ -461,9 +465,11 @@ unique_ptr<FunctionData> TSForecastBind(ClientContext &context, AggregateFunctio
 
 	ModelFactory::ValidateModelParams(model_name, model_params);
 
-	// Extract confidence_level and return_insample parameters
+	// Extract confidence_level, return_insample, include_forecast_step, and date_col_name parameters
 	double confidence_level = 0.90;
 	bool return_insample = false;
+	bool include_forecast_step = true;
+	string date_col_name = "date";
 
 	if (model_params.type().id() == LogicalTypeId::STRUCT) {
 		auto &struct_children = StructValue::GetChildren(model_params);
@@ -482,25 +488,51 @@ unique_ptr<FunctionData> TSForecastBind(ClientContext &context, AggregateFunctio
 				} catch (...) {
 					// Keep default on error
 				}
+			} else if (key == "include_forecast_step") {
+				try {
+					include_forecast_step = struct_children[i].GetValue<bool>();
+				} catch (...) {
+					// Keep default on error
+				}
+			} else if (key == "date_col_name") {
+				try {
+					date_col_name = struct_children[i].GetValue<string>();
+				} catch (...) {
+					// Keep default on error
+				}
 			}
 		}
 	}
 
-	// Set return type
+	// Generate dynamic column names based on confidence level
+	// Format: 0.90 -> "90", 0.95 -> "95", 0.999 -> "999" (remove trailing zeros)
+	int confidence_pct = static_cast<int>(confidence_level * 1000);
+	string confidence_suffix = std::to_string(confidence_pct);
+	// Remove trailing zero if it's a round percentage (e.g., 900 -> 90)
+	if (confidence_pct % 10 == 0) {
+		confidence_suffix = std::to_string(confidence_pct / 10);
+	}
+	string lower_col_name = "lower_" + confidence_suffix;
+	string upper_col_name = "upper_" + confidence_suffix;
+
+	// Set return type with dynamic column names
 	child_list_t<LogicalType> struct_children;
-	struct_children.push_back(make_pair("forecast_step", LogicalType::LIST(LogicalType::INTEGER)));
+	if (include_forecast_step) {
+		struct_children.push_back(make_pair("forecast_step", LogicalType::LIST(LogicalType::INTEGER)));
+	}
 	struct_children.push_back(make_pair("forecast_timestamp", LogicalType::LIST(LogicalType::TIMESTAMP)));
 	struct_children.push_back(make_pair("point_forecast", LogicalType::LIST(LogicalType::DOUBLE)));
-	struct_children.push_back(make_pair("lower", LogicalType::LIST(LogicalType::DOUBLE)));
-	struct_children.push_back(make_pair("upper", LogicalType::LIST(LogicalType::DOUBLE)));
+	struct_children.push_back(make_pair(lower_col_name, LogicalType::LIST(LogicalType::DOUBLE)));
+	struct_children.push_back(make_pair(upper_col_name, LogicalType::LIST(LogicalType::DOUBLE)));
 	struct_children.push_back(make_pair("model_name", LogicalType::VARCHAR));
 	struct_children.push_back(make_pair("insample_fitted", LogicalType::LIST(LogicalType::DOUBLE)));
-	struct_children.push_back(make_pair("confidence_level", LogicalType::DOUBLE));
+	struct_children.push_back(make_pair("date_col_name", LogicalType::VARCHAR));
 
 	function.return_type = LogicalType::STRUCT(std::move(struct_children));
 
 	// // std::cerr << "[DEBUG] TSForecastBind complete" << std::endl;
 	return make_uniq<ForecastAggregateBindData>(model_name, horizon, model_params, confidence_level, return_insample,
+	                                            include_forecast_step, date_col_name, lower_col_name, upper_col_name,
 	                                            date_type_id);
 }
 
