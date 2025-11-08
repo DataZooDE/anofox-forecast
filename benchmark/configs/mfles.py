@@ -9,8 +9,4 @@ MODELS = [
         'name': 'MFLES',
         'params': lambda seasonality: {'seasonal_periods': [seasonality]}
     },
-    {
-        'name': 'AutoMFLES',
-        'params': lambda seasonality: {'seasonal_periods': [seasonality]}
-    },
 ]
