@@ -115,7 +115,7 @@ void MFLES::fit(const core::TimeSeries& ts) {
 			std::vector<double> trend_fit;
 
 			if (params_.progressive_trend) {
-				// StatsForecast progressive trend: median → linear → smoother
+				// Progressive trend: median → linear → smoother
 				if (iter == 0) {
 					// Round 0: Use median as trend baseline
 					double median_val = computeMedian(residuals);
@@ -152,33 +152,54 @@ void MFLES::fit(const core::TimeSeries& ts) {
 				}
 			}
 
-			// Accumulate last 2 fitted trend values (for projecting trend in forecast)
-			// Store the last two values: trend_fit[n-2] and trend_fit[n-1]
-			if (n >= 2) {
-				double val_n_minus_2 = trend_fit[n-2];
-				double val_n_minus_1 = trend_fit[n-1];
+			// Calculate MSE before and after applying trend
+			double mse_before = 0.0;
+			for (const auto& r : residuals) {
+				mse_before += r * r;
+			}
+			mse_before /= n;
 
-				if (accumulated_trend_.size() < 2) {
-					// First iteration: initialize with last 2 values
-					accumulated_trend_ = {val_n_minus_2, val_n_minus_1};
-				} else {
-					// Subsequent iterations: add to accumulated values
-					accumulated_trend_[0] += params_.lr_trend * val_n_minus_2;
-					accumulated_trend_[1] += params_.lr_trend * val_n_minus_1;
-				}
+			// Calculate MSE after applying trend
+			std::vector<double> residuals_after = residuals;
+			for (int i = 0; i < n; ++i) {
+				residuals_after[i] -= params_.lr_trend * trend_fit[i];
 			}
 
-			// Update components and residuals
-			for (int i = 0; i < n; ++i) {
-				trend_component_[i] += params_.lr_trend * trend_fit[i];
-				residuals[i] -= params_.lr_trend * trend_fit[i];
+			double mse_after = 0.0;
+			for (const auto& r : residuals_after) {
+				mse_after += r * r;
+			}
+			mse_after /= n;
+
+			// Only accept trend if it improves MSE
+			if (mse_after < mse_before) {
+				// Accumulate last 2 fitted trend values (for projecting trend in forecast)
+				if (n >= 2) {
+					double val_n_minus_2 = trend_fit[n-2];
+					double val_n_minus_1 = trend_fit[n-1];
+
+					if (accumulated_trend_.size() < 2) {
+						// First iteration: initialize with last 2 values
+						accumulated_trend_ = {val_n_minus_2, val_n_minus_1};
+					} else {
+						// Subsequent iterations: add to accumulated values
+						accumulated_trend_[0] += params_.lr_trend * val_n_minus_2;
+						accumulated_trend_[1] += params_.lr_trend * val_n_minus_1;
+					}
+				}
+
+				// Update components and residuals
+				for (int i = 0; i < n; ++i) {
+					trend_component_[i] += params_.lr_trend * trend_fit[i];
+					residuals[i] -= params_.lr_trend * trend_fit[i];
+				}
 			}
 		}
 
 		// Component 3: Fourier seasonality (sequential if enabled)
 		if (params_.lr_season > 0.0 && !params_.seasonal_periods.empty()) {
 			if (params_.sequential_seasonality) {
-				// StatsForecast approach: one seasonality per round
+				// Sequential seasonality: one per round
 				// Round-robin through seasonal periods
 				int season_idx = iter % params_.seasonal_periods.size();
 				int period = params_.seasonal_periods[season_idx];
@@ -237,7 +258,6 @@ void MFLES::fit(const core::TimeSeries& ts) {
 		}
 
 		// Component 4: Residual smoothing (ES ensemble or MA)
-		// Phase 8 Fix #3: Apply round penalty threshold check (matches statsforecast line 602)
 		if (params_.lr_rs > 0.0) {
 			std::vector<double> rs_fit;
 
@@ -269,8 +289,6 @@ void MFLES::fit(const core::TimeSeries& ts) {
 			mse_after /= n;
 
 			// Only accept if improvement exceeds round penalty threshold
-			// statsforecast: if mse > component_mse + round_penalty * mse
-			// (i.e., reject if new MSE is not better by at least round_penalty * old_mse)
 			if (mse_after <= mse_before + params_.round_penalty * mse_before) {
 				// Accept the component
 				accumulated_level += params_.lr_rs * final_level_;
@@ -338,7 +356,6 @@ void MFLES::preprocess(const std::vector<double>& data) {
 		is_multiplicative_ = shouldUseMultiplicative(data);
 	}
 
-	// Phase 7: CRITICAL FIX - Match statsforecast preprocessing order
 	// Step 1: ALWAYS compute mean and std from ORIGINAL data (before any transforms)
 	mean_ = std::accumulate(data.begin(), data.end(), 0.0) / n;
 
@@ -456,8 +473,7 @@ double MFLES::computeMedian(const std::vector<double>& data) const {
 // ============================================================================
 
 std::vector<double> MFLES::fitMedianComponent(const std::vector<double>& data) {
-	// Phase 8 Fix #1: Return vector filled with median value (matches statsforecast)
-	// Compute median (global or moving window)
+	// Compute median component (global or moving window)
 	const int n = static_cast<int>(data.size());
 	double median_value;
 
@@ -498,7 +514,7 @@ std::vector<double> MFLES::fitMedianComponent(const std::vector<double>& data) {
 		}
 	}
 
-	// Return vector filled with the median value (like statsforecast's np.full_like)
+	// Return vector filled with the median value
 	return std::vector<double>(n, median_value);
 }
 
@@ -821,7 +837,7 @@ std::vector<double> MFLES::fitESEnsemble(const std::vector<double>& data) {
 
 	// Run ES for each alpha value
 	for (double alpha : es_ensemble_alphas_) {
-		// Initialize level with first value (matches statsforecast)
+		// Initialize level with first value
 		double level = data[0];
 
 		// Fit ES with this alpha
@@ -931,7 +947,7 @@ int MFLES::optimalK(int period) const {
 }
 
 int MFLES::adaptiveK(int period) const {
-	// Match statsforecast adaptive logic:
+	// Adaptive Fourier order selection:
 	// period < 10 → K=5
 	// period < 70 → K=10
 	// period >= 70 → K=15 (capped by MAX_FOURIER_TERMS)
@@ -946,9 +962,8 @@ int MFLES::adaptiveK(int period) const {
 }
 
 std::vector<double> MFLES::getSeasonalityWeights(int n, int period) const {
-	// Time-varying weights: increasing importance over time
-	// Statsforecast formula: 1 + floor(i / period)
-	// Discrete jumps per cycle, not continuous
+	// Time-varying weights with discrete jumps per cycle
+	// Formula: 1 + floor(i / period)
 	std::vector<double> weights(n);
 
 	for (int i = 0; i < n; ++i) {

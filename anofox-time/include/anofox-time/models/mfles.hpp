@@ -21,7 +21,7 @@ enum class TrendMethod {
 };
 
 /**
- * @brief MFLES Enhanced - Full feature parity with statsforecast MFLES
+ * @brief MFLES - Multiple Fourier and Linear Exponential Smoothing
  *
  * MFLES uses gradient boosted time series decomposition with 5 components:
  * 1. Median Component (optional, per-period or global baseline)
@@ -30,7 +30,7 @@ enum class TrendMethod {
  * 4. Residual Smoothing (ES ensemble or moving average)
  * 5. Exogenous Variables (future: external regressors)
  *
- * Key features matching statsforecast:
+ * Key features:
  * - Multiplicative decomposition (automatic log transform)
  * - Robust trend fitting (Siegel regression, changepoint detection)
  * - Weighted seasonality (increasing importance over time)
@@ -38,8 +38,6 @@ enum class TrendMethod {
  * - Outlier handling and capping
  * - Data normalization (log or z-score)
  * - Cross-validation based optimization
- *
- * Reference: statsforecast MFLES (https://github.com/Nixtla/statsforecast)
  */
 class MFLES : public IForecaster {
 public:
@@ -54,10 +52,10 @@ public:
 		std::vector<int> seasonal_periods = {12};
 
 		// Boosting configuration
-		int max_rounds = 50;              // Maximum boosting iterations (statsforecast default)
+		int max_rounds = 50;              // Maximum boosting iterations
 		double convergence_threshold = 0.01;  // Early stopping threshold
 
-		// Learning rates (match statsforecast defaults)
+		// Learning rates
 		double lr_median = 1.0;           // Median component learning rate
 		double lr_trend = 0.9;            // Trend component learning rate (linear_lr)
 		double lr_season = 0.9;           // Seasonal component learning rate (seasonal_lr)
@@ -76,12 +74,12 @@ public:
 		double n_changepoints_pct = 0.25; // 25% of series length
 		double lasso_alpha = 1.0;         // LASSO L1 penalty
 		double decay = -1.0;              // Adaptive decay (-1 = auto)
-		bool progressive_trend = true;    // Enable StatsForecast-style progressive trend (median→linear→smoother)
+		bool progressive_trend = true;    // Enable progressive trend (median→linear→smoother)
 
 		// Seasonality configuration
 		int fourier_order = -1;           // -1 = adaptive (5/10/15 based on period)
 		bool seasonality_weights = false; // Time-varying seasonal importance
-		bool sequential_seasonality = true; // One seasonality per round (StatsForecast), false = all simultaneously
+		bool sequential_seasonality = true; // One seasonality per round, false = all simultaneously
 
 		// Residual smoothing configuration
 		bool smoother = false;            // false = ES ensemble, true = MA
@@ -260,7 +258,7 @@ private:
 
 	// Fourier helpers
 	int optimalK(int period) const;
-	int adaptiveK(int period) const;  // statsforecast adaptive logic
+	int adaptiveK(int period) const;  // Adaptive Fourier order
 	std::vector<double> projectFourier(int period, int horizon, int start_index = 0) const;
 	std::vector<double> getSeasonalityWeights(int n, int period) const;
 

@@ -26,40 +26,40 @@ class AutoMFLES : public IForecaster {
 public:
 	/**
 	 * @brief Configuration for AutoMFLES optimization
-	 * Matches statsforecast MFLES grid search for apple-to-apple comparison
+	 * Grid search over 24 configurations for parameter selection
 	 */
 	struct Config {
-		// CV settings (statsforecast parameters: test_size, n_windows)
-		// test_size: Forecast horizon used during CV - statsforecast recommends season_length or season_length/2
+		// CV settings (test_size, n_windows parameters)
+		// test_size: Forecast horizon used during CV
 		//            Set to -1 to auto-detect from seasonal_periods (uses first period)
 		int cv_horizon = -1;             // -1 = auto (use seasonal_periods[0]), or explicit value
-		int cv_n_windows = 2;            // Number of CV folds (statsforecast default: 2)
+		int cv_n_windows = 2;            // Number of CV folds (default: 2)
 		int cv_initial_window = -1;      // Initial training window (-1 = auto: 10 * cv_horizon)
 		int cv_step = -1;                // Step between folds (-1 = auto: cv_horizon)
 		utils::CVStrategy cv_strategy = utils::CVStrategy::ROLLING;
-		utils::CVMetric cv_metric = utils::CVMetric::SMAPE;  // Optimization metric (statsforecast default: SMAPE)
+		utils::CVMetric cv_metric = utils::CVMetric::SMAPE;  // Optimization metric (default: SMAPE)
 
-		// Statsforecast grid search parameters (24 configurations: 2×2×3×2)
+		// Grid search parameters (24 configurations: 2×2×3×2)
 		std::vector<bool> seasonality_weights_options = {false, true};  // Time-varying seasonal weights
 		std::vector<bool> smoother_options = {false, true};             // ES ensemble (false) vs MA (true)
 		std::vector<int> ma_window_options = {-1, -2, -3};              // -1=period, -2=period/2, -3=None (ES ensemble)
 		std::vector<bool> seasonal_period_options = {false, true};      // false=None (no seasonality), true=use period
 
-		// Fixed parameters (not optimized by statsforecast grid search)
+		// Fixed parameters (not optimized by grid search)
 		std::vector<int> seasonal_periods = {12};
-		int max_rounds = 10;             // Tuned default (was 50 in statsforecast)
-		TrendMethod trend_method = TrendMethod::OLS;  // statsforecast uses OLS
-		int fourier_order = -1;          // statsforecast uses adaptive
-		double min_alpha = 0.05;         // statsforecast default
-		double max_alpha = 1.0;          // statsforecast default
-		int es_ensemble_size = 20;       // statsforecast default
-		bool progressive_trend = true;        // Enable StatsForecast progressive trend
-		bool sequential_seasonality = true;   // Enable StatsForecast sequential fitting
+		int max_rounds = 10;             // Tuned default
+		TrendMethod trend_method = TrendMethod::OLS;  // Default trend method
+		int fourier_order = -1;          // Adaptive Fourier order
+		double min_alpha = 0.05;         // ES ensemble min alpha
+		double max_alpha = 1.0;          // ES ensemble max alpha
+		int es_ensemble_size = 20;       // Number of alpha values to test
+		bool progressive_trend = true;        // Enable progressive trend complexity
+		bool sequential_seasonality = true;   // Enable sequential seasonality fitting
 
 		// Learning rates (tuned defaults for best accuracy)
-		double lr_trend = 0.3;           // Trend learning rate (was 0.9 in statsforecast)
-		double lr_season = 0.5;          // Seasonal learning rate (was 0.9 in statsforecast)
-		double lr_rs = 0.8;              // Residual smoothing learning rate (was 1.0 in statsforecast)
+		double lr_trend = 0.3;           // Trend learning rate
+		double lr_season = 0.5;          // Seasonal learning rate
+		double lr_rs = 0.8;              // Residual smoothing learning rate
 	};
 
 	AutoMFLES();
@@ -80,7 +80,7 @@ public:
 		return *fitted_model_;
 	}
 
-	// Get selected parameters (statsforecast grid)
+	// Get selected parameters from grid search
 	bool selectedSeasonalityWeights() const { return best_seasonality_weights_; }
 	bool selectedSmoother() const { return best_smoother_; }
 	int selectedMAWindow() const { return best_ma_window_; }
@@ -105,7 +105,7 @@ public:
 private:
 	Config config_;
 
-	// Selected parameters (statsforecast grid)
+	// Selected parameters from grid search
 	bool best_seasonality_weights_ = false;
 	bool best_smoother_ = false;
 	int best_ma_window_ = 5;

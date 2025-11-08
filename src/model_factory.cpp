@@ -96,7 +96,7 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		} else {
 			seasonal_periods = {12};
 		}
-		// StatsForecast defaults (matching Python implementation)
+		// Standard MFLES defaults
 		int n_iterations = GetParam<int>(model_params, "n_iterations", 50);
 		double lr_trend = GetParam<double>(model_params, "lr_trend", 0.9);
 		double lr_season = GetParam<double>(model_params, "lr_season", 0.9);
