@@ -56,6 +56,7 @@ add_library(anofox-time
     src/models/holt_winters.cpp
     src/models/mfles.cpp
     src/models/auto_mfles.cpp
+    src/models/method_name_wrapper.cpp
     src/models/mstl_forecaster.cpp
     src/models/auto_mstl.cpp
     src/models/tbats.cpp

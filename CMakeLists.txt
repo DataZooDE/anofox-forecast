@@ -70,6 +70,7 @@ set(ANOFOX_TIME_SOURCES
     # Multiple seasonality
     anofox-time/src/models/mfles.cpp
     anofox-time/src/models/auto_mfles.cpp
+    anofox-time/src/models/method_name_wrapper.cpp
     anofox-time/src/models/mstl_forecaster.cpp
     anofox-time/src/models/auto_mstl.cpp
     anofox-time/src/models/tbats.cpp

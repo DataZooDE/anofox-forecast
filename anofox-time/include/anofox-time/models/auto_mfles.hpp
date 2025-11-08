@@ -37,7 +37,7 @@ public:
 		int cv_initial_window = -1;      // Initial training window (-1 = auto: 10 * cv_horizon)
 		int cv_step = -1;                // Step between folds (-1 = auto: cv_horizon)
 		utils::CVStrategy cv_strategy = utils::CVStrategy::ROLLING;
-		utils::CVMetric cv_metric = utils::CVMetric::MAE;  // Optimization metric (statsforecast default: SMAPE)
+		utils::CVMetric cv_metric = utils::CVMetric::SMAPE;  // Optimization metric (statsforecast default: SMAPE)
 
 		// Statsforecast grid search parameters (24 configurations: 2×2×3×2)
 		std::vector<bool> seasonality_weights_options = {false, true};  // Time-varying seasonal weights

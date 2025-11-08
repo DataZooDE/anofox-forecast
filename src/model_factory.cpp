@@ -96,11 +96,11 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		} else {
 			seasonal_periods = {12};
 		}
-		// Tuned defaults for best accuracy (9% error vs statsforecast)
-		int n_iterations = GetParam<int>(model_params, "n_iterations", 10);
-		double lr_trend = GetParam<double>(model_params, "lr_trend", 0.3);
-		double lr_season = GetParam<double>(model_params, "lr_season", 0.5);
-		double lr_level = GetParam<double>(model_params, "lr_level", 0.8);
+		// StatsForecast defaults (matching Python implementation)
+		int n_iterations = GetParam<int>(model_params, "n_iterations", 50);
+		double lr_trend = GetParam<double>(model_params, "lr_trend", 0.9);
+		double lr_season = GetParam<double>(model_params, "lr_season", 0.9);
+		double lr_level = GetParam<double>(model_params, "lr_level", 1.0);
 		bool progressive_trend = GetParam<bool>(model_params, "progressive_trend", true);
 		bool sequential_seasonality = GetParam<bool>(model_params, "sequential_seasonality", true);
 		model = AnofoxTimeWrapper::CreateMFLES(seasonal_periods, n_iterations, lr_trend, lr_season, lr_level,

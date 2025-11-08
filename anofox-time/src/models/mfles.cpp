@@ -937,23 +937,22 @@ int MFLES::adaptiveK(int period) const {
 	// period >= 70 → K=15 (capped by MAX_FOURIER_TERMS)
 
 	if (period < 10) {
-		return std::min(5, period / 2);
+		return 5;  // Always 5 for small periods
 	} else if (period < 70) {
-		return std::min(10, period / 2);
+		return 10;  // Always 10 for medium periods
 	} else {
-		return std::min(15, std::min(period / 2, MAX_FOURIER_TERMS));
+		return 15;  // Always 15 for large periods (capped by MAX_FOURIER_TERMS)
 	}
 }
 
 std::vector<double> MFLES::getSeasonalityWeights(int n, int period) const {
 	// Time-varying weights: increasing importance over time
-	// Weight = 1 + (cycle_number / total_cycles)
+	// Statsforecast formula: 1 + floor(i / period)
+	// Discrete jumps per cycle, not continuous
 	std::vector<double> weights(n);
 
 	for (int i = 0; i < n; ++i) {
-		double cycle_num = static_cast<double>(i) / period;
-		double total_cycles = static_cast<double>(n) / period;
-		weights[i] = 1.0 + (cycle_num / total_cycles);
+		weights[i] = 1.0 + static_cast<double>(i / period);  // Integer division for discrete jumps
 	}
 
 	return weights;
