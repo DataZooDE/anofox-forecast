@@ -32,6 +32,7 @@ class Theta;
 class OptimizedTheta;
 class DynamicTheta;
 class DynamicOptimizedTheta;
+class AutoTheta;
 // Seasonal models
 class SeasonalExponentialSmoothing;
 class SeasonalESOptimized;
@@ -111,8 +112,12 @@ public:
 	// Theta variants
 	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateOptimizedTheta(int seasonal_period);
 	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateDynamicTheta(int seasonal_period,
-	                                                                             double theta_param);
+	                                                                              double theta_param);
 	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateDynamicOptimizedTheta(int seasonal_period);
+	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateAutoTheta(int seasonal_period,
+	                                                                           const std::string& decomposition_type,
+	                                                                           const std::optional<std::string>& specific_model,
+	                                                                           int nmse);
 
 	// Seasonal exponential smoothing
 	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateSeasonalES(int seasonal_period, double alpha,

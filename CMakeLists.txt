@@ -59,6 +59,7 @@ set(ANOFOX_TIME_SOURCES
     anofox-time/src/models/optimized_theta.cpp
     anofox-time/src/models/dynamic_theta.cpp
     anofox-time/src/models/dynamic_optimized_theta.cpp
+    anofox-time/src/models/auto_theta.cpp
     # Seasonal models
     anofox-time/src/models/seasonal_es.cpp
     anofox-time/src/models/seasonal_es_optimized.cpp
@@ -101,6 +102,7 @@ set(ANOFOX_TIME_SOURCES
     anofox-time/src/optimization/ets_gradients.cpp
     anofox-time/src/optimization/ets_gradients_simd.cpp
     anofox-time/src/optimization/ets_gradients_checkpointing.cpp
+    anofox-time/src/optimization/theta_gradients.cpp
 )
 
 # Add ARIMA models if Eigen3 is available

@@ -16,6 +16,7 @@
 #include "anofox-time/models/optimized_theta.hpp"
 #include "anofox-time/models/dynamic_theta.hpp"
 #include "anofox-time/models/dynamic_optimized_theta.hpp"
+#include "anofox-time/models/auto_theta.hpp"
 #include "anofox-time/models/holt.hpp"
 #include "anofox-time/models/holt_winters.hpp"
 #include "anofox-time/models/seasonal_es.hpp"
@@ -341,6 +342,27 @@ std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateDyna
 	return std::make_unique<::anofoxtime::models::DynamicOptimizedTheta>(seasonal_period);
 }
 
+std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateAutoTheta(
+	int seasonal_period,
+	const std::string& decomposition_type,
+	const std::optional<std::string>& specific_model,
+	int nmse) {
+	
+	// Convert decomposition type string to enum
+	::anofoxtime::models::AutoTheta::DecompositionType decomp_type;
+	if (decomposition_type == "additive") {
+		decomp_type = ::anofoxtime::models::AutoTheta::DecompositionType::Additive;
+	} else if (decomposition_type == "multiplicative") {
+		decomp_type = ::anofoxtime::models::AutoTheta::DecompositionType::Multiplicative;
+	} else {
+		decomp_type = ::anofoxtime::models::AutoTheta::DecompositionType::Auto;
+	}
+	
+	return std::make_unique<::anofoxtime::models::AutoTheta>(
+		seasonal_period, decomp_type, specific_model, nmse
+	);
+}
+
 // Seasonal exponential smoothing
 std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateSeasonalES(int seasonal_period,
                                                                                        double alpha, double gamma) {
@@ -494,6 +516,7 @@ std::vector<double> AnofoxTimeWrapper::GetFittedValues(::anofoxtime::models::IFo
 	TRY_GET_FITTED(OptimizedTheta)
 	TRY_GET_FITTED(DynamicTheta)
 	TRY_GET_FITTED(DynamicOptimizedTheta)
+	TRY_GET_FITTED(AutoTheta)
 	TRY_GET_FITTED(SeasonalExponentialSmoothing)
 	TRY_GET_FITTED(SeasonalESOptimized)
 	TRY_GET_FITTED(SeasonalWindowAverage)

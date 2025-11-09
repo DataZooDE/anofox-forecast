@@ -235,6 +235,15 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 	} else if (model_name == "DynamicOptimizedTheta") {
 		int seasonal_period = GetParam<int>(model_params, "seasonal_period", 1);
 		model = AnofoxTimeWrapper::CreateDynamicOptimizedTheta(seasonal_period);
+	} else if (model_name == "AutoTheta") {
+		int seasonal_period = GetParam<int>(model_params, "seasonal_period", 1);
+		std::string decomposition_type = GetParam<std::string>(model_params, "decomposition_type", "auto");
+		std::optional<std::string> specific_model;
+		if (HasParam(model_params, "model")) {
+			specific_model = GetParam<std::string>(model_params, "model", "");
+		}
+		int nmse = GetParam<int>(model_params, "nmse", 3);
+		model = AnofoxTimeWrapper::CreateAutoTheta(seasonal_period, decomposition_type, specific_model, nmse);
 	}
 	// Seasonal exponential smoothing
 	else if (model_name == "SeasonalES") {
@@ -293,7 +302,7 @@ std::vector<std::string> ModelFactory::GetSupportedModels() {
 	                                   // Holt
 	                                   "Holt", "HoltWinters",
 	                                   // Theta variants
-	                                   "Theta", "OptimizedTheta", "DynamicTheta", "DynamicOptimizedTheta",
+	                                   "Theta", "OptimizedTheta", "DynamicTheta", "DynamicOptimizedTheta", "AutoTheta",
 	                                   // Seasonal
 	                                   "SeasonalES", "SeasonalESOptimized", "SeasonalWindowAverage",
 #ifdef HAVE_EIGEN3
@@ -553,7 +562,7 @@ void ModelFactory::ValidateModelParams(const std::string &model_name, const Valu
 		// seasonal_periods is optional
 	}
 	// Theta variants
-	else if (model_name == "OptimizedTheta" || model_name == "DynamicTheta" || model_name == "DynamicOptimizedTheta") {
+	else if (model_name == "OptimizedTheta" || model_name == "DynamicTheta" || model_name == "DynamicOptimizedTheta" || model_name == "AutoTheta") {
 		// seasonal_period is optional
 	}
 	// Seasonal exponential smoothing
