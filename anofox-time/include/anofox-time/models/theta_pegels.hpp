@@ -85,7 +85,17 @@ struct OptimResult {
 };
 
 /**
- * Optimize alpha, theta, and initial level using Nelder-Mead
+ * Optimization method selection
+ */
+enum class OptimizerType {
+    NelderMead,  // Derivative-free, robust but slower
+    LBFGS        // Gradient-based, faster for smooth problems
+};
+
+/**
+ * Optimize alpha, theta, and initial level
+ * 
+ * @param optimizer Which optimization method to use (default: LBFGS for better performance)
  */
 OptimResult optimize(const std::vector<double>& y,
                     ModelType model_type,
@@ -95,7 +105,8 @@ OptimResult optimize(const std::vector<double>& y,
                     double init_level,
                     double init_alpha,
                     double init_theta,
-                    size_t nmse = 3);
+                    size_t nmse = 3,
+                    OptimizerType optimizer = OptimizerType::LBFGS);
 
 } // namespace anofoxtime::models::theta_pegels
 

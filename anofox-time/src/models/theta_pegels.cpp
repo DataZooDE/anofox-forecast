@@ -1,5 +1,7 @@
 #include "anofox-time/models/theta_pegels.hpp"
 #include "anofox-time/utils/nelder_mead.hpp"
+#include "anofox-time/optimization/lbfgs_optimizer.hpp"
+#include "anofox-time/optimization/theta_gradients.hpp"
 #include <algorithm>
 #include <numeric>
 #include <cmath>
@@ -273,9 +275,8 @@ OptimResult optimize(const std::vector<double>& y,
                     double init_level,
                     double init_alpha,
                     double init_theta,
-                    size_t nmse) {
-    // Port of statsforecast theta_cpp.txt lines 155-175
-    
+                    size_t nmse,
+                    OptimizerType optimizer_type) {
     // Build initial parameter vector
     std::vector<double> x0;
     std::vector<double> lower;
@@ -309,46 +310,106 @@ OptimResult optimize(const std::vector<double>& y,
         return {init_alpha, init_theta, init_level, mse, true, 0};
     }
     
-    // Create objective function
-    ThetaObjective objective(y, model_type, opt_level, opt_alpha, opt_theta,
-                            init_level, init_alpha, init_theta, nmse);
-    
-    // Nelder-Mead options
-    utils::NelderMeadOptimizer optimizer;
-    utils::NelderMeadOptimizer::Options options;
-    options.step = 0.05;
-    options.max_iterations = 1000;
-    options.tolerance = 1e-4;
-    options.alpha = 1.0;
-    options.gamma = 2.0;
-    options.rho = 0.5;
-    options.sigma = 0.5;
-    
-    // Run optimization
-    auto objective_fn = [&objective](const std::vector<double>& x) {
-        return objective(x);
-    };
-    
-    auto result = optimizer.minimize(objective_fn, x0, options, lower, upper);
-    
-    // Extract optimized parameters
-    size_t j = 0;
-    double opt_level_val = init_level;
-    double opt_alpha_val = init_alpha;
-    double opt_theta_val = init_theta;
-    
-    if (opt_level) {
-        opt_level_val = result.best[j++];
+    // Choose optimization method
+    if (optimizer_type == OptimizerType::LBFGS) {
+        // L-BFGS optimization with numerical gradients
+        auto objective_fn = [&](const std::vector<double>& params, std::vector<double>& grad) -> double {
+            size_t j = 0;
+            double level = opt_level ? params[j++] : init_level;
+            double alpha = opt_alpha ? params[j++] : init_alpha;
+            double theta = opt_theta ? params[j++] : init_theta;
+            
+            // Bounds checking
+            if (alpha <= 0.01 || alpha >= 0.99) {
+                std::fill(grad.begin(), grad.end(), 0.0);
+                return HUGE_N;
+            }
+            if (theta <= 1.0 || theta >= 10.0) {
+                std::fill(grad.begin(), grad.end(), 0.0);
+                return HUGE_N;
+            }
+            if (level <= 0.0) {
+                std::fill(grad.begin(), grad.end(), 0.0);
+                return HUGE_N;
+            }
+            
+            // Compute MSE and gradients
+            double mse = optimization::ThetaGradients::computeMSEWithGradients(
+                y, model_type, level, alpha, theta,
+                opt_level, opt_alpha, opt_theta, nmse, grad
+            );
+            
+            return mse;
+        };
+        
+        optimization::LBFGSOptimizer::Options lbfgs_options;
+        lbfgs_options.max_iterations = 200;
+        lbfgs_options.epsilon = 1e-6;
+        lbfgs_options.m = 10;
+        
+        auto lbfgs_result = optimization::LBFGSOptimizer::minimize(
+            objective_fn, x0, lower, upper, lbfgs_options
+        );
+        
+        // Extract optimized parameters
+        size_t j = 0;
+        double opt_level_val = init_level;
+        double opt_alpha_val = init_alpha;
+        double opt_theta_val = init_theta;
+        
+        if (opt_level) {
+            opt_level_val = lbfgs_result.x[j++];
+        }
+        if (opt_alpha) {
+            opt_alpha_val = lbfgs_result.x[j++];
+        }
+        if (opt_theta) {
+            opt_theta_val = lbfgs_result.x[j++];
+        }
+        
+        return {opt_alpha_val, opt_theta_val, opt_level_val, lbfgs_result.fx,
+                lbfgs_result.converged, lbfgs_result.iterations};
+        
+    } else {
+        // Nelder-Mead optimization (fallback/legacy)
+        ThetaObjective objective(y, model_type, opt_level, opt_alpha, opt_theta,
+                                init_level, init_alpha, init_theta, nmse);
+        
+        utils::NelderMeadOptimizer optimizer;
+        utils::NelderMeadOptimizer::Options options;
+        options.step = 0.05;
+        options.max_iterations = 1000;
+        options.tolerance = 1e-4;
+        options.alpha = 1.0;
+        options.gamma = 2.0;
+        options.rho = 0.5;
+        options.sigma = 0.5;
+        
+        auto objective_fn = [&objective](const std::vector<double>& x) {
+            return objective(x);
+        };
+        
+        auto result = optimizer.minimize(objective_fn, x0, options, lower, upper);
+        
+        // Extract optimized parameters
+        size_t j = 0;
+        double opt_level_val = init_level;
+        double opt_alpha_val = init_alpha;
+        double opt_theta_val = init_theta;
+        
+        if (opt_level) {
+            opt_level_val = result.best[j++];
+        }
+        if (opt_alpha) {
+            opt_alpha_val = result.best[j++];
+        }
+        if (opt_theta) {
+            opt_theta_val = result.best[j++];
+        }
+        
+        return {opt_alpha_val, opt_theta_val, opt_level_val, result.value,
+                result.converged, static_cast<int>(result.iterations)};
     }
-    if (opt_alpha) {
-        opt_alpha_val = result.best[j++];
-    }
-    if (opt_theta) {
-        opt_theta_val = result.best[j++];
-    }
-    
-    return {opt_alpha_val, opt_theta_val, opt_level_val, result.value, 
-            result.converged, static_cast<int>(result.iterations)};
 }
 
 } // namespace anofoxtime::models::theta_pegels
