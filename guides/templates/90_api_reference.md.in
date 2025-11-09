@@ -45,7 +45,7 @@ Generate forecasts for multiple time series with GROUP BY.
 
 ---
 
-## Available Models (31 Total)
+## Available Models (32 Total)
 
 ### Automatic Selection (Recommended)
 
@@ -53,6 +53,7 @@ Generate forecasts for multiple time series with GROUP BY.
 |-------|----------|------------|
 | **AutoETS** | General purpose | `seasonal_period` |
 | **AutoARIMA** | Complex patterns | `seasonal_period` |
+| **AutoTheta** | Theta family selection | `seasonal_period`, `model` |
 | **AutoMFLES** | Multiple seasonality | `seasonal_periods: [7, 365]` |
 | **AutoMSTL** | Multiple seasonality | `seasonal_periods: [7, 30]` |
 | **AutoTBATS** | Complex seasonality | `seasonal_periods: [24, 168]` |
@@ -89,6 +90,7 @@ Generate forecasts for multiple time series with GROUP BY.
 | Model | Description | Parameters |
 |-------|-------------|------------|
 | **Theta** | Theta decomposition | `seasonal_period`, `theta` |
+| **AutoTheta** | Auto model selection (STM/OTM/DSTM/DOTM) | `seasonal_period`, `model`, `decomposition_type` |
 | **OptimizedTheta** | Auto-optimized | `seasonal_period` |
 | **DynamicTheta** | Adaptive | `seasonal_period`, `theta` |
 | **DynamicOptimizedTheta** | Auto adaptive | `seasonal_period` |

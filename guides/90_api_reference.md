@@ -70,7 +70,7 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28,
 
 ---
 
-## Available Models (31 Total)
+## Available Models (32 Total)
 
 ### Automatic Selection (Recommended)
 
@@ -78,6 +78,7 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28,
 |-------|----------|------------|
 | **AutoETS** | General purpose | `seasonal_period` |
 | **AutoARIMA** | Complex patterns | `seasonal_period` |
+| **AutoTheta** | Theta family selection | `seasonal_period`, `model` |
 | **AutoMFLES** | Multiple seasonality | `seasonal_periods: [7, 365]` |
 | **AutoMSTL** | Multiple seasonality | `seasonal_periods: [7, 30]` |
 | **AutoTBATS** | Complex seasonality | `seasonal_periods: [24, 168]` |
@@ -114,6 +115,7 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28,
 | Model | Description | Parameters |
 |-------|-------------|------------|
 | **Theta** | Theta decomposition | `seasonal_period`, `theta` |
+| **AutoTheta** | Auto model selection (STM/OTM/DSTM/DOTM) | `seasonal_period`, `model`, `decomposition_type` |
 | **OptimizedTheta** | Auto-optimized | `seasonal_period` |
 | **DynamicTheta** | Adaptive | `seasonal_period`, `theta` |
 | **DynamicOptimizedTheta** | Auto adaptive | `seasonal_period` |

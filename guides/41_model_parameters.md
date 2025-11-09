@@ -176,47 +176,9 @@ FROM trending_data;
 
 ---
 
-### 5. SeasonalWindowAverage
-
-Moving average with seasonal adjustment.
-
-**Parameters:**
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `seasonal_period` | INTEGER | **Yes** | N/A | Length of seasonal cycle |
-| `window` | INTEGER | No | 5 | Moving average window size |
-
-**Validation:**
-- `seasonal_period` must be positive
-- `window` must be positive
-
-**Use Case:** Seasonal data with noise, smoothed seasonal baseline
-
-**Examples:**
-
-```sql
--- Weekly seasonality with default window
-SELECT TS_FORECAST(date, value, 'SeasonalWindowAverage', 14,
-       MAP{'seasonal_period': 7}) AS forecast
-FROM noisy_seasonal_data;
-
--- Custom window size for more smoothing
-SELECT TS_FORECAST(date, value, 'SeasonalWindowAverage', 14,
-       MAP{'seasonal_period': 7, 'window': 3}) AS forecast
-FROM noisy_seasonal_data;
-
--- Monthly seasonality with small window
-SELECT TS_FORECAST(month, value, 'SeasonalWindowAverage', 12,
-       MAP{'seasonal_period': 12, 'window': 3}) AS forecast
-FROM monthly_sales;
-```
-
----
-
 ## Exponential Smoothing
 
-### 6. SES (Simple Exponential Smoothing)
+### 5. SES (Simple Exponential Smoothing)
 
 Exponential smoothing with fixed smoothing parameter.
 
@@ -249,7 +211,7 @@ FROM stable_data;
 
 ---
 
-### 7. SESOptimized
+### 6. SESOptimized
 
 Simple Exponential Smoothing with automatically optimized alpha parameter.
 
@@ -265,7 +227,7 @@ FROM data;
 
 ---
 
-### 8. SeasonalES
+### 7. SeasonalES
 
 Exponential smoothing with seasonality (Holt-Winters additive seasonality).
 
@@ -292,7 +254,7 @@ FROM weekly_sales;
 
 ---
 
-### 9. SeasonalESOptimized
+### 8. SeasonalESOptimized
 
 SeasonalES with automatically optimized parameters.
 
@@ -309,6 +271,28 @@ SeasonalES with automatically optimized parameters.
 SELECT TS_FORECAST(date, value, 'SeasonalESOptimized', 12, 
        MAP{'seasonal_period': 12}) AS forecast
 FROM monthly_data;
+```
+
+---
+
+### 9. SeasonalWindowAverage
+
+Moving average with seasonal adjustment.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `seasonal_period` | INTEGER | **Yes** | N/A | Length of seasonal cycle |
+| `window` | INTEGER | No | 5 | Moving average window size |
+
+**Use Case:** Seasonal data with noise
+
+**Example:**
+```sql
+SELECT TS_FORECAST(date, value, 'SeasonalWindowAverage', 14, 
+       MAP{'seasonal_period': 7, 'window': 3}) AS forecast
+FROM noisy_seasonal_data;
 ```
 
 ---
@@ -696,9 +680,9 @@ Gradient-boosted decomposition for multiple seasonal patterns.
 |-----------|------|----------|---------|-------------|
 | `seasonal_periods` | INTEGER[] | No | [12] | Array of seasonal periods |
 | `n_iterations` | INTEGER | No | 50 | Number of gradient boosting iterations |
-| `lr_trend` | DOUBLE | No | 0.9 | Learning rate for trend |
-| `lr_season` | DOUBLE | No | 0.9 | Learning rate for seasonality |
-| `lr_level` | DOUBLE | No | 1.0 | Learning rate for level |
+| `lr_trend` | DOUBLE | No | 0.9 | Learning rate for trend component |
+| `lr_season` | DOUBLE | No | 0.9 | Learning rate for seasonality component |
+| `lr_level` | DOUBLE | No | 1.0 | Learning rate for residual smoothing (ES ensemble) |
 | `progressive_trend` | BOOLEAN | No | true | Use StatsForecast progressive trend complexity |
 | `sequential_seasonality` | BOOLEAN | No | true | Fit one seasonality per round (StatsForecast) |
 
@@ -740,15 +724,6 @@ SELECT TS_FORECAST(date, value, 'MFLES', 12,
        MAP{'seasonal_periods': [12], 'n_iterations': 15,
            'lr_trend': 0.4, 'lr_season': 0.6, 'lr_level': 0.9}) AS forecast
 FROM data;
-
--- Use original AnoFox algorithm (simultaneous seasonality, fixed trend)
-SELECT TS_FORECAST(date, value, 'MFLES', 12, 
-       MAP{'progressive_trend': false, 'sequential_seasonality': false}) AS forecast
-FROM data;
-
--- Use StatsForecast algorithm (default - sequential seasonality, progressive trend)
-SELECT TS_FORECAST(date, value, 'MFLES', 12, MAP{}) AS forecast
-FROM data;
 ```
 
 ---
@@ -779,35 +754,12 @@ MFLES with automatically optimized parameters via cross-validation.
 
 **Use Case:** Multiple seasonality with automatic parameter optimization
 
-**Examples:**
+**Example:**
 
 ```sql
--- Basic usage with default metric (MAE)
 SELECT TS_FORECAST(date, value, 'AutoMFLES', 30, 
        MAP{'seasonal_periods': [7, 365]}) AS forecast
 FROM daily_data;
-
--- Optimize for SMAPE (symmetric mean absolute percentage error)
-SELECT TS_FORECAST(date, value, 'AutoMFLES', 12, 
-       MAP{'seasonal_periods': [12], 'metric': 'smape'}) AS forecast
-FROM monthly_data;
-
--- Optimize for RMSE with custom CV settings
-SELECT TS_FORECAST(date, value, 'AutoMFLES', 24, 
-       MAP{'seasonal_periods': [24, 168], 
-           'metric': 'rmse',
-           'cv_horizon': 48,
-           'cv_n_windows': 3}) AS forecast
-FROM hourly_data;
-
--- Custom learning rates optimized for MAPE
-SELECT TS_FORECAST(date, value, 'AutoMFLES', 12, 
-       MAP{'seasonal_periods': [12],
-           'metric': 'mape',
-           'lr_trend': 0.4,
-           'lr_season': 0.6,
-           'lr_rs': 0.9}) AS forecast
-FROM data;
 ```
 
 ---
