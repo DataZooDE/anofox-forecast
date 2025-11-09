@@ -10,15 +10,15 @@ Comprehensive benchmark comparing Theta method variants between **Anofox-forecas
 
 | Implementation | Model | MASE | MAE | RMSE | Time (s) |
 |----------------|-------|------|-----|------|----------|
-| Anofox | OptimizedTheta | **1.149** | 178.08 | 209.53 | 1,033 |
-| Statsforecast | AutoTheta | **1.149** | 178.15 | 209.60 | 693 |
-| Statsforecast | OptimizedTheta | 1.151 | 178.44 | 209.91 | 693 |
-| Statsforecast | DynamicTheta | 1.153 | 178.83 | 210.33 | 693 |
-| Statsforecast | Theta | 1.154 | 178.85 | 210.36 | 693 |
-| Anofox | DynamicOptimizedTheta | 1.155 | 179.06 | 210.56 | 906 |
-| Statsforecast | DynamicOptimizedTheta | 1.156 | 178.97 | 210.52 | 693 |
-| Anofox | DynamicTheta | 1.226 | 191.41 | 221.94 | 19 |
-| Anofox | Theta | 1.226 | 191.46 | 222.00 | 20 |
+| Anofox | OptimizedTheta | **1.149** | 178.08 | 209.53 | 1,418 |
+| Statsforecast | AutoTheta | **1.149** | 178.15 | 209.60 | 2,327 |
+| Statsforecast | OptimizedTheta | 1.151 | 178.44 | 209.91 | 751 |
+| Statsforecast | DynamicTheta | 1.153 | 178.83 | 210.33 | 472 |
+| Statsforecast | Theta | 1.154 | 178.85 | 210.36 | 512 |
+| Anofox | DynamicOptimizedTheta | 1.155 | 179.06 | 210.56 | 773 |
+| Statsforecast | DynamicOptimizedTheta | 1.156 | 178.97 | 210.52 | 612 |
+| Anofox | DynamicTheta | 1.226 | 191.41 | 221.94 | 14 |
+| Anofox | Theta | 1.226 | 191.46 | 222.00 | 19 |
 
 ### Key Findings
 
@@ -29,21 +29,21 @@ Comprehensive benchmark comparing Theta method variants between **Anofox-forecas
 - **All Theta variants beat Auto ARIMA** (1.212) and competitive with AutoETS (1.148)
 
 **Speed:**
-- **Fastest**: Anofox non-optimized variants (19-20s) - Excellent for production
-- **Optimized Anofox**: 906-1,033s (~15-17 min) for marginal accuracy gain
-- **Statsforecast All Models**: 693s (~11.5 min) for all 5 variants combined
-- **Speed vs Accuracy**: Non-optimized Anofox 50x faster with only 6.7% accuracy loss
+- **Fastest**: Anofox non-optimized variants (14-19s) - Excellent for production
+- **Optimized Anofox**: 773-1,418s (~13-24 min) for marginal accuracy gain
+- **Statsforecast All Models**: 4,675s (~78 min) for all 5 variants total
+- **Speed vs Accuracy**: Non-optimized Anofox 100x+ faster with only 6.7% accuracy loss
 
 **Implementation Comparison:**
-- **Statsforecast faster**: ~1.5x faster than Anofox for optimized variants (693s vs 900-1000s)
-- **Identical top accuracy**: Both achieve MASE 1.149
-- **Anofox advantage**: Fast non-optimized variants (19-20s) for production
+- **Anofox OptimizedTheta**: Best overall (MASE 1.149, 1,418s)
+- **Statsforecast AutoTheta**: Tied best (MASE 1.149, 2,327s)
+- **Anofox advantage**: Fast non-optimized variants (14-19s) for production
 
 **Practical Recommendations:**
-- **Production Default**: Anofox Theta (20s, MASE 1.226) - Fast and reliable
-- **Best Accuracy**: Anofox OptimizedTheta or Statsforecast AutoTheta (MASE 1.149)
+- **Production Default**: Anofox Theta (19s, MASE 1.226) - Fast and reliable
+- **Best Accuracy**: Anofox OptimizedTheta (MASE 1.149, 1,418s / 24 min)
 - **Time Budget < 1 min**: Use Anofox Theta or DynamicTheta
-- **Time Budget 10-15 min**: Use optimized variants for 6-7% accuracy improvement
+- **Time Budget 10-25 min**: Use optimized variants for 6-7% accuracy improvement
 
 **Comparison with Other Methods:**
 - vs RandomWalkWithDrift (1.147): Theta slightly worse but competitive
@@ -78,7 +78,7 @@ SELECT * FROM TS_FORECAST_BY(
 - `theta_param`: Theta parameter (default: 2.0, typical range: 0-3)
 
 **Performance:**
-- 20s for 4,227 series (~0.005s per series)
+- 19s for 4,227 series (~0.004s per series)
 - MASE 1.226
 - **Fastest Theta variant**, ideal for production
 
@@ -101,9 +101,9 @@ SELECT * FROM TS_FORECAST_BY(
 - Theta parameter automatically optimized per series
 
 **Performance:**
-- 1,033s for 4,227 series (~0.24s per series)
+- 1,418s for 4,227 series (~0.34s per series)
 - MASE 1.149 - **Best Anofox accuracy**
-- 50x slower than non-optimized, 6.7% accuracy gain
+- 75x slower than non-optimized, 6.7% accuracy gain
 
 #### 3. DynamicTheta - Dynamic Theta Method
 
@@ -127,9 +127,9 @@ SELECT * FROM TS_FORECAST_BY(
 - `theta_param`: Theta parameter (default: 2.0)
 
 **Performance:**
-- 19s for 4,227 series (~0.004s per series)
+- 14s for 4,227 series (~0.003s per series)
 - MASE 1.226
-- Similar to standard Theta
+- Similar to standard Theta, fastest variant
 
 #### 4. DynamicOptimizedTheta - Dynamic + Optimized
 
@@ -150,9 +150,9 @@ SELECT * FROM TS_FORECAST_BY(
 - Theta parameter automatically optimized
 
 **Performance:**
-- 906s for 4,227 series (~0.21s per series)
+- 773s for 4,227 series (~0.18s per series)
 - MASE 1.155
-- Slightly worse than OptimizedTheta, slightly faster
+- Slightly worse than OptimizedTheta, faster
 
 ### Statsforecast Theta Variants
 

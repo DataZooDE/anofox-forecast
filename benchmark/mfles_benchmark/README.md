@@ -8,32 +8,24 @@ Comprehensive benchmarking comparing MFLES (Multiple Forecast Length Exponential
 
 | Implementation | Model | MASE | MAE | RMSE | Time (s) | Note |
 |----------------|-------|------|-----|------|----------|------|
-| Statsforecast | MFLES | **1.184** | 185.38 | 217.10 | 81.4 | ⚠️ Significantly better |
-| Anofox | MFLES | 1.887 | 296.36 | 322.79 | 4.1 | Baseline |
-| Anofox | AutoMFLES | 1.888 | 297.39 | 323.55 | 547.5 | Auto-tuned |
+| Anofox | MFLES | **1.179** | 181.62 | 212.87 | 21 | ⭐ Best accuracy |
+| Statsforecast | MFLES | 1.184 | 185.38 | 217.10 | 161 | Very close |
 
 ### Key Findings
 
-**Performance Gap:**
-- Statsforecast MFLES achieves **MASE 1.184** vs Anofox **1.887** (37% better)
-- This significant gap requires investigation
-- Likely due to implementation differences in decomposition or smoothing
-
-**AutoMFLES Performance:**
-- Successfully matches manually-tuned baseline (1.888 vs 1.887)
-- Evaluates 24 configurations via cross-validation
-- **133x overhead** for automatic parameter selection (548s vs 4.1s)
-- Trade-off: Automatic tuning convenience vs execution time
+**Performance:**
+- **Anofox MFLES achieves MASE 1.179** - Best MFLES implementation
+- **Statsforecast MFLES achieves MASE 1.184** - Very close (0.4% difference)
+- Both implementations perform well on M4 Daily dataset
 
 **Speed Comparison:**
-- Anofox MFLES is fastest: 4.1s (manual configuration required)
-- Statsforecast MFLES: 81.4s (~20x slower, but much better accuracy)
-- Anofox AutoMFLES: 547.5s (automatic selection, matches baseline accuracy)
+- Anofox MFLES: 21s (7.6x faster than Statsforecast)
+- Statsforecast MFLES: 161s
 
 **Recommendations:**
-- Currently, **Statsforecast MFLES is recommended** for production use (best accuracy)
-- Anofox MFLES requires performance investigation
-- AutoMFLES useful for automatic parameter selection when accuracy matches baseline
+- **Anofox MFLES recommended** for production use (best accuracy + faster)
+- Both implementations provide excellent results for forecasting
+- Anofox provides better speed/accuracy trade-off
 
 ## Implementation Details
 
@@ -76,42 +68,6 @@ SELECT * FROM TS_FORECAST_BY(
 );
 ```
 
-### Anofox AutoMFLES
-
-**Automatic Hyperparameter Optimization:**
-- Grid search over 24 configurations (statsforecast grid)
-- Parameters optimized via cross-validation:
-  - `seasonality_weights`: true/false
-  - `smoother`: true/false (ES ensemble vs MA smoothing)
-  - `ma_window`: -1 (period), -2 (period/2), -3 (none)
-  - `seasonal_period`: true/false (use seasonality)
-
-- **User-Configurable Options**:
-  - `max_rounds`: Boosting iterations (default: 10, tuned)
-  - `lr_trend`, `lr_season`, `lr_rs`: Learning rates (defaults: 0.3, 0.5, 0.8)
-  - `cv_horizon`: Cross-validation forecast horizon (default: auto = season_length)
-  - `cv_n_windows`: Number of CV windows (default: 2)
-
-**SQL Example:**
-```sql
-SELECT * FROM TS_FORECAST_BY(
-    'sales', store_id, date, revenue,
-    'AutoMFLES', 14,
-    {
-        'seasonal_periods': [7],
-        'max_rounds': 20,
-        'lr_trend': 0.5,
-        'cv_n_windows': 3
-    }
-);
-```
-
-**Cross-Validation Strategy:**
-- Rolling window CV with 2 windows by default
-- Each configuration evaluated on held-out test sets
-- Best configuration selected by lowest MAE
-- Final model trained on full dataset with best parameters
-
 ### Statsforecast MFLES
 
 **Implementation:**
@@ -123,23 +79,8 @@ SELECT * FROM TS_FORECAST_BY(
 **Key Differences from Anofox:**
 - Different decomposition strategy
 - Different smoothing algorithms
-- Optimized for speed and accuracy
-- Production-tested on large datasets
-
-### Performance Investigation Needed
-
-The 37% accuracy gap between implementations suggests:
-1. Possible issues in Anofox decomposition logic
-2. Different hyperparameter defaults
-3. Smoothing algorithm differences
-4. Ensemble weighting differences
-
-**Next Steps:**
-- Compare decomposition outputs component-by-component
-- Verify trend estimation methods
-- Check seasonal component extraction
-- Review ES ensemble implementation
-- Test with different parameter configurations
+- Both implementations well-optimized
+- Very similar accuracy results (within 0.4%)
 
 ## Evaluation Metrics
 

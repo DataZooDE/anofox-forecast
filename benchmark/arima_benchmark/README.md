@@ -8,8 +8,8 @@ Comprehensive benchmark of **AutoARIMA** from anofox-forecast on M4 Competition 
 
 | Implementation | Model | MASE | MAE | RMSE | Time (s) |
 |----------------|-------|------|-----|------|----------|
-| Statsforecast | AutoARIMA | **1.150** | 176.88 | 208.43 | 2,923 |
-| Anofox | AutoARIMA | 1.212 | 183.95 | 216.36 | 5.2 |
+| Statsforecast | AutoARIMA | **1.150** | 176.82 | 208.63 | 7,299 |
+| Anofox | AutoARIMA | 1.212 | 183.95 | 216.36 | 6.2 |
 
 ### Key Findings
 
@@ -21,14 +21,14 @@ Comprehensive benchmark of **AutoARIMA** from anofox-forecast on M4 Competition 
 - **Anofox close to optimized methods**: Within 5.5% of OptimizedTheta/AutoETS (1.148-1.149)
 
 **Speed:**
-- **Anofox: 5.2s** for 4,227 series (~0.001s per series) - **Extremely fast**
-- **Statsforecast: 2,923s** (48.7 min) for 4,227 series (~0.69s per series)
-- **Anofox is 562x faster** than Statsforecast with only 5.4% accuracy loss
-- **Fastest automatic method**: Anofox much faster than AutoETS (466s) and OptimizedTheta (900-1000s)
+- **Anofox: 6.2s** for 4,227 series (~0.001s per series) - **Extremely fast**
+- **Statsforecast: 7,299s** (121.7 min) for 4,227 series (~1.73s per series)
+- **Anofox is 1,176x faster** than Statsforecast with only 5.4% accuracy loss
+- **Fastest automatic method**: Anofox much faster than AutoETS (556s) and OptimizedTheta (1,418s)
 
 **Practical Insights:**
 - **Best Speed/Accuracy Trade-off**: Anofox provides excellent accuracy in seconds
-- **Best Accuracy**: Statsforecast when you can afford 49 minutes
+- **Best Accuracy**: Statsforecast when you can afford 122 minutes
 - **Automatic Model Selection**: Both implementations eliminate manual parameter tuning
 - **Production Ready**: Anofox fast enough for real-time applications
 - **SQL-Native**: Anofox integrates seamlessly with DuckDB workflows
@@ -40,13 +40,13 @@ Comprehensive benchmark of **AutoARIMA** from anofox-forecast on M4 Competition 
   - vs OptimizedTheta (1.149): 0.1% worse - **effectively tied for best complex model**
 - **Anofox AutoARIMA** (1.212):
   - vs RandomWalkWithDrift (1.147): 5.7% worse, but automatic ARIMA order selection
-  - vs AutoETS (1.148): 5.6% worse, but 90x faster (5s vs 466s)
-  - vs OptimizedTheta (1.149): 5.5% worse, but 200x faster (5s vs 1,033s)
-  - vs Statsforecast AutoARIMA (1.150): 5.4% worse, but **562x faster** (5s vs 2,923s)
+  - vs AutoETS (1.148): 5.6% worse, but 90x faster (6s vs 556s)
+  - vs OptimizedTheta (1.149): 5.5% worse, but 228x faster (6s vs 1,418s)
+  - vs Statsforecast AutoARIMA (1.150): 5.4% worse, but **1,176x faster** (6s vs 7,299s)
 
 **Recommendations:**
-- **Fast Automatic Forecasting**: Use Anofox AutoARIMA for speed (5s, MASE 1.212)
-- **Best ARIMA Accuracy**: Use Statsforecast AutoARIMA if you can afford 49 minutes (MASE 1.150)
+- **Fast Automatic Forecasting**: Use Anofox AutoARIMA for speed (6s, MASE 1.212)
+- **Best ARIMA Accuracy**: Use Statsforecast AutoARIMA if you can afford 122 minutes (MASE 1.150)
 - **Real-time Applications**: Anofox is the only viable choice for low-latency forecasting
 - **Batch Processing**: Statsforecast provides marginally better accuracy for offline workflows
 - **SQL Workflows**: Anofox offers native DuckDB integration
@@ -56,7 +56,7 @@ Comprehensive benchmark of **AutoARIMA** from anofox-forecast on M4 Competition 
 **Why the speed difference?**
 - **Anofox**: Optimized for SQL-native execution, streamlined search space
 - **Statsforecast**: More exhaustive ARIMA order search, extensive cross-validation
-- **Trade-off**: Anofox sacrifices 5.4% accuracy for 562x speedup
+- **Trade-off**: Anofox sacrifices 5.4% accuracy for 1,176x speedup
 
 **Why the accuracy difference?**
 - Statsforecast likely explores more (p,d,q)(P,D,Q)m combinations
@@ -115,7 +115,7 @@ Selection criteria:
 - Prevents overfitting through penalization
 
 **Performance:**
-- 5.2s for 4,227 series (~0.001s per series)
+- 6.2s for 4,227 series (~0.001s per series)
 - MASE 1.212
 - SQL-native execution in DuckDB
 - Zero-copy data access
@@ -135,7 +135,7 @@ Selection criteria:
 
 **When Not to Use:**
 - Need absolute best ARIMA accuracy (use Statsforecast AutoARIMA instead)
-- Can afford 49 minutes for 5.4% accuracy improvement
+- Can afford 122 minutes for 5.4% accuracy improvement
 - Working exclusively in Python (statsforecast integration simpler)
 
 ### Statsforecast AutoARIMA
@@ -171,14 +171,14 @@ forecasts = sf.forecast(df=train_df, h=14, level=[95])
 5. More sophisticated order selection algorithm
 
 **Performance:**
-- 2,923s for 4,227 series (~0.69s per series)
+- 7,299s for 4,227 series (~1.73s per series)
 - Achieves best ARIMA accuracy (MASE 1.150)
-- **562x slower than Anofox** but **5.4% more accurate**
+- **1,176x slower than Anofox** but **5.4% more accurate**
 - Competitive with best complex models (AutoETS, OptimizedTheta)
 
 **When to Use:**
 - Need best possible ARIMA accuracy
-- Can afford 49 minutes for batch forecasting
+- Can afford 122 minutes for batch forecasting
 - Working in Python ecosystem
 - Offline or batch processing workflows
 - Accuracy is more important than speed
@@ -187,7 +187,7 @@ forecasts = sf.forecast(df=train_df, h=14, level=[95])
 - Need real-time forecasting (< 10s)
 - SQL-native workflow required
 - Speed is critical (use Anofox instead)
-- 5.4% accuracy improvement not worth 562x slowdown
+- 5.4% accuracy improvement not worth 1,176x slowdown
 
 ### ARIMA Method Overview
 

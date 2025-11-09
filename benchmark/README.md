@@ -12,40 +12,39 @@ All models benchmarked on M4 Daily dataset, grouped by method family and separat
 
 | Method Family | Implementation | Model | MASE | MAE | RMSE | Time (s) |
 |---------------|----------------|-------|------|-----|------|----------|
-| **Baseline** | Anofox | Naive | 1.153 | 180.83 | 212.00 | 0.19 |
-| | Statsforecast | Naive | 1.153 | 180.83 | 212.00 | 0.38 |
-| | Anofox | RandomWalkWithDrift | **1.147** | 183.48 | 215.10 | 0.17 |
-| | Statsforecast | RandomWalkWithDrift | **1.147** | 183.48 | 215.10 | 0.38 |
-| | Anofox | SeasonalNaive | 1.441 | 227.11 | 263.74 | 0.18 |
-| | Statsforecast | SeasonalNaive | 1.452 | 227.12 | 262.16 | 0.38 |
-| | Anofox | SeasonalWindowAverage | 1.961 | 300.48 | 326.69 | 0.21 |
-| | Statsforecast | SeasonalWindowAverage | 2.209 | 334.23 | 359.39 | 0.38 |
-| | Anofox | SMA | 1.343 | 209.01 | 237.98 | 0.16 |
-| | Statsforecast | WindowAverage | 1.380 | 214.88 | 243.65 | 0.38 |
-| **ETS** | Anofox | AutoETS | **1.148** | 175.79 | 207.48 | 466 |
-| | Statsforecast | AutoETS | 1.227 | 188.14 | 227.63 | ~241 |
-| | Statsforecast | Holt | **1.132** | 172.86 | 204.44 | ~241 |
-| | Anofox | HoltWinters | 1.152 | 175.92 | 207.42 | 117 |
-| | Statsforecast | HoltWinters | **1.148** | 177.14 | 208.90 | ~241 |
-| | Statsforecast | SeasonalESOptimized | 1.457 | 226.82 | 261.36 | ~241 |
-| | Anofox | SeasonalES | 1.355 | 210.88 | 240.48 | 1.1 |
-| | Statsforecast | SeasonalES | 1.608 | 249.17 | 278.42 | ~241 |
-| | Anofox | SeasonalESOptimized | 1.203 | 186.67 | 218.23 | 8.0 |
-| | Statsforecast | SES | 1.231 | 191.79 | 222.13 | ~241 |
-| | Statsforecast | SESOpt | 1.154 | 178.32 | 209.79 | ~241 |
-| **Theta** | Statsforecast | AutoTheta | **1.149** | 178.15 | 209.60 | 693 |
-| | Anofox | DynamicOptimizedTheta | 1.155 | 179.06 | 210.56 | 906 |
-| | Statsforecast | DynamicOptimizedTheta | 1.156 | 178.97 | 210.52 | 693 |
-| | Anofox | DynamicTheta | 1.226 | 191.41 | 221.94 | 19 |
-| | Statsforecast | DynamicTheta | 1.153 | 178.83 | 210.33 | 693 |
-| | Anofox | OptimizedTheta | **1.149** | 178.08 | 209.53 | 1,033 |
-| | Statsforecast | OptimizedTheta | 1.151 | 178.44 | 209.91 | 693 |
-| | Anofox | Theta | 1.226 | 191.46 | 222.00 | 20 |
-| | Statsforecast | Theta | 1.154 | 178.85 | 210.36 | 693 |
-| **ARIMA** | Anofox | AutoARIMA | 1.212 | 183.95 | 216.36 | 5.2 |
-| | Statsforecast | AutoARIMA | **1.150** | 176.88 | 208.43 | 2,923 |
-| **MFLES** | Anofox | MFLES | **1.179** | 181.63 | 212.88 | ~40 |
-| | Statsforecast | MFLES | 1.184 | 185.38 | 217.10 | 81 |
+| **Baseline** | Anofox | Naive | 1.153 | 180.83 | 212.00 | 0.24 |
+| | Statsforecast | Naive | 1.153 | 180.83 | 212.00 | 3.17 |
+| | Anofox | RandomWalkWithDrift | **1.147** | 183.48 | 215.10 | 0.25 |
+| | Statsforecast | RandomWalkWithDrift | **1.147** | 183.48 | 215.10 | 4.78 |
+| | Anofox | SeasonalNaive | 1.441 | 227.11 | 263.74 | 0.22 |
+| | Statsforecast | SeasonalNaive | 1.452 | 227.12 | 262.16 | 3.51 |
+| | Anofox | SeasonalWindowAverage | 1.961 | 300.48 | 326.69 | 0.26 |
+| | Statsforecast | SeasonalWindowAverage | 2.209 | 334.23 | 359.39 | 6.20 |
+| | Anofox | SMA | 1.343 | 209.01 | 237.98 | 0.22 |
+| | Statsforecast | WindowAverage | 1.380 | 214.88 | 243.65 | 4.56 |
+| **ETS** | Anofox | AutoETS | **1.148** | 175.79 | 207.48 | 556 |
+| | Statsforecast | AutoETS | 1.227 | 188.14 | 227.63 | 3,179 |
+| | Statsforecast | Holt | **1.132** | 172.86 | 204.44 | 154 |
+| | Anofox | HoltWinters | 1.152 | 175.92 | 207.42 | 176 |
+| | Statsforecast | HoltWinters | **1.148** | 177.14 | 208.90 | 1,094 |
+| | Statsforecast | SeasonalESOptimized | 1.457 | 226.82 | 261.36 | 10 |
+| | Anofox | SeasonalESOptimized | 1.203 | 186.67 | 218.23 | 9 |
+| | Statsforecast | SeasonalES | 1.608 | 249.17 | 278.42 | 6 |
+| | Statsforecast | SES | 1.231 | 191.79 | 222.13 | 3 |
+| | Statsforecast | SESOpt | 1.154 | 178.32 | 209.79 | 6 |
+| **Theta** | Statsforecast | AutoTheta | **1.149** | 178.15 | 209.60 | 2,327 |
+| | Anofox | DynamicOptimizedTheta | 1.155 | 179.06 | 210.56 | 773 |
+| | Statsforecast | DynamicOptimizedTheta | 1.156 | 178.97 | 210.52 | 612 |
+| | Anofox | DynamicTheta | 1.226 | 191.41 | 221.94 | 14 |
+| | Statsforecast | DynamicTheta | 1.153 | 178.83 | 210.33 | 472 |
+| | Anofox | OptimizedTheta | **1.149** | 178.08 | 209.53 | 1,418 |
+| | Statsforecast | OptimizedTheta | 1.151 | 178.44 | 209.91 | 751 |
+| | Anofox | Theta | 1.226 | 191.46 | 222.00 | 19 |
+| | Statsforecast | Theta | 1.154 | 178.85 | 210.36 | 512 |
+| **ARIMA** | Anofox | AutoARIMA | 1.212 | 183.95 | 216.36 | 6.2 |
+| | Statsforecast | AutoARIMA | **1.150** | 176.82 | 208.63 | 7,299 |
+| **MFLES** | Anofox | MFLES | **1.179** | 181.62 | 212.87 | 21 |
+| | Statsforecast | MFLES | 1.184 | 185.38 | 217.10 | 161 |
 
 
 ## Datasets, Metrics, and Running Benchmarks

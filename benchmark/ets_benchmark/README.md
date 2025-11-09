@@ -8,17 +8,16 @@ Comprehensive benchmark of Error-Trend-Seasonal exponential smoothing models fro
 
 | Implementation | Model | MASE | MAE | RMSE | Time (s) | Note |
 |----------------|-------|------|-----|------|----------|------|
-| Statsforecast | Holt | **1.132** | 172.86 | 204.44 | ~241 | ⭐ Best ETS accuracy |
-| Anofox | AutoETS | **1.148** | 175.79 | 207.48 | 466 | Best complex automatic |
-| Statsforecast | HoltWinters | **1.148** | 177.14 | 208.90 | ~241 | Tied best automatic |
-| Anofox | HoltWinters | 1.152 | 175.92 | 207.42 | 117 | Fast & accurate |
-| Statsforecast | SESOpt | 1.154 | 178.32 | 209.79 | ~241 | Simple optimized |
-| Anofox | SeasonalESOptimized | 1.203 | 186.67 | 218.23 | 8.0 | Very fast optimized |
-| Statsforecast | AutoETS | 1.227 | 188.14 | 227.63 | ~241 | Automatic selection |
-| Statsforecast | SES | 1.231 | 191.79 | 222.13 | ~241 | Simple exponential |
-| Anofox | SeasonalES | 1.355 | 210.88 | 240.48 | 1.1 | Fastest |
-| Statsforecast | SeasonalESOptimized | 1.457 | 226.82 | 261.36 | ~241 | Seasonal optimized |
-| Statsforecast | SeasonalES | 1.608 | 249.17 | 278.42 | ~241 | Basic seasonal |
+| Statsforecast | Holt | **1.132** | 172.86 | 204.44 | 154 | ⭐ Best ETS accuracy |
+| Anofox | AutoETS | **1.148** | 175.79 | 207.48 | 556 | Best complex automatic |
+| Statsforecast | HoltWinters | **1.148** | 177.14 | 208.90 | 1,094 | Tied best automatic |
+| Anofox | HoltWinters | 1.152 | 175.92 | 207.42 | 176 | Fast & accurate |
+| Statsforecast | SESOpt | 1.154 | 178.32 | 209.79 | 6 | Simple optimized |
+| Anofox | SeasonalESOptimized | 1.203 | 186.67 | 218.23 | 9 | Very fast optimized |
+| Statsforecast | AutoETS | 1.227 | 188.14 | 227.63 | 3,179 | Automatic selection |
+| Statsforecast | SES | 1.231 | 191.79 | 222.13 | 3 | Simple exponential |
+| Statsforecast | SeasonalESOptimized | 1.457 | 226.82 | 261.36 | 10 | Seasonal optimized |
+| Statsforecast | SeasonalES | 1.608 | 249.17 | 278.42 | 6 | Basic seasonal |
 
 **Note**: Statsforecast timing has been updated to measure each model individually (previously averaged across all models)
 
@@ -32,11 +31,11 @@ Comprehensive benchmark of Error-Trend-Seasonal exponential smoothing models fro
 - **Anofox AutoETS beats Statsforecast AutoETS**: 1.148 vs 1.227 (6.4% better)
 
 **Speed:**
-- **Fastest**: Anofox SeasonalES at 1.1s (MASE 1.355)
-- **Fast Optimized**: Anofox SeasonalESOptimized at 8.0s (MASE 1.203)
-- **Fast Accurate**: Anofox HoltWinters at 117s (MASE 1.152)
-- **Batch Statsforecast**: All 7 models in 1,687s (~28 min)
-- **Best Complex**: Anofox AutoETS at 466s (~8 min, MASE 1.148)
+- **Fastest**: Statsforecast SES at 3s (MASE 1.231)
+- **Fast Optimized**: Anofox SeasonalESOptimized at 9s (MASE 1.203)
+- **Fast Accurate**: Statsforecast Holt at 154s (MASE 1.132, best accuracy)
+- **Anofox HoltWinters**: 176s (MASE 1.152)
+- **Best Complex**: Anofox AutoETS at 556s (~9 min, MASE 1.148)
 
 **Implementation Comparison:**
 - **Anofox AutoETS > Statsforecast AutoETS**: 1.148 vs 1.227 (6.4% more accurate)
@@ -94,7 +93,7 @@ SELECT * FROM TS_FORECAST_BY(
   - Third letter: Seasonal (N=none, A=additive, M=multiplicative, Z=auto)
 
 **Performance:**
-- 466s for 4,227 series (~0.11s per series)
+- 556s for 4,227 series (~0.13s per series)
 - Achieves best complex model accuracy (MASE 1.148)
 - Automatic selection eliminates manual tuning
 
@@ -131,14 +130,14 @@ SELECT * FROM TS_FORECAST_BY(
 - `gamma`: Seasonal smoothing parameter (0-1, default: optimized)
 
 **Performance:**
-- 117s for 4,227 series (~0.03s per series)
+- 176s for 4,227 series (~0.04s per series)
 - MASE 1.152 (only 0.3% worse than AutoETS)
-- 4x faster than AutoETS, near-optimal accuracy
+- 3x faster than AutoETS, near-optimal accuracy
 
 **When to Use:**
 - Known seasonal pattern (weekly, monthly, etc.)
 - Need fast execution with excellent accuracy
-- Production systems where 117s is acceptable
+- Production systems where 176s is acceptable
 
 ### SeasonalESOptimized - Optimized Seasonal Smoothing
 
@@ -159,7 +158,7 @@ SELECT * FROM TS_FORECAST_BY(
 - Smoothing parameters (alpha, gamma) automatically optimized
 
 **Performance:**
-- 8.0s for 4,227 series (~0.002s per series)
+- 9s for 4,227 series (~0.002s per series)
 - MASE 1.203 (reasonable accuracy)
 - Fast alternative when trend is not needed
 
