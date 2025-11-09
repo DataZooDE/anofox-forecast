@@ -11,47 +11,7 @@ Comprehensive benchmark of **AutoARIMA** from anofox-forecast on M4 Competition 
 | Statsforecast | AutoARIMA | **1.150** | 176.82 | 208.63 | 7,299 |
 | Anofox | AutoARIMA | 1.212 | 183.95 | 216.36 | 6.2 |
 
-### Key Findings
-
-**Accuracy:**
-- **Statsforecast AutoARIMA achieves MASE 1.150** - Best ARIMA result, competitive with top methods
-- **Anofox AutoARIMA achieves MASE 1.212** - Good accuracy, 5.4% worse than Statsforecast
-- **Both beat seasonal baselines**: Much better than SeasonalNaive (1.441)
-- **Statsforecast competitive with best**: Only 0.3% worse than RandomWalkWithDrift (1.147)
-- **Anofox close to optimized methods**: Within 5.5% of OptimizedTheta/AutoETS (1.148-1.149)
-
-**Speed:**
-- **Anofox: 6.2s** for 4,227 series (~0.001s per series) - **Extremely fast**
-- **Statsforecast: 7,299s** (121.7 min) for 4,227 series (~1.73s per series)
-- **Anofox is 1,176x faster** than Statsforecast with only 5.4% accuracy loss
-- **Fastest automatic method**: Anofox much faster than AutoETS (556s) and OptimizedTheta (1,418s)
-
-**Practical Insights:**
-- **Best Speed/Accuracy Trade-off**: Anofox provides excellent accuracy in seconds
-- **Best Accuracy**: Statsforecast when you can afford 122 minutes
-- **Automatic Model Selection**: Both implementations eliminate manual parameter tuning
-- **Production Ready**: Anofox fast enough for real-time applications
-- **SQL-Native**: Anofox integrates seamlessly with DuckDB workflows
-
-**Comparison with Other Methods:**
-- **Statsforecast AutoARIMA** (1.150):
-  - vs RandomWalkWithDrift (1.147): 0.3% worse
-  - vs AutoETS (1.148): 0.2% worse
-  - vs OptimizedTheta (1.149): 0.1% worse - **effectively tied for best complex model**
-- **Anofox AutoARIMA** (1.212):
-  - vs RandomWalkWithDrift (1.147): 5.7% worse, but automatic ARIMA order selection
-  - vs AutoETS (1.148): 5.6% worse, but 90x faster (6s vs 556s)
-  - vs OptimizedTheta (1.149): 5.5% worse, but 228x faster (6s vs 1,418s)
-  - vs Statsforecast AutoARIMA (1.150): 5.4% worse, but **1,176x faster** (6s vs 7,299s)
-
-**Recommendations:**
-- **Fast Automatic Forecasting**: Use Anofox AutoARIMA for speed (6s, MASE 1.212)
-- **Best ARIMA Accuracy**: Use Statsforecast AutoARIMA if you can afford 122 minutes (MASE 1.150)
-- **Real-time Applications**: Anofox is the only viable choice for low-latency forecasting
-- **Batch Processing**: Statsforecast provides marginally better accuracy for offline workflows
-- **SQL Workflows**: Anofox offers native DuckDB integration
-
-### Implementation Comparison
+## Implementation Comparison
 
 **Why the speed difference?**
 - **Anofox**: Optimized for SQL-native execution, streamlined search space

@@ -6,26 +6,10 @@ Comprehensive benchmarking comparing MFLES (Multiple Forecast Length Exponential
 
 **M4 Daily Dataset** (4,227 series, horizon=14, seasonality=7):
 
-| Implementation | Model | MASE | MAE | RMSE | Time (s) | Note |
-|----------------|-------|------|-----|------|----------|------|
-| Anofox | MFLES | **1.179** | 181.62 | 212.87 | 21 | ⭐ Best accuracy |
-| Statsforecast | MFLES | 1.184 | 185.38 | 217.10 | 161 | Very close |
-
-### Key Findings
-
-**Performance:**
-- **Anofox MFLES achieves MASE 1.179** - Best MFLES implementation
-- **Statsforecast MFLES achieves MASE 1.184** - Very close (0.4% difference)
-- Both implementations perform well on M4 Daily dataset
-
-**Speed Comparison:**
-- Anofox MFLES: 21s (7.6x faster than Statsforecast)
-- Statsforecast MFLES: 161s
-
-**Recommendations:**
-- **Anofox MFLES recommended** for production use (best accuracy + faster)
-- Both implementations provide excellent results for forecasting
-- Anofox provides better speed/accuracy trade-off
+| Implementation | Model | MASE | MAE | RMSE | Time (s) |
+|----------------|-------|------|-----|------|----------|
+| Anofox | MFLES | **1.179** | 181.62 | 212.87 | 21 |
+| Statsforecast | MFLES | 1.184 | 185.38 | 217.10 | 161 |
 
 ## Implementation Details
 

@@ -20,36 +20,6 @@ Comprehensive benchmark comparing Theta method variants between **Anofox-forecas
 | Anofox | DynamicTheta | 1.226 | 191.41 | 221.94 | 14 |
 | Anofox | Theta | 1.226 | 191.46 | 222.00 | 19 |
 
-### Key Findings
-
-**Accuracy:**
-- **Best Overall**: anofox-OptimizedTheta and statsforecast-AutoTheta tie at MASE 1.149
-- **Top Tier**: All optimized variants achieve MASE 1.149-1.156 (within 0.6% of best)
-- **Non-optimized Anofox**: MASE 1.226 (6.7% worse, but 50x faster)
-- **All Theta variants beat Auto ARIMA** (1.212) and competitive with AutoETS (1.148)
-
-**Speed:**
-- **Fastest**: Anofox non-optimized variants (14-19s) - Excellent for production
-- **Optimized Anofox**: 773-1,418s (~13-24 min) for marginal accuracy gain
-- **Statsforecast All Models**: 4,675s (~78 min) for all 5 variants total
-- **Speed vs Accuracy**: Non-optimized Anofox 100x+ faster with only 6.7% accuracy loss
-
-**Implementation Comparison:**
-- **Anofox OptimizedTheta**: Best overall (MASE 1.149, 1,418s)
-- **Statsforecast AutoTheta**: Tied best (MASE 1.149, 2,327s)
-- **Anofox advantage**: Fast non-optimized variants (14-19s) for production
-
-**Practical Recommendations:**
-- **Production Default**: Anofox Theta (19s, MASE 1.226) - Fast and reliable
-- **Best Accuracy**: Anofox OptimizedTheta (MASE 1.149, 1,418s / 24 min)
-- **Time Budget < 1 min**: Use Anofox Theta or DynamicTheta
-- **Time Budget 10-25 min**: Use optimized variants for 6-7% accuracy improvement
-
-**Comparison with Other Methods:**
-- vs RandomWalkWithDrift (1.147): Theta slightly worse but competitive
-- vs AutoETS (1.148): Theta matches best complex model
-- vs AutoARIMA (1.212): Theta significantly better (5.2% improvement)
-
 ## Implementation Details
 
 ### Anofox Theta Variants

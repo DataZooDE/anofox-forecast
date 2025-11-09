@@ -19,25 +19,6 @@ Comprehensive benchmark comparing Anofox and Statsforecast implementations of ba
 | Anofox | SeasonalWindowAverage | 1.961 | 300.48 | 326.69 | 0.26 |
 | Statsforecast | SeasonalWindowAverage | 2.209 | 334.23 | 359.39 | 6.20 |
 
-### Key Findings
-
-**Accuracy:**
-- **Best Model**: RandomWalkWithDrift (MASE 1.147) - Optimal for this dataset
-- **Identical Accuracy**: Anofox and Statsforecast produce identical results for Naive, RandomWalkWithDrift
-- **Simple is Effective**: RandomWalkWithDrift outperforms seasonal models significantly
-- **Naive Nearly As Good**: MASE 1.153 (only 0.5% worse than best)
-
-**Speed:**
-- **Exceptional Performance**: All baseline models complete in < 0.4 seconds for 4,227 series
-- **Anofox Faster**: Anofox models run ~2x faster than Statsforecast despite identical accuracy
-- **Fastest Overall**: Anofox SMA at 0.16s
-
-**Practical Insights:**
-1. **RandomWalkWithDrift** performs best by combining naive forecasting with linear trend
-2. **Seasonal models underperform** on this dataset, suggesting weak 7-day seasonality patterns
-3. **Production Recommendation**: Use RandomWalkWithDrift for fast, accurate baseline (0.17s)
-4. **Quick Baseline**: Naive model provides near-optimal accuracy (1.153) in 0.19s
-
 ## Implementation Details
 
 ### Anofox Baseline Models
