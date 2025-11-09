@@ -38,6 +38,7 @@ add_library(anofox-time
     src/optimization/ets_gradients.cpp
     src/optimization/ets_gradients_simd.cpp
     src/optimization/ets_gradients_checkpointing.cpp
+    src/optimization/theta_gradients.cpp
     src/detectors/mad.cpp
     src/models/arima.cpp
     src/models/auto_arima.cpp
@@ -46,6 +47,7 @@ add_library(anofox-time
     src/models/optimized_theta.cpp
     src/models/dynamic_theta.cpp
     src/models/dynamic_optimized_theta.cpp
+    src/models/auto_theta.cpp
     src/models/naive.cpp
     src/models/random_walk_drift.cpp
     src/models/seasonal_naive.cpp
