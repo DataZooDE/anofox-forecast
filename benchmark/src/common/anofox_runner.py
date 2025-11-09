@@ -95,12 +95,7 @@ def run_anofox_benchmark(
         params = params_fn(seasonality)
 
         forecast_query = f"""
-            SELECT
-                unique_id AS id_cols,
-                date_col AS time_col,
-                point_forecast AS forecast_col,
-                lower,
-                upper
+            SELECT *
             FROM TS_FORECAST_BY(
                 'train',
                 unique_id,
@@ -110,11 +105,34 @@ def run_anofox_benchmark(
                 {horizon},
                 {params}
             )
-            ORDER BY id_cols, time_col
         """
-
+        
         try:
             fcst_df = con.execute(forecast_query).fetchdf()
+            
+            # Rename columns to standardized names
+            rename_map = {
+                'unique_id': 'id_cols',
+                'date': 'time_col',
+                'point_forecast': 'forecast_col'
+            }
+            
+            # Handle different prediction interval column names
+            if 'lower_90' in fcst_df.columns:
+                rename_map['lower_90'] = 'lower'
+                rename_map['upper_90'] = 'upper'
+            elif 'lower_95' in fcst_df.columns:
+                rename_map['lower_95'] = 'lower'
+                rename_map['upper_95'] = 'upper'
+            
+            fcst_df = fcst_df.rename(columns=rename_map)
+            
+            # Keep only the columns we need
+            keep_cols = ['id_cols', 'time_col', 'forecast_col']
+            if 'lower' in fcst_df.columns:
+                keep_cols.extend(['lower', 'upper'])
+            
+            fcst_df = fcst_df[keep_cols].sort_values(['id_cols', 'time_col'])
             elapsed_time = time.time() - start_time
 
             print(f"\n✅ {model_name} completed in {elapsed_time:.2f} seconds")

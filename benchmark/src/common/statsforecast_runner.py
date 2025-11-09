@@ -110,6 +110,10 @@ def run_statsforecast_benchmark(
 
             # Reset index to get unique_id and ds as columns
             fcst_df = fcst_df.reset_index()
+            
+            # Drop any 'index' column if it exists (can cause merge conflicts)
+            if 'index' in fcst_df.columns:
+                fcst_df = fcst_df.drop(columns=['index'])
 
             # Rename model columns to use display name
             if model_class_name != model_display_name:
