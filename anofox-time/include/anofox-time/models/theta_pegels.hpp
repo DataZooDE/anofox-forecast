@@ -50,13 +50,16 @@ void update(StateMatrix& states,
 /**
  * Generate forecast from current state
  * Port of statsforecast's forecast() function
+ * 
+ * @param workspace Pre-allocated workspace for state calculations (must be at least i+h size)
  */
 void forecast(const StateMatrix& states,
              size_t i,
              ModelType model_type,
              std::vector<double>& f,
              double alpha,
-             double theta);
+             double theta,
+             StateMatrix& workspace);
 
 /**
  * Calculate MSE and residuals over training data

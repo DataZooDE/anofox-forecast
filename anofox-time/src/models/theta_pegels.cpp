@@ -108,19 +108,24 @@ void forecast(const StateMatrix& states,
              ModelType model_type,
              std::vector<double>& f,
              double alpha,
-             double theta) {
+             double theta,
+             StateMatrix& workspace) {
     // Port of statsforecast theta_cpp.txt lines 63-74
     
     size_t h = f.size();
-    StateMatrix new_states(i + h);
+    
+    // Resize workspace if needed (should be pre-sized by caller for efficiency)
+    if (workspace.size() < i + h) {
+        workspace.resize(i + h);
+    }
     
     // Copy existing states
-    std::copy(states.begin(), states.begin() + i, new_states.begin());
+    std::copy(states.begin(), states.begin() + i, workspace.begin());
     
     // Forecast future states
     for (size_t j = 0; j < h; ++j) {
-        update(new_states, i + j, model_type, alpha, theta, 0.0, true);
-        f[j] = new_states[i + j][4];
+        update(workspace, i + j, model_type, alpha, theta, 0.0, true);
+        f[j] = workspace[i + j][4];
     }
 }
 
@@ -150,10 +155,13 @@ double calc(const std::vector<double>& y,
     
     size_t n = y.size();
     
+    // Pre-allocate workspace for forecast calls (reused in loop)
+    StateMatrix forecast_workspace(n + nmse);
+    
     // Iterate through time series
     for (size_t i = 1; i < n; ++i) {
         // Generate forecast
-        forecast(states, i, model_type, f, alpha, theta);
+        forecast(states, i, model_type, f, alpha, theta, forecast_workspace);
         
         // Check for NA
         if (std::abs(f[0] - NA) < TOL) {
@@ -312,6 +320,10 @@ OptimResult optimize(const std::vector<double>& y,
     
     // Choose optimization method
     if (optimizer_type == OptimizerType::LBFGS) {
+        // Pre-allocate workspace for gradient computation (reused across iterations)
+        optimization::ThetaGradients::Workspace gradient_workspace;
+        gradient_workspace.resize(y.size(), nmse);
+        
         // L-BFGS optimization with numerical gradients
         auto objective_fn = [&](const std::vector<double>& params, std::vector<double>& grad) -> double {
             size_t j = 0;
@@ -336,7 +348,7 @@ OptimResult optimize(const std::vector<double>& y,
             // Compute MSE and gradients
             double mse = optimization::ThetaGradients::computeMSEWithGradients(
                 y, model_type, level, alpha, theta,
-                opt_level, opt_alpha, opt_theta, nmse, grad
+                opt_level, opt_alpha, opt_theta, nmse, grad, gradient_workspace
             );
             
             return mse;
