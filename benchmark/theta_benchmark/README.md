@@ -2,6 +2,48 @@
 
 Comprehensive benchmark comparing Theta method variants between **Anofox-forecast** and **Statsforecast** on M4 Competition datasets.
 
+## Recent Performance Optimizations (2025-11-10)
+
+Major C++ performance improvements implemented across all Theta methods:
+
+### Optimizations Completed
+
+1. **StateMatrix Allocation (CRITICAL)**: Eliminated repeated allocations in forecast loop
+   - Previously: Created new StateMatrix on every call (~1000x per fit)
+   - Now: Pre-allocate and reuse workspace across iterations
+   - **Expected improvement: 30-50% faster fitting**
+
+2. **Vector Copy Elimination**: Removed unnecessary return-by-value copies
+   - Created `theta_utils` namespace with in-place functions
+   - Eliminated copies in `deseasonalize()` and `reseasonalize()`
+   - **Expected improvement: 10-20% faster, reduced memory usage**
+
+3. **Gradient Buffer Pre-allocation**: Reuse workspace in L-BFGS optimization
+   - Pre-allocated `ThetaGradients::Workspace` for all iterations
+   - Eliminated 600-800 allocations during 200 L-BFGS iterations
+   - **Expected improvement: 5-15% faster optimization**
+
+4. **Reserved Capacity**: Pre-sized seasonal observation vectors
+   - Added `reserve()` calls to prevent dynamic reallocations
+   - **Expected improvement: 2-5% faster, reduced fragmentation**
+
+5. **Code Consolidation**: Extracted duplicated deseasonalize logic
+   - Removed ~150 lines of duplicated code
+   - Improved maintainability
+
+6. **Temporary Model Removal**: Direct utility function calls
+   - Removed unnecessary Theta/DynamicTheta instantiation in optimizers
+   - **Expected improvement: 2-5% faster**
+
+### Expected Overall Impact
+
+- **Fitting time**: 40-60% faster
+- **Optimization time**: 30-50% faster  
+- **Memory usage**: 30-40% reduction in peak allocations
+- **Code quality**: Smaller binary, better maintainability
+
+**Note**: Benchmark results below pre-date these optimizations. Re-run pending to quantify actual improvements.
+
 ## Latest Results
 
 **M4 Daily Dataset** (4,227 series, horizon=14, seasonality=7):
