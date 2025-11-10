@@ -222,7 +222,8 @@ AnofoxTimeWrapper::CreateAutoMFLES(const std::vector<int> &seasonal_periods, int
 }
 
 std::unique_ptr<::anofoxtime::models::IForecaster>
-AnofoxTimeWrapper::CreateMSTL(const std::vector<int> &seasonal_periods, int trend_method, int seasonal_method) {
+AnofoxTimeWrapper::CreateMSTL(const std::vector<int> &seasonal_periods, int trend_method, int seasonal_method,
+                               int deseasonalized_method) {
 	// std::cerr << "[DEBUG] AnofoxTimeWrapper::CreateMSTL" << std::endl;
 
 	// Map integer to enum
@@ -267,7 +268,23 @@ AnofoxTimeWrapper::CreateMSTL(const std::vector<int> &seasonal_periods, int tren
 		break;
 	}
 
-	return std::make_unique<::anofoxtime::models::MSTLForecaster>(seasonal_periods, trend, season);
+	::anofoxtime::models::MSTLForecaster::DeseasonalizedForecastMethod deseas;
+	switch (deseasonalized_method) {
+	case 0:
+		deseas = ::anofoxtime::models::MSTLForecaster::DeseasonalizedForecastMethod::ExponentialSmoothing;
+		break;
+	case 1:
+		deseas = ::anofoxtime::models::MSTLForecaster::DeseasonalizedForecastMethod::Linear;
+		break;
+	case 2:
+		deseas = ::anofoxtime::models::MSTLForecaster::DeseasonalizedForecastMethod::AutoETS;
+		break;
+	default:
+		deseas = ::anofoxtime::models::MSTLForecaster::DeseasonalizedForecastMethod::ExponentialSmoothing;
+		break;
+	}
+
+	return std::make_unique<::anofoxtime::models::MSTLForecaster>(seasonal_periods, trend, season, deseas);
 }
 
 std::unique_ptr<::anofoxtime::models::IForecaster>

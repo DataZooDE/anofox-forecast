@@ -1,4 +1,5 @@
 #include "anofox-time/seasonality/stl.hpp"
+#include "../../third_party/CppLowess/Lowess.h"
 #include <algorithm>
 #include <cmath>
 #include <numeric>
@@ -87,9 +88,18 @@ void STLDecomposition::fit(const core::TimeSeries& ts) {
 
     std::vector<double> detrended(n, 0.0);
     std::vector<double> weights(n, 1.0);
+    
+    // Pre-allocate work vectors for LOESS to avoid repeated allocations
+    std::vector<double> x_vec(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        x_vec[i] = static_cast<double>(i);
+    }
+    std::vector<double> lowess_weights(n);
+    std::vector<double> lowess_resid_weights(n, 1.0);
 
     for (std::size_t iter = 0; iter < iterations_; ++iter) {
-        movingAverage(data, trend_, trend_smoother_);
+        // Use LOESS smoothing for trend instead of moving average
+        applyLowessSmoothing(x_vec, data, trend_, trend_smoother_, lowess_weights, lowess_resid_weights);
 
         for (std::size_t i = 0; i < n; ++i) {
             detrended[i] = data[i] - trend_[i];
@@ -155,22 +165,27 @@ double STLDecomposition::variance(const std::vector<double>& values) {
     return accum / static_cast<double>(values.size());
 }
 
-void STLDecomposition::movingAverage(const std::vector<double>& data,
-                                     std::vector<double>& target,
-                                     std::size_t window) const {
-    const std::size_t n = data.size();
-    const std::size_t half = window / 2;
-    for (std::size_t i = 0; i < n; ++i) {
-        const std::size_t start = (i > half) ? i - half : 0;
-        const std::size_t end = std::min<std::size_t>(n - 1, i + half);
-        double sum = 0.0;
-        std::size_t count = 0;
-        for (std::size_t j = start; j <= end; ++j) {
-            sum += data[j];
-            ++count;
-        }
-        target[i] = (count > 0) ? sum / static_cast<double>(count) : data[i];
-    }
+void STLDecomposition::applyLowessSmoothing(const std::vector<double>& x,
+                                            const std::vector<double>& y,
+                                            std::vector<double>& smoothed,
+                                            std::size_t smoother_span,
+                                            std::vector<double>& work_weights,
+                                            std::vector<double>& work_resid_weights) const {
+    const std::size_t n = x.size();
+    
+    // Calculate fraction of data to use for LOESS
+    // Convert window size to fraction
+    double frac = static_cast<double>(smoother_span) / static_cast<double>(n);
+    frac = std::max(0.01, std::min(1.0, frac)); // Clamp between 0.01 and 1.0
+    
+    // Use CppLowess for proper LOESS smoothing
+    CppLowess::Lowess lowess;
+    
+    // Apply LOESS: nsteps=0 for non-robust, 2 for robust
+    int nsteps = robust_ ? 2 : 0;
+    double delta = 0.01 * (x[n-1] - x[0]); // Standard delta for efficiency
+    
+    lowess.lowess(x, y, frac, nsteps, delta, smoothed, work_resid_weights, work_weights);
 }
 
 double STLDecomposition::seasonalStrength() const {

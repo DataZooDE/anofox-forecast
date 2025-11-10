@@ -154,8 +154,9 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		}
 		int trend_method = GetParam<int>(model_params, "trend_method", 0);       // 0=Linear
 		int seasonal_method = GetParam<int>(model_params, "seasonal_method", 0); // 0=Cyclic
+		int deseasonalized_method = GetParam<int>(model_params, "deseasonalized_method", 0); // 0=ExponentialSmoothing (default, fast)
 		// std::cerr << "[DEBUG] Creating MSTL model" << std::endl;
-		model = AnofoxTimeWrapper::CreateMSTL(seasonal_periods, trend_method, seasonal_method);
+		model = AnofoxTimeWrapper::CreateMSTL(seasonal_periods, trend_method, seasonal_method, deseasonalized_method);
 	} else if (model_name == "AutoMSTL") {
 		// Check both 'seasonal_periods' (plural) and 'seasonal_period' (singular)
 		std::vector<int> seasonal_periods;
@@ -531,6 +532,14 @@ void ModelFactory::ValidateModelParams(const std::string &model_name, const Valu
 			int method = GetParam<int>(model_params, "seasonal_method", 0);
 			if (method < 0 || method > 2) {
 				throw InvalidInputException("MSTL seasonal_method must be 0-2, got: " + std::to_string(method));
+			}
+		}
+		if (HasParam(model_params, "deseasonalized_method")) {
+			int method = GetParam<int>(model_params, "deseasonalized_method", 0);
+			if (method < 0 || method > 2) {
+				throw InvalidInputException("MSTL deseasonalized_method must be 0-2 (0=ExponentialSmoothing, "
+				                            "1=Linear, 2=AutoETS), got: " +
+				                            std::to_string(method));
 			}
 		}
 	} else if (model_name == "AutoMSTL") {

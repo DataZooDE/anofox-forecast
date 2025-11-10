@@ -13,12 +13,14 @@ MSTLForecaster::MSTLForecaster(
 	std::vector<int> seasonal_periods,
 	TrendMethod trend_method,
 	SeasonalMethod seasonal_method,
+	DeseasonalizedForecastMethod deseasonalized_method,
 	int mstl_iterations,
 	bool robust
 )
 	: seasonal_periods_(std::move(seasonal_periods))
 	, trend_method_(trend_method)
 	, seasonal_method_(seasonal_method)
+	, deseasonalized_method_(deseasonalized_method)
 	, mstl_iterations_(std::max(1, mstl_iterations))
 	, robust_(robust)
 {
@@ -366,7 +368,6 @@ std::vector<double> MSTLForecaster::forecastSeasonalAutoETSMultiplicative(
 
 std::vector<double> MSTLForecaster::forecastDeseasonalized(int horizon) {
 	// This method forecasts the deseasonalized series (trend + remainder)
-	// matching statsforecast's approach: x_sa = trend + remainder
 	const auto& trend = decomposition_->components().trend;
 	const auto& remainder = decomposition_->components().remainder;
 	const int n = static_cast<int>(trend.size());
@@ -382,45 +383,94 @@ std::vector<double> MSTLForecaster::forecastDeseasonalized(int horizon) {
 		x_sa[i] = trend[i] + remainder[i];
 	}
 	
-	// Create TimeSeries from deseasonalized component
-	std::vector<core::TimeSeries::TimePoint> timestamps;
-	timestamps.reserve(n);
-	auto start = core::TimeSeries::TimePoint{};
-	for (int i = 0; i < n; ++i) {
-		timestamps.push_back(start + std::chrono::seconds(static_cast<long>(i)));
-	}
-	
-	core::TimeSeries x_sa_ts(timestamps, x_sa);
-	
-	// Use AutoETS to forecast the deseasonalized series (non-seasonal)
-	// Using "ZZN" spec (auto error, auto trend, no season) matches statsforecast default
-	try {
-		AutoETS autoets(1, "ZZN");  // season_length=1, non-seasonal
-		autoets.fit(x_sa_ts);
-		auto forecast = autoets.predict(horizon);
-		return forecast.primary();
-	} catch (const std::exception& e) {
-		// Fallback to linear extrapolation if AutoETS fails
-		double mean_x = (n - 1) / 2.0;
-		double mean_y = std::accumulate(x_sa.begin(), x_sa.end(), 0.0) / n;
-		
-		double numerator = 0.0;
-		double denominator = 0.0;
-		for (int i = 0; i < n; ++i) {
-			double x_diff = i - mean_x;
-			numerator += x_diff * (x_sa[i] - mean_y);
-			denominator += x_diff * x_diff;
+	// Select forecasting method based on configuration
+	switch (deseasonalized_method_) {
+		case DeseasonalizedForecastMethod::ExponentialSmoothing: {
+			// Fast simple exponential smoothing (default)
+			double alpha = 0.3;
+			double level = x_sa[0];
+			
+			for (int i = 1; i < n; ++i) {
+				level = alpha * x_sa[i] + (1.0 - alpha) * level;
+			}
+			
+			// Constant forecast (SES doesn't have trend)
+			return std::vector<double>(horizon, level);
 		}
 		
-		double slope = (denominator > 1e-10) ? (numerator / denominator) : 0.0;
-		double intercept = mean_y - slope * mean_x;
-		
-		std::vector<double> forecast(horizon);
-		for (int h = 0; h < horizon; ++h) {
-			forecast[h] = intercept + slope * (n + h);
+		case DeseasonalizedForecastMethod::Linear: {
+			// Linear regression extrapolation
+			double mean_x = (n - 1) / 2.0;
+			double mean_y = std::accumulate(x_sa.begin(), x_sa.end(), 0.0) / n;
+			
+			double numerator = 0.0;
+			double denominator = 0.0;
+			for (int i = 0; i < n; ++i) {
+				double x_diff = i - mean_x;
+				numerator += x_diff * (x_sa[i] - mean_y);
+				denominator += x_diff * x_diff;
+			}
+			
+			double slope = (denominator > 1e-10) ? (numerator / denominator) : 0.0;
+			double intercept = mean_y - slope * mean_x;
+			
+			std::vector<double> forecast(horizon);
+			for (int h = 0; h < horizon; ++h) {
+				forecast[h] = intercept + slope * (n + h);
+			}
+			
+			return forecast;
 		}
 		
-		return forecast;
+		case DeseasonalizedForecastMethod::AutoETS: {
+			// Full AutoETS (slowest but most accurate)
+			std::vector<core::TimeSeries::TimePoint> timestamps;
+			timestamps.reserve(n);
+			auto start = core::TimeSeries::TimePoint{};
+			for (int i = 0; i < n; ++i) {
+				timestamps.push_back(start + std::chrono::seconds(static_cast<long>(i)));
+			}
+			
+			core::TimeSeries x_sa_ts(timestamps, x_sa);
+			
+			try {
+				AutoETS autoets(1, "ZZN");  // season_length=1, non-seasonal
+				autoets.fit(x_sa_ts);
+				auto forecast = autoets.predict(horizon);
+				return forecast.primary();
+			} catch (const std::exception& e) {
+				// Fallback to linear extrapolation if AutoETS fails
+				double mean_x = (n - 1) / 2.0;
+				double mean_y = std::accumulate(x_sa.begin(), x_sa.end(), 0.0) / n;
+				
+				double numerator = 0.0;
+				double denominator = 0.0;
+				for (int i = 0; i < n; ++i) {
+					double x_diff = i - mean_x;
+					numerator += x_diff * (x_sa[i] - mean_y);
+					denominator += x_diff * x_diff;
+				}
+				
+				double slope = (denominator > 1e-10) ? (numerator / denominator) : 0.0;
+				double intercept = mean_y - slope * mean_x;
+				
+				std::vector<double> forecast(horizon);
+				for (int h = 0; h < horizon; ++h) {
+					forecast[h] = intercept + slope * (n + h);
+				}
+				
+				return forecast;
+			}
+		}
+		
+		default:
+			// Fallback to exponential smoothing
+			double alpha = 0.3;
+			double level = x_sa[0];
+			for (int i = 1; i < n; ++i) {
+				level = alpha * x_sa[i] + (1.0 - alpha) * level;
+			}
+			return std::vector<double>(horizon, level);
 	}
 }
 

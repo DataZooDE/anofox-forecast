@@ -156,6 +156,7 @@ void AutoMSTL::optimizeParameters(const core::TimeSeries& ts) {
 				seasonal_periods_,
 				candidate.trend,
 				candidate.seasonal,
+				MSTLForecaster::DeseasonalizedForecastMethod::ExponentialSmoothing,  // Use default fast method
 				mstl_iterations_,
 				robust_
 			);
@@ -175,6 +176,7 @@ void AutoMSTL::optimizeParameters(const core::TimeSeries& ts) {
 					seasonal_periods_,
 					candidate.trend,
 					candidate.seasonal,
+					MSTLForecaster::DeseasonalizedForecastMethod::ExponentialSmoothing,  // Use default fast method
 					mstl_iterations_,
 					robust_
 				);

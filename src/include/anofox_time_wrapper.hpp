@@ -90,7 +90,8 @@ public:
 	                double lr_season = 0.5, double lr_rs = 0.8, int cv_horizon = -1, int cv_n_windows = 2,
 	                ::anofoxtime::utils::CVMetric cv_metric = ::anofoxtime::utils::CVMetric::MAE);
 	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateMSTL(const std::vector<int> &seasonal_periods,
-	                                                                     int trend_method, int seasonal_method);
+	                                                                     int trend_method, int seasonal_method,
+	                                                                     int deseasonalized_method);
 	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateAutoMSTL(const std::vector<int> &seasonal_periods);
 
 	// Additional basic models

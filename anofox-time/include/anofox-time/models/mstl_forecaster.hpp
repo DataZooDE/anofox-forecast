@@ -49,10 +49,20 @@ public:
 	};
 	
 	/**
+	 * @brief Deseasonalized component forecasting method selection
+	 */
+	enum class DeseasonalizedForecastMethod {
+		ExponentialSmoothing,  // Simple exponential smoothing (default, fast)
+		Linear,                // Linear regression extrapolation
+		AutoETS                // Full AutoETS (slowest but most accurate)
+	};
+	
+	/**
 	 * @brief Construct an MSTL forecaster
 	 * @param seasonal_periods Vector of seasonal periods (e.g., {7, 365} for daily data)
 	 * @param trend_method Method to forecast the trend component
 	 * @param seasonal_method Method to forecast seasonal components
+	 * @param deseasonalized_method Method to forecast the deseasonalized component (trend + remainder)
 	 * @param mstl_iterations Number of MSTL decomposition iterations (default: 2)
 	 * @param robust Use robust LOESS fitting (default: false)
 	 */
@@ -60,6 +70,7 @@ public:
 		std::vector<int> seasonal_periods,
 		TrendMethod trend_method = TrendMethod::Linear,
 		SeasonalMethod seasonal_method = SeasonalMethod::Cyclic,
+		DeseasonalizedForecastMethod deseasonalized_method = DeseasonalizedForecastMethod::ExponentialSmoothing,
 		int mstl_iterations = 2,
 		bool robust = false
 	);
@@ -96,6 +107,7 @@ private:
 	std::vector<int> seasonal_periods_;
 	TrendMethod trend_method_;
 	SeasonalMethod seasonal_method_;
+	DeseasonalizedForecastMethod deseasonalized_method_;
 	int mstl_iterations_;
 	bool robust_;
 	
@@ -157,6 +169,11 @@ public:
 		return *this;
 	}
 	
+	MSTLForecasterBuilder& withDeseasonalizedMethod(MSTLForecaster::DeseasonalizedForecastMethod method) {
+		deseasonalized_method_ = method;
+		return *this;
+	}
+	
 	MSTLForecasterBuilder& withMSTLIterations(int iterations) {
 		mstl_iterations_ = iterations;
 		return *this;
@@ -172,6 +189,7 @@ public:
 			seasonal_periods_,
 			trend_method_,
 			seasonal_method_,
+			deseasonalized_method_,
 			mstl_iterations_,
 			robust_
 		);
@@ -181,6 +199,7 @@ private:
 	std::vector<int> seasonal_periods_ = {12};
 	MSTLForecaster::TrendMethod trend_method_ = MSTLForecaster::TrendMethod::Linear;
 	MSTLForecaster::SeasonalMethod seasonal_method_ = MSTLForecaster::SeasonalMethod::Cyclic;
+	MSTLForecaster::DeseasonalizedForecastMethod deseasonalized_method_ = MSTLForecaster::DeseasonalizedForecastMethod::ExponentialSmoothing;
 	int mstl_iterations_ = 2;
 	bool robust_ = false;
 };

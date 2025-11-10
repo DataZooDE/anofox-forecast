@@ -47,7 +47,12 @@ public:
 
 private:
     static double variance(const std::vector<double>& values);
-    void movingAverage(const std::vector<double>& data, std::vector<double>& target, std::size_t window) const;
+    void applyLowessSmoothing(const std::vector<double>& x,
+                             const std::vector<double>& y,
+                             std::vector<double>& smoothed,
+                             std::size_t smoother_span,
+                             std::vector<double>& work_weights,
+                             std::vector<double>& work_resid_weights) const;
 
     std::size_t seasonal_period_;
     std::size_t seasonal_smoother_;

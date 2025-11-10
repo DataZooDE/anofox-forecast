@@ -74,41 +74,54 @@ void MSTLDecomposition::fit(const core::TimeSeries& ts) {
         throw std::invalid_argument("Insufficient data for MSTL decomposition.");
     }
 
+    // Initialize pre-allocated objects on first fit
+    if (!is_initialized_ || work_timestamps_.size() != n) {
+        // Pre-allocate STL decomposers (one per period)
+        stl_decomposers_.clear();
+        stl_decomposers_.reserve(periods_.size());
+        for (std::size_t period : periods_) {
+            stl_decomposers_.emplace_back(
+                period,
+                period,  // seasonal_smoother
+                std::max<std::size_t>(ensure_odd(period * 3), 7),  // trend_smoother
+                1,  // iterations
+                robust_
+            );
+        }
+        
+        // Pre-allocate work vectors
+        work_timestamps_.resize(n);
+        for (std::size_t i = 0; i < n; ++i) {
+            work_timestamps_[i] = core::TimeSeries::TimePoint{} + std::chrono::seconds(static_cast<long>(i));
+        }
+        work_residual_.resize(n);
+        is_initialized_ = true;
+    }
+
     components_.trend.assign(n, 0.0);
     components_.seasonal.assign(periods_.size(), std::vector<double>(n, 0.0));
     components_.remainder.assign(n, 0.0);
 
-    std::vector<double> residual(values.begin(), values.end());
+    // Use pre-allocated work vector instead of creating new one
+    work_residual_.assign(values.begin(), values.end());
 
     for (std::size_t iter = 0; iter < iterations_; ++iter) {
-        residual.assign(values.begin(), values.end());
+        work_residual_.assign(values.begin(), values.end());
 
         for (std::size_t idx = 0; idx < periods_.size(); ++idx) {
-            std::size_t period = periods_[idx];
-            auto stl = STLDecomposition::builder()
-                           .withPeriod(period)
-                           .withSeasonalSmoother(period)
-                           .withTrendSmoother(std::max<std::size_t>(ensure_odd(period * 3), 7))
-                           .withIterations(1)
-                           .withRobust(robust_)
-                           .build();
+            // Reuse pre-allocated STL decomposer
+            core::TimeSeries temp_series(work_timestamps_, work_residual_);
+            stl_decomposers_[idx].fit(temp_series);
 
-            std::vector<core::TimeSeries::TimePoint> timestamps(n);
+            components_.seasonal[idx] = stl_decomposers_[idx].seasonal();
             for (std::size_t i = 0; i < n; ++i) {
-                timestamps[i] = core::TimeSeries::TimePoint{} + std::chrono::seconds(static_cast<long>(i));
-            }
-            core::TimeSeries temp_series(timestamps, residual);
-            stl.fit(temp_series);
-
-            components_.seasonal[idx] = stl.seasonal();
-            for (std::size_t i = 0; i < n; ++i) {
-                residual[i] -= components_.seasonal[idx][i];
+                work_residual_[i] -= components_.seasonal[idx][i];
             }
         }
 
-        // Estimate trend from residual after removing seasonalities.
+        // Estimate trend from work_residual after removing seasonalities.
         std::size_t trend_window = ensure_odd((*std::max_element(periods_.begin(), periods_.end())) * 2);
-        moving_average(residual, components_.trend, std::min(trend_window, n % 2 == 0 ? n - 1 : n));
+        moving_average(work_residual_, components_.trend, std::min(trend_window, n % 2 == 0 ? n - 1 : n));
         for (std::size_t i = 0; i < n; ++i) {
             components_.remainder[i] = values[i] - components_.trend[i];
             for (const auto& seasonal : components_.seasonal) {
@@ -121,7 +134,7 @@ void MSTLDecomposition::fit(const core::TimeSeries& ts) {
             continue;
         }
 
-        // Update residual for next iteration with robust weighting (simple clipping)
+        // Update work_residual for next iteration with robust weighting (simple clipping)
         double mad = 0.0;
         {
             std::vector<double> abs_res(components_.remainder.begin(), components_.remainder.end());
@@ -134,11 +147,11 @@ void MSTLDecomposition::fit(const core::TimeSeries& ts) {
             for (std::size_t i = 0; i < n; ++i) {
                 double r = components_.remainder[i];
                 const double factor = std::abs(r) > c ? (c / std::abs(r)) : 1.0;
-                residual[i] = values[i] - components_.trend[i];
+                work_residual_[i] = values[i] - components_.trend[i];
                 for (const auto& seasonal : components_.seasonal) {
-                    residual[i] -= seasonal[i];
+                    work_residual_[i] -= seasonal[i];
                 }
-                residual[i] *= factor;
+                work_residual_[i] *= factor;
             }
         }
     }

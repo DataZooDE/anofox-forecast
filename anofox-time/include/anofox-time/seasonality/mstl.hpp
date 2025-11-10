@@ -43,6 +43,14 @@ private:
     std::size_t iterations_;
     bool robust_;
     MSTLComponents components_;
+    
+    // Pre-allocated STL decomposers (one per period) to avoid repeated object creation
+    std::vector<STLDecomposition> stl_decomposers_;
+    
+    // Pre-allocated work vectors to avoid repeated allocations
+    std::vector<core::TimeSeries::TimePoint> work_timestamps_;
+    std::vector<double> work_residual_;
+    bool is_initialized_ = false;
 };
 
 } // namespace anofoxtime::seasonality
