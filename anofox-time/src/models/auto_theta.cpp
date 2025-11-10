@@ -353,13 +353,19 @@ void AutoTheta::fit(const core::TimeSeries& ts) {
             models_to_try.push_back(theta_pegels::ModelType::DSTM);
         } else if (model == "DOTM") {
             models_to_try.push_back(theta_pegels::ModelType::DOTM);
+        } else if (model == "all") {
+            // Special case: try all models (slow!)
+            models_to_try = {
+                theta_pegels::ModelType::STM,
+                theta_pegels::ModelType::OTM,
+                theta_pegels::ModelType::DSTM,
+                theta_pegels::ModelType::DOTM
+            };
         }
     } else {
-        // Try all models
+        // Default: Only use DOTM (M4 competition winner, matches statsforecast AutoTheta default)
+        // This is much faster than trying all 4 models
         models_to_try = {
-            theta_pegels::ModelType::STM,
-            theta_pegels::ModelType::OTM,
-            theta_pegels::ModelType::DSTM,
             theta_pegels::ModelType::DOTM
         };
     }
