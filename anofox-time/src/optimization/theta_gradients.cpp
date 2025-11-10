@@ -11,13 +11,15 @@ double ThetaGradients::computeMSE(
     double level,
     double alpha,
     double theta,
-    size_t nmse) {
+    size_t nmse,
+    Workspace& workspace) {
     
-    models::theta_pegels::StateMatrix states(y.size());
-    std::vector<double> e(y.size());
-    std::vector<double> amse(nmse);
+    // Ensure workspace is sized correctly
+    workspace.resize(y.size(), nmse);
     
-    double mse = models::theta_pegels::calc(y, states, model_type, level, alpha, theta, e, amse, nmse);
+    double mse = models::theta_pegels::calc(y, workspace.states, model_type, 
+                                           level, alpha, theta, 
+                                           workspace.e, workspace.amse, nmse);
     
     if (std::isnan(mse) || mse < 0.0) {
         return std::numeric_limits<double>::infinity();
@@ -34,7 +36,8 @@ double ThetaGradients::numericalGradient(
     double theta,
     double base_mse,
     int param_idx,
-    size_t nmse) {
+    size_t nmse,
+    Workspace& workspace) {
     
     // Adaptive epsilon based on parameter magnitude and type
     double eps;
@@ -76,7 +79,7 @@ double ThetaGradients::numericalGradient(
     }
     
     // Compute MSE at perturbed point
-    double mse_plus = computeMSE(y, model_type, level_plus, alpha_plus, theta_plus, nmse);
+    double mse_plus = computeMSE(y, model_type, level_plus, alpha_plus, theta_plus, nmse, workspace);
     
     // Handle infinite or invalid MSE
     if (!std::isfinite(mse_plus)) {
@@ -86,7 +89,7 @@ double ThetaGradients::numericalGradient(
             case 1: alpha_plus = alpha - eps; break;
             case 2: theta_plus = theta - eps; break;
         }
-        mse_plus = computeMSE(y, model_type, level_plus, alpha_plus, theta_plus, nmse);
+        mse_plus = computeMSE(y, model_type, level_plus, alpha_plus, theta_plus, nmse, workspace);
         if (!std::isfinite(mse_plus)) {
             return 0.0;  // Gradient unavailable
         }
@@ -107,10 +110,11 @@ double ThetaGradients::computeMSEWithGradients(
     bool opt_alpha,
     bool opt_theta,
     size_t nmse,
-    std::vector<double>& gradients) {
+    std::vector<double>& gradients,
+    Workspace& workspace) {
     
     // Compute base MSE
-    double base_mse = computeMSE(y, model_type, level, alpha, theta, nmse);
+    double base_mse = computeMSE(y, model_type, level, alpha, theta, nmse, workspace);
     
     if (!std::isfinite(base_mse)) {
         std::fill(gradients.begin(), gradients.end(), 0.0);
@@ -122,17 +126,17 @@ double ThetaGradients::computeMSEWithGradients(
     
     if (opt_level) {
         gradients[grad_idx++] = numericalGradient(y, model_type, level, alpha, theta,
-                                                   base_mse, 0, nmse);
+                                                   base_mse, 0, nmse, workspace);
     }
     
     if (opt_alpha) {
         gradients[grad_idx++] = numericalGradient(y, model_type, level, alpha, theta,
-                                                   base_mse, 1, nmse);
+                                                   base_mse, 1, nmse, workspace);
     }
     
     if (opt_theta) {
         gradients[grad_idx++] = numericalGradient(y, model_type, level, alpha, theta,
-                                                   base_mse, 2, nmse);
+                                                   base_mse, 2, nmse, workspace);
     }
     
     return base_mse;

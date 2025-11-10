@@ -17,6 +17,21 @@ namespace anofoxtime::optimization {
 class ThetaGradients {
 public:
     /**
+     * @brief Workspace for gradient computation to avoid repeated allocations
+     */
+    struct Workspace {
+        models::theta_pegels::StateMatrix states;
+        std::vector<double> e;
+        std::vector<double> amse;
+        
+        void resize(size_t n, size_t nmse) {
+            if (states.size() < n) states.resize(n);
+            if (e.size() < n) e.resize(n);
+            if (amse.size() < nmse) amse.resize(nmse);
+        }
+    };
+    
+    /**
      * @brief Compute MSE and gradients for Theta optimization
      * 
      * @param y Time series data
@@ -29,6 +44,7 @@ public:
      * @param opt_theta Whether to compute gradient w.r.t. theta
      * @param nmse Number of steps for multi-step MSE
      * @param gradients Output: gradient vector [d_level, d_alpha, d_theta]
+     * @param workspace Pre-allocated workspace for computations
      * @return double MSE value
      */
     static double computeMSEWithGradients(
@@ -41,7 +57,8 @@ public:
         bool opt_alpha,
         bool opt_theta,
         size_t nmse,
-        std::vector<double>& gradients
+        std::vector<double>& gradients,
+        Workspace& workspace
     );
     
 private:
@@ -56,7 +73,8 @@ private:
         double level,
         double alpha,
         double theta,
-        size_t nmse
+        size_t nmse,
+        Workspace& workspace
     );
     
     /**
@@ -73,7 +91,8 @@ private:
         double theta,
         double base_mse,
         int param_idx,  // 0=level, 1=alpha, 2=theta
-        size_t nmse
+        size_t nmse,
+        Workspace& workspace
     );
 };
 
