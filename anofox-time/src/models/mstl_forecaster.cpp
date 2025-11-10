@@ -72,16 +72,15 @@ core::Forecast MSTLForecaster::predict(int horizon) {
 	
 	// Forecast the deseasonalized series (trend + remainder) 
 	// This matches statsforecast's approach: x_sa = trend + remainder
-	std::vector<double> deseasonalized_forecast = forecastDeseasonalized(horizon);
-	
-	// Initialize forecast with deseasonalized component
-	std::vector<double> forecast_values = deseasonalized_forecast;
+	std::vector<double> forecast_values = forecastDeseasonalized(horizon);
 	
 	// Add all seasonal components
 	const auto& components = decomposition_->components();
+	
+	// Pre-allocate seasonal forecast vector outside loop to avoid repeated allocations
+	std::vector<double> seasonal_forecast(horizon);
+	
 	for (size_t i = 0; i < seasonal_periods_.size(); ++i) {
-		std::vector<double> seasonal_forecast;
-		
 		switch (seasonal_method_) {
 			case SeasonalMethod::Cyclic:
 				seasonal_forecast = projectSeasonalCyclic(

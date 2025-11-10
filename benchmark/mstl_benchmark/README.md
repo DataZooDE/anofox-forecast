@@ -82,11 +82,11 @@ SELECT * FROM TS_FORECAST_BY(
 
 **Performance (Optimized):**
 
-- **MSTL**: **0.60s** for 4,227 series (~0.00014s per series) - **658x
+- **MSTL**: **~0.65s** for 4,227 series (~0.00015s per series) - **600x
   faster than before!**
-- **AutoMSTL**: 14s for 4,227 series (~0.003s per series) - 28x faster
+- **AutoMSTL**: ~5s for 4,227 series (~0.001s per series) - 80x faster
 - MASE 1.302 with ExponentialSmoothing (fast default)
-- **710x faster than Statsforecast!**
+- **650x faster than Statsforecast!**
 - Ideal for real-time forecasting with complex seasonal patterns
 
 ### Statsforecast MSTL

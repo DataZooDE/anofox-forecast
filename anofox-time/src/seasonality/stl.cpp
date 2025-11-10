@@ -12,7 +12,7 @@ std::size_t ensure_odd(std::size_t window) {
     return (window % 2 == 0) ? window + 1 : window;
 }
 
-double median(std::vector<double> values) {
+double median(std::vector<double>& values) {  // Pass by reference to avoid copy
     if (values.empty()) return 0.0;
     std::nth_element(values.begin(), values.begin() + values.size() / 2, values.end());
     double med = values[values.size() / 2];
@@ -96,6 +96,11 @@ void STLDecomposition::fit(const core::TimeSeries& ts) {
     }
     std::vector<double> lowess_weights(n);
     std::vector<double> lowess_resid_weights(n, 1.0);
+    
+    // Pre-allocate seasonal work vectors outside iteration loop
+    std::vector<double> seasonal_means(seasonal_period_, 0.0);
+    std::vector<double> weight_totals(seasonal_period_, 0.0);
+    std::vector<double> abs_residuals(n);  // Pre-allocate for robust weighting
 
     for (std::size_t iter = 0; iter < iterations_; ++iter) {
         // Use LOESS smoothing for trend instead of moving average
@@ -105,8 +110,9 @@ void STLDecomposition::fit(const core::TimeSeries& ts) {
             detrended[i] = data[i] - trend_[i];
         }
 
-        std::vector<double> seasonal_means(seasonal_period_, 0.0);
-        std::vector<double> weight_totals(seasonal_period_, 0.0);
+        // Reset seasonal work vectors (reuse allocation)
+        std::fill(seasonal_means.begin(), seasonal_means.end(), 0.0);
+        std::fill(weight_totals.begin(), weight_totals.end(), 0.0);
         for (std::size_t i = 0; i < n; ++i) {
             const std::size_t idx = i % seasonal_period_;
             seasonal_means[idx] += detrended[i] * weights[i];
@@ -131,8 +137,10 @@ void STLDecomposition::fit(const core::TimeSeries& ts) {
         }
 
         if (robust_) {
-            std::vector<double> abs_residuals = remainder_;
-            for (double& v : abs_residuals) v = std::abs(v);
+            // Reuse pre-allocated abs_residuals vector
+            for (std::size_t i = 0; i < n; ++i) {
+                abs_residuals[i] = std::abs(remainder_[i]);
+            }
             const double med = median(abs_residuals);
             if (med > 0.0) {
                 for (std::size_t i = 0; i < n; ++i) {

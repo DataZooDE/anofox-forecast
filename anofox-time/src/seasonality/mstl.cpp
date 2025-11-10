@@ -104,6 +104,12 @@ void MSTLDecomposition::fit(const core::TimeSeries& ts) {
 
     // Use pre-allocated work vector instead of creating new one
     work_residual_.assign(values.begin(), values.end());
+    
+    // Pre-allocate abs_res vector for robust weighting (outside loop)
+    std::vector<double> abs_res;
+    if (robust_) {
+        abs_res.resize(n);
+    }
 
     for (std::size_t iter = 0; iter < iterations_; ++iter) {
         work_residual_.assign(values.begin(), values.end());
@@ -113,9 +119,11 @@ void MSTLDecomposition::fit(const core::TimeSeries& ts) {
             core::TimeSeries temp_series(work_timestamps_, work_residual_);
             stl_decomposers_[idx].fit(temp_series);
 
-            components_.seasonal[idx] = stl_decomposers_[idx].seasonal();
+            // Get reference to avoid copy, then copy only once to components
+            const auto& stl_seasonal = stl_decomposers_[idx].seasonal();
+            components_.seasonal[idx] = stl_seasonal;
             for (std::size_t i = 0; i < n; ++i) {
-                work_residual_[i] -= components_.seasonal[idx][i];
+                work_residual_[i] -= stl_seasonal[i];
             }
         }
 
@@ -135,13 +143,13 @@ void MSTLDecomposition::fit(const core::TimeSeries& ts) {
         }
 
         // Update work_residual for next iteration with robust weighting (simple clipping)
-        double mad = 0.0;
-        {
-            std::vector<double> abs_res(components_.remainder.begin(), components_.remainder.end());
-            for (double& v : abs_res) v = std::abs(v);
-            std::nth_element(abs_res.begin(), abs_res.begin() + abs_res.size() / 2, abs_res.end());
-            mad = abs_res[abs_res.size() / 2];
+        // Reuse pre-allocated abs_res vector
+        for (std::size_t i = 0; i < n; ++i) {
+            abs_res[i] = std::abs(components_.remainder[i]);
         }
+        std::nth_element(abs_res.begin(), abs_res.begin() + abs_res.size() / 2, abs_res.end());
+        double mad = abs_res[abs_res.size() / 2];
+        
         if (mad > 0.0) {
             const double c = 6.0 * mad;
             for (std::size_t i = 0; i < n; ++i) {
