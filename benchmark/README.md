@@ -117,10 +117,9 @@ uv run python run_benchmark.py eval Daily
 
 These benchmarks are used to:
 1. Validate forecasting accuracy against known datasets (M4 Competition)
-2. Measure performance with realistic workloads (4K+ time series)
+2. Measure performance on larger workloads (4K+ time series)
 3. Compare Anofox with other forecasting libraries (Statsforecast)
 4. Identify performance regressions and optimization opportunities
-5. Guide users toward optimal model selection for their use case
 
 ## Environment
 
@@ -132,15 +131,8 @@ The benchmark environment uses `uv` for Python dependency management:
 ## Adding Benchmarks
 
 When adding new benchmarks:
-1. Use realistic datasets (M4, M5, real-world data)
-2. Test at scale (1K+ series for performance tests)
+1. Use public available datasets (M4, M5, real-world data)
+2. Test at medium scale (1K+ series for performance tests)
 3. Include validation against known-good results
 4. Document expected performance characteristics
 5. Measure both accuracy (MASE, MAE, RMSE) and timing
-6. Compare with statsforecast when possible
-
-## Related
-
-- **Guides**: See `guides/60_performance_optimization.md` for performance tuning
-- **Examples**: SQL examples are in `test/sql/docs_examples/`
-- **Tests**: Unit tests are in `test/sql/`

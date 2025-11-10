@@ -95,8 +95,8 @@ static const DefaultTableMacro forecast_table_macros[] = {
         SELECT 
             row_data.timestamp AS date_col,
             row_data.value AS value_col,
-            row_data.is_changepoint AS is_changepoint,
-            row_data.changepoint_probability AS changepoint_probability
+            row_data.is_changepoint,
+            row_data.changepoint_probability
         FROM unnested
     )"},
     // TS_DETECT_CHANGEPOINTS_BY: Multiple series (1 group column)
@@ -122,8 +122,8 @@ static const DefaultTableMacro forecast_table_macros[] = {
             group_col,
             row_data.timestamp AS date_col,
             row_data.value AS value_col,
-            row_data.is_changepoint AS is_changepoint,
-            row_data.changepoint_probability AS changepoint_probability
+            row_data.is_changepoint,
+            row_data.changepoint_probability
         FROM unnested
     )"},
     {nullptr, nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}};

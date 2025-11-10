@@ -17,7 +17,7 @@ When creating timestamps directly in SQL, all precision types are supported:
 - **TIMESTAMP_MS** (millisecond precision)
 - **TIMESTAMP_NS** (nanosecond precision)
 
-**Important**: While SQL-created `TIMESTAMP_NS` works, pandas datetime64[ns] creates a TIMESTAMP_NS type that is NOT supported. See the [TIMESTAMP_NS Error](#timestamp_ns-error) section below for details.
+**Important**: While SQL-created `TIMESTAMP_NS` works, pandas datetime64[ns] creates a TIMESTAMP_NS type that is NOT supported. 
 
 ## Forecasting Functions
 
@@ -198,30 +198,3 @@ SELECT * FROM ts_forecast(
 LOAD 'sql/data_preparation_integer.sql';
 SELECT * FROM TS_FILL_GAPS_INT(my_table, series_id, date_col, value);
 ```
-
-## Test Coverage
-
-Comprehensive tests for date type support are available in:
-- `test/sql/core/test_comprehensive_date_types.test` - SQL integration tests for INTEGER, DATE, TIMESTAMP
-- `test/sql/core/test_timestamp_precisions.test` - Tests for all TIMESTAMP precision types (TIMESTAMP, TIMESTAMP_S, TIMESTAMP_MS, TIMESTAMP_NS)
-- `test/python/test_pandas_date_types.py` - Python/Pandas integration tests
-
-Run tests with:
-```bash
-# SQL tests - comprehensive date types
-build/release/test/unittest test/sql/core/test_comprehensive_date_types.test
-
-# SQL tests - timestamp precisions
-build/release/test/unittest test/sql/core/test_timestamp_precisions.test
-
-# Python tests
-python test/python/test_pandas_date_types.py
-```
-
-## Summary
-
-- ✅ **All forecasting functions** support INTEGER, BIGINT, DATE, and TIMESTAMP (all precisions)
-- ✅ **TIMESTAMP precision types** (TIMESTAMP, TIMESTAMP_S, TIMESTAMP_MS, TIMESTAMP_NS) all work in SQL
-- ✅ **Most data prep functions** support all date types
-- ⚠️ **Date arithmetic functions** require DATE/TIMESTAMP (INTEGER versions available separately)
-- ⚠️ **Pandas datetime64[ns]** should be converted to DATE using `.dt.date` to avoid TIMESTAMP_NS errors (SQL-created TIMESTAMP_NS works fine)

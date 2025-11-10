@@ -11,67 +11,32 @@ Comprehensive benchmarking comparing MFLES (Multiple Forecast Length Exponential
 | Anofox | MFLES | **1.179** | 181.62 | 212.87 | 21 |
 | Statsforecast | MFLES | 1.184 | 185.38 | 217.10 | 161 |
 
-## Implementation Details
-
-### Anofox MFLES
-
-**Core Features:**
-- **5-Component Decomposition**:
-  - Median baseline for robust center
-  - Gradient-boosted trend estimation
-  - Weighted Fourier seasonality with automatic period detection
-  - Multi-alpha exponential smoothing ensemble
-  - Moving window medians for adaptive baseline
-
-- **Robust Trend Methods**:
-  - OLS (Ordinary Least Squares) - Default, fast
-  - Siegel Robust Regression - Outlier-resistant
-  - Piecewise Linear - Handles changepoints
-
-- **Configurable Parameters**:
-  - `max_rounds`: Number of boosting iterations (default: 10)
-  - `seasonal_periods`: List of seasonal periods (e.g., [7, 365])
-  - `fourier_order`: Harmonics per seasonal period (default: auto)
-  - `lr_trend`, `lr_season`, `lr_rs`: Learning rates for components
-  - `trend_method`: OLS, Siegel, or Piecewise
-  - `ma_window`: Moving average window for smoothing
-  - `es_ensemble_size`: Number of ES forecasts to ensemble (default: 20)
-
-**SQL Example:**
-```sql
-SELECT * FROM TS_FORECAST_BY(
-    'sales', store_id, date, revenue,
-    'MFLES', 14,
-    {
-        'seasonal_periods': [7],
-        'max_rounds': 10,
-        'lr_trend': 0.3,
-        'lr_season': 0.5,
-        'lr_rs': 0.8
-    }
-);
-```
-
-### Statsforecast MFLES
-
-**Implementation:**
-- Standard MFLES from Nixtla's statsforecast library
-- Multi-core parallel processing
-- Configurable season length
-- Standard exponential smoothing approach
-
-**Key Differences from Anofox:**
-- Different decomposition strategy
-- Different smoothing algorithms
-- Both implementations well-optimized
-- Very similar accuracy results (within 0.4%)
-
 ## Evaluation Metrics
 
-All benchmarks measure:
-- **MASE** (Mean Absolute Scaled Error) - Primary metric, scale-independent
-- **MAE** (Mean Absolute Error) - Absolute forecast error
-- **RMSE** (Root Mean Squared Error) - Penalizes large errors
-- **Time** - Total execution time in seconds
+**MASE (Mean Absolute Scaled Error)** - Primary metric:
+```
+MASE = MAE / naive_baseline_error
 
-MASE < 1.0 means the model beats a naive seasonal baseline.
+Where:
+- MAE = mean(|y_true - y_pred|)
+- naive_baseline_error = mean(|y_train[t] - y_train[t-seasonality]|)
+
+MASE < 1.0 = Better than naive seasonal baseline
+MASE = 1.0 = Equal to naive seasonal baseline
+MASE > 1.0 = Worse than naive seasonal baseline
+```
+
+**MAE (Mean Absolute Error)**:
+```
+MAE = mean(|y_true - y_pred|)
+```
+
+**RMSE (Root Mean Squared Error)**:
+```
+RMSE = sqrt(mean((y_true - y_pred)²))
+```
+- Penalizes larger errors more heavily than MAE
+
+All metrics calculated:
+1. Per individual time series
+2. Averaged across all series for aggregate performance

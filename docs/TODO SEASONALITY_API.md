@@ -1,11 +1,11 @@
-# Seasonality Detection API
+# Seasonality Detection
 
 ## Overview
 
 The `anofox-forecast` extension provides two powerful functions for automatic seasonality detection in time series data:
 
 1. **`TS_DETECT_SEASONALITY`** - Simple detection returning seasonal periods
-2. **`TS_ANALYZE_SEASONALITY`** - Comprehensive analysis with seasonal/trend strength
+2. **`TS_ANALYZE_SEASONALITY`** - Analysis with seasonal/trend strength
 
 These functions use autocorrelation-based periodogram analysis to automatically identify recurring patterns in your data.
 
@@ -121,83 +121,6 @@ Both metrics range from 0 to 1:
 - **0.6-0.8**: Strong
 - **0.8-1.0**: Very strong (dominant pattern)
 
-## Use Cases
-
-### 1. Automatic Model Configuration
-
-```sql
--- Detect seasonality and use it for forecasting
-WITH detection AS (
-    SELECT TS_DETECT_SEASONALITY(LIST(sales ORDER BY date))[1] AS period
-    FROM sales_data
-)
-SELECT * FROM TS_FORECAST(
-    'sales_data',
-    date,
-    sales,
-    'SeasonalNaive',
-    28,
-    {'seasonal_period': (SELECT period FROM detection)}
-);
-```
-
-### 2. Multiple Series Analysis
-
-```sql
--- Detect seasonality for each product category
-WITH aggregated AS (
-    SELECT 
-        category,
-        LIST(date ORDER BY date) AS timestamps,
-        LIST(sales ORDER BY date) AS values
-    FROM sales_data
-    GROUP BY category
-)
-SELECT 
-    category,
-    TS_ANALYZE_SEASONALITY(timestamps, values) AS analysis
-FROM aggregated;
-```
-
-### 3. Seasonality Validation
-
-```sql
--- Check if your data has sufficient seasonality for seasonal models
-WITH analysis AS (
-    SELECT TS_ANALYZE_SEASONALITY(
-        LIST(date ORDER BY date),
-        LIST(sales ORDER BY date)
-    ) AS result
-    FROM sales_data
-)
-SELECT 
-    CASE 
-        WHEN result.seasonal_strength > 0.6 THEN 'Use seasonal models'
-        WHEN result.seasonal_strength > 0.3 THEN 'Consider seasonal models'
-        ELSE 'Use non-seasonal models'
-    END AS recommendation,
-    result.primary_period AS detected_period,
-    ROUND(result.seasonal_strength, 3) AS strength
-FROM analysis;
-```
-
-### 4. Rolling Window Analysis
-
-```sql
--- Detect seasonality in different time windows
-WITH windows AS (
-    SELECT 
-        DATE_TRUNC('quarter', date) AS quarter,
-        LIST(sales) AS values
-    FROM sales_data
-    GROUP BY quarter
-)
-SELECT 
-    quarter,
-    TS_DETECT_SEASONALITY(values) AS detected_periods
-FROM windows
-ORDER BY quarter;
-```
 
 ## Parameters and Tuning
 

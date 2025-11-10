@@ -42,6 +42,7 @@ struct TSDetectChangepointsOperation {
 		                               source.data->timestamps.end());
 		target.data->values.insert(target.data->values.end(), source.data->values.begin(), source.data->values.end());
 		target.data->hazard_lambda = source.data->hazard_lambda;
+		target.data->include_probabilities = source.data->include_probabilities;
 	}
 
 	template <class STATE>
@@ -50,6 +51,9 @@ struct TSDetectChangepointsOperation {
 			FlatVector::SetNull(finalize_data.result, finalize_data.result_idx, true);
 			return;
 		}
+
+		// Use include_probabilities flag from state data (set by Update function)
+		bool include_probs = state.data->include_probabilities;
 
 		// Detect changepoints using BOCPD
 		std::vector<size_t> changepoint_indices;
@@ -62,7 +66,7 @@ struct TSDetectChangepointsOperation {
 			                    .maxRunLength(1024)
 			                    .build();
 
-			if (state.data->include_probabilities) {
+			if (include_probs) {
 				auto result = detector.detectWithProbabilities(state.data->values);
 				changepoint_indices = std::move(result.changepoint_indices);
 				changepoint_probabilities = std::move(result.changepoint_probabilities);
@@ -89,9 +93,10 @@ struct TSDetectChangepointsOperation {
 			struct_values.push_back(make_pair("value", Value::DOUBLE(state.data->values[i])));
 			struct_values.push_back(make_pair("is_changepoint", Value::BOOLEAN(changepoint_set.count(i) > 0)));
 
-			// Always include probability column
+			// Always include probability column for consistent schema
+			// Set to 0.0 when not computed (include_probs=false), actual value when computed (include_probs=true)
 			double prob_value = 0.0;
-			if (state.data->include_probabilities && i < changepoint_probabilities.size()) {
+			if (include_probs && i < changepoint_probabilities.size()) {
 				prob_value = changepoint_probabilities[i];
 			}
 			struct_values.push_back(make_pair("changepoint_probability", Value::DOUBLE(prob_value)));
@@ -130,30 +135,43 @@ static void TSDetectChangepointsUpdate(Vector inputs[], AggregateInputData &aggr
 
 	// Parse parameters from first row (they're constant across the aggregate)
 	if (input_count > 2 && count > 0 && states[0]->data && !states[0]->data->finalized) {
-		auto &params_vec = inputs[2];
-		if (params_vec.GetType().id() == LogicalTypeId::MAP) {
-			auto params_value = params_vec.GetValue(0);
-			if (!params_value.IsNull()) {
-				auto &struct_children = StructValue::GetChildren(params_value);
-				for (size_t i = 0; i < struct_children.size(); i++) {
-					auto &key = StructType::GetChildName(params_value.type(), i);
-					auto &value = struct_children[i];
+		try {
+			auto &params_vec = inputs[2];
+			if (params_vec.GetType().id() == LogicalTypeId::MAP) {
+				UnifiedVectorFormat params_format;
+				params_vec.ToUnifiedFormat(count, params_format);
+				
+				if (params_format.validity.RowIsValid(0)) {
+					auto params_data = UnifiedVectorFormat::GetData<string_t>(params_format);
+					auto params_idx = params_format.sel->get_index(0);
+					
+					// Get the map value
+					auto params_value = params_vec.GetValue(params_idx);
+					if (!params_value.IsNull() && params_value.type().id() == LogicalTypeId::MAP) {
+						auto &struct_children = StructValue::GetChildren(params_value);
+						for (size_t i = 0; i < struct_children.size(); i++) {
+							auto &key = StructType::GetChildName(params_value.type(), i);
+							auto &value = struct_children[i];
 
-					if (key == "hazard_lambda" && !value.IsNull()) {
-						try {
-							states[0]->data->hazard_lambda = value.template GetValue<double>();
-						} catch (...) {
-							// Keep default on error
-						}
-					} else if (key == "include_probabilities" && !value.IsNull()) {
-						try {
-							states[0]->data->include_probabilities = value.template GetValue<bool>();
-						} catch (...) {
-							// Keep default on error
+							if (key == "hazard_lambda" && !value.IsNull()) {
+								try {
+									states[0]->data->hazard_lambda = value.template GetValue<double>();
+								} catch (...) {
+									// Keep default on error
+								}
+							} else if (key == "include_probabilities" && !value.IsNull()) {
+								try {
+									states[0]->data->include_probabilities = value.template GetValue<bool>();
+								} catch (...) {
+									// Keep default on error
+								}
+							}
 						}
 					}
 				}
 			}
+		} catch (...) {
+			// If parameter parsing fails, just use defaults
 		}
 	}
 
@@ -184,41 +202,48 @@ static void TSDetectChangepointsUpdate(Vector inputs[], AggregateInputData &aggr
 	}
 }
 
-// Create the aggregate function
-AggregateFunction CreateTSDetectChangepointsAgg() {
-	using STATE = TSDetectChangepointsState;
-	using OP = TSDetectChangepointsOperation;
-
-	// Return type: LIST<STRUCT(timestamp TIMESTAMP, value DOUBLE, is_changepoint BOOLEAN, changepoint_probability
-	// DOUBLE)>
-	child_list_t<LogicalType> struct_children;
-	struct_children.push_back({"timestamp", LogicalType::TIMESTAMP});
-	struct_children.push_back({"value", LogicalType::DOUBLE});
-	struct_children.push_back({"is_changepoint", LogicalType::BOOLEAN});
-	struct_children.push_back({"changepoint_probability", LogicalType::DOUBLE}); // Always include
-
-	auto return_type = LogicalType::LIST(LogicalType::STRUCT(struct_children));
-
-	AggregateFunction ts_detect_changepoints_agg(
-	    "ts_detect_changepoints_agg", {LogicalType::TIMESTAMP, LogicalType::DOUBLE, LogicalType::ANY}, // Added params
-	    return_type, AggregateFunction::StateSize<STATE>,
-	    AggregateFunction::StateInitialize<STATE, OP, AggregateDestructorType::LEGACY>, TSDetectChangepointsUpdate,
-	    AggregateFunction::StateCombine<STATE, OP>, AggregateFunction::StateVoidFinalize<STATE, OP>,
-	    nullptr, // simple_update
-	    nullptr, // bind
-	    AggregateFunction::StateDestroy<STATE, OP>);
-
-	return ts_detect_changepoints_agg;
-}
-
 // ============================================================================
 // Registration
 // ============================================================================
 
 void RegisterChangepointFunction(ExtensionLoader &loader) {
-	// Register the aggregate function
-	auto ts_detect_changepoints_agg = CreateTSDetectChangepointsAgg();
-	loader.RegisterFunction(ts_detect_changepoints_agg);
+	using STATE = TSDetectChangepointsState;
+	using OP = TSDetectChangepointsOperation;
+	
+	// Return type: always include all 4 columns for consistent schema
+	child_list_t<LogicalType> struct_children;
+	struct_children.push_back({"timestamp", LogicalType::TIMESTAMP});
+	struct_children.push_back({"value", LogicalType::DOUBLE});
+	struct_children.push_back({"is_changepoint", LogicalType::BOOLEAN});
+	struct_children.push_back({"changepoint_probability", LogicalType::DOUBLE});
+	auto return_type = LogicalType::LIST(LogicalType::STRUCT(struct_children));
+	
+	// Create function set for overloads
+	AggregateFunctionSet ts_detect_changepoints_agg_set("ts_detect_changepoints_agg");
+	
+	// 2-argument version (without params) - default behavior
+	AggregateFunction agg_2arg(
+	    {LogicalType::TIMESTAMP, LogicalType::DOUBLE},
+	    return_type, AggregateFunction::StateSize<STATE>,
+	    AggregateFunction::StateInitialize<STATE, OP, AggregateDestructorType::LEGACY>, TSDetectChangepointsUpdate,
+	    AggregateFunction::StateCombine<STATE, OP>, AggregateFunction::StateVoidFinalize<STATE, OP>,
+	    nullptr,                    // simple_update
+	    nullptr,                    // bind function
+	    AggregateFunction::StateDestroy<STATE, OP>);
+	ts_detect_changepoints_agg_set.AddFunction(agg_2arg);
+	
+	// 3-argument version (with params)
+	AggregateFunction agg_3arg(
+	    {LogicalType::TIMESTAMP, LogicalType::DOUBLE, LogicalType::ANY},
+	    return_type, AggregateFunction::StateSize<STATE>,
+	    AggregateFunction::StateInitialize<STATE, OP, AggregateDestructorType::LEGACY>, TSDetectChangepointsUpdate,
+	    AggregateFunction::StateCombine<STATE, OP>, AggregateFunction::StateVoidFinalize<STATE, OP>,
+	    nullptr,                    // simple_update
+	    nullptr,                    // bind function
+	    AggregateFunction::StateDestroy<STATE, OP>);
+	ts_detect_changepoints_agg_set.AddFunction(agg_3arg);
+	
+	loader.RegisterFunction(ts_detect_changepoints_agg_set);
 }
 
 } // namespace duckdb

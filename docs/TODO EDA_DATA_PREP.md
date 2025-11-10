@@ -2,23 +2,14 @@
 
 ## Overview
 
-Comprehensive SQL-based tools for time series EDA (Exploratory Data Analysis) and data preparation using DuckDB's powerful analytical capabilities.
-
-**Key Features**:
-- ✅ Zero Python dependencies - Pure SQL
-- ✅ Leverages DuckDB's analytical functions
-- ✅ Parallel processing out-of-the-box
-- ✅ Memory-efficient operations
-- ✅ Composable macros for pipelines
+A SQL-based tools for time series EDA (Exploratory Data Analysis) and data preparation using DuckDB's powerful analytical capabilities.
 
 ---
 
 ## Quick Start
 
 ```sql
--- Load EDA and Data Preparation macros
-.read sql/eda_time_series.sql
-.read sql/data_preparation.sql
+
 
 -- 1. Analyze your data
 CREATE TABLE series_stats AS
