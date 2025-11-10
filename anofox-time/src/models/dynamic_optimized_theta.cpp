@@ -1,4 +1,5 @@
 #include "anofox-time/models/dynamic_optimized_theta.hpp"
+#include "anofox-time/models/theta_utils.hpp"
 #include "anofox-time/utils/logging.hpp"
 #include <stdexcept>
 
@@ -26,10 +27,10 @@ void DynamicOptimizedTheta::fit(const core::TimeSeries& ts) {
         throw std::invalid_argument("Cannot fit DynamicOptimizedTheta on empty time series");
     }
     
-    // First do a basic DynamicTheta fit to get initial estimates
-    DynamicTheta temp_model(seasonal_period_, 2.0);
-    temp_model.fitRaw(data);
-    auto deseasonalized = temp_model.deseasonalize(data);
+    // Deseasonalize data directly without creating temporary model
+    std::vector<double> deseasonalized;
+    std::vector<double> seasonal_indices;
+    theta_utils::deseasonalize(data, seasonal_period_, deseasonalized, seasonal_indices);
     
     // Optimize using Pegels state-space with DYNAMIC An/Bn
     double init_level = deseasonalized[0];

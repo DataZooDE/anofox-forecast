@@ -473,8 +473,9 @@ core::Forecast AutoTheta::predict(int horizon) {
     
     // Generate forecast using best model
     std::vector<double> forecast_values(horizon);
+    theta_pegels::StateMatrix workspace(best_states_.size() + horizon);
     theta_pegels::forecast(best_states_, best_states_.size(), best_model_type_,
-                          forecast_values, best_alpha_, best_theta_);
+                          forecast_values, best_alpha_, best_theta_, workspace);
     
     // Reseasonalize if needed
     forecast_values = reseasonalize(forecast_values);
