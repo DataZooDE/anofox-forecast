@@ -12,3 +12,7 @@ anofox-time/build
 *.zip
 *.parquet
 *.p
+benchmark/src/__pycache__/
+benchmark/src/benchmark.egg-info/
+**/__pycache__/
+**results/
