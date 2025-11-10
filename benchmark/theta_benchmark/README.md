@@ -15,10 +15,15 @@ Comprehensive benchmark comparing Theta method variants between **Anofox-forecas
 | Statsforecast | OptimizedTheta | 1.151 | 178.44 | 209.91 | 751 |
 | Statsforecast | DynamicTheta | 1.153 | 178.83 | 210.33 | 472 |
 | Statsforecast | Theta | 1.154 | 178.85 | 210.36 | 512 |
+| Anofox | AutoTheta | 1.155 | 179.06 | 210.56 | ~773 |
 | Anofox | DynamicOptimizedTheta | 1.155 | 179.06 | 210.56 | 773 |
 | Statsforecast | DynamicOptimizedTheta | 1.156 | 178.97 | 210.52 | 612 |
 | Anofox | DynamicTheta | 1.226 | 191.41 | 221.94 | 14 |
 | Anofox | Theta | 1.226 | 191.46 | 222.00 | 19 |
+
+**Note**: Anofox AutoTheta defaults to DOTM (Dynamic Optimized Theta Method) and provides 
+identical results to DynamicOptimizedTheta. For comprehensive model selection across all 4 
+variants, use `{'model': 'all'}` (slower).
 
 ## Implementation Details
 
@@ -123,6 +128,54 @@ SELECT * FROM TS_FORECAST_BY(
 - 773s for 4,227 series (~0.18s per series)
 - MASE 1.155
 - Slightly worse than OptimizedTheta, faster
+
+#### 5. AutoTheta - Automatic Model Selection
+
+**Description:**
+Automatically selects the best Theta variant. By default uses DOTM (Dynamic Optimized Theta Method)
+which won the M4 forecasting competition. Optionally can evaluate all 4 variants (STM, OTM, DSTM, DOTM)
+and select the best based on MSE.
+
+Features:
+- Automatic seasonality detection using ACF test
+- Seasonal decomposition (additive/multiplicative/auto)
+- L-BFGS optimization for fast parameter estimation
+- Model selection based on MSE
+
+**SQL Example:**
+```sql
+-- Default: Use DOTM (fastest, recommended)
+SELECT * FROM TS_FORECAST_BY(
+    'sales', store_id, date, revenue,
+    'AutoTheta', 14,
+    {'seasonal_period': 7}
+);
+
+-- Evaluate all 4 variants and select best (slower)
+SELECT * FROM TS_FORECAST_BY(
+    'sales', store_id, date, revenue,
+    'AutoTheta', 14,
+    {'seasonal_period': 7, 'model': 'all'}
+);
+
+-- Force specific variant
+SELECT * FROM TS_FORECAST_BY(
+    'sales', store_id, date, revenue,
+    'AutoTheta', 14,
+    {'seasonal_period': 7, 'model': 'OTM'}
+);
+```
+
+**Parameters:**
+- `seasonal_period`: Seasonal cycle length
+- `model`: Optional - 'STM', 'OTM', 'DSTM', 'DOTM', or 'all' (default: DOTM only)
+- `decomposition_type`: 'auto', 'additive', or 'multiplicative' (default: auto)
+- `nmse`: Multi-step MSE evaluation (default: 3)
+
+**Performance:**
+- ~773s for 4,227 series (~0.18s per series) with default DOTM
+- MASE 1.155 (same as DynamicOptimizedTheta)
+- **Recommended for**: Production use with automatic tuning
 
 ### Statsforecast Theta Variants
 
