@@ -56,6 +56,7 @@ set(ANOFOX_TIME_SOURCES
     # Theta variants
     anofox-time/src/models/theta_pegels.cpp
     anofox-time/src/models/theta.cpp
+    anofox-time/src/models/theta_utils.cpp
     anofox-time/src/models/optimized_theta.cpp
     anofox-time/src/models/dynamic_theta.cpp
     anofox-time/src/models/dynamic_optimized_theta.cpp

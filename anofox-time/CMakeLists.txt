@@ -44,6 +44,7 @@ add_library(anofox-time
     src/models/auto_arima.cpp
     src/models/theta_pegels.cpp
     src/models/theta.cpp
+    src/models/theta_utils.cpp
     src/models/optimized_theta.cpp
     src/models/dynamic_theta.cpp
     src/models/dynamic_optimized_theta.cpp
