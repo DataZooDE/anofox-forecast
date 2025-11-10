@@ -27,29 +27,39 @@ Do you know which model to use?
 
 ### 1. Automatic Selection (⭐ Recommended)
 
-**When unsure, start here!**
+**API Behavior**: Automatic model selection with parameter optimization. No manual parameter tuning required.
 
-| Model | Best For | Speed | Accuracy | Complexity |
-|-------|----------|-------|----------|------------|
-| **AutoETS** | General purpose, seasonal data | Medium | High | Auto |
-| **AutoARIMA** | Complex patterns, trend+seasonality | Slow | Very High | Auto |
-| **AutoMFLES** | Multiple seasonality | Medium | High | Auto |
-| **AutoMSTL** | Multiple seasonality, decomposition | Fast | High | Auto |
-| **AutoTBATS** | Complex multiple seasonality | Very Slow | Very High | Auto |
+| Model | Best For | Speed (10K rows) | Parameter Optimization | Models Evaluated |
+|-------|----------|------------------|------------------------|------------------|
+| **AutoETS** | General purpose, seasonal data | 3-4s | Full grid search | 30+ ETS variants |
+| **AutoARIMA** | Complex patterns, trend+seasonality | 3-10s | Stepwise with early termination | ARIMA(p,d,q)(P,D,Q) |
+| **AutoMFLES** | Multiple seasonality | 2-5s | Learning rate optimization | Gradient boosting |
+| **AutoMSTL** | Multiple seasonality, decomposition | 1-3s | LOESS parameter tuning | STL variants |
+| **AutoTBATS** | Complex multiple seasonality | 5-15s | Box-Cox + ARMA optimization | TBATS variants |
+
+**Behavioral Notes**:
+- Early termination prevents excessive runtime on long series
+- Information criteria (AIC/BIC) guide model selection
+- Convergence failure triggers fallback to simpler models
 
 **Example**:
 <!-- include: test/sql/docs_examples/40_model_selection_evaluate_01.sql -->
 
 ### 2. Simple & Fast Models
 
-**When**: Speed matters, patterns are simple
+**API Behavior**: Minimal computation, suitable for real-time forecasting and baselines.
 
-| Model | Pattern | Speed | Example Use Case |
-|-------|---------|-------|------------------|
-| **Naive** | No pattern | Instant | Random walk (stock prices) |
-| **SeasonalNaive** | Seasonality only | Instant | Weekly sales (no trend) |
-| **SMA** | Smoothing | Fast | Noise reduction |
-| **SeasonalWindowAverage** | Seasonal averaging | Fast | Seasonal products |
+| Model | Pattern | Speed (10K rows) | Parameters | Computational Complexity |
+|-------|---------|------------------|------------|-------------------------|
+| **Naive** | Random walk | <1ms | None | O(1) |
+| **SeasonalNaive** | Seasonality only | <1ms | seasonal_period (required) | O(1) |
+| **SMA** | Smoothing | <1ms | window (default: 5) | O(window) |
+| **SeasonalWindowAverage** | Seasonal + smoothing | <1ms | seasonal_period, window | O(seasonal_period + window) |
+
+**Behavioral Notes**:
+- No parameter optimization required
+- Constant memory footprint
+- Suitable for baseline comparisons via MASE metric
 
 **Example**:
 <!-- include: test/sql/docs_examples/40_model_selection_seasonality_02.sql -->

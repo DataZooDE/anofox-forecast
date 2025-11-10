@@ -2,12 +2,13 @@
 
 ## Goal
 
-Generate your first time series forecast in under 5 minutes!
+Generate your first time series forecast using the Anofox Forecast extension's SQL API.
 
 ## Prerequisites
 
-- DuckDB installed
-- Anofox-forecast extension built
+- DuckDB installed (version 1.4.1+)
+- Anofox-forecast extension built and accessible
+- Basic understanding of SQL table functions
 
 ## Step 1: Load Extension (30 seconds)
 
@@ -51,17 +52,25 @@ SELECT * FROM TS_FORECAST(
 );
 ```
 
-**Output**:
+**Output Schema**:
 
 ```
 ┌───────────────┬────────────┬────────────────┬────────┬────────┐
 │ forecast_step │  date_col  │ point_forecast │ lower  │ upper  │
+│    INTEGER    │    DATE    │     DOUBLE     │ DOUBLE │ DOUBLE │
 ├───────────────┼────────────┼────────────────┼────────┼────────┤
 │             1 │ 2023-04-01 │         118.52 │ 109.74 │ 127.30 │
 │             2 │ 2023-04-02 │         125.43 │ 116.65 │ 134.21 │
 │             3 │ 2023-04-03 │         121.89 │ 113.11 │ 130.67 │
 │           ... │        ... │            ... │    ... │    ... │
 ```
+
+**Schema Notes**:
+
+- `forecast_step`: Sequential horizon step (1, 2, ..., horizon)
+- `date_col`: Forecast timestamp (type matches input date column)
+- `point_forecast`: Point forecast value
+- `lower`, `upper`: Prediction interval bounds (default 90% confidence)
 
 ## Step 4: Visualize (Optional)
 
@@ -154,18 +163,19 @@ SELECT * FROM TS_QUALITY_REPORT('stats', 30);
 
 ## 💡 Pro Tips
 
-1. **Always check seasonality**: Use `TS_DETECT_SEASONALITY_ALL()` first
-2. **Start with AutoETS**: Best automatic model selection
-3. **Use confidence intervals**: Check `lower` and `upper` bounds
-4. **Validate with metrics**: Use `TS_MAE()`, `TS_COVERAGE()` etc.
-5. **Prepare your data**: Use EDA macros to ensure quality
+1. **Seasonality detection first**: Use `TS_DETECT_SEASONALITY_ALL()` to determine appropriate `seasonal_period` parameter
+2. **Start with AutoETS**: Automatic model selection from 30+ ETS candidates with parameter optimization
+3. **Prediction intervals**: `lower` and `upper` bounds computed at specified `confidence_level` (default 0.90)
+4. **Metric validation**: Use array-based metrics with `LIST()` aggregation for GROUP BY operations
+5. **Data quality**: Run `TS_STATS()` and `TS_QUALITY_REPORT()` before forecasting
 
 ## ⚠️ Common Pitfalls
 
-❌ **Insufficient data**: Need at least 2x `seasonal_period` observations  
-❌ **Missing timestamps**: Fill gaps with `TS_FILL_GAPS()`  
-❌ **Constant series**: Will fail - filter with `TS_DROP_CONSTANT()`  
-❌ **Wrong seasonality**: Auto-detect with `TS_DETECT_SEASONALITY()`  
+❌ **Insufficient data**: Seasonal models require ≥ 2x `seasonal_period` observations (3-4x recommended)  
+❌ **Missing timestamps**: Use `TS_FILL_GAPS()` for DATE/TIMESTAMP, `TS_FILL_GAPS_INT()` for INTEGER  
+❌ **Constant series**: Models will fail - filter with `TS_DROP_CONSTANT()` before forecasting  
+❌ **Wrong seasonality**: Incorrect `seasonal_period` degrades accuracy - use `TS_DETECT_SEASONALITY()`  
+❌ **Pandas datetime64[ns]**: Convert to DATE via `df['date'].dt.date` before passing to DuckDB  
 
 ## 🆘 Troubleshooting
 

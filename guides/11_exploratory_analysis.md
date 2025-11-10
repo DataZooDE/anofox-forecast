@@ -2,9 +2,9 @@
 
 ## Introduction
 
-**"Garbage in, garbage out"** - The quality of your forecasts depends on the quality of your data.
+Data quality directly impacts forecast accuracy. This guide covers exploratory data analysis and preparation using SQL macros that operate on time series at scale.
 
-This guide covers the complete data preparation workflow using built-in SQL macros.
+**API Coverage**: 5 EDA macros + 12 data preparation macros for comprehensive data quality workflows.
 
 ## Why Data Preparation Matters
 
@@ -35,12 +35,14 @@ SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount);
 SELECT * FROM sales_stats LIMIT 5;
 ```
 
-**Output includes**:
+**Output Schema**:
+Returns comprehensive statistics per series including:
 
-- 23 statistical features per series
-- Quality score (0-1, higher is better)
-- Gaps, nulls, zeros, patterns
-- Trend correlation, CV, intermittency
+- **Basic stats**: count, mean, std, min, max, median
+- **Data quality**: null_count, gap_count, zero_count, constant_flag
+- **Pattern indicators**: cv (coefficient of variation), intermittency_rate
+- **Trend metrics**: trend_correlation, first_last_ratio
+- **Quality score**: Composite metric (0-1, higher indicates better quality)
 
 #### Step 2: Dataset Summary
 

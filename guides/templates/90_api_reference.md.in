@@ -2,9 +2,15 @@
 
 ## Overview
 
-Comprehensive reference for all functions, macros, and parameters in anofox-forecast.
+Comprehensive technical reference for all functions, macros, and parameters in the Anofox Forecast extension.
 
-**Total API Elements**: 60+ functions and macros
+**API Summary**:
+- 2 core forecasting functions (`TS_FORECAST`, `TS_FORECAST_BY`)
+- 31 forecasting models
+- 12 evaluation metrics
+- 5 EDA macros
+- 12 data preparation macros
+- 4 seasonality/changepoint detection functions
 
 ---
 
@@ -17,15 +23,24 @@ Generate forecasts for a single time series.
 **Signature**:
 <!-- include: test/sql/docs_examples/90_api_reference_forecast_01.sql -->
 
-**Output Columns**:
-- `forecast_step: INT` - Step ahead (1, 2, 3, ...)
-- `date_col: TIMESTAMP` - Forecast timestamp
-- `point_forecast: DOUBLE` - Point prediction
-- `lower: DOUBLE` - Lower confidence bound
-- `upper: DOUBLE` - Upper confidence bound
-- `model_name: VARCHAR` - Model identifier
-- `insample_fitted: DOUBLE[]` - Fitted values (if requested)
-- `confidence_level: DOUBLE` - Confidence level used
+**Output Schema**:
+```sql
+TABLE(
+    forecast_step INTEGER,                    -- Horizon step (1, 2, ..., horizon)
+    date_col DATE|TIMESTAMP|INTEGER,          -- Forecast timestamp (type matches input)
+    point_forecast DOUBLE,                    -- Point forecast value
+    lower DOUBLE,                             -- Lower prediction interval bound
+    upper DOUBLE,                             -- Upper prediction interval bound
+    model_name VARCHAR,                       -- Model name used
+    insample_fitted DOUBLE[],                 -- Fitted values (optional)
+    confidence_level DOUBLE                   -- Confidence level for intervals
+)
+```
+
+**Behavioral Notes**:
+- `date_col` type preserved from input (INTEGER, DATE, or TIMESTAMP)
+- `insample_fitted` array length equals training data size (empty by default, populate via `return_insample: true`)
+- Prediction intervals computed at `confidence_level` (default 0.90)
 
 **Example**:
 <!-- include: test/sql/docs_examples/90_api_reference_example_02.sql -->

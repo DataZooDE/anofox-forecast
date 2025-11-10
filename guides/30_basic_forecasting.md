@@ -2,7 +2,9 @@
 
 ## Introduction
 
-This guide covers the fundamentals of time series forecasting using anofox-forecast. By the end, you'll understand how to prepare data, select models, and evaluate forecasts.
+This guide covers the forecasting workflow using the Anofox Forecast extension's SQL API. Topics include data preparation, model selection, forecast generation, and accuracy evaluation.
+
+**API Functions Covered**: `TS_FORECAST()`, `TS_FORECAST_BY()`, evaluation metrics, and data preparation macros.
 
 ## What is Time Series Forecasting?
 
@@ -131,18 +133,24 @@ GROUP BY product_id;
 
 ## Understanding the Output
 
-### Forecast Columns
+### Forecast Output Schema
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `forecast_step` | INT | Step ahead (1, 2, 3, ...) |
-| `date_col` | TIMESTAMP | Forecast date |
-| `point_forecast` | DOUBLE | Predicted value |
-| `lower` | DOUBLE | Lower confidence bound |
-| `upper` | DOUBLE | Upper confidence bound |
-| `model_name` | VARCHAR | Model used |
-| `insample_fitted` | DOUBLE[] | Fitted values (if requested) |
-| `confidence_level` | DOUBLE | CI level used |
+| `forecast_step` | INTEGER | Horizon step (1, 2, 3, ..., horizon) |
+| `date_col` | DATE\|TIMESTAMP\|INTEGER | Forecast timestamp (type matches input) |
+| `point_forecast` | DOUBLE | Point forecast value |
+| `lower` | DOUBLE | Lower prediction interval bound |
+| `upper` | DOUBLE | Upper prediction interval bound |
+| `model_name` | VARCHAR | Model name used for forecast |
+| `insample_fitted` | DOUBLE[] | Fitted values (optional, via `return_insample: true`) |
+| `confidence_level` | DOUBLE | Confidence level used for intervals |
+
+**Behavioral Notes**:
+
+- Date column type preserved from input (INTEGER, DATE, or TIMESTAMP)
+- Prediction intervals computed at specified confidence level (default 0.90)
+- `insample_fitted` array has length equal to training data size (empty by default)
 
 ### Interpreting Results
 
