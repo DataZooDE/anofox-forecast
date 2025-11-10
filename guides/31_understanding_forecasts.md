@@ -9,6 +9,7 @@ This guide explains the statistical concepts behind time series forecasting, hel
 Every time series can be decomposed into:
 
 ### 1. Trend (T)
+
 Long-term increase or decrease in the data.
 
 **Example**: Revenue growing 5% year-over-year
@@ -30,9 +31,11 @@ FROM stats;
 ```
 
 ### 2. Seasonality (S)
+
 Regular repeating patterns at fixed intervals.
 
 **Common Periods**:
+
 - Weekly: period = 7
 - Monthly: period = 30
 - Quarterly: period = 90
@@ -53,6 +56,7 @@ WHERE is_seasonal = true;
 ```
 
 ### 3. Remainder (R)
+
 Random noise that cannot be explained by trend or seasonality.
 
 **Formula**: `Y_t = T_t + S_t + R_t` (additive model)
@@ -209,6 +213,7 @@ GROUP BY product_id, confidence_level;
 **Residual** = Actual - Fitted Value
 
 Good model → Residuals should be:
+
 - Centered around 0 (no bias)
 - Randomly distributed (no patterns)
 - Constant variance (homoscedastic)
@@ -401,6 +406,7 @@ GROUP BY product_id;
 ### What is Stationarity?
 
 A stationary series has:
+
 - Constant mean over time
 - Constant variance
 - No seasonality or trend
@@ -464,6 +470,7 @@ FROM sales;
 **Idea**: Recent observations weighted more heavily
 
 **Components**:
+
 - **E**: Error (additive/multiplicative)
 - **T**: Trend (none/additive/damped)
 - **S**: Seasonality (none/additive/multiplicative)
@@ -486,6 +493,7 @@ SELECT * FROM TS_FORECAST('sales', date, amount, 'ETS', 28, {
 **Idea**: Autoregressive Integrated Moving Average
 
 **Parameters**:
+
 - **p**: Autoregressive order (past values)
 - **d**: Differencing degree (make stationary)
 - **q**: Moving average order (past errors)
@@ -657,6 +665,7 @@ FROM q10, q50, q90;
 **Confidence Interval**: Range for the expected value (mean)
 
 In this extension:
+
 - `lower` and `upper` are **prediction intervals**
 - Wider than confidence intervals
 - What you need for planning!
@@ -664,6 +673,7 @@ In this extension:
 ## Summary
 
 **Key Concepts**:
+
 - ✅ Point forecasts = expected values
 - ✅ Confidence intervals = uncertainty quantification
 - ✅ Coverage = interval calibration check
@@ -672,6 +682,7 @@ In this extension:
 - ✅ Bias = systematic error detection
 
 **Best Practices**:
+
 1. Always validate with out-of-sample data
 2. Check coverage matches confidence level
 3. Analyze residuals for patterns
@@ -684,7 +695,7 @@ In this extension:
 ---
 
 **Related**:
+
 - [Model Selection](40_model_selection.md) - Choose the right model
 - [Confidence Intervals](22_confidence_intervals.md) - More on uncertainty
 - [Parameters Guide](12_parameters.md) - Model configuration
-

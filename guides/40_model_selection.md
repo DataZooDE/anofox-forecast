@@ -38,6 +38,7 @@ Do you know which model to use?
 | **AutoTBATS** | Complex multiple seasonality | Very Slow | Very High | Auto |
 
 **Example**:
+
 ```sql
 -- Let the algorithm choose
 SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, {'seasonal_period': 7});
@@ -55,6 +56,7 @@ SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, {'seasonal_perio
 | **SeasonalWindowAverage** | Seasonal averaging | Fast | Seasonal products |
 
 **Example**:
+
 ```sql
 -- Fastest forecast
 SELECT * FROM TS_FORECAST('sales', date, amount, 'SeasonalNaive', 28, {'seasonal_period': 7});
@@ -74,6 +76,7 @@ SELECT * FROM TS_FORECAST('sales', date, amount, 'SeasonalNaive', 28, {'seasonal
 | **SeasonalESOptimized** | Level + seasonal | Automatic | Seasonal, no trend |
 
 **Example**:
+
 ```sql
 -- Seasonal data with trend
 SELECT * FROM TS_FORECAST('sales', date, amount, 'HoltWinters', 28, {
@@ -100,6 +103,7 @@ SELECT * FROM TS_FORECAST('sales', date, amount, 'HoltWinters', 28, {
 | (A,A,A) | error_type=0, trend_type=1, season_type=1 | Trend + seasonal |
 
 **Example**:
+
 ```sql
 -- Manual ETS
 SELECT * FROM TS_FORECAST('sales', date, amount, 'ETS', 28, {
@@ -118,6 +122,7 @@ SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, {'seasonal_perio
 **When**: Need to model autocorrelation explicitly
 
 **Parameters**:
+
 - **p**: Autoregressive order (how many past values)
 - **d**: Differencing (make stationary)
 - **q**: Moving average order (how many past errors)
@@ -130,6 +135,7 @@ SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, {'seasonal_perio
 | SARIMA(1,1,1)(1,1,1,7) | + seasonal | Seasonal non-stationary |
 
 **Example**:
+
 ```sql
 -- Manual ARIMA
 SELECT * FROM TS_FORECAST('sales', date, amount, 'ARIMA', 28, {
@@ -153,6 +159,7 @@ SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoARIMA', 28, {'seasonal_per
 | **DynamicOptimizedTheta** | Auto adaptive | Complex changing patterns |
 
 **Example**:
+
 ```sql
 -- Simple and effective
 SELECT * FROM TS_FORECAST('sales', date, amount, 'OptimizedTheta', 28, {'seasonal_period': 7});
@@ -172,6 +179,7 @@ SELECT * FROM TS_FORECAST('sales', date, amount, 'OptimizedTheta', 28, {'seasona
 | **AutoTBATS** | Auto TBATS | Very Slow | Auto very complex |
 
 **Example**:
+
 ```sql
 -- Hourly data with daily (24) and weekly (168) patterns
 SELECT * FROM TS_FORECAST('hourly_sales', timestamp, amount, 'AutoMSTL', 168, {
@@ -193,6 +201,7 @@ SELECT * FROM TS_FORECAST('hourly_sales', timestamp, amount, 'AutoMSTL', 168, {
 | **TSB** | Teunter-Syntetos-Babai | Obsolescence |
 
 **Example**:
+
 ```sql
 -- Spare parts demand (many zeros)
 SELECT * FROM TS_FORECAST('spare_parts', date, demand, 'CrostonOptimized', 28, MAP{});
@@ -203,6 +212,7 @@ SELECT * FROM TS_FORECAST('spare_parts', date, demand, 'CrostonOptimized', 28, M
 ### By Data Characteristics
 
 #### Frequency
+
 | Frequency | Seasonal Period | Recommended Models |
 |-----------|----------------|---------------------|
 | **Hourly** | 24, 168 | MSTL, TBATS |
@@ -213,6 +223,7 @@ SELECT * FROM TS_FORECAST('spare_parts', date, demand, 'CrostonOptimized', 28, M
 | **Yearly** | - | Holt, AutoARIMA (non-seasonal) |
 
 #### Data Size
+
 | Series Length | Recommended | Avoid |
 |---------------|-------------|-------|
 | **< 30 obs** | Naive, SMA | AutoARIMA, TBATS |
@@ -221,6 +232,7 @@ SELECT * FROM TS_FORECAST('spare_parts', date, demand, 'CrostonOptimized', 28, M
 | **> 365 obs** | Any model | - |
 
 #### Pattern Complexity
+
 | Pattern | Model Complexity | Examples |
 |---------|------------------|----------|
 | **Simple** | Naive, SeasonalNaive | Weekly sales, no trend |
@@ -242,11 +254,13 @@ HoltWinters                             MSTL
 ```
 
 **Example**: Production forecasting (need speed)
+
 ```sql
 SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'SeasonalNaive', 7, {'seasonal_period': 7});
 ```
 
 **Example**: Strategic planning (need accuracy)
+
 ```sql
 SELECT * FROM TS_FORECAST('revenue', date, amount, 'AutoARIMA', 90, {'seasonal_period': 7});
 ```
@@ -318,6 +332,7 @@ ORDER BY mae;
 ### AutoETS
 
 **Strengths**:
+
 - ✅ Automatic parameter selection
 - ✅ Handles trend + seasonality
 - ✅ Fast optimization
@@ -325,6 +340,7 @@ ORDER BY mae;
 - ✅ Interpretable
 
 **Weaknesses**:
+
 - ❌ Single seasonality only
 - ❌ Assumes exponential smoothing appropriate
 
@@ -333,12 +349,14 @@ ORDER BY mae;
 ### AutoARIMA
 
 **Strengths**:
+
 - ✅ Handles complex autocorrelation
 - ✅ Very flexible
 - ✅ Can model differencing
 - ✅ Often most accurate
 
 **Weaknesses**:
+
 - ❌ Slower than ETS
 - ❌ Can overfit with small data
 - ❌ Less interpretable
@@ -348,12 +366,14 @@ ORDER BY mae;
 ### SeasonalNaive
 
 **Strengths**:
+
 - ✅ Extremely fast
 - ✅ No parameters to tune
 - ✅ Good baseline
 - ✅ Works with short series
 
 **Weaknesses**:
+
 - ❌ Ignores trend
 - ❌ Simple intervals
 - ❌ Lower accuracy for complex data
@@ -363,12 +383,14 @@ ORDER BY mae;
 ### Theta
 
 **Strengths**:
+
 - ✅ Good accuracy with minimal tuning
 - ✅ Fast
 - ✅ Handles trend well
 - ✅ Robust
 
 **Weaknesses**:
+
 - ❌ Limited seasonality handling
 - ❌ Fixed decomposition approach
 
@@ -377,12 +399,14 @@ ORDER BY mae;
 ### TBATS
 
 **Strengths**:
+
 - ✅ Multiple complex seasonality
 - ✅ Box-Cox transformation
 - ✅ ARMA errors
 - ✅ Very flexible
 
 **Weaknesses**:
+
 - ❌ Very slow
 - ❌ Can overfit
 - ❌ Requires long series
@@ -392,11 +416,13 @@ ORDER BY mae;
 ### Croston Methods
 
 **Strengths**:
+
 - ✅ Designed for intermittent demand
 - ✅ Handles many zeros well
 - ✅ Separates demand probability and size
 
 **Weaknesses**:
+
 - ❌ Not for continuous demand
 - ❌ Limited seasonality handling
 
@@ -509,12 +535,14 @@ SELECT * FROM TS_FORECAST('electricity_demand', timestamp, kwh,
 ### When to Tune vs When to Use Auto
 
 **Use Auto** (90% of cases):
+
 - Exploratory analysis
 - Production forecasting at scale
 - Unknown optimal parameters
 - Need reliability over perfection
 
 **Tune Manually** (10% of cases):
+
 - Benchmark performance
 - Specific domain knowledge
 - Fine-tuning after Auto selection
@@ -570,6 +598,7 @@ SELECT * FROM TS_FORECAST('sales', date, amount, 'Ensemble', 28, {
 ```
 
 **Current workaround**: Average forecasts manually
+
 ```sql
 WITH ets AS (
     SELECT forecast_step, point_forecast AS ets_forecast
@@ -591,18 +620,21 @@ JOIN arima USING (forecast_step);
 ### Model Fails or Returns Errors
 
 **Error**: "Series too short for seasonal model"
+
 ```sql
 -- Solution: Use non-seasonal model or get more data
 SELECT * FROM TS_FORECAST('sales', date, amount, 'Naive', 28, MAP{});
 ```
 
 **Error**: "ETS season length must be at least 2"
+
 ```sql
 -- Solution: Set appropriate seasonal_period
 {'seasonal_period': 7}  -- Not 1!
 ```
 
 **Error**: "Constant series detected"
+
 ```sql
 -- Solution: Remove constant series
 CREATE TABLE variable AS
@@ -612,12 +644,14 @@ SELECT * FROM TS_DROP_CONSTANT('sales', product_id, amount);
 ### Poor Forecast Accuracy
 
 **Check**:
+
 1. Data quality: `TS_STATS()`, `TS_QUALITY_REPORT()`
 2. Seasonality: `TS_DETECT_SEASONALITY_ALL()`
 3. Changepoints: `TS_DETECT_CHANGEPOINTS_BY()`
 4. Model fit: Check `insample_fitted` with `return_insample: true`
 
 **Try**:
+
 1. Different models
 2. Different seasonal_period
 3. Longer training window
@@ -641,6 +675,7 @@ SELECT * FROM TS_DROP_CONSTANT('sales', product_id, amount);
 | **Forecasting 1000s of series** | SeasonalNaive, AutoETS |
 
 **Decision Process**:
+
 1. Start with AutoETS
 2. Check accuracy with `TS_MAPE()`, `TS_COVERAGE()`
 3. If < 20% MAPE and good coverage → Deploy!
@@ -654,4 +689,3 @@ SELECT * FROM TS_DROP_CONSTANT('sales', product_id, amount);
 **Remember**: "All models are wrong, but some are useful" - George Box
 
 The best model is the one that works for YOUR data and YOUR business needs!
-

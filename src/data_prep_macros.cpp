@@ -13,23 +13,16 @@ static const DefaultTableMacro data_prep_macros[] = {
      {"table_name", "group_col", "date_col", "value_col", nullptr},
      {{nullptr, nullptr}},
      R"(
-            WITH aliased AS (
-                SELECT 
-                    group_col AS __g,
-                    date_col AS __d,
-                    value_col AS __v
-                FROM QUERY_TABLE(table_name)
-            )
             SELECT 
-                __g AS group_col,
-                __d AS date_col,
-                COALESCE(__v, 
-                        LAST_VALUE(__v IGNORE NULLS) 
-                            OVER (PARTITION BY __g ORDER BY __d 
+                group_col,
+                date_col,
+                COALESCE(value_col, 
+                        LAST_VALUE(value_col IGNORE NULLS) 
+                            OVER (PARTITION BY group_col ORDER BY date_col 
                                   ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
                 ) AS value_col
-            FROM aliased
-            ORDER BY __g, __d
+            FROM QUERY_TABLE(table_name)
+            ORDER BY group_col, date_col
         )"},
 
     // TS_FILL_NULLS_BACKWARD: Backward fill
@@ -38,23 +31,16 @@ static const DefaultTableMacro data_prep_macros[] = {
      {"table_name", "group_col", "date_col", "value_col", nullptr},
      {{nullptr, nullptr}},
      R"(
-            WITH aliased AS (
-                SELECT 
-                    group_col AS __g,
-                    date_col AS __d,
-                    value_col AS __v
-                FROM QUERY_TABLE(table_name)
-            )
             SELECT 
-                __g AS group_col,
-                __d AS date_col,
-                COALESCE(__v, 
-                        FIRST_VALUE(__v IGNORE NULLS) 
-                            OVER (PARTITION BY __g ORDER BY __d 
+                group_col,
+                date_col,
+                COALESCE(value_col, 
+                        FIRST_VALUE(value_col IGNORE NULLS) 
+                            OVER (PARTITION BY group_col ORDER BY date_col 
                                   ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
                 ) AS value_col
-            FROM aliased
-            ORDER BY __g, __d
+            FROM QUERY_TABLE(table_name)
+            ORDER BY group_col, date_col
         )"},
 
     // TS_FILL_NULLS_MEAN: Fill with series mean
@@ -63,29 +49,36 @@ static const DefaultTableMacro data_prep_macros[] = {
      {"table_name", "group_col", "date_col", "value_col", nullptr},
      {{nullptr, nullptr}},
      R"(
-            WITH series_means AS (
+            WITH base_with_alias AS (
                 SELECT 
-                    group_col AS __g,
-                    AVG(value_col) AS __mean
+                    group_col AS __gid,
+                    date_col AS __did,
+                    value_col AS __vid
                 FROM QUERY_TABLE(table_name)
-                WHERE value_col IS NOT NULL
-                GROUP BY group_col
+            ),
+            series_means AS (
+                SELECT 
+                    __gid,
+                    AVG(__vid) AS __mean
+                FROM base_with_alias
+                WHERE __vid IS NOT NULL
+                GROUP BY __gid
             ),
             with_means AS (
                 SELECT 
-                    group_col AS __g2,
-                    date_col AS __d2,
-                    value_col AS __v2,
-                    __mean
-                FROM QUERY_TABLE(table_name)
-                LEFT JOIN series_means ON group_col = __g
+                    b.__gid,
+                    b.__did,
+                    b.__vid,
+                    sm.__mean
+                FROM base_with_alias b
+                LEFT JOIN series_means sm ON b.__gid = sm.__gid
             )
             SELECT 
-                __g2 AS group_col,
-                __d2 AS date_col,
-                COALESCE(__v2, __mean) AS value_col
+                __gid AS group_col,
+                __did AS date_col,
+                COALESCE(__vid, __mean) AS value_col
             FROM with_means
-            ORDER BY __g2, __d2
+            ORDER BY __gid, __did
         )"},
 
     // TS_FILL_GAPS: Fill missing time gaps with NULL
@@ -95,33 +88,36 @@ static const DefaultTableMacro data_prep_macros[] = {
      {"table_name", "group_col", "date_col", "value_col", nullptr},
      {{nullptr, nullptr}},
      R"(
-            WITH series_ranges AS (
-                SELECT DISTINCT
+            WITH base_aliased AS (
+                SELECT 
+                    group_col AS __gid,
+                    date_col AS __did,
+                    value_col AS __vid,
                     group_col,
-                    MIN(date_col) OVER (PARTITION BY group_col) AS __min,
-                    MAX(date_col) OVER (PARTITION BY group_col) AS __max
+                    date_col,
+                    value_col
                 FROM QUERY_TABLE(table_name)
+            ),
+            series_ranges AS (
+                SELECT DISTINCT
+                    __gid,
+                    MIN(__did) OVER (PARTITION BY __gid) AS __min,
+                    MAX(__did) OVER (PARTITION BY __gid) AS __max
+                FROM base_aliased
             ),
             expanded AS (
                 SELECT 
-                    group_col AS __g,
-                    UNNEST(GENERATE_SERIES(__min, __max, INTERVAL '1 day')) AS __d
+                    __gid,
+                    UNNEST(GENERATE_SERIES(__min, __max, INTERVAL '1 day')) AS __did
                 FROM series_ranges
-            ),
-            original AS (
-                SELECT 
-                    group_col AS __g2,
-                    date_col AS __d2,
-                    value_col AS __v2
-                FROM QUERY_TABLE(table_name)
             )
             SELECT 
-                __g AS group_col,
-                __d AS date_col,
-                __v2 AS value_col
-            FROM expanded
-            LEFT JOIN original ON __g = __g2 AND __d = __d2
-            ORDER BY __g, __d
+                e.__gid AS group_col,
+                e.__did AS date_col,
+                b.__vid AS value_col
+            FROM expanded e
+            LEFT JOIN base_aliased b ON e.__gid = b.__gid AND e.__did = b.__did
+            ORDER BY e.__gid, e.__did
         )"},
 
     // TS_DROP_CONSTANT: Drop constant series

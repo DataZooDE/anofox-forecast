@@ -33,35 +33,41 @@
 
 ## Universal SQL Pattern
 
-### The Same SQL Works Everywhere!
+### The Same SQL Works Everywhere
 
 **SQL Query** (write once):
+
 ```sql
 SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
                           {'seasonal_period': 7, 'confidence_level': 0.95})
 ```
 
 **Use from Python**:
+
 ```python
 forecast = con.execute("SELECT * FROM TS_FORECAST(...)").fetchdf()
 ```
 
 **Use from R**:
+
 ```r
 forecast <- dbGetQuery(con, "SELECT * FROM TS_FORECAST(...)")
 ```
 
 **Use from Julia**:
+
 ```julia
 forecast = DataFrame(DBInterface.execute(con, "SELECT * FROM TS_FORECAST(...)"))
 ```
 
 **Use from C++**:
+
 ```cpp
 auto forecast = con.Query("SELECT * FROM TS_FORECAST(...)");
 ```
 
 **Use from Rust**:
+
 ```rust
 let forecast = conn.prepare("SELECT * FROM TS_FORECAST(...)")?.query_map(...)?;
 ```
@@ -166,6 +172,7 @@ forecast = con.execute(f"""
 ### Pattern 3: Microservices Architecture
 
 **Service 1 (Python)**: Data preparation
+
 ```python
 # Python service: Clean and prepare data
 con.execute("""
@@ -176,6 +183,7 @@ con.execute("COPY sales_prepared TO 'prepared.parquet' (FORMAT PARQUET)")
 ```
 
 **Service 2 (Rust)**: Low-latency forecasting
+
 ```rust
 // Rust service: Fast forecasting endpoint
 conn.execute_batch("CREATE TABLE sales_prepared AS SELECT * FROM read_parquet('prepared.parquet')")?;
@@ -183,6 +191,7 @@ let forecast = conn.prepare("SELECT * FROM TS_FORECAST_BY(...)")?;
 ```
 
 **Service 3 (R)**: Reporting and visualization
+
 ```r
 # R service: Generate reports
 forecasts <- dbGetQuery(con, "SELECT * FROM read_parquet('forecasts.parquet')")
@@ -208,6 +217,7 @@ forecasts <- dbGetQuery(con, "SELECT * FROM read_parquet('forecasts.parquet')")
 **Key Insight**: Forecasting time is nearly identical (DuckDB does the work)!
 
 **Differences**:
+
 - Data loading varies by language overhead
 - Memory usage varies by runtime (GC vs manual)
 - Julia/C++/Rust slightly more efficient
@@ -216,11 +226,13 @@ forecasts <- dbGetQuery(con, "SELECT * FROM read_parquet('forecasts.parquet')")
 ### What Affects Performance
 
 **Does NOT matter much**:
+
 - ❌ Which language you call from
 - ❌ DataFrame library (pandas vs polars vs Arrow)
 - ❌ Whether you use types
 
 **DOES matter**:
+
 - ✅ Model choice (AutoETS vs SeasonalNaive vs AutoTBATS)
 - ✅ Number of series (more = better parallelization)
 - ✅ Data preparation (gaps, nulls, filtering)
@@ -592,6 +604,7 @@ let conn = Connection::open("shared.duckdb")?;
 ### Scenario 1: Jupyter Notebook → Production API
 
 **Development** (Python/Jupyter):
+
 ```python
 # Notebook: Develop and test
 forecast_sql = """
@@ -603,6 +616,7 @@ forecast = con.execute(forecast_sql).fetchdf()
 ```
 
 **Production** (FastAPI/Python or Actix/Rust):
+
 ```python
 # Deploy same SQL in FastAPI
 @app.get("/forecast")
@@ -613,6 +627,7 @@ def get_forecast():
 ### Scenario 2: RMarkdown Report → Shiny Dashboard
 
 **Analysis** (RMarkdown):
+
 ```r
 # Document findings
 forecast <- dbGetQuery(con, "SELECT * FROM TS_FORECAST_BY(...)")
@@ -620,6 +635,7 @@ knitr::kable(forecast)
 ```
 
 **Dashboard** (Shiny):
+
 ```r
 # Interactive version for business users
 server <- function(input, output) {
@@ -633,6 +649,7 @@ server <- function(input, output) {
 ### Scenario 3: Research (Julia) → Trading System (C++)
 
 **Research** (Julia):
+
 ```julia
 # Backtest and optimize
 results = DataFrame(DBInterface.execute(con, """
@@ -642,6 +659,7 @@ results = DataFrame(DBInterface.execute(con, """
 ```
 
 **Production** (C++ trading system):
+
 ```cpp
 // Low-latency forecast in trading loop
 auto forecast = con.Query("SELECT * FROM TS_FORECAST(...)");
@@ -663,12 +681,14 @@ auto forecast = con.Query("SELECT * FROM TS_FORECAST(...)");
 ### Choosing Your Language Stack
 
 **For Teams**:
+
 - Data Science: Python or R
 - Engineering: Rust, C++, or Python
 - Analysis: R or Julia
 - Production: Whatever your infrastructure uses!
 
 **For Individuals**:
+
 - Use the language you're most comfortable with
 - Performance is similar across all
 - Focus on SQL query optimization, not language choice
@@ -709,6 +729,7 @@ auto forecast = con.Query("SELECT * FROM TS_FORECAST(...)");
 ---
 
 **Related Guides**:
+
 - [Python Usage Guide](81_python_integration.md) - Detailed Python examples
 - [R Usage Guide](82_r_integration.md) - Detailed R examples  
 - [Julia Usage Guide](83_julia_integration.md) - Detailed Julia examples
@@ -716,4 +737,3 @@ auto forecast = con.Query("SELECT * FROM TS_FORECAST(...)");
 - [Rust Usage Guide](85_rust_integration.md) - Detailed Rust examples
 
 **Main Benefit**: SQL is your forecasting DSL - the language binding is just the delivery mechanism! 🌍
-

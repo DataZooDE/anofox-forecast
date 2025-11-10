@@ -5,6 +5,7 @@
 Use anofox-forecast from Julia through DuckDB.jl. Perfect for high-performance scientific computing with production-grade forecasting.
 
 **Key Advantages**:
+
 - ✅ Julia's speed + DuckDB's analytical power
 - ✅ No Julia forecasting packages needed
 - ✅ Easy DataFrame integration
@@ -641,6 +642,7 @@ end
 ## Summary
 
 **Why Use from Julia?**
+
 - ✅ Julia's performance + DuckDB's analytical power
 - ✅ Type-safe forecasting workflows
 - ✅ Easy DataFrame integration
@@ -648,16 +650,19 @@ end
 - ✅ Perfect for scientific computing pipelines
 
 **Typical Julia Workflow**:
+
 ```
 DataFrame → register → SQL forecast → DataFrame → analysis/plot
 ```
 
 **Performance**:
+
 - Single series: Similar to Python
 - Multiple series: Excellent (DuckDB parallelization)
 - Data prep: 3-4x faster than pure Julia for large datasets
 
 **When to Use**:
+
 - High-performance scientific computing
 - Type-safe forecasting pipelines
 - Integration with Julia's numerical ecosystem
@@ -669,4 +674,3 @@ DataFrame → register → SQL forecast → DataFrame → analysis/plot
 **Next**: [C++ Usage Guide](84_cpp_integration.md) | [Rust Usage Guide](85_rust_integration.md)
 
 **Julia + DuckDB**: High-performance scientific forecasting! 🚀
-

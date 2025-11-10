@@ -1,6 +1,6 @@
 # Guide Index - Complete Documentation
 
-## Welcome!
+## Welcome
 
 This directory contains comprehensive guides for using anofox-forecast, organized by topic and complexity level.
 
@@ -15,7 +15,9 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 ## 🚀 Getting Started (Beginners)
 
 ### 1. [Quick Start Guide](01_quickstart.md) ⭐
+
 **5 minutes to your first forecast**
+
 - Load extension
 - Create sample data
 - Generate first forecast
@@ -26,7 +28,9 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 **Prerequisites**: None  
 
 ### 2. [Basic Forecasting](30_basic_forecasting.md)
+
 **Complete workflow from data to deployment**
+
 - Data preparation steps
 - Seasonality detection
 - Model selection basics
@@ -42,7 +46,9 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 ## 📖 Technical Guides (Developers & Data Scientists)
 
 ### 10. [API Reference](90_api_reference.md) ⭐
+
 **Complete function documentation**
+
 - All 31 models listed
 - All 12 metrics documented
 - EDA & data prep macros
@@ -54,7 +60,9 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 **Use**: Reference document  
 
 ### 11. [Model Selection Guide](40_model_selection.md)
+
 **Choosing the right forecasting model**
+
 - Decision tree
 - Model comparison matrix
 - Strengths & weaknesses
@@ -66,7 +74,9 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 **Prerequisites**: Basic Forecasting  
 
 ### 13. [Performance Optimization](60_performance_optimization.md)
+
 **Scaling to millions of series**
+
 - Performance benchmarks
 - Parallelization strategies
 - Memory optimization
@@ -79,7 +89,9 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 **Prerequisites**: API Reference  
 
 ### 40. [EDA & Data Preparation](11_exploratory_analysis.md) ⭐
+
 **Data quality and preparation workflow**
+
 - Why data prep matters
 - EDA workflow (5 steps)
 - Data preparation techniques
@@ -96,7 +108,9 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 ## 📊 Statistical Guides (Statisticians & Analysts)
 
 ### 20. [Understanding Forecasts](31_understanding_forecasts.md) ⭐
+
 **Statistical concepts explained**
+
 - Time series components
 - Point forecasts vs intervals
 - Confidence intervals interpretation
@@ -110,7 +124,9 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 **Prerequisites**: Basic statistics  
 
 ### 21. Accuracy Metrics (Coming Soon)
+
 **Deep dive into evaluation metrics**
+
 - MAE, RMSE, MAPE, SMAPE
 - R², BIAS, MASE
 - Coverage analysis
@@ -118,14 +134,18 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 - Benchmark values
 
 ### 22. Confidence Intervals (Coming Soon)
+
 **Understanding uncertainty quantification**
+
 - Prediction vs confidence intervals
 - Coverage calibration
 - Interval width analysis
 - Risk assessment
 
 ### 23. Seasonality Analysis (Coming Soon)
+
 **Detecting and modeling seasonal patterns**
+
 - Periodogram analysis
 - ACF-based detection
 - Multiple seasonality
@@ -136,7 +156,9 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 ## 💼 Business Guides (Business Users & Managers)
 
 ### 30. [Demand Forecasting](70_demand_forecasting.md) ⭐
+
 **Retail & inventory optimization**
+
 - Business ROI examples
 - Inventory optimization
 - Safety stock calculation
@@ -150,7 +172,9 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 **Business Value**: High  
 
 ### 31. [Sales Prediction](71_sales_prediction.md) ⭐
+
 **Revenue forecasting for planning**
+
 - Quarterly projections
 - Growth analysis
 - Risk management (VaR)
@@ -164,7 +188,9 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 **Business Value**: High  
 
 ### 32. [Capacity Planning](72_capacity_planning.md) ⭐
+
 **Resource optimization**
+
 - Workforce planning
 - Manufacturing capacity
 - IT infrastructure sizing
@@ -178,7 +204,9 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 **Business Value**: Very High  
 
 ### 33. Anomaly Detection (Coming Soon)
+
 **Identifying outliers and anomalies**
+
 - Real-time anomaly detection
 - Alert systems
 - Root cause analysis
@@ -188,7 +216,9 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 ## 🎯 Advanced Topics
 
 ### 41. [Changepoint Detection](docs/../examples/changepoint_detection.sql)
+
 **Regime identification and analysis**
+
 - Bayesian changepoint detection
 - Probability scoring
 - Regime-based features
@@ -200,13 +230,17 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 **Prerequisites**: Basic Forecasting, Understanding Forecasts  
 
 ### 42. Hierarchical Forecasting (Coming Soon)
+
 **Multi-level forecasting and reconciliation**
+
 - Top-down vs bottom-up
 - Reconciliation methods
 - Aggregation strategies
 
 ### 43. Model Ensembles (Coming Soon)
+
 **Combining multiple models**
+
 - Weighted averaging
 - Stacking approaches
 - Ensemble selection
@@ -216,7 +250,9 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 ## 🌍 Multi-Language Guides (Language Bindings)
 
 ### 49. [Multi-Language Overview](80_multi_language_overview.md) ⭐
+
 **Write SQL once, use everywhere**
+
 - Language comparison
 - Integration patterns
 - Polyglot workflows
@@ -228,7 +264,9 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 **Key Insight**: Same SQL works in all languages!  
 
 ### 50. [Python Usage](81_python_integration.md)
+
 **Using from Python (pandas, polars)**
+
 - Installation & setup
 - DataFrame integration
 - Visualization (matplotlib, plotly)
@@ -241,7 +279,9 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 **Prerequisites**: Python basics  
 
 ### 51. [R Usage](82_r_integration.md)
+
 **Using from R (tidyverse, ggplot2)**
+
 - Installation & setup
 - data.frame integration
 - Visualization (ggplot2)
@@ -254,7 +294,9 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 **Prerequisites**: R basics  
 
 ### 52. [Julia Usage](83_julia_integration.md)
+
 **Using from Julia (DataFrames.jl)**
+
 - Installation & setup
 - DataFrame integration
 - Type-safe queries
@@ -267,7 +309,9 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 **Prerequisites**: Julia basics  
 
 ### 53. [C++ Usage](84_cpp_integration.md)
+
 **Using from C++ (embedded)**
+
 - CMake integration
 - Type-safe results
 - Error handling
@@ -280,7 +324,9 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 **Prerequisites**: C++ knowledge  
 
 ### 54. [Rust Usage](85_rust_integration.md)
+
 **Using from Rust (safe & fast)**
+
 - Cargo setup
 - Type-safe structures
 - Error handling (Result)
@@ -462,7 +508,7 @@ Found an error? Have a suggestion?
 
 - Open an issue on GitHub
 - Submit a pull request
-- Contact: docs@anofox.com
+- Contact: <docs@anofox.com>
 
 ---
 
@@ -487,5 +533,4 @@ Before you start forecasting in production:
 
 Start here: [Quick Start Guide](01_quickstart.md) → Get your first forecast in 5 minutes!
 
-**Questions?** Check the appropriate guide above or contact support@anofox.com
-
+**Questions?** Check the appropriate guide above or contact <support@anofox.com>

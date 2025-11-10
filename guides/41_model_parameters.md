@@ -45,11 +45,13 @@ These parameters work with **all models**:
 | `generate_timestamps` | BOOLEAN | No | true | Generate forecast timestamps based on training data intervals |
 
 **Validation:**
+
 - `confidence_level` must be between 0 and 1 (exclusive)
 - Higher values produce wider prediction intervals
 - Common values: 0.80 (80%), 0.90 (90%), 0.95 (95%), 0.99 (99%)
 
 **Examples:**
+
 ```sql
 -- Default confidence level (0.90 = 90%)
 SELECT TS_FORECAST(date, value, 'Theta', 12, MAP{})
@@ -86,6 +88,7 @@ The Naive forecast uses the last observed value as the forecast for all future p
 **Use Case:** Baseline model, random walk data
 
 **Example:**
+
 ```sql
 SELECT TS_FORECAST(date, value, 'Naive', 7, MAP{}) AS forecast
 FROM time_series_data;
@@ -104,6 +107,7 @@ Forecasts using a simple moving average of the most recent observations.
 | `window` | INTEGER | No | 5 | Number of recent observations to average |
 
 **Validation:**
+
 - `window` must be positive
 
 **Use Case:** Smoothing noisy data, short-term trends
@@ -137,6 +141,7 @@ Uses the observation from the same season in the previous cycle as the forecast.
 | `seasonal_period` | INTEGER | **Yes** | N/A | Length of the seasonal cycle |
 
 **Validation:**
+
 - `seasonal_period` must be positive
 
 **Use Case:** Strong seasonal patterns, seasonal baseline
@@ -169,6 +174,7 @@ Naive forecast with linear trend (drift) component.
 **Use Case:** Data with consistent trend, no seasonality
 
 **Example:**
+
 ```sql
 SELECT TS_FORECAST(date, value, 'RandomWalkWithDrift', 10, MAP{}) AS forecast
 FROM trending_data;
@@ -189,6 +195,7 @@ Exponential smoothing with fixed smoothing parameter.
 | `alpha` | DOUBLE | No | 0.3 | Smoothing parameter (0 < alpha < 1) |
 
 **Validation:**
+
 - `alpha` must be between 0 and 1
 
 **Use Case:** Data with no trend or seasonality, level changes
@@ -220,6 +227,7 @@ Simple Exponential Smoothing with automatically optimized alpha parameter.
 **Use Case:** SES when optimal alpha is unknown
 
 **Example:**
+
 ```sql
 SELECT TS_FORECAST(date, value, 'SESOptimized', 10, MAP{}) AS forecast
 FROM data;
@@ -240,12 +248,14 @@ Exponential smoothing with seasonality (Holt-Winters additive seasonality).
 | `gamma` | DOUBLE | No | 0.1 | Seasonal smoothing parameter |
 
 **Validation:**
+
 - `seasonal_period` must be positive
 - `alpha`, `gamma` must be between 0 and 1
 
 **Use Case:** Seasonal data without trend
 
 **Example:**
+
 ```sql
 SELECT TS_FORECAST(date, sales, 'SeasonalES', 12, 
        MAP{'seasonal_period': 7, 'alpha': 0.3, 'gamma': 0.2}) AS forecast
@@ -267,6 +277,7 @@ SeasonalES with automatically optimized parameters.
 **Use Case:** Seasonal data, optimal parameters unknown
 
 **Example:**
+
 ```sql
 SELECT TS_FORECAST(date, value, 'SeasonalESOptimized', 12, 
        MAP{'seasonal_period': 12}) AS forecast
@@ -289,6 +300,7 @@ Moving average with seasonal adjustment.
 **Use Case:** Seasonal data with noise
 
 **Example:**
+
 ```sql
 SELECT TS_FORECAST(date, value, 'SeasonalWindowAverage', 14, 
        MAP{'seasonal_period': 7, 'window': 3}) AS forecast
@@ -311,6 +323,7 @@ Double exponential smoothing (level + trend).
 | `beta` | DOUBLE | No | 0.1 | Trend smoothing parameter |
 
 **Validation:**
+
 - `alpha`, `beta` must be between 0 and 1
 - `beta` ≤ `alpha` (typical constraint)
 
@@ -351,12 +364,14 @@ Triple exponential smoothing (level + trend + seasonality). **Note:** This metho
 | `gamma` | DOUBLE | No | 0.1 | Seasonal smoothing parameter |
 
 **Validation:**
+
 - `seasonal_period` must be positive
 - Parameters must be between 0 and 1
 
 **Use Case:** Data with trend and seasonality
 
 **Example:**
+
 ```sql
 -- Additive seasonality
 SELECT TS_FORECAST(date, sales, 'HoltWinters', 12, 
@@ -385,6 +400,7 @@ Classic Theta method with decomposition parameter.
 | `theta` | DOUBLE | No | 2.0 | Decomposition parameter |
 
 **Validation:**
+
 - `seasonal_period` must be positive
 - `theta` typically between 0 and 3
 
@@ -423,6 +439,7 @@ Theta method with automatically optimized theta parameter.
 **Use Case:** Theta when optimal theta is unknown
 
 **Example:**
+
 ```sql
 SELECT TS_FORECAST(date, value, 'OptimizedTheta', 12, 
        MAP{'seasonal_period': 12}) AS forecast
@@ -445,6 +462,7 @@ Theta with dynamic trend component.
 **Use Case:** Data with changing trends
 
 **Example:**
+
 ```sql
 SELECT TS_FORECAST(date, value, 'DynamicTheta', 12, 
        MAP{'seasonal_period': 7, 'theta': 2.5}) AS forecast
@@ -466,6 +484,7 @@ DynamicTheta with optimized parameters.
 **Use Case:** Dynamic trends, optimal parameters unknown
 
 **Example:**
+
 ```sql
 SELECT TS_FORECAST(date, value, 'DynamicOptimizedTheta', 12, 
        MAP{'seasonal_period': 12}) AS forecast
@@ -494,6 +513,7 @@ Box-Jenkins ARIMA model with manual parameter specification.
 | `include_intercept` | INTEGER | No | 1 | Include intercept (1) or not (0) |
 
 **Validation:**
+
 - All orders must be non-negative
 - `s` must be positive if seasonal orders > 0
 
@@ -584,6 +604,7 @@ Exponential smoothing state space model with manual component specification.
 | `phi` | DOUBLE | No | 0.98 | Damping parameter |
 
 **Validation:**
+
 - Smoothing parameters must be between 0 and 1
 - `phi` must be between 0 and 1 (typically 0.8-0.98)
 
@@ -616,6 +637,7 @@ FROM percentage_seasonal_data;
 ```
 
 **ETS Model Notation:**
+
 - Error: A=Additive, M=Multiplicative
 - Trend: N=None, A=Additive, Ad=Damped Additive, M=Multiplicative, Md=Damped Multiplicative
 - Season: N=None, A=Additive, M=Multiplicative
@@ -634,6 +656,7 @@ Automatically selects optimal ETS model from 30+ candidates.
 | `model` | VARCHAR | No | 'ZZZ' | Model specification (ZZZ = auto, e.g., 'AAN', 'MAM') |
 
 **Model Specification Format:** `[Error][Trend][Season]`
+
 - Error: A=Additive, M=Multiplicative, Z=Auto
 - Trend: N=None, A=Additive, Ad=Damped Additive, M=Multiplicative, Md=Damped Multiplicative, Z=Auto
 - Season: N=None, A=Additive, M=Multiplicative, Z=Auto
@@ -805,6 +828,7 @@ MSTL with automatically optimized parameters.
 | `seasonal_periods` | INTEGER[] | No | [12] | Array of seasonal periods |
 
 **Example:**
+
 ```sql
 SELECT TS_FORECAST(date, value, 'AutoMSTL', 30, 
        MAP{'seasonal_periods': [7, 365]}) AS forecast
@@ -865,6 +889,7 @@ TBATS with automatic parameter selection.
 | `seasonal_periods` | INTEGER[] | No | [12] | Array of seasonal periods |
 
 **Example:**
+
 ```sql
 SELECT TS_FORECAST(date, value, 'AutoTBATS', 30, 
        MAP{'seasonal_periods': [7, 365]}) AS forecast
@@ -886,6 +911,7 @@ Classic Croston's method for intermittent demand.
 **Use Case:** Spare parts demand, slow-moving inventory
 
 **Example:**
+
 ```sql
 SELECT TS_FORECAST(date, demand, 'CrostonClassic', 12, MAP{}) AS forecast
 FROM sparse_demand_data
@@ -903,6 +929,7 @@ Croston's method with optimized smoothing parameters.
 **Use Case:** Intermittent demand, optimal parameters unknown
 
 **Example:**
+
 ```sql
 SELECT TS_FORECAST(date, demand, 'CrostonOptimized', 12, MAP{}) AS forecast
 FROM intermittent_data;
@@ -919,6 +946,7 @@ Syntetos-Boylan Approximation variant of Croston's method (less biased).
 **Use Case:** Intermittent demand, reduced bias important
 
 **Example:**
+
 ```sql
 SELECT TS_FORECAST(date, demand, 'CrostonSBA', 12, MAP{}) AS forecast
 FROM lumpy_demand_data;
@@ -935,6 +963,7 @@ Aggregation-based method for intermittent demand.
 **Use Case:** Very sparse demand patterns
 
 **Example:**
+
 ```sql
 SELECT TS_FORECAST(date, demand, 'ADIDA', 12, MAP{}) AS forecast
 FROM very_sparse_data;
@@ -951,6 +980,7 @@ Multiple temporal aggregation for intermittent demand.
 **Use Case:** Complex intermittent patterns
 
 **Example:**
+
 ```sql
 SELECT TS_FORECAST(date, demand, 'IMAPA', 12, MAP{}) AS forecast
 FROM complex_intermittent_data;
@@ -970,6 +1000,7 @@ Advanced intermittent demand method separating demand occurrence and size.
 | `alpha_p` | DOUBLE | No | 0.1 | Smoothing for demand size |
 
 **Validation:**
+
 - Both alphas must be between 0 and 1
 
 **Use Case:** Intermittent demand with varying sizes
@@ -1078,6 +1109,7 @@ GROUP BY a;
 ### 1. Model Selection Strategy
 
 **Start Simple → Complex:**
+
 ```sql
 -- Level 1: Baseline
 Naive, SMA, SeasonalNaive
@@ -1101,18 +1133,21 @@ CrostonClassic, TSB, IMAPA
 ### 2. Parameter Tuning Guidelines
 
 **Window Size (SMA, SeasonalWindowAverage):**
+
 - Start with `window ≈ horizon`
 - Increase for stable data (less noise)
 - Decrease for volatile data (more responsiveness)
 - Typical range: 3-21
 
 **Smoothing Parameters (alpha, beta, gamma):**
+
 - alpha (level): 0.1-0.3 for stable, 0.5-0.8 for volatile
 - beta (trend): Usually < alpha, typical 0.05-0.15
 - gamma (seasonal): Usually smallest, typical 0.05-0.2
 - Use optimized variants if unsure
 
 **Seasonal Period:**
+
 - Must match data frequency:
   - Daily data, weekly pattern: 7
   - Daily data, yearly pattern: 365
@@ -1121,6 +1156,7 @@ CrostonClassic, TSB, IMAPA
   - Quarterly data, yearly pattern: 4
 
 **ARIMA Orders:**
+
 - Start with AutoARIMA
 - If manual tuning needed:
   - p: 0-3 for most data
@@ -1131,6 +1167,7 @@ CrostonClassic, TSB, IMAPA
 ### 3. Data Requirements
 
 **Minimum Data Points:**
+
 - Naive, SMA: 10+ points
 - SES, Holt: 20+ points
 - Seasonal models: 2× seasonal_period minimum, 3-4× recommended
@@ -1139,6 +1176,7 @@ CrostonClassic, TSB, IMAPA
 - Multiple seasonality: 2× max(seasonal_periods)
 
 **Data Quality:**
+
 - Models assume regular timestamps (use mean for interval calculation)
 - Models expect sorted data
 - No duplicate timestamps allowed
@@ -1147,15 +1185,19 @@ CrostonClassic, TSB, IMAPA
 ### 4. Performance Considerations
 
 **Fast Models (<1ms for 10K rows):**
+
 - Naive, SMA, SeasonalNaive, RandomWalkWithDrift
 
 **Medium Models (10-100ms for 10K rows):**
+
 - SES, Holt, Theta, OptimizedTheta
 
 **Slow Models (1-5s for 10K rows):**
+
 - AutoETS, AutoARIMA, MSTL, TBATS
 
 **Enable Performance Monitoring:**
+
 ```bash
 export ANOFOX_PERF=1
 ./duckdb < your_query.sql
@@ -1165,6 +1207,7 @@ export ANOFOX_PERF=1
 ### 5. Production Deployment
 
 **For Real-time Forecasting:**
+
 ```sql
 -- Use fast models with GROUP BY parallelization
 SELECT 
@@ -1176,6 +1219,7 @@ GROUP BY product_id;
 ```
 
 **For Batch Forecasting:**
+
 ```sql
 -- AutoETS provides best automatic results
 SELECT 
@@ -1187,6 +1231,7 @@ GROUP BY product_id, region;
 ```
 
 **For Intermittent Demand:**
+
 ```sql
 -- Use specialized intermittent models
 SELECT 
@@ -1201,12 +1246,14 @@ GROUP BY sku, warehouse;
 ### 6. Timestamps Control
 
 **Enable (default):**
+
 ```sql
 -- Real dates in output
 TS_FORECAST(date, value, 'Theta', 12, MAP{})
 ```
 
 **Disable for cleaner output:**
+
 ```sql
 -- Empty timestamp list (schema consistent)
 TS_FORECAST(date, value, 'Theta', 12, MAP{'generate_timestamps': false})
@@ -1245,6 +1292,7 @@ SELECT TS_FORECAST(date, value, 'MSTL', 7, MAP{'seasonal_periods': [12]});
 ## Common Use Cases
 
 ### Retail Sales Forecasting
+
 ```sql
 -- Daily sales with weekly seasonality
 SELECT 
@@ -1255,6 +1303,7 @@ GROUP BY store_id;
 ```
 
 ### Inventory Planning
+
 ```sql
 -- Intermittent spare parts demand
 SELECT 
@@ -1265,6 +1314,7 @@ GROUP BY part_number;
 ```
 
 ### Energy Demand
+
 ```sql
 -- Hourly electricity with daily and weekly patterns
 SELECT 
@@ -1275,6 +1325,7 @@ GROUP BY region;
 ```
 
 ### Financial Forecasting
+
 ```sql
 -- Monthly revenue with trend
 SELECT 
@@ -1285,6 +1336,7 @@ GROUP BY department;
 ```
 
 ### Website Traffic
+
 ```sql
 -- Hourly visitors with daily pattern
 SELECT 
@@ -1325,6 +1377,7 @@ FROM web_analytics;
 *For intermittent data only
 
 **Speed Legend:**
+
 - ⚡ Fast: <1ms for 10K rows
 - 🐇 Medium: 10-100ms for 10K rows
 - 🐢 Slow: 1-5s for 10K rows (with early termination optimization)

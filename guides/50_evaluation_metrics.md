@@ -9,6 +9,7 @@ This document describes the evaluation metric functions available in the DuckDB 
 The extension provides **12 time series forecasting accuracy metrics** as individual SQL functions:
 
 **Available Metrics:**
+
 - `TS_MAE()` - Mean Absolute Error
 - `TS_MSE()` - Mean Squared Error
 - `TS_RMSE()` - Root Mean Squared Error
@@ -83,6 +84,7 @@ ORDER BY mae;  -- Best forecasts first
 ```
 
 **Output**:
+
 ```
 ┌────────────┬──────┬───────┬────────┬────────┐
 │ product_id │ mae  │ rmse  │  mape  │  bias  │
@@ -125,13 +127,15 @@ TS_MAE(actual DOUBLE[], predicted DOUBLE[]) → DOUBLE
 
 **Range**: [0, ∞)
 
-**Interpretation**: 
+**Interpretation**:
+
 - Average absolute difference between actual and predicted values
 - Lower is better
 - Same units as original data
 - **Use when**: Easy interpretation needed, outliers shouldn't dominate
 
 **Example**:
+
 ```sql
 SELECT TS_MAE([100, 102, 105], [101, 101, 104]) AS mae;
 -- Result: 0.67
@@ -150,12 +154,14 @@ TS_MSE(actual DOUBLE[], predicted DOUBLE[]) → DOUBLE
 **Range**: [0, ∞)
 
 **Interpretation**:
+
 - Average squared difference
 - Penalizes large errors more than small ones
 - Units are squared
 - **Use when**: Large errors are particularly costly
 
 **Example**:
+
 ```sql
 SELECT TS_MSE([100, 102, 105], [101, 101, 104]) AS mse;
 -- Result: 0.67
@@ -174,6 +180,7 @@ TS_RMSE(actual DOUBLE[], predicted DOUBLE[]) → DOUBLE
 **Range**: [0, ∞)
 
 **Interpretation**:
+
 - Square root of MSE
 - Same units as original data
 - Penalizes outliers (but less than MSE)
@@ -181,6 +188,7 @@ TS_RMSE(actual DOUBLE[], predicted DOUBLE[]) → DOUBLE
 - **Use when**: You want to penalize large errors in original units
 
 **Example**:
+
 ```sql
 SELECT TS_RMSE([100, 102, 105], [101, 101, 104]) AS rmse;
 -- Result: 0.82
@@ -199,6 +207,7 @@ TS_MAPE(actual DOUBLE[], predicted DOUBLE[]) → DOUBLE
 **Range**: [0, ∞) (expressed as percentage)
 
 **Interpretation**:
+
 - Percentage error
 - Scale-independent (good for comparing different datasets)
 - < 10% is good, < 5% is excellent
@@ -206,6 +215,7 @@ TS_MAPE(actual DOUBLE[], predicted DOUBLE[]) → DOUBLE
 - **Use when**: Percentage errors are meaningful, all values > 0
 
 **Example**:
+
 ```sql
 SELECT TS_MAPE([100, 102, 105], [101, 101, 104]) AS mape_percent;
 -- Result: 0.65 (0.65% error)
@@ -224,12 +234,14 @@ TS_SMAPE(actual DOUBLE[], predicted DOUBLE[]) → DOUBLE
 **Range**: [0, 200]
 
 **Interpretation**:
+
 - Symmetric version of MAPE
 - Treats over-forecasting and under-forecasting equally
 - < 20% is good, < 10% is excellent
 - **Use when**: Symmetry important, can handle zeros better than MAPE
 
 **Example**:
+
 ```sql
 SELECT TS_SMAPE([100, 102, 105], [101, 101, 104]) AS smape_percent;
 -- Result: 0.65 (0.65% error)
@@ -248,6 +260,7 @@ TS_MASE(actual DOUBLE[], predicted DOUBLE[], baseline DOUBLE[]) → DOUBLE
 **Range**: [0, ∞)
 
 **Interpretation**:
+
 - Error relative to naive baseline forecast
 - < 1.0 means model beats baseline
 - > 1.0 means baseline is better
@@ -255,6 +268,7 @@ TS_MASE(actual DOUBLE[], predicted DOUBLE[], baseline DOUBLE[]) → DOUBLE
 - **Use when**: Comparing against baseline, zeros allowed in data
 
 **Example**:
+
 ```sql
 -- Compare Theta against Naive baseline
 SELECT TS_MASE(
@@ -278,6 +292,7 @@ TS_R2(actual DOUBLE[], predicted DOUBLE[]) → DOUBLE
 **Range**: (-∞, 1.0]
 
 **Interpretation**:
+
 - Proportion of variance explained by the model
 - 1.0 = perfect fit
 - 0.0 = as good as mean baseline
@@ -286,6 +301,7 @@ TS_R2(actual DOUBLE[], predicted DOUBLE[]) → DOUBLE
 - **Use when**: Want to quantify explained variance
 
 **Example**:
+
 ```sql
 SELECT TS_R2([100, 102, 105, 103, 107], [101, 101, 104, 104, 106]) AS r_squared;
 -- Result: 0.88 → Model explains 88% of variance
@@ -304,6 +320,7 @@ TS_BIAS(actual DOUBLE[], predicted DOUBLE[]) → DOUBLE
 **Range**: (-∞, ∞)
 
 **Interpretation**:
+
 - Average signed error (systematic over/under-forecasting)
 - **Positive bias** = systematic over-forecasting
 - **Negative bias** = systematic under-forecasting
@@ -312,6 +329,7 @@ TS_BIAS(actual DOUBLE[], predicted DOUBLE[]) → DOUBLE
 - **Use when**: Detecting systematic forecast bias
 
 **Example**:
+
 ```sql
 -- Over-forecasting
 SELECT TS_BIAS([100, 102, 105], [103, 105, 108]) AS bias;
@@ -327,6 +345,7 @@ SELECT TS_BIAS([100, 102, 105], [101, 101, 106]) AS bias;
 ```
 
 **Important Notes**:
+
 - Bias can be zero even with large errors if they cancel out
 - Always use with MAE/RMSE to get full picture
 - Positive bias ≠ good forecasts, just systematic tendency
@@ -480,45 +499,52 @@ FROM today_actual, yesterday_forecast;
 
 ## Metric Selection Guide
 
-### Choose MAE when:
+### Choose MAE when
+
 - ✅ You want errors in original units
 - ✅ Outliers shouldn't dominate
 - ✅ Simple interpretation needed
 - 🎯 Target: Domain-specific (e.g., <5 for sales forecast)
 
-### Choose RMSE when:
+### Choose RMSE when
+
 - ✅ Large errors are particularly costly
 - ✅ You want to penalize outliers more
 - ✅ Standard deviation-like metric preferred
 - 🎯 Target: Domain-specific, typically ≥ MAE
 
-### Choose MAPE when:
+### Choose MAPE when
+
 - ✅ Scale-independent comparison needed
 - ✅ All actual values are positive
 - ✅ Percentage errors are meaningful
 - ⚠️ Avoid when zeros in data
 - 🎯 Target: <10% good, <5% excellent
 
-### Choose SMAPE when:
+### Choose SMAPE when
+
 - ✅ Symmetric errors important
 - ✅ MAPE is too asymmetric
 - ✅ Some zeros might be present
 - 🎯 Target: <20% good, <10% excellent
 
-### Choose MASE when:
+### Choose MASE when
+
 - ✅ Comparing against naive baseline
 - ✅ Scale-independent metric needed
 - ✅ Zeros allowed in data
 - ✅ Want interpretable improvement over baseline
 - 🎯 Target: <1.0 = beats baseline
 
-### Choose R² when:
+### Choose R² when
+
 - ✅ Variance explained is meaningful
 - ✅ Comparing models on same dataset
 - ✅ Regression-style interpretation preferred
 - 🎯 Target: >0.7 good, >0.9 excellent
 
-### Choose BIAS when:
+### Choose BIAS when
+
 - ✅ Detecting systematic over/under-forecasting
 - ✅ Checking for forecast calibration
 - ✅ Identifying model tendencies
@@ -711,6 +737,7 @@ TS_RMAE(actual DOUBLE[], predicted1 DOUBLE[], predicted2 DOUBLE[]) → DOUBLE
 **Range**: [0, ∞)
 
 **Interpretation**:
+
 - Compares two forecasting methods
 - RMAE < 1: predicted1 is better than predicted2
 - RMAE > 1: predicted2 is better than predicted1
@@ -718,6 +745,7 @@ TS_RMAE(actual DOUBLE[], predicted1 DOUBLE[], predicted2 DOUBLE[]) → DOUBLE
 - **Use when**: Comparing two forecasting methods directly
 
 **Example**:
+
 ```sql
 -- Compare AutoETS vs Naive forecast
 SELECT 
@@ -748,6 +776,7 @@ TS_QUANTILE_LOSS(actual DOUBLE[], predicted DOUBLE[], q DOUBLE) → DOUBLE
 **Range**: [0, ∞)
 
 **Interpretation**:
+
 - Evaluates quantile forecasts (prediction intervals)
 - q = 0.5 gives median (equal weight to over/under-prediction)
 - q = 0.1 gives 10th percentile (penalizes over-prediction more)
@@ -756,6 +785,7 @@ TS_QUANTILE_LOSS(actual DOUBLE[], predicted DOUBLE[], q DOUBLE) → DOUBLE
 - **Use when**: Evaluating prediction intervals or quantile forecasts
 
 **Example**:
+
 ```sql
 -- Evaluate 10th, 50th (median), and 90th percentile forecasts
 SELECT 
@@ -782,6 +812,7 @@ TS_MQLOSS(actual DOUBLE[], predicted_quantiles DOUBLE[][], quantiles DOUBLE[]) �
 **Range**: [0, ∞)
 
 **Interpretation**:
+
 - Evaluates full predictive distribution
 - Approximates Continuous Ranked Probability Score (CRPS)
 - Measures accuracy of probabilistic forecasts
@@ -789,6 +820,7 @@ TS_MQLOSS(actual DOUBLE[], predicted_quantiles DOUBLE[][], quantiles DOUBLE[]) �
 - **Use when**: Evaluating full forecast distributions (not just point forecasts)
 
 **Example**:
+
 ```sql
 -- Evaluate a 5-quantile forecast distribution
 WITH distributions AS (
@@ -812,6 +844,7 @@ FROM distributions;
 ```
 
 **Use Case - CRPS Approximation**:
+
 ```sql
 -- Use many quantiles for better CRPS approximation
 WITH dense_quantiles AS (
@@ -876,4 +909,3 @@ SELECT TS_MASE([1, 2], [1, 2]);
 - [41_model_parameters.md](41_model_parameters.md) - Model parameters guide
 - [51_usage_guide.md](51_usage_guide.md) - Advanced usage patterns  
 - [00_README.md](../00_README.md) - General documentation
-

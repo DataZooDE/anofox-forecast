@@ -1,6 +1,7 @@
 # Demand Forecasting for Retail & Inventory - Business Guide
 
 > **📝 Note**: This guide presents simplified workflows to demonstrate forecasting concepts. Real-world demand forecasting is significantly more complex and requires:
+>
 > - Domain expertise in retail/inventory management
 > - Careful validation and testing
 > - Business rules integration (promotions, seasonality, external factors)
@@ -12,6 +13,7 @@
 ## Business Problem
 
 **Challenge**: Optimize inventory levels to:
+
 - Minimize stockouts (lost sales)
 - Minimize excess inventory (holding costs)
 - Improve cash flow
@@ -24,6 +26,7 @@
 ### ROI Example
 
 **Before Forecasting**:
+
 - Stockout rate: 15%
 - Excess inventory: 25%
 - Lost sales: $500K/year
@@ -31,6 +34,7 @@
 - **Total cost**: $700K/year
 
 **After Forecasting (85% accuracy)**:
+
 - Stockout rate: 5%
 - Excess inventory: 10%
 - Lost sales: $150K/year
@@ -648,17 +652,20 @@ COPY forecast_for_bi TO 'forecast_export.csv' (HEADER, DELIMITER ',');
 Track these KPIs to measure forecasting success:
 
 ### Inventory Metrics
+
 - **Stockout Rate**: Target < 5%
 - **Inventory Turnover**: Higher is better
 - **Days of Supply**: 30-45 days optimal
 - **Fill Rate**: Target > 95%
 
 ### Forecast Metrics
+
 - **MAPE**: Target < 20%
 - **Coverage**: Target 90-95% (matching CI level)
 - **Bias**: Target near 0 (no systematic over/under forecast)
 
 ### Financial Metrics
+
 - **Holding Cost Reduction**: Target 30-40%
 - **Stockout Cost Reduction**: Target 50-70%
 - **Cash Flow Improvement**: Track working capital
@@ -667,6 +674,7 @@ Track these KPIs to measure forecasting success:
 ## Summary
 
 **Key Takeaways**:
+
 - ✅ Demand forecasting directly impacts profitability
 - ✅ Combine forecasts with inventory rules for optimal stock
 - ✅ Monitor accuracy continuously
@@ -675,6 +683,7 @@ Track these KPIs to measure forecasting success:
 - ✅ Adjust for promotions and seasonality
 
 **Next Steps**:
+
 1. Implement basic forecasting pipeline
 2. Set up monitoring dashboards
 3. Integrate with procurement systems
@@ -683,9 +692,9 @@ Track these KPIs to measure forecasting success:
 ---
 
 **Related Guides**:
+
 - [Sales Prediction](71_sales_prediction.md) - Revenue forecasting
 - [Capacity Planning](72_capacity_planning.md) - Resource optimization
 - [Anomaly Detection](33_anomaly_detection.md) - Outlier identification
 
-**Need help?** Contact support@anofox.com for business consulting.
-
+**Need help?** Contact <support@anofox.com> for business consulting.

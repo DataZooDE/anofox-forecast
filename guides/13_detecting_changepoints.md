@@ -16,6 +16,7 @@ The `anofox-forecast` extension provides powerful changepoint detection capabili
 Detects changepoints in a single time series.
 
 **Signature:**
+
 ```sql
 TS_DETECT_CHANGEPOINTS(
     table_name: STRING,
@@ -26,6 +27,7 @@ TS_DETECT_CHANGEPOINTS(
 ```
 
 **Parameters:**
+
 - `table_name`: Name or subquery of the table containing data
 - `date_col`: Column name for timestamps
 - `value_col`: Column name for values
@@ -39,12 +41,14 @@ TS_DETECT_CHANGEPOINTS(
 
 **Returns:**
 Table with original data plus:
+
 - `is_changepoint`: Boolean marking detected changepoints
 - `changepoint_probability`: DOUBLE (0-1) confidence score
   - 0.0 when `include_probabilities=false` (default)
   - Actual Bayesian probability when `include_probabilities=true`
 
 **Example:**
+
 ```sql
 -- Detect with default parameters
 SELECT *
@@ -68,6 +72,7 @@ ORDER BY changepoint_probability DESC;
 Detects changepoints for multiple time series using GROUP BY.
 
 **Signature:**
+
 ```sql
 TS_DETECT_CHANGEPOINTS_BY(
     table_name: STRING,
@@ -79,6 +84,7 @@ TS_DETECT_CHANGEPOINTS_BY(
 ```
 
 **Parameters:**
+
 - `table_name`: Name or subquery of the table containing data
 - `group_col`: Column name for grouping (e.g., product_id, region)
 - `date_col`: Column name for timestamps
@@ -89,6 +95,7 @@ TS_DETECT_CHANGEPOINTS_BY(
 Table with original data grouped by `group_col` plus `is_changepoint` column.
 
 **Example:**
+
 ```sql
 -- Detect changepoints for each product
 SELECT 
@@ -149,6 +156,7 @@ Controls whether to compute Bayesian changepoint probabilities.
 | true | Compute actual probabilities | When you need confidence scores for filtering/ranking |
 
 **Examples:**
+
 ```sql
 -- Highly sensitive: detect even small changes
 {'hazard_lambda': 50.0}
@@ -320,20 +328,23 @@ The changepoint marks the **beginning of the new regime**, not the exact transit
 
 ## Tuning Guidelines
 
-### Choose hazard_lambda Based On:
+### Choose hazard_lambda Based On
 
 **1. Data Frequency**
+
 - Hourly data: 24-100 (1-4 days)
 - Daily data: 30-250 (1-8 months)  
 - Weekly data: 52-250 (1-5 years)
 - Monthly data: 12-60 (1-5 years)
 
 **2. Expected Change Frequency**
+
 - Frequent changes (e.g., A/B tests): 50-100
 - Occasional changes (e.g., promotions): 200-300
 - Rare changes (e.g., rebranding): 500-1000
 
 **3. Noise Level**
+
 - High noise: Use higher values (500+)
 - Low noise: Can use lower values (50-100)
 
@@ -422,6 +433,7 @@ GROUP BY segment_id;
 ## Examples
 
 See `examples/changepoint_detection.sql` for comprehensive examples including:
+
 - Single series detection
 - Parameter tuning (hazard_lambda)
 - Multiple series with GROUP BY
@@ -438,4 +450,3 @@ See `examples/changepoint_detection.sql` for comprehensive examples including:
 | **No UNNEST** | ✅ Table macro | ❌ Manual | ❌ Manual |
 | **GROUP BY** | ✅ Parallel | ❌ Loop | ❌ Loop |
 | **DuckDB Integration** | ✅ Native | ❌ Export/import | ❌ Export/import |
-

@@ -140,11 +140,11 @@ static void TSDetectChangepointsUpdate(Vector inputs[], AggregateInputData &aggr
 			if (params_vec.GetType().id() == LogicalTypeId::MAP) {
 				UnifiedVectorFormat params_format;
 				params_vec.ToUnifiedFormat(count, params_format);
-				
+
 				if (params_format.validity.RowIsValid(0)) {
 					auto params_data = UnifiedVectorFormat::GetData<string_t>(params_format);
 					auto params_idx = params_format.sel->get_index(0);
-					
+
 					// Get the map value
 					auto params_value = params_vec.GetValue(params_idx);
 					if (!params_value.IsNull() && params_value.type().id() == LogicalTypeId::MAP) {
@@ -209,7 +209,7 @@ static void TSDetectChangepointsUpdate(Vector inputs[], AggregateInputData &aggr
 void RegisterChangepointFunction(ExtensionLoader &loader) {
 	using STATE = TSDetectChangepointsState;
 	using OP = TSDetectChangepointsOperation;
-	
+
 	// Return type: always include all 4 columns for consistent schema
 	child_list_t<LogicalType> struct_children;
 	struct_children.push_back({"timestamp", LogicalType::TIMESTAMP});
@@ -217,32 +217,31 @@ void RegisterChangepointFunction(ExtensionLoader &loader) {
 	struct_children.push_back({"is_changepoint", LogicalType::BOOLEAN});
 	struct_children.push_back({"changepoint_probability", LogicalType::DOUBLE});
 	auto return_type = LogicalType::LIST(LogicalType::STRUCT(struct_children));
-	
+
 	// Create function set for overloads
 	AggregateFunctionSet ts_detect_changepoints_agg_set("ts_detect_changepoints_agg");
-	
+
 	// 2-argument version (without params) - default behavior
 	AggregateFunction agg_2arg(
-	    {LogicalType::TIMESTAMP, LogicalType::DOUBLE},
-	    return_type, AggregateFunction::StateSize<STATE>,
+	    {LogicalType::TIMESTAMP, LogicalType::DOUBLE}, return_type, AggregateFunction::StateSize<STATE>,
 	    AggregateFunction::StateInitialize<STATE, OP, AggregateDestructorType::LEGACY>, TSDetectChangepointsUpdate,
 	    AggregateFunction::StateCombine<STATE, OP>, AggregateFunction::StateVoidFinalize<STATE, OP>,
-	    nullptr,                    // simple_update
-	    nullptr,                    // bind function
+	    nullptr, // simple_update
+	    nullptr, // bind function
 	    AggregateFunction::StateDestroy<STATE, OP>);
 	ts_detect_changepoints_agg_set.AddFunction(agg_2arg);
-	
+
 	// 3-argument version (with params)
-	AggregateFunction agg_3arg(
-	    {LogicalType::TIMESTAMP, LogicalType::DOUBLE, LogicalType::ANY},
-	    return_type, AggregateFunction::StateSize<STATE>,
-	    AggregateFunction::StateInitialize<STATE, OP, AggregateDestructorType::LEGACY>, TSDetectChangepointsUpdate,
-	    AggregateFunction::StateCombine<STATE, OP>, AggregateFunction::StateVoidFinalize<STATE, OP>,
-	    nullptr,                    // simple_update
-	    nullptr,                    // bind function
-	    AggregateFunction::StateDestroy<STATE, OP>);
+	AggregateFunction agg_3arg({LogicalType::TIMESTAMP, LogicalType::DOUBLE, LogicalType::ANY}, return_type,
+	                           AggregateFunction::StateSize<STATE>,
+	                           AggregateFunction::StateInitialize<STATE, OP, AggregateDestructorType::LEGACY>,
+	                           TSDetectChangepointsUpdate, AggregateFunction::StateCombine<STATE, OP>,
+	                           AggregateFunction::StateVoidFinalize<STATE, OP>,
+	                           nullptr, // simple_update
+	                           nullptr, // bind function
+	                           AggregateFunction::StateDestroy<STATE, OP>);
 	ts_detect_changepoints_agg_set.AddFunction(agg_3arg);
-	
+
 	loader.RegisterFunction(ts_detect_changepoints_agg_set);
 }
 

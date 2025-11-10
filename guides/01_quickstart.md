@@ -52,6 +52,7 @@ SELECT * FROM TS_FORECAST(
 ```
 
 **Output**:
+
 ```
 ┌───────────────┬────────────┬────────────────┬────────┬────────┐
 │ forecast_step │  date_col  │ point_forecast │ lower  │ upper  │
@@ -107,9 +108,10 @@ WHERE forecast_step <= 3
 ORDER BY product_id, forecast_step;
 ```
 
-## 🎉 You Did It!
+## 🎉 You Did It
 
 You've just:
+
 - ✅ Loaded the extension
 - ✅ Created sample data
 - ✅ Generated a forecast
@@ -118,11 +120,13 @@ You've just:
 ## Next Steps
 
 ### Learn More
+
 - [Basic Forecasting Guide](30_basic_forecasting.md) - Detailed walkthrough
 - [Model Selection Guide](40_model_selection.md) - Choose the best model
 - [EDA & Data Prep](11_exploratory_analysis.md) - Clean your data first
 
 ### Try Different Models
+
 ```sql
 -- Compare models
 SELECT * FROM TS_FORECAST('my_sales', date, sales, 'SeasonalNaive', 14, {'seasonal_period': 7});
@@ -131,6 +135,7 @@ SELECT * FROM TS_FORECAST('my_sales', date, sales, 'ARIMA', 14, {'p': 1, 'd': 0,
 ```
 
 ### Evaluate Accuracy
+
 ```sql
 -- If you have actual future values
 SELECT 
@@ -140,6 +145,7 @@ FROM results;
 ```
 
 ### Check Data Quality
+
 ```sql
 -- Analyze your data before forecasting
 SELECT * FROM TS_STATS('my_sales', product_id, date, sales);
@@ -164,18 +170,21 @@ SELECT * FROM TS_QUALITY_REPORT('stats', 30);
 ## 🆘 Troubleshooting
 
 **Error: "SeasonalNaive model requires 'seasonal_period' parameter"**
+
 ```sql
 -- Add seasonal_period to params
 {'seasonal_period': 7}  -- for weekly data
 ```
 
 **Error: "Series too short"**
+
 ```sql
 -- Need more data or reduce min_length
 TS_DROP_SHORT('table', group_col, date, 14)  -- Keep series with ≥14 obs
 ```
 
 **Poor forecast accuracy?**
+
 ```sql
 -- 1. Check data quality
 SELECT * FROM TS_STATS('my_sales', product_id, date, sales);
@@ -192,4 +201,3 @@ SELECT * FROM TS_DETECT_SEASONALITY_ALL('my_sales', product_id, date, sales);
 **Ready for more?** → [Basic Forecasting Guide](30_basic_forecasting.md)
 
 **Need help?** → Check [guides/](.) for comprehensive documentation!
-

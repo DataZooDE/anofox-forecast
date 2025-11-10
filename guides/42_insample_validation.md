@@ -15,6 +15,7 @@ The forecasting API now returns **in-sample fitted values** and **confidence lev
 **When populated**: Set `return_insample: true` in parameters
 
 **Use cases**:
+
 - Residual analysis
 - Model diagnostics
 - Goodness-of-fit assessment
@@ -22,6 +23,7 @@ The forecasting API now returns **in-sample fitted values** and **confidence lev
 - Detect overfitting
 
 **Example**:
+
 ```sql
 SELECT 
     LEN(insample_fitted) AS num_fitted_values,
@@ -39,11 +41,13 @@ FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28,
 **Range**: 0.0 to 1.0 (exclusive)
 
 **Use cases**:
+
 - Document interval interpretation
 - Verify expected coverage
 - Metadata for downstream analysis
 
 **Example**:
+
 ```sql
 SELECT 
     confidence_level,
@@ -66,6 +70,7 @@ FROM TS_FORECAST('sales', date, amount, 'ETS', 28,
 **Performance**: Minimal overhead (~1-2%) when enabled.
 
 **Example**:
+
 ```sql
 {'return_insample': true}
 ```
@@ -79,12 +84,14 @@ FROM TS_FORECAST('sales', date, amount, 'ETS', 28,
 **Valid range**: `0.0 < level < 1.0`
 
 **Common values**:
+
 - `0.80` - 80% CI (narrow, frequent misses)
 - `0.90` - 90% CI (default, balanced)
 - `0.95` - 95% CI (wide, standard)
 - `0.99` - 99% CI (very wide, conservative)
 
 **Example**:
+
 ```sql
 {'confidence_level': 0.95}
 ```
@@ -324,6 +331,7 @@ Models that return fitted values when `return_insample: true`:
 ### ⚠️ Limited Support
 
 Some models may return empty fitted values:
+
 - SimpleMovingAverage (only provides fitted after warmup)
 - Ensemble models (composite fittin)
 - Some intermittent demand models
@@ -361,6 +369,7 @@ FROM TS_FORECAST('sales', date, amount, 'ModelName', 7,
 ## Best Practices
 
 ### 1. Model Validation
+
 ```sql
 -- Always check fitted values quality before deploying
 WITH fc AS (
@@ -374,6 +383,7 @@ WHERE TS_R2(...) > 0.7;  -- Ensure good fit
 ```
 
 ### 2. Confidence Level Selection
+
 ```sql
 -- For production: balance precision vs recall
 -- Use 90% for balanced risk
@@ -383,6 +393,7 @@ WHERE TS_R2(...) > 0.7;  -- Ensure good fit
 ```
 
 ### 3. Residual Monitoring
+
 ```sql
 -- Set up alerts for large residuals
 CREATE VIEW forecast_alerts AS
@@ -396,6 +407,7 @@ WHERE ABS(residual) > 3 * STDDEV(residual) OVER ();
 ## API Summary
 
 ### Single Series
+
 ```sql
 TS_FORECAST(table, date_col, value_col, method, horizon, params)
 
@@ -408,6 +420,7 @@ TS_FORECAST(table, date_col, value_col, method, horizon, params)
 ```
 
 ### Multiple Series
+
 ```sql
 TS_FORECAST_BY(table, group_col, date_col, value_col, method, horizon, params)
 
@@ -415,6 +428,7 @@ TS_FORECAST_BY(table, group_col, date_col, value_col, method, horizon, params)
 ```
 
 ### Output Schema
+
 ```
 forecast_step: INT
 date_col: TIMESTAMP
@@ -440,4 +454,3 @@ confidence_level: DOUBLE         ← NEW
 **Status**: ✅ Production-ready
 
 Both features are fully tested and integrated across all forecast functions!
-

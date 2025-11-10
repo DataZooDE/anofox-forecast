@@ -7,6 +7,7 @@ This guide covers the fundamentals of time series forecasting using anofox-forec
 ## What is Time Series Forecasting?
 
 Time series forecasting predicts future values based on historical patterns. Common patterns include:
+
 - **Trend**: Long-term increase or decrease
 - **Seasonality**: Regular repeating patterns (weekly, monthly, yearly)
 - **Cycles**: Non-regular fluctuations
@@ -148,11 +149,13 @@ GROUP BY product_id;
 **Point Forecast**: Best estimate (mean/median of distribution)
 
 **Confidence Intervals**:
+
 - 90% CI: 90% chance actual value falls within [lower, upper]
 - Wider intervals = more uncertainty
 - Intervals grow with forecast horizon
 
 **Example**:
+
 ```
 forecast_step=1: [95, 105] (width=10)
 forecast_step=7: [85, 115] (width=30) ← More uncertain
@@ -222,6 +225,7 @@ ORDER BY model, forecast_step;
 ### Model-Specific Parameters
 
 #### ETS Models
+
 ```sql
 {
     'seasonal_period': 7,
@@ -232,6 +236,7 @@ ORDER BY model, forecast_step;
 ```
 
 #### ARIMA Models
+
 ```sql
 {
     'p': 1,              -- AR order
@@ -242,6 +247,7 @@ ORDER BY model, forecast_step;
 ```
 
 #### Theta Models
+
 ```sql
 {
     'seasonal_period': 7,
@@ -378,6 +384,7 @@ GROUP BY product_id;
 ## Summary
 
 **You've learned**:
+
 - ✅ Complete forecasting workflow
 - ✅ Data preparation steps
 - ✅ Model selection basics
@@ -390,4 +397,3 @@ GROUP BY product_id;
 ---
 
 **Questions?** Check the [API Reference](90_api_reference.md) or [FAQ](50_faq.md)!
-

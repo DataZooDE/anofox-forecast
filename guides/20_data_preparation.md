@@ -5,6 +5,7 @@
 Comprehensive SQL-based tools for time series EDA (Exploratory Data Analysis) and data preparation using DuckDB's powerful analytical capabilities.
 
 **Key Features**:
+
 - ✅ Zero Python dependencies - Pure SQL
 - ✅ Leverages DuckDB's analytical functions
 - ✅ Parallel processing out-of-the-box
@@ -47,6 +48,7 @@ SELECT * FROM TS_PREPARE_STANDARD(
 Computes comprehensive statistics for each time series.
 
 **Returns**:
+
 - `series_id` - Series identifier
 - `length` - Number of observations
 - `expected_length` - Expected observations (based on date range)
@@ -63,6 +65,7 @@ Computes comprehensive statistics for each time series.
 - `values`, `dates` - Raw data arrays
 
 **Example**:
+
 ```sql
 CREATE TABLE stats AS
 SELECT * FROM TS_STATS('sales', product_id, date, sales_amount);
@@ -78,6 +81,7 @@ FROM stats;
 ### 1.2 Data Quality Checks
 
 **Individual Checks**:
+
 - `TS_CHECK_GAPS(stats_table)` - Gap analysis
 - `TS_CHECK_MISSING(stats_table)` - NULL/NaN values
 - `TS_CHECK_CONSTANT(stats_table)` - Constant series
@@ -85,6 +89,7 @@ FROM stats;
 - `TS_CHECK_ALIGNMENT(stats_table)` - End date alignment
 
 **Comprehensive Report**:
+
 ```sql
 -- All checks in one report
 SELECT * FROM TS_QUALITY_REPORT('stats', 30);
@@ -102,6 +107,7 @@ SELECT * FROM TS_QUALITY_REPORT('stats', 30);
 ### 1.3 Pattern Detection
 
 **Leading/Trailing Zeros**:
+
 ```sql
 SELECT * FROM TS_ANALYZE_ZEROS('sales', product_id, date, sales_amount);
 
@@ -112,6 +118,7 @@ SELECT * FROM TS_ANALYZE_ZEROS('sales', product_id, date, sales_amount);
 ```
 
 **Plateau Detection** (consecutive identical values):
+
 ```sql
 SELECT * FROM TS_DETECT_PLATEAUS('sales', product_id, date, sales_amount);
 
@@ -163,6 +170,7 @@ SELECT * FROM TS_GET_PROBLEMATIC('stats', 0.5);  -- quality_score < 0.5
 ### 2.1 Fill Time Gaps
 
 **Fill missing dates in time series**:
+
 ```sql
 CREATE TABLE sales_filled AS
 SELECT * FROM TS_FILL_GAPS('sales', product_id, date, sales_amount);
@@ -175,6 +183,7 @@ SELECT * FROM TS_FILL_GAPS('sales', product_id, date, sales_amount);
 ### 2.2 Fill Forward to Date
 
 **Extend all series to a common end date**:
+
 ```sql
 CREATE TABLE sales_extended AS
 SELECT * FROM TS_FILL_FORWARD(
@@ -186,18 +195,21 @@ SELECT * FROM TS_FILL_FORWARD(
 ### 2.3 Drop Series by Criteria
 
 **Drop constant series**:
+
 ```sql
 CREATE TABLE sales_variable AS
 SELECT * FROM TS_DROP_CONSTANT('sales', product_id, sales_amount);
 ```
 
 **Drop short series**:
+
 ```sql
 CREATE TABLE sales_long_enough AS
 SELECT * FROM TS_DROP_SHORT('sales', product_id, date, 30);  -- min 30 obs
 ```
 
 **Drop series with excessive gaps**:
+
 ```sql
 CREATE TABLE sales_complete AS
 SELECT * FROM TS_DROP_GAPPY('sales', product_id, date, 0.10);  -- max 10% gaps
@@ -206,18 +218,21 @@ SELECT * FROM TS_DROP_GAPPY('sales', product_id, date, 0.10);  -- max 10% gaps
 ### 2.4 Remove Edge Zeros
 
 **Drop leading zeros**:
+
 ```sql
 CREATE TABLE sales_no_leading AS
 SELECT * FROM TS_DROP_LEADING_ZEROS('sales', product_id, date, sales_amount);
 ```
 
 **Drop trailing zeros**:
+
 ```sql
 CREATE TABLE sales_no_trailing AS
 SELECT * FROM TS_DROP_TRAILING_ZEROS('sales', product_id, date, sales_amount);
 ```
 
 **Drop both**:
+
 ```sql
 CREATE TABLE sales_no_edge_zeros AS
 SELECT * FROM TS_DROP_EDGE_ZEROS('sales', product_id, date, sales_amount);
@@ -226,26 +241,31 @@ SELECT * FROM TS_DROP_EDGE_ZEROS('sales', product_id, date, sales_amount);
 ### 2.5 Fill Missing Values
 
 **Constant fill**:
+
 ```sql
 SELECT * FROM TS_FILL_NULLS_CONST('sales', product_id, date, sales_amount, 0.0);
 ```
 
 **Forward fill** (last observation carried forward):
+
 ```sql
 SELECT * FROM TS_FILL_NULLS_FORWARD('sales', product_id, date, sales_amount);
 ```
 
 **Backward fill** (next observation carried backward):
+
 ```sql
 SELECT * FROM TS_FILL_NULLS_BACKWARD('sales', product_id, date, sales_amount);
 ```
 
 **Linear interpolation**:
+
 ```sql
 SELECT * FROM TS_FILL_NULLS_INTERPOLATE('sales', product_id, date, sales_amount);
 ```
 
 **Fill with series mean**:
+
 ```sql
 SELECT * FROM TS_FILL_NULLS_MEAN('sales', product_id, date, sales_amount);
 ```
@@ -255,12 +275,14 @@ SELECT * FROM TS_FILL_NULLS_MEAN('sales', product_id, date, sales_amount);
 > **⚠️ Warning**: Automated outlier deletion is dangerous and should be used with extreme caution!
 >
 > **Why this is risky**:
+>
 > - "Outliers" may be legitimate extreme values (Black Friday sales, emergency demand)
 > - May indicate important business events that should be preserved
 > - Can destroy valuable signal in the data
 > - Statistical methods don't understand business context
 >
 > **Best Practices**:
+>
 > 1. **Investigate first**: Understand why values are extreme
 > 2. **Domain expertise**: Consult business stakeholders before removing data
 > 3. **Manual review**: Flag outliers for human review rather than auto-delete
@@ -270,12 +292,14 @@ SELECT * FROM TS_FILL_NULLS_MEAN('sales', product_id, date, sales_amount);
 > The examples below are for educational purposes. In production, always validate outlier treatment with domain experts.
 
 **Cap outliers using IQR method** (safer than deletion):
+
 ```sql
 SELECT * FROM TS_CAP_OUTLIERS_IQR('sales', product_id, date, sales_amount, 1.5);
 -- Caps values beyond Q1-1.5*IQR and Q3+1.5*IQR
 ```
 
 **Remove outliers using Z-score** (use with extreme caution):
+
 ```sql
 SELECT * FROM TS_REMOVE_OUTLIERS_ZSCORE('sales', product_id, date, sales_amount, 3.0);
 -- Removes observations with |z-score| > 3.0
@@ -284,27 +308,32 @@ SELECT * FROM TS_REMOVE_OUTLIERS_ZSCORE('sales', product_id, date, sales_amount,
 ### 2.7 Transformations
 
 **Log transformation**:
+
 ```sql
 SELECT * FROM TS_TRANSFORM_LOG('sales', product_id, date, sales_amount);
 ```
 
 **Box-Cox transformation**:
+
 ```sql
 SELECT * FROM TS_TRANSFORM_BOXCOX('sales', product_id, date, sales_amount, 0.5);
 ```
 
 **Differencing**:
+
 ```sql
 SELECT * FROM TS_DIFF('sales', product_id, date, sales_amount, 1);  -- 1st difference
 ```
 
 **Min-Max normalization** (per series):
+
 ```sql
 SELECT * FROM TS_NORMALIZE_MINMAX('sales', product_id, date, sales_amount);
 -- Scales to [0, 1]
 ```
 
 **Standardization** (Z-score, per series):
+
 ```sql
 SELECT * FROM TS_STANDARDIZE('sales', product_id, date, sales_amount);
 -- mean=0, std=1
@@ -313,6 +342,7 @@ SELECT * FROM TS_STANDARDIZE('sales', product_id, date, sales_amount);
 ### 2.8 Standard Pipeline
 
 **All-in-one preparation**:
+
 ```sql
 CREATE TABLE sales_prepared AS
 SELECT * FROM TS_PREPARE_STANDARD(
@@ -451,18 +481,21 @@ LIMIT 10;
 ## Performance Tips
 
 ### 1. Use CTEs for Multi-Step Pipelines
+
 ```sql
 WITH step1 AS (...), step2 AS (...), step3 AS (...)
 SELECT * FROM step3;
 ```
 
 ### 2. Materialize Intermediate Results
+
 ```sql
 CREATE TABLE sales_step1 AS SELECT * FROM TS_FILL_GAPS(...);
 CREATE TABLE sales_step2 AS SELECT * FROM TS_DROP_CONSTANT('sales_step1', ...);
 ```
 
 ### 3. Filter Early
+
 ```sql
 -- Filter before heavy operations
 WITH filtered AS (
@@ -472,6 +505,7 @@ SELECT * FROM TS_STATS('filtered', ...);
 ```
 
 ### 4. Use Parallel Processing
+
 ```sql
 -- DuckDB automatically parallelizes GROUP BY operations
 -- Larger batches = better parallelization
@@ -553,4 +587,3 @@ All macros are tested and ready for use with DuckDB 1.4.1+
 - **Forecasting**: `00_README.md`, `docs/42_insample_validation.md`
 - **Metrics**: `docs/50_evaluation_metrics.md`
 - **Examples**: `examples/eda_data_prep_demo.sql`
-

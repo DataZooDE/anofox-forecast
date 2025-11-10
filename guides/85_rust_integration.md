@@ -5,6 +5,7 @@
 Use anofox-forecast from Rust through the DuckDB Rust client. Combines Rust's safety guarantees with DuckDB's analytical power.
 
 **Key Advantages**:
+
 - ✅ Memory safety + zero-cost abstractions
 - ✅ Type-safe query results
 - ✅ Fearless concurrency
@@ -745,6 +746,7 @@ impl StatementCache {
 ## Summary
 
 **Why Use from Rust?**
+
 - ✅ Maximum safety (no segfaults, no data races)
 - ✅ Zero-cost abstractions
 - ✅ Excellent error handling (Result type)
@@ -752,17 +754,20 @@ impl StatementCache {
 - ✅ Great async support (Tokio)
 
 **Typical Rust Workflow**:
+
 ```
 Load data → Query → Type-safe results → Process → Output
 ```
 
 **Performance**:
+
 - Lowest latency (comparable to C++)
 - Memory safe (no undefined behavior)
 - Thread safe (fearless concurrency)
 - Production-grade reliability
 
 **Use Cases**:
+
 - High-performance web services (Actix, Axum)
 - CLI tools (Clap)
 - Embedded forecasting in Rust applications
@@ -774,4 +779,3 @@ Load data → Query → Type-safe results → Process → Output
 **Next**: [Python Usage Guide](81_python_integration.md) | [C++ Usage Guide](84_cpp_integration.md)
 
 **Rust + DuckDB**: Safe, fast, and production-ready forecasting! 🦀
-

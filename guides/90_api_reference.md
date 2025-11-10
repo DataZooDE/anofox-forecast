@@ -15,6 +15,7 @@ Comprehensive reference for all functions, macros, and parameters in anofox-fore
 Generate forecasts for a single time series.
 
 **Signature**:
+
 ```sql
 TS_FORECAST(
     table_name: VARCHAR,
@@ -27,6 +28,7 @@ TS_FORECAST(
 ```
 
 **Output Columns**:
+
 - `forecast_step: INT` - Step ahead (1, 2, 3, ...)
 - `date_col: TIMESTAMP` - Forecast timestamp
 - `point_forecast: DOUBLE` - Point prediction
@@ -37,6 +39,7 @@ TS_FORECAST(
 - `confidence_level: DOUBLE` - Confidence level used
 
 **Example**:
+
 ```sql
 SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
                           {'seasonal_period': 7, 'confidence_level': 0.95});
@@ -47,6 +50,7 @@ SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28,
 Generate forecasts for multiple time series with GROUP BY.
 
 **Signature**:
+
 ```sql
 TS_FORECAST_BY(
     table_name: VARCHAR,
@@ -60,9 +64,11 @@ TS_FORECAST_BY(
 ```
 
 **Output Columns**: Same as TS_FORECAST, plus:
+
 - `group_col: ANY` - Grouping column value
 
 **Example**:
+
 ```sql
 SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28, 
                              {'seasonal_period': 7});
@@ -167,6 +173,7 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28,
 ### Model-Specific Parameters
 
 #### ETS Parameters
+
 ```sql
 {
     'seasonal_period': 7,
@@ -181,6 +188,7 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28,
 ```
 
 #### ARIMA Parameters
+
 ```sql
 {
     'p': INT,                  -- AR order (0-5 typical)
@@ -195,6 +203,7 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28,
 ```
 
 #### Multiple Seasonality Parameters
+
 ```sql
 {
     'seasonal_periods': [7, 30, 365],  -- Array of periods
@@ -236,6 +245,7 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28,
 | **TS_COVERAGE** | Interval calibration |
 
 **Example Usage**:
+
 ```sql
 SELECT 
     TS_MAE(LIST(actual), LIST(forecast)) AS mae,
@@ -255,11 +265,13 @@ FROM results;
 Generate comprehensive per-series statistics.
 
 **Signature**:
+
 ```sql
 TS_STATS(table_name, group_col, date_col, value_col) → TABLE
 ```
 
 **Output** (23 features):
+
 - Basic: length, start_date, end_date, mean, std, min, max, median
 - Quality: n_null, n_nan, n_zeros, n_gaps, n_unique_values, is_constant
 - Advanced: trend_corr, cv, intermittency, quality_score
@@ -270,11 +282,13 @@ TS_STATS(table_name, group_col, date_col, value_col) → TABLE
 Comprehensive data quality checks.
 
 **Signature**:
+
 ```sql
 TS_QUALITY_REPORT(stats_table, min_length) → TABLE
 ```
 
 **Checks**:
+
 - Gap analysis
 - Missing values
 - Constant series
@@ -286,6 +300,7 @@ TS_QUALITY_REPORT(stats_table, min_length) → TABLE
 Overall dataset statistics.
 
 **Signature**:
+
 ```sql
 TS_DATASET_SUMMARY(stats_table) → TABLE
 ```
@@ -295,6 +310,7 @@ TS_DATASET_SUMMARY(stats_table) → TABLE
 Identify low-quality series.
 
 **Signature**:
+
 ```sql
 TS_GET_PROBLEMATIC(stats_table, quality_threshold) → TABLE
 ```
@@ -304,11 +320,13 @@ TS_GET_PROBLEMATIC(stats_table, quality_threshold) → TABLE
 Detect seasonality for all series.
 
 **Signature**:
+
 ```sql
 TS_DETECT_SEASONALITY_ALL(table_name, group_col, date_col, value_col) → TABLE
 ```
 
 **Output**:
+
 - `series_id`
 - `detected_periods: INT[]` - All detected periods
 - `primary_period: INT` - Main seasonal period
@@ -321,11 +339,13 @@ TS_DETECT_SEASONALITY_ALL(table_name, group_col, date_col, value_col) → TABLE
 ### Gap Filling
 
 **TS_FILL_GAPS**: Fill missing time points
+
 ```sql
 TS_FILL_GAPS(table_name, group_col, date_col, value_col) → TABLE
 ```
 
 **TS_FILL_FORWARD**: Extend series to target date
+
 ```sql
 TS_FILL_FORWARD(table_name, group_col, date_col, value_col, target_date) → TABLE
 ```
@@ -333,16 +353,19 @@ TS_FILL_FORWARD(table_name, group_col, date_col, value_col, target_date) → TAB
 ### Series Filtering
 
 **TS_DROP_CONSTANT**: Remove constant series
+
 ```sql
 TS_DROP_CONSTANT(table_name, group_col, value_col) → TABLE
 ```
 
 **TS_DROP_SHORT**: Remove short series
+
 ```sql
 TS_DROP_SHORT(table_name, group_col, date_col, min_length) → TABLE
 ```
 
 **TS_DROP_GAPPY**: Remove series with excessive gaps
+
 ```sql
 TS_DROP_GAPPY(table_name, group_col, date_col, max_gap_pct) → TABLE
 ```
@@ -350,16 +373,19 @@ TS_DROP_GAPPY(table_name, group_col, date_col, max_gap_pct) → TABLE
 ### Edge Cleaning
 
 **TS_DROP_LEADING_ZEROS**: Remove leading zeros
+
 ```sql
 TS_DROP_LEADING_ZEROS(table_name, group_col, date_col, value_col) → TABLE
 ```
 
 **TS_DROP_TRAILING_ZEROS**: Remove trailing zeros
+
 ```sql
 TS_DROP_TRAILING_ZEROS(table_name, group_col, date_col, value_col) → TABLE
 ```
 
 **TS_DROP_EDGE_ZEROS**: Remove both leading and trailing zeros
+
 ```sql
 TS_DROP_EDGE_ZEROS(table_name, group_col, date_col, value_col) → TABLE
 ```
@@ -367,21 +393,25 @@ TS_DROP_EDGE_ZEROS(table_name, group_col, date_col, value_col) → TABLE
 ### Missing Value Imputation
 
 **TS_FILL_NULLS_CONST**: Fill with constant
+
 ```sql
 TS_FILL_NULLS_CONST(table_name, group_col, date_col, value_col, fill_value) → TABLE
 ```
 
 **TS_FILL_NULLS_FORWARD**: Forward fill (LOCF)
+
 ```sql
 TS_FILL_NULLS_FORWARD(table_name, group_col, date_col, value_col) → TABLE
 ```
 
 **TS_FILL_NULLS_BACKWARD**: Backward fill
+
 ```sql
 TS_FILL_NULLS_BACKWARD(table_name, group_col, date_col, value_col) → TABLE
 ```
 
 **TS_FILL_NULLS_MEAN**: Fill with series mean
+
 ```sql
 TS_FILL_NULLS_MEAN(table_name, group_col, date_col, value_col) → TABLE
 ```
@@ -395,11 +425,13 @@ TS_FILL_NULLS_MEAN(table_name, group_col, date_col, value_col) → TABLE
 Detect seasonal periods in a single series.
 
 **Signature**:
+
 ```sql
 TS_DETECT_SEASONALITY(values: DOUBLE[]) → INT[]
 ```
 
 **Example**:
+
 ```sql
 SELECT TS_DETECT_SEASONALITY(LIST(sales ORDER BY date)) AS periods
 FROM sales_data;
@@ -411,6 +443,7 @@ FROM sales_data;
 Detailed seasonality analysis with decomposition.
 
 **Signature**:
+
 ```sql
 TS_ANALYZE_SEASONALITY(
     timestamps: TIMESTAMP[],
@@ -429,6 +462,7 @@ TS_ANALYZE_SEASONALITY(
 Detect regime changes in a single series.
 
 **Signature**:
+
 ```sql
 TS_DETECT_CHANGEPOINTS(
     table_name: VARCHAR,
@@ -439,6 +473,7 @@ TS_DETECT_CHANGEPOINTS(
 ```
 
 **Parameters**:
+
 ```sql
 {
     'hazard_lambda': DOUBLE,         -- Detection sensitivity (default: 250)
@@ -447,6 +482,7 @@ TS_DETECT_CHANGEPOINTS(
 ```
 
 **Output**:
+
 - `date_col: TIMESTAMP`
 - `value_col: DOUBLE`
 - `is_changepoint: BOOLEAN`
@@ -457,6 +493,7 @@ TS_DETECT_CHANGEPOINTS(
 Changepoint detection with GROUP BY.
 
 **Signature**:
+
 ```sql
 TS_DETECT_CHANGEPOINTS_BY(
     table_name: VARCHAR,
@@ -476,6 +513,7 @@ TS_DETECT_CHANGEPOINTS_BY(
 Aggregate function for custom GROUP BY.
 
 **Signature**:
+
 ```sql
 TS_FORECAST_AGG(
     date_col: TIMESTAMP,
@@ -487,6 +525,7 @@ TS_FORECAST_AGG(
 ```
 
 **Usage** (for 2+ group columns):
+
 ```sql
 WITH fc AS (
     SELECT 
@@ -509,6 +548,7 @@ FROM fc;
 Aggregate function for custom changepoint detection.
 
 **Signature**:
+
 ```sql
 TS_DETECT_CHANGEPOINTS_AGG(
     date_col: TIMESTAMP,
@@ -615,24 +655,28 @@ STRUCT {
 ### Common Errors
 
 **"Model requires 'seasonal_period' parameter"**
+
 ```sql
 -- Solution: Add seasonal_period
 {'seasonal_period': 7}
 ```
 
 **"Series too short for seasonal model"**
+
 ```sql
 -- Need at least 2 * seasonal_period observations
 -- Solution: Use non-seasonal model or get more data
 ```
 
 **"Constant series detected"**
+
 ```sql
 -- Solution: Drop constant series
 SELECT * FROM TS_DROP_CONSTANT('sales', product_id, amount);
 ```
 
 **"confidence_level must be between 0 and 1"**
+
 ```sql
 -- Solution: Use valid range
 {'confidence_level': 0.95}  -- ✅
@@ -646,6 +690,7 @@ SELECT * FROM TS_DROP_CONSTANT('sales', product_id, amount);
 ### Optimization Tips
 
 1. **Use GROUP BY efficiently**:
+
 ```sql
 -- Good: Single TS_FORECAST_BY call
 SELECT * FROM TS_FORECAST_BY('sales', product_id, ...);
@@ -654,6 +699,7 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, ...);
 ```
 
 2. **Materialize intermediate results**:
+
 ```sql
 -- For complex pipelines
 CREATE TABLE sales_prep AS SELECT * FROM TS_FILL_GAPS(...);
@@ -661,12 +707,14 @@ CREATE TABLE forecasts AS SELECT * FROM TS_FORECAST_BY('sales_prep', ...);
 ```
 
 3. **Disable features you don't need**:
+
 ```sql
 -- Don't request fitted values unless needed
 {'return_insample': false}  -- Faster
 ```
 
 4. **Use appropriate models**:
+
 ```sql
 -- AutoETS: Slower but accurate
 -- SeasonalNaive: Fast for simple patterns
@@ -685,6 +733,7 @@ CREATE TABLE forecasts AS SELECT * FROM TS_FORECAST_BY('sales_prep', ...);
 ## Summary
 
 **Total API**:
+
 - 31 forecasting models
 - 12 evaluation metrics
 - 5 EDA macros
@@ -698,7 +747,7 @@ CREATE TABLE forecasts AS SELECT * FROM TS_FORECAST_BY('sales_prep', ...);
 ---
 
 **Quick Links**:
+
 - [Basic Forecasting](30_basic_forecasting.md) - Get started
 - [Model Selection](40_model_selection.md) - Choose the right model
 - [Parameters Guide](12_parameters.md) - Detailed parameter reference
-

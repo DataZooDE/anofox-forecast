@@ -154,7 +154,8 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 		}
 		int trend_method = GetParam<int>(model_params, "trend_method", 0);       // 0=Linear
 		int seasonal_method = GetParam<int>(model_params, "seasonal_method", 0); // 0=Cyclic
-		int deseasonalized_method = GetParam<int>(model_params, "deseasonalized_method", 0); // 0=ExponentialSmoothing (default, fast)
+		int deseasonalized_method =
+		    GetParam<int>(model_params, "deseasonalized_method", 0); // 0=ExponentialSmoothing (default, fast)
 		// std::cerr << "[DEBUG] Creating MSTL model" << std::endl;
 		model = AnofoxTimeWrapper::CreateMSTL(seasonal_periods, trend_method, seasonal_method, deseasonalized_method);
 	} else if (model_name == "AutoMSTL") {
@@ -571,7 +572,8 @@ void ModelFactory::ValidateModelParams(const std::string &model_name, const Valu
 		// seasonal_periods is optional
 	}
 	// Theta variants
-	else if (model_name == "OptimizedTheta" || model_name == "DynamicTheta" || model_name == "DynamicOptimizedTheta" || model_name == "AutoTheta") {
+	else if (model_name == "OptimizedTheta" || model_name == "DynamicTheta" || model_name == "DynamicOptimizedTheta" ||
+	         model_name == "AutoTheta") {
 		// seasonal_period is optional
 	}
 	// Seasonal exponential smoothing

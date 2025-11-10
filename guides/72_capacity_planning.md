@@ -1,6 +1,7 @@
 # Capacity Planning & Resource Optimization - Business Guide
 
 > **📝 Note**: This guide presents simplified workflows to demonstrate forecasting concepts. Real-world capacity planning is significantly more complex and requires:
+>
 > - Detailed understanding of operational constraints and costs
 > - Integration with workforce management and scheduling systems
 > - Consideration of service level agreements and quality metrics
@@ -14,6 +15,7 @@
 **Challenge**: Allocate resources efficiently to meet demand without over-provisioning.
 
 **Areas**:
+
 - Workforce planning
 - Equipment/machinery utilization
 - Server capacity (IT)
@@ -659,6 +661,7 @@ FROM capacity_costs;
 ## Summary
 
 **Capacity Planning Workflow**:
+
 1. ✅ Forecast demand using appropriate model
 2. ✅ Calculate resource requirements from demand
 3. ✅ Use confidence intervals for buffer sizing
@@ -667,18 +670,21 @@ FROM capacity_costs;
 6. ✅ Adjust capacity dynamically
 
 **Key Formulas**:
+
 - **Staff needed** = CEIL(Demand × Processing_time / (Hours_per_shift × Occupancy_target))
 - **Safety buffer** = Upper_CI - Expected
 - **Utilization target** = 75-85% (allows flexibility)
 - **Safety stock** = Z_score × √Lead_time × Demand_std
 
 **Business Impact**:
+
 - 20-30% reduction in capacity costs
 - 40-60% reduction in stockouts/service failures
 - 15-25% improvement in resource utilization
 - Better workforce planning and morale
 
 **Next**:
+
 - [Demand Forecasting](70_demand_forecasting.md) - Inventory optimization
 - [Sales Prediction](71_sales_prediction.md) - Revenue forecasting
 - [Performance Guide](60_performance_optimization.md) - Technical optimization
@@ -686,4 +692,3 @@ FROM capacity_costs;
 ---
 
 **Pro Tip**: Always plan for 95th percentile demand, not average! This ensures you can handle peak loads while minimizing over-provisioning.
-

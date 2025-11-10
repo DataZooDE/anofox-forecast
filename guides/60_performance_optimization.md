@@ -32,6 +32,7 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28, {
 ```
 
 **Scalability**:
+
 - 4 cores: ~4x speedup
 - 8 cores: ~7x speedup
 - 16 cores: ~12x speedup
@@ -44,6 +45,7 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28, {
 **Scenario**: Need to forecast 10,000 products daily
 
 **Option A: Fast models** (Recommended for scale)
+
 ```sql
 -- SeasonalNaive: ~8 seconds for 10K series
 SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount,
@@ -51,6 +53,7 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount,
 ```
 
 **Option B: Accurate models** (Slower)
+
 ```sql
 -- AutoETS: ~15 minutes for 10K series
 SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount,
@@ -58,6 +61,7 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount,
 ```
 
 **Option C: Hybrid approach** (Best of both)
+
 ```sql
 -- Use fast model for most products, accurate for top products
 WITH abc_class AS (
@@ -114,12 +118,14 @@ SELECT * FROM TS_FORECAST(..., 7, ...);
 ### 3. Materialize Intermediate Results
 
 **Slow** (re-computes stats every time):
+
 ```sql
 -- Every query re-analyzes data
 SELECT * FROM TS_STATS('sales', product_id, date, amount);
 ```
 
 **Fast** (compute once, reuse):
+
 ```sql
 -- Compute once
 CREATE TABLE sales_stats AS
@@ -134,6 +140,7 @@ SELECT * FROM TS_QUALITY_REPORT('sales_stats', 30);
 ### 4. Filter Early
 
 **Slow** (processes all data then filters):
+
 ```sql
 WITH forecasts AS (
     SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28, {...})
@@ -142,6 +149,7 @@ SELECT * FROM forecasts WHERE product_id IN ('P001', 'P002', 'P003');
 ```
 
 **Fast** (filters before forecasting):
+
 ```sql
 CREATE TEMP TABLE filtered_sales AS
 SELECT * FROM sales WHERE product_id IN ('P001', 'P002', 'P003');
@@ -218,6 +226,7 @@ GROUP BY product_id;
 ### Use CTEs Effectively
 
 **Good** (DuckDB optimizes CTEs):
+
 ```sql
 WITH prepared AS (
     SELECT * FROM TS_FILL_GAPS('sales', product_id, date, amount)
@@ -232,6 +241,7 @@ SELECT * FROM forecasts;
 ```
 
 **Also Good** (Materialize for reuse):
+
 ```sql
 CREATE TABLE sales_prepared AS
 SELECT * FROM TS_FILL_GAPS('sales', product_id, date, amount);
@@ -243,6 +253,7 @@ SELECT * FROM TS_FORECAST_BY('sales_prepared', product_id, date, amount, 'AutoET
 ### Avoid Subqueries in GROUP BY
 
 **Slow**:
+
 ```sql
 SELECT * FROM TS_FORECAST_BY(
     (SELECT * FROM sales WHERE category = 'Electronics'),
@@ -251,6 +262,7 @@ SELECT * FROM TS_FORECAST_BY(
 ```
 
 **Fast**:
+
 ```sql
 CREATE TEMP TABLE electronics AS
 SELECT * FROM sales WHERE category = 'Electronics';
@@ -283,11 +295,13 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28, {
 ## Hardware Recommendations
 
 ### Minimum Requirements
+
 - **CPU**: 4 cores
 - **RAM**: 8 GB
 - **Storage**: SSD recommended
 
 ### Recommended for Production
+
 - **CPU**: 16+ cores (better parallelization)
 - **RAM**: 32+ GB (handle larger datasets)
 - **Storage**: NVMe SSD (faster I/O)
@@ -350,12 +364,14 @@ SELECT * FROM TS_FORECAST_BY(...);
 ### 3. Optimize the Bottleneck
 
 **Typical bottlenecks**:
+
 1. Data loading (I/O)
 2. Data preparation (gaps, nulls)
 3. Model fitting (AutoETS, AutoARIMA)
 4. Result materialization
 
 **Solutions**:
+
 - Use SSD for I/O
 - Materialize preparation results
 - Use faster models for non-critical series
@@ -439,6 +455,7 @@ ORDER BY product_id, date;  -- Sorted for better compression
 ### 4. Columnar Storage Benefits
 
 DuckDB's columnar storage means:
+
 - Reading only needed columns is very fast
 - Compression reduces I/O
 - Vectorized operations (SIMD)
@@ -573,6 +590,7 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount,
 ```
 
 **Strategy**:
+
 - Run on weekend (off-peak)
 - Use all available cores
 - Store results for the week
@@ -620,6 +638,7 @@ ORDER BY run_date;
 ### Diagnostic Checklist
 
 1. **Check data size**:
+
 ```sql
 SELECT 
     COUNT(DISTINCT product_id) AS num_series,
@@ -629,12 +648,14 @@ FROM sales;
 ```
 
 2. **Check model**:
+
 ```sql
 -- Is AutoARIMA or AutoTBATS slowing you down?
 -- Try AutoETS or Theta instead
 ```
 
 3. **Check preparation overhead**:
+
 ```sql
 -- Time each step
 .timer on
@@ -645,12 +666,14 @@ CREATE TABLE step2 AS SELECT * FROM TS_DROP_CONSTANT('step1', ...);
 ```
 
 4. **Check parallelization**:
+
 ```sql
 -- Verify cores being used
 SELECT * FROM duckdb_settings() WHERE name = 'threads';
 ```
 
 5. **Check memory**:
+
 ```sql
 -- Is it swapping?
 SELECT * FROM duckdb_memory();
@@ -672,6 +695,7 @@ SELECT * FROM duckdb_memory();
 ## Summary
 
 **Key Takeaways**:
+
 - ✅ DuckDB parallelizes GROUP BY automatically (use it!)
 - ✅ Model selection has biggest impact on speed
 - ✅ Materialize intermediate results for reuse
@@ -680,6 +704,7 @@ SELECT * FROM duckdb_memory();
 - ✅ Monitor performance over time
 
 **Performance Hierarchy** (fastest to slowest):
+
 1. SeasonalNaive, Naive
 2. Theta, OptimizedTheta
 3. AutoETS, ETS
@@ -688,6 +713,7 @@ SELECT * FROM duckdb_memory();
 6. AutoTBATS, TBATS
 
 **Scalability Sweet Spots**:
+
 - **< 1K series**: Any model, single machine
 - **1K-10K series**: AutoETS, single machine (16+ cores)
 - **10K-100K series**: Hybrid (fast + accurate), single powerful machine
@@ -698,4 +724,3 @@ SELECT * FROM duckdb_memory();
 **Next**: [EDA & Data Prep](11_exploratory_analysis.md) - Optimize data preparation performance
 
 **Related**: [API Reference](90_api_reference.md) - Complete function documentation
-

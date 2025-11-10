@@ -223,7 +223,7 @@ AnofoxTimeWrapper::CreateAutoMFLES(const std::vector<int> &seasonal_periods, int
 
 std::unique_ptr<::anofoxtime::models::IForecaster>
 AnofoxTimeWrapper::CreateMSTL(const std::vector<int> &seasonal_periods, int trend_method, int seasonal_method,
-                               int deseasonalized_method) {
+                              int deseasonalized_method) {
 	// std::cerr << "[DEBUG] AnofoxTimeWrapper::CreateMSTL" << std::endl;
 
 	// Map integer to enum
@@ -359,12 +359,10 @@ std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateDyna
 	return std::make_unique<::anofoxtime::models::DynamicOptimizedTheta>(seasonal_period);
 }
 
-std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateAutoTheta(
-	int seasonal_period,
-	const std::string& decomposition_type,
-	const std::optional<std::string>& specific_model,
-	int nmse) {
-	
+std::unique_ptr<::anofoxtime::models::IForecaster>
+AnofoxTimeWrapper::CreateAutoTheta(int seasonal_period, const std::string &decomposition_type,
+                                   const std::optional<std::string> &specific_model, int nmse) {
+
 	// Convert decomposition type string to enum
 	::anofoxtime::models::AutoTheta::DecompositionType decomp_type;
 	if (decomposition_type == "additive") {
@@ -374,10 +372,8 @@ std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateAuto
 	} else {
 		decomp_type = ::anofoxtime::models::AutoTheta::DecompositionType::Auto;
 	}
-	
-	return std::make_unique<::anofoxtime::models::AutoTheta>(
-		seasonal_period, decomp_type, specific_model, nmse
-	);
+
+	return std::make_unique<::anofoxtime::models::AutoTheta>(seasonal_period, decomp_type, specific_model, nmse);
 }
 
 // Seasonal exponential smoothing

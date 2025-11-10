@@ -5,6 +5,7 @@
 Use the anofox-forecast extension from R through DuckDB's R package. Perfect for R users who want production-grade forecasting without complex package dependencies.
 
 **Key Advantages**:
+
 - ✅ No need for forecast, fable, prophet packages
 - ✅ Faster than data.table for large datasets
 - ✅ Easy integration with tidyverse
@@ -662,6 +663,7 @@ function(product_id) {
 ## Summary
 
 **Why Use from R?**
+
 - ✅ Faster than traditional R packages for multiple series
 - ✅ Less memory usage (DuckDB's columnar storage)
 - ✅ Easy integration with tidyverse
@@ -669,11 +671,13 @@ function(product_id) {
 - ✅ Production-ready (battle-tested SQL)
 
 **Typical R Workflow**:
+
 ```r
 data.frame → duckdb_register() → SQL forecast → data.frame → ggplot2
 ```
 
 **When to Use**:
+
 - Forecasting 100+ series in parallel
 - Need data preparation (gaps, nulls, outliers)
 - Want faster performance than forecast/fable
@@ -685,4 +689,3 @@ data.frame → duckdb_register() → SQL forecast → data.frame → ggplot2
 **Next**: [Julia Usage Guide](83_julia_integration.md) | [C++ Usage Guide](84_cpp_integration.md)
 
 **R + DuckDB**: The best of both worlds - R's statistical ecosystem + DuckDB's performance! 📊
-

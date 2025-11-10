@@ -5,6 +5,7 @@
 The anofox-forecast extension works seamlessly with Python through DuckDB's Python API. Write your forecasting logic in SQL, execute from Python!
 
 **Key Advantages**:
+
 - ✅ No Python forecasting libraries needed (no statsforecast, prophet, etc.)
 - ✅ Faster than pandas/polars for large datasets
 - ✅ SQL queries portable across languages
@@ -775,6 +776,7 @@ con.sql("SELECT * FROM TS_FORECAST(...) LIMIT 10").show()
 ## Summary
 
 **Why Use from Python?**
+
 - ✅ Faster than pandas/statsforecast for data prep (3-4x)
 - ✅ No need for multiple forecasting libraries
 - ✅ Portable SQL queries
@@ -782,6 +784,7 @@ con.sql("SELECT * FROM TS_FORECAST(...) LIMIT 10").show()
 - ✅ Works with pandas, polars, arrow seamlessly
 
 **Typical Python Workflow**:
+
 ```
 Load data (pandas) 
   → Register with DuckDB
@@ -797,4 +800,3 @@ Load data (pandas)
 **Next**: [R Usage Guide](82_r_integration.md) | [Julia Usage Guide](83_julia_integration.md)
 
 **Examples**: See `examples/` directory for more SQL examples that work from Python!
-

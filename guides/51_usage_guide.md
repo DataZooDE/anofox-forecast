@@ -9,6 +9,7 @@ The `anofox_forecast` extension provides time series forecasting capabilities fo
 ### Building the Extension
 
 1. **Build anofox-time library** (optional - it's included in the extension build):
+
 ```bash
 cd anofox-time
 mkdir -p build && cd build
@@ -18,6 +19,7 @@ cd ../..
 ```
 
 2. **Build the DuckDB extension**:
+
 ```bash
 make debug
 # or for release build:
@@ -31,6 +33,7 @@ LOAD 'build/debug/extension/anofox_forecast/anofox_forecast.duckdb_extension';
 ```
 
 Or in release mode:
+
 ```sql
 LOAD 'build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension';
 ```
@@ -67,23 +70,28 @@ FORECAST(
 ### Supported Models (Phase 1)
 
 #### 1. Naive
+
 **Description**: Random walk model - all forecasts equal the last observed value.
 
 **Parameters**: None
 
 **Example**:
+
 ```sql
 SELECT * FROM FORECAST('timestamp', 'sales', 'Naive', 12, NULL)
 ORDER BY forecast_step;
 ```
 
 #### 2. SMA (Simple Moving Average)
+
 **Description**: Forecasts based on the average of the last N observations.
 
 **Parameters**:
+
 - `window`: Number of observations to average (default: 5)
 
 **Example**:
+
 ```sql
 -- Using default window (5)
 SELECT * FROM FORECAST('date', 'revenue', 'SMA', 7, NULL);
@@ -92,12 +100,15 @@ SELECT * FROM FORECAST('date', 'revenue', 'SMA', 7, NULL);
 ```
 
 #### 3. SeasonalNaive
+
 **Description**: Forecasts equal to the last observed value from the same season.
 
 **Parameters**:
+
 - `seasonal_period`: Length of the seasonal cycle (required)
 
 **Example**:
+
 ```sql
 -- Note: STRUCT parameters will be supported in a future update
 -- For now, use the default seasonal_period detection
@@ -201,6 +212,7 @@ GROUP BY model_name;
 ### Extension Not Loading
 
 If you get "Extension not found", ensure:
+
 1. The extension was built successfully (`make debug` or `make release`)
 2. You're using the correct path to the `.duckdb_extension` file
 3. The file has execute permissions
@@ -208,11 +220,13 @@ If you get "Extension not found", ensure:
 ### Debug Output
 
 The extension includes comprehensive debug logging. To see debug output:
+
 ```bash
 ./build/debug/test/unittest "your_test.test" 2>&1
 ```
 
 Debug messages show:
+
 - Extension loading
 - Function registration
 - Parameter validation
@@ -222,6 +236,7 @@ Debug messages show:
 ## Support
 
 For issues or questions:
+
 - Check the debug output for detailed error messages
 - Verify your data types (TIMESTAMP and DOUBLE)
 - Ensure time series has sufficient data points for the model

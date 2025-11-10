@@ -36,6 +36,7 @@ SELECT * FROM sales_stats LIMIT 5;
 ```
 
 **Output includes**:
+
 - 23 statistical features per series
 - Quality score (0-1, higher is better)
 - Gaps, nulls, zeros, patterns
@@ -49,6 +50,7 @@ SELECT * FROM TS_DATASET_SUMMARY('sales_stats');
 ```
 
 **Example Output**:
+
 ```
 total_series: 1,000
 total_observations: 365,000
@@ -66,6 +68,7 @@ SELECT * FROM TS_QUALITY_REPORT('sales_stats', 30);
 ```
 
 **Example Output**:
+
 ```
 Gap Analysis:
   - 850 series with no gaps (85%)
@@ -91,6 +94,7 @@ SELECT * FROM TS_GET_PROBLEMATIC('sales_stats', 0.7);
 ```
 
 **Common Issues**:
+
 - Many gaps → primary_issue = '⚠️ Many gaps'
 - Null values → primary_issue = '⚠️ Missing values'
 - Constant → primary_issue = '⚠️ Constant'
@@ -208,6 +212,7 @@ FROM prepared_stats;
 ```
 
 **Expected Improvements**:
+
 - Quality score: 0.65 → 0.92
 - Series with nulls: 45 → 0
 - Series with gaps: 150 → 0
@@ -621,6 +626,7 @@ quality_score = 1.0 - (
 ```
 
 **Interpretation**:
+
 - 1.0 = Perfect data
 - 0.8-1.0 = High quality
 - 0.5-0.8 = Moderate quality
@@ -721,6 +727,7 @@ SELECT * FROM TS_FORECAST_BY('sales_autoprepared', product_id, date, sales_amoun
 ## Summary
 
 **Data Preparation Workflow**:
+
 1. ✅ **Explore**: Use TS_STATS(), TS_QUALITY_REPORT()
 2. ✅ **Identify**: Find gaps, nulls, outliers, patterns
 3. ✅ **Clean**: Fill gaps, handle nulls, remove bad series
@@ -729,12 +736,14 @@ SELECT * FROM TS_FORECAST_BY('sales_autoprepared', product_id, date, sales_amoun
 6. ✅ **Forecast**: Generate predictions on clean data
 
 **Expected Outcome**:
+
 - 30-50% improvement in forecast accuracy
 - Fewer model failures
 - More reliable confidence intervals
 - Better business decisions
 
 **Next Steps**:
+
 - [Demand Forecasting Use Case](70_demand_forecasting.md)
 - [Model Selection Guide](40_model_selection.md)
 - [Statistical Guide](31_understanding_forecasts.md)
@@ -742,4 +751,3 @@ SELECT * FROM TS_FORECAST_BY('sales_autoprepared', product_id, date, sales_amoun
 ---
 
 **Pro Tip**: Save your preparation pipeline as a VIEW for reusability!
-

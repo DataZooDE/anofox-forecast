@@ -16,17 +16,21 @@ These functions use autocorrelation-based periodogram analysis to automatically 
 Detects up to 3 seasonal periods from a time series.
 
 **Signature:**
+
 ```sql
 TS_DETECT_SEASONALITY(values: DOUBLE[]) -> INT[]
 ```
 
 **Parameters:**
+
 - `values`: Array of time series values
 
 **Returns:**
+
 - Array of detected seasonal periods (up to 3), sorted by period length
 
 **Example:**
+
 ```sql
 WITH aggregated AS (
     SELECT LIST(sales ORDER BY date) AS values
@@ -43,6 +47,7 @@ FROM aggregated;
 Performs comprehensive seasonality analysis including strength metrics.
 
 **Signature:**
+
 ```sql
 TS_ANALYZE_SEASONALITY(
     timestamps: TIMESTAMP[], 
@@ -56,17 +61,20 @@ TS_ANALYZE_SEASONALITY(
 ```
 
 **Parameters:**
+
 - `timestamps`: Array of timestamps
 - `values`: Array of corresponding values
 
 **Returns:**
 A struct with:
+
 - `detected_periods`: Up to 3 detected seasonal periods
 - `primary_period`: The strongest (primary) seasonal period
 - `seasonal_strength`: Strength of seasonality (0-1, higher = stronger)
 - `trend_strength`: Strength of trend (0-1, higher = stronger)
 
 **Example:**
+
 ```sql
 WITH aggregated AS (
     SELECT 
@@ -116,8 +124,9 @@ For detailed analysis (`TS_ANALYZE_SEASONALITY`):
    - **Trend Strength**: `1 - Var(Remainder) / Var(Trend + Remainder)`
 
 Both metrics range from 0 to 1:
+
 - **0.0-0.3**: Weak (seasonality/trend barely present)
-- **0.3-0.6**: Moderate 
+- **0.3-0.6**: Moderate
 - **0.6-0.8**: Strong
 - **0.8-1.0**: Very strong (dominant pattern)
 
@@ -212,11 +221,11 @@ The algorithm uses these internal defaults:
 
 ### Data Requirements
 
-- **Minimum Length**: 
+- **Minimum Length**:
   - `TS_DETECT_SEASONALITY`: At least 8 observations
   - `TS_ANALYZE_SEASONALITY`: At least 2 full seasonal cycles (e.g., 14+ for weekly)
   
-- **Quality**: 
+- **Quality**:
   - Data should be regularly spaced (no large gaps)
   - Non-constant (variance > 0)
   - Ideally, at least 3 complete seasonal cycles for reliable detection
@@ -237,11 +246,13 @@ The algorithm uses these internal defaults:
 ### Empty Result (`[]`)
 
 **Causes:**
+
 - Data too short (< 8 observations)
 - No clear seasonality (autocorrelations too weak)
 - Constant or near-constant data (zero variance)
 
 **Solutions:**
+
 - Collect more data
 - Check if data actually has seasonality (visualize it)
 - Try different granularity (daily vs weekly vs monthly)
@@ -249,11 +260,13 @@ The algorithm uses these internal defaults:
 ### Unexpected Periods
 
 **Causes:**
+
 - Harmonics (detected period is multiple/fraction of true period)
 - Multiple overlapping patterns
 - Irregular spacing in data
 
 **Solutions:**
+
 - Use `TS_ANALYZE_SEASONALITY` to see strength metrics
 - Manually specify period if known
 - Check data quality and completeness
@@ -261,11 +274,13 @@ The algorithm uses these internal defaults:
 ### Low Seasonal Strength
 
 **Causes:**
+
 - Weak seasonality relative to noise
 - Trend dominates the signal
 - Irregular seasonal pattern
 
 **Solutions:**
+
 - Use robust forecasting methods
 - Consider detrending first
 - Use ensemble methods that combine seasonal and non-seasonal models
@@ -281,9 +296,9 @@ The algorithm uses these internal defaults:
 ## Examples
 
 See `examples/seasonality_detection.sql` for comprehensive examples including:
+
 - Simple detection
 - Detailed analysis
 - Multiple series
 - Integration with forecasting
 - Rolling window analysis
-

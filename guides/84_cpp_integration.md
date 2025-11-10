@@ -5,6 +5,7 @@
 Embed DuckDB with anofox-forecast extension in your C++ applications for high-performance, low-latency forecasting.
 
 **Key Advantages**:
+
 - ✅ Zero-overhead embedding
 - ✅ No external process required
 - ✅ Type-safe query results
@@ -776,6 +777,7 @@ int main() {
 ## Summary
 
 **Why Use from C++?**
+
 - ✅ Maximum performance (zero-copy where possible)
 - ✅ Embedding in existing C++ applications
 - ✅ Low-latency forecasting services
@@ -783,11 +785,13 @@ int main() {
 - ✅ Type-safe interface
 
 **Typical C++ Workflow**:
+
 ```
 Load data → Create table → Query SQL → Process results → Output
 ```
 
 **Performance**:
+
 - Lowest latency (embedded, no IPC)
 - Direct memory access
 - Compiled optimizations
@@ -798,6 +802,7 @@ Load data → Create table → Query SQL → Process results → Output
   - Embedded systems
 
 **Use Cases**:
+
 - Microservices (forecast API)
 - Real-time analytics
 - Embedded forecasting in trading systems
@@ -809,4 +814,3 @@ Load data → Create table → Query SQL → Process results → Output
 **Next**: [Rust Usage Guide](85_rust_integration.md) | [Python Usage Guide](81_python_integration.md)
 
 **C++ + DuckDB**: Ultimate performance for production forecasting! ⚡
-
