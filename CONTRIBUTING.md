@@ -91,12 +91,60 @@ See [Documentation Build System](README.md#documentation-build-system) for detai
 - Add comments for complex logic
 - Write clear commit messages
 
+### Forecasting Model Contributions
+
+When adding new forecasting models:
+
+1. **Core Library Integration**:
+   - Implement model in `anofox-time` C++ library
+   - Follow existing model interfaces (fit/predict pattern)
+   - Ensure parameter validation in model constructor
+   - Add unit tests in `anofox-time/tests/`
+
+2. **Extension Integration**:
+   - Register model in `src/model_factory.cpp`
+   - Add parameter parsing in model factory
+   - Ensure model name is case-insensitive
+   - Update model list in documentation
+
+3. **Parameter Specification**:
+   - Document all parameters in `docs/PARAMETERS.md`
+   - Specify types (INTEGER, DOUBLE, BOOLEAN, INTEGER[])
+   - Document ranges and validation rules
+   - Include behavioral notes and use cases
+
+4. **Testing Requirements**:
+   - Basic forecast test in `test/sql/models/`
+   - Parameter validation tests
+   - Edge case tests (minimum data, seasonality requirements)
+   - Output schema validation
+
+5. **Documentation Updates**:
+   - Add to model list in README.md
+   - Add to parameter guide (docs/PARAMETERS.md)
+   - Add to appropriate guide templates in `guides/templates/`
+   - Include usage examples in relevant guides
+
 ### Testing
 
-- Add tests for new features
-- Ensure all existing tests pass
-- Test SQL examples work correctly
-- Verify documentation builds without errors
+#### Test Requirements
+
+- **New forecasting models**: Add tests in `test/sql/` covering:
+  - Basic functionality with default parameters
+  - Parameter validation (ranges, types, required parameters)
+  - Edge cases (minimum data points, seasonality requirements)
+  - Output schema validation
+- **New metrics**: Test with:
+  - Equal-length arrays
+  - Edge cases (zeros, negative values, empty arrays)
+  - GROUP BY with LIST() aggregation
+- **Data preparation macros**: Test with:
+  - All supported date types (INTEGER, DATE, TIMESTAMP)
+  - Empty series, single-point series
+  - Edge cases specific to the macro
+- **Integration tests**: Ensure all tests pass via `make test`
+- **SQL examples**: All examples in guides must be executable and pass `make test-docs`
+- **Documentation**: Verify builds without errors via `make docs`
 
 ## Submitting Changes
 

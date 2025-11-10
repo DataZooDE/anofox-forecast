@@ -4,20 +4,34 @@ This document describes which date column types are supported by each function i
 
 ## Overview
 
-The anofox-forecast extension supports three date column types:
+The anofox-forecast extension supports three date column types with specific behavioral characteristics:
+
 - **INTEGER / BIGINT**: Sequential indices (1, 2, 3, ...)
+  - Use case: Time series without calendar semantics
+  - Arithmetic: Direct integer operations
+  - Timestamp generation: Sequential increments
+  
 - **DATE**: SQL DATE type (2024-01-01, 2024-01-02, ...)
+  - Use case: Daily granularity without time-of-day
+  - Arithmetic: Date interval operations
+  - Timestamp generation: Date arithmetic based on detected interval
+  
 - **TIMESTAMP**: SQL TIMESTAMP type with full date and time information
+  - Use case: Intraday time series (hourly, minute-level)
+  - Arithmetic: Timestamp interval operations  
+  - Timestamp generation: Timestamp arithmetic based on detected interval
 
-### TIMESTAMP Precision Types (SQL Only)
+### TIMESTAMP Precision Types
 
-When creating timestamps directly in SQL, all precision types are supported:
-- **TIMESTAMP** (microsecond precision) - Default, recommended
-- **TIMESTAMP_S** (second precision)
-- **TIMESTAMP_MS** (millisecond precision)
-- **TIMESTAMP_NS** (nanosecond precision)
+SQL-created timestamps support all precision levels:
+- **TIMESTAMP** (microsecond precision) - Default, recommended for most use cases
+- **TIMESTAMP_S** (second precision) - For second-granularity data
+- **TIMESTAMP_MS** (millisecond precision) - For millisecond-granularity data
+- **TIMESTAMP_NS** (nanosecond precision) - SQL-created only
 
-**Important**: While SQL-created `TIMESTAMP_NS` works, pandas datetime64[ns] creates a TIMESTAMP_NS type that is NOT supported. 
+**Critical Distinction**: 
+- ✅ SQL-created `TIMESTAMP_NS` via `'2024-01-01'::TIMESTAMP_NS`: Supported
+- ❌ Pandas-created `datetime64[ns]` via `pd.date_range()`: Not supported via Python API 
 
 ## Forecasting Functions
 

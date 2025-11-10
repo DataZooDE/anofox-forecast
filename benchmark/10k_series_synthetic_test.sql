@@ -185,6 +185,7 @@ SELECT '1. Naive' AS model;
 SELECT *
 FROM TS_FORECAST_BY('timeseries_10k', series_id, date, value, 'Naive', 10, MAP{});
 
+
 SELECT '2. SMA' AS model;
 SELECT *
 FROM TS_FORECAST_BY('timeseries_10k', series_id, date, value, 'SMA', 10, {'window': 7});

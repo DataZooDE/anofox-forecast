@@ -16,3 +16,4 @@ benchmark/src/__pycache__/
 benchmark/src/benchmark.egg-info/
 **/__pycache__/
 **results/
+AGENTS.md

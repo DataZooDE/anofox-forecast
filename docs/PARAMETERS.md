@@ -24,14 +24,19 @@ This document describes all parameters available for each of the 31 forecasting 
 Parameters are passed as MAP literals using DuckDB's `MAP{}` syntax:
 
 ```sql
-TS_FORECAST(date, value, 'ModelName', horizon, MAP{'param1': value1, 'param2': value2})
+TS_FORECAST(table, date, value, 'ModelName', horizon, MAP{'param1': value1, 'param2': value2})
 ```
 
 For models with no parameters or to use defaults, pass an empty MAP:
 
 ```sql
-TS_FORECAST(date, value, 'Naive', horizon, MAP{})
+TS_FORECAST(table, date, value, 'Naive', horizon, MAP{})
 ```
+
+**API Consistency**: The parameter system is identical across all functions:
+- `TS_FORECAST()` for single series
+- `TS_FORECAST_BY()` for multiple series
+- Same MAP syntax, same parameter names, same validation rules
 
 ---
 

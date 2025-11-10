@@ -113,16 +113,25 @@ ORDER BY num_changepoints DESC;
 **Bayesian Online Changepoint Detection** is a probabilistic method that:
 
 1. **Maintains Run Length Distribution**: Tracks probability of how long current segment has lasted
-2. **Computes Predictive Probability**: Uses Normal-Gamma conjugate prior
+2. **Computes Predictive Probability**: Uses Normal-Gamma conjugate prior for likelihood computation
 3. **Detects Changepoints**: When run length distribution drops (new segment starts)
-4. **Online/Streaming**: Processes data sequentially (no look-ahead)
+4. **Online/Streaming**: Processes data sequentially (no look-ahead required)
 
 ### Key Characteristics
 
-- **Probabilistic**: Accounts for uncertainty
-- **Adaptive**: Automatically adjusts to data characteristics
-- **No Pre-specification**: No need to specify number of changepoints
-- **Robust**: Works with non-stationary data
+- **Probabilistic**: Provides uncertainty quantification via Bayesian inference
+- **Adaptive**: Automatically adjusts to data characteristics without parameter tuning
+- **No Pre-specification**: Automatically determines number of changepoints
+- **Robust**: Handles non-stationary data and varying noise levels
+- **Computational Complexity**: O(n) per series with fixed memory overhead
+
+### Behavioral Notes
+
+- **Detection Lag**: Changepoints detected at segment boundary (minimal lag)
+- **False Positives**: Controlled via `hazard_lambda` parameter (higher = fewer false positives)
+- **Probability Computation**: Optional (default: false) for performance optimization
+- **Memory**: Fixed O(1024) per series for run length distribution tracking
+- **Parallelization**: Native DuckDB parallelization on GROUP BY operations
 
 ## Parameters
 

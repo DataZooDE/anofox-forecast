@@ -28,9 +28,20 @@ The extension provides **12 time series forecasting accuracy metrics** as indivi
 
 All metrics work seamlessly with `GROUP BY` operations using DuckDB's `LIST()` aggregate function.
 
-### Pattern
+### API Requirements
 
-**Metrics expect arrays (LIST), not individual values:**
+**All metrics accept DOUBLE[] arrays, not individual values:**
+
+Function signatures follow the pattern:
+```sql
+TS_MAE(actual DOUBLE[], predicted DOUBLE[]) → DOUBLE
+```
+
+This means:
+- **Direct usage**: Pass arrays directly to the function
+- **With GROUP BY**: Use `LIST()` to aggregate rows into arrays
+
+### Usage Pattern
 
 ```sql
 -- ❌ WRONG - This won't work (metrics need arrays)
@@ -38,12 +49,15 @@ SELECT product_id, TS_MAE(actual, predicted)
 FROM results
 GROUP BY product_id;
 
--- ✅ CORRECT - Use LIST() to create arrays
+-- ✅ CORRECT - Use LIST() to create arrays from grouped rows
 SELECT 
     product_id,
     TS_MAE(LIST(actual), LIST(predicted)) AS mae
 FROM results
 GROUP BY product_id;
+
+-- ✅ ALSO CORRECT - Direct array usage (no GROUP BY)
+SELECT TS_MAE([100.0, 102.0, 105.0], [101.0, 101.0, 104.0]) AS mae;
 ```
 
 ### Complete Example

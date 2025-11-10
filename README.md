@@ -4,7 +4,12 @@
 [![DuckDB](https://img.shields.io/badge/DuckDB-1.4.1+-green.svg)](https://duckdb.org)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
 
-Production-ready time series forecasting extension for DuckDB with 31 models, comprehensive data preparation, and advanced analytics—all in pure SQL.
+
+> [!IMPORTANT]
+> This extension is in early development, so bugs and breaking changes are expected.
+> Please use the [issues page](https://github.com/DataZooDE/anofox-statistics/issues) to report bugs or request features.
+
+A time series forecasting extension for DuckDB with 31 models, data preparation, and analytics — all in pure SQL.
 
 ## 🚀 Quick Start
 
@@ -13,9 +18,11 @@ Production-ready time series forecasting extension for DuckDB with 31 models, co
 LOAD 'anofox_forecast.duckdb_extension';
 
 -- Single series forecast
+-- Returns: forecast_step, date_col, point_forecast, lower, upper, model_name
 SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, {'seasonal_period': 7});
 
--- Multiple series with GROUP BY
+-- Multiple series with GROUP BY parallelization
+-- Automatically distributes forecasting across CPU cores
 SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28, 
                              {'seasonal_period': 7, 'confidence_level': 0.95});
 ```
@@ -27,7 +34,6 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28,
 - **Statistical**: ETS, ARIMA, Theta, Holt-Winters, Seasonal Naive
 - **Advanced**: TBATS, MSTL, MFLES (multiple seasonality)
 - **Intermittent Demand**: Croston, ADIDA, IMAPA, TSB
-- **Ensembles**: Combine multiple models
 
 ### 📊 Complete Workflow
 - **EDA**: 5 macros for data quality analysis
@@ -37,7 +43,6 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28,
 - **Changepoint Detection**: Regime identification with probabilities
 
 ### ⚡ Performance
-- **Fast**: 3-4x faster than Python/Polars for data prep
 - **Parallel**: Native DuckDB parallelization on GROUP BY
 - **Scalable**: Handles millions of series
 - **Memory Efficient**: Columnar storage, streaming operations
@@ -280,35 +285,62 @@ let forecast = conn.prepare("SELECT * FROM TS_FORECAST(...)")?.query([])?;
 ### Forecasting Functions
 
 #### TS_FORECAST
-Single time series forecasting.
+Single time series forecasting with automatic parameter validation.
 
 ```sql
 TS_FORECAST(
     table_name: VARCHAR,
-    date_col: DATE/TIMESTAMP,
+    date_col: DATE|TIMESTAMP|INTEGER,
     value_col: DOUBLE,
     method: VARCHAR,
-    horizon: INT,
+    horizon: INTEGER,
     params: MAP
-) → TABLE
+) → TABLE(
+    forecast_step INTEGER,
+    date_col DATE|TIMESTAMP|INTEGER,
+    point_forecast DOUBLE,
+    lower DOUBLE,
+    upper DOUBLE,
+    model_name VARCHAR,
+    insample_fitted DOUBLE[],
+    confidence_level DOUBLE
+)
 ```
 
-**Output**: forecast_step, date_col, point_forecast, lower, upper, model_name, insample_fitted, confidence_level
+**Behavioral Notes**:
+- Timestamp generation based on training data interval (configurable via `generate_timestamps`)
+- Prediction intervals computed at specified confidence level (default 0.90)
+- Optional in-sample fitted values via `return_insample: true`
 
 #### TS_FORECAST_BY
-Multiple time series with GROUP BY.
+Multiple time series forecasting with native DuckDB GROUP BY parallelization.
 
 ```sql
 TS_FORECAST_BY(
     table_name: VARCHAR,
-    group_col: VARCHAR,
-    date_col: DATE/TIMESTAMP,
+    group_col: ANY,
+    date_col: DATE|TIMESTAMP|INTEGER,
     value_col: DOUBLE,
     method: VARCHAR,
-    horizon: INT,
+    horizon: INTEGER,
     params: MAP
-) → TABLE
+) → TABLE(
+    group_col ANY,
+    forecast_step INTEGER,
+    date_col DATE|TIMESTAMP|INTEGER,
+    point_forecast DOUBLE,
+    lower DOUBLE,
+    upper DOUBLE,
+    model_name VARCHAR,
+    insample_fitted DOUBLE[],
+    confidence_level DOUBLE
+)
 ```
+
+**Behavioral Notes**:
+- Automatic parallelization: series distributed across CPU cores
+- Group column type preserved in output
+- Independent parameter validation per series
 
 **Models** (31 total):
 - AutoETS, AutoARIMA, AutoMFLES, AutoMSTL, AutoTBATS
@@ -331,54 +363,90 @@ TS_FORECAST_BY(
 
 ### Evaluation Metrics (12 total)
 
+All metrics accept DOUBLE[] arrays and return DOUBLE. Use with GROUP BY via LIST() aggregation:
+
 ```sql
-TS_MAE(actual, predicted) → DOUBLE              -- Mean Absolute Error
-TS_MSE(actual, predicted) → DOUBLE              -- Mean Squared Error
-TS_RMSE(actual, predicted) → DOUBLE             -- Root Mean Squared Error
-TS_MAPE(actual, predicted) → DOUBLE             -- Mean Absolute Percentage Error
-TS_SMAPE(actual, predicted) → DOUBLE            -- Symmetric MAPE
-TS_MASE(actual, predicted, baseline) → DOUBLE   -- Mean Absolute Scaled Error
-TS_R2(actual, predicted) → DOUBLE               -- R-squared
-TS_BIAS(actual, predicted) → DOUBLE             -- Bias
-TS_RMAE(actual, pred1, pred2) → DOUBLE          -- Relative MAE
-TS_QUANTILE_LOSS(actual, predicted, q) → DOUBLE -- Quantile Loss
-TS_MQLOSS(actual, quantiles, levels) → DOUBLE   -- Mean Quantile Loss
-TS_COVERAGE(actual, lower, upper) → DOUBLE      -- Interval Coverage
+TS_MAE(actual DOUBLE[], predicted DOUBLE[]) → DOUBLE              -- Mean Absolute Error
+TS_MSE(actual DOUBLE[], predicted DOUBLE[]) → DOUBLE              -- Mean Squared Error
+TS_RMSE(actual DOUBLE[], predicted DOUBLE[]) → DOUBLE             -- Root Mean Squared Error
+TS_MAPE(actual DOUBLE[], predicted DOUBLE[]) → DOUBLE             -- Mean Absolute Percentage Error
+TS_SMAPE(actual DOUBLE[], predicted DOUBLE[]) → DOUBLE            -- Symmetric MAPE
+TS_MASE(actual DOUBLE[], predicted DOUBLE[], baseline DOUBLE[]) → DOUBLE   -- Mean Absolute Scaled Error
+TS_R2(actual DOUBLE[], predicted DOUBLE[]) → DOUBLE               -- R-squared
+TS_BIAS(actual DOUBLE[], predicted DOUBLE[]) → DOUBLE             -- Forecast Bias
+TS_RMAE(actual DOUBLE[], pred1 DOUBLE[], pred2 DOUBLE[]) → DOUBLE -- Relative MAE
+TS_QUANTILE_LOSS(actual DOUBLE[], predicted DOUBLE[], q DOUBLE) → DOUBLE -- Quantile Loss
+TS_MQLOSS(actual DOUBLE[], quantiles DOUBLE[][], levels DOUBLE[]) → DOUBLE -- Mean Quantile Loss
+TS_COVERAGE(actual DOUBLE[], lower DOUBLE[], upper DOUBLE[]) → DOUBLE -- Interval Coverage
+```
+
+**GROUP BY Usage Pattern**:
+```sql
+SELECT 
+    product_id,
+    TS_MAE(LIST(actual), LIST(predicted)) AS mae,
+    TS_RMSE(LIST(actual), LIST(predicted)) AS rmse
+FROM results
+GROUP BY product_id;
 ```
 
 ### EDA Functions (5 macros)
 
+SQL macros for exploratory data analysis and quality assessment:
+
 ```sql
-TS_STATS(table, group_col, date_col, value_col)           -- Comprehensive statistics
-TS_QUALITY_REPORT(stats_table, min_length)                -- Quality checks
-TS_DATASET_SUMMARY(stats_table)                           -- Overall summary
-TS_GET_PROBLEMATIC(stats_table, quality_threshold)        -- Low quality series
-TS_DETECT_SEASONALITY_ALL(table, group_col, date_col, value_col)  -- Seasonality
+TS_STATS(table, group_col, date_col, value_col)
+-- Returns: per-series statistics (count, mean, std, min, max, nulls, gaps)
+
+TS_QUALITY_REPORT(stats_table, min_length)
+-- Returns: quality assessment with configurable minimum length threshold
+
+TS_DATASET_SUMMARY(stats_table)
+-- Returns: aggregate statistics across all series
+
+TS_GET_PROBLEMATIC(stats_table, quality_threshold)
+-- Returns: series below quality threshold
+
+TS_DETECT_SEASONALITY_ALL(table, group_col, date_col, value_col)
+-- Returns: detected seasonal periods for all series
 ```
 
 ### Data Preparation (12 macros)
 
-**Gap Filling**:
+SQL macros for data cleaning and transformation. Date type support varies by function.
+
+**Gap Filling** (DATE/TIMESTAMP only):
 ```sql
 TS_FILL_GAPS(table, group_col, date_col, value_col)
+-- Fills missing timestamps in series
+-- INTEGER variant: TS_FILL_GAPS_INT
+
 TS_FILL_FORWARD(table, group_col, date_col, value_col, target_date)
+-- Extends series to target date
+-- INTEGER variant: TS_FILL_FORWARD_INT
 ```
 
-**Filtering**:
+**Filtering** (all date types):
 ```sql
 TS_DROP_CONSTANT(table, group_col, value_col)
+-- Removes series with constant values
+
 TS_DROP_SHORT(table, group_col, date_col, min_length)
+-- Removes series below minimum length
+
 TS_DROP_GAPPY(table, group_col, date_col, max_gap_pct)
+-- Removes series with excessive gaps (DATE/TIMESTAMP only)
+-- INTEGER variant: TS_DROP_GAPPY_INT
 ```
 
-**Edge Cleaning**:
+**Edge Cleaning** (all date types):
 ```sql
 TS_DROP_LEADING_ZEROS(table, group_col, date_col, value_col)
 TS_DROP_TRAILING_ZEROS(table, group_col, date_col, value_col)
 TS_DROP_EDGE_ZEROS(table, group_col, date_col, value_col)
 ```
 
-**Imputation**:
+**Imputation** (all date types):
 ```sql
 TS_FILL_NULLS_CONST(table, group_col, date_col, value_col, fill_value)
 TS_FILL_NULLS_FORWARD(table, group_col, date_col, value_col)
@@ -388,13 +456,41 @@ TS_FILL_NULLS_MEAN(table, group_col, date_col, value_col)
 
 ### Seasonality & Changepoints
 
+**Seasonality Detection**:
 ```sql
-TS_DETECT_SEASONALITY(values: DOUBLE[]) → INT[]
-TS_ANALYZE_SEASONALITY(timestamps, values) → STRUCT
+TS_DETECT_SEASONALITY(values DOUBLE[]) → INTEGER[]
+-- Returns: detected seasonal periods sorted by strength
 
-TS_DETECT_CHANGEPOINTS(table, date_col, value_col, params)
-TS_DETECT_CHANGEPOINTS_BY(table, group_col, date_col, value_col, params)
+TS_ANALYZE_SEASONALITY(timestamps ANY[], values DOUBLE[]) → STRUCT
+-- Returns: detailed seasonality analysis structure
 ```
+
+**Changepoint Detection** (Bayesian Online Changepoint Detection):
+```sql
+TS_DETECT_CHANGEPOINTS(
+    table VARCHAR,
+    date_col DATE|TIMESTAMP,
+    value_col DOUBLE,
+    params MAP
+) → TABLE(date_col, value_col, is_changepoint BOOLEAN, changepoint_probability DOUBLE)
+
+TS_DETECT_CHANGEPOINTS_BY(
+    table VARCHAR,
+    group_col ANY,
+    date_col DATE|TIMESTAMP,
+    value_col DOUBLE,
+    params MAP
+) → TABLE(group_col, date_col, value_col, is_changepoint BOOLEAN, changepoint_probability DOUBLE)
+```
+
+**Parameters**:
+- `hazard_lambda` (default: 250.0): Expected run length between changepoints
+- `include_probabilities` (default: false): Compute Bayesian probabilities
+
+**Behavioral Notes**:
+- BOCPD algorithm detects level shifts, trend changes, variance shifts, regime changes
+- Full parallelization on GROUP BY operations
+- Normal-Gamma conjugate prior for probabilistic detection
 
 ## 📖 Guides
 
@@ -463,7 +559,7 @@ TS_DETECT_CHANGEPOINTS_BY(table, group_col, date_col, value_col, params)
 
 ## 📊 Performance
 
-### Benchmarks
+### Benchmark Results
 
 | Operation | Dataset | Python/Polars | DuckDB SQL | Speedup |
 |-----------|---------|---------------|------------|---------|
@@ -474,12 +570,19 @@ TS_DETECT_CHANGEPOINTS_BY(table, group_col, date_col, value_col, params)
 
 *Benchmarks on Intel i7, 16GB RAM*
 
-### Scalability
+### Model Speed Tiers
 
-- ✅ **Millions of rows**: Columnar storage + streaming
-- ✅ **Thousands of series**: Native parallelization
-- ✅ **Large horizons**: Optimized forecasting algorithms
+- **Fast** (<1ms/10K rows): Naive, SMA, SeasonalNaive, RandomWalkDrift
+- **Medium** (10-100ms/10K rows): SES, Holt, Theta, OptimizedTheta
+- **Slow** (1-5s/10K rows): AutoETS, AutoARIMA, MSTL, TBATS (with early termination)
+
+### Scalability Characteristics
+
+- ✅ **Millions of rows**: Columnar storage + streaming operations
+- ✅ **Thousands of series**: Native DuckDB parallelization on GROUP BY
+- ✅ **Large horizons**: Optimized forecasting algorithms with vectorization
 - ✅ **Memory efficient**: ~1GB for 1M rows, 1K series
+- ✅ **CPU utilization**: Automatic distribution across cores for multi-series forecasting
 
 ## 🏗️ Architecture
 
