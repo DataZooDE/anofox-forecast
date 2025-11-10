@@ -10,25 +10,10 @@ on M4 Competition datasets.
 
 ### Point Forecasts Only (Prediction Intervals Excluded)
 
-| Implementation | Model | MASE | MAE | RMSE | Time (s) | Speedup |
-|----------------|-------|------|-----|------|----------|---------|
-| Anofox | MSTL | 1.302 | 202.82 | 232.93 | **0.60** | **710x faster!** |
-| Anofox | AutoMSTL | 1.302 | 202.82 | 232.93 | 14.01 | 30x faster |
-| Statsforecast | MSTL | **1.200** | **184.34** | **216.14** | 425 | baseline |
-
-**Key Findings:**
-
-- **Dramatic Performance Improvement**: AnoFox MSTL is now **710x faster**
-  than Statsforecast (0.60s vs 425s)!
-- **Optimizations Applied**: CppLowess LOESS, object reuse, exponential
-  smoothing default, reduced allocations
-- **Accuracy Trade-off**: AnoFox MASE 1.302 vs Statsforecast 1.200 (8.5%
-  difference) due to using faster exponential smoothing instead of AutoETS
-  for deseasonalized component
-- **Configurable Methods**: Users can choose between speed
-  (ExponentialSmoothing, default) and accuracy (AutoETS option)
-- **Production Ready**: Sub-second forecasting for 4,227 series makes MSTL
-  practical for real-time applications
+| Implementation | Model | MASE | MAE | RMSE | Time (s) |
+|----------------|-------|------|-----|------|----------|
+| Anofox | MSTL | 1.302 | 202.82 | 232.93 | **0.60** |
+| Statsforecast | MSTL | **1.200** | **184.34** | **216.14** | 425 |
 
 ## Implementation Details
 

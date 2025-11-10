@@ -45,6 +45,8 @@ All models benchmarked on M4 Daily dataset, grouped by method family and separat
 | | Statsforecast | AutoARIMA | **1.150** | 176.82 | 208.63 | 7,299 |
 | **MFLES** | Anofox | MFLES | **1.179** | 181.62 | 212.87 | 21 |
 | | Statsforecast | MFLES | 1.184 | 185.38 | 217.10 | 161 |
+|| **MSTL** | Anofox | MSTL | 1.302 | 202.82 | 232.93 | **0.60** |
+|| | Statsforecast | MSTL | **1.200** | 184.34 | 216.14 | 425 |
 
 
 ## Datasets, Metrics, and Running Benchmarks
@@ -103,6 +105,12 @@ cd mfles_benchmark
 uv run python run.py anofox Daily
 uv run python run.py statsforecast Daily
 uv run python evaluate.py
+
+# MSTL models
+cd mstl_benchmark
+uv run python run_benchmark.py anofox Daily
+uv run python run_benchmark.py statsforecast Daily
+uv run python run_benchmark.py eval Daily
 ```
 
 ## Purpose
