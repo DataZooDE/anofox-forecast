@@ -63,102 +63,6 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28,
 - [Performance](#performance)
 - [License](#license)
 
-## 📦 Installation
-
-### Prerequisites
-
-Before building, install the required dependencies:
-
-**Manjaro/Arch Linux**:
-```bash
-sudo pacman -S base-devel cmake ninja openssl eigen
-```
-
-**Ubuntu/Debian**:
-```bash
-sudo apt update
-sudo apt install build-essential cmake ninja-build libssl-dev libeigen3-dev
-```
-
-**Fedora/RHEL**:
-```bash
-sudo dnf install gcc-c++ cmake ninja-build openssl-devel eigen3-devel
-```
-
-**macOS**:
-```bash
-brew install cmake ninja openssl eigen
-```
-
-**Windows** (Option 1 - vcpkg, recommended):
-```powershell
-# Install vcpkg
-git clone https://github.com/Microsoft/vcpkg.git
-.\vcpkg\bootstrap-vcpkg.bat
-
-# Install dependencies
-.\vcpkg\vcpkg install eigen3 openssl
-
-# Build with vcpkg toolchain
-cmake -DCMAKE_TOOLCHAIN_FILE=.\vcpkg\scripts\buildsystems\vcpkg.cmake .
-cmake --build . --config Release
-```
-
-**Windows** (Option 2 - MSYS2/MinGW):
-```bash
-# In MSYS2 MinGW64 terminal
-pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
-pacman -S mingw-w64-x86_64-openssl mingw-w64-x86_64-eigen3
-
-# Then build as normal
-make -j$(nproc)
-```
-
-**Windows** (Option 3 - WSL, easiest):
-```bash
-# Use Ubuntu in WSL
-wsl --install
-# Then follow Ubuntu instructions above
-```
-
-**Required**:
-- C++ compiler (GCC 9+ or Clang 10+)
-- CMake 3.15+
-- OpenSSL (development libraries)
-- Eigen3 (linear algebra library, required for ARIMA models)
-- Make or Ninja (build system)
-
-### Build from Source
-
-```bash
-# Clone with submodules
-git clone --recurse-submodules https://github.com/DataZooDE/anofox-forecast.git
-cd anofox-forecast
-
-# Build (choose one)
-make -j$(nproc)              # With Make
-GEN=ninja make release       # With Ninja (faster)
-```
-
-### Verify Installation
-
-```bash
-# Test the extension
-./build/release/duckdb -c "
-LOAD 'build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension';
-SELECT 'Extension loaded successfully! ✅' AS status;
-"
-```
-
-### Load Extension
-
-```sql
--- In DuckDB
-LOAD 'path/to/anofox_forecast.duckdb_extension';
-
--- Verify all functions are available
-SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 7, {'seasonal_period': 7});
-```
 
 ## 🎓 Quick Examples
 
@@ -492,90 +396,6 @@ TS_DETECT_CHANGEPOINTS_BY(
 - Full parallelization on GROUP BY operations
 - Normal-Gamma conjugate prior for probabilistic detection
 
-## 📖 Guides
-
-### Getting Started
-- [Quick Start Guide](guides/01_quickstart.md) ⭐ - 5-minute introduction
-- [Basic Forecasting](guides/30_basic_forecasting.md) - Complete workflow
-- [Understanding Forecasts](guides/31_understanding_forecasts.md) - Statistical concepts
-
-### Understanding Data
-- [Exploratory Analysis](guides/11_exploratory_analysis.md) ⭐ - Data quality workflow
-- [Detecting Seasonality](guides/12_detecting_seasonality.md) - Seasonality analysis
-- [Detecting Changepoints](guides/13_detecting_changepoints.md) - Regime detection
-
-### Data Preparation
-- [Data Preparation](guides/20_data_preparation.md) - Cleaning and transformation
-
-### Model Selection & Tuning
-- [Model Selection](guides/40_model_selection.md) ⭐ - Choosing the right model
-- [Model Parameters](guides/41_model_parameters.md) - Parameter tuning
-- [In-Sample Validation](guides/42_insample_validation.md) - Model validation
-
-### Evaluation & Optimization
-- [Evaluation Metrics](guides/50_evaluation_metrics.md) - Accuracy metrics
-- [Usage Guide](guides/51_usage_guide.md) - Best practices
-- [Performance Optimization](guides/60_performance_optimization.md) - Optimization tips
-
-### Business Use Cases
-- [Demand Forecasting](guides/70_demand_forecasting.md) ⭐ - Retail & inventory
-- [Sales Prediction](guides/71_sales_prediction.md) - Revenue forecasting
-- [Capacity Planning](guides/72_capacity_planning.md) - Resource allocation
-
-### Multi-Language Integration
-- [Multi-Language Overview](guides/80_multi_language_overview.md) ⭐ - Write once, use everywhere!
-- [Python Integration](guides/81_python_integration.md) - pandas, FastAPI, Jupyter
-- [R Integration](guides/82_r_integration.md) - tidyverse, ggplot2, Shiny
-- [Julia Integration](guides/83_julia_integration.md) - DataFrames.jl, type-safe
-- [C++ Integration](guides/84_cpp_integration.md) - Embedded, high-performance
-- [Rust Integration](guides/85_rust_integration.md) - Safe, fast, production-ready
-
-### Reference
-- [API Reference](guides/90_api_reference.md) ⭐ - Complete API documentation
-- [Date Type Support](docs/DATE_TYPE_SUPPORT.md) - INTEGER, DATE, and TIMESTAMP support
-- [Complete Guide Index](guides/99_guide_index.md) - All guides with learning paths
-
-## 🎯 Use Cases
-
-### Retail & E-commerce
-- **Demand Forecasting**: Predict product demand for inventory optimization
-- **Sales Forecasting**: Revenue prediction across product lines
-- **Promotions Impact**: Measure campaign effectiveness
-
-### Operations
-- **Capacity Planning**: Resource allocation and scheduling
-- **Maintenance Prediction**: Preventive maintenance scheduling
-- **Quality Control**: Process monitoring and anomaly detection
-
-### Finance
-- **Revenue Forecasting**: Financial planning and budgeting
-- **Cash Flow Prediction**: Liquidity management
-- **Cost Optimization**: Expense forecasting
-
-### Healthcare
-- **Patient Volume**: Hospital admissions forecasting
-- **Resource Planning**: Staff and equipment allocation
-- **Epidemic Modeling**: Disease spread prediction
-
-## 📊 Performance
-
-### Benchmark Results
-
-| Operation | Dataset | Python/Polars | DuckDB SQL | Speedup |
-|-----------|---------|---------------|------------|---------|
-| **Data Prep** | 1M rows, 1K series | 12s | 4s | 3x |
-| **Per-series stats** | 1M rows, 10K series | 5s | 1.2s | 4x |
-| **Forecast (AutoETS)** | 365 days, 1K series | ~120s | ~40s | 3x |
-| **Gap filling** | 1M rows, 1K series | 2.5s | 0.8s | 3x |
-
-*Benchmarks on Intel i7, 16GB RAM*
-
-### Model Speed Tiers
-
-- **Fast** (<1ms/10K rows): Naive, SMA, SeasonalNaive, RandomWalkDrift
-- **Medium** (10-100ms/10K rows): SES, Holt, Theta, OptimizedTheta
-- **Slow** (1-5s/10K rows): AutoETS, AutoARIMA, MSTL, TBATS (with early termination)
-
 ### Scalability Characteristics
 
 - ✅ **Millions of rows**: Columnar storage + streaming operations
@@ -584,86 +404,102 @@ TS_DETECT_CHANGEPOINTS_BY(
 - ✅ **Memory efficient**: ~1GB for 1M rows, 1K series
 - ✅ **CPU utilization**: Automatic distribution across cores for multi-series forecasting
 
-## 🏗️ Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    DuckDB Extension API                     │
-├─────────────────────────────────────────────────────────────┤
-│  Forecasting  │    Metrics    │  EDA & Prep  │  Detection  │
-│  (31 models)  │  (12 metrics) │  (17 macros) │ (Changepoint)│
-├─────────────────────────────────────────────────────────────┤
-│                   anofox-time Core Library                   │
-│  • Statistical Models    • Optimization (L-BFGS, Nelder-Mead)│
-│  • AutoML Selection      • SIMD Vectorization (AVX2)         │
-│  • Time Series Utils     • Gradient Checkpointing            │
-└─────────────────────────────────────────────────────────────┘
+## 📦 Development
+
+### Prerequisites
+
+Before building, install the required dependencies:
+
+**Manjaro/Arch Linux**:
+```bash
+sudo pacman -S base-devel cmake ninja openssl eigen
 ```
 
-## 🔧 Development
+**Ubuntu/Debian**:
+```bash
+sudo apt update
+sudo apt install build-essential cmake ninja-build libssl-dev libeigen3-dev
+```
 
-### Documentation Build System
+**Fedora/RHEL**:
+```bash
+sudo dnf install gcc-c++ cmake ninja-build openssl-devel eigen3-devel
+```
 
-This project uses a template-based documentation system:
+**macOS**:
+```bash
+brew install cmake ninja openssl eigen
+```
 
-- **Templates**: Edit files in `guides/templates/*.md.in`
-- **SQL Examples**: Separate SQL files in `test/sql/docs_examples/`
-- **Generated Docs**: Built from templates via `make docs`
+**Windows** (Option 1 - vcpkg, recommended):
+```powershell
+# Install vcpkg
+git clone https://github.com/Microsoft/vcpkg.git
+.\vcpkg\bootstrap-vcpkg.bat
+
+# Install dependencies
+.\vcpkg\vcpkg install eigen3 openssl
+
+# Build with vcpkg toolchain
+cmake -DCMAKE_TOOLCHAIN_FILE=.\vcpkg\scripts\buildsystems\vcpkg.cmake .
+cmake --build . --config Release
+```
+
+**Windows** (Option 2 - MSYS2/MinGW):
+```bash
+# In MSYS2 MinGW64 terminal
+pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
+pacman -S mingw-w64-x86_64-openssl mingw-w64-x86_64-eigen3
+
+# Then build as normal
+make -j$(nproc)
+```
+
+**Windows** (Option 3 - WSL, easiest):
+```bash
+# Use Ubuntu in WSL
+wsl --install
+# Then follow Ubuntu instructions above
+```
+
+**Required**:
+- C++ compiler (GCC 9+ or Clang 10+)
+- CMake 3.15+
+- OpenSSL (development libraries)
+- Eigen3 (linear algebra library)
+- Make or Ninja (build system)
+
+### Build from Source
 
 ```bash
-# Build documentation from templates
-make docs
+# Clone with submodules
+git clone --recurse-submodules https://github.com/DataZooDE/anofox-forecast.git
+cd anofox-forecast
 
-# Test SQL examples
-make test-docs
-
-# Lint documentation
-make lint-docs
-
-# Clean generated docs
-make clean-docs
-
-# Install git hooks (auto-build on commit)
-make install-hooks
+# Build (choose one)
+make -j$(nproc)              # With Make
+GEN=ninja make release       # With Ninja (faster)
 ```
 
-**Important**: Always edit template files (`*.md.in`) in `guides/templates/`, not the generated `*.md` files in `guides/`. The generated files are automatically rebuilt from templates.
-
-### Build Options
+### Verify Installation
 
 ```bash
-# Debug build
-make debug
-
-# Release build with optimizations
-make release
-
-# Run tests
-make test
-
-# Clean build
-make clean
+# Test the extension
+./build/release/duckdb -c "
+LOAD 'build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension';
+SELECT 'Extension loaded successfully! ✅' AS status;
+"
 ```
 
-### Project Structure
+### Load Extension
 
-```
-anofox-forecast/
-├── src/                          # Extension source code
-│   ├── forecast_aggregate.cpp   # Main forecasting logic
-│   ├── metrics_function.cpp     # Evaluation metrics
-│   ├── eda_macros.cpp           # EDA macros
-│   ├── data_prep_macros.cpp     # Data preparation macros
-│   └── ...
-├── anofox-time/                  # Core forecasting library
-│   ├── include/                  # Headers
-│   └── src/                      # Implementation
-├── benchmark/                    # Performance benchmarks (M5, synthetic tests)
-├── guides/                       # User guides (generated from templates)
-│   └── templates/                # Guide templates (*.md.in - edit these)
-├── test/                         # Tests
-│   └── sql/docs_examples/        # SQL examples from guides
-└── scripts/                      # Build and documentation scripts
+```sql
+-- In DuckDB
+LOAD 'path/to/anofox_forecast.duckdb_extension';
+
+-- Verify all functions are available
+SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 7, {'seasonal_period': 7});
 ```
 
 ## 📄 License
@@ -691,20 +527,13 @@ For commercial licensing (hosted services, embedded products), contact: `license
 
 We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-### Development Setup
-
-```bash
-git clone --recurse-submodules https://github.com/DataZooDE/anofox-forecast.git
-cd anofox-forecast
-make -j$(nproc)
-```
 
 ## 📞 Support
 
 - **Documentation**: [guides/](guides/)
 - **Issues**: [GitHub Issues](https://github.com/DataZooDE/anofox-forecast/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/DataZooDE/anofox-forecast/discussions)
-- **Email**: support@anofox.com
+- **Email**: sm@data-zoo.de
 
 ## 🎓 Citation
 
@@ -713,7 +542,7 @@ If you use this extension in research, please cite:
 ```bibtex
 @software{anofox_forecast,
   title = {Anofox Forecast: Time Series Forecasting for DuckDB},
-  author = {Anofox Team},
+  author = {Joachim Rosskopf, Simon Müller, DataZoo GmbH},
   year = {2025},
   url = {https://github.com/DataZooDE/anofox-forecast}
 }
@@ -722,26 +551,14 @@ If you use this extension in research, please cite:
 ## 🌟 Features Roadmap
 
 ### Coming Soon
-- [ ] Machine learning 
+- [ ] More EDA & Data Preparation tools
+- [ ] External regressors support
 - [ ] Probabilistic forecasting (quantile regression)
-- [ ] Hierarchical reconciliation
 - [ ] Cross-validation utilities
-- [ ] Model explainability (SHAP values)
 
 ### Under Consideration
-- [ ] Real-time forecasting updates
-- [ ] External regressors support
-- [ ] Causal impact analysis
+- [ ] Machine Learning
 - [ ] Web UI for visualization
-
-## 📊 Stats
-
-- **31 Models**: From simple to state-of-the-art
-- **12 Metrics**: Comprehensive evaluation
-- **17 Macros**: EDA + data preparation
-- **60+ Functions**: Complete API
-- **5,000+ Lines**: Production-ready code
-- **100% SQL**: No Python dependencies
 
 ## 🏆 Acknowledgments
 
@@ -757,6 +574,6 @@ Special thanks to the DuckDB team for making extensions possible!
 
 ⭐ **Star us on GitHub** if you find this useful!
 
-📢 **Follow us** for updates: [@anofox](https://twitter.com/anofox)
+📢 **Follow us** for updates: [@datazoo](https://www.linkedin.com/company/datazoo/)
 
-🚀 **Get started now**: `LOAD 'anofox_forecast.duckdb_extension';`
+🚀 **Get started now**: `LOAD 'anofox_forecast';`
