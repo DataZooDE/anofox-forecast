@@ -9,9 +9,5 @@ MODELS = [
         'name': 'MSTL',
         'params': lambda seasonality: {'seasonal_periods': [seasonality]}
     },
-    {
-        'name': 'AutoMSTL',
-        'params': lambda seasonality: {'seasonal_periods': [seasonality]}
-    },
 ]
 

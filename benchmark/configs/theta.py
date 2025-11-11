@@ -9,10 +9,6 @@ MODELS = [
         'params': lambda seasonality: {'seasonal_period': seasonality, 'theta_param': 2.0}
     },
     {
-        'name': 'AutoTheta',
-        'params': lambda seasonality: {'seasonal_period': seasonality}
-    },
-    {
         'name': 'OptimizedTheta',
         'params': lambda seasonality: {'seasonal_period': seasonality}
     },

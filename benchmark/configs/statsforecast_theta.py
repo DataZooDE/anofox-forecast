@@ -23,10 +23,6 @@ def get_models_config(seasonality: int, horizon: int):
     """
     return [
         {
-            'model_factory': AutoTheta,
-            'params': {'season_length': seasonality}
-        },
-        {
             'model_factory': Theta,
             'params': {'season_length': seasonality}
         },

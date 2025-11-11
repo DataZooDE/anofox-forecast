@@ -4,6 +4,7 @@ Shared Anofox-forecast benchmark runner.
 Generic runner for benchmarking Anofox forecast models from DuckDB extension.
 """
 import time
+import sys
 from pathlib import Path
 from typing import List, Dict, Callable, Optional
 
@@ -79,87 +80,79 @@ def run_anofox_benchmark(
     # Output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    all_results = []
+    print(f"\nRunning anofox {benchmark_name} forecasts with {len(models_config)} models...")
 
-    # Run each model
+    # Run each model separately to get individual timing
+    all_forecasts = []
+    all_metrics = []
+    series_count = train_df['unique_id'].nunique()
+
     for model_config in models_config:
         model_name = model_config['name']
         params_fn = model_config['params']
 
         print(f"\n{'='*60}")
-        print(f"Running {model_name} forecasts...")
+        print(f"Running {model_name}...")
         print(f"{'='*60}")
-        start_time = time.time()
 
-        # Get model parameters
-        params = params_fn(seasonality)
-
-        forecast_query = f"""
-            SELECT *
-            FROM TS_FORECAST_BY(
-                'train',
-                unique_id,
-                ds,
-                y,
-                '{model_name}',
-                {horizon},
-                {params}
-            )
-        """
-        
         try:
+            start_time = time.time()
+
+            # Get model parameters
+            params = params_fn(seasonality)
+
+            forecast_query = f"""
+                SELECT *
+                FROM TS_FORECAST_BY(
+                    'train',
+                    unique_id,
+                    ds,
+                    y,
+                    '{model_name}',
+                    {horizon},
+                    {params}
+                )
+            """
+            
             fcst_df = con.execute(forecast_query).fetchdf()
             
-            # Rename columns to standardized names
+            # Rename columns to standardized names (matching statsforecast format)
             rename_map = {
-                'unique_id': 'id_cols',
-                'date': 'time_col',
-                'point_forecast': 'forecast_col'
+                'date': 'ds',
+                'point_forecast': model_name
             }
             
             # Handle different prediction interval column names
             if 'lower_90' in fcst_df.columns:
-                rename_map['lower_90'] = 'lower'
-                rename_map['upper_90'] = 'upper'
+                rename_map['lower_90'] = f'{model_name}-lo-95'
+                rename_map['upper_90'] = f'{model_name}-hi-95'
             elif 'lower_95' in fcst_df.columns:
-                rename_map['lower_95'] = 'lower'
-                rename_map['upper_95'] = 'upper'
+                rename_map['lower_95'] = f'{model_name}-lo-95'
+                rename_map['upper_95'] = f'{model_name}-hi-95'
             
             fcst_df = fcst_df.rename(columns=rename_map)
             
-            # Keep only the columns we need
-            keep_cols = ['id_cols', 'time_col', 'forecast_col']
-            if 'lower' in fcst_df.columns:
-                keep_cols.extend(['lower', 'upper'])
+            # Keep only the columns we need for merging
+            keep_cols = ['unique_id', 'ds', model_name]
+            for col in [f'{model_name}-lo-95', f'{model_name}-hi-95']:
+                if col in fcst_df.columns:
+                    keep_cols.append(col)
             
-            fcst_df = fcst_df[keep_cols].sort_values(['id_cols', 'time_col'])
+            fcst_df = fcst_df[keep_cols].sort_values(['unique_id', 'ds'])
+            
             elapsed_time = time.time() - start_time
 
-            print(f"\n✅ {model_name} completed in {elapsed_time:.2f} seconds")
-            print(f"Generated {len(fcst_df)} forecast points for {fcst_df['id_cols'].nunique()} series")
+            print(f"✅ {model_name} completed in {elapsed_time:.2f} seconds")
+            print(f"Generated {len(fcst_df)} forecast points for {fcst_df['unique_id'].nunique()} series")
 
-            # Save forecasts
-            forecast_file = output_dir / f'anofox-{model_name}-{group}.parquet'
-            fcst_df.to_parquet(forecast_file, index=False)
-            print(f"Saved forecasts to {forecast_file}")
-
-            # Save timing metrics
-            metrics_file = output_dir / f'anofox-{model_name}-{group}-metrics.parquet'
-            metrics_df = pd.DataFrame({
-                'model': [f'anofox-{model_name}'],
-                'group': [group],
-                'time_seconds': [elapsed_time],
-                'series_count': [train_df['unique_id'].nunique()],
-                'forecast_points': [len(fcst_df)],
-            })
-            metrics_df.to_parquet(metrics_file, index=False)
-            print(f"Saved metrics to {metrics_file}")
-
-            all_results.append({
-                'model': model_name,
+            # Store forecast and metrics
+            all_forecasts.append(fcst_df)
+            all_metrics.append({
+                'model': f'anofox-{model_name}',
+                'group': group,
                 'time_seconds': elapsed_time,
+                'series_count': series_count,
                 'forecast_points': len(fcst_df),
-                'series_count': train_df['unique_id'].nunique()
             })
 
         except Exception as e:
@@ -169,8 +162,52 @@ def run_anofox_benchmark(
             continue
 
     con.close()
+
+    if not all_forecasts:
+        print(f"\n❌ No forecasts were generated successfully")
+        sys.exit(1)
+
+    # Merge all forecasts
     print(f"\n{'='*60}")
-    print(f"All {benchmark_name} benchmarks completed")
+    print("Merging forecasts from all models...")
     print(f"{'='*60}")
 
-    return all_results
+    # Start with the first forecast (has unique_id and ds)
+    merged_fcst = all_forecasts[0]
+
+    # Merge remaining forecasts (add their model columns)
+    for fcst_df in all_forecasts[1:]:
+        # Get model columns (exclude unique_id and ds)
+        model_cols = [col for col in fcst_df.columns if col not in ['unique_id', 'ds']]
+        # Merge on unique_id and ds
+        merged_fcst = merged_fcst.merge(
+            fcst_df[['unique_id', 'ds'] + model_cols],
+            on=['unique_id', 'ds'],
+            how='outer'
+        )
+
+    print(f"Merged forecast shape: {merged_fcst.shape}")
+    print(f"Columns: {list(merged_fcst.columns)}")
+
+    # Save merged forecasts
+    forecast_file = output_dir / f'anofox-{benchmark_name}-{group}.parquet'
+    merged_fcst.to_parquet(forecast_file, index=False)
+    print(f"\nSaved merged forecasts to {forecast_file}")
+
+    # Save timing metrics
+    metrics_file = output_dir / f'anofox-{benchmark_name}-{group}-metrics.parquet'
+    metrics_df = pd.DataFrame(all_metrics)
+    metrics_df.to_parquet(metrics_file, index=False)
+    print(f"Saved per-model metrics to {metrics_file}")
+
+    # Print summary
+    print(f"\n{'='*60}")
+    print("Timing Summary:")
+    print(f"{'='*60}")
+    for metric in all_metrics:
+        print(f"  {metric['model']}: {metric['time_seconds']:.2f}s")
+    total_time = sum(m['time_seconds'] for m in all_metrics)
+    print(f"  Total: {total_time:.2f}s")
+    print(f"{'='*60}")
+
+    return all_metrics
