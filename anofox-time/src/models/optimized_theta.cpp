@@ -5,8 +5,9 @@
 
 namespace anofoxtime::models {
 
-OptimizedTheta::OptimizedTheta(int seasonal_period)
+OptimizedTheta::OptimizedTheta(int seasonal_period, theta_pegels::OptimizerType optimizer)
     : seasonal_period_(seasonal_period),
+      optimizer_(optimizer),
       optimal_alpha_(0.5),
       optimal_theta_(2.0),
       optimal_level_(0.0),
@@ -49,7 +50,8 @@ void OptimizedTheta::fit(const core::TimeSeries& ts) {
         init_level,
         init_alpha,
         init_theta,
-        3  // 3-step-ahead MSE
+        3,  // 3-step-ahead MSE
+        optimizer_  // Optimizer type
     );
     
     optimal_alpha_ = result.alpha;

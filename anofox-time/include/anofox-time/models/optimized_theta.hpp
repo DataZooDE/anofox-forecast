@@ -13,7 +13,8 @@ namespace anofoxtime::models {
  */
 class OptimizedTheta : public IForecaster {
 public:
-    explicit OptimizedTheta(int seasonal_period = 1);
+    explicit OptimizedTheta(int seasonal_period = 1, 
+                           theta_pegels::OptimizerType optimizer = theta_pegels::OptimizerType::NelderMead);
     
     void fit(const core::TimeSeries& ts) override;
     core::Forecast predict(int horizon) override;
@@ -32,6 +33,7 @@ public:
     
 private:
     int seasonal_period_;
+    theta_pegels::OptimizerType optimizer_;
     double optimal_alpha_;
     double optimal_theta_;
     double optimal_level_;
