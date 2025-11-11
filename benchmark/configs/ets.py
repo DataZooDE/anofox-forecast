@@ -6,12 +6,24 @@ BENCHMARK_NAME = 'ets'
 # Note: For models without seasonality, we pass None instead of {} to avoid SQL syntax errors
 MODELS = [
     {
+        'name': 'SES',
+        'params': lambda seasonality: {'alpha': 0.5, 'model_name': 'SES'}
+    },
+    {
         'name': 'SESOptimized',
-        'params': lambda seasonality: None  # No parameters needed
+        'params': lambda seasonality: {'model_name': 'SESOptimized'}
+    },
+    {
+        'name': 'SeasonalES',
+        'params': lambda seasonality: {'seasonal_period': seasonality, 'alpha': 0.5, 'model_name': 'SeasonalES'}
     },
     {
         'name': 'SeasonalESOptimized',
         'params': lambda seasonality: {'seasonal_period': seasonality}
+    },
+    {
+        'name': 'Holt',
+        'params': lambda seasonality: {'alpha': 0.5, 'model_name': 'Holt'}
     },
     {
         'name': 'HoltWinters',
@@ -19,6 +31,6 @@ MODELS = [
     },
     {
         'name': 'AutoETS',
-        'params': lambda seasonality: {'season_length': seasonality}
+        'params': lambda seasonality: {'seasonal_period': seasonality}
     },
 ]

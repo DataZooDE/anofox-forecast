@@ -32,32 +32,31 @@ def get_models_config(seasonality: int, horizon: int):
     return [
         {
             'model_factory': SimpleExponentialSmoothing,
-            'params': {'alpha': 0.5}
+            'params': {'alpha': 0.5, 'model_name': 'SES'}
         },
         {
             'model_factory': SimpleExponentialSmoothingOptimized,
-            'params': {}
+            'params': {'model_name': 'SESOptimized'}
         },
         {
             'model_factory': SeasonalExponentialSmoothing,
-            'params': {'season_length': seasonality, 'alpha': 0.5}
+            'params': {'season_length': seasonality, 'alpha': 0.5, 'model_name': 'SeasonalES'}
         },
         {
             'model_factory': SeasonalExponentialSmoothingOptimized,
-            'params': {'season_length': seasonality},
-            'display_name': 'SeasonalESOptimized'  # Align with Anofox naming
+            'params': {'season_length': seasonality, 'model_name': 'SeasonalESOptimized'},
         },
         {
             'model_factory': Holt,
-            'params': {}
+            'params': {'model_name': 'Holt'}
         },
         {
             'model_factory': HoltWinters,
-            'params': {'season_length': seasonality}
+            'params': {'season_length': seasonality, 'model_name': 'HoltWinters'}
         },
         {
             'model_factory': AutoETS,
-            'params': {'season_length': seasonality}
+            'params': {'season_length': seasonality, 'model_name': 'AutoETS'}
         },
     ]
 

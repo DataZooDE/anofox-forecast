@@ -82,43 +82,48 @@ uv sync  # Install dependencies
 cd baseline_benchmark
 uv run python run.py anofox Daily        # Run Anofox models
 uv run python run.py statsforecast Daily # Run Statsforecast models
-uv run python evaluate.py                # Evaluate results
+uv run python run.py evaluate Daily      # Evaluate results
 
 # ETS models
 cd ets_benchmark
 uv run python run.py anofox Daily
-uv run python evaluate.py
+uv run python run.py evaluate Daily
 
 # Theta models
 cd theta_benchmark
 uv run python run.py anofox Daily
 uv run python run.py statsforecast Daily
-uv run python evaluate.py
+uv run python run.py evaluate Daily
 
 # ARIMA models
 cd arima_benchmark
 uv run python run.py anofox Daily
-uv run python evaluate.py
+uv run python run.py evaluate Daily
 
 # MFLES models
 cd mfles_benchmark
 uv run python run.py anofox Daily
 uv run python run.py statsforecast Daily
-uv run python evaluate.py
+uv run python run.py evaluate Daily
 
 # MSTL models
 cd mstl_benchmark
-uv run python run_benchmark.py anofox Daily
-uv run python run_benchmark.py statsforecast Daily
-uv run python run_benchmark.py eval Daily
+uv run python run.py anofox Daily
+uv run python run.py statsforecast Daily
+uv run python run.py evaluate Daily
 ```
+
+## Model Configuration
+
+The model configuration can be adjusted in the Python file in the config folder.
+
 
 ## Purpose
 
 These benchmarks are used to:
 1. Validate forecasting accuracy against known datasets (M4 Competition)
 2. Measure performance on larger workloads (4K+ time series)
-3. Compare Anofox with other forecasting libraries (Statsforecast)
+3. Validate Anofox with other forecasting libraries (Statsforecast)
 4. Identify performance regressions and optimization opportunities
 
 ## Environment
@@ -128,11 +133,7 @@ The benchmark environment uses `uv` for Python dependency management:
 - Locked dependencies in `uv.lock`
 - Python version in `.python-version`
 
-## Adding Benchmarks
+## Planned Benchmarks
 
-When adding new benchmarks:
-1. Use public available datasets (M4, M5, real-world data)
-2. Test at medium scale (1K+ series for performance tests)
-3. Include validation against known-good results
-4. Document expected performance characteristics
-5. Measure both accuracy (MASE, MAE, RMSE) and timing
+1. M5 Dataset
+2. Artificial dataset with 100k+ series for performance tests in realistic scenarios.
