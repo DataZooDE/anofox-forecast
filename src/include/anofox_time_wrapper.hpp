@@ -8,6 +8,8 @@
 
 // Include CVMetric enum (needed for default parameter value)
 #include "anofox-time/utils/cross_validation.hpp"
+// Include theta_pegels for OptimizerType enum (needed for default parameter value)
+#include "anofox-time/models/theta_pegels.hpp"
 
 // Forward declare anofoxtime types in global namespace
 namespace anofoxtime {
@@ -111,10 +113,14 @@ public:
 	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateAutoTBATS(const std::vector<int> &seasonal_periods);
 
 	// Theta variants
-	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateOptimizedTheta(int seasonal_period);
+	static std::unique_ptr<::anofoxtime::models::IForecaster>
+	CreateOptimizedTheta(int seasonal_period, ::anofoxtime::models::theta_pegels::OptimizerType optimizer =
+	                                              ::anofoxtime::models::theta_pegels::OptimizerType::NelderMead);
 	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateDynamicTheta(int seasonal_period,
 	                                                                             double theta_param);
-	static std::unique_ptr<::anofoxtime::models::IForecaster> CreateDynamicOptimizedTheta(int seasonal_period);
+	static std::unique_ptr<::anofoxtime::models::IForecaster>
+	CreateDynamicOptimizedTheta(int seasonal_period, ::anofoxtime::models::theta_pegels::OptimizerType optimizer =
+	                                                     ::anofoxtime::models::theta_pegels::OptimizerType::NelderMead);
 	static std::unique_ptr<::anofoxtime::models::IForecaster>
 	CreateAutoTheta(int seasonal_period, const std::string &decomposition_type,
 	                const std::optional<std::string> &specific_model, int nmse);

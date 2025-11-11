@@ -345,8 +345,10 @@ AnofoxTimeWrapper::CreateAutoTBATS(const std::vector<int> &seasonal_periods) {
 }
 
 // Theta variants
-std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateOptimizedTheta(int seasonal_period) {
-	return std::make_unique<::anofoxtime::models::OptimizedTheta>(seasonal_period);
+std::unique_ptr<::anofoxtime::models::IForecaster>
+AnofoxTimeWrapper::CreateOptimizedTheta(int seasonal_period,
+                                        ::anofoxtime::models::theta_pegels::OptimizerType optimizer) {
+	return std::make_unique<::anofoxtime::models::OptimizedTheta>(seasonal_period, optimizer);
 }
 
 std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateDynamicTheta(int seasonal_period,
@@ -355,8 +357,10 @@ std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateDyna
 	return std::make_unique<::anofoxtime::models::DynamicTheta>(seasonal_period);
 }
 
-std::unique_ptr<::anofoxtime::models::IForecaster> AnofoxTimeWrapper::CreateDynamicOptimizedTheta(int seasonal_period) {
-	return std::make_unique<::anofoxtime::models::DynamicOptimizedTheta>(seasonal_period);
+std::unique_ptr<::anofoxtime::models::IForecaster>
+AnofoxTimeWrapper::CreateDynamicOptimizedTheta(int seasonal_period,
+                                               ::anofoxtime::models::theta_pegels::OptimizerType optimizer) {
+	return std::make_unique<::anofoxtime::models::DynamicOptimizedTheta>(seasonal_period, optimizer);
 }
 
 std::unique_ptr<::anofoxtime::models::IForecaster>

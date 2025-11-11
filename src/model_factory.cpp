@@ -229,14 +229,28 @@ std::unique_ptr<::anofoxtime::models::IForecaster> ModelFactory::Create(const st
 	// Theta variants
 	else if (model_name == "OptimizedTheta") {
 		int seasonal_period = GetParam<int>(model_params, "seasonal_period", 1);
-		model = AnofoxTimeWrapper::CreateOptimizedTheta(seasonal_period);
+		std::string optimizer_str = GetParam<std::string>(model_params, "optimizer", "NelderMead");
+		::anofoxtime::models::theta_pegels::OptimizerType optimizer;
+		if (optimizer_str == "LBFGS") {
+			optimizer = ::anofoxtime::models::theta_pegels::OptimizerType::LBFGS;
+		} else {
+			optimizer = ::anofoxtime::models::theta_pegels::OptimizerType::NelderMead;
+		}
+		model = AnofoxTimeWrapper::CreateOptimizedTheta(seasonal_period, optimizer);
 	} else if (model_name == "DynamicTheta") {
 		int seasonal_period = GetParam<int>(model_params, "seasonal_period", 1);
 		double theta_param = GetParam<double>(model_params, "theta", 2.0);
 		model = AnofoxTimeWrapper::CreateDynamicTheta(seasonal_period, theta_param);
 	} else if (model_name == "DynamicOptimizedTheta") {
 		int seasonal_period = GetParam<int>(model_params, "seasonal_period", 1);
-		model = AnofoxTimeWrapper::CreateDynamicOptimizedTheta(seasonal_period);
+		std::string optimizer_str = GetParam<std::string>(model_params, "optimizer", "NelderMead");
+		::anofoxtime::models::theta_pegels::OptimizerType optimizer;
+		if (optimizer_str == "LBFGS") {
+			optimizer = ::anofoxtime::models::theta_pegels::OptimizerType::LBFGS;
+		} else {
+			optimizer = ::anofoxtime::models::theta_pegels::OptimizerType::NelderMead;
+		}
+		model = AnofoxTimeWrapper::CreateDynamicOptimizedTheta(seasonal_period, optimizer);
 	} else if (model_name == "AutoTheta") {
 		int seasonal_period = GetParam<int>(model_params, "seasonal_period", 1);
 		std::string decomposition_type = GetParam<std::string>(model_params, "decomposition_type", "auto");
@@ -715,5 +729,7 @@ template int ModelFactory::GetParam<int>(const Value &, const std::string &, con
 template int ModelFactory::GetRequiredParam<int>(const Value &, const std::string &);
 template double ModelFactory::GetParam<double>(const Value &, const std::string &, const double &);
 template double ModelFactory::GetRequiredParam<double>(const Value &, const std::string &);
+template std::string ModelFactory::GetParam<std::string>(const Value &, const std::string &, const std::string &);
+template bool ModelFactory::GetParam<bool>(const Value &, const std::string &, const bool &);
 
 } // namespace duckdb

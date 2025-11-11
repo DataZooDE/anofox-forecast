@@ -355,7 +355,7 @@ OptimResult optimize(const std::vector<double>& y,
         };
         
         optimization::LBFGSOptimizer::Options lbfgs_options;
-        lbfgs_options.max_iterations = 200;
+        lbfgs_options.max_iterations = 50;  // Reduced for performance
         lbfgs_options.epsilon = 1e-6;
         lbfgs_options.m = 10;
         

@@ -46,15 +46,15 @@ double ThetaGradients::numericalGradient(
     switch (param_idx) {
         case 0: // level
             param_val = level;
-            eps = std::max(1e-6, std::abs(level) * 1e-6);
+            eps = std::max(1e-5, std::abs(level) * 1e-5);
             break;
         case 1: // alpha
             param_val = alpha;
-            eps = 1e-6;  // Fixed for alpha since it's in [0,1]
+            eps = 1e-5;  // Fixed for alpha since it's in [0,1]
             break;
         case 2: // theta
             param_val = theta;
-            eps = std::max(1e-6, std::abs(theta) * 1e-6);
+            eps = std::max(1e-5, std::abs(theta) * 1e-5);
             break;
         default:
             return 0.0;
