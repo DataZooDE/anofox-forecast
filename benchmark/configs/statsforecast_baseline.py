@@ -34,15 +34,15 @@ def get_models_config(seasonality: int, horizon: int):
         },
         {
             'model_factory': RandomWalkWithDrift,
-            'params': {'model_name': 'RandomWalkWithDrift'}
+            'params': {'alias': 'RandomWalkWithDrift'}
         },
         {
             'model_factory': WindowAverage,
-            'params': {'window_size': window_size, 'model_name': 'SMA'}
+            'params': {'window_size': window_size, 'alias': 'SMA'}
         },
         {
             'model_factory': SeasonalWindowAverage,
-            'params': {'season_length': seasonality, 'window_size': window_size, 'model_name': 'SeasonalWindowAverage'}
+            'params': {'season_length': seasonality, 'window_size': window_size, 'alias': 'SeasonalWindowAverage'}
         },
     ]
 

@@ -32,31 +32,31 @@ def get_models_config(seasonality: int, horizon: int):
     return [
         {
             'model_factory': SimpleExponentialSmoothing,
-            'params': {'alpha': 0.5, 'model_name': 'SES'}
+            'params': {'alpha': 0.5, 'alias': 'SES'}
         },
         {
             'model_factory': SimpleExponentialSmoothingOptimized,
-            'params': {'model_name': 'SESOptimized'}
+            'params': {'alias': 'SESOptimized'}
         },
         {
             'model_factory': SeasonalExponentialSmoothing,
-            'params': {'season_length': seasonality, 'alpha': 0.5, 'model_name': 'SeasonalES'}
+            'params': {'season_length': seasonality, 'alpha': 0.5, 'alias': 'SeasonalES'}
         },
         {
             'model_factory': SeasonalExponentialSmoothingOptimized,
-            'params': {'season_length': seasonality, 'model_name': 'SeasonalESOptimized'},
+            'params': {'season_length': seasonality, 'alias': 'SeasonalESOptimized'},
         },
         {
             'model_factory': Holt,
-            'params': {'model_name': 'Holt'}
+            'params': {'alias': 'Holt'}
         },
         {
             'model_factory': HoltWinters,
-            'params': {'season_length': seasonality, 'model_name': 'HoltWinters'}
+            'params': {'season_length': seasonality, 'alias': 'HoltWinters'}
         },
         {
             'model_factory': AutoETS,
-            'params': {'season_length': seasonality, 'model_name': 'AutoETS'}
+            'params': {'season_length': seasonality, 'alias': 'AutoETS'}
         },
     ]
 
