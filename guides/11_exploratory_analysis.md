@@ -737,13 +737,6 @@ SELECT * FROM TS_FORECAST_BY('sales_autoprepared', product_id, date, sales_amoun
 5. ✅ **Validate**: Re-check quality scores
 6. ✅ **Forecast**: Generate predictions on clean data
 
-**Expected Outcome**:
-
-- 30-50% improvement in forecast accuracy
-- Fewer model failures
-- More reliable confidence intervals
-- Better business decisions
-
 **Next Steps**:
 
 - [Demand Forecasting Use Case](70_demand_forecasting.md)
@@ -752,4 +745,4 @@ SELECT * FROM TS_FORECAST_BY('sales_autoprepared', product_id, date, sales_amoun
 
 ---
 
-**Pro Tip**: Save your preparation pipeline as a VIEW for reusability!
+**Tip**: Save your preparation pipeline as a VIEW for reusability!

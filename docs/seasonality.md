@@ -200,13 +200,3 @@ The algorithm uses these internal defaults:
 3. **Use the primary period** (first in list) for forecasting
 4. **Consider multiple seasonalities** (use MSTL, TBATS, or MFLES)
 5. **Re-detect periodically** as patterns may change over time
-
-## Examples
-
-See `examples/seasonality_detection.sql` for comprehensive examples including:
-- Simple detection
-- Detailed analysis
-- Multiple series
-- Integration with forecasting
-- Rolling window analysis
-

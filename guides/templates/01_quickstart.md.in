@@ -36,7 +36,7 @@ Generate your first time series forecast using the Anofox Forecast extension's S
 
 **Schema Notes**:
 - `forecast_step`: Sequential horizon step (1, 2, ..., horizon)
-- `date_col`: Forecast timestamp (type matches input date column)
+- `date`: Forecast timestamp (type matches input date column)
 - `point_forecast`: Point forecast value
 - `lower`, `upper`: Prediction interval bounds (default 90% confidence)
 

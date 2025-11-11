@@ -68,7 +68,7 @@ SELECT * FROM TS_FORECAST(
 **Schema Notes**:
 
 - `forecast_step`: Sequential horizon step (1, 2, ..., horizon)
-- `date_col`: Forecast timestamp (type matches input date column)
+- `date`: Forecast timestamp (type matches input date column)
 - `point_forecast`: Point forecast value
 - `lower`, `upper`: Prediction interval bounds (default 90% confidence)
 
