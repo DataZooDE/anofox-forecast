@@ -4,16 +4,6 @@ The examples are organised around two end-to-end scenarios that combine the libr
 Each scenario is available as a C++ program in this directory and as a Python script under
 `python/examples/`.
 
-## Scenario Overview
-
-- **pipeline_forecasting**  
-  Builds a full forecasting workflow: transform pipeline (Yeo–Johnson + standard scaling), auto-select
-  across classical models, rolling backtests, and leaderboard style reporting with hold-out metrics.
-
-- **monitoring_workflow**  
-  Demonstrates production monitoring: online anomaly detection with MAD, changepoint localisation,
-  DBSCAN-based segment screening, and rolling ARIMA backtests to quantify drift.
-
 ## Building & Running C++ Examples
 
 ```bash
@@ -40,20 +30,6 @@ cmake --build . --target pipeline_forecasting monitoring_workflow
 
 The consolidated examples are wired into `ctest` (`ctest -R "^example-"`) and are exercised as part
 of `make test-example`.
-
-## Python Examples
-
-The matching Python walkthroughs live in `python/examples/`:
-
-- `pipeline_forecasting.py`
-- `monitoring_workflow.py`
-
-Run them after building/installing the bindings (e.g. `make dev`):
-
-```bash
-python python/examples/pipeline_forecasting.py
-python python/examples/monitoring_workflow.py
-```
 
 ## Extending
 
