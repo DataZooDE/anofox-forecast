@@ -157,6 +157,11 @@ target_link_libraries(${LOADABLE_EXTENSION_NAME}
     Threads::Threads
 )
 
+if(WIN32)
+    target_compile_definitions(${EXTENSION_NAME} PRIVATE _USE_MATH_DEFINES)
+    target_compile_definitions(${LOADABLE_EXTENSION_NAME} PRIVATE _USE_MATH_DEFINES)
+endif()
+
 # Link Eigen3 if available and add compile definition
 if(Eigen3_FOUND)
     target_link_libraries(${EXTENSION_NAME} Eigen3::Eigen)
