@@ -850,7 +850,8 @@ private:
 		}
 	}
 
-	static std::int64_t dayKey(const TimePoint &tp) {
+	template <typename Clock, typename Duration>
+	static std::int64_t dayKey(const std::chrono::time_point<Clock, Duration> &tp) {
 		static constexpr std::int64_t denom = kNanosecondsPerDay;
 		const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(tp.time_since_epoch()).count();
 		std::int64_t quotient = ns / denom;
