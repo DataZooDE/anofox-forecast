@@ -1,11 +1,9 @@
 {
         "dependencies": [
-                "openssl",
                 "eigen3"
         ],
 		"vcpkg-configuration": {
 				"overlay-ports": [
-						"./vcpkg_ports_local",
 						"./extension-ci-tools/vcpkg_ports"
 				],
                 "overlay-triplets": [

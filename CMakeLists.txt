@@ -19,8 +19,6 @@ else()
 endif()
 
 # DuckDB's extension distribution supports vcpkg
-# OpenSSL made optional due to linking issues
-find_package(OpenSSL QUIET)
 find_package(Threads REQUIRED)
 
 # Make Eigen3 optional for clang-tidy (which doesn't use vcpkg)
@@ -158,15 +156,6 @@ target_link_libraries(${EXTENSION_NAME}
 target_link_libraries(${LOADABLE_EXTENSION_NAME}
     Threads::Threads
 )
-
-# Link OpenSSL if found
-if(OpenSSL_FOUND)
-    target_link_libraries(${EXTENSION_NAME} OpenSSL::SSL OpenSSL::Crypto)
-    target_link_libraries(${LOADABLE_EXTENSION_NAME} OpenSSL::SSL OpenSSL::Crypto)
-    message(STATUS "OpenSSL found and linked")
-else()
-    message(STATUS "OpenSSL not found - skipping (not currently used)")
-endif()
 
 # Link Eigen3 if available and add compile definition
 if(Eigen3_FOUND)
