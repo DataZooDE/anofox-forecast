@@ -3,10 +3,11 @@
                 "openssl",
                 "eigen3"
         ],
-        "vcpkg-configuration": {
-                "overlay-ports": [
-                        "./extension-ci-tools/vcpkg_ports"
-                ],
+		"vcpkg-configuration": {
+				"overlay-ports": [
+						"./vcpkg_ports_local",
+						"./extension-ci-tools/vcpkg_ports"
+				],
                 "overlay-triplets": [
                         "./extension-ci-tools/toolchains"
                 ]
