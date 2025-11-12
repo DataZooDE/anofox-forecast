@@ -118,6 +118,31 @@ else()
     message(FATAL_ERROR "Unknown platform")
 endif()
 
+if(VCPKG_TARGET_IS_LINUX)
+    set(_anofox_kernel_header "/usr/include/linux/version.h")
+    if(NOT EXISTS "${_anofox_kernel_header}")
+        if(EXISTS "/etc/alpine-release")
+            set(_anofox_header_cmd "apk add --no-cache linux-headers")
+        elseif(EXISTS "/etc/debian_version")
+            set(_anofox_header_cmd "apt-get update && apt-get install -y linux-libc-dev")
+        elseif(EXISTS "/etc/redhat-release")
+            set(_anofox_header_cmd "yum install -y kernel-headers")
+        else()
+            set(_anofox_header_cmd "")
+        endif()
+        if(_anofox_header_cmd)
+            vcpkg_execute_required_process(
+                COMMAND "${CMAKE_COMMAND}" -E env bash -lc "${_anofox_header_cmd}"
+                WORKING_DIRECTORY "${CURRENT_BUILDTREES_DIR}"
+                LOGNAME anofox-install-kernel-headers
+            )
+        endif()
+        if(NOT EXISTS "${_anofox_kernel_header}")
+            message(FATAL_ERROR "Linux kernel headers are required to build OpenSSL but could not be installed automatically. Please install them with your system package manager.")
+        endif()
+    endif()
+endif()
+
 file(MAKE_DIRECTORY "${SOURCE_PATH}/vcpkg")
 file(COPY "${CMAKE_CURRENT_LIST_DIR}/configure" DESTINATION "${SOURCE_PATH}/vcpkg")
 if(NOT VCPKG_HOST_IS_WINDOWS)
