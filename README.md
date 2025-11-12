@@ -7,7 +7,7 @@
 
 > [!IMPORTANT]
 > This extension is in early development, so bugs and breaking changes are expected.
-> Please use the [issues page](https://github.com/DataZooDE/anofox-statistics/issues) to report bugs or request features.
+> Please use the [issues page](https://github.com/DataZooDE/anofox-forecast/issues) to report bugs or request features.
 
 A time series forecasting extension for DuckDB with 31 models, data preparation, and analytics — all in pure SQL.
 
@@ -518,10 +518,6 @@ SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 7, {'seasonal_period
 🔄 **Converts to MPL 2.0** - After 5 years from first publication
 
 See [LICENSE](LICENSE) for full terms.
-
-### Commercial Licensing
-
-For commercial licensing (hosted services, embedded products), contact: `license@anofox.com`
 
 ## 🤝 Contributing
 
