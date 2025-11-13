@@ -11,20 +11,91 @@
 
 A time series forecasting extension for DuckDB with 31 models, data preparation, and analytics — all in pure SQL.
 
-## 🚀 Quick Start
+## Installation
+
+### Community Extension
+
+```sql
+INSTALL anofox_forecast FROM community;
+LOAD anofox_forecast;
+```
+
+### From Source
+
+```bash
+# Clone the repository with submodules
+git clone --recurse-submodules https://github.com/DataZooDE/anofox-forecast.git
+cd anofox-forecast
+
+# Build the extension
+make release
+
+# The extension will be built to:
+# build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension
+```
+
+## 🚀 Quick Start on M5 Dataset
+
+The forecast takes ~2 minutes on a Dell XPS 13. 
 
 ```sql
 -- Load extension
-LOAD 'anofox_forecast.duckdb_extension';
+LOAD httpfs;
+LOAD anofox_forecast;
 
--- Single series forecast
--- Returns: forecast_step, date_col, point_forecast, lower, upper, model_name
-SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, {'seasonal_period': 7});
+CREATE OR REPLACE TABLE m5 AS 
+SELECT item_id, CAST(timestamp AS TIMESTAMP) AS ds, demand AS y FROM 'https://m5-benchmarks.s3.amazonaws.com/data/train/target.parquet'
+ORDER BY item_id, timestamp;
 
--- Multiple series with GROUP BY parallelization
--- Automatically distributes forecasting across CPU cores
-SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28, 
-                             {'seasonal_period': 7, 'confidence_level': 0.95});
+CREATE OR REPLACE TABLE m5_train AS
+SELECT * FROM m5 WHERE ds < DATE '2016-04-25';
+
+CREATE OR REPLACE TABLE m5_test AS
+SELECT * FROM m5 WHERE ds >= DATE '2016-04-25';
+
+-- Perform baseline forecast and evaluate performance
+CREATE OR REPLACE TABLE forecast_results AS (
+    SELECT *
+    FROM TS_FORECAST_BY('m5_train', item_id, ds, y, 'SeasonalNaive', 28, {'seasonal_period': 7})
+    UNION ALL
+    SELECT *
+    FROM TS_FORECAST_BY('m5_train', item_id, ds, y, 'Theta', 28, {'seasonal_period': 7})
+    UNION ALL
+    SELECT *
+    FROM TS_FORECAST_BY('m5_train', item_id, ds, y, 'AutoARIMA', 28, {'seasonal_period': 7})
+);
+
+-- MAE and Bias of Forecasts
+CREATE OR REPLACE TABLE evaluation_results AS (
+  SELECT 
+      item_id,
+      model_name,
+      TS_MAE(LIST(y), LIST(point_forecast)) AS mae,
+      TS_BIAS(LIST(y), LIST(point_forecast)) AS bias
+  FROM (
+      -- Join Forecast with Test Data
+      SELECT 
+          m.item_id,
+          m.ds,
+          m.y,
+          n.model_name,
+          n.point_forecast
+      FROM forecast_results n
+      JOIN m5_test m ON n.item_id = m.item_id AND n.date = m.ds
+  )
+  GROUP BY item_id, model_name
+);
+
+-- Summarise evaluation results by model
+SELECT
+  model_name,
+  AVG(mae) AS avg_mae,
+  STDDEV(mae) AS std_mae,
+  AVG(bias) AS avg_bias,
+  STDDEV(bias) AS std_bias
+FROM evaluation_results
+GROUP BY model_name
+ORDER BY avg_mae;
 ```
 
 ## ✨ Key Features
