@@ -1,7 +1,7 @@
 # Anofox Forecast - Time Series Forecasting for DuckDB
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE)
-[![DuckDB](https://img.shields.io/badge/DuckDB-1.4.1+-green.svg)](https://duckdb.org)
+[![DuckDB](https://img.shields.io/badge/DuckDB-1.4.2+-green.svg)](https://duckdb.org)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
 
 
@@ -36,7 +36,7 @@ make release
 
 ## 🚀 Quick Start on M5 Dataset
 
-The forecast takes ~2 minutes on a Dell XPS 13. 
+The forecast takes ~2 minutes on a Dell XPS 13. (You need DuckDB v1.4.2).
 
 ```sql
 -- Load extension
