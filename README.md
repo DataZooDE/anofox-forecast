@@ -11,6 +11,14 @@
 
 A time series forecasting extension for DuckDB with 31 models, data preparation, and analytics — all in pure SQL.
 
+## Pre-requirements
+
+Note: For ARIMA models you will need to install Eigen3 libraries. For example for Linux (Debian-Ubuntu based): 
+
+```bash
+sudo apt install libeigen3-dev
+```
+
 ## Installation
 
 ### Community Extension
