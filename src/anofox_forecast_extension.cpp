@@ -16,6 +16,7 @@
 #include "changepoint_function.hpp"
 #include "eda_macros.hpp"
 #include "data_prep_macros.hpp"
+#include "ts_features_function.hpp"
 #include "duckdb/catalog/default/default_functions.hpp"
 #include "duckdb/catalog/default/default_table_functions.hpp"
 
@@ -152,6 +153,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// Register changepoint detection functions
 	RegisterChangepointFunction(loader);
 	// std::cerr << "[DEBUG] Changepoint functions registered" << std::endl;
+
+	// Register ts_features aggregate/window function
+	RegisterTSFeaturesFunction(loader);
 
 	// Register table macros (TS_FORECAST, TS_FORECAST_BY)
 	// Both handle UNNEST internally - users get clean table output!

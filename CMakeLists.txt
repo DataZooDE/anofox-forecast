@@ -96,6 +96,9 @@ set(ANOFOX_TIME_SOURCES
     anofox-time/src/utils/intermittent_utils.cpp
     anofox-time/src/utils/robust_regression.cpp
     anofox-time/src/utils/cross_validation.cpp
+    anofox-time/src/features/feature_math.cpp
+    anofox-time/src/features/feature_registry.cpp
+    anofox-time/src/features/feature_calculators.cpp
     # Optimization
     anofox-time/src/optimization/lbfgs_optimizer.cpp
     anofox-time/src/optimization/ets_gradients.cpp
@@ -117,6 +120,7 @@ set(EXTENSION_SOURCES
     src/anofox_forecast_extension.cpp
     src/forecast_table_function.cpp
     src/forecast_aggregate.cpp
+    src/ts_features_function.cpp
     src/metrics_function.cpp
     src/seasonality_function.cpp
     src/changepoint_function.cpp

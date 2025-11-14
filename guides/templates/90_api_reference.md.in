@@ -5,6 +5,7 @@
 Comprehensive technical reference for all functions, macros, and parameters in the Anofox Forecast extension.
 
 **API Summary**:
+
 - 2 core forecasting functions (`TS_FORECAST`, `TS_FORECAST_BY`)
 - 31 forecasting models
 - 12 evaluation metrics
@@ -21,42 +22,62 @@ Comprehensive technical reference for all functions, macros, and parameters in t
 Generate forecasts for a single time series.
 
 **Signature**:
+
 <!-- include: test/sql/docs_examples/90_api_reference_forecast_01.sql -->
 
 **Output Schema**:
-```sql
-TABLE(
-    forecast_step INTEGER,                    -- Horizon step (1, 2, ..., horizon)
-    date_col DATE|TIMESTAMP|INTEGER,          -- Forecast timestamp (type matches input)
-    point_forecast DOUBLE,                    -- Point forecast value
-    lower DOUBLE,                             -- Lower prediction interval bound
-    upper DOUBLE,                             -- Upper prediction interval bound
-    model_name VARCHAR,                       -- Model name used
-    insample_fitted DOUBLE[],                 -- Fitted values (optional)
-    confidence_level DOUBLE                   -- Confidence level for intervals
-)
-```
+
+<!-- include: test/sql/docs_examples/90_api_reference_example_02.sql -->
 
 **Behavioral Notes**:
+
 - `date_col` type preserved from input (INTEGER, DATE, or TIMESTAMP)
 - `insample_fitted` array length equals training data size (empty by default, populate via `return_insample: true`)
 - Prediction intervals computed at `confidence_level` (default 0.90)
 
 **Example**:
-<!-- include: test/sql/docs_examples/90_api_reference_example_02.sql -->
+
+<!-- include: test/sql/docs_examples/90_api_reference_example_03.sql -->
 
 ### TS_FORECAST_BY
 
 Generate forecasts for multiple time series with GROUP BY.
 
 **Signature**:
-<!-- include: test/sql/docs_examples/90_api_reference_forecast_03.sql -->
+
+<!-- include: test/sql/docs_examples/90_api_reference_forecast_04.sql -->
 
 **Output Columns**: Same as TS_FORECAST, plus:
+
 - `group_col: ANY` - Grouping column value
 
 **Example**:
-<!-- include: test/sql/docs_examples/90_api_reference_example_04.sql -->
+
+<!-- include: test/sql/docs_examples/90_api_reference_example_05.sql -->
+
+### TS_FEATURES
+
+Extract the complete tsfresh-compatible feature vector directly inside DuckDB.
+
+**Signature**:
+
+```sql
+ts_features(
+    ts_column TIMESTAMP|DATE|BIGINT,
+    value_column DOUBLE
+) -> STRUCT(...)
+```
+
+**Highlights**:
+
+- Mirrors the 76 feature calculators and default parameter grids from upstream [tsfresh](https://tsfresh.readthedocs.io/en/latest/text/list_of_features.html)
+- Safe for both `GROUP BY` and analytic windows (`OVER (PARTITION BY ... ORDER BY ... ROWS BETWEEN ...)`)
+- Timestamp ordering inferred from INTEGER/DATE/TIMESTAMP inputs; values are always DOUBLE
+- Output columns follow `feature__param_key_value` naming for stable downstream references
+
+**Example**:
+
+<!-- include: test/sql/examples/ts_features.sql -->
 
 ---
 
@@ -157,13 +178,16 @@ Generate forecasts for multiple time series with GROUP BY.
 ### Model-Specific Parameters
 
 #### ETS Parameters
-<!-- include: test/sql/docs_examples/90_api_reference_example_05.sql -->
 
-#### ARIMA Parameters
 <!-- include: test/sql/docs_examples/90_api_reference_example_06.sql -->
 
+#### ARIMA Parameters
+
+<!-- include: test/sql/docs_examples/90_api_reference_example_07.sql -->
+
 #### Multiple Seasonality Parameters
-<!-- include: test/sql/docs_examples/90_api_reference_seasonality_07.sql -->
+
+<!-- include: test/sql/docs_examples/90_api_reference_seasonality_08.sql -->
 
 ---
 
@@ -197,7 +221,8 @@ Generate forecasts for multiple time series with GROUP BY.
 | **TS_COVERAGE** | Interval calibration |
 
 **Example Usage**:
-<!-- include: test/sql/docs_examples/90_api_reference_evaluate_08.sql -->
+
+<!-- include: test/sql/docs_examples/90_api_reference_evaluate_09.sql -->
 
 ---
 
@@ -208,9 +233,11 @@ Generate forecasts for multiple time series with GROUP BY.
 Generate comprehensive per-series statistics.
 
 **Signature**:
-<!-- include: test/sql/docs_examples/90_api_reference_statistics_09.sql -->
+
+<!-- include: test/sql/docs_examples/90_api_reference_statistics_10.sql -->
 
 **Output** (23 features):
+
 - Basic: length, start_date, end_date, mean, std, min, max, median
 - Quality: n_null, n_nan, n_zeros, n_gaps, n_unique_values, is_constant
 - Advanced: trend_corr, cv, intermittency, quality_score
@@ -221,9 +248,11 @@ Generate comprehensive per-series statistics.
 Comprehensive data quality checks.
 
 **Signature**:
-<!-- include: test/sql/docs_examples/90_api_reference_data_quality_10.sql -->
+
+<!-- include: test/sql/docs_examples/90_api_reference_data_quality_11.sql -->
 
 **Checks**:
+
 - Gap analysis
 - Missing values
 - Constant series
@@ -235,23 +264,27 @@ Comprehensive data quality checks.
 Overall dataset statistics.
 
 **Signature**:
-<!-- include: test/sql/docs_examples/90_api_reference_statistics_11.sql -->
+
+<!-- include: test/sql/docs_examples/90_api_reference_statistics_12.sql -->
 
 ### TS_GET_PROBLEMATIC
 
 Identify low-quality series.
 
 **Signature**:
-<!-- include: test/sql/docs_examples/90_api_reference_data_quality_12.sql -->
+
+<!-- include: test/sql/docs_examples/90_api_reference_data_quality_13.sql -->
 
 ### TS_DETECT_SEASONALITY_ALL
 
 Detect seasonality for all series.
 
 **Signature**:
-<!-- include: test/sql/docs_examples/90_api_reference_data_quality_13.sql -->
+
+<!-- include: test/sql/docs_examples/90_api_reference_data_quality_14.sql -->
 
 **Output**:
+
 - `series_id`
 - `detected_periods: INT[]` - All detected periods
 - `primary_period: INT` - Main seasonal period
@@ -264,46 +297,58 @@ Detect seasonality for all series.
 ### Gap Filling
 
 **TS_FILL_GAPS**: Fill missing time points
-<!-- include: test/sql/docs_examples/90_api_reference_fill_gaps_14.sql -->
+
+<!-- include: test/sql/docs_examples/90_api_reference_fill_gaps_15.sql -->
 
 **TS_FILL_FORWARD**: Extend series to target date
-<!-- include: test/sql/docs_examples/90_api_reference_fill_gaps_15.sql -->
+
+<!-- include: test/sql/docs_examples/90_api_reference_fill_gaps_16.sql -->
 
 ### Series Filtering
 
 **TS_DROP_CONSTANT**: Remove constant series
-<!-- include: test/sql/docs_examples/90_api_reference_example_16.sql -->
 
-**TS_DROP_SHORT**: Remove short series
 <!-- include: test/sql/docs_examples/90_api_reference_example_17.sql -->
 
-**TS_DROP_GAPPY**: Remove series with excessive gaps
+**TS_DROP_SHORT**: Remove short series
+
 <!-- include: test/sql/docs_examples/90_api_reference_example_18.sql -->
+
+**TS_DROP_GAPPY**: Remove series with excessive gaps
+
+<!-- include: test/sql/docs_examples/90_api_reference_example_19.sql -->
 
 ### Edge Cleaning
 
 **TS_DROP_LEADING_ZEROS**: Remove leading zeros
-<!-- include: test/sql/docs_examples/90_api_reference_example_19.sql -->
 
-**TS_DROP_TRAILING_ZEROS**: Remove trailing zeros
 <!-- include: test/sql/docs_examples/90_api_reference_example_20.sql -->
 
-**TS_DROP_EDGE_ZEROS**: Remove both leading and trailing zeros
+**TS_DROP_TRAILING_ZEROS**: Remove trailing zeros
+
 <!-- include: test/sql/docs_examples/90_api_reference_example_21.sql -->
+
+**TS_DROP_EDGE_ZEROS**: Remove both leading and trailing zeros
+
+<!-- include: test/sql/docs_examples/90_api_reference_example_22.sql -->
 
 ### Missing Value Imputation
 
 **TS_FILL_NULLS_CONST**: Fill with constant
-<!-- include: test/sql/docs_examples/90_api_reference_example_22.sql -->
 
-**TS_FILL_NULLS_FORWARD**: Forward fill (LOCF)
 <!-- include: test/sql/docs_examples/90_api_reference_example_23.sql -->
 
-**TS_FILL_NULLS_BACKWARD**: Backward fill
+**TS_FILL_NULLS_FORWARD**: Forward fill (LOCF)
+
 <!-- include: test/sql/docs_examples/90_api_reference_example_24.sql -->
 
-**TS_FILL_NULLS_MEAN**: Fill with series mean
+**TS_FILL_NULLS_BACKWARD**: Backward fill
+
 <!-- include: test/sql/docs_examples/90_api_reference_example_25.sql -->
+
+**TS_FILL_NULLS_MEAN**: Fill with series mean
+
+<!-- include: test/sql/docs_examples/90_api_reference_example_26.sql -->
 
 ---
 
@@ -314,17 +359,20 @@ Detect seasonality for all series.
 Detect seasonal periods in a single series.
 
 **Signature**:
-<!-- include: test/sql/docs_examples/90_api_reference_seasonality_26.sql -->
+
+<!-- include: test/sql/docs_examples/90_api_reference_seasonality_27.sql -->
 
 **Example**:
-<!-- include: test/sql/docs_examples/90_api_reference_seasonality_27.sql -->
+
+<!-- include: test/sql/docs_examples/90_api_reference_seasonality_28.sql -->
 
 ### TS_ANALYZE_SEASONALITY
 
 Detailed seasonality analysis with decomposition.
 
 **Signature**:
-<!-- include: test/sql/docs_examples/90_api_reference_seasonality_28.sql -->
+
+<!-- include: test/sql/docs_examples/90_api_reference_seasonality_29.sql -->
 
 **Returns**: trend_strength, seasonal_strength, periods, etc.
 
@@ -337,12 +385,15 @@ Detailed seasonality analysis with decomposition.
 Detect regime changes in a single series.
 
 **Signature**:
-<!-- include: test/sql/docs_examples/90_api_reference_seasonality_29.sql -->
 
-**Parameters**:
 <!-- include: test/sql/docs_examples/90_api_reference_seasonality_30.sql -->
 
+**Parameters**:
+
+<!-- include: test/sql/docs_examples/90_api_reference_seasonality_31.sql -->
+
 **Output**:
+
 - `date_col: TIMESTAMP`
 - `value_col: DOUBLE`
 - `is_changepoint: BOOLEAN`
@@ -353,7 +404,8 @@ Detect regime changes in a single series.
 Changepoint detection with GROUP BY.
 
 **Signature**:
-<!-- include: test/sql/docs_examples/90_api_reference_seasonality_31.sql -->
+
+<!-- include: test/sql/docs_examples/90_api_reference_seasonality_32.sql -->
 
 ---
 
@@ -364,17 +416,20 @@ Changepoint detection with GROUP BY.
 Aggregate function for custom GROUP BY.
 
 **Signature**:
-<!-- include: test/sql/docs_examples/90_api_reference_example_32.sql -->
+
+<!-- include: test/sql/docs_examples/90_api_reference_example_33.sql -->
 
 **Usage** (for 2+ group columns):
-<!-- include: test/sql/docs_examples/90_api_reference_example_33.sql -->
+
+<!-- include: test/sql/docs_examples/90_api_reference_example_34.sql -->
 
 ### TS_DETECT_CHANGEPOINTS_AGG
 
 Aggregate function for custom changepoint detection.
 
 **Signature**:
-<!-- include: test/sql/docs_examples/90_api_reference_seasonality_34.sql -->
+
+<!-- include: test/sql/docs_examples/90_api_reference_seasonality_35.sql -->
 
 ---
 
@@ -382,11 +437,11 @@ Aggregate function for custom changepoint detection.
 
 ### Forecasting Parameters
 
-<!-- include: test/sql/docs_examples/90_api_reference_example_35.sql -->
+<!-- include: test/sql/docs_examples/90_api_reference_example_36.sql -->
 
 ### Changepoint Parameters
 
-<!-- include: test/sql/docs_examples/90_api_reference_example_36.sql -->
+<!-- include: test/sql/docs_examples/90_api_reference_example_37.sql -->
 
 ---
 
@@ -394,11 +449,11 @@ Aggregate function for custom changepoint detection.
 
 ### Forecast Output
 
-<!-- include: test/sql/docs_examples/90_api_reference_example_37.sql -->
+<!-- include: test/sql/docs_examples/90_api_reference_example_38.sql -->
 
 ### Changepoint Output
 
-<!-- include: test/sql/docs_examples/90_api_reference_example_38.sql -->
+<!-- include: test/sql/docs_examples/90_api_reference_example_39.sql -->
 
 ---
 
@@ -406,17 +461,21 @@ Aggregate function for custom changepoint detection.
 
 ### Common Errors
 
-**"Model requires 'seasonal_period' parameter"**
-<!-- include: test/sql/docs_examples/90_api_reference_example_39.sql -->
+#### "Model requires `seasonal_period` parameter"
 
-**"Series too short for seasonal model"**
 <!-- include: test/sql/docs_examples/90_api_reference_example_40.sql -->
 
-**"Constant series detected"**
-<!-- include: test/sql/docs_examples/90_api_reference_seasonality_41.sql -->
+#### "Series too short for seasonal model"
 
-**"confidence_level must be between 0 and 1"**
+<!-- include: test/sql/docs_examples/90_api_reference_example_41.sql -->
+
+#### "Constant series detected"
+
 <!-- include: test/sql/docs_examples/90_api_reference_seasonality_42.sql -->
+
+#### "`confidence_level` must be between 0 and 1"
+
+<!-- include: test/sql/docs_examples/90_api_reference_seasonality_43.sql -->
 
 ---
 
@@ -425,16 +484,20 @@ Aggregate function for custom changepoint detection.
 ### Optimization Tips
 
 1. **Use GROUP BY efficiently**:
-<!-- include: test/sql/docs_examples/90_api_reference_example_43.sql -->
 
-2. **Materialize intermediate results**:
-<!-- include: test/sql/docs_examples/90_api_reference_multi_series_44.sql -->
+<!-- include: test/sql/docs_examples/90_api_reference_example_44.sql -->
 
-3. **Disable features you don't need**:
-<!-- include: test/sql/docs_examples/90_api_reference_create_sample_data_45.sql -->
+1. **Materialize intermediate results**:
 
-4. **Use appropriate models**:
+<!-- include: test/sql/docs_examples/90_api_reference_multi_series_45.sql -->
+
+1. **Disable features you don't need**:
+
 <!-- include: test/sql/docs_examples/90_api_reference_create_sample_data_46.sql -->
+
+1. **Use appropriate models**:
+
+<!-- include: test/sql/docs_examples/90_api_reference_example_47.sql -->
 
 ### Memory Usage
 
@@ -449,6 +512,7 @@ Aggregate function for custom changepoint detection.
 ## Summary
 
 **Total API**:
+
 - 31 forecasting models
 - 12 evaluation metrics
 - 5 EDA macros
@@ -462,7 +526,7 @@ Aggregate function for custom changepoint detection.
 ---
 
 **Quick Links**:
+
 - [Basic Forecasting](30_basic_forecasting.md) - Get started
 - [Model Selection](40_model_selection.md) - Choose the right model
 - [Parameters Guide](12_parameters.md) - Detailed parameter reference
-

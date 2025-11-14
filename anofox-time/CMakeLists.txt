@@ -17,6 +17,9 @@ add_library(anofox-time
     src/utils/intermittent_utils.cpp
     src/utils/robust_regression.cpp
     src/utils/cross_validation.cpp
+    src/features/feature_math.cpp
+    src/features/feature_registry.cpp
+    src/features/feature_calculators.cpp
     src/validation.cpp
     src/selectors/auto_selector.cpp
     src/models/garch.cpp
@@ -167,6 +170,7 @@ if(BUILD_TESTING)
         tests/selectors/test_auto_selector.cpp
         tests/integration/test_quick_pipeline.cpp
         tests/integration/test_monitoring_workflow.cpp
+        tests/features/test_tsfresh_features.cpp
     )
 
     add_executable(anofox-time-tests

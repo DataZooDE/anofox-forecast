@@ -37,16 +37,8 @@ TS_FORECAST(
 **Output Schema**:
 
 ```sql
-TABLE(
-    forecast_step INTEGER,                    -- Horizon step (1, 2, ..., horizon)
-    date_col DATE|TIMESTAMP|INTEGER,          -- Forecast timestamp (type matches input)
-    point_forecast DOUBLE,                    -- Point forecast value
-    lower DOUBLE,                             -- Lower prediction interval bound
-    upper DOUBLE,                             -- Upper prediction interval bound
-    model_name VARCHAR,                       -- Model name used
-    insample_fitted DOUBLE[],                 -- Fitted values (optional)
-    confidence_level DOUBLE                   -- Confidence level for intervals
-)
+SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
+                          {'seasonal_period': 7, 'confidence_level': 0.95});
 ```
 
 **Behavioral Notes**:
@@ -57,10 +49,7 @@ TABLE(
 
 **Example**:
 
-```sql
-SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
-                          {'seasonal_period': 7, 'confidence_level': 0.95});
-```
+<!-- include: test/sql/docs_examples/90_api_reference_example_03.sql -->
 
 ### TS_FORECAST_BY
 
@@ -68,17 +57,7 @@ Generate forecasts for multiple time series with GROUP BY.
 
 **Signature**:
 
-```sql
-TS_FORECAST_BY(
-    table_name: VARCHAR,
-    group_col: VARCHAR,
-    date_col: DATE | TIMESTAMP,
-    value_col: DOUBLE,
-    method: VARCHAR,
-    horizon: INT,
-    params: MAP<VARCHAR, ANY>
-) → TABLE
-```
+<!-- include: test/sql/docs_examples/90_api_reference_forecast_04.sql -->
 
 **Output Columns**: Same as TS_FORECAST, plus:
 
@@ -87,8 +66,61 @@ TS_FORECAST_BY(
 **Example**:
 
 ```sql
-SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28, 
-                             {'seasonal_period': 7});
+{
+    'seasonal_period': 7,
+    'error_type': 0 | 1,      -- 0=additive, 1=multiplicative
+    'trend_type': 0 | 1 | 2,  -- 0=none, 1=additive, 2=damped
+    'season_type': 0 | 1 | 2, -- 0=none, 1=additive, 2=multiplicative
+    'alpha': 0.0-1.0,         -- Level smoothing (optional, auto-optimized)
+    'beta': 0.0-1.0,          -- Trend smoothing (optional)
+    'gamma': 0.0-1.0,         -- Seasonal smoothing (optional)
+    'phi': 0.0-1.0            -- Damping (optional)
+}
+```
+
+### TS_FEATURES
+
+Extract the complete tsfresh-compatible feature vector directly inside DuckDB.
+
+**Signature**:
+
+```sql
+ts_features(
+    ts_column TIMESTAMP|DATE|BIGINT,
+    value_column DOUBLE
+) -> STRUCT(...)
+```
+
+**Highlights**:
+
+- Mirrors the 76 feature calculators and default parameter grids from upstream [tsfresh](https://tsfresh.readthedocs.io/en/latest/text/list_of_features.html)
+- Safe for both `GROUP BY` and analytic windows (`OVER (PARTITION BY ... ORDER BY ... ROWS BETWEEN ...)`)
+- Timestamp ordering inferred from INTEGER/DATE/TIMESTAMP inputs; values are always DOUBLE
+- Output columns follow `feature__param_key_value` naming for stable downstream references
+
+**Example**:
+
+```sql
+-- ts_features example: compute feature vector per product
+LOAD anofox_forecast;
+
+CREATE OR REPLACE TABLE demand_series AS
+SELECT 
+    product_id,
+    (TIMESTAMP '2024-01-01' + INTERVAL day DAY) AS ts,
+    (100 + product_id * 10 + day)::DOUBLE AS demand
+FROM generate_series(0, 6) t(day)
+CROSS JOIN (SELECT 1 AS product_id UNION ALL SELECT 2) p;
+
+SELECT 
+    product_id,
+    (ts_features(ts, demand)).mean AS avg_demand,
+    (ts_features(ts, demand)).variance AS demand_variance,
+    (ts_features(ts, demand)).autocorrelation__lag_1 AS lag1_autocorr
+FROM demand_series
+GROUP BY product_id
+ORDER BY product_id;
+
 ```
 
 ---
@@ -193,21 +225,6 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28,
 
 ```sql
 {
-    'seasonal_period': 7,
-    'error_type': 0 | 1,      -- 0=additive, 1=multiplicative
-    'trend_type': 0 | 1 | 2,  -- 0=none, 1=additive, 2=damped
-    'season_type': 0 | 1 | 2, -- 0=none, 1=additive, 2=multiplicative
-    'alpha': 0.0-1.0,         -- Level smoothing (optional, auto-optimized)
-    'beta': 0.0-1.0,          -- Trend smoothing (optional)
-    'gamma': 0.0-1.0,         -- Seasonal smoothing (optional)
-    'phi': 0.0-1.0            -- Damping (optional)
-}
-```
-
-#### ARIMA Parameters
-
-```sql
-{
     'p': INT,                  -- AR order (0-5 typical)
     'd': INT,                  -- Differencing (0-2 typical)
     'q': INT,                  -- MA order (0-5 typical)
@@ -219,16 +236,13 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28,
 }
 ```
 
+#### ARIMA Parameters
+
+<!-- include: test/sql/docs_examples/90_api_reference_example_07.sql -->
+
 #### Multiple Seasonality Parameters
 
-```sql
-{
-    'seasonal_periods': [7, 30, 365],  -- Array of periods
-    'n_iterations': 100,                -- MFLES iterations
-    'use_box_cox': true,                -- TBATS Box-Cox
-    'box_cox_lambda': 0.5               -- TBATS lambda
-}
-```
+<!-- include: test/sql/docs_examples/90_api_reference_seasonality_08.sql -->
 
 ---
 
@@ -263,15 +277,7 @@ SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28,
 
 **Example Usage**:
 
-```sql
-SELECT 
-    TS_MAE(LIST(actual), LIST(forecast)) AS mae,
-    TS_RMSE(LIST(actual), LIST(forecast)) AS rmse,
-    TS_MAPE(LIST(actual), LIST(forecast)) AS mape,
-    TS_R2(LIST(actual), LIST(forecast)) AS r_squared,
-    TS_COVERAGE(LIST(actual), LIST(lower), LIST(upper)) AS coverage
-FROM results;
-```
+<!-- include: test/sql/docs_examples/90_api_reference_evaluate_09.sql -->
 
 ---
 
@@ -283,9 +289,7 @@ Generate comprehensive per-series statistics.
 
 **Signature**:
 
-```sql
-TS_STATS(table_name, group_col, date_col, value_col) → TABLE
-```
+<!-- include: test/sql/docs_examples/90_api_reference_statistics_10.sql -->
 
 **Output** (23 features):
 
@@ -300,9 +304,7 @@ Comprehensive data quality checks.
 
 **Signature**:
 
-```sql
-TS_QUALITY_REPORT(stats_table, min_length) → TABLE
-```
+<!-- include: test/sql/docs_examples/90_api_reference_data_quality_11.sql -->
 
 **Checks**:
 
@@ -318,9 +320,7 @@ Overall dataset statistics.
 
 **Signature**:
 
-```sql
-TS_DATASET_SUMMARY(stats_table) → TABLE
-```
+<!-- include: test/sql/docs_examples/90_api_reference_statistics_12.sql -->
 
 ### TS_GET_PROBLEMATIC
 
@@ -329,7 +329,7 @@ Identify low-quality series.
 **Signature**:
 
 ```sql
-TS_GET_PROBLEMATIC(stats_table, quality_threshold) → TABLE
+TS_DETECT_SEASONALITY_ALL(table_name, group_col, date_col, value_col) → TABLE
 ```
 
 ### TS_DETECT_SEASONALITY_ALL
@@ -338,9 +338,7 @@ Detect seasonality for all series.
 
 **Signature**:
 
-```sql
-TS_DETECT_SEASONALITY_ALL(table_name, group_col, date_col, value_col) → TABLE
-```
+<!-- include: test/sql/docs_examples/90_api_reference_data_quality_14.sql -->
 
 **Output**:
 
@@ -358,33 +356,31 @@ TS_DETECT_SEASONALITY_ALL(table_name, group_col, date_col, value_col) → TABLE
 **TS_FILL_GAPS**: Fill missing time points
 
 ```sql
-TS_FILL_GAPS(table_name, group_col, date_col, value_col) → TABLE
+TS_FILL_FORWARD(table_name, group_col, date_col, value_col, target_date) → TABLE
 ```
 
 **TS_FILL_FORWARD**: Extend series to target date
 
-```sql
-TS_FILL_FORWARD(table_name, group_col, date_col, value_col, target_date) → TABLE
-```
+<!-- include: test/sql/docs_examples/90_api_reference_fill_gaps_16.sql -->
 
 ### Series Filtering
 
 **TS_DROP_CONSTANT**: Remove constant series
 
 ```sql
-TS_DROP_CONSTANT(table_name, group_col, value_col) → TABLE
+TS_DROP_SHORT(table_name, group_col, date_col, min_length) → TABLE
 ```
 
 **TS_DROP_SHORT**: Remove short series
 
 ```sql
-TS_DROP_SHORT(table_name, group_col, date_col, min_length) → TABLE
+TS_DROP_GAPPY(table_name, group_col, date_col, max_gap_pct) → TABLE
 ```
 
 **TS_DROP_GAPPY**: Remove series with excessive gaps
 
 ```sql
-TS_DROP_GAPPY(table_name, group_col, date_col, max_gap_pct) → TABLE
+TS_DROP_LEADING_ZEROS(table_name, group_col, date_col, value_col) → TABLE
 ```
 
 ### Edge Cleaning
@@ -392,19 +388,19 @@ TS_DROP_GAPPY(table_name, group_col, date_col, max_gap_pct) → TABLE
 **TS_DROP_LEADING_ZEROS**: Remove leading zeros
 
 ```sql
-TS_DROP_LEADING_ZEROS(table_name, group_col, date_col, value_col) → TABLE
+TS_DROP_TRAILING_ZEROS(table_name, group_col, date_col, value_col) → TABLE
 ```
 
 **TS_DROP_TRAILING_ZEROS**: Remove trailing zeros
 
 ```sql
-TS_DROP_TRAILING_ZEROS(table_name, group_col, date_col, value_col) → TABLE
+TS_DROP_EDGE_ZEROS(table_name, group_col, date_col, value_col) → TABLE
 ```
 
 **TS_DROP_EDGE_ZEROS**: Remove both leading and trailing zeros
 
 ```sql
-TS_DROP_EDGE_ZEROS(table_name, group_col, date_col, value_col) → TABLE
+TS_FILL_NULLS_CONST(table_name, group_col, date_col, value_col, fill_value) → TABLE
 ```
 
 ### Missing Value Imputation
@@ -412,26 +408,24 @@ TS_DROP_EDGE_ZEROS(table_name, group_col, date_col, value_col) → TABLE
 **TS_FILL_NULLS_CONST**: Fill with constant
 
 ```sql
-TS_FILL_NULLS_CONST(table_name, group_col, date_col, value_col, fill_value) → TABLE
+TS_FILL_NULLS_FORWARD(table_name, group_col, date_col, value_col) → TABLE
 ```
 
 **TS_FILL_NULLS_FORWARD**: Forward fill (LOCF)
 
 ```sql
-TS_FILL_NULLS_FORWARD(table_name, group_col, date_col, value_col) → TABLE
+TS_FILL_NULLS_BACKWARD(table_name, group_col, date_col, value_col) → TABLE
 ```
 
 **TS_FILL_NULLS_BACKWARD**: Backward fill
 
 ```sql
-TS_FILL_NULLS_BACKWARD(table_name, group_col, date_col, value_col) → TABLE
+TS_FILL_NULLS_MEAN(table_name, group_col, date_col, value_col) → TABLE
 ```
 
 **TS_FILL_NULLS_MEAN**: Fill with series mean
 
-```sql
-TS_FILL_NULLS_MEAN(table_name, group_col, date_col, value_col) → TABLE
-```
+<!-- include: test/sql/docs_examples/90_api_reference_example_26.sql -->
 
 ---
 
@@ -444,15 +438,18 @@ Detect seasonal periods in a single series.
 **Signature**:
 
 ```sql
-TS_DETECT_SEASONALITY(values: DOUBLE[]) → INT[]
+SELECT TS_DETECT_SEASONALITY(LIST(sales ORDER BY date)) AS periods
+FROM sales_data;
+-- Returns: [7, 30] (weekly and monthly patterns)
 ```
 
 **Example**:
 
 ```sql
-SELECT TS_DETECT_SEASONALITY(LIST(sales ORDER BY date)) AS periods
-FROM sales_data;
--- Returns: [7, 30] (weekly and monthly patterns)
+TS_ANALYZE_SEASONALITY(
+    timestamps: TIMESTAMP[],
+    values: DOUBLE[]
+) → STRUCT
 ```
 
 ### TS_ANALYZE_SEASONALITY
@@ -462,10 +459,12 @@ Detailed seasonality analysis with decomposition.
 **Signature**:
 
 ```sql
-TS_ANALYZE_SEASONALITY(
-    timestamps: TIMESTAMP[],
-    values: DOUBLE[]
-) → STRUCT
+TS_DETECT_CHANGEPOINTS(
+    table_name: VARCHAR,
+    date_col: DATE | TIMESTAMP,
+    value_col: DOUBLE,
+    params: MAP
+) → TABLE
 ```
 
 **Returns**: trend_strength, seasonal_strength, periods, etc.
@@ -481,21 +480,22 @@ Detect regime changes in a single series.
 **Signature**:
 
 ```sql
-TS_DETECT_CHANGEPOINTS(
-    table_name: VARCHAR,
-    date_col: DATE | TIMESTAMP,
-    value_col: DOUBLE,
-    params: MAP
-) → TABLE
+{
+    'hazard_lambda': DOUBLE,         -- Detection sensitivity (default: 250)
+    'include_probabilities': BOOL    -- Return probabilities (default: false)
+}
 ```
 
 **Parameters**:
 
 ```sql
-{
-    'hazard_lambda': DOUBLE,         -- Detection sensitivity (default: 250)
-    'include_probabilities': BOOL    -- Return probabilities (default: false)
-}
+TS_DETECT_CHANGEPOINTS_BY(
+    table_name: VARCHAR,
+    group_col: VARCHAR,
+    date_col: DATE | TIMESTAMP,
+    value_col: DOUBLE,
+    params: MAP
+) → TABLE
 ```
 
 **Output**:
@@ -511,15 +511,7 @@ Changepoint detection with GROUP BY.
 
 **Signature**:
 
-```sql
-TS_DETECT_CHANGEPOINTS_BY(
-    table_name: VARCHAR,
-    group_col: VARCHAR,
-    date_col: DATE | TIMESTAMP,
-    value_col: DOUBLE,
-    params: MAP
-) → TABLE
-```
+<!-- include: test/sql/docs_examples/90_api_reference_seasonality_32.sql -->
 
 ---
 
@@ -530,18 +522,6 @@ TS_DETECT_CHANGEPOINTS_BY(
 Aggregate function for custom GROUP BY.
 
 **Signature**:
-
-```sql
-TS_FORECAST_AGG(
-    date_col: TIMESTAMP,
-    value_col: DOUBLE,
-    method: VARCHAR,
-    horizon: INT,
-    params: MAP
-) → STRUCT
-```
-
-**Usage** (for 2+ group columns):
 
 ```sql
 WITH fc AS (
@@ -560,19 +540,17 @@ SELECT
 FROM fc;
 ```
 
+**Usage** (for 2+ group columns):
+
+<!-- include: test/sql/docs_examples/90_api_reference_example_34.sql -->
+
 ### TS_DETECT_CHANGEPOINTS_AGG
 
 Aggregate function for custom changepoint detection.
 
 **Signature**:
 
-```sql
-TS_DETECT_CHANGEPOINTS_AGG(
-    date_col: TIMESTAMP,
-    value_col: DOUBLE,
-    params: MAP
-) → STRUCT
-```
+<!-- include: test/sql/docs_examples/90_api_reference_seasonality_35.sql -->
 
 ---
 
@@ -582,64 +560,12 @@ TS_DETECT_CHANGEPOINTS_AGG(
 
 ```sql
 {
-    -- Universal
-    'confidence_level': 0.80 | 0.90 | 0.95 | 0.99,  -- Default: 0.90
-    'return_insample': true | false,                 -- Default: false
-    'seasonal_period': INT,                          -- Required for seasonal models
-    'seasonal_periods': [INT, ...],                  -- Multiple seasonality
-    
-    -- ETS
-    'error_type': 0 | 1,      -- 0=additive, 1=multiplicative
-    'trend_type': 0 | 1 | 2,  -- 0=none, 1=additive, 2=damped
-    'season_type': 0 | 1 | 2, -- 0=none, 1=additive, 2=multiplicative
-    'alpha': 0.0-1.0,         -- Level smoothing
-    'beta': 0.0-1.0,          -- Trend smoothing
-    'gamma': 0.0-1.0,         -- Seasonal smoothing
-    'phi': 0.0-1.0,           -- Damping parameter
-    
-    -- ARIMA
-    'p': INT,                 -- AR order
-    'd': INT,                 -- Differencing
-    'q': INT,                 -- MA order
-    'P': INT,                 -- Seasonal AR
-    'D': INT,                 -- Seasonal differencing
-    'Q': INT,                 -- Seasonal MA
-    's': INT,                 -- Seasonal period
-    'include_intercept': BOOL,
-    
-    -- Theta
-    'theta': DOUBLE,          -- Theta parameter (default: 2.0)
-    
-    -- TBATS
-    'use_box_cox': BOOL,
-    'box_cox_lambda': DOUBLE,
-    'use_trend': BOOL,
-    'use_damped_trend': BOOL,
-    
-    -- MFLES/MSTL
-    'n_iterations': INT,
-    'lr_trend': DOUBLE,
-    'lr_season': DOUBLE,
-    'lr_level': DOUBLE,
-    'trend_method': INT,
-    'seasonal_method': INT
-}
-```
-
-### Changepoint Parameters
-
-```sql
-{
     'hazard_lambda': DOUBLE,         -- Default: 250 (lower = more sensitive)
     'include_probabilities': BOOL    -- Default: false (faster)
 }
 ```
 
----
-
-## Return Types
-
-### Forecast Output
+### Changepoint Parameters
 
 ```sql
 STRUCT {
@@ -654,7 +580,11 @@ STRUCT {
 }
 ```
 
-### Changepoint Output
+---
+
+## Return Types
+
+### Forecast Output
 
 ```sql
 STRUCT {
@@ -665,40 +595,41 @@ STRUCT {
 }
 ```
 
----
-
-## Error Handling
-
-### Common Errors
-
-**"Model requires 'seasonal_period' parameter"**
+### Changepoint Output
 
 ```sql
 -- Solution: Add seasonal_period
 {'seasonal_period': 7}
 ```
 
-**"Series too short for seasonal model"**
+---
+
+## Error Handling
+
+### Common Errors
+
+#### "Model requires `seasonal_period` parameter"
 
 ```sql
 -- Need at least 2 * seasonal_period observations
 -- Solution: Use non-seasonal model or get more data
 ```
 
-**"Constant series detected"**
+#### "Series too short for seasonal model"
 
-```sql
--- Solution: Drop constant series
-SELECT * FROM TS_DROP_CONSTANT('sales', product_id, amount);
-```
+<!-- include: test/sql/docs_examples/90_api_reference_example_41.sql -->
 
-**"confidence_level must be between 0 and 1"**
+#### "Constant series detected"
 
 ```sql
 -- Solution: Use valid range
 {'confidence_level': 0.95}  -- ✅
 {'confidence_level': 95}    -- ❌
 ```
+
+#### "`confidence_level` must be between 0 and 1"
+
+<!-- include: test/sql/docs_examples/90_api_reference_seasonality_43.sql -->
 
 ---
 
@@ -708,34 +639,22 @@ SELECT * FROM TS_DROP_CONSTANT('sales', product_id, amount);
 
 1. **Use GROUP BY efficiently**:
 
-```sql
--- Good: Single TS_FORECAST_BY call
-SELECT * FROM TS_FORECAST_BY('sales', product_id, ...);
+<!-- include: test/sql/docs_examples/90_api_reference_example_44.sql -->
 
--- Avoid: Multiple individual calls
-```
+1. **Materialize intermediate results**:
 
-2. **Materialize intermediate results**:
+<!-- include: test/sql/docs_examples/90_api_reference_multi_series_45.sql -->
 
-```sql
--- For complex pipelines
-CREATE TABLE sales_prep AS SELECT * FROM TS_FILL_GAPS(...);
-CREATE TABLE forecasts AS SELECT * FROM TS_FORECAST_BY('sales_prep', ...);
-```
-
-3. **Disable features you don't need**:
-
-```sql
--- Don't request fitted values unless needed
-{'return_insample': false}  -- Faster
-```
-
-4. **Use appropriate models**:
+1. **Disable features you don't need**:
 
 ```sql
 -- AutoETS: Slower but accurate
 -- SeasonalNaive: Fast for simple patterns
 ```
+
+1. **Use appropriate models**:
+
+<!-- include: test/sql/docs_examples/90_api_reference_example_47.sql -->
 
 ### Memory Usage
 
