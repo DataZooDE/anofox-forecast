@@ -20,7 +20,8 @@ def run_anofox_benchmark(
     models_config: List[Dict],
     output_dir: Path,
     group: str = 'Daily',
-    extension_path: Optional[Path] = None
+    extension_path: Optional[Path] = None,
+    use_community_extension: bool = True
 ):
     """
     Run Anofox benchmarks with specified models.
@@ -63,14 +64,18 @@ def run_anofox_benchmark(
     if extension_path is None:
         extension_path = Path(__file__).parent.parent.parent.parent / 'build' / 'release' / 'extension' / 'anofox_forecast' / 'anofox_forecast.duckdb_extension'
 
-    if not extension_path.exists():
+    if not extension_path.exists() and not use_community_extension:
         print(f"ERROR: Extension not found at {extension_path}")
         print("Please build the extension first with: make release")
         raise FileNotFoundError(f"Extension not found at {extension_path}")
 
     # Connect to DuckDB and load extension
     con = duckdb.connect(':memory:', config={'allow_unsigned_extensions': 'true'})
-    con.execute(f"LOAD '{extension_path}'")
+    if use_community_extension:
+        con.execute("FORCE INSTALL anofox_forecast FROM community;")
+        con.execute("LOAD 'anofox_forecast';")
+    else:
+        con.execute(f"LOAD '{extension_path}'")
     print(f"Loaded extension from {extension_path}")
 
     # Create table from data
