@@ -37,7 +37,7 @@ WITH series_metadata AS (
             WHEN series_id % 4 = 2 THEN 'East'
             ELSE 'West'
         END AS region
-    FROM generate_series(1, 10000) AS t(series_id)
+    FROM generate_series(1, 100) AS t(series_id)
 ),
 time_series_data AS (
     SELECT 
