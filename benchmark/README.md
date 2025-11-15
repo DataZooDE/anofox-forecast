@@ -85,10 +85,10 @@ Add new datasets by creating `benchmark/<dataset>` and passing that dataset name
 
 ```bash
 # Baseline models
-cd baseline_benchmark
-uv run python run.py anofox Daily        # Run Anofox models
-uv run python run.py statsforecast Daily # Run Statsforecast models
-uv run python run.py evaluate Daily      # Evaluate results
+cd m4/baseline_benchmark
+uv run python run.py anofox Daily --dataset m4        # Run Anofox models
+uv run python run.py statsforecast Daily --dataset m4 # Run Statsforecast models
+uv run python run.py evaluate Daily --dataset m4      # Evaluate results
 
 # ETS models
 cd m4/ets_benchmark

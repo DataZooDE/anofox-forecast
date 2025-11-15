@@ -8,8 +8,8 @@ from pathlib import Path
 
 import fire
 
-# Add parent directory to path to import common modules
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add benchmark root to sys.path to import shared modules
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.common.benchmark_runner import create_benchmark_functions
 from configs import baseline, statsforecast_baseline
