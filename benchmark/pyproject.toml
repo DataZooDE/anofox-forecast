@@ -13,6 +13,7 @@ dependencies = [
     "fire>=0.7.0",
     "tabulate>=0.9.0",
     "datasetsforecast>=0.0.8",
+    "statsforecast>=2.0.2",
 ]
 
 [project.optional-dependencies]

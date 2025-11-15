@@ -1,36 +1,39 @@
 """
-Statsforecast MFLES benchmark - configuration-driven wrapper.
+Statsforecast MSTL benchmark - configuration-driven wrapper.
 
-Uses shared common modules and configuration files to run statsforecast MFLES model.
+Uses shared common modules and configuration files to run statsforecast MSTL models.
 """
 import sys
 from pathlib import Path
 
 import fire
 
-# Add parent directory to path to import common modules
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add benchmark root to sys.path to import shared modules
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.common.data import get_data
 from src.common.statsforecast_runner import run_statsforecast_benchmark
-from configs.statsforecast_mfles import (
+from configs.statsforecast_mstl import (
     BENCHMARK_NAME,
     get_models_config,
     INCLUDE_PREDICTION_INTERVALS,
 )
 
 
-def run_benchmark(group: str = 'Daily'):
+def run_benchmark(group: str = 'Daily', dataset: str = 'm4'):
     """
-    Run statsforecast MFLES benchmark on M4 dataset.
+    Run statsforecast MSTL benchmarks on the selected dataset.
 
     Parameters
     ----------
     group : str
-        M4 frequency group: 'Daily', 'Hourly', or 'Weekly'
+        Dataset frequency group: 'Daily', 'Hourly', or 'Weekly'
+    dataset : str
+        Dataset identifier (currently only 'm4')
     """
-    print(f"Loading M4 {group} data for statsforecast {BENCHMARK_NAME} benchmark...")
-    train_df, horizon, freq, seasonality = get_data('data', group, train=True)
+    dataset_key = dataset.lower()
+    print(f"Loading {dataset.upper()} {group} data for statsforecast {BENCHMARK_NAME} benchmark...")
+    train_df, horizon, freq, seasonality = get_data(dataset_key, group, train=True)
 
     output_dir = Path(__file__).parent / 'results'
 
@@ -52,3 +55,4 @@ def run_benchmark(group: str = 'Daily'):
 
 if __name__ == '__main__':
     fire.Fire(run_benchmark)
+

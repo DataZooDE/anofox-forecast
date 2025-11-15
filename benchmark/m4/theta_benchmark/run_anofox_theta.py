@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 # Add benchmark src to path
-sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src'))
 
 from common.data import get_data
 from common.anofox_runner import run_anofox_benchmark
@@ -15,9 +15,10 @@ def run_theta_benchmarks():
     """Run all Anofox Theta variants on M4 Daily dataset."""
     
     # Load M4 Daily data using proper loader
-    print("Loading M4 Daily training data...")
+    dataset = 'm4'
     group = 'Daily'
-    train_df, horizon, freq, seasonality = get_data('data', group, train=True)
+    print(f"Loading {dataset.upper()} {group} training data...")
+    train_df, horizon, freq, seasonality = get_data(dataset, group, train=True)
     
     # Define Theta models to benchmark
     models_config = [
@@ -42,7 +43,7 @@ def run_theta_benchmarks():
     output_dir = Path(__file__).parent / 'results'
     
     print(f"\n{'='*70}")
-    print(f"  ANOFOX THETA BENCHMARK - M4 Daily")
+    print(f"  ANOFOX THETA BENCHMARK - {dataset.upper()} {group}")
     print(f"{'='*70}")
     print(f"Series: {train_df['unique_id'].nunique()}")
     print(f"Horizon: {horizon}")
