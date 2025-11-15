@@ -126,3 +126,4 @@ echo "Tip: To also fix markdown files, run:"
 echo "  ${GREEN}./scripts/fix_format.sh --markdown${NC}"
 
 
+
