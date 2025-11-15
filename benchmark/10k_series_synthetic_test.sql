@@ -72,6 +72,15 @@ SELECT
 FROM time_series_data
 ORDER BY series_id, date;
 
+
+
+SELECT 
+    series_id,
+    ts_features(date, value) AS features
+FROM timeseries_10k
+GROUP BY series_id
+ORDER BY series_id;
+
 -- Show summary statistics
 SELECT 
     '========================================' AS separator;
