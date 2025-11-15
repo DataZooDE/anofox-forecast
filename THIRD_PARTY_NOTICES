@@ -24,6 +24,8 @@ DataZoo GmbH received such material are set forth below.
    See the License for the specific language governing permissions and
    limitations under the License.
 
+   See full Apache License 2.0 text in [licenses/Apache-2.0.txt](licenses/Apache-2.0.txt)
+
    Components used:
 
 - ETS state-space core and AutoETS wrappers (`anofox-time/src/models/ets_core_statsforecast.cpp`,
@@ -33,7 +35,8 @@ DataZoo GmbH received such material are set forth below.
 - MFLES boosting pipeline and AutoMFLES grid search (`anofox-time/src/models/mfles.cpp`,
      `anofox-time/src/models/auto_mfles.cpp`)
 - MSTL and intermittent-demand family (ADIDA, Croston variants, IMAPA, TSB) implement the same
-     published algorithms described in StatsForecast and academic sources.
+     published algorithms described in StatsForecast.
+- Parameter sets were aligned with the statsforecast ones to get similar results.
 
 ---
 
@@ -41,9 +44,10 @@ DataZoo GmbH received such material are set forth below.
 
    <https://github.com/grafana/augurs>
 
-   Portions of the Dynamic Time Warping implementation in `anofox-time/include/anofox-time/models/dtw.hpp`
-   and `anofox-time/src/models/dtw.cpp` mirror the feature set found in `augurs-dtw`
-   (Sakoe-Chiba windowing, early-abandon lower/upper bounds, configurable distance metrics).
+   Portions of the Dynamic Time Warping implementation in `anofox-time/include/anofox-time/models/dtw.hpp` and 
+   `anofox-time/src/models/dtw.cpp` are adapted from `augurs-dtw` (Sakoe-Chiba windowing, early-abandon lower/upper bounds, 
+   configurable distance metrics).
+   
    Augurs is dual-licensed under Apache-2.0 and MIT; the following MIT terms apply to our usage.
 
    The MIT License (MIT)
