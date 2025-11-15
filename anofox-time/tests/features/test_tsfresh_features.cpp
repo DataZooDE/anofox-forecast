@@ -1,6 +1,7 @@
 #include <catch2/catch.hpp>
 #include "anofox-time/features/feature_types.hpp"
 #include "anofox-time/features/feature_math.hpp"
+#include <unordered_set>
 
 using namespace anofoxtime::features;
 
@@ -77,5 +78,35 @@ TEST_CASE("tsfresh fft_coefficient real part", "[tsfresh][features]") {
 	auto results = FeatureRegistry::Instance().Compute(series, config);
 	REQUIRE(results.size() == 1);
 	REQUIRE(results[0].value == Approx(0.0).margin(1e-6));
+}
+
+TEST_CASE("default tsfresh config exposes unique feature columns", "[tsfresh][features]") {
+	const auto &config = FeatureRegistry::Instance().DefaultConfig();
+	std::unordered_set<std::string> seen;
+	for (const auto &request : config.requests) {
+		auto params = request.parameters.empty() ? std::vector<ParameterMap> {ParameterMap {}} : request.parameters;
+		for (const auto &param : params) {
+			auto column_name = request.name + param.ToSuffixString();
+			REQUIRE(seen.insert(column_name).second);
+		}
+	}
+}
+
+TEST_CASE("ratio_beyond_r_sigma responds to custom r parameter", "[tsfresh][features]") {
+	Series series {-10.0, -5.0, 0.0, 5.0, 10.0};
+
+	ParameterMap default_param;
+	default_param.entries["r"] = 0.5;
+	auto default_config = BuildConfig("ratio_beyond_r_sigma", {default_param});
+	auto default_results = FeatureRegistry::Instance().Compute(series, default_config);
+
+	ParameterMap widened_param;
+	widened_param.entries["r"] = 5.0;
+	auto override_config = BuildConfig("ratio_beyond_r_sigma", {widened_param});
+	auto override_results = FeatureRegistry::Instance().Compute(series, override_config);
+
+	REQUIRE(default_results.size() == 1);
+	REQUIRE(override_results.size() == 1);
+	REQUIRE(default_results[0].value != Approx(override_results[0].value));
 }
 

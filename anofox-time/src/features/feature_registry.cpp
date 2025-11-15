@@ -186,7 +186,11 @@ void FeatureRegistry::FinalizeDefaultConfig() {
 		if (feature.default_parameters.empty()) {
 			request.parameters.emplace_back();
 		} else {
-			request.parameters = feature.default_parameters;
+			size_t default_idx = feature.default_parameter_index;
+			if (default_idx >= feature.default_parameters.size()) {
+				default_idx = 0;
+			}
+			request.parameters.push_back(feature.default_parameters[default_idx]);
 		}
 		default_config_.requests.push_back(request);
 	}

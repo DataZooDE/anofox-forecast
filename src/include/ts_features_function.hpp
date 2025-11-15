@@ -4,7 +4,7 @@
 
 namespace duckdb {
 
-AggregateFunction CreateTSFeaturesFunction(const LogicalType &timestamp_type, bool has_config);
+AggregateFunction CreateTSFeaturesFunction(const LogicalType &timestamp_type);
 
 void RegisterTSFeaturesFunction(ExtensionLoader &loader);
 

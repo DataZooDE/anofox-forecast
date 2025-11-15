@@ -87,14 +87,30 @@ Extract the complete tsfresh-compatible feature vector directly inside DuckDB.
 ```sql
 ts_features(
     ts_column TIMESTAMP|DATE|BIGINT,
-    value_column DOUBLE
+    value_column DOUBLE,
+    feature_selection LIST(VARCHAR) | STRUCT(
+        feature_names LIST(VARCHAR),
+        overrides LIST(STRUCT(feature VARCHAR, params MAP(VARCHAR, ANY)))
+    ) DEFAULT NULL,
+    feature_params LIST(STRUCT(feature VARCHAR, params MAP(VARCHAR, ANY))) DEFAULT NULL
 ) -> STRUCT(...)
 ```
 
 **Highlights**:
 
-- Mirrors the 76 feature calculators and default parameter grids from upstream [tsfresh](https://tsfresh.readthedocs.io/en/latest/text/list_of_features.html)
+- Mirrors the 76 feature calculators and default parameter grids from upstream
+  [tsfresh](https://tsfresh.readthedocs.io/en/latest/text/list_of_features.html)
 - Safe for both `GROUP BY` and analytic windows (`OVER (PARTITION BY ... ORDER BY ... ROWS BETWEEN ...)`)
+- Optional `feature_names` lets you restrict output to a LIST(VARCHAR) of columns (omit or pass `NULL` for defaults)
+- Optional `feature_params` accepts a LIST(STRUCT(feature, params)) or MAP(VARCHAR, ANY) to override parameter grids
+  per feature
+- Use `ts_features_config_from_json(path)` or `ts_features_config_from_csv(path)` to materialize both `feature_names`
+  and `feature_params` from external files; pass the resulting STRUCT as the third argument to `ts_features`
+- Overrides replace (not merge) the default parameter combinations for that feature, making ad hoc ratios or
+  thresholds trivial
+- Default output emits exactly one column per feature; specify `feature_params` if you need additional parameterized
+  variants
+- Use `ts_features_list()` to inspect column names, default parameter values, and the supported parameter keys
 - Timestamp ordering inferred from INTEGER/DATE/TIMESTAMP inputs; values are always DOUBLE
 - Output columns follow `feature__param_key_value` naming for stable downstream references
 
@@ -112,16 +128,87 @@ SELECT
 FROM generate_series(0, 6) t(day)
 CROSS JOIN (SELECT 1 AS product_id UNION ALL SELECT 2) p;
 
+SELECT column_name, feature_name, default_parameters, parameter_keys
+FROM ts_features_list()
+ORDER BY column_name
+LIMIT 5;
+
+WITH feature_vec AS (
+    SELECT 
+        product_id,
+        ts_features(
+            ts,
+            demand,
+            ['mean', 'variance', 'autocorrelation__lag_1', 'ratio_beyond_r_sigma'],
+            [{'feature': 'ratio_beyond_r_sigma', 'params': {'r': 1.0}}]
+        ) AS feats
+    FROM demand_series
+    GROUP BY product_id
+)
 SELECT 
     product_id,
-    (ts_features(ts, demand)).mean AS avg_demand,
-    (ts_features(ts, demand)).variance AS demand_variance,
-    (ts_features(ts, demand)).autocorrelation__lag_1 AS lag1_autocorr
+    (feats).mean AS avg_demand,
+    (feats).variance AS demand_variance,
+    (feats).autocorrelation__lag_1 AS lag1_autocorr,
+    (feats).ratio_beyond_r_sigma__r_1 AS outlier_share
+FROM feature_vec
+ORDER BY product_id;
+
+-- Load overrides from a JSON file and pass the config struct directly
+SELECT 
+    product_id,
+    (ts_features(
+        ts,
+        demand,
+        ts_features_config_from_json('benchmark/timeseries_features/data/features_overrides.json')
+    )).autocorrelation__lag_2 AS lag2_autocorr
 FROM demand_series
 GROUP BY product_id
 ORDER BY product_id;
 
 ```
+
+### TS_FEATURES_LIST
+
+Return metadata for every available tsfresh feature (one row per feature by default).
+
+**Signature**:
+
+```sql
+ts_features_list() -> TABLE(
+    column_name VARCHAR,
+    feature_name VARCHAR,
+    parameter_suffix VARCHAR,
+    default_parameters VARCHAR,
+    parameter_keys VARCHAR
+)
+```
+
+Use this helper to discover valid column names before passing them to `ts_features(..., feature_names)` or to inspect
+default parameter sets and supported keys.
+
+### TS_FEATURES_CONFIG_FROM_JSON / TS_FEATURES_CONFIG_FROM_CSV
+
+Load reusable override definitions from external files. Each helper returns a STRUCT with two fields—`feature_names`
+(`LIST(VARCHAR)`) and `overrides` (`LIST(STRUCT(feature VARCHAR, params_json VARCHAR))`)—which can be supplied as the
+third argument to `ts_features`. The `params_json` field stores the parameter map as a JSON string, which `ts_features`
+parses at bind time to reconstruct typed overrides.
+
+**Signatures**:
+
+```sql
+ts_features_config_from_json(path VARCHAR) -> STRUCT(feature_names LIST(VARCHAR), overrides LIST(STRUCT(feature VARCHAR, params_json VARCHAR)))
+ts_features_config_from_csv(path VARCHAR)  -> STRUCT(feature_names LIST(VARCHAR), overrides LIST(STRUCT(feature VARCHAR, params_json VARCHAR)))
+```
+
+- JSON files should contain an array of objects with `feature` plus optional `params` objects (see
+  `benchmark/timeseries_features/data/features_overrides.json`)
+- CSV files should contain a header row with `feature` and any parameter columns (e.g., `r`, `lag`, etc.) as shown in
+  `benchmark/timeseries_features/data/features_overrides.csv`
+- Results are cached per-path for the session and evaluated at bind time, guaranteeing that `ts_features` receives
+  constant literal arguments
+- `ts_features_config_template()` exposes the same defaults as a table (one row per feature with a JSON payload) and is
+  used to generate the checked-in templates `benchmark/timeseries_features/data/all_features_overrides.{json,csv}`
 
 ---
 

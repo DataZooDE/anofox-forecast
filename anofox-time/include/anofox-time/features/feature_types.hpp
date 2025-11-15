@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -58,6 +59,7 @@ struct FeatureDefinition {
 	std::string name;
 	std::vector<ParameterMap> default_parameters;
 	FeatureCalculatorFn calculator;
+	size_t default_parameter_index = 0;
 };
 
 struct FeatureRequest {

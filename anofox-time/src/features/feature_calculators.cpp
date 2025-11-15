@@ -1043,10 +1043,19 @@ double FeatureArCoeff(const Series &series, const ParameterMap &param, FeatureCa
 
 void RegisterBuiltinFeatureCalculators(FeatureRegistry &registry) {
 	auto simple = [&](const std::string &name, FeatureCalculatorFn fn) {
-		registry.Register({name, {}, std::move(fn)});
+		FeatureDefinition def;
+		def.name = name;
+		def.calculator = std::move(fn);
+		registry.Register(std::move(def));
 	};
-	auto with_params = [&](const std::string &name, std::vector<ParameterMap> params, FeatureCalculatorFn fn) {
-		registry.Register({name, std::move(params), std::move(fn)});
+	auto with_params = [&](const std::string &name, std::vector<ParameterMap> params, FeatureCalculatorFn fn,
+	                       size_t default_index = 0) {
+		FeatureDefinition def;
+		def.name = name;
+		def.default_parameters = std::move(params);
+		def.calculator = std::move(fn);
+		def.default_parameter_index = default_index;
+		registry.Register(std::move(def));
 	};
 
 	simple("variance_larger_than_standard_deviation", FeatureVarianceLargerThanStd);
@@ -1121,7 +1130,7 @@ void RegisterBuiltinFeatureCalculators(FeatureRegistry &registry) {
 		            }
 		            return params;
 	            }(),
-	            FeatureAutocorrelation);
+	            FeatureAutocorrelation, 1);
 	with_params("agg_autocorrelation",
 	            [] {
 		            std::vector<ParameterMap> params;
@@ -1139,7 +1148,7 @@ void RegisterBuiltinFeatureCalculators(FeatureRegistry &registry) {
 		            }
 		            return params;
 	            }(),
-	            FeaturePartialAutocorrelation);
+	            FeaturePartialAutocorrelation, 1);
 	with_params("number_cwt_peaks", {Params({{"n", 1}}), Params({{"n", 5}})}, FeatureNumberCwtPeaks);
 	with_params("number_peaks",
 	            {Params({{"n", 1}}), Params({{"n", 3}}), Params({{"n", 5}}), Params({{"n", 10}}), Params({{"n", 50}})},
