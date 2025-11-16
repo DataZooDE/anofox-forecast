@@ -636,7 +636,8 @@ static Value LoadConfigFromJSONFile(const std::string &path, ClientContext &cont
 
 	std::vector<Value> feature_values;
 	std::vector<Value> overrides;
-	std::unordered_set<std::string> seen_features;
+	// Track seen parameterized column names (feature + parameter suffix) to avoid duplicates
+	std::unordered_set<std::string> seen_columns;
 
 	yyjson_val *entry = nullptr;
 	size_t idx = 0;
@@ -673,9 +674,11 @@ static Value LoadConfigFromJSONFile(const std::string &path, ClientContext &cont
 		}
 		auto parameter_map = BuildParameterMap(params_entries);
 		auto override_pair = BuildOverrideStruct(feature, parameter_map);
+		const auto &column_name = override_pair.second; // feature + parameter suffix
 		overrides.push_back(std::move(override_pair.first));
-		if (seen_features.insert(feature).second) {
-			feature_values.emplace_back(feature);
+		// Include parameterized column name in feature_names, deduplicated by full column
+		if (seen_columns.insert(column_name).second) {
+			feature_values.emplace_back(column_name);
 		}
 	}
 	yyjson_doc_free(doc);
