@@ -11,6 +11,31 @@
 
 A time series forecasting extension for DuckDB with 31 models, data preparation, and analytics — all in pure SQL.
 
+## Why a C++ Port?
+
+We implemented time-series forecasting algorithms in C++ with native DuckDB
+integration, drawing from multiple open-source implementations including
+StatsForecast (Python) and various Rust libraries focused on financial analytics.
+
+- **Zero Python overhead** - No subprocess calls, no serialization, pure native execution
+- **Automatic parallelization** - DuckDB handles parallel execution across CPU cores natively
+- **In-database forecasting** - Generate forecasts directly in SQL without moving data
+- **Production-ready performance** - C++ speed with DuckDB's query optimization
+- **Portability**: Run forecasts in DuckDB anywhere—including the browser via WASM (WebAssembly)—and from any language that supports DuckDB integration.
+
+## Attribution
+
+This extension includes C++ ports of algorithms from several open-source projects.
+See [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) for complete attribution and license information.
+
+## Pre-requirements
+
+Note: For ARIMA models you will need to install Eigen3 libraries. For example for Linux (Debian-Ubuntu based): 
+
+```bash
+sudo apt install libeigen3-dev
+```
+
 ## Installation
 
 ### Community Extension
