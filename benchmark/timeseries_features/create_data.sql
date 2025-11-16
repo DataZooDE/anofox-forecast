@@ -1,10 +1,16 @@
-LOAD '../../build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension';
+-- This script creates a parquet file containing synthetic time series data for benchmarking.
+--
+-- Workflow:
+--   1. Loads the DuckDB extension.
+--   2. Creates a table with 100 series × 365 days = 36,500 rows.
+--   3. Exports the results to a parquet file.
+--
+-- Output: A parquet file containing the synthetic time series data.
 
 
--- Create table with 10,000 series × 365 days = 3.65M rows
-CREATE TABLE timeseries_10k AS
+CREATE TABLE timeseries_100 AS
 WITH series_metadata AS (
-    -- Generate 10,000 unique series with different characteristics
+    -- Generate 100 unique series with different characteristics
     SELECT 
         series_id,
         -- Random base level (100-1000)

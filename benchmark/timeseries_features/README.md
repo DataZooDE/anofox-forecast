@@ -4,6 +4,23 @@ This directory contains the scripts needed to generate synthetic data, run
 tsfresh-based feature extraction, and compare the Python output with the DuckDB
 `ts_features` table function.
 
+## Feature Definition Source
+
+The complete list of features and their configuration used for benchmarking is specified in the [features_overrides.json](data/features_overrides.json) file in this directory.
+
+- This JSON file defines each feature, its parameters, and any customization or overrides applied during extraction.
+- Both DuckDB (`ts_features`) and Python (`tsfresh`) scripts consume this file to ensure feature definitions are **identical and synchronized** for fair, consistent comparison.
+
+> **See:** [`data/features_overrides.json`](data/features_overrides.json) for the exact configuration and set of features used.
+
+For a complete, up-to-date catalog of all features used in benchmarking (including full names, parameters, and configuration), see:
+
+- [`../../data/all_features_overrides.json`](../../data/all_features_overrides.json) — JSON listing of **all available** tsfresh features and parameters (located at the repo root).
+- [`../../data/all_features_overrides.csv`](../../data/all_features_overrides.csv) — CSV listing of **all available** tsfresh features and parameters (located at the repo root).
+
+These files are the single source of truth for which timeseries features are included and how they are parameterized in both DuckDB and Python (tsfresh) scripts.
+
+
 ## 1. Generate synthetic data
 
 Run the DuckDB script to build a reproducible dataset with 100 series × 365 days
