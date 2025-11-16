@@ -259,7 +259,7 @@ struct LinRegResult {
 	double intercept = std::numeric_limits<double>::quiet_NaN();
 	double rvalue = std::numeric_limits<double>::quiet_NaN();
 	double pvalue = std::numeric_limits<double>::quiet_NaN();
-	double stderr = std::numeric_limits<double>::quiet_NaN();
+	double std_error = std::numeric_limits<double>::quiet_NaN();
 };
 
 LinRegResult ComputeLinearRegression(const std::vector<double> &x, const Series &y) {
@@ -299,10 +299,10 @@ LinRegResult ComputeLinearRegression(const std::vector<double> &x, const Series 
 		}
 	}
 	if (n > 2) {
-		double stderr = std::sqrt(ss_res / (n - 2)) / std::sqrt(sum_xx - sum_x * sum_x / n);
-		result.stderr = stderr;
-		if (stderr > kEpsilon) {
-			double t_stat = result.slope / stderr;
+		double std_err = std::sqrt(ss_res / (n - 2)) / std::sqrt(sum_xx - sum_x * sum_x / n);
+		result.std_error = std_err;
+		if (std_err > kEpsilon) {
+			double t_stat = result.slope / std_err;
 			result.pvalue = NormalPValue(t_stat);
 		}
 	}
@@ -325,7 +325,7 @@ double LinearTrend(const Series &series, FeatureCache &cache, std::string_view a
 		return lin.rvalue;
 	}
 	if (attr == "stderr") {
-		return lin.stderr;
+		return lin.std_error;
 	}
 	if (attr == "pvalue") {
 		return lin.pvalue;
@@ -348,7 +348,7 @@ double LinearTrendTimewise(const Series &series, FeatureCache &cache, std::strin
 		return lin.rvalue;
 	}
 	if (attr == "stderr") {
-		return lin.stderr;
+		return lin.std_error;
 	}
 	if (attr == "pvalue") {
 		return lin.pvalue;
