@@ -9,9 +9,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  code-quality:
+    name: Code Quality
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_code_quality.yml@main
+    with:
+      extension_name: anofox_forecast
+      duckdb_version: v1.4.2
+      ci_tools_version: main
+      format_checks: 'format;tidy'
+
   test-anofox-time:
     name: Test anofox-time
     runs-on: ubuntu-24.04
+    needs: code-quality
     
     steps:
       - uses: actions/checkout@v4
