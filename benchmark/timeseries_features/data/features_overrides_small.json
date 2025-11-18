@@ -5,3 +5,4 @@
   { "feature": "autocorrelation", "params": { "lag": 7 } },
   { "feature": "partial_autocorrelation", "params": { "lag": 5 } }
 ]
+
