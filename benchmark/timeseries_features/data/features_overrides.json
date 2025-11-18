@@ -78,10 +78,7 @@
     }
   },
   {
-    "feature": "cid_ce",
-    "params": {
-      "normalize": false
-    }
+    "feature": "cid_ce"
   },
   {
     "feature": "count_above",
