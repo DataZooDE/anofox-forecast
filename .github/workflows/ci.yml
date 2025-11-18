@@ -21,7 +21,6 @@ jobs:
   test-anofox-time:
     name: Test anofox-time
     runs-on: ubuntu-24.04
-    needs: code-quality
     
     steps:
       - uses: actions/checkout@v4
@@ -97,7 +96,7 @@ jobs:
 
   build-extension:
     name: Build DuckDB Extension
-    needs: test-anofox-time
+    needs: [code-quality, test-anofox-time]
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@main
     with:
       extension_name: anofox_forecast
