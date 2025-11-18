@@ -2,7 +2,7 @@
 
 ## Introduction
 
-The `ts_features` function extracts comprehensive time series features directly in DuckDB, providing tsfresh-compatible feature vectors for machine learning, anomaly detection, and exploratory data analysis.
+The `ts_features` function extracts time series features directly in DuckDB, providing tsfresh-compatible feature vectors for machine learning, anomaly detection, and exploratory data analysis.
 
 **Key Capabilities**:
 - Extract 76+ statistical features from time series data
