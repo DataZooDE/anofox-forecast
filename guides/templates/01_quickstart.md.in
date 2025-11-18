@@ -56,52 +56,9 @@ You've just:
 - ✅ Generated a forecast
 - ✅ Forecasted multiple series in parallel
 
-## Next Steps
-
-### Learn More
-- [Basic Forecasting Guide](30_basic_forecasting.md) - Detailed walkthrough
-- [Model Selection Guide](40_model_selection.md) - Choose the best model
-- [EDA & Data Prep](11_exploratory_analysis.md) - Clean your data first
-
-### Try Different Models
-<!-- include: test/sql/docs_examples/01_quickstart_multi_series_06.sql -->
-
-### Evaluate Accuracy
-<!-- include: test/sql/docs_examples/01_quickstart_evaluate_07.sql -->
-
-### Check Data Quality
-<!-- include: test/sql/docs_examples/01_quickstart_evaluate_08.sql -->
-
-## 💡 Pro Tips
-
-1. **Seasonality detection first**: Use `TS_DETECT_SEASONALITY_ALL()` to determine appropriate `seasonal_period` parameter
-2. **Start with AutoETS**: Automatic model selection from 30+ ETS candidates with parameter optimization
-3. **Prediction intervals**: `lower` and `upper` bounds computed at specified `confidence_level` (default 0.90)
-4. **Metric validation**: Use array-based metrics with `LIST()` aggregation for GROUP BY operations
-5. **Data quality**: Run `TS_STATS()` and `TS_QUALITY_REPORT()` before forecasting
-
-## ⚠️ Common Pitfalls
-
-❌ **Insufficient data**: Seasonal models require ≥ 2x `seasonal_period` observations (3-4x recommended)  
-❌ **Missing timestamps**: Use `TS_FILL_GAPS()` for DATE/TIMESTAMP, `TS_FILL_GAPS_INT()` for INTEGER  
-❌ **Constant series**: Models will fail - filter with `TS_DROP_CONSTANT()` before forecasting  
-❌ **Wrong seasonality**: Incorrect `seasonal_period` degrades accuracy - use `TS_DETECT_SEASONALITY()`  
-❌ **Pandas datetime64[ns]**: Convert to DATE via `df['date'].dt.date` before passing to DuckDB  
-
 ## 🆘 Troubleshooting
 
 **Error: "SeasonalNaive model requires 'seasonal_period' parameter"**
 <!-- include: test/sql/docs_examples/01_quickstart_fill_gaps_09.sql -->
 
-**Error: "Series too short"**
-<!-- include: test/sql/docs_examples/01_quickstart_example_10.sql -->
-
-**Poor forecast accuracy?**
-<!-- include: test/sql/docs_examples/01_quickstart_evaluate_11.sql -->
-
----
-
-**Ready for more?** → [Basic Forecasting Guide](30_basic_forecasting.md)
-
-**Need help?** → Check [guides/](.) for comprehensive documentation!
 

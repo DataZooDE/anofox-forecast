@@ -1,16 +1,11 @@
 # name: test/sql/core/test_ts_features.test
-# description: Validate ts_features aggregate with grouping and window usage
+# description: Validate ts_features aggregate with grouping and window usage (both GROUP BY and window functions now working)
 # group: [core]
 
 require anofox_forecast
 
 statement ok
 LOAD anofox_forecast;
-
-# Disable verification for window function test to avoid segfault
-# TODO: Investigate why verification causes segfault with ts_features window functions
-statement ok
-PRAGMA disable_verification;
 
 statement ok
 CREATE TABLE ts_feature_data AS
@@ -28,21 +23,31 @@ FROM ts_feature_data;
 55.0
 
 # length per group should be 3 rows each
-# DISABLED: Also causes segfault in unittest framework with query verification enabled
-#query II
-#SELECT grp, (ts_features(ts, val)).length AS len
-#FROM ts_feature_data
-#GROUP BY grp
-#ORDER BY grp;
-#----
-#0	3
-#1	3
+query II
+SELECT grp, (ts_features(ts, val)).length AS len
+FROM ts_feature_data
+GROUP BY grp
+ORDER BY grp;
+----
+0	3
+1	3
 
 # Rolling window length with 2 preceding rows
-# DISABLED: This test causes segfault in unittest framework due to test-framework-specific state management issue
-# The query works correctly when run manually in DuckDB, but fails in unittest's query verification
-# TODO: Investigate and fix test framework interaction with LEGACY destructor aggregates in window functions
-# The window function query has been removed to prevent segfault in test framework
+# Note: First row of each group returns NULL because length feature requires at least 2 samples
+query III
+SELECT grp, ts, (ts_features(ts, val, ['length']) OVER (
+    PARTITION BY grp ORDER BY ts
+    ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+)).length AS win_len
+FROM ts_feature_data
+ORDER BY grp, ts;
+----
+0	2024-01-01 00:00:00	NULL
+0	2024-01-03 00:00:00	2.0
+0	2024-01-05 00:00:00	3.0
+1	2024-01-02 00:00:00	NULL
+1	2024-01-04 00:00:00	2.0
+1	2024-01-06 00:00:00	3.0
 
 # Verify a parameterized feature column exists
 query I

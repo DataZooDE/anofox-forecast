@@ -8,19 +8,35 @@ The `anofox_forecast` extension provides time series forecasting capabilities fo
 
 ### Building the Extension
 
-1. **Build anofox-time library** (optional - it's included in the extension build):
+1. **Build anofox-time library** (Optional; the extension build will automatically build anofox-time for you in almost all scenarios.)
 
 ```bash
+# Only required if you want to develop/test anofox-time independently
 cd anofox-time
 mkdir -p build && cd build
-cmake .. -DBUILD_PYTHON_BINDINGS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF
-make -j4
-cd ../..
+cmake .. -DBUILD_PYTHON_BINDINGS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TESTING=ON
+make -j$(nproc)
+```
+
+2. **Run unit tests for anofox-time** (optional):
+
+```bash
+# From the anofox-time/build directory
+ctest --output-on-failure
+```
+
+> **Note:** For standard extension usage, you do **not** need to build or test anofox-time manually; the extension build process handles all dependencies for you.
+
 ```
 
 2. **Build the DuckDB extension**:
 
-```bash
+# Tip: For much faster builds, install [ninja](https://ninja-build.org/) and use it with cmake:
+#   cmake -G Ninja ..
+#   ninja debug
+#   ninja release
+
+# Standard GNU make builds:
 make debug
 # or for release build:
 make release
@@ -189,55 +205,3 @@ SELECT
 FROM FORECAST('date', 'amount', 'SMA', 10, NULL)
 GROUP BY model_name;
 ```
-
-## Current Limitations (Phase 1)
-
-1. **No GROUP BY support yet**: Batch forecasting across multiple series will be implemented in Phase 2
-2. **STRUCT parameters**: Currently only NULL is supported for model_params. Named parameters will be added in future
-3. **Prediction intervals**: Currently simplified (±10% of point forecast). Proper statistical intervals coming in Phase 2
-4. **Limited models**: Only 3 baseline methods available. 30+ models will be added in Phase 2
-
-## Phase 2 Roadmap
-
-- Full GROUP BY support for batch forecasting
-- All 30+ models from anofox-time (ARIMA, ETS, Theta, etc.)
-- ENSEMBLE() table function
-- BACKTEST() table function  
-- Proper prediction intervals
-- STRUCT parameter support with named fields
-- Scalar utility functions (detect_seasonality, etc.)
-
-## Troubleshooting
-
-### Extension Not Loading
-
-If you get "Extension not found", ensure:
-
-1. The extension was built successfully (`make debug` or `make release`)
-2. You're using the correct path to the `.duckdb_extension` file
-3. The file has execute permissions
-
-### Debug Output
-
-The extension includes comprehensive debug logging. To see debug output:
-
-```bash
-./build/debug/test/unittest "your_test.test" 2>&1
-```
-
-Debug messages show:
-
-- Extension loading
-- Function registration
-- Parameter validation
-- Model creation and fitting
-- Forecast generation
-
-## Support
-
-For issues or questions:
-
-- Check the debug output for detailed error messages
-- Verify your data types (TIMESTAMP and DOUBLE)
-- Ensure time series has sufficient data points for the model
-- Check that horizon is positive
