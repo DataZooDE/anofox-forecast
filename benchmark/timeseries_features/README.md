@@ -65,3 +65,16 @@ The script:
 - Recomputes DuckDB `ts_features` using the same JSON overrides.
 - Selects comparable columns (e.g., `ratio_beyond_r_sigma*`) to verify that the
   results match for every `unique_id`.
+
+## 4. Generate expected values for C++ unit tests
+
+The script `generate_cpp_unit_test_expected_values.py` generates expected feature values from tsfresh for C++ unit tests. It uses the same test series (365 values, seed=42) as defined in `create_data.sql` to ensure consistency between Python and C++ implementations.
+
+To generate expected values:
+
+```shell
+cd benchmark/timeseries_features
+uv run python generate_cpp_unit_test_expected_values.py > expected_values.cpp
+```
+
+The output can be copied into `anofox-time/tests/features/test_tsfresh_features.cpp` to update the expected value constants used in unit tests.

@@ -28,6 +28,13 @@ StatsForecast (Python) and various Rust libraries focused on financial analytics
 This extension includes C++ ports of algorithms from several open-source projects.
 See [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) for complete attribution and license information.
 
+
+## News
+
+- [2025-11-16] Added a attribution and corresponding licence files.
+- [2025-11-16] Added timeseries feature calculation, see [Timeseries Features](benchmark/timeseries_features/README.md).
+
+
 ## Pre-requirements
 
 Note: For ARIMA models you will need to install Eigen3 libraries. For example for Linux (Debian-Ubuntu based): 

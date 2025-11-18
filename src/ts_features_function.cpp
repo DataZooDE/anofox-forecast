@@ -1142,8 +1142,13 @@ struct TSFeaturesData {
 
 struct TSFeaturesAggregateState {
 	TSFeaturesData *data;
+	// Cached computed results (stored in state to persist across Finalize calls)
+	// This ensures that when Finalize is called multiple times with different states,
+	// the results from the complete state are available
+	child_list_t<Value> cached_results;
+	size_t cached_sample_count; // Number of samples used to compute cached_results
 
-	TSFeaturesAggregateState() : data(nullptr) {
+	TSFeaturesAggregateState() : data(nullptr), cached_sample_count(0) {
 	}
 };
 
@@ -1201,7 +1206,9 @@ static void TSFeaturesUpdate(Vector inputs[], AggregateInputData &aggr_input, id
 	for (idx_t i = 0; i < count; ++i) {
 		auto &state = *states[i];
 		if (!state.data) {
-			continue;
+			// Initialize state.data if it's nullptr
+			// This might be the issue - if state.data is nullptr, we skip adding samples
+			state.data = new TSFeaturesData();
 		}
 		auto ts_idx = ts_format.sel->get_index(i);
 		auto val_idx = value_format.sel->get_index(i);
@@ -1240,11 +1247,26 @@ struct TSFeaturesAggregateOperation {
 
 	template <class STATE, class OP>
 	static void Combine(const STATE &source, STATE &target, AggregateInputData &) {
-		if (!source.data || !target.data) {
+		// If source has no data, nothing to combine
+		if (!source.data) {
 			return;
 		}
+		// If target has no data, initialize it or use source's data
+		if (!target.data) {
+			if (source.data->samples.empty()) {
+				return;
+			}
+			// Initialize target with source's data
+			target.data = new TSFeaturesData();
+			target.data->samples = source.data->samples;
+			return;
+		}
+		// Both have data - combine samples from source into target
 		target.data->samples.insert(target.data->samples.end(), source.data->samples.begin(),
 		                            source.data->samples.end());
+		// Clear cached results when combining states - they will be recomputed in Finalize
+		target.cached_results.clear();
+		target.cached_sample_count = 0;
 	}
 
 	template <class STATE>
@@ -1263,6 +1285,26 @@ struct TSFeaturesAggregateOperation {
 		}
 
 		auto &samples = state.data->samples;
+
+		// Check if we have cached results from a previous Finalize call with sufficient samples
+		// This handles the case where DuckDB calls Finalize multiple times
+		if (!state.cached_results.empty() && state.cached_sample_count >= samples.size()) {
+			child_list_t<Value> cached_copy = state.cached_results;
+			finalize_data.result.SetValue(finalize_data.result_idx, Value::STRUCT(std::move(cached_copy)));
+			return;
+		}
+
+		// Ensure we have at least 2 samples before computing
+		if (samples.size() < 2) {
+			// Too few samples - return NULL for all features
+			for (const auto &name : bind_data.column_names) {
+				children.emplace_back(name, Value());
+			}
+			finalize_data.result.SetValue(finalize_data.result_idx, Value::STRUCT(std::move(children)));
+			return;
+		}
+
+		// Sort samples by timestamp (key) and ordinal to ensure consistent ordering
 		std::stable_sort(samples.begin(), samples.end(), [](const TSFeaturesSample &a, const TSFeaturesSample &b) {
 			if (a.key == b.key) {
 				return a.ordinal < b.ordinal;
@@ -1279,6 +1321,7 @@ struct TSFeaturesAggregateOperation {
 		auto time_axis = BuildTimeAxis(samples, bind_data.timestamp_type);
 		const std::vector<double> *time_axis_ptr = time_axis.empty() ? nullptr : &time_axis;
 
+		// Compute results
 		auto &registry = FeatureRegistry::Instance();
 		auto results = registry.Compute(series, bind_data.config, time_axis_ptr);
 
@@ -1291,6 +1334,10 @@ struct TSFeaturesAggregateOperation {
 			}
 			children.emplace_back(bind_data.column_names[idx], std::move(value));
 		}
+
+		// Cache results in state for subsequent Finalize calls
+		state.cached_results = children;
+		state.cached_sample_count = samples.size();
 
 		finalize_data.result.SetValue(finalize_data.result_idx, Value::STRUCT(std::move(children)));
 	}
