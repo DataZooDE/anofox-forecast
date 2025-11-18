@@ -1202,12 +1202,17 @@ static void TSFeaturesUpdate(Vector inputs[], AggregateInputData &aggr_input, id
 	inputs[0].ToUnifiedFormat(count, ts_format);
 	inputs[1].ToUnifiedFormat(count, value_format);
 
+	// Flatten state vector to ensure it's in a flat format before accessing
+	state_vector.Flatten(count);
 	auto states = FlatVector::GetData<TSFeaturesAggregateState *>(state_vector);
 	for (idx_t i = 0; i < count; ++i) {
+		// Validate state pointer before dereferencing
+		if (!states[i]) {
+			continue;
+		}
 		auto &state = *states[i];
 		if (!state.data) {
 			// Initialize state.data if it's nullptr
-			// This might be the issue - if state.data is nullptr, we skip adding samples
 			state.data = new TSFeaturesData();
 		}
 		auto ts_idx = ts_format.sel->get_index(i);
