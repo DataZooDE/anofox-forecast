@@ -21,6 +21,9 @@ jobs:
   test-anofox-time:
     name: Test anofox-time
     runs-on: ubuntu-24.04
+    env:
+      CC: gcc
+      CXX: g++
     
     steps:
       - uses: actions/checkout@v4
@@ -42,7 +45,10 @@ jobs:
             unzip \
             pkg-config \
             python3 \
-            python3-pip
+            python3-pip \
+            autoconf \
+            automake \
+            autoconf-archive
 
       - name: Setup vcpkg
         run: |
@@ -73,9 +79,6 @@ jobs:
 
       - name: Configure anofox-time
         working-directory: anofox-time
-        env:
-          CC: gcc
-          CXX: g++
         run: |
           cmake -B build -S . \
             -DCMAKE_TOOLCHAIN_FILE=$VCPKG_TOOLCHAIN_PATH \
