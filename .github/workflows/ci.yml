@@ -99,7 +99,6 @@ jobs:
 
   build-extension:
     name: Build DuckDB Extension
-    needs: test-anofox-time
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@main
     with:
       extension_name: anofox_forecast
