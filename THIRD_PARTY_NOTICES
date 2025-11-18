@@ -173,3 +173,23 @@ DataZoo GmbH received such material are set forth below.
    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
    SOFTWARE.
+
+---
+
+## Eigen3
+
+   <https://eigen.tuxfamily.org/>
+
+   Eigen3 is a C++ template library for linear algebra, provided via vcpkg
+   dependency management. It is used for ARIMA model implementations requiring
+   matrix operations and eigenvalue computations.
+
+   Licensed under the Mozilla Public License Version 2.0 (MPL-2.0).
+
+   See full Mozilla Public License 2.0 text in [licences/MPL-2.0.txt](licences/MPL-2.0.txt)
+
+   Components used:
+
+- Linear algebra operations for ARIMA model parameter estimation
+- Eigenvalue computations for polynomial root checking in ARIMA models
+  (`anofox-time/src/models/auto_arima.cpp`)
