@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref || '' }}-${{ github.base_ref || '' }}-${{ github.ref != 'refs/heads/main' || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  test-anofox-time:
+    name: Test anofox-time
+    runs-on: ubuntu-24.04
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: 'recursive'
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -y -qq
+          sudo apt-get install -y -qq \
+            build-essential \
+            cmake \
+            ninja-build \
+            git \
+            curl \
+            tar \
+            zip \
+            unzip
+
+      - name: Setup vcpkg
+        run: |
+          mkdir -p local_vcpkg_installation
+          cd local_vcpkg_installation
+          git init
+          git remote add origin https://github.com/microsoft/vcpkg.git
+          git fetch origin ce613c41372b23b1f51333815feb3edd87ef8a8b
+          git checkout ce613c41372b23b1f51333815feb3edd87ef8a8b
+          ./bootstrap-vcpkg.sh
+          echo "VCPKG_ROOT=${{ github.workspace }}/local_vcpkg_installation" >> $GITHUB_ENV
+          echo "VCPKG_TOOLCHAIN_PATH=${{ github.workspace }}/local_vcpkg_installation/scripts/buildsystems/vcpkg.cmake" >> $GITHUB_ENV
+          echo "${{ github.workspace }}/local_vcpkg_installation" >> $GITHUB_PATH
+
+      - name: Configure anofox-time
+        working-directory: anofox-time
+        run: |
+          cmake -B build -S . \
+            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_TOOLCHAIN_PATH \
+            -DBUILD_TESTING=ON \
+            -DBUILD_EXAMPLES=OFF \
+            -G Ninja
+
+      - name: Build anofox-time
+        working-directory: anofox-time
+        run: |
+          cmake --build build --config Release -j$(nproc)
+
+      - name: Run anofox-time tests
+        working-directory: anofox-time
+        run: |
+          ctest --test-dir build --output-on-failure --parallel $(nproc)
+
+  build-extension:
+    name: Build DuckDB Extension
+    needs: test-anofox-time
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@main
+    with:
+      extension_name: anofox_forecast
+      duckdb_version: v1.4.2
+      ci_tools_version: main
+      exclude_archs: 'osx_amd64;osx_arm64;windows_amd64;windows_amd64_mingw;linux_arm64;linux_amd64_musl;wasm_mvp;wasm_eh;wasm_threads'
+      build_type: release
+      save_cache: ${{ github.event_name != 'pull_request' }}
+
