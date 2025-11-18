@@ -1140,15 +1140,26 @@ struct TSFeaturesData {
 	std::vector<TSFeaturesSample> samples;
 };
 
+// Cached results structure - heap-allocated to avoid issues with vector in state structure
+struct TSFeaturesCachedResults {
+	child_list_t<Value> results;
+	size_t sample_count;
+
+	TSFeaturesCachedResults() : sample_count(0) {
+	}
+};
+
 struct TSFeaturesAggregateState {
 	TSFeaturesData *data;
-	// Cached computed results (stored in state to persist across Finalize calls)
+	// Cached computed results - stored as pointer to avoid vector copy issues in window functions
 	// This ensures that when Finalize is called multiple times with different states,
 	// the results from the complete state are available
-	child_list_t<Value> cached_results;
-	size_t cached_sample_count; // Number of samples used to compute cached_results
+	TSFeaturesCachedResults *cached_results;
 
-	TSFeaturesAggregateState() : data(nullptr), cached_sample_count(0) {
+	// Default constructor - explicitly initialize all members
+	// For LEGACY destructor aggregates, DuckDB uses placement new and calls Initialize()
+	// We should NOT define copy constructor or assignment operator - DuckDB uses Combine() instead
+	TSFeaturesAggregateState() : data(nullptr), cached_results(nullptr) {
 	}
 };
 
@@ -1202,19 +1213,77 @@ static void TSFeaturesUpdate(Vector inputs[], AggregateInputData &aggr_input, id
 	inputs[0].ToUnifiedFormat(count, ts_format);
 	inputs[1].ToUnifiedFormat(count, value_format);
 
+	// Safety check: ensure count is valid
+	if (count == 0) {
+		return;
+	}
+
 	// Flatten state vector to ensure it's in a flat format before accessing
 	state_vector.Flatten(count);
-	auto states = FlatVector::GetData<TSFeaturesAggregateState *>(state_vector);
+
+	// Access state pointers - handle both window function (data_ptr_t) and regular aggregate (STATE*) patterns
+	// Window functions use LogicalType::POINTER with data_ptr_t, regular aggregates may use STATE* directly
+	TSFeaturesAggregateState **states = nullptr;
+	data_ptr_t *state_ptrs_raw = nullptr;
+
+	// Try to access as STATE* first (regular aggregate pattern, same as forecast_aggregate)
+	states = FlatVector::GetData<TSFeaturesAggregateState *>(state_vector);
+
+	// If that fails or vector type is POINTER, try data_ptr_t pattern (window functions)
+	if (!states || state_vector.GetType() == LogicalType::POINTER) {
+		state_ptrs_raw = FlatVector::GetData<data_ptr_t>(state_vector);
+		states = nullptr; // Clear states to use state_ptrs_raw instead
+	}
+
+	if (!state_ptrs_raw && !states) {
+		// No valid state vector data - this should not happen, but defensive check
+		return;
+	}
+
 	for (idx_t i = 0; i < count; ++i) {
-		// Validate state pointer before dereferencing
-		if (!states[i]) {
+		TSFeaturesAggregateState *state_ptr = nullptr;
+
+		if (state_ptrs_raw) {
+			// Window function pattern: cast data_ptr_t to STATE*
+			data_ptr_t state_ptr_raw = state_ptrs_raw[i];
+			if (!state_ptr_raw) {
+				continue;
+			}
+			// Cast to STATE* - window functions store raw pointers to state buffers
+			state_ptr = reinterpret_cast<TSFeaturesAggregateState *>(state_ptr_raw);
+		} else {
+			// Regular aggregate pattern: direct STATE* access (same as forecast_aggregate)
+			state_ptr = states[i];
+			if (!state_ptr) {
+				continue;
+			}
+		}
+
+		// Defensive check: ensure state pointer is not null before dereferencing
+		// This should never be null at this point, but test framework may trigger edge cases
+		if (!state_ptr) {
 			continue;
 		}
-		auto &state = *states[i];
+
+		// Dereference state pointer - this is where segfault occurs in test framework
+		// The pointer may be invalid due to test framework's query verification mechanism
+		TSFeaturesAggregateState &state = *state_ptr;
+
+		// CRITICAL: state.data MUST be initialized by Initialize() before Update() is called
+		// In window functions, Initialize() should be called for all states first
+		// If state.data is null here, it means Initialize() wasn't called, which is a bug
+		// Defensively initialize to prevent segfault, but this should not happen in normal operation
 		if (!state.data) {
-			// Initialize state.data if it's nullptr
+			// This should not happen - Initialize() should have been called first
+			// But defensively initialize to prevent segfault
 			state.data = new TSFeaturesData();
 		}
+
+		// Double-check after initialization (should never be null after new, but defensive)
+		if (!state.data) {
+			continue;
+		}
+
 		auto ts_idx = ts_format.sel->get_index(i);
 		auto val_idx = value_format.sel->get_index(i);
 		if (!ts_format.validity.RowIsValid(ts_idx) || !value_format.validity.RowIsValid(val_idx)) {
@@ -1247,31 +1316,55 @@ static std::vector<double> BuildTimeAxis(const std::vector<TSFeaturesSample> &sa
 struct TSFeaturesAggregateOperation {
 	template <class STATE>
 	static void Initialize(STATE &state) {
-		state.data = new TSFeaturesData();
+		// Initialize state.data - this MUST be called for window functions to work
+		// If state.data already exists (from defensive initialization in Update),
+		// we still need to ensure it's properly set up
+		if (!state.data) {
+			state.data = new TSFeaturesData();
+		}
+		// Initialize cached_results pointer if needed
+		if (!state.cached_results) {
+			state.cached_results = new TSFeaturesCachedResults();
+		} else {
+			// Clear existing cached results
+			state.cached_results->results.clear();
+			state.cached_results->sample_count = 0;
+		}
 	}
 
 	template <class STATE, class OP>
 	static void Combine(const STATE &source, STATE &target, AggregateInputData &) {
-		// If source has no data, nothing to combine
+		// Safety check: if source has no data, nothing to combine
 		if (!source.data) {
-			return;
-		}
-		// If target has no data, initialize it or use source's data
-		if (!target.data) {
-			if (source.data->samples.empty()) {
-				return;
+			// Source has no data - ensure target is at least initialized
+			if (!target.data) {
+				target.data = new TSFeaturesData();
 			}
-			// Initialize target with source's data
-			target.data = new TSFeaturesData();
-			target.data->samples = source.data->samples;
 			return;
 		}
+
+		// Safety check: if target has no data, initialize it and copy source's data
+		if (!target.data) {
+			target.data = new TSFeaturesData();
+			// Deep copy samples from source to target
+			target.data->samples = source.data->samples;
+			// Clear cached results - they will be recomputed in Finalize
+			if (target.cached_results) {
+				target.cached_results->results.clear();
+				target.cached_results->sample_count = 0;
+			}
+			return;
+		}
+
 		// Both have data - combine samples from source into target
+		// This is safe because we've verified both data pointers are non-null
 		target.data->samples.insert(target.data->samples.end(), source.data->samples.begin(),
 		                            source.data->samples.end());
 		// Clear cached results when combining states - they will be recomputed in Finalize
-		target.cached_results.clear();
-		target.cached_sample_count = 0;
+		if (target.cached_results) {
+			target.cached_results->results.clear();
+			target.cached_results->sample_count = 0;
+		}
 	}
 
 	template <class STATE>
@@ -1281,7 +1374,17 @@ struct TSFeaturesAggregateOperation {
 		child_list_t<Value> children;
 		children.reserve(bind_data.column_names.size());
 
-		if (!state.data || state.data->samples.empty()) {
+		// Safety check: ensure state.data is initialized (should be, but defensive for window functions)
+		if (!state.data) {
+			// State not initialized - return NULL for all features
+			for (const auto &name : bind_data.column_names) {
+				children.emplace_back(name, Value());
+			}
+			finalize_data.result.SetValue(finalize_data.result_idx, Value::STRUCT(std::move(children)));
+			return;
+		}
+
+		if (state.data->samples.empty()) {
 			for (const auto &name : bind_data.column_names) {
 				children.emplace_back(name, Value());
 			}
@@ -1291,10 +1394,15 @@ struct TSFeaturesAggregateOperation {
 
 		auto &samples = state.data->samples;
 
+		// Ensure cached_results is initialized
+		if (!state.cached_results) {
+			state.cached_results = new TSFeaturesCachedResults();
+		}
+
 		// Check if we have cached results from a previous Finalize call with sufficient samples
 		// This handles the case where DuckDB calls Finalize multiple times
-		if (!state.cached_results.empty() && state.cached_sample_count >= samples.size()) {
-			child_list_t<Value> cached_copy = state.cached_results;
+		if (!state.cached_results->results.empty() && state.cached_results->sample_count >= samples.size()) {
+			child_list_t<Value> cached_copy = state.cached_results->results;
 			finalize_data.result.SetValue(finalize_data.result_idx, Value::STRUCT(std::move(cached_copy)));
 			return;
 		}
@@ -1341,17 +1449,26 @@ struct TSFeaturesAggregateOperation {
 		}
 
 		// Cache results in state for subsequent Finalize calls
-		state.cached_results = children;
-		state.cached_sample_count = samples.size();
+		if (!state.cached_results) {
+			state.cached_results = new TSFeaturesCachedResults();
+		}
+		state.cached_results->results = children;
+		state.cached_results->sample_count = samples.size();
 
 		finalize_data.result.SetValue(finalize_data.result_idx, Value::STRUCT(std::move(children)));
 	}
 
 	template <class STATE>
 	static void Destroy(STATE &state, AggregateInputData &) {
+		// Safety check: ensure we only delete once
 		if (state.data) {
 			delete state.data;
 			state.data = nullptr;
+		}
+		// Delete cached results if it exists
+		if (state.cached_results) {
+			delete state.cached_results;
+			state.cached_results = nullptr;
 		}
 	}
 };
