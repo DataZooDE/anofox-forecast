@@ -568,22 +568,12 @@ double PermutationEntropy(const Series &series, int dimension, int tau, FeatureC
 }
 
 double LempelZivComplexity(const Series &series, int bins, FeatureCache &) {
-	// Debug output - always enabled for troubleshooting (uses std::cerr, not spdlog)
-	static int call_count = 0;
-	call_count++;
-	bool debug_this_call = (call_count <= 5); // Debug first 5 calls
-	
 	if (series.empty()) {
 		return std::numeric_limits<double>::quiet_NaN();
 	}
 	auto minmax = std::minmax_element(series.begin(), series.end());
 	double min_val = *minmax.first;
 	double max_val = *minmax.second;
-	
-	if (debug_this_call) {
-		std::cerr << "[LZ-DEBUG] Call #" << call_count << ": series.size()=" << series.size() 
-		          << ", min=" << min_val << ", max=" << max_val << ", bins=" << bins << std::endl;
-	}
 	
 	if (std::fabs(max_val - min_val) < kEpsilon) {
 		return 0.0;
@@ -629,24 +619,6 @@ double LempelZivComplexity(const Series &series, int bins, FeatureCache &) {
 		symbols[i] = bin_idx;
 	}
 	
-	if (debug_this_call) {
-		std::cerr << "[LZ-DEBUG] Binned symbols (first 20): ";
-		for (size_t i = 0; i < std::min(symbols.size(), size_t(20)); ++i) {
-			std::cerr << symbols[i] << " ";
-		}
-		std::cerr << std::endl;
-		// Count unique symbols
-		std::set<int> unique_symbols;
-		for (int sym : symbols) {
-			unique_symbols.insert(sym);
-		}
-		std::cerr << "[LZ-DEBUG] Unique symbols in sequence: " << unique_symbols.size() << " (";
-		for (int sym : unique_symbols) {
-			std::cerr << sym << " ";
-		}
-		std::cerr << ")" << std::endl;
-	}
-	
 	// tsfresh's Lempel-Ziv complexity algorithm:
 	// sub_strings = set()
 	// n = len(sequence)
@@ -683,7 +655,7 @@ double LempelZivComplexity(const Series &series, int bins, FeatureCache &) {
 		if (it != sub_strings.end()) {
 			// Substring exists, extend it
 			inc++;
-			} else {
+		} else {
 			// New substring, add it and move forward
 			sub_strings.insert(sub_str);
 			ind += inc;
@@ -693,22 +665,6 @@ double LempelZivComplexity(const Series &series, int bins, FeatureCache &) {
 	
 	// tsfresh returns len(sub_strings) / n
 	double result = static_cast<double>(sub_strings.size()) / static_cast<double>(n);
-	
-	if (debug_this_call) {
-		std::cerr << "[LZ-DEBUG] Found " << sub_strings.size() << " unique substrings" << std::endl;
-		std::cerr << "[LZ-DEBUG] Result: " << result << " (" << sub_strings.size() << "/" << n << ")" << std::endl;
-		// Show first few substrings
-		int count = 0;
-		for (const auto& sub_str : sub_strings) {
-			if (count++ >= 5) break;
-			std::cerr << "[LZ-DEBUG]   Substring " << count << ": [";
-			for (size_t i = 0; i < sub_str.size(); ++i) {
-				if (i > 0) std::cerr << ",";
-				std::cerr << sub_str[i];
-			}
-			std::cerr << "]" << std::endl;
-		}
-	}
 	
 	return result;
 }
