@@ -28,18 +28,18 @@ CREATE TABLE trend_temp AS SELECT date, value FROM comprehensive_test WHERE id =
 # Test Model 1: Naive (KNOWN WORKING)
 statement ok
 CREATE OR REPLACE TABLE test_batch AS
-SELECT id, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, value, 'Naive', 14, NULL);
+SELECT id, forecast_step, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, value, 'Naive', 14, NULL);
 
 statement ok
 CREATE OR REPLACE TABLE test_individual AS
-SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast('const_temp', date, value, 'Naive', 14, NULL)
+SELECT 'ConstantSeries' AS id, forecast_step, point_forecast FROM ts_forecast('const_temp', date, value, 'Naive', 14, NULL)
 UNION ALL
-SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast('trend_temp', date, value, 'Naive', 14, NULL);
+SELECT 'TrendSeries' AS id, forecast_step, point_forecast FROM ts_forecast('trend_temp', date, value, 'Naive', 14, NULL);
 
 query I
 SELECT COUNT(*) = 0 FROM (
-    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst, row_number() OVER (PARTITION BY b.id) AS rn
-    FROM test_batch b JOIN test_individual i ON b.id = i.id
+    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst
+    FROM test_batch b JOIN test_individual i ON b.id = i.id AND b.forecast_step = i.forecast_step
 ) WHERE ABS(batch_fcst - ind_fcst) > 0.01;
 ----
 true
@@ -47,18 +47,18 @@ true
 # Test Model 2: SMA (KNOWN WORKING)
 statement ok
 CREATE OR REPLACE TABLE test_batch AS
-SELECT id, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, value, 'SMA', 14, {'window': 7});
+SELECT id, forecast_step, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, value, 'SMA', 14, {'window': 7});
 
 statement ok
 CREATE OR REPLACE TABLE test_individual AS
-SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast('const_temp', date, value, 'SMA', 14, {'window': 7})
+SELECT 'ConstantSeries' AS id, forecast_step, point_forecast FROM ts_forecast('const_temp', date, value, 'SMA', 14, {'window': 7})
 UNION ALL
-SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast('trend_temp', date, value, 'SMA', 14, {'window': 7});
+SELECT 'TrendSeries' AS id, forecast_step, point_forecast FROM ts_forecast('trend_temp', date, value, 'SMA', 14, {'window': 7});
 
 query I
 SELECT COUNT(*) = 0 FROM (
-    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst, row_number() OVER (PARTITION BY b.id) AS rn
-    FROM test_batch b JOIN test_individual i ON b.id = i.id
+    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst
+    FROM test_batch b JOIN test_individual i ON b.id = i.id AND b.forecast_step = i.forecast_step
 ) WHERE ABS(batch_fcst - ind_fcst) > 0.01;
 ----
 true
@@ -66,18 +66,18 @@ true
 # Test Model 3: SES (KNOWN WORKING)
 statement ok
 CREATE OR REPLACE TABLE test_batch AS
-SELECT id, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, value, 'SES', 14, {'alpha': 0.3});
+SELECT id, forecast_step, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, value, 'SES', 14, {'alpha': 0.3});
 
 statement ok
 CREATE OR REPLACE TABLE test_individual AS
-SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast('const_temp', date, value, 'SES', 14, {'alpha': 0.3})
+SELECT 'ConstantSeries' AS id, forecast_step, point_forecast FROM ts_forecast('const_temp', date, value, 'SES', 14, {'alpha': 0.3})
 UNION ALL
-SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast('trend_temp', date, value, 'SES', 14, {'alpha': 0.3});
+SELECT 'TrendSeries' AS id, forecast_step, point_forecast FROM ts_forecast('trend_temp', date, value, 'SES', 14, {'alpha': 0.3});
 
 query I
 SELECT COUNT(*) = 0 FROM (
-    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst, row_number() OVER (PARTITION BY b.id) AS rn
-    FROM test_batch b JOIN test_individual i ON b.id = i.id
+    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst
+    FROM test_batch b JOIN test_individual i ON b.id = i.id AND b.forecast_step = i.forecast_step
 ) WHERE ABS(batch_fcst - ind_fcst) > 0.01;
 ----
 true
@@ -85,18 +85,18 @@ true
 # Test Model 4: SESOptimized (KNOWN WORKING)
 statement ok
 CREATE OR REPLACE TABLE test_batch AS
-SELECT id, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, value, 'SESOptimized', 14, NULL);
+SELECT id, forecast_step, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, value, 'SESOptimized', 14, NULL);
 
 statement ok
 CREATE OR REPLACE TABLE test_individual AS
-SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast('const_temp', date, value, 'SESOptimized', 14, NULL)
+SELECT 'ConstantSeries' AS id, forecast_step, point_forecast FROM ts_forecast('const_temp', date, value, 'SESOptimized', 14, NULL)
 UNION ALL
-SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast('trend_temp', date, value, 'SESOptimized', 14, NULL);
+SELECT 'TrendSeries' AS id, forecast_step, point_forecast FROM ts_forecast('trend_temp', date, value, 'SESOptimized', 14, NULL);
 
 query I
 SELECT COUNT(*) = 0 FROM (
-    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst, row_number() OVER (PARTITION BY b.id) AS rn
-    FROM test_batch b JOIN test_individual i ON b.id = i.id
+    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst
+    FROM test_batch b JOIN test_individual i ON b.id = i.id AND b.forecast_step = i.forecast_step
 ) WHERE ABS(batch_fcst - ind_fcst) > 0.01;
 ----
 true
@@ -104,18 +104,18 @@ true
 # Test Model 5: ETS (KNOWN WORKING)
 statement ok
 CREATE OR REPLACE TABLE test_batch AS
-SELECT id, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1});
+SELECT id, forecast_step, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1});
 
 statement ok
 CREATE OR REPLACE TABLE test_individual AS
-SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast('const_temp', date, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1})
+SELECT 'ConstantSeries' AS id, forecast_step, point_forecast FROM ts_forecast('const_temp', date, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1})
 UNION ALL
-SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast('trend_temp', date, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1});
+SELECT 'TrendSeries' AS id, forecast_step, point_forecast FROM ts_forecast('trend_temp', date, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1});
 
 query I
 SELECT COUNT(*) = 0 FROM (
-    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst, row_number() OVER (PARTITION BY b.id) AS rn
-    FROM test_batch b JOIN test_individual i ON b.id = i.id
+    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst
+    FROM test_batch b JOIN test_individual i ON b.id = i.id AND b.forecast_step = i.forecast_step
 ) WHERE ABS(batch_fcst - ind_fcst) > 0.01;
 ----
 true
@@ -123,18 +123,18 @@ true
 # Test Model 6: CrostonClassic (KNOWN WORKING)
 statement ok
 CREATE OR REPLACE TABLE test_batch AS
-SELECT id, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, value, 'CrostonClassic', 14, {'alpha': 0.1});
+SELECT id, forecast_step, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, value, 'CrostonClassic', 14, {'alpha': 0.1});
 
 statement ok
 CREATE OR REPLACE TABLE test_individual AS
-SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast('const_temp', date, value, 'CrostonClassic', 14, {'alpha': 0.1})
+SELECT 'ConstantSeries' AS id, forecast_step, point_forecast FROM ts_forecast('const_temp', date, value, 'CrostonClassic', 14, {'alpha': 0.1})
 UNION ALL
-SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast('trend_temp', date, value, 'CrostonClassic', 14, {'alpha': 0.1});
+SELECT 'TrendSeries' AS id, forecast_step, point_forecast FROM ts_forecast('trend_temp', date, value, 'CrostonClassic', 14, {'alpha': 0.1});
 
 query I
 SELECT COUNT(*) = 0 FROM (
-    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst, row_number() OVER (PARTITION BY b.id) AS rn
-    FROM test_batch b JOIN test_individual i ON b.id = i.id
+    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst
+    FROM test_batch b JOIN test_individual i ON b.id = i.id AND b.forecast_step = i.forecast_step
 ) WHERE ABS(batch_fcst - ind_fcst) > 0.01;
 ----
 true
@@ -142,18 +142,18 @@ true
 # Test Model 7: CrostonOptimized (KNOWN WORKING)
 statement ok
 CREATE OR REPLACE TABLE test_batch AS
-SELECT id, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, value, 'CrostonOptimized', 14, NULL);
+SELECT id, forecast_step, point_forecast FROM TS_FORECAST_BY(comprehensive_test, id, date, value, 'CrostonOptimized', 14, NULL);
 
 statement ok
 CREATE OR REPLACE TABLE test_individual AS
-SELECT 'ConstantSeries' AS id, point_forecast FROM ts_forecast('const_temp', date, value, 'CrostonOptimized', 14, NULL)
+SELECT 'ConstantSeries' AS id, forecast_step, point_forecast FROM ts_forecast('const_temp', date, value, 'CrostonOptimized', 14, NULL)
 UNION ALL
-SELECT 'TrendSeries' AS id, point_forecast FROM ts_forecast('trend_temp', date, value, 'CrostonOptimized', 14, NULL);
+SELECT 'TrendSeries' AS id, forecast_step, point_forecast FROM ts_forecast('trend_temp', date, value, 'CrostonOptimized', 14, NULL);
 
 query I
 SELECT COUNT(*) = 0 FROM (
-    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst, row_number() OVER (PARTITION BY b.id) AS rn
-    FROM test_batch b JOIN test_individual i ON b.id = i.id
+    SELECT b.id, b.point_forecast AS batch_fcst, i.point_forecast AS ind_fcst
+    FROM test_batch b JOIN test_individual i ON b.id = i.id AND b.forecast_step = i.forecast_step
 ) WHERE ABS(batch_fcst - ind_fcst) > 0.01;
 ----
 true
