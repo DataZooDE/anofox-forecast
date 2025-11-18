@@ -78,6 +78,6 @@ COPY (
         series_id AS unique_id,
         date AS ds,
         ROUND(value, 2) AS y
-    FROM timeseries_10k
+    FROM timeseries_100
     ORDER BY series_id, date
 ) TO 'data/time_series_data.parquet' (FORMAT PARQUET);
