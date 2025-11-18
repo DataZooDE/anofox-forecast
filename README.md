@@ -31,6 +31,8 @@ See [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) for complete attribution and lice
 
 ## News
 
+- [2025-11-18] Update documentation
+- [2025-11-18] Timeseries features for GROUP BY and WINDOW calculation, see [Timeseries Features](benchmark/timeseries_features/README.md).
 - [2025-11-16] Added a attribution and corresponding licence files.
 - [2025-11-16] Added timeseries feature calculation, see [Timeseries Features](benchmark/timeseries_features/README.md).
 
