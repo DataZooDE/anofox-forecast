@@ -1,0 +1,71 @@
+[
+  {
+    "feature": "autocorrelation",
+    "params": {
+      "lag": 1
+    }
+  },
+  {
+    "feature": "fft_aggregated",
+    "params": {
+      "aggtype": "centroid"
+    }
+  },
+  {
+    "feature": "first_location_of_maximum",
+    "params": {}
+  },
+  {
+    "feature": "first_location_of_minimum",
+    "params": {}
+  },
+  {
+    "feature": "kurtosis",
+    "params": {}
+  },
+  {
+    "feature": "linear_trend",
+    "params": {
+      "attr": "stderr"
+    }
+  },
+  {
+    "feature": "longest_strike_above_mean",
+    "params": {}
+  },
+  {
+    "feature": "mean",
+    "params": {}
+  },
+  {
+    "feature": "ratio_beyond_r_sigma",
+    "params": {
+      "r": 3.0
+    }
+  },
+  {
+    "feature": "skewness",
+    "params": {}
+  },
+  {
+    "feature": "spkt_welch_density",
+    "params": {
+      "coeff": 2
+    }
+  },
+  {
+    "feature": "standard_deviation",
+    "params": {}
+  },
+  {
+    "feature": "time_reversal_asymmetry_statistic",
+    "params": {
+      "lag": 1
+    }
+  },
+  {
+    "feature": "variance",
+    "params": {}
+  }
+]
+
