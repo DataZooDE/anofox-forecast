@@ -21,19 +21,26 @@ endif()
 # DuckDB's extension distribution supports vcpkg
 find_package(Threads REQUIRED)
 
-# Make Eigen3 optional for clang-tidy (which doesn't use vcpkg)
-if(CLANG_TIDY)
+# Find Eigen3 - prefer vcpkg's version when available
+# When using vcpkg, use CONFIG mode for proper integration
+if(VCPKG_BUILD OR DEFINED VCPKG_TARGET_TRIPLET)
+    # Using vcpkg - Eigen3 should be available via vcpkg
+    find_package(Eigen3 CONFIG REQUIRED)
+elseif(CLANG_TIDY)
+    # clang-tidy doesn't use vcpkg, make Eigen3 optional
     find_package(Eigen3 QUIET)
 else()
-    find_package(Eigen3 REQUIRED)
+    # Try CONFIG mode first (for vcpkg), fall back to MODULE mode (system install)
+    find_package(Eigen3 CONFIG QUIET)
+    if(NOT Eigen3_FOUND)
+        find_package(Eigen3 REQUIRED)
+    endif()
 endif()
 
 # Include anofox-time headers
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/anofox-time/include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/anofox-time/third_party/LBFGSpp/include)
-if(Eigen3_FOUND)
-    include_directories(${EIGEN3_INCLUDE_DIR})
-endif()
+# Note: When using Eigen3::Eigen target, include_directories is handled automatically
 
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
 set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
@@ -96,6 +103,9 @@ set(ANOFOX_TIME_SOURCES
     anofox-time/src/utils/intermittent_utils.cpp
     anofox-time/src/utils/robust_regression.cpp
     anofox-time/src/utils/cross_validation.cpp
+    anofox-time/src/features/feature_math.cpp
+    anofox-time/src/features/feature_registry.cpp
+    anofox-time/src/features/feature_calculators.cpp
     # Optimization
     anofox-time/src/optimization/lbfgs_optimizer.cpp
     anofox-time/src/optimization/ets_gradients.cpp
@@ -117,6 +127,7 @@ set(EXTENSION_SOURCES
     src/anofox_forecast_extension.cpp
     src/forecast_table_function.cpp
     src/forecast_aggregate.cpp
+    src/ts_features_function.cpp
     src/metrics_function.cpp
     src/seasonality_function.cpp
     src/changepoint_function.cpp

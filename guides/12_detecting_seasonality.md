@@ -5,7 +5,7 @@
 The `anofox-forecast` extension provides two powerful functions for automatic seasonality detection in time series data:
 
 1. **`TS_DETECT_SEASONALITY`** - Simple detection returning seasonal periods
-2. **`TS_ANALYZE_SEASONALITY`** - Comprehensive analysis with seasonal/trend strength
+2. **`TS_ANALYZE_SEASONALITY`** - Analysis with seasonal/trend strength
 
 These functions use autocorrelation-based periodogram analysis to automatically identify recurring patterns in your data.
 
@@ -283,22 +283,3 @@ The algorithm uses these internal defaults:
 
 - Use robust forecasting methods
 - Consider detrending first
-- Use ensemble methods that combine seasonal and non-seasonal models
-
-## Best Practices
-
-1. **Always check seasonal strength** before using seasonal models
-2. **Visualize your data** to validate detected periods
-3. **Use the primary period** (first in list) for forecasting
-4. **Consider multiple seasonalities** (use MSTL, TBATS, or MFLES)
-5. **Re-detect periodically** as patterns may change over time
-
-## Examples
-
-See `examples/seasonality_detection.sql` for comprehensive examples including:
-
-- Simple detection
-- Detailed analysis
-- Multiple series
-- Integration with forecasting
-- Rolling window analysis

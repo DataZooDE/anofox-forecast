@@ -981,6 +981,9 @@ core::Forecast MFLES::predict(int horizon) {
 	if (!is_fitted_) {
 		throw std::runtime_error("MFLES: must call fit() before predict()");
 	}
+	if (horizon <= 0) {
+		throw std::invalid_argument("MFLES: horizon must be positive");
+	}
 
 	const int n = static_cast<int>(preprocessed_data_.size());
 	std::vector<double> forecast(horizon, 0.0);
@@ -1114,13 +1117,12 @@ void MFLES::computeFittedValues() {
 	}
 
 	// Reverse preprocessing for fitted values
-	auto fitted_original = fitted_;
-	postprocess(fitted_original);
+	postprocess(fitted_);  // Store fitted values on original scale
 
 	// Compute residuals on original scale
 	residuals_ = std::vector<double>(n);
 	for (int i = 0; i < n; ++i) {
-		residuals_[i] = original_data_[i] - fitted_original[i];
+		residuals_[i] = original_data_[i] - fitted_[i];
 	}
 }
 

@@ -1,0 +1,8 @@
+[
+  { "feature": "ratio_beyond_r_sigma", "params": { "r": 1.5 } },
+  { "feature": "ratio_beyond_r_sigma", "params": { "r": 3.0 } },
+  { "feature": "autocorrelation", "params": { "lag": 2 } },
+  { "feature": "autocorrelation", "params": { "lag": 7 } },
+  { "feature": "partial_autocorrelation", "params": { "lag": 5 } }
+]
+

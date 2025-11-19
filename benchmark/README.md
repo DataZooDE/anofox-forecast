@@ -48,12 +48,12 @@ All models benchmarked on M4 Daily dataset, grouped by method family and separat
 | **MSTL** | Anofox | MSTL | 1.302 | 202.82 | 232.93 | **0.60** |
 | | Statsforecast | MSTL | **1.200** | 184.34 | 216.14 | 425 |
 
-
 ## Datasets, Metrics, and Running Benchmarks
 
 ### Dataset Information
 
 **M4 Daily Dataset:**
+
 - **Series Count**: 4,227 time series
 - **Season Length**: 7 (weekly seasonality)
 - **Forecast Horizon**: 14 days
@@ -63,6 +63,7 @@ All models benchmarked on M4 Daily dataset, grouped by method family and separat
 ### Metrics
 
 All benchmarks measure:
+
 - **MASE** (Mean Absolute Scaled Error) - Primary metric, scale-independent
 - **MAE** (Mean Absolute Error) - Absolute forecast error in original units
 - **RMSE** (Root Mean Squared Error) - Penalizes large errors
@@ -71,56 +72,61 @@ All benchmarks measure:
 ### Running Benchmarks
 
 **Environment Setup:**
+
 ```bash
 cd benchmark
 uv sync  # Install dependencies
 ```
 
 **Run Individual Benchmarks:**
+
+All benchmark commands accept a `--dataset` argument (default `m4`).
+Add new datasets by creating `benchmark/<dataset>` and passing that dataset name via CLI.
+
 ```bash
 # Baseline models
-cd baseline_benchmark
-uv run python run.py anofox Daily        # Run Anofox models
-uv run python run.py statsforecast Daily # Run Statsforecast models
-uv run python run.py evaluate Daily      # Evaluate results
+cd m4/baseline_benchmark
+uv run python run.py anofox Daily --dataset m4        # Run Anofox models
+uv run python run.py statsforecast Daily --dataset m4 # Run Statsforecast models
+uv run python run.py evaluate Daily --dataset m4      # Evaluate results
 
 # ETS models
-cd ets_benchmark
-uv run python run.py anofox Daily
-uv run python run.py evaluate Daily
+cd m4/ets_benchmark
+uv run python run.py anofox Daily --dataset m4
+uv run python run.py evaluate Daily --dataset m4
 
 # Theta models
-cd theta_benchmark
-uv run python run.py anofox Daily
-uv run python run.py statsforecast Daily
-uv run python run.py evaluate Daily
+cd m4/theta_benchmark
+uv run python run.py anofox Daily --dataset m4
+uv run python run.py statsforecast Daily --dataset m4
+uv run python run.py evaluate Daily --dataset m4
 
 # ARIMA models
-cd arima_benchmark
-uv run python run.py anofox Daily
-uv run python run.py evaluate Daily
+cd m4/arima_benchmark
+uv run python run.py anofox Daily --dataset m4
+uv run python run.py evaluate Daily --dataset m4
 
 # MFLES models
-cd mfles_benchmark
-uv run python run.py anofox Daily
-uv run python run.py statsforecast Daily
-uv run python run.py evaluate Daily
+cd m4/mfles_benchmark
+uv run python run.py anofox Daily --dataset m4
+uv run python run.py statsforecast Daily --dataset m4
+uv run python run.py evaluate Daily --dataset m4
 
 # MSTL models
-cd mstl_benchmark
-uv run python run.py anofox Daily
-uv run python run.py statsforecast Daily
-uv run python run.py evaluate Daily
+cd m4/mstl_benchmark
+uv run python run.py anofox Daily --dataset m4
+uv run python run.py statsforecast Daily --dataset m4
+uv run python run.py evaluate Daily --dataset m4
 ```
 
 ## Model Configuration
 
 The model configuration can be adjusted in the Python file in the config folder.
 
-
 ## Purpose
 
 These benchmarks are used to:
+
 1. Validate forecasting accuracy against known datasets (M4 Competition)
 2. Measure performance on larger workloads (4K+ time series)
 3. Validate Anofox with other forecasting libraries (Statsforecast)
@@ -129,6 +135,7 @@ These benchmarks are used to:
 ## Environment
 
 The benchmark environment uses `uv` for Python dependency management:
+
 - Python packages defined in `pyproject.toml`
 - Locked dependencies in `uv.lock`
 - Python version in `.python-version`

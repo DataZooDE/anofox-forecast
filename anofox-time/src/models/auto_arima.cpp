@@ -998,11 +998,6 @@ void AutoARIMA::fit(const core::TimeSeries &ts) {
 	            components_.seasonal_period);
 	ANOFOX_INFO("AutoARIMA: Evaluated {} models ({} failed), final AICc={:.2f}",
 	            diagnostics_.models_evaluated, diagnostics_.models_failed, metrics_.aicc);
-
-	// Print selected parameters to stderr for debugging
-	// std::cerr << "[AutoARIMA] Selected ARIMA(" << components_.p << "," << components_.d << "," << components_.q
-	//           << ")(" << components_.P << "," << components_.D << "," << components_.Q << ")[" << components_.seasonal_period
-	//           << "], AICc=" << metrics_.aicc << std::endl;
 }
 
 core::Forecast AutoARIMA::predict(int horizon) {

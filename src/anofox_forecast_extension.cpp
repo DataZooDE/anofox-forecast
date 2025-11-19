@@ -5,6 +5,7 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
+#include "duckdb/parser/parsed_data/create_aggregate_function_info.hpp"
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 
@@ -16,6 +17,7 @@
 #include "changepoint_function.hpp"
 #include "eda_macros.hpp"
 #include "data_prep_macros.hpp"
+#include "ts_features_function.hpp"
 #include "duckdb/catalog/default/default_functions.hpp"
 #include "duckdb/catalog/default/default_table_functions.hpp"
 
@@ -23,6 +25,22 @@
 // #include <openssl/opensslv.h>  // Not currently used
 
 namespace duckdb {
+
+static void RegisterTableFunctionIgnore(ExtensionLoader &loader, TableFunction function) {
+	TableFunctionSet set(function.name);
+	set.AddFunction(std::move(function));
+	CreateTableFunctionInfo info(std::move(set));
+	info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+	loader.RegisterFunction(std::move(info));
+}
+
+static void RegisterAggregateFunctionIgnore(ExtensionLoader &loader, AggregateFunction function) {
+	AggregateFunctionSet set(function.name);
+	set.AddFunction(std::move(function));
+	CreateAggregateFunctionInfo info(std::move(set));
+	info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+	loader.RegisterFunction(std::move(info));
+}
 
 // Table macros - user-facing API with automatic UNNEST
 // New signature: TS_FORECAST_BY(table_name, group_by_columns, date_col, target_col, method, horizon, params)
@@ -133,12 +151,12 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// Register the FORECAST table function (legacy, for compatibility)
 	auto forecast_function = CreateForecastTableFunction();
-	loader.RegisterFunction(*forecast_function);
+	RegisterTableFunctionIgnore(loader, std::move(*forecast_function));
 	// std::cerr << "[DEBUG] FORECAST table function registered" << std::endl;
 
 	// Register the TS_FORECAST_AGG aggregate function (internal, for GROUP BY)
 	auto ts_forecast_agg = CreateTSForecastAggregate();
-	loader.RegisterFunction(ts_forecast_agg);
+	RegisterAggregateFunctionIgnore(loader, std::move(ts_forecast_agg));
 	// std::cerr << "[DEBUG] TS_FORECAST_AGG aggregate function registered" << std::endl;
 
 	// Register the TS_METRICS scalar functions (for evaluation)
@@ -153,11 +171,15 @@ static void LoadInternal(ExtensionLoader &loader) {
 	RegisterChangepointFunction(loader);
 	// std::cerr << "[DEBUG] Changepoint functions registered" << std::endl;
 
+	// Register ts_features aggregate/window function
+	RegisterTSFeaturesFunction(loader);
+
 	// Register table macros (TS_FORECAST, TS_FORECAST_BY)
 	// Both handle UNNEST internally - users get clean table output!
 	// For 2+ group columns, use TS_FORECAST_AGG with manual UNNEST
 	for (idx_t index = 0; forecast_table_macros[index].name != nullptr; index++) {
 		auto table_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(forecast_table_macros[index]);
+		table_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
 		loader.RegisterFunction(*table_info);
 	}
 	// std::cerr << "[DEBUG] TS_FORECAST table macros registered" << std::endl;

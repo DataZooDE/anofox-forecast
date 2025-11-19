@@ -11,6 +11,50 @@
 
 A time series forecasting extension for DuckDB with 31 models, data preparation, and analytics — all in pure SQL.
 
+
+## ✨ Key Features
+
+### 🎯 Forecasting (31 Models)
+- **AutoML**: AutoETS, AutoARIMA, AutoMFLES, AutoMSTL, AutoTBATS
+- **Statistical**: ETS, ARIMA, Theta, Holt-Winters, Seasonal Naive
+- **Advanced**: TBATS, MSTL, MFLES (multiple seasonality)
+- **Intermittent Demand**: Croston, ADIDA, IMAPA, TSB
+
+### 📊 Complete Workflow
+- **EDA**: 5 macros for data quality analysis
+- **Data Preparation**: 12 macros for cleaning and transformation
+- **Evaluation**: 12 metrics including coverage analysis
+- **Seasonality Detection**: Automatic period identification
+- **Changepoint Detection**: Regime identification with probabilities
+
+### 🔢 Feature Calculation
+- **76+ Statistical Features**: Extract comprehensive time series features for ML pipelines
+- **GROUP BY & Window Support**: Native DuckDB parallelization for multi-series feature extraction
+- **Flexible Configuration**: Select specific features, customize parameters, or use JSON/CSV configs
+- **tsfresh-Compatible**: Compatible feature vectors for seamless integration with existing ML workflows (hctsa will come also)
+
+### ⚡ Performance
+- **Parallel**: Native DuckDB parallelization on GROUP BY
+- **Scalable**: Handles millions of series
+- **Memory Efficient**: Columnar storage, streaming operations
+
+### 🎨 User-Friendly API
+- **Zero Setup**: All macros load automatically
+- **Consistent**: MAP-based parameters
+- **Composable**: Chain operations easily
+- **Multi-Language**: Use from Python, R, Julia, C++, Rust, and more!
+
+## 📋 Table of Contents
+
+- [Installation](#installation)
+- [Quick Examples](#quick-examples)
+- [Multi-Language Support](#multi-language-support)
+- [API Reference](#api-reference)
+- [Guides](#guides)
+- [Performance](#performance)
+- [License](#license)
+
+
 ## Why a C++ Port?
 
 We implemented time-series forecasting algorithms in C++ with native DuckDB
@@ -28,13 +72,6 @@ StatsForecast (Python) and various Rust libraries focused on financial analytics
 This extension includes C++ ports of algorithms from several open-source projects.
 See [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) for complete attribution and license information.
 
-## Pre-requirements
-
-Note: For ARIMA models you will need to install Eigen3 libraries. For example for Linux (Debian-Ubuntu based): 
-
-```bash
-sudo apt install libeigen3-dev
-```
 
 ## Installation
 
@@ -123,41 +160,7 @@ GROUP BY model_name
 ORDER BY avg_mae;
 ```
 
-## ✨ Key Features
 
-### 🎯 Forecasting (31 Models)
-- **AutoML**: AutoETS, AutoARIMA, AutoMFLES, AutoMSTL, AutoTBATS
-- **Statistical**: ETS, ARIMA, Theta, Holt-Winters, Seasonal Naive
-- **Advanced**: TBATS, MSTL, MFLES (multiple seasonality)
-- **Intermittent Demand**: Croston, ADIDA, IMAPA, TSB
-
-### 📊 Complete Workflow
-- **EDA**: 5 macros for data quality analysis
-- **Data Preparation**: 12 macros for cleaning and transformation
-- **Evaluation**: 12 metrics including coverage analysis
-- **Seasonality Detection**: Automatic period identification
-- **Changepoint Detection**: Regime identification with probabilities
-
-### ⚡ Performance
-- **Parallel**: Native DuckDB parallelization on GROUP BY
-- **Scalable**: Handles millions of series
-- **Memory Efficient**: Columnar storage, streaming operations
-
-### 🎨 User-Friendly API
-- **Zero Setup**: All macros load automatically
-- **Consistent**: MAP-based parameters
-- **Composable**: Chain operations easily
-- **Multi-Language**: Use from Python, R, Julia, C++, Rust, and more!
-
-## 📋 Table of Contents
-
-- [Installation](#installation)
-- [Quick Examples](#quick-examples)
-- [Multi-Language Support](#multi-language-support)
-- [API Reference](#api-reference)
-- [Guides](#guides)
-- [Performance](#performance)
-- [License](#license)
 
 
 ## 🎓 Quick Examples

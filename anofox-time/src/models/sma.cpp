@@ -51,17 +51,29 @@ core::Forecast SimpleMovingAverage::predict(int horizon) {
 	auto &series = forecast.primary();
 	series.reserve(horizon);
 
-	// Calculate the average of the last window from historical data ONCE
-	// Then repeat this constant forecast for all horizons (matches statsforecast)
+	// Calculate effective window size
 	int effective_window = (window_ == 0) ? static_cast<int>(history_.size()) : window_;
 	effective_window = std::min(effective_window, static_cast<int>(history_.size()));
 	
-	double sum = std::accumulate(history_.end() - effective_window, history_.end(), 0.0);
-	double constant_forecast = sum / static_cast<double>(effective_window);
-
-	// Repeat the constant forecast for all horizons
-	for (int i = 0; i < horizon; ++i) {
-		series.push_back(constant_forecast);
+	if (window_ == 0) {
+		// window=0 means use full history: repeat constant forecast (mean of all history)
+		double sum = std::accumulate(history_.begin(), history_.end(), 0.0);
+		double constant_forecast = sum / static_cast<double>(history_.size());
+		for (int i = 0; i < horizon; ++i) {
+			series.push_back(constant_forecast);
+		}
+	} else {
+		// Rolling forecast: each step uses the average of the last window values
+		// This includes previously forecasted values in the window
+		std::vector<double> temp = history_;
+		
+		for (int i = 0; i < horizon; ++i) {
+			// Calculate average of last window values
+			const double sum = std::accumulate(temp.end() - effective_window, temp.end(), 0.0);
+			const double next = sum / static_cast<double>(effective_window);
+			series.push_back(next);
+			temp.push_back(next);  // Add to temp for next iteration
+		}
 	}
 
 	return forecast;

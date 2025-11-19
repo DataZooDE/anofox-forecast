@@ -45,3 +45,4 @@ core::Forecast MethodNameWrapper::predict(int horizon) {
 } // namespace anofoxtime::models
 
 
+

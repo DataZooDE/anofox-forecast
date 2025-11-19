@@ -64,6 +64,7 @@ static const DefaultTableMacro eda_macros[] = {
 void RegisterEDAMacros(ExtensionLoader &loader) {
 	for (idx_t index = 0; eda_macros[index].name != nullptr; index++) {
 		auto table_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(eda_macros[index]);
+		table_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
 		loader.RegisterFunction(*table_info);
 	}
 }

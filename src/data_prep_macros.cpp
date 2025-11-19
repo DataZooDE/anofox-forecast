@@ -248,6 +248,7 @@ static const DefaultTableMacro data_prep_macros[] = {
 void RegisterDataPrepMacros(ExtensionLoader &loader) {
 	for (idx_t index = 0; data_prep_macros[index].name != nullptr; index++) {
 		auto table_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(data_prep_macros[index]);
+		table_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
 		loader.RegisterFunction(*table_info);
 	}
 }

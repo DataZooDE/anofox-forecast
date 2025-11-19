@@ -1,0 +1,190 @@
+# name: test/sql/core/test_ts_features.test
+# description: Validate ts_features aggregate with grouping and window usage (both GROUP BY and window functions now working)
+# group: [core]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+statement ok
+CREATE TABLE ts_feature_data AS
+SELECT 
+    (i % 2) AS grp,
+    (TIMESTAMP '2024-01-01' + i * INTERVAL '1 day') AS ts,
+    i::DOUBLE AS val
+FROM generate_series(0, 5) t(i);
+
+# abs_energy over entire dataset = sum(i^2) from 0..5 = 55
+query I
+SELECT ROUND((ts_features(ts, val)).abs_energy, 6) 
+FROM ts_feature_data;
+----
+55.0
+
+# length per group should be 3 rows each
+query II
+SELECT grp, (ts_features(ts, val)).length AS len
+FROM ts_feature_data
+GROUP BY grp
+ORDER BY grp;
+----
+0	3
+1	3
+
+# Rolling window length with 2 preceding rows
+# Note: First row of each group returns NULL because length feature requires at least 2 samples
+query III
+SELECT grp, ts, (ts_features(ts, val, ['length']) OVER (
+    PARTITION BY grp ORDER BY ts
+    ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+)).length AS win_len
+FROM ts_feature_data
+ORDER BY grp, ts;
+----
+0	2024-01-01 00:00:00	NULL
+0	2024-01-03 00:00:00	2.0
+0	2024-01-05 00:00:00	3.0
+1	2024-01-02 00:00:00	NULL
+1	2024-01-04 00:00:00	2.0
+1	2024-01-06 00:00:00	3.0
+
+# Verify a parameterized feature column exists
+query I
+SELECT (ts_features(ts, val)).autocorrelation__lag_1 IS NOT NULL
+FROM ts_feature_data;
+----
+true
+
+# Selecting a subset of features via LIST(VARCHAR)
+query II
+WITH agg AS (
+    SELECT ts_features(ts, val, ['length', 'sum_values']) AS feat
+    FROM ts_feature_data
+)
+SELECT (feat).length, (feat).sum_values FROM agg;
+----
+6	15.0
+
+# Parameter overrides change output columns and values
+query I
+SELECT ROUND((
+    ts_features(
+        ts,
+        val,
+        ['ratio_beyond_r_sigma'],
+        [{'feature': 'ratio_beyond_r_sigma', 'params': {'r': 1.0}}]
+    )
+).ratio_beyond_r_sigma__r_1, 6)
+FROM ts_feature_data;
+----
+0.333333
+
+query I
+SELECT (
+    ts_features(
+        ts,
+        val,
+        ['ratio_beyond_r_sigma'],
+        [{'feature': 'ratio_beyond_r_sigma', 'params': {'r': 10.0}}]
+    )
+).ratio_beyond_r_sigma__r_10
+FROM ts_feature_data;
+----
+0.0
+
+# Overrides may be provided without a feature filter
+query I
+SELECT (
+    ts_features(
+        ts,
+        val,
+        [{'feature': 'ratio_beyond_r_sigma', 'params': {'r': 2.0}}]
+    )
+).ratio_beyond_r_sigma__r_2
+FROM ts_feature_data;
+----
+0.0
+
+# Invalid feature names raise a helpful error
+statement error
+SELECT ts_features(ts, val, ['not_a_feature'])
+FROM ts_feature_data;
+----
+Invalid Input Error: ts_features feature 'not_a_feature' does not exist. Use ts_features_list() to inspect available columns.
+
+# Duplicate feature names are rejected
+statement error
+SELECT ts_features(ts, val, ['length', 'length'])
+FROM ts_feature_data;
+----
+Invalid Input Error: ts_features feature 'length' specified more than once
+
+# Invalid overrides reference rejected features
+statement error
+SELECT ts_features(
+    ts,
+    val,
+    ['length'],
+    [{'feature': 'not_a_feature', 'params': {'dummy': 1}}]
+)
+FROM ts_feature_data;
+----
+Invalid Input Error: feature_params references unknown or filtered feature 'not_a_feature'
+
+# Listing helper exposes available feature columns
+query I
+SELECT COUNT(*) > 10
+FROM ts_features_list();
+----
+true
+
+query I
+SELECT COUNT(*) = 1
+FROM ts_features_list()
+WHERE feature_name = 'ratio_beyond_r_sigma';
+----
+true
+
+query TTTT
+SELECT column_name, feature_name, default_parameters, NULLIF(parameter_keys, '') AS parameter_keys
+FROM ts_features_list()
+WHERE column_name = 'mean';
+----
+mean	mean	{}	NULL
+
+# Config helpers load override files at bind time
+query I
+SELECT feat FROM (
+    SELECT UNNEST(
+        ts_features_config_from_json('benchmark/timeseries_features/data/features_overrides.json').feature_names
+    ) AS feat
+) WHERE feat LIKE 'ratio_beyond_r_sigma%' LIMIT 1;
+----
+ratio_beyond_r_sigma__r_0.5
+
+query I
+SELECT (
+    ts_features(
+        ts,
+        val,
+        ts_features_config_from_csv('benchmark/timeseries_features/data/features_overrides.csv')
+    )
+).autocorrelation__lag_4 IS NOT NULL
+FROM ts_feature_data;
+----
+true
+
+query I
+SELECT COUNT(*) = (SELECT COUNT(*) FROM ts_features_list())
+FROM ts_features_config_template();
+----
+true
+
+query I
+SELECT params_json LIKE '{%'
+FROM ts_features_config_template()
+WHERE feature = 'length';
+----
+true
+
