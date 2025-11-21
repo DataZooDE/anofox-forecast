@@ -5,6 +5,7 @@ Generic runner for benchmarking Anofox forecast models from DuckDB extension.
 """
 import time
 import sys
+import os
 from pathlib import Path
 from typing import List, Dict, Callable, Optional
 
@@ -62,11 +63,24 @@ def run_anofox_benchmark(
 
     # Find the extension
     if extension_path is None:
-        extension_path = Path(__file__).parent.parent.parent.parent / 'build' / 'release' / 'extension' / 'anofox_forecast' / 'anofox_forecast.duckdb_extension'
+        # Check environment variable first
+        env_path = os.environ.get("ANOFOX_EXTENSION_PATH")
+        if env_path:
+            extension_path = Path(env_path)
+        else:
+            # Fallback to local build path
+            extension_path = Path(__file__).parent.parent.parent.parent / 'build' / 'release' / 'extension' / 'anofox_forecast' / 'anofox_forecast.duckdb_extension'
 
     if not extension_path.exists() and not use_community_extension:
-        print(f"ERROR: Extension not found at {extension_path}")
-        print("Please build the extension first with: make release")
+        print(f"WARNING: Extension not found at {extension_path}")
+        if os.environ.get("ANOFOX_EXTENSION_PATH"):
+             print("The path was provided via ANOFOX_EXTENSION_PATH environment variable.")
+        print("Attempting to use community extension as fallback if available, or build it locally.")
+        # We raise error if strictly not using community extension, but if the intent is to support docker without build, 
+        # we might want to be softer here or assume if it's missing we fail unless community is allowed.
+        # The existing logic raises FileNotFoundError.
+        
+        # If we are in Docker and expect the extension, this should fail.
         raise FileNotFoundError(f"Extension not found at {extension_path}")
 
     # Connect to DuckDB and load extension

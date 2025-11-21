@@ -1,0 +1,22 @@
+services:
+  benchmark:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        GITHUB_TOKEN: ${GITHUB_TOKEN}
+        DOWNLOAD_EXTENSION: ${DOWNLOAD_EXTENSION:-false}
+        REPO_NAME: ${REPO_NAME:-datazoode/anofox-forecast}
+    volumes:
+      - ../data:/app/benchmark/data
+      - ../results:/app/benchmark/results
+      # Optional: Mount local extension if not downloading
+      # - ../../build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension:/extension.duckdb_extension
+    environment:
+      - ANOFOX_EXTENSION_PATH=${ANOFOX_EXTENSION_PATH}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+      - S3_BUCKET=${S3_BUCKET}
+    # Default command runs all benchmarks
+    command: uv run python run_all.py
