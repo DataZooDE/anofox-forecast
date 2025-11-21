@@ -60,6 +60,14 @@ All models benchmarked on M4 Daily dataset, grouped by method family and separat
 - **Split**: Per M4 competition rules (training/test split)
 - **Source**: M4 Competition dataset
 
+**M5 Daily Dataset:**
+
+- **Series Count**: 42,840 time series
+- **Season Length**: 7 (weekly seasonality)
+- **Forecast Horizon**: 28 days
+- **Split**: Date-based split (training before 2016-04-25, test from 2016-04-25 onwards)
+- **Source**: M5 Competition dataset (via datasetsforecast library)
+
 ### Metrics
 
 All benchmarks measure:
@@ -78,10 +86,28 @@ cd benchmark
 uv sync  # Install dependencies
 ```
 
+**Run All Benchmarks:**
+
+To run all benchmarks (anofox + statsforecast) for a specific dataset and group:
+
+```bash
+# Run all benchmarks for M4 Daily
+cd benchmark
+uv run python run_all_benchmarks.py --dataset m4 --group Daily
+
+# Run all benchmarks for M5 Daily
+uv run python run_all_benchmarks.py --dataset m5 --group Daily
+
+# Run specific benchmarks only
+uv run python run_all_benchmarks.py --dataset m4 --group Daily --benchmarks baseline,ets,theta
+```
+
 **Run Individual Benchmarks:**
 
 All benchmark commands accept a `--dataset` argument (default `m4`).
 Add new datasets by creating `benchmark/<dataset>` and passing that dataset name via CLI.
+
+**M4 Benchmarks:**
 
 ```bash
 # Baseline models
@@ -119,6 +145,44 @@ uv run python run.py statsforecast Daily --dataset m4
 uv run python run.py evaluate Daily --dataset m4
 ```
 
+**M5 Benchmarks:**
+
+```bash
+# Baseline models
+cd m5/baseline_benchmark
+uv run python run.py anofox Daily --dataset m5        # Run Anofox models
+uv run python run.py statsforecast Daily --dataset m5 # Run Statsforecast models
+uv run python run.py evaluate Daily --dataset m5      # Evaluate results
+
+# ETS models
+cd m5/ets_benchmark
+uv run python run.py anofox Daily --dataset m5
+uv run python run.py evaluate Daily --dataset m5
+
+# Theta models
+cd m5/theta_benchmark
+uv run python run.py anofox Daily --dataset m5
+uv run python run.py statsforecast Daily --dataset m5
+uv run python run.py evaluate Daily --dataset m5
+
+# ARIMA models
+cd m5/arima_benchmark
+uv run python run.py anofox Daily --dataset m5
+uv run python run.py evaluate Daily --dataset m5
+
+# MFLES models
+cd m5/mfles_benchmark
+uv run python run.py anofox Daily --dataset m5
+uv run python run.py statsforecast Daily --dataset m5
+uv run python run.py evaluate Daily --dataset m5
+
+# MSTL models
+cd m5/mstl_benchmark
+uv run python run.py anofox Daily --dataset m5
+uv run python run.py statsforecast Daily --dataset m5
+uv run python run.py evaluate Daily --dataset m5
+```
+
 ## Model Configuration
 
 The model configuration can be adjusted in the Python file in the config folder.
@@ -127,8 +191,8 @@ The model configuration can be adjusted in the Python file in the config folder.
 
 These benchmarks are used to:
 
-1. Validate forecasting accuracy against known datasets (M4 Competition)
-2. Measure performance on larger workloads (4K+ time series)
+1. Validate forecasting accuracy against known datasets (M4 and M5 Competitions)
+2. Measure performance on larger workloads (4K+ time series for M4, 42K+ for M5)
 3. Validate Anofox with other forecasting libraries (Statsforecast)
 4. Identify performance regressions and optimization opportunities
 
@@ -142,5 +206,4 @@ The benchmark environment uses `uv` for Python dependency management:
 
 ## Planned Benchmarks
 
-1. M5 Dataset
-2. Artificial dataset with 100k+ series for performance tests in realistic scenarios.
+1. Artificial dataset with 100k+ series for performance tests in realistic scenarios.
