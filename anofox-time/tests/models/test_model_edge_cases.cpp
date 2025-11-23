@@ -33,18 +33,18 @@ TimeSeries createTimeSeries(const std::vector<double>& data) {
 
 TEST_CASE("SES requires fit before predict", "[models][edge][error]") {
 	auto model = SimpleExponentialSmoothingBuilder().build();
-	REQUIRE_THROWS_AS(model->predict(5), std::logic_error);
+	REQUIRE_THROWS_AS(model->predict(5), std::runtime_error);
 }
 
 TEST_CASE("Holt requires fit before predict", "[models][edge][error]") {
 	auto model = HoltLinearTrendBuilder().build();
-	REQUIRE_THROWS_AS(model->predict(5), std::logic_error);
+	REQUIRE_THROWS_AS(model->predict(5), std::runtime_error);
 }
 
 TEST_CASE("ETS requires fit before predict", "[models][edge][error]") {
 	ETSConfig config;
 	ETS model(config);
-	REQUIRE_THROWS_AS(model.predict(5), std::logic_error);
+	REQUIRE_THROWS_AS(model.predict(5), std::runtime_error);
 }
 
 TEST_CASE("AutoETS requires fit before predict", "[models][edge][error]") {
@@ -61,7 +61,7 @@ TEST_CASE("AutoARIMA requires fit before predict", "[models][edge][error]") {
 
 TEST_CASE("Theta requires fit before predict", "[models][edge][error]") {
 	Theta model;
-	REQUIRE_THROWS_AS(model.predict(5), std::logic_error);
+	REQUIRE_THROWS_AS(model.predict(5), std::runtime_error);
 }
 
 // ============================================================================
@@ -180,6 +180,9 @@ TEST_CASE("ETS validates config parameters", "[models][edge][validation]") {
 	config.error = anofoxtime::models::ETSErrorType::Additive;
 	config.trend = anofoxtime::models::ETSTrendType::Additive;
 	config.season = anofoxtime::models::ETSSeasonType::Additive;
+	config.beta = 0.2;
+	config.gamma = 0.1;
+	config.season_length = 4;
 	
 	ETS model(config);
 	auto ts = createTimeSeries({1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0,

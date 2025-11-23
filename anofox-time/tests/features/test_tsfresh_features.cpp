@@ -3,6 +3,7 @@
 #include "anofox-time/features/feature_types.hpp"
 #include "anofox-time/features/feature_math.hpp"
 #include <unordered_set>
+#include <algorithm>
 #include <cmath>
 
 using namespace anofoxtime::features;
@@ -1056,6 +1057,10 @@ TEST_CASE("Features symmetry_looking with different r values", "[tsfresh][featur
 TEST_CASE("Features quantile with different quantiles", "[tsfresh][features][params]") {
 	Series series = TEST_SERIES;
 	
+	// Get min and max for bounds checking (quantile is computed from sorted series)
+	double min_val = *std::min_element(series.begin(), series.end());
+	double max_val = *std::max_element(series.begin(), series.end());
+	
 	for (double q : {0.1, 0.25, 0.5, 0.75, 0.9}) {
 		ParameterMap params;
 		params.entries["q"] = q;
@@ -1063,8 +1068,8 @@ TEST_CASE("Features quantile with different quantiles", "[tsfresh][features][par
 		auto results = FeatureRegistry::Instance().Compute(series, config);
 		REQUIRE(results.size() == 1);
 		REQUIRE(std::isfinite(results[0].value));
-		REQUIRE(results[0].value >= series[0]);
-		REQUIRE(results[0].value <= series[series.size() - 1]);
+		REQUIRE(results[0].value >= min_val);
+		REQUIRE(results[0].value <= max_val);
 	}
 }
 

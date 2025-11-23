@@ -60,20 +60,23 @@ void Ensemble::fit(const core::TimeSeries& ts) {
 	core::TimeSeries train_ts = ts;
 	std::optional<core::TimeSeries> validation_ts;
 	
-	if (config_.method == EnsembleCombinationMethod::WeightedAccuracy && 
-	    config_.validation_split > 0.0 && config_.validation_split < 1.0) {
-		
-		const std::size_t n = ts.size();
-		const std::size_t train_size = static_cast<std::size_t>(
-			n * (1.0 - config_.validation_split)
-		);
-		
-		if (train_size < 1 || train_size >= n) {
-			throw std::invalid_argument("Ensemble: Invalid validation_split, results in empty train or validation set");
+	if (config_.method == EnsembleCombinationMethod::WeightedAccuracy) {
+		if (config_.validation_split >= 1.0) {
+			throw std::invalid_argument("Ensemble: validation_split must be < 1.0");
 		}
-		
-		train_ts = ts.slice(0, train_size);
-		validation_ts = ts.slice(train_size, n);
+		if (config_.validation_split > 0.0 && config_.validation_split < 1.0) {
+			const std::size_t n = ts.size();
+			const std::size_t train_size = static_cast<std::size_t>(
+				n * (1.0 - config_.validation_split)
+			);
+			
+			if (train_size < 1 || train_size >= n) {
+				throw std::invalid_argument("Ensemble: Invalid validation_split, results in empty train or validation set");
+			}
+			
+			train_ts = ts.slice(0, train_size);
+			validation_ts = ts.slice(train_size, n);
+		}
 	}
 	
 	// Fit all base forecasters

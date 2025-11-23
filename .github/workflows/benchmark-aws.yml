@@ -51,9 +51,15 @@ jobs:
           REPO_OWNER="${{ github.repository_owner }}"
           ACTOR="${{ github.actor }}"
           
+          # For personal repositories: actor must match repository owner
+          # For organization repositories: you may need to adjust this check
+          # to verify the user is an organization owner/admin
           if [ "$ACTOR" != "$REPO_OWNER" ]; then
             echo "❌ Error: Only the repository owner ($REPO_OWNER) can run this workflow."
             echo "   Current user: $ACTOR"
+            echo ""
+            echo "   Note: For organization repositories, you may need to modify this check"
+            echo "   to verify organization admin permissions instead."
             exit 1
           fi
           

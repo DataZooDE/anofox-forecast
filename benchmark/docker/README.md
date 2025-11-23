@@ -239,6 +239,15 @@ Configure these secrets in your GitHub repository settings:
 - `AWS_ACCESS_KEY_ID`: AWS access key with permissions to push to ECR and run ECS tasks
 - `AWS_SECRET_ACCESS_KEY`: AWS secret key
 
+#### Security: Workflow Access Control
+
+**The workflow is restricted to repository owners only** to prevent unauthorized execution and AWS resource usage.
+
+- For **personal repositories**: Only the repository owner (the user who created the repo) can trigger the workflow
+- For **organization repositories**: The workflow checks if the triggering user matches the repository owner. If your organization requires different access control (e.g., organization admins), you may need to modify the verification step in the workflow file
+
+The workflow will fail immediately with a clear error message if an unauthorized user attempts to run it.
+
 #### Triggering the Workflow
 
 1. Go to **Actions** tab in your GitHub repository

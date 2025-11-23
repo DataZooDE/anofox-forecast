@@ -146,6 +146,14 @@ SelectionResult AutoSelector::selectWithCV(const std::vector<double>& data,
                                            std::size_t folds,
                                            std::size_t min_train,
                                            std::size_t horizon) const {
+    // Validate that data is sufficient for CV
+    if (data.size() < min_train + horizon) {
+        throw std::runtime_error("Insufficient data for cross-validation: need at least min_train + horizon points");
+    }
+    if (folds == 0) {
+        throw std::invalid_argument("Number of folds must be positive");
+    }
+    
     const auto splits = validation::timeSeriesCV(data, folds, min_train, horizon);
 
     std::vector<SelectionEntry> aggregate;

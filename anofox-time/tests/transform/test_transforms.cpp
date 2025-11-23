@@ -173,9 +173,9 @@ TEST_CASE("Pipeline with empty forecast does nothing") {
 	pipeline.fitTransform(data);
 	
 	Forecast forecast;
-	forecast.point = {};
+	// Ensure primary() returns empty by not initializing point
 	REQUIRE_NOTHROW(pipeline.inverseTransformForecast(forecast));
-	REQUIRE(forecast.point.empty());
+	REQUIRE(forecast.primary().empty());
 }
 
 TEST_CASE("Pipeline with multiple transformers") {

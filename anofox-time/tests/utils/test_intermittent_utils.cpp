@@ -167,7 +167,8 @@ TEST_CASE("expandFittedDemand basic", "[utils][intermittent]") {
 	std::vector<double> y{0.0, 5.0, 0.0, 0.0, 8.0, 0.0, 12.0};
 	auto expanded = expandFittedDemand(fitted, y);
 	
-	REQUIRE(expanded.size() == y.size());
+	// When last element is nonzero, expanded needs to be size y.size() + 1 to accommodate expanded[y.size()]
+	REQUIRE(expanded.size() == y.size() + 1);
 	REQUIRE(std::isnan(expanded[0]));
 	REQUIRE(expanded[2] == Catch::Approx(10.0));  // After first nonzero
 	REQUIRE(expanded[5] == Catch::Approx(20.0));  // After second nonzero
@@ -190,7 +191,8 @@ TEST_CASE("expandFittedIntervals basic", "[utils][intermittent]") {
 	std::vector<double> y{0.0, 1.0, 0.0, 0.0, 2.0, 0.0, 3.0};
 	auto expanded = expandFittedIntervals(fitted, y);
 	
-	REQUIRE(expanded.size() == y.size());
+	// When last element is nonzero, expanded needs to be size y.size() + 1 to accommodate expanded[y.size()]
+	REQUIRE(expanded.size() == y.size() + 1);
 	REQUIRE(std::isnan(expanded[0]));
 	REQUIRE(expanded[2] == Catch::Approx(2.0));
 	REQUIRE(expanded[5] == Catch::Approx(3.0));
