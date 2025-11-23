@@ -65,9 +65,118 @@ If you have a locally built extension you want to test without downloading:
      - ANOFOX_EXTENSION_PATH=/extension.duckdb_extension
    ```
 
-## Running on AWS
+## Running on AWS with GitHub Actions
 
-For running benchmarks in the cloud, **AWS ECS (Elastic Container Service) with Fargate** is recommended. It allows you to run containers without managing servers (EC2 instances) and pay only for the resources used during execution.
+This section describes how to set up and use AWS infrastructure for running benchmarks via GitHub Actions.
+
+### Infrastructure as Code Setup
+
+We use **Terraform** to manage AWS infrastructure. This ensures:
+- **Idempotent**: Running the setup multiple times is safe - if resources already exist and match the configuration, no changes are made
+- **Version controlled**: Infrastructure changes are tracked in code
+- **Reproducible**: Same configuration creates the same infrastructure every time
+
+#### Prerequisites
+
+- [Terraform](https://www.terraform.io/downloads) installed (>= 1.0)
+- [AWS CLI](https://aws.amazon.com/cli/) installed and configured
+- AWS credentials with permissions to create ECR, ECS, IAM, CloudWatch, and S3 resources
+
+#### Setting Up AWS Infrastructure
+
+1. **Run the setup script**:
+
+```bash
+cd benchmark/docker
+./setup_aws_resources.sh --region us-east-1 --s3-bucket my-benchmark-results
+```
+
+The script will:
+- Check for required tools (Terraform, AWS CLI)
+- Initialize Terraform
+- Show a plan of what will be created
+- Ask for confirmation before applying changes
+
+2. **Review the Terraform plan**: The script shows what resources will be created/modified. If infrastructure already exists and matches the configuration, Terraform will report "No changes."
+
+3. **Resources created**:
+   - ECR repository (`anofox-benchmark`)
+   - ECS cluster (`anofox-benchmark-cluster`)
+   - IAM roles (task execution and task roles)
+   - CloudWatch log group (`/ecs/anofox-benchmark`)
+   - S3 bucket (optional, if `--s3-bucket` is provided)
+   - ECS task definition
+
+4. **Save the outputs**: After setup, Terraform outputs important values like ECR repository URI and ECS cluster name. These are used by the GitHub Actions workflow.
+
+#### Manual Terraform Usage
+
+You can also use Terraform directly:
+
+```bash
+cd benchmark/docker/terraform
+
+# Initialize
+terraform init
+
+# Preview changes
+terraform plan
+
+# Apply changes
+terraform apply
+
+# View outputs
+terraform output
+
+# Destroy infrastructure (when no longer needed)
+terraform destroy
+```
+
+### GitHub Actions Workflow
+
+A GitHub Actions workflow is available to build the Docker image and optionally run benchmarks on AWS ECS.
+
+#### Required GitHub Secrets
+
+Configure these secrets in your GitHub repository settings:
+
+- `AWS_ACCESS_KEY_ID`: AWS access key with permissions to push to ECR and run ECS tasks
+- `AWS_SECRET_ACCESS_KEY`: AWS secret key
+
+#### Triggering the Workflow
+
+1. Go to **Actions** tab in your GitHub repository
+2. Select **"Build and Deploy Benchmark to AWS"** workflow
+3. Click **"Run workflow"**
+4. Fill in the inputs:
+   - **AWS Region**: AWS region (default: `us-east-1`)
+   - **ECS Cluster Name**: Name of your ECS cluster (default: `anofox-benchmark-cluster`)
+   - **S3 Bucket**: S3 bucket name for storing results
+   - **Run ECS Task**: Check to automatically run the task after building
+   - **Subnet IDs**: Comma-separated subnet IDs (required if running task)
+   - **Security Group IDs**: Comma-separated security group IDs (required if running task)
+
+#### Workflow Steps
+
+The workflow will:
+1. Checkout code
+2. Configure AWS credentials
+3. Login to Amazon ECR
+4. Build Docker image (using community extension, no download needed)
+5. Tag and push image to ECR
+6. Optionally run ECS task if "Run ECS Task" is enabled
+
+#### Monitoring
+
+- **ECS Tasks**: Monitor in AWS Console → ECS → Clusters → Your Cluster → Tasks
+- **CloudWatch Logs**: View logs at `/ecs/anofox-benchmark` log group
+- **S3 Results**: Check your S3 bucket for benchmark results
+
+## Running on AWS (Manual Setup)
+
+For running benchmarks in the cloud manually, **AWS ECS (Elastic Container Service) with Fargate** is recommended. It allows you to run containers without managing servers (EC2 instances) and pay only for the resources used during execution.
+
+> **Note**: For automated CI/CD, use the [GitHub Actions workflow](#github-actions-workflow) described above. The manual steps below are for reference or custom setups.
 
 ### 1. Create an ECR Repository
 
