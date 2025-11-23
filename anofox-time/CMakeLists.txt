@@ -76,6 +76,7 @@ add_library(anofox-time
     src/models/ensemble.cpp
     src/changepoint/bocpd.cpp
     src/transform/pipeline.cpp
+    src/transform/transformers.cpp
 )
 target_include_directories(anofox-time PUBLIC include)
 target_include_directories(anofox-time PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/LBFGSpp/include)

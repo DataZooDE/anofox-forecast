@@ -119,7 +119,7 @@ TEST_CASE("CrossValidation evaluate basic", "[utils][cross_validation]") {
 	auto results = CrossValidation::evaluate(data, model_factory, config);
 	
 	REQUIRE(results.folds.size() > 0);
-	REQUIRE(std::isfinite(results.mae) || results.total_forecasts == 0);
+	REQUIRE((std::isfinite(results.mae) || results.total_forecasts == 0));
 }
 
 TEST_CASE("CrossValidation evaluate with short series", "[utils][cross_validation]") {

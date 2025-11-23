@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "anofox-time/utils/nelder_mead.hpp"
 #include <vector>
@@ -21,7 +22,7 @@ TEST_CASE("NelderMeadOptimizer minimizes quadratic function", "[utils][nelder_me
 	
 	auto result = optimizer.minimize(objective, initial, options);
 	
-	REQUIRE(result.converged || result.iterations > 0);
+	REQUIRE((result.converged || result.iterations > 0));
 	REQUIRE(result.best[0] == Catch::Approx(5.0).margin(0.1));
 	REQUIRE(result.value == Catch::Approx(0.0).margin(0.01));
 }
@@ -41,7 +42,7 @@ TEST_CASE("NelderMeadOptimizer minimizes 2D function", "[utils][nelder_mead]") {
 	
 	auto result = optimizer.minimize(objective, initial, options);
 	
-	REQUIRE(result.converged || result.iterations > 0);
+	REQUIRE((result.converged || result.iterations > 0));
 	REQUIRE(result.best.size() == 2);
 	REQUIRE(result.best[0] == Catch::Approx(2.0).margin(0.1));
 	REQUIRE(result.best[1] == Catch::Approx(3.0).margin(0.1));
@@ -110,43 +111,8 @@ TEST_CASE("NelderMeadOptimizer with custom options", "[utils][nelder_mead]") {
 	REQUIRE(result.value >= 0.0);
 }
 
-TEST_CASE("NelderMeadOptimizer simplexSpread", "[utils][nelder_mead]") {
-	NelderMeadOptimizer optimizer;
-	
-	std::vector<double> values{1.0, 2.0, 3.0, 4.0, 5.0};
-	double spread = optimizer.simplexSpread(values);
-	
-	// Should compute standard deviation
-	REQUIRE(spread > 0.0);
-	REQUIRE(std::isfinite(spread));
-}
-
-TEST_CASE("NelderMeadOptimizer enforceBounds", "[utils][nelder_mead]") {
-	NelderMeadOptimizer optimizer;
-	
-	std::vector<double> point{10.0, -5.0, 0.5};
-	std::vector<double> lower{0.0, 0.0, 0.0};
-	std::vector<double> upper{5.0, 5.0, 5.0};
-	
-	optimizer.enforceBounds(point, lower, upper);
-	
-	REQUIRE(point[0] == 5.0);   // Clamped to upper
-	REQUIRE(point[1] == 0.0);   // Clamped to lower
-	REQUIRE(point[2] == 0.5);   // Within bounds
-}
-
-TEST_CASE("NelderMeadOptimizer enforceBounds with empty bounds", "[utils][nelder_mead]") {
-	NelderMeadOptimizer optimizer;
-	
-	std::vector<double> point{10.0, -5.0};
-	std::vector<double> empty;
-	
-	optimizer.enforceBounds(point, empty, empty);
-	
-	// Should not modify point
-	REQUIRE(point[0] == 10.0);
-	REQUIRE(point[1] == -5.0);
-}
+// Note: simplexSpread and enforceBounds are private methods, so we test them
+// indirectly through the public minimize() interface with bounds
 
 TEST_CASE("NelderMeadOptimizer with difficult function", "[utils][nelder_mead]") {
 	NelderMeadOptimizer optimizer;
@@ -168,5 +134,28 @@ TEST_CASE("NelderMeadOptimizer with difficult function", "[utils][nelder_mead]")
 	// Rosenbrock minimum is at (1, 1)
 	REQUIRE(result.best[0] == Catch::Approx(1.0).margin(0.5));
 	REQUIRE(result.best[1] == Catch::Approx(1.0).margin(0.5));
+}
+
+TEST_CASE("NelderMeadOptimizer enforceBounds via minimize", "[utils][nelder_mead]") {
+	NelderMeadOptimizer optimizer;
+	
+	// Test bounds enforcement indirectly through minimize
+	auto objective = [](const std::vector<double>& x) -> double {
+		return (x[0] - 10.0) * (x[0] - 10.0);  // Minimum at 10, but bounded
+	};
+	
+	std::vector<double> initial{0.0};
+	std::vector<double> lower{0.0};
+	std::vector<double> upper{5.0};  // Constrain to [0, 5]
+	
+	NelderMeadOptimizer::Options options;
+	options.max_iterations = 100;
+	options.tolerance = 1e-6;
+	
+	auto result = optimizer.minimize(objective, initial, options, lower, upper);
+	
+	// Verify bounds are enforced
+	REQUIRE(result.best[0] >= 0.0);
+	REQUIRE(result.best[0] <= 5.0);
 }
 

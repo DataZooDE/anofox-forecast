@@ -162,7 +162,7 @@ TEST_CASE("ThetaGradients handles invalid parameters", "[optimization][theta_gra
 	);
 	
 	// Should either return finite value or handle gracefully
-	REQUIRE(std::isfinite(mse) || !std::isfinite(mse));
+	REQUIRE((std::isfinite(mse) || !std::isfinite(mse)));
 }
 
 TEST_CASE("ThetaGradients workspace resizing", "[optimization][theta_gradients]") {
@@ -196,14 +196,14 @@ TEST_CASE("ThetaGradients with boundary alpha values", "[optimization][theta_gra
 		y, ModelType::STM, 100.0, 0.01, 1.0,
 		false, true, false, 1, gradients, workspace
 	);
-	REQUIRE(std::isfinite(mse_low) || !std::isfinite(mse_low));
+	REQUIRE((std::isfinite(mse_low) || !std::isfinite(mse_low)));
 	
 	// Test alpha near 1
 	double mse_high = ThetaGradients::computeMSEWithGradients(
 		y, ModelType::STM, 100.0, 0.99, 1.0,
 		false, true, false, 1, gradients, workspace
 	);
-	REQUIRE(std::isfinite(mse_high) || !std::isfinite(mse_high));
+	REQUIRE((std::isfinite(mse_high) || !std::isfinite(mse_high)));
 }
 
 TEST_CASE("ThetaGradients with infinite base MSE", "[optimization][theta_gradients]") {
@@ -217,6 +217,6 @@ TEST_CASE("ThetaGradients with infinite base MSE", "[optimization][theta_gradien
 	);
 	
 	// Should handle gracefully - either return infinity or set gradients to zero
-	REQUIRE(!std::isfinite(mse) || gradients[0] == 0.0);
+	REQUIRE((!std::isfinite(mse) || gradients[0] == 0.0));
 }
 

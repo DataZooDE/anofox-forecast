@@ -218,7 +218,7 @@ TEST_CASE("ETSGradients handles short series", "[optimization][ets_gradients][ed
 		config, short_series, 2.0, 0.0, {}, gradients
 	);
 	
-	REQUIRE(std::isfinite(neg_loglik) || !std::isfinite(neg_loglik));
+	REQUIRE((std::isfinite(neg_loglik) || !std::isfinite(neg_loglik)));
 }
 
 TEST_CASE("ETSGradients handles constant series", "[optimization][ets_gradients][edge]") {
@@ -233,7 +233,7 @@ TEST_CASE("ETSGradients handles constant series", "[optimization][ets_gradients]
 		config, constant, 50.0, 0.0, {}, gradients
 	);
 	
-	REQUIRE(std::isfinite(neg_loglik) || !std::isfinite(neg_loglik));
+	REQUIRE((std::isfinite(neg_loglik) || !std::isfinite(neg_loglik)));
 }
 
 TEST_CASE("ETSGradients with different initial states", "[optimization][ets_gradients]") {

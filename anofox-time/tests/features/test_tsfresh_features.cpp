@@ -971,7 +971,7 @@ TEST_CASE("Features handle very large values", "[tsfresh][features][edge]") {
 	auto config = BuildConfig("mean");
 	auto results = FeatureRegistry::Instance().Compute(large_series, config);
 	REQUIRE(results.size() == 1);
-	REQUIRE(std::isfinite(results[0].value) || !std::isfinite(results[0].value));
+	REQUIRE((std::isfinite(results[0].value) || !std::isfinite(results[0].value)));
 }
 
 TEST_CASE("Features handle very small values", "[tsfresh][features][edge]") {
@@ -979,7 +979,7 @@ TEST_CASE("Features handle very small values", "[tsfresh][features][edge]") {
 	auto config = BuildConfig("mean");
 	auto results = FeatureRegistry::Instance().Compute(small_series, config);
 	REQUIRE(results.size() == 1);
-	REQUIRE(std::isfinite(results[0].value) || !std::isfinite(results[0].value));
+	REQUIRE((std::isfinite(results[0].value) || !std::isfinite(results[0].value)));
 }
 
 TEST_CASE("Features with invalid parameters handle gracefully", "[tsfresh][features][edge]") {
@@ -1035,7 +1035,7 @@ TEST_CASE("Features large_standard_deviation with different thresholds", "[tsfre
 		auto config = BuildConfig("large_standard_deviation", {params});
 		auto results = FeatureRegistry::Instance().Compute(series, config);
 		REQUIRE(results.size() == 1);
-		REQUIRE(results[0].value == 0.0 || results[0].value == 1.0);
+		REQUIRE((results[0].value == 0.0 || results[0].value == 1.0));
 	}
 }
 

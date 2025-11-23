@@ -20,7 +20,7 @@ TEST_CASE("MethodNameWrapper construction validation", "[models][wrapper][valida
 	}
 	
 	SECTION("Empty name throws") {
-		auto model = std::make_unique<SES>();
+		auto model = SimpleExponentialSmoothingBuilder().build();
 		REQUIRE_THROWS_AS(
 			MethodNameWrapper(std::move(model), ""),
 			std::invalid_argument
@@ -28,7 +28,7 @@ TEST_CASE("MethodNameWrapper construction validation", "[models][wrapper][valida
 	}
 	
 	SECTION("Valid construction") {
-		auto model = std::make_unique<SES>();
+		auto model = SimpleExponentialSmoothingBuilder().build();
 		REQUIRE_NOTHROW(
 			MethodNameWrapper(std::move(model), "CustomSES")
 		);
@@ -36,7 +36,7 @@ TEST_CASE("MethodNameWrapper construction validation", "[models][wrapper][valida
 }
 
 TEST_CASE("MethodNameWrapper getName", "[models][wrapper][name]") {
-	auto model = std::make_unique<SES>();
+	auto model = SimpleExponentialSmoothingBuilder().build();
 	MethodNameWrapper wrapper(std::move(model), "MyCustomModel");
 	
 	REQUIRE(wrapper.getName() == "MyCustomModel");
@@ -44,7 +44,7 @@ TEST_CASE("MethodNameWrapper getName", "[models][wrapper][name]") {
 }
 
 TEST_CASE("MethodNameWrapper delegates fit", "[models][wrapper][fit]") {
-	auto model = std::make_unique<SES>();
+	auto model = SimpleExponentialSmoothingBuilder().build();
 	MethodNameWrapper wrapper(std::move(model), "WrappedSES");
 	
 	auto ts = tests::helpers::makeUnivariateSeries({1.0, 2.0, 3.0, 4.0, 5.0});
@@ -61,7 +61,7 @@ TEST_CASE("MethodNameWrapper delegates fit", "[models][wrapper][fit]") {
 }
 
 TEST_CASE("MethodNameWrapper delegates predict", "[models][wrapper][predict]") {
-	auto model = std::make_unique<SES>();
+	auto model = SimpleExponentialSmoothingBuilder().build();
 	MethodNameWrapper wrapper(std::move(model), "WrappedSES");
 	
 	auto ts = tests::helpers::makeUnivariateSeries({1.0, 2.0, 3.0, 4.0, 5.0});
@@ -73,14 +73,15 @@ TEST_CASE("MethodNameWrapper delegates predict", "[models][wrapper][predict]") {
 	}
 	
 	SECTION("Predict before fit throws") {
-		MethodNameWrapper unfitted(std::make_unique<SES>(), "Unfitted");
+		auto model = SimpleExponentialSmoothingBuilder().build();
+		MethodNameWrapper unfitted(std::move(model), "Unfitted");
 		REQUIRE_THROWS_AS(unfitted.predict(3), std::runtime_error);
 	}
 }
 
 TEST_CASE("MethodNameWrapper wrappedModel access", "[models][wrapper][access]") {
-	auto ses_model = std::make_unique<SES>();
-	SES* ses_ptr = ses_model.get();
+	auto ses_model = SimpleExponentialSmoothingBuilder().build();
+	IForecaster* ses_ptr = ses_model.get();
 	
 	MethodNameWrapper wrapper(std::move(ses_model), "WrappedSES");
 	
@@ -98,7 +99,7 @@ TEST_CASE("MethodNameWrapper wrappedModel access", "[models][wrapper][access]") 
 
 TEST_CASE("MethodNameWrapper with different model types", "[models][wrapper][types]") {
 	SECTION("Wrap SES") {
-		auto model = std::make_unique<SES>();
+		auto model = SimpleExponentialSmoothingBuilder().build();
 		MethodNameWrapper wrapper(std::move(model), "CustomSES");
 		auto ts = tests::helpers::makeUnivariateSeries({1.0, 2.0, 3.0});
 		wrapper.fit(ts);
@@ -148,7 +149,7 @@ TEST_CASE("MethodNameWrapper null model runtime error", "[models][wrapper][error
 	// a mock, but the code has these checks for safety
 	// The constructor already prevents null models, so this is defensive
 	
-	auto model = std::make_unique<SES>();
+	auto model = SimpleExponentialSmoothingBuilder().build();
 	MethodNameWrapper wrapper(std::move(model), "Test");
 	
 	// Normal usage should work

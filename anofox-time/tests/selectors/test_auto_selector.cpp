@@ -147,8 +147,8 @@ TEST_CASE("AutoSelector with custom scoring function", "[selectors][auto_selecto
 	AutoSelector selector({sma1, sma2});
 	selector.withScoringFunction([](const anofoxtime::utils::AccuracyMetrics& metrics) {
 		// Prefer MAPE if available, otherwise MAE
-		if (std::isfinite(metrics.mape)) {
-			return metrics.mape;
+		if (metrics.mape.has_value() && std::isfinite(*metrics.mape)) {
+			return *metrics.mape;
 		}
 		return metrics.mae;
 	});

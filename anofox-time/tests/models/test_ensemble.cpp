@@ -610,7 +610,7 @@ TEST_CASE("Ensemble min_weight threshold filtering", "[ensemble]") {
 	auto weights = ensemble.getWeights();
 	// Some weights may be zeroed out due to min_weight
 	for (const auto& w : weights) {
-		REQUIRE(w == 0.0 || w >= config.min_weight);
+				REQUIRE((w == 0.0 || w >= config.min_weight));
 	}
 }
 
