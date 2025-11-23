@@ -1,0 +1,134 @@
+name: Build and Deploy Benchmark to AWS
+
+on:
+  workflow_dispatch:
+    inputs:
+      aws_region:
+        description: 'AWS Region'
+        required: true
+        default: 'us-east-1'
+        type: string
+      ecs_cluster_name:
+        description: 'ECS Cluster Name'
+        required: true
+        default: 'anofox-benchmark-cluster'
+        type: string
+      s3_bucket:
+        description: 'S3 Bucket for Results'
+        required: true
+        type: string
+      run_task:
+        description: 'Run ECS Task After Build'
+        required: false
+        default: false
+        type: boolean
+      subnet_ids:
+        description: 'Comma-separated Subnet IDs (required if run_task=true)'
+        required: false
+        type: string
+      security_group_ids:
+        description: 'Comma-separated Security Group IDs (required if run_task=true)'
+        required: false
+        type: string
+
+env:
+  AWS_REGION: ${{ inputs.aws_region || 'us-east-1' }}
+  ECR_REPOSITORY: anofox-benchmark
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Get ECR repository URI
+        id: ecr-repo
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}"
+          echo "repository_uri=${ECR_URI}" >> $GITHUB_OUTPUT
+          echo "ECR Repository URI: ${ECR_URI}"
+
+      - name: Build Docker image
+        working-directory: benchmark
+        run: |
+          docker build \
+            -f docker/Dockerfile \
+            --build-arg DOWNLOAD_EXTENSION=false \
+            -t ${ECR_REPOSITORY}:${IMAGE_TAG} \
+            -t ${ECR_REPOSITORY}:latest \
+            .
+
+      - name: Tag Docker image
+        run: |
+          docker tag ${ECR_REPOSITORY}:${IMAGE_TAG} ${{ steps.ecr-repo.outputs.repository_uri }}:${IMAGE_TAG}
+          docker tag ${ECR_REPOSITORY}:latest ${{ steps.ecr-repo.outputs.repository_uri }}:latest
+
+      - name: Push Docker image to ECR
+        run: |
+          docker push ${{ steps.ecr-repo.outputs.repository_uri }}:${IMAGE_TAG}
+          docker push ${{ steps.ecr-repo.outputs.repository_uri }}:latest
+
+      - name: Get ECS task definition
+        id: task-def
+        run: |
+          TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition anofox-benchmark-task \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text 2>/dev/null || echo "")
+          echo "task_definition_arn=${TASK_DEF}" >> $GITHUB_OUTPUT
+
+      - name: Run ECS task
+        if: inputs.run_task == true
+        run: |
+          if [ -z "${{ inputs.subnet_ids }}" ] || [ -z "${{ inputs.security_group_ids }}" ]; then
+            echo "Error: subnet_ids and security_group_ids are required when run_task is true"
+            exit 1
+          fi
+          
+          SUBNETS=$(echo "${{ inputs.subnet_ids }}" | tr ',' ' ')
+          SECURITY_GROUPS=$(echo "${{ inputs.security_group_ids }}" | tr ',' ' ')
+          
+          SUBNET_ARRAY=$(echo "$SUBNETS" | awk '{for(i=1;i<=NF;i++) printf "\"%s\"%s", $i, (i<NF?", ":"")}')
+          SG_ARRAY=$(echo "$SECURITY_GROUPS" | awk '{for(i=1;i<=NF;i++) printf "\"%s\"%s", $i, (i<NF?", ":"")}')
+          
+          NETWORK_CONFIG="{\"awsvpcConfiguration\":{\"subnets\":[$SUBNET_ARRAY],\"securityGroups\":[$SG_ARRAY],\"assignPublicIp\":\"ENABLED\"}}"
+          
+          TASK_ARN=$(aws ecs run-task \
+            --cluster ${{ inputs.ecs_cluster_name }} \
+            --launch-type FARGATE \
+            --task-definition anofox-benchmark-task \
+            --network-configuration "$NETWORK_CONFIG" \
+            --overrides "{\"containerOverrides\":[{\"name\":\"benchmark\",\"environment\":[{\"name\":\"S3_BUCKET\",\"value\":\"${{ inputs.s3_bucket }}\"},{\"name\":\"AWS_DEFAULT_REGION\",\"value\":\"${{ env.AWS_REGION }}\"}]}]}" \
+            --query 'tasks[0].taskArn' \
+            --output text)
+          
+          echo "ECS Task ARN: ${TASK_ARN}"
+          echo "Monitor the task at: https://console.aws.amazon.com/ecs/v2/clusters/${{ inputs.ecs_cluster_name }}/tasks"
+
+      - name: Summary
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **ECR Repository**: ${{ steps.ecr-repo.outputs.repository_uri }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image Tag**: ${IMAGE_TAG}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Region**: ${AWS_REGION}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.run_task }}" == "true" ]; then
+            echo "- **ECS Task**: Started" >> $GITHUB_STEP_SUMMARY
+          fi
+
