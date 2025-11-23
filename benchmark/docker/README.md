@@ -97,6 +97,36 @@ The script will:
 - Show a plan of what will be created
 - Ask for confirmation before applying changes
 
+**Configuring Fargate Resources**:
+
+You can customize CPU and memory for the ECS Fargate task using command-line flags:
+
+```bash
+# Use 2 vCPU and 8GB RAM
+./setup_aws_resources.sh --cpu 2048 --memory 8192
+
+# Use 4 vCPU and 16GB RAM
+./setup_aws_resources.sh --cpu 4096 --memory 16384
+```
+
+**Fargate CPU/Memory Combinations**:
+
+Fargate has specific valid CPU/memory combinations. Common options:
+
+| CPU (vCPU) | CPU Units | Valid Memory (GB) |
+|------------|-----------|-------------------|
+| 0.25       | 256       | 0.5, 1, 2         |
+| 0.5        | 512       | 1, 2, 3, 4        |
+| 1          | 1024      | 2, 3, 4, 5, 6, 7, 8 |
+| 2          | 2048      | 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 |
+| 4          | 4096      | 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30 |
+| 8          | 8192      | 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30 |
+| 16         | 16384     | 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120 |
+
+**Default**: 1 vCPU (1024 units) and 4GB (4096 MB) memory
+
+**Note**: Memory must be specified in MB. For example, 4GB = 4096 MB.
+
 2. **Review the Terraform plan**: The script shows what resources will be created/modified. If infrastructure already exists and matches the configuration, Terraform will report "No changes."
 
 3. **Resources created**:
@@ -131,6 +161,72 @@ terraform output
 # Destroy infrastructure (when no longer needed)
 terraform destroy
 ```
+
+**Configuring Fargate via Terraform Variables**:
+
+You can set Fargate CPU and memory in several ways:
+
+1. **Via terraform.tfvars file** (recommended):
+
+```bash
+# Copy the example file
+cd benchmark/docker/terraform
+cp terraform.tfvars.example terraform.tfvars
+
+# Edit terraform.tfvars with your values
+```
+
+Example `terraform.tfvars`:
+
+```hcl
+aws_region = "us-east-1"
+ecs_cpu = 2048      # 2 vCPU
+ecs_memory = 8192   # 8GB (8192 MB)
+create_s3_bucket = true
+s3_bucket_name = "my-benchmark-results"
+```
+
+2. **Via command-line flags**:
+
+```bash
+terraform apply \
+  -var="ecs_cpu=2048" \
+  -var="ecs_memory=8192"
+```
+
+3. **Via environment variables** (prefix with `TF_VAR_`):
+
+```bash
+export TF_VAR_ecs_cpu=2048
+export TF_VAR_ecs_memory=8192
+terraform apply
+```
+
+4. **Via terraform apply -var-file**:
+
+```bash
+terraform apply -var-file="custom.tfvars"
+```
+
+**Available Terraform Variables**:
+
+- `ecs_cpu`: CPU units (256, 512, 1024, 2048, 4096, 8192, 16384)
+- `ecs_memory`: Memory in MB (must be valid for selected CPU)
+- `aws_region`: AWS region (default: us-east-1)
+- `project_name`: Project name for resource naming (default: anofox-benchmark)
+- `create_s3_bucket`: Whether to create S3 bucket (default: false)
+- `s3_bucket_name`: S3 bucket name (only if create_s3_bucket=true)
+- `ecr_image_tag`: Docker image tag (default: latest)
+
+**Updating Fargate Resources After Initial Setup**:
+
+If you need to change CPU or memory after the infrastructure is already created:
+
+1. Update `terraform.tfvars` (or use `-var` flags)
+2. Run `terraform plan` to preview changes
+3. Run `terraform apply` to update the task definition
+
+Terraform will create a new task definition revision with the updated CPU/memory. The GitHub Actions workflow will automatically use the latest task definition revision.
 
 ### GitHub Actions Workflow
 
