@@ -250,3 +250,69 @@ TEST_CASE("AutoETS matches augurs AirPassengers selection", "[models][auto_ets][
 	const auto forecast = auto_ets.predict(3);
 	REQUIRE(forecast.primary().size() == 3);
 }
+
+TEST_CASE("AutoETS error handling for unfitted model", "[models][auto_ets][error]") {
+	AutoETS auto_ets(1, "ZZN");
+	
+	SECTION("Access metrics before fit throws") {
+		REQUIRE_THROWS_AS(auto_ets.metrics(), std::logic_error);
+	}
+	
+	SECTION("Access diagnostics before fit throws") {
+		REQUIRE_THROWS_AS(auto_ets.diagnostics(), std::logic_error);
+	}
+	
+	SECTION("Access fittedValues before fit throws") {
+		REQUIRE_THROWS_AS(auto_ets.fittedValues(), std::logic_error);
+	}
+	
+	SECTION("Access residuals before fit throws") {
+		REQUIRE_THROWS_AS(auto_ets.residuals(), std::logic_error);
+	}
+	
+	SECTION("Access components before fit throws") {
+		REQUIRE_THROWS_AS(auto_ets.components(), std::logic_error);
+	}
+	
+	SECTION("Access parameters before fit throws") {
+		REQUIRE_THROWS_AS(auto_ets.parameters(), std::logic_error);
+	}
+	
+	SECTION("After fit, all accessors work") {
+		const auto data = makeConstantSeries(20, 5.0);
+		auto ts = tests::helpers::makeUnivariateSeries(data);
+		auto_ets.fit(ts);
+		
+		REQUIRE_NOTHROW(auto_ets.metrics());
+		REQUIRE_NOTHROW(auto_ets.diagnostics());
+		REQUIRE_NOTHROW(auto_ets.fittedValues());
+		REQUIRE_NOTHROW(auto_ets.residuals());
+		REQUIRE_NOTHROW(auto_ets.components());
+		REQUIRE_NOTHROW(auto_ets.parameters());
+	}
+}
+
+TEST_CASE("AutoETS requires minimum data size", "[models][auto_ets][validation]") {
+	AutoETS auto_ets(1, "ZZN");
+	
+	SECTION("Empty series throws") {
+		auto ts = tests::helpers::makeUnivariateSeries({});
+		REQUIRE_THROWS_AS(auto_ets.fit(ts), std::invalid_argument);
+	}
+	
+	SECTION("Too few observations throws") {
+		auto ts1 = tests::helpers::makeUnivariateSeries({1.0});
+		REQUIRE_THROWS_AS(auto_ets.fit(ts1), std::invalid_argument);
+		
+		auto ts2 = tests::helpers::makeUnivariateSeries({1.0, 2.0});
+		REQUIRE_THROWS_AS(auto_ets.fit(ts2), std::invalid_argument);
+		
+		auto ts3 = tests::helpers::makeUnivariateSeries({1.0, 2.0, 3.0});
+		REQUIRE_THROWS_AS(auto_ets.fit(ts3), std::invalid_argument);
+	}
+	
+	SECTION("Minimum size (4) works") {
+		auto ts = tests::helpers::makeUnivariateSeries({1.0, 2.0, 3.0, 4.0});
+		REQUIRE_NOTHROW(auto_ets.fit(ts));
+	}
+}

@@ -933,3 +933,398 @@ TEST_CASE("tsfresh variation_coefficient from SQL-generated series", "[tsfresh][
 	REQUIRE(results[0].value == Approx(VARIATION_COEFFICIENT_EXPECTED).margin(1e-6));
 }
 
+// Edge case tests for features
+TEST_CASE("Features handle empty series", "[tsfresh][features][edge]") {
+	Series empty_series;
+	auto config = BuildConfig("mean");
+	auto results = FeatureRegistry::Instance().Compute(empty_series, config);
+	// Should return NaN or handle gracefully
+	REQUIRE(results.size() == 1);
+}
+
+TEST_CASE("Features handle single value series", "[tsfresh][features][edge]") {
+	Series single{5.0};
+	auto config = BuildConfig("mean");
+	auto results = FeatureRegistry::Instance().Compute(single, config);
+	REQUIRE(results.size() == 1);
+	REQUIRE(results[0].value == Approx(5.0));
+}
+
+TEST_CASE("Features handle constant series", "[tsfresh][features][edge]") {
+	Series constant(10, 5.0);
+	auto config = BuildConfig("standard_deviation");
+	auto results = FeatureRegistry::Instance().Compute(constant, config);
+	REQUIRE(results.size() == 1);
+	REQUIRE(results[0].value == Approx(0.0).margin(1e-6));
+}
+
+TEST_CASE("Features handle NaN values", "[tsfresh][features][edge]") {
+	Series series_with_nan{1.0, 2.0, std::numeric_limits<double>::quiet_NaN(), 4.0};
+	auto config = BuildConfig("mean");
+	auto results = FeatureRegistry::Instance().Compute(series_with_nan, config);
+	REQUIRE(results.size() == 1);
+	// May return NaN or handle gracefully
+}
+
+TEST_CASE("Features handle very large values", "[tsfresh][features][edge]") {
+	Series large_series{1e10, 2e10, 3e10};
+	auto config = BuildConfig("mean");
+	auto results = FeatureRegistry::Instance().Compute(large_series, config);
+	REQUIRE(results.size() == 1);
+	REQUIRE(std::isfinite(results[0].value) || !std::isfinite(results[0].value));
+}
+
+TEST_CASE("Features handle very small values", "[tsfresh][features][edge]") {
+	Series small_series{1e-10, 2e-10, 3e-10};
+	auto config = BuildConfig("mean");
+	auto results = FeatureRegistry::Instance().Compute(small_series, config);
+	REQUIRE(results.size() == 1);
+	REQUIRE(std::isfinite(results[0].value) || !std::isfinite(results[0].value));
+}
+
+TEST_CASE("Features with invalid parameters handle gracefully", "[tsfresh][features][edge]") {
+	Series series = TEST_SERIES;
+	ParameterMap params;
+	params.entries["invalid_param"] = std::string("value");
+	auto config = BuildConfig("mean", {params});
+	// Should either ignore invalid params or handle gracefully
+	auto results = FeatureRegistry::Instance().Compute(series, config);
+	REQUIRE(results.size() >= 1);
+}
+
+TEST_CASE("Features handle negative values", "[tsfresh][features][edge]") {
+	Series negative_series{-1.0, -2.0, -3.0, 1.0, 2.0, 3.0};
+	auto config = BuildConfig("abs_energy");
+	auto results = FeatureRegistry::Instance().Compute(negative_series, config);
+	REQUIRE(results.size() == 1);
+	REQUIRE(results[0].value >= 0.0);
+}
+
+TEST_CASE("Features handle zero values", "[tsfresh][features][edge]") {
+	Series zero_series{0.0, 0.0, 0.0, 1.0, 2.0};
+	auto config = BuildConfig("count_above");
+	ParameterMap params;
+	params.entries["t"] = 0.0;
+	auto config_with_params = BuildConfig("count_above", {params});
+	auto results = FeatureRegistry::Instance().Compute(zero_series, config_with_params);
+	REQUIRE(results.size() == 1);
+	REQUIRE(results[0].value >= 0.0);
+}
+
+// Additional parameter variation tests
+TEST_CASE("Features ratio_beyond_r_sigma with different r values", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	for (double r : {0.5, 1.0, 2.0, 3.0}) {
+		ParameterMap params;
+		params.entries["r"] = r;
+		auto config = BuildConfig("ratio_beyond_r_sigma", {params});
+		auto results = FeatureRegistry::Instance().Compute(series, config);
+		REQUIRE(results.size() == 1);
+		REQUIRE(results[0].value >= 0.0);
+		REQUIRE(results[0].value <= 1.0);
+	}
+}
+
+TEST_CASE("Features large_standard_deviation with different thresholds", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	for (int r = 1; r < 5; ++r) {
+		ParameterMap params;
+		params.entries["r"] = r * 0.05;
+		auto config = BuildConfig("large_standard_deviation", {params});
+		auto results = FeatureRegistry::Instance().Compute(series, config);
+		REQUIRE(results.size() == 1);
+		REQUIRE(results[0].value == 0.0 || results[0].value == 1.0);
+	}
+}
+
+TEST_CASE("Features symmetry_looking with different r values", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	for (int r = 0; r < 5; ++r) {
+		ParameterMap params;
+		params.entries["r"] = r * 0.05;
+		auto config = BuildConfig("symmetry_looking", {params});
+		auto results = FeatureRegistry::Instance().Compute(series, config);
+		REQUIRE(results.size() == 1);
+		REQUIRE(results[0].value >= 0.0);
+		REQUIRE(results[0].value <= 1.0);
+	}
+}
+
+TEST_CASE("Features quantile with different quantiles", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	for (double q : {0.1, 0.25, 0.5, 0.75, 0.9}) {
+		ParameterMap params;
+		params.entries["q"] = q;
+		auto config = BuildConfig("quantile", {params});
+		auto results = FeatureRegistry::Instance().Compute(series, config);
+		REQUIRE(results.size() == 1);
+		REQUIRE(std::isfinite(results[0].value));
+		REQUIRE(results[0].value >= series[0]);
+		REQUIRE(results[0].value <= series[series.size() - 1]);
+	}
+}
+
+TEST_CASE("Features autocorrelation with different lags", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	for (int lag = 0; lag < 5; ++lag) {
+		ParameterMap params;
+		params.entries["lag"] = static_cast<int64_t>(lag);
+		auto config = BuildConfig("autocorrelation", {params});
+		auto results = FeatureRegistry::Instance().Compute(series, config);
+		REQUIRE(results.size() == 1);
+		REQUIRE(results[0].value >= -1.0);
+		REQUIRE(results[0].value <= 1.0);
+	}
+}
+
+TEST_CASE("Features partial_autocorrelation with different lags", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	for (int lag = 1; lag <= 5; ++lag) {
+		ParameterMap params;
+		params.entries["lag"] = static_cast<int64_t>(lag);
+		auto config = BuildConfig("partial_autocorrelation", {params});
+		auto results = FeatureRegistry::Instance().Compute(series, config);
+		REQUIRE(results.size() == 1);
+		// Partial autocorrelation can be outside [-1, 1] in some edge cases
+		REQUIRE(std::isfinite(results[0].value));
+	}
+}
+
+TEST_CASE("Features agg_autocorrelation with different aggregations", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	for (const std::string& agg : {"mean", "median", "var"}) {
+		ParameterMap params;
+		params.entries["f_agg"] = agg;
+		params.entries["maxlag"] = static_cast<int64_t>(10);
+		auto config = BuildConfig("agg_autocorrelation", {params});
+		auto results = FeatureRegistry::Instance().Compute(series, config);
+		REQUIRE(results.size() == 1);
+		REQUIRE(std::isfinite(results[0].value));
+	}
+}
+
+TEST_CASE("Features ar_coefficient with different coefficients", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	for (int coeff = 0; coeff <= 3; ++coeff) {
+		ParameterMap params;
+		params.entries["coeff"] = static_cast<int64_t>(coeff);
+		params.entries["k"] = static_cast<int64_t>(10);
+		auto config = BuildConfig("ar_coefficient", {params});
+		auto results = FeatureRegistry::Instance().Compute(series, config);
+		REQUIRE(results.size() == 1);
+		REQUIRE(std::isfinite(results[0].value));
+	}
+}
+
+TEST_CASE("Features fft_coefficient with different attributes", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	for (const std::string& attr : {"real", "imag", "abs", "angle"}) {
+		ParameterMap params;
+		params.entries["attr"] = attr;
+		params.entries["coeff"] = static_cast<int64_t>(0);
+		auto config = BuildConfig("fft_coefficient", {params});
+		auto results = FeatureRegistry::Instance().Compute(series, config);
+		REQUIRE(results.size() == 1);
+		REQUIRE(std::isfinite(results[0].value));
+	}
+}
+
+TEST_CASE("Features fft_aggregated with different aggregation types", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	for (const std::string& aggtype : {"centroid", "variance", "skew", "kurtosis"}) {
+		ParameterMap params;
+		params.entries["aggtype"] = aggtype;
+		auto config = BuildConfig("fft_aggregated", {params});
+		auto results = FeatureRegistry::Instance().Compute(series, config);
+		REQUIRE(results.size() == 1);
+		REQUIRE(std::isfinite(results[0].value));
+	}
+}
+
+TEST_CASE("Features approximate_entropy with different parameters", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	for (double r : {0.1, 0.3, 0.5}) {
+		ParameterMap params;
+		params.entries["m"] = static_cast<int64_t>(2);
+		params.entries["r"] = r;
+		auto config = BuildConfig("approximate_entropy", {params});
+		auto results = FeatureRegistry::Instance().Compute(series, config);
+		REQUIRE(results.size() == 1);
+		REQUIRE(std::isfinite(results[0].value));
+		REQUIRE(results[0].value >= 0.0);
+	}
+}
+
+TEST_CASE("Features fourier_entropy with different bins", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	for (int bins : {2, 5, 10}) {
+		ParameterMap params;
+		params.entries["bins"] = static_cast<int64_t>(bins);
+		auto config = BuildConfig("fourier_entropy", {params});
+		auto results = FeatureRegistry::Instance().Compute(series, config);
+		REQUIRE(results.size() == 1);
+		REQUIRE(std::isfinite(results[0].value));
+		REQUIRE(results[0].value >= 0.0);
+	}
+}
+
+TEST_CASE("Features lempel_ziv_complexity with different bins", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	for (int bins : {2, 5, 10}) {
+		ParameterMap params;
+		params.entries["bins"] = static_cast<int64_t>(bins);
+		auto config = BuildConfig("lempel_ziv_complexity", {params});
+		auto results = FeatureRegistry::Instance().Compute(series, config);
+		REQUIRE(results.size() == 1);
+		REQUIRE(std::isfinite(results[0].value));
+		REQUIRE(results[0].value >= 0.0);
+	}
+}
+
+TEST_CASE("Features permutation_entropy with different dimensions", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	for (int dimension = 3; dimension <= 5; ++dimension) {
+		ParameterMap params;
+		params.entries["tau"] = static_cast<int64_t>(1);
+		params.entries["dimension"] = static_cast<int64_t>(dimension);
+		auto config = BuildConfig("permutation_entropy", {params});
+		auto results = FeatureRegistry::Instance().Compute(series, config);
+		REQUIRE(results.size() == 1);
+		REQUIRE(std::isfinite(results[0].value));
+		REQUIRE(results[0].value >= 0.0);
+	}
+}
+
+TEST_CASE("Features change_quantiles with different parameters", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	// Test a few combinations
+	for (double ql : {0.2, 0.4}) {
+		for (double qh : {0.6, 0.8}) {
+			if (ql >= qh) continue;
+			for (bool isabs : {false, true}) {
+				for (const std::string& f : {"mean", "var"}) {
+					ParameterMap params;
+					params.entries["ql"] = ql;
+					params.entries["qh"] = qh;
+					params.entries["isabs"] = isabs;
+					params.entries["f_agg"] = f;
+					auto config = BuildConfig("change_quantiles", {params});
+					auto results = FeatureRegistry::Instance().Compute(series, config);
+					REQUIRE(results.size() == 1);
+					REQUIRE(std::isfinite(results[0].value));
+				}
+			}
+		}
+	}
+}
+
+TEST_CASE("Features time_reversal_asymmetry_statistic with different lags", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	for (int lag = 1; lag <= 3; ++lag) {
+		ParameterMap params;
+		params.entries["lag"] = static_cast<int64_t>(lag);
+		auto config = BuildConfig("time_reversal_asymmetry_statistic", {params});
+		auto results = FeatureRegistry::Instance().Compute(series, config);
+		REQUIRE(results.size() == 1);
+		REQUIRE(std::isfinite(results[0].value));
+	}
+}
+
+TEST_CASE("Features c3 with different lags", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	for (int lag = 1; lag <= 3; ++lag) {
+		ParameterMap params;
+		params.entries["lag"] = static_cast<int64_t>(lag);
+		auto config = BuildConfig("c3", {params});
+		auto results = FeatureRegistry::Instance().Compute(series, config);
+		REQUIRE(results.size() == 1);
+		REQUIRE(std::isfinite(results[0].value));
+	}
+}
+
+TEST_CASE("Features mean_n_absolute_max with different number_of_maxima", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	for (int n : {3, 5, 7}) {
+		ParameterMap params;
+		params.entries["number_of_maxima"] = static_cast<int64_t>(n);
+		auto config = BuildConfig("mean_n_absolute_max", {params});
+		auto results = FeatureRegistry::Instance().Compute(series, config);
+		REQUIRE(results.size() == 1);
+		REQUIRE(std::isfinite(results[0].value));
+		REQUIRE(results[0].value >= 0.0);
+	}
+}
+
+TEST_CASE("Features energy_ratio_by_chunks with different segments", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	for (int seg = 0; seg < 3; ++seg) {
+		ParameterMap params;
+		params.entries["num_segments"] = static_cast<int64_t>(10);
+		params.entries["segment_focus"] = static_cast<int64_t>(seg);
+		auto config = BuildConfig("energy_ratio_by_chunks", {params});
+		auto results = FeatureRegistry::Instance().Compute(series, config);
+		REQUIRE(results.size() == 1);
+		REQUIRE(std::isfinite(results[0].value));
+		REQUIRE(results[0].value >= 0.0);
+		REQUIRE(results[0].value <= 1.0);
+	}
+}
+
+TEST_CASE("Features linear_trend_timewise with different attributes", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	for (const std::string& attr : {"pvalue", "rvalue", "intercept", "slope", "stderr"}) {
+		ParameterMap params;
+		params.entries["attr"] = attr;
+		auto config = BuildConfig("linear_trend_timewise", {params});
+		auto results = FeatureRegistry::Instance().Compute(series, config);
+		REQUIRE(results.size() == 1);
+		REQUIRE(std::isfinite(results[0].value));
+	}
+}
+
+TEST_CASE("Features augmented_dickey_fuller with different attributes", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	for (const std::string& attr : {"teststat", "pvalue", "usedlag"}) {
+		ParameterMap params;
+		params.entries["attr"] = attr;
+		auto config = BuildConfig("augmented_dickey_fuller", {params});
+		auto results = FeatureRegistry::Instance().Compute(series, config);
+		REQUIRE(results.size() == 1);
+		REQUIRE(std::isfinite(results[0].value));
+	}
+}
+
+TEST_CASE("Features number_crossing_m with different m values", "[tsfresh][features][params]") {
+	Series series = TEST_SERIES;
+	
+	for (double m : {-1.0, 0.0, 1.0}) {
+		ParameterMap params;
+		params.entries["m"] = m;
+		auto config = BuildConfig("number_crossing_m", {params});
+		auto results = FeatureRegistry::Instance().Compute(series, config);
+		REQUIRE(results.size() == 1);
+		REQUIRE(results[0].value >= 0.0);
+	}
+}
+

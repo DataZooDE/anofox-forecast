@@ -90,6 +90,101 @@ TEST_CASE("MFLES v2: Multiple seasonal periods", "[mfles_v2][basic]") {
 }
 
 // ============================================================================
+// Parameter Validation Tests
+// ============================================================================
+
+TEST_CASE("MFLES validates max_rounds", "[mfles_v2][validation][error]") {
+	MFLES::Params params;
+	params.max_rounds = 0;  // Invalid
+	
+	REQUIRE_THROWS_AS(MFLES(params), std::invalid_argument);
+}
+
+TEST_CASE("MFLES validates learning rates", "[mfles_v2][validation][error]") {
+	MFLES::Params params;
+	
+	// Test each learning rate
+	params.lr_median = -0.1;
+	REQUIRE_THROWS_AS(MFLES(params), std::invalid_argument);
+	
+	params.lr_median = 1.0;
+	params.lr_trend = 1.5;  // > 1.0
+	REQUIRE_THROWS_AS(MFLES(params), std::invalid_argument);
+	
+	params.lr_trend = 0.9;
+	params.lr_season = -0.1;
+	REQUIRE_THROWS_AS(MFLES(params), std::invalid_argument);
+	
+	params.lr_season = 0.9;
+	params.lr_rs = 2.0;  // > 1.0
+	REQUIRE_THROWS_AS(MFLES(params), std::invalid_argument);
+	
+	params.lr_rs = 1.0;
+	params.lr_exogenous = -0.1;
+	REQUIRE_THROWS_AS(MFLES(params), std::invalid_argument);
+}
+
+TEST_CASE("MFLES validates seasonal periods", "[mfles_v2][validation][error]") {
+	MFLES::Params params;
+	params.seasonal_periods = {0};  // Invalid
+	
+	REQUIRE_THROWS_AS(MFLES(params), std::invalid_argument);
+	
+	params.seasonal_periods = {-1};  // Invalid
+	REQUIRE_THROWS_AS(MFLES(params), std::invalid_argument);
+}
+
+TEST_CASE("MFLES validates cov_threshold", "[mfles_v2][validation][error]") {
+	MFLES::Params params;
+	params.cov_threshold = -0.1;  // < 0.0
+	
+	REQUIRE_THROWS_AS(MFLES(params), std::invalid_argument);
+	
+	params.cov_threshold = 1.5;  // > 1.0
+	REQUIRE_THROWS_AS(MFLES(params), std::invalid_argument);
+}
+
+TEST_CASE("MFLES validates n_changepoints_pct", "[mfles_v2][validation][error]") {
+	MFLES::Params params;
+	params.n_changepoints_pct = -0.1;  // < 0.0
+	
+	REQUIRE_THROWS_AS(MFLES(params), std::invalid_argument);
+	
+	params.n_changepoints_pct = 1.5;  // > 1.0
+	REQUIRE_THROWS_AS(MFLES(params), std::invalid_argument);
+}
+
+TEST_CASE("MFLES requires fit before predict", "[mfles_v2][error]") {
+	MFLES mfles;
+	REQUIRE_THROWS_AS(mfles.predict(5), std::runtime_error);
+}
+
+TEST_CASE("MFLES validates horizon", "[mfles_v2][validation][error]") {
+	auto data = generateSeasonalData(60, 12);
+	auto ts = createTimeSeries(data);
+	
+	MFLES mfles;
+	mfles.fit(ts);
+	
+	REQUIRE_THROWS_AS(mfles.predict(0), std::invalid_argument);
+	REQUIRE_THROWS_AS(mfles.predict(-5), std::invalid_argument);
+}
+
+TEST_CASE("MFLES requires at least 3 data points", "[mfles_v2][error]") {
+	MFLES mfles;
+	
+	std::vector<double> short_data{1.0, 2.0};
+	auto ts = createTimeSeries(short_data);
+	
+	REQUIRE_THROWS_AS(mfles.fit(ts), std::runtime_error);
+}
+
+TEST_CASE("MFLES requires fit before seasonal_decompose", "[mfles_v2][error]") {
+	MFLES mfles;
+	REQUIRE_THROWS_AS(mfles.seasonal_decompose(), std::runtime_error);
+}
+
+// ============================================================================
 // Trend Method Tests
 // ============================================================================
 
