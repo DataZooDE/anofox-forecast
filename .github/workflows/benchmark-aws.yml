@@ -46,24 +46,44 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Verify repository owner
+      - name: Verify repository access
         run: |
           REPO_OWNER="${{ github.repository_owner }}"
           ACTOR="${{ github.actor }}"
           
           # For personal repositories: actor must match repository owner
-          # For organization repositories: you may need to adjust this check
-          # to verify the user is an organization owner/admin
-          if [ "$ACTOR" != "$REPO_OWNER" ]; then
-            echo "❌ Error: Only the repository owner ($REPO_OWNER) can run this workflow."
-            echo "   Current user: $ACTOR"
-            echo ""
-            echo "   Note: For organization repositories, you may need to modify this check"
-            echo "   to verify organization admin permissions instead."
-            exit 1
+          if [ "$ACTOR" == "$REPO_OWNER" ]; then
+            echo "✅ Verified: $ACTOR is the repository owner"
+            exit 0
           fi
           
-          echo "✅ Verified: $ACTOR is the repository owner"
+          # For organization repositories: check if user is an organization member
+          echo "Repository owner ($REPO_OWNER) is an organization. Checking if $ACTOR is a member..."
+          
+          # Check organization membership using GitHub API
+          # Returns 204 if member, 404 if not, 302 if public membership
+          # Note: Default GITHUB_TOKEN should have access to check membership
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/orgs/${REPO_OWNER}/members/${ACTOR}")
+          
+          if [ "$HTTP_CODE" == "204" ] || [ "$HTTP_CODE" == "302" ]; then
+            echo "✅ Verified: $ACTOR is a member of organization $REPO_OWNER"
+          elif [ "$HTTP_CODE" == "404" ]; then
+            echo "❌ Error: $ACTOR is not a member of organization $REPO_OWNER"
+            echo "   Only organization members can run this workflow."
+            exit 1
+          elif [ "$HTTP_CODE" == "403" ]; then
+            echo "❌ Error: Insufficient permissions to verify organization membership (HTTP 403)"
+            echo "   The workflow token may not have the required 'read:org' scope."
+            echo "   Please contact a repository administrator to configure the workflow permissions."
+            exit 1
+          else
+            echo "⚠️  Warning: Could not verify organization membership (HTTP $HTTP_CODE)"
+            echo "   Attempting to proceed, but access may be restricted."
+            echo "   If you encounter issues, ensure you are a member of $REPO_OWNER"
+          fi
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
