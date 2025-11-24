@@ -211,6 +211,8 @@ static const DefaultTableMacro data_quality_macros[] = {
             FROM ordered_data
             GROUP BY __uid
             HAVING COUNT(*) >= 3
+        )"
+     R"(
         ),
         -- Dimension 1: Structural Integrity
         structural_checks AS (
