@@ -1,8 +1,10 @@
 #pragma once
 
-#include "duckdb/main/extension_loader.hpp"
+#include "duckdb.hpp"
 
 namespace duckdb {
+
+class ExtensionLoader;
 
 // Register Data Quality table macros
 void RegisterDataQualityMacros(ExtensionLoader &loader);
