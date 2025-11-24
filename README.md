@@ -399,7 +399,7 @@ SQL macros for exploratory data analysis and quality assessment:
 
 ```sql
 TS_STATS(table, group_col, date_col, value_col)
--- Returns: per-series statistics (count, mean, std, min, max, nulls, gaps)
+-- Returns: per-series statistics (length, mean, std, min, max, nulls, zeros, plateau_size, n_zeros_start/end, expected_length)
 
 TS_QUALITY_REPORT(stats_table, min_length)
 -- Returns: quality assessment with configurable minimum length threshold
@@ -430,11 +430,11 @@ TS_DATA_QUALITY_SUMMARY(table, unique_id_col, date_col, value_col, n_short)
 
 **Example Output**:
 ```
-| unique_id | dimension    | metric           | value                    |
-|-----------|--------------|------------------|--------------------------|
-| Store_A   | Temporal     | timestamp_gaps   | 15.2% gaps (23 missing) |
-| Store_A   | Magnitude    | missing_values   | 8.5% missing (13 NULLs) |
-| Store_B   | Temporal     | series_length    | 5 observations           |
+| unique_id | dimension    | metric           | value | value_pct |
+|-----------|--------------|------------------|-------|-----------|
+| Store_A   | Temporal     | timestamp_gaps   | 23    | 0.152     |
+| Store_A   | Magnitude    | missing_values   | 13    | 0.085     |
+| Store_B   | Temporal     | series_length    | 5     | NULL      |
 ```
 
 ### Data Preparation (12 macros)

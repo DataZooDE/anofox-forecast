@@ -66,44 +66,71 @@ FROM (
 ----
 true
 
-# Verify schema: unique_id, dimension, metric, value (no status or recommendation)
+# Verify schema: unique_id, dimension, metric, value (INTEGER), value_pct (DOUBLE)
 query I
 SELECT COUNT(*) = 1
 FROM (
-    SELECT unique_id, dimension, metric, value
+    SELECT unique_id, dimension, metric, value, value_pct
     FROM health_card_result
     LIMIT 1
 );
 ----
 true
 
-# Test: Verify constant series are detected
+# Verify value column is INTEGER type
+query I
+SELECT COUNT(*) = 1
+FROM (
+    SELECT typeof(value) AS value_type
+    FROM health_card_result
+    LIMIT 1
+)
+WHERE value_type = 'INTEGER';
+----
+true
+
+# Verify value_pct column is DOUBLE type
+query I
+SELECT COUNT(*) = 1
+FROM (
+    SELECT typeof(value_pct) AS pct_type
+    FROM health_card_result
+    WHERE value_pct IS NOT NULL
+    LIMIT 1
+)
+WHERE pct_type IN ('DOUBLE', 'DECIMAL');
+----
+true
+
+# Test: Verify constant series are detected (value = 1 for constant)
 query I
 SELECT COUNT(*) > 0
 FROM health_card_result
 WHERE metric = 'static_values'
   AND unique_id = 'series_2'
-  AND value LIKE '%Constant%';
+  AND value = 1;
 ----
 true
 
-# Test: Verify missing values are detected
+# Test: Verify missing values are detected (value = count, value_pct = percentage)
 query I
 SELECT COUNT(*) > 0
 FROM health_card_result
 WHERE metric = 'missing_values'
   AND unique_id = 'series_1'
-  AND value LIKE '%missing%';
+  AND value > 0
+  AND value_pct IS NOT NULL;
 ----
 true
 
-# Test: Verify intermittency is detected
+# Test: Verify intermittency is detected (value = zero count, value_pct = percentage)
 query I
 SELECT COUNT(*) > 0
 FROM health_card_result
 WHERE metric = 'intermittency'
   AND unique_id = 'series_3'
-  AND value LIKE '%zeros%';
+  AND value > 0
+  AND value_pct IS NOT NULL;
 ----
 true
 
@@ -156,12 +183,12 @@ SELECT
     '2024-01-01'::TIMESTAMP AS date_col,
     200.0 AS value_col;  -- Duplicate key
 
-# Verify duplicate detection
+# Verify duplicate detection (value = duplicate count)
 query I
 SELECT COUNT(*) > 0
 FROM ts_data_quality_health_card(duplicate_test, series_id, date_col, value_col, 30)
 WHERE metric = 'key_uniqueness' 
-  AND value LIKE '%duplicate%';
+  AND value > 0;
 ----
 true
 

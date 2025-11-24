@@ -40,18 +40,17 @@ Computes comprehensive statistics for each time series.
 **Returns**:
 - `series_id` - Series identifier
 - `length` - Number of observations
-- `expected_length` - Expected observations (based on date range)
-- `n_gaps` - Missing time points
 - `start_date`, `end_date` - Temporal span
+- `expected_length` - Expected observations based on date range (INTEGER)
 - `mean`, `std`, `min`, `max`, `median` - Basic statistics
-- `n_null`, `n_nan`, `n_zeros` - Missing/special values
-- `n_unique_values` - Distinct values
+- `n_null` - Count of NULL values
+- `n_zeros` - Count of zero values
+- `n_unique_values` - Count of distinct values (INTEGER)
 - `is_constant` - Boolean flag for constant series
-- `trend_corr` - Trend correlation (-1 to 1)
-- `cv` - Coefficient of variation
-- `intermittency` - Proportion of zeros
-- `quality_score` - Overall quality (0-1, higher is better)
-- `values`, `dates` - Raw data arrays
+- `plateau_size` - Size of longest consecutive run of identical values (INTEGER)
+- `plateau_size_non_zero` - Size of longest consecutive run of identical non-zero values (INTEGER)
+- `n_zeros_start` - Number of zeros at the beginning of the series (INTEGER)
+- `n_zeros_end` - Number of zeros at the end of the series (INTEGER)
 
 **Example**:
 ```sql
@@ -61,8 +60,9 @@ SELECT * FROM TS_STATS('sales', product_id, date, sales_amount);
 -- View summary
 SELECT 
     COUNT(*) AS total_series,
-    ROUND(AVG(quality_score), 4) AS avg_quality,
-    SUM(CASE WHEN quality_score < 0.5 THEN 1 ELSE 0 END) AS low_quality_count
+    ROUND(AVG(length), 2) AS avg_length,
+    SUM(CASE WHEN is_constant THEN 1 ELSE 0 END) AS constant_series_count,
+    SUM(CASE WHEN n_zeros_start > 0 OR n_zeros_end > 0 THEN 1 ELSE 0 END) AS series_with_edge_zeros
 FROM stats;
 ```
 
@@ -77,14 +77,14 @@ The Data Quality Health Card provides a structured assessment across four dimens
 SELECT * FROM TS_DATA_QUALITY_HEALTH_CARD('sales_data', product_id, date, amount, 30);
 
 -- Example output:
--- | unique_id | dimension    | metric           | value                    |
--- |-----------|--------------|------------------|--------------------------|
--- | Store_A   | Structural  | key_uniqueness   | No duplicates             |
--- | Store_A   | Temporal    | timestamp_gaps   | 15.2% gaps (23 missing)  |
--- | Store_A   | Temporal    | series_length    | 12 observations           |
--- | Store_A   | Magnitude   | missing_values   | 8.5% missing (13 NULLs)  |
--- | Store_A   | Magnitude   | static_values    | Variable series           |
--- | Store_A   | Behavioural | intermittency    | 52.3% zeros              |
+-- | unique_id | dimension    | metric           | value | value_pct |
+-- |-----------|--------------|------------------|-------|-----------|
+-- | Store_A   | Structural  | key_uniqueness   | 0     | NULL      |
+-- | Store_A   | Temporal    | timestamp_gaps   | 23    | 0.152     |
+-- | Store_A   | Temporal    | series_length    | 12    | NULL      |
+-- | Store_A   | Magnitude   | missing_values   | 13    | 0.085     |
+-- | Store_A   | Magnitude   | static_values    | 0     | NULL      |
+-- | Store_A   | Behavioural | intermittency    | 104   | 0.523     |
 ```
 
 **Four Dimensions**:

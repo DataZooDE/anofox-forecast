@@ -223,11 +223,8 @@ static const DefaultTableMacro data_quality_macros[] = {
                 __uid AS unique_id,
                 'Structural' AS dimension,
                 'key_uniqueness' AS metric,
-                CASE 
-                    WHEN n_duplicates > 0 
-                    THEN n_duplicates || ' duplicate pairs found'
-                    ELSE 'No duplicates'
-                END AS value
+                n_duplicates AS value,
+                NULL AS value_pct
             FROM duplicate_stats
             
             UNION ALL
@@ -236,7 +233,8 @@ static const DefaultTableMacro data_quality_macros[] = {
                 'ALL_SERIES' AS unique_id,
                 'Structural' AS dimension,
                 'id_cardinality' AS metric,
-                COUNT(DISTINCT __uid) || ' unique IDs' AS value
+                COUNT(DISTINCT __uid) AS value,
+                NULL AS value_pct
             FROM base_data
         ),
         -- Dimension 2: Temporal Integrity
@@ -245,7 +243,8 @@ static const DefaultTableMacro data_quality_macros[] = {
                 ss.__uid AS unique_id,
                 'Temporal' AS dimension,
                 'series_length' AS metric,
-                ss.length || ' observations' AS value
+                ss.length AS value,
+                NULL AS value_pct
             FROM series_stats ss
             CROSS JOIN params
             
@@ -255,7 +254,8 @@ static const DefaultTableMacro data_quality_macros[] = {
                 __uid AS unique_id,
                 'Temporal' AS dimension,
                 'timestamp_gaps' AS metric,
-                ROUND(gap_pct, 1) || '% gaps (' || n_gaps || ' missing dates)' AS value
+                n_gaps AS value,
+                gap_pct / 100.0 AS value_pct
             FROM gap_stats
             
             UNION ALL
@@ -266,9 +266,10 @@ static const DefaultTableMacro data_quality_macros[] = {
                 'series_alignment' AS metric,
                 CASE 
                     WHEN n_start_dates > 1 OR n_end_dates > 1 
-                    THEN 'Ragged edges: ' || n_start_dates || ' start dates, ' || n_end_dates || ' end dates'
-                    ELSE 'All series aligned'
-                END AS value
+                    THEN GREATEST(n_start_dates, n_end_dates)
+                    ELSE 1
+                END AS value,
+                NULL AS value_pct
             FROM alignment_stats
             
             UNION ALL
@@ -277,11 +278,8 @@ static const DefaultTableMacro data_quality_macros[] = {
                 'ALL_SERIES' AS unique_id,
                 'Temporal' AS dimension,
                 'frequency_inference' AS metric,
-                CASE 
-                    WHEN n_frequencies > 1 
-                    THEN 'Mixed frequencies detected across ' || n_series || ' series'
-                    ELSE 'Consistent frequency across all series'
-                END AS value
+                n_frequencies AS value,
+                NULL AS value_pct
             FROM frequency_diversity
         ),
         -- Dimension 3: Magnitude & Value Validity
@@ -290,7 +288,8 @@ static const DefaultTableMacro data_quality_macros[] = {
                 __uid AS unique_id,
                 'Magnitude' AS dimension,
                 'missing_values' AS metric,
-                ROUND(null_pct, 1) || '% missing (' || null_count || ' NULLs)' AS value
+                null_count AS value,
+                null_pct / 100.0 AS value_pct
             FROM missing_stats
             
             UNION ALL
@@ -299,11 +298,12 @@ static const DefaultTableMacro data_quality_macros[] = {
                 __uid AS unique_id,
                 'Magnitude' AS dimension,
                 'value_bounds' AS metric,
+                negative_count AS value,
                 CASE 
-                    WHEN negative_count > 0 
-                    THEN negative_count || ' negative values found'
-                    ELSE 'No negative values'
-                END AS value
+                    WHEN total_count > 0 
+                    THEN CAST(negative_count AS DOUBLE) / total_count
+                    ELSE NULL
+                END AS value_pct
             FROM negative_stats
             
             UNION ALL
@@ -314,9 +314,10 @@ static const DefaultTableMacro data_quality_macros[] = {
                 'static_values' AS metric,
                 CASE 
                     WHEN distinct_count = 1 OR (stddev IS NOT NULL AND stddev = 0)
-                    THEN 'Constant series (variance = 0)'
-                    ELSE 'Variable series'
-                END AS value
+                    THEN 1
+                    ELSE 0
+                END AS value,
+                NULL AS value_pct
             FROM variance_stats
         ),
         -- Dimension 4: Behavioural/Statistical (Advanced)
@@ -325,7 +326,8 @@ static const DefaultTableMacro data_quality_macros[] = {
                 __uid AS unique_id,
                 'Behavioural' AS dimension,
                 'intermittency' AS metric,
-                ROUND(zero_pct, 1) || '% zeros' AS value
+                zero_count AS value,
+                zero_pct / 100.0 AS value_pct
             FROM zero_stats
             
             UNION ALL
@@ -336,9 +338,10 @@ static const DefaultTableMacro data_quality_macros[] = {
                 'seasonality_check' AS metric,
                 CASE 
                     WHEN LEN(detected_periods) = 0 
-                    THEN 'No seasonality detected'
-                    ELSE 'Seasonality detected: periods ' || detected_periods::VARCHAR
-                END AS value
+                    THEN 0
+                    ELSE 1
+                END AS value,
+                NULL AS value_pct
             FROM seasonality_results
             
             UNION ALL
@@ -347,14 +350,8 @@ static const DefaultTableMacro data_quality_macros[] = {
                 __uid AS unique_id,
                 'Behavioural' AS dimension,
                 'trend_detection' AS metric,
-                CASE 
-                    WHEN ABS(trend_correlation) > 0.7 
-                    THEN CASE 
-                        WHEN trend_correlation > 0 THEN 'Strong positive trend (r=' || ROUND(trend_correlation, 2) || ')'
-                        ELSE 'Strong negative trend (r=' || ROUND(trend_correlation, 2) || ')'
-                    END
-                    ELSE 'No strong trend detected (r=' || ROUND(COALESCE(trend_correlation, 0), 2) || ')'
-                END AS value
+                NULL AS value,
+                ABS(trend_correlation) AS value_pct
             FROM trend_stats
         ),
         -- Combine all checks
@@ -371,7 +368,8 @@ static const DefaultTableMacro data_quality_macros[] = {
             unique_id,
             dimension,
             metric,
-            value
+            value,
+            value_pct
         FROM all_checks
         ORDER BY 
             dimension,

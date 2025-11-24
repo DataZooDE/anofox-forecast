@@ -50,12 +50,12 @@ SELECT * FROM health_card ORDER BY dimension, metric;
 
 **Example Output**:
 
-| unique_id | dimension    | metric           | value                    |
-|-----------|--------------|------------------|--------------------------|
-| Store_A   | Temporal     | timestamp_gaps   | 15.2% gaps (23 missing) |
-| Store_A   | Magnitude   | missing_values   | 8.5% missing (13 NULLs) |
-| Store_B   | Temporal     | series_length    | 5 observations           |
-| Store_C   | Behavioural  | intermittency    | 52.3% zeros             |
+| unique_id | dimension    | metric           | value | value_pct |
+|-----------|--------------|------------------|-------|-----------|
+| Store_A   | Temporal     | timestamp_gaps   | 23    | 0.152     |
+| Store_A   | Magnitude   | missing_values   | 13    | 0.085     |
+| Store_B   | Temporal     | series_length    | 5     | NULL      |
+| Store_C   | Behavioural  | intermittency    | 104   | 0.523     |
 
 **Four Dimensions Assessed**:
 
