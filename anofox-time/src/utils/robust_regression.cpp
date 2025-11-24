@@ -41,6 +41,12 @@ void siegelRepeatedMedians(const std::vector<double>& x,
 	}
 
 	if (n < 2) {
+		// Handle single point case gracefully: return horizontal line through the point
+		if (n == 1) {
+			slope = 0.0;
+			intercept = y[0];
+			return;
+		}
 		throw std::invalid_argument("Need at least 2 points for regression");
 	}
 

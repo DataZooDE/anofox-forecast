@@ -15,6 +15,7 @@ from .evaluation import evaluate_forecasts
 
 _SUPPORTED_DATASETS: Dict[str, str] = {
     'm4': 'M4',
+    'm5': 'M5',
 }
 
 

@@ -76,6 +76,7 @@ add_library(anofox-time
     src/models/ensemble.cpp
     src/changepoint/bocpd.cpp
     src/transform/pipeline.cpp
+    src/transform/transformers.cpp
 )
 target_include_directories(anofox-time PUBLIC include)
 target_include_directories(anofox-time PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/LBFGSpp/include)
@@ -136,6 +137,10 @@ if(BUILD_TESTING)
         tests/main.cpp
         tests/utils/test_metrics.cpp
         tests/utils/test_logging.cpp
+        tests/utils/test_robust_regression.cpp
+        tests/utils/test_cross_validation.cpp
+        tests/utils/test_intermittent_utils.cpp
+        tests/utils/test_nelder_mead.cpp
         tests/core/test_distance_matrix.cpp
         tests/core/test_time_series.cpp
         tests/core/test_forecast.cpp
@@ -152,6 +157,8 @@ if(BUILD_TESTING)
         tests/models/test_theta.cpp
         tests/models/test_baseline.cpp
         tests/models/test_exponential_smoothing.cpp
+        tests/models/test_model_edge_cases.cpp
+        tests/models/test_method_name_wrapper.cpp
         tests/models/test_mfles.cpp
         tests/models/test_auto_mfles.cpp
         tests/models/test_mstl_forecaster.cpp
@@ -167,8 +174,10 @@ if(BUILD_TESTING)
         tests/seasonality/test_stl.cpp
         tests/seasonality/test_mstl.cpp
         tests/changepoint/test_bocpd.cpp
-        # tests/transform/test_transforms.cpp  # Disabled: transform classes not implemented
+        tests/transform/test_transforms.cpp
         tests/selectors/test_auto_selector.cpp
+        tests/optimization/test_theta_gradients.cpp
+        tests/optimization/test_ets_gradients.cpp
         # tests/integration/test_quick_pipeline.cpp  # Disabled: depends on transform classes
         tests/integration/test_monitoring_workflow.cpp
         tests/features/test_tsfresh_features.cpp

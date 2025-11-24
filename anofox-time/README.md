@@ -290,6 +290,29 @@ ctest --test-dir build --output-on-failure
 ./build/anofox-time-tests --success --durations yes
 ```
 
+### Code coverage
+
+Generate code coverage reports using the Makefile:
+
+```bash
+# Build with coverage instrumentation, run tests, and generate HTML report
+make coverage
+
+# Clean coverage artifacts
+make coverage-clean
+
+# Open coverage report in browser
+make coverage-open
+```
+
+The coverage report will be generated in `coverage_html/index.html`. The coverage build uses:
+- `lcov` for coverage data collection
+- `genhtml` for HTML report generation
+- Coverage flags: `--coverage` (gcc/clang)
+
+**Requirements:**
+- `lcov` package must be installed (e.g., `sudo apt-get install lcov` or `sudo pacman -S lcov`)
+
 ### Project Structure
 
 ```

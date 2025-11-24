@@ -47,4 +47,9 @@ docs/
 *.log
 .cache/
 
+# Coverage reports
+coverage_html/
+*.info
+lcov.info
+
 gitinges*

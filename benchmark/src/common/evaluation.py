@@ -103,7 +103,7 @@ def evaluate_forecasts(
     pl.DataFrame
         Evaluation results containing MASE, MAE, RMSE for each model
     """
-    print(f"Evaluating {benchmark_name} forecasts for M4 {group} dataset...")
+    print(f"Evaluating {benchmark_name} forecasts for {group} dataset...")
 
     # Convert pandas to polars
     test_df = pl.from_pandas(test_df_pd)
@@ -189,7 +189,7 @@ def evaluate_forecasts(
 
     # Print summary table
     print(f"\n{'='*80}")
-    print(f"{benchmark_name.capitalize()} Models Evaluation Summary - M4 {group}")
+    print(f"{benchmark_name.capitalize()} Models Evaluation Summary - {group}")
     print(f"{'='*80}")
     print(f"{'Model':<40} {'MASE':>8} {'MAE':>10} {'RMSE':>10}")
     print(f"{'-'*80}")

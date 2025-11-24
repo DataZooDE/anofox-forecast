@@ -135,21 +135,23 @@ SELECT series_id,
        ) AS feats_with_literal_overrides
 FROM timeseries_10k
 GROUP BY series_id
-ORDER BY series_id
-LIMIT 5;
+ORDER BY series_id;
 
 
 -----------------------------------------------------------------------
 -- 5) Adding a rolling feature (e.g., 7-day rolling mean) and a non-standard feature (e.g., entropy)
 -----------------------------------------------------------------------
-SELECT series_id, date, (ts_features(date, value, ['mean']) OVER (
-    PARTITION BY series_id ORDER BY date
-    ROWS BETWEEN 10 PRECEDING AND CURRENT ROW
-)).mean AS rolling_mean,
-(ts_features(date, value, ['linear_trend']) OVER (
-    PARTITION BY series_id ORDER BY date
-    ROWS BETWEEN 10 PRECEDING AND CURRENT ROW
-)).linear_trend__attr_slope AS rolling_linear_trend
+SELECT 
+    series_id, 
+    date, 
+    (ts_features(date, value, ['mean']) OVER (
+        PARTITION BY series_id ORDER BY date
+        ROWS BETWEEN 10 PRECEDING AND CURRENT ROW
+    )).mean AS rolling_mean,
+    (ts_features(date, value, ['linear_trend']) OVER (
+        PARTITION BY series_id ORDER BY date
+        ROWS BETWEEN 10 PRECEDING AND CURRENT ROW
+    )).linear_trend__attr_slope AS rolling_linear_trend
 FROM timeseries_10k
 ORDER BY series_id, date;
 

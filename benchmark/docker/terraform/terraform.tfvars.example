@@ -1,0 +1,34 @@
+# Example Terraform variables file
+# Copy this to terraform.tfvars and customize as needed
+
+# AWS region for resources
+aws_region = "us-east-1"
+
+# Project name used for resource naming
+project_name = "anofox-benchmark"
+
+# Fargate CPU and Memory Configuration
+# CPU units: 256 (0.25 vCPU), 512 (0.5 vCPU), 1024 (1 vCPU), 2048 (2 vCPU), 
+#            4096 (4 vCPU), 8192 (8 vCPU), 16384 (16 vCPU)
+ecs_cpu = 1024  # 1 vCPU
+
+# Memory in MB. Must be a valid combination with CPU.
+# Common combinations:
+#   1 vCPU:  2048-8192 MB (2-8 GB)
+#   2 vCPU:  4096-16384 MB (4-16 GB)
+#   4 vCPU:  8192-30720 MB (8-30 GB)
+#   8 vCPU:  16384-30720 MB (16-30 GB)
+#   16 vCPU: 32768-102400 MB (32-100 GB)
+ecs_memory = 4096  # 4 GB
+
+# Docker image tag to use in task definition
+ecr_image_tag = "latest"
+
+# S3 Bucket Configuration
+# Set to true to create an S3 bucket for benchmark results
+create_s3_bucket = false
+
+# S3 bucket name (only used if create_s3_bucket is true)
+# If empty, a name will be auto-generated: {project_name}-results-{account_id}
+s3_bucket_name = ""
+

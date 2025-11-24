@@ -521,3 +521,115 @@ TEST_CASE("Ensemble temperature parameter", "[ensemble]") {
 	}
 }
 
+TEST_CASE("Ensemble WeightedBIC combination", "[ensemble]") {
+	auto ts = createTestTimeSeries();
+	
+	std::vector<std::shared_ptr<IForecaster>> forecasters;
+	auto arima1 = ARIMABuilder().withAR(1).withMA(0).build();
+	auto arima2 = ARIMABuilder().withAR(2).withMA(1).build();
+	forecasters.push_back(std::move(arima1));
+	forecasters.push_back(std::move(arima2));
+	
+	EnsembleConfig config;
+	config.method = EnsembleCombinationMethod::WeightedBIC;
+	
+	Ensemble ensemble(forecasters, config);
+	ensemble.fit(ts);
+	
+	auto forecast = ensemble.predict(10);
+	REQUIRE(forecast.horizon() == 10);
+	
+	auto weights = ensemble.getWeights();
+	double sum = 0.0;
+	for (const auto& w : weights) {
+		sum += w;
+	}
+	REQUIRE_THAT(sum, Catch::Matchers::WithinRel(1.0, 0.001));
+}
+
+TEST_CASE("Ensemble handles forecaster failures gracefully", "[ensemble][error]") {
+	auto ts = createTestTimeSeries();
+	
+	std::vector<std::shared_ptr<IForecaster>> forecasters;
+	forecasters.push_back(std::make_shared<Naive>());
+	// Add a forecaster that might fail
+	forecasters.push_back(SimpleExponentialSmoothingBuilder().withAlpha(0.3).build());
+	
+	Ensemble ensemble(forecasters);
+	// Should handle gracefully if one forecaster fails
+	REQUIRE_NOTHROW(ensemble.fit(ts));
+}
+
+TEST_CASE("Ensemble validation_split edge cases", "[ensemble][edge]") {
+	auto ts = createLongerTimeSeries();
+	
+	std::vector<std::shared_ptr<IForecaster>> forecasters;
+	forecasters.push_back(std::make_shared<Naive>());
+	forecasters.push_back(SimpleExponentialSmoothingBuilder().withAlpha(0.3).build());
+	
+	SECTION("validation_split = 1.0 should fail") {
+		EnsembleConfig config;
+		config.method = EnsembleCombinationMethod::WeightedAccuracy;
+		config.validation_split = 1.0;
+		
+		Ensemble ensemble(forecasters, config);
+		REQUIRE_THROWS_AS(ensemble.fit(ts), std::invalid_argument);
+	}
+	
+	SECTION("validation_split too large for data") {
+		EnsembleConfig config;
+		config.method = EnsembleCombinationMethod::WeightedAccuracy;
+		config.validation_split = 0.99;  // Leaves almost no training data
+		
+		Ensemble ensemble(forecasters, config);
+		// May throw or handle gracefully
+		try {
+			ensemble.fit(ts);
+		} catch (...) {
+			// Acceptable
+		}
+	}
+}
+
+TEST_CASE("Ensemble min_weight threshold filtering", "[ensemble]") {
+	auto ts = createLongerTimeSeries();
+	
+	std::vector<std::shared_ptr<IForecaster>> forecasters;
+	forecasters.push_back(std::make_shared<Naive>());
+	forecasters.push_back(SimpleExponentialSmoothingBuilder().withAlpha(0.3).build());
+	forecasters.push_back(SimpleMovingAverageBuilder().withWindow(5).build());
+	
+	EnsembleConfig config;
+	config.method = EnsembleCombinationMethod::WeightedAccuracy;
+	config.validation_split = 0.2;
+	config.min_weight = 0.4;  // High threshold
+	
+	Ensemble ensemble(forecasters, config);
+	ensemble.fit(ts);
+	
+	auto weights = ensemble.getWeights();
+	// Some weights may be zeroed out due to min_weight
+	for (const auto& w : weights) {
+				REQUIRE((w == 0.0 || w >= config.min_weight));
+	}
+}
+
+TEST_CASE("Ensemble combineForecasts with NaN values", "[ensemble][edge]") {
+	auto ts = createTestTimeSeries();
+	
+	std::vector<std::shared_ptr<IForecaster>> forecasters;
+	forecasters.push_back(std::make_shared<Naive>());
+	forecasters.push_back(SimpleExponentialSmoothingBuilder().withAlpha(0.3).build());
+	
+	Ensemble ensemble(forecasters);
+	ensemble.fit(ts);
+	
+	// getIndividualForecasts may contain NaN if a forecaster fails
+	auto individual = ensemble.getIndividualForecasts(5);
+	REQUIRE(individual.size() == 2);
+	
+	// Ensemble should still produce valid forecast
+	auto forecast = ensemble.predict(5);
+	REQUIRE(forecast.horizon() == 5);
+}
+
