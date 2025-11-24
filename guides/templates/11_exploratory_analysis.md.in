@@ -4,7 +4,7 @@
 
 Data quality directly impacts forecast accuracy. This guide covers exploratory data analysis and preparation using SQL macros that operate on time series at scale.
 
-**API Coverage**: 5 EDA macros + 12 data preparation macros for comprehensive data quality workflows.
+**API Coverage**: 5 EDA macros + 4 Data Quality Health Card macros + 12 data preparation macros for comprehensive data quality workflows.
 
 ## Why Data Preparation Matters
 
@@ -50,7 +50,53 @@ high_quality_series: 856
 low_quality_series: 23
 ```
 
-#### Step 3: Quality Report
+#### Step 3: Data Quality Health Card
+
+**New**: Comprehensive data quality assessment with actionable recommendations:
+
+```sql
+-- Generate comprehensive health card
+CREATE TABLE health_card AS
+SELECT * FROM TS_DATA_QUALITY_HEALTH_CARD('sales_raw', product_id, date, sales_amount);
+
+-- View all issues
+SELECT * FROM health_card ORDER BY 
+    CASE status WHEN 'Critical' THEN 1 WHEN 'Warning' THEN 2 ELSE 3 END,
+    dimension, metric;
+```
+
+**Example Output**:
+
+| unique_id | dimension    | metric           | status   | value                    | recommendation                                    |
+|-----------|--------------|------------------|----------|--------------------------|---------------------------------------------------|
+| Store_A   | Temporal     | timestamp_gaps   | Critical | 15.2% gaps (23 missing) | Imputation required. 1. Forward Fill...           |
+| Store_A   | Magnitude   | missing_values   | Warning  | 8.5% missing (13 NULLs) | Same as Timestamp Gaps (Impute or Drop).          |
+| Store_B   | Temporal     | series_length    | Critical | 5 observations           | Cold Start protocol. Use simple moving averages...|
+| Store_C   | Behavioural  | intermittency    | Warning  | 52.3% zeros             | Switch to Croston's method or TWEEDIE loss...     |
+
+**Four Dimensions Assessed**:
+
+1. **Structural**: Key uniqueness, ID cardinality
+2. **Temporal**: Frequency inference, timestamp gaps, series alignment, series length
+3. **Magnitude**: Missing values, value bounds, static values
+4. **Behavioural**: Seasonality, trend detection, intermittency
+
+**Helper Functions**:
+
+```sql
+-- Get summary by dimension
+SELECT * FROM TS_DATA_QUALITY_SUMMARY('sales_raw', product_id, date, sales_amount);
+
+-- Get only critical (blocking) issues
+SELECT * FROM TS_GET_CRITICAL_ISSUES('sales_raw', product_id, date, sales_amount);
+
+-- Get only warnings (potential issues)
+SELECT * FROM TS_GET_WARNINGS('sales_raw', product_id, date, sales_amount);
+```
+
+#### Step 4: Legacy Quality Report (Alternative)
+
+For backward compatibility, you can still use the legacy quality report:
 
 <!-- include: test/sql/docs_examples/11_exploratory_analysis_data_quality_03.sql -->
 
@@ -72,7 +118,7 @@ Short Series (< 30):
   - 67 series too short (6.7%)
 ```
 
-#### Step 4: Identify Problems
+#### Step 5: Identify Problems
 
 <!-- include: test/sql/docs_examples/11_exploratory_analysis_example_04.sql -->
 
@@ -211,7 +257,7 @@ quality_score = 1.0 - (
 
 ### Before Forecasting
 
-- [ ] Check data quality: `TS_STATS()`, `TS_QUALITY_REPORT()`
+- [ ] Check data quality: `TS_STATS()`, `TS_DATA_QUALITY_HEALTH_CARD()` (or legacy `TS_QUALITY_REPORT()`)
 - [ ] Fill time gaps: `TS_FILL_GAPS()`
 - [ ] Handle missing values: `TS_FILL_NULLS_*()`
 - [ ] Remove constant series: `TS_DROP_CONSTANT()`
@@ -236,7 +282,7 @@ Define minimum standards:
 ## Summary
 
 **Data Preparation Workflow**:
-1. ✅ **Explore**: Use TS_STATS(), TS_QUALITY_REPORT()
+1. ✅ **Explore**: Use TS_STATS(), TS_DATA_QUALITY_HEALTH_CARD() (or legacy TS_QUALITY_REPORT())
 2. ✅ **Identify**: Find gaps, nulls, outliers, patterns
 3. ✅ **Clean**: Fill gaps, handle nulls, remove bad series
 4. ✅ **Transform**: Remove edge zeros, cap outliers
