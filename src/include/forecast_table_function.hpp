@@ -28,6 +28,8 @@ struct ForecastBindData : public TableFunctionData {
 	Value model_params;
 	idx_t timestamp_col_idx = 0;
 	idx_t value_col_idx = 1;
+	bool safe_mode = true;             // Enable error resilience (default: true)
+	bool include_error_message = true; // Include error_message field (default: true)
 
 	ForecastBindData() = default;
 };
@@ -51,6 +53,7 @@ struct ForecastLocalState : public LocalTableFunctionState {
 	::anofoxtime::models::IForecaster *model = nullptr;
 	::anofoxtime::core::Forecast *forecast = nullptr;
 	std::chrono::high_resolution_clock::time_point fit_start_time;
+	string error_message; // Store error message if forecast failed
 
 	ForecastLocalState() = default;
 	~ForecastLocalState(); // Defined in .cpp where full types are available

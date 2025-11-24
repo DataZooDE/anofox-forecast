@@ -10,6 +10,9 @@
 #include <iostream>
 #include <algorithm>
 #include <chrono>
+#include <cctype>
+#include <typeinfo>
+#include <stdexcept>
 
 // Performance profiling utility - RAII timer
 class ScopedTimer {
@@ -32,6 +35,102 @@ public:
 #include "anofox-time/models/iforecaster.hpp"
 
 namespace duckdb {
+
+// Helper function to sanitize error messages (remove stack traces, limit length)
+static string SanitizeErrorMessage(const string &error_msg) {
+	string sanitized = error_msg;
+	// Remove common stack trace patterns
+	size_t pos = sanitized.find(" at ");
+	if (pos != string::npos) {
+		sanitized = sanitized.substr(0, pos);
+	}
+	pos = sanitized.find(" in ");
+	if (pos != string::npos) {
+		sanitized = sanitized.substr(0, pos);
+	}
+	// Limit length to 500 characters
+	if (sanitized.length() > 500) {
+		sanitized = sanitized.substr(0, 497) + "...";
+	}
+	// Trim whitespace
+	while (!sanitized.empty() && (sanitized.back() == ' ' || sanitized.back() == '\n' || sanitized.back() == '\r')) {
+		sanitized.pop_back();
+	}
+	return sanitized.empty() ? "Model fitting or prediction failed" : sanitized;
+}
+
+// Helper function to detect validation errors that should always throw
+// Validation errors are typically std::invalid_argument with messages about
+// insufficient data, invalid parameters, or other input validation issues
+static bool IsValidationError(const std::exception &ex) {
+	// Check error message for validation-related keywords
+	string msg = ex.what();
+	// Convert to lowercase for case-insensitive matching
+	string lower_msg = msg;
+	std::transform(lower_msg.begin(), lower_msg.end(), lower_msg.begin(), ::tolower);
+
+	// Keywords that indicate validation errors (input validation, insufficient data, etc.)
+	// These should always throw, regardless of safe_mode
+	if (lower_msg.find("requires at least") != string::npos || lower_msg.find("cannot fit") != string::npos ||
+	    lower_msg.find("must be") != string::npos || lower_msg.find("must have") != string::npos ||
+	    lower_msg.find("invalid") != string::npos || lower_msg.find("empty") != string::npos ||
+	    lower_msg.find("insufficient") != string::npos || lower_msg.find("not enough") != string::npos) {
+		return true;
+	}
+
+	// Also check if it's specifically an std::invalid_argument by type
+	// Note: We use typeid to check the exception type
+	try {
+		if (typeid(ex) == typeid(std::invalid_argument)) {
+			return true;
+		}
+	} catch (...) {
+		// If typeid fails, fall through
+	}
+
+	return false;
+}
+
+// Helper function to create error result
+template <class STATE>
+static void CreateErrorResult(STATE &state, AggregateFinalizeData &finalize_data, const string &error_msg,
+                              const ForecastAggregateBindData &bind_data) {
+	child_list_t<Value> struct_values;
+	vector<Value> empty_list_int, empty_list_double, empty_list_timestamp;
+
+	// Conditionally include forecast_step
+	if (bind_data.include_forecast_step) {
+		struct_values.push_back(make_pair("forecast_step", Value::LIST(LogicalType::INTEGER, empty_list_int)));
+	}
+
+	// forecast_timestamp (always empty for errors)
+	struct_values.push_back(make_pair("forecast_timestamp", Value::LIST(LogicalType::TIMESTAMP, empty_list_timestamp)));
+
+	// point_forecast (empty list)
+	struct_values.push_back(make_pair("point_forecast", Value::LIST(LogicalType::DOUBLE, empty_list_double)));
+
+	// lower and upper bounds (empty lists)
+	struct_values.push_back(make_pair(bind_data.lower_col_name, Value::LIST(LogicalType::DOUBLE, empty_list_double)));
+	struct_values.push_back(make_pair(bind_data.upper_col_name, Value::LIST(LogicalType::DOUBLE, empty_list_double)));
+
+	// model_name = 'ERROR'
+	struct_values.push_back(make_pair("model_name", Value("ERROR")));
+
+	// insample_fitted (empty list)
+	struct_values.push_back(make_pair("insample_fitted", Value::LIST(LogicalType::DOUBLE, empty_list_double)));
+
+	// date_col_name
+	struct_values.push_back(make_pair("date_col_name", Value(bind_data.date_col_name)));
+
+	// error_message (if enabled)
+	if (bind_data.include_error_message) {
+		string sanitized = SanitizeErrorMessage(error_msg);
+		struct_values.push_back(make_pair("error_message", Value(sanitized)));
+	}
+
+	auto result_value = Value::STRUCT(std::move(struct_values));
+	finalize_data.result.SetValue(finalize_data.result_idx, result_value);
+}
 
 // Operation struct that defines Initialize, Combine, Finalize, Destroy
 struct ForecastAggregateOperation {
@@ -110,47 +209,7 @@ struct ForecastAggregateOperation {
 			    time_value_pairs.size() * (sizeof(std::chrono::system_clock::time_point) + sizeof(double));
 		}
 
-		// STAGE 3: BUILD TIMESERIES
-		std::unique_ptr<::anofoxtime::core::TimeSeries> ts_ptr;
-		{
-			ScopedTimer timer(&state.data->time_build_ts);
-
-			// Copy 3: Pass vectors to TimeSeries (by value, then moved internally)
-			ts_ptr = TimeSeriesBuilder::BuildTimeSeries(timestamps, sorted_values);
-			state.data->copy_count++;
-			state.data->bytes_copied +=
-			    timestamps.size() * (sizeof(std::chrono::system_clock::time_point) + sizeof(double));
-		}
-
-		// STAGE 4: FIT MODEL
-		std::unique_ptr<::anofoxtime::models::IForecaster> model_ptr;
-		{
-			ScopedTimer timer(&state.data->time_fit);
-			model_ptr = ModelFactory::Create(bind_data.model_name, bind_data.model_params);
-			AnofoxTimeWrapper::FitModel(model_ptr.get(), *ts_ptr);
-		}
-
-		// STAGE 4.5: EXTRACT FITTED VALUES (if requested)
-		std::vector<double> fitted_values;
-		if (bind_data.return_insample) {
-			try {
-				fitted_values = AnofoxTimeWrapper::GetFittedValues(model_ptr.get());
-			} catch (...) {
-				// Model doesn't support fitted values, return empty
-				fitted_values.clear();
-			}
-		}
-
-		// STAGE 5: PREDICT
-		std::unique_ptr<::anofoxtime::core::Forecast> forecast_ptr;
-		{
-			ScopedTimer timer(&state.data->time_predict);
-			forecast_ptr = AnofoxTimeWrapper::PredictWithConfidence(model_ptr.get(), bind_data.horizon,
-			                                                        bind_data.confidence_level);
-		}
-		auto &primary_forecast = AnofoxTimeWrapper::GetPrimaryForecast(*forecast_ptr);
-
-		// STAGE 5.5: CALCULATE FORECAST TIMESTAMPS
+		// STAGE 5.5: CALCULATE FORECAST TIMESTAMPS (declared outside try for performance profiling)
 		std::chrono::microseconds time_timestamp_calc {0};
 		int64_t interval_micros = 0;
 		int64_t last_timestamp_micros = 0;
@@ -168,101 +227,174 @@ struct ForecastAggregateOperation {
 			}
 		}
 
-		if (generate_timestamps) {
-			ScopedTimer timer(&time_timestamp_calc);
+		// STAGE 3-6: Model building, fitting, and prediction (wrapped in error handling if safe_mode enabled)
+		try {
+			// STAGE 3: BUILD TIMESERIES
+			std::unique_ptr<::anofoxtime::core::TimeSeries> ts_ptr;
+			{
+				ScopedTimer timer(&state.data->time_build_ts);
 
-			// Calculate mean interval (O(1) - assumes regular, sorted data)
-			if (timestamps.size() >= 2) {
-				auto total_time =
-				    std::chrono::duration_cast<std::chrono::microseconds>(timestamps.back() - timestamps.front())
-				        .count();
-				interval_micros = total_time / (timestamps.size() - 1);
+				// Copy 3: Pass vectors to TimeSeries (by value, then moved internally)
+				ts_ptr = TimeSeriesBuilder::BuildTimeSeries(timestamps, sorted_values);
+				state.data->copy_count++;
+				state.data->bytes_copied +=
+				    timestamps.size() * (sizeof(std::chrono::system_clock::time_point) + sizeof(double));
 			}
 
-			// Last timestamp from training data
-			last_timestamp_micros = time_value_pairs.back().first;
-		}
+			// STAGE 4: FIT MODEL
+			std::unique_ptr<::anofoxtime::models::IForecaster> model_ptr;
+			{
+				ScopedTimer timer(&state.data->time_fit);
+				model_ptr = ModelFactory::Create(bind_data.model_name, bind_data.model_params);
+				AnofoxTimeWrapper::FitModel(model_ptr.get(), *ts_ptr);
+			}
 
-		// STAGE 6: BUILD RESULT
-		{
-			ScopedTimer timer(&state.data->time_result);
-
-			child_list_t<Value> struct_values;
-			vector<Value> steps, forecasts, lowers, uppers, forecast_timestamps;
-
-			// Check if model provides prediction intervals
-			bool has_intervals =
-			    AnofoxTimeWrapper::HasLowerBound(*forecast_ptr) && AnofoxTimeWrapper::HasUpperBound(*forecast_ptr);
-
-			if (has_intervals) {
-				auto &lower_bound = AnofoxTimeWrapper::GetLowerBound(*forecast_ptr);
-				auto &upper_bound = AnofoxTimeWrapper::GetUpperBound(*forecast_ptr);
-
-				for (int32_t h = 0; h < bind_data.horizon; h++) {
-					steps.push_back(Value::INTEGER(h + 1));
-					forecasts.push_back(Value::DOUBLE(primary_forecast[h]));
-					lowers.push_back(Value::DOUBLE(lower_bound[h]));
-					uppers.push_back(Value::DOUBLE(upper_bound[h]));
-
-					if (generate_timestamps) {
-						int64_t forecast_ts_micros = last_timestamp_micros + interval_micros * (h + 1);
-						forecast_timestamps.push_back(Value::TIMESTAMP(timestamp_t(forecast_ts_micros)));
-					}
-				}
-			} else {
-				for (int32_t h = 0; h < bind_data.horizon; h++) {
-					steps.push_back(Value::INTEGER(h + 1));
-					forecasts.push_back(Value::DOUBLE(primary_forecast[h]));
-					lowers.push_back(Value::DOUBLE(primary_forecast[h] * 0.9));
-					uppers.push_back(Value::DOUBLE(primary_forecast[h] * 1.1));
-
-					if (generate_timestamps) {
-						int64_t forecast_ts_micros = last_timestamp_micros + interval_micros * (h + 1);
-						forecast_timestamps.push_back(Value::TIMESTAMP(timestamp_t(forecast_ts_micros)));
-					}
+			// STAGE 4.5: EXTRACT FITTED VALUES (if requested)
+			std::vector<double> fitted_values;
+			if (bind_data.return_insample) {
+				try {
+					fitted_values = AnofoxTimeWrapper::GetFittedValues(model_ptr.get());
+				} catch (...) {
+					// Model doesn't support fitted values, return empty
+					fitted_values.clear();
 				}
 			}
 
-			// Copy 4: Create DuckDB Value::LIST objects
-			state.data->copy_count++;
-			state.data->bytes_copied +=
-			    bind_data.horizon * (sizeof(int32_t) + sizeof(double) * 4 + sizeof(timestamp_t));
-
-			// Conditionally include forecast_step
-			if (bind_data.include_forecast_step) {
-				struct_values.push_back(make_pair("forecast_step", Value::LIST(LogicalType::INTEGER, steps)));
+			// STAGE 5: PREDICT
+			std::unique_ptr<::anofoxtime::core::Forecast> forecast_ptr;
+			{
+				ScopedTimer timer(&state.data->time_predict);
+				forecast_ptr = AnofoxTimeWrapper::PredictWithConfidence(model_ptr.get(), bind_data.horizon,
+				                                                        bind_data.confidence_level);
 			}
+			auto &primary_forecast = AnofoxTimeWrapper::GetPrimaryForecast(*forecast_ptr);
 
-			// Include forecast_timestamp field (empty if disabled for schema consistency)
+			// Calculate forecast timestamps if enabled
 			if (generate_timestamps) {
-				struct_values.push_back(
-				    make_pair("forecast_timestamp", Value::LIST(LogicalType::TIMESTAMP, forecast_timestamps)));
-			} else {
-				vector<Value> empty_timestamps;
-				struct_values.push_back(
-				    make_pair("forecast_timestamp", Value::LIST(LogicalType::TIMESTAMP, empty_timestamps)));
-			}
+				ScopedTimer timer(&time_timestamp_calc);
 
-			struct_values.push_back(make_pair("point_forecast", Value::LIST(LogicalType::DOUBLE, forecasts)));
-			// Use dynamic column names based on confidence level
-			struct_values.push_back(make_pair(bind_data.lower_col_name, Value::LIST(LogicalType::DOUBLE, lowers)));
-			struct_values.push_back(make_pair(bind_data.upper_col_name, Value::LIST(LogicalType::DOUBLE, uppers)));
-			struct_values.push_back(make_pair("model_name", Value(AnofoxTimeWrapper::GetModelName(*model_ptr))));
-
-			// Add in-sample fitted values (empty if not requested)
-			vector<Value> fitted_value_list;
-			if (bind_data.return_insample && !fitted_values.empty()) {
-				for (const auto &val : fitted_values) {
-					fitted_value_list.push_back(Value::DOUBLE(val));
+				// Calculate mean interval (O(1) - assumes regular, sorted data)
+				if (timestamps.size() >= 2) {
+					auto total_time =
+					    std::chrono::duration_cast<std::chrono::microseconds>(timestamps.back() - timestamps.front())
+					        .count();
+					interval_micros = total_time / (timestamps.size() - 1);
 				}
+
+				// Last timestamp from training data
+				last_timestamp_micros = time_value_pairs.back().first;
 			}
-			struct_values.push_back(make_pair("insample_fitted", Value::LIST(LogicalType::DOUBLE, fitted_value_list)));
 
-			// Add date column name for macro to use
-			struct_values.push_back(make_pair("date_col_name", Value(bind_data.date_col_name)));
+			// STAGE 6: BUILD RESULT
+			{
+				ScopedTimer timer(&state.data->time_result);
 
-			auto result_value = Value::STRUCT(std::move(struct_values));
-			finalize_data.result.SetValue(finalize_data.result_idx, result_value);
+				child_list_t<Value> struct_values;
+				vector<Value> steps, forecasts, lowers, uppers, forecast_timestamps;
+
+				// Check if model provides prediction intervals
+				bool has_intervals =
+				    AnofoxTimeWrapper::HasLowerBound(*forecast_ptr) && AnofoxTimeWrapper::HasUpperBound(*forecast_ptr);
+
+				if (has_intervals) {
+					auto &lower_bound = AnofoxTimeWrapper::GetLowerBound(*forecast_ptr);
+					auto &upper_bound = AnofoxTimeWrapper::GetUpperBound(*forecast_ptr);
+
+					for (int32_t h = 0; h < bind_data.horizon; h++) {
+						steps.push_back(Value::INTEGER(h + 1));
+						forecasts.push_back(Value::DOUBLE(primary_forecast[h]));
+						lowers.push_back(Value::DOUBLE(lower_bound[h]));
+						uppers.push_back(Value::DOUBLE(upper_bound[h]));
+
+						if (generate_timestamps) {
+							int64_t forecast_ts_micros = last_timestamp_micros + interval_micros * (h + 1);
+							forecast_timestamps.push_back(Value::TIMESTAMP(timestamp_t(forecast_ts_micros)));
+						}
+					}
+				} else {
+					for (int32_t h = 0; h < bind_data.horizon; h++) {
+						steps.push_back(Value::INTEGER(h + 1));
+						forecasts.push_back(Value::DOUBLE(primary_forecast[h]));
+						lowers.push_back(Value::DOUBLE(primary_forecast[h] * 0.9));
+						uppers.push_back(Value::DOUBLE(primary_forecast[h] * 1.1));
+
+						if (generate_timestamps) {
+							int64_t forecast_ts_micros = last_timestamp_micros + interval_micros * (h + 1);
+							forecast_timestamps.push_back(Value::TIMESTAMP(timestamp_t(forecast_ts_micros)));
+						}
+					}
+				}
+
+				// Copy 4: Create DuckDB Value::LIST objects
+				state.data->copy_count++;
+				state.data->bytes_copied +=
+				    bind_data.horizon * (sizeof(int32_t) + sizeof(double) * 4 + sizeof(timestamp_t));
+
+				// Conditionally include forecast_step
+				if (bind_data.include_forecast_step) {
+					struct_values.push_back(make_pair("forecast_step", Value::LIST(LogicalType::INTEGER, steps)));
+				}
+
+				// Include forecast_timestamp field (empty if disabled for schema consistency)
+				if (generate_timestamps) {
+					struct_values.push_back(
+					    make_pair("forecast_timestamp", Value::LIST(LogicalType::TIMESTAMP, forecast_timestamps)));
+				} else {
+					vector<Value> empty_timestamps;
+					struct_values.push_back(
+					    make_pair("forecast_timestamp", Value::LIST(LogicalType::TIMESTAMP, empty_timestamps)));
+				}
+
+				struct_values.push_back(make_pair("point_forecast", Value::LIST(LogicalType::DOUBLE, forecasts)));
+				// Use dynamic column names based on confidence level
+				struct_values.push_back(make_pair(bind_data.lower_col_name, Value::LIST(LogicalType::DOUBLE, lowers)));
+				struct_values.push_back(make_pair(bind_data.upper_col_name, Value::LIST(LogicalType::DOUBLE, uppers)));
+				struct_values.push_back(make_pair("model_name", Value(AnofoxTimeWrapper::GetModelName(*model_ptr))));
+
+				// Add in-sample fitted values (empty if not requested)
+				vector<Value> fitted_value_list;
+				if (bind_data.return_insample && !fitted_values.empty()) {
+					for (const auto &val : fitted_values) {
+						fitted_value_list.push_back(Value::DOUBLE(val));
+					}
+				}
+				struct_values.push_back(
+				    make_pair("insample_fitted", Value::LIST(LogicalType::DOUBLE, fitted_value_list)));
+
+				// Add date column name for macro to use
+				struct_values.push_back(make_pair("date_col_name", Value(bind_data.date_col_name)));
+
+				// Add error_message field (NULL for successful forecasts)
+				if (bind_data.include_error_message) {
+					struct_values.push_back(make_pair("error_message", Value()));
+				}
+
+				auto result_value = Value::STRUCT(std::move(struct_values));
+				finalize_data.result.SetValue(finalize_data.result_idx, result_value);
+			}
+		} catch (const std::exception &ex) {
+			// Error occurred during model building, fitting, or prediction
+			// Validation errors should always throw, regardless of safe_mode
+			if (IsValidationError(ex)) {
+				// Always re-throw validation errors (e.g., insufficient data, invalid parameters)
+				throw;
+			}
+
+			// For non-validation errors, check safe_mode
+			if (bind_data.safe_mode) {
+				// Create error result instead of aborting
+				CreateErrorResult(state, finalize_data, ex.what(), bind_data);
+			} else {
+				// Re-throw if safe_mode is disabled
+				throw;
+			}
+		} catch (...) {
+			// Unknown exception
+			if (bind_data.safe_mode) {
+				CreateErrorResult(state, finalize_data, "Unknown error during model fitting or prediction", bind_data);
+			} else {
+				throw;
+			}
 		}
 
 		// Calculate total time
@@ -465,11 +597,14 @@ unique_ptr<FunctionData> TSForecastBind(ClientContext &context, AggregateFunctio
 
 	ModelFactory::ValidateModelParams(model_name, model_params);
 
-	// Extract confidence_level, return_insample, include_forecast_step, and date_col_name parameters
+	// Extract confidence_level, return_insample, include_forecast_step, date_col_name, safe_mode, and
+	// include_error_message parameters
 	double confidence_level = 0.90;
 	bool return_insample = false;
 	bool include_forecast_step = true;
 	string date_col_name = "date";
+	bool safe_mode = true;
+	bool include_error_message = true;
 
 	if (model_params.type().id() == LogicalTypeId::STRUCT) {
 		auto &struct_children = StructValue::GetChildren(model_params);
@@ -500,6 +635,18 @@ unique_ptr<FunctionData> TSForecastBind(ClientContext &context, AggregateFunctio
 				} catch (...) {
 					// Keep default on error
 				}
+			} else if (key == "safe_mode") {
+				try {
+					safe_mode = struct_children[i].GetValue<bool>();
+				} catch (...) {
+					// Keep default on error
+				}
+			} else if (key == "include_error_message") {
+				try {
+					include_error_message = struct_children[i].GetValue<bool>();
+				} catch (...) {
+					// Keep default on error
+				}
 			}
 		}
 	}
@@ -527,13 +674,16 @@ unique_ptr<FunctionData> TSForecastBind(ClientContext &context, AggregateFunctio
 	struct_children.push_back(make_pair("model_name", LogicalType::VARCHAR));
 	struct_children.push_back(make_pair("insample_fitted", LogicalType::LIST(LogicalType::DOUBLE)));
 	struct_children.push_back(make_pair("date_col_name", LogicalType::VARCHAR));
+	if (include_error_message) {
+		struct_children.push_back(make_pair("error_message", LogicalType::VARCHAR));
+	}
 
 	function.return_type = LogicalType::STRUCT(std::move(struct_children));
 
 	// // std::cerr << "[DEBUG] TSForecastBind complete" << std::endl;
 	return make_uniq<ForecastAggregateBindData>(model_name, horizon, model_params, confidence_level, return_insample,
 	                                            include_forecast_step, date_col_name, lower_col_name, upper_col_name,
-	                                            date_type_id);
+	                                            date_type_id, safe_mode, include_error_message);
 }
 
 AggregateFunction CreateTSForecastAggregate() {
