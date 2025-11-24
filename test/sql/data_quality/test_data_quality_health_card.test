@@ -1,0 +1,193 @@
+# name: test/sql/data_quality/test_data_quality_health_card.test
+# description: Test Data Quality Health Card functionality
+# group: [data_quality]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+# Create test data with various quality issues
+statement ok
+CREATE TABLE dq_test_data AS
+SELECT 
+    'series_1' AS series_id,
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    CASE 
+        WHEN i <= 5 THEN 100.0 + i * 2.0
+        WHEN i BETWEEN 6 AND 10 THEN NULL  -- Missing values
+        WHEN i BETWEEN 11 AND 15 THEN 0.0  -- Zeros
+        ELSE 100.0 + i * 2.0
+    END AS value_col
+FROM generate_series(1, 20) t(i)
+UNION ALL
+SELECT 
+    'series_2' AS series_id,
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    50.0 AS value_col  -- Constant series
+FROM generate_series(1, 10) t(i)
+UNION ALL
+SELECT 
+    'series_3' AS series_id,
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    CASE 
+        WHEN i % 2 = 0 THEN 0.0  -- High intermittency
+        ELSE 100.0
+    END AS value_col
+FROM generate_series(1, 20) t(i);
+
+# Test: TS_DATA_QUALITY_HEALTH_CARD - Basic functionality
+statement ok
+CREATE TABLE health_card_result AS
+SELECT * FROM ts_data_quality_health_card(dq_test_data, series_id, date_col, value_col);
+
+# Verify health card returns results
+query I
+SELECT COUNT(*) > 0
+FROM health_card_result;
+----
+true
+
+# Verify all dimensions are present
+query I
+SELECT COUNT(DISTINCT dimension) = 4
+FROM health_card_result;
+----
+true
+
+# Verify dimensions are correct
+query I
+SELECT COUNT(*) = 4
+FROM (
+    SELECT DISTINCT dimension 
+    FROM health_card_result
+    WHERE dimension IN ('Structural', 'Temporal', 'Magnitude', 'Behavioural')
+);
+----
+true
+
+# Verify status values are valid
+query I
+SELECT COUNT(*) = 0
+FROM health_card_result
+WHERE status NOT IN ('Critical', 'Warning', 'OK');
+----
+true
+
+# Test: Verify critical issues are detected (constant series)
+query I
+SELECT COUNT(*) > 0
+FROM health_card_result
+WHERE status = 'Critical' 
+  AND metric = 'static_values'
+  AND unique_id = 'series_2';
+----
+true
+
+# Test: Verify missing values are detected
+query I
+SELECT COUNT(*) > 0
+FROM health_card_result
+WHERE status IN ('Critical', 'Warning')
+  AND metric = 'missing_values'
+  AND unique_id = 'series_1';
+----
+true
+
+# Test: Verify intermittency is detected
+query I
+SELECT COUNT(*) > 0
+FROM health_card_result
+WHERE status = 'Warning'
+  AND metric = 'intermittency'
+  AND unique_id = 'series_3';
+----
+true
+
+# Test: TS_DATA_QUALITY_SUMMARY
+statement ok
+CREATE TABLE summary_result AS
+SELECT * FROM ts_data_quality_summary(dq_test_data, series_id, date_col, value_col);
+
+# Verify summary returns results
+query I
+SELECT COUNT(*) > 0
+FROM summary_result;
+----
+true
+
+# Verify summary has expected columns
+query I
+SELECT COUNT(*) = 7
+FROM (
+    SELECT 
+        dimension, metric, total_series, critical_count, 
+        warning_count, ok_count, critical_pct, warning_pct
+    FROM summary_result
+    LIMIT 1
+);
+----
+true
+
+# Test: TS_GET_CRITICAL_ISSUES
+statement ok
+CREATE TABLE critical_result AS
+SELECT * FROM ts_get_critical_issues(dq_test_data, series_id, date_col, value_col);
+
+# Verify only critical issues are returned
+query I
+SELECT COUNT(*) = 0
+FROM critical_result
+WHERE status != 'Critical';
+----
+true
+
+# Test: TS_GET_WARNINGS
+statement ok
+CREATE TABLE warnings_result AS
+SELECT * FROM ts_get_warnings(dq_test_data, series_id, date_col, value_col);
+
+# Verify only warnings are returned
+query I
+SELECT COUNT(*) = 0
+FROM warnings_result
+WHERE status != 'Warning';
+----
+true
+
+# Test with duplicate keys
+statement ok
+CREATE TABLE duplicate_test AS
+SELECT 
+    'series_dup' AS series_id,
+    '2024-01-01'::TIMESTAMP AS date_col,
+    100.0 AS value_col
+UNION ALL
+SELECT 
+    'series_dup' AS series_id,
+    '2024-01-01'::TIMESTAMP AS date_col,
+    200.0 AS value_col;  -- Duplicate key
+
+# Verify duplicate detection
+query I
+SELECT COUNT(*) > 0
+FROM ts_data_quality_health_card(duplicate_test, series_id, date_col, value_col)
+WHERE metric = 'key_uniqueness' 
+  AND status = 'Critical';
+----
+true
+
+# Cleanup
+statement ok
+DROP TABLE dq_test_data;
+statement ok
+DROP TABLE health_card_result;
+statement ok
+DROP TABLE summary_result;
+statement ok
+DROP TABLE critical_result;
+statement ok
+DROP TABLE warnings_result;
+statement ok
+DROP TABLE duplicate_test;
+

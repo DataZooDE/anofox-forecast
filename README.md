@@ -414,6 +414,34 @@ TS_DETECT_SEASONALITY_ALL(table, group_col, date_col, value_col)
 -- Returns: detected seasonal periods for all series
 ```
 
+### Data Quality Health Card (4 macros)
+
+Comprehensive data quality assessment with actionable recommendations:
+
+```sql
+TS_DATA_QUALITY_HEALTH_CARD(table, unique_id_col, date_col, value_col)
+-- Returns: comprehensive health card with metrics, status (Critical/Warning/OK), and recommendations
+-- Dimensions: Structural, Temporal, Magnitude, Behavioural
+
+TS_DATA_QUALITY_SUMMARY(table, unique_id_col, date_col, value_col)
+-- Returns: aggregated summary by dimension and metric
+
+TS_GET_CRITICAL_ISSUES(table, unique_id_col, date_col, value_col)
+-- Returns: only Critical status items (blocking issues)
+
+TS_GET_WARNINGS(table, unique_id_col, date_col, value_col)
+-- Returns: only Warning status items (potential issues)
+```
+
+**Example Output**:
+```
+| unique_id | dimension    | metric           | status   | value                    | recommendation                                    |
+|-----------|--------------|------------------|----------|--------------------------|---------------------------------------------------|
+| Store_A   | Temporal     | timestamp_gaps   | Critical | 15.2% gaps (23 missing) | Imputation required. 1. Forward Fill...           |
+| Store_A   | Magnitude    | missing_values   | Warning  | 8.5% missing (13 NULLs) | Same as Timestamp Gaps (Impute or Drop).          |
+| Store_B   | Temporal     | series_length    | Critical | 5 observations           | Cold Start protocol. Use simple moving averages...|
+```
+
 ### Data Preparation (12 macros)
 
 SQL macros for data cleaning and transformation. Date type support varies by function.

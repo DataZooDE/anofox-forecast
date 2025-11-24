@@ -17,6 +17,7 @@
 #include "changepoint_function.hpp"
 #include "eda_macros.hpp"
 #include "data_prep_macros.hpp"
+#include "data_quality_macros.hpp"
 #include "ts_features_function.hpp"
 #include "duckdb/catalog/default/default_functions.hpp"
 #include "duckdb/catalog/default/default_table_functions.hpp"
@@ -191,6 +192,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// Register Data Preparation macros
 	RegisterDataPrepMacros(loader);
 	// std::cerr << "[DEBUG] Data Preparation macros registered" << std::endl;
+
+	// Register Data Quality macros
+	RegisterDataQualityMacros(loader);
+	// std::cerr << "[DEBUG] Data Quality macros registered" << std::endl;
 
 	// std::cerr << "[DEBUG] All functions registered successfully" << std::endl;
 }
