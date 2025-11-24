@@ -13,6 +13,29 @@
 
 namespace duckdb {
 
+// Helper function to sanitize error messages
+static string SanitizeErrorMessage(const string &error_msg) {
+	string sanitized = error_msg;
+	// Remove common stack trace patterns
+	size_t pos = sanitized.find(" at ");
+	if (pos != string::npos) {
+		sanitized = sanitized.substr(0, pos);
+	}
+	pos = sanitized.find(" in ");
+	if (pos != string::npos) {
+		sanitized = sanitized.substr(0, pos);
+	}
+	// Limit length to 500 characters
+	if (sanitized.length() > 500) {
+		sanitized = sanitized.substr(0, 497) + "...";
+	}
+	// Trim whitespace
+	while (!sanitized.empty() && (sanitized.back() == ' ' || sanitized.back() == '\n' || sanitized.back() == '\r')) {
+		sanitized.pop_back();
+	}
+	return sanitized.empty() ? "Model fitting or prediction failed" : sanitized;
+}
+
 // Destructor
 ForecastLocalState::~ForecastLocalState() {
 	// std::cerr << "[DEBUG] ForecastLocalState destructor called" << std::endl;
@@ -74,6 +97,29 @@ unique_ptr<FunctionData> ForecastBind(ClientContext &context, TableFunctionBindI
 	// Validate model parameters
 	ModelFactory::ValidateModelParams(model_name, model_params);
 
+	// Extract safe_mode and include_error_message from model_params
+	bool safe_mode = true;
+	bool include_error_message = true;
+	if (model_params.type().id() == LogicalTypeId::STRUCT) {
+		auto &struct_children = StructValue::GetChildren(model_params);
+		for (size_t i = 0; i < struct_children.size(); i++) {
+			auto &key = StructType::GetChildName(model_params.type(), i);
+			if (key == "safe_mode") {
+				try {
+					safe_mode = struct_children[i].GetValue<bool>();
+				} catch (...) {
+					// Keep default on error
+				}
+			} else if (key == "include_error_message") {
+				try {
+					include_error_message = struct_children[i].GetValue<bool>();
+				} catch (...) {
+					// Keep default on error
+				}
+			}
+		}
+	}
+
 	// Set output schema
 	return_types = {
 	    LogicalType::INTEGER, // forecast_step
@@ -85,12 +131,18 @@ unique_ptr<FunctionData> ForecastBind(ClientContext &context, TableFunctionBindI
 	};
 
 	names = {"forecast_step", "point_forecast", "lower_95", "upper_95", "model_name", "fit_time_ms"};
+	if (include_error_message) {
+		return_types.push_back(LogicalType::VARCHAR); // error_message
+		names.push_back("error_message");
+	}
 
 	// Store configuration
 	auto bind_data = make_uniq<ForecastBindData>();
 	bind_data->model_name = model_name;
 	bind_data->horizon = horizon;
 	bind_data->model_params = model_params;
+	bind_data->safe_mode = safe_mode;
+	bind_data->include_error_message = include_error_message;
 
 	// std::cerr << "[DEBUG] ForecastBind completed successfully" << std::endl;
 	return std::move(bind_data);
@@ -194,54 +246,81 @@ OperatorFinalizeResultType ForecastInOutFinal(ExecutionContext &context, TableFu
 			return OperatorFinalizeResultType::FINISHED;
 		}
 
-		// DEBUG: Log input data
-		std::cerr << "[SCALAR-DEBUG] Building TimeSeries with " << state.values.size() << " points" << std::endl;
-		std::cerr << "[SCALAR-DEBUG] Model: " << bind_data.model_name << ", Horizon: " << bind_data.horizon
-		          << std::endl;
-		if (state.values.size() > 0) {
-			std::cerr << "[SCALAR-DEBUG] First 5 values: ";
-			for (size_t i = 0; i < std::min(size_t(5), state.values.size()); i++) {
-				std::cerr << state.values[i] << " ";
+		// Wrap model building, fitting, and prediction in error handling
+		try {
+			// DEBUG: Log input data
+			std::cerr << "[SCALAR-DEBUG] Building TimeSeries with " << state.values.size() << " points" << std::endl;
+			std::cerr << "[SCALAR-DEBUG] Model: " << bind_data.model_name << ", Horizon: " << bind_data.horizon
+			          << std::endl;
+			if (state.values.size() > 0) {
+				std::cerr << "[SCALAR-DEBUG] First 5 values: ";
+				for (size_t i = 0; i < std::min(size_t(5), state.values.size()); i++) {
+					std::cerr << state.values[i] << " ";
+				}
+				std::cerr << std::endl;
+				std::cerr << "[SCALAR-DEBUG] Last 5 values: ";
+				for (size_t i = std::max(size_t(0), state.values.size() - 5); i < state.values.size(); i++) {
+					std::cerr << state.values[i] << " ";
+				}
+				std::cerr << std::endl;
 			}
-			std::cerr << std::endl;
-			std::cerr << "[SCALAR-DEBUG] Last 5 values: ";
-			for (size_t i = std::max(size_t(0), state.values.size() - 5); i < state.values.size(); i++) {
-				std::cerr << state.values[i] << " ";
+
+			// Build time series
+			auto ts_ptr = TimeSeriesBuilder::BuildTimeSeries(state.timestamps, state.values);
+
+			// Create and fit model
+			auto model_ptr = ModelFactory::Create(bind_data.model_name, bind_data.model_params);
+			state.model = model_ptr.release();
+
+			state.fit_start_time = std::chrono::high_resolution_clock::now();
+			AnofoxTimeWrapper::FitModel(state.model, *ts_ptr);
+
+			// Generate forecast
+			auto forecast_ptr = AnofoxTimeWrapper::Predict(state.model, bind_data.horizon);
+			state.forecast = forecast_ptr.release();
+
+			state.forecast_generated = true;
+			state.output_offset = 0;
+
+			// DEBUG: Log forecast output
+			auto &forecast_values = AnofoxTimeWrapper::GetPrimaryForecast(*state.forecast);
+			std::cerr << "[SCALAR-DEBUG] Forecast generated: " << forecast_values.size() << " points" << std::endl;
+			if (forecast_values.size() > 0) {
+				std::cerr << "[SCALAR-DEBUG] First 5 forecasts: ";
+				for (size_t i = 0; i < std::min(size_t(5), forecast_values.size()); i++) {
+					std::cerr << forecast_values[i] << " ";
+				}
+				std::cerr << std::endl;
+				std::cerr << "[SCALAR-DEBUG] Last 5 forecasts: ";
+				for (size_t i = std::max(size_t(0), forecast_values.size() - 5); i < forecast_values.size(); i++) {
+					std::cerr << forecast_values[i] << " ";
+				}
+				std::cerr << std::endl;
 			}
-			std::cerr << std::endl;
-		}
-
-		// Build time series
-		auto ts_ptr = TimeSeriesBuilder::BuildTimeSeries(state.timestamps, state.values);
-
-		// Create and fit model
-		auto model_ptr = ModelFactory::Create(bind_data.model_name, bind_data.model_params);
-		state.model = model_ptr.release();
-
-		state.fit_start_time = std::chrono::high_resolution_clock::now();
-		AnofoxTimeWrapper::FitModel(state.model, *ts_ptr);
-
-		// Generate forecast
-		auto forecast_ptr = AnofoxTimeWrapper::Predict(state.model, bind_data.horizon);
-		state.forecast = forecast_ptr.release();
-
-		state.forecast_generated = true;
-		state.output_offset = 0;
-
-		// DEBUG: Log forecast output
-		auto &forecast_values = AnofoxTimeWrapper::GetPrimaryForecast(*state.forecast);
-		std::cerr << "[SCALAR-DEBUG] Forecast generated: " << forecast_values.size() << " points" << std::endl;
-		if (forecast_values.size() > 0) {
-			std::cerr << "[SCALAR-DEBUG] First 5 forecasts: ";
-			for (size_t i = 0; i < std::min(size_t(5), forecast_values.size()); i++) {
-				std::cerr << forecast_values[i] << " ";
+		} catch (const std::exception &ex) {
+			// Error occurred during model building, fitting, or prediction
+			if (bind_data.safe_mode) {
+				// Mark as error state - we'll output error rows
+				state.forecast_generated = true;
+				state.output_offset = 0;
+				state.model = nullptr;
+				state.forecast = nullptr;
+				state.error_message = SanitizeErrorMessage(ex.what());
+			} else {
+				// Re-throw if safe_mode is disabled
+				throw;
 			}
-			std::cerr << std::endl;
-			std::cerr << "[SCALAR-DEBUG] Last 5 forecasts: ";
-			for (size_t i = std::max(size_t(0), forecast_values.size() - 5); i < forecast_values.size(); i++) {
-				std::cerr << forecast_values[i] << " ";
+		} catch (...) {
+			// Unknown exception
+			if (bind_data.safe_mode) {
+				state.forecast_generated = true;
+				state.output_offset = 0;
+				state.model = nullptr;
+				state.forecast = nullptr;
+				state.error_message = "Unknown error during model fitting or prediction";
+			} else {
+				throw;
 			}
-			std::cerr << std::endl;
 		}
 	}
 
@@ -256,32 +335,71 @@ OperatorFinalizeResultType ForecastInOutFinal(ExecutionContext &context, TableFu
 
 	// std::cerr << "[DEBUG] Outputting " << chunk_size << " rows (offset=" << state.output_offset << ")" << std::endl;
 
-	auto &primary_forecast = AnofoxTimeWrapper::GetPrimaryForecast(*state.forecast);
+	// Check if we're in error state (model/forecast are null and error_message is set)
+	bool is_error = !state.error_message.empty();
 
 	idx_t output_count = 0;
-	for (idx_t i = 0; i < chunk_size; i++) {
-		idx_t forecast_idx = state.output_offset + i;
+	if (is_error) {
+		// Output error rows
+		for (idx_t i = 0; i < chunk_size; i++) {
+			idx_t forecast_idx = state.output_offset + i;
 
-		// forecast_step (1-indexed)
-		output.data[0].SetValue(output_count, Value::INTEGER(forecast_idx + 1));
+			// forecast_step (1-indexed)
+			output.data[0].SetValue(output_count, Value::INTEGER(forecast_idx + 1));
 
-		// point_forecast
-		double point_forecast = primary_forecast[forecast_idx];
-		output.data[1].SetValue(output_count, Value::DOUBLE(point_forecast));
+			// point_forecast (NULL)
+			output.data[1].SetValue(output_count, Value());
 
-		// lower_95 and upper_95
-		output.data[2].SetValue(output_count, Value::DOUBLE(point_forecast * 0.9));
-		output.data[3].SetValue(output_count, Value::DOUBLE(point_forecast * 1.1));
+			// lower_95 and upper_95 (NULL)
+			output.data[2].SetValue(output_count, Value());
+			output.data[3].SetValue(output_count, Value());
 
-		// model_name
-		output.data[4].SetValue(output_count, Value(AnofoxTimeWrapper::GetModelName(*state.model)));
+			// model_name = 'ERROR'
+			output.data[4].SetValue(output_count, Value("ERROR"));
 
-		// fit_time_ms
-		auto end_time = std::chrono::high_resolution_clock::now();
-		auto fit_time = std::chrono::duration<double, std::milli>(end_time - state.fit_start_time).count();
-		output.data[5].SetValue(output_count, Value::DOUBLE(fit_time));
+			// fit_time_ms (NULL)
+			output.data[5].SetValue(output_count, Value());
 
-		output_count++;
+			// error_message (if enabled)
+			if (bind_data.include_error_message && output.ColumnCount() > 6) {
+				output.data[6].SetValue(output_count, Value(state.error_message));
+			}
+
+			output_count++;
+		}
+	} else {
+		// Output normal forecast rows
+		auto &primary_forecast = AnofoxTimeWrapper::GetPrimaryForecast(*state.forecast);
+
+		for (idx_t i = 0; i < chunk_size; i++) {
+			idx_t forecast_idx = state.output_offset + i;
+
+			// forecast_step (1-indexed)
+			output.data[0].SetValue(output_count, Value::INTEGER(forecast_idx + 1));
+
+			// point_forecast
+			double point_forecast = primary_forecast[forecast_idx];
+			output.data[1].SetValue(output_count, Value::DOUBLE(point_forecast));
+
+			// lower_95 and upper_95
+			output.data[2].SetValue(output_count, Value::DOUBLE(point_forecast * 0.9));
+			output.data[3].SetValue(output_count, Value::DOUBLE(point_forecast * 1.1));
+
+			// model_name
+			output.data[4].SetValue(output_count, Value(AnofoxTimeWrapper::GetModelName(*state.model)));
+
+			// fit_time_ms
+			auto end_time = std::chrono::high_resolution_clock::now();
+			auto fit_time = std::chrono::duration<double, std::milli>(end_time - state.fit_start_time).count();
+			output.data[5].SetValue(output_count, Value::DOUBLE(fit_time));
+
+			// error_message (NULL for successful forecasts)
+			if (bind_data.include_error_message && output.ColumnCount() > 6) {
+				output.data[6].SetValue(output_count, Value());
+			}
+
+			output_count++;
+		}
 	}
 
 	output.SetCardinality(output_count);
