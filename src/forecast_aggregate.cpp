@@ -10,6 +10,9 @@
 #include <iostream>
 #include <algorithm>
 #include <chrono>
+#include <cctype>
+#include <typeinfo>
+#include <stdexcept>
 
 // Performance profiling utility - RAII timer
 class ScopedTimer {
@@ -54,6 +57,38 @@ static string SanitizeErrorMessage(const string &error_msg) {
 		sanitized.pop_back();
 	}
 	return sanitized.empty() ? "Model fitting or prediction failed" : sanitized;
+}
+
+// Helper function to detect validation errors that should always throw
+// Validation errors are typically std::invalid_argument with messages about
+// insufficient data, invalid parameters, or other input validation issues
+static bool IsValidationError(const std::exception &ex) {
+	// Check error message for validation-related keywords
+	string msg = ex.what();
+	// Convert to lowercase for case-insensitive matching
+	string lower_msg = msg;
+	std::transform(lower_msg.begin(), lower_msg.end(), lower_msg.begin(), ::tolower);
+
+	// Keywords that indicate validation errors (input validation, insufficient data, etc.)
+	// These should always throw, regardless of safe_mode
+	if (lower_msg.find("requires at least") != string::npos || lower_msg.find("cannot fit") != string::npos ||
+	    lower_msg.find("must be") != string::npos || lower_msg.find("must have") != string::npos ||
+	    lower_msg.find("invalid") != string::npos || lower_msg.find("empty") != string::npos ||
+	    lower_msg.find("insufficient") != string::npos || lower_msg.find("not enough") != string::npos) {
+		return true;
+	}
+
+	// Also check if it's specifically an std::invalid_argument by type
+	// Note: We use typeid to check the exception type
+	try {
+		if (typeid(ex) == typeid(std::invalid_argument)) {
+			return true;
+		}
+	} catch (...) {
+		// If typeid fails, fall through
+	}
+
+	return false;
 }
 
 // Helper function to create error result
@@ -339,6 +374,13 @@ struct ForecastAggregateOperation {
 			}
 		} catch (const std::exception &ex) {
 			// Error occurred during model building, fitting, or prediction
+			// Validation errors should always throw, regardless of safe_mode
+			if (IsValidationError(ex)) {
+				// Always re-throw validation errors (e.g., insufficient data, invalid parameters)
+				throw;
+			}
+
+			// For non-validation errors, check safe_mode
 			if (bind_data.safe_mode) {
 				// Create error result instead of aborting
 				CreateErrorResult(state, finalize_data, ex.what(), bind_data);
