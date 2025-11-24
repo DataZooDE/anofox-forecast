@@ -19,24 +19,201 @@ static const DefaultTableMacro data_quality_macros[] = {
                 value_col AS __value
             FROM QUERY_TABLE(table_name)
         ),
+        -- Helper CTEs for structural checks
+        key_counts AS (
+            SELECT 
+                __uid,
+                __date,
+                COUNT(*) AS key_count
+            FROM base_data
+            GROUP BY __uid, __date
+        ),
+        duplicate_stats AS (
+            SELECT 
+                __uid,
+                SUM(CASE WHEN key_count > 1 THEN key_count - 1 ELSE 0 END) AS n_duplicates
+            FROM key_counts
+            GROUP BY __uid
+        ),
+        -- Helper CTEs for temporal checks
+        series_stats AS (
+            SELECT 
+                __uid,
+                COUNT(*) AS length,
+                MIN(__date) AS start_date,
+                MAX(__date) AS end_date
+            FROM base_data
+            GROUP BY __uid
+        ),
+        series_ranges AS (
+            SELECT 
+                __uid,
+                MIN(__date) AS start_date,
+                MAX(__date) AS end_date,
+                COUNT(*) AS actual_count
+            FROM base_data
+            GROUP BY __uid
+        ),
+        expected_counts AS (
+            SELECT 
+                __uid,
+                start_date,
+                end_date,
+                actual_count,
+                CASE 
+                    WHEN end_date >= start_date 
+                    THEN CAST(DATEDIFF('day', start_date, end_date) + 1 AS INTEGER)
+                    ELSE 1
+                END AS expected_count
+            FROM series_ranges
+        ),
+        gap_stats AS (
+            SELECT 
+                __uid,
+                actual_count,
+                expected_count,
+                expected_count - actual_count AS n_gaps,
+                CASE 
+                    WHEN expected_count > 0 
+                    THEN 100.0 * (expected_count - actual_count) / expected_count
+                    ELSE 0.0
+                END AS gap_pct
+            FROM expected_counts
+        ),
+        series_bounds AS (
+            SELECT 
+                __uid,
+                MIN(__date) AS start_date,
+                MAX(__date) AS end_date
+            FROM base_data
+            GROUP BY __uid
+        ),
+        alignment_stats AS (
+            SELECT 
+                COUNT(DISTINCT start_date) AS n_start_dates,
+                COUNT(DISTINCT end_date) AS n_end_dates,
+                COUNT(DISTINCT __uid) AS n_series
+            FROM series_bounds
+        ),
+        frequency_stats AS (
+            SELECT 
+                __uid,
+                COUNT(*) AS n_points,
+                MIN(__date) AS start_date,
+                MAX(__date) AS end_date,
+                CASE 
+                    WHEN MAX(__date) > MIN(__date)
+                    THEN CAST(DATEDIFF('day', MIN(__date), MAX(__date)) AS DOUBLE) / GREATEST(COUNT(*) - 1, 1)
+                    ELSE NULL
+                END AS avg_interval_days
+            FROM base_data
+            GROUP BY __uid
+        ),
+        frequency_classification AS (
+            SELECT 
+                __uid,
+                avg_interval_days,
+                CASE 
+                    WHEN avg_interval_days IS NULL THEN 'Unknown'
+                    WHEN avg_interval_days < 0.5 THEN 'Sub-hourly'
+                    WHEN avg_interval_days < 1.0 THEN 'Hourly'
+                    WHEN avg_interval_days < 7.0 THEN 'Daily'
+                    WHEN avg_interval_days < 30.0 THEN 'Weekly'
+                    WHEN avg_interval_days < 90.0 THEN 'Monthly'
+                    ELSE 'Quarterly+'
+                END AS inferred_frequency
+            FROM frequency_stats
+        ),
+        frequency_diversity AS (
+            SELECT 
+                COUNT(DISTINCT inferred_frequency) AS n_frequencies,
+                COUNT(DISTINCT __uid) AS n_series
+            FROM frequency_classification
+            WHERE inferred_frequency != 'Unknown'
+        ),
+        -- Helper CTEs for magnitude checks
+        missing_stats AS (
+            SELECT 
+                __uid,
+                COUNT(*) AS total_count,
+                COUNT(CASE WHEN __value IS NULL THEN 1 END) AS null_count,
+                CASE 
+                    WHEN COUNT(*) > 0 
+                    THEN 100.0 * COUNT(CASE WHEN __value IS NULL THEN 1 END) / COUNT(*)
+                    ELSE 0.0
+                END AS null_pct
+            FROM base_data
+            GROUP BY __uid
+        ),
+        negative_stats AS (
+            SELECT 
+                __uid,
+                COUNT(CASE WHEN __value < 0 THEN 1 END) AS negative_count,
+                COUNT(*) AS total_count
+            FROM base_data
+            WHERE __value IS NOT NULL
+            GROUP BY __uid
+        ),
+        variance_stats AS (
+            SELECT 
+                __uid,
+                COUNT(*) AS count,
+                COUNT(DISTINCT __value) AS distinct_count,
+                STDDEV(__value) AS stddev
+            FROM base_data
+            WHERE __value IS NOT NULL
+            GROUP BY __uid
+        ),
+        -- Helper CTEs for behavioural checks
+        zero_stats AS (
+            SELECT 
+                __uid,
+                COUNT(*) AS total_count,
+                COUNT(CASE WHEN __value = 0 OR __value IS NULL THEN 1 END) AS zero_count,
+                CASE 
+                    WHEN COUNT(*) > 0 
+                    THEN 100.0 * COUNT(CASE WHEN __value = 0 OR __value IS NULL THEN 1 END) / COUNT(*)
+                    ELSE 0.0
+                END AS zero_pct
+            FROM base_data
+            GROUP BY __uid
+        ),
+        series_agg AS (
+            SELECT 
+                __uid,
+                LIST(__value ORDER BY __date) AS values
+            FROM base_data
+            WHERE __value IS NOT NULL
+            GROUP BY __uid
+            HAVING COUNT(*) >= 7
+        ),
+        seasonality_results AS (
+            SELECT 
+                __uid,
+                values,
+                TS_DETECT_SEASONALITY(values) AS detected_periods
+            FROM series_agg
+        ),
+        ordered_data AS (
+            SELECT 
+                __uid,
+                __date,
+                __value,
+                ROW_NUMBER() OVER (PARTITION BY __uid ORDER BY __date) AS row_num
+            FROM base_data
+            WHERE __value IS NOT NULL
+        ),
+        trend_stats AS (
+            SELECT 
+                __uid,
+                COUNT(*) AS n_points,
+                CORR(row_num, __value) AS trend_correlation
+            FROM ordered_data
+            GROUP BY __uid
+            HAVING COUNT(*) >= 3
+        ),
         -- Dimension 1: Structural Integrity
         structural_checks AS (
-            -- Key Uniqueness: Check for duplicate (unique_id, date) pairs
-            WITH key_counts AS (
-                SELECT 
-                    __uid,
-                    __date,
-                    COUNT(*) AS key_count
-                FROM base_data
-                GROUP BY __uid, __date
-            ),
-            duplicate_stats AS (
-                SELECT 
-                    __uid,
-                    SUM(CASE WHEN key_count > 1 THEN key_count - 1 ELSE 0 END) AS n_duplicates
-                FROM key_counts
-                GROUP BY __uid
-            )
             SELECT 
                 __uid AS unique_id,
                 'Structural' AS dimension,
@@ -59,7 +236,6 @@ static const DefaultTableMacro data_quality_macros[] = {
             
             UNION ALL
             
-            -- ID Cardinality: Count distinct unique_id values (aggregated check)
             SELECT 
                 'ALL_SERIES' AS unique_id,
                 'Structural' AS dimension,
@@ -76,26 +252,15 @@ static const DefaultTableMacro data_quality_macros[] = {
                 END AS recommendation
             FROM base_data
         ),
-        
         -- Dimension 2: Temporal Integrity
         temporal_checks AS (
-            -- Series Length: Count data points per unique_id
-            WITH series_stats AS (
-                SELECT 
-                    __uid,
-                    COUNT(*) AS length,
-                    MIN(__date) AS start_date,
-                    MAX(__date) AS end_date
-                FROM base_data
-                GROUP BY __uid
-            )
             SELECT 
                 __uid AS unique_id,
                 'Temporal' AS dimension,
                 'series_length' AS metric,
                 CASE 
-                    WHEN length < 14 THEN 'Critical'  -- Less than 2 weeks (assuming daily)
-                    WHEN length < 7 THEN 'Warning'   -- Less than 1 week
+                    WHEN length < 14 THEN 'Critical'
+                    WHEN length < 7 THEN 'Warning'
                     ELSE 'OK'
                 END AS status,
                 length || ' observations' AS value,
@@ -110,42 +275,6 @@ static const DefaultTableMacro data_quality_macros[] = {
             
             UNION ALL
             
-            -- Timestamp Gaps: Check for missing dates within start/end range
-            WITH series_ranges AS (
-                SELECT 
-                    __uid,
-                    MIN(__date) AS start_date,
-                    MAX(__date) AS end_date,
-                    COUNT(*) AS actual_count
-                FROM base_data
-                GROUP BY __uid
-            ),
-            expected_counts AS (
-                SELECT 
-                    __uid,
-                    start_date,
-                    end_date,
-                    actual_count,
-                    CASE 
-                        WHEN end_date >= start_date 
-                        THEN CAST(DATEDIFF('day', start_date, end_date) + 1 AS INTEGER)
-                        ELSE 1
-                    END AS expected_count
-                FROM series_ranges
-            ),
-            gap_stats AS (
-                SELECT 
-                    __uid,
-                    actual_count,
-                    expected_count,
-                    expected_count - actual_count AS n_gaps,
-                    CASE 
-                        WHEN expected_count > 0 
-                        THEN 100.0 * (expected_count - actual_count) / expected_count
-                        ELSE 0.0
-                    END AS gap_pct
-                FROM expected_counts
-            )
             SELECT 
                 __uid AS unique_id,
                 'Temporal' AS dimension,
@@ -165,22 +294,6 @@ static const DefaultTableMacro data_quality_macros[] = {
             
             UNION ALL
             
-            -- Series Start/End Alignment: Check if all series share same start/end dates
-            WITH series_bounds AS (
-                SELECT 
-                    __uid,
-                    MIN(__date) AS start_date,
-                    MAX(__date) AS end_date
-                FROM base_data
-                GROUP BY __uid
-            ),
-            alignment_stats AS (
-                SELECT 
-                    COUNT(DISTINCT start_date) AS n_start_dates,
-                    COUNT(DISTINCT end_date) AS n_end_dates,
-                    COUNT(DISTINCT __uid) AS n_series
-                FROM series_bounds
-            )
             SELECT 
                 'ALL_SERIES' AS unique_id,
                 'Temporal' AS dimension,
@@ -203,43 +316,6 @@ static const DefaultTableMacro data_quality_macros[] = {
             
             UNION ALL
             
-            -- Frequency Inference: Determine dominant frequency per series
-            WITH frequency_stats AS (
-                SELECT 
-                    __uid,
-                    COUNT(*) AS n_points,
-                    MIN(__date) AS start_date,
-                    MAX(__date) AS end_date,
-                    CASE 
-                        WHEN MAX(__date) > MIN(__date)
-                        THEN CAST(DATEDIFF('day', MIN(__date), MAX(__date)) AS DOUBLE) / GREATEST(COUNT(*) - 1, 1)
-                        ELSE NULL
-                    END AS avg_interval_days
-                FROM base_data
-                GROUP BY __uid
-            ),
-            frequency_classification AS (
-                SELECT 
-                    __uid,
-                    avg_interval_days,
-                    CASE 
-                        WHEN avg_interval_days IS NULL THEN 'Unknown'
-                        WHEN avg_interval_days < 0.5 THEN 'Sub-hourly'
-                        WHEN avg_interval_days < 1.0 THEN 'Hourly'
-                        WHEN avg_interval_days < 7.0 THEN 'Daily'
-                        WHEN avg_interval_days < 30.0 THEN 'Weekly'
-                        WHEN avg_interval_days < 90.0 THEN 'Monthly'
-                        ELSE 'Quarterly+'
-                    END AS inferred_frequency
-                FROM frequency_stats
-            ),
-            frequency_diversity AS (
-                SELECT 
-                    COUNT(DISTINCT inferred_frequency) AS n_frequencies,
-                    COUNT(DISTINCT __uid) AS n_series
-                FROM frequency_classification
-                WHERE inferred_frequency != 'Unknown'
-            )
             SELECT 
                 'ALL_SERIES' AS unique_id,
                 'Temporal' AS dimension,
@@ -260,23 +336,8 @@ static const DefaultTableMacro data_quality_macros[] = {
                 END AS recommendation
             FROM frequency_diversity
         ),
-        
         -- Dimension 3: Magnitude & Value Validity
         magnitude_checks AS (
-            -- Missing Values (NaN): Count NULL values in value_col
-            WITH missing_stats AS (
-                SELECT 
-                    __uid,
-                    COUNT(*) AS total_count,
-                    COUNT(CASE WHEN __value IS NULL THEN 1 END) AS null_count,
-                    CASE 
-                        WHEN COUNT(*) > 0 
-                        THEN 100.0 * COUNT(CASE WHEN __value IS NULL THEN 1 END) / COUNT(*)
-                        ELSE 0.0
-                    END AS null_pct
-                FROM base_data
-                GROUP BY __uid
-            )
             SELECT 
                 __uid AS unique_id,
                 'Magnitude' AS dimension,
@@ -296,16 +357,6 @@ static const DefaultTableMacro data_quality_macros[] = {
             
             UNION ALL
             
-            -- Value Bounds: Check for negative values
-            WITH negative_stats AS (
-                SELECT 
-                    __uid,
-                    COUNT(CASE WHEN __value < 0 THEN 1 END) AS negative_count,
-                    COUNT(*) AS total_count
-                FROM base_data
-                WHERE __value IS NOT NULL
-                GROUP BY __uid
-            )
             SELECT 
                 __uid AS unique_id,
                 'Magnitude' AS dimension,
@@ -328,17 +379,6 @@ static const DefaultTableMacro data_quality_macros[] = {
             
             UNION ALL
             
-            -- Static Values: Check if variance == 0 (constant series)
-            WITH variance_stats AS (
-                SELECT 
-                    __uid,
-                    COUNT(*) AS count,
-                    COUNT(DISTINCT __value) AS distinct_count,
-                    STDDEV(__value) AS stddev
-                FROM base_data
-                WHERE __value IS NOT NULL
-                GROUP BY __uid
-            )
             SELECT 
                 __uid AS unique_id,
                 'Magnitude' AS dimension,
@@ -359,23 +399,8 @@ static const DefaultTableMacro data_quality_macros[] = {
                 END AS recommendation
             FROM variance_stats
         ),
-        
         -- Dimension 4: Behavioural/Statistical (Advanced)
         behavioural_checks AS (
-            -- Intermittency: Count zero values vs. non-zero values
-            WITH zero_stats AS (
-                SELECT 
-                    __uid,
-                    COUNT(*) AS total_count,
-                    COUNT(CASE WHEN __value = 0 OR __value IS NULL THEN 1 END) AS zero_count,
-                    CASE 
-                        WHEN COUNT(*) > 0 
-                        THEN 100.0 * COUNT(CASE WHEN __value = 0 OR __value IS NULL THEN 1 END) / COUNT(*)
-                        ELSE 0.0
-                    END AS zero_pct
-                FROM base_data
-                GROUP BY __uid
-            )
             SELECT 
                 __uid AS unique_id,
                 'Behavioural' AS dimension,
@@ -394,23 +419,6 @@ static const DefaultTableMacro data_quality_macros[] = {
             
             UNION ALL
             
-            -- Seasonality Check: Use existing TS_DETECT_SEASONALITY function
-            WITH series_agg AS (
-                SELECT 
-                    __uid,
-                    LIST(__value ORDER BY __date) AS values
-                FROM base_data
-                WHERE __value IS NOT NULL
-                GROUP BY __uid
-                HAVING COUNT(*) >= 7  -- Need at least 7 points for seasonality detection
-            ),
-            seasonality_results AS (
-                SELECT 
-                    __uid,
-                    values,
-                    TS_DETECT_SEASONALITY(values) AS detected_periods
-                FROM series_agg
-            )
             SELECT 
                 __uid AS unique_id,
                 'Behavioural' AS dimension,
@@ -433,25 +441,6 @@ static const DefaultTableMacro data_quality_macros[] = {
             
             UNION ALL
             
-            -- Trend Detection: Simple correlation-based trend test
-            WITH ordered_data AS (
-                SELECT 
-                    __uid,
-                    __date,
-                    __value,
-                    ROW_NUMBER() OVER (PARTITION BY __uid ORDER BY __date) AS row_num
-                FROM base_data
-                WHERE __value IS NOT NULL
-            ),
-            trend_stats AS (
-                SELECT 
-                    __uid,
-                    COUNT(*) AS n_points,
-                    CORR(row_num, __value) AS trend_correlation
-                FROM ordered_data
-                GROUP BY __uid
-                HAVING COUNT(*) >= 3  -- Need at least 3 points for correlation
-            )
             SELECT 
                 __uid AS unique_id,
                 'Behavioural' AS dimension,
@@ -475,7 +464,6 @@ static const DefaultTableMacro data_quality_macros[] = {
                 END AS recommendation
             FROM trend_stats
         ),
-        
         -- Combine all checks
         all_checks AS (
             SELECT * FROM structural_checks
@@ -524,7 +512,7 @@ static const DefaultTableMacro data_quality_macros[] = {
             ROUND(100.0 * COUNT(CASE WHEN status = 'Critical' THEN 1 END) / COUNT(*), 1) AS critical_pct,
             ROUND(100.0 * COUNT(CASE WHEN status = 'Warning' THEN 1 END) / COUNT(*), 1) AS warning_pct
         FROM health_card
-        WHERE unique_id != 'ALL_SERIES'  -- Exclude aggregated checks
+        WHERE unique_id != 'ALL_SERIES'
         GROUP BY dimension, metric
         ORDER BY 
             dimension,
