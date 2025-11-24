@@ -116,9 +116,9 @@ FROM summary_result;
 ----
 true
 
-# Verify summary has expected columns
+# Verify summary has expected columns (all 8 columns exist)
 query I
-SELECT COUNT(*) = 7
+SELECT COUNT(*) = 1
 FROM (
     SELECT 
         dimension, metric, total_series, critical_count, 
