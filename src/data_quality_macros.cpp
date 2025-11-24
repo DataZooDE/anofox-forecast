@@ -6,10 +6,10 @@ namespace duckdb {
 // Array of data quality macros
 static const DefaultTableMacro data_quality_macros[] = {
 
-    // TS_DATA_QUALITY_HEALTH_CARD: Comprehensive data quality assessment
+    // TS_DATA_QUALITY_HEALTH_CARD: Comprehensive data quality assessment (with n_short parameter)
     {DEFAULT_SCHEMA,
      "ts_data_quality_health_card",
-     {"table_name", "unique_id_col", "date_col", "value_col", nullptr},
+     {"table_name", "unique_id_col", "date_col", "value_col", "n_short", nullptr},
      {{nullptr, nullptr}},
      R"(
         WITH base_data AS (
@@ -18,6 +18,9 @@ static const DefaultTableMacro data_quality_macros[] = {
                 date_col AS __date,
                 value_col AS __value
             FROM QUERY_TABLE(table_name)
+        ),
+        params AS (
+            SELECT COALESCE(CAST(n_short AS INTEGER), 30) AS n_short_threshold
         ),
         -- Helper CTEs for structural checks
         key_counts AS (
@@ -221,19 +224,10 @@ static const DefaultTableMacro data_quality_macros[] = {
                 'Structural' AS dimension,
                 'key_uniqueness' AS metric,
                 CASE 
-                    WHEN n_duplicates > 0 THEN 'Critical'
-                    ELSE 'OK'
-                END AS status,
-                CASE 
                     WHEN n_duplicates > 0 
                     THEN n_duplicates || ' duplicate pairs found'
                     ELSE 'No duplicates'
-                END AS value,
-                CASE 
-                    WHEN n_duplicates > 0 
-                    THEN 'Aggregation required. Ask user: Sum duplicates? Average them? Or keep the last timestamp?'
-                    ELSE 'No action needed'
-                END AS recommendation
+                END AS value
             FROM duplicate_stats
             
             UNION ALL
@@ -242,38 +236,18 @@ static const DefaultTableMacro data_quality_macros[] = {
                 'ALL_SERIES' AS unique_id,
                 'Structural' AS dimension,
                 'id_cardinality' AS metric,
-                CASE 
-                    WHEN COUNT(DISTINCT __uid) > 100000 THEN 'Warning'
-                    ELSE 'OK'
-                END AS status,
-                COUNT(DISTINCT __uid) || ' unique IDs' AS value,
-                CASE 
-                    WHEN COUNT(DISTINCT __uid) > 100000 
-                    THEN 'High cardinality detected. Suggest grouping/clustering series or using global models (e.g., LightGBM) rather than per-series ARIMA.'
-                    ELSE 'No action needed'
-                END AS recommendation
+                COUNT(DISTINCT __uid) || ' unique IDs' AS value
             FROM base_data
         ),
         -- Dimension 2: Temporal Integrity
         temporal_checks AS (
             SELECT 
-                __uid AS unique_id,
+                ss.__uid AS unique_id,
                 'Temporal' AS dimension,
                 'series_length' AS metric,
-                CASE 
-                    WHEN length < 14 THEN 'Critical'
-                    WHEN length < 7 THEN 'Warning'
-                    ELSE 'OK'
-                END AS status,
-                length || ' observations' AS value,
-                CASE 
-                    WHEN length < 14 
-                    THEN 'Cold Start protocol. Flag these IDs to use simple moving averages instead of complex ML models.'
-                    WHEN length < 7
-                    THEN 'Short series detected. Consider using simpler models.'
-                    ELSE 'No action needed'
-                END AS recommendation
-            FROM series_stats
+                ss.length || ' observations' AS value
+            FROM series_stats ss
+            CROSS JOIN params
             
             UNION ALL
             
@@ -281,17 +255,7 @@ static const DefaultTableMacro data_quality_macros[] = {
                 __uid AS unique_id,
                 'Temporal' AS dimension,
                 'timestamp_gaps' AS metric,
-                CASE 
-                    WHEN gap_pct > 10.0 THEN 'Critical'
-                    WHEN gap_pct > 5.0 THEN 'Warning'
-                    ELSE 'OK'
-                END AS status,
-                ROUND(gap_pct, 1) || '% gaps (' || n_gaps || ' missing dates)' AS value,
-                CASE 
-                    WHEN gap_pct > 5.0 
-                    THEN 'Imputation required. 1. Forward Fill (if stock/inventory). 2. Zero Fill (if sales). 3. Interpolation (if temperature/sensor).'
-                    ELSE 'No action needed'
-                END AS recommendation
+                ROUND(gap_pct, 1) || '% gaps (' || n_gaps || ' missing dates)' AS value
             FROM gap_stats
             
             UNION ALL
@@ -301,19 +265,10 @@ static const DefaultTableMacro data_quality_macros[] = {
                 'Temporal' AS dimension,
                 'series_alignment' AS metric,
                 CASE 
-                    WHEN n_start_dates > 1 OR n_end_dates > 1 THEN 'Warning'
-                    ELSE 'OK'
-                END AS status,
-                CASE 
                     WHEN n_start_dates > 1 OR n_end_dates > 1 
                     THEN 'Ragged edges: ' || n_start_dates || ' start dates, ' || n_end_dates || ' end dates'
                     ELSE 'All series aligned'
-                END AS value,
-                CASE 
-                    WHEN n_start_dates > 1 OR n_end_dates > 1 
-                    THEN 'No action needed for Global Models. For correlation matrices, truncate to common intersection period.'
-                    ELSE 'No action needed'
-                END AS recommendation
+                END AS value
             FROM alignment_stats
             
             UNION ALL
@@ -323,19 +278,10 @@ static const DefaultTableMacro data_quality_macros[] = {
                 'Temporal' AS dimension,
                 'frequency_inference' AS metric,
                 CASE 
-                    WHEN n_frequencies > 1 THEN 'Warning'
-                    ELSE 'OK'
-                END AS status,
-                CASE 
                     WHEN n_frequencies > 1 
                     THEN 'Mixed frequencies detected across ' || n_series || ' series'
                     ELSE 'Consistent frequency across all series'
-                END AS value,
-                CASE 
-                    WHEN n_frequencies > 1 
-                    THEN 'Resample to common frequency. Upsample (fill) or Downsample (aggregate).'
-                    ELSE 'No action needed'
-                END AS recommendation
+                END AS value
             FROM frequency_diversity
         ),
         -- Dimension 3: Magnitude & Value Validity
@@ -344,17 +290,7 @@ static const DefaultTableMacro data_quality_macros[] = {
                 __uid AS unique_id,
                 'Magnitude' AS dimension,
                 'missing_values' AS metric,
-                CASE 
-                    WHEN null_pct > 10.0 THEN 'Critical'
-                    WHEN null_pct > 5.0 THEN 'Warning'
-                    ELSE 'OK'
-                END AS status,
-                ROUND(null_pct, 1) || '% missing (' || null_count || ' NULLs)' AS value,
-                CASE 
-                    WHEN null_pct > 5.0 
-                    THEN 'Same as Timestamp Gaps (Impute or Drop).'
-                    ELSE 'No action needed'
-                END AS recommendation
+                ROUND(null_pct, 1) || '% missing (' || null_count || ' NULLs)' AS value
             FROM missing_stats
             
             UNION ALL
@@ -364,19 +300,10 @@ static const DefaultTableMacro data_quality_macros[] = {
                 'Magnitude' AS dimension,
                 'value_bounds' AS metric,
                 CASE 
-                    WHEN negative_count > 0 THEN 'Warning'
-                    ELSE 'OK'
-                END AS status,
-                CASE 
                     WHEN negative_count > 0 
                     THEN negative_count || ' negative values found'
                     ELSE 'No negative values'
-                END AS value,
-                CASE 
-                    WHEN negative_count > 0 
-                    THEN '1. If impossible (e.g., units sold), convert to 0 or absolute value. 2. If possible (e.g., profit/temp), keep as is.'
-                    ELSE 'No action needed'
-                END AS recommendation
+                END AS value
             FROM negative_stats
             
             UNION ALL
@@ -386,19 +313,10 @@ static const DefaultTableMacro data_quality_macros[] = {
                 'Magnitude' AS dimension,
                 'static_values' AS metric,
                 CASE 
-                    WHEN distinct_count = 1 OR (stddev IS NOT NULL AND stddev = 0) THEN 'Critical'
-                    ELSE 'OK'
-                END AS status,
-                CASE 
                     WHEN distinct_count = 1 OR (stddev IS NOT NULL AND stddev = 0)
                     THEN 'Constant series (variance = 0)'
                     ELSE 'Variable series'
-                END AS value,
-                CASE 
-                    WHEN distinct_count = 1 OR (stddev IS NOT NULL AND stddev = 0)
-                    THEN 'Flag sensor failure. Remove unique_id from training set to prevent model bias.'
-                    ELSE 'No action needed'
-                END AS recommendation
+                END AS value
             FROM variance_stats
         ),
         -- Dimension 4: Behavioural/Statistical (Advanced)
@@ -407,16 +325,7 @@ static const DefaultTableMacro data_quality_macros[] = {
                 __uid AS unique_id,
                 'Behavioural' AS dimension,
                 'intermittency' AS metric,
-                CASE 
-                    WHEN zero_pct >= 50.0 THEN 'Warning'
-                    ELSE 'OK'
-                END AS status,
-                ROUND(zero_pct, 1) || '% zeros' AS value,
-                CASE 
-                    WHEN zero_pct >= 50.0 
-                    THEN 'Switch to Croston''s method or TWEEDIE loss functions (models designed for intermittent demand).'
-                    ELSE 'No action needed'
-                END AS recommendation
+                ROUND(zero_pct, 1) || '% zeros' AS value
             FROM zero_stats
             
             UNION ALL
@@ -426,19 +335,10 @@ static const DefaultTableMacro data_quality_macros[] = {
                 'Behavioural' AS dimension,
                 'seasonality_check' AS metric,
                 CASE 
-                    WHEN LEN(detected_periods) = 0 THEN 'Warning'
-                    ELSE 'OK'
-                END AS status,
-                CASE 
                     WHEN LEN(detected_periods) = 0 
                     THEN 'No seasonality detected'
                     ELSE 'Seasonality detected: periods ' || detected_periods::VARCHAR
-                END AS value,
-                CASE 
-                    WHEN LEN(detected_periods) = 0 
-                    THEN 'Use non-seasonal models (e.g., simple exponential smoothing).'
-                    ELSE 'No action needed'
-                END AS recommendation
+                END AS value
             FROM seasonality_results
             
             UNION ALL
@@ -448,22 +348,13 @@ static const DefaultTableMacro data_quality_macros[] = {
                 'Behavioural' AS dimension,
                 'trend_detection' AS metric,
                 CASE 
-                    WHEN ABS(trend_correlation) > 0.7 THEN 'Warning'
-                    ELSE 'OK'
-                END AS status,
-                CASE 
                     WHEN ABS(trend_correlation) > 0.7 
                     THEN CASE 
                         WHEN trend_correlation > 0 THEN 'Strong positive trend (r=' || ROUND(trend_correlation, 2) || ')'
                         ELSE 'Strong negative trend (r=' || ROUND(trend_correlation, 2) || ')'
                     END
                     ELSE 'No strong trend detected (r=' || ROUND(COALESCE(trend_correlation, 0), 2) || ')'
-                END AS value,
-                CASE 
-                    WHEN ABS(trend_correlation) > 0.7 
-                    THEN 'Apply differencing (y_t - y_{t-1}) or detrending before training models like ARIMA.'
-                    ELSE 'No action needed'
-                END AS recommendation
+                END AS value
             FROM trend_stats
         ),
         -- Combine all checks
@@ -480,16 +371,9 @@ static const DefaultTableMacro data_quality_macros[] = {
             unique_id,
             dimension,
             metric,
-            status,
-            value,
-            recommendation
+            value
         FROM all_checks
         ORDER BY 
-            CASE status 
-                WHEN 'Critical' THEN 1 
-                WHEN 'Warning' THEN 2 
-                ELSE 3 
-            END,
             dimension,
             metric,
             unique_id
@@ -498,52 +382,23 @@ static const DefaultTableMacro data_quality_macros[] = {
     // TS_DATA_QUALITY_SUMMARY: Aggregated summary by dimension
     {DEFAULT_SCHEMA,
      "ts_data_quality_summary",
-     {"table_name", "unique_id_col", "date_col", "value_col", nullptr},
+     {"table_name", "unique_id_col", "date_col", "value_col", "n_short", nullptr},
      {{nullptr, nullptr}},
      R"(
         WITH health_card AS (
-            SELECT * FROM ts_data_quality_health_card(table_name, unique_id_col, date_col, value_col)
+            SELECT * FROM ts_data_quality_health_card(table_name, unique_id_col, date_col, value_col, n_short)
         )
         SELECT 
             dimension,
             metric,
             COUNT(*) AS total_series,
-            COUNT(CASE WHEN status = 'Critical' THEN 1 END) AS critical_count,
-            COUNT(CASE WHEN status = 'Warning' THEN 1 END) AS warning_count,
-            COUNT(CASE WHEN status = 'OK' THEN 1 END) AS ok_count,
-            ROUND(100.0 * COUNT(CASE WHEN status = 'Critical' THEN 1 END) / COUNT(*), 1) AS critical_pct,
-            ROUND(100.0 * COUNT(CASE WHEN status = 'Warning' THEN 1 END) / COUNT(*), 1) AS warning_pct
+            COUNT(DISTINCT unique_id) AS unique_series_count
         FROM health_card
         WHERE unique_id != 'ALL_SERIES'
         GROUP BY dimension, metric
         ORDER BY 
             dimension,
-            critical_count DESC,
-            warning_count DESC
-    )"},
-
-    // TS_GET_CRITICAL_ISSUES: Filter to only Critical status items
-    {DEFAULT_SCHEMA,
-     "ts_get_critical_issues",
-     {"table_name", "unique_id_col", "date_col", "value_col", nullptr},
-     {{nullptr, nullptr}},
-     R"(
-        SELECT * 
-        FROM ts_data_quality_health_card(table_name, unique_id_col, date_col, value_col)
-        WHERE status = 'Critical'
-        ORDER BY dimension, metric, unique_id
-    )"},
-
-    // TS_GET_WARNINGS: Filter to only Warning status items
-    {DEFAULT_SCHEMA,
-     "ts_get_warnings",
-     {"table_name", "unique_id_col", "date_col", "value_col", nullptr},
-     {{nullptr, nullptr}},
-     R"(
-        SELECT * 
-        FROM ts_data_quality_health_card(table_name, unique_id_col, date_col, value_col)
-        WHERE status = 'Warning'
-        ORDER BY dimension, metric, unique_id
+            metric
     )"},
 
     // End marker

@@ -4,21 +4,7 @@
 
 Data quality directly impacts forecast accuracy. This guide covers exploratory data analysis and preparation using SQL macros that operate on time series at scale.
 
-**API Coverage**: 5 EDA macros + 4 Data Quality Health Card macros + 12 data preparation macros for comprehensive data quality workflows.
-
-## Why Data Preparation Matters
-
-### Impact on Forecast Accuracy
-
-| Issue | Impact on MAPE | Solution |
-|-------|----------------|----------|
-| **Missing values (5%)** | +10-15% | Fill nulls |
-| **Time gaps (10%)** | +15-20% | Fill gaps |
-| **Constant series** | Model fails | Drop series |
-| **Outliers (1%)** | +5-10% | Cap/remove |
-| **Wrong seasonality** | +20-30% | Auto-detect |
-
-**Bottom line**: Proper data prep can improve accuracy by 30-50%!
+**API Coverage**: 5 EDA macros + 2 Data Quality Health Card macros + 12 data preparation macros for comprehensive data quality workflows.
 
 ## Complete Workflow
 
@@ -42,7 +28,6 @@ Returns comprehensive statistics per series including:
 - **Data quality**: null_count, gap_count, zero_count, constant_flag
 - **Pattern indicators**: cv (coefficient of variation), intermittency_rate
 - **Trend metrics**: trend_correlation, first_last_ratio
-- **Quality score**: Composite metric (0-1, higher indicates better quality)
 
 #### Step 2: Dataset Summary
 
@@ -64,77 +49,60 @@ low_quality_series: 23
 
 #### Step 3: Data Quality Health Card
 
-**New**: Comprehensive data quality assessment with actionable recommendations:
+**New**: Data quality assessment with actionable recommendations:
 
 ```sql
--- Generate comprehensive health card
+-- Generate comprehensive health card (n_short parameter defaults to 30 if NULL)
 CREATE TABLE health_card AS
-SELECT * FROM TS_DATA_QUALITY_HEALTH_CARD('sales_raw', product_id, date, sales_amount);
+SELECT * FROM TS_DATA_QUALITY_HEALTH_CARD('sales_raw', product_id, date, sales_amount, 30);
 
 -- View all issues
-SELECT * FROM health_card ORDER BY 
-    CASE status WHEN 'Critical' THEN 1 WHEN 'Warning' THEN 2 ELSE 3 END,
-    dimension, metric;
+SELECT * FROM health_card ORDER BY dimension, metric;
 ```
 
 **Example Output**:
 
-| unique_id | dimension    | metric           | status   | value                    | recommendation                                    |
-|-----------|--------------|------------------|----------|--------------------------|---------------------------------------------------|
-| Store_A   | Temporal     | timestamp_gaps   | Critical | 15.2% gaps (23 missing) | Imputation required. 1. Forward Fill...           |
-| Store_A   | Magnitude   | missing_values   | Warning  | 8.5% missing (13 NULLs) | Same as Timestamp Gaps (Impute or Drop).          |
-| Store_B   | Temporal     | series_length    | Critical | 5 observations           | Cold Start protocol. Use simple moving averages...|
-| Store_C   | Behavioural  | intermittency    | Warning  | 52.3% zeros             | Switch to Croston's method or TWEEDIE loss...     |
+| unique_id | dimension    | metric           | value                    |
+|-----------|--------------|------------------|--------------------------|
+| Store_A   | Temporal     | timestamp_gaps   | 15.2% gaps (23 missing) |
+| Store_A   | Magnitude   | missing_values   | 8.5% missing (13 NULLs) |
+| Store_B   | Temporal     | series_length    | 5 observations           |
+| Store_C   | Behavioural  | intermittency    | 52.3% zeros             |
 
 **Four Dimensions Assessed**:
 
-1. **Structural**: Key uniqueness, ID cardinality
-2. **Temporal**: Frequency inference, timestamp gaps, series alignment, series length
-3. **Magnitude**: Missing values, value bounds, static values
-4. **Behavioural**: Seasonality, trend detection, intermittency
+1. **Structural**:
 
-**Helper Functions**:
+- Key uniqueness and
+- ID cardinality
+
+2. **Temporal**:
+
+- Frequency inference,
+- Timestamp gaps,
+- Series alignment, and
+- Series length
+
+3. **Magnitude**:
+
+- Missing values,
+- Value bounds, and
+- Static values
+
+4. **Behavioural**:
+
+- Seasonality,
+- Trend detection, and
+- Intermittency
+
+**Summary Function**:
 
 ```sql
--- Get summary by dimension
-SELECT * FROM TS_DATA_QUALITY_SUMMARY('sales_raw', product_id, date, sales_amount);
-
--- Get only critical (blocking) issues
-SELECT * FROM TS_GET_CRITICAL_ISSUES('sales_raw', product_id, date, sales_amount);
-
--- Get only warnings (potential issues)
-SELECT * FROM TS_GET_WARNINGS('sales_raw', product_id, date, sales_amount);
+-- Get summary by dimension (n_short parameter defaults to 30 if NULL)
+SELECT * FROM TS_DATA_QUALITY_SUMMARY('sales_raw', product_id, date, sales_amount, 30);
 ```
 
-#### Step 4: Legacy Quality Report (Alternative)
-
-For backward compatibility, you can still use the legacy quality report:
-
-```sql
--- Comprehensive quality checks
-SELECT * FROM TS_QUALITY_REPORT('sales_stats', 30);
-```
-
-**Example Output**:
-
-```
-Gap Analysis:
-  - 850 series with no gaps (85%)
-  - 150 series with gaps (15%)
-  - 2,450 total gaps
-
-Missing Values:
-  - 45 series with nulls (4.5%)
-  - 892 total nulls (0.24% of data)
-
-Constant Series:
-  - 23 constant series (2.3%)
-
-Short Series (< 30):
-  - 67 series too short (6.7%)
-```
-
-#### Step 5: Identify Problems
+#### Step 4: Identify Problems
 
 ```sql
 -- Find series with quality_score < 0.7
@@ -261,7 +229,6 @@ FROM prepared_stats;
 
 **Expected Improvements**:
 
-- Quality score: 0.65 → 0.92
 - Series with nulls: 45 → 0
 - Series with gaps: 150 → 0
 - Constant series: 23 → 0
@@ -309,7 +276,7 @@ WHERE s.product_id IN (SELECT series_id FROM clean);
 
 ### Issue 3: Constant Series
 
-**Problem**: All values are the same (impossible to forecast)
+**Problem**: All values are the same
 
 ```sql
 -- Detect
@@ -459,226 +426,7 @@ SELECT * FROM TS_FILL_FORWARD(
 
 ## Advanced Preparation Techniques
 
-### Technique 1: Seasonal Adjustment
-
-```sql
--- Remove seasonality for trend analysis
-WITH seasonality AS (
-    SELECT * FROM TS_ANALYZE_SEASONALITY(
-        LIST(date ORDER BY date),
-        LIST(sales_amount ORDER BY date)
-    )
-    FROM sales
-    WHERE product_id = 'P001'
-)
--- Future: seasonal_component would be extracted
--- Current: Use models that handle seasonality (ETS, TBATS)
-SELECT 'Use seasonal models like ETS or AutoETS' AS recommendation;
-```
-
-### Technique 2: Aggregation for Stability
-
-```sql
--- Daily data too noisy? Aggregate to weekly
-CREATE TABLE sales_weekly AS
-SELECT 
-    product_id,
-    DATE_TRUNC('week', date) AS week,
-    SUM(sales_amount) AS weekly_sales,
-    AVG(sales_amount) AS avg_daily_sales,
-    COUNT(*) AS days_in_week
-FROM sales_daily
-GROUP BY product_id, week;
-
--- Forecast on weekly data
-SELECT * FROM TS_FORECAST_BY('sales_weekly', product_id, week, weekly_sales,
-                             'AutoETS', 12, {'seasonal_period': 4});  -- 4 weeks = monthly
-```
-
-### Technique 3: Hierarchical Aggregation
-
-```sql
--- Forecast at category level, then disaggregate
-WITH category_forecast AS (
-    SELECT 
-        pc.category,
-        date,
-        SUM(sales_amount) AS category_sales
-    FROM sales s
-    JOIN product_catalog pc ON s.product_id = pc.product_id
-    GROUP BY pc.category, date
-),
-category_predictions AS (
-    SELECT * FROM TS_FORECAST_BY('category_forecast', category, date, category_sales,
-                                 'AutoETS', 28, {'seasonal_period': 7})
-),
-product_proportions AS (
-    SELECT 
-        product_id,
-        category,
-        AVG(sales_amount) / SUM(sales_amount) OVER (PARTITION BY category) AS product_share
-    FROM sales s
-    JOIN product_catalog pc ON s.product_id = pc.product_id
-    GROUP BY product_id, category
-)
-SELECT 
-    pp.product_id,
-    cp.date_col AS forecast_date,
-    ROUND(cp.point_forecast * pp.product_share, 2) AS product_forecast
-FROM category_predictions cp
-JOIN product_proportions pp ON cp.category = pp.category;
-```
-
-## Real-World Scenarios
-
-### Scenario 1: Messy Retail Data
-
-```sql
--- Typical retail data issues
-CREATE TABLE retail_prepared AS
-WITH 
--- Step 1: Fill gaps (stores closed on some days)
-filled AS (
-    SELECT * FROM TS_FILL_GAPS('retail_raw', store_id || '_' || sku AS series_key, 
-                               date, sales_qty)
-),
--- Step 2: Separate back to store and SKU
-parsed AS (
-    SELECT 
-        SPLIT_PART(series_key, '_', 1) AS store_id,
-        SPLIT_PART(series_key, '_', 2) AS sku,
-        date,
-        sales_qty
-    FROM filled
-),
--- Step 3: Drop products with < 90 days history
-sufficient_history AS (
-    SELECT * FROM TS_DROP_SHORT('parsed', sku, date, 90)
-),
--- Step 4: Fill nulls (missed scans)
-filled_nulls AS (
-    SELECT * FROM TS_FILL_NULLS_CONST('sufficient_history', sku, date, sales_qty, 0.0)
-),
--- Step 5: Remove products with no recent sales
-active_products AS (
-    SELECT * FROM TS_DROP_TRAILING_ZEROS('filled_nulls', sku, date, sales_qty)
-)
-SELECT * FROM active_products;
-```
-
-### Scenario 2: Sensor/IoT Data
-
-```sql
--- IoT sensor data with measurement errors
-CREATE TABLE sensor_prepared AS
-WITH 
--- Remove extreme outliers (sensor malfunction)
-outliers_removed AS (
-    SELECT 
-        sensor_id,
-        timestamp,
-        CASE 
-            WHEN measurement > 1000 OR measurement < -50 THEN NULL  -- Physically impossible
-            ELSE measurement
-        END AS measurement
-    FROM sensor_raw
-),
--- Interpolate gaps (linear)
-interpolated AS (
-    SELECT 
-        sensor_id,
-        timestamp,
-        COALESCE(
-            measurement,
-            -- Linear interpolation between neighbors
-            (LAST_VALUE(measurement IGNORE NULLS) 
-                OVER (PARTITION BY sensor_id ORDER BY timestamp 
-                      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) +
-             FIRST_VALUE(measurement IGNORE NULLS) 
-                OVER (PARTITION BY sensor_id ORDER BY timestamp 
-                      ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)) / 2.0
-        ) AS measurement
-    FROM outliers_removed
-)
-SELECT * FROM interpolated;
-```
-
-### Scenario 3: E-commerce with Promotions
-
-```sql
--- Handle promotional spikes
-CREATE TABLE ecommerce_prepared AS
-WITH 
--- Identify promotion periods (changepoints)
-changepoints AS (
-    SELECT * FROM TS_DETECT_CHANGEPOINTS_BY('ecom_sales', product_id, date, order_count,
-                                             {'include_probabilities': true})
-    WHERE changepoint_probability > 0.95  -- High confidence
-),
--- Create regime indicator
-with_regimes AS (
-    SELECT 
-        product_id,
-        date,
-        order_count,
-        SUM(CASE WHEN is_changepoint THEN 1 ELSE 0 END) 
-            OVER (PARTITION BY product_id ORDER BY date) AS regime_id
-    FROM changepoints
-),
--- Compute regime statistics
-regime_stats AS (
-    SELECT 
-        product_id,
-        regime_id,
-        AVG(order_count) AS regime_avg
-    FROM with_regimes
-    GROUP BY product_id, regime_id
-),
--- Flag promotion periods
-flagged AS (
-    SELECT 
-        w.*,
-        CASE 
-            WHEN rs.regime_avg > 
-                 LAG(rs.regime_avg) OVER (PARTITION BY w.product_id ORDER BY rs.regime_id) * 1.3
-            THEN true
-            ELSE false
-        END AS is_promo_period
-    FROM with_regimes w
-    JOIN regime_stats rs ON w.product_id = rs.product_id AND w.regime_id = rs.regime_id
-)
-SELECT product_id, date, order_count, is_promo_period
-FROM flagged;
-
--- Forecast only on non-promo data for base demand
-CREATE TABLE base_demand_forecast AS
-SELECT * FROM TS_FORECAST_BY(
-    (SELECT * FROM ecommerce_prepared WHERE is_promo_period = false),
-    product_id, date, order_count,
-    'AutoETS', 30, {'seasonal_period': 7}
-);
-```
-
 ## Data Quality Metrics
-
-### Define Quality Score
-
-The built-in quality_score formula:
-
-```
-quality_score = 1.0 - (
-    (n_null / length) * 0.4 +           -- Missing values (40% weight)
-    (is_constant ? 0.3 : 0.0) +         -- Constant series (30% weight)
-    (n_gaps / expected_length) * 0.3    -- Gaps (30% weight)
-)
-```
-
-**Interpretation**:
-
-- 1.0 = Perfect data
-- 0.8-1.0 = High quality
-- 0.5-0.8 = Moderate quality
-- < 0.5 = Low quality (needs attention)
 
 ### Custom Quality Metrics
 
@@ -713,11 +461,13 @@ ORDER BY original_quality DESC;
 
 ### Before Forecasting
 
-- [ ] Check data quality: `TS_STATS()`, `TS_DATA_QUALITY_HEALTH_CARD()` (or legacy `TS_QUALITY_REPORT()`)
+- [ ] Check data quality: `TS_STATS()`, `TS_DATA_QUALITY_HEALTH_CARD()`
 - [ ] Fill time gaps: `TS_FILL_GAPS()`
+- [ ] Fill up to end date: `TS_FILL_FORWARD()`
 - [ ] Handle missing values: `TS_FILL_NULLS_*()`
 - [ ] Remove constant series: `TS_DROP_CONSTANT()`
 - [ ] Check minimum length: `TS_DROP_SHORT()`
+- [ ] Remove leading zeros: `TS_DROP_LEADING_ZEROS()`
 - [ ] Detect seasonality: `TS_DETECT_SEASONALITY_ALL()`
 - [ ] Detect changepoints: `TS_DETECT_CHANGEPOINTS_BY()`
 - [ ] Remove edge zeros: `TS_DROP_EDGE_ZEROS()` (if applicable)
@@ -771,24 +521,3 @@ SELECT * FROM complete;
 SELECT * FROM TS_FORECAST_BY('sales_autoprepared', product_id, date, sales_amount,
                              'AutoETS', 28, {'seasonal_period': 7});
 ```
-
-## Summary
-
-**Data Preparation Workflow**:
-
-1. ✅ **Explore**: Use TS_STATS(), TS_DATA_QUALITY_HEALTH_CARD() (or legacy TS_QUALITY_REPORT())
-2. ✅ **Identify**: Find gaps, nulls, outliers, patterns
-3. ✅ **Clean**: Fill gaps, handle nulls, remove bad series
-4. ✅ **Transform**: Remove edge zeros, cap outliers
-5. ✅ **Validate**: Re-check quality scores
-6. ✅ **Forecast**: Generate predictions on clean data
-
-**Next Steps**:
-
-- [Demand Forecasting Use Case](70_demand_forecasting.md)
-- [Model Selection Guide](40_model_selection.md)
-- [Statistical Guide](31_understanding_forecasts.md)
-
----
-
-**Tip**: Save your preparation pipeline as a VIEW for reusability!

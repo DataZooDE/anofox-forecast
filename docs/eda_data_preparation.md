@@ -74,17 +74,17 @@ The Data Quality Health Card provides a structured assessment across four dimens
 
 ```sql
 -- Generate comprehensive health card
-SELECT * FROM TS_DATA_QUALITY_HEALTH_CARD('sales_data', product_id, date, amount);
+SELECT * FROM TS_DATA_QUALITY_HEALTH_CARD('sales_data', product_id, date, amount, 30);
 
 -- Example output:
--- | unique_id | dimension    | metric           | status   | value                    | recommendation                                    |
--- |-----------|--------------|------------------|----------|--------------------------|---------------------------------------------------|
--- | Store_A   | Structural  | key_uniqueness   | OK       | No duplicates             | No action needed                                  |
--- | Store_A   | Temporal    | timestamp_gaps   | Critical | 15.2% gaps (23 missing)  | Imputation required. 1. Forward Fill...           |
--- | Store_A   | Temporal    | series_length    | Warning  | 12 observations           | Short series detected. Consider using simpler...  |
--- | Store_A   | Magnitude   | missing_values   | Warning  | 8.5% missing (13 NULLs)  | Same as Timestamp Gaps (Impute or Drop).          |
--- | Store_A   | Magnitude   | static_values    | OK       | Variable series           | No action needed                                  |
--- | Store_A   | Behavioural | intermittency    | Warning  | 52.3% zeros              | Switch to Croston's method or TWEEDIE loss...     |
+-- | unique_id | dimension    | metric           | value                    |
+-- |-----------|--------------|------------------|--------------------------|
+-- | Store_A   | Structural  | key_uniqueness   | No duplicates             |
+-- | Store_A   | Temporal    | timestamp_gaps   | 15.2% gaps (23 missing)  |
+-- | Store_A   | Temporal    | series_length    | 12 observations           |
+-- | Store_A   | Magnitude   | missing_values   | 8.5% missing (13 NULLs)  |
+-- | Store_A   | Magnitude   | static_values    | Variable series           |
+-- | Store_A   | Behavioural | intermittency    | 52.3% zeros              |
 ```
 
 **Four Dimensions**:
@@ -94,22 +94,11 @@ SELECT * FROM TS_DATA_QUALITY_HEALTH_CARD('sales_data', product_id, date, amount
 3. **Magnitude & Value Validity**: Missing values, value bounds, static values
 4. **Behavioural/Statistical**: Seasonality, trend detection, intermittency
 
-**Status Levels**:
-- **Critical (Red)**: Issues that will cause model failures or significant accuracy degradation
-- **Warning (Amber)**: Issues that may impact performance but won't fail
-- **OK (Green)**: No issues detected
-
-**Helper Functions**:
+**Summary Function**:
 
 ```sql
 -- Get summary by dimension and metric
-SELECT * FROM TS_DATA_QUALITY_SUMMARY('sales_data', product_id, date, amount);
-
--- Get only critical (blocking) issues
-SELECT * FROM TS_GET_CRITICAL_ISSUES('sales_data', product_id, date, amount);
-
--- Get only warnings (potential issues)
-SELECT * FROM TS_GET_WARNINGS('sales_data', product_id, date, amount);
+SELECT * FROM TS_DATA_QUALITY_SUMMARY('sales_data', product_id, date, amount, 30);
 ```
 
 **Workflow Example**:
@@ -117,22 +106,15 @@ SELECT * FROM TS_GET_WARNINGS('sales_data', product_id, date, amount);
 ```sql
 -- 1. Generate health card
 CREATE TABLE health_card AS
-SELECT * FROM TS_DATA_QUALITY_HEALTH_CARD('sales_raw', product_id, date, amount);
+SELECT * FROM TS_DATA_QUALITY_HEALTH_CARD('sales_raw', product_id, date, amount, 30);
 
--- 2. Review critical issues
-SELECT * FROM health_card WHERE status = 'Critical' ORDER BY dimension, metric;
+-- 2. Review issues by dimension
+SELECT * FROM health_card WHERE dimension = 'Temporal' ORDER BY metric, unique_id;
 
 -- 3. Get summary statistics
-SELECT 
-    dimension,
-    COUNT(*) AS total_checks,
-    COUNT(CASE WHEN status = 'Critical' THEN 1 END) AS critical_count,
-    COUNT(CASE WHEN status = 'Warning' THEN 1 END) AS warning_count
-FROM health_card
-WHERE unique_id != 'ALL_SERIES'
-GROUP BY dimension;
+SELECT * FROM TS_DATA_QUALITY_SUMMARY('sales_raw', product_id, date, amount, 30);
 
--- 4. Take action based on recommendations
+-- 4. Take action based on findings
 -- (e.g., apply TS_FILL_GAPS for timestamp gaps, TS_DROP_CONSTANT for static values)
 ```
 
@@ -433,10 +415,8 @@ SELECT * FROM TS_STATS('filtered', ...);
 
 | Macro | Description |
 |-------|-------------|
-| `TS_DATA_QUALITY_HEALTH_CARD` | Comprehensive health card with metrics, status, and recommendations across 4 dimensions |
+| `TS_DATA_QUALITY_HEALTH_CARD` | Comprehensive health card with metrics and values across 4 dimensions |
 | `TS_DATA_QUALITY_SUMMARY` | Aggregated summary by dimension and metric |
-| `TS_GET_CRITICAL_ISSUES` | Filter to only Critical status items (blocking issues) |
-| `TS_GET_WARNINGS` | Filter to only Warning status items (potential issues) |
 
 **Dimensions**:
 - **Structural**: Key uniqueness, ID cardinality

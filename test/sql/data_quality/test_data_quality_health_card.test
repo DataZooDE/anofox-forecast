@@ -39,7 +39,7 @@ FROM generate_series(1, 20) t(i);
 # Test: TS_DATA_QUALITY_HEALTH_CARD - Basic functionality
 statement ok
 CREATE TABLE health_card_result AS
-SELECT * FROM ts_data_quality_health_card(dq_test_data, series_id, date_col, value_col);
+SELECT * FROM ts_data_quality_health_card(dq_test_data, series_id, date_col, value_col, 30);
 
 # Verify health card returns results
 query I
@@ -66,21 +66,24 @@ FROM (
 ----
 true
 
-# Verify status values are valid
+# Verify schema: unique_id, dimension, metric, value (no status or recommendation)
 query I
-SELECT COUNT(*) = 0
-FROM health_card_result
-WHERE status NOT IN ('Critical', 'Warning', 'OK');
+SELECT COUNT(*) = 1
+FROM (
+    SELECT unique_id, dimension, metric, value
+    FROM health_card_result
+    LIMIT 1
+);
 ----
 true
 
-# Test: Verify critical issues are detected (constant series)
+# Test: Verify constant series are detected
 query I
 SELECT COUNT(*) > 0
 FROM health_card_result
-WHERE status = 'Critical' 
-  AND metric = 'static_values'
-  AND unique_id = 'series_2';
+WHERE metric = 'static_values'
+  AND unique_id = 'series_2'
+  AND value LIKE '%Constant%';
 ----
 true
 
@@ -88,9 +91,9 @@ true
 query I
 SELECT COUNT(*) > 0
 FROM health_card_result
-WHERE status IN ('Critical', 'Warning')
-  AND metric = 'missing_values'
-  AND unique_id = 'series_1';
+WHERE metric = 'missing_values'
+  AND unique_id = 'series_1'
+  AND value LIKE '%missing%';
 ----
 true
 
@@ -98,16 +101,28 @@ true
 query I
 SELECT COUNT(*) > 0
 FROM health_card_result
-WHERE status = 'Warning'
-  AND metric = 'intermittency'
-  AND unique_id = 'series_3';
+WHERE metric = 'intermittency'
+  AND unique_id = 'series_3'
+  AND value LIKE '%zeros%';
+----
+true
+
+# Test: n_short parameter functionality
+statement ok
+CREATE TABLE health_card_custom AS
+SELECT * FROM ts_data_quality_health_card(dq_test_data, series_id, date_col, value_col, 15);
+
+# Verify custom n_short parameter works
+query I
+SELECT COUNT(*) > 0
+FROM health_card_custom;
 ----
 true
 
 # Test: TS_DATA_QUALITY_SUMMARY
 statement ok
 CREATE TABLE summary_result AS
-SELECT * FROM ts_data_quality_summary(dq_test_data, series_id, date_col, value_col);
+SELECT * FROM ts_data_quality_summary(dq_test_data, series_id, date_col, value_col, 30);
 
 # Verify summary returns results
 query I
@@ -116,42 +131,15 @@ FROM summary_result;
 ----
 true
 
-# Verify summary has expected columns (all 8 columns exist)
+# Verify summary has expected columns
 query I
 SELECT COUNT(*) = 1
 FROM (
     SELECT 
-        dimension, metric, total_series, critical_count, 
-        warning_count, ok_count, critical_pct, warning_pct
+        dimension, metric, total_series, unique_series_count
     FROM summary_result
     LIMIT 1
 );
-----
-true
-
-# Test: TS_GET_CRITICAL_ISSUES
-statement ok
-CREATE TABLE critical_result AS
-SELECT * FROM ts_get_critical_issues(dq_test_data, series_id, date_col, value_col);
-
-# Verify only critical issues are returned
-query I
-SELECT COUNT(*) = 0
-FROM critical_result
-WHERE status != 'Critical';
-----
-true
-
-# Test: TS_GET_WARNINGS
-statement ok
-CREATE TABLE warnings_result AS
-SELECT * FROM ts_get_warnings(dq_test_data, series_id, date_col, value_col);
-
-# Verify only warnings are returned
-query I
-SELECT COUNT(*) = 0
-FROM warnings_result
-WHERE status != 'Warning';
 ----
 true
 
@@ -171,9 +159,9 @@ SELECT
 # Verify duplicate detection
 query I
 SELECT COUNT(*) > 0
-FROM ts_data_quality_health_card(duplicate_test, series_id, date_col, value_col)
+FROM ts_data_quality_health_card(duplicate_test, series_id, date_col, value_col, 30)
 WHERE metric = 'key_uniqueness' 
-  AND status = 'Critical';
+  AND value LIKE '%duplicate%';
 ----
 true
 
@@ -188,10 +176,7 @@ statement ok
 DROP TABLE summary_result;
 
 statement ok
-DROP TABLE critical_result;
-
-statement ok
-DROP TABLE warnings_result;
+DROP TABLE health_card_custom;
 
 statement ok
 DROP TABLE duplicate_test;
