@@ -180,14 +180,19 @@ true
 # Cleanup
 statement ok
 DROP TABLE dq_test_data;
+
 statement ok
 DROP TABLE health_card_result;
+
 statement ok
 DROP TABLE summary_result;
+
 statement ok
 DROP TABLE critical_result;
+
 statement ok
 DROP TABLE warnings_result;
+
 statement ok
 DROP TABLE duplicate_test;
 
