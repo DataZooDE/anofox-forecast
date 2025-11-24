@@ -406,12 +406,12 @@ static const DefaultTableMacro data_quality_macros[] = {
                 'Behavioural' AS dimension,
                 'intermittency' AS metric,
                 CASE 
-                    WHEN zero_pct > 50.0 THEN 'Warning'
+                    WHEN zero_pct >= 50.0 THEN 'Warning'
                     ELSE 'OK'
                 END AS status,
                 ROUND(zero_pct, 1) || '% zeros' AS value,
                 CASE 
-                    WHEN zero_pct > 50.0 
+                    WHEN zero_pct >= 50.0 
                     THEN 'Switch to Croston''s method or TWEEDIE loss functions (models designed for intermittent demand).'
                     ELSE 'No action needed'
                 END AS recommendation
