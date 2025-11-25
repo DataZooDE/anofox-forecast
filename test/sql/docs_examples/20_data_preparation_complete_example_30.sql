@@ -57,11 +57,8 @@ step2 AS (
 ),
 step3 AS (
     SELECT * FROM TS_DROP_EDGE_ZEROS('step2', product_id, date, sales_amount)
-),
-step4 AS (
-    SELECT * FROM TS_FILL_NULLS_INTERPOLATE('step3', product_id, date, sales_amount)
 )
-SELECT * FROM step4;
+SELECT * FROM step3;
 
 -- ============================================================================
 -- Step 4: Validate preparation

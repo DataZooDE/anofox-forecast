@@ -389,48 +389,6 @@ static const DefaultTableMacro data_prep_macros[] = {
             ORDER BY group_col, date_col
         )"},
 
-    // TS_FILL_NULLS_INTERPOLATE: Linear interpolation
-    {DEFAULT_SCHEMA,
-     "ts_fill_nulls_interpolate",
-     {"table_name", "group_col", "date_col", "value_col", nullptr},
-     {{nullptr, nullptr}},
-     R"(
-            WITH ordered_data AS (
-                SELECT 
-                    group_col,
-                    date_col,
-                    value_col AS __vid,
-                    ROW_NUMBER() OVER (PARTITION BY group_col ORDER BY date_col) AS row_num,
-                    LAG(value_col) OVER (PARTITION BY group_col ORDER BY date_col) AS prev_val,
-                    LEAD(value_col) OVER (PARTITION BY group_col ORDER BY date_col) AS next_val,
-                    LAG(date_col) OVER (PARTITION BY group_col ORDER BY date_col) AS prev_date,
-                    LEAD(date_col) OVER (PARTITION BY group_col ORDER BY date_col) AS next_date
-                FROM QUERY_TABLE(table_name)
-            ),
-            interpolated AS (
-                SELECT 
-                    group_col,
-                    date_col,
-                    CASE 
-                        WHEN __vid IS NOT NULL THEN __vid
-                        WHEN prev_val IS NOT NULL AND next_val IS NOT NULL AND prev_date IS NOT NULL AND next_date IS NOT NULL
-                        THEN prev_val + (next_val - prev_val) * 
-                             CAST(DATEDIFF('day', prev_date, date_col) AS DOUBLE) / 
-                             CAST(DATEDIFF('day', prev_date, next_date) AS DOUBLE)
-                        WHEN prev_val IS NOT NULL THEN prev_val
-                        WHEN next_val IS NOT NULL THEN next_val
-                        ELSE NULL
-                    END AS value_col
-                FROM ordered_data
-            )
-            SELECT 
-                group_col,
-                date_col,
-                value_col
-            FROM interpolated
-            ORDER BY group_col, date_col
-        )"},
-
     // TS_TRANSFORM_LOG: Log transformation
     {DEFAULT_SCHEMA,
      "ts_transform_log",

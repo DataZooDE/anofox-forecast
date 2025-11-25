@@ -302,31 +302,6 @@ WHERE value_col = 0.0;
 ----
 true
 
-# Test: TS_FILL_NULLS_INTERPOLATE - Linear interpolation
-statement ok
-CREATE TABLE test_interpolate AS
-SELECT date_col, 'series_1' AS sid,
-    CASE 
-        WHEN i = 1 THEN 100.0
-        WHEN i BETWEEN 2 AND 4 THEN NULL
-        WHEN i = 5 THEN 200.0
-        ELSE 100.0 + i::DOUBLE
-    END AS val
-FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM generate_series(1, 10) t(i));
-
-statement ok
-CREATE TABLE filled_interpolate AS
-SELECT * FROM ts_fill_nulls_interpolate(test_interpolate, sid, date_col, val);
-
-# Verify NULLs are interpolated (should be between 100 and 200)
-query I
-SELECT COUNT(*) = 3
-FROM filled_interpolate
-WHERE value_col BETWEEN 100.0 AND 200.0
-  AND value_col IS NOT NULL;
-----
-true
-
 # Test: TS_TRANSFORM_LOG - Log transformation
 statement ok
 CREATE TABLE test_log AS
