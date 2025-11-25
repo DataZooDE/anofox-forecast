@@ -389,24 +389,6 @@ static const DefaultTableMacro data_prep_macros[] = {
             ORDER BY group_col, date_col
         )"},
 
-    // TS_TRANSFORM_LOG: Log transformation
-    {DEFAULT_SCHEMA,
-     "ts_transform_log",
-     {"table_name", "group_col", "date_col", "value_col", nullptr},
-     {{nullptr, nullptr}},
-     R"(
-            SELECT 
-                group_col,
-                date_col,
-                CASE 
-                    WHEN value_col IS NULL THEN NULL
-                    WHEN value_col > 0 THEN LN(value_col)
-                    ELSE NULL
-                END AS value_col
-            FROM QUERY_TABLE(table_name)
-            ORDER BY group_col, date_col
-        )"},
-
     // TS_DIFF: Differencing - Using 1st order difference only (order parameter causes parser issues)
     {DEFAULT_SCHEMA,
      "ts_diff",
@@ -429,81 +411,6 @@ static const DefaultTableMacro data_prep_macros[] = {
                     ELSE value_col - lagged_value
                 END AS value_col
             FROM ordered_data
-            ORDER BY group_col, date_col
-        )"},
-
-    // TS_NORMALIZE_MINMAX: Min-Max normalization (per series)
-    {DEFAULT_SCHEMA,
-     "ts_normalize_minmax",
-     {"table_name", "group_col", "date_col", "value_col", nullptr},
-     {{nullptr, nullptr}},
-     R"(
-            WITH series_stats AS (
-                SELECT 
-                    group_col AS __gid,
-                    MIN(value_col) AS __min_val,
-                    MAX(value_col) AS __max_val,
-                    MAX(value_col) - MIN(value_col) AS __range
-                FROM QUERY_TABLE(table_name)
-                WHERE value_col IS NOT NULL
-                GROUP BY group_col
-            ),
-            with_stats AS (
-                SELECT 
-                    t.group_col,
-                    t.date_col,
-                    t.value_col,
-                    ss.__min_val,
-                    ss.__range
-                FROM QUERY_TABLE(table_name) t
-                LEFT JOIN series_stats ss ON t.group_col = ss.__gid
-            )
-            SELECT 
-                group_col,
-                date_col,
-                CASE 
-                    WHEN value_col IS NULL THEN NULL
-                    WHEN __range = 0 THEN 0.0
-                    ELSE (value_col - __min_val) / __range
-                END AS value_col
-            FROM with_stats
-            ORDER BY group_col, date_col
-        )"},
-
-    // TS_STANDARDIZE: Z-score standardization (per series)
-    {DEFAULT_SCHEMA,
-     "ts_standardize",
-     {"table_name", "group_col", "date_col", "value_col", nullptr},
-     {{nullptr, nullptr}},
-     R"(
-            WITH series_stats AS (
-                SELECT 
-                    group_col AS __gid,
-                    AVG(value_col) AS __mean,
-                    STDDEV(value_col) AS __std
-                FROM QUERY_TABLE(table_name)
-                WHERE value_col IS NOT NULL
-                GROUP BY group_col
-            ),
-            with_stats AS (
-                SELECT 
-                    t.group_col,
-                    t.date_col,
-                    t.value_col,
-                    ss.__mean,
-                    ss.__std
-                FROM QUERY_TABLE(table_name) t
-                LEFT JOIN series_stats ss ON t.group_col = ss.__gid
-            )
-            SELECT 
-                group_col,
-                date_col,
-                CASE 
-                    WHEN value_col IS NULL THEN NULL
-                    WHEN __std IS NULL OR __std = 0 THEN 0.0
-                    ELSE (value_col - __mean) / __std
-                END AS value_col
-            FROM with_stats
             ORDER BY group_col, date_col
         )"},
 

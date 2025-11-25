@@ -302,24 +302,6 @@ WHERE value_col = 0.0;
 ----
 true
 
-# Test: TS_TRANSFORM_LOG - Log transformation
-statement ok
-CREATE TABLE test_log AS
-SELECT date_col, 'series_1' AS sid, EXP(i::DOUBLE) AS val
-FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM generate_series(1, 5) t(i));
-
-statement ok
-CREATE TABLE transformed_log AS
-SELECT * FROM ts_transform_log(test_log, sid, date_col, val);
-
-# Verify log transformation applied (should be approximately i)
-query I
-SELECT COUNT(*) = 5
-FROM transformed_log
-WHERE ABS(value_col - (SELECT i FROM generate_series(1, 5) t(i) WHERE i = EXTRACT(DAY FROM date_col - '2024-01-01'::TIMESTAMP)::INT)) < 0.1;
-----
-true
-
 # Test: TS_DIFF - Differencing
 statement ok
 CREATE TABLE test_diff AS
@@ -335,56 +317,6 @@ query I
 SELECT COUNT(*) >= 3
 FROM differenced
 WHERE value_col BETWEEN 9.0 AND 11.0;
-----
-true
-
-# Test: TS_NORMALIZE_MINMAX - Min-Max normalization
-statement ok
-CREATE TABLE test_normalize AS
-SELECT date_col, 'series_1' AS sid, i::DOUBLE * 10.0 AS val
-FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM generate_series(1, 5) t(i));
-
-statement ok
-CREATE TABLE normalized AS
-SELECT * FROM ts_normalize_minmax(test_normalize, sid, date_col, val);
-
-# Verify normalization (values should be between 0 and 1)
-query I
-SELECT COUNT(*) = 5
-FROM normalized
-WHERE value_col >= 0.0 AND value_col <= 1.0;
-----
-true
-
-# Verify min is 0.0 and max is 1.0
-query II
-SELECT MIN(value_col) = 0.0, MAX(value_col) = 1.0
-FROM normalized;
-----
-true	true
-
-# Test: TS_STANDARDIZE - Z-score standardization
-statement ok
-CREATE TABLE test_standardize AS
-SELECT date_col, 'series_1' AS sid, i::DOUBLE * 10.0 AS val
-FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM generate_series(1, 5) t(i));
-
-statement ok
-CREATE TABLE standardized AS
-SELECT * FROM ts_standardize(test_standardize, sid, date_col, val);
-
-# Verify standardization (mean should be approximately 0, std approximately 1)
-query I
-SELECT COUNT(*) = 5
-FROM standardized
-WHERE value_col IS NOT NULL;
-----
-true
-
-# Verify mean is approximately 0
-query I
-SELECT ABS(AVG(value_col)) < 0.1
-FROM standardized;
 ----
 true
 

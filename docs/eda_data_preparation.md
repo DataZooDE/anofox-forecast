@@ -411,11 +411,7 @@ SELECT * FROM TS_STATS('filtered', ...);
 | `TS_FILL_NULLS_CONST` | Fill with constant |
 | `TS_FILL_NULLS_FORWARD` | Forward fill |
 | `TS_FILL_NULLS_BACKWARD` | Backward fill |
-| `TS_FILL_NULLS_INTERPOLATE` | Linear interpolation |
 | `TS_FILL_NULLS_MEAN` | Fill with series mean |
-| `TS_TRANSFORM_LOG` | Log transformation |
 | `TS_DIFF` | Differencing |
-| `TS_NORMALIZE_MINMAX` | Min-Max normalization |
-| `TS_STANDARDIZE` | Z-score standardization |
 
 ---

@@ -1392,11 +1392,11 @@ These parameters work with **all forecasting models**:
 | Evaluation Metrics | 12 | Scalar functions |
 | EDA Macros | 5 | Table macros |
 | Data Quality | 2 | Table macros |
-| Data Preparation | 12 | Table macros |
+| Data Preparation | 9 | Table macros |
 | Seasonality | 2 | Scalar functions |
 | Changepoint Detection | 3 | Table macros (2), Aggregate (1) |
 | Time Series Features | 4 | Aggregate (1), Table function (1), Scalar (2) |
-| **Total** | **43** | |
+| **Total** | **40** | |
 
 ### Function Type Breakdown
 

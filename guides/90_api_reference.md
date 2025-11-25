@@ -436,7 +436,7 @@ Detect seasonality for all series.
 
 ---
 
-## Data Preparation Functions (12 Macros)
+## Data Preparation Functions (9 Macros)
 
 ### Gap Filling
 
