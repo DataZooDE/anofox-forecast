@@ -344,7 +344,7 @@ static const DefaultTableMacro data_prep_macros[] = {
                 FROM QUERY_TABLE(table_name)
             )
             SELECT 
-                orig_aliased.group_col AS group_col,
+                orig_aliased.__gid AS group_col,
                 orig_aliased.* EXCLUDE (__gid)
             FROM orig_aliased
             WHERE EXISTS (SELECT 1 FROM valid_series vs WHERE vs.__gid = orig_aliased.__gid)
