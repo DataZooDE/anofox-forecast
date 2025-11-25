@@ -223,7 +223,7 @@ static const DefaultTableMacro data_quality_macros[] = {
                 __uid AS unique_id,
                 'Structural' AS dimension,
                 'key_uniqueness' AS metric,
-                n_duplicates AS value,
+                CAST(n_duplicates AS INTEGER) AS value,
                 NULL AS value_pct
             FROM duplicate_stats
             
@@ -233,7 +233,7 @@ static const DefaultTableMacro data_quality_macros[] = {
                 'ALL_SERIES' AS unique_id,
                 'Structural' AS dimension,
                 'id_cardinality' AS metric,
-                COUNT(DISTINCT __uid) AS value,
+                CAST(COUNT(DISTINCT __uid) AS INTEGER) AS value,
                 NULL AS value_pct
             FROM base_data
         ),
@@ -243,7 +243,7 @@ static const DefaultTableMacro data_quality_macros[] = {
                 ss.__uid AS unique_id,
                 'Temporal' AS dimension,
                 'series_length' AS metric,
-                ss.length AS value,
+                CAST(ss.length AS INTEGER) AS value,
                 NULL AS value_pct
             FROM series_stats ss
             CROSS JOIN params
@@ -254,7 +254,7 @@ static const DefaultTableMacro data_quality_macros[] = {
                 __uid AS unique_id,
                 'Temporal' AS dimension,
                 'timestamp_gaps' AS metric,
-                n_gaps AS value,
+                CAST(n_gaps AS INTEGER) AS value,
                 gap_pct / 100.0 AS value_pct
             FROM gap_stats
             
@@ -264,11 +264,11 @@ static const DefaultTableMacro data_quality_macros[] = {
                 'ALL_SERIES' AS unique_id,
                 'Temporal' AS dimension,
                 'series_alignment' AS metric,
-                CASE 
+                CAST(CASE 
                     WHEN n_start_dates > 1 OR n_end_dates > 1 
                     THEN GREATEST(n_start_dates, n_end_dates)
                     ELSE 1
-                END AS value,
+                END AS INTEGER) AS value,
                 NULL AS value_pct
             FROM alignment_stats
             
@@ -278,7 +278,7 @@ static const DefaultTableMacro data_quality_macros[] = {
                 'ALL_SERIES' AS unique_id,
                 'Temporal' AS dimension,
                 'frequency_inference' AS metric,
-                n_frequencies AS value,
+                CAST(n_frequencies AS INTEGER) AS value,
                 NULL AS value_pct
             FROM frequency_diversity
         ),
@@ -288,7 +288,7 @@ static const DefaultTableMacro data_quality_macros[] = {
                 __uid AS unique_id,
                 'Magnitude' AS dimension,
                 'missing_values' AS metric,
-                null_count AS value,
+                CAST(null_count AS INTEGER) AS value,
                 null_pct / 100.0 AS value_pct
             FROM missing_stats
             
@@ -298,7 +298,7 @@ static const DefaultTableMacro data_quality_macros[] = {
                 __uid AS unique_id,
                 'Magnitude' AS dimension,
                 'value_bounds' AS metric,
-                negative_count AS value,
+                CAST(negative_count AS INTEGER) AS value,
                 CASE 
                     WHEN total_count > 0 
                     THEN CAST(negative_count AS DOUBLE) / total_count
@@ -312,11 +312,11 @@ static const DefaultTableMacro data_quality_macros[] = {
                 __uid AS unique_id,
                 'Magnitude' AS dimension,
                 'static_values' AS metric,
-                CASE 
+                CAST(CASE 
                     WHEN distinct_count = 1 OR (stddev IS NOT NULL AND stddev = 0)
                     THEN 1
                     ELSE 0
-                END AS value,
+                END AS INTEGER) AS value,
                 NULL AS value_pct
             FROM variance_stats
         ),
@@ -326,7 +326,7 @@ static const DefaultTableMacro data_quality_macros[] = {
                 __uid AS unique_id,
                 'Behavioural' AS dimension,
                 'intermittency' AS metric,
-                zero_count AS value,
+                CAST(zero_count AS INTEGER) AS value,
                 zero_pct / 100.0 AS value_pct
             FROM zero_stats
             
@@ -336,11 +336,11 @@ static const DefaultTableMacro data_quality_macros[] = {
                 __uid AS unique_id,
                 'Behavioural' AS dimension,
                 'seasonality_check' AS metric,
-                CASE 
+                CAST(CASE 
                     WHEN LEN(detected_periods) = 0 
                     THEN 0
                     ELSE 1
-                END AS value,
+                END AS INTEGER) AS value,
                 NULL AS value_pct
             FROM seasonality_results
             
