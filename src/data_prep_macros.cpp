@@ -342,16 +342,12 @@ static const DefaultTableMacro data_prep_macros[] = {
                     group_col AS __gid,
                     *
                 FROM QUERY_TABLE(table_name)
-            ),
-            filtered AS (
-                SELECT *
-                FROM orig_aliased oa
-                WHERE EXISTS (SELECT 1 FROM valid_series vs WHERE vs.__gid = oa.__gid)
             )
             SELECT 
-                f.group_col AS group_col,
-                f.* EXCLUDE (__gid)
-            FROM filtered f
+                orig_aliased.group_col AS group_col,
+                orig_aliased.* EXCLUDE (__gid)
+            FROM orig_aliased
+            WHERE EXISTS (SELECT 1 FROM valid_series vs WHERE vs.__gid = orig_aliased.__gid)
         )"},
 
     // TS_DROP_EDGE_ZEROS: Remove both leading and trailing zeros
