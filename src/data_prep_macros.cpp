@@ -399,7 +399,7 @@ static const DefaultTableMacro data_prep_macros[] = {
                 SELECT 
                     group_col,
                     date_col,
-                    value_col,
+                    value_col AS value_col,
                     ROW_NUMBER() OVER (PARTITION BY group_col ORDER BY date_col) AS row_num,
                     LAG(value_col) OVER (PARTITION BY group_col ORDER BY date_col) AS prev_val,
                     LEAD(value_col) OVER (PARTITION BY group_col ORDER BY date_col) AS next_val,
