@@ -399,7 +399,7 @@ static const DefaultTableMacro data_prep_macros[] = {
                 SELECT 
                     group_col,
                     date_col,
-                    value_col,
+                    value_col AS __vid,
                     ROW_NUMBER() OVER (PARTITION BY group_col ORDER BY date_col) AS row_num,
                     LAG(value_col) OVER (PARTITION BY group_col ORDER BY date_col) AS prev_val,
                     LEAD(value_col) OVER (PARTITION BY group_col ORDER BY date_col) AS next_val,
@@ -412,7 +412,7 @@ static const DefaultTableMacro data_prep_macros[] = {
                     group_col,
                     date_col,
                     CASE 
-                        WHEN value_col IS NOT NULL THEN value_col
+                        WHEN __vid IS NOT NULL THEN __vid
                         WHEN prev_val IS NOT NULL AND next_val IS NOT NULL AND prev_date IS NOT NULL AND next_date IS NOT NULL
                         THEN prev_val + (next_val - prev_val) * 
                              CAST(DATEDIFF('day', prev_date, date_col) AS DOUBLE) / 
