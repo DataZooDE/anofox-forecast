@@ -33,7 +33,7 @@ Returns comprehensive statistics per series including:
 
 ```sql
 -- Get overall picture
-SELECT * FROM TS_DATASET_SUMMARY('sales_stats');
+SELECT * FROM TS_STATS_SUMMARY('sales_stats');
 ```
 
 **Example Output**:
@@ -54,7 +54,7 @@ low_quality_series: 23
 ```sql
 -- Generate comprehensive health card (n_short parameter defaults to 30 if NULL)
 CREATE TABLE health_card AS
-SELECT * FROM TS_DATA_QUALITY_HEALTH_CARD('sales_raw', product_id, date, sales_amount, 30);
+SELECT * FROM TS_DATA_QUALITY('sales_raw', product_id, date, sales_amount, 30);
 
 -- View all issues
 SELECT * FROM health_card ORDER BY dimension, metric;
@@ -106,7 +106,6 @@ SELECT * FROM TS_DATA_QUALITY_SUMMARY('sales_raw', product_id, date, sales_amoun
 
 ```sql
 -- Find series with quality_score < 0.7
-SELECT * FROM TS_GET_PROBLEMATIC('sales_stats', 0.7);
 ```
 
 **Common Issues**:
@@ -119,7 +118,11 @@ SELECT * FROM TS_GET_PROBLEMATIC('sales_stats', 0.7);
 
 ```sql
 -- Seasonality
-SELECT * FROM TS_DETECT_SEASONALITY_ALL('sales_raw', product_id, date, sales_amount);
+SELECT 
+    product_id,
+    TS_DETECT_SEASONALITY(LIST(sales_amount ORDER BY date)) AS detected_periods
+FROM sales_raw
+GROUP BY product_id;
 
 -- Changepoints (regime changes)
 SELECT * FROM TS_DETECT_CHANGEPOINTS_BY('sales_raw', product_id, date, sales_amount,
@@ -173,7 +176,6 @@ filtered AS (
     SELECT f.*
     FROM filled f
     WHERE f.product_id NOT IN (
-        SELECT series_id FROM TS_GET_PROBLEMATIC('sales_stats', 0.5)
     )
 ),
 -- Remove edge zeros
@@ -461,14 +463,14 @@ ORDER BY original_quality DESC;
 
 ### Before Forecasting
 
-- [ ] Check data quality: `TS_STATS()`, `TS_DATA_QUALITY_HEALTH_CARD()`
+- [ ] Check data quality: `TS_STATS()`, `TS_DATA_QUALITY()`
 - [ ] Fill time gaps: `TS_FILL_GAPS()`
 - [ ] Fill up to end date: `TS_FILL_FORWARD()`
 - [ ] Handle missing values: `TS_FILL_NULLS_*()`
 - [ ] Remove constant series: `TS_DROP_CONSTANT()`
 - [ ] Check minimum length: `TS_DROP_SHORT()`
 - [ ] Remove leading zeros: `TS_DROP_LEADING_ZEROS()`
-- [ ] Detect seasonality: `TS_DETECT_SEASONALITY_ALL()`
+- [ ] Detect seasonality: `TS_DETECT_SEASONALITY()`
 - [ ] Detect changepoints: `TS_DETECT_CHANGEPOINTS_BY()`
 - [ ] Remove edge zeros: `TS_DROP_EDGE_ZEROS()` (if applicable)
 - [ ] Validate: Re-run `TS_STATS()` on prepared data

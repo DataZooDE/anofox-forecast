@@ -27,14 +27,18 @@ CREATE TABLE sales_stats AS
 SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount);
 
 -- View overall summary
-SELECT * FROM TS_DATASET_SUMMARY('sales_stats');
+SELECT * FROM TS_STATS_SUMMARY('sales_stats');
 
 -- Generate quality report
 SELECT * FROM TS_QUALITY_REPORT('sales_stats', 30);
 
 -- Detect seasonality
 CREATE TABLE sales_seasonality AS
-SELECT * FROM TS_DETECT_SEASONALITY('sales_raw', product_id, date, sales_amount);
+SELECT 
+    product_id,
+    TS_DETECT_SEASONALITY(LIST(sales_amount ORDER BY date)) AS detected_periods
+FROM sales_raw
+GROUP BY product_id;
 
 SELECT * FROM sales_seasonality;
 

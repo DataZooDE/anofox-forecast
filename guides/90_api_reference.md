@@ -401,7 +401,7 @@ Comprehensive data quality checks.
 - Short series
 - End date alignment
 
-### TS_DATASET_SUMMARY
+### TS_STATS_SUMMARY
 
 Overall dataset statistics.
 
@@ -409,17 +409,17 @@ Overall dataset statistics.
 
 <!-- include: test/sql/docs_examples/90_api_reference_statistics_12.sql -->
 
-### TS_GET_PROBLEMATIC
+###
 
 Identify low-quality series.
 
 **Signature**:
 
 ```sql
-TS_DETECT_SEASONALITY_ALL(table_name, group_col, date_col, value_col) → TABLE
+(table_name, group_col, date_col, value_col) → TABLE
 ```
 
-### TS_DETECT_SEASONALITY_ALL
+###
 
 Detect seasonality for all series.
 

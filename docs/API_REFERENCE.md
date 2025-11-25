@@ -70,11 +70,9 @@ Functions follow consistent naming patterns:
 3. [EDA Macros](#eda-macros)
    - [TS_STATS](#ts_stats)
    - [TS_QUALITY_REPORT](#ts_quality_report)
-   - [TS_DATASET_SUMMARY](#ts_dataset_summary)
-   - [TS_GET_PROBLEMATIC](#ts_get_problematic)
-   - [TS_DETECT_SEASONALITY_ALL](#ts_detect_seasonality_all)
+   - [TS_STATS_SUMMARY](#ts_stats_summary)
 4. [Data Quality Macros](#data-quality-macros)
-   - [TS_DATA_QUALITY_HEALTH_CARD](#ts_data_quality_health_card)
+   - [TS_DATA_QUALITY](#ts_data_quality)
    - [TS_DATA_QUALITY_SUMMARY](#ts_data_quality_summary)
 5. [Data Preparation Macros](#data-preparation-macros)
    - [Gap Filling](#gap-filling)
@@ -623,78 +621,43 @@ TS_QUALITY_REPORT(
 
 ---
 
-### TS_DATASET_SUMMARY
+### TS_STATS_SUMMARY
 
 **Overall Dataset Statistics**
 
 **Signature:**
 ```sql
-TS_DATASET_SUMMARY(
+TS_STATS_SUMMARY(
     stats_table    VARCHAR
 ) → TABLE
 ```
 
-**Returns:** Aggregate statistics across all series.
-
----
-
-### TS_GET_PROBLEMATIC
-
-**Identify Low-Quality Series**
-
-**Signature:**
-```sql
-TS_GET_PROBLEMATIC(
-    stats_table         VARCHAR,
-    quality_threshold   DOUBLE
-) → TABLE
-```
-
-**Returns:** Series below quality threshold.
-
----
-
-### TS_DETECT_SEASONALITY_ALL
-
-**Detect Seasonality for All Series**
-
-**Signature:**
-```sql
-TS_DETECT_SEASONALITY_ALL(
-    table_name    VARCHAR,
-    group_col     ANY,
-    date_col      DATE | TIMESTAMP | INTEGER,
-    value_col     DOUBLE
-) → TABLE
-```
+**Returns:** Aggregate statistics across all series from TS_STATS output.
 
 **Returns:**
 ```sql
 TABLE(
-    series_id          ANY,
-    detected_periods  INTEGER[],
-    primary_period     INTEGER,
-    is_seasonal        BOOLEAN
+    total_series        INTEGER,
+    total_observations  BIGINT,
+    avg_series_length   DOUBLE,
+    date_span           INTEGER,
+    frequency           VARCHAR
 )
-```
-
-**Example:**
-```sql
-SELECT * FROM TS_DETECT_SEASONALITY_ALL('sales', product_id, date, amount)
-WHERE is_seasonal = true;
 ```
 
 ---
 
+
+
 ## Data Quality Macros
 
-### TS_DATA_QUALITY_HEALTH_CARD
+### TS_DATA_QUALITY
 
 **Comprehensive Data Quality Assessment**
 
 **Signature:**
 ```sql
-TS_DATA_QUALITY_HEALTH_CARD(
+TS_DATA_QUALITY(
     table_name      VARCHAR,
     unique_id_col   ANY,
     date_col        DATE | TIMESTAMP | INTEGER,
@@ -725,7 +688,7 @@ TABLE(
 
 **Example:**
 ```sql
-SELECT * FROM TS_DATA_QUALITY_HEALTH_CARD('sales', product_id, date, amount, 30)
+SELECT * FROM TS_DATA_QUALITY('sales', product_id, date, amount, 30)
 WHERE dimension = 'Temporal' AND metric = 'timestamp_gaps';
 ```
 

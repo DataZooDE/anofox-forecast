@@ -42,7 +42,7 @@ low_quality_series: 23
 ```sql
 -- Generate comprehensive health card (n_short parameter defaults to 30 if NULL)
 CREATE TABLE health_card AS
-SELECT * FROM TS_DATA_QUALITY_HEALTH_CARD('sales_raw', product_id, date, sales_amount, 30);
+SELECT * FROM TS_DATA_QUALITY('sales_raw', product_id, date, sales_amount, 30);
 
 -- View all issues
 SELECT * FROM health_card ORDER BY dimension, metric;
@@ -177,14 +177,14 @@ Tailor to your specific needs:
 
 ### Before Forecasting
 
-- [ ] Check data quality: `TS_STATS()`, `TS_DATA_QUALITY_HEALTH_CARD()`
+- [ ] Check data quality: `TS_STATS()`, `TS_DATA_QUALITY()`
 - [ ] Fill time gaps: `TS_FILL_GAPS()`
 - [ ] Fill up to end date: `TS_FILL_FORWARD()`
 - [ ] Handle missing values: `TS_FILL_NULLS_*()`
 - [ ] Remove constant series: `TS_DROP_CONSTANT()`
 - [ ] Check minimum length: `TS_DROP_SHORT()`
 - [ ] Remove leading zeros: `TS_DROP_LEADING_ZEROS()`
-- [ ] Detect seasonality: `TS_DETECT_SEASONALITY_ALL()`
+- [ ] Detect seasonality: `TS_DETECT_SEASONALITY()`
 - [ ] Detect changepoints: `TS_DETECT_CHANGEPOINTS_BY()`
 - [ ] Remove edge zeros: `TS_DROP_EDGE_ZEROS()` (if applicable)
 - [ ] Validate: Re-run `TS_STATS()` on prepared data

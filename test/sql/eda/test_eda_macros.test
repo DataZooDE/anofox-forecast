@@ -142,10 +142,14 @@ WHERE series_id = 'series_3';
 true	true
 
 
-# Test: TS_DETECT_SEASONALITY_ALL - Seasonality detection
+# Test: TS_DETECT_SEASONALITY - Seasonality detection with GROUP BY
 statement ok
 CREATE TABLE seasonality_result AS
-SELECT * FROM ts_detect_seasonality_all(eda_test_data, series_id, date_col, value);
+SELECT 
+    series_id,
+    TS_DETECT_SEASONALITY(LIST(value ORDER BY date_col)) AS detected_periods
+FROM eda_test_data
+GROUP BY series_id;
 
 # Verify seasonality detection ran for all series
 query I
@@ -159,7 +163,7 @@ query I
 SELECT COUNT(*) = 1
 FROM (
     SELECT 
-        series_id, detected_periods, primary_period, is_seasonal
+        series_id, detected_periods
     FROM seasonality_result
     LIMIT 1
 );

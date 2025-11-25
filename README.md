@@ -213,7 +213,11 @@ WITH filled AS (
 SELECT * FROM TS_FILL_NULLS_FORWARD('filled', product_id, date, amount);
 
 -- 3. Detect seasonality
-SELECT * FROM TS_DETECT_SEASONALITY_ALL('sales_prepared', product_id, date, amount);
+SELECT 
+    product_id,
+    TS_DETECT_SEASONALITY(LIST(amount ORDER BY date)) AS detected_periods
+FROM sales_prepared
+GROUP BY product_id;
 
 -- 4. Generate forecasts with diagnostics
 CREATE TABLE forecasts AS
@@ -404,14 +408,8 @@ TS_STATS(table, group_col, date_col, value_col)
 TS_QUALITY_REPORT(stats_table, min_length)
 -- Returns: quality assessment with configurable minimum length threshold
 
-TS_DATASET_SUMMARY(stats_table)
--- Returns: aggregate statistics across all series
-
-TS_GET_PROBLEMATIC(stats_table, quality_threshold)
--- Returns: series below quality threshold
-
-TS_DETECT_SEASONALITY_ALL(table, group_col, date_col, value_col)
--- Returns: detected seasonal periods for all series
+TS_STATS_SUMMARY(stats_table)
+-- Returns: aggregate statistics across all series from TS_STATS output
 ```
 
 ### Data Quality Health Card (2 macros)
@@ -419,7 +417,7 @@ TS_DETECT_SEASONALITY_ALL(table, group_col, date_col, value_col)
 Comprehensive data quality assessment:
 
 ```sql
-TS_DATA_QUALITY_HEALTH_CARD(table, unique_id_col, date_col, value_col, n_short)
+TS_DATA_QUALITY(table, unique_id_col, date_col, value_col, n_short)
 -- Returns: comprehensive health card with metrics and values by dimension
 -- Dimensions: Structural, Temporal, Magnitude, Behavioural
 -- Parameters: n_short (optional, default 30) - threshold for short series detection

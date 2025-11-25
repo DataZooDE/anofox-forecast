@@ -1,4 +1,8 @@
-SELECT * FROM TS_DETECT_SEASONALITY_ALL('sales', product_id, date, sales_amount);
+SELECT 
+    product_id,
+    TS_DETECT_SEASONALITY(LIST(sales_amount ORDER BY date)) AS detected_periods
+FROM sales
+GROUP BY product_id;
 
 -- Returns:
 -- | series_id | detected_periods | primary_period | is_seasonal |

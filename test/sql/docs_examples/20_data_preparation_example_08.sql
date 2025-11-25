@@ -1,5 +1,5 @@
 -- Overall statistics
-SELECT * FROM TS_DATASET_SUMMARY('stats');
+SELECT * FROM TS_STATS_SUMMARY('stats');
 
 -- Example output:
 -- | total_series | total_observations | avg_series_length | date_span | frequency |

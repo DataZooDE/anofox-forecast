@@ -70,29 +70,55 @@ static const DefaultTableMacro eda_macros[] = {
             ORDER BY f.series_id
         )"},
 
-    // TS_DETECT_SEASONALITY_ALL: Detect seasonality for all series
+    // TS_STATS_SUMMARY: Aggregate statistics from TS_STATS output
     {DEFAULT_SCHEMA,
-     "ts_detect_seasonality_all",
-     {"table_name", "group_col", "date_col", "value_col", nullptr},
+     "ts_stats_summary",
+     {"stats_table", nullptr},
      {{nullptr, nullptr}},
      R"(
-            WITH series_agg AS (
+            WITH stats AS (
+                SELECT * FROM QUERY_TABLE(stats_table)
+            ),
+            series_intervals AS (
                 SELECT 
-                    group_col AS series_id,
-                    LIST(value_col ORDER BY date_col) AS values
-                FROM QUERY_TABLE(table_name)
-                GROUP BY group_col
+                    series_id,
+                    CASE 
+                        WHEN expected_length > 1 AND end_date >= start_date
+                        THEN CAST(DATEDIFF('day', start_date, end_date) AS DOUBLE) / GREATEST(expected_length - 1, 1)
+                        ELSE NULL
+                    END AS avg_interval_days
+                FROM stats
+            ),
+            aggregated AS (
+                SELECT 
+                    COUNT(DISTINCT s.series_id) AS total_series,
+                    SUM(s.length) AS total_observations,
+                    ROUND(AVG(CAST(s.length AS DOUBLE)), 2) AS avg_series_length,
+                    MIN(s.start_date) AS overall_start_date,
+                    MAX(s.end_date) AS overall_end_date,
+                    ROUND(AVG(si.avg_interval_days), 2) AS avg_interval_days
+                FROM stats s
+                LEFT JOIN series_intervals si ON s.series_id = si.series_id
             )
             SELECT 
-                series_id,
-                TS_DETECT_SEASONALITY(values) AS detected_periods,
+                total_series,
+                total_observations,
+                avg_series_length,
                 CASE 
-                    WHEN LEN(TS_DETECT_SEASONALITY(values)) > 0 
-                    THEN TS_DETECT_SEASONALITY(values)[1]
-                    ELSE NULL 
-                END AS primary_period,
-                LEN(TS_DETECT_SEASONALITY(values)) > 0 AS is_seasonal
-            FROM series_agg
+                    WHEN overall_end_date >= overall_start_date
+                    THEN CAST(DATEDIFF('day', overall_start_date, overall_end_date) AS INTEGER)
+                    ELSE 0
+                END AS date_span,
+                CASE 
+                    WHEN avg_interval_days IS NULL THEN 'Unknown'
+                    WHEN avg_interval_days < 0.5 THEN 'Sub-hourly'
+                    WHEN avg_interval_days < 1.0 THEN 'Hourly'
+                    WHEN avg_interval_days < 7.0 THEN 'Daily'
+                    WHEN avg_interval_days < 30.0 THEN 'Weekly'
+                    WHEN avg_interval_days < 90.0 THEN 'Monthly'
+                    ELSE 'Quarterly+'
+                END AS frequency
+            FROM aggregated
         )"},
 
     // End marker

@@ -2,7 +2,11 @@
 SELECT * FROM TS_STATS('my_sales', product_id, date, sales);
 
 -- 2. Detect seasonality
-SELECT * FROM TS_DETECT_SEASONALITY_ALL('my_sales', product_id, date, sales);
+SELECT 
+    product_id,
+    TS_DETECT_SEASONALITY(LIST(sales ORDER BY date)) AS detected_periods
+FROM my_sales
+GROUP BY product_id;
 
 -- 3. Try different models
 -- See guides/11_model_selection.md

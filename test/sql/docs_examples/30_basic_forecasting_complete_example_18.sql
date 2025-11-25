@@ -23,7 +23,11 @@ SELECT * FROM TS_QUALITY_REPORT('sales_stats', 30);
 
 -- Step 3: Detect seasonality
 CREATE TABLE seasonality AS
-SELECT * FROM TS_DETECT_SEASONALITY_ALL('sales_prep', product_id, date, sales_amount);
+SELECT 
+    product_id,
+    TS_DETECT_SEASONALITY(LIST(sales_amount ORDER BY date)) AS detected_periods
+FROM sales_prep
+GROUP BY product_id;
 
 SELECT * FROM seasonality;
 

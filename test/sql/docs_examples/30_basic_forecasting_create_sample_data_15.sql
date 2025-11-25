@@ -1,10 +1,21 @@
 -- Don't guess - detect!
-SELECT * FROM TS_DETECT_SEASONALITY_ALL('sales', product_id, date, amount);
+SELECT 
+    product_id,
+    TS_DETECT_SEASONALITY(LIST(amount ORDER BY date)) AS detected_periods
+FROM sales
+GROUP BY product_id;
 
 -- Use detected period in forecast
 WITH seasonality AS (
-    SELECT product_id, primary_period
-    FROM TS_DETECT_SEASONALITY_ALL('sales', product_id, date, amount)
+    SELECT 
+        product_id, 
+        CASE 
+            WHEN LEN(TS_DETECT_SEASONALITY(LIST(amount ORDER BY date))) > 0 
+            THEN TS_DETECT_SEASONALITY(LIST(amount ORDER BY date))[1]
+            ELSE NULL 
+        END AS primary_period
+    FROM sales
+    GROUP BY product_id
 )
 SELECT f.*
 FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28,
