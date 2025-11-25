@@ -181,6 +181,7 @@ if(BUILD_TESTING)
         # tests/integration/test_quick_pipeline.cpp  # Disabled: depends on transform classes
         tests/integration/test_monitoring_workflow.cpp
         tests/features/test_tsfresh_features.cpp
+        tests/features/test_new_stats_features.cpp
     )
 
     add_executable(anofox-time-tests

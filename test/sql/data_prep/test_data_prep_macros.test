@@ -218,3 +218,252 @@ DROP TABLE filled_data;
 statement ok
 DROP TABLE clean_data;
 
+# Test: TS_FILL_FORWARD - Extend series to target date
+statement ok
+CREATE TABLE test_forward AS
+SELECT date_col, 'series_1' AS sid, 100.0 + i::DOUBLE AS val
+FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM generate_series(1, 10) t(i));
+
+statement ok
+CREATE TABLE extended_forward AS
+SELECT * FROM ts_fill_forward(test_forward, sid, date_col, val, '2024-01-15'::DATE);
+
+# Verify series extended to target date (10 original -> 14 total: 2024-01-02 to 2024-01-15)
+query I
+SELECT COUNT(*) = 14
+FROM extended_forward
+WHERE group_col = 'series_1';
+----
+true
+
+# Test: TS_DROP_GAPPY - Drop series with excessive gaps
+statement ok
+CREATE TABLE test_gappy AS
+SELECT date_col, 'gappy_series' AS sid, 100.0 AS val
+FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM generate_series(1, 20) t(i))
+WHERE i NOT IN (5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);  -- 10 gaps out of 20 = 50% gaps
+
+statement ok
+CREATE TABLE no_gappy AS
+SELECT * FROM ts_drop_gappy(test_gappy, sid, date_col, 0.40);  -- Max 40% gaps
+
+# Verify gappy series removed (50% > 40%)
+query I
+SELECT COUNT(DISTINCT group_col) = 0
+FROM no_gappy;
+----
+true
+
+# Test: TS_DROP_EDGE_ZEROS - Remove both leading and trailing zeros
+statement ok
+CREATE TABLE test_edge_zeros AS
+SELECT date_col, 'edge_zeros' AS sid, 
+    CASE 
+        WHEN i <= 3 THEN 0.0
+        WHEN i >= 8 THEN 0.0
+        ELSE i::DOUBLE
+    END AS val
+FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM generate_series(1, 10) t(i));
+
+statement ok
+CREATE TABLE no_edge_zeros AS
+SELECT * FROM ts_drop_edge_zeros(test_edge_zeros, sid, date_col, val);
+
+# Verify edge zeros removed (10 -> 4 rows: 4, 5, 6, 7)
+query I
+SELECT COUNT(*) = 4
+FROM no_edge_zeros;
+----
+true
+
+# Test: TS_FILL_NULLS_CONST - Fill with constant value
+statement ok
+CREATE TABLE test_const_fill AS
+SELECT date_col, 'series_1' AS sid, 
+    CASE WHEN i BETWEEN 5 AND 7 THEN NULL ELSE 100.0 + i::DOUBLE END AS val
+FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM generate_series(1, 10) t(i));
+
+statement ok
+CREATE TABLE filled_const AS
+SELECT * FROM ts_fill_nulls_const(test_const_fill, sid, date_col, val, 0.0);
+
+# Verify all NULLs filled with 0.0
+query I
+SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) = 0
+FROM filled_const;
+----
+true
+
+# Verify filled values are 0.0
+query I
+SELECT COUNT(*) = 3
+FROM filled_const
+WHERE value_col = 0.0;
+----
+true
+
+# Test: TS_FILL_NULLS_INTERPOLATE - Linear interpolation
+statement ok
+CREATE TABLE test_interpolate AS
+SELECT date_col, 'series_1' AS sid,
+    CASE 
+        WHEN i = 1 THEN 100.0
+        WHEN i BETWEEN 2 AND 4 THEN NULL
+        WHEN i = 5 THEN 200.0
+        ELSE 100.0 + i::DOUBLE
+    END AS val
+FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM generate_series(1, 10) t(i));
+
+statement ok
+CREATE TABLE filled_interpolate AS
+SELECT * FROM ts_fill_nulls_interpolate(test_interpolate, sid, date_col, val);
+
+# Verify NULLs are interpolated (should be between 100 and 200)
+query I
+SELECT COUNT(*) = 3
+FROM filled_interpolate
+WHERE value_col BETWEEN 100.0 AND 200.0
+  AND value_col IS NOT NULL;
+----
+true
+
+# Test: TS_TRANSFORM_LOG - Log transformation
+statement ok
+CREATE TABLE test_log AS
+SELECT date_col, 'series_1' AS sid, EXP(i::DOUBLE) AS val
+FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM generate_series(1, 5) t(i));
+
+statement ok
+CREATE TABLE transformed_log AS
+SELECT * FROM ts_transform_log(test_log, sid, date_col, val);
+
+# Verify log transformation applied (should be approximately i)
+query I
+SELECT COUNT(*) = 5
+FROM transformed_log
+WHERE ABS(value_col - (SELECT i FROM generate_series(1, 5) t(i) WHERE i = EXTRACT(DAY FROM date_col - '2024-01-01'::TIMESTAMP)::INT)) < 0.1;
+----
+true
+
+# Test: TS_DIFF - Differencing
+statement ok
+CREATE TABLE test_diff AS
+SELECT date_col, 'series_1' AS sid, i::DOUBLE * 10.0 AS val
+FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM generate_series(1, 5) t(i));
+
+statement ok
+CREATE TABLE differenced AS
+SELECT * FROM ts_diff(test_diff, sid, date_col, val, 1);
+
+# Verify differencing applied (should be approximately 10.0 for order=1)
+query I
+SELECT COUNT(*) >= 3
+FROM differenced
+WHERE value_col BETWEEN 9.0 AND 11.0;
+----
+true
+
+# Test: TS_NORMALIZE_MINMAX - Min-Max normalization
+statement ok
+CREATE TABLE test_normalize AS
+SELECT date_col, 'series_1' AS sid, i::DOUBLE * 10.0 AS val
+FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM generate_series(1, 5) t(i));
+
+statement ok
+CREATE TABLE normalized AS
+SELECT * FROM ts_normalize_minmax(test_normalize, sid, date_col, val);
+
+# Verify normalization (values should be between 0 and 1)
+query I
+SELECT COUNT(*) = 5
+FROM normalized
+WHERE value_col >= 0.0 AND value_col <= 1.0;
+----
+true
+
+# Verify min is 0.0 and max is 1.0
+query II
+SELECT MIN(value_col) = 0.0, MAX(value_col) = 1.0
+FROM normalized;
+----
+true	true
+
+# Test: TS_STANDARDIZE - Z-score standardization
+statement ok
+CREATE TABLE test_standardize AS
+SELECT date_col, 'series_1' AS sid, i::DOUBLE * 10.0 AS val
+FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM generate_series(1, 5) t(i));
+
+statement ok
+CREATE TABLE standardized AS
+SELECT * FROM ts_standardize(test_standardize, sid, date_col, val);
+
+# Verify standardization (mean should be approximately 0, std approximately 1)
+query I
+SELECT COUNT(*) = 5
+FROM standardized
+WHERE value_col IS NOT NULL;
+----
+true
+
+# Verify mean is approximately 0
+query I
+SELECT ABS(AVG(value_col)) < 0.1
+FROM standardized;
+----
+true
+
+# Test: TS_PREPARE_STANDARD removed - use individual macros instead
+# Verify other macros still work
+query I
+SELECT COUNT(*) > 0
+FROM prepared;
+----
+true
+
+# Cleanup new test tables
+statement ok
+DROP TABLE test_forward;
+statement ok
+DROP TABLE extended_forward;
+statement ok
+DROP TABLE test_gappy;
+statement ok
+DROP TABLE no_gappy;
+statement ok
+DROP TABLE test_edge_zeros;
+statement ok
+DROP TABLE no_edge_zeros;
+statement ok
+DROP TABLE test_const_fill;
+statement ok
+DROP TABLE filled_const;
+statement ok
+DROP TABLE test_interpolate;
+statement ok
+DROP TABLE filled_interpolate;
+statement ok
+DROP TABLE test_log;
+statement ok
+DROP TABLE transformed_log;
+statement ok
+DROP TABLE test_boxcox;
+statement ok
+DROP TABLE transformed_boxcox;
+statement ok
+DROP TABLE test_diff;
+statement ok
+DROP TABLE differenced;
+statement ok
+DROP TABLE test_normalize;
+statement ok
+DROP TABLE normalized;
+statement ok
+DROP TABLE test_standardize;
+statement ok
+DROP TABLE standardized;
+statement ok
+DROP TABLE test_pipeline;
+statement ok
+DROP TABLE prepared;
+

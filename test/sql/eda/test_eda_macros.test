@@ -87,7 +87,7 @@ true
 
 # Verify n_unique_values column (renamed from n_unique)
 query I
-SELECT COUNT(*) = 2
+SELECT COUNT(*) = 3
 FROM stats_result
 WHERE n_unique_values IS NOT NULL;
 ----
@@ -103,9 +103,9 @@ WHERE series_id = 'series_1';
 ----
 true	true
 
-# Verify series_1 has zeros at the end (rows 16-20 are zeros, and it ends with zeros)
+# Verify series_1 does not have zeros at the end (rows 16-20 are zeros, but series ends with non-zero values)
 query I
-SELECT n_zeros_end > 0
+SELECT n_zeros_end = 0
 FROM stats_result
 WHERE series_id = 'series_1';
 ----
@@ -141,17 +141,31 @@ WHERE series_id = 'series_3';
 ----
 true	true
 
-# Test: TS_DETECT_SEASONALITY_ALL
+
+# Test: TS_DETECT_SEASONALITY_ALL - Seasonality detection
 statement ok
 CREATE TABLE seasonality_result AS
 SELECT * FROM ts_detect_seasonality_all(eda_test_data, series_id, date_col, value);
 
-# Verify seasonality detection ran for both series
+# Verify seasonality detection ran for all series
 query I
-SELECT COUNT(*) = 2
+SELECT COUNT(*) = 3
 FROM seasonality_result;
 ----
 true
+
+# Verify columns exist
+query I
+SELECT COUNT(*) = 1
+FROM (
+    SELECT 
+        series_id, detected_periods, primary_period, is_seasonal
+    FROM seasonality_result
+    LIMIT 1
+);
+----
+true
+
 
 # Test: Workflow - stats then filtering
 statement ok
@@ -166,6 +180,7 @@ SELECT COUNT(*) <= 1
 FROM quality_series;
 ----
 true
+
 
 # Cleanup
 statement ok

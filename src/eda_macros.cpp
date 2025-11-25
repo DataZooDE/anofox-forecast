@@ -13,79 +13,18 @@ static const DefaultTableMacro eda_macros[] = {
      {"table_name", "group_col", "date_col", "value_col", nullptr},
      {{nullptr, nullptr}},
      R"(
-            WITH ordered_data AS (
+            WITH features_agg AS (
                 SELECT 
-                    group_col,
-                    date_col,
-                    value_col,
-                    ROW_NUMBER() OVER (PARTITION BY group_col ORDER BY date_col) AS row_num
+                    group_col AS series_id,
+                    ts_features(date_col, value_col, [
+                        'mean', 'standard_deviation', 'minimum', 'maximum', 'median',
+                        'n_zeros', 'n_unique_values', 'is_constant',
+                        'plateau_size', 'plateau_size_non_zero', 'n_zeros_start', 'n_zeros_end'
+                    ]) AS feats
                 FROM QUERY_TABLE(table_name)
-            ),
-            value_changes AS (
-                SELECT 
-                    group_col,
-                    date_col,
-                    value_col,
-                    row_num,
-                    CASE 
-                        WHEN value_col IS DISTINCT FROM LAG(value_col) OVER (PARTITION BY group_col ORDER BY date_col)
-                        THEN 1
-                        ELSE 0
-                    END AS value_changed
-                FROM ordered_data
-            ),
-            run_groups AS (
-                SELECT 
-                    group_col,
-                    date_col,
-                    value_col,
-                    row_num,
-                    SUM(value_changed) OVER (PARTITION BY group_col ORDER BY date_col ROWS UNBOUNDED PRECEDING) AS run_id
-                FROM value_changes
-            ),
-            run_lengths AS (
-                SELECT 
-                    group_col,
-                    run_id,
-                    value_col,
-                    COUNT(*) AS run_length,
-                    MIN(row_num) AS run_start_row,
-                    MAX(row_num) AS run_end_row
-                FROM run_groups
-                GROUP BY group_col, run_id, value_col
-            ),
-            non_zero_run_lengths AS (
-                SELECT 
-                    group_col,
-                    run_id,
-                    value_col,
-                    COUNT(*) AS run_length,
-                    MIN(row_num) AS run_start_row,
-                    MAX(row_num) AS run_end_row
-                FROM run_groups
-                WHERE value_col != 0 OR value_col IS NULL
-                GROUP BY group_col, run_id, value_col
-            ),
-            zeros_start AS (
-                SELECT 
-                    group_col,
-                    COALESCE(MAX(CASE WHEN value_col = 0 AND run_start_row = 1 THEN run_length END), 0) AS n_zeros_start
-                FROM run_lengths
                 GROUP BY group_col
             ),
-            zeros_end AS (
-                SELECT 
-                    rl.group_col,
-                    COALESCE(MAX(CASE WHEN rl.value_col = 0 AND rl.run_end_row = od.max_row THEN rl.run_length END), 0) AS n_zeros_end
-                FROM run_lengths rl
-                INNER JOIN (
-                    SELECT group_col, MAX(row_num) AS max_row
-                    FROM ordered_data
-                    GROUP BY group_col
-                ) od ON rl.group_col = od.group_col
-                GROUP BY rl.group_col
-            ),
-            aggregated_stats AS (
+            temporal_metadata AS (
                 SELECT 
                     group_col AS series_id,
                     COUNT(*) AS length,
@@ -95,58 +34,40 @@ static const DefaultTableMacro eda_macros[] = {
                         WHEN MAX(date_col) >= MIN(date_col)
                         THEN CAST(DATEDIFF('day', MIN(date_col), MAX(date_col)) AS INTEGER) + 1
                         ELSE 1
-                    END AS expected_length,
-                    ROUND(AVG(value_col), 2) AS mean,
-                    ROUND(STDDEV(value_col), 2) AS std,
-                    ROUND(MIN(value_col), 2) AS min,
-                    ROUND(MAX(value_col), 2) AS max,
-                    ROUND(MEDIAN(value_col), 2) AS median,
-                    COUNT(CASE WHEN value_col IS NULL THEN 1 END) AS n_null,
-                    COUNT(CASE WHEN value_col = 0 THEN 1 END) AS n_zeros,
-                    COUNT(DISTINCT value_col) AS n_unique_values,
-                    COUNT(DISTINCT value_col) = 1 AS is_constant
+                    END AS expected_length
                 FROM QUERY_TABLE(table_name)
                 GROUP BY group_col
             ),
-            plateau_stats AS (
+            null_counts AS (
                 SELECT 
-                    group_col,
-                    MAX(run_length) AS plateau_size
-                FROM run_lengths
-                GROUP BY group_col
-            ),
-            plateau_non_zero_stats AS (
-                SELECT 
-                    group_col,
-                    COALESCE(MAX(run_length), 0) AS plateau_size_non_zero
-                FROM non_zero_run_lengths
+                    group_col AS series_id,
+                    COUNT(CASE WHEN value_col IS NULL THEN 1 END) AS n_null
+                FROM QUERY_TABLE(table_name)
                 GROUP BY group_col
             )
             SELECT 
-                a.series_id,
-                a.length,
-                a.start_date,
-                a.end_date,
-                a.expected_length,
-                a.mean,
-                a.std,
-                a.min,
-                a.max,
-                a.median,
-                a.n_null,
-                a.n_zeros,
-                a.n_unique_values,
-                a.is_constant,
-                COALESCE(p.plateau_size, 0) AS plateau_size,
-                COALESCE(pnz.plateau_size_non_zero, 0) AS plateau_size_non_zero,
-                COALESCE(zs.n_zeros_start, 0) AS n_zeros_start,
-                COALESCE(ze.n_zeros_end, 0) AS n_zeros_end
-            FROM aggregated_stats a
-            LEFT JOIN plateau_stats p ON a.series_id = p.group_col
-            LEFT JOIN plateau_non_zero_stats pnz ON a.series_id = pnz.group_col
-            LEFT JOIN zeros_start zs ON a.series_id = zs.group_col
-            LEFT JOIN zeros_end ze ON a.series_id = ze.group_col
-            ORDER BY a.series_id
+                f.series_id,
+                t.length,
+                t.start_date,
+                t.end_date,
+                t.expected_length,
+                ROUND(f.feats.mean, 2) AS mean,
+                ROUND(f.feats.standard_deviation, 2) AS std,
+                ROUND(f.feats.minimum, 2) AS min,
+                ROUND(f.feats.maximum, 2) AS max,
+                ROUND(f.feats.median, 2) AS median,
+                n.n_null,
+                CAST(f.feats.n_zeros AS BIGINT) AS n_zeros,
+                CAST(f.feats.n_unique_values AS BIGINT) AS n_unique_values,
+                CAST(f.feats.is_constant AS BOOLEAN) AS is_constant,
+                CAST(f.feats.plateau_size AS BIGINT) AS plateau_size,
+                CAST(f.feats.plateau_size_non_zero AS BIGINT) AS plateau_size_non_zero,
+                CAST(f.feats.n_zeros_start AS BIGINT) AS n_zeros_start,
+                CAST(f.feats.n_zeros_end AS BIGINT) AS n_zeros_end
+            FROM features_agg f
+            INNER JOIN temporal_metadata t ON f.series_id = t.series_id
+            INNER JOIN null_counts n ON f.series_id = n.series_id
+            ORDER BY f.series_id
         )"},
 
     // TS_DETECT_SEASONALITY_ALL: Detect seasonality for all series

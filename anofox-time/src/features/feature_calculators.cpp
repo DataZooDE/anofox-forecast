@@ -7,6 +7,7 @@
 #include <limits>
 #include <numeric>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace anofoxtime::features {
 
@@ -1756,6 +1757,163 @@ double FeatureArCoeff(const Series &series, const ParameterMap &param, FeatureCa
 	return FeatureArCoefficient(series, param, cache);
 }
 
+// Run-length encoding utility structures and functions
+struct RunLength {
+	double value;
+	size_t count;
+};
+
+std::vector<RunLength> ComputeRunLengthEncoding(const Series &series) {
+	std::vector<RunLength> runs;
+	if (series.empty()) {
+		return runs;
+	}
+	
+	double current_value = series[0];
+	size_t current_count = 1;
+	
+	for (size_t i = 1; i < series.size(); ++i) {
+		if (series[i] == current_value) {
+			++current_count;
+		} else {
+			runs.push_back({current_value, current_count});
+			current_value = series[i];
+			current_count = 1;
+		}
+	}
+	runs.push_back({current_value, current_count});
+	
+	return runs;
+}
+
+size_t MaxRunLength(const Series &series) {
+	auto runs = ComputeRunLengthEncoding(series);
+	if (runs.empty()) {
+		return 0;
+	}
+	size_t max_run = 0;
+	for (const auto &run : runs) {
+		if (run.count > max_run) {
+			max_run = run.count;
+		}
+	}
+	return max_run;
+}
+
+size_t MaxRunLengthNonZero(const Series &series) {
+	auto runs = ComputeRunLengthEncoding(series);
+	if (runs.empty()) {
+		return 0;
+	}
+	size_t max_run = 0;
+	for (const auto &run : runs) {
+		if (run.value != 0.0 && run.count > max_run) {
+			max_run = run.count;
+		}
+	}
+	return max_run;
+}
+
+size_t LeadingZeros(const Series &series) {
+	if (series.empty()) {
+		return 0;
+	}
+	size_t count = 0;
+	for (double value : series) {
+		if (value == 0.0) {
+			++count;
+		} else {
+			break;
+		}
+	}
+	return count;
+}
+
+size_t TrailingZeros(const Series &series) {
+	if (series.empty()) {
+		return 0;
+	}
+	size_t count = 0;
+	for (auto it = series.rbegin(); it != series.rend(); ++it) {
+		if (*it == 0.0) {
+			++count;
+		} else {
+			break;
+		}
+	}
+	return count;
+}
+
+// New feature calculators for TS_STATS
+double FeatureNNull(const Series &series, const ParameterMap &, FeatureCache &) {
+	// Note: NULLs are filtered out before reaching feature calculators
+	// This feature will always return 0.0
+	// The actual n_null count should be computed in SQL separately
+	return 0.0;
+}
+
+double FeatureNZeros(const Series &series, const ParameterMap &, FeatureCache &) {
+	if (series.empty()) {
+		return 0.0;
+	}
+	size_t count = 0;
+	for (double value : series) {
+		if (value == 0.0) {
+			++count;
+		}
+	}
+	return static_cast<double>(count);
+}
+
+double FeatureNUniqueValues(const Series &series, const ParameterMap &, FeatureCache &) {
+	if (series.empty()) {
+		return 0.0;
+	}
+	std::unordered_set<double> unique_values;
+	for (double value : series) {
+		unique_values.insert(value);
+	}
+	return static_cast<double>(unique_values.size());
+}
+
+double FeatureIsConstant(const Series &series, const ParameterMap &, FeatureCache &) {
+	if (series.empty()) {
+		return 1.0; // Empty series is considered constant
+	}
+	if (series.size() == 1) {
+		return 1.0;
+	}
+	double first_value = series[0];
+	for (size_t i = 1; i < series.size(); ++i) {
+		if (series[i] != first_value) {
+			return 0.0;
+		}
+	}
+	return 1.0;
+}
+
+double FeaturePlateauSize(const Series &series, const ParameterMap &, FeatureCache &) {
+	if (series.empty()) {
+		return 0.0;
+	}
+	return static_cast<double>(MaxRunLength(series));
+}
+
+double FeaturePlateauSizeNonZero(const Series &series, const ParameterMap &, FeatureCache &) {
+	if (series.empty()) {
+		return 0.0;
+	}
+	return static_cast<double>(MaxRunLengthNonZero(series));
+}
+
+double FeatureNZerosStart(const Series &series, const ParameterMap &, FeatureCache &) {
+	return static_cast<double>(LeadingZeros(series));
+}
+
+double FeatureNZerosEnd(const Series &series, const ParameterMap &, FeatureCache &) {
+	return static_cast<double>(TrailingZeros(series));
+}
+
 } // namespace
 
 void RegisterBuiltinFeatureCalculators(FeatureRegistry &registry) {
@@ -2052,6 +2210,16 @@ void RegisterBuiltinFeatureCalculators(FeatureRegistry &registry) {
 	             Params({{"threshold", 0.98}, {"feature", "25"}}),
 	             Params({{"threshold", 0.98}, {"feature", "75"}})},
 	            FeatureMatrixProfile);
+	
+	// New features for TS_STATS
+	simple("n_null", FeatureNNull);
+	simple("n_zeros", FeatureNZeros);
+	simple("n_unique_values", FeatureNUniqueValues);
+	simple("is_constant", FeatureIsConstant);
+	simple("plateau_size", FeaturePlateauSize);
+	simple("plateau_size_non_zero", FeaturePlateauSizeNonZero);
+	simple("n_zeros_start", FeatureNZerosStart);
+	simple("n_zeros_end", FeatureNZerosEnd);
 }
 
 } // namespace anofoxtime::features

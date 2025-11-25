@@ -241,6 +241,313 @@ static const DefaultTableMacro data_prep_macros[] = {
             ORDER BY group_col, date_col
         )"},
 
+    // TS_FILL_FORWARD: Extend all series to a target date
+    {DEFAULT_SCHEMA,
+     "ts_fill_forward",
+     {"table_name", "group_col", "date_col", "value_col", "target_date", nullptr},
+     {{nullptr, nullptr}},
+     R"(
+            WITH base_aliased AS (
+                SELECT 
+                    group_col AS __gid,
+                    date_col AS __did,
+                    value_col AS __vid
+                FROM QUERY_TABLE(table_name)
+            ),
+            series_ranges AS (
+                SELECT DISTINCT
+                    __gid,
+                    MIN(__did) OVER (PARTITION BY __gid) AS __min,
+                    MAX(__did) OVER (PARTITION BY __gid) AS __max
+                FROM base_aliased
+            ),
+            target_dates AS (
+                SELECT 
+                    sr.__gid,
+                    sr.__min,
+                    target_date AS __target
+                FROM series_ranges sr
+            ),
+            expanded AS (
+                SELECT 
+                    td.__gid,
+                    UNNEST(GENERATE_SERIES(td.__min, td.__target, INTERVAL '1 day')) AS __did
+                FROM target_dates td
+            )
+            SELECT 
+                e.__gid AS group_col,
+                e.__did AS date_col,
+                b.__vid AS value_col
+            FROM expanded e
+            LEFT JOIN base_aliased b ON e.__gid = b.__gid AND e.__did = b.__did
+            ORDER BY e.__gid, e.__did
+        )"},
+
+    // TS_DROP_GAPPY: Drop series with excessive gaps
+    {DEFAULT_SCHEMA,
+     "ts_drop_gappy",
+     {"table_name", "group_col", "date_col", "max_gap_pct", nullptr},
+     {{nullptr, nullptr}},
+     R"(
+            WITH base_aliased AS (
+                SELECT 
+                    group_col AS __gid,
+                    date_col AS __did,
+                    group_col,
+                    date_col
+                FROM QUERY_TABLE(table_name)
+            ),
+            series_ranges AS (
+                SELECT 
+                    __gid,
+                    MIN(__did) AS __min,
+                    MAX(__did) AS __max,
+                    COUNT(*) AS actual_count
+                FROM base_aliased
+                GROUP BY __gid
+            ),
+            expected_counts AS (
+                SELECT 
+                    __gid,
+                    __min,
+                    __max,
+                    actual_count,
+                    CASE 
+                        WHEN __max >= __min
+                        THEN CAST(DATEDIFF('day', __min, __max) AS INTEGER) + 1
+                        ELSE 1
+                    END AS expected_count
+                FROM series_ranges
+            ),
+            gap_stats AS (
+                SELECT 
+                    __gid,
+                    actual_count,
+                    expected_count,
+                    CASE 
+                        WHEN expected_count > 0
+                        THEN 100.0 * (expected_count - actual_count) / expected_count
+                        ELSE 0.0
+                    END AS gap_pct
+                FROM expected_counts
+            ),
+            valid_series AS (
+                SELECT 
+                    __gid
+                FROM gap_stats
+                WHERE gap_pct <= CAST(max_gap_pct AS DOUBLE)
+            ),
+            orig_aliased AS (
+                SELECT 
+                    group_col AS __gid,
+                    *
+                FROM QUERY_TABLE(table_name)
+            )
+            SELECT 
+                oa.* EXCLUDE (__gid)
+            FROM orig_aliased oa
+            WHERE EXISTS (SELECT 1 FROM valid_series vs WHERE vs.__gid = oa.__gid)
+        )"},
+
+    // TS_DROP_EDGE_ZEROS: Remove both leading and trailing zeros
+    {DEFAULT_SCHEMA,
+     "ts_drop_edge_zeros",
+     {"table_name", "group_col", "date_col", "value_col", nullptr},
+     {{nullptr, nullptr}},
+     R"(
+            WITH with_bounds AS (
+                SELECT 
+                    group_col,
+                    date_col,
+                    value_col,
+                    MIN(CASE WHEN value_col != 0 THEN date_col END) OVER (PARTITION BY group_col) AS __first_nz,
+                    MAX(CASE WHEN value_col != 0 THEN date_col END) OVER (PARTITION BY group_col) AS __last_nz
+                FROM QUERY_TABLE(table_name)
+            )
+            SELECT 
+                group_col,
+                date_col,
+                value_col
+            FROM with_bounds
+            WHERE (__first_nz IS NULL OR date_col >= __first_nz)
+              AND (__last_nz IS NULL OR date_col <= __last_nz)
+            ORDER BY group_col, date_col
+        )"},
+
+    // TS_FILL_NULLS_CONST: Fill with constant value
+    {DEFAULT_SCHEMA,
+     "ts_fill_nulls_const",
+     {"table_name", "group_col", "date_col", "value_col", "fill_value", nullptr},
+     {{nullptr, nullptr}},
+     R"(
+            SELECT 
+                group_col,
+                date_col,
+                COALESCE(value_col, fill_value) AS value_col
+            FROM QUERY_TABLE(table_name)
+            ORDER BY group_col, date_col
+        )"},
+
+    // TS_FILL_NULLS_INTERPOLATE: Linear interpolation
+    {DEFAULT_SCHEMA,
+     "ts_fill_nulls_interpolate",
+     {"table_name", "group_col", "date_col", "value_col", nullptr},
+     {{nullptr, nullptr}},
+     R"(
+            WITH ordered_data AS (
+                SELECT 
+                    group_col,
+                    date_col,
+                    value_col,
+                    ROW_NUMBER() OVER (PARTITION BY group_col ORDER BY date_col) AS row_num,
+                    LAG(value_col) OVER (PARTITION BY group_col ORDER BY date_col) AS prev_val,
+                    LEAD(value_col) OVER (PARTITION BY group_col ORDER BY date_col) AS next_val,
+                    LAG(date_col) OVER (PARTITION BY group_col ORDER BY date_col) AS prev_date,
+                    LEAD(date_col) OVER (PARTITION BY group_col ORDER BY date_col) AS next_date
+                FROM QUERY_TABLE(table_name)
+            ),
+            interpolated AS (
+                SELECT 
+                    group_col,
+                    date_col,
+                    CASE 
+                        WHEN value_col IS NOT NULL THEN value_col
+                        WHEN prev_val IS NOT NULL AND next_val IS NOT NULL AND prev_date IS NOT NULL AND next_date IS NOT NULL
+                        THEN prev_val + (next_val - prev_val) * 
+                             CAST(DATEDIFF('day', prev_date, date_col) AS DOUBLE) / 
+                             CAST(DATEDIFF('day', prev_date, next_date) AS DOUBLE)
+                        WHEN prev_val IS NOT NULL THEN prev_val
+                        WHEN next_val IS NOT NULL THEN next_val
+                        ELSE NULL
+                    END AS value_col
+                FROM ordered_data
+            )
+            SELECT 
+                group_col,
+                date_col,
+                value_col
+            FROM interpolated
+            ORDER BY group_col, date_col
+        )"},
+
+    // TS_TRANSFORM_LOG: Log transformation
+    {DEFAULT_SCHEMA,
+     "ts_transform_log",
+     {"table_name", "group_col", "date_col", "value_col", nullptr},
+     {{nullptr, nullptr}},
+     R"(
+            SELECT 
+                group_col,
+                date_col,
+                CASE 
+                    WHEN value_col IS NULL THEN NULL
+                    WHEN value_col > 0 THEN LN(value_col)
+                    ELSE NULL
+                END AS value_col
+            FROM QUERY_TABLE(table_name)
+            ORDER BY group_col, date_col
+        )"},
+
+    // TS_DIFF: Differencing - Using 1st order difference only (order parameter causes parser issues)
+    {DEFAULT_SCHEMA,
+     "ts_diff",
+     {"table_name", "group_col", "date_col", "value_col", "order", nullptr},
+     {{nullptr, nullptr}},
+     R"(
+            WITH ordered_data AS (
+                SELECT 
+                    group_col,
+                    date_col,
+                    value_col,
+                    LAG(value_col, 1) OVER (PARTITION BY group_col ORDER BY date_col) AS lagged_value
+                FROM QUERY_TABLE(table_name)
+            )
+            SELECT 
+                group_col,
+                date_col,
+                CASE 
+                    WHEN value_col IS NULL OR lagged_value IS NULL THEN NULL
+                    ELSE value_col - lagged_value
+                END AS value_col
+            FROM ordered_data
+            ORDER BY group_col, date_col
+        )"},
+
+    // TS_NORMALIZE_MINMAX: Min-Max normalization (per series)
+    {DEFAULT_SCHEMA,
+     "ts_normalize_minmax",
+     {"table_name", "group_col", "date_col", "value_col", nullptr},
+     {{nullptr, nullptr}},
+     R"(
+            WITH series_stats AS (
+                SELECT 
+                    group_col AS __gid,
+                    MIN(value_col) AS __min_val,
+                    MAX(value_col) AS __max_val,
+                    MAX(value_col) - MIN(value_col) AS __range
+                FROM QUERY_TABLE(table_name)
+                WHERE value_col IS NOT NULL
+                GROUP BY group_col
+            ),
+            with_stats AS (
+                SELECT 
+                    t.group_col,
+                    t.date_col,
+                    t.value_col,
+                    ss.__min_val,
+                    ss.__range
+                FROM QUERY_TABLE(table_name) t
+                LEFT JOIN series_stats ss ON t.group_col = ss.__gid
+            )
+            SELECT 
+                group_col,
+                date_col,
+                CASE 
+                    WHEN value_col IS NULL THEN NULL
+                    WHEN __range = 0 THEN 0.0
+                    ELSE (value_col - __min_val) / __range
+                END AS value_col
+            FROM with_stats
+            ORDER BY group_col, date_col
+        )"},
+
+    // TS_STANDARDIZE: Z-score standardization (per series)
+    {DEFAULT_SCHEMA,
+     "ts_standardize",
+     {"table_name", "group_col", "date_col", "value_col", nullptr},
+     {{nullptr, nullptr}},
+     R"(
+            WITH series_stats AS (
+                SELECT 
+                    group_col AS __gid,
+                    AVG(value_col) AS __mean,
+                    STDDEV(value_col) AS __std
+                FROM QUERY_TABLE(table_name)
+                WHERE value_col IS NOT NULL
+                GROUP BY group_col
+            ),
+            with_stats AS (
+                SELECT 
+                    t.group_col,
+                    t.date_col,
+                    t.value_col,
+                    ss.__mean,
+                    ss.__std
+                FROM QUERY_TABLE(table_name) t
+                LEFT JOIN series_stats ss ON t.group_col = ss.__gid
+            )
+            SELECT 
+                group_col,
+                date_col,
+                CASE 
+                    WHEN value_col IS NULL THEN NULL
+                    WHEN __std IS NULL OR __std = 0 THEN 0.0
+                    ELSE (value_col - __mean) / __std
+                END AS value_col
+            FROM with_stats
+            ORDER BY group_col, date_col
+        )"},
+
     // End marker
     {nullptr, nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}};
 
