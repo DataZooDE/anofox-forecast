@@ -1,6 +1,6 @@
 # Anofox Forecast Extension - API Reference
 
-**Version:** 1.0.0  
+**Version:** 0.2.0  
 **DuckDB Version:** ≥ v1.4.2  
 **Forecasting Engine:** anofox-time
 
@@ -104,9 +104,8 @@ Functions follow consistent naming patterns:
     - [Global Parameters](#global-parameters)
     - [Model-Specific Parameters](#model-specific-parameters)
 11. [Function Coverage Matrix](#function-coverage-matrix)
-12. [Version History](#version-history)
-13. [Notes](#notes)
-14. [Support](#support)
+12. [Notes](#notes)
+13. [Support](#support)
 
 ---
 
@@ -118,7 +117,7 @@ SQL macros for exploratory data analysis and quality assessment.
 
 **TS_STATS**
 
-Per-Series Comprehensive Statistics
+Computes per-series statistical metrics including length, date ranges, central tendencies (mean, median), dispersion (std), value distributions (min, max, zeros), and quality indicators (nulls, uniqueness, constancy). Returns 23 metrics per series for exploratory analysis and data profiling.
 
 **Signature:**
 ```sql
@@ -166,7 +165,7 @@ SELECT * FROM TS_STATS('sales_raw', product_id, date, amount);
 
 **TS_QUALITY_REPORT**
 
-Data Quality Assessment
+Generates quality assessment report from TS_STATS output. Evaluates series against configurable thresholds for gaps, missing values, constant series, short series, and temporal alignment. Identifies series requiring data preparation steps.
 
 **Signature:**
 ```sql
@@ -195,7 +194,7 @@ TS_QUALITY_REPORT(
 
 **TS_STATS_SUMMARY**
 
-Overall Dataset Statistics
+Aggregates statistics across all series from TS_STATS output. Computes dataset-level metrics including total series count, total observations, average series length, date span, and inferred frequency. Provides high-level overview for dataset characterization.
 
 **Signature:**
 ```sql
@@ -221,7 +220,7 @@ TABLE(
 
 ## Data Quality
 
-### Comprehensive Assessment
+### Assessment
 
 **TS_DATA_QUALITY**
 
@@ -455,7 +454,8 @@ TS_DROP_CONSTANT(
 
 **Behavior:** Removes series with constant values (no variation).
 
-**Note:** This function may drop intermittent demand series (series with many zeros) as long as gaps have not been filled yet (e.g., with zeros via gap filling functions). If you need to preserve intermittent series, ensure gaps remain as NULL values rather than being filled.
+> [!WARNING]
+> This function may drop intermittent demand series (series with many zeros) as long as gaps have not been filled yet (e.g., with zeros via gap filling functions). If you need to preserve intermittent series, ensure gaps remain as NULL values rather than being filled.
 
 ---
 
@@ -475,7 +475,8 @@ TS_DROP_SHORT(
 
 **Behavior:** Removes series below minimum length.
 
-**Note:** This function may drop intermittent demand series (series with many zeros) as long as gaps have not been filled yet (e.g., with zeros via gap filling functions). If you need to preserve intermittent series, ensure gaps remain as NULL values rather than being filled.
+> [!WARNING]
+> This function may drop intermittent demand series (series with many zeros) as long as gaps have not been filled yet (e.g., with zeros via gap filling functions). If you need to preserve intermittent series, ensure gaps remain as NULL values rather than being filled.
 
 ---
 
@@ -495,7 +496,8 @@ TS_DROP_LEADING_ZEROS(
 ) → TABLE
 ```
 
-**Note:** Results may differ if `TS_FILL_GAPS` or `TS_FILL_FORWARD` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
+> [!WARNING]
+> Results may differ if `TS_FILL_GAPS` or `TS_FILL_FORWARD` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
 
 ---
 
@@ -513,7 +515,8 @@ TS_DROP_TRAILING_ZEROS(
 ) → TABLE
 ```
 
-**Note:** Results may differ if `TS_FILL_GAPS` or `TS_FILL_FORWARD` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
+> [!WARNING]
+> Results may differ if `TS_FILL_GAPS` or `TS_FILL_FORWARD` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
 
 ---
 
@@ -531,7 +534,8 @@ TS_DROP_EDGE_ZEROS(
 ) → TABLE
 ```
 
-**Note:** Results may differ if `TS_FILL_GAPS` or `TS_FILL_FORWARD` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
+> [!WARNING]
+> Results may differ if `TS_FILL_GAPS` or `TS_FILL_FORWARD` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
 
 ---
 
@@ -786,13 +790,13 @@ LIST<STRUCT(
 
 ### Extract Time Series Features
 
-**ts_features**
+**TS_FEATURES**
 
 Extract Time Series Features (tsfresh-compatible)
 
 **Signature:**
 ```sql
-ts_features(
+TS_FEATURES(
     ts_column           TIMESTAMP | DATE | BIGINT,
     value_column        DOUBLE,
     feature_selection   LIST(VARCHAR) | STRUCT | NULL,
@@ -819,7 +823,7 @@ ts_features(
 ```sql
 SELECT 
     product_id,
-    ts_features(
+    TS_FEATURES(
         date,
         sales,
         ['mean', 'variance', 'autocorrelation__lag_1'],
@@ -833,13 +837,13 @@ GROUP BY product_id;
 
 ### List Available Features
 
-**ts_features_list**
+**TS_FEATURES_LIST**
 
 List Available Features
 
 **Signature:**
 ```sql
-ts_features_list() → TABLE
+TS_FEATURES_LIST() → TABLE
 ```
 
 **Returns:**
@@ -859,13 +863,13 @@ TABLE(
 
 ### Load Feature Configuration from JSON
 
-**ts_features_config_from_json**
+**TS_FEATURES_CONFIG_FROM_JSON**
 
 Load Feature Configuration from JSON
 
 **Signature:**
 ```sql
-ts_features_config_from_json(
+TS_FEATURES_CONFIG_FROM_JSON(
     path    VARCHAR
 ) → STRUCT
 ```
@@ -887,18 +891,18 @@ STRUCT(
 
 ### Load Feature Configuration from CSV
 
-**ts_features_config_from_csv**
+**TS_FEATURES_CONFIG_FROM_CSV**
 
 Load Feature Configuration from CSV
 
 **Signature:**
 ```sql
-ts_features_config_from_csv(
+TS_FEATURES_CONFIG_FROM_CSV(
     path    VARCHAR
 ) → STRUCT
 ```
 
-**Returns:** Same as `ts_features_config_from_json`.
+**Returns:** Same as `TS_FEATURES_CONFIG_FROM_JSON`.
 
 **File Format:** CSV with header row containing `feature` and parameter columns.
 
@@ -1180,7 +1184,8 @@ TS_MAPE(
 
 **Formula:** MAPE = (100/n) × Σ|y - ŷ| / |y|
 
-**Note:** Returns NULL if any actual value is zero.
+> [!WARNING]
+> Returns NULL if any actual value is zero.
 
 ---
 
@@ -1202,7 +1207,8 @@ TS_SMAPE(
 
 **Range:** [0, 200]
 
-**Note:** Handles zero values better than MAPE.
+> [!WARNING]
+> Handles zero values better than MAPE.
 
 ---
 
@@ -1425,7 +1431,8 @@ GROUP BY product_id;
 | **ARIMA** | Manual ARIMA | `p`, `d`, `q`, `P`, `D`, `Q`, `s` |
 | **AutoARIMA** | Automatic ARIMA selection | `seasonal_period` |
 
-**Note:** ARIMA models require Eigen3 library.
+> [!WARNING]
+> ARIMA models require Eigen3 library.
 
 ### Multiple Seasonality Models (6)
 
@@ -1552,9 +1559,9 @@ These parameters work with **all forecasting models**:
 | Type | Count | Examples |
 |------|-------|----------|
 | Table Macros | 23 | `TS_FORECAST`, `TS_STATS`, `TS_FILL_GAPS` |
-| Aggregate Functions | 5 | `TS_FORECAST_AGG`, `ts_features`, `TS_DETECT_CHANGEPOINTS_AGG` |
+| Aggregate Functions | 5 | `TS_FORECAST_AGG`, `TS_FEATURES`, `TS_DETECT_CHANGEPOINTS_AGG` |
 | Scalar Functions | 14 | `TS_MAE`, `TS_DETECT_SEASONALITY`, `TS_ANALYZE_SEASONALITY` |
-| Table Functions | 1 | `ts_features_list` |
+| Table Functions | 1 | `TS_FEATURES_LIST` |
 
 ### GROUP BY Support
 
@@ -1575,25 +1582,7 @@ These parameters work with **all forecasting models**:
 |-------------------|----------------|-------|
 | Evaluation Metrics | ❌ | Scalar functions only |
 | Seasonality | ❌ | Scalar functions only |
-| Time Series Features | ✅ | `ts_features` supports `OVER` clauses |
-
----
-
-## Version History
-
-### v1.0.0 (Current)
-
-**Initial Release:**
-- 31 forecasting models
-- 12 evaluation metrics
-- 5 EDA macros
-- 12 data preparation macros
-- 2 data quality macros
-- 2 seasonality functions
-- 3 changepoint detection functions
-- 4 time series feature functions
-
-**Total: 43 functions**
+| Time Series Features | ✅ | `TS_FEATURES` supports `OVER` clauses |
 
 ---
 
@@ -1637,5 +1626,5 @@ These parameters work with **all forecasting models**:
 ---
 
 **Last Updated:** 2025-01-25  
-**API Version:** 1.0.0
+**API Version:** 0.2.0
 
