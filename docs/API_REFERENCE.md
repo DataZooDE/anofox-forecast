@@ -12,8 +12,8 @@ The Anofox Forecast extension provides comprehensive time series forecasting cap
 
 ### Key Features
 
-- **31 Forecasting Models**: From simple naive methods to advanced AutoML models
-- **Complete Workflow**: EDA, data preparation, forecasting, and evaluation
+- **31 Forecasting Models**: From simple naive methods to more advanced statistical models
+- **Complete Workflow**: Exploratory data analysis, data quality, data preparation, forecasting, and evaluation
 - **76+ Time Series Features**: tsfresh-compatible feature extraction
 - **Native Parallelization**: Automatic GROUP BY parallelization across CPU cores
 - **Multiple Function Types**: Table functions, aggregates, window functions, scalar functions
