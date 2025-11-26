@@ -116,17 +116,47 @@ SQL macros for exploratory data analysis and quality assessment.
 
 **TS_STATS**
 
-Computes per-series statistical metrics including length, date ranges, central tendencies (mean, median), dispersion (std), value distributions (min, max, zeros), and quality indicators (nulls, uniqueness, constancy). Returns 23 metrics per series for exploratory analysis and data profiling.
+Computes per-series statistical metrics including length, date ranges, central tendencies (mean, median), dispersion (std), value distributions (min, max, zeros), and quality indicators (nulls, uniqueness, constancy). Returns 24 metrics per series for exploratory analysis and data profiling.
 
-**Signature:**
+**Signature (Function Overloading):**
 ```sql
+-- For DATE/TIMESTAMP columns (date-based frequency)
 TS_STATS(
     table_name    VARCHAR,
     group_col     ANY,
-    date_col      DATE | TIMESTAMP | INTEGER,
-    value_col     DOUBLE
+    date_col      DATE | TIMESTAMP,
+    value_col     DOUBLE,
+    frequency     VARCHAR
+) → TABLE
+
+-- For INTEGER columns (integer-based frequency)
+TS_STATS(
+    table_name    VARCHAR,
+    group_col     ANY,
+    date_col      INTEGER | BIGINT,
+    value_col     DOUBLE,
+    frequency     INTEGER
 ) → TABLE
 ```
+
+**Parameters:**
+- `frequency`: 
+  - **For DATE/TIMESTAMP columns**: Optional frequency string (Polars-style). Defaults to `"1d"` if NULL or not provided.
+    - `"30m"` or `"30min"` - 30 minutes
+    - `"1h"` - 1 hour
+    - `"1d"` - 1 day (default)
+    - `"1w"` - 1 week
+    - `"1mo"` - 1 month
+    - `"1q"` - 1 quarter (3 months)
+    - `"1y"` - 1 year
+  - **For INTEGER columns**: Optional integer step size. Defaults to `1` if NULL or not provided.
+    - `1`, `2`, `3`, etc. - Integer step size for `GENERATE_SERIES`
+
+**Type Validation:**
+- DuckDB automatically selects the correct overload based on the `frequency` parameter type:
+  - VARCHAR frequency → DATE/TIMESTAMP date column required
+  - INTEGER frequency → INTEGER/BIGINT date column required
+- If there's a type mismatch (e.g., INTEGER date column with VARCHAR frequency), a `Binder Error` will be raised at query time.
 
 **Returns:**
 ```sql
@@ -148,14 +178,23 @@ TABLE(
     plateau_size         BIGINT,
     plateau_size_non_zero BIGINT,
     n_zeros_start        BIGINT,
-    n_zeros_end          BIGINT
+    n_zeros_end          BIGINT,
+    n_duplicate_timestamps BIGINT
 )
 ```
 
 **Example:**
 ```sql
+-- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales_raw', product_id, date, amount);
+SELECT * FROM TS_STATS('sales_raw', product_id, date, amount, '1d');
+
+-- INTEGER columns: Use INTEGER frequency values
+CREATE TABLE int_stats AS
+SELECT * FROM TS_STATS('int_data', series_id, date_col, value, 1);
+
+-- Use NULL for default frequency
+SELECT * FROM TS_STATS('sales_raw', product_id, date, amount, NULL::VARCHAR);
 ```
 
 ---
@@ -193,7 +232,7 @@ TS_QUALITY_REPORT(
 
 **TS_STATS_SUMMARY**
 
-Aggregates statistics across all series from TS_STATS output. Computes dataset-level metrics including total series count, total observations, average series length, date span, and inferred frequency. Provides high-level overview for dataset characterization.
+Aggregates statistics across all series from TS_STATS output. Computes dataset-level metrics including total series count, total observations, average series length, and date span. Provides high-level overview for dataset characterization.
 
 **Signature:**
 ```sql
@@ -210,8 +249,7 @@ TABLE(
     total_series        INTEGER,
     total_observations  BIGINT,
     avg_series_length   DOUBLE,
-    date_span           INTEGER,
-    frequency           VARCHAR
+    date_span           INTEGER
 )
 ```
 
@@ -225,19 +263,48 @@ TABLE(
 
 Assesses data quality across four dimensions (Structural, Temporal, Magnitude, Behavioural) for each time series. Returns per-series metrics including key uniqueness, timestamp gaps, missing values, value distributions, and pattern characteristics. Output is normalized by dimension and metric for cross-series comparison.
 
-**Signature:**
+**Signature (Function Overloading):**
 ```sql
+-- For DATE/TIMESTAMP columns (date-based frequency)
 TS_DATA_QUALITY(
     table_name      VARCHAR,
     unique_id_col   ANY,
-    date_col        DATE | TIMESTAMP | INTEGER,
+    date_col        DATE | TIMESTAMP,
     value_col       DOUBLE,
-    n_short         INTEGER
+    n_short         INTEGER,
+    frequency       VARCHAR
+) → TABLE
+
+-- For INTEGER columns (integer-based frequency)
+TS_DATA_QUALITY(
+    table_name      VARCHAR,
+    unique_id_col   ANY,
+    date_col        INTEGER | BIGINT,
+    value_col       DOUBLE,
+    n_short         INTEGER,
+    frequency       INTEGER
 ) → TABLE
 ```
 
 **Parameters:**
 - `n_short`: Optional threshold for short series detection (default: 30)
+- `frequency`: 
+  - **For DATE/TIMESTAMP columns**: Optional frequency string (Polars-style). Defaults to `"1d"` if NULL or not provided.
+    - `"30m"` or `"30min"` - 30 minutes
+    - `"1h"` - 1 hour
+    - `"1d"` - 1 day (default)
+    - `"1w"` - 1 week
+    - `"1mo"` - 1 month
+    - `"1q"` - 1 quarter (3 months)
+    - `"1y"` - 1 year
+  - **For INTEGER columns**: Optional integer step size. Defaults to `1` if NULL or not provided.
+    - `1`, `2`, `3`, etc. - Integer step size for `GENERATE_SERIES`
+
+**Type Validation:**
+- DuckDB automatically selects the correct overload based on the `frequency` parameter type:
+  - VARCHAR frequency → DATE/TIMESTAMP date column required
+  - INTEGER frequency → INTEGER/BIGINT date column required
+- If there's a type mismatch (e.g., INTEGER date column with VARCHAR frequency), a `Binder Error` will be raised at query time.
 
 **Returns:**
 ```sql
@@ -250,16 +317,37 @@ TABLE(
 )
 ```
 
-**Dimensions:**
-- **Structural**: Key uniqueness, ID cardinality
-- **Temporal**: Series length, timestamp gaps, alignment, frequency inference
-- **Magnitude**: Missing values, value bounds, static values
-- **Behavioural**: Intermittency, seasonality check, trend detection
+**Dimensions and Metrics:**
+
+**Structural Dimension:**
+- `key_uniqueness`: Number of duplicate key combinations (unique_id + date_col). Counts how many rows have duplicate (unique_id, date_col) pairs. Value = 0 indicates all keys are unique.
+- `id_cardinality`: Total number of distinct series IDs in the dataset. Reported for `unique_id = 'ALL_SERIES'` only.
+
+**Temporal Dimension:**
+- `series_length`: Number of observations in the series. Count of non-NULL rows per series.
+- `timestamp_gaps`: Number of missing timestamps based on expected frequency. Calculated as `expected_count - actual_count` where expected_count is derived from the date range and frequency parameter. `value_pct` indicates the percentage of missing timestamps.
+- `series_alignment`: Number of distinct start/end dates across all series. Reported for `unique_id = 'ALL_SERIES'` only. Value = 1 indicates all series start/end on the same dates.
+- `frequency_inference`: Number of distinct inferred frequencies across series. Reported for `unique_id = 'ALL_SERIES'` only. Indicates frequency diversity in the dataset.
+
+**Magnitude Dimension:**
+- `missing_values`: Count and percentage of NULL values in the value column. `value` = count of NULLs, `value_pct` = percentage of NULLs.
+- `value_bounds`: Count and percentage of negative values (for non-negative expected data). `value` = count of negative values, `value_pct` = proportion of negative values. Useful for detecting data quality issues when values should be non-negative.
+- `static_values`: Boolean flag (1/0) indicating if series has no variation (constant values). Value = 1 if all values are identical (or standard deviation = 0), 0 otherwise.
+
+**Behavioural Dimension:**
+- `intermittency`: Count and percentage of zero values (including NULLs). `value` = count of zeros/NULLs, `value_pct` = proportion. High intermittency indicates sparse time series.
+- `seasonality_check`: Boolean flag (1/0) indicating if seasonality was detected. Value = 1 if any seasonal periods detected, 0 otherwise. Only computed for series with ≥7 observations.
+- `trend_detection`: Correlation coefficient between row number and value (trend strength). `value` = NULL, `value_pct` = absolute correlation (0-1). Higher values indicate stronger trend. Only computed for series with ≥3 observations.
 
 **Example:**
 ```sql
-SELECT * FROM TS_DATA_QUALITY('sales', product_id, date, amount, 30)
+-- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
+SELECT * FROM TS_DATA_QUALITY('sales', product_id, date, amount, 30, '1d')
 WHERE dimension = 'Temporal' AND metric = 'timestamp_gaps';
+
+-- INTEGER columns: Use INTEGER frequency values
+SELECT * FROM TS_DATA_QUALITY('int_data', series_id, date_col, value, 30, 1)
+WHERE dimension = 'Magnitude' AND metric = 'missing_values';
 ```
 
 ---
