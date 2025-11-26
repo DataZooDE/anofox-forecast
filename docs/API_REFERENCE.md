@@ -287,72 +287,6 @@ TS_DATA_QUALITY_SUMMARY(
 
 ---
 
-### Comprehensive Assessment
-
-**TS_DATA_QUALITY**
-
-Comprehensive Data Quality Assessment
-
-**Signature:**
-```sql
-TS_DATA_QUALITY(
-    table_name      VARCHAR,
-    unique_id_col   ANY,
-    date_col        DATE | TIMESTAMP | INTEGER,
-    value_col       DOUBLE,
-    n_short         INTEGER
-) → TABLE
-```
-
-**Parameters:**
-- `n_short`: Optional threshold for short series detection (default: 30)
-
-**Returns:**
-```sql
-TABLE(
-    unique_id       ANY,
-    dimension       VARCHAR,  -- Structural, Temporal, Magnitude, Behavioural
-    metric          VARCHAR,
-    value           BIGINT,
-    value_pct       DOUBLE
-)
-```
-
-**Dimensions:**
-- **Structural**: Key uniqueness, ID cardinality
-- **Temporal**: Series length, timestamp gaps, alignment, frequency inference
-- **Magnitude**: Missing values, value bounds, static values
-- **Behavioural**: Intermittency, seasonality check, trend detection
-
-**Example:**
-```sql
-SELECT * FROM TS_DATA_QUALITY('sales', product_id, date, amount, 30)
-WHERE dimension = 'Temporal' AND metric = 'timestamp_gaps';
-```
-
----
-
-### Summary by Dimension
-
-**TS_DATA_QUALITY_SUMMARY**
-
-Aggregated Summary by Dimension
-
-**Signature:**
-```sql
-TS_DATA_QUALITY_SUMMARY(
-    table_name      VARCHAR,
-    unique_id_col   ANY,
-    date_col        DATE | TIMESTAMP | INTEGER,
-    value_col       DOUBLE,
-    n_short         INTEGER
-) → TABLE
-```
-
-**Returns:** Aggregated summary by dimension and metric.
-
----
-
 ## Data Preparation
 
 SQL macros for data cleaning and transformation. Date type support varies by function.
@@ -521,6 +455,8 @@ TS_DROP_CONSTANT(
 
 **Behavior:** Removes series with constant values (no variation).
 
+**Note:** This function may drop intermittent demand series (series with many zeros) as long as gaps have not been filled yet (e.g., with zeros via gap filling functions). If you need to preserve intermittent series, ensure gaps remain as NULL values rather than being filled.
+
 ---
 
 #### TS_DROP_SHORT
@@ -539,26 +475,7 @@ TS_DROP_SHORT(
 
 **Behavior:** Removes series below minimum length.
 
----
-
-#### TS_DROP_GAPPY
-
-**Remove Series with Excessive Gaps**
-
-**Signature:**
-```sql
-TS_DROP_GAPPY(
-    table_name    VARCHAR,
-    group_col     ANY,
-    date_col      DATE | TIMESTAMP,
-    max_gap_pct   DOUBLE
-) → TABLE
-```
-
-**Note:** DATE/TIMESTAMP only. For INTEGER dates, use `TS_DROP_GAPPY_INT`.
-
-**Parameters:**
-- `max_gap_pct`: Maximum acceptable gap percentage (0-100)
+**Note:** This function may drop intermittent demand series (series with many zeros) as long as gaps have not been filled yet (e.g., with zeros via gap filling functions). If you need to preserve intermittent series, ensure gaps remain as NULL values rather than being filled.
 
 ---
 
@@ -578,6 +495,8 @@ TS_DROP_LEADING_ZEROS(
 ) → TABLE
 ```
 
+**Note:** Results may differ if `TS_FILL_GAPS` or `TS_FILL_FORWARD` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
+
 ---
 
 #### TS_DROP_TRAILING_ZEROS
@@ -594,6 +513,8 @@ TS_DROP_TRAILING_ZEROS(
 ) → TABLE
 ```
 
+**Note:** Results may differ if `TS_FILL_GAPS` or `TS_FILL_FORWARD` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
+
 ---
 
 #### TS_DROP_EDGE_ZEROS
@@ -609,6 +530,8 @@ TS_DROP_EDGE_ZEROS(
     value_col     DOUBLE
 ) → TABLE
 ```
+
+**Note:** Results may differ if `TS_FILL_GAPS` or `TS_FILL_FORWARD` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
 
 ---
 
