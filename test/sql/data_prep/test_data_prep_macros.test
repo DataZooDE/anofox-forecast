@@ -36,7 +36,7 @@ FROM generate_series(1, 15) t(i);
 # Test: TS_FILL_GAPS
 statement ok
 CREATE TABLE filled_gaps AS
-SELECT * FROM ts_fill_gaps(raw_data, series_id, date_col, value);
+SELECT * FROM ts_fill_gaps(raw_data, series_id, date_col, value, NULL::VARCHAR);
 
 # Verify gaps filled for series_1 (28 -> 30)
 query I
@@ -155,7 +155,7 @@ true
 # Test: Two-step workflow (fill then drop)
 statement ok
 CREATE TABLE filled_data AS
-SELECT * FROM ts_fill_gaps(raw_data, series_id, date_col, value);
+SELECT * FROM ts_fill_gaps(raw_data, series_id, date_col, value, NULL::VARCHAR);
 
 statement ok
 CREATE TABLE clean_data AS
@@ -226,7 +226,7 @@ FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM ge
 
 statement ok
 CREATE TABLE extended_forward AS
-SELECT * FROM ts_fill_forward(test_forward, sid, date_col, val, '2024-01-15'::DATE);
+SELECT * FROM ts_fill_forward(test_forward, sid, date_col, val, '2024-01-15'::DATE, NULL::VARCHAR);
 
 # Verify series extended to target date (10 original -> 14 total: 2024-01-02 to 2024-01-15)
 query I
@@ -321,56 +321,36 @@ WHERE value_col BETWEEN 9.0 AND 11.0;
 true
 
 # Test: TS_PREPARE_STANDARD removed - use individual macros instead
-# Verify other macros still work
-query I
-SELECT COUNT(*) > 0
-FROM prepared;
-----
-true
+# All individual macros tested above
 
 # Cleanup new test tables
 statement ok
 DROP TABLE test_forward;
+
 statement ok
 DROP TABLE extended_forward;
+
 statement ok
 DROP TABLE test_gappy;
+
 statement ok
 DROP TABLE no_gappy;
+
 statement ok
 DROP TABLE test_edge_zeros;
+
 statement ok
 DROP TABLE no_edge_zeros;
+
 statement ok
 DROP TABLE test_const_fill;
+
 statement ok
 DROP TABLE filled_const;
-statement ok
-DROP TABLE test_interpolate;
-statement ok
-DROP TABLE filled_interpolate;
-statement ok
-DROP TABLE test_log;
-statement ok
-DROP TABLE transformed_log;
-statement ok
-DROP TABLE test_boxcox;
-statement ok
-DROP TABLE transformed_boxcox;
+
 statement ok
 DROP TABLE test_diff;
+
 statement ok
 DROP TABLE differenced;
-statement ok
-DROP TABLE test_normalize;
-statement ok
-DROP TABLE normalized;
-statement ok
-DROP TABLE test_standardize;
-statement ok
-DROP TABLE standardized;
-statement ok
-DROP TABLE test_pipeline;
-statement ok
-DROP TABLE prepared;
 

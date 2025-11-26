@@ -439,15 +439,21 @@ TS_DATA_QUALITY_SUMMARY(table, unique_id_col, date_col, value_col, n_short)
 
 SQL macros for data cleaning and transformation. Date type support varies by function.
 
-**Gap Filling** (DATE/TIMESTAMP only):
+**Gap Filling** (DATE/TIMESTAMP and INTEGER via function overloading):
 ```sql
-TS_FILL_GAPS(table, group_col, date_col, value_col)
--- Fills missing timestamps in series
--- INTEGER variant: TS_FILL_GAPS_INT
+TS_FILL_GAPS(table, group_col, date_col, value_col, frequency)
+-- Fills missing timestamps/indices in series
+-- Function overloading: Same function name works for both DATE/TIMESTAMP and INTEGER columns
+-- For DATE/TIMESTAMP: frequency is VARCHAR ('30m', '1h', '1d', '1w', '1mo', '1q', '1y'), defaults to '1d'
+-- For INTEGER: frequency is INTEGER (1, 2, 3, ...), defaults to 1
+-- DuckDB automatically selects the correct overload based on frequency parameter type
 
-TS_FILL_FORWARD(table, group_col, date_col, value_col, target_date)
--- Extends series to target date
--- INTEGER variant: TS_FILL_FORWARD_INT
+TS_FILL_FORWARD(table, group_col, date_col, value_col, target_date, frequency)
+-- Extends series to target date/index
+-- Function overloading: Same function name works for both DATE/TIMESTAMP and INTEGER columns
+-- For DATE/TIMESTAMP: frequency is VARCHAR ('30m', '1h', '1d', '1w', '1mo', '1q', '1y'), defaults to '1d'
+-- For INTEGER: frequency is INTEGER (1, 2, 3, ...), defaults to 1
+-- DuckDB automatically selects the correct overload based on frequency parameter type
 ```
 
 **Filtering** (all date types):

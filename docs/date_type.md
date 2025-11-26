@@ -98,22 +98,26 @@ These functions work with INTEGER, DATE, and TIMESTAMP:
 
 These functions require DATE or TIMESTAMP types because they perform date arithmetic:
 
-| Function | INTEGER Version | Description |
+| Function | INTEGER Support | Description |
 |----------|----------------|-------------|
-| `TS_FILL_GAPS` | `TS_FILL_GAPS_INT` | Fill missing time gaps |
-| `TS_FILL_FORWARD` | `TS_FILL_FORWARD_INT` | Extend series forward |
-| `TS_DROP_GAPPY` | `TS_DROP_GAPPY_INT` | Drop series with excessive gaps |
-| `TS_FILL_NULLS_INTERPOLATE` | `TS_FILL_NULLS_INTERPOLATE_INT` | Linear interpolation |
+| `TS_FILL_GAPS` | ✅ **Function Overloading** | Fill missing time gaps |
+| `TS_FILL_FORWARD` | ✅ **Function Overloading** | Extend series forward |
+| `TS_DROP_GAPPY` | ❌ DATE/TIMESTAMP only | Drop series with excessive gaps |
+| `TS_FILL_NULLS_INTERPOLATE` | ❌ Not implemented | Linear interpolation |
 
-**Note**: INTEGER versions of these functions are available in `sql/data_preparation_integer.sql`. Load this file to use them:
+**Note**: `TS_FILL_GAPS` and `TS_FILL_FORWARD` now support INTEGER date columns via **function overloading**. The same function name works for both DATE/TIMESTAMP and INTEGER columns:
 
 ```sql
--- Load INTEGER-specific data prep functions
-LOAD 'sql/data_preparation_integer.sql';
+-- For DATE/TIMESTAMP columns: Use VARCHAR frequency strings
+SELECT * FROM TS_FILL_GAPS(my_table, series_id, date_col, value, '1d');
 
--- Use INTEGER version
-SELECT * FROM TS_FILL_GAPS_INT(my_table, series_id, date_col, value);
+-- For INTEGER columns: Use INTEGER frequency values
+SELECT * FROM TS_FILL_GAPS(my_table, series_id, date_col, value, 1);
 ```
+
+DuckDB automatically selects the correct overload based on the `frequency` parameter type:
+- VARCHAR frequency → DATE/TIMESTAMP date column required
+- INTEGER frequency → INTEGER/BIGINT date column required
 
 ## Python/Pandas Integration
 
@@ -207,8 +211,12 @@ SELECT * FROM ts_forecast(
 
 **Problem**: `TS_FILL_GAPS` doesn't work with INTEGER date columns.
 
-**Solution**: Use the INTEGER-specific version:
+**Solution**: Use function overloading with INTEGER frequency parameter:
 ```sql
-LOAD 'sql/data_preparation_integer.sql';
-SELECT * FROM TS_FILL_GAPS_INT(my_table, series_id, date_col, value);
+-- Use INTEGER frequency value (1, 2, 3, etc.) for INTEGER date columns
+SELECT * FROM TS_FILL_GAPS(my_table, series_id, date_col, value, 1);
 ```
+
+The function automatically detects the date column type based on the frequency parameter type:
+- VARCHAR frequency (e.g., `'1d'`) → DATE/TIMESTAMP columns
+- INTEGER frequency (e.g., `1`) → INTEGER/BIGINT columns

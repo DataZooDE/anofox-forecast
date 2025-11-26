@@ -1,5 +1,7 @@
 #include "duckdb.hpp"
 #include "duckdb/catalog/default/default_table_functions.hpp"
+#include <map>
+#include <vector>
 
 namespace duckdb {
 
@@ -81,11 +83,11 @@ static const DefaultTableMacro data_prep_macros[] = {
             ORDER BY __gid, __did
         )"},
 
-    // TS_FILL_GAPS: Fill missing time gaps with NULL
+    // TS_FILL_GAPS: Fill missing time gaps with NULL (VARCHAR frequency - date-based)
     // Note: This macro generates a full date range for each group
     {DEFAULT_SCHEMA,
      "ts_fill_gaps",
-     {"table_name", "group_col", "date_col", "value_col", nullptr},
+     {"table_name", "group_col", "date_col", "value_col", "frequency", nullptr},
      {{nullptr, nullptr}},
      R"(
             WITH base_aliased AS (
@@ -98,6 +100,22 @@ static const DefaultTableMacro data_prep_macros[] = {
                     value_col
                 FROM QUERY_TABLE(table_name)
             ),
+            frequency_parsed AS (
+                SELECT 
+                    frequency,
+                    CASE 
+                        WHEN frequency IS NULL THEN INTERVAL '1 day'
+                        WHEN UPPER(TRIM(CAST(frequency AS VARCHAR))) IN ('1D', '1DAY') THEN INTERVAL '1 day'
+                        WHEN UPPER(TRIM(CAST(frequency AS VARCHAR))) IN ('30M', '30MIN', '30MINUTE', '30MINUTES') THEN INTERVAL '30 minutes'
+                        WHEN UPPER(TRIM(CAST(frequency AS VARCHAR))) IN ('1H', '1HOUR', '1HOURS') THEN INTERVAL '1 hour'
+                        WHEN UPPER(TRIM(CAST(frequency AS VARCHAR))) IN ('1W', '1WEEK', '1WEEKS') THEN INTERVAL '1 week'
+                        WHEN UPPER(TRIM(CAST(frequency AS VARCHAR))) IN ('1MO', '1MONTH', '1MONTHS') THEN INTERVAL '1 month'
+                        WHEN UPPER(TRIM(CAST(frequency AS VARCHAR))) IN ('1Q', '1QUARTER', '1QUARTERS') THEN INTERVAL '3 months'
+                        WHEN UPPER(TRIM(CAST(frequency AS VARCHAR))) IN ('1Y', '1YEAR', '1YEARS') THEN INTERVAL '1 year'
+                        ELSE INTERVAL '1 day'
+                    END AS __interval
+                FROM (SELECT 1) t
+            ),
             series_ranges AS (
                 SELECT DISTINCT
                     __gid,
@@ -107,9 +125,54 @@ static const DefaultTableMacro data_prep_macros[] = {
             ),
             expanded AS (
                 SELECT 
+                    sr.__gid,
+                    UNNEST(GENERATE_SERIES(sr.__min, sr.__max, fp.__interval)) AS __did
+                FROM series_ranges sr
+                CROSS JOIN frequency_parsed fp
+            )
+            SELECT 
+                e.__gid AS group_col,
+                e.__did AS date_col,
+                b.__vid AS value_col
+            FROM expanded e
+            LEFT JOIN base_aliased b ON e.__gid = b.__gid AND e.__did = b.__did
+            ORDER BY e.__gid, e.__did
+        )"},
+
+    // TS_FILL_GAPS: Fill missing time gaps with NULL (INTEGER frequency - integer-based)
+    {DEFAULT_SCHEMA,
+     "ts_fill_gaps",
+     {"table_name", "group_col", "date_col", "value_col", "frequency", nullptr},
+     {{nullptr, nullptr}},
+     R"(
+            WITH base_aliased AS (
+                SELECT 
+                    group_col AS __gid,
+                    date_col AS __did,
+                    value_col AS __vid,
+                    group_col,
+                    date_col,
+                    value_col
+                FROM QUERY_TABLE(table_name)
+            ),
+            frequency_parsed AS (
+                SELECT 
+                    COALESCE(frequency, 1) AS __int_step
+                FROM (SELECT 1) t
+            ),
+            series_ranges AS (
+                SELECT DISTINCT
                     __gid,
-                    UNNEST(GENERATE_SERIES(__min, __max, INTERVAL '1 day')) AS __did
-                FROM series_ranges
+                    MIN(__did) OVER (PARTITION BY __gid) AS __min,
+                    MAX(__did) OVER (PARTITION BY __gid) AS __max
+                FROM base_aliased
+            ),
+            expanded AS (
+                SELECT 
+                    sr.__gid,
+                    UNNEST(GENERATE_SERIES(sr.__min, sr.__max, fp.__int_step)) AS __did
+                FROM series_ranges sr
+                CROSS JOIN frequency_parsed fp
             )
             SELECT 
                 e.__gid AS group_col,
@@ -241,10 +304,10 @@ static const DefaultTableMacro data_prep_macros[] = {
             ORDER BY group_col, date_col
         )"},
 
-    // TS_FILL_FORWARD: Extend all series to a target date
+    // TS_FILL_FORWARD: Extend all series to a target date (VARCHAR frequency - date-based)
     {DEFAULT_SCHEMA,
      "ts_fill_forward",
-     {"table_name", "group_col", "date_col", "value_col", "target_date", nullptr},
+     {"table_name", "group_col", "date_col", "value_col", "target_date", "frequency", nullptr},
      {{nullptr, nullptr}},
      R"(
             WITH base_aliased AS (
@@ -253,6 +316,22 @@ static const DefaultTableMacro data_prep_macros[] = {
                     date_col AS __did,
                     value_col AS __vid
                 FROM QUERY_TABLE(table_name)
+            ),
+            frequency_parsed AS (
+                SELECT 
+                    frequency,
+                    CASE 
+                        WHEN frequency IS NULL THEN INTERVAL '1 day'
+                        WHEN UPPER(TRIM(CAST(frequency AS VARCHAR))) IN ('1D', '1DAY') THEN INTERVAL '1 day'
+                        WHEN UPPER(TRIM(CAST(frequency AS VARCHAR))) IN ('30M', '30MIN', '30MINUTE', '30MINUTES') THEN INTERVAL '30 minutes'
+                        WHEN UPPER(TRIM(CAST(frequency AS VARCHAR))) IN ('1H', '1HOUR', '1HOURS') THEN INTERVAL '1 hour'
+                        WHEN UPPER(TRIM(CAST(frequency AS VARCHAR))) IN ('1W', '1WEEK', '1WEEKS') THEN INTERVAL '1 week'
+                        WHEN UPPER(TRIM(CAST(frequency AS VARCHAR))) IN ('1MO', '1MONTH', '1MONTHS') THEN INTERVAL '1 month'
+                        WHEN UPPER(TRIM(CAST(frequency AS VARCHAR))) IN ('1Q', '1QUARTER', '1QUARTERS') THEN INTERVAL '3 months'
+                        WHEN UPPER(TRIM(CAST(frequency AS VARCHAR))) IN ('1Y', '1YEAR', '1YEARS') THEN INTERVAL '1 year'
+                        ELSE INTERVAL '1 day'
+                    END AS __interval
+                FROM (SELECT 1) t
             ),
             series_ranges AS (
                 SELECT DISTINCT
@@ -271,8 +350,57 @@ static const DefaultTableMacro data_prep_macros[] = {
             expanded AS (
                 SELECT 
                     td.__gid,
-                    UNNEST(GENERATE_SERIES(td.__min, td.__target, INTERVAL '1 day')) AS __did
+                    UNNEST(GENERATE_SERIES(td.__min, td.__target, fp.__interval)) AS __did
                 FROM target_dates td
+                CROSS JOIN frequency_parsed fp
+            )
+            SELECT 
+                e.__gid AS group_col,
+                e.__did AS date_col,
+                b.__vid AS value_col
+            FROM expanded e
+            LEFT JOIN base_aliased b ON e.__gid = b.__gid AND e.__did = b.__did
+            ORDER BY e.__gid, e.__did
+        )"},
+
+    // TS_FILL_FORWARD: Extend all series to a target date (INTEGER frequency - integer-based)
+    {DEFAULT_SCHEMA,
+     "ts_fill_forward",
+     {"table_name", "group_col", "date_col", "value_col", "target_date", "frequency", nullptr},
+     {{nullptr, nullptr}},
+     R"(
+            WITH base_aliased AS (
+                SELECT 
+                    group_col AS __gid,
+                    date_col AS __did,
+                    value_col AS __vid
+                FROM QUERY_TABLE(table_name)
+            ),
+            frequency_parsed AS (
+                SELECT 
+                    COALESCE(frequency, 1) AS __int_step
+                FROM (SELECT 1) t
+            ),
+            series_ranges AS (
+                SELECT DISTINCT
+                    __gid,
+                    MIN(__did) OVER (PARTITION BY __gid) AS __min,
+                    MAX(__did) OVER (PARTITION BY __gid) AS __max
+                FROM base_aliased
+            ),
+            target_dates AS (
+                SELECT 
+                    sr.__gid,
+                    sr.__min,
+                    target_date AS __target
+                FROM series_ranges sr
+            ),
+            expanded AS (
+                SELECT 
+                    td.__gid,
+                    UNNEST(GENERATE_SERIES(td.__min, td.__target, fp.__int_step)) AS __did
+                FROM target_dates td
+                CROSS JOIN frequency_parsed fp
             )
             SELECT 
                 e.__gid AS group_col,
@@ -419,10 +547,64 @@ static const DefaultTableMacro data_prep_macros[] = {
 
 // Register Data Preparation table macros
 void RegisterDataPrepMacros(ExtensionLoader &loader) {
+	// Group macros by name to handle overloads
+	std::map<string, vector<idx_t>> macro_groups;
 	for (idx_t index = 0; data_prep_macros[index].name != nullptr; index++) {
-		auto table_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(data_prep_macros[index]);
-		table_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
-		loader.RegisterFunction(*table_info);
+		string name = string(data_prep_macros[index].name);
+		macro_groups[name].push_back(index);
+	}
+
+	// Register each group (handles overloads)
+	for (const auto &group : macro_groups) {
+		if (group.second.size() == 1) {
+			// Single macro, register normally
+			idx_t index = group.second[0];
+			auto table_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(data_prep_macros[index]);
+			table_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+			loader.RegisterFunction(*table_info);
+		} else {
+			// Multiple macros with same name - create overloaded macro with typed parameters
+			// For ts_fill_gaps and ts_fill_forward, we have VARCHAR and INTEGER overloads
+			if (group.second.size() == 2 && (group.first == "ts_fill_gaps" || group.first == "ts_fill_forward")) {
+				// Create a single CreateMacroInfo with both overloads
+				auto first_info =
+				    DefaultTableFunctionGenerator::CreateTableMacroInfo(data_prep_macros[group.second[0]]);
+				auto second_info =
+				    DefaultTableFunctionGenerator::CreateTableMacroInfo(data_prep_macros[group.second[1]]);
+
+				// Set parameter types: VARCHAR for first (date-based), INTEGER for second (integer-based)
+				// The frequency parameter is the 5th parameter (index 4) for ts_fill_gaps
+				// The frequency parameter is the 6th parameter (index 5) for ts_fill_forward
+				idx_t freq_param_idx = (group.first == "ts_fill_gaps") ? 4 : 5;
+
+				// First overload: VARCHAR frequency (date-based)
+				if (first_info->macros[0]->types.size() <= freq_param_idx) {
+					first_info->macros[0]->types.resize(freq_param_idx + 1, LogicalType::UNKNOWN);
+				}
+				first_info->macros[0]->types[freq_param_idx] = LogicalType::VARCHAR;
+
+				// Second overload: INTEGER frequency (integer-based)
+				if (second_info->macros[0]->types.size() <= freq_param_idx) {
+					second_info->macros[0]->types.resize(freq_param_idx + 1, LogicalType::UNKNOWN);
+				}
+				second_info->macros[0]->types[freq_param_idx] = LogicalType::INTEGER;
+
+				// Add second overload to first info
+				first_info->macros.push_back(std::move(second_info->macros[0]));
+
+				// Register the combined macro
+				first_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+				loader.RegisterFunction(*first_info);
+			} else {
+				// For other cases, register normally
+				for (idx_t i = 0; i < group.second.size(); i++) {
+					idx_t index = group.second[i];
+					auto table_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(data_prep_macros[index]);
+					table_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+					loader.RegisterFunction(*table_info);
+				}
+			}
+		}
 	}
 }
 

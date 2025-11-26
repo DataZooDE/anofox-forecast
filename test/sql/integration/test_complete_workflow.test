@@ -59,7 +59,7 @@ true	true
 statement ok
 CREATE TABLE clean_sales AS
 WITH step1 AS (
-    SELECT * FROM ts_fill_gaps(sales_data, product_id, date, sales)
+    SELECT * FROM ts_fill_gaps(sales_data, product_id, date, sales, NULL::VARCHAR)
 ),
 step2 AS (
     SELECT * FROM ts_fill_nulls_forward(step1, group_col, date_col, value_col)

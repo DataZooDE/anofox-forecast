@@ -723,19 +723,70 @@ SQL macros for data cleaning and transformation. Date type support varies by fun
 
 **Fill Missing Timestamps**
 
-**Signature:**
+**Signature (Function Overloading):**
 ```sql
+-- For DATE/TIMESTAMP columns (date-based frequency)
 TS_FILL_GAPS(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP,
-    value_col     DOUBLE
+    value_col     DOUBLE,
+    frequency     VARCHAR
+) → TABLE
+
+-- For INTEGER columns (integer-based frequency)
+TS_FILL_GAPS(
+    table_name    VARCHAR,
+    group_col     ANY,
+    date_col      INTEGER | BIGINT,
+    value_col     DOUBLE,
+    frequency     INTEGER
 ) → TABLE
 ```
 
-**Note:** DATE/TIMESTAMP only. For INTEGER dates, use `TS_FILL_GAPS_INT`.
+**Parameters:**
+- `frequency`: 
+  - **For DATE/TIMESTAMP columns**: Optional frequency string (Polars-style). Defaults to `"1d"` if NULL or not provided.
+    - `"30m"` or `"30min"` - 30 minutes
+    - `"1h"` - 1 hour
+    - `"1d"` - 1 day (default)
+    - `"1w"` - 1 week
+    - `"1mo"` - 1 month
+    - `"1q"` - 1 quarter (3 months)
+    - `"1y"` - 1 year
+  - **For INTEGER columns**: Optional integer step size. Defaults to `1` if NULL or not provided.
+    - `1`, `2`, `3`, etc. - Integer step size for `GENERATE_SERIES`
 
-**Behavior:** Fills missing timestamps in series with NULL values.
+**Type Validation:**
+- DuckDB automatically selects the correct overload based on the `frequency` parameter type:
+  - VARCHAR frequency → DATE/TIMESTAMP date column required
+  - INTEGER frequency → INTEGER/BIGINT date column required
+- If there's a type mismatch (e.g., INTEGER date column with VARCHAR frequency), a `Binder Error` will be raised at query time.
+
+**Behavior:** Fills missing timestamps/indices in series with NULL values using the specified frequency interval or step size.
+
+**Examples:**
+```sql
+-- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
+-- Fill gaps with 30-minute frequency
+SELECT * FROM TS_FILL_GAPS('hourly_data', series_id, timestamp, value, '30m');
+
+-- Fill gaps with weekly frequency
+SELECT * FROM TS_FILL_GAPS('weekly_data', series_id, date, value, '1w');
+
+-- Use NULL (must cast to VARCHAR for DATE/TIMESTAMP columns)
+SELECT * FROM TS_FILL_GAPS('daily_data', series_id, date, value, NULL::VARCHAR);
+
+-- INTEGER columns: Use INTEGER frequency values
+-- Fill gaps with step size of 1
+SELECT * FROM TS_FILL_GAPS('int_data', series_id, date_col, value, 1);
+
+-- Fill gaps with step size of 2
+SELECT * FROM TS_FILL_GAPS('int_data', series_id, date_col, value, 2);
+
+-- Use NULL (defaults to step size 1 for INTEGER columns)
+SELECT * FROM TS_FILL_GAPS('int_data', series_id, date_col, value, NULL);
+```
 
 ---
 
@@ -743,20 +794,73 @@ TS_FILL_GAPS(
 
 **Extend Series to Target Date**
 
-**Signature:**
+**Signature (Function Overloading):**
 ```sql
+-- For DATE/TIMESTAMP columns (date-based frequency)
 TS_FILL_FORWARD(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP,
     value_col     DOUBLE,
-    target_date   DATE | TIMESTAMP
+    target_date   DATE | TIMESTAMP,
+    frequency     VARCHAR
+) → TABLE
+
+-- For INTEGER columns (integer-based frequency)
+TS_FILL_FORWARD(
+    table_name    VARCHAR,
+    group_col     ANY,
+    date_col      INTEGER | BIGINT,
+    value_col     DOUBLE,
+    target_date   INTEGER | BIGINT,
+    frequency     INTEGER
 ) → TABLE
 ```
 
-**Note:** DATE/TIMESTAMP only. For INTEGER dates, use `TS_FILL_FORWARD_INT`.
+**Parameters:**
+- `target_date`: Target date/index to extend the series to (type must match `date_col` type)
+- `frequency`: 
+  - **For DATE/TIMESTAMP columns**: Optional frequency string (Polars-style). Defaults to `"1d"` if NULL or not provided.
+    - `"30m"` or `"30min"` - 30 minutes
+    - `"1h"` - 1 hour
+    - `"1d"` - 1 day (default)
+    - `"1w"` - 1 week
+    - `"1mo"` - 1 month
+    - `"1q"` - 1 quarter (3 months)
+    - `"1y"` - 1 year
+  - **For INTEGER columns**: Optional integer step size. Defaults to `1` if NULL or not provided.
+    - `1`, `2`, `3`, etc. - Integer step size for `GENERATE_SERIES`
 
-**Behavior:** Extends series to target date, filling gaps with NULL.
+**Type Validation:**
+- DuckDB automatically selects the correct overload based on the `frequency` parameter type:
+  - VARCHAR frequency → DATE/TIMESTAMP date column required
+  - INTEGER frequency → INTEGER/BIGINT date column required
+- If there's a type mismatch (e.g., INTEGER date column with VARCHAR frequency), a `Binder Error` will be raised at query time.
+
+**Behavior:** Extends series to target date/index, filling gaps with NULL using the specified frequency interval or step size.
+
+**Examples:**
+```sql
+-- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
+-- Extend hourly series to target date
+SELECT * FROM TS_FILL_FORWARD('hourly_data', series_id, timestamp, value, '2024-12-31'::TIMESTAMP, '1h');
+
+-- Extend monthly series to target date
+SELECT * FROM TS_FILL_FORWARD('monthly_data', series_id, date, value, '2024-12-01'::DATE, '1mo');
+
+-- Use NULL (must cast to VARCHAR for DATE/TIMESTAMP columns)
+SELECT * FROM TS_FILL_FORWARD('daily_data', series_id, date, value, '2024-12-31'::DATE, NULL::VARCHAR);
+
+-- INTEGER columns: Use INTEGER frequency values
+-- Extend series to index 100 with step size of 1
+SELECT * FROM TS_FILL_FORWARD('int_data', series_id, date_col, value, 100, 1);
+
+-- Extend series to index 100 with step size of 5
+SELECT * FROM TS_FILL_FORWARD('int_data', series_id, date_col, value, 100, 5);
+
+-- Use NULL (defaults to step size 1 for INTEGER columns)
+SELECT * FROM TS_FILL_FORWARD('int_data', series_id, date_col, value, 100, NULL);
+```
 
 ---
 
