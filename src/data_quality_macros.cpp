@@ -780,7 +780,7 @@ static const DefaultTableMacro data_quality_macros[] = {
      {{nullptr, nullptr}},
      R"(
         WITH health_card AS (
-            SELECT * FROM ts_data_quality(table_name, unique_id_col, date_col, value_col, n_short)
+            SELECT * FROM ts_data_quality(table_name, unique_id_col, date_col, value_col, n_short, NULL::VARCHAR)
         )
         SELECT 
             dimension,

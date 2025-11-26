@@ -39,7 +39,7 @@ FROM generate_series(1, 15) t(i);
 # Test: TS_STATS - Basic statistics
 statement ok
 CREATE TABLE stats_result AS
-SELECT * FROM ts_stats(eda_test_data, series_id, date_col, value);
+SELECT * FROM ts_stats(eda_test_data, series_id, date_col, value, '1d');
 
 # Verify stats for all series
 query I
