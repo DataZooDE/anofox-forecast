@@ -105,7 +105,6 @@ Functions follow consistent naming patterns:
     - [Model-Specific Parameters](#model-specific-parameters)
 11. [Function Coverage Matrix](#function-coverage-matrix)
 12. [Notes](#notes)
-13. [Support](#support)
 
 ---
 
@@ -455,7 +454,7 @@ TS_DROP_CONSTANT(
 **Behavior:** Removes series with constant values (no variation).
 
 > [!WARNING]
-> This function may drop intermittent demand series (series with many zeros) as long as gaps have not been filled yet (e.g., with zeros via gap filling functions). If you need to preserve intermittent series, ensure gaps remain as NULL values rather than being filled.
+> This function may drop intermittent demand series (series with many zeros) as long as gaps have not been filled yet (e.g., with zeros via gap filling functions). If you need to preserve intermittent series, ensure gaps are being filled.
 
 ---
 
@@ -476,7 +475,7 @@ TS_DROP_SHORT(
 **Behavior:** Removes series below minimum length.
 
 > [!WARNING]
-> This function may drop intermittent demand series (series with many zeros) as long as gaps have not been filled yet (e.g., with zeros via gap filling functions). If you need to preserve intermittent series, ensure gaps remain as NULL values rather than being filled.
+> This function may drop intermittent demand series (series with many zeros) as long as gaps have not been filled yet (e.g., with zeros via gap filling functions). If you need to preserve intermittent series, ensure gaps are being filled.
 
 ---
 
@@ -1597,7 +1596,6 @@ These parameters work with **all forecasting models**:
 4. **NULL handling**:
    - Missing values in input arrays will cause errors in metrics functions
    - Data preparation macros handle NULLs explicitly
-   - Window functions handle NULL y values specially (fit-predict)
 
 5. **Performance**:
    - Table macros: O(n) for small series, optimized for large datasets
@@ -1610,21 +1608,8 @@ These parameters work with **all forecasting models**:
    - For inference: n > p + 1 to have sufficient degrees of freedom
    - Some models require minimum lengths (e.g., ARIMA needs sufficient data for differencing)
 
-7. **Memory efficiency**:
-   - Columnar storage and streaming operations
-   - ~1GB for 1M rows, 1K series
-   - Efficient for millions of rows and thousands of series
-
 ---
 
-## Support
-
-- **Documentation**: [guides/](../guides/)
-- **Issues**: [GitHub Issues](https://github.com/DataZooDE/anofox-forecast/issues)
-- **Email**: sm@data-zoo.de
-
----
-
-**Last Updated:** 2025-01-25  
+**Last Updated:** 2025-11-26  
 **API Version:** 0.2.0
 
