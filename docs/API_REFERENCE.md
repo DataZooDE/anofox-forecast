@@ -225,7 +225,7 @@ TABLE(
 
 **TS_DATA_QUALITY**
 
-Comprehensive Data Quality Assessment
+Assesses data quality across four dimensions (Structural, Temporal, Magnitude, Behavioural) for each time series. Returns per-series metrics including key uniqueness, timestamp gaps, missing values, value distributions, and pattern characteristics. Output is normalized by dimension and metric for cross-series comparison.
 
 **Signature:**
 ```sql
@@ -270,7 +270,7 @@ WHERE dimension = 'Temporal' AND metric = 'timestamp_gaps';
 
 **TS_DATA_QUALITY_SUMMARY**
 
-Aggregated Summary by Dimension
+Aggregates quality metrics across all series, grouped by dimension and metric. Computes summary statistics (counts, percentages) for each quality dimension to provide dataset-level quality overview. Useful for identifying systemic data quality issues affecting multiple series.
 
 **Signature:**
 ```sql
