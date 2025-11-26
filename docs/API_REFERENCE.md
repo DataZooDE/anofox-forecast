@@ -50,47 +50,47 @@ Functions follow consistent naming patterns:
 
 ## Table of Contents
 
-1. [Forecasting Functions](#forecasting-functions)
-   - [TS_FORECAST](#ts_forecast)
-   - [TS_FORECAST_BY](#ts_forecast_by)
-   - [TS_FORECAST_AGG](#ts_forecast_agg)
-2. [Evaluation Metrics](#evaluation-metrics)
-   - [TS_MAE](#ts_mae)
-   - [TS_MSE](#ts_mse)
-   - [TS_RMSE](#ts_rmse)
-   - [TS_MAPE](#ts_mape)
-   - [TS_SMAPE](#ts_smape)
-   - [TS_MASE](#ts_mase)
-   - [TS_R2](#ts_r2)
-   - [TS_BIAS](#ts_bias)
-   - [TS_RMAE](#ts_rmae)
-   - [TS_QUANTILE_LOSS](#ts_quantile_loss)
-   - [TS_MQLOSS](#ts_mqloss)
-   - [TS_COVERAGE](#ts_coverage)
-3. [EDA Macros](#eda-macros)
-   - [TS_STATS](#ts_stats)
-   - [TS_QUALITY_REPORT](#ts_quality_report)
-   - [TS_STATS_SUMMARY](#ts_stats_summary)
-4. [Data Quality Macros](#data-quality-macros)
-   - [TS_DATA_QUALITY](#ts_data_quality)
-   - [TS_DATA_QUALITY_SUMMARY](#ts_data_quality_summary)
-5. [Data Preparation Macros](#data-preparation-macros)
+1. [Exploratory Data Analysis](#exploratory-data-analysis)
+   - [Per-Series Statistics](#per-series-statistics)
+   - [Quality Assessment](#quality-assessment)
+   - [Dataset Summary](#dataset-summary)
+2. [Data Quality](#data-quality)
+   - [Comprehensive Assessment](#comprehensive-assessment)
+   - [Summary by Dimension](#summary-by-dimension)
+3. [Data Preparation](#data-preparation)
    - [Gap Filling](#gap-filling)
    - [Series Filtering](#series-filtering)
    - [Edge Cleaning](#edge-cleaning)
    - [Missing Value Imputation](#missing-value-imputation)
-6. [Seasonality Functions](#seasonality-functions)
-   - [TS_DETECT_SEASONALITY](#ts_detect_seasonality)
-   - [TS_ANALYZE_SEASONALITY](#ts_analyze_seasonality)
-7. [Changepoint Detection](#changepoint-detection)
-   - [TS_DETECT_CHANGEPOINTS](#ts_detect_changepoints)
-   - [TS_DETECT_CHANGEPOINTS_BY](#ts_detect_changepoints_by)
-   - [TS_DETECT_CHANGEPOINTS_AGG](#ts_detect_changepoints_agg)
-8. [Time Series Features](#time-series-features)
-   - [ts_features](#ts_features)
-   - [ts_features_list](#ts_features_list)
-   - [ts_features_config_from_json](#ts_features_config_from_json)
-   - [ts_features_config_from_csv](#ts_features_config_from_csv)
+4. [Seasonality](#seasonality)
+   - [Simple Seasonality Detection](#simple-seasonality-detection)
+   - [Detailed Seasonality Analysis](#detailed-seasonality-analysis)
+5. [Changepoint Detection](#changepoint-detection)
+   - [Single Series Changepoint Detection](#single-series-changepoint-detection)
+   - [Multiple Series Changepoint Detection](#multiple-series-changepoint-detection)
+   - [Aggregate Function for Changepoint Detection](#aggregate-function-for-changepoint-detection)
+6. [Time Series Features](#time-series-features)
+   - [Extract Time Series Features](#extract-time-series-features)
+   - [List Available Features](#list-available-features)
+   - [Load Feature Configuration from JSON](#load-feature-configuration-from-json)
+   - [Load Feature Configuration from CSV](#load-feature-configuration-from-csv)
+7. [Forecasting](#forecasting)
+   - [Single Time Series Forecasting](#single-time-series-forecasting)
+   - [Multiple Time Series Forecasting](#multiple-time-series-forecasting)
+   - [Aggregate Function for Custom GROUP BY](#aggregate-function-for-custom-group-by)
+8. [Evaluation](#evaluation)
+   - [Mean Absolute Error](#mean-absolute-error)
+   - [Mean Squared Error](#mean-squared-error)
+   - [Root Mean Squared Error](#root-mean-squared-error)
+   - [Mean Absolute Percentage Error](#mean-absolute-percentage-error)
+   - [Symmetric Mean Absolute Percentage Error](#symmetric-mean-absolute-percentage-error)
+   - [Mean Absolute Scaled Error](#mean-absolute-scaled-error)
+   - [R-squared](#r-squared)
+   - [Forecast Bias](#forecast-bias)
+   - [Relative Mean Absolute Error](#relative-mean-absolute-error)
+   - [Quantile Loss](#quantile-loss)
+   - [Mean Quantile Loss](#mean-quantile-loss)
+   - [Prediction Interval Coverage](#prediction-interval-coverage)
 9. [Supported Models](#supported-models)
    - [Automatic Selection Models](#automatic-selection-models-6)
    - [Basic Models](#basic-models-6)
@@ -110,447 +110,15 @@ Functions follow consistent naming patterns:
 
 ---
 
-## Forecasting Functions
-
-### TS_FORECAST
-
-**Single Time Series Forecasting**
-
-Generate forecasts for a single time series with automatic parameter validation.
-
-**Signature:**
-```sql
-TS_FORECAST(
-    table_name    VARCHAR,
-    date_col      DATE | TIMESTAMP | INTEGER,
-    value_col     DOUBLE,
-    method        VARCHAR,
-    horizon       INTEGER,
-    params        MAP
-) → TABLE
-```
-
-**Parameters:**
-- `table_name`: Name of the input table
-- `date_col`: Date/timestamp column name
-- `value_col`: Value column name to forecast
-- `method`: Model name (see [Supported Models](#supported-models))
-- `horizon`: Number of future periods to forecast (must be > 0)
-- `params`: Configuration MAP with model-specific parameters
-
-**Returns:**
-```sql
-TABLE(
-    forecast_step      INTEGER,
-    date               DATE | TIMESTAMP | INTEGER,  -- Type matches input
-    point_forecast     DOUBLE,
-    lower              DOUBLE,  -- Lower bound (confidence_level)
-    upper              DOUBLE,  -- Upper bound (confidence_level)
-    model_name         VARCHAR,
-    insample_fitted    DOUBLE[],  -- Empty unless return_insample=true
-    confidence_level   DOUBLE
-)
-```
-
-**Example:**
-```sql
-SELECT * FROM TS_FORECAST(
-    'sales',
-    date,
-    amount,
-    'AutoETS',
-    28,
-    MAP{'seasonal_period': 7, 'confidence_level': 0.95}
-);
-```
-
-**Behavioral Notes:**
-- Timestamp generation based on training data interval (configurable via `generate_timestamps`)
-- Prediction intervals computed at specified confidence level (default 0.90)
-- Optional in-sample fitted values via `return_insample: true`
-- Date column type preserved from input
-
----
-
-### TS_FORECAST_BY
-
-**Multiple Time Series Forecasting with GROUP BY**
-
-Generate forecasts for multiple time series with native DuckDB GROUP BY parallelization.
-
-**Signature:**
-```sql
-TS_FORECAST_BY(
-    table_name    VARCHAR,
-    group_col     ANY,
-    date_col      DATE | TIMESTAMP | INTEGER,
-    value_col     DOUBLE,
-    method        VARCHAR,
-    horizon       INTEGER,
-    params        MAP
-) → TABLE
-```
-
-**Parameters:**
-- `table_name`: Name of the input table
-- `group_col`: Grouping column name (any type, preserved in output)
-- `date_col`: Date/timestamp column name
-- `value_col`: Value column name to forecast
-- `method`: Model name
-- `horizon`: Number of future periods to forecast
-- `params`: Configuration MAP
-
-**Returns:**
-```sql
-TABLE(
-    group_col          ANY,  -- Type matches input
-    forecast_step      INTEGER,
-    date               DATE | TIMESTAMP | INTEGER,
-    point_forecast     DOUBLE,
-    lower              DOUBLE,
-    upper              DOUBLE,
-    model_name         VARCHAR,
-    insample_fitted    DOUBLE[],
-    confidence_level   DOUBLE
-)
-```
-
-**Example:**
-```sql
-SELECT 
-    product_id,
-    forecast_step,
-    point_forecast
-FROM TS_FORECAST_BY(
-    'product_sales',
-    product_id,
-    date,
-    amount,
-    'AutoETS',
-    28,
-    MAP{'seasonal_period': 7}
-)
-WHERE forecast_step <= 7
-ORDER BY product_id, forecast_step;
-```
-
-**Behavioral Notes:**
-- Automatic parallelization: series distributed across CPU cores
-- Group column type preserved in output
-- Independent parameter validation per series
-- Efficient for thousands of series
-
----
-
-### TS_FORECAST_AGG
-
-**Aggregate Function for Custom GROUP BY**
-
-Low-level aggregate function for forecasting with 2+ group columns or custom aggregation patterns.
-
-**Signature:**
-```sql
-TS_FORECAST_AGG(
-    date_col      DATE | TIMESTAMP | INTEGER,
-    value_col     DOUBLE,
-    method        VARCHAR,
-    horizon       INTEGER,
-    params        MAP
-) → STRUCT
-```
-
-**Returns:**
-```sql
-STRUCT(
-    forecast_step          INTEGER[],
-    forecast_timestamp     TIMESTAMP[],
-    point_forecast         DOUBLE[],
-    lower                  DOUBLE[],  -- Dynamic name based on confidence_level
-    upper                  DOUBLE[],  -- Dynamic name based on confidence_level
-    model_name             VARCHAR,
-    insample_fitted        DOUBLE[],
-    confidence_level       DOUBLE,
-    date_col_name          VARCHAR
-)
-```
-
-**Example:**
-```sql
-WITH fc AS (
-    SELECT 
-        product_id,
-        location_id,
-        TS_FORECAST_AGG(date, amount, 'AutoETS', 28, MAP{'seasonal_period': 7}) AS result
-    FROM sales
-    GROUP BY product_id, location_id
-)
-SELECT 
-    product_id,
-    location_id,
-    UNNEST(result.forecast_step) AS forecast_step,
-    UNNEST(result.point_forecast) AS point_forecast,
-    UNNEST(result.lower) AS lower_bound
-FROM fc;
-```
-
-**Use Case:** When you need multiple grouping columns or custom aggregation patterns beyond single `group_col`.
-
----
-
-## Evaluation Metrics
-
-All metrics accept `DOUBLE[]` arrays and return `DOUBLE`. Use with `GROUP BY` via `LIST()` aggregation.
-
-### TS_MAE
-
-**Mean Absolute Error**
-
-**Signature:**
-```sql
-TS_MAE(
-    actual      DOUBLE[],
-    predicted   DOUBLE[]
-) → DOUBLE
-```
-
-**Formula:** MAE = Σ|y - ŷ| / n
-
-**Example:**
-```sql
-SELECT 
-    product_id,
-    TS_MAE(LIST(actual), LIST(predicted)) AS mae
-FROM results
-GROUP BY product_id;
-```
-
----
-
-### TS_MSE
-
-**Mean Squared Error**
-
-**Signature:**
-```sql
-TS_MSE(
-    actual      DOUBLE[],
-    predicted   DOUBLE[]
-) → DOUBLE
-```
-
-**Formula:** MSE = Σ(y - ŷ)² / n
-
----
-
-### TS_RMSE
-
-**Root Mean Squared Error**
-
-**Signature:**
-```sql
-TS_RMSE(
-    actual      DOUBLE[],
-    predicted   DOUBLE[]
-) → DOUBLE
-```
-
-**Formula:** RMSE = √(MSE)
-
----
-
-### TS_MAPE
-
-**Mean Absolute Percentage Error**
-
-**Signature:**
-```sql
-TS_MAPE(
-    actual      DOUBLE[],
-    predicted   DOUBLE[]
-) → DOUBLE
-```
-
-**Formula:** MAPE = (100/n) × Σ|y - ŷ| / |y|
-
-**Note:** Returns NULL if any actual value is zero.
-
----
-
-### TS_SMAPE
-
-**Symmetric Mean Absolute Percentage Error**
-
-**Signature:**
-```sql
-TS_SMAPE(
-    actual      DOUBLE[],
-    predicted   DOUBLE[]
-) → DOUBLE
-```
-
-**Formula:** SMAPE = (200/n) × Σ|y - ŷ| / (|y| + |ŷ|)
-
-**Range:** [0, 200]
-
-**Note:** Handles zero values better than MAPE.
-
----
-
-### TS_MASE
-
-**Mean Absolute Scaled Error**
-
-**Signature:**
-```sql
-TS_MASE(
-    actual      DOUBLE[],
-    predicted   DOUBLE[],
-    baseline    DOUBLE[]
-) → DOUBLE
-```
-
-**Formula:** MASE = MAE / (MAE of baseline method)
-
-**Use Case:** Compare forecast accuracy relative to a baseline (e.g., naive forecast).
-
----
-
-### TS_R2
-
-**R-squared (Coefficient of Determination)**
-
-**Signature:**
-```sql
-TS_R2(
-    actual      DOUBLE[],
-    predicted   DOUBLE[]
-) → DOUBLE
-```
-
-**Formula:** R² = 1 - (SS_res / SS_tot)
-
-**Range:** (-∞, 1]
-
----
-
-### TS_BIAS
-
-**Forecast Bias**
-
-**Signature:**
-```sql
-TS_BIAS(
-    actual      DOUBLE[],
-    predicted   DOUBLE[]
-) → DOUBLE
-```
-
-**Formula:** Bias = Σ(ŷ - y) / n
-
-**Interpretation:** Positive = over-forecasting, Negative = under-forecasting
-
----
-
-### TS_RMAE
-
-**Relative Mean Absolute Error**
-
-**Signature:**
-```sql
-TS_RMAE(
-    actual      DOUBLE[],
-    pred1        DOUBLE[],
-    pred2        DOUBLE[]
-) → DOUBLE
-```
-
-**Formula:** RMAE = MAE(pred1) / MAE(pred2)
-
-**Use Case:** Compare relative performance of two forecasting methods.
-
----
-
-### TS_QUANTILE_LOSS
-
-**Quantile Loss (Pinball Loss)**
-
-**Signature:**
-```sql
-TS_QUANTILE_LOSS(
-    actual      DOUBLE[],
-    predicted   DOUBLE[],
-    q           DOUBLE
-) → DOUBLE
-```
-
-**Formula:** QL = Σ max(q × (y - ŷ), (1 - q) × (ŷ - y))
-
-**Parameters:**
-- `q`: Quantile level (0 < q < 1)
-
-**Use Case:** Evaluate quantile forecasts (e.g., median, 90th percentile).
-
----
-
-### TS_MQLOSS
-
-**Mean Quantile Loss**
-
-**Signature:**
-```sql
-TS_MQLOSS(
-    actual      DOUBLE[],
-    quantiles   DOUBLE[][],
-    levels      DOUBLE[]
-) → DOUBLE
-```
-
-**Parameters:**
-- `quantiles`: Array of quantile forecast arrays
-- `levels`: Corresponding quantile levels (e.g., [0.1, 0.5, 0.9])
-
-**Use Case:** Evaluate multi-quantile forecasts (distribution forecasts).
-
----
-
-### TS_COVERAGE
-
-**Prediction Interval Coverage**
-
-**Signature:**
-```sql
-TS_COVERAGE(
-    actual      DOUBLE[],
-    lower       DOUBLE[],
-    upper       DOUBLE[]
-) → DOUBLE
-```
-
-**Formula:** Coverage = (Count of actuals within [lower, upper]) / n
-
-**Range:** [0, 1]
-
-**Use Case:** Evaluate calibration of prediction intervals (should match confidence_level).
-
-**Example:**
-```sql
-SELECT 
-    product_id,
-    TS_COVERAGE(LIST(actual), LIST(lower), LIST(upper)) * 100 AS coverage_pct
-FROM results
-GROUP BY product_id;
--- Coverage should be close to confidence_level × 100
-```
-
----
-
-## EDA Macros
+## Exploratory Data Analysis
 
 SQL macros for exploratory data analysis and quality assessment.
 
-### TS_STATS
+### Per-Series Statistics
 
-**Per-Series Comprehensive Statistics**
+**TS_STATS**
+
+Per-Series Comprehensive Statistics
 
 **Signature:**
 ```sql
@@ -594,9 +162,11 @@ SELECT * FROM TS_STATS('sales_raw', product_id, date, amount);
 
 ---
 
-### TS_QUALITY_REPORT
+### Quality Assessment
 
-**Data Quality Assessment**
+**TS_QUALITY_REPORT**
+
+Data Quality Assessment
 
 **Signature:**
 ```sql
@@ -621,9 +191,11 @@ TS_QUALITY_REPORT(
 
 ---
 
-### TS_STATS_SUMMARY
+### Dataset Summary
 
-**Overall Dataset Statistics**
+**TS_STATS_SUMMARY**
+
+Overall Dataset Statistics
 
 **Signature:**
 ```sql
@@ -647,13 +219,13 @@ TABLE(
 
 ---
 
+## Data Quality
 
+### Comprehensive Assessment
 
-## Data Quality Macros
+**TS_DATA_QUALITY**
 
-### TS_DATA_QUALITY
-
-**Comprehensive Data Quality Assessment**
+Comprehensive Data Quality Assessment
 
 **Signature:**
 ```sql
@@ -694,9 +266,11 @@ WHERE dimension = 'Temporal' AND metric = 'timestamp_gaps';
 
 ---
 
-### TS_DATA_QUALITY_SUMMARY
+### Summary by Dimension
 
-**Aggregated Summary by Dimension**
+**TS_DATA_QUALITY_SUMMARY**
+
+Aggregated Summary by Dimension
 
 **Signature:**
 ```sql
@@ -713,7 +287,73 @@ TS_DATA_QUALITY_SUMMARY(
 
 ---
 
-## Data Preparation Macros
+### Comprehensive Assessment
+
+**TS_DATA_QUALITY**
+
+Comprehensive Data Quality Assessment
+
+**Signature:**
+```sql
+TS_DATA_QUALITY(
+    table_name      VARCHAR,
+    unique_id_col   ANY,
+    date_col        DATE | TIMESTAMP | INTEGER,
+    value_col       DOUBLE,
+    n_short         INTEGER
+) → TABLE
+```
+
+**Parameters:**
+- `n_short`: Optional threshold for short series detection (default: 30)
+
+**Returns:**
+```sql
+TABLE(
+    unique_id       ANY,
+    dimension       VARCHAR,  -- Structural, Temporal, Magnitude, Behavioural
+    metric          VARCHAR,
+    value           BIGINT,
+    value_pct       DOUBLE
+)
+```
+
+**Dimensions:**
+- **Structural**: Key uniqueness, ID cardinality
+- **Temporal**: Series length, timestamp gaps, alignment, frequency inference
+- **Magnitude**: Missing values, value bounds, static values
+- **Behavioural**: Intermittency, seasonality check, trend detection
+
+**Example:**
+```sql
+SELECT * FROM TS_DATA_QUALITY('sales', product_id, date, amount, 30)
+WHERE dimension = 'Temporal' AND metric = 'timestamp_gaps';
+```
+
+---
+
+### Summary by Dimension
+
+**TS_DATA_QUALITY_SUMMARY**
+
+Aggregated Summary by Dimension
+
+**Signature:**
+```sql
+TS_DATA_QUALITY_SUMMARY(
+    table_name      VARCHAR,
+    unique_id_col   ANY,
+    date_col        DATE | TIMESTAMP | INTEGER,
+    value_col       DOUBLE,
+    n_short         INTEGER
+) → TABLE
+```
+
+**Returns:** Aggregated summary by dimension and metric.
+
+---
+
+## Data Preparation
 
 SQL macros for data cleaning and transformation. Date type support varies by function.
 
@@ -1045,11 +685,13 @@ TS_FILL_NULLS_MEAN(
 
 ---
 
-## Seasonality Functions
+## Seasonality
 
-### TS_DETECT_SEASONALITY
+### Simple Seasonality Detection
 
-**Simple Seasonality Detection**
+**TS_DETECT_SEASONALITY**
+
+Simple Seasonality Detection
 
 **Signature:**
 ```sql
@@ -1074,9 +716,11 @@ GROUP BY product_id;
 
 ---
 
-### TS_ANALYZE_SEASONALITY
+### Detailed Seasonality Analysis
 
-**Detailed Seasonality Analysis**
+**TS_ANALYZE_SEASONALITY**
+
+Detailed Seasonality Analysis
 
 **Signature:**
 ```sql
@@ -1118,9 +762,11 @@ GROUP BY product_id;
 
 ## Changepoint Detection
 
-### TS_DETECT_CHANGEPOINTS
+### Single Series Changepoint Detection
 
-**Single Series Changepoint Detection**
+**TS_DETECT_CHANGEPOINTS**
+
+Single Series Changepoint Detection
 
 **Signature:**
 ```sql
@@ -1158,9 +804,11 @@ TABLE(
 
 ---
 
-### TS_DETECT_CHANGEPOINTS_BY
+### Multiple Series Changepoint Detection
 
-**Multiple Series Changepoint Detection**
+**TS_DETECT_CHANGEPOINTS_BY**
+
+Multiple Series Changepoint Detection
 
 **Signature:**
 ```sql
@@ -1182,9 +830,11 @@ TS_DETECT_CHANGEPOINTS_BY(
 
 ---
 
-### TS_DETECT_CHANGEPOINTS_AGG
+### Aggregate Function for Changepoint Detection
 
-**Aggregate Function for Changepoint Detection**
+**TS_DETECT_CHANGEPOINTS_AGG**
+
+Aggregate Function for Changepoint Detection
 
 **Signature:**
 ```sql
@@ -1211,9 +861,11 @@ LIST<STRUCT(
 
 ## Time Series Features
 
-### ts_features
+### Extract Time Series Features
 
-**Extract Time Series Features (tsfresh-compatible)**
+**ts_features**
+
+Extract Time Series Features (tsfresh-compatible)
 
 **Signature:**
 ```sql
@@ -1256,9 +908,11 @@ GROUP BY product_id;
 
 ---
 
-### ts_features_list
+### List Available Features
 
-**List Available Features**
+**ts_features_list**
+
+List Available Features
 
 **Signature:**
 ```sql
@@ -1280,9 +934,11 @@ TABLE(
 
 ---
 
-### ts_features_config_from_json
+### Load Feature Configuration from JSON
 
-**Load Feature Configuration from JSON**
+**ts_features_config_from_json**
+
+Load Feature Configuration from JSON
 
 **Signature:**
 ```sql
@@ -1306,9 +962,11 @@ STRUCT(
 
 ---
 
-### ts_features_config_from_csv
+### Load Feature Configuration from CSV
 
-**Load Feature Configuration from CSV**
+**ts_features_config_from_csv**
+
+Load Feature Configuration from CSV
 
 **Signature:**
 ```sql
@@ -1320,6 +978,470 @@ ts_features_config_from_csv(
 **Returns:** Same as `ts_features_config_from_json`.
 
 **File Format:** CSV with header row containing `feature` and parameter columns.
+
+---
+
+## Forecasting
+
+### Single Time Series Forecasting
+
+**TS_FORECAST**
+
+Single Time Series Forecasting
+
+Generate forecasts for a single time series with automatic parameter validation.
+
+**Signature:**
+```sql
+TS_FORECAST(
+    table_name    VARCHAR,
+    date_col      DATE | TIMESTAMP | INTEGER,
+    value_col     DOUBLE,
+    method        VARCHAR,
+    horizon       INTEGER,
+    params        MAP
+) → TABLE
+```
+
+**Parameters:**
+- `table_name`: Name of the input table
+- `date_col`: Date/timestamp column name
+- `value_col`: Value column name to forecast
+- `method`: Model name (see [Supported Models](#supported-models))
+- `horizon`: Number of future periods to forecast (must be > 0)
+- `params`: Configuration MAP with model-specific parameters
+
+**Returns:**
+```sql
+TABLE(
+    forecast_step      INTEGER,
+    date               DATE | TIMESTAMP | INTEGER,  -- Type matches input
+    point_forecast     DOUBLE,
+    lower              DOUBLE,  -- Lower bound (confidence_level)
+    upper              DOUBLE,  -- Upper bound (confidence_level)
+    model_name         VARCHAR,
+    insample_fitted    DOUBLE[],  -- Empty unless return_insample=true
+    confidence_level   DOUBLE
+)
+```
+
+**Example:**
+```sql
+SELECT * FROM TS_FORECAST(
+    'sales',
+    date,
+    amount,
+    'AutoETS',
+    28,
+    MAP{'seasonal_period': 7, 'confidence_level': 0.95}
+);
+```
+
+**Behavioral Notes:**
+- Timestamp generation based on training data interval (configurable via `generate_timestamps`)
+- Prediction intervals computed at specified confidence level (default 0.90)
+- Optional in-sample fitted values via `return_insample: true`
+- Date column type preserved from input
+
+---
+
+### Multiple Time Series Forecasting
+
+**TS_FORECAST_BY**
+
+Multiple Time Series Forecasting with GROUP BY
+
+Generate forecasts for multiple time series with native DuckDB GROUP BY parallelization.
+
+**Signature:**
+```sql
+TS_FORECAST_BY(
+    table_name    VARCHAR,
+    group_col     ANY,
+    date_col      DATE | TIMESTAMP | INTEGER,
+    value_col     DOUBLE,
+    method        VARCHAR,
+    horizon       INTEGER,
+    params        MAP
+) → TABLE
+```
+
+**Parameters:**
+- `table_name`: Name of the input table
+- `group_col`: Grouping column name (any type, preserved in output)
+- `date_col`: Date/timestamp column name
+- `value_col`: Value column name to forecast
+- `method`: Model name
+- `horizon`: Number of future periods to forecast
+- `params`: Configuration MAP
+
+**Returns:**
+```sql
+TABLE(
+    group_col          ANY,  -- Type matches input
+    forecast_step      INTEGER,
+    date               DATE | TIMESTAMP | INTEGER,
+    point_forecast     DOUBLE,
+    lower              DOUBLE,
+    upper              DOUBLE,
+    model_name         VARCHAR,
+    insample_fitted    DOUBLE[],
+    confidence_level   DOUBLE
+)
+```
+
+**Example:**
+```sql
+SELECT 
+    product_id,
+    forecast_step,
+    point_forecast
+FROM TS_FORECAST_BY(
+    'product_sales',
+    product_id,
+    date,
+    amount,
+    'AutoETS',
+    28,
+    MAP{'seasonal_period': 7}
+)
+WHERE forecast_step <= 7
+ORDER BY product_id, forecast_step;
+```
+
+**Behavioral Notes:**
+- Automatic parallelization: series distributed across CPU cores
+- Group column type preserved in output
+- Independent parameter validation per series
+- Efficient for thousands of series
+
+---
+
+### Aggregate Function for Custom GROUP BY
+
+**TS_FORECAST_AGG**
+
+Aggregate Function for Custom GROUP BY
+
+Low-level aggregate function for forecasting with 2+ group columns or custom aggregation patterns.
+
+**Signature:**
+```sql
+TS_FORECAST_AGG(
+    date_col      DATE | TIMESTAMP | INTEGER,
+    value_col     DOUBLE,
+    method        VARCHAR,
+    horizon       INTEGER,
+    params        MAP
+) → STRUCT
+```
+
+**Returns:**
+```sql
+STRUCT(
+    forecast_step          INTEGER[],
+    forecast_timestamp     TIMESTAMP[],
+    point_forecast         DOUBLE[],
+    lower                  DOUBLE[],  -- Dynamic name based on confidence_level
+    upper                  DOUBLE[],  -- Dynamic name based on confidence_level
+    model_name             VARCHAR,
+    insample_fitted        DOUBLE[],
+    confidence_level       DOUBLE,
+    date_col_name          VARCHAR
+)
+```
+
+**Example:**
+```sql
+WITH fc AS (
+    SELECT 
+        product_id,
+        location_id,
+        TS_FORECAST_AGG(date, amount, 'AutoETS', 28, MAP{'seasonal_period': 7}) AS result
+    FROM sales
+    GROUP BY product_id, location_id
+)
+SELECT 
+    product_id,
+    location_id,
+    UNNEST(result.forecast_step) AS forecast_step,
+    UNNEST(result.point_forecast) AS point_forecast,
+    UNNEST(result.lower) AS lower_bound
+FROM fc;
+```
+
+**Use Case:** When you need multiple grouping columns or custom aggregation patterns beyond single `group_col`.
+
+---
+
+## Evaluation
+
+All metrics accept `DOUBLE[]` arrays and return `DOUBLE`. Use with `GROUP BY` via `LIST()` aggregation.
+
+### Mean Absolute Error
+
+**TS_MAE**
+
+Mean Absolute Error
+
+**Signature:**
+```sql
+TS_MAE(
+    actual      DOUBLE[],
+    predicted   DOUBLE[]
+) → DOUBLE
+```
+
+**Formula:** MAE = Σ|y - ŷ| / n
+
+**Example:**
+```sql
+SELECT 
+    product_id,
+    TS_MAE(LIST(actual), LIST(predicted)) AS mae
+FROM results
+GROUP BY product_id;
+```
+
+---
+
+### Mean Squared Error
+
+**TS_MSE**
+
+Mean Squared Error
+
+**Signature:**
+```sql
+TS_MSE(
+    actual      DOUBLE[],
+    predicted   DOUBLE[]
+) → DOUBLE
+```
+
+**Formula:** MSE = Σ(y - ŷ)² / n
+
+---
+
+### Root Mean Squared Error
+
+**TS_RMSE**
+
+Root Mean Squared Error
+
+**Signature:**
+```sql
+TS_RMSE(
+    actual      DOUBLE[],
+    predicted   DOUBLE[]
+) → DOUBLE
+```
+
+**Formula:** RMSE = √(MSE)
+
+---
+
+### Mean Absolute Percentage Error
+
+**TS_MAPE**
+
+Mean Absolute Percentage Error
+
+**Signature:**
+```sql
+TS_MAPE(
+    actual      DOUBLE[],
+    predicted   DOUBLE[]
+) → DOUBLE
+```
+
+**Formula:** MAPE = (100/n) × Σ|y - ŷ| / |y|
+
+**Note:** Returns NULL if any actual value is zero.
+
+---
+
+### Symmetric Mean Absolute Percentage Error
+
+**TS_SMAPE**
+
+Symmetric Mean Absolute Percentage Error
+
+**Signature:**
+```sql
+TS_SMAPE(
+    actual      DOUBLE[],
+    predicted   DOUBLE[]
+) → DOUBLE
+```
+
+**Formula:** SMAPE = (200/n) × Σ|y - ŷ| / (|y| + |ŷ|)
+
+**Range:** [0, 200]
+
+**Note:** Handles zero values better than MAPE.
+
+---
+
+### Mean Absolute Scaled Error
+
+**TS_MASE**
+
+Mean Absolute Scaled Error
+
+**Signature:**
+```sql
+TS_MASE(
+    actual      DOUBLE[],
+    predicted   DOUBLE[],
+    baseline    DOUBLE[]
+) → DOUBLE
+```
+
+**Formula:** MASE = MAE / (MAE of baseline method)
+
+**Use Case:** Compare forecast accuracy relative to a baseline (e.g., naive forecast).
+
+---
+
+### R-squared
+
+**TS_R2**
+
+R-squared (Coefficient of Determination)
+
+**Signature:**
+```sql
+TS_R2(
+    actual      DOUBLE[],
+    predicted   DOUBLE[]
+) → DOUBLE
+```
+
+**Formula:** R² = 1 - (SS_res / SS_tot)
+
+**Range:** (-∞, 1]
+
+---
+
+### Forecast Bias
+
+**TS_BIAS**
+
+Forecast Bias
+
+**Signature:**
+```sql
+TS_BIAS(
+    actual      DOUBLE[],
+    predicted   DOUBLE[]
+) → DOUBLE
+```
+
+**Formula:** Bias = Σ(ŷ - y) / n
+
+**Interpretation:** Positive = over-forecasting, Negative = under-forecasting
+
+---
+
+### Relative Mean Absolute Error
+
+**TS_RMAE**
+
+Relative Mean Absolute Error
+
+**Signature:**
+```sql
+TS_RMAE(
+    actual      DOUBLE[],
+    pred1        DOUBLE[],
+    pred2        DOUBLE[]
+) → DOUBLE
+```
+
+**Formula:** RMAE = MAE(pred1) / MAE(pred2)
+
+**Use Case:** Compare relative performance of two forecasting methods.
+
+---
+
+### Quantile Loss
+
+**TS_QUANTILE_LOSS**
+
+Quantile Loss (Pinball Loss)
+
+**Signature:**
+```sql
+TS_QUANTILE_LOSS(
+    actual      DOUBLE[],
+    predicted   DOUBLE[],
+    q           DOUBLE
+) → DOUBLE
+```
+
+**Formula:** QL = Σ max(q × (y - ŷ), (1 - q) × (ŷ - y))
+
+**Parameters:**
+- `q`: Quantile level (0 < q < 1)
+
+**Use Case:** Evaluate quantile forecasts (e.g., median, 90th percentile).
+
+---
+
+### Mean Quantile Loss
+
+**TS_MQLOSS**
+
+Mean Quantile Loss
+
+**Signature:**
+```sql
+TS_MQLOSS(
+    actual      DOUBLE[],
+    quantiles   DOUBLE[][],
+    levels      DOUBLE[]
+) → DOUBLE
+```
+
+**Parameters:**
+- `quantiles`: Array of quantile forecast arrays
+- `levels`: Corresponding quantile levels (e.g., [0.1, 0.5, 0.9])
+
+**Use Case:** Evaluate multi-quantile forecasts (distribution forecasts).
+
+---
+
+### Prediction Interval Coverage
+
+**TS_COVERAGE**
+
+Prediction Interval Coverage
+
+**Signature:**
+```sql
+TS_COVERAGE(
+    actual      DOUBLE[],
+    lower       DOUBLE[],
+    upper       DOUBLE[]
+) → DOUBLE
+```
+
+**Formula:** Coverage = (Count of actuals within [lower, upper]) / n
+
+**Range:** [0, 1]
+
+**Use Case:** Evaluate calibration of prediction intervals (should match confidence_level).
+
+**Example:**
+```sql
+SELECT 
+    product_id,
+    TS_COVERAGE(LIST(actual), LIST(lower), LIST(upper)) * 100 AS coverage_pct
+FROM results
+GROUP BY product_id;
+-- Coverage should be close to confidence_level × 100
+```
 
 ---
 
