@@ -45,7 +45,7 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 
 ## 📖 Technical Guides (Developers & Data Scientists)
 
-### 10. [API Reference](90_api_reference.md) ⭐
+### 10. [API Reference](../docs/API_REFERENCE.md) ⭐
 
 **Complete function documentation**
 
@@ -384,7 +384,7 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 → [Rust Usage](85_rust_integration.md)
 
 **...look up a specific function**
-→ [API Reference](90_api_reference.md)
+→ [API Reference](../docs/API_REFERENCE.md)
 
 **...get started in 5 minutes**
 → [Quick Start](01_quickstart.md)
@@ -418,7 +418,7 @@ This directory contains comprehensive guides for using anofox-forecast, organize
 ### Path 3: Engineer/Developer
 
 1. [Quick Start](01_quickstart.md) - 5 min
-2. [API Reference](90_api_reference.md) - 30 min
+2. [API Reference](../docs/API_REFERENCE.md) - 30 min
 3. [Performance Optimization](60_performance_optimization.md) - 60 min
 4. [EDA & Data Prep](11_exploratory_analysis.md) - 60 min
 
@@ -484,11 +484,11 @@ docs/
 
 **Intermediate**: Go to [guide that matches your use case](#quick-reference-by-use-case)
 
-**Advanced**: Check [API Reference](90_api_reference.md) and [Performance](60_performance_optimization.md)
+**Advanced**: Check [API Reference](../docs/API_REFERENCE.md) and [Performance](60_performance_optimization.md)
 
 ### By Question Type
 
-**"How do I...?"** → Search this index or [API Reference](90_api_reference.md)
+**"How do I...?"** → Search this index or [API Reference](../docs/API_REFERENCE.md)
 
 **"Which model...?"** → [Model Selection](40_model_selection.md)
 
