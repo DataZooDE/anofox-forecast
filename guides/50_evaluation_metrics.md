@@ -1,6 +1,16 @@
 # Time Series Evaluation Metrics
 
-This document describes the evaluation metric functions available in the DuckDB Anofox Forecast Extension.
+## Introduction
+
+The anofox-forecast extension provides a comprehensive set of evaluation metric functions for assessing forecast accuracy and model performance. These metrics enable quantitative comparison of forecasting methods, evaluation of prediction intervals, and assessment of forecast bias across single or multiple time series.
+
+**Key Capabilities**:
+
+- 12 evaluation metrics covering error, percentage error, scaled error, and probabilistic forecast evaluation
+- Support for GROUP BY operations using DuckDB's LIST() aggregation
+- Scale-independent metrics for comparing forecasts across different time series
+- Probabilistic forecast evaluation with quantile loss and prediction interval coverage
+- Input validation and error handling for robust metric computation
 
 ---
 
