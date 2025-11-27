@@ -1,30 +1,28 @@
-# Quick Start Guide - 5 Minutes to Your First Forecast
+# Quick Start Guide
 
-## Goal
+## Introduction
 
-Generate your first time series forecast using the Anofox Forecast extension's SQL API.
+The Anofox Forecast extension provides time series forecasting capabilities within DuckDB. The extension implements 31 forecasting models through the anofox-time C++ library, accessible via SQL table functions, aggregates, and scalar functions.
 
-## Prerequisites
+### Core Forecasting Functions
 
-- DuckDB installed (version 1.4.1+)
-- Anofox-forecast extension built and accessible
-- Basic understanding of SQL table functions
+- **TS_FORECAST**: Single time series forecasting
+- **TS_FORECAST_BY**: Multiple time series forecasting with GROUP BY parallelization
+- **TS_FORECAST_AGG**: Aggregate function for custom GROUP BY patterns
 
-## Step 1: Load Extension (30 seconds)
+### Prerequisites
 
-```sql
--- Create a simple daily sales dataset
-CREATE TABLE my_sales AS
-SELECT 
-    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
-    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales
-FROM generate_series(0, 89) t(d);  -- 90 days of data
+- DuckDB version 1.4.2 or higher
+- Anofox Forecast extension built and accessible
+- Basic SQL knowledge
 
--- Verify data
-SELECT * FROM my_sales LIMIT 5;
-```
+For complete function signatures, parameters, and model specifications, see [API Reference](../docs/API_REFERENCE.md).
 
-## Step 2: Create Sample Data (1 minute)
+## Single Series Forecasting
+
+### Setup
+
+Load the extension and create sample data:
 
 ```sql
 -- Create a simple daily sales dataset
@@ -38,7 +36,9 @@ FROM generate_series(0, 89) t(d);  -- 90 days of data
 SELECT * FROM my_sales LIMIT 5;
 ```
 
-## Step 3: Generate Forecast (30 seconds)
+### Generate Forecast
+
+Use `TS_FORECAST` to generate forecasts for a single time series:
 
 ```sql
 -- Forecast next 14 days
@@ -52,42 +52,73 @@ SELECT * FROM TS_FORECAST(
 );
 ```
 
-**Output Schema**:
+**Output Schema:**
 
-```
-┌───────────────┬────────────┬────────────────┬────────┬────────┐
-│ forecast_step │  date_col  │ point_forecast │ lower  │ upper  │
-│    INTEGER    │    DATE    │     DOUBLE     │ DOUBLE │ DOUBLE │
-├───────────────┼────────────┼────────────────┼────────┼────────┤
-│             1 │ 2023-04-01 │         118.52 │ 109.74 │ 127.30 │
-│             2 │ 2023-04-02 │         125.43 │ 116.65 │ 134.21 │
-│             3 │ 2023-04-03 │         121.89 │ 113.11 │ 130.67 │
-│           ... │        ... │            ... │    ... │    ... │
-```
+The function returns a table with the following columns:
 
-**Schema Notes**:
+| Column | Type | Description |
+|--------|------|-------------|
+| `forecast_step` | INTEGER | Sequential horizon step (1, 2, ..., horizon) |
+| `date` | DATE \| TIMESTAMP \| INTEGER | Forecast timestamp (type matches input date column) |
+| `point_forecast` | DOUBLE | Point forecast value |
+| `lower` | DOUBLE | Lower bound of prediction interval |
+| `upper` | DOUBLE | Upper bound of prediction interval |
+| `model_name` | VARCHAR | Name of the forecasting model used |
+| `insample_fitted` | DOUBLE[] | In-sample fitted values (empty unless `return_insample: true`) |
+| `confidence_level` | DOUBLE | Confidence level for prediction intervals (default: 0.90) |
 
-- `forecast_step`: Sequential horizon step (1, 2, ..., horizon)
-- `date`: Forecast timestamp (type matches input date column)
-- `point_forecast`: Point forecast value
-- `lower`, `upper`: Prediction interval bounds (default 90% confidence)
+**Parameters:**
 
-## Step 4: Visualize (Optional)
+- `table_name`: Source table name (VARCHAR)
+- `date_col`: Date/timestamp column name
+- `value_col`: Value column name to forecast
+- `method`: Model name (see [Supported Models](../docs/API_REFERENCE.md#supported-models))
+- `horizon`: Number of future periods to forecast (must be > 0)
+- `params`: Configuration MAP with model-specific parameters
+
+**Notes:**
+
+- All parameters are positional (named parameters with `:=` syntax are not supported)
+- Date column type (DATE, TIMESTAMP, or INTEGER) is preserved in output
+- Prediction intervals are computed at the specified confidence level (default 0.90)
+- Timestamps are generated based on training data intervals (configurable via `generate_timestamps`)
+
+## Multiple Models Comparison
+
+Compare forecasts from different models using the same dataset:
 
 ```sql
--- Simple ASCII visualization
-WITH fc AS (
-    SELECT 
-        forecast_step,
-        point_forecast,
-        REPEAT('█', CAST(point_forecast / 5 AS INT)) AS bar
-    FROM TS_FORECAST('my_sales', date, sales, 'AutoETS', 14, {'seasonal_period': 7})
-)
-SELECT forecast_step, ROUND(point_forecast, 1) AS forecast, bar
-FROM fc;
+-- Compare forecasts from different models using the same dataset
+-- Note: Assumes 'my_sales' table exists from previous step
+
+-- Model 1: AutoETS (automatic exponential smoothing)
+SELECT 'AutoETS' AS model_name, * FROM TS_FORECAST(
+    'my_sales', date, sales, 'AutoETS', 14, {'seasonal_period': 7}
+) LIMIT 5;
+
+-- Model 2: SeasonalNaive (seasonal naive method)
+SELECT 'SeasonalNaive' AS model_name, * FROM TS_FORECAST(
+    'my_sales', date, sales, 'SeasonalNaive', 14, {'seasonal_period': 7}
+) LIMIT 5;
+
+-- Model 3: Theta (theta decomposition method)
+SELECT 'Theta' AS model_name, * FROM TS_FORECAST(
+    'my_sales', date, sales, 'Theta', 14, {'seasonal_period': 7}
+) LIMIT 5;
+
 ```
 
-## Step 5: Multiple Series (1 minute)
+**Model Selection:**
+
+- **AutoETS**: Automatic exponential smoothing with trend and seasonality selection
+- **SeasonalNaive**: Seasonal naive method (repeats value from same period in previous cycle)
+- **Theta**: Theta decomposition method with seasonal adjustment
+
+All three models require the `seasonal_period` parameter for weekly seasonality (7 days). For complete model specifications and parameter requirements, see [Supported Models](../docs/API_REFERENCE.md#supported-models).
+
+## Multiple Series Forecasting
+
+Use `TS_FORECAST_BY` to forecast multiple time series in parallel:
 
 ```sql
 -- Create multi-product data
@@ -117,20 +148,53 @@ WHERE forecast_step <= 3
 ORDER BY product_id, forecast_step;
 ```
 
-## 🎉 You Did It
+**Output Schema:**
 
-You've just:
+The function returns the same columns as `TS_FORECAST`, plus:
 
-- ✅ Loaded the extension
-- ✅ Created sample data
-- ✅ Generated a forecast
-- ✅ Forecasted multiple series in parallel
+| Column | Type | Description |
+|--------|------|-------------|
+| `group_col` | ANY | Grouping column value (type matches input) |
 
-## 🆘 Troubleshooting
+**Parameters:**
+
+- `table_name`: Source table name (VARCHAR)
+- `group_col`: Grouping column name (any type, preserved in output)
+- `date_col`: Date/timestamp column name
+- `value_col`: Value column name to forecast
+- `method`: Model name
+- `horizon`: Number of future periods to forecast
+- `params`: Configuration MAP
+
+**Behavioral Notes:**
+
+- Automatic parallelization: series are distributed across CPU cores
+- Group column type is preserved in output
+- Independent parameter validation per series
+- Efficient for thousands of series
+
+## Troubleshooting
 
 **Error: "SeasonalNaive model requires 'seasonal_period' parameter"**
 
+Seasonal models require the `seasonal_period` parameter in the `params` MAP. Ensure the parameter is provided:
+
 ```sql
--- Add seasonal_period to params
-{'seasonal_period': 7}  -- for weekly data
+SELECT * FROM TS_FORECAST(
+    'my_sales', date, sales, 'SeasonalNaive', 14,
+    {'seasonal_period': 7}  -- Required for seasonal models
+);
 ```
+
+**Error: "Table with name X does not exist"**
+
+Ensure the source table exists and the table name is spelled correctly. Table names are case-sensitive.
+
+**Error: "Binder Error" for date column types**
+
+Date column types must match the frequency parameter type:
+
+- VARCHAR frequency → DATE or TIMESTAMP date column required
+- INTEGER frequency → INTEGER or BIGINT date column required
+
+For complete error handling and parameter validation details, see [API Reference](../docs/API_REFERENCE.md).
