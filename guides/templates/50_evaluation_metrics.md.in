@@ -4,23 +4,92 @@ This document describes the evaluation metric functions available in the DuckDB 
 
 ---
 
-## Overview
+## Table of Contents
 
-The extension provides **12 time series forecasting accuracy metrics** as individual SQL functions:
+1. [Example: Forecasting and Evaluation with Multiple Methods](#example-forecasting-and-evaluation-with-multiple-methods)
+2. [Using Metrics with GROUP BY](#using-metrics-with-group-by)
+3. [Function Signatures](#function-signatures)
+   - [TS_MAE - Mean Absolute Error](#ts_mae---mean-absolute-error)
+   - [TS_MSE - Mean Squared Error](#ts_mse---mean-squared-error)
+   - [TS_RMSE - Root Mean Squared Error](#ts_rmse---root-mean-squared-error)
+   - [TS_MAPE - Mean Absolute Percentage Error](#ts_mape---mean-absolute-percentage-error)
+   - [TS_SMAPE - Symmetric Mean Absolute Percentage Error](#ts_smape---symmetric-mean-absolute-percentage-error)
+   - [TS_MASE - Mean Absolute Scaled Error](#ts_mase---mean-absolute-scaled-error)
+   - [TS_R2 - Coefficient of Determination](#ts_r2---coefficient-of-determination)
+   - [TS_BIAS - Forecast Bias](#ts_bias---forecast-bias)
+   - [TS_RMAE - Relative Mean Absolute Error](#ts_rmae---relative-mean-absolute-error)
+   - [TS_QUANTILE_LOSS - Quantile Loss](#ts_quantile_loss---quantile-loss-pinball-loss)
+   - [TS_MQLOSS - Multi-Quantile Loss](#ts_mqloss---multi-quantile-loss)
+   - [TS_COVERAGE - Prediction Interval Coverage](#ts_coverage---prediction-interval-coverage)
+4. [Error Handling](#error-handling)
 
-**Available Metrics:**
-- `TS_MAE()` - Mean Absolute Error
-- `TS_MSE()` - Mean Squared Error
-- `TS_RMSE()` - Root Mean Squared Error
-- `TS_MAPE()` - Mean Absolute Percentage Error
-- `TS_SMAPE()` - Symmetric Mean Absolute Percentage Error
-- `TS_MASE()` - Mean Absolute Scaled Error (requires baseline)
-- `TS_R2()` - Coefficient of Determination (R-Squared)
-- `TS_BIAS()` - Forecast Bias (systematic over/under-forecasting)
-- `TS_RMAE()` - Relative Mean Absolute Error (compares two methods)
-- `TS_QUANTILE_LOSS()` - Quantile Loss / Pinball Loss (for quantile forecasts)
-- `TS_MQLOSS()` - Multi-Quantile Loss / CRPS approximation (for distributions)
-- `TS_COVERAGE()` - Prediction Interval Coverage (fraction within bounds)
+---
+
+## Example: Forecasting and Evaluation with Multiple Methods
+
+The following example demonstrates generating forecasts using three different forecasting methods for multiple time series with GROUP BY, then evaluating the forecasts using `TS_MAE` and `TS_BIAS` metrics.
+
+```sql
+-- Generate forecasts using three different methods for each product
+CREATE TEMP TABLE forecasts AS
+SELECT * FROM TS_FORECAST_BY(
+    'sales',
+    product_id,
+    date,
+    revenue,
+    'AutoETS',
+    28,
+    MAP{'seasonal_period': 7}
+)
+UNION ALL
+SELECT * FROM TS_FORECAST_BY(
+    'sales',
+    product_id,
+    date,
+    revenue,
+    'SeasonalNaive',
+    28,
+    MAP{'seasonal_period': 7}
+)
+UNION ALL
+SELECT * FROM TS_FORECAST_BY(
+    'sales',
+    product_id,
+    date,
+    revenue,
+    'AutoARIMA',
+    28,
+    MAP{'seasonal_period': 7}
+);
+
+-- Join forecasts with actual test data
+CREATE TEMP TABLE evaluation_data AS
+SELECT 
+    f.product_id,
+    f.model_name,
+    f.date,
+    f.point_forecast,
+    a.actual_value
+FROM forecasts f
+JOIN test_data a ON f.product_id = a.product_id AND f.date = a.date;
+
+-- Evaluate forecasts using TS_MAE and TS_BIAS per product and model
+SELECT 
+    product_id,
+    model_name,
+    TS_MAE(LIST(actual_value), LIST(point_forecast)) AS mae,
+    TS_BIAS(LIST(actual_value), LIST(point_forecast)) AS bias
+FROM evaluation_data
+GROUP BY product_id, model_name
+ORDER BY product_id, mae;
+```
+
+This example demonstrates:
+- Generating forecasts for multiple time series using `TS_FORECAST_BY` with three different methods (AutoETS, SeasonalNaive, AutoARIMA)
+- Combining forecasts from multiple methods using `UNION ALL`
+- Joining forecast results with actual test data
+- Evaluating forecast accuracy using `TS_MAE` and `TS_BIAS` with `GROUP BY` and `LIST()` aggregation
+- Results are grouped by both `product_id` and `model_name` to compare method performance across products
 
 ---
 
@@ -34,385 +103,313 @@ All metrics work seamlessly with `GROUP BY` operations using DuckDB's `LIST()` a
 
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_evaluate_01.sql -->
 
-### Complete Example
-
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_complete_example_02.sql -->
-
-**Output**:
-```
-┌────────────┬──────┬───────┬────────┬────────┐
-│ product_id │ mae  │ rmse  │  mape  │  bias  │
-├────────────┼──────┼───────┼────────┼────────┤
-│ Widget_A   │ 2.3  │ 2.8   │  1.8   │  0.5   │
-│ Widget_B   │ 3.1  │ 3.7   │  2.1   │ -0.3   │
-│ Widget_C   │ 4.2  │ 5.1   │  3.4   │  1.2   │
-└────────────┴──────┴───────┴────────┴────────┘
-```
-
-### Compare Methods Across Products
-
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_03.sql -->
-
-**Key Insight**: Use `LIST(column)` in GROUP BY contexts to aggregate rows into arrays before passing to metric functions.
-
 ---
 
 ## Function Signatures
 
 ### TS_MAE - Mean Absolute Error
 
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_04.sql -->
+**Signature:**
+```sql
+TS_MAE(
+    actual      DOUBLE[],
+    predicted   DOUBLE[]
+) → DOUBLE
+```
 
-**Formula**: `Σ|yᵢ - ŷᵢ| / n`
+**Formula:** `MAE = Σ|y - ŷ| / n`
 
-**Range**: [0, ∞)
+**Range:** [0, ∞)
 
-**Interpretation**: 
-- Average absolute difference between actual and predicted values
-- Lower is better
-- Same units as original data
-- **Use when**: Easy interpretation needed, outliers shouldn't dominate
+**Description:**
 
-**Example**:
+The Mean Absolute Error (MAE) computes the average absolute difference between actual and predicted values. It provides a measure of forecast accuracy in the same units as the original data. MAE treats all errors equally, making it less sensitive to outliers compared to squared error metrics like MSE or RMSE. Lower values indicate better forecast accuracy. MAE is particularly useful when you need an easily interpretable error metric that represents the typical magnitude of forecast errors without being dominated by occasional large errors.
+
+**Example:**
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_example_05.sql -->
 
 ---
 
 ### TS_MSE - Mean Squared Error
 
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_06.sql -->
+**Signature:**
+```sql
+TS_MSE(
+    actual      DOUBLE[],
+    predicted   DOUBLE[]
+) → DOUBLE
+```
 
-**Formula**: `Σ(yᵢ - ŷᵢ)² / n`
+**Formula:** `MSE = Σ(y - ŷ)² / n`
 
-**Range**: [0, ∞)
+**Range:** [0, ∞)
 
-**Interpretation**:
-- Average squared difference
-- Penalizes large errors more than small ones
-- Units are squared
-- **Use when**: Large errors are particularly costly
+**Description:**
 
-**Example**:
+The Mean Squared Error (MSE) computes the average of the squared differences between actual and predicted values. By squaring the errors, MSE penalizes large errors more heavily than small errors, making it sensitive to outliers. The units of MSE are the square of the original data units, which can make interpretation less intuitive. MSE is commonly used in optimization problems because it is differentiable and has desirable mathematical properties. Lower values indicate better forecast accuracy. MSE is particularly useful when large forecast errors are particularly costly or undesirable.
+
+**Example:**
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_example_07.sql -->
 
 ---
 
 ### TS_RMSE - Root Mean Squared Error
 
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_08.sql -->
+**Signature:**
+```sql
+TS_RMSE(
+    actual      DOUBLE[],
+    predicted   DOUBLE[]
+) → DOUBLE
+```
 
-**Formula**: `√(Σ(yᵢ - ŷᵢ)² / n)`
+**Formula:** `RMSE = √(MSE) = √(Σ(y - ŷ)² / n)`
 
-**Range**: [0, ∞)
+**Range:** [0, ∞)
 
-**Interpretation**:
-- Square root of MSE
-- Same units as original data
-- Penalizes outliers (but less than MSE)
-- Typically RMSE ≥ MAE
-- **Use when**: You want to penalize large errors in original units
+**Description:**
 
-**Example**:
+The Root Mean Squared Error (RMSE) is the square root of the Mean Squared Error, which restores the metric to the same units as the original data. RMSE maintains the property of penalizing large errors more than small errors, but to a lesser degree than MSE. It provides a measure of the standard deviation of forecast errors. Typically, RMSE ≥ MAE, with equality occurring only when all errors have the same magnitude. RMSE is widely used in forecasting because it balances sensitivity to outliers with interpretability in original units. Lower values indicate better forecast accuracy.
+
+**Example:**
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_example_09.sql -->
 
 ---
 
 ### TS_MAPE - Mean Absolute Percentage Error
 
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_10.sql -->
+**Signature:**
+```sql
+TS_MAPE(
+    actual      DOUBLE[],
+    predicted   DOUBLE[]
+) → DOUBLE
+```
 
-**Formula**: `100 × Σ|yᵢ - ŷᵢ| / |yᵢ| / n`
+**Formula:** `MAPE = (100/n) × Σ|y - ŷ| / |y|`
 
-**Range**: [0, ∞) (expressed as percentage)
+**Range:** [0, ∞) (expressed as percentage)
 
-**Interpretation**:
-- Percentage error
-- Scale-independent (good for comparing different datasets)
-- < 10% is good, < 5% is excellent
-- **Warning**: Undefined when actual values contain zeros
-- **Use when**: Percentage errors are meaningful, all values > 0
+**Description:**
 
-**Example**:
+The Mean Absolute Percentage Error (MAPE) expresses forecast errors as a percentage of the actual values, making it a scale-independent metric that facilitates comparison across different time series with different magnitudes. MAPE is calculated by averaging the absolute percentage errors, where each error is normalized by its corresponding actual value. This normalization allows for meaningful comparisons between series with different scales. However, MAPE has limitations: it is undefined when any actual value is zero, and it can be asymmetric, penalizing under-forecasting more than over-forecasting for the same absolute error. MAPE values are typically interpreted as percentages, with lower values indicating better accuracy.
+
+> [!WARNING]
+> Returns NULL if any actual value is zero.
+
+**Example:**
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_example_11.sql -->
 
 ---
 
 ### TS_SMAPE - Symmetric Mean Absolute Percentage Error
 
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_12.sql -->
+**Signature:**
+```sql
+TS_SMAPE(
+    actual      DOUBLE[],
+    predicted   DOUBLE[]
+) → DOUBLE
+```
 
-**Formula**: `100 × Σ|yᵢ - ŷᵢ| / ((|yᵢ|+|ŷᵢ|)/2) / n`
+**Formula:** `SMAPE = (200/n) × Σ|y - ŷ| / (|y| + |ŷ|)`
 
-**Range**: [0, 200]
+**Range:** [0, 200]
 
-**Interpretation**:
-- Symmetric version of MAPE
-- Treats over-forecasting and under-forecasting equally
-- < 20% is good, < 10% is excellent
-- **Use when**: Symmetry important, can handle zeros better than MAPE
+**Description:**
 
-**Example**:
+The Symmetric Mean Absolute Percentage Error (SMAPE) is a symmetric version of MAPE that treats over-forecasting and under-forecasting equally. Unlike MAPE, which normalizes errors only by actual values, SMAPE normalizes by the average of actual and predicted values, creating a symmetric penalty structure. This symmetry makes SMAPE more balanced for comparing forecast accuracy. SMAPE also handles zero values better than MAPE, though it can still be problematic when both actual and predicted values are zero. The metric ranges from 0 to 200, with lower values indicating better accuracy. SMAPE is particularly useful when you need a scale-independent metric that treats positive and negative errors symmetrically.
+
+> [!WARNING]
+> Handles zero values better than MAPE.
+
+**Example:**
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_example_13.sql -->
 
 ---
 
 ### TS_MASE - Mean Absolute Scaled Error
 
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_14.sql -->
+**Signature:**
+```sql
+TS_MASE(
+    actual      DOUBLE[],
+    predicted   DOUBLE[],
+    baseline    DOUBLE[]
+) → DOUBLE
+```
 
-**Formula**: `MAE(predicted) / MAE(baseline)`
+**Formula:** `MASE = MAE(predicted) / MAE(baseline)`
 
-**Range**: [0, ∞)
+**Range:** [0, ∞)
 
-**Interpretation**:
-- Error relative to naive baseline forecast
-- < 1.0 means model beats baseline
-- > 1.0 means baseline is better
-- Scale-independent
-- **Use when**: Comparing against baseline, zeros allowed in data
+**Description:**
 
-**Example**:
+The Mean Absolute Scaled Error (MASE) measures forecast accuracy relative to a baseline forecasting method, typically a naive forecast. MASE is calculated as the ratio of the MAE of the forecast method being evaluated to the MAE of the baseline method. This scaling makes MASE scale-independent and allows for meaningful comparisons across different time series. A MASE value less than 1.0 indicates that the forecast method performs better than the baseline, while a value greater than 1.0 indicates the baseline is superior. MASE is particularly useful for comparing forecast methods across multiple time series with different scales, and it handles zero values in the data better than percentage-based metrics. The baseline is typically a simple naive forecast (e.g., using the last observed value) or a seasonal naive forecast.
+
+**Example:**
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_example_15.sql -->
 
 ---
 
 ### TS_R2 - Coefficient of Determination
 
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_16.sql -->
+**Signature:**
+```sql
+TS_R2(
+    actual      DOUBLE[],
+    predicted   DOUBLE[]
+) → DOUBLE
+```
 
-**Formula**: `1 - SS_residual / SS_total`
+**Formula:** `R² = 1 - (SS_res / SS_tot)`
 
-**Range**: (-∞, 1.0]
+**Range:** (-∞, 1.0]
 
-**Interpretation**:
-- Proportion of variance explained by the model
-- 1.0 = perfect fit
-- 0.0 = as good as mean baseline
-- < 0 = worse than mean baseline
-- > 0.7 is good, > 0.9 is excellent
-- **Use when**: Want to quantify explained variance
+**Description:**
 
-**Example**:
+The R-squared (R²) coefficient of determination measures the proportion of variance in the actual values that is explained by the forecast model. R² is calculated as one minus the ratio of the residual sum of squares to the total sum of squares. A value of 1.0 indicates a perfect fit where all variance is explained by the model. A value of 0.0 indicates that the model performs as well as simply predicting the mean of the actual values. Negative values indicate that the model performs worse than the mean baseline. R² provides a normalized measure of model performance that is independent of the scale of the data, making it useful for comparing models across different time series. Higher values indicate better model fit, with values above 0.7 generally considered good and above 0.9 considered excellent.
+
+**Example:**
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_example_17.sql -->
 
 ---
 
 ### TS_BIAS - Forecast Bias
 
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_18.sql -->
+**Signature:**
+```sql
+TS_BIAS(
+    actual      DOUBLE[],
+    predicted   DOUBLE[]
+) → DOUBLE
+```
 
-**Formula**: `Σ(ŷᵢ - yᵢ) / n`
+**Formula:** `Bias = Σ(ŷ - y) / n`
 
-**Range**: (-∞, ∞)
+**Range:** (-∞, ∞)
 
-**Interpretation**:
-- Average signed error (systematic over/under-forecasting)
-- **Positive bias** = systematic over-forecasting
-- **Negative bias** = systematic under-forecasting
-- **Zero bias** = unbiased forecast (ideal)
-- Same units as original data
-- **Use when**: Detecting systematic forecast bias
+**Description:**
 
-**Example**:
+The Forecast Bias metric measures the average signed error between predicted and actual values, providing an indication of systematic over-forecasting or under-forecasting. Unlike error metrics that use absolute values, bias preserves the sign of errors, allowing detection of systematic tendencies in forecasts. A positive bias indicates systematic over-forecasting (predictions are consistently higher than actuals), while a negative bias indicates systematic under-forecasting (predictions are consistently lower than actuals). A bias of zero indicates an unbiased forecast, which is the ideal case. However, it is important to note that bias can be zero even when forecast errors are large, if positive and negative errors cancel out. Bias is expressed in the same units as the original data. It should always be used in conjunction with other error metrics like MAE or RMSE to get a complete picture of forecast accuracy, as bias alone does not capture the magnitude of errors.
+
+**Interpretation:** Positive = over-forecasting, Negative = under-forecasting
+
+**Example:**
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_seasonality_19.sql -->
-
-**Important Notes**:
-- Bias can be zero even with large errors if they cancel out
-- Always use with MAE/RMSE to get full picture
-- Positive bias ≠ good forecasts, just systematic tendency
-
----
-
-## Usage Examples
-
-### 1. Evaluate Single Model
-
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_evaluate_20.sql -->
-
----
-
-### 2. Compare Multiple Models
-
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_21.sql -->
-
----
-
-### 3. Benchmark Against Naive
-
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_22.sql -->
-
----
-
-### 4. Rolling Window Evaluation
-
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_23.sql -->
-
----
-
-### 5. Production Monitoring
-
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_24.sql -->
-
----
-
-## Metric Selection Guide
-
-### Choose MAE when:
-- ✅ You want errors in original units
-- ✅ Outliers shouldn't dominate
-- ✅ Simple interpretation needed
-- 🎯 Target: Domain-specific (e.g., <5 for sales forecast)
-
-### Choose RMSE when:
-- ✅ Large errors are particularly costly
-- ✅ You want to penalize outliers more
-- ✅ Standard deviation-like metric preferred
-- 🎯 Target: Domain-specific, typically ≥ MAE
-
-### Choose MAPE when:
-- ✅ Scale-independent comparison needed
-- ✅ All actual values are positive
-- ✅ Percentage errors are meaningful
-- ⚠️ Avoid when zeros in data
-- 🎯 Target: <10% good, <5% excellent
-
-### Choose SMAPE when:
-- ✅ Symmetric errors important
-- ✅ MAPE is too asymmetric
-- ✅ Some zeros might be present
-- 🎯 Target: <20% good, <10% excellent
-
-### Choose MASE when:
-- ✅ Comparing against naive baseline
-- ✅ Scale-independent metric needed
-- ✅ Zeros allowed in data
-- ✅ Want interpretable improvement over baseline
-- 🎯 Target: <1.0 = beats baseline
-
-### Choose R² when:
-- ✅ Variance explained is meaningful
-- ✅ Comparing models on same dataset
-- ✅ Regression-style interpretation preferred
-- 🎯 Target: >0.7 good, >0.9 excellent
-
-### Choose BIAS when:
-- ✅ Detecting systematic over/under-forecasting
-- ✅ Checking for forecast calibration
-- ✅ Identifying model tendencies
-- ⚠️ Always combine with MAE/RMSE (bias can be zero with large errors)
-- 🎯 Target: ≈0 (no systematic bias)
-
----
-
-## Common Use Cases
-
-### Model Selection
-
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_25.sql -->
-
----
-
-### Production Alerting
-
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_26.sql -->
-
----
-
-### A/B Testing
-
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_data_quality_27.sql -->
-
----
-
-### Improvement vs Baseline
-
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_28.sql -->
-
----
-
-## Best Practices
-
-### 1. Use Multiple Metrics
-
-Don't rely on a single metric. Different metrics reveal different aspects:
-
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_evaluate_29.sql -->
-
-### 2. Always Validate on Holdout Data
-
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_30.sql -->
-
-### 3. Use MASE for Model Comparison
-
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_31.sql -->
-
-### 4. Set Thresholds Based on Business Requirements
-
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_32.sql -->
 
 ---
 
 ### TS_RMAE - Relative Mean Absolute Error
 
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_data_quality_33.sql -->
+**Signature:**
+```sql
+TS_RMAE(
+    actual      DOUBLE[],
+    pred1        DOUBLE[],
+    pred2        DOUBLE[]
+) → DOUBLE
+```
 
-**Formula**: `MAE(actual, predicted1) / MAE(actual, predicted2)`
+**Formula:** `RMAE = MAE(actual, pred1) / MAE(actual, pred2)`
 
-**Range**: [0, ∞)
+**Range:** [0, ∞)
 
-**Interpretation**:
-- Compares two forecasting methods
-- RMAE < 1: predicted1 is better than predicted2
-- RMAE > 1: predicted2 is better than predicted1
-- RMAE = 1: Both methods perform equally
-- **Use when**: Comparing two forecasting methods directly
+**Description:**
 
-**Example**:
+The Relative Mean Absolute Error (RMAE) compares the performance of two forecasting methods by computing the ratio of their respective MAE values. RMAE provides a direct comparison metric that indicates which method performs better relative to the other. When RMAE is less than 1.0, the first method (pred1) has lower MAE and is therefore better than the second method (pred2). When RMAE is greater than 1.0, the second method performs better. When RMAE equals 1.0, both methods perform equally. RMAE is scale-independent and allows for straightforward comparison of two forecasting approaches on the same dataset. This metric is particularly useful for model selection when you want to directly compare two specific forecasting methods.
+
+**Example:**
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_example_34.sql -->
 
 ---
 
 ### TS_QUANTILE_LOSS - Quantile Loss (Pinball Loss)
 
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_35.sql -->
+**Signature:**
+```sql
+TS_QUANTILE_LOSS(
+    actual      DOUBLE[],
+    predicted   DOUBLE[],
+    q           DOUBLE
+) → DOUBLE
+```
 
-**Formula**: `Σ[(q * (yᵢ - ŷᵢ) if yᵢ > ŷᵢ else (q - 1) * (yᵢ - ŷᵢ))] / n`
+**Formula:** `QL = Σ max(q × (y - ŷ), (1 - q) × (ŷ - y))`
 
-**Range**: [0, ∞)
+**Range:** [0, ∞)
 
-**Interpretation**:
-- Evaluates quantile forecasts (prediction intervals)
-- q = 0.5 gives median (equal weight to over/under-prediction)
-- q = 0.1 gives 10th percentile (penalizes over-prediction more)
-- q = 0.9 gives 90th percentile (penalizes under-prediction more)
-- Lower values indicate better quantile forecasts
-- **Use when**: Evaluating prediction intervals or quantile forecasts
+**Description:**
 
-**Example**:
+The Quantile Loss, also known as Pinball Loss, evaluates the accuracy of quantile forecasts (prediction intervals) rather than point forecasts. The metric uses an asymmetric loss function that penalizes errors differently depending on whether the actual value is above or below the predicted quantile. The parameter `q` represents the quantile level (0 < q < 1). For the median (q = 0.5), the loss function is symmetric, giving equal weight to over-prediction and under-prediction. For lower quantiles (e.g., q = 0.1), the loss function penalizes over-prediction more heavily, which is appropriate for evaluating lower bounds of prediction intervals. For upper quantiles (e.g., q = 0.9), the loss function penalizes under-prediction more heavily, which is appropriate for evaluating upper bounds. Lower values indicate better quantile forecast accuracy. Quantile loss is essential for evaluating probabilistic forecasts and prediction intervals, as it assesses whether the forecasted quantiles are well-calibrated.
+
+**Parameters:**
+- `q`: Quantile level (0 < q < 1)
+
+**Example:**
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_evaluate_36.sql -->
 
 ---
 
 ### TS_MQLOSS - Multi-Quantile Loss
 
-<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_37.sql -->
+**Signature:**
+```sql
+TS_MQLOSS(
+    actual      DOUBLE[],
+    quantiles   DOUBLE[][],
+    levels      DOUBLE[]
+) → DOUBLE
+```
 
-**Formula**: `Average of quantile losses across all quantiles`
+**Formula:** `Average of quantile losses across all quantiles`
 
-**Range**: [0, ∞)
+**Range:** [0, ∞)
 
-**Interpretation**:
-- Evaluates full predictive distribution
-- Approximates Continuous Ranked Probability Score (CRPS)
-- Measures accuracy of probabilistic forecasts
-- Lower values indicate better distribution forecasts
-- **Use when**: Evaluating full forecast distributions (not just point forecasts)
+**Description:**
 
-**Example**:
+The Multi-Quantile Loss (MQLOSS) evaluates the accuracy of full predictive distributions by averaging quantile losses across multiple quantile levels. This metric provides a comprehensive assessment of probabilistic forecasts that include multiple quantiles, such as prediction intervals with both lower and upper bounds. MQLOSS approximates the Continuous Ranked Probability Score (CRPS), which is a widely used metric for evaluating probabilistic forecasts. By averaging quantile losses across different quantile levels, MQLOSS captures how well the forecasted distribution matches the actual distribution of outcomes. Lower values indicate better distribution forecast accuracy. This metric is particularly useful when evaluating forecasts that provide full predictive distributions rather than just point forecasts, as it assesses the calibration and sharpness of the entire forecast distribution.
+
+**Parameters:**
+- `quantiles`: Array of quantile forecast arrays
+- `levels`: Corresponding quantile levels (e.g., [0.1, 0.5, 0.9])
+
+**Example:**
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_evaluate_38.sql -->
 
 **Use Case - CRPS Approximation**:
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_evaluate_39.sql -->
+
+---
+
+### TS_COVERAGE - Prediction Interval Coverage
+
+**Signature:**
+```sql
+TS_COVERAGE(
+    actual      DOUBLE[],
+    lower       DOUBLE[],
+    upper       DOUBLE[]
+) → DOUBLE
+```
+
+**Formula:** `Coverage = (Count of actuals within [lower, upper]) / n`
+
+**Range:** [0, 1]
+
+**Description:**
+
+The Prediction Interval Coverage metric measures the fraction of actual values that fall within the forecasted prediction interval bounds. Coverage is calculated as the proportion of observations where the actual value lies between the lower and upper bounds of the prediction interval. This metric is essential for evaluating the calibration of prediction intervals, as it indicates whether the intervals are appropriately sized. Ideally, the coverage should match the confidence level used to generate the intervals. For example, if prediction intervals were generated with a 90% confidence level, the coverage should be approximately 0.90 (90%). Coverage values significantly below the confidence level indicate that the intervals are too narrow (overconfident forecasts), while values significantly above indicate that the intervals are too wide (underconfident forecasts). Coverage is a key metric for assessing the reliability of uncertainty quantification in forecasts.
+
+**Example:**
+```sql
+SELECT 
+    product_id,
+    TS_COVERAGE(LIST(actual), LIST(lower), LIST(upper)) * 100 AS coverage_pct
+FROM results
+GROUP BY product_id;
+-- Coverage should be close to confidence_level × 100
+```
 
 ---
 
@@ -421,30 +418,3 @@ Don't rely on a single metric. Different metrics reveal different aspects:
 All functions validate inputs:
 
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_example_40.sql -->
-
----
-
-## Quick Reference
-
-| Function | Arguments | Returns | Key Use |
-|----------|-----------|---------|---------|
-| `TS_MAE()` | actual, predicted | DOUBLE | General error |
-| `TS_MSE()` | actual, predicted | DOUBLE | Outlier penalty |
-| `TS_RMSE()` | actual, predicted | DOUBLE | Error in original units |
-| `TS_MAPE()` | actual, predicted | DOUBLE | Percentage error |
-| `TS_SMAPE()` | actual, predicted | DOUBLE | Symmetric % error |
-| `TS_MASE()` | actual, predicted, baseline | DOUBLE | vs Baseline |
-| `TS_R2()` | actual, predicted | DOUBLE | Variance explained |
-| `TS_BIAS()` | actual, predicted | DOUBLE | Systematic over/under-forecasting |
-| `TS_RMAE()` | actual, predicted1, predicted2 | DOUBLE | Compare two methods |
-| `TS_QUANTILE_LOSS()` | actual, predicted, q | DOUBLE | Quantile forecast accuracy |
-| `TS_MQLOSS()` | actual, predicted_quantiles[], quantiles[] | DOUBLE | Distribution accuracy (CRPS) |
-
----
-
-## See Also
-
-- [41_model_parameters.md](41_model_parameters.md) - Model parameters guide
-- [51_usage_guide.md](51_usage_guide.md) - Advanced usage patterns  
-- [00_README.md](../00_README.md) - General documentation
-
