@@ -122,6 +122,8 @@ This example demonstrates:
 - Evaluating forecast accuracy using `TS_MAE` and `TS_BIAS` with `GROUP BY` and `LIST()` aggregation
 - Results are grouped by both `product_id` and `model_name` to compare method performance across products
 
+[↑ Go to top](#time-series-evaluation-metrics)
+
 ---
 
 ## Using Metrics with GROUP BY
@@ -145,6 +147,8 @@ SELECT
 FROM results
 GROUP BY product_id;
 ```
+
+[↑ Go to top](#time-series-evaluation-metrics)
 
 ---
 
@@ -176,6 +180,8 @@ SELECT TS_MAE([100, 102, 105], [101, 101, 104]) AS mae;
 -- Result: 0.67
 ```
 
+[↑ Go to top](#time-series-evaluation-metrics)
+
 ---
 
 ### TS_MSE - Mean Squared Error
@@ -204,6 +210,8 @@ SELECT TS_MSE([100, 102, 105], [101, 101, 104]) AS mse;
 -- Result: 0.67
 ```
 
+[↑ Go to top](#time-series-evaluation-metrics)
+
 ---
 
 ### TS_RMSE - Root Mean Squared Error
@@ -231,6 +239,8 @@ The Root Mean Squared Error (RMSE) is the square root of the Mean Squared Error,
 SELECT TS_RMSE([100, 102, 105], [101, 101, 104]) AS rmse;
 -- Result: 0.82
 ```
+
+[↑ Go to top](#time-series-evaluation-metrics)
 
 ---
 
@@ -263,6 +273,8 @@ SELECT TS_MAPE([100, 102, 105], [101, 101, 104]) AS mape_percent;
 -- Result: 0.65 (0.65% error)
 ```
 
+[↑ Go to top](#time-series-evaluation-metrics)
+
 ---
 
 ### TS_SMAPE - Symmetric Mean Absolute Percentage Error
@@ -293,6 +305,8 @@ The Symmetric Mean Absolute Percentage Error (SMAPE) is a symmetric version of M
 SELECT TS_SMAPE([100, 102, 105], [101, 101, 104]) AS smape_percent;
 -- Result: 0.65 (0.65% error)
 ```
+
+[↑ Go to top](#time-series-evaluation-metrics)
 
 ---
 
@@ -328,6 +342,8 @@ SELECT TS_MASE(
 -- Result: 0.24 → Theta is 76% better than Naive ✅
 ```
 
+[↑ Go to top](#time-series-evaluation-metrics)
+
 ---
 
 ### TS_R2 - Coefficient of Determination
@@ -355,6 +371,8 @@ The R-squared (R²) coefficient of determination measures the proportion of vari
 SELECT TS_R2([100, 102, 105, 103, 107], [101, 101, 104, 104, 106]) AS r_squared;
 -- Result: 0.88 → Model explains 88% of variance
 ```
+
+[↑ Go to top](#time-series-evaluation-metrics)
 
 ---
 
@@ -394,6 +412,8 @@ SELECT TS_BIAS([100, 102, 105], [98, 100, 103]) AS bias;
 SELECT TS_BIAS([100, 102, 105], [101, 101, 106]) AS bias;
 -- Result: 0.0 → Errors cancel out (no systematic bias)
 ```
+
+[↑ Go to top](#time-series-evaluation-metrics)
 
 ---
 
@@ -436,6 +456,8 @@ FROM forecast_comparison;
 -- mae_autoets: 2.0, mae_naive: 4.5, relative_performance: 0.44, winner: 'AutoETS is better'
 ```
 
+[↑ Go to top](#time-series-evaluation-metrics)
+
 ---
 
 ### TS_QUANTILE_LOSS - Quantile Loss (Pinball Loss)
@@ -476,6 +498,8 @@ FROM forecasts;
 -- Lower ql_lower means better lower bound prediction
 -- Lower ql_upper means better upper bound prediction
 ```
+
+[↑ Go to top](#time-series-evaluation-metrics)
 
 ---
 
@@ -547,6 +571,8 @@ GROUP BY model_name
 ORDER BY crps_approximation;  -- Best model first
 ```
 
+[↑ Go to top](#time-series-evaluation-metrics)
+
 ---
 
 ### TS_COVERAGE - Prediction Interval Coverage
@@ -580,6 +606,8 @@ GROUP BY product_id;
 -- Coverage should be close to confidence_level × 100
 ```
 
+[↑ Go to top](#time-series-evaluation-metrics)
+
 ---
 
 ## Error Handling
@@ -601,3 +629,5 @@ SELECT TS_MAPE([0, 1, 2], [0, 1, 2]);
 SELECT TS_MASE([1, 2], [1, 2]);
 -- Use: TS_MASE([1, 2], [1, 2], baseline)
 ```
+
+[↑ Go to top](#time-series-evaluation-metrics)

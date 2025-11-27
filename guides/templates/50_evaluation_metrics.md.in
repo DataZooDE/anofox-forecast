@@ -121,6 +121,8 @@ This example demonstrates:
 - Evaluating forecast accuracy using `TS_MAE` and `TS_BIAS` with `GROUP BY` and `LIST()` aggregation
 - Results are grouped by both `product_id` and `model_name` to compare method performance across products
 
+[↑ Go to top](#time-series-evaluation-metrics)
+
 ---
 
 ## Using Metrics with GROUP BY
@@ -132,6 +134,8 @@ All metrics work seamlessly with `GROUP BY` operations using DuckDB's `LIST()` a
 **Metrics expect arrays (LIST), not individual values:**
 
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_evaluate_01.sql -->
+
+[↑ Go to top](#time-series-evaluation-metrics)
 
 ---
 
@@ -158,6 +162,8 @@ The Mean Absolute Error (MAE) computes the average absolute difference between a
 **Example:**
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_example_05.sql -->
 
+[↑ Go to top](#time-series-evaluation-metrics)
+
 ---
 
 ### TS_MSE - Mean Squared Error
@@ -181,6 +187,8 @@ The Mean Squared Error (MSE) computes the average of the squared differences bet
 **Example:**
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_example_07.sql -->
 
+[↑ Go to top](#time-series-evaluation-metrics)
+
 ---
 
 ### TS_RMSE - Root Mean Squared Error
@@ -203,6 +211,8 @@ The Root Mean Squared Error (RMSE) is the square root of the Mean Squared Error,
 
 **Example:**
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_example_09.sql -->
+
+[↑ Go to top](#time-series-evaluation-metrics)
 
 ---
 
@@ -230,6 +240,8 @@ The Mean Absolute Percentage Error (MAPE) expresses forecast errors as a percent
 **Example:**
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_example_11.sql -->
 
+[↑ Go to top](#time-series-evaluation-metrics)
+
 ---
 
 ### TS_SMAPE - Symmetric Mean Absolute Percentage Error
@@ -256,6 +268,8 @@ The Symmetric Mean Absolute Percentage Error (SMAPE) is a symmetric version of M
 **Example:**
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_example_13.sql -->
 
+[↑ Go to top](#time-series-evaluation-metrics)
+
 ---
 
 ### TS_MASE - Mean Absolute Scaled Error
@@ -280,6 +294,8 @@ The Mean Absolute Scaled Error (MASE) measures forecast accuracy relative to a b
 **Example:**
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_example_15.sql -->
 
+[↑ Go to top](#time-series-evaluation-metrics)
+
 ---
 
 ### TS_R2 - Coefficient of Determination
@@ -302,6 +318,8 @@ The R-squared (R²) coefficient of determination measures the proportion of vari
 
 **Example:**
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_example_17.sql -->
+
+[↑ Go to top](#time-series-evaluation-metrics)
 
 ---
 
@@ -328,6 +346,8 @@ The Forecast Bias metric measures the average signed error between predicted and
 **Example:**
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_seasonality_19.sql -->
 
+[↑ Go to top](#time-series-evaluation-metrics)
+
 ---
 
 ### TS_RMAE - Relative Mean Absolute Error
@@ -351,6 +371,8 @@ The Relative Mean Absolute Error (RMAE) compares the performance of two forecast
 
 **Example:**
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_example_34.sql -->
+
+[↑ Go to top](#time-series-evaluation-metrics)
 
 ---
 
@@ -378,6 +400,8 @@ The Quantile Loss, also known as Pinball Loss, evaluates the accuracy of quantil
 
 **Example:**
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_evaluate_36.sql -->
+
+[↑ Go to top](#time-series-evaluation-metrics)
 
 ---
 
@@ -410,6 +434,8 @@ The Multi-Quantile Loss (MQLOSS) evaluates the accuracy of full predictive distr
 **Use Case - CRPS Approximation**:
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_evaluate_39.sql -->
 
+[↑ Go to top](#time-series-evaluation-metrics)
+
 ---
 
 ### TS_COVERAGE - Prediction Interval Coverage
@@ -441,6 +467,8 @@ GROUP BY product_id;
 -- Coverage should be close to confidence_level × 100
 ```
 
+[↑ Go to top](#time-series-evaluation-metrics)
+
 ---
 
 ## Error Handling
@@ -448,3 +476,5 @@ GROUP BY product_id;
 All functions validate inputs:
 
 <!-- include: test/sql/docs_examples/50_evaluation_metrics_example_40.sql -->
+
+[↑ Go to top](#time-series-evaluation-metrics)
