@@ -37,18 +37,14 @@ The `ts_features` function extracts time series features directly in DuckDB, pro
 6. [Grouping and Aggregation](#grouping-and-aggregation)
    - [GROUP BY Aggregation](#group-by-aggregation)
    - [Multiple Groups](#multiple-groups)
-7. [Complete Examples](#complete-examples)
-   - [Feature Engineering for ML](#feature-engineering-for-ml)
-   - [Anomaly Detection](#anomaly-detection)
-   - [Time Series Clustering](#time-series-clustering)
-8. [Best Practices](#best-practices)
+7. [Best Practices](#best-practices)
    - [Performance Optimization](#performance-optimization)
    - [Feature Selection Tips](#feature-selection-tips)
    - [Handling NULL Values](#handling-null-values)
-9. [Common Patterns](#common-patterns)
+8. [Common Patterns](#common-patterns)
    - [Feature Comparison Across Series](#feature-comparison-across-series)
    - [Rolling Feature Trends](#rolling-feature-trends)
-10. [Troubleshooting](#troubleshooting)
+9. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -468,103 +464,6 @@ FROM (
     FROM sales_data
     GROUP BY region, category
 );
-```
-
-[↑ Go to top](#time-series-features-guide)
-
----
-
-## Complete Examples
-
-### Feature Engineering for ML
-
-Extract features for machine learning pipelines:
-
-```sql
--- Extract features for machine learning pipeline
--- Create sample sales data
-CREATE TABLE sales_data AS
-SELECT 
-    'Product_' || LPAD((i % 3 + 1)::VARCHAR, 2, '0') AS product_id,
-    DATE '2024-01-01' + INTERVAL (d) DAY AS ts,
-    GREATEST(0, 
-        100.0 + (i % 3 + 1) * 20.0
-        + 0.5 * d
-        + 15.0 * SIN(2 * PI() * d / 7)
-        + (RANDOM() * 10.0 - 5.0)
-    )::DOUBLE AS value
-FROM generate_series(0, 89) t(d)
-CROSS JOIN generate_series(1, 3) t(i);
-
--- Extract features with explicit selection
-SELECT 
-    product_id,
-    feats.*
-FROM (
-    SELECT 
-        product_id,
-        ts_features(
-            ts,
-            value,
-            ['mean', 'variance', 'autocorrelation__lag_1', 'linear_trend', 'sum_values']
-        ) AS feats
-    FROM sales_data
-    GROUP BY product_id
-)
-ORDER BY product_id;
-
-```
-
-### Anomaly Detection
-
-Use rolling features to detect anomalies:
-
-```sql
-WITH rolling_stats AS (
-    SELECT 
-        date,
-        value,
-        (ts_features(date, value, ['mean', 'variance']) OVER (
-            PARTITION BY sensor_id 
-            ORDER BY date
-            ROWS BETWEEN 30 PRECEDING AND CURRENT ROW
-        )) AS stats
-    FROM sensor_data
-)
-SELECT 
-    date,
-    value,
-    (stats).mean AS rolling_mean,
-    (stats).variance AS rolling_variance,
-    CASE 
-        WHEN ABS(value - (stats).mean) > 3 * SQRT((stats).variance) 
-        THEN 'ANOMALY' 
-        ELSE 'NORMAL' 
-    END AS anomaly_flag
-FROM rolling_stats;
-```
-
-### Time Series Clustering
-
-Extract feature vectors for clustering similar time series:
-
-```sql
-WITH feature_vectors AS (
-    SELECT 
-        series_id,
-        ts_features(
-            date,
-            value,
-            ['mean', 'variance', 'autocorrelation__lag_1', 'linear_trend']
-        ) AS feats
-    FROM time_series_data
-    GROUP BY series_id
-)
-SELECT 
-    series_id,
-    feats.*
-FROM feature_vectors
-ORDER BY series_id;
 ```
 
 [↑ Go to top](#time-series-features-guide)
