@@ -170,8 +170,8 @@ ORDER BY avg_mae;
 | **Python** | ✅ | [Python Usage](guides/81_python_integration.md) |
 | **R** | ✅ | [R Usage](guides/82_r_integration.md) |
 | **Julia** | ✅ | [Julia Usage](guides/83_julia_integration.md) |
-| **C++** | ✅ | [C++ Usage](guides/84_cpp_integration.md) |
-| **Rust** | ✅ | [Rust Usage](guides/85_rust_integration.md) |
+| **C++** | ✅ | Via DuckDB C++ bindings |
+| **Rust** | ✅ | Via DuckDB Rust bindings |
 | **Node.js** | ✅ | Via DuckDB Node bindings |
 | **Go** | ✅ | Via DuckDB Go bindings |
 | **Java** | ✅ | Via DuckDB JDBC driver |
