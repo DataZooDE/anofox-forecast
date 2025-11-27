@@ -1,4 +1,17 @@
--- Detect
+-- Create sample sales data with edge zeros
+CREATE TABLE sales AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    CASE 
+        WHEN d < 10 THEN 0.0  -- Leading zeros
+        WHEN d > 80 THEN 0.0  -- Trailing zeros
+        ELSE 100 + 50 * SIN(2 * PI() * (d - 10) / 7) + (RANDOM() * 20)
+    END AS sales_amount
+FROM generate_series(0, 90) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002')) products(product_id);
+
+-- Detect edge zeros
 WITH zero_analysis AS (
     SELECT 
         product_id,
