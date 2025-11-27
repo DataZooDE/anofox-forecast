@@ -1,16 +1,51 @@
 # Using anofox-forecast from Julia
 
-## Overview
+## Introduction
 
-Use anofox-forecast from Julia through DuckDB.jl. Perfect for high-performance scientific computing with production-grade forecasting.
+The anofox-forecast extension integrates with Julia through DuckDB.jl, enabling time series forecasting operations to be executed as SQL queries from Julia applications. This combination provides high-performance scientific computing capabilities with production-grade forecasting functionality.
 
-**Key Advantages**:
+**Key Capabilities**:
 
-- ✅ Julia's speed + DuckDB's analytical power
-- ✅ No Julia forecasting packages needed
-- ✅ Easy DataFrame integration
-- ✅ Type-safe queries
-- ✅ REPL-friendly
+- Execute forecasting operations via SQL queries through DuckDB.jl bindings
+- No dependency on Julia forecasting packages
+- High-performance data processing leveraging Julia's speed and DuckDB's analytical power
+- Seamless integration with DataFrames.jl and type-safe query execution
+- REPL-friendly workflow for interactive exploration
+- Portable SQL queries that work identically across programming languages
+- Support for complete forecasting workflows: data preparation, forecasting, and evaluation
+
+---
+
+## Table of Contents
+
+1. [Installation](#installation)
+2. [Quick Start](#quick-start)
+3. [Working with DataFrames](#working-with-dataframes)
+   - [Load Data from Julia DataFrame](#load-data-from-julia-dataframe)
+   - [Multiple Series](#multiple-series)
+4. [Data Preparation](#data-preparation)
+5. [Visualization with Plots.jl](#visualization-with-plotsjl)
+6. [Performance Optimization](#performance-optimization)
+   - [Persistent Connection](#persistent-connection)
+   - [Parallel Processing](#parallel-processing)
+7. [Evaluation](#evaluation)
+8. [Package Integration](#package-integration)
+   - [With CSV.jl](#with-csvjl)
+   - [With Arrow.jl](#with-arrowjl)
+9. [Jupyter Notebook (IJulia)](#jupyter-notebook-ijulia)
+10. [Type Safety](#type-safety)
+11. [Best Practices](#best-practices)
+    - [Prepared Statements](#1-prepared-statements)
+    - [Error Handling](#2-error-handling)
+    - [Logging](#3-logging)
+12. [Integration Patterns](#integration-patterns)
+    - [Data Pipeline](#pattern-1-data-pipeline)
+    - [HTTP API (Oxygen.jl)](#pattern-2-http-api-oxygenjl)
+13. [Scientific Computing](#scientific-computing)
+    - [Numerical Analysis](#numerical-analysis)
+14. [Summary](#summary)
+
+---
 
 ## Installation
 
@@ -115,6 +150,10 @@ for group in by_product
 end
 ```
 
+[↑ Go to top](#using-anofox-forecast-from-julia)
+
+---
+
 ## Data Preparation
 
 ```julia
@@ -191,6 +230,10 @@ title!("Sales Forecast")
 savefig("forecast.png")
 ```
 
+[↑ Go to top](#using-anofox-forecast-from-julia)
+
+---
+
 ## Performance Optimization
 
 ### Persistent Connection
@@ -252,6 +295,10 @@ forecasts = DataFrame(DBInterface.execute(con, """
 println("Forecasted $(length(unique(forecasts.product_id))) products in parallel")
 ```
 
+[↑ Go to top](#using-anofox-forecast-from-julia)
+
+---
+
 ## Evaluation
 
 ```julia
@@ -294,6 +341,10 @@ println("\nSummary:")
 println("  Mean MAPE: ", round(mean(metrics.mape), digits=2), "%")
 println("  Mean Coverage: ", round(mean(metrics.coverage)*100, digits=1), "%")
 ```
+
+[↑ Go to top](#using-anofox-forecast-from-julia)
+
+---
 
 ## Package Integration
 
@@ -343,6 +394,10 @@ forecast = DataFrame(DBInterface.execute(con, """
 # Write as Arrow/Parquet
 Arrow.write("forecast.arrow", forecast)
 ```
+
+[↑ Go to top](#using-anofox-forecast-from-julia)
+
+---
 
 ## Jupyter Notebook (IJulia)
 
@@ -417,6 +472,10 @@ end
 fc = get_forecast("P001", 28)
 println(typeof(fc))  # ForecastResult
 ```
+
+[↑ Go to top](#using-anofox-forecast-from-julia)
+
+---
 
 ## Best Practices
 
@@ -508,6 +567,10 @@ function forecast_with_logging(table_name::String)
 end
 ```
 
+[↑ Go to top](#using-anofox-forecast-from-julia)
+
+---
+
 ## Integration Patterns
 
 ### Pattern 1: Data Pipeline
@@ -592,6 +655,10 @@ end
 serve(port=8080)
 ```
 
+[↑ Go to top](#using-anofox-forecast-from-julia)
+
+---
+
 ## Scientific Computing
 
 ### Numerical Analysis
@@ -639,6 +706,10 @@ else
 end
 ```
 
+[↑ Go to top](#using-anofox-forecast-from-julia)
+
+---
+
 ## Summary
 
 **Why Use from Julia?**
@@ -673,4 +744,6 @@ DataFrame → register → SQL forecast → DataFrame → analysis/plot
 
 **Next**: [C++ Usage Guide](84_cpp_integration.md) | [Rust Usage Guide](85_rust_integration.md)
 
-**Julia + DuckDB**: High-performance scientific forecasting! 🚀
+**Julia + DuckDB**: High-performance scientific forecasting!
+
+[↑ Go to top](#using-anofox-forecast-from-julia)

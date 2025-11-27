@@ -1,10 +1,43 @@
 # Multi-Language Support - Write Once, Use Everywhere
 
-## The Power of SQL-Based Forecasting
+## Introduction
 
-**Core Insight**: Since anofox-forecast is a DuckDB extension, your forecasting logic is **pure SQL** and works across **all** programming languages that have DuckDB bindings!
+The anofox-forecast extension is implemented as a DuckDB extension, which means all forecasting operations are executed as SQL queries. This architecture enables the same forecasting logic to work seamlessly across all programming languages that support DuckDB bindings.
 
-**Write once in SQL → Use from Python, R, Julia, C++, Rust, Node.js, Go, Java, and more!**
+**Key Capabilities**:
+- Write forecasting logic once in SQL, use from any language
+- Native DuckDB performance regardless of calling language
+- Portable SQL queries that work identically across languages
+- Support for Python, R, Julia, C++, Rust, Node.js, Go, Java, and more
+- Zero language-specific forecasting library dependencies
+
+---
+
+## Table of Contents
+
+1. [Supported Languages](#supported-languages)
+   - [Production-Ready Languages](#production-ready-with-dedicated-guides)
+   - [Additional Supported Languages](#also-supported-via-duckdb-bindings)
+2. [Universal SQL Pattern](#universal-sql-pattern)
+   - [The Same SQL Works Everywhere](#the-same-sql-works-everywhere)
+3. [Language Comparison](#language-comparison)
+   - [Quick Comparison Matrix](#quick-comparison-matrix)
+   - [When to Use Each Language](#when-to-use-each-language)
+4. [Integration Patterns](#integration-patterns)
+   - [Polyglot Team Pattern](#pattern-1-polyglot-team)
+   - [Hybrid Pipeline Pattern](#pattern-2-hybrid-pipeline)
+   - [Microservices Architecture Pattern](#pattern-3-microservices-architecture)
+5. [Performance Across Languages](#performance-across-languages)
+   - [Benchmarks](#benchmarks-1000-series-365-days-28-day-horizon)
+   - [What Affects Performance](#what-affects-performance)
+6. [Code Reusability](#code-reusability)
+   - [Shared SQL Queries](#shared-sql-queries)
+7. [Example: Same Workflow, Different Languages](#example-same-workflow-different-languages)
+8. [Data Exchange Formats](#data-exchange-formats)
+   - [Parquet Format](#parquet-recommended)
+   - [CSV Format](#csv-simple)
+   - [Arrow IPC Format](#arrow-ipc-fast)
+   - [DuckDB Database File](#duckdb-database-file-best)
 
 ---
 
@@ -28,6 +61,8 @@
 - **C#/.NET**: Windows applications
 - **Swift**: iOS/macOS applications
 - **And many more!**
+
+[↑ Go to top](#multi-language-support-write-once-use-everywhere)
 
 ---
 
@@ -65,6 +100,8 @@ let forecast = conn.prepare("SELECT * FROM TS_FORECAST(...)")?.query_map(...)?;
 
 **Same logic, different language bindings!**
 
+[↑ Go to top](#multi-language-support-write-once-use-everywhere)
+
 ---
 
 ## Language Comparison
@@ -95,6 +132,8 @@ let forecast = conn.prepare("SELECT * FROM TS_FORECAST(...)")?.query_map(...)?;
 **C++** → Maximum performance, embedded systems, low-latency trading, game engines
 
 **Rust** → Production services needing safety, CLI tools, systems programming
+
+[↑ Go to top](#multi-language-support-write-once-use-everywhere)
 
 ---
 
@@ -188,6 +227,8 @@ forecasts <- dbGetQuery(con, "SELECT * FROM read_parquet('forecasts.parquet')")
 
 **Benefit**: Each service uses best language for the task!
 
+[↑ Go to top](#multi-language-support-write-once-use-everywhere)
+
 ---
 
 ## Performance Across Languages
@@ -222,6 +263,8 @@ forecasts <- dbGetQuery(con, "SELECT * FROM read_parquet('forecasts.parquet')")
 - ✅ Number of series (more = better parallelization)
 - ✅ Data preparation (gaps, nulls, filtering)
 - ✅ SQL query efficiency
+
+[↑ Go to top](#multi-language-support-write-once-use-everywhere)
 
 ---
 
@@ -260,6 +303,9 @@ let query = include_str!("queries.sql");
 conn.execute_batch(query)?;
 ```
 
+[↑ Go to top](#multi-language-support-write-once-use-everywhere)
+
+---
 
 ## Example: Same Workflow, Different Languages
 
@@ -326,8 +372,9 @@ conn.execute_batch("COPY (SELECT * FROM forecast) TO 'forecast.csv'")?;
 
 **Notice**: The SQL is identical in all languages!
 
----
+[↑ Go to top](#multi-language-support-write-once-use-everywhere)
 
+---
 
 ## Data Exchange Formats
 
@@ -382,5 +429,7 @@ let conn = Connection::open("shared.duckdb")?;
 ```
 
 **Benefit**: Zero data conversion, instant access!
+
+[↑ Go to top](#multi-language-support-write-once-use-everywhere)
 
 ---

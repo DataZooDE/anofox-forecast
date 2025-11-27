@@ -1,16 +1,46 @@
 # Using anofox-forecast from R
 
-## Overview
+## Introduction
 
-Use the anofox-forecast extension from R through DuckDB's R package. Perfect for R users who want production-grade forecasting without complex package dependencies.
+The anofox-forecast extension integrates with R through DuckDB's R package, enabling time series forecasting operations to be executed as SQL queries from R applications. This approach provides production-grade forecasting capabilities without requiring complex R package dependencies.
 
-**Key Advantages**:
+**Key Capabilities**:
 
-- ✅ No need for forecast, fable, prophet packages
-- ✅ Faster than data.table for large datasets
-- ✅ Easy integration with tidyverse
-- ✅ SQL queries portable
-- ✅ Works seamlessly with data.frames and tibbles
+- Execute forecasting operations via SQL queries through DuckDB R bindings
+- No dependency on R forecasting packages (forecast, fable, prophet, etc.)
+- High-performance data processing with native DuckDB parallelization
+- Seamless integration with tidyverse, data.frames, and tibbles
+- Portable SQL queries that work identically across programming languages
+- Support for complete forecasting workflows: data preparation, forecasting, and evaluation
+
+---
+
+## Table of Contents
+
+1. [Installation](#installation)
+2. [Quick Start](#quick-start)
+3. [Working with Data Frames](#working-with-data-frames)
+   - [Load Data from R](#load-data-from-r)
+   - [Tidyverse Integration](#tidyverse-integration)
+4. [Data Preparation](#data-preparation)
+5. [Visualization with ggplot2](#visualization-with-ggplot2)
+6. [Evaluation & Metrics](#evaluation--metrics)
+7. [Shiny Dashboard Example](#shiny-dashboard-example)
+8. [RMarkdown Report](#rmarkdown-report)
+9. [Best Practices for R](#best-practices-for-r)
+   - [Use dplyr for Post-Processing](#1-use-dplyr-for-post-processing)
+   - [Function Wrappers](#2-function-wrappers)
+   - [Batch Processing](#3-batch-processing)
+10. [Comparison: R forecast Package vs DuckDB Extension](#comparison-r-forecast-package-vs-duckdb-extension)
+11. [Working with Time Series Objects](#working-with-time-series-objects)
+    - [Convert to ts Object](#convert-to-ts-object)
+12. [Production Deployment](#production-deployment)
+    - [Scheduled R Script](#scheduled-r-script-cron-job)
+    - [Plumber API](#plumber-api)
+13. [Comparison with Other R Packages](#comparison-with-other-r-packages)
+14. [Summary](#summary)
+
+---
 
 ## Installation
 
@@ -122,6 +152,10 @@ print(forecasts_wide)
 dbDisconnect(con, shutdown = TRUE)
 ```
 
+[↑ Go to top](#using-anofox-forecast-from-r)
+
+---
+
 ## Data Preparation
 
 ```r
@@ -205,6 +239,10 @@ ggsave("forecast.png", width = 10, height = 6)
 dbDisconnect(con, shutdown = TRUE)
 ```
 
+[↑ Go to top](#using-anofox-forecast-from-r)
+
+---
+
 ## Evaluation & Metrics
 
 ```r
@@ -248,6 +286,10 @@ cat(sprintf("Mean Coverage: %.1f%%\n", mean(metrics$coverage_pct)))
 
 dbDisconnect(con, shutdown = TRUE)
 ```
+
+[↑ Go to top](#using-anofox-forecast-from-r)
+
+---
 
 ## Shiny Dashboard Example
 
@@ -320,6 +362,10 @@ server <- function(input, output, session) {
 shinyApp(ui, server)
 ```
 
+[↑ Go to top](#using-anofox-forecast-from-r)
+
+---
+
 ## RMarkdown Report
 
 ````r
@@ -382,6 +428,10 @@ kable(summary_stats)
 dbDisconnect(con, shutdown = TRUE)
 ```
 ````
+
+[↑ Go to top](#using-anofox-forecast-from-r)
+
+---
 
 ## Best Practices for R
 
@@ -468,6 +518,10 @@ forecasts_list <- map_dfr(products, function(pid) {
 dbDisconnect(con, shutdown = TRUE)
 ```
 
+[↑ Go to top](#using-anofox-forecast-from-r)
+
+---
+
 ## Comparison: R forecast Package vs DuckDB Extension
 
 ```r
@@ -505,6 +559,10 @@ microbenchmark(
 # For multiple series, DuckDB is MUCH faster (parallel)
 ```
 
+[↑ Go to top](#using-anofox-forecast-from-r)
+
+---
+
 ## Working with Time Series Objects
 
 ### Convert to ts Object
@@ -533,6 +591,10 @@ plot(forecast_ts)
 
 dbDisconnect(con, shutdown = TRUE)
 ```
+
+[↑ Go to top](#using-anofox-forecast-from-r)
+
+---
 
 ## Production Deployment
 
@@ -649,6 +711,10 @@ function(product_id) {
 # Run with: plumb("api.R")$run(port = 8000)
 ```
 
+[↑ Go to top](#using-anofox-forecast-from-r)
+
+---
+
 ## Comparison with Other R Packages
 
 | Feature | anofox-forecast | forecast | fable | prophet |
@@ -688,4 +754,6 @@ data.frame → duckdb_register() → SQL forecast → data.frame → ggplot2
 
 **Next**: [Julia Usage Guide](83_julia_integration.md) | [C++ Usage Guide](84_cpp_integration.md)
 
-**R + DuckDB**: The best of both worlds - R's statistical ecosystem + DuckDB's performance! 📊
+**R + DuckDB**: The best of both worlds - R's statistical ecosystem + DuckDB's performance!
+
+[↑ Go to top](#using-anofox-forecast-from-r)
