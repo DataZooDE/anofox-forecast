@@ -1,5 +1,7 @@
 # Seasonality Detection API
 
+> **Note:** This documentation will be updated as part of [issue #14](https://github.com/DataZooDE/anofox-forecast/issues/14) which includes porting seasonality simulations study from Python to the anofox-forecast benchmark suite and extending seasonality detection appropriately.
+
 ## Overview
 
 The `anofox-forecast` extension provides two powerful functions for automatic seasonality detection in time series data:
