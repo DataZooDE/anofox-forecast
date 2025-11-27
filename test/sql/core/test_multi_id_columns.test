@@ -177,7 +177,7 @@ true
 # Test 8: EDA with composite key
 statement ok
 CREATE TABLE eda_composite AS
-SELECT * FROM ts_stats(sales_with_composite, composite_id, date, sales);
+SELECT * FROM ts_stats(sales_with_composite, composite_id, date, sales, '1d');
 
 # Verify stats generated for multiple series
 query I

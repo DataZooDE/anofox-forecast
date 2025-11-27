@@ -31,7 +31,7 @@ CREATE TABLE sales_stats AS
 SELECT * FROM TS_STATS('sales_raw', product_id, date, amount);
 
 -- View summary
-SELECT * FROM TS_DATASET_SUMMARY('sales_stats');
+SELECT * FROM TS_STATS_SUMMARY('sales_stats');
 
 -- Quality report
 SELECT * FROM TS_QUALITY_REPORT('sales_stats', 30);
@@ -57,7 +57,11 @@ SELECT * FROM TS_FILL_NULLS_FORWARD('sales_clean', product_id, date, amount);
 
 ```sql
 -- Automatically detect seasonal periods
-SELECT * FROM TS_DETECT_SEASONALITY_ALL('sales_complete', product_id, date, amount);
+SELECT 
+    product_id,
+    TS_DETECT_SEASONALITY(LIST(amount ORDER BY date)) AS detected_periods
+FROM sales_complete
+GROUP BY product_id;
 
 -- Result:
 -- | product_id | detected_periods | primary_period | is_seasonal |

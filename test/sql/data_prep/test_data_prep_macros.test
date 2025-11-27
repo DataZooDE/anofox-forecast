@@ -36,7 +36,7 @@ FROM generate_series(1, 15) t(i);
 # Test: TS_FILL_GAPS
 statement ok
 CREATE TABLE filled_gaps AS
-SELECT * FROM ts_fill_gaps(raw_data, series_id, date_col, value);
+SELECT * FROM ts_fill_gaps(raw_data, series_id, date_col, value, NULL::VARCHAR);
 
 # Verify gaps filled for series_1 (28 -> 30)
 query I
@@ -155,7 +155,7 @@ true
 # Test: Two-step workflow (fill then drop)
 statement ok
 CREATE TABLE filled_data AS
-SELECT * FROM ts_fill_gaps(raw_data, series_id, date_col, value);
+SELECT * FROM ts_fill_gaps(raw_data, series_id, date_col, value, NULL::VARCHAR);
 
 statement ok
 CREATE TABLE clean_data AS
@@ -217,4 +217,140 @@ DROP TABLE filled_data;
 
 statement ok
 DROP TABLE clean_data;
+
+# Test: TS_FILL_FORWARD - Extend series to target date
+statement ok
+CREATE TABLE test_forward AS
+SELECT date_col, 'series_1' AS sid, 100.0 + i::DOUBLE AS val
+FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM generate_series(1, 10) t(i));
+
+statement ok
+CREATE TABLE extended_forward AS
+SELECT * FROM ts_fill_forward(test_forward, sid, date_col, val, '2024-01-15'::DATE, NULL::VARCHAR);
+
+# Verify series extended to target date (10 original -> 14 total: 2024-01-02 to 2024-01-15)
+query I
+SELECT COUNT(*) = 14
+FROM extended_forward
+WHERE group_col = 'series_1';
+----
+true
+
+# Test: TS_DROP_GAPPY - Drop series with excessive gaps
+statement ok
+CREATE TABLE test_gappy AS
+SELECT date_col, 'gappy_series' AS sid, 100.0 AS val
+FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM generate_series(1, 20) t(i))
+WHERE i NOT IN (5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);  -- 10 gaps out of 20 = 50% gaps
+
+statement ok
+CREATE TABLE no_gappy AS
+SELECT * FROM ts_drop_gappy(test_gappy, sid, date_col, 0.40);  -- Max 40% gaps
+
+# Verify gappy series removed (50% > 40%)
+query I
+SELECT COUNT(DISTINCT group_col) = 0
+FROM no_gappy;
+----
+true
+
+# Test: TS_DROP_EDGE_ZEROS - Remove both leading and trailing zeros
+statement ok
+CREATE TABLE test_edge_zeros AS
+SELECT date_col, 'edge_zeros' AS sid, 
+    CASE 
+        WHEN i <= 3 THEN 0.0
+        WHEN i >= 8 THEN 0.0
+        ELSE i::DOUBLE
+    END AS val
+FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM generate_series(1, 10) t(i));
+
+statement ok
+CREATE TABLE no_edge_zeros AS
+SELECT * FROM ts_drop_edge_zeros(test_edge_zeros, sid, date_col, val);
+
+# Verify edge zeros removed (10 -> 4 rows: 4, 5, 6, 7)
+query I
+SELECT COUNT(*) = 4
+FROM no_edge_zeros;
+----
+true
+
+# Test: TS_FILL_NULLS_CONST - Fill with constant value
+statement ok
+CREATE TABLE test_const_fill AS
+SELECT date_col, 'series_1' AS sid, 
+    CASE WHEN i BETWEEN 5 AND 7 THEN NULL ELSE 100.0 + i::DOUBLE END AS val
+FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM generate_series(1, 10) t(i));
+
+statement ok
+CREATE TABLE filled_const AS
+SELECT * FROM ts_fill_nulls_const(test_const_fill, sid, date_col, val, 0.0);
+
+# Verify all NULLs filled with 0.0
+query I
+SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) = 0
+FROM filled_const;
+----
+true
+
+# Verify filled values are 0.0
+query I
+SELECT COUNT(*) = 3
+FROM filled_const
+WHERE value_col = 0.0;
+----
+true
+
+# Test: TS_DIFF - Differencing
+statement ok
+CREATE TABLE test_diff AS
+SELECT date_col, 'series_1' AS sid, i::DOUBLE * 10.0 AS val
+FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM generate_series(1, 5) t(i));
+
+statement ok
+CREATE TABLE differenced AS
+SELECT * FROM ts_diff(test_diff, sid, date_col, val, 1);
+
+# Verify differencing applied (should be approximately 10.0 for order=1)
+query I
+SELECT COUNT(*) >= 3
+FROM differenced
+WHERE value_col BETWEEN 9.0 AND 11.0;
+----
+true
+
+# Test: TS_PREPARE_STANDARD removed - use individual macros instead
+# All individual macros tested above
+
+# Cleanup new test tables
+statement ok
+DROP TABLE test_forward;
+
+statement ok
+DROP TABLE extended_forward;
+
+statement ok
+DROP TABLE test_gappy;
+
+statement ok
+DROP TABLE no_gappy;
+
+statement ok
+DROP TABLE test_edge_zeros;
+
+statement ok
+DROP TABLE no_edge_zeros;
+
+statement ok
+DROP TABLE test_const_fill;
+
+statement ok
+DROP TABLE filled_const;
+
+statement ok
+DROP TABLE test_diff;
+
+statement ok
+DROP TABLE differenced;
 

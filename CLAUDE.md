@@ -898,9 +898,9 @@ This project currently targets **DuckDB v1.4.1** (check `.github/workflows/` and
 - **eda_macros.cpp/hpp** - 5 SQL macros for exploratory data analysis
 - `TS_STATS()` - Per-series statistics (count, mean, std, min, max, nulls, gaps)
 - `TS_QUALITY_REPORT()` - Quality assessment with configurable thresholds
-- `TS_DATASET_SUMMARY()` - Aggregate statistics across all series
-- `TS_GET_PROBLEMATIC()` - Identifies series below quality threshold
-- `TS_DETECT_SEASONALITY_ALL()` - Seasonality detection for all series
+- `TS_STATS_SUMMARY()` - Aggregate statistics across all series
+- `()` - Identifies series below quality threshold
+- `()` - Seasonality detection for all series
 
 #### 9. **Data Preparation Macros** (`data_prep_macros.*`)
 - **data_prep_macros.cpp/hpp** - 12 SQL macros for data cleaning and transformation

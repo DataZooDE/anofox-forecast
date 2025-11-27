@@ -27,33 +27,26 @@ CREATE TABLE sales_stats AS
 SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount);
 
 -- View overall summary
-SELECT * FROM TS_DATASET_SUMMARY('sales_stats');
+SELECT * FROM TS_STATS_SUMMARY('sales_stats');
 
 -- Generate quality report
 SELECT * FROM TS_QUALITY_REPORT('sales_stats', 30);
 
 -- Detect seasonality
 CREATE TABLE sales_seasonality AS
-SELECT * FROM TS_DETECT_SEASONALITY_ALL('sales_raw', product_id, date, sales_amount);
+SELECT 
+    product_id,
+    TS_DETECT_SEASONALITY(LIST(sales_amount ORDER BY date)) AS detected_periods
+FROM sales_raw
+GROUP BY product_id;
 
 SELECT * FROM sales_seasonality;
-
--- Find problematic series
-SELECT * FROM TS_GET_PROBLEMATIC('sales_stats', 0.7);
 
 -- ============================================================================
 -- Step 3: Data Preparation
 -- ============================================================================
 
--- Option A: Standard pipeline
-CREATE TABLE sales_prepared AS
-SELECT * FROM TS_PREPARE_STANDARD(
-    'sales_raw', product_id, date, sales_amount,
-    30,  -- min_length
-    'interpolate'  -- fill method
-);
-
--- Option B: Custom pipeline
+-- Custom pipeline using individual macros
 CREATE TABLE sales_custom AS
 WITH 
 step1 AS (
@@ -64,14 +57,8 @@ step2 AS (
 ),
 step3 AS (
     SELECT * FROM TS_DROP_EDGE_ZEROS('step2', product_id, date, sales_amount)
-),
-step4 AS (
-    SELECT * FROM TS_FILL_NULLS_INTERPOLATE('step3', product_id, date, sales_amount)
-),
-step5 AS (
-    SELECT * FROM TS_CAP_OUTLIERS_IQR('step4', product_id, date, sales_amount, 1.5)
 )
-SELECT * FROM step5;
+SELECT * FROM step3;
 
 -- ============================================================================
 -- Step 4: Validate preparation

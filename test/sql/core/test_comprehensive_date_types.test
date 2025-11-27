@@ -142,7 +142,7 @@ WHERE i NOT IN (10, 15, 20);
 
 query I
 SELECT COUNT(*) = 30
-FROM ts_fill_gaps(gaps_date, series_id, date_col, value)
+FROM ts_fill_gaps(gaps_date, series_id, date_col, value, NULL::VARCHAR)
 WHERE group_col = 'series_1';
 ----
 true
@@ -156,7 +156,7 @@ WHERE i NOT IN (10, 15, 20);
 
 query I
 SELECT COUNT(*) = 30
-FROM ts_fill_gaps(gaps_ts, series_id, date_col, value)
+FROM ts_fill_gaps(gaps_ts, series_id, date_col, value, NULL::VARCHAR)
 WHERE group_col = 'series_1';
 ----
 true

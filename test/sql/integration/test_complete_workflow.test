@@ -30,7 +30,7 @@ FROM generate_series(1, 100) t(i);
 # STEP 1: Exploratory Data Analysis
 statement ok
 CREATE TABLE eda_results AS
-SELECT * FROM ts_stats(sales_data, product_id, date, sales);
+SELECT * FROM ts_stats(sales_data, product_id, date, sales, '1d');
 
 # Verify EDA detected both products
 query I
@@ -59,7 +59,7 @@ true	true
 statement ok
 CREATE TABLE clean_sales AS
 WITH step1 AS (
-    SELECT * FROM ts_fill_gaps(sales_data, product_id, date, sales)
+    SELECT * FROM ts_fill_gaps(sales_data, product_id, date, sales, NULL::VARCHAR)
 ),
 step2 AS (
     SELECT * FROM ts_fill_nulls_forward(step1, group_col, date_col, value_col)

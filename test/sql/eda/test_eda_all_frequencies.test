@@ -1,0 +1,614 @@
+# name: test/sql/eda/test_eda_all_frequencies.test
+# description: Test EDA and statistics functions across multiple date frequencies (30min, 1h, 1d, 1w, 1mo, 1q, 1y)
+# group: [eda]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+#############################################
+# 30 MINUTE FREQUENCY TESTS
+#############################################
+
+# Create test data with 30-minute frequency
+statement ok
+CREATE TABLE test_30min AS
+SELECT 
+    ('2024-01-01 00:00:00'::TIMESTAMP + INTERVAL (i * 30) MINUTE) AS date_col,
+    'series_1' AS series_id,
+    CASE 
+        WHEN i <= 10 THEN 100.0 + i * 2.0
+        WHEN i BETWEEN 11 AND 15 THEN NULL
+        WHEN i BETWEEN 16 AND 20 THEN 0.0
+        ELSE 100.0 + i * 2.0
+    END AS value
+FROM generate_series(1, 50) t(i);
+
+# Test: TS_STATS with 30min frequency
+statement ok
+CREATE TABLE stats_30min AS
+SELECT * FROM ts_stats(test_30min, series_id, date_col, value, '30m');
+
+# Verify stats computed correctly
+query I
+SELECT COUNT(DISTINCT series_id) = 1
+FROM stats_30min;
+----
+true
+
+# Verify length matches
+query II
+SELECT series_id = 'series_1', length = 50
+FROM stats_30min
+WHERE series_id = 'series_1';
+----
+true	true
+
+# Verify NULLs detected
+query I
+SELECT n_null > 0
+FROM stats_30min
+WHERE series_id = 'series_1';
+----
+true
+
+# Verify zeros detected
+query I
+SELECT n_zeros > 0
+FROM stats_30min
+WHERE series_id = 'series_1';
+----
+true
+
+# Test: TS_STATS_SUMMARY with 30min frequency
+statement ok
+CREATE TABLE summary_30min AS
+SELECT * FROM ts_stats_summary('stats_30min');
+
+# Verify summary computed
+query I
+SELECT total_series = 1
+FROM summary_30min;
+----
+true
+
+# Verify summary computed correctly (frequency column removed)
+query I
+SELECT total_series = 1 AND total_observations = 50
+FROM summary_30min;
+----
+true
+
+#############################################
+# 1 HOUR FREQUENCY TESTS
+#############################################
+
+# Create test data with 1-hour frequency
+statement ok
+CREATE TABLE test_1h AS
+SELECT 
+    ('2024-01-01 00:00:00'::TIMESTAMP + INTERVAL (i) HOUR) AS date_col,
+    'series_1' AS series_id,
+    CASE 
+        WHEN i <= 10 THEN 100.0 + i * 2.0
+        WHEN i BETWEEN 11 AND 15 THEN NULL
+        WHEN i BETWEEN 16 AND 20 THEN 0.0
+        ELSE 100.0 + i * 2.0
+    END AS value
+FROM generate_series(1, 50) t(i);
+
+# Test: TS_STATS with 1h frequency
+statement ok
+CREATE TABLE stats_1h AS
+SELECT * FROM ts_stats(test_1h, series_id, date_col, value, '1h');
+
+query I
+SELECT COUNT(DISTINCT series_id) = 1
+FROM stats_1h;
+----
+true
+
+query II
+SELECT series_id = 'series_1', length = 50
+FROM stats_1h
+WHERE series_id = 'series_1';
+----
+true	true
+
+# Test: TS_STATS_SUMMARY with 1h frequency
+statement ok
+CREATE TABLE summary_1h AS
+SELECT * FROM ts_stats_summary('stats_1h');
+
+query I
+SELECT total_series = 1
+FROM summary_1h;
+----
+true
+
+query I
+SELECT total_series = 1 AND total_observations = 50
+FROM summary_1h;
+----
+true
+
+#############################################
+# 1 DAY FREQUENCY TESTS
+#############################################
+
+# Create test data with 1-day frequency
+statement ok
+CREATE TABLE test_1d AS
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    'series_1' AS series_id,
+    CASE 
+        WHEN i <= 10 THEN 100.0 + i * 2.0
+        WHEN i BETWEEN 11 AND 15 THEN NULL
+        WHEN i BETWEEN 16 AND 20 THEN 0.0
+        ELSE 100.0 + i * 2.0
+    END AS value
+FROM generate_series(1, 50) t(i);
+
+# Test: TS_STATS with 1d frequency
+statement ok
+CREATE TABLE stats_1d AS
+SELECT * FROM ts_stats(test_1d, series_id, date_col, value, '1d');
+
+query I
+SELECT COUNT(DISTINCT series_id) = 1
+FROM stats_1d;
+----
+true
+
+query II
+SELECT series_id = 'series_1', length = 50
+FROM stats_1d
+WHERE series_id = 'series_1';
+----
+true	true
+
+# Verify expected_length calculation
+query II
+SELECT series_id = 'series_1', expected_length = 50
+FROM stats_1d
+WHERE series_id = 'series_1';
+----
+true	true
+
+# Test: TS_STATS_SUMMARY with 1d frequency
+statement ok
+CREATE TABLE summary_1d AS
+SELECT * FROM ts_stats_summary('stats_1d');
+
+query I
+SELECT total_series = 1
+FROM summary_1d;
+----
+true
+
+query I
+SELECT total_series = 1 AND total_observations = 50
+FROM summary_1d;
+----
+true
+
+# Verify statistics are computed correctly
+query I
+SELECT mean IS NOT NULL AND std IS NOT NULL AND min IS NOT NULL AND max IS NOT NULL
+FROM stats_1d
+WHERE series_id = 'series_1';
+----
+true
+
+#############################################
+# 1 WEEK FREQUENCY TESTS
+#############################################
+
+# Create test data with 1-week frequency
+statement ok
+CREATE TABLE test_1w AS
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) WEEK) AS date_col,
+    'series_1' AS series_id,
+    CASE 
+        WHEN i <= 5 THEN 100.0 + i * 2.0
+        WHEN i BETWEEN 6 AND 8 THEN NULL
+        WHEN i BETWEEN 9 AND 10 THEN 0.0
+        ELSE 100.0 + i * 2.0
+    END AS value
+FROM generate_series(1, 20) t(i);
+
+# Test: TS_STATS with 1w frequency
+statement ok
+CREATE TABLE stats_1w AS
+SELECT * FROM ts_stats(test_1w, series_id, date_col, value, '1w');
+
+query I
+SELECT COUNT(DISTINCT series_id) = 1
+FROM stats_1w;
+----
+true
+
+query II
+SELECT series_id = 'series_1', length = 20
+FROM stats_1w
+WHERE series_id = 'series_1';
+----
+true	true
+
+# Test: TS_STATS_SUMMARY with 1w frequency
+statement ok
+CREATE TABLE summary_1w AS
+SELECT * FROM ts_stats_summary('stats_1w');
+
+query I
+SELECT total_series = 1
+FROM summary_1w;
+----
+true
+
+query I
+SELECT total_series = 1 AND total_observations = 20
+FROM summary_1w;
+----
+true
+
+#############################################
+# 1 MONTH FREQUENCY TESTS
+#############################################
+
+# Create test data with 1-month frequency
+statement ok
+CREATE TABLE test_1mo AS
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) MONTH) AS date_col,
+    'series_1' AS series_id,
+    CASE 
+        WHEN i <= 5 THEN 100.0 + i * 2.0
+        WHEN i BETWEEN 6 AND 8 THEN NULL
+        WHEN i BETWEEN 9 AND 10 THEN 0.0
+        ELSE 100.0 + i * 2.0
+    END AS value
+FROM generate_series(1, 12) t(i);
+
+# Test: TS_STATS with 1mo frequency
+statement ok
+CREATE TABLE stats_1mo AS
+SELECT * FROM ts_stats(test_1mo, series_id, date_col, value, '1mo');
+
+query I
+SELECT COUNT(DISTINCT series_id) = 1
+FROM stats_1mo;
+----
+true
+
+query II
+SELECT series_id = 'series_1', length = 12
+FROM stats_1mo
+WHERE series_id = 'series_1';
+----
+true	true
+
+# Test: TS_STATS_SUMMARY with 1mo frequency
+statement ok
+CREATE TABLE summary_1mo AS
+SELECT * FROM ts_stats_summary('stats_1mo');
+
+query I
+SELECT total_series = 1
+FROM summary_1mo;
+----
+true
+
+query I
+SELECT total_series = 1 AND total_observations = 12
+FROM summary_1mo;
+----
+true
+
+#############################################
+# 1 QUARTER FREQUENCY TESTS
+#############################################
+
+# Create test data with 1-quarter frequency
+statement ok
+CREATE TABLE test_1q AS
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i * 3) MONTH) AS date_col,
+    'series_1' AS series_id,
+    CASE 
+        WHEN i <= 3 THEN 100.0 + i * 2.0
+        WHEN i BETWEEN 4 AND 5 THEN NULL
+        WHEN i = 6 THEN 0.0
+        ELSE 100.0 + i * 2.0
+    END AS value
+FROM generate_series(1, 8) t(i);
+
+# Test: TS_STATS with 1q frequency
+statement ok
+CREATE TABLE stats_1q AS
+SELECT * FROM ts_stats(test_1q, series_id, date_col, value, '1q');
+
+query I
+SELECT COUNT(DISTINCT series_id) = 1
+FROM stats_1q;
+----
+true
+
+query II
+SELECT series_id = 'series_1', length = 8
+FROM stats_1q
+WHERE series_id = 'series_1';
+----
+true	true
+
+# Test: TS_STATS_SUMMARY with 1q frequency
+statement ok
+CREATE TABLE summary_1q AS
+SELECT * FROM ts_stats_summary('stats_1q');
+
+query I
+SELECT total_series = 1
+FROM summary_1q;
+----
+true
+
+query I
+SELECT total_series = 1 AND total_observations = 8
+FROM summary_1q;
+----
+true
+
+#############################################
+# 1 YEAR FREQUENCY TESTS
+#############################################
+
+# Create test data with 1-year frequency
+statement ok
+CREATE TABLE test_1y AS
+SELECT 
+    ('2020-01-01'::TIMESTAMP + INTERVAL (i) YEAR) AS date_col,
+    'series_1' AS series_id,
+    CASE 
+        WHEN i <= 3 THEN 100.0 + i * 2.0
+        WHEN i BETWEEN 4 AND 5 THEN NULL
+        WHEN i = 6 THEN 0.0
+        ELSE 100.0 + i * 2.0
+    END AS value
+FROM generate_series(1, 10) t(i);
+
+# Test: TS_STATS with 1y frequency
+statement ok
+CREATE TABLE stats_1y AS
+SELECT * FROM ts_stats(test_1y, series_id, date_col, value, '1y');
+
+query I
+SELECT COUNT(DISTINCT series_id) = 1
+FROM stats_1y;
+----
+true
+
+query II
+SELECT series_id = 'series_1', length = 10
+FROM stats_1y
+WHERE series_id = 'series_1';
+----
+true	true
+
+# Test: TS_STATS_SUMMARY with 1y frequency
+statement ok
+CREATE TABLE summary_1y AS
+SELECT * FROM ts_stats_summary('stats_1y');
+
+query I
+SELECT total_series = 1
+FROM summary_1y;
+----
+true
+
+query I
+SELECT total_series = 1 AND total_observations = 10
+FROM summary_1y;
+----
+true
+
+#############################################
+# MULTI-SERIES TEST ACROSS FREQUENCIES
+#############################################
+
+# Test: Multiple series with different frequencies in one stats call
+statement ok
+CREATE TABLE test_multi_freq AS
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    'daily' AS series_id,
+    100.0 + i * 2.0 AS value
+FROM generate_series(1, 30) t(i)
+UNION ALL
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) WEEK) AS date_col,
+    'weekly' AS series_id,
+    200.0 + i * 3.0 AS value
+FROM generate_series(1, 10) t(i);
+
+statement ok
+CREATE TABLE stats_multi AS
+SELECT * FROM ts_stats(test_multi_freq, series_id, date_col, value, '1d');
+
+# Verify both series present
+query I
+SELECT COUNT(DISTINCT series_id) = 2
+FROM stats_multi;
+----
+true
+
+# Verify each series has correct length
+query II
+SELECT 
+    (SELECT length FROM stats_multi WHERE series_id = 'daily') = 30,
+    (SELECT length FROM stats_multi WHERE series_id = 'weekly') = 10;
+----
+true	true
+
+# Test: TS_STATS_SUMMARY with multiple series
+statement ok
+CREATE TABLE summary_multi AS
+SELECT * FROM ts_stats_summary('stats_multi');
+
+query I
+SELECT total_series = 2
+FROM summary_multi;
+----
+true
+
+query I
+SELECT total_observations = 40
+FROM summary_multi;
+----
+true
+
+#############################################
+# INTEGER-BASED FREQUENCY TESTS
+#############################################
+
+# Create test data with INTEGER date column
+statement ok
+CREATE TABLE test_int AS
+SELECT 
+    i AS date_col,
+    'series_1' AS series_id,
+    CASE 
+        WHEN i <= 10 THEN 100.0 + i * 2.0
+        WHEN i BETWEEN 11 AND 15 THEN NULL
+        WHEN i BETWEEN 16 AND 20 THEN 0.0
+        ELSE 100.0 + i * 2.0
+    END AS value
+FROM generate_series(1, 50) t(i);
+
+# Test: TS_STATS with INTEGER date column
+# Note: TS_STATS currently only supports TIMESTAMP date columns, not INTEGER
+# This test is commented out until INTEGER support is added to TS_STATS
+# statement ok
+# CREATE TABLE stats_int AS
+# SELECT * FROM ts_stats(test_int, series_id, date_col, value);
+#
+# # Verify stats computed correctly
+# query I
+# SELECT COUNT(DISTINCT series_id) = 1
+# FROM stats_int;
+# ----
+# true
+#
+# query II
+# SELECT series_id = 'series_1', length = 50
+# FROM stats_int
+# WHERE series_id = 'series_1';
+# ----
+# true	true
+#
+# # Test: TS_STATS_SUMMARY with INTEGER date column
+# statement ok
+# CREATE TABLE summary_int AS
+# SELECT * FROM ts_stats_summary('stats_int');
+#
+# # Verify summary computed
+# query I
+# SELECT total_series = 1
+# FROM summary_int;
+# ----
+# true
+#
+# # Verify frequency inference (INTEGER columns don't have date-based frequency)
+# query I
+# SELECT frequency IN ('Unknown', 'Daily', 'Weekly', 'Monthly', 'Quarterly+')
+# FROM summary_int;
+# ----
+# true
+
+#############################################
+# CLEANUP
+#############################################
+
+statement ok
+DROP TABLE test_30min;
+
+statement ok
+DROP TABLE stats_30min;
+
+statement ok
+DROP TABLE summary_30min;
+
+statement ok
+DROP TABLE test_1h;
+
+statement ok
+DROP TABLE stats_1h;
+
+statement ok
+DROP TABLE summary_1h;
+
+statement ok
+DROP TABLE test_1d;
+
+statement ok
+DROP TABLE stats_1d;
+
+statement ok
+DROP TABLE summary_1d;
+
+statement ok
+DROP TABLE test_1w;
+
+statement ok
+DROP TABLE stats_1w;
+
+statement ok
+DROP TABLE summary_1w;
+
+statement ok
+DROP TABLE test_1mo;
+
+statement ok
+DROP TABLE stats_1mo;
+
+statement ok
+DROP TABLE summary_1mo;
+
+statement ok
+DROP TABLE test_1q;
+
+statement ok
+DROP TABLE stats_1q;
+
+statement ok
+DROP TABLE summary_1q;
+
+statement ok
+DROP TABLE test_1y;
+
+statement ok
+DROP TABLE stats_1y;
+
+statement ok
+DROP TABLE summary_1y;
+
+statement ok
+DROP TABLE test_multi_freq;
+
+statement ok
+DROP TABLE stats_multi;
+
+statement ok
+DROP TABLE summary_multi;
+
+statement ok
+DROP TABLE test_int;
+
+# statement ok
+# DROP TABLE stats_int;
+#
+# statement ok
+# DROP TABLE summary_int;
+

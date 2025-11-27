@@ -213,7 +213,11 @@ WITH filled AS (
 SELECT * FROM TS_FILL_NULLS_FORWARD('filled', product_id, date, amount);
 
 -- 3. Detect seasonality
-SELECT * FROM TS_DETECT_SEASONALITY_ALL('sales_prepared', product_id, date, amount);
+SELECT 
+    product_id,
+    TS_DETECT_SEASONALITY(LIST(amount ORDER BY date)) AS detected_periods
+FROM sales_prepared
+GROUP BY product_id;
 
 -- 4. Generate forecasts with diagnostics
 CREATE TABLE forecasts AS
@@ -399,34 +403,57 @@ SQL macros for exploratory data analysis and quality assessment:
 
 ```sql
 TS_STATS(table, group_col, date_col, value_col)
--- Returns: per-series statistics (count, mean, std, min, max, nulls, gaps)
+-- Returns: per-series statistics (length, mean, std, min, max, nulls, zeros, plateau_size, n_zeros_start/end, expected_length)
 
 TS_QUALITY_REPORT(stats_table, min_length)
 -- Returns: quality assessment with configurable minimum length threshold
 
-TS_DATASET_SUMMARY(stats_table)
--- Returns: aggregate statistics across all series
+TS_STATS_SUMMARY(stats_table)
+-- Returns: aggregate statistics across all series from TS_STATS output
+```
 
-TS_GET_PROBLEMATIC(stats_table, quality_threshold)
--- Returns: series below quality threshold
+### Data Quality Health Card (2 macros)
 
-TS_DETECT_SEASONALITY_ALL(table, group_col, date_col, value_col)
--- Returns: detected seasonal periods for all series
+Comprehensive data quality assessment:
+
+```sql
+TS_DATA_QUALITY(table, unique_id_col, date_col, value_col, n_short)
+-- Returns: comprehensive health card with metrics and values by dimension
+-- Dimensions: Structural, Temporal, Magnitude, Behavioural
+-- Parameters: n_short (optional, default 30) - threshold for short series detection
+
+TS_DATA_QUALITY_SUMMARY(table, unique_id_col, date_col, value_col, n_short)
+-- Returns: aggregated summary by dimension and metric
+```
+
+**Example Output**:
+```
+| unique_id | dimension    | metric           | value | value_pct |
+|-----------|--------------|------------------|-------|-----------|
+| Store_A   | Temporal     | timestamp_gaps   | 23    | 0.152     |
+| Store_A   | Magnitude    | missing_values   | 13    | 0.085     |
+| Store_B   | Temporal     | series_length    | 5     | NULL      |
 ```
 
 ### Data Preparation (12 macros)
 
 SQL macros for data cleaning and transformation. Date type support varies by function.
 
-**Gap Filling** (DATE/TIMESTAMP only):
+**Gap Filling** (DATE/TIMESTAMP and INTEGER via function overloading):
 ```sql
-TS_FILL_GAPS(table, group_col, date_col, value_col)
--- Fills missing timestamps in series
--- INTEGER variant: TS_FILL_GAPS_INT
+TS_FILL_GAPS(table, group_col, date_col, value_col, frequency)
+-- Fills missing timestamps/indices in series
+-- Function overloading: Same function name works for both DATE/TIMESTAMP and INTEGER columns
+-- For DATE/TIMESTAMP: frequency is VARCHAR ('30m', '1h', '1d', '1w', '1mo', '1q', '1y'), defaults to '1d'
+-- For INTEGER: frequency is INTEGER (1, 2, 3, ...), defaults to 1
+-- DuckDB automatically selects the correct overload based on frequency parameter type
 
-TS_FILL_FORWARD(table, group_col, date_col, value_col, target_date)
--- Extends series to target date
--- INTEGER variant: TS_FILL_FORWARD_INT
+TS_FILL_FORWARD(table, group_col, date_col, value_col, target_date, frequency)
+-- Extends series to target date/index
+-- Function overloading: Same function name works for both DATE/TIMESTAMP and INTEGER columns
+-- For DATE/TIMESTAMP: frequency is VARCHAR ('30m', '1h', '1d', '1w', '1mo', '1q', '1y'), defaults to '1d'
+-- For INTEGER: frequency is INTEGER (1, 2, 3, ...), defaults to 1
+-- DuckDB automatically selects the correct overload based on frequency parameter type
 ```
 
 **Filtering** (all date types):

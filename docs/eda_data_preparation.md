@@ -9,49 +9,157 @@ A SQL-based tools for time series EDA (Exploratory Data Analysis) and data prepa
 ## Quick Start
 
 ```sql
+-- 1. Get dataset overview
+SELECT * FROM TS_STATS_SUMMARY('series_stats');
 
+-- 2. Check data quality
+SELECT * FROM TS_DATA_QUALITY('sales_data', product_id, date, amount, 30);
 
--- 1. Analyze your data
-CREATE TABLE series_stats AS
-SELECT * FROM TS_STATS('sales_data', product_id, date, amount);
-
--- 2. Generate quality report
-SELECT * FROM TS_QUALITY_REPORT('series_stats', 30);
-
--- 3. Prepare your data
-CREATE TABLE sales_prepared AS
-SELECT * FROM TS_PREPARE_STANDARD(
-    'sales_data', product_id, date, amount,
-    30,  -- min_length
-    'forward'  -- fill_method
-);
+-- 3. Prepare your data (extend to common end date)
+CREATE TABLE sales_extended AS
+SELECT * FROM TS_FILL_FORWARD('sales_data', product_id, date, amount, DATE '2023-12-31');
 ```
 
 ---
 
 ## Part 1: EDA (Exploratory Data Analysis)
 
-### 1.1 Per-Series Statistics
+### 1.1 Dataset Summary
 
-**Macro**: `TS_STATS(table_name, group_cols, date_col, value_col)`
+**Macro**: `TS_STATS_SUMMARY(stats_table)`
+
+Provides overall statistics across all series in the dataset.
+
+**Returns**:
+- `total_series` - Total number of series (INTEGER)
+- `total_observations` - Total number of observations (INTEGER)
+- `avg_series_length` - Average length per series (DOUBLE)
+- `date_span` - Date range in days (INTEGER)
+- `frequency` - Inferred frequency category (VARCHAR)
+
+**Example**:
+```sql
+-- First generate stats
+CREATE TABLE stats AS
+SELECT * FROM TS_STATS('sales', product_id, date, sales_amount);
+
+-- Then get summary
+SELECT * FROM TS_STATS_SUMMARY('stats');
+
+-- Example output:
+-- | total_series | total_observations | avg_series_length | date_span | frequency |
+-- |-------------|-------------------|------------------|-----------|-----------|
+-- | 1000        | 365000            | 365.0             | 730       | 1d     |
+```
+
+### 1.2 Data Quality Health Card
+
+**Macro**: `TS_DATA_QUALITY(table_name, unique_id_col, date_col, value_col, n_short)`
+
+Comprehensive data quality assessment across four dimensions with actionable recommendations.
+
+**Returns**:
+- `unique_id` - Series identifier
+- `dimension` - Quality dimension (Structural, Temporal, Magnitude, Behavioural)
+- `metric` - Specific metric name
+- `value` - Metric value (INTEGER or DOUBLE)
+- `value_pct` - Metric as percentage (DOUBLE, NULL if not applicable)
+
+**Example**:
+```sql
+-- Generate comprehensive health card
+SELECT * FROM TS_DATA_QUALITY('sales_data', product_id, date, amount, 30);
+
+-- Example output:
+-- | unique_id | dimension    | metric           | value | value_pct |
+-- |-----------|--------------|------------------|-------|-----------|
+-- | Store_A   | Structural  | key_uniqueness   | 0     | NULL      |
+-- | Store_A   | Temporal    | timestamp_gaps   | 23    | 0.152     |
+-- | Store_A   | Temporal    | series_length    | 12    | NULL      |
+-- | Store_A   | Magnitude   | missing_values   | 13    | 0.085     |
+-- | Store_A   | Magnitude   | static_values    | 0     | NULL      |
+-- | Store_A   | Behavioural | intermittency    | 104   | 0.523     |
+```
+
+**Four Dimensions**:
+
+1. **Structural Integrity**: Key uniqueness, ID cardinality
+2. **Temporal Integrity**: Frequency inference, timestamp gaps, series alignment, series length
+3. **Magnitude & Value Validity**: Missing values, value bounds, static values
+4. **Behavioural/Statistical**: Seasonality, trend detection, intermittency
+
+**Summary Function**:
+
+```sql
+-- Get summary by dimension and metric
+SELECT * FROM TS_DATA_QUALITY_SUMMARY('sales_data', product_id, date, amount, 30);
+```
+
+**Workflow Example**:
+
+```sql
+-- 1. Generate health card
+CREATE TABLE health_card AS
+SELECT * FROM TS_DATA_QUALITY('sales_raw', product_id, date, amount, 30);
+
+-- 2. Review issues by dimension
+SELECT * FROM health_card WHERE dimension = 'Temporal' ORDER BY metric, unique_id;
+
+-- 3. Get summary statistics
+SELECT * FROM TS_DATA_QUALITY_SUMMARY('sales_raw', product_id, date, amount, 30);
+
+-- 4. Take action based on findings
+-- (e.g., apply TS_FILL_GAPS for timestamp gaps, TS_DROP_CONSTANT for static values)
+```
+
+### 1.3 Legacy Quality Report
+
+**Macro**: `TS_QUALITY_REPORT(stats_table, min_length)`
+
+All quality checks in one report (legacy format for backward compatibility).
+
+**Individual Checks** (also available separately):
+- `TS_CHECK_GAPS(stats_table)` - Gap analysis
+- `TS_CHECK_MISSING(stats_table)` - NULL/NaN values
+- `TS_CHECK_CONSTANT(stats_table)` - Constant series
+- `TS_CHECK_SHORT(stats_table, min_length)` - Short series
+- `TS_CHECK_ALIGNMENT(stats_table)` - End date alignment
+
+**Example**:
+```sql
+-- All checks in one report
+SELECT * FROM TS_QUALITY_REPORT('stats', 30);
+
+-- Example output:
+-- | check_type              | total_series | series_with_gaps | pct_with_gaps |
+-- |-------------------------|--------------|------------------|---------------|
+-- | Gap Analysis            | 1000         | 150              | 15.0%         |
+-- | Missing Values           | 1000         | 45               | 4.5%          |
+-- | Constant Series          | 1000         | 23               | 2.3%          |
+-- | Short Series (< 30)      | 1000         | 67               | 6.7%          |
+-- | End Date Alignment       | 1000         | 892              | 11 rows       |
+```
+
+### 1.4 Per-Series Statistics
+
+**Macro**: `TS_STATS(table_name, group_col, date_col, value_col)`
 
 Computes comprehensive statistics for each time series.
 
 **Returns**:
 - `series_id` - Series identifier
 - `length` - Number of observations
-- `expected_length` - Expected observations (based on date range)
-- `n_gaps` - Missing time points
 - `start_date`, `end_date` - Temporal span
+- `expected_length` - Expected observations based on date range (INTEGER)
 - `mean`, `std`, `min`, `max`, `median` - Basic statistics
-- `n_null`, `n_nan`, `n_zeros` - Missing/special values
-- `n_unique_values` - Distinct values
+- `n_null` - Count of NULL values
+- `n_zeros` - Count of zero values
+- `n_unique_values` - Count of distinct values (INTEGER)
 - `is_constant` - Boolean flag for constant series
-- `trend_corr` - Trend correlation (-1 to 1)
-- `cv` - Coefficient of variation
-- `intermittency` - Proportion of zeros
-- `quality_score` - Overall quality (0-1, higher is better)
-- `values`, `dates` - Raw data arrays
+- `plateau_size` - Size of longest consecutive run of identical values (INTEGER)
+- `plateau_size_non_zero` - Size of longest consecutive run of identical non-zero values (INTEGER)
+- `n_zeros_start` - Number of zeros at the beginning of the series (INTEGER)
+- `n_zeros_end` - Number of zeros at the end of the series (INTEGER)
 
 **Example**:
 ```sql
@@ -61,45 +169,22 @@ SELECT * FROM TS_STATS('sales', product_id, date, sales_amount);
 -- View summary
 SELECT 
     COUNT(*) AS total_series,
-    ROUND(AVG(quality_score), 4) AS avg_quality,
-    SUM(CASE WHEN quality_score < 0.5 THEN 1 ELSE 0 END) AS low_quality_count
+    ROUND(AVG(length), 2) AS avg_length,
+    SUM(CASE WHEN is_constant THEN 1 ELSE 0 END) AS constant_series_count,
+    SUM(CASE WHEN n_zeros_start > 0 OR n_zeros_end > 0 THEN 1 ELSE 0 END) AS series_with_edge_zeros
 FROM stats;
 ```
 
-### 1.2 Data Quality Checks
-
-**Individual Checks**:
-- `TS_CHECK_GAPS(stats_table)` - Gap analysis
-- `TS_CHECK_MISSING(stats_table)` - NULL/NaN values
-- `TS_CHECK_CONSTANT(stats_table)` - Constant series
-- `TS_CHECK_SHORT(stats_table, min_length)` - Short series
-- `TS_CHECK_ALIGNMENT(stats_table)` - End date alignment
-
-**Comprehensive Report**:
-```sql
--- All checks in one report
-SELECT * FROM TS_QUALITY_REPORT('stats', 30);
-
--- Example output:
--- | check_type              | total_series | series_with_gaps | pct_with_gaps |
--- |-------------------------|--------------|------------------|---------------|
--- | Gap Analysis            | 1000         | 150              | 15.0%         |
--- | Missing Values          | 1000         | 45               | 4.5%          |
--- | Constant Series         | 1000         | 23               | 2.3%          |
--- | Short Series (< 30)     | 1000         | 67               | 6.7%          |
--- | End Date Alignment      | 1000         | 892              | 11 rows       |
-```
-
-### 1.3 Pattern Detection
+### 1.5 Pattern Detection
 
 **Leading/Trailing Zeros**:
 ```sql
 SELECT * FROM TS_ANALYZE_ZEROS('sales', product_id, date, sales_amount);
 
 -- Returns:
--- | series_id | n_leading_zeros | n_trailing_zeros | total_edge_zeros |
--- |-----------|-----------------|------------------|------------------|
--- | P001      | 12              | 8                | 20               |
+-- | series_id | n_leading_zeros | n_trailing_zeros | total_edge_zeros | n_zeros | series_length |
+-- |-----------|-----------------|------------------|------------------|---------|----------------|
+-- | P001      | 12              | 8                | 20               | 45      | 365            |
 ```
 
 **Plateau Detection** (consecutive identical values):
@@ -107,51 +192,49 @@ SELECT * FROM TS_ANALYZE_ZEROS('sales', product_id, date, sales_amount);
 SELECT * FROM TS_DETECT_PLATEAUS('sales', product_id, date, sales_amount);
 
 -- Returns:
--- | series_id | max_plateau_size | max_plateau_nonzero | max_plateau_zeros | n_plateaus |
--- |-----------|------------------|---------------------|-------------------|------------|
--- | P001      | 45               | 12                  | 45                | 8          |
+-- | series_id | max_plateau_size | max_plateau_nonzero | max_plateau_zeros | n_plateaus | series_length |
+-- |-----------|------------------|---------------------|-------------------|------------|---------------|
+-- | P001      | 45               | 12                  | 45                | 8          | 365           |
 ```
 
-### 1.4 Seasonality Detection
-
+**Seasonality Detection**:
 ```sql
-SELECT * FROM TS_DETECT_SEASONALITY_ALL('sales', product_id, date, sales_amount);
+SELECT * FROM TS_DETECT_SEASONALITY('sales', product_id, date, sales_amount);
 
 -- Returns:
--- | series_id | detected_periods | primary_period | is_seasonal |
--- |-----------|------------------|----------------|-------------|
--- | P001      | [7, 30]          | 7              | true        |
--- | P002      | []               | NULL           | false       |
-```
-
-### 1.5 Distribution Analysis
-
-```sql
-SELECT * FROM TS_PERCENTILES('sales', product_id, sales_amount);
-
--- Returns percentiles: p01, p05, p10, p25, p50, p75, p90, p95, p99, iqr
-```
-
-### 1.6 Dataset Summary
-
-```sql
--- Overall statistics
-SELECT * FROM TS_DATASET_SUMMARY('stats');
-
--- Example output:
--- | total_series | total_observations | avg_series_length | date_span_days |
--- |--------------|-------------------|-------------------|----------------|
--- | 1000         | 365000            | 365.0             | 730            |
-
--- Find problematic series
-SELECT * FROM TS_GET_PROBLEMATIC('stats', 0.5);  -- quality_score < 0.5
+-- | series_id | detected_periods | primary_period | secondary_period | tertiary_period | is_seasonal |
+-- |-----------|------------------|----------------|------------------|-----------------|-------------|
+-- | P001      | [7, 30, 365]     | 7              | 30               | 365             | true        |
+-- | P002      | []               | NULL           | NULL             | NULL            | false       |
 ```
 
 ---
 
 ## Part 2: Data Preparation
 
-### 2.1 Fill Time Gaps
+### 2.1 Fill Forward to Date
+
+**Macro**: `TS_FILL_FORWARD(table_name, group_col, date_col, value_col, target_date)`
+
+Extends all series to a common end date. Missing dates are filled with NULL values (not forward-filled).
+
+**Parameters**:
+- `target_date` - Target end date (DATE, required)
+
+**Example**:
+```sql
+-- Extend to specific date
+CREATE TABLE sales_extended AS
+SELECT * FROM TS_FILL_FORWARD(
+    'sales', product_id, date, sales_amount, 
+    DATE '2023-12-31'
+);
+
+-- Note: Missing dates will have NULL values in value_col
+-- Use TS_FILL_NULLS_FORWARD afterwards if you want to forward-fill values
+```
+
+### 2.2 Fill Time Gaps
 
 **Fill missing dates in time series**:
 ```sql
@@ -161,17 +244,6 @@ SELECT * FROM TS_FILL_GAPS('sales', product_id, date, sales_amount);
 -- Before: [2023-01-01, 2023-01-03, 2023-01-05]
 -- After:  [2023-01-01, 2023-01-02, 2023-01-03, 2023-01-04, 2023-01-05]
 --         values:      [100, NULL, 150, NULL, 200]
-```
-
-### 2.2 Fill Forward to Date
-
-**Extend all series to a common end date**:
-```sql
-CREATE TABLE sales_extended AS
-SELECT * FROM TS_FILL_FORWARD(
-    'sales', product_id, date, sales_amount, 
-    DATE '2023-12-31'
-);
 ```
 
 ### 2.3 Drop Series by Criteria
@@ -241,21 +313,7 @@ SELECT * FROM TS_FILL_NULLS_INTERPOLATE('sales', product_id, date, sales_amount)
 SELECT * FROM TS_FILL_NULLS_MEAN('sales', product_id, date, sales_amount);
 ```
 
-### 2.6 Outlier Treatment
-
-**Cap outliers using IQR method**:
-```sql
-SELECT * FROM TS_CAP_OUTLIERS_IQR('sales', product_id, date, sales_amount, 1.5);
--- Caps values beyond Q1-1.5*IQR and Q3+1.5*IQR
-```
-
-**Remove outliers using Z-score**:
-```sql
-SELECT * FROM TS_REMOVE_OUTLIERS_ZSCORE('sales', product_id, date, sales_amount, 3.0);
--- Removes observations with |z-score| > 3.0
-```
-
-### 2.7 Transformations
+### 2.6 Transformations
 
 **Log transformation**:
 ```sql
@@ -264,7 +322,8 @@ SELECT * FROM TS_TRANSFORM_LOG('sales', product_id, date, sales_amount);
 
 **Box-Cox transformation**:
 ```sql
-SELECT * FROM TS_TRANSFORM_BOXCOX('sales', product_id, date, sales_amount, 0.5);
+-- Note: TS_TRANSFORM_BOXCOX is currently unavailable due to DuckDB parser limitations
+-- Use TS_TRANSFORM_LOG for lambda=0 case, or implement Box-Cox transformation manually
 ```
 
 **Differencing**:
@@ -282,28 +341,6 @@ SELECT * FROM TS_NORMALIZE_MINMAX('sales', product_id, date, sales_amount);
 ```sql
 SELECT * FROM TS_STANDARDIZE('sales', product_id, date, sales_amount);
 -- mean=0, std=1
-```
-
-### 2.8 Standard Pipeline
-
-**All-in-one preparation**:
-```sql
-CREATE TABLE sales_prepared AS
-SELECT * FROM TS_PREPARE_STANDARD(
-    'sales_raw',        -- Input table
-    product_id,         -- Group column
-    date,               -- Date column
-    sales_amount,       -- Value column
-    30,                 -- Minimum length
-    'forward'           -- Fill method: 'forward', 'mean', 'interpolate', 'zero'
-);
-
--- Pipeline steps:
--- 1. Fill time gaps
--- 2. Drop constant series
--- 3. Drop short series (< min_length)
--- 4. Drop leading zeros
--- 5. Fill remaining nulls (using specified method)
 ```
 
 ---
@@ -331,12 +368,6 @@ WITH filtered AS (
 SELECT * FROM TS_STATS('filtered', ...);
 ```
 
-### 4. Use Parallel Processing
-```sql
--- DuckDB automatically parallelizes GROUP BY operations
--- Larger batches = better parallelization
-```
-
 --- 
 
 ## API Reference
@@ -345,26 +376,32 @@ SELECT * FROM TS_STATS('filtered', ...);
 
 | Macro | Description |
 |-------|-------------|
-| `TS_STATS` | Per-series comprehensive statistics |
-| `TS_QUALITY_REPORT` | All quality checks in one report |
+| `TS_STATS_SUMMARY` | Overall dataset statistics from TS_STATS |
+| `TS_DATA_QUALITY` | Comprehensive health card with metrics and values across 4 dimensions |
+| `TS_DATA_QUALITY_SUMMARY` | Aggregated summary by dimension and metric |
+| `TS_QUALITY_REPORT` | All quality checks in one report (legacy) |
 | `TS_CHECK_GAPS` | Gap analysis |
 | `TS_CHECK_MISSING` | Missing value analysis |
 | `TS_CHECK_CONSTANT` | Constant series detection |
 | `TS_CHECK_SHORT` | Short series detection |
 | `TS_CHECK_ALIGNMENT` | End date alignment |
+| `TS_STATS` | Per-series comprehensive statistics |
 | `TS_ANALYZE_ZEROS` | Leading/trailing zero analysis |
 | `TS_DETECT_PLATEAUS` | Plateau detection |
-| `TS_DETECT_SEASONALITY_ALL` | Seasonality detection |
-| `TS_PERCENTILES` | Distribution percentiles |
-| `TS_DATASET_SUMMARY` | Overall dataset statistics |
-| `TS_GET_PROBLEMATIC` | Low-quality series |
+| `TS_DETECT_SEASONALITY` | Seasonality detection |
+
+**Dimensions** (for Data Quality Health Card):
+- **Structural**: Key uniqueness, ID cardinality
+- **Temporal**: Frequency inference, timestamp gaps, series alignment, series length
+- **Magnitude**: Missing values, value bounds, static values
+- **Behavioural**: Seasonality, trend detection, intermittency
 
 ### Data Preparation Macros
 
 | Macro | Description |
 |-------|-------------|
+| `TS_FILL_FORWARD` | Extend series to target_date |
 | `TS_FILL_GAPS` | Fill missing time gaps |
-| `TS_FILL_FORWARD` | Extend series to date |
 | `TS_DROP_CONSTANT` | Drop constant series |
 | `TS_DROP_SHORT` | Drop short series |
 | `TS_DROP_GAPPY` | Drop series with many gaps |
@@ -374,15 +411,7 @@ SELECT * FROM TS_STATS('filtered', ...);
 | `TS_FILL_NULLS_CONST` | Fill with constant |
 | `TS_FILL_NULLS_FORWARD` | Forward fill |
 | `TS_FILL_NULLS_BACKWARD` | Backward fill |
-| `TS_FILL_NULLS_INTERPOLATE` | Linear interpolation |
 | `TS_FILL_NULLS_MEAN` | Fill with series mean |
-| `TS_CAP_OUTLIERS_IQR` | Cap outliers (IQR) |
-| `TS_REMOVE_OUTLIERS_ZSCORE` | Remove outliers (Z-score) |
-| `TS_TRANSFORM_LOG` | Log transformation |
-| `TS_TRANSFORM_BOXCOX` | Box-Cox transformation |
 | `TS_DIFF` | Differencing |
-| `TS_NORMALIZE_MINMAX` | Min-Max normalization |
-| `TS_STANDARDIZE` | Z-score standardization |
-| `TS_PREPARE_STANDARD` | Standard pipeline |
 
 ---

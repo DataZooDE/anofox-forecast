@@ -1,1 +1,1 @@
-TS_DATASET_SUMMARY(stats_table) → TABLE
+TS_STATS_SUMMARY(stats_table) → TABLE

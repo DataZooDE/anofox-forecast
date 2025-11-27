@@ -9,7 +9,6 @@ filtered AS (
     SELECT f.*
     FROM filled f
     WHERE f.product_id NOT IN (
-        SELECT series_id FROM TS_GET_PROBLEMATIC('sales_stats', 0.5)
     )
 ),
 -- Remove edge zeros

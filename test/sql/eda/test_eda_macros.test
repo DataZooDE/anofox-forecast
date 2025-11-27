@@ -25,16 +25,25 @@ SELECT
     ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
     'series_2' AS series_id,
     50.0 AS value  -- Constant series
-FROM generate_series(1, 20) t(i);
+FROM generate_series(1, 20) t(i)
+UNION ALL
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    'series_3' AS series_id,
+    CASE 
+        WHEN i <= 5 THEN 0.0  -- Leading zeros
+        ELSE 100.0 + i * 2.0
+    END AS value
+FROM generate_series(1, 15) t(i);
 
 # Test: TS_STATS - Basic statistics
 statement ok
 CREATE TABLE stats_result AS
-SELECT * FROM ts_stats(eda_test_data, series_id, date_col, value);
+SELECT * FROM ts_stats(eda_test_data, series_id, date_col, value, '1d');
 
-# Verify stats for both series
+# Verify stats for all series
 query I
-SELECT COUNT(DISTINCT series_id) = 2
+SELECT COUNT(DISTINCT series_id) = 3
 FROM stats_result;
 ----
 true
@@ -63,17 +72,104 @@ WHERE series_id = 'series_2';
 ----
 true
 
-# Test: TS_DETECT_SEASONALITY_ALL
+# Verify new columns exist: n_unique_values, expected_length, plateau_size, plateau_size_non_zero, n_zeros_start, n_zeros_end
+query I
+SELECT COUNT(*) = 1
+FROM (
+    SELECT 
+        series_id, length, n_unique_values, expected_length,
+        plateau_size, plateau_size_non_zero, n_zeros_start, n_zeros_end
+    FROM stats_result
+    LIMIT 1
+);
+----
+true
+
+# Verify n_unique_values column (renamed from n_unique)
+query I
+SELECT COUNT(*) = 3
+FROM stats_result
+WHERE n_unique_values IS NOT NULL;
+----
+true
+
+# Verify expected_length is calculated correctly (date range + 1)
+query II
+SELECT 
+    series_id = 'series_1',
+    expected_length = 30
+FROM stats_result
+WHERE series_id = 'series_1';
+----
+true	true
+
+# Verify series_1 does not have zeros at the end (rows 16-20 are zeros, but series ends with non-zero values)
+query I
+SELECT n_zeros_end = 0
+FROM stats_result
+WHERE series_id = 'series_1';
+----
+true
+
+# Verify series_2 (constant) has plateau_size equal to length
+query II
+SELECT 
+    series_id = 'series_2',
+    plateau_size = length
+FROM stats_result
+WHERE series_id = 'series_2';
+----
+true	true
+
+# Verify plateau_size_non_zero for constant series equals length (all values are non-zero constant)
+query II
+SELECT 
+    series_id = 'series_2',
+    plateau_size_non_zero = length
+FROM stats_result
+WHERE series_id = 'series_2';
+----
+true	true
+
+# Verify series_3 has zeros at the start
+query II
+SELECT 
+    series_id = 'series_3',
+    n_zeros_start = 5
+FROM stats_result
+WHERE series_id = 'series_3';
+----
+true	true
+
+
+# Test: TS_DETECT_SEASONALITY - Seasonality detection with GROUP BY
 statement ok
 CREATE TABLE seasonality_result AS
-SELECT * FROM ts_detect_seasonality_all(eda_test_data, series_id, date_col, value);
+SELECT 
+    series_id,
+    TS_DETECT_SEASONALITY(LIST(value ORDER BY date_col)) AS detected_periods
+FROM eda_test_data
+GROUP BY series_id;
 
-# Verify seasonality detection ran for both series
+# Verify seasonality detection ran for all series
 query I
-SELECT COUNT(*) = 2
+SELECT COUNT(*) = 3
 FROM seasonality_result;
 ----
 true
+
+# Verify columns exist
+query I
+SELECT COUNT(*) = 1
+FROM (
+    SELECT 
+        series_id, detected_periods
+    FROM seasonality_result
+    LIMIT 1
+);
+----
+true
+
 
 # Test: Workflow - stats then filtering
 statement ok
@@ -88,6 +184,7 @@ SELECT COUNT(*) <= 1
 FROM quality_series;
 ----
 true
+
 
 # Cleanup
 statement ok

@@ -1,0 +1,210 @@
+# name: test/sql/data_quality/test_data_quality_health_card.test
+# description: Test Data Quality Health Card functionality
+# group: [data_quality]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+# Create test data with various quality issues
+statement ok
+CREATE TABLE dq_test_data AS
+SELECT 
+    'series_1' AS series_id,
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    CASE 
+        WHEN i <= 5 THEN 100.0 + i * 2.0
+        WHEN i BETWEEN 6 AND 10 THEN NULL  -- Missing values
+        WHEN i BETWEEN 11 AND 15 THEN 0.0  -- Zeros
+        ELSE 100.0 + i * 2.0
+    END AS value_col
+FROM generate_series(1, 20) t(i)
+UNION ALL
+SELECT 
+    'series_2' AS series_id,
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    50.0 AS value_col  -- Constant series
+FROM generate_series(1, 10) t(i)
+UNION ALL
+SELECT 
+    'series_3' AS series_id,
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    CASE 
+        WHEN i % 2 = 0 THEN 0.0  -- High intermittency
+        ELSE 100.0
+    END AS value_col
+FROM generate_series(1, 20) t(i);
+
+# Test: TS_DATA_QUALITY - Basic functionality
+statement ok
+CREATE TABLE health_card_result AS
+SELECT * FROM ts_data_quality(dq_test_data, series_id, date_col, value_col, 30, '1d');
+
+# Verify health card returns results
+query I
+SELECT COUNT(*) > 0
+FROM health_card_result;
+----
+true
+
+# Verify all dimensions are present
+query I
+SELECT COUNT(DISTINCT dimension) = 4
+FROM health_card_result;
+----
+true
+
+# Verify dimensions are correct
+query I
+SELECT COUNT(*) = 4
+FROM (
+    SELECT DISTINCT dimension 
+    FROM health_card_result
+    WHERE dimension IN ('Structural', 'Temporal', 'Magnitude', 'Behavioural')
+);
+----
+true
+
+# Verify schema: unique_id, dimension, metric, value (INTEGER), value_pct (DOUBLE)
+query I
+SELECT COUNT(*) = 1
+FROM (
+    SELECT unique_id, dimension, metric, value, value_pct
+    FROM health_card_result
+    LIMIT 1
+);
+----
+true
+
+# Verify value column is INTEGER type
+query I
+SELECT COUNT(*) = 1
+FROM (
+    SELECT typeof(value) AS value_type
+    FROM health_card_result
+    LIMIT 1
+)
+WHERE value_type = 'INTEGER';
+----
+true
+
+# Verify value_pct column is DOUBLE type
+query I
+SELECT COUNT(*) = 1
+FROM (
+    SELECT typeof(value_pct) AS pct_type
+    FROM health_card_result
+    WHERE value_pct IS NOT NULL
+    LIMIT 1
+)
+WHERE pct_type IN ('DOUBLE', 'DECIMAL');
+----
+true
+
+# Test: Verify constant series are detected (value = 1 for constant)
+query I
+SELECT COUNT(*) > 0
+FROM health_card_result
+WHERE metric = 'static_values'
+  AND unique_id = 'series_2'
+  AND value = 1;
+----
+true
+
+# Test: Verify missing values are detected (value = count, value_pct = percentage)
+query I
+SELECT COUNT(*) > 0
+FROM health_card_result
+WHERE metric = 'missing_values'
+  AND unique_id = 'series_1'
+  AND value > 0
+  AND value_pct IS NOT NULL;
+----
+true
+
+# Test: Verify intermittency is detected (value = zero count, value_pct = percentage)
+query I
+SELECT COUNT(*) > 0
+FROM health_card_result
+WHERE metric = 'intermittency'
+  AND unique_id = 'series_3'
+  AND value > 0
+  AND value_pct IS NOT NULL;
+----
+true
+
+# Test: n_short parameter functionality
+statement ok
+CREATE TABLE health_card_custom AS
+SELECT * FROM ts_data_quality(dq_test_data, series_id, date_col, value_col, 15, '1d');
+
+# Verify custom n_short parameter works
+query I
+SELECT COUNT(*) > 0
+FROM health_card_custom;
+----
+true
+
+# Test: TS_DATA_QUALITY_SUMMARY
+statement ok
+CREATE TABLE summary_result AS
+SELECT * FROM ts_data_quality_summary(dq_test_data, series_id, date_col, value_col, 30);
+
+# Verify summary returns results
+query I
+SELECT COUNT(*) > 0
+FROM summary_result;
+----
+true
+
+# Verify summary has expected columns
+query I
+SELECT COUNT(*) = 1
+FROM (
+    SELECT 
+        dimension, metric, total_series, unique_series_count
+    FROM summary_result
+    LIMIT 1
+);
+----
+true
+
+# Test with duplicate keys
+statement ok
+CREATE TABLE duplicate_test AS
+SELECT 
+    'series_dup' AS series_id,
+    '2024-01-01'::TIMESTAMP AS date_col,
+    100.0 AS value_col
+UNION ALL
+SELECT 
+    'series_dup' AS series_id,
+    '2024-01-01'::TIMESTAMP AS date_col,
+    200.0 AS value_col;  -- Duplicate key
+
+# Verify duplicate detection (value = duplicate count)
+query I
+SELECT COUNT(*) > 0
+FROM ts_data_quality(duplicate_test, series_id, date_col, value_col, 30, '1d')
+WHERE metric = 'key_uniqueness' 
+  AND value > 0;
+----
+true
+
+# Cleanup
+statement ok
+DROP TABLE dq_test_data;
+
+statement ok
+DROP TABLE health_card_result;
+
+statement ok
+DROP TABLE summary_result;
+
+statement ok
+DROP TABLE health_card_custom;
+
+statement ok
+DROP TABLE duplicate_test;
+
