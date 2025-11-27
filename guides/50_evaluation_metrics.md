@@ -27,13 +27,41 @@ This document describes the evaluation metric functions available in the DuckDB 
 
 ## Example: Forecasting and Evaluation with Multiple Methods
 
-The following example demonstrates generating forecasts using three different forecasting methods for multiple time series with GROUP BY, then evaluating the forecasts using `TS_MAE` and `TS_BIAS` metrics.
+The following complete example demonstrates creating train and test datasets, generating forecasts using three different forecasting methods for multiple time series with GROUP BY, then evaluating the forecasts using `TS_MAE` and `TS_BIAS` metrics. This example is copy-paste ready and can be executed immediately.
 
 ```sql
--- Generate forecasts using three different methods for each product
+-- Step 1: Create training data with multiple products and weekly seasonality
+CREATE TABLE sales_train AS
+SELECT 
+    'Product_' || LPAD((i % 3 + 1)::VARCHAR, 2, '0') AS product_id,
+    DATE '2024-01-01' + INTERVAL (d) DAY AS date,
+    GREATEST(0, 
+        100.0 + (i % 3 + 1) * 20.0  -- Base level varies by product
+        + 0.5 * d  -- Linear trend
+        + 15.0 * SIN(2 * PI() * d / 7)  -- Weekly seasonality
+        + (RANDOM() * 10.0 - 5.0)  -- Random noise
+    )::DOUBLE AS revenue
+FROM generate_series(0, 89) t(d)  -- 90 days of training data
+CROSS JOIN generate_series(1, 3) t(i);  -- 3 products
+
+-- Step 2: Create test data (holdout period)
+CREATE TABLE sales_test AS
+SELECT 
+    'Product_' || LPAD((i % 3 + 1)::VARCHAR, 2, '0') AS product_id,
+    DATE '2024-04-01' + INTERVAL (d) DAY AS date,
+    GREATEST(0, 
+        100.0 + (i % 3 + 1) * 20.0  -- Base level varies by product
+        + 0.5 * (d + 90)  -- Linear trend (continuing from train)
+        + 15.0 * SIN(2 * PI() * (d + 90) / 7)  -- Weekly seasonality
+        + (RANDOM() * 10.0 - 5.0)  -- Random noise
+    )::DOUBLE AS revenue
+FROM generate_series(0, 27) t(d)  -- 28 days of test data
+CROSS JOIN generate_series(1, 3) t(i);  -- 3 products
+
+-- Step 3: Generate forecasts using three different methods for each product
 CREATE TEMP TABLE forecasts AS
 SELECT * FROM TS_FORECAST_BY(
-    'sales',
+    'sales_train',
     product_id,
     date,
     revenue,
@@ -43,7 +71,7 @@ SELECT * FROM TS_FORECAST_BY(
 )
 UNION ALL
 SELECT * FROM TS_FORECAST_BY(
-    'sales',
+    'sales_train',
     product_id,
     date,
     revenue,
@@ -53,7 +81,7 @@ SELECT * FROM TS_FORECAST_BY(
 )
 UNION ALL
 SELECT * FROM TS_FORECAST_BY(
-    'sales',
+    'sales_train',
     product_id,
     date,
     revenue,
@@ -62,18 +90,18 @@ SELECT * FROM TS_FORECAST_BY(
     MAP{'seasonal_period': 7}
 );
 
--- Join forecasts with actual test data
+-- Step 4: Join forecasts with actual test data
 CREATE TEMP TABLE evaluation_data AS
 SELECT 
     f.product_id,
     f.model_name,
     f.date,
     f.point_forecast,
-    a.actual_value
+    t.revenue AS actual_value
 FROM forecasts f
-JOIN test_data a ON f.product_id = a.product_id AND f.date = a.date;
+JOIN sales_test t ON f.product_id = t.product_id AND f.date = t.date;
 
--- Evaluate forecasts using TS_MAE and TS_BIAS per product and model
+-- Step 5: Evaluate forecasts using TS_MAE and TS_BIAS per product and model
 SELECT 
     product_id,
     model_name,
@@ -86,6 +114,8 @@ ORDER BY product_id, mae;
 
 This example demonstrates:
 
+- Creating training data with multiple time series (3 products) with weekly seasonality and trend
+- Creating test data (holdout period) for evaluation
 - Generating forecasts for multiple time series using `TS_FORECAST_BY` with three different methods (AutoETS, SeasonalNaive, AutoARIMA)
 - Combining forecasts from multiple methods using `UNION ALL`
 - Joining forecast results with actual test data
