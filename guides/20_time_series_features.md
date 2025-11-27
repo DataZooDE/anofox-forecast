@@ -1,45 +1,5 @@
 # Time Series Features Guide
 
-## Table of Contents
-
-1. [Introduction](#introduction)
-2. [Basic Usage](#basic-usage)
-   - [Simple Feature Extraction](#simple-feature-extraction)
-   - [Listing Available Features](#listing-available-features)
-3. [Feature Selection](#feature-selection)
-   - [Select Specific Features](#select-specific-features)
-   - [Multiple Features](#multiple-features)
-4. [Parameter Customization](#parameter-customization)
-   - [Inline Parameter Overrides](#inline-parameter-overrides)
-   - [Parameterized Feature Columns](#parameterized-feature-columns)
-   - [Multiple Parameter Variants](#multiple-parameter-variants)
-5. [Configuration Files](#configuration-files)
-   - [JSON Configuration](#json-configuration)
-   - [CSV Configuration](#csv-configuration)
-   - [Configuration Template](#configuration-template)
-6. [Rolling Window Features](#rolling-window-features)
-   - [Basic Rolling Window](#basic-rolling-window)
-   - [Common Window Patterns](#common-window-patterns)
-   - [Multiple Rolling Features](#multiple-rolling-features)
-   - [Rolling Features with Parameters](#rolling-features-with-parameters)
-7. [Grouping and Aggregation](#grouping-and-aggregation)
-   - [GROUP BY Aggregation](#group-by-aggregation)
-   - [Multiple Groups](#multiple-groups)
-8. [Complete Examples](#complete-examples)
-   - [Feature Engineering for ML](#feature-engineering-for-ml)
-   - [Anomaly Detection](#anomaly-detection)
-   - [Time Series Clustering](#time-series-clustering)
-9. [Best Practices](#best-practices)
-   - [Performance Optimization](#performance-optimization)
-   - [Feature Selection Tips](#feature-selection-tips)
-   - [Handling NULL Values](#handling-null-values)
-10. [Common Patterns](#common-patterns)
-    - [Feature Comparison Across Series](#feature-comparison-across-series)
-    - [Rolling Feature Trends](#rolling-feature-trends)
-11. [Troubleshooting](#troubleshooting)
-
----
-
 ## Introduction
 
 The `ts_features` function extracts time series features directly in DuckDB, providing tsfresh-compatible feature vectors for machine learning, anomaly detection, and exploratory data analysis.
@@ -51,7 +11,46 @@ The `ts_features` function extracts time series features directly in DuckDB, pro
 - Flexible feature selection and parameter customization
 - Configuration via JSON/CSV files or inline parameters
 
-[↑ Go to top](#time-series-features-guide)
+---
+
+## Table of Contents
+
+1. [Basic Usage](#basic-usage)
+   - [Simple Feature Extraction](#simple-feature-extraction)
+   - [Listing Available Features](#listing-available-features)
+2. [Feature Selection](#feature-selection)
+   - [Select Specific Features](#select-specific-features)
+   - [Multiple Features](#multiple-features)
+3. [Parameter Customization](#parameter-customization)
+   - [Inline Parameter Overrides](#inline-parameter-overrides)
+   - [Parameterized Feature Columns](#parameterized-feature-columns)
+   - [Multiple Parameter Variants](#multiple-parameter-variants)
+4. [Configuration Files](#configuration-files)
+   - [JSON Configuration](#json-configuration)
+   - [CSV Configuration](#csv-configuration)
+   - [Configuration Template](#configuration-template)
+5. [Rolling Window Features](#rolling-window-features)
+   - [Basic Rolling Window](#basic-rolling-window)
+   - [Common Window Patterns](#common-window-patterns)
+   - [Multiple Rolling Features](#multiple-rolling-features)
+   - [Rolling Features with Parameters](#rolling-features-with-parameters)
+6. [Grouping and Aggregation](#grouping-and-aggregation)
+   - [GROUP BY Aggregation](#group-by-aggregation)
+   - [Multiple Groups](#multiple-groups)
+7. [Complete Examples](#complete-examples)
+   - [Feature Engineering for ML](#feature-engineering-for-ml)
+   - [Anomaly Detection](#anomaly-detection)
+   - [Time Series Clustering](#time-series-clustering)
+8. [Best Practices](#best-practices)
+   - [Performance Optimization](#performance-optimization)
+   - [Feature Selection Tips](#feature-selection-tips)
+   - [Handling NULL Values](#handling-null-values)
+9. [Common Patterns](#common-patterns)
+   - [Feature Comparison Across Series](#feature-comparison-across-series)
+   - [Rolling Feature Trends](#rolling-feature-trends)
+10. [Troubleshooting](#troubleshooting)
+
+---
 
 ---
 
