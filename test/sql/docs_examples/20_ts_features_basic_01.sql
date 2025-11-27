@@ -5,6 +5,9 @@ SELECT
     (100 + i * 2 + SIN(i * 2 * PI() / 7) * 10)::DOUBLE AS value
 FROM generate_series(0, 30) t(i);
 
-SELECT ts_features(ts, value) AS features
-FROM sample_ts;
+SELECT feats.*
+FROM (
+    SELECT ts_features(ts, value) AS feats
+    FROM sample_ts
+);
 
