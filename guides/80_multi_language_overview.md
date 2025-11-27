@@ -29,16 +29,15 @@ The anofox-forecast extension is implemented as a DuckDB extension, which means 
    - [Hybrid Pipeline Pattern](#pattern-2-hybrid-pipeline)
    - [Microservices Architecture Pattern](#pattern-3-microservices-architecture)
 5. [Performance Across Languages](#performance-across-languages)
-   - [Benchmarks](#benchmarks-1000-series-365-days-28-day-horizon)
    - [What Affects Performance](#what-affects-performance)
 6. [Code Reusability](#code-reusability)
    - [Shared SQL Queries](#shared-sql-queries)
 7. [Example: Same Workflow, Different Languages](#example-same-workflow-different-languages)
 8. [Data Exchange Formats](#data-exchange-formats)
-   - [Parquet Format](#parquet-recommended)
-   - [CSV Format](#csv-simple)
-   - [Arrow IPC Format](#arrow-ipc-fast)
-   - [DuckDB Database File](#duckdb-database-file-best)
+   - [Parquet Format](#parquet)
+   - [CSV Format](#csv)
+   - [Arrow IPC Format](#arrow-ipc)
+   - [DuckDB Database File](#duckdb-database-file)
 
 ---
 
@@ -246,25 +245,6 @@ forecasts <- dbGetQuery(con, "SELECT * FROM read_parquet('forecasts.parquet')")
 
 ## Performance Across Languages
 
-### Benchmarks (1,000 series, 365 days, 28-day horizon)
-
-| Language | Load Data | Forecast (AutoETS) | Total | Memory |
-|----------|-----------|-------------------|-------|--------|
-| **Python** | 2.1s | 38.5s | 40.6s | 850 MB |
-| **R** | 2.3s | 38.2s | 40.5s | 920 MB |
-| **Julia** | 1.8s | 38.1s | 39.9s | 780 MB |
-| **C++** | 0.9s | 38.0s | 38.9s | 720 MB |
-| **Rust** | 1.0s | 38.0s | 39.0s | 730 MB |
-
-**Key Insight**: Forecasting time is nearly identical (DuckDB does the work)!
-
-**Differences**:
-
-- Data loading varies by language overhead
-- Memory usage varies by runtime (GC vs manual)
-- Julia/C++/Rust slightly more efficient
-- **For forecasting itself: language choice doesn't matter much!**
-
 ### What Affects Performance
 
 **Does NOT matter much**:
@@ -416,7 +396,7 @@ conn.execute_batch("COPY (SELECT * FROM forecast) TO 'forecast.csv'")?;
 
 ## Data Exchange Formats
 
-### Parquet (Recommended)
+### Parquet
 
 **Universal format** - works across all languages:
 
@@ -442,15 +422,15 @@ forecast = Arrow.Table("forecast.parquet") |> DataFrame
 con.Query("SELECT * FROM read_parquet('forecast.parquet')")
 ```
 
-### CSV (Simple)
+### CSV
 
 Works everywhere but less efficient for large data.
 
-### Arrow IPC (Fast)
+### Arrow IPC
 
 For in-memory exchange between processes.
 
-### DuckDB Database File (Best)
+### DuckDB Database File
 
 **Share the entire database**:
 
