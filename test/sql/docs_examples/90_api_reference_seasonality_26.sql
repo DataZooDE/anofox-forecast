@@ -1,1 +1,0 @@
-TS_DETECT_SEASONALITY(values: DOUBLE[]) → INT[]

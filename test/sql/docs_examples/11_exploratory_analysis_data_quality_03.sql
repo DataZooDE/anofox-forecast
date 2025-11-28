@@ -13,7 +13,7 @@ CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
 -- Generate statistics first
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount);
+SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount, '1d');
 
--- Comprehensive quality checks
+-- Comprehensive quality checks (TS_QUALITY_REPORT now implemented)
 SELECT * FROM TS_QUALITY_REPORT('sales_stats', 30);

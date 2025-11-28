@@ -555,7 +555,6 @@ TS_DROP_CONSTANT(
 TS_DROP_SHORT(
     table_name    VARCHAR,
     group_col     ANY,
-    date_col      DATE | TIMESTAMP | INTEGER,
     min_length    INTEGER
 ) → TABLE
 ```

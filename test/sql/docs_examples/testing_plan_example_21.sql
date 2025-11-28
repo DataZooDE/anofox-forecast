@@ -1,15 +1,19 @@
--- These should fail gracefully with clear error message
-SELECT TS_FORECAST(value, 'ARIMA', 5, {'p': 1, 'd': 1, 'q': 1});
--- Expected error: "Unknown model: 'ARIMA'"
+-- Create sample data
+CREATE TABLE test_data AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS value
+FROM generate_series(0, 89) t(d);
 
-SELECT TS_FORECAST(value, 'AutoARIMA', 5, NULL);
--- Expected error: "Unknown model: 'AutoARIMA'"
+-- These should work (ARIMA models are supported)
+SELECT * FROM TS_FORECAST('test_data', date, value, 'ARIMA', 5, MAP{'p': 1, 'd': 1, 'q': 1})
+LIMIT 5;
 
--- Verify ARIMA models don't appear in supported list
-SELECT * FROM ts_list_models() WHERE model_name LIKE '%ARIMA%';
--- Expected: 0 rows
+SELECT * FROM TS_FORECAST('test_data', date, value, 'AutoARIMA', 5, MAP{})
+LIMIT 5;
 
 -- Verify other models still work
-SELECT TS_FORECAST(value, 'Naive', 5, NULL);
-SELECT TS_FORECAST(value, 'AutoETS', 5, {'seasonal_period': 12});
--- Expected: Success
+SELECT * FROM TS_FORECAST('test_data', date, value, 'Naive', 5, MAP{})
+LIMIT 5;
+SELECT * FROM TS_FORECAST('test_data', date, value, 'AutoETS', 5, MAP{'seasonal_period': 12})
+LIMIT 5;

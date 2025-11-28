@@ -12,7 +12,7 @@ CROSS JOIN (VALUES ('P001'), ('P002')) products(product_id);
 
 -- Generate stats for reference
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales', product_id, date, sales_amount);
+SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
 
 -- Option A: Forward fill (use last known value)
 SELECT * FROM TS_FILL_NULLS_FORWARD('sales', product_id, date, sales_amount);

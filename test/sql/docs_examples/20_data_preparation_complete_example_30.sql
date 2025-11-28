@@ -1,7 +1,3 @@
--- Load macros
-.read sql/eda_time_series.sql
-.read sql/data_preparation.sql
-
 -- ============================================================================
 -- Step 1: Load and explore data
 -- ============================================================================
@@ -24,7 +20,7 @@ CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
 -- Generate statistics
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount);
+SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount, '1d');
 
 -- View overall summary
 SELECT * FROM TS_STATS_SUMMARY('sales_stats');
@@ -47,39 +43,50 @@ SELECT * FROM sales_seasonality;
 -- ============================================================================
 
 -- Custom pipeline using individual macros
+-- Step 1: Fill gaps
+CREATE TEMP TABLE step1 AS
+SELECT 
+    group_col AS product_id,
+    date_col AS date,
+    value_col AS sales_amount
+FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount, '1d');
+
+-- Step 2: Drop constant series
+CREATE TEMP TABLE step2 AS
+SELECT * FROM TS_DROP_CONSTANT('step1', product_id, sales_amount);
+
+-- Step 3: Drop edge zeros
 CREATE TABLE sales_custom AS
-WITH 
-step1 AS (
-    SELECT * FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount)
-),
-step2 AS (
-    SELECT * FROM TS_DROP_CONSTANT('step1', product_id, sales_amount)
-),
-step3 AS (
-    SELECT * FROM TS_DROP_EDGE_ZEROS('step2', product_id, date, sales_amount)
-)
-SELECT * FROM step3;
+SELECT 
+    group_col AS product_id,
+    date_col AS date,
+    value_col AS sales_amount
+FROM TS_DROP_EDGE_ZEROS('step2', product_id, date, sales_amount);
 
 -- ============================================================================
 -- Step 4: Validate preparation
 -- ============================================================================
 
 -- Re-analyze prepared data
+CREATE TABLE sales_prepared AS
+SELECT * FROM sales_custom;
+
 CREATE TABLE prepared_stats AS
-SELECT * FROM TS_STATS('sales_prepared', product_id, date, sales_amount);
+SELECT * FROM TS_STATS('sales_prepared', product_id, date, sales_amount, '1d');
 
 -- Compare quality scores
 SELECT 
     'Before' AS stage,
-    ROUND(AVG(quality_score), 4) AS avg_quality,
+    ROUND(AVG(CAST(n_null AS DOUBLE)), 4) AS avg_nulls,
     SUM(CASE WHEN n_null > 0 THEN 1 ELSE 0 END) AS series_with_nulls
 FROM sales_stats
 UNION ALL
 SELECT 
     'After',
-    ROUND(AVG(quality_score), 4),
+    ROUND(AVG(CAST(n_null AS DOUBLE)), 4),
     SUM(CASE WHEN n_null > 0 THEN 1 ELSE 0 END)
-FROM prepared_stats;
+FROM prepared_stats
+LIMIT 10;
 
 -- ============================================================================
 -- Step 5: Forecast on prepared data
@@ -89,6 +96,6 @@ SELECT *
 FROM TS_FORECAST_BY(
     'sales_prepared', product_id, date, sales_amount,
     'AutoETS', 28,
-    {'seasonal_period': 7}
+    MAP{'seasonal_period': 7}
 )
 LIMIT 10;

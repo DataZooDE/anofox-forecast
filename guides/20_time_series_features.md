@@ -115,6 +115,13 @@ LIMIT 10;
 Limit computation to specific features for better performance:
 
 ```sql
+-- Create sample time series data
+CREATE TABLE sample_ts AS
+SELECT 
+    TIMESTAMP '2024-01-01' + INTERVAL (d) DAY AS ts,
+    100 + 10 * SIN(2 * PI() * d / 7) + (RANDOM() * 5) AS value
+FROM generate_series(0, 30) t(d);
+
 -- Select specific features for better performance
 SELECT feats.*
 FROM (
@@ -157,6 +164,13 @@ ORDER BY product_id;
 Many features accept parameters. Override defaults using the `feature_params` argument:
 
 ```sql
+-- Create sample time series data
+CREATE TABLE sample_ts AS
+SELECT 
+    TIMESTAMP '2024-01-01' + INTERVAL (d) DAY AS ts,
+    100 + 10 * SIN(2 * PI() * d / 7) + (RANDOM() * 5) AS value
+FROM generate_series(0, 30) t(d);
+
 -- Override default parameters for a feature
 SELECT feats.*
 FROM (
@@ -217,6 +231,13 @@ This produces columns: `autocorrelation__lag_1`, `autocorrelation__lag_3`, `auto
 Load feature configuration from a JSON file:
 
 ```sql
+-- Create sample time series data
+CREATE TABLE sample_ts AS
+SELECT 
+    TIMESTAMP '2024-01-01' + INTERVAL (d) DAY AS ts,
+    100 + 10 * SIN(2 * PI() * d / 7) + (RANDOM() * 5) AS value
+FROM generate_series(0, 30) t(d);
+
 -- Load feature configuration from JSON file
 SELECT feats.*
 FROM (
@@ -250,6 +271,13 @@ FROM (
 Load configuration from CSV (table-friendly format):
 
 ```sql
+-- Create sample time series data
+CREATE TABLE sample_ts AS
+SELECT 
+    TIMESTAMP '2024-01-01' + INTERVAL (d) DAY AS ts,
+    100 + 10 * SIN(2 * PI() * d / 7) + (RANDOM() * 5) AS value
+FROM generate_series(0, 30) t(d);
+
 -- Load feature configuration from CSV file
 SELECT feats.*
 FROM (
@@ -378,6 +406,15 @@ FROM time_series_data;
 Compute multiple features in the same rolling window:
 
 ```sql
+-- Create sample time series data
+CREATE TABLE time_series_data AS
+SELECT 
+    series_id,
+    DATE '2024-01-01' + INTERVAL (d) DAY AS date,
+    100 + series_id * 10 + 10 * SIN(2 * PI() * d / 7) + (RANDOM() * 5) AS value
+FROM generate_series(0, 50) t(d)
+CROSS JOIN (VALUES (1), (2), (3)) series(series_id);
+
 -- Compute multiple rolling features in the same window
 SELECT 
     series_id,

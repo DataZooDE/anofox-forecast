@@ -12,7 +12,11 @@ CROSS JOIN (VALUES ('P001'), ('P002')) products(product_id);
 
 -- Backward fill (use next known value)
 CREATE TABLE sales_backward_filled AS
-SELECT * FROM TS_FILL_NULLS_BACKWARD('sales', product_id, date, sales_amount);
+SELECT 
+    product_id,
+    date,
+    value_col AS sales_amount
+FROM TS_FILL_NULLS_BACKWARD('sales', product_id, date, sales_amount);
 
 -- Verify results (should have no NULLs)
 SELECT 

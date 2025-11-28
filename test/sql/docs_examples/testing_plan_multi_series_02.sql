@@ -1,11 +1,11 @@
--- Test with return_insample = true
-SELECT TS_FORECAST(
-    value,
-    'Naive',
-    5,
-    {'return_insample': true}
-) AS result
-FROM (VALUES (100.0), (102.0), (105.0), (103.0)) t(value);
+-- Create sample test data
+CREATE TABLE test_data AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS value
+FROM generate_series(0, 89) t(d);
 
--- Verify insample_fitted has correct length (training data length)
--- Verify fitted values make sense for the model
+-- For each model, verify it returns forecasts
+SELECT *
+FROM TS_FORECAST('test_data', date, value, 'Naive', 12, MAP{})
+LIMIT 5;

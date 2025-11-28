@@ -1,5 +1,12 @@
+-- Create sample daily evaluation data
+CREATE TABLE daily_evaluation AS
+SELECT 
+    CURRENT_DATE AS date,
+    [100.0, 102.0, 98.0, 105.0]::DOUBLE[] AS actual_list,
+    [101.0, 103.0, 99.0, 106.0]::DOUBLE[] AS forecast_list;
+
 -- Alert if forecast quality degrades
-CREATE OR REPLACE TABLE forecast_quality_log AS
+CREATE TABLE forecast_quality_log AS
 SELECT 
     CURRENT_DATE AS date,
     TS_MAE(actual_list, forecast_list) AS mae,

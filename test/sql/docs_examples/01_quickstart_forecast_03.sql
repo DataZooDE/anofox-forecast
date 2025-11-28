@@ -1,3 +1,10 @@
+-- Create sample data
+CREATE TABLE my_sales AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales
+FROM generate_series(0, 89) t(d);  -- 90 days of data
+
 -- Forecast next 14 days
 SELECT * FROM TS_FORECAST(
     'my_sales',      -- table name
@@ -5,5 +12,5 @@ SELECT * FROM TS_FORECAST(
     sales,           -- value column
     'AutoETS',       -- model (automatic)
     14,              -- horizon (14 days)
-    {'seasonal_period': 7}  -- weekly seasonality
+    MAP{'seasonal_period': 7}  -- weekly seasonality
 );

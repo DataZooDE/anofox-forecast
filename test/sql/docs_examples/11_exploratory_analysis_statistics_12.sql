@@ -13,10 +13,10 @@ WHERE
 
 -- Generate statistics
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales', product_id, date, sales_amount);
+SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
 
 -- Detect short series
 SELECT * FROM sales_stats WHERE length < 30;
 
 -- Fix: Drop short series
-SELECT * FROM TS_DROP_SHORT('sales', product_id, date, 30);
+SELECT * FROM TS_DROP_SHORT('sales', product_id, 30);

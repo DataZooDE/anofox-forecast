@@ -1,15 +1,24 @@
+-- Create sample sales data
+CREATE TABLE sales_data AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales
+FROM generate_series(0, 89) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
+
 -- Detect changepoints for each product
 SELECT 
-    group_col AS product_id,
+    product_id,
     date_col AS date,
     is_changepoint
 FROM TS_DETECT_CHANGEPOINTS_BY('sales_data', product_id, date, sales, MAP{})
 WHERE is_changepoint = true
-ORDER BY product_id, date;
+ORDER BY product_id, date_col;
 
 -- Count changepoints per product
 SELECT 
-    group_col AS product_id,
+    product_id,
     COUNT(*) FILTER (WHERE is_changepoint) AS num_changepoints
 FROM TS_DETECT_CHANGEPOINTS_BY('sales_data', product_id, date, sales, MAP{})
 GROUP BY product_id

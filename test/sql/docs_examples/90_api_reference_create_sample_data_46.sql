@@ -1,2 +1,0 @@
--- AutoETS: Slower but accurate
--- SeasonalNaive: Fast for simple patterns

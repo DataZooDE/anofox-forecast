@@ -1,2 +1,0 @@
--- Need at least 2 * seasonal_period observations
--- Solution: Use non-seasonal model or get more data

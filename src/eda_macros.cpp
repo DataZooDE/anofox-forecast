@@ -238,6 +238,118 @@ static const DefaultTableMacro eda_macros[] = {
             FROM aggregated
         )"},
 
+    // TS_QUALITY_REPORT: Quality assessment report from TS_STATS output
+    {DEFAULT_SCHEMA,
+     "ts_quality_report",
+     {"stats_table", "min_length", nullptr},
+     {{nullptr, nullptr}},
+     R"(
+            WITH stats AS (
+                SELECT * FROM QUERY_TABLE(stats_table)
+            ),
+            params AS (
+                SELECT COALESCE(CAST(min_length AS INTEGER), 30) AS min_length_threshold
+            ),
+            gap_analysis AS (
+                SELECT 
+                    COUNT(DISTINCT series_id) AS total_series,
+                    COUNT(DISTINCT CASE WHEN expected_length > length THEN series_id END) AS series_with_gaps,
+                    CASE 
+                        WHEN COUNT(DISTINCT series_id) > 0
+                        THEN 100.0 * COUNT(DISTINCT CASE WHEN expected_length > length THEN series_id END) / COUNT(DISTINCT series_id)
+                        ELSE 0.0
+                    END AS pct_with_gaps
+                FROM stats
+                CROSS JOIN params
+            ),
+            missing_analysis AS (
+                SELECT 
+                    COUNT(DISTINCT series_id) AS total_series,
+                    COUNT(DISTINCT CASE WHEN n_null > 0 THEN series_id END) AS series_with_missing,
+                    CASE 
+                        WHEN COUNT(DISTINCT series_id) > 0
+                        THEN 100.0 * COUNT(DISTINCT CASE WHEN n_null > 0 THEN series_id END) / COUNT(DISTINCT series_id)
+                        ELSE 0.0
+                    END AS pct_with_missing
+                FROM stats
+            ),
+            constant_analysis AS (
+                SELECT 
+                    COUNT(DISTINCT series_id) AS total_series,
+                    COUNT(DISTINCT CASE WHEN is_constant = true THEN series_id END) AS series_constant,
+                    CASE 
+                        WHEN COUNT(DISTINCT series_id) > 0
+                        THEN 100.0 * COUNT(DISTINCT CASE WHEN is_constant = true THEN series_id END) / COUNT(DISTINCT series_id)
+                        ELSE 0.0
+                    END AS pct_constant
+                FROM stats
+            ),
+            short_analysis AS (
+                SELECT 
+                    COUNT(DISTINCT series_id) AS total_series,
+                    COUNT(DISTINCT CASE WHEN length < min_length_threshold THEN series_id END) AS series_short,
+                    CASE 
+                        WHEN COUNT(DISTINCT series_id) > 0
+                        THEN 100.0 * COUNT(DISTINCT CASE WHEN length < min_length_threshold THEN series_id END) / COUNT(DISTINCT series_id)
+                        ELSE 0.0
+                    END AS pct_short
+                FROM stats
+                CROSS JOIN params
+            ),
+            alignment_analysis AS (
+                SELECT 
+                    COUNT(DISTINCT series_id) AS total_series,
+                    COUNT(DISTINCT start_date) AS n_start_dates,
+                    COUNT(DISTINCT end_date) AS n_end_dates,
+                    CASE 
+                        WHEN COUNT(DISTINCT start_date) > 1 OR COUNT(DISTINCT end_date) > 1
+                        THEN COUNT(DISTINCT series_id) - 1
+                        ELSE 0
+                    END AS series_misaligned
+                FROM stats
+            )
+            SELECT 
+                'Gap Analysis' AS check_type,
+                ga.total_series,
+                ga.series_with_gaps,
+                ROUND(ga.pct_with_gaps, 1) AS pct_with_gaps
+            FROM gap_analysis ga
+            UNION ALL
+            SELECT 
+                'Missing Values' AS check_type,
+                ma.total_series,
+                ma.series_with_missing,
+                ROUND(ma.pct_with_missing, 1) AS pct_with_missing
+            FROM missing_analysis ma
+            UNION ALL
+            SELECT 
+                'Constant Series' AS check_type,
+                ca.total_series,
+                ca.series_constant,
+                ROUND(ca.pct_constant, 1) AS pct_constant
+            FROM constant_analysis ca
+            UNION ALL
+            SELECT 
+                'Short Series (< ' || CAST(p.min_length_threshold AS VARCHAR) || ')' AS check_type,
+                sa.total_series,
+                sa.series_short,
+                ROUND(sa.pct_short, 1) AS pct_short
+            FROM short_analysis sa
+            CROSS JOIN params p
+            UNION ALL
+            SELECT 
+                'End Date Alignment' AS check_type,
+                aa.total_series,
+                aa.series_misaligned,
+                CASE 
+                    WHEN aa.total_series > 0
+                    THEN ROUND(100.0 * aa.series_misaligned / aa.total_series, 1)
+                    ELSE 0.0
+                END AS pct_misaligned
+            FROM alignment_analysis aa
+            ORDER BY check_type
+        )"},
+
     // End marker
     {nullptr, nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}};
 

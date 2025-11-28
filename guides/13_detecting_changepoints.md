@@ -18,15 +18,7 @@ The `anofox-forecast` extension provides powerful changepoint detection capabili
 Detects changepoints in a single time series.
 
 **Signature:**
-
-```sql
-TS_DETECT_CHANGEPOINTS(
-    table_name: STRING,
-    date_col: TIMESTAMP,
-    value_col: DOUBLE,
-    params: MAP
-) -> TABLE(date_col TIMESTAMP, value_col DOUBLE, is_changepoint BOOLEAN)
-```
+<!-- include: test/sql/docs_examples/13_detecting_changepoints_seasonality_01.sql -->
 
 **Parameters:**
 
@@ -52,6 +44,13 @@ Table with original data plus:
 **Example:**
 
 ```sql
+-- Create sample sales data
+CREATE TABLE sales_data AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales
+FROM generate_series(0, 89) t(d);  -- 90 days of data
+
 -- Detect with default parameters
 SELECT *
 FROM TS_DETECT_CHANGEPOINTS('sales_data', date, sales, MAP{})
@@ -59,12 +58,12 @@ WHERE is_changepoint = true;
 
 -- More sensitive detection
 SELECT *
-FROM TS_DETECT_CHANGEPOINTS('sales_data', date, sales, {'hazard_lambda': 50.0})
+FROM TS_DETECT_CHANGEPOINTS('sales_data', date, sales, MAP{'hazard_lambda': 50.0})
 WHERE is_changepoint = true;
 
 -- With probabilities for confidence scoring
 SELECT date_col, is_changepoint, ROUND(changepoint_probability, 4) AS confidence
-FROM TS_DETECT_CHANGEPOINTS('sales_data', date, sales, {'include_probabilities': true})
+FROM TS_DETECT_CHANGEPOINTS('sales_data', date, sales, MAP{'include_probabilities': true})
 WHERE is_changepoint = true
 ORDER BY changepoint_probability DESC;
 ```
@@ -74,16 +73,7 @@ ORDER BY changepoint_probability DESC;
 Detects changepoints for multiple time series using GROUP BY.
 
 **Signature:**
-
-```sql
-TS_DETECT_CHANGEPOINTS_BY(
-    table_name: STRING,
-    group_col: ANY,
-    date_col: TIMESTAMP,
-    value_col: DOUBLE,
-    params: MAP
-) -> TABLE(group_col ANY, date_col TIMESTAMP, value_col DOUBLE, is_changepoint BOOLEAN)
-```
+<!-- include: test/sql/docs_examples/13_detecting_changepoints_seasonality_03.sql -->
 
 **Parameters:**
 
@@ -99,18 +89,27 @@ Table with original data grouped by `group_col` plus `is_changepoint` column.
 **Example:**
 
 ```sql
+-- Create sample sales data
+CREATE TABLE sales_data AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales
+FROM generate_series(0, 89) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
+
 -- Detect changepoints for each product
 SELECT 
-    group_col AS product_id,
+    product_id,
     date_col AS date,
     is_changepoint
 FROM TS_DETECT_CHANGEPOINTS_BY('sales_data', product_id, date, sales, MAP{})
 WHERE is_changepoint = true
-ORDER BY product_id, date;
+ORDER BY product_id, date_col;
 
 -- Count changepoints per product
 SELECT 
-    group_col AS product_id,
+    product_id,
     COUNT(*) FILTER (WHERE is_changepoint) AS num_changepoints
 FROM TS_DETECT_CHANGEPOINTS_BY('sales_data', product_id, date, sales, MAP{})
 GROUP BY product_id
@@ -160,14 +159,24 @@ Controls whether to compute Bayesian changepoint probabilities.
 **Examples:**
 
 ```sql
+-- Create sample sales data
+CREATE TABLE sales_data AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales
+FROM generate_series(0, 89) t(d);
+
 -- Highly sensitive: detect even small changes
-{'hazard_lambda': 50.0}
+SELECT * FROM TS_DETECT_CHANGEPOINTS('sales_data', date, sales, MAP{'hazard_lambda': 50.0})
+WHERE is_changepoint = true;
 
 -- Default: balanced detection
-MAP{}  -- or {'hazard_lambda': 250.0}
+SELECT * FROM TS_DETECT_CHANGEPOINTS('sales_data', date, sales, MAP{})
+WHERE is_changepoint = true;
 
 -- Conservative: only major shifts
-{'hazard_lambda': 500.0}
+SELECT * FROM TS_DETECT_CHANGEPOINTS('sales_data', date, sales, MAP{'hazard_lambda': 500.0})
+WHERE is_changepoint = true;
 ```
 
 ## Interpretation
@@ -215,6 +224,13 @@ The changepoint marks the **beginning of the new regime**, not the exact transit
 ### Validation Strategy
 
 ```sql
+-- Create sample data
+CREATE TABLE data AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS value
+FROM generate_series(0, 89) t(d);  -- 90 days of data
+
 -- Step 1: Try default
 SELECT COUNT(*) AS changepoints
 FROM TS_DETECT_CHANGEPOINTS('data', date, value, MAP{})
@@ -222,12 +238,12 @@ WHERE is_changepoint = true;
 
 -- Step 2: If too few, decrease hazard_lambda
 SELECT COUNT(*) AS changepoints
-FROM TS_DETECT_CHANGEPOINTS('data', date, value, {'hazard_lambda': 100.0})
+FROM TS_DETECT_CHANGEPOINTS('data', date, value, MAP{'hazard_lambda': 100.0})
 WHERE is_changepoint = true;
 
 -- Step 3: If too many, increase hazard_lambda
 SELECT COUNT(*) AS changepoints
-FROM TS_DETECT_CHANGEPOINTS('data', date, value, {'hazard_lambda': 500.0})
+FROM TS_DETECT_CHANGEPOINTS('data', date, value, MAP{'hazard_lambda': 500.0})
 WHERE is_changepoint = true;
 ```
 
@@ -244,6 +260,13 @@ WHERE is_changepoint = true;
 ### Pattern 1: Find All Changepoints
 
 ```sql
+-- Create sample data
+CREATE TABLE data AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS value
+FROM generate_series(0, 89) t(d);  -- 90 days of data
+
 SELECT *
 FROM TS_DETECT_CHANGEPOINTS('data', date, value, MAP{})
 WHERE is_changepoint = true;
@@ -252,6 +275,13 @@ WHERE is_changepoint = true;
 ### Pattern 2: Count Changepoints
 
 ```sql
+-- Create sample data
+CREATE TABLE data AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS value
+FROM generate_series(0, 89) t(d);  -- 90 days of data
+
 SELECT 
     COUNT(*) FILTER (WHERE is_changepoint) AS total_changepoints
 FROM TS_DETECT_CHANGEPOINTS('data', date, value, MAP{});
@@ -260,6 +290,13 @@ FROM TS_DETECT_CHANGEPOINTS('data', date, value, MAP{});
 ### Pattern 3: Most Recent Changepoint
 
 ```sql
+-- Create sample data
+CREATE TABLE data AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS value
+FROM generate_series(0, 89) t(d);  -- 90 days of data
+
 SELECT MAX(date_col) AS last_change
 FROM TS_DETECT_CHANGEPOINTS('data', date, value, MAP{})
 WHERE is_changepoint = true;
@@ -268,6 +305,13 @@ WHERE is_changepoint = true;
 ### Pattern 4: Segment Statistics
 
 ```sql
+-- Create sample data
+CREATE TABLE data AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS value
+FROM generate_series(0, 89) t(d);  -- 90 days of data
+
 WITH cp AS (
     SELECT *
     FROM TS_DETECT_CHANGEPOINTS('data', date, value, MAP{})

@@ -13,7 +13,7 @@ CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
 -- Generate stats to detect constant series
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales', product_id, date, sales_amount);
+SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
 
 -- Detect constant series
 SELECT * FROM sales_stats WHERE is_constant = true;

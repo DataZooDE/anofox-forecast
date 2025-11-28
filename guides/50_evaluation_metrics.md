@@ -145,17 +145,32 @@ All metrics work seamlessly with `GROUP BY` operations using DuckDB's `LIST()` a
 **Metrics expect arrays (LIST), not individual values:**
 
 ```sql
+-- Create sample forecast results
+CREATE TABLE results AS
+SELECT 
+    1 AS forecast_step,
+    100.0 AS actual,
+    102.5 AS forecast,
+    95.0 AS lower,
+    110.0 AS upper
+UNION ALL
+SELECT 2, 105.0, 104.0, 96.0, 112.0
+UNION ALL
+SELECT 3, 103.0, 105.5, 97.0, 114.0
+UNION ALL
+SELECT 4, 108.0, 107.0, 98.0, 116.0
+UNION ALL
+SELECT 5, 106.0, 108.5, 99.0, 118.0;
+
 -- ❌ WRONG - This won't work (metrics need arrays)
-SELECT product_id, TS_MAE(actual, predicted)
-FROM results
-GROUP BY product_id;
+-- SELECT product_id, TS_MAE(actual, predicted)
+-- FROM results
+-- GROUP BY product_id;
 
 -- ✅ CORRECT - Use LIST() to create arrays
 SELECT 
-    product_id,
-    TS_MAE(LIST(actual), LIST(predicted)) AS mae
-FROM results
-GROUP BY product_id;
+    TS_MAE(LIST(actual ORDER BY forecast_step), LIST(forecast ORDER BY forecast_step)) AS mae
+FROM results;
 ```
 
 [↑ Go to top](#time-series-evaluation-metrics)
@@ -450,6 +465,13 @@ The Relative Mean Absolute Error (RMAE) compares the performance of two forecast
 **Example:**
 
 ```sql
+-- Create sample forecast comparison data
+CREATE TABLE forecast_comparison AS
+SELECT 
+    [100.0, 102.0, 98.0, 105.0]::DOUBLE[] AS actual,
+    [101.0, 103.0, 99.0, 106.0]::DOUBLE[] AS forecast_autoets,
+    [100.0, 100.0, 100.0, 100.0]::DOUBLE[] AS forecast_naive;
+
 -- Compare AutoETS vs Naive forecast
 SELECT 
     TS_MAE(actual, forecast_autoets) AS mae_autoets,
@@ -495,19 +517,7 @@ The Quantile Loss, also known as Pinball Loss, evaluates the accuracy of quantil
 - `q`: Quantile level (0 < q < 1)
 
 **Example:**
-
-```sql
--- Evaluate 10th, 50th (median), and 90th percentile forecasts
-SELECT 
-    TS_QUANTILE_LOSS(actual, lower_bound, 0.1) AS ql_lower,
-    TS_QUANTILE_LOSS(actual, median_forecast, 0.5) AS ql_median,
-    TS_QUANTILE_LOSS(actual, upper_bound, 0.9) AS ql_upper
-FROM forecasts;
-
--- Perfect median forecast (ql_median = 0.0) means predictions exactly match actuals
--- Lower ql_lower means better lower bound prediction
--- Lower ql_upper means better upper bound prediction
-```
+<!-- include: test/sql/docs_examples/50_evaluation_metrics_evaluate_36.sql -->
 
 [↑ Go to top](#time-series-evaluation-metrics)
 
@@ -563,23 +573,7 @@ FROM distributions;
 ```
 
 **Use Case - CRPS Approximation**:
-
-```sql
--- Use many quantiles for better CRPS approximation
-WITH dense_quantiles AS (
-    SELECT
-        actual,
-        [q01, q02, q03, ... q99] AS predicted_quantiles,  -- 99 quantiles
-        [0.01, 0.02, 0.03, ... 0.99] AS quantiles
-    FROM forecast_distributions
-)
-SELECT 
-    model_name,
-    TS_MQLOSS(actual, predicted_quantiles, quantiles) AS crps_approximation
-FROM dense_quantiles
-GROUP BY model_name
-ORDER BY crps_approximation;  -- Best model first
-```
+<!-- include: test/sql/docs_examples/50_evaluation_metrics_evaluate_39.sql -->
 
 [↑ Go to top](#time-series-evaluation-metrics)
 
@@ -624,20 +618,6 @@ GROUP BY product_id;
 
 All functions validate inputs:
 
-```sql
--- ERROR: Arrays must have same length
-SELECT TS_MAE([1, 2, 3], [1, 2]);
-
--- ERROR: Arrays must not be empty
-SELECT TS_MAE([], []);
-
--- ERROR: MAPE undefined for zeros
-SELECT TS_MAPE([0, 1, 2], [0, 1, 2]);
--- Returns NULL (gracefully handled)
-
--- ERROR: MASE requires 3 arguments
-SELECT TS_MASE([1, 2], [1, 2]);
--- Use: TS_MASE([1, 2], [1, 2], baseline)
-```
+<!-- include: test/sql/docs_examples/50_evaluation_metrics_example_40.sql -->
 
 [↑ Go to top](#time-series-evaluation-metrics)

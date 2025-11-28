@@ -1,29 +1,25 @@
+-- Create sample historical data
+CREATE TABLE historical_data AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS value
+FROM generate_series(0, 89) t(d);
+
+-- Create sample test data (matching forecast horizon of 7)
+CREATE TABLE test_data AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS value
+FROM generate_series(90, 96) t(d);
+
 -- Evaluate forecast quality over time windows
-WITH windows AS (
-    SELECT 
-        (ROW_NUMBER() OVER (ORDER BY date) - 1) / 30 AS window_id,
-        date,
-        value
-    FROM historical_data
+WITH forecast_all AS (
+    SELECT LIST(point_forecast ORDER BY forecast_step) AS pred FROM TS_FORECAST('historical_data', date, value, 'AutoETS', 7, MAP{'seasonal_period': 7})
 ),
-forecasts_by_window AS (
-    SELECT 
-        window_id,
-        TS_FORECAST(date, value, 'AutoETS', 7, MAP{'season_length': 7}) AS fc
-    FROM windows
-    GROUP BY window_id
-),
-test_by_window AS (
-    SELECT 
-        window_id,
-        LIST(value) AS actual
-    FROM test_data
-    GROUP BY window_id
+test_actuals AS (
+    SELECT LIST(value ORDER BY date) AS actual FROM test_data LIMIT 7
 )
 SELECT 
-    t.window_id,
-    ROUND(TS_MAE(t.actual, f.fc.point_forecast), 2) AS mae,
-    ROUND(TS_MAPE(t.actual, f.fc.point_forecast), 2) AS mape
-FROM test_by_window t
-JOIN forecasts_by_window f ON t.window_id = f.window_id
-ORDER BY t.window_id;
+    ROUND(TS_MAE(actual, pred), 2) AS mae,
+    ROUND(TS_MAPE(actual, pred), 2) AS mape
+FROM test_actuals, forecast_all;

@@ -1,15 +1,14 @@
--- Old-style aggregate call (no new parameters)
-SELECT TS_FORECAST(value, 'Naive', 5, NULL)
-FROM test_data;
--- Expected: Success, insample_fitted is empty, confidence_level is 0.90
+-- Create sample test data
+CREATE TABLE test_data AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS value
+FROM generate_series(0, 89) t(d);
 
--- Old-style table macro call
-SELECT * FROM ts_forecast(
-    test_data,
-    'date',
-    'value',
-    'Naive',
-    5,
-    {}
-);
--- Expected: Success, new columns included
+-- Standard forecast call
+SELECT * FROM TS_FORECAST('test_data', date, value, 'Naive', 5, MAP{})
+LIMIT 5;
+
+-- Forecast with return_insample
+SELECT * FROM TS_FORECAST('test_data', date, value, 'Naive', 12, MAP{'return_insample': true})
+LIMIT 5;

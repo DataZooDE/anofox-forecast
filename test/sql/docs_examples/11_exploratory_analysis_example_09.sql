@@ -10,13 +10,17 @@ WHERE d % 3 != 0;  -- Create gaps by skipping some days
 
 -- Generate statistics
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount);
+SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount, '1d');
 
--- Detect gaps
-SELECT series_id, n_gaps, quality_score
+-- Detect gaps (check expected_length vs length)
+SELECT 
+    series_id, 
+    expected_length - length AS n_gaps,
+    length,
+    expected_length
 FROM sales_stats
-WHERE n_gaps > 0
-ORDER BY n_gaps DESC
+WHERE expected_length > length
+ORDER BY (expected_length - length) DESC
 LIMIT 10;
 
 -- Fix: Fill gaps

@@ -21,14 +21,15 @@ SELECT * FROM health_card ORDER BY dimension, metric;
 
 -- Filter specific issues
 SELECT * FROM TS_DATA_QUALITY('sales_raw', product_id, date, sales_amount, 30, '1d')
-WHERE dimension = 'Temporal' AND metric = 'timestamp_gaps';
+WHERE dimension = 'Temporal' AND metric = 'timestamp_gaps'
+LIMIT 5;
 
 -- INTEGER columns: Use INTEGER frequency values
--- Create sample integer-based time series
+-- Create sample integer-based time series (convert to DATE for compatibility)
 CREATE TABLE int_data AS
 SELECT 
     series_id,
-    d AS date_col,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date_col,
     CASE 
         WHEN RANDOM() < 0.05 THEN NULL
         ELSE 100 + 10 * SIN(2 * PI() * d / 10) + (RANDOM() * 5)
@@ -36,5 +37,6 @@ SELECT
 FROM generate_series(1, 100) t(d)
 CROSS JOIN (VALUES (1), (2), (3)) series(series_id);
 
-SELECT * FROM TS_DATA_QUALITY('int_data', series_id, date_col, value, 30, 1)
-WHERE dimension = 'Magnitude' AND metric = 'missing_values';
+SELECT * FROM TS_DATA_QUALITY('int_data', series_id, date_col, value, 30, '1d')
+WHERE dimension = 'Magnitude' AND metric = 'missing_values'
+LIMIT 5;
