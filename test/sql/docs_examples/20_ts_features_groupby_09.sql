@@ -8,8 +8,13 @@ FROM generate_series(0, 20) t(i);
 
 SELECT 
     product_id,
-    ts_features(ts, value, ['mean', 'variance', 'length']) AS feats
-FROM multi_series
-GROUP BY product_id
+    feats.*
+FROM (
+    SELECT 
+        product_id,
+        ts_features(ts, value, ['mean', 'variance', 'length']) AS feats
+    FROM multi_series
+    GROUP BY product_id
+)
 ORDER BY product_id;
 

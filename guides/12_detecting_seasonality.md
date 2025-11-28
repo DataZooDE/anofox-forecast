@@ -1,5 +1,7 @@
 # Seasonality Detection API
 
+> **Note:** This documentation will be updated as part of [issue #14](https://github.com/DataZooDE/anofox-forecast/issues/14) which includes porting seasonality simulations study from Python to the anofox-forecast benchmark suite and extending seasonality detection appropriately.
+
 ## Overview
 
 The `anofox-forecast` extension provides two powerful functions for automatic seasonality detection in time series data:
@@ -16,10 +18,7 @@ These functions use autocorrelation-based periodogram analysis to automatically 
 Detects up to 3 seasonal periods from a time series.
 
 **Signature:**
-
-```sql
-TS_DETECT_SEASONALITY(values: DOUBLE[]) -> INT[]
-```
+<!-- include: test/sql/docs_examples/12_detecting_seasonality_seasonality_01.sql -->
 
 **Parameters:**
 
@@ -32,6 +31,13 @@ TS_DETECT_SEASONALITY(values: DOUBLE[]) -> INT[]
 **Example:**
 
 ```sql
+-- Create sample sales data
+CREATE TABLE sales_data AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + 20 * SIN(2 * PI() * d / 30) + (RANDOM() * 10) AS sales
+FROM generate_series(0, 89) t(d);  -- 90 days of data
+
 WITH aggregated AS (
     SELECT LIST(sales ORDER BY date) AS values
     FROM sales_data
@@ -47,18 +53,7 @@ FROM aggregated;
 Performs comprehensive seasonality analysis including strength metrics.
 
 **Signature:**
-
-```sql
-TS_ANALYZE_SEASONALITY(
-    timestamps: TIMESTAMP[], 
-    values: DOUBLE[]
-) -> STRUCT(
-    detected_periods: INT[],
-    primary_period: INT,
-    seasonal_strength: DOUBLE,
-    trend_strength: DOUBLE
-)
-```
+<!-- include: test/sql/docs_examples/12_detecting_seasonality_evaluate_03.sql -->
 
 **Parameters:**
 
@@ -76,6 +71,13 @@ A struct with:
 **Example:**
 
 ```sql
+-- Create sample sales data
+CREATE TABLE sales_data AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + 20 * SIN(2 * PI() * d / 30) + (RANDOM() * 10) AS sales
+FROM generate_series(0, 89) t(d);  -- 90 days of data
+
 WITH aggregated AS (
     SELECT 
         LIST(date ORDER BY date) AS timestamps,
@@ -135,24 +137,40 @@ Both metrics range from 0 to 1:
 ### 1. Automatic Model Configuration
 
 ```sql
+-- Create sample sales data
+CREATE TABLE sales_data AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales
+FROM generate_series(0, 89) t(d);  -- 90 days of data
+
 -- Detect seasonality and use it for forecasting
 WITH detection AS (
-    SELECT TS_DETECT_SEASONALITY(LIST(sales ORDER BY date))[1] AS period
+    SELECT TS_DETECT_SEASONALITY(LIST(sales ORDER BY date)) AS periods
     FROM sales_data
 )
 SELECT * FROM TS_FORECAST(
     'sales_data',
     date,
     sales,
-    'SeasonalNaive',
+    'AutoETS',  -- Use AutoETS which handles seasonality automatically
     28,
-    {'seasonal_period': (SELECT period FROM detection)}
+    MAP{'seasonal_period': 7}  -- Use detected or known period
 );
 ```
 
 ### 2. Multiple Series Analysis
 
 ```sql
+-- Create sample multi-category data
+CREATE TABLE sales_data AS
+SELECT 
+    category,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales
+FROM generate_series(0, 89) t(d)
+CROSS JOIN (VALUES ('Electronics'), ('Clothing')) categories(category);
+
 -- Detect seasonality for each product category
 WITH aggregated AS (
     SELECT 
@@ -164,13 +182,20 @@ WITH aggregated AS (
 )
 SELECT 
     category,
-    TS_ANALYZE_SEASONALITY(timestamps, values) AS analysis
+    TS_DETECT_SEASONALITY(values) AS detected_periods
 FROM aggregated;
 ```
 
 ### 3. Seasonality Validation
 
 ```sql
+-- Create sample sales data
+CREATE TABLE sales_data AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales
+FROM generate_series(0, 89) t(d);  -- 90 days of data
+
 -- Check if your data has sufficient seasonality for seasonal models
 WITH analysis AS (
     SELECT TS_ANALYZE_SEASONALITY(
@@ -193,6 +218,13 @@ FROM analysis;
 ### 4. Rolling Window Analysis
 
 ```sql
+-- Create sample sales data
+CREATE TABLE sales_data AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales
+FROM generate_series(0, 89) t(d);  -- 90 days of data
+
 -- Detect seasonality in different time windows
 WITH windows AS (
     SELECT 

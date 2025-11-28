@@ -11,6 +11,45 @@ The `ts_features` function extracts time series features directly in DuckDB, pro
 - Flexible feature selection and parameter customization
 - Configuration via JSON/CSV files or inline parameters
 
+---
+
+## Table of Contents
+
+1. [Basic Usage](#basic-usage)
+   - [Simple Feature Extraction](#simple-feature-extraction)
+   - [Listing Available Features](#listing-available-features)
+2. [Feature Selection](#feature-selection)
+   - [Select Specific Features](#select-specific-features)
+   - [Multiple Features](#multiple-features)
+3. [Parameter Customization](#parameter-customization)
+   - [Inline Parameter Overrides](#inline-parameter-overrides)
+   - [Parameterized Feature Columns](#parameterized-feature-columns)
+   - [Multiple Parameter Variants](#multiple-parameter-variants)
+4. [Configuration Files](#configuration-files)
+   - [JSON Configuration](#json-configuration)
+   - [CSV Configuration](#csv-configuration)
+   - [Configuration Template](#configuration-template)
+5. [Rolling Window Features](#rolling-window-features)
+   - [Basic Rolling Window](#basic-rolling-window)
+   - [Common Window Patterns](#common-window-patterns)
+   - [Multiple Rolling Features](#multiple-rolling-features)
+   - [Rolling Features with Parameters](#rolling-features-with-parameters)
+6. [Grouping and Aggregation](#grouping-and-aggregation)
+   - [GROUP BY Aggregation](#group-by-aggregation)
+   - [Multiple Groups](#multiple-groups)
+7. [Best Practices](#best-practices)
+   - [Performance Optimization](#performance-optimization)
+   - [Feature Selection Tips](#feature-selection-tips)
+   - [Handling NULL Values](#handling-null-values)
+8. [Common Patterns](#common-patterns)
+   - [Feature Comparison Across Series](#feature-comparison-across-series)
+   - [Rolling Feature Trends](#rolling-feature-trends)
+9. [Troubleshooting](#troubleshooting)
+
+---
+
+---
+
 ## Basic Usage
 
 ### Simple Feature Extraction
@@ -25,19 +64,23 @@ SELECT
     (100 + i * 2 + SIN(i * 2 * PI() / 7) * 10)::DOUBLE AS value
 FROM generate_series(0, 30) t(i);
 
-SELECT ts_features(ts, value) AS features
-FROM sample_ts;
+SELECT feats.*
+FROM (
+    SELECT ts_features(ts, value) AS feats
+    FROM sample_ts
+);
 
 ```
 
-The output is a STRUCT containing all available features. Access individual features using dot notation:
+The output is a STRUCT containing all available features. Use struct expansion (`feats.*`) to access all features as individual columns. If you only need specific features, explicitly specify them in the `feature_selection` parameter:
 
 ```sql
-SELECT 
-    (ts_features(ts, value)).mean AS avg_value,
-    (ts_features(ts, value)).variance AS variance,
-    (ts_features(ts, value)).length AS series_length
-FROM your_table;
+-- Extract only specific features
+SELECT feats.*
+FROM (
+    SELECT ts_features(ts, value, ['mean', 'variance', 'length']) AS feats
+    FROM sample_ts
+);
 ```
 
 ### Listing Available Features
@@ -61,6 +104,10 @@ LIMIT 10;
 - `default_parameters`: Default parameter values as JSON string
 - `parameter_keys`: Available parameter keys for this feature
 
+[↑ Go to top](#time-series-features-guide)
+
+---
+
 ## Feature Selection
 
 ### Select Specific Features
@@ -68,10 +115,19 @@ LIMIT 10;
 Limit computation to specific features for better performance:
 
 ```sql
--- Select specific features for better performance
+-- Create sample time series data
+CREATE TABLE sample_ts AS
 SELECT 
-    ts_features(ts, value, ['mean', 'variance', 'length']) AS feats
-FROM sample_ts;
+    TIMESTAMP '2024-01-01' + INTERVAL (d) DAY AS ts,
+    100 + 10 * SIN(2 * PI() * d / 7) + (RANDOM() * 5) AS value
+FROM generate_series(0, 30) t(d);
+
+-- Select specific features for better performance
+SELECT feats.*
+FROM (
+    SELECT ts_features(ts, value, ['mean', 'variance', 'length']) AS feats
+    FROM sample_ts
+);
 
 ```
 
@@ -82,14 +138,24 @@ Select multiple features at once:
 ```sql
 SELECT 
     product_id,
-    ts_features(
-        ts,
-        value,
-        ['mean', 'variance', 'autocorrelation__lag_1', 'sum_values']
-    ) AS feats
-FROM sales_data
-GROUP BY product_id;
+    feats.*
+FROM (
+    SELECT 
+        product_id,
+        ts_features(
+            ts,
+            value,
+            ['mean', 'variance', 'autocorrelation__lag_1', 'sum_values']
+        ) AS feats
+    FROM sales_data
+    GROUP BY product_id
+)
+ORDER BY product_id;
 ```
+
+[↑ Go to top](#time-series-features-guide)
+
+---
 
 ## Parameter Customization
 
@@ -98,15 +164,24 @@ GROUP BY product_id;
 Many features accept parameters. Override defaults using the `feature_params` argument:
 
 ```sql
--- Override default parameters for a feature
+-- Create sample time series data
+CREATE TABLE sample_ts AS
 SELECT 
-    ts_features(
+    TIMESTAMP '2024-01-01' + INTERVAL (d) DAY AS ts,
+    100 + 10 * SIN(2 * PI() * d / 7) + (RANDOM() * 5) AS value
+FROM generate_series(0, 30) t(d);
+
+-- Override default parameters for a feature
+SELECT feats.*
+FROM (
+    SELECT ts_features(
         ts,
         value,
         ['ratio_beyond_r_sigma'],
         [{'feature': 'ratio_beyond_r_sigma', 'params': {'r': 1.0}}]
     ) AS feats
-FROM sample_ts;
+    FROM sample_ts
+);
 
 ```
 
@@ -127,8 +202,9 @@ When you specify parameters, the output column names include parameter suffixes:
 Compute the same feature with different parameters:
 
 ```sql
-SELECT 
-    ts_features(
+SELECT feats.*
+FROM (
+    SELECT ts_features(
         ts,
         value,
         ['autocorrelation'],
@@ -138,10 +214,15 @@ SELECT
             {'feature': 'autocorrelation', 'params': {'lag': 6}}
         ]
     ) AS feats
-FROM time_series_data;
+    FROM time_series_data
+);
 ```
 
 This produces columns: `autocorrelation__lag_1`, `autocorrelation__lag_3`, `autocorrelation__lag_6`.
+
+[↑ Go to top](#time-series-features-guide)
+
+---
 
 ## Configuration Files
 
@@ -150,14 +231,23 @@ This produces columns: `autocorrelation__lag_1`, `autocorrelation__lag_3`, `auto
 Load feature configuration from a JSON file:
 
 ```sql
--- Load feature configuration from JSON file
+-- Create sample time series data
+CREATE TABLE sample_ts AS
 SELECT 
-    ts_features(
+    TIMESTAMP '2024-01-01' + INTERVAL (d) DAY AS ts,
+    100 + 10 * SIN(2 * PI() * d / 7) + (RANDOM() * 5) AS value
+FROM generate_series(0, 30) t(d);
+
+-- Load feature configuration from JSON file
+SELECT feats.*
+FROM (
+    SELECT ts_features(
         ts,
         value,
         ts_features_config_from_json('benchmark/timeseries_features/data/features_overrides.json')
     ) AS feats
-FROM sample_ts;
+    FROM sample_ts
+);
 
 ```
 
@@ -181,14 +271,23 @@ FROM sample_ts;
 Load configuration from CSV (table-friendly format):
 
 ```sql
--- Load feature configuration from CSV file
+-- Create sample time series data
+CREATE TABLE sample_ts AS
 SELECT 
-    ts_features(
+    TIMESTAMP '2024-01-01' + INTERVAL (d) DAY AS ts,
+    100 + 10 * SIN(2 * PI() * d / 7) + (RANDOM() * 5) AS value
+FROM generate_series(0, 30) t(d);
+
+-- Load feature configuration from CSV file
+SELECT feats.*
+FROM (
+    SELECT ts_features(
         ts,
         value,
         ts_features_config_from_csv('benchmark/timeseries_features/data/features_overrides.csv')
     ) AS feats
-FROM sample_ts;
+    FROM sample_ts
+);
 
 ```
 
@@ -217,6 +316,10 @@ ORDER BY feature;
 ```
 
 Use this to create your own configuration files.
+
+[↑ Go to top](#time-series-features-guide)
+
+---
 
 ## Rolling Window Features
 
@@ -303,6 +406,15 @@ FROM time_series_data;
 Compute multiple features in the same rolling window:
 
 ```sql
+-- Create sample time series data
+CREATE TABLE time_series_data AS
+SELECT 
+    series_id,
+    DATE '2024-01-01' + INTERVAL (d) DAY AS date,
+    100 + series_id * 10 + 10 * SIN(2 * PI() * d / 7) + (RANDOM() * 5) AS value
+FROM generate_series(0, 50) t(d)
+CROSS JOIN (VALUES (1), (2), (3)) series(series_id);
+
 -- Compute multiple rolling features in the same window
 SELECT 
     series_id,
@@ -339,6 +451,10 @@ SELECT
 FROM time_series_data;
 ```
 
+[↑ Go to top](#time-series-features-guide)
+
+---
+
 ## Grouping and Aggregation
 
 ### GROUP BY Aggregation
@@ -356,9 +472,14 @@ FROM generate_series(0, 20) t(i);
 
 SELECT 
     product_id,
-    ts_features(ts, value, ['mean', 'variance', 'length']) AS feats
-FROM multi_series
-GROUP BY product_id
+    feats.*
+FROM (
+    SELECT 
+        product_id,
+        ts_features(ts, value, ['mean', 'variance', 'length']) AS feats
+    FROM multi_series
+    GROUP BY product_id
+)
 ORDER BY product_id;
 
 ```
@@ -371,95 +492,20 @@ Group by multiple columns:
 SELECT 
     region,
     category,
-    ts_features(ts, value, ['mean', 'variance']) AS feats
-FROM sales_data
-GROUP BY region, category;
-```
-
-## Complete Examples
-
-### Feature Engineering for ML
-
-Extract features for machine learning pipelines:
-
-```sql
--- Extract features for machine learning pipeline
-WITH feature_vectors AS (
+    feats.*
+FROM (
     SELECT 
-        product_id,
-        ts_features(
-            ts,
-            value,
-            ['mean', 'variance', 'autocorrelation__lag_1', 'linear_trend', 'sum_values']
-        ) AS feats
+        region,
+        category,
+        ts_features(ts, value, ['mean', 'variance']) AS feats
     FROM sales_data
-    GROUP BY product_id
-)
-SELECT 
-    product_id,
-    (feats).mean AS avg_value,
-    (feats).variance AS variance,
-    (feats).autocorrelation__lag_1 AS lag1_autocorr,
-    (feats).linear_trend__attr_slope AS trend_slope,
-    (feats).sum_values AS total_value
-FROM feature_vectors
-ORDER BY product_id;
-
+    GROUP BY region, category
+);
 ```
 
-### Anomaly Detection
+[↑ Go to top](#time-series-features-guide)
 
-Use rolling features to detect anomalies:
-
-```sql
-WITH rolling_stats AS (
-    SELECT 
-        date,
-        value,
-        (ts_features(date, value, ['mean', 'variance']) OVER (
-            PARTITION BY sensor_id 
-            ORDER BY date
-            ROWS BETWEEN 30 PRECEDING AND CURRENT ROW
-        )) AS stats
-    FROM sensor_data
-)
-SELECT 
-    date,
-    value,
-    (stats).mean AS rolling_mean,
-    (stats).variance AS rolling_variance,
-    CASE 
-        WHEN ABS(value - (stats).mean) > 3 * SQRT((stats).variance) 
-        THEN 'ANOMALY' 
-        ELSE 'NORMAL' 
-    END AS anomaly_flag
-FROM rolling_stats;
-```
-
-### Time Series Clustering
-
-Extract feature vectors for clustering similar time series:
-
-```sql
-WITH feature_vectors AS (
-    SELECT 
-        series_id,
-        ts_features(
-            date,
-            value,
-            ['mean', 'variance', 'autocorrelation__lag_1', 'linear_trend']
-        ) AS feats
-    FROM time_series_data
-    GROUP BY series_id
-)
-SELECT 
-    series_id,
-    (feats).mean,
-    (feats).variance,
-    (feats).autocorrelation__lag_1,
-    (feats).linear_trend__attr_slope
-FROM feature_vectors;
-```
+---
 
 ## Best Practices
 
@@ -469,10 +515,18 @@ FROM feature_vectors;
 
    ```sql
    -- Good: Select specific features
-   ts_features(ts, value, ['mean', 'variance'])
+   SELECT feats.*
+   FROM (
+       SELECT ts_features(ts, value, ['mean', 'variance']) AS feats
+       FROM your_table
+   );
    
    -- Avoid: Computing all features unnecessarily
-   ts_features(ts, value)
+   SELECT feats.*
+   FROM (
+       SELECT ts_features(ts, value) AS feats
+       FROM your_table
+   );
    ```
 
 2. **Use appropriate window sizes**: Larger windows = more computation
@@ -489,10 +543,13 @@ FROM feature_vectors;
 
    ```sql
    -- Good: Filter first
-   SELECT ts_features(ts, value) 
-   FROM large_table 
-   WHERE date >= CURRENT_DATE - INTERVAL '30 days'
-   GROUP BY series_id;
+   SELECT feats.*
+   FROM (
+       SELECT ts_features(ts, value) AS feats
+       FROM large_table 
+       WHERE date >= CURRENT_DATE - INTERVAL '30 days'
+       GROUP BY series_id
+   );
    ```
 
 ### Feature Selection Tips
@@ -510,6 +567,10 @@ FROM feature_vectors;
 - Some features may return NULL for certain input characteristics
 - Always check for NULL before using features in downstream calculations
 
+[↑ Go to top](#time-series-features-guide)
+
+---
+
 ## Common Patterns
 
 ### Feature Comparison Across Series
@@ -524,9 +585,9 @@ WITH features AS (
 )
 SELECT 
     series_id,
-    (feats).mean,
-    (feats).variance,
-    (feats).variance / NULLIF((feats).mean, 0) AS coefficient_of_variation
+    feats.mean,
+    feats.variance,
+    feats.variance / NULLIF(feats.mean, 0) AS coefficient_of_variation
 FROM features
 ORDER BY coefficient_of_variation DESC;
 ```
@@ -549,6 +610,10 @@ SELECT
     )) AS rolling_30day
 FROM time_series_data;
 ```
+
+[↑ Go to top](#time-series-features-guide)
+
+---
 
 ## Troubleshooting
 
@@ -578,3 +643,5 @@ Remove duplicate feature names from your feature list.
 - Use smaller window sizes
 - Filter data before feature extraction
 - Consider materializing intermediate results
+
+[↑ Go to top](#time-series-features-guide)

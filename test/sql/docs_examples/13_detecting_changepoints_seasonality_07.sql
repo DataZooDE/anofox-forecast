@@ -1,3 +1,10 @@
+-- Create sample stock prices data
+CREATE TABLE stock_prices AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100.0 + d * 0.5 + 10 * SIN(2 * PI() * d / 30) + (RANDOM() * 5) AS price
+FROM generate_series(0, 89) t(d);  -- 90 days of data
+
 -- Segment time series into stable periods
 WITH changepoint_data AS (
     SELECT *

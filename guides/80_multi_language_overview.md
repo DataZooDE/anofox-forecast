@@ -1,10 +1,43 @@
 # Multi-Language Support - Write Once, Use Everywhere
 
-## The Power of SQL-Based Forecasting
+## Introduction
 
-**Core Insight**: Since anofox-forecast is a DuckDB extension, your forecasting logic is **pure SQL** and works across **all** programming languages that have DuckDB bindings!
+The anofox-forecast extension is implemented as a DuckDB extension, which means all forecasting operations are executed as SQL queries. This architecture enables the same forecasting logic to work seamlessly across all programming languages that support DuckDB bindings.
 
-**Write once in SQL → Use from Python, R, Julia, C++, Rust, Node.js, Go, Java, and more!**
+**Key Capabilities**:
+
+- Write forecasting logic once in SQL, use from any language
+- Native DuckDB performance regardless of calling language
+- Portable SQL queries that work identically across languages
+- Support for Python, R, Julia, C++, Rust, Node.js, Go, Java, and more
+- Zero language-specific forecasting library dependencies
+
+---
+
+## Table of Contents
+
+1. [Supported Languages](#supported-languages)
+   - [Production-Ready Languages](#production-ready-with-dedicated-guides)
+   - [Additional Supported Languages](#also-supported-via-duckdb-bindings)
+2. [Universal SQL Pattern](#universal-sql-pattern)
+   - [The Same SQL Works Everywhere](#the-same-sql-works-everywhere)
+3. [Language Comparison](#language-comparison)
+   - [Quick Comparison Matrix](#quick-comparison-matrix)
+   - [When to Use Each Language](#when-to-use-each-language)
+4. [Integration Patterns](#integration-patterns)
+   - [Polyglot Team Pattern](#pattern-1-polyglot-team)
+   - [Hybrid Pipeline Pattern](#pattern-2-hybrid-pipeline)
+   - [Microservices Architecture Pattern](#pattern-3-microservices-architecture)
+5. [Performance Across Languages](#performance-across-languages)
+   - [What Affects Performance](#what-affects-performance)
+6. [Code Reusability](#code-reusability)
+   - [Shared SQL Queries](#shared-sql-queries)
+7. [Example: Same Workflow, Different Languages](#example-same-workflow-different-languages)
+8. [Data Exchange Formats](#data-exchange-formats)
+   - [Parquet Format](#parquet)
+   - [CSV Format](#csv)
+   - [Arrow IPC Format](#arrow-ipc)
+   - [DuckDB Database File](#duckdb-database-file)
 
 ---
 
@@ -29,6 +62,8 @@
 - **Swift**: iOS/macOS applications
 - **And many more!**
 
+[↑ Go to top](#multi-language-support-write-once-use-everywhere)
+
 ---
 
 ## Universal SQL Pattern
@@ -38,8 +73,15 @@
 **SQL Query** (write once):
 
 ```sql
-SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
-                          {'seasonal_period': 7, 'confidence_level': 0.95})
+-- Create sample data
+CREATE TABLE sales AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales
+FROM generate_series(0, 89) t(d);  -- 90 days of data
+
+SELECT * FROM TS_FORECAST('sales', date, sales, 'AutoETS', 28, 
+                          MAP{'seasonal_period': 7, 'confidence_level': 0.95})
 ```
 
 **Use from Python**:
@@ -74,6 +116,8 @@ let forecast = conn.prepare("SELECT * FROM TS_FORECAST(...)")?.query_map(...)?;
 
 **Same logic, different language bindings!**
 
+[↑ Go to top](#multi-language-support-write-once-use-everywhere)
+
 ---
 
 ## Language Comparison
@@ -104,6 +148,8 @@ let forecast = conn.prepare("SELECT * FROM TS_FORECAST(...)")?.query_map(...)?;
 **C++** → Maximum performance, embedded systems, low-latency trading, game engines
 
 **Rust** → Production services needing safety, CLI tools, systems programming
+
+[↑ Go to top](#multi-language-support-write-once-use-everywhere)
 
 ---
 
@@ -200,28 +246,11 @@ forecasts <- dbGetQuery(con, "SELECT * FROM read_parquet('forecasts.parquet')")
 
 **Benefit**: Each service uses best language for the task!
 
+[↑ Go to top](#multi-language-support-write-once-use-everywhere)
+
 ---
 
 ## Performance Across Languages
-
-### Benchmarks (1,000 series, 365 days, 28-day horizon)
-
-| Language | Load Data | Forecast (AutoETS) | Total | Memory |
-|----------|-----------|-------------------|-------|--------|
-| **Python** | 2.1s | 38.5s | 40.6s | 850 MB |
-| **R** | 2.3s | 38.2s | 40.5s | 920 MB |
-| **Julia** | 1.8s | 38.1s | 39.9s | 780 MB |
-| **C++** | 0.9s | 38.0s | 38.9s | 720 MB |
-| **Rust** | 1.0s | 38.0s | 39.0s | 730 MB |
-
-**Key Insight**: Forecasting time is nearly identical (DuckDB does the work)!
-
-**Differences**:
-
-- Data loading varies by language overhead
-- Memory usage varies by runtime (GC vs manual)
-- Julia/C++/Rust slightly more efficient
-- **For forecasting itself: language choice doesn't matter much!**
 
 ### What Affects Performance
 
@@ -238,6 +267,8 @@ forecasts <- dbGetQuery(con, "SELECT * FROM read_parquet('forecasts.parquet')")
 - ✅ Data preparation (gaps, nulls, filtering)
 - ✅ SQL query efficiency
 
+[↑ Go to top](#multi-language-support-write-once-use-everywhere)
+
 ---
 
 ## Code Reusability
@@ -247,27 +278,34 @@ forecasts <- dbGetQuery(con, "SELECT * FROM read_parquet('forecasts.parquet')")
 Create a `queries.sql` file:
 
 ```sql
--- queries.sql
+-- Create sample sales data
+CREATE TABLE sales AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS amount
+FROM generate_series(0, 89) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
 -- Get quality stats
--- name: get_quality_stats
-SELECT * FROM TS_STATS('sales', product_id, date, amount);
+SELECT * FROM TS_STATS('sales', product_id, date, amount, '1d')
+LIMIT 5;
 
 -- Prepare data
--- name: prepare_data
 CREATE TABLE sales_prepared AS
-WITH filled AS (SELECT * FROM TS_FILL_GAPS('sales', product_id, date, amount))
+WITH filled AS (
+    SELECT 
+        group_col AS product_id,
+        date_col AS date,
+        value_col AS amount
+    FROM TS_FILL_GAPS('sales', product_id, date, amount, '1d')
+)
 SELECT * FROM TS_DROP_CONSTANT('filled', product_id, amount);
 
 -- Generate forecast
--- name: forecast_autoets
 SELECT * FROM TS_FORECAST_BY('sales_prepared', product_id, date, amount,
-                             'AutoETS', 28, {'seasonal_period': 7});
-
--- Evaluate metrics
--- name: evaluate_forecasts
-WITH joined AS (...)
-SELECT product_id, TS_MAE(...), TS_RMSE(...) FROM joined;
+                             'AutoETS', 28, MAP{'seasonal_period': 7})
+LIMIT 5;
 ```
 
 **Use from any language**:
@@ -296,6 +334,10 @@ DBInterface.execute(conn, query)
 let query = include_str!("queries.sql");
 conn.execute_batch(query)?;
 ```
+
+[↑ Go to top](#multi-language-support-write-once-use-everywhere)
+
+---
 
 ## Example: Same Workflow, Different Languages
 
@@ -362,11 +404,13 @@ conn.execute_batch("COPY (SELECT * FROM forecast) TO 'forecast.csv'")?;
 
 **Notice**: The SQL is identical in all languages!
 
+[↑ Go to top](#multi-language-support-write-once-use-everywhere)
+
 ---
 
 ## Data Exchange Formats
 
-### Parquet (Recommended)
+### Parquet
 
 **Universal format** - works across all languages:
 
@@ -392,15 +436,15 @@ forecast = Arrow.Table("forecast.parquet") |> DataFrame
 con.Query("SELECT * FROM read_parquet('forecast.parquet')")
 ```
 
-### CSV (Simple)
+### CSV
 
 Works everywhere but less efficient for large data.
 
-### Arrow IPC (Fast)
+### Arrow IPC
 
 For in-memory exchange between processes.
 
-### DuckDB Database File (Best)
+### DuckDB Database File
 
 **Share the entire database**:
 
@@ -417,5 +461,7 @@ let conn = Connection::open("shared.duckdb")?;
 ```
 
 **Benefit**: Zero data conversion, instant access!
+
+[↑ Go to top](#multi-language-support-write-once-use-everywhere)
 
 ---

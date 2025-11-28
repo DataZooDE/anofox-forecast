@@ -1,16 +1,23 @@
+-- Create sample data
+CREATE TABLE data AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS value
+FROM generate_series(0, 89) t(d);  -- 90 days of data
+
 -- Never evaluate on training data!
 WITH split AS (
-    SELECT * FROM data WHERE date < '2024-01-01'  -- Train
+    SELECT * FROM data WHERE date < DATE '2024-01-01'  -- Train
 ),
 forecast AS (
-    SELECT TS_FORECAST(date, value, 'AutoETS', 30, MAP{}) AS fc FROM split
+    SELECT LIST(point_forecast ORDER BY forecast_step) AS pred FROM TS_FORECAST('split', date, value, 'AutoETS', 30, MAP{})
 ),
 test AS (
-    SELECT LIST(value) AS actual 
+    SELECT LIST(value ORDER BY date) AS actual 
     FROM data 
-    WHERE date >= '2024-01-01'  -- Test (holdout)
+    WHERE date >= DATE '2024-01-01'  -- Test (holdout)
     LIMIT 30
 )
 SELECT 
-    TS_MAE(actual, forecast.fc.point_forecast) AS test_mae
+    TS_MAE(actual, pred) AS test_mae
 FROM test, forecast;

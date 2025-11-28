@@ -1,15 +1,54 @@
 # Using anofox-forecast from Python
 
-## Overview
+## Introduction
 
-The anofox-forecast extension works seamlessly with Python through DuckDB's Python API. Write your forecasting logic in SQL, execute from Python!
+The anofox-forecast extension integrates with Python through DuckDB's Python API, enabling time series forecasting operations to be executed as SQL queries from Python applications. This approach eliminates the need for Python-specific forecasting libraries while providing high performance and portability.
 
-**Key Advantages**:
-- ✅ No Python forecasting libraries needed (no statsforecast, prophet, etc.)
-- ✅ Faster than pandas/polars for large datasets
-- ✅ SQL queries portable across languages
-- ✅ Native parallelization
-- ✅ Easy integration with existing Python workflows
+**Key Capabilities**:
+- Execute forecasting operations via SQL queries through DuckDB Python bindings
+- No dependency on Python forecasting libraries (statsforecast, prophet, etc.)
+- High-performance data processing with native DuckDB parallelization
+- Seamless integration with pandas, polars, and Arrow DataFrames
+- Portable SQL queries that work identically across programming languages
+- Support for complete forecasting workflows: data preparation, forecasting, and evaluation
+
+---
+
+## Table of Contents
+
+1. [Installation](#installation)
+2. [Quick Start](#quick-start)
+3. [Working with DataFrames](#working-with-dataframes)
+   - [Load Data from Pandas](#load-data-from-pandas)
+   - [Multiple Series from DataFrame](#multiple-series-from-dataframe)
+4. [Data Preparation Workflow](#data-preparation-workflow)
+5. [Evaluation & Validation](#evaluation--validation)
+6. [Integration Patterns](#integration-patterns)
+   - [Batch Forecasting Pipeline](#pattern-1-batch-forecasting-pipeline)
+   - [API Endpoint](#pattern-2-api-endpoint)
+   - [Scheduled Job](#pattern-3-scheduled-job-airflowprefect)
+7. [Visualization](#visualization)
+   - [With Matplotlib](#with-matplotlib)
+   - [With Plotly](#with-plotly-interactive)
+8. [Advanced Usage](#advanced-usage)
+   - [Parameterized Queries](#parameterized-queries)
+   - [Batch Processing with Progress](#batch-processing-with-progress)
+   - [Integration with Scikit-learn](#integration-with-scikit-learn)
+9. [Database Integration](#database-integration)
+   - [SQLite to DuckDB](#sqlite-to-duckdb)
+   - [PostgreSQL to DuckDB](#postgresql-to-duckdb)
+10. [Best Practices](#best-practices)
+    - [Connection Pooling](#1-use-connection-pooling)
+    - [Error Handling](#2-error-handling)
+    - [Logging](#3-logging)
+11. [Performance Tips](#performance-tips)
+    - [Persistent Connection](#1-persistent-connection)
+    - [Arrow for Large Results](#2-arrow-for-large-results)
+    - [Parallel Python + DuckDB](#3-parallel-python--duckdb)
+12. [Jupyter Notebook Tips](#jupyter-notebook-tips)
+13. [Summary](#summary)
+
+---
 
 ## Installation
 
@@ -107,6 +146,10 @@ forecast_pivot = forecasts.pivot(
 print(forecast_pivot)
 ```
 
+[↑ Go to top](#using-anofox-forecast-from-python)
+
+---
+
 ## Data Preparation Workflow
 
 ```python
@@ -190,6 +233,10 @@ metrics = con.execute("""
 
 print(metrics)
 ```
+
+[↑ Go to top](#using-anofox-forecast-from-python)
+
+---
 
 ## Integration Patterns
 
@@ -350,6 +397,10 @@ if __name__ == "__main__":
     daily_forecast_flow()
 ```
 
+[↑ Go to top](#using-anofox-forecast-from-python)
+
+---
+
 ## Visualization
 
 ### With Matplotlib
@@ -434,6 +485,10 @@ fig.update_layout(
 
 fig.show()
 ```
+
+[↑ Go to top](#using-anofox-forecast-from-python)
+
+---
 
 ## Advanced Usage
 
@@ -532,6 +587,10 @@ rf = RandomForestRegressor()
 rf.fit(X, y)
 ```
 
+[↑ Go to top](#using-anofox-forecast-from-python)
+
+---
+
 ## Database Integration
 
 ### SQLite to DuckDB
@@ -585,6 +644,10 @@ con.execute("""
     CREATE TABLE pg.forecasts AS SELECT * FROM forecast
 """)
 ```
+
+[↑ Go to top](#using-anofox-forecast-from-python)
+
+---
 
 ## Best Practices
 
@@ -677,6 +740,10 @@ def forecast_with_logging(table_name: str):
     return forecast
 ```
 
+[↑ Go to top](#using-anofox-forecast-from-python)
+
+---
+
 ## Performance Tips
 
 ### 1. Persistent Connection
@@ -742,6 +809,10 @@ with ProcessPoolExecutor(max_workers=4) as executor:
 forecasts = pd.concat(results, ignore_index=True)
 ```
 
+[↑ Go to top](#using-anofox-forecast-from-python)
+
+---
+
 ## Jupyter Notebook Tips
 
 ```python
@@ -797,4 +868,6 @@ Load data (pandas)
 **Next**: [R Usage Guide](82_r_integration.md) | [Julia Usage Guide](83_julia_integration.md)
 
 **Examples**: See `examples/` directory for more SQL examples that work from Python!
+
+[↑ Go to top](#using-anofox-forecast-from-python)
 

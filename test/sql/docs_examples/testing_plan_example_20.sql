@@ -1,6 +1,12 @@
--- These should work
-SELECT TS_FORECAST(value, 'ARIMA', 5, {'p': 1, 'd': 1, 'q': 1});
-SELECT TS_FORECAST(value, 'AutoARIMA', 5, {'seasonal_period': 12});
+-- Create sample data
+CREATE TABLE test_data AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS value
+FROM generate_series(0, 89) t(d);
 
--- Verify ARIMA models appear in supported list
-SELECT * FROM ts_list_models() WHERE model_name LIKE '%ARIMA%';
+-- These should work
+SELECT * FROM TS_FORECAST('test_data', date, value, 'ARIMA', 5, MAP{'p': 1, 'd': 1, 'q': 1})
+LIMIT 5;
+SELECT * FROM TS_FORECAST('test_data', date, value, 'AutoARIMA', 5, MAP{'seasonal_period': 12})
+LIMIT 5;

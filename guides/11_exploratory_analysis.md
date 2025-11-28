@@ -2,20 +2,82 @@
 
 ## Introduction
 
-Data quality directly impacts forecast accuracy. This guide covers exploratory data analysis and preparation using SQL macros that operate on time series at scale.
+Data quality directly impacts forecast accuracy. This guide covers exploratory data analysis, data quality assessment, and data preparation using SQL macros that operate on time series at scale.
 
-**API Coverage**: 5 EDA macros + 2 Data Quality Health Card macros + 12 data preparation macros for comprehensive data quality workflows.
+**Note**: This guide follows the API documentation in `API_REFERENCE.md`, which is the authoritative source for function signatures, parameters, and behavior. For complete function reference, see the [API Reference](../docs/API_REFERENCE.md).
 
-## Complete Workflow
+**API Coverage**:
 
-### Phase 1: Explore Your Data (EDA)
+- **5 EDA macros**: `TS_STATS`, `TS_STATS_SUMMARY`, `TS_QUALITY_REPORT` (plus seasonality and changepoint detection)
+- **2 Data Quality macros**: `TS_DATA_QUALITY`, `TS_DATA_QUALITY_SUMMARY`
+- **12 Data Preparation macros**: Gap filling, series filtering, edge cleaning, and missing value imputation
 
-#### Step 1: Generate Statistics
+This guide provides practical workflows and examples for:
+
+1. **Exploratory Data Analysis**: Understanding your time series data structure and patterns
+2. **Data Quality Assessment**: Comprehensive evaluation across four dimensions (Structural, Temporal, Magnitude, Behavioural)
+3. **Data Preparation**: Cleaning, gap filling, filtering, and imputation to prepare data for forecasting
+
+---
+
+## Table of Contents
+
+1. [Exploratory Data Analysis](#exploratory-data-analysis)
+   - [Per-Series Statistics](#per-series-statistics)
+   - [Dataset Summary](#dataset-summary)
+   - [Quality Assessment](#quality-assessment)
+2. [Data Quality](#data-quality)
+   - [Comprehensive Assessment](#comprehensive-assessment)
+   - [Summary by Dimension](#summary-by-dimension)
+3. [Data Preparation](#data-preparation)
+   - [Gap Filling](#gap-filling)
+     - [TS_FILL_GAPS](#ts_fill_gaps)
+     - [TS_FILL_FORWARD](#ts_fill_forward)
+   - [Series Filtering](#series-filtering)
+     - [TS_DROP_CONSTANT](#ts_drop_constant)
+     - [TS_DROP_SHORT](#ts_drop_short)
+   - [Edge Cleaning](#edge-cleaning)
+     - [TS_DROP_LEADING_ZEROS](#ts_drop_leading_zeros)
+     - [TS_DROP_TRAILING_ZEROS](#ts_drop_trailing_zeros)
+     - [TS_DROP_EDGE_ZEROS](#ts_drop_edge_zeros)
+   - [Missing Value Imputation](#missing-value-imputation)
+     - [TS_FILL_NULLS_CONST](#ts_fill_nulls_const)
+     - [TS_FILL_NULLS_FORWARD](#ts_fill_nulls_forward)
+     - [TS_FILL_NULLS_BACKWARD](#ts_fill_nulls_backward)
+     - [TS_FILL_NULLS_MEAN](#ts_fill_nulls_mean)
+4. [Complete Workflow Examples](#complete-workflow-examples)
+5. [Common Data Issues & Solutions](#common-data-issues--solutions)
+6. [Preparation Checklist](#preparation-checklist)
+
+---
+
+## Exploratory Data Analysis
+
+### Per-Series Statistics
+
+**TS_STATS**
+
+Computes per-series statistical metrics including length, date ranges, central tendencies (mean, median), dispersion (std), value distributions (min, max, zeros), and quality indicators (nulls, uniqueness, constancy). Returns 24 metrics per series for exploratory analysis and data profiling.
+
+**Example:**
 
 ```sql
+-- Create sample sales data
+CREATE TABLE sales_raw AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    CASE 
+        WHEN RANDOM() < 0.05 THEN NULL  -- 5% missing
+        WHEN RANDOM() < 0.10 THEN 0.0   -- 5% zeros
+        ELSE 100 + 50 * SIN(2 * PI() * d / 7) + (RANDOM() * 20)
+    END AS sales_amount
+FROM generate_series(0, 364) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
+
 -- Compute comprehensive stats for all series
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount);
+SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount, '1d');
 
 -- View results
 SELECT * FROM sales_stats LIMIT 5;
@@ -29,202 +91,1172 @@ Returns comprehensive statistics per series including:
 - **Pattern indicators**: cv (coefficient of variation), intermittency_rate
 - **Trend metrics**: trend_correlation, first_last_ratio
 
-#### Step 2: Dataset Summary
+### Dataset Summary
+
+**TS_STATS_SUMMARY**
+
+Aggregates statistics across all series from TS_STATS output. Computes dataset-level metrics including total series count, total observations, average series length, and date span. Provides high-level overview for dataset characterization.
+
+**Example:**
 
 ```sql
+-- Create sample sales data
+CREATE TABLE sales_raw AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    CASE 
+        WHEN RANDOM() < 0.05 THEN NULL  -- 5% missing
+        WHEN RANDOM() < 0.10 THEN 0.0   -- 5% zeros
+        ELSE 100 + 50 * SIN(2 * PI() * d / 7) + (RANDOM() * 20)
+    END AS sales_amount
+FROM generate_series(0, 364) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
+
+-- Generate statistics first
+CREATE TABLE sales_stats AS
+SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount, '1d');
+
 -- Get overall picture
 SELECT * FROM TS_STATS_SUMMARY('sales_stats');
 ```
 
-**Example Output**:
+### Quality Assessment
 
-```
-total_series: 1,000
-total_observations: 365,000
-avg_series_length: 365
-avg_quality_score: 0.8234
-high_quality_series: 856
-low_quality_series: 23
-```
+**TS_QUALITY_REPORT**
 
-#### Step 3: Data Quality Health Card
+Generates quality assessment report from TS_STATS output. Evaluates series against configurable thresholds for gaps, missing values, constant series, short series, and temporal alignment. Identifies series requiring data preparation steps.
 
-**New**: Data quality assessment with actionable recommendations:
+**Example:**
 
 ```sql
+-- Create sample sales data
+CREATE TABLE sales_raw AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    CASE 
+        WHEN RANDOM() < 0.05 THEN NULL  -- 5% missing
+        WHEN RANDOM() < 0.10 THEN 0.0   -- 5% zeros
+        ELSE 100 + 50 * SIN(2 * PI() * d / 7) + (RANDOM() * 20)
+    END AS sales_amount
+FROM generate_series(0, 364) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
+
+-- Generate statistics first
+CREATE TABLE sales_stats AS
+SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount, '1d');
+
+-- Comprehensive quality checks (TS_QUALITY_REPORT now implemented)
+SELECT * FROM TS_QUALITY_REPORT('sales_stats', 30);
+```
+
+[↑ Go to top](#eda--data-preparation---complete-workflow-guide)
+
+---
+
+## Data Quality
+
+### Comprehensive Assessment
+
+**TS_DATA_QUALITY**
+
+Assesses data quality across four dimensions (Structural, Temporal, Magnitude, Behavioural) for each time series. Returns per-series metrics including key uniqueness, timestamp gaps, missing values, value distributions, and pattern characteristics. Output is normalized by dimension and metric for cross-series comparison.
+
+**Signature (Function Overloading):**
+
+```sql
+-- For DATE/TIMESTAMP columns (date-based frequency)
+TS_DATA_QUALITY(
+    table_name      VARCHAR,
+    unique_id_col   ANY,
+    date_col        DATE | TIMESTAMP,
+    value_col       DOUBLE,
+    n_short         INTEGER,
+    frequency       VARCHAR
+) → TABLE
+
+-- For INTEGER columns (integer-based frequency)
+TS_DATA_QUALITY(
+    table_name      VARCHAR,
+    unique_id_col   ANY,
+    date_col        INTEGER | BIGINT,
+    value_col       DOUBLE,
+    n_short         INTEGER,
+    frequency       INTEGER
+) → TABLE
+```
+
+**Parameters:**
+
+- `n_short`: Optional threshold for short series detection (default: 30)
+- `frequency`:
+  - **For DATE/TIMESTAMP columns**: Optional frequency string (Polars-style). Defaults to `"1d"` if NULL or not provided.
+    - `"30m"` or `"30min"` - 30 minutes
+    - `"1h"` - 1 hour
+    - `"1d"` - 1 day (default)
+    - `"1w"` - 1 week
+    - `"1mo"` - 1 month
+    - `"1q"` - 1 quarter (3 months)
+    - `"1y"` - 1 year
+  - **For INTEGER columns**: Optional integer step size. Defaults to `1` if NULL or not provided.
+    - `1`, `2`, `3`, etc. - Integer step size for `GENERATE_SERIES`
+
+**Type Validation:**
+
+- DuckDB automatically selects the correct overload based on the `frequency` parameter type:
+  - VARCHAR frequency → DATE/TIMESTAMP date column required
+  - INTEGER frequency → INTEGER/BIGINT date column required
+- If there's a type mismatch (e.g., INTEGER date column with VARCHAR frequency), a `Binder Error` will be raised at query time.
+
+**Returns:**
+
+```sql
+TABLE(
+    unique_id       ANY,  -- Type matches unique_id_col
+    dimension       VARCHAR,  -- Structural, Temporal, Magnitude, Behavioural
+    metric          VARCHAR,
+    value           BIGINT,
+    value_pct       DOUBLE
+)
+```
+
+**Dimensions and Metrics:**
+
+**Structural Dimension:**
+
+- `key_uniqueness`: Number of duplicate key combinations (unique_id + date_col). Counts how many rows have duplicate (unique_id, date_col) pairs. Value = 0 indicates all keys are unique.
+- `id_cardinality`: Total number of distinct series IDs in the dataset. Reported for `unique_id = 'ALL_SERIES'` only.
+
+**Temporal Dimension:**
+
+- `series_length`: Number of observations in the series. Count of non-NULL rows per series.
+- `timestamp_gaps`: Number of missing timestamps based on expected frequency. Calculated as `expected_count - actual_count` where expected_count is derived from the date range and frequency parameter. `value_pct` indicates the percentage of missing timestamps.
+- `series_alignment`: Number of distinct start/end dates across all series. Reported for `unique_id = 'ALL_SERIES'` only. Value = 1 indicates all series start/end on the same dates.
+- `frequency_inference`: Number of distinct inferred frequencies across series. Reported for `unique_id = 'ALL_SERIES'` only. Indicates frequency diversity in the dataset.
+
+**Magnitude Dimension:**
+
+- `missing_values`: Count and percentage of NULL values in the value column. `value` = count of NULLs, `value_pct` = percentage of NULLs.
+- `value_bounds`: Count and percentage of negative values (for non-negative expected data). `value` = count of negative values, `value_pct` = proportion of negative values. Useful for detecting data quality issues when values should be non-negative.
+- `static_values`: Boolean flag (1/0) indicating if series has no variation (constant values). Value = 1 if all values are identical (or standard deviation = 0), 0 otherwise.
+
+**Behavioural Dimension:**
+
+- `intermittency`: Count and percentage of zero values (including NULLs). `value` = count of zeros/NULLs, `value_pct` = proportion. High intermittency indicates sparse time series.
+- `seasonality_check`: Boolean flag (1/0) indicating if seasonality was detected. Value = 1 if any seasonal periods detected, 0 otherwise. Only computed for series with ≥7 observations.
+- `trend_detection`: Correlation coefficient between row number and value (trend strength). `value` = NULL, `value_pct` = absolute correlation (0-1). Higher values indicate stronger trend. Only computed for series with ≥3 observations.
+
+**Examples:**
+
+```sql
+-- Create sample sales data with gaps and missing values
+CREATE TABLE sales_raw AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    CASE 
+        WHEN RANDOM() < 0.05 THEN NULL  -- 5% missing
+        WHEN RANDOM() < 0.10 THEN 0.0   -- 5% zeros
+        ELSE 100 + 50 * SIN(2 * PI() * d / 7) + (RANDOM() * 20)
+    END AS sales_amount
+FROM generate_series(0, 364) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
+
+-- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
 -- Generate comprehensive health card (n_short parameter defaults to 30 if NULL)
 CREATE TABLE health_card AS
-SELECT * FROM TS_DATA_QUALITY('sales_raw', product_id, date, sales_amount, 30);
+SELECT * FROM TS_DATA_QUALITY('sales_raw', product_id, date, sales_amount, 30, '1d');
 
 -- View all issues
 SELECT * FROM health_card ORDER BY dimension, metric;
+
+-- Filter specific issues
+SELECT * FROM TS_DATA_QUALITY('sales_raw', product_id, date, sales_amount, 30, '1d')
+WHERE dimension = 'Temporal' AND metric = 'timestamp_gaps'
+LIMIT 5;
+
+-- INTEGER columns: Use INTEGER frequency values
+-- Create sample integer-based time series (convert to DATE for compatibility)
+CREATE TABLE int_data AS
+SELECT 
+    series_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date_col,
+    CASE 
+        WHEN RANDOM() < 0.05 THEN NULL
+        ELSE 100 + 10 * SIN(2 * PI() * d / 10) + (RANDOM() * 5)
+    END AS value
+FROM generate_series(1, 100) t(d)
+CROSS JOIN (VALUES (1), (2), (3)) series(series_id);
+
+SELECT * FROM TS_DATA_QUALITY('int_data', series_id, date_col, value, 30, '1d')
+WHERE dimension = 'Magnitude' AND metric = 'missing_values'
+LIMIT 5;
 ```
 
-**Example Output**:
+### Summary by Dimension
 
-| unique_id | dimension    | metric           | value | value_pct |
-|-----------|--------------|------------------|-------|-----------|
-| Store_A   | Temporal     | timestamp_gaps   | 23    | 0.152     |
-| Store_A   | Magnitude   | missing_values   | 13    | 0.085     |
-| Store_B   | Temporal     | series_length    | 5     | NULL      |
-| Store_C   | Behavioural  | intermittency    | 104   | 0.523     |
+**TS_DATA_QUALITY_SUMMARY**
 
-**Four Dimensions Assessed**:
+Aggregates quality metrics across all series, grouped by dimension and metric. Computes summary statistics (counts, percentages) for each quality dimension to provide dataset-level quality overview. Useful for identifying systemic data quality issues affecting multiple series.
 
-1. **Structural**:
-
-- Key uniqueness and
-- ID cardinality
-
-2. **Temporal**:
-
-- Frequency inference,
-- Timestamp gaps,
-- Series alignment, and
-- Series length
-
-3. **Magnitude**:
-
-- Missing values,
-- Value bounds, and
-- Static values
-
-4. **Behavioural**:
-
-- Seasonality,
-- Trend detection, and
-- Intermittency
-
-**Summary Function**:
+**Signature:**
 
 ```sql
+TS_DATA_QUALITY_SUMMARY(
+    table_name      VARCHAR,
+    unique_id_col   ANY,
+    date_col        DATE | TIMESTAMP | INTEGER,
+    value_col       DOUBLE,
+    n_short         INTEGER
+) → TABLE
+```
+
+**Returns:** Aggregated summary by dimension and metric.
+
+**Example:**
+
+```sql
+-- Create sample sales data
+CREATE TABLE sales_raw AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    CASE 
+        WHEN RANDOM() < 0.05 THEN NULL  -- 5% missing
+        WHEN RANDOM() < 0.10 THEN 0.0   -- 5% zeros
+        ELSE 100 + 50 * SIN(2 * PI() * d / 7) + (RANDOM() * 20)
+    END AS sales_amount
+FROM generate_series(0, 364) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
+
 -- Get summary by dimension (n_short parameter defaults to 30 if NULL)
 SELECT * FROM TS_DATA_QUALITY_SUMMARY('sales_raw', product_id, date, sales_amount, 30);
 ```
 
-#### Step 4: Identify Problems
+[↑ Go to top](#eda--data-preparation---complete-workflow-guide)
+
+---
+
+## Data Preparation
+
+SQL macros for data cleaning and transformation. Date type support varies by function.
+
+### Gap Filling
+
+#### TS_FILL_GAPS
+
+**Fill Missing Timestamps**
+
+Fills missing timestamps/indices in series with NULL values using the specified frequency interval or step size.
+
+**Signature (Function Overloading):**
 
 ```sql
--- Find series with quality_score < 0.7
+-- For DATE/TIMESTAMP columns (date-based frequency)
+TS_FILL_GAPS(
+    table_name    VARCHAR,
+    group_col     ANY,
+    date_col      DATE | TIMESTAMP,
+    value_col     DOUBLE,
+    frequency     VARCHAR
+) → TABLE
+
+-- For INTEGER columns (integer-based frequency)
+TS_FILL_GAPS(
+    table_name    VARCHAR,
+    group_col     ANY,
+    date_col      INTEGER | BIGINT,
+    value_col     DOUBLE,
+    frequency     INTEGER
+) → TABLE
 ```
 
-**Common Issues**:
+**Parameters:**
 
-- Many gaps → primary_issue = '⚠️ Many gaps'
-- Null values → primary_issue = '⚠️ Missing values'
-- Constant → primary_issue = '⚠️ Constant'
+- `frequency`:
+  - **For DATE/TIMESTAMP columns**: Optional frequency string (Polars-style). Defaults to `"1d"` if NULL or not provided.
+    - `"30m"` or `"30min"` - 30 minutes
+    - `"1h"` - 1 hour
+    - `"1d"` - 1 day (default)
+    - `"1w"` - 1 week
+    - `"1mo"` - 1 month
+    - `"1q"` - 1 quarter (3 months)
+    - `"1y"` - 1 year
+  - **For INTEGER columns**: Optional integer step size. Defaults to `1` if NULL or not provided.
+    - `1`, `2`, `3`, etc. - Integer step size for `GENERATE_SERIES`
 
-#### Step 5: Detect Patterns
+**Type Validation:**
+
+- DuckDB automatically selects the correct overload based on the `frequency` parameter type:
+  - VARCHAR frequency → DATE/TIMESTAMP date column required
+  - INTEGER frequency → INTEGER/BIGINT date column required
+- If there's a type mismatch (e.g., INTEGER date column with VARCHAR frequency), a `Binder Error` will be raised at query time.
+
+**Examples:**
 
 ```sql
--- Seasonality
+-- Create sample sales data with gaps
+CREATE TABLE sales_raw AS
 SELECT 
     product_id,
-    TS_DETECT_SEASONALITY(LIST(sales_amount ORDER BY date)) AS detected_periods
-FROM sales_raw
-GROUP BY product_id;
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 50 * SIN(2 * PI() * d / 7) + (RANDOM() * 20) AS sales_amount
+FROM generate_series(0, 364) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002')) products(product_id)
+WHERE d % 3 != 0;  -- Create gaps by skipping some days
 
--- Changepoints (regime changes)
-SELECT * FROM TS_DETECT_CHANGEPOINTS_BY('sales_raw', product_id, date, sales_amount,
-                                         {'include_probabilities': true});
+-- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
+-- Fill gaps with daily frequency (default)
+CREATE TABLE fixed AS
+SELECT * FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount, '1d');
+
+-- Create hourly data with gaps
+CREATE TABLE hourly_data AS
+SELECT 
+    series_id,
+    TIMESTAMP '2024-01-01 00:00:00' + INTERVAL (h) HOUR AS timestamp,
+    50 + 20 * SIN(2 * PI() * h / 24) + (RANDOM() * 10) AS value
+FROM generate_series(0, 167) t(h)  -- 7 days
+CROSS JOIN (VALUES (1), (2)) series(series_id)
+WHERE h % 2 != 0;  -- Create gaps
+
+-- Fill gaps with 30-minute frequency
+SELECT * FROM TS_FILL_GAPS('hourly_data', series_id, timestamp, value, '30m');
+
+-- Create weekly data
+CREATE TABLE weekly_data AS
+SELECT 
+    series_id,
+    DATE '2024-01-01' + INTERVAL (w * 7) DAY AS date,
+    200 + 50 * SIN(2 * PI() * w / 52) + (RANDOM() * 30) AS value
+FROM generate_series(0, 51) t(w)
+CROSS JOIN (VALUES (1), (2)) series(series_id)
+WHERE w % 2 != 0;  -- Create gaps
+
+-- Fill gaps with weekly frequency
+SELECT * FROM TS_FILL_GAPS('weekly_data', series_id, date, value, '1w');
+
+-- Use NULL (must cast to VARCHAR for DATE/TIMESTAMP columns)
+CREATE TABLE daily_data AS
+SELECT 
+    series_id,
+    DATE '2024-01-01' + INTERVAL (d) DAY AS date,
+    100 + (RANDOM() * 20) AS value
+FROM generate_series(0, 30) t(d)
+CROSS JOIN (VALUES (1)) series(series_id)
+WHERE d % 2 != 0;
+
+SELECT * FROM TS_FILL_GAPS('daily_data', series_id, date, value, NULL::VARCHAR);
+
+-- INTEGER columns: Use INTEGER frequency values
+-- Create integer-based time series
+CREATE TABLE int_data AS
+SELECT 
+    series_id,
+    d AS date_col,
+    100 + 10 * SIN(2 * PI() * d / 10) + (RANDOM() * 5) AS value
+FROM generate_series(1, 100) t(d)
+CROSS JOIN (VALUES (1), (2)) series(series_id)
+WHERE d % 3 != 0;  -- Create gaps
+
+-- Fill gaps with step size of 1
+SELECT * FROM TS_FILL_GAPS('int_data', series_id, date_col, value, 1);
+
+-- Fill gaps with step size of 2
+SELECT * FROM TS_FILL_GAPS('int_data', series_id, date_col, value, 2);
+
+-- Use NULL (defaults to step size 1 for INTEGER columns)
+SELECT * FROM TS_FILL_GAPS('int_data', series_id, date_col, value, NULL);
 ```
 
-### Phase 2: Prepare Your Data
+#### TS_FILL_FORWARD
 
-#### Standard Pipeline (Recommended)
+**Extend Series to Target Date**
+
+Extends series to target date/index, filling gaps with NULL using the specified frequency interval or step size.
+
+**Signature (Function Overloading):**
 
 ```sql
--- All-in-one preparation (if standard pipeline was implemented)
-CREATE TABLE sales_prepared AS
-WITH 
--- Step 1: Fill time gaps
-step1 AS (
-    SELECT * FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount)
-),
--- Step 2: Drop constant series
-step2 AS (
-    SELECT * FROM TS_DROP_CONSTANT('step1', product_id, sales_amount)
-),
--- Step 3: Drop short series
-step3 AS (
-    SELECT * FROM TS_DROP_SHORT('step2', product_id, date, 30)
-),
--- Step 4: Remove leading zeros
-step4 AS (
-    SELECT * FROM TS_DROP_LEADING_ZEROS('step3', product_id, date, sales_amount)
-),
--- Step 5: Fill remaining nulls
-step5 AS (
-    SELECT * FROM TS_FILL_NULLS_FORWARD('step4', product_id, date, sales_amount)
-)
-SELECT * FROM step5;
+-- For DATE/TIMESTAMP columns (date-based frequency)
+TS_FILL_FORWARD(
+    table_name    VARCHAR,
+    group_col     ANY,
+    date_col      DATE | TIMESTAMP,
+    value_col     DOUBLE,
+    target_date   DATE | TIMESTAMP,
+    frequency     VARCHAR
+) → TABLE
+
+-- For INTEGER columns (integer-based frequency)
+TS_FILL_FORWARD(
+    table_name    VARCHAR,
+    group_col     ANY,
+    date_col      INTEGER | BIGINT,
+    value_col     DOUBLE,
+    target_date   INTEGER | BIGINT,
+    frequency     INTEGER
+) → TABLE
 ```
 
-#### Custom Pipeline (Advanced)
+**Parameters:**
+
+- `target_date`: Target date/index to extend the series to (type must match `date_col` type)
+- `frequency`: Same as `TS_FILL_GAPS` (see above)
+
+**Type Validation:**
+
+- Same as `TS_FILL_GAPS` (see above)
+
+**Examples:**
+
+```sql
+-- Create sample sales data
+CREATE TABLE sales AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 50 * SIN(2 * PI() * d / 7) + (RANDOM() * 20) AS sales_amount
+FROM generate_series(0, 300) t(d)  -- Data until Oct 2023
+CROSS JOIN (VALUES ('P001'), ('P002')) products(product_id);
+
+-- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
+-- Create hourly data
+CREATE TABLE hourly_data AS
+SELECT 
+    series_id,
+    TIMESTAMP '2024-01-01 00:00:00' + INTERVAL (h) HOUR AS timestamp,
+    50 + 20 * SIN(2 * PI() * h / 24) + (RANDOM() * 10) AS value
+FROM generate_series(0, 100) t(h)
+CROSS JOIN (VALUES (1), (2)) series(series_id);
+
+-- Extend hourly series to target date
+SELECT * FROM TS_FILL_FORWARD('hourly_data', series_id, timestamp, value, '2024-12-31'::TIMESTAMP, '1h');
+
+-- Create monthly data
+CREATE TABLE monthly_data AS
+SELECT 
+    series_id,
+    DATE '2024-01-01' + INTERVAL (m) MONTH AS date,
+    200 + 50 * SIN(2 * PI() * m / 12) + (RANDOM() * 30) AS value
+FROM generate_series(0, 10) t(m)
+CROSS JOIN (VALUES (1), (2)) series(series_id);
+
+-- Extend monthly series to target date
+SELECT * FROM TS_FILL_FORWARD('monthly_data', series_id, date, value, '2024-12-01'::DATE, '1mo');
+
+-- Extend daily series to target date (default frequency)
+CREATE TABLE sales_extended AS
+SELECT * FROM TS_FILL_FORWARD(
+    'sales', product_id, date, sales_amount, 
+    DATE '2023-12-31', '1d'
+);
+
+-- Use NULL (must cast to VARCHAR for DATE/TIMESTAMP columns)
+CREATE TABLE daily_data AS
+SELECT 
+    series_id,
+    DATE '2024-01-01' + INTERVAL (d) DAY AS date,
+    100 + (RANDOM() * 20) AS value
+FROM generate_series(0, 30) t(d)
+CROSS JOIN (VALUES (1)) series(series_id);
+
+SELECT * FROM TS_FILL_FORWARD('daily_data', series_id, date, value, '2024-12-31'::DATE, NULL::VARCHAR);
+
+-- INTEGER columns: Use INTEGER frequency values
+-- Create integer-based time series
+CREATE TABLE int_data AS
+SELECT 
+    series_id,
+    d AS date_col,
+    100 + 10 * SIN(2 * PI() * d / 10) + (RANDOM() * 5) AS value
+FROM generate_series(1, 50) t(d)
+CROSS JOIN (VALUES (1), (2)) series(series_id);
+
+-- Extend series to index 100 with step size of 1
+SELECT * FROM TS_FILL_FORWARD('int_data', series_id, date_col, value, 100, 1);
+
+-- Extend series to index 100 with step size of 5
+SELECT * FROM TS_FILL_FORWARD('int_data', series_id, date_col, value, 100, 5);
+
+-- Use NULL (defaults to step size 1 for INTEGER columns)
+SELECT * FROM TS_FILL_FORWARD('int_data', series_id, date_col, value, 100, NULL);
+```
+
+[↑ Go to top](#eda--data-preparation---complete-workflow-guide)
+
+### Series Filtering
+
+#### TS_DROP_CONSTANT
+
+**Remove Constant Series**
+
+Removes series with constant values (no variation).
+
+**Signature:**
+
+```sql
+TS_DROP_CONSTANT(
+    table_name    VARCHAR,
+    group_col     ANY,
+    value_col     DOUBLE
+) → TABLE
+```
+
+> [!WARNING]
+> This function may drop intermittent demand series (series with many zeros) as long as gaps have not been filled yet (e.g., with zeros via gap filling functions). If you need to preserve intermittent series, ensure gaps are being filled.
+
+**Example:**
+
+```sql
+-- Create sample sales data with some constant series
+CREATE TABLE sales AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    CASE 
+        WHEN product_id = 'P001' THEN 100.0  -- Constant series
+        WHEN product_id = 'P002' THEN 50.0 + 10 * SIN(2 * PI() * d / 7)  -- Variable series
+        ELSE 75.0  -- Another constant series
+    END AS sales_amount
+FROM generate_series(0, 90) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
+
+-- Generate stats to detect constant series
+CREATE TABLE sales_stats AS
+SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+
+-- Detect constant series
+SELECT * FROM sales_stats WHERE is_constant = true;
+
+-- Remove constant series
+CREATE TABLE sales_no_constant AS
+SELECT * FROM TS_DROP_CONSTANT('sales', product_id, sales_amount);
+
+-- Verify result
+SELECT DISTINCT product_id FROM sales_no_constant;
+```
+
+#### TS_DROP_SHORT
+
+**Remove Short Series**
+
+Removes series below minimum length.
+
+**Signature:**
+
+```sql
+TS_DROP_SHORT(
+    table_name    VARCHAR,
+    group_col     ANY,
+    date_col      DATE | TIMESTAMP | INTEGER,
+    min_length    INTEGER
+) → TABLE
+```
+
+> [!WARNING]
+> This function may drop intermittent demand series (series with many zeros) as long as gaps have not been filled yet (e.g., with zeros via gap filling functions). If you need to preserve intermittent series, ensure gaps are being filled.
+
+**Example:**
+
+```sql
+-- Create sample sales data with some short series
+CREATE TABLE sales AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 50 * SIN(2 * PI() * d / 7) + (RANDOM() * 20) AS sales_amount
+FROM generate_series(0, 90) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id)
+WHERE 
+    (product_id = 'P001' AND d <= 10) OR  -- Short series (11 days)
+    (product_id = 'P002' AND d <= 20) OR  -- Short series (21 days)
+    (product_id = 'P003' AND d <= 90);    -- Long series (91 days)
+
+-- Remove series with less than 30 observations
+CREATE TABLE sales_long_enough AS
+SELECT * FROM TS_DROP_SHORT('sales', product_id, 30);
+
+-- Verify result
+SELECT DISTINCT product_id FROM sales_long_enough;
+```
+
+[↑ Go to top](#eda--data-preparation---complete-workflow-guide)
+
+### Edge Cleaning
+
+#### TS_DROP_LEADING_ZEROS
+
+**Remove Leading Zeros**
+
+Removes leading zeros from time series.
+
+**Signature:**
+
+```sql
+TS_DROP_LEADING_ZEROS(
+    table_name    VARCHAR,
+    group_col     ANY,
+    date_col      DATE | TIMESTAMP | INTEGER,
+    value_col     DOUBLE
+) → TABLE
+```
+
+> [!WARNING]
+> Results may differ if `TS_FILL_GAPS` or `TS_FILL_FORWARD` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
+
+**Example:**
+
+```sql
+-- Create sample sales data with leading zeros
+CREATE TABLE sales AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    CASE 
+        WHEN d < 10 THEN 0.0  -- Leading zeros
+        ELSE 100 + 50 * SIN(2 * PI() * (d - 10) / 7) + (RANDOM() * 20)
+    END AS sales_amount
+FROM generate_series(0, 90) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002')) products(product_id);
+
+-- Remove leading zeros
+CREATE TABLE sales_no_leading_zeros AS
+SELECT * FROM TS_DROP_LEADING_ZEROS('sales', product_id, date, sales_amount);
+
+-- Verify result (should start from day 10)
+SELECT 
+    product_id,
+    MIN(date) AS first_date,
+    COUNT(*) AS remaining_days
+FROM sales_no_leading_zeros
+GROUP BY product_id;
+```
+
+#### TS_DROP_TRAILING_ZEROS
+
+**Remove Trailing Zeros**
+
+Removes trailing zeros from time series.
+
+**Signature:**
+
+```sql
+TS_DROP_TRAILING_ZEROS(
+    table_name    VARCHAR,
+    group_col     ANY,
+    date_col      DATE | TIMESTAMP | INTEGER,
+    value_col     DOUBLE
+) → TABLE
+```
+
+> [!WARNING]
+> Results may differ if `TS_FILL_GAPS` or `TS_FILL_FORWARD` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
+
+**Example:**
+
+```sql
+-- Create sample sales data with trailing zeros
+CREATE TABLE sales AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    CASE 
+        WHEN d > 80 THEN 0.0  -- Trailing zeros
+        ELSE 100 + 50 * SIN(2 * PI() * d / 7) + (RANDOM() * 20)
+    END AS sales_amount
+FROM generate_series(0, 90) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002')) products(product_id);
+
+-- Remove trailing zeros
+CREATE TABLE sales_no_trailing_zeros AS
+SELECT * FROM TS_DROP_TRAILING_ZEROS('sales', product_id, date, sales_amount);
+
+-- Verify result (should end at day 80)
+SELECT 
+    product_id,
+    MAX(date) AS last_date,
+    COUNT(*) AS remaining_days
+FROM sales_no_trailing_zeros
+GROUP BY product_id;
+```
+
+#### TS_DROP_EDGE_ZEROS
+
+**Remove Both Leading and Trailing Zeros**
+
+Removes both leading and trailing zeros from time series.
+
+**Signature:**
+
+```sql
+TS_DROP_EDGE_ZEROS(
+    table_name    VARCHAR,
+    group_col     ANY,
+    date_col      DATE | TIMESTAMP | INTEGER,
+    value_col     DOUBLE
+) → TABLE
+```
+
+> [!WARNING]
+> Results may differ if `TS_FILL_GAPS` or `TS_FILL_FORWARD` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
+
+**Example:**
+
+```sql
+-- Detect edge zeros
+WITH zero_analysis AS (
+    SELECT 
+        product_id,
+        date,
+        sales_amount,
+        ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY date) AS rn,
+        SUM(CASE WHEN sales_amount != 0 THEN 1 ELSE 0 END) 
+            OVER (PARTITION BY product_id ORDER BY date) AS nonzero_count
+    FROM sales
+)
+SELECT 
+    product_id,
+    MIN(CASE WHEN sales_amount != 0 THEN date END) AS first_sale,
+    MAX(CASE WHEN sales_amount != 0 THEN date END) AS last_sale,
+    COUNT(*) AS total_days,
+    SUM(CASE WHEN sales_amount = 0 THEN 1 ELSE 0 END) AS zero_days
+FROM zero_analysis
+GROUP BY product_id
+HAVING zero_days > 0;
+
+-- Fix: Remove edge zeros
+CREATE TABLE sales_no_edge_zeros AS
+SELECT * FROM TS_DROP_EDGE_ZEROS('sales', product_id, date, sales_amount);
+```
+
+[↑ Go to top](#eda--data-preparation---complete-workflow-guide)
+
+### Missing Value Imputation
+
+#### TS_FILL_NULLS_CONST
+
+**Fill with Constant Value**
+
+Fills NULL values with a specified constant value.
+
+**Signature:**
+
+```sql
+TS_FILL_NULLS_CONST(
+    table_name    VARCHAR,
+    group_col     ANY,
+    date_col      DATE | TIMESTAMP | INTEGER,
+    value_col     DOUBLE,
+    fill_value    DOUBLE
+) → TABLE
+```
+
+**Example:**
+
+```sql
+-- Create sample sales data with NULL values
+CREATE TABLE sales AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    CASE 
+        WHEN RANDOM() < 0.15 THEN NULL  -- 15% missing
+        ELSE 100 + 50 * SIN(2 * PI() * d / 7) + (RANDOM() * 20)
+    END AS sales_amount
+FROM generate_series(0, 90) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002')) products(product_id);
+
+-- Fill NULLs with 0
+CREATE TABLE sales_filled_zero AS
+SELECT 
+    product_id,
+    date,
+    value_col AS sales_amount
+FROM TS_FILL_NULLS_CONST('sales', product_id, date, sales_amount, 0.0);
+
+-- Fill NULLs with a specific value (e.g., -1 for missing data indicator)
+CREATE TABLE sales_filled_marker AS
+SELECT 
+    product_id,
+    date,
+    value_col AS sales_amount
+FROM TS_FILL_NULLS_CONST('sales', product_id, date, sales_amount, -1.0);
+
+-- Verify results
+SELECT 
+    product_id,
+    COUNT(*) AS total_rows,
+    COUNT(sales_amount) AS non_null_rows,
+    SUM(CASE WHEN sales_amount = 0.0 THEN 1 ELSE 0 END) AS zero_count
+FROM sales_filled_zero
+GROUP BY product_id;
+```
+
+#### TS_FILL_NULLS_FORWARD
+
+**Forward Fill (Last Observation Carried Forward)**
+
+Uses `LAST_VALUE(... IGNORE NULLS)` window function to forward fill NULL values.
+
+**Signature:**
+
+```sql
+TS_FILL_NULLS_FORWARD(
+    table_name    VARCHAR,
+    group_col     ANY,
+    date_col      DATE | TIMESTAMP | INTEGER,
+    value_col     DOUBLE
+) → TABLE
+```
+
+**Example:**
+
+```sql
+-- Forward fill (use last known value)
+CREATE TABLE sales_forward_filled AS
+SELECT * FROM TS_FILL_NULLS_FORWARD('sales', product_id, date, sales_amount);
+```
+
+**Alternative Example:**
+
+```sql
+-- Create sample sales data with NULL values
+CREATE TABLE sales AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    CASE 
+        WHEN RANDOM() < 0.15 THEN NULL  -- 15% missing
+        ELSE 100 + 50 * SIN(2 * PI() * d / 7) + (RANDOM() * 20)
+    END AS sales_amount
+FROM generate_series(0, 90) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002')) products(product_id);
+
+-- Generate stats for reference
+CREATE TABLE sales_stats AS
+SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+
+-- Option A: Forward fill (use last known value)
+SELECT * FROM TS_FILL_NULLS_FORWARD('sales', product_id, date, sales_amount);
+
+-- Option B: Mean imputation
+SELECT * FROM TS_FILL_NULLS_MEAN('sales', product_id, date, sales_amount);
+
+-- Option C: Drop series with too many nulls
+WITH clean AS (
+    SELECT * FROM sales_stats WHERE n_null < length * 0.05  -- < 5% missing
+)
+SELECT s.*
+FROM sales s
+WHERE s.product_id IN (SELECT series_id FROM clean);
+```
+
+#### TS_FILL_NULLS_BACKWARD
+
+**Backward Fill**
+
+Uses `FIRST_VALUE(... IGNORE NULLS)` window function to backward fill NULL values.
+
+**Signature:**
+
+```sql
+TS_FILL_NULLS_BACKWARD(
+    table_name    VARCHAR,
+    group_col     ANY,
+    date_col      DATE | TIMESTAMP | INTEGER,
+    value_col     DOUBLE
+) → TABLE
+```
+
+**Example:**
+
+```sql
+-- Create sample sales data with NULL values
+CREATE TABLE sales AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    CASE 
+        WHEN RANDOM() < 0.15 THEN NULL  -- 15% missing
+        ELSE 100 + 50 * SIN(2 * PI() * d / 7) + (RANDOM() * 20)
+    END AS sales_amount
+FROM generate_series(0, 90) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002')) products(product_id);
+
+-- Backward fill (use next known value)
+CREATE TABLE sales_backward_filled AS
+SELECT 
+    product_id,
+    date,
+    value_col AS sales_amount
+FROM TS_FILL_NULLS_BACKWARD('sales', product_id, date, sales_amount);
+
+-- Verify results (should have no NULLs)
+SELECT 
+    product_id,
+    COUNT(*) AS total_rows,
+    COUNT(sales_amount) AS non_null_rows
+FROM sales_backward_filled
+GROUP BY product_id;
+```
+
+#### TS_FILL_NULLS_MEAN
+
+**Fill with Series Mean**
+
+Computes mean per series and fills NULLs with that mean value.
+
+**Signature:**
+
+```sql
+TS_FILL_NULLS_MEAN(
+    table_name    VARCHAR,
+    group_col     ANY,
+    date_col      DATE | TIMESTAMP | INTEGER,
+    value_col     DOUBLE
+) → TABLE
+```
+
+**Example:**
+
+```sql
+-- Fill NULLs with series mean
+CREATE TABLE sales_mean_filled AS
+SELECT * FROM TS_FILL_NULLS_MEAN('sales', product_id, date, sales_amount);
+```
+
+**Alternative: Drop series with too many nulls instead**
+
+```sql
+WITH clean AS (
+    SELECT * FROM sales_stats WHERE n_null < length * 0.05  -- < 5% missing
+)
+SELECT s.*
+FROM sales s
+WHERE s.product_id IN (SELECT series_id FROM clean);
+```
+
+[↑ Go to top](#eda--data-preparation---complete-workflow-guide)
+
+---
+
+## Complete Workflow Examples
+
+### Standard Pipeline (Recommended)
+
+```sql
+-- Create sample raw sales data
+CREATE TABLE sales_raw AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    CASE 
+        WHEN RANDOM() < 0.05 THEN NULL
+        ELSE 100 + 50 * SIN(2 * PI() * d / 7) + (RANDOM() * 20)
+    END AS sales_amount
+FROM generate_series(0, 89) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
+
+-- All-in-one preparation (if standard pipeline was implemented)
+-- Step 1: Fill time gaps
+CREATE TEMP TABLE step1 AS
+SELECT 
+    group_col AS product_id,
+    date_col AS date,
+    value_col AS sales_amount
+FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount, '1d');
+
+-- Step 2: Drop constant series
+CREATE TEMP TABLE step2 AS
+SELECT * FROM TS_DROP_CONSTANT('step1', product_id, sales_amount);
+
+-- Step 3: Drop short series
+CREATE TEMP TABLE step3 AS
+SELECT * FROM TS_DROP_SHORT('step2', product_id, 30);
+
+-- Step 4: Remove leading zeros
+CREATE TEMP TABLE step4 AS
+SELECT * FROM TS_DROP_LEADING_ZEROS('step3', product_id, date, sales_amount);
+
+-- Step 5: Fill remaining nulls
+CREATE TABLE sales_prepared AS
+SELECT * FROM TS_FILL_NULLS_FORWARD('step4', product_id, date, sales_amount);
+```
+
+### Custom Pipeline (Advanced)
 
 Tailor to your specific needs:
 
 ```sql
-CREATE TABLE sales_custom_prep AS
-WITH 
+-- Create sample raw sales data
+CREATE TABLE sales_raw AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    CASE 
+        WHEN RANDOM() < 0.05 THEN NULL
+        ELSE 100 + 50 * SIN(2 * PI() * d / 7) + (RANDOM() * 20)
+    END AS sales_amount
+FROM generate_series(0, 89) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
+
 -- Fill gaps first
-filled AS (
-    SELECT * FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount)
-),
--- Drop problematic series
-filtered AS (
-    SELECT f.*
-    FROM filled f
-    WHERE f.product_id NOT IN (
-    )
-),
+CREATE TEMP TABLE filled AS
+SELECT 
+    group_col AS product_id,
+    date_col AS date,
+    value_col AS sales_amount
+FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount, '1d');
+
 -- Remove edge zeros
-no_edges AS (
-    SELECT * FROM TS_DROP_EDGE_ZEROS('filtered', product_id, date, sales_amount)
-),
+CREATE TEMP TABLE no_edges AS
+SELECT * FROM TS_DROP_EDGE_ZEROS('filled', product_id, date, sales_amount);
+
 -- Fill nulls with interpolation (more sophisticated)
-interpolated AS (
+CREATE TABLE sales_custom_prep AS
+SELECT 
+    product_id,
+    date,
+    -- Linear interpolation
+    COALESCE(sales_amount,
+        AVG(sales_amount) OVER (
+            PARTITION BY product_id 
+            ORDER BY date 
+            ROWS BETWEEN 3 PRECEDING AND 3 FOLLOWING
+        )
+    ) AS sales_amount
+FROM no_edges;
+```
+
+### Automated Data Prep Pipeline
+
+```sql
+-- Create sample stats table
+CREATE TABLE sales AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + product_id * 20 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales_amount
+FROM generate_series(0, 89) t(d)
+CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
+
+CREATE TABLE stats AS
+SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+
+-- Create sample raw sales data
+CREATE TABLE sales_raw AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    CASE 
+        WHEN RANDOM() < 0.05 THEN NULL
+        ELSE 100 + 50 * SIN(2 * PI() * d / 7) + (RANDOM() * 20)
+    END AS sales_amount
+FROM generate_series(0, 89) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
+
+-- Create a reusable preparation view
+CREATE VIEW sales_autoprepared AS
+WITH stats AS (
+    SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount, '1d')
+),
+quality_series AS (
+    SELECT series_id FROM stats WHERE length >= 30  -- Keep series with at least 30 observations
+),
+filled_temp AS (
+    SELECT 
+        group_col,
+        date_col,
+        value_col
+    FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount, '1d')
+),
+filled_temp2 AS (
+    SELECT f.*
+    FROM filled_temp f
+    WHERE f.group_col::VARCHAR IN (SELECT series_id::VARCHAR FROM quality_series)
+),
+no_constant_temp AS (
+    SELECT 
+        group_col,
+        date_col,
+        value_col
+    FROM TS_DROP_CONSTANT('filled_temp2', group_col, value_col)
+),
+no_constant AS (
+    SELECT 
+        group_col AS product_id,
+        date_col AS date,
+        value_col AS sales_amount
+    FROM no_constant_temp
+),
+complete_temp AS (
+    SELECT * FROM TS_FILL_NULLS_FORWARD('no_constant', product_id, date, sales_amount)
+),
+complete AS (
     SELECT 
         product_id,
         date,
-        -- Linear interpolation
-        COALESCE(sales_amount,
-            AVG(sales_amount) OVER (
-                PARTITION BY product_id 
-                ORDER BY date 
-                ROWS BETWEEN 3 PRECEDING AND 3 FOLLOWING
-            )
-        ) AS sales_amount
-    FROM no_edges
+        value_col AS sales_amount
+    FROM complete_temp
 )
-SELECT * FROM interpolated;
+SELECT * FROM complete;
+
+-- Use in forecasting
+SELECT * FROM TS_FORECAST_BY('sales_autoprepared', product_id, date, sales_amount,
+                             'AutoETS', 28, MAP{'seasonal_period': 7});
 ```
 
-### Phase 3: Validate Preparation
+### Validate Preparation
 
-#### Compare Before/After
+Compare before/after:
 
 ```sql
+-- Create sample raw data
+CREATE TABLE sales_raw AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    CASE 
+        WHEN RANDOM() < 0.05 THEN NULL
+        ELSE 100 + 50 * SIN(2 * PI() * d / 7) + (RANDOM() * 20)
+    END AS sales_amount
+FROM generate_series(0, 89) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
+
+-- Create stats for raw data
+CREATE TABLE sales_stats AS
+SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount, '1d');
+
+-- Prepare data (fill gaps, drop constants, etc.)
+CREATE TABLE sales_prepared AS
+SELECT 
+    group_col AS product_id,
+    date_col AS date,
+    value_col AS sales_amount
+FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount, '1d');
+
 -- Generate stats for prepared data
 CREATE TABLE prepared_stats AS
-SELECT * FROM TS_STATS('sales_prepared', product_id, date, sales_amount);
+SELECT * FROM TS_STATS('sales_prepared', product_id, date, sales_amount, '1d');
 
 -- Compare quality
 SELECT 
     'Raw data' AS stage,
     COUNT(*) AS num_series,
-    ROUND(AVG(quality_score), 4) AS avg_quality,
+    ROUND(AVG(CAST(length AS DOUBLE)), 2) AS avg_length,
     SUM(CASE WHEN n_null > 0 THEN 1 ELSE 0 END) AS series_with_nulls,
-    SUM(CASE WHEN n_gaps > 0 THEN 1 ELSE 0 END) AS series_with_gaps,
+    SUM(CASE WHEN expected_length > length THEN 1 ELSE 0 END) AS series_with_gaps,
     SUM(CASE WHEN is_constant THEN 1 ELSE 0 END) AS constant_series
 FROM sales_stats
 UNION ALL
 SELECT 
     'Prepared',
     COUNT(*),
-    ROUND(AVG(quality_score), 4),
+    ROUND(AVG(CAST(length AS DOUBLE)), 2),
     SUM(CASE WHEN n_null > 0 THEN 1 ELSE 0 END),
-    SUM(CASE WHEN n_gaps > 0 THEN 1 ELSE 0 END),
+    SUM(CASE WHEN expected_length > length THEN 1 ELSE 0 END),
     SUM(CASE WHEN is_constant THEN 1 ELSE 0 END)
 FROM prepared_stats;
 ```
@@ -235,32 +1267,72 @@ FROM prepared_stats;
 - Series with gaps: 150 → 0
 - Constant series: 23 → 0
 
+[↑ Go to top](#eda--data-preparation---complete-workflow-guide)
+
+---
+
 ## Common Data Issues & Solutions
 
 ### Issue 1: Missing Time Points
 
 **Problem**: Dates are not continuous
 
+**Solution**: Use `TS_FILL_GAPS` to fill missing timestamps
+
 ```sql
--- Detect
-SELECT series_id, n_gaps, quality_score
+-- Create sample sales data with gaps
+CREATE TABLE sales_raw AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 50 * SIN(2 * PI() * d / 7) + (RANDOM() * 20) AS sales_amount
+FROM generate_series(0, 364) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id)
+WHERE d % 3 != 0;  -- Create gaps by skipping some days
+
+-- Generate statistics
+CREATE TABLE sales_stats AS
+SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount, '1d');
+
+-- Detect gaps (check expected_length vs length)
+SELECT 
+    series_id, 
+    expected_length - length AS n_gaps,
+    length,
+    expected_length
 FROM sales_stats
-WHERE n_gaps > 0
-ORDER BY n_gaps DESC
+WHERE expected_length > length
+ORDER BY (expected_length - length) DESC
 LIMIT 10;
 
--- Fix
+-- Fix: Fill gaps
 CREATE TABLE fixed AS
-SELECT * FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount);
+SELECT * FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount, '1d');
 ```
 
 ### Issue 2: Missing Values (NULLs)
 
 **Problem**: Some values are NULL
 
-**Solutions**:
+**Solutions**: Multiple imputation options available
 
 ```sql
+-- Create sample sales data with NULL values
+CREATE TABLE sales AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    CASE 
+        WHEN RANDOM() < 0.15 THEN NULL  -- 15% missing
+        ELSE 100 + 50 * SIN(2 * PI() * d / 7) + (RANDOM() * 20)
+    END AS sales_amount
+FROM generate_series(0, 90) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002')) products(product_id);
+
+-- Generate stats for reference
+CREATE TABLE sales_stats AS
+SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+
 -- Option A: Forward fill (use last known value)
 SELECT * FROM TS_FILL_NULLS_FORWARD('sales', product_id, date, sales_amount);
 
@@ -280,11 +1352,30 @@ WHERE s.product_id IN (SELECT series_id FROM clean);
 
 **Problem**: All values are the same
 
+**Solution**: Remove constant series with `TS_DROP_CONSTANT`
+
 ```sql
--- Detect
+-- Create sample sales data with constant series
+CREATE TABLE sales AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    CASE 
+        WHEN product_id = 'P001' THEN 100.0  -- Constant series
+        WHEN product_id = 'P002' THEN 50.0 + 10 * SIN(2 * PI() * d / 7)  -- Variable series
+        ELSE 75.0  -- Another constant series
+    END AS sales_amount
+FROM generate_series(0, 90) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
+
+-- Generate statistics
+CREATE TABLE sales_stats AS
+SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+
+-- Detect constant series
 SELECT * FROM sales_stats WHERE is_constant = true;
 
--- Fix
+-- Fix: Remove constant series
 SELECT * FROM TS_DROP_CONSTANT('sales', product_id, sales_amount);
 ```
 
@@ -292,32 +1383,54 @@ SELECT * FROM TS_DROP_CONSTANT('sales', product_id, sales_amount);
 
 **Problem**: Not enough historical data
 
+**Solution**: Filter short series with `TS_DROP_SHORT`
+
 ```sql
--- Detect
+-- Create sample sales data with short series
+CREATE TABLE sales AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 50 * SIN(2 * PI() * d / 7) + (RANDOM() * 20) AS sales_amount
+FROM generate_series(0, 90) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id)
+WHERE 
+    (product_id = 'P001' AND d <= 10) OR  -- Short series (11 days)
+    (product_id = 'P002' AND d <= 20) OR  -- Short series (21 days)
+    (product_id = 'P003' AND d <= 90);    -- Long series (91 days)
+
+-- Generate statistics
+CREATE TABLE sales_stats AS
+SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+
+-- Detect short series
 SELECT * FROM sales_stats WHERE length < 30;
 
--- Fix: Drop or aggregate
-SELECT * FROM TS_DROP_SHORT('sales', product_id, date, 30);
-
--- Or: Aggregate similar products
-WITH aggregated AS (
-    SELECT 
-        category AS product_id,  -- Aggregate by category
-        date,
-        SUM(sales_amount) AS sales_amount
-    FROM sales
-    JOIN product_catalog USING (product_id)
-    GROUP BY category, date
-)
-SELECT * FROM aggregated;
+-- Fix: Drop short series
+SELECT * FROM TS_DROP_SHORT('sales', product_id, 30);
 ```
 
 ### Issue 5: Leading/Trailing Zeros
 
 **Problem**: Product not yet launched or discontinued
 
+**Solution**: Remove edge zeros with `TS_DROP_EDGE_ZEROS`
+
 ```sql
--- Detect
+-- Create sample sales data with edge zeros
+CREATE TABLE sales AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    CASE 
+        WHEN d < 10 THEN 0.0  -- Leading zeros
+        WHEN d > 80 THEN 0.0  -- Trailing zeros
+        ELSE 100 + 50 * SIN(2 * PI() * (d - 10) / 7) + (RANDOM() * 20)
+    END AS sales_amount
+FROM generate_series(0, 90) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002')) products(product_id);
+
+-- Detect edge zeros
 WITH zero_analysis AS (
     SELECT 
         product_id,
@@ -347,6 +1460,16 @@ SELECT * FROM TS_DROP_EDGE_ZEROS('sales', product_id, date, sales_amount);
 **Problem**: Extreme values distorting the pattern
 
 ```sql
+-- Create sample sales data
+CREATE TABLE sales AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + product_id * 20 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 20) + 
+    CASE WHEN RANDOM() < 0.05 THEN 200 ELSE 0 END AS sales_amount  -- Some outliers
+FROM generate_series(0, 89) t(d)
+CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
+
 -- Detect outliers using IQR method
 WITH series_bounds AS (
     SELECT 
@@ -405,6 +1528,8 @@ JOIN series_bounds b ON s.product_id = b.product_id;
 
 **Problem**: Series end on different dates
 
+**Solution**: Use `TS_FILL_FORWARD` to align end dates
+
 ```sql
 -- Detect
 WITH end_dates AS (
@@ -422,42 +1547,14 @@ SELECT * FROM TS_FILL_FORWARD(
     product_id,
     date,
     sales_amount,
-    (SELECT MAX(date) FROM sales)  -- Latest date
+    (SELECT MAX(date) FROM sales),  -- Latest date
+    '1d'
 );
 ```
 
-## Advanced Preparation Techniques
+[↑ Go to top](#eda--data-preparation---complete-workflow-guide)
 
-## Data Quality Metrics
-
-### Custom Quality Metrics
-
-```sql
--- Define your own quality criteria
-WITH custom_quality AS (
-    SELECT 
-        series_id,
-        quality_score,  -- Built-in
-        -- Custom: Penalize intermittency
-        CASE 
-            WHEN intermittency > 0.5 THEN quality_score * 0.7
-            ELSE quality_score
-        END AS adjusted_quality,
-        -- Custom: Require minimum length
-        CASE 
-            WHEN length < 60 THEN 0.0
-            ELSE quality_score
-        END AS length_adjusted_quality
-    FROM sales_stats
-)
-SELECT 
-    series_id,
-    ROUND(quality_score, 4) AS original_quality,
-    ROUND(adjusted_quality, 4) AS intermittency_adjusted,
-    ROUND(length_adjusted_quality, 4) AS length_adjusted
-FROM custom_quality
-ORDER BY original_quality DESC;
-```
+---
 
 ## Preparation Checklist
 
@@ -480,46 +1577,37 @@ ORDER BY original_quality DESC;
 Define minimum standards:
 
 ```sql
+-- Create sample sales and stats
+CREATE TABLE sales AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + product_id * 20 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales_amount
+FROM generate_series(0, 89) t(d)
+CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
+
+CREATE TABLE sales_stats AS
+SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+
+-- Create prepared sales data
+CREATE TABLE sales_prepared AS
+SELECT 
+    group_col AS product_id,
+    date_col AS date,
+    value_col AS sales_amount
+FROM TS_FILL_GAPS('sales', product_id, date, sales_amount, '1d');
+
 -- Only forecast high-quality series
 WITH quality_check AS (
     SELECT series_id
     FROM sales_stats
-    WHERE quality_score >= 0.7        -- High quality
-      AND length >= 60                -- Sufficient history
+    WHERE length >= 60                -- Sufficient history
       AND n_unique_values > 5         -- Not near-constant
-      AND intermittency < 0.30        -- Not too sparse
+      AND is_constant = false         -- Not constant
 )
 SELECT s.*
 FROM sales_prepared s
-WHERE s.product_id IN (SELECT series_id FROM quality_check);
+WHERE s.product_id::VARCHAR IN (SELECT series_id::VARCHAR FROM quality_check);
 ```
 
-## Automation
-
-### Automated Data Prep Pipeline
-
-```sql
--- Create a reusable preparation view
-CREATE VIEW sales_autoprepared AS
-WITH stats AS (
-    SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount)
-),
-quality_series AS (
-    SELECT series_id FROM stats WHERE quality_score >= 0.6
-),
-filled AS (
-    SELECT * FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount)
-    WHERE product_id IN (SELECT series_id FROM quality_series)
-),
-no_constant AS (
-    SELECT * FROM TS_DROP_CONSTANT('filled', product_id, sales_amount)
-),
-complete AS (
-    SELECT * FROM TS_FILL_NULLS_FORWARD('no_constant', product_id, date, sales_amount)
-)
-SELECT * FROM complete;
-
--- Use in forecasting
-SELECT * FROM TS_FORECAST_BY('sales_autoprepared', product_id, date, sales_amount,
-                             'AutoETS', 28, {'seasonal_period': 7});
-```
+[↑ Go to top](#eda--data-preparation---complete-workflow-guide)

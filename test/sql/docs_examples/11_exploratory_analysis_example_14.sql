@@ -1,3 +1,13 @@
+-- Create sample sales data
+CREATE TABLE sales AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + product_id * 20 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 20) + 
+    CASE WHEN RANDOM() < 0.05 THEN 200 ELSE 0 END AS sales_amount  -- Some outliers
+FROM generate_series(0, 89) t(d)
+CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
+
 -- Detect outliers using IQR method
 WITH series_bounds AS (
     SELECT 

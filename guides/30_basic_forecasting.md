@@ -26,9 +26,21 @@ Raw Data → Data Preparation → Forecasting → Evaluation → Deployment
 #### Check Data Quality
 
 ```sql
+-- Create sample raw sales data
+CREATE TABLE sales_raw AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    CASE 
+        WHEN RANDOM() < 0.05 THEN NULL
+        ELSE 100 + 50 * SIN(2 * PI() * d / 7) + (RANDOM() * 20)
+    END AS sales_amount
+FROM generate_series(0, 89) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
+
 -- Generate statistics
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales_raw', product_id, date, amount);
+SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount, '1d');
 
 -- View summary
 SELECT * FROM TS_STATS_SUMMARY('sales_stats');
@@ -40,26 +52,55 @@ SELECT * FROM TS_QUALITY_REPORT('sales_stats', 30);
 #### Handle Common Issues
 
 ```sql
+-- Create sample raw sales data
+CREATE TABLE sales_raw AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    CASE 
+        WHEN RANDOM() < 0.05 THEN NULL
+        ELSE 100 + 50 * SIN(2 * PI() * d / 7) + (RANDOM() * 20)
+    END AS sales_amount
+FROM generate_series(0, 89) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
+
 -- Fill time gaps
 CREATE TABLE sales_filled AS
-SELECT * FROM TS_FILL_GAPS('sales_raw', product_id, date, amount);
+SELECT 
+    group_col AS product_id,
+    date_col AS date,
+    value_col AS sales_amount
+FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount, '1d');
 
 -- Remove constant series
 CREATE TABLE sales_clean AS
-SELECT * FROM TS_DROP_CONSTANT('sales_filled', product_id, amount);
+SELECT * FROM TS_DROP_CONSTANT('sales_filled', product_id, sales_amount);
 
 -- Fill missing values
 CREATE TABLE sales_complete AS
-SELECT * FROM TS_FILL_NULLS_FORWARD('sales_clean', product_id, date, amount);
+SELECT 
+    product_id,
+    date,
+    value_col AS sales_amount
+FROM TS_FILL_NULLS_FORWARD('sales_clean', product_id, date, sales_amount);
 ```
 
 ### 2. Detect Seasonality
 
 ```sql
+-- Create sample complete sales data
+CREATE TABLE sales_complete AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + product_id * 20 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales_amount
+FROM generate_series(0, 89) t(d)
+CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
+
 -- Automatically detect seasonal periods
 SELECT 
     product_id,
-    TS_DETECT_SEASONALITY(LIST(amount ORDER BY date)) AS detected_periods
+    TS_DETECT_SEASONALITY(LIST(sales_amount ORDER BY date)) AS detected_periods
 FROM sales_complete
 GROUP BY product_id;
 
@@ -74,27 +115,43 @@ GROUP BY product_id;
 #### Single Series
 
 ```sql
+-- Create sample sales data
+CREATE TABLE sales_complete AS
+SELECT 
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales_amount
+FROM generate_series(0, 89) t(d);
+
 SELECT * FROM TS_FORECAST(
     'sales_complete',
     date,
-    amount,
+    sales_amount,
     'AutoETS',  -- Automatic model selection
     28,         -- 28 days ahead
-    {'seasonal_period': 7}
+    MAP{'seasonal_period': 7}
 );
 ```
 
 #### Multiple Series
 
 ```sql
+-- Create sample multi-product sales data
+CREATE TABLE sales_complete AS
+SELECT 
+    product_id,
+    DATE '2023-01-01' + INTERVAL (d) DAY AS date,
+    100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales_amount
+FROM generate_series(0, 89) t(d)
+CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
+
 SELECT * FROM TS_FORECAST_BY(
     'sales_complete',
     product_id,     -- Parallel forecasting per product
     date,
-    amount,
+    sales_amount,
     'AutoETS',
     28,
-    {'seasonal_period': 7, 'confidence_level': 0.95}
+    MAP{'seasonal_period': 7, 'confidence_level': 0.95}
 );
 ```
 
@@ -103,20 +160,41 @@ SELECT * FROM TS_FORECAST_BY(
 #### Accuracy Metrics
 
 ```sql
+-- Create sample forecasts data
+CREATE TABLE forecasts AS
+SELECT 
+    product_id,
+    forecast_step,
+    DATE '2024-01-01' + INTERVAL (forecast_step) DAY AS date,
+    100.0 + forecast_step * 2.0 AS point_forecast,
+    90.0 + forecast_step * 1.5 AS lower,
+    110.0 + forecast_step * 2.5 AS upper
+FROM generate_series(1, 28) t(forecast_step)
+CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
+
+-- Create actuals table
+CREATE TABLE sales_actuals AS
+SELECT 
+    product_id,
+    DATE '2024-01-01' + INTERVAL (forecast_step) DAY AS date,
+    100.0 + forecast_step * 2.0 + (RANDOM() * 5) AS actual_sales
+FROM generate_series(1, 28) t(forecast_step)
+CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
+
 -- Assuming you have actual values for the forecast period
 WITH actuals AS (
     SELECT product_id, date, actual_sales
     FROM sales_actuals
 ),
 forecasts AS (
-    SELECT product_id, date_col AS date, point_forecast
-    FROM ts_forecast_result
+    SELECT product_id, date AS date, point_forecast
+    FROM forecasts
 )
 SELECT 
     f.product_id,
-    ROUND(TS_MAE(LIST(a.actual_sales), LIST(f.point_forecast)), 2) AS mae,
-    ROUND(TS_RMSE(LIST(a.actual_sales), LIST(f.point_forecast)), 2) AS rmse,
-    ROUND(TS_MAPE(LIST(a.actual_sales), LIST(f.point_forecast)), 2) AS mape
+    ROUND(TS_MAE(LIST(a.actual_sales ORDER BY a.date), LIST(f.point_forecast ORDER BY f.date)), 2) AS mae,
+    ROUND(TS_RMSE(LIST(a.actual_sales ORDER BY a.date), LIST(f.point_forecast ORDER BY f.date)), 2) AS rmse,
+    ROUND(TS_MAPE(LIST(a.actual_sales ORDER BY a.date), LIST(f.point_forecast ORDER BY f.date)), 2) AS mape
 FROM forecasts f
 JOIN actuals a ON f.product_id = a.product_id AND f.date = a.date
 GROUP BY f.product_id;
@@ -125,12 +203,27 @@ GROUP BY f.product_id;
 #### Interval Coverage
 
 ```sql
+-- Create sample forecast results
+CREATE TABLE results AS
+SELECT 
+    1 AS forecast_step,
+    100.0 AS actual,
+    102.5 AS forecast,
+    95.0 AS lower,
+    110.0 AS upper
+UNION ALL
+SELECT 2, 105.0, 104.0, 96.0, 112.0
+UNION ALL
+SELECT 3, 103.0, 105.5, 97.0, 114.0
+UNION ALL
+SELECT 4, 108.0, 107.0, 98.0, 116.0
+UNION ALL
+SELECT 5, 106.0, 108.5, 99.0, 118.0;
+
 -- Check if 95% intervals actually cover 95% of actuals
 SELECT 
-    product_id,
-    ROUND(TS_COVERAGE(LIST(actual), LIST(lower), LIST(upper)) * 100, 1) AS coverage_pct
-FROM results
-GROUP BY product_id;
+    ROUND(TS_COVERAGE(LIST(actual ORDER BY forecast_step), LIST(lower ORDER BY forecast_step), LIST(upper ORDER BY forecast_step)) * 100, 1) AS coverage_pct
+FROM results;
 
 -- Target: ~95% for well-calibrated 95% CI
 ```

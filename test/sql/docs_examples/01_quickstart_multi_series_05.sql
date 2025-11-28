@@ -19,7 +19,7 @@ FROM TS_FORECAST_BY(
     sales,
     'AutoETS',
     14,
-    {'seasonal_period': 7}
+    MAP{'seasonal_period': 7}
 )
 WHERE forecast_step <= 3
 ORDER BY product_id, forecast_step;

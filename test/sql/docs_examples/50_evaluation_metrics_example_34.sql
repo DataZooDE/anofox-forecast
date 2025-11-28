@@ -1,3 +1,10 @@
+-- Create sample forecast comparison data
+CREATE TABLE forecast_comparison AS
+SELECT 
+    [100.0, 102.0, 98.0, 105.0]::DOUBLE[] AS actual,
+    [101.0, 103.0, 99.0, 106.0]::DOUBLE[] AS forecast_autoets,
+    [100.0, 100.0, 100.0, 100.0]::DOUBLE[] AS forecast_naive;
+
 -- Compare AutoETS vs Naive forecast
 SELECT 
     TS_MAE(actual, forecast_autoets) AS mae_autoets,

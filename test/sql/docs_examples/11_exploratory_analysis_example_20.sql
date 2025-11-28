@@ -1,3 +1,15 @@
+-- Create sample raw sensor data
+CREATE TABLE sensor_raw AS
+SELECT 
+    sensor_id,
+    TIMESTAMP '2024-01-01 00:00:00' + INTERVAL (h) HOUR AS timestamp,
+    CASE 
+        WHEN RANDOM() < 0.05 THEN NULL
+        ELSE 20 + sensor_id * 2 + 5 * SIN(2 * PI() * h / 24) + (RANDOM() * 2)
+    END AS temperature
+FROM generate_series(0, 167) t(h)
+CROSS JOIN (VALUES (1), (2), (3)) sensors(sensor_id);
+
 -- IoT sensor data with measurement errors
 CREATE TABLE sensor_prepared AS
 WITH 
@@ -7,8 +19,8 @@ outliers_removed AS (
         sensor_id,
         timestamp,
         CASE 
-            WHEN measurement > 1000 OR measurement < -50 THEN NULL  -- Physically impossible
-            ELSE measurement
+            WHEN temperature > 1000 OR temperature < -50 THEN NULL  -- Physically impossible
+            ELSE temperature
         END AS measurement
     FROM sensor_raw
 ),
