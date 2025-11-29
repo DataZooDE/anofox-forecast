@@ -21,28 +21,28 @@ FROM generate_series(1, 50) t(i);
 # Test ARIMA (manual) - requires Eigen3
 query I
 SELECT COUNT(*) = 12
-FROM ts_forecast(test_series, date_col, value, 'ARIMA', 12, {'p': 1, 'd': 1, 'q': 1, 's': 12});
+FROM anofox_fcst_ts_forecast(test_series, date_col, value, 'ARIMA', 12, {'p': 1, 'd': 1, 'q': 1, 's': 12});
 ----
 true
 
 # Test AutoARIMA - requires Eigen3
 query I
 SELECT COUNT(*) = 12
-FROM ts_forecast(test_series, date_col, value, 'AutoARIMA', 12, {'seasonal_period': 12});
+FROM anofox_fcst_ts_forecast(test_series, date_col, value, 'AutoARIMA', 12, {'seasonal_period': 12});
 ----
 true
 
 # Verify that non-ARIMA models always work regardless of Eigen3
 query I
 SELECT COUNT(*) = 12
-FROM ts_forecast(test_series, date_col, value, 'AutoETS', 12, {'season_length': 12});
+FROM anofox_fcst_ts_forecast(test_series, date_col, value, 'AutoETS', 12, {'season_length': 12});
 ----
 true
 
 # Test ARIMA with aggregate function
 statement ok
 CREATE TABLE arima_result AS
-SELECT TS_FORECAST_AGG(date_col, value, 'ARIMA', 5, {'p': 1, 'd': 1, 'q': 1}) AS result
+SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'ARIMA', 5, {'p': 1, 'd': 1, 'q': 1}) AS result
 FROM test_series;
 
 query I
@@ -54,7 +54,7 @@ true
 # Test AutoARIMA with aggregate function
 statement ok
 CREATE TABLE autoarima_result AS
-SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, {'seasonal_period': 12}) AS result
+SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'AutoARIMA', 5, {'seasonal_period': 12}) AS result
 FROM test_series;
 
 query I

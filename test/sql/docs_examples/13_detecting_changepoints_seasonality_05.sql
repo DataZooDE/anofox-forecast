@@ -6,13 +6,13 @@ SELECT
 FROM generate_series(0, 89) t(d);
 
 -- Highly sensitive: detect even small changes
-SELECT * FROM TS_DETECT_CHANGEPOINTS('sales_data', date, sales, MAP{'hazard_lambda': 50.0})
+SELECT * FROM anofox_fcst_ts_detect_changepoints('sales_data', date, sales, MAP{'hazard_lambda': 50.0})
 WHERE is_changepoint = true;
 
 -- Default: balanced detection
-SELECT * FROM TS_DETECT_CHANGEPOINTS('sales_data', date, sales, MAP{})
+SELECT * FROM anofox_fcst_ts_detect_changepoints('sales_data', date, sales, MAP{})
 WHERE is_changepoint = true;
 
 -- Conservative: only major shifts
-SELECT * FROM TS_DETECT_CHANGEPOINTS('sales_data', date, sales, MAP{'hazard_lambda': 500.0})
+SELECT * FROM anofox_fcst_ts_detect_changepoints('sales_data', date, sales, MAP{'hazard_lambda': 500.0})
 WHERE is_changepoint = true;

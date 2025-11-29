@@ -33,7 +33,7 @@ SELECT
     (SUM(CASE WHEN result.model_name = 'ERROR' THEN 1 ELSE 0 END) = 0) AND  -- No errors (validation errors not caught)
     (SUM(CASE WHEN result.model_name != 'ERROR' THEN 1 ELSE 0 END) = 100)  -- All successful
 FROM (
-    SELECT store_id, TS_FORECAST_AGG(date_col, value, 'Naive', 5, NULL) AS result
+    SELECT store_id, anofox_fcst_ts_forecast_agg(date_col, value, 'Naive', 5, NULL) AS result
     FROM test_mixed_series
     GROUP BY store_id
 );
@@ -52,7 +52,7 @@ FROM generate_series(1, 30) t(i);
 query I
 SELECT result.model_name = 'AutoARIMA'
 FROM (
-    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, NULL) AS result
+    SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'AutoARIMA', 5, NULL) AS result
     FROM test_constant_zero
 );
 ----
@@ -64,7 +64,7 @@ SELECT
     (result.model_name = 'AutoARIMA') AND
     (LEN(result.point_forecast) = 5)  -- Has forecast
 FROM (
-    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, NULL) AS result
+    SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'AutoARIMA', 5, NULL) AS result
     FROM test_constant_zero
 );
 ----
@@ -76,7 +76,7 @@ SELECT
     (result.model_name = 'AutoARIMA') AND
     (LEN(result.point_forecast) = 5)  -- Has forecast (not empty)
 FROM (
-    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, NULL) AS result
+    SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'AutoARIMA', 5, NULL) AS result
     FROM test_constant_zero
 );
 ----
@@ -85,7 +85,7 @@ true
 # Test 5: Test with safe_mode disabled (constant data doesn't error, so this succeeds)
 # Note: Constant data is handled successfully, so no error is thrown even with safe_mode disabled
 statement ok
-SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, {'safe_mode': false}) AS result
+SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'AutoARIMA', 5, {'safe_mode': false}) AS result
 FROM test_constant_zero;
 
 # Test 6: Test with include_error_message disabled (successful forecast)
@@ -94,7 +94,7 @@ SELECT
     (result.model_name = 'AutoARIMA') AND
     (LEN(result.point_forecast) = 5)  -- Successful forecast
 FROM (
-    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, {'include_error_message': false}) AS result
+    SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'AutoARIMA', 5, {'include_error_message': false}) AS result
     FROM test_constant_zero
 );
 ----
@@ -113,7 +113,7 @@ FROM generate_series(1, 5) t(i);  -- Only 5 points, AutoARIMA needs at least 10
 
 # Validation errors throw exceptions, so this test expects an error statement
 statement error
-SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, NULL) AS result
+SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'AutoARIMA', 5, NULL) AS result
 FROM test_short_series;
 ----
 AutoARIMA requires at least 10 observations
@@ -132,7 +132,7 @@ SELECT
     (result.model_name = 'Naive') AND
     (LEN(result.point_forecast) = 5)
 FROM (
-    SELECT TS_FORECAST_AGG(date_col, value, 'Naive', 5, NULL) AS result
+    SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'Naive', 5, NULL) AS result
     FROM test_good_series
 );
 ----
@@ -165,7 +165,7 @@ SELECT
     (SUM(CASE WHEN result.model_name = 'ERROR' THEN 1 ELSE 0 END) = 0) AND  -- No errors
     (SUM(CASE WHEN result.model_name != 'ERROR' THEN 1 ELSE 0 END) = 10)  -- All successful
 FROM (
-    SELECT store_id, TS_FORECAST_AGG(date_col, value, 'Naive', 5, NULL) AS result
+    SELECT store_id, anofox_fcst_ts_forecast_agg(date_col, value, 'Naive', 5, NULL) AS result
     FROM test_mixed_scenario
     GROUP BY store_id
 );
@@ -180,7 +180,7 @@ SELECT
     (LEN(result.lower_90) = 5) AND
     (LEN(result.upper_90) = 5)
 FROM (
-    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, NULL) AS result
+    SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'AutoARIMA', 5, NULL) AS result
     FROM test_good_series
 );
 ----

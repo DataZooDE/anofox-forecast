@@ -8,8 +8,8 @@ Data quality directly impacts forecast accuracy. This guide covers exploratory d
 
 **API Coverage**:
 
-- **5 EDA macros**: `TS_STATS`, `TS_STATS_SUMMARY`, `TS_QUALITY_REPORT` (plus seasonality and changepoint detection)
-- **2 Data Quality macros**: `TS_DATA_QUALITY`, `TS_DATA_QUALITY_SUMMARY`
+- **5 EDA macros**: `anofox_fcst_ts_stats`, `anofox_fcst_ts_stats_summary`, `anofox_fcst_ts_quality_report` (plus seasonality and changepoint detection)
+- **2 Data Quality macros**: `anofox_fcst_ts_data_quality`, `anofox_fcst_ts_data_quality_summary`
 - **12 Data Preparation macros**: Gap filling, series filtering, edge cleaning, and missing value imputation
 
 This guide provides practical workflows and examples for:
@@ -31,20 +31,20 @@ This guide provides practical workflows and examples for:
    - [Summary by Dimension](#summary-by-dimension)
 3. [Data Preparation](#data-preparation)
    - [Gap Filling](#gap-filling)
-     - [TS_FILL_GAPS](#ts_fill_gaps)
-     - [TS_FILL_FORWARD](#ts_fill_forward)
+     - [anofox_fcst_ts_fill_gaps](#ts_fill_gaps)
+     - [anofox_fcst_ts_fill_forward](#ts_fill_forward)
    - [Series Filtering](#series-filtering)
-     - [TS_DROP_CONSTANT](#ts_drop_constant)
-     - [TS_DROP_SHORT](#ts_drop_short)
+     - [anofox_fcst_ts_drop_constant](#ts_drop_constant)
+     - [anofox_fcst_ts_drop_short](#ts_drop_short)
    - [Edge Cleaning](#edge-cleaning)
-     - [TS_DROP_LEADING_ZEROS](#ts_drop_leading_zeros)
-     - [TS_DROP_TRAILING_ZEROS](#ts_drop_trailing_zeros)
-     - [TS_DROP_EDGE_ZEROS](#ts_drop_edge_zeros)
+     - [anofox_fcst_ts_drop_leading_zeros](#ts_drop_leading_zeros)
+     - [anofox_fcst_ts_drop_trailing_zeros](#ts_drop_trailing_zeros)
+     - [anofox_fcst_ts_drop_edge_zeros](#ts_drop_edge_zeros)
    - [Missing Value Imputation](#missing-value-imputation)
-     - [TS_FILL_NULLS_CONST](#ts_fill_nulls_const)
-     - [TS_FILL_NULLS_FORWARD](#ts_fill_nulls_forward)
-     - [TS_FILL_NULLS_BACKWARD](#ts_fill_nulls_backward)
-     - [TS_FILL_NULLS_MEAN](#ts_fill_nulls_mean)
+     - [anofox_fcst_ts_fill_nulls_const](#ts_fill_nulls_const)
+     - [anofox_fcst_ts_fill_nulls_forward](#ts_fill_nulls_forward)
+     - [anofox_fcst_ts_fill_nulls_backward](#ts_fill_nulls_backward)
+     - [anofox_fcst_ts_fill_nulls_mean](#ts_fill_nulls_mean)
 4. [Complete Workflow Examples](#complete-workflow-examples)
 5. [Common Data Issues & Solutions](#common-data-issues--solutions)
 6. [Preparation Checklist](#preparation-checklist)
@@ -55,7 +55,7 @@ This guide provides practical workflows and examples for:
 
 ### Per-Series Statistics
 
-**TS_STATS**
+**anofox_fcst_ts_stats**
 
 Computes per-series statistical metrics including length, date ranges, central tendencies (mean, median), dispersion (std), value distributions (min, max, zeros), and quality indicators (nulls, uniqueness, constancy). Returns 24 metrics per series for exploratory analysis and data profiling.
 
@@ -77,7 +77,7 @@ CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
 -- Compute comprehensive stats for all series
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales_raw', product_id, date, sales_amount, '1d');
 
 -- View results
 SELECT * FROM sales_stats LIMIT 5;
@@ -93,9 +93,9 @@ Returns comprehensive statistics per series including:
 
 ### Dataset Summary
 
-**TS_STATS_SUMMARY**
+**anofox_fcst_ts_stats_summary**
 
-Aggregates statistics across all series from TS_STATS output. Computes dataset-level metrics including total series count, total observations, average series length, and date span. Provides high-level overview for dataset characterization.
+Aggregates statistics across all series from anofox_fcst_ts_stats output. Computes dataset-level metrics including total series count, total observations, average series length, and date span. Provides high-level overview for dataset characterization.
 
 **Example:**
 
@@ -115,17 +115,17 @@ CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
 -- Generate statistics first
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales_raw', product_id, date, sales_amount, '1d');
 
 -- Get overall picture
-SELECT * FROM TS_STATS_SUMMARY('sales_stats');
+SELECT * FROM anofox_fcst_ts_stats_summary('sales_stats');
 ```
 
 ### Quality Assessment
 
-**TS_QUALITY_REPORT**
+**anofox_fcst_ts_quality_report**
 
-Generates quality assessment report from TS_STATS output. Evaluates series against configurable thresholds for gaps, missing values, constant series, short series, and temporal alignment. Identifies series requiring data preparation steps.
+Generates quality assessment report from anofox_fcst_ts_stats output. Evaluates series against configurable thresholds for gaps, missing values, constant series, short series, and temporal alignment. Identifies series requiring data preparation steps.
 
 **Example:**
 
@@ -145,10 +145,10 @@ CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
 -- Generate statistics first
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales_raw', product_id, date, sales_amount, '1d');
 
--- Comprehensive quality checks (TS_QUALITY_REPORT now implemented)
-SELECT * FROM TS_QUALITY_REPORT('sales_stats', 30);
+-- Comprehensive quality checks (anofox_fcst_ts_quality_report now implemented)
+SELECT * FROM anofox_fcst_ts_quality_report('sales_stats', 30);
 ```
 
 [↑ Go to top](#eda--data-preparation---complete-workflow-guide)
@@ -159,7 +159,7 @@ SELECT * FROM TS_QUALITY_REPORT('sales_stats', 30);
 
 ### Comprehensive Assessment
 
-**TS_DATA_QUALITY**
+**anofox_fcst_ts_data_quality**
 
 Assesses data quality across four dimensions (Structural, Temporal, Magnitude, Behavioural) for each time series. Returns per-series metrics including key uniqueness, timestamp gaps, missing values, value distributions, and pattern characteristics. Output is normalized by dimension and metric for cross-series comparison.
 
@@ -167,7 +167,7 @@ Assesses data quality across four dimensions (Structural, Temporal, Magnitude, B
 
 ```sql
 -- For DATE/TIMESTAMP columns (date-based frequency)
-TS_DATA_QUALITY(
+anofox_fcst_ts_data_quality(
     table_name      VARCHAR,
     unique_id_col   ANY,
     date_col        DATE | TIMESTAMP,
@@ -177,7 +177,7 @@ TS_DATA_QUALITY(
 ) → TABLE
 
 -- For INTEGER columns (integer-based frequency)
-TS_DATA_QUALITY(
+anofox_fcst_ts_data_quality(
     table_name      VARCHAR,
     unique_id_col   ANY,
     date_col        INTEGER | BIGINT,
@@ -266,13 +266,13 @@ CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 -- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
 -- Generate comprehensive health card (n_short parameter defaults to 30 if NULL)
 CREATE TABLE health_card AS
-SELECT * FROM TS_DATA_QUALITY('sales_raw', product_id, date, sales_amount, 30, '1d');
+SELECT * FROM anofox_fcst_ts_data_quality('sales_raw', product_id, date, sales_amount, 30, '1d');
 
 -- View all issues
 SELECT * FROM health_card ORDER BY dimension, metric;
 
 -- Filter specific issues
-SELECT * FROM TS_DATA_QUALITY('sales_raw', product_id, date, sales_amount, 30, '1d')
+SELECT * FROM anofox_fcst_ts_data_quality('sales_raw', product_id, date, sales_amount, 30, '1d')
 WHERE dimension = 'Temporal' AND metric = 'timestamp_gaps'
 LIMIT 5;
 
@@ -289,21 +289,21 @@ SELECT
 FROM generate_series(1, 100) t(d)
 CROSS JOIN (VALUES (1), (2), (3)) series(series_id);
 
-SELECT * FROM TS_DATA_QUALITY('int_data', series_id, date_col, value, 30, '1d')
+SELECT * FROM anofox_fcst_ts_data_quality('int_data', series_id, date_col, value, 30, '1d')
 WHERE dimension = 'Magnitude' AND metric = 'missing_values'
 LIMIT 5;
 ```
 
 ### Summary by Dimension
 
-**TS_DATA_QUALITY_SUMMARY**
+**anofox_fcst_ts_data_quality_summary**
 
 Aggregates quality metrics across all series, grouped by dimension and metric. Computes summary statistics (counts, percentages) for each quality dimension to provide dataset-level quality overview. Useful for identifying systemic data quality issues affecting multiple series.
 
 **Signature:**
 
 ```sql
-TS_DATA_QUALITY_SUMMARY(
+anofox_fcst_ts_data_quality_summary(
     table_name      VARCHAR,
     unique_id_col   ANY,
     date_col        DATE | TIMESTAMP | INTEGER,
@@ -331,7 +331,7 @@ FROM generate_series(0, 364) t(d)
 CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
 -- Get summary by dimension (n_short parameter defaults to 30 if NULL)
-SELECT * FROM TS_DATA_QUALITY_SUMMARY('sales_raw', product_id, date, sales_amount, 30);
+SELECT * FROM anofox_fcst_ts_data_quality_summary('sales_raw', product_id, date, sales_amount, 30);
 ```
 
 [↑ Go to top](#eda--data-preparation---complete-workflow-guide)
@@ -344,7 +344,7 @@ SQL macros for data cleaning and transformation. Date type support varies by fun
 
 ### Gap Filling
 
-#### TS_FILL_GAPS
+#### anofox_fcst_ts_fill_gaps
 
 **Fill Missing Timestamps**
 
@@ -354,7 +354,7 @@ Fills missing timestamps/indices in series with NULL values using the specified 
 
 ```sql
 -- For DATE/TIMESTAMP columns (date-based frequency)
-TS_FILL_GAPS(
+anofox_fcst_ts_fill_gaps(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP,
@@ -363,7 +363,7 @@ TS_FILL_GAPS(
 ) → TABLE
 
 -- For INTEGER columns (integer-based frequency)
-TS_FILL_GAPS(
+anofox_fcst_ts_fill_gaps(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      INTEGER | BIGINT,
@@ -409,7 +409,7 @@ WHERE d % 3 != 0;  -- Create gaps by skipping some days
 -- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
 -- Fill gaps with daily frequency (default)
 CREATE TABLE fixed AS
-SELECT * FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_fill_gaps('sales_raw', product_id, date, sales_amount, '1d');
 
 -- Create hourly data with gaps
 CREATE TABLE hourly_data AS
@@ -422,7 +422,7 @@ CROSS JOIN (VALUES (1), (2)) series(series_id)
 WHERE h % 2 != 0;  -- Create gaps
 
 -- Fill gaps with 30-minute frequency
-SELECT * FROM TS_FILL_GAPS('hourly_data', series_id, timestamp, value, '30m');
+SELECT * FROM anofox_fcst_ts_fill_gaps('hourly_data', series_id, timestamp, value, '30m');
 
 -- Create weekly data
 CREATE TABLE weekly_data AS
@@ -435,7 +435,7 @@ CROSS JOIN (VALUES (1), (2)) series(series_id)
 WHERE w % 2 != 0;  -- Create gaps
 
 -- Fill gaps with weekly frequency
-SELECT * FROM TS_FILL_GAPS('weekly_data', series_id, date, value, '1w');
+SELECT * FROM anofox_fcst_ts_fill_gaps('weekly_data', series_id, date, value, '1w');
 
 -- Use NULL (must cast to VARCHAR for DATE/TIMESTAMP columns)
 CREATE TABLE daily_data AS
@@ -447,7 +447,7 @@ FROM generate_series(0, 30) t(d)
 CROSS JOIN (VALUES (1)) series(series_id)
 WHERE d % 2 != 0;
 
-SELECT * FROM TS_FILL_GAPS('daily_data', series_id, date, value, NULL::VARCHAR);
+SELECT * FROM anofox_fcst_ts_fill_gaps('daily_data', series_id, date, value, NULL::VARCHAR);
 
 -- INTEGER columns: Use INTEGER frequency values
 -- Create integer-based time series
@@ -461,16 +461,16 @@ CROSS JOIN (VALUES (1), (2)) series(series_id)
 WHERE d % 3 != 0;  -- Create gaps
 
 -- Fill gaps with step size of 1
-SELECT * FROM TS_FILL_GAPS('int_data', series_id, date_col, value, 1);
+SELECT * FROM anofox_fcst_ts_fill_gaps('int_data', series_id, date_col, value, 1);
 
 -- Fill gaps with step size of 2
-SELECT * FROM TS_FILL_GAPS('int_data', series_id, date_col, value, 2);
+SELECT * FROM anofox_fcst_ts_fill_gaps('int_data', series_id, date_col, value, 2);
 
 -- Use NULL (defaults to step size 1 for INTEGER columns)
-SELECT * FROM TS_FILL_GAPS('int_data', series_id, date_col, value, NULL);
+SELECT * FROM anofox_fcst_ts_fill_gaps('int_data', series_id, date_col, value, NULL);
 ```
 
-#### TS_FILL_FORWARD
+#### anofox_fcst_ts_fill_forward
 
 **Extend Series to Target Date**
 
@@ -480,7 +480,7 @@ Extends series to target date/index, filling gaps with NULL using the specified 
 
 ```sql
 -- For DATE/TIMESTAMP columns (date-based frequency)
-TS_FILL_FORWARD(
+anofox_fcst_ts_fill_forward(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP,
@@ -490,7 +490,7 @@ TS_FILL_FORWARD(
 ) → TABLE
 
 -- For INTEGER columns (integer-based frequency)
-TS_FILL_FORWARD(
+anofox_fcst_ts_fill_forward(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      INTEGER | BIGINT,
@@ -503,11 +503,11 @@ TS_FILL_FORWARD(
 **Parameters:**
 
 - `target_date`: Target date/index to extend the series to (type must match `date_col` type)
-- `frequency`: Same as `TS_FILL_GAPS` (see above)
+- `frequency`: Same as `anofox_fcst_ts_fill_gaps` (see above)
 
 **Type Validation:**
 
-- Same as `TS_FILL_GAPS` (see above)
+- Same as `anofox_fcst_ts_fill_gaps` (see above)
 
 **Examples:**
 
@@ -532,7 +532,7 @@ FROM generate_series(0, 100) t(h)
 CROSS JOIN (VALUES (1), (2)) series(series_id);
 
 -- Extend hourly series to target date
-SELECT * FROM TS_FILL_FORWARD('hourly_data', series_id, timestamp, value, '2024-12-31'::TIMESTAMP, '1h');
+SELECT * FROM anofox_fcst_ts_fill_forward('hourly_data', series_id, timestamp, value, '2024-12-31'::TIMESTAMP, '1h');
 
 -- Create monthly data
 CREATE TABLE monthly_data AS
@@ -544,11 +544,11 @@ FROM generate_series(0, 10) t(m)
 CROSS JOIN (VALUES (1), (2)) series(series_id);
 
 -- Extend monthly series to target date
-SELECT * FROM TS_FILL_FORWARD('monthly_data', series_id, date, value, '2024-12-01'::DATE, '1mo');
+SELECT * FROM anofox_fcst_ts_fill_forward('monthly_data', series_id, date, value, '2024-12-01'::DATE, '1mo');
 
 -- Extend daily series to target date (default frequency)
 CREATE TABLE sales_extended AS
-SELECT * FROM TS_FILL_FORWARD(
+SELECT * FROM anofox_fcst_ts_fill_forward(
     'sales', product_id, date, sales_amount, 
     DATE '2023-12-31', '1d'
 );
@@ -562,7 +562,7 @@ SELECT
 FROM generate_series(0, 30) t(d)
 CROSS JOIN (VALUES (1)) series(series_id);
 
-SELECT * FROM TS_FILL_FORWARD('daily_data', series_id, date, value, '2024-12-31'::DATE, NULL::VARCHAR);
+SELECT * FROM anofox_fcst_ts_fill_forward('daily_data', series_id, date, value, '2024-12-31'::DATE, NULL::VARCHAR);
 
 -- INTEGER columns: Use INTEGER frequency values
 -- Create integer-based time series
@@ -575,20 +575,20 @@ FROM generate_series(1, 50) t(d)
 CROSS JOIN (VALUES (1), (2)) series(series_id);
 
 -- Extend series to index 100 with step size of 1
-SELECT * FROM TS_FILL_FORWARD('int_data', series_id, date_col, value, 100, 1);
+SELECT * FROM anofox_fcst_ts_fill_forward('int_data', series_id, date_col, value, 100, 1);
 
 -- Extend series to index 100 with step size of 5
-SELECT * FROM TS_FILL_FORWARD('int_data', series_id, date_col, value, 100, 5);
+SELECT * FROM anofox_fcst_ts_fill_forward('int_data', series_id, date_col, value, 100, 5);
 
 -- Use NULL (defaults to step size 1 for INTEGER columns)
-SELECT * FROM TS_FILL_FORWARD('int_data', series_id, date_col, value, 100, NULL);
+SELECT * FROM anofox_fcst_ts_fill_forward('int_data', series_id, date_col, value, 100, NULL);
 ```
 
 [↑ Go to top](#eda--data-preparation---complete-workflow-guide)
 
 ### Series Filtering
 
-#### TS_DROP_CONSTANT
+#### anofox_fcst_ts_drop_constant
 
 **Remove Constant Series**
 
@@ -597,7 +597,7 @@ Removes series with constant values (no variation).
 **Signature:**
 
 ```sql
-TS_DROP_CONSTANT(
+anofox_fcst_ts_drop_constant(
     table_name    VARCHAR,
     group_col     ANY,
     value_col     DOUBLE
@@ -625,20 +625,20 @@ CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
 -- Generate stats to detect constant series
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, sales_amount, '1d');
 
 -- Detect constant series
 SELECT * FROM sales_stats WHERE is_constant = true;
 
 -- Remove constant series
 CREATE TABLE sales_no_constant AS
-SELECT * FROM TS_DROP_CONSTANT('sales', product_id, sales_amount);
+SELECT * FROM anofox_fcst_ts_drop_constant('sales', product_id, sales_amount);
 
 -- Verify result
 SELECT DISTINCT product_id FROM sales_no_constant;
 ```
 
-#### TS_DROP_SHORT
+#### anofox_fcst_ts_drop_short
 
 **Remove Short Series**
 
@@ -647,7 +647,7 @@ Removes series below minimum length.
 **Signature:**
 
 ```sql
-TS_DROP_SHORT(
+anofox_fcst_ts_drop_short(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -676,7 +676,7 @@ WHERE
 
 -- Remove series with less than 30 observations
 CREATE TABLE sales_long_enough AS
-SELECT * FROM TS_DROP_SHORT('sales', product_id, 30);
+SELECT * FROM anofox_fcst_ts_drop_short('sales', product_id, 30);
 
 -- Verify result
 SELECT DISTINCT product_id FROM sales_long_enough;
@@ -686,7 +686,7 @@ SELECT DISTINCT product_id FROM sales_long_enough;
 
 ### Edge Cleaning
 
-#### TS_DROP_LEADING_ZEROS
+#### anofox_fcst_ts_drop_leading_zeros
 
 **Remove Leading Zeros**
 
@@ -695,7 +695,7 @@ Removes leading zeros from time series.
 **Signature:**
 
 ```sql
-TS_DROP_LEADING_ZEROS(
+anofox_fcst_ts_drop_leading_zeros(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -704,7 +704,7 @@ TS_DROP_LEADING_ZEROS(
 ```
 
 > [!WARNING]
-> Results may differ if `TS_FILL_GAPS` or `TS_FILL_FORWARD` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
+> Results may differ if `anofox_fcst_ts_fill_gaps` or `anofox_fcst_ts_fill_forward` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
 
 **Example:**
 
@@ -723,7 +723,7 @@ CROSS JOIN (VALUES ('P001'), ('P002')) products(product_id);
 
 -- Remove leading zeros
 CREATE TABLE sales_no_leading_zeros AS
-SELECT * FROM TS_DROP_LEADING_ZEROS('sales', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_drop_leading_zeros('sales', product_id, date, sales_amount);
 
 -- Verify result (should start from day 10)
 SELECT 
@@ -734,7 +734,7 @@ FROM sales_no_leading_zeros
 GROUP BY product_id;
 ```
 
-#### TS_DROP_TRAILING_ZEROS
+#### anofox_fcst_ts_drop_trailing_zeros
 
 **Remove Trailing Zeros**
 
@@ -743,7 +743,7 @@ Removes trailing zeros from time series.
 **Signature:**
 
 ```sql
-TS_DROP_TRAILING_ZEROS(
+anofox_fcst_ts_drop_trailing_zeros(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -752,7 +752,7 @@ TS_DROP_TRAILING_ZEROS(
 ```
 
 > [!WARNING]
-> Results may differ if `TS_FILL_GAPS` or `TS_FILL_FORWARD` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
+> Results may differ if `anofox_fcst_ts_fill_gaps` or `anofox_fcst_ts_fill_forward` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
 
 **Example:**
 
@@ -771,7 +771,7 @@ CROSS JOIN (VALUES ('P001'), ('P002')) products(product_id);
 
 -- Remove trailing zeros
 CREATE TABLE sales_no_trailing_zeros AS
-SELECT * FROM TS_DROP_TRAILING_ZEROS('sales', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_drop_trailing_zeros('sales', product_id, date, sales_amount);
 
 -- Verify result (should end at day 80)
 SELECT 
@@ -782,7 +782,7 @@ FROM sales_no_trailing_zeros
 GROUP BY product_id;
 ```
 
-#### TS_DROP_EDGE_ZEROS
+#### anofox_fcst_ts_drop_edge_zeros
 
 **Remove Both Leading and Trailing Zeros**
 
@@ -791,7 +791,7 @@ Removes both leading and trailing zeros from time series.
 **Signature:**
 
 ```sql
-TS_DROP_EDGE_ZEROS(
+anofox_fcst_ts_drop_edge_zeros(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -800,7 +800,7 @@ TS_DROP_EDGE_ZEROS(
 ```
 
 > [!WARNING]
-> Results may differ if `TS_FILL_GAPS` or `TS_FILL_FORWARD` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
+> Results may differ if `anofox_fcst_ts_fill_gaps` or `anofox_fcst_ts_fill_forward` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
 
 **Example:**
 
@@ -828,14 +828,14 @@ HAVING zero_days > 0;
 
 -- Fix: Remove edge zeros
 CREATE TABLE sales_no_edge_zeros AS
-SELECT * FROM TS_DROP_EDGE_ZEROS('sales', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_drop_edge_zeros('sales', product_id, date, sales_amount);
 ```
 
 [↑ Go to top](#eda--data-preparation---complete-workflow-guide)
 
 ### Missing Value Imputation
 
-#### TS_FILL_NULLS_CONST
+#### anofox_fcst_ts_fill_nulls_const
 
 **Fill with Constant Value**
 
@@ -844,7 +844,7 @@ Fills NULL values with a specified constant value.
 **Signature:**
 
 ```sql
-TS_FILL_NULLS_CONST(
+anofox_fcst_ts_fill_nulls_const(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -874,7 +874,7 @@ SELECT
     product_id,
     date,
     value_col AS sales_amount
-FROM TS_FILL_NULLS_CONST('sales', product_id, date, sales_amount, 0.0);
+FROM anofox_fcst_ts_fill_nulls_const('sales', product_id, date, sales_amount, 0.0);
 
 -- Fill NULLs with a specific value (e.g., -1 for missing data indicator)
 CREATE TABLE sales_filled_marker AS
@@ -882,7 +882,7 @@ SELECT
     product_id,
     date,
     value_col AS sales_amount
-FROM TS_FILL_NULLS_CONST('sales', product_id, date, sales_amount, -1.0);
+FROM anofox_fcst_ts_fill_nulls_const('sales', product_id, date, sales_amount, -1.0);
 
 -- Verify results
 SELECT 
@@ -894,7 +894,7 @@ FROM sales_filled_zero
 GROUP BY product_id;
 ```
 
-#### TS_FILL_NULLS_FORWARD
+#### anofox_fcst_ts_fill_nulls_forward
 
 **Forward Fill (Last Observation Carried Forward)**
 
@@ -903,7 +903,7 @@ Uses `LAST_VALUE(... IGNORE NULLS)` window function to forward fill NULL values.
 **Signature:**
 
 ```sql
-TS_FILL_NULLS_FORWARD(
+anofox_fcst_ts_fill_nulls_forward(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -916,7 +916,7 @@ TS_FILL_NULLS_FORWARD(
 ```sql
 -- Forward fill (use last known value)
 CREATE TABLE sales_forward_filled AS
-SELECT * FROM TS_FILL_NULLS_FORWARD('sales', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_fill_nulls_forward('sales', product_id, date, sales_amount);
 ```
 
 **Alternative Example:**
@@ -936,13 +936,13 @@ CROSS JOIN (VALUES ('P001'), ('P002')) products(product_id);
 
 -- Generate stats for reference
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, sales_amount, '1d');
 
 -- Option A: Forward fill (use last known value)
-SELECT * FROM TS_FILL_NULLS_FORWARD('sales', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_fill_nulls_forward('sales', product_id, date, sales_amount);
 
 -- Option B: Mean imputation
-SELECT * FROM TS_FILL_NULLS_MEAN('sales', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_fill_nulls_mean('sales', product_id, date, sales_amount);
 
 -- Option C: Drop series with too many nulls
 WITH clean AS (
@@ -953,7 +953,7 @@ FROM sales s
 WHERE s.product_id IN (SELECT series_id FROM clean);
 ```
 
-#### TS_FILL_NULLS_BACKWARD
+#### anofox_fcst_ts_fill_nulls_backward
 
 **Backward Fill**
 
@@ -962,7 +962,7 @@ Uses `FIRST_VALUE(... IGNORE NULLS)` window function to backward fill NULL value
 **Signature:**
 
 ```sql
-TS_FILL_NULLS_BACKWARD(
+anofox_fcst_ts_fill_nulls_backward(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -991,7 +991,7 @@ SELECT
     product_id,
     date,
     value_col AS sales_amount
-FROM TS_FILL_NULLS_BACKWARD('sales', product_id, date, sales_amount);
+FROM anofox_fcst_ts_fill_nulls_backward('sales', product_id, date, sales_amount);
 
 -- Verify results (should have no NULLs)
 SELECT 
@@ -1002,7 +1002,7 @@ FROM sales_backward_filled
 GROUP BY product_id;
 ```
 
-#### TS_FILL_NULLS_MEAN
+#### anofox_fcst_ts_fill_nulls_mean
 
 **Fill with Series Mean**
 
@@ -1011,7 +1011,7 @@ Computes mean per series and fills NULLs with that mean value.
 **Signature:**
 
 ```sql
-TS_FILL_NULLS_MEAN(
+anofox_fcst_ts_fill_nulls_mean(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -1024,7 +1024,7 @@ TS_FILL_NULLS_MEAN(
 ```sql
 -- Fill NULLs with series mean
 CREATE TABLE sales_mean_filled AS
-SELECT * FROM TS_FILL_NULLS_MEAN('sales', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_fill_nulls_mean('sales', product_id, date, sales_amount);
 ```
 
 **Alternative: Drop series with too many nulls instead**
@@ -1066,23 +1066,23 @@ SELECT
     group_col AS product_id,
     date_col AS date,
     value_col AS sales_amount
-FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount, '1d');
+FROM anofox_fcst_ts_fill_gaps('sales_raw', product_id, date, sales_amount, '1d');
 
 -- Step 2: Drop constant series
 CREATE TEMP TABLE step2 AS
-SELECT * FROM TS_DROP_CONSTANT('step1', product_id, sales_amount);
+SELECT * FROM anofox_fcst_ts_drop_constant('step1', product_id, sales_amount);
 
 -- Step 3: Drop short series
 CREATE TEMP TABLE step3 AS
-SELECT * FROM TS_DROP_SHORT('step2', product_id, 30);
+SELECT * FROM anofox_fcst_ts_drop_short('step2', product_id, 30);
 
 -- Step 4: Remove leading zeros
 CREATE TEMP TABLE step4 AS
-SELECT * FROM TS_DROP_LEADING_ZEROS('step3', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_drop_leading_zeros('step3', product_id, date, sales_amount);
 
 -- Step 5: Fill remaining nulls
 CREATE TABLE sales_prepared AS
-SELECT * FROM TS_FILL_NULLS_FORWARD('step4', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_fill_nulls_forward('step4', product_id, date, sales_amount);
 ```
 
 ### Custom Pipeline (Advanced)
@@ -1108,11 +1108,11 @@ SELECT
     group_col AS product_id,
     date_col AS date,
     value_col AS sales_amount
-FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount, '1d');
+FROM anofox_fcst_ts_fill_gaps('sales_raw', product_id, date, sales_amount, '1d');
 
 -- Remove edge zeros
 CREATE TEMP TABLE no_edges AS
-SELECT * FROM TS_DROP_EDGE_ZEROS('filled', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_drop_edge_zeros('filled', product_id, date, sales_amount);
 
 -- Fill nulls with interpolation (more sophisticated)
 CREATE TABLE sales_custom_prep AS
@@ -1143,7 +1143,7 @@ FROM generate_series(0, 89) t(d)
 CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
 
 CREATE TABLE stats AS
-SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, sales_amount, '1d');
 
 -- Create sample raw sales data
 CREATE TABLE sales_raw AS
@@ -1160,7 +1160,7 @@ CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 -- Create a reusable preparation view
 CREATE VIEW sales_autoprepared AS
 WITH stats AS (
-    SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount, '1d')
+    SELECT * FROM anofox_fcst_ts_stats('sales_raw', product_id, date, sales_amount, '1d')
 ),
 quality_series AS (
     SELECT series_id FROM stats WHERE length >= 30  -- Keep series with at least 30 observations
@@ -1170,7 +1170,7 @@ filled_temp AS (
         group_col,
         date_col,
         value_col
-    FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount, '1d')
+    FROM anofox_fcst_ts_fill_gaps('sales_raw', product_id, date, sales_amount, '1d')
 ),
 filled_temp2 AS (
     SELECT f.*
@@ -1182,7 +1182,7 @@ no_constant_temp AS (
         group_col,
         date_col,
         value_col
-    FROM TS_DROP_CONSTANT('filled_temp2', group_col, value_col)
+    FROM anofox_fcst_ts_drop_constant('filled_temp2', group_col, value_col)
 ),
 no_constant AS (
     SELECT 
@@ -1192,7 +1192,7 @@ no_constant AS (
     FROM no_constant_temp
 ),
 complete_temp AS (
-    SELECT * FROM TS_FILL_NULLS_FORWARD('no_constant', product_id, date, sales_amount)
+    SELECT * FROM anofox_fcst_ts_fill_nulls_forward('no_constant', product_id, date, sales_amount)
 ),
 complete AS (
     SELECT 
@@ -1204,7 +1204,7 @@ complete AS (
 SELECT * FROM complete;
 
 -- Use in forecasting
-SELECT * FROM TS_FORECAST_BY('sales_autoprepared', product_id, date, sales_amount,
+SELECT * FROM anofox_fcst_ts_forecast_by('sales_autoprepared', product_id, date, sales_amount,
                              'AutoETS', 28, MAP{'seasonal_period': 7});
 ```
 
@@ -1227,7 +1227,7 @@ CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
 -- Create stats for raw data
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales_raw', product_id, date, sales_amount, '1d');
 
 -- Prepare data (fill gaps, drop constants, etc.)
 CREATE TABLE sales_prepared AS
@@ -1235,11 +1235,11 @@ SELECT
     group_col AS product_id,
     date_col AS date,
     value_col AS sales_amount
-FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount, '1d');
+FROM anofox_fcst_ts_fill_gaps('sales_raw', product_id, date, sales_amount, '1d');
 
 -- Generate stats for prepared data
 CREATE TABLE prepared_stats AS
-SELECT * FROM TS_STATS('sales_prepared', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales_prepared', product_id, date, sales_amount, '1d');
 
 -- Compare quality
 SELECT 
@@ -1277,7 +1277,7 @@ FROM prepared_stats;
 
 **Problem**: Dates are not continuous
 
-**Solution**: Use `TS_FILL_GAPS` to fill missing timestamps
+**Solution**: Use `anofox_fcst_ts_fill_gaps` to fill missing timestamps
 
 ```sql
 -- Create sample sales data with gaps
@@ -1292,7 +1292,7 @@ WHERE d % 3 != 0;  -- Create gaps by skipping some days
 
 -- Generate statistics
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales_raw', product_id, date, sales_amount, '1d');
 
 -- Detect gaps (check expected_length vs length)
 SELECT 
@@ -1307,7 +1307,7 @@ LIMIT 10;
 
 -- Fix: Fill gaps
 CREATE TABLE fixed AS
-SELECT * FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_fill_gaps('sales_raw', product_id, date, sales_amount, '1d');
 ```
 
 ### Issue 2: Missing Values (NULLs)
@@ -1331,13 +1331,13 @@ CROSS JOIN (VALUES ('P001'), ('P002')) products(product_id);
 
 -- Generate stats for reference
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, sales_amount, '1d');
 
 -- Option A: Forward fill (use last known value)
-SELECT * FROM TS_FILL_NULLS_FORWARD('sales', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_fill_nulls_forward('sales', product_id, date, sales_amount);
 
 -- Option B: Mean imputation
-SELECT * FROM TS_FILL_NULLS_MEAN('sales', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_fill_nulls_mean('sales', product_id, date, sales_amount);
 
 -- Option C: Drop series with too many nulls
 WITH clean AS (
@@ -1352,7 +1352,7 @@ WHERE s.product_id IN (SELECT series_id FROM clean);
 
 **Problem**: All values are the same
 
-**Solution**: Remove constant series with `TS_DROP_CONSTANT`
+**Solution**: Remove constant series with `anofox_fcst_ts_drop_constant`
 
 ```sql
 -- Create sample sales data with constant series
@@ -1370,20 +1370,20 @@ CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
 -- Generate statistics
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, sales_amount, '1d');
 
 -- Detect constant series
 SELECT * FROM sales_stats WHERE is_constant = true;
 
 -- Fix: Remove constant series
-SELECT * FROM TS_DROP_CONSTANT('sales', product_id, sales_amount);
+SELECT * FROM anofox_fcst_ts_drop_constant('sales', product_id, sales_amount);
 ```
 
 ### Issue 4: Short Series
 
 **Problem**: Not enough historical data
 
-**Solution**: Filter short series with `TS_DROP_SHORT`
+**Solution**: Filter short series with `anofox_fcst_ts_drop_short`
 
 ```sql
 -- Create sample sales data with short series
@@ -1401,20 +1401,20 @@ WHERE
 
 -- Generate statistics
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, sales_amount, '1d');
 
 -- Detect short series
 SELECT * FROM sales_stats WHERE length < 30;
 
 -- Fix: Drop short series
-SELECT * FROM TS_DROP_SHORT('sales', product_id, 30);
+SELECT * FROM anofox_fcst_ts_drop_short('sales', product_id, 30);
 ```
 
 ### Issue 5: Leading/Trailing Zeros
 
 **Problem**: Product not yet launched or discontinued
 
-**Solution**: Remove edge zeros with `TS_DROP_EDGE_ZEROS`
+**Solution**: Remove edge zeros with `anofox_fcst_ts_drop_edge_zeros`
 
 ```sql
 -- Create sample sales data with edge zeros
@@ -1452,7 +1452,7 @@ GROUP BY product_id
 HAVING zero_days > 0;
 
 -- Fix: Remove edge zeros
-SELECT * FROM TS_DROP_EDGE_ZEROS('sales', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_drop_edge_zeros('sales', product_id, date, sales_amount);
 ```
 
 ### Issue 6: Outliers
@@ -1528,7 +1528,7 @@ JOIN series_bounds b ON s.product_id = b.product_id;
 
 **Problem**: Series end on different dates
 
-**Solution**: Use `TS_FILL_FORWARD` to align end dates
+**Solution**: Use `anofox_fcst_ts_fill_forward` to align end dates
 
 ```sql
 -- Detect
@@ -1542,7 +1542,7 @@ SELECT * FROM end_dates;
 
 -- Fix: Extend all series to common date
 CREATE TABLE sales_aligned AS
-SELECT * FROM TS_FILL_FORWARD(
+SELECT * FROM anofox_fcst_ts_fill_forward(
     'sales',
     product_id,
     date,
@@ -1560,17 +1560,17 @@ SELECT * FROM TS_FILL_FORWARD(
 
 ### Before Forecasting
 
-- [ ] Check data quality: `TS_STATS()`, `TS_DATA_QUALITY()`
-- [ ] Fill time gaps: `TS_FILL_GAPS()`
-- [ ] Fill up to end date: `TS_FILL_FORWARD()`
-- [ ] Handle missing values: `TS_FILL_NULLS_*()`
-- [ ] Remove constant series: `TS_DROP_CONSTANT()`
-- [ ] Check minimum length: `TS_DROP_SHORT()`
-- [ ] Remove leading zeros: `TS_DROP_LEADING_ZEROS()`
-- [ ] Detect seasonality: `TS_DETECT_SEASONALITY()`
-- [ ] Detect changepoints: `TS_DETECT_CHANGEPOINTS_BY()`
-- [ ] Remove edge zeros: `TS_DROP_EDGE_ZEROS()` (if applicable)
-- [ ] Validate: Re-run `TS_STATS()` on prepared data
+- [ ] Check data quality: `anofox_fcst_ts_stats()`, `anofox_fcst_ts_data_quality()`
+- [ ] Fill time gaps: `anofox_fcst_ts_fill_gaps()`
+- [ ] Fill up to end date: `anofox_fcst_ts_fill_forward()`
+- [ ] Handle missing values: `anofox_fcst_ts_fill_nulls_*()`
+- [ ] Remove constant series: `anofox_fcst_ts_drop_constant()`
+- [ ] Check minimum length: `anofox_fcst_ts_drop_short()`
+- [ ] Remove leading zeros: `anofox_fcst_ts_drop_leading_zeros()`
+- [ ] Detect seasonality: `anofox_fcst_ts_detect_seasonality()`
+- [ ] Detect changepoints: `anofox_fcst_ts_detect_changepoints_by()`
+- [ ] Remove edge zeros: `anofox_fcst_ts_drop_edge_zeros()` (if applicable)
+- [ ] Validate: Re-run `anofox_fcst_ts_stats()` on prepared data
 
 ### Quality Gates
 
@@ -1587,7 +1587,7 @@ FROM generate_series(0, 89) t(d)
 CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
 
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, sales_amount, '1d');
 
 -- Create prepared sales data
 CREATE TABLE sales_prepared AS
@@ -1595,7 +1595,7 @@ SELECT
     group_col AS product_id,
     date_col AS date,
     value_col AS sales_amount
-FROM TS_FILL_GAPS('sales', product_id, date, sales_amount, '1d');
+FROM anofox_fcst_ts_fill_gaps('sales', product_id, date, sales_amount, '1d');
 
 -- Only forecast high-quality series
 WITH quality_check AS (

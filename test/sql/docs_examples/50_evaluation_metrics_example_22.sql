@@ -13,18 +13,18 @@ SELECT
 FROM generate_series(61, 70) t(d);
 
 WITH theta_fc AS (
-    SELECT LIST(point_forecast ORDER BY forecast_step) AS pred FROM TS_FORECAST('train', date, value, 'Theta', 10, MAP{})
+    SELECT LIST(point_forecast ORDER BY forecast_step) AS pred FROM anofox_fcst_ts_forecast('train', date, value, 'Theta', 10, MAP{})
 ),
 naive_fc AS (
-    SELECT LIST(point_forecast ORDER BY forecast_step) AS baseline FROM TS_FORECAST('train', date, value, 'Naive', 10, MAP{})
+    SELECT LIST(point_forecast ORDER BY forecast_step) AS baseline FROM anofox_fcst_ts_forecast('train', date, value, 'Naive', 10, MAP{})
 ),
 actuals AS (
     SELECT LIST(value ORDER BY date) AS actual FROM test
 )
 SELECT 
-    TS_MASE(actual, pred, baseline) AS mase,
+    anofox_fcst_ts_mase(actual, pred, baseline) AS mase,
     CASE 
-        WHEN TS_MASE(actual, pred, baseline) < 1.0
+        WHEN anofox_fcst_ts_mase(actual, pred, baseline) < 1.0
         THEN 'Theta beats Naive ✅'
         ELSE 'Naive is better'
     END AS result

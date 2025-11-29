@@ -14,4 +14,4 @@ SELECT
     product_id,
     date,
     value_col AS sales_amount
-FROM TS_FILL_NULLS_BACKWARD('sales', product_id, date, sales_amount);
+FROM anofox_fcst_ts_fill_nulls_backward('sales', product_id, date, sales_amount);

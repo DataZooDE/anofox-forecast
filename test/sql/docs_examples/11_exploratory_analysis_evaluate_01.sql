@@ -13,7 +13,7 @@ CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
 -- Compute comprehensive stats for all series
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales_raw', product_id, date, sales_amount, '1d');
 
 -- View results
 SELECT * FROM sales_stats LIMIT 5;

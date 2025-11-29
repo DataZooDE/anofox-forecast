@@ -5,5 +5,5 @@ SELECT
     100.0 AS value;
 
 -- This should handle single value appropriately
-SELECT * FROM TS_FORECAST('single_value_data', date, value, 'Naive', 5, MAP{});
+SELECT * FROM anofox_fcst_ts_forecast('single_value_data', date, value, 'Naive', 5, MAP{});
 -- Expected: Appropriate error or default behavior

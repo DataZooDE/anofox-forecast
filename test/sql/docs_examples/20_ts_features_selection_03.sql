@@ -8,7 +8,7 @@ FROM generate_series(0, 30) t(d);
 -- Select specific features for better performance
 SELECT feats.*
 FROM (
-    SELECT ts_features(ts, value, ['mean', 'variance', 'length']) AS feats
+    SELECT anofox_fcst_ts_features(ts, value, ['mean', 'variance', 'length']) AS feats
     FROM sample_ts
 );
 

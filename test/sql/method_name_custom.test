@@ -18,7 +18,7 @@ FROM generate_series(1, 30) t(i);
 # Test 1: Custom model_name with Naive model
 query I
 SELECT model_name = 'MyCustomNaive'
-FROM ts_forecast(test_data, date_col, value, 'Naive', 5, {'method_name': 'MyCustomNaive'})
+FROM anofox_fcst_ts_forecast(test_data, date_col, value, 'Naive', 5, {'method_name': 'MyCustomNaive'})
 LIMIT 1;
 ----
 true
@@ -26,7 +26,7 @@ true
 # Test 2: Custom model_name with SES model
 query I
 SELECT model_name = 'CustomSmoother'
-FROM ts_forecast(test_data, date_col, value, 'SES', 5, {'method_name': 'CustomSmoother', 'alpha': 0.3})
+FROM anofox_fcst_ts_forecast(test_data, date_col, value, 'SES', 5, {'method_name': 'CustomSmoother', 'alpha': 0.3})
 LIMIT 1;
 ----
 true
@@ -34,7 +34,7 @@ true
 # Test 3: Custom model_name with Holt model
 query I
 SELECT model_name = 'HoltV2'
-FROM ts_forecast(test_data, date_col, value, 'Holt', 5, {'method_name': 'HoltV2', 'alpha': 0.8, 'beta': 0.2})
+FROM anofox_fcst_ts_forecast(test_data, date_col, value, 'Holt', 5, {'method_name': 'HoltV2', 'alpha': 0.8, 'beta': 0.2})
 LIMIT 1;
 ----
 true
@@ -42,7 +42,7 @@ true
 # Test 4: Custom model_name with AutoETS model
 query I
 SELECT model_name = 'MyAutoETS'
-FROM ts_forecast(test_data, date_col, value, 'AutoETS', 5, {'method_name': 'MyAutoETS', 'season_length': 7})
+FROM anofox_fcst_ts_forecast(test_data, date_col, value, 'AutoETS', 5, {'method_name': 'MyAutoETS', 'season_length': 7})
 LIMIT 1;
 ----
 true
@@ -50,7 +50,7 @@ true
 # Test 5: Custom model_name with Theta model
 query I
 SELECT model_name = 'ThetaCustom'
-FROM ts_forecast(test_data, date_col, value, 'Theta', 5, {'method_name': 'ThetaCustom', 'seasonal_period': 7})
+FROM anofox_fcst_ts_forecast(test_data, date_col, value, 'Theta', 5, {'method_name': 'ThetaCustom', 'seasonal_period': 7})
 LIMIT 1;
 ----
 true
@@ -58,7 +58,7 @@ true
 # Test 6: Custom model_name with SMA model
 query I
 SELECT model_name = 'MovingAvg5'
-FROM ts_forecast(test_data, date_col, value, 'SMA', 5, {'method_name': 'MovingAvg5', 'window': 5})
+FROM anofox_fcst_ts_forecast(test_data, date_col, value, 'SMA', 5, {'method_name': 'MovingAvg5', 'window': 5})
 LIMIT 1;
 ----
 true
@@ -66,7 +66,7 @@ true
 # Test 7: Verify forecasts still work correctly with custom names
 query I
 SELECT COUNT(*) = 5
-FROM ts_forecast(test_data, date_col, value, 'Naive', 5, {'method_name': 'CustomNaive'});
+FROM anofox_fcst_ts_forecast(test_data, date_col, value, 'Naive', 5, {'method_name': 'CustomNaive'});
 ----
 true
 
@@ -75,11 +75,11 @@ statement ok
 CREATE TABLE multi_model_results AS
 WITH naive_result AS (
     SELECT 'naive' as model_type, * 
-    FROM ts_forecast(test_data, date_col, value, 'Naive', 5, {'method_name': 'NaiveCustom'})
+    FROM anofox_fcst_ts_forecast(test_data, date_col, value, 'Naive', 5, {'method_name': 'NaiveCustom'})
 ),
 ses_result AS (
     SELECT 'ses' as model_type, *
-    FROM ts_forecast(test_data, date_col, value, 'SES', 5, {'method_name': 'SESCustom', 'alpha': 0.3})
+    FROM anofox_fcst_ts_forecast(test_data, date_col, value, 'SES', 5, {'method_name': 'SESCustom', 'alpha': 0.3})
 )
 SELECT * FROM naive_result
 UNION ALL

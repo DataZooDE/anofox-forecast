@@ -12,7 +12,7 @@ SELECT
     product_id,
     forecast_step,
     ROUND(point_forecast, 2) AS forecast
-FROM TS_FORECAST_BY(
+FROM anofox_fcst_ts_forecast_by(
     'product_sales',
     product_id,      -- GROUP BY this column
     date,

@@ -12,7 +12,7 @@ SELECT
     product_id,
     date_col AS date,
     is_changepoint
-FROM TS_DETECT_CHANGEPOINTS_BY('sales_data', product_id, date, sales, MAP{})
+FROM anofox_fcst_ts_detect_changepoints_by('sales_data', product_id, date, sales, MAP{})
 WHERE is_changepoint = true
 ORDER BY product_id, date_col;
 
@@ -20,6 +20,6 @@ ORDER BY product_id, date_col;
 SELECT 
     product_id,
     COUNT(*) FILTER (WHERE is_changepoint) AS num_changepoints
-FROM TS_DETECT_CHANGEPOINTS_BY('sales_data', product_id, date, sales, MAP{})
+FROM anofox_fcst_ts_detect_changepoints_by('sales_data', product_id, date, sales, MAP{})
 GROUP BY product_id
 ORDER BY num_changepoints DESC;

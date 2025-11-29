@@ -7,11 +7,11 @@ SELECT
 
 -- Compare AutoETS vs Naive forecast
 SELECT 
-    TS_MAE(actual, forecast_autoets) AS mae_autoets,
-    TS_MAE(actual, forecast_naive) AS mae_naive,
-    TS_RMAE(actual, forecast_autoets, forecast_naive) AS relative_performance,
+    anofox_fcst_ts_mae(actual, forecast_autoets) AS mae_autoets,
+    anofox_fcst_ts_mae(actual, forecast_naive) AS mae_naive,
+    anofox_fcst_ts_rmae(actual, forecast_autoets, forecast_naive) AS relative_performance,
     CASE 
-        WHEN TS_RMAE(actual, forecast_autoets, forecast_naive) < 1.0
+        WHEN anofox_fcst_ts_rmae(actual, forecast_autoets, forecast_naive) < 1.0
         THEN 'AutoETS is better'
         ELSE 'Naive is better'
     END AS winner

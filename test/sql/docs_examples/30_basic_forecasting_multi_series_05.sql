@@ -7,7 +7,7 @@ SELECT
 FROM generate_series(0, 89) t(d)
 CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
-SELECT * FROM TS_FORECAST_BY(
+SELECT * FROM anofox_fcst_ts_forecast_by(
     'sales_complete',
     product_id,     -- Parallel forecasting per product
     date,

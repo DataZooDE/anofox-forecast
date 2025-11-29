@@ -9,7 +9,7 @@ CROSS JOIN (VALUES (1), (2), (3), (4), (5)) series(series_id);
 
 -- Test forecasting with many groups
 SELECT series_id, * 
-FROM TS_FORECAST_BY(
+FROM anofox_fcst_ts_forecast_by(
     'large_dataset',
     series_id,
     date,

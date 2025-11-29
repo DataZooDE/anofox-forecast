@@ -19,25 +19,25 @@ The anofox-forecast extension provides a comprehensive set of evaluation metric 
 1. [Example: Forecasting and Evaluation with Multiple Methods](#example-forecasting-and-evaluation-with-multiple-methods)
 2. [Using Metrics with GROUP BY](#using-metrics-with-group-by)
 3. [Function Signatures](#function-signatures)
-   - [TS_MAE - Mean Absolute Error](#ts_mae---mean-absolute-error)
-   - [TS_MSE - Mean Squared Error](#ts_mse---mean-squared-error)
-   - [TS_RMSE - Root Mean Squared Error](#ts_rmse---root-mean-squared-error)
-   - [TS_MAPE - Mean Absolute Percentage Error](#ts_mape---mean-absolute-percentage-error)
-   - [TS_SMAPE - Symmetric Mean Absolute Percentage Error](#ts_smape---symmetric-mean-absolute-percentage-error)
-   - [TS_MASE - Mean Absolute Scaled Error](#ts_mase---mean-absolute-scaled-error)
+   - [anofox_fcst_ts_mae - Mean Absolute Error](#ts_mae---mean-absolute-error)
+   - [anofox_fcst_ts_mse - Mean Squared Error](#ts_mse---mean-squared-error)
+   - [anofox_fcst_ts_rmse - Root Mean Squared Error](#ts_rmse---root-mean-squared-error)
+   - [anofox_fcst_ts_mape - Mean Absolute Percentage Error](#ts_mape---mean-absolute-percentage-error)
+   - [anofox_fcst_ts_smape - Symmetric Mean Absolute Percentage Error](#ts_smape---symmetric-mean-absolute-percentage-error)
+   - [anofox_fcst_ts_mase - Mean Absolute Scaled Error](#ts_mase---mean-absolute-scaled-error)
    - [TS_R2 - Coefficient of Determination](#ts_r2---coefficient-of-determination)
-   - [TS_BIAS - Forecast Bias](#ts_bias---forecast-bias)
-   - [TS_RMAE - Relative Mean Absolute Error](#ts_rmae---relative-mean-absolute-error)
-   - [TS_QUANTILE_LOSS - Quantile Loss](#ts_quantile_loss---quantile-loss-pinball-loss)
-   - [TS_MQLOSS - Multi-Quantile Loss](#ts_mqloss---multi-quantile-loss)
-   - [TS_COVERAGE - Prediction Interval Coverage](#ts_coverage---prediction-interval-coverage)
+   - [anofox_fcst_ts_bias - Forecast Bias](#ts_bias---forecast-bias)
+   - [anofox_fcst_ts_rmae - Relative Mean Absolute Error](#ts_rmae---relative-mean-absolute-error)
+   - [anofox_fcst_ts_quantile_loss - Quantile Loss](#ts_quantile_loss---quantile-loss-pinball-loss)
+   - [anofox_fcst_ts_mqloss - Multi-Quantile Loss](#ts_mqloss---multi-quantile-loss)
+   - [anofox_fcst_ts_coverage - Prediction Interval Coverage](#ts_coverage---prediction-interval-coverage)
 4. [Error Handling](#error-handling)
 
 ---
 
 ## Example: Forecasting and Evaluation with Multiple Methods
 
-The following complete example demonstrates creating train and test datasets, generating forecasts using three different forecasting methods for multiple time series with GROUP BY, then evaluating the forecasts using `TS_MAE` and `TS_BIAS` metrics. This example is copy-paste ready and can be executed immediately.
+The following complete example demonstrates creating train and test datasets, generating forecasts using three different forecasting methods for multiple time series with GROUP BY, then evaluating the forecasts using `anofox_fcst_ts_mae` and `anofox_fcst_ts_bias` metrics. This example is copy-paste ready and can be executed immediately.
 
 ```sql
 -- Step 1: Create training data with multiple products and weekly seasonality
@@ -70,7 +70,7 @@ CROSS JOIN generate_series(1, 3) t(i);  -- 3 products
 
 -- Step 3: Generate forecasts using three different methods for each product
 CREATE TEMP TABLE forecasts AS
-SELECT * FROM TS_FORECAST_BY(
+SELECT * FROM anofox_fcst_ts_forecast_by(
     'sales_train',
     product_id,
     date,
@@ -80,7 +80,7 @@ SELECT * FROM TS_FORECAST_BY(
     MAP{'seasonal_period': 7}
 )
 UNION ALL
-SELECT * FROM TS_FORECAST_BY(
+SELECT * FROM anofox_fcst_ts_forecast_by(
     'sales_train',
     product_id,
     date,
@@ -90,7 +90,7 @@ SELECT * FROM TS_FORECAST_BY(
     MAP{'seasonal_period': 7}
 )
 UNION ALL
-SELECT * FROM TS_FORECAST_BY(
+SELECT * FROM anofox_fcst_ts_forecast_by(
     'sales_train',
     product_id,
     date,
@@ -111,12 +111,12 @@ SELECT
 FROM forecasts f
 JOIN sales_test t ON f.product_id = t.product_id AND f.date = t.date;
 
--- Step 5: Evaluate forecasts using TS_MAE and TS_BIAS per product and model
+-- Step 5: Evaluate forecasts using anofox_fcst_ts_mae and anofox_fcst_ts_bias per product and model
 SELECT 
     product_id,
     model_name,
-    TS_MAE(LIST(actual_value), LIST(point_forecast)) AS mae,
-    TS_BIAS(LIST(actual_value), LIST(point_forecast)) AS bias
+    anofox_fcst_ts_mae(LIST(actual_value), LIST(point_forecast)) AS mae,
+    anofox_fcst_ts_bias(LIST(actual_value), LIST(point_forecast)) AS bias
 FROM evaluation_data
 GROUP BY product_id, model_name
 ORDER BY product_id, mae;
@@ -126,10 +126,10 @@ This example demonstrates:
 
 - Creating training data with multiple time series (3 products) with weekly seasonality and trend
 - Creating test data (holdout period) for evaluation
-- Generating forecasts for multiple time series using `TS_FORECAST_BY` with three different methods (AutoETS, SeasonalNaive, AutoARIMA)
+- Generating forecasts for multiple time series using `anofox_fcst_ts_forecast_by` with three different methods (AutoETS, SeasonalNaive, AutoARIMA)
 - Combining forecasts from multiple methods using `UNION ALL`
 - Joining forecast results with actual test data
-- Evaluating forecast accuracy using `TS_MAE` and `TS_BIAS` with `GROUP BY` and `LIST()` aggregation
+- Evaluating forecast accuracy using `anofox_fcst_ts_mae` and `anofox_fcst_ts_bias` with `GROUP BY` and `LIST()` aggregation
 - Results are grouped by both `product_id` and `model_name` to compare method performance across products
 
 [↑ Go to top](#time-series-evaluation-metrics)
@@ -163,13 +163,13 @@ UNION ALL
 SELECT 5, 106.0, 108.5, 99.0, 118.0;
 
 -- ❌ WRONG - This won't work (metrics need arrays)
--- SELECT product_id, TS_MAE(actual, predicted)
+-- SELECT product_id, anofox_fcst_ts_mae(actual, predicted)
 -- FROM results
 -- GROUP BY product_id;
 
 -- ✅ CORRECT - Use LIST() to create arrays
 SELECT 
-    TS_MAE(LIST(actual ORDER BY forecast_step), LIST(forecast ORDER BY forecast_step)) AS mae
+    anofox_fcst_ts_mae(LIST(actual ORDER BY forecast_step), LIST(forecast ORDER BY forecast_step)) AS mae
 FROM results;
 ```
 
@@ -179,12 +179,12 @@ FROM results;
 
 ## Function Signatures
 
-### TS_MAE - Mean Absolute Error
+### anofox_fcst_ts_mae - Mean Absolute Error
 
 **Signature:**
 
 ```sql
-TS_MAE(
+anofox_fcst_ts_mae(
     actual      DOUBLE[],
     predicted   DOUBLE[]
 ) → DOUBLE
@@ -201,7 +201,7 @@ The Mean Absolute Error (MAE) computes the average absolute difference between a
 **Example:**
 
 ```sql
-SELECT TS_MAE([100, 102, 105], [101, 101, 104]) AS mae;
+SELECT anofox_fcst_ts_mae([100, 102, 105], [101, 101, 104]) AS mae;
 -- Result: 0.67
 ```
 
@@ -209,12 +209,12 @@ SELECT TS_MAE([100, 102, 105], [101, 101, 104]) AS mae;
 
 ---
 
-### TS_MSE - Mean Squared Error
+### anofox_fcst_ts_mse - Mean Squared Error
 
 **Signature:**
 
 ```sql
-TS_MSE(
+anofox_fcst_ts_mse(
     actual      DOUBLE[],
     predicted   DOUBLE[]
 ) → DOUBLE
@@ -231,7 +231,7 @@ The Mean Squared Error (MSE) computes the average of the squared differences bet
 **Example:**
 
 ```sql
-SELECT TS_MSE([100, 102, 105], [101, 101, 104]) AS mse;
+SELECT anofox_fcst_ts_mse([100, 102, 105], [101, 101, 104]) AS mse;
 -- Result: 0.67
 ```
 
@@ -239,12 +239,12 @@ SELECT TS_MSE([100, 102, 105], [101, 101, 104]) AS mse;
 
 ---
 
-### TS_RMSE - Root Mean Squared Error
+### anofox_fcst_ts_rmse - Root Mean Squared Error
 
 **Signature:**
 
 ```sql
-TS_RMSE(
+anofox_fcst_ts_rmse(
     actual      DOUBLE[],
     predicted   DOUBLE[]
 ) → DOUBLE
@@ -261,7 +261,7 @@ The Root Mean Squared Error (RMSE) is the square root of the Mean Squared Error,
 **Example:**
 
 ```sql
-SELECT TS_RMSE([100, 102, 105], [101, 101, 104]) AS rmse;
+SELECT anofox_fcst_ts_rmse([100, 102, 105], [101, 101, 104]) AS rmse;
 -- Result: 0.82
 ```
 
@@ -269,12 +269,12 @@ SELECT TS_RMSE([100, 102, 105], [101, 101, 104]) AS rmse;
 
 ---
 
-### TS_MAPE - Mean Absolute Percentage Error
+### anofox_fcst_ts_mape - Mean Absolute Percentage Error
 
 **Signature:**
 
 ```sql
-TS_MAPE(
+anofox_fcst_ts_mape(
     actual      DOUBLE[],
     predicted   DOUBLE[]
 ) → DOUBLE
@@ -294,7 +294,7 @@ The Mean Absolute Percentage Error (MAPE) expresses forecast errors as a percent
 **Example:**
 
 ```sql
-SELECT TS_MAPE([100, 102, 105], [101, 101, 104]) AS mape_percent;
+SELECT anofox_fcst_ts_mape([100, 102, 105], [101, 101, 104]) AS mape_percent;
 -- Result: 0.65 (0.65% error)
 ```
 
@@ -302,12 +302,12 @@ SELECT TS_MAPE([100, 102, 105], [101, 101, 104]) AS mape_percent;
 
 ---
 
-### TS_SMAPE - Symmetric Mean Absolute Percentage Error
+### anofox_fcst_ts_smape - Symmetric Mean Absolute Percentage Error
 
 **Signature:**
 
 ```sql
-TS_SMAPE(
+anofox_fcst_ts_smape(
     actual      DOUBLE[],
     predicted   DOUBLE[]
 ) → DOUBLE
@@ -327,7 +327,7 @@ The Symmetric Mean Absolute Percentage Error (SMAPE) is a symmetric version of M
 **Example:**
 
 ```sql
-SELECT TS_SMAPE([100, 102, 105], [101, 101, 104]) AS smape_percent;
+SELECT anofox_fcst_ts_smape([100, 102, 105], [101, 101, 104]) AS smape_percent;
 -- Result: 0.65 (0.65% error)
 ```
 
@@ -335,12 +335,12 @@ SELECT TS_SMAPE([100, 102, 105], [101, 101, 104]) AS smape_percent;
 
 ---
 
-### TS_MASE - Mean Absolute Scaled Error
+### anofox_fcst_ts_mase - Mean Absolute Scaled Error
 
 **Signature:**
 
 ```sql
-TS_MASE(
+anofox_fcst_ts_mase(
     actual      DOUBLE[],
     predicted   DOUBLE[],
     baseline    DOUBLE[]
@@ -359,7 +359,7 @@ The Mean Absolute Scaled Error (MASE) measures forecast accuracy relative to a b
 
 ```sql
 -- Compare Theta against Naive baseline
-SELECT TS_MASE(
+SELECT anofox_fcst_ts_mase(
     [100, 102, 105, 103, 107],  -- actual
     [101, 101, 104, 104, 106],  -- theta predictions
     [100, 100, 100, 100, 100]   -- naive baseline
@@ -393,7 +393,7 @@ The R-squared (R²) coefficient of determination measures the proportion of vari
 **Example:**
 
 ```sql
-SELECT TS_R2([100, 102, 105, 103, 107], [101, 101, 104, 104, 106]) AS r_squared;
+SELECT anofox_fcst_ts_r2([100, 102, 105, 103, 107], [101, 101, 104, 104, 106]) AS r_squared;
 -- Result: 0.88 → Model explains 88% of variance
 ```
 
@@ -401,12 +401,12 @@ SELECT TS_R2([100, 102, 105, 103, 107], [101, 101, 104, 104, 106]) AS r_squared;
 
 ---
 
-### TS_BIAS - Forecast Bias
+### anofox_fcst_ts_bias - Forecast Bias
 
 **Signature:**
 
 ```sql
-TS_BIAS(
+anofox_fcst_ts_bias(
     actual      DOUBLE[],
     predicted   DOUBLE[]
 ) → DOUBLE
@@ -426,15 +426,15 @@ The Forecast Bias metric measures the average signed error between predicted and
 
 ```sql
 -- Over-forecasting
-SELECT TS_BIAS([100, 102, 105], [103, 105, 108]) AS bias;
+SELECT anofox_fcst_ts_bias([100, 102, 105], [103, 105, 108]) AS bias;
 -- Result: +3.0 → Systematically over-forecasting by 3 units
 
 -- Under-forecasting
-SELECT TS_BIAS([100, 102, 105], [98, 100, 103]) AS bias;
+SELECT anofox_fcst_ts_bias([100, 102, 105], [98, 100, 103]) AS bias;
 -- Result: -2.0 → Systematically under-forecasting by 2 units
 
 -- Unbiased
-SELECT TS_BIAS([100, 102, 105], [101, 101, 106]) AS bias;
+SELECT anofox_fcst_ts_bias([100, 102, 105], [101, 101, 106]) AS bias;
 -- Result: 0.0 → Errors cancel out (no systematic bias)
 ```
 
@@ -442,12 +442,12 @@ SELECT TS_BIAS([100, 102, 105], [101, 101, 106]) AS bias;
 
 ---
 
-### TS_RMAE - Relative Mean Absolute Error
+### anofox_fcst_ts_rmae - Relative Mean Absolute Error
 
 **Signature:**
 
 ```sql
-TS_RMAE(
+anofox_fcst_ts_rmae(
     actual      DOUBLE[],
     pred1        DOUBLE[],
     pred2        DOUBLE[]
@@ -474,11 +474,11 @@ SELECT
 
 -- Compare AutoETS vs Naive forecast
 SELECT 
-    TS_MAE(actual, forecast_autoets) AS mae_autoets,
-    TS_MAE(actual, forecast_naive) AS mae_naive,
-    TS_RMAE(actual, forecast_autoets, forecast_naive) AS relative_performance,
+    anofox_fcst_ts_mae(actual, forecast_autoets) AS mae_autoets,
+    anofox_fcst_ts_mae(actual, forecast_naive) AS mae_naive,
+    anofox_fcst_ts_rmae(actual, forecast_autoets, forecast_naive) AS relative_performance,
     CASE 
-        WHEN TS_RMAE(actual, forecast_autoets, forecast_naive) < 1.0
+        WHEN anofox_fcst_ts_rmae(actual, forecast_autoets, forecast_naive) < 1.0
         THEN 'AutoETS is better'
         ELSE 'Naive is better'
     END AS winner
@@ -492,12 +492,12 @@ FROM forecast_comparison;
 
 ---
 
-### TS_QUANTILE_LOSS - Quantile Loss (Pinball Loss)
+### anofox_fcst_ts_quantile_loss - Quantile Loss (Pinball Loss)
 
 **Signature:**
 
 ```sql
-TS_QUANTILE_LOSS(
+anofox_fcst_ts_quantile_loss(
     actual      DOUBLE[],
     predicted   DOUBLE[],
     q           DOUBLE
@@ -523,12 +523,12 @@ The Quantile Loss, also known as Pinball Loss, evaluates the accuracy of quantil
 
 ---
 
-### TS_MQLOSS - Multi-Quantile Loss
+### anofox_fcst_ts_mqloss - Multi-Quantile Loss
 
 **Signature:**
 
 ```sql
-TS_MQLOSS(
+anofox_fcst_ts_mqloss(
     actual      DOUBLE[],
     quantiles   DOUBLE[][],
     levels      DOUBLE[]
@@ -565,7 +565,7 @@ WITH distributions AS (
         [0.1, 0.25, 0.5, 0.75, 0.9] AS quantiles
 )
 SELECT 
-    TS_MQLOSS(actual, predicted_quantiles, quantiles) AS mqloss,
+    anofox_fcst_ts_mqloss(actual, predicted_quantiles, quantiles) AS mqloss,
     'Lower is better - measures full distribution accuracy' AS interpretation
 FROM distributions;
 
@@ -579,12 +579,12 @@ FROM distributions;
 
 ---
 
-### TS_COVERAGE - Prediction Interval Coverage
+### anofox_fcst_ts_coverage - Prediction Interval Coverage
 
 **Signature:**
 
 ```sql
-TS_COVERAGE(
+anofox_fcst_ts_coverage(
     actual      DOUBLE[],
     lower       DOUBLE[],
     upper       DOUBLE[]
@@ -604,7 +604,7 @@ The Prediction Interval Coverage metric measures the fraction of actual values t
 ```sql
 SELECT 
     product_id,
-    TS_COVERAGE(LIST(actual), LIST(lower), LIST(upper)) * 100 AS coverage_pct
+    anofox_fcst_ts_coverage(LIST(actual), LIST(lower), LIST(upper)) * 100 AS coverage_pct
 FROM results
 GROUP BY product_id;
 -- Coverage should be close to confidence_level × 100

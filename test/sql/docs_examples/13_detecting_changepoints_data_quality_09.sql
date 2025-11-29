@@ -13,7 +13,7 @@ WITH process_changes AS (
         machine_id,
         MAX(date_col) FILTER (WHERE is_changepoint) AS last_shift,
         COUNT(*) FILTER (WHERE is_changepoint) AS total_shifts
-    FROM TS_DETECT_CHANGEPOINTS_BY('process_data', machine_id, timestamp, measurement, MAP{})
+    FROM anofox_fcst_ts_detect_changepoints_by('process_data', machine_id, timestamp, measurement, MAP{})
     GROUP BY machine_id
 )
 SELECT 

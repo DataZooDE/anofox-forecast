@@ -17,7 +17,7 @@ SELECT
     ROUND(result.seasonal_strength, 3) AS seasonal_str,
     ROUND(result.trend_strength, 3) AS trend_str
 FROM (
-    SELECT TS_ANALYZE_SEASONALITY(timestamps, values) AS result
+    SELECT anofox_fcst_ts_analyze_seasonality(timestamps, values) AS result
     FROM aggregated
 );
 

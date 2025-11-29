@@ -694,7 +694,7 @@ AggregateFunction CreateTSForecastAggregate() {
 
 	// Create aggregate function - use LEGACY destructor for non-trivial state
 	AggregateFunction forecast_agg(
-	    "ts_forecast_agg", // name (internal, use TS_FORECAST macro for user-facing API)
+	    "anofox_fcst_ts_forecast_agg", // name (internal, use TS_FORECAST macro for user-facing API)
 	    {LogicalType::ANY, LogicalType::DOUBLE, LogicalType::VARCHAR, LogicalType::INTEGER,
 	     LogicalType::ANY},                  // arguments (first arg accepts INTEGER/DATE/TIMESTAMP)
 	    LogicalType::STRUCT({}),             // return_type (will be set in bind)

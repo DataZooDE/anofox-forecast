@@ -12,13 +12,13 @@ CROSS JOIN (VALUES ('P001'), ('P002')) products(product_id);
 
 -- Generate stats for reference
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, sales_amount, '1d');
 
 -- Option A: Forward fill (use last known value)
-SELECT * FROM TS_FILL_NULLS_FORWARD('sales', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_fill_nulls_forward('sales', product_id, date, sales_amount);
 
 -- Option B: Mean imputation
-SELECT * FROM TS_FILL_NULLS_MEAN('sales', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_fill_nulls_mean('sales', product_id, date, sales_amount);
 
 -- Option C: Drop series with too many nulls
 WITH clean AS (

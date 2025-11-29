@@ -40,7 +40,7 @@ CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
 
 -- Generate forecasts for multiple products
 CREATE TEMP TABLE forecasts_temp AS
-SELECT * FROM TS_FORECAST_BY(
+SELECT * FROM anofox_fcst_ts_forecast_by(
     'sales',
     product_id,
     date,
@@ -62,10 +62,10 @@ JOIN actuals a ON f.product_id = a.product_id AND f.forecast_step = a.step;
 -- Calculate metrics per product using GROUP BY + LIST()
 SELECT 
     product_id,
-    TS_MAE(LIST(actual ORDER BY product_id), LIST(predicted ORDER BY product_id)) AS mae,
-    TS_RMSE(LIST(actual ORDER BY product_id), LIST(predicted ORDER BY product_id)) AS rmse,
-    TS_MAPE(LIST(actual ORDER BY product_id), LIST(predicted ORDER BY product_id)) AS mape,
-    TS_BIAS(LIST(actual ORDER BY product_id), LIST(predicted ORDER BY product_id)) AS bias
+    anofox_fcst_ts_mae(LIST(actual ORDER BY product_id), LIST(predicted ORDER BY product_id)) AS mae,
+    anofox_fcst_ts_rmse(LIST(actual ORDER BY product_id), LIST(predicted ORDER BY product_id)) AS rmse,
+    anofox_fcst_ts_mape(LIST(actual ORDER BY product_id), LIST(predicted ORDER BY product_id)) AS mape,
+    anofox_fcst_ts_bias(LIST(actual ORDER BY product_id), LIST(predicted ORDER BY product_id)) AS bias
 FROM evaluation
 GROUP BY product_id
 ORDER BY mae;  -- Best forecasts first

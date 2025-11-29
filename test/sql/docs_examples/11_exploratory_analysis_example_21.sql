@@ -12,7 +12,7 @@ CREATE TABLE ecommerce_prepared AS
 WITH 
 -- Identify promotion periods (changepoints)
 changepoints AS (
-    SELECT * FROM TS_DETECT_CHANGEPOINTS_BY('ecom_sales', product_id, date, amount,
+    SELECT * FROM anofox_fcst_ts_detect_changepoints_by('ecom_sales', product_id, date, amount,
                                              MAP{'include_probabilities': true})
     WHERE changepoint_probability > 0.95  -- High confidence
 ),
@@ -59,7 +59,7 @@ WHERE is_promo_period = false;
 
 -- Forecast only on non-promo data for base demand
 CREATE TABLE base_demand_forecast AS
-SELECT * FROM TS_FORECAST_BY(
+SELECT * FROM anofox_fcst_ts_forecast_by(
     'base_demand_data',
     product_id, date_col, value_col,
     'AutoETS', 30, MAP{'seasonal_period': 7}

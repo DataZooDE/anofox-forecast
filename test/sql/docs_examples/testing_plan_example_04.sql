@@ -6,8 +6,8 @@ SELECT
     [105.0, 107.0, 103.0, 110.0]::DOUBLE[] AS upper_bounds;
 
 -- Generate forecasts with known distribution
--- Check coverage using TS_COVERAGE metric
-SELECT TS_COVERAGE(
+-- Check coverage using anofox_fcst_ts_coverage metric
+SELECT anofox_fcst_ts_coverage(
     actual_values,
     lower_bounds,
     upper_bounds

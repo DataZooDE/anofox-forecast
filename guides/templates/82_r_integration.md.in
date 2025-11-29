@@ -72,7 +72,7 @@ dbExecute(con, "
 
 # Generate forecast
 forecast <- dbGetQuery(con, "
-    SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
+    SELECT * FROM anofox_fcst_ts_forecast('sales', date, amount, 'AutoETS', 28, 
                               {'seasonal_period': 7})
 ")
 
@@ -105,7 +105,7 @@ duckdb::duckdb_register(con, "sales", sales_df)
 
 # Forecast directly from R data frame
 forecast <- dbGetQuery(con, "
-    SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28,
+    SELECT * FROM anofox_fcst_ts_forecast('sales', date, amount, 'AutoETS', 28,
                               {'seasonal_period': 7})
 ")
 
@@ -135,7 +135,7 @@ duckdb_register(con, "sales", sales)
 
 # Forecast multiple series
 forecasts <- dbGetQuery(con, "
-    SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount,
+    SELECT * FROM anofox_fcst_ts_forecast_by('sales', product_id, date, amount,
                                  'AutoETS', 14, {'seasonal_period': 7})
 ") %>%
   as_tibble() %>%
@@ -168,7 +168,7 @@ dbExecute(con, "CREATE TABLE sales_raw AS SELECT * FROM read_csv('sales.csv')")
 
 # Analyze quality
 stats <- dbGetQuery(con, "
-    SELECT * FROM TS_STATS('sales_raw', product_id, date, amount)
+    SELECT * FROM anofox_fcst_ts_stats('sales_raw', product_id, date, amount)
 ")
 
 cat(sprintf("Average quality score: %.3f\n", mean(stats$quality_score)))
@@ -178,17 +178,17 @@ cat(sprintf("Series with issues: %d\n", sum(stats$quality_score < 0.7)))
 dbExecute(con, "
     CREATE TABLE sales_prepared AS
     WITH filled AS (
-        SELECT * FROM TS_FILL_GAPS('sales_raw', product_id, date, amount)
+        SELECT * FROM anofox_fcst_ts_fill_gaps('sales_raw', product_id, date, amount)
     ),
     cleaned AS (
-        SELECT * FROM TS_DROP_CONSTANT('filled', product_id, amount)
+        SELECT * FROM anofox_fcst_ts_drop_constant('filled', product_id, amount)
     )
-    SELECT * FROM TS_FILL_NULLS_FORWARD('cleaned', product_id, date, amount)
+    SELECT * FROM anofox_fcst_ts_fill_nulls_forward('cleaned', product_id, date, amount)
 ")
 
 # Forecast on prepared data
 forecasts <- dbGetQuery(con, "
-    SELECT * FROM TS_FORECAST_BY('sales_prepared', product_id, date, amount,
+    SELECT * FROM anofox_fcst_ts_forecast_by('sales_prepared', product_id, date, amount,
                                  'AutoETS', 28, {'seasonal_period': 7})
 ")
 
@@ -212,7 +212,7 @@ historical <- dbGetQuery(con, "SELECT date, amount FROM sales ORDER BY date") %>
 # Get forecast
 forecast <- dbGetQuery(con, "
     SELECT date_col AS date, point_forecast AS amount, lower, upper
-    FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
+    FROM anofox_fcst_ts_forecast('sales', date, amount, 'AutoETS', 28, 
                      {'seasonal_period': 7, 'confidence_level': 0.95})
 ") %>%
   mutate(date = as.Date(date), type = 'Forecast')
@@ -269,10 +269,10 @@ metrics <- dbGetQuery(con, "
     )
     SELECT 
         product_id,
-        ROUND(TS_MAE(actuals, forecasts), 2) AS mae,
-        ROUND(TS_RMSE(actuals, forecasts), 2) AS rmse,
-        ROUND(TS_MAPE(actuals, forecasts), 2) AS mape,
-        ROUND(TS_COVERAGE(actuals, lower_bounds, upper_bounds) * 100, 1) AS coverage_pct
+        ROUND(anofox_fcst_ts_mae(actuals, forecasts), 2) AS mae,
+        ROUND(anofox_fcst_ts_rmse(actuals, forecasts), 2) AS rmse,
+        ROUND(anofox_fcst_ts_mape(actuals, forecasts), 2) AS mape,
+        ROUND(anofox_fcst_ts_coverage(actuals, lower_bounds, upper_bounds) * 100, 1) AS coverage_pct
     FROM joined
 ")
 
@@ -322,7 +322,7 @@ server <- function(input, output, session) {
   
   forecast_data <- eventReactive(input$forecast, {
     dbGetQuery(con, sprintf("
-      SELECT * FROM TS_FORECAST(
+      SELECT * FROM anofox_fcst_ts_forecast(
         (SELECT * FROM sales WHERE product_id = '%s'),
         date, amount, 'AutoETS', %d, {'seasonal_period': 7}
       )
@@ -388,7 +388,7 @@ dbExecute(con, "CREATE TABLE sales AS SELECT * FROM read_csv('sales.csv')")
 
 ```{r quality}
 stats <- dbGetQuery(con, "
-    SELECT * FROM TS_STATS('sales', product_id, date, amount)
+    SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, amount)
 ")
 
 kable(stats %>% select(series_id, length, quality_score, n_gaps, n_null))
@@ -398,7 +398,7 @@ kable(stats %>% select(series_id, length, quality_score, n_gaps, n_null))
 
 ```{r forecast}
 forecast <- dbGetQuery(con, "
-    SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 
+    SELECT * FROM anofox_fcst_ts_forecast_by('sales', product_id, date, amount, 
                                  'AutoETS', 28, {'seasonal_period': 7})
 ")
 
@@ -446,7 +446,7 @@ dbExecute(con, "LOAD 'anofox_forecast.duckdb_extension'")
 # Let DuckDB do heavy lifting (forecasting)
 # Use dplyr for final shaping
 forecast <- dbGetQuery(con, "
-    SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28, 
+    SELECT * FROM anofox_fcst_ts_forecast_by('sales', product_id, date, amount, 'AutoETS', 28, 
                                  {'seasonal_period': 7})
 ") %>%
   as_tibble() %>%
@@ -479,7 +479,7 @@ ts_forecast <- function(data, date_col, value_col, horizon = 28,
   duckdb_register(con, "input_data", data)
   
   result <- dbGetQuery(con, sprintf("
-    SELECT * FROM TS_FORECAST('input_data', %s, %s, '%s', %d, 
+    SELECT * FROM anofox_fcst_ts_forecast('input_data', %s, %s, '%s', %d, 
                               {'seasonal_period': %d})
   ", date_col, value_col, model, horizon, seasonal_period))
   
@@ -506,7 +506,7 @@ products <- dbGetQuery(con, "SELECT DISTINCT product_id FROM sales")$product_id
 # Forecast each product
 forecasts_list <- map_dfr(products, function(pid) {
   dbGetQuery(con, sprintf("
-    SELECT * FROM TS_FORECAST(
+    SELECT * FROM anofox_fcst_ts_forecast(
       (SELECT * FROM sales WHERE product_id = '%s'),
       date, amount, 'AutoETS', 28, {'seasonal_period': 7}
     )
@@ -546,7 +546,7 @@ microbenchmark(
     dbExecute(con, "LOAD 'anofox_forecast.duckdb_extension'")
     duckdb_register(con, "sales", sales_df)
     fc <- dbGetQuery(con, "
-      SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
+      SELECT * FROM anofox_fcst_ts_forecast('sales', date, amount, 'AutoETS', 28, 
                                 {'seasonal_period': 7})
     ")
     dbDisconnect(con, shutdown = TRUE)
@@ -574,7 +574,7 @@ dbExecute(con, "LOAD 'anofox_forecast.duckdb_extension'")
 
 # Get forecast as data frame
 forecast_df <- dbGetQuery(con, "
-    SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
+    SELECT * FROM anofox_fcst_ts_forecast('sales', date, amount, 'AutoETS', 28, 
                               {'seasonal_period': 7})
 ")
 
@@ -622,7 +622,7 @@ log_info("Data refreshed")
 # Generate forecasts
 dbExecute(con, "
     CREATE OR REPLACE TABLE forecasts AS
-    SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount,
+    SELECT * FROM anofox_fcst_ts_forecast_by('sales', product_id, date, amount,
                                  'AutoETS', 28, {'seasonal_period': 7})
 ")
 
@@ -679,7 +679,7 @@ function(product_id, horizon = 28) {
   }
   
   result <- dbGetQuery(con, sprintf("
-    SELECT * FROM TS_FORECAST(
+    SELECT * FROM anofox_fcst_ts_forecast(
       (SELECT * FROM sales WHERE product_id = '%s'),
       date, amount, 'AutoETS', %d, {'seasonal_period': 7}
     )
@@ -698,7 +698,7 @@ function(product_id) {
   }
   
   result <- dbGetQuery(con, sprintf("
-    SELECT * FROM TS_STATS(
+    SELECT * FROM anofox_fcst_ts_stats(
       (SELECT * FROM sales WHERE product_id = '%s'),
       product_id, date, amount
     )

@@ -25,10 +25,10 @@ SELECT
     END AS value
 FROM generate_series(1, 50) t(i);
 
-# Test: TS_STATS with 30min frequency
+# Test: anofox_fcst_ts_stats with 30min frequency
 statement ok
 CREATE TABLE stats_30min AS
-SELECT * FROM ts_stats(test_30min, series_id, date_col, value, '30m');
+SELECT * FROM anofox_fcst_ts_stats(test_30min, series_id, date_col, value, '30m');
 
 # Verify stats computed correctly
 query I
@@ -61,10 +61,10 @@ WHERE series_id = 'series_1';
 ----
 true
 
-# Test: TS_STATS_SUMMARY with 30min frequency
+# Test: anofox_fcst_ts_stats_summary with 30min frequency
 statement ok
 CREATE TABLE summary_30min AS
-SELECT * FROM ts_stats_summary('stats_30min');
+SELECT * FROM anofox_fcst_ts_stats_summary('stats_30min');
 
 # Verify summary computed
 query I
@@ -98,10 +98,10 @@ SELECT
     END AS value
 FROM generate_series(1, 50) t(i);
 
-# Test: TS_STATS with 1h frequency
+# Test: anofox_fcst_ts_stats with 1h frequency
 statement ok
 CREATE TABLE stats_1h AS
-SELECT * FROM ts_stats(test_1h, series_id, date_col, value, '1h');
+SELECT * FROM anofox_fcst_ts_stats(test_1h, series_id, date_col, value, '1h');
 
 query I
 SELECT COUNT(DISTINCT series_id) = 1
@@ -116,10 +116,10 @@ WHERE series_id = 'series_1';
 ----
 true	true
 
-# Test: TS_STATS_SUMMARY with 1h frequency
+# Test: anofox_fcst_ts_stats_summary with 1h frequency
 statement ok
 CREATE TABLE summary_1h AS
-SELECT * FROM ts_stats_summary('stats_1h');
+SELECT * FROM anofox_fcst_ts_stats_summary('stats_1h');
 
 query I
 SELECT total_series = 1
@@ -151,10 +151,10 @@ SELECT
     END AS value
 FROM generate_series(1, 50) t(i);
 
-# Test: TS_STATS with 1d frequency
+# Test: anofox_fcst_ts_stats with 1d frequency
 statement ok
 CREATE TABLE stats_1d AS
-SELECT * FROM ts_stats(test_1d, series_id, date_col, value, '1d');
+SELECT * FROM anofox_fcst_ts_stats(test_1d, series_id, date_col, value, '1d');
 
 query I
 SELECT COUNT(DISTINCT series_id) = 1
@@ -177,10 +177,10 @@ WHERE series_id = 'series_1';
 ----
 true	true
 
-# Test: TS_STATS_SUMMARY with 1d frequency
+# Test: anofox_fcst_ts_stats_summary with 1d frequency
 statement ok
 CREATE TABLE summary_1d AS
-SELECT * FROM ts_stats_summary('stats_1d');
+SELECT * FROM anofox_fcst_ts_stats_summary('stats_1d');
 
 query I
 SELECT total_series = 1
@@ -220,10 +220,10 @@ SELECT
     END AS value
 FROM generate_series(1, 20) t(i);
 
-# Test: TS_STATS with 1w frequency
+# Test: anofox_fcst_ts_stats with 1w frequency
 statement ok
 CREATE TABLE stats_1w AS
-SELECT * FROM ts_stats(test_1w, series_id, date_col, value, '1w');
+SELECT * FROM anofox_fcst_ts_stats(test_1w, series_id, date_col, value, '1w');
 
 query I
 SELECT COUNT(DISTINCT series_id) = 1
@@ -238,10 +238,10 @@ WHERE series_id = 'series_1';
 ----
 true	true
 
-# Test: TS_STATS_SUMMARY with 1w frequency
+# Test: anofox_fcst_ts_stats_summary with 1w frequency
 statement ok
 CREATE TABLE summary_1w AS
-SELECT * FROM ts_stats_summary('stats_1w');
+SELECT * FROM anofox_fcst_ts_stats_summary('stats_1w');
 
 query I
 SELECT total_series = 1
@@ -273,10 +273,10 @@ SELECT
     END AS value
 FROM generate_series(1, 12) t(i);
 
-# Test: TS_STATS with 1mo frequency
+# Test: anofox_fcst_ts_stats with 1mo frequency
 statement ok
 CREATE TABLE stats_1mo AS
-SELECT * FROM ts_stats(test_1mo, series_id, date_col, value, '1mo');
+SELECT * FROM anofox_fcst_ts_stats(test_1mo, series_id, date_col, value, '1mo');
 
 query I
 SELECT COUNT(DISTINCT series_id) = 1
@@ -291,10 +291,10 @@ WHERE series_id = 'series_1';
 ----
 true	true
 
-# Test: TS_STATS_SUMMARY with 1mo frequency
+# Test: anofox_fcst_ts_stats_summary with 1mo frequency
 statement ok
 CREATE TABLE summary_1mo AS
-SELECT * FROM ts_stats_summary('stats_1mo');
+SELECT * FROM anofox_fcst_ts_stats_summary('stats_1mo');
 
 query I
 SELECT total_series = 1
@@ -326,10 +326,10 @@ SELECT
     END AS value
 FROM generate_series(1, 8) t(i);
 
-# Test: TS_STATS with 1q frequency
+# Test: anofox_fcst_ts_stats with 1q frequency
 statement ok
 CREATE TABLE stats_1q AS
-SELECT * FROM ts_stats(test_1q, series_id, date_col, value, '1q');
+SELECT * FROM anofox_fcst_ts_stats(test_1q, series_id, date_col, value, '1q');
 
 query I
 SELECT COUNT(DISTINCT series_id) = 1
@@ -344,10 +344,10 @@ WHERE series_id = 'series_1';
 ----
 true	true
 
-# Test: TS_STATS_SUMMARY with 1q frequency
+# Test: anofox_fcst_ts_stats_summary with 1q frequency
 statement ok
 CREATE TABLE summary_1q AS
-SELECT * FROM ts_stats_summary('stats_1q');
+SELECT * FROM anofox_fcst_ts_stats_summary('stats_1q');
 
 query I
 SELECT total_series = 1
@@ -379,10 +379,10 @@ SELECT
     END AS value
 FROM generate_series(1, 10) t(i);
 
-# Test: TS_STATS with 1y frequency
+# Test: anofox_fcst_ts_stats with 1y frequency
 statement ok
 CREATE TABLE stats_1y AS
-SELECT * FROM ts_stats(test_1y, series_id, date_col, value, '1y');
+SELECT * FROM anofox_fcst_ts_stats(test_1y, series_id, date_col, value, '1y');
 
 query I
 SELECT COUNT(DISTINCT series_id) = 1
@@ -397,10 +397,10 @@ WHERE series_id = 'series_1';
 ----
 true	true
 
-# Test: TS_STATS_SUMMARY with 1y frequency
+# Test: anofox_fcst_ts_stats_summary with 1y frequency
 statement ok
 CREATE TABLE summary_1y AS
-SELECT * FROM ts_stats_summary('stats_1y');
+SELECT * FROM anofox_fcst_ts_stats_summary('stats_1y');
 
 query I
 SELECT total_series = 1
@@ -435,7 +435,7 @@ FROM generate_series(1, 10) t(i);
 
 statement ok
 CREATE TABLE stats_multi AS
-SELECT * FROM ts_stats(test_multi_freq, series_id, date_col, value, '1d');
+SELECT * FROM anofox_fcst_ts_stats(test_multi_freq, series_id, date_col, value, '1d');
 
 # Verify both series present
 query I
@@ -452,10 +452,10 @@ SELECT
 ----
 true	true
 
-# Test: TS_STATS_SUMMARY with multiple series
+# Test: anofox_fcst_ts_stats_summary with multiple series
 statement ok
 CREATE TABLE summary_multi AS
-SELECT * FROM ts_stats_summary('stats_multi');
+SELECT * FROM anofox_fcst_ts_stats_summary('stats_multi');
 
 query I
 SELECT total_series = 2
@@ -487,12 +487,12 @@ SELECT
     END AS value
 FROM generate_series(1, 50) t(i);
 
-# Test: TS_STATS with INTEGER date column
-# Note: TS_STATS currently only supports TIMESTAMP date columns, not INTEGER
-# This test is commented out until INTEGER support is added to TS_STATS
+# Test: anofox_fcst_ts_stats with INTEGER date column
+# Note: anofox_fcst_ts_stats currently only supports TIMESTAMP date columns, not INTEGER
+# This test is commented out until INTEGER support is added to anofox_fcst_ts_stats
 # statement ok
 # CREATE TABLE stats_int AS
-# SELECT * FROM ts_stats(test_int, series_id, date_col, value);
+# SELECT * FROM anofox_fcst_ts_stats(test_int, series_id, date_col, value);
 #
 # # Verify stats computed correctly
 # query I
@@ -508,10 +508,10 @@ FROM generate_series(1, 50) t(i);
 # ----
 # true	true
 #
-# # Test: TS_STATS_SUMMARY with INTEGER date column
+# # Test: anofox_fcst_ts_stats_summary with INTEGER date column
 # statement ok
 # CREATE TABLE summary_int AS
-# SELECT * FROM ts_stats_summary('stats_int');
+# SELECT * FROM anofox_fcst_ts_stats_summary('stats_int');
 #
 # # Verify summary computed
 # query I

@@ -9,7 +9,7 @@ CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
 
 -- Generate stats
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, sales_amount, '1d');
 
 -- Detect
 WITH end_dates AS (
@@ -26,7 +26,7 @@ SELECT
     group_col AS product_id,
     date_col AS date,
     value_col AS sales_amount
-FROM TS_FILL_FORWARD(
+FROM anofox_fcst_ts_fill_forward(
     'sales',
     product_id,
     date,

@@ -10,7 +10,7 @@ WITH split AS (
     SELECT * FROM data WHERE date < DATE '2024-01-01'  -- Train
 ),
 forecast AS (
-    SELECT LIST(point_forecast ORDER BY forecast_step) AS pred FROM TS_FORECAST('split', date, value, 'AutoETS', 30, MAP{})
+    SELECT LIST(point_forecast ORDER BY forecast_step) AS pred FROM anofox_fcst_ts_forecast('split', date, value, 'AutoETS', 30, MAP{})
 ),
 test AS (
     SELECT LIST(value ORDER BY date) AS actual 
@@ -19,5 +19,5 @@ test AS (
     LIMIT 30
 )
 SELECT 
-    TS_MAE(actual, pred) AS test_mae
+    anofox_fcst_ts_mae(actual, pred) AS test_mae
 FROM test, forecast;

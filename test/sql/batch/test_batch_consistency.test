@@ -1,5 +1,5 @@
 # name: test/sql/batch/test_batch_consistency.test
-# description: Test batch (TS_FORECAST_BY) vs individual (ts_forecast) consistency for all models
+# description: Test batch (anofox_fcst_ts_forecast_by) vs individual (anofox_fcst_ts_forecast) consistency for all models
 # group: [batch]
 
 require anofox_forecast
@@ -23,7 +23,7 @@ FROM generate_series(DATE '2023-01-01', DATE '2023-12-31', INTERVAL 1 DAY) t(i);
 statement ok
 CREATE TABLE batch_naive AS
 SELECT series_id, forecast_step, point_forecast
-FROM TS_FORECAST_BY(test_series, series_id, date_col, value, 'Naive', 14, NULL)
+FROM anofox_fcst_ts_forecast_by(test_series, series_id, date_col, value, 'Naive', 14, NULL)
 ORDER BY series_id, forecast_step;
 
 statement ok
@@ -38,13 +38,13 @@ CREATE TABLE s3_temp AS SELECT date_col, value FROM test_series WHERE series_id 
 statement ok
 CREATE TABLE individual_naive AS
 SELECT 'S1_constant' AS series_id, forecast_step, point_forecast
-FROM ts_forecast('s1_temp', date_col, value, 'Naive', 14, NULL)
+FROM anofox_fcst_ts_forecast('s1_temp', date_col, value, 'Naive', 14, NULL)
 UNION ALL
 SELECT 'S2_trend' AS series_id, forecast_step, point_forecast
-FROM ts_forecast('s2_temp', date_col, value, 'Naive', 14, NULL)
+FROM anofox_fcst_ts_forecast('s2_temp', date_col, value, 'Naive', 14, NULL)
 UNION ALL
 SELECT 'S3_seasonal' AS series_id, forecast_step, point_forecast
-FROM ts_forecast('s3_temp', date_col, value, 'Naive', 14, NULL);
+FROM anofox_fcst_ts_forecast('s3_temp', date_col, value, 'Naive', 14, NULL);
 
 # Verify Naive forecasts match exactly
 query I
@@ -62,19 +62,19 @@ true
 statement ok
 CREATE TABLE batch_sma AS
 SELECT series_id, forecast_step, point_forecast
-FROM TS_FORECAST_BY(test_series, series_id, date_col, value, 'SMA', 14, {'window': 7})
+FROM anofox_fcst_ts_forecast_by(test_series, series_id, date_col, value, 'SMA', 14, {'window': 7})
 ORDER BY series_id, forecast_step;
 
 statement ok
 CREATE TABLE individual_sma AS
 SELECT 'S1_constant' AS series_id, forecast_step, point_forecast
-FROM ts_forecast('s1_temp', date_col, value, 'SMA', 14, {'window': 7})
+FROM anofox_fcst_ts_forecast('s1_temp', date_col, value, 'SMA', 14, {'window': 7})
 UNION ALL
 SELECT 'S2_trend' AS series_id, forecast_step, point_forecast
-FROM ts_forecast('s2_temp', date_col, value, 'SMA', 14, {'window': 7})
+FROM anofox_fcst_ts_forecast('s2_temp', date_col, value, 'SMA', 14, {'window': 7})
 UNION ALL
 SELECT 'S3_seasonal' AS series_id, forecast_step, point_forecast
-FROM ts_forecast('s3_temp', date_col, value, 'SMA', 14, {'window': 7});
+FROM anofox_fcst_ts_forecast('s3_temp', date_col, value, 'SMA', 14, {'window': 7});
 
 query I
 SELECT COUNT(*) = 0 AS all_match
@@ -91,19 +91,19 @@ true
 statement ok
 CREATE TABLE batch_ses AS
 SELECT series_id, forecast_step, point_forecast
-FROM TS_FORECAST_BY(test_series, series_id, date_col, value, 'SES', 14, {'alpha': 0.3})
+FROM anofox_fcst_ts_forecast_by(test_series, series_id, date_col, value, 'SES', 14, {'alpha': 0.3})
 ORDER BY series_id, forecast_step;
 
 statement ok
 CREATE TABLE individual_ses AS
 SELECT 'S1_constant' AS series_id, forecast_step, point_forecast
-FROM ts_forecast('s1_temp', date_col, value, 'SES', 14, {'alpha': 0.3})
+FROM anofox_fcst_ts_forecast('s1_temp', date_col, value, 'SES', 14, {'alpha': 0.3})
 UNION ALL
 SELECT 'S2_trend' AS series_id, forecast_step, point_forecast
-FROM ts_forecast('s2_temp', date_col, value, 'SES', 14, {'alpha': 0.3})
+FROM anofox_fcst_ts_forecast('s2_temp', date_col, value, 'SES', 14, {'alpha': 0.3})
 UNION ALL
 SELECT 'S3_seasonal' AS series_id, forecast_step, point_forecast
-FROM ts_forecast('s3_temp', date_col, value, 'SES', 14, {'alpha': 0.3});
+FROM anofox_fcst_ts_forecast('s3_temp', date_col, value, 'SES', 14, {'alpha': 0.3});
 
 query I
 SELECT COUNT(*) = 0 AS all_match
@@ -120,19 +120,19 @@ true
 statement ok
 CREATE TABLE batch_ets AS
 SELECT series_id, forecast_step, point_forecast
-FROM TS_FORECAST_BY(test_series, series_id, date_col, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1})
+FROM anofox_fcst_ts_forecast_by(test_series, series_id, date_col, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1})
 ORDER BY series_id, forecast_step;
 
 statement ok
 CREATE TABLE individual_ets AS
 SELECT 'S1_constant' AS series_id, forecast_step, point_forecast
-FROM ts_forecast('s1_temp', date_col, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1})
+FROM anofox_fcst_ts_forecast('s1_temp', date_col, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1})
 UNION ALL
 SELECT 'S2_trend' AS series_id, forecast_step, point_forecast
-FROM ts_forecast('s2_temp', date_col, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1})
+FROM anofox_fcst_ts_forecast('s2_temp', date_col, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1})
 UNION ALL
 SELECT 'S3_seasonal' AS series_id, forecast_step, point_forecast
-FROM ts_forecast('s3_temp', date_col, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1});
+FROM anofox_fcst_ts_forecast('s3_temp', date_col, value, 'ETS', 14, {'error': 'A', 'trend': 'A', 'season': 'N', 'season_length': 1});
 
 query I
 SELECT COUNT(*) = 0 AS all_match
@@ -149,19 +149,19 @@ true
 statement ok
 CREATE TABLE batch_croston AS
 SELECT series_id, forecast_step, point_forecast
-FROM TS_FORECAST_BY(test_series, series_id, date_col, value, 'CrostonClassic', 14, {'alpha': 0.1})
+FROM anofox_fcst_ts_forecast_by(test_series, series_id, date_col, value, 'CrostonClassic', 14, {'alpha': 0.1})
 ORDER BY series_id, forecast_step;
 
 statement ok
 CREATE TABLE individual_croston AS
 SELECT 'S1_constant' AS series_id, forecast_step, point_forecast
-FROM ts_forecast('s1_temp', date_col, value, 'CrostonClassic', 14, {'alpha': 0.1})
+FROM anofox_fcst_ts_forecast('s1_temp', date_col, value, 'CrostonClassic', 14, {'alpha': 0.1})
 UNION ALL
 SELECT 'S2_trend' AS series_id, forecast_step, point_forecast
-FROM ts_forecast('s2_temp', date_col, value, 'CrostonClassic', 14, {'alpha': 0.1})
+FROM anofox_fcst_ts_forecast('s2_temp', date_col, value, 'CrostonClassic', 14, {'alpha': 0.1})
 UNION ALL
 SELECT 'S3_seasonal' AS series_id, forecast_step, point_forecast
-FROM ts_forecast('s3_temp', date_col, value, 'CrostonClassic', 14, {'alpha': 0.1});
+FROM anofox_fcst_ts_forecast('s3_temp', date_col, value, 'CrostonClassic', 14, {'alpha': 0.1});
 
 query I
 SELECT COUNT(*) = 0 AS all_match

@@ -10,7 +10,7 @@ static const DefaultTableMacro data_quality_macros[] = {
 
     // TS_DATA_QUALITY: Comprehensive data quality assessment (VARCHAR frequency - date-based)
     {DEFAULT_SCHEMA,
-     "ts_data_quality",
+     "anofox_fcst_ts_data_quality",
      {"table_name", "unique_id_col", "date_col", "value_col", "n_short", "frequency", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -399,7 +399,7 @@ static const DefaultTableMacro data_quality_macros[] = {
 
     // TS_DATA_QUALITY: Comprehensive data quality assessment (INTEGER frequency - integer-based)
     {DEFAULT_SCHEMA,
-     "ts_data_quality",
+     "anofox_fcst_ts_data_quality",
      {"table_name", "unique_id_col", "date_col", "value_col", "n_short", "frequency", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -775,7 +775,7 @@ static const DefaultTableMacro data_quality_macros[] = {
 
     // TS_DATA_QUALITY_SUMMARY: Aggregated summary by dimension
     {DEFAULT_SCHEMA,
-     "ts_data_quality_summary",
+     "anofox_fcst_ts_data_quality_summary",
      {"table_name", "unique_id_col", "date_col", "value_col", "n_short", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -815,10 +815,21 @@ void RegisterDataQualityMacros(ExtensionLoader &loader) {
 			auto table_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(data_quality_macros[index]);
 			table_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
 			loader.RegisterFunction(*table_info);
+
+			// Register alias
+			if (table_info->name.find("anofox_fcst_") == 0) {
+				string alias_name = table_info->name.substr(12); // Remove "anofox_fcst_" prefix
+				DefaultTableMacro alias_macro = data_quality_macros[index];
+				alias_macro.name = alias_name.c_str();
+				auto alias_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(alias_macro);
+				alias_info->alias_of = table_info->name;
+				alias_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+				loader.RegisterFunction(*alias_info);
+			}
 		} else {
 			// Multiple macros with same name - create overloaded macro with typed parameters
 			// For ts_data_quality, we have VARCHAR and INTEGER overloads
-			if (group.second.size() == 2 && group.first == "ts_data_quality") {
+			if (group.second.size() == 2 && group.first == "anofox_fcst_ts_data_quality") {
 				// Create a single CreateMacroInfo with both overloads
 				auto first_info =
 				    DefaultTableFunctionGenerator::CreateTableMacroInfo(data_quality_macros[group.second[0]]);
@@ -847,6 +858,23 @@ void RegisterDataQualityMacros(ExtensionLoader &loader) {
 				// Register the combined macro
 				first_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
 				loader.RegisterFunction(*first_info);
+
+				// Register alias
+				if (first_info->name.find("anofox_fcst_") == 0) {
+					string alias_name = first_info->name.substr(12); // Remove "anofox_fcst_" prefix
+					auto alias_info =
+					    DefaultTableFunctionGenerator::CreateTableMacroInfo(data_quality_macros[group.second[0]]);
+					alias_info->name = alias_name;
+					// Copy the overloads
+					for (size_t i = 1; i < first_info->macros.size(); i++) {
+						auto alias_macro =
+						    DefaultTableFunctionGenerator::CreateTableMacroInfo(data_quality_macros[group.second[i]]);
+						alias_info->macros.push_back(std::move(alias_macro->macros[0]));
+					}
+					alias_info->alias_of = first_info->name;
+					alias_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+					loader.RegisterFunction(*alias_info);
+				}
 			} else {
 				// For other cases, register normally
 				for (idx_t i = 0; i < group.second.size(); i++) {
@@ -854,6 +882,17 @@ void RegisterDataQualityMacros(ExtensionLoader &loader) {
 					auto table_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(data_quality_macros[index]);
 					table_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
 					loader.RegisterFunction(*table_info);
+
+					// Register alias
+					if (table_info->name.find("anofox_fcst_") == 0) {
+						string alias_name = table_info->name.substr(12); // Remove "anofox_fcst_" prefix
+						DefaultTableMacro alias_macro = data_quality_macros[index];
+						alias_macro.name = alias_name.c_str();
+						auto alias_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(alias_macro);
+						alias_info->alias_of = table_info->name;
+						alias_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+						loader.RegisterFunction(*alias_info);
+					}
 				}
 			}
 		}

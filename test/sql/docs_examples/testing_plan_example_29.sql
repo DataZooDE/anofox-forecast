@@ -6,9 +6,9 @@ SELECT
 FROM generate_series(0, 89) t(d);
 
 -- Standard forecast call
-SELECT * FROM TS_FORECAST('test_data', date, value, 'Naive', 5, MAP{})
+SELECT * FROM anofox_fcst_ts_forecast('test_data', date, value, 'Naive', 5, MAP{})
 LIMIT 5;
 
 -- Forecast with return_insample
-SELECT * FROM TS_FORECAST('test_data', date, value, 'Naive', 12, MAP{'return_insample': true})
+SELECT * FROM anofox_fcst_ts_forecast('test_data', date, value, 'Naive', 12, MAP{'return_insample': true})
 LIMIT 5;

@@ -25,10 +25,10 @@ SELECT
 FROM generate_series(1, 50) t(i)
 WHERE i NOT IN (20, 21, 22);  -- Create gaps
 
-# Test: TS_FILL_GAPS with 30min frequency
+# Test: anofox_fcst_ts_fill_gaps with 30min frequency
 statement ok
 CREATE TABLE filled_gaps_30min AS
-SELECT * FROM ts_fill_gaps(test_30min, series_id, date_col, value, '30m');
+SELECT * FROM anofox_fcst_ts_fill_gaps(test_30min, series_id, date_col, value, '30m');
 
 # Verify gaps filled (should have more rows than original)
 query I
@@ -38,10 +38,10 @@ WHERE group_col = 'series_1';
 ----
 true
 
-# Test: TS_FILL_NULLS_FORWARD with 30min frequency
+# Test: anofox_fcst_ts_fill_nulls_forward with 30min frequency
 statement ok
 CREATE TABLE filled_forward_30min AS
-SELECT * FROM ts_fill_nulls_forward(test_30min, series_id, date_col, value);
+SELECT * FROM anofox_fcst_ts_fill_nulls_forward(test_30min, series_id, date_col, value);
 
 # Verify NULLs are reduced
 query I
@@ -50,10 +50,10 @@ FROM filled_forward_30min;
 ----
 true
 
-# Test: TS_FILL_NULLS_BACKWARD with 30min frequency
+# Test: anofox_fcst_ts_fill_nulls_backward with 30min frequency
 statement ok
 CREATE TABLE filled_backward_30min AS
-SELECT * FROM ts_fill_nulls_backward(test_30min, series_id, date_col, value);
+SELECT * FROM anofox_fcst_ts_fill_nulls_backward(test_30min, series_id, date_col, value);
 
 # Verify NULLs are reduced
 query I
@@ -62,10 +62,10 @@ FROM filled_backward_30min;
 ----
 true
 
-# Test: TS_FILL_NULLS_MEAN with 30min frequency
+# Test: anofox_fcst_ts_fill_nulls_mean with 30min frequency
 statement ok
 CREATE TABLE filled_mean_30min AS
-SELECT * FROM ts_fill_nulls_mean(test_30min, series_id, date_col, value);
+SELECT * FROM anofox_fcst_ts_fill_nulls_mean(test_30min, series_id, date_col, value);
 
 # Verify all NULLs are filled
 query I
@@ -74,10 +74,10 @@ FROM filled_mean_30min;
 ----
 true
 
-# Test: TS_FILL_FORWARD with 30min frequency
+# Test: anofox_fcst_ts_fill_forward with 30min frequency
 statement ok
 CREATE TABLE extended_30min AS
-SELECT * FROM ts_fill_forward(test_30min, series_id, date_col, value, '2024-01-02 12:00:00'::TIMESTAMP, '30m');
+SELECT * FROM anofox_fcst_ts_fill_forward(test_30min, series_id, date_col, value, '2024-01-02 12:00:00'::TIMESTAMP, '30m');
 
 # Verify series extended (original has ~47 rows, extended to target should have more)
 query I
@@ -118,10 +118,10 @@ SELECT
 FROM generate_series(1, 50) t(i)
 WHERE i NOT IN (20, 21, 22);
 
-# Test: TS_FILL_GAPS with 1h frequency
+# Test: anofox_fcst_ts_fill_gaps with 1h frequency
 statement ok
 CREATE TABLE filled_gaps_1h AS
-SELECT * FROM ts_fill_gaps(test_1h, series_id, date_col, value, '1h');
+SELECT * FROM anofox_fcst_ts_fill_gaps(test_1h, series_id, date_col, value, '1h');
 
 query I
 SELECT COUNT(*) >= 50
@@ -130,10 +130,10 @@ WHERE group_col = 'series_1';
 ----
 true
 
-# Test: TS_FILL_FORWARD with 1h frequency
+# Test: anofox_fcst_ts_fill_forward with 1h frequency
 statement ok
 CREATE TABLE extended_1h AS
-SELECT * FROM ts_fill_forward(test_1h, series_id, date_col, value, '2024-01-04 00:00:00'::TIMESTAMP, '1h');
+SELECT * FROM anofox_fcst_ts_fill_forward(test_1h, series_id, date_col, value, '2024-01-04 00:00:00'::TIMESTAMP, '1h');
 
 # Verify series extended (original has ~47 rows, extended should have more)
 query I
@@ -143,10 +143,10 @@ WHERE group_col = 'series_1';
 ----
 true
 
-# Test: TS_FILL_NULLS_CONST with 1h frequency
+# Test: anofox_fcst_ts_fill_nulls_const with 1h frequency
 statement ok
 CREATE TABLE filled_const_1h AS
-SELECT * FROM ts_fill_nulls_const(test_1h, series_id, date_col, value, 0.0);
+SELECT * FROM anofox_fcst_ts_fill_nulls_const(test_1h, series_id, date_col, value, 0.0);
 
 query I
 SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) = 0
@@ -172,10 +172,10 @@ SELECT
 FROM generate_series(1, 50) t(i)
 WHERE i NOT IN (20, 21, 22);
 
-# Test: TS_FILL_GAPS with 1d frequency (default)
+# Test: anofox_fcst_ts_fill_gaps with 1d frequency (default)
 statement ok
 CREATE TABLE filled_gaps_1d AS
-SELECT * FROM ts_fill_gaps(test_1d, series_id, date_col, value, '1d');
+SELECT * FROM anofox_fcst_ts_fill_gaps(test_1d, series_id, date_col, value, '1d');
 
 query I
 SELECT COUNT(*) >= 50
@@ -184,11 +184,11 @@ WHERE group_col = 'series_1';
 ----
 true
 
-# Test: TS_FILL_GAPS with NULL frequency (should default to 1d)
+# Test: anofox_fcst_ts_fill_gaps with NULL frequency (should default to 1d)
 # Note: NULL must be cast to VARCHAR to select the date-based overload
 statement ok
 CREATE TABLE filled_gaps_1d_default AS
-SELECT * FROM ts_fill_gaps(test_1d, series_id, date_col, value, NULL::VARCHAR);
+SELECT * FROM anofox_fcst_ts_fill_gaps(test_1d, series_id, date_col, value, NULL::VARCHAR);
 
 query I
 SELECT COUNT(*) >= 50
@@ -197,7 +197,7 @@ WHERE group_col = 'series_1';
 ----
 true
 
-# Test: TS_DROP_CONSTANT with 1d frequency
+# Test: anofox_fcst_ts_drop_constant with 1d frequency
 statement ok
 CREATE TABLE test_constant_1d AS
 SELECT date_col, 'constant' AS sid, 50.0 AS val
@@ -206,7 +206,7 @@ LIMIT 10;
 
 statement ok
 CREATE TABLE no_constant_1d AS
-SELECT * FROM ts_drop_constant(test_constant_1d, sid, val);
+SELECT * FROM anofox_fcst_ts_drop_constant(test_constant_1d, sid, val);
 
 query I
 SELECT COUNT(DISTINCT sid) = 0
@@ -214,10 +214,10 @@ FROM no_constant_1d;
 ----
 true
 
-# Test: TS_DROP_SHORT with 1d frequency
+# Test: anofox_fcst_ts_drop_short with 1d frequency
 statement ok
 CREATE TABLE no_short_1d AS
-SELECT * FROM ts_drop_short(test_1d, series_id, 30);
+SELECT * FROM anofox_fcst_ts_drop_short(test_1d, series_id, 30);
 
 query I
 SELECT COUNT(*) > 0
@@ -242,7 +242,7 @@ FROM no_zeros_1d;
 ----
 true
 
-# Test: TS_DROP_LEADING_ZEROS with 1d frequency
+# Test: anofox_fcst_ts_drop_leading_zeros with 1d frequency
 statement ok
 CREATE TABLE test_leading_1d AS
 SELECT date_col, 'lead' AS sid, CASE WHEN i <= 3 THEN 0.0 ELSE i::DOUBLE END AS val
@@ -250,7 +250,7 @@ FROM (SELECT date_col, ROW_NUMBER() OVER (ORDER BY date_col) AS i FROM test_1d L
 
 statement ok
 CREATE TABLE no_leading_1d AS
-SELECT * FROM ts_drop_leading_zeros(test_leading_1d, sid, date_col, val);
+SELECT * FROM anofox_fcst_ts_drop_leading_zeros(test_leading_1d, sid, date_col, val);
 
 query I
 SELECT COUNT(*) <= 7
@@ -258,7 +258,7 @@ FROM no_leading_1d;
 ----
 true
 
-# Test: TS_DROP_TRAILING_ZEROS with 1d frequency
+# Test: anofox_fcst_ts_drop_trailing_zeros with 1d frequency
 statement ok
 CREATE TABLE test_trailing_1d AS
 SELECT date_col, 'trail' AS sid, CASE WHEN i >= 8 THEN 0.0 ELSE i::DOUBLE END AS val
@@ -266,7 +266,7 @@ FROM (SELECT date_col, ROW_NUMBER() OVER (ORDER BY date_col) AS i FROM test_1d L
 
 statement ok
 CREATE TABLE no_trailing_1d AS
-SELECT * FROM ts_drop_trailing_zeros(test_trailing_1d, sid, date_col, val);
+SELECT * FROM anofox_fcst_ts_drop_trailing_zeros(test_trailing_1d, sid, date_col, val);
 
 query I
 SELECT COUNT(*) <= 7
@@ -274,7 +274,7 @@ FROM no_trailing_1d;
 ----
 true
 
-# Test: TS_DROP_EDGE_ZEROS with 1d frequency
+# Test: anofox_fcst_ts_drop_edge_zeros with 1d frequency
 statement ok
 CREATE TABLE test_edge_1d AS
 SELECT date_col, 'edge' AS sid, 
@@ -287,7 +287,7 @@ FROM (SELECT date_col, ROW_NUMBER() OVER (ORDER BY date_col) AS i FROM test_1d L
 
 statement ok
 CREATE TABLE no_edge_1d AS
-SELECT * FROM ts_drop_edge_zeros(test_edge_1d, sid, date_col, val);
+SELECT * FROM anofox_fcst_ts_drop_edge_zeros(test_edge_1d, sid, date_col, val);
 
 query I
 SELECT COUNT(*) <= 4
@@ -313,10 +313,10 @@ SELECT
 FROM generate_series(1, 20) t(i)
 WHERE i NOT IN (10, 11);
 
-# Test: TS_FILL_GAPS with 1w frequency
+# Test: anofox_fcst_ts_fill_gaps with 1w frequency
 statement ok
 CREATE TABLE filled_gaps_1w AS
-SELECT * FROM ts_fill_gaps(test_1w, series_id, date_col, value, '1w');
+SELECT * FROM anofox_fcst_ts_fill_gaps(test_1w, series_id, date_col, value, '1w');
 
 query I
 SELECT COUNT(*) >= 20
@@ -325,10 +325,10 @@ WHERE group_col = 'series_1';
 ----
 true
 
-# Test: TS_FILL_FORWARD with 1w frequency
+# Test: anofox_fcst_ts_fill_forward with 1w frequency
 statement ok
 CREATE TABLE extended_1w AS
-SELECT * FROM ts_fill_forward(test_1w, series_id, date_col, value, '2024-06-01'::TIMESTAMP, '1w');
+SELECT * FROM anofox_fcst_ts_fill_forward(test_1w, series_id, date_col, value, '2024-06-01'::TIMESTAMP, '1w');
 
 query I
 SELECT COUNT(*) >= 20
@@ -355,10 +355,10 @@ SELECT
 FROM generate_series(1, 12) t(i)
 WHERE i NOT IN (8, 9);
 
-# Test: TS_FILL_GAPS with 1mo frequency
+# Test: anofox_fcst_ts_fill_gaps with 1mo frequency
 statement ok
 CREATE TABLE filled_gaps_1mo AS
-SELECT * FROM ts_fill_gaps(test_1mo, series_id, date_col, value, '1mo');
+SELECT * FROM anofox_fcst_ts_fill_gaps(test_1mo, series_id, date_col, value, '1mo');
 
 query I
 SELECT COUNT(*) >= 12
@@ -367,10 +367,10 @@ WHERE group_col = 'series_1';
 ----
 true
 
-# Test: TS_FILL_FORWARD with 1mo frequency
+# Test: anofox_fcst_ts_fill_forward with 1mo frequency
 statement ok
 CREATE TABLE extended_1mo AS
-SELECT * FROM ts_fill_forward(test_1mo, series_id, date_col, value, '2025-01-01'::TIMESTAMP, '1mo');
+SELECT * FROM anofox_fcst_ts_fill_forward(test_1mo, series_id, date_col, value, '2025-01-01'::TIMESTAMP, '1mo');
 
 # Verify series extended (original has ~10 rows due to gaps, extended should have at least that many)
 query I
@@ -398,10 +398,10 @@ SELECT
 FROM generate_series(1, 8) t(i)
 WHERE i NOT IN (5);
 
-# Test: TS_FILL_GAPS with 1q frequency
+# Test: anofox_fcst_ts_fill_gaps with 1q frequency
 statement ok
 CREATE TABLE filled_gaps_1q AS
-SELECT * FROM ts_fill_gaps(test_1q, series_id, date_col, value, '1q');
+SELECT * FROM anofox_fcst_ts_fill_gaps(test_1q, series_id, date_col, value, '1q');
 
 query I
 SELECT COUNT(*) >= 8
@@ -410,10 +410,10 @@ WHERE group_col = 'series_1';
 ----
 true
 
-# Test: TS_FILL_FORWARD with 1q frequency
+# Test: anofox_fcst_ts_fill_forward with 1q frequency
 statement ok
 CREATE TABLE extended_1q AS
-SELECT * FROM ts_fill_forward(test_1q, series_id, date_col, value, '2025-12-01'::TIMESTAMP, '1q');
+SELECT * FROM anofox_fcst_ts_fill_forward(test_1q, series_id, date_col, value, '2025-12-01'::TIMESTAMP, '1q');
 
 # Verify series extended (original has ~7 rows due to gaps, extended should have at least that many)
 query I
@@ -441,10 +441,10 @@ SELECT
 FROM generate_series(1, 10) t(i)
 WHERE i NOT IN (5);
 
-# Test: TS_FILL_GAPS with 1y frequency
+# Test: anofox_fcst_ts_fill_gaps with 1y frequency
 statement ok
 CREATE TABLE filled_gaps_1y AS
-SELECT * FROM ts_fill_gaps(test_1y, series_id, date_col, value, '1y');
+SELECT * FROM anofox_fcst_ts_fill_gaps(test_1y, series_id, date_col, value, '1y');
 
 query I
 SELECT COUNT(*) >= 10
@@ -453,10 +453,10 @@ WHERE group_col = 'series_1';
 ----
 true
 
-# Test: TS_FILL_FORWARD with 1y frequency
+# Test: anofox_fcst_ts_fill_forward with 1y frequency
 statement ok
 CREATE TABLE extended_1y AS
-SELECT * FROM ts_fill_forward(test_1y, series_id, date_col, value, '2030-01-01'::TIMESTAMP, '1y');
+SELECT * FROM anofox_fcst_ts_fill_forward(test_1y, series_id, date_col, value, '2030-01-01'::TIMESTAMP, '1y');
 
 query I
 SELECT COUNT(*) >= 10
@@ -483,10 +483,10 @@ SELECT
 FROM generate_series(1, 50) t(i)
 WHERE i NOT IN (20, 21, 22);
 
-# Test: TS_FILL_GAPS with integer frequency step=1
+# Test: anofox_fcst_ts_fill_gaps with integer frequency step=1
 statement ok
 CREATE TABLE filled_gaps_int1 AS
-SELECT * FROM ts_fill_gaps(test_int, series_id, date_col, value, 1);
+SELECT * FROM anofox_fcst_ts_fill_gaps(test_int, series_id, date_col, value, 1);
 
 # Verify gaps filled
 query I
@@ -496,10 +496,10 @@ WHERE group_col = 'series_1';
 ----
 true
 
-# Test: TS_FILL_GAPS with integer frequency step=2
+# Test: anofox_fcst_ts_fill_gaps with integer frequency step=2
 statement ok
 CREATE TABLE filled_gaps_int2 AS
-SELECT * FROM ts_fill_gaps(test_int, series_id, date_col, value, 2);
+SELECT * FROM anofox_fcst_ts_fill_gaps(test_int, series_id, date_col, value, 2);
 
 # Verify gaps filled with step=2
 query I
@@ -509,10 +509,10 @@ WHERE group_col = 'series_1';
 ----
 true
 
-# Test: TS_FILL_FORWARD with integer frequency step=1
+# Test: anofox_fcst_ts_fill_forward with integer frequency step=1
 statement ok
 CREATE TABLE extended_int1 AS
-SELECT * FROM ts_fill_forward(test_int, series_id, date_col, value, 60, 1);
+SELECT * FROM anofox_fcst_ts_fill_forward(test_int, series_id, date_col, value, 60, 1);
 
 # Verify series extended
 query I
@@ -522,10 +522,10 @@ WHERE group_col = 'series_1';
 ----
 true
 
-# Test: TS_FILL_FORWARD with integer frequency step=5
+# Test: anofox_fcst_ts_fill_forward with integer frequency step=5
 statement ok
 CREATE TABLE extended_int5 AS
-SELECT * FROM ts_fill_forward(test_int, series_id, date_col, value, 60, 5);
+SELECT * FROM anofox_fcst_ts_fill_forward(test_int, series_id, date_col, value, 60, 5);
 
 # Verify series extended with step=5
 query I
@@ -538,7 +538,7 @@ true
 # Test: Validation error - INTEGER date with date-based frequency (should fail at runtime)
 # Note: DuckDB will try to match the VARCHAR overload, which will fail when trying to use INTERVAL with INTEGER columns
 statement error
-SELECT * FROM ts_fill_gaps(test_int, series_id, date_col, value, '1d');
+SELECT * FROM anofox_fcst_ts_fill_gaps(test_int, series_id, date_col, value, '1d');
 ----
 Binder Error
 
@@ -553,7 +553,7 @@ SELECT
 FROM generate_series(1, 10) t(i);
 
 statement error
-SELECT * FROM ts_fill_gaps(test_date_for_validation, series_id, date_col, value, 1);
+SELECT * FROM anofox_fcst_ts_fill_gaps(test_date_for_validation, series_id, date_col, value, 1);
 ----
 Binder Error
 

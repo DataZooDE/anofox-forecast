@@ -13,7 +13,7 @@ SELECT
 FROM generate_series(61, 72) t(d);
 
 WITH forecast AS (
-    SELECT * FROM TS_FORECAST('train_data', date, sales_amount, 'Theta', 12, MAP{})
+    SELECT * FROM anofox_fcst_ts_forecast('train_data', date, sales_amount, 'Theta', 12, MAP{})
 ),
 predictions AS (
     SELECT LIST(point_forecast ORDER BY forecast_step) AS pred FROM forecast
@@ -22,7 +22,7 @@ actuals AS (
     SELECT LIST(value ORDER BY date) AS actual FROM test_data
 )
 SELECT 
-    TS_MAE(actual, pred) AS mae,
-    TS_RMSE(actual, pred) AS rmse,
-    TS_MAPE(actual, pred) AS mape_percent
+    anofox_fcst_ts_mae(actual, pred) AS mae,
+    anofox_fcst_ts_rmse(actual, pred) AS rmse,
+    anofox_fcst_ts_mape(actual, pred) AS mape_percent
 FROM actuals, predictions;

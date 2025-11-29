@@ -2,6 +2,7 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/types/data_chunk.hpp"
 #include "duckdb/function/scalar_function.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/main/extension_entries.hpp"
 
 // anofox-time includes
@@ -218,11 +219,31 @@ static void TSAnalyzeSeasonalityFunction(DataChunk &args, ExpressionState &state
 // ============================================================================
 
 void RegisterSeasonalityFunction(ExtensionLoader &loader) {
+	// Helper to register with alias
+	auto register_with_alias = [&loader](const string &full_name, const string &alias_name,
+	                                     const vector<LogicalType> &args, LogicalType ret_type,
+	                                     scalar_function_t func) {
+		ScalarFunction main_func(full_name, args, ret_type, func);
+		ScalarFunctionSet main_set(full_name);
+		main_set.AddFunction(main_func);
+		CreateScalarFunctionInfo main_info(std::move(main_set));
+		main_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+		loader.RegisterFunction(std::move(main_info));
+
+		ScalarFunction alias_func(alias_name, args, ret_type, func);
+		ScalarFunctionSet alias_set(alias_name);
+		alias_set.AddFunction(alias_func);
+		CreateScalarFunctionInfo alias_info(std::move(alias_set));
+		alias_info.alias_of = full_name;
+		alias_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+		loader.RegisterFunction(std::move(alias_info));
+	};
+
 	// TS_DETECT_SEASONALITY(values: DOUBLE[]) -> INT[]
 	// Simple detection returning list of seasonal periods
-	ScalarFunction ts_detect_seasonality("ts_detect_seasonality", {LogicalType::LIST(LogicalType::DOUBLE)},
-	                                     LogicalType::LIST(LogicalType::INTEGER), TSDetectSeasonalityFunction);
-	loader.RegisterFunction(ts_detect_seasonality);
+	register_with_alias("anofox_fcst_ts_detect_seasonality", "ts_detect_seasonality",
+	                    {LogicalType::LIST(LogicalType::DOUBLE)}, LogicalType::LIST(LogicalType::INTEGER),
+	                    TSDetectSeasonalityFunction);
 
 	// TS_ANALYZE_SEASONALITY(timestamps: TIMESTAMP[], values: DOUBLE[])
 	// -> STRUCT(detected_periods INT[], primary_period INT, seasonal_strength DOUBLE, trend_strength DOUBLE)
@@ -232,10 +253,9 @@ void RegisterSeasonalityFunction(ExtensionLoader &loader) {
 	struct_children.push_back({"seasonal_strength", LogicalType::DOUBLE});
 	struct_children.push_back({"trend_strength", LogicalType::DOUBLE});
 
-	ScalarFunction ts_analyze_seasonality(
-	    "ts_analyze_seasonality", {LogicalType::LIST(LogicalType::TIMESTAMP), LogicalType::LIST(LogicalType::DOUBLE)},
-	    LogicalType::STRUCT(struct_children), TSAnalyzeSeasonalityFunction);
-	loader.RegisterFunction(ts_analyze_seasonality);
+	register_with_alias("anofox_fcst_ts_analyze_seasonality", "ts_analyze_seasonality",
+	                    {LogicalType::LIST(LogicalType::TIMESTAMP), LogicalType::LIST(LogicalType::DOUBLE)},
+	                    LogicalType::STRUCT(struct_children), TSAnalyzeSeasonalityFunction);
 }
 
 } // namespace duckdb

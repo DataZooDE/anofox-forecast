@@ -8,7 +8,7 @@ FROM generate_series(0, 89) t(d)
 CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
 CREATE TABLE stats AS
-SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, sales_amount, '1d');
 
 -- View summary
 SELECT 

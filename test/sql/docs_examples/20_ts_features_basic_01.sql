@@ -7,7 +7,7 @@ FROM generate_series(0, 30) t(i);
 
 SELECT feats.*
 FROM (
-    SELECT ts_features(ts, value) AS feats
+    SELECT anofox_fcst_ts_features(ts, value) AS feats
     FROM sample_ts
 );
 

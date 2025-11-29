@@ -4,7 +4,7 @@
 
 This guide covers the forecasting workflow using the Anofox Forecast extension's SQL API. Topics include data preparation, model selection, forecast generation, and accuracy evaluation.
 
-**API Functions Covered**: `TS_FORECAST()`, `TS_FORECAST_BY()`, evaluation metrics, and data preparation macros.
+**API Functions Covered**: `anofox_fcst_ts_forecast()`, `anofox_fcst_ts_forecast_by()`, evaluation metrics, and data preparation macros.
 
 ## What is Time Series Forecasting?
 

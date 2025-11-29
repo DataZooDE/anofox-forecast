@@ -29,7 +29,7 @@ WITH category_forecast AS (
     GROUP BY pc.category, date
 ),
 category_predictions AS (
-    SELECT * FROM TS_FORECAST_BY('category_forecast', category, date, category_sales,
+    SELECT * FROM anofox_fcst_ts_forecast_by('category_forecast', category, date, category_sales,
                                  'AutoETS', 28, MAP{'seasonal_period': 7})
 ),
 product_proportions AS (

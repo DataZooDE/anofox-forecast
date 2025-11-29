@@ -7,7 +7,7 @@ SELECT
 FROM generate_series(0, 30) t(d)
 CROSS JOIN (VALUES (1), (2)) series(series_id);
 
-SELECT * FROM TS_DROP_CONSTANT('test_table', series_id, value_col);
-SELECT * FROM TS_DROP_CONSTANT('test_table', series_id, value_col)
+SELECT * FROM anofox_fcst_ts_drop_constant('test_table', series_id, value_col);
+SELECT * FROM anofox_fcst_ts_drop_constant('test_table', series_id, value_col)
 WHERE value_col = 0;
 -- Verify filters out constant/zero series

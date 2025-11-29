@@ -13,7 +13,7 @@ The `anofox-forecast` extension provides powerful changepoint detection capabili
 
 ## Functions
 
-### TS_DETECT_CHANGEPOINTS
+### anofox_fcst_ts_detect_changepoints
 
 Detects changepoints in a single time series.
 
@@ -53,22 +53,22 @@ FROM generate_series(0, 89) t(d);  -- 90 days of data
 
 -- Detect with default parameters
 SELECT *
-FROM TS_DETECT_CHANGEPOINTS('sales_data', date, sales, MAP{})
+FROM anofox_fcst_ts_detect_changepoints('sales_data', date, sales, MAP{})
 WHERE is_changepoint = true;
 
 -- More sensitive detection
 SELECT *
-FROM TS_DETECT_CHANGEPOINTS('sales_data', date, sales, MAP{'hazard_lambda': 50.0})
+FROM anofox_fcst_ts_detect_changepoints('sales_data', date, sales, MAP{'hazard_lambda': 50.0})
 WHERE is_changepoint = true;
 
 -- With probabilities for confidence scoring
 SELECT date_col, is_changepoint, ROUND(changepoint_probability, 4) AS confidence
-FROM TS_DETECT_CHANGEPOINTS('sales_data', date, sales, MAP{'include_probabilities': true})
+FROM anofox_fcst_ts_detect_changepoints('sales_data', date, sales, MAP{'include_probabilities': true})
 WHERE is_changepoint = true
 ORDER BY changepoint_probability DESC;
 ```
 
-### TS_DETECT_CHANGEPOINTS_BY
+### anofox_fcst_ts_detect_changepoints_by
 
 Detects changepoints for multiple time series using GROUP BY.
 
@@ -103,7 +103,7 @@ SELECT
     product_id,
     date_col AS date,
     is_changepoint
-FROM TS_DETECT_CHANGEPOINTS_BY('sales_data', product_id, date, sales, MAP{})
+FROM anofox_fcst_ts_detect_changepoints_by('sales_data', product_id, date, sales, MAP{})
 WHERE is_changepoint = true
 ORDER BY product_id, date_col;
 
@@ -111,7 +111,7 @@ ORDER BY product_id, date_col;
 SELECT 
     product_id,
     COUNT(*) FILTER (WHERE is_changepoint) AS num_changepoints
-FROM TS_DETECT_CHANGEPOINTS_BY('sales_data', product_id, date, sales, MAP{})
+FROM anofox_fcst_ts_detect_changepoints_by('sales_data', product_id, date, sales, MAP{})
 GROUP BY product_id
 ORDER BY num_changepoints DESC;
 ```
@@ -167,15 +167,15 @@ SELECT
 FROM generate_series(0, 89) t(d);
 
 -- Highly sensitive: detect even small changes
-SELECT * FROM TS_DETECT_CHANGEPOINTS('sales_data', date, sales, MAP{'hazard_lambda': 50.0})
+SELECT * FROM anofox_fcst_ts_detect_changepoints('sales_data', date, sales, MAP{'hazard_lambda': 50.0})
 WHERE is_changepoint = true;
 
 -- Default: balanced detection
-SELECT * FROM TS_DETECT_CHANGEPOINTS('sales_data', date, sales, MAP{})
+SELECT * FROM anofox_fcst_ts_detect_changepoints('sales_data', date, sales, MAP{})
 WHERE is_changepoint = true;
 
 -- Conservative: only major shifts
-SELECT * FROM TS_DETECT_CHANGEPOINTS('sales_data', date, sales, MAP{'hazard_lambda': 500.0})
+SELECT * FROM anofox_fcst_ts_detect_changepoints('sales_data', date, sales, MAP{'hazard_lambda': 500.0})
 WHERE is_changepoint = true;
 ```
 
@@ -233,17 +233,17 @@ FROM generate_series(0, 89) t(d);  -- 90 days of data
 
 -- Step 1: Try default
 SELECT COUNT(*) AS changepoints
-FROM TS_DETECT_CHANGEPOINTS('data', date, value, MAP{})
+FROM anofox_fcst_ts_detect_changepoints('data', date, value, MAP{})
 WHERE is_changepoint = true;
 
 -- Step 2: If too few, decrease hazard_lambda
 SELECT COUNT(*) AS changepoints
-FROM TS_DETECT_CHANGEPOINTS('data', date, value, MAP{'hazard_lambda': 100.0})
+FROM anofox_fcst_ts_detect_changepoints('data', date, value, MAP{'hazard_lambda': 100.0})
 WHERE is_changepoint = true;
 
 -- Step 3: If too many, increase hazard_lambda
 SELECT COUNT(*) AS changepoints
-FROM TS_DETECT_CHANGEPOINTS('data', date, value, MAP{'hazard_lambda': 500.0})
+FROM anofox_fcst_ts_detect_changepoints('data', date, value, MAP{'hazard_lambda': 500.0})
 WHERE is_changepoint = true;
 ```
 
@@ -268,7 +268,7 @@ SELECT
 FROM generate_series(0, 89) t(d);  -- 90 days of data
 
 SELECT *
-FROM TS_DETECT_CHANGEPOINTS('data', date, value, MAP{})
+FROM anofox_fcst_ts_detect_changepoints('data', date, value, MAP{})
 WHERE is_changepoint = true;
 ```
 
@@ -284,7 +284,7 @@ FROM generate_series(0, 89) t(d);  -- 90 days of data
 
 SELECT 
     COUNT(*) FILTER (WHERE is_changepoint) AS total_changepoints
-FROM TS_DETECT_CHANGEPOINTS('data', date, value, MAP{});
+FROM anofox_fcst_ts_detect_changepoints('data', date, value, MAP{});
 ```
 
 ### Pattern 3: Most Recent Changepoint
@@ -298,7 +298,7 @@ SELECT
 FROM generate_series(0, 89) t(d);  -- 90 days of data
 
 SELECT MAX(date_col) AS last_change
-FROM TS_DETECT_CHANGEPOINTS('data', date, value, MAP{})
+FROM anofox_fcst_ts_detect_changepoints('data', date, value, MAP{})
 WHERE is_changepoint = true;
 ```
 
@@ -314,7 +314,7 @@ FROM generate_series(0, 89) t(d);  -- 90 days of data
 
 WITH cp AS (
     SELECT *
-    FROM TS_DETECT_CHANGEPOINTS('data', date, value, MAP{})
+    FROM anofox_fcst_ts_detect_changepoints('data', date, value, MAP{})
 ),
 segments AS (
     SELECT 

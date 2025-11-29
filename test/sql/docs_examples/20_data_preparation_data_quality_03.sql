@@ -9,10 +9,10 @@ CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
 -- Create stats table first
 CREATE TABLE stats AS
-SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, sales_amount, '1d');
 
 -- All checks in one report
-SELECT * FROM TS_QUALITY_REPORT('stats', 30);
+SELECT * FROM anofox_fcst_ts_quality_report('stats', 30);
 
 -- Example output:
 -- | check_type              | total_series | series_with_gaps | pct_with_gaps |

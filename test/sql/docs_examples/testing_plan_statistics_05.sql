@@ -7,6 +7,6 @@ SELECT
 FROM generate_series(0, 30) t(d)
 CROSS JOIN (VALUES (1), (2)) series(series_id);
 
-SELECT * FROM TS_STATS('test_table', series_id, date_col, value_col, '1d')
+SELECT * FROM anofox_fcst_ts_stats('test_table', series_id, date_col, value_col, '1d')
 LIMIT 5;
 -- Verify returns: count, mean, std, min, max, median, q25, q75

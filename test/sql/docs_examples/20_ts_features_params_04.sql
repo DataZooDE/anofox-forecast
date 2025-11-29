@@ -8,7 +8,7 @@ FROM generate_series(0, 30) t(d);
 -- Override default parameters for a feature
 SELECT feats.*
 FROM (
-    SELECT ts_features(
+    SELECT anofox_fcst_ts_features(
         ts,
         value,
         ['ratio_beyond_r_sigma'],

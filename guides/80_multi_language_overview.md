@@ -80,38 +80,38 @@ SELECT
     100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales
 FROM generate_series(0, 89) t(d);  -- 90 days of data
 
-SELECT * FROM TS_FORECAST('sales', date, sales, 'AutoETS', 28, 
+SELECT * FROM anofox_fcst_ts_forecast('sales', date, sales, 'AutoETS', 28, 
                           MAP{'seasonal_period': 7, 'confidence_level': 0.95})
 ```
 
 **Use from Python**:
 
 ```python
-forecast = con.execute("SELECT * FROM TS_FORECAST(...)").fetchdf()
+forecast = con.execute("SELECT * FROM anofox_fcst_ts_forecast(...)").fetchdf()
 ```
 
 **Use from R**:
 
 ```r
-forecast <- dbGetQuery(con, "SELECT * FROM TS_FORECAST(...)")
+forecast <- dbGetQuery(con, "SELECT * FROM anofox_fcst_ts_forecast(...)")
 ```
 
 **Use from Julia**:
 
 ```julia
-forecast = DataFrame(DBInterface.execute(con, "SELECT * FROM TS_FORECAST(...)"))
+forecast = DataFrame(DBInterface.execute(con, "SELECT * FROM anofox_fcst_ts_forecast(...)"))
 ```
 
 **Use from C++**:
 
 ```cpp
-auto forecast = con.Query("SELECT * FROM TS_FORECAST(...)");
+auto forecast = con.Query("SELECT * FROM anofox_fcst_ts_forecast(...)");
 ```
 
 **Use from Rust**:
 
 ```rust
-let forecast = conn.prepare("SELECT * FROM TS_FORECAST(...)")?.query_map(...)?;
+let forecast = conn.prepare("SELECT * FROM anofox_fcst_ts_forecast(...)")?.query_map(...)?;
 ```
 
 **Same logic, different language bindings!**
@@ -162,7 +162,7 @@ let forecast = conn.prepare("SELECT * FROM TS_FORECAST(...)")?.query_map(...)?;
 ```python
 # Data scientist writes SQL logic (Python)
 forecast_query = """
-    SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount,
+    SELECT * FROM anofox_fcst_ts_forecast_by('sales', product_id, date, amount,
                                  'AutoETS', 28, {'seasonal_period': 7})
 """
 
@@ -193,8 +193,8 @@ con <- dbConnect(duckdb::duckdb())
 dbExecute(con, "LOAD 'anofox_forecast.duckdb_extension'")
 
 # Try different models
-ets_fc <- dbGetQuery(con, "SELECT * FROM TS_FORECAST(..., 'AutoETS', ...)")
-arima_fc <- dbGetQuery(con, "SELECT * FROM TS_FORECAST(..., 'AutoARIMA', ...)")
+ets_fc <- dbGetQuery(con, "SELECT * FROM anofox_fcst_ts_forecast(..., 'AutoETS', ...)")
+arima_fc <- dbGetQuery(con, "SELECT * FROM anofox_fcst_ts_forecast(..., 'AutoARIMA', ...)")
 
 # Decide: AutoETS is best
 best_model <- "AutoETS"
@@ -208,7 +208,7 @@ con.execute("LOAD 'anofox_forecast.duckdb_extension'")
 
 # Use model selected by analyst
 forecast = con.execute(f"""
-    SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount,
+    SELECT * FROM anofox_fcst_ts_forecast_by('sales', product_id, date, amount,
                                  'AutoETS', 28, {{'seasonal_period': 7}})
 """).fetchdf()
 ```
@@ -223,7 +223,7 @@ forecast = con.execute(f"""
 # Python service: Clean and prepare data
 con.execute("""
     CREATE TABLE sales_prepared AS
-    SELECT * FROM TS_FILL_GAPS('sales_raw', product_id, date, amount)
+    SELECT * FROM anofox_fcst_ts_fill_gaps('sales_raw', product_id, date, amount)
 """)
 con.execute("COPY sales_prepared TO 'prepared.parquet' (FORMAT PARQUET)")
 ```
@@ -233,7 +233,7 @@ con.execute("COPY sales_prepared TO 'prepared.parquet' (FORMAT PARQUET)")
 ```rust
 // Rust service: Fast forecasting endpoint
 conn.execute_batch("CREATE TABLE sales_prepared AS SELECT * FROM read_parquet('prepared.parquet')")?;
-let forecast = conn.prepare("SELECT * FROM TS_FORECAST_BY(...)")?;
+let forecast = conn.prepare("SELECT * FROM anofox_fcst_ts_forecast_by(...)")?;
 ```
 
 **Service 3 (R)**: Reporting and visualization
@@ -288,7 +288,7 @@ FROM generate_series(0, 89) t(d)
 CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
 -- Get quality stats
-SELECT * FROM TS_STATS('sales', product_id, date, amount, '1d')
+SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, amount, '1d')
 LIMIT 5;
 
 -- Prepare data
@@ -298,12 +298,12 @@ WITH filled AS (
         group_col AS product_id,
         date_col AS date,
         value_col AS amount
-    FROM TS_FILL_GAPS('sales', product_id, date, amount, '1d')
+    FROM anofox_fcst_ts_fill_gaps('sales', product_id, date, amount, '1d')
 )
-SELECT * FROM TS_DROP_CONSTANT('filled', product_id, amount);
+SELECT * FROM anofox_fcst_ts_drop_constant('filled', product_id, amount);
 
 -- Generate forecast
-SELECT * FROM TS_FORECAST_BY('sales_prepared', product_id, date, amount,
+SELECT * FROM anofox_fcst_ts_forecast_by('sales_prepared', product_id, date, amount,
                              'AutoETS', 28, MAP{'seasonal_period': 7})
 LIMIT 5;
 ```
@@ -348,8 +348,8 @@ import duckdb
 con = duckdb.connect()
 con.execute("LOAD 'anofox_forecast.duckdb_extension'")
 con.execute("CREATE TABLE sales AS SELECT * FROM read_csv('sales.csv')")
-stats = con.execute("SELECT * FROM TS_STATS('sales', product_id, date, amount)").fetchdf()
-forecast = con.execute("SELECT * FROM TS_FORECAST_BY(...)").fetchdf()
+stats = con.execute("SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, amount)").fetchdf()
+forecast = con.execute("SELECT * FROM anofox_fcst_ts_forecast_by(...)").fetchdf()
 forecast.to_csv('forecast.csv')
 ```
 
@@ -360,8 +360,8 @@ library(duckdb)
 con <- dbConnect(duckdb::duckdb())
 dbExecute(con, "LOAD 'anofox_forecast.duckdb_extension'")
 dbExecute(con, "CREATE TABLE sales AS SELECT * FROM read_csv('sales.csv')")
-stats <- dbGetQuery(con, "SELECT * FROM TS_STATS('sales', product_id, date, amount)")
-forecast <- dbGetQuery(con, "SELECT * FROM TS_FORECAST_BY(...)")
+stats <- dbGetQuery(con, "SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, amount)")
+forecast <- dbGetQuery(con, "SELECT * FROM anofox_fcst_ts_forecast_by(...)")
 write.csv(forecast, 'forecast.csv', row.names=FALSE)
 ```
 
@@ -372,8 +372,8 @@ using DuckDB, DataFrames, CSV
 con = DBInterface.connect(DuckDB.DB)
 DBInterface.execute(con, "LOAD 'anofox_forecast.duckdb_extension'")
 DBInterface.execute(con, "CREATE TABLE sales AS SELECT * FROM read_csv('sales.csv')")
-stats = DataFrame(DBInterface.execute(con, "SELECT * FROM TS_STATS('sales', product_id, date, amount)"))
-forecast = DataFrame(DBInterface.execute(con, "SELECT * FROM TS_FORECAST_BY(...)"))
+stats = DataFrame(DBInterface.execute(con, "SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, amount)"))
+forecast = DataFrame(DBInterface.execute(con, "SELECT * FROM anofox_fcst_ts_forecast_by(...)"))
 CSV.write("forecast.csv", forecast)
 ```
 
@@ -385,8 +385,8 @@ duckdb::DuckDB db(nullptr);
 duckdb::Connection con(db);
 con.Query("LOAD 'anofox_forecast.duckdb_extension'");
 con.Query("CREATE TABLE sales AS SELECT * FROM read_csv('sales.csv')");
-auto stats = con.Query("SELECT * FROM TS_STATS('sales', product_id, date, amount)");
-auto forecast = con.Query("SELECT * FROM TS_FORECAST_BY(...)");
+auto stats = con.Query("SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, amount)");
+auto forecast = con.Query("SELECT * FROM anofox_fcst_ts_forecast_by(...)");
 con.Query("COPY (SELECT * FROM forecast) TO 'forecast.csv'");
 ```
 
@@ -397,8 +397,8 @@ use duckdb::Connection;
 let conn = Connection::open_in_memory()?;
 conn.execute_batch("LOAD 'anofox_forecast.duckdb_extension'")?;
 conn.execute_batch("CREATE TABLE sales AS SELECT * FROM read_csv('sales.csv')")?;
-let stats = conn.prepare("SELECT * FROM TS_STATS('sales', product_id, date, amount)")?.query([])?;
-let forecast = conn.prepare("SELECT * FROM TS_FORECAST_BY(...)")?.query([])?;
+let stats = conn.prepare("SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, amount)")?.query([])?;
+let forecast = conn.prepare("SELECT * FROM anofox_fcst_ts_forecast_by(...)")?.query([])?;
 conn.execute_batch("COPY (SELECT * FROM forecast) TO 'forecast.csv'")?;
 ```
 
@@ -451,7 +451,7 @@ For in-memory exchange between processes.
 ```python
 # Python: Create
 con = duckdb.connect('shared.duckdb')
-con.execute("CREATE TABLE forecasts AS SELECT * FROM TS_FORECAST_BY(...)")
+con.execute("CREATE TABLE forecasts AS SELECT * FROM anofox_fcst_ts_forecast_by(...)")
 ```
 
 ```rust

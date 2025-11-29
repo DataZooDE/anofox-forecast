@@ -13,7 +13,7 @@ SELECT 'Theta', [100.0, 102.0, 98.0, 105.0]::DOUBLE[], [101.5, 103.5, 99.5, 106.
 -- MASE is scale-independent and baseline-aware
 SELECT 
     model_name,
-    TS_MASE(actual, pred, naive_baseline) AS mase
+    anofox_fcst_ts_mase(actual, pred, naive_baseline) AS mase
 FROM model_comparison
 ORDER BY mase;
 

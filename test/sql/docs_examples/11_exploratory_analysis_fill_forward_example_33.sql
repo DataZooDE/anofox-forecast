@@ -18,7 +18,7 @@ FROM generate_series(0, 100) t(h)
 CROSS JOIN (VALUES (1), (2)) series(series_id);
 
 -- Extend hourly series to target date
-SELECT * FROM TS_FILL_FORWARD('hourly_data', series_id, timestamp, value, '2024-12-31'::TIMESTAMP, '1h');
+SELECT * FROM anofox_fcst_ts_fill_forward('hourly_data', series_id, timestamp, value, '2024-12-31'::TIMESTAMP, '1h');
 
 -- Create monthly data
 CREATE TABLE monthly_data AS
@@ -30,11 +30,11 @@ FROM generate_series(0, 10) t(m)
 CROSS JOIN (VALUES (1), (2)) series(series_id);
 
 -- Extend monthly series to target date
-SELECT * FROM TS_FILL_FORWARD('monthly_data', series_id, date, value, '2024-12-01'::DATE, '1mo');
+SELECT * FROM anofox_fcst_ts_fill_forward('monthly_data', series_id, date, value, '2024-12-01'::DATE, '1mo');
 
 -- Extend daily series to target date (default frequency)
 CREATE TABLE sales_extended AS
-SELECT * FROM TS_FILL_FORWARD(
+SELECT * FROM anofox_fcst_ts_fill_forward(
     'sales', product_id, date, sales_amount, 
     DATE '2023-12-31', '1d'
 );
@@ -48,7 +48,7 @@ SELECT
 FROM generate_series(0, 30) t(d)
 CROSS JOIN (VALUES (1)) series(series_id);
 
-SELECT * FROM TS_FILL_FORWARD('daily_data', series_id, date, value, '2024-12-31'::DATE, NULL::VARCHAR);
+SELECT * FROM anofox_fcst_ts_fill_forward('daily_data', series_id, date, value, '2024-12-31'::DATE, NULL::VARCHAR);
 
 -- INTEGER columns: Use INTEGER frequency values
 -- Create integer-based time series
@@ -61,10 +61,10 @@ FROM generate_series(1, 50) t(d)
 CROSS JOIN (VALUES (1), (2)) series(series_id);
 
 -- Extend series to index 100 with step size of 1
-SELECT * FROM TS_FILL_FORWARD('int_data', series_id, date_col, value, 100, 1);
+SELECT * FROM anofox_fcst_ts_fill_forward('int_data', series_id, date_col, value, 100, 1);
 
 -- Extend series to index 100 with step size of 5
-SELECT * FROM TS_FILL_FORWARD('int_data', series_id, date_col, value, 100, 5);
+SELECT * FROM anofox_fcst_ts_fill_forward('int_data', series_id, date_col, value, 100, 5);
 
 -- Use NULL (defaults to step size 1 for INTEGER columns)
-SELECT * FROM TS_FILL_FORWARD('int_data', series_id, date_col, value, 100, NULL);
+SELECT * FROM anofox_fcst_ts_fill_forward('int_data', series_id, date_col, value, 100, NULL);

@@ -10,7 +10,7 @@ FROM (VALUES
 
 -- Test with return_insample = true
 SELECT *
-FROM TS_FORECAST('test_data', date, value, 'Naive', 5, MAP{'return_insample': true})
+FROM anofox_fcst_ts_forecast('test_data', date, value, 'Naive', 5, MAP{'return_insample': true})
 LIMIT 5;
 
 -- Verify insample_fitted has correct length (training data length)

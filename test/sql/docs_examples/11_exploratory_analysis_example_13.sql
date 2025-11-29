@@ -33,4 +33,4 @@ GROUP BY product_id
 HAVING zero_days > 0;
 
 -- Fix: Remove edge zeros
-SELECT * FROM TS_DROP_EDGE_ZEROS('sales', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_drop_edge_zeros('sales', product_id, date, sales_amount);

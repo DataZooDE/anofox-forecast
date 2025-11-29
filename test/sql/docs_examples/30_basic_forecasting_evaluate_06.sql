@@ -30,9 +30,9 @@ forecasts AS (
 )
 SELECT 
     f.product_id,
-    ROUND(TS_MAE(LIST(a.actual_sales ORDER BY a.date), LIST(f.point_forecast ORDER BY f.date)), 2) AS mae,
-    ROUND(TS_RMSE(LIST(a.actual_sales ORDER BY a.date), LIST(f.point_forecast ORDER BY f.date)), 2) AS rmse,
-    ROUND(TS_MAPE(LIST(a.actual_sales ORDER BY a.date), LIST(f.point_forecast ORDER BY f.date)), 2) AS mape
+    ROUND(anofox_fcst_ts_mae(LIST(a.actual_sales ORDER BY a.date), LIST(f.point_forecast ORDER BY f.date)), 2) AS mae,
+    ROUND(anofox_fcst_ts_rmse(LIST(a.actual_sales ORDER BY a.date), LIST(f.point_forecast ORDER BY f.date)), 2) AS rmse,
+    ROUND(anofox_fcst_ts_mape(LIST(a.actual_sales ORDER BY a.date), LIST(f.point_forecast ORDER BY f.date)), 2) AS mape
 FROM forecasts f
 JOIN actuals a ON f.product_id = a.product_id AND f.date = a.date
 GROUP BY f.product_id;

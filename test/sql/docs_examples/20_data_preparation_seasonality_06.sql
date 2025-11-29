@@ -9,7 +9,7 @@ CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
 SELECT 
     product_id,
-    TS_DETECT_SEASONALITY(LIST(sales_amount ORDER BY date)) AS detected_periods
+    anofox_fcst_ts_detect_seasonality(LIST(sales_amount ORDER BY date)) AS detected_periods
 FROM sales
 GROUP BY product_id;
 

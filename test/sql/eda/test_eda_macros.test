@@ -36,10 +36,10 @@ SELECT
     END AS value
 FROM generate_series(1, 15) t(i);
 
-# Test: TS_STATS - Basic statistics
+# Test: anofox_fcst_ts_stats - Basic statistics
 statement ok
 CREATE TABLE stats_result AS
-SELECT * FROM ts_stats(eda_test_data, series_id, date_col, value, '1d');
+SELECT * FROM anofox_fcst_ts_stats(eda_test_data, series_id, date_col, value, '1d');
 
 # Verify stats for all series
 query I
@@ -142,12 +142,12 @@ WHERE series_id = 'series_3';
 true	true
 
 
-# Test: TS_DETECT_SEASONALITY - Seasonality detection with GROUP BY
+# Test: anofox_fcst_ts_detect_seasonality - Seasonality detection with GROUP BY
 statement ok
 CREATE TABLE seasonality_result AS
 SELECT 
     series_id,
-    TS_DETECT_SEASONALITY(LIST(value ORDER BY date_col)) AS detected_periods
+    anofox_fcst_ts_detect_seasonality(LIST(value ORDER BY date_col)) AS detected_periods
 FROM eda_test_data
 GROUP BY series_id;
 

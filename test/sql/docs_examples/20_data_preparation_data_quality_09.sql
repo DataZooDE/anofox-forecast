@@ -13,7 +13,7 @@ SELECT
     group_col AS product_id,
     date_col AS date,
     value_col AS sales_amount
-FROM TS_FILL_GAPS('sales', product_id, date, sales_amount, '1d');
+FROM anofox_fcst_ts_fill_gaps('sales', product_id, date, sales_amount, '1d');
 
 -- Before: [2023-01-01, 2023-01-03, 2023-01-05]
 -- After:  [2023-01-01, 2023-01-02, 2023-01-03, 2023-01-04, 2023-01-05]

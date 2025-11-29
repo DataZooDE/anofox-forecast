@@ -10,7 +10,7 @@ WHERE d % 3 != 0;  -- Create gaps by skipping some days
 
 -- Generate statistics
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales_raw', product_id, date, sales_amount, '1d');
 
 -- Detect gaps (check expected_length vs length)
 SELECT 
@@ -25,4 +25,4 @@ LIMIT 10;
 
 -- Fix: Fill gaps
 CREATE TABLE fixed AS
-SELECT * FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_fill_gaps('sales_raw', product_id, date, sales_amount, '1d');

@@ -7,5 +7,5 @@ FROM generate_series(0, 89) t(d);
 
 -- For each model, verify it returns forecasts
 SELECT *
-FROM TS_FORECAST('test_data', date, value, 'Naive', 12, MAP{})
+FROM anofox_fcst_ts_forecast('test_data', date, value, 'Naive', 12, MAP{})
 LIMIT 5;

@@ -12,7 +12,7 @@ CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
 -- Create stats for raw data
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales_raw', product_id, date, sales_amount, '1d');
 
 -- Prepare data (fill gaps, drop constants, etc.)
 CREATE TABLE sales_prepared AS
@@ -20,11 +20,11 @@ SELECT
     group_col AS product_id,
     date_col AS date,
     value_col AS sales_amount
-FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount, '1d');
+FROM anofox_fcst_ts_fill_gaps('sales_raw', product_id, date, sales_amount, '1d');
 
 -- Generate stats for prepared data
 CREATE TABLE prepared_stats AS
-SELECT * FROM TS_STATS('sales_prepared', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales_prepared', product_id, date, sales_amount, '1d');
 
 -- Compare quality
 SELECT 

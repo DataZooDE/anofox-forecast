@@ -7,7 +7,7 @@ FROM generate_series(0, 89) t(d);  -- 90 days of data
 
 -- Get in-sample fitted values
 CREATE TABLE forecast_with_fit AS
-SELECT * FROM TS_FORECAST('sales', date, sales, 'AutoETS', 28,
+SELECT * FROM anofox_fcst_ts_forecast('sales', date, sales, 'AutoETS', 28,
                           MAP{'seasonal_period': 7, 'return_insample': true});
 
 -- Check fit quality
@@ -20,8 +20,8 @@ WITH residuals AS (
     ORDER BY s.date
 )
 SELECT 
-    TS_R2(LIST(actual), LIST(fitted)) AS r_squared,
-    TS_RMSE(LIST(actual), LIST(fitted)) AS rmse
+    anofox_fcst_ts_r2(LIST(actual), LIST(fitted)) AS r_squared,
+    anofox_fcst_ts_rmse(LIST(actual), LIST(fitted)) AS rmse
 FROM residuals;
 
 -- R² > 0.7 indicates good fit

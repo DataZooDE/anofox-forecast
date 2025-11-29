@@ -6,5 +6,5 @@ SELECT
 FROM generate_series(1, 10000) t(idx);
 
 -- Test with 10,000 data points
-SELECT * FROM TS_FORECAST('large_test_data', date, value, 'Naive', 100, MAP{})
+SELECT * FROM anofox_fcst_ts_forecast('large_test_data', date, value, 'Naive', 100, MAP{})
 LIMIT 5;

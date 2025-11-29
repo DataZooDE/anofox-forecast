@@ -29,18 +29,18 @@ FROM (
 );
 
 # ============================================================================
-# APPROACH 1: Manual GROUP BY with TS_FORECAST_AGG (Recommended)
+# APPROACH 1: Manual GROUP BY with anofox_fcst_ts_forecast_agg (Recommended)
 # ============================================================================
 # For 3+ ID columns, use manual GROUP BY
 
-# Test 1: Forecast using TS_FORECAST_AGG with manual GROUP BY on 3 columns
+# Test 1: Forecast using anofox_fcst_ts_forecast_agg with manual GROUP BY on 3 columns
 statement ok
 CREATE TABLE forecasts_3id AS
 SELECT 
     region,
     store,
     product,
-    TS_FORECAST_AGG(date, sales, 'Naive', 7, NULL) AS result
+    anofox_fcst_ts_forecast_agg(date, sales, 'Naive', 7, NULL) AS result
 FROM sales_data
 GROUP BY region, store, product;
 
@@ -117,11 +117,11 @@ SELECT
     sales
 FROM sales_data;
 
-# Test 5: Use ts_forecast_by with composite ID
+# Test 5: Use anofox_fcst_ts_forecast_by with composite ID
 statement ok
 CREATE TABLE forecasts_composite AS
 SELECT *
-FROM ts_forecast_by(
+FROM anofox_fcst_ts_forecast_by(
     sales_with_composite,
     composite_id,
     date,
@@ -177,7 +177,7 @@ true
 # Test 8: EDA with composite key
 statement ok
 CREATE TABLE eda_composite AS
-SELECT * FROM ts_stats(sales_with_composite, composite_id, date, sales, '1d');
+SELECT * FROM anofox_fcst_ts_stats(sales_with_composite, composite_id, date, sales, '1d');
 
 # Verify stats generated for multiple series
 query I
@@ -189,7 +189,7 @@ true
 # Test 9: Data prep with composite key
 statement ok
 CREATE TABLE prepped_data AS
-SELECT * FROM ts_fill_nulls_forward(sales_with_composite, composite_id, date, sales);
+SELECT * FROM anofox_fcst_ts_fill_nulls_forward(sales_with_composite, composite_id, date, sales);
 
 # Verify data prep works with composite ID
 query I

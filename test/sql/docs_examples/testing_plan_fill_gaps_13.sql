@@ -11,13 +11,13 @@ SELECT
     series_id,
     date_col AS date,
     value_col AS value
-FROM TS_FILL_NULLS_FORWARD('test_table', series_id, date_col, value_col)
+FROM anofox_fcst_ts_fill_nulls_forward('test_table', series_id, date_col, value_col)
 LIMIT 5;
 
 SELECT 
     series_id,
     date_col AS date,
     value_col AS value
-FROM TS_FILL_NULLS_BACKWARD('test_table', series_id, date_col, value_col)
+FROM anofox_fcst_ts_fill_nulls_backward('test_table', series_id, date_col, value_col)
 LIMIT 5;
 -- Verify fills NULL values appropriately

@@ -6,14 +6,14 @@
 
 The `anofox-forecast` extension provides two powerful functions for automatic seasonality detection in time series data:
 
-1. **`TS_DETECT_SEASONALITY`** - Simple detection returning seasonal periods
-2. **`TS_ANALYZE_SEASONALITY`** - Analysis with seasonal/trend strength
+1. **`anofox_fcst_ts_detect_seasonality`** - Simple detection returning seasonal periods
+2. **`anofox_fcst_ts_analyze_seasonality`** - Analysis with seasonal/trend strength
 
 These functions use autocorrelation-based periodogram analysis to automatically identify recurring patterns in your data.
 
 ## Functions
 
-### TS_DETECT_SEASONALITY
+### anofox_fcst_ts_detect_seasonality
 
 Detects up to 3 seasonal periods from a time series.
 
@@ -29,7 +29,7 @@ Detects up to 3 seasonal periods from a time series.
 **Example:**
 <!-- include: test/sql/docs_examples/12_detecting_seasonality_seasonality_02.sql -->
 
-### TS_ANALYZE_SEASONALITY
+### anofox_fcst_ts_analyze_seasonality
 
 Performs comprehensive seasonality analysis including strength metrics.
 
@@ -66,7 +66,7 @@ The detection algorithm uses **autocorrelation-based periodogram analysis**:
 
 ### Seasonal Strength Calculation
 
-For detailed analysis (`TS_ANALYZE_SEASONALITY`):
+For detailed analysis (`anofox_fcst_ts_analyze_seasonality`):
 
 1. **Decomposition**: Uses STL (Seasonal and Trend decomposition using Loess) or MSTL (Multiple STL for multiple seasonalities)
 
@@ -112,8 +112,8 @@ The algorithm uses these internal defaults:
 ### Data Requirements
 
 - **Minimum Length**: 
-  - `TS_DETECT_SEASONALITY`: At least 8 observations
-  - `TS_ANALYZE_SEASONALITY`: At least 2 full seasonal cycles (e.g., 14+ for weekly)
+  - `anofox_fcst_ts_detect_seasonality`: At least 8 observations
+  - `anofox_fcst_ts_analyze_seasonality`: At least 2 full seasonal cycles (e.g., 14+ for weekly)
   
 - **Quality**: 
   - Data should be regularly spaced (no large gaps)
@@ -153,7 +153,7 @@ The algorithm uses these internal defaults:
 - Irregular spacing in data
 
 **Solutions:**
-- Use `TS_ANALYZE_SEASONALITY` to see strength metrics
+- Use `anofox_fcst_ts_analyze_seasonality` to see strength metrics
 - Manually specify period if known
 - Check data quality and completeness
 

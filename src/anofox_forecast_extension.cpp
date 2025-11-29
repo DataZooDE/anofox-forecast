@@ -43,18 +43,58 @@ static void RegisterAggregateFunctionIgnore(ExtensionLoader &loader, AggregateFu
 	loader.RegisterFunction(std::move(info));
 }
 
+static void RegisterAggregateFunctionWithAlias(ExtensionLoader &loader, AggregateFunction function,
+                                               const string &alias_name) {
+	// Register main function
+	AggregateFunctionSet main_set(function.name);
+	main_set.AddFunction(function);
+	CreateAggregateFunctionInfo main_info(std::move(main_set));
+	main_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+	loader.RegisterFunction(std::move(main_info));
+
+	// Register alias
+	AggregateFunction alias_function = function;
+	alias_function.name = alias_name;
+	AggregateFunctionSet alias_set(alias_name);
+	alias_set.AddFunction(std::move(alias_function));
+	CreateAggregateFunctionInfo alias_info(std::move(alias_set));
+	alias_info.alias_of = function.name;
+	alias_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+	loader.RegisterFunction(std::move(alias_info));
+}
+
+static void RegisterScalarFunctionWithAlias(ExtensionLoader &loader, ScalarFunction function,
+                                            const string &alias_name) {
+	// Register main function
+	ScalarFunctionSet main_set(function.name);
+	main_set.AddFunction(function);
+	CreateScalarFunctionInfo main_info(std::move(main_set));
+	main_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+	loader.RegisterFunction(std::move(main_info));
+
+	// Register alias
+	ScalarFunction alias_function = function;
+	alias_function.name = alias_name;
+	ScalarFunctionSet alias_set(alias_name);
+	alias_set.AddFunction(std::move(alias_function));
+	CreateScalarFunctionInfo alias_info(std::move(alias_set));
+	alias_info.alias_of = function.name;
+	alias_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+	loader.RegisterFunction(std::move(alias_info));
+}
+
 // Table macros - user-facing API with automatic UNNEST
 // New signature: TS_FORECAST_BY(table_name, group_by_columns, date_col, target_col, method, horizon, params)
 // Users get direct table output, no manual UNNEST needed!
 static const DefaultTableMacro forecast_table_macros[] = {
     // TS_FORECAST: Single series (no GROUP BY)
     {DEFAULT_SCHEMA,
-     "ts_forecast",
+     "anofox_fcst_ts_forecast",
      {"table_name", "date_col", "target_col", "method", "horizon", "params", nullptr},
      {{nullptr, nullptr}},
      R"(
         WITH fc AS (
-            SELECT TS_FORECAST_AGG(date_col, target_col, method, horizon, params) AS result
+            SELECT anofox_fcst_ts_forecast_agg(date_col, target_col, method, horizon, params) AS result
             FROM QUERY_TABLE(table_name)
         ),
         expanded AS (
@@ -72,7 +112,7 @@ static const DefaultTableMacro forecast_table_macros[] = {
     )"},
     // TS_FORECAST_BY: Multiple series (1 group column)
     {DEFAULT_SCHEMA,
-     "ts_forecast_by",
+     "anofox_fcst_ts_forecast_by",
      {"table_name", "group_col", "date_col", "target_col", "method", "horizon", "params", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -99,7 +139,7 @@ static const DefaultTableMacro forecast_table_macros[] = {
     )"},
     // TS_DETECT_CHANGEPOINTS: Single series (no GROUP BY)
     {DEFAULT_SCHEMA,
-     "ts_detect_changepoints",
+     "anofox_fcst_ts_detect_changepoints",
      {"table_name", "date_col", "value_col", "params", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -120,14 +160,14 @@ static const DefaultTableMacro forecast_table_macros[] = {
     )"},
     // TS_DETECT_CHANGEPOINTS_BY: Multiple series (1 group column)
     {DEFAULT_SCHEMA,
-     "ts_detect_changepoints_by",
+     "anofox_fcst_ts_detect_changepoints_by",
      {"table_name", "group_col", "date_col", "value_col", "params", nullptr},
      {{nullptr, nullptr}},
      R"(
         WITH cp AS (
             SELECT 
                 group_col,
-                TS_DETECT_CHANGEPOINTS_AGG(date_col, value_col, params) AS result
+                anofox_fcst_ts_detect_changepoints_agg(date_col, value_col, params) AS result
             FROM QUERY_TABLE(table_name)
             GROUP BY group_col
         ),
@@ -152,12 +192,22 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// Register the FORECAST table function (legacy, for compatibility)
 	auto forecast_function = CreateForecastTableFunction();
+	// Register main function
 	RegisterTableFunctionIgnore(loader, std::move(*forecast_function));
+	// Register alias
+	auto alias_function = CreateForecastTableFunction();
+	(*alias_function).name = "forecast";
+	TableFunctionSet alias_set("forecast");
+	alias_set.AddFunction(*alias_function);
+	CreateTableFunctionInfo alias_info(std::move(alias_set));
+	alias_info.alias_of = "anofox_fcst_forecast";
+	alias_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+	loader.RegisterFunction(std::move(alias_info));
 	// std::cerr << "[DEBUG] FORECAST table function registered" << std::endl;
 
 	// Register the TS_FORECAST_AGG aggregate function (internal, for GROUP BY)
 	auto ts_forecast_agg = CreateTSForecastAggregate();
-	RegisterAggregateFunctionIgnore(loader, std::move(ts_forecast_agg));
+	RegisterAggregateFunctionWithAlias(loader, std::move(ts_forecast_agg), "ts_forecast_agg");
 	// std::cerr << "[DEBUG] TS_FORECAST_AGG aggregate function registered" << std::endl;
 
 	// Register the TS_METRICS scalar functions (for evaluation)
@@ -182,6 +232,17 @@ static void LoadInternal(ExtensionLoader &loader) {
 		auto table_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(forecast_table_macros[index]);
 		table_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
 		loader.RegisterFunction(*table_info);
+
+		// Register alias (without anofox_fcst_ prefix)
+		if (forecast_table_macros[index].name && string(forecast_table_macros[index].name).find("anofox_fcst_") == 0) {
+			string alias_name = string(forecast_table_macros[index].name).substr(12); // Remove "anofox_fcst_" prefix
+			DefaultTableMacro alias_macro = forecast_table_macros[index];
+			alias_macro.name = alias_name.c_str();
+			auto alias_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(alias_macro);
+			alias_info->alias_of = forecast_table_macros[index].name;
+			alias_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+			loader.RegisterFunction(*alias_info);
+		}
 	}
 	// std::cerr << "[DEBUG] TS_FORECAST table macros registered" << std::endl;
 

@@ -12,7 +12,7 @@ CROSS JOIN (VALUES ('P001'), ('P002')) products(product_id);
 
 -- Remove trailing zeros
 CREATE TABLE sales_no_trailing_zeros AS
-SELECT * FROM TS_DROP_TRAILING_ZEROS('sales', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_drop_trailing_zeros('sales', product_id, date, sales_amount);
 
 -- Verify result (should end at day 80)
 SELECT 

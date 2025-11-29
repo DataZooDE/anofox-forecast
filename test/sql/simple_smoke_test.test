@@ -15,10 +15,10 @@ SELECT
     (100.0 + i)::DOUBLE AS value
 FROM generate_series(1, 20) t(i);
 
-# Test: TS_FORECAST_AGG aggregate function
+# Test: anofox_fcst_ts_forecast_agg aggregate function
 statement ok
 CREATE TABLE forecast_result AS
-SELECT TS_FORECAST_AGG(date_col, value, 'Naive', 5, NULL) AS result
+SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'Naive', 5, NULL) AS result
 FROM test_data;
 
 # Verify forecast was generated
@@ -28,10 +28,10 @@ FROM forecast_result;
 ----
 true
 
-# Test: ts_forecast table macro (column names without quotes)
+# Test: anofox_fcst_ts_forecast table macro (column names without quotes)
 statement ok
 CREATE TABLE macro_result AS
-SELECT * FROM ts_forecast(test_data, date_col, value, 'Naive', 5, NULL);
+SELECT * FROM anofox_fcst_ts_forecast(test_data, date_col, value, 'Naive', 5, NULL);
 
 # Verify macro returned 5 forecast steps
 query I

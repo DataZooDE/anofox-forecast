@@ -8,15 +8,15 @@ FROM generate_series(0, 89) t(d);  -- 90 days of data
 -- Try 3 models and compare
 WITH ets AS (
     SELECT 'AutoETS' AS model, * 
-    FROM TS_FORECAST('sales', date, sales, 'AutoETS', 14, MAP{'seasonal_period': 7})
+    FROM anofox_fcst_ts_forecast('sales', date, sales, 'AutoETS', 14, MAP{'seasonal_period': 7})
 ),
 theta AS (
     SELECT 'Theta' AS model, * 
-    FROM TS_FORECAST('sales', date, sales, 'Theta', 14, MAP{'seasonal_period': 7})
+    FROM anofox_fcst_ts_forecast('sales', date, sales, 'Theta', 14, MAP{'seasonal_period': 7})
 ),
 naive AS (
     SELECT 'Theta' AS model, * 
-    FROM TS_FORECAST('sales', date, sales, 'Theta', 14, MAP{'seasonal_period': 7})
+    FROM anofox_fcst_ts_forecast('sales', date, sales, 'Theta', 14, MAP{'seasonal_period': 7})
 )
 SELECT * FROM ets 
 UNION ALL SELECT * FROM theta 

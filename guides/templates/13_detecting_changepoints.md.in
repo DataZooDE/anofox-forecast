@@ -13,7 +13,7 @@ The `anofox-forecast` extension provides powerful changepoint detection capabili
 
 ## Functions
 
-### TS_DETECT_CHANGEPOINTS
+### anofox_fcst_ts_detect_changepoints
 
 Detects changepoints in a single time series.
 
@@ -42,7 +42,7 @@ Table with original data plus:
 **Example:**
 <!-- include: test/sql/docs_examples/13_detecting_changepoints_seasonality_02.sql -->
 
-### TS_DETECT_CHANGEPOINTS_BY
+### anofox_fcst_ts_detect_changepoints_by
 
 Detects changepoints for multiple time series using GROUP BY.
 

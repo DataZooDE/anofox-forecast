@@ -8,10 +8,10 @@ FROM generate_series(0, 89) t(d);  -- 90 days of data
 -- Forecast using only data after the last changepoint
 WITH last_cp AS (
     SELECT MAX(date_col) AS last_change
-    FROM TS_DETECT_CHANGEPOINTS('sales_data', date, sales, MAP{})
+    FROM anofox_fcst_ts_detect_changepoints('sales_data', date, sales, MAP{})
     WHERE is_changepoint = true
 )
-SELECT * FROM TS_FORECAST(
+SELECT * FROM anofox_fcst_ts_forecast(
     'sales_data',
     date, sales, 'AutoETS', 28, MAP{'seasonal_period': 7}
 )

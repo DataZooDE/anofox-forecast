@@ -8,4 +8,4 @@ FROM generate_series(0, 89) t(d)
 CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
 
 CREATE TABLE sales_variable AS
-SELECT * FROM TS_DROP_CONSTANT('sales', product_id, sales_amount);
+SELECT * FROM anofox_fcst_ts_drop_constant('sales', product_id, sales_amount);

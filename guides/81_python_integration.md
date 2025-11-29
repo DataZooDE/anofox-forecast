@@ -81,7 +81,7 @@ con.execute("""
 
 # Generate forecast
 result = con.execute("""
-    SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
+    SELECT * FROM anofox_fcst_ts_forecast('sales', date, amount, 'AutoETS', 28, 
                               {'seasonal_period': 7})
 """).fetchdf()
 
@@ -108,7 +108,7 @@ con.register('sales_df', df)
 
 # Forecast directly from pandas DataFrame
 forecast = con.execute("""
-    SELECT * FROM TS_FORECAST('sales_df', date, amount, 'AutoETS', 28,
+    SELECT * FROM anofox_fcst_ts_forecast('sales_df', date, amount, 'AutoETS', 28,
                               {'seasonal_period': 7})
 """).fetchdf()
 
@@ -134,7 +134,7 @@ con.register('sales', df)
 
 # Forecast all products in parallel
 forecasts = con.execute("""
-    SELECT * FROM TS_FORECAST_BY('sales', product_id, date, sales,
+    SELECT * FROM anofox_fcst_ts_forecast_by('sales', product_id, date, sales,
                                  'AutoETS', 14, {'seasonal_period': 7})
 """).fetchdf()
 
@@ -164,7 +164,7 @@ con.execute("CREATE TABLE sales_raw AS SELECT * FROM read_csv('sales.csv')")
 
 # 1. Analyze data quality
 stats = con.execute("""
-    SELECT * FROM TS_STATS('sales_raw', product_id, date, amount)
+    SELECT * FROM anofox_fcst_ts_stats('sales_raw', product_id, date, amount)
 """).fetchdf()
 
 print(f"Average quality score: {stats['quality_score'].mean():.3f}")
@@ -174,17 +174,17 @@ print(f"Series with issues: {(stats['quality_score'] < 0.7).sum()}")
 con.execute("""
     CREATE TABLE sales_prepared AS
     WITH filled AS (
-        SELECT * FROM TS_FILL_GAPS('sales_raw', product_id, date, amount)
+        SELECT * FROM anofox_fcst_ts_fill_gaps('sales_raw', product_id, date, amount)
     ),
     cleaned AS (
-        SELECT * FROM TS_DROP_CONSTANT('filled', product_id, amount)
+        SELECT * FROM anofox_fcst_ts_drop_constant('filled', product_id, amount)
     )
-    SELECT * FROM TS_FILL_NULLS_FORWARD('cleaned', product_id, date, amount)
+    SELECT * FROM anofox_fcst_ts_fill_nulls_forward('cleaned', product_id, date, amount)
 """)
 
 # 3. Forecast
 forecasts = con.execute("""
-    SELECT * FROM TS_FORECAST_BY('sales_prepared', product_id, date, amount,
+    SELECT * FROM anofox_fcst_ts_forecast_by('sales_prepared', product_id, date, amount,
                                  'AutoETS', 28, {'seasonal_period': 7})
 """).fetchdf()
 
@@ -225,10 +225,10 @@ metrics = con.execute("""
     )
     SELECT 
         product_id,
-        TS_MAE(actuals, forecasts) AS mae,
-        TS_RMSE(actuals, forecasts) AS rmse,
-        TS_MAPE(actuals, forecasts) AS mape,
-        TS_COVERAGE(actuals, lower_bounds, upper_bounds) AS coverage
+        anofox_fcst_ts_mae(actuals, forecasts) AS mae,
+        anofox_fcst_ts_rmse(actuals, forecasts) AS rmse,
+        anofox_fcst_ts_mape(actuals, forecasts) AS mape,
+        anofox_fcst_ts_coverage(actuals, lower_bounds, upper_bounds) AS coverage
     FROM joined
 """).fetchdf()
 
@@ -258,7 +258,7 @@ def run_forecast_pipeline(input_file, output_file):
     # Prepare
     con.execute("""
         CREATE TABLE sales_prep AS
-        SELECT * FROM TS_FILL_GAPS('sales', product_id, date, amount)
+        SELECT * FROM anofox_fcst_ts_fill_gaps('sales', product_id, date, amount)
     """)
     
     # Forecast
@@ -271,7 +271,7 @@ def run_forecast_pipeline(input_file, output_file):
             upper AS upper_95ci,
             confidence_level,
             CURRENT_TIMESTAMP AS generated_at
-        FROM TS_FORECAST_BY('sales_prep', product_id, date, amount,
+        FROM anofox_fcst_ts_forecast_by('sales_prep', product_id, date, amount,
                             'AutoETS', 28, {'seasonal_period': 7, 'confidence_level': 0.95})
     """).fetchdf()
     
@@ -308,7 +308,7 @@ def get_forecast(product_id: str, horizon: int = 28):
             point_forecast,
             lower,
             upper
-        FROM TS_FORECAST(
+        FROM anofox_fcst_ts_forecast(
             (SELECT * FROM sales WHERE product_id = '{product_id}'),
             date, amount, 'AutoETS', {horizon},
             {{'seasonal_period': 7}}
@@ -322,7 +322,7 @@ def get_metrics(product_id: str):
     """Get forecast accuracy metrics"""
     metrics = con.execute(f"""
         WITH stats AS (
-            SELECT * FROM TS_STATS(
+            SELECT * FROM anofox_fcst_ts_stats(
                 (SELECT * FROM sales WHERE product_id = '{product_id}'),
                 product_id, date, amount
             )
@@ -354,9 +354,9 @@ def prepare_data():
     con.execute("""
         CREATE OR REPLACE TABLE sales_prepared AS
         WITH filled AS (
-            SELECT * FROM TS_FILL_GAPS('sales_raw', product_id, date, amount)
+            SELECT * FROM anofox_fcst_ts_fill_gaps('sales_raw', product_id, date, amount)
         )
-        SELECT * FROM TS_DROP_CONSTANT('filled', product_id, amount)
+        SELECT * FROM anofox_fcst_ts_drop_constant('filled', product_id, amount)
     """)
     
     return "Data prepared"
@@ -369,7 +369,7 @@ def generate_forecasts():
     
     con.execute("""
         CREATE OR REPLACE TABLE forecasts AS
-        SELECT * FROM TS_FORECAST_BY('sales_prepared', product_id, date, amount,
+        SELECT * FROM anofox_fcst_ts_forecast_by('sales_prepared', product_id, date, amount,
                                      'AutoETS', 28, {'seasonal_period': 7})
     """)
     
@@ -421,7 +421,7 @@ historical = con.execute("""
 # Get forecast
 forecast = con.execute("""
     SELECT date_col, point_forecast, lower, upper
-    FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
+    FROM anofox_fcst_ts_forecast('sales', date, amount, 'AutoETS', 28, 
                      {'seasonal_period': 7, 'confidence_level': 0.95})
 """).fetchdf()
 
@@ -452,7 +452,7 @@ con.execute("LOAD 'anofox_forecast.duckdb_extension'")
 
 historical = con.execute("SELECT date, amount FROM sales").fetchdf()
 forecast = con.execute("""
-    SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, {'seasonal_period': 7})
+    SELECT * FROM anofox_fcst_ts_forecast('sales', date, amount, 'AutoETS', 28, {'seasonal_period': 7})
 """).fetchdf()
 
 fig = go.Figure()
@@ -505,7 +505,7 @@ def forecast_product(product_id: str, horizon: int = 28) -> pd.DataFrame:
     
     # Use prepared statement for safety
     result = con.execute("""
-        SELECT * FROM TS_FORECAST(
+        SELECT * FROM anofox_fcst_ts_forecast(
             (SELECT * FROM sales WHERE product_id = ?),
             date, amount, 'AutoETS', ?, {'seasonal_period': 7}
         )
@@ -534,7 +534,7 @@ forecasts = []
 for product_id, in tqdm(products, desc="Forecasting"):
     # Forecast one product at a time (if needed for memory)
     fc = con.execute(f"""
-        SELECT * FROM TS_FORECAST(
+        SELECT * FROM anofox_fcst_ts_forecast(
             (SELECT * FROM sales WHERE product_id = '{product_id}'),
             date, amount, 'AutoETS', 28, {{'seasonal_period': 7}}
         )
@@ -562,7 +562,7 @@ fitted = con.execute("""
     SELECT 
         product_id,
         insample_fitted
-    FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 7,
+    FROM anofox_fcst_ts_forecast_by('sales', product_id, date, amount, 'AutoETS', 7,
                         {'seasonal_period': 7, 'return_insample': true})
     WHERE forecast_step = 1
 """).fetchdf()
@@ -610,7 +610,7 @@ duckdb_con.execute("LOAD 'anofox_forecast.duckdb_extension'")
 duckdb_con.register('sales', df)
 
 forecast = duckdb_con.execute("""
-    SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28, 
+    SELECT * FROM anofox_fcst_ts_forecast_by('sales', product_id, date, amount, 'AutoETS', 28, 
                                  {'seasonal_period': 7})
 """).fetchdf()
 
@@ -636,7 +636,7 @@ con.execute("""
 
 # Forecast directly from PostgreSQL table
 forecast = con.execute("""
-    SELECT * FROM TS_FORECAST_BY('pg.sales', product_id, date, amount,
+    SELECT * FROM anofox_fcst_ts_forecast_by('pg.sales', product_id, date, amount,
                                  'AutoETS', 28, {'seasonal_period': 7})
 """).fetchdf()
 
@@ -671,7 +671,7 @@ def get_forecast_connection():
 # Usage
 with get_forecast_connection() as con:
     forecast = con.execute("""
-        SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
+        SELECT * FROM anofox_fcst_ts_forecast('sales', date, amount, 'AutoETS', 28, 
                                   {'seasonal_period': 7})
     """).fetchdf()
 ```
@@ -688,7 +688,7 @@ def safe_forecast(product_id: str) -> pd.DataFrame:
         con.execute("LOAD 'anofox_forecast.duckdb_extension'")
         
         result = con.execute(f"""
-            SELECT * FROM TS_FORECAST(
+            SELECT * FROM anofox_fcst_ts_forecast(
                 (SELECT * FROM sales WHERE product_id = '{product_id}'),
                 date, amount, 'AutoETS', 28, {{'seasonal_period': 7}}
             )
@@ -725,14 +725,14 @@ def forecast_with_logging(table_name: str):
     # Check data quality first
     stats = con.execute(f"""
         SELECT COUNT(*) as n_series, AVG(quality_score) as avg_quality
-        FROM TS_STATS('{table_name}', product_id, date, amount)
+        FROM anofox_fcst_ts_stats('{table_name}', product_id, date, amount)
     """).fetchone()
     
     logger.info(f"Data quality: {stats[1]:.3f} for {stats[0]} series")
     
     # Generate forecast
     forecast = con.execute(f"""
-        SELECT * FROM TS_FORECAST_BY('{table_name}', product_id, date, amount,
+        SELECT * FROM anofox_fcst_ts_forecast_by('{table_name}', product_id, date, amount,
                                      'AutoETS', 28, {{'seasonal_period': 7}})
     """).fetchdf()
     
@@ -755,9 +755,9 @@ con = duckdb.connect('analytics.db', read_only=False)
 con.execute("LOAD 'anofox_forecast.duckdb_extension'")
 
 # Multiple operations on same connection
-stats = con.execute("SELECT * FROM TS_STATS('sales', product_id, date, amount)").fetchdf()
-forecast = con.execute("SELECT * FROM TS_FORECAST_BY(...)").fetchdf()
-metrics = con.execute("SELECT TS_MAE(...) FROM ...").fetchdf()
+stats = con.execute("SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, amount)").fetchdf()
+forecast = con.execute("SELECT * FROM anofox_fcst_ts_forecast_by(...)").fetchdf()
+metrics = con.execute("SELECT anofox_fcst_ts_mae(...) FROM ...").fetchdf()
 
 con.close()
 ```
@@ -773,7 +773,7 @@ con.execute("LOAD 'anofox_forecast.duckdb_extension'")
 
 # Returns PyArrow table (faster for large data)
 forecast_arrow = con.execute("""
-    SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount, 'AutoETS', 28, 
+    SELECT * FROM anofox_fcst_ts_forecast_by('sales', product_id, date, amount, 'AutoETS', 28, 
                                  {'seasonal_period': 7})
 """).fetch_arrow_table()
 
@@ -794,7 +794,7 @@ def forecast_batch(product_ids):
     
     # DuckDB parallelizes internally
     return con.execute(f"""
-        SELECT * FROM TS_FORECAST_BY(
+        SELECT * FROM anofox_fcst_ts_forecast_by(
             (SELECT * FROM sales WHERE product_id IN ({','.join(f"'{p}'" for p in product_ids)})),
             product_id, date, amount, 'AutoETS', 28, {{'seasonal_period': 7}}
         )
@@ -834,14 +834,14 @@ con.execute("CREATE TABLE sales AS SELECT ...")
 
 # Quick forecast
 forecast = con.sql("""
-    SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, {'seasonal_period': 7})
+    SELECT * FROM anofox_fcst_ts_forecast('sales', date, amount, 'AutoETS', 28, {'seasonal_period': 7})
 """).df()
 
 # Display nicely
 forecast.head(10)
 
 # Or use DuckDB's built-in display
-con.sql("SELECT * FROM TS_FORECAST(...) LIMIT 10").show()
+con.sql("SELECT * FROM anofox_fcst_ts_forecast(...) LIMIT 10").show()
 ```
 
 ## Summary

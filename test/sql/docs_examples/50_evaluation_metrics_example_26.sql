@@ -9,8 +9,8 @@ SELECT
 CREATE TABLE forecast_quality_log AS
 SELECT 
     CURRENT_DATE AS date,
-    TS_MAE(actual_list, forecast_list) AS mae,
-    TS_MAPE(actual_list, forecast_list) AS mape
+    anofox_fcst_ts_mae(actual_list, forecast_list) AS mae,
+    anofox_fcst_ts_mape(actual_list, forecast_list) AS mape
 FROM daily_evaluation;
 
 -- Check if quality is degrading

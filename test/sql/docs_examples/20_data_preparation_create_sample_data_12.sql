@@ -8,4 +8,4 @@ FROM generate_series(0, 89) t(d)
 CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
 
 CREATE TABLE sales_long_enough AS
-SELECT * FROM TS_DROP_SHORT('sales', product_id, 30);  -- min 30 obs
+SELECT * FROM anofox_fcst_ts_drop_short('sales', product_id, 30);  -- min 30 obs

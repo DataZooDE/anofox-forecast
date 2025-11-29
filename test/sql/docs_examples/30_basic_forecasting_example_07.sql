@@ -17,7 +17,7 @@ SELECT 5, 106.0, 108.5, 99.0, 118.0;
 
 -- Check if 95% intervals actually cover 95% of actuals
 SELECT 
-    ROUND(TS_COVERAGE(LIST(actual ORDER BY forecast_step), LIST(lower ORDER BY forecast_step), LIST(upper ORDER BY forecast_step)) * 100, 1) AS coverage_pct
+    ROUND(anofox_fcst_ts_coverage(LIST(actual ORDER BY forecast_step), LIST(lower ORDER BY forecast_step), LIST(upper ORDER BY forecast_step)) * 100, 1) AS coverage_pct
 FROM results;
 
 -- Target: ~95% for well-calibrated 95% CI

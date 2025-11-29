@@ -18,7 +18,7 @@ FROM generate_series(1, 30) t(i);
 
 query I
 SELECT COUNT(*) = 10
-FROM ts_forecast(test_timestamp, date_col, value, 'Naive', 10, NULL);
+FROM anofox_fcst_ts_forecast(test_timestamp, date_col, value, 'Naive', 10, NULL);
 ----
 true
 
@@ -33,7 +33,7 @@ FROM generate_series(1, 30) t(i);
 
 query I
 SELECT COUNT(*) = 10
-FROM ts_forecast(test_timestamp_s, date_col, value, 'Naive', 10, NULL);
+FROM anofox_fcst_ts_forecast(test_timestamp_s, date_col, value, 'Naive', 10, NULL);
 ----
 true
 
@@ -48,7 +48,7 @@ FROM generate_series(1, 30) t(i);
 
 query I
 SELECT COUNT(*) = 10
-FROM ts_forecast(test_timestamp_ms, date_col, value, 'Naive', 10, NULL);
+FROM anofox_fcst_ts_forecast(test_timestamp_ms, date_col, value, 'Naive', 10, NULL);
 ----
 true
 
@@ -63,18 +63,18 @@ FROM generate_series(1, 30) t(i);
 
 query I
 SELECT COUNT(*) = 10
-FROM ts_forecast(test_timestamp_ns, date_col, value, 'Naive', 10, NULL);
+FROM anofox_fcst_ts_forecast(test_timestamp_ns, date_col, value, 'Naive', 10, NULL);
 ----
 true
 
 #############################################
-# Test TS_FORECAST_AGG with different precisions
+# Test anofox_fcst_ts_forecast_agg with different precisions
 #############################################
 
 # Test with TIMESTAMP_S
 statement ok
 CREATE TABLE agg_result_timestamp_s AS
-SELECT TS_FORECAST_AGG(date_col, value, 'Naive', 5, NULL) AS result
+SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'Naive', 5, NULL) AS result
 FROM test_timestamp_s;
 
 query I
@@ -86,7 +86,7 @@ true
 # Test with TIMESTAMP_MS
 statement ok
 CREATE TABLE agg_result_timestamp_ms AS
-SELECT TS_FORECAST_AGG(date_col, value, 'Naive', 5, NULL) AS result
+SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'Naive', 5, NULL) AS result
 FROM test_timestamp_ms;
 
 query I
@@ -98,7 +98,7 @@ true
 # Test with TIMESTAMP_NS
 statement ok
 CREATE TABLE agg_result_timestamp_ns AS
-SELECT TS_FORECAST_AGG(date_col, value, 'Naive', 5, NULL) AS result
+SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'Naive', 5, NULL) AS result
 FROM test_timestamp_ns;
 
 query I
@@ -108,7 +108,7 @@ FROM agg_result_timestamp_ns;
 true
 
 #############################################
-# Test ts_forecast_by with different precisions
+# Test anofox_fcst_ts_forecast_by with different precisions
 #############################################
 
 # Create multi-series data with TIMESTAMP_NS
@@ -119,7 +119,7 @@ FROM generate_series(1, 30) t(i);
 
 query I
 SELECT COUNT(DISTINCT series_id) = 3
-FROM ts_forecast_by(multi_timestamp_ns, series_id, date_col, value, 'Naive', 5, NULL);
+FROM anofox_fcst_ts_forecast_by(multi_timestamp_ns, series_id, date_col, value, 'Naive', 5, NULL);
 ----
 true
 

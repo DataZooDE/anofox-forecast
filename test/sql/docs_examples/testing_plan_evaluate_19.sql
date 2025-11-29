@@ -9,10 +9,10 @@ SELECT
 
 -- Test all 12 metrics work
 SELECT 
-    TS_MAE(actual, forecast) AS mae,
-    TS_RMSE(actual, forecast) AS rmse,
-    TS_MAPE(actual, forecast) AS mape,
-    TS_SMAPE(actual, forecast) AS smape,
-    TS_MASE(actual, forecast, seasonal_period) AS mase,
-    TS_COVERAGE(actual, lower, upper) AS coverage
+    anofox_fcst_ts_mae(actual, forecast) AS mae,
+    anofox_fcst_ts_rmse(actual, forecast) AS rmse,
+    anofox_fcst_ts_mape(actual, forecast) AS mape,
+    anofox_fcst_ts_smape(actual, forecast) AS smape,
+    anofox_fcst_ts_mase(actual, forecast, seasonal_period) AS mase,
+    anofox_fcst_ts_coverage(actual, lower, upper) AS coverage
 FROM forecast_validation;

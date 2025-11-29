@@ -14,4 +14,4 @@ SELECT
     group_col AS product_id,
     date_col AS date,
     value_col AS sales_amount
-FROM TS_FILL_NULLS_MEAN('sales', product_id, date, sales_amount);
+FROM anofox_fcst_ts_fill_nulls_mean('sales', product_id, date, sales_amount);

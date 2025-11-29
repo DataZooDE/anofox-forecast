@@ -6,14 +6,14 @@ SELECT
 FROM generate_series(0, 89) t(d);
 
 -- These should work (ARIMA models are supported)
-SELECT * FROM TS_FORECAST('test_data', date, value, 'ARIMA', 5, MAP{'p': 1, 'd': 1, 'q': 1})
+SELECT * FROM anofox_fcst_ts_forecast('test_data', date, value, 'ARIMA', 5, MAP{'p': 1, 'd': 1, 'q': 1})
 LIMIT 5;
 
-SELECT * FROM TS_FORECAST('test_data', date, value, 'AutoARIMA', 5, MAP{})
+SELECT * FROM anofox_fcst_ts_forecast('test_data', date, value, 'AutoARIMA', 5, MAP{})
 LIMIT 5;
 
 -- Verify other models still work
-SELECT * FROM TS_FORECAST('test_data', date, value, 'Naive', 5, MAP{})
+SELECT * FROM anofox_fcst_ts_forecast('test_data', date, value, 'Naive', 5, MAP{})
 LIMIT 5;
-SELECT * FROM TS_FORECAST('test_data', date, value, 'AutoETS', 5, MAP{'seasonal_period': 12})
+SELECT * FROM anofox_fcst_ts_forecast('test_data', date, value, 'AutoETS', 5, MAP{'seasonal_period': 12})
 LIMIT 5;

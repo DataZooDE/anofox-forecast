@@ -8,7 +8,7 @@ FROM generate_series(0, 89) t(d)
 CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
 -- Get quality stats
-SELECT * FROM TS_STATS('sales', product_id, date, amount, '1d')
+SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, amount, '1d')
 LIMIT 5;
 
 -- Prepare data
@@ -18,11 +18,11 @@ WITH filled AS (
         group_col AS product_id,
         date_col AS date,
         value_col AS amount
-    FROM TS_FILL_GAPS('sales', product_id, date, amount, '1d')
+    FROM anofox_fcst_ts_fill_gaps('sales', product_id, date, amount, '1d')
 )
-SELECT * FROM TS_DROP_CONSTANT('filled', product_id, amount);
+SELECT * FROM anofox_fcst_ts_drop_constant('filled', product_id, amount);
 
 -- Generate forecast
-SELECT * FROM TS_FORECAST_BY('sales_prepared', product_id, date, amount,
+SELECT * FROM anofox_fcst_ts_forecast_by('sales_prepared', product_id, date, amount,
                              'AutoETS', 28, MAP{'seasonal_period': 7})
 LIMIT 5;

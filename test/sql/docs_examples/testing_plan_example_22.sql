@@ -6,5 +6,5 @@ SELECT
 WHERE FALSE;
 
 -- This should handle empty data appropriately
-SELECT * FROM TS_FORECAST('empty_data', date, value, 'Naive', 5, MAP{});
+SELECT * FROM anofox_fcst_ts_forecast('empty_data', date, value, 'Naive', 5, MAP{});
 -- Expected: Appropriate error or empty result

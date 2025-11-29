@@ -8,7 +8,7 @@ FROM generate_series(0, 30) t(d)
 CROSS JOIN (VALUES (1), (2)) series(series_id);
 
 CREATE TABLE test_stats AS
-SELECT * FROM TS_STATS('test_table', id_col, date_col, value_col, '1d');
+SELECT * FROM anofox_fcst_ts_stats('test_table', id_col, date_col, value_col, '1d');
 
-SELECT * FROM TS_QUALITY_REPORT('test_stats', 30);
+SELECT * FROM anofox_fcst_ts_quality_report('test_stats', 30);
 -- Verify detects: nulls, zeros, constants, gaps

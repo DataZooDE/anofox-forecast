@@ -12,7 +12,7 @@ SELECT 3, 103.0, 105.5;
 -- Example: Inventory planning accepts 5% error
 WITH quality_check AS (
     SELECT 
-        TS_MAPE(LIST(actual ORDER BY step), LIST(predicted ORDER BY step)) AS mape
+        anofox_fcst_ts_mape(LIST(actual ORDER BY step), LIST(predicted ORDER BY step)) AS mape
     FROM forecast_evaluation
 )
 SELECT 
