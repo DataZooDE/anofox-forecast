@@ -1,99 +1,202 @@
-# Documentation Cleanup and Restructuring
+# Unify API Naming Convention Across All Extensions
 
 ## Overview
 
-This PR performs a comprehensive cleanup and restructuring of the documentation to improve maintainability, consistency, and user experience. The changes establish `API_REFERENCE.md` as the single source of truth for API documentation and streamline the guide structure.
+This PR implements a unified naming convention across all Anofox extensions (Tabular, Statistics, and Forecast) by renaming all functions to use the `anofox_fcst_*` prefix for the Forecast extension, while maintaining full backward compatibility through aliases.
 
-## Key Changes
+## Naming Convention
 
-### 1. Documentation Consolidation
+All Anofox extensions now follow a consistent naming pattern:
+- **anofox-tabular**: `anofox_tab_*`
+- **anofox-forecast**: `anofox_fcst_*`
+- **anofox-statistics**: `anofox_stats_*`
 
-- **Established `API_REFERENCE.md` as single source of truth**: Updated README to reference `API_REFERENCE.md` for all API documentation, eliminating duplication and ensuring consistency
-- **Removed deprecated guides**: Deleted 7 deprecated guide files and their associated SQL examples:
-  - `41_model_parameters.md` - Content consolidated into API reference
-  - `51_usage_guide.md` - Redundant with quickstart and API reference
-  - `60_performance_optimization.md` - Removed outdated optimization content
-  - `70_demand_forecasting.md` - Removed domain-specific use case guide
-  - `84_cpp_integration.md` - Removed (C++ integration covered in multi-language overview)
-  - `85_rust_integration.md` - Removed (Rust integration covered in multi-language overview)
-  - `99_guide_index.md` - Removed redundant index
+Additionally, all functions are available without the prefix as aliases for backward compatibility. For example:
+- `anofox_fcst_ts_forecast` and `ts_forecast` (both work)
+- `anofox_fcst_ts_mae` and `ts_mae` (both work)
 
-### 2. Guide Restructuring and Alignment
+## Changes Made
 
-- **Aligned guides with API_REFERENCE.md structure**: Restructured all guides to follow the same organizational pattern as the API reference
-- **Enhanced EDA guide**: Expanded exploratory analysis guide with comprehensive examples and improved structure (1,520+ lines added)
-- **Improved quickstart guide**: Added introduction, single/multiple series examples, and multiple models comparison
-- **Refactored evaluation metrics guide**: Restructured with introduction section, complete train/test data examples, and improved navigation
+### 1. Function Renaming
 
-### 3. SQL Examples Improvements
+All functions in the anofox-forecast extension have been renamed from `ts_*` to `anofox_fcst_ts_*`:
 
-- **Added sample datasets**: All SQL examples now include complete, copy-paste ready sample datasets for immediate testing
-- **Fixed test coverage**: Improved SQL test coverage to 150/154 passing (97.4%)
-- **Removed orphaned examples**: Deleted 4 unused SQL test files that were not referenced in any guides
-- **Standardized examples**: Updated examples to use consistent patterns and include necessary data preparation steps
+**Forecasting Functions:**
+- `anofox_fcst_ts_forecast` (alias: `ts_forecast`)
+- `anofox_fcst_ts_forecast_by` (alias: `ts_forecast_by`)
+- `anofox_fcst_ts_forecast_agg` (alias: `ts_forecast_agg`)
 
-### 4. Navigation and Usability Enhancements
+**Evaluation Metrics (12 functions):**
+- `anofox_fcst_ts_mae`, `anofox_fcst_ts_mse`, `anofox_fcst_ts_rmse`
+- `anofox_fcst_ts_mape`, `anofox_fcst_ts_smape`, `anofox_fcst_ts_mase`
+- `anofox_fcst_ts_r2`, `anofox_fcst_ts_bias`, `anofox_fcst_ts_rmae`
+- `anofox_fcst_ts_quantile_loss`, `anofox_fcst_ts_mqloss`, `anofox_fcst_ts_coverage`
 
-- **Added Table of Contents**: Time series features guide now includes a comprehensive ToC
-- **Added "Go to Top" links**: Evaluation metrics and time series features guides include navigation links after each section
-- **Fixed broken links**: Corrected C++ and Rust guide links in Multi-Language Support section
-- **Improved section organization**: Moved Introduction sections before Table of Contents for better flow
+**Seasonality Functions:**
+- `anofox_fcst_ts_detect_seasonality` (alias: `ts_detect_seasonality`)
+- `anofox_fcst_ts_analyze_seasonality` (alias: `ts_analyze_seasonality`)
 
-### 5. Content Updates
+**Changepoint Functions:**
+- `anofox_fcst_ts_detect_changepoints` (alias: `ts_detect_changepoints`)
+- `anofox_fcst_ts_detect_changepoints_by` (alias: `ts_detect_changepoints_by`)
+- `anofox_fcst_ts_detect_changepoints_agg` (alias: `ts_detect_changepoints_agg`)
 
-- **Added issue references**: Added notes about issue #14 to seasonality and changepoint detection documentation
-- **Removed redundant sections**: Removed "Complete Examples" sections that duplicated content from other guides
-- **Cleaned multi-language guide**: Removed benchmarks section and format recommendations, focusing on integration patterns
-- **Updated struct expansion**: Time series features guide now uses struct expansion for cleaner examples
+**Time Series Features:**
+- `anofox_fcst_ts_features` (alias: `ts_features`)
+- `anofox_fcst_ts_features_list` (alias: `ts_features_list`)
+- `anofox_fcst_ts_features_config_from_json` (alias: `ts_features_config_from_json`)
+- `anofox_fcst_ts_features_config_from_csv` (alias: `ts_features_config_from_csv`)
 
-## Technical Details
+**EDA Macros (3 macros):**
+- `anofox_fcst_ts_stats` (alias: `ts_stats`)
+- `anofox_fcst_ts_stats_summary` (alias: `ts_stats_summary`)
+- `anofox_fcst_ts_quality_report` (alias: `ts_quality_report`)
 
-### Files Changed
-- **488 files changed**: 6,317 insertions(+), 13,838 deletions(-)
-- **Guide files**: 18 guide files restructured
-- **SQL examples**: 200+ SQL example files updated
-- **Templates**: 18 template files updated to match new structure
+**Data Preparation Macros (12+ macros):**
+- `anofox_fcst_ts_fill_gaps`, `anofox_fcst_ts_fill_forward`
+- `anofox_fcst_ts_fill_nulls_forward`, `anofox_fcst_ts_fill_nulls_backward`
+- `anofox_fcst_ts_fill_nulls_mean`, `anofox_fcst_ts_fill_nulls_const`
+- `anofox_fcst_ts_drop_constant`, `anofox_fcst_ts_drop_short`
+- `anofox_fcst_ts_drop_leading_zeros`, `anofox_fcst_ts_drop_trailing_zeros`
+- `anofox_fcst_ts_drop_edge_zeros`, `anofox_fcst_ts_drop_gappy`
+- `anofox_fcst_ts_diff`
+- (All with corresponding aliases)
 
-### Removed Files
-- 7 deprecated guide files and templates
-- 4 orphaned SQL test files
-- 200+ SQL examples associated with removed guides
+**Data Quality Macros:**
+- `anofox_fcst_ts_data_quality` (alias: `ts_data_quality`)
+- `anofox_fcst_ts_data_quality_summary` (alias: `ts_data_quality_summary`)
 
-### Test Coverage
-- SQL test coverage: **150/154 passing (97.4%)**
-- All remaining test failures are documented and tracked
+### 2. Implementation Details
+
+**C++ Source Files Updated (10 files):**
+- `src/anofox_forecast_extension.cpp` - Core registration with alias helpers
+- `src/forecast_aggregate.cpp` - Forecast aggregate function
+- `src/forecast_table_function.cpp` - Legacy forecast table function
+- `src/metrics_function.cpp` - 12 metrics functions with aliases
+- `src/seasonality_function.cpp` - 2 seasonality functions with aliases
+- `src/changepoint_function.cpp` - Changepoint functions with aliases
+- `src/ts_features_function.cpp` - TS features functions with aliases
+- `src/eda_macros.cpp` - EDA macros with alias registration
+- `src/data_prep_macros.cpp` - Data prep macros with alias registration
+- `src/data_quality_macros.cpp` - Data quality macros with alias registration
+
+**Alias Registration:**
+- All functions are registered twice: once with the full name and once as an alias
+- Aliases use the `alias_of` field to point to the main function
+- Both naming conventions work identically and produce the same results
+
+### 3. Documentation Updates
+
+**API Reference:**
+- Updated `docs/API_REFERENCE.md` with new function names
+- Added alias documentation throughout
+- Updated function naming conventions section
+
+**README:**
+- Updated quick start examples to use new function names
+- Maintained backward compatibility examples
+
+**Guide Templates:**
+- Updated all SQL examples in guide templates
+- Updated markdown references to function names
+- All guides now reflect the new naming convention
+
+### 4. Test Updates
+
+**SQL Test Files:**
+- Updated 177+ SQL test files with new function names
+- All existing tests continue to pass
+
+**New Test Suite:**
+- Created `test/sql/core/test_function_aliases.test`
+- Comprehensive test coverage for both full names and aliases
+- 24 assertions covering all function types:
+  - Scalar functions (metrics, seasonality)
+  - Table macros (forecast, stats)
+  - Aggregate functions
+  - Result equivalence verification
+
+**Test Results:**
+- ✅ All 13 core tests passing
+- ✅ Alias test suite: 24/24 assertions passing
+- ✅ Verified both naming conventions produce identical results
+
+## Backward Compatibility
+
+**100% Backward Compatible:** All existing code using `ts_*` function names will continue to work without any changes. The aliases are fully functional and produce identical results to the full function names.
+
+**Migration Path:**
+- Existing code: No changes required (aliases work)
+- New code: Can use either naming convention
+- Recommended: Use `anofox_fcst_ts_*` for clarity and consistency
+
+## Testing
+
+### Manual Verification
+```sql
+-- Full name works
+SELECT anofox_fcst_ts_mae([1.0, 2.0, 3.0], [1.1, 2.1, 3.1]);
+-- Result: 0.1 ✓
+
+-- Alias works
+SELECT ts_mae([1.0, 2.0, 3.0], [1.1, 2.1, 3.1]);
+-- Result: 0.1 ✓
+
+-- Both produce identical results
+SELECT anofox_fcst_ts_forecast(...) = ts_forecast(...);
+-- Result: true ✓
+```
+
+### Automated Tests
+- ✅ `test_function_aliases.test`: 24 assertions (tests both naming conventions)
+- ✅ `test_basic_forecasting.test`: 18 assertions
+- ✅ `test_all_models.test`: 37 assertions
+- ✅ All other core tests: Passing
+
+## Files Changed
+
+**Statistics:**
+- 208 files changed
+- 2,097 insertions(+), 1,560 deletions(-)
+
+**Key Files:**
+- 10 C++ source files
+- 1 API reference documentation
+- 1 README
+- 11 guide template files
+- 177+ SQL test files
+- 1 new test file (alias test suite)
 
 ## Impact
 
 ### Benefits
-- **Reduced maintenance burden**: Single source of truth eliminates duplicate documentation
-- **Improved consistency**: All guides follow the same structure and patterns
-- **Better user experience**: Copy-paste ready examples with complete datasets
-- **Enhanced navigation**: ToC and go-to-top links improve discoverability
-- **Cleaner codebase**: Removed 7,500+ lines of deprecated/redundant content
+- **Unified naming**: Consistent API across all Anofox extensions
+- **Clear namespace**: `anofox_fcst_*` prefix clearly identifies forecast extension functions
+- **Backward compatible**: Zero breaking changes for existing users
+- **Future-proof**: Ready for integration with other Anofox extensions
 
 ### Breaking Changes
-- **None**: This is a documentation-only change. No API or functionality changes.
-
-## Migration Notes
-
-For users referencing the removed guides:
-- Model parameters → See `docs/API_REFERENCE.md` for detailed parameter documentation
-- Usage guide → See `guides/01_quickstart.md` and `docs/API_REFERENCE.md`
-- Performance optimization → See `docs/API_REFERENCE.md` for performance-related parameters
-- C++/Rust integration → See `guides/80_multi_language_overview.md`
-- Demand forecasting → See `guides/30_basic_forecasting.md` for general forecasting patterns
+- **None**: This is fully backward compatible through aliases
 
 ## Related Issues
 
-- Addresses documentation maintenance concerns
-- Improves test coverage (97.4% passing)
-- Fixes broken cross-references
+This PR addresses the requirement to unify API naming conventions across all Anofox extensions (Tabular, Statistics, and Forecast).
 
-## Testing
+## Checklist
 
-- ✅ All SQL examples tested and verified
-- ✅ Cross-references validated
-- ✅ Documentation builds successfully
-- ✅ Test coverage: 150/154 passing (97.4%)
+- [x] All functions renamed to `anofox_fcst_ts_*` prefix
+- [x] All aliases registered and tested
+- [x] Documentation updated (API_REFERENCE.md, README.md, guides)
+- [x] All SQL test files updated
+- [x] Comprehensive alias test suite created
+- [x] All tests passing (13/13 core tests)
+- [x] Code compiled successfully (release mode)
+- [x] Manual verification completed
+- [x] Backward compatibility verified
 
+## Next Steps
+
+After this PR is merged:
+1. Update anofox-tabular extension with `anofox_tab_*` prefix
+2. Update anofox-statistics extension with `anofox_stats_*` prefix
+3. Update cross-extension documentation and examples
