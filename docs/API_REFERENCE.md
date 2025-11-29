@@ -21,10 +21,14 @@ The Anofox Forecast extension provides comprehensive time series forecasting cap
 ### Function Naming Conventions
 
 Functions follow consistent naming patterns:
-- `TS_*` prefix for time series functions
-- `TS_FORECAST*` for forecasting operations
-- `TS_*_BY` suffix for multi-series operations with GROUP BY
-- `TS_*_AGG` suffix for aggregate functions (internal/low-level)
+- `anofox_fcst_ts_*` prefix for all forecast extension functions
+- `anofox_fcst_ts_forecast*` for forecasting operations
+- `anofox_fcst_ts_*_by` suffix for multi-series operations with GROUP BY
+- `anofox_fcst_ts_*_agg` suffix for aggregate functions (internal/low-level)
+
+**Aliases**: All functions are also available without the `anofox_fcst_` prefix for backward compatibility. For example:
+- `anofox_fcst_ts_forecast` and `ts_forecast` (both work)
+- `anofox_fcst_ts_mae` and `ts_mae` (both work)
 
 ### Parameter Conventions
 
@@ -114,14 +118,14 @@ SQL macros for exploratory data analysis and quality assessment.
 
 ### Per-Series Statistics
 
-**TS_STATS**
+**anofox_fcst_ts_stats** (alias: `ts_stats`)
 
 Computes per-series statistical metrics including length, date ranges, central tendencies (mean, median), dispersion (std), value distributions (min, max, zeros), and quality indicators (nulls, uniqueness, constancy). Returns 24 metrics per series for exploratory analysis and data profiling.
 
 **Signature (Function Overloading):**
 ```sql
 -- For DATE/TIMESTAMP columns (date-based frequency)
-TS_STATS(
+anofox_fcst_ts_stats(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP,
@@ -130,7 +134,7 @@ TS_STATS(
 ) → TABLE
 
 -- For INTEGER columns (integer-based frequency)
-TS_STATS(
+anofox_fcst_ts_stats(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      INTEGER | BIGINT,
@@ -187,34 +191,34 @@ TABLE(
 ```sql
 -- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales_raw', product_id, date, amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales_raw', product_id, date, amount, '1d');
 
 -- INTEGER columns: Use INTEGER frequency values
 CREATE TABLE int_stats AS
-SELECT * FROM TS_STATS('int_data', series_id, date_col, value, 1);
+SELECT * FROM anofox_fcst_ts_stats('int_data', series_id, date_col, value, 1);
 
 -- Use NULL for default frequency
-SELECT * FROM TS_STATS('sales_raw', product_id, date, amount, NULL::VARCHAR);
+SELECT * FROM anofox_fcst_ts_stats('sales_raw', product_id, date, amount, NULL::VARCHAR);
 ```
 
 ---
 
 ### Quality Assessment
 
-**TS_QUALITY_REPORT**
+**anofox_fcst_ts_quality_report** (alias: `ts_quality_report`)
 
-Generates quality assessment report from TS_STATS output. Evaluates series against configurable thresholds for gaps, missing values, constant series, short series, and temporal alignment. Identifies series requiring data preparation steps.
+Generates quality assessment report from anofox_fcst_ts_stats output. Evaluates series against configurable thresholds for gaps, missing values, constant series, short series, and temporal alignment. Identifies series requiring data preparation steps.
 
 **Signature:**
 ```sql
-TS_QUALITY_REPORT(
+anofox_fcst_ts_quality_report(
     stats_table    VARCHAR,
     min_length     INTEGER
 ) → TABLE
 ```
 
 **Parameters:**
-- `stats_table`: Table produced by `TS_STATS`
+- `stats_table`: Table produced by `anofox_fcst_ts_stats`
 - `min_length`: Minimum acceptable series length
 
 **Returns:** Quality assessment with configurable minimum length threshold.
@@ -230,18 +234,18 @@ TS_QUALITY_REPORT(
 
 ### Dataset Summary
 
-**TS_STATS_SUMMARY**
+**anofox_fcst_ts_stats_summary** (alias: `ts_stats_summary`)
 
-Aggregates statistics across all series from TS_STATS output. Computes dataset-level metrics including total series count, total observations, average series length, and date span. Provides high-level overview for dataset characterization.
+Aggregates statistics across all series from anofox_fcst_ts_stats output. Computes dataset-level metrics including total series count, total observations, average series length, and date span. Provides high-level overview for dataset characterization.
 
 **Signature:**
 ```sql
-TS_STATS_SUMMARY(
+anofox_fcst_ts_stats_summary(
     stats_table    VARCHAR
 ) → TABLE
 ```
 
-**Returns:** Aggregate statistics across all series from TS_STATS output.
+**Returns:** Aggregate statistics across all series from anofox_fcst_ts_stats output.
 
 **Returns:**
 ```sql
@@ -259,14 +263,14 @@ TABLE(
 
 ### Assessment
 
-**TS_DATA_QUALITY**
+**anofox_fcst_ts_data_quality** (alias: `ts_data_quality`)
 
 Assesses data quality across four dimensions (Structural, Temporal, Magnitude, Behavioural) for each time series. Returns per-series metrics including key uniqueness, timestamp gaps, missing values, value distributions, and pattern characteristics. Output is normalized by dimension and metric for cross-series comparison.
 
 **Signature (Function Overloading):**
 ```sql
 -- For DATE/TIMESTAMP columns (date-based frequency)
-TS_DATA_QUALITY(
+anofox_fcst_ts_data_quality(
     table_name      VARCHAR,
     unique_id_col   ANY,
     date_col        DATE | TIMESTAMP,
@@ -276,7 +280,7 @@ TS_DATA_QUALITY(
 ) → TABLE
 
 -- For INTEGER columns (integer-based frequency)
-TS_DATA_QUALITY(
+anofox_fcst_ts_data_quality(
     table_name      VARCHAR,
     unique_id_col   ANY,
     date_col        INTEGER | BIGINT,
@@ -342,11 +346,11 @@ TABLE(
 **Example:**
 ```sql
 -- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
-SELECT * FROM TS_DATA_QUALITY('sales', product_id, date, amount, 30, '1d')
+SELECT * FROM anofox_fcst_ts_data_quality('sales', product_id, date, amount, 30, '1d')
 WHERE dimension = 'Temporal' AND metric = 'timestamp_gaps';
 
 -- INTEGER columns: Use INTEGER frequency values
-SELECT * FROM TS_DATA_QUALITY('int_data', series_id, date_col, value, 30, 1)
+SELECT * FROM anofox_fcst_ts_data_quality('int_data', series_id, date_col, value, 30, 1)
 WHERE dimension = 'Magnitude' AND metric = 'missing_values';
 ```
 
@@ -354,13 +358,13 @@ WHERE dimension = 'Magnitude' AND metric = 'missing_values';
 
 ### Summary by Dimension
 
-**TS_DATA_QUALITY_SUMMARY**
+**anofox_fcst_ts_data_quality_summary** (alias: `ts_data_quality_summary`)
 
 Aggregates quality metrics across all series, grouped by dimension and metric. Computes summary statistics (counts, percentages) for each quality dimension to provide dataset-level quality overview. Useful for identifying systemic data quality issues affecting multiple series.
 
 **Signature:**
 ```sql
-TS_DATA_QUALITY_SUMMARY(
+anofox_fcst_ts_data_quality_summary(
     table_name      VARCHAR,
     unique_id_col   ANY,
     date_col        DATE | TIMESTAMP | INTEGER,
@@ -379,14 +383,14 @@ SQL macros for data cleaning and transformation. Date type support varies by fun
 
 ### Gap Filling
 
-#### TS_FILL_GAPS
+#### anofox_fcst_ts_fill_gaps (alias: `ts_fill_gaps`)
 
 **Fill Missing Timestamps**
 
 **Signature (Function Overloading):**
 ```sql
 -- For DATE/TIMESTAMP columns (date-based frequency)
-TS_FILL_GAPS(
+anofox_fcst_ts_fill_gaps(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP,
@@ -395,7 +399,7 @@ TS_FILL_GAPS(
 ) → TABLE
 
 -- For INTEGER columns (integer-based frequency)
-TS_FILL_GAPS(
+anofox_fcst_ts_fill_gaps(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      INTEGER | BIGINT,
@@ -429,35 +433,35 @@ TS_FILL_GAPS(
 ```sql
 -- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
 -- Fill gaps with 30-minute frequency
-SELECT * FROM TS_FILL_GAPS('hourly_data', series_id, timestamp, value, '30m');
+SELECT * FROM anofox_fcst_ts_fill_gaps('hourly_data', series_id, timestamp, value, '30m');
 
 -- Fill gaps with weekly frequency
-SELECT * FROM TS_FILL_GAPS('weekly_data', series_id, date, value, '1w');
+SELECT * FROM anofox_fcst_ts_fill_gaps('weekly_data', series_id, date, value, '1w');
 
 -- Use NULL (must cast to VARCHAR for DATE/TIMESTAMP columns)
-SELECT * FROM TS_FILL_GAPS('daily_data', series_id, date, value, NULL::VARCHAR);
+SELECT * FROM anofox_fcst_ts_fill_gaps('daily_data', series_id, date, value, NULL::VARCHAR);
 
 -- INTEGER columns: Use INTEGER frequency values
 -- Fill gaps with step size of 1
-SELECT * FROM TS_FILL_GAPS('int_data', series_id, date_col, value, 1);
+SELECT * FROM anofox_fcst_ts_fill_gaps('int_data', series_id, date_col, value, 1);
 
 -- Fill gaps with step size of 2
-SELECT * FROM TS_FILL_GAPS('int_data', series_id, date_col, value, 2);
+SELECT * FROM anofox_fcst_ts_fill_gaps('int_data', series_id, date_col, value, 2);
 
 -- Use NULL (defaults to step size 1 for INTEGER columns)
-SELECT * FROM TS_FILL_GAPS('int_data', series_id, date_col, value, NULL);
+SELECT * FROM anofox_fcst_ts_fill_gaps('int_data', series_id, date_col, value, NULL);
 ```
 
 ---
 
-#### TS_FILL_FORWARD
+#### anofox_fcst_ts_fill_forward (alias: `ts_fill_forward`)
 
 **Extend Series to Target Date**
 
 **Signature (Function Overloading):**
 ```sql
 -- For DATE/TIMESTAMP columns (date-based frequency)
-TS_FILL_FORWARD(
+anofox_fcst_ts_fill_forward(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP,
@@ -467,7 +471,7 @@ TS_FILL_FORWARD(
 ) → TABLE
 
 -- For INTEGER columns (integer-based frequency)
-TS_FILL_FORWARD(
+anofox_fcst_ts_fill_forward(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      INTEGER | BIGINT,
@@ -503,36 +507,36 @@ TS_FILL_FORWARD(
 ```sql
 -- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
 -- Extend hourly series to target date
-SELECT * FROM TS_FILL_FORWARD('hourly_data', series_id, timestamp, value, '2024-12-31'::TIMESTAMP, '1h');
+SELECT * FROM anofox_fcst_ts_fill_forward('hourly_data', series_id, timestamp, value, '2024-12-31'::TIMESTAMP, '1h');
 
 -- Extend monthly series to target date
-SELECT * FROM TS_FILL_FORWARD('monthly_data', series_id, date, value, '2024-12-01'::DATE, '1mo');
+SELECT * FROM anofox_fcst_ts_fill_forward('monthly_data', series_id, date, value, '2024-12-01'::DATE, '1mo');
 
 -- Use NULL (must cast to VARCHAR for DATE/TIMESTAMP columns)
-SELECT * FROM TS_FILL_FORWARD('daily_data', series_id, date, value, '2024-12-31'::DATE, NULL::VARCHAR);
+SELECT * FROM anofox_fcst_ts_fill_forward('daily_data', series_id, date, value, '2024-12-31'::DATE, NULL::VARCHAR);
 
 -- INTEGER columns: Use INTEGER frequency values
 -- Extend series to index 100 with step size of 1
-SELECT * FROM TS_FILL_FORWARD('int_data', series_id, date_col, value, 100, 1);
+SELECT * FROM anofox_fcst_ts_fill_forward('int_data', series_id, date_col, value, 100, 1);
 
 -- Extend series to index 100 with step size of 5
-SELECT * FROM TS_FILL_FORWARD('int_data', series_id, date_col, value, 100, 5);
+SELECT * FROM anofox_fcst_ts_fill_forward('int_data', series_id, date_col, value, 100, 5);
 
 -- Use NULL (defaults to step size 1 for INTEGER columns)
-SELECT * FROM TS_FILL_FORWARD('int_data', series_id, date_col, value, 100, NULL);
+SELECT * FROM anofox_fcst_ts_fill_forward('int_data', series_id, date_col, value, 100, NULL);
 ```
 
 ---
 
 ### Series Filtering
 
-#### TS_DROP_CONSTANT
+#### anofox_fcst_ts_drop_constant (alias: `ts_drop_constant`)
 
 **Remove Constant Series**
 
 **Signature:**
 ```sql
-TS_DROP_CONSTANT(
+anofox_fcst_ts_drop_constant(
     table_name    VARCHAR,
     group_col     ANY,
     value_col     DOUBLE
@@ -546,13 +550,13 @@ TS_DROP_CONSTANT(
 
 ---
 
-#### TS_DROP_SHORT
+#### anofox_fcst_ts_drop_short (alias: `ts_drop_short`)
 
 **Remove Short Series**
 
 **Signature:**
 ```sql
-TS_DROP_SHORT(
+anofox_fcst_ts_drop_short(
     table_name    VARCHAR,
     group_col     ANY,
     min_length    INTEGER
@@ -568,13 +572,13 @@ TS_DROP_SHORT(
 
 ### Edge Cleaning
 
-#### TS_DROP_LEADING_ZEROS
+#### anofox_fcst_ts_drop_leading_zeros (alias: `ts_drop_leading_zeros`)
 
 **Remove Leading Zeros**
 
 **Signature:**
 ```sql
-TS_DROP_LEADING_ZEROS(
+anofox_fcst_ts_drop_leading_zeros(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -583,17 +587,17 @@ TS_DROP_LEADING_ZEROS(
 ```
 
 > [!WARNING]
-> Results may differ if `TS_FILL_GAPS` or `TS_FILL_FORWARD` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
+> Results may differ if `anofox_fcst_ts_fill_gaps` (or `ts_fill_gaps`) or `anofox_fcst_ts_fill_forward` (or `ts_fill_forward`) has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
 
 ---
 
-#### TS_DROP_TRAILING_ZEROS
+#### anofox_fcst_ts_drop_trailing_zeros (alias: `ts_drop_trailing_zeros`)
 
 **Remove Trailing Zeros**
 
 **Signature:**
 ```sql
-TS_DROP_TRAILING_ZEROS(
+anofox_fcst_ts_drop_trailing_zeros(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -602,17 +606,17 @@ TS_DROP_TRAILING_ZEROS(
 ```
 
 > [!WARNING]
-> Results may differ if `TS_FILL_GAPS` or `TS_FILL_FORWARD` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
+> Results may differ if `anofox_fcst_ts_fill_gaps` (or `ts_fill_gaps`) or `anofox_fcst_ts_fill_forward` (or `ts_fill_forward`) has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
 
 ---
 
-#### TS_DROP_EDGE_ZEROS
+#### anofox_fcst_ts_drop_edge_zeros (alias: `ts_drop_edge_zeros`)
 
 **Remove Both Leading and Trailing Zeros**
 
 **Signature:**
 ```sql
-TS_DROP_EDGE_ZEROS(
+anofox_fcst_ts_drop_edge_zeros(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -621,19 +625,19 @@ TS_DROP_EDGE_ZEROS(
 ```
 
 > [!WARNING]
-> Results may differ if `TS_FILL_GAPS` or `TS_FILL_FORWARD` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
+> Results may differ if `anofox_fcst_ts_fill_gaps` (or `ts_fill_gaps`) or `anofox_fcst_ts_fill_forward` (or `ts_fill_forward`) has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
 
 ---
 
 ### Missing Value Imputation
 
-#### TS_FILL_NULLS_CONST
+#### anofox_fcst_ts_fill_nulls_const (alias: `ts_fill_nulls_const`)
 
 **Fill with Constant Value**
 
 **Signature:**
 ```sql
-TS_FILL_NULLS_CONST(
+anofox_fcst_ts_fill_nulls_const(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -644,13 +648,13 @@ TS_FILL_NULLS_CONST(
 
 ---
 
-#### TS_FILL_NULLS_FORWARD
+#### anofox_fcst_ts_fill_nulls_forward (alias: `ts_fill_nulls_forward`)
 
 **Forward Fill (Last Observation Carried Forward)**
 
 **Signature:**
 ```sql
-TS_FILL_NULLS_FORWARD(
+anofox_fcst_ts_fill_nulls_forward(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -662,13 +666,13 @@ TS_FILL_NULLS_FORWARD(
 
 ---
 
-#### TS_FILL_NULLS_BACKWARD
+#### anofox_fcst_ts_fill_nulls_backward (alias: `ts_fill_nulls_backward`)
 
 **Backward Fill**
 
 **Signature:**
 ```sql
-TS_FILL_NULLS_BACKWARD(
+anofox_fcst_ts_fill_nulls_backward(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -680,13 +684,13 @@ TS_FILL_NULLS_BACKWARD(
 
 ---
 
-#### TS_FILL_NULLS_MEAN
+#### anofox_fcst_ts_fill_nulls_mean (alias: `ts_fill_nulls_mean`)
 
 **Fill with Series Mean**
 
 **Signature:**
 ```sql
-TS_FILL_NULLS_MEAN(
+anofox_fcst_ts_fill_nulls_mean(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -702,13 +706,13 @@ TS_FILL_NULLS_MEAN(
 
 ### Simple Seasonality Detection
 
-**TS_DETECT_SEASONALITY**
+**anofox_fcst_ts_detect_seasonality** (alias: `ts_detect_seasonality`)
 
 Simple Seasonality Detection
 
 **Signature:**
 ```sql
-TS_DETECT_SEASONALITY(
+anofox_fcst_ts_detect_seasonality(
     values    DOUBLE[]
 ) → INTEGER[]
 ```
@@ -719,7 +723,7 @@ TS_DETECT_SEASONALITY(
 ```sql
 SELECT 
     product_id,
-    TS_DETECT_SEASONALITY(LIST(value ORDER BY date)) AS periods
+    anofox_fcst_ts_detect_seasonality(LIST(value ORDER BY date)) AS periods
 FROM sales
 GROUP BY product_id;
 -- Returns: [7, 30] (weekly and monthly patterns)
@@ -731,13 +735,13 @@ GROUP BY product_id;
 
 ### Detailed Seasonality Analysis
 
-**TS_ANALYZE_SEASONALITY**
+**anofox_fcst_ts_analyze_seasonality** (alias: `ts_analyze_seasonality`)
 
 Detailed Seasonality Analysis
 
 **Signature:**
 ```sql
-TS_ANALYZE_SEASONALITY(
+anofox_fcst_ts_analyze_seasonality(
     timestamps    TIMESTAMP[] | DATE[],
     values        DOUBLE[]
 ) → STRUCT
@@ -757,7 +761,7 @@ STRUCT(
 ```sql
 SELECT 
     product_id,
-    TS_ANALYZE_SEASONALITY(
+    anofox_fcst_ts_analyze_seasonality(
         LIST(timestamp ORDER BY timestamp),
         LIST(value ORDER BY timestamp)
     ) AS analysis
@@ -777,13 +781,13 @@ GROUP BY product_id;
 
 ### Single Series Changepoint Detection
 
-**TS_DETECT_CHANGEPOINTS**
+**anofox_fcst_ts_detect_changepoints** (alias: `ts_detect_changepoints`)
 
 Single Series Changepoint Detection
 
 **Signature:**
 ```sql
-TS_DETECT_CHANGEPOINTS(
+anofox_fcst_ts_detect_changepoints(
     table_name    VARCHAR,
     date_col      DATE | TIMESTAMP,
     value_col     DOUBLE,
@@ -819,13 +823,13 @@ TABLE(
 
 ### Multiple Series Changepoint Detection
 
-**TS_DETECT_CHANGEPOINTS_BY**
+**anofox_fcst_ts_detect_changepoints_by** (alias: `ts_detect_changepoints_by`)
 
 Multiple Series Changepoint Detection
 
 **Signature:**
 ```sql
-TS_DETECT_CHANGEPOINTS_BY(
+anofox_fcst_ts_detect_changepoints_by(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP,
@@ -834,7 +838,7 @@ TS_DETECT_CHANGEPOINTS_BY(
 ) → TABLE
 ```
 
-**Returns:** Same as `TS_DETECT_CHANGEPOINTS`, plus `group_col` column.
+**Returns:** Same as `anofox_fcst_ts_detect_changepoints` (or `ts_detect_changepoints`), plus `group_col` column.
 
 **Behavioral Notes:**
 - Full parallelization on GROUP BY operations
@@ -845,13 +849,13 @@ TS_DETECT_CHANGEPOINTS_BY(
 
 ### Aggregate Function for Changepoint Detection
 
-**TS_DETECT_CHANGEPOINTS_AGG**
+**anofox_fcst_ts_detect_changepoints_agg** (alias: `ts_detect_changepoints_agg`)
 
 Aggregate Function for Changepoint Detection
 
 **Signature:**
 ```sql
-TS_DETECT_CHANGEPOINTS_AGG(
+anofox_fcst_ts_detect_changepoints_agg(
     date_col      DATE | TIMESTAMP,
     value_col     DOUBLE,
     params        MAP
@@ -876,13 +880,13 @@ LIST<STRUCT(
 
 ### Extract Time Series Features
 
-**TS_FEATURES**
+**anofox_fcst_ts_features** (alias: `ts_features`)
 
 Extract Time Series Features (tsfresh-compatible)
 
 **Signature:**
 ```sql
-TS_FEATURES(
+anofox_fcst_ts_features(
     ts_column           TIMESTAMP | DATE | BIGINT,
     value_column        DOUBLE,
     feature_selection   LIST(VARCHAR) | STRUCT | NULL,
@@ -909,7 +913,7 @@ TS_FEATURES(
 ```sql
 SELECT 
     product_id,
-    TS_FEATURES(
+    anofox_fcst_ts_features(
         date,
         sales,
         ['mean', 'variance', 'autocorrelation__lag_1'],
@@ -923,13 +927,13 @@ GROUP BY product_id;
 
 ### List Available Features
 
-**TS_FEATURES_LIST**
+**anofox_fcst_ts_features_list** (alias: `ts_features_list`)
 
 List Available Features
 
 **Signature:**
 ```sql
-TS_FEATURES_LIST() → TABLE
+anofox_fcst_ts_features_list() → TABLE
 ```
 
 **Returns:**
@@ -949,13 +953,13 @@ TABLE(
 
 ### Load Feature Configuration from JSON
 
-**TS_FEATURES_CONFIG_FROM_JSON**
+**anofox_fcst_ts_features_config_from_json** (alias: `ts_features_config_from_json`)
 
 Load Feature Configuration from JSON
 
 **Signature:**
 ```sql
-TS_FEATURES_CONFIG_FROM_JSON(
+anofox_fcst_ts_features_config_from_json(
     path    VARCHAR
 ) → STRUCT
 ```
@@ -977,18 +981,18 @@ STRUCT(
 
 ### Load Feature Configuration from CSV
 
-**TS_FEATURES_CONFIG_FROM_CSV**
+**anofox_fcst_ts_features_config_from_csv** (alias: `ts_features_config_from_csv`)
 
 Load Feature Configuration from CSV
 
 **Signature:**
 ```sql
-TS_FEATURES_CONFIG_FROM_CSV(
+anofox_fcst_ts_features_config_from_csv(
     path    VARCHAR
 ) → STRUCT
 ```
 
-**Returns:** Same as `TS_FEATURES_CONFIG_FROM_JSON`.
+**Returns:** Same as `anofox_fcst_ts_features_config_from_json` (or `ts_features_config_from_json`).
 
 **File Format:** CSV with header row containing `feature` and parameter columns.
 
@@ -998,7 +1002,7 @@ TS_FEATURES_CONFIG_FROM_CSV(
 
 ### Single Time Series Forecasting
 
-**TS_FORECAST**
+**anofox_fcst_ts_forecast** (alias: `ts_forecast`)
 
 Single Time Series Forecasting
 
@@ -1006,7 +1010,7 @@ Generate forecasts for a single time series with automatic parameter validation.
 
 **Signature:**
 ```sql
-TS_FORECAST(
+anofox_fcst_ts_forecast(
     table_name    VARCHAR,
     date_col      DATE | TIMESTAMP | INTEGER,
     value_col     DOUBLE,
@@ -1040,7 +1044,7 @@ TABLE(
 
 **Example:**
 ```sql
-SELECT * FROM TS_FORECAST(
+SELECT * FROM anofox_fcst_ts_forecast(
     'sales',
     date,
     amount,
@@ -1060,7 +1064,7 @@ SELECT * FROM TS_FORECAST(
 
 ### Multiple Time Series Forecasting
 
-**TS_FORECAST_BY**
+**anofox_fcst_ts_forecast_by** (alias: `ts_forecast_by`)
 
 Multiple Time Series Forecasting with GROUP BY
 
@@ -1068,7 +1072,7 @@ Generate forecasts for multiple time series with native DuckDB GROUP BY parallel
 
 **Signature:**
 ```sql
-TS_FORECAST_BY(
+anofox_fcst_ts_forecast_by(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -1109,7 +1113,7 @@ SELECT
     product_id,
     forecast_step,
     point_forecast
-FROM TS_FORECAST_BY(
+FROM anofox_fcst_ts_forecast_by(
     'product_sales',
     product_id,
     date,
@@ -1132,7 +1136,7 @@ ORDER BY product_id, forecast_step;
 
 ### Aggregate Function for Custom GROUP BY
 
-**TS_FORECAST_AGG**
+**anofox_fcst_ts_forecast_agg** (alias: `ts_forecast_agg`)
 
 Aggregate Function for Custom GROUP BY
 
@@ -1140,7 +1144,7 @@ Low-level aggregate function for forecasting with 2+ group columns or custom agg
 
 **Signature:**
 ```sql
-TS_FORECAST_AGG(
+anofox_fcst_ts_forecast_agg(
     date_col      DATE | TIMESTAMP | INTEGER,
     value_col     DOUBLE,
     method        VARCHAR,
@@ -1170,7 +1174,7 @@ WITH fc AS (
     SELECT 
         product_id,
         location_id,
-        TS_FORECAST_AGG(date, amount, 'AutoETS', 28, MAP{'seasonal_period': 7}) AS result
+        anofox_fcst_ts_forecast_agg(date, amount, 'AutoETS', 28, MAP{'seasonal_period': 7}) AS result
     FROM sales
     GROUP BY product_id, location_id
 )
@@ -1193,13 +1197,13 @@ All metrics accept `DOUBLE[]` arrays and return `DOUBLE`. Use with `GROUP BY` vi
 
 ### Mean Absolute Error
 
-**TS_MAE**
+**anofox_fcst_ts_mae** (alias: `ts_mae`)
 
 Mean Absolute Error
 
 **Signature:**
 ```sql
-TS_MAE(
+anofox_fcst_ts_mae(
     actual      DOUBLE[],
     predicted   DOUBLE[]
 ) → DOUBLE
@@ -1211,7 +1215,7 @@ TS_MAE(
 ```sql
 SELECT 
     product_id,
-    TS_MAE(LIST(actual), LIST(predicted)) AS mae
+    anofox_fcst_ts_mae(LIST(actual), LIST(predicted)) AS mae
 FROM results
 GROUP BY product_id;
 ```
@@ -1220,13 +1224,13 @@ GROUP BY product_id;
 
 ### Mean Squared Error
 
-**TS_MSE**
+**anofox_fcst_ts_mse** (alias: `ts_mse`)
 
 Mean Squared Error
 
 **Signature:**
 ```sql
-TS_MSE(
+anofox_fcst_ts_mse(
     actual      DOUBLE[],
     predicted   DOUBLE[]
 ) → DOUBLE
@@ -1238,13 +1242,13 @@ TS_MSE(
 
 ### Root Mean Squared Error
 
-**TS_RMSE**
+**anofox_fcst_ts_rmse** (alias: `ts_rmse`)
 
 Root Mean Squared Error
 
 **Signature:**
 ```sql
-TS_RMSE(
+anofox_fcst_ts_rmse(
     actual      DOUBLE[],
     predicted   DOUBLE[]
 ) → DOUBLE
@@ -1256,13 +1260,13 @@ TS_RMSE(
 
 ### Mean Absolute Percentage Error
 
-**TS_MAPE**
+**anofox_fcst_ts_mape** (alias: `ts_mape`)
 
 Mean Absolute Percentage Error
 
 **Signature:**
 ```sql
-TS_MAPE(
+anofox_fcst_ts_mape(
     actual      DOUBLE[],
     predicted   DOUBLE[]
 ) → DOUBLE
@@ -1277,13 +1281,13 @@ TS_MAPE(
 
 ### Symmetric Mean Absolute Percentage Error
 
-**TS_SMAPE**
+**anofox_fcst_ts_smape** (alias: `ts_smape`)
 
 Symmetric Mean Absolute Percentage Error
 
 **Signature:**
 ```sql
-TS_SMAPE(
+anofox_fcst_ts_smape(
     actual      DOUBLE[],
     predicted   DOUBLE[]
 ) → DOUBLE
@@ -1300,13 +1304,13 @@ TS_SMAPE(
 
 ### Mean Absolute Scaled Error
 
-**TS_MASE**
+**anofox_fcst_ts_mase** (alias: `ts_mase`)
 
 Mean Absolute Scaled Error
 
 **Signature:**
 ```sql
-TS_MASE(
+anofox_fcst_ts_mase(
     actual      DOUBLE[],
     predicted   DOUBLE[],
     baseline    DOUBLE[]
@@ -1321,13 +1325,13 @@ TS_MASE(
 
 ### R-squared
 
-**TS_R2**
+**anofox_fcst_ts_r2** (alias: `ts_r2`)
 
 R-squared (Coefficient of Determination)
 
 **Signature:**
 ```sql
-TS_R2(
+anofox_fcst_ts_r2(
     actual      DOUBLE[],
     predicted   DOUBLE[]
 ) → DOUBLE
@@ -1341,13 +1345,13 @@ TS_R2(
 
 ### Forecast Bias
 
-**TS_BIAS**
+**anofox_fcst_ts_bias** (alias: `ts_bias`)
 
 Forecast Bias
 
 **Signature:**
 ```sql
-TS_BIAS(
+anofox_fcst_ts_bias(
     actual      DOUBLE[],
     predicted   DOUBLE[]
 ) → DOUBLE
@@ -1361,13 +1365,13 @@ TS_BIAS(
 
 ### Relative Mean Absolute Error
 
-**TS_RMAE**
+**anofox_fcst_ts_rmae** (alias: `ts_rmae`)
 
 Relative Mean Absolute Error
 
 **Signature:**
 ```sql
-TS_RMAE(
+anofox_fcst_ts_rmae(
     actual      DOUBLE[],
     pred1        DOUBLE[],
     pred2        DOUBLE[]
@@ -1382,13 +1386,13 @@ TS_RMAE(
 
 ### Quantile Loss
 
-**TS_QUANTILE_LOSS**
+**anofox_fcst_ts_quantile_loss** (alias: `ts_quantile_loss`)
 
 Quantile Loss (Pinball Loss)
 
 **Signature:**
 ```sql
-TS_QUANTILE_LOSS(
+anofox_fcst_ts_quantile_loss(
     actual      DOUBLE[],
     predicted   DOUBLE[],
     q           DOUBLE
@@ -1406,13 +1410,13 @@ TS_QUANTILE_LOSS(
 
 ### Mean Quantile Loss
 
-**TS_MQLOSS**
+**anofox_fcst_ts_mqloss** (alias: `ts_mqloss`)
 
 Mean Quantile Loss
 
 **Signature:**
 ```sql
-TS_MQLOSS(
+anofox_fcst_ts_mqloss(
     actual      DOUBLE[],
     quantiles   DOUBLE[][],
     levels      DOUBLE[]
@@ -1429,13 +1433,13 @@ TS_MQLOSS(
 
 ### Prediction Interval Coverage
 
-**TS_COVERAGE**
+**anofox_fcst_ts_coverage** (alias: `ts_coverage`)
 
 Prediction Interval Coverage
 
 **Signature:**
 ```sql
-TS_COVERAGE(
+anofox_fcst_ts_coverage(
     actual      DOUBLE[],
     lower       DOUBLE[],
     upper       DOUBLE[]
@@ -1452,7 +1456,7 @@ TS_COVERAGE(
 ```sql
 SELECT 
     product_id,
-    TS_COVERAGE(LIST(actual), LIST(lower), LIST(upper)) * 100 AS coverage_pct
+    anofox_fcst_ts_coverage(LIST(actual), LIST(lower), LIST(upper)) * 100 AS coverage_pct
 FROM results
 GROUP BY product_id;
 -- Coverage should be close to confidence_level × 100
@@ -1644,22 +1648,22 @@ These parameters work with **all forecasting models**:
 
 | Type | Count | Examples |
 |------|-------|----------|
-| Table Macros | 23 | `TS_FORECAST`, `TS_STATS`, `TS_FILL_GAPS` |
-| Aggregate Functions | 5 | `TS_FORECAST_AGG`, `TS_FEATURES`, `TS_DETECT_CHANGEPOINTS_AGG` |
-| Scalar Functions | 14 | `TS_MAE`, `TS_DETECT_SEASONALITY`, `TS_ANALYZE_SEASONALITY` |
-| Table Functions | 1 | `TS_FEATURES_LIST` |
+| Table Macros | 23 | `anofox_fcst_ts_forecast` (or `ts_forecast`), `TS_STATS`, `anofox_fcst_ts_fill_gaps` (or `ts_fill_gaps`) |
+| Aggregate Functions | 5 | `anofox_fcst_ts_forecast_agg` (or `ts_forecast_agg`), `anofox_fcst_ts_features` (or `ts_features`), `anofox_fcst_ts_detect_changepoints_agg` (or `ts_detect_changepoints_agg`) |
+| Scalar Functions | 14 | `anofox_fcst_ts_mae` (or `ts_mae`), `anofox_fcst_ts_detect_seasonality` (or `ts_detect_seasonality`), `anofox_fcst_ts_analyze_seasonality` (or `ts_analyze_seasonality`) |
+| Table Functions | 1 | `anofox_fcst_ts_features_list` (or `ts_features_list`) |
 
 ### GROUP BY Support
 
 | Function Category | GROUP BY Support | Notes |
 |-------------------|------------------|-------|
-| Forecasting | ✅ | `TS_FORECAST_BY` and `TS_FORECAST_AGG` |
+| Forecasting | ✅ | `anofox_fcst_ts_forecast_by` (or `ts_forecast_by`) and `anofox_fcst_ts_forecast_agg` (or `ts_forecast_agg`) |
 | Evaluation Metrics | ✅ | Use with `LIST()` aggregation |
 | EDA Macros | ✅ | All macros support GROUP BY via `group_col` |
 | Data Quality | ✅ | All macros support GROUP BY |
 | Data Preparation | ✅ | All macros support GROUP BY |
 | Seasonality | ✅ | Use with `LIST()` aggregation |
-| Changepoint Detection | ✅ | `TS_DETECT_CHANGEPOINTS_BY` and `TS_DETECT_CHANGEPOINTS_AGG` |
+| Changepoint Detection | ✅ | `anofox_fcst_ts_detect_changepoints_by` (or `ts_detect_changepoints_by`) and `anofox_fcst_ts_detect_changepoints_agg` (or `ts_detect_changepoints_agg`) |
 | Time Series Features | ✅ | Aggregate function supports GROUP BY |
 
 ### Window Function Support
@@ -1668,7 +1672,7 @@ These parameters work with **all forecasting models**:
 |-------------------|----------------|-------|
 | Evaluation Metrics | ❌ | Scalar functions only |
 | Seasonality | ❌ | Scalar functions only |
-| Time Series Features | ✅ | `TS_FEATURES` supports `OVER` clauses |
+| Time Series Features | ✅ | `anofox_fcst_ts_features` (or `ts_features`) supports `OVER` clauses |
 
 ---
 

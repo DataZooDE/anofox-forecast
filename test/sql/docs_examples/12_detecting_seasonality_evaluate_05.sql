@@ -7,10 +7,10 @@ FROM generate_series(0, 89) t(d);  -- 90 days of data
 
 -- Detect seasonality and use it for forecasting
 WITH detection AS (
-    SELECT TS_DETECT_SEASONALITY(LIST(sales ORDER BY date)) AS periods
+    SELECT anofox_fcst_ts_detect_seasonality(LIST(sales ORDER BY date)) AS periods
     FROM sales_data
 )
-SELECT * FROM TS_FORECAST(
+SELECT * FROM anofox_fcst_ts_forecast(
     'sales_data',
     date,
     sales,

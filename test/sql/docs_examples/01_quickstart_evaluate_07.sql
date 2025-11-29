@@ -13,6 +13,6 @@ SELECT 3, 103.0, 105.5, 97.0, 114.0;
 
 -- If you have actual future values
 SELECT 
-    TS_MAE(LIST(actual), LIST(forecast)) AS mae,
-    TS_RMSE(LIST(actual), LIST(forecast)) AS rmse
+    anofox_fcst_ts_mae(LIST(actual), LIST(forecast)) AS mae,
+    anofox_fcst_ts_rmse(LIST(actual), LIST(forecast)) AS rmse
 FROM results;

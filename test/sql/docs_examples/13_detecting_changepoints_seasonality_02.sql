@@ -7,16 +7,16 @@ FROM generate_series(0, 89) t(d);  -- 90 days of data
 
 -- Detect with default parameters
 SELECT *
-FROM TS_DETECT_CHANGEPOINTS('sales_data', date, sales, MAP{})
+FROM anofox_fcst_ts_detect_changepoints('sales_data', date, sales, MAP{})
 WHERE is_changepoint = true;
 
 -- More sensitive detection
 SELECT *
-FROM TS_DETECT_CHANGEPOINTS('sales_data', date, sales, MAP{'hazard_lambda': 50.0})
+FROM anofox_fcst_ts_detect_changepoints('sales_data', date, sales, MAP{'hazard_lambda': 50.0})
 WHERE is_changepoint = true;
 
 -- With probabilities for confidence scoring
 SELECT date_col, is_changepoint, ROUND(changepoint_probability, 4) AS confidence
-FROM TS_DETECT_CHANGEPOINTS('sales_data', date, sales, MAP{'include_probabilities': true})
+FROM anofox_fcst_ts_detect_changepoints('sales_data', date, sales, MAP{'include_probabilities': true})
 WHERE is_changepoint = true
 ORDER BY changepoint_probability DESC;

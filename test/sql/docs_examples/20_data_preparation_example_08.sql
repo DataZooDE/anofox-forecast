@@ -8,10 +8,10 @@ FROM generate_series(0, 89) t(d)
 CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
 
 CREATE TABLE stats AS
-SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, sales_amount, '1d');
 
 -- Overall statistics
-SELECT * FROM TS_STATS_SUMMARY('stats');
+SELECT * FROM anofox_fcst_ts_stats_summary('stats');
 
 -- Example output:
 -- | total_series | total_observations | avg_series_length | date_span | frequency |

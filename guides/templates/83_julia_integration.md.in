@@ -77,7 +77,7 @@ DBInterface.execute(con, """
 
 # Generate forecast
 forecast = DataFrame(DBInterface.execute(con, """
-    SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
+    SELECT * FROM anofox_fcst_ts_forecast('sales', date, amount, 'AutoETS', 28, 
                               {'seasonal_period': 7})
 """))
 
@@ -108,7 +108,7 @@ DuckDB.register_data_frame(con, sales, "sales")
 
 # Forecast
 forecast = DataFrame(DBInterface.execute(con, """
-    SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28,
+    SELECT * FROM anofox_fcst_ts_forecast('sales', date, amount, 'AutoETS', 28,
                               {'seasonal_period': 7})
 """))
 
@@ -138,7 +138,7 @@ DuckDB.register_data_frame(con, sales, "sales")
 
 # Forecast all products in parallel
 forecasts = DataFrame(DBInterface.execute(con, """
-    SELECT * FROM TS_FORECAST_BY('sales', product_id, date, amount,
+    SELECT * FROM anofox_fcst_ts_forecast_by('sales', product_id, date, amount,
                                  'AutoETS', 14, {'seasonal_period': 7})
 """))
 
@@ -167,7 +167,7 @@ DBInterface.execute(con, "CREATE TABLE sales_raw AS SELECT * FROM read_csv('sale
 
 # Analyze quality
 stats = DataFrame(DBInterface.execute(con, """
-    SELECT * FROM TS_STATS('sales_raw', product_id, date, amount)
+    SELECT * FROM anofox_fcst_ts_stats('sales_raw', product_id, date, amount)
 """))
 
 println("Quality report:")
@@ -178,17 +178,17 @@ println("  Series with issues: ", count(stats.quality_score .< 0.7))
 DBInterface.execute(con, """
     CREATE TABLE sales_prepared AS
     WITH filled AS (
-        SELECT * FROM TS_FILL_GAPS('sales_raw', product_id, date, amount)
+        SELECT * FROM anofox_fcst_ts_fill_gaps('sales_raw', product_id, date, amount)
     ),
     cleaned AS (
-        SELECT * FROM TS_DROP_CONSTANT('filled', product_id, amount)
+        SELECT * FROM anofox_fcst_ts_drop_constant('filled', product_id, amount)
     )
-    SELECT * FROM TS_FILL_NULLS_FORWARD('cleaned', product_id, date, amount)
+    SELECT * FROM anofox_fcst_ts_fill_nulls_forward('cleaned', product_id, date, amount)
 """)
 
 # Forecast
 forecasts = DataFrame(DBInterface.execute(con, """
-    SELECT * FROM TS_FORECAST_BY('sales_prepared', product_id, date, amount,
+    SELECT * FROM anofox_fcst_ts_forecast_by('sales_prepared', product_id, date, amount,
                                  'AutoETS', 28, {'seasonal_period': 7})
 """))
 ```
@@ -211,7 +211,7 @@ historical = DataFrame(DBInterface.execute(con, """
 # Get forecast
 forecast = DataFrame(DBInterface.execute(con, """
     SELECT date_col, point_forecast, lower, upper
-    FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28,
+    FROM anofox_fcst_ts_forecast('sales', date, amount, 'AutoETS', 28,
                      {'seasonal_period': 7, 'confidence_level': 0.95})
 """))
 
@@ -252,7 +252,7 @@ end
 
 function forecast_product(product_id::String, horizon::Int=28)
     result = DataFrame(DBInterface.execute(CON[], """
-        SELECT * FROM TS_FORECAST(
+        SELECT * FROM anofox_fcst_ts_forecast(
             (SELECT * FROM sales WHERE product_id = '$product_id'),
             date, amount, 'AutoETS', $horizon, {'seasonal_period': 7}
         )
@@ -283,9 +283,9 @@ DBInterface.execute(con, "LOAD 'anofox_forecast.duckdb_extension'")
 products = ["P001", "P002", "P003", "P004", "P005"]
 
 # DuckDB handles parallelization internally for GROUP BY
-# Just use TS_FORECAST_BY - no need for Julia threading
+# Just use anofox_fcst_ts_forecast_by - no need for Julia threading
 forecasts = DataFrame(DBInterface.execute(con, """
-    SELECT * FROM TS_FORECAST_BY(
+    SELECT * FROM anofox_fcst_ts_forecast_by(
         (SELECT * FROM sales WHERE product_id IN ('P001','P002','P003','P004','P005')),
         product_id, date, amount, 'AutoETS', 28, {'seasonal_period': 7}
     )
@@ -326,10 +326,10 @@ metrics = DataFrame(DBInterface.execute(con, """
     )
     SELECT 
         product_id,
-        TS_MAE(actuals, forecasts) AS mae,
-        TS_RMSE(actuals, forecasts) AS rmse,
-        TS_MAPE(actuals, forecasts) AS mape,
-        TS_COVERAGE(actuals, lower, upper) AS coverage
+        anofox_fcst_ts_mae(actuals, forecasts) AS mae,
+        anofox_fcst_ts_rmse(actuals, forecasts) AS rmse,
+        anofox_fcst_ts_mape(actuals, forecasts) AS mape,
+        anofox_fcst_ts_coverage(actuals, lower, upper) AS coverage
     FROM joined
 """))
 
@@ -363,7 +363,7 @@ DBInterface.execute(con, "LOAD 'anofox_forecast.duckdb_extension'")
 DuckDB.register_data_frame(con, sales_df, "sales")
 
 forecast = DataFrame(DBInterface.execute(con, """
-    SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
+    SELECT * FROM anofox_fcst_ts_forecast('sales', date, amount, 'AutoETS', 28, 
                               {'seasonal_period': 7})
 """))
 
@@ -386,7 +386,7 @@ DBInterface.execute(con, "LOAD 'anofox_forecast.duckdb_extension'")
 DBInterface.execute(con, "CREATE TABLE sales AS SELECT * FROM table")
 
 forecast = DataFrame(DBInterface.execute(con, """
-    SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
+    SELECT * FROM anofox_fcst_ts_forecast('sales', date, amount, 'AutoETS', 28, 
                               {'seasonal_period': 7})
 """))
 
@@ -419,7 +419,7 @@ DuckDB.register_data_frame(con, sales, "sales")
 
 # Forecast
 forecast = DataFrame(DBInterface.execute(con, """
-    SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 28, 
+    SELECT * FROM anofox_fcst_ts_forecast('sales', date, amount, 'AutoETS', 28, 
                               {'seasonal_period': 7})
 """))
 
@@ -450,7 +450,7 @@ function get_forecast(product_id::String, horizon::Int)::ForecastResult
     DBInterface.execute(con, "LOAD 'anofox_forecast.duckdb_extension'")
     
     df = DataFrame(DBInterface.execute(con, """
-        SELECT * FROM TS_FORECAST(
+        SELECT * FROM anofox_fcst_ts_forecast(
             (SELECT * FROM sales WHERE product_id = '$product_id'),
             date, amount, 'AutoETS', $horizon, {'seasonal_period': 7}
         )
@@ -488,7 +488,7 @@ DBInterface.execute(con, "LOAD 'anofox_forecast.duckdb_extension'")
 
 # Prepare statement
 stmt = DBInterface.prepare(con, """
-    SELECT * FROM TS_FORECAST(
+    SELECT * FROM anofox_fcst_ts_forecast(
         (SELECT * FROM sales WHERE product_id = \$1),
         date, amount, 'AutoETS', \$2, {'seasonal_period': 7}
     )
@@ -512,7 +512,7 @@ function safe_forecast(product_id::String, horizon::Int=28)
         DBInterface.execute(con, "LOAD 'anofox_forecast.duckdb_extension'")
         
         result = DataFrame(DBInterface.execute(con, """
-            SELECT * FROM TS_FORECAST(
+            SELECT * FROM anofox_fcst_ts_forecast(
                 (SELECT * FROM sales WHERE product_id = '$product_id'),
                 date, amount, 'AutoETS', $horizon, {'seasonal_period': 7}
             )
@@ -549,14 +549,14 @@ function forecast_with_logging(table_name::String)
     # Check data quality
     stats = DataFrame(DBInterface.execute(con, """
         SELECT COUNT(*) as n_series, AVG(quality_score) as avg_quality
-        FROM TS_STATS('$table_name', product_id, date, amount)
+        FROM anofox_fcst_ts_stats('$table_name', product_id, date, amount)
     """))
     
     @info "Data quality: $(round(stats.avg_quality[1], digits=3)) for $(stats.n_series[1]) series"
     
     # Forecast
     forecast = DataFrame(DBInterface.execute(con, """
-        SELECT * FROM TS_FORECAST_BY('$table_name', product_id, date, amount,
+        SELECT * FROM anofox_fcst_ts_forecast_by('$table_name', product_id, date, amount,
                                      'AutoETS', 28, {'seasonal_period': 7})
     """))
     
@@ -593,12 +593,12 @@ function run_forecast_pipeline(input_file::String, output_file::String)
     # Prepare
     DBInterface.execute(con, """
         CREATE TABLE sales_prep AS
-        SELECT * FROM TS_FILL_GAPS('sales', product_id, date, amount)
+        SELECT * FROM anofox_fcst_ts_fill_gaps('sales', product_id, date, amount)
     """)
     
     # Forecast
     forecasts = DataFrame(DBInterface.execute(con, """
-        SELECT * FROM TS_FORECAST_BY('sales_prep', product_id, date, amount,
+        SELECT * FROM anofox_fcst_ts_forecast_by('sales_prep', product_id, date, amount,
                                      'AutoETS', 28, {'seasonal_period': 7})
     """))
     
@@ -630,7 +630,7 @@ DBInterface.execute(con, "LOAD 'anofox_forecast.duckdb_extension'")
     horizon = get(req.query, "horizon", "28")
     
     result = DataFrame(DBInterface.execute(con, """
-        SELECT * FROM TS_FORECAST(
+        SELECT * FROM anofox_fcst_ts_forecast(
             (SELECT * FROM sales WHERE product_id = '$product_id'),
             date, amount, 'AutoETS', $horizon, {'seasonal_period': 7}
         )
@@ -641,7 +641,7 @@ end
 
 @get "/quality/{product_id}" function(req, product_id::String)
     stats = DataFrame(DBInterface.execute(con, """
-        SELECT * FROM TS_STATS(
+        SELECT * FROM anofox_fcst_ts_stats(
             (SELECT * FROM sales WHERE product_id = '$product_id'),
             product_id, date, amount
         )
@@ -673,7 +673,7 @@ DBInterface.execute(con, "LOAD 'anofox_forecast.duckdb_extension'")
 
 # Get in-sample fitted values
 forecast = DataFrame(DBInterface.execute(con, """
-    SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 7,
+    SELECT * FROM anofox_fcst_ts_forecast('sales', date, amount, 'AutoETS', 7,
                               {'seasonal_period': 7, 'return_insample': true})
 """))
 

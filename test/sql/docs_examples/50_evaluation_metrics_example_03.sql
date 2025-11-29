@@ -12,9 +12,9 @@ CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
 -- Compare two forecasting methods per product
 SELECT 
     product_id,
-    TS_RMAE(LIST(actual ORDER BY forecast_step), LIST(method1_pred ORDER BY forecast_step), LIST(method2_pred ORDER BY forecast_step)) AS rmae,
+    anofox_fcst_ts_rmae(LIST(actual ORDER BY forecast_step), LIST(method1_pred ORDER BY forecast_step), LIST(method2_pred ORDER BY forecast_step)) AS rmae,
     CASE 
-        WHEN TS_RMAE(LIST(actual ORDER BY forecast_step), LIST(method1_pred ORDER BY forecast_step), LIST(method2_pred ORDER BY forecast_step)) < 1.0
+        WHEN anofox_fcst_ts_rmae(LIST(actual ORDER BY forecast_step), LIST(method1_pred ORDER BY forecast_step), LIST(method2_pred ORDER BY forecast_step)) < 1.0
         THEN 'Method 1 is better'
         ELSE 'Method 2 is better'
     END AS winner

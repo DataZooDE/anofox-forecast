@@ -33,10 +33,10 @@ SELECT
     0.0 AS value  -- All zeros
 FROM generate_series(1, 15) t(i);
 
-# Test: TS_FILL_GAPS
+# Test: anofox_fcst_ts_fill_gaps
 statement ok
 CREATE TABLE filled_gaps AS
-SELECT * FROM ts_fill_gaps(raw_data, series_id, date_col, value, NULL::VARCHAR);
+SELECT * FROM anofox_fcst_ts_fill_gaps(raw_data, series_id, date_col, value, NULL::VARCHAR);
 
 # Verify gaps filled for series_1 (28 -> 30)
 query I
@@ -46,10 +46,10 @@ WHERE group_col = 'series_1';
 ----
 true
 
-# Test: TS_FILL_NULLS_FORWARD
+# Test: anofox_fcst_ts_fill_nulls_forward
 statement ok
 CREATE TABLE filled_forward AS
-SELECT * FROM ts_fill_nulls_forward(raw_data, series_id, date_col, value);
+SELECT * FROM anofox_fcst_ts_fill_nulls_forward(raw_data, series_id, date_col, value);
 
 # Verify total NULLs are reduced (originally 3 NULLs in series_1, 0 in others)
 query I
@@ -58,10 +58,10 @@ FROM filled_forward;
 ----
 true
 
-# Test: TS_FILL_NULLS_BACKWARD
+# Test: anofox_fcst_ts_fill_nulls_backward
 statement ok
 CREATE TABLE filled_backward AS
-SELECT * FROM ts_fill_nulls_backward(raw_data, series_id, date_col, value);
+SELECT * FROM anofox_fcst_ts_fill_nulls_backward(raw_data, series_id, date_col, value);
 
 # Verify total NULLs are reduced
 query I
@@ -70,10 +70,10 @@ FROM filled_backward;
 ----
 true
 
-# Test: TS_FILL_NULLS_MEAN
+# Test: anofox_fcst_ts_fill_nulls_mean
 statement ok
 CREATE TABLE filled_mean AS
-SELECT * FROM ts_fill_nulls_mean(raw_data, series_id, date_col, value);
+SELECT * FROM anofox_fcst_ts_fill_nulls_mean(raw_data, series_id, date_col, value);
 
 # Verify all NULLs are filled with mean
 query I
@@ -82,10 +82,10 @@ FROM filled_mean;
 ----
 true
 
-# Test: TS_DROP_CONSTANT
+# Test: anofox_fcst_ts_drop_constant
 statement ok
 CREATE TABLE no_constants AS
-SELECT * FROM ts_drop_constant(raw_data, series_id, value);
+SELECT * FROM anofox_fcst_ts_drop_constant(raw_data, series_id, value);
 
 # Verify constant series removed (series_2 and series_3 both constant)
 query I
@@ -106,10 +106,10 @@ FROM no_zeros;
 ----
 true
 
-# Test: TS_DROP_SHORT
+# Test: anofox_fcst_ts_drop_short
 statement ok
 CREATE TABLE no_short AS
-SELECT * FROM ts_drop_short(raw_data, series_id, 20);
+SELECT * FROM anofox_fcst_ts_drop_short(raw_data, series_id, 20);
 
 # Verify series_3 (15 rows) is removed
 query I
@@ -118,7 +118,7 @@ FROM no_short;
 ----
 true
 
-# Test: TS_DROP_LEADING_ZEROS
+# Test: anofox_fcst_ts_drop_leading_zeros
 statement ok
 CREATE TABLE test_leading AS
 SELECT date_col, 'lead_zeros' AS sid, CASE WHEN i <= 3 THEN 0.0 ELSE i::DOUBLE END AS val
@@ -126,7 +126,7 @@ FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM ge
 
 statement ok
 CREATE TABLE no_leading AS
-SELECT * FROM ts_drop_leading_zeros(test_leading, sid, date_col, val);
+SELECT * FROM anofox_fcst_ts_drop_leading_zeros(test_leading, sid, date_col, val);
 
 # Verify first 3 zeros removed (10 -> 7)
 query I
@@ -135,7 +135,7 @@ FROM no_leading;
 ----
 true
 
-# Test: TS_DROP_TRAILING_ZEROS
+# Test: anofox_fcst_ts_drop_trailing_zeros
 statement ok
 CREATE TABLE test_trailing AS
 SELECT date_col, 'trail_zeros' AS sid, CASE WHEN i >= 8 THEN 0.0 ELSE i::DOUBLE END AS val
@@ -143,7 +143,7 @@ FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM ge
 
 statement ok
 CREATE TABLE no_trailing AS
-SELECT * FROM ts_drop_trailing_zeros(test_trailing, sid, date_col, val);
+SELECT * FROM anofox_fcst_ts_drop_trailing_zeros(test_trailing, sid, date_col, val);
 
 # Verify last 3 zeros removed (10 -> 7)
 query I
@@ -155,11 +155,11 @@ true
 # Test: Two-step workflow (fill then drop)
 statement ok
 CREATE TABLE filled_data AS
-SELECT * FROM ts_fill_gaps(raw_data, series_id, date_col, value, NULL::VARCHAR);
+SELECT * FROM anofox_fcst_ts_fill_gaps(raw_data, series_id, date_col, value, NULL::VARCHAR);
 
 statement ok
 CREATE TABLE clean_data AS
-SELECT * FROM ts_fill_nulls_forward(filled_data, group_col, date_col, value_col);
+SELECT * FROM anofox_fcst_ts_fill_nulls_forward(filled_data, group_col, date_col, value_col);
 
 # Verify workflow produces clean data
 query I
@@ -218,7 +218,7 @@ DROP TABLE filled_data;
 statement ok
 DROP TABLE clean_data;
 
-# Test: TS_FILL_FORWARD - Extend series to target date
+# Test: anofox_fcst_ts_fill_forward - Extend series to target date
 statement ok
 CREATE TABLE test_forward AS
 SELECT date_col, 'series_1' AS sid, 100.0 + i::DOUBLE AS val
@@ -226,7 +226,7 @@ FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM ge
 
 statement ok
 CREATE TABLE extended_forward AS
-SELECT * FROM ts_fill_forward(test_forward, sid, date_col, val, '2024-01-15'::DATE, NULL::VARCHAR);
+SELECT * FROM anofox_fcst_ts_fill_forward(test_forward, sid, date_col, val, '2024-01-15'::DATE, NULL::VARCHAR);
 
 # Verify series extended to target date (10 original -> 14 total: 2024-01-02 to 2024-01-15)
 query I
@@ -254,7 +254,7 @@ FROM no_gappy;
 ----
 true
 
-# Test: TS_DROP_EDGE_ZEROS - Remove both leading and trailing zeros
+# Test: anofox_fcst_ts_drop_edge_zeros - Remove both leading and trailing zeros
 statement ok
 CREATE TABLE test_edge_zeros AS
 SELECT date_col, 'edge_zeros' AS sid, 
@@ -267,7 +267,7 @@ FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM ge
 
 statement ok
 CREATE TABLE no_edge_zeros AS
-SELECT * FROM ts_drop_edge_zeros(test_edge_zeros, sid, date_col, val);
+SELECT * FROM anofox_fcst_ts_drop_edge_zeros(test_edge_zeros, sid, date_col, val);
 
 # Verify edge zeros removed (10 -> 4 rows: 4, 5, 6, 7)
 query I
@@ -276,7 +276,7 @@ FROM no_edge_zeros;
 ----
 true
 
-# Test: TS_FILL_NULLS_CONST - Fill with constant value
+# Test: anofox_fcst_ts_fill_nulls_const - Fill with constant value
 statement ok
 CREATE TABLE test_const_fill AS
 SELECT date_col, 'series_1' AS sid, 
@@ -285,7 +285,7 @@ FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM ge
 
 statement ok
 CREATE TABLE filled_const AS
-SELECT * FROM ts_fill_nulls_const(test_const_fill, sid, date_col, val, 0.0);
+SELECT * FROM anofox_fcst_ts_fill_nulls_const(test_const_fill, sid, date_col, val, 0.0);
 
 # Verify all NULLs filled with 0.0
 query I

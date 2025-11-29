@@ -8,7 +8,7 @@ FROM generate_series(0, 89) t(d)
 CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
 
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, sales_amount, '1d');
 
 -- Create prepared sales data
 CREATE TABLE sales_prepared AS
@@ -16,7 +16,7 @@ SELECT
     group_col AS product_id,
     date_col AS date,
     value_col AS sales_amount
-FROM TS_FILL_GAPS('sales', product_id, date, sales_amount, '1d');
+FROM anofox_fcst_ts_fill_gaps('sales', product_id, date, sales_amount, '1d');
 
 -- Only forecast high-quality series
 WITH quality_check AS (

@@ -16,11 +16,11 @@ SELECT
     group_col AS product_id,
     date_col AS date,
     value_col AS sales_amount
-FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount, '1d');
+FROM anofox_fcst_ts_fill_gaps('sales_raw', product_id, date, sales_amount, '1d');
 
 -- Remove edge zeros
 CREATE TEMP TABLE no_edges AS
-SELECT * FROM TS_DROP_EDGE_ZEROS('filled', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_drop_edge_zeros('filled', product_id, date, sales_amount);
 
 -- Fill nulls with interpolation (more sophisticated)
 CREATE TABLE sales_custom_prep AS

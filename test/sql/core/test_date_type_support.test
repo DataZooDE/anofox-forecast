@@ -17,14 +17,14 @@ FROM generate_series(1, 30) t(i);
 
 query I
 SELECT COUNT(*) = 10
-FROM ts_forecast(test_integer_dates, date_col, value, 'Naive', 10, NULL);
+FROM anofox_fcst_ts_forecast(test_integer_dates, date_col, value, 'Naive', 10, NULL);
 ----
 true
 
-# Test 2: INTEGER with TS_FORECAST_AGG
+# Test 2: INTEGER with anofox_fcst_ts_forecast_agg
 statement ok
 CREATE TABLE integer_agg_result AS
-SELECT TS_FORECAST_AGG(date_col, value, 'Naive', 5, NULL) AS result
+SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'Naive', 5, NULL) AS result
 FROM test_integer_dates;
 
 query I
@@ -43,14 +43,14 @@ FROM generate_series(1, 30) t(i);
 
 query I
 SELECT COUNT(*) = 10
-FROM ts_forecast(test_date_dates, date_col, value, 'Naive', 10, NULL);
+FROM anofox_fcst_ts_forecast(test_date_dates, date_col, value, 'Naive', 10, NULL);
 ----
 true
 
-# Test 4: DATE with TS_FORECAST_AGG
+# Test 4: DATE with anofox_fcst_ts_forecast_agg
 statement ok
 CREATE TABLE date_agg_result AS
-SELECT TS_FORECAST_AGG(date_col, value, 'Naive', 5, NULL) AS result
+SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'Naive', 5, NULL) AS result
 FROM test_date_dates;
 
 query I
@@ -69,14 +69,14 @@ FROM generate_series(1, 30) t(i);
 
 query I
 SELECT COUNT(*) = 10
-FROM ts_forecast(test_timestamp_dates, date_col, value, 'Naive', 10, NULL);
+FROM anofox_fcst_ts_forecast(test_timestamp_dates, date_col, value, 'Naive', 10, NULL);
 ----
 true
 
-# Test 6: TIMESTAMP with TS_FORECAST_AGG
+# Test 6: TIMESTAMP with anofox_fcst_ts_forecast_agg
 statement ok
 CREATE TABLE timestamp_agg_result AS
-SELECT TS_FORECAST_AGG(date_col, value, 'Naive', 5, NULL) AS result
+SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'Naive', 5, NULL) AS result
 FROM test_timestamp_dates;
 
 query I
@@ -88,7 +88,7 @@ true
 # Test 7: INTEGER with AutoETS model (more robust for simple data)
 statement ok
 CREATE TABLE integer_arima_result AS
-SELECT TS_FORECAST_AGG(date_col, value, 'AutoETS', 5, {'seasonal_period': 7}) AS result
+SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'AutoETS', 5, {'seasonal_period': 7}) AS result
 FROM test_integer_dates;
 
 query I
@@ -100,7 +100,7 @@ true
 # Test 8: DATE with AutoETS model
 statement ok
 CREATE TABLE date_ets_result AS
-SELECT TS_FORECAST_AGG(date_col, value, 'AutoETS', 5, {'season_length': 7}) AS result
+SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'AutoETS', 5, {'season_length': 7}) AS result
 FROM test_date_dates;
 
 query I
@@ -109,7 +109,7 @@ FROM date_ets_result;
 ----
 true
 
-# Test 9: INTEGER with TS_FORECAST_BY (multiple series)
+# Test 9: INTEGER with anofox_fcst_ts_forecast_by (multiple series)
 statement ok
 CREATE TABLE multi_integer AS
 SELECT
@@ -120,11 +120,11 @@ FROM generate_series(1, 30) t(i);
 
 query I
 SELECT COUNT(DISTINCT series_id) = 3
-FROM ts_forecast_by(multi_integer, series_id, date_col, value, 'Naive', 5, NULL);
+FROM anofox_fcst_ts_forecast_by(multi_integer, series_id, date_col, value, 'Naive', 5, NULL);
 ----
 true
 
-# Test 10: DATE with TS_FORECAST_BY (multiple series)
+# Test 10: DATE with anofox_fcst_ts_forecast_by (multiple series)
 statement ok
 CREATE TABLE multi_date AS
 SELECT
@@ -135,7 +135,7 @@ FROM generate_series(1, 30) t(i);
 
 query I
 SELECT COUNT(DISTINCT series_id) = 3
-FROM ts_forecast_by(multi_date, series_id, date_col, value, 'Naive', 5, NULL);
+FROM anofox_fcst_ts_forecast_by(multi_date, series_id, date_col, value, 'Naive', 5, NULL);
 ----
 true
 
@@ -149,7 +149,7 @@ FROM generate_series(1, 30) t(i);
 
 query I
 SELECT COUNT(*) = 10
-FROM ts_forecast(test_bigint_dates, date_col, value, 'Naive', 10, NULL);
+FROM anofox_fcst_ts_forecast(test_bigint_dates, date_col, value, 'Naive', 10, NULL);
 ----
 true
 

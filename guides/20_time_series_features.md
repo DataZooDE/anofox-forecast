@@ -66,7 +66,7 @@ FROM generate_series(0, 30) t(i);
 
 SELECT feats.*
 FROM (
-    SELECT ts_features(ts, value) AS feats
+    SELECT anofox_fcst_ts_features(ts, value) AS feats
     FROM sample_ts
 );
 
@@ -90,7 +90,7 @@ Use `ts_features_list()` to explore available features and their parameters:
 ```sql
 -- List available features and their parameters
 SELECT column_name, feature_name, default_parameters, parameter_keys
-FROM ts_features_list()
+FROM anofox_fcst_ts_features_list()
 ORDER BY column_name
 LIMIT 10;
 
@@ -125,7 +125,7 @@ FROM generate_series(0, 30) t(d);
 -- Select specific features for better performance
 SELECT feats.*
 FROM (
-    SELECT ts_features(ts, value, ['mean', 'variance', 'length']) AS feats
+    SELECT anofox_fcst_ts_features(ts, value, ['mean', 'variance', 'length']) AS feats
     FROM sample_ts
 );
 
@@ -174,7 +174,7 @@ FROM generate_series(0, 30) t(d);
 -- Override default parameters for a feature
 SELECT feats.*
 FROM (
-    SELECT ts_features(
+    SELECT anofox_fcst_ts_features(
         ts,
         value,
         ['ratio_beyond_r_sigma'],
@@ -241,10 +241,10 @@ FROM generate_series(0, 30) t(d);
 -- Load feature configuration from JSON file
 SELECT feats.*
 FROM (
-    SELECT ts_features(
+    SELECT anofox_fcst_ts_features(
         ts,
         value,
-        ts_features_config_from_json('benchmark/timeseries_features/data/features_overrides.json')
+        anofox_fcst_ts_features_config_from_json('benchmark/timeseries_features/data/features_overrides.json')
     ) AS feats
     FROM sample_ts
 );
@@ -281,10 +281,10 @@ FROM generate_series(0, 30) t(d);
 -- Load feature configuration from CSV file
 SELECT feats.*
 FROM (
-    SELECT ts_features(
+    SELECT anofox_fcst_ts_features(
         ts,
         value,
-        ts_features_config_from_csv('benchmark/timeseries_features/data/features_overrides.csv')
+        anofox_fcst_ts_features_config_from_csv('benchmark/timeseries_features/data/features_overrides.csv')
     ) AS feats
     FROM sample_ts
 );
@@ -340,7 +340,7 @@ SELECT
     series_id,
     ts,
     value,
-    (ts_features(ts, value, ['mean', 'length']) OVER (
+    (anofox_fcst_ts_features(ts, value, ['mean', 'length']) OVER (
         PARTITION BY series_id 
         ORDER BY ts
         ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
@@ -420,7 +420,7 @@ SELECT
     series_id,
     date,
     value,
-    (ts_features(date, value, ['mean', 'variance', 'linear_trend']) OVER (
+    (anofox_fcst_ts_features(date, value, ['mean', 'variance', 'linear_trend']) OVER (
         PARTITION BY series_id 
         ORDER BY date
         ROWS BETWEEN 10 PRECEDING AND CURRENT ROW
@@ -476,7 +476,7 @@ SELECT
 FROM (
     SELECT 
         product_id,
-        ts_features(ts, value, ['mean', 'variance', 'length']) AS feats
+        anofox_fcst_ts_features(ts, value, ['mean', 'variance', 'length']) AS feats
     FROM multi_series
     GROUP BY product_id
 )

@@ -20,7 +20,7 @@ SELECT
 FROM (
     SELECT 
         product_id,
-        ts_features(
+        anofox_fcst_ts_features(
             ts,
             value,
             ['mean', 'variance', 'autocorrelation__lag_1', 'linear_trend', 'sum_values']

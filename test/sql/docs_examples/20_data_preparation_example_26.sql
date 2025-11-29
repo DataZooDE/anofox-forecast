@@ -7,4 +7,4 @@ SELECT
 FROM generate_series(0, 89) t(d)
 CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
-SELECT * FROM TS_DIFF('sales', product_id, date, sales_amount, 1);  -- 1st difference
+SELECT * FROM anofox_fcst_ts_diff('sales', product_id, date, sales_amount, 1);  -- 1st difference

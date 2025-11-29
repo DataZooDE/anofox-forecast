@@ -10,7 +10,7 @@ CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 -- Don't guess - detect!
 SELECT 
     product_id,
-    TS_DETECT_SEASONALITY(LIST(sales_amount ORDER BY date)) AS detected_periods
+    anofox_fcst_ts_detect_seasonality(LIST(sales_amount ORDER BY date)) AS detected_periods
 FROM sales
 GROUP BY product_id;
 
@@ -19,13 +19,13 @@ WITH seasonality AS (
     SELECT 
         product_id, 
         CASE 
-            WHEN LEN(TS_DETECT_SEASONALITY(LIST(sales_amount ORDER BY date))) > 0 
-            THEN TS_DETECT_SEASONALITY(LIST(sales_amount ORDER BY date))[1]
+            WHEN LEN(anofox_fcst_ts_detect_seasonality(LIST(sales_amount ORDER BY date))) > 0 
+            THEN anofox_fcst_ts_detect_seasonality(LIST(sales_amount ORDER BY date))[1]
             ELSE NULL 
         END AS primary_period
     FROM sales
     GROUP BY product_id
 )
 SELECT f.*
-FROM TS_FORECAST_BY('sales', product_id, date, sales_amount, 'AutoETS', 28,
+FROM anofox_fcst_ts_forecast_by('sales', product_id, date, sales_amount, 'AutoETS', 28,
                     MAP{'seasonal_period': 7}) f;

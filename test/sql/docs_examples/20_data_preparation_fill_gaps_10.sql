@@ -12,7 +12,7 @@ SELECT
     group_col AS product_id,
     date_col AS date,
     value_col AS sales_amount
-FROM TS_FILL_FORWARD(
+FROM anofox_fcst_ts_fill_forward(
     'sales', product_id, date, sales_amount, 
     DATE '2023-12-31', '1d'
 );

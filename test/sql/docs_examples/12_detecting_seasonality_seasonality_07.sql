@@ -7,7 +7,7 @@ FROM generate_series(0, 89) t(d);  -- 90 days of data
 
 -- Check if your data has sufficient seasonality for seasonal models
 WITH analysis AS (
-    SELECT TS_ANALYZE_SEASONALITY(
+    SELECT anofox_fcst_ts_analyze_seasonality(
         LIST(date ORDER BY date),
         LIST(sales ORDER BY date)
     ) AS result

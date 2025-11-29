@@ -27,20 +27,20 @@ FROM generate_series(DATE '2023-01-01', DATE '2023-04-10', INTERVAL 1 DAY) t(i);
 #statement ok
 #CREATE TABLE batch_autoarima AS
 #SELECT id, point_forecast
-#FROM TS_FORECAST_BY(minimal_test, id, date, value, 'AutoARIMA', 14, {'seasonal_period': 7})
+#FROM anofox_fcst_ts_forecast_by(minimal_test, id, date, value, 'AutoARIMA', 14, {'seasonal_period': 7})
 #ORDER BY id;
 
 # Test 2: Individual processing with AutoARIMA
 #statement ok
 #CREATE TABLE individual_autoarima AS
 #SELECT 'Series1' AS id, point_forecast
-#FROM ts_forecast(
+#FROM anofox_fcst_ts_forecast(
 #    (SELECT date, value FROM minimal_test WHERE id = 'Series1'),
 #    date, value, 'AutoARIMA', 14, {'seasonal_period': 7}
 #)
 #UNION ALL
 #SELECT 'Series2' AS id, point_forecast
-#FROM ts_forecast(
+#FROM anofox_fcst_ts_forecast(
 #    (SELECT date, value FROM minimal_test WHERE id = 'Series2'),
 #    date, value, 'AutoARIMA', 14, {'seasonal_period': 7}
 #);
@@ -97,14 +97,14 @@ FROM generate_series(DATE '2023-01-01', DATE '2023-04-10', INTERVAL 1 DAY) t(i);
 #statement ok
 #CREATE TABLE batch_forward AS
 #SELECT id, point_forecast
-#FROM TS_FORECAST_BY(series_forward, id, date, value, 'AutoARIMA', 14, {'seasonal_period': 7})
+#FROM anofox_fcst_ts_forecast_by(series_forward, id, date, value, 'AutoARIMA', 14, {'seasonal_period': 7})
 #ORDER BY id;
 
 # Test 7: Process in reverse order (B then A)
 #statement ok
 #CREATE TABLE batch_reverse AS
 #SELECT id, point_forecast
-#FROM TS_FORECAST_BY(series_reverse, id, date, value, 'AutoARIMA', 14, {'seasonal_period': 7})
+#FROM anofox_fcst_ts_forecast_by(series_reverse, id, date, value, 'AutoARIMA', 14, {'seasonal_period': 7})
 #ORDER BY id;
 
 # Test 8: Verify order independence (when bug is fixed)
@@ -131,14 +131,14 @@ FROM generate_series(DATE '2023-01-01', DATE '2023-04-10', INTERVAL 1 DAY) t(i);
 #statement ok
 #CREATE TABLE batch_single AS
 #SELECT id, point_forecast
-#FROM TS_FORECAST_BY(single_series, id, date, value, 'AutoARIMA', 14, {'seasonal_period': 7})
+#FROM anofox_fcst_ts_forecast_by(single_series, id, date, value, 'AutoARIMA', 14, {'seasonal_period': 7})
 #ORDER BY id;
 
 # Test 10: Same series individual mode
 #statement ok
 #CREATE TABLE individual_single AS
 #SELECT 'OnlySeries' AS id, point_forecast
-#FROM ts_forecast(
+#FROM anofox_fcst_ts_forecast(
 #    (SELECT date, value FROM single_series WHERE id = 'OnlySeries'),
 #    date, value, 'AutoARIMA', 14, {'seasonal_period': 7}
 #);

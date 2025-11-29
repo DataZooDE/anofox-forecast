@@ -7,8 +7,8 @@ Data quality directly impacts forecast accuracy. This guide covers exploratory d
 **Note**: This guide follows the API documentation in `API_REFERENCE.md`, which is the authoritative source for function signatures, parameters, and behavior. For complete function reference, see the [API Reference](../docs/API_REFERENCE.md).
 
 **API Coverage**: 
-- **5 EDA macros**: `TS_STATS`, `TS_STATS_SUMMARY`, `TS_QUALITY_REPORT` (plus seasonality and changepoint detection)
-- **2 Data Quality macros**: `TS_DATA_QUALITY`, `TS_DATA_QUALITY_SUMMARY`
+- **5 EDA macros**: `anofox_fcst_ts_stats`, `anofox_fcst_ts_stats_summary`, `anofox_fcst_ts_quality_report` (plus seasonality and changepoint detection)
+- **2 Data Quality macros**: `anofox_fcst_ts_data_quality`, `anofox_fcst_ts_data_quality_summary`
 - **12 Data Preparation macros**: Gap filling, series filtering, edge cleaning, and missing value imputation
 
 This guide provides practical workflows and examples for:
@@ -29,20 +29,20 @@ This guide provides practical workflows and examples for:
    - [Summary by Dimension](#summary-by-dimension)
 3. [Data Preparation](#data-preparation)
    - [Gap Filling](#gap-filling)
-     - [TS_FILL_GAPS](#ts_fill_gaps)
-     - [TS_FILL_FORWARD](#ts_fill_forward)
+     - [anofox_fcst_ts_fill_gaps](#ts_fill_gaps)
+     - [anofox_fcst_ts_fill_forward](#ts_fill_forward)
    - [Series Filtering](#series-filtering)
-     - [TS_DROP_CONSTANT](#ts_drop_constant)
-     - [TS_DROP_SHORT](#ts_drop_short)
+     - [anofox_fcst_ts_drop_constant](#ts_drop_constant)
+     - [anofox_fcst_ts_drop_short](#ts_drop_short)
    - [Edge Cleaning](#edge-cleaning)
-     - [TS_DROP_LEADING_ZEROS](#ts_drop_leading_zeros)
-     - [TS_DROP_TRAILING_ZEROS](#ts_drop_trailing_zeros)
-     - [TS_DROP_EDGE_ZEROS](#ts_drop_edge_zeros)
+     - [anofox_fcst_ts_drop_leading_zeros](#ts_drop_leading_zeros)
+     - [anofox_fcst_ts_drop_trailing_zeros](#ts_drop_trailing_zeros)
+     - [anofox_fcst_ts_drop_edge_zeros](#ts_drop_edge_zeros)
    - [Missing Value Imputation](#missing-value-imputation)
-     - [TS_FILL_NULLS_CONST](#ts_fill_nulls_const)
-     - [TS_FILL_NULLS_FORWARD](#ts_fill_nulls_forward)
-     - [TS_FILL_NULLS_BACKWARD](#ts_fill_nulls_backward)
-     - [TS_FILL_NULLS_MEAN](#ts_fill_nulls_mean)
+     - [anofox_fcst_ts_fill_nulls_const](#ts_fill_nulls_const)
+     - [anofox_fcst_ts_fill_nulls_forward](#ts_fill_nulls_forward)
+     - [anofox_fcst_ts_fill_nulls_backward](#ts_fill_nulls_backward)
+     - [anofox_fcst_ts_fill_nulls_mean](#ts_fill_nulls_mean)
 4. [Complete Workflow Examples](#complete-workflow-examples)
 5. [Common Data Issues & Solutions](#common-data-issues--solutions)
 6. [Preparation Checklist](#preparation-checklist)
@@ -53,7 +53,7 @@ This guide provides practical workflows and examples for:
 
 ### Per-Series Statistics
 
-**TS_STATS**
+**anofox_fcst_ts_stats**
 
 Computes per-series statistical metrics including length, date ranges, central tendencies (mean, median), dispersion (std), value distributions (min, max, zeros), and quality indicators (nulls, uniqueness, constancy). Returns 24 metrics per series for exploratory analysis and data profiling.
 
@@ -70,9 +70,9 @@ Returns comprehensive statistics per series including:
 
 ### Dataset Summary
 
-**TS_STATS_SUMMARY**
+**anofox_fcst_ts_stats_summary**
 
-Aggregates statistics across all series from TS_STATS output. Computes dataset-level metrics including total series count, total observations, average series length, and date span. Provides high-level overview for dataset characterization.
+Aggregates statistics across all series from anofox_fcst_ts_stats output. Computes dataset-level metrics including total series count, total observations, average series length, and date span. Provides high-level overview for dataset characterization.
 
 **Example:**
 
@@ -80,9 +80,9 @@ Aggregates statistics across all series from TS_STATS output. Computes dataset-l
 
 ### Quality Assessment
 
-**TS_QUALITY_REPORT**
+**anofox_fcst_ts_quality_report**
 
-Generates quality assessment report from TS_STATS output. Evaluates series against configurable thresholds for gaps, missing values, constant series, short series, and temporal alignment. Identifies series requiring data preparation steps.
+Generates quality assessment report from anofox_fcst_ts_stats output. Evaluates series against configurable thresholds for gaps, missing values, constant series, short series, and temporal alignment. Identifies series requiring data preparation steps.
 
 **Example:**
 
@@ -96,14 +96,14 @@ Generates quality assessment report from TS_STATS output. Evaluates series again
 
 ### Comprehensive Assessment
 
-**TS_DATA_QUALITY**
+**anofox_fcst_ts_data_quality**
 
 Assesses data quality across four dimensions (Structural, Temporal, Magnitude, Behavioural) for each time series. Returns per-series metrics including key uniqueness, timestamp gaps, missing values, value distributions, and pattern characteristics. Output is normalized by dimension and metric for cross-series comparison.
 
 **Signature (Function Overloading):**
 ```sql
 -- For DATE/TIMESTAMP columns (date-based frequency)
-TS_DATA_QUALITY(
+anofox_fcst_ts_data_quality(
     table_name      VARCHAR,
     unique_id_col   ANY,
     date_col        DATE | TIMESTAMP,
@@ -113,7 +113,7 @@ TS_DATA_QUALITY(
 ) → TABLE
 
 -- For INTEGER columns (integer-based frequency)
-TS_DATA_QUALITY(
+anofox_fcst_ts_data_quality(
     table_name      VARCHAR,
     unique_id_col   ANY,
     date_col        INTEGER | BIGINT,
@@ -182,13 +182,13 @@ TABLE(
 
 ### Summary by Dimension
 
-**TS_DATA_QUALITY_SUMMARY**
+**anofox_fcst_ts_data_quality_summary**
 
 Aggregates quality metrics across all series, grouped by dimension and metric. Computes summary statistics (counts, percentages) for each quality dimension to provide dataset-level quality overview. Useful for identifying systemic data quality issues affecting multiple series.
 
 **Signature:**
 ```sql
-TS_DATA_QUALITY_SUMMARY(
+anofox_fcst_ts_data_quality_summary(
     table_name      VARCHAR,
     unique_id_col   ANY,
     date_col        DATE | TIMESTAMP | INTEGER,
@@ -213,7 +213,7 @@ SQL macros for data cleaning and transformation. Date type support varies by fun
 
 ### Gap Filling
 
-#### TS_FILL_GAPS
+#### anofox_fcst_ts_fill_gaps
 
 **Fill Missing Timestamps**
 
@@ -222,7 +222,7 @@ Fills missing timestamps/indices in series with NULL values using the specified 
 **Signature (Function Overloading):**
 ```sql
 -- For DATE/TIMESTAMP columns (date-based frequency)
-TS_FILL_GAPS(
+anofox_fcst_ts_fill_gaps(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP,
@@ -231,7 +231,7 @@ TS_FILL_GAPS(
 ) → TABLE
 
 -- For INTEGER columns (integer-based frequency)
-TS_FILL_GAPS(
+anofox_fcst_ts_fill_gaps(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      INTEGER | BIGINT,
@@ -263,7 +263,7 @@ TS_FILL_GAPS(
 
 <!-- include: test/sql/docs_examples/11_exploratory_analysis_fill_gaps_example_32.sql -->
 
-#### TS_FILL_FORWARD
+#### anofox_fcst_ts_fill_forward
 
 **Extend Series to Target Date**
 
@@ -272,7 +272,7 @@ Extends series to target date/index, filling gaps with NULL using the specified 
 **Signature (Function Overloading):**
 ```sql
 -- For DATE/TIMESTAMP columns (date-based frequency)
-TS_FILL_FORWARD(
+anofox_fcst_ts_fill_forward(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP,
@@ -282,7 +282,7 @@ TS_FILL_FORWARD(
 ) → TABLE
 
 -- For INTEGER columns (integer-based frequency)
-TS_FILL_FORWARD(
+anofox_fcst_ts_fill_forward(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      INTEGER | BIGINT,
@@ -294,10 +294,10 @@ TS_FILL_FORWARD(
 
 **Parameters:**
 - `target_date`: Target date/index to extend the series to (type must match `date_col` type)
-- `frequency`: Same as `TS_FILL_GAPS` (see above)
+- `frequency`: Same as `anofox_fcst_ts_fill_gaps` (see above)
 
 **Type Validation:**
-- Same as `TS_FILL_GAPS` (see above)
+- Same as `anofox_fcst_ts_fill_gaps` (see above)
 
 **Examples:**
 
@@ -307,7 +307,7 @@ TS_FILL_FORWARD(
 
 ### Series Filtering
 
-#### TS_DROP_CONSTANT
+#### anofox_fcst_ts_drop_constant
 
 **Remove Constant Series**
 
@@ -315,7 +315,7 @@ Removes series with constant values (no variation).
 
 **Signature:**
 ```sql
-TS_DROP_CONSTANT(
+anofox_fcst_ts_drop_constant(
     table_name    VARCHAR,
     group_col     ANY,
     value_col     DOUBLE
@@ -329,7 +329,7 @@ TS_DROP_CONSTANT(
 
 <!-- include: test/sql/docs_examples/11_exploratory_analysis_drop_constant_example_34.sql -->
 
-#### TS_DROP_SHORT
+#### anofox_fcst_ts_drop_short
 
 **Remove Short Series**
 
@@ -337,7 +337,7 @@ Removes series below minimum length.
 
 **Signature:**
 ```sql
-TS_DROP_SHORT(
+anofox_fcst_ts_drop_short(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -356,7 +356,7 @@ TS_DROP_SHORT(
 
 ### Edge Cleaning
 
-#### TS_DROP_LEADING_ZEROS
+#### anofox_fcst_ts_drop_leading_zeros
 
 **Remove Leading Zeros**
 
@@ -364,7 +364,7 @@ Removes leading zeros from time series.
 
 **Signature:**
 ```sql
-TS_DROP_LEADING_ZEROS(
+anofox_fcst_ts_drop_leading_zeros(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -373,13 +373,13 @@ TS_DROP_LEADING_ZEROS(
 ```
 
 > [!WARNING]
-> Results may differ if `TS_FILL_GAPS` or `TS_FILL_FORWARD` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
+> Results may differ if `anofox_fcst_ts_fill_gaps` or `anofox_fcst_ts_fill_forward` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
 
 **Example:**
 
 <!-- include: test/sql/docs_examples/11_exploratory_analysis_drop_leading_zeros_27.sql -->
 
-#### TS_DROP_TRAILING_ZEROS
+#### anofox_fcst_ts_drop_trailing_zeros
 
 **Remove Trailing Zeros**
 
@@ -387,7 +387,7 @@ Removes trailing zeros from time series.
 
 **Signature:**
 ```sql
-TS_DROP_TRAILING_ZEROS(
+anofox_fcst_ts_drop_trailing_zeros(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -396,13 +396,13 @@ TS_DROP_TRAILING_ZEROS(
 ```
 
 > [!WARNING]
-> Results may differ if `TS_FILL_GAPS` or `TS_FILL_FORWARD` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
+> Results may differ if `anofox_fcst_ts_fill_gaps` or `anofox_fcst_ts_fill_forward` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
 
 **Example:**
 
 <!-- include: test/sql/docs_examples/11_exploratory_analysis_drop_trailing_zeros_28.sql -->
 
-#### TS_DROP_EDGE_ZEROS
+#### anofox_fcst_ts_drop_edge_zeros
 
 **Remove Both Leading and Trailing Zeros**
 
@@ -410,7 +410,7 @@ Removes both leading and trailing zeros from time series.
 
 **Signature:**
 ```sql
-TS_DROP_EDGE_ZEROS(
+anofox_fcst_ts_drop_edge_zeros(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -419,7 +419,7 @@ TS_DROP_EDGE_ZEROS(
 ```
 
 > [!WARNING]
-> Results may differ if `TS_FILL_GAPS` or `TS_FILL_FORWARD` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
+> Results may differ if `anofox_fcst_ts_fill_gaps` or `anofox_fcst_ts_fill_forward` has been applied, as these functions may introduce zeros or other values in previously missing timestamps.
 
 **Example:**
 
@@ -447,14 +447,14 @@ HAVING zero_days > 0;
 
 -- Fix: Remove edge zeros
 CREATE TABLE sales_no_edge_zeros AS
-SELECT * FROM TS_DROP_EDGE_ZEROS('sales', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_drop_edge_zeros('sales', product_id, date, sales_amount);
 ```
 
 [↑ Go to top](#eda--data-preparation---complete-workflow-guide)
 
 ### Missing Value Imputation
 
-#### TS_FILL_NULLS_CONST
+#### anofox_fcst_ts_fill_nulls_const
 
 **Fill with Constant Value**
 
@@ -462,7 +462,7 @@ Fills NULL values with a specified constant value.
 
 **Signature:**
 ```sql
-TS_FILL_NULLS_CONST(
+anofox_fcst_ts_fill_nulls_const(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -475,7 +475,7 @@ TS_FILL_NULLS_CONST(
 
 <!-- include: test/sql/docs_examples/11_exploratory_analysis_fill_nulls_const_25.sql -->
 
-#### TS_FILL_NULLS_FORWARD
+#### anofox_fcst_ts_fill_nulls_forward
 
 **Forward Fill (Last Observation Carried Forward)**
 
@@ -483,7 +483,7 @@ Uses `LAST_VALUE(... IGNORE NULLS)` window function to forward fill NULL values.
 
 **Signature:**
 ```sql
-TS_FILL_NULLS_FORWARD(
+anofox_fcst_ts_fill_nulls_forward(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -496,14 +496,14 @@ TS_FILL_NULLS_FORWARD(
 ```sql
 -- Forward fill (use last known value)
 CREATE TABLE sales_forward_filled AS
-SELECT * FROM TS_FILL_NULLS_FORWARD('sales', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_fill_nulls_forward('sales', product_id, date, sales_amount);
 ```
 
 **Alternative Example:**
 
 <!-- include: test/sql/docs_examples/11_exploratory_analysis_create_sample_data_10.sql -->
 
-#### TS_FILL_NULLS_BACKWARD
+#### anofox_fcst_ts_fill_nulls_backward
 
 **Backward Fill**
 
@@ -511,7 +511,7 @@ Uses `FIRST_VALUE(... IGNORE NULLS)` window function to backward fill NULL value
 
 **Signature:**
 ```sql
-TS_FILL_NULLS_BACKWARD(
+anofox_fcst_ts_fill_nulls_backward(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -523,7 +523,7 @@ TS_FILL_NULLS_BACKWARD(
 
 <!-- include: test/sql/docs_examples/11_exploratory_analysis_fill_nulls_backward_26.sql -->
 
-#### TS_FILL_NULLS_MEAN
+#### anofox_fcst_ts_fill_nulls_mean
 
 **Fill with Series Mean**
 
@@ -531,7 +531,7 @@ Computes mean per series and fills NULLs with that mean value.
 
 **Signature:**
 ```sql
-TS_FILL_NULLS_MEAN(
+anofox_fcst_ts_fill_nulls_mean(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
@@ -544,7 +544,7 @@ TS_FILL_NULLS_MEAN(
 ```sql
 -- Fill NULLs with series mean
 CREATE TABLE sales_mean_filled AS
-SELECT * FROM TS_FILL_NULLS_MEAN('sales', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_fill_nulls_mean('sales', product_id, date, sales_amount);
 ```
 
 **Alternative: Drop series with too many nulls instead**
@@ -599,7 +599,7 @@ Compare before/after:
 
 **Problem**: Dates are not continuous
 
-**Solution**: Use `TS_FILL_GAPS` to fill missing timestamps
+**Solution**: Use `anofox_fcst_ts_fill_gaps` to fill missing timestamps
 
 <!-- include: test/sql/docs_examples/11_exploratory_analysis_example_09.sql -->
 
@@ -615,7 +615,7 @@ Compare before/after:
 
 **Problem**: All values are the same
 
-**Solution**: Remove constant series with `TS_DROP_CONSTANT`
+**Solution**: Remove constant series with `anofox_fcst_ts_drop_constant`
 
 <!-- include: test/sql/docs_examples/11_exploratory_analysis_example_11.sql -->
 
@@ -623,7 +623,7 @@ Compare before/after:
 
 **Problem**: Not enough historical data
 
-**Solution**: Filter short series with `TS_DROP_SHORT`
+**Solution**: Filter short series with `anofox_fcst_ts_drop_short`
 
 <!-- include: test/sql/docs_examples/11_exploratory_analysis_statistics_12.sql -->
 
@@ -631,7 +631,7 @@ Compare before/after:
 
 **Problem**: Product not yet launched or discontinued
 
-**Solution**: Remove edge zeros with `TS_DROP_EDGE_ZEROS`
+**Solution**: Remove edge zeros with `anofox_fcst_ts_drop_edge_zeros`
 
 <!-- include: test/sql/docs_examples/11_exploratory_analysis_example_13.sql -->
 
@@ -645,7 +645,7 @@ Compare before/after:
 
 **Problem**: Series end on different dates
 
-**Solution**: Use `TS_FILL_FORWARD` to align end dates
+**Solution**: Use `anofox_fcst_ts_fill_forward` to align end dates
 
 ```sql
 -- Detect
@@ -659,7 +659,7 @@ SELECT * FROM end_dates;
 
 -- Fix: Extend all series to common date
 CREATE TABLE sales_aligned AS
-SELECT * FROM TS_FILL_FORWARD(
+SELECT * FROM anofox_fcst_ts_fill_forward(
     'sales',
     product_id,
     date,
@@ -677,17 +677,17 @@ SELECT * FROM TS_FILL_FORWARD(
 
 ### Before Forecasting
 
-- [ ] Check data quality: `TS_STATS()`, `TS_DATA_QUALITY()`
-- [ ] Fill time gaps: `TS_FILL_GAPS()`
-- [ ] Fill up to end date: `TS_FILL_FORWARD()`
-- [ ] Handle missing values: `TS_FILL_NULLS_*()`
-- [ ] Remove constant series: `TS_DROP_CONSTANT()`
-- [ ] Check minimum length: `TS_DROP_SHORT()`
-- [ ] Remove leading zeros: `TS_DROP_LEADING_ZEROS()`
-- [ ] Detect seasonality: `TS_DETECT_SEASONALITY()`
-- [ ] Detect changepoints: `TS_DETECT_CHANGEPOINTS_BY()`
-- [ ] Remove edge zeros: `TS_DROP_EDGE_ZEROS()` (if applicable)
-- [ ] Validate: Re-run `TS_STATS()` on prepared data
+- [ ] Check data quality: `anofox_fcst_ts_stats()`, `anofox_fcst_ts_data_quality()`
+- [ ] Fill time gaps: `anofox_fcst_ts_fill_gaps()`
+- [ ] Fill up to end date: `anofox_fcst_ts_fill_forward()`
+- [ ] Handle missing values: `anofox_fcst_ts_fill_nulls_*()`
+- [ ] Remove constant series: `anofox_fcst_ts_drop_constant()`
+- [ ] Check minimum length: `anofox_fcst_ts_drop_short()`
+- [ ] Remove leading zeros: `anofox_fcst_ts_drop_leading_zeros()`
+- [ ] Detect seasonality: `anofox_fcst_ts_detect_seasonality()`
+- [ ] Detect changepoints: `anofox_fcst_ts_detect_changepoints_by()`
+- [ ] Remove edge zeros: `anofox_fcst_ts_drop_edge_zeros()` (if applicable)
+- [ ] Validate: Re-run `anofox_fcst_ts_stats()` on prepared data
 
 ### Quality Gates
 

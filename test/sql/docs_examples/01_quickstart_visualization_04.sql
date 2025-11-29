@@ -11,7 +11,7 @@ WITH fc AS (
         forecast_step,
         point_forecast,
         REPEAT('█', CAST(point_forecast / 5 AS INT)) AS bar
-    FROM TS_FORECAST('my_sales', date, sales, 'AutoETS', 14, MAP{'seasonal_period': 7})
+    FROM anofox_fcst_ts_forecast('my_sales', date, sales, 'AutoETS', 14, MAP{'seasonal_period': 7})
 )
 SELECT forecast_step, ROUND(point_forecast, 1) AS forecast, bar
 FROM fc;

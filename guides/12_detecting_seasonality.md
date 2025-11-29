@@ -6,14 +6,14 @@
 
 The `anofox-forecast` extension provides two powerful functions for automatic seasonality detection in time series data:
 
-1. **`TS_DETECT_SEASONALITY`** - Simple detection returning seasonal periods
-2. **`TS_ANALYZE_SEASONALITY`** - Analysis with seasonal/trend strength
+1. **`anofox_fcst_ts_detect_seasonality`** - Simple detection returning seasonal periods
+2. **`anofox_fcst_ts_analyze_seasonality`** - Analysis with seasonal/trend strength
 
 These functions use autocorrelation-based periodogram analysis to automatically identify recurring patterns in your data.
 
 ## Functions
 
-### TS_DETECT_SEASONALITY
+### anofox_fcst_ts_detect_seasonality
 
 Detects up to 3 seasonal periods from a time series.
 
@@ -42,13 +42,13 @@ WITH aggregated AS (
     SELECT LIST(sales ORDER BY date) AS values
     FROM sales_data
 )
-SELECT TS_DETECT_SEASONALITY(values) AS periods
+SELECT anofox_fcst_ts_detect_seasonality(values) AS periods
 FROM aggregated;
 
 -- Result: [7, 30]  (weekly and monthly seasonality)
 ```
 
-### TS_ANALYZE_SEASONALITY
+### anofox_fcst_ts_analyze_seasonality
 
 Performs comprehensive seasonality analysis including strength metrics.
 
@@ -90,7 +90,7 @@ SELECT
     ROUND(result.seasonal_strength, 3) AS seasonal_str,
     ROUND(result.trend_strength, 3) AS trend_str
 FROM (
-    SELECT TS_ANALYZE_SEASONALITY(timestamps, values) AS result
+    SELECT anofox_fcst_ts_analyze_seasonality(timestamps, values) AS result
     FROM aggregated
 );
 
@@ -117,7 +117,7 @@ The detection algorithm uses **autocorrelation-based periodogram analysis**:
 
 ### Seasonal Strength Calculation
 
-For detailed analysis (`TS_ANALYZE_SEASONALITY`):
+For detailed analysis (`anofox_fcst_ts_analyze_seasonality`):
 
 1. **Decomposition**: Uses STL (Seasonal and Trend decomposition using Loess) or MSTL (Multiple STL for multiple seasonalities)
 
@@ -146,10 +146,10 @@ FROM generate_series(0, 89) t(d);  -- 90 days of data
 
 -- Detect seasonality and use it for forecasting
 WITH detection AS (
-    SELECT TS_DETECT_SEASONALITY(LIST(sales ORDER BY date)) AS periods
+    SELECT anofox_fcst_ts_detect_seasonality(LIST(sales ORDER BY date)) AS periods
     FROM sales_data
 )
-SELECT * FROM TS_FORECAST(
+SELECT * FROM anofox_fcst_ts_forecast(
     'sales_data',
     date,
     sales,
@@ -182,7 +182,7 @@ WITH aggregated AS (
 )
 SELECT 
     category,
-    TS_DETECT_SEASONALITY(values) AS detected_periods
+    anofox_fcst_ts_detect_seasonality(values) AS detected_periods
 FROM aggregated;
 ```
 
@@ -198,7 +198,7 @@ FROM generate_series(0, 89) t(d);  -- 90 days of data
 
 -- Check if your data has sufficient seasonality for seasonal models
 WITH analysis AS (
-    SELECT TS_ANALYZE_SEASONALITY(
+    SELECT anofox_fcst_ts_analyze_seasonality(
         LIST(date ORDER BY date),
         LIST(sales ORDER BY date)
     ) AS result
@@ -235,7 +235,7 @@ WITH windows AS (
 )
 SELECT 
     quarter,
-    TS_DETECT_SEASONALITY(values) AS detected_periods
+    anofox_fcst_ts_detect_seasonality(values) AS detected_periods
 FROM windows
 ORDER BY quarter;
 ```
@@ -254,8 +254,8 @@ The algorithm uses these internal defaults:
 ### Data Requirements
 
 - **Minimum Length**:
-  - `TS_DETECT_SEASONALITY`: At least 8 observations
-  - `TS_ANALYZE_SEASONALITY`: At least 2 full seasonal cycles (e.g., 14+ for weekly)
+  - `anofox_fcst_ts_detect_seasonality`: At least 8 observations
+  - `anofox_fcst_ts_analyze_seasonality`: At least 2 full seasonal cycles (e.g., 14+ for weekly)
   
 - **Quality**:
   - Data should be regularly spaced (no large gaps)
@@ -299,7 +299,7 @@ The algorithm uses these internal defaults:
 
 **Solutions:**
 
-- Use `TS_ANALYZE_SEASONALITY` to see strength metrics
+- Use `anofox_fcst_ts_analyze_seasonality` to see strength metrics
 - Manually specify period if known
 - Check data quality and completeness
 

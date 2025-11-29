@@ -13,7 +13,7 @@ SELECT
     date_col AS date,
     value_col AS amount,
     is_changepoint
-FROM TS_DETECT_CHANGEPOINTS_BY('product_sales', product_id, date, amount, MAP{})
+FROM anofox_fcst_ts_detect_changepoints_by('product_sales', product_id, date, amount, MAP{})
 WHERE is_changepoint = true
 ORDER BY product_id, date_col;
 
@@ -22,7 +22,7 @@ WITH changes AS (
     SELECT 
         product_id,
         MAX(date_col) FILTER (WHERE is_changepoint) AS last_change
-    FROM TS_DETECT_CHANGEPOINTS_BY('product_sales', product_id, date, amount, MAP{})
+    FROM anofox_fcst_ts_detect_changepoints_by('product_sales', product_id, date, amount, MAP{})
     GROUP BY product_id
 )
 SELECT 

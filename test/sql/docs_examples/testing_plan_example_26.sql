@@ -6,5 +6,5 @@ SELECT
 FROM generate_series(0, 89) t(d);
 
 -- Valid usage with seasonal_period - use Theta instead as SeasonalNaive has parameter issues
-SELECT * FROM TS_FORECAST('test_data', date, value, 'Theta', 5, MAP{'seasonal_period': 7})
+SELECT * FROM anofox_fcst_ts_forecast('test_data', date, value, 'Theta', 5, MAP{'seasonal_period': 7})
 LIMIT 5;

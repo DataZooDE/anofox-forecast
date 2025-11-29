@@ -19,5 +19,5 @@ FROM sales_daily
 GROUP BY product_id, week;
 
 -- Forecast on weekly data
-SELECT * FROM TS_FORECAST_BY('sales_weekly', product_id, week, weekly_sales,
+SELECT * FROM anofox_fcst_ts_forecast_by('sales_weekly', product_id, week, weekly_sales,
                              'AutoETS', 12, MAP{'seasonal_period': 4});  -- 4 weeks = monthly

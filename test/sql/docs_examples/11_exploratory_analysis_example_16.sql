@@ -9,7 +9,7 @@ CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
 
 -- Detect seasonality for trend analysis
 WITH seasonality AS (
-    SELECT TS_DETECT_SEASONALITY(LIST(sales_amount ORDER BY date)) AS detected_periods
+    SELECT anofox_fcst_ts_detect_seasonality(LIST(sales_amount ORDER BY date)) AS detected_periods
     FROM sales
     WHERE product_id = 1
 )

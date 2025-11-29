@@ -6,9 +6,9 @@ The Anofox Forecast extension provides time series forecasting capabilities with
 
 ### Core Forecasting Functions
 
-- **TS_FORECAST**: Single time series forecasting
-- **TS_FORECAST_BY**: Multiple time series forecasting with GROUP BY parallelization
-- **TS_FORECAST_AGG**: Aggregate function for custom GROUP BY patterns
+- **anofox_fcst_ts_forecast**: Single time series forecasting
+- **anofox_fcst_ts_forecast_by**: Multiple time series forecasting with GROUP BY parallelization
+- **anofox_fcst_ts_forecast_agg**: Aggregate function for custom GROUP BY patterns
 
 ### Prerequisites
 
@@ -28,7 +28,7 @@ Load the extension and create sample data:
 
 ### Generate Forecast
 
-Use `TS_FORECAST` to generate forecasts for a single time series:
+Use `anofox_fcst_ts_forecast` to generate forecasts for a single time series:
 
 <!-- include: test/sql/docs_examples/01_quickstart_forecast_03.sql -->
 
@@ -79,13 +79,13 @@ All three models require the `seasonal_period` parameter for weekly seasonality 
 
 ## Multiple Series Forecasting
 
-Use `TS_FORECAST_BY` to forecast multiple time series in parallel:
+Use `anofox_fcst_ts_forecast_by` to forecast multiple time series in parallel:
 
 <!-- include: test/sql/docs_examples/01_quickstart_multi_series_05.sql -->
 
 **Output Schema:**
 
-The function returns the same columns as `TS_FORECAST`, plus:
+The function returns the same columns as `anofox_fcst_ts_forecast`, plus:
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -115,7 +115,7 @@ The function returns the same columns as `TS_FORECAST`, plus:
 Seasonal models require the `seasonal_period` parameter in the `params` MAP. Ensure the parameter is provided:
 
 ```sql
-SELECT * FROM TS_FORECAST(
+SELECT * FROM anofox_fcst_ts_forecast(
     'my_sales', date, sales, 'SeasonalNaive', 14,
     {'seasonal_period': 7}  -- Required for seasonal models
 );

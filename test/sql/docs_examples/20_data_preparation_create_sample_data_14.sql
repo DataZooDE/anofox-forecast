@@ -8,4 +8,4 @@ FROM generate_series(0, 89) t(d)
 CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
 
 CREATE TABLE sales_no_leading AS
-SELECT * FROM TS_DROP_LEADING_ZEROS('sales', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_drop_leading_zeros('sales', product_id, date, sales_amount);

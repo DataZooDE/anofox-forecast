@@ -33,7 +33,7 @@ query I
 SELECT COUNT(*) > 0
 FROM (
     WITH changepoints AS (
-        SELECT TS_DETECT_CHANGEPOINTS_AGG(ds, y) AS result
+        SELECT anofox_fcst_ts_detect_changepoints_agg(ds, y) AS result
         FROM cp_test
     ),
     unnested AS (
@@ -55,7 +55,7 @@ query I
 SELECT COUNT(*) = 100
 FROM (
     WITH changepoints AS (
-        SELECT TS_DETECT_CHANGEPOINTS_AGG(ds, y) AS result
+        SELECT anofox_fcst_ts_detect_changepoints_agg(ds, y) AS result
         FROM cp_test
     ),
     unnested AS (
@@ -77,7 +77,7 @@ SELECT
     COUNT(*) = 3
 FROM (
     WITH changepoints AS (
-        SELECT TS_DETECT_CHANGEPOINTS_AGG(ds, y) AS result
+        SELECT anofox_fcst_ts_detect_changepoints_agg(ds, y) AS result
         FROM cp_test
     ),
     unnested AS (
@@ -103,7 +103,7 @@ SELECT
     COUNT(DISTINCT row_data.is_changepoint) <= 2
 FROM (
     WITH changepoints AS (
-        SELECT TS_DETECT_CHANGEPOINTS_AGG(ds, y) AS result
+        SELECT anofox_fcst_ts_detect_changepoints_agg(ds, y) AS result
         FROM cp_test
     )
     SELECT UNNEST(result) AS row_data

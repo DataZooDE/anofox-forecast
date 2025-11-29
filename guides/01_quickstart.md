@@ -6,9 +6,9 @@ The Anofox Forecast extension provides time series forecasting capabilities with
 
 ### Core Forecasting Functions
 
-- **TS_FORECAST**: Single time series forecasting
-- **TS_FORECAST_BY**: Multiple time series forecasting with GROUP BY parallelization
-- **TS_FORECAST_AGG**: Aggregate function for custom GROUP BY patterns
+- **anofox_fcst_ts_forecast**: Single time series forecasting
+- **anofox_fcst_ts_forecast_by**: Multiple time series forecasting with GROUP BY parallelization
+- **anofox_fcst_ts_forecast_agg**: Aggregate function for custom GROUP BY patterns
 
 ### Prerequisites
 
@@ -38,7 +38,7 @@ SELECT * FROM my_sales LIMIT 5;
 
 ### Generate Forecast
 
-Use `TS_FORECAST` to generate forecasts for a single time series:
+Use `anofox_fcst_ts_forecast` to generate forecasts for a single time series:
 
 ```sql
 -- Create sample data
@@ -49,7 +49,7 @@ SELECT
 FROM generate_series(0, 89) t(d);  -- 90 days of data
 
 -- Forecast next 14 days
-SELECT * FROM TS_FORECAST(
+SELECT * FROM anofox_fcst_ts_forecast(
     'my_sales',      -- table name
     date,            -- date column
     sales,           -- value column
@@ -110,7 +110,7 @@ SELECT
     point_forecast,
     lower_90,
     upper_90
-FROM TS_FORECAST('my_sales', date, sales, 'AutoETS', 14, MAP{'seasonal_period': 7})
+FROM anofox_fcst_ts_forecast('my_sales', date, sales, 'AutoETS', 14, MAP{'seasonal_period': 7})
 LIMIT 5;
 
 -- Model 2: SES (Simple Exponential Smoothing)
@@ -120,7 +120,7 @@ SELECT
     point_forecast,
     lower_90,
     upper_90
-FROM TS_FORECAST('my_sales', date, sales, 'SES', 14, MAP{})
+FROM anofox_fcst_ts_forecast('my_sales', date, sales, 'SES', 14, MAP{})
 LIMIT 5;
 
 -- Model 3: Theta (theta decomposition method)
@@ -130,7 +130,7 @@ SELECT
     point_forecast,
     lower_90,
     upper_90
-FROM TS_FORECAST('my_sales', date, sales, 'Theta', 14, MAP{'seasonal_period': 7})
+FROM anofox_fcst_ts_forecast('my_sales', date, sales, 'Theta', 14, MAP{'seasonal_period': 7})
 LIMIT 5;
 
 ```
@@ -145,7 +145,7 @@ All three models require the `seasonal_period` parameter for weekly seasonality 
 
 ## Multiple Series Forecasting
 
-Use `TS_FORECAST_BY` to forecast multiple time series in parallel:
+Use `anofox_fcst_ts_forecast_by` to forecast multiple time series in parallel:
 
 ```sql
 -- Create multi-product data
@@ -162,7 +162,7 @@ SELECT
     product_id,
     forecast_step,
     ROUND(point_forecast, 2) AS forecast
-FROM TS_FORECAST_BY(
+FROM anofox_fcst_ts_forecast_by(
     'product_sales',
     product_id,      -- GROUP BY this column
     date,
@@ -177,7 +177,7 @@ ORDER BY product_id, forecast_step;
 
 **Output Schema:**
 
-The function returns the same columns as `TS_FORECAST`, plus:
+The function returns the same columns as `anofox_fcst_ts_forecast`, plus:
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -207,7 +207,7 @@ The function returns the same columns as `TS_FORECAST`, plus:
 Seasonal models require the `seasonal_period` parameter in the `params` MAP. Ensure the parameter is provided:
 
 ```sql
-SELECT * FROM TS_FORECAST(
+SELECT * FROM anofox_fcst_ts_forecast(
     'my_sales', date, sales, 'SeasonalNaive', 14,
     {'seasonal_period': 7}  -- Required for seasonal models
 );

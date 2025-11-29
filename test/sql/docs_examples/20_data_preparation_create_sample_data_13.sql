@@ -8,4 +8,4 @@ FROM generate_series(0, 89) t(d)
 CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
 
 CREATE TABLE sales_complete AS
-SELECT * FROM TS_DROP_GAPPY('sales', product_id, date, 0.10);  -- max 10% gaps
+SELECT * FROM anofox_fcst_ts_drop_gappy('sales', product_id, date, 0.10);  -- max 10% gaps

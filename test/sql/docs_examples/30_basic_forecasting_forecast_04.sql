@@ -5,7 +5,7 @@ SELECT
     100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales_amount
 FROM generate_series(0, 89) t(d);
 
-SELECT * FROM TS_FORECAST(
+SELECT * FROM anofox_fcst_ts_forecast(
     'sales_complete',
     date,
     sales_amount,

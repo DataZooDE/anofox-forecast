@@ -12,7 +12,7 @@ WITH distributions AS (
         [0.1, 0.25, 0.5, 0.75, 0.9] AS quantiles
 )
 SELECT 
-    TS_MQLOSS(actual, predicted_quantiles, quantiles) AS mqloss,
+    anofox_fcst_ts_mqloss(actual, predicted_quantiles, quantiles) AS mqloss,
     'Lower is better - measures full distribution accuracy' AS interpretation
 FROM distributions;
 

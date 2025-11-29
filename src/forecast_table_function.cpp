@@ -440,7 +440,7 @@ unique_ptr<TableFunction> CreateForecastTableFunction() {
 	table_function.in_out_function = ForecastInOutFunction;
 	table_function.in_out_function_final = ForecastInOutFinal;
 	table_function.cardinality = ForecastCardinality;
-	table_function.name = "forecast";
+	table_function.name = "anofox_fcst_forecast";
 
 	// std::cerr << "[DEBUG] FORECAST table function created (table-in-out mode)" << std::endl;
 	return make_uniq<TableFunction>(table_function);

@@ -3,6 +3,7 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/types/data_chunk.hpp"
 #include "duckdb/function/scalar_function.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/main/extension_entries.hpp"
 
 // Include anofox-time metrics
@@ -532,77 +533,91 @@ static void TSMQLOSSFunction(DataChunk &args, ExpressionState &state, Vector &re
 }
 
 void RegisterMetricsFunction(ExtensionLoader &loader) {
+	// Helper to register with alias
+	auto register_with_alias = [&loader](const string &full_name, const string &alias_name,
+	                                     const vector<LogicalType> &args, LogicalType ret_type,
+	                                     scalar_function_t func) {
+		ScalarFunction main_func(full_name, args, ret_type, func);
+		ScalarFunctionSet main_set(full_name);
+		main_set.AddFunction(main_func);
+		CreateScalarFunctionInfo main_info(std::move(main_set));
+		main_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+		loader.RegisterFunction(std::move(main_info));
+
+		ScalarFunction alias_func(alias_name, args, ret_type, func);
+		ScalarFunctionSet alias_set(alias_name);
+		alias_set.AddFunction(alias_func);
+		CreateScalarFunctionInfo alias_info(std::move(alias_set));
+		alias_info.alias_of = full_name;
+		alias_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+		loader.RegisterFunction(std::move(alias_info));
+	};
+
 	// TS_MAE
-	ScalarFunction ts_mae("ts_mae", {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-	                      LogicalType::DOUBLE, TSMAEFunction);
-	loader.RegisterFunction(ts_mae);
+	register_with_alias("anofox_fcst_ts_mae", "ts_mae",
+	                    {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
+	                    LogicalType::DOUBLE, TSMAEFunction);
 
 	// TS_MSE
-	ScalarFunction ts_mse("ts_mse", {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-	                      LogicalType::DOUBLE, TSMSEFunction);
-	loader.RegisterFunction(ts_mse);
+	register_with_alias("anofox_fcst_ts_mse", "ts_mse",
+	                    {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
+	                    LogicalType::DOUBLE, TSMSEFunction);
 
 	// TS_RMSE
-	ScalarFunction ts_rmse("ts_rmse", {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-	                       LogicalType::DOUBLE, TSRMSEFunction);
-	loader.RegisterFunction(ts_rmse);
+	register_with_alias("anofox_fcst_ts_rmse", "ts_rmse",
+	                    {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
+	                    LogicalType::DOUBLE, TSRMSEFunction);
 
 	// TS_MAPE
-	ScalarFunction ts_mape("ts_mape", {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-	                       LogicalType::DOUBLE, TSMAPEFunction);
-	loader.RegisterFunction(ts_mape);
+	register_with_alias("anofox_fcst_ts_mape", "ts_mape",
+	                    {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
+	                    LogicalType::DOUBLE, TSMAPEFunction);
 
 	// TS_SMAPE
-	ScalarFunction ts_smape("ts_smape",
-	                        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-	                        LogicalType::DOUBLE, TSSMAPEFunction);
-	loader.RegisterFunction(ts_smape);
+	register_with_alias("anofox_fcst_ts_smape", "ts_smape",
+	                    {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
+	                    LogicalType::DOUBLE, TSSMAPEFunction);
 
 	// TS_MASE (requires baseline)
-	ScalarFunction ts_mase("ts_mase",
-	                       {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE),
-	                        LogicalType::LIST(LogicalType::DOUBLE)},
-	                       LogicalType::DOUBLE, TSMASEFunction);
-	loader.RegisterFunction(ts_mase);
+	register_with_alias("anofox_fcst_ts_mase", "ts_mase",
+	                    {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE),
+	                     LogicalType::LIST(LogicalType::DOUBLE)},
+	                    LogicalType::DOUBLE, TSMASEFunction);
 
 	// TS_R2
-	ScalarFunction ts_r2("ts_r2", {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-	                     LogicalType::DOUBLE, TSR2Function);
-	loader.RegisterFunction(ts_r2);
+	register_with_alias("anofox_fcst_ts_r2", "ts_r2",
+	                    {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
+	                    LogicalType::DOUBLE, TSR2Function);
 
 	// TS_BIAS
-	ScalarFunction ts_bias("ts_bias", {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-	                       LogicalType::DOUBLE, TSBiasFunction);
-	loader.RegisterFunction(ts_bias);
+	register_with_alias("anofox_fcst_ts_bias", "ts_bias",
+	                    {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
+	                    LogicalType::DOUBLE, TSBiasFunction);
 
 	// TS_RMAE (Relative MAE - compares two forecasting methods)
-	ScalarFunction ts_rmae("ts_rmae",
-	                       {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE),
-	                        LogicalType::LIST(LogicalType::DOUBLE)},
-	                       LogicalType::DOUBLE, TSRMAEFunction);
-	loader.RegisterFunction(ts_rmae);
+	register_with_alias("anofox_fcst_ts_rmae", "ts_rmae",
+	                    {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE),
+	                     LogicalType::LIST(LogicalType::DOUBLE)},
+	                    LogicalType::DOUBLE, TSRMAEFunction);
 
 	// TS_QUANTILE_LOSS (Pinball loss for quantile forecasts)
-	ScalarFunction ts_quantile_loss(
-	    "ts_quantile_loss",
+	register_with_alias(
+	    "anofox_fcst_ts_quantile_loss", "ts_quantile_loss",
 	    {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
 	    LogicalType::DOUBLE, TSQuantileLossFunction);
-	loader.RegisterFunction(ts_quantile_loss);
 
 	// TS_MQLOSS (Multi-quantile loss for distribution forecasts)
-	ScalarFunction ts_mqloss("ts_mqloss",
-	                         {LogicalType::LIST(LogicalType::DOUBLE),
-	                          LogicalType::LIST(LogicalType::LIST(LogicalType::DOUBLE)),
-	                          LogicalType::LIST(LogicalType::DOUBLE)},
-	                         LogicalType::DOUBLE, TSMQLOSSFunction);
-	loader.RegisterFunction(ts_mqloss);
+	register_with_alias("anofox_fcst_ts_mqloss", "ts_mqloss",
+	                    {LogicalType::LIST(LogicalType::DOUBLE),
+	                     LogicalType::LIST(LogicalType::LIST(LogicalType::DOUBLE)),
+	                     LogicalType::LIST(LogicalType::DOUBLE)},
+	                    LogicalType::DOUBLE, TSMQLOSSFunction);
 
 	// TS_COVERAGE (Prediction interval coverage)
-	ScalarFunction ts_coverage("ts_coverage",
-	                           {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE),
-	                            LogicalType::LIST(LogicalType::DOUBLE)},
-	                           LogicalType::DOUBLE, TSCoverageFunction);
-	loader.RegisterFunction(ts_coverage);
+	register_with_alias("anofox_fcst_ts_coverage", "ts_coverage",
+	                    {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE),
+	                     LogicalType::LIST(LogicalType::DOUBLE)},
+	                    LogicalType::DOUBLE, TSCoverageFunction);
 }
 
 } // namespace duckdb
