@@ -11,7 +11,7 @@ static const DefaultTableMacro data_prep_macros[] = {
 
     // TS_FILL_NULLS_FORWARD: Forward fill (LOCF)
     {DEFAULT_SCHEMA,
-     "ts_fill_nulls_forward",
+     "anofox_fcst_ts_fill_nulls_forward",
      {"table_name", "group_col", "date_col", "value_col", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -29,7 +29,7 @@ static const DefaultTableMacro data_prep_macros[] = {
 
     // TS_FILL_NULLS_BACKWARD: Backward fill
     {DEFAULT_SCHEMA,
-     "ts_fill_nulls_backward",
+     "anofox_fcst_ts_fill_nulls_backward",
      {"table_name", "group_col", "date_col", "value_col", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -47,7 +47,7 @@ static const DefaultTableMacro data_prep_macros[] = {
 
     // TS_FILL_NULLS_MEAN: Fill with series mean
     {DEFAULT_SCHEMA,
-     "ts_fill_nulls_mean",
+     "anofox_fcst_ts_fill_nulls_mean",
      {"table_name", "group_col", "date_col", "value_col", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -86,7 +86,7 @@ static const DefaultTableMacro data_prep_macros[] = {
     // TS_FILL_GAPS: Fill missing time gaps with NULL (VARCHAR frequency - date-based)
     // Note: This macro generates a full date range for each group
     {DEFAULT_SCHEMA,
-     "ts_fill_gaps",
+     "anofox_fcst_ts_fill_gaps",
      {"table_name", "group_col", "date_col", "value_col", "frequency", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -141,7 +141,7 @@ static const DefaultTableMacro data_prep_macros[] = {
 
     // TS_FILL_GAPS: Fill missing time gaps with NULL (INTEGER frequency - integer-based)
     {DEFAULT_SCHEMA,
-     "ts_fill_gaps",
+     "anofox_fcst_ts_fill_gaps",
      {"table_name", "group_col", "date_col", "value_col", "frequency", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -185,7 +185,7 @@ static const DefaultTableMacro data_prep_macros[] = {
 
     // TS_DROP_CONSTANT: Drop constant series
     {DEFAULT_SCHEMA,
-     "ts_drop_constant",
+     "anofox_fcst_ts_drop_constant",
      {"table_name", "group_col", "value_col", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -210,7 +210,7 @@ static const DefaultTableMacro data_prep_macros[] = {
 
     // TS_DROP_SHORT: Drop short series
     {DEFAULT_SCHEMA,
-     "ts_drop_short",
+     "anofox_fcst_ts_drop_short",
      {"table_name", "group_col", "min_length", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -235,7 +235,7 @@ static const DefaultTableMacro data_prep_macros[] = {
 
     // TS_DROP_ZEROS: Drop series with all zeros
     {DEFAULT_SCHEMA,
-     "ts_drop_zeros",
+     "anofox_fcst_ts_drop_zeros",
      {"table_name", "group_col", "value_col", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -260,7 +260,7 @@ static const DefaultTableMacro data_prep_macros[] = {
 
     // TS_DROP_LEADING_ZEROS: Remove leading zeros
     {DEFAULT_SCHEMA,
-     "ts_drop_leading_zeros",
+     "anofox_fcst_ts_drop_leading_zeros",
      {"table_name", "group_col", "date_col", "value_col", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -283,7 +283,7 @@ static const DefaultTableMacro data_prep_macros[] = {
 
     // TS_DROP_TRAILING_ZEROS: Remove trailing zeros
     {DEFAULT_SCHEMA,
-     "ts_drop_trailing_zeros",
+     "anofox_fcst_ts_drop_trailing_zeros",
      {"table_name", "group_col", "date_col", "value_col", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -306,7 +306,7 @@ static const DefaultTableMacro data_prep_macros[] = {
 
     // TS_FILL_FORWARD: Extend all series to a target date (VARCHAR frequency - date-based)
     {DEFAULT_SCHEMA,
-     "ts_fill_forward",
+     "anofox_fcst_ts_fill_forward",
      {"table_name", "group_col", "date_col", "value_col", "target_date", "frequency", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -365,7 +365,7 @@ static const DefaultTableMacro data_prep_macros[] = {
 
     // TS_FILL_FORWARD: Extend all series to a target date (INTEGER frequency - integer-based)
     {DEFAULT_SCHEMA,
-     "ts_fill_forward",
+     "anofox_fcst_ts_fill_forward",
      {"table_name", "group_col", "date_col", "value_col", "target_date", "frequency", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -413,7 +413,7 @@ static const DefaultTableMacro data_prep_macros[] = {
 
     // TS_DROP_GAPPY: Drop series with excessive gaps
     {DEFAULT_SCHEMA,
-     "ts_drop_gappy",
+     "anofox_fcst_ts_drop_gappy",
      {"table_name", "group_col", "date_col", "max_gap_pct", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -480,7 +480,7 @@ static const DefaultTableMacro data_prep_macros[] = {
 
     // TS_DROP_EDGE_ZEROS: Remove both leading and trailing zeros
     {DEFAULT_SCHEMA,
-     "ts_drop_edge_zeros",
+     "anofox_fcst_ts_drop_edge_zeros",
      {"table_name", "group_col", "date_col", "value_col", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -505,7 +505,7 @@ static const DefaultTableMacro data_prep_macros[] = {
 
     // TS_FILL_NULLS_CONST: Fill with constant value
     {DEFAULT_SCHEMA,
-     "ts_fill_nulls_const",
+     "anofox_fcst_ts_fill_nulls_const",
      {"table_name", "group_col", "date_col", "value_col", "fill_value", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -519,7 +519,7 @@ static const DefaultTableMacro data_prep_macros[] = {
 
     // TS_DIFF: Differencing - Using 1st order difference only (order parameter causes parser issues)
     {DEFAULT_SCHEMA,
-     "ts_diff",
+     "anofox_fcst_ts_diff",
      {"table_name", "group_col", "date_col", "value_col", "order", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -562,10 +562,22 @@ void RegisterDataPrepMacros(ExtensionLoader &loader) {
 			auto table_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(data_prep_macros[index]);
 			table_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
 			loader.RegisterFunction(*table_info);
+
+			// Register alias
+			if (table_info->name.find("anofox_fcst_") == 0) {
+				string alias_name = table_info->name.substr(12); // Remove "anofox_fcst_" prefix
+				DefaultTableMacro alias_macro = data_prep_macros[index];
+				alias_macro.name = alias_name.c_str();
+				auto alias_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(alias_macro);
+				alias_info->alias_of = table_info->name;
+				alias_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+				loader.RegisterFunction(*alias_info);
+			}
 		} else {
 			// Multiple macros with same name - create overloaded macro with typed parameters
 			// For ts_fill_gaps and ts_fill_forward, we have VARCHAR and INTEGER overloads
-			if (group.second.size() == 2 && (group.first == "ts_fill_gaps" || group.first == "ts_fill_forward")) {
+			if (group.second.size() == 2 &&
+			    (group.first == "anofox_fcst_ts_fill_gaps" || group.first == "anofox_fcst_ts_fill_forward")) {
 				// Create a single CreateMacroInfo with both overloads
 				auto first_info =
 				    DefaultTableFunctionGenerator::CreateTableMacroInfo(data_prep_macros[group.second[0]]);
@@ -575,7 +587,7 @@ void RegisterDataPrepMacros(ExtensionLoader &loader) {
 				// Set parameter types: VARCHAR for first (date-based), INTEGER for second (integer-based)
 				// The frequency parameter is the 5th parameter (index 4) for ts_fill_gaps
 				// The frequency parameter is the 6th parameter (index 5) for ts_fill_forward
-				idx_t freq_param_idx = (group.first == "ts_fill_gaps") ? 4 : 5;
+				idx_t freq_param_idx = (group.first == "anofox_fcst_ts_fill_gaps") ? 4 : 5;
 
 				// First overload: VARCHAR frequency (date-based)
 				if (first_info->macros[0]->types.size() <= freq_param_idx) {
@@ -595,6 +607,23 @@ void RegisterDataPrepMacros(ExtensionLoader &loader) {
 				// Register the combined macro
 				first_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
 				loader.RegisterFunction(*first_info);
+
+				// Register alias
+				if (first_info->name.find("anofox_fcst_") == 0) {
+					string alias_name = first_info->name.substr(12); // Remove "anofox_fcst_" prefix
+					auto alias_info =
+					    DefaultTableFunctionGenerator::CreateTableMacroInfo(data_prep_macros[group.second[0]]);
+					alias_info->name = alias_name;
+					// Copy the overloads
+					for (size_t i = 1; i < first_info->macros.size(); i++) {
+						auto alias_macro =
+						    DefaultTableFunctionGenerator::CreateTableMacroInfo(data_prep_macros[group.second[i]]);
+						alias_info->macros.push_back(std::move(alias_macro->macros[0]));
+					}
+					alias_info->alias_of = first_info->name;
+					alias_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+					loader.RegisterFunction(*alias_info);
+				}
 			} else {
 				// For other cases, register normally
 				for (idx_t i = 0; i < group.second.size(); i++) {
@@ -602,6 +631,17 @@ void RegisterDataPrepMacros(ExtensionLoader &loader) {
 					auto table_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(data_prep_macros[index]);
 					table_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
 					loader.RegisterFunction(*table_info);
+
+					// Register alias
+					if (table_info->name.find("anofox_fcst_") == 0) {
+						string alias_name = table_info->name.substr(12); // Remove "anofox_fcst_" prefix
+						DefaultTableMacro alias_macro = data_prep_macros[index];
+						alias_macro.name = alias_name.c_str();
+						auto alias_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(alias_macro);
+						alias_info->alias_of = table_info->name;
+						alias_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+						loader.RegisterFunction(*alias_info);
+					}
 				}
 			}
 		}

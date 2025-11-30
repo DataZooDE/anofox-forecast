@@ -7,7 +7,7 @@ FROM generate_series(0, 89) t(d);  -- 90 days of data
 
 WITH cp AS (
     SELECT *
-    FROM TS_DETECT_CHANGEPOINTS('data', date, value, MAP{})
+    FROM anofox_fcst_ts_detect_changepoints('data', date, value, MAP{})
 ),
 segments AS (
     SELECT 

@@ -30,7 +30,7 @@ FROM generate_series(1, 100) t(i);
 # STEP 1: Exploratory Data Analysis
 statement ok
 CREATE TABLE eda_results AS
-SELECT * FROM ts_stats(sales_data, product_id, date, sales, '1d');
+SELECT * FROM anofox_fcst_ts_stats(sales_data, product_id, date, sales, '1d');
 
 # Verify EDA detected both products
 query I
@@ -59,10 +59,10 @@ true	true
 statement ok
 CREATE TABLE clean_sales AS
 WITH step1 AS (
-    SELECT * FROM ts_fill_gaps(sales_data, product_id, date, sales, NULL::VARCHAR)
+    SELECT * FROM anofox_fcst_ts_fill_gaps(sales_data, product_id, date, sales, NULL::VARCHAR)
 ),
 step2 AS (
-    SELECT * FROM ts_fill_nulls_forward(step1, group_col, date_col, value_col)
+    SELECT * FROM anofox_fcst_ts_fill_nulls_forward(step1, group_col, date_col, value_col)
 )
 SELECT * FROM step2
 ORDER BY group_col, date_col;
@@ -86,7 +86,7 @@ true
 statement ok
 CREATE TABLE forecasts AS
 SELECT *
-FROM ts_forecast_by(
+FROM anofox_fcst_ts_forecast_by(
     clean_sales,
     group_col,
     date_col,

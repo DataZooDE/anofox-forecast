@@ -8,7 +8,7 @@ FROM generate_series(0, 89) t(d);  -- 90 days of data
 -- Segment time series into stable periods
 WITH changepoint_data AS (
     SELECT *
-    FROM TS_DETECT_CHANGEPOINTS('stock_prices', date, price, MAP{})
+    FROM anofox_fcst_ts_detect_changepoints('stock_prices', date, price, MAP{})
 ),
 segments AS (
     SELECT 

@@ -11,7 +11,7 @@ CROSS JOIN (SELECT generate_series(1, 10) AS series_id) s;
 SELECT 
     series_id,
     COUNT(*) FILTER (WHERE is_changepoint) AS num_changepoints
-FROM TS_DETECT_CHANGEPOINTS_BY('large_dataset', series_id, date, value, MAP{})
+FROM anofox_fcst_ts_detect_changepoints_by('large_dataset', series_id, date, value, MAP{})
 GROUP BY series_id;
 
 -- Performance: ~10-20ms per series × (num_series / num_cores)

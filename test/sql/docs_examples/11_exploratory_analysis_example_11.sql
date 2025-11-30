@@ -13,10 +13,10 @@ CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
 -- Generate statistics
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, sales_amount, '1d');
 
 -- Detect constant series
 SELECT * FROM sales_stats WHERE is_constant = true;
 
 -- Fix: Remove constant series
-SELECT * FROM TS_DROP_CONSTANT('sales', product_id, sales_amount);
+SELECT * FROM anofox_fcst_ts_drop_constant('sales', product_id, sales_amount);

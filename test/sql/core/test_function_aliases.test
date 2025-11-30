@@ -1,0 +1,147 @@
+# name: test/sql/core/test_function_aliases.test
+# description: Test that both full function names (anofox_fcst_ts_*) and aliases (ts_*) work correctly
+# group: [core]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+# Create test data
+statement ok
+CREATE TABLE test_data AS
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    (100.0 + i)::DOUBLE AS value
+FROM generate_series(1, 30) t(i);
+
+# Test 1: Scalar function - Full name anofox_fcst_ts_mae
+query I
+SELECT abs(anofox_fcst_ts_mae([1.0, 2.0, 3.0], [1.1, 2.1, 3.1]) - 0.1) < 0.0001;
+----
+true
+
+# Test 2: Scalar function - Alias ts_mae
+query I
+SELECT abs(ts_mae([1.0, 2.0, 3.0], [1.1, 2.1, 3.1]) - 0.1) < 0.0001;
+----
+true
+
+# Test 3: Scalar function - Full name anofox_fcst_ts_mse
+query I
+SELECT abs(anofox_fcst_ts_mse([1.0, 2.0, 3.0], [1.1, 2.1, 3.1]) - 0.01) < 0.0001;
+----
+true
+
+# Test 4: Scalar function - Alias ts_mse
+query I
+SELECT abs(ts_mse([1.0, 2.0, 3.0], [1.1, 2.1, 3.1]) - 0.01) < 0.0001;
+----
+true
+
+# Test 5: Table macro - Full name anofox_fcst_ts_forecast
+query I
+SELECT COUNT(*) = 10
+FROM anofox_fcst_ts_forecast('test_data', date_col, value, 'Naive', 10, NULL);
+----
+true
+
+# Test 6: Table macro - Alias ts_forecast
+query I
+SELECT COUNT(*) = 10
+FROM ts_forecast('test_data', date_col, value, 'Naive', 10, NULL);
+----
+true
+
+# Test 7: Scalar function - Full name anofox_fcst_ts_detect_seasonality
+query I
+SELECT len(anofox_fcst_ts_detect_seasonality([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])) >= 0;
+----
+true
+
+# Test 8: Scalar function - Alias ts_detect_seasonality
+query I
+SELECT len(ts_detect_seasonality([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])) >= 0;
+----
+true
+
+# Test 9: Table macro - Full name anofox_fcst_ts_stats
+query I
+SELECT COUNT(*) >= 1
+FROM anofox_fcst_ts_stats('test_data', 1, date_col, value, '1d');
+----
+true
+
+# Test 10: Table macro - Alias ts_stats
+query I
+SELECT COUNT(*) >= 1
+FROM ts_stats('test_data', 1, date_col, value, '1d');
+----
+true
+
+# Test 11: Aggregate function - Full name anofox_fcst_ts_forecast_agg
+statement ok
+CREATE TABLE agg_test_full AS
+SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'Naive', 5, NULL) AS result
+FROM test_data;
+
+# Test 12: Aggregate function - Alias ts_forecast_agg
+statement ok
+CREATE TABLE agg_test_alias AS
+SELECT ts_forecast_agg(date_col, value, 'Naive', 5, NULL) AS result
+FROM test_data;
+
+# Test 13: Verify both aggregate functions produce same results
+query I
+SELECT 
+    (SELECT len(result.point_forecast) FROM agg_test_full) = 
+    (SELECT len(result.point_forecast) FROM agg_test_alias);
+----
+true
+
+# Test 14: Table macro - Full name anofox_fcst_ts_forecast_by
+statement ok
+CREATE TABLE multi_series AS
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    (i % 3)::VARCHAR AS series_id,
+    (100.0 + i * (i % 3 + 1))::DOUBLE AS value
+FROM generate_series(1, 30) t(i);
+
+query I
+SELECT COUNT(DISTINCT series_id) = 3
+FROM anofox_fcst_ts_forecast_by('multi_series', series_id, date_col, value, 'Naive', 5, NULL);
+----
+true
+
+# Test 15: Table macro - Alias ts_forecast_by
+query I
+SELECT COUNT(DISTINCT series_id) = 3
+FROM ts_forecast_by('multi_series', series_id, date_col, value, 'Naive', 5, NULL);
+----
+true
+
+# Test 16: Scalar function - Full name anofox_fcst_ts_rmse
+query I
+SELECT anofox_fcst_ts_rmse([1.0, 2.0, 3.0], [1.1, 2.1, 3.1]) > 0.0;
+----
+true
+
+# Test 17: Scalar function - Alias ts_rmse
+query I
+SELECT ts_rmse([1.0, 2.0, 3.0], [1.1, 2.1, 3.1]) > 0.0;
+----
+true
+
+# Cleanup
+statement ok
+DROP TABLE IF EXISTS test_data;
+
+statement ok
+DROP TABLE IF EXISTS agg_test_full;
+
+statement ok
+DROP TABLE IF EXISTS agg_test_alias;
+
+statement ok
+DROP TABLE IF EXISTS multi_series;

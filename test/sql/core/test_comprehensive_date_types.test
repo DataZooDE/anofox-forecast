@@ -8,10 +8,10 @@ statement ok
 LOAD anofox_forecast;
 
 #############################################
-# FORECASTING FUNCTIONS - ts_forecast
+# FORECASTING FUNCTIONS - anofox_fcst_ts_forecast
 #############################################
 
-# Test ts_forecast with INTEGER
+# Test anofox_fcst_ts_forecast with INTEGER
 statement ok
 CREATE TABLE test_int_single AS
 SELECT i AS date_col, (100.0 + i * 5)::DOUBLE AS value
@@ -19,11 +19,11 @@ FROM generate_series(1, 30) t(i);
 
 query I
 SELECT COUNT(*) = 10
-FROM ts_forecast(test_int_single, date_col, value, 'Naive', 10, NULL);
+FROM anofox_fcst_ts_forecast(test_int_single, date_col, value, 'Naive', 10, NULL);
 ----
 true
 
-# Test ts_forecast with DATE
+# Test anofox_fcst_ts_forecast with DATE
 statement ok
 CREATE TABLE test_date_single AS
 SELECT ('2024-01-01'::DATE + INTERVAL (i) DAY)::DATE AS date_col, (100.0 + i * 5)::DOUBLE AS value
@@ -31,11 +31,11 @@ FROM generate_series(1, 30) t(i);
 
 query I
 SELECT COUNT(*) = 10
-FROM ts_forecast(test_date_single, date_col, value, 'Naive', 10, NULL);
+FROM anofox_fcst_ts_forecast(test_date_single, date_col, value, 'Naive', 10, NULL);
 ----
 true
 
-# Test ts_forecast with TIMESTAMP
+# Test anofox_fcst_ts_forecast with TIMESTAMP
 statement ok
 CREATE TABLE test_ts_single AS
 SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, (100.0 + i * 5)::DOUBLE AS value
@@ -43,18 +43,18 @@ FROM generate_series(1, 30) t(i);
 
 query I
 SELECT COUNT(*) = 10
-FROM ts_forecast(test_ts_single, date_col, value, 'Naive', 10, NULL);
+FROM anofox_fcst_ts_forecast(test_ts_single, date_col, value, 'Naive', 10, NULL);
 ----
 true
 
 #############################################
-# FORECASTING FUNCTIONS - TS_FORECAST_AGG
+# FORECASTING FUNCTIONS - anofox_fcst_ts_forecast_agg
 #############################################
 
-# Test TS_FORECAST_AGG with INTEGER (using Naive model)
+# Test anofox_fcst_ts_forecast_agg with INTEGER (using Naive model)
 statement ok
 CREATE TABLE agg_int_result AS
-SELECT TS_FORECAST_AGG(date_col, value, 'Naive', 5, NULL) AS result
+SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'Naive', 5, NULL) AS result
 FROM test_int_single;
 
 query I
@@ -63,10 +63,10 @@ FROM agg_int_result;
 ----
 true
 
-# Test TS_FORECAST_AGG with DATE (using Naive model)
+# Test anofox_fcst_ts_forecast_agg with DATE (using Naive model)
 statement ok
 CREATE TABLE agg_date_result AS
-SELECT TS_FORECAST_AGG(date_col, value, 'Naive', 5, NULL) AS result
+SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'Naive', 5, NULL) AS result
 FROM test_date_single;
 
 query I
@@ -75,10 +75,10 @@ FROM agg_date_result;
 ----
 true
 
-# Test TS_FORECAST_AGG with TIMESTAMP (using Naive model)
+# Test anofox_fcst_ts_forecast_agg with TIMESTAMP (using Naive model)
 statement ok
 CREATE TABLE agg_ts_result AS
-SELECT TS_FORECAST_AGG(date_col, value, 'Naive', 5, NULL) AS result
+SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'Naive', 5, NULL) AS result
 FROM test_ts_single;
 
 query I
@@ -88,10 +88,10 @@ FROM agg_ts_result;
 true
 
 #############################################
-# FORECASTING FUNCTIONS - ts_forecast_by
+# FORECASTING FUNCTIONS - anofox_fcst_ts_forecast_by
 #############################################
 
-# Test ts_forecast_by with INTEGER
+# Test anofox_fcst_ts_forecast_by with INTEGER
 statement ok
 CREATE TABLE multi_int AS
 SELECT i AS date_col, (i % 3)::VARCHAR AS series_id, (100.0 + i * (i % 3 + 1))::DOUBLE AS value
@@ -99,11 +99,11 @@ FROM generate_series(1, 30) t(i);
 
 query I
 SELECT COUNT(DISTINCT series_id) = 3
-FROM ts_forecast_by(multi_int, series_id, date_col, value, 'Naive', 5, NULL);
+FROM anofox_fcst_ts_forecast_by(multi_int, series_id, date_col, value, 'Naive', 5, NULL);
 ----
 true
 
-# Test ts_forecast_by with DATE
+# Test anofox_fcst_ts_forecast_by with DATE
 statement ok
 CREATE TABLE multi_date AS
 SELECT ('2024-01-01'::DATE + INTERVAL (i) DAY)::DATE AS date_col, (i % 3)::VARCHAR AS series_id, (100.0 + i * (i % 3 + 1))::DOUBLE AS value
@@ -111,11 +111,11 @@ FROM generate_series(1, 30) t(i);
 
 query I
 SELECT COUNT(DISTINCT series_id) = 3
-FROM ts_forecast_by(multi_date, series_id, date_col, value, 'Naive', 5, NULL);
+FROM anofox_fcst_ts_forecast_by(multi_date, series_id, date_col, value, 'Naive', 5, NULL);
 ----
 true
 
-# Test ts_forecast_by with TIMESTAMP
+# Test anofox_fcst_ts_forecast_by with TIMESTAMP
 statement ok
 CREATE TABLE multi_ts AS
 SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, (i % 3)::VARCHAR AS series_id, (100.0 + i * (i % 3 + 1))::DOUBLE AS value
@@ -123,17 +123,17 @@ FROM generate_series(1, 30) t(i);
 
 query I
 SELECT COUNT(DISTINCT series_id) = 3
-FROM ts_forecast_by(multi_ts, series_id, date_col, value, 'Naive', 5, NULL);
+FROM anofox_fcst_ts_forecast_by(multi_ts, series_id, date_col, value, 'Naive', 5, NULL);
 ----
 true
 
 #############################################
-# DATA PREP - ts_fill_gaps
+# DATA PREP - anofox_fcst_ts_fill_gaps
 # NOTE: INTEGER support available via sql/data_preparation_integer.sql
 # Skipping INTEGER test here to keep test simple - see data_prep test file
 #############################################
 
-# Test ts_fill_gaps with DATE
+# Test anofox_fcst_ts_fill_gaps with DATE
 statement ok
 CREATE TABLE gaps_date AS
 SELECT ('2024-01-01'::DATE + INTERVAL (i) DAY)::DATE AS date_col, 'series_1' AS series_id, 100.0 AS value
@@ -142,12 +142,12 @@ WHERE i NOT IN (10, 15, 20);
 
 query I
 SELECT COUNT(*) = 30
-FROM ts_fill_gaps(gaps_date, series_id, date_col, value, NULL::VARCHAR)
+FROM anofox_fcst_ts_fill_gaps(gaps_date, series_id, date_col, value, NULL::VARCHAR)
 WHERE group_col = 'series_1';
 ----
 true
 
-# Test ts_fill_gaps with TIMESTAMP
+# Test anofox_fcst_ts_fill_gaps with TIMESTAMP
 statement ok
 CREATE TABLE gaps_ts AS
 SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, 'series_1' AS series_id, 100.0 AS value
@@ -156,18 +156,18 @@ WHERE i NOT IN (10, 15, 20);
 
 query I
 SELECT COUNT(*) = 30
-FROM ts_fill_gaps(gaps_ts, series_id, date_col, value, NULL::VARCHAR)
+FROM anofox_fcst_ts_fill_gaps(gaps_ts, series_id, date_col, value, NULL::VARCHAR)
 WHERE group_col = 'series_1';
 ----
 true
 
 #############################################
-# DATA PREP - ts_fill_nulls_forward
+# DATA PREP - anofox_fcst_ts_fill_nulls_forward
 # NOTE: This macro works with all date types (INTEGER, DATE, TIMESTAMP)
 # Skipping INTEGER test here - see data_prep test file
 #############################################
 
-# Test ts_fill_nulls_forward with DATE
+# Test anofox_fcst_ts_fill_nulls_forward with DATE
 statement ok
 CREATE TABLE nulls_date AS
 SELECT ('2024-01-01'::DATE + INTERVAL (i) DAY)::DATE AS date_col, 'series_1' AS series_id,
@@ -176,11 +176,11 @@ FROM generate_series(1, 30) t(i);
 
 query I
 SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) < 3
-FROM ts_fill_nulls_forward(nulls_date, series_id, date_col, value);
+FROM anofox_fcst_ts_fill_nulls_forward(nulls_date, series_id, date_col, value);
 ----
 true
 
-# Test ts_fill_nulls_forward with TIMESTAMP
+# Test anofox_fcst_ts_fill_nulls_forward with TIMESTAMP
 statement ok
 CREATE TABLE nulls_ts AS
 SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, 'series_1' AS series_id,
@@ -189,56 +189,56 @@ FROM generate_series(1, 30) t(i);
 
 query I
 SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) < 3
-FROM ts_fill_nulls_forward(nulls_ts, series_id, date_col, value);
+FROM anofox_fcst_ts_fill_nulls_forward(nulls_ts, series_id, date_col, value);
 ----
 true
 
 #############################################
-# DATA PREP - ts_fill_nulls_backward
+# DATA PREP - anofox_fcst_ts_fill_nulls_backward
 # NOTE: This macro works with all date types (INTEGER, DATE, TIMESTAMP)
 # Skipping INTEGER test here - see data_prep test file
 #############################################
 
-# Test ts_fill_nulls_backward with DATE
+# Test anofox_fcst_ts_fill_nulls_backward with DATE
 query I
 SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) < 3
-FROM ts_fill_nulls_backward(nulls_date, series_id, date_col, value);
+FROM anofox_fcst_ts_fill_nulls_backward(nulls_date, series_id, date_col, value);
 ----
 true
 
-# Test ts_fill_nulls_backward with TIMESTAMP
+# Test anofox_fcst_ts_fill_nulls_backward with TIMESTAMP
 query I
 SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) < 3
-FROM ts_fill_nulls_backward(nulls_ts, series_id, date_col, value);
+FROM anofox_fcst_ts_fill_nulls_backward(nulls_ts, series_id, date_col, value);
 ----
 true
 
 #############################################
-# DATA PREP - ts_fill_nulls_mean
+# DATA PREP - anofox_fcst_ts_fill_nulls_mean
 # NOTE: This macro works with all date types (INTEGER, DATE, TIMESTAMP)
 # Skipping INTEGER test here - see data_prep test file
 #############################################
 
-# Test ts_fill_nulls_mean with DATE
+# Test anofox_fcst_ts_fill_nulls_mean with DATE
 query I
 SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) = 0
-FROM ts_fill_nulls_mean(nulls_date, series_id, date_col, value);
+FROM anofox_fcst_ts_fill_nulls_mean(nulls_date, series_id, date_col, value);
 ----
 true
 
-# Test ts_fill_nulls_mean with TIMESTAMP
+# Test anofox_fcst_ts_fill_nulls_mean with TIMESTAMP
 query I
 SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) = 0
-FROM ts_fill_nulls_mean(nulls_ts, series_id, date_col, value);
+FROM anofox_fcst_ts_fill_nulls_mean(nulls_ts, series_id, date_col, value);
 ----
 true
 
 #############################################
-# DATA PREP - ts_drop_constant
-# NOTE: ts_drop_constant works with all date types (doesn't use date column)
+# DATA PREP - anofox_fcst_ts_drop_constant
+# NOTE: anofox_fcst_ts_drop_constant works with all date types (doesn't use date column)
 #############################################
 
-# Test ts_drop_constant with INTEGER
+# Test anofox_fcst_ts_drop_constant with INTEGER
 statement ok
 CREATE TABLE const_int AS
 SELECT i AS date_col, 'series_1' AS series_id, 100.0 AS value FROM generate_series(1, 30) t(i)
@@ -247,11 +247,11 @@ SELECT i AS date_col, 'series_2' AS series_id, (100.0 + i)::DOUBLE AS value FROM
 
 query I
 SELECT COUNT(DISTINCT series_id) = 1
-FROM ts_drop_constant(const_int, series_id, value);
+FROM anofox_fcst_ts_drop_constant(const_int, series_id, value);
 ----
 true
 
-# Test ts_drop_constant with DATE
+# Test anofox_fcst_ts_drop_constant with DATE
 statement ok
 CREATE TABLE const_date AS
 SELECT ('2024-01-01'::DATE + INTERVAL (i) DAY)::DATE AS date_col, 'series_1' AS series_id, 100.0 AS value FROM generate_series(1, 30) t(i)
@@ -260,11 +260,11 @@ SELECT ('2024-01-01'::DATE + INTERVAL (i) DAY)::DATE AS date_col, 'series_2' AS 
 
 query I
 SELECT COUNT(DISTINCT series_id) = 1
-FROM ts_drop_constant(const_date, series_id, value);
+FROM anofox_fcst_ts_drop_constant(const_date, series_id, value);
 ----
 true
 
-# Test ts_drop_constant with TIMESTAMP
+# Test anofox_fcst_ts_drop_constant with TIMESTAMP
 statement ok
 CREATE TABLE const_ts AS
 SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, 'series_1' AS series_id, 100.0 AS value FROM generate_series(1, 30) t(i)
@@ -273,7 +273,7 @@ SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, 'series_2' AS s
 
 query I
 SELECT COUNT(DISTINCT series_id) = 1
-FROM ts_drop_constant(const_ts, series_id, value);
+FROM anofox_fcst_ts_drop_constant(const_ts, series_id, value);
 ----
 true
 
@@ -321,10 +321,10 @@ FROM ts_drop_zeros(zeros_ts, series_id, value);
 true
 
 #############################################
-# DATA PREP - ts_drop_short
+# DATA PREP - anofox_fcst_ts_drop_short
 #############################################
 
-# Test ts_drop_short with INTEGER
+# Test anofox_fcst_ts_drop_short with INTEGER
 statement ok
 CREATE TABLE short_int AS
 SELECT i AS date_col, 'series_1' AS series_id, 100.0 AS value FROM generate_series(1, 5) t(i)
@@ -333,11 +333,11 @@ SELECT i AS date_col, 'series_2' AS series_id, 100.0 AS value FROM generate_seri
 
 query I
 SELECT COUNT(DISTINCT series_id) = 1
-FROM ts_drop_short(short_int, series_id, 10);
+FROM anofox_fcst_ts_drop_short(short_int, series_id, 10);
 ----
 true
 
-# Test ts_drop_short with DATE
+# Test anofox_fcst_ts_drop_short with DATE
 statement ok
 CREATE TABLE short_date AS
 SELECT ('2024-01-01'::DATE + INTERVAL (i) DAY)::DATE AS date_col, 'series_1' AS series_id, 100.0 AS value FROM generate_series(1, 5) t(i)
@@ -346,11 +346,11 @@ SELECT ('2024-01-01'::DATE + INTERVAL (i) DAY)::DATE AS date_col, 'series_2' AS 
 
 query I
 SELECT COUNT(DISTINCT series_id) = 1
-FROM ts_drop_short(short_date, series_id, 10);
+FROM anofox_fcst_ts_drop_short(short_date, series_id, 10);
 ----
 true
 
-# Test ts_drop_short with TIMESTAMP
+# Test anofox_fcst_ts_drop_short with TIMESTAMP
 statement ok
 CREATE TABLE short_ts AS
 SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, 'series_1' AS series_id, 100.0 AS value FROM generate_series(1, 5) t(i)
@@ -359,7 +359,7 @@ SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, 'series_2' AS s
 
 query I
 SELECT COUNT(DISTINCT series_id) = 1
-FROM ts_drop_short(short_ts, series_id, 10);
+FROM anofox_fcst_ts_drop_short(short_ts, series_id, 10);
 ----
 true
 

@@ -11,7 +11,7 @@ WHERE d % 3 != 0;  -- Create gaps by skipping some days
 -- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
 -- Fill gaps with daily frequency (default)
 CREATE TABLE fixed AS
-SELECT * FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_fill_gaps('sales_raw', product_id, date, sales_amount, '1d');
 
 -- Create hourly data with gaps
 CREATE TABLE hourly_data AS
@@ -24,7 +24,7 @@ CROSS JOIN (VALUES (1), (2)) series(series_id)
 WHERE h % 2 != 0;  -- Create gaps
 
 -- Fill gaps with 30-minute frequency
-SELECT * FROM TS_FILL_GAPS('hourly_data', series_id, timestamp, value, '30m');
+SELECT * FROM anofox_fcst_ts_fill_gaps('hourly_data', series_id, timestamp, value, '30m');
 
 -- Create weekly data
 CREATE TABLE weekly_data AS
@@ -37,7 +37,7 @@ CROSS JOIN (VALUES (1), (2)) series(series_id)
 WHERE w % 2 != 0;  -- Create gaps
 
 -- Fill gaps with weekly frequency
-SELECT * FROM TS_FILL_GAPS('weekly_data', series_id, date, value, '1w');
+SELECT * FROM anofox_fcst_ts_fill_gaps('weekly_data', series_id, date, value, '1w');
 
 -- Use NULL (must cast to VARCHAR for DATE/TIMESTAMP columns)
 CREATE TABLE daily_data AS
@@ -49,7 +49,7 @@ FROM generate_series(0, 30) t(d)
 CROSS JOIN (VALUES (1)) series(series_id)
 WHERE d % 2 != 0;
 
-SELECT * FROM TS_FILL_GAPS('daily_data', series_id, date, value, NULL::VARCHAR);
+SELECT * FROM anofox_fcst_ts_fill_gaps('daily_data', series_id, date, value, NULL::VARCHAR);
 
 -- INTEGER columns: Use INTEGER frequency values
 -- Create integer-based time series
@@ -63,10 +63,10 @@ CROSS JOIN (VALUES (1), (2)) series(series_id)
 WHERE d % 3 != 0;  -- Create gaps
 
 -- Fill gaps with step size of 1
-SELECT * FROM TS_FILL_GAPS('int_data', series_id, date_col, value, 1);
+SELECT * FROM anofox_fcst_ts_fill_gaps('int_data', series_id, date_col, value, 1);
 
 -- Fill gaps with step size of 2
-SELECT * FROM TS_FILL_GAPS('int_data', series_id, date_col, value, 2);
+SELECT * FROM anofox_fcst_ts_fill_gaps('int_data', series_id, date_col, value, 2);
 
 -- Use NULL (defaults to step size 1 for INTEGER columns)
-SELECT * FROM TS_FILL_GAPS('int_data', series_id, date_col, value, NULL);
+SELECT * FROM anofox_fcst_ts_fill_gaps('int_data', series_id, date_col, value, NULL);

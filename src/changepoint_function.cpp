@@ -2,6 +2,7 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/types/data_chunk.hpp"
 #include "duckdb/function/aggregate_function.hpp"
+#include "duckdb/parser/parsed_data/create_aggregate_function_info.hpp"
 #include "duckdb/main/extension_entries.hpp"
 
 // anofox-time includes
@@ -219,7 +220,7 @@ void RegisterChangepointFunction(ExtensionLoader &loader) {
 	auto return_type = LogicalType::LIST(LogicalType::STRUCT(struct_children));
 
 	// Create function set for overloads
-	AggregateFunctionSet ts_detect_changepoints_agg_set("ts_detect_changepoints_agg");
+	AggregateFunctionSet ts_detect_changepoints_agg_set("anofox_fcst_ts_detect_changepoints_agg");
 
 	// 2-argument version (without params) - default behavior
 	AggregateFunction agg_2arg(
@@ -242,7 +243,19 @@ void RegisterChangepointFunction(ExtensionLoader &loader) {
 	                           AggregateFunction::StateDestroy<STATE, OP>);
 	ts_detect_changepoints_agg_set.AddFunction(agg_3arg);
 
-	loader.RegisterFunction(ts_detect_changepoints_agg_set);
+	// Register main function
+	CreateAggregateFunctionInfo main_info(ts_detect_changepoints_agg_set);
+	main_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+	loader.RegisterFunction(std::move(main_info));
+
+	// Register alias
+	AggregateFunctionSet alias_set("ts_detect_changepoints_agg");
+	alias_set.AddFunction(agg_2arg);
+	alias_set.AddFunction(agg_3arg);
+	CreateAggregateFunctionInfo alias_info(std::move(alias_set));
+	alias_info.alias_of = "anofox_fcst_ts_detect_changepoints_agg";
+	alias_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+	loader.RegisterFunction(std::move(alias_info));
 }
 
 } // namespace duckdb

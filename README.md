@@ -117,13 +117,13 @@ SELECT * FROM m5 WHERE ds >= DATE '2016-04-25';
 -- Perform baseline forecast and evaluate performance
 CREATE OR REPLACE TABLE forecast_results AS (
     SELECT *
-    FROM TS_FORECAST_BY('m5_train', item_id, ds, y, 'SeasonalNaive', 28, {'seasonal_period': 7})
+    FROM anofox_fcst_ts_forecast_by('m5_train', item_id, ds, y, 'SeasonalNaive', 28, {'seasonal_period': 7})
     UNION ALL
     SELECT *
-    FROM TS_FORECAST_BY('m5_train', item_id, ds, y, 'Theta', 28, {'seasonal_period': 7})
+    FROM anofox_fcst_ts_forecast_by('m5_train', item_id, ds, y, 'Theta', 28, {'seasonal_period': 7})
     UNION ALL
     SELECT *
-    FROM TS_FORECAST_BY('m5_train', item_id, ds, y, 'AutoARIMA', 28, {'seasonal_period': 7})
+    FROM anofox_fcst_ts_forecast_by('m5_train', item_id, ds, y, 'AutoARIMA', 28, {'seasonal_period': 7})
 );
 
 -- MAE and Bias of Forecasts
@@ -131,8 +131,8 @@ CREATE OR REPLACE TABLE evaluation_results AS (
   SELECT 
       item_id,
       model_name,
-      TS_MAE(LIST(y), LIST(point_forecast)) AS mae,
-      TS_BIAS(LIST(y), LIST(point_forecast)) AS bias
+      anofox_fcst_ts_mae(LIST(y), LIST(point_forecast)) AS mae,
+      anofox_fcst_ts_bias(LIST(y), LIST(point_forecast)) AS bias
   FROM (
       -- Join Forecast with Test Data
       SELECT 

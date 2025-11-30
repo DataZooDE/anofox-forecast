@@ -6,11 +6,11 @@ SELECT
 FROM generate_series(0, 89) t(d);  -- 90 days of data
 
 -- Step 1: Start with AutoETS
-SELECT * FROM TS_FORECAST('sales', date, sales, 'AutoETS', 28, MAP{'seasonal_period': 7});
+SELECT * FROM anofox_fcst_ts_forecast('sales', date, sales, 'AutoETS', 28, MAP{'seasonal_period': 7});
 
 -- Step 2: If needed, try specialized models
-SELECT * FROM TS_FORECAST('sales', date, sales, 'AutoARIMA', 28, MAP{'seasonal_period': 7});
+SELECT * FROM anofox_fcst_ts_forecast('sales', date, sales, 'AutoARIMA', 28, MAP{'seasonal_period': 7});
 
 -- Step 3: Fine-tune parameters
-SELECT * FROM TS_FORECAST('sales', date, sales, 'ETS', 28, 
+SELECT * FROM anofox_fcst_ts_forecast('sales', date, sales, 'ETS', 28, 
                           MAP{'seasonal_period': 7, 'trend_type': 2, 'season_type': 1});

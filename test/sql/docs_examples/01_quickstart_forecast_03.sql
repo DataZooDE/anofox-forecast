@@ -6,7 +6,7 @@ SELECT
 FROM generate_series(0, 89) t(d);  -- 90 days of data
 
 -- Forecast next 14 days
-SELECT * FROM TS_FORECAST(
+SELECT * FROM anofox_fcst_ts_forecast(
     'my_sales',      -- table name
     date,            -- date column
     sales,           -- value column

@@ -4,7 +4,7 @@
 
 This guide covers the forecasting workflow using the Anofox Forecast extension's SQL API. Topics include data preparation, model selection, forecast generation, and accuracy evaluation.
 
-**API Functions Covered**: `TS_FORECAST()`, `TS_FORECAST_BY()`, evaluation metrics, and data preparation macros.
+**API Functions Covered**: `anofox_fcst_ts_forecast()`, `anofox_fcst_ts_forecast_by()`, evaluation metrics, and data preparation macros.
 
 ## What is Time Series Forecasting?
 
@@ -40,13 +40,13 @@ CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
 -- Generate statistics
 CREATE TABLE sales_stats AS
-SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales_raw', product_id, date, sales_amount, '1d');
 
 -- View summary
-SELECT * FROM TS_STATS_SUMMARY('sales_stats');
+SELECT * FROM anofox_fcst_ts_stats_summary('sales_stats');
 
 -- Quality report
-SELECT * FROM TS_QUALITY_REPORT('sales_stats', 30);
+SELECT * FROM anofox_fcst_ts_quality_report('sales_stats', 30);
 ```
 
 #### Handle Common Issues
@@ -70,11 +70,11 @@ SELECT
     group_col AS product_id,
     date_col AS date,
     value_col AS sales_amount
-FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount, '1d');
+FROM anofox_fcst_ts_fill_gaps('sales_raw', product_id, date, sales_amount, '1d');
 
 -- Remove constant series
 CREATE TABLE sales_clean AS
-SELECT * FROM TS_DROP_CONSTANT('sales_filled', product_id, sales_amount);
+SELECT * FROM anofox_fcst_ts_drop_constant('sales_filled', product_id, sales_amount);
 
 -- Fill missing values
 CREATE TABLE sales_complete AS
@@ -82,7 +82,7 @@ SELECT
     product_id,
     date,
     value_col AS sales_amount
-FROM TS_FILL_NULLS_FORWARD('sales_clean', product_id, date, sales_amount);
+FROM anofox_fcst_ts_fill_nulls_forward('sales_clean', product_id, date, sales_amount);
 ```
 
 ### 2. Detect Seasonality
@@ -100,7 +100,7 @@ CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
 -- Automatically detect seasonal periods
 SELECT 
     product_id,
-    TS_DETECT_SEASONALITY(LIST(sales_amount ORDER BY date)) AS detected_periods
+    anofox_fcst_ts_detect_seasonality(LIST(sales_amount ORDER BY date)) AS detected_periods
 FROM sales_complete
 GROUP BY product_id;
 
@@ -122,7 +122,7 @@ SELECT
     100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales_amount
 FROM generate_series(0, 89) t(d);
 
-SELECT * FROM TS_FORECAST(
+SELECT * FROM anofox_fcst_ts_forecast(
     'sales_complete',
     date,
     sales_amount,
@@ -144,7 +144,7 @@ SELECT
 FROM generate_series(0, 89) t(d)
 CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
-SELECT * FROM TS_FORECAST_BY(
+SELECT * FROM anofox_fcst_ts_forecast_by(
     'sales_complete',
     product_id,     -- Parallel forecasting per product
     date,
@@ -192,9 +192,9 @@ forecasts AS (
 )
 SELECT 
     f.product_id,
-    ROUND(TS_MAE(LIST(a.actual_sales ORDER BY a.date), LIST(f.point_forecast ORDER BY f.date)), 2) AS mae,
-    ROUND(TS_RMSE(LIST(a.actual_sales ORDER BY a.date), LIST(f.point_forecast ORDER BY f.date)), 2) AS rmse,
-    ROUND(TS_MAPE(LIST(a.actual_sales ORDER BY a.date), LIST(f.point_forecast ORDER BY f.date)), 2) AS mape
+    ROUND(anofox_fcst_ts_mae(LIST(a.actual_sales ORDER BY a.date), LIST(f.point_forecast ORDER BY f.date)), 2) AS mae,
+    ROUND(anofox_fcst_ts_rmse(LIST(a.actual_sales ORDER BY a.date), LIST(f.point_forecast ORDER BY f.date)), 2) AS rmse,
+    ROUND(anofox_fcst_ts_mape(LIST(a.actual_sales ORDER BY a.date), LIST(f.point_forecast ORDER BY f.date)), 2) AS mape
 FROM forecasts f
 JOIN actuals a ON f.product_id = a.product_id AND f.date = a.date
 GROUP BY f.product_id;
@@ -222,7 +222,7 @@ SELECT 5, 106.0, 108.5, 99.0, 118.0;
 
 -- Check if 95% intervals actually cover 95% of actuals
 SELECT 
-    ROUND(TS_COVERAGE(LIST(actual ORDER BY forecast_step), LIST(lower ORDER BY forecast_step), LIST(upper ORDER BY forecast_step)) * 100, 1) AS coverage_pct
+    ROUND(anofox_fcst_ts_coverage(LIST(actual ORDER BY forecast_step), LIST(lower ORDER BY forecast_step), LIST(upper ORDER BY forecast_step)) * 100, 1) AS coverage_pct
 FROM results;
 
 -- Target: ~95% for well-calibrated 95% CI

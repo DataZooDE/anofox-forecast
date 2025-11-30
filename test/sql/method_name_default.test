@@ -18,7 +18,7 @@ FROM generate_series(1, 30) t(i);
 # Test 1: Naive model returns default name
 query I
 SELECT model_name = 'Naive'
-FROM ts_forecast(test_data, date_col, value, 'Naive', 5, NULL)
+FROM anofox_fcst_ts_forecast(test_data, date_col, value, 'Naive', 5, NULL)
 LIMIT 1;
 ----
 true
@@ -26,7 +26,7 @@ true
 # Test 2: SES model returns default name
 query I
 SELECT model_name = 'SimpleExponentialSmoothing'
-FROM ts_forecast(test_data, date_col, value, 'SES', 5, {'alpha': 0.3})
+FROM anofox_fcst_ts_forecast(test_data, date_col, value, 'SES', 5, {'alpha': 0.3})
 LIMIT 1;
 ----
 true
@@ -34,7 +34,7 @@ true
 # Test 3: Holt model returns 'AutoETS' (it wraps AutoETS internally)
 query I
 SELECT model_name = 'AutoETS'
-FROM ts_forecast(test_data, date_col, value, 'Holt', 5, {'alpha': 0.8, 'beta': 0.2})
+FROM anofox_fcst_ts_forecast(test_data, date_col, value, 'Holt', 5, {'alpha': 0.8, 'beta': 0.2})
 LIMIT 1;
 ----
 true
@@ -42,7 +42,7 @@ true
 # Test 4: AutoETS model returns default name
 query I
 SELECT model_name = 'AutoETS'
-FROM ts_forecast(test_data, date_col, value, 'AutoETS', 5, {'season_length': 7})
+FROM anofox_fcst_ts_forecast(test_data, date_col, value, 'AutoETS', 5, {'season_length': 7})
 LIMIT 1;
 ----
 true
@@ -50,7 +50,7 @@ true
 # Test 5: Theta model returns default name
 query I
 SELECT model_name = 'Theta'
-FROM ts_forecast(test_data, date_col, value, 'Theta', 5, {'seasonal_period': 7})
+FROM anofox_fcst_ts_forecast(test_data, date_col, value, 'Theta', 5, {'seasonal_period': 7})
 LIMIT 1;
 ----
 true
@@ -58,7 +58,7 @@ true
 # Test 6: SMA model returns default name
 query I
 SELECT model_name = 'SimpleMovingAverage'
-FROM ts_forecast(test_data, date_col, value, 'SMA', 5, {'window': 5})
+FROM anofox_fcst_ts_forecast(test_data, date_col, value, 'SMA', 5, {'window': 5})
 LIMIT 1;
 ----
 true
@@ -66,7 +66,7 @@ true
 # Test 7: SeasonalNaive model returns default name
 query I
 SELECT model_name = 'SeasonalNaive'
-FROM ts_forecast(test_data, date_col, value, 'SeasonalNaive', 5, {'seasonal_period': 7})
+FROM anofox_fcst_ts_forecast(test_data, date_col, value, 'SeasonalNaive', 5, {'seasonal_period': 7})
 LIMIT 1;
 ----
 true
@@ -74,7 +74,7 @@ true
 # Test 8: Empty MAP returns default names
 query I
 SELECT model_name = 'Naive'
-FROM ts_forecast(test_data, date_col, value, 'Naive', 5, MAP{})
+FROM anofox_fcst_ts_forecast(test_data, date_col, value, 'Naive', 5, MAP{})
 LIMIT 1;
 ----
 true

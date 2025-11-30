@@ -14,4 +14,4 @@ SELECT
     product_id,
     date,
     value_col AS sales_amount
-FROM TS_FILL_NULLS_CONST('sales', product_id, date, sales_amount, 0.0);
+FROM anofox_fcst_ts_fill_nulls_const('sales', product_id, date, sales_amount, 0.0);

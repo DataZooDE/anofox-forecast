@@ -12,7 +12,7 @@ SELECT
 FROM (
     SELECT 
         product_id,
-        ts_features(ts, value, ['mean', 'variance', 'length']) AS feats
+        anofox_fcst_ts_features(ts, value, ['mean', 'variance', 'length']) AS feats
     FROM multi_series
     GROUP BY product_id
 )

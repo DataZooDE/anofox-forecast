@@ -16,7 +16,7 @@ FROM generate_series(1, 100) t(i);
 query I
 SELECT len(result.point_forecast) = 5
 FROM (
-    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, NULL) AS result
+    SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'AutoARIMA', 5, NULL) AS result
     FROM test_linear_integer
 ) subq;
 ----
@@ -26,7 +26,7 @@ true
 query I
 SELECT result.point_forecast[1] > 0.0 AND result.point_forecast[1] < 1000.0
 FROM (
-    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, NULL) AS result
+    SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'AutoARIMA', 5, NULL) AS result
     FROM test_linear_integer
 ) subq;
 ----
@@ -43,7 +43,7 @@ FROM generate_series(1, 100) t(i);
 query I
 SELECT len(result.point_forecast) = 10
 FROM (
-    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 10, NULL) AS result
+    SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'AutoARIMA', 10, NULL) AS result
     FROM test_linear_date
 ) subq;
 ----
@@ -53,7 +53,7 @@ true
 query I
 SELECT result.point_forecast[1] > 0.0 AND len(result.point_forecast) = 10
 FROM (
-    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 10, NULL) AS result
+    SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'AutoARIMA', 10, NULL) AS result
     FROM test_linear_date
 ) subq;
 ----
@@ -70,7 +70,7 @@ FROM generate_series(1, 100) t(i);
 query I
 SELECT len(result.point_forecast) = 5
 FROM (
-    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, NULL) AS result
+    SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'AutoARIMA', 5, NULL) AS result
     FROM test_linear_timestamp
 ) subq;
 ----
@@ -87,7 +87,7 @@ FROM generate_series(1, 100) t(i);
 query I
 SELECT len(result.point_forecast) = 5
 FROM (
-    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, NULL) AS result
+    SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'AutoARIMA', 5, NULL) AS result
     FROM test_linear_negative
 ) subq;
 ----
@@ -97,7 +97,7 @@ true
 query I
 SELECT result.point_forecast[1] > 0.0 AND result.point_forecast[1] < 500.0
 FROM (
-    SELECT TS_FORECAST_AGG(date_col, value, 'AutoARIMA', 5, NULL) AS result
+    SELECT anofox_fcst_ts_forecast_agg(date_col, value, 'AutoARIMA', 5, NULL) AS result
     FROM test_linear_negative
 ) subq;
 ----

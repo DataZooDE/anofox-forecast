@@ -22,7 +22,7 @@ CREATE TABLE retail_prepared AS
 WITH 
 -- Step 1: Fill gaps (stores closed on some days)
 filled_temp AS (
-    SELECT * FROM TS_FILL_GAPS('retail_with_key', series_key, date, sales_qty, '1d')
+    SELECT * FROM anofox_fcst_ts_fill_gaps('retail_with_key', series_key, date, sales_qty, '1d')
 ),
 filled AS (
     SELECT 
@@ -42,11 +42,11 @@ parsed AS (
 ),
 -- Step 3: Drop products with < 90 days history
 sufficient_history AS (
-    SELECT * FROM TS_DROP_SHORT('parsed', sku, 90)
+    SELECT * FROM anofox_fcst_ts_drop_short('parsed', sku, 90)
 ),
 -- Step 4: Fill nulls (missed scans)
 filled_nulls_temp AS (
-    SELECT * FROM TS_FILL_NULLS_CONST('sufficient_history', sku, date, sales_qty, 0.0)
+    SELECT * FROM anofox_fcst_ts_fill_nulls_const('sufficient_history', sku, date, sales_qty, 0.0)
 ),
 filled_nulls AS (
     SELECT 
@@ -57,6 +57,6 @@ filled_nulls AS (
 ),
 -- Step 5: Remove products with no recent sales
 active_products AS (
-    SELECT * FROM TS_DROP_TRAILING_ZEROS('filled_nulls', sku, date, sales_qty)
+    SELECT * FROM anofox_fcst_ts_drop_trailing_zeros('filled_nulls', sku, date, sales_qty)
 )
 SELECT * FROM active_products;

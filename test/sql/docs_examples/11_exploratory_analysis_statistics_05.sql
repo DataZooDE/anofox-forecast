@@ -13,10 +13,10 @@ CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 -- Seasonality
 SELECT 
     product_id,
-    TS_DETECT_SEASONALITY(LIST(sales_amount ORDER BY date)) AS detected_periods
+    anofox_fcst_ts_detect_seasonality(LIST(sales_amount ORDER BY date)) AS detected_periods
 FROM sales_raw
 GROUP BY product_id;
 
 -- Changepoints (regime changes)
-SELECT * FROM TS_DETECT_CHANGEPOINTS_BY('sales_raw', product_id, date, sales_amount,
+SELECT * FROM anofox_fcst_ts_detect_changepoints_by('sales_raw', product_id, date, sales_amount,
                                          MAP{'include_probabilities': true});

@@ -9,7 +9,7 @@ CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
 
 -- Analyze your data before forecasting
 CREATE TABLE stats AS
-SELECT * FROM TS_STATS('my_sales', product_id, date, sales, '1d');
+SELECT * FROM anofox_fcst_ts_stats('my_sales', product_id, date, sales, '1d');
 
 -- Generate quality report
-SELECT * FROM TS_QUALITY_REPORT('stats', 30);
+SELECT * FROM anofox_fcst_ts_quality_report('stats', 30);

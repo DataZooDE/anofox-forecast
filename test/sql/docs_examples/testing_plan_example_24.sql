@@ -6,5 +6,5 @@ SELECT
 FROM generate_series(0, 2) t(d);
 
 -- This should handle all NULL values appropriately
-SELECT * FROM TS_FORECAST('null_data', date, value, 'Naive', 5, MAP{});
+SELECT * FROM anofox_fcst_ts_forecast('null_data', date, value, 'Naive', 5, MAP{});
 -- Expected: Appropriate error

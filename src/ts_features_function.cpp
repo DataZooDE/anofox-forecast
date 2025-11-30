@@ -1525,7 +1525,7 @@ AggregateFunction CreateTSFeaturesFunction(const LogicalType &timestamp_type) {
 	arguments.emplace_back(LogicalTypeId::DOUBLE);
 
 	AggregateFunction function(
-	    "ts_features", std::move(arguments), LogicalType::STRUCT({}), AggregateFunction::StateSize<STATE>,
+	    "anofox_fcst_ts_features", std::move(arguments), LogicalType::STRUCT({}), AggregateFunction::StateSize<STATE>,
 	    AggregateFunction::StateInitialize<STATE, OP, AggregateDestructorType::LEGACY>, TSFeaturesUpdate,
 	    AggregateFunction::StateCombine<STATE, OP>, AggregateFunction::StateVoidFinalize<STATE, OP>, nullptr,
 	    TSFeaturesBind, AggregateFunction::StateDestroy<STATE, OP>);
@@ -1628,7 +1628,7 @@ static void TSFeaturesListFunction(ClientContext &, TableFunctionInput &data, Da
 }
 
 static TableFunction CreateTSFeaturesListTableFunction() {
-	TableFunction function("ts_features_list", {}, TSFeaturesListFunction);
+	TableFunction function("anofox_fcst_ts_features_list", {}, TSFeaturesListFunction);
 	function.bind = TSFeaturesListBind;
 	function.init_global = TSFeaturesListInit;
 	return function;
@@ -1638,19 +1638,80 @@ void RegisterTSFeaturesFunction(ExtensionLoader &loader) {
 	std::vector<LogicalType> variants = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DATE),
 	                                     LogicalType(LogicalTypeId::BIGINT)};
 
+	// Helper to register aggregate with alias
+	auto register_agg_with_alias = [&loader](AggregateFunction function, const string &alias_name) {
+		AggregateFunctionSet main_set(function.name);
+		main_set.AddFunction(function);
+		CreateAggregateFunctionInfo main_info(std::move(main_set));
+		main_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+		loader.RegisterFunction(std::move(main_info));
+
+		AggregateFunction alias_func = function;
+		alias_func.name = alias_name;
+		AggregateFunctionSet alias_set(alias_name);
+		alias_set.AddFunction(std::move(alias_func));
+		CreateAggregateFunctionInfo alias_info(std::move(alias_set));
+		alias_info.alias_of = function.name;
+		alias_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+		loader.RegisterFunction(std::move(alias_info));
+	};
+
+	// Helper to register scalar with alias
+	auto register_scalar_with_alias = [&loader](ScalarFunction function, const string &alias_name) {
+		ScalarFunctionSet main_set(function.name);
+		main_set.AddFunction(function);
+		CreateScalarFunctionInfo main_info(std::move(main_set));
+		main_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+		loader.RegisterFunction(std::move(main_info));
+
+		ScalarFunction alias_func = function;
+		alias_func.name = alias_name;
+		ScalarFunctionSet alias_set(alias_name);
+		alias_set.AddFunction(std::move(alias_func));
+		CreateScalarFunctionInfo alias_info(std::move(alias_set));
+		alias_info.alias_of = function.name;
+		alias_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+		loader.RegisterFunction(std::move(alias_info));
+	};
+
+	// Helper to register table function with alias
+	auto register_table_with_alias = [&loader](TableFunction function, const string &alias_name) {
+		TableFunctionSet main_set(function.name);
+		main_set.AddFunction(function);
+		CreateTableFunctionInfo main_info(std::move(main_set));
+		main_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+		loader.RegisterFunction(std::move(main_info));
+
+		TableFunction alias_func = function;
+		alias_func.name = alias_name;
+		TableFunctionSet alias_set(alias_name);
+		alias_set.AddFunction(std::move(alias_func));
+		CreateTableFunctionInfo alias_info(std::move(alias_set));
+		alias_info.alias_of = function.name;
+		alias_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+		loader.RegisterFunction(std::move(alias_info));
+	};
+
+	// Register ts_features aggregate for each variant
 	for (auto &variant : variants) {
 		auto function = CreateTSFeaturesFunction(variant);
-		RegisterAggregateFunctionIgnore(loader, std::move(function));
+		register_agg_with_alias(std::move(function), "ts_features");
 	}
 
-	RegisterScalarFunctionIgnore(
-	    loader, CreateTSFeaturesConfigFunction("ts_features_config_from_json", TSFeaturesConfigSource::JSON));
-	RegisterScalarFunctionIgnore(
-	    loader, CreateTSFeaturesConfigFunction("ts_features_config_from_csv", TSFeaturesConfigSource::CSV));
+	// Register config functions
+	auto json_config =
+	    CreateTSFeaturesConfigFunction("anofox_fcst_ts_features_config_from_json", TSFeaturesConfigSource::JSON);
+	register_scalar_with_alias(std::move(json_config), "ts_features_config_from_json");
 
+	auto csv_config =
+	    CreateTSFeaturesConfigFunction("anofox_fcst_ts_features_config_from_csv", TSFeaturesConfigSource::CSV);
+	register_scalar_with_alias(std::move(csv_config), "ts_features_config_from_csv");
+
+	// Register list table function
 	auto list_function = CreateTSFeaturesListTableFunction();
-	RegisterTableFunctionIgnore(loader, std::move(list_function));
+	register_table_with_alias(std::move(list_function), "ts_features_list");
 
+	// Register template table function (no alias needed, internal)
 	auto template_function = CreateTSFeaturesConfigTemplateFunction();
 	RegisterTableFunctionIgnore(loader, std::move(template_function));
 }

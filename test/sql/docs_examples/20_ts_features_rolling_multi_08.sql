@@ -12,7 +12,7 @@ SELECT
     series_id,
     date,
     value,
-    (ts_features(date, value, ['mean', 'variance', 'linear_trend']) OVER (
+    (anofox_fcst_ts_features(date, value, ['mean', 'variance', 'linear_trend']) OVER (
         PARTITION BY series_id 
         ORDER BY date
         ROWS BETWEEN 10 PRECEDING AND CURRENT ROW

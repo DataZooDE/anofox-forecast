@@ -12,7 +12,7 @@ CROSS JOIN (VALUES ('P001'), ('P002')) products(product_id);
 
 -- Remove leading zeros
 CREATE TABLE sales_no_leading_zeros AS
-SELECT * FROM TS_DROP_LEADING_ZEROS('sales', product_id, date, sales_amount);
+SELECT * FROM anofox_fcst_ts_drop_leading_zeros('sales', product_id, date, sales_amount);
 
 -- Verify result (should start from day 10)
 SELECT 

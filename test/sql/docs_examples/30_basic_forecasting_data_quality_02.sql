@@ -16,11 +16,11 @@ SELECT
     group_col AS product_id,
     date_col AS date,
     value_col AS sales_amount
-FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount, '1d');
+FROM anofox_fcst_ts_fill_gaps('sales_raw', product_id, date, sales_amount, '1d');
 
 -- Remove constant series
 CREATE TABLE sales_clean AS
-SELECT * FROM TS_DROP_CONSTANT('sales_filled', product_id, sales_amount);
+SELECT * FROM anofox_fcst_ts_drop_constant('sales_filled', product_id, sales_amount);
 
 -- Fill missing values
 CREATE TABLE sales_complete AS
@@ -28,4 +28,4 @@ SELECT
     product_id,
     date,
     value_col AS sales_amount
-FROM TS_FILL_NULLS_FORWARD('sales_clean', product_id, date, sales_amount);
+FROM anofox_fcst_ts_fill_nulls_forward('sales_clean', product_id, date, sales_amount);

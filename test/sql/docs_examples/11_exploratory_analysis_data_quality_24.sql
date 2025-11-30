@@ -8,7 +8,7 @@ FROM generate_series(0, 89) t(d)
 CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
 
 CREATE TABLE stats AS
-SELECT * FROM TS_STATS('sales', product_id, date, sales_amount, '1d');
+SELECT * FROM anofox_fcst_ts_stats('sales', product_id, date, sales_amount, '1d');
 
 -- Create sample raw sales data
 CREATE TABLE sales_raw AS
@@ -25,7 +25,7 @@ CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 -- Create a reusable preparation view
 CREATE VIEW sales_autoprepared AS
 WITH stats AS (
-    SELECT * FROM TS_STATS('sales_raw', product_id, date, sales_amount, '1d')
+    SELECT * FROM anofox_fcst_ts_stats('sales_raw', product_id, date, sales_amount, '1d')
 ),
 quality_series AS (
     SELECT series_id FROM stats WHERE length >= 30  -- Keep series with at least 30 observations
@@ -35,7 +35,7 @@ filled_temp AS (
         group_col,
         date_col,
         value_col
-    FROM TS_FILL_GAPS('sales_raw', product_id, date, sales_amount, '1d')
+    FROM anofox_fcst_ts_fill_gaps('sales_raw', product_id, date, sales_amount, '1d')
 ),
 filled_temp2 AS (
     SELECT f.*
@@ -47,7 +47,7 @@ no_constant_temp AS (
         group_col,
         date_col,
         value_col
-    FROM TS_DROP_CONSTANT('filled_temp2', group_col, value_col)
+    FROM anofox_fcst_ts_drop_constant('filled_temp2', group_col, value_col)
 ),
 no_constant AS (
     SELECT 
@@ -57,7 +57,7 @@ no_constant AS (
     FROM no_constant_temp
 ),
 complete_temp AS (
-    SELECT * FROM TS_FILL_NULLS_FORWARD('no_constant', product_id, date, sales_amount)
+    SELECT * FROM anofox_fcst_ts_fill_nulls_forward('no_constant', product_id, date, sales_amount)
 ),
 complete AS (
     SELECT 
@@ -69,5 +69,5 @@ complete AS (
 SELECT * FROM complete;
 
 -- Use in forecasting
-SELECT * FROM TS_FORECAST_BY('sales_autoprepared', product_id, date, sales_amount,
+SELECT * FROM anofox_fcst_ts_forecast_by('sales_autoprepared', product_id, date, sales_amount,
                              'AutoETS', 28, MAP{'seasonal_period': 7});

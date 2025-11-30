@@ -10,7 +10,7 @@ FROM generate_series(1, 10000) t(i);
 SELECT 
     series_id,
     *
-FROM TS_FORECAST_BY(
+FROM anofox_fcst_ts_forecast_by(
     'large_multi_series',
     series_id,
     date,

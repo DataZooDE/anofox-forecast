@@ -14,17 +14,17 @@ FROM generate_series(61, 72) t(d);
 
 -- Quantify improvement over naive forecast
 WITH model_fc AS (
-    SELECT LIST(point_forecast ORDER BY forecast_step) AS pred FROM TS_FORECAST('train', date, value, 'AutoETS', 12, MAP{})
+    SELECT LIST(point_forecast ORDER BY forecast_step) AS pred FROM anofox_fcst_ts_forecast('train', date, value, 'AutoETS', 12, MAP{})
 ),
 naive_fc AS (
-    SELECT LIST(point_forecast ORDER BY forecast_step) AS baseline FROM TS_FORECAST('train', date, value, 'Naive', 12, MAP{})
+    SELECT LIST(point_forecast ORDER BY forecast_step) AS baseline FROM anofox_fcst_ts_forecast('train', date, value, 'Naive', 12, MAP{})
 ),
 actuals AS (
     SELECT LIST(value ORDER BY date) AS actual FROM test
 )
 SELECT 
-    TS_MASE(actual, pred, baseline) AS mase,
-    ROUND((1.0 - TS_MASE(actual, pred, baseline)) * 100, 1) AS improvement_percent
+    anofox_fcst_ts_mase(actual, pred, baseline) AS mase,
+    ROUND((1.0 - anofox_fcst_ts_mase(actual, pred, baseline)) * 100, 1) AS improvement_percent
 FROM actuals, model_fc, naive_fc;
 
 -- Example: MASE=0.35 → 65% improvement over naive

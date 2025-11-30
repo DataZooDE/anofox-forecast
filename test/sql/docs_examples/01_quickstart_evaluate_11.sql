@@ -8,12 +8,12 @@ FROM generate_series(0, 89) t(d)
 CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
 
 -- 1. Check data quality
-SELECT * FROM TS_STATS('my_sales', product_id, date, sales, '1d');
+SELECT * FROM anofox_fcst_ts_stats('my_sales', product_id, date, sales, '1d');
 
 -- 2. Detect seasonality
 SELECT 
     product_id,
-    TS_DETECT_SEASONALITY(LIST(sales ORDER BY date)) AS detected_periods
+    anofox_fcst_ts_detect_seasonality(LIST(sales ORDER BY date)) AS detected_periods
 FROM my_sales
 GROUP BY product_id;
 

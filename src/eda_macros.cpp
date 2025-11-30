@@ -11,7 +11,7 @@ static const DefaultTableMacro eda_macros[] = {
 
     // TS_STATS: Per-series comprehensive statistics (VARCHAR frequency - date-based)
     {DEFAULT_SCHEMA,
-     "ts_stats",
+     "anofox_fcst_ts_stats",
      {"table_name", "group_col", "date_col", "value_col", "frequency", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -34,7 +34,7 @@ static const DefaultTableMacro eda_macros[] = {
             features_agg AS (
                 SELECT 
                     group_col AS series_id,
-                    ts_features(date_col, value_col, [
+                    anofox_fcst_ts_features(date_col, value_col, [
                         'mean', 'standard_deviation', 'minimum', 'maximum', 'median',
                         'n_zeros', 'n_unique_values', 'is_constant',
                         'plateau_size', 'plateau_size_non_zero', 'n_zeros_start', 'n_zeros_end'
@@ -116,7 +116,7 @@ static const DefaultTableMacro eda_macros[] = {
 
     // TS_STATS: Per-series comprehensive statistics (INTEGER frequency - integer-based)
     {DEFAULT_SCHEMA,
-     "ts_stats",
+     "anofox_fcst_ts_stats",
      {"table_name", "group_col", "date_col", "value_col", "frequency", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -128,7 +128,7 @@ static const DefaultTableMacro eda_macros[] = {
             features_agg AS (
                 SELECT 
                     group_col AS series_id,
-                    ts_features(date_col, value_col, [
+                    anofox_fcst_ts_features(date_col, value_col, [
                         'mean', 'standard_deviation', 'minimum', 'maximum', 'median',
                         'n_zeros', 'n_unique_values', 'is_constant',
                         'plateau_size', 'plateau_size_non_zero', 'n_zeros_start', 'n_zeros_end'
@@ -210,7 +210,7 @@ static const DefaultTableMacro eda_macros[] = {
 
     // TS_STATS_SUMMARY: Aggregate statistics from TS_STATS output
     {DEFAULT_SCHEMA,
-     "ts_stats_summary",
+     "anofox_fcst_ts_stats_summary",
      {"stats_table", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -240,7 +240,7 @@ static const DefaultTableMacro eda_macros[] = {
 
     // TS_QUALITY_REPORT: Quality assessment report from TS_STATS output
     {DEFAULT_SCHEMA,
-     "ts_quality_report",
+     "anofox_fcst_ts_quality_report",
      {"stats_table", "min_length", nullptr},
      {{nullptr, nullptr}},
      R"(
@@ -370,10 +370,21 @@ void RegisterEDAMacros(ExtensionLoader &loader) {
 			auto table_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(eda_macros[index]);
 			table_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
 			loader.RegisterFunction(*table_info);
+
+			// Register alias
+			if (table_info->name.find("anofox_fcst_") == 0) {
+				string alias_name = table_info->name.substr(12); // Remove "anofox_fcst_" prefix
+				DefaultTableMacro alias_macro = eda_macros[index];
+				alias_macro.name = alias_name.c_str();
+				auto alias_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(alias_macro);
+				alias_info->alias_of = table_info->name;
+				alias_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+				loader.RegisterFunction(*alias_info);
+			}
 		} else {
 			// Multiple macros with same name - create overloaded macro with typed parameters
 			// For ts_stats, we have VARCHAR and INTEGER overloads
-			if (group.second.size() == 2 && group.first == "ts_stats") {
+			if (group.second.size() == 2 && group.first == "anofox_fcst_ts_stats") {
 				// Create a single CreateMacroInfo with both overloads
 				auto first_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(eda_macros[group.second[0]]);
 				auto second_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(eda_macros[group.second[1]]);
@@ -400,6 +411,22 @@ void RegisterEDAMacros(ExtensionLoader &loader) {
 				// Register the combined macro
 				first_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
 				loader.RegisterFunction(*first_info);
+
+				// Register alias
+				if (first_info->name.find("anofox_fcst_") == 0) {
+					string alias_name = first_info->name.substr(12); // Remove "anofox_fcst_" prefix
+					auto alias_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(eda_macros[group.second[0]]);
+					alias_info->name = alias_name;
+					// Copy the overloads
+					for (size_t i = 1; i < first_info->macros.size(); i++) {
+						auto alias_macro =
+						    DefaultTableFunctionGenerator::CreateTableMacroInfo(eda_macros[group.second[i]]);
+						alias_info->macros.push_back(std::move(alias_macro->macros[0]));
+					}
+					alias_info->alias_of = first_info->name;
+					alias_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+					loader.RegisterFunction(*alias_info);
+				}
 			} else {
 				// For other cases, register normally
 				for (idx_t i = 0; i < group.second.size(); i++) {
@@ -407,6 +434,17 @@ void RegisterEDAMacros(ExtensionLoader &loader) {
 					auto table_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(eda_macros[index]);
 					table_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
 					loader.RegisterFunction(*table_info);
+
+					// Register alias
+					if (table_info->name.find("anofox_fcst_") == 0) {
+						string alias_name = table_info->name.substr(12); // Remove "anofox_fcst_" prefix
+						DefaultTableMacro alias_macro = eda_macros[index];
+						alias_macro.name = alias_name.c_str();
+						auto alias_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(alias_macro);
+						alias_info->alias_of = table_info->name;
+						alias_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+						loader.RegisterFunction(*alias_info);
+					}
 				}
 			}
 		}

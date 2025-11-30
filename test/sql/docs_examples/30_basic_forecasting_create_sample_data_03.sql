@@ -10,7 +10,7 @@ CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
 -- Automatically detect seasonal periods
 SELECT 
     product_id,
-    TS_DETECT_SEASONALITY(LIST(sales_amount ORDER BY date)) AS detected_periods
+    anofox_fcst_ts_detect_seasonality(LIST(sales_amount ORDER BY date)) AS detected_periods
 FROM sales_complete
 GROUP BY product_id;
 

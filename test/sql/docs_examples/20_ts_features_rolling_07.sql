@@ -10,7 +10,7 @@ SELECT
     series_id,
     ts,
     value,
-    (ts_features(ts, value, ['mean', 'length']) OVER (
+    (anofox_fcst_ts_features(ts, value, ['mean', 'length']) OVER (
         PARTITION BY series_id 
         ORDER BY ts
         ROWS BETWEEN 2 PRECEDING AND CURRENT ROW

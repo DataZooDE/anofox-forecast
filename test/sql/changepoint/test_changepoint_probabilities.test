@@ -24,21 +24,21 @@ FROM generate_series(0, 99) t(d);
 # Test 1: Schema always has 4 columns (consistent schema)
 query I
 SELECT COUNT(*) = 4
-FROM (DESCRIBE SELECT * FROM TS_DETECT_CHANGEPOINTS('cp_test', ds, y, MAP{}));
+FROM (DESCRIBE SELECT * FROM anofox_fcst_ts_detect_changepoints('cp_test', ds, y, MAP{}));
 ----
 true
 
 # Test 2: With probabilities also has 4 columns
 query I
 SELECT COUNT(*) = 4
-FROM (DESCRIBE SELECT * FROM TS_DETECT_CHANGEPOINTS('cp_test', ds, y, {'include_probabilities': true}));
+FROM (DESCRIBE SELECT * FROM anofox_fcst_ts_detect_changepoints('cp_test', ds, y, {'include_probabilities': true}));
 ----
 true
 
 # Test 3: Verify probability column always exists
 query I
 SELECT COUNT(*) = 1
-FROM (DESCRIBE SELECT * FROM TS_DETECT_CHANGEPOINTS('cp_test', ds, y, MAP{}))
+FROM (DESCRIBE SELECT * FROM anofox_fcst_ts_detect_changepoints('cp_test', ds, y, MAP{}))
 WHERE column_name = 'changepoint_probability';
 ----
 true
@@ -48,7 +48,7 @@ query I
 SELECT 
     MIN(changepoint_probability) = 0.0 AND 
     MAX(changepoint_probability) = 0.0
-FROM TS_DETECT_CHANGEPOINTS('cp_test', ds, y, MAP{});
+FROM anofox_fcst_ts_detect_changepoints('cp_test', ds, y, MAP{});
 ----
 true
 
@@ -57,7 +57,7 @@ query I
 SELECT 
     MIN(changepoint_probability) >= 0 AND 
     MAX(changepoint_probability) <= 1
-FROM TS_DETECT_CHANGEPOINTS('cp_test', ds, y, {'include_probabilities': true});
+FROM anofox_fcst_ts_detect_changepoints('cp_test', ds, y, {'include_probabilities': true});
 ----
 true
 
@@ -66,7 +66,7 @@ true
 # through the table function macro. This needs further investigation.
 query I
 SELECT MAX(changepoint_probability) >= 0.0
-FROM TS_DETECT_CHANGEPOINTS('cp_test', ds, y, {'include_probabilities': true});
+FROM anofox_fcst_ts_detect_changepoints('cp_test', ds, y, {'include_probabilities': true});
 ----
 true
 
@@ -78,7 +78,7 @@ FROM (
         date_col AS ds,
         is_changepoint,
         changepoint_probability
-    FROM TS_DETECT_CHANGEPOINTS('cp_test', ds, y, {'include_probabilities': true})
+    FROM anofox_fcst_ts_detect_changepoints('cp_test', ds, y, {'include_probabilities': true})
     ORDER BY changepoint_probability DESC
     LIMIT 10
 );
@@ -103,7 +103,7 @@ FROM generate_series(0, 89) t(d);
 # Test 9: Multiple series detect changepoints with probabilities
 query I
 SELECT COUNT(*) > 0
-FROM TS_DETECT_CHANGEPOINTS_BY('multi_test', id, ds, y, {'include_probabilities': true})
+FROM anofox_fcst_ts_detect_changepoints_by('multi_test', id, ds, y, {'include_probabilities': true})
 WHERE is_changepoint = true;
 ----
 true
@@ -111,7 +111,7 @@ true
 # Test 10: Each series should have data
 query I
 SELECT COUNT(DISTINCT id) = 3
-FROM TS_DETECT_CHANGEPOINTS_BY('multi_test', id, ds, y, {'include_probabilities': true});
+FROM anofox_fcst_ts_detect_changepoints_by('multi_test', id, ds, y, {'include_probabilities': true});
 ----
 true
 
@@ -120,14 +120,14 @@ query I
 SELECT 
     MIN(changepoint_probability) >= 0 AND 
     MAX(changepoint_probability) <= 1
-FROM TS_DETECT_CHANGEPOINTS_BY('multi_test', id, ds, y, {'include_probabilities': true});
+FROM anofox_fcst_ts_detect_changepoints_by('multi_test', id, ds, y, {'include_probabilities': true});
 ----
 true
 
 # Test 12: Multi-series always has expected column count (5 columns: id, date, value, is_changepoint, probability)
 query I
 SELECT COUNT(*) = 5
-FROM (DESCRIBE SELECT * FROM TS_DETECT_CHANGEPOINTS_BY('multi_test', id, ds, y, MAP{}));
+FROM (DESCRIBE SELECT * FROM anofox_fcst_ts_detect_changepoints_by('multi_test', id, ds, y, MAP{}));
 ----
 true
 
@@ -136,7 +136,7 @@ query I
 SELECT 
     MIN(changepoint_probability) = 0.0 AND 
     MAX(changepoint_probability) = 0.0
-FROM TS_DETECT_CHANGEPOINTS_BY('multi_test', id, ds, y, MAP{});
+FROM anofox_fcst_ts_detect_changepoints_by('multi_test', id, ds, y, MAP{});
 ----
 true
 

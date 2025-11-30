@@ -13,7 +13,7 @@ SELECT
     point_forecast,
     lower_90,
     upper_90
-FROM TS_FORECAST('my_sales', date, sales, 'AutoETS', 14, MAP{'seasonal_period': 7})
+FROM anofox_fcst_ts_forecast('my_sales', date, sales, 'AutoETS', 14, MAP{'seasonal_period': 7})
 LIMIT 5;
 
 -- Model 2: SES (Simple Exponential Smoothing)
@@ -23,7 +23,7 @@ SELECT
     point_forecast,
     lower_90,
     upper_90
-FROM TS_FORECAST('my_sales', date, sales, 'SES', 14, MAP{})
+FROM anofox_fcst_ts_forecast('my_sales', date, sales, 'SES', 14, MAP{})
 LIMIT 5;
 
 -- Model 3: Theta (theta decomposition method)
@@ -33,6 +33,6 @@ SELECT
     point_forecast,
     lower_90,
     upper_90
-FROM TS_FORECAST('my_sales', date, sales, 'Theta', 14, MAP{'seasonal_period': 7})
+FROM anofox_fcst_ts_forecast('my_sales', date, sales, 'Theta', 14, MAP{'seasonal_period': 7})
 LIMIT 5;
 

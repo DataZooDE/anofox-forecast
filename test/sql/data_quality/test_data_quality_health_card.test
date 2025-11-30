@@ -36,10 +36,10 @@ SELECT
     END AS value_col
 FROM generate_series(1, 20) t(i);
 
-# Test: TS_DATA_QUALITY - Basic functionality
+# Test: anofox_fcst_ts_data_quality - Basic functionality
 statement ok
 CREATE TABLE health_card_result AS
-SELECT * FROM ts_data_quality(dq_test_data, series_id, date_col, value_col, 30, '1d');
+SELECT * FROM anofox_fcst_ts_data_quality(dq_test_data, series_id, date_col, value_col, 30, '1d');
 
 # Verify health card returns results
 query I
@@ -137,7 +137,7 @@ true
 # Test: n_short parameter functionality
 statement ok
 CREATE TABLE health_card_custom AS
-SELECT * FROM ts_data_quality(dq_test_data, series_id, date_col, value_col, 15, '1d');
+SELECT * FROM anofox_fcst_ts_data_quality(dq_test_data, series_id, date_col, value_col, 15, '1d');
 
 # Verify custom n_short parameter works
 query I
@@ -146,10 +146,10 @@ FROM health_card_custom;
 ----
 true
 
-# Test: TS_DATA_QUALITY_SUMMARY
+# Test: anofox_fcst_ts_data_quality_summary
 statement ok
 CREATE TABLE summary_result AS
-SELECT * FROM ts_data_quality_summary(dq_test_data, series_id, date_col, value_col, 30);
+SELECT * FROM anofox_fcst_ts_data_quality_summary(dq_test_data, series_id, date_col, value_col, 30);
 
 # Verify summary returns results
 query I
@@ -186,7 +186,7 @@ SELECT
 # Verify duplicate detection (value = duplicate count)
 query I
 SELECT COUNT(*) > 0
-FROM ts_data_quality(duplicate_test, series_id, date_col, value_col, 30, '1d')
+FROM anofox_fcst_ts_data_quality(duplicate_test, series_id, date_col, value_col, 30, '1d')
 WHERE metric = 'key_uniqueness' 
   AND value > 0;
 ----

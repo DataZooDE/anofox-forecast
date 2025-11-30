@@ -12,4 +12,4 @@ FROM generate_series(0, 364) t(d)
 CROSS JOIN (VALUES ('P001'), ('P002'), ('P003')) products(product_id);
 
 -- Get summary by dimension (n_short parameter defaults to 30 if NULL)
-SELECT * FROM TS_DATA_QUALITY_SUMMARY('sales_raw', product_id, date, sales_amount, 30);
+SELECT * FROM anofox_fcst_ts_data_quality_summary('sales_raw', product_id, date, sales_amount, 30);

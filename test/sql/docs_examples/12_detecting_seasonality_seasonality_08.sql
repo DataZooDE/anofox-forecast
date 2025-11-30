@@ -15,6 +15,6 @@ WITH windows AS (
 )
 SELECT 
     quarter,
-    TS_DETECT_SEASONALITY(values) AS detected_periods
+    anofox_fcst_ts_detect_seasonality(values) AS detected_periods
 FROM windows
 ORDER BY quarter;
