@@ -21,7 +21,7 @@ A time series forecasting extension for DuckDB with 31 models, data preparation,
 - **Intermittent Demand**: Croston, ADIDA, IMAPA, TSB
 
 ### 📊 Complete Workflow
-- **EDA**: 5 macros for data quality analysis
+- **EDA & Data Quality**: 5 functions (2 table functions, 3 macros) for exploratory analysis and data quality assessment
 - **Data Preparation**: 12 macros for cleaning and transformation
 - **Evaluation**: 12 metrics including coverage analysis
 - **Seasonality Detection**: Automatic period identification
