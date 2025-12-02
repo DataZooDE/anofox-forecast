@@ -698,6 +698,40 @@ anofox_fcst_ts_fill_nulls_mean(
 
 ---
 
+### Transformation Operations
+
+#### anofox_fcst_ts_diff (alias: `ts_diff`)
+
+**Compute Differences**
+
+**Signature:**
+```sql
+anofox_fcst_ts_diff(
+    table_name    VARCHAR,
+    group_col     ANY,
+    date_col      DATE | TIMESTAMP | INTEGER,
+    value_col     DOUBLE,
+    order         INTEGER
+) → TABLE
+```
+
+**Parameters:**
+- `table_name`: Table name (VARCHAR). Can be provided as a quoted string literal (e.g., `'table_name'`) or as an unquoted table identifier (e.g., `table_name`). Both forms are accepted and work identically.
+- `order`: Difference order (must be > 0). Computes `value[t] - value[t-order]`.
+
+**Behavior:** Computes differences of the specified order for each series. For `order=1`, computes first differences (value[t] - value[t-1]). For `order=2`, computes second differences, and so on.
+
+**Example:**
+```sql
+-- Compute first differences (order=1)
+SELECT * FROM anofox_fcst_ts_diff('sales_data', product_id, date, amount, 1);
+
+-- Compute second differences (order=2)
+SELECT * FROM anofox_fcst_ts_diff('sales_data', product_id, date, amount, 2);
+```
+
+---
+
 ## Seasonality
 
 ### Simple Seasonality Detection
@@ -1009,7 +1043,7 @@ Generate forecasts for a single time series with automatic parameter validation.
 anofox_fcst_ts_forecast(
     table_name    VARCHAR,
     date_col      DATE | TIMESTAMP | INTEGER,
-    value_col     DOUBLE,
+    target_col    DOUBLE,
     method        VARCHAR,
     horizon       INTEGER,
     params        MAP
@@ -1019,7 +1053,7 @@ anofox_fcst_ts_forecast(
 **Parameters:**
 - `table_name`: Name of the input table
 - `date_col`: Date/timestamp column name
-- `value_col`: Value column name to forecast
+- `target_col`: Value column name to forecast
 - `method`: Model name (see [Supported Models](#supported-models))
 - `horizon`: Number of future periods to forecast (must be > 0)
 - `params`: Configuration MAP with model-specific parameters
@@ -1030,13 +1064,14 @@ TABLE(
     forecast_step      INTEGER,
     date               DATE | TIMESTAMP | INTEGER,  -- Type matches input
     point_forecast     DOUBLE,
-    lower              DOUBLE,  -- Lower bound (confidence_level)
-    upper              DOUBLE,  -- Upper bound (confidence_level)
+    lower              DOUBLE,  -- Lower bound (dynamic name based on confidence_level, e.g., lower_90)
+    upper              DOUBLE,  -- Upper bound (dynamic name based on confidence_level, e.g., upper_90)
     model_name         VARCHAR,
-    insample_fitted    DOUBLE[],  -- Empty unless return_insample=true
-    confidence_level   DOUBLE
+    insample_fitted    DOUBLE[]  -- Empty unless return_insample=true
 )
 ```
+
+**Note:** The `lower` and `upper` bound columns have dynamic names based on the `confidence_level` parameter. For example, with `confidence_level: 0.90`, the columns are named `lower_90` and `upper_90`. With `confidence_level: 0.95`, they are `lower_95` and `upper_95`.
 
 **Example:**
 ```sql
@@ -1048,6 +1083,7 @@ SELECT * FROM anofox_fcst_ts_forecast(
     28,
     MAP{'seasonal_period': 7, 'confidence_level': 0.95}
 );
+-- Note: The 'lower' and 'upper' columns will be named 'lower_95' and 'upper_95' based on confidence_level
 ```
 
 **Behavioral Notes:**
@@ -1072,7 +1108,7 @@ anofox_fcst_ts_forecast_by(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
-    value_col     DOUBLE,
+    target_col    DOUBLE,
     method        VARCHAR,
     horizon       INTEGER,
     params        MAP
@@ -1083,7 +1119,7 @@ anofox_fcst_ts_forecast_by(
 - `table_name`: Name of the input table
 - `group_col`: Grouping column name (any type, preserved in output)
 - `date_col`: Date/timestamp column name
-- `value_col`: Value column name to forecast
+- `target_col`: Value column name to forecast
 - `method`: Model name
 - `horizon`: Number of future periods to forecast
 - `params`: Configuration MAP
@@ -1095,13 +1131,14 @@ TABLE(
     forecast_step      INTEGER,
     date               DATE | TIMESTAMP | INTEGER,
     point_forecast     DOUBLE,
-    lower              DOUBLE,
-    upper              DOUBLE,
+    lower              DOUBLE,  -- Dynamic name based on confidence_level (e.g., lower_90)
+    upper              DOUBLE,  -- Dynamic name based on confidence_level (e.g., upper_90)
     model_name         VARCHAR,
-    insample_fitted    DOUBLE[],
-    confidence_level   DOUBLE
+    insample_fitted    DOUBLE[]
 )
 ```
+
+**Note:** The `lower` and `upper` bound columns have dynamic names based on the `confidence_level` parameter. For example, with `confidence_level: 0.90`, the columns are named `lower_90` and `upper_90`.
 
 **Example:**
 ```sql
@@ -1152,17 +1189,22 @@ anofox_fcst_ts_forecast_agg(
 **Returns:**
 ```sql
 STRUCT(
-    forecast_step          INTEGER[],
+    forecast_step          INTEGER[],  -- Optional, controlled by include_forecast_step parameter
     forecast_timestamp     TIMESTAMP[],
     point_forecast         DOUBLE[],
-    lower                  DOUBLE[],  -- Dynamic name based on confidence_level
-    upper                  DOUBLE[],  -- Dynamic name based on confidence_level
+    lower_<suffix>         DOUBLE[],  -- Dynamic name based on confidence_level (e.g., lower_90, lower_95)
+    upper_<suffix>         DOUBLE[],  -- Dynamic name based on confidence_level (e.g., upper_90, upper_95)
     model_name             VARCHAR,
     insample_fitted        DOUBLE[],
-    confidence_level       DOUBLE,
-    date_col_name          VARCHAR
+    date_col_name          VARCHAR,
+    error_message          VARCHAR    -- Optional, present when include_error_message=true and errors occur
 )
 ```
+
+**Note:** 
+- The `lower` and `upper` bound columns have dynamic names based on the `confidence_level` parameter. For example, with `confidence_level: 0.90`, the columns are named `lower_90` and `upper_90`. With `confidence_level: 0.95`, they are `lower_95` and `upper_95`.
+- The `forecast_step` field is optional and only included when `include_forecast_step: true` (default: true).
+- The `error_message` field is optional and only included when `include_error_message: true` (default: true) and an error occurs during forecasting.
 
 **Example:**
 ```sql
@@ -1182,6 +1224,12 @@ SELECT
     UNNEST(result.lower) AS lower_bound
 FROM fc;
 ```
+
+**Parameters (in `params` MAP):**
+- `include_forecast_step` (BOOLEAN, default: true): Include `forecast_step` array in return struct
+- `date_col_name` (VARCHAR, default: "date"): Name of the date column (used in return struct)
+- `safe_mode` (BOOLEAN, default: true): Enable safe error handling mode
+- `include_error_message` (BOOLEAN, default: true): Include `error_message` field in return struct on errors
 
 **Use Case:** When you need multiple grouping columns or custom aggregation patterns beyond single `group_col`.
 
@@ -1634,11 +1682,11 @@ These parameters work with **all forecasting models**:
 | Evaluation Metrics | 12 | Scalar functions |
 | EDA Macros | 5 | Table macros |
 | Data Quality | 2 | Table macros |
-| Data Preparation | 9 | Table macros |
+| Data Preparation | 10 | Table macros |
 | Seasonality | 2 | Scalar functions |
 | Changepoint Detection | 3 | Table macros (2), Aggregate (1) |
 | Time Series Features | 4 | Aggregate (1), Table function (1), Scalar (2) |
-| **Total** | **40** | |
+| **Total** | **41** | |
 
 ### Function Type Breakdown
 
