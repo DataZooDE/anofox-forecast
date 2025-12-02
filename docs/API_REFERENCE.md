@@ -114,7 +114,7 @@ Functions follow consistent naming patterns:
 
 ## Exploratory Data Analysis
 
-SQL macros for exploratory data analysis and quality assessment.
+Table functions and SQL macros for exploratory data analysis and quality assessment.
 
 ### Per-Series Statistics
 
@@ -122,30 +122,24 @@ SQL macros for exploratory data analysis and quality assessment.
 
 Computes per-series statistical metrics including length, date ranges, central tendencies (mean, median), dispersion (std), value distributions (min, max, zeros), and quality indicators (nulls, uniqueness, constancy). Returns 24 metrics per series for exploratory analysis and data profiling.
 
-**Signature (Function Overloading):**
+**Signature:**
 ```sql
--- For DATE/TIMESTAMP columns (date-based frequency)
 anofox_fcst_ts_stats(
-    table_name    VARCHAR,
-    group_col     ANY,
-    date_col      DATE | TIMESTAMP,
-    value_col     DOUBLE,
-    frequency     VARCHAR
-) → TABLE
-
--- For INTEGER columns (integer-based frequency)
-anofox_fcst_ts_stats(
-    table_name    VARCHAR,
-    group_col     ANY,
-    date_col      INTEGER | BIGINT,
-    value_col     DOUBLE,
-    frequency     INTEGER
+    table_name    VARCHAR | TABLE_IDENTIFIER,
+    group_col     VARCHAR | COLUMN_REFERENCE,
+    date_col      VARCHAR | COLUMN_REFERENCE,
+    value_col     VARCHAR | COLUMN_REFERENCE,
+    frequency     VARCHAR | INTEGER
 ) → TABLE
 ```
 
 **Parameters:**
+- `table_name`: Table name as string literal (e.g., `'sales'`) or table identifier (e.g., `sales`)
+- `group_col`: Grouping column name as string literal (e.g., `'series_id'`) or column reference (e.g., `series_id`). **Note:** Integer literals (e.g., `1`) are not supported; use column names or references.
+- `date_col`: Date/timestamp column name as string literal or column reference. Supports DATE, TIMESTAMP, INTEGER, or BIGINT columns.
+- `value_col`: Value column name as string literal or column reference
 - `frequency`: 
-  - **For DATE/TIMESTAMP columns**: Optional frequency string (Polars-style). Defaults to `"1d"` if NULL or not provided.
+  - **String frequency** (Polars-style) for DATE/TIMESTAMP columns:
     - `"30m"` or `"30min"` - 30 minutes
     - `"1h"` - 1 hour
     - `"1d"` - 1 day (default)
@@ -153,14 +147,13 @@ anofox_fcst_ts_stats(
     - `"1mo"` - 1 month
     - `"1q"` - 1 quarter (3 months)
     - `"1y"` - 1 year
-  - **For INTEGER columns**: Optional integer step size. Defaults to `1` if NULL or not provided.
+  - **Integer frequency** for INTEGER/BIGINT date columns:
     - `1`, `2`, `3`, etc. - Integer step size for `GENERATE_SERIES`
 
-**Type Validation:**
-- DuckDB automatically selects the correct overload based on the `frequency` parameter type:
-  - VARCHAR frequency → DATE/TIMESTAMP date column required
-  - INTEGER frequency → INTEGER/BIGINT date column required
-- If there's a type mismatch (e.g., INTEGER date column with VARCHAR frequency), a `Binder Error` will be raised at query time.
+**Type Handling:**
+- The function uses a macro wrapper that normalizes inputs using `format()`, allowing flexible parameter types
+- DATE columns are automatically cast to TIMESTAMP internally for feature extraction
+- The function handles both string frequency values (e.g., `'1d'`) and integer frequency values (e.g., `1`) based on the date column type
 
 **Returns:**
 ```sql
@@ -169,7 +162,7 @@ TABLE(
     length               BIGINT,
     start_date           DATE | TIMESTAMP | INTEGER,
     end_date             DATE | TIMESTAMP | INTEGER,
-    expected_length      INTEGER,
+    expected_length      BIGINT,
     mean                 DOUBLE,
     std                  DOUBLE,
     min                  DOUBLE,
@@ -183,22 +176,27 @@ TABLE(
     plateau_size_non_zero BIGINT,
     n_zeros_start        BIGINT,
     n_zeros_end          BIGINT,
-    n_duplicate_timestamps BIGINT
+    n_duplicate_timestamps HUGEINT
 )
 ```
 
 **Example:**
 ```sql
--- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
+-- DATE/TIMESTAMP columns: Use string frequency
+CREATE TABLE sales_stats AS
+SELECT * FROM anofox_fcst_ts_stats('sales_raw', 'product_id', 'date', 'amount', '1d');
+
+-- Using column references (also supported)
 CREATE TABLE sales_stats AS
 SELECT * FROM anofox_fcst_ts_stats('sales_raw', product_id, date, amount, '1d');
 
--- INTEGER columns: Use INTEGER frequency values
+-- INTEGER date columns: Use integer frequency
 CREATE TABLE int_stats AS
-SELECT * FROM anofox_fcst_ts_stats('int_data', series_id, date_col, value, 1);
+SELECT * FROM anofox_fcst_ts_stats('int_data', 'series_id', 'date_col', 'value', 1);
 
--- Use NULL for default frequency
-SELECT * FROM anofox_fcst_ts_stats('sales_raw', product_id, date, amount, NULL::VARCHAR);
+-- Table identifier (without quotes) also works
+CREATE TABLE stats AS
+SELECT * FROM anofox_fcst_ts_stats(sales_raw, product_id, date, amount, '1d');
 ```
 
 ---
@@ -1680,7 +1678,7 @@ These parameters work with **all forecasting models**:
 |----------|-------|----------------|
 | Forecasting | 3 | Table macros (2), Aggregate (1) |
 | Evaluation Metrics | 12 | Scalar functions |
-| EDA Macros | 5 | Table macros |
+| EDA | 3 | Table functions (2), Table macros (1) |
 | Data Quality | 2 | Table macros |
 | Data Preparation | 10 | Table macros |
 | Seasonality | 2 | Scalar functions |
@@ -1692,10 +1690,10 @@ These parameters work with **all forecasting models**:
 
 | Type | Count | Examples |
 |------|-------|----------|
-| Table Macros | 23 | `anofox_fcst_ts_forecast` (or `ts_forecast`), `TS_STATS`, `anofox_fcst_ts_fill_gaps` (or `ts_fill_gaps`) |
+| Table Macros | 21 | `anofox_fcst_ts_forecast` (or `ts_forecast`), `anofox_fcst_ts_fill_gaps` (or `ts_fill_gaps`) |
 | Aggregate Functions | 5 | `anofox_fcst_ts_forecast_agg` (or `ts_forecast_agg`), `anofox_fcst_ts_features` (or `ts_features`), `anofox_fcst_ts_detect_changepoints_agg` (or `ts_detect_changepoints_agg`) |
 | Scalar Functions | 14 | `anofox_fcst_ts_mae` (or `ts_mae`), `anofox_fcst_ts_detect_seasonality` (or `ts_detect_seasonality`), `anofox_fcst_ts_analyze_seasonality` (or `ts_analyze_seasonality`) |
-| Table Functions | 1 | `anofox_fcst_ts_features_list` (or `ts_features_list`) |
+| Table Functions | 3 | `anofox_fcst_ts_stats` (or `ts_stats`), `anofox_fcst_ts_quality_report` (or `ts_quality_report`), `anofox_fcst_ts_features_list` (or `ts_features_list`) |
 
 ### GROUP BY Support
 
