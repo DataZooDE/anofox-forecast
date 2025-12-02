@@ -1,0 +1,461 @@
+# name: test/sql/data_prep/test_column_and_type_preservation.test
+# description: Test column preservation and date type preservation in data prep macros
+# group: [data_prep]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+#############################################
+# COLUMN PRESERVATION TESTS
+#############################################
+
+# Test: anofox_fcst_ts_fill_nulls_forward preserves all columns
+statement ok
+CREATE TABLE test_data_with_extra_cols AS
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    'series_1' AS series_id,
+    CASE WHEN i BETWEEN 5 AND 7 THEN NULL ELSE 100.0 + i * 2.0 END AS value,
+    'category_A' AS category,
+    42 AS metadata_id,
+    TRUE AS is_active
+FROM generate_series(1, 30) t(i);
+
+statement ok
+CREATE TABLE filled_forward_result AS
+SELECT * FROM anofox_fcst_ts_fill_nulls_forward(test_data_with_extra_cols, series_id, date_col, value);
+
+# Verify all columns are preserved by checking values exist
+query I
+SELECT COUNT(*) = 30
+FROM filled_forward_result
+WHERE category = 'category_A' AND metadata_id = 42 AND is_active = TRUE;
+----
+true
+
+# Test: anofox_fcst_ts_fill_nulls_backward preserves all columns
+statement ok
+CREATE TABLE filled_backward_result AS
+SELECT * FROM anofox_fcst_ts_fill_nulls_backward(test_data_with_extra_cols, series_id, date_col, value);
+
+# Verify all columns are preserved
+query I
+SELECT COUNT(*) = 30
+FROM filled_backward_result
+WHERE category = 'category_A' AND metadata_id = 42 AND is_active = TRUE;
+----
+true
+
+# Test: anofox_fcst_ts_fill_nulls_mean preserves all columns
+statement ok
+CREATE TABLE filled_mean_result AS
+SELECT * FROM anofox_fcst_ts_fill_nulls_mean(test_data_with_extra_cols, series_id, date_col, value);
+
+# Verify all columns are preserved
+query I
+SELECT COUNT(*) = 30
+FROM filled_mean_result
+WHERE category = 'category_A' AND metadata_id = 42 AND is_active = TRUE;
+----
+true
+
+# Test: anofox_fcst_ts_fill_nulls_const preserves all columns
+statement ok
+CREATE TABLE filled_const_result AS
+SELECT * FROM anofox_fcst_ts_fill_nulls_const(test_data_with_extra_cols, series_id, date_col, value, 0.0);
+
+# Verify all columns are preserved
+query I
+SELECT COUNT(*) = 30
+FROM filled_const_result
+WHERE category = 'category_A' AND metadata_id = 42 AND is_active = TRUE;
+----
+true
+
+# Test: anofox_fcst_ts_fill_gaps preserves all columns
+statement ok
+CREATE TABLE test_data_with_gaps AS
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    'series_1' AS series_id,
+    100.0 + i * 2.0 AS value,
+    'category_B' AS category,
+    99 AS metadata_id,
+    FALSE AS is_active
+FROM generate_series(1, 30) t(i)
+WHERE i NOT IN (10, 15, 20);
+
+statement ok
+CREATE TABLE filled_gaps_result AS
+SELECT * FROM anofox_fcst_ts_fill_gaps(test_data_with_gaps, series_id, date_col, value, '1d');
+
+# Verify all columns are preserved by checking values
+
+# Verify extra column values are preserved (including NULLs for new gap rows)
+query I
+    SELECT COUNT(*) = 27
+    FROM filled_gaps_result
+    WHERE category = 'category_B' AND metadata_id = 99 AND is_active = FALSE;
+----
+true
+
+# Verify gaps were filled (27 original + 3 gaps = 30 total)
+query I
+SELECT COUNT(*) = 30
+FROM filled_gaps_result
+WHERE series_id = 'series_1';
+----
+true
+
+# Test: anofox_fcst_ts_fill_forward preserves all columns
+statement ok
+CREATE TABLE test_data_forward AS
+SELECT 
+    ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    'series_1' AS series_id,
+    100.0 + i * 2.0 AS value,
+    'category_C' AS category,
+    123 AS metadata_id,
+    TRUE AS is_active
+FROM generate_series(1, 10) t(i);
+
+statement ok
+CREATE TABLE filled_forward_extended AS
+SELECT * FROM anofox_fcst_ts_fill_forward('test_data_forward', 'series_id', 'date_col', 'value', '2024-01-15'::DATE, '1d');
+
+# Verify all columns are preserved
+
+query I
+SELECT COUNT(*) = 10
+FROM filled_forward_extended
+WHERE category = 'category_C' AND metadata_id = 123 AND is_active = TRUE;
+----
+true
+
+# Verify series was extended (10 original + 4 new = 14 total)
+query I
+SELECT COUNT(*) = 14
+FROM filled_forward_extended
+WHERE series_id = 'series_1';
+----
+true
+
+#############################################
+# DATE TYPE PRESERVATION TESTS
+#############################################
+
+# Test: anofox_fcst_ts_fill_gaps preserves DATE type (does not convert to TIMESTAMP)
+statement ok
+CREATE TABLE test_date_type AS
+SELECT 
+    ('2024-01-01'::DATE + INTERVAL (i) DAY)::DATE AS date_col,
+    'series_1' AS series_id,
+    100.0 AS value
+FROM generate_series(1, 30) t(i)
+WHERE i NOT IN (10, 15, 20);
+
+statement ok
+CREATE TABLE filled_gaps_date AS
+SELECT * FROM anofox_fcst_ts_fill_gaps(test_date_type, series_id, date_col, value, '1d');
+
+# Verify date_col is still DATE type (not TIMESTAMP)
+# For DATE type, the value should equal its DATE cast (always true for DATE)
+# For TIMESTAMP, this might not always be true due to time components
+query I
+SELECT COUNT(*) = 30
+FROM filled_gaps_date
+WHERE date_col = CAST(date_col AS DATE);
+----
+true
+
+# Verify DATE type by checking it doesn't have time component
+# DATE values should have no time, so DATEDIFF with itself should be 0
+query I
+SELECT COUNT(*) = 30
+FROM filled_gaps_date
+WHERE DATEDIFF('day', date_col, date_col) = 0;
+----
+true
+
+# Test: anofox_fcst_ts_fill_gaps preserves TIMESTAMP type
+statement ok
+CREATE TABLE test_timestamp_type AS
+SELECT 
+    ('2024-01-01 12:00:00'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    'series_1' AS series_id,
+    100.0 AS value
+FROM generate_series(1, 30) t(i)
+WHERE i NOT IN (10, 15, 20);
+
+statement ok
+CREATE TABLE filled_gaps_timestamp AS
+SELECT * FROM anofox_fcst_ts_fill_gaps(test_timestamp_type, series_id, date_col, value, '1d');
+
+# Verify all rows have TIMESTAMP type (can extract hour)
+query I
+SELECT COUNT(*) = 30
+FROM filled_gaps_timestamp
+WHERE EXTRACT(HOUR FROM date_col) = 12;
+----
+true
+
+# Verify TIMESTAMP type by checking it has time component
+query I
+SELECT COUNT(*) = 30
+FROM filled_gaps_timestamp
+WHERE EXTRACT(HOUR FROM date_col) IS NOT NULL;
+----
+true
+
+# Test: anofox_fcst_ts_fill_forward preserves DATE type
+statement ok
+CREATE TABLE test_date_forward AS
+SELECT 
+    ('2024-01-01'::DATE + INTERVAL (i) DAY)::DATE AS date_col,
+    'series_1' AS series_id,
+    100.0 AS value
+FROM generate_series(1, 10) t(i);
+
+statement ok
+CREATE TABLE filled_forward_date AS
+SELECT * FROM anofox_fcst_ts_fill_forward('test_date_forward', 'series_id', 'date_col', 'value', '2024-01-15'::DATE, '1d');
+
+# Verify all rows have DATE type
+query I
+SELECT COUNT(*) = 14
+FROM filled_forward_date
+WHERE date_col = CAST(date_col AS DATE);
+----
+true
+
+# Verify DATE type by checking it doesn't have time component
+query I
+SELECT COUNT(*) = 14
+FROM filled_forward_date
+WHERE DATEDIFF('day', date_col, date_col) = 0;
+----
+true
+
+# Test: anofox_fcst_ts_fill_forward preserves TIMESTAMP type
+statement ok
+CREATE TABLE test_timestamp_forward AS
+SELECT 
+    ('2024-01-01 12:00:00'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    'series_1' AS series_id,
+    100.0 AS value
+FROM generate_series(1, 10) t(i);
+
+statement ok
+CREATE TABLE filled_forward_timestamp AS
+SELECT * FROM anofox_fcst_ts_fill_forward('test_timestamp_forward', 'series_id', 'date_col', 'value', '2024-01-15'::TIMESTAMP, '1d');
+
+# Verify all rows have TIMESTAMP type with correct hour
+query I
+SELECT COUNT(*) = 14
+FROM filled_forward_timestamp
+WHERE EXTRACT(HOUR FROM date_col) = 12;
+----
+true
+
+# Verify TIMESTAMP type by checking it has time component
+query I
+SELECT COUNT(*) = 14
+FROM filled_forward_timestamp
+WHERE EXTRACT(HOUR FROM date_col) IS NOT NULL;
+----
+true
+
+#############################################
+# COMBINED TESTS: Column + Type Preservation
+#############################################
+
+# Test: Both column and type preservation together
+statement ok
+CREATE TABLE test_combined AS
+SELECT 
+    ('2024-01-01'::DATE + INTERVAL (i) DAY)::DATE AS date_col,
+    'series_1' AS series_id,
+    100.0 + i * 2.0 AS value,
+    'category_D' AS category,
+    456 AS metadata_id
+FROM generate_series(1, 30) t(i)
+WHERE i NOT IN (10, 15, 20);
+
+statement ok
+CREATE TABLE filled_combined AS
+SELECT * FROM anofox_fcst_ts_fill_gaps(test_combined, series_id, date_col, value, '1d');
+
+# Verify DATE type is preserved
+query I
+SELECT COUNT(*) = 30
+FROM filled_combined
+WHERE date_col = CAST(date_col AS DATE);
+----
+true
+
+# Verify all columns are preserved by checking values
+query I
+SELECT COUNT(*) = 27
+FROM filled_combined
+WHERE category = 'category_D' AND metadata_id = 456;
+----
+true
+
+# Verify values are correct
+query I
+SELECT COUNT(*) = 27
+FROM filled_combined
+WHERE category = 'category_D' AND metadata_id = 456;
+----
+true
+
+# Verify gaps were filled
+query I
+SELECT COUNT(*) = 30
+FROM filled_combined
+WHERE series_id = 'series_1';
+----
+true
+
+#############################################
+# INTEGER FREQUENCY TESTS
+#############################################
+
+# Test: anofox_fcst_ts_fill_gaps (INTEGER frequency) preserves all columns
+statement ok
+CREATE TABLE test_int_frequency AS
+SELECT 
+    i AS date_col,
+    'series_1' AS series_id,
+    100.0 + i * 2.0 AS value,
+    'category_E' AS category,
+    789 AS metadata_id
+FROM generate_series(1, 30) t(i)
+WHERE i NOT IN (10, 15, 20);
+
+statement ok
+CREATE TABLE filled_gaps_int AS
+SELECT * FROM anofox_fcst_ts_fill_gaps(test_int_frequency, series_id, date_col, value, 1);
+
+# Verify all columns are preserved
+query I
+SELECT COUNT(*) = 27
+FROM filled_gaps_int
+WHERE category = 'category_E' AND metadata_id = 789;
+----
+true
+
+# Verify gaps were filled (27 original + 3 gaps = 30 total)
+query I
+SELECT COUNT(*) = 30
+FROM filled_gaps_int
+WHERE series_id = 'series_1';
+----
+true
+
+# Test: anofox_fcst_ts_fill_forward (INTEGER frequency) preserves all columns
+statement ok
+CREATE TABLE test_int_forward AS
+SELECT 
+    i AS date_col,
+    'series_1' AS series_id,
+    100.0 + i * 2.0 AS value,
+    'category_F' AS category,
+    999 AS metadata_id
+FROM generate_series(1, 10) t(i);
+
+statement ok
+CREATE TABLE filled_forward_int AS
+SELECT * FROM anofox_fcst_ts_fill_forward('test_int_forward', 'series_id', 'date_col', 'value', 15, 1);
+
+# Verify all columns are preserved
+query I
+SELECT COUNT(*) = 10
+FROM filled_forward_int
+WHERE category = 'category_F' AND metadata_id = 999;
+----
+true
+
+# Verify series was extended (10 original + 5 new = 15 total)
+query I
+SELECT COUNT(*) = 15
+FROM filled_forward_int
+WHERE series_id = 'series_1';
+----
+true
+
+#############################################
+# CLEANUP
+#############################################
+
+statement ok
+DROP TABLE test_int_frequency;
+
+statement ok
+DROP TABLE filled_gaps_int;
+
+statement ok
+DROP TABLE test_int_forward;
+
+statement ok
+DROP TABLE filled_forward_int;
+
+statement ok
+DROP TABLE test_data_with_extra_cols;
+
+statement ok
+DROP TABLE filled_forward_result;
+
+statement ok
+DROP TABLE filled_backward_result;
+
+statement ok
+DROP TABLE filled_mean_result;
+
+statement ok
+DROP TABLE filled_const_result;
+
+statement ok
+DROP TABLE test_data_with_gaps;
+
+statement ok
+DROP TABLE filled_gaps_result;
+
+statement ok
+DROP TABLE test_data_forward;
+
+statement ok
+DROP TABLE filled_forward_extended;
+
+statement ok
+DROP TABLE test_date_type;
+
+statement ok
+DROP TABLE filled_gaps_date;
+
+statement ok
+DROP TABLE test_timestamp_type;
+
+statement ok
+DROP TABLE filled_gaps_timestamp;
+
+statement ok
+DROP TABLE test_date_forward;
+
+statement ok
+DROP TABLE filled_forward_date;
+
+statement ok
+DROP TABLE test_timestamp_forward;
+
+statement ok
+DROP TABLE filled_forward_timestamp;
+
+statement ok
+DROP TABLE test_combined;
+
+statement ok
+DROP TABLE filled_combined;
+

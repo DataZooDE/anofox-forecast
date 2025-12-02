@@ -409,16 +409,17 @@ anofox_fcst_ts_fill_gaps(
 ```
 
 **Parameters:**
+- `table_name`: Table name (VARCHAR). Can be provided as a quoted string literal (e.g., `'table_name'`) or as an unquoted table identifier (e.g., `table_name`). Both forms are accepted and work identically.
 - `frequency`: 
-  - **For DATE/TIMESTAMP columns**: Optional frequency string (Polars-style). Defaults to `"1d"` if NULL or not provided.
+  - **For DATE/TIMESTAMP columns**: Required frequency string (Polars-style).
     - `"30m"` or `"30min"` - 30 minutes
     - `"1h"` - 1 hour
-    - `"1d"` - 1 day (default)
+    - `"1d"` - 1 day
     - `"1w"` - 1 week
     - `"1mo"` - 1 month
     - `"1q"` - 1 quarter (3 months)
     - `"1y"` - 1 year
-  - **For INTEGER columns**: Optional integer step size. Defaults to `1` if NULL or not provided.
+  - **For INTEGER columns**: Required integer step size.
     - `1`, `2`, `3`, etc. - Integer step size for `GENERATE_SERIES`
 
 **Type Validation:**
@@ -432,14 +433,14 @@ anofox_fcst_ts_fill_gaps(
 **Examples:**
 ```sql
 -- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
--- Fill gaps with 30-minute frequency
+-- Fill gaps with 30-minute frequency (table name as string literal)
 SELECT * FROM anofox_fcst_ts_fill_gaps('hourly_data', series_id, timestamp, value, '30m');
 
--- Fill gaps with weekly frequency
-SELECT * FROM anofox_fcst_ts_fill_gaps('weekly_data', series_id, date, value, '1w');
+-- Fill gaps with weekly frequency (table name as identifier)
+SELECT * FROM anofox_fcst_ts_fill_gaps(weekly_data, series_id, date, value, '1w');
 
--- Use NULL (must cast to VARCHAR for DATE/TIMESTAMP columns)
-SELECT * FROM anofox_fcst_ts_fill_gaps('daily_data', series_id, date, value, NULL::VARCHAR);
+-- Fill gaps with daily frequency
+SELECT * FROM anofox_fcst_ts_fill_gaps('daily_data', series_id, date, value, '1d');
 
 -- INTEGER columns: Use INTEGER frequency values
 -- Fill gaps with step size of 1
@@ -447,9 +448,6 @@ SELECT * FROM anofox_fcst_ts_fill_gaps('int_data', series_id, date_col, value, 1
 
 -- Fill gaps with step size of 2
 SELECT * FROM anofox_fcst_ts_fill_gaps('int_data', series_id, date_col, value, 2);
-
--- Use NULL (defaults to step size 1 for INTEGER columns)
-SELECT * FROM anofox_fcst_ts_fill_gaps('int_data', series_id, date_col, value, NULL);
 ```
 
 ---
@@ -482,17 +480,18 @@ anofox_fcst_ts_fill_forward(
 ```
 
 **Parameters:**
+- `table_name`: Table name (VARCHAR). Can be provided as a quoted string literal (e.g., `'table_name'`) or as an unquoted table identifier (e.g., `table_name`). Both forms are accepted and work identically.
 - `target_date`: Target date/index to extend the series to (type must match `date_col` type)
 - `frequency`: 
-  - **For DATE/TIMESTAMP columns**: Optional frequency string (Polars-style). Defaults to `"1d"` if NULL or not provided.
+  - **For DATE/TIMESTAMP columns**: Required frequency string (Polars-style).
     - `"30m"` or `"30min"` - 30 minutes
     - `"1h"` - 1 hour
-    - `"1d"` - 1 day (default)
+    - `"1d"` - 1 day
     - `"1w"` - 1 week
     - `"1mo"` - 1 month
     - `"1q"` - 1 quarter (3 months)
     - `"1y"` - 1 year
-  - **For INTEGER columns**: Optional integer step size. Defaults to `1` if NULL or not provided.
+  - **For INTEGER columns**: Required integer step size.
     - `1`, `2`, `3`, etc. - Integer step size for `GENERATE_SERIES`
 
 **Type Validation:**
@@ -506,14 +505,14 @@ anofox_fcst_ts_fill_forward(
 **Examples:**
 ```sql
 -- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
--- Extend hourly series to target date
+-- Extend hourly series to target date (table name as string literal)
 SELECT * FROM anofox_fcst_ts_fill_forward('hourly_data', series_id, timestamp, value, '2024-12-31'::TIMESTAMP, '1h');
 
--- Extend monthly series to target date
-SELECT * FROM anofox_fcst_ts_fill_forward('monthly_data', series_id, date, value, '2024-12-01'::DATE, '1mo');
+-- Extend monthly series to target date (table name as identifier)
+SELECT * FROM anofox_fcst_ts_fill_forward(monthly_data, series_id, date, value, '2024-12-01'::DATE, '1mo');
 
--- Use NULL (must cast to VARCHAR for DATE/TIMESTAMP columns)
-SELECT * FROM anofox_fcst_ts_fill_forward('daily_data', series_id, date, value, '2024-12-31'::DATE, NULL::VARCHAR);
+-- Extend daily series to target date
+SELECT * FROM anofox_fcst_ts_fill_forward('daily_data', series_id, date, value, '2024-12-31'::DATE, '1d');
 
 -- INTEGER columns: Use INTEGER frequency values
 -- Extend series to index 100 with step size of 1
@@ -521,9 +520,6 @@ SELECT * FROM anofox_fcst_ts_fill_forward('int_data', series_id, date_col, value
 
 -- Extend series to index 100 with step size of 5
 SELECT * FROM anofox_fcst_ts_fill_forward('int_data', series_id, date_col, value, 100, 5);
-
--- Use NULL (defaults to step size 1 for INTEGER columns)
-SELECT * FROM anofox_fcst_ts_fill_forward('int_data', series_id, date_col, value, 100, NULL);
 ```
 
 ---

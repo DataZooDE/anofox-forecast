@@ -36,24 +36,24 @@ FROM generate_series(1, 15) t(i);
 # Test: anofox_fcst_ts_fill_gaps
 statement ok
 CREATE TABLE filled_gaps AS
-SELECT * FROM anofox_fcst_ts_fill_gaps(raw_data, series_id, date_col, value, NULL::VARCHAR);
+SELECT * FROM anofox_fcst_ts_fill_gaps('raw_data', 'series_id', 'date_col', 'value', '1d');
 
 # Verify gaps filled for series_1 (28 -> 30)
 query I
 SELECT COUNT(*) = 30
 FROM filled_gaps
-WHERE group_col = 'series_1';
+WHERE series_id = 'series_1';
 ----
 true
 
 # Test: anofox_fcst_ts_fill_nulls_forward
 statement ok
 CREATE TABLE filled_forward AS
-SELECT * FROM anofox_fcst_ts_fill_nulls_forward(raw_data, series_id, date_col, value);
+SELECT * FROM anofox_fcst_ts_fill_nulls_forward('raw_data', 'series_id', 'date_col', 'value');
 
 # Verify total NULLs are reduced (originally 3 NULLs in series_1, 0 in others)
 query I
-SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END)::INT < 3
+SELECT SUM(CASE WHEN value IS NULL THEN 1 ELSE 0 END)::INT < 3
 FROM filled_forward;
 ----
 true
@@ -65,7 +65,7 @@ SELECT * FROM anofox_fcst_ts_fill_nulls_backward(raw_data, series_id, date_col, 
 
 # Verify total NULLs are reduced
 query I
-SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END)::INT < 3
+SELECT SUM(CASE WHEN value IS NULL THEN 1 ELSE 0 END)::INT < 3
 FROM filled_backward;
 ----
 true
@@ -77,7 +77,7 @@ SELECT * FROM anofox_fcst_ts_fill_nulls_mean(raw_data, series_id, date_col, valu
 
 # Verify all NULLs are filled with mean
 query I
-SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) = 0
+SELECT SUM(CASE WHEN value IS NULL THEN 1 ELSE 0 END) = 0
 FROM filled_mean;
 ----
 true
@@ -155,22 +155,22 @@ true
 # Test: Two-step workflow (fill then drop)
 statement ok
 CREATE TABLE filled_data AS
-SELECT * FROM anofox_fcst_ts_fill_gaps(raw_data, series_id, date_col, value, NULL::VARCHAR);
+SELECT * FROM anofox_fcst_ts_fill_gaps('raw_data', 'series_id', 'date_col', 'value', '1d');
 
 statement ok
 CREATE TABLE clean_data AS
-SELECT * FROM anofox_fcst_ts_fill_nulls_forward(filled_data, group_col, date_col, value_col);
+SELECT * FROM anofox_fcst_ts_fill_nulls_forward('filled_data', 'series_id', 'date_col', 'value');
 
 # Verify workflow produces clean data
 query I
-SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) = 0
+SELECT SUM(CASE WHEN value IS NULL THEN 1 ELSE 0 END) = 0
 FROM clean_data;
 ----
 true
 
 # Verify all series present
 query I
-SELECT COUNT(DISTINCT group_col) = 3
+SELECT COUNT(DISTINCT series_id) = 3
 FROM clean_data;
 ----
 true
@@ -226,13 +226,13 @@ FROM (SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, i FROM ge
 
 statement ok
 CREATE TABLE extended_forward AS
-SELECT * FROM anofox_fcst_ts_fill_forward(test_forward, sid, date_col, val, '2024-01-15'::DATE, NULL::VARCHAR);
+SELECT * FROM anofox_fcst_ts_fill_forward('test_forward', 'sid', 'date_col', 'val', '2024-01-15'::DATE, '1d');
 
 # Verify series extended to target date (10 original -> 14 total: 2024-01-02 to 2024-01-15)
 query I
 SELECT COUNT(*) = 14
 FROM extended_forward
-WHERE group_col = 'series_1';
+WHERE sid = 'series_1';
 ----
 true
 
@@ -249,7 +249,7 @@ SELECT * FROM ts_drop_gappy(test_gappy, sid, date_col, 0.40);  -- Max 40% gaps
 
 # Verify gappy series removed (50% > 40%)
 query I
-SELECT COUNT(DISTINCT group_col) = 0
+SELECT COUNT(DISTINCT sid) = 0
 FROM no_gappy;
 ----
 true
@@ -289,7 +289,7 @@ SELECT * FROM anofox_fcst_ts_fill_nulls_const(test_const_fill, sid, date_col, va
 
 # Verify all NULLs filled with 0.0
 query I
-SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) = 0
+SELECT SUM(CASE WHEN val IS NULL THEN 1 ELSE 0 END) = 0
 FROM filled_const;
 ----
 true
@@ -298,7 +298,7 @@ true
 query I
 SELECT COUNT(*) = 3
 FROM filled_const
-WHERE value_col = 0.0;
+WHERE val = 0.0;
 ----
 true
 
@@ -316,7 +316,7 @@ SELECT * FROM ts_diff(test_diff, sid, date_col, val, 1);
 query I
 SELECT COUNT(*) >= 3
 FROM differenced
-WHERE value_col BETWEEN 9.0 AND 11.0;
+WHERE val BETWEEN 9.0 AND 11.0;
 ----
 true
 
