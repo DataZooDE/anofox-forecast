@@ -84,7 +84,7 @@ static const DefaultTableMacro data_quality_macros[] = {
                 fp.__interval,
                 CASE 
                     WHEN sr.end_date >= sr.start_date 
-                    THEN CAST(EXTRACT(EPOCH FROM (sr.end_date - sr.start_date)) / EXTRACT(EPOCH FROM fp.__interval) AS INTEGER) + 1
+                    THEN CAST(EXTRACT(EPOCH FROM (CAST(sr.end_date AS TIMESTAMP) - CAST(sr.start_date AS TIMESTAMP))) / EXTRACT(EPOCH FROM fp.__interval) AS INTEGER) + 1
                     ELSE 1
                 END AS expected_count
             FROM series_ranges sr

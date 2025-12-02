@@ -59,7 +59,9 @@ unique_ptr<TableRef> TSFillGapsBindReplace(ClientContext &context, TableFunction
 	    << escaped_date_col << R"( AS __did,
         )"
 	    << escaped_value_col << R"( AS __vid,
-        *
+        *,
+        CAST()"
+	    << escaped_date_col << R"( AS DATE) AS __did_normalized
     FROM QUERY_TABLE()"
 	    << escaped_table << R"()
 ),
@@ -84,45 +86,43 @@ frequency_parsed AS (
         END AS __interval
     FROM (SELECT 1) t
 ),
-date_type_check AS (
-    SELECT DISTINCT
+series_ranges AS (
+    SELECT 
         __gid,
+        MIN(__did) AS __min,
+        MAX(__did) AS __max,
         MIN(__did) = CAST(MIN(__did) AS DATE) AS __is_date_type
     FROM orig_aliased
     GROUP BY __gid
 ),
-series_ranges AS (
-    SELECT DISTINCT
-        oa.__gid,
-        MIN(oa.__did) OVER (PARTITION BY oa.__gid) AS __min,
-        MAX(oa.__did) OVER (PARTITION BY oa.__gid) AS __max,
-        dtc.__is_date_type
-    FROM orig_aliased oa
-    LEFT JOIN date_type_check dtc ON oa.__gid = dtc.__gid
-),
-expanded AS (
+expanded_raw AS (
     SELECT 
         sr.__gid,
-        UNNEST(GENERATE_SERIES(sr.__min, sr.__max, fp.__interval)) AS __did,
+        UNNEST(GENERATE_SERIES(sr.__min, sr.__max, fp.__interval)) AS __did_raw,
         sr.__is_date_type
     FROM series_ranges sr
     CROSS JOIN frequency_parsed fp
 ),
+expanded AS (
+    SELECT 
+        __gid,
+        CASE 
+            WHEN __is_date_type THEN CAST(__did_raw AS DATE)
+            ELSE __did_raw
+        END AS __did,
+        __is_date_type
+    FROM expanded_raw
+),
 with_original_data AS (
     SELECT 
         e.__gid,
-        CASE 
-            WHEN oa.__did IS NOT NULL THEN 
-                CASE WHEN e.__is_date_type THEN CAST(oa.__did AS DATE) ELSE oa.__did END
-            WHEN e.__is_date_type THEN CAST(e.__did AS DATE)
-            ELSE e.__did
-        END AS __did,
+        COALESCE(oa.__did, e.__did) AS __did,
         oa.__vid,
-        oa.* EXCLUDE (__gid, __did, __vid)
+        oa.* EXCLUDE (__gid, __did, __vid, __did_normalized)
     FROM expanded e
     LEFT JOIN orig_aliased oa ON e.__gid = oa.__gid 
         AND (
-            (e.__is_date_type AND CAST(e.__did AS DATE) = CAST(oa.__did AS DATE))
+            (e.__is_date_type AND e.__did = oa.__did_normalized)
             OR
             (NOT e.__is_date_type AND e.__did = oa.__did)
         )
@@ -408,11 +408,12 @@ frequency_parsed AS (
     FROM (SELECT 1) t
 ),
 series_ranges AS (
-    SELECT DISTINCT
+    SELECT 
         __gid,
-        MIN(__did) OVER (PARTITION BY __gid) AS __min,
-        MAX(__did) OVER (PARTITION BY __gid) AS __max
+        MIN(__did) AS __min,
+        MAX(__did) AS __max
     FROM orig_aliased
+    GROUP BY __gid
 ),
 expanded AS (
     SELECT 

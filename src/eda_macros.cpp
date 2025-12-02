@@ -60,7 +60,7 @@ static const DefaultTableMacro eda_macros[] = {
                     fp.__interval,
                     CASE 
                         WHEN tm.end_date >= tm.start_date
-                        THEN CAST(EXTRACT(EPOCH FROM (tm.end_date - tm.start_date)) / EXTRACT(EPOCH FROM fp.__interval) AS INTEGER) + 1
+                        THEN CAST(EXTRACT(EPOCH FROM (CAST(tm.end_date AS TIMESTAMP) - CAST(tm.start_date AS TIMESTAMP))) / EXTRACT(EPOCH FROM fp.__interval) AS INTEGER) + 1
                         ELSE 1
                     END AS expected_length
                 FROM temporal_metadata tm
