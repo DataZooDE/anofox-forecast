@@ -65,14 +65,14 @@ SELECT len(ts_detect_seasonality([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 1
 ----
 true
 
-# Test 9: Table macro - Full name anofox_fcst_ts_stats
+# Test 9: Table function - Full name anofox_fcst_ts_stats
 query I
 SELECT COUNT(*) >= 1
 FROM anofox_fcst_ts_stats('test_data', 1, date_col, value, '1d');
 ----
 true
 
-# Test 10: Table macro - Alias ts_stats
+# Test 10: Table function - Alias ts_stats
 query I
 SELECT COUNT(*) >= 1
 FROM ts_stats('test_data', 1, date_col, value, '1d');

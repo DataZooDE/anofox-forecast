@@ -17,7 +17,6 @@
 #include "changepoint_function.hpp"
 #include "eda_macros.hpp"
 #include "data_prep_macros.hpp"
-#include "data_quality_macros.hpp"
 #include "ts_features_function.hpp"
 #include "duckdb/catalog/default/default_functions.hpp"
 #include "duckdb/catalog/default/default_table_functions.hpp"
@@ -246,7 +245,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 	}
 	// std::cerr << "[DEBUG] TS_FORECAST table macros registered" << std::endl;
 
-	// Register EDA (Exploratory Data Analysis) macros
+	// Register EDA (Exploratory Data Analysis) table functions (bind_replace)
+	RegisterEDATableFunctions(loader);
+
+	// Register EDA (Exploratory Data Analysis) macros (for functions not converted to table functions)
 	RegisterEDAMacros(loader);
 	// std::cerr << "[DEBUG] EDA macros registered" << std::endl;
 

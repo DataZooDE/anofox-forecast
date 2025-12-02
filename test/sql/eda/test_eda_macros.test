@@ -1,5 +1,5 @@
 # name: test/sql/eda/test_eda_macros.test
-# description: Test EDA (Exploratory Data Analysis) table macros
+# description: Test EDA (Exploratory Data Analysis) functions (table functions and macros)
 # group: [eda]
 
 require anofox_forecast
@@ -186,6 +186,96 @@ FROM quality_series;
 true
 
 
+#############################################
+# Test: anofox_fcst_ts_stats with DATE column type
+# This tests the fix for INT32/INT64 type mismatch when using DATE columns
+#############################################
+
+# Create test data with DATE column type
+statement ok
+CREATE TABLE eda_test_data_date AS
+SELECT 
+    ('2024-01-01'::DATE + INTERVAL (i) DAY)::DATE AS date_col,
+    'series_1' AS series_id,
+    CASE 
+        WHEN i <= 10 THEN 100.0 + i * 2.0
+        WHEN i BETWEEN 11 AND 15 THEN NULL
+        WHEN i BETWEEN 16 AND 20 THEN 0.0
+        ELSE 100.0 + i * 2.0
+    END AS value
+FROM generate_series(1, 30) t(i)
+UNION ALL
+SELECT 
+    ('2024-01-01'::DATE + INTERVAL (i) DAY)::DATE AS date_col,
+    'series_2' AS series_id,
+    50.0 AS value  -- Constant series
+FROM generate_series(1, 20) t(i)
+UNION ALL
+SELECT 
+    ('2024-01-01'::DATE + INTERVAL (i) DAY)::DATE AS date_col,
+    'series_3' AS series_id,
+    CASE 
+        WHEN i <= 5 THEN 0.0  -- Leading zeros
+        ELSE 100.0 + i * 2.0
+    END AS value
+FROM generate_series(1, 15) t(i);
+
+# Test: anofox_fcst_ts_stats with DATE column - should not fail with type mismatch
+statement ok
+CREATE TABLE stats_result_date AS
+SELECT * FROM anofox_fcst_ts_stats(eda_test_data_date, series_id, date_col, value, '1d');
+
+# Verify stats for all series (DATE column test)
+query I
+SELECT COUNT(DISTINCT series_id) = 3
+FROM stats_result_date;
+----
+true
+
+# Verify series_1 has expected stats (DATE column test)
+query II
+SELECT series_id = 'series_1', length = 30
+FROM stats_result_date
+WHERE series_id = 'series_1';
+----
+true	true
+
+# Verify expected_length is calculated correctly for DATE column
+query II
+SELECT 
+    series_id = 'series_1',
+    expected_length = 30
+FROM stats_result_date
+WHERE series_id = 'series_1';
+----
+true	true
+
+# Verify all expected columns are present (DATE column test)
+query I
+SELECT COUNT(*) = 1
+FROM (
+    SELECT 
+        series_id, length, start_date, end_date, expected_length,
+        mean, std, min, max, median, n_null, n_zeros,
+        n_unique_values, is_constant, plateau_size, plateau_size_non_zero,
+        n_zeros_start, n_zeros_end, n_duplicate_timestamps
+    FROM stats_result_date
+    LIMIT 1
+);
+----
+true
+
+# Verify start_date and end_date are DATE type (not TIMESTAMP)
+query II
+SELECT 
+    series_id = 'series_1',
+    start_date = CAST(start_date AS DATE) AND end_date = CAST(end_date AS DATE)
+FROM stats_result_date
+WHERE series_id = 'series_1';
+----
+true	true
+
+
 # Cleanup
 statement ok
 DROP TABLE eda_test_data;
@@ -198,4 +288,10 @@ DROP TABLE seasonality_result;
 
 statement ok
 DROP TABLE quality_series;
+
+statement ok
+DROP TABLE eda_test_data_date;
+
+statement ok
+DROP TABLE stats_result_date;
 
