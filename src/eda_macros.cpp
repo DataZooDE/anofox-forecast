@@ -1,7 +1,14 @@
 #include "duckdb.hpp"
 #include "duckdb/catalog/default/default_table_functions.hpp"
 #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
+#include "duckdb/parser/parsed_data/create_macro_info.hpp"
 #include "duckdb/function/table_function.hpp"
+#include "duckdb/function/table_macro_function.hpp"
+#include "duckdb/parser/parser.hpp"
+#include "duckdb/parser/statement/select_statement.hpp"
+#include "duckdb/parser/expression/columnref_expression.hpp"
+#include "duckdb/parser/tableref/subqueryref.hpp"
+#include "duckdb/parser/keyword_helper.hpp"
 #include "eda_bind_replace.hpp"
 #include "eda_macros.hpp"
 #include <map>
@@ -62,39 +69,37 @@ static void RegisterTableFunctionIgnore(ExtensionLoader &loader, TableFunction f
 
 // Register EDA (Exploratory Data Analysis) table functions (bind_replace)
 void RegisterEDATableFunctions(ExtensionLoader &loader) {
-	// TS_STATS: VARCHAR frequency (date-based)
-	// Use ANY for first parameter to allow both string literals and table identifiers
-	TableFunction ts_stats_varchar(
-	    "anofox_fcst_ts_stats",
-	    {LogicalType::ANY, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR},
-	    nullptr, nullptr);
-	ts_stats_varchar.bind_replace = TSStatsVarcharBindReplace;
-	ts_stats_varchar.named_parameters["table_name"] = LogicalType::VARCHAR;
-	ts_stats_varchar.named_parameters["group_col"] = LogicalType::VARCHAR;
-	ts_stats_varchar.named_parameters["date_col"] = LogicalType::VARCHAR;
-	ts_stats_varchar.named_parameters["value_col"] = LogicalType::VARCHAR;
-	ts_stats_varchar.named_parameters["frequency"] = LogicalType::VARCHAR;
+	// TS_STATS_INTERNAL: The "engine" function - strict VARCHAR signature (matching Commit 53a3dd6 pattern)
+	// This is the internal implementation that does the actual work
+	// Strategy: Use strict VARCHAR for all parameters, handle polymorphism in bind_replace
+	// This matches the working pattern from fill_nulls_forward and other data prep functions
+	TableFunction ts_stats_internal("anofox_fcst_ts_stats_internal",
+	                                {LogicalType::VARCHAR,  // table_name
+	                                 LogicalType::VARCHAR,  // group_col (Accepts "1" or "col_name" as string)
+	                                 LogicalType::VARCHAR,  // date_col
+	                                 LogicalType::VARCHAR,  // value_col
+	                                 LogicalType::VARCHAR}, // frequency (Accepts "1" or "1d" as string)
+	                                nullptr, nullptr);
 
-	// TS_STATS: INTEGER frequency (integer-based)
-	// Use ANY for first parameter to allow both string literals and table identifiers
-	TableFunction ts_stats_integer(
-	    "anofox_fcst_ts_stats",
-	    {LogicalType::ANY, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::INTEGER},
-	    nullptr, nullptr);
-	ts_stats_integer.bind_replace = TSStatsIntegerBindReplace;
-	ts_stats_integer.named_parameters["table_name"] = LogicalType::VARCHAR;
-	ts_stats_integer.named_parameters["group_col"] = LogicalType::VARCHAR;
-	ts_stats_integer.named_parameters["date_col"] = LogicalType::VARCHAR;
-	ts_stats_integer.named_parameters["value_col"] = LogicalType::VARCHAR;
-	ts_stats_integer.named_parameters["frequency"] = LogicalType::INTEGER;
+	// Wrap TSStatsBindReplace in try-catch to catch any early exceptions
+	static auto SafeTSStatsBindReplace = [](ClientContext &context,
+	                                        TableFunctionBindInput &input) -> unique_ptr<TableRef> {
+		try {
+			return TSStatsBindReplace(context, input);
+		} catch (const std::exception &e) {
+			// Re-throw with context to help debugging
+			throw BinderException("TSStatsBindReplace failed: %s", e.what());
+		}
+	};
 
-	// Register TS_STATS as a TableFunctionSet with both overloads
-	TableFunctionSet ts_stats_set("anofox_fcst_ts_stats");
-	ts_stats_set.AddFunction(std::move(ts_stats_varchar));
-	ts_stats_set.AddFunction(std::move(ts_stats_integer));
-	CreateTableFunctionInfo ts_stats_info(std::move(ts_stats_set));
-	ts_stats_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
-	loader.RegisterFunction(std::move(ts_stats_info));
+	ts_stats_internal.bind_replace = SafeTSStatsBindReplace;
+	// Named parameters for documentation (matching fill_nulls_forward pattern)
+	ts_stats_internal.named_parameters["table_name"] = LogicalType::VARCHAR;
+	ts_stats_internal.named_parameters["group_col"] = LogicalType::VARCHAR;
+	ts_stats_internal.named_parameters["date_col"] = LogicalType::VARCHAR;
+	ts_stats_internal.named_parameters["value_col"] = LogicalType::VARCHAR;
+	ts_stats_internal.named_parameters["frequency"] = LogicalType::VARCHAR;
+	loader.RegisterFunction(ts_stats_internal);
 
 	// TS_QUALITY_REPORT
 	TableFunction ts_quality_report("anofox_fcst_ts_quality_report", {LogicalType::VARCHAR, LogicalType::INTEGER},
@@ -107,8 +112,68 @@ void RegisterEDATableFunctions(ExtensionLoader &loader) {
 	TableFunction ts_quality_report_for_alias = ts_quality_report;
 	loader.RegisterFunction(ts_quality_report);
 
-	// Register aliases for all TableFunction objects (remove "anofox_fcst_" prefix)
-	// Helper lambda to register alias using TableFunctionSet pattern
+	// Register the public-facing SQL macro that wraps the internal function
+	// This macro normalizes inputs: converts integers to VARCHAR, handles table identifiers
+	// Pattern: Strict VARCHAR signature + Macro normalization (matching Commit 53a3dd6)
+	Parser parser;
+	// Macro SQL: Use format() for all parameters - it handles both literals and column references
+	// format() converts integers to strings, and column references are passed as identifiers
+	string macro_sql = R"(SELECT * FROM anofox_fcst_ts_stats_internal(
+        format('{}', t),        -- table identifier -> string
+        format('{}', g),        -- integer 1 -> '1', column 'col' -> 'col'
+        format('{}', d),        -- date_col
+        format('{}', v),        -- value_col
+        format('{}', f)         -- integer 1 -> '1', string '1d' -> '1d'
+    ))";
+	parser.ParseQuery(macro_sql);
+	if (parser.statements.size() != 1 || parser.statements[0]->type != StatementType::SELECT_STATEMENT) {
+		throw InternalException("Failed to parse macro SQL for anofox_fcst_ts_stats");
+	}
+	auto select_stmt = unique_ptr_cast<SQLStatement, SelectStatement>(std::move(parser.statements[0]));
+	auto macro_function = make_uniq<TableMacroFunction>(std::move(select_stmt->node));
+
+	// Set macro parameters
+	macro_function->parameters.push_back(make_uniq<ColumnRefExpression>("t")); // table_in
+	macro_function->parameters.push_back(make_uniq<ColumnRefExpression>("g")); // group_col
+	macro_function->parameters.push_back(make_uniq<ColumnRefExpression>("d")); // date_col
+	macro_function->parameters.push_back(make_uniq<ColumnRefExpression>("v")); // value_col
+	macro_function->parameters.push_back(make_uniq<ColumnRefExpression>("f")); // frequency
+
+	// Create macro info
+	auto macro_info = make_uniq<CreateMacroInfo>(CatalogType::TABLE_MACRO_ENTRY);
+	macro_info->schema = DEFAULT_SCHEMA;
+	macro_info->name = "anofox_fcst_ts_stats";
+	macro_info->temporary = true;
+	macro_info->internal = true;
+	macro_info->macros.push_back(std::move(macro_function));
+	loader.RegisterFunction(*macro_info);
+
+	// Register alias for the macro (ts_stats)
+	// Create a new parser for the alias (can't reuse the same parser)
+	Parser alias_parser;
+	alias_parser.ParseQuery(macro_sql);
+	if (alias_parser.statements.size() != 1 || alias_parser.statements[0]->type != StatementType::SELECT_STATEMENT) {
+		throw InternalException("Failed to parse macro SQL for ts_stats alias");
+	}
+	auto alias_select_stmt = unique_ptr_cast<SQLStatement, SelectStatement>(std::move(alias_parser.statements[0]));
+	auto alias_macro_function = make_uniq<TableMacroFunction>(std::move(alias_select_stmt->node));
+	alias_macro_function->parameters.push_back(make_uniq<ColumnRefExpression>("t"));
+	alias_macro_function->parameters.push_back(make_uniq<ColumnRefExpression>("g"));
+	alias_macro_function->parameters.push_back(make_uniq<ColumnRefExpression>("d"));
+	alias_macro_function->parameters.push_back(make_uniq<ColumnRefExpression>("v"));
+	alias_macro_function->parameters.push_back(make_uniq<ColumnRefExpression>("f"));
+
+	auto alias_macro_info = make_uniq<CreateMacroInfo>(CatalogType::TABLE_MACRO_ENTRY);
+	alias_macro_info->schema = DEFAULT_SCHEMA;
+	alias_macro_info->name = "ts_stats";
+	alias_macro_info->temporary = true;
+	alias_macro_info->internal = true;
+	alias_macro_info->macros.push_back(std::move(alias_macro_function));
+	alias_macro_info->alias_of = "anofox_fcst_ts_stats";
+	alias_macro_info->on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+	loader.RegisterFunction(*alias_macro_info);
+
+	// Register alias for TS_QUALITY_REPORT
 	auto register_table_alias = [&loader](TableFunction func) {
 		string name = func.name;
 		if (name.find("anofox_fcst_") == 0) {
@@ -123,40 +188,6 @@ void RegisterEDATableFunctions(ExtensionLoader &loader) {
 			loader.RegisterFunction(std::move(alias_info));
 		}
 	};
-
-	// Register alias for TS_STATS (with both overloads)
-	// Use ANY for first parameter to allow both string literals and table identifiers
-	TableFunction ts_stats_varchar_alias(
-	    "ts_stats",
-	    {LogicalType::ANY, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR},
-	    nullptr, nullptr);
-	ts_stats_varchar_alias.bind_replace = TSStatsVarcharBindReplace;
-	ts_stats_varchar_alias.named_parameters["table_name"] = LogicalType::VARCHAR;
-	ts_stats_varchar_alias.named_parameters["group_col"] = LogicalType::VARCHAR;
-	ts_stats_varchar_alias.named_parameters["date_col"] = LogicalType::VARCHAR;
-	ts_stats_varchar_alias.named_parameters["value_col"] = LogicalType::VARCHAR;
-	ts_stats_varchar_alias.named_parameters["frequency"] = LogicalType::VARCHAR;
-
-	TableFunction ts_stats_integer_alias(
-	    "ts_stats",
-	    {LogicalType::ANY, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::INTEGER},
-	    nullptr, nullptr);
-	ts_stats_integer_alias.bind_replace = TSStatsIntegerBindReplace;
-	ts_stats_integer_alias.named_parameters["table_name"] = LogicalType::VARCHAR;
-	ts_stats_integer_alias.named_parameters["group_col"] = LogicalType::VARCHAR;
-	ts_stats_integer_alias.named_parameters["date_col"] = LogicalType::VARCHAR;
-	ts_stats_integer_alias.named_parameters["value_col"] = LogicalType::VARCHAR;
-	ts_stats_integer_alias.named_parameters["frequency"] = LogicalType::INTEGER;
-
-	TableFunctionSet ts_stats_alias_set("ts_stats");
-	ts_stats_alias_set.AddFunction(std::move(ts_stats_varchar_alias));
-	ts_stats_alias_set.AddFunction(std::move(ts_stats_integer_alias));
-	CreateTableFunctionInfo ts_stats_alias_info(std::move(ts_stats_alias_set));
-	ts_stats_alias_info.alias_of = "anofox_fcst_ts_stats";
-	ts_stats_alias_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
-	loader.RegisterFunction(std::move(ts_stats_alias_info));
-
-	// Register alias for TS_QUALITY_REPORT
 	register_table_alias(ts_quality_report_for_alias);
 }
 

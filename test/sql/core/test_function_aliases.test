@@ -11,6 +11,7 @@ LOAD anofox_forecast;
 statement ok
 CREATE TABLE test_data AS
 SELECT 
+    1 AS series_id,
     ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
     (100.0 + i)::DOUBLE AS value
 FROM generate_series(1, 30) t(i);
@@ -68,14 +69,14 @@ true
 # Test 9: Table function - Full name anofox_fcst_ts_stats
 query I
 SELECT COUNT(*) >= 1
-FROM anofox_fcst_ts_stats('test_data', 1, date_col, value, '1d');
+FROM anofox_fcst_ts_stats('test_data', 'series_id', date_col, value, '1d');
 ----
 true
 
 # Test 10: Table function - Alias ts_stats
 query I
 SELECT COUNT(*) >= 1
-FROM ts_stats('test_data', 1, date_col, value, '1d');
+FROM ts_stats('test_data', 'series_id', date_col, value, '1d');
 ----
 true
 
