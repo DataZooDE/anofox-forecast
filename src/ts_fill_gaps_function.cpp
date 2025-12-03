@@ -652,7 +652,8 @@ unique_ptr<NodeStatistics> TSFillGapsCardinality(ClientContext &context, const F
 
 // Create table-in-out function (internal operator)
 // This function takes TABLE input and processes it
-unique_ptr<TableFunction> CreateTSFillGapsOperatorTableFunction() {
+// Mark as used to prevent linker from dropping it during dead code elimination
+__attribute__((used)) unique_ptr<TableFunction> CreateTSFillGapsOperatorTableFunction() {
 	// Table-in-out function arguments: group_col, date_col, value_col, frequency
 	// The input table columns are provided automatically via the input DataChunk
 	vector<LogicalType> arguments = {
