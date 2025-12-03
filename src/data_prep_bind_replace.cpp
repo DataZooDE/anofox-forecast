@@ -34,54 +34,119 @@ unique_ptr<TableRef> TSFillGapsBindReplace(ClientContext &context, TableFunction
 	if (input.inputs[4].IsNull()) {
 		throw InvalidInputException("frequency parameter is required and cannot be NULL");
 	}
-	string frequency = input.inputs[4].ToString();
-	if (frequency.empty()) {
-		throw InvalidInputException("frequency parameter cannot be empty");
-	}
 
 	// Escape identifiers to prevent SQL injection
-	// Column names should be identifiers (may need quoting if they're keywords)
 	string escaped_group_col = KeywordHelper::WriteOptionallyQuoted(group_col);
 	string escaped_date_col = KeywordHelper::WriteOptionallyQuoted(date_col);
 	string escaped_value_col = KeywordHelper::WriteOptionallyQuoted(value_col);
-	// Table name for QUERY_TABLE should be a string literal
 	string escaped_table = KeywordHelper::WriteQuoted(table_name);
-	// Frequency is a constant string value - always use the defaulted value
-	string escaped_frequency = KeywordHelper::WriteQuoted(frequency);
 
-	// Generate SQL dynamically with optimized Grid-CTE pattern
-	// Key optimization: Normalize date types upfront to enable efficient hash joins
-	// Removed complex OR condition in join predicate (expert recommendation)
+	// Determine if frequency is INTEGER or VARCHAR
+	bool is_integer_frequency =
+	    (input.inputs[4].type().id() == LogicalTypeId::INTEGER || input.inputs[4].type().id() == LogicalTypeId::BIGINT);
+
+	string frequency_str;
+	if (is_integer_frequency) {
+		frequency_str = input.inputs[4].ToString();
+	} else {
+		string frequency = input.inputs[4].ToString();
+		if (frequency.empty()) {
+			throw InvalidInputException("frequency parameter cannot be empty");
+		}
+		frequency_str = KeywordHelper::WriteQuoted(frequency);
+	}
+
+	// Generate SQL dynamically - route based on frequency type
 	std::ostringstream sql;
-	sql << R"(WITH orig_aliased AS (
+
+	if (is_integer_frequency) {
+		// INTEGER frequency: Use integer-based logic (for INTEGER/BIGINT date columns)
+		sql << R"(WITH orig_aliased AS (
     SELECT 
-        )"
-	    << escaped_group_col << R"( AS __gid,
-        CAST()"
-	    << escaped_date_col << R"( AS DATE) AS __did,
-        )"
-	    << escaped_value_col << R"( AS __vid,
+        )" << escaped_group_col
+		    << R"( AS __gid,
+        )" << escaped_date_col
+		    << R"( AS __did,
+        )" << escaped_value_col
+		    << R"( AS __vid,
         *
     FROM QUERY_TABLE()"
-	    << escaped_table << R"()
+		    << escaped_table << R"()
+),
+frequency_parsed AS (
+    SELECT 
+        )" << frequency_str
+		    << R"( AS __int_step
+    FROM (SELECT 1) t
+),
+series_ranges AS (
+    SELECT 
+        __gid,
+        MIN(__did) AS __min,
+        MAX(__did) AS __max
+    FROM orig_aliased
+    GROUP BY __gid
+),
+grid AS (
+    SELECT 
+        sr.__gid,
+        UNNEST(GENERATE_SERIES(sr.__min, sr.__max, fp.__int_step)) AS __did
+    FROM series_ranges sr
+    CROSS JOIN frequency_parsed fp
+),
+with_original_data AS (
+    SELECT 
+        g.__gid,
+        g.__did,
+        oa.__vid,
+        oa.* EXCLUDE (__gid, __did, __vid)
+    FROM grid g
+    LEFT JOIN orig_aliased oa ON g.__gid = oa.__gid AND g.__did = oa.__did
+)
+SELECT 
+    with_original_data.* EXCLUDE (__gid, __did, __vid, )"
+		    << escaped_group_col << R"(, )" << escaped_date_col << R"(, )" << escaped_value_col << R"(),
+    with_original_data.__gid AS )"
+		    << escaped_group_col << R"(,
+    with_original_data.__did AS )"
+		    << escaped_date_col << R"(,
+    with_original_data.__vid AS )"
+		    << escaped_value_col << R"(
+FROM with_original_data
+ORDER BY )" << escaped_group_col
+		    << R"(, )" << escaped_date_col << R"()";
+	} else {
+		// VARCHAR frequency: Use interval-based logic (for DATE/TIMESTAMP columns)
+		// Preserve original date type - don't cast to DATE (loses TIMESTAMP time component)
+		sql << R"(WITH orig_aliased AS (
+    SELECT 
+        )" << escaped_group_col
+		    << R"( AS __gid,
+        )" << escaped_date_col
+		    << R"( AS __did,
+        )" << escaped_value_col
+		    << R"( AS __vid,
+        *
+    FROM QUERY_TABLE()"
+		    << escaped_table << R"()
 ),
 frequency_parsed AS (
     SELECT 
         CASE 
             WHEN UPPER(TRIM()"
-	    << escaped_frequency << R"()) IN ('1D', '1DAY') THEN INTERVAL '1 day'
+		    << frequency_str << R"()) IN ('1D', '1DAY') THEN INTERVAL '1 day'
             WHEN UPPER(TRIM()"
-	    << escaped_frequency << R"()) IN ('30M', '30MIN', '30MINUTE', '30MINUTES') THEN INTERVAL '30 minutes'
+		    << frequency_str << R"()) IN ('30M', '30MIN', '30MINUTE', '30MINUTES') THEN INTERVAL '30 minutes'
             WHEN UPPER(TRIM()"
-	    << escaped_frequency << R"()) IN ('1H', '1HOUR', '1HOURS') THEN INTERVAL '1 hour'
+		    << frequency_str << R"()) IN ('1H', '1HOUR', '1HOURS') THEN INTERVAL '1 hour'
             WHEN UPPER(TRIM()"
-	    << escaped_frequency << R"()) IN ('1W', '1WEEK', '1WEEKS') THEN INTERVAL '1 week'
+		    << frequency_str << R"()) IN ('1W', '1WEEK', '1WEEKS') THEN INTERVAL '1 week'
             WHEN UPPER(TRIM()"
-	    << escaped_frequency << R"()) IN ('1MO', '1MONTH', '1MONTHS') THEN INTERVAL '1 month'
+		    << frequency_str << R"()) IN ('1MO', '1MONTH', '1MONTHS') THEN INTERVAL '1 month'
             WHEN UPPER(TRIM()"
-	    << escaped_frequency << R"()) IN ('1Q', '1QUARTER', '1QUARTERS') THEN INTERVAL '3 months'
+		    << frequency_str << R"()) IN ('1Q', '1QUARTER', '1QUARTERS') THEN INTERVAL '3 months'
             WHEN UPPER(TRIM()"
-	    << escaped_frequency << R"()) IN ('1Y', '1YEAR', '1YEAR') THEN INTERVAL '1 year'
+		    << frequency_str << R"()) IN ('1Y', '1YEAR', '1YEAR') THEN INTERVAL '1 year'
             ELSE INTERVAL '1 day'
         END AS __interval
     FROM (SELECT 1) t
@@ -97,7 +162,7 @@ series_ranges AS (
 grid AS (
     SELECT 
         sr.__gid,
-        CAST(UNNEST(GENERATE_SERIES(sr.__min, sr.__max, fp.__interval)) AS DATE) AS __did
+        UNNEST(GENERATE_SERIES(sr.__min, sr.__max, fp.__interval)) AS __did
     FROM series_ranges sr
     CROSS JOIN frequency_parsed fp
 ),
@@ -112,16 +177,17 @@ with_original_data AS (
 )
 SELECT 
     with_original_data.* EXCLUDE (__gid, __did, __vid, )"
-	    << escaped_group_col << R"(, )" << escaped_date_col << R"(, )" << escaped_value_col << R"(),
+		    << escaped_group_col << R"(, )" << escaped_date_col << R"(, )" << escaped_value_col << R"(),
     with_original_data.__gid AS )"
-	    << escaped_group_col << R"(,
+		    << escaped_group_col << R"(,
     with_original_data.__did AS )"
-	    << escaped_date_col << R"(,
+		    << escaped_date_col << R"(,
     with_original_data.__vid AS )"
-	    << escaped_value_col << R"(
+		    << escaped_value_col << R"(
 FROM with_original_data
-ORDER BY )"
-	    << escaped_group_col << R"(, )" << escaped_date_col << R"()";
+ORDER BY )" << escaped_group_col
+		    << R"(, )" << escaped_date_col << R"()";
+	}
 
 	// Parse the generated SQL and return as SubqueryRef
 	return ParseSubquery(sql.str(), context.GetParserOptions(), "Failed to parse generated SQL for ts_fill_gaps");
@@ -351,75 +417,9 @@ ORDER BY )"
 
 // TS_FILL_GAPS (INTEGER frequency)
 unique_ptr<TableRef> TSFillGapsIntegerBindReplace(ClientContext &context, TableFunctionBindInput &input) {
-	if (input.inputs.size() < 5) {
-		throw InvalidInputException(
-		    "anofox_fcst_ts_fill_gaps requires 5 arguments: table_name, group_col, date_col, value_col, frequency");
-	}
-
-	string table_name = input.inputs[0].ToString();
-	string group_col = input.inputs[1].ToString();
-	string date_col = input.inputs[2].ToString();
-	string value_col = input.inputs[3].ToString();
-	// Frequency is required - reject NULL
-	if (input.inputs[4].IsNull()) {
-		throw InvalidInputException("frequency parameter is required and cannot be NULL");
-	}
-	string frequency_str = input.inputs[4].ToString();
-
-	string escaped_table = KeywordHelper::WriteQuoted(table_name);
-	string escaped_group_col = KeywordHelper::WriteOptionallyQuoted(group_col);
-	string escaped_date_col = KeywordHelper::WriteOptionallyQuoted(date_col);
-	string escaped_value_col = KeywordHelper::WriteOptionallyQuoted(value_col);
-
-	std::ostringstream sql;
-	sql << R"(WITH orig_aliased AS (
-    SELECT 
-        )"
-	    << escaped_group_col << R"( AS __gid,
-        )"
-	    << escaped_date_col << R"( AS __did,
-        )"
-	    << escaped_value_col << R"( AS __vid,
-        *
-    FROM QUERY_TABLE()"
-	    << escaped_table << R"()
-),
-frequency_parsed AS (
-    SELECT 
-        )"
-	    << frequency_str << R"( AS __int_step
-    FROM (SELECT 1) t
-),
-series_ranges AS (
-    SELECT 
-        __gid,
-        MIN(__did) AS __min,
-        MAX(__did) AS __max
-    FROM orig_aliased
-    GROUP BY __gid
-),
-expanded AS (
-    SELECT 
-        sr.__gid,
-        UNNEST(GENERATE_SERIES(sr.__min, sr.__max, fp.__int_step)) AS __did
-    FROM series_ranges sr
-    CROSS JOIN frequency_parsed fp
-),
-with_original_data AS (
-    SELECT 
-        e.__gid,
-        e.__did,
-        oa.__vid,
-        oa.* EXCLUDE (__gid, __did, __vid)
-    FROM expanded e
-    LEFT JOIN orig_aliased oa ON e.__gid = oa.__gid AND e.__did = oa.__did
-)
-)"
-	    << GenerateFinalSelect("with_original_data", escaped_group_col, escaped_date_col, escaped_value_col,
-	                           "with_original_data.__gid", "with_original_data.__did", "with_original_data.__vid");
-
-	return ParseSubquery(sql.str(), context.GetParserOptions(),
-	                     "Failed to parse generated SQL for ts_fill_gaps (INTEGER frequency)");
+	// Same as VARCHAR version - use the table-in-out operator
+	// The operator handles both VARCHAR and INTEGER frequency
+	return TSFillGapsBindReplace(context, input);
 }
 
 // TS_FILL_FORWARD (VARCHAR frequency)

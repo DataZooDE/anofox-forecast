@@ -3,6 +3,7 @@
 #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "data_prep_bind_replace.hpp"
+#include "ts_fill_gaps_function.hpp"
 #include <map>
 #include <set>
 #include <vector>
@@ -735,7 +736,25 @@ void RegisterDataPrepMacros(ExtensionLoader &loader) {
 	fill_nulls_const.named_parameters["fill_value"] = LogicalType::ANY;
 	loader.RegisterFunction(fill_nulls_const);
 
-	// TS_FILL_GAPS: VARCHAR frequency (already registered, keep for reference)
+	// TS_FILL_GAPS: Table-In-Out operator (internal function)
+	// This is the native C++ implementation that takes TABLE input
+	auto ts_fill_gaps_operator = CreateTSFillGapsOperatorTableFunction();
+	TableFunctionSet ts_fill_gaps_operator_set("anofox_fcst_ts_fill_gaps_operator");
+	ts_fill_gaps_operator_set.AddFunction(*ts_fill_gaps_operator);
+	CreateTableFunctionInfo ts_fill_gaps_operator_info(std::move(ts_fill_gaps_operator_set));
+	loader.RegisterFunction(std::move(ts_fill_gaps_operator_info));
+
+	// Register alias for ts_fill_gaps_operator
+	auto ts_fill_gaps_operator_alias = CreateTSFillGapsOperatorTableFunction();
+	TableFunctionSet ts_fill_gaps_operator_alias_set("ts_fill_gaps_operator");
+	ts_fill_gaps_operator_alias_set.AddFunction(*ts_fill_gaps_operator_alias);
+	CreateTableFunctionInfo ts_fill_gaps_operator_alias_info(std::move(ts_fill_gaps_operator_alias_set));
+	ts_fill_gaps_operator_alias_info.alias_of = "anofox_fcst_ts_fill_gaps_operator";
+	ts_fill_gaps_operator_alias_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+	loader.RegisterFunction(std::move(ts_fill_gaps_operator_alias_info));
+
+	// TS_FILL_GAPS: Public API with string table name (uses bind_replace to pipe into operator)
+	// VARCHAR frequency overload
 	TableFunction ts_fill_gaps_varchar(
 	    "anofox_fcst_ts_fill_gaps",
 	    {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR},
@@ -748,7 +767,7 @@ void RegisterDataPrepMacros(ExtensionLoader &loader) {
 	ts_fill_gaps_varchar.named_parameters["frequency"] = LogicalType::VARCHAR;
 	loader.RegisterFunction(ts_fill_gaps_varchar);
 
-	// TS_FILL_GAPS: INTEGER frequency
+	// INTEGER frequency overload
 	TableFunction ts_fill_gaps_integer(
 	    "anofox_fcst_ts_fill_gaps",
 	    {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::INTEGER},

@@ -450,6 +450,110 @@ SELECT * FROM anofox_fcst_ts_fill_gaps('int_data', series_id, date_col, value, 2
 
 ---
 
+#### anofox_fcst_ts_fill_gaps_operator (alias: `ts_fill_gaps_operator`)
+
+**Native C++ Table-In-Out Operator for Gap Filling**
+
+High-performance native C++ implementation that processes table input directly. This is the internal operator used by the public `anofox_fcst_ts_fill_gaps` API. Can be called directly for maximum performance when you have a table reference.
+
+**Signature (Function Overloading):**
+```sql
+-- For DATE/TIMESTAMP columns (date-based frequency)
+anofox_fcst_ts_fill_gaps_operator(
+    input_table   TABLE,
+    group_col     VARCHAR,
+    date_col      VARCHAR,
+    value_col     VARCHAR,
+    frequency     VARCHAR
+) → TABLE
+
+-- For INTEGER columns (integer-based frequency)
+anofox_fcst_ts_fill_gaps_operator(
+    input_table   TABLE,
+    group_col     VARCHAR,
+    date_col      VARCHAR,
+    value_col     VARCHAR,
+    frequency     INTEGER
+) → TABLE
+```
+
+**Parameters:**
+- `input_table`: Input table as `TABLE` type (e.g., `TABLE my_table` or `TABLE (SELECT * FROM my_table)`)
+- `group_col`: Grouping column name as string literal (e.g., `'series_id'`)
+- `date_col`: Date/timestamp column name as string literal
+- `value_col`: Value column name as string literal
+- `frequency`: 
+  - **For DATE/TIMESTAMP columns**: Required frequency string (Polars-style).
+    - `"30m"` or `"30min"` - 30 minutes
+    - `"1h"` - 1 hour
+    - `"1d"` - 1 day
+    - `"1w"` - 1 week
+    - `"1mo"` - 1 month
+    - `"1q"` - 1 quarter (3 months)
+    - `"1y"` - 1 year
+  - **For INTEGER columns**: Required integer step size.
+    - `1`, `2`, `3`, etc. - Integer step size for `GENERATE_SERIES`
+
+**Type Validation:**
+- DuckDB automatically selects the correct overload based on the `frequency` parameter type:
+  - VARCHAR frequency → DATE/TIMESTAMP date column required
+  - INTEGER frequency → INTEGER/BIGINT date column required
+- If there's a type mismatch (e.g., INTEGER date column with VARCHAR frequency), a `Binder Error` will be raised at query time.
+
+**Behavior:** Fills missing timestamps/indices in series with NULL values using the specified frequency interval or step size. This is the native C++ implementation that provides significantly better performance (6-258x faster) than the SQL-based approach, especially for large datasets.
+
+**Performance Notes:**
+- **6-258x faster** than SQL version depending on dataset size
+- Avoids SQL materialization overhead
+- Uses efficient O(1) hash set lookups for gap detection
+- Best performance for datasets >100K rows
+
+**Examples:**
+```sql
+-- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
+-- Direct table reference (maximum performance)
+SELECT * FROM anofox_fcst_ts_fill_gaps_operator(
+    TABLE daily_data,
+    'series_id',
+    'date',
+    'value',
+    '1d'
+);
+
+-- Using alias
+SELECT * FROM ts_fill_gaps_operator(
+    TABLE daily_data,
+    'series_id',
+    'date',
+    'value',
+    '1d'
+);
+
+-- With subquery
+SELECT * FROM anofox_fcst_ts_fill_gaps_operator(
+    TABLE (SELECT * FROM sales WHERE date >= '2024-01-01'),
+    'product_id',
+    'date',
+    'amount',
+    '1d'
+);
+
+-- INTEGER columns: Use INTEGER frequency values
+SELECT * FROM anofox_fcst_ts_fill_gaps_operator(
+    TABLE int_data,
+    'series_id',
+    'date_col',
+    'value',
+    1
+);
+```
+
+**When to Use:**
+- **Use `anofox_fcst_ts_fill_gaps`** (string API): When you have a table name as a string, for ease of use and compatibility
+- **Use `anofox_fcst_ts_fill_gaps_operator`** (TABLE API): When you need maximum performance and have a direct table reference
+
+---
+
 #### anofox_fcst_ts_fill_forward (alias: `ts_fill_forward`)
 
 **Extend Series to Target Date**
