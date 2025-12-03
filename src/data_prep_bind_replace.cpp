@@ -49,19 +49,19 @@ unique_ptr<TableRef> TSFillGapsBindReplace(ClientContext &context, TableFunction
 	// Frequency is a constant string value - always use the defaulted value
 	string escaped_frequency = KeywordHelper::WriteQuoted(frequency);
 
-	// Generate SQL dynamically with column preservation pattern
+	// Generate SQL dynamically with optimized Grid-CTE pattern
+	// Key optimization: Normalize date types upfront to enable efficient hash joins
+	// Removed complex OR condition in join predicate (expert recommendation)
 	std::ostringstream sql;
 	sql << R"(WITH orig_aliased AS (
     SELECT 
         )"
 	    << escaped_group_col << R"( AS __gid,
-        )"
-	    << escaped_date_col << R"( AS __did,
+        CAST()"
+	    << escaped_date_col << R"( AS DATE) AS __did,
         )"
 	    << escaped_value_col << R"( AS __vid,
-        *,
-        CAST()"
-	    << escaped_date_col << R"( AS DATE) AS __did_normalized
+        *
     FROM QUERY_TABLE()"
 	    << escaped_table << R"()
 ),
@@ -90,42 +90,25 @@ series_ranges AS (
     SELECT 
         __gid,
         MIN(__did) AS __min,
-        MAX(__did) AS __max,
-        MIN(__did) = CAST(MIN(__did) AS DATE) AS __is_date_type
+        MAX(__did) AS __max
     FROM orig_aliased
     GROUP BY __gid
 ),
-expanded_raw AS (
+grid AS (
     SELECT 
         sr.__gid,
-        UNNEST(GENERATE_SERIES(sr.__min, sr.__max, fp.__interval)) AS __did_raw,
-        sr.__is_date_type
+        CAST(UNNEST(GENERATE_SERIES(sr.__min, sr.__max, fp.__interval)) AS DATE) AS __did
     FROM series_ranges sr
     CROSS JOIN frequency_parsed fp
 ),
-expanded AS (
-    SELECT 
-        __gid,
-        CASE 
-            WHEN __is_date_type THEN CAST(__did_raw AS DATE)
-            ELSE __did_raw
-        END AS __did,
-        __is_date_type
-    FROM expanded_raw
-),
 with_original_data AS (
     SELECT 
-        e.__gid,
-        COALESCE(oa.__did, e.__did) AS __did,
+        g.__gid,
+        g.__did,
         oa.__vid,
-        oa.* EXCLUDE (__gid, __did, __vid, __did_normalized)
-    FROM expanded e
-    LEFT JOIN orig_aliased oa ON e.__gid = oa.__gid 
-        AND (
-            (e.__is_date_type AND e.__did = oa.__did_normalized)
-            OR
-            (NOT e.__is_date_type AND e.__did = oa.__did)
-        )
+        oa.* EXCLUDE (__gid, __did, __vid)
+    FROM grid g
+    LEFT JOIN orig_aliased oa ON g.__gid = oa.__gid AND g.__did = oa.__did
 )
 SELECT 
     with_original_data.* EXCLUDE (__gid, __did, __vid, )"
