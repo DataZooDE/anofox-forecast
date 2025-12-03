@@ -37,6 +37,7 @@ A time series forecasting extension for DuckDB with 31 models, data preparation,
 - **Parallel**: Native DuckDB parallelization on GROUP BY
 - **Scalable**: Handles millions of series
 - **Memory Efficient**: Columnar storage, streaming operations
+- **Native C++ Operators**: High-performance native implementations for data preparation (e.g., `ts_fill_gaps_operator` with 6-258x speedup)
 
 ### 🎨 User-Friendly API
 - **Zero Setup**: All macros load automatically
