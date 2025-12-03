@@ -142,6 +142,34 @@ OperatorFinalizeResultType TSFillGapsOperatorFinal(ExecutionContext &context, Ta
 unique_ptr<NodeStatistics> TSFillGapsCardinality(ClientContext &context, const FunctionData *bind_data);
 
 // Create table-in-out function for internal use (takes TABLE input)
-unique_ptr<TableFunction> CreateTSFillGapsOperatorTableFunction();
+// Defined inline to avoid linker issues with static libraries (especially on Alpine/musl)
+inline unique_ptr<TableFunction> CreateTSFillGapsOperatorTableFunction() {
+	// Table-in-out function arguments: group_col, date_col, value_col, frequency
+	// The input table columns are provided automatically via the input DataChunk
+	vector<LogicalType> arguments = {
+	    LogicalType::VARCHAR, // group_col
+	    LogicalType::VARCHAR, // date_col
+	    LogicalType::VARCHAR, // value_col
+	    LogicalType::ANY      // frequency (VARCHAR or INTEGER)
+	};
+
+	// Create table function with nullptr for regular function (we use in_out_function)
+	TableFunction table_function(arguments, nullptr, TSFillGapsOperatorBind, TSFillGapsOperatorInitGlobal,
+	                             TSFillGapsOperatorInitLocal);
+
+	// Set in-out handlers
+	table_function.in_out_function = TSFillGapsOperatorInOut;
+	table_function.in_out_function_final = TSFillGapsOperatorFinal;
+	table_function.cardinality = TSFillGapsCardinality;
+	table_function.name = "anofox_fcst_ts_fill_gaps_operator";
+
+	// Named parameters
+	table_function.named_parameters["group_col"] = LogicalType::VARCHAR;
+	table_function.named_parameters["date_col"] = LogicalType::VARCHAR;
+	table_function.named_parameters["value_col"] = LogicalType::VARCHAR;
+	table_function.named_parameters["frequency"] = LogicalType::ANY;
+
+	return make_uniq<TableFunction>(std::move(table_function));
+}
 
 } // namespace duckdb

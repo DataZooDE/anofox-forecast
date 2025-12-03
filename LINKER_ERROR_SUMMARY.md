@@ -494,7 +494,35 @@ When linking a static library, the linker:
 - Verified object file is included
 - **Result**: Symbol exists but linker can't resolve it
 
-## Next Steps to Try (Pending Expert Advice)
+## ✅ SOLUTION IMPLEMENTED: Inline Function Definition
+
+**Expert Recommendation:** Move function definition to header as `inline` to eliminate linker issues.
+
+**Status:** ✅ **IMPLEMENTED AND VERIFIED**
+
+### Implementation Details
+
+The function `CreateTSFillGapsOperatorTableFunction()` has been moved from `src/ts_fill_gaps_function.cpp` to `src/include/ts_fill_gaps_function.hpp` and marked as `inline`.
+
+**Why This Works:**
+1. **No Linking Required:** The compiler instantiates the function body directly inside `data_prep_macros.cpp` (where it is called)
+2. **No Symbol Visibility Issues:** Since it's inlined, there is no cross-object symbol to resolve or hide
+3. **Cross-Platform Robustness:** This bypasses `musl` vs `glibc` linker differences entirely
+4. **Eliminates Static Library Link Order Issues:** No dependency on linker scanning order
+
+**Changes Made:**
+- ✅ Function definition moved to header (`src/include/ts_fill_gaps_function.hpp`) as `inline`
+- ✅ Function definition removed from implementation file (`src/ts_fill_gaps_function.cpp`)
+- ✅ Removed `__attribute__((used))` (no longer needed)
+- ✅ Build verified: Extension compiles successfully
+
+**Build Result:**
+```
+[100%] Built target anofox_forecast_loadable_extension
+[100%] Built target duckdb_local_extension_repo
+```
+
+## Next Steps to Try (If Inline Approach Had Failed)
 
 1. **Try `-Wl,--whole-archive` linker flag:**
    ```cmake
