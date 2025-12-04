@@ -133,7 +133,11 @@ set(EXTENSION_SOURCES
     src/changepoint_function.cpp
     src/eda_macros.cpp
     src/eda_bind_replace.cpp
+    # Order matters for static library linking: consumer before producer
+    # data_prep_macros.cpp USES CreateTSFillGapsOperatorTableFunction()
     src/data_prep_macros.cpp
+    # ts_fill_gaps_function.cpp DEFINES CreateTSFillGapsOperatorTableFunction()
+    src/ts_fill_gaps_function.cpp
     src/data_prep_bind_replace.cpp
     src/model_factory.cpp
     src/time_series_builder.cpp
@@ -191,3 +195,45 @@ install(
   EXPORT "${DUCKDB_EXPORT_SET}"
   LIBRARY DESTINATION "${INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${INSTALL_LIB_DIR}")
+
+# --- Unit Tests for ts_fill_gaps (must pass before DuckDB binding) ---
+option(BUILD_TS_FILL_GAPS_TESTS "Build unit tests for ts_fill_gaps" ON)
+
+if(BUILD_TS_FILL_GAPS_TESTS)
+    enable_testing()
+    include(CTest)
+    
+    # Find Catch2 (DuckDB's version)
+    set(CATCH_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/duckdb/third_party/catch")
+    
+    if(EXISTS "${CATCH_INCLUDE_DIR}/catch.hpp")
+        # Create test executable
+        add_executable(ts_fill_gaps_tests
+            test/cpp/test_ts_fill_gaps.cpp
+            src/ts_fill_gaps_function.cpp
+        )
+        
+        # Include directories
+        target_include_directories(ts_fill_gaps_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/duckdb/src/include
+            ${CATCH_INCLUDE_DIR}
+        )
+        
+        # Link DuckDB (we need the types and exception classes)
+        # Note: This requires DuckDB to be built first
+        # For now, we'll link against the extension which includes DuckDB
+        target_link_libraries(ts_fill_gaps_tests PRIVATE
+            ${EXTENSION_NAME}
+            Threads::Threads
+        )
+        
+        # Add test
+        add_test(NAME ts_fill_gaps_unit_tests COMMAND ts_fill_gaps_tests)
+        
+        message(STATUS "ts_fill_gaps unit tests enabled")
+    else()
+        message(WARNING "Catch2 not found at ${CATCH_INCLUDE_DIR} - skipping ts_fill_gaps unit tests")
+    endif()
+endif()
