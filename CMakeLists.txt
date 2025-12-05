@@ -140,7 +140,6 @@ set(EXTENSION_SOURCES
     src/ts_fill_gaps_function.cpp
     src/mstl_decomposition_function.cpp
     src/data_prep_bind_replace.cpp
-    src/test_batch_index_reproduction.cpp
     src/model_factory.cpp
     src/time_series_builder.cpp
     src/anofox_time_wrapper.cpp
