@@ -1,0 +1,228 @@
+# name: test/sql/data_prep/test_ts_fill_gaps_bind_replace.test
+# description: Test ts_fill_gaps with bind_replace implementation for column preservation and type handling
+# group: [data_prep]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast;
+
+#############################################
+# COLUMN PRESERVATION TESTS
+#############################################
+
+# Test: ts_fill_gaps preserves all columns with extra columns
+statement ok
+CREATE TABLE test_gaps_with_extra_cols AS
+SELECT 
+    ('2024-01-01'::DATE + INTERVAL (i) DAY) AS date_col,
+    'series_1' AS series_id,
+    CASE WHEN i IN (3, 5, 7) THEN NULL ELSE 100.0 + i * 2.0 END AS value,
+    'category_A' AS category,
+    42 AS metadata_id,
+    TRUE AS is_active
+FROM generate_series(1, 10) t(i)
+WHERE i NOT IN (4, 6);  -- Create gaps on days 4 and 6
+
+statement ok
+CREATE TABLE filled_gaps_result AS
+SELECT * FROM anofox_fcst_ts_fill_gaps('test_gaps_with_extra_cols', 'series_id', 'date_col', 'value', '1d');
+
+# Verify all original columns are preserved - check that original rows still have their values
+query I
+SELECT COUNT(*) = 8
+FROM filled_gaps_result
+WHERE category = 'category_A' AND metadata_id = 42 AND is_active = TRUE;
+----
+true
+
+# Verify gaps were filled (should have 10 rows, not 8)
+query I
+SELECT COUNT(*) = 10
+FROM filled_gaps_result;
+----
+true
+
+# Verify the extra columns still have correct values
+query I
+SELECT COUNT(*) = 2
+FROM filled_gaps_result
+WHERE date_col IN ('2024-01-04'::DATE, '2024-01-06'::DATE) AND value IS NULL;
+----
+true
+
+#############################################
+# DATE TYPE PRESERVATION TESTS
+#############################################
+
+# Test: DATE columns remain DATE type
+statement ok
+CREATE TABLE test_gaps_date_type AS
+SELECT 
+    ('2024-01-01'::DATE + INTERVAL (i) DAY) AS date_col,
+    'series_A' AS series_id,
+    i * 10.0 AS value
+FROM generate_series(1, 5) t(i)
+WHERE i != 3;  -- Gap on day 3
+
+statement ok
+CREATE TABLE filled_gaps_date AS
+SELECT * FROM anofox_fcst_ts_fill_gaps('test_gaps_date_type', 'series_id', 'date_col', 'value', '1d');
+
+# Verify DATE type is preserved - should have 5 rows (4 original + 1 filled gap)
+query I
+SELECT COUNT(*) = 5
+FROM filled_gaps_date;
+----
+true
+
+# Test: TIMESTAMP columns remain TIMESTAMP type
+statement ok
+CREATE TABLE test_gaps_timestamp_type AS
+SELECT 
+    ('2024-01-01 12:00:00'::TIMESTAMP + INTERVAL (i) DAY) AS date_col,
+    'series_B' AS series_id,
+    i * 10.0 AS value
+FROM generate_series(1, 5) t(i)
+WHERE i != 3;  -- Gap on day 3
+
+statement ok
+CREATE TABLE filled_gaps_timestamp AS
+SELECT * FROM anofox_fcst_ts_fill_gaps('test_gaps_timestamp_type', 'series_id', 'date_col', 'value', '1d');
+
+# Verify TIMESTAMP type is preserved (check that time component exists)
+query I
+SELECT COUNT(*) = 5
+FROM filled_gaps_timestamp
+WHERE EXTRACT(HOUR FROM date_col) = 12;
+----
+true
+
+#############################################
+# CONFLICTING COLUMN NAMES TEST
+#############################################
+
+# Test: Table with columns named group_col, date_col, value_col (conflicting names)
+statement ok
+CREATE TABLE test_conflicting_cols AS
+SELECT 
+    ('2024-01-01'::DATE + INTERVAL (i) DAY) AS date_col,
+    'series_1' AS group_col,
+    CASE WHEN i IN (3, 5) THEN NULL ELSE 100.0 + i END AS value_col,
+    'extra_info' AS metadata
+FROM generate_series(1, 5) t(i)
+WHERE i != 4;  -- Gap on day 4
+
+statement ok
+CREATE TABLE filled_conflicting AS
+SELECT * FROM anofox_fcst_ts_fill_gaps('test_conflicting_cols', 'group_col', 'date_col', 'value_col', '1d');
+
+# Verify result has all columns including metadata
+# Original rows should have metadata, filled gaps should have NULL
+query I
+SELECT COUNT(*) = 4
+FROM filled_conflicting
+WHERE metadata = 'extra_info';
+----
+true
+
+# Verify filled gap has NULL metadata
+query I
+SELECT COUNT(*) = 1
+FROM filled_conflicting
+WHERE metadata IS NULL;
+----
+true
+
+# Verify the output has group_col, date_col, value_col (the processed ones)
+query I
+SELECT COUNT(*) = 5
+FROM filled_conflicting
+WHERE group_col = 'series_1';
+----
+true
+
+#############################################
+# FREQUENCY PARAMETER TESTS
+#############################################
+
+# Test: Different frequency strings
+statement ok
+CREATE TABLE test_freq_weekly AS
+SELECT 
+    ('2024-01-01'::DATE + INTERVAL (i * 7) DAY) AS date_col,
+    'series_weekly' AS series_id,
+    i * 10.0 AS value
+FROM generate_series(1, 3) t(i);
+
+statement ok
+CREATE TABLE filled_weekly AS
+SELECT * FROM anofox_fcst_ts_fill_gaps('test_freq_weekly', 'series_id', 'date_col', 'value', '1w');
+
+# Verify weekly frequency works
+query I
+SELECT COUNT(*) >= 3
+FROM filled_weekly;
+----
+true
+
+# Test: Monthly frequency
+statement ok
+CREATE TABLE test_freq_monthly AS
+SELECT 
+    ('2024-01-01'::DATE + INTERVAL (i) MONTH) AS date_col,
+    'series_monthly' AS series_id,
+    i * 10.0 AS value
+FROM generate_series(0, 2) t(i);
+
+statement ok
+CREATE TABLE filled_monthly AS
+SELECT * FROM anofox_fcst_ts_fill_gaps('test_freq_monthly', 'series_id', 'date_col', 'value', '1mo');
+
+# Verify monthly frequency works
+query I
+SELECT COUNT(*) >= 3
+FROM filled_monthly;
+----
+true
+
+#############################################
+# CLEANUP
+#############################################
+
+statement ok
+DROP TABLE IF EXISTS test_gaps_with_extra_cols;
+
+statement ok
+DROP TABLE IF EXISTS filled_gaps_result;
+
+statement ok
+DROP TABLE IF EXISTS test_gaps_date_type;
+
+statement ok
+DROP TABLE IF EXISTS filled_gaps_date;
+
+statement ok
+DROP TABLE IF EXISTS test_gaps_timestamp_type;
+
+statement ok
+DROP TABLE IF EXISTS filled_gaps_timestamp;
+
+statement ok
+DROP TABLE IF EXISTS test_conflicting_cols;
+
+statement ok
+DROP TABLE IF EXISTS filled_conflicting;
+
+statement ok
+DROP TABLE IF EXISTS test_freq_weekly;
+
+statement ok
+DROP TABLE IF EXISTS filled_weekly;
+
+statement ok
+DROP TABLE IF EXISTS test_freq_monthly;
+
+statement ok
+DROP TABLE IF EXISTS filled_monthly;
+

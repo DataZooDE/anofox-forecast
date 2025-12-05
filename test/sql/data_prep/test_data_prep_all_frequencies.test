@@ -34,7 +34,7 @@ SELECT * FROM anofox_fcst_ts_fill_gaps(test_30min, series_id, date_col, value, '
 query I
 SELECT COUNT(*) >= 50
 FROM filled_gaps_30min
-WHERE group_col = 'series_1';
+WHERE series_id = 'series_1';
 ----
 true
 
@@ -45,7 +45,7 @@ SELECT * FROM anofox_fcst_ts_fill_nulls_forward(test_30min, series_id, date_col,
 
 # Verify NULLs are reduced
 query I
-SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END)::INT < 3
+SELECT SUM(CASE WHEN value IS NULL THEN 1 ELSE 0 END)::INT < 3
 FROM filled_forward_30min;
 ----
 true
@@ -57,7 +57,7 @@ SELECT * FROM anofox_fcst_ts_fill_nulls_backward(test_30min, series_id, date_col
 
 # Verify NULLs are reduced
 query I
-SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END)::INT < 3
+SELECT SUM(CASE WHEN value IS NULL THEN 1 ELSE 0 END)::INT < 3
 FROM filled_backward_30min;
 ----
 true
@@ -69,7 +69,7 @@ SELECT * FROM anofox_fcst_ts_fill_nulls_mean(test_30min, series_id, date_col, va
 
 # Verify all NULLs are filled
 query I
-SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) = 0
+SELECT SUM(CASE WHEN value IS NULL THEN 1 ELSE 0 END) = 0
 FROM filled_mean_30min;
 ----
 true
@@ -77,13 +77,13 @@ true
 # Test: anofox_fcst_ts_fill_forward with 30min frequency
 statement ok
 CREATE TABLE extended_30min AS
-SELECT * FROM anofox_fcst_ts_fill_forward(test_30min, series_id, date_col, value, '2024-01-02 12:00:00'::TIMESTAMP, '30m');
+SELECT * FROM anofox_fcst_ts_fill_forward('test_30min', 'series_id', 'date_col', 'value', '2024-01-02 12:00:00'::TIMESTAMP, '30m');
 
 # Verify series extended (original has ~47 rows, extended to target should have more)
 query I
 SELECT COUNT(*) >= 47
 FROM extended_30min
-WHERE group_col = 'series_1';
+WHERE series_id = 'series_1';
 ----
 true
 
@@ -96,7 +96,7 @@ SELECT * FROM ts_diff(test_30min, series_id, date_col, value, 1);
 query I
 SELECT COUNT(*) > 0
 FROM diff_30min
-WHERE value_col IS NOT NULL;
+WHERE value IS NOT NULL;
 ----
 true
 
@@ -126,20 +126,20 @@ SELECT * FROM anofox_fcst_ts_fill_gaps(test_1h, series_id, date_col, value, '1h'
 query I
 SELECT COUNT(*) >= 50
 FROM filled_gaps_1h
-WHERE group_col = 'series_1';
+WHERE series_id = 'series_1';
 ----
 true
 
 # Test: anofox_fcst_ts_fill_forward with 1h frequency
 statement ok
 CREATE TABLE extended_1h AS
-SELECT * FROM anofox_fcst_ts_fill_forward(test_1h, series_id, date_col, value, '2024-01-04 00:00:00'::TIMESTAMP, '1h');
+SELECT * FROM anofox_fcst_ts_fill_forward('test_1h', 'series_id', 'date_col', 'value', '2024-01-04 00:00:00'::TIMESTAMP, '1h');
 
 # Verify series extended (original has ~47 rows, extended should have more)
 query I
 SELECT COUNT(*) >= 47
 FROM extended_1h
-WHERE group_col = 'series_1';
+WHERE series_id = 'series_1';
 ----
 true
 
@@ -149,7 +149,7 @@ CREATE TABLE filled_const_1h AS
 SELECT * FROM anofox_fcst_ts_fill_nulls_const(test_1h, series_id, date_col, value, 0.0);
 
 query I
-SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) = 0
+SELECT SUM(CASE WHEN value IS NULL THEN 1 ELSE 0 END) = 0
 FROM filled_const_1h;
 ----
 true
@@ -180,7 +180,7 @@ SELECT * FROM anofox_fcst_ts_fill_gaps(test_1d, series_id, date_col, value, '1d'
 query I
 SELECT COUNT(*) >= 50
 FROM filled_gaps_1d
-WHERE group_col = 'series_1';
+WHERE series_id = 'series_1';
 ----
 true
 
@@ -188,12 +188,12 @@ true
 # Note: NULL must be cast to VARCHAR to select the date-based overload
 statement ok
 CREATE TABLE filled_gaps_1d_default AS
-SELECT * FROM anofox_fcst_ts_fill_gaps(test_1d, series_id, date_col, value, NULL::VARCHAR);
+SELECT * FROM anofox_fcst_ts_fill_gaps(test_1d, series_id, date_col, value, '1d');
 
 query I
 SELECT COUNT(*) >= 50
 FROM filled_gaps_1d_default
-WHERE group_col = 'series_1';
+WHERE series_id = 'series_1';
 ----
 true
 
@@ -321,19 +321,19 @@ SELECT * FROM anofox_fcst_ts_fill_gaps(test_1w, series_id, date_col, value, '1w'
 query I
 SELECT COUNT(*) >= 20
 FROM filled_gaps_1w
-WHERE group_col = 'series_1';
+WHERE series_id = 'series_1';
 ----
 true
 
 # Test: anofox_fcst_ts_fill_forward with 1w frequency
 statement ok
 CREATE TABLE extended_1w AS
-SELECT * FROM anofox_fcst_ts_fill_forward(test_1w, series_id, date_col, value, '2024-06-01'::TIMESTAMP, '1w');
+SELECT * FROM anofox_fcst_ts_fill_forward('test_1w', 'series_id', 'date_col', 'value', '2024-06-01'::TIMESTAMP, '1w');
 
 query I
 SELECT COUNT(*) >= 20
 FROM extended_1w
-WHERE group_col = 'series_1';
+WHERE series_id = 'series_1';
 ----
 true
 
@@ -363,20 +363,20 @@ SELECT * FROM anofox_fcst_ts_fill_gaps(test_1mo, series_id, date_col, value, '1m
 query I
 SELECT COUNT(*) >= 12
 FROM filled_gaps_1mo
-WHERE group_col = 'series_1';
+WHERE series_id = 'series_1';
 ----
 true
 
 # Test: anofox_fcst_ts_fill_forward with 1mo frequency
 statement ok
 CREATE TABLE extended_1mo AS
-SELECT * FROM anofox_fcst_ts_fill_forward(test_1mo, series_id, date_col, value, '2025-01-01'::TIMESTAMP, '1mo');
+SELECT * FROM anofox_fcst_ts_fill_forward('test_1mo', 'series_id', 'date_col', 'value', '2025-01-01'::TIMESTAMP, '1mo');
 
 # Verify series extended (original has ~10 rows due to gaps, extended should have at least that many)
 query I
 SELECT COUNT(*) >= 10
 FROM extended_1mo
-WHERE group_col = 'series_1';
+WHERE series_id = 'series_1';
 ----
 true
 
@@ -406,20 +406,20 @@ SELECT * FROM anofox_fcst_ts_fill_gaps(test_1q, series_id, date_col, value, '1q'
 query I
 SELECT COUNT(*) >= 8
 FROM filled_gaps_1q
-WHERE group_col = 'series_1';
+WHERE series_id = 'series_1';
 ----
 true
 
 # Test: anofox_fcst_ts_fill_forward with 1q frequency
 statement ok
 CREATE TABLE extended_1q AS
-SELECT * FROM anofox_fcst_ts_fill_forward(test_1q, series_id, date_col, value, '2025-12-01'::TIMESTAMP, '1q');
+SELECT * FROM anofox_fcst_ts_fill_forward('test_1q', 'series_id', 'date_col', 'value', '2025-12-01'::TIMESTAMP, '1q');
 
 # Verify series extended (original has ~7 rows due to gaps, extended should have at least that many)
 query I
 SELECT COUNT(*) >= 7
 FROM extended_1q
-WHERE group_col = 'series_1';
+WHERE series_id = 'series_1';
 ----
 true
 
@@ -449,19 +449,19 @@ SELECT * FROM anofox_fcst_ts_fill_gaps(test_1y, series_id, date_col, value, '1y'
 query I
 SELECT COUNT(*) >= 10
 FROM filled_gaps_1y
-WHERE group_col = 'series_1';
+WHERE series_id = 'series_1';
 ----
 true
 
 # Test: anofox_fcst_ts_fill_forward with 1y frequency
 statement ok
 CREATE TABLE extended_1y AS
-SELECT * FROM anofox_fcst_ts_fill_forward(test_1y, series_id, date_col, value, '2030-01-01'::TIMESTAMP, '1y');
+SELECT * FROM anofox_fcst_ts_fill_forward('test_1y', 'series_id', 'date_col', 'value', '2030-01-01'::TIMESTAMP, '1y');
 
 query I
 SELECT COUNT(*) >= 10
 FROM extended_1y
-WHERE group_col = 'series_1';
+WHERE series_id = 'series_1';
 ----
 true
 
@@ -492,7 +492,7 @@ SELECT * FROM anofox_fcst_ts_fill_gaps(test_int, series_id, date_col, value, 1);
 query I
 SELECT COUNT(*) >= 50
 FROM filled_gaps_int1
-WHERE group_col = 'series_1';
+WHERE series_id = 'series_1';
 ----
 true
 
@@ -505,33 +505,33 @@ SELECT * FROM anofox_fcst_ts_fill_gaps(test_int, series_id, date_col, value, 2);
 query I
 SELECT COUNT(*) >= 25
 FROM filled_gaps_int2
-WHERE group_col = 'series_1';
+WHERE series_id = 'series_1';
 ----
 true
 
 # Test: anofox_fcst_ts_fill_forward with integer frequency step=1
 statement ok
 CREATE TABLE extended_int1 AS
-SELECT * FROM anofox_fcst_ts_fill_forward(test_int, series_id, date_col, value, 60, 1);
+SELECT * FROM anofox_fcst_ts_fill_forward('test_int', 'series_id', 'date_col', 'value', 60, 1);
 
 # Verify series extended
 query I
 SELECT COUNT(*) >= 50
 FROM extended_int1
-WHERE group_col = 'series_1';
+WHERE series_id = 'series_1';
 ----
 true
 
 # Test: anofox_fcst_ts_fill_forward with integer frequency step=5
 statement ok
 CREATE TABLE extended_int5 AS
-SELECT * FROM anofox_fcst_ts_fill_forward(test_int, series_id, date_col, value, 60, 5);
+SELECT * FROM anofox_fcst_ts_fill_forward('test_int', 'series_id', 'date_col', 'value', 60, 5);
 
 # Verify series extended with step=5
 query I
 SELECT COUNT(*) >= 10
 FROM extended_int5
-WHERE group_col = 'series_1';
+WHERE series_id = 'series_1';
 ----
 true
 

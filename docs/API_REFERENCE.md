@@ -114,7 +114,7 @@ Functions follow consistent naming patterns:
 
 ## Exploratory Data Analysis
 
-SQL macros for exploratory data analysis and quality assessment.
+Table functions and SQL macros for exploratory data analysis and quality assessment.
 
 ### Per-Series Statistics
 
@@ -122,30 +122,24 @@ SQL macros for exploratory data analysis and quality assessment.
 
 Computes per-series statistical metrics including length, date ranges, central tendencies (mean, median), dispersion (std), value distributions (min, max, zeros), and quality indicators (nulls, uniqueness, constancy). Returns 24 metrics per series for exploratory analysis and data profiling.
 
-**Signature (Function Overloading):**
+**Signature:**
 ```sql
--- For DATE/TIMESTAMP columns (date-based frequency)
 anofox_fcst_ts_stats(
-    table_name    VARCHAR,
-    group_col     ANY,
-    date_col      DATE | TIMESTAMP,
-    value_col     DOUBLE,
-    frequency     VARCHAR
-) → TABLE
-
--- For INTEGER columns (integer-based frequency)
-anofox_fcst_ts_stats(
-    table_name    VARCHAR,
-    group_col     ANY,
-    date_col      INTEGER | BIGINT,
-    value_col     DOUBLE,
-    frequency     INTEGER
+    table_name    VARCHAR | TABLE_IDENTIFIER,
+    group_col     VARCHAR | COLUMN_REFERENCE,
+    date_col      VARCHAR | COLUMN_REFERENCE,
+    value_col     VARCHAR | COLUMN_REFERENCE,
+    frequency     VARCHAR | INTEGER
 ) → TABLE
 ```
 
 **Parameters:**
+- `table_name`: Table name as string literal (e.g., `'sales'`) or table identifier (e.g., `sales`)
+- `group_col`: Grouping column name as string literal (e.g., `'series_id'`) or column reference (e.g., `series_id`). **Note:** Integer literals (e.g., `1`) are not supported; use column names or references.
+- `date_col`: Date/timestamp column name as string literal or column reference. Supports DATE, TIMESTAMP, INTEGER, or BIGINT columns.
+- `value_col`: Value column name as string literal or column reference
 - `frequency`: 
-  - **For DATE/TIMESTAMP columns**: Optional frequency string (Polars-style). Defaults to `"1d"` if NULL or not provided.
+  - **String frequency** (Polars-style) for DATE/TIMESTAMP columns:
     - `"30m"` or `"30min"` - 30 minutes
     - `"1h"` - 1 hour
     - `"1d"` - 1 day (default)
@@ -153,14 +147,13 @@ anofox_fcst_ts_stats(
     - `"1mo"` - 1 month
     - `"1q"` - 1 quarter (3 months)
     - `"1y"` - 1 year
-  - **For INTEGER columns**: Optional integer step size. Defaults to `1` if NULL or not provided.
+  - **Integer frequency** for INTEGER/BIGINT date columns:
     - `1`, `2`, `3`, etc. - Integer step size for `GENERATE_SERIES`
 
-**Type Validation:**
-- DuckDB automatically selects the correct overload based on the `frequency` parameter type:
-  - VARCHAR frequency → DATE/TIMESTAMP date column required
-  - INTEGER frequency → INTEGER/BIGINT date column required
-- If there's a type mismatch (e.g., INTEGER date column with VARCHAR frequency), a `Binder Error` will be raised at query time.
+**Type Handling:**
+- The function uses a macro wrapper that normalizes inputs using `format()`, allowing flexible parameter types
+- DATE columns are automatically cast to TIMESTAMP internally for feature extraction
+- The function handles both string frequency values (e.g., `'1d'`) and integer frequency values (e.g., `1`) based on the date column type
 
 **Returns:**
 ```sql
@@ -169,7 +162,7 @@ TABLE(
     length               BIGINT,
     start_date           DATE | TIMESTAMP | INTEGER,
     end_date             DATE | TIMESTAMP | INTEGER,
-    expected_length      INTEGER,
+    expected_length      BIGINT,
     mean                 DOUBLE,
     std                  DOUBLE,
     min                  DOUBLE,
@@ -183,22 +176,27 @@ TABLE(
     plateau_size_non_zero BIGINT,
     n_zeros_start        BIGINT,
     n_zeros_end          BIGINT,
-    n_duplicate_timestamps BIGINT
+    n_duplicate_timestamps HUGEINT
 )
 ```
 
 **Example:**
 ```sql
--- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
+-- DATE/TIMESTAMP columns: Use string frequency
+CREATE TABLE sales_stats AS
+SELECT * FROM anofox_fcst_ts_stats('sales_raw', 'product_id', 'date', 'amount', '1d');
+
+-- Using column references (also supported)
 CREATE TABLE sales_stats AS
 SELECT * FROM anofox_fcst_ts_stats('sales_raw', product_id, date, amount, '1d');
 
--- INTEGER columns: Use INTEGER frequency values
+-- INTEGER date columns: Use integer frequency
 CREATE TABLE int_stats AS
-SELECT * FROM anofox_fcst_ts_stats('int_data', series_id, date_col, value, 1);
+SELECT * FROM anofox_fcst_ts_stats('int_data', 'series_id', 'date_col', 'value', 1);
 
--- Use NULL for default frequency
-SELECT * FROM anofox_fcst_ts_stats('sales_raw', product_id, date, amount, NULL::VARCHAR);
+-- Table identifier (without quotes) also works
+CREATE TABLE stats AS
+SELECT * FROM anofox_fcst_ts_stats(sales_raw, product_id, date, amount, '1d');
 ```
 
 ---
@@ -409,16 +407,17 @@ anofox_fcst_ts_fill_gaps(
 ```
 
 **Parameters:**
+- `table_name`: Table name (VARCHAR). Can be provided as a quoted string literal (e.g., `'table_name'`) or as an unquoted table identifier (e.g., `table_name`). Both forms are accepted and work identically.
 - `frequency`: 
-  - **For DATE/TIMESTAMP columns**: Optional frequency string (Polars-style). Defaults to `"1d"` if NULL or not provided.
+  - **For DATE/TIMESTAMP columns**: Required frequency string (Polars-style).
     - `"30m"` or `"30min"` - 30 minutes
     - `"1h"` - 1 hour
-    - `"1d"` - 1 day (default)
+    - `"1d"` - 1 day
     - `"1w"` - 1 week
     - `"1mo"` - 1 month
     - `"1q"` - 1 quarter (3 months)
     - `"1y"` - 1 year
-  - **For INTEGER columns**: Optional integer step size. Defaults to `1` if NULL or not provided.
+  - **For INTEGER columns**: Required integer step size.
     - `1`, `2`, `3`, etc. - Integer step size for `GENERATE_SERIES`
 
 **Type Validation:**
@@ -432,14 +431,14 @@ anofox_fcst_ts_fill_gaps(
 **Examples:**
 ```sql
 -- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
--- Fill gaps with 30-minute frequency
+-- Fill gaps with 30-minute frequency (table name as string literal)
 SELECT * FROM anofox_fcst_ts_fill_gaps('hourly_data', series_id, timestamp, value, '30m');
 
--- Fill gaps with weekly frequency
-SELECT * FROM anofox_fcst_ts_fill_gaps('weekly_data', series_id, date, value, '1w');
+-- Fill gaps with weekly frequency (table name as identifier)
+SELECT * FROM anofox_fcst_ts_fill_gaps(weekly_data, series_id, date, value, '1w');
 
--- Use NULL (must cast to VARCHAR for DATE/TIMESTAMP columns)
-SELECT * FROM anofox_fcst_ts_fill_gaps('daily_data', series_id, date, value, NULL::VARCHAR);
+-- Fill gaps with daily frequency
+SELECT * FROM anofox_fcst_ts_fill_gaps('daily_data', series_id, date, value, '1d');
 
 -- INTEGER columns: Use INTEGER frequency values
 -- Fill gaps with step size of 1
@@ -447,10 +446,111 @@ SELECT * FROM anofox_fcst_ts_fill_gaps('int_data', series_id, date_col, value, 1
 
 -- Fill gaps with step size of 2
 SELECT * FROM anofox_fcst_ts_fill_gaps('int_data', series_id, date_col, value, 2);
-
--- Use NULL (defaults to step size 1 for INTEGER columns)
-SELECT * FROM anofox_fcst_ts_fill_gaps('int_data', series_id, date_col, value, NULL);
 ```
+
+---
+
+#### anofox_fcst_ts_fill_gaps_operator (alias: `ts_fill_gaps_operator`)
+
+**Native C++ Table-In-Out Operator for Gap Filling**
+
+High-performance native C++ implementation that processes table input directly. This is the internal operator used by the public `anofox_fcst_ts_fill_gaps` API. Can be called directly for maximum performance when you have a table reference.
+
+**Signature (Function Overloading):**
+```sql
+-- For DATE/TIMESTAMP columns (date-based frequency)
+anofox_fcst_ts_fill_gaps_operator(
+    input_table   TABLE,
+    group_col     VARCHAR,
+    date_col      VARCHAR,
+    value_col     VARCHAR,
+    frequency     VARCHAR
+) → TABLE
+
+-- For INTEGER columns (integer-based frequency)
+anofox_fcst_ts_fill_gaps_operator(
+    input_table   TABLE,
+    group_col     VARCHAR,
+    date_col      VARCHAR,
+    value_col     VARCHAR,
+    frequency     INTEGER
+) → TABLE
+```
+
+**Parameters:**
+- `input_table`: Input table as `TABLE` type (e.g., `TABLE my_table` or `TABLE (SELECT * FROM my_table)`)
+- `group_col`: Grouping column name as string literal (e.g., `'series_id'`)
+- `date_col`: Date/timestamp column name as string literal
+- `value_col`: Value column name as string literal
+- `frequency`: 
+  - **For DATE/TIMESTAMP columns**: Required frequency string (Polars-style).
+    - `"30m"` or `"30min"` - 30 minutes
+    - `"1h"` - 1 hour
+    - `"1d"` - 1 day
+    - `"1w"` - 1 week
+    - `"1mo"` - 1 month
+    - `"1q"` - 1 quarter (3 months)
+    - `"1y"` - 1 year
+  - **For INTEGER columns**: Required integer step size.
+    - `1`, `2`, `3`, etc. - Integer step size for `GENERATE_SERIES`
+
+**Type Validation:**
+- DuckDB automatically selects the correct overload based on the `frequency` parameter type:
+  - VARCHAR frequency → DATE/TIMESTAMP date column required
+  - INTEGER frequency → INTEGER/BIGINT date column required
+- If there's a type mismatch (e.g., INTEGER date column with VARCHAR frequency), a `Binder Error` will be raised at query time.
+
+**Behavior:** Fills missing timestamps/indices in series with NULL values using the specified frequency interval or step size. This is the native C++ implementation that provides significantly better performance (6-258x faster) than the SQL-based approach, especially for large datasets.
+
+**Performance Notes:**
+- **6-258x faster** than SQL version depending on dataset size
+- Avoids SQL materialization overhead
+- Uses efficient O(1) hash set lookups for gap detection
+- Best performance for datasets >100K rows
+
+**Examples:**
+```sql
+-- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
+-- Direct table reference (maximum performance)
+SELECT * FROM anofox_fcst_ts_fill_gaps_operator(
+    TABLE daily_data,
+    'series_id',
+    'date',
+    'value',
+    '1d'
+);
+
+-- Using alias
+SELECT * FROM ts_fill_gaps_operator(
+    TABLE daily_data,
+    'series_id',
+    'date',
+    'value',
+    '1d'
+);
+
+-- With subquery
+SELECT * FROM anofox_fcst_ts_fill_gaps_operator(
+    TABLE (SELECT * FROM sales WHERE date >= '2024-01-01'),
+    'product_id',
+    'date',
+    'amount',
+    '1d'
+);
+
+-- INTEGER columns: Use INTEGER frequency values
+SELECT * FROM anofox_fcst_ts_fill_gaps_operator(
+    TABLE int_data,
+    'series_id',
+    'date_col',
+    'value',
+    1
+);
+```
+
+**When to Use:**
+- **Use `anofox_fcst_ts_fill_gaps`** (string API): When you have a table name as a string, for ease of use and compatibility
+- **Use `anofox_fcst_ts_fill_gaps_operator`** (TABLE API): When you need maximum performance and have a direct table reference
 
 ---
 
@@ -482,17 +582,18 @@ anofox_fcst_ts_fill_forward(
 ```
 
 **Parameters:**
+- `table_name`: Table name (VARCHAR). Can be provided as a quoted string literal (e.g., `'table_name'`) or as an unquoted table identifier (e.g., `table_name`). Both forms are accepted and work identically.
 - `target_date`: Target date/index to extend the series to (type must match `date_col` type)
 - `frequency`: 
-  - **For DATE/TIMESTAMP columns**: Optional frequency string (Polars-style). Defaults to `"1d"` if NULL or not provided.
+  - **For DATE/TIMESTAMP columns**: Required frequency string (Polars-style).
     - `"30m"` or `"30min"` - 30 minutes
     - `"1h"` - 1 hour
-    - `"1d"` - 1 day (default)
+    - `"1d"` - 1 day
     - `"1w"` - 1 week
     - `"1mo"` - 1 month
     - `"1q"` - 1 quarter (3 months)
     - `"1y"` - 1 year
-  - **For INTEGER columns**: Optional integer step size. Defaults to `1` if NULL or not provided.
+  - **For INTEGER columns**: Required integer step size.
     - `1`, `2`, `3`, etc. - Integer step size for `GENERATE_SERIES`
 
 **Type Validation:**
@@ -506,14 +607,14 @@ anofox_fcst_ts_fill_forward(
 **Examples:**
 ```sql
 -- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
--- Extend hourly series to target date
+-- Extend hourly series to target date (table name as string literal)
 SELECT * FROM anofox_fcst_ts_fill_forward('hourly_data', series_id, timestamp, value, '2024-12-31'::TIMESTAMP, '1h');
 
--- Extend monthly series to target date
-SELECT * FROM anofox_fcst_ts_fill_forward('monthly_data', series_id, date, value, '2024-12-01'::DATE, '1mo');
+-- Extend monthly series to target date (table name as identifier)
+SELECT * FROM anofox_fcst_ts_fill_forward(monthly_data, series_id, date, value, '2024-12-01'::DATE, '1mo');
 
--- Use NULL (must cast to VARCHAR for DATE/TIMESTAMP columns)
-SELECT * FROM anofox_fcst_ts_fill_forward('daily_data', series_id, date, value, '2024-12-31'::DATE, NULL::VARCHAR);
+-- Extend daily series to target date
+SELECT * FROM anofox_fcst_ts_fill_forward('daily_data', series_id, date, value, '2024-12-31'::DATE, '1d');
 
 -- INTEGER columns: Use INTEGER frequency values
 -- Extend series to index 100 with step size of 1
@@ -521,9 +622,6 @@ SELECT * FROM anofox_fcst_ts_fill_forward('int_data', series_id, date_col, value
 
 -- Extend series to index 100 with step size of 5
 SELECT * FROM anofox_fcst_ts_fill_forward('int_data', series_id, date_col, value, 100, 5);
-
--- Use NULL (defaults to step size 1 for INTEGER columns)
-SELECT * FROM anofox_fcst_ts_fill_forward('int_data', series_id, date_col, value, 100, NULL);
 ```
 
 ---
@@ -699,6 +797,40 @@ anofox_fcst_ts_fill_nulls_mean(
 ```
 
 **Behavior:** Computes mean per series and fills NULLs.
+
+---
+
+### Transformation Operations
+
+#### anofox_fcst_ts_diff (alias: `ts_diff`)
+
+**Compute Differences**
+
+**Signature:**
+```sql
+anofox_fcst_ts_diff(
+    table_name    VARCHAR,
+    group_col     ANY,
+    date_col      DATE | TIMESTAMP | INTEGER,
+    value_col     DOUBLE,
+    order         INTEGER
+) → TABLE
+```
+
+**Parameters:**
+- `table_name`: Table name (VARCHAR). Can be provided as a quoted string literal (e.g., `'table_name'`) or as an unquoted table identifier (e.g., `table_name`). Both forms are accepted and work identically.
+- `order`: Difference order (must be > 0). Computes `value[t] - value[t-order]`.
+
+**Behavior:** Computes differences of the specified order for each series. For `order=1`, computes first differences (value[t] - value[t-1]). For `order=2`, computes second differences, and so on.
+
+**Example:**
+```sql
+-- Compute first differences (order=1)
+SELECT * FROM anofox_fcst_ts_diff('sales_data', product_id, date, amount, 1);
+
+-- Compute second differences (order=2)
+SELECT * FROM anofox_fcst_ts_diff('sales_data', product_id, date, amount, 2);
+```
 
 ---
 
@@ -1013,7 +1145,7 @@ Generate forecasts for a single time series with automatic parameter validation.
 anofox_fcst_ts_forecast(
     table_name    VARCHAR,
     date_col      DATE | TIMESTAMP | INTEGER,
-    value_col     DOUBLE,
+    target_col    DOUBLE,
     method        VARCHAR,
     horizon       INTEGER,
     params        MAP
@@ -1023,7 +1155,7 @@ anofox_fcst_ts_forecast(
 **Parameters:**
 - `table_name`: Name of the input table
 - `date_col`: Date/timestamp column name
-- `value_col`: Value column name to forecast
+- `target_col`: Value column name to forecast
 - `method`: Model name (see [Supported Models](#supported-models))
 - `horizon`: Number of future periods to forecast (must be > 0)
 - `params`: Configuration MAP with model-specific parameters
@@ -1034,13 +1166,14 @@ TABLE(
     forecast_step      INTEGER,
     date               DATE | TIMESTAMP | INTEGER,  -- Type matches input
     point_forecast     DOUBLE,
-    lower              DOUBLE,  -- Lower bound (confidence_level)
-    upper              DOUBLE,  -- Upper bound (confidence_level)
+    lower              DOUBLE,  -- Lower bound (dynamic name based on confidence_level, e.g., lower_90)
+    upper              DOUBLE,  -- Upper bound (dynamic name based on confidence_level, e.g., upper_90)
     model_name         VARCHAR,
-    insample_fitted    DOUBLE[],  -- Empty unless return_insample=true
-    confidence_level   DOUBLE
+    insample_fitted    DOUBLE[]  -- Empty unless return_insample=true
 )
 ```
+
+**Note:** The `lower` and `upper` bound columns have dynamic names based on the `confidence_level` parameter. For example, with `confidence_level: 0.90`, the columns are named `lower_90` and `upper_90`. With `confidence_level: 0.95`, they are `lower_95` and `upper_95`.
 
 **Example:**
 ```sql
@@ -1052,6 +1185,7 @@ SELECT * FROM anofox_fcst_ts_forecast(
     28,
     MAP{'seasonal_period': 7, 'confidence_level': 0.95}
 );
+-- Note: The 'lower' and 'upper' columns will be named 'lower_95' and 'upper_95' based on confidence_level
 ```
 
 **Behavioral Notes:**
@@ -1076,7 +1210,7 @@ anofox_fcst_ts_forecast_by(
     table_name    VARCHAR,
     group_col     ANY,
     date_col      DATE | TIMESTAMP | INTEGER,
-    value_col     DOUBLE,
+    target_col    DOUBLE,
     method        VARCHAR,
     horizon       INTEGER,
     params        MAP
@@ -1087,7 +1221,7 @@ anofox_fcst_ts_forecast_by(
 - `table_name`: Name of the input table
 - `group_col`: Grouping column name (any type, preserved in output)
 - `date_col`: Date/timestamp column name
-- `value_col`: Value column name to forecast
+- `target_col`: Value column name to forecast
 - `method`: Model name
 - `horizon`: Number of future periods to forecast
 - `params`: Configuration MAP
@@ -1099,13 +1233,14 @@ TABLE(
     forecast_step      INTEGER,
     date               DATE | TIMESTAMP | INTEGER,
     point_forecast     DOUBLE,
-    lower              DOUBLE,
-    upper              DOUBLE,
+    lower              DOUBLE,  -- Dynamic name based on confidence_level (e.g., lower_90)
+    upper              DOUBLE,  -- Dynamic name based on confidence_level (e.g., upper_90)
     model_name         VARCHAR,
-    insample_fitted    DOUBLE[],
-    confidence_level   DOUBLE
+    insample_fitted    DOUBLE[]
 )
 ```
+
+**Note:** The `lower` and `upper` bound columns have dynamic names based on the `confidence_level` parameter. For example, with `confidence_level: 0.90`, the columns are named `lower_90` and `upper_90`.
 
 **Example:**
 ```sql
@@ -1156,17 +1291,22 @@ anofox_fcst_ts_forecast_agg(
 **Returns:**
 ```sql
 STRUCT(
-    forecast_step          INTEGER[],
+    forecast_step          INTEGER[],  -- Optional, controlled by include_forecast_step parameter
     forecast_timestamp     TIMESTAMP[],
     point_forecast         DOUBLE[],
-    lower                  DOUBLE[],  -- Dynamic name based on confidence_level
-    upper                  DOUBLE[],  -- Dynamic name based on confidence_level
+    lower_<suffix>         DOUBLE[],  -- Dynamic name based on confidence_level (e.g., lower_90, lower_95)
+    upper_<suffix>         DOUBLE[],  -- Dynamic name based on confidence_level (e.g., upper_90, upper_95)
     model_name             VARCHAR,
     insample_fitted        DOUBLE[],
-    confidence_level       DOUBLE,
-    date_col_name          VARCHAR
+    date_col_name          VARCHAR,
+    error_message          VARCHAR    -- Optional, present when include_error_message=true and errors occur
 )
 ```
+
+**Note:** 
+- The `lower` and `upper` bound columns have dynamic names based on the `confidence_level` parameter. For example, with `confidence_level: 0.90`, the columns are named `lower_90` and `upper_90`. With `confidence_level: 0.95`, they are `lower_95` and `upper_95`.
+- The `forecast_step` field is optional and only included when `include_forecast_step: true` (default: true).
+- The `error_message` field is optional and only included when `include_error_message: true` (default: true) and an error occurs during forecasting.
 
 **Example:**
 ```sql
@@ -1186,6 +1326,12 @@ SELECT
     UNNEST(result.lower) AS lower_bound
 FROM fc;
 ```
+
+**Parameters (in `params` MAP):**
+- `include_forecast_step` (BOOLEAN, default: true): Include `forecast_step` array in return struct
+- `date_col_name` (VARCHAR, default: "date"): Name of the date column (used in return struct)
+- `safe_mode` (BOOLEAN, default: true): Enable safe error handling mode
+- `include_error_message` (BOOLEAN, default: true): Include `error_message` field in return struct on errors
 
 **Use Case:** When you need multiple grouping columns or custom aggregation patterns beyond single `group_col`.
 
@@ -1636,22 +1782,22 @@ These parameters work with **all forecasting models**:
 |----------|-------|----------------|
 | Forecasting | 3 | Table macros (2), Aggregate (1) |
 | Evaluation Metrics | 12 | Scalar functions |
-| EDA Macros | 5 | Table macros |
+| EDA | 3 | Table functions (2), Table macros (1) |
 | Data Quality | 2 | Table macros |
-| Data Preparation | 9 | Table macros |
+| Data Preparation | 10 | Table macros |
 | Seasonality | 2 | Scalar functions |
 | Changepoint Detection | 3 | Table macros (2), Aggregate (1) |
 | Time Series Features | 4 | Aggregate (1), Table function (1), Scalar (2) |
-| **Total** | **40** | |
+| **Total** | **41** | |
 
 ### Function Type Breakdown
 
 | Type | Count | Examples |
 |------|-------|----------|
-| Table Macros | 23 | `anofox_fcst_ts_forecast` (or `ts_forecast`), `TS_STATS`, `anofox_fcst_ts_fill_gaps` (or `ts_fill_gaps`) |
+| Table Macros | 21 | `anofox_fcst_ts_forecast` (or `ts_forecast`), `anofox_fcst_ts_fill_gaps` (or `ts_fill_gaps`) |
 | Aggregate Functions | 5 | `anofox_fcst_ts_forecast_agg` (or `ts_forecast_agg`), `anofox_fcst_ts_features` (or `ts_features`), `anofox_fcst_ts_detect_changepoints_agg` (or `ts_detect_changepoints_agg`) |
 | Scalar Functions | 14 | `anofox_fcst_ts_mae` (or `ts_mae`), `anofox_fcst_ts_detect_seasonality` (or `ts_detect_seasonality`), `anofox_fcst_ts_analyze_seasonality` (or `ts_analyze_seasonality`) |
-| Table Functions | 1 | `anofox_fcst_ts_features_list` (or `ts_features_list`) |
+| Table Functions | 3 | `anofox_fcst_ts_stats` (or `ts_stats`), `anofox_fcst_ts_quality_report` (or `ts_quality_report`), `anofox_fcst_ts_features_list` (or `ts_features_list`) |
 
 ### GROUP BY Support
 

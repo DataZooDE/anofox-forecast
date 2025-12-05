@@ -142,8 +142,8 @@ WHERE i NOT IN (10, 15, 20);
 
 query I
 SELECT COUNT(*) = 30
-FROM anofox_fcst_ts_fill_gaps(gaps_date, series_id, date_col, value, NULL::VARCHAR)
-WHERE group_col = 'series_1';
+FROM anofox_fcst_ts_fill_gaps(gaps_date, series_id, date_col, value, '1d')
+WHERE series_id = 'series_1';
 ----
 true
 
@@ -156,8 +156,8 @@ WHERE i NOT IN (10, 15, 20);
 
 query I
 SELECT COUNT(*) = 30
-FROM anofox_fcst_ts_fill_gaps(gaps_ts, series_id, date_col, value, NULL::VARCHAR)
-WHERE group_col = 'series_1';
+FROM anofox_fcst_ts_fill_gaps(gaps_ts, series_id, date_col, value, '1d')
+WHERE series_id = 'series_1';
 ----
 true
 
@@ -175,8 +175,8 @@ SELECT ('2024-01-01'::DATE + INTERVAL (i) DAY)::DATE AS date_col, 'series_1' AS 
 FROM generate_series(1, 30) t(i);
 
 query I
-SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) < 3
-FROM anofox_fcst_ts_fill_nulls_forward(nulls_date, series_id, date_col, value);
+SELECT SUM(CASE WHEN value IS NULL THEN 1 ELSE 0 END) < 3
+FROM anofox_fcst_ts_fill_nulls_forward('nulls_date', 'series_id', 'date_col', 'value');
 ----
 true
 
@@ -188,8 +188,8 @@ SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (i) DAY) AS date_col, 'series_1' AS s
 FROM generate_series(1, 30) t(i);
 
 query I
-SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) < 3
-FROM anofox_fcst_ts_fill_nulls_forward(nulls_ts, series_id, date_col, value);
+SELECT SUM(CASE WHEN value IS NULL THEN 1 ELSE 0 END) < 3
+FROM anofox_fcst_ts_fill_nulls_forward('nulls_ts', 'series_id', 'date_col', 'value');
 ----
 true
 
@@ -201,15 +201,15 @@ true
 
 # Test anofox_fcst_ts_fill_nulls_backward with DATE
 query I
-SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) < 3
-FROM anofox_fcst_ts_fill_nulls_backward(nulls_date, series_id, date_col, value);
+SELECT SUM(CASE WHEN value IS NULL THEN 1 ELSE 0 END) < 3
+FROM anofox_fcst_ts_fill_nulls_backward('nulls_date', 'series_id', 'date_col', 'value');
 ----
 true
 
 # Test anofox_fcst_ts_fill_nulls_backward with TIMESTAMP
 query I
-SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) < 3
-FROM anofox_fcst_ts_fill_nulls_backward(nulls_ts, series_id, date_col, value);
+SELECT SUM(CASE WHEN value IS NULL THEN 1 ELSE 0 END) < 3
+FROM anofox_fcst_ts_fill_nulls_backward('nulls_ts', 'series_id', 'date_col', 'value');
 ----
 true
 
@@ -221,15 +221,15 @@ true
 
 # Test anofox_fcst_ts_fill_nulls_mean with DATE
 query I
-SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) = 0
-FROM anofox_fcst_ts_fill_nulls_mean(nulls_date, series_id, date_col, value);
+SELECT SUM(CASE WHEN value IS NULL THEN 1 ELSE 0 END) = 0
+FROM anofox_fcst_ts_fill_nulls_mean('nulls_date', 'series_id', 'date_col', 'value');
 ----
 true
 
 # Test anofox_fcst_ts_fill_nulls_mean with TIMESTAMP
 query I
-SELECT SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END) = 0
-FROM anofox_fcst_ts_fill_nulls_mean(nulls_ts, series_id, date_col, value);
+SELECT SUM(CASE WHEN value IS NULL THEN 1 ELSE 0 END) = 0
+FROM anofox_fcst_ts_fill_nulls_mean('nulls_ts', 'series_id', 'date_col', 'value');
 ----
 true
 
