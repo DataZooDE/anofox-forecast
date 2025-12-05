@@ -264,7 +264,6 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// Register MSTL decomposition
 	RegisterMstlDecompositionFunctions(loader);
 
-
 	// std::cerr << "[DEBUG] All functions registered successfully" << std::endl;
 }
 
