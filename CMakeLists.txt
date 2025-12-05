@@ -199,7 +199,8 @@ install(
 # --- Unit Tests for ts_fill_gaps (must pass before DuckDB binding) ---
 option(BUILD_TS_FILL_GAPS_TESTS "Build unit tests for ts_fill_gaps" ON)
 
-if(BUILD_TS_FILL_GAPS_TESTS)
+# Skip tests for WASM builds - they require DuckDB static library which isn't available
+if(BUILD_TS_FILL_GAPS_TESTS AND NOT WASM_LOADABLE_EXTENSIONS)
     enable_testing()
     include(CTest)
     
@@ -236,4 +237,6 @@ if(BUILD_TS_FILL_GAPS_TESTS)
     else()
         message(WARNING "Catch2 not found at ${CATCH_INCLUDE_DIR} - skipping ts_fill_gaps unit tests")
     endif()
+elseif(WASM_LOADABLE_EXTENSIONS)
+    message(STATUS "ts_fill_gaps unit tests disabled for WASM builds")
 endif()
