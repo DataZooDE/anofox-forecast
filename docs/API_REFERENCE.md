@@ -1014,6 +1014,33 @@ SELECT * FROM ts_mstl_decomposition(
 - **Minimum requirement**: Each series must have at least `2 × min(seasonal_periods)` observations (e.g., with periods `[7, 30]`, minimum is `2 × 7 = 14` observations)
 - **Recommended**: For reliable decomposition, use at least `3 × max(seasonal_periods)` observations per series
 
+**Performance Note - Large Datasets:**
+
+When using `CREATE TABLE AS` with large datasets (10,000+ groups) and parallel execution, you may encounter internal batch index errors. To avoid this, wrap the query with `ORDER BY` to force materialization:
+
+```sql
+-- Recommended pattern for large datasets
+CREATE TABLE result AS
+SELECT * FROM (
+    SELECT * FROM ts_mstl_decomposition(
+        'sales_data',
+        'product_id',
+        'date',
+        'amount',
+        MAP{'seasonal_periods': [7, 30]}
+    )
+    ORDER BY 1  -- Forces global sort/materialization
+);
+
+-- Alternative: Use single-threaded execution
+PRAGMA threads=1;
+CREATE TABLE result AS
+SELECT * FROM ts_mstl_decomposition(...);
+PRAGMA threads=8;  -- Reset to default
+```
+
+This is a known limitation related to DuckDB's batch index handling during parallel `FinalExecute` operations with table inserts.
+
 ---
 
 ## Changepoint Detection
@@ -1953,6 +1980,39 @@ These parameters work with **all forecasting models**:
    - General rule: n ≥ 2 × seasonal_period for seasonal models
    - For inference: n > p + 1 to have sufficient degrees of freedom
    - Some models require minimum lengths (e.g., ARIMA needs sufficient data for differencing)
+
+7. **Known Issue - Batch Index Collision with Table-In-Out Operators**:
+
+   When using CPU-intensive Table-In-Out operators (like `ts_mstl_decomposition`) with `CREATE TABLE AS` on large datasets (10,000+ groups), you may encounter:
+   ```
+   Error: batch index 9999999999999 is present in multiple collections
+   ```
+
+   **Root Cause**: This is a DuckDB limitation in batch index coordination during parallel `FinalExecute` operations. When multiple threads complete their computation at different times and write to `PhysicalBatchInsert`, batch indices may collide. The value `9999999999999` is `BATCH_INCREMENT - 1`, a sentinel/default value that indicates batch indices weren't properly distributed across threads.
+
+   **Affected Functions**:
+   - `ts_mstl_decomposition` / `anofox_fcst_ts_mstl_decomposition`
+   - Any Table-In-Out operator with CPU-intensive `FinalExecute` phase
+
+   **Workarounds**:
+   ```sql
+   -- Option 1: Force materialization with ORDER BY (recommended)
+   CREATE TABLE result AS
+   SELECT * FROM (
+       SELECT * FROM ts_mstl_decomposition(...)
+       ORDER BY 1
+   );
+
+   -- Option 2: Single-threaded execution
+   PRAGMA threads=1;
+   CREATE TABLE result AS SELECT * FROM ts_mstl_decomposition(...);
+   PRAGMA threads=8;  -- Reset
+
+   -- Option 3: SELECT works without issues (no batch insert)
+   SELECT COUNT(*) FROM ts_mstl_decomposition(...);
+   ```
+
+   **Status**: This appears to be a DuckDB core issue with `TryFlushCachingOperators` not properly managing batch indices during the `FinalExecute` phase. Lightweight Table-In-Out operators (like `ts_fill_gaps`) are less likely to trigger this due to faster, more synchronized thread completion.
 
 ---
 

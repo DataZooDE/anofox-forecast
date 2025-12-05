@@ -9,9 +9,11 @@
 //   'value_col', 100);
 //   3. Observe batch index collision error with large datasets
 
+#include "test_batch_index_reproduction.hpp"
 #include "duckdb.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include <thread>
 #include <chrono>
 #include <unordered_map>
@@ -180,7 +182,7 @@ OperatorFinalizeResultType TestBatchIndexFinal(ExecutionContext &context, TableF
 		if (lstate.current_row_idx == 0) {
 			// ARTIFICIAL DELAY: Simulates MSTL decomposition computation time
 			// This creates variable thread completion times, exposing the race condition
-			std::this_thread::sleep_for(std::chrono::milliseconds(bind_data->delay_ms));
+			std::this_thread::sleep_for(std::chrono::milliseconds(bind_data.delay_ms));
 
 			// "Process" the values (simple transformation for demonstration)
 			lstate.processed_values.clear();
@@ -195,10 +197,10 @@ OperatorFinalizeResultType TestBatchIndexFinal(ExecutionContext &context, TableF
 		while (out_count < STANDARD_VECTOR_SIZE && lstate.current_row_idx < count_in_group) {
 			// Preserve original columns
 			idx_t col_idx = 0;
-			for (idx_t i = 0; i < bind_data->return_types.size() - 1; i++) {
-				if (i == bind_data->group_col_idx) {
+			for (idx_t i = 0; i < bind_data.return_types.size() - 1; i++) {
+				if (i == bind_data.group_col_idx) {
 					output.SetValue(col_idx++, out_count, group.group_value);
-				} else if (i == bind_data->value_col_idx) {
+				} else if (i == bind_data.value_col_idx) {
 					output.SetValue(col_idx++, out_count, Value::DOUBLE(group.values[lstate.current_row_idx]));
 				} else {
 					// For simplicity, skip other columns in this minimal reproduction

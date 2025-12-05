@@ -19,6 +19,7 @@
 #include "data_prep_macros.hpp"
 #include "mstl_decomposition_function.hpp"
 #include "ts_features_function.hpp"
+#include "test_batch_index_reproduction.hpp"
 #include "duckdb/catalog/default/default_functions.hpp"
 #include "duckdb/catalog/default/default_table_functions.hpp"
 
@@ -263,6 +264,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// Register MSTL decomposition
 	RegisterMstlDecompositionFunctions(loader);
+
+	// Register test batch index reproduction operator (for debugging DuckDB batch index collision)
+	// This is a diagnostic tool - can be removed in production if not needed
+	RegisterTestBatchIndexReproduction(loader);
 
 	// std::cerr << "[DEBUG] All functions registered successfully" << std::endl;
 }
