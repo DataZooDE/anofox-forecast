@@ -93,18 +93,21 @@ set_target_properties(anofox-time PROPERTIES POSITION_INDEPENDENT_CODE ON)
 message(STATUS "AVX2 support DISABLED for compatibility")
 
 # --- Dependencies ---
-find_package(spdlog CONFIG)
+# When building as DuckDB extension, prevent spdlog dependency
+if(NOT DEFINED DUCKDB_EXTENSION_BUILD)
+    find_package(spdlog CONFIG)
+endif()
 find_package(Threads REQUIRED)
 find_package(Eigen3 CONFIG REQUIRED)
 
-if(spdlog_FOUND)
+if(spdlog_FOUND AND NOT DEFINED DUCKDB_EXTENSION_BUILD)
     target_link_libraries(anofox-time PUBLIC 
         spdlog::spdlog 
         Threads::Threads
         Eigen3::Eigen
     )
 else()
-    message(STATUS "spdlog not found, building without logging support")
+    message(STATUS "spdlog not found or disabled (DuckDB extension build), building without internal logging")
     target_link_libraries(anofox-time PUBLIC 
         Threads::Threads
         Eigen3::Eigen

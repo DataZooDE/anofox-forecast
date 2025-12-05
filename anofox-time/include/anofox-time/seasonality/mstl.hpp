@@ -34,7 +34,8 @@ public:
                       std::size_t iterations,
                       bool robust);
 
-    void fit(const core::TimeSeries& ts);
+    // Explicitly use anofoxtime::core::TimeSeries to avoid lookup issues
+    void fit(const anofoxtime::core::TimeSeries& ts);
 
     const MSTLComponents& components() const { return components_; }
 
@@ -48,7 +49,7 @@ private:
     std::vector<STLDecomposition> stl_decomposers_;
     
     // Pre-allocated work vectors to avoid repeated allocations
-    std::vector<core::TimeSeries::TimePoint> work_timestamps_;
+    std::vector<anofoxtime::core::TimeSeries::TimePoint> work_timestamps_;
     std::vector<double> work_residual_;
     bool is_initialized_ = false;
 };

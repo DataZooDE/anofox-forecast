@@ -1,6 +1,7 @@
 #pragma once
 
 #ifndef ANOFOX_NO_LOGGING
+#if !defined(DUCKDB_EXTENSION_BUILD)
 #include <spdlog/spdlog.h>
 #include <memory>
 
@@ -44,6 +45,27 @@ private:
 #define ANOFOX_WARN(...)     anofoxtime::utils::Logging::getLogger()->warn(__VA_ARGS__)
 #define ANOFOX_ERROR(...)    anofoxtime::utils::Logging::getLogger()->error(__VA_ARGS__)
 #define ANOFOX_CRITICAL(...) anofoxtime::utils::Logging::getLogger()->critical(__VA_ARGS__)
+
+#else // DUCKDB_EXTENSION_BUILD
+// Use DuckDB logging or no-op
+#include <iostream>
+
+namespace anofoxtime::utils {
+class Logging {
+public:
+    static void init() {}
+};
+}
+
+// Simple fallback to std::cerr for debugging or no-op
+#define ANOFOX_TRACE(...)    do {} while(0)
+#define ANOFOX_DEBUG(...)    do {} while(0)
+#define ANOFOX_INFO(...)     do {} while(0)
+#define ANOFOX_WARN(...)     do {} while(0)
+#define ANOFOX_ERROR(...)    std::cerr << "[ANOFOX ERROR] " << __VA_ARGS__ << std::endl
+#define ANOFOX_CRITICAL(...) std::cerr << "[ANOFOX CRITICAL] " << __VA_ARGS__ << std::endl
+
+#endif // DUCKDB_EXTENSION_BUILD
 
 #else
 // No-op logging when spdlog is not available
