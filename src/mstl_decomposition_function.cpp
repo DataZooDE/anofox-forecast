@@ -298,9 +298,23 @@ OperatorFinalizeResultType TSMstlDecompositionOperatorFinal(ExecutionContext &co
 	}
 
 	idx_t out_count = 0;
+	output.SetCardinality(0);
 
 	if (output.ColumnCount() == 0) {
 		output.InitializeEmpty(bind_data.return_types);
+	}
+
+	// Initialize output columns - set vector type to FLAT_VECTOR for all columns
+	// This is important for proper batch handling in parallel execution
+	// Must be done on every call to Final, not just when ColumnCount() == 0
+	for (idx_t col_idx = 0; col_idx < output.ColumnCount(); col_idx++) {
+		output.data[col_idx].SetVectorType(VectorType::FLAT_VECTOR);
+	}
+
+	// Early return if no groups to process
+	if (lstate.group_order.empty()) {
+		output.SetCardinality(0);
+		return OperatorFinalizeResultType::FINISHED;
 	}
 
 	while (out_count < STANDARD_VECTOR_SIZE && lstate.current_group_idx < lstate.group_order.size()) {
@@ -398,11 +412,29 @@ OperatorFinalizeResultType TSMstlDecompositionOperatorFinal(ExecutionContext &co
 
 	output.SetCardinality(out_count);
 
+	// Safety check: if we have no output but more groups, something went wrong
+	if (out_count == 0 && lstate.current_group_idx < lstate.group_order.size()) {
+		// This shouldn't happen, but if it does, return FINISHED to avoid issues
+		return OperatorFinalizeResultType::FINISHED;
+	}
+
 	if (lstate.current_group_idx >= lstate.group_order.size()) {
 		return OperatorFinalizeResultType::FINISHED;
 	}
 
-	return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;
+	// Only return HAVE_MORE_OUTPUT if we actually have output
+	if (out_count > 0) {
+		return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;
+	}
+
+	return OperatorFinalizeResultType::FINISHED;
+}
+
+// Cardinality estimation
+unique_ptr<NodeStatistics> TSMstlDecompositionCardinality(ClientContext &context, const FunctionData *bind_data) {
+	// For table-in-out functions, cardinality is typically unknown until all input is processed
+	// Return nullptr to let DuckDB estimate
+	return nullptr;
 }
 
 // Bind Replace for SQL Wrapper
@@ -471,6 +503,7 @@ void RegisterMstlDecompositionFunctions(ExtensionLoader &loader) {
 	    nullptr, TSMstlDecompositionBind, TSMstlDecompositionInitGlobal, TSMstlDecompositionInitLocal);
 	operator_func.in_out_function = TSMstlDecompositionOperatorInOut;
 	operator_func.in_out_function_final = TSMstlDecompositionOperatorFinal;
+	operator_func.cardinality = TSMstlDecompositionCardinality;
 
 	TableFunctionSet set("anofox_fcst_mstl_decomposition_operator");
 	set.AddFunction(operator_func);
