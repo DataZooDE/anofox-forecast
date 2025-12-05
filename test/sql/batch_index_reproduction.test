@@ -1,6 +1,6 @@
 # name: test/sql/batch_index_reproduction.test
 # description: Demonstrate batch index collision in DuckDB Table-In-Out operators with heavy Final phase
-# group: [batch_index]
+# group: [sql]
 
 require anofox_forecast
 
