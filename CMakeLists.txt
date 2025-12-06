@@ -138,6 +138,7 @@ set(EXTENSION_SOURCES
     src/data_prep_macros.cpp
     # ts_fill_gaps_function.cpp DEFINES CreateTSFillGapsOperatorTableFunction()
     src/ts_fill_gaps_function.cpp
+    src/mstl_decomposition_function.cpp
     src/data_prep_bind_replace.cpp
     src/model_factory.cpp
     src/time_series_builder.cpp
@@ -234,6 +235,30 @@ if(BUILD_TS_FILL_GAPS_TESTS AND NOT WASM_LOADABLE_EXTENSIONS)
         add_test(NAME ts_fill_gaps_unit_tests COMMAND ts_fill_gaps_tests)
         
         message(STATUS "ts_fill_gaps unit tests enabled")
+
+        # Create MSTL test executable
+        add_executable(mstl_decomposition_tests
+            test/cpp/test_mstl_decomposition.cpp
+            src/mstl_decomposition_function.cpp
+        )
+        
+        target_include_directories(mstl_decomposition_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/duckdb/src/include
+            ${CATCH_INCLUDE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/anofox-time/include
+        )
+        
+        target_link_libraries(mstl_decomposition_tests PRIVATE
+            ${EXTENSION_NAME}
+            Threads::Threads
+        )
+        
+        target_compile_definitions(mstl_decomposition_tests PRIVATE DUCKDB_EXTENSION_BUILD)
+        
+        add_test(NAME mstl_decomposition_unit_tests COMMAND mstl_decomposition_tests)
+        message(STATUS "mstl_decomposition unit tests enabled")
     else()
         message(WARNING "Catch2 not found at ${CATCH_INCLUDE_DIR} - skipping ts_fill_gaps unit tests")
     endif()

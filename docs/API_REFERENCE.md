@@ -69,20 +69,22 @@ Functions follow consistent naming patterns:
 4. [Seasonality](#seasonality)
    - [Simple Seasonality Detection](#simple-seasonality-detection)
    - [Detailed Seasonality Analysis](#detailed-seasonality-analysis)
-5. [Changepoint Detection](#changepoint-detection)
+5. [Time Series Decomposition](#time-series-decomposition)
+   - [Multiple Seasonal-Trend Decomposition (MSTL)](#multiple-seasonal-trend-decomposition-mstl)
+6. [Changepoint Detection](#changepoint-detection)
    - [Single Series Changepoint Detection](#single-series-changepoint-detection)
    - [Multiple Series Changepoint Detection](#multiple-series-changepoint-detection)
    - [Aggregate Function for Changepoint Detection](#aggregate-function-for-changepoint-detection)
-6. [Time Series Features](#time-series-features)
+7. [Time Series Features](#time-series-features)
    - [Extract Time Series Features](#extract-time-series-features)
    - [List Available Features](#list-available-features)
    - [Load Feature Configuration from JSON](#load-feature-configuration-from-json)
    - [Load Feature Configuration from CSV](#load-feature-configuration-from-csv)
-7. [Forecasting](#forecasting)
+8. [Forecasting](#forecasting)
    - [Single Time Series Forecasting](#single-time-series-forecasting)
    - [Multiple Time Series Forecasting](#multiple-time-series-forecasting)
    - [Aggregate Function for Custom GROUP BY](#aggregate-function-for-custom-group-by)
-8. [Evaluation](#evaluation)
+9. [Evaluation](#evaluation)
    - [Mean Absolute Error](#mean-absolute-error)
    - [Mean Squared Error](#mean-squared-error)
    - [Root Mean Squared Error](#root-mean-squared-error)
@@ -95,7 +97,7 @@ Functions follow consistent naming patterns:
    - [Quantile Loss](#quantile-loss)
    - [Mean Quantile Loss](#mean-quantile-loss)
    - [Prediction Interval Coverage](#prediction-interval-coverage)
-9. [Supported Models](#supported-models)
+10. [Supported Models](#supported-models)
    - [Automatic Selection Models](#automatic-selection-models-6)
    - [Basic Models](#basic-models-6)
    - [Exponential Smoothing Models](#exponential-smoothing-models-4)
@@ -104,11 +106,11 @@ Functions follow consistent naming patterns:
    - [ARIMA Models](#arima-models-2)
    - [Multiple Seasonality Models](#multiple-seasonality-models-6)
    - [Intermittent Demand Models](#intermittent-demand-models-6)
-10. [Parameter Reference](#parameter-reference)
+11. [Parameter Reference](#parameter-reference)
     - [Global Parameters](#global-parameters)
     - [Model-Specific Parameters](#model-specific-parameters)
-11. [Function Coverage Matrix](#function-coverage-matrix)
-12. [Notes](#notes)
+12. [Function Coverage Matrix](#function-coverage-matrix)
+13. [Notes](#notes)
 
 ---
 
@@ -906,6 +908,138 @@ GROUP BY product_id;
 - `primary_period`: Main seasonal period (may be NULL)
 - `seasonal_strength`: Strength of seasonal component (0-1)
 - `trend_strength`: Strength of trend component (0-1)
+
+---
+
+## Time Series Decomposition
+
+### Multiple Seasonal-Trend Decomposition (MSTL)
+
+**anofox_fcst_ts_mstl_decomposition** (alias: `ts_mstl_decomposition`)
+
+Multiple Seasonal-Trend Decomposition using Loess (MSTL)
+
+Decomposes a time series into trend, multiple seasonal components, and residual using the MSTL algorithm. This is an extension of STL (Seasonal and Trend decomposition using Loess) that handles multiple seasonal patterns simultaneously.
+
+**Signature:**
+```sql
+anofox_fcst_ts_mstl_decomposition(
+    table_name    VARCHAR,
+    group_col     VARCHAR,
+    date_col      DATE | TIMESTAMP,
+    value_col     VARCHAR,
+    params        MAP
+) → TABLE
+```
+
+**Parameters:**
+- `table_name`: Table name (VARCHAR). Can be provided as a quoted string literal (e.g., `'table_name'`) or as an unquoted table identifier (e.g., `table_name`). Both forms are accepted and work identically.
+- `group_col`: Grouping column name as string literal (e.g., `'series_id'`) or column reference (e.g., `series_id`)
+- `date_col`: Date/timestamp column name as string literal or column reference. Supports DATE or TIMESTAMP columns.
+- `value_col`: Value column name as string literal or column reference
+- `params`: Configuration MAP with the following keys:
+  - `seasonal_periods` (INTEGER[], required): Array of seasonal periods to decompose (e.g., `[7, 30]` for weekly and monthly patterns)
+
+**Minimum Series Length:**
+- Each series must have at least `2 × min(seasonal_periods)` observations
+- For example, with `seasonal_periods: [7, 30]`, each series needs at least `2 × 7 = 14` observations
+- For reliable decomposition, it's recommended to have at least `3 × max(seasonal_periods)` observations per series
+
+**Returns:**
+```sql
+TABLE(
+    ...original_columns...,  -- All original columns from input table
+    trend                    DOUBLE,
+    seasonal_P               DOUBLE,  -- One column per period P (e.g., seasonal_7, seasonal_30)
+    residual                 DOUBLE
+)
+```
+
+**Output Columns:**
+- All original columns from the input table are preserved
+- `trend`: Trend component of the decomposition
+- `seasonal_P`: Seasonal component for each period P specified in `seasonal_periods` (e.g., `seasonal_7`, `seasonal_30`)
+- `residual`: Residual component (remainder after removing trend and all seasonal components)
+
+**Additivity:**
+The decomposition is additive: `value_col ≈ trend + seasonal_P1 + seasonal_P2 + ... + residual`
+
+**Example:**
+```sql
+-- Single seasonal period (weekly)
+CREATE TABLE decomposition_result AS
+SELECT * FROM anofox_fcst_ts_mstl_decomposition(
+    'sales_data',
+    'product_id',
+    'date',
+    'amount',
+    MAP{'seasonal_periods': [7]}
+);
+
+-- Multiple seasonal periods (weekly and monthly)
+CREATE TABLE multi_seasonal_decomp AS
+SELECT * FROM anofox_fcst_ts_mstl_decomposition(
+    'sales_data',
+    'product_id',
+    'date',
+    'amount',
+    MAP{'seasonal_periods': [7, 30]}
+);
+
+-- Verify additivity
+SELECT 
+    product_id,
+    AVG(ABS(amount - (trend + seasonal_7 + seasonal_30 + residual))) AS reconstruction_error
+FROM multi_seasonal_decomp
+GROUP BY product_id;
+-- Reconstruction error should be very small (near zero)
+
+-- Using alias
+SELECT * FROM ts_mstl_decomposition(
+    'sales_data',
+    'product_id',
+    'date',
+    'amount',
+    MAP{'seasonal_periods': [7, 30]}
+);
+```
+
+**Algorithm:** MSTL (Multiple Seasonal-Trend Decomposition using Loess) iteratively applies STL decomposition for each seasonal period, extracting components sequentially and updating the series for the next iteration.
+
+**Behavioral Notes:**
+- Supports multiple series via `group_col` (each series decomposed independently)
+- All original columns are preserved in the output
+- Seasonal components are named `seasonal_P` where P is the period value
+- The decomposition is additive: original values can be reconstructed by summing all components
+- **Minimum requirement**: Each series must have at least `2 × min(seasonal_periods)` observations (e.g., with periods `[7, 30]`, minimum is `2 × 7 = 14` observations)
+- **Recommended**: For reliable decomposition, use at least `3 × max(seasonal_periods)` observations per series
+
+**Performance Note - Large Datasets:**
+
+When using `CREATE TABLE AS` with large datasets (10,000+ groups) and parallel execution, you may encounter internal batch index errors. To avoid this, wrap the query with `ORDER BY` to force materialization:
+
+```sql
+-- Recommended pattern for large datasets
+CREATE TABLE result AS
+SELECT * FROM (
+    SELECT * FROM ts_mstl_decomposition(
+        'sales_data',
+        'product_id',
+        'date',
+        'amount',
+        MAP{'seasonal_periods': [7, 30]}
+    )
+    ORDER BY 1  -- Forces global sort/materialization
+);
+
+-- Alternative: Use single-threaded execution
+PRAGMA threads=1;
+CREATE TABLE result AS
+SELECT * FROM ts_mstl_decomposition(...);
+PRAGMA threads=8;  -- Reset to default
+```
+
+This is a known limitation related to DuckDB's batch index handling during parallel `FinalExecute` operations with table inserts.
 
 ---
 
@@ -1786,15 +1920,16 @@ These parameters work with **all forecasting models**:
 | Data Quality | 2 | Table macros |
 | Data Preparation | 10 | Table macros |
 | Seasonality | 2 | Scalar functions |
+| Time Series Decomposition | 1 | Table macro |
 | Changepoint Detection | 3 | Table macros (2), Aggregate (1) |
 | Time Series Features | 4 | Aggregate (1), Table function (1), Scalar (2) |
-| **Total** | **41** | |
+| **Total** | **42** | |
 
 ### Function Type Breakdown
 
 | Type | Count | Examples |
 |------|-------|----------|
-| Table Macros | 21 | `anofox_fcst_ts_forecast` (or `ts_forecast`), `anofox_fcst_ts_fill_gaps` (or `ts_fill_gaps`) |
+| Table Macros | 22 | `anofox_fcst_ts_forecast` (or `ts_forecast`), `anofox_fcst_ts_fill_gaps` (or `ts_fill_gaps`), `anofox_fcst_ts_mstl_decomposition` (or `ts_mstl_decomposition`) |
 | Aggregate Functions | 5 | `anofox_fcst_ts_forecast_agg` (or `ts_forecast_agg`), `anofox_fcst_ts_features` (or `ts_features`), `anofox_fcst_ts_detect_changepoints_agg` (or `ts_detect_changepoints_agg`) |
 | Scalar Functions | 14 | `anofox_fcst_ts_mae` (or `ts_mae`), `anofox_fcst_ts_detect_seasonality` (or `ts_detect_seasonality`), `anofox_fcst_ts_analyze_seasonality` (or `ts_analyze_seasonality`) |
 | Table Functions | 3 | `anofox_fcst_ts_stats` (or `ts_stats`), `anofox_fcst_ts_quality_report` (or `ts_quality_report`), `anofox_fcst_ts_features_list` (or `ts_features_list`) |
@@ -1809,6 +1944,7 @@ These parameters work with **all forecasting models**:
 | Data Quality | ✅ | All macros support GROUP BY |
 | Data Preparation | ✅ | All macros support GROUP BY |
 | Seasonality | ✅ | Use with `LIST()` aggregation |
+| Time Series Decomposition | ✅ | Supports GROUP BY via `group_col` parameter |
 | Changepoint Detection | ✅ | `anofox_fcst_ts_detect_changepoints_by` (or `ts_detect_changepoints_by`) and `anofox_fcst_ts_detect_changepoints_agg` (or `ts_detect_changepoints_agg`) |
 | Time Series Features | ✅ | Aggregate function supports GROUP BY |
 
@@ -1844,6 +1980,39 @@ These parameters work with **all forecasting models**:
    - General rule: n ≥ 2 × seasonal_period for seasonal models
    - For inference: n > p + 1 to have sufficient degrees of freedom
    - Some models require minimum lengths (e.g., ARIMA needs sufficient data for differencing)
+
+7. **Known Issue - Batch Index Collision with Table-In-Out Operators**:
+
+   When using CPU-intensive Table-In-Out operators (like `ts_mstl_decomposition`) with `CREATE TABLE AS` on large datasets (10,000+ groups), you may encounter:
+   ```
+   Error: batch index 9999999999999 is present in multiple collections
+   ```
+
+   **Root Cause**: This is a DuckDB limitation in batch index coordination during parallel `FinalExecute` operations. When multiple threads complete their computation at different times and write to `PhysicalBatchInsert`, batch indices may collide. The value `9999999999999` is `BATCH_INCREMENT - 1`, a sentinel/default value that indicates batch indices weren't properly distributed across threads.
+
+   **Affected Functions**:
+   - `ts_mstl_decomposition` / `anofox_fcst_ts_mstl_decomposition`
+   - Any Table-In-Out operator with CPU-intensive `FinalExecute` phase
+
+   **Workarounds**:
+   ```sql
+   -- Option 1: Force materialization with ORDER BY (recommended)
+   CREATE TABLE result AS
+   SELECT * FROM (
+       SELECT * FROM ts_mstl_decomposition(...)
+       ORDER BY 1
+   );
+
+   -- Option 2: Single-threaded execution
+   PRAGMA threads=1;
+   CREATE TABLE result AS SELECT * FROM ts_mstl_decomposition(...);
+   PRAGMA threads=8;  -- Reset
+
+   -- Option 3: SELECT works without issues (no batch insert)
+   SELECT COUNT(*) FROM ts_mstl_decomposition(...);
+   ```
+
+   **Status**: This appears to be a DuckDB core issue with `TryFlushCachingOperators` not properly managing batch indices during the `FinalExecute` phase. Lightweight Table-In-Out operators (like `ts_fill_gaps`) are less likely to trigger this due to faster, more synchronized thread completion.
 
 ---
 

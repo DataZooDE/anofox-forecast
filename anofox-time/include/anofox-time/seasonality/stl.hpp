@@ -34,7 +34,8 @@ public:
                               std::size_t iterations = 2,
                               bool robust = false);
 
-    void fit(const core::TimeSeries& ts);
+    // Explicitly use anofoxtime::core::TimeSeries
+    void fit(const anofoxtime::core::TimeSeries& ts);
 
     const std::vector<double>& trend() const { return trend_; }
     const std::vector<double>& seasonal() const { return seasonal_; }
