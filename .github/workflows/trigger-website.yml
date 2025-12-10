@@ -1,0 +1,25 @@
+name: Trigger Website Docs
+
+on:
+  push:
+    paths:
+      - 'docs/API_REFERENCE.md'
+    branches:
+      - main
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Website Repository
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.WEBSITE_REPO_PAT }}
+          repository: DataZooDE/anofox-landingpage
+          event-type: docs-update-trigger
+          client-payload: >
+            {
+              "extension_name": "anofox_forecast", 
+              "remote_url": "https://raw.githubusercontent.com/DataZooDE/anofox-forecast/main/docs/API_REFERENCE.md",
+              "target_dir": "content/docs/forecast" 
+            }
