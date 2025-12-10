@@ -10,6 +10,7 @@
 
 The Anofox Forecast extension provides comprehensive time series forecasting capabilities directly within DuckDB. All forecasting computations are performed by the **anofox-time** library, which implements efficient time series algorithms in C++.
 
+
 ### Key Features
 
 - **31 Forecasting Models**: From simple naive methods to more advanced statistical models
