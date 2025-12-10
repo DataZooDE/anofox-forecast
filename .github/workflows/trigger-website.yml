@@ -1,6 +1,7 @@
 name: Trigger Website Docs
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - 'docs/API_REFERENCE.md'
