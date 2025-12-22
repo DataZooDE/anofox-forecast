@@ -4,6 +4,7 @@
 #include "duckdb/function/table_function.hpp"
 #include "data_prep_bind_replace.hpp"
 #include "ts_fill_gaps_function.hpp"
+#include "ts_fill_forward_function.hpp"
 #include <map>
 #include <set>
 #include <vector>
@@ -779,6 +780,23 @@ void RegisterDataPrepMacros(ExtensionLoader &loader) {
 	ts_fill_gaps_integer.named_parameters["value_col"] = LogicalType::VARCHAR;
 	ts_fill_gaps_integer.named_parameters["frequency"] = LogicalType::INTEGER;
 	loader.RegisterFunction(ts_fill_gaps_integer);
+
+	// TS_FILL_FORWARD: Table-In-Out operator (internal function)
+	// This is the native C++ implementation that takes TABLE input
+	auto ts_fill_forward_operator = CreateTSFillForwardOperatorTableFunction();
+	TableFunctionSet ts_fill_forward_operator_set("anofox_fcst_ts_fill_forward_operator");
+	ts_fill_forward_operator_set.AddFunction(*ts_fill_forward_operator);
+	CreateTableFunctionInfo ts_fill_forward_operator_info(std::move(ts_fill_forward_operator_set));
+	loader.RegisterFunction(std::move(ts_fill_forward_operator_info));
+
+	// Register alias for ts_fill_forward_operator
+	auto ts_fill_forward_operator_alias = CreateTSFillForwardOperatorTableFunction();
+	TableFunctionSet ts_fill_forward_operator_alias_set("ts_fill_forward_operator");
+	ts_fill_forward_operator_alias_set.AddFunction(*ts_fill_forward_operator_alias);
+	CreateTableFunctionInfo ts_fill_forward_operator_alias_info(std::move(ts_fill_forward_operator_alias_set));
+	ts_fill_forward_operator_alias_info.alias_of = "anofox_fcst_ts_fill_forward_operator";
+	ts_fill_forward_operator_alias_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+	loader.RegisterFunction(std::move(ts_fill_forward_operator_alias_info));
 
 	// TS_FILL_FORWARD: VARCHAR frequency - target_date accepts ANY type (column name or literal value)
 	TableFunction ts_fill_forward_varchar("anofox_fcst_ts_fill_forward",

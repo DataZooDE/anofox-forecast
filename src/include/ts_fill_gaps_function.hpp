@@ -50,6 +50,12 @@ struct TSFillGapsGlobalState : public GlobalTableFunctionState {
 	idx_t value_col_idx = 0;
 
 	TSFillGapsGlobalState() = default;
+
+	// Override MaxThreads to return 1 to avoid BatchedDataCollection merge errors
+	// See: https://github.com/duckdb/duckdb/issues/19939
+	idx_t MaxThreads() const override {
+		return 1;
+	}
 };
 
 // Series data structure for accumulating input per group

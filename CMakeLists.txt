@@ -138,6 +138,8 @@ set(EXTENSION_SOURCES
     src/data_prep_macros.cpp
     # ts_fill_gaps_function.cpp DEFINES CreateTSFillGapsOperatorTableFunction()
     src/ts_fill_gaps_function.cpp
+    # ts_fill_forward_function.cpp DEFINES CreateTSFillForwardOperatorTableFunction()
+    src/ts_fill_forward_function.cpp
     src/mstl_decomposition_function.cpp
     src/data_prep_bind_replace.cpp
     src/model_factory.cpp

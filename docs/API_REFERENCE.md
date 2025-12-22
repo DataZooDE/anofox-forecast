@@ -629,6 +629,117 @@ SELECT * FROM anofox_fcst_ts_fill_forward('int_data', series_id, date_col, value
 
 ---
 
+#### anofox_fcst_ts_fill_forward_operator (alias: `ts_fill_forward_operator`)
+
+**Native C++ Table-In-Out Operator for Forward Filling**
+
+High-performance native C++ implementation that processes table input directly. This is the internal operator used by the public `anofox_fcst_ts_fill_forward` API. Can be called directly for maximum performance when you have a table reference.
+
+**Signature (Function Overloading):**
+```sql
+-- For DATE/TIMESTAMP columns (date-based frequency)
+anofox_fcst_ts_fill_forward_operator(
+    input_table   TABLE,
+    group_col     VARCHAR,
+    date_col      VARCHAR,
+    value_col     VARCHAR,
+    target_date   DATE | TIMESTAMP,
+    frequency     VARCHAR
+) → TABLE
+
+-- For INTEGER columns (integer-based frequency)
+anofox_fcst_ts_fill_forward_operator(
+    input_table   TABLE,
+    group_col     VARCHAR,
+    date_col      VARCHAR,
+    value_col     VARCHAR,
+    target_date   INTEGER | BIGINT,
+    frequency     INTEGER
+) → TABLE
+```
+
+**Parameters:**
+- `input_table`: Input table as `TABLE` type (e.g., `TABLE my_table` or `TABLE (SELECT * FROM my_table)`)
+- `group_col`: Grouping column name as string literal (e.g., `'series_id'`)
+- `date_col`: Date/timestamp column name as string literal
+- `value_col`: Value column name as string literal
+- `target_date`: Target date/index to extend the series to (type must match `date_col` type)
+- `frequency`:
+  - **For DATE/TIMESTAMP columns**: Required frequency string (Polars-style).
+    - `"30m"` or `"30min"` - 30 minutes
+    - `"1h"` - 1 hour
+    - `"1d"` - 1 day
+    - `"1w"` - 1 week
+    - `"1mo"` - 1 month
+    - `"1q"` - 1 quarter (3 months)
+    - `"1y"` - 1 year
+  - **For INTEGER columns**: Required integer step size.
+    - `1`, `2`, `3`, etc. - Integer step size for `GENERATE_SERIES`
+
+**Type Validation:**
+- DuckDB automatically selects the correct overload based on the `frequency` parameter type:
+  - VARCHAR frequency → DATE/TIMESTAMP date column required
+  - INTEGER frequency → INTEGER/BIGINT date column required
+- If there's a type mismatch (e.g., INTEGER date column with VARCHAR frequency), a `Binder Error` will be raised at query time.
+
+**Behavior:** Extends series to target date/index, filling gaps with NULL using the specified frequency interval or step size. This is the native C++ implementation that provides significantly better performance than the SQL-based approach, especially for large datasets.
+
+**Performance Notes:**
+- Significantly faster than SQL version for large datasets
+- Avoids SQL materialization overhead
+- Uses efficient O(1) hash set lookups for gap detection
+- Best performance for datasets >100K rows
+
+**Examples:**
+```sql
+-- DATE/TIMESTAMP columns: Use VARCHAR frequency strings
+-- Direct table reference (maximum performance)
+SELECT * FROM anofox_fcst_ts_fill_forward_operator(
+    TABLE daily_data,
+    'series_id',
+    'date',
+    'value',
+    '2024-12-31'::DATE,
+    '1d'
+);
+
+-- Using alias
+SELECT * FROM ts_fill_forward_operator(
+    TABLE daily_data,
+    'series_id',
+    'date',
+    'value',
+    '2024-12-31'::DATE,
+    '1d'
+);
+
+-- With subquery
+SELECT * FROM anofox_fcst_ts_fill_forward_operator(
+    TABLE (SELECT * FROM sales WHERE date >= '2024-01-01'),
+    'product_id',
+    'date',
+    'amount',
+    '2024-12-31'::DATE,
+    '1d'
+);
+
+-- INTEGER columns: Use INTEGER frequency values
+SELECT * FROM anofox_fcst_ts_fill_forward_operator(
+    TABLE int_data,
+    'series_id',
+    'date_col',
+    'value',
+    100,
+    1
+);
+```
+
+**When to Use:**
+- **Use `anofox_fcst_ts_fill_forward`** (string API): When you have a table name as a string, for ease of use and compatibility
+- **Use `anofox_fcst_ts_fill_forward_operator`** (TABLE API): When you need maximum performance and have a direct table reference
+
+---
+
 ### Series Filtering
 
 #### anofox_fcst_ts_drop_constant (alias: `ts_drop_constant`)
@@ -1919,18 +2030,19 @@ These parameters work with **all forecasting models**:
 | Evaluation Metrics | 12 | Scalar functions |
 | EDA | 3 | Table functions (2), Table macros (1) |
 | Data Quality | 2 | Table macros |
-| Data Preparation | 10 | Table macros |
+| Data Preparation | 12 | Table macros (10), Table-In-Out operators (2) |
 | Seasonality | 2 | Scalar functions |
 | Time Series Decomposition | 1 | Table macro |
 | Changepoint Detection | 3 | Table macros (2), Aggregate (1) |
 | Time Series Features | 4 | Aggregate (1), Table function (1), Scalar (2) |
-| **Total** | **42** | |
+| **Total** | **44** | |
 
 ### Function Type Breakdown
 
 | Type | Count | Examples |
 |------|-------|----------|
 | Table Macros | 22 | `anofox_fcst_ts_forecast` (or `ts_forecast`), `anofox_fcst_ts_fill_gaps` (or `ts_fill_gaps`), `anofox_fcst_ts_mstl_decomposition` (or `ts_mstl_decomposition`) |
+| Table-In-Out Operators | 2 | `anofox_fcst_ts_fill_gaps_operator` (or `ts_fill_gaps_operator`), `anofox_fcst_ts_fill_forward_operator` (or `ts_fill_forward_operator`) |
 | Aggregate Functions | 5 | `anofox_fcst_ts_forecast_agg` (or `ts_forecast_agg`), `anofox_fcst_ts_features` (or `ts_features`), `anofox_fcst_ts_detect_changepoints_agg` (or `ts_detect_changepoints_agg`) |
 | Scalar Functions | 14 | `anofox_fcst_ts_mae` (or `ts_mae`), `anofox_fcst_ts_detect_seasonality` (or `ts_detect_seasonality`), `anofox_fcst_ts_analyze_seasonality` (or `ts_analyze_seasonality`) |
 | Table Functions | 3 | `anofox_fcst_ts_stats` (or `ts_stats`), `anofox_fcst_ts_quality_report` (or `ts_quality_report`), `anofox_fcst_ts_features_list` (or `ts_features_list`) |
@@ -2017,6 +2129,6 @@ These parameters work with **all forecasting models**:
 
 ---
 
-**Last Updated:** 2025-11-26  
+**Last Updated:** 2025-12-22
 **API Version:** 0.2.0
 
