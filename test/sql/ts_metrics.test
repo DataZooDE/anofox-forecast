@@ -1,0 +1,292 @@
+# name: test/sql/ts_metrics.test
+# description: Tests for time series evaluation metric functions
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# MAE - Mean Absolute Error
+#######################################
+
+# Perfect forecast - MAE should be 0
+query I
+SELECT ts_mae([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]);
+----
+0.0
+
+# Simple error - MAE = mean(|actual - forecast|)
+# actual=[1,2,3], forecast=[2,3,4], errors=[1,1,1], MAE=1
+query I
+SELECT ts_mae([1.0, 2.0, 3.0], [2.0, 3.0, 4.0]);
+----
+1.0
+
+# Mixed errors
+# actual=[10,20,30], forecast=[12,18,33], errors=[2,2,3], MAE=7/3≈2.33
+query I
+SELECT ABS(ts_mae([10.0, 20.0, 30.0], [12.0, 18.0, 33.0]) - 2.333333) < 0.01;
+----
+true
+
+# Alias test
+query I
+SELECT anofox_fcst_ts_mae([1.0, 2.0], [1.0, 2.0]);
+----
+0.0
+
+#######################################
+# MSE - Mean Squared Error
+#######################################
+
+# Perfect forecast - MSE should be 0
+query I
+SELECT ts_mse([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]);
+----
+0.0
+
+# Simple error - MSE = mean((actual - forecast)^2)
+# actual=[1,2,3], forecast=[2,3,4], errors=[1,1,1], MSE=1
+query I
+SELECT ts_mse([1.0, 2.0, 3.0], [2.0, 3.0, 4.0]);
+----
+1.0
+
+# Larger errors get squared
+# actual=[1,2,3], forecast=[3,4,5], errors=[2,2,2], squared=[4,4,4], MSE=4
+query I
+SELECT ts_mse([1.0, 2.0, 3.0], [3.0, 4.0, 5.0]);
+----
+4.0
+
+#######################################
+# RMSE - Root Mean Squared Error
+#######################################
+
+# Perfect forecast - RMSE should be 0
+query I
+SELECT ts_rmse([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]);
+----
+0.0
+
+# RMSE = sqrt(MSE)
+# actual=[1,2,3], forecast=[3,4,5], MSE=4, RMSE=2
+query I
+SELECT ts_rmse([1.0, 2.0, 3.0], [3.0, 4.0, 5.0]);
+----
+2.0
+
+# RMSE with unit errors
+query I
+SELECT ts_rmse([1.0, 2.0, 3.0], [2.0, 3.0, 4.0]);
+----
+1.0
+
+#######################################
+# MAPE - Mean Absolute Percentage Error
+#######################################
+
+# Perfect forecast - MAPE should be 0
+query I
+SELECT ts_mape([10.0, 20.0, 30.0], [10.0, 20.0, 30.0]);
+----
+0.0
+
+# 10% error on each
+# actual=[10,20,30], forecast=[11,22,33], %-errors=[10%,10%,10%], MAPE=10%
+query I
+SELECT ABS(ts_mape([10.0, 20.0, 30.0], [11.0, 22.0, 33.0]) - 0.1) < 0.01;
+----
+true
+
+# 50% error
+# actual=[10,20], forecast=[5,10], %-errors=[50%,50%], MAPE=50%
+query I
+SELECT ABS(ts_mape([10.0, 20.0], [5.0, 10.0]) - 0.5) < 0.01;
+----
+true
+
+#######################################
+# SMAPE - Symmetric Mean Absolute Percentage Error
+#######################################
+
+# Perfect forecast - SMAPE should be 0
+query I
+SELECT ts_smape([10.0, 20.0, 30.0], [10.0, 20.0, 30.0]);
+----
+0.0
+
+# SMAPE is symmetric - over and under forecast treated same
+query I
+SELECT ABS(ts_smape([10.0, 20.0], [12.0, 24.0]) - ts_smape([12.0, 24.0], [10.0, 20.0])) < 0.01;
+----
+true
+
+# SMAPE should be bounded (unlike MAPE)
+query I
+SELECT ts_smape([10.0, 20.0], [5.0, 10.0]) < 1.0;
+----
+true
+
+#######################################
+# MASE - Mean Absolute Scaled Error
+#######################################
+
+# Perfect forecast with seasonal period 1
+query I
+SELECT ts_mase([1.0, 2.0, 3.0, 4.0, 5.0], [1.0, 2.0, 3.0, 4.0, 5.0], 1);
+----
+0.0
+
+# MASE = 1 means as good as naive forecast
+query I
+SELECT ts_mase([1.0, 2.0, 3.0, 4.0, 5.0], [2.0, 3.0, 4.0, 5.0, 6.0], 1) > 0;
+----
+true
+
+# MASE with seasonal period 2
+query I
+SELECT ts_mase([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2);
+----
+0.0
+
+#######################################
+# R2 - Coefficient of Determination
+#######################################
+
+# Perfect forecast - R2 should be 1
+query I
+SELECT ts_r2([1.0, 2.0, 3.0, 4.0, 5.0], [1.0, 2.0, 3.0, 4.0, 5.0]);
+----
+1.0
+
+# Good fit - R2 close to 1
+query I
+SELECT ts_r2([1.0, 2.0, 3.0, 4.0, 5.0], [1.1, 2.1, 2.9, 4.0, 5.1]) > 0.95;
+----
+true
+
+# Bad fit - R2 lower
+query I
+SELECT ts_r2([1.0, 2.0, 3.0, 4.0, 5.0], [5.0, 4.0, 3.0, 2.0, 1.0]) < 0;
+----
+true
+
+#######################################
+# Bias - Mean Error
+#######################################
+
+# No bias - errors cancel out
+query I
+SELECT ts_bias([1.0, 2.0, 3.0], [0.0, 2.0, 4.0]);
+----
+0.0
+
+# Positive bias - forecast under-predicts
+# actual=[10,20,30], forecast=[8,18,28], bias=2
+query I
+SELECT ts_bias([10.0, 20.0, 30.0], [8.0, 18.0, 28.0]);
+----
+2.0
+
+# Negative bias - forecast over-predicts
+# actual=[10,20,30], forecast=[12,22,32], bias=-2
+query I
+SELECT ts_bias([10.0, 20.0, 30.0], [12.0, 22.0, 32.0]);
+----
+-2.0
+
+#######################################
+# RMAE - Relative Mean Absolute Error
+#######################################
+
+# RMAE for matching forecasts
+query I
+SELECT ts_rmae([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]);
+----
+0.0
+
+# RMAE should be positive for non-matching
+query I
+SELECT ts_rmae([10.0, 20.0, 30.0], [12.0, 22.0, 32.0]) > 0;
+----
+true
+
+#######################################
+# Quantile Loss (Pinball Loss)
+#######################################
+
+# Quantile loss at median (0.5)
+query I
+SELECT ts_quantile_loss([10.0, 20.0, 30.0], [10.0, 20.0, 30.0], 0.5);
+----
+0.0
+
+# Quantile loss for under-prediction at q=0.9
+# Under-prediction penalized more at high quantiles
+query I
+SELECT ts_quantile_loss([10.0, 20.0, 30.0], [8.0, 18.0, 28.0], 0.9) > 0;
+----
+true
+
+# Quantile loss for over-prediction at q=0.1
+# Over-prediction penalized more at low quantiles
+query I
+SELECT ts_quantile_loss([10.0, 20.0, 30.0], [12.0, 22.0, 32.0], 0.1) > 0;
+----
+true
+
+#######################################
+# MQLoss - Mean Quantile Loss
+#######################################
+
+# Perfect forecast
+query I
+SELECT ts_mqloss([10.0, 20.0, 30.0], [10.0, 20.0, 30.0], 0.5);
+----
+0.0
+
+# MQLoss should be positive for errors
+query I
+SELECT ts_mqloss([10.0, 20.0, 30.0], [12.0, 22.0, 32.0], 0.5) > 0;
+----
+true
+
+#######################################
+# Coverage - Prediction Interval Coverage
+#######################################
+
+# All actuals within bounds - 100% coverage
+query I
+SELECT ts_coverage([5.0, 10.0, 15.0], [0.0, 5.0, 10.0], [10.0, 15.0, 20.0]);
+----
+1.0
+
+# None within bounds - 0% coverage
+query I
+SELECT ts_coverage([50.0, 100.0, 150.0], [0.0, 5.0, 10.0], [10.0, 15.0, 20.0]);
+----
+0.0
+
+# Partial coverage - 2/3 within bounds
+query I
+SELECT ABS(ts_coverage([5.0, 10.0, 50.0], [0.0, 5.0, 10.0], [10.0, 15.0, 20.0]) - 0.666667) < 0.01;
+----
+true
+
+# Exact on bounds should count as covered
+query I
+SELECT ts_coverage([0.0, 10.0], [0.0, 5.0], [5.0, 10.0]);
+----
+1.0
+
+#######################################
+# Error Handling
+#######################################
+
+# Empty arrays should error
+statement error
+SELECT ts_mae([], []);
+
+# Mismatched lengths should error
+statement error
+SELECT ts_mae([1.0, 2.0, 3.0], [1.0, 2.0]);

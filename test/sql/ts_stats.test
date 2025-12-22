@@ -1,0 +1,231 @@
+# name: test/sql/ts_stats.test
+# description: Tests for ts_stats time series statistics function
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Basic Statistics Tests
+#######################################
+
+# Test with simple numeric array - check length
+query I
+SELECT (ts_stats([1.0, 2.0, 3.0, 4.0, 5.0])).length;
+----
+5
+
+# Test mean calculation
+query I
+SELECT (ts_stats([1.0, 2.0, 3.0, 4.0, 5.0])).mean;
+----
+3.0
+
+# Test median calculation (odd count)
+query I
+SELECT (ts_stats([1.0, 2.0, 3.0, 4.0, 5.0])).median;
+----
+3.0
+
+# Test median calculation (even count)
+query I
+SELECT (ts_stats([1.0, 2.0, 3.0, 4.0])).median;
+----
+2.5
+
+# Test min value
+query I
+SELECT (ts_stats([1.0, 2.0, 3.0, 4.0, 5.0])).min;
+----
+1.0
+
+# Test max value
+query I
+SELECT (ts_stats([1.0, 2.0, 3.0, 4.0, 5.0])).max;
+----
+5.0
+
+# Test range (max - min)
+query I
+SELECT (ts_stats([1.0, 2.0, 3.0, 4.0, 5.0])).range;
+----
+4.0
+
+# Test sum
+query I
+SELECT (ts_stats([1.0, 2.0, 3.0, 4.0, 5.0])).sum;
+----
+15.0
+
+#######################################
+# Variance and Standard Deviation
+#######################################
+
+# Test variance (population variance)
+query I
+SELECT ABS((ts_stats([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])).variance - 4.0) < 0.01;
+----
+true
+
+# Test standard deviation
+query I
+SELECT ABS((ts_stats([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])).std_dev - 2.0) < 0.01;
+----
+true
+
+#######################################
+# Quartiles
+#######################################
+
+# Test Q1 (25th percentile)
+query I
+SELECT ABS((ts_stats([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])).q1 - 2.5) < 0.5;
+----
+true
+
+# Test Q3 (75th percentile)
+query I
+SELECT ABS((ts_stats([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])).q3 - 6.5) < 0.5;
+----
+true
+
+# Test IQR (Q3 - Q1)
+query I
+SELECT (ts_stats([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])).iqr > 0;
+----
+true
+
+#######################################
+# Count Statistics
+#######################################
+
+# Test n_zeros count
+query I
+SELECT (ts_stats([0.0, 1.0, 0.0, 2.0, 0.0])).n_zeros;
+----
+3
+
+# Test n_positive count
+query I
+SELECT (ts_stats([-1.0, 0.0, 1.0, 2.0, 3.0])).n_positive;
+----
+3
+
+# Test n_negative count
+query I
+SELECT (ts_stats([-2.0, -1.0, 0.0, 1.0, 2.0])).n_negative;
+----
+2
+
+#######################################
+# Shape Statistics
+#######################################
+
+# Test skewness for symmetric distribution (should be near 0)
+query I
+SELECT ABS((ts_stats([1.0, 2.0, 3.0, 4.0, 5.0])).skewness) < 0.1;
+----
+true
+
+# Test kurtosis exists
+query I
+SELECT (ts_stats([1.0, 2.0, 3.0, 4.0, 5.0])).kurtosis IS NOT NULL;
+----
+true
+
+# Test coefficient of variation (std_dev / mean)
+query I
+SELECT (ts_stats([1.0, 2.0, 3.0, 4.0, 5.0])).coef_variation > 0;
+----
+true
+
+#######################################
+# Time Series Specific Metrics
+#######################################
+
+# Test autocorrelation lag 1 for trending series (should be positive)
+query I
+SELECT (ts_stats([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])).autocorr_lag1 > 0;
+----
+true
+
+# Test trend strength for linear trend
+query I
+SELECT (ts_stats([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])).trend_strength > 0.5;
+----
+true
+
+# Test seasonality strength
+query I
+SELECT (ts_stats([1.0, 2.0, 3.0, 4.0, 5.0])).seasonality_strength >= 0;
+----
+true
+
+# Test entropy (should be positive for non-constant series)
+query I
+SELECT (ts_stats([1.0, 2.0, 3.0, 4.0, 5.0])).entropy >= 0;
+----
+true
+
+# Test stability
+query I
+SELECT (ts_stats([1.0, 2.0, 3.0, 4.0, 5.0])).stability >= 0;
+----
+true
+
+#######################################
+# Edge Cases
+#######################################
+
+# Test with single value
+query I
+SELECT (ts_stats([5.0])).length;
+----
+1
+
+query I
+SELECT (ts_stats([5.0])).mean;
+----
+5.0
+
+# Test with constant series
+query I
+SELECT (ts_stats([3.0, 3.0, 3.0, 3.0, 3.0])).variance;
+----
+0.0
+
+query I
+SELECT (ts_stats([3.0, 3.0, 3.0, 3.0, 3.0])).std_dev;
+----
+0.0
+
+# Test with negative values
+query I
+SELECT (ts_stats([-5.0, -3.0, -1.0, 1.0, 3.0])).mean;
+----
+-1.0
+
+#######################################
+# NULL Handling
+#######################################
+
+# Test with NULL in array
+query I
+SELECT (ts_stats([1.0, NULL, 3.0, NULL, 5.0])).n_nulls;
+----
+2
+
+# Test NULL input
+query I
+SELECT ts_stats(NULL) IS NULL;
+----
+true
+
+#######################################
+# Alias Function Test
+#######################################
+
+# Test anofox_fcst_ts_stats alias
+query I
+SELECT (anofox_fcst_ts_stats([1.0, 2.0, 3.0])).mean;
+----
+2.0

@@ -1,0 +1,29 @@
+[workspace]
+members = ["crates/anofox-fcst-core", "crates/anofox-fcst-ffi"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Simon Mueller"]
+repository = "https://github.com/DataZooDE/anofox-forecast-extension"
+
+[workspace.dependencies]
+# Core forecasting library
+anofox-forecast = "0.2"
+
+# FFI and memory management
+libc = "0.2"
+thiserror = "2.0"
+
+# Date/time handling
+chrono = "0.4"
+
+# Statistics
+statrs = "0.18"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3

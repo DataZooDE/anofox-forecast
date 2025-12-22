@@ -1,0 +1,226 @@
+# name: test/sql/ts_features.test
+# description: Tests for ts_features and ts_features_list feature extraction functions
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# ts_features_scalar - Scalar Version Tests (DOUBLE[] → STRUCT)
+#######################################
+
+# Test ts_features_scalar returns STRUCT type
+query I
+SELECT ts_features_scalar([1.0, 2.0, 3.0, 4.0, 5.0]) IS NOT NULL;
+----
+true
+
+# Test STRUCT has mean field (proves structure exists)
+query I
+SELECT ts_features_scalar([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]).mean IS NOT NULL;
+----
+true
+
+#######################################
+# ts_features_list - List Available Features
+#######################################
+
+# Test ts_features_list returns non-empty table
+query I
+SELECT count(*) > 0 FROM ts_features_list();
+----
+true
+
+# Test ts_features_list returns rows
+query I
+SELECT feature_name IS NOT NULL FROM ts_features_list() LIMIT 1;
+----
+true
+
+#######################################
+# Feature Value Tests (using scalar version)
+#######################################
+
+# Mean feature should be correct (5.5 for 1-10)
+query I
+SELECT ABS(ts_features_scalar([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]).mean - 5.5) < 0.01;
+----
+true
+
+# Variance feature should be positive
+query I
+SELECT ts_features_scalar([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]).variance > 0;
+----
+true
+
+# Length feature should be correct
+query I
+SELECT ts_features_scalar([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]).length = 10;
+----
+true
+
+# Min feature should be correct
+query I
+SELECT ts_features_scalar([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]).minimum = 1.0;
+----
+true
+
+# Max feature should be correct
+query I
+SELECT ts_features_scalar([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]).maximum = 10.0;
+----
+true
+
+#######################################
+# Different Series Types
+#######################################
+
+# Constant series - variance should be zero
+query I
+SELECT ts_features_scalar([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0]).variance < 0.001;
+----
+true
+
+# Trending series - features should exist
+query I
+SELECT ts_features_scalar([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]).mean IS NOT NULL;
+----
+true
+
+# Seasonal series - features should exist
+query I
+SELECT ts_features_scalar([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0]).mean IS NOT NULL;
+----
+true
+
+#######################################
+# Edge Cases
+#######################################
+
+# Short series
+query I
+SELECT ts_features_scalar([1.0, 2.0, 3.0]).mean IS NOT NULL;
+----
+true
+
+# Longer series
+query I
+SELECT ts_features_scalar([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0,
+                    11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0]).mean IS NOT NULL;
+----
+true
+
+#######################################
+# Alias Tests
+#######################################
+
+# Test anofox_fcst_ts_features_scalar alias
+query I
+SELECT anofox_fcst_ts_features_scalar([1.0, 2.0, 3.0, 4.0, 5.0]).mean IS NOT NULL;
+----
+true
+
+# Test anofox_fcst_ts_features_list alias
+query I
+SELECT count(*) > 0 FROM anofox_fcst_ts_features_list();
+----
+true
+
+#######################################
+# ts_features - Aggregate Function Tests (C++ API Compatible)
+# Signature: ts_features(ts_col, val_col, feature_selection, feature_params) → STRUCT
+#######################################
+
+# Test ts_features aggregate returns STRUCT (2-param version)
+query I
+SELECT (SELECT ts_features(ts, val) FROM (
+    SELECT '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts, i::DOUBLE as val
+    FROM range(1, 11) t(i)
+)).mean IS NOT NULL;
+----
+true
+
+# Test ts_features aggregate mean calculation
+query I
+SELECT ABS((SELECT ts_features(ts, val) FROM (
+    SELECT '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts, i::DOUBLE as val
+    FROM range(1, 11) t(i)
+)).mean - 5.5) < 0.01;
+----
+true
+
+# Test 3-parameter version with feature_selection (NULL)
+query I
+SELECT (SELECT ts_features(ts, val, NULL) FROM (
+    SELECT '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts, i::DOUBLE as val
+    FROM range(1, 11) t(i)
+)).mean IS NOT NULL;
+----
+true
+
+# Test 3-parameter version with feature_selection list
+query I
+SELECT (SELECT ts_features(ts, val, ['mean', 'variance']) FROM (
+    SELECT '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts, i::DOUBLE as val
+    FROM range(1, 11) t(i)
+)).mean IS NOT NULL;
+----
+true
+
+# Test 4-parameter version with feature_selection and feature_params (NULL, NULL)
+query I
+SELECT (SELECT ts_features(ts, val, NULL, NULL) FROM (
+    SELECT '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts, i::DOUBLE as val
+    FROM range(1, 11) t(i)
+)).variance IS NOT NULL;
+----
+true
+
+#######################################
+# ts_features_agg - Aggregate Version Tests
+#######################################
+
+# Test ts_features_agg returns STRUCT
+query I
+SELECT (SELECT ts_features_agg(ts, val) FROM (
+    SELECT '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts, i::DOUBLE as val
+    FROM range(1, 11) t(i)
+)).mean IS NOT NULL;
+----
+true
+
+# Test ts_features_agg mean calculation
+query I
+SELECT ABS((SELECT ts_features_agg(ts, val) FROM (
+    SELECT '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts, i::DOUBLE as val
+    FROM range(1, 11) t(i)
+)).mean - 5.5) < 0.01;
+----
+true
+
+# Test 3-parameter version with feature_selection (NULL)
+query I
+SELECT (SELECT ts_features_agg(ts, val, NULL) FROM (
+    SELECT '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts, i::DOUBLE as val
+    FROM range(1, 11) t(i)
+)).mean IS NOT NULL;
+----
+true
+
+# Test 3-parameter version with feature_selection list
+query I
+SELECT (SELECT ts_features_agg(ts, val, ['mean', 'variance']) FROM (
+    SELECT '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts, i::DOUBLE as val
+    FROM range(1, 11) t(i)
+)).mean IS NOT NULL;
+----
+true
+
+# Test 4-parameter version with feature_selection and feature_params (NULL, NULL)
+query I
+SELECT (SELECT ts_features_agg(ts, val, NULL, NULL) FROM (
+    SELECT '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts, i::DOUBLE as val
+    FROM range(1, 11) t(i)
+)).variance IS NOT NULL;
+----
+true
+

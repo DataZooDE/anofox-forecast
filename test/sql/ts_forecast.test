@@ -1,0 +1,169 @@
+# name: test/sql/ts_forecast.test
+# description: Tests for ts_forecast time series forecasting function
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Basic Forecasting Tests
+#######################################
+
+# Test forecast with simple trend data
+query I
+SELECT length((ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3)).point);
+----
+3
+
+# Test forecast returns correct horizon
+query I
+SELECT length((ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 5)).point);
+----
+5
+
+# Test forecast returns model name
+query I
+SELECT (ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3)).model IS NOT NULL;
+----
+true
+
+# Test confidence bounds exist and have correct length
+query I
+SELECT length((ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3)).lower);
+----
+3
+
+query I
+SELECT length((ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3)).upper);
+----
+3
+
+# Test fitted values have same length as input
+query I
+SELECT length((ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3)).fitted);
+----
+10
+
+# Test residuals have same length as input
+query I
+SELECT length((ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3)).residuals);
+----
+10
+
+#######################################
+# Model Specification Tests
+#######################################
+
+# Test with Naive model - should repeat last value
+query I
+SELECT ABS((ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0], 3, 'naive')).point[1] - 5.0) < 0.01;
+----
+true
+
+query I
+SELECT ABS((ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0], 3, 'naive')).point[2] - 5.0) < 0.01;
+----
+true
+
+query I
+SELECT ABS((ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0], 3, 'naive')).point[3] - 5.0) < 0.01;
+----
+true
+
+# Test model name is set correctly
+query I
+SELECT (ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0], 3, 'naive')).model;
+----
+naive
+
+# Test with Holt model (exponential smoothing with trend)
+query I
+SELECT (ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'holt')).model;
+----
+holt
+
+#######################################
+# Trend Detection Tests
+#######################################
+
+# Linear increasing trend - forecast should continue upward
+query I
+SELECT (ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3)).point[1] > 10.0;
+----
+true
+
+# Linear decreasing trend - forecast should continue downward
+query I
+SELECT (ts_forecast([10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0], 3)).point[1] < 1.0;
+----
+true
+
+#######################################
+# Forecast Quality Metrics
+#######################################
+
+# AIC should be finite
+query I
+SELECT (ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3)).aic IS NOT NULL;
+----
+true
+
+# BIC should be finite
+query I
+SELECT (ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3)).bic IS NOT NULL;
+----
+true
+
+# MSE should be non-negative
+query I
+SELECT (ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3)).mse >= 0;
+----
+true
+
+#######################################
+# Confidence Bounds Properties
+#######################################
+
+# Lower bound should be <= point forecast
+query I
+SELECT (ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3)).lower[1] <=
+       (ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3)).point[1];
+----
+true
+
+# Upper bound should be >= point forecast
+query I
+SELECT (ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3)).upper[1] >=
+       (ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3)).point[1];
+----
+true
+
+#######################################
+# Seasonal Data Tests
+#######################################
+
+# Test with seasonal pattern (period 4)
+query I
+SELECT length((ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4)).point);
+----
+4
+
+#######################################
+# NULL Handling
+#######################################
+
+# NULL input should return NULL
+query I
+SELECT ts_forecast(NULL, 3) IS NULL;
+----
+true
+
+#######################################
+# Alias Test
+#######################################
+
+# Test anofox_fcst_ts_forecast alias
+query I
+SELECT length((anofox_fcst_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3)).point);
+----
+3
+

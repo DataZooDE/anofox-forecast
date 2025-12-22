@@ -1,0 +1,38 @@
+# Build directories
+build/
+target/
+cmake-build-*/
+
+# Rust
+*.rlib
+*.rmeta
+
+# DuckDB extension outputs
+*.duckdb_extension
+*.duckdb_extension.gz
+
+# Test artifacts
+duckdb_unittest_tempdir/
+test/comparison/.venv/
+*.log
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Compiled objects
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/

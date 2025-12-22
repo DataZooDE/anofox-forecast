@@ -1,0 +1,202 @@
+# name: test/sql/ts_imputation.test
+# description: Tests for NULL filling/imputation functions
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# ts_fill_nulls_const - Fill with Constant
+#######################################
+
+# Test basic constant fill
+query I
+SELECT ts_fill_nulls_const([1.0, NULL, 3.0], 0.0);
+----
+[1.0, 0.0, 3.0]
+
+# Test fill with specific value
+query I
+SELECT ts_fill_nulls_const([1.0, NULL, 3.0], 99.0);
+----
+[1.0, 99.0, 3.0]
+
+# Test with no NULLs - should return same array
+query I
+SELECT ts_fill_nulls_const([1.0, 2.0, 3.0], 0.0);
+----
+[1.0, 2.0, 3.0]
+
+# Test with multiple NULLs
+query I
+SELECT ts_fill_nulls_const([NULL, 2.0, NULL, 4.0, NULL], -1.0);
+----
+[-1.0, 2.0, -1.0, 4.0, -1.0]
+
+# Test with all NULLs
+query I
+SELECT ts_fill_nulls_const([NULL, NULL, NULL], 5.0);
+----
+[5.0, 5.0, 5.0]
+
+#######################################
+# ts_fill_nulls_forward - Forward Fill
+#######################################
+
+# Test basic forward fill
+query I
+SELECT ts_fill_nulls_forward([1.0, NULL, NULL, 4.0]);
+----
+[1.0, 1.0, 1.0, 4.0]
+
+# Test forward fill with single NULL
+query I
+SELECT ts_fill_nulls_forward([1.0, NULL, 3.0]);
+----
+[1.0, 1.0, 3.0]
+
+# Test with no NULLs
+query I
+SELECT ts_fill_nulls_forward([1.0, 2.0, 3.0]);
+----
+[1.0, 2.0, 3.0]
+
+# Test forward fill carries last value
+query I
+SELECT ts_fill_nulls_forward([1.0, 2.0, NULL, NULL, 5.0]);
+----
+[1.0, 2.0, 2.0, 2.0, 5.0]
+
+#######################################
+# ts_fill_nulls_backward - Backward Fill
+#######################################
+
+# Test basic backward fill
+query I
+SELECT ts_fill_nulls_backward([NULL, NULL, 3.0, 4.0]);
+----
+[3.0, 3.0, 3.0, 4.0]
+
+# Test backward fill with single NULL
+query I
+SELECT ts_fill_nulls_backward([1.0, NULL, 3.0]);
+----
+[1.0, 3.0, 3.0]
+
+# Test with no NULLs
+query I
+SELECT ts_fill_nulls_backward([1.0, 2.0, 3.0]);
+----
+[1.0, 2.0, 3.0]
+
+# Test backward fill uses next value
+query I
+SELECT ts_fill_nulls_backward([1.0, NULL, NULL, 4.0, 5.0]);
+----
+[1.0, 4.0, 4.0, 4.0, 5.0]
+
+#######################################
+# ts_fill_nulls_mean - Fill with Mean
+#######################################
+
+# Test mean fill
+query I
+SELECT ts_fill_nulls_mean([1.0, NULL, 3.0]);
+----
+[1.0, 2.0, 3.0]
+
+# Test mean fill - mean of 2 and 4 is 3
+query I
+SELECT ts_fill_nulls_mean([2.0, NULL, 4.0]);
+----
+[2.0, 3.0, 4.0]
+
+# Test with multiple NULLs
+query I
+SELECT ts_fill_nulls_mean([0.0, NULL, NULL, 4.0]);
+----
+[0.0, 2.0, 2.0, 4.0]
+
+# Test with no NULLs
+query I
+SELECT ts_fill_nulls_mean([1.0, 2.0, 3.0]);
+----
+[1.0, 2.0, 3.0]
+
+#######################################
+# Length Preservation Tests
+#######################################
+
+# All imputation functions should preserve array length
+query I
+SELECT length(ts_fill_nulls_const([1.0, NULL, 3.0, NULL, 5.0], 0.0));
+----
+5
+
+query I
+SELECT length(ts_fill_nulls_forward([1.0, NULL, 3.0, NULL, 5.0]));
+----
+5
+
+query I
+SELECT length(ts_fill_nulls_backward([1.0, NULL, 3.0, NULL, 5.0]));
+----
+5
+
+query I
+SELECT length(ts_fill_nulls_mean([1.0, NULL, 3.0, NULL, 5.0]));
+----
+5
+
+#######################################
+# NULL Handling (Input NULL)
+#######################################
+
+# NULL array input should return NULL
+query I
+SELECT ts_fill_nulls_const(NULL, 0.0) IS NULL;
+----
+true
+
+query I
+SELECT ts_fill_nulls_forward(NULL) IS NULL;
+----
+true
+
+query I
+SELECT ts_fill_nulls_backward(NULL) IS NULL;
+----
+true
+
+query I
+SELECT ts_fill_nulls_mean(NULL) IS NULL;
+----
+true
+
+#######################################
+# Alias Tests
+#######################################
+
+# Test anofox_fcst_ts_fill_nulls_const alias
+query I
+SELECT anofox_fcst_ts_fill_nulls_const([1.0, NULL, 3.0], 0.0);
+----
+[1.0, 0.0, 3.0]
+
+# Test anofox_fcst_ts_fill_nulls_forward alias
+query I
+SELECT anofox_fcst_ts_fill_nulls_forward([1.0, NULL, 3.0]);
+----
+[1.0, 1.0, 3.0]
+
+# Test anofox_fcst_ts_fill_nulls_backward alias
+query I
+SELECT anofox_fcst_ts_fill_nulls_backward([1.0, NULL, 3.0]);
+----
+[1.0, 3.0, 3.0]
+
+# Test anofox_fcst_ts_fill_nulls_mean alias
+query I
+SELECT anofox_fcst_ts_fill_nulls_mean([1.0, NULL, 3.0]);
+----
+[1.0, 2.0, 3.0]
+

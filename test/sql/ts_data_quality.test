@@ -1,0 +1,162 @@
+# name: test/sql/ts_data_quality.test
+# description: Tests for ts_data_quality data quality assessment function
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Basic Data Quality Tests
+#######################################
+
+# Test returns STRUCT with structural_score
+query I
+SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).structural_score IS NOT NULL;
+----
+true
+
+# Test returns STRUCT with temporal_score
+query I
+SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).temporal_score IS NOT NULL;
+----
+true
+
+# Test returns STRUCT with magnitude_score
+query I
+SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).magnitude_score IS NOT NULL;
+----
+true
+
+# Test returns STRUCT with behavioral_score
+query I
+SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).behavioral_score IS NOT NULL;
+----
+true
+
+# Test returns STRUCT with overall_score
+query I
+SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).overall_score IS NOT NULL;
+----
+true
+
+# Test returns STRUCT with n_gaps
+query I
+SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).n_gaps IS NOT NULL;
+----
+true
+
+# Test returns STRUCT with n_missing
+query I
+SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).n_missing IS NOT NULL;
+----
+true
+
+# Test returns STRUCT with is_constant
+query I
+SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).is_constant IS NOT NULL;
+----
+true
+
+#######################################
+# Score Bounds Tests
+#######################################
+
+# Scores should be between 0 and 1 (or positive)
+query I
+SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).overall_score >= 0;
+----
+true
+
+query I
+SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).structural_score >= 0;
+----
+true
+
+query I
+SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).temporal_score >= 0;
+----
+true
+
+query I
+SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).magnitude_score >= 0;
+----
+true
+
+query I
+SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).behavioral_score >= 0;
+----
+true
+
+#######################################
+# Good Quality Data Tests
+#######################################
+
+# Clean linear trend should have high quality
+query I
+SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])).overall_score > 0.5;
+----
+true
+
+# No gaps in clean data
+query I
+SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])).n_gaps;
+----
+0
+
+# No missing in clean data
+query I
+SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])).n_missing;
+----
+0
+
+#######################################
+# Constant Series Tests
+#######################################
+
+# Constant series should be marked as constant
+query I
+SELECT (ts_data_quality([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0])).is_constant;
+----
+true
+
+# Non-constant series should not be marked as constant
+query I
+SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])).is_constant;
+----
+false
+
+#######################################
+# Series with NULLs
+#######################################
+
+# Series with NULLs should report missing count
+query I
+SELECT (ts_data_quality([1.0, NULL, 3.0, NULL, 5.0])).n_missing;
+----
+2
+
+# Series with NULLs should still have a quality score
+query I
+SELECT (ts_data_quality([1.0, NULL, 3.0, NULL, 5.0])).overall_score >= 0;
+----
+true
+
+#######################################
+# NULL Handling
+#######################################
+
+# NULL input should return NULL
+query I
+SELECT ts_data_quality(NULL) IS NULL;
+----
+true
+
+#######################################
+# Alias Test
+#######################################
+
+# Test anofox_fcst_ts_data_quality alias
+query I
+SELECT (anofox_fcst_ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).overall_score >= 0;
+----
+true
+

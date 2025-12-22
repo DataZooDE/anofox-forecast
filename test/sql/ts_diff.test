@@ -1,0 +1,135 @@
+# name: test/sql/ts_diff.test
+# description: Tests for ts_diff differencing function
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# First Order Differencing
+#######################################
+
+# Simple first difference
+query I
+SELECT ts_diff([1.0, 2.0, 3.0, 4.0, 5.0], 1);
+----
+[1.0, 1.0, 1.0, 1.0]
+
+# First difference reduces length by 1
+query I
+SELECT length(ts_diff([1.0, 2.0, 3.0, 4.0, 5.0], 1));
+----
+4
+
+# Constant series - first difference should be all zeros
+query I
+SELECT ts_diff([5.0, 5.0, 5.0, 5.0, 5.0], 1);
+----
+[0.0, 0.0, 0.0, 0.0]
+
+# Decreasing series
+query I
+SELECT ts_diff([5.0, 4.0, 3.0, 2.0, 1.0], 1);
+----
+[-1.0, -1.0, -1.0, -1.0]
+
+# Non-linear series
+query I
+SELECT ts_diff([1.0, 4.0, 9.0, 16.0, 25.0], 1);
+----
+[3.0, 5.0, 7.0, 9.0]
+
+#######################################
+# Second Order Differencing
+#######################################
+
+# Second difference of linear series should be zeros
+query I
+SELECT ts_diff([1.0, 2.0, 3.0, 4.0, 5.0], 2);
+----
+[0.0, 0.0, 0.0]
+
+# Second difference reduces length by 2
+query I
+SELECT length(ts_diff([1.0, 2.0, 3.0, 4.0, 5.0], 2));
+----
+3
+
+# Quadratic series - second difference should be constant
+query I
+SELECT ts_diff([1.0, 4.0, 9.0, 16.0, 25.0], 2);
+----
+[2.0, 2.0, 2.0]
+
+#######################################
+# Higher Order Differencing
+#######################################
+
+# Third order differencing
+query I
+SELECT length(ts_diff([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0], 3));
+----
+4
+
+# Fourth order differencing
+query I
+SELECT length(ts_diff([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 4));
+----
+6
+
+#######################################
+# Edge Cases
+#######################################
+
+# Minimum viable series for order 1
+query I
+SELECT ts_diff([1.0, 2.0], 1);
+----
+[1.0]
+
+# Series length equals order - should return single element for order 1
+query I
+SELECT length(ts_diff([1.0, 2.0], 1));
+----
+1
+
+#######################################
+# Stationarity Check
+#######################################
+
+# After differencing a trend, the result should have near-zero mean changes
+query I
+SELECT ABS(ts_diff([1.0, 2.0, 3.0, 4.0, 5.0], 1)[1] - 1.0) < 0.001;
+----
+true
+
+query I
+SELECT ABS(ts_diff([1.0, 2.0, 3.0, 4.0, 5.0], 1)[2] - 1.0) < 0.001;
+----
+true
+
+#######################################
+# NULL Handling
+#######################################
+
+# NULL input should return NULL
+query I
+SELECT ts_diff(NULL, 1) IS NULL;
+----
+true
+
+#######################################
+# Alias Test
+#######################################
+
+# Test anofox_fcst_ts_diff alias
+query I
+SELECT anofox_fcst_ts_diff([1.0, 2.0, 3.0, 4.0, 5.0], 1);
+----
+[1.0, 1.0, 1.0, 1.0]
+
+# Test alias with order 2
+query I
+SELECT anofox_fcst_ts_diff([1.0, 4.0, 9.0, 16.0, 25.0], 2);
+----
+[2.0, 2.0, 2.0]
+

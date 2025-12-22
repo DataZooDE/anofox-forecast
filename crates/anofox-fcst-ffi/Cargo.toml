@@ -1,0 +1,17 @@
+[package]
+name = "anofox-fcst-ffi"
+description = "C FFI boundary for anofox-forecast DuckDB extension"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+anofox-fcst-core = { path = "../anofox-fcst-core" }
+libc = { workspace = true }
+
+[build-dependencies]
+cbindgen = "0.27"

@@ -1,0 +1,65 @@
+#pragma once
+
+#include "duckdb.hpp"
+
+namespace duckdb {
+
+// Forward declarations for function registration
+void RegisterTsStatsFunction(ExtensionLoader &loader);
+void RegisterTsQualityReportFunction(ExtensionLoader &loader);
+void RegisterTsStatsSummaryFunction(ExtensionLoader &loader);
+void RegisterTsDataQualityFunction(ExtensionLoader &loader);
+void RegisterTsDataQualitySummaryFunction(ExtensionLoader &loader);
+void RegisterTsFillGapsFunction(ExtensionLoader &loader);
+void RegisterTsFillGapsOperatorFunction(ExtensionLoader &loader);
+void RegisterTsFillForwardFunction(ExtensionLoader &loader);
+void RegisterTsDropConstantFunction(ExtensionLoader &loader);
+void RegisterTsDropShortFunction(ExtensionLoader &loader);
+void RegisterTsDropLeadingZerosFunction(ExtensionLoader &loader);
+void RegisterTsDropTrailingZerosFunction(ExtensionLoader &loader);
+void RegisterTsDropEdgeZerosFunction(ExtensionLoader &loader);
+void RegisterTsFillNullsConstFunction(ExtensionLoader &loader);
+void RegisterTsFillNullsForwardFunction(ExtensionLoader &loader);
+void RegisterTsFillNullsBackwardFunction(ExtensionLoader &loader);
+void RegisterTsFillNullsMeanFunction(ExtensionLoader &loader);
+void RegisterTsDiffFunction(ExtensionLoader &loader);
+void RegisterTsDetectSeasonalityFunction(ExtensionLoader &loader);
+void RegisterTsAnalyzeSeasonalityFunction(ExtensionLoader &loader);
+void RegisterTsMstlDecompositionFunction(ExtensionLoader &loader);
+void RegisterTsDetectChangepointsFunction(ExtensionLoader &loader);
+void RegisterTsDetectChangepointsBocpdFunction(ExtensionLoader &loader);
+void RegisterTsDetectChangepointsByFunction(ExtensionLoader &loader);
+void RegisterTsDetectChangepointsAggFunction(ExtensionLoader &loader);
+void RegisterTsFeaturesFunction(ExtensionLoader &loader);
+void RegisterTsFeaturesListFunction(ExtensionLoader &loader);
+void RegisterTsFeaturesAggFunction(ExtensionLoader &loader);
+void RegisterTsFeaturesConfigFromJsonFunction(ExtensionLoader &loader);
+void RegisterTsFeaturesConfigFromCsvFunction(ExtensionLoader &loader);
+void RegisterTsForecastFunction(ExtensionLoader &loader);
+void RegisterTsForecastByFunction(ExtensionLoader &loader);
+void RegisterTsForecastAggFunction(ExtensionLoader &loader);
+void RegisterTsMaeFunction(ExtensionLoader &loader);
+void RegisterTsMseFunction(ExtensionLoader &loader);
+void RegisterTsRmseFunction(ExtensionLoader &loader);
+void RegisterTsMapeFunction(ExtensionLoader &loader);
+void RegisterTsSmapeFunction(ExtensionLoader &loader);
+void RegisterTsMaseFunction(ExtensionLoader &loader);
+void RegisterTsR2Function(ExtensionLoader &loader);
+void RegisterTsBiasFunction(ExtensionLoader &loader);
+void RegisterTsRmaeFunction(ExtensionLoader &loader);
+void RegisterTsQuantileLossFunction(ExtensionLoader &loader);
+void RegisterTsMqlossFunction(ExtensionLoader &loader);
+void RegisterTsCoverageFunction(ExtensionLoader &loader);
+
+// Table macros
+void RegisterTsTableMacros(ExtensionLoader &loader);
+
+// Extension class
+class AnofoxForecastExtension : public Extension {
+public:
+    void Load(ExtensionLoader &loader) override;
+    std::string Name() override;
+    std::string Version() const override;
+};
+
+} // namespace duckdb

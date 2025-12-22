@@ -1,0 +1,220 @@
+# name: test/sql/ts_filter.test
+# description: Tests for series filtering functions
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# ts_drop_constant - Filter Constant Series
+#######################################
+
+# Constant series should return NULL
+query I
+SELECT ts_drop_constant([5.0, 5.0, 5.0, 5.0, 5.0]) IS NULL;
+----
+true
+
+# Non-constant series should return the array
+query I
+SELECT ts_drop_constant([1.0, 2.0, 3.0, 4.0, 5.0]);
+----
+[1.0, 2.0, 3.0, 4.0, 5.0]
+
+# Nearly constant with tiny variation should not be constant
+query I
+SELECT ts_drop_constant([1.0, 2.0, 1.0, 2.0, 1.0]) IS NOT NULL;
+----
+true
+
+#######################################
+# ts_drop_short - Filter Short Series
+#######################################
+
+# Short series (less than min_len) should return NULL
+query I
+SELECT ts_drop_short([1.0, 2.0, 3.0], 5) IS NULL;
+----
+true
+
+# Series with exact min_len should pass
+query I
+SELECT ts_drop_short([1.0, 2.0, 3.0, 4.0, 5.0], 5);
+----
+[1.0, 2.0, 3.0, 4.0, 5.0]
+
+# Series longer than min_len should pass
+query I
+SELECT ts_drop_short([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 5);
+----
+[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+
+# Test with different min_len
+query I
+SELECT ts_drop_short([1.0, 2.0], 3) IS NULL;
+----
+true
+
+query I
+SELECT ts_drop_short([1.0, 2.0, 3.0], 3);
+----
+[1.0, 2.0, 3.0]
+
+#######################################
+# ts_drop_leading_zeros - Trim Leading Zeros
+#######################################
+
+# Remove leading zeros
+query I
+SELECT ts_drop_leading_zeros([0.0, 0.0, 1.0, 2.0, 3.0]);
+----
+[1.0, 2.0, 3.0]
+
+# No leading zeros - should return same array
+query I
+SELECT ts_drop_leading_zeros([1.0, 2.0, 3.0, 0.0, 0.0]);
+----
+[1.0, 2.0, 3.0, 0.0, 0.0]
+
+# All zeros
+query I
+SELECT length(ts_drop_leading_zeros([0.0, 0.0, 0.0]));
+----
+0
+
+# Single leading zero
+query I
+SELECT ts_drop_leading_zeros([0.0, 5.0, 6.0]);
+----
+[5.0, 6.0]
+
+#######################################
+# ts_drop_trailing_zeros - Trim Trailing Zeros
+#######################################
+
+# Remove trailing zeros
+query I
+SELECT ts_drop_trailing_zeros([1.0, 2.0, 3.0, 0.0, 0.0]);
+----
+[1.0, 2.0, 3.0]
+
+# No trailing zeros - should return same array
+query I
+SELECT ts_drop_trailing_zeros([0.0, 0.0, 1.0, 2.0, 3.0]);
+----
+[0.0, 0.0, 1.0, 2.0, 3.0]
+
+# All zeros
+query I
+SELECT length(ts_drop_trailing_zeros([0.0, 0.0, 0.0]));
+----
+0
+
+# Single trailing zero
+query I
+SELECT ts_drop_trailing_zeros([5.0, 6.0, 0.0]);
+----
+[5.0, 6.0]
+
+#######################################
+# ts_drop_edge_zeros - Trim Both Edges
+#######################################
+
+# Remove zeros from both edges
+query I
+SELECT ts_drop_edge_zeros([0.0, 0.0, 1.0, 2.0, 3.0, 0.0, 0.0]);
+----
+[1.0, 2.0, 3.0]
+
+# Only leading zeros
+query I
+SELECT ts_drop_edge_zeros([0.0, 0.0, 1.0, 2.0, 3.0]);
+----
+[1.0, 2.0, 3.0]
+
+# Only trailing zeros
+query I
+SELECT ts_drop_edge_zeros([1.0, 2.0, 3.0, 0.0, 0.0]);
+----
+[1.0, 2.0, 3.0]
+
+# No edge zeros
+query I
+SELECT ts_drop_edge_zeros([1.0, 0.0, 2.0, 0.0, 3.0]);
+----
+[1.0, 0.0, 2.0, 0.0, 3.0]
+
+# All zeros
+query I
+SELECT length(ts_drop_edge_zeros([0.0, 0.0, 0.0]));
+----
+0
+
+# Single value
+query I
+SELECT ts_drop_edge_zeros([5.0]);
+----
+[5.0]
+
+#######################################
+# NULL Handling
+#######################################
+
+query I
+SELECT ts_drop_constant(NULL) IS NULL;
+----
+true
+
+query I
+SELECT ts_drop_short(NULL, 5) IS NULL;
+----
+true
+
+query I
+SELECT ts_drop_leading_zeros(NULL) IS NULL;
+----
+true
+
+query I
+SELECT ts_drop_trailing_zeros(NULL) IS NULL;
+----
+true
+
+query I
+SELECT ts_drop_edge_zeros(NULL) IS NULL;
+----
+true
+
+#######################################
+# Alias Tests
+#######################################
+
+# Test anofox_fcst_ts_drop_constant alias
+query I
+SELECT anofox_fcst_ts_drop_constant([5.0, 5.0, 5.0]) IS NULL;
+----
+true
+
+# Test anofox_fcst_ts_drop_short alias
+query I
+SELECT anofox_fcst_ts_drop_short([1.0, 2.0], 5) IS NULL;
+----
+true
+
+# Test anofox_fcst_ts_drop_leading_zeros alias
+query I
+SELECT anofox_fcst_ts_drop_leading_zeros([0.0, 0.0, 1.0, 2.0]);
+----
+[1.0, 2.0]
+
+# Test anofox_fcst_ts_drop_trailing_zeros alias
+query I
+SELECT anofox_fcst_ts_drop_trailing_zeros([1.0, 2.0, 0.0, 0.0]);
+----
+[1.0, 2.0]
+
+# Test anofox_fcst_ts_drop_edge_zeros alias
+query I
+SELECT anofox_fcst_ts_drop_edge_zeros([0.0, 1.0, 2.0, 0.0]);
+----
+[1.0, 2.0]
+

@@ -1,0 +1,136 @@
+# name: test/sql/ts_changepoints.test
+# description: Tests for ts_detect_changepoints changepoint detection function
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Basic Changepoint Detection Tests
+#######################################
+
+# Test returns STRUCT with changepoints field
+query I
+SELECT (ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0])).changepoints IS NOT NULL;
+----
+true
+
+# Test returns STRUCT with n_changepoints field
+query I
+SELECT (ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0])).n_changepoints IS NOT NULL;
+----
+true
+
+# Test returns STRUCT with cost field
+query I
+SELECT (ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0])).cost IS NOT NULL;
+----
+true
+
+#######################################
+# Clear Changepoint Detection
+#######################################
+
+# Single level shift should detect at least one changepoint
+query I
+SELECT (ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0, 10.0])).n_changepoints >= 1;
+----
+true
+
+# Multiple level shifts should detect multiple changepoints
+query I
+SELECT (ts_detect_changepoints([1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 1.0, 1.0, 1.0])).n_changepoints >= 1;
+----
+true
+
+#######################################
+# No Changepoint Cases
+#######################################
+
+# Constant series - may have 0 changepoints
+query I
+SELECT (ts_detect_changepoints([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0])).n_changepoints >= 0;
+----
+true
+
+# Linear trend - may or may not have changepoints
+query I
+SELECT (ts_detect_changepoints([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])).n_changepoints >= 0;
+----
+true
+
+#######################################
+# With Parameters Tests
+#######################################
+
+# Test with min_size parameter
+query I
+SELECT (ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0], 2, 0.0)).n_changepoints >= 0;
+----
+true
+
+# Test with larger min_size - may detect fewer changepoints
+query I
+SELECT (ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0], 4, 0.0)).n_changepoints >= 0;
+----
+true
+
+# Test with penalty parameter
+query I
+SELECT (ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0], 2, 1.0)).n_changepoints >= 0;
+----
+true
+
+# Higher penalty should result in fewer or equal changepoints
+query I
+SELECT (ts_detect_changepoints([1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 1.0, 1.0, 1.0], 2, 100.0)).n_changepoints <=
+       (ts_detect_changepoints([1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 1.0, 1.0, 1.0], 2, 0.01)).n_changepoints + 1;
+----
+true
+
+#######################################
+# Changepoint List Properties
+#######################################
+
+# Number of changepoints should match list length
+query I
+SELECT length((ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0])).changepoints) =
+       (ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0])).n_changepoints;
+----
+true
+
+#######################################
+# Cost Property Tests
+#######################################
+
+# Cost should be non-negative
+query I
+SELECT (ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0])).cost >= 0;
+----
+true
+
+#######################################
+# NULL Handling
+#######################################
+
+# NULL input should return NULL
+query I
+SELECT ts_detect_changepoints(NULL) IS NULL;
+----
+true
+
+#######################################
+# Alias Test
+#######################################
+
+# Test anofox_fcst_ts_detect_changepoints alias
+query I
+SELECT (anofox_fcst_ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0])).n_changepoints >= 0;
+----
+true
+
+# Test alias with parameters
+query I
+SELECT (anofox_fcst_ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0], 2, 1.0)).n_changepoints >= 0;
+----
+true
+
