@@ -93,21 +93,8 @@ static void TsDiffFunction(DataChunk &args, ExpressionState &state, Vector &resu
 }
 
 void RegisterTsDiffFunction(ExtensionLoader &loader) {
-    ScalarFunctionSet ts_diff_set("ts_diff");
-    ts_diff_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::INTEGER},
-        LogicalType::LIST(LogicalType::DOUBLE),
-        TsDiffFunction
-    ));
-    loader.RegisterFunction(ts_diff_set);
-
-    ScalarFunctionSet anofox_set("anofox_fcst_ts_diff");
-    anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::INTEGER},
-        LogicalType::LIST(LogicalType::DOUBLE),
-        TsDiffFunction
-    ));
-    loader.RegisterFunction(anofox_set);
+    // No-op: C++ extension uses table function, not scalar
+    // Table macro ts_diff is registered in ts_macros.cpp
 }
 
 // ============================================================================
@@ -162,21 +149,8 @@ static void TsDropConstantFunction(DataChunk &args, ExpressionState &state, Vect
 }
 
 void RegisterTsDropConstantFunction(ExtensionLoader &loader) {
-    ScalarFunctionSet ts_drop_set("ts_drop_constant");
-    ts_drop_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::LIST(LogicalType::DOUBLE),
-        TsDropConstantFunction
-    ));
-    loader.RegisterFunction(ts_drop_set);
-
-    ScalarFunctionSet anofox_set("anofox_fcst_ts_drop_constant");
-    anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::LIST(LogicalType::DOUBLE),
-        TsDropConstantFunction
-    ));
-    loader.RegisterFunction(anofox_set);
+    // No-op: C++ extension uses table function, not scalar
+    // Table macro ts_drop_constant is registered in ts_macros.cpp
 }
 
 // ============================================================================
@@ -230,21 +204,8 @@ static void TsDropShortFunction(DataChunk &args, ExpressionState &state, Vector 
 }
 
 void RegisterTsDropShortFunction(ExtensionLoader &loader) {
-    ScalarFunctionSet ts_drop_set("ts_drop_short");
-    ts_drop_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::INTEGER},
-        LogicalType::LIST(LogicalType::DOUBLE),
-        TsDropShortFunction
-    ));
-    loader.RegisterFunction(ts_drop_set);
-
-    ScalarFunctionSet anofox_set("anofox_fcst_ts_drop_short");
-    anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::INTEGER},
-        LogicalType::LIST(LogicalType::DOUBLE),
-        TsDropShortFunction
-    ));
-    loader.RegisterFunction(anofox_set);
+    // No-op: C++ extension uses table function, not scalar
+    // Table macro ts_drop_short is registered in ts_macros.cpp
 }
 
 // ============================================================================
@@ -295,21 +256,8 @@ static void TsDropLeadingZerosFunction(DataChunk &args, ExpressionState &state, 
 }
 
 void RegisterTsDropLeadingZerosFunction(ExtensionLoader &loader) {
-    ScalarFunctionSet ts_drop_set("ts_drop_leading_zeros");
-    ts_drop_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::LIST(LogicalType::DOUBLE),
-        TsDropLeadingZerosFunction
-    ));
-    loader.RegisterFunction(ts_drop_set);
-
-    ScalarFunctionSet anofox_set("anofox_fcst_ts_drop_leading_zeros");
-    anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::LIST(LogicalType::DOUBLE),
-        TsDropLeadingZerosFunction
-    ));
-    loader.RegisterFunction(anofox_set);
+    // No-op: C++ extension uses table function, not scalar
+    // Table macro ts_drop_leading_zeros is registered in ts_macros.cpp
 }
 
 // ============================================================================
@@ -358,21 +306,8 @@ static void TsDropTrailingZerosFunction(DataChunk &args, ExpressionState &state,
 }
 
 void RegisterTsDropTrailingZerosFunction(ExtensionLoader &loader) {
-    ScalarFunctionSet ts_drop_set("ts_drop_trailing_zeros");
-    ts_drop_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::LIST(LogicalType::DOUBLE),
-        TsDropTrailingZerosFunction
-    ));
-    loader.RegisterFunction(ts_drop_set);
-
-    ScalarFunctionSet anofox_set("anofox_fcst_ts_drop_trailing_zeros");
-    anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::LIST(LogicalType::DOUBLE),
-        TsDropTrailingZerosFunction
-    ));
-    loader.RegisterFunction(anofox_set);
+    // No-op: C++ extension uses table function, not scalar
+    // Table macro ts_drop_trailing_zeros is registered in ts_macros.cpp
 }
 
 // ============================================================================
@@ -431,21 +366,8 @@ static void TsDropEdgeZerosFunction(DataChunk &args, ExpressionState &state, Vec
 }
 
 void RegisterTsDropEdgeZerosFunction(ExtensionLoader &loader) {
-    ScalarFunctionSet ts_drop_set("ts_drop_edge_zeros");
-    ts_drop_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::LIST(LogicalType::DOUBLE),
-        TsDropEdgeZerosFunction
-    ));
-    loader.RegisterFunction(ts_drop_set);
-
-    ScalarFunctionSet anofox_set("anofox_fcst_ts_drop_edge_zeros");
-    anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::LIST(LogicalType::DOUBLE),
-        TsDropEdgeZerosFunction
-    ));
-    loader.RegisterFunction(anofox_set);
+    // No-op: C++ extension uses table function, not scalar
+    // Table macro ts_drop_edge_zeros is registered in ts_macros.cpp
 }
 
 } // namespace duckdb

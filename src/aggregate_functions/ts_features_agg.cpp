@@ -391,36 +391,13 @@ void RegisterTsFeaturesAggFunction(ExtensionLoader &loader) {
         TsFeaturesAggDestructor
     );
 
-    // Register all overloads for ts_features_agg
-    AggregateFunctionSet func_set("ts_features_agg");
-    func_set.AddFunction(agg_func_2);
-    func_set.AddFunction(agg_func_3);
-    func_set.AddFunction(agg_func_4);
-    loader.RegisterFunction(func_set);
-
-    // Also register with anofox_fcst_ prefix
-    AggregateFunctionSet alias_set("anofox_fcst_ts_features_agg");
-    alias_set.AddFunction(agg_func_2);
-    alias_set.AddFunction(agg_func_3);
-    alias_set.AddFunction(agg_func_4);
-    loader.RegisterFunction(alias_set);
-
-    // =========================================================================
     // Register ts_features as aggregate function (C++ API compatible)
-    // This allows: ts_features(ts_col, val_col, feature_selection, feature_params)
-    // The scalar ts_features(DOUBLE[]) is registered separately in ts_features.cpp
-    // =========================================================================
-    AggregateFunctionSet ts_features_agg_set("ts_features");
-    ts_features_agg_set.AddFunction(agg_func_2);
-    ts_features_agg_set.AddFunction(agg_func_3);
-    ts_features_agg_set.AddFunction(agg_func_4);
-    loader.RegisterFunction(ts_features_agg_set);
-
-    AggregateFunctionSet anofox_ts_features_set("anofox_fcst_ts_features");
-    anofox_ts_features_set.AddFunction(agg_func_2);
-    anofox_ts_features_set.AddFunction(agg_func_3);
-    anofox_ts_features_set.AddFunction(agg_func_4);
-    loader.RegisterFunction(anofox_ts_features_set);
+    // C++ only has ts_features, not ts_features_agg
+    AggregateFunctionSet ts_features_set("ts_features");
+    ts_features_set.AddFunction(agg_func_2);
+    ts_features_set.AddFunction(agg_func_3);
+    ts_features_set.AddFunction(agg_func_4);
+    loader.RegisterFunction(ts_features_set);
 }
 
 } // namespace duckdb

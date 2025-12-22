@@ -135,24 +135,8 @@ static void TsFeaturesFunction(DataChunk &args, ExpressionState &state, Vector &
 }
 
 void RegisterTsFeaturesFunction(ExtensionLoader &loader) {
-    // Scalar version: ts_features_scalar(DOUBLE[]) → STRUCT
-    // Note: The main ts_features is registered as an aggregate function in ts_features_agg.cpp
-    // to match the C++ extension API. This scalar version is a convenience function.
-    ScalarFunctionSet ts_features_scalar_set("ts_features_scalar");
-    ts_features_scalar_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        GetScalarFeaturesResultType(),
-        TsFeaturesFunction
-    ));
-    loader.RegisterFunction(ts_features_scalar_set);
-
-    ScalarFunctionSet anofox_scalar_set("anofox_fcst_ts_features_scalar");
-    anofox_scalar_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        GetScalarFeaturesResultType(),
-        TsFeaturesFunction
-    ));
-    loader.RegisterFunction(anofox_scalar_set);
+    // No-op: C++ extension only has ts_features as aggregate function
+    // The aggregate function is registered in ts_features_agg.cpp
 }
 
 // ============================================================================
@@ -243,9 +227,73 @@ static void TsFeaturesListExecute(ClientContext &context, TableFunctionInput &da
 void RegisterTsFeaturesListFunction(ExtensionLoader &loader) {
     TableFunction ts_features_list_func("ts_features_list", {}, TsFeaturesListExecute, TsFeaturesListBind);
     loader.RegisterFunction(ts_features_list_func);
+}
 
-    TableFunction anofox_func("anofox_fcst_ts_features_list", {}, TsFeaturesListExecute, TsFeaturesListBind);
-    loader.RegisterFunction(anofox_func);
+// ============================================================================
+// ts_features_config_template - Returns (feature VARCHAR, params_json VARCHAR)
+// C++ API compatible config template output
+// ============================================================================
+
+struct TsFeaturesConfigTemplateData : public TableFunctionData {
+    vector<pair<string, string>> features;  // (feature_name, params_json)
+    idx_t current_idx = 0;
+    bool initialized = false;
+};
+
+static unique_ptr<FunctionData> TsFeaturesConfigTemplateBind(ClientContext &context, TableFunctionBindInput &input,
+                                                              vector<LogicalType> &return_types, vector<string> &names) {
+    names.push_back("feature");
+    return_types.push_back(LogicalType::VARCHAR);
+
+    names.push_back("params_json");
+    return_types.push_back(LogicalType::VARCHAR);
+
+    return make_uniq<TsFeaturesConfigTemplateData>();
+}
+
+static void TsFeaturesConfigTemplateExecute(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
+    auto &data = data_p.bind_data->CastNoConst<TsFeaturesConfigTemplateData>();
+
+    if (!data.initialized) {
+        // Get feature names from FFI
+        char *names_raw = nullptr;
+        size_t n_names = 0;
+        anofox_ts_features_list(&names_raw, &n_names);
+        char **names = reinterpret_cast<char**>(names_raw);
+
+        if (names) {
+            for (size_t i = 0; i < n_names; i++) {
+                // Default params_json is empty object
+                data.features.push_back({names[i], "{}"});
+                free(names[i]);
+            }
+            free(names);
+        }
+        data.initialized = true;
+    }
+
+    idx_t count = 0;
+    idx_t max_count = STANDARD_VECTOR_SIZE;
+
+    while (data.current_idx < data.features.size() && count < max_count) {
+        const auto &feat = data.features[data.current_idx];
+
+        FlatVector::GetData<string_t>(output.data[0])[count] =
+            StringVector::AddString(output.data[0], feat.first);
+
+        FlatVector::GetData<string_t>(output.data[1])[count] =
+            StringVector::AddString(output.data[1], feat.second);
+
+        data.current_idx++;
+        count++;
+    }
+
+    output.SetCardinality(count);
+}
+
+void RegisterTsFeaturesConfigTemplateFunction(ExtensionLoader &loader) {
+    TableFunction func("ts_features_config_template", {}, TsFeaturesConfigTemplateExecute, TsFeaturesConfigTemplateBind);
+    loader.RegisterFunction(func);
 }
 
 // ============================================================================

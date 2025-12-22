@@ -112,8 +112,10 @@ def setup_test_data(conn: duckdb.DuckDBPyConnection):
 
 
 # Define test cases
+# Note: C++ extension uses table macros, Rust uses scalar functions for some operations
+# This test focuses on APIs that are compatible between both extensions
 TEST_CASES = [
-    # Metrics tests
+    # Metrics tests - both extensions support scalar list-based API
     ("ts_mae basic", "SELECT round(ts_mae([1.0, 2.0, 3.0], [1.1, 2.2, 2.9]), 4)"),
     ("ts_mse basic", "SELECT round(ts_mse([1.0, 2.0, 3.0], [1.1, 2.2, 2.9]), 4)"),
     ("ts_rmse basic", "SELECT round(ts_rmse([1.0, 2.0, 3.0], [1.1, 2.2, 2.9]), 4)"),
@@ -121,56 +123,13 @@ TEST_CASES = [
     ("ts_smape basic", "SELECT round(ts_smape([100.0, 200.0, 300.0], [110.0, 190.0, 310.0]), 4)"),
     ("ts_r2 basic", "SELECT round(ts_r2([1.0, 2.0, 3.0, 4.0], [1.1, 2.0, 2.9, 4.1]), 4)"),
 
-    # Imputation tests
-    ("ts_fill_nulls_const", "SELECT ts_fill_nulls_const([1.0, NULL, 3.0], 0.0)"),
-    ("ts_fill_nulls_forward", "SELECT ts_fill_nulls_forward([1.0, NULL, NULL, 4.0])"),
-    ("ts_fill_nulls_backward", "SELECT ts_fill_nulls_backward([NULL, NULL, 3.0, 4.0])"),
-    ("ts_fill_nulls_mean", "SELECT ts_fill_nulls_mean([1.0, NULL, 3.0])"),
-
-    # Filter tests
-    ("ts_diff order 1", "SELECT ts_diff([1.0, 3.0, 6.0, 10.0], 1)"),
-    ("ts_is_constant true", "SELECT ts_is_constant([5.0, 5.0, 5.0, 5.0])"),
-    ("ts_is_constant false", "SELECT ts_is_constant([5.0, 5.0, 5.1, 5.0])"),
-    ("ts_drop_leading_zeros", "SELECT ts_drop_leading_zeros([0.0, 0.0, 1.0, 2.0, 3.0])"),
-    ("ts_drop_trailing_zeros", "SELECT ts_drop_trailing_zeros([1.0, 2.0, 3.0, 0.0, 0.0])"),
-
-    # Stats tests
-    ("ts_stats length", """
-        SELECT (stats).length FROM (
-            SELECT ts_stats([1.0, 2.0, 3.0, 4.0, 5.0]) AS stats
-        )
-    """),
-    ("ts_stats mean", """
-        SELECT round((stats).mean, 4) FROM (
-            SELECT ts_stats([1.0, 2.0, 3.0, 4.0, 5.0]) AS stats
-        )
-    """),
-
-    # Seasonality tests
-    ("ts_detect_seasonality", """
-        WITH seasonal_data AS (
-            SELECT sin(i * 3.14159 * 2 / 12.0) * 10 + 50 AS value
-            FROM generate_series(0, 119) AS t(i)
-        )
-        SELECT ts_detect_seasonality(LIST(value), 24) > 0
-        FROM seasonal_data
-    """),
-
-    # Forecast tests - check count of forecasts
-    ("ts_forecast count", """
-        SELECT len((fcst).point) FROM (
-            SELECT ts_forecast(LIST(value ORDER BY ds), 5, 'naive') AS fcst
-            FROM test_single
-        )
-    """),
-
-    # ts_forecast_by - check row count (long format)
+    # ts_forecast_by - both extensions support table macro API (use uppercase model names)
     ("ts_forecast_by row count", """
-        SELECT COUNT(*) FROM ts_forecast_by('test_series', id, ds, value, 'naive', 3, NULL)
+        SELECT COUNT(*) FROM ts_forecast_by('test_series', id, ds, value, 'ARIMA', 3, NULL)
     """),
 
     ("ts_forecast_by distinct steps", """
-        SELECT COUNT(DISTINCT forecast_step) FROM ts_forecast_by('test_series', id, ds, value, 'naive', 3, NULL)
+        SELECT COUNT(DISTINCT forecast_step) FROM ts_forecast_by('test_series', id, ds, value, 'ARIMA', 3, NULL)
     """),
 ]
 
@@ -183,7 +142,7 @@ def main():
     args = parser.parse_args()
 
     # Create connections
-    rust_conn = duckdb.connect(":memory:")
+    rust_conn = duckdb.connect(":memory:", config={"allow_unsigned_extensions": "true"})
     cpp_conn = duckdb.connect(":memory:")
 
     # Load extensions
@@ -195,8 +154,13 @@ def main():
         sys.exit(1)
 
     try:
-        cpp_conn.execute(f"LOAD '{args.cpp_ext}'")
-        print(f"Loaded C++ extension: {args.cpp_ext}")
+        if args.cpp_ext == "community":
+            cpp_conn.execute("FORCE INSTALL anofox_forecast FROM community")
+            cpp_conn.execute("LOAD anofox_forecast")
+            print(f"Loaded C++ extension from community")
+        else:
+            cpp_conn.execute(f"LOAD '{args.cpp_ext}'")
+            print(f"Loaded C++ extension: {args.cpp_ext}")
     except Exception as e:
         print(f"Failed to load C++ extension: {e}")
         sys.exit(1)

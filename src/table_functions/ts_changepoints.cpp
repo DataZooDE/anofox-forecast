@@ -183,36 +183,8 @@ static void TsDetectChangepointsWithParamsFunction(DataChunk &args, ExpressionSt
 }
 
 void RegisterTsDetectChangepointsFunction(ExtensionLoader &loader) {
-    ScalarFunctionSet ts_cp_set("ts_detect_changepoints");
-
-    // ts_detect_changepoints(values)
-    ts_cp_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        GetChangepointResultType(),
-        TsDetectChangepointsFunction
-    ));
-
-    // ts_detect_changepoints(values, min_size, penalty)
-    ts_cp_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::INTEGER, LogicalType::DOUBLE},
-        GetChangepointResultType(),
-        TsDetectChangepointsWithParamsFunction
-    ));
-
-    loader.RegisterFunction(ts_cp_set);
-
-    ScalarFunctionSet anofox_set("anofox_fcst_ts_detect_changepoints");
-    anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        GetChangepointResultType(),
-        TsDetectChangepointsFunction
-    ));
-    anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::INTEGER, LogicalType::DOUBLE},
-        GetChangepointResultType(),
-        TsDetectChangepointsWithParamsFunction
-    ));
-    loader.RegisterFunction(anofox_set);
+    // No-op: C++ extension uses table macro, not scalar
+    // Table macro ts_detect_changepoints is registered in ts_macros.cpp
 }
 
 // ============================================================================
@@ -350,9 +322,10 @@ static void TsDetectChangepointsBocpdFunction(DataChunk &args, ExpressionState &
 }
 
 void RegisterTsDetectChangepointsBocpdFunction(ExtensionLoader &loader) {
-    ScalarFunctionSet ts_bocpd_set("ts_detect_changepoints_bocpd");
+    // Internal scalar function used by ts_detect_changepoints table macros
+    ScalarFunctionSet ts_bocpd_set("_ts_detect_changepoints_bocpd");
 
-    // ts_detect_changepoints_bocpd(values, hazard_lambda, include_probabilities)
+    // _ts_detect_changepoints_bocpd(values, hazard_lambda, include_probabilities)
     ts_bocpd_set.AddFunction(ScalarFunction(
         {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::BOOLEAN},
         GetBocpdResultType(),
@@ -360,14 +333,6 @@ void RegisterTsDetectChangepointsBocpdFunction(ExtensionLoader &loader) {
     ));
 
     loader.RegisterFunction(ts_bocpd_set);
-
-    ScalarFunctionSet anofox_set("anofox_fcst_ts_detect_changepoints_bocpd");
-    anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::BOOLEAN},
-        GetBocpdResultType(),
-        TsDetectChangepointsBocpdFunction
-    ));
-    loader.RegisterFunction(anofox_set);
 }
 
 // Placeholder functions

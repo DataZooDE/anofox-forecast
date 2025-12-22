@@ -35,6 +35,7 @@ void RegisterTsFeaturesListFunction(ExtensionLoader &loader);
 void RegisterTsFeaturesAggFunction(ExtensionLoader &loader);
 void RegisterTsFeaturesConfigFromJsonFunction(ExtensionLoader &loader);
 void RegisterTsFeaturesConfigFromCsvFunction(ExtensionLoader &loader);
+void RegisterTsFeaturesConfigTemplateFunction(ExtensionLoader &loader);
 void RegisterTsForecastFunction(ExtensionLoader &loader);
 void RegisterTsForecastByFunction(ExtensionLoader &loader);
 void RegisterTsForecastAggFunction(ExtensionLoader &loader);

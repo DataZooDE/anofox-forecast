@@ -1,5 +1,5 @@
 # name: test/sql/ts_gaps.test
-# description: Tests for gap filling functions (ts_fill_gaps_operator, ts_fill_forward_operator)
+# description: Tests for gap filling functions (ts_fill_gaps_operator, ts_fill_forward)
 # group: [sql]
 
 require anofox_forecast
@@ -48,36 +48,26 @@ SELECT count(*) FROM ts_fill_gaps_operator('test_multi_group', grp, dt, val, '1 
 5
 
 #######################################
-# ts_fill_forward_operator - Extend series to target date
+# ts_fill_forward - Extend series to target date
 #######################################
 
-# Test ts_fill_forward_operator extends series
+# Test ts_fill_forward extends series
 query I
-SELECT count(*) FROM ts_fill_forward_operator('test_forward', grp, dt, val, '2023-01-05'::TIMESTAMP, '1 day');
+SELECT count(*) FROM ts_fill_forward('test_forward', grp, dt, val, '2023-01-05'::TIMESTAMP, '1 day');
 ----
 5
 
 # Test original values preserved
 query I
-SELECT count(*) FROM ts_fill_forward_operator('test_forward', grp, dt, val, '2023-01-05'::TIMESTAMP, '1 day') WHERE value_col IS NOT NULL;
+SELECT count(*) FROM ts_fill_forward('test_forward', grp, dt, val, '2023-01-05'::TIMESTAMP, '1 day') WHERE value_col IS NOT NULL;
 ----
 2
 
 # Test extended values are NULL
 query I
-SELECT count(*) FROM ts_fill_forward_operator('test_forward', grp, dt, val, '2023-01-05'::TIMESTAMP, '1 day') WHERE value_col IS NULL;
+SELECT count(*) FROM ts_fill_forward('test_forward', grp, dt, val, '2023-01-05'::TIMESTAMP, '1 day') WHERE value_col IS NULL;
 ----
 3
-
-#######################################
-# Alias Tests
-#######################################
-
-# Test anofox_fcst_ts_fill_forward_operator alias exists and works
-query I
-SELECT count(*) >= 0 FROM anofox_fcst_ts_fill_forward_operator('test_forward', grp, dt, val, '2023-01-03'::TIMESTAMP, '1 day');
-----
-true
 
 #######################################
 # Cleanup

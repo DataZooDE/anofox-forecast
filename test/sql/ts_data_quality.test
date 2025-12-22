@@ -1,58 +1,58 @@
 # name: test/sql/ts_data_quality.test
-# description: Tests for ts_data_quality data quality assessment function
+# description: Tests for ts_data_quality table function (C++ API compatible)
 # group: [sql]
 
 require anofox_forecast
 
 #######################################
-# Basic Data Quality Tests
+# Internal _ts_data_quality Scalar Function Tests
 #######################################
 
 # Test returns STRUCT with structural_score
 query I
-SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).structural_score IS NOT NULL;
+SELECT (_ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).structural_score IS NOT NULL;
 ----
 true
 
 # Test returns STRUCT with temporal_score
 query I
-SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).temporal_score IS NOT NULL;
+SELECT (_ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).temporal_score IS NOT NULL;
 ----
 true
 
 # Test returns STRUCT with magnitude_score
 query I
-SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).magnitude_score IS NOT NULL;
+SELECT (_ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).magnitude_score IS NOT NULL;
 ----
 true
 
 # Test returns STRUCT with behavioral_score
 query I
-SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).behavioral_score IS NOT NULL;
+SELECT (_ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).behavioral_score IS NOT NULL;
 ----
 true
 
 # Test returns STRUCT with overall_score
 query I
-SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).overall_score IS NOT NULL;
+SELECT (_ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).overall_score IS NOT NULL;
 ----
 true
 
 # Test returns STRUCT with n_gaps
 query I
-SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).n_gaps IS NOT NULL;
+SELECT (_ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).n_gaps IS NOT NULL;
 ----
 true
 
 # Test returns STRUCT with n_missing
 query I
-SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).n_missing IS NOT NULL;
+SELECT (_ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).n_missing IS NOT NULL;
 ----
 true
 
 # Test returns STRUCT with is_constant
 query I
-SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).is_constant IS NOT NULL;
+SELECT (_ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).is_constant IS NOT NULL;
 ----
 true
 
@@ -62,27 +62,12 @@ true
 
 # Scores should be between 0 and 1 (or positive)
 query I
-SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).overall_score >= 0;
+SELECT (_ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).overall_score >= 0;
 ----
 true
 
 query I
-SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).structural_score >= 0;
-----
-true
-
-query I
-SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).temporal_score >= 0;
-----
-true
-
-query I
-SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).magnitude_score >= 0;
-----
-true
-
-query I
-SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).behavioral_score >= 0;
+SELECT (_ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).structural_score >= 0;
 ----
 true
 
@@ -92,19 +77,19 @@ true
 
 # Clean linear trend should have high quality
 query I
-SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])).overall_score > 0.5;
+SELECT (_ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])).overall_score > 0.5;
 ----
 true
 
 # No gaps in clean data
 query I
-SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])).n_gaps;
+SELECT (_ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])).n_gaps;
 ----
 0
 
 # No missing in clean data
 query I
-SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])).n_missing;
+SELECT (_ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])).n_missing;
 ----
 0
 
@@ -114,13 +99,13 @@ SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])).n_
 
 # Constant series should be marked as constant
 query I
-SELECT (ts_data_quality([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0])).is_constant;
+SELECT (_ts_data_quality([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0])).is_constant;
 ----
 true
 
 # Non-constant series should not be marked as constant
 query I
-SELECT (ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])).is_constant;
+SELECT (_ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])).is_constant;
 ----
 false
 
@@ -130,13 +115,13 @@ false
 
 # Series with NULLs should report missing count
 query I
-SELECT (ts_data_quality([1.0, NULL, 3.0, NULL, 5.0])).n_missing;
+SELECT (_ts_data_quality([1.0, NULL, 3.0, NULL, 5.0])).n_missing;
 ----
 2
 
 # Series with NULLs should still have a quality score
 query I
-SELECT (ts_data_quality([1.0, NULL, 3.0, NULL, 5.0])).overall_score >= 0;
+SELECT (_ts_data_quality([1.0, NULL, 3.0, NULL, 5.0])).overall_score >= 0;
 ----
 true
 
@@ -146,17 +131,24 @@ true
 
 # NULL input should return NULL
 query I
-SELECT ts_data_quality(NULL) IS NULL;
+SELECT _ts_data_quality(NULL) IS NULL;
 ----
 true
 
 #######################################
-# Alias Test
+# Table Function API Tests
 #######################################
 
-# Test anofox_fcst_ts_data_quality alias
+statement ok
+CREATE TABLE quality_test AS
+SELECT 'A' AS id, ('2023-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS date, (i + 1)::DOUBLE AS val
+FROM generate_series(0, 9) AS t(i);
+
+# Test ts_data_quality table function returns results
 query I
-SELECT (anofox_fcst_ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).overall_score >= 0;
+SELECT COUNT(*) FROM ts_data_quality('quality_test', id, date, val, 5, '1 day');
 ----
-true
+1
 
+statement ok
+DROP TABLE quality_test;

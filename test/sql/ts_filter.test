@@ -1,220 +1,161 @@
 # name: test/sql/ts_filter.test
-# description: Tests for series filtering functions
+# description: Tests for series filtering table functions (C++ API compatible)
 # group: [sql]
 
 require anofox_forecast
 
 #######################################
+# Setup Test Data
+#######################################
+
+statement ok
+CREATE TABLE test_series AS
+SELECT 'A' AS id, '2023-01-01'::TIMESTAMP AS date, 1.0 AS val
+UNION ALL SELECT 'A', '2023-01-02', 2.0
+UNION ALL SELECT 'A', '2023-01-03', 3.0
+UNION ALL SELECT 'A', '2023-01-04', 4.0
+UNION ALL SELECT 'A', '2023-01-05', 5.0
+UNION ALL SELECT 'B', '2023-01-01', 0.0
+UNION ALL SELECT 'B', '2023-01-02', 0.0
+UNION ALL SELECT 'B', '2023-01-03', 1.0
+UNION ALL SELECT 'B', '2023-01-04', 2.0
+UNION ALL SELECT 'B', '2023-01-05', 0.0
+UNION ALL SELECT 'C', '2023-01-01', 5.0
+UNION ALL SELECT 'C', '2023-01-02', 5.0
+UNION ALL SELECT 'C', '2023-01-03', 5.0;
+
+#######################################
 # ts_drop_constant - Filter Constant Series
 #######################################
 
-# Constant series should return NULL
+# Should filter out constant series (C)
 query I
-SELECT ts_drop_constant([5.0, 5.0, 5.0, 5.0, 5.0]) IS NULL;
+SELECT COUNT(DISTINCT id) FROM ts_drop_constant('test_series', id, val);
 ----
-true
+2
 
-# Non-constant series should return the array
+# Verify series C is excluded
 query I
-SELECT ts_drop_constant([1.0, 2.0, 3.0, 4.0, 5.0]);
+SELECT COUNT(*) FROM ts_drop_constant('test_series', id, val) WHERE id = 'C';
 ----
-[1.0, 2.0, 3.0, 4.0, 5.0]
+0
 
-# Nearly constant with tiny variation should not be constant
+# Verify A and B remain
 query I
-SELECT ts_drop_constant([1.0, 2.0, 1.0, 2.0, 1.0]) IS NOT NULL;
+SELECT COUNT(*) FROM ts_drop_constant('test_series', id, val) WHERE id IN ('A', 'B');
 ----
-true
+10
 
 #######################################
 # ts_drop_short - Filter Short Series
 #######################################
 
-# Short series (less than min_len) should return NULL
+# Series C has only 3 rows, should be filtered with min_length=5
 query I
-SELECT ts_drop_short([1.0, 2.0, 3.0], 5) IS NULL;
+SELECT COUNT(DISTINCT id) FROM ts_drop_short('test_series', id, 5);
 ----
-true
+2
 
-# Series with exact min_len should pass
+# With min_length=3, all series should pass
 query I
-SELECT ts_drop_short([1.0, 2.0, 3.0, 4.0, 5.0], 5);
+SELECT COUNT(DISTINCT id) FROM ts_drop_short('test_series', id, 3);
 ----
-[1.0, 2.0, 3.0, 4.0, 5.0]
-
-# Series longer than min_len should pass
-query I
-SELECT ts_drop_short([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 5);
-----
-[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
-
-# Test with different min_len
-query I
-SELECT ts_drop_short([1.0, 2.0], 3) IS NULL;
-----
-true
-
-query I
-SELECT ts_drop_short([1.0, 2.0, 3.0], 3);
-----
-[1.0, 2.0, 3.0]
+3
 
 #######################################
 # ts_drop_leading_zeros - Trim Leading Zeros
 #######################################
 
-# Remove leading zeros
+# Series B starts with zeros, should remove them
 query I
-SELECT ts_drop_leading_zeros([0.0, 0.0, 1.0, 2.0, 3.0]);
+SELECT COUNT(*) FROM ts_drop_leading_zeros('test_series', id, date, val) WHERE id = 'B';
 ----
-[1.0, 2.0, 3.0]
+3
 
-# No leading zeros - should return same array
+# Series A has no leading zeros, should remain unchanged
 query I
-SELECT ts_drop_leading_zeros([1.0, 2.0, 3.0, 0.0, 0.0]);
+SELECT COUNT(*) FROM ts_drop_leading_zeros('test_series', id, date, val) WHERE id = 'A';
 ----
-[1.0, 2.0, 3.0, 0.0, 0.0]
-
-# All zeros
-query I
-SELECT length(ts_drop_leading_zeros([0.0, 0.0, 0.0]));
-----
-0
-
-# Single leading zero
-query I
-SELECT ts_drop_leading_zeros([0.0, 5.0, 6.0]);
-----
-[5.0, 6.0]
+5
 
 #######################################
 # ts_drop_trailing_zeros - Trim Trailing Zeros
 #######################################
 
-# Remove trailing zeros
+# Series B ends with zeros, should remove them
 query I
-SELECT ts_drop_trailing_zeros([1.0, 2.0, 3.0, 0.0, 0.0]);
+SELECT COUNT(*) FROM ts_drop_trailing_zeros('test_series', id, date, val) WHERE id = 'B';
 ----
-[1.0, 2.0, 3.0]
+4
 
-# No trailing zeros - should return same array
+# Series A has no trailing zeros, should remain unchanged
 query I
-SELECT ts_drop_trailing_zeros([0.0, 0.0, 1.0, 2.0, 3.0]);
+SELECT COUNT(*) FROM ts_drop_trailing_zeros('test_series', id, date, val) WHERE id = 'A';
 ----
-[0.0, 0.0, 1.0, 2.0, 3.0]
-
-# All zeros
-query I
-SELECT length(ts_drop_trailing_zeros([0.0, 0.0, 0.0]));
-----
-0
-
-# Single trailing zero
-query I
-SELECT ts_drop_trailing_zeros([5.0, 6.0, 0.0]);
-----
-[5.0, 6.0]
+5
 
 #######################################
 # ts_drop_edge_zeros - Trim Both Edges
 #######################################
 
-# Remove zeros from both edges
+# Series B has leading and trailing zeros
 query I
-SELECT ts_drop_edge_zeros([0.0, 0.0, 1.0, 2.0, 3.0, 0.0, 0.0]);
+SELECT COUNT(*) FROM ts_drop_edge_zeros('test_series', id, date, val) WHERE id = 'B';
 ----
-[1.0, 2.0, 3.0]
+2
 
-# Only leading zeros
+# Series A has no edge zeros
 query I
-SELECT ts_drop_edge_zeros([0.0, 0.0, 1.0, 2.0, 3.0]);
+SELECT COUNT(*) FROM ts_drop_edge_zeros('test_series', id, date, val) WHERE id = 'A';
 ----
-[1.0, 2.0, 3.0]
-
-# Only trailing zeros
-query I
-SELECT ts_drop_edge_zeros([1.0, 2.0, 3.0, 0.0, 0.0]);
-----
-[1.0, 2.0, 3.0]
-
-# No edge zeros
-query I
-SELECT ts_drop_edge_zeros([1.0, 0.0, 2.0, 0.0, 3.0]);
-----
-[1.0, 0.0, 2.0, 0.0, 3.0]
-
-# All zeros
-query I
-SELECT length(ts_drop_edge_zeros([0.0, 0.0, 0.0]));
-----
-0
-
-# Single value
-query I
-SELECT ts_drop_edge_zeros([5.0]);
-----
-[5.0]
+5
 
 #######################################
-# NULL Handling
+# ts_drop_gappy - Filter Gappy Series
 #######################################
 
-query I
-SELECT ts_drop_constant(NULL) IS NULL;
-----
-true
+statement ok
+CREATE TABLE gappy_series AS
+SELECT 'X' AS id, '2023-01-01'::TIMESTAMP AS date, NULL::DOUBLE AS val
+UNION ALL SELECT 'X', '2023-01-02', 1.0
+UNION ALL SELECT 'X', '2023-01-03', 2.0
+UNION ALL SELECT 'Y', '2023-01-01', 1.0
+UNION ALL SELECT 'Y', '2023-01-02', 2.0
+UNION ALL SELECT 'Y', '2023-01-03', 3.0;
 
+# X has 33% gaps, Y has 0% - with 0.3 threshold, only Y passes
 query I
-SELECT ts_drop_short(NULL, 5) IS NULL;
+SELECT COUNT(DISTINCT id) FROM ts_drop_gappy('gappy_series', id, val, 0.3);
 ----
-true
+1
 
+# With 0.5 threshold, both pass
 query I
-SELECT ts_drop_leading_zeros(NULL) IS NULL;
+SELECT COUNT(DISTINCT id) FROM ts_drop_gappy('gappy_series', id, val, 0.5);
 ----
-true
-
-query I
-SELECT ts_drop_trailing_zeros(NULL) IS NULL;
-----
-true
-
-query I
-SELECT ts_drop_edge_zeros(NULL) IS NULL;
-----
-true
+2
 
 #######################################
-# Alias Tests
+# ts_drop_zeros - Filter All-Zero Series
 #######################################
 
-# Test anofox_fcst_ts_drop_constant alias
-query I
-SELECT anofox_fcst_ts_drop_constant([5.0, 5.0, 5.0]) IS NULL;
-----
-true
+statement ok
+CREATE TABLE zero_series AS
+SELECT 'X' AS id, '2023-01-01'::TIMESTAMP AS date, 0.0 AS val
+UNION ALL SELECT 'X', '2023-01-02', 0.0
+UNION ALL SELECT 'X', '2023-01-03', 0.0
+UNION ALL SELECT 'Y', '2023-01-01', 1.0
+UNION ALL SELECT 'Y', '2023-01-02', 0.0
+UNION ALL SELECT 'Y', '2023-01-03', 2.0;
 
-# Test anofox_fcst_ts_drop_short alias
+# X is all zeros, should be filtered
 query I
-SELECT anofox_fcst_ts_drop_short([1.0, 2.0], 5) IS NULL;
+SELECT COUNT(DISTINCT id) FROM ts_drop_zeros('zero_series', id, val);
 ----
-true
+1
 
-# Test anofox_fcst_ts_drop_leading_zeros alias
+# Y has non-zero values
 query I
-SELECT anofox_fcst_ts_drop_leading_zeros([0.0, 0.0, 1.0, 2.0]);
+SELECT COUNT(*) FROM ts_drop_zeros('zero_series', id, val) WHERE id = 'Y';
 ----
-[1.0, 2.0]
-
-# Test anofox_fcst_ts_drop_trailing_zeros alias
-query I
-SELECT anofox_fcst_ts_drop_trailing_zeros([1.0, 2.0, 0.0, 0.0]);
-----
-[1.0, 2.0]
-
-# Test anofox_fcst_ts_drop_edge_zeros alias
-query I
-SELECT anofox_fcst_ts_drop_edge_zeros([0.0, 1.0, 2.0, 0.0]);
-----
-[1.0, 2.0]
-
+3

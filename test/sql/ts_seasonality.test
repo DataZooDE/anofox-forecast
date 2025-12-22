@@ -30,27 +30,27 @@ true
 # ts_analyze_seasonality - STRUCT Result Tests
 #######################################
 
-# Test periods field exists
+# Test detected_periods field exists
 query I
-SELECT (ts_analyze_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).periods IS NOT NULL;
+SELECT (ts_analyze_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).detected_periods IS NOT NULL;
 ----
 true
 
-# Test strengths field exists
+# Test primary_period field exists
 query I
-SELECT (ts_analyze_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).strengths IS NOT NULL;
+SELECT (ts_analyze_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).primary_period IS NOT NULL;
 ----
 true
 
-# Test dominant_period field exists
+# Test seasonal_strength field exists
 query I
-SELECT (ts_analyze_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).dominant_period IS NOT NULL;
+SELECT (ts_analyze_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).seasonal_strength IS NOT NULL;
 ----
 true
 
-# Test is_seasonal field exists
+# Test trend_strength field exists
 query I
-SELECT (ts_analyze_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).is_seasonal IS NOT NULL;
+SELECT (ts_analyze_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).trend_strength IS NOT NULL;
 ----
 true
 
@@ -58,37 +58,31 @@ true
 # Strong Seasonal Patterns
 #######################################
 
-# Clear period 4 pattern - should be marked seasonal
+# Clear period 4 pattern - detected_periods should include 4
 query I
-SELECT (ts_analyze_seasonality([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0])).is_seasonal;
+SELECT 4 = ANY((ts_analyze_seasonality([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0])).detected_periods);
 ----
 true
 
-# Clear period 4 pattern - dominant period should be 4
+# Clear period 4 pattern - primary_period should be 4
 query I
-SELECT (ts_analyze_seasonality([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0])).dominant_period;
+SELECT (ts_analyze_seasonality([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0])).primary_period;
 ----
 4
-
-#######################################
-# Non-Seasonal Patterns
-#######################################
-
-# Pure linear trend - should not be strongly seasonal
-query I
-SELECT (ts_analyze_seasonality([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).is_seasonal = false OR
-       (ts_analyze_seasonality([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).is_seasonal = true;
-----
-true
 
 #######################################
 # Strength Properties
 #######################################
 
-# Strengths should be between 0 and 1 (or positive)
+# Seasonal strength should be between 0 and 1
 query I
-SELECT length((ts_analyze_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).strengths) =
-       length((ts_analyze_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).periods);
+SELECT (ts_analyze_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).seasonal_strength >= 0;
+----
+true
+
+# Trend strength should be between 0 and 1
+query I
+SELECT (ts_analyze_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).trend_strength >= 0;
 ----
 true
 
@@ -107,20 +101,3 @@ query I
 SELECT ts_analyze_seasonality(NULL) IS NULL;
 ----
 true
-
-#######################################
-# Alias Tests
-#######################################
-
-# Test anofox_fcst_ts_detect_seasonality alias
-query I
-SELECT anofox_fcst_ts_detect_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0]) IS NOT NULL;
-----
-true
-
-# Test anofox_fcst_ts_analyze_seasonality alias
-query I
-SELECT (anofox_fcst_ts_analyze_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).periods IS NOT NULL;
-----
-true
-

@@ -58,6 +58,7 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsFeaturesAggFunction(loader);
     RegisterTsFeaturesConfigFromJsonFunction(loader);
     RegisterTsFeaturesConfigFromCsvFunction(loader);
+    RegisterTsFeaturesConfigTemplateFunction(loader);
 
     // Register Forecasting functions
     RegisterTsForecastFunction(loader);

@@ -147,8 +147,9 @@ static void TsStatsFunction(DataChunk &args, ExpressionState &state, Vector &res
 }
 
 void RegisterTsStatsFunction(ExtensionLoader &loader) {
-    // Register the main function with LIST(DOUBLE) input
-    ScalarFunctionSet ts_stats_set("ts_stats");
+    // Internal scalar function used by ts_stats table macro
+    // Named with underscore prefix to match C++ API (ts_stats is table macro only)
+    ScalarFunctionSet ts_stats_set("_ts_stats");
 
     ts_stats_set.AddFunction(ScalarFunction(
         {LogicalType::LIST(LogicalType::DOUBLE)},
@@ -157,16 +158,6 @@ void RegisterTsStatsFunction(ExtensionLoader &loader) {
     ));
 
     loader.RegisterFunction(ts_stats_set);
-
-    // Register alias with anofox_fcst_ prefix
-    ScalarFunctionSet anofox_ts_stats_set("anofox_fcst_ts_stats");
-    anofox_ts_stats_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        GetTsStatsResultType(),
-        TsStatsFunction
-    ));
-
-    loader.RegisterFunction(anofox_ts_stats_set);
 }
 
 } // namespace duckdb

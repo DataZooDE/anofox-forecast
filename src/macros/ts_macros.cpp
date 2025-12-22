@@ -27,7 +27,7 @@ static const TsTableMacro ts_table_macros[] = {
 R"(
 SELECT
     group_col AS id,
-    ts_stats(LIST(value_col ORDER BY date_col)) AS stats
+    _ts_stats(LIST(value_col ORDER BY date_col)) AS stats
 FROM query_table(source::VARCHAR)
 GROUP BY group_col
 )"},
@@ -65,7 +65,7 @@ FROM query_table(stats_table::VARCHAR)
 R"(
 SELECT
     unique_id_col AS unique_id,
-    ts_data_quality(LIST(value_col ORDER BY date_col)) AS quality
+    _ts_data_quality(LIST(value_col ORDER BY date_col)) AS quality
 FROM query_table(source::VARCHAR)
 GROUP BY unique_id_col
 )"},
@@ -83,92 +83,84 @@ SELECT
 FROM (
     SELECT
         unique_id_col AS unique_id,
-        ts_data_quality(LIST(value_col ORDER BY date_col)) AS quality
+        _ts_data_quality(LIST(value_col ORDER BY date_col)) AS quality
     FROM query_table(source::VARCHAR)
     GROUP BY unique_id_col
 )
 )"},
 
-    // ts_drop_constant: Filter out constant series
+    // ts_drop_constant: Filter out constant series (table-based)
+    // C++ API: ts_drop_constant(table_name, group_col, value_col)
     {"ts_drop_constant", {"source", "group_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH series_stats AS (
-    SELECT
-        group_col,
-        ts_is_constant(LIST(value_col)) AS is_const
+SELECT *
+FROM query_table(source::VARCHAR)
+WHERE group_col IN (
+    SELECT group_col
     FROM query_table(source::VARCHAR)
     GROUP BY group_col
+    HAVING MIN(value_col) != MAX(value_col) OR MIN(value_col) IS NULL OR MAX(value_col) IS NULL
 )
-SELECT t.*
-FROM query_table(source::VARCHAR) t
-JOIN series_stats s ON t.group_col = s.group_col
-WHERE NOT s.is_const
 )"},
 
-    // ts_drop_short: Filter out short series
+    // ts_drop_short: Filter out short series (table-based)
     // C++ API: ts_drop_short(table_name, group_col, min_length)
     {"ts_drop_short", {"source", "group_col", "min_length", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH series_counts AS (
-    SELECT group_col, COUNT(*) AS n
+SELECT *
+FROM query_table(source::VARCHAR)
+WHERE group_col IN (
+    SELECT group_col
     FROM query_table(source::VARCHAR)
     GROUP BY group_col
+    HAVING COUNT(*) >= min_length
 )
-SELECT t.*
-FROM query_table(source::VARCHAR) t
-JOIN series_counts c ON t.group_col = c.group_col
-WHERE c.n >= min_length
 )"},
 
-    // ts_drop_leading_zeros: Remove leading zeros from series
+    // ts_drop_leading_zeros: Remove leading zeros from series (table-based)
+    // C++ API: ts_drop_leading_zeros(table_name, group_col, date_col, value_col)
     {"ts_drop_leading_zeros", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH first_nonzero AS (
-    SELECT group_col, MIN(date_col) AS first_date
+    SELECT *,
+           MIN(CASE WHEN value_col != 0 AND value_col IS NOT NULL THEN date_col END) OVER (PARTITION BY group_col) AS _first_nz
     FROM query_table(source::VARCHAR)
-    WHERE value_col != 0 AND value_col IS NOT NULL
-    GROUP BY group_col
 )
-SELECT t.*
-FROM query_table(source::VARCHAR) t
-JOIN first_nonzero f ON t.group_col = f.group_col
-WHERE t.date_col >= f.first_date
+SELECT * EXCLUDE (_first_nz)
+FROM first_nonzero
+WHERE date_col >= _first_nz
 )"},
 
-    // ts_drop_trailing_zeros: Remove trailing zeros from series
+    // ts_drop_trailing_zeros: Remove trailing zeros from series (table-based)
+    // C++ API: ts_drop_trailing_zeros(table_name, group_col, date_col, value_col)
     {"ts_drop_trailing_zeros", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH last_nonzero AS (
-    SELECT group_col, MAX(date_col) AS last_date
+    SELECT *,
+           MAX(CASE WHEN value_col != 0 AND value_col IS NOT NULL THEN date_col END) OVER (PARTITION BY group_col) AS _last_nz
     FROM query_table(source::VARCHAR)
-    WHERE value_col != 0 AND value_col IS NOT NULL
-    GROUP BY group_col
 )
-SELECT t.*
-FROM query_table(source::VARCHAR) t
-JOIN last_nonzero l ON t.group_col = l.group_col
-WHERE t.date_col <= l.last_date
+SELECT * EXCLUDE (_last_nz)
+FROM last_nonzero
+WHERE date_col <= _last_nz
 )"},
 
-    // ts_drop_edge_zeros: Remove both leading and trailing zeros
+    // ts_drop_edge_zeros: Remove both leading and trailing zeros (table-based)
+    // C++ API: ts_drop_edge_zeros(table_name, group_col, date_col, value_col)
     {"ts_drop_edge_zeros", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH nonzero_bounds AS (
-    SELECT
-        group_col,
-        MIN(date_col) AS first_date,
-        MAX(date_col) AS last_date
+    SELECT *,
+           MIN(CASE WHEN value_col != 0 AND value_col IS NOT NULL THEN date_col END) OVER (PARTITION BY group_col) AS _first_nz,
+           MAX(CASE WHEN value_col != 0 AND value_col IS NOT NULL THEN date_col END) OVER (PARTITION BY group_col) AS _last_nz
     FROM query_table(source::VARCHAR)
-    WHERE value_col != 0 AND value_col IS NOT NULL
-    GROUP BY group_col
 )
-SELECT t.*
-FROM query_table(source::VARCHAR) t
-JOIN nonzero_bounds b ON t.group_col = b.group_col
-WHERE t.date_col >= b.first_date AND t.date_col <= b.last_date
+SELECT * EXCLUDE (_first_nz, _last_nz)
+FROM nonzero_bounds
+WHERE date_col >= _first_nz AND date_col <= _last_nz
 )"},
 
-    // ts_fill_nulls_const: Fill NULL values with constant
+    // ts_fill_nulls_const: Fill NULL values with constant (table-based)
     // C++ API: ts_fill_nulls_const(table_name, group_col, date_col, value_col, fill_value)
     {"ts_fill_nulls_const", {"source", "group_col", "date_col", "value_col", "fill_value", nullptr}, {{nullptr, nullptr}},
 R"(
@@ -180,7 +172,8 @@ FROM query_table(source::VARCHAR)
 ORDER BY group_col, date_col
 )"},
 
-    // ts_fill_nulls_forward: Forward fill (LOCF)
+    // ts_fill_nulls_forward: Forward fill (LOCF) (table-based)
+    // C++ API: ts_fill_nulls_forward(table_name, group_col, date_col, value_col)
     {"ts_fill_nulls_forward", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT
@@ -193,7 +186,8 @@ FROM query_table(source::VARCHAR)
 ORDER BY group_col, date_col
 )"},
 
-    // ts_fill_nulls_backward: Backward fill (NOCB)
+    // ts_fill_nulls_backward: Backward fill (NOCB) (table-based)
+    // C++ API: ts_fill_nulls_backward(table_name, group_col, date_col, value_col)
     {"ts_fill_nulls_backward", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT
@@ -206,24 +200,21 @@ FROM query_table(source::VARCHAR)
 ORDER BY group_col, date_col
 )"},
 
-    // ts_fill_nulls_mean: Fill with series mean
+    // ts_fill_nulls_mean: Fill with series mean (table-based)
+    // C++ API: ts_fill_nulls_mean(table_name, group_col, date_col, value_col)
     {"ts_fill_nulls_mean", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH series_means AS (
-    SELECT group_col, AVG(value_col) AS mean_val
+WITH with_mean AS (
+    SELECT *,
+           AVG(value_col) OVER (PARTITION BY group_col) AS _mean_val
     FROM query_table(source::VARCHAR)
-    GROUP BY group_col
 )
-SELECT
-    t.group_col,
-    t.date_col,
-    COALESCE(t.value_col, m.mean_val) AS value_col
-FROM query_table(source::VARCHAR) t
-JOIN series_means m ON t.group_col = m.group_col
-ORDER BY t.group_col, t.date_col
+SELECT group_col, date_col, COALESCE(value_col, _mean_val) AS value_col
+FROM with_mean
+ORDER BY group_col, date_col
 )"},
 
-    // ts_diff: Compute differences
+    // ts_diff: Compute differences (table-based)
     // C++ API: ts_diff(table_name, group_col, date_col, value_col, diff_order)
     {"ts_diff", {"source", "group_col", "date_col", "value_col", "diff_order", nullptr}, {{nullptr, nullptr}},
 R"(
@@ -332,37 +323,32 @@ LEFT JOIN src s ON ad._grp = s._grp AND ad._dt = s._dt
 ORDER BY ad._grp, ad._dt
 )"},
 
-    // ts_fill_forward_operator: Fill forward to a target date with NULL values (operator version)
-    // C++ API: ts_fill_forward_operator(table_name, group_col, date_col, value_col, target_date, frequency)
-    // Note: This is identical to ts_fill_forward but named "operator" for C++ API compatibility
-    {"ts_fill_forward_operator", {"source", "group_col", "date_col", "value_col", "target_date", "frequency", nullptr}, {{nullptr, nullptr}},
+    // ts_drop_gappy: Filter out series with too many gaps
+    // C++ API: ts_drop_gappy(table_name, group_col, value_col, max_gap_ratio)
+    {"ts_drop_gappy", {"source", "group_col", "value_col", "max_gap_ratio", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH src AS (
-    SELECT group_col AS _grp, date_col AS _dt, value_col AS _val
+SELECT *
+FROM query_table(source::VARCHAR)
+WHERE group_col IN (
+    SELECT group_col
     FROM query_table(source::VARCHAR)
-),
-last_dates AS (
-    SELECT
-        _grp,
-        MAX(_dt)::TIMESTAMP AS _max_dt
-    FROM src
-    GROUP BY _grp
-),
-forward_dates AS (
-    SELECT
-        ld._grp,
-        UNNEST(generate_series(ld._max_dt + frequency::INTERVAL, target_date::TIMESTAMP, frequency::INTERVAL)) AS _dt
-    FROM last_dates ld
-    WHERE ld._max_dt < target_date::TIMESTAMP
+    GROUP BY group_col
+    HAVING (SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END)::DOUBLE / NULLIF(COUNT(*), 0)) <= max_gap_ratio
 )
-SELECT _grp AS group_col, _dt AS date_col, _val AS value_col FROM src
-UNION ALL
-SELECT
-    fd._grp AS group_col,
-    fd._dt AS date_col,
-    NULL::DOUBLE AS value_col
-FROM forward_dates fd
-ORDER BY 1, 2
+)"},
+
+    // ts_drop_zeros: Filter out series with all zeros
+    // C++ API: ts_drop_zeros(table_name, group_col, value_col)
+    {"ts_drop_zeros", {"source", "group_col", "value_col", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT *
+FROM query_table(source::VARCHAR)
+WHERE group_col IN (
+    SELECT group_col
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+    HAVING SUM(CASE WHEN value_col != 0 AND value_col IS NOT NULL THEN 1 ELSE 0 END) > 0
+)
 )"},
 
     // ts_mstl_decomposition: MSTL decomposition for grouped series
@@ -371,7 +357,7 @@ ORDER BY 1, 2
 R"(
 SELECT
     group_col AS id,
-    ts_mstl_decomposition(LIST(value_col ORDER BY date_col), params['seasonal_periods']) AS decomposition
+    _ts_mstl_decomposition(LIST(value_col ORDER BY date_col)) AS decomposition
 FROM query_table(source::VARCHAR)
 GROUP BY group_col
 )"},
@@ -383,13 +369,13 @@ GROUP BY group_col
 R"(
 WITH ordered_data AS (
     SELECT
-        date_col,
-        value_col,
-        ROW_NUMBER() OVER (ORDER BY date_col) AS idx
+        date_col AS _dt,
+        value_col AS _val,
+        ROW_NUMBER() OVER (ORDER BY date_col) AS _idx
     FROM query_table(source::VARCHAR)
 ),
 cp_result AS (
-    SELECT ts_detect_changepoints_bocpd(
+    SELECT _ts_detect_changepoints_bocpd(
         LIST(value_col ORDER BY date_col),
         COALESCE(params['hazard_lambda']::DOUBLE, 250.0),
         COALESCE(params['include_probabilities']::BOOLEAN, false)
@@ -397,12 +383,12 @@ cp_result AS (
     FROM query_table(source::VARCHAR)
 )
 SELECT
-    od.date_col,
-    od.value_col,
-    (cp.cp).is_changepoint[od.idx] AS is_changepoint,
-    (cp.cp).changepoint_probability[od.idx] AS changepoint_probability
+    od._dt AS date_col,
+    od._val AS value_col,
+    (cp.cp).is_changepoint[od._idx] AS is_changepoint,
+    (cp.cp).changepoint_probability[od._idx] AS changepoint_probability
 FROM ordered_data od, cp_result cp
-ORDER BY od.date_col
+ORDER BY od._dt
 )"},
 
     // ts_detect_changepoints_by: Detect changepoints per group
@@ -411,7 +397,7 @@ ORDER BY od.date_col
 R"(
 SELECT
     group_col AS id,
-    ts_detect_changepoints_bocpd(
+    _ts_detect_changepoints_bocpd(
         LIST(value_col ORDER BY date_col),
         COALESCE(params['hazard_lambda']::DOUBLE, 250.0),
         COALESCE(params['include_probabilities']::BOOLEAN, false)
@@ -420,12 +406,12 @@ FROM query_table(source::VARCHAR)
 GROUP BY group_col
 )"},
 
-    // ts_forecast: Generate forecasts for a single series
-    // Signature: ts_forecast(table_name, date_col, target_col, method, horizon, params)
+    // ts_forecast: Generate forecasts for a single series (table-based)
+    // C++ API: ts_forecast(table_name, date_col, target_col, method, horizon, params)
     {"ts_forecast", {"source", "date_col", "target_col", "method", "horizon", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH forecast_result AS (
-    SELECT ts_forecast(LIST(target_col ORDER BY date_col), horizon, method) AS fcst
+    SELECT _ts_forecast(LIST(target_col ORDER BY date_col), horizon, method) AS fcst
     FROM query_table(source::VARCHAR)
 )
 SELECT
@@ -439,101 +425,28 @@ FROM forecast_result
 )"},
 
     // ts_forecast_by: Generate forecasts per group (long format - one row per forecast step)
-    // Signature: ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, params)
+    // C++ API: ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, params)
     {"ts_forecast_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH forecast_data AS (
     SELECT
         group_col AS id,
-        ts_forecast(LIST(target_col ORDER BY date_col), horizon, method) AS fcst
+        MAX(date_col) AS last_date,
+        _ts_forecast(LIST(target_col ORDER BY date_col), horizon, method) AS fcst
     FROM query_table(source::VARCHAR)
     GROUP BY group_col
 )
 SELECT
     id,
-    UNNEST(generate_series(1, len((fcst).point))) AS forecast_step,
+    UNNEST(generate_series(1, len((fcst).point)))::INTEGER AS forecast_step,
+    UNNEST(generate_series(last_date + INTERVAL '1 day', last_date + (len((fcst).point)::INTEGER || ' days')::INTERVAL, INTERVAL '1 day'))::TIMESTAMP AS date,
     UNNEST((fcst).point) AS point_forecast,
-    UNNEST((fcst).lower) AS lower,
-    UNNEST((fcst).upper) AS upper,
+    UNNEST((fcst).lower) AS lower_90,
+    UNNEST((fcst).upper) AS upper_90,
     (fcst).model AS model_name,
-    (fcst).aic AS aic,
-    (fcst).bic AS bic
+    (fcst).fitted AS insample_fitted
 FROM forecast_data
 ORDER BY id, forecast_step
-)"},
-
-    // anofox_fcst_ts_forecast: Alias for ts_forecast
-    // Signature: anofox_fcst_ts_forecast(table_name, date_col, target_col, method, horizon, params)
-    {"anofox_fcst_ts_forecast", {"source", "date_col", "target_col", "method", "horizon", "params", nullptr}, {{nullptr, nullptr}},
-R"(
-WITH forecast_result AS (
-    SELECT ts_forecast(LIST(target_col ORDER BY date_col), horizon, method) AS fcst
-    FROM query_table(source::VARCHAR)
-)
-SELECT
-    (fcst).point AS point_forecasts,
-    (fcst).lower AS lower_bounds,
-    (fcst).upper AS upper_bounds,
-    (fcst).model AS model_name,
-    (fcst).aic,
-    (fcst).bic
-FROM forecast_result
-)"},
-
-    // anofox_fcst_ts_forecast_by: Alias for ts_forecast_by (long format)
-    // Signature: anofox_fcst_ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, params)
-    {"anofox_fcst_ts_forecast_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", "params", nullptr}, {{nullptr, nullptr}},
-R"(
-WITH forecast_data AS (
-    SELECT
-        group_col AS id,
-        ts_forecast(LIST(target_col ORDER BY date_col), horizon, method) AS fcst
-    FROM query_table(source::VARCHAR)
-    GROUP BY group_col
-)
-SELECT
-    id,
-    UNNEST(generate_series(1, len((fcst).point))) AS forecast_step,
-    UNNEST((fcst).point) AS point_forecast,
-    UNNEST((fcst).lower) AS lower,
-    UNNEST((fcst).upper) AS upper,
-    (fcst).model AS model_name,
-    (fcst).aic AS aic,
-    (fcst).bic AS bic
-FROM forecast_data
-ORDER BY id, forecast_step
-)"},
-
-    // anofox_fcst_ts_fill_forward_operator: Alias for ts_fill_forward_operator
-    // Signature: anofox_fcst_ts_fill_forward_operator(table_name, group_col, date_col, value_col, target_date, frequency)
-    {"anofox_fcst_ts_fill_forward_operator", {"source", "group_col", "date_col", "value_col", "target_date", "frequency", nullptr}, {{nullptr, nullptr}},
-R"(
-WITH src AS (
-    SELECT group_col AS _grp, date_col AS _dt, value_col AS _val
-    FROM query_table(source::VARCHAR)
-),
-last_dates AS (
-    SELECT
-        _grp,
-        MAX(_dt)::TIMESTAMP AS _max_dt
-    FROM src
-    GROUP BY _grp
-),
-forward_dates AS (
-    SELECT
-        ld._grp,
-        UNNEST(generate_series(ld._max_dt + frequency::INTERVAL, target_date::TIMESTAMP, frequency::INTERVAL)) AS _dt
-    FROM last_dates ld
-    WHERE ld._max_dt < target_date::TIMESTAMP
-)
-SELECT _grp AS group_col, _dt AS date_col, _val AS value_col FROM src
-UNION ALL
-SELECT
-    fd._grp AS group_col,
-    fd._dt AS date_col,
-    NULL::DOUBLE AS value_col
-FROM forward_dates fd
-ORDER BY 1, 2
 )"},
 
     // Sentinel

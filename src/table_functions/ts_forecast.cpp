@@ -259,16 +259,18 @@ static void TsForecastWithModelFunction(DataChunk &args, ExpressionState &state,
 }
 
 void RegisterTsForecastFunction(ExtensionLoader &loader) {
-    ScalarFunctionSet ts_forecast_set("ts_forecast");
+    // Internal scalar function used by ts_forecast and ts_forecast_by table macros
+    // Named with underscore prefix to match C++ API (ts_forecast is table macro only)
+    ScalarFunctionSet ts_forecast_set("_ts_forecast");
 
-    // ts_forecast(values, horizon)
+    // _ts_forecast(values, horizon)
     ts_forecast_set.AddFunction(ScalarFunction(
         {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::INTEGER},
         GetForecastResultType(),
         TsForecastFunction
     ));
 
-    // ts_forecast(values, horizon, model)
+    // _ts_forecast(values, horizon, model)
     ts_forecast_set.AddFunction(ScalarFunction(
         {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::INTEGER, LogicalType::VARCHAR},
         GetForecastResultType(),
@@ -276,19 +278,6 @@ void RegisterTsForecastFunction(ExtensionLoader &loader) {
     ));
 
     loader.RegisterFunction(ts_forecast_set);
-
-    ScalarFunctionSet anofox_set("anofox_fcst_ts_forecast");
-    anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::INTEGER},
-        GetForecastResultType(),
-        TsForecastFunction
-    ));
-    anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::INTEGER, LogicalType::VARCHAR},
-        GetForecastResultType(),
-        TsForecastWithModelFunction
-    ));
-    loader.RegisterFunction(anofox_set);
 }
 
 // ts_forecast_by is implemented as a table macro in ts_macros.cpp

@@ -101,21 +101,15 @@ static void TsDataQualityFunction(DataChunk &args, ExpressionState &state, Vecto
 }
 
 void RegisterTsDataQualityFunction(ExtensionLoader &loader) {
-    ScalarFunctionSet ts_dq_set("ts_data_quality");
+    // Internal scalar function used by ts_data_quality table macro
+    // Named with underscore prefix to match C++ API (ts_data_quality is table macro only)
+    ScalarFunctionSet ts_dq_set("_ts_data_quality");
     ts_dq_set.AddFunction(ScalarFunction(
         {LogicalType::LIST(LogicalType::DOUBLE)},
         GetDataQualityResultType(),
         TsDataQualityFunction
     ));
     loader.RegisterFunction(ts_dq_set);
-
-    ScalarFunctionSet anofox_set("anofox_fcst_ts_data_quality");
-    anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        GetDataQualityResultType(),
-        TsDataQualityFunction
-    ));
-    loader.RegisterFunction(anofox_set);
 }
 
 // Placeholder for summary function

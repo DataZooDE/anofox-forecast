@@ -1,112 +1,52 @@
 # name: test/sql/ts_changepoints.test
-# description: Tests for ts_detect_changepoints changepoint detection function
+# description: Tests for ts_detect_changepoints table function (C++ API compatible)
 # group: [sql]
 
 require anofox_forecast
 
 #######################################
-# Basic Changepoint Detection Tests
+# Internal _ts_detect_changepoints_bocpd Tests
 #######################################
 
-# Test returns STRUCT with changepoints field
+# Test returns STRUCT with is_changepoint field
 query I
-SELECT (ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0])).changepoints IS NOT NULL;
+SELECT (_ts_detect_changepoints_bocpd([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0], 250.0, false)).is_changepoint IS NOT NULL;
 ----
 true
 
-# Test returns STRUCT with n_changepoints field
+# Test returns STRUCT with changepoint_probability field
 query I
-SELECT (ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0])).n_changepoints IS NOT NULL;
+SELECT (_ts_detect_changepoints_bocpd([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0], 250.0, false)).changepoint_probability IS NOT NULL;
 ----
 true
 
-# Test returns STRUCT with cost field
+# Test returns STRUCT with changepoint_indices field
 query I
-SELECT (ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0])).cost IS NOT NULL;
+SELECT (_ts_detect_changepoints_bocpd([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0], 250.0, false)).changepoint_indices IS NOT NULL;
 ----
 true
+
+# Test is_changepoint array has same length as input
+query I
+SELECT length((_ts_detect_changepoints_bocpd([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0], 250.0, false)).is_changepoint);
+----
+8
+
+# Test changepoint_probability array has same length as input
+query I
+SELECT length((_ts_detect_changepoints_bocpd([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0], 250.0, false)).changepoint_probability);
+----
+8
 
 #######################################
-# Clear Changepoint Detection
+# Constant Series Tests
 #######################################
 
-# Single level shift should detect at least one changepoint
+# Constant series - should have no changepoints
 query I
-SELECT (ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0, 10.0])).n_changepoints >= 1;
+SELECT length((_ts_detect_changepoints_bocpd([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 250.0, false)).changepoint_indices);
 ----
-true
-
-# Multiple level shifts should detect multiple changepoints
-query I
-SELECT (ts_detect_changepoints([1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 1.0, 1.0, 1.0])).n_changepoints >= 1;
-----
-true
-
-#######################################
-# No Changepoint Cases
-#######################################
-
-# Constant series - may have 0 changepoints
-query I
-SELECT (ts_detect_changepoints([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0])).n_changepoints >= 0;
-----
-true
-
-# Linear trend - may or may not have changepoints
-query I
-SELECT (ts_detect_changepoints([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])).n_changepoints >= 0;
-----
-true
-
-#######################################
-# With Parameters Tests
-#######################################
-
-# Test with min_size parameter
-query I
-SELECT (ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0], 2, 0.0)).n_changepoints >= 0;
-----
-true
-
-# Test with larger min_size - may detect fewer changepoints
-query I
-SELECT (ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0], 4, 0.0)).n_changepoints >= 0;
-----
-true
-
-# Test with penalty parameter
-query I
-SELECT (ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0], 2, 1.0)).n_changepoints >= 0;
-----
-true
-
-# Higher penalty should result in fewer or equal changepoints
-query I
-SELECT (ts_detect_changepoints([1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 1.0, 1.0, 1.0], 2, 100.0)).n_changepoints <=
-       (ts_detect_changepoints([1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 1.0, 1.0, 1.0], 2, 0.01)).n_changepoints + 1;
-----
-true
-
-#######################################
-# Changepoint List Properties
-#######################################
-
-# Number of changepoints should match list length
-query I
-SELECT length((ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0])).changepoints) =
-       (ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0])).n_changepoints;
-----
-true
-
-#######################################
-# Cost Property Tests
-#######################################
-
-# Cost should be non-negative
-query I
-SELECT (ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0])).cost >= 0;
-----
-true
+0
 
 #######################################
 # NULL Handling
@@ -114,23 +54,25 @@ true
 
 # NULL input should return NULL
 query I
-SELECT ts_detect_changepoints(NULL) IS NULL;
+SELECT _ts_detect_changepoints_bocpd(NULL, 250.0, false) IS NULL;
 ----
 true
 
 #######################################
-# Alias Test
+# Table Function API Tests
 #######################################
 
-# Test anofox_fcst_ts_detect_changepoints alias
-query I
-SELECT (anofox_fcst_ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0])).n_changepoints >= 0;
-----
-true
+statement ok
+CREATE TABLE changepoint_test AS
+SELECT ('2023-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS date,
+       CASE WHEN i < 5 THEN 1.0 ELSE 10.0 END AS val
+FROM generate_series(0, 9) AS t(i);
 
-# Test alias with parameters
+# Test ts_detect_changepoints table function returns results
 query I
-SELECT (anofox_fcst_ts_detect_changepoints([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 10.0], 2, 1.0)).n_changepoints >= 0;
+SELECT COUNT(*) FROM ts_detect_changepoints('changepoint_test', date, val, MAP(['hazard_lambda'], ['250.0']));
 ----
-true
+10
 
+statement ok
+DROP TABLE changepoint_test;

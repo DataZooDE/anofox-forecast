@@ -167,21 +167,14 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
 }
 
 void RegisterTsMstlDecompositionFunction(ExtensionLoader &loader) {
-    ScalarFunctionSet ts_mstl_set("ts_mstl_decomposition");
+    // Internal scalar function used by ts_mstl_decomposition table macro
+    ScalarFunctionSet ts_mstl_set("_ts_mstl_decomposition");
     ts_mstl_set.AddFunction(ScalarFunction(
         {LogicalType::LIST(LogicalType::DOUBLE)},
         GetMstlResultType(),
         TsMstlDecompositionFunction
     ));
     loader.RegisterFunction(ts_mstl_set);
-
-    ScalarFunctionSet anofox_set("anofox_fcst_ts_mstl_decomposition");
-    anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        GetMstlResultType(),
-        TsMstlDecompositionFunction
-    ));
-    loader.RegisterFunction(anofox_set);
 }
 
 } // namespace duckdb

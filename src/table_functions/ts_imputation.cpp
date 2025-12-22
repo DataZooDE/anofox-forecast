@@ -119,21 +119,8 @@ static void TsFillNullsConstFunction(DataChunk &args, ExpressionState &state, Ve
 }
 
 void RegisterTsFillNullsConstFunction(ExtensionLoader &loader) {
-    ScalarFunctionSet ts_fill_set("ts_fill_nulls_const");
-    ts_fill_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
-        LogicalType::LIST(LogicalType::DOUBLE),
-        TsFillNullsConstFunction
-    ));
-    loader.RegisterFunction(ts_fill_set);
-
-    ScalarFunctionSet anofox_set("anofox_fcst_ts_fill_nulls_const");
-    anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
-        LogicalType::LIST(LogicalType::DOUBLE),
-        TsFillNullsConstFunction
-    ));
-    loader.RegisterFunction(anofox_set);
+    // No-op: C++ extension uses table function, not scalar
+    // Table macro ts_fill_nulls_const is registered in ts_macros.cpp
 }
 
 // ============================================================================
@@ -197,21 +184,8 @@ static void TsFillNullsForwardFunction(DataChunk &args, ExpressionState &state, 
 }
 
 void RegisterTsFillNullsForwardFunction(ExtensionLoader &loader) {
-    ScalarFunctionSet ts_fill_set("ts_fill_nulls_forward");
-    ts_fill_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::LIST(LogicalType::DOUBLE),
-        TsFillNullsForwardFunction
-    ));
-    loader.RegisterFunction(ts_fill_set);
-
-    ScalarFunctionSet anofox_set("anofox_fcst_ts_fill_nulls_forward");
-    anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::LIST(LogicalType::DOUBLE),
-        TsFillNullsForwardFunction
-    ));
-    loader.RegisterFunction(anofox_set);
+    // No-op: C++ extension uses table function, not scalar
+    // Table macro ts_fill_nulls_forward is registered in ts_macros.cpp
 }
 
 // ============================================================================
@@ -278,21 +252,8 @@ static void TsFillNullsBackwardFunction(DataChunk &args, ExpressionState &state,
 }
 
 void RegisterTsFillNullsBackwardFunction(ExtensionLoader &loader) {
-    ScalarFunctionSet ts_fill_set("ts_fill_nulls_backward");
-    ts_fill_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::LIST(LogicalType::DOUBLE),
-        TsFillNullsBackwardFunction
-    ));
-    loader.RegisterFunction(ts_fill_set);
-
-    ScalarFunctionSet anofox_set("anofox_fcst_ts_fill_nulls_backward");
-    anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::LIST(LogicalType::DOUBLE),
-        TsFillNullsBackwardFunction
-    ));
-    loader.RegisterFunction(anofox_set);
+    // No-op: C++ extension uses table function, not scalar
+    // Table macro ts_fill_nulls_backward is registered in ts_macros.cpp
 }
 
 // ============================================================================
@@ -353,21 +314,8 @@ static void TsFillNullsMeanFunction(DataChunk &args, ExpressionState &state, Vec
 }
 
 void RegisterTsFillNullsMeanFunction(ExtensionLoader &loader) {
-    ScalarFunctionSet ts_fill_set("ts_fill_nulls_mean");
-    ts_fill_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::LIST(LogicalType::DOUBLE),
-        TsFillNullsMeanFunction
-    ));
-    loader.RegisterFunction(ts_fill_set);
-
-    ScalarFunctionSet anofox_set("anofox_fcst_ts_fill_nulls_mean");
-    anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::LIST(LogicalType::DOUBLE),
-        TsFillNullsMeanFunction
-    ));
-    loader.RegisterFunction(anofox_set);
+    // No-op: C++ extension uses table function, not scalar
+    // Table macro ts_fill_nulls_mean is registered in ts_macros.cpp
 }
 
 } // namespace duckdb

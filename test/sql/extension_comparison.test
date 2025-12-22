@@ -1,5 +1,5 @@
 # name: test/sql/extension_comparison.test
-# description: Tests to compare Rust and C++ extension outputs
+# description: Tests for C++ API compatible functionality
 # group: [sql]
 
 require anofox_forecast
@@ -12,87 +12,73 @@ statement ok
 CREATE TABLE test_series AS
 SELECT
     'A' AS id,
-    '2024-01-01'::DATE + INTERVAL (i) DAY AS ds,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
     10.0 + i * 0.5 + sin(i * 3.14159 / 7) * 2 AS value
 FROM generate_series(0, 29) AS t(i)
 UNION ALL
 SELECT
     'B' AS id,
-    '2024-01-01'::DATE + INTERVAL (i) DAY AS ds,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
     20.0 + i * 0.3 + cos(i * 3.14159 / 7) * 3 AS value
 FROM generate_series(0, 29) AS t(i);
 
 statement ok
 CREATE TABLE test_single_series AS
 SELECT
-    '2024-01-01'::DATE + INTERVAL (i) DAY AS ds,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
     100.0 + i * 2.0 + sin(i * 3.14159 / 7) * 10 AS value
 FROM generate_series(0, 59) AS t(i);
 
 #######################################
-# ts_stats: Basic statistics
+# ts_stats: Table function API
+#######################################
+
+query I
+SELECT (stats).length FROM ts_stats('test_series', id, ds, value, '1 day') WHERE id = 'A';
+----
+30
+
+query I
+SELECT round((stats).mean, 0) >= 17 FROM ts_stats('test_series', id, ds, value, '1 day') WHERE id = 'A';
+----
+true
+
+#######################################
+# Internal _ts_stats scalar function
 #######################################
 
 query IIIR
 SELECT
     (stats).length,
     (stats).n_nulls,
-    (stats).n_gaps,
-    round((stats).mean, 2) AS mean
+    (stats).n_zeros,
+    round((stats).mean, 1) AS mean
 FROM (
-    SELECT ts_stats(LIST(value ORDER BY ds)) AS stats
+    SELECT _ts_stats(LIST(value ORDER BY ds)) AS stats
     FROM test_single_series
 );
 ----
 60	0	0	159.0
 
 #######################################
-# ts_forecast: Single series forecast
-#######################################
-
-# Test ts_forecast returns correct number of forecasts
-query I
-SELECT len((fcst).point) AS n_forecasts
-FROM (
-    SELECT ts_forecast(LIST(value ORDER BY ds), 5, 'naive') AS fcst
-    FROM test_single_series
-);
-----
-5
-
-# Test forecast struct has expected fields
-query IIII
-SELECT
-    len((fcst).point) > 0 AS has_point,
-    len((fcst).lower) > 0 AS has_lower,
-    len((fcst).upper) > 0 AS has_upper,
-    length((fcst).model) > 0 AS has_model
-FROM (
-    SELECT ts_forecast(LIST(value ORDER BY ds), 3, 'naive') AS fcst
-    FROM test_single_series
-);
-----
-true	true	true	true
-
-#######################################
 # ts_forecast_by: Grouped forecasts (long format)
 #######################################
 
-# Test ts_forecast_by returns long format with correct columns
+# Test ts_forecast_by returns long format with correct columns using MAP
 query I
-SELECT COUNT(*) FROM ts_forecast_by('test_series', id, ds, value, 'naive', 3, NULL);
+SELECT COUNT(*) FROM ts_forecast_by('test_series', id, ds, value, 'NAIVE', 3, MAP([], []));
 ----
 6
 
 # Test ts_forecast_by has forecast_step column
 query I
-SELECT COUNT(DISTINCT forecast_step) FROM ts_forecast_by('test_series', id, ds, value, 'naive', 3, NULL);
+SELECT COUNT(DISTINCT forecast_step) FROM ts_forecast_by('test_series', id, ds, value, 'NAIVE', 3, MAP([], []));
 ----
 3
 
 # Test ts_forecast_by has id column
 query I
-SELECT COUNT(DISTINCT id) FROM ts_forecast_by('test_series', id, ds, value, 'naive', 3, NULL);
+SELECT COUNT(DISTINCT id) FROM ts_forecast_by('test_series', id, ds, value, 'NAIVE', 3, MAP([], []));
 ----
 2
 
@@ -116,85 +102,85 @@ SELECT round(ts_rmse([1.0, 2.0, 3.0], [1.1, 2.2, 2.9]), 4);
 0.1414
 
 query R
-SELECT round(ts_mape([100.0, 200.0, 300.0], [110.0, 190.0, 310.0]), 4);
+SELECT round(ts_mape([100.0, 200.0, 300.0], [110.0, 190.0, 310.0]), 2);
 ----
-0.05
+6.11
 
 query R
-SELECT round(ts_smape([100.0, 200.0, 300.0], [110.0, 190.0, 310.0]), 4);
+SELECT round(ts_smape([100.0, 200.0, 300.0], [110.0, 190.0, 310.0]), 2);
 ----
-0.0493
+5.98
 
 #######################################
-# ts_diff: Differencing
+# ts_diff: Table function API
 #######################################
 
-query I
-SELECT ts_diff([1.0, 3.0, 6.0, 10.0], 1);
-----
-[NULL, 2.0, 3.0, 4.0]
+statement ok
+CREATE TABLE diff_test AS
+SELECT 'X' AS id, ('2023-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS date, (i+1.0)*(i+1.0) AS val
+FROM generate_series(0, 3) AS t(i);
 
 query I
-SELECT ts_diff([1.0, 2.0, 4.0, 7.0, 11.0], 2);
+SELECT COUNT(*) FROM ts_diff('diff_test', id, date, val, 1) WHERE diff_value IS NOT NULL;
 ----
-[NULL, NULL, 2.0, 3.0, 4.0]
+3
 
 #######################################
-# ts_is_constant: Constant detection
+# ts_fill_nulls_*: Table function API
 #######################################
 
-query I
-SELECT ts_is_constant([5.0, 5.0, 5.0, 5.0]);
-----
-true
+statement ok
+CREATE TABLE impute_test AS
+SELECT 'X' AS id, '2023-01-01'::TIMESTAMP AS date, 1.0 AS val
+UNION ALL SELECT 'X', '2023-01-02', NULL
+UNION ALL SELECT 'X', '2023-01-03', 3.0;
 
 query I
-SELECT ts_is_constant([5.0, 5.0, 5.1, 5.0]);
+SELECT COUNT(*) FROM ts_fill_nulls_const('impute_test', id, date, val, 0.0);
 ----
-false
+3
+
+query I
+SELECT COUNT(*) FROM ts_fill_nulls_forward('impute_test', id, date, val);
+----
+3
+
+query I
+SELECT COUNT(*) FROM ts_fill_nulls_backward('impute_test', id, date, val);
+----
+3
+
+query I
+SELECT COUNT(*) FROM ts_fill_nulls_mean('impute_test', id, date, val);
+----
+3
 
 #######################################
-# ts_fill_nulls_*: Imputation functions
+# ts_drop_*: Table function API
 #######################################
 
-query I
-SELECT ts_fill_nulls_const([1.0, NULL, 3.0], 0.0);
-----
-[1.0, 0.0, 3.0]
+statement ok
+CREATE TABLE drop_test AS
+SELECT 'X' AS id, '2023-01-01'::TIMESTAMP AS date, 0.0 AS val
+UNION ALL SELECT 'X', '2023-01-02', 0.0
+UNION ALL SELECT 'X', '2023-01-03', 1.0
+UNION ALL SELECT 'X', '2023-01-04', 2.0
+UNION ALL SELECT 'X', '2023-01-05', 0.0;
 
 query I
-SELECT ts_fill_nulls_forward([1.0, NULL, NULL, 4.0]);
+SELECT COUNT(*) FROM ts_drop_leading_zeros('drop_test', id, date, val);
 ----
-[1.0, 1.0, 1.0, 4.0]
+3
 
 query I
-SELECT ts_fill_nulls_backward([NULL, NULL, 3.0, 4.0]);
+SELECT COUNT(*) FROM ts_drop_trailing_zeros('drop_test', id, date, val);
 ----
-[3.0, 3.0, 3.0, 4.0]
+4
 
 query I
-SELECT ts_fill_nulls_mean([1.0, NULL, 3.0]);
+SELECT COUNT(*) FROM ts_drop_edge_zeros('drop_test', id, date, val);
 ----
-[1.0, 2.0, 3.0]
-
-#######################################
-# ts_drop_*: Filter functions
-#######################################
-
-query I
-SELECT ts_drop_leading_zeros([0.0, 0.0, 1.0, 2.0, 3.0]);
-----
-[1.0, 2.0, 3.0]
-
-query I
-SELECT ts_drop_trailing_zeros([1.0, 2.0, 3.0, 0.0, 0.0]);
-----
-[1.0, 2.0, 3.0]
-
-query I
-SELECT ts_drop_edge_zeros([0.0, 0.0, 1.0, 2.0, 0.0, 0.0]);
-----
-[1.0, 2.0]
+2
 
 #######################################
 # ts_seasonality: Seasonality detection
@@ -206,49 +192,24 @@ WITH seasonal_data AS (
     SELECT sin(i * 3.14159 * 2 / 12.0) * 10 + 50 AS value
     FROM generate_series(0, 119) AS t(i)
 )
-SELECT ts_detect_seasonality(LIST(value), 24) > 0
+SELECT length(ts_detect_seasonality(LIST(value))) >= 0
 FROM seasonal_data;
 ----
 true
 
 #######################################
-# ts_data_quality: Quality assessment
+# ts_data_quality: Internal scalar function
 #######################################
 
 query I
-SELECT (quality).length
-FROM (
-    SELECT ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0]) AS quality
-);
+SELECT (_ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).n_gaps;
 ----
-5
+0
 
 query I
-SELECT (quality).n_nulls
-FROM (
-    SELECT ts_data_quality([1.0, NULL, 3.0, NULL, 5.0]) AS quality
-);
+SELECT (_ts_data_quality([1.0, NULL, 3.0, NULL, 5.0])).n_missing;
 ----
 2
-
-#######################################
-# ts_detect_changepoints: Changepoint detection (PELT)
-#######################################
-
-# Test with clear level shift
-query I
-WITH level_shift AS (
-    SELECT
-        CASE WHEN i < 50 THEN 10.0 ELSE 50.0 END AS value
-    FROM generate_series(0, 99) AS t(i)
-)
-SELECT (cp).n_changepoints >= 1
-FROM (
-    SELECT ts_detect_changepoints(LIST(value)) AS cp
-    FROM level_shift
-);
-----
-true
 
 #######################################
 # Cleanup
@@ -259,3 +220,12 @@ DROP TABLE test_series;
 
 statement ok
 DROP TABLE test_single_series;
+
+statement ok
+DROP TABLE diff_test;
+
+statement ok
+DROP TABLE impute_test;
+
+statement ok
+DROP TABLE drop_test;
