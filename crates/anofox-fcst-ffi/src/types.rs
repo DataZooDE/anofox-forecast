@@ -291,11 +291,11 @@ pub struct ForecastOptions {
 
 impl Default for ForecastOptions {
     fn default() -> Self {
-        let mut model = [0i8; 32];
+        let mut model = [0 as c_char; 32];
         b"auto"
             .iter()
             .enumerate()
-            .for_each(|(i, &b)| model[i] = b as i8);
+            .for_each(|(i, &b)| model[i] = b as c_char);
         Self {
             model,
             horizon: 12,
