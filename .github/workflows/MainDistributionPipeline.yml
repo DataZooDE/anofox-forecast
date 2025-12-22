@@ -19,10 +19,8 @@ jobs:
       extension_name: anofox_forecast
       duckdb_version: v1.4.3
       ci_tools_version: v1.4.3
-      enable_rust: true
+      extra_toolchains: 'rust'
       exclude_archs: 'wasm_mvp;wasm_eh;wasm_threads;windows_amd64_rtools'
-      # Disable reduced CI for full testing on all platforms
-      override_ci_ref: ''
 
   build-and-test-rust:
     name: Rust Tests
