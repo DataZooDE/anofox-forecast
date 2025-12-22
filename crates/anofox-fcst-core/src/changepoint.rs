@@ -129,6 +129,7 @@ pub fn detect_changepoints(
     for tau_star in min_size..=n {
         let candidates: Vec<usize> = (0..=(tau_star.saturating_sub(min_size)))
             .filter(|&tau| tau + min_size <= tau_star)
+            .filter(|&tau| tau == 0 || tau >= min_size) // Only valid previous changepoints
             .collect();
 
         let mut best_f = f64::INFINITY;

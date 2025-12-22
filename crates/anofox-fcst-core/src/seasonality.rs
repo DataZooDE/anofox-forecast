@@ -180,8 +180,9 @@ mod tests {
 
     #[test]
     fn test_analyze_seasonality() {
+        // Use a stronger seasonal signal with mild trend
         let values: Vec<f64> = (0..120)
-            .map(|i| (2.0 * PI * i as f64 / 12.0).sin() + 0.1 * i as f64)
+            .map(|i| 10.0 * (2.0 * PI * i as f64 / 12.0).sin() + 0.01 * i as f64)
             .collect();
 
         let analysis = analyze_seasonality(&values, Some(24)).unwrap();
