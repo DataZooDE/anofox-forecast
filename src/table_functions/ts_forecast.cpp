@@ -21,15 +21,23 @@ static LogicalType GetForecastResultType() {
     return LogicalType::STRUCT(std::move(children));
 }
 
-static void ExtractListValues(Vector &list_vec, idx_t row_idx,
+static void ExtractListValues(Vector &list_vec, idx_t count, idx_t row_idx,
                               vector<double> &out_values,
                               vector<uint64_t> &out_validity) {
-    auto list_data = ListVector::GetData(list_vec);
-    auto &list_entry = list_data[row_idx];
+    // Use UnifiedVectorFormat to handle all vector types (flat, constant, dictionary)
+    UnifiedVectorFormat list_data;
+    list_vec.ToUnifiedFormat(count, list_data);
+
+    auto list_entries = UnifiedVectorFormat::GetData<list_entry_t>(list_data);
+    auto list_idx = list_data.sel->get_index(row_idx);
+    auto &list_entry = list_entries[list_idx];
 
     auto &child_vec = ListVector::GetEntry(list_vec);
-    auto child_data = FlatVector::GetData<double>(child_vec);
-    auto &child_validity = FlatVector::Validity(child_vec);
+
+    // Also use UnifiedVectorFormat for child vector
+    UnifiedVectorFormat child_data;
+    child_vec.ToUnifiedFormat(ListVector::GetListSize(list_vec), child_data);
+    auto child_values = UnifiedVectorFormat::GetData<double>(child_data);
 
     out_values.clear();
     out_validity.clear();
@@ -43,8 +51,9 @@ static void ExtractListValues(Vector &list_vec, idx_t row_idx,
 
     for (idx_t i = 0; i < list_size; i++) {
         idx_t child_idx = list_offset + i;
-        if (child_validity.RowIsValid(child_idx)) {
-            out_values[i] = child_data[child_idx];
+        auto unified_child_idx = child_data.sel->get_index(child_idx);
+        if (child_data.validity.RowIsValid(unified_child_idx)) {
+            out_values[i] = child_values[unified_child_idx];
             out_validity[i / 64] |= (1ULL << (i % 64));
         } else {
             out_values[i] = 0.0;
@@ -94,18 +103,22 @@ static void TsForecastFunction(DataChunk &args, ExpressionState &state, Vector &
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     // Use UnifiedVectorFormat to handle both constant and flat vectors
+    UnifiedVectorFormat list_format;
+    list_vec.ToUnifiedFormat(count, list_format);
+
     UnifiedVectorFormat horizon_data;
     horizon_vec.ToUnifiedFormat(count, horizon_data);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(list_vec, row_idx)) {
+        auto list_idx = list_format.sel->get_index(row_idx);
+        if (!list_format.validity.RowIsValid(list_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> values;
         vector<uint64_t> validity;
-        ExtractListValues(list_vec, row_idx, values, validity);
+        ExtractListValues(list_vec, count, row_idx, values, validity);
 
         // Get horizon from unified format (handles constant vectors correctly)
         auto horizon_idx = horizon_data.sel->get_index(row_idx);
@@ -168,6 +181,9 @@ static void TsForecastWithModelFunction(DataChunk &args, ExpressionState &state,
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     // Use UnifiedVectorFormat to handle both constant and flat vectors
+    UnifiedVectorFormat list_format;
+    list_vec.ToUnifiedFormat(count, list_format);
+
     UnifiedVectorFormat horizon_data;
     horizon_vec.ToUnifiedFormat(count, horizon_data);
 
@@ -175,14 +191,15 @@ static void TsForecastWithModelFunction(DataChunk &args, ExpressionState &state,
     model_vec.ToUnifiedFormat(count, model_data);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(list_vec, row_idx)) {
+        auto list_idx = list_format.sel->get_index(row_idx);
+        if (!list_format.validity.RowIsValid(list_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> values;
         vector<uint64_t> validity;
-        ExtractListValues(list_vec, row_idx, values, validity);
+        ExtractListValues(list_vec, count, row_idx, values, validity);
 
         // Get horizon from unified format (handles constant vectors correctly)
         auto horizon_idx = horizon_data.sel->get_index(row_idx);
