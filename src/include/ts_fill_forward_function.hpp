@@ -19,13 +19,13 @@ struct TSFillForwardBindData : public TableFunctionData {
 	std::string date_col;
 	std::string value_col;
 	FrequencyConfig frequency;
-	Value target_date_value;              // User-specified target date (NEW vs ts_fill_gaps)
+	Value target_date_value; // User-specified target date (NEW vs ts_fill_gaps)
 	idx_t group_col_idx = 0;
 	idx_t date_col_idx = 0;
 	idx_t value_col_idx = 0;
-	LogicalType date_col_type;            // DATE, TIMESTAMP, INTEGER, or BIGINT
-	vector<LogicalType> return_types;     // Store return types from bind
-	vector<string> return_names;          // Store return names from bind
+	LogicalType date_col_type;        // DATE, TIMESTAMP, INTEGER, or BIGINT
+	vector<LogicalType> return_types; // Store return types from bind
+	vector<string> return_names;      // Store return names from bind
 
 	TSFillForwardBindData() = default;
 };
@@ -52,8 +52,8 @@ struct TSFillForwardLocalState : public LocalTableFunctionState {
 	std::unordered_map<std::string, SeriesData> series_data; // Group value (as string) -> SeriesData
 	bool input_done = false;
 	idx_t output_offset = 0;
-	std::vector<std::string> current_group_order;            // Maintain order of groups (as strings)
-	std::unordered_map<std::string, Value> group_value_map;  // Map string key back to original Value for output
+	std::vector<std::string> current_group_order;           // Maintain order of groups (as strings)
+	std::unordered_map<std::string, Value> group_value_map; // Map string key back to original Value for output
 
 	// Output generation state
 	std::string current_group_key;                                         // Current group being processed

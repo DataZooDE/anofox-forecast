@@ -392,8 +392,8 @@ OperatorFinalizeResultType TSFillForwardOperatorFinal(ExecutionContext &context,
 						series.generated_integer_dates = series.integer_dates;
 						std::sort(series.generated_integer_dates.begin(), series.generated_integer_dates.end());
 					} else {
-						series.generated_integer_dates =
-						    ts_fill_gaps_internal::GenerateIntegerRange(min_date, target_date, bind_data.frequency.step);
+						series.generated_integer_dates = ts_fill_gaps_internal::GenerateIntegerRange(
+						    min_date, target_date, bind_data.frequency.step);
 					}
 
 					// Build lookup map: generated date -> index in original data
@@ -404,15 +404,16 @@ OperatorFinalizeResultType TSFillForwardOperatorFinal(ExecutionContext &context,
 			} else {
 				if (!series.timestamps.empty()) {
 					auto min_date = *std::min_element(series.timestamps.begin(), series.timestamps.end());
-					auto target_date = ConvertTargetDateToTimePoint(bind_data.target_date_value, bind_data.date_col_type);
+					auto target_date =
+					    ConvertTargetDateToTimePoint(bind_data.target_date_value, bind_data.date_col_type);
 
 					// If target_date is before min_date, just use original data
 					if (target_date < min_date) {
 						series.generated_timestamps = series.timestamps;
 						std::sort(series.generated_timestamps.begin(), series.generated_timestamps.end());
 					} else {
-						series.generated_timestamps =
-						    ts_fill_gaps_internal::GenerateDateRange(min_date, target_date, bind_data.frequency.interval);
+						series.generated_timestamps = ts_fill_gaps_internal::GenerateDateRange(
+						    min_date, target_date, bind_data.frequency.interval);
 					}
 				}
 			}
