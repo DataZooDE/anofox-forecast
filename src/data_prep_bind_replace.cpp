@@ -434,7 +434,6 @@ unique_ptr<TableRef> TSFillForwardVarcharBindReplace(ClientContext &context, Tab
 	string date_col = input.inputs[2].ToString();
 	string value_col = input.inputs[3].ToString();
 	// target_date can be a column name (VARCHAR) or a literal value (DATE/TIMESTAMP/etc)
-	// Use ToSQLString() to handle both cases
 	string target_date_sql = input.inputs[4].ToSQLString();
 	// Frequency is required - reject NULL
 	if (input.inputs[5].IsNull()) {
@@ -451,25 +450,23 @@ unique_ptr<TableRef> TSFillForwardVarcharBindReplace(ClientContext &context, Tab
 	string escaped_value_col = KeywordHelper::WriteOptionallyQuoted(value_col);
 	string escaped_frequency = KeywordHelper::WriteQuoted(frequency);
 
-	// target_date can be a literal value or column reference - use as-is
-	string escaped_target_date = target_date_sql;
-
+	// Generate SQL with CTEs similar to ts_fill_gaps but using target_date as upper bound
 	std::ostringstream sql;
 	sql << R"(WITH orig_aliased AS (
-    SELECT 
-        )"
-	    << escaped_group_col << R"( AS __gid,
-        )"
-	    << escaped_date_col << R"( AS __did,
-        )"
-	    << escaped_value_col << R"( AS __vid,
+    SELECT
+        )" << escaped_group_col
+	    << R"( AS __gid,
+        )" << escaped_date_col
+	    << R"( AS __did,
+        )" << escaped_value_col
+	    << R"( AS __vid,
         *
     FROM QUERY_TABLE()"
 	    << escaped_table << R"()
 ),
 frequency_parsed AS (
-    SELECT 
-        CASE 
+    SELECT
+        CASE
             WHEN UPPER(TRIM()"
 	    << escaped_frequency << R"()) IN ('1D', '1DAY') THEN INTERVAL '1 day'
             WHEN UPPER(TRIM()"
@@ -488,84 +485,45 @@ frequency_parsed AS (
         END AS __interval
     FROM (SELECT 1) t
 ),
-date_type_check AS (
-    SELECT DISTINCT
+series_ranges AS (
+    SELECT
         __gid,
-        MIN(__did) = CAST(MIN(__did) AS DATE) AS __is_date_type
+        MIN(__did) AS __min
     FROM orig_aliased
     GROUP BY __gid
 ),
-series_ranges AS (
-    SELECT DISTINCT
-        oa.__gid,
-        MIN(oa.__did) OVER (PARTITION BY oa.__gid) AS __min,
-        MAX(oa.__did) OVER (PARTITION BY oa.__gid) AS __max,
-        dtc.__is_date_type
-    FROM orig_aliased oa
-    LEFT JOIN date_type_check dtc ON oa.__gid = dtc.__gid
-),
-target_dates AS (
-    SELECT 
+grid_raw AS (
+    SELECT
         sr.__gid,
-        sr.__min,
-        sr.__is_date_type,
-        )"
-	    << escaped_target_date << R"( AS __target
+        UNNEST(GENERATE_SERIES(sr.__min, )" << target_date_sql << R"( + fp.__interval, fp.__interval)) AS __did
     FROM series_ranges sr
-),
-expanded_base AS (
-    SELECT 
-        td.__gid,
-        UNNEST(GENERATE_SERIES(td.__min, td.__target, fp.__interval)) AS __did,
-        td.__is_date_type
-    FROM target_dates td
     CROSS JOIN frequency_parsed fp
-    UNION ALL
-    -- For DATE types: use target as-is
-    SELECT 
-        td.__gid,
-        CAST(td.__target AS DATE) AS __did,
-        td.__is_date_type
-    FROM target_dates td
-    WHERE td.__is_date_type = true
-    UNION ALL
-    -- For TIMESTAMP types: preserve time component from __min
-    SELECT 
-        td.__gid,
-        CAST(td.__target AS TIMESTAMP) + (CAST(td.__min AS TIMESTAMP) - DATE_TRUNC('day', CAST(td.__min AS TIMESTAMP))) AS __did,
-        td.__is_date_type
-    FROM target_dates td
-    WHERE td.__is_date_type = false
 ),
-expanded AS (
-    SELECT DISTINCT
-        __gid,
-        __did,
-        __is_date_type
-    FROM expanded_base
+grid AS (
+    SELECT __gid, __did FROM grid_raw
+    WHERE __did <= )" << target_date_sql << R"( OR DATE_TRUNC('day', __did) = DATE_TRUNC('day', )" << target_date_sql << R"()
 ),
 with_original_data AS (
-    SELECT 
-        e.__gid,
-        CASE 
-            WHEN oa.__did IS NOT NULL THEN 
-                CASE WHEN e.__is_date_type THEN CAST(oa.__did AS DATE) ELSE oa.__did END
-            WHEN e.__is_date_type THEN CAST(e.__did AS DATE)
-            ELSE e.__did
-        END AS __did,
+    SELECT
+        g.__gid,
+        g.__did,
         oa.__vid,
         oa.* EXCLUDE (__gid, __did, __vid)
-    FROM expanded e
-    LEFT JOIN orig_aliased oa ON e.__gid = oa.__gid 
-        AND (
-            (e.__is_date_type AND CAST(e.__did AS DATE) = CAST(oa.__did AS DATE))
-            OR
-            (NOT e.__is_date_type AND e.__did = oa.__did)
-        )
+    FROM grid g
+    LEFT JOIN orig_aliased oa ON g.__gid = oa.__gid AND g.__did = oa.__did
 )
-)"
-	    << GenerateFinalSelect("with_original_data", escaped_group_col, escaped_date_col, escaped_value_col,
-	                           "with_original_data.__gid", "with_original_data.__did", "with_original_data.__vid");
+SELECT
+    with_original_data.* EXCLUDE (__gid, __did, __vid, )"
+	    << escaped_group_col << R"(, )" << escaped_date_col << R"(, )" << escaped_value_col << R"(),
+    with_original_data.__gid AS )"
+	    << escaped_group_col << R"(,
+    with_original_data.__did AS )"
+	    << escaped_date_col << R"(,
+    with_original_data.__vid AS )"
+	    << escaped_value_col << R"(
+FROM with_original_data
+ORDER BY )" << escaped_group_col
+	    << R"(, )" << escaped_date_col << R"()";
 
 	return ParseSubquery(sql.str(), context.GetParserOptions(),
 	                     "Failed to parse generated SQL for ts_fill_forward (VARCHAR frequency)");
@@ -594,73 +552,62 @@ unique_ptr<TableRef> TSFillForwardIntegerBindReplace(ClientContext &context, Tab
 	string escaped_group_col = KeywordHelper::WriteOptionallyQuoted(group_col);
 	string escaped_date_col = KeywordHelper::WriteOptionallyQuoted(date_col);
 	string escaped_value_col = KeywordHelper::WriteOptionallyQuoted(value_col);
-	// target_date can be a literal value or column reference - use as-is
-	string escaped_target_date = target_date_sql;
 
+	// Generate SQL with CTEs similar to ts_fill_gaps but using target_date as upper bound
 	std::ostringstream sql;
 	sql << R"(WITH orig_aliased AS (
-    SELECT 
-        )"
-	    << escaped_group_col << R"( AS __gid,
-        )"
-	    << escaped_date_col << R"( AS __did,
-        )"
-	    << escaped_value_col << R"( AS __vid,
+    SELECT
+        )" << escaped_group_col
+	    << R"( AS __gid,
+        )" << escaped_date_col
+	    << R"( AS __did,
+        )" << escaped_value_col
+	    << R"( AS __vid,
         *
     FROM QUERY_TABLE()"
 	    << escaped_table << R"()
 ),
 frequency_parsed AS (
-    SELECT 
-        )"
-	    << frequency_str << R"( AS __int_step
+    SELECT
+        )" << frequency_str
+	    << R"( AS __int_step
     FROM (SELECT 1) t
 ),
 series_ranges AS (
-    SELECT DISTINCT
+    SELECT
         __gid,
-        MIN(__did) OVER (PARTITION BY __gid) AS __min,
-        MAX(__did) OVER (PARTITION BY __gid) AS __max
+        MIN(__did) AS __min
     FROM orig_aliased
+    GROUP BY __gid
 ),
-target_dates AS (
-    SELECT 
+grid AS (
+    SELECT
         sr.__gid,
-        sr.__min,
-        )"
-	    << escaped_target_date << R"( AS __target
+        UNNEST(GENERATE_SERIES(sr.__min, )" << target_date_sql << R"(, fp.__int_step)) AS __did
     FROM series_ranges sr
-),
-expanded_base AS (
-    SELECT 
-        td.__gid,
-        UNNEST(GENERATE_SERIES(td.__min, td.__target, fp.__int_step)) AS __did
-    FROM target_dates td
     CROSS JOIN frequency_parsed fp
-    UNION ALL
-    SELECT 
-        td.__gid,
-        td.__target AS __did
-    FROM target_dates td
-),
-expanded AS (
-    SELECT DISTINCT
-        __gid,
-        __did
-    FROM expanded_base
 ),
 with_original_data AS (
-    SELECT 
-        e.__gid,
-        e.__did,
+    SELECT
+        g.__gid,
+        g.__did,
         oa.__vid,
         oa.* EXCLUDE (__gid, __did, __vid)
-    FROM expanded e
-    LEFT JOIN orig_aliased oa ON e.__gid = oa.__gid AND e.__did = oa.__did
+    FROM grid g
+    LEFT JOIN orig_aliased oa ON g.__gid = oa.__gid AND g.__did = oa.__did
 )
-)"
-	    << GenerateFinalSelect("with_original_data", escaped_group_col, escaped_date_col, escaped_value_col,
-	                           "with_original_data.__gid", "with_original_data.__did", "with_original_data.__vid");
+SELECT
+    with_original_data.* EXCLUDE (__gid, __did, __vid, )"
+	    << escaped_group_col << R"(, )" << escaped_date_col << R"(, )" << escaped_value_col << R"(),
+    with_original_data.__gid AS )"
+	    << escaped_group_col << R"(,
+    with_original_data.__did AS )"
+	    << escaped_date_col << R"(,
+    with_original_data.__vid AS )"
+	    << escaped_value_col << R"(
+FROM with_original_data
+ORDER BY )" << escaped_group_col
+	    << R"(, )" << escaped_date_col << R"()";
 
 	return ParseSubquery(sql.str(), context.GetParserOptions(),
 	                     "Failed to parse generated SQL for ts_fill_forward (INTEGER frequency)");
