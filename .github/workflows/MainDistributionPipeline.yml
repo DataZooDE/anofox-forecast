@@ -16,10 +16,10 @@ jobs:
     name: Build extension binaries
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@main
     with:
-      extension_name: anofox_forecast
       duckdb_version: v1.4.3
       ci_tools_version: v1.4.3
-      extra_toolchains: 'rust'
+      extension_name: anofox_forecast
+      enable_rust: true
       exclude_archs: 'wasm_mvp;wasm_eh;wasm_threads;windows_amd64_rtools'
 
   build-and-test-rust:
