@@ -383,7 +383,7 @@ mod tests {
 
         let result = detect_changepoints(&values, 5, None, CostFunction::L2).unwrap();
 
-        assert!(result.changepoints.len() >= 1);
+        assert!(!result.changepoints.is_empty());
     }
 
     #[test]
