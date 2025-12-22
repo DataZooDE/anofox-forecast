@@ -454,12 +454,12 @@ unique_ptr<TableRef> TSFillForwardVarcharBindReplace(ClientContext &context, Tab
 	std::ostringstream sql;
 	sql << R"(WITH orig_aliased AS (
     SELECT
-        )" << escaped_group_col
-	    << R"( AS __gid,
-        )" << escaped_date_col
-	    << R"( AS __did,
-        )" << escaped_value_col
-	    << R"( AS __vid,
+        )"
+	    << escaped_group_col << R"( AS __gid,
+        )"
+	    << escaped_date_col << R"( AS __did,
+        )"
+	    << escaped_value_col << R"( AS __vid,
         *
     FROM QUERY_TABLE()"
 	    << escaped_table << R"()
@@ -495,13 +495,15 @@ series_ranges AS (
 grid_raw AS (
     SELECT
         sr.__gid,
-        UNNEST(GENERATE_SERIES(sr.__min, )" << target_date_sql << R"( + fp.__interval, fp.__interval)) AS __did
+        UNNEST(GENERATE_SERIES(sr.__min, )"
+	    << target_date_sql << R"( + fp.__interval, fp.__interval)) AS __did
     FROM series_ranges sr
     CROSS JOIN frequency_parsed fp
 ),
 grid AS (
     SELECT __gid, __did FROM grid_raw
-    WHERE __did <= )" << target_date_sql << R"( OR DATE_TRUNC('day', __did) = DATE_TRUNC('day', )" << target_date_sql << R"()
+    WHERE __did <= )"
+	    << target_date_sql << R"( OR DATE_TRUNC('day', __did) = DATE_TRUNC('day', )" << target_date_sql << R"()
 ),
 with_original_data AS (
     SELECT
@@ -522,8 +524,8 @@ SELECT
     with_original_data.__vid AS )"
 	    << escaped_value_col << R"(
 FROM with_original_data
-ORDER BY )" << escaped_group_col
-	    << R"(, )" << escaped_date_col << R"()";
+ORDER BY )"
+	    << escaped_group_col << R"(, )" << escaped_date_col << R"()";
 
 	return ParseSubquery(sql.str(), context.GetParserOptions(),
 	                     "Failed to parse generated SQL for ts_fill_forward (VARCHAR frequency)");
@@ -557,20 +559,20 @@ unique_ptr<TableRef> TSFillForwardIntegerBindReplace(ClientContext &context, Tab
 	std::ostringstream sql;
 	sql << R"(WITH orig_aliased AS (
     SELECT
-        )" << escaped_group_col
-	    << R"( AS __gid,
-        )" << escaped_date_col
-	    << R"( AS __did,
-        )" << escaped_value_col
-	    << R"( AS __vid,
+        )"
+	    << escaped_group_col << R"( AS __gid,
+        )"
+	    << escaped_date_col << R"( AS __did,
+        )"
+	    << escaped_value_col << R"( AS __vid,
         *
     FROM QUERY_TABLE()"
 	    << escaped_table << R"()
 ),
 frequency_parsed AS (
     SELECT
-        )" << frequency_str
-	    << R"( AS __int_step
+        )"
+	    << frequency_str << R"( AS __int_step
     FROM (SELECT 1) t
 ),
 series_ranges AS (
@@ -583,7 +585,8 @@ series_ranges AS (
 grid AS (
     SELECT
         sr.__gid,
-        UNNEST(GENERATE_SERIES(sr.__min, )" << target_date_sql << R"(, fp.__int_step)) AS __did
+        UNNEST(GENERATE_SERIES(sr.__min, )"
+	    << target_date_sql << R"(, fp.__int_step)) AS __did
     FROM series_ranges sr
     CROSS JOIN frequency_parsed fp
 ),
@@ -606,8 +609,8 @@ SELECT
     with_original_data.__vid AS )"
 	    << escaped_value_col << R"(
 FROM with_original_data
-ORDER BY )" << escaped_group_col
-	    << R"(, )" << escaped_date_col << R"()";
+ORDER BY )"
+	    << escaped_group_col << R"(, )" << escaped_date_col << R"()";
 
 	return ParseSubquery(sql.str(), context.GetParserOptions(),
 	                     "Failed to parse generated SQL for ts_fill_forward (INTEGER frequency)");
