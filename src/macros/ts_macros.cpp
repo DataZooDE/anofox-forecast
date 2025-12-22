@@ -438,15 +438,28 @@ SELECT
 FROM forecast_result
 )"},
 
-    // ts_forecast_by: Generate forecasts per group
+    // ts_forecast_by: Generate forecasts per group (long format - one row per forecast step)
     // Signature: ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, params)
     {"ts_forecast_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", "params", nullptr}, {{nullptr, nullptr}},
 R"(
+WITH forecast_data AS (
+    SELECT
+        group_col AS id,
+        ts_forecast(LIST(target_col ORDER BY date_col), horizon, method) AS fcst
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+)
 SELECT
-    group_col AS id,
-    ts_forecast(LIST(target_col ORDER BY date_col), horizon, method) AS forecast
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+    id,
+    UNNEST(generate_series(1, len((fcst).point))) AS forecast_step,
+    UNNEST((fcst).point) AS point_forecast,
+    UNNEST((fcst).lower) AS lower,
+    UNNEST((fcst).upper) AS upper,
+    (fcst).model AS model_name,
+    (fcst).aic AS aic,
+    (fcst).bic AS bic
+FROM forecast_data
+ORDER BY id, forecast_step
 )"},
 
     // anofox_fcst_ts_forecast: Alias for ts_forecast
@@ -467,15 +480,28 @@ SELECT
 FROM forecast_result
 )"},
 
-    // anofox_fcst_ts_forecast_by: Alias for ts_forecast_by
+    // anofox_fcst_ts_forecast_by: Alias for ts_forecast_by (long format)
     // Signature: anofox_fcst_ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, params)
     {"anofox_fcst_ts_forecast_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", "params", nullptr}, {{nullptr, nullptr}},
 R"(
+WITH forecast_data AS (
+    SELECT
+        group_col AS id,
+        ts_forecast(LIST(target_col ORDER BY date_col), horizon, method) AS fcst
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+)
 SELECT
-    group_col AS id,
-    ts_forecast(LIST(target_col ORDER BY date_col), horizon, method) AS forecast
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+    id,
+    UNNEST(generate_series(1, len((fcst).point))) AS forecast_step,
+    UNNEST((fcst).point) AS point_forecast,
+    UNNEST((fcst).lower) AS lower,
+    UNNEST((fcst).upper) AS upper,
+    (fcst).model AS model_name,
+    (fcst).aic AS aic,
+    (fcst).bic AS bic
+FROM forecast_data
+ORDER BY id, forecast_step
 )"},
 
     // anofox_fcst_ts_fill_forward_operator: Alias for ts_fill_forward_operator
