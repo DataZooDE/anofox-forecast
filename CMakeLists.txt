@@ -212,6 +212,9 @@ target_link_libraries(${LOADABLE_EXTENSION_NAME}
 if(WIN32)
     target_compile_definitions(${EXTENSION_NAME} PRIVATE _USE_MATH_DEFINES)
     target_compile_definitions(${LOADABLE_EXTENSION_NAME} PRIVATE _USE_MATH_DEFINES)
+    # iphlpapi is required for GetAdaptersInfo (used by posthog-telemetry for MAC address)
+    target_link_libraries(${EXTENSION_NAME} iphlpapi)
+    target_link_libraries(${LOADABLE_EXTENSION_NAME} iphlpapi)
 endif()
 
 # Link Eigen3 if available and add compile definition
