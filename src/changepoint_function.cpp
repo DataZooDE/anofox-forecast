@@ -4,6 +4,7 @@
 #include "duckdb/function/aggregate_function.hpp"
 #include "duckdb/parser/parsed_data/create_aggregate_function_info.hpp"
 #include "duckdb/main/extension_entries.hpp"
+#include "duckdb/planner/expression/bound_constant_expression.hpp"
 
 // anofox-time includes
 #include "anofox-time/changepoint/bocpd.hpp"
@@ -16,11 +17,35 @@ using namespace anofoxtime;
 // TS_DETECT_CHANGEPOINTS_AGG: Aggregate function returning changepoint data
 // ============================================================================
 
+// ============================================================================
+// Bind data: stores parameters parsed at bind time
+// ============================================================================
+
+struct TSDetectChangepointsBindData : public FunctionData {
+	double hazard_lambda = 250.0;
+	bool include_probabilities = false;
+
+	TSDetectChangepointsBindData(double hazard, bool include_probs)
+	    : hazard_lambda(hazard), include_probabilities(include_probs) {
+	}
+
+	unique_ptr<FunctionData> Copy() const override {
+		return make_uniq<TSDetectChangepointsBindData>(hazard_lambda, include_probabilities);
+	}
+
+	bool Equals(const FunctionData &other) const override {
+		auto &other_data = other.Cast<TSDetectChangepointsBindData>();
+		return hazard_lambda == other_data.hazard_lambda && include_probabilities == other_data.include_probabilities;
+	}
+};
+
+// ============================================================================
+// Aggregate state: stores time series data during aggregation
+// ============================================================================
+
 struct TSDetectChangepointsData {
 	std::vector<int64_t> timestamps;
 	std::vector<double> values;
-	double hazard_lambda = 250.0;
-	bool include_probabilities = false; // Default: don't compute probabilities (faster)
 	bool finalized = false;
 };
 
@@ -42,8 +67,6 @@ struct TSDetectChangepointsOperation {
 		target.data->timestamps.insert(target.data->timestamps.end(), source.data->timestamps.begin(),
 		                               source.data->timestamps.end());
 		target.data->values.insert(target.data->values.end(), source.data->values.begin(), source.data->values.end());
-		target.data->hazard_lambda = source.data->hazard_lambda;
-		target.data->include_probabilities = source.data->include_probabilities;
 	}
 
 	template <class STATE>
@@ -53,8 +76,10 @@ struct TSDetectChangepointsOperation {
 			return;
 		}
 
-		// Use include_probabilities flag from state data (set by Update function)
-		bool include_probs = state.data->include_probabilities;
+		// Get parameters from bind data (parsed at query bind time)
+		auto &bind_data = finalize_data.input.bind_data->Cast<TSDetectChangepointsBindData>();
+		bool include_probs = bind_data.include_probabilities;
+		double hazard_lambda = bind_data.hazard_lambda;
 
 		// Detect changepoints using BOCPD
 		std::vector<size_t> changepoint_indices;
@@ -62,7 +87,7 @@ struct TSDetectChangepointsOperation {
 
 		try {
 			auto detector = changepoint::BocpdDetector::builder()
-			                    .hazardLambda(state.data->hazard_lambda)
+			                    .hazardLambda(hazard_lambda)
 			                    .normalGammaPrior({0.0, 1.0, 1.0, 1.0})
 			                    .maxRunLength(1024)
 			                    .build();
@@ -120,12 +145,46 @@ struct TSDetectChangepointsOperation {
 	}
 };
 
-// Update function for aggregate
+// ============================================================================
+// Bind function: parse parameters at query bind time
+// ============================================================================
+
+static unique_ptr<FunctionData> TSDetectChangepointsBind(ClientContext &context, AggregateFunction &function,
+                                                         vector<unique_ptr<Expression>> &arguments) {
+	double hazard_lambda = 250.0;
+	bool include_probabilities = false;
+
+	// Parse optional params argument (index 2)
+	if (arguments.size() > 2 && arguments[2]->IsFoldable()) {
+		auto params_value = ExpressionExecutor::EvaluateScalar(context, *arguments[2]);
+
+		if (!params_value.IsNull() && params_value.type().id() == LogicalTypeId::STRUCT) {
+			auto &struct_children = StructValue::GetChildren(params_value);
+			for (size_t i = 0; i < struct_children.size(); i++) {
+				auto &key = StructType::GetChildName(params_value.type(), i);
+				auto &value = struct_children[i];
+
+				if (key == "hazard_lambda" && !value.IsNull()) {
+					hazard_lambda = value.GetValue<double>();
+				} else if (key == "include_probabilities" && !value.IsNull()) {
+					include_probabilities = value.GetValue<bool>();
+				}
+			}
+		}
+	}
+
+	return make_uniq<TSDetectChangepointsBindData>(hazard_lambda, include_probabilities);
+}
+
+// ============================================================================
+// Update function: accumulate time series data
+// ============================================================================
+
 static void TSDetectChangepointsUpdate(Vector inputs[], AggregateInputData &aggr_input_data, idx_t input_count,
                                        Vector &state_vector, idx_t count) {
 	auto &timestamp_vec = inputs[0];
 	auto &value_vec = inputs[1];
-	// inputs[2] is params (constant, handled once on first call)
+	// inputs[2] is params (parsed in bind function, available via bind_data in Finalize)
 
 	UnifiedVectorFormat timestamp_format, value_format;
 	timestamp_vec.ToUnifiedFormat(count, timestamp_format);
@@ -134,58 +193,10 @@ static void TSDetectChangepointsUpdate(Vector inputs[], AggregateInputData &aggr
 	// State vector is FLAT - use FlatVector::GetData
 	auto states = FlatVector::GetData<TSDetectChangepointsState *>(state_vector);
 
-	// Parse parameters from first row (they're constant across the aggregate)
-	if (input_count > 2 && count > 0 && states[0]->data && !states[0]->data->finalized) {
-		try {
-			auto &params_vec = inputs[2];
-			if (params_vec.GetType().id() == LogicalTypeId::MAP) {
-				UnifiedVectorFormat params_format;
-				params_vec.ToUnifiedFormat(count, params_format);
-
-				if (params_format.validity.RowIsValid(0)) {
-					auto params_data = UnifiedVectorFormat::GetData<string_t>(params_format);
-					auto params_idx = params_format.sel->get_index(0);
-
-					// Get the map value
-					auto params_value = params_vec.GetValue(params_idx);
-					if (!params_value.IsNull() && params_value.type().id() == LogicalTypeId::MAP) {
-						auto &struct_children = StructValue::GetChildren(params_value);
-						for (size_t i = 0; i < struct_children.size(); i++) {
-							auto &key = StructType::GetChildName(params_value.type(), i);
-							auto &value = struct_children[i];
-
-							if (key == "hazard_lambda" && !value.IsNull()) {
-								try {
-									states[0]->data->hazard_lambda = value.template GetValue<double>();
-								} catch (...) {
-									// Keep default on error
-								}
-							} else if (key == "include_probabilities" && !value.IsNull()) {
-								try {
-									states[0]->data->include_probabilities = value.template GetValue<bool>();
-								} catch (...) {
-									// Keep default on error
-								}
-							}
-						}
-					}
-				}
-			}
-		} catch (...) {
-			// If parameter parsing fails, just use defaults
-		}
-	}
-
 	for (idx_t i = 0; i < count; i++) {
 		auto &state = *states[i];
 		if (!state.data) {
 			continue;
-		}
-
-		// Copy parameters from first state to all others (for combine)
-		if (i > 0 && states[0]->data) {
-			state.data->hazard_lambda = states[0]->data->hazard_lambda;
-			state.data->include_probabilities = states[0]->data->include_probabilities;
 		}
 
 		auto timestamp_idx = timestamp_format.sel->get_index(i);
@@ -227,8 +238,8 @@ void RegisterChangepointFunction(ExtensionLoader &loader) {
 	    {LogicalType::TIMESTAMP, LogicalType::DOUBLE}, return_type, AggregateFunction::StateSize<STATE>,
 	    AggregateFunction::StateInitialize<STATE, OP, AggregateDestructorType::LEGACY>, TSDetectChangepointsUpdate,
 	    AggregateFunction::StateCombine<STATE, OP>, AggregateFunction::StateVoidFinalize<STATE, OP>,
-	    nullptr, // simple_update
-	    nullptr, // bind function
+	    nullptr,                  // simple_update
+	    TSDetectChangepointsBind, // bind function
 	    AggregateFunction::StateDestroy<STATE, OP>);
 	ts_detect_changepoints_agg_set.AddFunction(agg_2arg);
 
@@ -238,8 +249,8 @@ void RegisterChangepointFunction(ExtensionLoader &loader) {
 	                           AggregateFunction::StateInitialize<STATE, OP, AggregateDestructorType::LEGACY>,
 	                           TSDetectChangepointsUpdate, AggregateFunction::StateCombine<STATE, OP>,
 	                           AggregateFunction::StateVoidFinalize<STATE, OP>,
-	                           nullptr, // simple_update
-	                           nullptr, // bind function
+	                           nullptr,                  // simple_update
+	                           TSDetectChangepointsBind, // bind function
 	                           AggregateFunction::StateDestroy<STATE, OP>);
 	ts_detect_changepoints_agg_set.AddFunction(agg_3arg);
 

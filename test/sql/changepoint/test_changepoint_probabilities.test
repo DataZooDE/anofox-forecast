@@ -61,11 +61,10 @@ FROM anofox_fcst_ts_detect_changepoints('cp_test', ds, y, {'include_probabilitie
 ----
 true
 
-# Test 6: Verify probabilities exist but are currently 0.0 (parameter parsing TODO)
-# NOTE: The include_probabilities parameter is not currently being parsed correctly
-# through the table function macro. This needs further investigation.
+# Test 6: When include_probabilities=true, probabilities should be non-zero
+# (BOCPD algorithm produces changepoint probabilities > 0)
 query I
-SELECT MAX(changepoint_probability) >= 0.0
+SELECT MAX(changepoint_probability) > 0.0
 FROM anofox_fcst_ts_detect_changepoints('cp_test', ds, y, {'include_probabilities': true});
 ----
 true
@@ -133,10 +132,17 @@ true
 
 # Test 13: Multi-series without include_probabilities has all probabilities as 0.0
 query I
-SELECT 
-    MIN(changepoint_probability) = 0.0 AND 
+SELECT
+    MIN(changepoint_probability) = 0.0 AND
     MAX(changepoint_probability) = 0.0
 FROM anofox_fcst_ts_detect_changepoints_by('multi_test', id, ds, y, MAP{});
+----
+true
+
+# Test 14: Multi-series with include_probabilities=true should have non-zero probabilities
+query I
+SELECT MAX(changepoint_probability) > 0.0
+FROM anofox_fcst_ts_detect_changepoints_by('multi_test', id, ds, y, {'include_probabilities': true});
 ----
 true
 
