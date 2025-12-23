@@ -80,9 +80,8 @@ unique_ptr<FunctionData> TSForecastByTestOperatorBind(ClientContext &context, Ta
                                                       vector<LogicalType> &return_types, vector<string> &names) {
 	// Expected arguments: TABLE, group_col, date_col, target_col, method, horizon, params
 	if (input.inputs.size() < 7) {
-		throw InvalidInputException(
-		    "anofox_fcst_ts_forecast_by_test_operator requires 7 arguments: table, group_col, "
-		    "date_col, target_col, method, horizon, params");
+		throw InvalidInputException("anofox_fcst_ts_forecast_by_test_operator requires 7 arguments: table, group_col, "
+		                            "date_col, target_col, method, horizon, params");
 	}
 
 	if (input.input_table_types.empty() || input.input_table_names.empty()) {
@@ -196,20 +195,19 @@ unique_ptr<FunctionData> TSForecastByTestOperatorBind(ClientContext &context, Ta
 	return std::move(bind_data);
 }
 
-unique_ptr<GlobalTableFunctionState> TSForecastByTestInitGlobal(ClientContext &context,
-                                                                 TableFunctionInitInput &input) {
+unique_ptr<GlobalTableFunctionState> TSForecastByTestInitGlobal(ClientContext &context, TableFunctionInitInput &input) {
 	auto global_state = make_uniq<TSForecastByTestGlobalState>();
 	global_state->bind_data = &input.bind_data->Cast<TSForecastByTestBindData>();
 	return std::move(global_state);
 }
 
 unique_ptr<LocalTableFunctionState> TSForecastByTestInitLocal(ExecutionContext &context, TableFunctionInitInput &input,
-                                                               GlobalTableFunctionState *global_state) {
+                                                              GlobalTableFunctionState *global_state) {
 	return make_uniq<TSForecastByTestLocalState>();
 }
 
 OperatorResultType TSForecastByTestOperatorInOut(ExecutionContext &context, TableFunctionInput &data_p,
-                                                  DataChunk &input, DataChunk &output) {
+                                                 DataChunk &input, DataChunk &output) {
 	auto &bind_data = data_p.bind_data->Cast<TSForecastByTestBindData>();
 	auto &lstate = data_p.local_state->Cast<TSForecastByTestLocalState>();
 
@@ -248,7 +246,7 @@ OperatorResultType TSForecastByTestOperatorInOut(ExecutionContext &context, Tabl
 }
 
 OperatorFinalizeResultType TSForecastByTestOperatorFinal(ExecutionContext &context, TableFunctionInput &data_p,
-                                                          DataChunk &output) {
+                                                         DataChunk &output) {
 	auto &bind_data = data_p.bind_data->Cast<TSForecastByTestBindData>();
 	auto &lstate = data_p.local_state->Cast<TSForecastByTestLocalState>();
 
@@ -287,9 +285,9 @@ OperatorFinalizeResultType TSForecastByTestOperatorFinal(ExecutionContext &conte
 			          [](const ForecastDataPoint &a, const ForecastDataPoint &b) { return a.timestamp < b.timestamp; });
 
 			// Remove duplicate timestamps (keep last)
-			auto last =
-			    std::unique(group.points.begin(), group.points.end(),
-			                [](const ForecastDataPoint &a, const ForecastDataPoint &b) { return a.timestamp == b.timestamp; });
+			auto last = std::unique(
+			    group.points.begin(), group.points.end(),
+			    [](const ForecastDataPoint &a, const ForecastDataPoint &b) { return a.timestamp == b.timestamp; });
 			group.points.erase(last, group.points.end());
 
 			// Convert to TimeSeries
@@ -315,8 +313,8 @@ OperatorFinalizeResultType TSForecastByTestOperatorFinal(ExecutionContext &conte
 				AnofoxTimeWrapper::FitModel(model_ptr.get(), *ts_ptr);
 
 				// Predict with confidence
-				auto forecast_ptr =
-				    AnofoxTimeWrapper::PredictWithConfidence(model_ptr.get(), bind_data.horizon, bind_data.confidence_level);
+				auto forecast_ptr = AnofoxTimeWrapper::PredictWithConfidence(model_ptr.get(), bind_data.horizon,
+				                                                             bind_data.confidence_level);
 
 				auto &primary_forecast = AnofoxTimeWrapper::GetPrimaryForecast(*forecast_ptr);
 				bool has_intervals =
@@ -328,7 +326,8 @@ OperatorFinalizeResultType TSForecastByTestOperatorFinal(ExecutionContext &conte
 
 				if (timestamps.size() >= 2) {
 					auto total_time =
-					    std::chrono::duration_cast<std::chrono::microseconds>(timestamps.back() - timestamps.front()).count();
+					    std::chrono::duration_cast<std::chrono::microseconds>(timestamps.back() - timestamps.front())
+					        .count();
 					interval_micros = total_time / (static_cast<int64_t>(timestamps.size()) - 1);
 				}
 				last_timestamp_micros =
@@ -364,7 +363,8 @@ OperatorFinalizeResultType TSForecastByTestOperatorFinal(ExecutionContext &conte
 						int32_t days = static_cast<int32_t>(forecast_ts_micros / (24LL * 60LL * 60LL * 1000000LL));
 						lstate.current_forecast.forecast_timestamps.push_back(Value::DATE(date_t(days)));
 					} else if (bind_data.date_col_type.id() == LogicalTypeId::TIMESTAMP) {
-						lstate.current_forecast.forecast_timestamps.push_back(Value::TIMESTAMP(timestamp_t(forecast_ts_micros)));
+						lstate.current_forecast.forecast_timestamps.push_back(
+						    Value::TIMESTAMP(timestamp_t(forecast_ts_micros)));
 					} else {
 						// INTEGER/BIGINT - convert back to day index
 						int64_t day_index = forecast_ts_micros / (24LL * 60LL * 60LL * 1000000LL);
@@ -386,19 +386,23 @@ OperatorFinalizeResultType TSForecastByTestOperatorFinal(ExecutionContext &conte
 			output.SetValue(col_idx++, out_count, group.group_value);
 
 			// forecast_step
-			output.SetValue(col_idx++, out_count, Value::INTEGER(lstate.current_forecast.forecast_steps[lstate.current_row_idx]));
+			output.SetValue(col_idx++, out_count,
+			                Value::INTEGER(lstate.current_forecast.forecast_steps[lstate.current_row_idx]));
 
 			// date
 			output.SetValue(col_idx++, out_count, lstate.current_forecast.forecast_timestamps[lstate.current_row_idx]);
 
 			// point_forecast
-			output.SetValue(col_idx++, out_count, Value::DOUBLE(lstate.current_forecast.point_forecasts[lstate.current_row_idx]));
+			output.SetValue(col_idx++, out_count,
+			                Value::DOUBLE(lstate.current_forecast.point_forecasts[lstate.current_row_idx]));
 
 			// lower bound
-			output.SetValue(col_idx++, out_count, Value::DOUBLE(lstate.current_forecast.lower_bounds[lstate.current_row_idx]));
+			output.SetValue(col_idx++, out_count,
+			                Value::DOUBLE(lstate.current_forecast.lower_bounds[lstate.current_row_idx]));
 
 			// upper bound
-			output.SetValue(col_idx++, out_count, Value::DOUBLE(lstate.current_forecast.upper_bounds[lstate.current_row_idx]));
+			output.SetValue(col_idx++, out_count,
+			                Value::DOUBLE(lstate.current_forecast.upper_bounds[lstate.current_row_idx]));
 
 			// model_name
 			output.SetValue(col_idx++, out_count, Value(lstate.current_forecast.model_name));
@@ -500,11 +504,11 @@ unique_ptr<TableRef> TSForecastByTestBindReplace(ClientContext &context, TableFu
 
 void RegisterTSForecastByTestFunction(ExtensionLoader &loader) {
 	// 1. Register internal operator (takes TABLE input)
-	TableFunction operator_func(
-	    "anofox_fcst_ts_forecast_by_test_operator",
-	    {LogicalType::TABLE, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR,
-	     LogicalType::INTEGER, LogicalType::ANY},
-	    nullptr, TSForecastByTestOperatorBind, TSForecastByTestInitGlobal, TSForecastByTestInitLocal);
+	TableFunction operator_func("anofox_fcst_ts_forecast_by_test_operator",
+	                            {LogicalType::TABLE, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR,
+	                             LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::ANY},
+	                            nullptr, TSForecastByTestOperatorBind, TSForecastByTestInitGlobal,
+	                            TSForecastByTestInitLocal);
 	operator_func.in_out_function = TSForecastByTestOperatorInOut;
 	operator_func.in_out_function_final = TSForecastByTestOperatorFinal;
 	operator_func.cardinality = TSForecastByTestCardinality;

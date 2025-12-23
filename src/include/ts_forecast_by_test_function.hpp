@@ -100,17 +100,16 @@ std::chrono::system_clock::time_point ConvertToTimePoint(const Value &date_value
 unique_ptr<FunctionData> TSForecastByTestOperatorBind(ClientContext &context, TableFunctionBindInput &input,
                                                       vector<LogicalType> &return_types, vector<string> &names);
 
-unique_ptr<GlobalTableFunctionState> TSForecastByTestInitGlobal(ClientContext &context,
-                                                                 TableFunctionInitInput &input);
+unique_ptr<GlobalTableFunctionState> TSForecastByTestInitGlobal(ClientContext &context, TableFunctionInitInput &input);
 
 unique_ptr<LocalTableFunctionState> TSForecastByTestInitLocal(ExecutionContext &context, TableFunctionInitInput &input,
-                                                               GlobalTableFunctionState *global_state);
+                                                              GlobalTableFunctionState *global_state);
 
 OperatorResultType TSForecastByTestOperatorInOut(ExecutionContext &context, TableFunctionInput &data_p,
-                                                  DataChunk &input, DataChunk &output);
+                                                 DataChunk &input, DataChunk &output);
 
 OperatorFinalizeResultType TSForecastByTestOperatorFinal(ExecutionContext &context, TableFunctionInput &data_p,
-                                                          DataChunk &output);
+                                                         DataChunk &output);
 
 unique_ptr<NodeStatistics> TSForecastByTestCardinality(ClientContext &context, const FunctionData *bind_data);
 
