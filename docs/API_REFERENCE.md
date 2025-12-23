@@ -1051,6 +1051,10 @@ anofox_fcst_ts_mstl_decomposition(
 - `value_col`: Value column name as string literal or column reference
 - `params`: Configuration MAP with the following keys:
   - `seasonal_periods` (INTEGER[], required): Array of seasonal periods to decompose (e.g., `[7, 30]` for weekly and monthly patterns)
+  - `insufficient_data` (VARCHAR, optional): Controls behavior when a series has insufficient data for MSTL decomposition. Default: `'trend'`
+    - `'fail'`: Throw an error (original behavior)
+    - `'trend'`: Apply trend-only decomposition using moving average; seasonal columns filled with NULL, residual = value - trend
+    - `'none'`: No decomposition; all decomposition columns (trend, seasonal_*, residual) filled with NULL
 
 **Minimum Series Length:**
 - Each series must have at least `2 × min(seasonal_periods)` observations

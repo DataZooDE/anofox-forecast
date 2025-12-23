@@ -103,6 +103,172 @@ SELECT COUNT(*) FROM result_mstl_alias;
 ----
 101
 
+#############################################
+# INSUFFICIENT DATA HANDLING TESTS
+#############################################
+
+# Create a series with insufficient data for period=7 (needs at least 14 points, we have 5)
+statement ok
+CREATE TABLE test_insufficient AS
+SELECT
+    ('2024-01-01'::DATE + INTERVAL (i) DAY) AS date_col,
+    'short_series' AS group_col,
+    100.0 + i AS value_col
+FROM generate_series(0, 4) t(i);
+
+# Test 5: insufficient_data = 'fail' - should throw error
+statement error
+SELECT * FROM ts_mstl_decomposition(
+    table_name='test_insufficient',
+    group_col='group_col',
+    date_col='date_col',
+    value_col='value_col',
+    params={'seasonal_periods': [7], 'insufficient_data': 'fail'}
+);
+----
+MSTL decomposition failed for group
+
+# Test 6: insufficient_data = 'trend' (default) - trend populated, seasonal=NULL, residual=value-trend
+statement ok
+CREATE TABLE result_insufficient_trend AS
+SELECT * FROM ts_mstl_decomposition(
+    table_name='test_insufficient',
+    group_col='group_col',
+    date_col='date_col',
+    value_col='value_col',
+    params={'seasonal_periods': [7], 'insufficient_data': 'trend'}
+);
+
+# Verify trend is NOT NULL
+query I
+SELECT COUNT(*) FROM result_insufficient_trend WHERE trend IS NOT NULL;
+----
+5
+
+# Verify seasonal_7 IS NULL
+query I
+SELECT COUNT(*) FROM result_insufficient_trend WHERE seasonal_7 IS NULL;
+----
+5
+
+# Verify residual is NOT NULL (residual = value - trend)
+query I
+SELECT COUNT(*) FROM result_insufficient_trend WHERE residual IS NOT NULL;
+----
+5
+
+# Verify additivity with NULL seasonality: value_col = trend + residual (since seasonal is NULL)
+query I
+SELECT AVG(ABS(value_col - (trend + residual))) < 0.001 FROM result_insufficient_trend;
+----
+true
+
+# Test 7: insufficient_data = 'none' - all decomposition columns = NULL
+statement ok
+CREATE TABLE result_insufficient_none AS
+SELECT * FROM ts_mstl_decomposition(
+    table_name='test_insufficient',
+    group_col='group_col',
+    date_col='date_col',
+    value_col='value_col',
+    params={'seasonal_periods': [7], 'insufficient_data': 'none'}
+);
+
+# Verify all decomposition columns are NULL
+query I
+SELECT COUNT(*) FROM result_insufficient_none WHERE trend IS NULL AND seasonal_7 IS NULL AND residual IS NULL;
+----
+5
+
+# Test 8: Default behavior (no insufficient_data specified) - should default to 'trend'
+statement ok
+CREATE TABLE result_insufficient_default AS
+SELECT * FROM ts_mstl_decomposition(
+    table_name='test_insufficient',
+    group_col='group_col',
+    date_col='date_col',
+    value_col='value_col',
+    params={'seasonal_periods': [7]}
+);
+
+# Verify default behavior matches 'trend' mode
+query I
+SELECT COUNT(*) FROM result_insufficient_default WHERE trend IS NOT NULL AND seasonal_7 IS NULL;
+----
+5
+
+# Test 9: Mixed series - some sufficient, some insufficient
+statement ok
+CREATE TABLE test_mixed AS
+SELECT * FROM (
+    -- Short series (insufficient data)
+    SELECT
+        ('2024-01-01'::DATE + INTERVAL (i) DAY) AS date_col,
+        'short' AS group_col,
+        100.0 + i AS value_col
+    FROM generate_series(0, 4) t(i)
+    UNION ALL
+    -- Long series (sufficient data)
+    SELECT
+        ('2024-01-01'::DATE + INTERVAL (i) DAY) AS date_col,
+        'long' AS group_col,
+        100.0 + i + sin(i * 2 * 3.14159 / 7.0) * 10 AS value_col
+    FROM generate_series(0, 100) t(i)
+);
+
+statement ok
+CREATE TABLE result_mixed AS
+SELECT * FROM ts_mstl_decomposition(
+    table_name='test_mixed',
+    group_col='group_col',
+    date_col='date_col',
+    value_col='value_col',
+    params={'seasonal_periods': [7], 'insufficient_data': 'trend'}
+);
+
+# Short series should have NULL seasonal
+query I
+SELECT COUNT(*) FROM result_mixed WHERE group_col = 'short' AND seasonal_7 IS NULL;
+----
+5
+
+# Long series should have non-NULL seasonal
+query I
+SELECT COUNT(*) FROM result_mixed WHERE group_col = 'long' AND seasonal_7 IS NOT NULL;
+----
+101
+
+# Test 10: Invalid insufficient_data mode
+statement error
+SELECT * FROM ts_mstl_decomposition(
+    table_name='test_insufficient',
+    group_col='group_col',
+    date_col='date_col',
+    value_col='value_col',
+    params={'seasonal_periods': [7], 'insufficient_data': 'invalid_mode'}
+);
+----
+Invalid insufficient_data mode
+
+# Cleanup insufficient data tests
+statement ok
+DROP TABLE IF EXISTS test_insufficient;
+
+statement ok
+DROP TABLE IF EXISTS result_insufficient_trend;
+
+statement ok
+DROP TABLE IF EXISTS result_insufficient_none;
+
+statement ok
+DROP TABLE IF EXISTS result_insufficient_default;
+
+statement ok
+DROP TABLE IF EXISTS test_mixed;
+
+statement ok
+DROP TABLE IF EXISTS result_mixed;
+
 # Cleanup
 statement ok
 DROP TABLE IF EXISTS test_mstl_basic;

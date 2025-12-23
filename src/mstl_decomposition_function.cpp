@@ -51,11 +51,72 @@ struct DataPoint {
 
 } // namespace mstl_internal
 
+// Enum for insufficient_data parameter handling
+enum class InsufficientDataMode {
+	FAIL,  // Throw error (original behavior)
+	TREND, // Compute trend only, seasonal=NULL, residual=value-trend
+	NONE   // All decomposition columns = NULL
+};
+
+// Parse insufficient_data mode string to enum
+InsufficientDataMode ParseInsufficientDataMode(const std::string &mode_str) {
+	if (mode_str == "fail") {
+		return InsufficientDataMode::FAIL;
+	} else if (mode_str == "trend") {
+		return InsufficientDataMode::TREND;
+	} else if (mode_str == "none") {
+		return InsufficientDataMode::NONE;
+	}
+	throw InvalidInputException("Invalid insufficient_data mode: '" + mode_str +
+	                            "'. Valid values are: 'fail', 'trend', 'none'");
+}
+
+// Simple moving average for trend-only decomposition (used when insufficient data)
+std::vector<double> ComputeTrendOnly(const std::vector<double> &values, const std::vector<int32_t> &periods) {
+	size_t n = values.size();
+	if (n == 0) {
+		return {};
+	}
+
+	std::vector<double> trend(n);
+
+	// Use largest period * 2 as window, but ensure it's odd and <= n
+	int32_t max_period = *std::max_element(periods.begin(), periods.end());
+	size_t window = std::min(static_cast<size_t>(max_period * 2), n);
+	if (window % 2 == 0 && window > 0) {
+		window--;
+	}
+	if (window < 3) {
+		window = 3;
+	}
+	if (window > n) {
+		window = (n % 2 == 0) ? n - 1 : n;
+	}
+	if (window < 1) {
+		window = 1;
+	}
+
+	size_t half = window / 2;
+	for (size_t i = 0; i < n; ++i) {
+		size_t start = (i > half) ? i - half : 0;
+		size_t end = std::min(n - 1, i + half);
+		double sum = 0.0;
+		size_t count = 0;
+		for (size_t j = start; j <= end; ++j) {
+			sum += values[j];
+			++count;
+		}
+		trend[i] = (count > 0) ? sum / static_cast<double>(count) : values[i];
+	}
+	return trend;
+}
+
 struct TSMstlDecompositionBindData : public TableFunctionData {
 	std::string group_col;
 	std::string date_col;
 	std::string value_col;
 	std::vector<int32_t> seasonal_periods;
+	std::string insufficient_data_mode = "trend"; // 'fail', 'trend', 'none'
 
 	idx_t group_col_idx = DConstants::INVALID_INDEX;
 	idx_t date_col_idx = DConstants::INVALID_INDEX;
@@ -68,6 +129,12 @@ struct TSMstlDecompositionBindData : public TableFunctionData {
 
 struct TSMstlDecompositionGlobalState : public GlobalTableFunctionState {
 	const TSMstlDecompositionBindData *bind_data = nullptr;
+
+	// Override MaxThreads to return 1 to avoid BatchedDataCollection merge errors
+	// See: https://github.com/duckdb/duckdb/issues/19939
+	idx_t MaxThreads() const override {
+		return 1;
+	}
 };
 
 struct GroupData {
@@ -149,6 +216,50 @@ std::vector<int32_t> TSMstlExtractPeriods(const Value &params_val) {
 	return seasonal_periods;
 }
 
+// Extract insufficient_data mode from params value (default: "trend")
+std::string TSMstlExtractInsufficientDataMode(const Value &params_val) {
+	std::string mode = "trend"; // default
+
+	if (params_val.IsNull()) {
+		return mode;
+	}
+
+	// Handle MAP
+	if (params_val.type().id() == LogicalTypeId::MAP) {
+		const auto &entries = ListValue::GetChildren(params_val);
+		for (const auto &entry : entries) {
+			auto &entry_children = StructValue::GetChildren(entry);
+			if (entry_children.size() == 2) {
+				string key = entry_children[0].ToString();
+				if (key == "insufficient_data") {
+					mode = entry_children[1].ToString();
+					break;
+				}
+			}
+		}
+	}
+	// Handle STRUCT
+	else if (params_val.type().id() == LogicalTypeId::STRUCT) {
+		auto &child_types = StructType::GetChildTypes(params_val.type());
+		auto &children = StructValue::GetChildren(params_val);
+
+		for (size_t i = 0; i < child_types.size(); i++) {
+			if (child_types[i].first == "insufficient_data") {
+				mode = children[i].ToString();
+				break;
+			}
+		}
+	}
+
+	// Validate the mode value
+	if (mode != "fail" && mode != "trend" && mode != "none") {
+		throw InvalidInputException("Invalid insufficient_data mode: '" + mode +
+		                            "'. Valid values are: 'fail', 'trend', 'none'");
+	}
+
+	return mode;
+}
+
 unique_ptr<FunctionData> TSMstlDecompositionBind(ClientContext &context, TableFunctionBindInput &input,
                                                  vector<LogicalType> &return_types, vector<string> &names) {
 	if (input.inputs.size() < 5) {
@@ -174,6 +285,9 @@ unique_ptr<FunctionData> TSMstlDecompositionBind(ClientContext &context, TableFu
 	if (seasonal_periods.empty()) {
 		throw InvalidInputException("seasonal_periods cannot be empty");
 	}
+
+	// Extract insufficient_data mode (default: "trend")
+	std::string insufficient_data_mode = TSMstlExtractInsufficientDataMode(params_val);
 
 	// Find column indices
 	idx_t group_col_idx = DConstants::INVALID_INDEX;
@@ -201,6 +315,7 @@ unique_ptr<FunctionData> TSMstlDecompositionBind(ClientContext &context, TableFu
 	bind_data->date_col = date_col;
 	bind_data->value_col = value_col;
 	bind_data->seasonal_periods = seasonal_periods;
+	bind_data->insufficient_data_mode = insufficient_data_mode;
 	bind_data->group_col_idx = group_col_idx;
 	bind_data->date_col_idx = date_col_idx;
 	bind_data->value_col_idx = value_col_idx;
@@ -361,7 +476,27 @@ OperatorFinalizeResultType TSMstlDecompositionOperatorFinal(ExecutionContext &co
 				lstate.current_processed.residual = comps.remainder;
 
 			} catch (const std::exception &e) {
-				throw InvalidInputException("MSTL decomposition failed for group " + group_key + ": " + e.what());
+				// Handle insufficient data based on mode
+				InsufficientDataMode mode = ParseInsufficientDataMode(bind_data.insufficient_data_mode);
+
+				if (mode == InsufficientDataMode::FAIL) {
+					throw InvalidInputException("MSTL decomposition failed for group " + group_key + ": " + e.what());
+				} else if (mode == InsufficientDataMode::TREND) {
+					// Compute trend-only, seasonal columns = NULL, residual = value - trend
+					lstate.current_processed.trend = ComputeTrendOnly(values, bind_data.seasonal_periods);
+					// Empty vectors for seasonal components -> will output NULL
+					lstate.current_processed.seasonal.assign(bind_data.seasonal_periods.size(), std::vector<double>());
+					// Calculate residual as value - trend (so decomposition is still additive)
+					lstate.current_processed.residual.resize(values.size());
+					for (size_t i = 0; i < values.size(); ++i) {
+						lstate.current_processed.residual[i] = values[i] - lstate.current_processed.trend[i];
+					}
+				} else { // NONE
+					// All decomposition columns = NULL (empty vectors)
+					lstate.current_processed.trend.clear();
+					lstate.current_processed.seasonal.assign(bind_data.seasonal_periods.size(), std::vector<double>());
+					lstate.current_processed.residual.clear();
+				}
 			}
 		}
 
@@ -386,19 +521,31 @@ OperatorFinalizeResultType TSMstlDecompositionOperatorFinal(ExecutionContext &co
 			}
 
 			// 2. MSTL components
-			// trend
-			output.SetValue(col_idx++, out_count,
-			                Value::DOUBLE(lstate.current_processed.trend[lstate.current_row_idx]));
-
-			// seasonal components
-			for (size_t s = 0; s < bind_data.seasonal_periods.size(); s++) {
+			// trend (NULL if empty vector - 'none' mode)
+			if (lstate.current_processed.trend.empty()) {
+				output.SetValue(col_idx++, out_count, Value());
+			} else {
 				output.SetValue(col_idx++, out_count,
-				                Value::DOUBLE(lstate.current_processed.seasonal[s][lstate.current_row_idx]));
+				                Value::DOUBLE(lstate.current_processed.trend[lstate.current_row_idx]));
 			}
 
-			// residual
-			output.SetValue(col_idx++, out_count,
-			                Value::DOUBLE(lstate.current_processed.residual[lstate.current_row_idx]));
+			// seasonal components (NULL if empty vector - 'trend' or 'none' mode)
+			for (size_t s = 0; s < bind_data.seasonal_periods.size(); s++) {
+				if (lstate.current_processed.seasonal[s].empty()) {
+					output.SetValue(col_idx++, out_count, Value());
+				} else {
+					output.SetValue(col_idx++, out_count,
+					                Value::DOUBLE(lstate.current_processed.seasonal[s][lstate.current_row_idx]));
+				}
+			}
+
+			// residual (NULL if empty vector - 'none' mode)
+			if (lstate.current_processed.residual.empty()) {
+				output.SetValue(col_idx++, out_count, Value());
+			} else {
+				output.SetValue(col_idx++, out_count,
+				                Value::DOUBLE(lstate.current_processed.residual[lstate.current_row_idx]));
+			}
 
 			lstate.current_row_idx++;
 			out_count++;
