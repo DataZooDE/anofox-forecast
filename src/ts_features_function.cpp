@@ -13,6 +13,7 @@
 #include "duckdb/common/types/string_type.hpp"
 #include "duckdb/common/types/value.hpp"
 #include "duckdb/common/string_util.hpp"
+#include "duckdb/common/printer.hpp"
 #include "duckdb/common/constants.hpp"
 #include "duckdb/common/file_system.hpp"
 #include "duckdb/common/serializer/buffered_file_reader.hpp"
@@ -1033,7 +1034,9 @@ static void ApplyOverrides(FeatureConfig &config, const FeatureParamOverrides &o
 	}
 	for (const auto &entry : overrides) {
 		if (!matched.count(entry.first)) {
-			throw InvalidInputException("feature_params references unknown or filtered feature '%s'", entry.first);
+			Printer::PrintF(OutputStream::STREAM_STDERR,
+			                "Warning: ts_features feature_params references unknown or filtered feature '%s' - ignored\n",
+			                entry.first.c_str());
 		}
 	}
 }

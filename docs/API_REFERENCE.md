@@ -1293,12 +1293,12 @@ anofox_fcst_ts_features(
 
 **Example:**
 ```sql
-SELECT 
+SELECT
     product_id,
     anofox_fcst_ts_features(
         date,
         sales,
-        ['mean', 'variance', 'autocorrelation__lag_1'],
+        ['mean', 'variance', 'ratio_beyond_r_sigma'],
         [{'feature': 'ratio_beyond_r_sigma', 'params': {'r': 1.0}}]
     ) AS feats
 FROM sales
