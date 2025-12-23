@@ -1,6 +1,6 @@
 # name: test/sql/telemetry.test
 # description: Test telemetry configuration options
-# group: [anofox_forecast]
+# group: [sql]
 
 require anofox_forecast
 
