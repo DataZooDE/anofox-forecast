@@ -1034,9 +1034,10 @@ static void ApplyOverrides(FeatureConfig &config, const FeatureParamOverrides &o
 	}
 	for (const auto &entry : overrides) {
 		if (!matched.count(entry.first)) {
-			Printer::PrintF(OutputStream::STREAM_STDERR,
-			                "Warning: ts_features feature_params references unknown or filtered feature '%s' - ignored\n",
-			                entry.first.c_str());
+			Printer::PrintF(
+			    OutputStream::STREAM_STDERR,
+			    "Warning: ts_features feature_params references unknown or filtered feature '%s' - ignored\n",
+			    entry.first.c_str());
 		}
 	}
 }
