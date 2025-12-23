@@ -19,13 +19,46 @@
 #include "data_prep_macros.hpp"
 #include "mstl_decomposition_function.hpp"
 #include "ts_features_function.hpp"
+#include "include/ts_forecast_by_test_function.hpp"
 #include "duckdb/catalog/default/default_functions.hpp"
 #include "duckdb/catalog/default/default_table_functions.hpp"
-
-// OpenSSL linked through vcpkg
-// #include <openssl/opensslv.h>  // Not currently used
+#include "telemetry.hpp"
 
 namespace duckdb {
+
+namespace {
+
+void OnTelemetryEnabled(ClientContext &context, SetScope scope, Value &parameter) {
+	if (parameter.IsNull()) {
+		throw InvalidInputException("anofox_telemetry_enabled cannot be NULL");
+	}
+	auto &telemetry = PostHogTelemetry::Instance();
+	telemetry.SetEnabled(BooleanValue::Get(parameter));
+}
+
+void OnTelemetryKey(ClientContext &context, SetScope scope, Value &parameter) {
+	if (parameter.IsNull()) {
+		throw InvalidInputException("anofox_telemetry_key cannot be NULL");
+	}
+	auto &telemetry = PostHogTelemetry::Instance();
+	telemetry.SetAPIKey(StringValue::Get(parameter));
+}
+
+} // anonymous namespace
+
+static void RegisterTelemetryOptions(ExtensionLoader &loader) {
+	auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());
+
+	config.AddExtensionOption("anofox_telemetry_enabled",
+	                          "Enable or disable anonymous usage telemetry",
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(true), OnTelemetryEnabled);
+
+	config.AddExtensionOption("anofox_telemetry_key",
+	                          "PostHog API key for telemetry",
+	                          LogicalType::VARCHAR,
+	                          Value("phc_t3wwRLtpyEmLHYaZCSszG0MqVr74J6wnCrj9D41zk2t"),
+	                          OnTelemetryKey);
+}
 
 static void RegisterTableFunctionIgnore(ExtensionLoader &loader, TableFunction function) {
 	TableFunctionSet set(function.name);
@@ -188,7 +221,21 @@ static const DefaultTableMacro forecast_table_macros[] = {
     {nullptr, nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}};
 
 static void LoadInternal(ExtensionLoader &loader) {
-	// std::cerr << "[DEBUG] Loading anofox_forecast extension..." << std::endl;
+	// Register telemetry options FIRST (allows users to disable via SQL settings)
+	// Note: Environment variable DATAZOO_DISABLE_TELEMETRY is always checked by posthog-telemetry
+	RegisterTelemetryOptions(loader);
+
+	// Initialize and capture extension load event
+	auto &telemetry = PostHogTelemetry::Instance();
+	telemetry.SetAPIKey("phc_t3wwRLtpyEmLHYaZCSszG0MqVr74J6wnCrj9D41zk2t");
+
+	std::string version;
+#ifdef EXT_VERSION_ANOFOX_FORECAST
+	version = EXT_VERSION_ANOFOX_FORECAST;
+#else
+	version = "1.0.0";
+#endif
+	telemetry.CaptureExtensionLoad("anofox_forecast", version);
 
 	// Register the FORECAST table function (legacy, for compatibility)
 	auto forecast_function = CreateForecastTableFunction();
@@ -263,6 +310,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// Register MSTL decomposition
 	RegisterMstlDecompositionFunctions(loader);
+
+	// Register TS_FORECAST_BY_TEST (table-in-out variant for performance testing)
+	RegisterTSForecastByTestFunction(loader);
 
 	// std::cerr << "[DEBUG] All functions registered successfully" << std::endl;
 }
