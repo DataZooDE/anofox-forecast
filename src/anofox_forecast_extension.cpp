@@ -49,15 +49,11 @@ void OnTelemetryKey(ClientContext &context, SetScope scope, Value &parameter) {
 static void RegisterTelemetryOptions(ExtensionLoader &loader) {
 	auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());
 
-	config.AddExtensionOption("anofox_telemetry_enabled",
-	                          "Enable or disable anonymous usage telemetry",
+	config.AddExtensionOption("anofox_telemetry_enabled", "Enable or disable anonymous usage telemetry",
 	                          LogicalType::BOOLEAN, Value::BOOLEAN(true), OnTelemetryEnabled);
 
-	config.AddExtensionOption("anofox_telemetry_key",
-	                          "PostHog API key for telemetry",
-	                          LogicalType::VARCHAR,
-	                          Value("phc_t3wwRLtpyEmLHYaZCSszG0MqVr74J6wnCrj9D41zk2t"),
-	                          OnTelemetryKey);
+	config.AddExtensionOption("anofox_telemetry_key", "PostHog API key for telemetry", LogicalType::VARCHAR,
+	                          Value("phc_t3wwRLtpyEmLHYaZCSszG0MqVr74J6wnCrj9D41zk2t"), OnTelemetryKey);
 }
 
 static void RegisterTableFunctionIgnore(ExtensionLoader &loader, TableFunction function) {
