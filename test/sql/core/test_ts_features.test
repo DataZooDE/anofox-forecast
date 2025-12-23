@@ -120,8 +120,8 @@ FROM ts_feature_data;
 ----
 Invalid Input Error: ts_features feature 'length' specified more than once
 
-# Invalid overrides reference rejected features
-statement error
+# Unused overrides emit warning and continue (feature_params for non-selected features)
+statement ok
 SELECT anofox_fcst_ts_features(
     ts,
     val,
@@ -129,8 +129,6 @@ SELECT anofox_fcst_ts_features(
     [{'feature': 'not_a_feature', 'params': {'dummy': 1}}]
 )
 FROM ts_feature_data;
-----
-Invalid Input Error: feature_params references unknown or filtered feature 'not_a_feature'
 
 # Listing helper exposes available feature columns
 query I
