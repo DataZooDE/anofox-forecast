@@ -1,0 +1,23 @@
+# name: test/sql/telemetry.test
+# description: Test telemetry configuration options
+# group: [sql]
+
+require anofox_forecast
+
+statement ok
+LOAD anofox_forecast
+
+# Test that telemetry options exist and can be set
+statement ok
+SET anofox_telemetry_enabled = false
+
+statement ok
+SET anofox_telemetry_enabled = true
+
+# Test that telemetry key can be updated
+statement ok
+SET anofox_telemetry_key = 'test_key_12345'
+
+# Reset to default
+statement ok
+SET anofox_telemetry_key = 'phc_t3wwRLtpyEmLHYaZCSszG0MqVr74J6wnCrj9D41zk2t'

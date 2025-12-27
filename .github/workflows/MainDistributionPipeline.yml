@@ -20,6 +20,8 @@ jobs:
       duckdb_version: v1.4.3
       ci_tools_version: v1.4.3
       extension_name: anofox_forecast
+      # Exclude MinGW builds - vcpkg OpenSSL build issues
+      exclude_archs: windows_amd64_mingw
       # Use override_ci_tools_repository to point to a fork with the Dockerfile fix
       # Once upstream fixes the Dockerfile, remove this override
       # override_ci_tools_repository: 'DataZooDE/extension-ci-tools'  # Uncomment if you have a fork with the fix

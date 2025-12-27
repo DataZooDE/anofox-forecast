@@ -31,6 +31,41 @@ Functions follow consistent naming patterns:
 - `anofox_fcst_ts_forecast` and `ts_forecast` (both work)
 - `anofox_fcst_ts_mae` and `ts_mae` (both work)
 
+---
+
+## Configuration
+
+### Telemetry Settings
+
+The extension collects anonymous usage telemetry by default. You can configure telemetry behavior using these settings:
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `anofox_telemetry_enabled` | BOOLEAN | true | Enable or disable anonymous usage telemetry |
+| `anofox_telemetry_key` | VARCHAR | (internal) | PostHog API key (typically not changed) |
+
+**Disable Telemetry via SQL:**
+```sql
+SET anofox_telemetry_enabled = false;
+```
+
+**Disable Telemetry via Environment Variable:**
+```bash
+export DATAZOO_DISABLE_TELEMETRY=1
+```
+
+**What is Collected:**
+- Extension load events (when the extension is initialized)
+- Anonymous device identifier (hashed MAC address)
+- Extension version and DuckDB platform
+
+**What is NOT Collected:**
+- Query content or SQL statements
+- Table names or data values
+- Personal or identifiable information
+
+---
+
 ### Parameter Conventions
 
 **Important**: All functions use **positional parameters**, NOT named parameters (`:=` syntax).
@@ -55,6 +90,8 @@ Functions follow consistent naming patterns:
 
 ## Table of Contents
 
+0. [Configuration](#configuration)
+   - [Telemetry Settings](#telemetry-settings)
 1. [Exploratory Data Analysis](#exploratory-data-analysis)
    - [Per-Series Statistics](#per-series-statistics)
    - [Quality Assessment](#quality-assessment)

@@ -21,6 +21,25 @@ endif()
 # DuckDB's extension distribution supports vcpkg
 find_package(Threads REQUIRED)
 
+# --- Telemetry ---
+# Build telemetry as OBJECT library to avoid link order issues with DuckDB symbols
+# The telemetry library uses DuckDB's StringUtil::Format which depends on exception symbols
+find_package(OpenSSL REQUIRED)
+
+add_library(posthog_telemetry_obj OBJECT
+    ${CMAKE_CURRENT_SOURCE_DIR}/posthog-telemetry/src/telemetry.cpp
+)
+
+target_include_directories(posthog_telemetry_obj PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/posthog-telemetry/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/duckdb/src/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/duckdb/third_party
+    ${CMAKE_CURRENT_SOURCE_DIR}/duckdb/third_party/httplib
+    ${OPENSSL_INCLUDE_DIR}
+)
+
+target_compile_features(posthog_telemetry_obj PUBLIC cxx_std_17)
+
 # Find Eigen3 - prefer vcpkg's version when available
 # When using vcpkg, use CONFIG mode for proper integration
 if(VCPKG_BUILD OR DEFINED VCPKG_TARGET_TRIPLET)
@@ -141,6 +160,7 @@ set(EXTENSION_SOURCES
     # ts_fill_forward_function.cpp DEFINES CreateTSFillForwardOperatorTableFunction()
     src/ts_fill_forward_function.cpp
     src/mstl_decomposition_function.cpp
+    src/ts_forecast_by_test_function.cpp
     src/data_prep_bind_replace.cpp
     src/model_factory.cpp
     src/time_series_builder.cpp
@@ -150,6 +170,14 @@ set(EXTENSION_SOURCES
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
+
+# Add telemetry objects to both extension targets
+target_sources(${EXTENSION_NAME} PRIVATE $<TARGET_OBJECTS:posthog_telemetry_obj>)
+target_sources(${LOADABLE_EXTENSION_NAME} PRIVATE $<TARGET_OBJECTS:posthog_telemetry_obj>)
+
+# Add telemetry include path for telemetry.hpp header
+target_include_directories(${EXTENSION_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/posthog-telemetry/include)
+target_include_directories(${LOADABLE_EXTENSION_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/posthog-telemetry/include)
 
 # Enable AVX2 for SIMD optimizations (if supported)
 # DISABLED: Causing compatibility issues with older GCC/Eigen3
@@ -171,15 +199,22 @@ endif()
 # Link required libraries (no pre-built anofox-time needed)
 target_link_libraries(${EXTENSION_NAME}
     Threads::Threads
+    OpenSSL::SSL
+    OpenSSL::Crypto
 )
 
 target_link_libraries(${LOADABLE_EXTENSION_NAME}
     Threads::Threads
+    OpenSSL::SSL
+    OpenSSL::Crypto
 )
 
 if(WIN32)
     target_compile_definitions(${EXTENSION_NAME} PRIVATE _USE_MATH_DEFINES)
     target_compile_definitions(${LOADABLE_EXTENSION_NAME} PRIVATE _USE_MATH_DEFINES)
+    # iphlpapi is required for GetAdaptersInfo (used by posthog-telemetry for MAC address)
+    target_link_libraries(${EXTENSION_NAME} iphlpapi)
+    target_link_libraries(${LOADABLE_EXTENSION_NAME} iphlpapi)
 endif()
 
 # Link Eigen3 if available and add compile definition

@@ -296,6 +296,28 @@ LOAD 'path/to/anofox_forecast.duckdb_extension';
 SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 7, {'seasonal_period': 7});
 ```
 
+## 📊 Telemetry
+
+Anofox Forecast collects anonymous usage telemetry to help improve the extension. This includes:
+- Extension load events (when the extension is loaded)
+- No personal data, query content, or table names are collected
+
+### Opting Out
+
+You can disable telemetry at any time:
+
+**Option 1: Environment Variable**
+```bash
+export DATAZOO_DISABLE_TELEMETRY=1
+```
+
+**Option 2: SQL Setting**
+```sql
+SET anofox_telemetry_enabled = false;
+```
+
+Telemetry is anonymous (uses hashed device ID) and helps us understand usage patterns to prioritize improvements.
+
 ## 📄 License
 
 **Business Source License 1.1 (BSL 1.1)**
