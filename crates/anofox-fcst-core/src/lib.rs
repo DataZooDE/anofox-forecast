@@ -20,9 +20,9 @@ pub mod stats;
 pub use changepoint::{
     detect_changepoints, detect_changepoints_bocpd, BocpdResult, ChangepointResult, CostFunction,
 };
-pub use decomposition::{mstl_decompose, MstlDecomposition};
+pub use decomposition::{mstl_decompose, InsufficientDataMode, MstlDecomposition};
 pub use error::{ForecastError, Result};
-pub use features::{extract_features, list_features};
+pub use features::{extract_features, list_features, validate_feature_params};
 pub use filter::{
     diff, drop_edge_zeros, drop_leading_zeros, drop_trailing_zeros, is_constant, is_short,
 };

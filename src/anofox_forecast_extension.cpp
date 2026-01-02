@@ -1,8 +1,11 @@
 #define DUCKDB_EXTENSION_MAIN
 
 #include "anofox_forecast_extension.hpp"
+#include "anofox_fcst_ffi.h"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
+
+#include <cstdlib>
 
 namespace duckdb {
 
@@ -20,6 +23,7 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsFillGapsFunction(loader);
     RegisterTsFillGapsOperatorFunction(loader);
     RegisterTsFillForwardFunction(loader);
+    RegisterTsFillForwardOperatorFunction(loader);
 
     // Register Filtering functions
     RegisterTsDropConstantFunction(loader);
@@ -81,6 +85,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 
     // Register Table Macros
     RegisterTsTableMacros(loader);
+
+    // Initialize telemetry (respects DATAZOO_DISABLE_TELEMETRY env var)
+    anofox_telemetry_init(true, nullptr);
+    anofox_telemetry_capture_extension_load();
 }
 
 void AnofoxForecastExtension::Load(ExtensionLoader &loader) {

@@ -9,9 +9,18 @@ authors.workspace = true
 [lib]
 crate-type = ["staticlib"]
 
+[features]
+default = ["telemetry"]
+telemetry = ["ureq", "serde_json", "uuid"]
+
 [dependencies]
 anofox-fcst-core = { path = "../anofox-fcst-core" }
 libc = { workspace = true }
+
+# Telemetry (optional)
+ureq = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 
 [build-dependencies]
 cbindgen = "0.27"

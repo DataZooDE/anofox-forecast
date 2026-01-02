@@ -44,6 +44,7 @@ set(EXTENSION_SOURCES
     src/table_functions/ts_imputation.cpp
     src/table_functions/ts_filter.cpp
     src/table_functions/ts_gaps.cpp
+    src/table_functions/ts_fill_forward_operator.cpp
     src/scalar_functions/metrics.cpp
     src/aggregate_functions/ts_forecast_agg.cpp
     src/aggregate_functions/ts_changepoints_agg.cpp

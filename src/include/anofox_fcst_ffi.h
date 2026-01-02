@@ -187,7 +187,7 @@ typedef struct SeasonalityResult {
  */
 typedef struct MstlResult {
     /**
-     * Trend component
+     * Trend component (may be NULL if decomposition was skipped)
      */
     double *trend;
     /**
@@ -195,7 +195,7 @@ typedef struct MstlResult {
      */
     double **seasonal_components;
     /**
-     * Remainder (residual) component
+     * Remainder (residual) component (may be NULL if decomposition was skipped)
      */
     double *remainder;
     /**
@@ -210,6 +210,10 @@ typedef struct MstlResult {
      * Array of seasonal periods
      */
     int *seasonal_periods;
+    /**
+     * Whether decomposition was actually applied
+     */
+    bool decomposition_applied;
 } MstlResult;
 
 /**
@@ -716,6 +720,12 @@ bool anofox_ts_analyze_seasonality(const int64_t *_timestamps,
 /**
  * MSTL decomposition.
  *
+ * # Arguments
+ * * `insufficient_data_mode` - How to handle insufficient data:
+ *   - 0 (Fail): Error on insufficient data (default)
+ *   - 1 (Trend): Apply trend-only decomposition, seasonal components are empty
+ *   - 2 (None): Skip decomposition entirely, return empty result
+ *
  * # Safety
  * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
  */
@@ -723,6 +733,7 @@ bool anofox_ts_mstl_decomposition(const double *values,
                                   size_t length,
                                   const int *periods,
                                   size_t n_periods,
+                                  int insufficient_data_mode,
                                   struct MstlResult *out_result,
                                   struct AnofoxError *out_error);
 
@@ -762,6 +773,25 @@ bool anofox_ts_features(const double *values,
                         size_t length,
                         struct FeaturesResult *out_result,
                         struct AnofoxError *out_error);
+
+/**
+ * Validate feature parameter keys and return warnings for unknown keys.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ */
+bool anofox_ts_validate_feature_params(const char *const *param_names,
+                                       size_t n_params,
+                                       char ***out_warnings,
+                                       size_t *out_n_warnings);
+
+/**
+ * Free warnings array returned by validate_feature_params.
+ *
+ * # Safety
+ * The pointer must be valid or null.
+ */
+void anofox_free_warnings(char **warnings, size_t n_warnings);
 
 /**
  * List available feature names.
@@ -999,6 +1029,24 @@ void anofox_free_double_array(double *ptr);
 void anofox_free_int_array(int *ptr);
 
 const char *anofox_fcst_version(void);
+
+/**
+ * Initialize telemetry from C/C++.
+ *
+ * # Safety
+ * The api_key pointer must be valid or null.
+ */
+void anofox_telemetry_init(bool enabled, const char *api_key);
+
+/**
+ * Check if telemetry is enabled.
+ */
+bool anofox_telemetry_is_enabled(void);
+
+/**
+ * Capture extension load event from C/C++.
+ */
+void anofox_telemetry_capture_extension_load(void);
 
 #ifdef __cplusplus
 }  // extern "C"

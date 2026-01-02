@@ -2,17 +2,51 @@
 
 use crate::error::{ForecastError, Result};
 
+/// Mode for handling insufficient data in MSTL decomposition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InsufficientDataMode {
+    /// Error on insufficient data (default behavior)
+    #[default]
+    Fail,
+    /// Apply trend-only decomposition with NULL seasonal columns
+    Trend,
+    /// No decomposition, all decomposition columns = NULL
+    None,
+}
+
+impl InsufficientDataMode {
+    /// Create from string identifier.
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "trend" => Self::Trend,
+            "none" => Self::None,
+            _ => Self::Fail,
+        }
+    }
+
+    /// Create from integer (for FFI).
+    pub fn from_int(i: i32) -> Self {
+        match i {
+            1 => Self::Trend,
+            2 => Self::None,
+            _ => Self::Fail,
+        }
+    }
+}
+
 /// Result of MSTL decomposition.
 #[derive(Debug, Clone)]
 pub struct MstlDecomposition {
-    /// Trend component
-    pub trend: Vec<f64>,
+    /// Trend component (None if decomposition was skipped)
+    pub trend: Option<Vec<f64>>,
     /// Seasonal components (one per period)
     pub seasonal: Vec<Vec<f64>>,
     /// Seasonal periods used
     pub periods: Vec<i32>,
-    /// Remainder (residual) component
-    pub remainder: Vec<f64>,
+    /// Remainder (residual) component (None if decomposition was skipped)
+    pub remainder: Option<Vec<f64>>,
+    /// Whether decomposition was actually applied
+    pub decomposition_applied: bool,
 }
 
 /// Perform STL decomposition for a single seasonal period.
@@ -104,14 +138,66 @@ fn stl_decompose(values: &[f64], period: usize) -> Result<(Vec<f64>, Vec<f64>, V
 /// Perform MSTL (Multiple Seasonal-Trend decomposition using Loess) decomposition.
 ///
 /// This is a simplified version that handles multiple seasonal periods.
-pub fn mstl_decompose(values: &[f64], periods: &[i32]) -> Result<MstlDecomposition> {
+///
+/// # Arguments
+/// * `values` - Time series values
+/// * `periods` - Seasonal periods to extract
+/// * `insufficient_data_mode` - How to handle insufficient data
+///   - `Fail`: Error on insufficient data (default)
+///   - `Trend`: Apply trend-only decomposition, seasonal components are empty
+///   - `None`: Skip decomposition entirely, return empty result
+pub fn mstl_decompose(
+    values: &[f64],
+    periods: &[i32],
+    insufficient_data_mode: InsufficientDataMode,
+) -> Result<MstlDecomposition> {
     if values.is_empty() {
-        return Err(ForecastError::InsufficientData { needed: 1, got: 0 });
+        match insufficient_data_mode {
+            InsufficientDataMode::Fail => {
+                return Err(ForecastError::InsufficientData { needed: 1, got: 0 });
+            }
+            InsufficientDataMode::Trend | InsufficientDataMode::None => {
+                return Ok(MstlDecomposition {
+                    trend: None,
+                    seasonal: vec![],
+                    periods: vec![],
+                    remainder: None,
+                    decomposition_applied: false,
+                });
+            }
+        }
     }
 
-    if periods.is_empty() {
-        // No seasonal periods - just compute trend and remainder
-        let n = values.len();
+    // Check if we have enough data for the requested periods
+    let n = values.len();
+    let min_period = periods.iter().filter(|&&p| p > 0).min().copied().unwrap_or(0) as usize;
+    let insufficient = !periods.is_empty() && min_period > 0 && n < 2 * min_period;
+
+    if insufficient {
+        match insufficient_data_mode {
+            InsufficientDataMode::Fail => {
+                return Err(ForecastError::InsufficientData {
+                    needed: 2 * min_period,
+                    got: n,
+                });
+            }
+            InsufficientDataMode::None => {
+                return Ok(MstlDecomposition {
+                    trend: None,
+                    seasonal: vec![],
+                    periods: vec![],
+                    remainder: None,
+                    decomposition_applied: false,
+                });
+            }
+            InsufficientDataMode::Trend => {
+                // Fall through to trend-only computation below
+            }
+        }
+    }
+
+    if periods.is_empty() || insufficient {
+        // No seasonal periods or insufficient data with Trend mode - just compute trend and remainder
         let window = (n / 5).max(3).min(n);
         let half_window = window / 2;
 
@@ -139,10 +225,11 @@ pub fn mstl_decompose(values: &[f64], periods: &[i32]) -> Result<MstlDecompositi
             .collect();
 
         return Ok(MstlDecomposition {
-            trend,
+            trend: Some(trend),
             seasonal: vec![],
             periods: vec![],
-            remainder,
+            remainder: Some(remainder),
+            decomposition_applied: true,
         });
     }
 
@@ -211,10 +298,11 @@ pub fn mstl_decompose(values: &[f64], periods: &[i32]) -> Result<MstlDecompositi
     }
 
     Ok(MstlDecomposition {
-        trend,
+        trend: Some(trend),
         seasonal: seasonal_components,
         periods: final_periods,
-        remainder,
+        remainder: Some(remainder),
+        decomposition_applied: true,
     })
 }
 
@@ -234,11 +322,41 @@ mod tests {
             })
             .collect();
 
-        let result = mstl_decompose(&values, &[12]).unwrap();
+        let result = mstl_decompose(&values, &[12], InsufficientDataMode::Fail).unwrap();
 
-        assert_eq!(result.trend.len(), values.len());
+        assert!(result.decomposition_applied);
+        assert_eq!(result.trend.unwrap().len(), values.len());
         assert_eq!(result.seasonal.len(), 1);
         assert_eq!(result.seasonal[0].len(), values.len());
-        assert_eq!(result.remainder.len(), values.len());
+        assert_eq!(result.remainder.unwrap().len(), values.len());
+    }
+
+    #[test]
+    fn test_mstl_insufficient_data_fail() {
+        let values = vec![1.0, 2.0, 3.0];
+        let result = mstl_decompose(&values, &[12], InsufficientDataMode::Fail);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_mstl_insufficient_data_trend() {
+        let values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let result = mstl_decompose(&values, &[12], InsufficientDataMode::Trend).unwrap();
+
+        assert!(result.decomposition_applied);
+        assert!(result.trend.is_some());
+        assert!(result.seasonal.is_empty());
+        assert!(result.remainder.is_some());
+    }
+
+    #[test]
+    fn test_mstl_insufficient_data_none() {
+        let values = vec![1.0, 2.0];
+        let result = mstl_decompose(&values, &[12], InsufficientDataMode::None).unwrap();
+
+        assert!(!result.decomposition_applied);
+        assert!(result.trend.is_none());
+        assert!(result.seasonal.is_empty());
+        assert!(result.remainder.is_none());
     }
 }

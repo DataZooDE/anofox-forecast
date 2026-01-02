@@ -440,6 +440,26 @@ pub fn list_features() -> Vec<String> {
 
 // Helper functions
 
+/// Validate feature parameters and return warnings for unknown parameter keys.
+///
+/// Returns a vector of warning messages for each unknown feature parameter key.
+/// This allows queries to continue with a warning instead of failing.
+pub fn validate_feature_params(feature_params: &[String]) -> Vec<String> {
+    let available_features: HashSet<String> = list_features().into_iter().collect();
+    let mut warnings = Vec::new();
+
+    for param_key in feature_params {
+        if !available_features.contains(param_key) {
+            warnings.push(format!(
+                "Unknown feature parameter key '{}' - this parameter will be ignored",
+                param_key
+            ));
+        }
+    }
+
+    warnings
+}
+
 fn quantile(sorted: &[f64], q: f64) -> f64 {
     if sorted.is_empty() {
         return f64::NAN;

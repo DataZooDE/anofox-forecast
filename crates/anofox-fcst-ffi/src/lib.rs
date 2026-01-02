@@ -3,6 +3,7 @@
 //! This crate provides C-compatible functions that can be called from the
 //! C++ DuckDB extension wrapper.
 
+pub mod telemetry;
 pub mod types;
 
 use libc::{c_char, c_double, c_int, free, malloc, size_t};
@@ -826,6 +827,12 @@ pub unsafe extern "C" fn anofox_ts_analyze_seasonality(
 
 /// MSTL decomposition.
 ///
+/// # Arguments
+/// * `insufficient_data_mode` - How to handle insufficient data:
+///   - 0 (Fail): Error on insufficient data (default)
+///   - 1 (Trend): Apply trend-only decomposition, seasonal components are empty
+///   - 2 (None): Skip decomposition entirely, return empty result
+///
 /// # Safety
 /// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
 #[no_mangle]
@@ -834,6 +841,7 @@ pub unsafe extern "C" fn anofox_ts_mstl_decomposition(
     length: size_t,
     periods: *const c_int,
     n_periods: size_t,
+    insufficient_data_mode: c_int,
     out_result: *mut MstlResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -848,6 +856,8 @@ pub unsafe extern "C" fn anofox_ts_mstl_decomposition(
         return false;
     }
 
+    let mode = anofox_fcst_core::InsufficientDataMode::from_int(insufficient_data_mode);
+
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
         let periods_vec: Vec<i32> = if periods.is_null() || n_periods == 0 {
@@ -855,20 +865,29 @@ pub unsafe extern "C" fn anofox_ts_mstl_decomposition(
         } else {
             std::slice::from_raw_parts(periods, n_periods).to_vec()
         };
-        anofox_fcst_core::mstl_decompose(&values_vec, &periods_vec)
+        anofox_fcst_core::mstl_decompose(&values_vec, &periods_vec, mode)
     }));
 
     match result {
         Ok(Ok(decomp)) => {
-            let n = decomp.trend.len();
-            (*out_result).n_observations = n;
+            (*out_result).decomposition_applied = decomp.decomposition_applied;
             (*out_result).n_seasonal = decomp.seasonal.len();
 
-            // Copy trend
-            (*out_result).trend = vec_to_c_array(&decomp.trend);
+            // Copy trend (may be None if decomposition was skipped)
+            if let Some(ref trend) = decomp.trend {
+                (*out_result).n_observations = trend.len();
+                (*out_result).trend = vec_to_c_array(trend);
+            } else {
+                (*out_result).n_observations = length;
+                (*out_result).trend = ptr::null_mut();
+            }
 
-            // Copy remainder
-            (*out_result).remainder = vec_to_c_array(&decomp.remainder);
+            // Copy remainder (may be None if decomposition was skipped)
+            if let Some(ref remainder) = decomp.remainder {
+                (*out_result).remainder = vec_to_c_array(remainder);
+            } else {
+                (*out_result).remainder = ptr::null_mut();
+            }
 
             // Copy seasonal periods
             if !decomp.periods.is_empty() {
@@ -1141,6 +1160,85 @@ pub unsafe extern "C" fn anofox_ts_features(
             false
         }
     }
+}
+
+/// Validate feature parameter keys and return warnings for unknown keys.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_validate_feature_params(
+    param_names: *const *const c_char,
+    n_params: size_t,
+    out_warnings: *mut *mut *mut c_char,
+    out_n_warnings: *mut size_t,
+) -> bool {
+    if param_names.is_null() || out_warnings.is_null() || out_n_warnings.is_null() {
+        return false;
+    }
+
+    // Convert C strings to Rust strings
+    let mut param_vec = Vec::with_capacity(n_params);
+    for i in 0..n_params {
+        let param_ptr = *param_names.add(i);
+        if !param_ptr.is_null() {
+            if let Ok(param_str) = CStr::from_ptr(param_ptr).to_str() {
+                param_vec.push(param_str.to_string());
+            }
+        }
+    }
+
+    // Call the validation function
+    let warnings = anofox_fcst_core::validate_feature_params(&param_vec);
+    let n = warnings.len();
+
+    *out_n_warnings = n;
+
+    if n > 0 {
+        let warnings_ptr = malloc(n * std::mem::size_of::<*mut c_char>()) as *mut *mut c_char;
+        if warnings_ptr.is_null() {
+            return false;
+        }
+
+        for (i, warning) in warnings.into_iter().enumerate() {
+            let warning_len = warning.len() + 1;
+            let warning_cstr = malloc(warning_len) as *mut c_char;
+            if !warning_cstr.is_null() {
+                ptr::copy_nonoverlapping(
+                    warning.as_ptr() as *const c_char,
+                    warning_cstr,
+                    warning.len(),
+                );
+                *warning_cstr.add(warning.len()) = 0;
+            }
+            *warnings_ptr.add(i) = warning_cstr;
+        }
+
+        *out_warnings = warnings_ptr;
+    } else {
+        *out_warnings = ptr::null_mut();
+    }
+
+    true
+}
+
+/// Free warnings array returned by validate_feature_params.
+///
+/// # Safety
+/// The pointer must be valid or null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_free_warnings(warnings: *mut *mut c_char, n_warnings: size_t) {
+    if warnings.is_null() {
+        return;
+    }
+
+    for i in 0..n_warnings {
+        let warning_ptr = *warnings.add(i);
+        if !warning_ptr.is_null() {
+            free(warning_ptr as *mut libc::c_void);
+        }
+    }
+    free(warnings as *mut libc::c_void);
 }
 
 /// List available feature names.

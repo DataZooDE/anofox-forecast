@@ -4,6 +4,8 @@
 #include "duckdb/common/exception.hpp"
 
 #include "duckdb/function/scalar_function.hpp"
+#include <algorithm>
+#include <cctype>
 
 namespace duckdb {
 
@@ -35,9 +37,28 @@ static void ExtractListAsDouble(Vector &list_vec, idx_t row_idx, vector<double> 
     }
 }
 
+// Helper to convert insufficient_data mode string to int
+static int ParseInsufficientDataMode(const string &mode) {
+    string lower = mode;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    if (lower == "trend") return 1;
+    if (lower == "none") return 2;
+    return 0;  // default: fail
+}
+
 static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state, Vector &result) {
     auto &list_vec = args.data[0];
     idx_t count = args.size();
+
+    // Get insufficient_data mode from second argument if provided (default: fail = 0)
+    int insufficient_data_mode = 0;
+    if (args.ColumnCount() > 1) {
+        auto &mode_vec = args.data[1];
+        if (!FlatVector::IsNull(mode_vec, 0)) {
+            auto mode_str = FlatVector::GetData<string_t>(mode_vec)[0].GetString();
+            insufficient_data_mode = ParseInsufficientDataMode(mode_str);
+        }
+    }
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
@@ -59,6 +80,7 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
             values.size(),
             nullptr,  // periods - auto detect
             0,
+            insufficient_data_mode,
             &mstl_result,
             &error
         );
@@ -169,8 +191,15 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
 void RegisterTsMstlDecompositionFunction(ExtensionLoader &loader) {
     // Internal scalar function used by ts_mstl_decomposition table macro
     ScalarFunctionSet ts_mstl_set("_ts_mstl_decomposition");
+    // 1-arg version: just values
     ts_mstl_set.AddFunction(ScalarFunction(
         {LogicalType::LIST(LogicalType::DOUBLE)},
+        GetMstlResultType(),
+        TsMstlDecompositionFunction
+    ));
+    // 2-arg version: values + insufficient_data mode
+    ts_mstl_set.AddFunction(ScalarFunction(
+        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::VARCHAR},
         GetMstlResultType(),
         TsMstlDecompositionFunction
     ));

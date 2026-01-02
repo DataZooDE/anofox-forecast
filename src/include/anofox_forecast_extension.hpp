@@ -13,6 +13,7 @@ void RegisterTsDataQualitySummaryFunction(ExtensionLoader &loader);
 void RegisterTsFillGapsFunction(ExtensionLoader &loader);
 void RegisterTsFillGapsOperatorFunction(ExtensionLoader &loader);
 void RegisterTsFillForwardFunction(ExtensionLoader &loader);
+void RegisterTsFillForwardOperatorFunction(ExtensionLoader &loader);
 void RegisterTsDropConstantFunction(ExtensionLoader &loader);
 void RegisterTsDropShortFunction(ExtensionLoader &loader);
 void RegisterTsDropLeadingZerosFunction(ExtensionLoader &loader);

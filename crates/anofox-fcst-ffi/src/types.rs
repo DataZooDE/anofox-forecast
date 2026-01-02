@@ -409,11 +409,11 @@ impl Default for SeasonalityResult {
 /// MSTL decomposition result.
 #[repr(C)]
 pub struct MstlResult {
-    /// Trend component
+    /// Trend component (may be NULL if decomposition was skipped)
     pub trend: *mut c_double,
     /// Array of seasonal component arrays (one per period)
     pub seasonal_components: *mut *mut c_double,
-    /// Remainder (residual) component
+    /// Remainder (residual) component (may be NULL if decomposition was skipped)
     pub remainder: *mut c_double,
     /// Number of observations
     pub n_observations: size_t,
@@ -421,6 +421,8 @@ pub struct MstlResult {
     pub n_seasonal: size_t,
     /// Array of seasonal periods
     pub seasonal_periods: *mut c_int,
+    /// Whether decomposition was actually applied
+    pub decomposition_applied: bool,
 }
 
 impl Default for MstlResult {
@@ -432,6 +434,7 @@ impl Default for MstlResult {
             n_observations: 0,
             n_seasonal: 0,
             seasonal_periods: std::ptr::null_mut(),
+            decomposition_applied: false,
         }
     }
 }

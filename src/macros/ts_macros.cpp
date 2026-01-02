@@ -239,8 +239,8 @@ WITH src AS (
 date_range AS (
     SELECT
         _grp,
-        MIN(_dt)::TIMESTAMP AS _min_dt,
-        MAX(_dt)::TIMESTAMP AS _max_dt
+        date_trunc('second', MIN(_dt)::TIMESTAMP) AS _min_dt,
+        date_trunc('second', MAX(_dt)::TIMESTAMP) AS _max_dt
     FROM src
     GROUP BY _grp
 ),
@@ -255,7 +255,7 @@ SELECT
     ad._dt AS date_col,
     s._val AS value_col
 FROM all_dates ad
-LEFT JOIN src s ON ad._grp = s._grp AND ad._dt = s._dt
+LEFT JOIN src s ON ad._grp = s._grp AND date_trunc('second', ad._dt) = date_trunc('second', s._dt::TIMESTAMP)
 ORDER BY ad._grp, ad._dt
 )"},
 
@@ -270,16 +270,16 @@ WITH src AS (
 last_dates AS (
     SELECT
         _grp,
-        MAX(_dt)::TIMESTAMP AS _max_dt
+        date_trunc('second', MAX(_dt)::TIMESTAMP) AS _max_dt
     FROM src
     GROUP BY _grp
 ),
 forward_dates AS (
     SELECT
         ld._grp,
-        UNNEST(generate_series(ld._max_dt + frequency::INTERVAL, target_date::TIMESTAMP, frequency::INTERVAL)) AS _dt
+        UNNEST(generate_series(ld._max_dt + frequency::INTERVAL, date_trunc('second', target_date::TIMESTAMP), frequency::INTERVAL)) AS _dt
     FROM last_dates ld
-    WHERE ld._max_dt < target_date::TIMESTAMP
+    WHERE ld._max_dt < date_trunc('second', target_date::TIMESTAMP)
 )
 SELECT _grp AS group_col, _dt AS date_col, _val AS value_col FROM src
 UNION ALL
@@ -303,8 +303,8 @@ WITH src AS (
 date_range AS (
     SELECT
         _grp,
-        MIN(_dt)::TIMESTAMP AS _min_dt,
-        MAX(_dt)::TIMESTAMP AS _max_dt
+        date_trunc('second', MIN(_dt)::TIMESTAMP) AS _min_dt,
+        date_trunc('second', MAX(_dt)::TIMESTAMP) AS _max_dt
     FROM src
     GROUP BY _grp
 ),
@@ -319,7 +319,7 @@ SELECT
     ad._dt AS date_col,
     s._val AS value_col
 FROM all_dates ad
-LEFT JOIN src s ON ad._grp = s._grp AND ad._dt = s._dt
+LEFT JOIN src s ON ad._grp = s._grp AND date_trunc('second', ad._dt) = date_trunc('second', s._dt::TIMESTAMP)
 ORDER BY ad._grp, ad._dt
 )"},
 
@@ -425,13 +425,13 @@ FROM forecast_result
 )"},
 
     // ts_forecast_by: Generate forecasts per group (long format - one row per forecast step)
-    // C++ API: ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, params)
-    {"ts_forecast_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", "params", nullptr}, {{nullptr, nullptr}},
+    // C++ API: ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, params, frequency)
+    {"ts_forecast_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", "params", nullptr}, {{"frequency", "'1 day'"}, {nullptr, nullptr}},
 R"(
 WITH forecast_data AS (
     SELECT
         group_col AS id,
-        MAX(date_col) AS last_date,
+        date_trunc('second', MAX(date_col)::TIMESTAMP) AS last_date,
         _ts_forecast(LIST(target_col ORDER BY date_col), horizon, method) AS fcst
     FROM query_table(source::VARCHAR)
     GROUP BY group_col
@@ -439,7 +439,7 @@ WITH forecast_data AS (
 SELECT
     id,
     UNNEST(generate_series(1, len((fcst).point)))::INTEGER AS forecast_step,
-    UNNEST(generate_series(last_date + INTERVAL '1 day', last_date + (len((fcst).point)::INTEGER || ' days')::INTERVAL, INTERVAL '1 day'))::TIMESTAMP AS date,
+    UNNEST(generate_series(last_date + frequency::INTERVAL, last_date + (len((fcst).point)::INTEGER * EXTRACT(EPOCH FROM frequency::INTERVAL) || ' seconds')::INTERVAL, frequency::INTERVAL))::TIMESTAMP AS date,
     UNNEST((fcst).point) AS point_forecast,
     UNNEST((fcst).lower) AS lower_90,
     UNNEST((fcst).upper) AS upper_90,

@@ -2,6 +2,7 @@
 #include "anofox_fcst_ffi.h"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb/common/printer.hpp"
 #include "duckdb/function/aggregate_function.hpp"
 #include "duckdb/common/types/timestamp.hpp"
 #include <unordered_map>
@@ -9,6 +10,33 @@
 #include <limits>
 
 namespace duckdb {
+
+// Helper function to emit warnings for unknown feature params
+static void EmitFeatureParamWarnings(const vector<string> &param_names) {
+    if (param_names.empty()) {
+        return;
+    }
+
+    // Convert to C string array
+    vector<const char*> c_params;
+    for (const auto &name : param_names) {
+        c_params.push_back(name.c_str());
+    }
+
+    char **warnings = nullptr;
+    size_t n_warnings = 0;
+
+    if (anofox_ts_validate_feature_params(c_params.data(), c_params.size(), &warnings, &n_warnings)) {
+        for (size_t i = 0; i < n_warnings; i++) {
+            if (warnings[i]) {
+                Printer::Print(StringUtil::Format("Warning: %s", warnings[i]));
+            }
+        }
+        if (warnings) {
+            anofox_free_warnings(warnings, n_warnings);
+        }
+    }
+}
 
 // Internal state class (allocated on heap)
 struct TsFeaturesAggStateData {
