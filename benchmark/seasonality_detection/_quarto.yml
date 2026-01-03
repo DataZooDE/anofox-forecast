@@ -1,0 +1,27 @@
+project:
+  type: default
+  output-dir: _output
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    code-tools: true
+    self-contained: true
+  pdf:
+    toc: true
+    toc-depth: 3
+    colorlinks: true
+    pdf-engine: pdflatex
+
+execute:
+  freeze: auto
+  cache: true
+
+knitr:
+  opts_chunk:
+    fig.width: 10
+    fig.height: 6
+    fig.retina: 2

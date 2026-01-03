@@ -1,0 +1,16 @@
+# Virtual environment
+.venv/
+
+# Quarto intermediate files
+_freeze/
+.jupyter_cache/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Generated CSV files
+*.csv
+
+/.quarto/
+**/*.quarto_ipynb

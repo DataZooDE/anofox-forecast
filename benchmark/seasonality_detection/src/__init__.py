@@ -1,0 +1,1 @@
+"""Seasonality detection benchmark modules."""
