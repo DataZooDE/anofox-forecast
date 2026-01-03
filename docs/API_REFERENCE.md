@@ -1,19 +1,18 @@
-# Anofox Forecast Extension (Rust Port) - API Reference
+# Anofox Forecast Extension - API Reference
 
-**Version:** 0.2.0
+**Version:** 0.2.4
 **DuckDB Version:** >= v1.4.3
 **Forecasting Engine:** anofox-fcst-core (Rust)
-**C++ Extension Compatibility:** 100% for forecast functions
 
 ---
 
 ## Overview
 
-The Anofox Forecast extension (Rust port) provides time series forecasting capabilities directly within DuckDB. All computations are performed by the **anofox-fcst-core** library, implemented in Rust.
+The Anofox Forecast extension provides time series forecasting capabilities directly within DuckDB. All computations are performed by the **anofox-fcst-core** library, implemented in Rust.
 
 ### API Variants
 
-The Rust port provides **three API styles**:
+The extension provides **three API styles**:
 
 #### 1. Scalar Functions (Array-Based)
 Low-level functions that operate on arrays. Composable with `GROUP BY` and `LIST()`.
@@ -46,8 +45,6 @@ SELECT
 FROM sales
 GROUP BY product_id;
 ```
-
-> **Note on C++ Extension Compatibility:** This Rust port is **100% API compatible** with the C++ extension for the core forecast functions (`anofox_fcst_ts_forecast`, `anofox_fcst_ts_forecast_by`, `anofox_fcst_ts_forecast_agg`). All parameters are positional and match the C++ extension's API exactly.
 
 ### Key Features
 
@@ -111,7 +108,6 @@ Both forms are identical in functionality.
    - [Quantile Loss](#quantile-loss)
    - [Mean Quantile Loss](#mean-quantile-loss)
    - [Prediction Interval Coverage](#prediction-interval-coverage)
-10. [API Comparison with C++ Extension](#api-comparison-with-c-extension)
 
 ---
 
@@ -992,9 +988,9 @@ The extension provides multiple ways to generate forecasts:
 2. **Table macros** - operate on tables directly with positional parameters
 3. **Aggregate functions** - use with custom `GROUP BY` patterns
 
-### Supported Models (31 Models)
+### Supported Models (32 Models)
 
-The extension supports all 31 models from the C++ extension with **exact case-sensitive naming**.
+The extension supports all 32 models with **exact case-sensitive naming**.
 
 **Parameter notation:**
 - **Bold** = Required parameter
@@ -1128,7 +1124,7 @@ GROUP BY product_id;
 
 ### anofox_fcst_ts_forecast (Table Macro)
 
-Generate forecasts for a single series from a table. **100% API compatible with C++ extension.**
+Generate forecasts for a single series from a table.
 
 **Signature:**
 ```sql
@@ -1152,7 +1148,7 @@ SELECT * FROM anofox_fcst_ts_forecast('sales', date, amount, 'naive', 12, MAP{})
 
 ### anofox_fcst_ts_forecast_by (Table Macro)
 
-Generate forecasts for multiple series grouped by a column. **100% API compatible with C++ extension.**
+Generate forecasts for multiple series grouped by a column.
 
 **Signature:**
 ```sql
@@ -1177,7 +1173,7 @@ SELECT * FROM anofox_fcst_ts_forecast_by('sales', product_id, date, amount, 'ets
 
 ### anofox_fcst_ts_forecast_agg (Aggregate Function)
 
-Aggregate function for generating forecasts. **100% API compatible with C++ extension.**
+Aggregate function for generating forecasts.
 
 **Signature:**
 ```sql
@@ -1211,7 +1207,7 @@ The prediction interval columns use dynamic names based on the confidence level:
 - Default (90% confidence): `lower_90`, `upper_90`
 - If `confidence_level: '0.95'` in params: `lower_95`, `upper_95`
 
-This matches the C++ extension's behavior for 100% API compatibility.
+This provides dynamic column naming based on the configured confidence level.
 
 **Example:**
 ```sql
@@ -1488,94 +1484,6 @@ SELECT ts_coverage(
 
 ---
 
-## API Comparison with C++ Extension
-
-The Rust port provides a **simplified array-based API** compared to the C++ extension's table macro API.
-
-### Key Differences
-
-| Aspect | Rust Port | C++ Extension |
-|--------|-----------|---------------|
-| **Function Types** | Scalar + Table macros + Aggregates | Table macros + Aggregates |
-| **Input** | DOUBLE[] arrays or table references | Table/column references |
-| **Multi-series** | Table macros OR GROUP BY + LIST() | Built-in group_col parameter |
-| **Date handling** | Built-in via table macros | Built-in date column support |
-| **Gap filling** | Table macros (ts_fill_gaps, ts_fill_forward, ts_fill_gaps_operator, ts_fill_forward_operator) | Full gap filling support |
-| **API Compatibility** | 100% compatible for forecast functions | Reference implementation |
-
-### Function Availability Comparison
-
-| Function | Rust Port | C++ Extension |
-|----------|-----------|---------------|
-| ts_stats | ✅ Scalar (DOUBLE[] → STRUCT) | ✅ Table macro |
-| ts_data_quality | ✅ Scalar | ✅ Table macro |
-| ts_quality_report | ✅ Table macro | ✅ Table macro |
-| ts_stats_summary | ✅ Table macro | ✅ Table macro |
-| ts_fill_gaps | ✅ Table macro | ✅ Table macro |
-| ts_fill_gaps_operator | ✅ Table macro | ✅ Table macro |
-| ts_fill_forward | ✅ Table macro | ✅ Table macro |
-| ts_fill_forward_operator | ✅ Table macro | ✅ Table macro |
-| ts_drop_* | ✅ Scalar | ✅ Table macro |
-| ts_fill_nulls_* | ✅ Scalar | ✅ Table macro |
-| ts_diff | ✅ Scalar | ✅ Table macro |
-| ts_detect_seasonality | ✅ Scalar | ✅ Scalar |
-| ts_detect_changepoints | ✅ Scalar (PELT) | ✅ BOCPD |
-| ts_detect_changepoints_bocpd | ✅ Scalar (BOCPD) | ✅ BOCPD |
-| ts_features_list | ✅ Table function | ✅ Table function |
-| ts_features_config_from_json | ✅ Scalar | ✅ Scalar |
-| ts_features_config_from_csv | ✅ Scalar | ✅ Scalar |
-| ts_analyze_seasonality | ✅ Scalar | ✅ Scalar |
-| ts_mstl_decomposition | ✅ Scalar | ✅ Table macro |
-| ts_detect_changepoints | ✅ Scalar | ✅ Table macro |
-| ts_detect_changepoints_by | ✅ Table macro | ✅ Table macro |
-| ts_features | ✅ Aggregate (→ STRUCT) | ✅ Aggregate (→ STRUCT) |
-| ts_features_scalar | ✅ Scalar (→ STRUCT) | N/A (Rust convenience) |
-| ts_features_list | ✅ Scalar | ✅ Table function |
-| ts_forecast | ✅ Scalar + Table macro | ✅ Table macro |
-| ts_forecast_by | ✅ Table macro | ✅ Table macro |
-| ts_forecast_agg | ✅ Aggregate | ✅ Aggregate |
-| Evaluation metrics | ✅ All 12 | ✅ All 12 |
-
-### Usage Pattern Comparison
-
-**Multiple Series Processing:**
-
-```sql
--- Option 1: Use table macros (same API as C++ extension)
-SELECT * FROM ts_forecast_by('sales', product_id, date, value, 'ets', 7, MAP{});
-
--- Option 2: Use scalar function with GROUP BY + LIST()
-SELECT
-    product_id,
-    ts_stats(LIST(value ORDER BY date)) AS stats,
-    ts_forecast(LIST(value ORDER BY date), 7) AS forecast
-FROM sales
-GROUP BY product_id;
-
--- Option 3: Use aggregate function
-SELECT
-    product_id,
-    ts_forecast_agg(ts, value, 'naive', 7, MAP{}) AS forecast
-FROM sales
-GROUP BY product_id;
-```
-
-**Gap Filling:**
-
-```sql
--- Fill gaps between first and last observation:
-SELECT * FROM ts_fill_gaps('sales', product_id, date, value, '1 day');
-
--- Fill forward to a target date:
-SELECT * FROM ts_fill_forward('sales', product_id, date, value, '2024-12-31', '1 day');
-
--- Operator versions (same functionality, C++ API compatible naming):
-SELECT * FROM ts_fill_gaps_operator('sales', product_id, date, value, '1 day');
-SELECT * FROM ts_fill_forward_operator('sales', product_id, date, value, '2024-12-31', '1 day');
-```
-
----
-
 ## Notes
 
 1. **Array-based design**: All functions operate on DOUBLE[] arrays. Use `LIST(column ORDER BY date)` to convert table data to arrays.
@@ -1593,7 +1501,5 @@ SELECT * FROM ts_fill_forward_operator('sales', product_id, date, value, '2024-1
 
 ---
 
-**Last Updated:** 2025-12-22
-**API Version:** 0.2.0
-**Based on:** anofox-forecast C++ extension v0.2.0
-**API Compatibility:** 100% compatible with C++ extension for forecast functions
+**Last Updated:** 2026-01-03
+**API Version:** 0.2.4

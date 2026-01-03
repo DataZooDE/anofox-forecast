@@ -7,8 +7,8 @@ Thank you for your interest in contributing to Anofox Forecast! This document pr
 1. Fork the repository
 2. Clone your fork:
    ```bash
-   git clone https://github.com/<your-username>/anofox-forecast-extension.git
-   cd anofox-forecast-extension
+   git clone https://github.com/<your-username>/anofox-forecast.git
+   cd anofox-forecast
    ```
 3. Install prerequisites:
    - Rust toolchain (via rustup)

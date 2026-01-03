@@ -9,12 +9,12 @@
 > This extension is in early development, so bugs and breaking changes are expected.
 > Please use the [issues page](https://github.com/DataZooDE/anofox-forecast/issues) to report bugs or request features.
 
-A time series forecasting extension for DuckDB with 31 models, data preparation, and analytics — all in pure SQL.
+A time series forecasting extension for DuckDB with 32 models, data preparation, and analytics — all in pure SQL.
 
 
 ## ✨ Key Features
 
-### 🎯 Forecasting (31 Models)
+### 🎯 Forecasting (32 Models)
 - **AutoML**: AutoETS, AutoARIMA, AutoMFLES, AutoMSTL, AutoTBATS
 - **Statistical**: ETS, ARIMA, Theta, Holt-Winters, Seasonal Naive
 - **Advanced**: TBATS, MSTL, MFLES (multiple seasonality)
@@ -55,18 +55,6 @@ A time series forecasting extension for DuckDB with 31 models, data preparation,
 - [License](#license)
 
 
-## Why a Rust Port?
-
-This is a Rust implementation of the anofox-forecast extension, providing time-series
-forecasting algorithms with native DuckDB integration via a thin C++ FFI layer.
-
-- **Zero Python overhead** - No subprocess calls, no serialization, pure native execution
-- **Automatic parallelization** - DuckDB handles parallel execution across CPU cores natively
-- **In-database forecasting** - Generate forecasts directly in SQL without moving data
-- **Production-ready performance** - Rust speed with DuckDB's query optimization
-- **Memory safety** - Rust's ownership model prevents memory leaks and data races
-- **Portability**: Run forecasts in DuckDB anywhere and from any language that supports DuckDB integration.
-
 ## Attribution
 
 This extension uses the `anofox-forecast` Rust crate and implements algorithms from several open-source projects.
@@ -86,8 +74,8 @@ LOAD anofox_forecast;
 
 ```bash
 # Clone the repository
-git clone https://github.com/DataZooDE/anofox-forecast-extension.git
-cd anofox-forecast-extension
+git clone https://github.com/DataZooDE/anofox-forecast.git
+cd anofox-forecast
 
 # Build the extension (requires Rust toolchain and CMake)
 make release
