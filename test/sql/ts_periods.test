@@ -1,0 +1,139 @@
+# name: test/sql/ts_periods.test
+# description: Tests for period detection functions (fdars-core integration)
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# ts_detect_periods - Basic Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_detect_periods([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0]) IS NOT NULL;
+----
+true
+
+# Test with method parameter
+query I
+SELECT ts_detect_periods([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 'fft') IS NOT NULL;
+----
+true
+
+# Test n_periods field exists
+query I
+SELECT (ts_detect_periods([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).n_periods >= 0;
+----
+true
+
+# Test primary_period field exists
+query I
+SELECT (ts_detect_periods([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).primary_period IS NOT NULL;
+----
+true
+
+# Test method field exists
+query I
+SELECT (ts_detect_periods([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).method IS NOT NULL;
+----
+true
+
+#######################################
+# ts_estimate_period_fft - Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_estimate_period_fft([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0]) IS NOT NULL;
+----
+true
+
+# Test period field exists
+query I
+SELECT (ts_estimate_period_fft([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).period IS NOT NULL;
+----
+true
+
+# Test frequency field exists
+query I
+SELECT (ts_estimate_period_fft([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).frequency IS NOT NULL;
+----
+true
+
+# Test method field
+query I
+SELECT (ts_estimate_period_fft([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).method = 'fft';
+----
+true
+
+#######################################
+# ts_estimate_period_acf - Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_estimate_period_acf([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0]) IS NOT NULL;
+----
+true
+
+# Test with max_lag parameter
+query I
+SELECT ts_estimate_period_acf([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 8) IS NOT NULL;
+----
+true
+
+# Test method field
+query I
+SELECT (ts_estimate_period_acf([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).method = 'acf';
+----
+true
+
+#######################################
+# ts_detect_multiple_periods - Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_detect_multiple_periods([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0]) IS NOT NULL;
+----
+true
+
+# Test with max_periods parameter
+query I
+SELECT ts_detect_multiple_periods([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 3) IS NOT NULL;
+----
+true
+
+# Test periods list exists
+query I
+SELECT (ts_detect_multiple_periods([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).periods IS NOT NULL;
+----
+true
+
+#######################################
+# NULL Handling
+#######################################
+
+# NULL input should return NULL for ts_detect_periods
+query I
+SELECT ts_detect_periods(NULL) IS NULL;
+----
+true
+
+# NULL input should return NULL for ts_estimate_period_fft
+query I
+SELECT ts_estimate_period_fft(NULL) IS NULL;
+----
+true
+
+# NULL input should return NULL for ts_estimate_period_acf
+query I
+SELECT ts_estimate_period_acf(NULL) IS NULL;
+----
+true
+
+# NULL input should return NULL for ts_detect_multiple_periods
+query I
+SELECT ts_detect_multiple_periods(NULL) IS NULL;
+----
+true

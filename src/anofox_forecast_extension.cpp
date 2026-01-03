@@ -47,6 +47,28 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsDetectSeasonalityFunction(loader);
     RegisterTsAnalyzeSeasonalityFunction(loader);
 
+    // Register Period Detection functions (fdars-core)
+    RegisterTsDetectPeriodsFunction(loader);
+    RegisterTsEstimatePeriodFftFunction(loader);
+    RegisterTsEstimatePeriodAcfFunction(loader);
+    RegisterTsDetectMultiplePeriodsFunction(loader);
+
+    // Register Peak Detection functions (fdars-core)
+    RegisterTsDetectPeaksFunction(loader);
+    RegisterTsAnalyzePeakTimingFunction(loader);
+
+    // Register Detrending functions (fdars-core)
+    RegisterTsDetrendFunction(loader);
+    RegisterTsDecomposeSeasonalFunction(loader);
+
+    // Register Extended Seasonality functions (fdars-core)
+    RegisterTsSeasonalStrengthFunction(loader);
+    RegisterTsSeasonalStrengthWindowedFunction(loader);
+    RegisterTsClassifySeasonalityFunction(loader);
+    RegisterTsDetectSeasonalityChangesFunction(loader);
+    RegisterTsInstantaneousPeriodFunction(loader);
+    RegisterTsDetectAmplitudeModulationFunction(loader);
+
     // Register Decomposition functions
     RegisterTsMstlDecompositionFunction(loader);
 

@@ -16,12 +16,30 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(Corrosion)
 
+# Detect WASM build
+if(DEFINED ENV{DUCKDB_WASM_PLATFORM} OR "${DUCKDB_EXPLICIT_PLATFORM}" MATCHES "^wasm")
+    set(WASM_BUILD TRUE)
+    message(STATUS "Building for WASM platform")
+else()
+    set(WASM_BUILD FALSE)
+endif()
+
 # Import Rust FFI crate
 # Note: Corrosion converts hyphens to underscores in target names
-corrosion_import_crate(
-    MANIFEST_PATH ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
-    CRATES anofox-fcst-ffi
-)
+if(WASM_BUILD)
+    # For WASM, disable telemetry feature (networking not available)
+    corrosion_import_crate(
+        MANIFEST_PATH ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
+        CRATES anofox-fcst-ffi
+        FEATURES ""
+        NO_DEFAULT_FEATURES
+    )
+else()
+    corrosion_import_crate(
+        MANIFEST_PATH ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
+        CRATES anofox-fcst-ffi
+    )
+endif()
 
 # The Rust target name (with underscores)
 set(RUST_LIB anofox_fcst_ffi)
@@ -45,6 +63,9 @@ set(EXTENSION_SOURCES
     src/table_functions/ts_filter.cpp
     src/table_functions/ts_gaps.cpp
     src/table_functions/ts_fill_forward_operator.cpp
+    src/table_functions/ts_periods.cpp
+    src/table_functions/ts_peaks.cpp
+    src/table_functions/ts_detrend.cpp
     src/scalar_functions/metrics.cpp
     src/aggregate_functions/ts_forecast_agg.cpp
     src/aggregate_functions/ts_changepoints_agg.cpp
@@ -59,7 +80,11 @@ build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} "" ${EXTENSION_SOURCES})
 
 # Link Rust library and platform-specific libs
-if(UNIX AND NOT APPLE)
+if(WASM_BUILD)
+    # WASM: minimal linking, no system libraries
+    target_link_libraries(${TARGET_NAME}_extension ${RUST_LIB})
+    target_link_libraries(${TARGET_NAME}_loadable_extension ${RUST_LIB})
+elseif(UNIX AND NOT APPLE)
     target_link_libraries(${TARGET_NAME}_extension ${RUST_LIB} pthread dl m)
     target_link_libraries(${TARGET_NAME}_loadable_extension ${RUST_LIB} pthread dl m)
 elseif(WIN32)

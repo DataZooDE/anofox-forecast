@@ -144,9 +144,12 @@ impl std::str::FromStr for ModelType {
             "seasonalnaive" | "seasonal_naive" | "snaive" => Ok(ModelType::SeasonalNaive),
             "ses" => Ok(ModelType::SES),
             "sesoptimized" | "ses_optimized" => Ok(ModelType::SESOptimized),
-            "randomwalkdrift" | "random_walk_drift" | "rwd" | "drift" | "randomwalkwithdrift" | "random_walk_with_drift" => {
-                Ok(ModelType::RandomWalkDrift)
-            }
+            "randomwalkdrift"
+            | "random_walk_drift"
+            | "rwd"
+            | "drift"
+            | "randomwalkwithdrift"
+            | "random_walk_with_drift" => Ok(ModelType::RandomWalkDrift),
             // Exponential Smoothing
             "holt" => Ok(ModelType::Holt),
             "holtwinters" | "holt_winters" | "hw" => Ok(ModelType::HoltWinters),

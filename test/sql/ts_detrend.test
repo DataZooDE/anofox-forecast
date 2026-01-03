@@ -1,0 +1,288 @@
+# name: test/sql/ts_detrend.test
+# description: Tests for detrending and extended seasonality functions (fdars-core integration)
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# ts_detrend - Basic Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_detrend([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]) IS NOT NULL;
+----
+true
+
+# Test with method parameter
+query I
+SELECT ts_detrend([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 'linear') IS NOT NULL;
+----
+true
+
+# Test trend field exists
+query I
+SELECT (ts_detrend([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])).trend IS NOT NULL;
+----
+true
+
+# Test detrended field exists
+query I
+SELECT (ts_detrend([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])).detrended IS NOT NULL;
+----
+true
+
+# Test method field exists
+query I
+SELECT (ts_detrend([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])).method IS NOT NULL;
+----
+true
+
+# Test trend length matches input
+query I
+SELECT length((ts_detrend([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])).trend) = 10;
+----
+true
+
+#######################################
+# ts_decompose_seasonal - Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_decompose_seasonal([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0) IS NOT NULL;
+----
+true
+
+# Test with method parameter
+query I
+SELECT ts_decompose_seasonal([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0, 'additive') IS NOT NULL;
+----
+true
+
+# Test trend field exists
+query I
+SELECT (ts_decompose_seasonal([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0)).trend IS NOT NULL;
+----
+true
+
+# Test seasonal field exists
+query I
+SELECT (ts_decompose_seasonal([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0)).seasonal IS NOT NULL;
+----
+true
+
+# Test remainder field exists
+query I
+SELECT (ts_decompose_seasonal([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0)).remainder IS NOT NULL;
+----
+true
+
+# Test period field
+query I
+SELECT (ts_decompose_seasonal([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0)).period = 4.0;
+----
+true
+
+#######################################
+# ts_seasonal_strength - Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_seasonal_strength([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0) IS NOT NULL;
+----
+true
+
+# Test with method parameter
+query I
+SELECT ts_seasonal_strength([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0, 'variance') IS NOT NULL;
+----
+true
+
+# Strength should be non-negative
+query I
+SELECT ts_seasonal_strength([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0) >= 0
+    OR ts_seasonal_strength([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0) != ts_seasonal_strength([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0);
+----
+true
+
+#######################################
+# ts_seasonal_strength_windowed - Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_seasonal_strength_windowed([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0) IS NOT NULL;
+----
+true
+
+# Test result is a list
+query I
+SELECT typeof(ts_seasonal_strength_windowed([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0)) = 'DOUBLE[]';
+----
+true
+
+#######################################
+# ts_classify_seasonality - Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_classify_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0) IS NOT NULL;
+----
+true
+
+# Test is_seasonal field exists
+query I
+SELECT (ts_classify_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0)).is_seasonal IS NOT NULL;
+----
+true
+
+# Test classification field exists
+query I
+SELECT (ts_classify_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0)).classification IS NOT NULL;
+----
+true
+
+# Test cycle_strengths list exists
+query I
+SELECT (ts_classify_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0)).cycle_strengths IS NOT NULL;
+----
+true
+
+#######################################
+# ts_detect_seasonality_changes - Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_detect_seasonality_changes([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0) IS NOT NULL;
+----
+true
+
+# Test n_changes field exists
+query I
+SELECT (ts_detect_seasonality_changes([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0)).n_changes >= 0;
+----
+true
+
+# Test change_points list exists
+query I
+SELECT (ts_detect_seasonality_changes([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0)).change_points IS NOT NULL;
+----
+true
+
+# Test strength_curve list exists
+query I
+SELECT (ts_detect_seasonality_changes([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0)).strength_curve IS NOT NULL;
+----
+true
+
+#######################################
+# ts_instantaneous_period - Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_instantaneous_period([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0]) IS NOT NULL;
+----
+true
+
+# Test periods list exists
+query I
+SELECT (ts_instantaneous_period([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).periods IS NOT NULL;
+----
+true
+
+# Test frequencies list exists
+query I
+SELECT (ts_instantaneous_period([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).frequencies IS NOT NULL;
+----
+true
+
+# Test amplitudes list exists
+query I
+SELECT (ts_instantaneous_period([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])).amplitudes IS NOT NULL;
+----
+true
+
+#######################################
+# ts_detect_amplitude_modulation - Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_detect_amplitude_modulation([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0) IS NOT NULL;
+----
+true
+
+# Test is_seasonal field exists
+query I
+SELECT (ts_detect_amplitude_modulation([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0)).is_seasonal IS NOT NULL;
+----
+true
+
+# Test has_modulation field exists
+query I
+SELECT (ts_detect_amplitude_modulation([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0)).has_modulation IS NOT NULL;
+----
+true
+
+# Test modulation_type field exists
+query I
+SELECT (ts_detect_amplitude_modulation([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0)).modulation_type IS NOT NULL;
+----
+true
+
+# Test wavelet_amplitude list exists
+query I
+SELECT (ts_detect_amplitude_modulation([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0)).wavelet_amplitude IS NOT NULL;
+----
+true
+
+#######################################
+# NULL Handling
+#######################################
+
+# NULL input should return NULL for ts_detrend
+query I
+SELECT ts_detrend(NULL) IS NULL;
+----
+true
+
+# NULL input should return NULL for ts_decompose_seasonal
+query I
+SELECT ts_decompose_seasonal(NULL, 4.0) IS NULL;
+----
+true
+
+# NULL period should return NULL for ts_decompose_seasonal
+query I
+SELECT ts_decompose_seasonal([1.0, 2.0, 3.0], NULL) IS NULL;
+----
+true
+
+# NULL input should return NULL for ts_seasonal_strength
+query I
+SELECT ts_seasonal_strength(NULL, 4.0) IS NULL;
+----
+true
+
+# NULL input should return NULL for ts_classify_seasonality
+query I
+SELECT ts_classify_seasonality(NULL, 4.0) IS NULL;
+----
+true
+
+# NULL input should return NULL for ts_instantaneous_period
+query I
+SELECT ts_instantaneous_period(NULL) IS NULL;
+----
+true
+
+# NULL input should return NULL for ts_detect_amplitude_modulation
+query I
+SELECT ts_detect_amplitude_modulation(NULL, 4.0) IS NULL;
+----
+true

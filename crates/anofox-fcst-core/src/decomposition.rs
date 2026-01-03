@@ -1,6 +1,7 @@
 //! Time series decomposition (MSTL).
 
 use crate::error::{ForecastError, Result};
+use std::str::FromStr;
 
 /// Mode for handling insufficient data in MSTL decomposition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -14,16 +15,19 @@ pub enum InsufficientDataMode {
     None,
 }
 
-impl InsufficientDataMode {
-    /// Create from string identifier.
-    pub fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
+impl FromStr for InsufficientDataMode {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Ok(match s.to_lowercase().as_str() {
             "trend" => Self::Trend,
             "none" => Self::None,
             _ => Self::Fail,
-        }
+        })
     }
+}
 
+impl InsufficientDataMode {
     /// Create from integer (for FFI).
     pub fn from_int(i: i32) -> Self {
         match i {
@@ -170,7 +174,12 @@ pub fn mstl_decompose(
 
     // Check if we have enough data for the requested periods
     let n = values.len();
-    let min_period = periods.iter().filter(|&&p| p > 0).min().copied().unwrap_or(0) as usize;
+    let min_period = periods
+        .iter()
+        .filter(|&&p| p > 0)
+        .min()
+        .copied()
+        .unwrap_or(0) as usize;
     let insufficient = !periods.is_empty() && min_period > 0 && n < 2 * min_period;
 
     if insufficient {

@@ -32,6 +32,13 @@ pub enum ForecastError {
     #[error("Invalid frequency: {0}")]
     InvalidFrequency(String),
 
+    #[error("Invalid parameter '{param}' = '{value}': {reason}")]
+    InvalidParameter {
+        param: String,
+        value: String,
+        reason: String,
+    },
+
     #[error("Internal error: {0}")]
     InternalError(String),
 }
@@ -48,6 +55,7 @@ impl ForecastError {
             ForecastError::InsufficientData { .. } => 6,
             ForecastError::InvalidDateFormat(_) => 7,
             ForecastError::InvalidFrequency(_) => 8,
+            ForecastError::InvalidParameter { .. } => 9,
             ForecastError::InternalError(_) => 10,
         }
     }

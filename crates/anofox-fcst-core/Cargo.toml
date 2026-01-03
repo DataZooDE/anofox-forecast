@@ -8,6 +8,7 @@ authors.workspace = true
 
 [dependencies]
 anofox-forecast = { workspace = true }
+fdars-core = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
 statrs = { workspace = true }
