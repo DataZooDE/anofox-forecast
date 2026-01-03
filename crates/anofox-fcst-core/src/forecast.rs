@@ -47,11 +47,12 @@ pub enum ModelType {
     SESOptimized,
     RandomWalkDrift,
 
-    // Exponential Smoothing Models (4)
+    // Exponential Smoothing Models (5)
     Holt,
     HoltWinters,
     SeasonalES,
     SeasonalESOptimized,
+    SeasonalWindowAverage,
 
     // Theta Methods (5) - note: AutoTheta counted above
     Theta,
@@ -98,12 +99,13 @@ impl std::str::FromStr for ModelType {
             "SeasonalNaive" => return Ok(ModelType::SeasonalNaive),
             "SES" => return Ok(ModelType::SES),
             "SESOptimized" => return Ok(ModelType::SESOptimized),
-            "RandomWalkDrift" => return Ok(ModelType::RandomWalkDrift),
+            "RandomWalkDrift" | "RandomWalkWithDrift" => return Ok(ModelType::RandomWalkDrift),
             // Exponential Smoothing Models
             "Holt" => return Ok(ModelType::Holt),
             "HoltWinters" => return Ok(ModelType::HoltWinters),
             "SeasonalES" => return Ok(ModelType::SeasonalES),
             "SeasonalESOptimized" => return Ok(ModelType::SeasonalESOptimized),
+            "SeasonalWindowAverage" => return Ok(ModelType::SeasonalWindowAverage),
             // Theta Methods
             "Theta" => return Ok(ModelType::Theta),
             "OptimizedTheta" => return Ok(ModelType::OptimizedTheta),
@@ -142,7 +144,7 @@ impl std::str::FromStr for ModelType {
             "seasonalnaive" | "seasonal_naive" | "snaive" => Ok(ModelType::SeasonalNaive),
             "ses" => Ok(ModelType::SES),
             "sesoptimized" | "ses_optimized" => Ok(ModelType::SESOptimized),
-            "randomwalkdrift" | "random_walk_drift" | "rwd" | "drift" => {
+            "randomwalkdrift" | "random_walk_drift" | "rwd" | "drift" | "randomwalkwithdrift" | "random_walk_with_drift" => {
                 Ok(ModelType::RandomWalkDrift)
             }
             // Exponential Smoothing
@@ -150,6 +152,9 @@ impl std::str::FromStr for ModelType {
             "holtwinters" | "holt_winters" | "hw" => Ok(ModelType::HoltWinters),
             "seasonales" | "seasonal_es" => Ok(ModelType::SeasonalES),
             "seasonalesoptimized" | "seasonal_es_optimized" => Ok(ModelType::SeasonalESOptimized),
+            "seasonalwindowaverage" | "seasonal_window_average" | "swa" => {
+                Ok(ModelType::SeasonalWindowAverage)
+            }
             // Theta Methods
             "theta" => Ok(ModelType::Theta),
             "optimizedtheta" | "optimized_theta" | "otm" => Ok(ModelType::OptimizedTheta),
@@ -202,6 +207,7 @@ impl ModelType {
             ModelType::HoltWinters => "HoltWinters",
             ModelType::SeasonalES => "SeasonalES",
             ModelType::SeasonalESOptimized => "SeasonalESOptimized",
+            ModelType::SeasonalWindowAverage => "SeasonalWindowAverage",
             // Theta Methods
             ModelType::Theta => "Theta",
             ModelType::OptimizedTheta => "OptimizedTheta",
@@ -311,6 +317,9 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         }
         ModelType::SeasonalES | ModelType::SeasonalESOptimized => {
             forecast_seasonal_es(&clean_values, options.horizon, period)
+        }
+        ModelType::SeasonalWindowAverage => {
+            forecast_seasonal_window_average(&clean_values, options.horizon, period)
         }
         ModelType::ETS | ModelType::AutoETS => forecast_ets(&clean_values, options.horizon, period),
         // Theta Methods
@@ -633,6 +642,69 @@ fn forecast_seasonal_es(values: &[f64], horizon: usize, period: usize) -> Result
     })
 }
 
+fn forecast_seasonal_window_average(
+    values: &[f64],
+    horizon: usize,
+    period: usize,
+) -> Result<ForecastOutput> {
+    // Seasonal Window Average: average of values at the same seasonal position
+    // Uses a window of seasonal periods to compute forecasts
+    let p = period.max(1).min(values.len());
+    let n = values.len();
+
+    // Calculate the number of complete seasons we can use
+    let n_seasons = n / p;
+    if n_seasons == 0 {
+        // Fall back to simple average if not enough data
+        let avg = values.iter().sum::<f64>() / n as f64;
+        return Ok(ForecastOutput {
+            point: vec![avg; horizon],
+            lower: vec![],
+            upper: vec![],
+            fitted: None,
+            residuals: None,
+            model_name: "SeasonalWindowAverage".to_string(),
+            aic: None,
+            bic: None,
+            mse: None,
+        });
+    }
+
+    // Calculate seasonal averages for each position in the period
+    let mut seasonal_avg = vec![0.0; p];
+    let mut seasonal_count = vec![0usize; p];
+
+    for (i, &val) in values.iter().enumerate() {
+        let pos = i % p;
+        seasonal_avg[pos] += val;
+        seasonal_count[pos] += 1;
+    }
+
+    for i in 0..p {
+        if seasonal_count[i] > 0 {
+            seasonal_avg[i] /= seasonal_count[i] as f64;
+        }
+    }
+
+    // Generate forecasts using the seasonal averages
+    let start_pos = n % p;
+    let point: Vec<f64> = (0..horizon)
+        .map(|h| seasonal_avg[(start_pos + h) % p])
+        .collect();
+
+    Ok(ForecastOutput {
+        point,
+        lower: vec![],
+        upper: vec![],
+        fitted: None,
+        residuals: None,
+        model_name: "SeasonalWindowAverage".to_string(),
+        aic: None,
+        bic: None,
+        mse: None,
+    })
+}
+
 fn forecast_ets(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
     // ETS: Error-Trend-Seasonal (simplified implementation)
     // Falls back to appropriate simpler model based on data characteristics
@@ -866,6 +938,27 @@ fn calculate_fitted_values(values: &[f64], model: ModelType, period: usize) -> V
             }
             fitted
         }
+        ModelType::SeasonalWindowAverage => {
+            // Fitted values are the seasonal averages at each position
+            let p = period.max(1).min(values.len());
+            let mut seasonal_sum = vec![0.0; p];
+            let mut seasonal_count = vec![0usize; p];
+            let mut fitted = Vec::with_capacity(values.len());
+
+            for (i, &val) in values.iter().enumerate() {
+                let pos = i % p;
+                // Fitted value is the current average for this seasonal position
+                if seasonal_count[pos] > 0 {
+                    fitted.push(seasonal_sum[pos] / seasonal_count[pos] as f64);
+                } else {
+                    fitted.push(val); // No prior data, use actual
+                }
+                // Update running average
+                seasonal_sum[pos] += val;
+                seasonal_count[pos] += 1;
+            }
+            fitted
+        }
         _ => {
             // SES fitted values
             let alpha = 0.3;
@@ -882,7 +975,7 @@ fn calculate_fitted_values(values: &[f64], model: ModelType, period: usize) -> V
     }
 }
 
-/// List all available model names (31 models matching C++ extension).
+/// List all available model names (32 models matching C++ extension).
 /// See: https://github.com/DataZooDE/anofox-forecast/blob/main/docs/API_REFERENCE.md#supported-models
 pub fn list_models() -> Vec<String> {
     vec![
@@ -900,11 +993,12 @@ pub fn list_models() -> Vec<String> {
         "SES",
         "SESOptimized",
         "RandomWalkDrift",
-        // Exponential Smoothing Models (4)
+        // Exponential Smoothing Models (5)
         "Holt",
         "HoltWinters",
         "SeasonalES",
         "SeasonalESOptimized",
+        "SeasonalWindowAverage",
         // Theta Methods (5) - AutoTheta counted above
         "Theta",
         "OptimizedTheta",
