@@ -147,7 +147,10 @@ pub fn estimate_period_fft_ts(values: &[f64]) -> Result<SinglePeriodResult> {
 ///
 /// # Returns
 /// Estimated period result with confidence
-pub fn estimate_period_acf_ts(values: &[f64], max_lag: Option<usize>) -> Result<SinglePeriodResult> {
+pub fn estimate_period_acf_ts(
+    values: &[f64],
+    max_lag: Option<usize>,
+) -> Result<SinglePeriodResult> {
     let n = values.len();
     if n < 4 {
         return Err(ForecastError::InsufficientData { needed: 4, got: n });
@@ -192,7 +195,8 @@ pub fn estimate_period_regression_ts(
     let candidates = n_candidates.unwrap_or(50);
     let harmonics = n_harmonics.unwrap_or(3);
 
-    let result = estimate_period_regression(values, n, 1, &argvals, p_min, p_max, candidates, harmonics);
+    let result =
+        estimate_period_regression(values, n, 1, &argvals, p_min, p_max, candidates, harmonics);
 
     Ok((result, "regression").into())
 }
@@ -300,8 +304,7 @@ pub fn detect_periods(values: &[f64], method: PeriodMethod) -> Result<MultiPerio
             let acf_result = estimate_period_acf_ts(values, None)?;
 
             // Use FFT result if it agrees with ACF (within 10%)
-            let agreement =
-                (fft_result.period - acf_result.period).abs() / fft_result.period < 0.1;
+            let agreement = (fft_result.period - acf_result.period).abs() / fft_result.period < 0.1;
 
             let (best, method_name) = if agreement || fft_result.confidence > acf_result.confidence
             {
@@ -375,8 +378,7 @@ mod tests {
         // Create series with two periods: 12 and 52
         let values: Vec<f64> = (0..520)
             .map(|i| {
-                5.0 * (2.0 * PI * i as f64 / 12.0).sin()
-                    + 3.0 * (2.0 * PI * i as f64 / 52.0).sin()
+                5.0 * (2.0 * PI * i as f64 / 12.0).sin() + 3.0 * (2.0 * PI * i as f64 / 52.0).sin()
             })
             .collect();
 

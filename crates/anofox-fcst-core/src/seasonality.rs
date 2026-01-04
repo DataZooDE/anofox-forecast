@@ -16,8 +16,7 @@ use fdars_core::seasonal::{
     ChangeDetectionResult as FdarsChangeDetectionResult, ChangePoint as FdarsChangePoint,
     ChangeType, InstantaneousPeriod as FdarsInstantaneousPeriod, ModulationType,
     SeasonalType as FdarsSeasonalType, SeasonalityClassification as FdarsSeasonalityClassification,
-    StrengthMethod as FdarsStrengthMethod,
-    WaveletAmplitudeResult as FdarsWaveletAmplitudeResult,
+    StrengthMethod as FdarsStrengthMethod, WaveletAmplitudeResult as FdarsWaveletAmplitudeResult,
 };
 use std::str::FromStr;
 
@@ -612,8 +611,7 @@ pub fn seasonal_strength_windowed(
 
     let argvals = make_argvals(n);
     let win_size = window_size.unwrap_or(2.0 * period);
-    let strength_method: FdarsStrengthMethod =
-        method.unwrap_or(StrengthMethod::Variance).into();
+    let strength_method: FdarsStrengthMethod = method.unwrap_or(StrengthMethod::Variance).into();
 
     Ok(fdars_seasonal_strength_windowed(
         values,
@@ -718,9 +716,8 @@ pub fn detect_seasonality_changes(
     let win_size = window_size.unwrap_or(2.0 * period);
     let min_dur = min_duration.unwrap_or(period);
 
-    let result = fdars_detect_seasonality_changes(
-        values, n, 1, &argvals, period, thresh, win_size, min_dur,
-    );
+    let result =
+        fdars_detect_seasonality_changes(values, n, 1, &argvals, period, thresh, win_size, min_dur);
 
     Ok(result.into())
 }
@@ -787,7 +784,13 @@ pub fn detect_amplitude_modulation(
     let seas_thresh = seasonality_threshold.unwrap_or(0.3);
 
     let result = fdars_detect_amplitude_modulation_wavelet(
-        values, n, 1, &argvals, period, mod_thresh, seas_thresh,
+        values,
+        n,
+        1,
+        &argvals,
+        period,
+        mod_thresh,
+        seas_thresh,
     );
 
     Ok(result.into())

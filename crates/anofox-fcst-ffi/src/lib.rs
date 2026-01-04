@@ -867,9 +867,8 @@ pub unsafe extern "C" fn anofox_ts_detect_periods(
             copy_string_to_buffer(&multi_result.method, &mut (*out_result).method);
 
             if n > 0 {
-                let periods_ptr =
-                    malloc(n * std::mem::size_of::<types::DetectedPeriodFFI>())
-                        as *mut types::DetectedPeriodFFI;
+                let periods_ptr = malloc(n * std::mem::size_of::<types::DetectedPeriodFFI>())
+                    as *mut types::DetectedPeriodFFI;
                 for (i, dp) in multi_result.periods.iter().enumerate() {
                     (*periods_ptr.add(i)).period = dp.period;
                     (*periods_ptr.add(i)).confidence = dp.confidence;
@@ -976,7 +975,11 @@ pub unsafe extern "C" fn anofox_ts_estimate_period_acf(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
-        let max_lag_opt = if max_lag > 0 { Some(max_lag as usize) } else { None };
+        let max_lag_opt = if max_lag > 0 {
+            Some(max_lag as usize)
+        } else {
+            None
+        };
         anofox_fcst_core::estimate_period_acf_ts(&values_vec, max_lag_opt)
     }));
 
@@ -1031,9 +1034,21 @@ pub unsafe extern "C" fn anofox_ts_detect_multiple_periods(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
-        let max_p = if max_periods > 0 { Some(max_periods as usize) } else { None };
-        let min_c = if min_confidence > 0.0 { Some(min_confidence) } else { None };
-        let min_s = if min_strength > 0.0 { Some(min_strength) } else { None };
+        let max_p = if max_periods > 0 {
+            Some(max_periods as usize)
+        } else {
+            None
+        };
+        let min_c = if min_confidence > 0.0 {
+            Some(min_confidence)
+        } else {
+            None
+        };
+        let min_s = if min_strength > 0.0 {
+            Some(min_strength)
+        } else {
+            None
+        };
         anofox_fcst_core::detect_multiple_periods_ts(&values_vec, max_p, min_c, min_s)
     }));
 
@@ -1045,9 +1060,8 @@ pub unsafe extern "C" fn anofox_ts_detect_multiple_periods(
             copy_string_to_buffer(&multi_result.method, &mut (*out_result).method);
 
             if n > 0 {
-                let periods_ptr =
-                    malloc(n * std::mem::size_of::<types::DetectedPeriodFFI>())
-                        as *mut types::DetectedPeriodFFI;
+                let periods_ptr = malloc(n * std::mem::size_of::<types::DetectedPeriodFFI>())
+                    as *mut types::DetectedPeriodFFI;
                 for (i, dp) in multi_result.periods.iter().enumerate() {
                     (*periods_ptr.add(i)).period = dp.period;
                     (*periods_ptr.add(i)).confidence = dp.confidence;
@@ -1109,8 +1123,16 @@ pub unsafe extern "C" fn anofox_ts_detect_peaks(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
-        let min_dist = if min_distance > 0.0 { Some(min_distance) } else { None };
-        let min_prom = if min_prominence > 0.0 { Some(min_prominence) } else { None };
+        let min_dist = if min_distance > 0.0 {
+            Some(min_distance)
+        } else {
+            None
+        };
+        let min_prom = if min_prominence > 0.0 {
+            Some(min_prominence)
+        } else {
+            None
+        };
         anofox_fcst_core::detect_peaks(&values_vec, min_dist, min_prom, smooth_first, None)
     }));
 
@@ -1137,7 +1159,8 @@ pub unsafe extern "C" fn anofox_ts_detect_peaks(
             let n_dist = peak_result.inter_peak_distances.len();
             (*out_result).n_distances = n_dist;
             if n_dist > 0 {
-                (*out_result).inter_peak_distances = vec_to_c_array(&peak_result.inter_peak_distances);
+                (*out_result).inter_peak_distances =
+                    vec_to_c_array(&peak_result.inter_peak_distances);
             } else {
                 (*out_result).inter_peak_distances = ptr::null_mut();
             }
@@ -1266,7 +1289,8 @@ pub unsafe extern "C" fn anofox_ts_detrend(
         } else {
             CStr::from_ptr(method).to_str().unwrap_or("auto")
         };
-        let detrend_method: anofox_fcst_core::DetrendMethod = method_str.parse().unwrap_or_default();
+        let detrend_method: anofox_fcst_core::DetrendMethod =
+            method_str.parse().unwrap_or_default();
         anofox_fcst_core::detrend(&values_vec, detrend_method)
     }));
 
@@ -1344,7 +1368,8 @@ pub unsafe extern "C" fn anofox_ts_decompose(
         } else {
             CStr::from_ptr(method).to_str().unwrap_or("additive")
         };
-        let decompose_method: anofox_fcst_core::DecomposeMethod = method_str.parse().unwrap_or_default();
+        let decompose_method: anofox_fcst_core::DecomposeMethod =
+            method_str.parse().unwrap_or_default();
         anofox_fcst_core::decompose(&values_vec, period, decompose_method)
     }));
 
@@ -1418,7 +1443,8 @@ pub unsafe extern "C" fn anofox_ts_seasonal_strength(
         } else {
             CStr::from_ptr(method).to_str().unwrap_or("variance")
         };
-        let strength_method: anofox_fcst_core::StrengthMethod = method_str.parse().unwrap_or_default();
+        let strength_method: anofox_fcst_core::StrengthMethod =
+            method_str.parse().unwrap_or_default();
         anofox_fcst_core::seasonal_strength(&values_vec, period, strength_method)
     }));
 
@@ -1477,12 +1503,19 @@ pub unsafe extern "C" fn anofox_ts_seasonal_strength_windowed(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
-        let window_opt = if window_size > 0.0 { Some(window_size) } else { None };
+        let window_opt = if window_size > 0.0 {
+            Some(window_size)
+        } else {
+            None
+        };
         let method_str = if method.is_null() {
             None
         } else {
             let s = CStr::from_ptr(method).to_str().unwrap_or("variance");
-            Some(s.parse::<anofox_fcst_core::StrengthMethod>().unwrap_or_default())
+            Some(
+                s.parse::<anofox_fcst_core::StrengthMethod>()
+                    .unwrap_or_default(),
+            )
         };
         anofox_fcst_core::seasonal_strength_windowed(&values_vec, period, window_opt, method_str)
     }));
@@ -1546,8 +1579,16 @@ pub unsafe extern "C" fn anofox_ts_classify_seasonality(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
-        let strength_opt = if strength_threshold > 0.0 { Some(strength_threshold) } else { None };
-        let timing_opt = if timing_threshold > 0.0 { Some(timing_threshold) } else { None };
+        let strength_opt = if strength_threshold > 0.0 {
+            Some(strength_threshold)
+        } else {
+            None
+        };
+        let timing_opt = if timing_threshold > 0.0 {
+            Some(timing_threshold)
+        } else {
+            None
+        };
         anofox_fcst_core::classify_seasonality(&values_vec, period, strength_opt, timing_opt)
     }));
 
@@ -1557,7 +1598,10 @@ pub unsafe extern "C" fn anofox_ts_classify_seasonality(
             (*out_result).has_stable_timing = classification.has_stable_timing;
             (*out_result).timing_variability = classification.timing_variability;
             (*out_result).seasonal_strength = classification.seasonal_strength;
-            copy_string_to_buffer(classification.classification.as_str(), &mut (*out_result).classification);
+            copy_string_to_buffer(
+                classification.classification.as_str(),
+                &mut (*out_result).classification,
+            );
 
             // Copy cycle strengths
             let n_cycles = classification.cycle_strengths.len();
@@ -1633,10 +1677,28 @@ pub unsafe extern "C" fn anofox_ts_detect_seasonality_changes(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
-        let threshold_opt = if threshold > 0.0 { Some(threshold) } else { None };
-        let window_opt = if window_size > 0.0 { Some(window_size) } else { None };
-        let min_dur_opt = if min_duration > 0.0 { Some(min_duration) } else { None };
-        anofox_fcst_core::detect_seasonality_changes(&values_vec, period, threshold_opt, window_opt, min_dur_opt)
+        let threshold_opt = if threshold > 0.0 {
+            Some(threshold)
+        } else {
+            None
+        };
+        let window_opt = if window_size > 0.0 {
+            Some(window_size)
+        } else {
+            None
+        };
+        let min_dur_opt = if min_duration > 0.0 {
+            Some(min_duration)
+        } else {
+            None
+        };
+        anofox_fcst_core::detect_seasonality_changes(
+            &values_vec,
+            period,
+            threshold_opt,
+            window_opt,
+            min_dur_opt,
+        )
     }));
 
     match result {
@@ -1651,7 +1713,10 @@ pub unsafe extern "C" fn anofox_ts_detect_seasonality_changes(
                 for (i, cp) in change_result.change_points.iter().enumerate() {
                     (*changes_ptr.add(i)).index = cp.index;
                     (*changes_ptr.add(i)).time = cp.time;
-                    copy_string_to_buffer(cp.change_type.as_str(), &mut (*changes_ptr.add(i)).change_type);
+                    copy_string_to_buffer(
+                        cp.change_type.as_str(),
+                        &mut (*changes_ptr.add(i)).change_type,
+                    );
                     (*changes_ptr.add(i)).strength_before = cp.strength_before;
                     (*changes_ptr.add(i)).strength_after = cp.strength_after;
                 }
@@ -1779,8 +1844,16 @@ pub unsafe extern "C" fn anofox_ts_detect_amplitude_modulation(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
-        let mod_thresh = if modulation_threshold > 0.0 { Some(modulation_threshold) } else { None };
-        let seas_thresh = if seasonality_threshold > 0.0 { Some(seasonality_threshold) } else { None };
+        let mod_thresh = if modulation_threshold > 0.0 {
+            Some(modulation_threshold)
+        } else {
+            None
+        };
+        let seas_thresh = if seasonality_threshold > 0.0 {
+            Some(seasonality_threshold)
+        } else {
+            None
+        };
         anofox_fcst_core::detect_amplitude_modulation(&values_vec, period, mod_thresh, seas_thresh)
     }));
 
@@ -1789,7 +1862,10 @@ pub unsafe extern "C" fn anofox_ts_detect_amplitude_modulation(
             (*out_result).is_seasonal = am_result.is_seasonal;
             (*out_result).seasonal_strength = am_result.seasonal_strength;
             (*out_result).has_modulation = am_result.has_modulation;
-            copy_string_to_buffer(am_result.modulation_type.as_str(), &mut (*out_result).modulation_type);
+            copy_string_to_buffer(
+                am_result.modulation_type.as_str(),
+                &mut (*out_result).modulation_type,
+            );
             (*out_result).modulation_score = am_result.modulation_score;
             (*out_result).amplitude_trend = am_result.amplitude_trend;
             (*out_result).scale = am_result.scale;
@@ -3212,7 +3288,9 @@ pub unsafe extern "C" fn anofox_free_multi_period_result(result: *mut types::Mul
 /// # Safety
 /// The result pointer must be valid or null.
 #[no_mangle]
-pub unsafe extern "C" fn anofox_free_peak_detection_result(result: *mut types::PeakDetectionResultFFI) {
+pub unsafe extern "C" fn anofox_free_peak_detection_result(
+    result: *mut types::PeakDetectionResultFFI,
+) {
     if result.is_null() {
         return;
     }
@@ -3308,7 +3386,9 @@ pub unsafe extern "C" fn anofox_free_decompose_result(result: *mut types::Decomp
 /// # Safety
 /// The result pointer must be valid or null.
 #[no_mangle]
-pub unsafe extern "C" fn anofox_free_seasonality_classification_result(result: *mut types::SeasonalityClassificationFFI) {
+pub unsafe extern "C" fn anofox_free_seasonality_classification_result(
+    result: *mut types::SeasonalityClassificationFFI,
+) {
     if result.is_null() {
         return;
     }
@@ -3329,7 +3409,9 @@ pub unsafe extern "C" fn anofox_free_seasonality_classification_result(result: *
 /// # Safety
 /// The result pointer must be valid or null.
 #[no_mangle]
-pub unsafe extern "C" fn anofox_free_change_detection_result(result: *mut types::ChangeDetectionResultFFI) {
+pub unsafe extern "C" fn anofox_free_change_detection_result(
+    result: *mut types::ChangeDetectionResultFFI,
+) {
     if result.is_null() {
         return;
     }
@@ -3350,7 +3432,9 @@ pub unsafe extern "C" fn anofox_free_change_detection_result(result: *mut types:
 /// # Safety
 /// The result pointer must be valid or null.
 #[no_mangle]
-pub unsafe extern "C" fn anofox_free_instantaneous_period_result(result: *mut types::InstantaneousPeriodResultFFI) {
+pub unsafe extern "C" fn anofox_free_instantaneous_period_result(
+    result: *mut types::InstantaneousPeriodResultFFI,
+) {
     if result.is_null() {
         return;
     }
@@ -3375,7 +3459,9 @@ pub unsafe extern "C" fn anofox_free_instantaneous_period_result(result: *mut ty
 /// # Safety
 /// The result pointer must be valid or null.
 #[no_mangle]
-pub unsafe extern "C" fn anofox_free_amplitude_modulation_result(result: *mut types::AmplitudeModulationResultFFI) {
+pub unsafe extern "C" fn anofox_free_amplitude_modulation_result(
+    result: *mut types::AmplitudeModulationResultFFI,
+) {
     if result.is_null() {
         return;
     }

@@ -6,7 +6,7 @@
 //! - SQL setting: SET anofox_telemetry_enabled = false;
 
 use std::env;
-use std::ffi::{CStr, c_char};
+use std::ffi::{c_char, CStr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
@@ -102,8 +102,10 @@ pub fn capture_event(event: &str, properties: serde_json::Value) {
     });
 }
 
+/// No-op capture when telemetry feature is disabled.
+/// This version accepts any type that can be ignored.
 #[cfg(not(feature = "telemetry"))]
-pub fn capture_event(_event: &str, _properties: serde_json::Value) {
+pub fn capture_event<T>(_event: &str, _properties: T) {
     // No-op when telemetry feature is disabled
 }
 

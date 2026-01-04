@@ -8,8 +8,8 @@ use fdars_core::detrend::{
     auto_detrend as fdars_auto_detrend, decompose_additive as fdars_decompose_additive,
     decompose_multiplicative as fdars_decompose_multiplicative, detrend_diff as fdars_detrend_diff,
     detrend_linear as fdars_detrend_linear, detrend_loess as fdars_detrend_loess,
-    detrend_polynomial as fdars_detrend_polynomial,
-    DecomposeResult as FdarsDecomposeResult, TrendResult as FdarsTrendResult,
+    detrend_polynomial as fdars_detrend_polynomial, DecomposeResult as FdarsDecomposeResult,
+    TrendResult as FdarsTrendResult,
 };
 use std::str::FromStr;
 
@@ -387,7 +387,12 @@ mod tests {
         (0..n).map(|i| intercept + slope * i as f64).collect()
     }
 
-    fn generate_seasonal_series(n: usize, period: f64, amplitude: f64, trend_slope: f64) -> Vec<f64> {
+    fn generate_seasonal_series(
+        n: usize,
+        period: f64,
+        amplitude: f64,
+        trend_slope: f64,
+    ) -> Vec<f64> {
         (0..n)
             .map(|i| {
                 let trend = trend_slope * i as f64;

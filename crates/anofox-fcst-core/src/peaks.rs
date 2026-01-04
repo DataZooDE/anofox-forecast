@@ -58,11 +58,8 @@ impl From<FdarsPeakDetectionResult> for PeakDetectionResult {
 
         let n_peaks = peaks.len();
 
-        let inter_peak_distances: Vec<f64> = r
-            .inter_peak_distances
-            .first()
-            .cloned()
-            .unwrap_or_default();
+        let inter_peak_distances: Vec<f64> =
+            r.inter_peak_distances.first().cloned().unwrap_or_default();
 
         Self {
             peaks,

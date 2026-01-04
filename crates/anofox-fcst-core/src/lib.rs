@@ -57,10 +57,10 @@ pub use quality::{
 };
 pub use seasonality::{
     analyze_seasonality, classify_seasonality, detect_amplitude_modulation, detect_seasonality,
-    detect_seasonality_changes, instantaneous_period, seasonal_strength, seasonal_strength_spectral,
-    seasonal_strength_variance, seasonal_strength_wavelet, seasonal_strength_windowed,
-    AmplitudeModulationResult, AmplitudeModulationType, ChangeDetectionResult, ChangePointType,
-    InstantaneousPeriodResult, SeasonalityAnalysis, SeasonalityChangePoint,
-    SeasonalityClassification, SeasonalType, StrengthMethod,
+    detect_seasonality_changes, instantaneous_period, seasonal_strength,
+    seasonal_strength_spectral, seasonal_strength_variance, seasonal_strength_wavelet,
+    seasonal_strength_windowed, AmplitudeModulationResult, AmplitudeModulationType,
+    ChangeDetectionResult, ChangePointType, InstantaneousPeriodResult, SeasonalType,
+    SeasonalityAnalysis, SeasonalityChangePoint, SeasonalityClassification, StrengthMethod,
 };
 pub use stats::{compute_ts_stats, TsStats};

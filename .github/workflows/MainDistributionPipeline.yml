@@ -20,7 +20,10 @@ jobs:
       ci_tools_version: v1.4.3
       extension_name: anofox_forecast
       enable_rust: true
-      exclude_archs: 'wasm_mvp;wasm_eh;wasm_threads;windows_amd64_rtools;linux_arm64'
+      # windows_amd64_rtools excluded: only needed for R package builds
+      exclude_archs: 'windows_amd64_rtools'
+      # Enable WASM builds
+      opt_in_archs: 'wasm_mvp;wasm_eh;wasm_threads'
 
   build-and-test-rust:
     name: Rust Tests
