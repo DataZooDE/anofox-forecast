@@ -79,23 +79,35 @@ Both forms are identical in functionality.
    - [Missing Value Imputation](#missing-value-imputation)
    - [Differencing](#differencing)
 4. [Seasonality](#seasonality)
-   - [Seasonality Detection](#seasonality-detection)
+   - [Period Detection](#period-detection)
    - [Seasonality Analysis](#seasonality-analysis)
-5. [Time Series Decomposition](#time-series-decomposition)
+   - [Seasonal Strength](#seasonal-strength)
+   - [Windowed Seasonal Strength](#windowed-seasonal-strength)
+   - [Seasonality Classification](#seasonality-classification)
+   - [Seasonality Change Detection](#seasonality-change-detection)
+   - [Instantaneous Period](#instantaneous-period)
+   - [Amplitude Modulation Detection](#amplitude-modulation-detection)
+5. [Peak Detection](#peak-detection)
+   - [Detect Peaks](#detect-peaks)
+   - [Peak Timing Analysis](#peak-timing-analysis)
+6. [Detrending](#detrending)
+   - [Detrend](#detrend)
+7. [Time Series Decomposition](#time-series-decomposition)
+   - [Decompose](#decompose)
    - [MSTL Decomposition](#mstl-decomposition)
-6. [Changepoint Detection](#changepoint-detection)
+8. [Changepoint Detection](#changepoint-detection)
    - [Changepoint Detection Aggregate](#changepoint-detection-aggregate)
-7. [Feature Extraction](#feature-extraction)
+9. [Feature Extraction](#feature-extraction)
    - [Extract Features](#extract-features)
    - [List Available Features](#list-available-features)
    - [Feature Extraction Aggregate](#feature-extraction-aggregate)
    - [Feature Configuration](#feature-configuration)
-8. [Forecasting](#forecasting)
+10. [Forecasting](#forecasting)
    - [ts_forecast (Scalar)](#ts_forecast-scalar)
    - [ts_forecast (Table Macro)](#anofox_fcst_ts_forecast--ts_forecast-table-macro)
    - [ts_forecast_by (Table Macro)](#anofox_fcst_ts_forecast_by--ts_forecast_by-table-macro)
    - [ts_forecast_agg (Aggregate)](#anofox_fcst_ts_forecast_agg--ts_forecast_agg-aggregate-function)
-9. [Evaluation Metrics](#evaluation-metrics)
+11. [Evaluation Metrics](#evaluation-metrics)
    - [Mean Absolute Error (MAE)](#mean-absolute-error-mae)
    - [Mean Squared Error (MSE)](#mean-squared-error-mse)
    - [Root Mean Squared Error (RMSE)](#root-mean-squared-error-rmse)
@@ -529,30 +541,51 @@ SELECT ts_diff([1.0, 2.0, 4.0, 7.0, 11.0], 2);
 
 ## Seasonality
 
-### Seasonality Detection
+### Period Detection
 
-**ts_detect_seasonality** (alias: `anofox_fcst_ts_detect_seasonality`)
+**ts_detect_periods** (alias: `anofox_fcst_ts_detect_periods`)
 
-Detects seasonal periods using autocorrelation analysis.
+Detects seasonal periods using multiple methods from fdars-core.
 
 **Signature:**
 ```sql
-ts_detect_seasonality(values DOUBLE[]) → INTEGER[]
+ts_detect_periods(values DOUBLE[]) → STRUCT
+ts_detect_periods(values DOUBLE[], method VARCHAR) → STRUCT
 ```
 
-**Returns:** Array of detected seasonal periods, sorted by strength.
+**Parameters:**
+- `values`: Time series values (DOUBLE[])
+- `method`: Detection method (VARCHAR, optional, default: 'auto')
+  - `'fft'` - FFT periodogram-based estimation
+  - `'acf'` - Autocorrelation function approach
+  - `'regression'` - Fourier regression grid search
+  - `'multi'` - Iterative residual subtraction for concurrent periodicities
+  - `'wavelet'` - Wavelet-based period detection
+  - `'auto'` - Automatic method selection (default)
+
+**Returns:**
+```sql
+STRUCT(
+    periods          INTEGER[],     -- Detected periods sorted by strength
+    confidences      DOUBLE[],      -- Confidence score for each period (0-1)
+    primary_period   INTEGER,       -- Dominant period
+    method_used      VARCHAR        -- Method that was used
+)
+```
 
 **Example:**
 ```sql
--- Detect weekly and monthly patterns
-SELECT ts_detect_seasonality(LIST(value ORDER BY date)) AS periods
-FROM sales
-GROUP BY product_id;
--- Returns: [7, 30] for weekly and monthly patterns
+-- Detect periods using FFT
+SELECT ts_detect_periods(LIST(value ORDER BY date), 'fft') AS periods
+FROM sales GROUP BY product_id;
 
--- Simple example with repeating pattern
-SELECT ts_detect_seasonality([1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[]);
--- Returns: [4] (period of 4)
+-- Default auto-selection
+SELECT (ts_detect_periods([1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[])).primary_period;
+-- Returns: 4
+
+-- Access just the periods array
+SELECT (ts_detect_periods([1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[])).periods;
+-- Returns: [4]
 ```
 
 ---
@@ -561,14 +594,11 @@ SELECT ts_detect_seasonality([1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[]
 
 **ts_analyze_seasonality** (alias: `anofox_fcst_ts_analyze_seasonality`)
 
-Provides detailed seasonality analysis. C++ API compatible with optional timestamps parameter.
+Provides detailed seasonality analysis using fdars-core algorithms.
 
 **Signature:**
 ```sql
--- Single-argument form (convenience)
 ts_analyze_seasonality(values DOUBLE[]) → STRUCT
-
--- Two-argument form (C++ API compatible)
 ts_analyze_seasonality(timestamps TIMESTAMP[], values DOUBLE[]) → STRUCT
 ```
 
@@ -590,7 +620,380 @@ SELECT ts_analyze_seasonality([1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[]);
 
 ---
 
+### Seasonal Strength
+
+**ts_seasonal_strength** (alias: `anofox_fcst_ts_seasonal_strength`)
+
+Calculate seasonal strength using specified method.
+
+**Signature:**
+```sql
+ts_seasonal_strength(values DOUBLE[], method VARCHAR) → DOUBLE
+ts_seasonal_strength(values DOUBLE[], method VARCHAR, period INTEGER) → DOUBLE
+```
+
+**Parameters:**
+- `values`: Time series values (DOUBLE[])
+- `method`: Strength calculation method (VARCHAR)
+  - `'variance'` - Variance decomposition method
+  - `'spectral'` - Spectral-based measurement
+  - `'wavelet'` - Wavelet-based strength measurement
+  - `'auto'` - Automatic selection (default)
+- `period`: Optional known period (INTEGER)
+
+**Returns:** DOUBLE in range [0, 1]
+
+**Example:**
+```sql
+SELECT ts_seasonal_strength([1,2,3,4,1,2,3,4]::DOUBLE[], 'spectral');
+-- Returns: 0.95
+
+SELECT ts_seasonal_strength([1,2,3,4,1,2,3,4]::DOUBLE[], 'wavelet', 4);
+-- Returns: 0.92
+```
+
+---
+
+### Windowed Seasonal Strength
+
+**ts_seasonal_strength_windowed** (alias: `anofox_fcst_ts_seasonal_strength_windowed`)
+
+Compute time-varying seasonal strength using sliding windows.
+
+**Signature:**
+```sql
+ts_seasonal_strength_windowed(values DOUBLE[], window_size INTEGER) → STRUCT
+ts_seasonal_strength_windowed(values DOUBLE[], window_size INTEGER, step INTEGER) → STRUCT
+```
+
+**Returns:**
+```sql
+STRUCT(
+    window_starts    UBIGINT[],    -- Start indices of each window
+    strengths        DOUBLE[],     -- Seasonal strength for each window
+    mean_strength    DOUBLE,       -- Mean strength across windows
+    min_strength     DOUBLE,       -- Minimum strength
+    max_strength     DOUBLE,       -- Maximum strength
+    is_stable        BOOLEAN       -- Whether seasonality is stable (std < 0.1)
+)
+```
+
+**Example:**
+```sql
+SELECT ts_seasonal_strength_windowed(LIST(value ORDER BY date), 52) AS windowed
+FROM weekly_sales GROUP BY product_id;
+```
+
+---
+
+### Seasonality Classification
+
+**ts_classify_seasonality** (alias: `anofox_fcst_ts_classify_seasonality`)
+
+Classify the type of seasonal pattern.
+
+**Signature:**
+```sql
+ts_classify_seasonality(values DOUBLE[]) → STRUCT
+ts_classify_seasonality(values DOUBLE[], period INTEGER) → STRUCT
+```
+
+**Returns:**
+```sql
+STRUCT(
+    seasonal_type       VARCHAR,      -- 'none', 'weak', 'moderate', 'strong', 'dominant'
+    pattern_type        VARCHAR,      -- 'sinusoidal', 'sawtooth', 'pulse', 'complex', 'irregular'
+    symmetry            DOUBLE,       -- Symmetry score (-1 to 1, 0 = symmetric)
+    sharpness           DOUBLE,       -- Peak sharpness (0 = smooth, 1 = sharp)
+    is_multiplicative   BOOLEAN       -- Whether pattern appears multiplicative
+)
+```
+
+**Example:**
+```sql
+SELECT ts_classify_seasonality(LIST(value ORDER BY date)) AS classification
+FROM sales GROUP BY product_id;
+```
+
+---
+
+### Seasonality Change Detection
+
+**ts_detect_seasonality_changes** (alias: `anofox_fcst_ts_detect_seasonality_changes`)
+
+Detect when seasonality begins or ends in a time series.
+
+**Signature:**
+```sql
+ts_detect_seasonality_changes(values DOUBLE[]) → STRUCT
+ts_detect_seasonality_changes(values DOUBLE[], threshold DOUBLE) → STRUCT
+```
+
+**Returns:**
+```sql
+STRUCT(
+    change_indices       UBIGINT[],   -- Indices where changes occur
+    change_types         VARCHAR[],   -- 'onset' or 'cessation' for each
+    strength_before      DOUBLE[],    -- Seasonal strength before each change
+    strength_after       DOUBLE[],    -- Seasonal strength after each change
+    n_changes            UBIGINT      -- Number of detected changes
+)
+```
+
+**Example:**
+```sql
+SELECT ts_detect_seasonality_changes(LIST(value ORDER BY date)) AS changes
+FROM product_sales GROUP BY product_id;
+```
+
+---
+
+### Instantaneous Period
+
+**ts_instantaneous_period** (alias: `anofox_fcst_ts_instantaneous_period`)
+
+Estimate time-varying period using Hilbert transform for drifting seasonality.
+
+**Signature:**
+```sql
+ts_instantaneous_period(values DOUBLE[]) → STRUCT
+```
+
+**Returns:**
+```sql
+STRUCT(
+    periods              DOUBLE[],    -- Instantaneous period at each point
+    mean_period          DOUBLE,      -- Mean instantaneous period
+    period_drift         DOUBLE,      -- Linear trend in period (positive = lengthening)
+    is_stationary        BOOLEAN      -- Whether period is stationary (drift < threshold)
+)
+```
+
+**Example:**
+```sql
+SELECT ts_instantaneous_period(LIST(value ORDER BY date)) AS inst_period
+FROM sensor_data GROUP BY sensor_id;
+```
+
+---
+
+### Amplitude Modulation Detection
+
+**ts_detect_amplitude_modulation** (alias: `anofox_fcst_ts_detect_amplitude_modulation`)
+
+Detect amplitude modulation in seasonal patterns using wavelet analysis.
+
+**Signature:**
+```sql
+ts_detect_amplitude_modulation(values DOUBLE[]) → STRUCT
+ts_detect_amplitude_modulation(values DOUBLE[], period INTEGER) → STRUCT
+```
+
+**Returns:**
+```sql
+STRUCT(
+    has_modulation       BOOLEAN,      -- Whether amplitude modulation is detected
+    modulation_period    INTEGER,      -- Period of the modulation (if detected)
+    modulation_strength  DOUBLE,       -- Strength of modulation (0-1)
+    envelope             DOUBLE[],     -- Extracted amplitude envelope
+    is_growing           BOOLEAN       -- Whether amplitude is increasing over time
+)
+```
+
+**Example:**
+```sql
+SELECT ts_detect_amplitude_modulation(LIST(value ORDER BY date)) AS modulation
+FROM sales GROUP BY product_id;
+```
+
+---
+
+## Peak Detection
+
+### Detect Peaks
+
+**ts_detect_peaks** (alias: `anofox_fcst_ts_detect_peaks`)
+
+Detect peaks (local maxima) in time series data with prominence calculation.
+
+**Signature:**
+```sql
+ts_detect_peaks(values DOUBLE[]) → STRUCT
+ts_detect_peaks(values DOUBLE[], min_prominence DOUBLE) → STRUCT
+ts_detect_peaks(values DOUBLE[], min_prominence DOUBLE, min_distance INTEGER) → STRUCT
+```
+
+**Parameters:**
+- `values`: Time series values (DOUBLE[])
+- `min_prominence`: Minimum peak prominence threshold (default: 0.0, meaning all peaks)
+- `min_distance`: Minimum distance between peaks in observations (default: 1)
+
+**Returns:**
+```sql
+STRUCT(
+    peak_indices     UBIGINT[],    -- Indices of detected peaks (0-based)
+    peak_values      DOUBLE[],     -- Values at peak locations
+    prominences      DOUBLE[],     -- Prominence of each peak
+    n_peaks          UBIGINT       -- Number of peaks detected
+)
+```
+
+**Example:**
+```sql
+-- Detect all peaks
+SELECT ts_detect_peaks([1.0, 3.0, 2.0, 5.0, 1.0, 4.0, 2.0]::DOUBLE[]);
+-- Returns: {peak_indices: [1, 3, 5], peak_values: [3.0, 5.0, 4.0], ...}
+
+-- Detect significant peaks only (prominence > 2.0)
+SELECT ts_detect_peaks(LIST(value ORDER BY date), 2.0) AS peaks
+FROM sensor_data GROUP BY sensor_id;
+
+-- With minimum distance between peaks
+SELECT ts_detect_peaks(LIST(value ORDER BY date), 1.0, 7) AS peaks
+FROM daily_data GROUP BY series_id;
+```
+
+---
+
+### Peak Timing Analysis
+
+**ts_analyze_peak_timing** (alias: `anofox_fcst_ts_analyze_peak_timing`)
+
+Analyze peak timing variability across seasonal cycles.
+
+**Signature:**
+```sql
+ts_analyze_peak_timing(values DOUBLE[], period INTEGER) → STRUCT
+```
+
+**Parameters:**
+- `values`: Time series values (DOUBLE[])
+- `period`: Expected seasonal period (INTEGER)
+
+**Returns:**
+```sql
+STRUCT(
+    mean_peak_position    DOUBLE,     -- Mean position of peak within cycle (0 to period-1)
+    peak_position_std     DOUBLE,     -- Standard deviation of peak positions
+    peak_timing_cv        DOUBLE,     -- Coefficient of variation for peak timing
+    n_cycles              UBIGINT,    -- Number of complete cycles analyzed
+    is_consistent         BOOLEAN     -- Whether peak timing is consistent (cv < 0.2)
+)
+```
+
+**Example:**
+```sql
+-- Analyze weekly peak timing
+SELECT ts_analyze_peak_timing(LIST(value ORDER BY date), 7) AS timing
+FROM daily_sales GROUP BY store_id;
+
+-- Check if monthly peaks occur at consistent times
+SELECT
+    product_id,
+    (ts_analyze_peak_timing(LIST(value ORDER BY date), 30)).is_consistent AS has_consistent_peaks
+FROM monthly_data GROUP BY product_id;
+```
+
+---
+
+## Detrending
+
+### Detrend
+
+**ts_detrend** (alias: `anofox_fcst_ts_detrend`)
+
+Remove trend from time series using various methods.
+
+**Signature:**
+```sql
+ts_detrend(values DOUBLE[], method VARCHAR) → STRUCT
+```
+
+**Parameters:**
+- `values`: Time series values (DOUBLE[])
+- `method`: Detrending method (VARCHAR)
+  - `'linear'` - Linear trend removal via least squares
+  - `'polynomial'` - Polynomial trend (degree 2) via QR decomposition
+  - `'diff'` - First differencing
+  - `'diff2'` - Second differencing
+  - `'loess'` - LOESS local polynomial regression
+  - `'spline'` - P-splines detrending
+  - `'auto'` - Automatic selection using AIC
+
+**Returns:**
+```sql
+STRUCT(
+    detrended        DOUBLE[],     -- Detrended values
+    trend            DOUBLE[],     -- Extracted trend component
+    method_used      VARCHAR,      -- Method that was used
+    residual_var     DOUBLE        -- Variance of detrended series
+)
+```
+
+**Example:**
+```sql
+-- Linear detrending
+SELECT ts_detrend([1,2,3,4,5,6,7,8,9,10]::DOUBLE[], 'linear');
+
+-- Automatic method selection
+SELECT (ts_detrend(LIST(value ORDER BY date), 'auto')).detrended AS detrended_values
+FROM sales GROUP BY product_id;
+
+-- LOESS detrending for non-linear trends
+SELECT ts_detrend(LIST(value ORDER BY date), 'loess') AS result
+FROM sensor_data GROUP BY sensor_id;
+```
+
+---
+
 ## Time Series Decomposition
+
+### Decompose
+
+**ts_decompose** (alias: `anofox_fcst_ts_decompose`)
+
+Additive or multiplicative seasonal decomposition.
+
+**Signature:**
+```sql
+ts_decompose(values DOUBLE[], type VARCHAR) → STRUCT
+ts_decompose(values DOUBLE[], type VARCHAR, period INTEGER) → STRUCT
+```
+
+**Parameters:**
+- `values`: Time series values (DOUBLE[])
+- `type`: Decomposition type (VARCHAR)
+  - `'additive'` - data = trend + seasonal + remainder
+  - `'multiplicative'` - data = trend × seasonal × remainder
+  - `'auto'` - Automatic selection
+- `period`: Optional known period (INTEGER)
+
+**Returns:**
+```sql
+STRUCT(
+    trend            DOUBLE[],     -- Trend component
+    seasonal         DOUBLE[],     -- Seasonal component
+    remainder        DOUBLE[],     -- Residual component
+    period           INTEGER,      -- Detected/used period
+    type_used        VARCHAR       -- 'additive' or 'multiplicative'
+)
+```
+
+**Example:**
+```sql
+-- Additive decomposition
+SELECT ts_decompose([1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[], 'additive');
+
+-- Auto-detect decomposition type
+SELECT ts_decompose(LIST(value ORDER BY date), 'auto') AS decomposition
+FROM sales GROUP BY product_id;
+
+-- Multiplicative with known period
+SELECT ts_decompose(LIST(value ORDER BY date), 'multiplicative', 12) AS decomposition
+FROM monthly_sales GROUP BY product_id;
+```
+
+---
 
 ### MSTL Decomposition
 

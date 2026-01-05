@@ -183,6 +183,404 @@ typedef struct SeasonalityResult {
 } SeasonalityResult;
 
 /**
+ * A detected period from multiple period detection.
+ */
+typedef struct DetectedPeriodFFI {
+    /**
+     * Estimated period (in samples)
+     */
+    double period;
+    /**
+     * Confidence measure
+     */
+    double confidence;
+    /**
+     * Seasonal strength at this period
+     */
+    double strength;
+    /**
+     * Amplitude of the sinusoidal component
+     */
+    double amplitude;
+    /**
+     * Phase of the sinusoidal component (radians)
+     */
+    double phase;
+    /**
+     * Iteration number (1-indexed)
+     */
+    size_t iteration;
+} DetectedPeriodFFI;
+
+/**
+ * Result from multiple period detection.
+ */
+typedef struct MultiPeriodResult {
+    /**
+     * Array of detected periods
+     */
+    struct DetectedPeriodFFI *periods;
+    /**
+     * Number of detected periods
+     */
+    size_t n_periods;
+    /**
+     * Primary (strongest) period
+     */
+    double primary_period;
+    /**
+     * Method used for estimation
+     */
+    char method[32];
+} MultiPeriodResult;
+
+/**
+ * Result from single period estimation.
+ */
+typedef struct SinglePeriodResult {
+    /**
+     * Estimated period (in samples)
+     */
+    double period;
+    /**
+     * Dominant frequency (1/period)
+     */
+    double frequency;
+    /**
+     * Power at the dominant frequency
+     */
+    double power;
+    /**
+     * Confidence measure
+     */
+    double confidence;
+    /**
+     * Method used for estimation
+     */
+    char method[32];
+} SinglePeriodResult;
+
+/**
+ * A detected peak in the time series.
+ */
+typedef struct PeakFFI {
+    /**
+     * Index at which the peak occurs
+     */
+    size_t index;
+    /**
+     * Time at which the peak occurs
+     */
+    double time;
+    /**
+     * Value at the peak
+     */
+    double value;
+    /**
+     * Prominence of the peak
+     */
+    double prominence;
+} PeakFFI;
+
+/**
+ * Result of peak detection.
+ */
+typedef struct PeakDetectionResultFFI {
+    /**
+     * Array of detected peaks
+     */
+    struct PeakFFI *peaks;
+    /**
+     * Number of peaks detected
+     */
+    size_t n_peaks;
+    /**
+     * Inter-peak distances
+     */
+    double *inter_peak_distances;
+    /**
+     * Number of inter-peak distances
+     */
+    size_t n_distances;
+    /**
+     * Mean period estimated from inter-peak distances
+     */
+    double mean_period;
+} PeakDetectionResultFFI;
+
+/**
+ * Result of peak timing variability analysis.
+ */
+typedef struct PeakTimingResultFFI {
+    /**
+     * Peak times for each cycle
+     */
+    double *peak_times;
+    /**
+     * Peak values
+     */
+    double *peak_values;
+    /**
+     * Normalized timing (0-1 scale)
+     */
+    double *normalized_timing;
+    /**
+     * Number of peaks
+     */
+    size_t n_peaks;
+    /**
+     * Mean normalized timing
+     */
+    double mean_timing;
+    /**
+     * Standard deviation of normalized timing
+     */
+    double std_timing;
+    /**
+     * Range of normalized timing
+     */
+    double range_timing;
+    /**
+     * Variability score (0 = stable, 1 = highly variable)
+     */
+    double variability_score;
+    /**
+     * Trend in timing
+     */
+    double timing_trend;
+    /**
+     * Whether timing is considered stable
+     */
+    bool is_stable;
+} PeakTimingResultFFI;
+
+/**
+ * Result of detrending operation.
+ */
+typedef struct DetrendResultFFI {
+    /**
+     * Estimated trend values
+     */
+    double *trend;
+    /**
+     * Detrended data
+     */
+    double *detrended;
+    /**
+     * Number of values
+     */
+    size_t length;
+    /**
+     * Method used for detrending
+     */
+    char method[32];
+    /**
+     * Polynomial coefficients (may be NULL)
+     */
+    double *coefficients;
+    /**
+     * Number of coefficients
+     */
+    size_t n_coefficients;
+    /**
+     * Residual sum of squares
+     */
+    double rss;
+    /**
+     * Number of parameters
+     */
+    size_t n_params;
+} DetrendResultFFI;
+
+/**
+ * Result of seasonal decomposition.
+ */
+typedef struct DecomposeResultFFI {
+    /**
+     * Trend component
+     */
+    double *trend;
+    /**
+     * Seasonal component
+     */
+    double *seasonal;
+    /**
+     * Remainder/residual component
+     */
+    double *remainder;
+    /**
+     * Number of observations
+     */
+    size_t length;
+    /**
+     * Period used for decomposition
+     */
+    double period;
+    /**
+     * Decomposition method ("additive" or "multiplicative")
+     */
+    char method[32];
+} DecomposeResultFFI;
+
+/**
+ * Result of seasonality classification.
+ */
+typedef struct SeasonalityClassificationFFI {
+    /**
+     * Whether series is classified as seasonal
+     */
+    bool is_seasonal;
+    /**
+     * Whether timing is stable across cycles
+     */
+    bool has_stable_timing;
+    /**
+     * Timing variability measure
+     */
+    double timing_variability;
+    /**
+     * Overall seasonal strength
+     */
+    double seasonal_strength;
+    /**
+     * Per-cycle seasonal strength
+     */
+    double *cycle_strengths;
+    /**
+     * Number of cycle strengths
+     */
+    size_t n_cycle_strengths;
+    /**
+     * Indices of weak/missing seasons
+     */
+    size_t *weak_seasons;
+    /**
+     * Number of weak seasons
+     */
+    size_t n_weak_seasons;
+    /**
+     * Classification type (stable, variable, intermittent, absent)
+     */
+    char classification[32];
+} SeasonalityClassificationFFI;
+
+/**
+ * Seasonality change point.
+ */
+typedef struct SeasonalityChangePointFFI {
+    /**
+     * Index at which change occurs
+     */
+    size_t index;
+    /**
+     * Time at which change occurs
+     */
+    double time;
+    /**
+     * Type of change (onset, cessation)
+     */
+    char change_type[32];
+    /**
+     * Strength before change
+     */
+    double strength_before;
+    /**
+     * Strength after change
+     */
+    double strength_after;
+} SeasonalityChangePointFFI;
+
+/**
+ * Result of seasonality change detection.
+ */
+typedef struct ChangeDetectionResultFFI {
+    /**
+     * Array of detected change points
+     */
+    struct SeasonalityChangePointFFI *change_points;
+    /**
+     * Number of change points
+     */
+    size_t n_changes;
+    /**
+     * Time-varying seasonal strength curve
+     */
+    double *strength_curve;
+    /**
+     * Number of strength curve values
+     */
+    size_t n_strength_curve;
+} ChangeDetectionResultFFI;
+
+/**
+ * Result of instantaneous period estimation.
+ */
+typedef struct InstantaneousPeriodResultFFI {
+    /**
+     * Instantaneous period at each time point
+     */
+    double *periods;
+    /**
+     * Instantaneous frequency at each time point
+     */
+    double *frequencies;
+    /**
+     * Instantaneous amplitude (envelope) at each time point
+     */
+    double *amplitudes;
+    /**
+     * Number of values
+     */
+    size_t length;
+} InstantaneousPeriodResultFFI;
+
+/**
+ * Result of amplitude modulation detection.
+ */
+typedef struct AmplitudeModulationResultFFI {
+    /**
+     * Whether seasonality is present
+     */
+    bool is_seasonal;
+    /**
+     * Overall seasonal strength
+     */
+    double seasonal_strength;
+    /**
+     * Whether amplitude modulation is detected
+     */
+    bool has_modulation;
+    /**
+     * Modulation type (stable, emerging, fading, oscillating, non_seasonal)
+     */
+    char modulation_type[32];
+    /**
+     * Coefficient of variation of wavelet amplitude
+     */
+    double modulation_score;
+    /**
+     * Trend in amplitude (-1 to 1)
+     */
+    double amplitude_trend;
+    /**
+     * Wavelet amplitude at the seasonal frequency over time
+     */
+    double *wavelet_amplitude;
+    /**
+     * Time points corresponding to wavelet_amplitude
+     */
+    double *time_points;
+    /**
+     * Number of amplitude/time values
+     */
+    size_t n_points;
+    /**
+     * Scale (period) used for wavelet analysis
+     */
+    double scale;
+} AmplitudeModulationResultFFI;
+
+/**
  * MSTL decomposition result.
  */
 typedef struct MstlResult {
@@ -718,6 +1116,188 @@ bool anofox_ts_analyze_seasonality(const int64_t *_timestamps,
                                    struct AnofoxError *out_error);
 
 /**
+ * Detect periods using specified method.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ */
+bool anofox_ts_detect_periods(const double *values,
+                              size_t length,
+                              const char *method,
+                              struct MultiPeriodResult *out_result,
+                              struct AnofoxError *out_error);
+
+/**
+ * Estimate period using FFT.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_estimate_period_fft(const double *values,
+                                   size_t length,
+                                   struct SinglePeriodResult *out_result,
+                                   struct AnofoxError *out_error);
+
+/**
+ * Estimate period using ACF.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_estimate_period_acf(const double *values,
+                                   size_t length,
+                                   int max_lag,
+                                   struct SinglePeriodResult *out_result,
+                                   struct AnofoxError *out_error);
+
+/**
+ * Detect multiple periods in time series.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_detect_multiple_periods(const double *values,
+                                       size_t length,
+                                       int max_periods,
+                                       double min_confidence,
+                                       double min_strength,
+                                       struct MultiPeriodResult *out_result,
+                                       struct AnofoxError *out_error);
+
+/**
+ * Detect peaks in time series.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_detect_peaks(const double *values,
+                            size_t length,
+                            double min_distance,
+                            double min_prominence,
+                            bool smooth_first,
+                            struct PeakDetectionResultFFI *out_result,
+                            struct AnofoxError *out_error);
+
+/**
+ * Analyze peak timing variability.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_analyze_peak_timing(const double *values,
+                                   size_t length,
+                                   double period,
+                                   struct PeakTimingResultFFI *out_result,
+                                   struct AnofoxError *out_error);
+
+/**
+ * Detrend time series using specified method.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_detrend(const double *values,
+                       size_t length,
+                       const char *method,
+                       struct DetrendResultFFI *out_result,
+                       struct AnofoxError *out_error);
+
+/**
+ * Decompose time series into trend, seasonal, and remainder.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_decompose(const double *values,
+                         size_t length,
+                         double period,
+                         const char *method,
+                         struct DecomposeResultFFI *out_result,
+                         struct AnofoxError *out_error);
+
+/**
+ * Compute seasonal strength using specified method.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_seasonal_strength(const double *values,
+                                 size_t length,
+                                 double period,
+                                 const char *method,
+                                 double *out_strength,
+                                 struct AnofoxError *out_error);
+
+/**
+ * Compute windowed seasonal strength.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_seasonal_strength_windowed(const double *values,
+                                          size_t length,
+                                          double period,
+                                          double window_size,
+                                          const char *method,
+                                          double **out_strengths,
+                                          size_t *out_n_windows,
+                                          struct AnofoxError *out_error);
+
+/**
+ * Classify seasonality type and pattern.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_classify_seasonality(const double *values,
+                                    size_t length,
+                                    double period,
+                                    double strength_threshold,
+                                    double timing_threshold,
+                                    struct SeasonalityClassificationFFI *out_result,
+                                    struct AnofoxError *out_error);
+
+/**
+ * Detect seasonality changes over time.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_detect_seasonality_changes(const double *values,
+                                          size_t length,
+                                          double period,
+                                          double threshold,
+                                          double window_size,
+                                          double min_duration,
+                                          struct ChangeDetectionResultFFI *out_result,
+                                          struct AnofoxError *out_error);
+
+/**
+ * Compute instantaneous period using Hilbert transform.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_instantaneous_period(const double *values,
+                                    size_t length,
+                                    struct InstantaneousPeriodResultFFI *out_result,
+                                    struct AnofoxError *out_error);
+
+/**
+ * Detect amplitude modulation in seasonal time series.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_detect_amplitude_modulation(const double *values,
+                                           size_t length,
+                                           double period,
+                                           double modulation_threshold,
+                                           double seasonality_threshold,
+                                           struct AmplitudeModulationResultFFI *out_result,
+                                           struct AnofoxError *out_error);
+
+/**
  * MSTL decomposition.
  *
  * # Arguments
@@ -1027,6 +1607,78 @@ void anofox_free_double_array(double *ptr);
  * The pointer must be valid or null.
  */
 void anofox_free_int_array(int *ptr);
+
+/**
+ * Free a MultiPeriodResult.
+ *
+ * # Safety
+ * The result pointer must be valid or null.
+ */
+void anofox_free_multi_period_result(struct MultiPeriodResult *result);
+
+/**
+ * Free a PeakDetectionResultFFI.
+ *
+ * # Safety
+ * The result pointer must be valid or null.
+ */
+void anofox_free_peak_detection_result(struct PeakDetectionResultFFI *result);
+
+/**
+ * Free a PeakTimingResultFFI.
+ *
+ * # Safety
+ * The result pointer must be valid or null.
+ */
+void anofox_free_peak_timing_result(struct PeakTimingResultFFI *result);
+
+/**
+ * Free a DetrendResultFFI.
+ *
+ * # Safety
+ * The result pointer must be valid or null.
+ */
+void anofox_free_detrend_result(struct DetrendResultFFI *result);
+
+/**
+ * Free a DecomposeResultFFI.
+ *
+ * # Safety
+ * The result pointer must be valid or null.
+ */
+void anofox_free_decompose_result(struct DecomposeResultFFI *result);
+
+/**
+ * Free a SeasonalityClassificationFFI.
+ *
+ * # Safety
+ * The result pointer must be valid or null.
+ */
+void anofox_free_seasonality_classification_result(struct SeasonalityClassificationFFI *result);
+
+/**
+ * Free a ChangeDetectionResultFFI.
+ *
+ * # Safety
+ * The result pointer must be valid or null.
+ */
+void anofox_free_change_detection_result(struct ChangeDetectionResultFFI *result);
+
+/**
+ * Free an InstantaneousPeriodResultFFI.
+ *
+ * # Safety
+ * The result pointer must be valid or null.
+ */
+void anofox_free_instantaneous_period_result(struct InstantaneousPeriodResultFFI *result);
+
+/**
+ * Free an AmplitudeModulationResultFFI.
+ *
+ * # Safety
+ * The result pointer must be valid or null.
+ */
+void anofox_free_amplitude_modulation_result(struct AmplitudeModulationResultFFI *result);
 
 const char *anofox_fcst_version(void);
 
