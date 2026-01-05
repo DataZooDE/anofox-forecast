@@ -3,7 +3,12 @@
 //! These types are designed to be used across the Rust/C++ boundary,
 //! following the patterns from anofox-statistics.
 
-use libc::{c_char, c_double, c_int, size_t};
+// Use core::ffi types for cross-platform compatibility including WASM
+use core::ffi::{c_char, c_double, c_int};
+
+// size_t is not in core::ffi, use usize instead
+#[allow(non_camel_case_types)]
+type size_t = usize;
 
 /// Error codes for FFI boundary.
 #[repr(C)]

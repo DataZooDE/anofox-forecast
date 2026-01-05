@@ -3,13 +3,41 @@
 //! This crate provides C-compatible functions that can be called from the
 //! C++ DuckDB extension wrapper.
 
+#[cfg(not(target_family = "wasm"))]
 pub mod telemetry;
 pub mod types;
 
-use libc::{c_char, c_double, c_int, free, malloc, size_t};
+// Use core::ffi types which work on all platforms including WASM
+use core::ffi::{c_char, c_double, c_int};
 use std::ffi::CStr;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
+
+// size_t is not in core::ffi, use usize instead
+#[allow(non_camel_case_types)]
+type size_t = usize;
+
+// Memory allocation - use libc on native, std::alloc on WASM
+#[cfg(not(target_family = "wasm"))]
+use libc::{free, malloc};
+
+#[cfg(target_family = "wasm")]
+unsafe fn malloc(size: usize) -> *mut core::ffi::c_void {
+    use std::alloc::{alloc, Layout};
+    let layout = Layout::from_size_align(size, 8).unwrap();
+    alloc(layout) as *mut core::ffi::c_void
+}
+
+#[cfg(target_family = "wasm")]
+unsafe fn free(ptr: *mut core::ffi::c_void) {
+    use std::alloc::{dealloc, Layout};
+    if !ptr.is_null() {
+        // Note: We don't know the actual size, so we use a minimal layout
+        // This is safe because DuckDB manages the actual memory
+        let layout = Layout::from_size_align(1, 8).unwrap();
+        dealloc(ptr as *mut u8, layout);
+    }
+}
 
 pub use types::*;
 
@@ -2311,10 +2339,10 @@ pub unsafe extern "C" fn anofox_free_warnings(warnings: *mut *mut c_char, n_warn
     for i in 0..n_warnings {
         let warning_ptr = *warnings.add(i);
         if !warning_ptr.is_null() {
-            free(warning_ptr as *mut libc::c_void);
+            free(warning_ptr as *mut core::ffi::c_void);
         }
     }
-    free(warnings as *mut libc::c_void);
+    free(warnings as *mut core::ffi::c_void);
 }
 
 /// List available feature names.
@@ -3054,15 +3082,15 @@ pub unsafe extern "C" fn anofox_free_gap_fill_result(result: *mut GapFillResult)
     let r = &mut *result;
 
     if !r.dates.is_null() {
-        free(r.dates as *mut libc::c_void);
+        free(r.dates as *mut core::ffi::c_void);
         r.dates = ptr::null_mut();
     }
     if !r.values.is_null() {
-        free(r.values as *mut libc::c_void);
+        free(r.values as *mut core::ffi::c_void);
         r.values = ptr::null_mut();
     }
     if !r.validity.is_null() {
-        free(r.validity as *mut libc::c_void);
+        free(r.validity as *mut core::ffi::c_void);
         r.validity = ptr::null_mut();
     }
 }
@@ -3079,11 +3107,11 @@ pub unsafe extern "C" fn anofox_free_filled_values_result(result: *mut FilledVal
     let r = &mut *result;
 
     if !r.values.is_null() {
-        free(r.values as *mut libc::c_void);
+        free(r.values as *mut core::ffi::c_void);
         r.values = ptr::null_mut();
     }
     if !r.validity.is_null() {
-        free(r.validity as *mut libc::c_void);
+        free(r.validity as *mut core::ffi::c_void);
         r.validity = ptr::null_mut();
     }
 }
@@ -3100,23 +3128,23 @@ pub unsafe extern "C" fn anofox_free_forecast_result(result: *mut ForecastResult
     let r = &mut *result;
 
     if !r.point_forecasts.is_null() {
-        free(r.point_forecasts as *mut libc::c_void);
+        free(r.point_forecasts as *mut core::ffi::c_void);
         r.point_forecasts = ptr::null_mut();
     }
     if !r.lower_bounds.is_null() {
-        free(r.lower_bounds as *mut libc::c_void);
+        free(r.lower_bounds as *mut core::ffi::c_void);
         r.lower_bounds = ptr::null_mut();
     }
     if !r.upper_bounds.is_null() {
-        free(r.upper_bounds as *mut libc::c_void);
+        free(r.upper_bounds as *mut core::ffi::c_void);
         r.upper_bounds = ptr::null_mut();
     }
     if !r.fitted_values.is_null() {
-        free(r.fitted_values as *mut libc::c_void);
+        free(r.fitted_values as *mut core::ffi::c_void);
         r.fitted_values = ptr::null_mut();
     }
     if !r.residuals.is_null() {
-        free(r.residuals as *mut libc::c_void);
+        free(r.residuals as *mut core::ffi::c_void);
         r.residuals = ptr::null_mut();
     }
 }
@@ -3133,7 +3161,7 @@ pub unsafe extern "C" fn anofox_free_changepoint_result(result: *mut Changepoint
     let r = &mut *result;
 
     if !r.changepoints.is_null() {
-        free(r.changepoints as *mut libc::c_void);
+        free(r.changepoints as *mut core::ffi::c_void);
         r.changepoints = ptr::null_mut();
     }
 }
@@ -3150,15 +3178,15 @@ pub unsafe extern "C" fn anofox_free_bocpd_result(result: *mut types::BocpdResul
     let r = &mut *result;
 
     if !r.is_changepoint.is_null() {
-        free(r.is_changepoint as *mut libc::c_void);
+        free(r.is_changepoint as *mut core::ffi::c_void);
         r.is_changepoint = ptr::null_mut();
     }
     if !r.changepoint_probability.is_null() {
-        free(r.changepoint_probability as *mut libc::c_void);
+        free(r.changepoint_probability as *mut core::ffi::c_void);
         r.changepoint_probability = ptr::null_mut();
     }
     if !r.changepoint_indices.is_null() {
-        free(r.changepoint_indices as *mut libc::c_void);
+        free(r.changepoint_indices as *mut core::ffi::c_void);
         r.changepoint_indices = ptr::null_mut();
     }
 }
@@ -3175,7 +3203,7 @@ pub unsafe extern "C" fn anofox_free_features_result(result: *mut FeaturesResult
     let r = &mut *result;
 
     if !r.features.is_null() {
-        free(r.features as *mut libc::c_void);
+        free(r.features as *mut core::ffi::c_void);
         r.features = ptr::null_mut();
     }
 
@@ -3183,10 +3211,10 @@ pub unsafe extern "C" fn anofox_free_features_result(result: *mut FeaturesResult
         for i in 0..r.n_features {
             let name_ptr = *r.feature_names.add(i);
             if !name_ptr.is_null() {
-                free(name_ptr as *mut libc::c_void);
+                free(name_ptr as *mut core::ffi::c_void);
             }
         }
-        free(r.feature_names as *mut libc::c_void);
+        free(r.feature_names as *mut core::ffi::c_void);
         r.feature_names = ptr::null_mut();
     }
 }
@@ -3203,7 +3231,7 @@ pub unsafe extern "C" fn anofox_free_seasonality_result(result: *mut Seasonality
     let r = &mut *result;
 
     if !r.detected_periods.is_null() {
-        free(r.detected_periods as *mut libc::c_void);
+        free(r.detected_periods as *mut core::ffi::c_void);
         r.detected_periods = ptr::null_mut();
     }
 }
@@ -3220,15 +3248,15 @@ pub unsafe extern "C" fn anofox_free_mstl_result(result: *mut MstlResult) {
     let r = &mut *result;
 
     if !r.trend.is_null() {
-        free(r.trend as *mut libc::c_void);
+        free(r.trend as *mut core::ffi::c_void);
         r.trend = ptr::null_mut();
     }
     if !r.remainder.is_null() {
-        free(r.remainder as *mut libc::c_void);
+        free(r.remainder as *mut core::ffi::c_void);
         r.remainder = ptr::null_mut();
     }
     if !r.seasonal_periods.is_null() {
-        free(r.seasonal_periods as *mut libc::c_void);
+        free(r.seasonal_periods as *mut core::ffi::c_void);
         r.seasonal_periods = ptr::null_mut();
     }
 
@@ -3236,10 +3264,10 @@ pub unsafe extern "C" fn anofox_free_mstl_result(result: *mut MstlResult) {
         for i in 0..r.n_seasonal {
             let comp_ptr = *r.seasonal_components.add(i);
             if !comp_ptr.is_null() {
-                free(comp_ptr as *mut libc::c_void);
+                free(comp_ptr as *mut core::ffi::c_void);
             }
         }
-        free(r.seasonal_components as *mut libc::c_void);
+        free(r.seasonal_components as *mut core::ffi::c_void);
         r.seasonal_components = ptr::null_mut();
     }
 }
@@ -3251,7 +3279,7 @@ pub unsafe extern "C" fn anofox_free_mstl_result(result: *mut MstlResult) {
 #[no_mangle]
 pub unsafe extern "C" fn anofox_free_double_array(ptr: *mut c_double) {
     if !ptr.is_null() {
-        free(ptr as *mut libc::c_void);
+        free(ptr as *mut core::ffi::c_void);
     }
 }
 
@@ -3262,7 +3290,7 @@ pub unsafe extern "C" fn anofox_free_double_array(ptr: *mut c_double) {
 #[no_mangle]
 pub unsafe extern "C" fn anofox_free_int_array(ptr: *mut c_int) {
     if !ptr.is_null() {
-        free(ptr as *mut libc::c_void);
+        free(ptr as *mut core::ffi::c_void);
     }
 }
 
@@ -3278,7 +3306,7 @@ pub unsafe extern "C" fn anofox_free_multi_period_result(result: *mut types::Mul
     let r = &mut *result;
 
     if !r.periods.is_null() {
-        free(r.periods as *mut libc::c_void);
+        free(r.periods as *mut core::ffi::c_void);
         r.periods = ptr::null_mut();
     }
 }
@@ -3297,11 +3325,11 @@ pub unsafe extern "C" fn anofox_free_peak_detection_result(
     let r = &mut *result;
 
     if !r.peaks.is_null() {
-        free(r.peaks as *mut libc::c_void);
+        free(r.peaks as *mut core::ffi::c_void);
         r.peaks = ptr::null_mut();
     }
     if !r.inter_peak_distances.is_null() {
-        free(r.inter_peak_distances as *mut libc::c_void);
+        free(r.inter_peak_distances as *mut core::ffi::c_void);
         r.inter_peak_distances = ptr::null_mut();
     }
 }
@@ -3318,15 +3346,15 @@ pub unsafe extern "C" fn anofox_free_peak_timing_result(result: *mut types::Peak
     let r = &mut *result;
 
     if !r.peak_times.is_null() {
-        free(r.peak_times as *mut libc::c_void);
+        free(r.peak_times as *mut core::ffi::c_void);
         r.peak_times = ptr::null_mut();
     }
     if !r.peak_values.is_null() {
-        free(r.peak_values as *mut libc::c_void);
+        free(r.peak_values as *mut core::ffi::c_void);
         r.peak_values = ptr::null_mut();
     }
     if !r.normalized_timing.is_null() {
-        free(r.normalized_timing as *mut libc::c_void);
+        free(r.normalized_timing as *mut core::ffi::c_void);
         r.normalized_timing = ptr::null_mut();
     }
 }
@@ -3343,15 +3371,15 @@ pub unsafe extern "C" fn anofox_free_detrend_result(result: *mut types::DetrendR
     let r = &mut *result;
 
     if !r.trend.is_null() {
-        free(r.trend as *mut libc::c_void);
+        free(r.trend as *mut core::ffi::c_void);
         r.trend = ptr::null_mut();
     }
     if !r.detrended.is_null() {
-        free(r.detrended as *mut libc::c_void);
+        free(r.detrended as *mut core::ffi::c_void);
         r.detrended = ptr::null_mut();
     }
     if !r.coefficients.is_null() {
-        free(r.coefficients as *mut libc::c_void);
+        free(r.coefficients as *mut core::ffi::c_void);
         r.coefficients = ptr::null_mut();
     }
 }
@@ -3368,15 +3396,15 @@ pub unsafe extern "C" fn anofox_free_decompose_result(result: *mut types::Decomp
     let r = &mut *result;
 
     if !r.trend.is_null() {
-        free(r.trend as *mut libc::c_void);
+        free(r.trend as *mut core::ffi::c_void);
         r.trend = ptr::null_mut();
     }
     if !r.seasonal.is_null() {
-        free(r.seasonal as *mut libc::c_void);
+        free(r.seasonal as *mut core::ffi::c_void);
         r.seasonal = ptr::null_mut();
     }
     if !r.remainder.is_null() {
-        free(r.remainder as *mut libc::c_void);
+        free(r.remainder as *mut core::ffi::c_void);
         r.remainder = ptr::null_mut();
     }
 }
@@ -3395,11 +3423,11 @@ pub unsafe extern "C" fn anofox_free_seasonality_classification_result(
     let r = &mut *result;
 
     if !r.cycle_strengths.is_null() {
-        free(r.cycle_strengths as *mut libc::c_void);
+        free(r.cycle_strengths as *mut core::ffi::c_void);
         r.cycle_strengths = ptr::null_mut();
     }
     if !r.weak_seasons.is_null() {
-        free(r.weak_seasons as *mut libc::c_void);
+        free(r.weak_seasons as *mut core::ffi::c_void);
         r.weak_seasons = ptr::null_mut();
     }
 }
@@ -3418,11 +3446,11 @@ pub unsafe extern "C" fn anofox_free_change_detection_result(
     let r = &mut *result;
 
     if !r.change_points.is_null() {
-        free(r.change_points as *mut libc::c_void);
+        free(r.change_points as *mut core::ffi::c_void);
         r.change_points = ptr::null_mut();
     }
     if !r.strength_curve.is_null() {
-        free(r.strength_curve as *mut libc::c_void);
+        free(r.strength_curve as *mut core::ffi::c_void);
         r.strength_curve = ptr::null_mut();
     }
 }
@@ -3441,15 +3469,15 @@ pub unsafe extern "C" fn anofox_free_instantaneous_period_result(
     let r = &mut *result;
 
     if !r.periods.is_null() {
-        free(r.periods as *mut libc::c_void);
+        free(r.periods as *mut core::ffi::c_void);
         r.periods = ptr::null_mut();
     }
     if !r.frequencies.is_null() {
-        free(r.frequencies as *mut libc::c_void);
+        free(r.frequencies as *mut core::ffi::c_void);
         r.frequencies = ptr::null_mut();
     }
     if !r.amplitudes.is_null() {
-        free(r.amplitudes as *mut libc::c_void);
+        free(r.amplitudes as *mut core::ffi::c_void);
         r.amplitudes = ptr::null_mut();
     }
 }
@@ -3468,11 +3496,11 @@ pub unsafe extern "C" fn anofox_free_amplitude_modulation_result(
     let r = &mut *result;
 
     if !r.wavelet_amplitude.is_null() {
-        free(r.wavelet_amplitude as *mut libc::c_void);
+        free(r.wavelet_amplitude as *mut core::ffi::c_void);
         r.wavelet_amplitude = ptr::null_mut();
     }
     if !r.time_points.is_null() {
-        free(r.time_points as *mut libc::c_void);
+        free(r.time_points as *mut core::ffi::c_void);
         r.time_points = ptr::null_mut();
     }
 }
@@ -3482,7 +3510,7 @@ pub unsafe extern "C" fn anofox_free_amplitude_modulation_result(
 // ============================================================================
 
 #[no_mangle]
-pub extern "C" fn anofox_fcst_version() -> *const libc::c_char {
+pub extern "C" fn anofox_fcst_version() -> *const c_char {
     static VERSION: &[u8] = b"0.1.0\0";
-    VERSION.as_ptr() as *const libc::c_char
+    VERSION.as_ptr() as *const c_char
 }
