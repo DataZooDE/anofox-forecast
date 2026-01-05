@@ -20,11 +20,8 @@ jobs:
       ci_tools_version: v1.4.3
       extension_name: anofox_forecast
       enable_rust: true
-      # windows_amd64_rtools: only needed for R package builds
-      # WASM (wasm_mvp, wasm_eh, wasm_threads): Rust extensions don't support WASM
-      # cross-compilation yet - Cargo build scripts require host compilation,
-      # but Emscripten is applied globally which breaks the build
-      exclude_archs: 'windows_amd64_rtools;wasm_mvp;wasm_eh;wasm_threads'
+      # windows_amd64_rtools excluded: only needed for R package builds
+      exclude_archs: 'windows_amd64_rtools'
 
   build-and-test-rust:
     name: Rust Tests

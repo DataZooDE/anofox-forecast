@@ -1,5 +1,69 @@
 cmake_minimum_required(VERSION 3.20)
 
+set(CORROSION_VERBOSE_OUTPUT ON)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Get installed Rust targets
+execute_process(
+    COMMAND rustup target list --installed
+    OUTPUT_VARIABLE RUST_TARGETS
+    ERROR_QUIET
+)
+
+# Propagate arch to rust build for CI
+set(Rust_CARGO_TARGET "")
+if("${OS_NAME}" STREQUAL "linux")
+    if ("${OS_ARCH}" STREQUAL "arm64")
+        set(Rust_CARGO_TARGET "aarch64-unknown-linux-gnu")
+    elseif("${CMAKE_CXX_COMPILER}" MATCHES "aarch64")
+        set(Rust_CARGO_TARGET "aarch64-unknown-linux-gnu")
+    else()
+        string(FIND "${RUST_TARGETS}" "musl" MUSL_TARGET_FOUND)
+        if(NOT MUSL_TARGET_FOUND EQUAL -1)
+            set(Rust_CARGO_TARGET "x86_64-unknown-linux-musl")
+        else()
+            set(Rust_CARGO_TARGET "x86_64-unknown-linux-gnu")
+        endif()
+    endif()
+elseif("${OS_NAME}" STREQUAL "osx")
+    if ("${OSX_BUILD_ARCH}" STREQUAL "arm64")
+        set(Rust_CARGO_TARGET "aarch64-apple-darwin")
+    elseif ("${OSX_BUILD_ARCH}" STREQUAL "x86_64")
+        set(Rust_CARGO_TARGET "x86_64-apple-darwin")
+    elseif ("${OS_ARCH}" STREQUAL "arm64")
+        set(Rust_CARGO_TARGET "aarch64-apple-darwin")
+    endif()
+elseif(WIN32)
+    if (MINGW AND "${OS_ARCH}" STREQUAL "arm64")
+        set(Rust_CARGO_TARGET "aarch64-pc-windows-gnu")
+    elseif (MINGW AND "${OS_ARCH}" STREQUAL "amd64")
+        set(Rust_CARGO_TARGET "x86_64-pc-windows-gnu")
+    elseif (MSVC AND "${OS_ARCH}" STREQUAL "arm64")
+        set(Rust_CARGO_TARGET "aarch64-pc-windows-msvc")
+    elseif (MSVC AND "${OS_ARCH}" STREQUAL "amd64")
+        set(Rust_CARGO_TARGET "x86_64-pc-windows-msvc")
+    endif()
+endif()
+
+# Check for WASM target
+string(FIND "${RUST_TARGETS}" "wasm32-unknown-emscripten" WASM_TARGET_FOUND)
+if (NOT WASM_TARGET_FOUND EQUAL -1)
+    set(Rust_CARGO_TARGET "wasm32-unknown-emscripten")
+endif()
+
+message(STATUS "Rust_CARGO_TARGET: ${Rust_CARGO_TARGET}")
+message(STATUS "OS_NAME: ${OS_NAME}")
+message(STATUS "OS_ARCH: ${OS_ARCH}")
+
+# Detect WASM build for conditional compilation
+if(DEFINED ENV{DUCKDB_WASM_PLATFORM} OR "${DUCKDB_EXPLICIT_PLATFORM}" MATCHES "^wasm" OR "${Rust_CARGO_TARGET}" STREQUAL "wasm32-unknown-emscripten")
+    set(WASM_BUILD TRUE)
+    message(STATUS "Building for WASM platform")
+else()
+    set(WASM_BUILD FALSE)
+endif()
+
 # Set extension name
 set(TARGET_NAME anofox_forecast)
 project(${TARGET_NAME})
@@ -15,14 +79,6 @@ FetchContent_Declare(
     GIT_TAG v0.5.2
 )
 FetchContent_MakeAvailable(Corrosion)
-
-# Detect WASM build
-if(DEFINED ENV{DUCKDB_WASM_PLATFORM} OR "${DUCKDB_EXPLICIT_PLATFORM}" MATCHES "^wasm")
-    set(WASM_BUILD TRUE)
-    message(STATUS "Building for WASM platform")
-else()
-    set(WASM_BUILD FALSE)
-endif()
 
 # Import Rust FFI crate
 # Note: Corrosion converts hyphens to underscores in target names
