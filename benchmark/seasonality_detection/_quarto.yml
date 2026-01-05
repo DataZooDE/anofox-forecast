@@ -7,17 +7,23 @@ format:
     theme: cosmo
     toc: true
     toc-depth: 3
-    code-fold: true
+    code-fold: false
     code-tools: true
     self-contained: true
+    fig-width: 10
+    fig-height: 6
   pdf:
     toc: true
     toc-depth: 3
     colorlinks: true
     pdf-engine: pdflatex
+    fig-width: 7
+    fig-height: 5
 
 execute:
-  freeze: auto
+  echo: true
+  warning: false
+  message: false
   cache: true
 
 knitr:
@@ -25,3 +31,4 @@ knitr:
     fig.width: 10
     fig.height: 6
     fig.retina: 2
+    connection: con

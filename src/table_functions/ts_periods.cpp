@@ -91,19 +91,23 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
 
         auto &children = StructVector::GetEntries(result);
 
-        // Set periods list
+        // Set periods list - IMPORTANT: Reserve before getting child references
+        // as Reserve can relocate the underlying memory
         {
             auto &periods_list = *children[0];
-            auto list_data = FlatVector::GetData<list_entry_t>(periods_list);
-            auto &list_child = ListVector::GetEntry(periods_list);
             auto current_size = ListVector::GetListSize(periods_list);
 
-            list_data[row_idx].offset = current_size;
-            list_data[row_idx].length = period_result.n_periods;
-
+            // First, reserve space and set list size
             ListVector::Reserve(periods_list, current_size + period_result.n_periods);
             ListVector::SetListSize(periods_list, current_size + period_result.n_periods);
 
+            // Now get the list data and child references AFTER Reserve
+            auto list_data = FlatVector::GetData<list_entry_t>(periods_list);
+            list_data[row_idx].offset = current_size;
+            list_data[row_idx].length = period_result.n_periods;
+
+            // Get child vector references AFTER Reserve to avoid dangling references
+            auto &list_child = ListVector::GetEntry(periods_list);
             auto &struct_entries = StructVector::GetEntries(list_child);
             for (size_t i = 0; i < period_result.n_periods; i++) {
                 FlatVector::GetData<double>(*struct_entries[0])[current_size + i] = period_result.periods[i].period;
@@ -158,19 +162,23 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
 
         auto &children = StructVector::GetEntries(result);
 
-        // Set periods list
+        // Set periods list - IMPORTANT: Reserve before getting child references
+        // as Reserve can relocate the underlying memory
         {
             auto &periods_list = *children[0];
-            auto list_data = FlatVector::GetData<list_entry_t>(periods_list);
-            auto &list_child = ListVector::GetEntry(periods_list);
             auto current_size = ListVector::GetListSize(periods_list);
 
-            list_data[row_idx].offset = current_size;
-            list_data[row_idx].length = period_result.n_periods;
-
+            // First, reserve space and set list size
             ListVector::Reserve(periods_list, current_size + period_result.n_periods);
             ListVector::SetListSize(periods_list, current_size + period_result.n_periods);
 
+            // Now get the list data and child references AFTER Reserve
+            auto list_data = FlatVector::GetData<list_entry_t>(periods_list);
+            list_data[row_idx].offset = current_size;
+            list_data[row_idx].length = period_result.n_periods;
+
+            // Get child vector references AFTER Reserve to avoid dangling references
+            auto &list_child = ListVector::GetEntry(periods_list);
             auto &struct_entries = StructVector::GetEntries(list_child);
             for (size_t i = 0; i < period_result.n_periods; i++) {
                 FlatVector::GetData<double>(*struct_entries[0])[current_size + i] = period_result.periods[i].period;
@@ -395,19 +403,23 @@ static void TsDetectMultiplePeriodsFunction(DataChunk &args, ExpressionState &st
 
         auto &children = StructVector::GetEntries(result);
 
-        // Set periods list
+        // Set periods list - IMPORTANT: Reserve before getting child references
+        // as Reserve can relocate the underlying memory
         {
             auto &periods_list = *children[0];
-            auto list_data = FlatVector::GetData<list_entry_t>(periods_list);
-            auto &list_child = ListVector::GetEntry(periods_list);
             auto current_size = ListVector::GetListSize(periods_list);
 
-            list_data[row_idx].offset = current_size;
-            list_data[row_idx].length = period_result.n_periods;
-
+            // First, reserve space and set list size
             ListVector::Reserve(periods_list, current_size + period_result.n_periods);
             ListVector::SetListSize(periods_list, current_size + period_result.n_periods);
 
+            // Now get the list data and child references AFTER Reserve
+            auto list_data = FlatVector::GetData<list_entry_t>(periods_list);
+            list_data[row_idx].offset = current_size;
+            list_data[row_idx].length = period_result.n_periods;
+
+            // Get child vector references AFTER Reserve to avoid dangling references
+            auto &list_child = ListVector::GetEntry(periods_list);
             auto &struct_entries = StructVector::GetEntries(list_child);
             for (size_t i = 0; i < period_result.n_periods; i++) {
                 FlatVector::GetData<double>(*struct_entries[0])[current_size + i] = period_result.periods[i].period;

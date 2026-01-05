@@ -1,16 +1,21 @@
-# Virtual environment
-.venv/
-
 # Quarto intermediate files
 _freeze/
 .jupyter_cache/
+/.quarto/
+**/*.quarto_ipynb
 
-# Python cache
-__pycache__/
-*.pyc
+# R session files
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# knitr cache
+*_cache/
+*_files/
 
 # Generated CSV files
 *.csv
 
-/.quarto/
-**/*.quarto_ipynb
+# Output directory (already in _quarto.yml)
+# _output/
