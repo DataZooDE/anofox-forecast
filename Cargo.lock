@@ -601,12 +601,13 @@ checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 
 [[package]]
 name = "fdars-core"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f31d49bbcb4a24b4cd677bac173d9e45398766cd05932b0ef08a4af6725bf81c"
+checksum = "f71583d5a06792a513367e2cc0d78ba56fe329b9b321e6517c0b7f4512bae3c5"
 dependencies = [
  "anofox-regression",
  "faer",
+ "getrandom 0.2.16",
  "nalgebra",
  "num-complex",
  "rand 0.8.5",
@@ -797,8 +798,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "335ff9f135e4384c8150d6f27c6daed433577f86b4750418338c01a1a2528592"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "wasi",
+ "wasm-bindgen",
 ]
 
 [[package]]

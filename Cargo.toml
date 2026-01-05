@@ -14,7 +14,7 @@ repository = "https://github.com/DataZooDE/anofox-forecast-extension"
 anofox-forecast = "0.2"
 
 # Functional data analysis (seasonality, peaks, detrending)
-fdars-core = "0.2"
+fdars-core = "0.3"
 
 # FFI and memory management
 libc = "0.2"
