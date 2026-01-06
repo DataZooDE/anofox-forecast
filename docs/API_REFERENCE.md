@@ -8,11 +8,35 @@
 
 ## Overview
 
-The Anofox Forecast extension provides time series forecasting capabilities directly within DuckDB. All computations are performed by the **anofox-fcst-core** library, implemented in Rust.
+The Anofox Forecast extension brings comprehensive time series analysis and forecasting capabilities directly into DuckDB. It enables analysts and data scientists to perform sophisticated time series operations using familiar SQL syntax, without needing external tools or data movement.
+
+**Key Benefits:**
+- **SQL-native**: All operations are expressed as SQL functions and macros
+- **High Performance**: Core algorithms implemented in Rust for speed and safety
+- **Comprehensive**: 32 forecasting models, 117 features, seasonality detection, changepoint detection
+- **Flexible API**: Three API styles to fit different workflows
+
+All computations are performed by the **anofox-fcst-core** library, implemented in Rust.
+
+### Quick Start
+
+```sql
+-- Load the extension
+LOAD anofox_forecast;
+
+-- Generate forecasts for multiple products
+SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'AutoETS', 30, MAP{});
+
+-- Analyze seasonality
+SELECT ts_detect_periods(LIST(quantity ORDER BY date)) FROM sales GROUP BY product_id;
+
+-- Compute time series statistics
+SELECT * FROM ts_stats('sales', product_id, date, quantity);
+```
 
 ### API Variants
 
-The extension provides **three API styles**:
+The extension provides **three API styles** to accommodate different use cases:
 
 #### 1. Scalar Functions (Array-Based)
 Low-level functions that operate on arrays. Composable with `GROUP BY` and `LIST()`.
@@ -125,7 +149,40 @@ Both forms are identical in functionality.
 
 ## Table Macros (Table-Level API)
 
-Table macros provide a high-level API for working directly with tables. Column names are passed as identifiers (unquoted).
+Table macros provide a high-level API for working directly with tables. They are the **recommended way** to use the extension for most use cases, offering a clean SQL interface without needing to manually aggregate data into arrays.
+
+### How Table Macros Work
+
+Table macros take a **table name as a string** and **column names as unquoted identifiers**. They automatically handle:
+- Grouping data by the specified group column
+- Ordering data by the date column
+- Aggregating values into arrays for processing
+- Unpacking results back into tabular format
+
+**Syntax Pattern:**
+```sql
+SELECT * FROM macro_name('table_name', group_col, date_col, value_col, ...);
+```
+
+**Key Points:**
+- Table name is a **quoted string**: `'my_table'`
+- Column names are **unquoted identifiers**: `product_id`, `date`, `value`
+- Results are returned as a table that can be filtered, joined, or further processed
+
+**Example Comparison:**
+```sql
+-- Using table macro (recommended)
+SELECT * FROM ts_stats('sales_data', product_id, sale_date, quantity);
+
+-- Equivalent using scalar function with GROUP BY
+SELECT
+    product_id,
+    ts_stats(LIST(quantity ORDER BY sale_date)) AS stats
+FROM sales_data
+GROUP BY product_id;
+```
+
+---
 
 ### ts_stats (Table Macro)
 
@@ -201,77 +258,232 @@ SELECT * FROM ts_fill_nulls_mean(source, group_col, date_col, value_col);
 
 ### ts_fill_gaps
 
-Fill date gaps with NULL values at a specified frequency. Creates a complete date sequence.
+Fills gaps in time series data by generating a complete date sequence at a specified frequency. Missing timestamps are inserted with NULL values, enabling proper handling of irregular time series.
+
+**Purpose:**
+Time series data often has missing observations due to weekends, holidays, sensor failures, or irregular data collection. Many forecasting algorithms and statistical methods require regularly-spaced observations. This function creates a complete, regular time grid with NULLs where data was missing, which can then be imputed using functions like `ts_fill_nulls_forward` or `ts_fill_nulls_mean`.
 
 ```sql
 SELECT * FROM ts_fill_gaps(source, group_col, date_col, value_col, frequency);
 ```
 
 **Parameters:**
-- `source` - Source table name
-- `group_col` - Column for grouping series
-- `date_col` - Date/timestamp column
-- `value_col` - Value column
-- `frequency` - Interval frequency (e.g., `'1 day'`, `'1 hour'`)
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Source table name (quoted string) |
+| `group_col` | IDENTIFIER | Column for grouping series (unquoted) |
+| `date_col` | IDENTIFIER | Date/timestamp column (unquoted) |
+| `value_col` | IDENTIFIER | Value column (unquoted) |
+| `frequency` | VARCHAR | Interval frequency (see [Frequency Formats](#frequency-formats)) |
+
+**Returns:** A table with columns:
+- `group_col` - The grouping identifier
+- `time_col` - Complete timestamp sequence (min to max per group)
+- `value_col` - Original values where they existed, NULL for inserted timestamps
 
 **Example:**
 ```sql
--- Fill daily gaps in sales data
-SELECT * FROM ts_fill_gaps(sales_data, product_id, sale_date, quantity, '1 day');
+-- Sample data with gaps (missing Jan 2nd)
+CREATE TABLE sales_data AS
+SELECT 'ProductA' as product_id, '2024-01-01'::TIMESTAMP as sale_date, 100.0 as quantity
+UNION ALL SELECT 'ProductA', '2024-01-03'::TIMESTAMP, 150.0;
+
+-- Fill the gap at daily frequency
+SELECT * FROM ts_fill_gaps('sales_data', product_id, sale_date, quantity, '1d');
+-- Result:
+-- | product_id | time_col            | value_col |
+-- |------------|---------------------|-----------|
+-- | ProductA   | 2024-01-01 00:00:00 | 100.0     |
+-- | ProductA   | 2024-01-02 00:00:00 | NULL      |  <- Gap filled with NULL
+-- | ProductA   | 2024-01-03 00:00:00 | 150.0     |
+
+-- Chain with imputation to fill the NULL values
+WITH filled AS (
+    SELECT * FROM ts_fill_gaps('sales_data', product_id, sale_date, quantity, '1d')
+)
+SELECT
+    group_col,
+    time_col,
+    ts_fill_nulls_forward(LIST(value_col ORDER BY time_col)) AS imputed_values
+FROM filled
+GROUP BY group_col;
 ```
+
+**Notes:**
+- The function operates per group, finding the min and max timestamps for each group
+- Only gaps within the observed range are filled (no extrapolation)
+- Use `ts_fill_forward` to extend the series beyond the last observation
+
+---
 
 ### ts_fill_forward
 
-Fill forward to a target date with NULL values at a specified frequency.
+Extends time series data forward to a target date at a specified frequency. All extended timestamps receive NULL values, which is useful for preparing forecast horizons or aligning multiple series to a common end date.
+
+**Purpose:**
+When preparing data for forecasting, you often need to create placeholder rows for future timestamps that will receive forecasted values. This function extends each series from its last observation to a specified target date, creating the structure needed for forecast output.
 
 ```sql
 SELECT * FROM ts_fill_forward(source, group_col, date_col, value_col, target_date, frequency);
 ```
 
 **Parameters:**
-- `source` - Source table name
-- `group_col` - Column for grouping series
-- `date_col` - Date/timestamp column
-- `value_col` - Value column
-- `target_date` - Target date to fill forward to (TIMESTAMP)
-- `frequency` - Interval frequency (e.g., `'1 day'`, `'1 hour'`)
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Source table name (quoted string) |
+| `group_col` | IDENTIFIER | Column for grouping series (unquoted) |
+| `date_col` | IDENTIFIER | Date/timestamp column (unquoted) |
+| `value_col` | IDENTIFIER | Value column (unquoted) |
+| `target_date` | TIMESTAMP | Target date to extend series to |
+| `frequency` | VARCHAR | Interval frequency (see [Frequency Formats](#frequency-formats)) |
+
+**Returns:** A table with all original rows plus new rows extending to `target_date`:
+- `group_col` - The grouping identifier
+- `time_col` - Timestamps including extended future dates
+- `value_col` - Original values for historical data, NULL for future timestamps
 
 **Example:**
 ```sql
--- Fill forward to end of year
+-- Historical data ending Jan 2nd
+CREATE TABLE sales_data AS
+SELECT 'ProductA' as product_id, '2024-01-01'::TIMESTAMP as sale_date, 100.0 as quantity
+UNION ALL SELECT 'ProductA', '2024-01-02'::TIMESTAMP, 110.0;
+
+-- Extend to Jan 5th for a 3-day forecast horizon
 SELECT * FROM ts_fill_forward(
-    sales_data, product_id, sale_date, quantity,
-    '2024-12-31'::TIMESTAMP, '1 day'
+    'sales_data', product_id, sale_date, quantity,
+    '2024-01-05'::TIMESTAMP, '1d'
 );
+-- Result:
+-- | product_id | time_col            | value_col |
+-- |------------|---------------------|-----------|
+-- | ProductA   | 2024-01-01 00:00:00 | 100.0     |
+-- | ProductA   | 2024-01-02 00:00:00 | 110.0     |
+-- | ProductA   | 2024-01-03 00:00:00 | NULL      |  <- Extended
+-- | ProductA   | 2024-01-04 00:00:00 | NULL      |  <- Extended
+-- | ProductA   | 2024-01-05 00:00:00 | NULL      |  <- Extended
+
+-- Typical workflow: Prepare forecast table structure
+WITH forecast_ready AS (
+    SELECT * FROM ts_fill_forward(
+        'sales_data', product_id, sale_date, quantity,
+        '2024-01-05'::TIMESTAMP, '1d'
+    )
+)
+SELECT
+    group_col,
+    time_col,
+    CASE
+        WHEN value_col IS NOT NULL THEN value_col
+        ELSE 0  -- Placeholder for forecast values
+    END AS value
+FROM forecast_ready;
 ```
+
+**Notes:**
+- Original data is preserved unchanged
+- Only extends forward from each group's maximum timestamp
+- If `target_date` is before or equal to the max timestamp of a group, no extension occurs for that group
+- Combine with `ts_fill_gaps` to handle both internal gaps and forward extension
+
+---
+
+### ts_fill_gaps_operator
+
+Low-level operator version of `ts_fill_gaps`. Functionally identical but named for internal consistency with the operator pattern.
+
+```sql
+SELECT * FROM ts_fill_gaps_operator(source, group_col, date_col, value_col, frequency);
+```
+
+**Parameters:** Same as `ts_fill_gaps`
+
+---
 
 ### Frequency Formats
 
-The `frequency` parameter in `ts_fill_gaps`, `ts_fill_forward`, and `ts_forecast_by` supports two formats for backward compatibility:
+The `frequency` parameter in gap-filling and forecasting functions supports two formats for backward compatibility with the C++ API.
 
-**Polars-style (compact)** - Compatible with C++ API:
-| Format | Examples | Description |
-|--------|----------|-------------|
-| Minutes | `'30m'`, `'30min'` | Minutes |
-| Hours | `'1h'`, `'6h'` | Hours |
-| Days | `'1d'`, `'7d'` | Days |
-| Weeks | `'1w'`, `'2w'` | Weeks |
-| Months | `'1mo'`, `'3mo'` | Months |
-| Quarters | `'1q'`, `'2q'` | Quarters (converted to months) |
-| Years | `'1y'` | Years |
+#### Polars-style (Compact Format)
 
-**DuckDB INTERVAL** - Native DuckDB format:
-| Format | Examples |
-|--------|----------|
-| Seconds | `'1 second'`, `'30 seconds'` |
-| Minutes | `'1 minute'`, `'15 minutes'` |
-| Hours | `'1 hour'`, `'6 hours'` |
-| Days | `'1 day'`, `'7 days'` |
-| Weeks | `'1 week'`, `'2 weeks'` |
-| Months | `'1 month'`, `'3 months'` |
-| Years | `'1 year'` |
+The compact format uses a numeric prefix followed by a unit suffix. This format is **recommended** for compatibility with the original C++ API.
 
-Both formats are automatically converted internally. Polars-style is recommended for compatibility with the C++ API.
+| Unit | Suffix | Examples | Description |
+|------|--------|----------|-------------|
+| Minutes | `m` or `min` | `'30m'`, `'15min'` | Minutes (1-59 typical) |
+| Hours | `h` | `'1h'`, `'6h'`, `'12h'` | Hours |
+| Days | `d` | `'1d'`, `'7d'`, `'14d'` | Calendar days |
+| Weeks | `w` | `'1w'`, `'2w'` | Weeks (7 days) |
+| Months | `mo` | `'1mo'`, `'3mo'`, `'6mo'` | Calendar months |
+| Quarters | `q` | `'1q'`, `'2q'` | Quarters (converted to 3/6 months) |
+| Years | `y` | `'1y'` | Calendar years |
+
+**Examples:**
+```sql
+-- Daily data (most common for business data)
+SELECT * FROM ts_fill_gaps('sales', product_id, date, value, '1d');
+
+-- Hourly sensor data
+SELECT * FROM ts_fill_gaps('sensors', sensor_id, timestamp, reading, '1h');
+
+-- Weekly aggregates
+SELECT * FROM ts_fill_gaps('weekly_sales', store_id, week_start, revenue, '1w');
+
+-- Monthly financial data
+SELECT * FROM ts_fill_gaps('financials', account_id, month_end, balance, '1mo');
+
+-- Quarterly reporting
+SELECT * FROM ts_fill_gaps('quarterly', division_id, quarter_end, revenue, '1q');
+
+-- 15-minute intervals (e.g., energy data)
+SELECT * FROM ts_fill_gaps('energy', meter_id, timestamp, kwh, '15m');
+```
+
+#### DuckDB INTERVAL (Native Format)
+
+The native DuckDB INTERVAL format provides full flexibility and supports all DuckDB interval syntax.
+
+| Unit | Examples | Description |
+|------|----------|-------------|
+| Seconds | `'1 second'`, `'30 seconds'` | Seconds (rare for time series) |
+| Minutes | `'1 minute'`, `'15 minutes'` | Minutes |
+| Hours | `'1 hour'`, `'6 hours'` | Hours |
+| Days | `'1 day'`, `'7 days'` | Calendar days |
+| Weeks | `'1 week'`, `'2 weeks'` | Weeks |
+| Months | `'1 month'`, `'3 months'` | Calendar months |
+| Years | `'1 year'` | Calendar years |
+
+**Examples:**
+```sql
+-- Equivalent to '1d'
+SELECT * FROM ts_fill_gaps('sales', product_id, date, value, '1 day');
+
+-- Equivalent to '6h'
+SELECT * FROM ts_fill_gaps('sensors', sensor_id, timestamp, reading, '6 hours');
+
+-- Equivalent to '3mo'
+SELECT * FROM ts_fill_gaps('quarterly', division_id, date, revenue, '3 months');
+```
+
+#### Conversion Table
+
+| Polars-style | DuckDB INTERVAL | Typical Use Case |
+|--------------|-----------------|------------------|
+| `'1d'` | `'1 day'` | Daily sales, transactions |
+| `'7d'` | `'7 days'` | Weekly data (explicit days) |
+| `'1w'` | `'1 week'` | Weekly data (semantic week) |
+| `'1h'` | `'1 hour'` | Hourly sensor data |
+| `'15m'` | `'15 minutes'` | High-frequency IoT, energy |
+| `'1mo'` | `'1 month'` | Monthly financials |
+| `'3mo'` | `'3 months'` | Quarterly data |
+| `'1q'` | `'3 months'` | Quarterly data |
+| `'1y'` | `'1 year'` | Annual data |
+
+**Notes:**
+- Both formats are automatically detected and converted internally
+- Polars-style is recommended for portability with C++ API code
+- Use DuckDB INTERVAL for complex intervals not covered by Polars-style
+- The quarter suffix `q` is converted to months (1q = 3 months, 2q = 6 months)
 
 ### ts_diff (Table Macro)
 
@@ -1460,10 +1672,30 @@ SELECT ts_features_config_from_json('config.json');
 
 ## Forecasting
 
-The extension provides multiple ways to generate forecasts:
-1. **Scalar functions** - operate on arrays, use with `LIST()` and `GROUP BY`
-2. **Table macros** - operate on tables directly with positional parameters
-3. **Aggregate functions** - use with custom `GROUP BY` patterns
+The extension provides a comprehensive forecasting system with 32 models ranging from simple baselines to sophisticated state-space methods. Forecasts can be generated using three different API styles depending on your use case.
+
+### API Styles for Forecasting
+
+| API Style | Best For | Example |
+|-----------|----------|---------|
+| **Table Macros** | Most users; clean SQL interface | `ts_forecast_by('sales', id, date, val, 'ets', 12, MAP{})` |
+| **Aggregate Functions** | Custom GROUP BY patterns | `ts_forecast_agg(date, value, 'ets', 12, MAP{})` |
+| **Scalar Functions** | Array-based workflows, composition | `ts_forecast([1,2,3,4]::DOUBLE[], 3, 'naive')` |
+
+### Choosing a Forecasting Model
+
+**For beginners:** Start with `Naive` or `SES` to establish baselines, then try `AutoETS` for automatic model selection.
+
+**Model Selection Guide:**
+
+| Data Characteristics | Recommended Models |
+|---------------------|-------------------|
+| No trend, no seasonality | `Naive`, `SES`, `SESOptimized` |
+| Trend, no seasonality | `Holt`, `Theta`, `RandomWalkDrift` |
+| Seasonality (single period) | `SeasonalNaive`, `HoltWinters`, `SeasonalES` |
+| Multiple seasonalities | `MSTL`, `MFLES`, `TBATS` |
+| Intermittent demand (many zeros) | `CrostonClassic`, `CrostonSBA`, `TSB` |
+| Unknown characteristics | `AutoETS`, `AutoARIMA`, `AutoTheta` |
 
 ### Supported Models (32 Models)
 
@@ -1623,28 +1855,98 @@ SELECT * FROM anofox_fcst_ts_forecast('sales', date, amount, 'naive', 12, MAP{})
 
 ---
 
-### anofox_fcst_ts_forecast_by (Table Macro)
+### anofox_fcst_ts_forecast_by / ts_forecast_by (Table Macro)
 
-Generate forecasts for multiple series grouped by a column.
+Generate forecasts for multiple time series grouped by an identifier column. This is the **primary forecasting function** for most use cases.
+
+**Purpose:**
+When you have a table with multiple time series (e.g., sales by product, sensor readings by device), this function forecasts each series independently and returns all forecasts in a single result table.
 
 **Signature:**
 ```sql
-anofox_fcst_ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, params) → TABLE
+ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, params) → TABLE
 ```
 
 **Parameters (all positional):**
-- `table_name` - Source table name (VARCHAR)
-- `group_col` - Column for grouping series
-- `date_col` - Date/timestamp column
-- `target_col` - Target value column
-- `method` - Forecasting method (VARCHAR)
-- `horizon` - Number of periods to forecast (INTEGER)
-- `params` - Additional parameters (MAP, typically `MAP{}`)
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `table_name` | VARCHAR | Source table name (quoted string) |
+| `group_col` | IDENTIFIER | Column for grouping series (unquoted) |
+| `date_col` | IDENTIFIER | Date/timestamp column (unquoted) |
+| `target_col` | IDENTIFIER | Target value column (unquoted) |
+| `method` | VARCHAR | Forecasting method name (case-sensitive, see [Supported Models](#supported-models-32-models)) |
+| `horizon` | INTEGER | Number of periods to forecast |
+| `params` | MAP | Model parameters (use `MAP{}` for defaults) |
 
-**Example:**
+**Returns:** A table with columns:
+- `group_col` - The series identifier
+- `ds` - Forecast timestamp
+- `forecast` - Point forecast value
+- `lower` - Lower prediction interval bound
+- `upper` - Upper prediction interval bound
+
+**Examples:**
 ```sql
-SELECT * FROM anofox_fcst_ts_forecast_by('sales', product_id, date, amount, 'ets', 12, MAP{});
+-- Basic forecast: 12 periods ahead using ETS model
+SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'ETS', 12, MAP{});
+
+-- Using Naive method (simple baseline)
+SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'Naive', 7, MAP{});
+
+-- Seasonal model with explicit period
+SELECT * FROM ts_forecast_by(
+    'weekly_sales', store_id, week, revenue,
+    'HoltWinters', 52,
+    MAP{'seasonal_period': '52'}
+);
+
+-- Filter to specific products
+SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'AutoETS', 30, MAP{})
+WHERE product_id IN ('SKU001', 'SKU002', 'SKU003');
+
+-- Join forecasts with actuals for comparison
+WITH forecasts AS (
+    SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'ETS', 12, MAP{})
+)
+SELECT
+    f.product_id,
+    f.ds,
+    f.forecast,
+    a.amount AS actual
+FROM forecasts f
+LEFT JOIN sales a ON f.product_id = a.product_id AND f.ds = a.date;
 ```
+
+**Setting Model Parameters:**
+
+The `params` MAP allows you to customize model behavior:
+
+```sql
+-- SES with custom smoothing parameter
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'SES', 12,
+    MAP{'alpha': '0.5'}
+);
+
+-- Holt-Winters with explicit seasonal period and smoothing
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'HoltWinters', 12,
+    MAP{'seasonal_period': '7', 'alpha': '0.2', 'beta': '0.1', 'gamma': '0.3'}
+);
+
+-- MSTL with multiple seasonal periods (daily data with weekly and yearly patterns)
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'MSTL', 30,
+    MAP{'seasonal_periods': '[7, 365]'}
+);
+
+-- Custom confidence level (95% instead of default 90%)
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'ETS', 12,
+    MAP{'confidence_level': '0.95'}
+);
+```
+
+**Notes:**
+- The function uses the `frequency` parameter (default: `'1d'`) to generate forecast timestamps
+- Each series is forecast independently; errors in one series don't affect others
+- For very large datasets, consider filtering to relevant series before forecasting
 
 ---
 
@@ -1963,20 +2265,79 @@ SELECT ts_coverage(
 
 ## Notes
 
-1. **Array-based design**: All functions operate on DOUBLE[] arrays. Use `LIST(column ORDER BY date)` to convert table data to arrays.
+### Array-Based Design
 
-2. **NULL handling**: Most functions handle NULLs gracefully. Use imputation functions to fill NULLs before analysis if needed.
+All scalar functions operate on `DOUBLE[]` arrays. To convert table data to arrays, use the `LIST()` aggregate with `ORDER BY`:
 
-3. **Performance**: Scalar functions are optimized for use with DuckDB's vectorized execution engine.
+```sql
+-- Convert table column to ordered array
+SELECT
+    product_id,
+    ts_stats(LIST(value ORDER BY date)) AS stats
+FROM sales
+GROUP BY product_id;
+```
 
-4. **Minimum data requirements**:
-   - General rule: n ≥ 2 for basic statistics
-   - Seasonality: n ≥ 2 × seasonal_period
-   - Forecasting: n ≥ 10 recommended
+**Important:** Always use `ORDER BY` in `LIST()` to ensure correct temporal ordering.
 
-5. **Ordering**: Time series order matters. Always use `ORDER BY date` in `LIST()` aggregations.
+### NULL Handling
+
+Most functions handle NULL values gracefully:
+- **Statistics functions**: NULLs are typically excluded from calculations
+- **Imputation functions**: Specifically designed to fill NULLs (`ts_fill_nulls_*`)
+- **Forecasting**: NULLs in input may cause errors; impute first
+
+```sql
+-- Recommended: Fill NULLs before forecasting
+WITH cleaned AS (
+    SELECT * FROM ts_fill_gaps('sales', product_id, date, value, '1d')
+),
+imputed AS (
+    SELECT
+        group_col,
+        time_col,
+        ts_fill_nulls_forward(LIST(value_col ORDER BY time_col)) AS values
+    FROM cleaned
+    GROUP BY group_col
+)
+SELECT * FROM ts_forecast_by('imputed', group_col, time_col, values, 'ETS', 12, MAP{});
+```
+
+### Minimum Data Requirements
+
+| Function Type | Minimum Length | Recommended |
+|--------------|----------------|-------------|
+| Basic statistics | n ≥ 2 | n ≥ 10 |
+| Seasonality detection | n ≥ 2 × period | n ≥ 4 × period |
+| Forecasting (simple models) | n ≥ 3 | n ≥ 20 |
+| Forecasting (seasonal models) | n ≥ 2 × period | n ≥ 3 × period |
+| Feature extraction | n ≥ 10 | n ≥ 50 |
+| Changepoint detection | n ≥ 10 | n ≥ 50 |
+
+### Performance Tips
+
+1. **Use table macros** when possible - they're optimized for batch processing
+2. **Filter early**: Apply WHERE clauses before calling forecast functions
+3. **Limit horizon**: Forecasts beyond 2-3 seasonal periods have high uncertainty
+4. **Batch processing**: Process multiple series in one query rather than separate queries
+
+```sql
+-- Good: Single query for all products
+SELECT * FROM ts_forecast_by('sales', product_id, date, value, 'ETS', 12, MAP{});
+
+-- Avoid: Separate queries per product
+-- SELECT * FROM ts_forecast(...) WHERE product_id = 'A';
+-- SELECT * FROM ts_forecast(...) WHERE product_id = 'B';
+```
+
+### Backward Compatibility with C++ API
+
+This Rust implementation maintains backward compatibility with the original C++ API:
+- **Frequency formats**: Both Polars-style (`'1d'`, `'1h'`) and DuckDB INTERVAL (`'1 day'`) are supported
+- **Function names**: All original function names are preserved
+- **Parameter order**: Positional parameters maintain the same order
 
 ---
 
-**Last Updated:** 2026-01-03
+**Last Updated:** 2026-01-06
 **API Version:** 0.2.4
