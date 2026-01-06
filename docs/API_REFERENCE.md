@@ -247,8 +247,20 @@ SELECT * FROM ts_fill_forward(
 
 ### Frequency Formats
 
-The `frequency` parameter in `ts_fill_gaps` and `ts_fill_forward` accepts any valid DuckDB INTERVAL string:
+The `frequency` parameter in `ts_fill_gaps`, `ts_fill_forward`, and `ts_forecast_by` supports two formats for backward compatibility:
 
+**Polars-style (compact)** - Compatible with C++ API:
+| Format | Examples | Description |
+|--------|----------|-------------|
+| Minutes | `'30m'`, `'30min'` | Minutes |
+| Hours | `'1h'`, `'6h'` | Hours |
+| Days | `'1d'`, `'7d'` | Days |
+| Weeks | `'1w'`, `'2w'` | Weeks |
+| Months | `'1mo'`, `'3mo'` | Months |
+| Quarters | `'1q'`, `'2q'` | Quarters (converted to months) |
+| Years | `'1y'` | Years |
+
+**DuckDB INTERVAL** - Native DuckDB format:
 | Format | Examples |
 |--------|----------|
 | Seconds | `'1 second'`, `'30 seconds'` |
@@ -259,7 +271,7 @@ The `frequency` parameter in `ts_fill_gaps` and `ts_fill_forward` accepts any va
 | Months | `'1 month'`, `'3 months'` |
 | Years | `'1 year'` |
 
-Both singular and plural forms work (`'1 day'` and `'2 days'`). The string is passed to DuckDB's `generate_series()` function internally.
+Both formats are automatically converted internally. Polars-style is recommended for compatibility with the C++ API.
 
 ### ts_diff (Table Macro)
 
