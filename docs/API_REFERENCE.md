@@ -199,6 +199,52 @@ SELECT * FROM ts_fill_nulls_backward(source, group_col, date_col, value_col);
 SELECT * FROM ts_fill_nulls_mean(source, group_col, date_col, value_col);
 ```
 
+### ts_fill_gaps
+
+Fill date gaps with NULL values at a specified frequency. Creates a complete date sequence.
+
+```sql
+SELECT * FROM ts_fill_gaps(source, group_col, date_col, value_col, frequency);
+```
+
+**Parameters:**
+- `source` - Source table name
+- `group_col` - Column for grouping series
+- `date_col` - Date/timestamp column
+- `value_col` - Value column
+- `frequency` - Interval frequency (e.g., `'1 day'`, `'1 hour'`)
+
+**Example:**
+```sql
+-- Fill daily gaps in sales data
+SELECT * FROM ts_fill_gaps(sales_data, product_id, sale_date, quantity, '1 day');
+```
+
+### ts_fill_forward
+
+Fill forward to a target date with NULL values at a specified frequency.
+
+```sql
+SELECT * FROM ts_fill_forward(source, group_col, date_col, value_col, target_date, frequency);
+```
+
+**Parameters:**
+- `source` - Source table name
+- `group_col` - Column for grouping series
+- `date_col` - Date/timestamp column
+- `value_col` - Value column
+- `target_date` - Target date to fill forward to (TIMESTAMP)
+- `frequency` - Interval frequency (e.g., `'1 day'`, `'1 hour'`)
+
+**Example:**
+```sql
+-- Fill forward to end of year
+SELECT * FROM ts_fill_forward(
+    sales_data, product_id, sale_date, quantity,
+    '2024-12-31'::TIMESTAMP, '1 day'
+);
+```
+
 ### ts_diff (Table Macro)
 
 Compute differences for each group.
