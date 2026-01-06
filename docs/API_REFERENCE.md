@@ -245,6 +245,22 @@ SELECT * FROM ts_fill_forward(
 );
 ```
 
+### Frequency Formats
+
+The `frequency` parameter in `ts_fill_gaps` and `ts_fill_forward` accepts any valid DuckDB INTERVAL string:
+
+| Format | Examples |
+|--------|----------|
+| Seconds | `'1 second'`, `'30 seconds'` |
+| Minutes | `'1 minute'`, `'15 minutes'` |
+| Hours | `'1 hour'`, `'6 hours'` |
+| Days | `'1 day'`, `'7 days'` |
+| Weeks | `'1 week'`, `'2 weeks'` |
+| Months | `'1 month'`, `'3 months'` |
+| Years | `'1 year'` |
+
+Both singular and plural forms work (`'1 day'` and `'2 days'`). The string is passed to DuckDB's `generate_series()` function internally.
+
 ### ts_diff (Table Macro)
 
 Compute differences for each group.
