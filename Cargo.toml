@@ -11,7 +11,7 @@ repository = "https://github.com/DataZooDE/anofox-forecast-extension"
 
 [workspace.dependencies]
 # Core forecasting library
-anofox-forecast = "0.3"
+anofox-forecast = "0.3.1"
 
 # Functional data analysis (seasonality, peaks, detrending)
 # Note: default-features disabled to allow WASM builds; features enabled per-target in crates

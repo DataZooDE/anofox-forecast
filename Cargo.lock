@@ -52,11 +52,12 @@ dependencies = [
 
 [[package]]
 name = "anofox-forecast"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9e58a719820217e87f98524bcfca594a7a6f33d7164094eb9b4b95a0015d7c5"
+checksum = "1d681c6d7523ec5396d5940db9c4e9b9ac0e5fd5a947ce33dc4c5626c320c6ea"
 dependencies = [
  "chrono",
+ "getrandom 0.2.16",
  "rand 0.8.5",
  "rustfft",
  "statrs",
