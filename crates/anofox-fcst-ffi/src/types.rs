@@ -613,6 +613,49 @@ impl Default for MultiPeriodResult {
     }
 }
 
+/// Flattened result from multiple period detection.
+///
+/// Uses parallel arrays instead of nested struct array for safer FFI.
+/// This avoids memory management issues when crossing the Rust/C++ boundary,
+/// particularly with R's DuckDB bindings.
+#[repr(C)]
+pub struct FlatMultiPeriodResult {
+    /// Array of period values (in samples)
+    pub period_values: *mut c_double,
+    /// Array of confidence values
+    pub confidence_values: *mut c_double,
+    /// Array of strength values
+    pub strength_values: *mut c_double,
+    /// Array of amplitude values
+    pub amplitude_values: *mut c_double,
+    /// Array of phase values (radians)
+    pub phase_values: *mut c_double,
+    /// Array of iteration values (1-indexed)
+    pub iteration_values: *mut size_t,
+    /// Number of detected periods
+    pub n_periods: size_t,
+    /// Primary (strongest) period
+    pub primary_period: c_double,
+    /// Method used for estimation
+    pub method: [c_char; 32],
+}
+
+impl Default for FlatMultiPeriodResult {
+    fn default() -> Self {
+        Self {
+            period_values: std::ptr::null_mut(),
+            confidence_values: std::ptr::null_mut(),
+            strength_values: std::ptr::null_mut(),
+            amplitude_values: std::ptr::null_mut(),
+            phase_values: std::ptr::null_mut(),
+            iteration_values: std::ptr::null_mut(),
+            n_periods: 0,
+            primary_period: 0.0,
+            method: [0; 32],
+        }
+    }
+}
+
 // ============================================================================
 // Peak Detection Types (fdars-core integration)
 // ============================================================================

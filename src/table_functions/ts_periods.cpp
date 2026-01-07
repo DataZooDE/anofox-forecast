@@ -7,21 +7,31 @@
 namespace duckdb {
 
 // Helper to extract list as double values
-static void ExtractListAsDouble(Vector &list_vec, idx_t row_idx, vector<double> &out_values) {
-    auto list_data = ListVector::GetData(list_vec);
-    auto &list_entry = list_data[row_idx];
+// Uses UnifiedVectorFormat to handle all vector types (flat, constant, dictionary)
+static void ExtractListAsDouble(Vector &list_vec, idx_t count, idx_t row_idx, vector<double> &out_values) {
+    // Use UnifiedVectorFormat to handle all vector types
+    UnifiedVectorFormat list_format;
+    list_vec.ToUnifiedFormat(count, list_format);
+
+    auto list_entries = UnifiedVectorFormat::GetData<list_entry_t>(list_format);
+    auto list_idx = list_format.sel->get_index(row_idx);
+    auto &list_entry = list_entries[list_idx];
 
     auto &child_vec = ListVector::GetEntry(list_vec);
-    auto child_data = FlatVector::GetData<double>(child_vec);
-    auto &child_validity = FlatVector::Validity(child_vec);
+
+    // Also use UnifiedVectorFormat for child vector
+    UnifiedVectorFormat child_format;
+    child_vec.ToUnifiedFormat(ListVector::GetListSize(list_vec), child_format);
+    auto child_values = UnifiedVectorFormat::GetData<double>(child_format);
 
     out_values.clear();
     out_values.reserve(list_entry.length);
 
     for (idx_t i = 0; i < list_entry.length; i++) {
         idx_t child_idx = list_entry.offset + i;
-        if (child_validity.RowIsValid(child_idx)) {
-            out_values.push_back(child_data[child_idx]);
+        auto unified_child_idx = child_format.sel->get_index(child_idx);
+        if (child_format.validity.RowIsValid(unified_child_idx)) {
+            out_values.push_back(child_values[unified_child_idx]);
         }
     }
 }
@@ -58,14 +68,31 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
+    // Two-pass approach to avoid incremental Reserve calls which can cause memory issues:
+    // Pass 1: Compute all results and store them, calculate total list size
+    // Pass 2: Reserve once, then copy all data
+
+    struct RowResult {
+        FlatMultiPeriodResult result;
+        bool is_null;
+    };
+
+    vector<RowResult> row_results(count);
+    size_t total_periods = 0;
+
+    // Pass 1: Compute all FFI results
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
+        row_results[row_idx].is_null = false;
+        memset(&row_results[row_idx].result, 0, sizeof(FlatMultiPeriodResult));
+
         if (FlatVector::IsNull(values_vec, row_idx)) {
+            row_results[row_idx].is_null = true;
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> values;
-        ExtractListAsDouble(values_vec, row_idx, values);
+        ExtractListAsDouble(values_vec, count, row_idx, values);
 
         const char *method_str = nullptr;
         if (!FlatVector::IsNull(method_vec, row_idx)) {
@@ -73,58 +100,103 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
             method_str = method_data[row_idx].GetData();
         }
 
-        MultiPeriodResult period_result;
-        memset(&period_result, 0, sizeof(period_result));
         AnofoxError error;
-
-        bool success = anofox_ts_detect_periods(
+        bool success = anofox_ts_detect_periods_flat(
             values.data(),
             values.size(),
             method_str,
-            &period_result,
+            &row_results[row_idx].result,
             &error
         );
 
         if (!success) {
+            // Clean up any already-allocated results
+            for (idx_t i = 0; i < row_idx; i++) {
+                if (!row_results[i].is_null) {
+                    anofox_free_flat_multi_period_result(&row_results[i].result);
+                }
+            }
             throw InvalidInputException("ts_detect_periods failed: %s", error.message);
         }
 
-        auto &children = StructVector::GetEntries(result);
+        total_periods += row_results[row_idx].result.n_periods;
+    }
 
-        // Set periods list - IMPORTANT: Reserve before getting child references
-        // as Reserve can relocate the underlying memory
-        {
-            auto &periods_list = *children[0];
-            auto current_size = ListVector::GetListSize(periods_list);
+    // Pass 2: Reserve all space at once, then copy data
+    // IMPORTANT: Get fresh references after each operation that might reallocate
+    {
+        auto &children_init = StructVector::GetEntries(result);
+        auto &periods_list_init = *children_init[0];
 
-            // First, reserve space and set list size
-            ListVector::Reserve(periods_list, current_size + period_result.n_periods);
-            ListVector::SetListSize(periods_list, current_size + period_result.n_periods);
+        // Reserve all space at once (reserve at least 1 to ensure valid list structure)
+        ListVector::Reserve(periods_list_init, total_periods > 0 ? total_periods : 1);
+        ListVector::SetListSize(periods_list_init, total_periods);
+    }
 
-            // Now get the list data and child references AFTER Reserve
-            auto list_data = FlatVector::GetData<list_entry_t>(periods_list);
-            list_data[row_idx].offset = current_size;
-            list_data[row_idx].length = period_result.n_periods;
+    // Get fresh references after Reserve (Reserve may have reallocated memory)
+    auto &children = StructVector::GetEntries(result);
+    auto &periods_list = *children[0];
 
-            // Get child vector references AFTER Reserve to avoid dangling references
-            auto &list_child = ListVector::GetEntry(periods_list);
-            auto &struct_entries = StructVector::GetEntries(list_child);
-            for (size_t i = 0; i < period_result.n_periods; i++) {
-                FlatVector::GetData<double>(*struct_entries[0])[current_size + i] = period_result.periods[i].period;
-                FlatVector::GetData<double>(*struct_entries[1])[current_size + i] = period_result.periods[i].confidence;
-                FlatVector::GetData<double>(*struct_entries[2])[current_size + i] = period_result.periods[i].strength;
-                FlatVector::GetData<double>(*struct_entries[3])[current_size + i] = period_result.periods[i].amplitude;
-                FlatVector::GetData<double>(*struct_entries[4])[current_size + i] = period_result.periods[i].phase;
-                FlatVector::GetData<int64_t>(*struct_entries[5])[current_size + i] = period_result.periods[i].iteration;
+    // Get list_data pointer for the list entries
+    auto list_data = FlatVector::GetData<list_entry_t>(periods_list);
+
+    // Only get struct child pointers if we have periods to copy
+    double *period_data = nullptr;
+    double *confidence_data = nullptr;
+    double *strength_data = nullptr;
+    double *amplitude_data = nullptr;
+    double *phase_data = nullptr;
+    int64_t *iteration_data = nullptr;
+
+    if (total_periods > 0) {
+        auto &list_child = ListVector::GetEntry(periods_list);
+        auto &struct_entries = StructVector::GetEntries(list_child);
+        period_data = FlatVector::GetData<double>(*struct_entries[0]);
+        confidence_data = FlatVector::GetData<double>(*struct_entries[1]);
+        strength_data = FlatVector::GetData<double>(*struct_entries[2]);
+        amplitude_data = FlatVector::GetData<double>(*struct_entries[3]);
+        phase_data = FlatVector::GetData<double>(*struct_entries[4]);
+        iteration_data = FlatVector::GetData<int64_t>(*struct_entries[5]);
+    }
+
+    auto n_periods_data = FlatVector::GetData<int64_t>(*children[1]);
+    auto primary_period_data = FlatVector::GetData<double>(*children[2]);
+
+    size_t current_offset = 0;
+    for (idx_t row_idx = 0; row_idx < count; row_idx++) {
+        if (row_results[row_idx].is_null) {
+            list_data[row_idx].offset = current_offset;
+            list_data[row_idx].length = 0;
+            continue;
+        }
+
+        auto &res = row_results[row_idx].result;
+
+        // Set list entry
+        list_data[row_idx].offset = current_offset;
+        list_data[row_idx].length = res.n_periods;
+
+        // Copy period data (only if we have data pointers)
+        if (res.n_periods > 0 && period_data != nullptr) {
+            for (size_t i = 0; i < res.n_periods; i++) {
+                period_data[current_offset + i] = res.period_values[i];
+                confidence_data[current_offset + i] = res.confidence_values[i];
+                strength_data[current_offset + i] = res.strength_values[i];
+                amplitude_data[current_offset + i] = res.amplitude_values[i];
+                phase_data[current_offset + i] = res.phase_values[i];
+                iteration_data[current_offset + i] = res.iteration_values[i];
             }
         }
 
-        // Set scalar fields
-        FlatVector::GetData<int64_t>(*children[1])[row_idx] = period_result.n_periods;
-        FlatVector::GetData<double>(*children[2])[row_idx] = period_result.primary_period;
-        FlatVector::GetData<string_t>(*children[3])[row_idx] = StringVector::AddString(*children[3], period_result.method);
+        current_offset += res.n_periods;
 
-        anofox_free_multi_period_result(&period_result);
+        // Set scalar fields
+        n_periods_data[row_idx] = res.n_periods;
+        primary_period_data[row_idx] = res.primary_period;
+        FlatVector::GetData<string_t>(*children[3])[row_idx] = StringVector::AddString(*children[3], res.method);
+
+        // Free FFI result
+        anofox_free_flat_multi_period_result(&row_results[row_idx].result);
     }
 }
 
@@ -135,67 +207,126 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
+    // Two-pass approach to avoid incremental Reserve calls which can cause memory issues
+    struct RowResult {
+        FlatMultiPeriodResult result;
+        bool is_null;
+    };
+
+    vector<RowResult> row_results(count);
+    size_t total_periods = 0;
+
+    // Pass 1: Compute all FFI results
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
+        row_results[row_idx].is_null = false;
+        memset(&row_results[row_idx].result, 0, sizeof(FlatMultiPeriodResult));
+
         if (FlatVector::IsNull(values_vec, row_idx)) {
+            row_results[row_idx].is_null = true;
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> values;
-        ExtractListAsDouble(values_vec, row_idx, values);
+        ExtractListAsDouble(values_vec, count, row_idx, values);
 
-        MultiPeriodResult period_result;
-        memset(&period_result, 0, sizeof(period_result));
         AnofoxError error;
-
-        bool success = anofox_ts_detect_periods(
+        bool success = anofox_ts_detect_periods_flat(
             values.data(),
             values.size(),
             nullptr,  // default method
-            &period_result,
+            &row_results[row_idx].result,
             &error
         );
 
         if (!success) {
+            // Clean up any already-allocated results
+            for (idx_t i = 0; i < row_idx; i++) {
+                if (!row_results[i].is_null) {
+                    anofox_free_flat_multi_period_result(&row_results[i].result);
+                }
+            }
             throw InvalidInputException("ts_detect_periods failed: %s", error.message);
         }
 
-        auto &children = StructVector::GetEntries(result);
+        total_periods += row_results[row_idx].result.n_periods;
+    }
 
-        // Set periods list - IMPORTANT: Reserve before getting child references
-        // as Reserve can relocate the underlying memory
-        {
-            auto &periods_list = *children[0];
-            auto current_size = ListVector::GetListSize(periods_list);
+    // Pass 2: Reserve all space at once, then copy data
+    // IMPORTANT: Get fresh references after each operation that might reallocate
+    {
+        auto &children_init = StructVector::GetEntries(result);
+        auto &periods_list_init = *children_init[0];
 
-            // First, reserve space and set list size
-            ListVector::Reserve(periods_list, current_size + period_result.n_periods);
-            ListVector::SetListSize(periods_list, current_size + period_result.n_periods);
+        // Reserve all space at once (reserve at least 1 to ensure valid list structure)
+        ListVector::Reserve(periods_list_init, total_periods > 0 ? total_periods : 1);
+        ListVector::SetListSize(periods_list_init, total_periods);
+    }
 
-            // Now get the list data and child references AFTER Reserve
-            auto list_data = FlatVector::GetData<list_entry_t>(periods_list);
-            list_data[row_idx].offset = current_size;
-            list_data[row_idx].length = period_result.n_periods;
+    // Get fresh references after Reserve (Reserve may have reallocated memory)
+    auto &children = StructVector::GetEntries(result);
+    auto &periods_list = *children[0];
 
-            // Get child vector references AFTER Reserve to avoid dangling references
-            auto &list_child = ListVector::GetEntry(periods_list);
-            auto &struct_entries = StructVector::GetEntries(list_child);
-            for (size_t i = 0; i < period_result.n_periods; i++) {
-                FlatVector::GetData<double>(*struct_entries[0])[current_size + i] = period_result.periods[i].period;
-                FlatVector::GetData<double>(*struct_entries[1])[current_size + i] = period_result.periods[i].confidence;
-                FlatVector::GetData<double>(*struct_entries[2])[current_size + i] = period_result.periods[i].strength;
-                FlatVector::GetData<double>(*struct_entries[3])[current_size + i] = period_result.periods[i].amplitude;
-                FlatVector::GetData<double>(*struct_entries[4])[current_size + i] = period_result.periods[i].phase;
-                FlatVector::GetData<int64_t>(*struct_entries[5])[current_size + i] = period_result.periods[i].iteration;
+    // Get list_data pointer for the list entries
+    auto list_data = FlatVector::GetData<list_entry_t>(periods_list);
+
+    // Only get struct child pointers if we have periods to copy
+    double *period_data = nullptr;
+    double *confidence_data = nullptr;
+    double *strength_data = nullptr;
+    double *amplitude_data = nullptr;
+    double *phase_data = nullptr;
+    int64_t *iteration_data = nullptr;
+
+    if (total_periods > 0) {
+        auto &list_child = ListVector::GetEntry(periods_list);
+        auto &struct_entries = StructVector::GetEntries(list_child);
+        period_data = FlatVector::GetData<double>(*struct_entries[0]);
+        confidence_data = FlatVector::GetData<double>(*struct_entries[1]);
+        strength_data = FlatVector::GetData<double>(*struct_entries[2]);
+        amplitude_data = FlatVector::GetData<double>(*struct_entries[3]);
+        phase_data = FlatVector::GetData<double>(*struct_entries[4]);
+        iteration_data = FlatVector::GetData<int64_t>(*struct_entries[5]);
+    }
+
+    auto n_periods_data = FlatVector::GetData<int64_t>(*children[1]);
+    auto primary_period_data = FlatVector::GetData<double>(*children[2]);
+
+    size_t current_offset = 0;
+    for (idx_t row_idx = 0; row_idx < count; row_idx++) {
+        if (row_results[row_idx].is_null) {
+            list_data[row_idx].offset = current_offset;
+            list_data[row_idx].length = 0;
+            continue;
+        }
+
+        auto &res = row_results[row_idx].result;
+
+        // Set list entry
+        list_data[row_idx].offset = current_offset;
+        list_data[row_idx].length = res.n_periods;
+
+        // Copy period data (only if we have data pointers)
+        if (res.n_periods > 0 && period_data != nullptr) {
+            for (size_t i = 0; i < res.n_periods; i++) {
+                period_data[current_offset + i] = res.period_values[i];
+                confidence_data[current_offset + i] = res.confidence_values[i];
+                strength_data[current_offset + i] = res.strength_values[i];
+                amplitude_data[current_offset + i] = res.amplitude_values[i];
+                phase_data[current_offset + i] = res.phase_values[i];
+                iteration_data[current_offset + i] = res.iteration_values[i];
             }
         }
 
-        // Set scalar fields
-        FlatVector::GetData<int64_t>(*children[1])[row_idx] = period_result.n_periods;
-        FlatVector::GetData<double>(*children[2])[row_idx] = period_result.primary_period;
-        FlatVector::GetData<string_t>(*children[3])[row_idx] = StringVector::AddString(*children[3], period_result.method);
+        current_offset += res.n_periods;
 
-        anofox_free_multi_period_result(&period_result);
+        // Set scalar fields
+        n_periods_data[row_idx] = res.n_periods;
+        primary_period_data[row_idx] = res.primary_period;
+        FlatVector::GetData<string_t>(*children[3])[row_idx] = StringVector::AddString(*children[3], res.method);
+
+        // Free FFI result
+        anofox_free_flat_multi_period_result(&row_results[row_idx].result);
     }
 }
 
@@ -244,7 +375,7 @@ static void TsEstimatePeriodFftFunction(DataChunk &args, ExpressionState &state,
         }
 
         vector<double> values;
-        ExtractListAsDouble(values_vec, row_idx, values);
+        ExtractListAsDouble(values_vec, count, row_idx, values);
 
         SinglePeriodResult period_result;
         memset(&period_result, 0, sizeof(period_result));
@@ -304,7 +435,7 @@ static void TsEstimatePeriodAcfFunction(DataChunk &args, ExpressionState &state,
         }
 
         vector<double> values;
-        ExtractListAsDouble(values_vec, row_idx, values);
+        ExtractListAsDouble(values_vec, count, row_idx, values);
 
         SinglePeriodResult period_result;
         memset(&period_result, 0, sizeof(period_result));
@@ -374,69 +505,128 @@ static void TsDetectMultiplePeriodsFunction(DataChunk &args, ExpressionState &st
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
+    // Two-pass approach to avoid incremental Reserve calls which can cause memory issues
+    struct RowResult {
+        FlatMultiPeriodResult result;
+        bool is_null;
+    };
+
+    vector<RowResult> row_results(count);
+    size_t total_periods = 0;
+
+    // Pass 1: Compute all FFI results
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
+        row_results[row_idx].is_null = false;
+        memset(&row_results[row_idx].result, 0, sizeof(FlatMultiPeriodResult));
+
         if (FlatVector::IsNull(values_vec, row_idx)) {
+            row_results[row_idx].is_null = true;
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> values;
-        ExtractListAsDouble(values_vec, row_idx, values);
+        ExtractListAsDouble(values_vec, count, row_idx, values);
 
-        MultiPeriodResult period_result;
-        memset(&period_result, 0, sizeof(period_result));
         AnofoxError error;
-
-        bool success = anofox_ts_detect_multiple_periods(
+        bool success = anofox_ts_detect_multiple_periods_flat(
             values.data(),
             values.size(),
             max_periods,
             min_confidence,
             min_strength,
-            &period_result,
+            &row_results[row_idx].result,
             &error
         );
 
         if (!success) {
+            // Clean up any already-allocated results
+            for (idx_t i = 0; i < row_idx; i++) {
+                if (!row_results[i].is_null) {
+                    anofox_free_flat_multi_period_result(&row_results[i].result);
+                }
+            }
             throw InvalidInputException("ts_detect_multiple_periods failed: %s", error.message);
         }
 
-        auto &children = StructVector::GetEntries(result);
+        total_periods += row_results[row_idx].result.n_periods;
+    }
 
-        // Set periods list - IMPORTANT: Reserve before getting child references
-        // as Reserve can relocate the underlying memory
-        {
-            auto &periods_list = *children[0];
-            auto current_size = ListVector::GetListSize(periods_list);
+    // Pass 2: Reserve all space at once, then copy data
+    // IMPORTANT: Get fresh references after each operation that might reallocate
+    {
+        auto &children_init = StructVector::GetEntries(result);
+        auto &periods_list_init = *children_init[0];
 
-            // First, reserve space and set list size
-            ListVector::Reserve(periods_list, current_size + period_result.n_periods);
-            ListVector::SetListSize(periods_list, current_size + period_result.n_periods);
+        // Reserve all space at once (reserve at least 1 to ensure valid list structure)
+        ListVector::Reserve(periods_list_init, total_periods > 0 ? total_periods : 1);
+        ListVector::SetListSize(periods_list_init, total_periods);
+    }
 
-            // Now get the list data and child references AFTER Reserve
-            auto list_data = FlatVector::GetData<list_entry_t>(periods_list);
-            list_data[row_idx].offset = current_size;
-            list_data[row_idx].length = period_result.n_periods;
+    // Get fresh references after Reserve (Reserve may have reallocated memory)
+    auto &children = StructVector::GetEntries(result);
+    auto &periods_list = *children[0];
 
-            // Get child vector references AFTER Reserve to avoid dangling references
-            auto &list_child = ListVector::GetEntry(periods_list);
-            auto &struct_entries = StructVector::GetEntries(list_child);
-            for (size_t i = 0; i < period_result.n_periods; i++) {
-                FlatVector::GetData<double>(*struct_entries[0])[current_size + i] = period_result.periods[i].period;
-                FlatVector::GetData<double>(*struct_entries[1])[current_size + i] = period_result.periods[i].confidence;
-                FlatVector::GetData<double>(*struct_entries[2])[current_size + i] = period_result.periods[i].strength;
-                FlatVector::GetData<double>(*struct_entries[3])[current_size + i] = period_result.periods[i].amplitude;
-                FlatVector::GetData<double>(*struct_entries[4])[current_size + i] = period_result.periods[i].phase;
-                FlatVector::GetData<int64_t>(*struct_entries[5])[current_size + i] = period_result.periods[i].iteration;
+    // Get list_data pointer for the list entries
+    auto list_data = FlatVector::GetData<list_entry_t>(periods_list);
+
+    // Only get struct child pointers if we have periods to copy
+    double *period_data = nullptr;
+    double *confidence_data = nullptr;
+    double *strength_data = nullptr;
+    double *amplitude_data = nullptr;
+    double *phase_data = nullptr;
+    int64_t *iteration_data = nullptr;
+
+    if (total_periods > 0) {
+        auto &list_child = ListVector::GetEntry(periods_list);
+        auto &struct_entries = StructVector::GetEntries(list_child);
+        period_data = FlatVector::GetData<double>(*struct_entries[0]);
+        confidence_data = FlatVector::GetData<double>(*struct_entries[1]);
+        strength_data = FlatVector::GetData<double>(*struct_entries[2]);
+        amplitude_data = FlatVector::GetData<double>(*struct_entries[3]);
+        phase_data = FlatVector::GetData<double>(*struct_entries[4]);
+        iteration_data = FlatVector::GetData<int64_t>(*struct_entries[5]);
+    }
+
+    auto n_periods_data = FlatVector::GetData<int64_t>(*children[1]);
+    auto primary_period_data = FlatVector::GetData<double>(*children[2]);
+
+    size_t current_offset = 0;
+    for (idx_t row_idx = 0; row_idx < count; row_idx++) {
+        if (row_results[row_idx].is_null) {
+            list_data[row_idx].offset = current_offset;
+            list_data[row_idx].length = 0;
+            continue;
+        }
+
+        auto &res = row_results[row_idx].result;
+
+        // Set list entry
+        list_data[row_idx].offset = current_offset;
+        list_data[row_idx].length = res.n_periods;
+
+        // Copy period data (only if we have data pointers)
+        if (res.n_periods > 0 && period_data != nullptr) {
+            for (size_t i = 0; i < res.n_periods; i++) {
+                period_data[current_offset + i] = res.period_values[i];
+                confidence_data[current_offset + i] = res.confidence_values[i];
+                strength_data[current_offset + i] = res.strength_values[i];
+                amplitude_data[current_offset + i] = res.amplitude_values[i];
+                phase_data[current_offset + i] = res.phase_values[i];
+                iteration_data[current_offset + i] = res.iteration_values[i];
             }
         }
 
-        // Set scalar fields
-        FlatVector::GetData<int64_t>(*children[1])[row_idx] = period_result.n_periods;
-        FlatVector::GetData<double>(*children[2])[row_idx] = period_result.primary_period;
-        FlatVector::GetData<string_t>(*children[3])[row_idx] = StringVector::AddString(*children[3], period_result.method);
+        current_offset += res.n_periods;
 
-        anofox_free_multi_period_result(&period_result);
+        // Set scalar fields
+        n_periods_data[row_idx] = res.n_periods;
+        primary_period_data[row_idx] = res.primary_period;
+        FlatVector::GetData<string_t>(*children[3])[row_idx] = StringVector::AddString(*children[3], res.method);
+
+        // Free FFI result
+        anofox_free_flat_multi_period_result(&row_results[row_idx].result);
     }
 }
 

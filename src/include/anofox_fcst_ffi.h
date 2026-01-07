@@ -235,6 +235,52 @@ typedef struct MultiPeriodResult {
 } MultiPeriodResult;
 
 /**
+ * Flattened result from multiple period detection.
+ *
+ * Uses parallel arrays instead of nested struct array for safer FFI.
+ * This avoids memory management issues when crossing the Rust/C++ boundary,
+ * particularly with R's DuckDB bindings.
+ */
+typedef struct FlatMultiPeriodResult {
+    /**
+     * Array of period values (in samples)
+     */
+    double *period_values;
+    /**
+     * Array of confidence values
+     */
+    double *confidence_values;
+    /**
+     * Array of strength values
+     */
+    double *strength_values;
+    /**
+     * Array of amplitude values
+     */
+    double *amplitude_values;
+    /**
+     * Array of phase values (radians)
+     */
+    double *phase_values;
+    /**
+     * Array of iteration values (1-indexed)
+     */
+    size_t *iteration_values;
+    /**
+     * Number of detected periods
+     */
+    size_t n_periods;
+    /**
+     * Primary (strongest) period
+     */
+    double primary_period;
+    /**
+     * Method used for estimation
+     */
+    char method[32];
+} FlatMultiPeriodResult;
+
+/**
  * Result from single period estimation.
  */
 typedef struct SinglePeriodResult {
@@ -1128,6 +1174,21 @@ bool anofox_ts_detect_periods(const double *values,
                               struct AnofoxError *out_error);
 
 /**
+ * Detect multiple periods in a time series using the specified method.
+ *
+ * Returns a flattened result with parallel arrays for safer FFI.
+ * This version avoids memory issues when used through R's DuckDB bindings.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_detect_periods_flat(const double *values,
+                                   size_t length,
+                                   const char *method,
+                                   struct FlatMultiPeriodResult *out_result,
+                                   struct AnofoxError *out_error);
+
+/**
  * Estimate period using FFT.
  *
  * # Safety
@@ -1163,6 +1224,23 @@ bool anofox_ts_detect_multiple_periods(const double *values,
                                        double min_strength,
                                        struct MultiPeriodResult *out_result,
                                        struct AnofoxError *out_error);
+
+/**
+ * Detect multiple periods in time series.
+ *
+ * Returns a flattened result with parallel arrays for safer FFI.
+ * This version avoids memory issues when used through R's DuckDB bindings.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_detect_multiple_periods_flat(const double *values,
+                                            size_t length,
+                                            int max_periods,
+                                            double min_confidence,
+                                            double min_strength,
+                                            struct FlatMultiPeriodResult *out_result,
+                                            struct AnofoxError *out_error);
 
 /**
  * Detect peaks in time series.
@@ -1615,6 +1693,16 @@ void anofox_free_int_array(int *ptr);
  * The result pointer must be valid or null.
  */
 void anofox_free_multi_period_result(struct MultiPeriodResult *result);
+
+/**
+ * Free a FlatMultiPeriodResult.
+ *
+ * Frees all parallel arrays allocated by the flat period detection functions.
+ *
+ * # Safety
+ * The result pointer must be valid or null.
+ */
+void anofox_free_flat_multi_period_result(struct FlatMultiPeriodResult *result);
 
 /**
  * Free a PeakDetectionResultFFI.

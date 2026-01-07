@@ -906,6 +906,100 @@ pub unsafe extern "C" fn anofox_ts_detect_periods(
     }
 }
 
+/// Detect multiple periods in a time series using the specified method.
+///
+/// Returns a flattened result with parallel arrays for safer FFI.
+/// This version avoids memory issues when used through R's DuckDB bindings.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_detect_periods_flat(
+    values: *const c_double,
+    length: size_t,
+    method: *const c_char,
+    out_result: *mut types::FlatMultiPeriodResult,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if values.is_null() || out_result.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let values_vec = std::slice::from_raw_parts(values, length).to_vec();
+        let method_str = if method.is_null() {
+            "fft"
+        } else {
+            CStr::from_ptr(method).to_str().unwrap_or("fft")
+        };
+        let period_method: anofox_fcst_core::PeriodMethod = method_str.parse().unwrap_or_default();
+        anofox_fcst_core::detect_periods(&values_vec, period_method)
+    }));
+
+    match result {
+        Ok(Ok(multi_result)) => {
+            let n = multi_result.periods.len();
+            (*out_result).n_periods = n;
+            (*out_result).primary_period = multi_result.primary_period;
+            copy_string_to_buffer(&multi_result.method, &mut (*out_result).method);
+
+            if n > 0 {
+                // Allocate parallel arrays instead of struct array
+                let period_ptr = malloc(n * std::mem::size_of::<c_double>()) as *mut c_double;
+                let confidence_ptr = malloc(n * std::mem::size_of::<c_double>()) as *mut c_double;
+                let strength_ptr = malloc(n * std::mem::size_of::<c_double>()) as *mut c_double;
+                let amplitude_ptr = malloc(n * std::mem::size_of::<c_double>()) as *mut c_double;
+                let phase_ptr = malloc(n * std::mem::size_of::<c_double>()) as *mut c_double;
+                let iteration_ptr = malloc(n * std::mem::size_of::<size_t>()) as *mut size_t;
+
+                for (i, dp) in multi_result.periods.iter().enumerate() {
+                    *period_ptr.add(i) = dp.period;
+                    *confidence_ptr.add(i) = dp.confidence;
+                    *strength_ptr.add(i) = dp.strength;
+                    *amplitude_ptr.add(i) = dp.amplitude;
+                    *phase_ptr.add(i) = dp.phase;
+                    *iteration_ptr.add(i) = dp.iteration;
+                }
+
+                (*out_result).period_values = period_ptr;
+                (*out_result).confidence_values = confidence_ptr;
+                (*out_result).strength_values = strength_ptr;
+                (*out_result).amplitude_values = amplitude_ptr;
+                (*out_result).phase_values = phase_ptr;
+                (*out_result).iteration_values = iteration_ptr;
+            } else {
+                (*out_result).period_values = ptr::null_mut();
+                (*out_result).confidence_values = ptr::null_mut();
+                (*out_result).strength_values = ptr::null_mut();
+                (*out_result).amplitude_values = ptr::null_mut();
+                (*out_result).phase_values = ptr::null_mut();
+                (*out_result).iteration_values = ptr::null_mut();
+            }
+
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
 /// Estimate period using FFT.
 ///
 /// # Safety
@@ -1080,6 +1174,111 @@ pub unsafe extern "C" fn anofox_ts_detect_multiple_periods(
                 (*out_result).periods = periods_ptr;
             } else {
                 (*out_result).periods = ptr::null_mut();
+            }
+
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
+/// Detect multiple periods in time series.
+///
+/// Returns a flattened result with parallel arrays for safer FFI.
+/// This version avoids memory issues when used through R's DuckDB bindings.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_detect_multiple_periods_flat(
+    values: *const c_double,
+    length: size_t,
+    max_periods: c_int,
+    min_confidence: c_double,
+    min_strength: c_double,
+    out_result: *mut types::FlatMultiPeriodResult,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if values.is_null() || out_result.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let values_vec = std::slice::from_raw_parts(values, length).to_vec();
+        let max_p = if max_periods > 0 {
+            Some(max_periods as usize)
+        } else {
+            None
+        };
+        let min_c = if min_confidence > 0.0 {
+            Some(min_confidence)
+        } else {
+            None
+        };
+        let min_s = if min_strength > 0.0 {
+            Some(min_strength)
+        } else {
+            None
+        };
+        anofox_fcst_core::detect_multiple_periods_ts(&values_vec, max_p, min_c, min_s)
+    }));
+
+    match result {
+        Ok(Ok(multi_result)) => {
+            let n = multi_result.periods.len();
+            (*out_result).n_periods = n;
+            (*out_result).primary_period = multi_result.primary_period;
+            copy_string_to_buffer(&multi_result.method, &mut (*out_result).method);
+
+            if n > 0 {
+                // Allocate parallel arrays instead of struct array
+                let period_ptr = malloc(n * std::mem::size_of::<c_double>()) as *mut c_double;
+                let confidence_ptr = malloc(n * std::mem::size_of::<c_double>()) as *mut c_double;
+                let strength_ptr = malloc(n * std::mem::size_of::<c_double>()) as *mut c_double;
+                let amplitude_ptr = malloc(n * std::mem::size_of::<c_double>()) as *mut c_double;
+                let phase_ptr = malloc(n * std::mem::size_of::<c_double>()) as *mut c_double;
+                let iteration_ptr = malloc(n * std::mem::size_of::<size_t>()) as *mut size_t;
+
+                for (i, dp) in multi_result.periods.iter().enumerate() {
+                    *period_ptr.add(i) = dp.period;
+                    *confidence_ptr.add(i) = dp.confidence;
+                    *strength_ptr.add(i) = dp.strength;
+                    *amplitude_ptr.add(i) = dp.amplitude;
+                    *phase_ptr.add(i) = dp.phase;
+                    *iteration_ptr.add(i) = dp.iteration;
+                }
+
+                (*out_result).period_values = period_ptr;
+                (*out_result).confidence_values = confidence_ptr;
+                (*out_result).strength_values = strength_ptr;
+                (*out_result).amplitude_values = amplitude_ptr;
+                (*out_result).phase_values = phase_ptr;
+                (*out_result).iteration_values = iteration_ptr;
+            } else {
+                (*out_result).period_values = ptr::null_mut();
+                (*out_result).confidence_values = ptr::null_mut();
+                (*out_result).strength_values = ptr::null_mut();
+                (*out_result).amplitude_values = ptr::null_mut();
+                (*out_result).phase_values = ptr::null_mut();
+                (*out_result).iteration_values = ptr::null_mut();
             }
 
             true
@@ -3287,6 +3486,47 @@ pub unsafe extern "C" fn anofox_free_multi_period_result(result: *mut types::Mul
     if !r.periods.is_null() {
         free(r.periods as *mut core::ffi::c_void);
         r.periods = ptr::null_mut();
+    }
+}
+
+/// Free a FlatMultiPeriodResult.
+///
+/// Frees all parallel arrays allocated by the flat period detection functions.
+///
+/// # Safety
+/// The result pointer must be valid or null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_free_flat_multi_period_result(
+    result: *mut types::FlatMultiPeriodResult,
+) {
+    if result.is_null() {
+        return;
+    }
+    let r = &mut *result;
+
+    if !r.period_values.is_null() {
+        free(r.period_values as *mut core::ffi::c_void);
+        r.period_values = ptr::null_mut();
+    }
+    if !r.confidence_values.is_null() {
+        free(r.confidence_values as *mut core::ffi::c_void);
+        r.confidence_values = ptr::null_mut();
+    }
+    if !r.strength_values.is_null() {
+        free(r.strength_values as *mut core::ffi::c_void);
+        r.strength_values = ptr::null_mut();
+    }
+    if !r.amplitude_values.is_null() {
+        free(r.amplitude_values as *mut core::ffi::c_void);
+        r.amplitude_values = ptr::null_mut();
+    }
+    if !r.phase_values.is_null() {
+        free(r.phase_values as *mut core::ffi::c_void);
+        r.phase_values = ptr::null_mut();
+    }
+    if !r.iteration_values.is_null() {
+        free(r.iteration_values as *mut core::ffi::c_void);
+        r.iteration_values = ptr::null_mut();
     }
 }
 

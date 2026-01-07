@@ -48,9 +48,7 @@ METHOD_COLORS <- c(
   "Basic" = "#E41A1C",
   "Analysis" = "#377EB8",
   "FFT" = "#4DAF4A",
-  "ACF" = "#984EA3",
-  "Multi" = "#FF7F00",
-  "Multiple" = "#A65628"
+  "ACF" = "#984EA3"
 )
 ```
 
@@ -66,8 +64,6 @@ The `anofox-forecast` DuckDB extension provides SQL functions for detecting and 
 | Full Analysis | `ts_analyze_seasonality(values)` | Comprehensive struct with periods and strength metrics |
 | FFT Period | `ts_estimate_period_fft(values)` | Period estimation via Fast Fourier Transform |
 | ACF Period | `ts_estimate_period_acf(values)` | Period estimation via Autocorrelation |
-| Multi-Method | `ts_detect_periods(values, method)` | Detection using specified method ('fft', 'acf', 'combined') |
-| Multiple Periods | `ts_detect_multiple_periods(values)` | Detects all significant periods |
 
 ### Simulation Scenarios
 
@@ -397,7 +393,8 @@ for (i in 1:nrow(all_series)) {
 }
 
 cat("Data loaded into DuckDB table 'simulated_series'\n")
-dbGetQuery(con, "SELECT COUNT(*) as n_rows FROM simulated_series")
+row_count <- dbGetQuery(con, "SELECT COUNT(*) as n_rows FROM simulated_series")
+cat("Row count:", row_count$n_rows, "\n")
 ```
 
 ## Detection Methods Tutorial
@@ -408,11 +405,15 @@ This section demonstrates each detection method with explicit SQL queries.
 
 Returns an array of detected seasonal periods.
 
-```{sql}
---| label: sql-detect-seasonality
---| connection: con
---| output.var: "basic_detection"
+```{r}
+#| label: sql-detect-seasonality
 
+# Debug: Check if connection is valid and table exists
+cat("Connection class:", class(con), "\n")
+tables <- dbListTables(con)
+cat("Tables in database:", paste(tables, collapse=", "), "\n")
+
+basic_detection <- dbGetQuery(con, "
 SELECT
     global_id,
     scenario,
@@ -421,7 +422,8 @@ SELECT
 FROM simulated_series
 WHERE series_id = 1
 ORDER BY scenario
-LIMIT 7;
+LIMIT 7
+")
 ```
 
 ```{r}
@@ -434,11 +436,10 @@ kable(basic_detection, caption = "Basic Seasonality Detection Results")
 
 Comprehensive analysis including strength metrics.
 
-```{sql}
---| label: sql-analyze-seasonality
---| connection: con
---| output.var: "full_analysis"
+```{r}
+#| label: sql-analyze-seasonality
 
+full_analysis <- dbGetQuery(con, "
 SELECT
     global_id,
     scenario,
@@ -449,7 +450,8 @@ SELECT
 FROM simulated_series
 WHERE series_id = 1
 ORDER BY scenario
-LIMIT 7;
+LIMIT 7
+")
 ```
 
 ```{r}
@@ -462,11 +464,10 @@ kable(full_analysis, digits = 3, caption = "Full Seasonality Analysis Results")
 
 Uses Fast Fourier Transform for precise frequency detection.
 
-```{sql}
---| label: sql-fft-period
---| connection: con
---| output.var: "fft_results"
+```{r}
+#| label: sql-fft-period
 
+fft_results <- dbGetQuery(con, "
 SELECT
     global_id,
     scenario,
@@ -477,7 +478,8 @@ SELECT
 FROM simulated_series
 WHERE series_id = 1
 ORDER BY scenario
-LIMIT 7;
+LIMIT 7
+")
 ```
 
 ```{r}
@@ -490,11 +492,10 @@ kable(fft_results, digits = 3, caption = "FFT Period Estimation Results")
 
 Detects periods using autocorrelation peaks.
 
-```{sql}
---| label: sql-acf-period
---| connection: con
---| output.var: "acf_results"
+```{r}
+#| label: sql-acf-period
 
+acf_results <- dbGetQuery(con, "
 SELECT
     global_id,
     scenario,
@@ -504,7 +505,8 @@ SELECT
 FROM simulated_series
 WHERE series_id = 1
 ORDER BY scenario
-LIMIT 7;
+LIMIT 7
+")
 ```
 
 ```{r}
@@ -513,69 +515,15 @@ LIMIT 7;
 kable(acf_results, digits = 3, caption = "ACF Period Estimation Results")
 ```
 
-### Method 5: Multi-Method Detection (`ts_detect_periods`)
-
-Allows selecting the detection method ('fft', 'acf', or 'combined').
-
-```{sql}
---| label: sql-multi-method
---| connection: con
---| output.var: "multi_results"
-
-SELECT
-    global_id,
-    scenario,
-    true_period,
-    (ts_detect_periods(values, 'combined')).primary_period as multi_period,
-    (ts_detect_periods(values, 'combined')).n_periods as n_periods
-FROM simulated_series
-WHERE series_id = 1
-ORDER BY scenario
-LIMIT 7;
-```
-
-```{r}
-#| label: show-multi-results
-
-kable(multi_results, digits = 3, caption = "Multi-Method Detection Results")
-```
-
-### Method 6: Multiple Periods Detection (`ts_detect_multiple_periods`)
-
-Detects all significant seasonal periods in the data.
-
-```{sql}
---| label: sql-multiple-periods
---| connection: con
---| output.var: "multiple_results"
-
-SELECT
-    global_id,
-    scenario,
-    true_period,
-    (ts_detect_multiple_periods(values)).primary_period as primary_period,
-    (ts_detect_multiple_periods(values)).n_periods as n_periods
-FROM simulated_series
-WHERE series_id = 1
-ORDER BY scenario
-LIMIT 7;
-```
-
-```{r}
-#| label: show-multiple-results
-
-kable(multiple_results, digits = 3, caption = "Multiple Periods Detection Results")
-```
 
 ## Running Full Detection with All Methods
 
-Now we run all six detection methods on all simulated series.
+Now we run all four detection methods on all simulated series.
 
-```{sql}
---| label: sql-full-detection
---| connection: con
---| output.var: "all_detections"
+```{r}
+#| label: sql-full-detection
 
+all_detections <- dbGetQuery(con, "
 WITH detection_results AS (
     SELECT
         global_id,
@@ -590,11 +538,7 @@ WITH detection_results AS (
         -- Method 3: FFT detection
         ts_estimate_period_fft(values) as fft,
         -- Method 4: ACF detection
-        ts_estimate_period_acf(values) as acf,
-        -- Method 5: Multi-method detection
-        ts_detect_periods(values, 'combined') as multi,
-        -- Method 6: Multiple periods detection
-        ts_detect_multiple_periods(values) as multiple
+        ts_estimate_period_acf(values) as acf
     FROM simulated_series
 )
 SELECT
@@ -613,14 +557,9 @@ SELECT
     (fft).confidence as fft_confidence,
     -- ACF results
     (acf).period as acf_period,
-    (acf).confidence as acf_confidence,
-    -- Multi-method results
-    (multi).primary_period as multi_period,
-    (multi).n_periods as multi_n_periods,
-    -- Multiple periods results
-    (multiple).primary_period as multiple_period,
-    (multiple).n_periods as multiple_n_periods
-FROM detection_results;
+    (acf).confidence as acf_confidence
+FROM detection_results
+")
 ```
 
 ```{r}
@@ -638,17 +577,11 @@ detections <- as_tibble(all_detections) %>%
                           abs(fft_period - true_period) / true_period < 0.1, FALSE),
     acf_accurate = ifelse(true_period > 0,
                           abs(acf_period - true_period) / true_period < 0.1, FALSE),
-    multi_accurate = ifelse(true_period > 0,
-                            abs(multi_period - true_period) / true_period < 0.1, FALSE),
-    multiple_accurate = ifelse(true_period > 0,
-                               abs(multiple_period - true_period) / true_period < 0.1, FALSE),
     # Detection based on various thresholds
     basic_detected = !is.na(basic_period) & basic_period > 0,
     analysis_detected = analysis_strength > 0.3,
     fft_detected = fft_confidence > 0.5,
-    acf_detected = acf_confidence > 0.5,
-    multi_detected = multi_n_periods > 0,
-    multiple_detected = multiple_n_periods > 0
+    acf_detected = acf_confidence > 0.5
   )
 
 cat(sprintf("Processed %d detection results\n", nrow(detections)))
@@ -660,7 +593,7 @@ cat(sprintf("Processed %d detection results\n", nrow(detections)))
 
 ```{r}
 #| label: fig-detection-rates
-#| fig-cap: "Detection rates across scenarios for all six methods"
+#| fig-cap: "Detection rates across scenarios for all four methods"
 #| fig-height: 8
 
 detection_rates <- detections %>%
@@ -670,11 +603,9 @@ detection_rates <- detections %>%
     Analysis = mean(analysis_detected, na.rm = TRUE),
     FFT = mean(fft_detected, na.rm = TRUE),
     ACF = mean(acf_detected, na.rm = TRUE),
-    Multi = mean(multi_detected, na.rm = TRUE),
-    Multiple = mean(multiple_detected, na.rm = TRUE),
     .groups = "drop"
   ) %>%
-  pivot_longer(cols = c(Basic, Analysis, FFT, ACF, Multi, Multiple),
+  pivot_longer(cols = c(Basic, Analysis, FFT, ACF),
                names_to = "method", values_to = "detection_rate") %>%
   mutate(method = factor(method, levels = names(METHOD_COLORS)))
 
@@ -707,8 +638,6 @@ detection_rates_wide <- detections %>%
     Analysis = sprintf("%.1f%%", mean(analysis_detected, na.rm = TRUE) * 100),
     FFT = sprintf("%.1f%%", mean(fft_detected, na.rm = TRUE) * 100),
     ACF = sprintf("%.1f%%", mean(acf_detected, na.rm = TRUE) * 100),
-    Multi = sprintf("%.1f%%", mean(multi_detected, na.rm = TRUE) * 100),
-    Multiple = sprintf("%.1f%%", mean(multiple_detected, na.rm = TRUE) * 100),
     .groups = "drop"
   )
 
@@ -725,8 +654,8 @@ kable(detection_rates_wide, caption = "Detection Rates by Scenario and Method")
 period_data <- detections %>%
   filter(is_seasonal, true_period > 0) %>%
   select(scenario, true_period, basic_period, analysis_period,
-         fft_period, acf_period, multi_period, multiple_period) %>%
-  pivot_longer(cols = ends_with("_period"),
+         fft_period, acf_period) %>%
+  pivot_longer(cols = c(basic_period, analysis_period, fft_period, acf_period),
                names_to = "method", values_to = "detected_period") %>%
   mutate(
     method = gsub("_period", "", method),
@@ -734,9 +663,7 @@ period_data <- detections %>%
       method == "basic" ~ "Basic",
       method == "analysis" ~ "Analysis",
       method == "fft" ~ "FFT",
-      method == "acf" ~ "ACF",
-      method == "multi" ~ "Multi",
-      method == "multiple" ~ "Multiple"
+      method == "acf" ~ "ACF"
     ),
     method = factor(method, levels = names(METHOD_COLORS))
   ) %>%
@@ -826,9 +753,7 @@ metrics <- bind_rows(
   calc_metrics(detections$basic_detected, detections$is_seasonal) %>% mutate(Method = "Basic"),
   calc_metrics(detections$analysis_detected, detections$is_seasonal) %>% mutate(Method = "Analysis"),
   calc_metrics(detections$fft_detected, detections$is_seasonal) %>% mutate(Method = "FFT"),
-  calc_metrics(detections$acf_detected, detections$is_seasonal) %>% mutate(Method = "ACF"),
-  calc_metrics(detections$multi_detected, detections$is_seasonal) %>% mutate(Method = "Multi"),
-  calc_metrics(detections$multiple_detected, detections$is_seasonal) %>% mutate(Method = "Multiple")
+  calc_metrics(detections$acf_detected, detections$is_seasonal) %>% mutate(Method = "ACF")
 ) %>%
   select(Method, Precision, Recall, Specificity, F1, Accuracy)
 
@@ -849,8 +774,6 @@ scenario_metrics <- detections %>%
     Analysis = mean(analysis_detected, na.rm = TRUE),
     FFT = mean(fft_detected, na.rm = TRUE),
     ACF = mean(acf_detected, na.rm = TRUE),
-    Multi = mean(multi_detected, na.rm = TRUE),
-    Multiple = mean(multiple_detected, na.rm = TRUE),
     .groups = "drop"
   ) %>%
   pivot_longer(-scenario, names_to = "method", values_to = "value") %>%
@@ -978,7 +901,7 @@ if (nrow(significant_mcnemar) > 0) {
 #| fig-height: 6
 
 # Create symmetric matrix for heatmap
-method_names <- c("Basic", "Analysis", "FFT", "ACF", "Multi", "Multiple")
+method_names <- c("Basic", "Analysis", "FFT", "ACF")
 mcnemar_matrix <- mcnemar_results %>%
   select(Method1, Method2, `p-value`) %>%
   bind_rows(
@@ -1030,14 +953,12 @@ best_by_scenario <- detections %>%
     Analysis = mean(analysis_detected, na.rm = TRUE),
     FFT = mean(fft_detected, na.rm = TRUE),
     ACF = mean(acf_detected, na.rm = TRUE),
-    Multi = mean(multi_detected, na.rm = TRUE),
-    Multiple = mean(multiple_detected, na.rm = TRUE),
     .groups = "drop"
   ) %>%
   rowwise() %>%
   mutate(
-    best_rate = max(c_across(Basic:Multiple)),
-    best_method = names(METHOD_COLORS)[which.max(c_across(Basic:Multiple))]
+    best_rate = max(c_across(Basic:ACF)),
+    best_method = names(METHOD_COLORS)[which.max(c_across(Basic:ACF))]
   ) %>%
   ungroup() %>%
   select(Scenario = scenario, `Best Method` = best_method, `Detection Rate` = best_rate)
@@ -1061,25 +982,19 @@ recommendations <- tibble(
     "Clean, stable seasonality",
     "Noisy data",
     "Unknown characteristics",
-    "Trending data",
-    "Time-varying patterns",
-    "Multiple seasonal periods"
+    "Trending data"
   ),
   `Recommended Method` = c(
     "FFT (`ts_estimate_period_fft`)",
     "ACF (`ts_estimate_period_acf`)",
     "Analysis (`ts_analyze_seasonality`)",
-    "Analysis (`ts_analyze_seasonality`)",
-    "Multi (`ts_detect_periods`)",
-    "Multiple (`ts_detect_multiple_periods`)"
+    "Analysis (`ts_analyze_seasonality`)"
   ),
   Rationale = c(
     "Precise frequency detection",
     "More robust to noise",
     "Comprehensive metrics including trend",
-    "Built-in detrending",
-    "Cross-validates FFT and ACF",
-    "Finds all significant periods"
+    "Built-in detrending"
   )
 )
 
@@ -1095,13 +1010,12 @@ kable(recommendations, caption = "Method Selection Recommendations")
 
 ## Conclusion
 
-The `anofox-forecast` DuckDB extension provides robust seasonality detection through six complementary methods. Key findings:
+The `anofox-forecast` DuckDB extension provides robust seasonality detection through four complementary methods. Key findings:
 
 - **FFT-based detection** excels at precise frequency detection in clean signals
 - **ACF-based detection** shows robustness to noise
 - **Full analysis** provides comprehensive view with multiple metrics
-- **Multi-method detection** combines approaches for reliability
-- **Multiple periods detection** handles complex seasonal patterns
+- **Basic detection** offers simple period extraction for quick analysis
 
 ## Cleanup
 
@@ -1136,17 +1050,6 @@ SELECT
     (ts_estimate_period_acf(values)).period,
     (ts_estimate_period_acf(values)).confidence
 FROM my_table;
-
--- Method 5: Multi-method detection
-SELECT
-    ts_detect_periods(values, 'fft'),      -- FFT only
-    ts_detect_periods(values, 'acf'),      -- ACF only
-    ts_detect_periods(values, 'combined')  -- Both methods
-FROM my_table;
-
--- Method 6: Multiple period detection
-SELECT ts_detect_multiple_periods(values, 3, 0.5, 0.2) FROM my_table;
--- Parameters: values, max_periods, min_confidence, min_strength
 ```
 
 ### Session Info
