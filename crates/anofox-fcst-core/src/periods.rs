@@ -264,13 +264,15 @@ fn make_argvals(n: usize) -> Vec<f64> {
 /// # Returns
 /// Estimated period result with confidence
 pub fn estimate_period_fft_ts(values: &[f64]) -> Result<SinglePeriodResult> {
-    let n = values.len();
-    if n < 4 {
-        return Err(ForecastError::InsufficientData { needed: 4, got: n });
+    let m = values.len();
+    if m < 4 {
+        return Err(ForecastError::InsufficientData { needed: 4, got: m });
     }
 
-    let argvals = make_argvals(n);
-    let result = estimate_period_fft(values, n, 1, &argvals);
+    let argvals = make_argvals(m);
+    // fdars-core expects: data, n_samples, m_timepoints, argvals
+    // We have 1 sample (our time series) with m time points
+    let result = estimate_period_fft(values, 1, m, &argvals);
 
     Ok((result, "fft").into())
 }
@@ -289,14 +291,16 @@ pub fn estimate_period_acf_ts(
     values: &[f64],
     max_lag: Option<usize>,
 ) -> Result<SinglePeriodResult> {
-    let n = values.len();
-    if n < 4 {
-        return Err(ForecastError::InsufficientData { needed: 4, got: n });
+    let m = values.len();
+    if m < 4 {
+        return Err(ForecastError::InsufficientData { needed: 4, got: m });
     }
 
-    let argvals = make_argvals(n);
-    let lag = max_lag.unwrap_or(n / 2);
-    let result = estimate_period_acf(values, n, 1, &argvals, lag);
+    let argvals = make_argvals(m);
+    let lag = max_lag.unwrap_or(m / 2);
+    // fdars-core expects: data, n_samples, m_timepoints, argvals, max_lag
+    // We have 1 sample (our time series) with m time points
+    let result = estimate_period_acf(values, 1, m, &argvals, lag);
 
     Ok((result, "acf").into())
 }
@@ -333,8 +337,10 @@ pub fn estimate_period_regression_ts(
     let candidates = n_candidates.unwrap_or(50);
     let harmonics = n_harmonics.unwrap_or(3);
 
+    // fdars-core expects: data, n_samples, m_timepoints, argvals, ...
+    // We have 1 sample (our time series) with n time points
     let result =
-        estimate_period_regression(values, n, 1, &argvals, p_min, p_max, candidates, harmonics);
+        estimate_period_regression(values, 1, n, &argvals, p_min, p_max, candidates, harmonics);
 
     Ok((result, "regression").into())
 }
@@ -367,7 +373,9 @@ pub fn detect_multiple_periods_ts(
     let min_conf = min_confidence.unwrap_or(2.0);
     let min_str = min_strength.unwrap_or(0.1);
 
-    let detected = fdars_detect_multiple_periods(values, n, 1, &argvals, max_p, min_conf, min_str);
+    // fdars-core expects: data, n_samples, m_timepoints, argvals, ...
+    // We have 1 sample (our time series) with n time points
+    let detected = fdars_detect_multiple_periods(values, 1, n, &argvals, max_p, min_conf, min_str);
 
     let periods: Vec<DetectedPeriod> = detected.into_iter().map(Into::into).collect();
     let primary = periods.first().map(|p| p.period).unwrap_or(0.0);
@@ -463,8 +471,11 @@ pub fn cfd_autoperiod(values: &[f64], acf_threshold: Option<f64>) -> Result<Auto
     let differenced: Vec<f64> = values.windows(2).map(|w| w[1] - w[0]).collect();
 
     // Get FFT period estimate on differenced series
-    let argvals = make_argvals(differenced.len());
-    let fft_est = estimate_period_fft(&differenced, differenced.len(), 1, &argvals);
+    let m = differenced.len();
+    let argvals = make_argvals(m);
+    // fdars-core expects: data, n_samples, m_timepoints, argvals
+    // We have 1 sample (differenced series) with m time points
+    let fft_est = estimate_period_fft(&differenced, 1, m, &argvals);
 
     let period = fft_est.period.round() as usize;
 
