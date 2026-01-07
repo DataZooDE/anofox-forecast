@@ -3,9 +3,11 @@
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE)
 [![DuckDB](https://img.shields.io/badge/DuckDB-1.4.2+-green.svg)](https://duckdb.org)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
-[![Technical Depth](https://img.shields.io/badge/Technical%20Depth-A%20(93%25)-brightgreen.svg)]()
-[![Code Health](https://img.shields.io/badge/Code%20Health-A--(%2090%25)-green.svg)]()
+[![Technical Depth](https://img.shields.io/badge/Technical%20Depth-A%20(93%25)-brightgreen.svg)](#code-quality)
+[![Code Health](https://img.shields.io/badge/Code%20Health-A--(%2090%25)-green.svg)](#code-quality)
 [![Tests](https://img.shields.io/badge/Tests-138%20passed-brightgreen.svg)]()
+
+<sub>Technical Depth and Code Health scores calculated using [PMAT](https://github.com/paiml/paiml-mcp-agent-toolkit)</sub>
 
 
 > [!IMPORTANT]
