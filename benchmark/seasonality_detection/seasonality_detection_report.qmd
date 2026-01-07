@@ -25,9 +25,49 @@ execute:
 
 ## Executive Summary
 
-This benchmark evaluates seasonality detection methods as a **binary classification problem**: given a time series, does it contain seasonality? We simulate 550 curves with varying seasonal strength levels (0.0 to 1.0) and evaluate 13 detection methods using classification metrics (Accuracy, Precision, Recall, F1, ROC/AUC). Ground truth is defined as seasonal if simulated strength >= 0.2.
+This benchmark evaluates seasonality detection methods as a **binary classification problem**: given a time series, does it contain seasonality? We simulate 550 curves with varying seasonal strength levels (0.0 to 1.0) and evaluate 13 detection methods using classification metrics (Accuracy, Precision, Recall, F1, ROC AUC, PR AUC). Ground truth is defined as seasonal if simulated strength >= 0.2.
+
+**Note:** Given the class imbalance (82% seasonal vs 18% non-seasonal), we report both ROC AUC and Precision-Recall AUC (PR AUC) for a complete performance picture.
 
 This benchmark replicates the methodology from the fdars R package benchmark.
+
+### Quick Start: Which Method Should I Use?
+
+| Your Situation | Recommended Method | SQL Example |
+|----------------|-------------------|-------------|
+| **General purpose** | Wavelet or Variance Strength | `ts_seasonal_strength(values, period, 'wavelet')` |
+| **Unknown period** | Autoperiod | `(ts_autoperiod(values)).detected` |
+| **Fast screening** | FFT | `(ts_estimate_period_fft(values)).confidence` |
+| **Trending data** | CFD-Autoperiod | `(ts_cfd_autoperiod(values)).detected` |
+| **Noisy data** | ACF or Autoperiod | `(ts_estimate_period_acf(values)).confidence` |
+| **Irregular sampling** | Lomb-Scargle | `(ts_lomb_scargle(values)).false_alarm_prob` |
+| **Need model fit** | AIC | `(ts_aic_period(values)).r_squared` |
+
+### Quick SQL Example
+
+```sql
+-- Detect if a time series has seasonality
+SELECT
+    series_id,
+    -- Method 1: Autoperiod (returns TRUE/FALSE)
+    (ts_autoperiod(values)).detected AS has_seasonality,
+    (ts_autoperiod(values)).period AS detected_period,
+
+    -- Method 2: Strength-based (requires known period, returns 0-1)
+    ts_seasonal_strength(values, 12, 'wavelet') AS seasonal_strength
+FROM my_data;
+
+-- Threshold for classification: strength > 0.3 typically indicates seasonality
+```
+
+### Key Results (TL;DR)
+
+- **Best overall performers**: Wavelet Strength and Variance Strength methods
+- **Most practical**: Autoperiod (doesn't require known period, returns boolean)
+- **Fastest**: FFT (but less robust to noise)
+- **For irregular data**: Lomb-Scargle handles missing values and uneven spacing
+
+*For detailed methodology and analysis, continue reading below.*
 
 ```{r}
 #| label: setup
@@ -42,6 +82,7 @@ library(purrr)
 library(knitr)
 library(scales)
 library(pROC)
+library(PRROC)
 
 # Set ggplot theme
 theme_set(theme_minimal(base_size = 12))
@@ -87,6 +128,93 @@ Unlike period estimation (which asks "what is the period?"), **seasonality detec
 | Matrix Profile | `ts_matrix_profile_period` | confidence | Motif agreement ratio |
 | STL | `ts_stl_period` | seasonal_strength | Decomposition strength |
 | SSA | `ts_ssa_period` | variance_explained | Eigenvalue dominance |
+
+### Detailed Method Descriptions
+
+#### Spectral Methods
+
+**FFT (Fast Fourier Transform)**
+Computes the discrete Fourier transform to identify dominant frequencies. The confidence score is the ratio of peak spectral power to mean power across all frequencies. Fast ($O(n \log n)$) but sensitive to noise and non-stationarity.
+
+$$X[k] = \sum_{t=0}^{N-1} x[t] \cdot e^{-2\pi ikt/N}, \quad \text{Confidence} = \frac{P[k_{max}]}{\bar{P}}$$
+
+*Reference: Cooley, J.W. & Tukey, J.W. (1965). "An Algorithm for the Machine Calculation of Complex Fourier Series." Mathematics of Computation, 19(90), 297-301.*
+
+**Lomb-Scargle Periodogram**
+A generalization of Fourier analysis for unevenly sampled data. Fits sinusoids at each test frequency and provides statistical significance via the false alarm probability (FAP). Robust for irregular sampling.
+
+$$P(\omega) = \frac{1}{2\sigma^2} \left[ \frac{(\sum y_i \cos\omega(t_i-\tau))^2}{\sum\cos^2\omega(t_i-\tau)} + \frac{(\sum y_i \sin\omega(t_i-\tau))^2}{\sum\sin^2\omega(t_i-\tau)} \right]$$
+
+*References: Lomb, N.R. (1976). "Least-squares frequency analysis of unequally spaced data." Astrophysics and Space Science, 39, 447-462. Scargle, J.D. (1982). "Studies in astronomical time series analysis II." The Astrophysical Journal, 263, 835-853.*
+
+**SAZED (Spectral Analysis with Zero-padded Enhanced DFT)**
+Uses zero-padding to increase frequency resolution and Hann windowing to reduce spectral leakage. The signal-to-noise ratio (SNR) provides a confidence measure.
+
+*Reference: Ding, H., et al. (2008). "Querying and Mining of Time Series Data." VLDB Endowment, 1(2), 1542-1552.*
+
+#### Autocorrelation Methods
+
+**ACF (Autocorrelation Function)**
+Measures correlation of the signal with lagged versions of itself. Peaks in the ACF indicate periodic structure. The confidence is the ACF value at the detected period lag.
+
+$$\text{ACF}(k) = \frac{\sum_{t=1}^{n-k} (x_t - \mu)(x_{t+k} - \mu)}{\sum_{t=1}^{n} (x_t - \mu)^2}$$
+
+*Reference: Box, G.E.P. & Jenkins, G.M. (1976). Time Series Analysis: Forecasting and Control. Holden-Day.*
+
+**Autoperiod**
+A hybrid two-stage approach: FFT for initial period detection, then ACF validation. Combines spectral speed with time-domain robustness.
+
+*Reference: Vlachos, M., Yu, P., & Castelli, V. (2005). "On Periodicity Detection and Structural Periodic Similarity." SIAM International Conference on Data Mining.*
+
+**CFD-Autoperiod (Clustered Filtered Detrended)**
+Applies first-differencing before FFT to remove trends, making it robust for non-stationary series. Validates with ACF on the original series.
+
+*Reference: Elfeky, M.G., Aref, W.G., & Elmagarmid, A.K. (2005). "Periodicity Detection in Time Series Databases." IEEE TKDE, 17(7), 875-887.*
+
+#### Model-Based Methods
+
+**AIC Comparison**
+Fits sinusoidal models at multiple candidate periods and selects the period minimizing the Akaike Information Criterion. Returns R² as a measure of model fit quality.
+
+$$\text{AIC} = n \cdot \ln(\text{RSS}/n) + 2k, \quad R^2 = 1 - \frac{\text{RSS}}{\text{SS}_{total}}$$
+
+*Reference: Akaike, H. (1974). "A new look at the statistical model identification." IEEE Transactions on Automatic Control, 19(6), 716-723.*
+
+#### Decomposition Methods
+
+**STL (Seasonal and Trend decomposition using LOESS)**
+Decomposes the series into trend, seasonal, and remainder components. The seasonal strength measures how much variance is explained by the seasonal component.
+
+$$F_S = \max\left(0, 1 - \frac{\text{Var}(R)}{\text{Var}(S + R)}\right)$$
+
+*Reference: Cleveland, R.B., et al. (1990). "STL: A Seasonal-Trend Decomposition Procedure Based on Loess." Journal of Official Statistics, 6(1), 3-73.*
+
+**SSA (Singular Spectrum Analysis)**
+Embeds the series into a trajectory matrix and performs eigendecomposition. Periodic components appear as paired eigenvalues. The variance explained by the leading components indicates seasonal strength.
+
+*Reference: Golyandina, N., Nekrutkin, V., & Zhigljavsky, A. (2001). Analysis of Time Series Structure: SSA and Related Techniques. Chapman & Hall/CRC.*
+
+#### Strength-Based Methods
+
+**Variance Strength**
+Measures the ratio of seasonal variance to total variance after STL decomposition. Values near 1 indicate strong seasonality.
+
+**Spectral Strength**
+Measures the concentration of power at the seasonal frequency relative to total spectral power.
+
+**Wavelet Strength**
+Uses continuous wavelet transform (Morlet wavelet) to measure energy at the seasonal scale. Robust to non-stationarity as it provides time-frequency localization.
+
+*Reference: Wang, X., Smith, K., & Hyndman, R. (2006). "Characteristic-based clustering for time series data." Data Mining and Knowledge Discovery, 13(3), 335-364.*
+
+#### Pattern-Based Methods
+
+**Matrix Profile**
+Computes z-normalized Euclidean distances between all subsequences to find repeating patterns (motifs). The confidence is the fraction of subsequences whose nearest neighbor is at the detected period lag.
+
+$$d(i,j) = \sqrt{\sum(z_i - z_j)^2}, \quad \text{Period} = \arg\max_k H[k]$$
+
+*References: Yeh, C.C.M., et al. (2016). "Matrix Profile I: All Pairs Similarity Joins for Time Series." IEEE ICDM. Yeh, C.C.M., et al. (2017). "Matrix Profile VI: Meaningful Multidimensional Motif Discovery." IEEE ICDM.*
 
 ### Ground Truth Definition
 
@@ -140,6 +268,8 @@ set.seed(SEED)
 ```
 
 ### Baseline Data Generation
+
+We generate synthetic time series with known seasonal strength using a sinusoidal signal plus white noise. The amplitude is calibrated so that the signal-to-noise ratio corresponds to the target strength level: $\text{strength} = A^2 / (A^2 + \sigma^2)$.
 
 ```{r}
 #| label: generate-baseline
@@ -233,6 +363,8 @@ ggplot(examples, aes(x = time, y = values)) +
 
 ### Load Data into DuckDB
 
+The simulated curves are loaded into a DuckDB table for analysis. Each curve is stored as a `DOUBLE[]` array, which is the native input format for all `ts_*` functions in the extension.
+
 ```{r}
 #| label: load-to-duckdb
 #| cache: false
@@ -264,7 +396,63 @@ cat("Data loaded into DuckDB\n")
 
 ## Method Evaluation
 
+### SQL API Usage
+
+The following SQL query demonstrates how to use all 13 seasonality detection methods in the `anofox_forecast` extension. Each method returns a struct with method-specific fields; we extract the relevant confidence/strength score for classification.
+
+```sql
+-- Seasonality Detection API Examples
+SELECT
+    curve_id,
+
+    -- Period detection methods (return struct with period + confidence)
+    (ts_estimate_period_fft(values)).period AS fft_period,
+    (ts_estimate_period_fft(values)).confidence AS fft_confidence,
+
+    (ts_estimate_period_acf(values)).period AS acf_period,
+    (ts_estimate_period_acf(values)).confidence AS acf_confidence,
+
+    -- Autoperiod methods (FFT + ACF validation)
+    (ts_autoperiod(values)).period AS autoperiod_period,
+    (ts_autoperiod(values)).detected AS autoperiod_detected,
+    (ts_autoperiod(values)).acf_validation AS autoperiod_score,
+
+    (ts_cfd_autoperiod(values)).period AS cfd_period,
+    (ts_cfd_autoperiod(values)).acf_validation AS cfd_score,
+
+    -- Model-based methods
+    (ts_aic_period(values)).period AS aic_period,
+    (ts_aic_period(values)).r_squared AS aic_r_squared,
+
+    -- Spectral methods
+    (ts_lomb_scargle(values)).period AS lomb_period,
+    (ts_lomb_scargle(values)).false_alarm_prob AS lomb_fap,
+
+    (ts_sazed_period(values)).period AS sazed_period,
+    (ts_sazed_period(values)).snr AS sazed_snr,
+
+    -- Decomposition methods
+    (ts_stl_period(values)).period AS stl_period,
+    (ts_stl_period(values)).seasonal_strength AS stl_strength,
+
+    (ts_ssa_period(values)).period AS ssa_period,
+    (ts_ssa_period(values)).variance_explained AS ssa_variance,
+
+    -- Pattern-based methods
+    (ts_matrix_profile_period(values)).period AS mp_period,
+    (ts_matrix_profile_period(values)).confidence AS mp_confidence,
+
+    -- Strength methods (require known period)
+    ts_seasonal_strength(values, 12, 'variance') AS variance_strength,
+    ts_seasonal_strength(values, 12, 'spectral') AS spectral_strength,
+    ts_seasonal_strength(values, 12, 'wavelet') AS wavelet_strength
+
+FROM my_time_series_table;
+```
+
 ### Extract Confidence Scores
+
+For each curve, we extract the confidence/strength score from each method. Scores are normalized to [0, 1] where possible for fair comparison.
 
 ```{r}
 #| label: extract-scores
@@ -362,7 +550,9 @@ ggplot(score_long, aes(x = score, fill = ground_truth)) +
 
 ## ROC Analysis
 
-### Compute ROC Curves and AUC
+We use Receiver Operating Characteristic (ROC) analysis to evaluate each method's ability to discriminate between seasonal and non-seasonal series. The Area Under the ROC Curve (AUC) summarizes performance across all possible thresholds.
+
+Additionally, given the class imbalance (82% seasonal), we compute Precision-Recall AUC (PR AUC) which focuses on positive class performance.
 
 ```{r}
 #| label: compute-roc
@@ -377,7 +567,7 @@ method_labels <- c(
   "lomb" = "Lomb", "mp" = "MatrixProfile", "stl" = "STL", "ssa" = "SSA"
 )
 
-# Compute ROC for each method
+# Compute ROC and PR curves for each method
 roc_results <- map(methods, function(m) {
   score_col <- paste0(m, "_score")
   score_vals <- scores[[score_col]]
@@ -392,10 +582,20 @@ roc_results <- map(methods, function(m) {
   # Get optimal threshold (Youden's J)
   coords_best <- coords(roc_obj, "best", ret = c("threshold", "sensitivity", "specificity"))
 
+  # Compute PR AUC using PRROC package
+  # scores.class0 = scores for positive class (seasonal)
+  # scores.class1 = scores for negative class (non-seasonal)
+  pr_obj <- pr.curve(
+    scores.class0 = score_vals[valid_idx & scores$is_seasonal[valid_idx]],
+    scores.class1 = score_vals[valid_idx & !scores$is_seasonal[valid_idx]],
+    curve = FALSE
+  )
+
   list(
     method = method_labels[m],
     roc = roc_obj,
     auc = auc(roc_obj),
+    pr_auc = pr_obj$auc.integral,
     threshold = coords_best$threshold,
     sensitivity = coords_best$sensitivity,
     specificity = coords_best$specificity
@@ -407,15 +607,16 @@ roc_results <- map(methods, function(m) {
 auc_summary <- map_dfr(roc_results, function(r) {
   tibble(
     Method = r$method,
-    AUC = as.numeric(r$auc),
+    `ROC AUC` = as.numeric(r$auc),
+    `PR AUC` = r$pr_auc,
     `Optimal Threshold` = r$threshold,
     Sensitivity = r$sensitivity,
     Specificity = r$specificity
   )
 }) %>%
-  arrange(desc(AUC))
+  arrange(desc(`ROC AUC`))
 
-kable(auc_summary, digits = 3, caption = "ROC Analysis Summary (sorted by AUC)")
+kable(auc_summary, digits = 3, caption = "ROC and PR Analysis Summary (sorted by ROC AUC)")
 ```
 
 ### ROC Curves
@@ -455,17 +656,25 @@ ggplot(roc_data, aes(x = fpr, y = sensitivity, color = method)) +
 
 ```{r}
 #| label: fig-auc-comparison
-#| fig-cap: "AUC comparison across methods"
+#| fig-cap: "ROC AUC and PR AUC comparison across methods"
+#| fig-height: 7
 
-ggplot(auc_summary, aes(x = reorder(Method, AUC), y = AUC, fill = Method)) +
+# Reshape for faceted plot
+auc_long <- auc_summary %>%
+  select(Method, `ROC AUC`, `PR AUC`) %>%
+  pivot_longer(cols = c(`ROC AUC`, `PR AUC`), names_to = "Metric", values_to = "AUC") %>%
+  mutate(Metric = factor(Metric, levels = c("ROC AUC", "PR AUC")))
+
+ggplot(auc_long, aes(x = reorder(Method, AUC), y = AUC, fill = Method)) +
   geom_col() +
-  geom_text(aes(label = sprintf("%.3f", AUC)), hjust = -0.1, size = 3) +
+  geom_text(aes(label = sprintf("%.3f", AUC)), hjust = -0.1, size = 2.5) +
   scale_fill_manual(values = METHOD_COLORS) +
-  scale_y_continuous(limits = c(0, 1.1)) +
+  scale_y_continuous(limits = c(0, 1.15)) +
   coord_flip() +
+  facet_wrap(~Metric, ncol = 2) +
   labs(
-    title = "Area Under ROC Curve (AUC) by Method",
-    subtitle = "Higher AUC = better discrimination",
+    title = "Area Under Curve Comparison",
+    subtitle = "ROC AUC: overall discrimination | PR AUC: performance on positive class (82% imbalance)",
     x = "",
     y = "AUC"
   ) +
@@ -474,7 +683,7 @@ ggplot(auc_summary, aes(x = reorder(Method, AUC), y = AUC, fill = Method)) +
 
 ## Classification Performance
 
-### Apply Optimal Thresholds
+Using the optimal threshold from ROC analysis (Youden's J statistic), we convert continuous scores into binary predictions and compute standard classification metrics.
 
 ```{r}
 #| label: apply-thresholds
@@ -498,7 +707,7 @@ predictions <- predictions %>%
   mutate(across(ends_with("_pred"), ~ replace_na(., FALSE)))
 ```
 
-### Classification Metrics
+We calculate Accuracy, Precision (positive predictive value), Recall (sensitivity), Specificity, False Positive Rate, and F1 score for each method.
 
 ```{r}
 #| label: classification-metrics
@@ -681,6 +890,8 @@ Following the fdars benchmark, we test method robustness under challenging condi
 
 ### Challenge 1: Linear Trends
 
+Linear trends are common in real-world data and can mask or mimic seasonality. We add trends of varying slopes (0.1, 0.3, 0.5 per time unit) to test robustness. Methods that operate on differenced data (CFD-Autoperiod) should be more robust.
+
 ```{r}
 #| label: challenge-trends
 
@@ -706,6 +917,8 @@ cat(sprintf("Generated %d curves with trends\n", nrow(trend_data)))
 ```
 
 ### Challenge 2: Red Noise (AR(1) Process)
+
+Red noise (autocorrelated noise) can produce spurious peaks in spectral analysis that may be mistaken for seasonality. We replace white noise with AR(1) noise with coefficients $\phi$ = 0.3, 0.5, 0.7. Higher $\phi$ means stronger autocorrelation.
 
 ```{r}
 #| label: challenge-rednoise
@@ -741,6 +954,8 @@ cat(sprintf("Generated %d curves with AR(1) noise\n", nrow(ar_data)))
 
 ### Challenge 3: Outlier Contamination
 
+Outliers can distort both spectral and autocorrelation-based methods. We inject outliers with probability 5-10% and magnitude 3-5 standard deviations. Robust methods should maintain performance.
+
 ```{r}
 #| label: challenge-outliers
 
@@ -769,6 +984,8 @@ cat(sprintf("Generated %d curves with outliers\n", nrow(outlier_data)))
 ```
 
 ### Challenge Scenario Performance
+
+We evaluate a subset of methods (Variance, Wavelet, FFT, ACF) on each challenge scenario to assess robustness.
 
 ```{r}
 #| label: evaluate-challenges
@@ -868,7 +1085,7 @@ final_ranking <- auc_summary %>%
   left_join(metrics %>% select(Method, F1), by = "Method") %>%
   arrange(desc(F1)) %>%
   mutate(Rank = row_number()) %>%
-  select(Rank, Method, AUC, F1, `Optimal Threshold`, Sensitivity, Specificity)
+  select(Rank, Method, `ROC AUC`, `PR AUC`, F1, `Optimal Threshold`, Sensitivity, Specificity)
 
 kable(final_ranking, digits = 3, caption = "Final Method Rankings by F1 Score")
 ```
@@ -880,9 +1097,11 @@ kable(final_ranking, digits = 3, caption = "Final Method Rankings by F1 Score")
 
 top_method <- final_ranking$Method[1]
 top_f1 <- final_ranking$F1[1]
-top_auc <- final_ranking$AUC[1]
+top_roc_auc <- final_ranking$`ROC AUC`[1]
+top_pr_auc <- final_ranking$`PR AUC`[1]
 
-cat(sprintf("**Best Overall Method**: %s (F1 = %.3f, AUC = %.3f)\n\n", top_method, top_f1, top_auc))
+cat(sprintf("**Best Overall Method**: %s (F1 = %.3f, ROC AUC = %.3f, PR AUC = %.3f)\n\n",
+            top_method, top_f1, top_roc_auc, top_pr_auc))
 
 # Methods with no significant difference from top
 non_sig_from_top <- mcnemar_results %>%

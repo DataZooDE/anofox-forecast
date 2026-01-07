@@ -833,6 +833,8 @@ SELECT ts_diff([1.0, 2.0, 4.0, 7.0, 11.0], 2);
 
 Detects seasonal periods using multiple methods from fdars-core.
 
+> **See also:** [Individual Period Detection Methods](#individual-period-detection-methods) for direct access to 11 specialized algorithms with full control over parameters and detailed return values including `period`, `frequency`, `power`, and `confidence` fields.
+
 **Signature:**
 ```sql
 ts_detect_periods(values DOUBLE[]) → STRUCT
@@ -873,6 +875,510 @@ SELECT (ts_detect_periods([1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[])).primary_period;
 SELECT (ts_detect_periods([1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[])).periods;
 -- Returns: [4]
 ```
+
+---
+
+### Individual Period Detection Methods
+
+The extension provides 11 specialized period detection algorithms, each optimized for different data characteristics. These methods are available through the `ts_detect_periods()` wrapper or can be called individually for more control.
+
+#### Method Comparison
+
+| Method | Speed | Noise Robustness | Best Use Case | Min Observations |
+|--------|-------|------------------|---------------|------------------|
+| FFT | Very Fast | Low | Clean signals | 4 |
+| ACF | Fast | Medium | Cyclical patterns | 4 |
+| Autoperiod | Fast | High | General purpose | 8 |
+| CFD-Autoperiod | Fast | Very High | Trending data | 9 |
+| Lomb-Scargle | Medium | High | Irregular sampling | 4 |
+| AIC | Slow | High | Model selection | 8 |
+| SSA | Medium | Medium | Complex patterns | 16 |
+| STL | Slow | Medium | Decomposition | 16 |
+| Matrix Profile | Slow | Very High | Pattern repetition | 32 |
+| SAZED | Medium | High | Frequency resolution | 16 |
+| Multi-Period | Medium | High | Multiple seasonalities | 8 |
+
+---
+
+#### ts_estimate_period_fft
+
+**Description:**
+Fast Fourier Transform (FFT) based periodogram analysis that identifies the dominant frequency in the signal by computing the discrete Fourier transform and finding the frequency bin with maximum spectral power.
+
+**Signature:**
+```sql
+ts_estimate_period_fft(values DOUBLE[]) → STRUCT
+```
+
+**Mathematical Formula:**
+```
+DFT: X[k] = Σ_{t=0}^{N-1} x[t] · e^{-2πikt/N}
+
+Power Spectrum: P[k] = |X[k]|² / N
+
+Period: p = N / k_max  where k_max = argmax_{k>0} P[k]
+
+Confidence: C = P[k_max] / mean(P)
+```
+
+**Returns:**
+```sql
+STRUCT(
+    period     DOUBLE,   -- Estimated period (in samples)
+    frequency  DOUBLE,   -- Dominant frequency (1/period)
+    power      DOUBLE,   -- Power at the dominant frequency
+    confidence DOUBLE,   -- Ratio of peak power to mean power
+    method     VARCHAR   -- "fft"
+)
+```
+
+**Example:**
+```sql
+SELECT ts_estimate_period_fft([1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[]);
+-- Returns: {period: 4.0, frequency: 0.25, power: ..., confidence: ..., method: "fft"}
+```
+
+**Reference:**
+- Cooley, J.W. & Tukey, J.W. (1965). "An Algorithm for the Machine Calculation of Complex Fourier Series." *Mathematics of Computation*, 19(90), 297-301.
+
+---
+
+#### ts_estimate_period_acf
+
+**Description:**
+Autocorrelation Function (ACF) based period detection that measures the correlation of the signal with lagged versions of itself. The period is identified as the first significant peak in the autocorrelation function after lag 0.
+
+**Signature:**
+```sql
+ts_estimate_period_acf(values DOUBLE[]) → STRUCT
+ts_estimate_period_acf(values DOUBLE[], max_lag INTEGER) → STRUCT
+```
+
+**Mathematical Formula:**
+```
+ACF(k) = Cov(X_t, X_{t+k}) / Var(X)
+       = Σ_{t=1}^{n-k} (x_t - μ)(x_{t+k} - μ) / Σ_{t=1}^{n} (x_t - μ)²
+
+Period: p = argmax_{k>min_lag} ACF(k)  where ACF(k) > threshold
+```
+
+**Returns:** Same as `ts_estimate_period_fft` (period, frequency, power, confidence, method)
+
+**Example:**
+```sql
+SELECT ts_estimate_period_acf([1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[]);
+```
+
+**Reference:**
+- Box, G.E.P. & Jenkins, G.M. (1976). *Time Series Analysis: Forecasting and Control*. Holden-Day.
+
+---
+
+#### ts_autoperiod
+
+**Description:**
+A hybrid two-stage approach combining FFT for initial period detection with ACF validation. The FFT provides a fast initial estimate, while ACF validation confirms the periodicity exists in the time domain.
+
+**Signature:**
+```sql
+ts_autoperiod(values DOUBLE[]) → STRUCT
+ts_autoperiod(values DOUBLE[], acf_threshold DOUBLE) → STRUCT
+```
+
+**Mathematical Process:**
+```
+Stage 1 (FFT): p_fft = estimate_period_fft(x)
+Stage 2 (ACF Validation): v = ACF(p_fft)
+Detection: detected = (v > threshold)  [default threshold = 0.3]
+```
+
+**Returns:**
+```sql
+STRUCT(
+    period         DOUBLE,   -- Detected period (from FFT)
+    fft_confidence DOUBLE,   -- FFT peak-to-mean power ratio
+    acf_validation DOUBLE,   -- ACF value at detected period
+    detected       BOOLEAN,  -- TRUE if acf_validation > threshold
+    method         VARCHAR   -- "autoperiod"
+)
+```
+
+**Example:**
+```sql
+SELECT ts_autoperiod([1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[]);
+-- Check if period was confidently detected
+SELECT (ts_autoperiod(LIST(value ORDER BY date))).detected FROM sales GROUP BY product_id;
+```
+
+**Reference:**
+- Vlachos, M., Yu, P., & Castelli, V. (2005). "On Periodicity Detection and Structural Periodic Similarity." *SIAM International Conference on Data Mining*.
+
+---
+
+#### ts_cfd_autoperiod
+
+**Description:**
+Clustered Filtered Detrended (CFD) variant of autoperiod that applies first-differencing before FFT analysis to remove linear trends, making it more robust for trending time series.
+
+**Signature:**
+```sql
+ts_cfd_autoperiod(values DOUBLE[]) → STRUCT
+ts_cfd_autoperiod(values DOUBLE[], acf_threshold DOUBLE) → STRUCT
+```
+
+**Mathematical Process:**
+```
+Stage 1 (Differencing): y[t] = x[t+1] - x[t]
+Stage 2 (FFT on differenced): p = estimate_period_fft(y)
+Stage 3 (ACF on original): v = ACF_original(p)
+Detection: detected = (v > threshold)  [default threshold = 0.25]
+```
+
+**Returns:** Same as `ts_autoperiod` (period, fft_confidence, acf_validation, detected, method)
+
+**Example:**
+```sql
+-- Better for data with trends
+SELECT ts_cfd_autoperiod([1,3,5,7,2,4,6,8,3,5,7,9]::DOUBLE[]);
+```
+
+**Reference:**
+- Elfeky, M.G., Aref, W.G., & Elmagarmid, A.K. (2005). "Periodicity Detection in Time Series Databases." *IEEE Transactions on Knowledge and Data Engineering*, 17(7), 875-887.
+
+---
+
+#### ts_estimate_period_lomb_scargle
+
+**Description:**
+The Lomb-Scargle periodogram is a generalization of the Fourier transform designed for unevenly sampled data. It fits sinusoids at each test frequency and provides statistical significance through the false alarm probability.
+
+**Signature:**
+```sql
+ts_estimate_period_lomb_scargle(values DOUBLE[]) → STRUCT
+ts_estimate_period_lomb_scargle(values DOUBLE[], times DOUBLE[]) → STRUCT
+ts_estimate_period_lomb_scargle(values DOUBLE[], times DOUBLE[], min_period DOUBLE, max_period DOUBLE) → STRUCT
+```
+
+**Mathematical Formula:**
+```
+τ(ω) = arctan(Σsin(2ωt_i) / Σcos(2ωt_i)) / (2ω)
+
+P(ω) = (1/2σ²) · [ (Σy_i·cos(ω(t_i-τ)))² / Σcos²(ω(t_i-τ))
+                 + (Σy_i·sin(ω(t_i-τ)))² / Σsin²(ω(t_i-τ)) ]
+
+False Alarm Probability: FAP ≈ 1 - (1 - e^{-P})^M
+```
+
+**Returns:**
+```sql
+STRUCT(
+    period           DOUBLE,   -- Detected period
+    frequency        DOUBLE,   -- Corresponding frequency
+    power            DOUBLE,   -- Normalized power at peak
+    false_alarm_prob DOUBLE,   -- FAP (lower = more significant)
+    method           VARCHAR   -- "lomb_scargle"
+)
+```
+
+**Example:**
+```sql
+-- For irregularly sampled data
+SELECT ts_estimate_period_lomb_scargle(
+    [1.0, 2.1, 0.9, 2.0, 1.1]::DOUBLE[],
+    [0.0, 0.25, 0.5, 0.75, 1.0]::DOUBLE[]  -- irregular times
+);
+```
+
+**Reference:**
+- Lomb, N.R. (1976). "Least-squares frequency analysis of unequally spaced data." *Astrophysics and Space Science*, 39, 447-462.
+- Scargle, J.D. (1982). "Studies in astronomical time series analysis II." *The Astrophysical Journal*, 263, 835-853.
+
+---
+
+#### ts_estimate_period_aic
+
+**Description:**
+Information criterion-based period selection that fits sinusoidal models at multiple candidate periods and selects the period minimizing the Akaike Information Criterion (AIC), balancing model fit against complexity.
+
+**Signature:**
+```sql
+ts_estimate_period_aic(values DOUBLE[]) → STRUCT
+ts_estimate_period_aic(values DOUBLE[], min_period DOUBLE, max_period DOUBLE) → STRUCT
+ts_estimate_period_aic(values DOUBLE[], min_period DOUBLE, max_period DOUBLE, n_candidates INTEGER) → STRUCT
+```
+
+**Mathematical Formula:**
+```
+Model: y_t = μ + Σ_{k=1}^{K} [a_k·cos(2πkt/p) + b_k·sin(2πkt/p)] + ε_t
+
+RSS = Σ(y_t - ŷ_t)²
+
+AIC = n·ln(RSS/n) + 2·(2K + 1)
+BIC = n·ln(RSS/n) + (2K + 1)·ln(n)
+R² = 1 - RSS / SS_total
+
+Best period: p* = argmin_p AIC(p)
+```
+
+**Returns:**
+```sql
+STRUCT(
+    period    DOUBLE,   -- Best period (minimum AIC)
+    aic       DOUBLE,   -- AIC of best model
+    bic       DOUBLE,   -- BIC of best model
+    rss       DOUBLE,   -- Residual sum of squares
+    r_squared DOUBLE,   -- Coefficient of determination
+    method    VARCHAR   -- "aic"
+)
+```
+
+**Example:**
+```sql
+SELECT ts_estimate_period_aic([1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[]);
+-- Get R² to assess fit quality
+SELECT (ts_estimate_period_aic(LIST(value ORDER BY date))).r_squared FROM sales;
+```
+
+**Reference:**
+- Akaike, H. (1974). "A new look at the statistical model identification." *IEEE Transactions on Automatic Control*, 19(6), 716-723.
+
+---
+
+#### ts_estimate_period_ssa
+
+**Description:**
+Singular Spectrum Analysis (SSA) decomposes the time series using eigenvalue decomposition of the trajectory matrix. Periodic components appear as paired eigenvalues, and the period is estimated from eigenvector zero-crossings.
+
+**Signature:**
+```sql
+ts_estimate_period_ssa(values DOUBLE[]) → STRUCT
+ts_estimate_period_ssa(values DOUBLE[], window_size INTEGER) → STRUCT
+```
+
+**Mathematical Formula:**
+```
+Trajectory Matrix: X[i,j] = x[i+j-1]  for i=1..L, j=1..K  (L=window, K=n-L+1)
+
+Covariance: C = XX^T / K
+
+Eigendecomposition: C = UΛU^T
+
+Period from eigenvector u_k: p ≈ 2L / (zero_crossings(u_k))
+
+Variance explained: (λ_1 + λ_2) / Σλ_i
+```
+
+**Returns:**
+```sql
+STRUCT(
+    period             DOUBLE,   -- Primary detected period
+    variance_explained DOUBLE,   -- By first periodic component pair
+    n_eigenvalues      UBIGINT,  -- Number of eigenvalues returned
+    method             VARCHAR   -- "ssa"
+)
+```
+
+**Example:**
+```sql
+SELECT ts_estimate_period_ssa([1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[]);
+```
+
+**Reference:**
+- Golyandina, N., Nekrutkin, V., & Zhigljavsky, A. (2001). *Analysis of Time Series Structure: SSA and Related Techniques*. Chapman & Hall/CRC.
+
+---
+
+#### ts_estimate_period_stl
+
+**Description:**
+STL (Seasonal and Trend decomposition using LOESS) based period detection. Multiple candidate periods are tested, and the period maximizing the seasonal strength metric is selected.
+
+**Signature:**
+```sql
+ts_estimate_period_stl(values DOUBLE[]) → STRUCT
+ts_estimate_period_stl(values DOUBLE[], min_period INTEGER, max_period INTEGER) → STRUCT
+```
+
+**Mathematical Formula:**
+```
+STL Decomposition: Y_t = T_t + S_t + R_t  (Trend + Seasonal + Remainder)
+
+Seasonal Strength: F_S = max(0, 1 - Var(R) / Var(S + R))
+Trend Strength: F_T = max(0, 1 - Var(R) / Var(T + R))
+
+Best period: p* = argmax_p F_S(p)
+```
+
+**Returns:**
+```sql
+STRUCT(
+    period            DOUBLE,   -- Best period (max seasonal strength)
+    seasonal_strength DOUBLE,   -- F_S at best period (0-1)
+    trend_strength    DOUBLE,   -- F_T at best period (0-1)
+    method            VARCHAR   -- "stl"
+)
+```
+
+**Example:**
+```sql
+SELECT ts_estimate_period_stl([1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[]);
+-- Get seasonal strength interpretation:
+-- 0.0-0.3: Weak, 0.3-0.6: Moderate, 0.6-0.8: Strong, 0.8-1.0: Very strong
+```
+
+**Reference:**
+- Cleveland, R.B., Cleveland, W.S., McRae, J.E., & Terpenning, I. (1990). "STL: A Seasonal-Trend Decomposition Procedure Based on Loess." *Journal of Official Statistics*, 6(1), 3-73.
+- Wang, X., Smith, K., & Hyndman, R. (2006). "Characteristic-based clustering for time series data." *Data Mining and Knowledge Discovery*, 13(3), 335-364.
+
+---
+
+#### ts_estimate_period_matrix_profile
+
+**Description:**
+Matrix Profile based period detection finds repeating patterns (motifs) by computing z-normalized Euclidean distances between all subsequences. The most common lag between nearest-neighbor subsequences indicates the period.
+
+**Signature:**
+```sql
+ts_estimate_period_matrix_profile(values DOUBLE[]) → STRUCT
+ts_estimate_period_matrix_profile(values DOUBLE[], subsequence_length INTEGER) → STRUCT
+```
+
+**Mathematical Formula:**
+```
+Z-normalization: z_i = (X_i - μ_i) / σ_i  for each subsequence
+
+Distance: d(i,j) = √(Σ(z_i - z_j)²)
+
+Matrix Profile: MP[i] = min_{j: |i-j| > exclusion} d(i,j)
+Profile Index: PI[i] = argmin_{j: |i-j| > exclusion} d(i,j)
+
+Lag histogram: H[k] = count of (|i - PI[i]| = k)
+Period: p = argmax_k H[k]
+```
+
+**Returns:**
+```sql
+STRUCT(
+    period             DOUBLE,   -- Most common motif lag
+    confidence         DOUBLE,   -- Fraction of motifs at this lag
+    n_motifs           UBIGINT,  -- Number of motif pairs found
+    subsequence_length UBIGINT,  -- Subsequence length used
+    method             VARCHAR   -- "matrix_profile"
+)
+```
+
+**Example:**
+```sql
+-- Best for detecting repeating patterns regardless of amplitude
+SELECT ts_estimate_period_matrix_profile(LIST(value ORDER BY date)) FROM sensor_data;
+```
+
+**Reference:**
+- Yeh, C.C.M., et al. (2016). "Matrix Profile I: All Pairs Similarity Joins for Time Series." *IEEE ICDM*.
+- Yeh, C.C.M., et al. (2017). "Matrix Profile VI: Meaningful Multidimensional Motif Discovery." *IEEE ICDM*.
+
+---
+
+#### ts_estimate_period_sazed
+
+**Description:**
+SAZED (Spectral Analysis with Zero-padded Enhanced DFT) uses zero-padding to increase frequency resolution and applies windowing to reduce spectral leakage. SNR estimation provides confidence measurement.
+
+**Signature:**
+```sql
+ts_estimate_period_sazed(values DOUBLE[]) → STRUCT
+ts_estimate_period_sazed(values DOUBLE[], padding_factor INTEGER) → STRUCT
+```
+
+**Mathematical Formula:**
+```
+Mean removal: y = x - μ
+
+Windowing (Hann): w[t] = 0.5·(1 - cos(2πt/(n-1)))
+
+Zero-padding: pad to (n · factor).next_power_of_2()
+
+DFT: Y[k] = Σ_{t=0}^{N-1} y[t]·w[t]·e^{-2πikt/N_padded}
+
+Power: P[k] = |Y[k]|² / N_padded
+
+SNR = P[k_max] / median(P_noise)
+```
+
+**Returns:**
+```sql
+STRUCT(
+    period DOUBLE,   -- Primary detected period
+    power  DOUBLE,   -- Spectral power at peak
+    snr    DOUBLE,   -- Signal-to-noise ratio
+    method VARCHAR   -- "sazed"
+)
+```
+
+**Example:**
+```sql
+-- Better frequency resolution than standard FFT
+SELECT ts_estimate_period_sazed([1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[]);
+```
+
+**Reference:**
+- Ding, H., et al. (2008). "Querying and Mining of Time Series Data: Experimental Comparison of Representations and Distance Measures." *VLDB Endowment*, 1(2), 1542-1552.
+
+---
+
+#### ts_detect_multiple_periods
+
+**Description:**
+Iterative multiple period detection using residual subtraction. The dominant period is detected, its sinusoidal component is removed, and the process repeats on the residual to find additional periodic components.
+
+**Signature:**
+```sql
+ts_detect_multiple_periods(values DOUBLE[]) → STRUCT
+ts_detect_multiple_periods(values DOUBLE[], max_periods INTEGER) → STRUCT
+ts_detect_multiple_periods(values DOUBLE[], max_periods INTEGER, min_confidence DOUBLE, min_strength DOUBLE) → STRUCT
+```
+
+**Mathematical Algorithm:**
+```
+Initialize: residual = x
+
+For i = 1 to max_periods:
+    1. p_i, conf_i = estimate_period_fft(residual)
+    2. If conf_i < min_confidence: break
+    3. Fit sinusoid: ŝ_i = A_i·sin(2πt/p_i + φ_i)
+       where A_i, φ_i from least squares
+    4. strength_i = 1 - Var(residual - ŝ_i) / Var(residual)
+    5. If strength_i < min_strength: break
+    6. residual = residual - ŝ_i
+    7. Store (p_i, conf_i, strength_i, A_i, φ_i, i)
+```
+
+**Returns:**
+```sql
+STRUCT(
+    period_values     DOUBLE[],   -- Detected periods (in samples)
+    confidence_values DOUBLE[],   -- FFT peak confidence for each
+    strength_values   DOUBLE[],   -- Variance explained by each
+    amplitude_values  DOUBLE[],   -- Sinusoidal amplitude for each
+    phase_values      DOUBLE[],   -- Phase (radians) for each
+    iteration_values  UBIGINT[],  -- Detection iteration (1-indexed)
+    n_periods         UBIGINT,    -- Number of detected periods
+    primary_period    DOUBLE,     -- Strongest period (iteration 1)
+    method            VARCHAR     -- "multi"
+)
+```
+
+**Example:**
+```sql
+-- Detect multiple seasonalities (e.g., daily and weekly)
+SELECT ts_detect_multiple_periods(LIST(value ORDER BY date), 3) FROM hourly_data;
+
+-- Access individual periods
+SELECT (ts_detect_multiple_periods(values)).period_values AS periods FROM my_data;
+```
+
+**Reference:**
+- Parthasarathy, S., Mehta, S., & Srinivasan, S. (2006). "Robust Periodicity Detection Algorithms." *ACM CIKM*.
 
 ---
 
@@ -2339,5 +2845,5 @@ This Rust implementation maintains backward compatibility with the original C++ 
 
 ---
 
-**Last Updated:** 2026-01-06
+**Last Updated:** 2026-01-08
 **API Version:** 0.2.4
