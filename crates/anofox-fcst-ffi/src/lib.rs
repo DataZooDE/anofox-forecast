@@ -727,7 +727,11 @@ pub unsafe extern "C" fn anofox_ts_detect_seasonality(
             if n > 0 {
                 let ptr = malloc(n * std::mem::size_of::<c_int>()) as *mut c_int;
                 if ptr.is_null() {
-                    set_error(out_error, ErrorCode::AllocationError, "Memory allocation failed");
+                    set_error(
+                        out_error,
+                        ErrorCode::AllocationError,
+                        "Memory allocation failed",
+                    );
                     return false;
                 }
                 for (i, &p) in periods.iter().enumerate() {
@@ -789,7 +793,11 @@ pub unsafe extern "C" fn anofox_ts_analyze_seasonality(
                 let periods_ptr = malloc(n * std::mem::size_of::<c_int>()) as *mut c_int;
 
                 if periods_ptr.is_null() {
-                    set_error(out_error, ErrorCode::AllocationError, "Memory allocation failed");
+                    set_error(
+                        out_error,
+                        ErrorCode::AllocationError,
+                        "Memory allocation failed",
+                    );
                     return false;
                 }
 

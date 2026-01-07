@@ -419,10 +419,7 @@ mod tests {
             .changepoint_probability
             .iter()
             .fold(0.0_f64, |a, &b| a.max(b));
-        assert!(
-            max_prob >= 0.0,
-            "Should compute valid probabilities"
-        );
+        assert!(max_prob >= 0.0, "Should compute valid probabilities");
     }
 
     #[test]
@@ -443,10 +440,7 @@ mod tests {
         // Cost of constant segment
         let constant = vec![5.0; 5];
         let constant_cost = cost_l1(&constant, 0, 5);
-        assert!(
-            constant_cost < 1e-10,
-            "Cost should be ~0 for constant data"
-        );
+        assert!(constant_cost < 1e-10, "Cost should be ~0 for constant data");
 
         // Empty segment
         let empty_cost = cost_l1(&values, 2, 2);

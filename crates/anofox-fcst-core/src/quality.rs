@@ -362,7 +362,10 @@ mod tests {
 
         // Empty series
         let score_empty = calculate_temporal_score(0, 0);
-        assert_eq!(score_empty, 0.0, "Empty series should have 0 temporal score");
+        assert_eq!(
+            score_empty, 0.0,
+            "Empty series should have 0 temporal score"
+        );
     }
 
     #[test]
@@ -387,7 +390,10 @@ mod tests {
 
         // Empty series
         let empty_score = calculate_magnitude_score(&[]);
-        assert_eq!(empty_score, 0.0, "Empty series should have 0 magnitude score");
+        assert_eq!(
+            empty_score, 0.0,
+            "Empty series should have 0 magnitude score"
+        );
     }
 
     #[test]

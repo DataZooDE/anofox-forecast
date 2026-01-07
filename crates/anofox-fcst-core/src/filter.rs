@@ -212,10 +212,10 @@ mod tests {
     #[test]
     fn test_filter_short() {
         let series_list = vec![
-            vec![Some(1.0), Some(2.0)],                         // 2 values
-            vec![Some(1.0), Some(2.0), Some(3.0), Some(4.0)],   // 4 values
-            vec![Some(1.0)],                                     // 1 value
-            vec![Some(1.0), None, Some(3.0), None, Some(5.0)],  // 3 non-null
+            vec![Some(1.0), Some(2.0)],                        // 2 values
+            vec![Some(1.0), Some(2.0), Some(3.0), Some(4.0)],  // 4 values
+            vec![Some(1.0)],                                   // 1 value
+            vec![Some(1.0), None, Some(3.0), None, Some(5.0)], // 3 non-null
         ];
 
         let indices = filter_short(&series_list, 3);
@@ -224,7 +224,14 @@ mod tests {
 
     #[test]
     fn test_drop_edge_zeros() {
-        let values = vec![Some(0.0), Some(0.0), Some(1.0), Some(2.0), Some(0.0), Some(0.0)];
+        let values = vec![
+            Some(0.0),
+            Some(0.0),
+            Some(1.0),
+            Some(2.0),
+            Some(0.0),
+            Some(0.0),
+        ];
         let result = drop_edge_zeros(&values);
         assert_eq!(result, vec![Some(1.0), Some(2.0)]);
     }

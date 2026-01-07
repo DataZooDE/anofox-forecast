@@ -733,7 +733,9 @@ fn forecast_arima(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
     let mean_diff = diff.iter().sum::<f64>() / diff.len() as f64;
     let ar_coef = 0.5; // Simplified: fixed AR coefficient
 
-    let last_val = *values.last().expect("values.len() >= 5 validated by caller");
+    let last_val = *values
+        .last()
+        .expect("values.len() >= 5 validated by caller");
     let last_diff = *diff.last().expect("diff non-empty when values.len() >= 5");
 
     let mut point = Vec::with_capacity(horizon);
@@ -1185,9 +1187,7 @@ mod tests {
 
     #[test]
     fn test_forecast_theta() {
-        let values: Vec<Option<f64>> = (0..20)
-            .map(|i| Some(10.0 + i as f64 * 1.5))
-            .collect();
+        let values: Vec<Option<f64>> = (0..20).map(|i| Some(10.0 + i as f64 * 1.5)).collect();
 
         let options = ForecastOptions {
             model: ModelType::Theta,
@@ -1203,9 +1203,7 @@ mod tests {
 
     #[test]
     fn test_forecast_auto_ets() {
-        let values: Vec<Option<f64>> = (0..30)
-            .map(|i| Some(50.0 + (i % 7) as f64 * 3.0))
-            .collect();
+        let values: Vec<Option<f64>> = (0..30).map(|i| Some(50.0 + (i % 7) as f64 * 3.0)).collect();
 
         let options = ForecastOptions {
             model: ModelType::AutoETS,
