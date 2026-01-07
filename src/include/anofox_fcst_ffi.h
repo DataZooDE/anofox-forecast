@@ -307,6 +307,185 @@ typedef struct SinglePeriodResult {
 } SinglePeriodResult;
 
 /**
+ * Result from autoperiod detection.
+ *
+ * Combines FFT period estimation with ACF validation.
+ */
+typedef struct AutoperiodResultFFI {
+    /**
+     * Detected period (in samples)
+     */
+    double period;
+    /**
+     * FFT confidence (ratio of peak power to mean power)
+     */
+    double fft_confidence;
+    /**
+     * ACF validation score (correlation at the detected period)
+     */
+    double acf_validation;
+    /**
+     * Whether the period was detected (acf_validation > threshold)
+     */
+    bool detected;
+    /**
+     * Method used ("autoperiod" or "cfd_autoperiod")
+     */
+    char method[32];
+} AutoperiodResultFFI;
+
+/**
+ * Result from Lomb-Scargle periodogram.
+ *
+ * Lomb-Scargle is optimal for detecting periodic signals in unevenly
+ * sampled data and provides statistical significance via false alarm probability.
+ */
+typedef struct LombScargleResultFFI {
+    /**
+     * Detected period (in samples)
+     */
+    double period;
+    /**
+     * Frequency corresponding to the peak
+     */
+    double frequency;
+    /**
+     * Power at the peak frequency (normalized)
+     */
+    double power;
+    /**
+     * False alarm probability (lower = more significant)
+     */
+    double false_alarm_prob;
+    /**
+     * Method identifier
+     */
+    char method[32];
+} LombScargleResultFFI;
+
+/**
+ * Result from AIC-based period comparison.
+ */
+typedef struct AicPeriodResultFFI {
+    /**
+     * Best period according to AIC
+     */
+    double period;
+    /**
+     * AIC value for the best model
+     */
+    double aic;
+    /**
+     * BIC value for the best model
+     */
+    double bic;
+    /**
+     * Residual sum of squares for the best model
+     */
+    double rss;
+    /**
+     * R-squared for the best model
+     */
+    double r_squared;
+    /**
+     * Method identifier
+     */
+    char method[32];
+} AicPeriodResultFFI;
+
+/**
+ * Result from SSA period detection.
+ */
+typedef struct SsaPeriodResultFFI {
+    /**
+     * Primary detected period
+     */
+    double period;
+    /**
+     * Variance explained by the primary periodic component
+     */
+    double variance_explained;
+    /**
+     * Number of eigenvalues returned
+     */
+    size_t n_eigenvalues;
+    /**
+     * Method identifier
+     */
+    char method[32];
+} SsaPeriodResultFFI;
+
+/**
+ * Result from STL-based period detection.
+ */
+typedef struct StlPeriodResultFFI {
+    /**
+     * Best detected period
+     */
+    double period;
+    /**
+     * Seasonal strength at the best period (0-1)
+     */
+    double seasonal_strength;
+    /**
+     * Trend strength (0-1)
+     */
+    double trend_strength;
+    /**
+     * Method identifier
+     */
+    char method[32];
+} StlPeriodResultFFI;
+
+/**
+ * Result from Matrix Profile period detection.
+ */
+typedef struct MatrixProfilePeriodResultFFI {
+    /**
+     * Detected period (most common motif distance)
+     */
+    double period;
+    /**
+     * Confidence based on peak prominence in lag histogram
+     */
+    double confidence;
+    /**
+     * Number of motif pairs found
+     */
+    size_t n_motifs;
+    /**
+     * Subsequence length used
+     */
+    size_t subsequence_length;
+    /**
+     * Method identifier
+     */
+    char method[32];
+} MatrixProfilePeriodResultFFI;
+
+/**
+ * Result from SAZED period detection.
+ */
+typedef struct SazedPeriodResultFFI {
+    /**
+     * Primary detected period
+     */
+    double period;
+    /**
+     * Spectral power at the detected period
+     */
+    double power;
+    /**
+     * Signal-to-noise ratio
+     */
+    double snr;
+    /**
+     * Method identifier
+     */
+    char method[32];
+} SazedPeriodResultFFI;
+
+/**
  * A detected peak in the time series.
  */
 typedef struct PeakFFI {
@@ -1241,6 +1420,121 @@ bool anofox_ts_detect_multiple_periods_flat(const double *values,
                                             double min_strength,
                                             struct FlatMultiPeriodResult *out_result,
                                             struct AnofoxError *out_error);
+
+/**
+ * Autoperiod: FFT period detection with ACF validation.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_autoperiod(const double *values,
+                          size_t length,
+                          double acf_threshold,
+                          struct AutoperiodResultFFI *out_result,
+                          struct AnofoxError *out_error);
+
+/**
+ * CFD Autoperiod: First-differenced FFT with ACF validation.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_cfd_autoperiod(const double *values,
+                              size_t length,
+                              double acf_threshold,
+                              struct AutoperiodResultFFI *out_result,
+                              struct AnofoxError *out_error);
+
+/**
+ * Lomb-Scargle periodogram for period detection.
+ *
+ * Optimal for detecting periodic signals in unevenly sampled data.
+ * More robust than FFT for noisy data and provides statistical significance.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_lomb_scargle(const double *values,
+                            size_t length,
+                            double min_period,
+                            double max_period,
+                            size_t n_frequencies,
+                            struct LombScargleResultFFI *out_result,
+                            struct AnofoxError *out_error);
+
+/**
+ * AIC-based period comparison.
+ *
+ * Fits sinusoidal models with different candidate periods and selects
+ * the one with the lowest AIC.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_aic_period(const double *values,
+                          size_t length,
+                          double min_period,
+                          double max_period,
+                          size_t n_candidates,
+                          struct AicPeriodResultFFI *out_result,
+                          struct AnofoxError *out_error);
+
+/**
+ * SSA (Singular Spectrum Analysis) for period detection.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_ssa_period(const double *values,
+                          size_t length,
+                          size_t window_size,
+                          size_t n_components,
+                          struct SsaPeriodResultFFI *out_result,
+                          struct AnofoxError *out_error);
+
+/**
+ * STL-based period detection via seasonal strength optimization.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_stl_period(const double *values,
+                          size_t length,
+                          size_t min_period,
+                          size_t max_period,
+                          size_t n_candidates,
+                          struct StlPeriodResultFFI *out_result,
+                          struct AnofoxError *out_error);
+
+/**
+ * Matrix Profile period detection.
+ *
+ * Uses Matrix Profile to find motifs and estimate periodicity from
+ * the distribution of motif distances.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_matrix_profile_period(const double *values,
+                                     size_t length,
+                                     size_t subsequence_length,
+                                     size_t n_best,
+                                     struct MatrixProfilePeriodResultFFI *out_result,
+                                     struct AnofoxError *out_error);
+
+/**
+ * SAZED period detection using spectral analysis with zero-padding.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_sazed_period(const double *values,
+                            size_t length,
+                            size_t min_period,
+                            size_t max_period,
+                            size_t zero_pad_factor,
+                            struct SazedPeriodResultFFI *out_result,
+                            struct AnofoxError *out_error);
 
 /**
  * Detect peaks in time series.

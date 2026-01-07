@@ -33,6 +33,14 @@ void RegisterTsDetectPeriodsFunction(ExtensionLoader &loader);
 void RegisterTsEstimatePeriodFftFunction(ExtensionLoader &loader);
 void RegisterTsEstimatePeriodAcfFunction(ExtensionLoader &loader);
 void RegisterTsDetectMultiplePeriodsFunction(ExtensionLoader &loader);
+void RegisterTsAutoperiodFunction(ExtensionLoader &loader);
+void RegisterTsCfdAutoperiodFunction(ExtensionLoader &loader);
+void RegisterTsLombScargleFunction(ExtensionLoader &loader);
+void RegisterTsAicPeriodFunction(ExtensionLoader &loader);
+void RegisterTsSsaPeriodFunction(ExtensionLoader &loader);
+void RegisterTsStlPeriodFunction(ExtensionLoader &loader);
+void RegisterTsMatrixProfilePeriodFunction(ExtensionLoader &loader);
+void RegisterTsSazedPeriodFunction(ExtensionLoader &loader);
 
 // Peak detection functions (fdars-core integration)
 void RegisterTsDetectPeaksFunction(ExtensionLoader &loader);

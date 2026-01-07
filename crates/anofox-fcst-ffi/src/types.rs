@@ -656,6 +656,194 @@ impl Default for FlatMultiPeriodResult {
     }
 }
 
+/// Result from autoperiod detection.
+///
+/// Combines FFT period estimation with ACF validation.
+#[repr(C)]
+pub struct AutoperiodResultFFI {
+    /// Detected period (in samples)
+    pub period: c_double,
+    /// FFT confidence (ratio of peak power to mean power)
+    pub fft_confidence: c_double,
+    /// ACF validation score (correlation at the detected period)
+    pub acf_validation: c_double,
+    /// Whether the period was detected (acf_validation > threshold)
+    pub detected: bool,
+    /// Method used ("autoperiod" or "cfd_autoperiod")
+    pub method: [c_char; 32],
+}
+
+impl Default for AutoperiodResultFFI {
+    fn default() -> Self {
+        Self {
+            period: 0.0,
+            fft_confidence: 0.0,
+            acf_validation: 0.0,
+            detected: false,
+            method: [0; 32],
+        }
+    }
+}
+
+/// Result from Lomb-Scargle periodogram.
+///
+/// Lomb-Scargle is optimal for detecting periodic signals in unevenly
+/// sampled data and provides statistical significance via false alarm probability.
+#[repr(C)]
+pub struct LombScargleResultFFI {
+    /// Detected period (in samples)
+    pub period: c_double,
+    /// Frequency corresponding to the peak
+    pub frequency: c_double,
+    /// Power at the peak frequency (normalized)
+    pub power: c_double,
+    /// False alarm probability (lower = more significant)
+    pub false_alarm_prob: c_double,
+    /// Method identifier
+    pub method: [c_char; 32],
+}
+
+impl Default for LombScargleResultFFI {
+    fn default() -> Self {
+        Self {
+            period: 0.0,
+            frequency: 0.0,
+            power: 0.0,
+            false_alarm_prob: 1.0,
+            method: [0; 32],
+        }
+    }
+}
+
+/// Result from AIC-based period comparison.
+#[repr(C)]
+pub struct AicPeriodResultFFI {
+    /// Best period according to AIC
+    pub period: c_double,
+    /// AIC value for the best model
+    pub aic: c_double,
+    /// BIC value for the best model
+    pub bic: c_double,
+    /// Residual sum of squares for the best model
+    pub rss: c_double,
+    /// R-squared for the best model
+    pub r_squared: c_double,
+    /// Method identifier
+    pub method: [c_char; 32],
+}
+
+impl Default for AicPeriodResultFFI {
+    fn default() -> Self {
+        Self {
+            period: 0.0,
+            aic: 0.0,
+            bic: 0.0,
+            rss: 0.0,
+            r_squared: 0.0,
+            method: [0; 32],
+        }
+    }
+}
+
+/// Result from SSA period detection.
+#[repr(C)]
+pub struct SsaPeriodResultFFI {
+    /// Primary detected period
+    pub period: c_double,
+    /// Variance explained by the primary periodic component
+    pub variance_explained: c_double,
+    /// Number of eigenvalues returned
+    pub n_eigenvalues: size_t,
+    /// Method identifier
+    pub method: [c_char; 32],
+}
+
+impl Default for SsaPeriodResultFFI {
+    fn default() -> Self {
+        Self {
+            period: 0.0,
+            variance_explained: 0.0,
+            n_eigenvalues: 0,
+            method: [0; 32],
+        }
+    }
+}
+
+/// Result from STL-based period detection.
+#[repr(C)]
+pub struct StlPeriodResultFFI {
+    /// Best detected period
+    pub period: c_double,
+    /// Seasonal strength at the best period (0-1)
+    pub seasonal_strength: c_double,
+    /// Trend strength (0-1)
+    pub trend_strength: c_double,
+    /// Method identifier
+    pub method: [c_char; 32],
+}
+
+impl Default for StlPeriodResultFFI {
+    fn default() -> Self {
+        Self {
+            period: 0.0,
+            seasonal_strength: 0.0,
+            trend_strength: 0.0,
+            method: [0; 32],
+        }
+    }
+}
+
+/// Result from Matrix Profile period detection.
+#[repr(C)]
+pub struct MatrixProfilePeriodResultFFI {
+    /// Detected period (most common motif distance)
+    pub period: c_double,
+    /// Confidence based on peak prominence in lag histogram
+    pub confidence: c_double,
+    /// Number of motif pairs found
+    pub n_motifs: size_t,
+    /// Subsequence length used
+    pub subsequence_length: size_t,
+    /// Method identifier
+    pub method: [c_char; 32],
+}
+
+impl Default for MatrixProfilePeriodResultFFI {
+    fn default() -> Self {
+        Self {
+            period: 0.0,
+            confidence: 0.0,
+            n_motifs: 0,
+            subsequence_length: 0,
+            method: [0; 32],
+        }
+    }
+}
+
+/// Result from SAZED period detection.
+#[repr(C)]
+pub struct SazedPeriodResultFFI {
+    /// Primary detected period
+    pub period: c_double,
+    /// Spectral power at the detected period
+    pub power: c_double,
+    /// Signal-to-noise ratio
+    pub snr: c_double,
+    /// Method identifier
+    pub method: [c_char; 32],
+}
+
+impl Default for SazedPeriodResultFFI {
+    fn default() -> Self {
+        Self {
+            period: 0.0,
+            power: 0.0,
+            snr: 0.0,
+            method: [0; 32],
+        }
+    }
+}
+
 // ============================================================================
 // Peak Detection Types (fdars-core integration)
 // ============================================================================

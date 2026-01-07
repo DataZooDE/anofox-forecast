@@ -1298,6 +1298,526 @@ pub unsafe extern "C" fn anofox_ts_detect_multiple_periods_flat(
     }
 }
 
+/// Autoperiod: FFT period detection with ACF validation.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_autoperiod(
+    values: *const c_double,
+    length: size_t,
+    acf_threshold: c_double,
+    out_result: *mut types::AutoperiodResultFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if values.is_null() || out_result.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let values_vec = std::slice::from_raw_parts(values, length).to_vec();
+        let threshold = if acf_threshold > 0.0 {
+            Some(acf_threshold)
+        } else {
+            None
+        };
+        anofox_fcst_core::autoperiod(&values_vec, threshold)
+    }));
+
+    match result {
+        Ok(Ok(ap_result)) => {
+            (*out_result).period = ap_result.period;
+            (*out_result).fft_confidence = ap_result.fft_confidence;
+            (*out_result).acf_validation = ap_result.acf_validation;
+            (*out_result).detected = ap_result.detected;
+            copy_string_to_buffer(&ap_result.method, &mut (*out_result).method);
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
+/// CFD Autoperiod: First-differenced FFT with ACF validation.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_cfd_autoperiod(
+    values: *const c_double,
+    length: size_t,
+    acf_threshold: c_double,
+    out_result: *mut types::AutoperiodResultFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if values.is_null() || out_result.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let values_vec = std::slice::from_raw_parts(values, length).to_vec();
+        let threshold = if acf_threshold > 0.0 {
+            Some(acf_threshold)
+        } else {
+            None
+        };
+        anofox_fcst_core::cfd_autoperiod(&values_vec, threshold)
+    }));
+
+    match result {
+        Ok(Ok(ap_result)) => {
+            (*out_result).period = ap_result.period;
+            (*out_result).fft_confidence = ap_result.fft_confidence;
+            (*out_result).acf_validation = ap_result.acf_validation;
+            (*out_result).detected = ap_result.detected;
+            copy_string_to_buffer(&ap_result.method, &mut (*out_result).method);
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
+/// Lomb-Scargle periodogram for period detection.
+///
+/// Optimal for detecting periodic signals in unevenly sampled data.
+/// More robust than FFT for noisy data and provides statistical significance.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_lomb_scargle(
+    values: *const c_double,
+    length: size_t,
+    min_period: c_double,
+    max_period: c_double,
+    n_frequencies: size_t,
+    out_result: *mut types::LombScargleResultFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if values.is_null() || out_result.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let values_vec = std::slice::from_raw_parts(values, length).to_vec();
+        let min_p = if min_period > 0.0 {
+            Some(min_period)
+        } else {
+            None
+        };
+        let max_p = if max_period > 0.0 {
+            Some(max_period)
+        } else {
+            None
+        };
+        let n_freq = if n_frequencies > 0 {
+            Some(n_frequencies)
+        } else {
+            None
+        };
+        anofox_fcst_core::lomb_scargle(&values_vec, None, min_p, max_p, n_freq)
+    }));
+
+    match result {
+        Ok(Ok(ls_result)) => {
+            (*out_result).period = ls_result.period;
+            (*out_result).frequency = ls_result.frequency;
+            (*out_result).power = ls_result.power;
+            (*out_result).false_alarm_prob = ls_result.false_alarm_prob;
+            copy_string_to_buffer(&ls_result.method, &mut (*out_result).method);
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
+/// AIC-based period comparison.
+///
+/// Fits sinusoidal models with different candidate periods and selects
+/// the one with the lowest AIC.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_aic_period(
+    values: *const c_double,
+    length: size_t,
+    min_period: c_double,
+    max_period: c_double,
+    n_candidates: size_t,
+    out_result: *mut types::AicPeriodResultFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if values.is_null() || out_result.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let values_vec = std::slice::from_raw_parts(values, length).to_vec();
+        let min_p = if min_period > 0.0 {
+            Some(min_period)
+        } else {
+            None
+        };
+        let max_p = if max_period > 0.0 {
+            Some(max_period)
+        } else {
+            None
+        };
+        let n_cand = if n_candidates > 0 {
+            Some(n_candidates)
+        } else {
+            None
+        };
+        anofox_fcst_core::aic_comparison(&values_vec, min_p, max_p, n_cand, None)
+    }));
+
+    match result {
+        Ok(Ok(aic_result)) => {
+            (*out_result).period = aic_result.period;
+            (*out_result).aic = aic_result.aic;
+            (*out_result).bic = aic_result.bic;
+            (*out_result).rss = aic_result.rss;
+            (*out_result).r_squared = aic_result.r_squared;
+            copy_string_to_buffer(&aic_result.method, &mut (*out_result).method);
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
+/// SSA (Singular Spectrum Analysis) for period detection.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_ssa_period(
+    values: *const c_double,
+    length: size_t,
+    window_size: size_t,
+    n_components: size_t,
+    out_result: *mut types::SsaPeriodResultFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if values.is_null() || out_result.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let values_vec = std::slice::from_raw_parts(values, length).to_vec();
+        let win_size = if window_size > 0 {
+            Some(window_size)
+        } else {
+            None
+        };
+        let n_comp = if n_components > 0 {
+            Some(n_components)
+        } else {
+            None
+        };
+        anofox_fcst_core::ssa_period(&values_vec, win_size, n_comp)
+    }));
+
+    match result {
+        Ok(Ok(ssa_result)) => {
+            (*out_result).period = ssa_result.period;
+            (*out_result).variance_explained = ssa_result.variance_explained;
+            (*out_result).n_eigenvalues = ssa_result.eigenvalues.len();
+            copy_string_to_buffer(&ssa_result.method, &mut (*out_result).method);
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
+/// STL-based period detection via seasonal strength optimization.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_stl_period(
+    values: *const c_double,
+    length: size_t,
+    min_period: size_t,
+    max_period: size_t,
+    n_candidates: size_t,
+    out_result: *mut types::StlPeriodResultFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if values.is_null() || out_result.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let values_vec = std::slice::from_raw_parts(values, length).to_vec();
+        let min_p = if min_period > 0 {
+            Some(min_period)
+        } else {
+            None
+        };
+        let max_p = if max_period > 0 {
+            Some(max_period)
+        } else {
+            None
+        };
+        let n_cand = if n_candidates > 0 {
+            Some(n_candidates)
+        } else {
+            None
+        };
+        anofox_fcst_core::stl_period(&values_vec, min_p, max_p, n_cand)
+    }));
+
+    match result {
+        Ok(Ok(stl_result)) => {
+            (*out_result).period = stl_result.period;
+            (*out_result).seasonal_strength = stl_result.seasonal_strength;
+            (*out_result).trend_strength = stl_result.trend_strength;
+            copy_string_to_buffer(&stl_result.method, &mut (*out_result).method);
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
+/// Matrix Profile period detection.
+///
+/// Uses Matrix Profile to find motifs and estimate periodicity from
+/// the distribution of motif distances.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_matrix_profile_period(
+    values: *const c_double,
+    length: size_t,
+    subsequence_length: size_t,
+    n_best: size_t,
+    out_result: *mut types::MatrixProfilePeriodResultFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if values.is_null() || out_result.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let values_vec = std::slice::from_raw_parts(values, length).to_vec();
+        let subseq_len = if subsequence_length > 0 {
+            Some(subsequence_length)
+        } else {
+            None
+        };
+        let n_b = if n_best > 0 { Some(n_best) } else { None };
+        anofox_fcst_core::matrix_profile_period(&values_vec, subseq_len, n_b)
+    }));
+
+    match result {
+        Ok(Ok(mp_result)) => {
+            (*out_result).period = mp_result.period;
+            (*out_result).confidence = mp_result.confidence;
+            (*out_result).n_motifs = mp_result.n_motifs;
+            (*out_result).subsequence_length = mp_result.subsequence_length;
+            copy_string_to_buffer(&mp_result.method, &mut (*out_result).method);
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
+/// SAZED period detection using spectral analysis with zero-padding.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_sazed_period(
+    values: *const c_double,
+    length: size_t,
+    min_period: size_t,
+    max_period: size_t,
+    zero_pad_factor: size_t,
+    out_result: *mut types::SazedPeriodResultFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if values.is_null() || out_result.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let values_vec = std::slice::from_raw_parts(values, length).to_vec();
+        let zp_factor = if zero_pad_factor > 0 {
+            Some(zero_pad_factor)
+        } else {
+            None
+        };
+        let min_p = if min_period > 0 {
+            Some(min_period)
+        } else {
+            None
+        };
+        let max_p = if max_period > 0 {
+            Some(max_period)
+        } else {
+            None
+        };
+        // sazed_period signature: padding_factor, min_period, max_period
+        anofox_fcst_core::sazed_period(&values_vec, zp_factor, min_p, max_p)
+    }));
+
+    match result {
+        Ok(Ok(sazed_result)) => {
+            (*out_result).period = sazed_result.period;
+            (*out_result).power = sazed_result.power;
+            (*out_result).snr = sazed_result.snr;
+            copy_string_to_buffer(&sazed_result.method, &mut (*out_result).method);
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
 // ============================================================================
 // Peak Detection Functions (fdars-core integration)
 // ============================================================================

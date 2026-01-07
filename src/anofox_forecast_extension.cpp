@@ -52,6 +52,14 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsEstimatePeriodFftFunction(loader);
     RegisterTsEstimatePeriodAcfFunction(loader);
     RegisterTsDetectMultiplePeriodsFunction(loader);
+    RegisterTsAutoperiodFunction(loader);
+    RegisterTsCfdAutoperiodFunction(loader);
+    RegisterTsLombScargleFunction(loader);
+    RegisterTsAicPeriodFunction(loader);
+    RegisterTsSsaPeriodFunction(loader);
+    RegisterTsStlPeriodFunction(loader);
+    RegisterTsMatrixProfilePeriodFunction(loader);
+    RegisterTsSazedPeriodFunction(loader);
 
     // Register Peak Detection functions (fdars-core)
     RegisterTsDetectPeaksFunction(loader);
