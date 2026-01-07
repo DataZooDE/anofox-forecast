@@ -1,6 +1,6 @@
 ---
 title: "Seasonality Detection Methods: A Comparative Study"
-subtitle: "Comprehensive Benchmark for the anofox-forecast DuckDB Extension"
+subtitle: "Binary Classification Benchmark for the anofox-forecast DuckDB Extension"
 author: "anofox-forecast benchmark suite"
 date: today
 format:
@@ -25,7 +25,9 @@ execute:
 
 ## Executive Summary
 
-This benchmark evaluates all seasonality detection methods available in the `anofox-forecast` DuckDB extension. Using simulated time series with known characteristics, we compare detection accuracy across seven scenarios using twelve detection methods spanning spectral analysis, autocorrelation, decomposition, and model-based approaches.
+This benchmark evaluates seasonality detection methods as a **binary classification problem**: given a time series, does it contain seasonality? We simulate 550 curves with varying seasonal strength levels (0.0 to 1.0) and evaluate 13 detection methods using classification metrics (Accuracy, Precision, Recall, F1, ROC/AUC). Ground truth is defined as seasonal if simulated strength >= 0.2.
+
+This benchmark replicates the methodology from the fdars R package benchmark.
 
 ```{r}
 #| label: setup
@@ -39,59 +41,56 @@ library(tidyr)
 library(purrr)
 library(knitr)
 library(scales)
+library(pROC)
 
 # Set ggplot theme
 theme_set(theme_minimal(base_size = 12))
 
-# Define consistent colors for all methods (12 total)
+# Define consistent colors for all methods (13 total)
 METHOD_COLORS <- c(
-  "Basic" = "#E41A1C",
-  "Analysis" = "#377EB8",
-  "FFT" = "#4DAF4A",
-  "ACF" = "#984EA3",
-  "Autoperiod" = "#FF7F00",
-  "CFD" = "#FFFF33",
-  "Lomb" = "#A65628",
-  "AIC" = "#F781BF",
-  "SSA" = "#999999",
-  "STL" = "#66C2A5",
+  "AIC" = "#E41A1C",
+  "FFT" = "#377EB8",
+  "ACF" = "#4DAF4A",
+  "Variance" = "#984EA3",
+  "Spectral" = "#FF7F00",
+  "Wavelet" = "#FFFF33",
+  "SAZED" = "#A65628",
+  "Autoperiod" = "#F781BF",
+  "CFD" = "#999999",
+  "Lomb" = "#66C2A5",
   "MatrixProfile" = "#FC8D62",
-  "SAZED" = "#8DA0CB"
+  "STL" = "#8DA0CB",
+  "SSA" = "#E78AC3"
 )
 ```
 
 ## Introduction
 
-The `anofox-forecast` DuckDB extension provides SQL functions for detecting and analyzing seasonality in time series data. This report serves as both a benchmark and a tutorial, demonstrating how to use these functions effectively.
+### Detection as Binary Classification
 
-### Detection Methods Available
+Unlike period estimation (which asks "what is the period?"), **seasonality detection** asks a simpler question: **"is there seasonality?"** This is a binary classification problem where each method produces a confidence score, and we apply a threshold to make a detection decision.
 
-| Method | SQL Function | Description |
-|--------|-------------|-------------|
-| Basic Detection | `ts_detect_seasonality(values)` | Returns array of detected periods |
-| Full Analysis | `ts_analyze_seasonality(values)` | Comprehensive struct with periods and strength metrics |
-| FFT Period | `ts_estimate_period_fft(values)` | Period estimation via Fast Fourier Transform |
-| ACF Period | `ts_estimate_period_acf(values)` | Period estimation via Autocorrelation |
-| Autoperiod | `ts_autoperiod(values)` | Hybrid FFT+ACF validation method |
-| CFD-Autoperiod | `ts_cfd_autoperiod(values)` | Circular Frequency Domain variant |
-| Lomb-Scargle | `ts_lomb_scargle(values)` | Spectral analysis for irregular sampling |
-| AIC Comparison | `ts_aic_period(values)` | Model selection via AIC/BIC criteria |
-| SSA Period | `ts_ssa_period(values)` | Singular Spectrum Analysis decomposition |
-| STL Period | `ts_stl_period(values)` | STL decomposition with seasonal strength optimization |
-| Matrix Profile | `ts_matrix_profile_period(values)` | Motif-based period detection via matrix profile |
-| SAZED | `ts_sazed_period(values)` | Spectral Analysis with Zero-padding for Enhanced Detection |
+### Methods Evaluated
 
-### Simulation Scenarios
+| Method | SQL Function | Score Used | Description |
+|--------|-------------|------------|-------------|
+| AIC Comparison | `ts_aic_period` | R-squared | Fourier model fit quality |
+| FFT Confidence | `ts_estimate_period_fft` | confidence | Peak-to-mean power ratio |
+| ACF Confidence | `ts_estimate_period_acf` | confidence | Autocorrelation at lag |
+| Variance Strength | `ts_seasonal_strength(..., 'variance')` | strength | Seasonal variance ratio |
+| Spectral Strength | `ts_seasonal_strength(..., 'spectral')` | strength | Power at seasonal frequency |
+| Wavelet Strength | `ts_seasonal_strength(..., 'wavelet')` | strength | Morlet wavelet energy |
+| SAZED | `ts_sazed_period` | SNR | Zero-padded spectral SNR |
+| Autoperiod | `ts_autoperiod` | acf_validation | FFT+ACF hybrid validation |
+| CFD-Autoperiod | `ts_cfd_autoperiod` | acf_validation | First-differenced FFT+ACF |
+| Lomb-Scargle | `ts_lomb_scargle` | 1-FAP | Statistical significance |
+| Matrix Profile | `ts_matrix_profile_period` | confidence | Motif agreement ratio |
+| STL | `ts_stl_period` | seasonal_strength | Decomposition strength |
+| SSA | `ts_ssa_period` | variance_explained | Eigenvalue dominance |
 
-We test across seven scenarios representing common real-world patterns:
+### Ground Truth Definition
 
-1. **Strong Seasonal** - Clear sinusoidal pattern (high SNR)
-2. **Weak Seasonal** - Low amplitude with high noise
-3. **No Seasonal** - Pure noise (null case)
-4. **Trending Seasonal** - Seasonality with strong linear trend
-5. **Variable Amplitude** - Time-varying amplitude modulation
-6. **Emerging Seasonal** - Seasonality appears mid-series
-7. **Fading Seasonal** - Seasonality disappears mid-series
+A series is classified as **seasonal** if its simulated seasonal strength >= 0.2. This threshold follows the fdars benchmark convention.
 
 ## Setup
 
@@ -101,10 +100,8 @@ We test across seven scenarios representing common real-world patterns:
 #| label: connect-duckdb
 #| cache: false
 
-# Create DuckDB connection with allow_unsigned_extensions enabled
 con <- dbConnect(duckdb(config = list("allow_unsigned_extensions" = "true")))
 
-# Load the anofox-forecast extension
 extension_path <- "../../build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension"
 
 if (file.exists(extension_path)) {
@@ -116,1057 +113,485 @@ if (file.exists(extension_path)) {
 }
 ```
 
-## Data Simulation
-
-We generate synthetic time series in R with known seasonality characteristics, then load them into DuckDB for analysis.
+## Baseline Simulation
 
 ### Simulation Parameters
+
+Following the fdars benchmark:
+- **11 strength levels**: 0.0, 0.1, 0.2, ..., 1.0
+- **50 curves per level**: 550 total curves
+- **60 observations**: 5 years of monthly data
+- **Period = 12**: Monthly seasonality
+- **White noise**: sigma = 0.3
 
 ```{r}
 #| label: simulation-params
 
-# Simulation configuration
-N_SERIES <- 100      # Series per scenario
-N_POINTS <- 120      # Length of each series
-PERIOD <- 12.0       # True seasonal period
-NOISE_SD <- 1.0      # Base noise standard deviation
-SEED <- 42           # Random seed for reproducibility
+N_LEVELS <- 11
+N_CURVES_PER_LEVEL <- 50
+N_TOTAL <- N_LEVELS * N_CURVES_PER_LEVEL  # 550
+N_POINTS <- 60
+PERIOD <- 12.0
+NOISE_SD <- 0.3
+STRENGTH_THRESHOLD <- 0.2
+SEED <- 42
 
 set.seed(SEED)
 ```
 
-### Simulation Functions
+### Baseline Data Generation
 
 ```{r}
-#| label: simulation-functions
+#| label: generate-baseline
 
-# Generate sinusoidal seasonal component
-generate_seasonal <- function(n, period, amplitude, phase = 0) {
-  t <- 0:(n - 1)
-  amplitude * sin(2 * pi * t / period + phase)
-}
+# Generate baseline curves with varying seasonal strength
+generate_baseline <- function(n_levels, n_per_level, n_points, period, noise_sd) {
+  strength_levels <- seq(0, 1, length.out = n_levels)
 
-# Generate linear trend
-generate_trend <- function(n, slope, intercept = 0) {
-  t <- 0:(n - 1)
-  intercept + slope * t
-}
+  curves <- map_dfr(seq_along(strength_levels), function(level_idx) {
+    strength <- strength_levels[level_idx]
 
-# Generate white noise
-generate_noise <- function(n, sd) {
-  rnorm(n, mean = 0, sd = sd)
-}
+    map_dfr(1:n_per_level, function(curve_idx) {
+      t <- 0:(n_points - 1)
+      phase <- runif(1, 0, 2 * pi)
 
-# Calculate true seasonal strength (signal-to-noise ratio based)
-calc_strength <- function(amplitude, noise_sd) {
-  amplitude^2 / (amplitude^2 + noise_sd^2)
-}
+      # Amplitude derived from strength: strength = amp^2 / (amp^2 + noise^2)
+      # So amp = sqrt(strength * noise^2 / (1 - strength)) when strength < 1
+      if (strength > 0 && strength < 1) {
+        amplitude <- sqrt(strength * noise_sd^2 / (1 - strength))
+      } else if (strength >= 1) {
+        amplitude <- 10 * noise_sd  # Very strong signal
+      } else {
+        amplitude <- 0
+      }
 
-# Scenario 1: Strong, stable seasonality
-generate_strong_seasonal <- function(n_series, n_points, period, noise_sd) {
-  map_dfr(1:n_series, function(i) {
-    amplitude <- runif(1, 3.0, 5.0)
-    phase <- runif(1, 0, 2 * pi)
+      seasonal <- amplitude * sin(2 * pi * t / period + phase)
+      noise <- rnorm(n_points, 0, noise_sd)
+      values <- seasonal + noise
 
-    seasonal <- generate_seasonal(n_points, period, amplitude, phase)
-    trend <- generate_trend(n_points, slope = 0, intercept = 10)
-    noise <- generate_noise(n_points, noise_sd)
-
-    tibble(
-      series_id = i,
-      scenario = "strong_seasonal",
-      true_period = period,
-      true_strength = calc_strength(amplitude, noise_sd),
-      is_seasonal = TRUE,
-      values = list(trend + seasonal + noise)
-    )
+      tibble(
+        curve_id = (level_idx - 1) * n_per_level + curve_idx,
+        strength_level = strength,
+        is_seasonal = strength >= STRENGTH_THRESHOLD,
+        scenario = "baseline",
+        values = list(values)
+      )
+    })
   })
+
+  curves
 }
 
-# Scenario 2: Weak seasonality
-generate_weak_seasonal <- function(n_series, n_points, period, noise_sd) {
-  map_dfr(1:n_series, function(i) {
-    amplitude <- runif(1, 0.3, 0.7)
-    phase <- runif(1, 0, 2 * pi)
-    high_noise <- noise_sd * 2.0
+baseline_data <- generate_baseline(N_LEVELS, N_CURVES_PER_LEVEL, N_POINTS, PERIOD, NOISE_SD)
 
-    seasonal <- generate_seasonal(n_points, period, amplitude, phase)
-    trend <- generate_trend(n_points, slope = 0, intercept = 10)
-    noise <- generate_noise(n_points, high_noise)
-
-    tibble(
-      series_id = i,
-      scenario = "weak_seasonal",
-      true_period = period,
-      true_strength = calc_strength(amplitude, high_noise),
-      is_seasonal = TRUE,
-      values = list(trend + seasonal + noise)
-    )
-  })
-}
-
-# Scenario 3: No seasonality (null case)
-generate_no_seasonal <- function(n_series, n_points, period, noise_sd) {
-  map_dfr(1:n_series, function(i) {
-    trend <- generate_trend(n_points, slope = 0, intercept = 10)
-    noise <- generate_noise(n_points, noise_sd)
-
-    tibble(
-      series_id = i,
-      scenario = "no_seasonal",
-      true_period = 0,
-      true_strength = 0,
-      is_seasonal = FALSE,
-      values = list(trend + noise)
-    )
-  })
-}
-
-# Scenario 4: Trending seasonal
-generate_trending_seasonal <- function(n_series, n_points, period, noise_sd) {
-  map_dfr(1:n_series, function(i) {
-    amplitude <- runif(1, 2.0, 4.0)
-    phase <- runif(1, 0, 2 * pi)
-    strong_slope <- runif(1, 0.3, 0.5)
-
-    seasonal <- generate_seasonal(n_points, period, amplitude, phase)
-    trend <- generate_trend(n_points, slope = strong_slope, intercept = 10)
-    noise <- generate_noise(n_points, noise_sd)
-
-    tibble(
-      series_id = i,
-      scenario = "trending_seasonal",
-      true_period = period,
-      true_strength = calc_strength(amplitude, noise_sd),
-      is_seasonal = TRUE,
-      values = list(trend + seasonal + noise)
-    )
-  })
-}
-
-# Scenario 5: Variable amplitude (amplitude modulation)
-generate_variable_amplitude <- function(n_series, n_points, period, noise_sd) {
-  map_dfr(1:n_series, function(i) {
-    base_amplitude <- runif(1, 2.0, 4.0)
-    phase <- runif(1, 0, 2 * pi)
-
-    t <- 0:(n_points - 1)
-    amplitude_mod <- base_amplitude * (1 + 0.5 * sin(2 * pi * t / (n_points / 2)))
-    seasonal <- amplitude_mod * sin(2 * pi * t / period + phase)
-
-    trend <- generate_trend(n_points, slope = 0, intercept = 10)
-    noise <- generate_noise(n_points, noise_sd)
-
-    tibble(
-      series_id = i,
-      scenario = "variable_amplitude",
-      true_period = period,
-      true_strength = calc_strength(base_amplitude, noise_sd),
-      is_seasonal = TRUE,
-      values = list(trend + seasonal + noise)
-    )
-  })
-}
-
-# Scenario 6: Emerging seasonality
-generate_emerging_seasonal <- function(n_series, n_points, period, noise_sd) {
-  map_dfr(1:n_series, function(i) {
-    amplitude <- runif(1, 3.0, 5.0)
-    phase <- runif(1, 0, 2 * pi)
-
-    t <- 0:(n_points - 1)
-    midpoint <- n_points / 2
-    transition_width <- n_points / 10
-
-    transition <- 1 / (1 + exp(-(t - midpoint) / transition_width))
-    seasonal <- amplitude * transition * sin(2 * pi * t / period + phase)
-
-    trend <- generate_trend(n_points, slope = 0, intercept = 10)
-    noise <- generate_noise(n_points, noise_sd)
-
-    tibble(
-      series_id = i,
-      scenario = "emerging_seasonal",
-      true_period = period,
-      true_strength = calc_strength(amplitude, noise_sd),
-      is_seasonal = TRUE,
-      values = list(trend + seasonal + noise)
-    )
-  })
-}
-
-# Scenario 7: Fading seasonality
-generate_fading_seasonal <- function(n_series, n_points, period, noise_sd) {
-  map_dfr(1:n_series, function(i) {
-    amplitude <- runif(1, 3.0, 5.0)
-    phase <- runif(1, 0, 2 * pi)
-
-    t <- 0:(n_points - 1)
-    midpoint <- n_points / 2
-    transition_width <- n_points / 10
-
-    transition <- 1 - 1 / (1 + exp(-(t - midpoint) / transition_width))
-    seasonal <- amplitude * transition * sin(2 * pi * t / period + phase)
-
-    trend <- generate_trend(n_points, slope = 0, intercept = 10)
-    noise <- generate_noise(n_points, noise_sd)
-
-    tibble(
-      series_id = i,
-      scenario = "fading_seasonal",
-      true_period = period,
-      true_strength = calc_strength(amplitude, noise_sd),
-      is_seasonal = TRUE,
-      values = list(trend + seasonal + noise)
-    )
-  })
-}
+cat(sprintf("Generated %d curves\n", nrow(baseline_data)))
+cat(sprintf("Seasonal (strength >= %.1f): %d\n", STRENGTH_THRESHOLD, sum(baseline_data$is_seasonal)))
+cat(sprintf("Non-seasonal: %d\n", sum(!baseline_data$is_seasonal)))
 ```
 
-### Generate All Scenarios
+### Strength Level Distribution
 
 ```{r}
-#| label: generate-data
-#| cache: true
+#| label: fig-strength-dist
+#| fig-cap: "Distribution of curves by seasonal strength level"
 
-message("Generating simulated time series...")
-
-all_series <- bind_rows(
-  generate_strong_seasonal(N_SERIES, N_POINTS, PERIOD, NOISE_SD),
-  generate_weak_seasonal(N_SERIES, N_POINTS, PERIOD, NOISE_SD),
-  generate_no_seasonal(N_SERIES, N_POINTS, PERIOD, NOISE_SD),
-  generate_trending_seasonal(N_SERIES, N_POINTS, PERIOD, NOISE_SD),
-  generate_variable_amplitude(N_SERIES, N_POINTS, PERIOD, NOISE_SD),
-  generate_emerging_seasonal(N_SERIES, N_POINTS, PERIOD, NOISE_SD),
-  generate_fading_seasonal(N_SERIES, N_POINTS, PERIOD, NOISE_SD)
-) %>%
-  mutate(
-    global_id = row_number(),
-    scenario = factor(scenario, levels = c(
-      "strong_seasonal", "weak_seasonal", "no_seasonal",
-      "trending_seasonal", "variable_amplitude",
-      "emerging_seasonal", "fading_seasonal"
-    ))
+ggplot(baseline_data, aes(x = factor(strength_level), fill = is_seasonal)) +
+  geom_bar() +
+  scale_fill_manual(values = c("TRUE" = "#1a9850", "FALSE" = "#d73027"),
+                    labels = c("TRUE" = "Seasonal", "FALSE" = "Non-seasonal")) +
+  labs(
+    title = "Curve Distribution by Strength Level",
+    subtitle = sprintf("Ground truth: seasonal if strength >= %.1f", STRENGTH_THRESHOLD),
+    x = "Seasonal Strength",
+    y = "Number of Curves",
+    fill = "Ground Truth"
   )
-
-cat(sprintf("Total series generated: %d\n", nrow(all_series)))
-cat("\nSeries per scenario:\n")
-print(table(all_series$scenario))
 ```
 
-### Example Series Visualization
+### Example Curves
 
 ```{r}
-#| label: fig-example-series
-#| fig-cap: "Example time series from each scenario"
-#| fig-height: 10
+#| label: fig-example-curves
+#| fig-cap: "Example curves at different strength levels"
+#| fig-height: 8
 
-examples <- all_series %>%
-  group_by(scenario) %>%
+examples <- baseline_data %>%
+  filter(strength_level %in% c(0.0, 0.2, 0.5, 0.8, 1.0)) %>%
+  group_by(strength_level) %>%
   slice(1) %>%
   ungroup() %>%
   mutate(
-    time = map(values, ~ 1:length(.x)),
-    scenario_label = gsub("_", " ", scenario) %>% tools::toTitleCase()
+    time = map(values, ~ 1:length(.x))
   ) %>%
   unnest(c(time, values))
 
 ggplot(examples, aes(x = time, y = values)) +
   geom_line(color = "steelblue", linewidth = 0.5) +
-  facet_wrap(~scenario_label, ncol = 2, scales = "free_y") +
-  labs(title = "Example Time Series from Each Scenario", x = "Time", y = "Value") +
-  theme(strip.text = element_text(face = "bold"))
+  facet_wrap(~sprintf("Strength = %.1f", strength_level), ncol = 1, scales = "free_y") +
+  labs(title = "Example Curves at Different Strength Levels", x = "Time", y = "Value")
 ```
 
 ### Load Data into DuckDB
 
 ```{r}
 #| label: load-to-duckdb
+#| cache: false
 
-dbExecute(con, "DROP TABLE IF EXISTS simulated_series")
+dbExecute(con, "DROP TABLE IF EXISTS benchmark_curves")
 dbExecute(con, "
-  CREATE TABLE simulated_series (
-    global_id INTEGER,
-    series_id INTEGER,
-    scenario VARCHAR,
-    true_period DOUBLE,
-    true_strength DOUBLE,
+  CREATE TABLE benchmark_curves (
+    curve_id INTEGER,
+    strength_level DOUBLE,
     is_seasonal BOOLEAN,
+    scenario VARCHAR,
     values DOUBLE[]
   )
 ")
 
-for (i in 1:nrow(all_series)) {
-  row <- all_series[i, ]
+for (i in 1:nrow(baseline_data)) {
+  row <- baseline_data[i, ]
   values_str <- paste0("[", paste(row$values[[1]], collapse = ","), "]")
 
   dbExecute(con, sprintf("
-    INSERT INTO simulated_series VALUES (%d, %d, '%s', %f, %f, %s, %s::DOUBLE[])
-  ", row$global_id, row$series_id, row$scenario,
-     row$true_period, row$true_strength,
+    INSERT INTO benchmark_curves VALUES (%d, %f, %s, '%s', %s::DOUBLE[])
+  ", row$curve_id, row$strength_level,
      ifelse(row$is_seasonal, "true", "false"),
-     values_str))
+     row$scenario, values_str))
 }
 
-cat("Data loaded into DuckDB table 'simulated_series'\n")
-row_count <- dbGetQuery(con, "SELECT COUNT(*) as n_rows FROM simulated_series")
-cat("Row count:", row_count$n_rows, "\n")
+cat("Data loaded into DuckDB\n")
 ```
 
-## Detection Methods Tutorial
+## Method Evaluation
 
-This section demonstrates each detection method with explicit SQL queries.
-
-### Method 1: Basic Seasonality Detection (`ts_detect_seasonality`)
-
-Returns an array of detected seasonal periods.
+### Extract Confidence Scores
 
 ```{r}
-#| label: sql-detect-seasonality
+#| label: extract-scores
+#| cache: false
 
-# Debug: Check if connection is valid and table exists
-cat("Connection class:", class(con), "\n")
-tables <- dbListTables(con)
-cat("Tables in database:", paste(tables, collapse=", "), "\n")
-
-basic_detection <- dbGetQuery(con, "
+# Run all detection methods and extract confidence scores
+# Use known period = 12 for strength methods
+scores <- dbGetQuery(con, "
 SELECT
-    global_id,
-    scenario,
-    true_period,
-    ts_detect_seasonality(values) as detected_periods
-FROM simulated_series
-WHERE series_id = 1
-ORDER BY scenario
-LIMIT 7
-")
-```
-
-```{r}
-#| label: show-basic-detection
-
-kable(basic_detection, caption = "Basic Seasonality Detection Results")
-```
-
-### Method 2: Full Seasonality Analysis (`ts_analyze_seasonality`)
-
-Comprehensive analysis including strength metrics.
-
-```{r}
-#| label: sql-analyze-seasonality
-
-full_analysis <- dbGetQuery(con, "
-SELECT
-    global_id,
-    scenario,
-    true_period,
-    (ts_analyze_seasonality(values)).primary_period as detected_period,
-    (ts_analyze_seasonality(values)).seasonal_strength as seasonal_strength,
-    (ts_analyze_seasonality(values)).trend_strength as trend_strength
-FROM simulated_series
-WHERE series_id = 1
-ORDER BY scenario
-LIMIT 7
-")
-```
-
-```{r}
-#| label: show-full-analysis
-
-kable(full_analysis, digits = 3, caption = "Full Seasonality Analysis Results")
-```
-
-### Method 3: FFT Period Estimation (`ts_estimate_period_fft`)
-
-Uses Fast Fourier Transform for precise frequency detection.
-
-```{r}
-#| label: sql-fft-period
-
-fft_results <- dbGetQuery(con, "
-SELECT
-    global_id,
-    scenario,
-    true_period,
-    (ts_estimate_period_fft(values)).period as fft_period,
-    (ts_estimate_period_fft(values)).confidence as fft_confidence,
-    (ts_estimate_period_fft(values)).power as fft_power
-FROM simulated_series
-WHERE series_id = 1
-ORDER BY scenario
-LIMIT 7
-")
-```
-
-```{r}
-#| label: show-fft-results
-
-kable(fft_results, digits = 3, caption = "FFT Period Estimation Results")
-```
-
-### Method 4: ACF Period Estimation (`ts_estimate_period_acf`)
-
-Detects periods using autocorrelation peaks.
-
-```{r}
-#| label: sql-acf-period
-
-acf_results <- dbGetQuery(con, "
-SELECT
-    global_id,
-    scenario,
-    true_period,
-    (ts_estimate_period_acf(values)).period as acf_period,
-    (ts_estimate_period_acf(values)).confidence as acf_confidence
-FROM simulated_series
-WHERE series_id = 1
-ORDER BY scenario
-LIMIT 7
-")
-```
-
-```{r}
-#| label: show-acf-results
-
-kable(acf_results, digits = 3, caption = "ACF Period Estimation Results")
-```
-
-### Method 5: Autoperiod (`ts_autoperiod`)
-
-Hybrid approach combining FFT with ACF validation for robust period detection.
-
-```{r}
-#| label: sql-autoperiod
-
-autoperiod_results <- dbGetQuery(con, "
-SELECT
-    global_id,
-    scenario,
-    true_period,
-    (ts_autoperiod(values)).period as autoperiod_period,
-    (ts_autoperiod(values)).fft_confidence as autoperiod_confidence,
-    (ts_autoperiod(values)).acf_validation as autoperiod_acf_val
-FROM simulated_series
-WHERE series_id = 1
-ORDER BY scenario
-LIMIT 7
-")
-```
-
-```{r}
-#| label: show-autoperiod-results
-
-kable(autoperiod_results, digits = 3, caption = "Autoperiod Detection Results")
-```
-
-### Method 6: CFD-Autoperiod (`ts_cfd_autoperiod`)
-
-Circular Frequency Domain variant of Autoperiod for improved harmonic handling.
-
-```{r}
-#| label: sql-cfd-autoperiod
-
-cfd_results <- dbGetQuery(con, "
-SELECT
-    global_id,
-    scenario,
-    true_period,
-    (ts_cfd_autoperiod(values)).period as cfd_period,
-    (ts_cfd_autoperiod(values)).fft_confidence as cfd_confidence,
-    (ts_cfd_autoperiod(values)).acf_validation as cfd_acf_val
-FROM simulated_series
-WHERE series_id = 1
-ORDER BY scenario
-LIMIT 7
-")
-```
-
-```{r}
-#| label: show-cfd-results
-
-kable(cfd_results, digits = 3, caption = "CFD-Autoperiod Detection Results")
-```
-
-### Method 7: Lomb-Scargle Periodogram (`ts_lomb_scargle`)
-
-Spectral analysis optimized for irregularly sampled data with false alarm probability.
-
-```{r}
-#| label: sql-lomb-scargle
-
-lomb_results <- dbGetQuery(con, "
-SELECT
-    global_id,
-    scenario,
-    true_period,
-    (ts_lomb_scargle(values)).period as lomb_period,
-    (ts_lomb_scargle(values)).power as lomb_power,
-    (ts_lomb_scargle(values)).false_alarm_prob as lomb_fap
-FROM simulated_series
-WHERE series_id = 1
-ORDER BY scenario
-LIMIT 7
-")
-```
-
-```{r}
-#| label: show-lomb-results
-
-kable(lomb_results, digits = 3, caption = "Lomb-Scargle Periodogram Results")
-```
-
-### Method 8: AIC-Based Model Comparison (`ts_aic_period`)
-
-Fits sinusoidal models at candidate periods and selects best via AIC/BIC criteria.
-
-```{r}
-#| label: sql-aic-period
-
-aic_results <- dbGetQuery(con, "
-SELECT
-    global_id,
-    scenario,
-    true_period,
-    (ts_aic_period(values)).period as aic_period,
-    (ts_aic_period(values)).r_squared as aic_r_squared,
-    (ts_aic_period(values)).aic as aic_value
-FROM simulated_series
-WHERE series_id = 1
-ORDER BY scenario
-LIMIT 7
-")
-```
-
-```{r}
-#| label: show-aic-results
-
-kable(aic_results, digits = 3, caption = "AIC Period Selection Results")
-```
-
-### Method 9: Singular Spectrum Analysis (`ts_ssa_period`)
-
-Decomposes the time series via SSA to extract periodic components.
-
-```{r}
-#| label: sql-ssa-period
-
-ssa_results <- dbGetQuery(con, "
-SELECT
-    global_id,
-    scenario,
-    true_period,
-    (ts_ssa_period(values)).period as ssa_period,
-    (ts_ssa_period(values)).variance_explained as ssa_variance
-FROM simulated_series
-WHERE series_id = 1
-ORDER BY scenario
-LIMIT 7
-")
-```
-
-```{r}
-#| label: show-ssa-results
-
-kable(ssa_results, digits = 3, caption = "SSA Period Detection Results")
-```
-
-### Method 10: STL Decomposition (`ts_stl_period`)
-
-Uses STL (Seasonal and Trend decomposition using LOESS) to find the period that maximizes seasonal strength.
-
-```{r}
-#| label: sql-stl-period
-
-stl_results <- dbGetQuery(con, "
-SELECT
-    global_id,
-    scenario,
-    true_period,
-    (ts_stl_period(values)).period as stl_period,
-    (ts_stl_period(values)).seasonal_strength as stl_strength
-FROM simulated_series
-WHERE series_id = 1
-ORDER BY scenario
-LIMIT 7
-")
-```
-
-```{r}
-#| label: show-stl-results
-
-kable(stl_results, digits = 3, caption = "STL Period Detection Results")
-```
-
-### Method 11: Matrix Profile (`ts_matrix_profile_period`)
-
-Uses Matrix Profile algorithm to find motifs (recurring patterns) and estimate periodicity from the distribution of motif distances.
-
-```{r}
-#| label: sql-mp-period
-
-mp_results <- dbGetQuery(con, "
-SELECT
-    global_id,
-    scenario,
-    true_period,
-    (ts_matrix_profile_period(values)).period as mp_period,
-    (ts_matrix_profile_period(values)).confidence as mp_confidence,
-    (ts_matrix_profile_period(values)).n_motifs as mp_n_motifs
-FROM simulated_series
-WHERE series_id = 1
-ORDER BY scenario
-LIMIT 7
-")
-```
-
-```{r}
-#| label: show-mp-results
-
-kable(mp_results, digits = 3, caption = "Matrix Profile Period Detection Results")
-```
-
-### Method 12: SAZED (`ts_sazed_period`)
-
-Spectral Analysis with Zero-padding for Enhanced Detection - uses zero-padding and Hann windowing to improve frequency resolution in spectral analysis.
-
-```{r}
-#| label: sql-sazed-period
-
-sazed_results <- dbGetQuery(con, "
-SELECT
-    global_id,
-    scenario,
-    true_period,
-    (ts_sazed_period(values)).period as sazed_period,
-    (ts_sazed_period(values)).snr as sazed_snr
-FROM simulated_series
-WHERE series_id = 1
-ORDER BY scenario
-LIMIT 7
-")
-```
-
-```{r}
-#| label: show-sazed-results
-
-kable(sazed_results, digits = 3, caption = "SAZED Period Detection Results")
-```
-
-
-## Running Full Detection with All Methods
-
-Now we run all twelve detection methods on all simulated series.
-
-```{r}
-#| label: sql-full-detection
-
-all_detections <- dbGetQuery(con, "
-WITH detection_results AS (
-    SELECT
-        global_id,
-        scenario,
-        true_period,
-        true_strength,
-        is_seasonal,
-        -- Method 1: Basic detection
-        ts_detect_seasonality(values) as basic,
-        -- Method 2: Full analysis
-        ts_analyze_seasonality(values) as analysis,
-        -- Method 3: FFT detection
-        ts_estimate_period_fft(values) as fft,
-        -- Method 4: ACF detection
-        ts_estimate_period_acf(values) as acf,
-        -- Method 5: Autoperiod
-        ts_autoperiod(values) as autoperiod,
-        -- Method 6: CFD-Autoperiod
-        ts_cfd_autoperiod(values) as cfd,
-        -- Method 7: Lomb-Scargle
-        ts_lomb_scargle(values) as lomb,
-        -- Method 8: AIC comparison
-        ts_aic_period(values) as aic,
-        -- Method 9: SSA period
-        ts_ssa_period(values) as ssa,
-        -- Method 10: STL period
-        ts_stl_period(values) as stl,
-        -- Method 11: Matrix Profile period
-        ts_matrix_profile_period(values) as mp,
-        -- Method 12: SAZED period
-        ts_sazed_period(values) as sazed
-    FROM simulated_series
-)
-SELECT
-    global_id,
-    scenario,
-    true_period,
-    true_strength,
+    curve_id,
+    strength_level,
     is_seasonal,
-    -- Basic: extract first period from array (if exists)
-    CASE WHEN len(basic) > 0 THEN basic[1] ELSE NULL END as basic_period,
-    -- Analysis results
-    (analysis).primary_period as analysis_period,
-    (analysis).seasonal_strength as analysis_strength,
-    -- FFT results
-    (fft).period as fft_period,
-    (fft).confidence as fft_confidence,
-    -- ACF results
-    (acf).period as acf_period,
-    (acf).confidence as acf_confidence,
-    -- Autoperiod results
-    (autoperiod).period as autoperiod_period,
-    (autoperiod).fft_confidence as autoperiod_confidence,
-    -- CFD-Autoperiod results
-    (cfd).period as cfd_period,
-    (cfd).fft_confidence as cfd_confidence,
-    -- Lomb-Scargle results
-    (lomb).period as lomb_period,
-    (lomb).power as lomb_power,
-    -- AIC results
-    (aic).period as aic_period,
-    (aic).r_squared as aic_r_squared,
-    -- SSA results
-    (ssa).period as ssa_period,
-    (ssa).variance_explained as ssa_variance,
-    -- STL results
-    (stl).period as stl_period,
-    (stl).seasonal_strength as stl_strength,
-    -- Matrix Profile results
-    (mp).period as mp_period,
-    (mp).confidence as mp_confidence,
-    -- SAZED results
-    (sazed).period as sazed_period,
-    (sazed).snr as sazed_snr
-FROM detection_results
+    scenario,
+    -- AIC: R-squared as confidence
+    (ts_aic_period(values)).r_squared as aic_score,
+    -- FFT: confidence (peak/mean power ratio), normalize to 0-1
+    LEAST(1.0, (ts_estimate_period_fft(values)).confidence / 100.0) as fft_score,
+    -- ACF: confidence (correlation value)
+    (ts_estimate_period_acf(values)).confidence as acf_score,
+    -- Strength methods (with known period = 12)
+    ts_seasonal_strength(values, 12, 'variance') as variance_score,
+    ts_seasonal_strength(values, 12, 'spectral') as spectral_score,
+    ts_seasonal_strength(values, 12, 'wavelet') as wavelet_score,
+    -- SAZED: SNR normalized
+    LEAST(1.0, (ts_sazed_period(values)).snr / 10.0) as sazed_score,
+    -- Autoperiod: ACF validation
+    (ts_autoperiod(values)).acf_validation as autoperiod_score,
+    -- CFD-Autoperiod: ACF validation
+    (ts_cfd_autoperiod(values)).acf_validation as cfd_score,
+    -- Lomb-Scargle: 1 - false alarm probability
+    1.0 - (ts_lomb_scargle(values)).false_alarm_prob as lomb_score,
+    -- Matrix Profile: confidence
+    (ts_matrix_profile_period(values)).confidence as mp_score,
+    -- STL: seasonal strength
+    (ts_stl_period(values)).seasonal_strength as stl_score,
+    -- SSA: variance explained
+    (ts_ssa_period(values)).variance_explained as ssa_score
+FROM benchmark_curves
 ")
+
+# Convert to tibble and handle NaN/Inf
+scores <- as_tibble(scores) %>%
+  mutate(across(ends_with("_score"), ~ ifelse(is.nan(.) | is.infinite(.), 0, .)))
+
+cat(sprintf("Extracted scores for %d curves\n", nrow(scores)))
 ```
 
-```{r}
-#| label: process-detections
-
-# Convert to tibble and add derived columns
-detections <- as_tibble(all_detections) %>%
-  mutate(
-    # Period detection accuracy (within 10% of true period, handle division by zero)
-    basic_accurate = ifelse(true_period > 0,
-                            abs(basic_period - true_period) / true_period < 0.1, FALSE),
-    analysis_accurate = ifelse(true_period > 0,
-                               abs(analysis_period - true_period) / true_period < 0.1, FALSE),
-    fft_accurate = ifelse(true_period > 0,
-                          abs(fft_period - true_period) / true_period < 0.1, FALSE),
-    acf_accurate = ifelse(true_period > 0,
-                          abs(acf_period - true_period) / true_period < 0.1, FALSE),
-    autoperiod_accurate = ifelse(true_period > 0,
-                                  abs(autoperiod_period - true_period) / true_period < 0.1, FALSE),
-    cfd_accurate = ifelse(true_period > 0,
-                          abs(cfd_period - true_period) / true_period < 0.1, FALSE),
-    lomb_accurate = ifelse(true_period > 0,
-                           abs(lomb_period - true_period) / true_period < 0.1, FALSE),
-    aic_accurate = ifelse(true_period > 0,
-                          abs(aic_period - true_period) / true_period < 0.1, FALSE),
-    ssa_accurate = ifelse(true_period > 0,
-                          abs(ssa_period - true_period) / true_period < 0.1, FALSE),
-    stl_accurate = ifelse(true_period > 0,
-                          abs(stl_period - true_period) / true_period < 0.1, FALSE),
-    mp_accurate = ifelse(true_period > 0,
-                         abs(mp_period - true_period) / true_period < 0.1, FALSE),
-    sazed_accurate = ifelse(true_period > 0,
-                            abs(sazed_period - true_period) / true_period < 0.1, FALSE),
-    # Detection based on various thresholds
-    basic_detected = !is.na(basic_period) & basic_period > 0,
-    analysis_detected = analysis_strength > 0.3,
-    fft_detected = fft_confidence > 0.5,
-    acf_detected = acf_confidence > 0.5,
-    autoperiod_detected = !is.na(autoperiod_period) & autoperiod_period > 0 & autoperiod_confidence > 0.1,
-    cfd_detected = !is.na(cfd_period) & cfd_period > 0 & cfd_confidence > 0.1,
-    lomb_detected = !is.na(lomb_period) & lomb_period > 0 & lomb_power > 0.1,
-    aic_detected = !is.na(aic_period) & aic_period > 0 & aic_r_squared > 0.3,
-    ssa_detected = !is.na(ssa_period) & ssa_period > 0 & ssa_variance > 0.3,
-    stl_detected = !is.na(stl_period) & stl_period > 0 & stl_strength > 0.3,
-    mp_detected = !is.na(mp_period) & mp_period > 0 & mp_confidence > 0.1,
-    sazed_detected = !is.na(sazed_period) & sazed_period > 0 & sazed_snr > 1.0
-  )
-
-cat(sprintf("Processed %d detection results\n", nrow(detections)))
-```
-
-## Evaluation Results
-
-### Detection Rates by Scenario (All Methods)
+### Score Distributions by Ground Truth
 
 ```{r}
-#| label: fig-detection-rates
-#| fig-cap: "Detection rates across scenarios for all twelve methods"
-#| fig-height: 10
-
-detection_rates <- detections %>%
-  group_by(scenario) %>%
-  summarise(
-    Basic = mean(basic_detected, na.rm = TRUE),
-    Analysis = mean(analysis_detected, na.rm = TRUE),
-    FFT = mean(fft_detected, na.rm = TRUE),
-    ACF = mean(acf_detected, na.rm = TRUE),
-    Autoperiod = mean(autoperiod_detected, na.rm = TRUE),
-    CFD = mean(cfd_detected, na.rm = TRUE),
-    Lomb = mean(lomb_detected, na.rm = TRUE),
-    AIC = mean(aic_detected, na.rm = TRUE),
-    SSA = mean(ssa_detected, na.rm = TRUE),
-    STL = mean(stl_detected, na.rm = TRUE),
-    MatrixProfile = mean(mp_detected, na.rm = TRUE),
-    SAZED = mean(sazed_detected, na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  pivot_longer(cols = c(Basic, Analysis, FFT, ACF, Autoperiod, CFD, Lomb, AIC, SSA, STL, MatrixProfile, SAZED),
-               names_to = "method", values_to = "detection_rate") %>%
-  mutate(method = factor(method, levels = names(METHOD_COLORS)))
-
-ggplot(detection_rates, aes(x = method, y = scenario, fill = detection_rate)) +
-  geom_tile(color = "white", linewidth = 0.5) +
-  geom_text(aes(label = sprintf("%.2f", detection_rate)),
-            color = ifelse(detection_rates$detection_rate > 0.5, "white", "black"),
-            size = 3.5) +
-  scale_fill_gradient2(low = "#d73027", mid = "#ffffbf", high = "#1a9850",
-                       midpoint = 0.5, limits = c(0, 1)) +
-  labs(
-    title = "Seasonality Detection Rate by Scenario and Method",
-    subtitle = "All twelve detection methods compared",
-    x = "Detection Method",
-    y = "Scenario",
-    fill = "Detection\nRate"
-  ) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-```
-
-### Detection Rates Table
-
-```{r}
-#| label: detection-rates-table
-
-detection_rates_wide <- detections %>%
-  group_by(scenario) %>%
-  summarise(
-    Basic = sprintf("%.1f%%", mean(basic_detected, na.rm = TRUE) * 100),
-    Analysis = sprintf("%.1f%%", mean(analysis_detected, na.rm = TRUE) * 100),
-    FFT = sprintf("%.1f%%", mean(fft_detected, na.rm = TRUE) * 100),
-    ACF = sprintf("%.1f%%", mean(acf_detected, na.rm = TRUE) * 100),
-    Autoperiod = sprintf("%.1f%%", mean(autoperiod_detected, na.rm = TRUE) * 100),
-    CFD = sprintf("%.1f%%", mean(cfd_detected, na.rm = TRUE) * 100),
-    Lomb = sprintf("%.1f%%", mean(lomb_detected, na.rm = TRUE) * 100),
-    AIC = sprintf("%.1f%%", mean(aic_detected, na.rm = TRUE) * 100),
-    SSA = sprintf("%.1f%%", mean(ssa_detected, na.rm = TRUE) * 100),
-    STL = sprintf("%.1f%%", mean(stl_detected, na.rm = TRUE) * 100),
-    MatrixProfile = sprintf("%.1f%%", mean(mp_detected, na.rm = TRUE) * 100),
-    SAZED = sprintf("%.1f%%", mean(sazed_detected, na.rm = TRUE) * 100),
-    .groups = "drop"
-  )
-
-kable(detection_rates_wide, caption = "Detection Rates by Scenario and Method")
-```
-
-### Period Estimation Accuracy (All Methods)
-
-```{r}
-#| label: fig-period-accuracy
-#| fig-cap: "Period estimation accuracy for all methods"
+#| label: fig-score-distributions
+#| fig-cap: "Distribution of confidence scores by ground truth (seasonal vs non-seasonal)"
 #| fig-height: 12
 
-period_data <- detections %>%
-  filter(is_seasonal, true_period > 0) %>%
-  select(scenario, true_period, basic_period, analysis_period,
-         fft_period, acf_period, autoperiod_period, cfd_period,
-         lomb_period, aic_period, ssa_period, stl_period, mp_period, sazed_period) %>%
-  pivot_longer(cols = c(basic_period, analysis_period, fft_period, acf_period,
-                        autoperiod_period, cfd_period, lomb_period, aic_period, ssa_period,
-                        stl_period, mp_period, sazed_period),
-               names_to = "method", values_to = "detected_period") %>%
+score_long <- scores %>%
+  pivot_longer(
+    cols = ends_with("_score"),
+    names_to = "method",
+    values_to = "score"
+  ) %>%
   mutate(
-    method = gsub("_period", "", method),
+    method = gsub("_score", "", method),
     method = case_when(
-      method == "basic" ~ "Basic",
-      method == "analysis" ~ "Analysis",
+      method == "aic" ~ "AIC",
       method == "fft" ~ "FFT",
       method == "acf" ~ "ACF",
+      method == "variance" ~ "Variance",
+      method == "spectral" ~ "Spectral",
+      method == "wavelet" ~ "Wavelet",
+      method == "sazed" ~ "SAZED",
       method == "autoperiod" ~ "Autoperiod",
       method == "cfd" ~ "CFD",
       method == "lomb" ~ "Lomb",
-      method == "aic" ~ "AIC",
-      method == "ssa" ~ "SSA",
-      method == "stl" ~ "STL",
       method == "mp" ~ "MatrixProfile",
-      method == "sazed" ~ "SAZED"
+      method == "stl" ~ "STL",
+      method == "ssa" ~ "SSA"
     ),
-    method = factor(method, levels = names(METHOD_COLORS))
-  ) %>%
-  filter(!is.na(detected_period))
-
-ggplot(period_data, aes(x = true_period, y = detected_period, color = method)) +
-  geom_point(alpha = 0.3, size = 1.5) +
-  geom_abline(slope = 1, intercept = 0, color = "black", linetype = "dashed", linewidth = 0.8) +
-  facet_wrap(~method, ncol = 3) +
-  scale_color_manual(values = METHOD_COLORS) +
-  coord_fixed(xlim = c(0, 30), ylim = c(0, 30)) +
-  labs(
-    title = "Period Estimation: Detected vs True Period",
-    subtitle = "Points on diagonal line indicate accurate detection",
-    x = "True Period",
-    y = "Detected Period"
-  ) +
-  theme(legend.position = "none")
-```
-
-### Confidence Distribution by Ground Truth (All Methods)
-
-```{r}
-#| label: fig-confidence-dist
-#| fig-cap: "Distribution of confidence/strength scores by ground truth for all methods"
-#| fig-height: 10
-
-confidence_data <- detections %>%
-  select(is_seasonal, analysis_strength, fft_confidence, acf_confidence,
-         autoperiod_confidence, cfd_confidence, lomb_power, aic_r_squared, ssa_variance) %>%
-  pivot_longer(cols = c(analysis_strength, fft_confidence, acf_confidence,
-                        autoperiod_confidence, cfd_confidence, lomb_power, aic_r_squared, ssa_variance),
-               names_to = "method", values_to = "confidence") %>%
-  mutate(
-    method = case_when(
-      method == "analysis_strength" ~ "Analysis",
-      method == "fft_confidence" ~ "FFT",
-      method == "acf_confidence" ~ "ACF",
-      method == "autoperiod_confidence" ~ "Autoperiod",
-      method == "cfd_confidence" ~ "CFD",
-      method == "lomb_power" ~ "Lomb",
-      method == "aic_r_squared" ~ "AIC",
-      method == "ssa_variance" ~ "SSA"
-    ),
-    method = factor(method, levels = c("Analysis", "FFT", "ACF", "Autoperiod", "CFD", "Lomb", "AIC", "SSA")),
+    method = factor(method, levels = names(METHOD_COLORS)),
     ground_truth = ifelse(is_seasonal, "Seasonal", "Non-seasonal")
-  ) %>%
-  filter(!is.na(confidence))
+  )
 
-ggplot(confidence_data, aes(x = confidence, fill = ground_truth)) +
-  geom_histogram(bins = 30, alpha = 0.7, position = "identity") +
-  facet_wrap(~method, scales = "free_y", ncol = 3) +
-  scale_fill_manual(values = c("Seasonal" = "#377EB8", "Non-seasonal" = "#E41A1C")) +
+ggplot(score_long, aes(x = score, fill = ground_truth)) +
+  geom_density(alpha = 0.5) +
+  facet_wrap(~method, scales = "free", ncol = 3) +
+  scale_fill_manual(values = c("Seasonal" = "#1a9850", "Non-seasonal" = "#d73027")) +
   labs(
-    title = "Confidence Score Distribution by Ground Truth",
-    x = "Confidence / Strength Score",
-    y = "Count",
+    title = "Confidence Score Distributions by Ground Truth",
+    subtitle = "Good separation indicates discriminative power",
+    x = "Confidence Score",
+    y = "Density",
     fill = "Ground Truth"
   ) +
   theme(legend.position = "bottom")
 ```
 
-### Performance Metrics (All Methods)
+## ROC Analysis
+
+### Compute ROC Curves and AUC
 
 ```{r}
-#| label: performance-metrics
+#| label: compute-roc
 
-calc_metrics <- function(detected, actual) {
-  detected <- replace(detected, is.na(detected), FALSE)
+methods <- c("aic", "fft", "acf", "variance", "spectral", "wavelet",
+             "sazed", "autoperiod", "cfd", "lomb", "mp", "stl", "ssa")
+
+method_labels <- c(
+  "aic" = "AIC", "fft" = "FFT", "acf" = "ACF",
+  "variance" = "Variance", "spectral" = "Spectral", "wavelet" = "Wavelet",
+  "sazed" = "SAZED", "autoperiod" = "Autoperiod", "cfd" = "CFD",
+  "lomb" = "Lomb", "mp" = "MatrixProfile", "stl" = "STL", "ssa" = "SSA"
+)
+
+# Compute ROC for each method
+roc_results <- map(methods, function(m) {
+  score_col <- paste0(m, "_score")
+  score_vals <- scores[[score_col]]
+
+  # Handle NA values
+  valid_idx <- !is.na(score_vals)
+  if (sum(valid_idx) < 10) return(NULL)
+
+  roc_obj <- roc(scores$is_seasonal[valid_idx], score_vals[valid_idx],
+                 quiet = TRUE, direction = "<")
+
+  # Get optimal threshold (Youden's J)
+  coords_best <- coords(roc_obj, "best", ret = c("threshold", "sensitivity", "specificity"))
+
+  list(
+    method = method_labels[m],
+    roc = roc_obj,
+    auc = auc(roc_obj),
+    threshold = coords_best$threshold,
+    sensitivity = coords_best$sensitivity,
+    specificity = coords_best$specificity
+  )
+}) %>%
+  compact()
+
+# Create AUC summary table
+auc_summary <- map_dfr(roc_results, function(r) {
+  tibble(
+    Method = r$method,
+    AUC = as.numeric(r$auc),
+    `Optimal Threshold` = r$threshold,
+    Sensitivity = r$sensitivity,
+    Specificity = r$specificity
+  )
+}) %>%
+  arrange(desc(AUC))
+
+kable(auc_summary, digits = 3, caption = "ROC Analysis Summary (sorted by AUC)")
+```
+
+### ROC Curves
+
+```{r}
+#| label: fig-roc-curves
+#| fig-cap: "ROC curves for all detection methods"
+#| fig-height: 8
+
+# Extract ROC curve data for plotting
+roc_data <- map_dfr(roc_results, function(r) {
+  tibble(
+    method = r$method,
+    sensitivity = r$roc$sensitivities,
+    specificity = r$roc$specificities,
+    fpr = 1 - r$roc$specificities,
+    auc = as.numeric(r$auc)
+  )
+})
+
+ggplot(roc_data, aes(x = fpr, y = sensitivity, color = method)) +
+  geom_line(linewidth = 1) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
+  scale_color_manual(values = METHOD_COLORS) +
+  labs(
+    title = "ROC Curves for Seasonality Detection Methods",
+    subtitle = "Diagonal line = random classifier",
+    x = "False Positive Rate (1 - Specificity)",
+    y = "True Positive Rate (Sensitivity)",
+    color = "Method"
+  ) +
+  coord_fixed() +
+  theme(legend.position = "right")
+```
+
+### AUC Comparison
+
+```{r}
+#| label: fig-auc-comparison
+#| fig-cap: "AUC comparison across methods"
+
+ggplot(auc_summary, aes(x = reorder(Method, AUC), y = AUC, fill = Method)) +
+  geom_col() +
+  geom_text(aes(label = sprintf("%.3f", AUC)), hjust = -0.1, size = 3) +
+  scale_fill_manual(values = METHOD_COLORS) +
+  scale_y_continuous(limits = c(0, 1.1)) +
+  coord_flip() +
+  labs(
+    title = "Area Under ROC Curve (AUC) by Method",
+    subtitle = "Higher AUC = better discrimination",
+    x = "",
+    y = "AUC"
+  ) +
+  theme(legend.position = "none")
+```
+
+## Classification Performance
+
+### Apply Optimal Thresholds
+
+```{r}
+#| label: apply-thresholds
+
+# Create predictions using optimal thresholds
+predictions <- scores %>%
+  select(curve_id, is_seasonal)
+
+for (r in roc_results) {
+  method_lower <- tolower(gsub("MatrixProfile", "mp", r$method))
+  score_col <- paste0(method_lower, "_score")
+  pred_col <- paste0(method_lower, "_pred")
+
+  if (score_col %in% names(scores)) {
+    predictions[[pred_col]] <- scores[[score_col]] >= r$threshold
+  }
+}
+
+# Handle any remaining NAs
+predictions <- predictions %>%
+  mutate(across(ends_with("_pred"), ~ replace_na(., FALSE)))
+```
+
+### Classification Metrics
+
+```{r}
+#| label: classification-metrics
+
+calc_metrics <- function(predicted, actual) {
+  predicted <- replace(predicted, is.na(predicted), FALSE)
   actual <- replace(actual, is.na(actual), FALSE)
 
-  tp <- sum(detected & actual)
-  tn <- sum(!detected & !actual)
-  fp <- sum(detected & !actual)
-  fn <- sum(!detected & actual)
+  tp <- sum(predicted & actual)
+  tn <- sum(!predicted & !actual)
+  fp <- sum(predicted & !actual)
+  fn <- sum(!predicted & actual)
 
+  accuracy <- (tp + tn) / (tp + tn + fp + fn)
   precision <- ifelse(tp + fp > 0, tp / (tp + fp), 0)
   recall <- ifelse(tp + fn > 0, tp / (tp + fn), 0)
   specificity <- ifelse(tn + fp > 0, tn / (tn + fp), 0)
-  f1 <- ifelse(precision + recall > 0, 2 * (precision * recall) / (precision + recall), 0)
-  accuracy <- (tp + tn) / (tp + tn + fp + fn)
+  fpr <- ifelse(fp + tn > 0, fp / (fp + tn), 0)
+  f1 <- ifelse(precision + recall > 0, 2 * precision * recall / (precision + recall), 0)
 
   tibble(
-    TP = tp, TN = tn, FP = fp, FN = fn,
+    Accuracy = accuracy,
     Precision = precision,
     Recall = recall,
     Specificity = specificity,
-    F1 = f1,
-    Accuracy = accuracy
+    FPR = fpr,
+    F1 = f1
   )
 }
 
-metrics <- bind_rows(
-  calc_metrics(detections$basic_detected, detections$is_seasonal) %>% mutate(Method = "Basic"),
-  calc_metrics(detections$analysis_detected, detections$is_seasonal) %>% mutate(Method = "Analysis"),
-  calc_metrics(detections$fft_detected, detections$is_seasonal) %>% mutate(Method = "FFT"),
-  calc_metrics(detections$acf_detected, detections$is_seasonal) %>% mutate(Method = "ACF"),
-  calc_metrics(detections$autoperiod_detected, detections$is_seasonal) %>% mutate(Method = "Autoperiod"),
-  calc_metrics(detections$cfd_detected, detections$is_seasonal) %>% mutate(Method = "CFD"),
-  calc_metrics(detections$lomb_detected, detections$is_seasonal) %>% mutate(Method = "Lomb"),
-  calc_metrics(detections$aic_detected, detections$is_seasonal) %>% mutate(Method = "AIC"),
-  calc_metrics(detections$ssa_detected, detections$is_seasonal) %>% mutate(Method = "SSA"),
-  calc_metrics(detections$stl_detected, detections$is_seasonal) %>% mutate(Method = "STL"),
-  calc_metrics(detections$mp_detected, detections$is_seasonal) %>% mutate(Method = "MatrixProfile"),
-  calc_metrics(detections$sazed_detected, detections$is_seasonal) %>% mutate(Method = "SAZED")
-) %>%
-  select(Method, Precision, Recall, Specificity, F1, Accuracy)
+# Calculate metrics for each method
+metrics_list <- map(roc_results, function(r) {
+  method_lower <- tolower(gsub("MatrixProfile", "mp", r$method))
+  pred_col <- paste0(method_lower, "_pred")
 
-kable(metrics, digits = 3, caption = "Detection Performance Metrics (All Methods)")
+  if (pred_col %in% names(predictions)) {
+    calc_metrics(predictions[[pred_col]], predictions$is_seasonal) %>%
+      mutate(Method = r$method)
+  } else {
+    NULL
+  }
+}) %>%
+  compact()
+
+metrics <- bind_rows(metrics_list) %>%
+  select(Method, Accuracy, Precision, Recall, Specificity, FPR, F1) %>%
+  arrange(desc(F1))
+
+kable(metrics, digits = 3, caption = "Classification Performance at Optimal Thresholds (sorted by F1)")
 ```
 
-### Scenario-Specific Performance (All Methods)
+### Performance Comparison
 
 ```{r}
-#| label: fig-scenario-performance
-#| fig-cap: "Detection rates by scenario for all methods"
-#| fig-height: 10
+#| label: fig-performance-comparison
+#| fig-cap: "Classification metrics comparison across methods"
+#| fig-height: 8
 
-scenario_metrics <- detections %>%
-  group_by(scenario) %>%
-  summarise(
-    Basic = mean(basic_detected, na.rm = TRUE),
-    Analysis = mean(analysis_detected, na.rm = TRUE),
-    FFT = mean(fft_detected, na.rm = TRUE),
-    ACF = mean(acf_detected, na.rm = TRUE),
-    Autoperiod = mean(autoperiod_detected, na.rm = TRUE),
-    CFD = mean(cfd_detected, na.rm = TRUE),
-    Lomb = mean(lomb_detected, na.rm = TRUE),
-    AIC = mean(aic_detected, na.rm = TRUE),
-    SSA = mean(ssa_detected, na.rm = TRUE),
-    STL = mean(stl_detected, na.rm = TRUE),
-    MatrixProfile = mean(mp_detected, na.rm = TRUE),
-    SAZED = mean(sazed_detected, na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  pivot_longer(-scenario, names_to = "method", values_to = "value") %>%
-  mutate(method = factor(method, levels = names(METHOD_COLORS)))
+metrics_long <- metrics %>%
+  pivot_longer(cols = c(Accuracy, Precision, Recall, F1),
+               names_to = "Metric", values_to = "Value")
 
-ggplot(scenario_metrics, aes(x = scenario, y = value, fill = method)) +
-  geom_col(position = "dodge") +
-  scale_y_continuous(limits = c(0, 1), labels = percent) +
+ggplot(metrics_long, aes(x = Method, y = Value, fill = Method)) +
+  geom_col() +
+  facet_wrap(~Metric, ncol = 2) +
   scale_fill_manual(values = METHOD_COLORS) +
+  scale_y_continuous(limits = c(0, 1), labels = percent) +
   labs(
-    title = "Detection Rate by Scenario and Method",
-    x = "Scenario",
-    y = "Detection Rate",
-    fill = "Method"
+    title = "Classification Performance Metrics by Method",
+    x = "",
+    y = "Score"
   ) +
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1),
-    legend.position = "bottom"
+    legend.position = "none"
   )
 ```
 
-## Statistical Comparison: McNemar Tests
+## Statistical Significance: McNemar Tests
 
-McNemar's test compares paired binary outcomes between methods. A significant p-value indicates that two methods differ in their detection performance.
+McNemar's test compares paired binary predictions between methods. A significant p-value indicates methods differ in their detection decisions.
 
 ```{r}
-#| label: mcnemar-function
+#| label: mcnemar-tests
 
-# McNemar test function
-run_mcnemar <- function(method1, method2, data) {
-  d1 <- data[[paste0(method1, "_detected")]]
-  d2 <- data[[paste0(method2, "_detected")]]
+run_mcnemar <- function(pred1, pred2) {
+  pred1 <- replace(pred1, is.na(pred1), FALSE)
+  pred2 <- replace(pred2, is.na(pred2), FALSE)
 
-  # Replace NA with FALSE
-  d1 <- replace(d1, is.na(d1), FALSE)
-  d2 <- replace(d2, is.na(d2), FALSE)
+  b <- sum(pred1 & !pred2)  # Method1 positive, Method2 negative
 
-  # Create contingency table
-  b <- sum(d1 & !d2)  # Method1 detected, Method2 missed
-  c <- sum(!d1 & d2)  # Method1 missed, Method2 detected
+  c <- sum(!pred1 & pred2)  # Method1 negative, Method2 positive
 
-  # McNemar test (with continuity correction)
   if (b + c > 0) {
     chi_sq <- (abs(b - c) - 1)^2 / (b + c)
     p_value <- pchisq(chi_sq, df = 1, lower.tail = FALSE)
@@ -1175,243 +600,311 @@ run_mcnemar <- function(method1, method2, data) {
     p_value <- 1
   }
 
-  tibble(
-    Method1 = method1,
-    Method2 = method2,
-    `Only M1` = b,
-    `Only M2` = c,
-    `Chi-sq` = chi_sq,
-    `p-value` = p_value,
-    Significant = ifelse(p_value < 0.05, "*", "")
-  )
+  list(chi_sq = chi_sq, p_value = p_value, b = b, c = c)
 }
-```
 
-### Overall McNemar Comparison
+# Get all prediction columns
+pred_cols <- names(predictions)[grepl("_pred$", names(predictions))]
+method_names <- gsub("_pred$", "", pred_cols)
 
-```{r}
-#| label: mcnemar-overall
-
-methods <- c("basic", "analysis", "fft", "acf", "autoperiod", "cfd", "lomb", "aic", "ssa", "stl", "mp", "sazed")
-method_pairs <- combn(methods, 2, simplify = FALSE)
-
-mcnemar_results <- map_dfr(method_pairs, function(pair) {
-  run_mcnemar(pair[1], pair[2], detections)
-})
-
-# Capitalize method names for display
-mcnemar_results <- mcnemar_results %>%
+# Run pairwise McNemar tests
+mcnemar_results <- expand.grid(
+  method1 = method_names,
+  method2 = method_names,
+  stringsAsFactors = FALSE
+) %>%
+  filter(method1 < method2) %>%
+  rowwise() %>%
   mutate(
-    Method1 = case_when(
-      Method1 == "mp" ~ "MatrixProfile",
-      Method1 == "sazed" ~ "SAZED",
-      Method1 == "stl" ~ "STL",
-      TRUE ~ tools::toTitleCase(Method1)
-    ),
-    Method2 = case_when(
-      Method2 == "mp" ~ "MatrixProfile",
-      Method2 == "sazed" ~ "SAZED",
-      Method2 == "stl" ~ "STL",
-      TRUE ~ tools::toTitleCase(Method2)
-    )
-  )
-
-kable(mcnemar_results, digits = 4,
-      caption = "McNemar Test: Pairwise Method Comparisons (* = p < 0.05)")
-```
-
-### McNemar Tests by Scenario
-
-```{r}
-#| label: mcnemar-by-scenario
-
-mcnemar_by_scenario <- detections %>%
-  group_by(scenario) %>%
-  group_split() %>%
-  map_dfr(function(scenario_data) {
-    scenario_name <- unique(scenario_data$scenario)
-
-    map_dfr(method_pairs, function(pair) {
-      run_mcnemar(pair[1], pair[2], scenario_data) %>%
-        mutate(Scenario = as.character(scenario_name))
-    })
-  }) %>%
-  mutate(
-    Method1 = case_when(
-      Method1 == "mp" ~ "MatrixProfile",
-      Method1 == "sazed" ~ "SAZED",
-      Method1 == "stl" ~ "STL",
-      TRUE ~ tools::toTitleCase(Method1)
-    ),
-    Method2 = case_when(
-      Method2 == "mp" ~ "MatrixProfile",
-      Method2 == "sazed" ~ "SAZED",
-      Method2 == "stl" ~ "STL",
-      TRUE ~ tools::toTitleCase(Method2)
-    )
+    test = list(run_mcnemar(
+      predictions[[paste0(method1, "_pred")]],
+      predictions[[paste0(method2, "_pred")]]
+    )),
+    chi_sq = test$chi_sq,
+    p_value = test$p_value,
+    significant = p_value < 0.05
   ) %>%
-  select(Scenario, everything())
+  ungroup() %>%
+  select(-test) %>%
+  mutate(
+    method1 = method_labels[method1],
+    method2 = method_labels[method2]
+  )
 
-# Show significant differences only
-significant_mcnemar <- mcnemar_by_scenario %>%
-  filter(`p-value` < 0.05)
+# Show significant differences
+significant_pairs <- mcnemar_results %>%
+  filter(significant) %>%
+  arrange(p_value)
 
-if (nrow(significant_mcnemar) > 0) {
-  kable(significant_mcnemar, digits = 4,
-        caption = "Significant McNemar Results by Scenario (p < 0.05)")
+if (nrow(significant_pairs) > 0) {
+  kable(significant_pairs %>% select(-significant), digits = 4,
+        caption = "Significant McNemar Test Results (p < 0.05)")
 } else {
-  cat("No significant differences found between methods within scenarios.\n")
+  cat("No significant differences found between any method pairs.\n")
 }
 ```
 
-### McNemar Summary Heatmap
+### McNemar P-Value Heatmap
 
 ```{r}
 #| label: fig-mcnemar-heatmap
-#| fig-cap: "McNemar test p-values between method pairs (lower = more different)"
+#| fig-cap: "McNemar test p-values between method pairs (red = significant difference)"
 #| fig-height: 8
-#| fig-width: 10
 
-# Create symmetric matrix for heatmap
-method_names <- c("Basic", "Analysis", "FFT", "ACF", "Autoperiod", "Cfd", "Lomb", "Aic", "Ssa")
+# Create symmetric matrix
 mcnemar_matrix <- mcnemar_results %>%
-  select(Method1, Method2, `p-value`) %>%
+  select(method1, method2, p_value) %>%
   bind_rows(
     mcnemar_results %>%
-      select(Method1 = Method2, Method2 = Method1, `p-value`)
-  ) %>%
-  complete(Method1 = method_names, Method2 = method_names, fill = list(`p-value` = 1)) %>%
-  mutate(`p-value` = ifelse(Method1 == Method2, NA, `p-value`))
+      rename(method1 = method2, method2 = method1) %>%
+      select(method1, method2, p_value)
+  )
 
-ggplot(mcnemar_matrix, aes(x = Method1, y = Method2, fill = `p-value`)) +
+ggplot(mcnemar_matrix, aes(x = method1, y = method2, fill = p_value)) +
   geom_tile(color = "white", linewidth = 0.5) +
-  geom_text(aes(label = ifelse(is.na(`p-value`), "-",
-                               ifelse(`p-value` < 0.001, "<.001",
-                                      sprintf("%.3f", `p-value`)))),
-            size = 3) +
+  geom_text(aes(label = ifelse(p_value < 0.001, "<.001", sprintf("%.3f", p_value))),
+            size = 2.5) +
   scale_fill_gradient2(low = "#d73027", mid = "#ffffbf", high = "#1a9850",
-                       midpoint = 0.5, limits = c(0, 1), na.value = "grey90") +
+                       midpoint = 0.5, limits = c(0, 1)) +
   labs(
     title = "McNemar Test P-Values Between Methods",
-    subtitle = "Red indicates significant difference (p < 0.05)",
+    subtitle = "Red = significant difference (p < 0.05)",
     x = "", y = "",
     fill = "p-value"
   ) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
-## Summary Statistics
+## Challenge Scenarios
+
+Following the fdars benchmark, we test method robustness under challenging conditions.
+
+### Challenge 1: Linear Trends
 
 ```{r}
-#| label: summary-table
+#| label: challenge-trends
 
-overall_summary <- metrics %>%
-  arrange(desc(F1)) %>%
-  mutate(Rank = row_number()) %>%
-  select(Rank, Method, F1, Accuracy, Precision, Recall, Specificity)
+generate_with_trend <- function(base_data, slope) {
+  base_data %>%
+    mutate(
+      values = map(values, function(v) {
+        t <- seq_along(v) - 1
+        v + slope * t
+      }),
+      scenario = paste0("trend_", slope)
+    )
+}
 
-kable(overall_summary, digits = 3,
-      caption = "Overall Method Ranking by F1 Score")
-```
-
-```{r}
-#| label: executive-summary-final
-
-# Best method per scenario
-best_by_scenario <- detections %>%
-  group_by(scenario) %>%
-  summarise(
-    Basic = mean(basic_detected, na.rm = TRUE),
-    Analysis = mean(analysis_detected, na.rm = TRUE),
-    FFT = mean(fft_detected, na.rm = TRUE),
-    ACF = mean(acf_detected, na.rm = TRUE),
-    Autoperiod = mean(autoperiod_detected, na.rm = TRUE),
-    CFD = mean(cfd_detected, na.rm = TRUE),
-    Lomb = mean(lomb_detected, na.rm = TRUE),
-    AIC = mean(aic_detected, na.rm = TRUE),
-    SSA = mean(ssa_detected, na.rm = TRUE),
-    STL = mean(stl_detected, na.rm = TRUE),
-    MatrixProfile = mean(mp_detected, na.rm = TRUE),
-    SAZED = mean(sazed_detected, na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  rowwise() %>%
-  mutate(
-    best_rate = max(c_across(Basic:SAZED)),
-    best_method = names(METHOD_COLORS)[which.max(c_across(Basic:SAZED))]
-  ) %>%
-  ungroup() %>%
-  select(Scenario = scenario, `Best Method` = best_method, `Detection Rate` = best_rate)
-
-kable(best_by_scenario, digits = 3,
-      caption = "Best Performing Method per Scenario")
-```
-
-## Recommendations
-
-Based on the benchmark results:
-
-### Method Selection Guide
-
-```{r}
-#| label: recommendations-table
-#| echo: false
-
-recommendations <- tibble(
-  `Scenario Type` = c(
-    "Clean, stable seasonality",
-    "Noisy data",
-    "Unknown characteristics",
-    "Trending data",
-    "Irregular sampling",
-    "Model selection needed",
-    "Non-stationary signals"
-  ),
-  `Recommended Method` = c(
-    "FFT (`ts_estimate_period_fft`) or AIC (`ts_aic_period`)",
-    "ACF (`ts_estimate_period_acf`) or Autoperiod (`ts_autoperiod`)",
-    "Analysis (`ts_analyze_seasonality`)",
-    "Analysis (`ts_analyze_seasonality`)",
-    "Lomb-Scargle (`ts_lomb_scargle`)",
-    "AIC (`ts_aic_period`)",
-    "SSA (`ts_ssa_period`)"
-  ),
-  Rationale = c(
-    "Precise frequency detection with high R²",
-    "Robust to noise with ACF validation",
-    "Comprehensive metrics including trend",
-    "Built-in detrending",
-    "Handles gaps and uneven spacing",
-    "Information-theoretic model comparison",
-    "Adaptive decomposition for changing patterns"
-  )
+# Test with different trend slopes
+trend_data <- bind_rows(
+  generate_with_trend(baseline_data %>% filter(strength_level %in% c(0.0, 0.3, 0.6)), 0.1),
+  generate_with_trend(baseline_data %>% filter(strength_level %in% c(0.0, 0.3, 0.6)), 0.3),
+  generate_with_trend(baseline_data %>% filter(strength_level %in% c(0.0, 0.3, 0.6)), 0.5)
 )
 
-kable(recommendations, caption = "Method Selection Recommendations")
+cat(sprintf("Generated %d curves with trends\n", nrow(trend_data)))
 ```
 
-### Best Practices
+### Challenge 2: Red Noise (AR(1) Process)
 
-1. **Start with `ts_analyze_seasonality`** for initial exploration
-2. **Use confidence thresholds** appropriate to your use case
-3. **Cross-validate** using multiple methods when accuracy is critical
-4. **Consider the scenario** - different methods excel in different conditions
+```{r}
+#| label: challenge-rednoise
 
-## Conclusion
+generate_with_ar_noise <- function(base_data, phi) {
+  base_data %>%
+    mutate(
+      values = map(values, function(v) {
+        n <- length(v)
+        # Generate AR(1) noise
+        ar_noise <- numeric(n)
+        ar_noise[1] <- rnorm(1, 0, NOISE_SD)
+        for (i in 2:n) {
+          ar_noise[i] <- phi * ar_noise[i-1] + rnorm(1, 0, NOISE_SD * sqrt(1 - phi^2))
+        }
+        # Replace white noise component with AR noise
+        seasonal <- v - rnorm(n, 0, NOISE_SD)  # Remove original noise
+        seasonal + ar_noise
+      }),
+      scenario = paste0("ar_", phi)
+    )
+}
 
-The `anofox-forecast` DuckDB extension provides robust seasonality detection through twelve complementary methods. Key findings:
+# Test with different AR coefficients
+ar_data <- bind_rows(
+  generate_with_ar_noise(baseline_data %>% filter(strength_level %in% c(0.0, 0.3, 0.6)), 0.3),
+  generate_with_ar_noise(baseline_data %>% filter(strength_level %in% c(0.0, 0.3, 0.6)), 0.5),
+  generate_with_ar_noise(baseline_data %>% filter(strength_level %in% c(0.0, 0.3, 0.6)), 0.7)
+)
 
-- **FFT-based detection** excels at precise frequency detection in clean signals
-- **ACF-based detection** shows robustness to noise
-- **Autoperiod/CFD-Autoperiod** combine FFT power with ACF validation for hybrid robustness
-- **Lomb-Scargle** handles irregular sampling and provides false alarm probabilities
-- **AIC comparison** offers rigorous model selection with information-theoretic criteria
-- **SSA** provides adaptive decomposition for non-stationary signals
-- **STL decomposition** optimizes seasonal strength to find the best period
-- **Matrix Profile** discovers recurring motifs for period estimation
-- **SAZED** uses zero-padding to enhance spectral frequency resolution
-- **Full analysis** provides comprehensive view with multiple metrics
-- **Basic detection** offers simple period extraction for quick analysis
+cat(sprintf("Generated %d curves with AR(1) noise\n", nrow(ar_data)))
+```
+
+### Challenge 3: Outlier Contamination
+
+```{r}
+#| label: challenge-outliers
+
+generate_with_outliers <- function(base_data, outlier_prob, outlier_magnitude) {
+  base_data %>%
+    mutate(
+      values = map(values, function(v) {
+        n <- length(v)
+        outlier_idx <- runif(n) < outlier_prob
+        v[outlier_idx] <- v[outlier_idx] + sample(c(-1, 1), sum(outlier_idx), replace = TRUE) *
+                          outlier_magnitude * sd(v)
+        v
+      }),
+      scenario = paste0("outliers_", outlier_prob, "_", outlier_magnitude)
+    )
+}
+
+# Test with different outlier configurations
+outlier_data <- bind_rows(
+  generate_with_outliers(baseline_data %>% filter(strength_level %in% c(0.0, 0.3, 0.6)), 0.05, 3),
+  generate_with_outliers(baseline_data %>% filter(strength_level %in% c(0.0, 0.3, 0.6)), 0.05, 5),
+  generate_with_outliers(baseline_data %>% filter(strength_level %in% c(0.0, 0.3, 0.6)), 0.10, 3)
+)
+
+cat(sprintf("Generated %d curves with outliers\n", nrow(outlier_data)))
+```
+
+### Challenge Scenario Performance
+
+```{r}
+#| label: evaluate-challenges
+
+evaluate_challenge <- function(challenge_data, scenario_name) {
+  # Load challenge data into DuckDB
+  dbExecute(con, "DROP TABLE IF EXISTS challenge_curves")
+  dbExecute(con, "
+    CREATE TABLE challenge_curves (
+      curve_id INTEGER,
+      strength_level DOUBLE,
+      is_seasonal BOOLEAN,
+      scenario VARCHAR,
+      values DOUBLE[]
+    )
+  ")
+
+  for (i in 1:nrow(challenge_data)) {
+    row <- challenge_data[i, ]
+    values_str <- paste0("[", paste(row$values[[1]], collapse = ","), "]")
+
+    dbExecute(con, sprintf("
+      INSERT INTO challenge_curves VALUES (%d, %f, %s, '%s', %s::DOUBLE[])
+    ", row$curve_id, row$strength_level,
+       ifelse(row$is_seasonal, "true", "false"),
+       row$scenario, values_str))
+  }
+
+  # Get scores for key methods (known period = 12)
+  challenge_scores <- dbGetQuery(con, "
+    SELECT
+        curve_id,
+        strength_level,
+        is_seasonal,
+        scenario,
+        ts_seasonal_strength(values, 12, 'variance') as variance_score,
+        ts_seasonal_strength(values, 12, 'wavelet') as wavelet_score,
+        (ts_estimate_period_fft(values)).confidence / 100.0 as fft_score,
+        (ts_estimate_period_acf(values)).confidence as acf_score
+    FROM challenge_curves
+  ")
+
+  # Calculate metrics for each method
+  map_dfr(c("variance", "wavelet", "fft", "acf"), function(m) {
+    score_col <- paste0(m, "_score")
+    scores_vec <- challenge_scores[[score_col]]
+    valid_idx <- !is.na(scores_vec) & !is.nan(scores_vec)
+
+    if (sum(valid_idx) < 10) {
+      return(tibble(Method = method_labels[m], Scenario = scenario_name, AUC = NA, F1 = NA))
+    }
+
+    roc_obj <- tryCatch(
+      roc(challenge_scores$is_seasonal[valid_idx], scores_vec[valid_idx], quiet = TRUE),
+      error = function(e) NULL
+    )
+
+    if (is.null(roc_obj)) {
+      return(tibble(Method = method_labels[m], Scenario = scenario_name, AUC = NA, F1 = NA))
+    }
+
+    auc_val <- as.numeric(auc(roc_obj))
+    threshold <- coords(roc_obj, "best")$threshold
+    preds <- scores_vec >= threshold
+
+    metrics <- calc_metrics(preds[valid_idx], challenge_scores$is_seasonal[valid_idx])
+
+    tibble(
+      Method = method_labels[m],
+      Scenario = scenario_name,
+      AUC = auc_val,
+      F1 = metrics$F1
+    )
+  })
+}
+
+# Evaluate challenges
+challenge_results <- bind_rows(
+  evaluate_challenge(trend_data, "Trends"),
+  evaluate_challenge(ar_data, "Red Noise"),
+  evaluate_challenge(outlier_data, "Outliers")
+)
+
+kable(challenge_results %>% arrange(Scenario, desc(AUC)), digits = 3,
+      caption = "Method Performance Under Challenge Scenarios")
+```
+
+## Summary and Conclusions
+
+### Final Rankings
+
+```{r}
+#| label: final-rankings
+
+# Combine AUC from ROC analysis with F1 from classification
+final_ranking <- auc_summary %>%
+  left_join(metrics %>% select(Method, F1), by = "Method") %>%
+  arrange(desc(F1)) %>%
+  mutate(Rank = row_number()) %>%
+  select(Rank, Method, AUC, F1, `Optimal Threshold`, Sensitivity, Specificity)
+
+kable(final_ranking, digits = 3, caption = "Final Method Rankings by F1 Score")
+```
+
+### Key Findings
+
+```{r}
+#| label: key-findings
+
+top_method <- final_ranking$Method[1]
+top_f1 <- final_ranking$F1[1]
+top_auc <- final_ranking$AUC[1]
+
+cat(sprintf("**Best Overall Method**: %s (F1 = %.3f, AUC = %.3f)\n\n", top_method, top_f1, top_auc))
+
+# Methods with no significant difference from top
+non_sig_from_top <- mcnemar_results %>%
+  filter((method1 == top_method | method2 == top_method) & !significant) %>%
+  mutate(other = ifelse(method1 == top_method, method2, method1)) %>%
+  pull(other)
+
+if (length(non_sig_from_top) > 0) {
+  cat(sprintf("**Methods not significantly different from %s**: %s\n",
+              top_method, paste(non_sig_from_top, collapse = ", ")))
+}
+```
+
+### Recommendations
+
+| Use Case | Recommended Method | Rationale |
+|----------|-------------------|-----------|
+| General detection | Wavelet or Variance | Highest F1 scores |
+| Quick screening | FFT | Fast with good accuracy |
+| Noisy data | ACF or Autoperiod | Robust to noise |
+| Irregular sampling | Lomb-Scargle | Handles gaps |
+| Non-stationary | SSA | Adaptive decomposition |
 
 ## Cleanup
 
@@ -1419,91 +912,12 @@ The `anofox-forecast` DuckDB extension provides robust seasonality detection thr
 #| label: cleanup
 #| cache: false
 
+dbExecute(con, "DROP TABLE IF EXISTS benchmark_curves")
+dbExecute(con, "DROP TABLE IF EXISTS challenge_curves")
 dbDisconnect(con, shutdown = TRUE)
 ```
 
-## Appendix: SQL Function Reference
-
-```sql
--- Method 1: Basic detection (returns array of periods)
-SELECT ts_detect_seasonality(values) FROM my_table;
-
--- Method 2: Full analysis (returns struct with multiple metrics)
-SELECT
-    (ts_analyze_seasonality(values)).primary_period,
-    (ts_analyze_seasonality(values)).seasonal_strength,
-    (ts_analyze_seasonality(values)).trend_strength
-FROM my_table;
-
--- Method 3: FFT period estimation
-SELECT
-    (ts_estimate_period_fft(values)).period,
-    (ts_estimate_period_fft(values)).confidence
-FROM my_table;
-
--- Method 4: ACF period estimation
-SELECT
-    (ts_estimate_period_acf(values)).period,
-    (ts_estimate_period_acf(values)).confidence
-FROM my_table;
-
--- Method 5: Autoperiod (hybrid FFT+ACF validation)
-SELECT
-    (ts_autoperiod(values)).period,
-    (ts_autoperiod(values)).fft_confidence,
-    (ts_autoperiod(values)).acf_validation
-FROM my_table;
-
--- Method 6: CFD-Autoperiod (Circular Frequency Domain variant)
-SELECT
-    (ts_cfd_autoperiod(values)).period,
-    (ts_cfd_autoperiod(values)).fft_confidence,
-    (ts_cfd_autoperiod(values)).acf_validation
-FROM my_table;
-
--- Method 7: Lomb-Scargle periodogram
-SELECT
-    (ts_lomb_scargle(values)).period,
-    (ts_lomb_scargle(values)).power,
-    (ts_lomb_scargle(values)).false_alarm_prob
-FROM my_table;
-
--- Method 8: AIC-based model comparison
-SELECT
-    (ts_aic_period(values)).period,
-    (ts_aic_period(values)).aic,
-    (ts_aic_period(values)).r_squared
-FROM my_table;
-
--- Method 9: Singular Spectrum Analysis
-SELECT
-    (ts_ssa_period(values)).period,
-    (ts_ssa_period(values)).variance_explained
-FROM my_table;
-
--- Method 10: STL Decomposition
-SELECT
-    (ts_stl_period(values)).period,
-    (ts_stl_period(values)).seasonal_strength,
-    (ts_stl_period(values)).trend_strength
-FROM my_table;
-
--- Method 11: Matrix Profile
-SELECT
-    (ts_matrix_profile_period(values)).period,
-    (ts_matrix_profile_period(values)).confidence,
-    (ts_matrix_profile_period(values)).n_motifs
-FROM my_table;
-
--- Method 12: SAZED (Spectral Analysis with Zero-padding)
-SELECT
-    (ts_sazed_period(values)).period,
-    (ts_sazed_period(values)).power,
-    (ts_sazed_period(values)).snr
-FROM my_table;
-```
-
-### Session Info
+## Session Info
 
 ```{r}
 #| label: session-info

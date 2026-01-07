@@ -247,18 +247,24 @@ static void TsSeasonalStrengthFunction(DataChunk &args, ExpressionState &state, 
         method_str = method_data[0].GetData();
     }
 
+    // Handle constant vectors properly
+    UnifiedVectorFormat period_format;
+    period_vec.ToUnifiedFormat(count, period_format);
+    auto period_data = UnifiedVectorFormat::GetData<double>(period_format);
+
     result.SetVectorType(VectorType::FLAT_VECTOR);
     auto result_data = FlatVector::GetData<double>(result);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx) || FlatVector::IsNull(period_vec, row_idx)) {
+        auto period_idx = period_format.sel->get_index(row_idx);
+        if (FlatVector::IsNull(values_vec, row_idx) || !period_format.validity.RowIsValid(period_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> values;
         ExtractListAsDouble(values_vec, row_idx, values);
-        double period = FlatVector::GetData<double>(period_vec)[row_idx];
+        double period = period_data[period_idx];
 
         double strength = 0.0;
         AnofoxError error;

@@ -496,8 +496,10 @@ pub fn seasonal_strength_variance(
     let argvals = make_argvals(n);
     let harmonics = n_harmonics.unwrap_or(3);
 
+    // fdars-core expects: data, n_samples, m_timepoints, argvals, ...
+    // We have 1 sample (our time series) with n time points
     Ok(fdars_seasonal_strength_variance(
-        values, n, 1, &argvals, period, harmonics,
+        values, 1, n, &argvals, period, harmonics,
     ))
 }
 
@@ -527,8 +529,10 @@ pub fn seasonal_strength_spectral(values: &[f64], period: f64) -> Result<f64> {
 
     let argvals = make_argvals(n);
 
+    // fdars-core expects: data, n_samples, m_timepoints, argvals, ...
+    // We have 1 sample (our time series) with n time points
     Ok(fdars_seasonal_strength_spectral(
-        values, n, 1, &argvals, period,
+        values, 1, n, &argvals, period,
     ))
 }
 
@@ -558,8 +562,10 @@ pub fn seasonal_strength_wavelet(values: &[f64], period: f64) -> Result<f64> {
 
     let argvals = make_argvals(n);
 
+    // fdars-core expects: data, n_samples, m_timepoints, argvals, ...
+    // We have 1 sample (our time series) with n time points
     Ok(fdars_seasonal_strength_wavelet(
-        values, n, 1, &argvals, period,
+        values, 1, n, &argvals, period,
     ))
 }
 
@@ -613,10 +619,12 @@ pub fn seasonal_strength_windowed(
     let win_size = window_size.unwrap_or(2.0 * period);
     let strength_method: FdarsStrengthMethod = method.unwrap_or(StrengthMethod::Variance).into();
 
+    // fdars-core expects: data, n_samples, m_timepoints, argvals, ...
+    // We have 1 sample (our time series) with n time points
     Ok(fdars_seasonal_strength_windowed(
         values,
-        n,
         1,
+        n,
         &argvals,
         period,
         win_size,
@@ -716,8 +724,10 @@ pub fn detect_seasonality_changes(
     let win_size = window_size.unwrap_or(2.0 * period);
     let min_dur = min_duration.unwrap_or(period);
 
+    // fdars-core expects: data, n_samples, m_timepoints, argvals, ...
+    // We have 1 sample (our time series) with n time points
     let result =
-        fdars_detect_seasonality_changes(values, n, 1, &argvals, period, thresh, win_size, min_dur);
+        fdars_detect_seasonality_changes(values, 1, n, &argvals, period, thresh, win_size, min_dur);
 
     Ok(result.into())
 }
@@ -739,7 +749,9 @@ pub fn instantaneous_period(values: &[f64]) -> Result<InstantaneousPeriodResult>
 
     let argvals = make_argvals(n);
 
-    let result = fdars_instantaneous_period(values, n, 1, &argvals);
+    // fdars-core expects: data, n_samples, m_timepoints, argvals
+    // We have 1 sample (our time series) with n time points
+    let result = fdars_instantaneous_period(values, 1, n, &argvals);
 
     Ok(result.into())
 }
