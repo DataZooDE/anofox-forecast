@@ -17,8 +17,9 @@ _freeze/
 # Generated CSV files
 *.csv
 
-# Output directory
-_output/
+# Output directory (except final PDF)
+_output/*
+!_output/*.pdf
 
 # Intermediate rmarkdown files
 *.rmarkdown
