@@ -2,7 +2,18 @@
 //!
 //! This crate provides C-compatible functions that can be called from the
 //! C++ DuckDB extension wrapper.
+//!
+//! # Module Organization
+//!
+//! - `types` - FFI-compatible data structures
+//! - `error_handling` - Standardized error handling utilities
+//! - `conversion` - Parameter conversion helpers
+//! - `allocation` - Memory allocation helpers
+//! - `telemetry` - Usage telemetry (native only)
 
+pub mod allocation;
+pub mod conversion;
+pub mod error_handling;
 #[cfg(not(target_family = "wasm"))]
 pub mod telemetry;
 pub mod types;
@@ -12,6 +23,11 @@ use core::ffi::{c_char, c_double, c_int};
 use std::ffi::CStr;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
+
+// Re-export helper functions from submodules for internal use
+use allocation::{alloc_double_array, vec_to_c_double_array};
+use conversion::to_option_usize;
+use error_handling::{check_null_pointers, init_error, set_error};
 
 // size_t is not in core::ffi, use usize instead
 #[allow(non_camel_case_types)]
@@ -98,21 +114,10 @@ unsafe fn build_values(data: *const c_double, validity: *const u64, length: size
     }
 }
 
-/// Allocate a double array using libc malloc.
-unsafe fn alloc_double_array(n: size_t) -> *mut c_double {
-    if n == 0 {
-        return ptr::null_mut();
-    }
-    malloc(n * std::mem::size_of::<c_double>()) as *mut c_double
-}
-
-/// Copy a Rust Vec<f64> to a malloc'd C array.
+// Helper: vec_to_c_array delegates to allocation module
+#[inline]
 unsafe fn vec_to_c_array(vec: &[f64]) -> *mut c_double {
-    let ptr = alloc_double_array(vec.len());
-    if !ptr.is_null() && !vec.is_empty() {
-        ptr::copy_nonoverlapping(vec.as_ptr(), ptr, vec.len());
-    }
-    ptr
+    vec_to_c_double_array(vec)
 }
 
 /// Copy a string to a fixed-size char buffer.
@@ -141,14 +146,13 @@ pub unsafe extern "C" fn anofox_ts_stats(
     out_result: *mut TsStatsResult,
     out_error: *mut AnofoxError,
 ) -> bool {
-    if !out_error.is_null() {
-        *out_error = AnofoxError::success();
-    }
+    init_error(out_error);
 
-    if values.is_null() || out_result.is_null() {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
-        }
+    let ptrs = &[
+        values as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
         return false;
     }
 
@@ -168,15 +172,11 @@ pub unsafe extern "C" fn anofox_ts_stats(
             true
         }
         Ok(Err(e)) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
-            }
+            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
             false
         }
         Err(_) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
-            }
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in Rust code");
             false
         }
     }
@@ -200,14 +200,14 @@ where
     F: FnOnce(&[f64], &[f64]) -> Result<f64, anofox_fcst_core::ForecastError>
         + std::panic::UnwindSafe,
 {
-    if !out_error.is_null() {
-        *out_error = AnofoxError::success();
-    }
+    init_error(out_error);
 
-    if actual.is_null() || forecast.is_null() || out_result.is_null() {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
-        }
+    let ptrs = &[
+        actual as *const core::ffi::c_void,
+        forecast as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
         return false;
     }
 
@@ -223,15 +223,11 @@ where
             true
         }
         Ok(Err(e)) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
-            }
+            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
             false
         }
         Err(_) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
-            }
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in Rust code");
             false
         }
     }
@@ -707,25 +703,20 @@ pub unsafe extern "C" fn anofox_ts_detect_seasonality(
     out_n_periods: *mut size_t,
     out_error: *mut AnofoxError,
 ) -> bool {
-    if !out_error.is_null() {
-        *out_error = AnofoxError::success();
-    }
+    init_error(out_error);
 
-    if values.is_null() || out_periods.is_null() || out_n_periods.is_null() {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
-        }
+    let ptrs = &[
+        values as *const core::ffi::c_void,
+        out_periods as *const core::ffi::c_void,
+        out_n_periods as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
         return false;
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
-        let max_p = if max_period > 0 {
-            Some(max_period as usize)
-        } else {
-            None
-        };
-        anofox_fcst_core::detect_seasonality(&values_vec, max_p)
+        anofox_fcst_core::detect_seasonality(&values_vec, to_option_usize(max_period))
     }));
 
     match result {
@@ -736,10 +727,7 @@ pub unsafe extern "C" fn anofox_ts_detect_seasonality(
             if n > 0 {
                 let ptr = malloc(n * std::mem::size_of::<c_int>()) as *mut c_int;
                 if ptr.is_null() {
-                    if !out_error.is_null() {
-                        (*out_error)
-                            .set_error(ErrorCode::AllocationError, "Memory allocation failed");
-                    }
+                    set_error(out_error, ErrorCode::AllocationError, "Memory allocation failed");
                     return false;
                 }
                 for (i, &p) in periods.iter().enumerate() {
@@ -752,15 +740,11 @@ pub unsafe extern "C" fn anofox_ts_detect_seasonality(
             true
         }
         Ok(Err(e)) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
-            }
+            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
             false
         }
         Err(_) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
-            }
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in Rust code");
             false
         }
     }
@@ -781,25 +765,19 @@ pub unsafe extern "C" fn anofox_ts_analyze_seasonality(
     out_result: *mut SeasonalityResult,
     out_error: *mut AnofoxError,
 ) -> bool {
-    if !out_error.is_null() {
-        *out_error = AnofoxError::success();
-    }
+    init_error(out_error);
 
-    if values.is_null() || out_result.is_null() {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
-        }
+    let ptrs = &[
+        values as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
         return false;
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
-        let max_p = if max_period > 0 {
-            Some(max_period as usize)
-        } else {
-            None
-        };
-        anofox_fcst_core::analyze_seasonality(&values_vec, max_p)
+        anofox_fcst_core::analyze_seasonality(&values_vec, to_option_usize(max_period))
     }));
 
     match result {
@@ -811,10 +789,7 @@ pub unsafe extern "C" fn anofox_ts_analyze_seasonality(
                 let periods_ptr = malloc(n * std::mem::size_of::<c_int>()) as *mut c_int;
 
                 if periods_ptr.is_null() {
-                    if !out_error.is_null() {
-                        (*out_error)
-                            .set_error(ErrorCode::AllocationError, "Memory allocation failed");
-                    }
+                    set_error(out_error, ErrorCode::AllocationError, "Memory allocation failed");
                     return false;
                 }
 
@@ -835,15 +810,11 @@ pub unsafe extern "C" fn anofox_ts_analyze_seasonality(
             true
         }
         Ok(Err(e)) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
-            }
+            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
             false
         }
         Err(_) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
-            }
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in Rust code");
             false
         }
     }
