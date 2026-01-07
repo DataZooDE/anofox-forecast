@@ -812,7 +812,7 @@ typedef struct GapFillResult {
      */
     double *values;
     /**
-     * Validity bitmask for filled values (bit i indicates if values[i] is valid)
+     * Validity bitmask for filled values (bit `i` indicates if `values[i]` is valid)
      */
     uint64_t *validity;
     /**
@@ -830,7 +830,7 @@ typedef struct FilledValuesResult {
      */
     double *values;
     /**
-     * Validity bitmask (bit i indicates if values[i] is valid)
+     * Validity bitmask (bit `i` indicates if `values[i]` is valid)
      */
     uint64_t *validity;
     /**

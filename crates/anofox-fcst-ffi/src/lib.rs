@@ -40,7 +40,7 @@ use libc::{free, malloc};
 #[cfg(target_family = "wasm")]
 unsafe fn malloc(size: usize) -> *mut core::ffi::c_void {
     use std::alloc::{alloc, Layout};
-    let layout = Layout::from_size_align(size, 8).unwrap();
+    let layout = Layout::from_size_align(size, 8).expect("8-byte alignment is always valid");
     alloc(layout) as *mut core::ffi::c_void
 }
 
@@ -50,7 +50,7 @@ unsafe fn free(ptr: *mut core::ffi::c_void) {
     if !ptr.is_null() {
         // Note: We don't know the actual size, so we use a minimal layout
         // This is safe because DuckDB manages the actual memory
-        let layout = Layout::from_size_align(1, 8).unwrap();
+        let layout = Layout::from_size_align(1, 8).expect("8-byte alignment is always valid");
         dealloc(ptr as *mut u8, layout);
     }
 }

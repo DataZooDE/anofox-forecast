@@ -6,7 +6,7 @@
 use core::ffi::{c_char, c_double, c_int};
 use std::ffi::CStr;
 
-/// Convert a c_int to Option<usize>, where values <= 0 become None.
+/// Convert a `c_int` to `Option<usize>`, where values <= 0 become None.
 #[inline]
 pub fn to_option_usize(value: c_int) -> Option<usize> {
     if value > 0 {
@@ -16,7 +16,7 @@ pub fn to_option_usize(value: c_int) -> Option<usize> {
     }
 }
 
-/// Convert a c_double to Option<f64>, where values <= 0.0 become None.
+/// Convert a `c_double` to `Option<f64>`, where values <= 0.0 become None.
 #[inline]
 pub fn to_option_f64_positive(value: c_double) -> Option<f64> {
     if value > 0.0 {
@@ -26,7 +26,7 @@ pub fn to_option_f64_positive(value: c_double) -> Option<f64> {
     }
 }
 
-/// Convert a c_double to Option<f64>, where 0.0 becomes None.
+/// Convert a `c_double` to `Option<f64>`, where 0.0 becomes None.
 #[inline]
 pub fn to_option_f64_nonzero(value: c_double) -> Option<f64> {
     if value.abs() > f64::EPSILON {
@@ -36,7 +36,7 @@ pub fn to_option_f64_nonzero(value: c_double) -> Option<f64> {
     }
 }
 
-/// Convert a c_int to Option<i32>, where values < 0 become None.
+/// Convert a `c_int` to `Option<i32>`, where values < 0 become None.
 #[inline]
 pub fn to_option_i32_nonnegative(value: c_int) -> Option<i32> {
     if value >= 0 {
@@ -46,12 +46,12 @@ pub fn to_option_i32_nonnegative(value: c_int) -> Option<i32> {
     }
 }
 
-/// Convert a C string pointer to a Rust &str with a default value.
+/// Convert a C string pointer to a Rust `&str` with a default value.
 ///
 /// # Safety
 /// The pointer must be null or point to a valid null-terminated string.
 #[inline]
-pub unsafe fn c_str_to_str<'a>(ptr: *const c_char, default: &'a str) -> &'a str {
+pub unsafe fn c_str_to_str(ptr: *const c_char, default: &str) -> &str {
     if ptr.is_null() {
         default
     } else {

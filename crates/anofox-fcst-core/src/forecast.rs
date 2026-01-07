@@ -28,7 +28,7 @@ pub struct ForecastOutput {
 }
 
 /// Available forecast models - matches C++ extension exactly.
-/// See: https://github.com/DataZooDE/anofox-forecast/blob/main/docs/API_REFERENCE.md#supported-models
+/// See: <https://github.com/DataZooDE/anofox-forecast/blob/main/docs/API_REFERENCE.md#supported-models>
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelType {
     // Automatic Selection Models (6)
@@ -401,7 +401,7 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
 // Model implementations
 
 fn forecast_naive(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
-    let last = *values.last().unwrap();
+    let last = *values.last().expect("values validated non-empty by caller");
     Ok(ForecastOutput {
         point: vec![last; horizon],
         lower: vec![],
@@ -733,8 +733,8 @@ fn forecast_arima(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
     let mean_diff = diff.iter().sum::<f64>() / diff.len() as f64;
     let ar_coef = 0.5; // Simplified: fixed AR coefficient
 
-    let last_val = *values.last().unwrap();
-    let last_diff = *diff.last().unwrap();
+    let last_val = *values.last().expect("values.len() >= 5 validated by caller");
+    let last_diff = *diff.last().expect("diff non-empty when values.len() >= 5");
 
     let mut point = Vec::with_capacity(horizon);
     let mut prev_diff = last_diff;
@@ -979,7 +979,7 @@ fn calculate_fitted_values(values: &[f64], model: ModelType, period: usize) -> V
 }
 
 /// List all available model names (32 models matching C++ extension).
-/// See: https://github.com/DataZooDE/anofox-forecast/blob/main/docs/API_REFERENCE.md#supported-models
+/// See: <https://github.com/DataZooDE/anofox-forecast/blob/main/docs/API_REFERENCE.md#supported-models>
 pub fn list_models() -> Vec<String> {
     vec![
         // Automatic Selection Models (6)

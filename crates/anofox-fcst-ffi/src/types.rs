@@ -503,7 +503,7 @@ pub struct GapFillResult {
     pub dates: *mut i64,
     /// Array of filled values
     pub values: *mut c_double,
-    /// Validity bitmask for filled values (bit i indicates if values[i] is valid)
+    /// Validity bitmask for filled values (bit `i` indicates if `values[i]` is valid)
     pub validity: *mut u64,
     /// Number of observations after gap filling
     pub length: size_t,
@@ -525,7 +525,7 @@ impl Default for GapFillResult {
 pub struct FilledValuesResult {
     /// Array of filled values
     pub values: *mut c_double,
-    /// Validity bitmask (bit i indicates if values[i] is valid)
+    /// Validity bitmask (bit `i` indicates if `values[i]` is valid)
     pub validity: *mut u64,
     /// Number of values
     pub length: size_t,

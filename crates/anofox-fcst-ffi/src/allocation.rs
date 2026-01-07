@@ -14,7 +14,7 @@ use libc::{free, malloc};
 #[cfg(target_family = "wasm")]
 unsafe fn malloc(size: usize) -> *mut core::ffi::c_void {
     use std::alloc::{alloc, Layout};
-    let layout = Layout::from_size_align(size, 8).unwrap();
+    let layout = Layout::from_size_align(size, 8).expect("8-byte alignment is always valid");
     alloc(layout) as *mut core::ffi::c_void
 }
 
@@ -22,7 +22,7 @@ unsafe fn malloc(size: usize) -> *mut core::ffi::c_void {
 unsafe fn free(ptr: *mut core::ffi::c_void) {
     use std::alloc::{dealloc, Layout};
     if !ptr.is_null() {
-        let layout = Layout::from_size_align(1, 8).unwrap();
+        let layout = Layout::from_size_align(1, 8).expect("8-byte alignment is always valid");
         dealloc(ptr as *mut u8, layout);
     }
 }
@@ -73,14 +73,14 @@ pub unsafe fn slice_to_c_array<T: Copy>(slice: &[T]) -> *mut T {
         return ptr::null_mut();
     }
 
-    let ptr = malloc(slice.len() * std::mem::size_of::<T>()) as *mut T;
+    let ptr = malloc(std::mem::size_of_val(slice)) as *mut T;
     if !ptr.is_null() {
         ptr::copy_nonoverlapping(slice.as_ptr(), ptr, slice.len());
     }
     ptr
 }
 
-/// Copy a Vec<f64> to a newly allocated C double array.
+/// Copy a `Vec<f64>` to a newly allocated C double array.
 ///
 /// # Safety
 /// Returns null on allocation failure or if vec is empty.
@@ -89,7 +89,7 @@ pub unsafe fn vec_to_c_double_array(vec: &[f64]) -> *mut c_double {
     slice_to_c_array(vec)
 }
 
-/// Copy a Vec<i32> to a newly allocated C int array.
+/// Copy a `Vec<i32>` to a newly allocated C int array.
 ///
 /// # Safety
 /// Returns null on allocation failure or if vec is empty.
@@ -113,7 +113,7 @@ pub unsafe fn alloc_and_copy_array<T: Copy>(
         return true;
     }
 
-    let ptr = malloc(items.len() * std::mem::size_of::<T>()) as *mut T;
+    let ptr = malloc(std::mem::size_of_val(items)) as *mut T;
     if ptr.is_null() {
         if !out_error.is_null() {
             (*out_error).set_error(ErrorCode::AllocationError, "Memory allocation failed");
@@ -193,6 +193,10 @@ macro_rules! free_fields {
 }
 
 /// Set a validity bit in a bitmask.
+///
+/// # Safety
+/// The validity pointer must be valid and point to an array with sufficient
+/// capacity for the given index (at least `index / 64 + 1` u64 words).
 #[inline]
 pub unsafe fn set_validity_bit(validity: *mut u64, index: usize, is_valid: bool) {
     if validity.is_null() {
@@ -207,7 +211,7 @@ pub unsafe fn set_validity_bit(validity: *mut u64, index: usize, is_valid: bool)
     }
 }
 
-/// Fill values and validity arrays from Option<f64> data.
+/// Fill values and validity arrays from `Option<f64>` data.
 ///
 /// # Safety
 /// result_values and result_validity must point to arrays of sufficient size.
