@@ -17,5 +17,8 @@ _freeze/
 # Generated CSV files
 *.csv
 
-# Output directory (already in _quarto.yml)
-# _output/
+# Output directory
+_output/
+
+# Intermediate rmarkdown files
+*.rmarkdown
