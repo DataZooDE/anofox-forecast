@@ -1,0 +1,27 @@
+#!/bin/sh
+#
+# Pre-commit hook for Rust code quality
+# Runs cargo fmt and cargo clippy before each commit
+#
+# Install: ./scripts/setup-hooks.sh
+# Or manually: cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+set -e
+
+echo "Running cargo fmt --check..."
+if ! cargo fmt --all -- --check; then
+    echo ""
+    echo "ERROR: Code formatting issues detected."
+    echo "Run 'cargo fmt' to fix formatting before committing."
+    exit 1
+fi
+
+echo "Running cargo clippy..."
+if ! cargo clippy --workspace -- -D warnings; then
+    echo ""
+    echo "ERROR: Clippy warnings detected."
+    echo "Fix the warnings before committing."
+    exit 1
+fi
+
+echo "Pre-commit checks passed!"

@@ -259,9 +259,31 @@ wsl --install
 git clone --recurse-submodules https://github.com/DataZooDE/anofox-forecast.git
 cd anofox-forecast
 
+# Set up Git hooks (recommended)
+./scripts/setup-hooks.sh
+
 # Build (choose one)
 make -j$(nproc)              # With Make
 GEN=ninja make release       # With Ninja (faster)
+```
+
+### Code Quality
+
+This project uses Git hooks to ensure code quality before commits:
+
+- **cargo fmt** - Enforces consistent code formatting
+- **cargo clippy** - Catches common mistakes and enforces best practices
+
+Setup the hooks after cloning:
+```bash
+./scripts/setup-hooks.sh
+```
+
+To run checks manually:
+```bash
+cargo fmt --all           # Format code
+cargo clippy --workspace  # Run linter
+cargo test --workspace    # Run tests
 ```
 
 ### Verify Installation
