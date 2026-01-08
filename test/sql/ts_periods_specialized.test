@@ -1,0 +1,497 @@
+# name: test/sql/ts_periods_specialized.test
+# description: Tests for specialized period detection methods (ts_aic_period, ts_ssa_period, ts_stl_period, ts_matrix_profile_period, ts_sazed_period)
+# group: [anofox_forecast]
+
+require anofox_forecast
+
+#######################################
+# Setup - Create test data
+#######################################
+
+# Clear seasonal pattern with period 4 (32 values - enough for matrix profile minimum of 32)
+statement ok
+CREATE TABLE seasonal_4 AS SELECT
+    ROW_NUMBER() OVER () AS idx,
+    v AS value
+FROM (VALUES
+    (10.0), (20.0), (30.0), (40.0),
+    (10.0), (20.0), (30.0), (40.0),
+    (10.0), (20.0), (30.0), (40.0),
+    (10.0), (20.0), (30.0), (40.0),
+    (10.0), (20.0), (30.0), (40.0),
+    (10.0), (20.0), (30.0), (40.0),
+    (10.0), (20.0), (30.0), (40.0),
+    (10.0), (20.0), (30.0), (40.0)
+) AS t(v);
+
+# Weekly seasonal pattern (period 7) - 28 values
+statement ok
+CREATE TABLE seasonal_7 AS SELECT
+    ROW_NUMBER() OVER () AS idx,
+    v AS value
+FROM (VALUES
+    (100.0), (120.0), (140.0), (160.0), (180.0), (200.0), (150.0),
+    (100.0), (120.0), (140.0), (160.0), (180.0), (200.0), (150.0),
+    (100.0), (120.0), (140.0), (160.0), (180.0), (200.0), (150.0),
+    (100.0), (120.0), (140.0), (160.0), (180.0), (200.0), (150.0)
+) AS t(v);
+
+# Short series (8 values - for AIC/SAZED minimum)
+statement ok
+CREATE TABLE short_series AS SELECT
+    ROW_NUMBER() OVER () AS idx,
+    v AS value
+FROM (VALUES
+    (10.0), (20.0), (10.0), (20.0),
+    (10.0), (20.0), (10.0), (20.0)
+) AS t(v);
+
+#######################################
+# ts_aic_period - Basic Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_aic_period(LIST(value ORDER BY idx)) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test with min_period parameter
+query I
+SELECT ts_aic_period(LIST(value ORDER BY idx), 2.0) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test with min_period and max_period parameters
+query I
+SELECT ts_aic_period(LIST(value ORDER BY idx), 2.0, 10.0) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test with all parameters
+query I
+SELECT ts_aic_period(LIST(value ORDER BY idx), 2.0, 10.0, 5) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test period field exists
+query I
+SELECT (ts_aic_period(LIST(value ORDER BY idx))).period IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test aic field exists
+query I
+SELECT (ts_aic_period(LIST(value ORDER BY idx))).aic IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test bic field exists
+query I
+SELECT (ts_aic_period(LIST(value ORDER BY idx))).bic IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test rss field exists
+query I
+SELECT (ts_aic_period(LIST(value ORDER BY idx))).rss IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test r_squared field exists
+query I
+SELECT (ts_aic_period(LIST(value ORDER BY idx))).r_squared IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test method field
+query T
+SELECT (ts_aic_period(LIST(value ORDER BY idx))).method FROM seasonal_4;
+----
+aic
+
+# Period should be positive
+query I
+SELECT (ts_aic_period(LIST(value ORDER BY idx))).period > 0 FROM seasonal_4;
+----
+true
+
+# R-squared should be between 0 and 1
+query I
+SELECT (ts_aic_period(LIST(value ORDER BY idx))).r_squared >= 0 AND
+       (ts_aic_period(LIST(value ORDER BY idx))).r_squared <= 1
+FROM seasonal_4;
+----
+true
+
+#######################################
+# ts_ssa_period - Basic Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_ssa_period(LIST(value ORDER BY idx)) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test with window_size parameter
+query I
+SELECT ts_ssa_period(LIST(value ORDER BY idx), 8) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test with window_size and n_components parameters
+query I
+SELECT ts_ssa_period(LIST(value ORDER BY idx), 8, 4) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test period field exists
+query I
+SELECT (ts_ssa_period(LIST(value ORDER BY idx))).period IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test variance_explained field exists
+query I
+SELECT (ts_ssa_period(LIST(value ORDER BY idx))).variance_explained IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test n_eigenvalues field exists
+query I
+SELECT (ts_ssa_period(LIST(value ORDER BY idx))).n_eigenvalues IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test method field
+query T
+SELECT (ts_ssa_period(LIST(value ORDER BY idx))).method FROM seasonal_4;
+----
+ssa
+
+# Period should be positive
+query I
+SELECT (ts_ssa_period(LIST(value ORDER BY idx))).period > 0 FROM seasonal_4;
+----
+true
+
+# Variance explained should be positive
+query I
+SELECT (ts_ssa_period(LIST(value ORDER BY idx))).variance_explained >= 0 FROM seasonal_4;
+----
+true
+
+#######################################
+# ts_stl_period - Basic Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_stl_period(LIST(value ORDER BY idx)) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test with min_period parameter
+query I
+SELECT ts_stl_period(LIST(value ORDER BY idx), 2) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test with min_period and max_period parameters
+query I
+SELECT ts_stl_period(LIST(value ORDER BY idx), 2, 12) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test with all parameters
+query I
+SELECT ts_stl_period(LIST(value ORDER BY idx), 2, 12, 5) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test period field exists
+query I
+SELECT (ts_stl_period(LIST(value ORDER BY idx))).period IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test seasonal_strength field exists
+query I
+SELECT (ts_stl_period(LIST(value ORDER BY idx))).seasonal_strength IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test trend_strength field exists
+query I
+SELECT (ts_stl_period(LIST(value ORDER BY idx))).trend_strength IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test method field
+query T
+SELECT (ts_stl_period(LIST(value ORDER BY idx))).method FROM seasonal_4;
+----
+stl
+
+# Period should be positive
+query I
+SELECT (ts_stl_period(LIST(value ORDER BY idx))).period > 0 FROM seasonal_4;
+----
+true
+
+# Seasonal strength should be between 0 and 1
+query I
+SELECT (ts_stl_period(LIST(value ORDER BY idx))).seasonal_strength >= 0 FROM seasonal_4;
+----
+true
+
+#######################################
+# ts_matrix_profile_period - Basic Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_matrix_profile_period(LIST(value ORDER BY idx)) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test with subsequence_length parameter
+query I
+SELECT ts_matrix_profile_period(LIST(value ORDER BY idx), 4) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test with subsequence_length and n_best parameters
+query I
+SELECT ts_matrix_profile_period(LIST(value ORDER BY idx), 4, 3) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test period field exists
+query I
+SELECT (ts_matrix_profile_period(LIST(value ORDER BY idx))).period IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test confidence field exists
+query I
+SELECT (ts_matrix_profile_period(LIST(value ORDER BY idx))).confidence IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test n_motifs field exists
+query I
+SELECT (ts_matrix_profile_period(LIST(value ORDER BY idx))).n_motifs IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test subsequence_length field exists
+query I
+SELECT (ts_matrix_profile_period(LIST(value ORDER BY idx))).subsequence_length IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test method field
+query T
+SELECT (ts_matrix_profile_period(LIST(value ORDER BY idx))).method FROM seasonal_4;
+----
+matrix_profile
+
+# Period should be positive
+query I
+SELECT (ts_matrix_profile_period(LIST(value ORDER BY idx))).period > 0 FROM seasonal_4;
+----
+true
+
+# Confidence should be non-negative
+query I
+SELECT (ts_matrix_profile_period(LIST(value ORDER BY idx))).confidence >= 0 FROM seasonal_4;
+----
+true
+
+#######################################
+# ts_sazed_period - Basic Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_sazed_period(LIST(value ORDER BY idx)) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test with min_period parameter
+query I
+SELECT ts_sazed_period(LIST(value ORDER BY idx), 2) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test with min_period and max_period parameters
+query I
+SELECT ts_sazed_period(LIST(value ORDER BY idx), 2, 12) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test with all parameters (min_period, max_period, zero_pad_factor)
+query I
+SELECT ts_sazed_period(LIST(value ORDER BY idx), 2, 12, 2) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test period field exists
+query I
+SELECT (ts_sazed_period(LIST(value ORDER BY idx))).period IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test power field exists
+query I
+SELECT (ts_sazed_period(LIST(value ORDER BY idx))).power IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test snr field exists
+query I
+SELECT (ts_sazed_period(LIST(value ORDER BY idx))).snr IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test method field
+query T
+SELECT (ts_sazed_period(LIST(value ORDER BY idx))).method FROM seasonal_4;
+----
+sazed
+
+# Period should be positive
+query I
+SELECT (ts_sazed_period(LIST(value ORDER BY idx))).period > 0 FROM seasonal_4;
+----
+true
+
+# Power should be positive
+query I
+SELECT (ts_sazed_period(LIST(value ORDER BY idx))).power >= 0 FROM seasonal_4;
+----
+true
+
+#######################################
+# Period Detection Accuracy
+#######################################
+
+# AIC should detect period close to 4
+query I
+SELECT ABS((ts_aic_period(LIST(value ORDER BY idx))).period - 4.0) < 2.0 FROM seasonal_4;
+----
+true
+
+# AIC should detect period close to 7 for weekly data
+query I
+SELECT ABS((ts_aic_period(LIST(value ORDER BY idx))).period - 7.0) < 2.0 FROM seasonal_7;
+----
+true
+
+#######################################
+# NULL Handling
+#######################################
+
+# NULL input should return NULL
+query I
+SELECT ts_aic_period(NULL) IS NULL;
+----
+true
+
+query I
+SELECT ts_ssa_period(NULL) IS NULL;
+----
+true
+
+query I
+SELECT ts_stl_period(NULL) IS NULL;
+----
+true
+
+query I
+SELECT ts_matrix_profile_period(NULL) IS NULL;
+----
+true
+
+query I
+SELECT ts_sazed_period(NULL) IS NULL;
+----
+true
+
+#######################################
+# Short Series (Minimum Data Requirements)
+#######################################
+
+# AIC works with 8+ values
+query I
+SELECT ts_aic_period(LIST(value ORDER BY idx)) IS NOT NULL FROM short_series;
+----
+true
+
+# SSA returns NULL for series < 16 values
+query I
+SELECT ts_ssa_period(LIST(value ORDER BY idx)) IS NULL FROM short_series;
+----
+true
+
+# STL returns NULL for series < 16 values
+query I
+SELECT ts_stl_period(LIST(value ORDER BY idx)) IS NULL FROM short_series;
+----
+true
+
+# Matrix Profile returns NULL for series < 16 values (actually needs 32)
+query I
+SELECT ts_matrix_profile_period(LIST(value ORDER BY idx)) IS NULL FROM short_series;
+----
+true
+
+# SAZED throws error for series < 16 values
+statement error
+SELECT ts_sazed_period(LIST(value ORDER BY idx)) FROM short_series;
+----
+Insufficient data
+
+#######################################
+# All Methods Return Positive Periods
+#######################################
+
+query I
+SELECT (ts_aic_period(LIST(value ORDER BY idx))).period > 0 FROM seasonal_4;
+----
+true
+
+query I
+SELECT (ts_ssa_period(LIST(value ORDER BY idx))).period > 0 FROM seasonal_4;
+----
+true
+
+query I
+SELECT (ts_stl_period(LIST(value ORDER BY idx))).period > 0 FROM seasonal_4;
+----
+true
+
+query I
+SELECT (ts_matrix_profile_period(LIST(value ORDER BY idx))).period > 0 FROM seasonal_4;
+----
+true
+
+query I
+SELECT (ts_sazed_period(LIST(value ORDER BY idx))).period > 0 FROM seasonal_4;
+----
+true
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE seasonal_4;
+
+statement ok
+DROP TABLE seasonal_7;
+
+statement ok
+DROP TABLE short_series;
