@@ -448,11 +448,11 @@ SELECT ts_matrix_profile_period(LIST(value ORDER BY idx)) IS NULL FROM short_ser
 ----
 true
 
-# SAZED throws error for series < 16 values
-statement error
-SELECT ts_sazed_period(LIST(value ORDER BY idx)) FROM short_series;
+# SAZED returns NULL for series < 16 values (graceful error handling)
+query I
+SELECT ts_sazed_period(LIST(value ORDER BY idx)) IS NULL FROM short_series;
 ----
-Insufficient data
+true
 
 #######################################
 # All Methods Return Positive Periods

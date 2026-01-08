@@ -110,13 +110,9 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
         );
 
         if (!success) {
-            // Clean up any already-allocated results
-            for (idx_t i = 0; i < row_idx; i++) {
-                if (!row_results[i].is_null) {
-                    anofox_free_flat_multi_period_result(&row_results[i].result);
-                }
-            }
-            throw InvalidInputException("ts_detect_periods failed: %s", error.message);
+            row_results[row_idx].is_null = true;
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         total_periods += row_results[row_idx].result.n_periods;
@@ -240,13 +236,9 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
         );
 
         if (!success) {
-            // Clean up any already-allocated results
-            for (idx_t i = 0; i < row_idx; i++) {
-                if (!row_results[i].is_null) {
-                    anofox_free_flat_multi_period_result(&row_results[i].result);
-                }
-            }
-            throw InvalidInputException("ts_detect_periods failed: %s", error.message);
+            row_results[row_idx].is_null = true;
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         total_periods += row_results[row_idx].result.n_periods;
@@ -389,7 +381,8 @@ static void TsEstimatePeriodFftFunction(DataChunk &args, ExpressionState &state,
         );
 
         if (!success) {
-            throw InvalidInputException("ts_estimate_period_fft failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);
@@ -450,7 +443,8 @@ static void TsEstimatePeriodAcfFunction(DataChunk &args, ExpressionState &state,
         );
 
         if (!success) {
-            throw InvalidInputException("ts_estimate_period_acf failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);
@@ -540,13 +534,9 @@ static void TsDetectMultiplePeriodsFunction(DataChunk &args, ExpressionState &st
         );
 
         if (!success) {
-            // Clean up any already-allocated results
-            for (idx_t i = 0; i < row_idx; i++) {
-                if (!row_results[i].is_null) {
-                    anofox_free_flat_multi_period_result(&row_results[i].result);
-                }
-            }
-            throw InvalidInputException("ts_detect_multiple_periods failed: %s", error.message);
+            row_results[row_idx].is_null = true;
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         total_periods += row_results[row_idx].result.n_periods;
@@ -708,7 +698,8 @@ static void TsAutoperiodFunction(DataChunk &args, ExpressionState &state, Vector
         );
 
         if (!success) {
-            throw InvalidInputException("ts_autoperiod failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);
@@ -776,7 +767,8 @@ static void TsCfdAutoperiodFunction(DataChunk &args, ExpressionState &state, Vec
         );
 
         if (!success) {
-            throw InvalidInputException("ts_cfd_autoperiod failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);
@@ -869,7 +861,8 @@ static void TsLombScargleFunction(DataChunk &args, ExpressionState &state, Vecto
         );
 
         if (!success) {
-            throw InvalidInputException("ts_lomb_scargle failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);
@@ -974,7 +967,8 @@ static void TsAicPeriodFunction(DataChunk &args, ExpressionState &state, Vector 
         );
 
         if (!success) {
-            throw InvalidInputException("ts_aic_period failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);
@@ -1069,7 +1063,8 @@ static void TsSsaPeriodFunction(DataChunk &args, ExpressionState &state, Vector 
         );
 
         if (!success) {
-            throw InvalidInputException("ts_ssa_period failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);
@@ -1162,7 +1157,8 @@ static void TsStlPeriodFunction(DataChunk &args, ExpressionState &state, Vector 
         );
 
         if (!success) {
-            throw InvalidInputException("ts_stl_period failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);
@@ -1256,7 +1252,8 @@ static void TsMatrixProfilePeriodFunction(DataChunk &args, ExpressionState &stat
         );
 
         if (!success) {
-            throw InvalidInputException("ts_matrix_profile_period failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);
@@ -1350,7 +1347,8 @@ static void TsSazedPeriodFunction(DataChunk &args, ExpressionState &state, Vecto
         );
 
         if (!success) {
-            throw InvalidInputException("ts_sazed_period failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);
