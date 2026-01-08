@@ -1,0 +1,500 @@
+# name: test/sql/ts_forecast_theta.test
+# description: Tests for Theta forecasting methods (Theta, OptimizedTheta, DynamicTheta, DynamicOptimizedTheta)
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup: Create test data
+#######################################
+
+# Linear trend data
+statement ok
+CREATE TABLE trend_data AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    50.0 + i * 2.0 AS value
+FROM generate_series(0, 29) AS t(i);
+
+# Decreasing trend data
+statement ok
+CREATE TABLE decreasing_data AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    100.0 - i * 1.5 AS value
+FROM generate_series(0, 29) AS t(i);
+
+# Constant data
+statement ok
+CREATE TABLE constant_data AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    75.0 AS value
+FROM generate_series(0, 29) AS t(i);
+
+# Noisy trend data
+statement ok
+CREATE TABLE noisy_trend AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    50.0 + i * 1.0 + (i % 3) * 2.0 AS value
+FROM generate_series(0, 29) AS t(i);
+
+# Grouped data for aggregate function testing
+statement ok
+CREATE TABLE grouped_data AS
+SELECT
+    'A' AS group_id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    30.0 + i * 1.5 AS value
+FROM generate_series(0, 29) AS t(i)
+UNION ALL
+SELECT
+    'B' AS group_id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    60.0 + i * 0.8 AS value
+FROM generate_series(0, 29) AS t(i);
+
+#######################################
+# Theta Model Tests
+#######################################
+
+# Test Theta model returns correct model name
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Theta')).model;
+----
+Theta
+
+# Test Theta returns correct horizon length
+query I
+SELECT length((_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 5, 'Theta')).point);
+----
+5
+
+# Test Theta with increasing trend - forecast should be reasonable (combines SES and drift)
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Theta')).point[1] > 25.0;
+----
+true
+
+# Test Theta forecast increases over horizon for trending data
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Theta')).point[2] >
+       (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Theta')).point[1];
+----
+true
+
+# Test Theta with decreasing trend - forecast should be below the mean (combines SES and drift)
+query I
+SELECT (_ts_forecast([50.0, 48.0, 46.0, 44.0, 42.0, 40.0, 38.0, 36.0, 34.0, 32.0], 3, 'Theta')).point[1] < 35.0;
+----
+true
+
+# Test Theta with constant data - should stay near the constant value
+query I
+SELECT ABS((_ts_forecast([25.0, 25.0, 25.0, 25.0, 25.0, 25.0, 25.0, 25.0, 25.0, 25.0], 3, 'Theta')).point[1] - 25.0) < 1.0;
+----
+true
+
+# Test Theta with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'Theta', 5, MAP([], []))).model_name
+FROM trend_data;
+----
+Theta
+
+# Test Theta forecasts are finite
+query I
+SELECT (ts_forecast_agg(ts, value, 'Theta', 3, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM trend_data;
+----
+true
+
+# Test Theta confidence bounds
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Theta')).lower[1] <=
+       (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Theta')).point[1];
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Theta')).upper[1] >=
+       (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Theta')).point[1];
+----
+true
+
+# Test Theta fitted values length
+query I
+SELECT length((_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Theta')).fitted);
+----
+10
+
+# Test Theta residuals length
+query I
+SELECT length((_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Theta')).residuals);
+----
+10
+
+# Test Theta case-insensitive name
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'theta')).model;
+----
+Theta
+
+#######################################
+# OptimizedTheta Model Tests
+#######################################
+
+# Test OptimizedTheta model returns correct model name
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'OptimizedTheta')).model;
+----
+OptimizedTheta
+
+# Test OptimizedTheta returns correct horizon length
+query I
+SELECT length((_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 5, 'OptimizedTheta')).point);
+----
+5
+
+# Test OptimizedTheta with increasing trend - forecast should be reasonable
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'OptimizedTheta')).point[1] > 25.0;
+----
+true
+
+# Test OptimizedTheta with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'OptimizedTheta', 5, MAP([], []))).model_name
+FROM trend_data;
+----
+OptimizedTheta
+
+# Test OptimizedTheta forecasts are finite
+query I
+SELECT (ts_forecast_agg(ts, value, 'OptimizedTheta', 3, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM trend_data;
+----
+true
+
+# Test OptimizedTheta confidence bounds
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'OptimizedTheta')).lower[1] <=
+       (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'OptimizedTheta')).point[1];
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'OptimizedTheta')).upper[1] >=
+       (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'OptimizedTheta')).point[1];
+----
+true
+
+# Test OptimizedTheta alternative names
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'optimizedtheta')).model;
+----
+OptimizedTheta
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'optimized_theta')).model;
+----
+OptimizedTheta
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'otm')).model;
+----
+OptimizedTheta
+
+#######################################
+# DynamicTheta Model Tests
+#######################################
+
+# Test DynamicTheta model returns correct model name
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'DynamicTheta')).model;
+----
+DynamicTheta
+
+# Test DynamicTheta returns correct horizon length
+query I
+SELECT length((_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 5, 'DynamicTheta')).point);
+----
+5
+
+# Test DynamicTheta with increasing trend - forecast should be reasonable
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'DynamicTheta')).point[1] > 25.0;
+----
+true
+
+# Test DynamicTheta with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'DynamicTheta', 5, MAP([], []))).model_name
+FROM trend_data;
+----
+DynamicTheta
+
+# Test DynamicTheta forecasts are finite
+query I
+SELECT (ts_forecast_agg(ts, value, 'DynamicTheta', 3, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM trend_data;
+----
+true
+
+# Test DynamicTheta confidence bounds
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'DynamicTheta')).lower[1] <=
+       (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'DynamicTheta')).point[1];
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'DynamicTheta')).upper[1] >=
+       (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'DynamicTheta')).point[1];
+----
+true
+
+# Test DynamicTheta alternative names
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'dynamictheta')).model;
+----
+DynamicTheta
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'dynamic_theta')).model;
+----
+DynamicTheta
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'dstm')).model;
+----
+DynamicTheta
+
+#######################################
+# DynamicOptimizedTheta Model Tests
+#######################################
+
+# Test DynamicOptimizedTheta model returns correct model name
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'DynamicOptimizedTheta')).model;
+----
+DynamicOptimizedTheta
+
+# Test DynamicOptimizedTheta returns correct horizon length
+query I
+SELECT length((_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 5, 'DynamicOptimizedTheta')).point);
+----
+5
+
+# Test DynamicOptimizedTheta with increasing trend - forecast should be reasonable
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'DynamicOptimizedTheta')).point[1] > 25.0;
+----
+true
+
+# Test DynamicOptimizedTheta with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'DynamicOptimizedTheta', 5, MAP([], []))).model_name
+FROM trend_data;
+----
+DynamicOptimizedTheta
+
+# Test DynamicOptimizedTheta forecasts are finite
+query I
+SELECT (ts_forecast_agg(ts, value, 'DynamicOptimizedTheta', 3, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM trend_data;
+----
+true
+
+# Test DynamicOptimizedTheta confidence bounds
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'DynamicOptimizedTheta')).lower[1] <=
+       (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'DynamicOptimizedTheta')).point[1];
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'DynamicOptimizedTheta')).upper[1] >=
+       (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'DynamicOptimizedTheta')).point[1];
+----
+true
+
+# Test DynamicOptimizedTheta alternative names
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'dynamicoptimizedtheta')).model;
+----
+DynamicOptimizedTheta
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'dynamic_optimized_theta')).model;
+----
+DynamicOptimizedTheta
+
+#######################################
+# Model Quality Metrics Tests
+#######################################
+
+# Test AIC exists for Theta models
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Theta')).aic IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'OptimizedTheta')).aic IS NOT NULL;
+----
+true
+
+# Test BIC exists
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Theta')).bic IS NOT NULL;
+----
+true
+
+# Test MSE is non-negative
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Theta')).mse >= 0;
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'DynamicTheta')).mse >= 0;
+----
+true
+
+#######################################
+# Integration with ts_forecast_agg - Grouped Tests
+#######################################
+
+# Test all Theta models work with grouped data
+query II
+SELECT group_id, length((ts_forecast_agg(ts, value, 'Theta', 5, MAP([], []))).point_forecast)
+FROM grouped_data
+GROUP BY group_id
+ORDER BY group_id;
+----
+A	5
+B	5
+
+query II
+SELECT group_id, (ts_forecast_agg(ts, value, 'OptimizedTheta', 5, MAP([], []))).model_name
+FROM grouped_data
+GROUP BY group_id
+ORDER BY group_id;
+----
+A	OptimizedTheta
+B	OptimizedTheta
+
+query II
+SELECT group_id, (ts_forecast_agg(ts, value, 'DynamicTheta', 5, MAP([], []))).model_name
+FROM grouped_data
+GROUP BY group_id
+ORDER BY group_id;
+----
+A	DynamicTheta
+B	DynamicTheta
+
+query II
+SELECT group_id, (ts_forecast_agg(ts, value, 'DynamicOptimizedTheta', 5, MAP([], []))).model_name
+FROM grouped_data
+GROUP BY group_id
+ORDER BY group_id;
+----
+A	DynamicOptimizedTheta
+B	DynamicOptimizedTheta
+
+# Test insample_fitted length matches input data length
+query II
+SELECT group_id, length((ts_forecast_agg(ts, value, 'Theta', 5, MAP([], []))).insample_fitted)
+FROM grouped_data
+GROUP BY group_id
+ORDER BY group_id;
+----
+A	30
+B	30
+
+# Test different groups produce different forecasts
+query I
+SELECT COUNT(*) FROM (
+    SELECT DISTINCT (ts_forecast_agg(ts, value, 'Theta', 3, MAP([], []))).point_forecast[1] AS f
+    FROM grouped_data
+    GROUP BY group_id
+);
+----
+2
+
+#######################################
+# Edge Cases
+#######################################
+
+# Test Theta with minimum data length (3 points)
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0], 2, 'Theta')).point);
+----
+2
+
+# Test with large horizon
+query I
+SELECT length((_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 50, 'Theta')).point);
+----
+50
+
+query I
+SELECT length((_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 50, 'OptimizedTheta')).point);
+----
+50
+
+# Test all Theta variants produce finite forecasts
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Theta')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'OptimizedTheta')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'DynamicTheta')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'DynamicOptimizedTheta')).point[1] IS NOT NULL;
+----
+true
+
+# Test with noisy data
+query I
+SELECT (ts_forecast_agg(ts, value, 'Theta', 5, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM noisy_trend;
+----
+true
+
+# Test with decreasing data
+query I
+SELECT (ts_forecast_agg(ts, value, 'Theta', 3, MAP([], []))).point_forecast[1] < (SELECT MAX(value) FROM decreasing_data)
+FROM decreasing_data;
+----
+true
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE trend_data;
+
+statement ok
+DROP TABLE decreasing_data;
+
+statement ok
+DROP TABLE constant_data;
+
+statement ok
+DROP TABLE noisy_trend;
+
+statement ok
+DROP TABLE grouped_data;
