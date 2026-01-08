@@ -85,7 +85,10 @@ pub fn capture_event(event: &str, properties: serde_json::Value) {
         });
 
         // Merge additional properties
-        let mut payload_obj = payload.as_object().unwrap().clone();
+        let Some(payload_obj) = payload.as_object() else {
+            return; // Silently skip if payload is not an object
+        };
+        let mut payload_obj = payload_obj.clone();
         if let Some(props) = properties.as_object() {
             if let Some(existing_props) = payload_obj.get_mut("properties") {
                 if let Some(existing_props_obj) = existing_props.as_object_mut() {
@@ -102,8 +105,10 @@ pub fn capture_event(event: &str, properties: serde_json::Value) {
     });
 }
 
+/// No-op capture when telemetry feature is disabled.
+/// This version accepts any type that can be ignored.
 #[cfg(not(feature = "telemetry"))]
-pub fn capture_event(_event: &str, _properties: serde_json::Value) {
+pub fn capture_event<T>(_event: &str, _properties: T) {
     // No-op when telemetry feature is disabled
 }
 

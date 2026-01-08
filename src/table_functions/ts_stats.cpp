@@ -112,7 +112,8 @@ static void TsStatsFunction(DataChunk &args, ExpressionState &state, Vector &res
         );
 
         if (!success) {
-            throw InvalidInputException("ts_stats failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         // Set result fields

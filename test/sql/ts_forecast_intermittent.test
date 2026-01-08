@@ -1,0 +1,537 @@
+# name: test/sql/ts_forecast_intermittent.test
+# description: Tests for Intermittent Demand Models (CrostonClassic, CrostonOptimized, CrostonSBA, ADIDA, IMAPA, TSB)
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup: Create test data
+#######################################
+
+# Classic intermittent demand data: many zeros with occasional non-zero values
+statement ok
+CREATE TABLE intermittent_data AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    CASE
+        WHEN i % 5 = 0 THEN 10.0
+        WHEN i % 7 = 0 THEN 15.0
+        ELSE 0.0
+    END AS value
+FROM generate_series(0, 49) AS t(i);
+
+# Sparse demand with varying amounts
+statement ok
+CREATE TABLE sparse_demand AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    CASE
+        WHEN i = 2 THEN 5.0
+        WHEN i = 6 THEN 8.0
+        WHEN i = 11 THEN 3.0
+        WHEN i = 18 THEN 12.0
+        WHEN i = 25 THEN 7.0
+        WHEN i = 35 THEN 9.0
+        ELSE 0.0
+    END AS value
+FROM generate_series(0, 39) AS t(i);
+
+# Regular non-zero data for comparison
+statement ok
+CREATE TABLE regular_data AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    10.0 + i * 0.5 AS value
+FROM generate_series(0, 29) AS t(i);
+
+# Grouped intermittent data
+statement ok
+CREATE TABLE grouped_intermittent AS
+SELECT
+    'P1' AS product_id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    CASE WHEN i % 4 = 0 THEN 8.0 ELSE 0.0 END AS value
+FROM generate_series(0, 39) AS t(i)
+UNION ALL
+SELECT
+    'P2' AS product_id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    CASE WHEN i % 6 = 0 THEN 12.0 ELSE 0.0 END AS value
+FROM generate_series(0, 39) AS t(i);
+
+#######################################
+# CrostonClassic Model Tests
+#######################################
+
+# Test CrostonClassic model returns correct model name
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonClassic')).model;
+----
+CrostonClassic
+
+# Test CrostonClassic returns correct horizon length
+query I
+SELECT length((_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 5, 'CrostonClassic')).point);
+----
+5
+
+# Test CrostonClassic produces flat forecast (all values equal)
+query I
+SELECT ABS((_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonClassic')).point[1] -
+           (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonClassic')).point[2]) < 0.01;
+----
+true
+
+query I
+SELECT ABS((_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonClassic')).point[2] -
+           (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonClassic')).point[3]) < 0.01;
+----
+true
+
+# Test CrostonClassic forecast is positive for data with positive demands
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonClassic')).point[1] > 0;
+----
+true
+
+# Test CrostonClassic with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'CrostonClassic', 5, MAP([], []))).model_name
+FROM intermittent_data;
+----
+CrostonClassic
+
+# Test CrostonClassic forecasts are finite
+query I
+SELECT (ts_forecast_agg(ts, value, 'CrostonClassic', 3, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM intermittent_data;
+----
+true
+
+# Test CrostonClassic confidence bounds
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonClassic')).lower[1] <=
+       (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonClassic')).point[1];
+----
+true
+
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonClassic')).upper[1] >=
+       (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonClassic')).point[1];
+----
+true
+
+# Test CrostonClassic alternative names
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'crostonclassic')).model;
+----
+CrostonClassic
+
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'croston_classic')).model;
+----
+CrostonClassic
+
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'croston')).model;
+----
+CrostonClassic
+
+#######################################
+# CrostonOptimized Model Tests
+#######################################
+
+# Test CrostonOptimized model returns correct model name
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonOptimized')).model;
+----
+CrostonOptimized
+
+# Test CrostonOptimized returns correct horizon length
+query I
+SELECT length((_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 5, 'CrostonOptimized')).point);
+----
+5
+
+# Test CrostonOptimized produces flat forecast
+query I
+SELECT ABS((_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonOptimized')).point[1] -
+           (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonOptimized')).point[3]) < 0.01;
+----
+true
+
+# Test CrostonOptimized with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'CrostonOptimized', 5, MAP([], []))).model_name
+FROM intermittent_data;
+----
+CrostonOptimized
+
+# Test CrostonOptimized alternative names
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'crostonoptimized')).model;
+----
+CrostonOptimized
+
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'croston_optimized')).model;
+----
+CrostonOptimized
+
+#######################################
+# CrostonSBA Model Tests
+#######################################
+
+# Test CrostonSBA model returns correct model name
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonSBA')).model;
+----
+CrostonSBA
+
+# Test CrostonSBA returns correct horizon length
+query I
+SELECT length((_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 5, 'CrostonSBA')).point);
+----
+5
+
+# Test CrostonSBA produces flat forecast
+query I
+SELECT ABS((_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonSBA')).point[1] -
+           (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonSBA')).point[3]) < 0.01;
+----
+true
+
+# Test CrostonSBA with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'CrostonSBA', 5, MAP([], []))).model_name
+FROM intermittent_data;
+----
+CrostonSBA
+
+# Test CrostonSBA alternative names
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'crostonsba')).model;
+----
+CrostonSBA
+
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'croston_sba')).model;
+----
+CrostonSBA
+
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'sba')).model;
+----
+CrostonSBA
+
+#######################################
+# ADIDA Model Tests
+#######################################
+
+# Test ADIDA model returns correct model name
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'ADIDA')).model;
+----
+ADIDA
+
+# Test ADIDA returns correct horizon length
+query I
+SELECT length((_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 5, 'ADIDA')).point);
+----
+5
+
+# Test ADIDA produces flat forecast
+query I
+SELECT ABS((_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'ADIDA')).point[1] -
+           (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'ADIDA')).point[3]) < 0.01;
+----
+true
+
+# Test ADIDA with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'ADIDA', 5, MAP([], []))).model_name
+FROM intermittent_data;
+----
+ADIDA
+
+# Test ADIDA case-insensitive name
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'adida')).model;
+----
+ADIDA
+
+#######################################
+# IMAPA Model Tests
+#######################################
+
+# Test IMAPA model returns correct model name
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'IMAPA')).model;
+----
+IMAPA
+
+# Test IMAPA returns correct horizon length
+query I
+SELECT length((_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 5, 'IMAPA')).point);
+----
+5
+
+# Test IMAPA produces flat forecast
+query I
+SELECT ABS((_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'IMAPA')).point[1] -
+           (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'IMAPA')).point[3]) < 0.01;
+----
+true
+
+# Test IMAPA with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'IMAPA', 5, MAP([], []))).model_name
+FROM intermittent_data;
+----
+IMAPA
+
+# Test IMAPA case-insensitive name
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'imapa')).model;
+----
+IMAPA
+
+#######################################
+# TSB Model Tests
+#######################################
+
+# Test TSB model returns correct model name
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'TSB')).model;
+----
+TSB
+
+# Test TSB returns correct horizon length
+query I
+SELECT length((_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 5, 'TSB')).point);
+----
+5
+
+# Test TSB produces flat forecast
+query I
+SELECT ABS((_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'TSB')).point[1] -
+           (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'TSB')).point[3]) < 0.01;
+----
+true
+
+# Test TSB with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'TSB', 5, MAP([], []))).model_name
+FROM intermittent_data;
+----
+TSB
+
+# Test TSB case-insensitive name
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'tsb')).model;
+----
+TSB
+
+#######################################
+# Model Quality Metrics Tests
+#######################################
+
+# Test AIC exists for intermittent demand models
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonClassic')).aic IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'ADIDA')).aic IS NOT NULL;
+----
+true
+
+# Test BIC exists
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonClassic')).bic IS NOT NULL;
+----
+true
+
+# Test MSE is non-negative
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonClassic')).mse >= 0;
+----
+true
+
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'TSB')).mse >= 0;
+----
+true
+
+#######################################
+# Fitted Values and Residuals Tests
+#######################################
+
+# Test fitted values length
+query I
+SELECT length((_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonClassic')).fitted);
+----
+12
+
+# Test residuals length
+query I
+SELECT length((_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonClassic')).residuals);
+----
+12
+
+#######################################
+# Integration with ts_forecast_agg - Grouped Tests
+#######################################
+
+# Test all intermittent demand models work with grouped data
+query II
+SELECT product_id, length((ts_forecast_agg(ts, value, 'CrostonClassic', 5, MAP([], []))).point_forecast)
+FROM grouped_intermittent
+GROUP BY product_id
+ORDER BY product_id;
+----
+P1	5
+P2	5
+
+query II
+SELECT product_id, (ts_forecast_agg(ts, value, 'CrostonOptimized', 5, MAP([], []))).model_name
+FROM grouped_intermittent
+GROUP BY product_id
+ORDER BY product_id;
+----
+P1	CrostonOptimized
+P2	CrostonOptimized
+
+query II
+SELECT product_id, (ts_forecast_agg(ts, value, 'CrostonSBA', 5, MAP([], []))).model_name
+FROM grouped_intermittent
+GROUP BY product_id
+ORDER BY product_id;
+----
+P1	CrostonSBA
+P2	CrostonSBA
+
+query II
+SELECT product_id, (ts_forecast_agg(ts, value, 'ADIDA', 5, MAP([], []))).model_name
+FROM grouped_intermittent
+GROUP BY product_id
+ORDER BY product_id;
+----
+P1	ADIDA
+P2	ADIDA
+
+query II
+SELECT product_id, (ts_forecast_agg(ts, value, 'IMAPA', 5, MAP([], []))).model_name
+FROM grouped_intermittent
+GROUP BY product_id
+ORDER BY product_id;
+----
+P1	IMAPA
+P2	IMAPA
+
+query II
+SELECT product_id, (ts_forecast_agg(ts, value, 'TSB', 5, MAP([], []))).model_name
+FROM grouped_intermittent
+GROUP BY product_id
+ORDER BY product_id;
+----
+P1	TSB
+P2	TSB
+
+# Test insample_fitted length matches input data length
+query II
+SELECT product_id, length((ts_forecast_agg(ts, value, 'CrostonClassic', 5, MAP([], []))).insample_fitted)
+FROM grouped_intermittent
+GROUP BY product_id
+ORDER BY product_id;
+----
+P1	40
+P2	40
+
+# Test different groups produce different forecasts
+query I
+SELECT COUNT(*) FROM (
+    SELECT DISTINCT (ts_forecast_agg(ts, value, 'CrostonClassic', 3, MAP([], []))).point_forecast[1] AS f
+    FROM grouped_intermittent
+    GROUP BY product_id
+);
+----
+2
+
+#######################################
+# Edge Cases
+#######################################
+
+# Test with minimum data length (3 points)
+query I
+SELECT length((_ts_forecast([0.0, 5.0, 0.0], 2, 'CrostonClassic')).point);
+----
+2
+
+# Test with large horizon
+query I
+SELECT length((_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 50, 'CrostonClassic')).point);
+----
+50
+
+# Test all intermittent models produce finite forecasts
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonClassic')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonOptimized')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'CrostonSBA')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'ADIDA')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'IMAPA')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 6.0], 3, 'TSB')).point[1] IS NOT NULL;
+----
+true
+
+# Test with sparse demand data
+query I
+SELECT (ts_forecast_agg(ts, value, 'CrostonClassic', 5, MAP([], []))).point_forecast[1] > 0
+FROM sparse_demand;
+----
+true
+
+# Test intermittent models also work on regular (non-sparse) data
+query I
+SELECT (ts_forecast_agg(ts, value, 'CrostonClassic', 5, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM regular_data;
+----
+true
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE intermittent_data;
+
+statement ok
+DROP TABLE sparse_demand;
+
+statement ok
+DROP TABLE regular_data;
+
+statement ok
+DROP TABLE grouped_intermittent;

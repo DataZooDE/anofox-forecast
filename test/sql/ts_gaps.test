@@ -70,6 +70,48 @@ SELECT count(*) FROM ts_fill_forward('test_forward', grp, dt, val, '2023-01-05':
 3
 
 #######################################
+# Polars-style frequency format (C++ API compatibility)
+#######################################
+
+# Test ts_fill_gaps with Polars-style '1d' frequency
+query I
+SELECT count(*) FROM ts_fill_gaps('test_gaps', grp, dt, val, '1d');
+----
+3
+
+# Test ts_fill_gaps_operator with Polars-style '1d' frequency
+query I
+SELECT count(*) FROM ts_fill_gaps_operator('test_gaps', grp, dt, val, '1d');
+----
+3
+
+# Test ts_fill_forward with Polars-style '1d' frequency
+query I
+SELECT count(*) FROM ts_fill_forward('test_forward', grp, dt, val, '2023-01-05'::TIMESTAMP, '1d');
+----
+5
+
+# Test multi-day Polars-style frequency '2d'
+query I
+SELECT count(*) FROM ts_fill_gaps('test_gaps', grp, dt, val, '2d');
+----
+2
+
+# Test hourly frequency with Polars-style '1h'
+statement ok
+CREATE TABLE test_hourly AS
+SELECT 'A' as grp, '2023-01-01 00:00:00'::TIMESTAMP as dt, 1.0 as val
+UNION ALL SELECT 'A', '2023-01-01 03:00:00'::TIMESTAMP, 2.0;
+
+query I
+SELECT count(*) FROM ts_fill_gaps('test_hourly', grp, dt, val, '1h');
+----
+4
+
+statement ok
+DROP TABLE test_hourly;
+
+#######################################
 # Cleanup
 #######################################
 

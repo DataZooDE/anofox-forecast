@@ -28,7 +28,7 @@ pub struct ForecastOutput {
 }
 
 /// Available forecast models - matches C++ extension exactly.
-/// See: https://github.com/DataZooDE/anofox-forecast/blob/main/docs/API_REFERENCE.md#supported-models
+/// See: <https://github.com/DataZooDE/anofox-forecast/blob/main/docs/API_REFERENCE.md#supported-models>
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelType {
     // Automatic Selection Models (6)
@@ -401,7 +401,7 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
 // Model implementations
 
 fn forecast_naive(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
-    let last = *values.last().unwrap();
+    let last = *values.last().expect("values validated non-empty by caller");
     Ok(ForecastOutput {
         point: vec![last; horizon],
         lower: vec![],
@@ -733,8 +733,10 @@ fn forecast_arima(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
     let mean_diff = diff.iter().sum::<f64>() / diff.len() as f64;
     let ar_coef = 0.5; // Simplified: fixed AR coefficient
 
-    let last_val = *values.last().unwrap();
-    let last_diff = *diff.last().unwrap();
+    let last_val = *values
+        .last()
+        .expect("values.len() >= 5 validated by caller");
+    let last_diff = *diff.last().expect("diff non-empty when values.len() >= 5");
 
     let mut point = Vec::with_capacity(horizon);
     let mut prev_diff = last_diff;
@@ -979,7 +981,7 @@ fn calculate_fitted_values(values: &[f64], model: ModelType, period: usize) -> V
 }
 
 /// List all available model names (32 models matching C++ extension).
-/// See: https://github.com/DataZooDE/anofox-forecast/blob/main/docs/API_REFERENCE.md#supported-models
+/// See: <https://github.com/DataZooDE/anofox-forecast/blob/main/docs/API_REFERENCE.md#supported-models>
 pub fn list_models() -> Vec<String> {
     vec![
         // Automatic Selection Models (6)
@@ -1057,5 +1059,283 @@ mod tests {
 
         let result = forecast(&values, &options).unwrap();
         assert_eq!(result.point.len(), 5);
+    }
+
+    #[test]
+    fn test_forecast_holt_winters() {
+        // Create seasonal data: base + seasonal pattern
+        let values: Vec<Option<f64>> = (0..48)
+            .map(|i| {
+                let seasonal = (i % 12) as f64 * 2.0; // period 12
+                let trend = i as f64 * 0.5;
+                Some(100.0 + trend + seasonal)
+            })
+            .collect();
+
+        let options = ForecastOptions {
+            model: ModelType::HoltWinters,
+            horizon: 12,
+            seasonal_period: 12,
+            auto_detect_seasonality: false,
+            ..Default::default()
+        };
+
+        let result = forecast(&values, &options).unwrap();
+        assert_eq!(result.point.len(), 12);
+        assert_eq!(result.model_name, "HoltWinters");
+        // Forecasts should be reasonable (positive and not NaN)
+        assert!(result.point.iter().all(|v| v.is_finite() && *v > 0.0));
+    }
+
+    #[test]
+    fn test_forecast_arima() {
+        // Create trending data with some noise
+        let values: Vec<Option<f64>> = (0..30)
+            .map(|i| Some(100.0 + i as f64 * 2.0 + (i % 3) as f64))
+            .collect();
+
+        let options = ForecastOptions {
+            model: ModelType::ARIMA,
+            horizon: 5,
+            ..Default::default()
+        };
+
+        let result = forecast(&values, &options).unwrap();
+        assert_eq!(result.point.len(), 5);
+        assert_eq!(result.model_name, "ARIMA");
+        // ARIMA forecasts should continue the trend
+        assert!(result.point.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn test_forecast_mstl() {
+        // Create data with trend and seasonality
+        let values: Vec<Option<f64>> = (0..36)
+            .map(|i| {
+                let seasonal = ((i % 6) as f64 * std::f64::consts::PI / 3.0).sin() * 10.0;
+                Some(50.0 + i as f64 + seasonal)
+            })
+            .collect();
+
+        let options = ForecastOptions {
+            model: ModelType::MSTL,
+            horizon: 6,
+            seasonal_period: 6,
+            auto_detect_seasonality: false,
+            ..Default::default()
+        };
+
+        let result = forecast(&values, &options).unwrap();
+        assert_eq!(result.point.len(), 6);
+        assert_eq!(result.model_name, "MSTL");
+        assert!(result.point.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn test_forecast_tbats() {
+        let values: Vec<Option<f64>> = (0..24)
+            .map(|i| Some(100.0 + (i % 4) as f64 * 5.0))
+            .collect();
+
+        let options = ForecastOptions {
+            model: ModelType::TBATS,
+            horizon: 4,
+            seasonal_period: 4,
+            auto_detect_seasonality: false,
+            ..Default::default()
+        };
+
+        let result = forecast(&values, &options).unwrap();
+        assert_eq!(result.point.len(), 4);
+        assert_eq!(result.model_name, "TBATS");
+        assert!(result.point.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn test_forecast_croston() {
+        // Intermittent demand: many zeros with occasional non-zero values
+        let values: Vec<Option<f64>> = vec![
+            Some(0.0),
+            Some(0.0),
+            Some(5.0),
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+            Some(3.0),
+            Some(0.0),
+            Some(4.0),
+            Some(0.0),
+            Some(0.0),
+            Some(6.0),
+        ];
+
+        let options = ForecastOptions {
+            model: ModelType::CrostonClassic,
+            horizon: 5,
+            ..Default::default()
+        };
+
+        let result = forecast(&values, &options).unwrap();
+        assert_eq!(result.point.len(), 5);
+        assert_eq!(result.model_name, "CrostonClassic");
+        // Croston produces flat forecasts
+        assert!(result.point.iter().all(|v| v.is_finite() && *v > 0.0));
+        // All forecast values should be the same
+        let first = result.point[0];
+        assert!(result.point.iter().all(|v| (*v - first).abs() < 1e-10));
+    }
+
+    #[test]
+    fn test_forecast_theta() {
+        let values: Vec<Option<f64>> = (0..20).map(|i| Some(10.0 + i as f64 * 1.5)).collect();
+
+        let options = ForecastOptions {
+            model: ModelType::Theta,
+            horizon: 5,
+            ..Default::default()
+        };
+
+        let result = forecast(&values, &options).unwrap();
+        assert_eq!(result.point.len(), 5);
+        assert_eq!(result.model_name, "Theta");
+        assert!(result.point.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn test_forecast_auto_ets() {
+        let values: Vec<Option<f64>> = (0..30).map(|i| Some(50.0 + (i % 7) as f64 * 3.0)).collect();
+
+        let options = ForecastOptions {
+            model: ModelType::AutoETS,
+            horizon: 7,
+            ..Default::default()
+        };
+
+        let result = forecast(&values, &options).unwrap();
+        assert_eq!(result.point.len(), 7);
+        // AutoETS selects a model automatically
+        assert!(result.point.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn test_select_best_model_with_trend_and_seasonality() {
+        // Data with both trend and seasonality
+        let values: Vec<f64> = (0..48)
+            .map(|i| {
+                let trend = i as f64 * 2.0;
+                let seasonal = (i % 12) as f64 * 3.0;
+                100.0 + trend + seasonal
+            })
+            .collect();
+
+        let model = select_best_model(&values, 12);
+        assert_eq!(model, ModelType::HoltWinters);
+    }
+
+    #[test]
+    fn test_select_best_model_short_series() {
+        let values: Vec<f64> = vec![1.0, 2.0, 3.0];
+        let model = select_best_model(&values, 1);
+        assert_eq!(model, ModelType::Naive);
+    }
+
+    #[test]
+    fn test_calculate_confidence_intervals() {
+        let forecasts = vec![100.0, 105.0, 110.0];
+        let historical: Vec<f64> = (0..20).map(|i| 50.0 + i as f64).collect();
+
+        let (lower, upper) = calculate_confidence_intervals(&forecasts, &historical, 0.95);
+
+        assert_eq!(lower.len(), 3);
+        assert_eq!(upper.len(), 3);
+        // Lower bounds should be below forecasts
+        assert!(lower.iter().zip(&forecasts).all(|(l, f)| l < f));
+        // Upper bounds should be above forecasts
+        assert!(upper.iter().zip(&forecasts).all(|(u, f)| u > f));
+        // Intervals should widen with horizon
+        let width_1 = upper[0] - lower[0];
+        let width_3 = upper[2] - lower[2];
+        assert!(width_3 > width_1);
+    }
+
+    #[test]
+    fn test_is_auto_model() {
+        assert!(is_auto_model(ModelType::AutoETS));
+        assert!(is_auto_model(ModelType::AutoARIMA));
+        assert!(is_auto_model(ModelType::AutoTheta));
+        assert!(is_auto_model(ModelType::AutoMFLES));
+        assert!(is_auto_model(ModelType::AutoMSTL));
+        assert!(is_auto_model(ModelType::AutoTBATS));
+        assert!(!is_auto_model(ModelType::Naive));
+        assert!(!is_auto_model(ModelType::HoltWinters));
+    }
+
+    #[test]
+    fn test_model_type_from_str() {
+        assert_eq!("Naive".parse::<ModelType>().unwrap(), ModelType::Naive);
+        assert_eq!("naive".parse::<ModelType>().unwrap(), ModelType::Naive);
+        assert_eq!(
+            "HoltWinters".parse::<ModelType>().unwrap(),
+            ModelType::HoltWinters
+        );
+        assert_eq!("hw".parse::<ModelType>().unwrap(), ModelType::HoltWinters);
+        assert_eq!(
+            "croston".parse::<ModelType>().unwrap(),
+            ModelType::CrostonClassic
+        );
+        assert!("invalid_model".parse::<ModelType>().is_err());
+    }
+
+    #[test]
+    fn test_forecast_with_nulls() {
+        // Test that NULL values are handled via interpolation
+        let values: Vec<Option<f64>> = vec![
+            Some(1.0),
+            Some(2.0),
+            None,
+            Some(4.0),
+            Some(5.0),
+            None,
+            Some(7.0),
+        ];
+
+        let options = ForecastOptions {
+            model: ModelType::Naive,
+            horizon: 3,
+            ..Default::default()
+        };
+
+        let result = forecast(&values, &options).unwrap();
+        assert_eq!(result.point.len(), 3);
+        assert!(result.point.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn test_forecast_with_fitted_and_residuals() {
+        let values: Vec<Option<f64>> = (0..15).map(|i| Some(i as f64 * 2.0)).collect();
+
+        let options = ForecastOptions {
+            model: ModelType::SES,
+            horizon: 3,
+            include_fitted: true,
+            include_residuals: true,
+            ..Default::default()
+        };
+
+        let result = forecast(&values, &options).unwrap();
+        assert!(result.fitted.is_some());
+        assert!(result.residuals.is_some());
+        assert_eq!(result.fitted.as_ref().unwrap().len(), 15);
+        assert_eq!(result.residuals.as_ref().unwrap().len(), 15);
+        assert!(result.mse.is_some());
+    }
+
+    #[test]
+    fn test_insufficient_data() {
+        let values: Vec<Option<f64>> = vec![Some(1.0), Some(2.0)];
+        let options = ForecastOptions::default();
+
+        let result = forecast(&values, &options);
+        assert!(result.is_err());
     }
 }

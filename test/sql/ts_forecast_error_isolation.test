@@ -1,0 +1,1241 @@
+# name: test/sql/ts_forecast_error_isolation.test
+# description: Tests for batch error isolation in ts_forecast - validates that errors in individual series don't affect other series
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Batch Error Isolation Foundation
+#######################################
+# These tests verify the core behavior that individual series failures
+# return NULL without crashing the entire batch operation.
+
+# Basic setup - create test data with mix of valid and invalid series
+statement ok
+CREATE TABLE batch_test_series AS
+SELECT * FROM (VALUES
+    (1, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),  -- valid: trend
+    (2, []::DOUBLE[]),                                           -- invalid: empty
+    (3, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])   -- valid: trend
+) AS t(series_id, values);
+
+# Core isolation test: batch with invalid series should still process valid ones
+query II
+SELECT
+    series_id,
+    _ts_forecast(values, 3) IS NOT NULL as has_result
+FROM batch_test_series
+ORDER BY series_id;
+----
+1	true
+2	false
+3	true
+
+# Verify the valid series actually produce correct results
+query II
+SELECT
+    series_id,
+    length((_ts_forecast(values, 3)).point) as forecast_length
+FROM batch_test_series
+WHERE _ts_forecast(values, 3) IS NOT NULL
+ORDER BY series_id;
+----
+1	3
+3	3
+
+statement ok
+DROP TABLE batch_test_series;
+
+#######################################
+# Empty Array Handling
+#######################################
+
+# Empty array should return NULL
+query I
+SELECT _ts_forecast([]::DOUBLE[], 5) IS NULL;
+----
+true
+
+# Batch with empty arrays - other series should succeed
+query II
+SELECT
+    series_id,
+    _ts_forecast(values, 3) IS NOT NULL as has_result
+FROM (VALUES
+    (1, [1.0, 2.0, 3.0, 4.0, 5.0]::DOUBLE[]),
+    (2, []::DOUBLE[]),
+    (3, [5.0, 4.0, 3.0, 2.0, 1.0]::DOUBLE[])
+) AS t(series_id, values)
+ORDER BY series_id;
+----
+1	true
+2	false
+3	true
+
+#######################################
+# Single Value Array Handling
+#######################################
+
+# Single value is technically valid but limited - returns NULL for forecasting
+query I
+SELECT _ts_forecast([1.0], 3) IS NULL;
+----
+true
+
+# Two values - minimal for some models
+query I
+SELECT _ts_forecast([1.0, 2.0], 3) IS NULL;
+----
+true
+
+# Three values - still too short for reliable forecasting
+query I
+SELECT _ts_forecast([1.0, 2.0, 3.0], 3) IS NOT NULL;
+----
+true
+
+#######################################
+# NULL Value Handling Within Series
+#######################################
+
+# Series with some NULL values should still work (NULLs handled as gaps)
+query I
+SELECT _ts_forecast([1.0, NULL, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3) IS NOT NULL;
+----
+true
+
+# All-NULL series produces NaN values (not NULL struct)
+query I
+SELECT _ts_forecast([NULL, NULL, NULL, NULL, NULL]::DOUBLE[], 3) IS NOT NULL;
+----
+true
+
+# Verify all-NULL produces NaN forecasts
+query I
+SELECT isnan((_ts_forecast([NULL, NULL, NULL, NULL, NULL]::DOUBLE[], 3)).point[1]);
+----
+true
+
+# Batch mixing series with NULLs (all-NULL produces result with NaN values)
+query II
+SELECT
+    series_id,
+    _ts_forecast(values, 3) IS NOT NULL as has_result
+FROM (VALUES
+    (1, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),
+    (2, [NULL, NULL, NULL, NULL, NULL]::DOUBLE[]),
+    (3, [1.0, NULL, 3.0, NULL, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])
+) AS t(series_id, values)
+ORDER BY series_id;
+----
+1	true
+2	true
+3	true
+
+#######################################
+# Constant Series Handling
+#######################################
+
+# All same values - degenerate case but should work
+query I
+SELECT _ts_forecast([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 3) IS NOT NULL;
+----
+true
+
+# Constant series forecast should be the constant value
+query I
+SELECT ABS((_ts_forecast([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 3)).point[1] - 5.0) < 0.01;
+----
+true
+
+#######################################
+# Multiple Error Types in Single Batch
+#######################################
+
+# Comprehensive batch with various error scenarios
+statement ok
+CREATE TABLE comprehensive_batch AS
+SELECT * FROM (VALUES
+    (1, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 'valid_trend'),
+    (2, []::DOUBLE[], 'empty'),
+    (3, [NULL, NULL, NULL, NULL, NULL]::DOUBLE[], 'all_null'),
+    (4, [1.0]::DOUBLE[], 'single_value'),
+    (5, [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 'constant'),
+    (6, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 'valid_trend_2')
+) AS t(series_id, values, description);
+
+# Count forecasts that return non-NULL (includes all_null which returns NaN values)
+query I
+SELECT COUNT(*)
+FROM comprehensive_batch
+WHERE _ts_forecast(values, 3) IS NOT NULL;
+----
+4
+
+query III
+SELECT
+    series_id,
+    description,
+    _ts_forecast(values, 3) IS NOT NULL as has_result
+FROM comprehensive_batch
+ORDER BY series_id;
+----
+1	valid_trend	true
+2	empty	false
+3	all_null	true
+4	single_value	false
+5	constant	true
+6	valid_trend_2	true
+
+statement ok
+DROP TABLE comprehensive_batch;
+
+#######################################
+# NULL Input List Handling
+#######################################
+
+# NULL as the entire list should return NULL
+query I
+SELECT _ts_forecast(NULL, 3) IS NULL;
+----
+true
+
+# Batch with NULL list entries
+query II
+SELECT
+    series_id,
+    _ts_forecast(values, 3) IS NOT NULL as has_result
+FROM (VALUES
+    (1, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),
+    (2, NULL::DOUBLE[]),
+    (3, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])
+) AS t(series_id, values)
+ORDER BY series_id;
+----
+1	true
+2	false
+3	true
+
+#######################################
+# Mixed Batch Isolation Tests
+# Key tests for 10k series resilience
+#######################################
+
+# Large mixed batch: errors distributed throughout should not affect valid series
+statement ok
+CREATE TABLE large_mixed_batch AS
+WITH base AS (
+    SELECT i as series_id,
+           CASE
+               -- 10% empty arrays (error)
+               WHEN i % 10 = 0 THEN []::DOUBLE[]
+               -- 5% single values (error)
+               WHEN i % 20 = 5 THEN [1.0]::DOUBLE[]
+               -- 5% all NULLs (returns NaN)
+               WHEN i % 20 = 15 THEN [NULL, NULL, NULL, NULL, NULL]::DOUBLE[]
+               -- 80% valid trending data
+               ELSE [
+                   (i + 0.0)::DOUBLE, (i + 1.0)::DOUBLE, (i + 2.0)::DOUBLE,
+                   (i + 3.0)::DOUBLE, (i + 4.0)::DOUBLE, (i + 5.0)::DOUBLE,
+                   (i + 6.0)::DOUBLE, (i + 7.0)::DOUBLE, (i + 8.0)::DOUBLE,
+                   (i + 9.0)::DOUBLE
+               ]
+           END as values
+    FROM generate_series(1, 100) AS t(i)
+)
+SELECT * FROM base;
+
+# Verify the distribution of error types
+query I
+SELECT COUNT(*) FROM large_mixed_batch WHERE length(values) = 0;
+----
+10
+
+query I
+SELECT COUNT(*) FROM large_mixed_batch WHERE length(values) = 1;
+----
+5
+
+query I
+SELECT COUNT(*) FROM large_mixed_batch WHERE length(values) = 5;
+----
+5
+
+query I
+SELECT COUNT(*) FROM large_mixed_batch WHERE length(values) = 10;
+----
+80
+
+# Core isolation test: all 100 series processed, valid ones succeed
+query I
+SELECT COUNT(*) FROM large_mixed_batch WHERE _ts_forecast(values, 3) IS NOT NULL;
+----
+85
+
+# Verify errors are isolated - empty and single-value return NULL
+query I
+SELECT COUNT(*)
+FROM large_mixed_batch
+WHERE (length(values) = 0 OR length(values) = 1)
+  AND _ts_forecast(values, 3) IS NULL;
+----
+15
+
+# Verify valid series produce actual forecasts
+query I
+SELECT COUNT(*)
+FROM large_mixed_batch
+WHERE length(values) = 10
+  AND length((_ts_forecast(values, 3)).point) = 3;
+----
+80
+
+statement ok
+DROP TABLE large_mixed_batch;
+
+#######################################
+# Simulated 10k Series Resilience Test
+#######################################
+
+# Generate 1000 series with varied error rates (scaled-down 10k test)
+statement ok
+CREATE TABLE simulated_scale_batch AS
+WITH series_data AS (
+    SELECT
+        i as series_id,
+        CASE
+            -- 2% catastrophic: empty arrays
+            WHEN i % 50 = 0 THEN []::DOUBLE[]
+            -- 2% edge case: single value
+            WHEN i % 50 = 25 THEN [42.0]::DOUBLE[]
+            -- 1% edge case: two values
+            WHEN i % 100 = 50 THEN [1.0, 2.0]::DOUBLE[]
+            -- 5% sparse: 3 values (minimum for some models)
+            WHEN i % 20 = 10 THEN [1.0, 2.0, 3.0]::DOUBLE[]
+            -- 90% normal: 10+ values
+            ELSE list_value(
+                (sin(i) * 10)::DOUBLE,
+                (sin(i + 1) * 10)::DOUBLE,
+                (sin(i + 2) * 10)::DOUBLE,
+                (sin(i + 3) * 10)::DOUBLE,
+                (sin(i + 4) * 10)::DOUBLE,
+                (sin(i + 5) * 10)::DOUBLE,
+                (sin(i + 6) * 10)::DOUBLE,
+                (sin(i + 7) * 10)::DOUBLE,
+                (sin(i + 8) * 10)::DOUBLE,
+                (sin(i + 9) * 10)::DOUBLE
+            )
+        END as values
+    FROM generate_series(1, 1000) AS t(i)
+)
+SELECT * FROM series_data;
+
+# Verify batch completed without crash (core resilience test)
+query I
+SELECT COUNT(*) >= 950
+FROM simulated_scale_batch
+WHERE _ts_forecast(values, 5) IS NOT NULL;
+----
+true
+
+# Count successful forecasts (should be ~95%+)
+query I
+SELECT COUNT(*)
+FROM simulated_scale_batch
+WHERE _ts_forecast(values, 5) IS NOT NULL
+  AND length((_ts_forecast(values, 5)).point) = 5;
+----
+960
+
+# Verify errors didn't corrupt valid results - spot check first and last
+query I
+SELECT length((_ts_forecast(values, 5)).point)
+FROM simulated_scale_batch
+WHERE series_id = 1;
+----
+5
+
+query I
+SELECT length((_ts_forecast(values, 5)).point)
+FROM simulated_scale_batch
+WHERE series_id = 999;
+----
+5
+
+statement ok
+DROP TABLE simulated_scale_batch;
+
+#######################################
+# Sequential Error Recovery
+#######################################
+
+# Test that consecutive errors don't cause cascading failures
+query IIII
+SELECT
+    series_id,
+    length(values) as len,
+    _ts_forecast(values, 3) IS NOT NULL as has_result,
+    CASE WHEN _ts_forecast(values, 3) IS NOT NULL
+         THEN length((_ts_forecast(values, 3)).point)
+         ELSE NULL END as forecast_len
+FROM (VALUES
+    (1, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),
+    (2, []::DOUBLE[]),           -- error 1
+    (3, []::DOUBLE[]),           -- error 2 (consecutive)
+    (4, []::DOUBLE[]),           -- error 3 (consecutive)
+    (5, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),  -- recovery
+    (6, [1.0]::DOUBLE[]),        -- error 4
+    (7, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])   -- recovery
+) AS t(series_id, values)
+ORDER BY series_id;
+----
+1	10	true	3
+2	0	false	NULL
+3	0	false	NULL
+4	0	false	NULL
+5	10	true	3
+6	1	false	NULL
+7	10	true	3
+
+#######################################
+# Interleaved Valid/Invalid Pattern
+#######################################
+
+# Alternating valid and invalid series
+query II
+SELECT
+    series_id,
+    _ts_forecast(values, 3) IS NOT NULL as succeeded
+FROM (VALUES
+    (1, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),
+    (2, []::DOUBLE[]),
+    (3, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),
+    (4, []::DOUBLE[]),
+    (5, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),
+    (6, []::DOUBLE[]),
+    (7, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),
+    (8, []::DOUBLE[]),
+    (9, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),
+    (10, []::DOUBLE[])
+) AS t(series_id, values)
+ORDER BY series_id;
+----
+1	true
+2	false
+3	true
+4	false
+5	true
+6	false
+7	true
+8	false
+9	true
+10	false
+
+# Verify all odd-numbered (valid) series have correct forecast length
+query I
+SELECT COUNT(*)
+FROM (VALUES
+    (1, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),
+    (2, []::DOUBLE[]),
+    (3, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),
+    (4, []::DOUBLE[]),
+    (5, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),
+    (6, []::DOUBLE[]),
+    (7, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),
+    (8, []::DOUBLE[]),
+    (9, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),
+    (10, []::DOUBLE[])
+) AS t(series_id, values)
+WHERE series_id % 2 = 1 AND length((_ts_forecast(values, 3)).point) = 3;
+----
+5
+
+#######################################
+# Individual Error Scenario Tests
+# Detailed tests for specific error conditions
+#######################################
+
+#---------------------------------------
+# Short Series Tests
+#---------------------------------------
+
+# Zero-length array returns NULL
+query I
+SELECT _ts_forecast([]::DOUBLE[], 3) IS NULL;
+----
+true
+
+# Single value returns NULL (insufficient for forecasting)
+query I
+SELECT _ts_forecast([42.0], 3) IS NULL;
+----
+true
+
+# Two values returns NULL (insufficient for most models)
+query I
+SELECT _ts_forecast([1.0, 2.0], 3) IS NULL;
+----
+true
+
+# Three values - minimum threshold, should work
+query I
+SELECT _ts_forecast([1.0, 2.0, 3.0], 3) IS NOT NULL;
+----
+true
+
+# Four values - works
+query I
+SELECT _ts_forecast([1.0, 2.0, 3.0, 4.0], 3) IS NOT NULL;
+----
+true
+
+# Five values - comfortable minimum
+query I
+SELECT _ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0], 3) IS NOT NULL;
+----
+true
+
+# Verify short series that work produce correct forecast length
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0], 5)).point);
+----
+5
+
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0, 4.0], 5)).point);
+----
+5
+
+# Short series with different horizons
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0], 1)).point);
+----
+1
+
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0], 10)).point);
+----
+10
+
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0], 100)).point);
+----
+100
+
+#---------------------------------------
+# NULL Value Pattern Tests
+#---------------------------------------
+
+# All NULLs - produces NaN values (not NULL struct)
+query I
+SELECT _ts_forecast([NULL, NULL, NULL, NULL, NULL]::DOUBLE[], 3) IS NOT NULL;
+----
+true
+
+query I
+SELECT isnan((_ts_forecast([NULL, NULL, NULL, NULL, NULL]::DOUBLE[], 3)).point[1]);
+----
+true
+
+# Leading NULLs - should still work
+query I
+SELECT _ts_forecast([NULL, NULL, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3) IS NOT NULL;
+----
+true
+
+# Trailing NULLs - should still work
+query I
+SELECT _ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, NULL, NULL], 3) IS NOT NULL;
+----
+true
+
+# Middle NULLs (gaps) - should still work
+query I
+SELECT _ts_forecast([1.0, 2.0, NULL, NULL, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3) IS NOT NULL;
+----
+true
+
+# Alternating NULLs - should still work if enough valid values
+query I
+SELECT _ts_forecast([1.0, NULL, 3.0, NULL, 5.0, NULL, 7.0, NULL, 9.0, NULL], 3) IS NOT NULL;
+----
+true
+
+# Single valid value among NULLs - may produce NaN
+query I
+SELECT _ts_forecast([NULL, NULL, 5.0, NULL, NULL]::DOUBLE[], 3) IS NOT NULL;
+----
+true
+
+# Two valid values among NULLs
+query I
+SELECT _ts_forecast([NULL, 2.0, NULL, 4.0, NULL]::DOUBLE[], 3) IS NOT NULL;
+----
+true
+
+# Mostly NULLs with few valid values at edges
+query I
+SELECT _ts_forecast([1.0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 10.0], 3) IS NOT NULL;
+----
+true
+
+#---------------------------------------
+# Empty Array Edge Cases
+#---------------------------------------
+
+# Empty with various horizons - all return NULL
+query I
+SELECT _ts_forecast([]::DOUBLE[], 1) IS NULL;
+----
+true
+
+query I
+SELECT _ts_forecast([]::DOUBLE[], 10) IS NULL;
+----
+true
+
+query I
+SELECT _ts_forecast([]::DOUBLE[], 100) IS NULL;
+----
+true
+
+# Empty in subquery context
+query I
+SELECT COUNT(*) FROM (
+    SELECT _ts_forecast(values, 3) as result
+    FROM (VALUES ([]::DOUBLE[])) AS t(values)
+) sub WHERE result IS NULL;
+----
+1
+
+# Empty with explicit model specification
+query I
+SELECT _ts_forecast([]::DOUBLE[], 3, 'NAIVE') IS NULL;
+----
+true
+
+query I
+SELECT _ts_forecast([]::DOUBLE[], 3, 'auto') IS NULL;
+----
+true
+
+#---------------------------------------
+# Constant Series Tests
+#---------------------------------------
+
+# All zeros
+query I
+SELECT _ts_forecast([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 3) IS NOT NULL;
+----
+true
+
+# Forecast of zeros should be zero
+query I
+SELECT ABS((_ts_forecast([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 3)).point[1]) < 0.001;
+----
+true
+
+# All ones
+query I
+SELECT ABS((_ts_forecast([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], 3)).point[1] - 1.0) < 0.001;
+----
+true
+
+# Large constant value
+query I
+SELECT ABS((_ts_forecast([1000000.0, 1000000.0, 1000000.0, 1000000.0, 1000000.0], 3)).point[1] - 1000000.0) < 1.0;
+----
+true
+
+# Small constant value
+query I
+SELECT ABS((_ts_forecast([0.001, 0.001, 0.001, 0.001, 0.001], 3)).point[1] - 0.001) < 0.0001;
+----
+true
+
+# Negative constant
+query I
+SELECT ABS((_ts_forecast([-5.0, -5.0, -5.0, -5.0, -5.0, -5.0, -5.0, -5.0, -5.0, -5.0], 3)).point[1] - (-5.0)) < 0.001;
+----
+true
+
+# Constant with longer horizon
+query I
+SELECT length((_ts_forecast([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 20)).point);
+----
+20
+
+# Verify all forecast points are the constant value
+query I
+SELECT ABS((_ts_forecast([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 3)).point[3] - 5.0) < 0.001;
+----
+true
+
+# Constant series confidence bounds should be narrow
+query I
+SELECT (_ts_forecast([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 3)).upper[1] -
+       (_ts_forecast([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 3)).lower[1] < 1.0;
+----
+true
+
+#---------------------------------------
+# Combined Edge Cases
+#---------------------------------------
+
+# Short constant series
+query I
+SELECT _ts_forecast([5.0, 5.0, 5.0], 3) IS NOT NULL;
+----
+true
+
+# Short series with NULL
+query I
+SELECT _ts_forecast([1.0, NULL, 3.0], 3) IS NOT NULL;
+----
+true
+
+# Constant with one NULL
+query I
+SELECT _ts_forecast([5.0, 5.0, NULL, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 3) IS NOT NULL;
+----
+true
+
+# Near-constant (tiny variation)
+query I
+SELECT _ts_forecast([5.0, 5.0000001, 5.0, 5.0000001, 5.0, 5.0000001, 5.0, 5.0000001, 5.0, 5.0], 3) IS NOT NULL;
+----
+true
+
+#---------------------------------------
+# Batch with All Error Scenarios
+#---------------------------------------
+
+# Comprehensive batch covering all error types
+statement ok
+CREATE TABLE all_error_scenarios AS
+SELECT * FROM (VALUES
+    ('empty', []::DOUBLE[]),
+    ('single', [1.0]::DOUBLE[]),
+    ('double', [1.0, 2.0]::DOUBLE[]),
+    ('triple', [1.0, 2.0, 3.0]::DOUBLE[]),
+    ('all_null', [NULL, NULL, NULL, NULL, NULL]::DOUBLE[]),
+    ('mostly_null', [NULL, NULL, 5.0, NULL, NULL]::DOUBLE[]),
+    ('constant_zero', [0.0, 0.0, 0.0, 0.0, 0.0]::DOUBLE[]),
+    ('constant_pos', [5.0, 5.0, 5.0, 5.0, 5.0]::DOUBLE[]),
+    ('constant_neg', [-5.0, -5.0, -5.0, -5.0, -5.0]::DOUBLE[]),
+    ('valid_trend', [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]::DOUBLE[])
+) AS t(scenario, values);
+
+# Count scenarios that produce results (not NULL)
+query I
+SELECT COUNT(*) FROM all_error_scenarios WHERE _ts_forecast(values, 3) IS NOT NULL;
+----
+7
+
+# List scenarios that fail (return NULL)
+query I
+SELECT scenario FROM all_error_scenarios
+WHERE _ts_forecast(values, 3) IS NULL
+ORDER BY scenario;
+----
+double
+empty
+single
+
+# List scenarios that succeed (note: all_null produces NaN values, not NULL)
+query I
+SELECT scenario FROM all_error_scenarios
+WHERE _ts_forecast(values, 3) IS NOT NULL
+ORDER BY scenario;
+----
+all_null
+constant_neg
+constant_pos
+constant_zero
+mostly_null
+triple
+valid_trend
+
+statement ok
+DROP TABLE all_error_scenarios;
+
+#######################################
+# Model-Specific Batch Tests
+# Tests that different models handle errors gracefully in batch context
+#######################################
+
+# Test each model with a mix of valid and invalid series
+statement ok
+CREATE TABLE model_batch_data AS
+SELECT * FROM (VALUES
+    (1, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),  -- valid trend
+    (2, []::DOUBLE[]),                                           -- empty (error)
+    (3, [10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0]),  -- valid decreasing
+    (4, [1.0]::DOUBLE[]),                                        -- single (error)
+    (5, [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0])    -- valid constant
+) AS t(series_id, values);
+
+#---------------------------------------
+# Basic Models Batch Tests
+#---------------------------------------
+
+# NAIVE model batch isolation
+query II
+SELECT series_id, _ts_forecast(values, 3, 'NAIVE') IS NOT NULL as has_result
+FROM model_batch_data ORDER BY series_id;
+----
+1	true
+2	false
+3	true
+4	false
+5	true
+
+# SMA model batch isolation
+query II
+SELECT series_id, _ts_forecast(values, 3, 'SMA') IS NOT NULL as has_result
+FROM model_batch_data ORDER BY series_id;
+----
+1	true
+2	false
+3	true
+4	false
+5	true
+
+# SES model batch isolation
+query II
+SELECT series_id, _ts_forecast(values, 3, 'SES') IS NOT NULL as has_result
+FROM model_batch_data ORDER BY series_id;
+----
+1	true
+2	false
+3	true
+4	false
+5	true
+
+# RandomWalkDrift model batch isolation
+query II
+SELECT series_id, _ts_forecast(values, 3, 'RandomWalkDrift') IS NOT NULL as has_result
+FROM model_batch_data ORDER BY series_id;
+----
+1	true
+2	false
+3	true
+4	false
+5	true
+
+#---------------------------------------
+# Trend Models Batch Tests
+#---------------------------------------
+
+# Holt model batch isolation
+query II
+SELECT series_id, _ts_forecast(values, 3, 'Holt') IS NOT NULL as has_result
+FROM model_batch_data ORDER BY series_id;
+----
+1	true
+2	false
+3	true
+4	false
+5	true
+
+# Theta model batch isolation
+query II
+SELECT series_id, _ts_forecast(values, 3, 'Theta') IS NOT NULL as has_result
+FROM model_batch_data ORDER BY series_id;
+----
+1	true
+2	false
+3	true
+4	false
+5	true
+
+#---------------------------------------
+# Auto Models Batch Tests
+#---------------------------------------
+
+# AutoETS model batch isolation
+query II
+SELECT series_id, _ts_forecast(values, 3, 'AutoETS') IS NOT NULL as has_result
+FROM model_batch_data ORDER BY series_id;
+----
+1	true
+2	false
+3	true
+4	false
+5	true
+
+# AutoARIMA model batch isolation
+query II
+SELECT series_id, _ts_forecast(values, 3, 'AutoARIMA') IS NOT NULL as has_result
+FROM model_batch_data ORDER BY series_id;
+----
+1	true
+2	false
+3	true
+4	false
+5	true
+
+# AutoTheta model batch isolation
+query II
+SELECT series_id, _ts_forecast(values, 3, 'AutoTheta') IS NOT NULL as has_result
+FROM model_batch_data ORDER BY series_id;
+----
+1	true
+2	false
+3	true
+4	false
+5	true
+
+statement ok
+DROP TABLE model_batch_data;
+
+#---------------------------------------
+# Seasonal Models Batch Tests
+#---------------------------------------
+
+# Create data with seasonal pattern for HoltWinters/MSTL tests
+statement ok
+CREATE TABLE seasonal_batch_data AS
+SELECT * FROM (VALUES
+    (1, [1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0]),  -- valid seasonal
+    (2, []::DOUBLE[]),                                                     -- empty (error)
+    (3, [4.0, 3.0, 2.0, 1.0, 4.0, 3.0, 2.0, 1.0, 4.0, 3.0, 2.0, 1.0]),  -- valid seasonal decreasing
+    (4, [1.0, 2.0]::DOUBLE[]),                                             -- too short (error)
+    (5, [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0])   -- constant (degenerate seasonal)
+) AS t(series_id, values);
+
+# HoltWinters model batch isolation (needs seasonal data)
+query II
+SELECT series_id, _ts_forecast(values, 4, 'HoltWinters') IS NOT NULL as has_result
+FROM seasonal_batch_data ORDER BY series_id;
+----
+1	true
+2	false
+3	true
+4	false
+5	true
+
+# MSTL model batch isolation
+query II
+SELECT series_id, _ts_forecast(values, 4, 'MSTL') IS NOT NULL as has_result
+FROM seasonal_batch_data ORDER BY series_id;
+----
+1	true
+2	false
+3	true
+4	false
+5	true
+
+statement ok
+DROP TABLE seasonal_batch_data;
+
+#---------------------------------------
+# Model Error Recovery Test
+#---------------------------------------
+
+# Test that after model failure, subsequent valid series still work
+query III
+SELECT
+    series_id,
+    model_name,
+    CASE WHEN _ts_forecast(values, 3, model_name) IS NOT NULL
+         THEN length((_ts_forecast(values, 3, model_name)).point)
+         ELSE NULL END as forecast_len
+FROM (VALUES
+    (1, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 'NAIVE'),
+    (2, []::DOUBLE[], 'NAIVE'),
+    (3, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 'SES'),
+    (4, []::DOUBLE[], 'AutoETS'),
+    (5, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 'AutoETS')
+) AS t(series_id, values, model_name)
+ORDER BY series_id;
+----
+1	NAIVE	3
+2	NAIVE	NULL
+3	SES	3
+4	AutoETS	NULL
+5	AutoETS	3
+
+#---------------------------------------
+# Invalid Model Name Test
+#---------------------------------------
+
+# Invalid model name falls back to default (Naive) - doesn't crash
+query I
+SELECT _ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0], 3, 'INVALID_MODEL') IS NOT NULL;
+----
+true
+
+# Verify invalid model falls back to Naive
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0], 3, 'INVALID_MODEL')).model;
+----
+Naive
+
+# Batch with invalid model names mixed with valid - all should produce results
+query II
+SELECT
+    series_id,
+    _ts_forecast(values, 3, model_name) IS NOT NULL as has_result
+FROM (VALUES
+    (1, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 'NAIVE'),
+    (2, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 'NOT_A_MODEL'),
+    (3, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 'SES')
+) AS t(series_id, values, model_name)
+ORDER BY series_id;
+----
+1	true
+2	true
+3	true
+
+#######################################
+# Extreme Value Batch Tests
+# Tests for numerical edge cases (1e308, 1e-308, etc.)
+#######################################
+
+#---------------------------------------
+# Large Value Tests
+#---------------------------------------
+
+# Very large values (near double max ~1.7e308)
+query I
+SELECT _ts_forecast([1e100, 2e100, 3e100, 4e100, 5e100], 3) IS NOT NULL;
+----
+true
+
+# Forecast with large values should produce reasonable results
+query I
+SELECT length((_ts_forecast([1e100, 2e100, 3e100, 4e100, 5e100], 3)).point);
+----
+3
+
+# Large values in batch context
+query II
+SELECT
+    series_id,
+    _ts_forecast(values, 3) IS NOT NULL as has_result
+FROM (VALUES
+    (1, [1e50, 2e50, 3e50, 4e50, 5e50]::DOUBLE[]),
+    (2, []::DOUBLE[]),
+    (3, [1e100, 2e100, 3e100, 4e100, 5e100]::DOUBLE[])
+) AS t(series_id, values)
+ORDER BY series_id;
+----
+1	true
+2	false
+3	true
+
+# Extremely large constant
+query I
+SELECT _ts_forecast([1e200, 1e200, 1e200, 1e200, 1e200], 3) IS NOT NULL;
+----
+true
+
+#---------------------------------------
+# Small Value Tests
+#---------------------------------------
+
+# Very small values (near double min ~2.2e-308)
+query I
+SELECT _ts_forecast([1e-100, 2e-100, 3e-100, 4e-100, 5e-100], 3) IS NOT NULL;
+----
+true
+
+# Forecast with small values should produce reasonable results
+query I
+SELECT length((_ts_forecast([1e-100, 2e-100, 3e-100, 4e-100, 5e-100], 3)).point);
+----
+3
+
+# Small values in batch context
+query II
+SELECT
+    series_id,
+    _ts_forecast(values, 3) IS NOT NULL as has_result
+FROM (VALUES
+    (1, [1e-50, 2e-50, 3e-50, 4e-50, 5e-50]::DOUBLE[]),
+    (2, []::DOUBLE[]),
+    (3, [1e-100, 2e-100, 3e-100, 4e-100, 5e-100]::DOUBLE[])
+) AS t(series_id, values)
+ORDER BY series_id;
+----
+1	true
+2	false
+3	true
+
+# Extremely small constant
+query I
+SELECT _ts_forecast([1e-200, 1e-200, 1e-200, 1e-200, 1e-200], 3) IS NOT NULL;
+----
+true
+
+#---------------------------------------
+# Mixed Scale Tests
+#---------------------------------------
+
+# Mix of large and small values (high dynamic range)
+query I
+SELECT _ts_forecast([1e-50, 1e50, 1e-50, 1e50, 1e-50, 1e50, 1e-50, 1e50, 1e-50, 1e50], 3) IS NOT NULL;
+----
+true
+
+# Transition from small to large
+query I
+SELECT _ts_forecast([1e-10, 1e-5, 1e0, 1e5, 1e10], 3) IS NOT NULL;
+----
+true
+
+# Batch with mixed scales
+query II
+SELECT
+    series_id,
+    _ts_forecast(values, 3) IS NOT NULL as has_result
+FROM (VALUES
+    (1, [1.0, 2.0, 3.0, 4.0, 5.0]::DOUBLE[]),              -- normal scale
+    (2, [1e100, 2e100, 3e100, 4e100, 5e100]::DOUBLE[]),    -- large scale
+    (3, [1e-100, 2e-100, 3e-100, 4e-100, 5e-100]::DOUBLE[]), -- small scale
+    (4, []::DOUBLE[]),                                       -- error
+    (5, [1e-50, 1e0, 1e50, 1e0, 1e-50]::DOUBLE[])          -- mixed scale
+) AS t(series_id, values)
+ORDER BY series_id;
+----
+1	true
+2	true
+3	true
+4	false
+5	true
+
+#---------------------------------------
+# Special Floating Point Values
+#---------------------------------------
+
+# Infinity handling - should return NULL or handle gracefully
+query I
+SELECT _ts_forecast([1.0, 2.0, 'inf'::DOUBLE, 4.0, 5.0], 3) IS NOT NULL;
+----
+true
+
+# Negative infinity
+query I
+SELECT _ts_forecast([1.0, 2.0, '-inf'::DOUBLE, 4.0, 5.0], 3) IS NOT NULL;
+----
+true
+
+# NaN in input - should handle gracefully
+query I
+SELECT _ts_forecast([1.0, 2.0, 'nan'::DOUBLE, 4.0, 5.0], 3) IS NOT NULL;
+----
+true
+
+# Batch with special values
+query II
+SELECT
+    series_id,
+    _ts_forecast(values, 3) IS NOT NULL as has_result
+FROM (VALUES
+    (1, [1.0, 2.0, 3.0, 4.0, 5.0]::DOUBLE[]),
+    (2, [1.0, 'inf'::DOUBLE, 3.0, 4.0, 5.0]::DOUBLE[]),
+    (3, [1.0, 2.0, 3.0, 4.0, 5.0]::DOUBLE[]),
+    (4, [1.0, 'nan'::DOUBLE, 3.0, 4.0, 5.0]::DOUBLE[]),
+    (5, [1.0, 2.0, 3.0, 4.0, 5.0]::DOUBLE[])
+) AS t(series_id, values)
+ORDER BY series_id;
+----
+1	true
+2	true
+3	true
+4	true
+5	true
+
+#---------------------------------------
+# Negative Value Tests
+#---------------------------------------
+
+# All negative values
+query I
+SELECT _ts_forecast([-1.0, -2.0, -3.0, -4.0, -5.0, -6.0, -7.0, -8.0, -9.0, -10.0], 3) IS NOT NULL;
+----
+true
+
+# Large negative values
+query I
+SELECT _ts_forecast([-1e100, -2e100, -3e100, -4e100, -5e100], 3) IS NOT NULL;
+----
+true
+
+# Small negative values
+query I
+SELECT _ts_forecast([-1e-100, -2e-100, -3e-100, -4e-100, -5e-100], 3) IS NOT NULL;
+----
+true
+
+# Mix of positive and negative
+query I
+SELECT _ts_forecast([-5.0, -3.0, -1.0, 1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0], 3) IS NOT NULL;
+----
+true
+
+# Batch with negative values
+query II
+SELECT
+    series_id,
+    _ts_forecast(values, 3) IS NOT NULL as has_result
+FROM (VALUES
+    (1, [-1.0, -2.0, -3.0, -4.0, -5.0]::DOUBLE[]),
+    (2, []::DOUBLE[]),
+    (3, [-1e100, -2e100, -3e100, -4e100, -5e100]::DOUBLE[]),
+    (4, [1.0]::DOUBLE[]),
+    (5, [-5.0, 0.0, 5.0, 10.0, 15.0]::DOUBLE[])
+) AS t(series_id, values)
+ORDER BY series_id;
+----
+1	true
+2	false
+3	true
+4	false
+5	true
+
+#---------------------------------------
+# Comprehensive Extreme Value Batch
+#---------------------------------------
+
+statement ok
+CREATE TABLE extreme_value_batch AS
+SELECT * FROM (VALUES
+    ('normal', [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]::DOUBLE[]),
+    ('large', [1e100, 2e100, 3e100, 4e100, 5e100, 6e100, 7e100, 8e100, 9e100, 1e101]::DOUBLE[]),
+    ('small', [1e-100, 2e-100, 3e-100, 4e-100, 5e-100, 6e-100, 7e-100, 8e-100, 9e-100, 1e-99]::DOUBLE[]),
+    ('negative', [-10.0, -9.0, -8.0, -7.0, -6.0, -5.0, -4.0, -3.0, -2.0, -1.0]::DOUBLE[]),
+    ('mixed_sign', [-5.0, -3.0, -1.0, 1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0]::DOUBLE[]),
+    ('empty', []::DOUBLE[]),
+    ('single', [42.0]::DOUBLE[]),
+    ('with_inf', [1.0, 2.0, 'inf'::DOUBLE, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]::DOUBLE[]),
+    ('with_nan', [1.0, 2.0, 'nan'::DOUBLE, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]::DOUBLE[]),
+    ('large_neg', [-1e100, -2e100, -3e100, -4e100, -5e100, -6e100, -7e100, -8e100, -9e100, -1e101]::DOUBLE[])
+) AS t(scenario, values);
+
+# Count successful forecasts
+query I
+SELECT COUNT(*) FROM extreme_value_batch WHERE _ts_forecast(values, 3) IS NOT NULL;
+----
+8
+
+# List scenarios that fail
+query I
+SELECT scenario FROM extreme_value_batch
+WHERE _ts_forecast(values, 3) IS NULL
+ORDER BY scenario;
+----
+empty
+single
+
+# Verify all successful scenarios produce correct forecast length
+query I
+SELECT COUNT(*) FROM extreme_value_batch
+WHERE _ts_forecast(values, 3) IS NOT NULL
+  AND length((_ts_forecast(values, 3)).point) = 3;
+----
+8
+
+statement ok
+DROP TABLE extreme_value_batch;

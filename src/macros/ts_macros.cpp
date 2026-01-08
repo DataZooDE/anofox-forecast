@@ -230,9 +230,22 @@ ORDER BY group_col, date_col
 
     // ts_fill_gaps: Fill date gaps with NULL values at specified frequency
     // C++ API: ts_fill_gaps(table_name, group_col, date_col, value_col, frequency)
+    // Supports both Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y') and DuckDB INTERVAL ('1 day', '1 hour')
     {"ts_fill_gaps", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH src AS (
+WITH _freq AS (
+    SELECT CASE
+        WHEN frequency ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency, 'd$', ' day'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency, 'h$', ' hour'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency, '(m|min)$', ' minute'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency, 'w$', ' week'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency, 'mo$', ' month'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
+        WHEN frequency ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency, 'y$', ' year'))::INTERVAL
+        ELSE frequency::INTERVAL
+    END AS _interval
+),
+src AS (
     SELECT group_col AS _grp, date_col AS _dt, value_col AS _val
     FROM query_table(source::VARCHAR)
 ),
@@ -247,7 +260,7 @@ date_range AS (
 all_dates AS (
     SELECT
         dr._grp,
-        UNNEST(generate_series(dr._min_dt, dr._max_dt, frequency::INTERVAL)) AS _dt
+        UNNEST(generate_series(dr._min_dt, dr._max_dt, (SELECT _interval FROM _freq))) AS _dt
     FROM date_range dr
 )
 SELECT
@@ -261,9 +274,22 @@ ORDER BY ad._grp, ad._dt
 
     // ts_fill_forward: Fill forward to a target date with NULL values
     // C++ API: ts_fill_forward(table_name, group_col, date_col, value_col, target_date, frequency)
+    // Supports both Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y') and DuckDB INTERVAL ('1 day', '1 hour')
     {"ts_fill_forward", {"source", "group_col", "date_col", "value_col", "target_date", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH src AS (
+WITH _freq AS (
+    SELECT CASE
+        WHEN frequency ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency, 'd$', ' day'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency, 'h$', ' hour'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency, '(m|min)$', ' minute'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency, 'w$', ' week'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency, 'mo$', ' month'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
+        WHEN frequency ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency, 'y$', ' year'))::INTERVAL
+        ELSE frequency::INTERVAL
+    END AS _interval
+),
+src AS (
     SELECT group_col AS _grp, date_col AS _dt, value_col AS _val
     FROM query_table(source::VARCHAR)
 ),
@@ -277,7 +303,7 @@ last_dates AS (
 forward_dates AS (
     SELECT
         ld._grp,
-        UNNEST(generate_series(ld._max_dt + frequency::INTERVAL, date_trunc('second', target_date::TIMESTAMP), frequency::INTERVAL)) AS _dt
+        UNNEST(generate_series(ld._max_dt + (SELECT _interval FROM _freq), date_trunc('second', target_date::TIMESTAMP), (SELECT _interval FROM _freq))) AS _dt
     FROM last_dates ld
     WHERE ld._max_dt < date_trunc('second', target_date::TIMESTAMP)
 )
@@ -294,9 +320,22 @@ ORDER BY 1, 2
     // ts_fill_gaps_operator: High-performance gap filling (API compatible with C++ version)
     // C++ API: ts_fill_gaps_operator(table_name, group_col, date_col, value_col, frequency)
     // Note: This is identical to ts_fill_gaps but named "operator" for C++ API compatibility
+    // Supports both Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y') and DuckDB INTERVAL ('1 day', '1 hour')
     {"ts_fill_gaps_operator", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH src AS (
+WITH _freq AS (
+    SELECT CASE
+        WHEN frequency ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency, 'd$', ' day'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency, 'h$', ' hour'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency, '(m|min)$', ' minute'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency, 'w$', ' week'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency, 'mo$', ' month'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
+        WHEN frequency ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency, 'y$', ' year'))::INTERVAL
+        ELSE frequency::INTERVAL
+    END AS _interval
+),
+src AS (
     SELECT group_col AS _grp, date_col AS _dt, value_col AS _val
     FROM query_table(source::VARCHAR)
 ),
@@ -311,7 +350,7 @@ date_range AS (
 all_dates AS (
     SELECT
         dr._grp,
-        UNNEST(generate_series(dr._min_dt, dr._max_dt, frequency::INTERVAL)) AS _dt
+        UNNEST(generate_series(dr._min_dt, dr._max_dt, (SELECT _interval FROM _freq))) AS _dt
     FROM date_range dr
 )
 SELECT
@@ -426,9 +465,22 @@ FROM forecast_result
 
     // ts_forecast_by: Generate forecasts per group (long format - one row per forecast step)
     // C++ API: ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, params, frequency)
-    {"ts_forecast_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", "params", nullptr}, {{"frequency", "'1 day'"}, {nullptr, nullptr}},
+    // Supports both Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y') and DuckDB INTERVAL ('1 day', '1 hour')
+    {"ts_forecast_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", "params", nullptr}, {{"frequency", "'1d'"}, {nullptr, nullptr}},
 R"(
-WITH forecast_data AS (
+WITH _freq AS (
+    SELECT CASE
+        WHEN frequency ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency, 'd$', ' day'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency, 'h$', ' hour'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency, '(m|min)$', ' minute'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency, 'w$', ' week'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency, 'mo$', ' month'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
+        WHEN frequency ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency, 'y$', ' year'))::INTERVAL
+        ELSE frequency::INTERVAL
+    END AS _interval
+),
+forecast_data AS (
     SELECT
         group_col AS id,
         date_trunc('second', MAX(date_col)::TIMESTAMP) AS last_date,
@@ -439,7 +491,7 @@ WITH forecast_data AS (
 SELECT
     id,
     UNNEST(generate_series(1, len((fcst).point)))::INTEGER AS forecast_step,
-    UNNEST(generate_series(last_date + frequency::INTERVAL, last_date + (len((fcst).point)::INTEGER * EXTRACT(EPOCH FROM frequency::INTERVAL) || ' seconds')::INTERVAL, frequency::INTERVAL))::TIMESTAMP AS date,
+    UNNEST(generate_series(last_date + (SELECT _interval FROM _freq), last_date + (len((fcst).point)::INTEGER * EXTRACT(EPOCH FROM (SELECT _interval FROM _freq)) || ' seconds')::INTERVAL, (SELECT _interval FROM _freq)))::TIMESTAMP AS date,
     UNNEST((fcst).point) AS point_forecast,
     UNNEST((fcst).lower) AS lower_90,
     UNNEST((fcst).upper) AS upper_90,

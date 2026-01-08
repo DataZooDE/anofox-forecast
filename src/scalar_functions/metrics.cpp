@@ -59,7 +59,8 @@ static void TsMaeFunction(DataChunk &args, ExpressionState &state, Vector &resul
         );
 
         if (!success) {
-            throw InvalidInputException("ts_mae failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         result_data[row_idx] = mae_result;
@@ -115,7 +116,8 @@ static void TsMseFunction(DataChunk &args, ExpressionState &state, Vector &resul
         );
 
         if (!success) {
-            throw InvalidInputException("ts_mse failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         result_data[row_idx] = mse_result;
@@ -171,7 +173,8 @@ static void TsRmseFunction(DataChunk &args, ExpressionState &state, Vector &resu
         );
 
         if (!success) {
-            throw InvalidInputException("ts_rmse failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         result_data[row_idx] = rmse_result;
@@ -227,7 +230,8 @@ static void TsMapeFunction(DataChunk &args, ExpressionState &state, Vector &resu
         );
 
         if (!success) {
-            throw InvalidInputException("ts_mape failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         result_data[row_idx] = mape_result;
@@ -283,7 +287,8 @@ static void TsSmapeFunction(DataChunk &args, ExpressionState &state, Vector &res
         );
 
         if (!success) {
-            throw InvalidInputException("ts_smape failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         result_data[row_idx] = smape_result;
@@ -344,7 +349,8 @@ static void TsMaseFunction(DataChunk &args, ExpressionState &state, Vector &resu
         );
 
         if (!success) {
-            throw InvalidInputException("ts_mase failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         result_data[row_idx] = mase_result;
@@ -400,7 +406,8 @@ static void TsR2Function(DataChunk &args, ExpressionState &state, Vector &result
         );
 
         if (!success) {
-            throw InvalidInputException("ts_r2 failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         result_data[row_idx] = r2_result;
@@ -456,7 +463,8 @@ static void TsBiasFunction(DataChunk &args, ExpressionState &state, Vector &resu
         );
 
         if (!success) {
-            throw InvalidInputException("ts_bias failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         result_data[row_idx] = bias_result;
@@ -518,7 +526,8 @@ static void TsRmaeFunction(DataChunk &args, ExpressionState &state, Vector &resu
         );
 
         if (!success) {
-            throw InvalidInputException("ts_rmae failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         result_data[row_idx] = rmae_result;
@@ -585,7 +594,8 @@ static void TsQuantileLossFunction(DataChunk &args, ExpressionState &state, Vect
         );
 
         if (!success) {
-            throw InvalidInputException("ts_quantile_loss failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         result_data[row_idx] = ql_result;
@@ -670,7 +680,8 @@ static void TsMqlossFunction(DataChunk &args, ExpressionState &state, Vector &re
         ExtractListAsDouble(levels_vec, row_idx, levels);
 
         if (quantiles.size() != levels.size()) {
-            throw InvalidInputException("ts_mqloss: number of quantile arrays must match number of levels");
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         // Build array of pointers for FFI
@@ -689,7 +700,8 @@ static void TsMqlossFunction(DataChunk &args, ExpressionState &state, Vector &re
         );
 
         if (!success) {
-            throw InvalidInputException("ts_mqloss failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         result_data[row_idx] = mqloss_result;
@@ -754,7 +766,8 @@ static void TsCoverageFunction(DataChunk &args, ExpressionState &state, Vector &
         );
 
         if (!success) {
-            throw InvalidInputException("ts_coverage failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         result_data[row_idx] = cov_result;

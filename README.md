@@ -3,6 +3,11 @@
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE)
 [![DuckDB](https://img.shields.io/badge/DuckDB-1.4.2+-green.svg)](https://duckdb.org)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
+[![Technical Depth](https://img.shields.io/badge/Technical%20Depth-A%20(93%25)-brightgreen.svg)](#code-quality)
+[![Code Health](https://img.shields.io/badge/Code%20Health-A--(%2090%25)-green.svg)](#code-quality)
+[![Tests](https://img.shields.io/badge/Tests-138%20passed-brightgreen.svg)]()
+
+<sub>Technical Depth and Code Health scores calculated using [PMAT](https://github.com/paiml/paiml-mcp-agent-toolkit)</sub>
 
 
 > [!IMPORTANT]
@@ -259,9 +264,31 @@ wsl --install
 git clone --recurse-submodules https://github.com/DataZooDE/anofox-forecast.git
 cd anofox-forecast
 
+# Set up Git hooks (recommended)
+./scripts/setup-hooks.sh
+
 # Build (choose one)
 make -j$(nproc)              # With Make
 GEN=ninja make release       # With Ninja (faster)
+```
+
+### Code Quality
+
+This project uses Git hooks to ensure code quality before commits:
+
+- **cargo fmt** - Enforces consistent code formatting
+- **cargo clippy** - Catches common mistakes and enforces best practices
+
+Setup the hooks after cloning:
+```bash
+./scripts/setup-hooks.sh
+```
+
+To run checks manually:
+```bash
+cargo fmt --all           # Format code
+cargo clippy --workspace  # Run linter
+cargo test --workspace    # Run tests
 ```
 
 ### Verify Installation

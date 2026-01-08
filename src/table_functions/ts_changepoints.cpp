@@ -63,7 +63,8 @@ static void TsDetectChangepointsFunction(DataChunk &args, ExpressionState &state
         );
 
         if (!success) {
-            throw InvalidInputException("ts_detect_changepoints failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);
@@ -149,7 +150,8 @@ static void TsDetectChangepointsWithParamsFunction(DataChunk &args, ExpressionSt
         );
 
         if (!success) {
-            throw InvalidInputException("ts_detect_changepoints failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);
@@ -249,7 +251,8 @@ static void TsDetectChangepointsBocpdFunction(DataChunk &args, ExpressionState &
         );
 
         if (!success) {
-            throw InvalidInputException("ts_detect_changepoints_bocpd failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);

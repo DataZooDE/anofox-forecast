@@ -27,6 +27,36 @@ void RegisterTsDiffFunction(ExtensionLoader &loader);
 void RegisterTsDetectSeasonalityFunction(ExtensionLoader &loader);
 void RegisterTsAnalyzeSeasonalityFunction(ExtensionLoader &loader);
 void RegisterTsMstlDecompositionFunction(ExtensionLoader &loader);
+
+// Period detection functions (fdars-core integration)
+void RegisterTsDetectPeriodsFunction(ExtensionLoader &loader);
+void RegisterTsEstimatePeriodFftFunction(ExtensionLoader &loader);
+void RegisterTsEstimatePeriodAcfFunction(ExtensionLoader &loader);
+void RegisterTsDetectMultiplePeriodsFunction(ExtensionLoader &loader);
+void RegisterTsAutoperiodFunction(ExtensionLoader &loader);
+void RegisterTsCfdAutoperiodFunction(ExtensionLoader &loader);
+void RegisterTsLombScargleFunction(ExtensionLoader &loader);
+void RegisterTsAicPeriodFunction(ExtensionLoader &loader);
+void RegisterTsSsaPeriodFunction(ExtensionLoader &loader);
+void RegisterTsStlPeriodFunction(ExtensionLoader &loader);
+void RegisterTsMatrixProfilePeriodFunction(ExtensionLoader &loader);
+void RegisterTsSazedPeriodFunction(ExtensionLoader &loader);
+
+// Peak detection functions (fdars-core integration)
+void RegisterTsDetectPeaksFunction(ExtensionLoader &loader);
+void RegisterTsAnalyzePeakTimingFunction(ExtensionLoader &loader);
+
+// Detrending and decomposition functions (fdars-core integration)
+void RegisterTsDetrendFunction(ExtensionLoader &loader);
+void RegisterTsDecomposeSeasonalFunction(ExtensionLoader &loader);
+
+// Extended seasonality functions (fdars-core integration)
+void RegisterTsSeasonalStrengthFunction(ExtensionLoader &loader);
+void RegisterTsSeasonalStrengthWindowedFunction(ExtensionLoader &loader);
+void RegisterTsClassifySeasonalityFunction(ExtensionLoader &loader);
+void RegisterTsDetectSeasonalityChangesFunction(ExtensionLoader &loader);
+void RegisterTsInstantaneousPeriodFunction(ExtensionLoader &loader);
+void RegisterTsDetectAmplitudeModulationFunction(ExtensionLoader &loader);
 void RegisterTsDetectChangepointsFunction(ExtensionLoader &loader);
 void RegisterTsDetectChangepointsBocpdFunction(ExtensionLoader &loader);
 void RegisterTsDetectChangepointsByFunction(ExtensionLoader &loader);

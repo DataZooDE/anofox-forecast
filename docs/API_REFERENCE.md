@@ -8,11 +8,35 @@
 
 ## Overview
 
-The Anofox Forecast extension provides time series forecasting capabilities directly within DuckDB. All computations are performed by the **anofox-fcst-core** library, implemented in Rust.
+The Anofox Forecast extension brings comprehensive time series analysis and forecasting capabilities directly into DuckDB. It enables analysts and data scientists to perform sophisticated time series operations using familiar SQL syntax, without needing external tools or data movement.
+
+**Key Benefits:**
+- **SQL-native**: All operations are expressed as SQL functions and macros
+- **High Performance**: Core algorithms implemented in Rust for speed and safety
+- **Comprehensive**: 32 forecasting models, 117 features, seasonality detection, changepoint detection
+- **Flexible API**: Three API styles to fit different workflows
+
+All computations are performed by the **anofox-fcst-core** library, implemented in Rust.
+
+### Quick Start
+
+```sql
+-- Load the extension
+LOAD anofox_forecast;
+
+-- Generate forecasts for multiple products
+SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'AutoETS', 30, MAP{});
+
+-- Analyze seasonality
+SELECT ts_detect_periods(LIST(quantity ORDER BY date)) FROM sales GROUP BY product_id;
+
+-- Compute time series statistics
+SELECT * FROM ts_stats('sales', product_id, date, quantity);
+```
 
 ### API Variants
 
-The extension provides **three API styles**:
+The extension provides **three API styles** to accommodate different use cases:
 
 #### 1. Scalar Functions (Array-Based)
 Low-level functions that operate on arrays. Composable with `GROUP BY` and `LIST()`.
@@ -79,23 +103,35 @@ Both forms are identical in functionality.
    - [Missing Value Imputation](#missing-value-imputation)
    - [Differencing](#differencing)
 4. [Seasonality](#seasonality)
-   - [Seasonality Detection](#seasonality-detection)
+   - [Period Detection](#period-detection)
    - [Seasonality Analysis](#seasonality-analysis)
-5. [Time Series Decomposition](#time-series-decomposition)
+   - [Seasonal Strength](#seasonal-strength)
+   - [Windowed Seasonal Strength](#windowed-seasonal-strength)
+   - [Seasonality Classification](#seasonality-classification)
+   - [Seasonality Change Detection](#seasonality-change-detection)
+   - [Instantaneous Period](#instantaneous-period)
+   - [Amplitude Modulation Detection](#amplitude-modulation-detection)
+5. [Peak Detection](#peak-detection)
+   - [Detect Peaks](#detect-peaks)
+   - [Peak Timing Analysis](#peak-timing-analysis)
+6. [Detrending](#detrending)
+   - [Detrend](#detrend)
+7. [Time Series Decomposition](#time-series-decomposition)
+   - [Decompose](#decompose)
    - [MSTL Decomposition](#mstl-decomposition)
-6. [Changepoint Detection](#changepoint-detection)
+8. [Changepoint Detection](#changepoint-detection)
    - [Changepoint Detection Aggregate](#changepoint-detection-aggregate)
-7. [Feature Extraction](#feature-extraction)
+9. [Feature Extraction](#feature-extraction)
    - [Extract Features](#extract-features)
    - [List Available Features](#list-available-features)
    - [Feature Extraction Aggregate](#feature-extraction-aggregate)
    - [Feature Configuration](#feature-configuration)
-8. [Forecasting](#forecasting)
+10. [Forecasting](#forecasting)
    - [ts_forecast (Scalar)](#ts_forecast-scalar)
    - [ts_forecast (Table Macro)](#anofox_fcst_ts_forecast--ts_forecast-table-macro)
    - [ts_forecast_by (Table Macro)](#anofox_fcst_ts_forecast_by--ts_forecast_by-table-macro)
    - [ts_forecast_agg (Aggregate)](#anofox_fcst_ts_forecast_agg--ts_forecast_agg-aggregate-function)
-9. [Evaluation Metrics](#evaluation-metrics)
+11. [Evaluation Metrics](#evaluation-metrics)
    - [Mean Absolute Error (MAE)](#mean-absolute-error-mae)
    - [Mean Squared Error (MSE)](#mean-squared-error-mse)
    - [Root Mean Squared Error (RMSE)](#root-mean-squared-error-rmse)
@@ -113,7 +149,40 @@ Both forms are identical in functionality.
 
 ## Table Macros (Table-Level API)
 
-Table macros provide a high-level API for working directly with tables. Column names are passed as identifiers (unquoted).
+Table macros provide a high-level API for working directly with tables. They are the **recommended way** to use the extension for most use cases, offering a clean SQL interface without needing to manually aggregate data into arrays.
+
+### How Table Macros Work
+
+Table macros take a **table name as a string** and **column names as unquoted identifiers**. They automatically handle:
+- Grouping data by the specified group column
+- Ordering data by the date column
+- Aggregating values into arrays for processing
+- Unpacking results back into tabular format
+
+**Syntax Pattern:**
+```sql
+SELECT * FROM macro_name('table_name', group_col, date_col, value_col, ...);
+```
+
+**Key Points:**
+- Table name is a **quoted string**: `'my_table'`
+- Column names are **unquoted identifiers**: `product_id`, `date`, `value`
+- Results are returned as a table that can be filtered, joined, or further processed
+
+**Example Comparison:**
+```sql
+-- Using table macro (recommended)
+SELECT * FROM ts_stats('sales_data', product_id, sale_date, quantity);
+
+-- Equivalent using scalar function with GROUP BY
+SELECT
+    product_id,
+    ts_stats(LIST(quantity ORDER BY sale_date)) AS stats
+FROM sales_data
+GROUP BY product_id;
+```
+
+---
 
 ### ts_stats (Table Macro)
 
@@ -186,6 +255,235 @@ SELECT * FROM ts_fill_nulls_forward(source, group_col, date_col, value_col);
 SELECT * FROM ts_fill_nulls_backward(source, group_col, date_col, value_col);
 SELECT * FROM ts_fill_nulls_mean(source, group_col, date_col, value_col);
 ```
+
+### ts_fill_gaps
+
+Fills gaps in time series data by generating a complete date sequence at a specified frequency. Missing timestamps are inserted with NULL values, enabling proper handling of irregular time series.
+
+**Purpose:**
+Time series data often has missing observations due to weekends, holidays, sensor failures, or irregular data collection. Many forecasting algorithms and statistical methods require regularly-spaced observations. This function creates a complete, regular time grid with NULLs where data was missing, which can then be imputed using functions like `ts_fill_nulls_forward` or `ts_fill_nulls_mean`.
+
+```sql
+SELECT * FROM ts_fill_gaps(source, group_col, date_col, value_col, frequency);
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Source table name (quoted string) |
+| `group_col` | IDENTIFIER | Column for grouping series (unquoted) |
+| `date_col` | IDENTIFIER | Date/timestamp column (unquoted) |
+| `value_col` | IDENTIFIER | Value column (unquoted) |
+| `frequency` | VARCHAR | Interval frequency (see [Frequency Formats](#frequency-formats)) |
+
+**Returns:** A table with columns:
+- `group_col` - The grouping identifier
+- `time_col` - Complete timestamp sequence (min to max per group)
+- `value_col` - Original values where they existed, NULL for inserted timestamps
+
+**Example:**
+```sql
+-- Sample data with gaps (missing Jan 2nd)
+CREATE TABLE sales_data AS
+SELECT 'ProductA' as product_id, '2024-01-01'::TIMESTAMP as sale_date, 100.0 as quantity
+UNION ALL SELECT 'ProductA', '2024-01-03'::TIMESTAMP, 150.0;
+
+-- Fill the gap at daily frequency
+SELECT * FROM ts_fill_gaps('sales_data', product_id, sale_date, quantity, '1d');
+-- Result:
+-- | product_id | time_col            | value_col |
+-- |------------|---------------------|-----------|
+-- | ProductA   | 2024-01-01 00:00:00 | 100.0     |
+-- | ProductA   | 2024-01-02 00:00:00 | NULL      |  <- Gap filled with NULL
+-- | ProductA   | 2024-01-03 00:00:00 | 150.0     |
+
+-- Chain with imputation to fill the NULL values
+WITH filled AS (
+    SELECT * FROM ts_fill_gaps('sales_data', product_id, sale_date, quantity, '1d')
+)
+SELECT
+    group_col,
+    time_col,
+    ts_fill_nulls_forward(LIST(value_col ORDER BY time_col)) AS imputed_values
+FROM filled
+GROUP BY group_col;
+```
+
+**Notes:**
+- The function operates per group, finding the min and max timestamps for each group
+- Only gaps within the observed range are filled (no extrapolation)
+- Use `ts_fill_forward` to extend the series beyond the last observation
+
+---
+
+### ts_fill_forward
+
+Extends time series data forward to a target date at a specified frequency. All extended timestamps receive NULL values, which is useful for preparing forecast horizons or aligning multiple series to a common end date.
+
+**Purpose:**
+When preparing data for forecasting, you often need to create placeholder rows for future timestamps that will receive forecasted values. This function extends each series from its last observation to a specified target date, creating the structure needed for forecast output.
+
+```sql
+SELECT * FROM ts_fill_forward(source, group_col, date_col, value_col, target_date, frequency);
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Source table name (quoted string) |
+| `group_col` | IDENTIFIER | Column for grouping series (unquoted) |
+| `date_col` | IDENTIFIER | Date/timestamp column (unquoted) |
+| `value_col` | IDENTIFIER | Value column (unquoted) |
+| `target_date` | TIMESTAMP | Target date to extend series to |
+| `frequency` | VARCHAR | Interval frequency (see [Frequency Formats](#frequency-formats)) |
+
+**Returns:** A table with all original rows plus new rows extending to `target_date`:
+- `group_col` - The grouping identifier
+- `time_col` - Timestamps including extended future dates
+- `value_col` - Original values for historical data, NULL for future timestamps
+
+**Example:**
+```sql
+-- Historical data ending Jan 2nd
+CREATE TABLE sales_data AS
+SELECT 'ProductA' as product_id, '2024-01-01'::TIMESTAMP as sale_date, 100.0 as quantity
+UNION ALL SELECT 'ProductA', '2024-01-02'::TIMESTAMP, 110.0;
+
+-- Extend to Jan 5th for a 3-day forecast horizon
+SELECT * FROM ts_fill_forward(
+    'sales_data', product_id, sale_date, quantity,
+    '2024-01-05'::TIMESTAMP, '1d'
+);
+-- Result:
+-- | product_id | time_col            | value_col |
+-- |------------|---------------------|-----------|
+-- | ProductA   | 2024-01-01 00:00:00 | 100.0     |
+-- | ProductA   | 2024-01-02 00:00:00 | 110.0     |
+-- | ProductA   | 2024-01-03 00:00:00 | NULL      |  <- Extended
+-- | ProductA   | 2024-01-04 00:00:00 | NULL      |  <- Extended
+-- | ProductA   | 2024-01-05 00:00:00 | NULL      |  <- Extended
+
+-- Typical workflow: Prepare forecast table structure
+WITH forecast_ready AS (
+    SELECT * FROM ts_fill_forward(
+        'sales_data', product_id, sale_date, quantity,
+        '2024-01-05'::TIMESTAMP, '1d'
+    )
+)
+SELECT
+    group_col,
+    time_col,
+    CASE
+        WHEN value_col IS NOT NULL THEN value_col
+        ELSE 0  -- Placeholder for forecast values
+    END AS value
+FROM forecast_ready;
+```
+
+**Notes:**
+- Original data is preserved unchanged
+- Only extends forward from each group's maximum timestamp
+- If `target_date` is before or equal to the max timestamp of a group, no extension occurs for that group
+- Combine with `ts_fill_gaps` to handle both internal gaps and forward extension
+
+---
+
+### ts_fill_gaps_operator
+
+Low-level operator version of `ts_fill_gaps`. Functionally identical but named for internal consistency with the operator pattern.
+
+```sql
+SELECT * FROM ts_fill_gaps_operator(source, group_col, date_col, value_col, frequency);
+```
+
+**Parameters:** Same as `ts_fill_gaps`
+
+---
+
+### Frequency Formats
+
+The `frequency` parameter in gap-filling and forecasting functions supports two formats for backward compatibility with the C++ API.
+
+#### Polars-style (Compact Format)
+
+The compact format uses a numeric prefix followed by a unit suffix. This format is **recommended** for compatibility with the original C++ API.
+
+| Unit | Suffix | Examples | Description |
+|------|--------|----------|-------------|
+| Minutes | `m` or `min` | `'30m'`, `'15min'` | Minutes (1-59 typical) |
+| Hours | `h` | `'1h'`, `'6h'`, `'12h'` | Hours |
+| Days | `d` | `'1d'`, `'7d'`, `'14d'` | Calendar days |
+| Weeks | `w` | `'1w'`, `'2w'` | Weeks (7 days) |
+| Months | `mo` | `'1mo'`, `'3mo'`, `'6mo'` | Calendar months |
+| Quarters | `q` | `'1q'`, `'2q'` | Quarters (converted to 3/6 months) |
+| Years | `y` | `'1y'` | Calendar years |
+
+**Examples:**
+```sql
+-- Daily data (most common for business data)
+SELECT * FROM ts_fill_gaps('sales', product_id, date, value, '1d');
+
+-- Hourly sensor data
+SELECT * FROM ts_fill_gaps('sensors', sensor_id, timestamp, reading, '1h');
+
+-- Weekly aggregates
+SELECT * FROM ts_fill_gaps('weekly_sales', store_id, week_start, revenue, '1w');
+
+-- Monthly financial data
+SELECT * FROM ts_fill_gaps('financials', account_id, month_end, balance, '1mo');
+
+-- Quarterly reporting
+SELECT * FROM ts_fill_gaps('quarterly', division_id, quarter_end, revenue, '1q');
+
+-- 15-minute intervals (e.g., energy data)
+SELECT * FROM ts_fill_gaps('energy', meter_id, timestamp, kwh, '15m');
+```
+
+#### DuckDB INTERVAL (Native Format)
+
+The native DuckDB INTERVAL format provides full flexibility and supports all DuckDB interval syntax.
+
+| Unit | Examples | Description |
+|------|----------|-------------|
+| Seconds | `'1 second'`, `'30 seconds'` | Seconds (rare for time series) |
+| Minutes | `'1 minute'`, `'15 minutes'` | Minutes |
+| Hours | `'1 hour'`, `'6 hours'` | Hours |
+| Days | `'1 day'`, `'7 days'` | Calendar days |
+| Weeks | `'1 week'`, `'2 weeks'` | Weeks |
+| Months | `'1 month'`, `'3 months'` | Calendar months |
+| Years | `'1 year'` | Calendar years |
+
+**Examples:**
+```sql
+-- Equivalent to '1d'
+SELECT * FROM ts_fill_gaps('sales', product_id, date, value, '1 day');
+
+-- Equivalent to '6h'
+SELECT * FROM ts_fill_gaps('sensors', sensor_id, timestamp, reading, '6 hours');
+
+-- Equivalent to '3mo'
+SELECT * FROM ts_fill_gaps('quarterly', division_id, date, revenue, '3 months');
+```
+
+#### Conversion Table
+
+| Polars-style | DuckDB INTERVAL | Typical Use Case |
+|--------------|-----------------|------------------|
+| `'1d'` | `'1 day'` | Daily sales, transactions |
+| `'7d'` | `'7 days'` | Weekly data (explicit days) |
+| `'1w'` | `'1 week'` | Weekly data (semantic week) |
+| `'1h'` | `'1 hour'` | Hourly sensor data |
+| `'15m'` | `'15 minutes'` | High-frequency IoT, energy |
+| `'1mo'` | `'1 month'` | Monthly financials |
+| `'3mo'` | `'3 months'` | Quarterly data |
+| `'1q'` | `'3 months'` | Quarterly data |
+| `'1y'` | `'1 year'` | Annual data |
+
+**Notes:**
+- Both formats are automatically detected and converted internally
+- Polars-style is recommended for portability with C++ API code
+- Use DuckDB INTERVAL for complex intervals not covered by Polars-style
+- The quarter suffix `q` is converted to months (1q = 3 months, 2q = 6 months)
 
 ### ts_diff (Table Macro)
 
@@ -529,31 +827,558 @@ SELECT ts_diff([1.0, 2.0, 4.0, 7.0, 11.0], 2);
 
 ## Seasonality
 
-### Seasonality Detection
+### Period Detection
 
-**ts_detect_seasonality** (alias: `anofox_fcst_ts_detect_seasonality`)
+**ts_detect_periods** (alias: `anofox_fcst_ts_detect_periods`)
 
-Detects seasonal periods using autocorrelation analysis.
+Detects seasonal periods using multiple methods from fdars-core.
+
+> **See also:** [Individual Period Detection Methods](#individual-period-detection-methods) for direct access to 11 specialized algorithms with full control over parameters and detailed return values including `period`, `frequency`, `power`, and `confidence` fields.
 
 **Signature:**
 ```sql
-ts_detect_seasonality(values DOUBLE[]) → INTEGER[]
+ts_detect_periods(values DOUBLE[]) → STRUCT
+ts_detect_periods(values DOUBLE[], method VARCHAR) → STRUCT
 ```
 
-**Returns:** Array of detected seasonal periods, sorted by strength.
+**Parameters:**
+- `values`: Time series values (DOUBLE[])
+- `method`: Detection method (VARCHAR, optional, default: 'auto')
+  - `'fft'` - FFT periodogram-based estimation
+  - `'acf'` - Autocorrelation function approach
+  - `'regression'` - Fourier regression grid search
+  - `'multi'` - Iterative residual subtraction for concurrent periodicities
+  - `'wavelet'` - Wavelet-based period detection
+  - `'auto'` - Automatic method selection (default)
+
+**Returns:**
+```sql
+STRUCT(
+    periods          INTEGER[],     -- Detected periods sorted by strength
+    confidences      DOUBLE[],      -- Confidence score for each period (0-1)
+    primary_period   INTEGER,       -- Dominant period
+    method_used      VARCHAR        -- Method that was used
+)
+```
 
 **Example:**
 ```sql
--- Detect weekly and monthly patterns
-SELECT ts_detect_seasonality(LIST(value ORDER BY date)) AS periods
-FROM sales
-GROUP BY product_id;
--- Returns: [7, 30] for weekly and monthly patterns
+-- Detect periods using FFT
+SELECT ts_detect_periods(LIST(value ORDER BY date), 'fft') AS periods
+FROM sales GROUP BY product_id;
 
--- Simple example with repeating pattern
-SELECT ts_detect_seasonality([1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[]);
--- Returns: [4] (period of 4)
+-- Default auto-selection
+SELECT (ts_detect_periods([1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[])).primary_period;
+-- Returns: 4
+
+-- Access just the periods array
+SELECT (ts_detect_periods([1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[])).periods;
+-- Returns: [4]
 ```
+
+---
+
+### Individual Period Detection Methods
+
+The extension provides 11 specialized period detection algorithms, each optimized for different data characteristics. These methods are available through the `ts_detect_periods()` wrapper or can be called individually for more control.
+
+#### Method Comparison
+
+| Method | Speed | Noise Robustness | Best Use Case | Min Observations |
+|--------|-------|------------------|---------------|------------------|
+| FFT | Very Fast | Low | Clean signals | 4 |
+| ACF | Fast | Medium | Cyclical patterns | 4 |
+| Autoperiod | Fast | High | General purpose | 8 |
+| CFD-Autoperiod | Fast | Very High | Trending data | 9 |
+| Lomb-Scargle | Medium | High | Irregular sampling | 4 |
+| AIC | Slow | High | Model selection | 8 |
+| SSA | Medium | Medium | Complex patterns | 16 |
+| STL | Slow | Medium | Decomposition | 16 |
+| Matrix Profile | Slow | Very High | Pattern repetition | 32 |
+| SAZED | Medium | High | Frequency resolution | 16 |
+| Multi-Period | Medium | High | Multiple seasonalities | 8 |
+
+---
+
+#### ts_estimate_period_fft
+
+**Description:**
+Fast Fourier Transform (FFT) based periodogram analysis that identifies the dominant frequency in the signal by computing the discrete Fourier transform and finding the frequency bin with maximum spectral power.
+
+**Signature:**
+```sql
+ts_estimate_period_fft(values DOUBLE[]) → STRUCT
+```
+
+**Mathematical Formula:**
+```
+DFT: X[k] = Σ_{t=0}^{N-1} x[t] · e^{-2πikt/N}
+
+Power Spectrum: P[k] = |X[k]|² / N
+
+Period: p = N / k_max  where k_max = argmax_{k>0} P[k]
+
+Confidence: C = P[k_max] / mean(P)
+```
+
+**Returns:**
+```sql
+STRUCT(
+    period     DOUBLE,   -- Estimated period (in samples)
+    frequency  DOUBLE,   -- Dominant frequency (1/period)
+    power      DOUBLE,   -- Power at the dominant frequency
+    confidence DOUBLE,   -- Ratio of peak power to mean power
+    method     VARCHAR   -- "fft"
+)
+```
+
+**Example:**
+```sql
+SELECT ts_estimate_period_fft([1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[]);
+-- Returns: {period: 4.0, frequency: 0.25, power: ..., confidence: ..., method: "fft"}
+```
+
+**Reference:**
+- Cooley, J.W. & Tukey, J.W. (1965). "An Algorithm for the Machine Calculation of Complex Fourier Series." *Mathematics of Computation*, 19(90), 297-301.
+
+---
+
+#### ts_estimate_period_acf
+
+**Description:**
+Autocorrelation Function (ACF) based period detection that measures the correlation of the signal with lagged versions of itself. The period is identified as the first significant peak in the autocorrelation function after lag 0.
+
+**Signature:**
+```sql
+ts_estimate_period_acf(values DOUBLE[]) → STRUCT
+ts_estimate_period_acf(values DOUBLE[], max_lag INTEGER) → STRUCT
+```
+
+**Mathematical Formula:**
+```
+ACF(k) = Cov(X_t, X_{t+k}) / Var(X)
+       = Σ_{t=1}^{n-k} (x_t - μ)(x_{t+k} - μ) / Σ_{t=1}^{n} (x_t - μ)²
+
+Period: p = argmax_{k>min_lag} ACF(k)  where ACF(k) > threshold
+```
+
+**Returns:** Same as `ts_estimate_period_fft` (period, frequency, power, confidence, method)
+
+**Example:**
+```sql
+SELECT ts_estimate_period_acf([1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[]);
+```
+
+**Reference:**
+- Box, G.E.P. & Jenkins, G.M. (1976). *Time Series Analysis: Forecasting and Control*. Holden-Day.
+
+---
+
+#### ts_autoperiod
+
+**Description:**
+A hybrid two-stage approach combining FFT for initial period detection with ACF validation. The FFT provides a fast initial estimate, while ACF validation confirms the periodicity exists in the time domain.
+
+**Signature:**
+```sql
+ts_autoperiod(values DOUBLE[]) → STRUCT
+ts_autoperiod(values DOUBLE[], acf_threshold DOUBLE) → STRUCT
+```
+
+**Mathematical Process:**
+```
+Stage 1 (FFT): p_fft = estimate_period_fft(x)
+Stage 2 (ACF Validation): v = ACF(p_fft)
+Detection: detected = (v > threshold)  [default threshold = 0.3]
+```
+
+**Returns:**
+```sql
+STRUCT(
+    period         DOUBLE,   -- Detected period (from FFT)
+    fft_confidence DOUBLE,   -- FFT peak-to-mean power ratio
+    acf_validation DOUBLE,   -- ACF value at detected period
+    detected       BOOLEAN,  -- TRUE if acf_validation > threshold
+    method         VARCHAR   -- "autoperiod"
+)
+```
+
+**Example:**
+```sql
+SELECT ts_autoperiod([1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[]);
+-- Check if period was confidently detected
+SELECT (ts_autoperiod(LIST(value ORDER BY date))).detected FROM sales GROUP BY product_id;
+```
+
+**Reference:**
+- Vlachos, M., Yu, P., & Castelli, V. (2005). "On Periodicity Detection and Structural Periodic Similarity." *SIAM International Conference on Data Mining*.
+
+---
+
+#### ts_cfd_autoperiod
+
+**Description:**
+Clustered Filtered Detrended (CFD) variant of autoperiod that applies first-differencing before FFT analysis to remove linear trends, making it more robust for trending time series.
+
+**Signature:**
+```sql
+ts_cfd_autoperiod(values DOUBLE[]) → STRUCT
+ts_cfd_autoperiod(values DOUBLE[], acf_threshold DOUBLE) → STRUCT
+```
+
+**Mathematical Process:**
+```
+Stage 1 (Differencing): y[t] = x[t+1] - x[t]
+Stage 2 (FFT on differenced): p = estimate_period_fft(y)
+Stage 3 (ACF on original): v = ACF_original(p)
+Detection: detected = (v > threshold)  [default threshold = 0.25]
+```
+
+**Returns:** Same as `ts_autoperiod` (period, fft_confidence, acf_validation, detected, method)
+
+**Example:**
+```sql
+-- Better for data with trends
+SELECT ts_cfd_autoperiod([1,3,5,7,2,4,6,8,3,5,7,9]::DOUBLE[]);
+```
+
+**Reference:**
+- Elfeky, M.G., Aref, W.G., & Elmagarmid, A.K. (2005). "Periodicity Detection in Time Series Databases." *IEEE Transactions on Knowledge and Data Engineering*, 17(7), 875-887.
+
+---
+
+#### ts_estimate_period_lomb_scargle
+
+**Description:**
+The Lomb-Scargle periodogram is a generalization of the Fourier transform designed for unevenly sampled data. It fits sinusoids at each test frequency and provides statistical significance through the false alarm probability.
+
+**Signature:**
+```sql
+ts_estimate_period_lomb_scargle(values DOUBLE[]) → STRUCT
+ts_estimate_period_lomb_scargle(values DOUBLE[], times DOUBLE[]) → STRUCT
+ts_estimate_period_lomb_scargle(values DOUBLE[], times DOUBLE[], min_period DOUBLE, max_period DOUBLE) → STRUCT
+```
+
+**Mathematical Formula:**
+```
+τ(ω) = arctan(Σsin(2ωt_i) / Σcos(2ωt_i)) / (2ω)
+
+P(ω) = (1/2σ²) · [ (Σy_i·cos(ω(t_i-τ)))² / Σcos²(ω(t_i-τ))
+                 + (Σy_i·sin(ω(t_i-τ)))² / Σsin²(ω(t_i-τ)) ]
+
+False Alarm Probability: FAP ≈ 1 - (1 - e^{-P})^M
+```
+
+**Returns:**
+```sql
+STRUCT(
+    period           DOUBLE,   -- Detected period
+    frequency        DOUBLE,   -- Corresponding frequency
+    power            DOUBLE,   -- Normalized power at peak
+    false_alarm_prob DOUBLE,   -- FAP (lower = more significant)
+    method           VARCHAR   -- "lomb_scargle"
+)
+```
+
+**Example:**
+```sql
+-- For irregularly sampled data
+SELECT ts_estimate_period_lomb_scargle(
+    [1.0, 2.1, 0.9, 2.0, 1.1]::DOUBLE[],
+    [0.0, 0.25, 0.5, 0.75, 1.0]::DOUBLE[]  -- irregular times
+);
+```
+
+**Reference:**
+- Lomb, N.R. (1976). "Least-squares frequency analysis of unequally spaced data." *Astrophysics and Space Science*, 39, 447-462.
+- Scargle, J.D. (1982). "Studies in astronomical time series analysis II." *The Astrophysical Journal*, 263, 835-853.
+
+---
+
+#### ts_estimate_period_aic
+
+**Description:**
+Information criterion-based period selection that fits sinusoidal models at multiple candidate periods and selects the period minimizing the Akaike Information Criterion (AIC), balancing model fit against complexity.
+
+**Signature:**
+```sql
+ts_estimate_period_aic(values DOUBLE[]) → STRUCT
+ts_estimate_period_aic(values DOUBLE[], min_period DOUBLE, max_period DOUBLE) → STRUCT
+ts_estimate_period_aic(values DOUBLE[], min_period DOUBLE, max_period DOUBLE, n_candidates INTEGER) → STRUCT
+```
+
+**Mathematical Formula:**
+```
+Model: y_t = μ + Σ_{k=1}^{K} [a_k·cos(2πkt/p) + b_k·sin(2πkt/p)] + ε_t
+
+RSS = Σ(y_t - ŷ_t)²
+
+AIC = n·ln(RSS/n) + 2·(2K + 1)
+BIC = n·ln(RSS/n) + (2K + 1)·ln(n)
+R² = 1 - RSS / SS_total
+
+Best period: p* = argmin_p AIC(p)
+```
+
+**Returns:**
+```sql
+STRUCT(
+    period    DOUBLE,   -- Best period (minimum AIC)
+    aic       DOUBLE,   -- AIC of best model
+    bic       DOUBLE,   -- BIC of best model
+    rss       DOUBLE,   -- Residual sum of squares
+    r_squared DOUBLE,   -- Coefficient of determination
+    method    VARCHAR   -- "aic"
+)
+```
+
+**Example:**
+```sql
+SELECT ts_estimate_period_aic([1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[]);
+-- Get R² to assess fit quality
+SELECT (ts_estimate_period_aic(LIST(value ORDER BY date))).r_squared FROM sales;
+```
+
+**Reference:**
+- Akaike, H. (1974). "A new look at the statistical model identification." *IEEE Transactions on Automatic Control*, 19(6), 716-723.
+
+---
+
+#### ts_estimate_period_ssa
+
+**Description:**
+Singular Spectrum Analysis (SSA) decomposes the time series using eigenvalue decomposition of the trajectory matrix. Periodic components appear as paired eigenvalues, and the period is estimated from eigenvector zero-crossings.
+
+**Signature:**
+```sql
+ts_estimate_period_ssa(values DOUBLE[]) → STRUCT
+ts_estimate_period_ssa(values DOUBLE[], window_size INTEGER) → STRUCT
+```
+
+**Mathematical Formula:**
+```
+Trajectory Matrix: X[i,j] = x[i+j-1]  for i=1..L, j=1..K  (L=window, K=n-L+1)
+
+Covariance: C = XX^T / K
+
+Eigendecomposition: C = UΛU^T
+
+Period from eigenvector u_k: p ≈ 2L / (zero_crossings(u_k))
+
+Variance explained: (λ_1 + λ_2) / Σλ_i
+```
+
+**Returns:**
+```sql
+STRUCT(
+    period             DOUBLE,   -- Primary detected period
+    variance_explained DOUBLE,   -- By first periodic component pair
+    n_eigenvalues      UBIGINT,  -- Number of eigenvalues returned
+    method             VARCHAR   -- "ssa"
+)
+```
+
+**Example:**
+```sql
+SELECT ts_estimate_period_ssa([1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[]);
+```
+
+**Reference:**
+- Golyandina, N., Nekrutkin, V., & Zhigljavsky, A. (2001). *Analysis of Time Series Structure: SSA and Related Techniques*. Chapman & Hall/CRC.
+
+---
+
+#### ts_estimate_period_stl
+
+**Description:**
+STL (Seasonal and Trend decomposition using LOESS) based period detection. Multiple candidate periods are tested, and the period maximizing the seasonal strength metric is selected.
+
+**Signature:**
+```sql
+ts_estimate_period_stl(values DOUBLE[]) → STRUCT
+ts_estimate_period_stl(values DOUBLE[], min_period INTEGER, max_period INTEGER) → STRUCT
+```
+
+**Mathematical Formula:**
+```
+STL Decomposition: Y_t = T_t + S_t + R_t  (Trend + Seasonal + Remainder)
+
+Seasonal Strength: F_S = max(0, 1 - Var(R) / Var(S + R))
+Trend Strength: F_T = max(0, 1 - Var(R) / Var(T + R))
+
+Best period: p* = argmax_p F_S(p)
+```
+
+**Returns:**
+```sql
+STRUCT(
+    period            DOUBLE,   -- Best period (max seasonal strength)
+    seasonal_strength DOUBLE,   -- F_S at best period (0-1)
+    trend_strength    DOUBLE,   -- F_T at best period (0-1)
+    method            VARCHAR   -- "stl"
+)
+```
+
+**Example:**
+```sql
+SELECT ts_estimate_period_stl([1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[]);
+-- Get seasonal strength interpretation:
+-- 0.0-0.3: Weak, 0.3-0.6: Moderate, 0.6-0.8: Strong, 0.8-1.0: Very strong
+```
+
+**Reference:**
+- Cleveland, R.B., Cleveland, W.S., McRae, J.E., & Terpenning, I. (1990). "STL: A Seasonal-Trend Decomposition Procedure Based on Loess." *Journal of Official Statistics*, 6(1), 3-73.
+- Wang, X., Smith, K., & Hyndman, R. (2006). "Characteristic-based clustering for time series data." *Data Mining and Knowledge Discovery*, 13(3), 335-364.
+
+---
+
+#### ts_estimate_period_matrix_profile
+
+**Description:**
+Matrix Profile based period detection finds repeating patterns (motifs) by computing z-normalized Euclidean distances between all subsequences. The most common lag between nearest-neighbor subsequences indicates the period.
+
+**Signature:**
+```sql
+ts_estimate_period_matrix_profile(values DOUBLE[]) → STRUCT
+ts_estimate_period_matrix_profile(values DOUBLE[], subsequence_length INTEGER) → STRUCT
+```
+
+**Mathematical Formula:**
+```
+Z-normalization: z_i = (X_i - μ_i) / σ_i  for each subsequence
+
+Distance: d(i,j) = √(Σ(z_i - z_j)²)
+
+Matrix Profile: MP[i] = min_{j: |i-j| > exclusion} d(i,j)
+Profile Index: PI[i] = argmin_{j: |i-j| > exclusion} d(i,j)
+
+Lag histogram: H[k] = count of (|i - PI[i]| = k)
+Period: p = argmax_k H[k]
+```
+
+**Returns:**
+```sql
+STRUCT(
+    period             DOUBLE,   -- Most common motif lag
+    confidence         DOUBLE,   -- Fraction of motifs at this lag
+    n_motifs           UBIGINT,  -- Number of motif pairs found
+    subsequence_length UBIGINT,  -- Subsequence length used
+    method             VARCHAR   -- "matrix_profile"
+)
+```
+
+**Example:**
+```sql
+-- Best for detecting repeating patterns regardless of amplitude
+SELECT ts_estimate_period_matrix_profile(LIST(value ORDER BY date)) FROM sensor_data;
+```
+
+**Reference:**
+- Yeh, C.C.M., et al. (2016). "Matrix Profile I: All Pairs Similarity Joins for Time Series." *IEEE ICDM*.
+- Yeh, C.C.M., et al. (2017). "Matrix Profile VI: Meaningful Multidimensional Motif Discovery." *IEEE ICDM*.
+
+---
+
+#### ts_estimate_period_sazed
+
+**Description:**
+SAZED (Spectral Analysis with Zero-padded Enhanced DFT) uses zero-padding to increase frequency resolution and applies windowing to reduce spectral leakage. SNR estimation provides confidence measurement.
+
+**Signature:**
+```sql
+ts_estimate_period_sazed(values DOUBLE[]) → STRUCT
+ts_estimate_period_sazed(values DOUBLE[], padding_factor INTEGER) → STRUCT
+```
+
+**Mathematical Formula:**
+```
+Mean removal: y = x - μ
+
+Windowing (Hann): w[t] = 0.5·(1 - cos(2πt/(n-1)))
+
+Zero-padding: pad to (n · factor).next_power_of_2()
+
+DFT: Y[k] = Σ_{t=0}^{N-1} y[t]·w[t]·e^{-2πikt/N_padded}
+
+Power: P[k] = |Y[k]|² / N_padded
+
+SNR = P[k_max] / median(P_noise)
+```
+
+**Returns:**
+```sql
+STRUCT(
+    period DOUBLE,   -- Primary detected period
+    power  DOUBLE,   -- Spectral power at peak
+    snr    DOUBLE,   -- Signal-to-noise ratio
+    method VARCHAR   -- "sazed"
+)
+```
+
+**Example:**
+```sql
+-- Better frequency resolution than standard FFT
+SELECT ts_estimate_period_sazed([1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[]);
+```
+
+**Reference:**
+- Ding, H., et al. (2008). "Querying and Mining of Time Series Data: Experimental Comparison of Representations and Distance Measures." *VLDB Endowment*, 1(2), 1542-1552.
+
+---
+
+#### ts_detect_multiple_periods
+
+**Description:**
+Iterative multiple period detection using residual subtraction. The dominant period is detected, its sinusoidal component is removed, and the process repeats on the residual to find additional periodic components.
+
+**Signature:**
+```sql
+ts_detect_multiple_periods(values DOUBLE[]) → STRUCT
+ts_detect_multiple_periods(values DOUBLE[], max_periods INTEGER) → STRUCT
+ts_detect_multiple_periods(values DOUBLE[], max_periods INTEGER, min_confidence DOUBLE, min_strength DOUBLE) → STRUCT
+```
+
+**Mathematical Algorithm:**
+```
+Initialize: residual = x
+
+For i = 1 to max_periods:
+    1. p_i, conf_i = estimate_period_fft(residual)
+    2. If conf_i < min_confidence: break
+    3. Fit sinusoid: ŝ_i = A_i·sin(2πt/p_i + φ_i)
+       where A_i, φ_i from least squares
+    4. strength_i = 1 - Var(residual - ŝ_i) / Var(residual)
+    5. If strength_i < min_strength: break
+    6. residual = residual - ŝ_i
+    7. Store (p_i, conf_i, strength_i, A_i, φ_i, i)
+```
+
+**Returns:**
+```sql
+STRUCT(
+    period_values     DOUBLE[],   -- Detected periods (in samples)
+    confidence_values DOUBLE[],   -- FFT peak confidence for each
+    strength_values   DOUBLE[],   -- Variance explained by each
+    amplitude_values  DOUBLE[],   -- Sinusoidal amplitude for each
+    phase_values      DOUBLE[],   -- Phase (radians) for each
+    iteration_values  UBIGINT[],  -- Detection iteration (1-indexed)
+    n_periods         UBIGINT,    -- Number of detected periods
+    primary_period    DOUBLE,     -- Strongest period (iteration 1)
+    method            VARCHAR     -- "multi"
+)
+```
+
+**Example:**
+```sql
+-- Detect multiple seasonalities (e.g., daily and weekly)
+SELECT ts_detect_multiple_periods(LIST(value ORDER BY date), 3) FROM hourly_data;
+
+-- Access individual periods
+SELECT (ts_detect_multiple_periods(values)).period_values AS periods FROM my_data;
+```
+
+**Reference:**
+- Parthasarathy, S., Mehta, S., & Srinivasan, S. (2006). "Robust Periodicity Detection Algorithms." *ACM CIKM*.
 
 ---
 
@@ -561,14 +1386,11 @@ SELECT ts_detect_seasonality([1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[]
 
 **ts_analyze_seasonality** (alias: `anofox_fcst_ts_analyze_seasonality`)
 
-Provides detailed seasonality analysis. C++ API compatible with optional timestamps parameter.
+Provides detailed seasonality analysis using fdars-core algorithms.
 
 **Signature:**
 ```sql
--- Single-argument form (convenience)
 ts_analyze_seasonality(values DOUBLE[]) → STRUCT
-
--- Two-argument form (C++ API compatible)
 ts_analyze_seasonality(timestamps TIMESTAMP[], values DOUBLE[]) → STRUCT
 ```
 
@@ -590,7 +1412,380 @@ SELECT ts_analyze_seasonality([1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[]);
 
 ---
 
+### Seasonal Strength
+
+**ts_seasonal_strength** (alias: `anofox_fcst_ts_seasonal_strength`)
+
+Calculate seasonal strength using specified method.
+
+**Signature:**
+```sql
+ts_seasonal_strength(values DOUBLE[], method VARCHAR) → DOUBLE
+ts_seasonal_strength(values DOUBLE[], method VARCHAR, period INTEGER) → DOUBLE
+```
+
+**Parameters:**
+- `values`: Time series values (DOUBLE[])
+- `method`: Strength calculation method (VARCHAR)
+  - `'variance'` - Variance decomposition method
+  - `'spectral'` - Spectral-based measurement
+  - `'wavelet'` - Wavelet-based strength measurement
+  - `'auto'` - Automatic selection (default)
+- `period`: Optional known period (INTEGER)
+
+**Returns:** DOUBLE in range [0, 1]
+
+**Example:**
+```sql
+SELECT ts_seasonal_strength([1,2,3,4,1,2,3,4]::DOUBLE[], 'spectral');
+-- Returns: 0.95
+
+SELECT ts_seasonal_strength([1,2,3,4,1,2,3,4]::DOUBLE[], 'wavelet', 4);
+-- Returns: 0.92
+```
+
+---
+
+### Windowed Seasonal Strength
+
+**ts_seasonal_strength_windowed** (alias: `anofox_fcst_ts_seasonal_strength_windowed`)
+
+Compute time-varying seasonal strength using sliding windows.
+
+**Signature:**
+```sql
+ts_seasonal_strength_windowed(values DOUBLE[], window_size INTEGER) → STRUCT
+ts_seasonal_strength_windowed(values DOUBLE[], window_size INTEGER, step INTEGER) → STRUCT
+```
+
+**Returns:**
+```sql
+STRUCT(
+    window_starts    UBIGINT[],    -- Start indices of each window
+    strengths        DOUBLE[],     -- Seasonal strength for each window
+    mean_strength    DOUBLE,       -- Mean strength across windows
+    min_strength     DOUBLE,       -- Minimum strength
+    max_strength     DOUBLE,       -- Maximum strength
+    is_stable        BOOLEAN       -- Whether seasonality is stable (std < 0.1)
+)
+```
+
+**Example:**
+```sql
+SELECT ts_seasonal_strength_windowed(LIST(value ORDER BY date), 52) AS windowed
+FROM weekly_sales GROUP BY product_id;
+```
+
+---
+
+### Seasonality Classification
+
+**ts_classify_seasonality** (alias: `anofox_fcst_ts_classify_seasonality`)
+
+Classify the type of seasonal pattern.
+
+**Signature:**
+```sql
+ts_classify_seasonality(values DOUBLE[]) → STRUCT
+ts_classify_seasonality(values DOUBLE[], period INTEGER) → STRUCT
+```
+
+**Returns:**
+```sql
+STRUCT(
+    seasonal_type       VARCHAR,      -- 'none', 'weak', 'moderate', 'strong', 'dominant'
+    pattern_type        VARCHAR,      -- 'sinusoidal', 'sawtooth', 'pulse', 'complex', 'irregular'
+    symmetry            DOUBLE,       -- Symmetry score (-1 to 1, 0 = symmetric)
+    sharpness           DOUBLE,       -- Peak sharpness (0 = smooth, 1 = sharp)
+    is_multiplicative   BOOLEAN       -- Whether pattern appears multiplicative
+)
+```
+
+**Example:**
+```sql
+SELECT ts_classify_seasonality(LIST(value ORDER BY date)) AS classification
+FROM sales GROUP BY product_id;
+```
+
+---
+
+### Seasonality Change Detection
+
+**ts_detect_seasonality_changes** (alias: `anofox_fcst_ts_detect_seasonality_changes`)
+
+Detect when seasonality begins or ends in a time series.
+
+**Signature:**
+```sql
+ts_detect_seasonality_changes(values DOUBLE[]) → STRUCT
+ts_detect_seasonality_changes(values DOUBLE[], threshold DOUBLE) → STRUCT
+```
+
+**Returns:**
+```sql
+STRUCT(
+    change_indices       UBIGINT[],   -- Indices where changes occur
+    change_types         VARCHAR[],   -- 'onset' or 'cessation' for each
+    strength_before      DOUBLE[],    -- Seasonal strength before each change
+    strength_after       DOUBLE[],    -- Seasonal strength after each change
+    n_changes            UBIGINT      -- Number of detected changes
+)
+```
+
+**Example:**
+```sql
+SELECT ts_detect_seasonality_changes(LIST(value ORDER BY date)) AS changes
+FROM product_sales GROUP BY product_id;
+```
+
+---
+
+### Instantaneous Period
+
+**ts_instantaneous_period** (alias: `anofox_fcst_ts_instantaneous_period`)
+
+Estimate time-varying period using Hilbert transform for drifting seasonality.
+
+**Signature:**
+```sql
+ts_instantaneous_period(values DOUBLE[]) → STRUCT
+```
+
+**Returns:**
+```sql
+STRUCT(
+    periods              DOUBLE[],    -- Instantaneous period at each point
+    mean_period          DOUBLE,      -- Mean instantaneous period
+    period_drift         DOUBLE,      -- Linear trend in period (positive = lengthening)
+    is_stationary        BOOLEAN      -- Whether period is stationary (drift < threshold)
+)
+```
+
+**Example:**
+```sql
+SELECT ts_instantaneous_period(LIST(value ORDER BY date)) AS inst_period
+FROM sensor_data GROUP BY sensor_id;
+```
+
+---
+
+### Amplitude Modulation Detection
+
+**ts_detect_amplitude_modulation** (alias: `anofox_fcst_ts_detect_amplitude_modulation`)
+
+Detect amplitude modulation in seasonal patterns using wavelet analysis.
+
+**Signature:**
+```sql
+ts_detect_amplitude_modulation(values DOUBLE[]) → STRUCT
+ts_detect_amplitude_modulation(values DOUBLE[], period INTEGER) → STRUCT
+```
+
+**Returns:**
+```sql
+STRUCT(
+    has_modulation       BOOLEAN,      -- Whether amplitude modulation is detected
+    modulation_period    INTEGER,      -- Period of the modulation (if detected)
+    modulation_strength  DOUBLE,       -- Strength of modulation (0-1)
+    envelope             DOUBLE[],     -- Extracted amplitude envelope
+    is_growing           BOOLEAN       -- Whether amplitude is increasing over time
+)
+```
+
+**Example:**
+```sql
+SELECT ts_detect_amplitude_modulation(LIST(value ORDER BY date)) AS modulation
+FROM sales GROUP BY product_id;
+```
+
+---
+
+## Peak Detection
+
+### Detect Peaks
+
+**ts_detect_peaks** (alias: `anofox_fcst_ts_detect_peaks`)
+
+Detect peaks (local maxima) in time series data with prominence calculation.
+
+**Signature:**
+```sql
+ts_detect_peaks(values DOUBLE[]) → STRUCT
+ts_detect_peaks(values DOUBLE[], min_prominence DOUBLE) → STRUCT
+ts_detect_peaks(values DOUBLE[], min_prominence DOUBLE, min_distance INTEGER) → STRUCT
+```
+
+**Parameters:**
+- `values`: Time series values (DOUBLE[])
+- `min_prominence`: Minimum peak prominence threshold (default: 0.0, meaning all peaks)
+- `min_distance`: Minimum distance between peaks in observations (default: 1)
+
+**Returns:**
+```sql
+STRUCT(
+    peak_indices     UBIGINT[],    -- Indices of detected peaks (0-based)
+    peak_values      DOUBLE[],     -- Values at peak locations
+    prominences      DOUBLE[],     -- Prominence of each peak
+    n_peaks          UBIGINT       -- Number of peaks detected
+)
+```
+
+**Example:**
+```sql
+-- Detect all peaks
+SELECT ts_detect_peaks([1.0, 3.0, 2.0, 5.0, 1.0, 4.0, 2.0]::DOUBLE[]);
+-- Returns: {peak_indices: [1, 3, 5], peak_values: [3.0, 5.0, 4.0], ...}
+
+-- Detect significant peaks only (prominence > 2.0)
+SELECT ts_detect_peaks(LIST(value ORDER BY date), 2.0) AS peaks
+FROM sensor_data GROUP BY sensor_id;
+
+-- With minimum distance between peaks
+SELECT ts_detect_peaks(LIST(value ORDER BY date), 1.0, 7) AS peaks
+FROM daily_data GROUP BY series_id;
+```
+
+---
+
+### Peak Timing Analysis
+
+**ts_analyze_peak_timing** (alias: `anofox_fcst_ts_analyze_peak_timing`)
+
+Analyze peak timing variability across seasonal cycles.
+
+**Signature:**
+```sql
+ts_analyze_peak_timing(values DOUBLE[], period INTEGER) → STRUCT
+```
+
+**Parameters:**
+- `values`: Time series values (DOUBLE[])
+- `period`: Expected seasonal period (INTEGER)
+
+**Returns:**
+```sql
+STRUCT(
+    mean_peak_position    DOUBLE,     -- Mean position of peak within cycle (0 to period-1)
+    peak_position_std     DOUBLE,     -- Standard deviation of peak positions
+    peak_timing_cv        DOUBLE,     -- Coefficient of variation for peak timing
+    n_cycles              UBIGINT,    -- Number of complete cycles analyzed
+    is_consistent         BOOLEAN     -- Whether peak timing is consistent (cv < 0.2)
+)
+```
+
+**Example:**
+```sql
+-- Analyze weekly peak timing
+SELECT ts_analyze_peak_timing(LIST(value ORDER BY date), 7) AS timing
+FROM daily_sales GROUP BY store_id;
+
+-- Check if monthly peaks occur at consistent times
+SELECT
+    product_id,
+    (ts_analyze_peak_timing(LIST(value ORDER BY date), 30)).is_consistent AS has_consistent_peaks
+FROM monthly_data GROUP BY product_id;
+```
+
+---
+
+## Detrending
+
+### Detrend
+
+**ts_detrend** (alias: `anofox_fcst_ts_detrend`)
+
+Remove trend from time series using various methods.
+
+**Signature:**
+```sql
+ts_detrend(values DOUBLE[], method VARCHAR) → STRUCT
+```
+
+**Parameters:**
+- `values`: Time series values (DOUBLE[])
+- `method`: Detrending method (VARCHAR)
+  - `'linear'` - Linear trend removal via least squares
+  - `'polynomial'` - Polynomial trend (degree 2) via QR decomposition
+  - `'diff'` - First differencing
+  - `'diff2'` - Second differencing
+  - `'loess'` - LOESS local polynomial regression
+  - `'spline'` - P-splines detrending
+  - `'auto'` - Automatic selection using AIC
+
+**Returns:**
+```sql
+STRUCT(
+    detrended        DOUBLE[],     -- Detrended values
+    trend            DOUBLE[],     -- Extracted trend component
+    method_used      VARCHAR,      -- Method that was used
+    residual_var     DOUBLE        -- Variance of detrended series
+)
+```
+
+**Example:**
+```sql
+-- Linear detrending
+SELECT ts_detrend([1,2,3,4,5,6,7,8,9,10]::DOUBLE[], 'linear');
+
+-- Automatic method selection
+SELECT (ts_detrend(LIST(value ORDER BY date), 'auto')).detrended AS detrended_values
+FROM sales GROUP BY product_id;
+
+-- LOESS detrending for non-linear trends
+SELECT ts_detrend(LIST(value ORDER BY date), 'loess') AS result
+FROM sensor_data GROUP BY sensor_id;
+```
+
+---
+
 ## Time Series Decomposition
+
+### Decompose
+
+**ts_decompose** (alias: `anofox_fcst_ts_decompose`)
+
+Additive or multiplicative seasonal decomposition.
+
+**Signature:**
+```sql
+ts_decompose(values DOUBLE[], type VARCHAR) → STRUCT
+ts_decompose(values DOUBLE[], type VARCHAR, period INTEGER) → STRUCT
+```
+
+**Parameters:**
+- `values`: Time series values (DOUBLE[])
+- `type`: Decomposition type (VARCHAR)
+  - `'additive'` - data = trend + seasonal + remainder
+  - `'multiplicative'` - data = trend × seasonal × remainder
+  - `'auto'` - Automatic selection
+- `period`: Optional known period (INTEGER)
+
+**Returns:**
+```sql
+STRUCT(
+    trend            DOUBLE[],     -- Trend component
+    seasonal         DOUBLE[],     -- Seasonal component
+    remainder        DOUBLE[],     -- Residual component
+    period           INTEGER,      -- Detected/used period
+    type_used        VARCHAR       -- 'additive' or 'multiplicative'
+)
+```
+
+**Example:**
+```sql
+-- Additive decomposition
+SELECT ts_decompose([1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[], 'additive');
+
+-- Auto-detect decomposition type
+SELECT ts_decompose(LIST(value ORDER BY date), 'auto') AS decomposition
+FROM sales GROUP BY product_id;
+
+-- Multiplicative with known period
+SELECT ts_decompose(LIST(value ORDER BY date), 'multiplicative', 12) AS decomposition
+FROM monthly_sales GROUP BY product_id;
+```
+
+---
 
 ### MSTL Decomposition
 
@@ -983,10 +2178,30 @@ SELECT ts_features_config_from_json('config.json');
 
 ## Forecasting
 
-The extension provides multiple ways to generate forecasts:
-1. **Scalar functions** - operate on arrays, use with `LIST()` and `GROUP BY`
-2. **Table macros** - operate on tables directly with positional parameters
-3. **Aggregate functions** - use with custom `GROUP BY` patterns
+The extension provides a comprehensive forecasting system with 32 models ranging from simple baselines to sophisticated state-space methods. Forecasts can be generated using three different API styles depending on your use case.
+
+### API Styles for Forecasting
+
+| API Style | Best For | Example |
+|-----------|----------|---------|
+| **Table Macros** | Most users; clean SQL interface | `ts_forecast_by('sales', id, date, val, 'ets', 12, MAP{})` |
+| **Aggregate Functions** | Custom GROUP BY patterns | `ts_forecast_agg(date, value, 'ets', 12, MAP{})` |
+| **Scalar Functions** | Array-based workflows, composition | `ts_forecast([1,2,3,4]::DOUBLE[], 3, 'naive')` |
+
+### Choosing a Forecasting Model
+
+**For beginners:** Start with `Naive` or `SES` to establish baselines, then try `AutoETS` for automatic model selection.
+
+**Model Selection Guide:**
+
+| Data Characteristics | Recommended Models |
+|---------------------|-------------------|
+| No trend, no seasonality | `Naive`, `SES`, `SESOptimized` |
+| Trend, no seasonality | `Holt`, `Theta`, `RandomWalkDrift` |
+| Seasonality (single period) | `SeasonalNaive`, `HoltWinters`, `SeasonalES` |
+| Multiple seasonalities | `MSTL`, `MFLES`, `TBATS` |
+| Intermittent demand (many zeros) | `CrostonClassic`, `CrostonSBA`, `TSB` |
+| Unknown characteristics | `AutoETS`, `AutoARIMA`, `AutoTheta` |
 
 ### Supported Models (32 Models)
 
@@ -1062,6 +2277,9 @@ The extension supports all 32 models with **exact case-sensitive naming**.
 | `TSB` | Teunter-Syntetos-Babai method | — | *alpha_d*, *alpha_p* |
 
 > **Note:** Parameters are passed via the `params` MAP argument in table macros and aggregate functions.
+
+> **Note:** Invalid or unrecognized model names will silently fall back to the `Naive` model rather than returning an error. This ensures batch processing continues even if some rows have incorrect model specifications. Always verify model names match the exact case-sensitive names listed above.
+
 > Example: `MAP{'seasonal_period': '7', 'alpha': '0.2'}`
 
 ---
@@ -1146,28 +2364,98 @@ SELECT * FROM anofox_fcst_ts_forecast('sales', date, amount, 'naive', 12, MAP{})
 
 ---
 
-### anofox_fcst_ts_forecast_by (Table Macro)
+### anofox_fcst_ts_forecast_by / ts_forecast_by (Table Macro)
 
-Generate forecasts for multiple series grouped by a column.
+Generate forecasts for multiple time series grouped by an identifier column. This is the **primary forecasting function** for most use cases.
+
+**Purpose:**
+When you have a table with multiple time series (e.g., sales by product, sensor readings by device), this function forecasts each series independently and returns all forecasts in a single result table.
 
 **Signature:**
 ```sql
-anofox_fcst_ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, params) → TABLE
+ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, params) → TABLE
 ```
 
 **Parameters (all positional):**
-- `table_name` - Source table name (VARCHAR)
-- `group_col` - Column for grouping series
-- `date_col` - Date/timestamp column
-- `target_col` - Target value column
-- `method` - Forecasting method (VARCHAR)
-- `horizon` - Number of periods to forecast (INTEGER)
-- `params` - Additional parameters (MAP, typically `MAP{}`)
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `table_name` | VARCHAR | Source table name (quoted string) |
+| `group_col` | IDENTIFIER | Column for grouping series (unquoted) |
+| `date_col` | IDENTIFIER | Date/timestamp column (unquoted) |
+| `target_col` | IDENTIFIER | Target value column (unquoted) |
+| `method` | VARCHAR | Forecasting method name (case-sensitive, see [Supported Models](#supported-models-32-models)) |
+| `horizon` | INTEGER | Number of periods to forecast |
+| `params` | MAP | Model parameters (use `MAP{}` for defaults) |
 
-**Example:**
+**Returns:** A table with columns:
+- `group_col` - The series identifier
+- `ds` - Forecast timestamp
+- `forecast` - Point forecast value
+- `lower` - Lower prediction interval bound
+- `upper` - Upper prediction interval bound
+
+**Examples:**
 ```sql
-SELECT * FROM anofox_fcst_ts_forecast_by('sales', product_id, date, amount, 'ets', 12, MAP{});
+-- Basic forecast: 12 periods ahead using ETS model
+SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'ETS', 12, MAP{});
+
+-- Using Naive method (simple baseline)
+SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'Naive', 7, MAP{});
+
+-- Seasonal model with explicit period
+SELECT * FROM ts_forecast_by(
+    'weekly_sales', store_id, week, revenue,
+    'HoltWinters', 52,
+    MAP{'seasonal_period': '52'}
+);
+
+-- Filter to specific products
+SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'AutoETS', 30, MAP{})
+WHERE product_id IN ('SKU001', 'SKU002', 'SKU003');
+
+-- Join forecasts with actuals for comparison
+WITH forecasts AS (
+    SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'ETS', 12, MAP{})
+)
+SELECT
+    f.product_id,
+    f.ds,
+    f.forecast,
+    a.amount AS actual
+FROM forecasts f
+LEFT JOIN sales a ON f.product_id = a.product_id AND f.ds = a.date;
 ```
+
+**Setting Model Parameters:**
+
+The `params` MAP allows you to customize model behavior:
+
+```sql
+-- SES with custom smoothing parameter
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'SES', 12,
+    MAP{'alpha': '0.5'}
+);
+
+-- Holt-Winters with explicit seasonal period and smoothing
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'HoltWinters', 12,
+    MAP{'seasonal_period': '7', 'alpha': '0.2', 'beta': '0.1', 'gamma': '0.3'}
+);
+
+-- MSTL with multiple seasonal periods (daily data with weekly and yearly patterns)
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'MSTL', 30,
+    MAP{'seasonal_periods': '[7, 365]'}
+);
+
+-- Custom confidence level (95% instead of default 90%)
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'ETS', 12,
+    MAP{'confidence_level': '0.95'}
+);
+```
+
+**Notes:**
+- The function uses the `frequency` parameter (default: `'1d'`) to generate forecast timestamps
+- Each series is forecast independently; errors in one series don't affect others
+- For very large datasets, consider filtering to relevant series before forecasting
 
 ---
 
@@ -1486,20 +2774,79 @@ SELECT ts_coverage(
 
 ## Notes
 
-1. **Array-based design**: All functions operate on DOUBLE[] arrays. Use `LIST(column ORDER BY date)` to convert table data to arrays.
+### Array-Based Design
 
-2. **NULL handling**: Most functions handle NULLs gracefully. Use imputation functions to fill NULLs before analysis if needed.
+All scalar functions operate on `DOUBLE[]` arrays. To convert table data to arrays, use the `LIST()` aggregate with `ORDER BY`:
 
-3. **Performance**: Scalar functions are optimized for use with DuckDB's vectorized execution engine.
+```sql
+-- Convert table column to ordered array
+SELECT
+    product_id,
+    ts_stats(LIST(value ORDER BY date)) AS stats
+FROM sales
+GROUP BY product_id;
+```
 
-4. **Minimum data requirements**:
-   - General rule: n ≥ 2 for basic statistics
-   - Seasonality: n ≥ 2 × seasonal_period
-   - Forecasting: n ≥ 10 recommended
+**Important:** Always use `ORDER BY` in `LIST()` to ensure correct temporal ordering.
 
-5. **Ordering**: Time series order matters. Always use `ORDER BY date` in `LIST()` aggregations.
+### NULL Handling
+
+Most functions handle NULL values gracefully:
+- **Statistics functions**: NULLs are typically excluded from calculations
+- **Imputation functions**: Specifically designed to fill NULLs (`ts_fill_nulls_*`)
+- **Forecasting**: NULLs in input may cause errors; impute first
+
+```sql
+-- Recommended: Fill NULLs before forecasting
+WITH cleaned AS (
+    SELECT * FROM ts_fill_gaps('sales', product_id, date, value, '1d')
+),
+imputed AS (
+    SELECT
+        group_col,
+        time_col,
+        ts_fill_nulls_forward(LIST(value_col ORDER BY time_col)) AS values
+    FROM cleaned
+    GROUP BY group_col
+)
+SELECT * FROM ts_forecast_by('imputed', group_col, time_col, values, 'ETS', 12, MAP{});
+```
+
+### Minimum Data Requirements
+
+| Function Type | Minimum Length | Recommended |
+|--------------|----------------|-------------|
+| Basic statistics | n ≥ 2 | n ≥ 10 |
+| Seasonality detection | n ≥ 2 × period | n ≥ 4 × period |
+| Forecasting (simple models) | n ≥ 3 | n ≥ 20 |
+| Forecasting (seasonal models) | n ≥ 2 × period | n ≥ 3 × period |
+| Feature extraction | n ≥ 10 | n ≥ 50 |
+| Changepoint detection | n ≥ 10 | n ≥ 50 |
+
+### Performance Tips
+
+1. **Use table macros** when possible - they're optimized for batch processing
+2. **Filter early**: Apply WHERE clauses before calling forecast functions
+3. **Limit horizon**: Forecasts beyond 2-3 seasonal periods have high uncertainty
+4. **Batch processing**: Process multiple series in one query rather than separate queries
+
+```sql
+-- Good: Single query for all products
+SELECT * FROM ts_forecast_by('sales', product_id, date, value, 'ETS', 12, MAP{});
+
+-- Avoid: Separate queries per product
+-- SELECT * FROM ts_forecast(...) WHERE product_id = 'A';
+-- SELECT * FROM ts_forecast(...) WHERE product_id = 'B';
+```
+
+### Backward Compatibility with C++ API
+
+This Rust implementation maintains backward compatibility with the original C++ API:
+- **Frequency formats**: Both Polars-style (`'1d'`, `'1h'`) and DuckDB INTERVAL (`'1 day'`) are supported
+- **Function names**: All original function names are preserved
+- **Parameter order**: Positional parameters maintain the same order
 
 ---
 
-**Last Updated:** 2026-01-03
+**Last Updated:** 2026-01-08
 **API Version:** 0.2.4

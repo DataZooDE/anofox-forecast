@@ -1,0 +1,366 @@
+# name: test/sql/ts_forecast_params.test
+# description: Test forecast function parameters (confidence_level, seasonal_period, etc.)
+# group: [anofox_forecast]
+
+require anofox_forecast
+
+#######################################
+# Setup - Create test tables
+#######################################
+
+statement ok
+CREATE TABLE trend_data AS SELECT
+    ROW_NUMBER() OVER () AS idx,
+    v AS value
+FROM (VALUES (10.0), (12.0), (14.0), (16.0), (18.0), (20.0), (22.0), (24.0), (26.0), (28.0), (30.0), (32.0)) AS t(v);
+
+statement ok
+CREATE TABLE seasonal_data AS SELECT
+    ROW_NUMBER() OVER () AS idx,
+    v AS value
+FROM (VALUES
+    (10.0), (20.0), (30.0), (10.0), (20.0), (30.0),
+    (10.0), (20.0), (30.0), (10.0), (20.0), (30.0),
+    (10.0), (20.0), (30.0), (10.0), (20.0), (30.0)
+) AS t(v);
+
+statement ok
+CREATE TABLE grouped_data AS SELECT * FROM (VALUES
+    ('A', '2024-01-01'::DATE, 10.0),
+    ('A', '2024-01-02'::DATE, 12.0),
+    ('A', '2024-01-03'::DATE, 14.0),
+    ('A', '2024-01-04'::DATE, 16.0),
+    ('A', '2024-01-05'::DATE, 18.0),
+    ('A', '2024-01-06'::DATE, 20.0),
+    ('A', '2024-01-07'::DATE, 22.0),
+    ('A', '2024-01-08'::DATE, 24.0),
+    ('A', '2024-01-09'::DATE, 26.0),
+    ('A', '2024-01-10'::DATE, 28.0),
+    ('B', '2024-01-01'::DATE, 100.0),
+    ('B', '2024-01-02'::DATE, 105.0),
+    ('B', '2024-01-03'::DATE, 110.0),
+    ('B', '2024-01-04'::DATE, 115.0),
+    ('B', '2024-01-05'::DATE, 120.0),
+    ('B', '2024-01-06'::DATE, 125.0),
+    ('B', '2024-01-07'::DATE, 130.0),
+    ('B', '2024-01-08'::DATE, 135.0),
+    ('B', '2024-01-09'::DATE, 140.0),
+    ('B', '2024-01-10'::DATE, 145.0)
+) AS t(id, ds, value);
+
+#######################################
+# Default Confidence Level Tests
+#######################################
+
+# Test default confidence level (0.95) produces confidence bounds
+query I
+SELECT length((_ts_forecast(LIST(value ORDER BY idx), 3, 'Naive')).lower) FROM trend_data;
+----
+3
+
+query I
+SELECT length((_ts_forecast(LIST(value ORDER BY idx), 3, 'Naive')).upper) FROM trend_data;
+----
+3
+
+# Lower and upper bounds should be different
+query I
+SELECT (_ts_forecast(LIST(value ORDER BY idx), 3, 'Naive')).lower[1] !=
+       (_ts_forecast(LIST(value ORDER BY idx), 3, 'Naive')).upper[1]
+FROM trend_data;
+----
+true
+
+# Lower bound should be less than point forecast
+query I
+SELECT (_ts_forecast(LIST(value ORDER BY idx), 3, 'Naive')).lower[1] <
+       (_ts_forecast(LIST(value ORDER BY idx), 3, 'Naive')).point[1]
+FROM trend_data;
+----
+true
+
+# Upper bound should be greater than point forecast
+query I
+SELECT (_ts_forecast(LIST(value ORDER BY idx), 3, 'Naive')).upper[1] >
+       (_ts_forecast(LIST(value ORDER BY idx), 3, 'Naive')).point[1]
+FROM trend_data;
+----
+true
+
+#######################################
+# Seasonal Period Tests
+#######################################
+
+# Test SeasonalNaive with auto-detected period (default)
+query T
+SELECT (_ts_forecast(LIST(value ORDER BY idx), 3, 'SeasonalNaive')).model FROM seasonal_data;
+----
+SeasonalNaive
+
+# Seasonal model should produce forecasts
+query I
+SELECT length((_ts_forecast(LIST(value ORDER BY idx), 6, 'SeasonalNaive')).point) FROM seasonal_data;
+----
+6
+
+# Seasonal pattern should be detected - forecasts should follow pattern
+# With 18 values of period 3 pattern [10, 20, 30], forecasts should continue
+query I
+SELECT ABS((_ts_forecast(LIST(value ORDER BY idx), 3, 'SeasonalNaive')).point[1] - 10.0) < 0.01
+FROM seasonal_data;
+----
+true
+
+query I
+SELECT ABS((_ts_forecast(LIST(value ORDER BY idx), 3, 'SeasonalNaive')).point[2] - 20.0) < 0.01
+FROM seasonal_data;
+----
+true
+
+query I
+SELECT ABS((_ts_forecast(LIST(value ORDER BY idx), 3, 'SeasonalNaive')).point[3] - 30.0) < 0.01
+FROM seasonal_data;
+----
+true
+
+#######################################
+# Auto Detection Tests
+#######################################
+
+# Auto model should work
+query I
+SELECT length((_ts_forecast(LIST(value ORDER BY idx), 3, 'auto')).point) FROM trend_data;
+----
+3
+
+# Auto model should produce model name
+query I
+SELECT length((_ts_forecast(LIST(value ORDER BY idx), 3, 'auto')).model) > 0 FROM trend_data;
+----
+true
+
+# AutoETS should work (returns the selected model name)
+query I
+SELECT length((_ts_forecast(LIST(value ORDER BY idx), 3, 'AutoETS')).model) > 0 FROM trend_data;
+----
+true
+
+# AutoARIMA should work (returns the selected model name)
+query I
+SELECT length((_ts_forecast(LIST(value ORDER BY idx), 3, 'AutoARIMA')).model) > 0 FROM trend_data;
+----
+true
+
+#######################################
+# ts_forecast_by MAP Parameter Tests
+#######################################
+
+# MAP with confidence_level should not error (syntax accepted)
+query I
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, MAP(['confidence_level'], [0.80]));
+----
+6
+
+# MAP with seasonal_period should not error (syntax accepted)
+query I
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'SeasonalNaive', 3, MAP(['seasonal_period'], [7]));
+----
+6
+
+# MAP with multiple parameters should not error (syntax accepted)
+query I
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'HoltWinters', 3,
+    MAP(['confidence_level', 'seasonal_period'], [0.95, 7]));
+----
+6
+
+# Empty MAP should work
+query I
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, MAP([], []));
+----
+6
+
+#######################################
+# ts_forecast_agg MAP Parameter Tests
+#######################################
+
+# MAP with confidence_level should not error
+query I
+SELECT COUNT(*) FROM (
+    SELECT id, anofox_fcst_ts_forecast_agg(ds, value, 'Naive', 3, MAP(['confidence_level'], [0.80])) AS fcst
+    FROM grouped_data
+    GROUP BY id
+);
+----
+2
+
+# Empty MAP should work
+query I
+SELECT COUNT(*) FROM (
+    SELECT id, anofox_fcst_ts_forecast_agg(ds, value, 'Naive', 3, MAP([], [])) AS fcst
+    FROM grouped_data
+    GROUP BY id
+);
+----
+2
+
+#######################################
+# Frequency Parameter Tests
+#######################################
+
+# Polars-style '1d' frequency
+query I
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, MAP([], []), '1d');
+----
+6
+
+# DuckDB INTERVAL style '1 day'
+query I
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, MAP([], []), '1 day');
+----
+6
+
+# Weekly frequency
+query I
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, MAP([], []), '1w');
+----
+6
+
+# Hourly frequency
+query I
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, MAP([], []), '1h');
+----
+6
+
+# Minute frequency
+query I
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, MAP([], []), '30m');
+----
+6
+
+# Monthly frequency
+query I
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, MAP([], []), '1mo');
+----
+6
+
+# Quarterly frequency
+query I
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, MAP([], []), '1q');
+----
+6
+
+# Yearly frequency
+query I
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, MAP([], []), '1y');
+----
+6
+
+#######################################
+# Model-Specific Parameter Behavior
+#######################################
+
+# SES should use auto-detected smoothing (alpha parameter is optimized internally)
+query I
+SELECT length((_ts_forecast(LIST(value ORDER BY idx), 3, 'SESOptimized')).point) = 3 FROM trend_data;
+----
+true
+
+# Holt should use auto-detected level and trend smoothing
+query I
+SELECT length((_ts_forecast(LIST(value ORDER BY idx), 3, 'Holt')).point) = 3 FROM trend_data;
+----
+true
+
+# HoltWinters uses auto-detected period
+query I
+SELECT length((_ts_forecast(LIST(value ORDER BY idx), 6, 'HoltWinters')).point) = 6 FROM seasonal_data;
+----
+true
+
+# MSTL can detect multiple seasonal periods
+query T
+SELECT (_ts_forecast(LIST(value ORDER BY idx), 3, 'MSTL')).model FROM seasonal_data;
+----
+MSTL
+
+# TBATS can detect multiple seasonal periods
+query T
+SELECT (_ts_forecast(LIST(value ORDER BY idx), 3, 'TBATS')).model FROM seasonal_data;
+----
+TBATS
+
+#######################################
+# Edge Cases
+#######################################
+
+# Minimum data length for confidence bounds
+query I
+SELECT length((_ts_forecast(LIST(value ORDER BY idx), 1, 'Naive')).lower) >= 1 FROM trend_data;
+----
+true
+
+# Large horizon should work
+query I
+SELECT length((_ts_forecast(LIST(value ORDER BY idx), 24, 'Naive')).point) FROM trend_data;
+----
+24
+
+# Zero horizon should produce empty forecast
+query I
+SELECT length((_ts_forecast(LIST(value ORDER BY idx), 0, 'Naive')).point) FROM trend_data;
+----
+0
+
+# Minimum 3 observations required
+query I
+SELECT length((_ts_forecast([10.0, 20.0, 30.0], 1, 'Naive')).point);
+----
+1
+
+# Short series with seasonal model
+query I
+SELECT length((_ts_forecast([10.0, 20.0, 10.0, 20.0], 2, 'SeasonalNaive')).point);
+----
+2
+
+#######################################
+# Quality Metrics with Parameters
+#######################################
+
+# AIC should be computed for auto models
+query I
+SELECT (_ts_forecast(LIST(value ORDER BY idx), 3, 'AutoETS')).aic IS NOT NULL FROM trend_data;
+----
+true
+
+# BIC should be computed for auto models
+query I
+SELECT (_ts_forecast(LIST(value ORDER BY idx), 3, 'AutoETS')).bic IS NOT NULL FROM trend_data;
+----
+true
+
+# MSE should be computed
+query I
+SELECT (_ts_forecast(LIST(value ORDER BY idx), 3, 'Naive')).mse IS NOT NULL FROM trend_data;
+----
+true
+
+# MSE should be non-negative
+query I
+SELECT (_ts_forecast(LIST(value ORDER BY idx), 3, 'Naive')).mse >= 0 FROM trend_data;
+----
+true
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE trend_data;
+
+statement ok
+DROP TABLE seasonal_data;
+
+statement ok
+DROP TABLE grouped_data;

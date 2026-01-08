@@ -66,11 +66,9 @@ fn stl_decompose(values: &[f64], period: usize) -> Result<(Vec<f64>, Vec<f64>, V
 
     // Simple STL approximation using moving averages
     // 1. Trend: centered moving average
-    let window = if period.is_multiple_of(2) {
-        period + 1
-    } else {
-        period
-    };
+    // Note: is_multiple_of() is unstable and breaks WASM builds
+    #[allow(clippy::manual_is_multiple_of)]
+    let window = if period % 2 == 0 { period + 1 } else { period };
     let half_window = window / 2;
 
     let mut trend = vec![f64::NAN; n];
