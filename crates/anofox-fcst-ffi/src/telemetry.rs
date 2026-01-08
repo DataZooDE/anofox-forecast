@@ -6,7 +6,7 @@
 //! - SQL setting: SET anofox_telemetry_enabled = false;
 
 use std::env;
-use std::ffi::{CStr, c_char};
+use std::ffi::{c_char, CStr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
