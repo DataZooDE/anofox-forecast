@@ -1,0 +1,576 @@
+# name: test/sql/ts_forecast_basic_models.test
+# description: Tests for basic forecasting models (SMA, SeasonalNaive, SES, SESOptimized, RandomWalkDrift)
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup: Create test data
+#######################################
+
+# Simple linear trend data
+statement ok
+CREATE TABLE linear_data AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    10.0 + i * 2.0 AS value
+FROM generate_series(0, 29) AS t(i);
+
+# Seasonal data with period 7 (weekly pattern)
+statement ok
+CREATE TABLE seasonal_data AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    100.0 + (i % 7) * 10.0 AS value
+FROM generate_series(0, 55) AS t(i);
+
+# Constant data (no trend, no seasonality)
+statement ok
+CREATE TABLE constant_data AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    50.0 AS value
+FROM generate_series(0, 19) AS t(i);
+
+# Grouped data for testing with ts_forecast_agg
+statement ok
+CREATE TABLE grouped_data AS
+SELECT
+    'A' AS group_id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    20.0 + i * 1.0 AS value
+FROM generate_series(0, 29) AS t(i)
+UNION ALL
+SELECT
+    'B' AS group_id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    50.0 + i * 0.5 AS value
+FROM generate_series(0, 29) AS t(i);
+
+#######################################
+# SMA (Simple Moving Average) Tests
+#######################################
+
+# Test SMA model returns correct model name
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SMA')).model;
+----
+SMA
+
+# Test SMA returns correct horizon length
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 5, 'SMA')).point);
+----
+5
+
+# Test SMA forecast is flat (all values should be equal to the moving average)
+query I
+SELECT ABS((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SMA')).point[1] -
+           (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SMA')).point[2]) < 0.01;
+----
+true
+
+query I
+SELECT ABS((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SMA')).point[2] -
+           (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SMA')).point[3]) < 0.01;
+----
+true
+
+# Test SMA forecast value is the average of recent values
+# For [1,2,3,4,5,6,7,8,9,10], using period 3 (min window), average of last 3 is (8+9+10)/3 = 9.0
+query I
+SELECT ABS((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SMA')).point[1] - 9.0) < 0.1;
+----
+true
+
+# Test SMA with constant data returns that constant
+query I
+SELECT ABS((_ts_forecast([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 3, 'SMA')).point[1] - 5.0) < 0.01;
+----
+true
+
+# Test SMA with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'SMA', 5, MAP([], []))).model_name
+FROM linear_data;
+----
+SMA
+
+# Test SMA returns finite values
+query I
+SELECT (ts_forecast_agg(ts, value, 'SMA', 3, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM linear_data;
+----
+true
+
+#######################################
+# SeasonalNaive Tests
+#######################################
+
+# Test SeasonalNaive model returns correct model name
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4, 'SeasonalNaive')).model;
+----
+SeasonalNaive
+
+# Test SeasonalNaive returns correct horizon length
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 6, 'SeasonalNaive')).point);
+----
+6
+
+# Test SeasonalNaive repeats the last season's pattern
+# For data with period 4: [1,2,3,4,1,2,3,4,1,2,3,4], forecast should repeat [1,2,3,4]
+query I
+SELECT ABS((_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4, 'SeasonalNaive')).point[1] - 1.0) < 0.01;
+----
+true
+
+query I
+SELECT ABS((_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4, 'SeasonalNaive')).point[2] - 2.0) < 0.01;
+----
+true
+
+query I
+SELECT ABS((_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4, 'SeasonalNaive')).point[3] - 3.0) < 0.01;
+----
+true
+
+query I
+SELECT ABS((_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4, 'SeasonalNaive')).point[4] - 4.0) < 0.01;
+----
+true
+
+# Test SeasonalNaive cycles correctly for horizon > period
+query I
+SELECT ABS((_ts_forecast([10.0, 20.0, 30.0, 10.0, 20.0, 30.0, 10.0, 20.0, 30.0], 6, 'SeasonalNaive')).point[1] - 10.0) < 0.01;
+----
+true
+
+query I
+SELECT ABS((_ts_forecast([10.0, 20.0, 30.0, 10.0, 20.0, 30.0, 10.0, 20.0, 30.0], 6, 'SeasonalNaive')).point[4] - 10.0) < 0.01;
+----
+true
+
+# Test SeasonalNaive with ts_forecast_agg on seasonal data
+query I
+SELECT (ts_forecast_agg(ts, value, 'SeasonalNaive', 7, MAP([], []))).model_name
+FROM seasonal_data;
+----
+SeasonalNaive
+
+# Test SeasonalNaive alternative name 'snaive'
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4, 'snaive')).model;
+----
+SeasonalNaive
+
+# Test SeasonalNaive with case-insensitive name
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4, 'seasonalnaive')).model;
+----
+SeasonalNaive
+
+#######################################
+# SES (Simple Exponential Smoothing) Tests
+#######################################
+
+# Test SES model returns correct model name
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SES')).model;
+----
+SES
+
+# Test SES returns correct horizon length
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 5, 'SES')).point);
+----
+5
+
+# Test SES produces flat forecast (all values should be equal)
+query I
+SELECT ABS((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SES')).point[1] -
+           (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SES')).point[2]) < 0.01;
+----
+true
+
+query I
+SELECT ABS((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SES')).point[2] -
+           (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SES')).point[3]) < 0.01;
+----
+true
+
+# Test SES forecast is between min and max of data (reasonable smoothing)
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SES')).point[1] > 1.0;
+----
+true
+
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SES')).point[1] < 10.0;
+----
+true
+
+# Test SES with constant data returns that constant
+query I
+SELECT ABS((_ts_forecast([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 3, 'SES')).point[1] - 5.0) < 0.01;
+----
+true
+
+# Test SES with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'SES', 5, MAP([], []))).model_name
+FROM linear_data;
+----
+SES
+
+# Test SES returns finite values
+query I
+SELECT (ts_forecast_agg(ts, value, 'SES', 3, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM linear_data;
+----
+true
+
+# Test SES in grouped context
+query II
+SELECT group_id, (ts_forecast_agg(ts, value, 'SES', 3, MAP([], []))).model_name
+FROM grouped_data
+GROUP BY group_id
+ORDER BY group_id;
+----
+A	SES
+B	SES
+
+#######################################
+# SESOptimized Tests
+#######################################
+
+# Test SESOptimized model returns correct model name
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SESOptimized')).model;
+----
+SESOptimized
+
+# Test SESOptimized returns correct horizon length
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 5, 'SESOptimized')).point);
+----
+5
+
+# Test SESOptimized produces flat forecast
+query I
+SELECT ABS((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SESOptimized')).point[1] -
+           (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SESOptimized')).point[3]) < 0.01;
+----
+true
+
+# Test SESOptimized with constant data
+query I
+SELECT ABS((_ts_forecast([7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0], 3, 'SESOptimized')).point[1] - 7.0) < 0.01;
+----
+true
+
+# Test SESOptimized with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'SESOptimized', 5, MAP([], []))).model_name
+FROM linear_data;
+----
+SESOptimized
+
+# Test SESOptimized with alternative case
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'sesoptimized')).model;
+----
+SESOptimized
+
+# Test SESOptimized with underscore alternative
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'ses_optimized')).model;
+----
+SESOptimized
+
+#######################################
+# RandomWalkDrift Tests
+#######################################
+
+# Test RandomWalkDrift model returns correct model name (reports as Drift)
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'RandomWalkDrift')).model;
+----
+RandomWalkDrift
+
+# Test RandomWalkDrift returns correct horizon length
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 5, 'RandomWalkDrift')).point);
+----
+5
+
+# Test RandomWalkDrift continues the trend
+# For data [1,2,3,4,5,6,7,8,9,10], drift = (10-1)/(10-1) = 1.0
+# Next forecast: 10 + 1*1 = 11, 10 + 2*1 = 12, 10 + 3*1 = 13
+query I
+SELECT ABS((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'RandomWalkDrift')).point[1] - 11.0) < 0.1;
+----
+true
+
+query I
+SELECT ABS((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'RandomWalkDrift')).point[2] - 12.0) < 0.1;
+----
+true
+
+query I
+SELECT ABS((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'RandomWalkDrift')).point[3] - 13.0) < 0.1;
+----
+true
+
+# Test RandomWalkDrift with decreasing trend
+# For data [10,9,8,7,6,5,4,3,2,1], drift = (1-10)/(10-1) = -1.0
+# Next forecast: 1 + 1*(-1) = 0, 1 + 2*(-1) = -1, 1 + 3*(-1) = -2
+query I
+SELECT ABS((_ts_forecast([10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0], 3, 'RandomWalkDrift')).point[1] - 0.0) < 0.1;
+----
+true
+
+query I
+SELECT ABS((_ts_forecast([10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0], 3, 'RandomWalkDrift')).point[2] - (-1.0)) < 0.1;
+----
+true
+
+# Test RandomWalkDrift with constant data (zero drift)
+query I
+SELECT ABS((_ts_forecast([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 3, 'RandomWalkDrift')).point[1] - 5.0) < 0.01;
+----
+true
+
+# Test RandomWalkDrift with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'RandomWalkDrift', 5, MAP([], []))).model_name
+FROM linear_data;
+----
+RandomWalkDrift
+
+# Test RandomWalkDrift forecasts continue upward for linear increasing data
+query I
+SELECT (ts_forecast_agg(ts, value, 'RandomWalkDrift', 3, MAP([], []))).point_forecast[1] >
+       (SELECT MAX(value) FROM linear_data)
+FROM linear_data;
+----
+true
+
+# Test RandomWalkDrift alternative names
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'drift')).model;
+----
+RandomWalkDrift
+
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'rwd')).model;
+----
+RandomWalkDrift
+
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'RandomWalkWithDrift')).model;
+----
+RandomWalkDrift
+
+#######################################
+# Confidence Bounds Tests for Basic Models
+#######################################
+
+# Test SMA confidence bounds
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SMA')).lower[1] <=
+       (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SMA')).point[1];
+----
+true
+
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SMA')).upper[1] >=
+       (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SMA')).point[1];
+----
+true
+
+# Test SES confidence bounds
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SES')).lower[1] <=
+       (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SES')).point[1];
+----
+true
+
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SES')).upper[1] >=
+       (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SES')).point[1];
+----
+true
+
+# Test RandomWalkDrift confidence bounds
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'RandomWalkDrift')).lower[1] <=
+       (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'RandomWalkDrift')).point[1];
+----
+true
+
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'RandomWalkDrift')).upper[1] >=
+       (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'RandomWalkDrift')).point[1];
+----
+true
+
+#######################################
+# Fitted Values and Residuals Tests
+#######################################
+
+# Test fitted values length for SMA
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SMA')).fitted);
+----
+10
+
+# Test fitted values length for SES
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SES')).fitted);
+----
+10
+
+# Test residuals length for SMA
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SMA')).residuals);
+----
+10
+
+#######################################
+# Model Quality Metrics Tests
+#######################################
+
+# Test AIC exists for basic models
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SMA')).aic IS NOT NULL;
+----
+true
+
+# Test BIC exists for basic models
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SES')).bic IS NOT NULL;
+----
+true
+
+# Test MSE is non-negative
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SMA')).mse >= 0;
+----
+true
+
+#######################################
+# Edge Cases
+#######################################
+
+# Test with minimum data length (3 points)
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0], 2, 'SMA')).point);
+----
+2
+
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0], 2, 'SES')).point);
+----
+2
+
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0], 2, 'RandomWalkDrift')).point);
+----
+2
+
+# Test with large horizon
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 50, 'SMA')).point);
+----
+50
+
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 50, 'SES')).point);
+----
+50
+
+# Test forecasts are finite
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SMA')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SeasonalNaive')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SES')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SESOptimized')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'RandomWalkDrift')).point[1] IS NOT NULL;
+----
+true
+
+#######################################
+# Integration with ts_forecast_agg
+#######################################
+
+# Test all basic models with ts_forecast_agg in grouped context
+query II
+SELECT group_id, length((ts_forecast_agg(ts, value, 'SMA', 5, MAP([], []))).point_forecast)
+FROM grouped_data
+GROUP BY group_id
+ORDER BY group_id;
+----
+A	5
+B	5
+
+query II
+SELECT group_id, length((ts_forecast_agg(ts, value, 'SES', 5, MAP([], []))).point_forecast)
+FROM grouped_data
+GROUP BY group_id
+ORDER BY group_id;
+----
+A	5
+B	5
+
+query II
+SELECT group_id, length((ts_forecast_agg(ts, value, 'RandomWalkDrift', 5, MAP([], []))).point_forecast)
+FROM grouped_data
+GROUP BY group_id
+ORDER BY group_id;
+----
+A	5
+B	5
+
+# Test insample_fitted length matches input data length
+query II
+SELECT group_id, length((ts_forecast_agg(ts, value, 'SMA', 5, MAP([], []))).insample_fitted)
+FROM grouped_data
+GROUP BY group_id
+ORDER BY group_id;
+----
+A	30
+B	30
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE linear_data;
+
+statement ok
+DROP TABLE seasonal_data;
+
+statement ok
+DROP TABLE constant_data;
+
+statement ok
+DROP TABLE grouped_data;
