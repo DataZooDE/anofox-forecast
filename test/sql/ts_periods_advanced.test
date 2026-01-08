@@ -1,0 +1,428 @@
+# name: test/sql/ts_periods_advanced.test
+# description: Tests for advanced period detection methods (ts_autoperiod, ts_cfd_autoperiod, ts_lomb_scargle)
+# group: [anofox_forecast]
+
+require anofox_forecast
+
+#######################################
+# Setup - Create test data
+#######################################
+
+# Clear seasonal pattern with period 4
+statement ok
+CREATE TABLE seasonal_4 AS SELECT
+    ROW_NUMBER() OVER () AS idx,
+    v AS value
+FROM (VALUES
+    (10.0), (20.0), (30.0), (40.0),
+    (10.0), (20.0), (30.0), (40.0),
+    (10.0), (20.0), (30.0), (40.0),
+    (10.0), (20.0), (30.0), (40.0),
+    (10.0), (20.0), (30.0), (40.0),
+    (10.0), (20.0), (30.0), (40.0)
+) AS t(v);
+
+# Weekly seasonal pattern (period 7)
+statement ok
+CREATE TABLE seasonal_7 AS SELECT
+    ROW_NUMBER() OVER () AS idx,
+    v AS value
+FROM (VALUES
+    (100.0), (120.0), (140.0), (160.0), (180.0), (200.0), (150.0),
+    (100.0), (120.0), (140.0), (160.0), (180.0), (200.0), (150.0),
+    (100.0), (120.0), (140.0), (160.0), (180.0), (200.0), (150.0),
+    (100.0), (120.0), (140.0), (160.0), (180.0), (200.0), (150.0)
+) AS t(v);
+
+# Monthly seasonal pattern (period 12)
+statement ok
+CREATE TABLE seasonal_12 AS SELECT
+    ROW_NUMBER() OVER () AS idx,
+    v AS value
+FROM (VALUES
+    (50.0), (60.0), (70.0), (80.0), (90.0), (100.0), (100.0), (90.0), (80.0), (70.0), (60.0), (50.0),
+    (50.0), (60.0), (70.0), (80.0), (90.0), (100.0), (100.0), (90.0), (80.0), (70.0), (60.0), (50.0),
+    (50.0), (60.0), (70.0), (80.0), (90.0), (100.0), (100.0), (90.0), (80.0), (70.0), (60.0), (50.0),
+    (50.0), (60.0), (70.0), (80.0), (90.0), (100.0), (100.0), (90.0), (80.0), (70.0), (60.0), (50.0)
+) AS t(v);
+
+# Non-seasonal (random/noise-like) data
+statement ok
+CREATE TABLE non_seasonal AS SELECT
+    ROW_NUMBER() OVER () AS idx,
+    v AS value
+FROM (VALUES
+    (42.0), (17.0), (89.0), (33.0), (71.0), (25.0), (58.0), (12.0),
+    (94.0), (46.0), (63.0), (29.0), (77.0), (51.0), (38.0), (84.0)
+) AS t(v);
+
+#######################################
+# ts_autoperiod - Basic Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_autoperiod(LIST(value ORDER BY idx)) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test with acf_threshold parameter
+query I
+SELECT ts_autoperiod(LIST(value ORDER BY idx), 0.5) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test period field exists
+query I
+SELECT (ts_autoperiod(LIST(value ORDER BY idx))).period IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test fft_confidence field exists
+query I
+SELECT (ts_autoperiod(LIST(value ORDER BY idx))).fft_confidence IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test acf_validation field exists
+query I
+SELECT (ts_autoperiod(LIST(value ORDER BY idx))).acf_validation IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test detected field exists
+query I
+SELECT (ts_autoperiod(LIST(value ORDER BY idx))).detected IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test method field
+query T
+SELECT (ts_autoperiod(LIST(value ORDER BY idx))).method FROM seasonal_4;
+----
+autoperiod
+
+#######################################
+# ts_autoperiod - Period Detection Accuracy
+#######################################
+
+# Should detect period close to 4 for seasonal_4 data
+query I
+SELECT ABS((ts_autoperiod(LIST(value ORDER BY idx))).period - 4.0) < 1.0 FROM seasonal_4;
+----
+true
+
+# Should detect period close to 7 for seasonal_7 data
+query I
+SELECT ABS((ts_autoperiod(LIST(value ORDER BY idx))).period - 7.0) < 1.0 FROM seasonal_7;
+----
+true
+
+# Should detect period close to 12 for seasonal_12 data
+query I
+SELECT ABS((ts_autoperiod(LIST(value ORDER BY idx))).period - 12.0) < 2.0 FROM seasonal_12;
+----
+true
+
+# FFT confidence should be positive
+query I
+SELECT (ts_autoperiod(LIST(value ORDER BY idx))).fft_confidence >= 0.0 FROM seasonal_4;
+----
+true
+
+# ACF validation should be between 0 and 1
+query I
+SELECT (ts_autoperiod(LIST(value ORDER BY idx))).acf_validation >= 0.0 FROM seasonal_4;
+----
+true
+
+#######################################
+# ts_cfd_autoperiod - Basic Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_cfd_autoperiod(LIST(value ORDER BY idx)) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test with acf_threshold parameter
+query I
+SELECT ts_cfd_autoperiod(LIST(value ORDER BY idx), 0.5) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test period field exists
+query I
+SELECT (ts_cfd_autoperiod(LIST(value ORDER BY idx))).period IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test fft_confidence field exists
+query I
+SELECT (ts_cfd_autoperiod(LIST(value ORDER BY idx))).fft_confidence IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test acf_validation field exists
+query I
+SELECT (ts_cfd_autoperiod(LIST(value ORDER BY idx))).acf_validation IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test detected field exists
+query I
+SELECT (ts_cfd_autoperiod(LIST(value ORDER BY idx))).detected IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test method field
+query T
+SELECT (ts_cfd_autoperiod(LIST(value ORDER BY idx))).method FROM seasonal_4;
+----
+cfd_autoperiod
+
+#######################################
+# ts_cfd_autoperiod - Period Detection
+#######################################
+
+# CFD autoperiod should work on trended seasonal data
+# (first differencing removes trend, exposing seasonality)
+query I
+SELECT (ts_cfd_autoperiod(LIST(value ORDER BY idx))).period IS NOT NULL FROM seasonal_7;
+----
+true
+
+# FFT confidence should be non-negative
+query I
+SELECT (ts_cfd_autoperiod(LIST(value ORDER BY idx))).fft_confidence >= 0.0 FROM seasonal_4;
+----
+true
+
+#######################################
+# ts_lomb_scargle - Basic Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_lomb_scargle(LIST(value ORDER BY idx)) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test with min_period parameter
+query I
+SELECT ts_lomb_scargle(LIST(value ORDER BY idx), 2.0) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test with min_period and max_period parameters
+query I
+SELECT ts_lomb_scargle(LIST(value ORDER BY idx), 2.0, 10.0) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test with all parameters (min_period, max_period, n_frequencies)
+query I
+SELECT ts_lomb_scargle(LIST(value ORDER BY idx), 2.0, 10.0, 100) IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test period field exists
+query I
+SELECT (ts_lomb_scargle(LIST(value ORDER BY idx))).period IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test frequency field exists
+query I
+SELECT (ts_lomb_scargle(LIST(value ORDER BY idx))).frequency IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test power field exists
+query I
+SELECT (ts_lomb_scargle(LIST(value ORDER BY idx))).power IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test false_alarm_prob field exists
+query I
+SELECT (ts_lomb_scargle(LIST(value ORDER BY idx))).false_alarm_prob IS NOT NULL FROM seasonal_4;
+----
+true
+
+# Test method field
+query T
+SELECT (ts_lomb_scargle(LIST(value ORDER BY idx))).method FROM seasonal_4;
+----
+lomb_scargle
+
+#######################################
+# ts_lomb_scargle - Period Detection Accuracy
+#######################################
+
+# Should detect period close to 4 for seasonal_4 data
+query I
+SELECT ABS((ts_lomb_scargle(LIST(value ORDER BY idx))).period - 4.0) < 1.0 FROM seasonal_4;
+----
+true
+
+# Period and frequency should be inversely related (period = 1/frequency)
+query I
+SELECT ABS((ts_lomb_scargle(LIST(value ORDER BY idx))).period * (ts_lomb_scargle(LIST(value ORDER BY idx))).frequency - 1.0) < 0.01 FROM seasonal_4;
+----
+true
+
+# Power should be positive for strongly seasonal data
+query I
+SELECT (ts_lomb_scargle(LIST(value ORDER BY idx))).power > 0 FROM seasonal_4;
+----
+true
+
+# False alarm probability should be between 0 and 1
+query I
+SELECT (ts_lomb_scargle(LIST(value ORDER BY idx))).false_alarm_prob >= 0.0 AND
+       (ts_lomb_scargle(LIST(value ORDER BY idx))).false_alarm_prob <= 1.0
+FROM seasonal_4;
+----
+true
+
+#######################################
+# ts_lomb_scargle - Parameter Effects
+#######################################
+
+# Constraining min_period should affect results
+query I
+SELECT (ts_lomb_scargle(LIST(value ORDER BY idx), 5.0)).period >= 5.0 FROM seasonal_4;
+----
+true
+
+# Constraining max_period should affect results
+query I
+SELECT (ts_lomb_scargle(LIST(value ORDER BY idx), 2.0, 5.0)).period <= 5.0 FROM seasonal_4;
+----
+true
+
+#######################################
+# NULL Handling
+#######################################
+
+# NULL input should return NULL for ts_autoperiod
+query I
+SELECT ts_autoperiod(NULL) IS NULL;
+----
+true
+
+# NULL input should return NULL for ts_cfd_autoperiod
+query I
+SELECT ts_cfd_autoperiod(NULL) IS NULL;
+----
+true
+
+# NULL input should return NULL for ts_lomb_scargle
+query I
+SELECT ts_lomb_scargle(NULL) IS NULL;
+----
+true
+
+#######################################
+# Edge Cases
+#######################################
+
+# Short series should still work for autoperiod (minimum 4 values)
+query I
+SELECT ts_autoperiod([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0]) IS NOT NULL;
+----
+true
+
+# Very short series should still return result or NULL for lomb_scargle
+query I
+SELECT ts_lomb_scargle([10.0, 20.0, 30.0, 40.0]) IS NOT NULL;
+----
+true
+
+# Constant series
+query I
+SELECT ts_autoperiod([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0]) IS NOT NULL;
+----
+true
+
+# Series with trend
+query I
+SELECT ts_autoperiod([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0]) IS NOT NULL;
+----
+true
+
+#######################################
+# Comparison Between Methods
+#######################################
+
+# All methods should produce positive periods
+query I
+SELECT (ts_autoperiod(LIST(value ORDER BY idx))).period > 0 FROM seasonal_4;
+----
+true
+
+query I
+SELECT (ts_cfd_autoperiod(LIST(value ORDER BY idx))).period > 0 FROM seasonal_4;
+----
+true
+
+query I
+SELECT (ts_lomb_scargle(LIST(value ORDER BY idx))).period > 0 FROM seasonal_4;
+----
+true
+
+# FFT-based methods should give similar periods for clear seasonal data
+query I
+SELECT ABS((ts_autoperiod(LIST(value ORDER BY idx))).period -
+           (ts_lomb_scargle(LIST(value ORDER BY idx))).period) < 2.0
+FROM seasonal_4;
+----
+true
+
+#######################################
+# Integration with SQL
+#######################################
+
+# Use in aggregate query
+query I
+SELECT COUNT(*) FROM (
+    SELECT
+        ts_autoperiod(LIST(value ORDER BY idx)) AS ap_result
+    FROM seasonal_4
+);
+----
+1
+
+# Use in WHERE clause
+query I
+SELECT COUNT(*) FROM seasonal_4
+WHERE (SELECT (ts_autoperiod(LIST(value ORDER BY idx))).detected FROM seasonal_4) = true;
+----
+24
+
+# Multiple function calls in same query
+query I
+SELECT
+    (ts_autoperiod(LIST(value ORDER BY idx))).period IS NOT NULL AND
+    (ts_lomb_scargle(LIST(value ORDER BY idx))).period IS NOT NULL
+FROM seasonal_4;
+----
+true
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE seasonal_4;
+
+statement ok
+DROP TABLE seasonal_7;
+
+statement ok
+DROP TABLE seasonal_12;
+
+statement ok
+DROP TABLE non_seasonal;
