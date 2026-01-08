@@ -411,7 +411,7 @@ mod tests {
         assert!(result
             .changepoint_probability
             .iter()
-            .all(|&p| p >= 0.0 && p <= 1.0));
+            .all(|&p| (0.0..=1.0).contains(&p)));
 
         // The algorithm should produce some probability output
         // (Detection accuracy depends on parameters and data)

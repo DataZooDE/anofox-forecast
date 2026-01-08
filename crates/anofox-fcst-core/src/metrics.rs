@@ -458,7 +458,7 @@ mod tests {
         let forecast = vec![200.0, 10.0, 100.0]; // Large errors
 
         let result = smape(&actual, &forecast).unwrap();
-        assert!(result >= 0.0 && result <= 200.0);
+        assert!((0.0..=200.0).contains(&result));
 
         // Perfect forecast should give 0
         let perfect = smape(&actual, &actual).unwrap();
