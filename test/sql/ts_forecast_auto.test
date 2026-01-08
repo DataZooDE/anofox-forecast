@@ -1,0 +1,623 @@
+# name: test/sql/ts_forecast_auto.test
+# description: Tests for Auto Selection Models (AutoETS, AutoARIMA, AutoTheta, AutoMFLES, AutoMSTL, AutoTBATS)
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup: Create test data
+#######################################
+
+# Linear trend data
+statement ok
+CREATE TABLE trend_data AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    50.0 + i * 2.0 AS value
+FROM generate_series(0, 29) AS t(i);
+
+# Seasonal data with period 7 (weekly pattern) and trend
+statement ok
+CREATE TABLE seasonal_trend AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    100.0 + (i % 7) * 10.0 + i * 0.5 AS value
+FROM generate_series(0, 55) AS t(i);
+
+# Pure seasonal data without trend
+statement ok
+CREATE TABLE pure_seasonal AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    100.0 + (i % 7) * 15.0 AS value
+FROM generate_series(0, 55) AS t(i);
+
+# Constant/stationary data
+statement ok
+CREATE TABLE stationary_data AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    50.0 + (i % 3) * 2.0 AS value
+FROM generate_series(0, 29) AS t(i);
+
+# Grouped data for aggregate function testing
+statement ok
+CREATE TABLE grouped_data AS
+SELECT
+    'G1' AS group_id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    30.0 + i * 1.2 + (i % 7) * 5.0 AS value
+FROM generate_series(0, 41) AS t(i)
+UNION ALL
+SELECT
+    'G2' AS group_id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    60.0 + i * 0.8 + (i % 7) * 8.0 AS value
+FROM generate_series(0, 41) AS t(i);
+
+#######################################
+# AutoETS Model Tests
+#######################################
+
+# Test AutoETS returns a valid model name (auto-selects appropriate model)
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoETS')).model IS NOT NULL;
+----
+true
+
+# Test AutoETS returns correct horizon length
+query I
+SELECT length((_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 5, 'AutoETS')).point);
+----
+5
+
+# Test AutoETS with ts_forecast_agg - model name should indicate selection
+query I
+SELECT (ts_forecast_agg(ts, value, 'AutoETS', 5, MAP([], []))).model_name IS NOT NULL
+FROM trend_data;
+----
+true
+
+# Test AutoETS forecasts are finite
+query I
+SELECT (ts_forecast_agg(ts, value, 'AutoETS', 3, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM trend_data;
+----
+true
+
+# Test AutoETS confidence bounds
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoETS')).lower[1] <=
+       (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoETS')).point[1];
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoETS')).upper[1] >=
+       (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoETS')).point[1];
+----
+true
+
+# Test AutoETS fitted values length
+query I
+SELECT length((_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoETS')).fitted);
+----
+10
+
+# Test AutoETS alternative names
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'autoets')).model IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'auto_ets')).model IS NOT NULL;
+----
+true
+
+#######################################
+# AutoARIMA Model Tests
+#######################################
+
+# Test AutoARIMA returns a valid model name
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoARIMA')).model IS NOT NULL;
+----
+true
+
+# Test AutoARIMA returns correct horizon length
+query I
+SELECT length((_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 5, 'AutoARIMA')).point);
+----
+5
+
+# Test AutoARIMA with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'AutoARIMA', 5, MAP([], []))).model_name IS NOT NULL
+FROM trend_data;
+----
+true
+
+# Test AutoARIMA forecasts are finite
+query I
+SELECT (ts_forecast_agg(ts, value, 'AutoARIMA', 3, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM trend_data;
+----
+true
+
+# Test AutoARIMA confidence bounds
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoARIMA')).lower[1] <=
+       (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoARIMA')).point[1];
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoARIMA')).upper[1] >=
+       (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoARIMA')).point[1];
+----
+true
+
+# Test AutoARIMA alternative names
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'autoarima')).model IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'auto_arima')).model IS NOT NULL;
+----
+true
+
+#######################################
+# AutoTheta Model Tests
+#######################################
+
+# Test AutoTheta returns a valid model name
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoTheta')).model IS NOT NULL;
+----
+true
+
+# Test AutoTheta returns correct horizon length
+query I
+SELECT length((_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 5, 'AutoTheta')).point);
+----
+5
+
+# Test AutoTheta with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'AutoTheta', 5, MAP([], []))).model_name IS NOT NULL
+FROM trend_data;
+----
+true
+
+# Test AutoTheta forecasts are finite
+query I
+SELECT (ts_forecast_agg(ts, value, 'AutoTheta', 3, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM trend_data;
+----
+true
+
+# Test AutoTheta confidence bounds
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoTheta')).lower[1] <=
+       (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoTheta')).point[1];
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoTheta')).upper[1] >=
+       (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoTheta')).point[1];
+----
+true
+
+# Test AutoTheta alternative names
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'autotheta')).model IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'auto_theta')).model IS NOT NULL;
+----
+true
+
+#######################################
+# AutoMFLES Model Tests
+#######################################
+
+# Test AutoMFLES returns a valid model name
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'AutoMFLES')).model IS NOT NULL;
+----
+true
+
+# Test AutoMFLES returns correct horizon length
+query I
+SELECT length((_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 6, 'AutoMFLES')).point);
+----
+6
+
+# Test AutoMFLES with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'AutoMFLES', 7, MAP([], []))).model_name IS NOT NULL
+FROM seasonal_trend;
+----
+true
+
+# Test AutoMFLES forecasts are finite
+query I
+SELECT (ts_forecast_agg(ts, value, 'AutoMFLES', 3, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM seasonal_trend;
+----
+true
+
+# Test AutoMFLES confidence bounds
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'AutoMFLES')).lower[1] <=
+       (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'AutoMFLES')).point[1];
+----
+true
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'AutoMFLES')).upper[1] >=
+       (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'AutoMFLES')).point[1];
+----
+true
+
+# Test AutoMFLES alternative names
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'automfles')).model IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'auto_mfles')).model IS NOT NULL;
+----
+true
+
+#######################################
+# AutoMSTL Model Tests
+#######################################
+
+# Test AutoMSTL returns a valid model name
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'AutoMSTL')).model IS NOT NULL;
+----
+true
+
+# Test AutoMSTL returns correct horizon length
+query I
+SELECT length((_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 6, 'AutoMSTL')).point);
+----
+6
+
+# Test AutoMSTL with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'AutoMSTL', 7, MAP([], []))).model_name IS NOT NULL
+FROM seasonal_trend;
+----
+true
+
+# Test AutoMSTL forecasts are finite
+query I
+SELECT (ts_forecast_agg(ts, value, 'AutoMSTL', 3, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM seasonal_trend;
+----
+true
+
+# Test AutoMSTL confidence bounds
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'AutoMSTL')).lower[1] <=
+       (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'AutoMSTL')).point[1];
+----
+true
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'AutoMSTL')).upper[1] >=
+       (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'AutoMSTL')).point[1];
+----
+true
+
+# Test AutoMSTL alternative names
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'automstl')).model IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'auto_mstl')).model IS NOT NULL;
+----
+true
+
+#######################################
+# AutoTBATS Model Tests
+#######################################
+
+# Test AutoTBATS returns a valid model name
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'AutoTBATS')).model IS NOT NULL;
+----
+true
+
+# Test AutoTBATS returns correct horizon length
+query I
+SELECT length((_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 6, 'AutoTBATS')).point);
+----
+6
+
+# Test AutoTBATS with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'AutoTBATS', 7, MAP([], []))).model_name IS NOT NULL
+FROM seasonal_trend;
+----
+true
+
+# Test AutoTBATS forecasts are finite
+query I
+SELECT (ts_forecast_agg(ts, value, 'AutoTBATS', 3, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM seasonal_trend;
+----
+true
+
+# Test AutoTBATS confidence bounds
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'AutoTBATS')).lower[1] <=
+       (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'AutoTBATS')).point[1];
+----
+true
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'AutoTBATS')).upper[1] >=
+       (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'AutoTBATS')).point[1];
+----
+true
+
+# Test AutoTBATS alternative names
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'autotbats')).model IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'auto_tbats')).model IS NOT NULL;
+----
+true
+
+#######################################
+# Model Quality Metrics Tests
+#######################################
+
+# Test AIC exists for auto selection models
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoETS')).aic IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoARIMA')).aic IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoTheta')).aic IS NOT NULL;
+----
+true
+
+# Test BIC exists
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoETS')).bic IS NOT NULL;
+----
+true
+
+# Test MSE is non-negative
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoETS')).mse >= 0;
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoARIMA')).mse >= 0;
+----
+true
+
+#######################################
+# Fitted Values and Residuals Tests
+#######################################
+
+# Test fitted values length
+query I
+SELECT length((_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoETS')).fitted);
+----
+10
+
+query I
+SELECT length((_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoARIMA')).fitted);
+----
+10
+
+# Test residuals length
+query I
+SELECT length((_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoETS')).residuals);
+----
+10
+
+#######################################
+# Integration with ts_forecast_agg - Grouped Tests
+#######################################
+
+# Test all auto selection models work with grouped data
+query II
+SELECT group_id, length((ts_forecast_agg(ts, value, 'AutoETS', 5, MAP([], []))).point_forecast)
+FROM grouped_data
+GROUP BY group_id
+ORDER BY group_id;
+----
+G1	5
+G2	5
+
+query II
+SELECT group_id, length((ts_forecast_agg(ts, value, 'AutoARIMA', 5, MAP([], []))).point_forecast)
+FROM grouped_data
+GROUP BY group_id
+ORDER BY group_id;
+----
+G1	5
+G2	5
+
+query II
+SELECT group_id, length((ts_forecast_agg(ts, value, 'AutoTheta', 5, MAP([], []))).point_forecast)
+FROM grouped_data
+GROUP BY group_id
+ORDER BY group_id;
+----
+G1	5
+G2	5
+
+query II
+SELECT group_id, length((ts_forecast_agg(ts, value, 'AutoMFLES', 7, MAP([], []))).point_forecast)
+FROM grouped_data
+GROUP BY group_id
+ORDER BY group_id;
+----
+G1	7
+G2	7
+
+query II
+SELECT group_id, length((ts_forecast_agg(ts, value, 'AutoMSTL', 7, MAP([], []))).point_forecast)
+FROM grouped_data
+GROUP BY group_id
+ORDER BY group_id;
+----
+G1	7
+G2	7
+
+query II
+SELECT group_id, length((ts_forecast_agg(ts, value, 'AutoTBATS', 7, MAP([], []))).point_forecast)
+FROM grouped_data
+GROUP BY group_id
+ORDER BY group_id;
+----
+G1	7
+G2	7
+
+# Test insample_fitted length matches input data length
+query II
+SELECT group_id, length((ts_forecast_agg(ts, value, 'AutoETS', 5, MAP([], []))).insample_fitted)
+FROM grouped_data
+GROUP BY group_id
+ORDER BY group_id;
+----
+G1	42
+G2	42
+
+# Test different groups produce different forecasts
+query I
+SELECT COUNT(*) FROM (
+    SELECT DISTINCT (ts_forecast_agg(ts, value, 'AutoETS', 3, MAP([], []))).point_forecast[1] AS f
+    FROM grouped_data
+    GROUP BY group_id
+);
+----
+2
+
+#######################################
+# Edge Cases
+#######################################
+
+# Test with minimum data length (3 points)
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0], 2, 'AutoETS')).point);
+----
+2
+
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0], 2, 'AutoARIMA')).point);
+----
+2
+
+# Test with large horizon
+query I
+SELECT length((_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 50, 'AutoETS')).point);
+----
+50
+
+query I
+SELECT length((_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 50, 'AutoARIMA')).point);
+----
+50
+
+# Test all auto models produce finite forecasts
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoETS')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoARIMA')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoTheta')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'AutoMFLES')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'AutoMSTL')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'AutoTBATS')).point[1] IS NOT NULL;
+----
+true
+
+# Test with pure seasonal data
+query I
+SELECT (ts_forecast_agg(ts, value, 'AutoETS', 7, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM pure_seasonal;
+----
+true
+
+# Test with stationary data
+query I
+SELECT (ts_forecast_agg(ts, value, 'AutoETS', 5, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM stationary_data;
+----
+true
+
+#######################################
+# Legacy 'auto' alias test
+#######################################
+
+# Test 'auto' maps to AutoETS
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'auto')).model IS NOT NULL;
+----
+true
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE trend_data;
+
+statement ok
+DROP TABLE seasonal_trend;
+
+statement ok
+DROP TABLE pure_seasonal;
+
+statement ok
+DROP TABLE stationary_data;
+
+statement ok
+DROP TABLE grouped_data;

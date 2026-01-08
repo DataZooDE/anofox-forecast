@@ -1,0 +1,492 @@
+# name: test/sql/ts_forecast_multi_seasonal.test
+# description: Tests for Multiple Seasonality Models (MFLES, MSTL, TBATS)
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup: Create test data
+#######################################
+
+# Seasonal data with period 7 (weekly pattern) and trend
+statement ok
+CREATE TABLE weekly_seasonal AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    100.0 + (i % 7) * 10.0 + i * 0.5 AS value
+FROM generate_series(0, 55) AS t(i);
+
+# Pure seasonal data without trend
+statement ok
+CREATE TABLE pure_seasonal AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    100.0 + (i % 7) * 15.0 AS value
+FROM generate_series(0, 55) AS t(i);
+
+# Quarterly seasonal data (period 4)
+statement ok
+CREATE TABLE quarterly_seasonal AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' month')::INTERVAL)::TIMESTAMP AS ts,
+    200.0 + (i % 4) * 25.0 + i * 1.5 AS value
+FROM generate_series(0, 23) AS t(i);
+
+# Linear trend data (non-seasonal)
+statement ok
+CREATE TABLE trend_data AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    50.0 + i * 2.0 AS value
+FROM generate_series(0, 29) AS t(i);
+
+# Grouped seasonal data
+statement ok
+CREATE TABLE grouped_seasonal AS
+SELECT
+    'S1' AS series_id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    80.0 + (i % 7) * 8.0 + i * 0.3 AS value
+FROM generate_series(0, 41) AS t(i)
+UNION ALL
+SELECT
+    'S2' AS series_id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    120.0 + (i % 7) * 12.0 + i * 0.4 AS value
+FROM generate_series(0, 41) AS t(i);
+
+#######################################
+# MFLES Model Tests
+#######################################
+
+# Test MFLES model returns correct model name
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'MFLES')).model;
+----
+MFLES
+
+# Test MFLES returns correct horizon length
+query I
+SELECT length((_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 6, 'MFLES')).point);
+----
+6
+
+# Test MFLES with ts_forecast_agg on seasonal data
+query I
+SELECT (ts_forecast_agg(ts, value, 'MFLES', 7, MAP([], []))).model_name
+FROM weekly_seasonal;
+----
+MFLES
+
+# Test MFLES forecasts are finite
+query I
+SELECT (ts_forecast_agg(ts, value, 'MFLES', 7, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM weekly_seasonal;
+----
+true
+
+# Test MFLES confidence bounds
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'MFLES')).lower[1] <=
+       (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'MFLES')).point[1];
+----
+true
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'MFLES')).upper[1] >=
+       (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'MFLES')).point[1];
+----
+true
+
+# Test MFLES fitted values length
+query I
+SELECT length((_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'MFLES')).fitted);
+----
+12
+
+# Test MFLES residuals length
+query I
+SELECT length((_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'MFLES')).residuals);
+----
+12
+
+# Test MFLES case-insensitive name
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'mfles')).model;
+----
+MFLES
+
+# Test MFLES captures seasonal variation
+query I
+SELECT ABS((_ts_forecast([100.0, 120.0, 140.0, 160.0, 100.0, 120.0, 140.0, 160.0, 100.0, 120.0, 140.0, 160.0], 4, 'MFLES')).point[1] -
+           (_ts_forecast([100.0, 120.0, 140.0, 160.0, 100.0, 120.0, 140.0, 160.0, 100.0, 120.0, 140.0, 160.0], 4, 'MFLES')).point[2]) > 0.1;
+----
+true
+
+#######################################
+# MSTL Model Tests
+#######################################
+
+# Test MSTL model returns correct model name
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'MSTL')).model;
+----
+MSTL
+
+# Test MSTL returns correct horizon length
+query I
+SELECT length((_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 6, 'MSTL')).point);
+----
+6
+
+# Test MSTL with ts_forecast_agg on seasonal data
+query I
+SELECT (ts_forecast_agg(ts, value, 'MSTL', 7, MAP([], []))).model_name
+FROM weekly_seasonal;
+----
+MSTL
+
+# Test MSTL forecasts are finite
+query I
+SELECT (ts_forecast_agg(ts, value, 'MSTL', 7, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM weekly_seasonal;
+----
+true
+
+# Test MSTL confidence bounds
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'MSTL')).lower[1] <=
+       (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'MSTL')).point[1];
+----
+true
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'MSTL')).upper[1] >=
+       (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'MSTL')).point[1];
+----
+true
+
+# Test MSTL fitted values length
+query I
+SELECT length((_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'MSTL')).fitted);
+----
+12
+
+# Test MSTL residuals length
+query I
+SELECT length((_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'MSTL')).residuals);
+----
+12
+
+# Test MSTL case-insensitive name
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'mstl')).model;
+----
+MSTL
+
+# Test MSTL with quarterly data
+query I
+SELECT (ts_forecast_agg(ts, value, 'MSTL', 4, MAP([], []))).model_name
+FROM quarterly_seasonal;
+----
+MSTL
+
+# Test MSTL with trend data (non-seasonal)
+query I
+SELECT (ts_forecast_agg(ts, value, 'MSTL', 5, MAP([], []))).model_name
+FROM trend_data;
+----
+MSTL
+
+#######################################
+# TBATS Model Tests
+#######################################
+
+# Test TBATS model returns correct model name
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'TBATS')).model;
+----
+TBATS
+
+# Test TBATS returns correct horizon length
+query I
+SELECT length((_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 6, 'TBATS')).point);
+----
+6
+
+# Test TBATS with ts_forecast_agg on seasonal data
+query I
+SELECT (ts_forecast_agg(ts, value, 'TBATS', 7, MAP([], []))).model_name
+FROM weekly_seasonal;
+----
+TBATS
+
+# Test TBATS forecasts are finite
+query I
+SELECT (ts_forecast_agg(ts, value, 'TBATS', 7, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM weekly_seasonal;
+----
+true
+
+# Test TBATS confidence bounds
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'TBATS')).lower[1] <=
+       (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'TBATS')).point[1];
+----
+true
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'TBATS')).upper[1] >=
+       (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'TBATS')).point[1];
+----
+true
+
+# Test TBATS fitted values length
+query I
+SELECT length((_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'TBATS')).fitted);
+----
+12
+
+# Test TBATS residuals length
+query I
+SELECT length((_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'TBATS')).residuals);
+----
+12
+
+# Test TBATS case-insensitive name
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'tbats')).model;
+----
+TBATS
+
+# Test TBATS with quarterly data
+query I
+SELECT (ts_forecast_agg(ts, value, 'TBATS', 4, MAP([], []))).model_name
+FROM quarterly_seasonal;
+----
+TBATS
+
+#######################################
+# Model Quality Metrics Tests
+#######################################
+
+# Test AIC exists for multiple seasonality models
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'MFLES')).aic IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'MSTL')).aic IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'TBATS')).aic IS NOT NULL;
+----
+true
+
+# Test BIC exists
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'MFLES')).bic IS NOT NULL;
+----
+true
+
+# Test MSE is non-negative
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'MFLES')).mse >= 0;
+----
+true
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'MSTL')).mse >= 0;
+----
+true
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'TBATS')).mse >= 0;
+----
+true
+
+#######################################
+# Integration with ts_forecast_agg - Grouped Tests
+#######################################
+
+# Test all multiple seasonality models work with grouped data
+query II
+SELECT series_id, length((ts_forecast_agg(ts, value, 'MFLES', 7, MAP([], []))).point_forecast)
+FROM grouped_seasonal
+GROUP BY series_id
+ORDER BY series_id;
+----
+S1	7
+S2	7
+
+query II
+SELECT series_id, (ts_forecast_agg(ts, value, 'MSTL', 7, MAP([], []))).model_name
+FROM grouped_seasonal
+GROUP BY series_id
+ORDER BY series_id;
+----
+S1	MSTL
+S2	MSTL
+
+query II
+SELECT series_id, (ts_forecast_agg(ts, value, 'TBATS', 7, MAP([], []))).model_name
+FROM grouped_seasonal
+GROUP BY series_id
+ORDER BY series_id;
+----
+S1	TBATS
+S2	TBATS
+
+# Test insample_fitted length matches input data length
+query II
+SELECT series_id, length((ts_forecast_agg(ts, value, 'MFLES', 7, MAP([], []))).insample_fitted)
+FROM grouped_seasonal
+GROUP BY series_id
+ORDER BY series_id;
+----
+S1	42
+S2	42
+
+query II
+SELECT series_id, length((ts_forecast_agg(ts, value, 'MSTL', 7, MAP([], []))).insample_fitted)
+FROM grouped_seasonal
+GROUP BY series_id
+ORDER BY series_id;
+----
+S1	42
+S2	42
+
+# Test different groups produce different forecasts
+query I
+SELECT COUNT(*) FROM (
+    SELECT DISTINCT (ts_forecast_agg(ts, value, 'MFLES', 3, MAP([], []))).point_forecast[1] AS f
+    FROM grouped_seasonal
+    GROUP BY series_id
+);
+----
+2
+
+query I
+SELECT COUNT(*) FROM (
+    SELECT DISTINCT (ts_forecast_agg(ts, value, 'MSTL', 3, MAP([], []))).point_forecast[1] AS f
+    FROM grouped_seasonal
+    GROUP BY series_id
+);
+----
+2
+
+#######################################
+# Edge Cases
+#######################################
+
+# Test with minimum data length (3 points)
+query I
+SELECT length((_ts_forecast([100.0, 110.0, 120.0], 2, 'MFLES')).point);
+----
+2
+
+query I
+SELECT length((_ts_forecast([100.0, 110.0, 120.0], 2, 'MSTL')).point);
+----
+2
+
+query I
+SELECT length((_ts_forecast([100.0, 110.0, 120.0], 2, 'TBATS')).point);
+----
+2
+
+# Test with large horizon
+query I
+SELECT length((_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 50, 'MFLES')).point);
+----
+50
+
+query I
+SELECT length((_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 50, 'MSTL')).point);
+----
+50
+
+query I
+SELECT length((_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 50, 'TBATS')).point);
+----
+50
+
+# Test all forecasts are finite
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'MFLES')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'MSTL')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'TBATS')).point[1] IS NOT NULL;
+----
+true
+
+# Test with pure seasonal data (no trend)
+query I
+SELECT (ts_forecast_agg(ts, value, 'MFLES', 7, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM pure_seasonal;
+----
+true
+
+query I
+SELECT (ts_forecast_agg(ts, value, 'MSTL', 7, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM pure_seasonal;
+----
+true
+
+query I
+SELECT (ts_forecast_agg(ts, value, 'TBATS', 7, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM pure_seasonal;
+----
+true
+
+#######################################
+# Comparison Tests
+#######################################
+
+# Test all models produce reasonable forecasts for seasonal data
+query I
+SELECT (ts_forecast_agg(ts, value, 'MFLES', 7, MAP([], []))).point_forecast[1] > 50
+FROM weekly_seasonal;
+----
+true
+
+query I
+SELECT (ts_forecast_agg(ts, value, 'MSTL', 7, MAP([], []))).point_forecast[1] > 50
+FROM weekly_seasonal;
+----
+true
+
+query I
+SELECT (ts_forecast_agg(ts, value, 'TBATS', 7, MAP([], []))).point_forecast[1] > 50
+FROM weekly_seasonal;
+----
+true
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE weekly_seasonal;
+
+statement ok
+DROP TABLE pure_seasonal;
+
+statement ok
+DROP TABLE quarterly_seasonal;
+
+statement ok
+DROP TABLE trend_data;
+
+statement ok
+DROP TABLE grouped_seasonal;

@@ -3,7 +3,12 @@
 //! These types are designed to be used across the Rust/C++ boundary,
 //! following the patterns from anofox-statistics.
 
-use libc::{c_char, c_double, c_int, size_t};
+// Use core::ffi types for cross-platform compatibility including WASM
+use core::ffi::{c_char, c_double, c_int};
+
+// size_t is not in core::ffi, use usize instead
+#[allow(non_camel_case_types)]
+type size_t = usize;
 
 /// Error codes for FFI boundary.
 #[repr(C)]
@@ -498,7 +503,7 @@ pub struct GapFillResult {
     pub dates: *mut i64,
     /// Array of filled values
     pub values: *mut c_double,
-    /// Validity bitmask for filled values (bit i indicates if values[i] is valid)
+    /// Validity bitmask for filled values (bit `i` indicates if `values[i]` is valid)
     pub validity: *mut u64,
     /// Number of observations after gap filling
     pub length: size_t,
@@ -520,7 +525,7 @@ impl Default for GapFillResult {
 pub struct FilledValuesResult {
     /// Array of filled values
     pub values: *mut c_double,
-    /// Validity bitmask (bit i indicates if values[i] is valid)
+    /// Validity bitmask (bit `i` indicates if `values[i]` is valid)
     pub validity: *mut u64,
     /// Number of values
     pub length: size_t,
@@ -532,6 +537,613 @@ impl Default for FilledValuesResult {
             values: std::ptr::null_mut(),
             validity: std::ptr::null_mut(),
             length: 0,
+        }
+    }
+}
+
+// ============================================================================
+// Period Detection Types (fdars-core integration)
+// ============================================================================
+
+/// Result from single period estimation.
+#[repr(C)]
+pub struct SinglePeriodResult {
+    /// Estimated period (in samples)
+    pub period: c_double,
+    /// Dominant frequency (1/period)
+    pub frequency: c_double,
+    /// Power at the dominant frequency
+    pub power: c_double,
+    /// Confidence measure
+    pub confidence: c_double,
+    /// Method used for estimation
+    pub method: [c_char; 32],
+}
+
+impl Default for SinglePeriodResult {
+    fn default() -> Self {
+        Self {
+            period: 0.0,
+            frequency: 0.0,
+            power: 0.0,
+            confidence: 0.0,
+            method: [0; 32],
+        }
+    }
+}
+
+/// A detected period from multiple period detection.
+#[repr(C)]
+pub struct DetectedPeriodFFI {
+    /// Estimated period (in samples)
+    pub period: c_double,
+    /// Confidence measure
+    pub confidence: c_double,
+    /// Seasonal strength at this period
+    pub strength: c_double,
+    /// Amplitude of the sinusoidal component
+    pub amplitude: c_double,
+    /// Phase of the sinusoidal component (radians)
+    pub phase: c_double,
+    /// Iteration number (1-indexed)
+    pub iteration: size_t,
+}
+
+/// Result from multiple period detection.
+#[repr(C)]
+pub struct MultiPeriodResult {
+    /// Array of detected periods
+    pub periods: *mut DetectedPeriodFFI,
+    /// Number of detected periods
+    pub n_periods: size_t,
+    /// Primary (strongest) period
+    pub primary_period: c_double,
+    /// Method used for estimation
+    pub method: [c_char; 32],
+}
+
+impl Default for MultiPeriodResult {
+    fn default() -> Self {
+        Self {
+            periods: std::ptr::null_mut(),
+            n_periods: 0,
+            primary_period: 0.0,
+            method: [0; 32],
+        }
+    }
+}
+
+/// Flattened result from multiple period detection.
+///
+/// Uses parallel arrays instead of nested struct array for safer FFI.
+/// This avoids memory management issues when crossing the Rust/C++ boundary,
+/// particularly with R's DuckDB bindings.
+#[repr(C)]
+pub struct FlatMultiPeriodResult {
+    /// Array of period values (in samples)
+    pub period_values: *mut c_double,
+    /// Array of confidence values
+    pub confidence_values: *mut c_double,
+    /// Array of strength values
+    pub strength_values: *mut c_double,
+    /// Array of amplitude values
+    pub amplitude_values: *mut c_double,
+    /// Array of phase values (radians)
+    pub phase_values: *mut c_double,
+    /// Array of iteration values (1-indexed)
+    pub iteration_values: *mut size_t,
+    /// Number of detected periods
+    pub n_periods: size_t,
+    /// Primary (strongest) period
+    pub primary_period: c_double,
+    /// Method used for estimation
+    pub method: [c_char; 32],
+}
+
+impl Default for FlatMultiPeriodResult {
+    fn default() -> Self {
+        Self {
+            period_values: std::ptr::null_mut(),
+            confidence_values: std::ptr::null_mut(),
+            strength_values: std::ptr::null_mut(),
+            amplitude_values: std::ptr::null_mut(),
+            phase_values: std::ptr::null_mut(),
+            iteration_values: std::ptr::null_mut(),
+            n_periods: 0,
+            primary_period: 0.0,
+            method: [0; 32],
+        }
+    }
+}
+
+/// Result from autoperiod detection.
+///
+/// Combines FFT period estimation with ACF validation.
+#[repr(C)]
+pub struct AutoperiodResultFFI {
+    /// Detected period (in samples)
+    pub period: c_double,
+    /// FFT confidence (ratio of peak power to mean power)
+    pub fft_confidence: c_double,
+    /// ACF validation score (correlation at the detected period)
+    pub acf_validation: c_double,
+    /// Whether the period was detected (acf_validation > threshold)
+    pub detected: bool,
+    /// Method used ("autoperiod" or "cfd_autoperiod")
+    pub method: [c_char; 32],
+}
+
+impl Default for AutoperiodResultFFI {
+    fn default() -> Self {
+        Self {
+            period: 0.0,
+            fft_confidence: 0.0,
+            acf_validation: 0.0,
+            detected: false,
+            method: [0; 32],
+        }
+    }
+}
+
+/// Result from Lomb-Scargle periodogram.
+///
+/// Lomb-Scargle is optimal for detecting periodic signals in unevenly
+/// sampled data and provides statistical significance via false alarm probability.
+#[repr(C)]
+pub struct LombScargleResultFFI {
+    /// Detected period (in samples)
+    pub period: c_double,
+    /// Frequency corresponding to the peak
+    pub frequency: c_double,
+    /// Power at the peak frequency (normalized)
+    pub power: c_double,
+    /// False alarm probability (lower = more significant)
+    pub false_alarm_prob: c_double,
+    /// Method identifier
+    pub method: [c_char; 32],
+}
+
+impl Default for LombScargleResultFFI {
+    fn default() -> Self {
+        Self {
+            period: 0.0,
+            frequency: 0.0,
+            power: 0.0,
+            false_alarm_prob: 1.0,
+            method: [0; 32],
+        }
+    }
+}
+
+/// Result from AIC-based period comparison.
+#[repr(C)]
+pub struct AicPeriodResultFFI {
+    /// Best period according to AIC
+    pub period: c_double,
+    /// AIC value for the best model
+    pub aic: c_double,
+    /// BIC value for the best model
+    pub bic: c_double,
+    /// Residual sum of squares for the best model
+    pub rss: c_double,
+    /// R-squared for the best model
+    pub r_squared: c_double,
+    /// Method identifier
+    pub method: [c_char; 32],
+}
+
+impl Default for AicPeriodResultFFI {
+    fn default() -> Self {
+        Self {
+            period: 0.0,
+            aic: 0.0,
+            bic: 0.0,
+            rss: 0.0,
+            r_squared: 0.0,
+            method: [0; 32],
+        }
+    }
+}
+
+/// Result from SSA period detection.
+#[repr(C)]
+pub struct SsaPeriodResultFFI {
+    /// Primary detected period
+    pub period: c_double,
+    /// Variance explained by the primary periodic component
+    pub variance_explained: c_double,
+    /// Number of eigenvalues returned
+    pub n_eigenvalues: size_t,
+    /// Method identifier
+    pub method: [c_char; 32],
+}
+
+impl Default for SsaPeriodResultFFI {
+    fn default() -> Self {
+        Self {
+            period: 0.0,
+            variance_explained: 0.0,
+            n_eigenvalues: 0,
+            method: [0; 32],
+        }
+    }
+}
+
+/// Result from STL-based period detection.
+#[repr(C)]
+pub struct StlPeriodResultFFI {
+    /// Best detected period
+    pub period: c_double,
+    /// Seasonal strength at the best period (0-1)
+    pub seasonal_strength: c_double,
+    /// Trend strength (0-1)
+    pub trend_strength: c_double,
+    /// Method identifier
+    pub method: [c_char; 32],
+}
+
+impl Default for StlPeriodResultFFI {
+    fn default() -> Self {
+        Self {
+            period: 0.0,
+            seasonal_strength: 0.0,
+            trend_strength: 0.0,
+            method: [0; 32],
+        }
+    }
+}
+
+/// Result from Matrix Profile period detection.
+#[repr(C)]
+pub struct MatrixProfilePeriodResultFFI {
+    /// Detected period (most common motif distance)
+    pub period: c_double,
+    /// Confidence based on peak prominence in lag histogram
+    pub confidence: c_double,
+    /// Number of motif pairs found
+    pub n_motifs: size_t,
+    /// Subsequence length used
+    pub subsequence_length: size_t,
+    /// Method identifier
+    pub method: [c_char; 32],
+}
+
+impl Default for MatrixProfilePeriodResultFFI {
+    fn default() -> Self {
+        Self {
+            period: 0.0,
+            confidence: 0.0,
+            n_motifs: 0,
+            subsequence_length: 0,
+            method: [0; 32],
+        }
+    }
+}
+
+/// Result from SAZED period detection.
+#[repr(C)]
+pub struct SazedPeriodResultFFI {
+    /// Primary detected period
+    pub period: c_double,
+    /// Spectral power at the detected period
+    pub power: c_double,
+    /// Signal-to-noise ratio
+    pub snr: c_double,
+    /// Method identifier
+    pub method: [c_char; 32],
+}
+
+impl Default for SazedPeriodResultFFI {
+    fn default() -> Self {
+        Self {
+            period: 0.0,
+            power: 0.0,
+            snr: 0.0,
+            method: [0; 32],
+        }
+    }
+}
+
+// ============================================================================
+// Peak Detection Types (fdars-core integration)
+// ============================================================================
+
+/// A detected peak in the time series.
+#[repr(C)]
+pub struct PeakFFI {
+    /// Index at which the peak occurs
+    pub index: size_t,
+    /// Time at which the peak occurs
+    pub time: c_double,
+    /// Value at the peak
+    pub value: c_double,
+    /// Prominence of the peak
+    pub prominence: c_double,
+}
+
+/// Result of peak detection.
+#[repr(C)]
+pub struct PeakDetectionResultFFI {
+    /// Array of detected peaks
+    pub peaks: *mut PeakFFI,
+    /// Number of peaks detected
+    pub n_peaks: size_t,
+    /// Inter-peak distances
+    pub inter_peak_distances: *mut c_double,
+    /// Number of inter-peak distances
+    pub n_distances: size_t,
+    /// Mean period estimated from inter-peak distances
+    pub mean_period: c_double,
+}
+
+impl Default for PeakDetectionResultFFI {
+    fn default() -> Self {
+        Self {
+            peaks: std::ptr::null_mut(),
+            n_peaks: 0,
+            inter_peak_distances: std::ptr::null_mut(),
+            n_distances: 0,
+            mean_period: 0.0,
+        }
+    }
+}
+
+/// Result of peak timing variability analysis.
+#[repr(C)]
+pub struct PeakTimingResultFFI {
+    /// Peak times for each cycle
+    pub peak_times: *mut c_double,
+    /// Peak values
+    pub peak_values: *mut c_double,
+    /// Normalized timing (0-1 scale)
+    pub normalized_timing: *mut c_double,
+    /// Number of peaks
+    pub n_peaks: size_t,
+    /// Mean normalized timing
+    pub mean_timing: c_double,
+    /// Standard deviation of normalized timing
+    pub std_timing: c_double,
+    /// Range of normalized timing
+    pub range_timing: c_double,
+    /// Variability score (0 = stable, 1 = highly variable)
+    pub variability_score: c_double,
+    /// Trend in timing
+    pub timing_trend: c_double,
+    /// Whether timing is considered stable
+    pub is_stable: bool,
+}
+
+impl Default for PeakTimingResultFFI {
+    fn default() -> Self {
+        Self {
+            peak_times: std::ptr::null_mut(),
+            peak_values: std::ptr::null_mut(),
+            normalized_timing: std::ptr::null_mut(),
+            n_peaks: 0,
+            mean_timing: 0.0,
+            std_timing: 0.0,
+            range_timing: 0.0,
+            variability_score: 0.0,
+            timing_trend: 0.0,
+            is_stable: false,
+        }
+    }
+}
+
+// ============================================================================
+// Detrending Types (fdars-core integration)
+// ============================================================================
+
+/// Result of detrending operation.
+#[repr(C)]
+pub struct DetrendResultFFI {
+    /// Estimated trend values
+    pub trend: *mut c_double,
+    /// Detrended data
+    pub detrended: *mut c_double,
+    /// Number of values
+    pub length: size_t,
+    /// Method used for detrending
+    pub method: [c_char; 32],
+    /// Polynomial coefficients (may be NULL)
+    pub coefficients: *mut c_double,
+    /// Number of coefficients
+    pub n_coefficients: size_t,
+    /// Residual sum of squares
+    pub rss: c_double,
+    /// Number of parameters
+    pub n_params: size_t,
+}
+
+impl Default for DetrendResultFFI {
+    fn default() -> Self {
+        Self {
+            trend: std::ptr::null_mut(),
+            detrended: std::ptr::null_mut(),
+            length: 0,
+            method: [0; 32],
+            coefficients: std::ptr::null_mut(),
+            n_coefficients: 0,
+            rss: 0.0,
+            n_params: 0,
+        }
+    }
+}
+
+/// Result of seasonal decomposition.
+#[repr(C)]
+pub struct DecomposeResultFFI {
+    /// Trend component
+    pub trend: *mut c_double,
+    /// Seasonal component
+    pub seasonal: *mut c_double,
+    /// Remainder/residual component
+    pub remainder: *mut c_double,
+    /// Number of observations
+    pub length: size_t,
+    /// Period used for decomposition
+    pub period: c_double,
+    /// Decomposition method ("additive" or "multiplicative")
+    pub method: [c_char; 32],
+}
+
+impl Default for DecomposeResultFFI {
+    fn default() -> Self {
+        Self {
+            trend: std::ptr::null_mut(),
+            seasonal: std::ptr::null_mut(),
+            remainder: std::ptr::null_mut(),
+            length: 0,
+            period: 0.0,
+            method: [0; 32],
+        }
+    }
+}
+
+// ============================================================================
+// Extended Seasonality Types (fdars-core integration)
+// ============================================================================
+
+/// Result of seasonality classification.
+#[repr(C)]
+pub struct SeasonalityClassificationFFI {
+    /// Whether series is classified as seasonal
+    pub is_seasonal: bool,
+    /// Whether timing is stable across cycles
+    pub has_stable_timing: bool,
+    /// Timing variability measure
+    pub timing_variability: c_double,
+    /// Overall seasonal strength
+    pub seasonal_strength: c_double,
+    /// Per-cycle seasonal strength
+    pub cycle_strengths: *mut c_double,
+    /// Number of cycle strengths
+    pub n_cycle_strengths: size_t,
+    /// Indices of weak/missing seasons
+    pub weak_seasons: *mut size_t,
+    /// Number of weak seasons
+    pub n_weak_seasons: size_t,
+    /// Classification type (stable, variable, intermittent, absent)
+    pub classification: [c_char; 32],
+}
+
+impl Default for SeasonalityClassificationFFI {
+    fn default() -> Self {
+        Self {
+            is_seasonal: false,
+            has_stable_timing: false,
+            timing_variability: 0.0,
+            seasonal_strength: 0.0,
+            cycle_strengths: std::ptr::null_mut(),
+            n_cycle_strengths: 0,
+            weak_seasons: std::ptr::null_mut(),
+            n_weak_seasons: 0,
+            classification: [0; 32],
+        }
+    }
+}
+
+/// Seasonality change point.
+#[repr(C)]
+pub struct SeasonalityChangePointFFI {
+    /// Index at which change occurs
+    pub index: size_t,
+    /// Time at which change occurs
+    pub time: c_double,
+    /// Type of change (onset, cessation)
+    pub change_type: [c_char; 32],
+    /// Strength before change
+    pub strength_before: c_double,
+    /// Strength after change
+    pub strength_after: c_double,
+}
+
+/// Result of seasonality change detection.
+#[repr(C)]
+pub struct ChangeDetectionResultFFI {
+    /// Array of detected change points
+    pub change_points: *mut SeasonalityChangePointFFI,
+    /// Number of change points
+    pub n_changes: size_t,
+    /// Time-varying seasonal strength curve
+    pub strength_curve: *mut c_double,
+    /// Number of strength curve values
+    pub n_strength_curve: size_t,
+}
+
+impl Default for ChangeDetectionResultFFI {
+    fn default() -> Self {
+        Self {
+            change_points: std::ptr::null_mut(),
+            n_changes: 0,
+            strength_curve: std::ptr::null_mut(),
+            n_strength_curve: 0,
+        }
+    }
+}
+
+/// Result of instantaneous period estimation.
+#[repr(C)]
+pub struct InstantaneousPeriodResultFFI {
+    /// Instantaneous period at each time point
+    pub periods: *mut c_double,
+    /// Instantaneous frequency at each time point
+    pub frequencies: *mut c_double,
+    /// Instantaneous amplitude (envelope) at each time point
+    pub amplitudes: *mut c_double,
+    /// Number of values
+    pub length: size_t,
+}
+
+impl Default for InstantaneousPeriodResultFFI {
+    fn default() -> Self {
+        Self {
+            periods: std::ptr::null_mut(),
+            frequencies: std::ptr::null_mut(),
+            amplitudes: std::ptr::null_mut(),
+            length: 0,
+        }
+    }
+}
+
+/// Result of amplitude modulation detection.
+#[repr(C)]
+pub struct AmplitudeModulationResultFFI {
+    /// Whether seasonality is present
+    pub is_seasonal: bool,
+    /// Overall seasonal strength
+    pub seasonal_strength: c_double,
+    /// Whether amplitude modulation is detected
+    pub has_modulation: bool,
+    /// Modulation type (stable, emerging, fading, oscillating, non_seasonal)
+    pub modulation_type: [c_char; 32],
+    /// Coefficient of variation of wavelet amplitude
+    pub modulation_score: c_double,
+    /// Trend in amplitude (-1 to 1)
+    pub amplitude_trend: c_double,
+    /// Wavelet amplitude at the seasonal frequency over time
+    pub wavelet_amplitude: *mut c_double,
+    /// Time points corresponding to wavelet_amplitude
+    pub time_points: *mut c_double,
+    /// Number of amplitude/time values
+    pub n_points: size_t,
+    /// Scale (period) used for wavelet analysis
+    pub scale: c_double,
+}
+
+impl Default for AmplitudeModulationResultFFI {
+    fn default() -> Self {
+        Self {
+            is_seasonal: false,
+            seasonal_strength: 0.0,
+            has_modulation: false,
+            modulation_type: [0; 32],
+            modulation_score: 0.0,
+            amplitude_trend: 0.0,
+            wavelet_amplitude: std::ptr::null_mut(),
+            time_points: std::ptr::null_mut(),
+            n_points: 0,
+            scale: 0.0,
         }
     }
 }

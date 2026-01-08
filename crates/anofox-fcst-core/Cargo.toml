@@ -6,11 +6,23 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[features]
+default = ["native"]
+native = []  # Enable native optimizations (parallel, linalg)
+wasm = []    # WASM-compatible build
+
 [dependencies]
 anofox-forecast = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
 statrs = { workspace = true }
+
+# fdars-core with target-specific features
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+fdars-core = { workspace = true, features = ["parallel", "linalg"] }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+fdars-core = { workspace = true, features = ["js"] }
 
 [dev-dependencies]
 approx = "0.5"

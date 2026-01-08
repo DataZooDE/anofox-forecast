@@ -1,0 +1,113 @@
+# name: test/sql/ts_peaks.test
+# description: Tests for peak detection functions (fdars-core integration)
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# ts_detect_peaks - Basic Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_detect_peaks([1.0, 3.0, 2.0, 5.0, 3.0, 7.0, 4.0, 6.0, 3.0, 8.0, 2.0, 4.0]) IS NOT NULL;
+----
+true
+
+# Test with min_distance parameter
+query I
+SELECT ts_detect_peaks([1.0, 3.0, 2.0, 5.0, 3.0, 7.0, 4.0, 6.0, 3.0, 8.0, 2.0, 4.0], 2.0) IS NOT NULL;
+----
+true
+
+# Test with min_prominence parameter
+query I
+SELECT ts_detect_peaks([1.0, 3.0, 2.0, 5.0, 3.0, 7.0, 4.0, 6.0, 3.0, 8.0, 2.0, 4.0], 0.0, 1.0) IS NOT NULL;
+----
+true
+
+# Test with smooth_first parameter
+query I
+SELECT ts_detect_peaks([1.0, 3.0, 2.0, 5.0, 3.0, 7.0, 4.0, 6.0, 3.0, 8.0, 2.0, 4.0], 0.0, 0.0, true) IS NOT NULL;
+----
+true
+
+# Test n_peaks field exists
+query I
+SELECT (ts_detect_peaks([1.0, 3.0, 2.0, 5.0, 3.0, 7.0, 4.0, 6.0, 3.0, 8.0, 2.0, 4.0])).n_peaks >= 0;
+----
+true
+
+# Test peaks list exists
+query I
+SELECT (ts_detect_peaks([1.0, 3.0, 2.0, 5.0, 3.0, 7.0, 4.0, 6.0, 3.0, 8.0, 2.0, 4.0])).peaks IS NOT NULL;
+----
+true
+
+# Test inter_peak_distances field exists
+query I
+SELECT (ts_detect_peaks([1.0, 3.0, 2.0, 5.0, 3.0, 7.0, 4.0, 6.0, 3.0, 8.0, 2.0, 4.0])).inter_peak_distances IS NOT NULL;
+----
+true
+
+# Test mean_period field exists
+query I
+SELECT (ts_detect_peaks([1.0, 3.0, 2.0, 5.0, 3.0, 7.0, 4.0, 6.0, 3.0, 8.0, 2.0, 4.0])).mean_period IS NOT NULL;
+----
+true
+
+#######################################
+# ts_analyze_peak_timing - Tests
+#######################################
+
+# Test function returns valid result
+query I
+SELECT ts_analyze_peak_timing([1.0, 3.0, 2.0, 5.0, 3.0, 7.0, 4.0, 6.0, 3.0, 8.0, 2.0, 4.0], 4.0) IS NOT NULL;
+----
+true
+
+# Test n_peaks field exists
+query I
+SELECT (ts_analyze_peak_timing([1.0, 3.0, 2.0, 5.0, 3.0, 7.0, 4.0, 6.0, 3.0, 8.0, 2.0, 4.0], 4.0)).n_peaks >= 0;
+----
+true
+
+# Test peak_times list exists
+query I
+SELECT (ts_analyze_peak_timing([1.0, 3.0, 2.0, 5.0, 3.0, 7.0, 4.0, 6.0, 3.0, 8.0, 2.0, 4.0], 4.0)).peak_times IS NOT NULL;
+----
+true
+
+# Test variability_score field exists
+query I
+SELECT (ts_analyze_peak_timing([1.0, 3.0, 2.0, 5.0, 3.0, 7.0, 4.0, 6.0, 3.0, 8.0, 2.0, 4.0], 4.0)).variability_score IS NOT NULL;
+----
+true
+
+# Test is_stable field exists
+query I
+SELECT (ts_analyze_peak_timing([1.0, 3.0, 2.0, 5.0, 3.0, 7.0, 4.0, 6.0, 3.0, 8.0, 2.0, 4.0], 4.0)).is_stable IS NOT NULL;
+----
+true
+
+#######################################
+# NULL Handling
+#######################################
+
+# NULL input should return NULL for ts_detect_peaks
+query I
+SELECT ts_detect_peaks(NULL) IS NULL;
+----
+true
+
+# NULL input should return NULL for ts_analyze_peak_timing
+query I
+SELECT ts_analyze_peak_timing(NULL, 4.0) IS NULL;
+----
+true
+
+# NULL period should return NULL for ts_analyze_peak_timing
+query I
+SELECT ts_analyze_peak_timing([1.0, 2.0, 3.0], NULL) IS NULL;
+----
+true

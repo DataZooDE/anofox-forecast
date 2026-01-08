@@ -1,0 +1,25 @@
+# Quarto intermediate files
+_freeze/
+.jupyter_cache/
+/.quarto/
+**/*.quarto_ipynb
+
+# R session files
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# knitr cache
+*_cache/
+*_files/
+
+# Generated CSV files
+*.csv
+
+# Output directory (except final PDF)
+_output/*
+!_output/*.pdf
+
+# Intermediate rmarkdown files
+*.rmarkdown

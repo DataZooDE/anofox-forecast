@@ -105,7 +105,8 @@ static void TsFeaturesFunction(DataChunk &args, ExpressionState &state, Vector &
         );
 
         if (!success) {
-            throw InvalidInputException("ts_features failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         // Build name to value map for quick lookup

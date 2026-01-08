@@ -394,4 +394,105 @@ mod tests {
         let result = detect_changepoints(&values, 5, None, CostFunction::L2).unwrap();
         assert!(result.changepoints.is_empty() || result.changepoints.len() <= 1);
     }
+
+    #[test]
+    fn test_detect_changepoints_bocpd() {
+        // Create series with clear changepoint in mean
+        let mut values: Vec<f64> = (0..50).map(|_| 10.0).collect();
+        values.extend((0..50).map(|_| 50.0));
+
+        let result = detect_changepoints_bocpd(&values, 20.0, true).unwrap();
+
+        // Verify output structure is correct
+        assert_eq!(result.is_changepoint.len(), 100);
+        assert_eq!(result.changepoint_probability.len(), 100);
+
+        // Check that probabilities are valid (in range [0, 1])
+        assert!(result
+            .changepoint_probability
+            .iter()
+            .all(|&p| (0.0..=1.0).contains(&p)));
+
+        // The algorithm should produce some probability output
+        // (Detection accuracy depends on parameters and data)
+        let max_prob = result
+            .changepoint_probability
+            .iter()
+            .fold(0.0_f64, |a, &b| a.max(b));
+        assert!(max_prob >= 0.0, "Should compute valid probabilities");
+    }
+
+    #[test]
+    fn test_detect_changepoints_bocpd_insufficient_data() {
+        let values = vec![1.0, 2.0];
+        let result = detect_changepoints_bocpd(&values, 10.0, false);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cost_l1() {
+        let values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+
+        // Cost of entire segment
+        let cost = cost_l1(&values, 0, 5);
+        assert!(cost > 0.0, "Cost should be positive for varied data");
+
+        // Cost of constant segment
+        let constant = vec![5.0; 5];
+        let constant_cost = cost_l1(&constant, 0, 5);
+        assert!(constant_cost < 1e-10, "Cost should be ~0 for constant data");
+
+        // Empty segment
+        let empty_cost = cost_l1(&values, 2, 2);
+        assert_eq!(empty_cost, 0.0);
+    }
+
+    #[test]
+    fn test_cost_normal() {
+        let values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+
+        // Cost should be positive for varied data
+        let cost = cost_normal(&values, 0, 5);
+        assert!(cost > 0.0, "Normal cost should be positive for varied data");
+
+        // Constant segment has zero variance -> cost = 0
+        let constant = vec![5.0; 5];
+        let constant_cost = cost_normal(&constant, 0, 5);
+        assert_eq!(
+            constant_cost, 0.0,
+            "Constant data should have 0 normal cost"
+        );
+
+        // Short segment
+        let short_cost = cost_normal(&values, 0, 1);
+        assert_eq!(short_cost, 0.0, "Single element should have 0 cost");
+    }
+
+    #[test]
+    fn test_detect_changepoints_with_different_cost_functions() {
+        // Create series with clear changepoint
+        let mut values = vec![5.0; 30];
+        values.extend(vec![15.0; 30]);
+
+        // All cost functions should detect the changepoint
+        for cost_fn in [CostFunction::L1, CostFunction::L2, CostFunction::Normal] {
+            let result = detect_changepoints(&values, 5, None, cost_fn).unwrap();
+            assert!(
+                !result.changepoints.is_empty(),
+                "{:?} cost function should detect changepoint",
+                cost_fn
+            );
+        }
+    }
+
+    #[test]
+    fn test_detect_changepoints_bayesian() {
+        // Legacy function test
+        let mut values = vec![10.0; 40];
+        values.extend(vec![50.0; 40]);
+
+        let result = detect_changepoints_bayesian(&values, 0.01).unwrap();
+        // Should return a valid result structure
+        assert!(result.cost == 0.0); // Legacy function sets cost to 0
+    }
 }

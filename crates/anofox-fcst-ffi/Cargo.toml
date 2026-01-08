@@ -16,11 +16,16 @@ telemetry = ["ureq", "serde_json", "uuid"]
 [dependencies]
 anofox-fcst-core = { path = "../anofox-fcst-core" }
 libc = { workspace = true }
-
-# Telemetry (optional)
-ureq = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
+
+# Telemetry dependencies - only for non-WASM targets
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+ureq = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
+
+# For WASM: uuid with js feature
+[target.'cfg(target_family = "wasm")'.dependencies]
+uuid = { version = "1.7", features = ["v4", "js"], optional = true }
 
 [build-dependencies]
 cbindgen = "0.27"

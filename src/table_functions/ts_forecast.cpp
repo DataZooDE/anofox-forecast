@@ -151,7 +151,8 @@ static void TsForecastFunction(DataChunk &args, ExpressionState &state, Vector &
         );
 
         if (!success) {
-            throw InvalidInputException("ts_forecast failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         // Set list fields
@@ -241,7 +242,8 @@ static void TsForecastWithModelFunction(DataChunk &args, ExpressionState &state,
         );
 
         if (!success) {
-            throw InvalidInputException("ts_forecast failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         SetListFromArray(result, 0, row_idx, fcst_result.point_forecasts, fcst_result.n_forecasts);

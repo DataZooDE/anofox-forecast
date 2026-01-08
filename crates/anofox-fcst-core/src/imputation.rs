@@ -74,8 +74,8 @@ pub fn fill_nulls_interpolate(values: &[Option<f64>]) -> Vec<f64> {
         return result;
     }
 
-    let first = first_idx.unwrap();
-    let last = last_idx.unwrap();
+    let first = first_idx.expect("checked is_none() above");
+    let last = last_idx.expect("checked is_none() above");
 
     // Fill before first value with first value
     if let Some(v) = values[first] {
@@ -93,7 +93,7 @@ pub fn fill_nulls_interpolate(values: &[Option<f64>]) -> Vec<f64> {
 
     // Interpolate between known values
     let mut prev_idx = first;
-    let mut prev_val = values[first].unwrap();
+    let mut prev_val = values[first].expect("position() guarantees values[first] is Some");
     result[first] = prev_val;
 
     for i in (first + 1)..=last {

@@ -86,7 +86,8 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
         );
 
         if (!success) {
-            throw InvalidInputException("ts_mstl_decomposition failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);

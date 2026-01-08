@@ -316,4 +316,187 @@ mod tests {
         let quality = compute_data_quality(&values, None).unwrap();
         assert!(quality.is_constant);
     }
+
+    #[test]
+    fn test_structural_score() {
+        // Complete series with good length
+        let values: Vec<f64> = (0..50).map(|i| i as f64).collect();
+        let score = calculate_structural_score(&values, 0);
+        assert!(score > 0.9, "Complete long series should have high score");
+
+        // Series with many missing values
+        let values_with_missing: Vec<f64> = vec![1.0, 2.0, 3.0];
+        let score_with_missing = calculate_structural_score(&values_with_missing, 10);
+        assert!(
+            score_with_missing < score,
+            "Series with missing values should have lower score"
+        );
+
+        // Empty with missing
+        let empty_score = calculate_structural_score(&[], 5);
+        assert_eq!(
+            empty_score, 0.0,
+            "Empty series with missing values should have 0 score"
+        );
+    }
+
+    #[test]
+    fn test_temporal_score() {
+        // No gaps
+        let score_no_gaps = calculate_temporal_score(0, 100);
+        assert_eq!(score_no_gaps, 1.0, "No gaps should give perfect score");
+
+        // Some gaps
+        let score_some_gaps = calculate_temporal_score(5, 100);
+        assert!(
+            score_some_gaps < 1.0 && score_some_gaps > 0.0,
+            "Some gaps should reduce score"
+        );
+
+        // Many gaps
+        let score_many_gaps = calculate_temporal_score(50, 100);
+        assert!(
+            score_many_gaps < score_some_gaps,
+            "More gaps should give lower score"
+        );
+
+        // Empty series
+        let score_empty = calculate_temporal_score(0, 0);
+        assert_eq!(
+            score_empty, 0.0,
+            "Empty series should have 0 temporal score"
+        );
+    }
+
+    #[test]
+    fn test_magnitude_score() {
+        // Normal distribution - no outliers
+        let normal_values: Vec<f64> = (0..100).map(|i| 50.0 + (i % 10) as f64 - 5.0).collect();
+        let normal_score = calculate_magnitude_score(&normal_values);
+        assert!(
+            normal_score > 0.8,
+            "Normal data should have high magnitude score"
+        );
+
+        // Data with outliers
+        let mut outlier_values: Vec<f64> = (0..100).map(|i| i as f64).collect();
+        outlier_values.push(1000.0); // Add extreme outlier
+        outlier_values.push(-500.0); // Add another extreme outlier
+        let outlier_score = calculate_magnitude_score(&outlier_values);
+        assert!(
+            outlier_score < normal_score,
+            "Data with outliers should have lower score"
+        );
+
+        // Empty series
+        let empty_score = calculate_magnitude_score(&[]);
+        assert_eq!(
+            empty_score, 0.0,
+            "Empty series should have 0 magnitude score"
+        );
+    }
+
+    #[test]
+    fn test_behavioral_score() {
+        // Constant series (zero variance)
+        let constant_values: Vec<f64> = vec![5.0; 20];
+        let constant_score = calculate_behavioral_score(&constant_values);
+        assert_eq!(
+            constant_score, 0.0,
+            "Constant series should have 0 behavioral score"
+        );
+
+        // Series with reasonable variation
+        let varied_values: Vec<f64> = (0..50).map(|i| (i as f64 * 0.1).sin() * 10.0).collect();
+        let varied_score = calculate_behavioral_score(&varied_values);
+        assert!(
+            varied_score > 0.5,
+            "Varied series should have reasonable behavioral score"
+        );
+
+        // Short series
+        let short_values: Vec<f64> = vec![1.0, 2.0];
+        let short_score = calculate_behavioral_score(&short_values);
+        assert_eq!(
+            short_score, 0.5,
+            "Very short series should return default score"
+        );
+    }
+
+    #[test]
+    fn test_generate_quality_report() {
+        let series_list: Vec<Vec<Option<f64>>> = vec![
+            // Good series
+            (0..50).map(|i| Some(i as f64)).collect(),
+            // Series with many missing values (50% missing)
+            (0..50)
+                .map(|i| if i % 2 == 0 { Some(i as f64) } else { None })
+                .collect(),
+            // Constant series
+            vec![Some(10.0); 50],
+            // Short series
+            vec![Some(1.0), Some(2.0), Some(3.0)],
+        ];
+
+        let thresholds = QualityThresholds::default();
+        let report = generate_quality_report(&series_list, &thresholds);
+
+        assert_eq!(report.n_total, 4);
+        assert!(report.n_constant >= 1, "Should detect constant series");
+        assert!(report.n_missing_issues >= 1, "Should detect missing issues");
+        // At least one series should pass
+        assert!(report.n_passed >= 1, "At least one series should pass");
+    }
+
+    #[test]
+    fn test_data_quality_scores_in_range() {
+        // All scores should be between 0 and 1
+        let values: Vec<Option<f64>> = (0..100)
+            .map(|i| {
+                if i % 5 == 0 {
+                    None
+                } else {
+                    Some(i as f64 + (i % 7) as f64)
+                }
+            })
+            .collect();
+
+        let quality = compute_data_quality(&values, None).unwrap();
+
+        assert!(
+            quality.structural_score >= 0.0 && quality.structural_score <= 1.0,
+            "Structural score should be in [0, 1]"
+        );
+        assert!(
+            quality.temporal_score >= 0.0 && quality.temporal_score <= 1.0,
+            "Temporal score should be in [0, 1]"
+        );
+        assert!(
+            quality.magnitude_score >= 0.0 && quality.magnitude_score <= 1.0,
+            "Magnitude score should be in [0, 1]"
+        );
+        assert!(
+            quality.behavioral_score >= 0.0 && quality.behavioral_score <= 1.0,
+            "Behavioral score should be in [0, 1]"
+        );
+        assert!(
+            quality.overall_score >= 0.0 && quality.overall_score <= 1.0,
+            "Overall score should be in [0, 1]"
+        );
+    }
+
+    #[test]
+    fn test_count_gaps() {
+        // No gaps - regular intervals
+        let dates_regular: Vec<i64> = (0..10).map(|i| i * 1000).collect();
+        assert_eq!(count_gaps(&dates_regular), 0);
+
+        // With gaps
+        let dates_with_gap: Vec<i64> = vec![0, 1000, 2000, 5000, 6000, 7000];
+        assert!(count_gaps(&dates_with_gap) >= 1);
+
+        // Empty and single element
+        assert_eq!(count_gaps(&[]), 0);
+        assert_eq!(count_gaps(&[1000]), 0);
+    }
 }

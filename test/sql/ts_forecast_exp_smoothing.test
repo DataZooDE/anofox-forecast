@@ -1,0 +1,575 @@
+# name: test/sql/ts_forecast_exp_smoothing.test
+# description: Tests for exponential smoothing models (Holt, HoltWinters, SeasonalES, SeasonalESOptimized, SeasonalWindowAverage)
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup: Create test data
+#######################################
+
+# Linear trend data for Holt model testing
+statement ok
+CREATE TABLE trend_data AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    50.0 + i * 2.0 AS value
+FROM generate_series(0, 29) AS t(i);
+
+# Seasonal data with period 7 (weekly pattern) for HoltWinters/SeasonalES
+statement ok
+CREATE TABLE seasonal_data AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    100.0 + (i % 7) * 10.0 + i * 0.5 AS value
+FROM generate_series(0, 55) AS t(i);
+
+# Pure seasonal data without trend for SeasonalES testing
+statement ok
+CREATE TABLE pure_seasonal_data AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    100.0 + (i % 7) * 15.0 AS value
+FROM generate_series(0, 55) AS t(i);
+
+# Seasonal data with period 4 (quarterly pattern)
+statement ok
+CREATE TABLE quarterly_data AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' month')::INTERVAL)::TIMESTAMP AS ts,
+    200.0 + (i % 4) * 25.0 + i * 1.0 AS value
+FROM generate_series(0, 23) AS t(i);
+
+# Constant data
+statement ok
+CREATE TABLE constant_data AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    75.0 AS value
+FROM generate_series(0, 29) AS t(i);
+
+# Grouped data for aggregate function testing
+statement ok
+CREATE TABLE grouped_seasonal AS
+SELECT
+    'X' AS group_id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    50.0 + (i % 7) * 8.0 + i * 0.3 AS value
+FROM generate_series(0, 41) AS t(i)
+UNION ALL
+SELECT
+    'Y' AS group_id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    80.0 + (i % 7) * 12.0 + i * 0.4 AS value
+FROM generate_series(0, 41) AS t(i);
+
+#######################################
+# Holt Model Tests (Double Exponential Smoothing)
+#######################################
+
+# Test Holt model returns correct model name
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Holt')).model;
+----
+Holt
+
+# Test Holt returns correct horizon length
+query I
+SELECT length((_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 5, 'Holt')).point);
+----
+5
+
+# Test Holt captures trend - forecast should continue upward for increasing data
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Holt')).point[1] > 28.0;
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Holt')).point[2] >
+       (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Holt')).point[1];
+----
+true
+
+# Test Holt with decreasing trend - forecast should continue downward
+query I
+SELECT (_ts_forecast([50.0, 48.0, 46.0, 44.0, 42.0, 40.0, 38.0, 36.0, 34.0, 32.0], 3, 'Holt')).point[1] < 32.0;
+----
+true
+
+# Test Holt with constant data - should maintain level
+query I
+SELECT ABS((_ts_forecast([20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0], 3, 'Holt')).point[1] - 20.0) < 1.0;
+----
+true
+
+# Test Holt with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'Holt', 5, MAP([], []))).model_name
+FROM trend_data;
+----
+Holt
+
+# Test Holt forecasts are finite
+query I
+SELECT (ts_forecast_agg(ts, value, 'Holt', 3, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM trend_data;
+----
+true
+
+# Test Holt confidence bounds
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Holt')).lower[1] <=
+       (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Holt')).point[1];
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Holt')).upper[1] >=
+       (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Holt')).point[1];
+----
+true
+
+# Test Holt fitted values length
+query I
+SELECT length((_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Holt')).fitted);
+----
+10
+
+#######################################
+# HoltWinters Model Tests (Triple Exponential Smoothing)
+#######################################
+
+# Test HoltWinters model returns correct model name
+query I
+SELECT (_ts_forecast([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4, 'HoltWinters')).model;
+----
+HoltWinters
+
+# Test HoltWinters returns correct horizon length
+query I
+SELECT length((_ts_forecast([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 6, 'HoltWinters')).point);
+----
+6
+
+# Test HoltWinters with ts_forecast_agg on seasonal data
+query I
+SELECT (ts_forecast_agg(ts, value, 'HoltWinters', 7, MAP([], []))).model_name
+FROM seasonal_data;
+----
+HoltWinters
+
+# Test HoltWinters captures seasonality - forecasts should be different across the seasonal cycle
+query I
+SELECT ABS((_ts_forecast([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4, 'HoltWinters')).point[1] -
+           (_ts_forecast([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4, 'HoltWinters')).point[2]) > 0.1;
+----
+true
+
+# Test HoltWinters forecasts are finite
+query I
+SELECT (ts_forecast_agg(ts, value, 'HoltWinters', 7, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM seasonal_data;
+----
+true
+
+# Test HoltWinters confidence bounds
+query I
+SELECT (_ts_forecast([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4, 'HoltWinters')).lower[1] <=
+       (_ts_forecast([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4, 'HoltWinters')).point[1];
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4, 'HoltWinters')).upper[1] >=
+       (_ts_forecast([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4, 'HoltWinters')).point[1];
+----
+true
+
+# Test HoltWinters fitted values length
+query I
+SELECT length((_ts_forecast([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4, 'HoltWinters')).fitted);
+----
+12
+
+# Test HoltWinters with quarterly data
+query I
+SELECT (ts_forecast_agg(ts, value, 'HoltWinters', 4, MAP([], []))).model_name
+FROM quarterly_data;
+----
+HoltWinters
+
+# Test HoltWinters alternative names
+query I
+SELECT (_ts_forecast([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4, 'holtwinters')).model;
+----
+HoltWinters
+
+query I
+SELECT (_ts_forecast([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4, 'hw')).model;
+----
+HoltWinters
+
+query I
+SELECT (_ts_forecast([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4, 'holt_winters')).model;
+----
+HoltWinters
+
+#######################################
+# SeasonalES Model Tests
+#######################################
+
+# Test SeasonalES model returns correct model name
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'SeasonalES')).model;
+----
+SeasonalES
+
+# Test SeasonalES returns correct horizon length
+query I
+SELECT length((_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 6, 'SeasonalES')).point);
+----
+6
+
+# Test SeasonalES with ts_forecast_agg on seasonal data
+query I
+SELECT (ts_forecast_agg(ts, value, 'SeasonalES', 7, MAP([], []))).model_name
+FROM pure_seasonal_data;
+----
+SeasonalES
+
+# Test SeasonalES forecasts are finite
+query I
+SELECT (ts_forecast_agg(ts, value, 'SeasonalES', 7, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM pure_seasonal_data;
+----
+true
+
+# Test SeasonalES captures seasonality - forecasts vary across the period
+query I
+SELECT ABS((_ts_forecast([100.0, 120.0, 140.0, 160.0, 100.0, 120.0, 140.0, 160.0, 100.0, 120.0, 140.0, 160.0], 4, 'SeasonalES')).point[1] -
+           (_ts_forecast([100.0, 120.0, 140.0, 160.0, 100.0, 120.0, 140.0, 160.0, 100.0, 120.0, 140.0, 160.0], 4, 'SeasonalES')).point[2]) > 0.1;
+----
+true
+
+# Test SeasonalES confidence bounds
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'SeasonalES')).lower[1] <=
+       (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'SeasonalES')).point[1];
+----
+true
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'SeasonalES')).upper[1] >=
+       (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'SeasonalES')).point[1];
+----
+true
+
+# Test SeasonalES alternative name
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'seasonales')).model;
+----
+SeasonalES
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'seasonal_es')).model;
+----
+SeasonalES
+
+#######################################
+# SeasonalESOptimized Model Tests
+#######################################
+
+# Test SeasonalESOptimized model returns correct model name
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'SeasonalESOptimized')).model;
+----
+SeasonalESOptimized
+
+# Test SeasonalESOptimized returns correct horizon length
+query I
+SELECT length((_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 6, 'SeasonalESOptimized')).point);
+----
+6
+
+# Test SeasonalESOptimized with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'SeasonalESOptimized', 7, MAP([], []))).model_name
+FROM pure_seasonal_data;
+----
+SeasonalESOptimized
+
+# Test SeasonalESOptimized forecasts are finite
+query I
+SELECT (ts_forecast_agg(ts, value, 'SeasonalESOptimized', 7, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM pure_seasonal_data;
+----
+true
+
+# Test SeasonalESOptimized alternative names
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'seasonalesoptimized')).model;
+----
+SeasonalESOptimized
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'seasonal_es_optimized')).model;
+----
+SeasonalESOptimized
+
+#######################################
+# SeasonalWindowAverage Model Tests
+#######################################
+
+# Test SeasonalWindowAverage model returns correct model name
+query I
+SELECT (_ts_forecast([10.0, 20.0, 30.0, 10.0, 20.0, 30.0, 10.0, 20.0, 30.0], 3, 'SeasonalWindowAverage')).model;
+----
+SeasonalWindowAverage
+
+# Test SeasonalWindowAverage returns correct horizon length
+query I
+SELECT length((_ts_forecast([10.0, 20.0, 30.0, 10.0, 20.0, 30.0, 10.0, 20.0, 30.0], 6, 'SeasonalWindowAverage')).point);
+----
+6
+
+# Test SeasonalWindowAverage with ts_forecast_agg
+query I
+SELECT (ts_forecast_agg(ts, value, 'SeasonalWindowAverage', 7, MAP([], []))).model_name
+FROM seasonal_data;
+----
+SeasonalWindowAverage
+
+# Test SeasonalWindowAverage forecasts are finite
+query I
+SELECT (ts_forecast_agg(ts, value, 'SeasonalWindowAverage', 7, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM seasonal_data;
+----
+true
+
+# Test SeasonalWindowAverage produces seasonal pattern in forecasts
+# For data [10, 20, 30] repeated, the seasonal averages should be approximately 10, 20, 30
+query I
+SELECT ABS((_ts_forecast([10.0, 20.0, 30.0, 10.0, 20.0, 30.0, 10.0, 20.0, 30.0], 3, 'SeasonalWindowAverage')).point[1] - 10.0) < 1.0;
+----
+true
+
+query I
+SELECT ABS((_ts_forecast([10.0, 20.0, 30.0, 10.0, 20.0, 30.0, 10.0, 20.0, 30.0], 3, 'SeasonalWindowAverage')).point[2] - 20.0) < 1.0;
+----
+true
+
+query I
+SELECT ABS((_ts_forecast([10.0, 20.0, 30.0, 10.0, 20.0, 30.0, 10.0, 20.0, 30.0], 3, 'SeasonalWindowAverage')).point[3] - 30.0) < 1.0;
+----
+true
+
+# Test SeasonalWindowAverage confidence bounds
+query I
+SELECT (_ts_forecast([10.0, 20.0, 30.0, 10.0, 20.0, 30.0, 10.0, 20.0, 30.0], 3, 'SeasonalWindowAverage')).lower[1] <=
+       (_ts_forecast([10.0, 20.0, 30.0, 10.0, 20.0, 30.0, 10.0, 20.0, 30.0], 3, 'SeasonalWindowAverage')).point[1];
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 20.0, 30.0, 10.0, 20.0, 30.0, 10.0, 20.0, 30.0], 3, 'SeasonalWindowAverage')).upper[1] >=
+       (_ts_forecast([10.0, 20.0, 30.0, 10.0, 20.0, 30.0, 10.0, 20.0, 30.0], 3, 'SeasonalWindowAverage')).point[1];
+----
+true
+
+# Test SeasonalWindowAverage alternative names
+query I
+SELECT (_ts_forecast([10.0, 20.0, 30.0, 10.0, 20.0, 30.0, 10.0, 20.0, 30.0], 3, 'seasonalwindowaverage')).model;
+----
+SeasonalWindowAverage
+
+query I
+SELECT (_ts_forecast([10.0, 20.0, 30.0, 10.0, 20.0, 30.0, 10.0, 20.0, 30.0], 3, 'seasonal_window_average')).model;
+----
+SeasonalWindowAverage
+
+query I
+SELECT (_ts_forecast([10.0, 20.0, 30.0, 10.0, 20.0, 30.0, 10.0, 20.0, 30.0], 3, 'swa')).model;
+----
+SeasonalWindowAverage
+
+# Test SeasonalWindowAverage fitted values
+query I
+SELECT length((_ts_forecast([10.0, 20.0, 30.0, 10.0, 20.0, 30.0, 10.0, 20.0, 30.0], 3, 'SeasonalWindowAverage')).fitted);
+----
+9
+
+#######################################
+# Model Quality Metrics Tests
+#######################################
+
+# Test AIC exists for exponential smoothing models
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Holt')).aic IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4, 'HoltWinters')).aic IS NOT NULL;
+----
+true
+
+# Test BIC exists
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Holt')).bic IS NOT NULL;
+----
+true
+
+# Test MSE is non-negative
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Holt')).mse >= 0;
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4, 'HoltWinters')).mse >= 0;
+----
+true
+
+#######################################
+# Integration with ts_forecast_agg - Grouped Tests
+#######################################
+
+# Test all exponential smoothing models work with grouped data
+query II
+SELECT group_id, length((ts_forecast_agg(ts, value, 'Holt', 5, MAP([], []))).point_forecast)
+FROM grouped_seasonal
+GROUP BY group_id
+ORDER BY group_id;
+----
+X	5
+Y	5
+
+query II
+SELECT group_id, (ts_forecast_agg(ts, value, 'HoltWinters', 7, MAP([], []))).model_name
+FROM grouped_seasonal
+GROUP BY group_id
+ORDER BY group_id;
+----
+X	HoltWinters
+Y	HoltWinters
+
+query II
+SELECT group_id, (ts_forecast_agg(ts, value, 'SeasonalES', 7, MAP([], []))).model_name
+FROM grouped_seasonal
+GROUP BY group_id
+ORDER BY group_id;
+----
+X	SeasonalES
+Y	SeasonalES
+
+query II
+SELECT group_id, (ts_forecast_agg(ts, value, 'SeasonalWindowAverage', 7, MAP([], []))).model_name
+FROM grouped_seasonal
+GROUP BY group_id
+ORDER BY group_id;
+----
+X	SeasonalWindowAverage
+Y	SeasonalWindowAverage
+
+# Test insample_fitted length matches input data length
+query II
+SELECT group_id, length((ts_forecast_agg(ts, value, 'Holt', 5, MAP([], []))).insample_fitted)
+FROM grouped_seasonal
+GROUP BY group_id
+ORDER BY group_id;
+----
+X	42
+Y	42
+
+#######################################
+# Edge Cases
+#######################################
+
+# Test Holt with minimum data length (3 points)
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0], 2, 'Holt')).point);
+----
+2
+
+# Test HoltWinters falls back to Holt when insufficient seasonal data
+# (less than 2*period points)
+query I
+SELECT length((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0], 2, 'HoltWinters')).point);
+----
+2
+
+# Test with large horizon
+query I
+SELECT length((_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 50, 'Holt')).point);
+----
+50
+
+query I
+SELECT length((_ts_forecast([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 50, 'HoltWinters')).point);
+----
+50
+
+# Test all forecasts are finite (not NaN or Inf)
+query I
+SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Holt')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4, 'HoltWinters')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'SeasonalES')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0, 100.0, 110.0, 120.0, 130.0], 4, 'SeasonalESOptimized')).point[1] IS NOT NULL;
+----
+true
+
+query I
+SELECT (_ts_forecast([10.0, 20.0, 30.0, 10.0, 20.0, 30.0, 10.0, 20.0, 30.0], 3, 'SeasonalWindowAverage')).point[1] IS NOT NULL;
+----
+true
+
+#######################################
+# Residuals Tests
+#######################################
+
+# Test residuals length for Holt
+query I
+SELECT length((_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'Holt')).residuals);
+----
+10
+
+# Test residuals length for HoltWinters
+query I
+SELECT length((_ts_forecast([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4, 'HoltWinters')).residuals);
+----
+12
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE trend_data;
+
+statement ok
+DROP TABLE seasonal_data;
+
+statement ok
+DROP TABLE pure_seasonal_data;
+
+statement ok
+DROP TABLE quarterly_data;
+
+statement ok
+DROP TABLE constant_data;
+
+statement ok
+DROP TABLE grouped_seasonal;
