@@ -49,7 +49,9 @@ pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
     // Median
     let mut sorted = values.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let median = if values.len().is_multiple_of(2) {
+    // Note: is_multiple_of() is unstable and breaks WASM builds
+    #[allow(clippy::manual_is_multiple_of)]
+    let median = if values.len() % 2 == 0 {
         (sorted[values.len() / 2 - 1] + sorted[values.len() / 2]) / 2.0
     } else {
         sorted[values.len() / 2]
