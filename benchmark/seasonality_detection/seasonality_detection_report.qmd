@@ -21,6 +21,10 @@ execute:
   echo: false
   warning: false
   message: false
+knitr:
+  opts_chunk:
+    out.width: "100%"
+    fig.align: "center"
 ---
 
 ## Executive Summary
@@ -94,16 +98,17 @@ library(PRROC)
 theme_set(theme_minimal(base_size = 12))
 
 # Define consistent colors for all methods (13 total)
+# Colors aligned with fdars package for consistency
 METHOD_COLORS <- c(
-  "AIC" = "#E41A1C",
-  "FFT" = "#377EB8",
-  "ACF" = "#4DAF4A",
-  "Variance" = "#984EA3",
-  "Spectral" = "#FF7F00",
-  "Wavelet" = "#FFFF33",
-  "SAZED" = "#A65628",
-  "Autoperiod" = "#F781BF",
-  "CFD" = "#999999",
+  "AIC" = "#2166AC",
+  "FFT" = "#B2182B",
+  "ACF" = "#1B7837",
+  "Variance" = "#E66101",
+  "Spectral" = "#762A83",
+  "Wavelet" = "#D95F02",
+  "SAZED" = "#984EA3",
+  "Autoperiod" = "#FF7F00",
+  "CFD" = "#A65628",
   "Lomb" = "#66C2A5",
   "MatrixProfile" = "#FC8D62",
   "STL" = "#8DA0CB",
@@ -349,7 +354,7 @@ ggplot(baseline_data, aes(x = factor(strength_level), fill = is_seasonal)) +
 ```{r}
 #| label: fig-example-curves
 #| fig-cap: "Example curves at different strength levels"
-#| fig-height: 8
+#| fig-height: 7
 
 examples <- baseline_data %>%
   filter(strength_level %in% c(0.0, 0.2, 0.5, 0.8, 1.0)) %>%
@@ -541,7 +546,7 @@ cat(sprintf("Extracted scores for %d curves\n", nrow(scores)))
 ```{r}
 #| label: fig-score-distributions
 #| fig-cap: "Distribution of confidence scores by ground truth (seasonal vs non-seasonal)"
-#| fig-height: 12
+#| fig-height: 9
 
 score_long <- scores %>%
   pivot_longer(
@@ -660,7 +665,7 @@ kable(auc_summary, digits = 3, caption = "ROC and PR Analysis Summary (sorted by
 ```{r}
 #| label: fig-roc-curves
 #| fig-cap: "ROC curves for all detection methods"
-#| fig-height: 8
+#| fig-height: 6
 
 # Extract ROC curve data for plotting
 roc_data <- map_dfr(roc_results, function(r) {
@@ -824,7 +829,7 @@ kable(metrics, digits = 3, caption = "Classification Performance at Optimal Thre
 ```{r}
 #| label: fig-performance-comparison
 #| fig-cap: "Classification metrics comparison across methods"
-#| fig-height: 8
+#| fig-height: 6
 
 metrics_long <- metrics %>%
   pivot_longer(cols = c(Accuracy, Precision, Recall, F1),
@@ -841,8 +846,9 @@ ggplot(metrics_long, aes(x = Method, y = Value, fill = Method)) +
     y = "Score"
   ) +
   theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    legend.position = "none"
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    legend.position = "none",
+    plot.margin = margin(5, 15, 5, 5)
   )
 ```
 
@@ -925,7 +931,7 @@ if (nrow(significant_pairs) > 0) {
 ```{r}
 #| label: fig-mcnemar-heatmap
 #| fig-cap: "McNemar test p-values (FDR-adjusted) between method pairs (red = significant difference)"
-#| fig-height: 8
+#| fig-height: 7
 
 # Create symmetric matrix with adjusted p-values
 mcnemar_matrix <- mcnemar_results %>%
@@ -948,7 +954,11 @@ ggplot(mcnemar_matrix, aes(x = method1, y = method2, fill = p_adjusted)) +
     x = "", y = "",
     fill = "Adj. p-value"
   ) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+    axis.text.y = element_text(size = 7),
+    plot.margin = margin(5, 15, 5, 5)
+  )
 ```
 
 ## Challenge Scenarios
