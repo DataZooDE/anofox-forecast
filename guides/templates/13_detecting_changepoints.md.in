@@ -175,6 +175,23 @@ The changepoint marks the **beginning of the new regime**, not the exact transit
 
 <!-- include: test/sql/docs_examples/13_detecting_changepoints_statistics_16.sql -->
 
+## Boundary Behavior
+
+### First Observation
+
+The **first observation is never marked as a changepoint** because:
+- BOCPD detects when a new segment begins
+- The first observation has no prior segment to compare against
+- There is no "change" from anything
+
+### Last Observation
+
+The **last observation is not artificially marked** as a changepoint:
+- Only marked if the actual probability exceeds the threshold (0.5)
+- Stable time series will have no changepoints at boundaries
+
+This ensures that when analyzing many time series, you won't see artificial 100% changepoint rates at boundaries.
+
 ## Limitations
 
 1. **Assumes Normal Distribution**: BOCPD uses Normal-Gamma prior (works well for most data)

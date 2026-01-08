@@ -49,6 +49,59 @@ SELECT length((_ts_detect_changepoints_bocpd([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0,
 0
 
 #######################################
+# Boundary Condition Tests (GH#50)
+# First/last observations should NOT be artificially marked as changepoints
+#######################################
+
+# First observation should NEVER be marked as changepoint (no prior segment exists)
+query I
+SELECT (_ts_detect_changepoints_bocpd([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 250.0, true)).is_changepoint[1];
+----
+false
+
+# Last observation should NOT be artificially marked as changepoint
+query I
+SELECT (_ts_detect_changepoints_bocpd([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 250.0, true)).is_changepoint[8];
+----
+false
+
+# Stable series with small random noise - first observation should not be changepoint
+query I
+SELECT (_ts_detect_changepoints_bocpd([50.1, 50.2, 50.3, 50.1, 50.4, 50.2, 50.3, 50.1], 250.0, true)).is_changepoint[1];
+----
+false
+
+# Stable series with small random noise - last observation should not be changepoint
+query I
+SELECT (_ts_detect_changepoints_bocpd([50.1, 50.2, 50.3, 50.1, 50.4, 50.2, 50.3, 50.1], 250.0, true)).is_changepoint[8];
+----
+false
+
+# Changepoint probability for first observation should be below threshold (< 0.5)
+query I
+SELECT (_ts_detect_changepoints_bocpd([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 250.0, true)).changepoint_probability[1] < 0.5;
+----
+true
+
+# Changepoint probability for last observation should be below threshold (< 0.5)
+query I
+SELECT (_ts_detect_changepoints_bocpd([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 250.0, true)).changepoint_probability[8] < 0.5;
+----
+true
+
+# Index 0 should NOT appear in changepoint_indices for stable data
+query I
+SELECT list_contains((_ts_detect_changepoints_bocpd([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 250.0, true)).changepoint_indices, 0::UBIGINT);
+----
+false
+
+# Last index (n-1) should NOT appear in changepoint_indices for stable data
+query I
+SELECT list_contains((_ts_detect_changepoints_bocpd([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 250.0, true)).changepoint_indices, 7::UBIGINT);
+----
+false
+
+#######################################
 # NULL Handling
 #######################################
 
