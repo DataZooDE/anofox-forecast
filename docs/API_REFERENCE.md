@@ -2277,6 +2277,9 @@ The extension supports all 32 models with **exact case-sensitive naming**.
 | `TSB` | Teunter-Syntetos-Babai method | — | *alpha_d*, *alpha_p* |
 
 > **Note:** Parameters are passed via the `params` MAP argument in table macros and aggregate functions.
+
+> **Note:** Invalid or unrecognized model names will silently fall back to the `Naive` model rather than returning an error. This ensures batch processing continues even if some rows have incorrect model specifications. Always verify model names match the exact case-sensitive names listed above.
+
 > Example: `MAP{'seasonal_period': '7', 'alpha': '0.2'}`
 
 ---
