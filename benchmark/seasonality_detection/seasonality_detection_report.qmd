@@ -46,18 +46,24 @@ This benchmark replicates the methodology from the fdars R package benchmark.
 ### Quick SQL Example
 
 ```sql
--- Detect if a time series has seasonality
+-- From long format data (one row per observation):
+-- Aggregate values per series, then detect seasonality
 SELECT
     series_id,
-    -- Method 1: Autoperiod (returns TRUE/FALSE)
+    (ts_autoperiod(LIST(value ORDER BY date))).detected AS has_seasonality,
+    (ts_autoperiod(LIST(value ORDER BY date))).period AS detected_period,
+    ts_seasonal_strength(LIST(value ORDER BY date), 12, 'wavelet') AS strength
+FROM observations
+GROUP BY series_id;
+
+-- From wide format (values already as DOUBLE[] array):
+SELECT
+    series_id,
     (ts_autoperiod(values)).detected AS has_seasonality,
-    (ts_autoperiod(values)).period AS detected_period,
+    ts_seasonal_strength(values, 12, 'wavelet') AS strength
+FROM series_data;
 
-    -- Method 2: Strength-based (requires known period, returns 0-1)
-    ts_seasonal_strength(values, 12, 'wavelet') AS seasonal_strength
-FROM my_data;
-
--- Threshold for classification: strength > 0.3 typically indicates seasonality
+-- Threshold: strength > 0.3 typically indicates seasonality
 ```
 
 ### Key Results (TL;DR)
@@ -398,12 +404,42 @@ cat("Data loaded into DuckDB\n")
 
 ### SQL API Usage
 
-The following SQL query demonstrates how to use all 13 seasonality detection methods in the `anofox_forecast` extension. Each method returns a struct with method-specific fields; we extract the relevant confidence/strength score for classification.
+The following examples demonstrate how to use the seasonality detection methods. All `ts_*` functions expect a `DOUBLE[]` array as input.
+
+**Data Format:** If your data is in "long" format (one row per observation), use `LIST()` with `GROUP BY` to aggregate into arrays:
 
 ```sql
--- Seasonality Detection API Examples
+-- Long format: one row per observation
+-- +----------+------------+-------+
+-- | series_id| date       | value |
+-- +----------+------------+-------+
+-- | A        | 2020-01-01 | 10.5  |
+-- | A        | 2020-02-01 | 12.3  |
+-- | B        | 2020-01-01 | 5.2   |
+-- +----------+------------+-------+
+
+-- Aggregate to array per series, then detect seasonality
 SELECT
-    curve_id,
+    series_id,
+    (ts_autoperiod(LIST(value ORDER BY date))).detected AS has_seasonality,
+    (ts_autoperiod(LIST(value ORDER BY date))).period AS detected_period
+FROM long_format_data
+GROUP BY series_id;
+```
+
+**Wide format:** If your data already has one row per series with a `DOUBLE[]` column:
+
+```sql
+-- Wide format: one row per series with array column
+-- +----------+---------------------------+
+-- | series_id| values                    |
+-- +----------+---------------------------+
+-- | A        | [10.5, 12.3, 11.8, ...]   |
+-- | B        | [5.2, 6.1, 4.8, ...]      |
+-- +----------+---------------------------+
+
+SELECT
+    series_id,
 
     -- Period detection methods (return struct with period + confidence)
     (ts_estimate_period_fft(values)).period AS fft_period,
@@ -447,7 +483,7 @@ SELECT
     ts_seasonal_strength(values, 12, 'spectral') AS spectral_strength,
     ts_seasonal_strength(values, 12, 'wavelet') AS wavelet_strength
 
-FROM my_time_series_table;
+FROM wide_format_data;
 ```
 
 ### Extract Confidence Scores
