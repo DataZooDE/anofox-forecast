@@ -1113,27 +1113,27 @@ fisher_scenarios <- bind_rows(
   # White noise
   tibble(
     scenario = "White Noise",
-    values = replicate(n_test, list(rnorm(60, 0, 0.3)), simplify = FALSE)
+    values = lapply(1:n_test, function(i) rnorm(60, 0, 0.3))
   ),
   # AR(1) phi = 0.5
   tibble(
     scenario = "AR(1) phi=0.5",
-    values = replicate(n_test, {
+    values = lapply(1:n_test, function(i) {
       x <- numeric(60)
       x[1] <- rnorm(1, 0, 0.3)
-      for (i in 2:60) x[i] <- 0.5 * x[i-1] + rnorm(1, 0, 0.3 * sqrt(1 - 0.5^2))
-      list(x)
-    }, simplify = FALSE)
+      for (j in 2:60) x[j] <- 0.5 * x[j-1] + rnorm(1, 0, 0.3 * sqrt(1 - 0.5^2))
+      x
+    })
   ),
   # AR(1) phi = 0.9
   tibble(
     scenario = "AR(1) phi=0.9",
-    values = replicate(n_test, {
+    values = lapply(1:n_test, function(i) {
       x <- numeric(60)
       x[1] <- rnorm(1, 0, 0.3)
-      for (i in 2:60) x[i] <- 0.9 * x[i-1] + rnorm(1, 0, 0.3 * sqrt(1 - 0.9^2))
-      list(x)
-    }, simplify = FALSE)
+      for (j in 2:60) x[j] <- 0.9 * x[j-1] + rnorm(1, 0, 0.3 * sqrt(1 - 0.9^2))
+      x
+    })
   )
 )
 
@@ -1228,8 +1228,19 @@ complexity_results <- map_dfr(series_lengths, function(len) {
   })
 })
 
-# Plot log-log complexity analysis
-plot_computational_scaling(complexity_results, METHOD_COLORS)
+# Report benchmark success rate
+cat(sprintf("Complexity benchmark: %d/%d measurements successful\n",
+    sum(!is.na(complexity_results$time_ms)), nrow(complexity_results)))
+
+# Filter out failed measurements and plot
+valid_complexity <- complexity_results %>%
+  filter(!is.na(time_ms))
+
+if (nrow(valid_complexity) > 0) {
+  plot_computational_scaling(valid_complexity, METHOD_COLORS)
+} else {
+  cat("Warning: No valid timing measurements obtained.\n")
+}
 ```
 
 ```{r}
