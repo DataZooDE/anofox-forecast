@@ -1368,6 +1368,58 @@ generate_with_sinusoidal_trend <- function(base_data, amplitude) {
     )
 }
 
+# Exponential trend generator
+generate_with_exponential_trend <- function(base_data, rate) {
+  base_data %>%
+    mutate(
+      values = map(values, function(v) {
+        n <- length(v)
+        t_norm <- (seq_along(v) - 1) / (n - 1)
+        v + 0.5 * (exp(rate * t_norm) - 1)  # Scale to keep reasonable range
+      }),
+      scenario = paste0("exponential_", rate)
+    )
+}
+
+# Logarithmic trend generator
+generate_with_logarithmic_trend <- function(base_data, rate) {
+  base_data %>%
+    mutate(
+      values = map(values, function(v) {
+        n <- length(v)
+        t_norm <- (seq_along(v) - 1) / (n - 1)
+        v + log(1 + rate * t_norm)
+      }),
+      scenario = paste0("logarithmic_", rate)
+    )
+}
+
+# Step (level shift) trend generator
+generate_with_step_trend <- function(base_data, shift) {
+  base_data %>%
+    mutate(
+      values = map(values, function(v) {
+        n <- length(v)
+        t_norm <- (seq_along(v) - 1) / (n - 1)
+        v + shift * (t_norm > 0.5)
+      }),
+      scenario = paste0("step_", shift)
+    )
+}
+
+# Piecewise linear (V-shape) trend generator
+generate_with_piecewise_trend <- function(base_data, slope) {
+  base_data %>%
+    mutate(
+      values = map(values, function(v) {
+        n <- length(v)
+        t_norm <- (seq_along(v) - 1) / (n - 1)
+        v + slope * abs(t_norm - 0.5) * 2  # V-shape centered at midpoint
+      }),
+      scenario = paste0("piecewise_", slope)
+    )
+}
+
 # Generate quadratic trend data
 quadratic_data <- bind_rows(
   generate_with_quadratic_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 1),
@@ -1382,14 +1434,46 @@ sinusoid_data <- bind_rows(
   generate_with_sinusoidal_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 2.0)
 )
 
+# Generate exponential trend data
+exponential_data <- bind_rows(
+  generate_with_exponential_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 1),
+  generate_with_exponential_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 2),
+  generate_with_exponential_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 3)
+)
+
+# Generate logarithmic trend data
+logarithmic_data <- bind_rows(
+  generate_with_logarithmic_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 2),
+  generate_with_logarithmic_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 5),
+  generate_with_logarithmic_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 10)
+)
+
+# Generate step (level shift) trend data
+step_data <- bind_rows(
+  generate_with_step_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 1),
+  generate_with_step_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 2),
+  generate_with_step_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 3)
+)
+
+# Generate piecewise linear (V-shape) trend data
+piecewise_data <- bind_rows(
+  generate_with_piecewise_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 1),
+  generate_with_piecewise_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 2),
+  generate_with_piecewise_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 3)
+)
+
 cat(sprintf("Generated %d curves with quadratic trends\n", nrow(quadratic_data)))
 cat(sprintf("Generated %d curves with sinusoidal trends\n", nrow(sinusoid_data)))
+cat(sprintf("Generated %d curves with exponential trends\n", nrow(exponential_data)))
+cat(sprintf("Generated %d curves with logarithmic trends\n", nrow(logarithmic_data)))
+cat(sprintf("Generated %d curves with step trends\n", nrow(step_data)))
+cat(sprintf("Generated %d curves with piecewise trends\n", nrow(piecewise_data)))
 ```
 
 ```{r}
 #| label: fig-nonlinear-trend-examples
-#| fig-cap: "Effect of non-linear trends on seasonal signal (strength = 0.3)"
-#| fig-height: 5
+#| fig-cap: "Effect of non-linear trends on seasonal signal (strength = 0.3). Six trend types representing common real-world patterns."
+#| fig-height: 8
 
 # Get example curve
 example_nonlinear <- baseline_data %>%
@@ -1402,13 +1486,20 @@ t_norm <- (0:(n-1)) / (n-1)
 nonlinear_examples <- bind_rows(
   example_nonlinear %>% mutate(trend_type = "Original", values = values),
   example_nonlinear %>% mutate(trend_type = "Quadratic (c=3)", values = map(values, ~.x + 3 * t_norm^2)),
-  example_nonlinear %>% mutate(trend_type = "Sinusoidal (A=1.5)", values = map(values, ~.x + 1.5 * sin(pi * t_norm)))
+  example_nonlinear %>% mutate(trend_type = "Sinusoidal (A=1.5)", values = map(values, ~.x + 1.5 * sin(pi * t_norm))),
+  example_nonlinear %>% mutate(trend_type = "Exponential (r=2)", values = map(values, ~.x + 0.5 * (exp(2 * t_norm) - 1))),
+  example_nonlinear %>% mutate(trend_type = "Logarithmic (r=5)", values = map(values, ~.x + log(1 + 5 * t_norm))),
+  example_nonlinear %>% mutate(trend_type = "Step (s=2)", values = map(values, ~.x + 2 * (t_norm > 0.5))),
+  example_nonlinear %>% mutate(trend_type = "Piecewise (V-shape)", values = map(values, ~.x + 2 * abs(t_norm - 0.5) * 2))
 ) %>%
   unnest(values) %>%
   group_by(trend_type) %>%
   mutate(t = row_number() - 1) %>%
   ungroup() %>%
-  mutate(trend_type = factor(trend_type, levels = c("Original", "Quadratic (c=3)", "Sinusoidal (A=1.5)")))
+  mutate(trend_type = factor(trend_type, levels = c(
+    "Original", "Quadratic (c=3)", "Sinusoidal (A=1.5)",
+    "Exponential (r=2)", "Logarithmic (r=5)", "Step (s=2)", "Piecewise (V-shape)"
+  )))
 
 ggplot(nonlinear_examples, aes(x = t, y = values)) +
   geom_line(linewidth = 0.6, color = "#333333") +
@@ -1828,36 +1919,62 @@ get_challenge_scores <- function(challenge_data) {
 ALL_METHODS <- c("aic", "fft", "acf", "variance", "spectral", "wavelet",
                  "sazed", "autoperiod", "cfd", "lomb", "mp", "stl", "ssa")
 
-# Calculate metrics for a specific scenario subset
+# Calculate metrics for a specific scenario subset (PR AUC, F1, and ROC AUC)
 calc_scenario_metrics <- function(scores_df, methods = ALL_METHODS) {
   map_dfr(methods, function(m) {
     score_col <- paste0(m, "_score")
     if (!score_col %in% names(scores_df)) return(NULL)
 
     scores_vec <- scores_df[[score_col]]
+    labels <- scores_df$is_seasonal
     valid_idx <- !is.na(scores_vec) & !is.nan(scores_vec) & !is.infinite(scores_vec)
 
-    if (sum(valid_idx) < 10 || length(unique(scores_df$is_seasonal[valid_idx])) < 2) {
-      return(tibble(Method = method_labels[m], AUC = NA, TPR = NA, FPR = NA))
+    if (sum(valid_idx) < 10 || length(unique(labels[valid_idx])) < 2) {
+      return(tibble(Method = method_labels[m], PR_AUC = NA, F1 = NA, ROC_AUC = NA))
     }
 
+    # ROC AUC
     roc_obj <- tryCatch(
-      roc(scores_df$is_seasonal[valid_idx], scores_vec[valid_idx], quiet = TRUE),
+      roc(labels[valid_idx], scores_vec[valid_idx], quiet = TRUE),
       error = function(e) NULL
     )
 
     if (is.null(roc_obj)) {
-      return(tibble(Method = method_labels[m], AUC = NA, TPR = NA, FPR = NA))
+      return(tibble(Method = method_labels[m], PR_AUC = NA, F1 = NA, ROC_AUC = NA))
     }
 
-    auc_val <- as.numeric(auc(roc_obj))
+    roc_auc <- as.numeric(auc(roc_obj))
+
+    # PR AUC using PRROC
+    pr_auc <- tryCatch({
+      pr_obj <- pr.curve(
+        scores.class0 = scores_vec[valid_idx & labels[valid_idx]],
+        scores.class1 = scores_vec[valid_idx & !labels[valid_idx]],
+        curve = FALSE
+      )
+      pr_obj$auc.integral
+    }, error = function(e) NA_real_)
+
+    # F1 Score at optimal threshold
     coords_best <- coords(roc_obj, "best", ret = c("threshold", "sensitivity", "specificity"))
+    threshold <- coords_best$threshold
+
+    predicted <- scores_vec[valid_idx] >= threshold
+    actual <- labels[valid_idx]
+
+    tp <- sum(predicted & actual)
+    fp <- sum(predicted & !actual)
+    fn <- sum(!predicted & actual)
+
+    precision <- ifelse(tp + fp > 0, tp / (tp + fp), 0)
+    recall <- ifelse(tp + fn > 0, tp / (tp + fn), 0)
+    f1 <- ifelse(precision + recall > 0, 2 * precision * recall / (precision + recall), 0)
 
     tibble(
       Method = method_labels[m],
-      AUC = auc_val,
-      TPR = coords_best$sensitivity,
-      FPR = 1 - coords_best$specificity
+      PR_AUC = pr_auc,
+      F1 = f1,
+      ROC_AUC = roc_auc
     )
   }) %>% compact() %>% bind_rows()
 }
@@ -1878,14 +1995,14 @@ trend_results <- trend_scores %>%
   group_modify(~calc_scenario_metrics(.x)) %>%
   ungroup()
 
-ggplot(trend_results, aes(x = factor(slope), y = AUC, color = Method, group = Method)) +
+ggplot(trend_results, aes(x = factor(slope), y = PR_AUC, color = Method, group = Method)) +
   geom_line(linewidth = 0.8) +
   geom_point(size = 2) +
   scale_color_manual(values = METHOD_COLORS) +
   labs(
-    title = "Trend Robustness: AUC vs Trend Slope",
-    subtitle = "Lower AUC at higher slopes indicates sensitivity to trends",
-    x = "Trend Slope", y = "AUC"
+    title = "Trend Robustness: PR AUC vs Trend Slope",
+    subtitle = "Lower PR AUC at higher slopes indicates sensitivity to trends",
+    x = "Trend Slope", y = "PR AUC"
   ) +
   theme(legend.position = "bottom") +
   guides(color = guide_legend(nrow = 2))
@@ -1908,14 +2025,14 @@ ar_results <- ar_scores %>%
   group_modify(~calc_scenario_metrics(.x)) %>%
   ungroup()
 
-ggplot(ar_results, aes(x = factor(phi), y = AUC, color = Method, group = Method)) +
+ggplot(ar_results, aes(x = factor(phi), y = PR_AUC, color = Method, group = Method)) +
   geom_line(linewidth = 0.8) +
   geom_point(size = 2) +
   scale_color_manual(values = METHOD_COLORS) +
   labs(
-    title = "Red Noise Robustness: AUC vs AR(1) Coefficient",
-    subtitle = "Lower AUC at higher φ indicates sensitivity to autocorrelated noise",
-    x = "AR(1) Coefficient (φ)", y = "AUC"
+    title = "Red Noise Robustness: PR AUC vs AR(1) Coefficient",
+    subtitle = "Lower PR AUC at higher φ indicates sensitivity to autocorrelated noise",
+    x = "AR(1) Coefficient (φ)", y = "PR AUC"
   ) +
   theme(legend.position = "bottom") +
   guides(color = guide_legend(nrow = 2))
@@ -1995,13 +2112,13 @@ outlier_results <- outlier_scores %>%
   ungroup() %>%
   mutate(label = factor(label, levels = c("5% @ 3σ", "5% @ 5σ", "10% @ 3σ")))
 
-ggplot(outlier_results, aes(x = label, y = AUC, fill = Method)) +
+ggplot(outlier_results, aes(x = label, y = PR_AUC, fill = Method)) +
   geom_col(position = position_dodge(width = 0.8), width = 0.7) +
   scale_fill_manual(values = METHOD_COLORS) +
   labs(
-    title = "Outlier Robustness: AUC by Contamination Level",
+    title = "Outlier Robustness: PR AUC by Contamination Level",
     subtitle = "Probability @ Magnitude format",
-    x = "Outlier Configuration", y = "AUC"
+    x = "Outlier Configuration", y = "PR AUC"
   ) +
   theme(legend.position = "bottom") +
   guides(fill = guide_legend(nrow = 2))
@@ -2022,14 +2139,14 @@ quadratic_results <- quadratic_scores %>%
   group_modify(~calc_scenario_metrics(.x)) %>%
   ungroup()
 
-ggplot(quadratic_results, aes(x = factor(curvature), y = AUC, color = Method, group = Method)) +
+ggplot(quadratic_results, aes(x = factor(curvature), y = PR_AUC, color = Method, group = Method)) +
   geom_line(linewidth = 0.8) +
   geom_point(size = 2) +
   scale_color_manual(values = METHOD_COLORS) +
   labs(
     title = "Quadratic Trend Robustness",
-    subtitle = "AUC vs quadratic curvature coefficient",
-    x = "Curvature", y = "AUC"
+    subtitle = "PR AUC vs quadratic curvature coefficient",
+    x = "Curvature", y = "PR AUC"
   ) +
   theme(legend.position = "bottom") +
   guides(color = guide_legend(nrow = 2))
@@ -2048,14 +2165,118 @@ sinusoid_results <- sinusoid_scores %>%
   group_modify(~calc_scenario_metrics(.x)) %>%
   ungroup()
 
-ggplot(sinusoid_results, aes(x = factor(amplitude), y = AUC, color = Method, group = Method)) +
+ggplot(sinusoid_results, aes(x = factor(amplitude), y = PR_AUC, color = Method, group = Method)) +
   geom_line(linewidth = 0.8) +
   geom_point(size = 2) +
   scale_color_manual(values = METHOD_COLORS) +
   labs(
     title = "Sinusoidal Trend Robustness",
-    subtitle = "AUC vs sinusoidal trend amplitude",
-    x = "Amplitude", y = "AUC"
+    subtitle = "PR AUC vs sinusoidal trend amplitude",
+    x = "Amplitude", y = "PR AUC"
+  ) +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(nrow = 2))
+```
+
+```{r}
+#| label: fig-exponential-performance
+#| fig-cap: "Method performance with increasing exponential trend rate"
+#| fig-height: 6
+
+exponential_scores <- get_challenge_scores(exponential_data)
+
+exponential_results <- exponential_scores %>%
+  mutate(rate = as.numeric(gsub("exponential_", "", scenario))) %>%
+  group_by(rate) %>%
+  group_modify(~calc_scenario_metrics(.x)) %>%
+  ungroup()
+
+ggplot(exponential_results, aes(x = factor(rate), y = PR_AUC, color = Method, group = Method)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2) +
+  scale_color_manual(values = METHOD_COLORS) +
+  labs(
+    title = "Exponential Trend Robustness",
+    subtitle = "PR AUC vs exponential growth rate",
+    x = "Rate", y = "PR AUC"
+  ) +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(nrow = 2))
+```
+
+```{r}
+#| label: fig-logarithmic-performance
+#| fig-cap: "Method performance with increasing logarithmic trend rate"
+#| fig-height: 6
+
+logarithmic_scores <- get_challenge_scores(logarithmic_data)
+
+logarithmic_results <- logarithmic_scores %>%
+  mutate(rate = as.numeric(gsub("logarithmic_", "", scenario))) %>%
+  group_by(rate) %>%
+  group_modify(~calc_scenario_metrics(.x)) %>%
+  ungroup()
+
+ggplot(logarithmic_results, aes(x = factor(rate), y = PR_AUC, color = Method, group = Method)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2) +
+  scale_color_manual(values = METHOD_COLORS) +
+  labs(
+    title = "Logarithmic Trend Robustness",
+    subtitle = "PR AUC vs logarithmic trend rate",
+    x = "Rate", y = "PR AUC"
+  ) +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(nrow = 2))
+```
+
+```{r}
+#| label: fig-step-performance
+#| fig-cap: "Method performance with increasing step (level shift) magnitude"
+#| fig-height: 6
+
+step_scores <- get_challenge_scores(step_data)
+
+step_results <- step_scores %>%
+  mutate(shift = as.numeric(gsub("step_", "", scenario))) %>%
+  group_by(shift) %>%
+  group_modify(~calc_scenario_metrics(.x)) %>%
+  ungroup()
+
+ggplot(step_results, aes(x = factor(shift), y = PR_AUC, color = Method, group = Method)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2) +
+  scale_color_manual(values = METHOD_COLORS) +
+  labs(
+    title = "Step (Level Shift) Trend Robustness",
+    subtitle = "PR AUC vs step magnitude",
+    x = "Shift Magnitude", y = "PR AUC"
+  ) +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(nrow = 2))
+```
+
+```{r}
+#| label: fig-piecewise-performance
+#| fig-cap: "Method performance with increasing piecewise (V-shape) trend slope"
+#| fig-height: 6
+
+piecewise_scores <- get_challenge_scores(piecewise_data)
+
+piecewise_results <- piecewise_scores %>%
+  mutate(slope = as.numeric(gsub("piecewise_", "", scenario))) %>%
+  group_by(slope) %>%
+  group_modify(~calc_scenario_metrics(.x)) %>%
+  ungroup()
+
+ggplot(piecewise_results, aes(x = factor(slope), y = PR_AUC, color = Method, group = Method)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2) +
+  scale_color_manual(values = METHOD_COLORS) +
+  labs(
+    title = "Piecewise (V-Shape) Trend Robustness",
+    subtitle = "PR AUC vs V-shape slope",
+    x = "Slope", y = "PR AUC"
   ) +
   theme(legend.position = "bottom") +
   guides(color = guide_legend(nrow = 2))
@@ -2078,13 +2299,13 @@ shape_results <- shape_scores %>%
   mutate(shape = factor(shape, levels = c("sine", "square", "triangle"),
                         labels = c("Sine", "Square", "Triangle")))
 
-ggplot(shape_results, aes(x = shape, y = AUC, fill = Method)) +
+ggplot(shape_results, aes(x = shape, y = PR_AUC, fill = Method)) +
   geom_col(position = position_dodge(width = 0.8), width = 0.7) +
   scale_fill_manual(values = METHOD_COLORS) +
   labs(
-    title = "Shape Robustness: AUC by Waveform Shape",
+    title = "Shape Robustness: PR AUC by Waveform Shape",
     subtitle = "Sine wave is baseline; square/triangle have higher harmonics",
-    x = "Waveform Shape", y = "AUC"
+    x = "Waveform Shape", y = "PR AUC"
   ) +
   theme(legend.position = "bottom") +
   guides(fill = guide_legend(nrow = 2))
@@ -2108,13 +2329,13 @@ amplitude_results <- amplitude_scores %>%
     levels = c("constant", "growth", "decay", "emergence"),
     labels = c("Constant", "Growth", "Decay", "Emergence")))
 
-ggplot(amplitude_results, aes(x = modulation, y = AUC, fill = Method)) +
+ggplot(amplitude_results, aes(x = modulation, y = PR_AUC, fill = Method)) +
   geom_col(position = position_dodge(width = 0.8), width = 0.7) +
   scale_fill_manual(values = METHOD_COLORS) +
   labs(
     title = "Amplitude Modulation Robustness",
     subtitle = "Tests non-stationary seasonality detection",
-    x = "Modulation Type", y = "AUC"
+    x = "Modulation Type", y = "PR AUC"
   ) +
   theme(legend.position = "bottom") +
   guides(fill = guide_legend(nrow = 2))
@@ -2130,6 +2351,10 @@ all_challenge_results <- bind_rows(
   trend_results %>% mutate(Challenge = "Linear Trends", Parameter = as.character(slope)) %>% select(-slope),
   quadratic_results %>% mutate(Challenge = "Quadratic Trends", Parameter = as.character(curvature)) %>% select(-curvature),
   sinusoid_results %>% mutate(Challenge = "Sinusoidal Trends", Parameter = as.character(amplitude)) %>% select(-amplitude),
+  exponential_results %>% mutate(Challenge = "Exponential Trends", Parameter = as.character(rate)) %>% select(-rate),
+  logarithmic_results %>% mutate(Challenge = "Logarithmic Trends", Parameter = as.character(rate)) %>% select(-rate),
+  step_results %>% mutate(Challenge = "Step (Level Shift)", Parameter = as.character(shift)) %>% select(-shift),
+  piecewise_results %>% mutate(Challenge = "Piecewise (V-Shape)", Parameter = as.character(slope)) %>% select(-slope),
   ar_results %>% mutate(Challenge = "Red Noise (AR1)", Parameter = as.character(phi)) %>% select(-phi),
   outlier_results %>% mutate(Challenge = "Outliers", Parameter = label) %>% select(-label),
   shape_results %>% mutate(Challenge = "Shape Robustness", Parameter = as.character(shape)) %>% select(-shape),
@@ -2140,35 +2365,36 @@ all_challenge_results <- bind_rows(
 challenge_summary <- all_challenge_results %>%
   group_by(Challenge, Method) %>%
   summarise(
-    `Mean AUC` = mean(AUC, na.rm = TRUE),
-    `Min AUC` = min(AUC, na.rm = TRUE),
-    `Max AUC` = max(AUC, na.rm = TRUE),
+    `Mean PR AUC` = mean(PR_AUC, na.rm = TRUE),
+    `Mean F1` = mean(F1, na.rm = TRUE),
+    `Min PR AUC` = min(PR_AUC, na.rm = TRUE),
+    `Max PR AUC` = max(PR_AUC, na.rm = TRUE),
     .groups = "drop"
   ) %>%
-  arrange(Challenge, desc(`Mean AUC`))
+  arrange(Challenge, desc(`Mean PR AUC`))
 
 kable(challenge_summary, digits = 3,
-      caption = "Extended Challenge Scenario Summary: AUC Statistics by Method")
+      caption = "Extended Challenge Scenario Summary: PR AUC and F1 Statistics by Method")
 ```
 
 ```{r}
 #| label: fig-challenge-heatmap
-#| fig-cap: "Challenge robustness heatmap: Mean AUC by method and challenge type"
+#| fig-cap: "Challenge robustness heatmap: Mean PR AUC by method and challenge type"
 #| fig-height: 7
 
 challenge_heatmap_data <- all_challenge_results %>%
   group_by(Challenge, Method) %>%
-  summarise(MeanAUC = mean(AUC, na.rm = TRUE), .groups = "drop")
+  summarise(MeanPRAUC = mean(PR_AUC, na.rm = TRUE), .groups = "drop")
 
-ggplot(challenge_heatmap_data, aes(x = Challenge, y = Method, fill = MeanAUC)) +
+ggplot(challenge_heatmap_data, aes(x = Challenge, y = Method, fill = MeanPRAUC)) +
   geom_tile(color = "white", linewidth = 0.5) +
-  geom_text(aes(label = sprintf("%.2f", MeanAUC)), size = 2.5) +
+  geom_text(aes(label = sprintf("%.2f", MeanPRAUC)), size = 2.5) +
   scale_fill_gradient2(low = "#d73027", mid = "#ffffbf", high = "#1a9850",
                        midpoint = 0.85, limits = c(0.5, 1)) +
   labs(
     title = "Challenge Robustness Heatmap",
-    subtitle = "Mean AUC across challenge parameters",
-    x = "Challenge Scenario", y = "Method", fill = "Mean AUC"
+    subtitle = "Mean PR AUC across challenge parameters",
+    x = "Challenge Scenario", y = "Method", fill = "Mean PR AUC"
   ) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
