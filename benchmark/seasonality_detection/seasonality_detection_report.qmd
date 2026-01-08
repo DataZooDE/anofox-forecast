@@ -9,20 +9,19 @@ format:
     toc: true
     toc-depth: 3
     theme: cosmo
-    fig-width: 10
-    fig-height: 6
   pdf:
     toc: true
     toc-depth: 3
     colorlinks: true
-    fig-width: 7
-    fig-height: 5
+    keep-tex: false
 execute:
   echo: false
   warning: false
   message: false
 knitr:
   opts_chunk:
+    fig.width: 10
+    fig.height: 6
     out.width: "100%"
     fig.align: "center"
 ---
@@ -1191,12 +1190,12 @@ ggplot(outlier_examples, aes(x = t, y = values, color = config)) +
 
 ### Challenge Scenario Performance
 
-We evaluate a subset of methods (Variance, Wavelet, FFT, ACF) on each challenge scenario, broken down by the specific challenge parameter to understand performance degradation.
+We evaluate all 13 methods on each challenge scenario, broken down by the specific challenge parameter to understand performance degradation.
 
 ```{r}
 #| label: evaluate-challenges
 
-# Helper to load data to DuckDB and get scores
+# Helper to load data to DuckDB and get scores for ALL methods
 get_challenge_scores <- function(challenge_data) {
   dbExecute(con, "DROP TABLE IF EXISTS challenge_curves")
   dbExecute(con, "
@@ -1223,21 +1222,38 @@ get_challenge_scores <- function(challenge_data) {
     dbGetQuery(con, "
       SELECT
           curve_id, strength_level, is_seasonal, scenario,
+          -- Strength methods (with known period = 12)
           ts_seasonal_strength(values, 12, 'variance') as variance_score,
+          ts_seasonal_strength(values, 12, 'spectral') as spectral_score,
           ts_seasonal_strength(values, 12, 'wavelet') as wavelet_score,
-          (ts_estimate_period_fft(values)).confidence / 100.0 as fft_score,
-          (ts_estimate_period_acf(values)).confidence as acf_score
+          -- Period detection methods
+          (ts_aic_period(values)).r_squared as aic_score,
+          LEAST(1.0, (ts_estimate_period_fft(values)).confidence / 100.0) as fft_score,
+          (ts_estimate_period_acf(values)).confidence as acf_score,
+          LEAST(1.0, (ts_sazed_period(values)).snr / 10.0) as sazed_score,
+          (ts_autoperiod(values)).acf_validation as autoperiod_score,
+          (ts_cfd_autoperiod(values)).acf_validation as cfd_score,
+          1.0 - (ts_lomb_scargle(values)).false_alarm_prob as lomb_score,
+          (ts_matrix_profile_period(values)).confidence as mp_score,
+          (ts_stl_period(values)).seasonal_strength as stl_score,
+          (ts_ssa_period(values)).variance_explained as ssa_score
       FROM challenge_curves
     ")
   }, error = function(e) NULL)
 }
 
+# All methods for challenge evaluation
+ALL_METHODS <- c("aic", "fft", "acf", "variance", "spectral", "wavelet",
+                 "sazed", "autoperiod", "cfd", "lomb", "mp", "stl", "ssa")
+
 # Calculate metrics for a specific scenario subset
-calc_scenario_metrics <- function(scores_df, methods = c("variance", "wavelet", "fft", "acf")) {
+calc_scenario_metrics <- function(scores_df, methods = ALL_METHODS) {
   map_dfr(methods, function(m) {
     score_col <- paste0(m, "_score")
+    if (!score_col %in% names(scores_df)) return(NULL)
+
     scores_vec <- scores_df[[score_col]]
-    valid_idx <- !is.na(scores_vec) & !is.nan(scores_vec)
+    valid_idx <- !is.na(scores_vec) & !is.nan(scores_vec) & !is.infinite(scores_vec)
 
     if (sum(valid_idx) < 10 || length(unique(scores_df$is_seasonal[valid_idx])) < 2) {
       return(tibble(Method = method_labels[m], AUC = NA, TPR = NA, FPR = NA))
@@ -1258,15 +1274,11 @@ calc_scenario_metrics <- function(scores_df, methods = c("variance", "wavelet", 
     tibble(
       Method = method_labels[m],
       AUC = auc_val,
-      TPR = coords_best$sensitivity,  # True Positive Rate (Sensitivity)
-      FPR = 1 - coords_best$specificity  # False Positive Rate
+      TPR = coords_best$sensitivity,
+      FPR = 1 - coords_best$specificity
     )
-  })
+  }) %>% compact() %>% bind_rows()
 }
-
-# Define subset of methods for challenge evaluation (use consistent colors)
-CHALLENGE_METHODS <- c("Variance", "Wavelet", "FFT", "ACF")
-CHALLENGE_COLORS <- METHOD_COLORS[CHALLENGE_METHODS]
 ```
 
 ### Trend Robustness
@@ -1274,7 +1286,7 @@ CHALLENGE_COLORS <- METHOD_COLORS[CHALLENGE_METHODS]
 ```{r}
 #| label: fig-trend-performance
 #| fig-cap: "Method performance degradation with increasing trend slope"
-#| fig-height: 5
+#| fig-height: 6
 
 trend_scores <- get_challenge_scores(trend_data)
 
@@ -1282,19 +1294,19 @@ trend_results <- trend_scores %>%
   mutate(slope = as.numeric(gsub("trend_", "", scenario))) %>%
   group_by(slope) %>%
   group_modify(~calc_scenario_metrics(.x)) %>%
-  ungroup() %>%
-  filter(Method %in% CHALLENGE_METHODS)
+  ungroup()
 
 ggplot(trend_results, aes(x = factor(slope), y = AUC, color = Method, group = Method)) +
-  geom_line(linewidth = 1) +
-  geom_point(size = 3) +
-  scale_color_manual(values = CHALLENGE_COLORS) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2) +
+  scale_color_manual(values = METHOD_COLORS) +
   labs(
     title = "Trend Robustness: AUC vs Trend Slope",
     subtitle = "Lower AUC at higher slopes indicates sensitivity to trends",
     x = "Trend Slope", y = "AUC"
   ) +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(nrow = 2))
 ```
 
 ### Red Noise Robustness (AR(1) False Positive Rate)
@@ -1303,31 +1315,28 @@ For red noise tests, we focus on **non-seasonal curves only** to measure false p
 
 ```{r}
 #| label: fig-ar-performance
-#| fig-cap: "False positive rate with increasing AR(1) autocorrelation"
-#| fig-height: 5
+#| fig-cap: "AUC with increasing AR(1) autocorrelation"
+#| fig-height: 6
 
 ar_scores <- get_challenge_scores(ar_data)
-
-# Focus on non-seasonal curves to measure FPR
-ar_nonseasonal <- ar_scores %>% filter(!is_seasonal)
 
 ar_results <- ar_scores %>%
   mutate(phi = as.numeric(gsub("ar_", "", scenario))) %>%
   group_by(phi) %>%
   group_modify(~calc_scenario_metrics(.x)) %>%
-  ungroup() %>%
-  filter(Method %in% CHALLENGE_METHODS)
+  ungroup()
 
 ggplot(ar_results, aes(x = factor(phi), y = AUC, color = Method, group = Method)) +
-  geom_line(linewidth = 1) +
-  geom_point(size = 3) +
-  scale_color_manual(values = CHALLENGE_COLORS) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2) +
+  scale_color_manual(values = METHOD_COLORS) +
   labs(
     title = "Red Noise Robustness: AUC vs AR(1) Coefficient",
     subtitle = "Lower AUC at higher φ indicates sensitivity to autocorrelated noise",
     x = "AR(1) Coefficient (φ)", y = "AUC"
   ) +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(nrow = 2))
 ```
 
 ### Outlier Robustness
@@ -1349,18 +1358,18 @@ outlier_results <- outlier_scores %>%
   group_by(label) %>%
   group_modify(~calc_scenario_metrics(.x)) %>%
   ungroup() %>%
-  filter(Method %in% CHALLENGE_METHODS) %>%
   mutate(label = factor(label, levels = c("5% @ 3σ", "5% @ 5σ", "10% @ 3σ")))
 
 ggplot(outlier_results, aes(x = label, y = AUC, fill = Method)) +
   geom_col(position = position_dodge(width = 0.8), width = 0.7) +
-  scale_fill_manual(values = CHALLENGE_COLORS) +
+  scale_fill_manual(values = METHOD_COLORS) +
   labs(
     title = "Outlier Robustness: AUC by Contamination Level",
     subtitle = "Probability @ Magnitude format",
     x = "Outlier Configuration", y = "AUC"
   ) +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom") +
+  guides(fill = guide_legend(nrow = 2))
 ```
 
 ### Challenge Summary Table
