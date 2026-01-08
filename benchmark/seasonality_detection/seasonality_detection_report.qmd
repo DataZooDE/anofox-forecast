@@ -717,6 +717,30 @@ ggplot(auc_long, aes(x = reorder(Method, AUC), y = AUC, fill = Method)) +
   theme(legend.position = "none")
 ```
 
+### Optimal Threshold Estimation
+
+The **optimal classification threshold** for each method is determined using **Youden's J statistic** (Youden, 1950), which maximizes the sum of sensitivity and specificity:
+
+$$J = \text{Sensitivity} + \text{Specificity} - 1 = \text{TPR} - \text{FPR}$$
+
+The threshold that maximizes $J$ represents the point on the ROC curve farthest from the diagonal (random classifier), providing the best trade-off between detecting true seasonality (sensitivity) and avoiding false positives (specificity).
+
+**Why Youden's J?**
+
+- **Balanced approach**: Does not favor sensitivity over specificity
+- **Threshold-independent**: Works for any score distribution
+- **Standard practice**: Widely used in diagnostic test evaluation
+
+Alternative threshold selection methods include:
+
+- **Fixed sensitivity**: Set threshold to achieve target sensitivity (e.g., 0.90)
+- **Cost-based**: Minimize misclassification cost when FP and FN have different costs
+- **Prevalence-adjusted**: Account for class imbalance in threshold selection
+
+The `pROC::coords()` function with `best` method implements Youden's J optimization.
+
+**Reference**: Youden, W. J. (1950). Index for rating diagnostic tests. *Cancer*, 3(1), 32-35.
+
 ## Classification Performance
 
 Using the optimal threshold from ROC analysis (Youden's J statistic), we convert continuous scores into binary predictions and compute standard classification metrics.
@@ -950,13 +974,50 @@ generate_with_trend <- function(base_data, slope) {
 }
 
 # Test with different trend slopes
+# Use round() to handle floating-point comparison issues
 trend_data <- bind_rows(
-  generate_with_trend(baseline_data %>% filter(strength_level %in% c(0.0, 0.3, 0.6)), 0.1),
-  generate_with_trend(baseline_data %>% filter(strength_level %in% c(0.0, 0.3, 0.6)), 0.3),
-  generate_with_trend(baseline_data %>% filter(strength_level %in% c(0.0, 0.3, 0.6)), 0.5)
+  generate_with_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 0.1),
+  generate_with_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 0.3),
+  generate_with_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 0.5)
 )
 
 cat(sprintf("Generated %d curves with trends\n", nrow(trend_data)))
+```
+
+```{r}
+#| label: fig-trend-examples
+#| fig-cap: "Example curves with linear trends of varying slopes"
+#| fig-height: 4
+
+# Show examples of trend effects
+example_curves <- baseline_data %>%
+  filter(round(strength_level, 1) == 0.3) %>%
+  slice(1)
+
+example_with_trends <- bind_rows(
+  example_curves %>% mutate(slope = "Original (no trend)", values = values),
+  example_curves %>% mutate(slope = "Slope = 0.1", values = map(values, ~.x + 0.1 * (seq_along(.x) - 1))),
+  example_curves %>% mutate(slope = "Slope = 0.3", values = map(values, ~.x + 0.3 * (seq_along(.x) - 1))),
+  example_curves %>% mutate(slope = "Slope = 0.5", values = map(values, ~.x + 0.5 * (seq_along(.x) - 1)))
+)
+
+example_long <- example_with_trends %>%
+  unnest(values) %>%
+  group_by(slope) %>%
+  mutate(t = row_number() - 1) %>%
+  ungroup() %>%
+  mutate(slope = factor(slope, levels = c("Original (no trend)", "Slope = 0.1", "Slope = 0.3", "Slope = 0.5")))
+
+ggplot(example_long, aes(x = t, y = values, color = slope)) +
+  geom_line(linewidth = 0.8) +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "Effect of Linear Trend on Seasonal Signal",
+    subtitle = "Seasonal strength = 0.3",
+    x = "Time", y = "Value",
+    color = "Trend"
+  ) +
+  theme(legend.position = "bottom")
 ```
 
 ### Challenge 2: Red Noise (AR(1) Process)
@@ -987,12 +1048,57 @@ generate_with_ar_noise <- function(base_data, phi) {
 
 # Test with different AR coefficients
 ar_data <- bind_rows(
-  generate_with_ar_noise(baseline_data %>% filter(strength_level %in% c(0.0, 0.3, 0.6)), 0.3),
-  generate_with_ar_noise(baseline_data %>% filter(strength_level %in% c(0.0, 0.3, 0.6)), 0.5),
-  generate_with_ar_noise(baseline_data %>% filter(strength_level %in% c(0.0, 0.3, 0.6)), 0.7)
+  generate_with_ar_noise(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 0.3),
+  generate_with_ar_noise(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 0.5),
+  generate_with_ar_noise(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 0.7)
 )
 
 cat(sprintf("Generated %d curves with AR(1) noise\n", nrow(ar_data)))
+```
+
+```{r}
+#| label: fig-ar-examples
+#| fig-cap: "Example curves with AR(1) colored noise (autocorrelated)"
+#| fig-height: 4
+
+set.seed(42)  # For reproducibility of AR examples
+
+# Show examples of AR noise effects on non-seasonal curves
+example_nonseasonal <- baseline_data %>%
+  filter(round(strength_level, 1) == 0.0) %>%
+  slice(1)
+
+# Generate AR noise examples
+generate_ar_noise <- function(n, phi) {
+  noise <- numeric(n)
+  noise[1] <- rnorm(1)
+  for (i in 2:n) {
+    noise[i] <- phi * noise[i-1] + sqrt(1 - phi^2) * rnorm(1)
+  }
+  noise * 0.3
+}
+
+ar_examples <- tibble(
+  phi = c("White noise ($\\phi$=0)", "AR(1) $\\phi$=0.3", "AR(1) $\\phi$=0.5", "AR(1) $\\phi$=0.7"),
+  phi_val = c(0, 0.3, 0.5, 0.7)
+) %>%
+  mutate(values = map(phi_val, ~generate_ar_noise(60, .x))) %>%
+  unnest(values) %>%
+  group_by(phi) %>%
+  mutate(t = row_number() - 1) %>%
+  ungroup() %>%
+  mutate(phi = factor(phi, levels = c("White noise ($\\phi$=0)", "AR(1) $\\phi$=0.3", "AR(1) $\\phi$=0.5", "AR(1) $\\phi$=0.7")))
+
+ggplot(ar_examples, aes(x = t, y = values, color = phi)) +
+  geom_line(linewidth = 0.8) +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "AR(1) Noise Patterns (Red Noise)",
+    subtitle = "Higher autocorrelation produces smoother, potentially misleading patterns",
+    x = "Time", y = "Value",
+    color = "Noise Type"
+  ) +
+  theme(legend.position = "bottom")
 ```
 
 ### Challenge 3: Outlier Contamination
@@ -1018,23 +1124,70 @@ generate_with_outliers <- function(base_data, outlier_prob, outlier_magnitude) {
 
 # Test with different outlier configurations
 outlier_data <- bind_rows(
-  generate_with_outliers(baseline_data %>% filter(strength_level %in% c(0.0, 0.3, 0.6)), 0.05, 3),
-  generate_with_outliers(baseline_data %>% filter(strength_level %in% c(0.0, 0.3, 0.6)), 0.05, 5),
-  generate_with_outliers(baseline_data %>% filter(strength_level %in% c(0.0, 0.3, 0.6)), 0.10, 3)
+  generate_with_outliers(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 0.05, 3),
+  generate_with_outliers(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 0.05, 5),
+  generate_with_outliers(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 0.10, 3)
 )
 
 cat(sprintf("Generated %d curves with outliers\n", nrow(outlier_data)))
 ```
 
+```{r}
+#| label: fig-outlier-examples
+#| fig-cap: "Example curves with outlier contamination at different levels"
+#| fig-height: 4
+
+set.seed(42)
+
+# Show examples of outlier effects
+example_seasonal <- baseline_data %>%
+  filter(round(strength_level, 1) == 0.3) %>%
+  slice(1)
+
+base_vals <- example_seasonal$values[[1]]
+n <- length(base_vals)
+
+add_outliers <- function(v, prob, mag) {
+  outlier_idx <- runif(length(v)) < prob
+  v[outlier_idx] <- v[outlier_idx] + sample(c(-1, 1), sum(outlier_idx), replace = TRUE) * mag * sd(v)
+  v
+}
+
+outlier_examples <- tibble(
+  config = c("No outliers", "5% @ 3σ", "5% @ 5σ", "10% @ 3σ"),
+  prob = c(0, 0.05, 0.05, 0.10),
+  mag = c(0, 3, 5, 3)
+) %>%
+  rowwise() %>%
+  mutate(values = list(if (prob == 0) base_vals else add_outliers(base_vals, prob, mag))) %>%
+  ungroup() %>%
+  unnest(values) %>%
+  group_by(config) %>%
+  mutate(t = row_number() - 1) %>%
+  ungroup() %>%
+  mutate(config = factor(config, levels = c("No outliers", "5% @ 3σ", "5% @ 5σ", "10% @ 3σ")))
+
+ggplot(outlier_examples, aes(x = t, y = values, color = config)) +
+  geom_line(linewidth = 0.8) +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "Effect of Outlier Contamination on Seasonal Signal",
+    subtitle = "Seasonal strength = 0.3",
+    x = "Time", y = "Value",
+    color = "Outlier Config"
+  ) +
+  theme(legend.position = "bottom")
+```
+
 ### Challenge Scenario Performance
 
-We evaluate a subset of methods (Variance, Wavelet, FFT, ACF) on each challenge scenario to assess robustness.
+We evaluate a subset of methods (Variance, Wavelet, FFT, ACF) on each challenge scenario, broken down by the specific challenge parameter to understand performance degradation.
 
 ```{r}
 #| label: evaluate-challenges
 
-evaluate_challenge <- function(challenge_data, scenario_name) {
-  # Load challenge data into DuckDB
+# Helper to load data to DuckDB and get scores
+get_challenge_scores <- function(challenge_data) {
   dbExecute(con, "DROP TABLE IF EXISTS challenge_curves")
   dbExecute(con, "
     CREATE TABLE challenge_curves (
@@ -1049,7 +1202,6 @@ evaluate_challenge <- function(challenge_data, scenario_name) {
   for (i in 1:nrow(challenge_data)) {
     row <- challenge_data[i, ]
     values_str <- paste0("[", paste(row$values[[1]], collapse = ","), "]")
-
     dbExecute(con, sprintf("
       INSERT INTO challenge_curves VALUES (%d, %f, %s, '%s', %s::DOUBLE[])
     ", row$curve_id, row$strength_level,
@@ -1057,63 +1209,174 @@ evaluate_challenge <- function(challenge_data, scenario_name) {
        row$scenario, values_str))
   }
 
-  # Get scores for key methods (known period = 12)
-  challenge_scores <- dbGetQuery(con, "
-    SELECT
-        curve_id,
-        strength_level,
-        is_seasonal,
-        scenario,
-        ts_seasonal_strength(values, 12, 'variance') as variance_score,
-        ts_seasonal_strength(values, 12, 'wavelet') as wavelet_score,
-        (ts_estimate_period_fft(values)).confidence / 100.0 as fft_score,
-        (ts_estimate_period_acf(values)).confidence as acf_score
-    FROM challenge_curves
-  ")
+  tryCatch({
+    dbGetQuery(con, "
+      SELECT
+          curve_id, strength_level, is_seasonal, scenario,
+          ts_seasonal_strength(values, 12, 'variance') as variance_score,
+          ts_seasonal_strength(values, 12, 'wavelet') as wavelet_score,
+          (ts_estimate_period_fft(values)).confidence / 100.0 as fft_score,
+          (ts_estimate_period_acf(values)).confidence as acf_score
+      FROM challenge_curves
+    ")
+  }, error = function(e) NULL)
+}
 
-  # Calculate metrics for each method
-  map_dfr(c("variance", "wavelet", "fft", "acf"), function(m) {
+# Calculate metrics for a specific scenario subset
+calc_scenario_metrics <- function(scores_df, methods = c("variance", "wavelet", "fft", "acf")) {
+  map_dfr(methods, function(m) {
     score_col <- paste0(m, "_score")
-    scores_vec <- challenge_scores[[score_col]]
+    scores_vec <- scores_df[[score_col]]
     valid_idx <- !is.na(scores_vec) & !is.nan(scores_vec)
 
-    if (sum(valid_idx) < 10) {
-      return(tibble(Method = method_labels[m], Scenario = scenario_name, AUC = NA, F1 = NA))
+    if (sum(valid_idx) < 10 || length(unique(scores_df$is_seasonal[valid_idx])) < 2) {
+      return(tibble(Method = method_labels[m], AUC = NA, TPR = NA, FPR = NA))
     }
 
     roc_obj <- tryCatch(
-      roc(challenge_scores$is_seasonal[valid_idx], scores_vec[valid_idx], quiet = TRUE),
+      roc(scores_df$is_seasonal[valid_idx], scores_vec[valid_idx], quiet = TRUE),
       error = function(e) NULL
     )
 
     if (is.null(roc_obj)) {
-      return(tibble(Method = method_labels[m], Scenario = scenario_name, AUC = NA, F1 = NA))
+      return(tibble(Method = method_labels[m], AUC = NA, TPR = NA, FPR = NA))
     }
 
     auc_val <- as.numeric(auc(roc_obj))
-    threshold <- coords(roc_obj, "best")$threshold
-    preds <- scores_vec >= threshold
-
-    metrics <- calc_metrics(preds[valid_idx], challenge_scores$is_seasonal[valid_idx])
+    coords_best <- coords(roc_obj, "best", ret = c("threshold", "sensitivity", "specificity"))
 
     tibble(
       Method = method_labels[m],
-      Scenario = scenario_name,
       AUC = auc_val,
-      F1 = metrics$F1
+      TPR = coords_best$sensitivity,  # True Positive Rate (Sensitivity)
+      FPR = 1 - coords_best$specificity  # False Positive Rate
     )
   })
 }
 
-# Evaluate challenges
-challenge_results <- bind_rows(
-  evaluate_challenge(trend_data, "Trends"),
-  evaluate_challenge(ar_data, "Red Noise"),
-  evaluate_challenge(outlier_data, "Outliers")
+# Define subset of methods for challenge evaluation (use consistent colors)
+CHALLENGE_METHODS <- c("Variance", "Wavelet", "FFT", "ACF")
+CHALLENGE_COLORS <- METHOD_COLORS[CHALLENGE_METHODS]
+```
+
+### Trend Robustness
+
+```{r}
+#| label: fig-trend-performance
+#| fig-cap: "Method performance degradation with increasing trend slope"
+#| fig-height: 5
+
+trend_scores <- get_challenge_scores(trend_data)
+
+trend_results <- trend_scores %>%
+  mutate(slope = as.numeric(gsub("trend_", "", scenario))) %>%
+  group_by(slope) %>%
+  group_modify(~calc_scenario_metrics(.x)) %>%
+  ungroup() %>%
+  filter(Method %in% CHALLENGE_METHODS)
+
+ggplot(trend_results, aes(x = factor(slope), y = AUC, color = Method, group = Method)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  scale_color_manual(values = CHALLENGE_COLORS) +
+  labs(
+    title = "Trend Robustness: AUC vs Trend Slope",
+    subtitle = "Lower AUC at higher slopes indicates sensitivity to trends",
+    x = "Trend Slope", y = "AUC"
+  ) +
+  theme(legend.position = "bottom")
+```
+
+### Red Noise Robustness (AR(1) False Positive Rate)
+
+For red noise tests, we focus on **non-seasonal curves only** to measure false positive rate (FPR) — i.e., how often methods incorrectly detect seasonality in autocorrelated noise.
+
+```{r}
+#| label: fig-ar-performance
+#| fig-cap: "False positive rate with increasing AR(1) autocorrelation"
+#| fig-height: 5
+
+ar_scores <- get_challenge_scores(ar_data)
+
+# Focus on non-seasonal curves to measure FPR
+ar_nonseasonal <- ar_scores %>% filter(!is_seasonal)
+
+ar_results <- ar_scores %>%
+  mutate(phi = as.numeric(gsub("ar_", "", scenario))) %>%
+  group_by(phi) %>%
+  group_modify(~calc_scenario_metrics(.x)) %>%
+  ungroup() %>%
+  filter(Method %in% CHALLENGE_METHODS)
+
+ggplot(ar_results, aes(x = factor(phi), y = AUC, color = Method, group = Method)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  scale_color_manual(values = CHALLENGE_COLORS) +
+  labs(
+    title = "Red Noise Robustness: AUC vs AR(1) Coefficient",
+    subtitle = "Lower AUC at higher φ indicates sensitivity to autocorrelated noise",
+    x = "AR(1) Coefficient (φ)", y = "AUC"
+  ) +
+  theme(legend.position = "bottom")
+```
+
+### Outlier Robustness
+
+```{r}
+#| label: fig-outlier-performance
+#| fig-cap: "Method performance under different outlier configurations"
+#| fig-height: 5
+
+outlier_scores <- get_challenge_scores(outlier_data)
+
+outlier_results <- outlier_scores %>%
+  mutate(
+    config = gsub("outliers_", "", scenario),
+    prob = as.numeric(gsub("_.*", "", config)),
+    mag = as.numeric(gsub(".*_", "", config)),
+    label = paste0(prob * 100, "% @ ", mag, "σ")
+  ) %>%
+  group_by(label) %>%
+  group_modify(~calc_scenario_metrics(.x)) %>%
+  ungroup() %>%
+  filter(Method %in% CHALLENGE_METHODS) %>%
+  mutate(label = factor(label, levels = c("5% @ 3σ", "5% @ 5σ", "10% @ 3σ")))
+
+ggplot(outlier_results, aes(x = label, y = AUC, fill = Method)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  scale_fill_manual(values = CHALLENGE_COLORS) +
+  labs(
+    title = "Outlier Robustness: AUC by Contamination Level",
+    subtitle = "Probability @ Magnitude format",
+    x = "Outlier Configuration", y = "AUC"
+  ) +
+  theme(legend.position = "bottom")
+```
+
+### Challenge Summary Table
+
+```{r}
+#| label: challenge-summary
+
+# Aggregate results across all challenges
+all_challenge_results <- bind_rows(
+  trend_results %>% mutate(Challenge = "Trends", Parameter = as.character(slope)) %>% select(-slope),
+  ar_results %>% mutate(Challenge = "Red Noise", Parameter = as.character(phi)) %>% select(-phi),
+  outlier_results %>% mutate(Challenge = "Outliers", Parameter = label) %>% select(-label)
 )
 
-kable(challenge_results %>% arrange(Scenario, desc(AUC)), digits = 3,
-      caption = "Method Performance Under Challenge Scenarios")
+# Summary by challenge type
+challenge_summary <- all_challenge_results %>%
+  group_by(Challenge, Method) %>%
+  summarise(
+    `Mean AUC` = mean(AUC, na.rm = TRUE),
+    `Min AUC` = min(AUC, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(Challenge, desc(`Mean AUC`))
+
+kable(challenge_summary, digits = 3,
+      caption = "Challenge Scenario Summary: Mean and Minimum AUC by Method")
 ```
 
 ## Summary and Conclusions
