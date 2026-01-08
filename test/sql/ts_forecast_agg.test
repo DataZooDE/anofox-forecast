@@ -1,0 +1,481 @@
+# name: test/sql/ts_forecast_agg.test
+# description: Tests for ts_forecast_agg aggregate function
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup: Create test data
+#######################################
+
+# Simple trend data for basic tests
+statement ok
+CREATE TABLE sales AS
+SELECT
+    'A' AS product_id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    10.0 + i * 0.5 AS value
+FROM generate_series(0, 29) AS t(i)
+UNION ALL
+SELECT
+    'B' AS product_id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    20.0 + i * 0.3 AS value
+FROM generate_series(0, 29) AS t(i);
+
+# Seasonal data for seasonal model tests
+statement ok
+CREATE TABLE seasonal_sales AS
+SELECT
+    'S1' AS product_id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    100 + sin(i * 2 * 3.14159 / 7) * 20 + i * 0.1 AS value
+FROM generate_series(0, 55) AS t(i)
+UNION ALL
+SELECT
+    'S2' AS product_id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    200 + cos(i * 2 * 3.14159 / 7) * 30 + i * 0.2 AS value
+FROM generate_series(0, 55) AS t(i);
+
+# Single group data
+statement ok
+CREATE TABLE single_series AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    50.0 + i * 0.2 AS value
+FROM generate_series(0, 39) AS t(i);
+
+#######################################
+# Basic Aggregate Function Tests
+#######################################
+
+# Test ts_forecast_agg returns one result per group
+query I
+SELECT COUNT(*) FROM (
+    SELECT product_id, ts_forecast_agg(ts, value, 'Naive', 5, MAP([], [])) AS forecast
+    FROM sales
+    GROUP BY product_id
+);
+----
+2
+
+# Test with alias anofox_fcst_ts_forecast_agg
+query I
+SELECT COUNT(*) FROM (
+    SELECT product_id, anofox_fcst_ts_forecast_agg(ts, value, 'Naive', 5, MAP([], [])) AS forecast
+    FROM sales
+    GROUP BY product_id
+);
+----
+2
+
+# Test single group (no GROUP BY)
+query I
+SELECT COUNT(*) FROM (
+    SELECT ts_forecast_agg(ts, value, 'Naive', 3, MAP([], [])) AS forecast
+    FROM single_series
+);
+----
+1
+
+#######################################
+# Output Structure Tests
+#######################################
+
+# Test forecast_step length matches horizon
+query I
+SELECT length((ts_forecast_agg(ts, value, 'Naive', 5, MAP([], []))).forecast_step)
+FROM single_series;
+----
+5
+
+# Test forecast_timestamp length matches horizon
+query I
+SELECT length((ts_forecast_agg(ts, value, 'Naive', 5, MAP([], []))).forecast_timestamp)
+FROM single_series;
+----
+5
+
+# Test point_forecast length matches horizon
+query I
+SELECT length((ts_forecast_agg(ts, value, 'Naive', 5, MAP([], []))).point_forecast)
+FROM single_series;
+----
+5
+
+# Test lower_90 length matches horizon
+query I
+SELECT length((ts_forecast_agg(ts, value, 'Naive', 5, MAP([], []))).lower_90)
+FROM single_series;
+----
+5
+
+# Test upper_90 length matches horizon
+query I
+SELECT length((ts_forecast_agg(ts, value, 'Naive', 5, MAP([], []))).upper_90)
+FROM single_series;
+----
+5
+
+# Test model_name is returned
+query I
+SELECT (ts_forecast_agg(ts, value, 'Naive', 5, MAP([], []))).model_name
+FROM single_series;
+----
+Naive
+
+# Test insample_fitted has same length as input data
+query I
+SELECT length((ts_forecast_agg(ts, value, 'Naive', 5, MAP([], []))).insample_fitted)
+FROM single_series;
+----
+40
+
+# Test date_col_name is set
+query I
+SELECT (ts_forecast_agg(ts, value, 'Naive', 5, MAP([], []))).date_col_name IS NOT NULL
+FROM single_series;
+----
+true
+
+# Test error_message is empty on success
+query I
+SELECT (ts_forecast_agg(ts, value, 'Naive', 5, MAP([], []))).error_message = ''
+FROM single_series;
+----
+true
+
+#######################################
+# Forecast Steps Validation
+#######################################
+
+# Test forecast_step values are sequential (1 to horizon)
+query I
+SELECT (ts_forecast_agg(ts, value, 'Naive', 5, MAP([], []))).forecast_step[1]
+FROM single_series;
+----
+1
+
+query I
+SELECT (ts_forecast_agg(ts, value, 'Naive', 5, MAP([], []))).forecast_step[5]
+FROM single_series;
+----
+5
+
+#######################################
+# Forecast Timestamp Validation
+#######################################
+
+# Test forecast timestamps are after last observation
+query I
+SELECT (ts_forecast_agg(ts, value, 'Naive', 3, MAP([], []))).forecast_timestamp[1] > '2024-02-09'::TIMESTAMP
+FROM single_series;
+----
+true
+
+#######################################
+# Model Tests - Basic Models
+#######################################
+
+# Naive model
+query I
+SELECT (ts_forecast_agg(ts, value, 'Naive', 3, MAP([], []))).model_name
+FROM single_series;
+----
+Naive
+
+# SMA model
+query I
+SELECT (ts_forecast_agg(ts, value, 'SMA', 3, MAP([], []))).model_name
+FROM single_series;
+----
+SMA
+
+# SES model
+query I
+SELECT (ts_forecast_agg(ts, value, 'SES', 3, MAP([], []))).model_name
+FROM single_series;
+----
+SES
+
+# SESOptimized model
+query I
+SELECT (ts_forecast_agg(ts, value, 'SESOptimized', 3, MAP([], []))).model_name
+FROM single_series;
+----
+SESOptimized
+
+# RandomWalkDrift model
+query I
+SELECT (ts_forecast_agg(ts, value, 'RandomWalkDrift', 3, MAP([], []))).model_name
+FROM single_series;
+----
+RandomWalkDrift
+
+#######################################
+# Model Tests - Exponential Smoothing
+#######################################
+
+# Holt model
+query I
+SELECT (ts_forecast_agg(ts, value, 'Holt', 3, MAP([], []))).model_name
+FROM single_series;
+----
+Holt
+
+# HoltWinters model (with seasonal data)
+query I
+SELECT (ts_forecast_agg(ts, value, 'HoltWinters', 7, MAP([], []))).model_name
+FROM (SELECT ts, value FROM seasonal_sales WHERE product_id = 'S1');
+----
+HoltWinters
+
+#######################################
+# Model Tests - Theta Methods
+#######################################
+
+# Theta model
+query I
+SELECT (ts_forecast_agg(ts, value, 'Theta', 3, MAP([], []))).model_name
+FROM single_series;
+----
+Theta
+
+# OptimizedTheta model
+query I
+SELECT (ts_forecast_agg(ts, value, 'OptimizedTheta', 3, MAP([], []))).model_name
+FROM single_series;
+----
+OptimizedTheta
+
+#######################################
+# Model Tests - State Space/ARIMA
+#######################################
+
+# ETS model
+query I
+SELECT (ts_forecast_agg(ts, value, 'ETS', 3, MAP([], []))).model_name
+FROM single_series;
+----
+ETS
+
+# ARIMA model
+query I
+SELECT (ts_forecast_agg(ts, value, 'ARIMA', 3, MAP([], []))).model_name
+FROM single_series;
+----
+ARIMA
+
+#######################################
+# Model Tests - Auto Selection
+#######################################
+
+# AutoETS model
+query I
+SELECT (ts_forecast_agg(ts, value, 'AutoETS', 3, MAP([], []))).model_name IS NOT NULL
+FROM single_series;
+----
+true
+
+# AutoARIMA model
+query I
+SELECT (ts_forecast_agg(ts, value, 'AutoARIMA', 3, MAP([], []))).model_name IS NOT NULL
+FROM single_series;
+----
+true
+
+# AutoTheta model
+query I
+SELECT (ts_forecast_agg(ts, value, 'AutoTheta', 3, MAP([], []))).model_name IS NOT NULL
+FROM single_series;
+----
+true
+
+#######################################
+# Confidence Bounds Tests
+#######################################
+
+# Lower bound should be <= point forecast
+query I
+SELECT (ts_forecast_agg(ts, value, 'Naive', 3, MAP([], []))).lower_90[1] <=
+       (ts_forecast_agg(ts, value, 'Naive', 3, MAP([], []))).point_forecast[1]
+FROM single_series;
+----
+true
+
+# Upper bound should be >= point forecast
+query I
+SELECT (ts_forecast_agg(ts, value, 'Naive', 3, MAP([], []))).upper_90[1] >=
+       (ts_forecast_agg(ts, value, 'Naive', 3, MAP([], []))).point_forecast[1]
+FROM single_series;
+----
+true
+
+# Bounds should be valid for all forecast steps
+query I
+SELECT COUNT(*) FROM (
+    SELECT unnest((ts_forecast_agg(ts, value, 'Naive', 5, MAP([], []))).lower_90) AS lower,
+           unnest((ts_forecast_agg(ts, value, 'Naive', 5, MAP([], []))).point_forecast) AS point,
+           unnest((ts_forecast_agg(ts, value, 'Naive', 5, MAP([], []))).upper_90) AS upper
+    FROM single_series
+) WHERE lower <= point AND point <= upper;
+----
+5
+
+#######################################
+# GROUP BY Tests
+#######################################
+
+# Test each group gets correct forecast
+query II
+SELECT product_id, length((ts_forecast_agg(ts, value, 'Naive', 5, MAP([], []))).point_forecast)
+FROM sales
+GROUP BY product_id
+ORDER BY product_id;
+----
+A	5
+B	5
+
+# Test model name is consistent per group
+query II
+SELECT product_id, (ts_forecast_agg(ts, value, 'SES', 3, MAP([], []))).model_name
+FROM sales
+GROUP BY product_id
+ORDER BY product_id;
+----
+A	SES
+B	SES
+
+# Test forecasts are different per group (different data)
+query I
+SELECT COUNT(*) FROM (
+    SELECT DISTINCT (ts_forecast_agg(ts, value, 'Naive', 3, MAP([], []))).point_forecast[1] AS f
+    FROM sales
+    GROUP BY product_id
+);
+----
+2
+
+#######################################
+# Horizon Tests
+#######################################
+
+# Horizon of 1
+query I
+SELECT length((ts_forecast_agg(ts, value, 'Naive', 1, MAP([], []))).point_forecast)
+FROM single_series;
+----
+1
+
+# Horizon of 12
+query I
+SELECT length((ts_forecast_agg(ts, value, 'Naive', 12, MAP([], []))).point_forecast)
+FROM single_series;
+----
+12
+
+# Horizon of 24
+query I
+SELECT length((ts_forecast_agg(ts, value, 'Naive', 24, MAP([], []))).point_forecast)
+FROM single_series;
+----
+24
+
+#######################################
+# Point Forecast Sanity Tests
+#######################################
+
+# Naive forecast should repeat last value
+query I
+SELECT ABS((ts_forecast_agg(ts, value, 'Naive', 1, MAP([], []))).point_forecast[1] - 57.8) < 0.1
+FROM single_series;
+----
+true
+
+# Forecasts should be finite
+query I
+SELECT (ts_forecast_agg(ts, value, 'SES', 3, MAP([], []))).point_forecast[1] IS NOT NULL
+FROM single_series;
+----
+true
+
+#######################################
+# Fitted Values Tests
+#######################################
+
+# Fitted values should match input length
+query I
+SELECT length((ts_forecast_agg(ts, value, 'Naive', 5, MAP([], []))).insample_fitted)
+FROM single_series;
+----
+40
+
+# Fitted values should be present for each group
+query II
+SELECT product_id, length((ts_forecast_agg(ts, value, 'SES', 3, MAP([], []))).insample_fitted)
+FROM sales
+GROUP BY product_id
+ORDER BY product_id;
+----
+A	30
+B	30
+
+#######################################
+# Multiple Seasonality Models
+#######################################
+
+# MFLES model
+query I
+SELECT (ts_forecast_agg(ts, value, 'MFLES', 7, MAP([], []))).model_name
+FROM (SELECT ts, value FROM seasonal_sales WHERE product_id = 'S1');
+----
+MFLES
+
+# MSTL model
+query I
+SELECT (ts_forecast_agg(ts, value, 'MSTL', 7, MAP([], []))).model_name
+FROM (SELECT ts, value FROM seasonal_sales WHERE product_id = 'S1');
+----
+MSTL
+
+#######################################
+# Combining with Other SQL Operations
+#######################################
+
+# Access specific forecast components in SELECT
+query I
+SELECT length((ts_forecast_agg(ts, value, 'Naive', 5, MAP([], []))).point_forecast)
+FROM sales
+WHERE product_id = 'A'
+GROUP BY product_id;
+----
+5
+
+# Use in subquery
+query I
+SELECT COUNT(*) FROM (
+    SELECT
+        product_id,
+        (forecast).point_forecast[1] AS first_forecast
+    FROM (
+        SELECT product_id, ts_forecast_agg(ts, value, 'Naive', 3, MAP([], [])) AS forecast
+        FROM sales
+        GROUP BY product_id
+    )
+);
+----
+2
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE sales;
+
+statement ok
+DROP TABLE seasonal_sales;
+
+statement ok
+DROP TABLE single_series;
