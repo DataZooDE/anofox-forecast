@@ -2409,37 +2409,22 @@ To validate synthetic benchmark results, we apply all detection methods to real-
 #| label: m4-load
 #| cache: true
 
-# Load M4 Monthly data via Python datasetsforecast
-# Check if reticulate is available
-reticulate_available <- requireNamespace("reticulate", quietly = TRUE)
-
-m4_available <- FALSE
-if (reticulate_available) {
-  library(reticulate)
-  # Check if datasetsforecast is available
-  m4_available <- tryCatch({
-    datasetsforecast <- import("datasetsforecast.m4")
-    TRUE
-  }, error = function(e) FALSE)
-}
+# Load M4 Monthly data using M4comp2018 R package
+m4_available <- requireNamespace("M4comp2018", quietly = TRUE)
 
 if (m4_available) {
-  # Load M4 Monthly data
-  m4_raw <- datasetsforecast$M4$load(
-    directory = tempdir(),
-    group = "Monthly"
-  )
+  library(M4comp2018)
 
-  m4_df <- as_tibble(m4_raw[[1]])
+  # Extract Monthly series from M4 dataset
+  # M4 is a list where each element has $x (training) and $xx (test) ts objects
+  m4_monthly <- M4[sapply(M4, function(s) s$period == "Monthly")]
 
-  # Aggregate to array format
-  m4_prepared <- m4_df %>%
-    group_by(unique_id) %>%
-    summarise(
-      values = list(y),
-      n_obs = n(),
-      .groups = "drop"
-    ) %>%
+  # Convert to tibble format
+  m4_prepared <- tibble(
+    unique_id = sapply(m4_monthly, function(s) s$st),
+    values = lapply(m4_monthly, function(s) as.numeric(s$x)),
+    n_obs = sapply(m4_monthly, function(s) length(s$x))
+  ) %>%
     filter(n_obs >= 36)  # At least 3 years
 
   # Sample for tractable benchmark
@@ -2449,13 +2434,8 @@ if (m4_available) {
 
   cat(sprintf("Loaded %d M4 Monthly series (sampled %d)\n", nrow(m4_prepared), nrow(m4_sample)))
 } else {
-  if (!reticulate_available) {
-    cat("Note: M4 validation skipped - reticulate R package not available\n")
-    cat("Install with: install.packages('reticulate')\n")
-  } else {
-    cat("Note: M4 validation skipped - datasetsforecast Python package not available\n")
-    cat("Install with: pip install datasetsforecast\n")
-  }
+  cat("Note: M4 validation skipped - M4comp2018 R package not available\n")
+  cat("Install with: install.packages('M4comp2018', repos = 'https://cloud.r-project.org')\n")
   m4_sample <- NULL
 }
 ```
