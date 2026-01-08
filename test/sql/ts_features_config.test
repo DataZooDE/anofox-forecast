@@ -1,0 +1,237 @@
+# name: test/sql/ts_features_config.test
+# description: Tests for ts_features_config_from_json and ts_features_config_from_csv functions
+# group: [anofox_forecast]
+
+require anofox_forecast
+
+#######################################
+# ts_features_config_from_json - Basic Tests
+#######################################
+
+# Test function returns valid result with any path
+query I
+SELECT ts_features_config_from_json('config.json') IS NOT NULL;
+----
+true
+
+# Test feature_names field exists and is non-empty
+query I
+SELECT length((ts_features_config_from_json('config.json')).feature_names) > 0;
+----
+true
+
+# Test overrides field exists (empty list for default)
+query I
+SELECT (ts_features_config_from_json('config.json')).overrides IS NOT NULL;
+----
+true
+
+# Test overrides is empty list by default
+query I
+SELECT length((ts_features_config_from_json('config.json')).overrides) = 0;
+----
+true
+
+# Test with different path strings
+query I
+SELECT ts_features_config_from_json('/path/to/features.json') IS NOT NULL;
+----
+true
+
+query I
+SELECT ts_features_config_from_json('relative/path/config.json') IS NOT NULL;
+----
+true
+
+#######################################
+# ts_features_config_from_json - Feature Names
+#######################################
+
+# Feature names should include common features
+query I
+SELECT 'mean' IN (SELECT UNNEST((ts_features_config_from_json('config.json')).feature_names));
+----
+true
+
+query I
+SELECT 'variance' IN (SELECT UNNEST((ts_features_config_from_json('config.json')).feature_names));
+----
+true
+
+query I
+SELECT 'length' IN (SELECT UNNEST((ts_features_config_from_json('config.json')).feature_names));
+----
+true
+
+# All feature names should be non-empty strings
+query I
+SELECT BOOL_AND(feature != '') FROM (
+    SELECT UNNEST((ts_features_config_from_json('config.json')).feature_names) AS feature
+);
+----
+true
+
+#######################################
+# ts_features_config_from_csv - Basic Tests
+#######################################
+
+# Test function returns valid result with any path
+query I
+SELECT ts_features_config_from_csv('config.csv') IS NOT NULL;
+----
+true
+
+# Test feature_names field exists and is non-empty
+query I
+SELECT length((ts_features_config_from_csv('config.csv')).feature_names) > 0;
+----
+true
+
+# Test overrides field exists (empty list for default)
+query I
+SELECT (ts_features_config_from_csv('config.csv')).overrides IS NOT NULL;
+----
+true
+
+# Test overrides is empty list by default
+query I
+SELECT length((ts_features_config_from_csv('config.csv')).overrides) = 0;
+----
+true
+
+# Test with different path strings
+query I
+SELECT ts_features_config_from_csv('/path/to/features.csv') IS NOT NULL;
+----
+true
+
+#######################################
+# ts_features_config_from_csv - Feature Names
+#######################################
+
+# Feature names should include common features
+query I
+SELECT 'mean' IN (SELECT UNNEST((ts_features_config_from_csv('config.csv')).feature_names));
+----
+true
+
+query I
+SELECT 'variance' IN (SELECT UNNEST((ts_features_config_from_csv('config.csv')).feature_names));
+----
+true
+
+#######################################
+# Aliased Function Names (anofox_fcst_ prefix)
+#######################################
+
+# Test aliased JSON function
+query I
+SELECT anofox_fcst_ts_features_config_from_json('config.json') IS NOT NULL;
+----
+true
+
+# Test aliased CSV function
+query I
+SELECT anofox_fcst_ts_features_config_from_csv('config.csv') IS NOT NULL;
+----
+true
+
+# Aliased functions should return same result
+query I
+SELECT (ts_features_config_from_json('config.json')).feature_names =
+       (anofox_fcst_ts_features_config_from_json('config.json')).feature_names;
+----
+true
+
+query I
+SELECT (ts_features_config_from_csv('config.csv')).feature_names =
+       (anofox_fcst_ts_features_config_from_csv('config.csv')).feature_names;
+----
+true
+
+#######################################
+# JSON and CSV Should Return Same Results
+#######################################
+
+# Both should return the same feature list
+query I
+SELECT (ts_features_config_from_json('config.json')).feature_names =
+       (ts_features_config_from_csv('config.csv')).feature_names;
+----
+true
+
+# Both should have same number of features
+query I
+SELECT length((ts_features_config_from_json('config.json')).feature_names) =
+       length((ts_features_config_from_csv('config.csv')).feature_names);
+----
+true
+
+#######################################
+# NULL Handling
+#######################################
+
+# NULL input should return NULL
+query I
+SELECT ts_features_config_from_json(NULL) IS NULL;
+----
+true
+
+query I
+SELECT ts_features_config_from_csv(NULL) IS NULL;
+----
+true
+
+#######################################
+# Integration with ts_features
+#######################################
+
+# Feature names from config should be usable with ts_features
+# Using the feature_names list as feature_selection parameter
+query I
+SELECT (SELECT ts_features(ts, val, (ts_features_config_from_json('config.json')).feature_names) FROM (
+    SELECT '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts, i::DOUBLE as val
+    FROM range(1, 11) t(i)
+)).mean IS NOT NULL;
+----
+true
+
+#######################################
+# Count Feature Names
+#######################################
+
+# Should have multiple features (at least 10 common statistical features)
+query I
+SELECT length((ts_features_config_from_json('config.json')).feature_names) >= 10;
+----
+true
+
+# Feature count should be close to ts_features_list (may differ by implementation)
+query I
+SELECT ABS(length((ts_features_config_from_json('config.json')).feature_names) -
+       (SELECT COUNT(*) FROM ts_features_list())) <= 2;
+----
+true
+
+#######################################
+# Struct Field Access
+#######################################
+
+# Access feature_names field
+query I
+SELECT (ts_features_config_from_json('config.json')).feature_names IS NOT NULL;
+----
+true
+
+# Access overrides field
+query I
+SELECT (ts_features_config_from_json('config.json')).overrides IS NOT NULL;
+----
+true
+
+# Both fields accessible in single query
+query I
+SELECT (ts_features_config_from_json('config.json')).feature_names IS NOT NULL AND
+       (ts_features_config_from_json('config.json')).overrides IS NOT NULL;
+----
+true
