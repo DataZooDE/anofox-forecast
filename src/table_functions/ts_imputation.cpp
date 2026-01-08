@@ -96,7 +96,8 @@ static void TsFillNullsConstFunction(DataChunk &args, ExpressionState &state, Ve
         );
 
         if (!success) {
-            throw InvalidInputException("ts_fill_nulls_const failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         // Build result list
@@ -292,7 +293,8 @@ static void TsFillNullsMeanFunction(DataChunk &args, ExpressionState &state, Vec
         );
 
         if (!success) {
-            throw InvalidInputException("ts_fill_nulls_mean failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto list_data = FlatVector::GetData<list_entry_t>(result);

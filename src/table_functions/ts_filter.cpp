@@ -71,7 +71,8 @@ static void TsDiffFunction(DataChunk &args, ExpressionState &state, Vector &resu
         );
 
         if (!success) {
-            throw InvalidInputException("ts_diff failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto list_data = FlatVector::GetData<list_entry_t>(result);

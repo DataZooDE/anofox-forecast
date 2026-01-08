@@ -94,7 +94,8 @@ static void TsDetectPeaksFunction(DataChunk &args, ExpressionState &state, Vecto
         );
 
         if (!success) {
-            throw InvalidInputException("ts_detect_peaks failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);
@@ -231,7 +232,8 @@ static void TsAnalyzePeakTimingFunction(DataChunk &args, ExpressionState &state,
         );
 
         if (!success) {
-            throw InvalidInputException("ts_analyze_peak_timing failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);

@@ -59,7 +59,8 @@ static void TsDetectSeasonalityFunction(DataChunk &args, ExpressionState &state,
         );
 
         if (!success) {
-            throw InvalidInputException("ts_detect_seasonality failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         // Build the result list
@@ -149,7 +150,8 @@ static void TsAnalyzeSeasonalityWithTimestampsFunction(DataChunk &args, Expressi
         );
 
         if (!success) {
-            throw InvalidInputException("ts_analyze_seasonality failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);
@@ -213,7 +215,8 @@ static void TsAnalyzeSeasonalityFunction(DataChunk &args, ExpressionState &state
         );
 
         if (!success) {
-            throw InvalidInputException("ts_analyze_seasonality failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);

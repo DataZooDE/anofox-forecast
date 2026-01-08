@@ -76,7 +76,8 @@ static void TsDetrendFunction(DataChunk &args, ExpressionState &state, Vector &r
         );
 
         if (!success) {
-            throw InvalidInputException("ts_detrend failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);
@@ -180,7 +181,8 @@ static void TsDecomposeSeasonalFunction(DataChunk &args, ExpressionState &state,
         );
 
         if (!success) {
-            throw InvalidInputException("ts_decompose_seasonal failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);
@@ -279,7 +281,8 @@ static void TsSeasonalStrengthFunction(DataChunk &args, ExpressionState &state, 
         );
 
         if (!success) {
-            throw InvalidInputException("ts_seasonal_strength failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         result_data[row_idx] = strength;
@@ -352,7 +355,8 @@ static void TsSeasonalStrengthWindowedFunction(DataChunk &args, ExpressionState 
         );
 
         if (!success) {
-            throw InvalidInputException("ts_seasonal_strength_windowed failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto list_data = FlatVector::GetData<list_entry_t>(result);
@@ -459,7 +463,8 @@ static void TsClassifySeasonalityFunction(DataChunk &args, ExpressionState &stat
         );
 
         if (!success) {
-            throw InvalidInputException("ts_classify_seasonality failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);
@@ -605,7 +610,8 @@ static void TsDetectSeasonalityChangesFunction(DataChunk &args, ExpressionState 
         );
 
         if (!success) {
-            throw InvalidInputException("ts_detect_seasonality_changes failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);
@@ -728,7 +734,8 @@ static void TsInstantaneousPeriodFunction(DataChunk &args, ExpressionState &stat
         );
 
         if (!success) {
-            throw InvalidInputException("ts_instantaneous_period failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);
@@ -832,7 +839,8 @@ static void TsDetectAmplitudeModulationFunction(DataChunk &args, ExpressionState
         );
 
         if (!success) {
-            throw InvalidInputException("ts_detect_amplitude_modulation failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         auto &children = StructVector::GetEntries(result);

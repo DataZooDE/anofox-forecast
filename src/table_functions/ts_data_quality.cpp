@@ -86,7 +86,8 @@ static void TsDataQualityFunction(DataChunk &args, ExpressionState &state, Vecto
         );
 
         if (!success) {
-            throw InvalidInputException("ts_data_quality failed: %s", error.message);
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
         }
 
         SetStructField<double>(result, 0, row_idx, dq_result.structural_score);
