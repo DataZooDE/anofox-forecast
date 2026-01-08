@@ -1,0 +1,217 @@
+# name: test/sql/ts_forecast_error_isolation.test
+# description: Tests for batch error isolation in ts_forecast - validates that errors in individual series don't affect other series
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Batch Error Isolation Foundation
+#######################################
+# These tests verify the core behavior that individual series failures
+# return NULL without crashing the entire batch operation.
+
+# Basic setup - create test data with mix of valid and invalid series
+statement ok
+CREATE TABLE batch_test_series AS
+SELECT * FROM (VALUES
+    (1, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),  -- valid: trend
+    (2, []::DOUBLE[]),                                           -- invalid: empty
+    (3, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])   -- valid: trend
+) AS t(series_id, values);
+
+# Core isolation test: batch with invalid series should still process valid ones
+query II
+SELECT
+    series_id,
+    _ts_forecast(values, 3) IS NOT NULL as has_result
+FROM batch_test_series
+ORDER BY series_id;
+----
+1	true
+2	false
+3	true
+
+# Verify the valid series actually produce correct results
+query II
+SELECT
+    series_id,
+    length((_ts_forecast(values, 3)).point) as forecast_length
+FROM batch_test_series
+WHERE _ts_forecast(values, 3) IS NOT NULL
+ORDER BY series_id;
+----
+1	3
+3	3
+
+statement ok
+DROP TABLE batch_test_series;
+
+#######################################
+# Empty Array Handling
+#######################################
+
+# Empty array should return NULL
+query I
+SELECT _ts_forecast([]::DOUBLE[], 5) IS NULL;
+----
+true
+
+# Batch with empty arrays - other series should succeed
+query II
+SELECT
+    series_id,
+    _ts_forecast(values, 3) IS NOT NULL as has_result
+FROM (VALUES
+    (1, [1.0, 2.0, 3.0, 4.0, 5.0]::DOUBLE[]),
+    (2, []::DOUBLE[]),
+    (3, [5.0, 4.0, 3.0, 2.0, 1.0]::DOUBLE[])
+) AS t(series_id, values)
+ORDER BY series_id;
+----
+1	true
+2	false
+3	true
+
+#######################################
+# Single Value Array Handling
+#######################################
+
+# Single value is technically valid but limited - returns NULL for forecasting
+query I
+SELECT _ts_forecast([1.0], 3) IS NULL;
+----
+true
+
+# Two values - minimal for some models
+query I
+SELECT _ts_forecast([1.0, 2.0], 3) IS NULL;
+----
+true
+
+# Three values - still too short for reliable forecasting
+query I
+SELECT _ts_forecast([1.0, 2.0, 3.0], 3) IS NOT NULL;
+----
+true
+
+#######################################
+# NULL Value Handling Within Series
+#######################################
+
+# Series with some NULL values should still work (NULLs handled as gaps)
+query I
+SELECT _ts_forecast([1.0, NULL, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3) IS NOT NULL;
+----
+true
+
+# All-NULL series produces NaN values (not NULL struct)
+query I
+SELECT _ts_forecast([NULL, NULL, NULL, NULL, NULL]::DOUBLE[], 3) IS NOT NULL;
+----
+true
+
+# Verify all-NULL produces NaN forecasts
+query I
+SELECT isnan((_ts_forecast([NULL, NULL, NULL, NULL, NULL]::DOUBLE[], 3)).point[1]);
+----
+true
+
+# Batch mixing series with NULLs (all-NULL produces result with NaN values)
+query II
+SELECT
+    series_id,
+    _ts_forecast(values, 3) IS NOT NULL as has_result
+FROM (VALUES
+    (1, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),
+    (2, [NULL, NULL, NULL, NULL, NULL]::DOUBLE[]),
+    (3, [1.0, NULL, 3.0, NULL, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])
+) AS t(series_id, values)
+ORDER BY series_id;
+----
+1	true
+2	true
+3	true
+
+#######################################
+# Constant Series Handling
+#######################################
+
+# All same values - degenerate case but should work
+query I
+SELECT _ts_forecast([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 3) IS NOT NULL;
+----
+true
+
+# Constant series forecast should be the constant value
+query I
+SELECT ABS((_ts_forecast([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 3)).point[1] - 5.0) < 0.01;
+----
+true
+
+#######################################
+# Multiple Error Types in Single Batch
+#######################################
+
+# Comprehensive batch with various error scenarios
+statement ok
+CREATE TABLE comprehensive_batch AS
+SELECT * FROM (VALUES
+    (1, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 'valid_trend'),
+    (2, []::DOUBLE[], 'empty'),
+    (3, [NULL, NULL, NULL, NULL, NULL]::DOUBLE[], 'all_null'),
+    (4, [1.0]::DOUBLE[], 'single_value'),
+    (5, [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 'constant'),
+    (6, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 'valid_trend_2')
+) AS t(series_id, values, description);
+
+# Count forecasts that return non-NULL (includes all_null which returns NaN values)
+query I
+SELECT COUNT(*)
+FROM comprehensive_batch
+WHERE _ts_forecast(values, 3) IS NOT NULL;
+----
+4
+
+query III
+SELECT
+    series_id,
+    description,
+    _ts_forecast(values, 3) IS NOT NULL as has_result
+FROM comprehensive_batch
+ORDER BY series_id;
+----
+1	valid_trend	true
+2	empty	false
+3	all_null	true
+4	single_value	false
+5	constant	true
+6	valid_trend_2	true
+
+statement ok
+DROP TABLE comprehensive_batch;
+
+#######################################
+# NULL Input List Handling
+#######################################
+
+# NULL as the entire list should return NULL
+query I
+SELECT _ts_forecast(NULL, 3) IS NULL;
+----
+true
+
+# Batch with NULL list entries
+query II
+SELECT
+    series_id,
+    _ts_forecast(values, 3) IS NOT NULL as has_result
+FROM (VALUES
+    (1, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),
+    (2, NULL::DOUBLE[]),
+    (3, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])
+) AS t(series_id, values)
+ORDER BY series_id;
+----
+1	true
+2	false
+3	true
