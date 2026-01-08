@@ -1,0 +1,582 @@
+# name: test/sql/ts_forecast_by.test
+# description: Tests for ts_forecast_by table macro with all forecast models
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup: Create test data
+#######################################
+
+# Multi-group time series data with trend and seasonality
+statement ok
+CREATE TABLE test_groups AS
+SELECT
+    'A' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    10.0 + i * 0.5 + sin(i * 3.14159 / 7) * 2 AS value
+FROM generate_series(0, 59) AS t(i)
+UNION ALL
+SELECT
+    'B' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    20.0 + i * 0.3 + cos(i * 3.14159 / 7) * 3 AS value
+FROM generate_series(0, 59) AS t(i);
+
+# Seasonal data with clear weekly pattern (period = 7)
+statement ok
+CREATE TABLE test_seasonal AS
+SELECT
+    'S1' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    100 + sin(i * 2 * 3.14159 / 7) * 20 + i * 0.1 AS value
+FROM generate_series(0, 83) AS t(i)
+UNION ALL
+SELECT
+    'S2' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    200 + cos(i * 2 * 3.14159 / 7) * 30 + i * 0.2 AS value
+FROM generate_series(0, 83) AS t(i);
+
+# Intermittent demand data (sparse with zeros)
+statement ok
+CREATE TABLE test_intermittent AS
+SELECT
+    'I1' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    CASE WHEN i % 5 = 0 THEN 10.0 + random() * 5 ELSE 0.0 END AS value
+FROM generate_series(0, 59) AS t(i)
+UNION ALL
+SELECT
+    'I2' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    CASE WHEN i % 4 = 0 THEN 15.0 + random() * 3 ELSE 0.0 END AS value
+FROM generate_series(0, 59) AS t(i);
+
+#######################################
+# Basic Structure Tests
+#######################################
+
+# Test ts_forecast_by returns correct number of rows (2 groups x 5 steps = 10)
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 5, MAP([], []));
+----
+10
+
+# Test output has expected columns
+query I
+SELECT COUNT(*) FROM (
+    SELECT id, forecast_step, date, point_forecast, lower_90, upper_90, model_name, insample_fitted
+    FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 3, MAP([], []))
+);
+----
+6
+
+# Test forecast_step values are sequential (1 to horizon)
+query I
+SELECT COUNT(DISTINCT forecast_step) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 7, MAP([], []));
+----
+7
+
+# Test all groups are represented
+query I
+SELECT COUNT(DISTINCT id) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 3, MAP([], []));
+----
+2
+
+# Test dates are sequential after last observation
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 3, MAP([], []))
+WHERE date > '2024-02-29'::TIMESTAMP;
+----
+6
+
+#######################################
+# Basic Models (6)
+#######################################
+
+# Naive - repeats last value
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 3, MAP([], []));
+----
+6
+
+query I
+SELECT model_name FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 3, MAP([], [])) LIMIT 1;
+----
+Naive
+
+# SMA - Simple Moving Average
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'SMA', 3, MAP([], []));
+----
+6
+
+query I
+SELECT model_name FROM ts_forecast_by('test_groups', id, ds, value, 'SMA', 3, MAP([], [])) LIMIT 1;
+----
+SMA
+
+# SeasonalNaive - repeats seasonal pattern
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_seasonal', id, ds, value, 'SeasonalNaive', 7, MAP([], []));
+----
+14
+
+query I
+SELECT model_name FROM ts_forecast_by('test_seasonal', id, ds, value, 'SeasonalNaive', 7, MAP([], [])) LIMIT 1;
+----
+SeasonalNaive
+
+# SES - Simple Exponential Smoothing
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'SES', 3, MAP([], []));
+----
+6
+
+query I
+SELECT model_name FROM ts_forecast_by('test_groups', id, ds, value, 'SES', 3, MAP([], [])) LIMIT 1;
+----
+SES
+
+# SESOptimized - Optimized Simple Exponential Smoothing
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'SESOptimized', 3, MAP([], []));
+----
+6
+
+query I
+SELECT model_name FROM ts_forecast_by('test_groups', id, ds, value, 'SESOptimized', 3, MAP([], [])) LIMIT 1;
+----
+SESOptimized
+
+# RandomWalkDrift - Random walk with drift
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'RandomWalkDrift', 3, MAP([], []));
+----
+6
+
+query I
+SELECT model_name FROM ts_forecast_by('test_groups', id, ds, value, 'RandomWalkDrift', 3, MAP([], [])) LIMIT 1;
+----
+RandomWalkDrift
+
+#######################################
+# Exponential Smoothing Models (5)
+#######################################
+
+# Holt - Double exponential smoothing (trend)
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Holt', 3, MAP([], []));
+----
+6
+
+query I
+SELECT model_name FROM ts_forecast_by('test_groups', id, ds, value, 'Holt', 3, MAP([], [])) LIMIT 1;
+----
+Holt
+
+# HoltWinters - Triple exponential smoothing (trend + seasonality)
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_seasonal', id, ds, value, 'HoltWinters', 7, MAP([], []));
+----
+14
+
+query I
+SELECT model_name FROM ts_forecast_by('test_seasonal', id, ds, value, 'HoltWinters', 7, MAP([], [])) LIMIT 1;
+----
+HoltWinters
+
+# SeasonalES - Seasonal Exponential Smoothing
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_seasonal', id, ds, value, 'SeasonalES', 7, MAP([], []));
+----
+14
+
+query I
+SELECT model_name FROM ts_forecast_by('test_seasonal', id, ds, value, 'SeasonalES', 7, MAP([], [])) LIMIT 1;
+----
+SeasonalES
+
+# SeasonalESOptimized - Optimized Seasonal ES
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_seasonal', id, ds, value, 'SeasonalESOptimized', 7, MAP([], []));
+----
+14
+
+query I
+SELECT model_name FROM ts_forecast_by('test_seasonal', id, ds, value, 'SeasonalESOptimized', 7, MAP([], [])) LIMIT 1;
+----
+SeasonalESOptimized
+
+# SeasonalWindowAverage - Seasonal window average
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_seasonal', id, ds, value, 'SeasonalWindowAverage', 7, MAP([], []));
+----
+14
+
+query I
+SELECT model_name FROM ts_forecast_by('test_seasonal', id, ds, value, 'SeasonalWindowAverage', 7, MAP([], [])) LIMIT 1;
+----
+SeasonalWindowAverage
+
+#######################################
+# Theta Methods (4)
+#######################################
+
+# Theta - Basic Theta method
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Theta', 3, MAP([], []));
+----
+6
+
+query I
+SELECT model_name FROM ts_forecast_by('test_groups', id, ds, value, 'Theta', 3, MAP([], [])) LIMIT 1;
+----
+Theta
+
+# OptimizedTheta - Optimized Theta method
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'OptimizedTheta', 3, MAP([], []));
+----
+6
+
+query I
+SELECT model_name FROM ts_forecast_by('test_groups', id, ds, value, 'OptimizedTheta', 3, MAP([], [])) LIMIT 1;
+----
+OptimizedTheta
+
+# DynamicTheta - Dynamic Theta method
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'DynamicTheta', 3, MAP([], []));
+----
+6
+
+query I
+SELECT model_name FROM ts_forecast_by('test_groups', id, ds, value, 'DynamicTheta', 3, MAP([], [])) LIMIT 1;
+----
+DynamicTheta
+
+# DynamicOptimizedTheta - Dynamic Optimized Theta method
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'DynamicOptimizedTheta', 3, MAP([], []));
+----
+6
+
+query I
+SELECT model_name FROM ts_forecast_by('test_groups', id, ds, value, 'DynamicOptimizedTheta', 3, MAP([], [])) LIMIT 1;
+----
+DynamicOptimizedTheta
+
+#######################################
+# State Space and ARIMA Models (2)
+#######################################
+
+# ETS - Exponential smoothing state space
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'ETS', 3, MAP([], []));
+----
+6
+
+query I
+SELECT model_name FROM ts_forecast_by('test_groups', id, ds, value, 'ETS', 3, MAP([], [])) LIMIT 1;
+----
+ETS
+
+# ARIMA - Autoregressive Integrated Moving Average
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'ARIMA', 3, MAP([], []));
+----
+6
+
+query I
+SELECT model_name FROM ts_forecast_by('test_groups', id, ds, value, 'ARIMA', 3, MAP([], [])) LIMIT 1;
+----
+ARIMA
+
+#######################################
+# Auto Selection Models (6)
+#######################################
+
+# AutoETS - Automatic ETS selection
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'AutoETS', 3, MAP([], []));
+----
+6
+
+query I
+SELECT model_name IS NOT NULL FROM ts_forecast_by('test_groups', id, ds, value, 'AutoETS', 3, MAP([], [])) LIMIT 1;
+----
+true
+
+# AutoARIMA - Automatic ARIMA selection
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'AutoARIMA', 3, MAP([], []));
+----
+6
+
+query I
+SELECT model_name IS NOT NULL FROM ts_forecast_by('test_groups', id, ds, value, 'AutoARIMA', 3, MAP([], [])) LIMIT 1;
+----
+true
+
+# AutoTheta - Automatic Theta selection
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'AutoTheta', 3, MAP([], []));
+----
+6
+
+query I
+SELECT model_name IS NOT NULL FROM ts_forecast_by('test_groups', id, ds, value, 'AutoTheta', 3, MAP([], [])) LIMIT 1;
+----
+true
+
+# AutoMFLES - Automatic MFLES selection
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_seasonal', id, ds, value, 'AutoMFLES', 7, MAP([], []));
+----
+14
+
+query I
+SELECT model_name IS NOT NULL FROM ts_forecast_by('test_seasonal', id, ds, value, 'AutoMFLES', 7, MAP([], [])) LIMIT 1;
+----
+true
+
+# AutoMSTL - Automatic MSTL selection
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_seasonal', id, ds, value, 'AutoMSTL', 7, MAP([], []));
+----
+14
+
+query I
+SELECT model_name IS NOT NULL FROM ts_forecast_by('test_seasonal', id, ds, value, 'AutoMSTL', 7, MAP([], [])) LIMIT 1;
+----
+true
+
+# AutoTBATS - Automatic TBATS selection
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_seasonal', id, ds, value, 'AutoTBATS', 7, MAP([], []));
+----
+14
+
+query I
+SELECT model_name IS NOT NULL FROM ts_forecast_by('test_seasonal', id, ds, value, 'AutoTBATS', 7, MAP([], [])) LIMIT 1;
+----
+true
+
+#######################################
+# Intermittent Demand Models (6)
+#######################################
+
+# CrostonClassic - Classic Croston's method
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_intermittent', id, ds, value, 'CrostonClassic', 5, MAP([], []));
+----
+10
+
+query I
+SELECT model_name FROM ts_forecast_by('test_intermittent', id, ds, value, 'CrostonClassic', 5, MAP([], [])) LIMIT 1;
+----
+CrostonClassic
+
+# CrostonOptimized - Optimized Croston
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_intermittent', id, ds, value, 'CrostonOptimized', 5, MAP([], []));
+----
+10
+
+query I
+SELECT model_name FROM ts_forecast_by('test_intermittent', id, ds, value, 'CrostonOptimized', 5, MAP([], [])) LIMIT 1;
+----
+CrostonOptimized
+
+# CrostonSBA - Croston SBA (Syntetos-Boylan Approximation)
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_intermittent', id, ds, value, 'CrostonSBA', 5, MAP([], []));
+----
+10
+
+query I
+SELECT model_name FROM ts_forecast_by('test_intermittent', id, ds, value, 'CrostonSBA', 5, MAP([], [])) LIMIT 1;
+----
+CrostonSBA
+
+# ADIDA - Aggregate-Disaggregate Intermittent Demand Approach
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_intermittent', id, ds, value, 'ADIDA', 5, MAP([], []));
+----
+10
+
+query I
+SELECT model_name FROM ts_forecast_by('test_intermittent', id, ds, value, 'ADIDA', 5, MAP([], [])) LIMIT 1;
+----
+ADIDA
+
+# IMAPA - Intermittent Multiple Aggregation Prediction Algorithm
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_intermittent', id, ds, value, 'IMAPA', 5, MAP([], []));
+----
+10
+
+query I
+SELECT model_name FROM ts_forecast_by('test_intermittent', id, ds, value, 'IMAPA', 5, MAP([], [])) LIMIT 1;
+----
+IMAPA
+
+# TSB - Teunter-Syntetos-Babai method
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_intermittent', id, ds, value, 'TSB', 5, MAP([], []));
+----
+10
+
+query I
+SELECT model_name FROM ts_forecast_by('test_intermittent', id, ds, value, 'TSB', 5, MAP([], [])) LIMIT 1;
+----
+TSB
+
+#######################################
+# Multiple Seasonality Models (3)
+#######################################
+
+# MFLES - Multiple Frequency Local Level Seasonal
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_seasonal', id, ds, value, 'MFLES', 7, MAP([], []));
+----
+14
+
+query I
+SELECT model_name FROM ts_forecast_by('test_seasonal', id, ds, value, 'MFLES', 7, MAP([], [])) LIMIT 1;
+----
+MFLES
+
+# MSTL - Multiple Seasonal Trend using Loess
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_seasonal', id, ds, value, 'MSTL', 7, MAP([], []));
+----
+14
+
+query I
+SELECT model_name FROM ts_forecast_by('test_seasonal', id, ds, value, 'MSTL', 7, MAP([], [])) LIMIT 1;
+----
+MSTL
+
+# TBATS - Trigonometric Box-Cox ARMA Trend Seasonal
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_seasonal', id, ds, value, 'TBATS', 7, MAP([], []));
+----
+14
+
+query I
+SELECT model_name FROM ts_forecast_by('test_seasonal', id, ds, value, 'TBATS', 7, MAP([], [])) LIMIT 1;
+----
+TBATS
+
+#######################################
+# MAP Parameters Tests
+#######################################
+
+# Test confidence_level parameter
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 3, MAP(['confidence_level'], [0.80]));
+----
+6
+
+# Test seasonal_period parameter
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_seasonal', id, ds, value, 'SeasonalNaive', 7, MAP(['seasonal_period'], [7]));
+----
+14
+
+# Test multiple parameters
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_seasonal', id, ds, value, 'HoltWinters', 7,
+    MAP(['confidence_level', 'seasonal_period'], [0.95, 7]));
+----
+14
+
+#######################################
+# Frequency Parameter Tests
+#######################################
+
+# Test with Polars-style frequency '1d'
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 3, MAP([], []), '1d');
+----
+6
+
+# Test with DuckDB INTERVAL style '1 day'
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 3, MAP([], []), '1 day');
+----
+6
+
+# Test with weekly frequency
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 3, MAP([], []), '1w');
+----
+6
+
+#######################################
+# Output Quality Tests
+#######################################
+
+# Test point forecast is numeric and not NULL
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 3, MAP([], []))
+WHERE point_forecast IS NOT NULL;
+----
+6
+
+# Test confidence bounds are valid (lower <= point <= upper)
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 3, MAP([], []))
+WHERE lower_90 <= point_forecast AND point_forecast <= upper_90;
+----
+6
+
+# Test forecast steps are correct
+query I
+SELECT MIN(forecast_step) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 5, MAP([], []));
+----
+1
+
+query I
+SELECT MAX(forecast_step) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 5, MAP([], []));
+----
+5
+
+# Test insample_fitted is returned as array
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 3, MAP([], []))
+WHERE insample_fitted IS NOT NULL;
+----
+6
+
+#######################################
+# Edge Cases
+#######################################
+
+# Forecast horizon of 1
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 1, MAP([], []));
+----
+2
+
+# Large forecast horizon
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 30, MAP([], []));
+----
+60
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE test_groups;
+
+statement ok
+DROP TABLE test_seasonal;
+
+statement ok
+DROP TABLE test_intermittent;
