@@ -76,3 +76,191 @@ SELECT COUNT(*) FROM ts_detect_changepoints('changepoint_test', date, val, MAP([
 
 statement ok
 DROP TABLE changepoint_test;
+
+#######################################
+# ts_detect_changepoints_agg - Aggregate Function Tests
+#######################################
+
+# Test ts_detect_changepoints_agg returns LIST
+query I
+SELECT (SELECT ts_detect_changepoints_agg(ts, val, MAP([], [])) FROM (
+    SELECT '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts,
+           CASE WHEN i < 5 THEN 1.0 ELSE 10.0 END as val
+    FROM range(0, 10) t(i)
+)) IS NOT NULL;
+----
+true
+
+# Test list length matches input length
+query I
+SELECT length((SELECT ts_detect_changepoints_agg(ts, val, MAP([], [])) FROM (
+    SELECT '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts,
+           CASE WHEN i < 5 THEN 1.0 ELSE 10.0 END as val
+    FROM range(0, 10) t(i)
+)));
+----
+10
+
+# Test STRUCT fields exist - timestamp
+query I
+SELECT ((SELECT ts_detect_changepoints_agg(ts, val, MAP([], [])) FROM (
+    SELECT '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts,
+           CASE WHEN i < 5 THEN 1.0 ELSE 10.0 END as val
+    FROM range(0, 10) t(i)
+))[1]).timestamp IS NOT NULL;
+----
+true
+
+# Test STRUCT fields exist - value
+query I
+SELECT ((SELECT ts_detect_changepoints_agg(ts, val, MAP([], [])) FROM (
+    SELECT '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts,
+           CASE WHEN i < 5 THEN 1.0 ELSE 10.0 END as val
+    FROM range(0, 10) t(i)
+))[1]).value IS NOT NULL;
+----
+true
+
+# Test STRUCT fields exist - is_changepoint
+query I
+SELECT ((SELECT ts_detect_changepoints_agg(ts, val, MAP([], [])) FROM (
+    SELECT '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts,
+           CASE WHEN i < 5 THEN 1.0 ELSE 10.0 END as val
+    FROM range(0, 10) t(i)
+))[1]).is_changepoint IS NOT NULL;
+----
+true
+
+# Test STRUCT fields exist - changepoint_probability
+query I
+SELECT ((SELECT ts_detect_changepoints_agg(ts, val, MAP([], [])) FROM (
+    SELECT '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts,
+           CASE WHEN i < 5 THEN 1.0 ELSE 10.0 END as val
+    FROM range(0, 10) t(i)
+))[1]).changepoint_probability IS NOT NULL;
+----
+true
+
+# Test with constant series - no changepoints expected (all is_changepoint should be false)
+query I
+SELECT list_reduce(
+    list_transform(
+        (SELECT ts_detect_changepoints_agg(ts, val, MAP([], [])) FROM (
+            SELECT '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts, 5.0 as val
+            FROM range(0, 10) t(i)
+        )),
+        x -> CASE WHEN x.is_changepoint THEN 1 ELSE 0 END
+    ),
+    (a, b) -> a + b
+) = 0;
+----
+true
+
+# Test with hazard_lambda parameter
+query I
+SELECT length((SELECT ts_detect_changepoints_agg(ts, val, MAP(['hazard_lambda'], ['100.0'])) FROM (
+    SELECT '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts,
+           CASE WHEN i < 5 THEN 1.0 ELSE 10.0 END as val
+    FROM range(0, 10) t(i)
+)));
+----
+10
+
+# Test GROUP BY with aggregate - multiple groups
+statement ok
+CREATE TABLE changepoints_agg_test AS
+SELECT 'A' as grp, '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts,
+       CASE WHEN i < 5 THEN 1.0 ELSE 10.0 END as val
+FROM range(0, 10) t(i)
+UNION ALL
+SELECT 'B' as grp, '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts,
+       CASE WHEN i < 3 THEN 2.0 ELSE 20.0 END as val
+FROM range(0, 10) t(i);
+
+# Test aggregate with GROUP BY returns one result per group
+query I
+SELECT COUNT(*) FROM (
+    SELECT grp, ts_detect_changepoints_agg(ts, val, MAP([], [])) as cps
+    FROM changepoints_agg_test
+    GROUP BY grp
+);
+----
+2
+
+# Test each group has correct list length
+query I
+SELECT length(ts_detect_changepoints_agg(ts, val, MAP([], []))) = 10
+FROM changepoints_agg_test
+GROUP BY grp
+ORDER BY grp
+LIMIT 1;
+----
+true
+
+statement ok
+DROP TABLE changepoints_agg_test;
+
+#######################################
+# ts_detect_changepoints_by - Table Macro Tests
+#######################################
+
+statement ok
+CREATE TABLE changepoints_by_test AS
+SELECT 'A' as grp, '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts,
+       CASE WHEN i < 5 THEN 1.0 ELSE 10.0 END as val
+FROM range(0, 10) t(i)
+UNION ALL
+SELECT 'B' as grp, '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts,
+       CASE WHEN i < 3 THEN 2.0 ELSE 20.0 END as val
+FROM range(0, 10) t(i);
+
+# Test ts_detect_changepoints_by returns results
+query I
+SELECT COUNT(*) FROM ts_detect_changepoints_by('changepoints_by_test', grp, ts, val, MAP([], []));
+----
+2
+
+# Test ts_detect_changepoints_by has id column
+query I
+SELECT COUNT(DISTINCT id) FROM ts_detect_changepoints_by('changepoints_by_test', grp, ts, val, MAP([], []));
+----
+2
+
+# Test ts_detect_changepoints_by has changepoints column
+query I
+SELECT (changepoints).is_changepoint IS NOT NULL
+FROM ts_detect_changepoints_by('changepoints_by_test', grp, ts, val, MAP([], []))
+LIMIT 1;
+----
+true
+
+# Test changepoints STRUCT has changepoint_probability field
+query I
+SELECT (changepoints).changepoint_probability IS NOT NULL
+FROM ts_detect_changepoints_by('changepoints_by_test', grp, ts, val, MAP([], []))
+LIMIT 1;
+----
+true
+
+# Test changepoints STRUCT has changepoint_indices field
+query I
+SELECT (changepoints).changepoint_indices IS NOT NULL
+FROM ts_detect_changepoints_by('changepoints_by_test', grp, ts, val, MAP([], []))
+LIMIT 1;
+----
+true
+
+# Test with hazard_lambda parameter
+query I
+SELECT COUNT(*) FROM ts_detect_changepoints_by('changepoints_by_test', grp, ts, val, MAP(['hazard_lambda'], ['100.0']));
+----
+2
+
+# Test with include_probabilities parameter
+query I
+SELECT COUNT(*) FROM ts_detect_changepoints_by('changepoints_by_test', grp, ts, val, MAP(['include_probabilities'], ['true']));
+----
+2
+
+statement ok
+DROP TABLE changepoints_by_test;
