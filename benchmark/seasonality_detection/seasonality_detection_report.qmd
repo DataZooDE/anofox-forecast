@@ -1029,9 +1029,97 @@ ggplot(example_long, aes(x = t, y = values, color = slope)) +
   theme(legend.position = "bottom")
 ```
 
+### Challenge 1b: Non-linear Trends
+
+Beyond linear trends, real-world data often exhibits non-linear trend patterns. We test quadratic (accelerating/decelerating) and sinusoidal (cyclical) trends that can confuse period detection methods.
+
+```{r}
+#| label: challenge-nonlinear-trends
+
+# Quadratic trend generator
+generate_with_quadratic_trend <- function(base_data, curvature) {
+  base_data %>%
+    mutate(
+      values = map(values, function(v) {
+        n <- length(v)
+        t_norm <- (seq_along(v) - 1) / (n - 1)  # Normalize to 0-1
+        v + curvature * t_norm^2
+      }),
+      scenario = paste0("quadratic_", curvature)
+    )
+}
+
+# Sinusoidal trend generator (low-frequency trend overlaid on seasonal)
+generate_with_sinusoidal_trend <- function(base_data, amplitude) {
+  base_data %>%
+    mutate(
+      values = map(values, function(v) {
+        n <- length(v)
+        t <- seq_along(v) - 1
+        # Half-cycle sinusoidal trend (period = 2*n)
+        v + amplitude * sin(pi * t / (n - 1))
+      }),
+      scenario = paste0("sinusoid_", amplitude)
+    )
+}
+
+# Generate quadratic trend data
+quadratic_data <- bind_rows(
+  generate_with_quadratic_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 1),
+  generate_with_quadratic_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 3),
+  generate_with_quadratic_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 5)
+)
+
+# Generate sinusoidal trend data
+sinusoid_data <- bind_rows(
+  generate_with_sinusoidal_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 0.5),
+  generate_with_sinusoidal_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 1.0),
+  generate_with_sinusoidal_trend(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 2.0)
+)
+
+cat(sprintf("Generated %d curves with quadratic trends\n", nrow(quadratic_data)))
+cat(sprintf("Generated %d curves with sinusoidal trends\n", nrow(sinusoid_data)))
+```
+
+```{r}
+#| label: fig-nonlinear-trend-examples
+#| fig-cap: "Effect of non-linear trends on seasonal signal (strength = 0.3)"
+#| fig-height: 5
+
+# Get example curve
+example_nonlinear <- baseline_data %>%
+  filter(round(strength_level, 1) == 0.3) %>%
+  slice(1)
+
+n <- N_POINTS
+t_norm <- (0:(n-1)) / (n-1)
+
+nonlinear_examples <- bind_rows(
+  example_nonlinear %>% mutate(trend_type = "Original", values = values),
+  example_nonlinear %>% mutate(trend_type = "Quadratic (c=3)", values = map(values, ~.x + 3 * t_norm^2)),
+  example_nonlinear %>% mutate(trend_type = "Sinusoidal (A=1.5)", values = map(values, ~.x + 1.5 * sin(pi * t_norm)))
+) %>%
+  unnest(values) %>%
+  group_by(trend_type) %>%
+  mutate(t = row_number() - 1) %>%
+  ungroup() %>%
+  mutate(trend_type = factor(trend_type, levels = c("Original", "Quadratic (c=3)", "Sinusoidal (A=1.5)")))
+
+ggplot(nonlinear_examples, aes(x = t, y = values, color = trend_type)) +
+  geom_line(linewidth = 0.8) +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "Non-linear Trend Effects on Seasonal Signal",
+    subtitle = "Seasonal strength = 0.3",
+    x = "Time", y = "Value",
+    color = "Trend Type"
+  ) +
+  theme(legend.position = "bottom")
+```
+
 ### Challenge 2: Red Noise (AR(1) Process)
 
-Red noise (autocorrelated noise) can produce spurious peaks in spectral analysis that may be mistaken for seasonality. We replace white noise with AR(1) noise with coefficients $\phi$ = 0.3, 0.5, 0.7. Higher $\phi$ means stronger autocorrelation.
+Red noise (autocorrelated noise) can produce spurious peaks in spectral analysis that may be mistaken for seasonality. We replace white noise with AR(1) noise with coefficients $\phi$ = 0.0 (baseline), 0.3, 0.5, 0.7, and 0.9 (extreme). Higher $\phi$ means stronger autocorrelation.
 
 ```{r}
 #| label: challenge-rednoise
@@ -1057,9 +1145,11 @@ generate_with_ar_noise <- function(base_data, phi) {
 
 # Test with different AR coefficients
 ar_data <- bind_rows(
+  generate_with_ar_noise(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 0.0),  # White noise baseline
   generate_with_ar_noise(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 0.3),
   generate_with_ar_noise(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 0.5),
-  generate_with_ar_noise(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 0.7)
+  generate_with_ar_noise(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 0.7),
+  generate_with_ar_noise(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), 0.9)   # Extreme autocorrelation
 )
 
 cat(sprintf("Generated %d curves with AR(1) noise\n", nrow(ar_data)))
@@ -1088,15 +1178,15 @@ generate_ar_noise <- function(n, phi) {
 }
 
 ar_examples <- tibble(
-  phi = c("White noise ($\\phi$=0)", "AR(1) $\\phi$=0.3", "AR(1) $\\phi$=0.5", "AR(1) $\\phi$=0.7"),
-  phi_val = c(0, 0.3, 0.5, 0.7)
+  phi = c("White noise ($\\phi$=0)", "AR(1) $\\phi$=0.3", "AR(1) $\\phi$=0.5", "AR(1) $\\phi$=0.7", "AR(1) $\\phi$=0.9"),
+  phi_val = c(0, 0.3, 0.5, 0.7, 0.9)
 ) %>%
   mutate(values = map(phi_val, ~generate_ar_noise(60, .x))) %>%
   unnest(values) %>%
   group_by(phi) %>%
   mutate(t = row_number() - 1) %>%
   ungroup() %>%
-  mutate(phi = factor(phi, levels = c("White noise ($\\phi$=0)", "AR(1) $\\phi$=0.3", "AR(1) $\\phi$=0.5", "AR(1) $\\phi$=0.7")))
+  mutate(phi = factor(phi, levels = c("White noise ($\\phi$=0)", "AR(1) $\\phi$=0.3", "AR(1) $\\phi$=0.5", "AR(1) $\\phi$=0.7", "AR(1) $\\phi$=0.9")))
 
 ggplot(ar_examples, aes(x = t, y = values, color = phi)) +
   geom_line(linewidth = 0.8) +
@@ -1186,6 +1276,191 @@ ggplot(outlier_examples, aes(x = t, y = values, color = config)) +
     color = "Outlier Config"
   ) +
   theme(legend.position = "bottom")
+```
+
+### Challenge 4: Shape Robustness
+
+Real-world seasonality is rarely a perfect sinusoid. We test methods' ability to detect non-sinusoidal periodic patterns including square waves and triangle waves, which contain higher harmonic content.
+
+```{r}
+#| label: challenge-shapes
+
+# Generate waveform helper
+generate_waveform <- function(n_points, period, shape = "sine") {
+  t <- 0:(n_points - 1)
+  phase_in_period <- (t %% period) / period  # 0 to 1 within each period
+
+  switch(shape,
+    "sine" = sin(2 * pi * phase_in_period),
+    "square" = ifelse(phase_in_period < 0.5, 1, -1),
+    "triangle" = 4 * abs(phase_in_period - 0.5) - 1
+  )
+}
+
+# Generate curves with different waveform shapes
+generate_shape_curves <- function(n_per_level, n_points, period, noise_sd, shape,
+                                   strength_levels = c(0.0, 0.3, 0.6)) {
+  curves <- map_dfr(strength_levels, function(strength) {
+    map_dfr(1:n_per_level, function(curve_idx) {
+      # Amplitude from strength formula
+      if (strength > 0 && strength < 1) {
+        amplitude <- sqrt(strength * noise_sd^2 / (1 - strength))
+      } else if (strength >= 1) {
+        amplitude <- 10 * noise_sd
+      } else {
+        amplitude <- 0
+      }
+
+      # Generate waveform with random phase
+      phase_shift <- sample(0:(period-1), 1)
+      waveform <- generate_waveform(n_points, period, shape)
+      seasonal <- amplitude * c(waveform[(phase_shift+1):n_points], waveform[1:phase_shift])
+      noise <- rnorm(n_points, 0, noise_sd)
+      values <- seasonal + noise
+
+      tibble(
+        curve_id = which(strength_levels == strength) * n_per_level + curve_idx,
+        strength_level = strength,
+        is_seasonal = strength >= STRENGTH_THRESHOLD,
+        scenario = paste0("shape_", shape),
+        values = list(values)
+      )
+    })
+  })
+  curves
+}
+
+# Generate curves for each waveform shape
+set.seed(42)
+shape_data <- bind_rows(
+  generate_shape_curves(N_CURVES_PER_LEVEL, N_POINTS, PERIOD, NOISE_SD, "sine"),
+  generate_shape_curves(N_CURVES_PER_LEVEL, N_POINTS, PERIOD, NOISE_SD, "square"),
+  generate_shape_curves(N_CURVES_PER_LEVEL, N_POINTS, PERIOD, NOISE_SD, "triangle")
+)
+
+cat(sprintf("Generated %d curves with different shapes\n", nrow(shape_data)))
+```
+
+```{r}
+#| label: fig-shape-examples
+#| fig-cap: "Seasonal waveform shapes (period = 12, normalized amplitude)"
+#| fig-height: 4
+
+shape_examples <- tibble(
+  shape = c("Sine", "Square", "Triangle"),
+  waveform = list(
+    generate_waveform(60, 12, "sine"),
+    generate_waveform(60, 12, "square"),
+    generate_waveform(60, 12, "triangle")
+  )
+) %>%
+  unnest(waveform) %>%
+  group_by(shape) %>%
+  mutate(t = row_number() - 1) %>%
+  ungroup() %>%
+  mutate(shape = factor(shape, levels = c("Sine", "Square", "Triangle")))
+
+ggplot(shape_examples, aes(x = t, y = waveform, color = shape)) +
+  geom_line(linewidth = 0.8) +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "Seasonal Waveform Shapes",
+    subtitle = "Square and triangle waves contain higher harmonics",
+    x = "Time", y = "Amplitude",
+    color = "Shape"
+  ) +
+  theme(legend.position = "bottom")
+```
+
+### Challenge 5: Amplitude Modulation
+
+Non-stationary seasonality with time-varying amplitude is common in real-world data (e.g., emerging or fading seasonal patterns). We test methods' robustness to amplitude modulation patterns.
+
+```{r}
+#| label: challenge-amplitude
+
+# Amplitude modulation generator
+generate_with_amplitude_modulation <- function(base_data, modulation_type) {
+  base_data %>%
+    mutate(
+      values = map(values, function(v) {
+        n <- length(v)
+        t_norm <- (seq_along(v) - 1) / (n - 1)  # Normalize to 0-1
+
+        # Define modulation envelope
+        envelope <- switch(modulation_type,
+          "constant" = rep(1, n),                                    # Baseline
+          "growth" = t_norm,                                         # 0 -> 1
+          "decay" = 1 - t_norm,                                      # 1 -> 0
+          "emergence" = ifelse(t_norm < 0.5, 0, 2 * (t_norm - 0.5))  # 0 first half, grow second
+        )
+
+        # Apply envelope - modulate around mean to preserve signal structure
+        mean_v <- mean(v)
+        (v - mean_v) * envelope + mean_v
+      }),
+      scenario = paste0("amplitude_", modulation_type)
+    )
+}
+
+# Generate amplitude modulation data
+amplitude_data <- bind_rows(
+  generate_with_amplitude_modulation(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), "constant"),
+  generate_with_amplitude_modulation(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), "growth"),
+  generate_with_amplitude_modulation(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), "decay"),
+  generate_with_amplitude_modulation(baseline_data %>% filter(round(strength_level, 1) %in% c(0.0, 0.3, 0.6)), "emergence")
+)
+
+cat(sprintf("Generated %d curves with amplitude modulation\n", nrow(amplitude_data)))
+```
+
+```{r}
+#| label: fig-amplitude-examples
+#| fig-cap: "Amplitude modulation patterns applied to seasonal signal (strength = 0.5)"
+#| fig-height: 6
+
+# Get a seasonal example curve
+example_amp <- baseline_data %>%
+  filter(round(strength_level, 1) == 0.6) %>%
+  slice(1)
+
+n <- N_POINTS
+t_norm <- (0:(n-1)) / (n-1)
+
+# Apply different modulations
+amplitude_examples <- bind_rows(
+  example_amp %>% mutate(modulation = "Constant", values = values),
+  example_amp %>% mutate(modulation = "Growth",
+    values = map(values, function(v) {
+      mean_v <- mean(v); (v - mean_v) * t_norm + mean_v
+    })),
+  example_amp %>% mutate(modulation = "Decay",
+    values = map(values, function(v) {
+      mean_v <- mean(v); (v - mean_v) * (1 - t_norm) + mean_v
+    })),
+  example_amp %>% mutate(modulation = "Emergence",
+    values = map(values, function(v) {
+      mean_v <- mean(v)
+      envelope <- ifelse(t_norm < 0.5, 0, 2 * (t_norm - 0.5))
+      (v - mean_v) * envelope + mean_v
+    }))
+) %>%
+  unnest(values) %>%
+  group_by(modulation) %>%
+  mutate(t = row_number() - 1) %>%
+  ungroup() %>%
+  mutate(modulation = factor(modulation, levels = c("Constant", "Growth", "Decay", "Emergence")))
+
+ggplot(amplitude_examples, aes(x = t, y = values, color = modulation)) +
+  geom_line(linewidth = 0.6) +
+  facet_wrap(~modulation, ncol = 2, scales = "free_y") +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "Amplitude Modulation Patterns",
+    subtitle = "Non-stationary seasonality scenarios",
+    x = "Time", y = "Value"
+  ) +
+  theme(legend.position = "none")
 ```
 
 ### Challenge Scenario Performance
@@ -1372,16 +1647,133 @@ ggplot(outlier_results, aes(x = label, y = AUC, fill = Method)) +
   guides(fill = guide_legend(nrow = 2))
 ```
 
+### Non-linear Trend Robustness
+
+```{r}
+#| label: fig-quadratic-performance
+#| fig-cap: "Method performance with increasing quadratic trend curvature"
+#| fig-height: 6
+
+quadratic_scores <- get_challenge_scores(quadratic_data)
+
+quadratic_results <- quadratic_scores %>%
+  mutate(curvature = as.numeric(gsub("quadratic_", "", scenario))) %>%
+  group_by(curvature) %>%
+  group_modify(~calc_scenario_metrics(.x)) %>%
+  ungroup()
+
+ggplot(quadratic_results, aes(x = factor(curvature), y = AUC, color = Method, group = Method)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2) +
+  scale_color_manual(values = METHOD_COLORS) +
+  labs(
+    title = "Quadratic Trend Robustness",
+    subtitle = "AUC vs quadratic curvature coefficient",
+    x = "Curvature", y = "AUC"
+  ) +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(nrow = 2))
+```
+
+```{r}
+#| label: fig-sinusoid-performance
+#| fig-cap: "Method performance with increasing sinusoidal trend amplitude"
+#| fig-height: 6
+
+sinusoid_scores <- get_challenge_scores(sinusoid_data)
+
+sinusoid_results <- sinusoid_scores %>%
+  mutate(amplitude = as.numeric(gsub("sinusoid_", "", scenario))) %>%
+  group_by(amplitude) %>%
+  group_modify(~calc_scenario_metrics(.x)) %>%
+  ungroup()
+
+ggplot(sinusoid_results, aes(x = factor(amplitude), y = AUC, color = Method, group = Method)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2) +
+  scale_color_manual(values = METHOD_COLORS) +
+  labs(
+    title = "Sinusoidal Trend Robustness",
+    subtitle = "AUC vs sinusoidal trend amplitude",
+    x = "Amplitude", y = "AUC"
+  ) +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(nrow = 2))
+```
+
+### Shape Robustness
+
+```{r}
+#| label: fig-shape-performance
+#| fig-cap: "Method performance across waveform shapes"
+#| fig-height: 6
+
+shape_scores <- get_challenge_scores(shape_data)
+
+shape_results <- shape_scores %>%
+  mutate(shape = gsub("shape_", "", scenario)) %>%
+  group_by(shape) %>%
+  group_modify(~calc_scenario_metrics(.x)) %>%
+  ungroup() %>%
+  mutate(shape = factor(shape, levels = c("sine", "square", "triangle"),
+                        labels = c("Sine", "Square", "Triangle")))
+
+ggplot(shape_results, aes(x = shape, y = AUC, fill = Method)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  scale_fill_manual(values = METHOD_COLORS) +
+  labs(
+    title = "Shape Robustness: AUC by Waveform Shape",
+    subtitle = "Sine wave is baseline; square/triangle have higher harmonics",
+    x = "Waveform Shape", y = "AUC"
+  ) +
+  theme(legend.position = "bottom") +
+  guides(fill = guide_legend(nrow = 2))
+```
+
+### Amplitude Modulation Robustness
+
+```{r}
+#| label: fig-amplitude-performance
+#| fig-cap: "Method performance under amplitude modulation"
+#| fig-height: 6
+
+amplitude_scores <- get_challenge_scores(amplitude_data)
+
+amplitude_results <- amplitude_scores %>%
+  mutate(modulation = gsub("amplitude_", "", scenario)) %>%
+  group_by(modulation) %>%
+  group_modify(~calc_scenario_metrics(.x)) %>%
+  ungroup() %>%
+  mutate(modulation = factor(modulation,
+    levels = c("constant", "growth", "decay", "emergence"),
+    labels = c("Constant", "Growth", "Decay", "Emergence")))
+
+ggplot(amplitude_results, aes(x = modulation, y = AUC, fill = Method)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  scale_fill_manual(values = METHOD_COLORS) +
+  labs(
+    title = "Amplitude Modulation Robustness",
+    subtitle = "Tests non-stationary seasonality detection",
+    x = "Modulation Type", y = "AUC"
+  ) +
+  theme(legend.position = "bottom") +
+  guides(fill = guide_legend(nrow = 2))
+```
+
 ### Challenge Summary Table
 
 ```{r}
 #| label: challenge-summary
 
-# Aggregate results across all challenges
+# Aggregate results across ALL challenges including new ones
 all_challenge_results <- bind_rows(
-  trend_results %>% mutate(Challenge = "Trends", Parameter = as.character(slope)) %>% select(-slope),
-  ar_results %>% mutate(Challenge = "Red Noise", Parameter = as.character(phi)) %>% select(-phi),
-  outlier_results %>% mutate(Challenge = "Outliers", Parameter = label) %>% select(-label)
+  trend_results %>% mutate(Challenge = "Linear Trends", Parameter = as.character(slope)) %>% select(-slope),
+  quadratic_results %>% mutate(Challenge = "Quadratic Trends", Parameter = as.character(curvature)) %>% select(-curvature),
+  sinusoid_results %>% mutate(Challenge = "Sinusoidal Trends", Parameter = as.character(amplitude)) %>% select(-amplitude),
+  ar_results %>% mutate(Challenge = "Red Noise (AR1)", Parameter = as.character(phi)) %>% select(-phi),
+  outlier_results %>% mutate(Challenge = "Outliers", Parameter = label) %>% select(-label),
+  shape_results %>% mutate(Challenge = "Shape Robustness", Parameter = as.character(shape)) %>% select(-shape),
+  amplitude_results %>% mutate(Challenge = "Amplitude Modulation", Parameter = as.character(modulation)) %>% select(-modulation)
 )
 
 # Summary by challenge type
@@ -1390,12 +1782,280 @@ challenge_summary <- all_challenge_results %>%
   summarise(
     `Mean AUC` = mean(AUC, na.rm = TRUE),
     `Min AUC` = min(AUC, na.rm = TRUE),
+    `Max AUC` = max(AUC, na.rm = TRUE),
     .groups = "drop"
   ) %>%
   arrange(Challenge, desc(`Mean AUC`))
 
 kable(challenge_summary, digits = 3,
-      caption = "Challenge Scenario Summary: Mean and Minimum AUC by Method")
+      caption = "Extended Challenge Scenario Summary: AUC Statistics by Method")
+```
+
+```{r}
+#| label: fig-challenge-heatmap
+#| fig-cap: "Challenge robustness heatmap: Mean AUC by method and challenge type"
+#| fig-height: 7
+
+challenge_heatmap_data <- all_challenge_results %>%
+  group_by(Challenge, Method) %>%
+  summarise(MeanAUC = mean(AUC, na.rm = TRUE), .groups = "drop")
+
+ggplot(challenge_heatmap_data, aes(x = Challenge, y = Method, fill = MeanAUC)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(aes(label = sprintf("%.2f", MeanAUC)), size = 2.5) +
+  scale_fill_gradient2(low = "#d73027", mid = "#ffffbf", high = "#1a9850",
+                       midpoint = 0.85, limits = c(0.5, 1)) +
+  labs(
+    title = "Challenge Robustness Heatmap",
+    subtitle = "Mean AUC across challenge parameters",
+    x = "Challenge Scenario", y = "Method", fill = "Mean AUC"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## M4 Real-World Validation
+
+To validate synthetic benchmark results, we apply all detection methods to real-world time series from the M4 Competition Monthly dataset. Monthly series are expected to exhibit annual seasonality (period = 12).
+
+```{r}
+#| label: m4-load
+#| cache: true
+
+# Load M4 Monthly data via Python datasetsforecast
+# Check if reticulate is available
+reticulate_available <- requireNamespace("reticulate", quietly = TRUE)
+
+m4_available <- FALSE
+if (reticulate_available) {
+  library(reticulate)
+  # Check if datasetsforecast is available
+  m4_available <- tryCatch({
+    datasetsforecast <- import("datasetsforecast.m4")
+    TRUE
+  }, error = function(e) FALSE)
+}
+
+if (m4_available) {
+  # Load M4 Monthly data
+  m4_raw <- datasetsforecast$M4$load(
+    directory = tempdir(),
+    group = "Monthly"
+  )
+
+  m4_df <- as_tibble(m4_raw[[1]])
+
+  # Aggregate to array format
+  m4_prepared <- m4_df %>%
+    group_by(unique_id) %>%
+    summarise(
+      values = list(y),
+      n_obs = n(),
+      .groups = "drop"
+    ) %>%
+    filter(n_obs >= 36)  # At least 3 years
+
+  # Sample for tractable benchmark
+  set.seed(42)
+  m4_sample <- m4_prepared %>%
+    slice_sample(n = min(1000, nrow(.)))
+
+  cat(sprintf("Loaded %d M4 Monthly series (sampled %d)\n", nrow(m4_prepared), nrow(m4_sample)))
+} else {
+  if (!reticulate_available) {
+    cat("Note: M4 validation skipped - reticulate R package not available\n")
+    cat("Install with: install.packages('reticulate')\n")
+  } else {
+    cat("Note: M4 validation skipped - datasetsforecast Python package not available\n")
+    cat("Install with: pip install datasetsforecast\n")
+  }
+  m4_sample <- NULL
+}
+```
+
+```{r}
+#| label: m4-scores
+#| eval: !expr 'exists("m4_sample") && !is.null(m4_sample) && nrow(m4_sample) > 0'
+
+# Load M4 sample to DuckDB
+dbExecute(con, "DROP TABLE IF EXISTS m4_curves")
+dbExecute(con, "
+  CREATE TABLE m4_curves (
+    series_id VARCHAR,
+    n_obs INTEGER,
+    values DOUBLE[]
+  )
+")
+
+for (i in 1:nrow(m4_sample)) {
+  row <- m4_sample[i, ]
+  values_str <- paste0("[", paste(row$values[[1]], collapse = ","), "]")
+  dbExecute(con, sprintf("
+    INSERT INTO m4_curves VALUES ('%s', %d, %s::DOUBLE[])
+  ", row$unique_id, row$n_obs, values_str))
+}
+
+# Run all detection methods
+m4_scores <- tryCatch({
+  dbGetQuery(con, "
+  SELECT
+      series_id,
+      n_obs,
+      -- Strength methods (with expected period = 12)
+      ts_seasonal_strength(values, 12, 'variance') as variance_score,
+      ts_seasonal_strength(values, 12, 'spectral') as spectral_score,
+      ts_seasonal_strength(values, 12, 'wavelet') as wavelet_score,
+      -- Period detection methods
+      (ts_aic_period(values)).r_squared as aic_score,
+      (ts_aic_period(values)).period as aic_period,
+      LEAST(1.0, (ts_estimate_period_fft(values)).confidence / 100.0) as fft_score,
+      (ts_estimate_period_fft(values)).period as fft_period,
+      (ts_estimate_period_acf(values)).confidence as acf_score,
+      (ts_estimate_period_acf(values)).period as acf_period,
+      LEAST(1.0, (ts_sazed_period(values)).snr / 10.0) as sazed_score,
+      (ts_autoperiod(values)).acf_validation as autoperiod_score,
+      (ts_autoperiod(values)).period as autoperiod_period,
+      (ts_cfd_autoperiod(values)).acf_validation as cfd_score,
+      (ts_cfd_autoperiod(values)).period as cfd_period,
+      1.0 - (ts_lomb_scargle(values)).false_alarm_prob as lomb_score,
+      (ts_matrix_profile_period(values)).confidence as mp_score,
+      (ts_stl_period(values)).seasonal_strength as stl_score,
+      (ts_ssa_period(values)).variance_explained as ssa_score
+  FROM m4_curves
+  ")
+}, error = function(e) {
+  cat("Error extracting M4 scores:", e$message, "\n")
+  NULL
+})
+
+if (!is.null(m4_scores)) {
+  m4_scores <- as_tibble(m4_scores) %>%
+    mutate(across(ends_with("_score"), ~ ifelse(is.nan(.) | is.infinite(.), NA_real_, .)))
+  cat(sprintf("Computed scores for %d M4 series\n", nrow(m4_scores)))
+}
+```
+
+```{r}
+#| label: fig-m4-period-detection
+#| fig-cap: "Distribution of detected periods on M4 Monthly data (expected = 12)"
+#| fig-height: 6
+#| eval: !expr 'exists("m4_scores") && !is.null(m4_scores)'
+
+period_cols <- c("aic_period", "fft_period", "acf_period", "autoperiod_period", "cfd_period")
+
+m4_periods <- m4_scores %>%
+  select(series_id, all_of(period_cols)) %>%
+  pivot_longer(cols = all_of(period_cols), names_to = "method", values_to = "detected_period") %>%
+  mutate(
+    method = gsub("_period", "", method),
+    method = toupper(method),
+    period_correct = abs(detected_period - 12) <= 1  # Within +/- 1 of 12
+  )
+
+# Calculate accuracy for each method
+period_accuracy <- m4_periods %>%
+  group_by(method) %>%
+  summarise(
+    accuracy = mean(period_correct, na.rm = TRUE),
+    n_valid = sum(!is.na(detected_period))
+  )
+
+ggplot(m4_periods, aes(x = detected_period)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", alpha = 0.7) +
+  geom_vline(xintercept = 12, linetype = "dashed", color = "red", linewidth = 1) +
+  facet_wrap(~method, ncol = 2, scales = "free_y") +
+  scale_x_continuous(limits = c(0, 30), breaks = seq(0, 30, 6)) +
+  labs(
+    title = "Detected Periods on M4 Monthly Data",
+    subtitle = "Red line = expected period (12)",
+    x = "Detected Period", y = "Count"
+  )
+```
+
+```{r}
+#| label: fig-m4-detection-rate
+#| fig-cap: "Seasonality detection rate on M4 Monthly data using optimal thresholds"
+#| fig-height: 6
+#| eval: !expr 'exists("m4_scores") && !is.null(m4_scores) && exists("auc_summary")'
+
+# Use optimal thresholds from baseline analysis
+method_thresholds <- auc_summary %>%
+  select(Method, `Optimal Threshold`) %>%
+  mutate(method_lower = tolower(gsub("MatrixProfile", "mp", Method)))
+
+# Calculate detection rate for each method
+m4_detection_rates <- map_dfr(1:nrow(method_thresholds), function(i) {
+  method_name <- method_thresholds$Method[i]
+  method_lower <- method_thresholds$method_lower[i]
+  threshold <- method_thresholds$`Optimal Threshold`[i]
+  score_col <- paste0(method_lower, "_score")
+
+  if (score_col %in% names(m4_scores)) {
+    scores <- m4_scores[[score_col]]
+    detection_rate <- mean(scores >= threshold, na.rm = TRUE)
+    tibble(Method = method_name, DetectionRate = detection_rate, n_valid = sum(!is.na(scores)))
+  } else {
+    NULL
+  }
+}) %>%
+  filter(!is.null(Method))
+
+ggplot(m4_detection_rates, aes(x = reorder(Method, DetectionRate), y = DetectionRate, fill = Method)) +
+  geom_col() +
+  geom_text(aes(label = sprintf("%.1f%%", DetectionRate * 100)), hjust = -0.1, size = 3) +
+  scale_fill_manual(values = METHOD_COLORS) +
+  scale_y_continuous(limits = c(0, 1.1), labels = scales::percent) +
+  coord_flip() +
+  labs(
+    title = "M4 Monthly: Seasonality Detection Rate",
+    subtitle = "Using optimal thresholds from baseline simulation",
+    x = "", y = "Detection Rate"
+  ) +
+  theme(legend.position = "none")
+```
+
+```{r}
+#| label: fig-m4-score-distributions
+#| fig-cap: "Distribution of detection scores on M4 Monthly data"
+#| fig-height: 7
+#| eval: !expr 'exists("m4_scores") && !is.null(m4_scores)'
+
+m4_scores_long <- m4_scores %>%
+  select(series_id, ends_with("_score")) %>%
+  pivot_longer(cols = ends_with("_score"), names_to = "method", values_to = "score") %>%
+  mutate(
+    method = gsub("_score", "", method),
+    method = case_when(
+      method == "aic" ~ "AIC", method == "fft" ~ "FFT", method == "acf" ~ "ACF",
+      method == "variance" ~ "Variance", method == "spectral" ~ "Spectral",
+      method == "wavelet" ~ "Wavelet", method == "sazed" ~ "SAZED",
+      method == "autoperiod" ~ "Autoperiod", method == "cfd" ~ "CFD",
+      method == "lomb" ~ "Lomb", method == "mp" ~ "MatrixProfile",
+      method == "stl" ~ "STL", method == "ssa" ~ "SSA"
+    ),
+    method = factor(method, levels = names(METHOD_COLORS))
+  )
+
+ggplot(m4_scores_long, aes(x = method, y = score, fill = method)) +
+  geom_boxplot(alpha = 0.7, outlier.size = 0.5) +
+  scale_fill_manual(values = METHOD_COLORS) +
+  labs(
+    title = "M4 Monthly: Score Distributions by Method",
+    x = "", y = "Score"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none")
+```
+
+```{r}
+#| label: m4-period-accuracy
+#| eval: !expr 'exists("m4_periods")'
+
+# Period detection accuracy table
+if (exists("period_accuracy")) {
+  kable(period_accuracy %>% arrange(desc(accuracy)),
+        digits = 3,
+        col.names = c("Method", "Period Accuracy (±1)", "Valid Series"),
+        caption = "M4 Monthly: Period Detection Accuracy (detecting period 11-13)")
+}
 ```
 
 ## Summary and Conclusions
@@ -1444,11 +2104,14 @@ if (length(non_sig_from_top) > 0) {
 
 | Use Case | Recommended Method | Rationale |
 |----------|-------------------|-----------|
-| General detection | Wavelet or Variance | Highest F1 scores |
-| Quick screening | FFT | Fast with good accuracy |
-| Noisy data | ACF or Autoperiod | Robust to noise |
-| Irregular sampling | Lomb-Scargle | Handles gaps |
-| Non-stationary | SSA | Adaptive decomposition |
+| General detection | Wavelet or Variance | Highest F1 scores across challenges |
+| Quick screening | FFT | Fast with good accuracy on clean data |
+| Noisy data | ACF or Autoperiod | Robust to AR(1) autocorrelated noise |
+| Data with trends | CFD-Autoperiod | Uses differencing to remove trends |
+| Irregular sampling | Lomb-Scargle | Handles gaps and uneven spacing |
+| Non-stationary amplitude | Wavelet or SSA | Time-frequency localization |
+| Non-sinusoidal patterns | Autoperiod or ACF | Less sensitive to harmonic content |
+| Emerging seasonality | Wavelet | Detects time-localized patterns |
 
 ## Cleanup
 
@@ -1458,6 +2121,7 @@ if (length(non_sig_from_top) > 0) {
 
 dbExecute(con, "DROP TABLE IF EXISTS benchmark_curves")
 dbExecute(con, "DROP TABLE IF EXISTS challenge_curves")
+dbExecute(con, "DROP TABLE IF EXISTS m4_curves")
 dbDisconnect(con, shutdown = TRUE)
 ```
 
