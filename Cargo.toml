@@ -41,3 +41,10 @@ lto = true
 codegen-units = 1
 opt-level = 3
 strip = true  # Strip debug symbols for smaller binaries
+
+# Patch argmin to use stable Rust compatible version
+# argmin 0.11.0 uses unstable `is_multiple_of` feature (Rust 1.87+)
+# This fork replaces it with modulo operations for Rust 1.86 compatibility
+[patch.crates-io]
+argmin = { git = "https://github.com/DataZooDE/argmin", branch = "fix/stable-rust-compat" }
+argmin-math = { git = "https://github.com/DataZooDE/argmin", branch = "fix/stable-rust-compat" }
