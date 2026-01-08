@@ -1,39 +1,24 @@
-# colors.R - Colorblind-friendly palette for seasonality detection benchmark
-# Using Okabe-Ito palette as base with extensions for 13 methods
+# colors.R - Color palette for seasonality detection benchmark
+# User-specified palette for consistent method identification across plots
 
-# Base Okabe-Ito colorblind-friendly palette
-OKABE_ITO <- c(
-  orange = "#E69F00",
-  sky_blue = "#56B4E9",
-  bluish_green = "#009E73",
-  yellow = "#F0E442",
-  blue = "#0072B2",
-  vermillion = "#D55E00",
-  reddish_purple = "#CC79A7",
-
-black = "#000000"
-)
-
-# Extended palette for 13 detection methods
-# Core 8 from Okabe-Ito + 5 from Paul Tol's palette
+# Primary method colors - ensure methods are identifiable across all charts
 METHOD_COLORS <- c(
-  "AIC" = "#0072B2",           # Blue
-
-"FFT" = "#D55E00",           # Vermillion
-  "ACF" = "#009E73",           # Bluish Green
-  "Variance" = "#E69F00",      # Orange
-  "Spectral" = "#CC79A7",      # Reddish Purple
-  "Wavelet" = "#56B4E9",       # Sky Blue
-  "SAZED" = "#F0E442",         # Yellow
-  "Autoperiod" = "#999999",    # Gray
-  "CFD" = "#882255",           # Wine (Paul Tol)
-  "Lomb" = "#44AA99",          # Teal (Paul Tol)
-  "MatrixProfile" = "#DDCC77", # Sand (Paul Tol)
-  "STL" = "#117733",           # Green (Paul Tol)
-  "SSA" = "#AA4499"            # Magenta (Paul Tol)
+  "AIC" = "#2166AC",
+  "FFT" = "#B2182B",
+  "ACF" = "#1B7837",
+  "Variance" = "#E66101",
+  "Spectral" = "#762A83",
+  "Wavelet" = "#D95F02",
+  "SAZED" = "#984EA3",
+  "Autoperiod" = "#FF7F00",
+  "CFD" = "#A65628",
+  "Lomb" = "#66C2A5",
+  "MatrixProfile" = "#FC8D62",
+  "STL" = "#8DA0CB",
+  "SSA" = "#E78AC3"
 )
 
-# Method labels for display
+# Method labels for display (lowercase -> display name)
 method_labels <- c(
   "aic" = "AIC",
   "fft" = "FFT",
@@ -50,35 +35,35 @@ method_labels <- c(
   "ssa" = "SSA"
 )
 
-# Method families for grouped analysis
+# Method families for grouped analysis (PR curve faceting)
 METHOD_FAMILIES <- list(
-  spectral = c("FFT", "Lomb", "SAZED", "Spectral"),
-  decomposition = c("AIC", "STL", "SSA"),
-  pattern = c("ACF", "MatrixProfile", "Autoperiod", "CFD", "Variance", "Wavelet")
+  Spectral = c("FFT", "Lomb", "SAZED", "Spectral"),
+  Decomposition = c("AIC", "STL", "SSA"),
+  Pattern = c("ACF", "MatrixProfile", "Autoperiod", "CFD", "Variance", "Wavelet")
 )
 
 # Create family lookup for each method
 METHOD_TO_FAMILY <- c(
-  "FFT" = "Spectral Methods",
-  "Lomb" = "Spectral Methods",
-  "SAZED" = "Spectral Methods",
-  "Spectral" = "Spectral Methods",
-  "AIC" = "Decomposition Methods",
-  "STL" = "Decomposition Methods",
-  "SSA" = "Decomposition Methods",
-  "ACF" = "Pattern/Autocorrelation",
-  "MatrixProfile" = "Pattern/Autocorrelation",
-  "Autoperiod" = "Pattern/Autocorrelation",
-  "CFD" = "Pattern/Autocorrelation",
-  "Variance" = "Pattern/Autocorrelation",
-  "Wavelet" = "Pattern/Autocorrelation"
+  "FFT" = "Spectral",
+  "Lomb" = "Spectral",
+  "SAZED" = "Spectral",
+  "Spectral" = "Spectral",
+  "AIC" = "Decomposition",
+  "STL" = "Decomposition",
+  "SSA" = "Decomposition",
+  "ACF" = "Pattern",
+  "MatrixProfile" = "Pattern",
+  "Autoperiod" = "Pattern",
+  "CFD" = "Pattern",
+  "Variance" = "Pattern",
+  "Wavelet" = "Pattern"
 )
 
 # Family colors for grouped plots
 FAMILY_COLORS <- c(
-  "Spectral Methods" = "#D55E00",
-  "Decomposition Methods" = "#0072B2",
-  "Pattern/Autocorrelation" = "#009E73"
+  "Spectral" = "#B2182B",
+  "Decomposition" = "#2166AC",
+  "Pattern" = "#1B7837"
 )
 
 # Gradient palettes for heatmaps
@@ -88,9 +73,23 @@ HEATMAP_GRADIENT <- c(
   high = "#1a9850"    # Green (good)
 )
 
+# Confusion matrix cell colors
 CONFUSION_MATRIX_COLORS <- c(
   "TN" = "#4575B4",   # Blue - True Negative
   "FP" = "#D73027",   # Red - False Positive
   "FN" = "#FC8D59",   # Orange - False Negative
   "TP" = "#1A9850"    # Green - True Positive
+)
+
+# Challenge scenario colors for faceted plots
+SCENARIO_COLORS <- c(
+  "baseline" = "#333333",
+  "trend_0.1" = "#FDAE61",
+  "trend_0.3" = "#F46D43",
+  "trend_0.5" = "#D73027",
+  "ar_0.0" = "#ABD9E9",
+  "ar_0.3" = "#74ADD1",
+  "ar_0.5" = "#4575B4",
+  "ar_0.7" = "#313695",
+  "ar_0.9" = "#1A1A5E"
 )
