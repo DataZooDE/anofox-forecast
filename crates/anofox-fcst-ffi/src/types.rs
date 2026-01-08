@@ -313,6 +313,81 @@ impl Default for ForecastOptions {
     }
 }
 
+/// Exogenous regressor data for a single regressor.
+///
+/// Each regressor is a column of values aligned with the time series observations.
+#[repr(C)]
+pub struct ExogenousRegressor {
+    /// Pointer to the regressor values (historical, aligned with y values)
+    pub values: *const c_double,
+    /// Number of historical values (must match y length)
+    pub n_values: size_t,
+    /// Pointer to future regressor values (for forecast horizon)
+    pub future_values: *const c_double,
+    /// Number of future values (must match horizon)
+    pub n_future: size_t,
+}
+
+/// Exogenous data containing multiple regressors.
+///
+/// Used to pass historical X and future X values across the FFI boundary.
+/// Layout: regressors[i] contains the i-th regressor's historical and future values.
+#[repr(C)]
+pub struct ExogenousData {
+    /// Array of regressors
+    pub regressors: *const ExogenousRegressor,
+    /// Number of regressors
+    pub n_regressors: size_t,
+}
+
+impl ExogenousData {
+    /// Check if exogenous data is empty (no regressors).
+    pub fn is_empty(&self) -> bool {
+        self.regressors.is_null() || self.n_regressors == 0
+    }
+}
+
+/// Forecast options with exogenous variables support.
+#[repr(C)]
+pub struct ForecastOptionsExog {
+    /// Model name (null-terminated string)
+    pub model: [c_char; 32],
+    /// Forecast horizon
+    pub horizon: c_int,
+    /// Confidence level (0-1)
+    pub confidence_level: c_double,
+    /// Seasonal period (0 = auto-detect)
+    pub seasonal_period: c_int,
+    /// Whether to auto-detect seasonality
+    pub auto_detect_seasonality: bool,
+    /// Include in-sample fitted values
+    pub include_fitted: bool,
+    /// Include residuals
+    pub include_residuals: bool,
+    /// Exogenous data (may be null if no exogenous variables)
+    pub exog: *const ExogenousData,
+}
+
+impl Default for ForecastOptionsExog {
+    fn default() -> Self {
+        let mut model = [0 as c_char; 32];
+        b"auto"
+            .iter()
+            .enumerate()
+            .for_each(|(i, &b)| model[i] = b as c_char);
+        Self {
+            model,
+            horizon: 12,
+            confidence_level: 0.95,
+            seasonal_period: 0,
+            auto_detect_seasonality: true,
+            include_fitted: false,
+            include_residuals: false,
+            exog: std::ptr::null(),
+        }
+    }
+}
+
 /// Changepoint detection result (PELT algorithm).
 #[repr(C)]
 pub struct ChangepointResult {

@@ -173,6 +173,169 @@ static void TsForecastFunction(DataChunk &args, ExpressionState &state, Vector &
     }
 }
 
+// Helper to extract nested list (LIST<LIST<DOUBLE>>) into vector of vectors
+static void ExtractNestedListValues(Vector &list_vec, idx_t count, idx_t row_idx,
+                                    vector<vector<double>> &out_regressors) {
+    out_regressors.clear();
+
+    UnifiedVectorFormat list_data;
+    list_vec.ToUnifiedFormat(count, list_data);
+
+    auto list_idx = list_data.sel->get_index(row_idx);
+    if (!list_data.validity.RowIsValid(list_idx)) {
+        return;
+    }
+
+    auto list_entries = UnifiedVectorFormat::GetData<list_entry_t>(list_data);
+    auto &outer_entry = list_entries[list_idx];
+
+    auto &inner_list_vec = ListVector::GetEntry(list_vec);
+    idx_t outer_size = outer_entry.length;
+    idx_t outer_offset = outer_entry.offset;
+
+    for (idx_t i = 0; i < outer_size; i++) {
+        idx_t inner_idx = outer_offset + i;
+
+        UnifiedVectorFormat inner_data;
+        inner_list_vec.ToUnifiedFormat(ListVector::GetListSize(list_vec), inner_data);
+        auto inner_entries = UnifiedVectorFormat::GetData<list_entry_t>(inner_data);
+
+        auto inner_unified_idx = inner_data.sel->get_index(inner_idx);
+        auto &inner_entry = inner_entries[inner_unified_idx];
+
+        auto &values_vec = ListVector::GetEntry(inner_list_vec);
+        UnifiedVectorFormat values_data;
+        values_vec.ToUnifiedFormat(ListVector::GetListSize(inner_list_vec), values_data);
+        auto values = UnifiedVectorFormat::GetData<double>(values_data);
+
+        vector<double> regressor;
+        for (idx_t j = 0; j < inner_entry.length; j++) {
+            idx_t val_idx = inner_entry.offset + j;
+            auto val_unified_idx = values_data.sel->get_index(val_idx);
+            if (values_data.validity.RowIsValid(val_unified_idx)) {
+                regressor.push_back(values[val_unified_idx]);
+            } else {
+                regressor.push_back(0.0);  // Fill NULL with 0 for regressors
+            }
+        }
+        out_regressors.push_back(std::move(regressor));
+    }
+}
+
+static void TsForecastExogFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+    auto &list_vec = args.data[0];       // y values
+    auto &xreg_vec = args.data[1];       // historical X regressors
+    auto &future_xreg_vec = args.data[2]; // future X regressors
+    auto &horizon_vec = args.data[3];
+    auto &model_vec = args.data[4];
+    idx_t count = args.size();
+
+    result.SetVectorType(VectorType::FLAT_VECTOR);
+
+    UnifiedVectorFormat list_format;
+    list_vec.ToUnifiedFormat(count, list_format);
+
+    UnifiedVectorFormat horizon_data;
+    horizon_vec.ToUnifiedFormat(count, horizon_data);
+
+    UnifiedVectorFormat model_data;
+    model_vec.ToUnifiedFormat(count, model_data);
+
+    for (idx_t row_idx = 0; row_idx < count; row_idx++) {
+        auto list_idx = list_format.sel->get_index(row_idx);
+        if (!list_format.validity.RowIsValid(list_idx)) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        // Extract y values
+        vector<double> values;
+        vector<uint64_t> validity;
+        ExtractListValues(list_vec, count, row_idx, values, validity);
+
+        // Extract historical X regressors
+        vector<vector<double>> xreg;
+        ExtractNestedListValues(xreg_vec, count, row_idx, xreg);
+
+        // Extract future X regressors
+        vector<vector<double>> future_xreg;
+        ExtractNestedListValues(future_xreg_vec, count, row_idx, future_xreg);
+
+        // Get horizon
+        auto horizon_idx = horizon_data.sel->get_index(row_idx);
+        int32_t horizon = 12;
+        if (horizon_data.validity.RowIsValid(horizon_idx)) {
+            horizon = UnifiedVectorFormat::GetData<int32_t>(horizon_data)[horizon_idx];
+        }
+
+        // Get model
+        auto model_idx = model_data.sel->get_index(row_idx);
+        string model_name = "AutoARIMA";
+        if (model_data.validity.RowIsValid(model_idx)) {
+            model_name = UnifiedVectorFormat::GetData<string_t>(model_data)[model_idx].GetString();
+        }
+
+        // Build exogenous data structure
+        vector<ExogenousRegressor> regressors;
+        for (size_t i = 0; i < xreg.size() && i < future_xreg.size(); i++) {
+            ExogenousRegressor reg;
+            reg.values = xreg[i].data();
+            reg.n_values = xreg[i].size();
+            reg.future_values = future_xreg[i].data();
+            reg.n_future = future_xreg[i].size();
+            regressors.push_back(reg);
+        }
+
+        ExogenousData exog_data;
+        exog_data.regressors = regressors.empty() ? nullptr : regressors.data();
+        exog_data.n_regressors = regressors.size();
+
+        // Build options
+        ForecastOptionsExog opts;
+        memset(&opts, 0, sizeof(opts));
+        size_t model_len = std::min(model_name.size(), (size_t)31);
+        memcpy(opts.model, model_name.c_str(), model_len);
+        opts.model[model_len] = '\0';
+        opts.horizon = horizon;
+        opts.confidence_level = 0.95;
+        opts.seasonal_period = 0;
+        opts.auto_detect_seasonality = true;
+        opts.include_fitted = true;
+        opts.include_residuals = true;
+        opts.exog = regressors.empty() ? nullptr : &exog_data;
+
+        ForecastResult fcst_result;
+        memset(&fcst_result, 0, sizeof(fcst_result));
+        AnofoxError error;
+
+        bool success = anofox_ts_forecast_exog(
+            values.data(),
+            validity.empty() ? nullptr : validity.data(),
+            values.size(),
+            &opts,
+            &fcst_result,
+            &error
+        );
+
+        if (!success) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        SetListFromArray(result, 0, row_idx, fcst_result.point_forecasts, fcst_result.n_forecasts);
+        SetListFromArray(result, 1, row_idx, fcst_result.lower_bounds, fcst_result.n_forecasts);
+        SetListFromArray(result, 2, row_idx, fcst_result.upper_bounds, fcst_result.n_forecasts);
+        SetListFromArray(result, 3, row_idx, fcst_result.fitted_values, fcst_result.n_fitted);
+        SetListFromArray(result, 4, row_idx, fcst_result.residuals, fcst_result.n_fitted);
+        SetStringField(result, 5, row_idx, fcst_result.model_name);
+        SetStructField<double>(result, 6, row_idx, fcst_result.aic);
+        SetStructField<double>(result, 7, row_idx, fcst_result.bic);
+        SetStructField<double>(result, 8, row_idx, fcst_result.mse);
+
+        anofox_free_forecast_result(&fcst_result);
+    }
+}
+
 static void TsForecastWithModelFunction(DataChunk &args, ExpressionState &state, Vector &result) {
     auto &list_vec = args.data[0];
     auto &horizon_vec = args.data[1];
@@ -280,6 +443,25 @@ void RegisterTsForecastFunction(ExtensionLoader &loader) {
     ));
 
     loader.RegisterFunction(ts_forecast_set);
+
+    // Internal scalar function for forecasting with exogenous variables
+    // _ts_forecast_exog(values, xreg, future_xreg, horizon, model)
+    // - values: LIST<DOUBLE> - target variable y
+    // - xreg: LIST<LIST<DOUBLE>> - historical X regressors [n_regressors][n_obs]
+    // - future_xreg: LIST<LIST<DOUBLE>> - future X regressors [n_regressors][horizon]
+    // - horizon: INTEGER - forecast horizon
+    // - model: VARCHAR - model name (AutoARIMA, ARIMAX, ThetaX, MFLESX, etc.)
+    ScalarFunction ts_forecast_exog_func(
+        "_ts_forecast_exog",
+        {LogicalType::LIST(LogicalType::DOUBLE),           // values
+         LogicalType::LIST(LogicalType::LIST(LogicalType::DOUBLE)),  // xreg
+         LogicalType::LIST(LogicalType::LIST(LogicalType::DOUBLE)),  // future_xreg
+         LogicalType::INTEGER,                             // horizon
+         LogicalType::VARCHAR},                            // model
+        GetForecastResultType(),
+        TsForecastExogFunction
+    );
+    loader.RegisterFunction(ts_forecast_exog_func);
 }
 
 // ts_forecast_by is implemented as a table macro in ts_macros.cpp

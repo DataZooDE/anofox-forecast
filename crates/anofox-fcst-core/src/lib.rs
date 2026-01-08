@@ -34,7 +34,10 @@ pub use features::{extract_features, list_features, validate_feature_params};
 pub use filter::{
     diff, drop_edge_zeros, drop_leading_zeros, drop_trailing_zeros, is_constant, is_short,
 };
-pub use forecast::{forecast, list_models, ForecastOptions, ForecastOutput, ModelType};
+pub use forecast::{
+    forecast, forecast_with_exog, list_models, ExogenousData, ForecastOptions, ForecastOptionsExog,
+    ForecastOutput, ModelType,
+};
 pub use gaps::{detect_frequency, fill_forward, fill_gaps};
 pub use imputation::{
     fill_nulls_backward, fill_nulls_const, fill_nulls_forward, fill_nulls_interpolate,

@@ -987,6 +987,85 @@ typedef struct ForecastResult {
 } ForecastResult;
 
 /**
+ * Exogenous regressor data for a single regressor.
+ *
+ * Each regressor is a column of values aligned with the time series observations.
+ */
+typedef struct ExogenousRegressor {
+    /**
+     * Pointer to the regressor values (historical, aligned with y values)
+     */
+    const double *values;
+    /**
+     * Number of historical values (must match y length)
+     */
+    size_t n_values;
+    /**
+     * Pointer to future regressor values (for forecast horizon)
+     */
+    const double *future_values;
+    /**
+     * Number of future values (must match horizon)
+     */
+    size_t n_future;
+} ExogenousRegressor;
+
+/**
+ * Exogenous data containing multiple regressors.
+ *
+ * Used to pass historical X and future X values across the FFI boundary.
+ * Layout: regressors[i] contains the i-th regressor's historical and future values.
+ */
+typedef struct ExogenousData {
+    /**
+     * Array of regressors
+     */
+    const struct ExogenousRegressor *regressors;
+    /**
+     * Number of regressors
+     */
+    size_t n_regressors;
+} ExogenousData;
+
+/**
+ * Forecast options with exogenous variables support.
+ */
+typedef struct ForecastOptionsExog {
+    /**
+     * Model name (null-terminated string)
+     */
+    char model[32];
+    /**
+     * Forecast horizon
+     */
+    int horizon;
+    /**
+     * Confidence level (0-1)
+     */
+    double confidence_level;
+    /**
+     * Seasonal period (0 = auto-detect)
+     */
+    int seasonal_period;
+    /**
+     * Whether to auto-detect seasonality
+     */
+    bool auto_detect_seasonality;
+    /**
+     * Include in-sample fitted values
+     */
+    bool include_fitted;
+    /**
+     * Include residuals
+     */
+    bool include_residuals;
+    /**
+     * Exogenous data (may be null if no exogenous variables)
+     */
+    const struct ExogenousData *exog;
+} ForecastOptionsExog;
+
+/**
  * Data quality result (per-series).
  */
 typedef struct DataQualityResult {
@@ -1765,6 +1844,42 @@ bool anofox_ts_forecast(const double *values,
                         const struct ForecastOptions *options,
                         struct ForecastResult *out_result,
                         struct AnofoxError *out_error);
+
+/**
+ * Generate time series forecasts with exogenous variables.
+ *
+ * This function extends `anofox_ts_forecast` to support external regressors (xreg).
+ * Exogenous variables can improve forecast accuracy when external factors (e.g.,
+ * promotions, holidays, weather) influence the target variable.
+ *
+ * # Arguments
+ * * `values` - Pointer to time series values (target variable y)
+ * * `validity` - Pointer to validity bitmask (NULL means all valid)
+ * * `length` - Number of observations
+ * * `options` - Forecast options including exogenous data
+ * * `out_result` - Output forecast result
+ * * `out_error` - Output error (optional)
+ *
+ * # Supported Models
+ * The following models support exogenous variables:
+ * - AutoARIMA, ARIMA (ARIMAX)
+ * - OptimizedTheta, DynamicTheta
+ * - MFLES
+ *
+ * Other models will ignore the exogenous data and produce a standard forecast.
+ *
+ * # Safety
+ * All pointer arguments must be valid. Arrays must have the specified lengths.
+ * For exogenous data:
+ * - Each regressor's `n_values` must equal `length`
+ * - Each regressor's `n_future` must equal `options.horizon`
+ */
+bool anofox_ts_forecast_exog(const double *values,
+                             const uint64_t *validity,
+                             size_t length,
+                             const struct ForecastOptionsExog *options,
+                             struct ForecastResult *out_result,
+                             struct AnofoxError *out_error);
 
 /**
  * Compute data quality metrics.

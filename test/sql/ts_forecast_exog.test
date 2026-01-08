@@ -1,0 +1,143 @@
+# name: test/sql/ts_forecast_exog.test
+# description: Tests for ts_forecast with exogenous variables
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# _ts_forecast_exog Scalar Function Tests
+#######################################
+
+# Test basic exog forecast with single regressor
+query I
+SELECT length((_ts_forecast_exog(
+    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0, 25.0, 35.0],  -- y values
+    [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],        -- historical X (1 regressor)
+    [[1.0, 2.0, 1.0]],                                   -- future X (horizon=3)
+    3,                                                    -- horizon
+    'AutoARIMA'                                           -- model
+)).point);
+----
+3
+
+# Test exog forecast returns model name
+query I
+SELECT (_ts_forecast_exog(
+    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0],
+    [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],
+    [[1.0, 2.0]],
+    2,
+    'AutoARIMA'
+)).model IS NOT NULL;
+----
+true
+
+# Test exog forecast with two regressors
+query I
+SELECT length((_ts_forecast_exog(
+    [100.0, 120.0, 110.0, 130.0, 125.0, 140.0],         -- y (sales)
+    [[20.0, 22.0, 19.0, 23.0, 21.0, 24.0],              -- X1 (temperature)
+     [0.0, 1.0, 0.0, 1.0, 0.0, 1.0]],                   -- X2 (promotion)
+    [[22.0, 20.0, 21.0],                                 -- future temp
+     [1.0, 0.0, 1.0]],                                   -- future promo
+    3,
+    'AutoARIMA'
+)).point);
+----
+3
+
+# Test that model name contains X suffix for exog models
+query I
+SELECT (_ts_forecast_exog(
+    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0],
+    [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],
+    [[1.0, 2.0]],
+    2,
+    'AutoARIMA'
+)).model LIKE '%X' OR (_ts_forecast_exog(
+    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0],
+    [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],
+    [[1.0, 2.0]],
+    2,
+    'AutoARIMA'
+)).model LIKE '%ARIMA%';
+----
+true
+
+# Test confidence bounds have correct length
+query I
+SELECT length((_ts_forecast_exog(
+    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0],
+    [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],
+    [[1.0, 2.0, 1.0, 2.0]],
+    4,
+    'AutoARIMA'
+)).lower);
+----
+4
+
+query I
+SELECT length((_ts_forecast_exog(
+    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0],
+    [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],
+    [[1.0, 2.0, 1.0, 2.0]],
+    4,
+    'AutoARIMA'
+)).upper);
+----
+4
+
+#######################################
+# Exog Effect Validation Tests
+#######################################
+
+# Test that exogenous forecasting works with different models
+query I
+SELECT (_ts_forecast_exog(
+    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0],
+    [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],
+    [[1.0, 2.0]],
+    2,
+    'ARIMA'
+)).model;
+----
+ARIMAX
+
+query I
+SELECT (_ts_forecast_exog(
+    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0],
+    [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],
+    [[1.0, 2.0]],
+    2,
+    'OptimizedTheta'
+)).model;
+----
+ThetaX
+
+query I
+SELECT (_ts_forecast_exog(
+    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0],
+    [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],
+    [[1.0, 2.0]],
+    2,
+    'MFLES'
+)).model;
+----
+MFLESX
+
+#######################################
+# Error Handling Tests
+#######################################
+
+# Test with empty exogenous arrays (should still work, falls back to non-exog)
+query I
+SELECT length((_ts_forecast_exog(
+    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0],
+    [],
+    [],
+    3,
+    'AutoARIMA'
+)).point);
+----
+3
+

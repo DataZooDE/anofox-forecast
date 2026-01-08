@@ -31,8 +31,10 @@ name = "anofox-fcst-core"
 version = "0.1.0"
 dependencies = [
  "anofox-forecast",
+ "anofox-regression",
  "approx",
  "chrono",
+ "faer",
  "fdars-core",
  "statrs",
  "thiserror 2.0.17",

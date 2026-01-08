@@ -268,6 +268,123 @@ impl Default for ForecastOptions {
     }
 }
 
+/// Exogenous data for forecasting with external regressors.
+///
+/// Contains both historical regressors (aligned with y values) and
+/// future regressors (for the forecast horizon).
+#[derive(Debug, Clone, Default)]
+pub struct ExogenousData {
+    /// Historical regressor values: `historical[regressor_idx][time_idx]`
+    /// Each inner Vec must have the same length as the target time series.
+    pub historical: Vec<Vec<f64>>,
+    /// Future regressor values: `future[regressor_idx][horizon_idx]`
+    /// Each inner Vec must have length equal to the forecast horizon.
+    pub future: Vec<Vec<f64>>,
+}
+
+impl ExogenousData {
+    /// Create new exogenous data.
+    pub fn new(historical: Vec<Vec<f64>>, future: Vec<Vec<f64>>) -> Self {
+        Self { historical, future }
+    }
+
+    /// Check if exogenous data is empty.
+    pub fn is_empty(&self) -> bool {
+        self.historical.is_empty()
+    }
+
+    /// Get the number of regressors.
+    pub fn n_regressors(&self) -> usize {
+        self.historical.len()
+    }
+
+    /// Validate that exogenous data dimensions are consistent.
+    pub fn validate(&self, n_obs: usize, horizon: usize) -> Result<()> {
+        if self.historical.len() != self.future.len() {
+            return Err(ForecastError::InvalidInput(format!(
+                "Historical has {} regressors but future has {}",
+                self.historical.len(),
+                self.future.len()
+            )));
+        }
+
+        for (i, hist) in self.historical.iter().enumerate() {
+            if hist.len() != n_obs {
+                return Err(ForecastError::InvalidInput(format!(
+                    "Regressor {} historical has {} values but expected {}",
+                    i,
+                    hist.len(),
+                    n_obs
+                )));
+            }
+        }
+
+        for (i, fut) in self.future.iter().enumerate() {
+            if fut.len() != horizon {
+                return Err(ForecastError::InvalidInput(format!(
+                    "Regressor {} future has {} values but horizon is {}",
+                    i,
+                    fut.len(),
+                    horizon
+                )));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Forecast options with exogenous variables support.
+#[derive(Debug, Clone)]
+pub struct ForecastOptionsExog {
+    /// Model to use
+    pub model: ModelType,
+    /// Forecast horizon
+    pub horizon: usize,
+    /// Confidence level (0-1)
+    pub confidence_level: f64,
+    /// Seasonal period (0 = auto-detect)
+    pub seasonal_period: usize,
+    /// Auto-detect seasonality
+    pub auto_detect_seasonality: bool,
+    /// Include fitted values
+    pub include_fitted: bool,
+    /// Include residuals
+    pub include_residuals: bool,
+    /// Exogenous data (optional)
+    pub exog: Option<ExogenousData>,
+}
+
+impl Default for ForecastOptionsExog {
+    fn default() -> Self {
+        Self {
+            model: ModelType::AutoETS,
+            horizon: 12,
+            confidence_level: 0.95,
+            seasonal_period: 0,
+            auto_detect_seasonality: true,
+            include_fitted: false,
+            include_residuals: false,
+            exog: None,
+        }
+    }
+}
+
+impl From<ForecastOptions> for ForecastOptionsExog {
+    fn from(opts: ForecastOptions) -> Self {
+        Self {
+            model: opts.model,
+            horizon: opts.horizon,
+            confidence_level: opts.confidence_level,
+            seasonal_period: opts.seasonal_period,
+            auto_detect_seasonality: opts.auto_detect_seasonality,
+            include_fitted: opts.include_fitted,
+            include_residuals: opts.include_residuals,
+            exog: None,
+        }
+    }
+}
+
 /// Generate forecasts for a time series.
 pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<ForecastOutput> {
     // Handle NULLs by interpolation
@@ -396,6 +513,222 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         bic: None,
         mse,
     })
+}
+
+/// Generate forecasts with exogenous variables.
+///
+/// This function extends the standard `forecast` function to support external
+/// regressors (xreg). Exogenous variables can improve forecast accuracy when
+/// external factors (e.g., promotions, holidays, weather) influence the target.
+///
+/// # Supported Models
+/// The following models support exogenous variables:
+/// - `AutoARIMA`, `ARIMA` (ARIMAX)
+/// - `OptimizedTheta`, `DynamicTheta`
+/// - `MFLES`
+///
+/// Other models will ignore the exogenous data and produce a standard forecast.
+///
+/// # Arguments
+/// * `values` - Target time series values (may contain NULLs)
+/// * `options` - Forecast options including exogenous data
+///
+/// # Example
+/// ```ignore
+/// let y = vec![Some(10.0), Some(20.0), Some(15.0), Some(25.0)];
+/// let exog = ExogenousData::new(
+///     vec![vec![1.0, 2.0, 1.0, 2.0]],  // historical X
+///     vec![vec![1.0, 2.0, 1.0]],        // future X (horizon=3)
+/// );
+/// let options = ForecastOptionsExog {
+///     model: ModelType::AutoARIMA,
+///     horizon: 3,
+///     exog: Some(exog),
+///     ..Default::default()
+/// };
+/// let result = forecast_with_exog(&y, &options)?;
+/// ```
+pub fn forecast_with_exog(
+    values: &[Option<f64>],
+    options: &ForecastOptionsExog,
+) -> Result<ForecastOutput> {
+    // Validate exogenous data if provided
+    if let Some(ref exog) = options.exog {
+        exog.validate(values.len(), options.horizon)?;
+    }
+
+    // Handle NULLs by interpolation
+    let clean_values: Vec<f64> = fill_nulls_interpolate(values);
+
+    if clean_values.is_empty() {
+        return Err(ForecastError::InsufficientData { needed: 1, got: 0 });
+    }
+
+    if clean_values.len() < 3 {
+        return Err(ForecastError::InsufficientData {
+            needed: 3,
+            got: clean_values.len(),
+        });
+    }
+
+    // Detect seasonality if needed
+    let period = if options.auto_detect_seasonality && options.seasonal_period == 0 {
+        detect_seasonality(&clean_values, None)
+            .ok()
+            .and_then(|p| p.first().cloned())
+            .unwrap_or(1) as usize
+    } else if options.seasonal_period > 0 {
+        options.seasonal_period
+    } else {
+        1
+    };
+
+    // Check if requested model supports exogenous variables
+    let supports_exog = matches!(
+        options.model,
+        ModelType::ARIMA
+            | ModelType::AutoARIMA
+            | ModelType::OptimizedTheta
+            | ModelType::DynamicTheta
+            | ModelType::MFLES
+            | ModelType::AutoMFLES
+    );
+
+    // Generate forecast based on model
+    // For models that support exog with exog data provided, use exogenous-aware forecasting
+    // Don't do auto-selection when using exog - use the requested model family
+    let result = if supports_exog && options.exog.is_some() {
+        let exog = options.exog.as_ref().unwrap();
+        match options.model {
+            ModelType::ARIMA | ModelType::AutoARIMA => {
+                forecast_arima_with_exog(&clean_values, options.horizon, exog)
+            }
+            ModelType::OptimizedTheta | ModelType::DynamicTheta | ModelType::AutoTheta => {
+                forecast_theta_with_exog(&clean_values, options.horizon, exog)
+            }
+            ModelType::MFLES | ModelType::AutoMFLES => {
+                forecast_mfles_with_exog(&clean_values, options.horizon, period, exog)
+            }
+            _ => {
+                // Shouldn't happen due to supports_exog check, but fallback to ARIMA with exog
+                forecast_arima_with_exog(&clean_values, options.horizon, exog)
+            }
+        }
+    } else {
+        // No exog data or model doesn't support exog - use standard forecasting with auto-selection
+        let model = if is_auto_model(options.model) {
+            select_best_model(&clean_values, period)
+        } else {
+            options.model
+        };
+        forecast_with_model(&clean_values, options.horizon, model, period)
+    }?;
+
+    // For fitted values calculation, determine actual model used
+    let model = if supports_exog && options.exog.is_some() {
+        options.model // Use requested model for exog case
+    } else if is_auto_model(options.model) {
+        select_best_model(&clean_values, period)
+    } else {
+        options.model
+    };
+
+    // Calculate confidence intervals
+    let (lower, upper) =
+        calculate_confidence_intervals(&result.point, &clean_values, options.confidence_level);
+
+    // Calculate fitted values and residuals if requested
+    let (fitted, residuals) = if options.include_fitted || options.include_residuals {
+        let fitted = calculate_fitted_values(&clean_values, model, period);
+        let residuals = if options.include_residuals {
+            Some(
+                clean_values
+                    .iter()
+                    .zip(fitted.iter())
+                    .map(|(a, f)| a - f)
+                    .collect(),
+            )
+        } else {
+            None
+        };
+        (Some(fitted), residuals)
+    } else {
+        (None, None)
+    };
+
+    // Calculate MSE
+    let mse = fitted.as_ref().map(|f| {
+        let sse: f64 = clean_values
+            .iter()
+            .zip(f.iter())
+            .map(|(a, f)| (a - f).powi(2))
+            .sum();
+        sse / clean_values.len() as f64
+    });
+
+    // Use the model name from the result (e.g., "ARIMAX" for exog) if available,
+    // otherwise use the model enum name
+    let model_name = if !result.model_name.is_empty() {
+        result.model_name
+    } else {
+        model.name().to_string()
+    };
+
+    Ok(ForecastOutput {
+        point: result.point,
+        lower,
+        upper,
+        fitted: if options.include_fitted { fitted } else { None },
+        residuals,
+        model_name,
+        aic: None,
+        bic: None,
+        mse,
+    })
+}
+
+/// Internal helper to forecast with a specific model (no exog).
+fn forecast_with_model(
+    values: &[f64],
+    horizon: usize,
+    model: ModelType,
+    period: usize,
+) -> Result<ForecastOutput> {
+    match model {
+        // Basic Models
+        ModelType::Naive => forecast_naive(values, horizon),
+        ModelType::SeasonalNaive => forecast_seasonal_naive(values, horizon, period),
+        ModelType::SMA => forecast_sma(values, horizon, period.max(3)),
+        ModelType::RandomWalkDrift => forecast_drift(values, horizon),
+        // Exponential Smoothing
+        ModelType::SES | ModelType::SESOptimized => forecast_ses(values, horizon, 0.3),
+        ModelType::Holt => forecast_holt(values, horizon, 0.3, 0.1),
+        ModelType::HoltWinters => forecast_holt_winters(values, horizon, period, 0.3, 0.1, 0.1),
+        ModelType::SeasonalES | ModelType::SeasonalESOptimized => {
+            forecast_seasonal_es(values, horizon, period)
+        }
+        ModelType::SeasonalWindowAverage => {
+            forecast_seasonal_window_average(values, horizon, period)
+        }
+        ModelType::ETS | ModelType::AutoETS => forecast_ets(values, horizon, period),
+        // Theta Methods
+        ModelType::Theta
+        | ModelType::OptimizedTheta
+        | ModelType::DynamicTheta
+        | ModelType::DynamicOptimizedTheta
+        | ModelType::AutoTheta => forecast_theta(values, horizon),
+        // ARIMA
+        ModelType::ARIMA | ModelType::AutoARIMA => forecast_arima(values, horizon),
+        // Multiple Seasonality
+        ModelType::MFLES | ModelType::AutoMFLES => forecast_mfles(values, horizon, period),
+        ModelType::MSTL | ModelType::AutoMSTL => forecast_mstl(values, horizon, period),
+        ModelType::TBATS | ModelType::AutoTBATS => forecast_tbats(values, horizon, period),
+        // Intermittent Demand
+        ModelType::CrostonClassic | ModelType::CrostonOptimized | ModelType::CrostonSBA => {
+            forecast_croston(values, horizon)
+        }
+        ModelType::TSB | ModelType::ADIDA | ModelType::IMAPA => forecast_croston(values, horizon),
+    }
 }
 
 // Model implementations
@@ -844,6 +1177,187 @@ fn forecast_croston(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
         fitted: None,
         residuals: None,
         model_name: "CrostonClassic".to_string(),
+        aic: None,
+        bic: None,
+        mse: None,
+    })
+}
+
+// ============================================================================
+// Exogenous-aware forecasting functions
+// ============================================================================
+
+use anofox_regression::prelude::*;
+
+/// Fit OLS regression: y = X * beta using anofox-regression
+/// Returns coefficients (intercept + betas) and residuals
+fn fit_ols_regression(y: &[f64], x: &[Vec<f64>]) -> (Vec<f64>, Vec<f64>) {
+    let n = y.len();
+    let k = x.len(); // number of regressors
+
+    if k == 0 || n == 0 {
+        return (vec![], y.to_vec());
+    }
+
+    // Build design matrix using faer: n_obs rows × k columns
+    let x_mat = faer::Mat::from_fn(n, k, |i, j| x[j][i]);
+    let y_col = faer::Col::from_fn(n, |i| y[i]);
+
+    // Fit OLS with intercept
+    let fitted = match OlsRegressor::builder()
+        .with_intercept(true)
+        .build()
+        .fit(&x_mat, &y_col)
+    {
+        Ok(f) => f,
+        Err(_) => {
+            // Fallback: return zeros and original y as residuals
+            return (vec![0.0; k + 1], y.to_vec());
+        }
+    };
+
+    // Get coefficients: [intercept, beta1, beta2, ...]
+    let coeffs_col = fitted.coefficients();
+    let coeffs: Vec<f64> = (0..coeffs_col.nrows()).map(|i| coeffs_col[i]).collect();
+
+    // Calculate residuals: y - y_hat
+    let predictions = fitted.predict(&x_mat);
+    let residuals: Vec<f64> = (0..n).map(|i| y[i] - predictions[i]).collect();
+
+    (coeffs, residuals)
+}
+
+/// Apply regression coefficients to future X values
+fn apply_regression(coeffs: &[f64], future_x: &[Vec<f64>], horizon: usize) -> Vec<f64> {
+    if coeffs.is_empty() || future_x.is_empty() {
+        return vec![0.0; horizon];
+    }
+
+    // coeffs format: [intercept, beta1, beta2, ...]
+    let intercept = coeffs[0];
+    let betas = &coeffs[1..];
+
+    (0..horizon)
+        .map(|h| {
+            let mut effect = intercept;
+            for (j, beta) in betas.iter().enumerate() {
+                if j < future_x.len() && h < future_x[j].len() {
+                    effect += beta * future_x[j][h];
+                }
+            }
+            effect
+        })
+        .collect()
+}
+
+/// ARIMA forecast with exogenous variables (ARIMAX).
+///
+/// Approach: Regress y on X, then forecast the residuals with ARIMA,
+/// and add back the exogenous effect for forecast horizon.
+fn forecast_arima_with_exog(
+    values: &[f64],
+    horizon: usize,
+    exog: &ExogenousData,
+) -> Result<ForecastOutput> {
+    // Fit regression: y = X*beta + residuals
+    let (coeffs, residuals) = fit_ols_regression(values, &exog.historical);
+
+    // Forecast residuals with ARIMA
+    let residual_forecast = forecast_arima(&residuals, horizon)?;
+
+    // Calculate exogenous effect for future
+    let exog_effect = apply_regression(&coeffs, &exog.future, horizon);
+
+    // Combine: forecast = residual_forecast + exog_effect
+    let point: Vec<f64> = residual_forecast
+        .point
+        .iter()
+        .zip(exog_effect.iter())
+        .map(|(r, e)| r + e)
+        .collect();
+
+    Ok(ForecastOutput {
+        point,
+        lower: vec![],
+        upper: vec![],
+        fitted: None,
+        residuals: None,
+        model_name: "ARIMAX".to_string(),
+        aic: None,
+        bic: None,
+        mse: None,
+    })
+}
+
+/// Theta forecast with exogenous variables.
+///
+/// Approach: Similar to ARIMAX - regress, forecast residuals, add back exog effect.
+fn forecast_theta_with_exog(
+    values: &[f64],
+    horizon: usize,
+    exog: &ExogenousData,
+) -> Result<ForecastOutput> {
+    // Fit regression
+    let (coeffs, residuals) = fit_ols_regression(values, &exog.historical);
+
+    // Forecast residuals with Theta
+    let residual_forecast = forecast_theta(&residuals, horizon)?;
+
+    // Calculate exogenous effect for future
+    let exog_effect = apply_regression(&coeffs, &exog.future, horizon);
+
+    // Combine
+    let point: Vec<f64> = residual_forecast
+        .point
+        .iter()
+        .zip(exog_effect.iter())
+        .map(|(r, e)| r + e)
+        .collect();
+
+    Ok(ForecastOutput {
+        point,
+        lower: vec![],
+        upper: vec![],
+        fitted: None,
+        residuals: None,
+        model_name: "ThetaX".to_string(),
+        aic: None,
+        bic: None,
+        mse: None,
+    })
+}
+
+/// MFLES forecast with exogenous variables.
+fn forecast_mfles_with_exog(
+    values: &[f64],
+    horizon: usize,
+    period: usize,
+    exog: &ExogenousData,
+) -> Result<ForecastOutput> {
+    // Fit regression
+    let (coeffs, residuals) = fit_ols_regression(values, &exog.historical);
+
+    // Forecast residuals with MFLES
+    let residual_forecast = forecast_mfles(&residuals, horizon, period)?;
+
+    // Calculate exogenous effect for future
+    let exog_effect = apply_regression(&coeffs, &exog.future, horizon);
+
+    // Combine
+    let point: Vec<f64> = residual_forecast
+        .point
+        .iter()
+        .zip(exog_effect.iter())
+        .map(|(r, e)| r + e)
+        .collect();
+
+    Ok(ForecastOutput {
+        point,
+        lower: vec![],
+        upper: vec![],
+        fitted: None,
+        residuals: None,
+        model_name: "MFLESX".to_string(),
         aic: None,
         bic: None,
         mse: None,
