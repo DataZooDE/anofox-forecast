@@ -866,56 +866,63 @@ mcnemar_results <- expand.grid(
       predictions[[paste0(method2, "_pred")]]
     )),
     chi_sq = test$chi_sq,
-    p_value = test$p_value,
-    significant = p_value < 0.05
+    p_value = test$p_value
   ) %>%
   ungroup() %>%
   select(-test) %>%
+  # Apply Benjamini-Hochberg (FDR) correction for multiple testing
+  # With 13 methods, we have C(13,2) = 78 pairwise comparisons
   mutate(
+    p_adjusted = p.adjust(p_value, method = "BH"),
+    significant = p_adjusted < 0.05,
     method1 = method_labels[method1],
     method2 = method_labels[method2]
   )
 
+cat(sprintf("Note: p-values adjusted for %d pairwise comparisons using Benjamini-Hochberg (FDR) correction.\n\n",
+            nrow(mcnemar_results)))
+
 # Show significant differences
 significant_pairs <- mcnemar_results %>%
   filter(significant) %>%
-  arrange(p_value)
+  arrange(p_adjusted)
 
 if (nrow(significant_pairs) > 0) {
-  kable(significant_pairs %>% select(-significant), digits = 4,
-        caption = "Significant McNemar Test Results (p < 0.05)")
+  kable(significant_pairs %>% select(method1, method2, chi_sq, p_value, p_adjusted),
+        digits = 4, col.names = c("Method 1", "Method 2", "Chi-sq", "p (raw)", "p (adjusted)"),
+        caption = "Significant McNemar Test Results (adjusted p < 0.05)")
 } else {
-  cat("No significant differences found between any method pairs.\n")
+  cat("No significant differences found between any method pairs after FDR correction.\n")
 }
 ```
 
-### McNemar P-Value Heatmap
+### McNemar P-Value Heatmap (FDR-Adjusted)
 
 ```{r}
 #| label: fig-mcnemar-heatmap
-#| fig-cap: "McNemar test p-values between method pairs (red = significant difference)"
+#| fig-cap: "McNemar test p-values (FDR-adjusted) between method pairs (red = significant difference)"
 #| fig-height: 8
 
-# Create symmetric matrix
+# Create symmetric matrix with adjusted p-values
 mcnemar_matrix <- mcnemar_results %>%
-  select(method1, method2, p_value) %>%
+  select(method1, method2, p_adjusted) %>%
   bind_rows(
     mcnemar_results %>%
       rename(method1 = method2, method2 = method1) %>%
-      select(method1, method2, p_value)
+      select(method1, method2, p_adjusted)
   )
 
-ggplot(mcnemar_matrix, aes(x = method1, y = method2, fill = p_value)) +
+ggplot(mcnemar_matrix, aes(x = method1, y = method2, fill = p_adjusted)) +
   geom_tile(color = "white", linewidth = 0.5) +
-  geom_text(aes(label = ifelse(p_value < 0.001, "<.001", sprintf("%.3f", p_value))),
+  geom_text(aes(label = ifelse(p_adjusted < 0.001, "<.001", sprintf("%.3f", p_adjusted))),
             size = 2.5) +
   scale_fill_gradient2(low = "#d73027", mid = "#ffffbf", high = "#1a9850",
                        midpoint = 0.5, limits = c(0, 1)) +
   labs(
     title = "McNemar Test P-Values Between Methods",
-    subtitle = "Red = significant difference (p < 0.05)",
+    subtitle = "FDR-adjusted (Benjamini-Hochberg); Red = significant difference (adj. p < 0.05)",
     x = "", y = "",
-    fill = "p-value"
+    fill = "Adj. p-value"
   ) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
