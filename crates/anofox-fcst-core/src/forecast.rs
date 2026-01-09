@@ -1217,8 +1217,14 @@ fn fit_ols_regression(y: &[f64], x: &[Vec<f64>]) -> (Vec<f64>, Vec<f64>) {
     };
 
     // Get coefficients: [intercept, beta1, beta2, ...]
+    // The intercept is accessed separately via fitted.intercept()
+    // The coefficients() method only returns the beta coefficients
+    let intercept = fitted.intercept().unwrap_or(0.0);
     let coeffs_col = fitted.coefficients();
-    let coeffs: Vec<f64> = (0..coeffs_col.nrows()).map(|i| coeffs_col[i]).collect();
+    let mut coeffs = vec![intercept];
+    for i in 0..coeffs_col.nrows() {
+        coeffs.push(coeffs_col[i]);
+    }
 
     // Calculate residuals: y - y_hat
     let predictions = fitted.predict(&x_mat);
