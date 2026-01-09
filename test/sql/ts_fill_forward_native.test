@@ -1,0 +1,149 @@
+# name: test/sql/ts_fill_forward_native.test
+# description: Test ts_fill_forward_native table-in-out function with type preservation
+# group: [anofox_forecast]
+
+require anofox_forecast
+
+# Test DATE type preservation
+statement ok
+CREATE TABLE test_date AS
+SELECT 'A' as group_col, d::DATE as date_col, v as value
+FROM (VALUES
+    ('2024-01-01', 10.0),
+    ('2024-01-02', 20.0)
+) AS t(d, v);
+
+query III
+SELECT * FROM ts_fill_forward_native(
+    (SELECT group_col, date_col, value FROM test_date ORDER BY group_col, date_col),
+    '2024-01-05'::DATE,
+    '1d'
+);
+----
+A	2024-01-01	10.0
+A	2024-01-02	20.0
+A	2024-01-03	NULL
+A	2024-01-04	NULL
+A	2024-01-05	NULL
+
+# Verify DATE type is preserved
+query I
+SELECT typeof(date_col) FROM ts_fill_forward_native(
+    (SELECT group_col, date_col, value FROM test_date ORDER BY group_col, date_col),
+    '2024-01-05'::DATE,
+    '1d'
+) LIMIT 1;
+----
+DATE
+
+# Test TIMESTAMP type preservation with hourly frequency
+statement ok
+DROP TABLE IF EXISTS test_timestamp;
+
+statement ok
+CREATE TABLE test_timestamp AS
+SELECT 'B' as group_col, ts as date_col, val as value
+FROM (VALUES
+    ('2024-01-01 00:00:00'::TIMESTAMP, 10.0),
+    ('2024-01-01 01:00:00'::TIMESTAMP, 20.0)
+) AS t(ts, val);
+
+query III
+SELECT * FROM ts_fill_forward_native(
+    (SELECT group_col, date_col, value FROM test_timestamp ORDER BY group_col, date_col),
+    '2024-01-01 05:00:00'::TIMESTAMP,
+    '1h'
+);
+----
+B	2024-01-01 00:00:00	10.0
+B	2024-01-01 01:00:00	20.0
+B	2024-01-01 02:00:00	NULL
+B	2024-01-01 03:00:00	NULL
+B	2024-01-01 04:00:00	NULL
+B	2024-01-01 05:00:00	NULL
+
+# Verify TIMESTAMP type is preserved
+query I
+SELECT typeof(date_col) FROM ts_fill_forward_native(
+    (SELECT group_col, date_col, value FROM test_timestamp ORDER BY group_col, date_col),
+    '2024-01-01 05:00:00'::TIMESTAMP,
+    '1h'
+) LIMIT 1;
+----
+TIMESTAMP
+
+# Test BIGINT with raw integer frequency
+statement ok
+DROP TABLE IF EXISTS test_bigint;
+
+statement ok
+CREATE TABLE test_bigint AS
+SELECT 'C'::VARCHAR as group_col, ts as date_col, val as value
+FROM (VALUES
+    (1::BIGINT, 10.0),
+    (2::BIGINT, 20.0)
+) AS t(ts, val);
+
+query III
+SELECT * FROM ts_fill_forward_native(
+    (SELECT group_col, date_col, value FROM test_bigint ORDER BY group_col, date_col),
+    5::BIGINT,
+    '1'
+);
+----
+C	1	10.0
+C	2	20.0
+C	3	NULL
+C	4	NULL
+C	5	NULL
+
+# Verify BIGINT type is preserved
+query I
+SELECT typeof(date_col) FROM ts_fill_forward_native(
+    (SELECT group_col, date_col, value FROM test_bigint ORDER BY group_col, date_col),
+    5::BIGINT,
+    '1'
+) LIMIT 1;
+----
+BIGINT
+
+# Test multiple groups
+statement ok
+DROP TABLE IF EXISTS test_multi;
+
+statement ok
+CREATE TABLE test_multi AS
+SELECT group_col, date_col::DATE as date_col, value FROM (VALUES
+    ('G1', '2024-01-01', 10.0),
+    ('G1', '2024-01-02', 20.0),
+    ('G2', '2024-01-01', 100.0)
+) AS t(group_col, date_col, value);
+
+query III
+SELECT * FROM ts_fill_forward_native(
+    (SELECT group_col, date_col, value FROM test_multi ORDER BY group_col, date_col),
+    '2024-01-04'::DATE,
+    '1d'
+) ORDER BY group_col, date_col;
+----
+G1	2024-01-01	10.0
+G1	2024-01-02	20.0
+G1	2024-01-03	NULL
+G1	2024-01-04	NULL
+G2	2024-01-01	100.0
+G2	2024-01-02	NULL
+G2	2024-01-03	NULL
+G2	2024-01-04	NULL
+
+# Test alias with anofox_fcst prefix
+query III
+SELECT * FROM anofox_fcst_ts_fill_forward_native(
+    (SELECT group_col, date_col, value FROM test_date ORDER BY group_col, date_col),
+    '2024-01-04'::DATE,
+    '1d'
+);
+----
+A	2024-01-01	10.0
+A	2024-01-02	20.0
+A	2024-01-03	NULL
+A	2024-01-04	NULL
