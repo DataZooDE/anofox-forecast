@@ -511,42 +511,60 @@ ORDER BY id, forecast_step
     // - xreg_cols: list of X column names in source table
     // - future_source: table containing future X values
     // - future_xreg_cols: list of X column names in future_source table
+    // Note: Requires JSON extension for dynamic column access (auto-loaded if available)
     {"ts_forecast_exog", {"source", "date_col", "target_col", "xreg_cols", "future_source", "future_date_col", "future_xreg_cols", nullptr}, {{"method", "'AutoARIMA'"}, {"horizon", "12"}, {"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
-WITH historical_data AS (
-    SELECT
-        target_col AS _y,
-        LIST_TRANSFORM(xreg_cols, col -> query_table(source::VARCHAR)[col]) AS _x_cols
-    FROM query_table(source::VARCHAR)
-    ORDER BY date_col
+WITH src AS (
+    SELECT * FROM query_table(source::VARCHAR)
 ),
-agg_historical AS (
-    SELECT
-        LIST(_y ORDER BY ROWID) AS _y_list,
-        LIST_TRANSFORM(RANGE(LEN(xreg_cols)), i ->
-            LIST(_x_cols[i + 1] ORDER BY ROWID)
-        ) AS _xreg_list
-    FROM historical_data
+future_src AS (
+    SELECT * FROM query_table(future_source::VARCHAR)
 ),
-future_data AS (
-    SELECT
-        LIST_TRANSFORM(future_xreg_cols, col -> query_table(future_source::VARCHAR)[col]) AS _fx_cols
-    FROM query_table(future_source::VARCHAR)
-    ORDER BY future_date_col
-    LIMIT horizon
+-- Expand xreg column names (single series, no groups)
+_xreg_cols_expanded AS (
+    SELECT UNNEST(xreg_cols) AS col_name
 ),
-agg_future AS (
+-- For each column name, extract values using JSON via CROSS JOIN
+_xreg_values AS (
     SELECT
-        LIST_TRANSFORM(RANGE(LEN(future_xreg_cols)), i ->
-            LIST(_fx_cols[i + 1] ORDER BY ROWID)
-        ) AS _future_xreg_list
-    FROM future_data
+        xce.col_name,
+        LIST(json_extract(to_json(s), '$.' || xce.col_name)::DOUBLE ORDER BY s.date_col) AS values
+    FROM _xreg_cols_expanded xce
+    CROSS JOIN src s
+    GROUP BY xce.col_name
+),
+-- Build list of lists for xreg
+_xreg_list AS (
+    SELECT LIST(values ORDER BY col_name) AS xreg_list
+    FROM _xreg_values
+),
+-- Aggregate historical target values
+_y_list AS (
+    SELECT LIST(target_col ORDER BY date_col) AS y_list FROM src
+),
+-- Expand future xreg column names
+_future_cols_expanded AS (
+    SELECT UNNEST(future_xreg_cols) AS col_name
+),
+-- For each column name, extract future values using JSON via CROSS JOIN
+_future_xreg_values AS (
+    SELECT
+        fce.col_name,
+        LIST(json_extract(to_json(fsrc), '$.' || fce.col_name)::DOUBLE ORDER BY future_date_col) AS values
+    FROM _future_cols_expanded fce
+    CROSS JOIN future_src fsrc
+    GROUP BY fce.col_name
+),
+-- Build list of lists for future xreg
+_future_xreg_list AS (
+    SELECT LIST(values ORDER BY col_name) AS future_xreg_list
+    FROM _future_xreg_values
 ),
 forecast_result AS (
     SELECT _ts_forecast_exog(
-        (SELECT _y_list FROM agg_historical),
-        (SELECT _xreg_list FROM agg_historical),
-        (SELECT _future_xreg_list FROM agg_future),
+        (SELECT y_list FROM _y_list),
+        COALESCE((SELECT xreg_list FROM _xreg_list), []::DOUBLE[][]),
+        COALESCE((SELECT future_xreg_list FROM _future_xreg_list), []::DOUBLE[][]),
         horizon,
         method
     ) AS fcst
@@ -564,6 +582,7 @@ FROM forecast_result
 
     // ts_forecast_exog_by: Generate forecasts with exogenous variables per group
     // C++ API: ts_forecast_exog_by(source, group_col, date_col, target_col, xreg_cols, future_source, future_date_col, future_xreg_cols, method, horizon, params, frequency)
+    // Note: Requires JSON extension for dynamic column access (auto-loaded if available)
     {"ts_forecast_exog_by", {"source", "group_col", "date_col", "target_col", "xreg_cols", "future_source", "future_date_col", "future_xreg_cols", nullptr}, {{"method", "'AutoARIMA'"}, {"horizon", "12"}, {"params", "MAP{}"}, {"frequency", "'1d'"}, {nullptr, nullptr}},
 R"(
 WITH _freq AS (
@@ -585,25 +604,64 @@ src AS (
 future_src AS (
     SELECT * FROM query_table(future_source::VARCHAR)
 ),
+-- Get unique groups from source
+_groups AS (
+    SELECT DISTINCT group_col AS id FROM src
+),
+-- Expand xreg column names per group for historical data
+_xreg_cols_expanded AS (
+    SELECT g.id, UNNEST(xreg_cols) AS col_name
+    FROM _groups g
+),
+-- For each (group, col_name), extract values using JSON via JOIN
+_xreg_values AS (
+    SELECT
+        xce.id,
+        xce.col_name,
+        LIST(json_extract(to_json(s), '$.' || xce.col_name)::DOUBLE ORDER BY s.date_col) AS values
+    FROM _xreg_cols_expanded xce
+    JOIN src s ON s.group_col = xce.id
+    GROUP BY xce.id, xce.col_name
+),
+-- Build list of lists for xreg per group
+_xreg_lists AS (
+    SELECT id, LIST(values ORDER BY col_name) AS _xreg_list
+    FROM _xreg_values
+    GROUP BY id
+),
+-- Aggregate historical target values per group
 grouped_historical AS (
     SELECT
         group_col AS id,
         date_trunc('second', MAX(date_col)::TIMESTAMP) AS last_date,
-        LIST(target_col ORDER BY date_col) AS _y_list,
-        LIST_TRANSFORM(xreg_cols, col ->
-            (SELECT LIST(src2[col] ORDER BY src2.date_col) FROM src src2 WHERE src2.group_col = src.group_col)
-        ) AS _xreg_list
+        LIST(target_col ORDER BY date_col) AS _y_list
     FROM src
     GROUP BY group_col
 ),
-grouped_future AS (
+-- Get unique groups from future source
+_future_groups AS (
+    SELECT DISTINCT group_col AS id FROM future_src
+),
+-- Expand future xreg column names per group
+_future_cols_expanded AS (
+    SELECT g.id, UNNEST(future_xreg_cols) AS col_name
+    FROM _future_groups g
+),
+-- For each (group, col_name), extract future values using JSON via JOIN
+_future_xreg_values AS (
     SELECT
-        group_col AS id,
-        LIST_TRANSFORM(future_xreg_cols, col ->
-            (SELECT LIST(f2[col] ORDER BY f2.future_date_col) FROM future_src f2 WHERE f2.group_col = future_src.group_col LIMIT horizon)
-        ) AS _future_xreg_list
-    FROM future_src
-    GROUP BY group_col
+        fce.id,
+        fce.col_name,
+        LIST(json_extract(to_json(fsrc), '$.' || fce.col_name)::DOUBLE ORDER BY future_date_col) AS values
+    FROM _future_cols_expanded fce
+    JOIN future_src fsrc ON fsrc.group_col = fce.id
+    GROUP BY fce.id, fce.col_name
+),
+-- Build list of lists for future xreg per group
+_future_xreg_lists AS (
+    SELECT id, LIST(values ORDER BY col_name) AS _future_xreg_list
+    FROM _future_xreg_values
+    GROUP BY id
 ),
 forecast_data AS (
     SELECT
@@ -611,13 +669,14 @@ forecast_data AS (
         h.last_date,
         _ts_forecast_exog(
             h._y_list,
-            h._xreg_list,
-            COALESCE(f._future_xreg_list, LIST_TRANSFORM(xreg_cols, col -> []::DOUBLE[])),
+            COALESCE(x._xreg_list, []::DOUBLE[][]),
+            COALESCE(fx._future_xreg_list, []::DOUBLE[][]),
             horizon,
             method
         ) AS fcst
     FROM grouped_historical h
-    LEFT JOIN grouped_future f ON h.id = f.id
+    LEFT JOIN _xreg_lists x ON h.id = x.id
+    LEFT JOIN _future_xreg_lists fx ON h.id = fx.id
 )
 SELECT
     id,
