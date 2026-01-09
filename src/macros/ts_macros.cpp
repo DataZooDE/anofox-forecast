@@ -626,6 +626,281 @@ FROM forecast_data
 ORDER BY id, forecast_step
 )"},
 
+    // ts_fill_unknown: Fill unknown future feature values in test set for CV splits
+    // C++ API: ts_fill_unknown(table_name, group_col, date_col, value_col, cutoff_date, strategy, fill_value)
+    // strategy: 'default' (use fill_value), 'last_value' (forward fill from last known), 'null' (leave NULL)
+    // fill_value: only used when strategy = 'default'
+    {"ts_fill_unknown", {"source", "group_col", "date_col", "value_col", "cutoff_date", nullptr}, {{"strategy", "'last_value'"}, {"fill_value", "0.0"}, {nullptr, nullptr}},
+R"(
+WITH src AS (
+    SELECT
+        group_col AS _grp,
+        date_trunc('second', date_col::TIMESTAMP) AS _dt,
+        value_col AS _val
+    FROM query_table(source::VARCHAR)
+),
+_cutoff AS (
+    SELECT date_trunc('second', cutoff_date::TIMESTAMP) AS _cutoff_ts
+)
+SELECT
+    _grp AS group_col,
+    _dt AS date_col,
+    CASE
+        WHEN _dt <= (SELECT _cutoff_ts FROM _cutoff) THEN _val
+        WHEN strategy = 'null' THEN NULL
+        WHEN strategy = 'default' THEN fill_value
+        WHEN strategy = 'last_value' THEN
+            LAST_VALUE(CASE WHEN _dt <= (SELECT _cutoff_ts FROM _cutoff) THEN _val END IGNORE NULLS) OVER (
+                PARTITION BY _grp ORDER BY _dt
+                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            )
+        ELSE _val
+    END AS value_col
+FROM src
+ORDER BY _grp, _dt
+)"},
+
+    // ts_validate_timestamps: Validate that expected timestamps exist in data for each group
+    // C++ API: ts_validate_timestamps(table_name, group_col, date_col, expected_timestamps)
+    // Returns: group_col, is_valid, n_expected, n_found, n_missing, missing_timestamps
+    // expected_timestamps should be a LIST of DATE/TIMESTAMP values
+    {"ts_validate_timestamps", {"source", "group_col", "date_col", "expected_timestamps", nullptr}, {{nullptr, nullptr}},
+R"(
+WITH src AS (
+    SELECT DISTINCT
+        group_col AS _grp,
+        date_trunc('second', date_col::TIMESTAMP) AS _dt
+    FROM query_table(source::VARCHAR)
+),
+expected AS (
+    SELECT date_trunc('second', UNNEST(expected_timestamps)::TIMESTAMP) AS _expected_dt
+),
+groups AS (
+    SELECT DISTINCT _grp FROM src
+),
+all_expected AS (
+    SELECT g._grp, e._expected_dt
+    FROM groups g
+    CROSS JOIN expected e
+),
+validation AS (
+    SELECT
+        ae._grp,
+        ae._expected_dt,
+        CASE WHEN s._dt IS NOT NULL THEN TRUE ELSE FALSE END AS _found
+    FROM all_expected ae
+    LEFT JOIN src s ON ae._grp = s._grp AND ae._expected_dt = s._dt
+)
+SELECT
+    _grp AS group_col,
+    BOOL_AND(_found) AS is_valid,
+    COUNT(*) AS n_expected,
+    SUM(CASE WHEN _found THEN 1 ELSE 0 END)::BIGINT AS n_found,
+    SUM(CASE WHEN NOT _found THEN 1 ELSE 0 END)::BIGINT AS n_missing,
+    LIST(_expected_dt ORDER BY _expected_dt) FILTER (WHERE NOT _found) AS missing_timestamps
+FROM validation
+GROUP BY _grp
+ORDER BY _grp
+)"},
+
+    // ts_validate_timestamps_summary: Quick validation summary across all groups
+    // C++ API: ts_validate_timestamps_summary(table_name, group_col, date_col, expected_timestamps)
+    // Returns: single row with all_valid, n_groups, n_valid_groups, n_invalid_groups, invalid_groups
+    {"ts_validate_timestamps_summary", {"source", "group_col", "date_col", "expected_timestamps", nullptr}, {{nullptr, nullptr}},
+R"(
+WITH src AS (
+    SELECT DISTINCT
+        group_col AS _grp,
+        date_trunc('second', date_col::TIMESTAMP) AS _dt
+    FROM query_table(source::VARCHAR)
+),
+expected AS (
+    SELECT date_trunc('second', UNNEST(expected_timestamps)::TIMESTAMP) AS _expected_dt
+),
+groups AS (
+    SELECT DISTINCT _grp FROM src
+),
+all_expected AS (
+    SELECT g._grp, e._expected_dt
+    FROM groups g
+    CROSS JOIN expected e
+),
+validation AS (
+    SELECT
+        ae._grp,
+        ae._expected_dt,
+        CASE WHEN s._dt IS NOT NULL THEN TRUE ELSE FALSE END AS _found
+    FROM all_expected ae
+    LEFT JOIN src s ON ae._grp = s._grp AND ae._expected_dt = s._dt
+),
+per_group AS (
+    SELECT
+        _grp,
+        BOOL_AND(_found) AS is_valid
+    FROM validation
+    GROUP BY _grp
+)
+SELECT
+    BOOL_AND(is_valid) AS all_valid,
+    COUNT(*) AS n_groups,
+    SUM(CASE WHEN is_valid THEN 1 ELSE 0 END)::BIGINT AS n_valid_groups,
+    SUM(CASE WHEN NOT is_valid THEN 1 ELSE 0 END)::BIGINT AS n_invalid_groups,
+    LIST(_grp) FILTER (WHERE NOT is_valid) AS invalid_groups
+FROM per_group
+)"},
+
+    // ts_cv_split_folds: Generate fold boundaries for time series cross-validation
+    // C++ API: ts_cv_split_folds(source, group_col, date_col, training_end_times, horizon, frequency)
+    // training_end_times: LIST of cutoff dates for each fold
+    // horizon: number of periods in test set
+    // frequency: time frequency ('1d', '1h', etc.)
+    // Returns: fold_id, train_end, test_start, test_end for each fold
+    {"ts_cv_split_folds", {"source", "group_col", "date_col", "training_end_times", "horizon", "frequency", nullptr}, {{nullptr, nullptr}},
+R"(
+WITH _freq AS (
+    SELECT CASE
+        WHEN frequency ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency, 'd$', ' day'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency, 'h$', ' hour'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency, '(m|min)$', ' minute'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency, 'w$', ' week'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency, 'mo$', ' month'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
+        WHEN frequency ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency, 'y$', ' year'))::INTERVAL
+        ELSE frequency::INTERVAL
+    END AS _interval
+),
+date_bounds AS (
+    SELECT
+        MIN(date_trunc('second', date_col::TIMESTAMP)) AS _min_dt,
+        MAX(date_trunc('second', date_col::TIMESTAMP)) AS _max_dt
+    FROM query_table(source::VARCHAR)
+),
+folds AS (
+    SELECT
+        ROW_NUMBER() OVER (ORDER BY _train_end) AS fold_id,
+        date_trunc('second', _train_end::TIMESTAMP) AS train_end,
+        date_trunc('second', _train_end::TIMESTAMP) + (SELECT _interval FROM _freq) AS test_start,
+        date_trunc('second', _train_end::TIMESTAMP) + (horizon * (SELECT _interval FROM _freq)) AS test_end
+    FROM (SELECT UNNEST(training_end_times) AS _train_end)
+)
+SELECT
+    fold_id::BIGINT AS fold_id,
+    (SELECT _min_dt FROM date_bounds) AS train_start,
+    train_end,
+    test_start,
+    test_end,
+    horizon::BIGINT AS horizon
+FROM folds
+ORDER BY fold_id
+)"},
+
+    // ts_cv_split: Split time series data into train/test sets for cross-validation
+    // C++ API: ts_cv_split(source, group_col, date_col, target_col, training_end_times, horizon, frequency)
+    // Returns: group_col, date_col, target_col, fold_id, split (train/test)
+    {"ts_cv_split", {"source", "group_col", "date_col", "target_col", "training_end_times", "horizon", "frequency", nullptr}, {{"window_type", "'expanding'"}, {"min_train_size", "1"}, {nullptr, nullptr}},
+R"(
+WITH _freq AS (
+    SELECT CASE
+        WHEN frequency ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency, 'd$', ' day'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency, 'h$', ' hour'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency, '(m|min)$', ' minute'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency, 'w$', ' week'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency, 'mo$', ' month'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
+        WHEN frequency ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency, 'y$', ' year'))::INTERVAL
+        ELSE frequency::INTERVAL
+    END AS _interval
+),
+src AS (
+    SELECT
+        group_col AS _grp,
+        date_trunc('second', date_col::TIMESTAMP) AS _dt,
+        target_col AS _target
+    FROM query_table(source::VARCHAR)
+),
+date_bounds AS (
+    SELECT MIN(_dt) AS _min_dt FROM src
+),
+folds AS (
+    SELECT
+        ROW_NUMBER() OVER (ORDER BY _train_end) AS fold_id,
+        date_trunc('second', _train_end::TIMESTAMP) AS train_end
+    FROM (SELECT UNNEST(training_end_times) AS _train_end)
+),
+fold_bounds AS (
+    SELECT
+        f.fold_id,
+        CASE
+            WHEN window_type = 'expanding' THEN (SELECT _min_dt FROM date_bounds)
+            WHEN window_type = 'fixed' THEN f.train_end - (min_train_size * (SELECT _interval FROM _freq))
+            WHEN window_type = 'sliding' THEN f.train_end - (min_train_size * (SELECT _interval FROM _freq))
+            ELSE (SELECT _min_dt FROM date_bounds)
+        END AS train_start,
+        f.train_end,
+        f.train_end + (SELECT _interval FROM _freq) AS test_start,
+        f.train_end + (horizon * (SELECT _interval FROM _freq)) AS test_end
+    FROM folds f
+)
+SELECT
+    s._grp AS group_col,
+    s._dt AS date_col,
+    s._target AS target_col,
+    fb.fold_id::BIGINT AS fold_id,
+    CASE
+        WHEN s._dt >= fb.train_start AND s._dt <= fb.train_end THEN 'train'
+        WHEN s._dt >= fb.test_start AND s._dt <= fb.test_end THEN 'test'
+        ELSE NULL
+    END AS split
+FROM src s
+CROSS JOIN fold_bounds fb
+WHERE (s._dt >= fb.train_start AND s._dt <= fb.train_end)
+   OR (s._dt >= fb.test_start AND s._dt <= fb.test_end)
+ORDER BY fb.fold_id, s._grp, s._dt
+)"},
+
+    // ts_cv_generate_folds: Generate training end times automatically based on data range
+    // C++ API: ts_cv_generate_folds(source, date_col, n_folds, horizon, frequency, initial_train_size)
+    // Returns: LIST of training end timestamps
+    {"ts_cv_generate_folds", {"source", "date_col", "n_folds", "horizon", "frequency", nullptr}, {{"initial_train_size", "NULL"}, {nullptr, nullptr}},
+R"(
+WITH _freq AS (
+    SELECT CASE
+        WHEN frequency ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency, 'd$', ' day'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency, 'h$', ' hour'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency, '(m|min)$', ' minute'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency, 'w$', ' week'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency, 'mo$', ' month'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
+        WHEN frequency ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency, 'y$', ' year'))::INTERVAL
+        ELSE frequency::INTERVAL
+    END AS _interval
+),
+date_bounds AS (
+    SELECT
+        MIN(date_trunc('second', date_col::TIMESTAMP)) AS _min_dt,
+        MAX(date_trunc('second', date_col::TIMESTAMP)) AS _max_dt,
+        COUNT(DISTINCT date_trunc('second', date_col::TIMESTAMP)) AS _n_dates
+    FROM query_table(source::VARCHAR)
+),
+params AS (
+    SELECT
+        _min_dt,
+        _max_dt,
+        _n_dates,
+        COALESCE(initial_train_size, GREATEST((_n_dates / 2)::BIGINT, 1)) AS _init_size,
+        (SELECT _interval FROM _freq) AS _interval
+    FROM date_bounds
+),
+fold_end_times AS (
+    SELECT
+        _min_dt + (_init_size * _interval) + ((generate_series - 1) * horizon * _interval) AS train_end
+    FROM params, generate_series(1, n_folds)
+    WHERE _min_dt + (_init_size * _interval) + ((generate_series - 1) * horizon * _interval) + (horizon * _interval) <= _max_dt
+)
+SELECT LIST(train_end ORDER BY train_end) AS training_end_times
+FROM fold_end_times
+)"},
+
     // Sentinel
     {nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}
 };

@@ -1,0 +1,131 @@
+# name: test/sql/ts_cv_split.test
+# description: Tests for ts_cv_split - time series cross-validation splitting
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup Test Data
+#######################################
+
+statement ok
+CREATE TABLE cv_test AS
+SELECT
+    'A' AS series_id,
+    '2024-01-01'::DATE + (i * INTERVAL '1 day') AS date,
+    10.0 + i AS value
+FROM generate_series(0, 29) AS t(i)
+UNION ALL
+SELECT
+    'B' AS series_id,
+    '2024-01-01'::DATE + (i * INTERVAL '1 day') AS date,
+    100.0 + i AS value
+FROM generate_series(0, 29) AS t(i);
+
+#######################################
+# ts_cv_split_folds - Basic Tests
+#######################################
+
+# Test returns correct number of folds
+query I
+SELECT COUNT(*) FROM ts_cv_split_folds('cv_test', series_id, date, ['2024-01-10'::DATE, '2024-01-15'::DATE, '2024-01-20'::DATE], 5, '1d');
+----
+3
+
+# Test fold boundaries are correct
+query II
+SELECT fold_id, horizon FROM ts_cv_split_folds('cv_test', series_id, date, ['2024-01-10'::DATE], 5, '1d');
+----
+1	5
+
+#######################################
+# ts_cv_split - Expanding Window Tests
+#######################################
+
+# Test expanding window generates correct number of rows
+# Fold 1: train 10 + test 5 = 15 × 2 series = 30
+# Fold 2: train 15 + test 5 = 20 × 2 series = 40
+# Total = 70
+query I
+SELECT COUNT(*) FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE, '2024-01-15'::DATE], 5, '1d');
+----
+70
+
+# Test expanding window train size grows (per series)
+query II
+SELECT fold_id, COUNT(*) as n_train FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE, '2024-01-15'::DATE], 5, '1d')
+WHERE split = 'train'
+GROUP BY fold_id
+ORDER BY fold_id;
+----
+1	20
+2	30
+
+# Test test size is consistent (per series)
+query II
+SELECT fold_id, COUNT(*) as n_test FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE, '2024-01-15'::DATE], 5, '1d')
+WHERE split = 'test'
+GROUP BY fold_id
+ORDER BY fold_id;
+----
+1	10
+2	10
+
+#######################################
+# ts_cv_split - Fixed Window Tests
+#######################################
+
+# Test fixed window train size is constant (8 days × 2 series = 16)
+query II
+SELECT fold_id, COUNT(*) as n_train FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE, '2024-01-15'::DATE, '2024-01-20'::DATE], 5, '1d', window_type := 'fixed', min_train_size := 7)
+WHERE split = 'train'
+GROUP BY fold_id
+ORDER BY fold_id;
+----
+1	16
+2	16
+3	16
+
+#######################################
+# ts_cv_split - Multiple Series Tests
+#######################################
+
+# Test both series are present in each fold
+query II
+SELECT fold_id, COUNT(DISTINCT group_col) as n_series FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE], 5, '1d')
+GROUP BY fold_id;
+----
+1	2
+
+#######################################
+# ts_cv_generate_folds Tests
+#######################################
+
+# Test auto-generated folds returns a list with at least 1 element
+query I
+SELECT len(training_end_times) >= 1 FROM ts_cv_generate_folds('cv_test', date, 5, 3, '1d');
+----
+true
+
+# Test with custom initial_train_size
+query I
+SELECT len(training_end_times) >= 1 FROM ts_cv_generate_folds('cv_test', date, 3, 5, '1d', initial_train_size := 10);
+----
+true
+
+#######################################
+# Edge Cases
+#######################################
+
+# Test single fold
+query I
+SELECT COUNT(DISTINCT fold_id) FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-15'::DATE], 5, '1d');
+----
+1
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE cv_test;
