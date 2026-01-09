@@ -143,12 +143,15 @@ pub fn detect_peaks(
         return Err(ForecastError::InsufficientData { needed: 3, got: n });
     }
 
-    let argvals = make_argvals(n);
+    let m = n; // m = number of time points
+    let argvals = make_argvals(m);
 
+    // fdars_detect_peaks expects: data, n_samples, m_timepoints, argvals, ...
+    // For a single time series: n_samples=1, m_timepoints=len(values)
     let result = fdars_detect_peaks(
         values,
-        n,
-        1,
+        1, // n = 1 sample (one time series)
+        m, // m = number of time points
         &argvals,
         min_distance,
         min_prominence,
@@ -202,9 +205,12 @@ pub fn analyze_peak_timing(
         });
     }
 
-    let argvals = make_argvals(n);
+    let m = n; // m = number of time points
+    let argvals = make_argvals(m);
 
-    let result = fdars_analyze_peak_timing(values, n, 1, &argvals, period, smooth_nbasis);
+    // fdars_analyze_peak_timing expects: data, n_samples, m_timepoints, argvals, ...
+    // For a single time series: n_samples=1, m_timepoints=len(values)
+    let result = fdars_analyze_peak_timing(values, 1, m, &argvals, period, smooth_nbasis);
 
     Ok(result.into())
 }
@@ -292,6 +298,20 @@ mod tests {
     fn test_insufficient_data() {
         let values = vec![1.0, 2.0];
         assert!(detect_peaks_default(&values).is_err());
+    }
+
+    #[test]
+    fn test_issue_59_peaks_detected() {
+        // Regression test for GitHub issue #59: verify peaks are actually detected
+        // The bug was passing n/m in wrong order to fdars-core
+        let values = vec![1.0, 3.0, 2.0, 5.0, 1.0, 4.0, 2.0];
+        let result = detect_peaks_default(&values).unwrap();
+        assert!(result.n_peaks > 0, "Should detect peaks in {:?}", values);
+
+        // Also test pronounced peaks
+        let values2 = vec![0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0];
+        let result2 = detect_peaks_default(&values2).unwrap();
+        assert!(result2.n_peaks > 0, "Should detect peaks in {:?}", values2);
     }
 
     #[test]
