@@ -1,0 +1,154 @@
+# name: test/sql/ts_integer_frequency.test
+# description: Tests for integer frequency support in time series functions
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup Test Data
+#######################################
+
+statement ok
+CREATE TABLE freq_test AS
+SELECT 'A' AS id, '2023-01-01'::DATE AS date, 10.0 AS val
+UNION ALL SELECT 'A', '2023-01-02'::DATE, 20.0
+UNION ALL SELECT 'A', '2023-01-04'::DATE, 30.0
+UNION ALL SELECT 'A', '2023-01-05'::DATE, 40.0;
+
+#######################################
+# Current supported frequency formats
+#######################################
+
+# Polars-style frequency works
+query III
+SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps('freq_test', id, date, val, '1d') ORDER BY dt;
+----
+A	2023-01-01	10.0
+A	2023-01-02	20.0
+A	2023-01-03	NULL
+A	2023-01-04	30.0
+A	2023-01-05	40.0
+
+# DuckDB INTERVAL style works
+query III
+SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps('freq_test', id, date, val, '1 day') ORDER BY dt;
+----
+A	2023-01-01	10.0
+A	2023-01-02	20.0
+A	2023-01-03	NULL
+A	2023-01-04	30.0
+A	2023-01-05	40.0
+
+#######################################
+# Integer frequency tests
+# Integer frequencies are interpreted as days
+#######################################
+
+# Integer literal frequency works (interpreted as 1 day)
+query III
+SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps('freq_test', id, date, val, 1) ORDER BY dt;
+----
+A	2023-01-01	10.0
+A	2023-01-02	20.0
+A	2023-01-03	NULL
+A	2023-01-04	30.0
+A	2023-01-05	40.0
+
+# String integer frequency works (interpreted as 1 day)
+query III
+SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps('freq_test', id, date, val, '1') ORDER BY dt;
+----
+A	2023-01-01	10.0
+A	2023-01-02	20.0
+A	2023-01-03	NULL
+A	2023-01-04	30.0
+A	2023-01-05	40.0
+
+# Multi-day integer frequency (7 = weekly)
+query II
+SELECT group_col, date_col::DATE AS dt FROM ts_fill_gaps('freq_test', id, date, val, 7) ORDER BY dt;
+----
+A	2023-01-01
+
+#######################################
+# ts_fill_forward with various frequencies
+#######################################
+
+# Polars-style works (extends from last date 2023-01-05 to target 2023-01-07)
+query I
+SELECT COUNT(*) FROM ts_fill_forward('freq_test', id, date, val, '2023-01-07', '1d');
+----
+6
+
+# DuckDB INTERVAL style works
+query I
+SELECT COUNT(*) FROM ts_fill_forward('freq_test', id, date, val, '2023-01-07', '1 day');
+----
+6
+
+# Integer frequency works (interpreted as days)
+query I
+SELECT COUNT(*) FROM ts_fill_forward('freq_test', id, date, val, '2023-01-07', 1);
+----
+6
+
+#######################################
+# ts_fill_gaps_operator with various frequencies
+#######################################
+
+# Polars-style works
+query I
+SELECT COUNT(*) FROM ts_fill_gaps_operator('freq_test', id, date, val, '1d');
+----
+5
+
+# DuckDB INTERVAL style works
+query I
+SELECT COUNT(*) FROM ts_fill_gaps_operator('freq_test', id, date, val, '1 day');
+----
+5
+
+# Integer frequency works (interpreted as days)
+query I
+SELECT COUNT(*) FROM ts_fill_gaps_operator('freq_test', id, date, val, 1);
+----
+5
+
+#######################################
+# ts_forecast_by with various frequencies
+#######################################
+
+# Polars-style frequency works (default is '1d')
+query I
+SELECT COUNT(*) FROM ts_forecast_by('freq_test', id, date, val, 'naive', 2, MAP{});
+----
+2
+
+# Explicit Polars-style
+query I
+SELECT COUNT(*) FROM ts_forecast_by('freq_test', id, date, val, 'naive', 2, MAP{}, frequency := '1d');
+----
+2
+
+# DuckDB INTERVAL style works
+query I
+SELECT COUNT(*) FROM ts_forecast_by('freq_test', id, date, val, 'naive', 2, MAP{}, frequency := '1 day');
+----
+2
+
+# Integer frequency works (interpreted as days)
+query I
+SELECT COUNT(*) FROM ts_forecast_by('freq_test', id, date, val, 'naive', 2, MAP{}, frequency := 1);
+----
+2
+
+# NOTE: ts_forecast_exog_by integer frequency support is implemented but
+# the function has a pre-existing bug (see forecast-extension-jl3 task).
+# Tests will be added once the function is fixed.
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE freq_test;

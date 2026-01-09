@@ -1,0 +1,186 @@
+# name: test/sql/ts_fill_gaps_native.test
+# description: Test ts_fill_gaps_native table-in-out function with type preservation
+# group: [anofox_forecast]
+
+require anofox_forecast
+
+# Test DATE type preservation
+statement ok
+CREATE TABLE test_date AS
+SELECT 'A' as group_col, d::DATE as date_col, v as value
+FROM (VALUES
+    ('2024-01-01', 10.0),
+    ('2024-01-02', 20.0),
+    ('2024-01-04', 40.0)
+) AS t(d, v);
+
+query III
+SELECT * FROM ts_fill_gaps_native(
+    (SELECT group_col, date_col, value FROM test_date ORDER BY group_col, date_col),
+    '1d'
+);
+----
+A	2024-01-01	10.0
+A	2024-01-02	20.0
+A	2024-01-03	NULL
+A	2024-01-04	40.0
+
+# Verify DATE type is preserved
+query I
+SELECT typeof(date_col) FROM ts_fill_gaps_native(
+    (SELECT group_col, date_col, value FROM test_date ORDER BY group_col, date_col),
+    '1d'
+) LIMIT 1;
+----
+DATE
+
+# Test TIMESTAMP type preservation with hourly frequency
+statement ok
+DROP TABLE IF EXISTS test_timestamp;
+
+statement ok
+CREATE TABLE test_timestamp AS
+SELECT 'B' as group_col, ts as date_col, val as value
+FROM (VALUES
+    ('2024-01-01 00:00:00'::TIMESTAMP, 10.0),
+    ('2024-01-01 01:00:00'::TIMESTAMP, 20.0),
+    ('2024-01-01 03:00:00'::TIMESTAMP, 40.0)
+) AS t(ts, val);
+
+query III
+SELECT * FROM ts_fill_gaps_native(
+    (SELECT group_col, date_col, value FROM test_timestamp ORDER BY group_col, date_col),
+    '1h'
+);
+----
+B	2024-01-01 00:00:00	10.0
+B	2024-01-01 01:00:00	20.0
+B	2024-01-01 02:00:00	NULL
+B	2024-01-01 03:00:00	40.0
+
+# Verify TIMESTAMP type is preserved
+query I
+SELECT typeof(date_col) FROM ts_fill_gaps_native(
+    (SELECT group_col, date_col, value FROM test_timestamp ORDER BY group_col, date_col),
+    '1h'
+) LIMIT 1;
+----
+TIMESTAMP
+
+# Test BIGINT with raw integer frequency
+statement ok
+DROP TABLE IF EXISTS test_bigint;
+
+statement ok
+CREATE TABLE test_bigint AS
+SELECT 'C'::VARCHAR as group_col, ts as date_col, val as value
+FROM (VALUES
+    (1::BIGINT, 10.0),
+    (2::BIGINT, 20.0),
+    (4::BIGINT, 40.0)
+) AS t(ts, val);
+
+query III
+SELECT * FROM ts_fill_gaps_native(
+    (SELECT group_col, date_col, value FROM test_bigint ORDER BY group_col, date_col),
+    '1'
+);
+----
+C	1	10.0
+C	2	20.0
+C	3	NULL
+C	4	40.0
+
+# Verify BIGINT type is preserved
+query I
+SELECT typeof(date_col) FROM ts_fill_gaps_native(
+    (SELECT group_col, date_col, value FROM test_bigint ORDER BY group_col, date_col),
+    '1'
+) LIMIT 1;
+----
+BIGINT
+
+# Test INTEGER with raw integer frequency
+statement ok
+DROP TABLE IF EXISTS test_integer;
+
+statement ok
+CREATE TABLE test_integer AS
+SELECT 'D'::VARCHAR as group_col, ts::INTEGER as date_col, val as value
+FROM (VALUES
+    (100, 10.0),
+    (200, 20.0),
+    (400, 40.0)
+) AS t(ts, val);
+
+query III
+SELECT * FROM ts_fill_gaps_native(
+    (SELECT group_col, date_col, value FROM test_integer ORDER BY group_col, date_col),
+    '100'
+);
+----
+D	100	10.0
+D	200	20.0
+D	300	NULL
+D	400	40.0
+
+# Test multiple groups
+statement ok
+DROP TABLE IF EXISTS test_multi;
+
+statement ok
+CREATE TABLE test_multi AS
+SELECT group_col, date_col::DATE as date_col, value FROM (VALUES
+    ('G1', '2024-01-01', 10.0),
+    ('G1', '2024-01-03', 30.0),
+    ('G2', '2024-01-01', 100.0),
+    ('G2', '2024-01-02', 200.0),
+    ('G2', '2024-01-04', 400.0)
+) AS t(group_col, date_col, value);
+
+query III
+SELECT * FROM ts_fill_gaps_native(
+    (SELECT group_col, date_col, value FROM test_multi ORDER BY group_col, date_col),
+    '1d'
+) ORDER BY group_col, date_col;
+----
+G1	2024-01-01	10.0
+G1	2024-01-02	NULL
+G1	2024-01-03	30.0
+G2	2024-01-01	100.0
+G2	2024-01-02	200.0
+G2	2024-01-03	NULL
+G2	2024-01-04	400.0
+
+# Test with DuckDB interval-style frequency
+statement ok
+DROP TABLE IF EXISTS test_interval;
+
+statement ok
+CREATE TABLE test_interval AS
+SELECT 'E' as group_col, d::DATE as date_col, v as value
+FROM (VALUES
+    ('2024-01-01', 10.0),
+    ('2024-01-08', 80.0)
+) AS t(d, v);
+
+query III
+SELECT * FROM ts_fill_gaps_native(
+    (SELECT group_col, date_col, value FROM test_interval ORDER BY group_col, date_col),
+    '1 week'
+);
+----
+E	2024-01-01	10.0
+E	2024-01-08	80.0
+
+# Test alias with anofox_fcst prefix
+query III
+SELECT * FROM anofox_fcst_ts_fill_gaps_native(
+    (SELECT group_col, date_col, value FROM test_date ORDER BY group_col, date_col),
+    '1d'
+);
+----
+A	2024-01-01	10.0
+A	2024-01-02	20.0
+A	2024-01-03	NULL
+A	2024-01-04	40.0
