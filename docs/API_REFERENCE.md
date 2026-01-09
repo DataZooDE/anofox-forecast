@@ -133,10 +133,10 @@ Both forms are identical in functionality.
    - [Fill Unknown Features](#fill-unknown-features)
    - [Mark Unknown Rows](#mark-unknown-rows)
 11. [Forecasting](#forecasting)
-   - [ts_forecast (Scalar)](#ts_forecast-scalar)
+   - [_ts_forecast (Scalar)](#_ts_forecast-scalar)
    - [ts_forecast (Table Macro)](#anofox_fcst_ts_forecast--ts_forecast-table-macro)
    - [ts_forecast_by (Table Macro)](#anofox_fcst_ts_forecast_by--ts_forecast_by-table-macro)
-   - [ts_forecast_exog (Scalar)](#_ts_forecast_exog-scalar)
+   - [_ts_forecast_exog (Scalar)](#_ts_forecast_exog-scalar)
    - [ts_forecast_exog (Table Macro)](#ts_forecast_exog-table-macro)
    - [ts_forecast_exog_by (Table Macro)](#ts_forecast_exog_by-table-macro)
    - [ts_forecast_agg (Aggregate)](#anofox_fcst_ts_forecast_agg--ts_forecast_agg-aggregate-function)
@@ -2549,7 +2549,7 @@ The extension provides a comprehensive forecasting system with 32 models ranging
 |-----------|----------|---------|
 | **Table Macros** | Most users; clean SQL interface | `ts_forecast_by('sales', id, date, val, 'ets', 12, MAP{})` |
 | **Aggregate Functions** | Custom GROUP BY patterns | `ts_forecast_agg(date, value, 'ets', 12, MAP{})` |
-| **Scalar Functions** | Array-based workflows, composition | `ts_forecast([1,2,3,4]::DOUBLE[], 3, 'naive')` |
+| **Scalar Functions** | Array-based workflows, composition | `_ts_forecast([1,2,3,4]::DOUBLE[], 3, 'naive')` |
 
 ### Choosing a Forecasting Model
 
@@ -2647,19 +2647,19 @@ The extension supports all 32 models with **exact case-sensitive naming**.
 
 ---
 
-### ts_forecast (Scalar)
+### _ts_forecast (Scalar)
 
-**ts_forecast** (alias: `anofox_fcst_ts_forecast`)
+**_ts_forecast** - Internal scalar function used by table macros.
 
-Generates time series forecasts from an array.
+Generates time series forecasts from an array. This is a low-level function; prefer using the table macros `ts_forecast` or `ts_forecast_by` for most use cases.
 
 **Signature:**
 ```sql
 -- With default model (auto)
-ts_forecast(values DOUBLE[], horizon INTEGER) → STRUCT
+_ts_forecast(values DOUBLE[], horizon INTEGER) → STRUCT
 
 -- With specified model
-ts_forecast(values DOUBLE[], horizon INTEGER, model VARCHAR) → STRUCT
+_ts_forecast(values DOUBLE[], horizon INTEGER, model VARCHAR) → STRUCT
 ```
 
 **Parameters:**
@@ -2685,18 +2685,18 @@ STRUCT(
 **Example:**
 ```sql
 -- Simple forecast
-SELECT ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]::DOUBLE[], 3);
+SELECT _ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]::DOUBLE[], 3);
 
 -- With specific model
-SELECT ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]::DOUBLE[], 3, 'ses');
+SELECT _ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]::DOUBLE[], 3, 'ses');
 
 -- Access point forecasts
-SELECT (ts_forecast([1,2,3,4,5,6,7,8,9,10]::DOUBLE[], 3)).point;
+SELECT (_ts_forecast([1,2,3,4,5,6,7,8,9,10]::DOUBLE[], 3)).point;
 
 -- Use with GROUP BY for multiple series
 SELECT
     product_id,
-    (ts_forecast(LIST(value ORDER BY date), 7, 'naive')).point AS forecast
+    (_ts_forecast(LIST(value ORDER BY date), 7, 'naive')).point AS forecast
 FROM sales
 GROUP BY product_id;
 ```
