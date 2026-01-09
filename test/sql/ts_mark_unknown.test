@@ -1,0 +1,106 @@
+# name: test/sql/ts_mark_unknown.test
+# description: Tests for ts_mark_unknown - mark rows for scenario expression support
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup Test Data
+#######################################
+
+statement ok
+CREATE TABLE scenario_test AS
+SELECT * FROM (VALUES
+    ('A', '2024-01-01'::DATE, 10.0, 0),
+    ('A', '2024-01-02', 20.0, 0),
+    ('A', '2024-01-03', 30.0, 1),
+    ('A', '2024-01-04', 40.0, 0),
+    ('A', '2024-01-05', 50.0, 1),
+    ('B', '2024-01-01', 100.0, 0),
+    ('B', '2024-01-02', 200.0, 0),
+    ('B', '2024-01-03', 300.0, 0),
+    ('B', '2024-01-04', 400.0, 1),
+    ('B', '2024-01-05', 500.0, 0)
+) AS t(series_id, date, value, is_holiday);
+
+#######################################
+# ts_mark_unknown - Basic Tests
+#######################################
+
+# Test row count preserved
+query I
+SELECT COUNT(*) FROM ts_mark_unknown('scenario_test', series_id, date, '2024-01-03'::DATE);
+----
+10
+
+# Test is_unknown correctly marks future rows (4 rows after Jan 3: 2 per series)
+query I
+SELECT COUNT(*) FROM ts_mark_unknown('scenario_test', series_id, date, '2024-01-03'::DATE)
+WHERE is_unknown = true;
+----
+4
+
+# Test is_unknown correctly marks known rows (6 rows on or before Jan 3: 3 per series)
+query I
+SELECT COUNT(*) FROM ts_mark_unknown('scenario_test', series_id, date, '2024-01-03'::DATE)
+WHERE is_unknown = false;
+----
+6
+
+# Test all columns from source are preserved
+query I
+SELECT COUNT(*) FROM ts_mark_unknown('scenario_test', series_id, date, '2024-01-03'::DATE)
+WHERE value IS NOT NULL AND is_holiday IS NOT NULL;
+----
+10
+
+#######################################
+# Scenario Expression Usage Tests
+#######################################
+
+# Test using is_unknown flag for conditional expression
+query II
+SELECT
+    series_id,
+    SUM(CASE WHEN is_unknown THEN 1 ELSE is_holiday END) as scenario_sum
+FROM ts_mark_unknown('scenario_test', series_id, date, '2024-01-03'::DATE)
+GROUP BY series_id
+ORDER BY series_id;
+----
+A	3
+B	2
+
+#######################################
+# last_known_date Tests
+#######################################
+
+# Test last_known_date is correctly computed per group
+query I
+SELECT COUNT(DISTINCT last_known_date) FROM ts_mark_unknown('scenario_test', series_id, date, '2024-01-03'::DATE);
+----
+1
+
+#######################################
+# Edge Cases
+#######################################
+
+# Test with cutoff at start (all unknown)
+query I
+SELECT COUNT(*) FROM ts_mark_unknown('scenario_test', series_id, date, '2023-12-31'::DATE)
+WHERE is_unknown = true;
+----
+10
+
+# Test with cutoff at end (none unknown)
+query I
+SELECT COUNT(*) FROM ts_mark_unknown('scenario_test', series_id, date, '2024-01-05'::DATE)
+WHERE is_unknown = true;
+----
+0
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE scenario_test;

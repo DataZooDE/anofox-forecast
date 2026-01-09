@@ -626,6 +626,39 @@ FROM forecast_data
 ORDER BY id, forecast_step
 )"},
 
+    // ts_mark_unknown: Mark rows as known/unknown based on cutoff date for scenario expressions
+    // C++ API: ts_mark_unknown(table_name, group_col, date_col, cutoff_date)
+    // Returns: all source columns plus is_unknown (boolean), last_known_date (per group)
+    // Use this with custom CASE expressions for scenario-based filling
+    {"ts_mark_unknown", {"source", "group_col", "date_col", "cutoff_date", nullptr}, {{nullptr, nullptr}},
+R"(
+WITH src AS (
+    SELECT
+        *,
+        group_col AS _grp,
+        date_trunc('second', date_col::TIMESTAMP) AS _dt
+    FROM query_table(source::VARCHAR)
+),
+_cutoff AS (
+    SELECT date_trunc('second', cutoff_date::TIMESTAMP) AS _cutoff_ts
+),
+last_known AS (
+    SELECT
+        _grp,
+        MAX(_dt) AS _last_known_dt
+    FROM src
+    WHERE _dt <= (SELECT _cutoff_ts FROM _cutoff)
+    GROUP BY _grp
+)
+SELECT
+    src.* EXCLUDE (_grp, _dt),
+    src._dt > (SELECT _cutoff_ts FROM _cutoff) AS is_unknown,
+    lk._last_known_dt AS last_known_date
+FROM src
+LEFT JOIN last_known lk ON src._grp = lk._grp
+ORDER BY src._grp, src._dt
+)"},
+
     // ts_fill_unknown: Fill unknown future feature values in test set for CV splits
     // C++ API: ts_fill_unknown(table_name, group_col, date_col, value_col, cutoff_date, strategy, fill_value)
     // strategy: 'default' (use fill_value), 'last_value' (forward fill from last known), 'null' (leave NULL)
