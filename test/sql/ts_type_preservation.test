@@ -1,0 +1,166 @@
+# name: test/sql/ts_type_preservation.test
+# description: Tests for time column type preservation (DATE should remain DATE, not become TIMESTAMP)
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup Test Data with DATE type
+#######################################
+
+statement ok
+CREATE TABLE date_test AS
+SELECT 'A' AS id, '2023-01-01'::DATE AS date, 10.0 AS val
+UNION ALL SELECT 'A', '2023-01-02'::DATE, 20.0
+UNION ALL SELECT 'A', '2023-01-03'::DATE, 30.0
+UNION ALL SELECT 'A', '2023-01-04'::DATE, 40.0
+UNION ALL SELECT 'A', '2023-01-05'::DATE, 50.0;
+
+# Verify input is DATE type
+query T
+SELECT typeof(date) FROM date_test LIMIT 1;
+----
+DATE
+
+#######################################
+# Functions that PASS THROUGH columns (should preserve type)
+#######################################
+
+# ts_fill_nulls_const - uses original column names
+query T
+SELECT typeof(date) FROM ts_fill_nulls_const('date_test', id, date, val, 0.0) LIMIT 1;
+----
+DATE
+
+# ts_fill_nulls_forward
+query T
+SELECT typeof(date) FROM ts_fill_nulls_forward('date_test', id, date, val) LIMIT 1;
+----
+DATE
+
+# ts_fill_nulls_backward
+query T
+SELECT typeof(date) FROM ts_fill_nulls_backward('date_test', id, date, val) LIMIT 1;
+----
+DATE
+
+# ts_fill_nulls_mean
+query T
+SELECT typeof(date) FROM ts_fill_nulls_mean('date_test', id, date, val) LIMIT 1;
+----
+DATE
+
+# ts_diff - preserves type
+query T
+SELECT typeof(date) FROM ts_diff('date_test', id, date, val, 1) LIMIT 1;
+----
+DATE
+
+# ts_drop_leading_zeros
+query T
+SELECT typeof(date) FROM ts_drop_leading_zeros('date_test', id, date, val) LIMIT 1;
+----
+DATE
+
+# ts_drop_trailing_zeros
+query T
+SELECT typeof(date) FROM ts_drop_trailing_zeros('date_test', id, date, val) LIMIT 1;
+----
+DATE
+
+# ts_drop_edge_zeros
+query T
+SELECT typeof(date) FROM ts_drop_edge_zeros('date_test', id, date, val) LIMIT 1;
+----
+DATE
+
+# ts_drop_constant - passes through SELECT *
+query T
+SELECT typeof(date) FROM ts_drop_constant('date_test', id, val) LIMIT 1;
+----
+DATE
+
+# ts_drop_short - passes through SELECT *
+query T
+SELECT typeof(date) FROM ts_drop_short('date_test', id, 3) LIMIT 1;
+----
+DATE
+
+# ts_drop_gappy - passes through SELECT *
+query T
+SELECT typeof(date) FROM ts_drop_gappy('date_test', id, val, 0.5) LIMIT 1;
+----
+DATE
+
+# ts_drop_zeros - passes through SELECT *
+query T
+SELECT typeof(date) FROM ts_drop_zeros('date_test', id, val) LIMIT 1;
+----
+DATE
+
+#######################################
+# Functions using generate_series
+# TODO: Currently convert DATE to TIMESTAMP
+# These tests document the current (incorrect) behavior
+#######################################
+
+# ts_fill_gaps - uses generate_series, outputs TIMESTAMP
+# TODO: Should preserve DATE type when input is DATE
+query T
+SELECT typeof(date_col) FROM ts_fill_gaps('date_test', id, date, val, '1d') LIMIT 1;
+----
+TIMESTAMP
+
+# ts_fill_forward (date extension) - uses generate_series
+# TODO: Should preserve DATE type when input is DATE
+query T
+SELECT typeof(date_col) FROM ts_fill_forward('date_test', id, date, val, '2023-01-10', '1d') LIMIT 1;
+----
+TIMESTAMP
+
+# ts_fill_gaps_operator - uses generate_series
+# TODO: Should preserve DATE type when input is DATE
+query T
+SELECT typeof(date_col) FROM ts_fill_gaps_operator('date_test', id, date, val, '1d') LIMIT 1;
+----
+TIMESTAMP
+
+#######################################
+# TIMESTAMP Input Tests - Should remain TIMESTAMP
+#######################################
+
+statement ok
+CREATE TABLE timestamp_test AS
+SELECT 'A' AS id, '2023-01-01 12:00:00'::TIMESTAMP AS date, 10.0 AS val
+UNION ALL SELECT 'A', '2023-01-02 12:00:00'::TIMESTAMP, 20.0
+UNION ALL SELECT 'A', '2023-01-03 12:00:00'::TIMESTAMP, 30.0
+UNION ALL SELECT 'A', '2023-01-04 12:00:00'::TIMESTAMP, 40.0
+UNION ALL SELECT 'A', '2023-01-05 12:00:00'::TIMESTAMP, 50.0;
+
+# Verify input is TIMESTAMP type
+query T
+SELECT typeof(date) FROM timestamp_test LIMIT 1;
+----
+TIMESTAMP
+
+# Pass-through functions keep TIMESTAMP
+query T
+SELECT typeof(date) FROM ts_fill_nulls_const('timestamp_test', id, date, val, 0.0) LIMIT 1;
+----
+TIMESTAMP
+
+# generate_series functions output TIMESTAMP (correct for TIMESTAMP input)
+query T
+SELECT typeof(date_col) FROM ts_fill_gaps('timestamp_test', id, date, val, '1d') LIMIT 1;
+----
+TIMESTAMP
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE date_test;
+
+statement ok
+DROP TABLE timestamp_test;

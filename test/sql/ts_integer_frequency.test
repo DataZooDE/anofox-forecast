@@ -1,0 +1,162 @@
+# name: test/sql/ts_integer_frequency.test
+# description: Tests for integer frequency support in time series functions
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup Test Data
+#######################################
+
+statement ok
+CREATE TABLE freq_test AS
+SELECT 'A' AS id, '2023-01-01'::DATE AS date, 10.0 AS val
+UNION ALL SELECT 'A', '2023-01-02'::DATE, 20.0
+UNION ALL SELECT 'A', '2023-01-04'::DATE, 30.0
+UNION ALL SELECT 'A', '2023-01-05'::DATE, 40.0;
+
+#######################################
+# Current supported frequency formats
+#######################################
+
+# Polars-style frequency works
+query III
+SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps('freq_test', id, date, val, '1d') ORDER BY dt;
+----
+A	2023-01-01	10.0
+A	2023-01-02	20.0
+A	2023-01-03	NULL
+A	2023-01-04	30.0
+A	2023-01-05	40.0
+
+# DuckDB INTERVAL style works
+query III
+SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps('freq_test', id, date, val, '1 day') ORDER BY dt;
+----
+A	2023-01-01	10.0
+A	2023-01-02	20.0
+A	2023-01-03	NULL
+A	2023-01-04	30.0
+A	2023-01-05	40.0
+
+#######################################
+# Integer frequency tests
+# TODO: Currently NOT supported - integer frequencies fail
+# These tests are skipped until implementation
+#######################################
+
+# TODO: Integer literal frequency (fails with regex error)
+# query III
+# SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps('freq_test', id, date, val, 1) ORDER BY dt;
+# ----
+# A	2023-01-01	10.0
+# A	2023-01-02	20.0
+# A	2023-01-03	NULL
+# A	2023-01-04	30.0
+# A	2023-01-05	40.0
+
+# TODO: String integer frequency (fails with interval conversion error)
+# query III
+# SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps('freq_test', id, date, val, '1') ORDER BY dt;
+# ----
+# A	2023-01-01	10.0
+# A	2023-01-02	20.0
+# A	2023-01-03	NULL
+# A	2023-01-04	30.0
+# A	2023-01-05	40.0
+
+#######################################
+# Verify integer frequency currently fails
+# These tests document the current behavior
+#######################################
+
+# Integer literal fails with regex error
+statement error
+SELECT * FROM ts_fill_gaps('freq_test', id, date, val, 1);
+----
+Binder Error
+
+# String integer fails with interval conversion error
+statement error
+SELECT * FROM ts_fill_gaps('freq_test', id, date, val, '1');
+----
+Conversion Error
+
+#######################################
+# ts_fill_forward with various frequencies
+#######################################
+
+# Polars-style works (extends from last date 2023-01-05 to target 2023-01-07)
+query I
+SELECT COUNT(*) FROM ts_fill_forward('freq_test', id, date, val, '2023-01-07', '1d');
+----
+6
+
+# DuckDB INTERVAL style works
+query I
+SELECT COUNT(*) FROM ts_fill_forward('freq_test', id, date, val, '2023-01-07', '1 day');
+----
+6
+
+# Integer fails
+statement error
+SELECT * FROM ts_fill_forward('freq_test', id, date, val, '2023-01-07', 1);
+----
+Binder Error
+
+#######################################
+# ts_fill_gaps_operator with various frequencies
+#######################################
+
+# Polars-style works
+query I
+SELECT COUNT(*) FROM ts_fill_gaps_operator('freq_test', id, date, val, '1d');
+----
+5
+
+# DuckDB INTERVAL style works
+query I
+SELECT COUNT(*) FROM ts_fill_gaps_operator('freq_test', id, date, val, '1 day');
+----
+5
+
+# Integer fails
+statement error
+SELECT * FROM ts_fill_gaps_operator('freq_test', id, date, val, 1);
+----
+Binder Error
+
+#######################################
+# ts_forecast_by with various frequencies
+#######################################
+
+# Polars-style frequency works (default is '1d')
+query I
+SELECT COUNT(*) FROM ts_forecast_by('freq_test', id, date, val, 'naive', 2, MAP{});
+----
+2
+
+# Explicit Polars-style
+query I
+SELECT COUNT(*) FROM ts_forecast_by('freq_test', id, date, val, 'naive', 2, MAP{}, frequency := '1d');
+----
+2
+
+# DuckDB INTERVAL style works
+query I
+SELECT COUNT(*) FROM ts_forecast_by('freq_test', id, date, val, 'naive', 2, MAP{}, frequency := '1 day');
+----
+2
+
+# TODO: Integer frequency fails
+statement error
+SELECT * FROM ts_forecast_by('freq_test', id, date, val, 'naive', 2, MAP{}, frequency := 1);
+----
+Binder Error
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE freq_test;
