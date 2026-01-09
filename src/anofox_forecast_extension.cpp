@@ -25,6 +25,7 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsFillGapsNativeFunction(loader);
     RegisterTsFillForwardFunction(loader);
     RegisterTsFillForwardOperatorFunction(loader);
+    RegisterTsFillForwardNativeFunction(loader);
 
     // Register Filtering functions
     RegisterTsDropConstantFunction(loader);

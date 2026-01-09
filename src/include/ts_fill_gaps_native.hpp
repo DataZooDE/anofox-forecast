@@ -23,7 +23,8 @@ date_t MicrosecondsToDate(int64_t micros);
 timestamp_t MicrosecondsToTimestamp(int64_t micros);
 string GetGroupKey(const Value &group_value);
 
-// Registration function
+// Registration functions
 void RegisterTsFillGapsNativeFunction(ExtensionLoader &loader);
+void RegisterTsFillForwardNativeFunction(ExtensionLoader &loader);
 
 } // namespace duckdb
