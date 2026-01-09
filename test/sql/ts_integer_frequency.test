@@ -142,6 +142,10 @@ SELECT COUNT(*) FROM ts_forecast_by('freq_test', id, date, val, 'naive', 2, MAP{
 ----
 2
 
+# NOTE: ts_forecast_exog_by integer frequency support is implemented but
+# the function has a pre-existing bug (see forecast-extension-jl3 task).
+# Tests will be added once the function is fixed.
+
 #######################################
 # Cleanup
 #######################################
