@@ -11,7 +11,7 @@ namespace duckdb {
 // Structure for defining table macros
 struct TsTableMacro {
     const char *name;
-    const char *parameters[8];          // Positional parameters (nullptr terminated)
+    const char *parameters[10];         // Positional parameters (nullptr terminated)
     struct {
         const char *name;
         const char *default_value;
@@ -497,6 +497,131 @@ SELECT
     UNNEST((fcst).upper) AS upper_90,
     (fcst).model AS model_name,
     (fcst).fitted AS insample_fitted
+FROM forecast_data
+ORDER BY id, forecast_step
+)"},
+
+    // ts_forecast_exog: Generate forecasts with exogenous variables (single series)
+    // C++ API: ts_forecast_exog(source, date_col, target_col, xreg_cols, future_source, future_date_col, future_xreg_cols, method, horizon, params)
+    // - source: historical data table with y and X columns
+    // - xreg_cols: list of X column names in source table
+    // - future_source: table containing future X values
+    // - future_xreg_cols: list of X column names in future_source table
+    {"ts_forecast_exog", {"source", "date_col", "target_col", "xreg_cols", "future_source", "future_date_col", "future_xreg_cols", nullptr}, {{"method", "'AutoARIMA'"}, {"horizon", "12"}, {"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+WITH historical_data AS (
+    SELECT
+        target_col AS _y,
+        LIST_TRANSFORM(xreg_cols, col -> query_table(source::VARCHAR)[col]) AS _x_cols
+    FROM query_table(source::VARCHAR)
+    ORDER BY date_col
+),
+agg_historical AS (
+    SELECT
+        LIST(_y ORDER BY ROWID) AS _y_list,
+        LIST_TRANSFORM(RANGE(LEN(xreg_cols)), i ->
+            LIST(_x_cols[i + 1] ORDER BY ROWID)
+        ) AS _xreg_list
+    FROM historical_data
+),
+future_data AS (
+    SELECT
+        LIST_TRANSFORM(future_xreg_cols, col -> query_table(future_source::VARCHAR)[col]) AS _fx_cols
+    FROM query_table(future_source::VARCHAR)
+    ORDER BY future_date_col
+    LIMIT horizon
+),
+agg_future AS (
+    SELECT
+        LIST_TRANSFORM(RANGE(LEN(future_xreg_cols)), i ->
+            LIST(_fx_cols[i + 1] ORDER BY ROWID)
+        ) AS _future_xreg_list
+    FROM future_data
+),
+forecast_result AS (
+    SELECT _ts_forecast_exog(
+        (SELECT _y_list FROM agg_historical),
+        (SELECT _xreg_list FROM agg_historical),
+        (SELECT _future_xreg_list FROM agg_future),
+        horizon,
+        method
+    ) AS fcst
+)
+SELECT
+    (fcst).point AS point_forecasts,
+    (fcst).lower AS lower_bounds,
+    (fcst).upper AS upper_bounds,
+    (fcst).model AS model_name,
+    (fcst).aic,
+    (fcst).bic,
+    (fcst).mse
+FROM forecast_result
+)"},
+
+    // ts_forecast_exog_by: Generate forecasts with exogenous variables per group
+    // C++ API: ts_forecast_exog_by(source, group_col, date_col, target_col, xreg_cols, future_source, future_date_col, future_xreg_cols, method, horizon, params, frequency)
+    {"ts_forecast_exog_by", {"source", "group_col", "date_col", "target_col", "xreg_cols", "future_source", "future_date_col", "future_xreg_cols", nullptr}, {{"method", "'AutoARIMA'"}, {"horizon", "12"}, {"params", "MAP{}"}, {"frequency", "'1d'"}, {nullptr, nullptr}},
+R"(
+WITH _freq AS (
+    SELECT CASE
+        WHEN frequency ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency, 'd$', ' day'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency, 'h$', ' hour'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency, '(m|min)$', ' minute'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency, 'w$', ' week'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency, 'mo$', ' month'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
+        WHEN frequency ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency, 'y$', ' year'))::INTERVAL
+        ELSE frequency::INTERVAL
+    END AS _interval
+),
+src AS (
+    SELECT * FROM query_table(source::VARCHAR)
+),
+future_src AS (
+    SELECT * FROM query_table(future_source::VARCHAR)
+),
+grouped_historical AS (
+    SELECT
+        group_col AS id,
+        date_trunc('second', MAX(date_col)::TIMESTAMP) AS last_date,
+        LIST(target_col ORDER BY date_col) AS _y_list,
+        LIST_TRANSFORM(xreg_cols, col ->
+            (SELECT LIST(src2[col] ORDER BY src2.date_col) FROM src src2 WHERE src2.group_col = src.group_col)
+        ) AS _xreg_list
+    FROM src
+    GROUP BY group_col
+),
+grouped_future AS (
+    SELECT
+        group_col AS id,
+        LIST_TRANSFORM(future_xreg_cols, col ->
+            (SELECT LIST(f2[col] ORDER BY f2.future_date_col) FROM future_src f2 WHERE f2.group_col = future_src.group_col LIMIT horizon)
+        ) AS _future_xreg_list
+    FROM future_src
+    GROUP BY group_col
+),
+forecast_data AS (
+    SELECT
+        h.id,
+        h.last_date,
+        _ts_forecast_exog(
+            h._y_list,
+            h._xreg_list,
+            COALESCE(f._future_xreg_list, LIST_TRANSFORM(xreg_cols, col -> []::DOUBLE[])),
+            horizon,
+            method
+        ) AS fcst
+    FROM grouped_historical h
+    LEFT JOIN grouped_future f ON h.id = f.id
+)
+SELECT
+    id,
+    UNNEST(generate_series(1, len((fcst).point)))::INTEGER AS forecast_step,
+    UNNEST(generate_series(last_date + (SELECT _interval FROM _freq), last_date + (len((fcst).point)::INTEGER * EXTRACT(EPOCH FROM (SELECT _interval FROM _freq)) || ' seconds')::INTERVAL, (SELECT _interval FROM _freq)))::TIMESTAMP AS date,
+    UNNEST((fcst).point) AS point_forecast,
+    UNNEST((fcst).lower) AS lower_90,
+    UNNEST((fcst).upper) AS upper_90,
+    (fcst).model AS model_name
 FROM forecast_data
 ORDER BY id, forecast_step
 )"},

@@ -3178,6 +3178,175 @@ pub unsafe extern "C" fn anofox_ts_forecast(
     }
 }
 
+/// Generate time series forecasts with exogenous variables.
+///
+/// This function extends `anofox_ts_forecast` to support external regressors (xreg).
+/// Exogenous variables can improve forecast accuracy when external factors (e.g.,
+/// promotions, holidays, weather) influence the target variable.
+///
+/// # Arguments
+/// * `values` - Pointer to time series values (target variable y)
+/// * `validity` - Pointer to validity bitmask (NULL means all valid)
+/// * `length` - Number of observations
+/// * `options` - Forecast options including exogenous data
+/// * `out_result` - Output forecast result
+/// * `out_error` - Output error (optional)
+///
+/// # Supported Models
+/// The following models support exogenous variables:
+/// - AutoARIMA, ARIMA (ARIMAX)
+/// - OptimizedTheta, DynamicTheta
+/// - MFLES
+///
+/// Other models will ignore the exogenous data and produce a standard forecast.
+///
+/// # Safety
+/// All pointer arguments must be valid. Arrays must have the specified lengths.
+/// For exogenous data:
+/// - Each regressor's `n_values` must equal `length`
+/// - Each regressor's `n_future` must equal `options.horizon`
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_forecast_exog(
+    values: *const c_double,
+    validity: *const u64,
+    length: size_t,
+    options: *const ForecastOptionsExog,
+    out_result: *mut ForecastResult,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if values.is_null() || options.is_null() || out_result.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let series = build_series(values, validity, length);
+        let opts = &*options;
+
+        // Parse model name
+        let model_str = CStr::from_ptr(opts.model.as_ptr())
+            .to_str()
+            .unwrap_or("auto");
+
+        let model_type: anofox_fcst_core::ModelType = model_str
+            .parse()
+            .unwrap_or(anofox_fcst_core::ModelType::AutoETS);
+
+        // Build exogenous data if provided
+        let exog_data = if !opts.exog.is_null() {
+            let exog = &*opts.exog;
+            if !exog.is_empty() {
+                let mut historical: Vec<Vec<f64>> = Vec::with_capacity(exog.n_regressors);
+                let mut future: Vec<Vec<f64>> = Vec::with_capacity(exog.n_regressors);
+
+                for i in 0..exog.n_regressors {
+                    let reg = &*exog.regressors.add(i);
+
+                    // Validate lengths
+                    if reg.n_values != length {
+                        return Err(anofox_fcst_core::error::ForecastError::InvalidInput(
+                            format!(
+                                "Exogenous regressor {} has {} values but y has {} values",
+                                i, reg.n_values, length
+                            ),
+                        ));
+                    }
+                    if reg.n_future != opts.horizon as usize {
+                        return Err(anofox_fcst_core::error::ForecastError::InvalidInput(
+                            format!(
+                                "Exogenous regressor {} has {} future values but horizon is {}",
+                                i, reg.n_future, opts.horizon
+                            ),
+                        ));
+                    }
+
+                    // Copy historical values
+                    let hist_slice = std::slice::from_raw_parts(reg.values, reg.n_values);
+                    historical.push(hist_slice.to_vec());
+
+                    // Copy future values
+                    let future_slice = std::slice::from_raw_parts(reg.future_values, reg.n_future);
+                    future.push(future_slice.to_vec());
+                }
+
+                Some(anofox_fcst_core::ExogenousData { historical, future })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let core_opts = anofox_fcst_core::ForecastOptionsExog {
+            model: model_type,
+            horizon: opts.horizon as usize,
+            confidence_level: opts.confidence_level,
+            seasonal_period: opts.seasonal_period as usize,
+            auto_detect_seasonality: opts.auto_detect_seasonality,
+            include_fitted: opts.include_fitted,
+            include_residuals: opts.include_residuals,
+            exog: exog_data,
+        };
+
+        anofox_fcst_core::forecast_with_exog(&series, &core_opts)
+    }));
+
+    match result {
+        Ok(Ok(forecast)) => {
+            let n_forecasts = forecast.point.len();
+            (*out_result).n_forecasts = n_forecasts;
+
+            // Copy point forecasts
+            (*out_result).point_forecasts = vec_to_c_array(&forecast.point);
+            (*out_result).lower_bounds = vec_to_c_array(&forecast.lower);
+            (*out_result).upper_bounds = vec_to_c_array(&forecast.upper);
+
+            // Copy fitted values
+            if let Some(ref fitted) = forecast.fitted {
+                (*out_result).fitted_values = vec_to_c_array(fitted);
+                (*out_result).n_fitted = fitted.len();
+            } else {
+                (*out_result).fitted_values = ptr::null_mut();
+                (*out_result).n_fitted = 0;
+            }
+
+            // Copy residuals
+            if let Some(ref resid) = forecast.residuals {
+                (*out_result).residuals = vec_to_c_array(resid);
+            } else {
+                (*out_result).residuals = ptr::null_mut();
+            }
+
+            // Copy model name
+            copy_string_to_buffer(&forecast.model_name, &mut (*out_result).model_name);
+
+            (*out_result).aic = forecast.aic.unwrap_or(f64::NAN);
+            (*out_result).bic = forecast.bic.unwrap_or(f64::NAN);
+            (*out_result).mse = forecast.mse.unwrap_or(f64::NAN);
+
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
 // ============================================================================
 // Data Quality Functions
 // ============================================================================

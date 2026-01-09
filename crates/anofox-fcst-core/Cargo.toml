@@ -13,6 +13,8 @@ wasm = []    # WASM-compatible build
 
 [dependencies]
 anofox-forecast = { workspace = true }
+anofox-regression = { workspace = true }
+faer = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
 statrs = { workspace = true }
