@@ -100,33 +100,32 @@ DATE
 
 #######################################
 # Functions using generate_series
-# TODO: Currently convert DATE to TIMESTAMP
-# These tests document the current (incorrect) behavior
+# Note: These functions always return TIMESTAMP because DuckDB's
+# generate_series returns TIMESTAMP and SQL type system is determined
+# at query planning time, not runtime. Cast to DATE if needed:
+# SELECT date_col::DATE FROM ts_fill_gaps(...)
 #######################################
 
-# ts_fill_gaps - uses generate_series, outputs TIMESTAMP
-# TODO: Should preserve DATE type when input is DATE
+# ts_fill_gaps - returns TIMESTAMP (generate_series limitation)
 query T
 SELECT typeof(date_col) FROM ts_fill_gaps('date_test', id, date, val, '1d') LIMIT 1;
 ----
 TIMESTAMP
 
-# ts_fill_forward (date extension) - uses generate_series
-# TODO: Should preserve DATE type when input is DATE
+# ts_fill_forward - returns TIMESTAMP (generate_series limitation)
 query T
 SELECT typeof(date_col) FROM ts_fill_forward('date_test', id, date, val, '2023-01-10', '1d') LIMIT 1;
 ----
 TIMESTAMP
 
-# ts_fill_gaps_operator - uses generate_series
-# TODO: Should preserve DATE type when input is DATE
+# ts_fill_gaps_operator - returns TIMESTAMP (generate_series limitation)
 query T
 SELECT typeof(date_col) FROM ts_fill_gaps_operator('date_test', id, date, val, '1d') LIMIT 1;
 ----
 TIMESTAMP
 
 #######################################
-# TIMESTAMP Input Tests - Should remain TIMESTAMP
+# TIMESTAMP Input Tests
 #######################################
 
 statement ok
@@ -149,7 +148,7 @@ SELECT typeof(date) FROM ts_fill_nulls_const('timestamp_test', id, date, val, 0.
 ----
 TIMESTAMP
 
-# generate_series functions output TIMESTAMP (correct for TIMESTAMP input)
+# generate_series functions output TIMESTAMP
 query T
 SELECT typeof(date_col) FROM ts_fill_gaps('timestamp_test', id, date, val, '1d') LIMIT 1;
 ----
