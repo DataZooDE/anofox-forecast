@@ -405,7 +405,30 @@ SELECT * FROM ts_fill_gaps_operator(source, group_col, date_col, value_col, freq
 
 ### Frequency Formats
 
-The `frequency` parameter in gap-filling and forecasting functions supports two formats for backward compatibility with the C++ API.
+The `frequency` parameter in gap-filling and forecasting functions supports three formats for maximum flexibility.
+
+#### Integer Format (Days)
+
+Pure integers are interpreted as days. This is the simplest format for daily data.
+
+| Value | Interpretation | Use Case |
+|-------|----------------|----------|
+| `1` | 1 day | Daily data |
+| `7` | 7 days | Weekly data |
+| `30` | 30 days | ~Monthly data |
+| `365` | 365 days | ~Yearly data |
+
+**Examples:**
+```sql
+-- Daily frequency using integer
+SELECT * FROM ts_fill_gaps('sales', product_id, date, value, 1);
+
+-- Weekly frequency (7 days)
+SELECT * FROM ts_fill_gaps('weekly_sales', store_id, week_start, revenue, 7);
+
+-- Integer as string also works
+SELECT * FROM ts_fill_gaps('sales', product_id, date, value, '1');
+```
 
 #### Polars-style (Compact Format)
 
@@ -470,20 +493,21 @@ SELECT * FROM ts_fill_gaps('quarterly', division_id, date, revenue, '3 months');
 
 #### Conversion Table
 
-| Polars-style | DuckDB INTERVAL | Typical Use Case |
-|--------------|-----------------|------------------|
-| `'1d'` | `'1 day'` | Daily sales, transactions |
-| `'7d'` | `'7 days'` | Weekly data (explicit days) |
-| `'1w'` | `'1 week'` | Weekly data (semantic week) |
-| `'1h'` | `'1 hour'` | Hourly sensor data |
-| `'15m'` | `'15 minutes'` | High-frequency IoT, energy |
-| `'1mo'` | `'1 month'` | Monthly financials |
-| `'3mo'` | `'3 months'` | Quarterly data |
-| `'1q'` | `'3 months'` | Quarterly data |
-| `'1y'` | `'1 year'` | Annual data |
+| Integer | Polars-style | DuckDB INTERVAL | Typical Use Case |
+|---------|--------------|-----------------|------------------|
+| `1` | `'1d'` | `'1 day'` | Daily sales, transactions |
+| `7` | `'7d'` | `'7 days'` | Weekly data (explicit days) |
+| - | `'1w'` | `'1 week'` | Weekly data (semantic week) |
+| - | `'1h'` | `'1 hour'` | Hourly sensor data |
+| - | `'15m'` | `'15 minutes'` | High-frequency IoT, energy |
+| - | `'1mo'` | `'1 month'` | Monthly financials |
+| - | `'3mo'` | `'3 months'` | Quarterly data |
+| - | `'1q'` | `'3 months'` | Quarterly data |
+| - | `'1y'` | `'1 year'` | Annual data |
 
 **Notes:**
-- Both formats are automatically detected and converted internally
+- All three formats are automatically detected and converted internally
+- Integer format is simplest for daily data (integers are interpreted as days)
 - Polars-style is recommended for portability with C++ API code
 - Use DuckDB INTERVAL for complex intervals not covered by Polars-style
 - The quarter suffix `q` is converted to months (1q = 3 months, 2q = 6 months)
