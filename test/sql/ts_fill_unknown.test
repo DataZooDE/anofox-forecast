@@ -1,0 +1,121 @@
+# name: test/sql/ts_fill_unknown.test
+# description: Tests for ts_fill_unknown table function - fill unknown future features in CV splits
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup Test Data
+#######################################
+
+statement ok
+CREATE TABLE cv_test AS
+SELECT 'A' AS series_id, '2024-01-01'::DATE AS date, 10.0 AS feature
+UNION ALL SELECT 'A', '2024-01-02', 20.0
+UNION ALL SELECT 'A', '2024-01-03', 30.0
+UNION ALL SELECT 'A', '2024-01-04', 40.0
+UNION ALL SELECT 'A', '2024-01-05', 50.0
+UNION ALL SELECT 'B', '2024-01-01', 100.0
+UNION ALL SELECT 'B', '2024-01-02', 200.0
+UNION ALL SELECT 'B', '2024-01-03', 300.0
+UNION ALL SELECT 'B', '2024-01-04', 400.0
+UNION ALL SELECT 'B', '2024-01-05', 500.0;
+
+#######################################
+# ts_fill_unknown - last_value strategy (default)
+#######################################
+
+# Test row count preserved
+query I
+SELECT COUNT(*) FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-03'::DATE);
+----
+10
+
+# Test last_value fills with last known value per series
+query TR
+SELECT group_col, value_col FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-03'::DATE)
+WHERE date_col > '2024-01-03'::TIMESTAMP
+ORDER BY group_col, date_col;
+----
+A	30.0
+A	30.0
+B	300.0
+B	300.0
+
+# Test known values unchanged
+query TR
+SELECT group_col, value_col FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-03'::DATE)
+WHERE date_col <= '2024-01-03'::TIMESTAMP
+ORDER BY group_col, date_col;
+----
+A	10.0
+A	20.0
+A	30.0
+B	100.0
+B	200.0
+B	300.0
+
+#######################################
+# ts_fill_unknown - null strategy
+#######################################
+
+# Test null strategy sets future values to NULL
+query I
+SELECT COUNT(*) FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-03'::DATE, strategy := 'null')
+WHERE value_col IS NULL;
+----
+4
+
+# Known values should not be NULL
+query I
+SELECT COUNT(*) FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-03'::DATE, strategy := 'null')
+WHERE date_col <= '2024-01-03'::TIMESTAMP AND value_col IS NULL;
+----
+0
+
+#######################################
+# ts_fill_unknown - default strategy
+#######################################
+
+# Test default strategy with fill_value
+query TR
+SELECT group_col, value_col FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-03'::DATE, strategy := 'default', fill_value := 999.0)
+WHERE date_col > '2024-01-03'::TIMESTAMP
+ORDER BY group_col, date_col;
+----
+A	999.0
+A	999.0
+B	999.0
+B	999.0
+
+# Test default strategy with fill_value = 0
+query R
+SELECT SUM(value_col) FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-03'::DATE, strategy := 'default', fill_value := 0.0)
+WHERE date_col > '2024-01-03'::TIMESTAMP;
+----
+0.0
+
+#######################################
+# Edge Cases
+#######################################
+
+# Test with cutoff at start (all values unknown with last_value - first value NULL since no prior known)
+query I
+SELECT COUNT(*) FROM ts_fill_unknown('cv_test', series_id, date, feature, '2023-12-31'::DATE, strategy := 'null')
+WHERE value_col IS NULL;
+----
+10
+
+# Test with cutoff at end (all values known)
+query I
+SELECT COUNT(*) FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-05'::DATE)
+WHERE value_col IS NOT NULL;
+----
+10
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE cv_test;
