@@ -126,7 +126,13 @@ Both forms are identical in functionality.
    - [List Available Features](#list-available-features)
    - [Feature Extraction Aggregate](#feature-extraction-aggregate)
    - [Feature Configuration](#feature-configuration)
-10. [Forecasting](#forecasting)
+10. [Cross-Validation & Backtesting](#cross-validation--backtesting)
+   - [Generate Fold Boundaries](#generate-fold-boundaries)
+   - [View Fold Date Ranges](#view-fold-date-ranges)
+   - [Create Train/Test Splits](#create-traintest-splits)
+   - [Fill Unknown Features](#fill-unknown-features)
+   - [Mark Unknown Rows](#mark-unknown-rows)
+11. [Forecasting](#forecasting)
    - [ts_forecast (Scalar)](#ts_forecast-scalar)
    - [ts_forecast (Table Macro)](#anofox_fcst_ts_forecast--ts_forecast-table-macro)
    - [ts_forecast_by (Table Macro)](#anofox_fcst_ts_forecast_by--ts_forecast_by-table-macro)
@@ -134,7 +140,7 @@ Both forms are identical in functionality.
    - [ts_forecast_exog (Table Macro)](#ts_forecast_exog-table-macro)
    - [ts_forecast_exog_by (Table Macro)](#ts_forecast_exog_by-table-macro)
    - [ts_forecast_agg (Aggregate)](#anofox_fcst_ts_forecast_agg--ts_forecast_agg-aggregate-function)
-11. [Evaluation Metrics](#evaluation-metrics)
+12. [Evaluation Metrics](#evaluation-metrics)
    - [Mean Absolute Error (MAE)](#mean-absolute-error-mae)
    - [Mean Squared Error (MSE)](#mean-squared-error-mse)
    - [Root Mean Squared Error (RMSE)](#root-mean-squared-error-rmse)
@@ -2199,6 +2205,336 @@ ts_features_config_from_json(path VARCHAR) → STRUCT(
 ```sql
 -- Get default configuration (all 117 features)
 SELECT ts_features_config_from_json('config.json');
+```
+
+---
+
+## Cross-Validation & Backtesting
+
+Time series cross-validation requires special handling because data has temporal ordering. These functions help you create proper train/test splits, handle unknown features during backtesting, and prevent data leakage.
+
+### Overview
+
+| Function | Purpose |
+|----------|---------|
+| `ts_cv_generate_folds` | Auto-generate fold boundaries based on data range |
+| `ts_cv_split_folds` | View fold date ranges (train/test boundaries) |
+| `ts_cv_split` | Create train/test splits with fold assignments |
+| `ts_fill_unknown` | Fill future feature values to prevent data leakage |
+| `ts_mark_unknown` | Mark rows as known/unknown for custom handling |
+
+### Typical Workflow
+
+```sql
+-- 1. Generate fold boundaries automatically
+SELECT training_end_times FROM ts_cv_generate_folds('data', 'date', 3, 5, '1d');
+
+-- 2. View the fold date ranges
+SELECT * FROM ts_cv_split_folds('data', 'group_id', 'date', [...], 5, '1d');
+
+-- 3. Create train/test splits
+SELECT * FROM ts_cv_split('data', 'group_id', 'date', 'value', [...], 5, '1d');
+
+-- 4. Fill unknown features for backtesting
+SELECT * FROM ts_fill_unknown('data', 'group_id', 'date', 'feature', cutoff, strategy := 'last_value');
+```
+
+---
+
+### Generate Fold Boundaries
+
+**ts_cv_generate_folds**
+
+Automatically generate fold boundaries based on data range. Useful when you don't want to manually specify cutoff dates.
+
+**Signature:**
+```sql
+ts_cv_generate_folds(
+    source VARCHAR,                      -- Table name
+    date_col VARCHAR,                    -- Date column name
+    n_folds BIGINT,                      -- Number of folds to generate
+    horizon BIGINT,                      -- Number of periods in test set
+    frequency VARCHAR,                   -- Data frequency: '1d', '1w', '1mo', etc.
+    initial_train_size BIGINT := NULL    -- Starting training size (default: 50% of data)
+) → TABLE(training_end_times DATE[])
+```
+
+**Parameters:**
+- `source`: Table containing time series data
+- `date_col`: Date/timestamp column name
+- `n_folds`: Number of CV folds to generate
+- `horizon`: Number of periods per test set
+- `frequency`: Data frequency string (`'1d'`, `'1h'`, `'1w'`, `'1mo'`, `'1q'`, `'1y'`)
+- `initial_train_size`: Periods for first fold's training set. If NULL (default), uses 50% of data
+
+**Returns:** Single row containing a `DATE[]` array of training end times.
+
+**Example:**
+```sql
+-- Generate 3 folds with 5-day test horizon
+SELECT training_end_times
+FROM ts_cv_generate_folds('sales_data', 'date', 3, 5, '1d');
+-- Returns: [2024-01-15, 2024-01-20, 2024-01-25]
+
+-- With custom initial training size (10 periods)
+SELECT training_end_times
+FROM ts_cv_generate_folds('sales_data', 'date', 3, 5, '1d', initial_train_size := 10);
+```
+
+---
+
+### View Fold Date Ranges
+
+**ts_cv_split_folds**
+
+Generate fold boundaries (train/test date ranges) for time series cross-validation. Shows when each fold's training and test periods start and end.
+
+**Signature:**
+```sql
+ts_cv_split_folds(
+    source VARCHAR,                      -- Table name
+    group_col VARCHAR,                   -- Grouping column name
+    date_col VARCHAR,                    -- Date column name
+    training_end_times DATE[],           -- Cutoff dates for each fold
+    horizon BIGINT,                      -- Number of periods in test set
+    frequency VARCHAR                    -- Data frequency
+) → TABLE(fold_id BIGINT, train_start TIMESTAMP, train_end TIMESTAMP,
+          test_start TIMESTAMP, test_end TIMESTAMP, horizon BIGINT)
+```
+
+**Parameters:**
+- `source`: Table containing time series data
+- `group_col`: Column name used for grouping (e.g., `'series_id'`)
+- `date_col`: Column containing date/timestamp values
+- `training_end_times`: Array of dates marking when each training period ends
+- `horizon`: Number of forecast periods per fold
+- `frequency`: Data frequency string
+
+**Returns:** One row per fold showing date boundaries.
+
+**Example:**
+```sql
+SELECT * FROM ts_cv_split_folds(
+    'sales_data',
+    'store_id',
+    'date',
+    ['2024-01-10'::DATE, '2024-01-15'::DATE, '2024-01-20'::DATE],
+    5,
+    '1d'
+);
+```
+
+| fold_id | train_start | train_end | test_start | test_end | horizon |
+|---------|-------------|-----------|------------|----------|---------|
+| 1 | 2024-01-01 | 2024-01-10 | 2024-01-11 | 2024-01-15 | 5 |
+| 2 | 2024-01-01 | 2024-01-15 | 2024-01-16 | 2024-01-20 | 5 |
+| 3 | 2024-01-01 | 2024-01-20 | 2024-01-21 | 2024-01-25 | 5 |
+
+---
+
+### Create Train/Test Splits
+
+**ts_cv_split**
+
+Split time series data into train/test sets for cross-validation with support for different window types.
+
+**Signature:**
+```sql
+ts_cv_split(
+    source VARCHAR,                      -- Table name
+    group_col VARCHAR,                   -- Grouping column name
+    date_col VARCHAR,                    -- Date column name
+    target_col VARCHAR,                  -- Target/value column name
+    training_end_times DATE[],           -- Cutoff dates for each fold
+    horizon BIGINT,                      -- Number of periods in test set
+    frequency VARCHAR,                   -- Data frequency
+    window_type VARCHAR := 'expanding',  -- 'expanding', 'fixed', or 'sliding'
+    min_train_size BIGINT := 1           -- Minimum training set size
+) → TABLE(group_col, date_col, target_col, fold_id BIGINT, split VARCHAR)
+```
+
+**Parameters:**
+- `source`: Table containing time series data
+- `group_col`: Column for grouping multiple series
+- `date_col`: Date/timestamp column
+- `target_col`: The value column to predict
+- `training_end_times`: Array of dates marking end of each training period
+- `horizon`: Number of test periods per fold
+- `frequency`: Data frequency string
+- `window_type`: Controls how training window evolves:
+  - `'expanding'` (default): Training includes all history up to train_end
+  - `'fixed'`: Training has fixed size, slides forward
+  - `'sliding'`: Same as fixed
+- `min_train_size`: Minimum periods in training set (used with `'fixed'` window)
+
+**Returns:** Rows from source with `fold_id` and `split` (`'train'` or `'test'`) columns.
+
+**Example:**
+```sql
+-- Expanding window (default) - training grows with each fold
+SELECT * FROM ts_cv_split(
+    'sales_data',
+    'store_id',
+    'date',
+    'sales',
+    ['2024-01-10'::DATE, '2024-01-15'::DATE],
+    5,
+    '1d'
+);
+
+-- Fixed window (8-day training) - constant training size
+SELECT * FROM ts_cv_split(
+    'sales_data',
+    'store_id',
+    'date',
+    'sales',
+    ['2024-01-10'::DATE, '2024-01-15'::DATE],
+    5,
+    '1d',
+    window_type := 'fixed',
+    min_train_size := 8
+);
+```
+
+**Window Types Illustrated:**
+
+```
+Expanding window (default):
+Fold 1: [====TRAIN====][TEST]
+Fold 2: [======TRAIN======][TEST]
+Fold 3: [========TRAIN========][TEST]
+
+Fixed window:
+Fold 1:     [==TRAIN==][TEST]
+Fold 2:         [==TRAIN==][TEST]
+Fold 3:             [==TRAIN==][TEST]
+```
+
+---
+
+### Fill Unknown Features
+
+**ts_fill_unknown**
+
+Fill unknown future values in test sets during cross-validation to prevent data leakage. Use this for features that wouldn't be available at forecast time (e.g., weather, actual demand).
+
+**Signature:**
+```sql
+ts_fill_unknown(
+    source VARCHAR,                      -- Table name
+    group_col VARCHAR,                   -- Grouping column name
+    date_col VARCHAR,                    -- Date column name
+    value_col VARCHAR,                   -- Value column to fill
+    cutoff_date DATE,                    -- Boundary: before = known, after = unknown
+    strategy VARCHAR := 'last_value',    -- Fill strategy
+    fill_value DOUBLE := 0.0             -- Constant for 'default' strategy
+) → TABLE(group_col, date_col, value_col)
+```
+
+**Parameters:**
+- `source`: Table containing time series data
+- `group_col`: Column for grouping/identifying series
+- `date_col`: Date/timestamp column
+- `value_col`: Column containing values to fill
+- `cutoff_date`: Rows with `date <= cutoff` are known (unchanged); rows with `date > cutoff` are unknown (filled)
+- `strategy`: How to fill unknown values:
+  - `'last_value'` (default): Forward fill from last known value
+  - `'null'`: Set to NULL
+  - `'default'`: Set to constant `fill_value`
+- `fill_value`: Value to use when `strategy='default'`
+
+**Returns:** All rows with `value_col` modified for unknown dates.
+
+**Example:**
+```sql
+-- Forward fill temperature (last known value carried forward)
+SELECT * FROM ts_fill_unknown(
+    'backtest_data',
+    'category',
+    'date',
+    'temperature',
+    '2023-06-01'::DATE,
+    strategy := 'last_value'
+);
+
+-- Set unknown values to NULL (let model handle missing)
+SELECT * FROM ts_fill_unknown(
+    'backtest_data',
+    'category',
+    'date',
+    'temperature',
+    '2023-06-01'::DATE,
+    strategy := 'null'
+);
+
+-- Set unknown values to historical mean
+SELECT * FROM ts_fill_unknown(
+    'backtest_data',
+    'category',
+    'date',
+    'temperature',
+    '2023-06-01'::DATE,
+    strategy := 'default',
+    fill_value := 65.0
+);
+```
+
+**Known vs Unknown Features:**
+
+| Feature Type | Examples | Available at Forecast Time? | Handling |
+|--------------|----------|----------------------------|----------|
+| **Known** | Calendar, planned promotions | Yes | Use directly |
+| **Unknown** | Weather, actual demand | No | Must fill for backtesting |
+
+---
+
+### Mark Unknown Rows
+
+**ts_mark_unknown**
+
+Mark rows as known/unknown based on a cutoff date without modifying values. Useful for custom filling logic or tracking data availability.
+
+**Signature:**
+```sql
+ts_mark_unknown(
+    source VARCHAR,                      -- Table name
+    group_col VARCHAR,                   -- Grouping column name
+    date_col VARCHAR,                    -- Date column name
+    cutoff_date DATE                     -- Boundary date
+) → TABLE(*, is_unknown BOOLEAN, last_known_date TIMESTAMP)
+```
+
+**Parameters:**
+- `source`: Table containing time series data
+- `group_col`: Column for grouping/identifying series
+- `date_col`: Date/timestamp column
+- `cutoff_date`: Rows with `date <= cutoff` get `is_unknown=FALSE`; rows with `date > cutoff` get `is_unknown=TRUE`
+
+**Returns:** All columns from source plus:
+- `is_unknown`: TRUE if row is in unknown (future) period
+- `last_known_date`: Per-group timestamp of last known date
+
+**Example:**
+```sql
+-- Mark unknown dates and apply custom logic
+SELECT
+    category,
+    date,
+    temperature,
+    is_unknown,
+    last_known_date,
+    -- Custom fill: use group mean for unknown
+    CASE
+        WHEN is_unknown THEN AVG(temperature) OVER (PARTITION BY category)
+        ELSE temperature
+    END AS temperature_filled
+FROM ts_mark_unknown(
+    'backtest_data',
+    'category',
+    'date',
+    '2023-06-01'::DATE
+)
+ORDER BY category, date;
 ```
 
 ---
