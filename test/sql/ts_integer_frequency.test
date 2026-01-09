@@ -41,46 +41,34 @@ A	2023-01-05	40.0
 
 #######################################
 # Integer frequency tests
-# TODO: Currently NOT supported - integer frequencies fail
-# These tests are skipped until implementation
+# Integer frequencies are interpreted as days
 #######################################
 
-# TODO: Integer literal frequency (fails with regex error)
-# query III
-# SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps('freq_test', id, date, val, 1) ORDER BY dt;
-# ----
-# A	2023-01-01	10.0
-# A	2023-01-02	20.0
-# A	2023-01-03	NULL
-# A	2023-01-04	30.0
-# A	2023-01-05	40.0
-
-# TODO: String integer frequency (fails with interval conversion error)
-# query III
-# SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps('freq_test', id, date, val, '1') ORDER BY dt;
-# ----
-# A	2023-01-01	10.0
-# A	2023-01-02	20.0
-# A	2023-01-03	NULL
-# A	2023-01-04	30.0
-# A	2023-01-05	40.0
-
-#######################################
-# Verify integer frequency currently fails
-# These tests document the current behavior
-#######################################
-
-# Integer literal fails with regex error
-statement error
-SELECT * FROM ts_fill_gaps('freq_test', id, date, val, 1);
+# Integer literal frequency works (interpreted as 1 day)
+query III
+SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps('freq_test', id, date, val, 1) ORDER BY dt;
 ----
-Binder Error
+A	2023-01-01	10.0
+A	2023-01-02	20.0
+A	2023-01-03	NULL
+A	2023-01-04	30.0
+A	2023-01-05	40.0
 
-# String integer fails with interval conversion error
-statement error
-SELECT * FROM ts_fill_gaps('freq_test', id, date, val, '1');
+# String integer frequency works (interpreted as 1 day)
+query III
+SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps('freq_test', id, date, val, '1') ORDER BY dt;
 ----
-Conversion Error
+A	2023-01-01	10.0
+A	2023-01-02	20.0
+A	2023-01-03	NULL
+A	2023-01-04	30.0
+A	2023-01-05	40.0
+
+# Multi-day integer frequency (7 = weekly)
+query II
+SELECT group_col, date_col::DATE AS dt FROM ts_fill_gaps('freq_test', id, date, val, 7) ORDER BY dt;
+----
+A	2023-01-01
 
 #######################################
 # ts_fill_forward with various frequencies
@@ -98,11 +86,11 @@ SELECT COUNT(*) FROM ts_fill_forward('freq_test', id, date, val, '2023-01-07', '
 ----
 6
 
-# Integer fails
-statement error
-SELECT * FROM ts_fill_forward('freq_test', id, date, val, '2023-01-07', 1);
+# Integer frequency works (interpreted as days)
+query I
+SELECT COUNT(*) FROM ts_fill_forward('freq_test', id, date, val, '2023-01-07', 1);
 ----
-Binder Error
+6
 
 #######################################
 # ts_fill_gaps_operator with various frequencies
@@ -120,11 +108,11 @@ SELECT COUNT(*) FROM ts_fill_gaps_operator('freq_test', id, date, val, '1 day');
 ----
 5
 
-# Integer fails
-statement error
-SELECT * FROM ts_fill_gaps_operator('freq_test', id, date, val, 1);
+# Integer frequency works (interpreted as days)
+query I
+SELECT COUNT(*) FROM ts_fill_gaps_operator('freq_test', id, date, val, 1);
 ----
-Binder Error
+5
 
 #######################################
 # ts_forecast_by with various frequencies
@@ -148,11 +136,11 @@ SELECT COUNT(*) FROM ts_forecast_by('freq_test', id, date, val, 'naive', 2, MAP{
 ----
 2
 
-# TODO: Integer frequency fails
-statement error
-SELECT * FROM ts_forecast_by('freq_test', id, date, val, 'naive', 2, MAP{}, frequency := 1);
+# Integer frequency works (interpreted as days)
+query I
+SELECT COUNT(*) FROM ts_forecast_by('freq_test', id, date, val, 'naive', 2, MAP{}, frequency := 1);
 ----
-Binder Error
+2
 
 #######################################
 # Cleanup
