@@ -892,11 +892,17 @@ ORDER BY fold_id
 )"},
 
     // ts_cv_split: Split time series data into train/test sets for cross-validation
-    // C++ API: ts_cv_split(source, group_col, date_col, target_col, training_end_times, horizon, frequency)
+    // C++ API: ts_cv_split(source, group_col, date_col, target_col, training_end_times, horizon, frequency, params)
+    // params MAP supports: window_type ('expanding', 'fixed', 'sliding'), min_train_size (BIGINT)
     // Returns: group_col, date_col, target_col, fold_id, split (train/test)
-    {"ts_cv_split", {"source", "group_col", "date_col", "target_col", "training_end_times", "horizon", "frequency", nullptr}, {{"window_type", "'expanding'"}, {"min_train_size", "1"}, {nullptr, nullptr}},
+    {"ts_cv_split", {"source", "group_col", "date_col", "target_col", "training_end_times", "horizon", "frequency", "params", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH _freq AS (
+WITH _params AS (
+    SELECT
+        COALESCE(params['window_type'][1], 'expanding') AS _window_type,
+        COALESCE(TRY_CAST(params['min_train_size'][1] AS BIGINT), 1) AS _min_train_size
+),
+_freq AS (
     SELECT CASE
         WHEN frequency ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency, 'd$', ' day'))::INTERVAL
         WHEN frequency ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency, 'h$', ' hour'))::INTERVAL
@@ -928,9 +934,9 @@ fold_bounds AS (
     SELECT
         f.fold_id,
         CASE
-            WHEN window_type = 'expanding' THEN (SELECT _min_dt FROM date_bounds)
-            WHEN window_type = 'fixed' THEN f.train_end - (min_train_size * (SELECT _interval FROM _freq))
-            WHEN window_type = 'sliding' THEN f.train_end - (min_train_size * (SELECT _interval FROM _freq))
+            WHEN (SELECT _window_type FROM _params) = 'expanding' THEN (SELECT _min_dt FROM date_bounds)
+            WHEN (SELECT _window_type FROM _params) = 'fixed' THEN f.train_end - ((SELECT _min_train_size FROM _params) * (SELECT _interval FROM _freq))
+            WHEN (SELECT _window_type FROM _params) = 'sliding' THEN f.train_end - ((SELECT _min_train_size FROM _params) * (SELECT _interval FROM _freq))
             ELSE (SELECT _min_dt FROM date_bounds)
         END AS train_start,
         f.train_end,
