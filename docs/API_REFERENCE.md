@@ -2271,6 +2271,8 @@ ts_cv_generate_folds(
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `initial_train_size` | BIGINT | 50% of data | Periods for first fold's training set |
+| `skip_length` | BIGINT | `horizon` | Periods between fold start times (controls fold overlap) |
+| `clip_horizon` | BOOLEAN | `false` | If `true`, include folds with partial test windows |
 
 **Returns:** Single row containing a `DATE[]` array of training end times.
 
@@ -2285,6 +2287,52 @@ FROM ts_cv_generate_folds('sales_data', 'date', 3, 5, '1d', MAP{});
 SELECT training_end_times
 FROM ts_cv_generate_folds('sales_data', 'date', 3, 5, '1d',
     MAP{'initial_train_size': '10'});
+
+-- Dense folds (1 period spacing for more test coverage)
+SELECT training_end_times
+FROM ts_cv_generate_folds('sales_data', 'date', 10, 7, '1d',
+    MAP{'skip_length': '1'});
+
+-- Monthly fold spacing for efficiency
+SELECT training_end_times
+FROM ts_cv_generate_folds('sales_data', 'date', 3, 7, '1d',
+    MAP{'skip_length': '30'});
+
+-- Allow partial test windows near end of data
+SELECT training_end_times
+FROM ts_cv_generate_folds('sales_data', 'date', 5, 7, '1d',
+    MAP{'clip_horizon': 'true'});
+```
+
+**Fold Spacing Illustrated (`skip_length`):**
+```
+skip_length=horizon (default): Non-overlapping test windows
+    Fold 1: [TRAIN════════][TEST═══]
+    Fold 2:        [TRAIN════════][TEST═══]   ← horizon periods later
+
+skip_length=1 (dense): Overlapping folds for maximum test coverage
+    Fold 1: [TRAIN════════][TEST═══]
+    Fold 2:  [TRAIN════════][TEST═══]         ← 1 period later
+    Fold 3:   [TRAIN════════][TEST═══]
+
+skip_length=30 (sparse): Monthly spacing for efficiency
+    Fold 1: [TRAIN════════][TEST═══]
+    Fold 2:                              [TRAIN════════][TEST═══]  ← 30 periods later
+```
+
+**Variable Horizon Illustrated (`clip_horizon`):**
+```
+clip_horizon=false (default): Folds with incomplete test windows are SKIPPED
+    Data:     [═══════════════════════════]
+    Fold 1: [TRAIN════════][TEST═══]        ✓ Full horizon
+    Fold 2:        [TRAIN════════][TEST═══] ✓ Full horizon
+    Fold 3:               [TRAIN════════][TE  ✗ Skipped (only 2 periods available)
+
+clip_horizon=true: Folds with partial test windows are INCLUDED
+    Data:     [═══════════════════════════]
+    Fold 1: [TRAIN════════][TEST═══]        ✓ Full horizon (7 periods)
+    Fold 2:        [TRAIN════════][TEST═══] ✓ Full horizon (7 periods)
+    Fold 3:               [TRAIN════════][TE] ✓ Partial horizon (2 periods)
 ```
 
 ---
