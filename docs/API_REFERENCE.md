@@ -133,10 +133,8 @@ Both forms are identical in functionality.
    - [Fill Unknown Features](#fill-unknown-features)
    - [Mark Unknown Rows](#mark-unknown-rows)
 11. [Forecasting](#forecasting)
-   - [_ts_forecast (Scalar)](#_ts_forecast-scalar)
    - [ts_forecast (Table Macro)](#anofox_fcst_ts_forecast--ts_forecast-table-macro)
    - [ts_forecast_by (Table Macro)](#anofox_fcst_ts_forecast_by--ts_forecast_by-table-macro)
-   - [_ts_forecast_exog (Scalar)](#_ts_forecast_exog-scalar)
    - [ts_forecast_exog (Table Macro)](#ts_forecast_exog-table-macro)
    - [ts_forecast_exog_by (Table Macro)](#ts_forecast_exog_by-table-macro)
    - [ts_forecast_agg (Aggregate)](#anofox_fcst_ts_forecast_agg--ts_forecast_agg-aggregate-function)
@@ -2541,15 +2539,14 @@ ORDER BY category, date;
 
 ## Forecasting
 
-The extension provides a comprehensive forecasting system with 32 models ranging from simple baselines to sophisticated state-space methods. Forecasts can be generated using three different API styles depending on your use case.
+The extension provides a comprehensive forecasting system with 32 models ranging from simple baselines to sophisticated state-space methods.
 
 ### API Styles for Forecasting
 
 | API Style | Best For | Example |
 |-----------|----------|---------|
-| **Table Macros** | Most users; clean SQL interface | `ts_forecast_by('sales', id, date, val, 'ets', 12, MAP{})` |
+| **Table Macros** | Most users; forecasting multiple series | `ts_forecast_by('sales', id, date, val, 'ets', 12, MAP{})` |
 | **Aggregate Functions** | Custom GROUP BY patterns | `ts_forecast_agg(date, value, 'ets', 12, MAP{})` |
-| **Scalar Functions** | Array-based workflows, composition | `_ts_forecast([1,2,3,4]::DOUBLE[], 3, 'naive')` |
 
 ### Choosing a Forecasting Model
 
@@ -2647,63 +2644,7 @@ The extension supports all 32 models with **exact case-sensitive naming**.
 
 ---
 
-### _ts_forecast (Scalar)
-
-**_ts_forecast** - Internal scalar function used by table macros.
-
-Generates time series forecasts from an array. This is a low-level function; prefer using the table macros `ts_forecast` or `ts_forecast_by` for most use cases.
-
-**Signature:**
-```sql
--- With default model (auto)
-_ts_forecast(values DOUBLE[], horizon INTEGER) → STRUCT
-
--- With specified model
-_ts_forecast(values DOUBLE[], horizon INTEGER, model VARCHAR) → STRUCT
-```
-
-**Parameters:**
-- `values`: Historical time series values (DOUBLE[])
-- `horizon`: Number of periods to forecast (INTEGER)
-- `model`: Forecasting model (VARCHAR, optional, default: 'auto')
-
-**Returns:**
-```sql
-STRUCT(
-    point     DOUBLE[],   -- Point forecasts
-    lower     DOUBLE[],   -- Lower prediction interval bounds
-    upper     DOUBLE[],   -- Upper prediction interval bounds
-    fitted    DOUBLE[],   -- In-sample fitted values
-    residuals DOUBLE[],   -- In-sample residuals
-    model     VARCHAR,    -- Model name used
-    aic       DOUBLE,     -- Akaike Information Criterion
-    bic       DOUBLE,     -- Bayesian Information Criterion
-    mse       DOUBLE      -- Mean Squared Error
-)
-```
-
-**Example:**
-```sql
--- Simple forecast
-SELECT _ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]::DOUBLE[], 3);
-
--- With specific model
-SELECT _ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]::DOUBLE[], 3, 'ses');
-
--- Access point forecasts
-SELECT (_ts_forecast([1,2,3,4,5,6,7,8,9,10]::DOUBLE[], 3)).point;
-
--- Use with GROUP BY for multiple series
-SELECT
-    product_id,
-    (_ts_forecast(LIST(value ORDER BY date), 7, 'naive')).point AS forecast
-FROM sales
-GROUP BY product_id;
-```
-
----
-
-### anofox_fcst_ts_forecast (Table Macro)
+### anofox_fcst_ts_forecast / ts_forecast (Table Macro)
 
 Generate forecasts for a single series from a table.
 
@@ -2822,93 +2763,6 @@ SELECT * FROM ts_forecast_by('sales', id, date, val, 'ETS', 12,
 
 ---
 
-### _ts_forecast_exog (Scalar)
-
-Scalar function for forecasting with exogenous variables (external regressors). This function allows you to incorporate external factors that influence your time series.
-
-**Purpose:**
-When your time series is influenced by external factors (temperature, promotions, economic indicators), you can include these as exogenous variables to improve forecast accuracy.
-
-**Signature:**
-```sql
-_ts_forecast_exog(
-    values DOUBLE[],           -- Historical target values
-    historical_x DOUBLE[][],   -- Historical exogenous variables (matrix)
-    future_x DOUBLE[][],       -- Future exogenous variables for forecast horizon
-    horizon INTEGER,           -- Number of periods to forecast
-    model VARCHAR              -- Model name (ARIMA, AutoARIMA, OptimizedTheta, MFLES)
-) → STRUCT
-```
-
-**Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `values` | `DOUBLE[]` | Historical time series values |
-| `historical_x` | `DOUBLE[][]` | Matrix of historical exogenous regressors. Each inner array is one regressor with values aligned to `values` |
-| `future_x` | `DOUBLE[][]` | Matrix of future exogenous values. Each inner array must have `horizon` elements |
-| `horizon` | `INTEGER` | Number of periods to forecast |
-| `model` | `VARCHAR` | Base model name (see supported models below) |
-
-**Returns:**
-```sql
-STRUCT(
-    point DOUBLE[],    -- Point forecasts
-    lower DOUBLE[],    -- Lower prediction interval bounds
-    upper DOUBLE[],    -- Upper prediction interval bounds
-    model VARCHAR      -- Model name used (with X suffix, e.g., ARIMAX)
-)
-```
-
-**Supported Models with Exogenous Variables:**
-| Base Model | With Exog | Description |
-|------------|-----------|-------------|
-| `ARIMA` | `ARIMAX` | ARIMA with exogenous regressors |
-| `AutoARIMA` | `ARIMAX` | Auto-selected ARIMA with exogenous |
-| `OptimizedTheta` | `ThetaX` | Theta method with exogenous |
-| `MFLES` | `MFLESX` | MFLES with exogenous regressors |
-
-**Examples:**
-```sql
--- Simple example with one regressor (e.g., promotional effect)
-SELECT (_ts_forecast_exog(
-    [100.0, 120.0, 110.0, 130.0, 125.0, 140.0],  -- sales history
-    [[0.0, 1.0, 0.0, 1.0, 0.0, 1.0]],            -- historical promotion (0/1)
-    [[1.0, 0.0, 1.0]],                            -- future promotions
-    3,                                             -- forecast 3 periods
-    'AutoARIMA'
-)).point AS forecast;
-
--- Multiple regressors (temperature + promotion)
-SELECT * FROM (
-    SELECT (_ts_forecast_exog(
-        [100.0, 120.0, 110.0, 130.0, 125.0, 140.0],
-        [[20.0, 22.0, 19.0, 23.0, 21.0, 24.0],    -- temperature
-         [0.0, 1.0, 0.0, 1.0, 0.0, 1.0]],         -- promotion
-        [[22.0, 20.0, 21.0],                       -- future temperature
-         [1.0, 0.0, 1.0]],                         -- future promotion
-        3,
-        'ARIMA'
-    )) AS result
-);
-
--- Check which model was selected
-SELECT (_ts_forecast_exog(
-    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0],
-    [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],
-    [[1.0, 2.0]],
-    2,
-    'ARIMA'
-)).model;  -- Returns 'ARIMAX'
-```
-
-**Notes:**
-- The number of regressors in `historical_x` must match `future_x`
-- Each regressor in `historical_x` must have the same length as `values`
-- Each regressor in `future_x` must have exactly `horizon` elements
-- If empty arrays are provided for exogenous variables, the function falls back to non-exogenous forecasting
-
----
-
 ### ts_forecast_exog (Table Macro)
 
 Table macro for single-series forecasting with exogenous variables from a DuckDB table.
@@ -2935,9 +2789,17 @@ ts_forecast_exog(
 | `target_col` | `IDENTIFIER` | Target value column (unquoted) |
 | `x_cols` | `VARCHAR` | Comma-separated list of exogenous column names |
 | `future_table` | `VARCHAR` | Table containing future exogenous values |
-| `model` | `VARCHAR` | Forecasting method (ARIMA, AutoARIMA, OptimizedTheta, MFLES) |
+| `model` | `VARCHAR` | Forecasting method (see supported models below) |
 | `horizon` | `INTEGER` | Number of periods to forecast |
 | `params` | `MAP` | Model parameters (use `MAP{}` for defaults) |
+
+**Supported Models with Exogenous Variables:**
+| Base Model | With Exog | Description |
+|------------|-----------|-------------|
+| `ARIMA` | `ARIMAX` | ARIMA with exogenous regressors |
+| `AutoARIMA` | `ARIMAX` | Auto-selected ARIMA with exogenous |
+| `OptimizedTheta` | `ThetaX` | Theta method with exogenous |
+| `MFLES` | `MFLESX` | MFLES with exogenous regressors |
 
 **Returns:** A table with columns:
 - `ds` - Forecast timestamp
