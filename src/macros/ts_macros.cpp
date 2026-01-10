@@ -724,12 +724,16 @@ ORDER BY src._grp, src._dt
 )"},
 
     // ts_fill_unknown: Fill unknown future feature values in test set for CV splits
-    // C++ API: ts_fill_unknown(table_name, group_col, date_col, value_col, cutoff_date, strategy, fill_value)
-    // strategy: 'default' (use fill_value), 'last_value' (forward fill from last known), 'null' (leave NULL)
-    // fill_value: only used when strategy = 'default'
-    {"ts_fill_unknown", {"source", "group_col", "date_col", "value_col", "cutoff_date", nullptr}, {{"strategy", "'last_value'"}, {"fill_value", "0.0"}, {nullptr, nullptr}},
+    // C++ API: ts_fill_unknown(table_name, group_col, date_col, value_col, cutoff_date, params)
+    // params MAP supports: strategy ('last_value', 'null', 'default'), fill_value (DOUBLE, for 'default' strategy)
+    {"ts_fill_unknown", {"source", "group_col", "date_col", "value_col", "cutoff_date", "params", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH src AS (
+WITH _params AS (
+    SELECT
+        COALESCE(params['strategy'][1], 'last_value') AS _strategy,
+        COALESCE(TRY_CAST(params['fill_value'][1] AS DOUBLE), 0.0) AS _fill_value
+),
+src AS (
     SELECT
         group_col AS _grp,
         date_trunc('second', date_col::TIMESTAMP) AS _dt,
@@ -744,9 +748,9 @@ SELECT
     _dt AS date_col,
     CASE
         WHEN _dt <= (SELECT _cutoff_ts FROM _cutoff) THEN _val
-        WHEN strategy = 'null' THEN NULL
-        WHEN strategy = 'default' THEN fill_value
-        WHEN strategy = 'last_value' THEN
+        WHEN (SELECT _strategy FROM _params) = 'null' THEN NULL
+        WHEN (SELECT _strategy FROM _params) = 'default' THEN (SELECT _fill_value FROM _params)
+        WHEN (SELECT _strategy FROM _params) = 'last_value' THEN
             LAST_VALUE(CASE WHEN _dt <= (SELECT _cutoff_ts FROM _cutoff) THEN _val END IGNORE NULLS) OVER (
                 PARTITION BY _grp ORDER BY _dt
                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
