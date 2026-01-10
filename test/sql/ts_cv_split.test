@@ -269,6 +269,43 @@ statement ok
 DROP TABLE cv_skip_test;
 
 #######################################
+# ts_cv_generate_folds - clip_horizon Tests
+#######################################
+
+# Create test data for clip_horizon tests (27 days)
+statement ok
+CREATE TABLE cv_clip_test AS
+SELECT
+    'A' AS series_id,
+    '2024-01-01'::DATE + (i * INTERVAL '1 day') AS date,
+    10.0 + i AS value
+FROM generate_series(0, 26) AS t(i);
+
+# Test clip_horizon=false (default): fold 3 excluded (not enough data for full horizon)
+# With init=10, horizon=7: folds at day 11, 18, but day 25 would need test to day 32
+query I
+SELECT len(training_end_times) FROM ts_cv_generate_folds('cv_clip_test', date, 5, 7, '1d', MAP{'initial_train_size': '10'});
+----
+2
+
+# Test clip_horizon=true: fold 3 included even with partial test window
+query I
+SELECT len(training_end_times) FROM ts_cv_generate_folds('cv_clip_test', date, 5, 7, '1d', MAP{'initial_train_size': '10', 'clip_horizon': 'true'});
+----
+3
+
+# Verify the extra fold date with clip_horizon
+query I
+SELECT training_end_times[3]::DATE = '2024-01-25'::DATE
+FROM ts_cv_generate_folds('cv_clip_test', date, 5, 7, '1d', MAP{'initial_train_size': '10', 'clip_horizon': 'true'});
+----
+true
+
+# Cleanup
+statement ok
+DROP TABLE cv_clip_test;
+
+#######################################
 # ts_cv_split_index - Skinny Index Tests
 #######################################
 

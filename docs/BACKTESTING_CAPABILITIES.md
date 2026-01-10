@@ -182,6 +182,27 @@ skip_length=30 (sparse):  Monthly spacing for efficiency
     Fold 2:                              [TRAIN════════][TEST═══]  ← 30 periods later
 ```
 
+### Variable Horizon
+
+| Parameter | Purpose | Default | Use Case |
+|-----------|---------|---------|----------|
+| `clip_horizon` | Allow partial test windows | `false` | Backtesting near end of time series |
+
+**Visual Example:**
+```
+clip_horizon=false (default):  Folds with incomplete test windows are SKIPPED
+    Data:     [═══════════════════════════]
+    Fold 1: [TRAIN════════][TEST═══]        ✓ Full horizon
+    Fold 2:        [TRAIN════════][TEST═══] ✓ Full horizon
+    Fold 3:               [TRAIN════════][TE  ✗ Skipped (only 2 periods available)
+
+clip_horizon=true:  Folds with partial test windows are INCLUDED
+    Data:     [═══════════════════════════]
+    Fold 1: [TRAIN════════][TEST═══]        ✓ Full horizon (7 periods)
+    Fold 2:        [TRAIN════════][TEST═══] ✓ Full horizon (7 periods)
+    Fold 3:               [TRAIN════════][TE] ✓ Partial horizon (2 periods)
+```
+
 ---
 
 ## Metrics

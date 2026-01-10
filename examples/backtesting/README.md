@@ -383,6 +383,9 @@ SELECT * FROM ts_cv_forecast_by(
    - `skip_length: '1'` - Dense overlapping folds (more test coverage, slower)
    - `skip_length: '30'` - Sparse folds (faster, monthly checkpoints)
 
+7. **Use clip_horizon for Recent Data**
+   By default, folds that can't fit a full test window are skipped. Use `clip_horizon: 'true'` to include partial test windows at the end of your time series. Useful when you need to evaluate model performance on the most recent data.
+
 ---
 
 ## Troubleshooting / FAQ

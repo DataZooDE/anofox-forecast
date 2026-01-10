@@ -1385,6 +1385,7 @@ LIMIT 1
     // params MAP supports:
     //   initial_train_size (BIGINT, default: 50% of data) - periods before first fold
     //   skip_length (BIGINT, default: horizon) - periods between folds (1=dense, horizon=default, 30=monthly)
+    //   clip_horizon (BOOLEAN, default: false) - if true, allow folds with partial test windows
     // Returns: LIST of training end timestamps
     {"ts_cv_generate_folds", {"source", "date_col", "n_folds", "horizon", "frequency", "params", nullptr}, {{nullptr, nullptr}},
 R"(
@@ -1412,8 +1413,9 @@ _computed AS (
         _min_dt,
         _max_dt,
         _n_dates,
-        COALESCE(TRY_CAST(params['initial_train_size'][1] AS BIGINT), GREATEST((_n_dates / 2)::BIGINT, 1)) AS _init_size,
-        COALESCE(TRY_CAST(params['skip_length'][1] AS BIGINT), horizon) AS _skip_length,
+        COALESCE(TRY_CAST(params['initial_train_size'] AS BIGINT), GREATEST((_n_dates / 2)::BIGINT, 1)) AS _init_size,
+        COALESCE(TRY_CAST(params['skip_length'] AS BIGINT), horizon) AS _skip_length,
+        COALESCE(LOWER(params['clip_horizon']) IN ('true', '1', 'yes'), FALSE) AS _clip_horizon,
         (SELECT _interval FROM _freq) AS _interval
     FROM date_bounds
 ),
@@ -1421,7 +1423,13 @@ fold_end_times AS (
     SELECT
         _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) AS train_end
     FROM _computed, generate_series(1, n_folds)
-    WHERE _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) + (horizon * _interval) <= _max_dt
+    WHERE
+        -- When clip_horizon=true: only require at least 1 period of test data
+        -- When clip_horizon=false (default): require full horizon of test data
+        CASE WHEN _clip_horizon
+            THEN _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) + _interval <= _max_dt
+            ELSE _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) + (horizon * _interval) <= _max_dt
+        END
 )
 SELECT LIST(train_end ORDER BY train_end) AS training_end_times
 FROM fold_end_times
@@ -1438,6 +1446,7 @@ FROM fold_end_times
     //   window_type ('expanding', 'fixed', 'sliding') - training window strategy (default 'expanding')
     //   initial_train_size (BIGINT) - initial training periods before first fold
     //   skip_length (BIGINT) - periods between folds (default: horizon). Use 1 for dense overlapping folds.
+    //   clip_horizon (BOOLEAN) - if true, allow partial test windows clipped to available data (default: false)
     // features: VARCHAR[] of external regressor column names (default NULL, used with regression models)
     // metric: VARCHAR for fold-level metric calculation ('rmse', 'mae', 'mape', 'mse', default 'rmse')
     // Model dispatch logic:
@@ -1455,6 +1464,7 @@ WITH _params AS (
         COALESCE(TRY_CAST(params['embargo'] AS BIGINT), 0) AS _embargo,
         TRY_CAST(params['initial_train_size'] AS BIGINT) AS _init_train_size,
         TRY_CAST(params['skip_length'] AS BIGINT) AS _skip_length_param,
+        COALESCE(LOWER(params['clip_horizon']) IN ('true', '1', 'yes'), FALSE) AS _clip_horizon,
         -- Model type detection: regression models from anofox-statistics
         CASE
             WHEN LOWER(COALESCE(params['method'], 'AutoETS')) IN (
@@ -1503,6 +1513,7 @@ _computed AS (
         _n_dates,
         COALESCE((SELECT _init_train_size FROM _params), GREATEST((_n_dates / 2)::BIGINT, 1)) AS _init_size,
         COALESCE((SELECT _skip_length_param FROM _params), horizon) AS _skip_length,
+        (SELECT _clip_horizon FROM _params) AS _clip_horizon,
         (SELECT _interval FROM _freq) AS _interval
     FROM date_bounds
 ),
@@ -1511,7 +1522,13 @@ fold_end_times AS (
     SELECT
         _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) AS train_end
     FROM _computed, generate_series(1, folds)
-    WHERE _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) + (horizon * _interval) <= _max_dt
+    WHERE
+        -- When clip_horizon=true: only require at least 1 period of test data
+        -- When clip_horizon=false (default): require full horizon of test data
+        CASE WHEN _clip_horizon
+            THEN _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) + _interval <= _max_dt
+            ELSE _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) + (horizon * _interval) <= _max_dt
+        END
 ),
 training_end_times AS (
     SELECT LIST(train_end ORDER BY train_end) AS _times FROM fold_end_times
@@ -1522,7 +1539,14 @@ folds_raw AS (
         ROW_NUMBER() OVER (ORDER BY _train_end) AS fold_id,
         date_trunc('second', _train_end::TIMESTAMP) AS train_end,
         date_trunc('second', _train_end::TIMESTAMP) + (((SELECT _gap FROM _params) + 1) * (SELECT _interval FROM _freq)) AS test_start,
-        date_trunc('second', _train_end::TIMESTAMP) + (((SELECT _gap FROM _params) + horizon) * (SELECT _interval FROM _freq)) AS test_end
+        -- Clip test_end to max available date when clip_horizon=true
+        CASE WHEN (SELECT _clip_horizon FROM _computed)
+            THEN LEAST(
+                date_trunc('second', _train_end::TIMESTAMP) + (((SELECT _gap FROM _params) + horizon) * (SELECT _interval FROM _freq)),
+                (SELECT _max_dt FROM date_bounds)
+            )
+            ELSE date_trunc('second', _train_end::TIMESTAMP) + (((SELECT _gap FROM _params) + horizon) * (SELECT _interval FROM _freq))
+        END AS test_end
     FROM (SELECT UNNEST((SELECT _times FROM training_end_times)) AS _train_end)
 ),
 folds_with_embargo AS (
