@@ -1,0 +1,116 @@
+# name: test/sql/ts_prepare_regression_input.test
+# description: Tests for ts_prepare_regression_input - regression model data adapter
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup Test Data
+#######################################
+
+statement ok
+CREATE TABLE sales_data AS
+SELECT
+    series_id,
+    '2024-01-01'::DATE + (i * INTERVAL '1 day') AS date,
+    10.0 + CASE WHEN series_id = 'A' THEN 50 ELSE 0 END + i AS revenue,
+    20 + i % 10 AS temperature,
+    i % 7 = 0 AS is_weekend
+FROM generate_series(0, 59) AS t(i)
+CROSS JOIN (SELECT UNNEST(['A', 'B']) AS series_id) s;
+
+statement ok
+CREATE TABLE cv_splits AS
+SELECT * FROM ts_cv_split(
+    'sales_data', series_id, date, revenue,
+    ['2024-01-30'::DATE, '2024-02-15'::DATE], 7, '1d', MAP{}
+);
+
+#######################################
+# ts_prepare_regression_input - Basic Tests
+#######################################
+
+# Test returns rows for both train and test
+query I
+SELECT COUNT(*) > 0 FROM ts_prepare_regression_input(
+    'cv_splits', 'sales_data', series_id, date, revenue, MAP{}
+);
+----
+true
+
+# Test that test rows have NULL masked_target
+query II
+SELECT split, COUNT(*) AS n_null_target FROM ts_prepare_regression_input(
+    'cv_splits', 'sales_data', series_id, date, revenue, MAP{}
+) WHERE masked_target IS NULL
+GROUP BY split;
+----
+test	28
+
+# Test that train rows have non-NULL masked_target
+query II
+SELECT split, SUM(CASE WHEN masked_target IS NOT NULL THEN 1 ELSE 0 END) > 0 AS has_targets
+FROM ts_prepare_regression_input(
+    'cv_splits', 'sales_data', series_id, date, revenue, MAP{}
+)
+GROUP BY split
+ORDER BY split DESC;
+----
+train	true
+test	false
+
+# Test _is_test flag matches split
+query I
+SELECT COUNT(*) FROM ts_prepare_regression_input(
+    'cv_splits', 'sales_data', series_id, date, revenue, MAP{}
+) WHERE (_is_test AND split = 'test') OR (NOT _is_test AND split = 'train');
+----
+180
+
+#######################################
+# ts_prepare_regression_input - Features Preserved
+#######################################
+
+# Test that feature columns are preserved
+query I
+SELECT COUNT(*) FROM ts_prepare_regression_input(
+    'cv_splits', 'sales_data', series_id, date, revenue, MAP{}
+) WHERE temperature IS NOT NULL AND is_weekend IS NOT NULL;
+----
+180
+
+#######################################
+# ts_prepare_regression_input - Fold Structure
+#######################################
+
+# Test all folds are represented
+query I
+SELECT COUNT(DISTINCT fold_id) FROM ts_prepare_regression_input(
+    'cv_splits', 'sales_data', series_id, date, revenue, MAP{}
+);
+----
+2
+
+# Test both series are in each fold
+query III
+SELECT fold_id, split, COUNT(DISTINCT group_col) AS n_series
+FROM ts_prepare_regression_input(
+    'cv_splits', 'sales_data', series_id, date, revenue, MAP{}
+)
+GROUP BY fold_id, split
+ORDER BY fold_id, split DESC;
+----
+1	train	2
+1	test	2
+2	train	2
+2	test	2
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE sales_data;
+
+statement ok
+DROP TABLE cv_splits;

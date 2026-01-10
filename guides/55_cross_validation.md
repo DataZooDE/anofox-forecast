@@ -30,6 +30,9 @@ The anofox-forecast extension provides a complete set of functions for time seri
 3. [Window Types](#window-types)
 4. [Function Reference](#function-reference)
    - [ts_backtest_auto](#ts_backtest_auto) ⭐ One-liner backtest
+   - [ts_backtest_regression](#ts_backtest_regression) ⭐ Regression backtest
+   - [ts_prepare_regression_input](#ts_prepare_regression_input) Regression adapter
+   - [ts_hydrate_features](#ts_hydrate_features) ⭐ Feature hydration
    - [ts_cv_split](#ts_cv_split)
    - [ts_cv_split_index](#ts_cv_split_index) ⭐ Memory-efficient
    - [ts_cv_forecast_by](#ts_cv_forecast_by) ⭐ Parallel folds
@@ -117,6 +120,10 @@ Use `embargo` when:
 - Your target aggregates future values (e.g., "revenue in next N days")
 - Features might correlate with future outcomes (e.g., lagged moving averages)
 - You want "purged" cross-validation to prevent any information leakage
+
+> **Key Distinction:**
+> - **Gap** removes data *before* the test set (simulates blindness to recent data)
+> - **Embargo** removes data *after* the previous test set (ensures fold independence)
 
 ```sql
 -- Example: Target is "next 7 days total sales"
@@ -262,7 +269,9 @@ ts_backtest_auto(
     horizon             INTEGER,    -- Forecast horizon
     folds               INTEGER,    -- Number of CV folds
     frequency           VARCHAR,    -- Time frequency ('1d', '1h', '1w', '1mo')
-    params              MAP         -- Optional parameters (see below)
+    params              MAP,        -- Optional parameters (see below)
+    features            VARCHAR[],  -- Optional: external regressor column names (default NULL)
+    metric              VARCHAR     -- Optional: fold-level metric ('rmse', 'mae', 'mape', 'mse', default 'rmse')
 ) → TABLE
 ```
 
@@ -276,6 +285,13 @@ ts_backtest_auto(
 | `gap` | INTEGER | 0 | Gap periods between train end and test start |
 | `embargo` | INTEGER | 0 | Periods to exclude from training after previous fold's test |
 | `initial_train_size` | INTEGER | 50% of data | Initial training size before first fold |
+
+**Named Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `features` | VARCHAR[] | NULL | External regressor column names (for regression models) |
+| `metric` | VARCHAR | 'rmse' | Fold-level metric: 'rmse', 'mae', 'mape', 'mse' |
 
 **Output Columns:**
 
@@ -291,6 +307,7 @@ ts_backtest_auto(
 | `lower_90` | DOUBLE | Lower 90% prediction interval |
 | `upper_90` | DOUBLE | Upper 90% prediction interval |
 | `model_name` | VARCHAR | Model used |
+| `fold_metric_score` | DOUBLE | Calculated metric per fold (based on `metric` param) |
 
 **Example:**
 
@@ -328,15 +345,216 @@ GROUP BY group_col, model_name
 ORDER BY store;
 ```
 
+**With Custom Metric:**
+
+```sql
+-- Use MAE instead of RMSE for fold-level metric
+SELECT
+    fold_id,
+    group_col,
+    ROUND(MIN(fold_metric_score), 2) AS fold_mae
+FROM ts_backtest_auto('sales_data', store_id, date, revenue, 7, 5, '1d', MAP{},
+    metric => 'mae')
+GROUP BY fold_id, group_col
+ORDER BY fold_id, group_col;
+```
+
 **When to Use ts_backtest_auto vs Individual Functions:**
 
 | Scenario | Recommended |
 |----------|-------------|
 | Quick evaluation | `ts_backtest_auto` |
 | Just need forecast vs actual metrics | `ts_backtest_auto` |
-| Need custom feature handling | Individual functions |
-| Need exogenous variables | Individual functions |
+| Need custom feature handling | `ts_backtest_regression` or individual functions |
+| Need exogenous variables | `ts_backtest_regression` or individual functions |
 | Complex multi-step pipeline | Individual functions |
+
+[Go to top](#time-series-cross-validation)
+
+---
+
+### ts_backtest_regression
+
+⭐ **Regression model backtest** - Backtest using regression models (OLS) with a single feature. Demonstrates the regression backtest pattern using DuckDB's built-in linear regression.
+
+**Why Use This?**
+
+- **Regression models**: Test linear relationships between features and target
+- **Pattern demonstration**: Shows the prepare → fit → predict workflow
+- **Built-in OLS**: No external dependencies needed
+
+For advanced models (Ridge, Random Forest, XGBoost), use the anofox-statistics extension.
+
+**Signature:**
+
+```sql
+ts_backtest_regression(
+    cv_splits           VARCHAR,    -- Table with CV splits (from ts_cv_split)
+    source              VARCHAR,    -- Original source table with features
+    src_group_col       COLUMN,     -- Group column in source
+    src_date_col        COLUMN,     -- Date column in source
+    target_col          COLUMN,     -- Target column in source
+    feature_col         COLUMN,     -- Single feature column for regression
+    params              MAP,        -- Optional parameters
+    metric              VARCHAR     -- Optional: fold metric (default 'rmse')
+) → TABLE
+```
+
+**Output Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | CV fold number |
+| `group_col` | VARCHAR | Series identifier |
+| `date_col` | TIMESTAMP | Forecast date |
+| `forecast` | DOUBLE | Predicted value |
+| `actual` | DOUBLE | Actual value |
+| `error` | DOUBLE | forecast - actual |
+| `abs_error` | DOUBLE | |forecast - actual| |
+| `model_name` | VARCHAR | 'LinearRegression_OLS' |
+| `fold_metric_score` | DOUBLE | Calculated metric per fold |
+
+**Example:**
+
+```sql
+-- Create data with linear relationship
+CREATE TABLE sales AS
+SELECT
+    store_id,
+    date,
+    revenue,
+    day_index  -- Feature: days since start
+FROM raw_sales;
+
+-- Create CV splits
+CREATE TABLE cv_splits AS
+SELECT * FROM ts_cv_split('sales', store_id, date, revenue,
+    ['2024-03-01', '2024-04-01']::DATE[], 7, '1d', MAP{});
+
+-- Run regression backtest
+SELECT
+    fold_id,
+    group_col AS store,
+    ROUND(AVG(abs_error), 2) AS mae,
+    model_name
+FROM ts_backtest_regression(
+    'cv_splits', 'sales', store_id, date, revenue, day_index, MAP{}
+)
+GROUP BY fold_id, group_col, model_name;
+```
+
+[Go to top](#time-series-cross-validation)
+
+---
+
+### ts_prepare_regression_input
+
+Prepares data for regression models by masking target values in test rows. This is the "adapter" that enables regression models to work with CV splits.
+
+**How It Works:**
+
+- For **TRAIN** rows: Target value is preserved (model learns from these)
+- For **TEST** rows: Target is set to NULL (model predicts these)
+- All features are preserved for both train and test
+
+**Signature:**
+
+```sql
+ts_prepare_regression_input(
+    cv_splits           VARCHAR,    -- CV splits from ts_cv_split
+    source              VARCHAR,    -- Original source table
+    src_group_col       COLUMN,     -- Group column in source
+    src_date_col        COLUMN,     -- Date column in source
+    target_col          COLUMN,     -- Target column in source
+    params              MAP         -- Reserved for future use
+) → TABLE
+```
+
+**Output Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | CV fold number |
+| `split` | VARCHAR | 'train' or 'test' |
+| `group_col` | VARCHAR | Series identifier |
+| `date_col` | TIMESTAMP | Date |
+| `masked_target` | DOUBLE | Target (NULL for test rows) |
+| `_is_test` | BOOLEAN | TRUE for test rows |
+| (source columns) | various | All other source columns |
+
+**Example:**
+
+```sql
+-- Prepare data for regression
+SELECT fold_id, split, group_col, date_col,
+       masked_target,  -- NULL for test rows
+       temperature,    -- Feature preserved
+       is_holiday      -- Feature preserved
+FROM ts_prepare_regression_input(
+    'cv_splits', 'sales_data', store_id, date, revenue, MAP{}
+)
+WHERE fold_id = 1
+LIMIT 10;
+```
+
+[Go to top](#time-series-cross-validation)
+
+---
+
+### ts_hydrate_features
+
+⭐ **Feature hydration** - Safely join CV splits with source features, with support for masking unknown features.
+
+**Why Use This?**
+
+- **Safe join**: Combines CV splits with original features
+- **Masking support**: Use `_is_test` to mask unknown features in test rows
+- **Prevents leakage**: Makes it easy to distinguish known vs unknown features
+
+**Signature:**
+
+```sql
+ts_hydrate_features(
+    cv_splits           VARCHAR,    -- CV splits from ts_cv_split
+    source              VARCHAR,    -- Original source table with features
+    src_group_col       COLUMN,     -- Group column in source
+    src_date_col        COLUMN,     -- Date column in source
+    params              MAP         -- Reserved for future use
+) → TABLE
+```
+
+**Output Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | CV fold number |
+| `split` | VARCHAR | 'train' or 'test' |
+| `group_col` | VARCHAR | Series identifier |
+| `date_col` | TIMESTAMP | Date |
+| `target_col` | DOUBLE | Target from cv_splits |
+| `_is_test` | BOOLEAN | TRUE for test rows (use for masking) |
+| `_train_cutoff` | TIMESTAMP | Last training date per fold |
+| (source columns) | various | All source columns |
+
+**Example - Known vs Unknown Features:**
+
+```sql
+-- Known features: Use actual values in test (calendar, planned promotions)
+-- Unknown features: Mask in test (actual temperature, competitor prices)
+
+SELECT
+    fold_id,
+    split,
+    group_col,
+    date_col,
+    target_col,
+    is_holiday,        -- KNOWN: calendar feature, use as-is
+    promotion_flag,    -- KNOWN: planned in advance, use as-is
+    CASE WHEN _is_test THEN NULL ELSE temperature END AS temperature,  -- UNKNOWN: mask in test
+    CASE WHEN _is_test THEN NULL ELSE competitor_price END AS competitor_price  -- UNKNOWN: mask in test
+FROM ts_hydrate_features('cv_splits', 'sales_data', store_id, date, MAP{})
+WHERE fold_id = 1;
+```
 
 [Go to top](#time-series-cross-validation)
 

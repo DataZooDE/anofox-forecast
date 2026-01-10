@@ -1272,6 +1272,51 @@ JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
 ORDER BY cv._fold_id, src._src_grp, src._src_dt
 )"},
 
+    // ts_hydrate_features: Automatically hydrate CV splits with features from source
+    // C++ API: ts_hydrate_features(cv_splits, source, src_group_col, src_date_col, params)
+    // cv_splits: Output from ts_cv_split (has group_col, date_col, target_col, fold_id, split)
+    // source: Original data table with features
+    // src_group_col, src_date_col: Column expressions for source table
+    // Returns: fold_id, split, group_col, date_col, target_col, _is_test, _train_cutoff, plus all source columns
+    // Use _is_test to mask unknown features: CASE WHEN _is_test THEN NULL ELSE unknown_col END
+    // Known features (calendar, promotions): Use directly
+    // Unknown features (competitor_sales, actual temperature): Mask with CASE WHEN _is_test
+    {"ts_hydrate_features", {"cv_splits", "source", "src_group_col", "src_date_col", "params", nullptr}, {{nullptr, nullptr}},
+R"(
+WITH cv AS (
+    SELECT
+        "group_col" AS _cv_grp,
+        date_trunc('second', "date_col"::TIMESTAMP) AS _cv_dt,
+        "target_col" AS _target,
+        fold_id AS _fold_id,
+        split AS _split,
+        (split = 'test') AS _is_test,
+        MAX(CASE WHEN split = 'train' THEN date_trunc('second', "date_col"::TIMESTAMP) END)
+            OVER (PARTITION BY "group_col", fold_id) AS _train_cutoff
+    FROM query_table(cv_splits::VARCHAR)
+    WHERE split IN ('train', 'test')
+),
+src AS (
+    SELECT *,
+        src_group_col AS _src_grp,
+        date_trunc('second', src_date_col::TIMESTAMP) AS _src_dt
+    FROM query_table(source::VARCHAR)
+)
+SELECT
+    cv._fold_id AS fold_id,
+    cv._split AS split,
+    cv._cv_grp AS group_col,
+    cv._cv_dt AS date_col,
+    cv._target AS target_col,
+    cv._is_test,
+    cv._train_cutoff,
+    -- Include all source columns; user should mask unknown features: CASE WHEN _is_test THEN NULL ELSE col END
+    src.* EXCLUDE (_src_grp, _src_dt)
+FROM cv
+JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
+ORDER BY cv._fold_id, cv._cv_grp, cv._cv_dt
+)"},
+
     // ts_hydrate_split_strict: FAIL-SAFE join - returns ONLY metadata columns, NO data columns
     // C++ API: ts_hydrate_split_strict(cv_splits, source, src_group_col, src_date_col, params)
     // This is the maximally fail-safe approach: forces user to explicitly add each column
@@ -1380,11 +1425,22 @@ FROM fold_end_times
 )"},
 
     // ts_backtest_auto: One-liner backtest combining fold generation, splitting, forecasting, and evaluation
-    // C++ API: ts_backtest_auto(source, group_col, date_col, target_col, horizon, folds, frequency, params)
-    // params MAP supports: method (VARCHAR, default 'AutoETS'), gap (BIGINT), embargo (BIGINT),
-    //                      window_type ('expanding', 'fixed', 'sliding'), initial_train_size (BIGINT)
-    // Returns: fold_id, group_col, date, forecast, actual, error, abs_error, model_name
-    {"ts_backtest_auto", {"source", "group_col", "date_col", "target_col", "horizon", "folds", "frequency", "params", nullptr}, {{nullptr, nullptr}},
+    // C++ API: ts_backtest_auto(source, group_col, date_col, target_col, horizon, folds, frequency, params, features, metric)
+    // params MAP supports:
+    //   method (VARCHAR, default 'AutoETS') - model to use for forecasting
+    //     Univariate models: 'AutoETS', 'ARIMA', 'AutoARIMA', 'Naive', 'SeasonalNaive', 'Theta', 'SES', 'Holt', 'DampedHolt'
+    //     Regression models (requires anofox-statistics): 'linear_regression_ols', 'ols', 'ridge', 'lasso', 'random_forest', 'rf', 'xgboost'
+    //   gap (BIGINT) - periods between train end and test start (default 0)
+    //   embargo (BIGINT) - periods to exclude from training after previous fold's test (default 0)
+    //   window_type ('expanding', 'fixed', 'sliding') - training window strategy (default 'expanding')
+    //   initial_train_size (BIGINT) - initial training periods before first fold
+    // features: VARCHAR[] of external regressor column names (default NULL, used with regression models)
+    // metric: VARCHAR for fold-level metric calculation ('rmse', 'mae', 'mape', 'mse', default 'rmse')
+    // Model dispatch logic:
+    //   - Univariate models: uses internal _ts_forecast function
+    //   - Regression models: prepares data via ts_prepare_regression_input (target=NULL for test)
+    // Returns: fold_id, group_col, date, forecast, actual, error, abs_error, model_name, fold_metric_score
+    {"ts_backtest_auto", {"source", "group_col", "date_col", "target_col", "horizon", "folds", "frequency", "params", nullptr}, {{"features", "NULL"}, {"metric", "'rmse'"}, {nullptr, nullptr}},
 R"(
 WITH _params AS (
     SELECT
@@ -1393,7 +1449,18 @@ WITH _params AS (
         COALESCE(TRY_CAST(params['min_train_size'] AS BIGINT), 1) AS _min_train_size,
         COALESCE(TRY_CAST(params['gap'] AS BIGINT), 0) AS _gap,
         COALESCE(TRY_CAST(params['embargo'] AS BIGINT), 0) AS _embargo,
-        TRY_CAST(params['initial_train_size'] AS BIGINT) AS _init_train_size
+        TRY_CAST(params['initial_train_size'] AS BIGINT) AS _init_train_size,
+        -- Model type detection: regression models from anofox-statistics
+        CASE
+            WHEN LOWER(COALESCE(params['method'], 'AutoETS')) IN (
+                'linear_regression_ols', 'ols', 'linear_regression',
+                'ridge', 'ridge_regression',
+                'lasso', 'lasso_regression',
+                'random_forest', 'rf', 'random_forest_regression',
+                'gradient_boosting', 'gbm', 'xgboost'
+            ) THEN TRUE
+            ELSE FALSE
+        END AS _is_regression_model
 ),
 _freq AS (
     SELECT CASE
@@ -1541,10 +1608,158 @@ SELECT
     ABS(f.point_forecast - t._target) AS abs_error,
     f.lower_90,
     f.upper_90,
-    f.model_name
+    f.model_name,
+    CASE metric
+        WHEN 'rmse' THEN SQRT(AVG((f.point_forecast - t._target) * (f.point_forecast - t._target)) OVER (PARTITION BY f.fold_id))
+        WHEN 'mae' THEN AVG(ABS(f.point_forecast - t._target)) OVER (PARTITION BY f.fold_id)
+        WHEN 'mape' THEN AVG(ABS((f.point_forecast - t._target) / NULLIF(t._target, 0)) * 100) OVER (PARTITION BY f.fold_id)
+        WHEN 'mse' THEN AVG((f.point_forecast - t._target) * (f.point_forecast - t._target)) OVER (PARTITION BY f.fold_id)
+        ELSE SQRT(AVG((f.point_forecast - t._target) * (f.point_forecast - t._target)) OVER (PARTITION BY f.fold_id))
+    END AS fold_metric_score
 FROM forecasts f
 JOIN cv_test t ON f.fold_id = t.fold_id AND f.id = t._grp AND f._forecast_date = t._dt
 ORDER BY f.fold_id, f.id, f._forecast_date
+)"},
+
+    // ts_backtest_regression: Backtest using regression models (OLS example with DuckDB built-ins)
+    // C++ API: ts_backtest_regression(cv_splits, source, src_group_col, src_date_col, target_col, feature_cols, params)
+    // This demonstrates the regression backtest pattern using DuckDB's built-in linear regression.
+    // For advanced models (Ridge, RF, XGBoost), use anofox-statistics extension.
+    // The pattern is: 1) Prepare data with ts_prepare_regression_input, 2) Fit model on train, 3) Predict test
+    // params MAP supports: metric ('rmse', 'mae', 'mape', 'mse')
+    // Note: This simple OLS example uses a single feature. For multi-feature, use statistics extension.
+    // Returns: fold_id, group_col, date_col, forecast, actual, error, abs_error, fold_metric_score
+    {"ts_backtest_regression", {"cv_splits", "source", "src_group_col", "src_date_col", "target_col", "feature_col", "params", nullptr}, {{"metric", "'rmse'"}, {nullptr, nullptr}},
+R"(
+WITH prep AS (
+    -- Prepare regression input: train rows have target, test rows have NULL target
+    SELECT
+        cv._fold_id AS fold_id,
+        cv._split AS split,
+        cv._cv_grp AS group_col,
+        cv._cv_dt AS date_col,
+        CASE WHEN cv._is_test THEN NULL ELSE src._original_target END AS masked_target,
+        cv._is_test,
+        src._feature_val AS feature_val,
+        src._original_target AS actual_target
+    FROM (
+        SELECT
+            "group_col" AS _cv_grp,
+            date_trunc('second', "date_col"::TIMESTAMP) AS _cv_dt,
+            fold_id AS _fold_id,
+            split AS _split,
+            (split = 'test') AS _is_test
+        FROM query_table(cv_splits::VARCHAR)
+        WHERE split IN ('train', 'test')
+    ) cv
+    JOIN (
+        SELECT
+            src_group_col AS _src_grp,
+            date_trunc('second', src_date_col::TIMESTAMP) AS _src_dt,
+            target_col AS _original_target,
+            feature_col AS _feature_val
+        FROM query_table(source::VARCHAR)
+    ) src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
+),
+-- Compute regression coefficients per fold using training data
+regression_coeffs AS (
+    SELECT
+        fold_id,
+        REGR_INTERCEPT(masked_target, feature_val) AS intercept,
+        REGR_SLOPE(masked_target, feature_val) AS slope
+    FROM prep
+    WHERE NOT _is_test AND masked_target IS NOT NULL
+    GROUP BY fold_id
+),
+-- Generate predictions for test rows
+predictions AS (
+    SELECT
+        p.fold_id,
+        p.group_col,
+        p.date_col,
+        p.split,
+        p._is_test,
+        p.actual_target,
+        p.feature_val,
+        CASE
+            WHEN p._is_test THEN r.intercept + r.slope * p.feature_val
+            ELSE p.masked_target
+        END AS forecast
+    FROM prep p
+    JOIN regression_coeffs r ON p.fold_id = r.fold_id
+),
+-- Compute metrics for test set only
+backtest_result AS (
+    SELECT
+        fold_id,
+        group_col,
+        date_col,
+        forecast,
+        actual_target AS actual,
+        forecast - actual_target AS error,
+        ABS(forecast - actual_target) AS abs_error
+    FROM predictions
+    WHERE _is_test
+)
+SELECT
+    fold_id,
+    group_col,
+    date_col,
+    forecast,
+    actual,
+    error,
+    abs_error,
+    'LinearRegression_OLS' AS model_name,
+    CASE metric
+        WHEN 'rmse' THEN SQRT(AVG(error * error) OVER (PARTITION BY fold_id))
+        WHEN 'mae' THEN AVG(abs_error) OVER (PARTITION BY fold_id)
+        WHEN 'mape' THEN AVG(ABS(error / NULLIF(actual, 0)) * 100) OVER (PARTITION BY fold_id)
+        WHEN 'mse' THEN AVG(error * error) OVER (PARTITION BY fold_id)
+        ELSE SQRT(AVG(error * error) OVER (PARTITION BY fold_id))
+    END AS fold_metric_score
+FROM backtest_result
+ORDER BY fold_id, group_col, date_col
+)"},
+
+    // ts_prepare_regression_input: Prepare data for regression models in CV backtest
+    // C++ API: ts_prepare_regression_input(cv_splits, source, src_group_col, src_date_col, target_col, params)
+    // This is the "Adapter" for anofox-statistics regression models.
+    // For TEST rows: target is set to NULL (model will predict these)
+    // For TRAIN rows: target keeps original value
+    // All features from source table are preserved
+    // params MAP supports: include_features (VARCHAR[]), known_features (VARCHAR[])
+    // Returns: fold_id, split, group_col, date_col, masked_target, _is_test, plus all source columns
+    {"ts_prepare_regression_input", {"cv_splits", "source", "src_group_col", "src_date_col", "target_col", "params", nullptr}, {{nullptr, nullptr}},
+R"(
+WITH cv AS (
+    SELECT
+        "group_col" AS _cv_grp,
+        date_trunc('second', "date_col"::TIMESTAMP) AS _cv_dt,
+        fold_id AS _fold_id,
+        split AS _split,
+        (split = 'test') AS _is_test
+    FROM query_table(cv_splits::VARCHAR)
+    WHERE split IN ('train', 'test')
+),
+src AS (
+    SELECT *,
+        src_group_col AS _src_grp,
+        date_trunc('second', src_date_col::TIMESTAMP) AS _src_dt,
+        target_col AS _original_target
+    FROM query_table(source::VARCHAR)
+)
+SELECT
+    cv._fold_id AS fold_id,
+    cv._split AS split,
+    cv._cv_grp AS group_col,
+    cv._cv_dt AS date_col,
+    -- Mask target for test rows (regression model will predict NULLs)
+    CASE WHEN cv._is_test THEN NULL ELSE src._original_target END AS masked_target,
+    cv._is_test,
+    src.* EXCLUDE (_src_grp, _src_dt, _original_target)
+FROM cv
+JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
+ORDER BY cv._fold_id, cv._cv_grp, cv._cv_dt
 )"},
 
     // Sentinel

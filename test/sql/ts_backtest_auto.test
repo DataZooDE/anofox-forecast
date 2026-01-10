@@ -30,7 +30,7 @@ SELECT COUNT(*) FROM ts_backtest_auto(
 ----
 42
 
-# Test has all expected columns
+# Test has all expected columns (11 columns including fold_metric_score)
 query I
 SELECT COUNT(*) FROM (
     DESCRIBE SELECT * FROM ts_backtest_auto(
@@ -38,7 +38,7 @@ SELECT COUNT(*) FROM (
     )
 );
 ----
-10
+11
 
 # Test all folds are represented
 query I
@@ -152,6 +152,70 @@ ORDER BY group_col;
 ----
 A	true
 B	true
+
+#######################################
+# ts_backtest_auto - Metric Parameter Tests
+#######################################
+
+# Test fold_metric_score column exists and is numeric
+query I
+SELECT COUNT(*) FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
+) WHERE fold_metric_score IS NOT NULL;
+----
+42
+
+# Test metric='mae' returns MAE scores
+query I
+SELECT COUNT(DISTINCT fold_metric_score) >= 1 FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{},
+    metric => 'mae'
+);
+----
+true
+
+# Test metric='rmse' returns RMSE scores (default)
+query I
+SELECT COUNT(DISTINCT fold_metric_score) >= 1 FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{},
+    metric => 'rmse'
+);
+----
+true
+
+# Test metric='mse' returns MSE scores
+query I
+SELECT COUNT(DISTINCT fold_metric_score) >= 1 FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{},
+    metric => 'mse'
+);
+----
+true
+
+# Test fold_metric_score is consistent within each fold
+query I
+SELECT COUNT(DISTINCT n_unique_scores) FROM (
+    SELECT fold_id, COUNT(DISTINCT ROUND(fold_metric_score, 6)) AS n_unique_scores
+    FROM ts_backtest_auto(
+        'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
+    )
+    GROUP BY fold_id
+);
+----
+1
+
+#######################################
+# ts_backtest_auto - Features Parameter Tests
+#######################################
+
+# Test features parameter accepts empty array (default)
+query I
+SELECT COUNT(*) FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{},
+    features => []::VARCHAR[]
+);
+----
+42
 
 #######################################
 # Single Series Test
