@@ -297,29 +297,31 @@ SELECT
 FROM joined
 WHERE split = 'test';
 
--- OLS Results Summary
+-- OLS Results Summary using built-in metric functions
 SELECT
     'OLS Regression' AS model,
     fold_id,
     COUNT(*) AS n_predictions,
-    ROUND(AVG(abs_error), 2) AS mae,
-    ROUND(SQRT(AVG(error * error)), 2) AS rmse,
-    ROUND(AVG(error), 2) AS bias
+    ROUND(ts_mae(LIST(actual), LIST(forecast)), 2) AS mae,
+    ROUND(ts_rmse(LIST(actual), LIST(forecast)), 2) AS rmse,
+    ROUND(ts_bias(LIST(actual), LIST(forecast)), 2) AS bias
 FROM ols_backtest_results
 GROUP BY fold_id
 ORDER BY fold_id;
 
--- Overall OLS vs SeasonalNaive comparison
+-- Overall OLS vs SeasonalNaive comparison using built-in metrics
 SELECT
     'OLS Regression' AS model,
-    ROUND(AVG(abs_error), 2) AS mae,
-    ROUND(SQRT(AVG(error * error)), 2) AS rmse
+    ROUND(ts_mae(LIST(actual), LIST(forecast)), 2) AS mae,
+    ROUND(ts_rmse(LIST(actual), LIST(forecast)), 2) AS rmse,
+    ROUND(ts_bias(LIST(actual), LIST(forecast)), 2) AS bias
 FROM ols_backtest_results
 UNION ALL
 SELECT
     'SeasonalNaive' AS model,
-    ROUND(AVG(abs_error), 2) AS mae,
-    ROUND(SQRT(AVG(error * error)), 2) AS rmse
+    ROUND(ts_mae(LIST(actual), LIST(forecast)), 2) AS mae,
+    ROUND(ts_rmse(LIST(actual), LIST(forecast)), 2) AS rmse,
+    ROUND(ts_bias(LIST(actual), LIST(forecast)), 2) AS bias
 FROM ts_backtest_auto(
     'm5_sample', item_id, ds, y, 14, 3, '1d',
     MAP{'method': 'SeasonalNaive', 'seasonal_period': '7'}

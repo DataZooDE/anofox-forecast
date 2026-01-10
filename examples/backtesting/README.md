@@ -513,6 +513,7 @@ SELECT
 FROM model_ready_data m;
 
 -- OLS results maintain input order within each group
+CREATE OR REPLACE TEMP TABLE ols_predictions AS
 WITH
 reg_input_numbered AS (
     SELECT
@@ -533,11 +534,22 @@ SELECT
     ri.fold_id,
     ri.group_col AS store_id,
     ri.date_col AS date,
-    ROUND(ols.forecast, 2) AS forecast,
+    ols.forecast,
     ri.revenue AS actual
 FROM ols_raw ols
 JOIN reg_input_numbered ri ON ols.fold_id = ri.fold_id AND ols.row_in_fold = ri.row_in_fold
 WHERE ri.split = 'test';
+
+-- Calculate metrics per fold using built-in functions
+SELECT
+    fold_id,
+    COUNT(*) AS n_predictions,
+    ROUND(ts_mae(LIST(actual), LIST(forecast)), 2) AS mae,
+    ROUND(ts_rmse(LIST(actual), LIST(forecast)), 2) AS rmse,
+    ROUND(ts_bias(LIST(actual), LIST(forecast)), 2) AS bias
+FROM ols_predictions
+GROUP BY fold_id
+ORDER BY fold_id;
 ```
 
 ### Why It Works: Key Steps
