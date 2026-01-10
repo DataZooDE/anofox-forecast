@@ -10,6 +10,7 @@ The anofox-forecast extension provides a complete set of functions for time seri
 
 - `ts_cv_split` - Split data into train/test sets for multiple CV folds
 - `ts_cv_split_index` - **Memory-efficient** split returning only index columns (no target data)
+- `ts_cv_forecast_by` - **Parallel fold execution** - run forecasts for all folds at once
 - `ts_cv_split_folds` - Generate fold boundary information
 - `ts_cv_generate_folds` - Automatically generate training end times
 - `ts_hydrate_split` - **Safe join** of CV splits with source data, masking unknown columns
@@ -28,6 +29,7 @@ The anofox-forecast extension provides a complete set of functions for time seri
 4. [Function Reference](#function-reference)
    - [ts_cv_split](#ts_cv_split)
    - [ts_cv_split_index](#ts_cv_split_index) ⭐ Memory-efficient
+   - [ts_cv_forecast_by](#ts_cv_forecast_by) ⭐ Parallel folds
    - [ts_cv_split_folds](#ts_cv_split_folds)
    - [ts_cv_generate_folds](#ts_cv_generate_folds)
    - [ts_hydrate_split](#ts_hydrate_split) ⭐ Safe Join
@@ -331,6 +333,105 @@ JOIN sales_data sd ON ci.group_col = sd.store_id AND ci.date_col = sd.date;
 |----------|-------------------|--------------|----------|
 | `ts_cv_split` | Yes | Higher | Simple workflows, direct forecasting |
 | `ts_cv_split_index` | No | Lower | Large datasets, custom hydration |
+
+[Go to top](#time-series-cross-validation)
+
+---
+
+### ts_cv_forecast_by
+
+⭐ **Parallel fold execution** - Generate forecasts for all CV folds in a single query. DuckDB automatically parallelizes across folds and series, providing massive performance gains compared to serial fold-by-fold processing.
+
+**Why Use This?**
+
+- **Parallel execution**: All folds processed simultaneously using DuckDB's thread pool
+- **Single query**: No application-layer loop required
+- **Vectorized**: Leverages DuckDB's columnar engine for maximum throughput
+- **3-10x faster**: Compared to serial fold-by-fold execution
+
+**Signature:**
+
+```sql
+ts_cv_forecast_by(
+    cv_splits           VARCHAR,    -- Table with CV training data (filter to split='train')
+    group_col           COLUMN,     -- Series identifier column (group_col from cv_splits)
+    date_col            COLUMN,     -- Date column (date_col from cv_splits)
+    target_col          COLUMN,     -- Target column (target_col from cv_splits)
+    method              VARCHAR,    -- Forecast method ('AutoETS', 'ARIMA', 'Naive', etc.)
+    horizon             INTEGER,    -- Forecast horizon
+    params              MAP,        -- Model parameters
+    frequency           VARCHAR     -- Optional: time frequency (default '1d')
+) → TABLE
+```
+
+**Output Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | CV fold number |
+| `id` | VARCHAR | Series identifier |
+| `forecast_step` | INTEGER | Step within horizon (1 to horizon) |
+| `date` | TIMESTAMP | Forecast date |
+| `point_forecast` | DOUBLE | Point forecast |
+| `lower_90` | DOUBLE | Lower 90% prediction interval |
+| `upper_90` | DOUBLE | Upper 90% prediction interval |
+| `model_name` | VARCHAR | Model used |
+
+**Example:**
+
+```sql
+-- Create CV splits
+CREATE TABLE cv_splits AS
+SELECT * FROM ts_cv_split('sales_data', category, date, sales,
+    training_end_times, 7, '1d', MAP{});
+
+-- Extract training data
+CREATE TABLE cv_train AS
+SELECT * FROM cv_splits WHERE split = 'train';
+
+-- Generate forecasts for ALL folds in parallel!
+CREATE TABLE cv_forecasts AS
+SELECT *
+FROM ts_cv_forecast_by(
+    'cv_train',
+    group_col,      -- Use standardized column names from cv_splits
+    date_col,
+    target_col,
+    'AutoETS',
+    7,              -- 7-day horizon
+    MAP{},
+    '1d'
+);
+
+-- Join with actuals for evaluation
+SELECT
+    f.fold_id,
+    f.id AS category,
+    f.date,
+    f.point_forecast,
+    t.target_col AS actual,
+    ABS(f.point_forecast - t.target_col) AS abs_error
+FROM cv_forecasts f
+JOIN cv_splits t
+    ON f.fold_id = t.fold_id
+    AND f.id = t.group_col
+    AND f.date = t.date_col
+WHERE t.split = 'test';
+```
+
+**Performance Comparison:**
+
+```
+SERIAL (old approach):
+  FOR fold IN 1..N:
+    FOR category IN categories:
+      SELECT * FROM ts_forecast_by(...)  -- One query per fold × category
+
+PARALLEL (ts_cv_forecast_by):
+  SELECT * FROM ts_cv_forecast_by(...)   -- ALL folds + categories at once!
+```
+
+With 8 CPU cores, 3 folds, and 10 categories, the parallel version can be **up to 10x faster**.
 
 [Go to top](#time-series-cross-validation)
 

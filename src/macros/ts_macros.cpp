@@ -505,6 +505,55 @@ FROM forecast_data
 ORDER BY id, forecast_step
 )"},
 
+    // ts_cv_forecast_by: Generate forecasts for CV splits with parallel fold execution
+    // C++ API: ts_cv_forecast_by(cv_splits, group_col, date_col, target_col, method, horizon, params, frequency)
+    // Processes all folds in parallel using DuckDB's vectorization
+    // cv_splits should be output from ts_cv_split filtered to split='train'
+    {"ts_cv_forecast_by", {"cv_splits", "group_col", "date_col", "target_col", "method", "horizon", "params", nullptr}, {{"frequency", "'1d'"}, {nullptr, nullptr}},
+R"(
+WITH _freq AS (
+    SELECT CASE
+        WHEN frequency::VARCHAR ~ '^[0-9]+$' THEN (frequency::VARCHAR || ' day')::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'w$', ' week'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'mo$', ' month'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency::VARCHAR, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'y$', ' year'))::INTERVAL
+        ELSE frequency::INTERVAL
+    END AS _interval
+),
+cv_data AS (
+    SELECT
+        fold_id,
+        group_col AS _grp,
+        date_col,
+        target_col
+    FROM query_table(cv_splits::VARCHAR)
+),
+forecast_data AS (
+    SELECT
+        fold_id,
+        _grp AS id,
+        date_trunc('second', MAX(date_col)::TIMESTAMP) AS last_date,
+        _ts_forecast(LIST(target_col ORDER BY date_col), horizon, method) AS fcst
+    FROM cv_data
+    GROUP BY fold_id, _grp
+)
+SELECT
+    fold_id,
+    id,
+    UNNEST(generate_series(1, len((fcst).point)))::INTEGER AS forecast_step,
+    UNNEST(generate_series(last_date + (SELECT _interval FROM _freq), last_date + (len((fcst).point)::INTEGER * EXTRACT(EPOCH FROM (SELECT _interval FROM _freq)) || ' seconds')::INTERVAL, (SELECT _interval FROM _freq)))::TIMESTAMP AS date,
+    UNNEST((fcst).point) AS point_forecast,
+    UNNEST((fcst).lower) AS lower_90,
+    UNNEST((fcst).upper) AS upper_90,
+    (fcst).model AS model_name
+FROM forecast_data
+ORDER BY fold_id, id, forecast_step
+)"},
+
     // ts_forecast_exog: Generate forecasts with exogenous variables (single series)
     // C++ API: ts_forecast_exog(source, date_col, target_col, xreg_cols, future_source, future_date_col, future_xreg_cols, method, horizon, params)
     // - source: historical data table with y and X columns
