@@ -2215,11 +2215,22 @@ Time series cross-validation requires special handling because data has temporal
 
 | Function | Purpose |
 |----------|---------|
+| `ts_backtest_auto` | **One-liner backtest** - complete CV in a single call |
 | `ts_cv_generate_folds` | Auto-generate fold boundaries based on data range |
 | `ts_cv_split_folds` | View fold date ranges (train/test boundaries) |
 | `ts_cv_split` | Create train/test splits with fold assignments |
+| `ts_cv_forecast_by` | Generate forecasts for all CV folds in parallel |
+| `ts_prepare_regression_input` | Prepare data for regression models (masks test targets) |
+| `ts_hydrate_features` | Join CV splits with source features safely |
 | `ts_fill_unknown` | Fill future feature values to prevent data leakage |
 | `ts_mark_unknown` | Mark rows as known/unknown for custom handling |
+
+### Two Usage Patterns
+
+| Pattern | Use Case | Complexity |
+|---------|----------|------------|
+| **One-liner** (`ts_backtest_auto`) | Quick evaluation, 80% of use cases | Simple |
+| **Modular** (`ts_cv_split` + `ts_cv_forecast_by`) | Custom pipelines, regression models | Advanced |
 
 ### Typical Workflow
 
@@ -2235,6 +2246,135 @@ SELECT * FROM ts_cv_split('data', 'group_id', 'date', 'value', [...], 5, '1d', M
 
 -- 4. Fill unknown features for backtesting
 SELECT * FROM ts_fill_unknown('data', 'group_id', 'date', 'feature', cutoff, MAP{});
+```
+
+---
+
+### One-Liner Backtest
+
+**ts_backtest_auto**
+
+Complete backtesting in a single function call. Combines fold generation, data splitting, forecasting, and evaluation. This is the recommended approach for most use cases.
+
+**Signature:**
+```sql
+ts_backtest_auto(
+    source VARCHAR,         -- Table name
+    group_col COLUMN,       -- Series identifier column
+    date_col COLUMN,        -- Date/timestamp column
+    target_col COLUMN,      -- Target value column
+    horizon BIGINT,         -- Forecast horizon (periods ahead)
+    folds BIGINT,           -- Number of CV folds
+    frequency VARCHAR,      -- Time frequency ('1d', '1h', '1w', '1mo')
+    params MAP,             -- Model and CV parameters
+    features VARCHAR[],     -- Optional: regressor column names (default NULL)
+    metric VARCHAR          -- Optional: fold metric ('rmse', 'mae', etc., default 'rmse')
+) → TABLE
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Table containing time series data |
+| `group_col` | COLUMN | Column identifying each series (unquoted) |
+| `date_col` | COLUMN | Date/timestamp column (unquoted) |
+| `target_col` | COLUMN | Target value to forecast (unquoted) |
+| `horizon` | BIGINT | Number of periods to forecast ahead |
+| `folds` | BIGINT | Number of CV folds |
+| `frequency` | VARCHAR | Data frequency (`'1d'`, `'1h'`, `'1w'`, `'1mo'`, `'1q'`, `'1y'`) |
+| `params` | MAP | Model and CV parameters (see below) |
+| `features` | VARCHAR[] | Optional regressor columns for regression models (default `NULL`) |
+| `metric` | VARCHAR | Metric for `fold_metric_score` column (default `'rmse'`) |
+
+**Params MAP Options:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `method` | VARCHAR | `'AutoETS'` | Forecasting model (see [Supported Models](#supported-models)) |
+| `gap` | BIGINT | `0` | Periods between train end and test start (simulates ETL latency) |
+| `embargo` | BIGINT | `0` | Periods to exclude from training after previous fold's test |
+| `window_type` | VARCHAR | `'expanding'` | Training window: `'expanding'`, `'fixed'`, or `'sliding'` |
+| `min_train_size` | BIGINT | `1` | Minimum training periods (used with `fixed`/`sliding`) |
+| `initial_train_size` | BIGINT | 50% of data | Periods for first fold's training set |
+| `skip_length` | BIGINT | `horizon` | Periods between fold start times |
+| `clip_horizon` | BOOLEAN | `false` | If `true`, include folds with partial test windows |
+
+**Supported Metrics:**
+
+All metrics use the same scalar functions (`ts_mae`, `ts_rmse`, etc.) ensuring consistent calculations.
+
+| Metric | Parameter | Description |
+|--------|-----------|-------------|
+| RMSE | `'rmse'` | Root Mean Squared Error (default) |
+| MAE | `'mae'` | Mean Absolute Error |
+| MAPE | `'mape'` | Mean Absolute Percentage Error |
+| MSE | `'mse'` | Mean Squared Error |
+| SMAPE | `'smape'` | Symmetric Mean Absolute Percentage Error |
+| Bias | `'bias'` | Mean Error (forecast - actual) |
+| R² | `'r2'` | Coefficient of Determination |
+| Coverage | `'coverage'` | Prediction interval coverage (uses lower_90/upper_90) |
+
+**Not available in backtest** (require additional inputs):
+| Metric | Reason |
+|--------|--------|
+| MASE | Requires baseline predictions (3rd array) |
+| rMAE | Requires second model predictions for comparison |
+| Quantile Loss | Requires quantile level parameter |
+| MQLoss | Requires multiple quantile arrays and levels |
+
+These can still be computed post-hoc using the scalar functions on the output columns.
+
+**Output Columns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | CV fold number |
+| `group_col` | ANY | Series identifier |
+| `date` | TIMESTAMP | Forecast date |
+| `forecast` | DOUBLE | Point forecast |
+| `actual` | DOUBLE | Actual value |
+| `error` | DOUBLE | forecast - actual |
+| `abs_error` | DOUBLE | \|forecast - actual\| |
+| `lower_90` | DOUBLE | Lower bound of 90% prediction interval |
+| `upper_90` | DOUBLE | Upper bound of 90% prediction interval |
+| `model_name` | VARCHAR | Model used for forecasting |
+| `fold_metric_score` | DOUBLE | Calculated metric for this fold |
+
+**Examples:**
+```sql
+-- Basic backtest with AutoETS
+SELECT * FROM ts_backtest_auto(
+    'sales_data', store_id, date, revenue,
+    7,              -- 7-day horizon
+    5,              -- 5 folds
+    '1d',           -- daily frequency
+    MAP{}           -- defaults: AutoETS, expanding window
+);
+
+-- Compare with different metric
+SELECT * FROM ts_backtest_auto(
+    'sales_data', store_id, date, revenue, 7, 5, '1d',
+    MAP{'method': 'Theta'},
+    NULL,           -- no features
+    'smape'         -- use SMAPE metric
+);
+
+-- With gap for ETL latency and fixed window
+SELECT * FROM ts_backtest_auto(
+    'sales_data', store_id, date, revenue, 7, 5, '1d',
+    MAP{
+        'method': 'SeasonalNaive',
+        'gap': '2',                 -- 2-day data delay
+        'window_type': 'fixed',
+        'min_train_size': '30'
+    }
+);
+
+-- Aggregate results by model
+SELECT
+    model_name,
+    AVG(abs_error) AS mae,
+    AVG(fold_metric_score) AS avg_rmse
+FROM ts_backtest_auto('sales_data', store_id, date, revenue, 7, 5, '1d', MAP{})
+GROUP BY model_name;
 ```
 
 ---
