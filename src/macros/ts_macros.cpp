@@ -904,12 +904,16 @@ FROM per_group
     // training_end_times: LIST of cutoff dates for each fold
     // horizon: number of periods in test set
     // frequency: time frequency ('1d', '1h', etc.)
-    // params MAP supports: gap (BIGINT) - periods between training end and test start (default 0)
-    // Returns: fold_id, train_end, test_start, test_end, gap for each fold
+    // params MAP supports:
+    //   gap (BIGINT) - periods between training end and test start (default 0)
+    //   embargo (BIGINT) - periods to exclude from training after previous fold's test end (default 0)
+    // Returns: fold_id, train_start, train_end, test_start, test_end, horizon, gap, embargo for each fold
     {"ts_cv_split_folds", {"source", "group_col", "date_col", "training_end_times", "horizon", "frequency", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH _params AS (
-    SELECT COALESCE(TRY_CAST(params['gap'] AS BIGINT), 0) AS _gap
+    SELECT
+        COALESCE(TRY_CAST(params['gap'] AS BIGINT), 0) AS _gap,
+        COALESCE(TRY_CAST(params['embargo'] AS BIGINT), 0) AS _embargo
 ),
 _freq AS (
     SELECT CASE
@@ -929,7 +933,7 @@ date_bounds AS (
         MAX(date_trunc('second', date_col::TIMESTAMP)) AS _max_dt
     FROM query_table(source::VARCHAR)
 ),
-folds AS (
+folds_raw AS (
     SELECT
         ROW_NUMBER() OVER (ORDER BY _train_end) AS fold_id,
         date_trunc('second', _train_end::TIMESTAMP) AS train_end,
@@ -937,23 +941,46 @@ folds AS (
         date_trunc('second', _train_end::TIMESTAMP) + (((SELECT _gap FROM _params) + 1) * (SELECT _interval FROM _freq)) AS test_start,
         date_trunc('second', _train_end::TIMESTAMP) + (((SELECT _gap FROM _params) + horizon) * (SELECT _interval FROM _freq)) AS test_end
     FROM (SELECT UNNEST(training_end_times) AS _train_end)
+),
+folds_with_embargo AS (
+    SELECT
+        fold_id,
+        train_end,
+        test_start,
+        test_end,
+        -- Embargo: train_start must be at least embargo periods after previous fold's test_end
+        -- Only apply if embargo > 0; otherwise use min_date (no constraint)
+        CASE
+            WHEN (SELECT _embargo FROM _params) > 0 THEN
+                GREATEST(
+                    (SELECT _min_dt FROM date_bounds),
+                    COALESCE(
+                        LAG(test_end) OVER (ORDER BY fold_id) + ((SELECT _embargo FROM _params) * (SELECT _interval FROM _freq)),
+                        (SELECT _min_dt FROM date_bounds)
+                    )
+                )
+            ELSE (SELECT _min_dt FROM date_bounds)
+        END AS train_start_with_embargo
+    FROM folds_raw
 )
 SELECT
     fold_id::BIGINT AS fold_id,
-    (SELECT _min_dt FROM date_bounds) AS train_start,
+    train_start_with_embargo AS train_start,
     train_end,
     test_start,
     test_end,
     horizon::BIGINT AS horizon,
-    (SELECT _gap FROM _params)::BIGINT AS gap
-FROM folds
+    (SELECT _gap FROM _params)::BIGINT AS gap,
+    (SELECT _embargo FROM _params)::BIGINT AS embargo
+FROM folds_with_embargo
 ORDER BY fold_id
 )"},
 
     // ts_cv_split: Split time series data into train/test sets for cross-validation
     // C++ API: ts_cv_split(source, group_col, date_col, target_col, training_end_times, horizon, frequency, params)
-    // params MAP supports: window_type ('expanding', 'fixed', 'sliding'), min_train_size (BIGINT), gap (BIGINT)
+    // params MAP supports: window_type ('expanding', 'fixed', 'sliding'), min_train_size (BIGINT), gap (BIGINT), embargo (BIGINT)
     // gap: number of periods between training end and test start (default 0, simulates data latency)
+    // embargo: number of periods to exclude from training after previous fold's test end (default 0, prevents label leakage)
     // Returns: group_col, date_col, target_col, fold_id, split (train/test)
     {"ts_cv_split", {"source", "group_col", "date_col", "target_col", "training_end_times", "horizon", "frequency", "params", nullptr}, {{nullptr, nullptr}},
 R"(
@@ -961,7 +988,8 @@ WITH _params AS (
     SELECT
         COALESCE(params['window_type'], 'expanding') AS _window_type,
         COALESCE(TRY_CAST(params['min_train_size'] AS BIGINT), 1) AS _min_train_size,
-        COALESCE(TRY_CAST(params['gap'] AS BIGINT), 0) AS _gap
+        COALESCE(TRY_CAST(params['gap'] AS BIGINT), 0) AS _gap,
+        COALESCE(TRY_CAST(params['embargo'] AS BIGINT), 0) AS _embargo
 ),
 _freq AS (
     SELECT CASE
@@ -985,26 +1013,49 @@ src AS (
 date_bounds AS (
     SELECT MIN(_dt) AS _min_dt FROM src
 ),
-folds AS (
+folds_raw AS (
     SELECT
         ROW_NUMBER() OVER (ORDER BY _train_end) AS fold_id,
-        date_trunc('second', _train_end::TIMESTAMP) AS train_end
+        date_trunc('second', _train_end::TIMESTAMP) AS train_end,
+        -- Gap: skip _gap periods after training before test starts
+        date_trunc('second', _train_end::TIMESTAMP) + (((SELECT _gap FROM _params) + 1) * (SELECT _interval FROM _freq)) AS test_start,
+        date_trunc('second', _train_end::TIMESTAMP) + (((SELECT _gap FROM _params) + horizon) * (SELECT _interval FROM _freq)) AS test_end
     FROM (SELECT UNNEST(training_end_times) AS _train_end)
+),
+folds_with_embargo AS (
+    SELECT
+        fold_id,
+        train_end,
+        test_start,
+        test_end,
+        -- Embargo: only compute cutoff if embargo > 0
+        CASE
+            WHEN (SELECT _embargo FROM _params) > 0 THEN
+                COALESCE(
+                    LAG(test_end) OVER (ORDER BY fold_id) + ((SELECT _embargo FROM _params) * (SELECT _interval FROM _freq)),
+                    (SELECT _min_dt FROM date_bounds)
+                )
+            ELSE (SELECT _min_dt FROM date_bounds)
+        END AS embargo_cutoff
+    FROM folds_raw
 ),
 fold_bounds AS (
     SELECT
         f.fold_id,
-        CASE
-            WHEN (SELECT _window_type FROM _params) = 'expanding' THEN (SELECT _min_dt FROM date_bounds)
-            WHEN (SELECT _window_type FROM _params) = 'fixed' THEN f.train_end - ((SELECT _min_train_size FROM _params) * (SELECT _interval FROM _freq))
-            WHEN (SELECT _window_type FROM _params) = 'sliding' THEN f.train_end - ((SELECT _min_train_size FROM _params) * (SELECT _interval FROM _freq))
-            ELSE (SELECT _min_dt FROM date_bounds)
-        END AS train_start,
+        -- Train start is the GREATER of: window-based start OR embargo cutoff
+        GREATEST(
+            CASE
+                WHEN (SELECT _window_type FROM _params) = 'expanding' THEN (SELECT _min_dt FROM date_bounds)
+                WHEN (SELECT _window_type FROM _params) = 'fixed' THEN f.train_end - ((SELECT _min_train_size FROM _params) * (SELECT _interval FROM _freq))
+                WHEN (SELECT _window_type FROM _params) = 'sliding' THEN f.train_end - ((SELECT _min_train_size FROM _params) * (SELECT _interval FROM _freq))
+                ELSE (SELECT _min_dt FROM date_bounds)
+            END,
+            f.embargo_cutoff
+        ) AS train_start,
         f.train_end,
-        -- Gap: skip _gap periods after training before test starts
-        f.train_end + (((SELECT _gap FROM _params) + 1) * (SELECT _interval FROM _freq)) AS test_start,
-        f.train_end + (((SELECT _gap FROM _params) + horizon) * (SELECT _interval FROM _freq)) AS test_end
-    FROM folds f
+        f.test_start,
+        f.test_end
+    FROM folds_with_embargo f
 )
 SELECT
     s._grp AS group_col,
@@ -1025,7 +1076,7 @@ ORDER BY fb.fold_id, s._grp, s._dt
 
     // ts_cv_split_index: Memory-efficient CV split that returns only index columns (no data columns)
     // C++ API: ts_cv_split_index(source, group_col, date_col, training_end_times, horizon, frequency, params)
-    // params MAP supports: window_type ('expanding', 'fixed', 'sliding'), min_train_size (BIGINT), gap (BIGINT)
+    // params MAP supports: window_type ('expanding', 'fixed', 'sliding'), min_train_size (BIGINT), gap (BIGINT), embargo (BIGINT)
     // Returns: group_col, date_col, fold_id, split (train/test) - NO target column
     // Use this for large datasets to avoid duplicating data across folds
     // Join back to source using ts_hydrate_split_full for complete data
@@ -1035,7 +1086,8 @@ WITH _params AS (
     SELECT
         COALESCE(params['window_type'], 'expanding') AS _window_type,
         COALESCE(TRY_CAST(params['min_train_size'] AS BIGINT), 1) AS _min_train_size,
-        COALESCE(TRY_CAST(params['gap'] AS BIGINT), 0) AS _gap
+        COALESCE(TRY_CAST(params['gap'] AS BIGINT), 0) AS _gap,
+        COALESCE(TRY_CAST(params['embargo'] AS BIGINT), 0) AS _embargo
 ),
 _freq AS (
     SELECT CASE
@@ -1058,25 +1110,47 @@ src AS (
 date_bounds AS (
     SELECT MIN(_dt) AS _min_dt FROM src
 ),
-folds AS (
+folds_raw AS (
     SELECT
         ROW_NUMBER() OVER (ORDER BY _train_end) AS fold_id,
-        date_trunc('second', _train_end::TIMESTAMP) AS train_end
+        date_trunc('second', _train_end::TIMESTAMP) AS train_end,
+        date_trunc('second', _train_end::TIMESTAMP) + (((SELECT _gap FROM _params) + 1) * (SELECT _interval FROM _freq)) AS test_start,
+        date_trunc('second', _train_end::TIMESTAMP) + (((SELECT _gap FROM _params) + horizon) * (SELECT _interval FROM _freq)) AS test_end
     FROM (SELECT UNNEST(training_end_times) AS _train_end)
+),
+folds_with_embargo AS (
+    SELECT
+        fold_id,
+        train_end,
+        test_start,
+        test_end,
+        -- Embargo: only compute cutoff if embargo > 0
+        CASE
+            WHEN (SELECT _embargo FROM _params) > 0 THEN
+                COALESCE(
+                    LAG(test_end) OVER (ORDER BY fold_id) + ((SELECT _embargo FROM _params) * (SELECT _interval FROM _freq)),
+                    (SELECT _min_dt FROM date_bounds)
+                )
+            ELSE (SELECT _min_dt FROM date_bounds)
+        END AS embargo_cutoff
+    FROM folds_raw
 ),
 fold_bounds AS (
     SELECT
         f.fold_id,
-        CASE
-            WHEN (SELECT _window_type FROM _params) = 'expanding' THEN (SELECT _min_dt FROM date_bounds)
-            WHEN (SELECT _window_type FROM _params) = 'fixed' THEN f.train_end - ((SELECT _min_train_size FROM _params) * (SELECT _interval FROM _freq))
-            WHEN (SELECT _window_type FROM _params) = 'sliding' THEN f.train_end - ((SELECT _min_train_size FROM _params) * (SELECT _interval FROM _freq))
-            ELSE (SELECT _min_dt FROM date_bounds)
-        END AS train_start,
+        GREATEST(
+            CASE
+                WHEN (SELECT _window_type FROM _params) = 'expanding' THEN (SELECT _min_dt FROM date_bounds)
+                WHEN (SELECT _window_type FROM _params) = 'fixed' THEN f.train_end - ((SELECT _min_train_size FROM _params) * (SELECT _interval FROM _freq))
+                WHEN (SELECT _window_type FROM _params) = 'sliding' THEN f.train_end - ((SELECT _min_train_size FROM _params) * (SELECT _interval FROM _freq))
+                ELSE (SELECT _min_dt FROM date_bounds)
+            END,
+            f.embargo_cutoff
+        ) AS train_start,
         f.train_end,
-        f.train_end + (((SELECT _gap FROM _params) + 1) * (SELECT _interval FROM _freq)) AS test_start,
-        f.train_end + (((SELECT _gap FROM _params) + horizon) * (SELECT _interval FROM _freq)) AS test_end
-    FROM folds f
+        f.test_start,
+        f.test_end
+    FROM folds_with_embargo f
 )
 SELECT
     s._grp AS group_col,
@@ -1303,6 +1377,174 @@ fold_end_times AS (
 )
 SELECT LIST(train_end ORDER BY train_end) AS training_end_times
 FROM fold_end_times
+)"},
+
+    // ts_backtest_auto: One-liner backtest combining fold generation, splitting, forecasting, and evaluation
+    // C++ API: ts_backtest_auto(source, group_col, date_col, target_col, horizon, folds, frequency, params)
+    // params MAP supports: method (VARCHAR, default 'AutoETS'), gap (BIGINT), embargo (BIGINT),
+    //                      window_type ('expanding', 'fixed', 'sliding'), initial_train_size (BIGINT)
+    // Returns: fold_id, group_col, date, forecast, actual, error, abs_error, model_name
+    {"ts_backtest_auto", {"source", "group_col", "date_col", "target_col", "horizon", "folds", "frequency", "params", nullptr}, {{nullptr, nullptr}},
+R"(
+WITH _params AS (
+    SELECT
+        COALESCE(params['method'], 'AutoETS') AS _method,
+        COALESCE(params['window_type'], 'expanding') AS _window_type,
+        COALESCE(TRY_CAST(params['min_train_size'] AS BIGINT), 1) AS _min_train_size,
+        COALESCE(TRY_CAST(params['gap'] AS BIGINT), 0) AS _gap,
+        COALESCE(TRY_CAST(params['embargo'] AS BIGINT), 0) AS _embargo,
+        TRY_CAST(params['initial_train_size'] AS BIGINT) AS _init_train_size
+),
+_freq AS (
+    SELECT CASE
+        WHEN frequency ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency, 'd$', ' day'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency, 'h$', ' hour'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency, '(m|min)$', ' minute'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency, 'w$', ' week'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency, 'mo$', ' month'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
+        WHEN frequency ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency, 'y$', ' year'))::INTERVAL
+        ELSE frequency::INTERVAL
+    END AS _interval
+),
+-- Source data
+src AS (
+    SELECT
+        group_col AS _grp,
+        date_trunc('second', date_col::TIMESTAMP) AS _dt,
+        target_col AS _target
+    FROM query_table(source::VARCHAR)
+),
+-- Date bounds for fold generation
+date_bounds AS (
+    SELECT
+        MIN(_dt) AS _min_dt,
+        MAX(_dt) AS _max_dt,
+        COUNT(DISTINCT _dt) AS _n_dates
+    FROM src
+),
+-- Compute fold parameters
+_computed AS (
+    SELECT
+        _min_dt,
+        _max_dt,
+        _n_dates,
+        COALESCE((SELECT _init_train_size FROM _params), GREATEST((_n_dates / 2)::BIGINT, 1)) AS _init_size,
+        (SELECT _interval FROM _freq) AS _interval
+    FROM date_bounds
+),
+-- Generate fold end times
+fold_end_times AS (
+    SELECT
+        _min_dt + (_init_size * _interval) + ((generate_series - 1) * horizon * _interval) AS train_end
+    FROM _computed, generate_series(1, folds)
+    WHERE _min_dt + (_init_size * _interval) + ((generate_series - 1) * horizon * _interval) + (horizon * _interval) <= _max_dt
+),
+training_end_times AS (
+    SELECT LIST(train_end ORDER BY train_end) AS _times FROM fold_end_times
+),
+-- Generate fold boundaries with gap and embargo
+folds_raw AS (
+    SELECT
+        ROW_NUMBER() OVER (ORDER BY _train_end) AS fold_id,
+        date_trunc('second', _train_end::TIMESTAMP) AS train_end,
+        date_trunc('second', _train_end::TIMESTAMP) + (((SELECT _gap FROM _params) + 1) * (SELECT _interval FROM _freq)) AS test_start,
+        date_trunc('second', _train_end::TIMESTAMP) + (((SELECT _gap FROM _params) + horizon) * (SELECT _interval FROM _freq)) AS test_end
+    FROM (SELECT UNNEST((SELECT _times FROM training_end_times)) AS _train_end)
+),
+folds_with_embargo AS (
+    SELECT
+        fold_id,
+        train_end,
+        test_start,
+        test_end,
+        CASE
+            WHEN (SELECT _embargo FROM _params) > 0 THEN
+                COALESCE(
+                    LAG(test_end) OVER (ORDER BY fold_id) + ((SELECT _embargo FROM _params) * (SELECT _interval FROM _freq)),
+                    (SELECT _min_dt FROM date_bounds)
+                )
+            ELSE (SELECT _min_dt FROM date_bounds)
+        END AS embargo_cutoff
+    FROM folds_raw
+),
+fold_bounds AS (
+    SELECT
+        f.fold_id,
+        GREATEST(
+            CASE
+                WHEN (SELECT _window_type FROM _params) = 'expanding' THEN (SELECT _min_dt FROM date_bounds)
+                WHEN (SELECT _window_type FROM _params) = 'fixed' THEN f.train_end - ((SELECT _min_train_size FROM _params) * (SELECT _interval FROM _freq))
+                WHEN (SELECT _window_type FROM _params) = 'sliding' THEN f.train_end - ((SELECT _min_train_size FROM _params) * (SELECT _interval FROM _freq))
+                ELSE (SELECT _min_dt FROM date_bounds)
+            END,
+            f.embargo_cutoff
+        ) AS train_start,
+        f.train_end,
+        f.test_start,
+        f.test_end
+    FROM folds_with_embargo f
+),
+-- Create train/test splits
+cv_splits AS (
+    SELECT
+        s._grp AS _grp,
+        s._dt AS _dt,
+        s._target AS _target,
+        fb.fold_id::BIGINT AS fold_id,
+        CASE
+            WHEN s._dt >= fb.train_start AND s._dt <= fb.train_end THEN 'train'
+            WHEN s._dt >= fb.test_start AND s._dt <= fb.test_end THEN 'test'
+            ELSE NULL
+        END AS split
+    FROM src s
+    CROSS JOIN fold_bounds fb
+    WHERE (s._dt >= fb.train_start AND s._dt <= fb.train_end)
+       OR (s._dt >= fb.test_start AND s._dt <= fb.test_end)
+),
+-- Generate forecasts for training data (using ts_cv_forecast_by logic)
+cv_train AS (
+    SELECT fold_id, _grp, _dt, _target FROM cv_splits WHERE split = 'train'
+),
+forecast_data AS (
+    SELECT
+        fold_id,
+        _grp AS id,
+        date_trunc('second', MAX(_dt)::TIMESTAMP) AS last_date,
+        _ts_forecast(LIST(_target ORDER BY _dt), horizon, (SELECT _method FROM _params)) AS fcst
+    FROM cv_train
+    GROUP BY fold_id, _grp
+),
+forecasts AS (
+    SELECT
+        fold_id,
+        id,
+        UNNEST(generate_series(1, len((fcst).point)))::INTEGER AS forecast_step,
+        UNNEST(generate_series(last_date + (SELECT _interval FROM _freq), last_date + (len((fcst).point)::INTEGER * EXTRACT(EPOCH FROM (SELECT _interval FROM _freq)) || ' seconds')::INTERVAL, (SELECT _interval FROM _freq)))::TIMESTAMP AS _forecast_date,
+        UNNEST((fcst).point) AS point_forecast,
+        UNNEST((fcst).lower) AS lower_90,
+        UNNEST((fcst).upper) AS upper_90,
+        (fcst).model AS model_name
+    FROM forecast_data
+),
+-- Join forecasts with test actuals
+cv_test AS (
+    SELECT fold_id, _grp, _dt, _target FROM cv_splits WHERE split = 'test'
+)
+SELECT
+    f.fold_id,
+    f.id AS group_col,
+    f._forecast_date AS date,
+    f.point_forecast AS forecast,
+    t._target AS actual,
+    f.point_forecast - t._target AS error,
+    ABS(f.point_forecast - t._target) AS abs_error,
+    f.lower_90,
+    f.upper_90,
+    f.model_name
+FROM forecasts f
+JOIN cv_test t ON f.fold_id = t.fold_id AND f.id = t._grp AND f._forecast_date = t._dt
+ORDER BY f.fold_id, f.id, f._forecast_date
 )"},
 
     // Sentinel

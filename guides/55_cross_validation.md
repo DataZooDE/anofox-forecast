@@ -8,6 +8,7 @@ The anofox-forecast extension provides a complete set of functions for time seri
 
 **Key Functions**:
 
+- `ts_backtest_auto` - ⭐ **One-liner backtest** - complete backtest in a single call
 - `ts_cv_split` - Split data into train/test sets for multiple CV folds
 - `ts_cv_split_index` - **Memory-efficient** split returning only index columns (no target data)
 - `ts_cv_forecast_by` - **Parallel fold execution** - run forecasts for all folds at once
@@ -28,6 +29,7 @@ The anofox-forecast extension provides a complete set of functions for time seri
 2. [Quick Start Example](#quick-start-example)
 3. [Window Types](#window-types)
 4. [Function Reference](#function-reference)
+   - [ts_backtest_auto](#ts_backtest_auto) ⭐ One-liner backtest
    - [ts_cv_split](#ts_cv_split)
    - [ts_cv_split_index](#ts_cv_split_index) ⭐ Memory-efficient
    - [ts_cv_forecast_by](#ts_cv_forecast_by) ⭐ Parallel folds
@@ -82,6 +84,47 @@ Data: [==========================================================]
 Fold 1: [TRAIN TRAIN TRAIN TRAIN]  [TEST TEST]
 Fold 2: [TRAIN TRAIN TRAIN TRAIN TRAIN TRAIN]  [TEST TEST]
 Fold 3: [TRAIN TRAIN TRAIN TRAIN TRAIN TRAIN TRAIN TRAIN]  [TEST TEST]
+```
+
+### Gap vs Embargo: Preventing Data Leakage
+
+Two parameters help prevent different types of data leakage:
+
+**Gap** - Simulates data latency (e.g., ETL processing delay):
+
+```
+                    gap=2
+                    vv
+Fold 1: [TRAIN TRAIN]  ##  [TEST TEST]
+        Train ends ──┘  └── 2 periods skipped before test starts
+```
+
+Use `gap` when: Your production data has a processing delay (e.g., sales data takes 2 days to consolidate).
+
+**Embargo** - Prevents label leakage with overlapping targets:
+
+When your target is forward-looking (e.g., "next 7 days' total sales"), the labels in fold 1's test period use actual data that could correlate with fold 2's training features. Embargo excludes training data after the previous fold's test period.
+
+```
+                          embargo=3
+                          vvvvvvv
+Fold 1: [TRAIN TRAIN][TEST TEST]
+Fold 2:              xxx[TRAIN TRAIN][TEST TEST]
+                      └── 3 periods excluded from fold 2's training
+```
+
+Use `embargo` when:
+- Your target aggregates future values (e.g., "revenue in next N days")
+- Features might correlate with future outcomes (e.g., lagged moving averages)
+- You want "purged" cross-validation to prevent any information leakage
+
+```sql
+-- Example: Target is "next 7 days total sales"
+-- Embargo ensures fold 2's training doesn't overlap with fold 1's test labels
+SELECT * FROM ts_cv_split('sales', store, date, next_7d_sales,
+    ['2024-03-01', '2024-03-15']::DATE[], 7, '1d',
+    MAP{'embargo': '7'}  -- 7 days to match target window
+);
 ```
 
 [Go to top](#time-series-cross-validation)
@@ -198,6 +241,107 @@ SELECT * FROM ts_cv_split(
 
 ## Function Reference
 
+### ts_backtest_auto
+
+⭐ **One-liner backtest** - Complete backtesting in a single call. Combines fold generation, data splitting, forecasting, and evaluation into one function.
+
+**Why Use This?**
+
+- **Simplest possible API**: One function call does everything
+- **80% use case**: Perfect when you just want forecast vs actual metrics
+- **No intermediate tables**: No need to manage split tables or joins
+
+**Signature:**
+
+```sql
+ts_backtest_auto(
+    source              VARCHAR,    -- Table name
+    group_col           COLUMN,     -- Series identifier column
+    date_col            COLUMN,     -- Date/timestamp column
+    target_col          COLUMN,     -- Target value column
+    horizon             INTEGER,    -- Forecast horizon
+    folds               INTEGER,    -- Number of CV folds
+    frequency           VARCHAR,    -- Time frequency ('1d', '1h', '1w', '1mo')
+    params              MAP         -- Optional parameters (see below)
+) → TABLE
+```
+
+**Parameters (via params MAP):**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `method` | VARCHAR | 'AutoETS' | Forecast method ('AutoETS', 'ARIMA', 'Naive', etc.) |
+| `window_type` | VARCHAR | 'expanding' | Window type: 'expanding', 'fixed', or 'sliding' |
+| `min_train_size` | INTEGER | 1 | Minimum training periods (for fixed/sliding) |
+| `gap` | INTEGER | 0 | Gap periods between train end and test start |
+| `embargo` | INTEGER | 0 | Periods to exclude from training after previous fold's test |
+| `initial_train_size` | INTEGER | 50% of data | Initial training size before first fold |
+
+**Output Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | CV fold number |
+| `group_col` | VARCHAR | Series identifier |
+| `date` | TIMESTAMP | Forecast date |
+| `forecast` | DOUBLE | Point forecast |
+| `actual` | DOUBLE | Actual value |
+| `error` | DOUBLE | forecast - actual |
+| `abs_error` | DOUBLE | |forecast - actual| |
+| `lower_90` | DOUBLE | Lower 90% prediction interval |
+| `upper_90` | DOUBLE | Upper 90% prediction interval |
+| `model_name` | VARCHAR | Model used |
+
+**Example:**
+
+```sql
+-- Complete backtest in ONE query!
+SELECT * FROM ts_backtest_auto(
+    'sales_data',
+    store_id,
+    date,
+    revenue,
+    7,          -- 7-day forecast horizon
+    5,          -- 5 CV folds
+    '1d',       -- Daily frequency
+    MAP{}       -- Default: AutoETS, expanding window
+);
+
+-- With custom options
+SELECT * FROM ts_backtest_auto(
+    'sales_data', store_id, date, revenue, 7, 5, '1d',
+    MAP{
+        'method': 'Naive',
+        'gap': '2',
+        'embargo': '3'
+    }
+);
+
+-- Aggregate metrics across all folds
+SELECT
+    group_col AS store,
+    ROUND(AVG(abs_error), 2) AS mae,
+    ROUND(SQRT(AVG(error * error)), 2) AS rmse,
+    model_name
+FROM ts_backtest_auto('sales_data', store_id, date, revenue, 7, 5, '1d', MAP{})
+GROUP BY group_col, model_name
+ORDER BY store;
+```
+
+**When to Use ts_backtest_auto vs Individual Functions:**
+
+| Scenario | Recommended |
+|----------|-------------|
+| Quick evaluation | `ts_backtest_auto` |
+| Just need forecast vs actual metrics | `ts_backtest_auto` |
+| Need custom feature handling | Individual functions |
+| Need exogenous variables | Individual functions |
+| Complex multi-step pipeline | Individual functions |
+
+[Go to top](#time-series-cross-validation)
+
+---
+
 ### ts_cv_split
 
 Splits time series data into train/test sets for cross-validation.
@@ -223,7 +367,8 @@ ts_cv_split(
 |-----------|------|---------|-------------|
 | `window_type` | VARCHAR | 'expanding' | Window type: 'expanding', 'fixed', or 'sliding' |
 | `min_train_size` | INTEGER | 1 | Minimum training periods (for fixed/sliding windows) |
-| `gap` | INTEGER | 0 | **Gap periods between training end and test start** (simulates data latency) |
+| `gap` | INTEGER | 0 | Gap periods between training end and test start (simulates data latency) |
+| `embargo` | INTEGER | 0 | Periods to exclude from training after previous fold's test end (prevents label leakage) |
 
 **Output Columns:**
 
@@ -462,18 +607,20 @@ ts_cv_split_folds(
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `gap` | INTEGER | 0 | Gap periods between training end and test start |
+| `embargo` | INTEGER | 0 | Periods to exclude from training after previous fold's test end |
 
 **Output Columns:**
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `fold_id` | BIGINT | Fold number |
-| `train_start` | TIMESTAMP | Training period start |
+| `train_start` | TIMESTAMP | Training period start (respects embargo) |
 | `train_end` | TIMESTAMP | Training period end (cutoff) |
 | `test_start` | TIMESTAMP | Test period start |
 | `test_end` | TIMESTAMP | Test period end |
 | `horizon` | BIGINT | Test horizon |
 | `gap` | BIGINT | Gap periods used |
+| `embargo` | BIGINT | Embargo periods used |
 
 **Example:**
 

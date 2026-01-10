@@ -151,6 +151,53 @@ train	10
 test	5
 
 #######################################
+# ts_cv_split - Embargo Parameter Tests
+#######################################
+
+# Test embargo=0 (default): train starts from beginning for all folds
+query II
+SELECT fold_id, MIN(date_col)::DATE as train_start FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE, '2024-01-15'::DATE], 5, '1d', MAP{})
+WHERE group_col = 'A' AND split = 'train'
+GROUP BY fold_id ORDER BY fold_id;
+----
+1	2024-01-01
+2	2024-01-01
+
+# Test embargo=2: fold 2 train_start = fold 1 test_end + 2 days
+# Fold 1 test_end = 2024-01-15, so fold 2 train_start = 2024-01-17
+query II
+SELECT fold_id, MIN(date_col)::DATE as train_start FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE, '2024-01-20'::DATE], 5, '1d', MAP{'embargo': '2'})
+WHERE group_col = 'A' AND split = 'train'
+GROUP BY fold_id ORDER BY fold_id;
+----
+1	2024-01-01
+2	2024-01-17
+
+# Test embargo reduces training size for subsequent folds
+query II
+SELECT fold_id, COUNT(*) as n_train FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE, '2024-01-20'::DATE], 5, '1d', MAP{'embargo': '2'})
+WHERE group_col = 'A' AND split = 'train'
+GROUP BY fold_id ORDER BY fold_id;
+----
+1	10
+2	4
+
+# Test embargo works with ts_cv_split_folds
+query III
+SELECT fold_id, train_start::DATE, embargo FROM ts_cv_split_folds('cv_test', series_id, date, ['2024-01-10'::DATE, '2024-01-20'::DATE], 5, '1d', MAP{'embargo': '2'});
+----
+1	2024-01-01	2
+2	2024-01-17	2
+
+# Test embargo combined with gap
+# gap affects test_start, embargo affects subsequent fold's train_start
+query IIII
+SELECT fold_id, train_start::DATE, test_start::DATE, gap FROM ts_cv_split_folds('cv_test', series_id, date, ['2024-01-10'::DATE, '2024-01-20'::DATE], 5, '1d', MAP{'embargo': '2', 'gap': '1'});
+----
+1	2024-01-01	2024-01-12	1
+2	2024-01-18	2024-01-22	1
+
+#######################################
 # ts_cv_generate_folds Tests
 #######################################
 
