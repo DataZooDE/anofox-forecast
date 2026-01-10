@@ -152,27 +152,43 @@ SELECT * FROM ts_cv_split(
 );
 
 -- 2. Prepare regression input (masks target as NULL for test rows)
+--    Note: revenue column is preserved as-is for scoring; masked_target is NULL for test
 CREATE OR REPLACE TEMP TABLE reg_input AS
 SELECT * FROM ts_prepare_regression_input(
     'cv_splits', 'sales_data', store_id, date, revenue, MAP{}
 );
 
 -- 3. Run OLS fit-predict with multiple features
+--    OLS results maintain input order within each group, so we match by row number
+WITH
+reg_input_numbered AS (
+    SELECT
+        ROW_NUMBER() OVER (PARTITION BY fold_id ORDER BY group_col, date_col) AS row_in_fold,
+        *
+    FROM reg_input
+),
+ols_raw AS (
+    SELECT
+        ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY group_id) AS row_in_fold,
+        group_id AS fold_id,
+        yhat AS forecast
+    FROM ols_fit_predict_by(
+        'reg_input',
+        fold_id,
+        masked_target,
+        [temperature, is_holiday, promotion_active]
+    )
+)
 SELECT
     ri.fold_id,
     ri.group_col AS store_id,
     ri.date_col AS date,
-    ROUND(ols.yhat, 2) AS forecast,
-    ri.actual_target AS actual,
-    ROUND(ols.yhat - ri.actual_target, 2) AS error,
-    ROUND(ABS(ols.yhat - ri.actual_target), 2) AS abs_error
-FROM ols_fit_predict_by(
-    'reg_input',
-    fold_id,
-    masked_target,          -- NULL for test rows, actual for train
-    [temperature, is_holiday, promotion_active]  -- multiple features
-) ols
-JOIN reg_input ri ON ols.row_id = ri.rowid
+    ROUND(ols.forecast, 2) AS forecast,
+    ri.revenue AS actual,
+    ROUND(ols.forecast - ri.revenue, 2) AS error,
+    ROUND(ABS(ols.forecast - ri.revenue), 2) AS abs_error
+FROM ols_raw ols
+JOIN reg_input_numbered ri ON ols.fold_id = ri.fold_id AND ols.row_in_fold = ri.row_in_fold
 WHERE ri.split = 'test'
 ORDER BY ri.fold_id, ri.group_col, ri.date_col;
 ```
@@ -453,9 +469,8 @@ SELECT
 FROM safe_data;
 
 -- 4. Fill the Unknowns (Imputation)
--- Since 'footfall' is now NULL in the test set, Regression would fail.
--- We fill it using the last observed value from the training set.
-CREATE OR REPLACE TEMP TABLE model_ready_data AS
+-- ts_fill_unknown returns (group_col, date_col, value_col) - join back to get full data
+CREATE OR REPLACE TEMP TABLE filled_footfall AS
 SELECT * FROM ts_fill_unknown(
     'masked_data',          -- source table
     store_id,               -- group column
@@ -465,27 +480,63 @@ SELECT * FROM ts_fill_unknown(
     MAP{'strategy': 'last_value'}  -- fill method
 );
 
+-- Join filled values back to masked_data
+CREATE OR REPLACE TEMP TABLE model_ready_data AS
+SELECT
+    m.fold_id,
+    m.split,
+    m.group_col,
+    m.date_col,
+    m.target_col,
+    m.is_holiday,
+    m.revenue,
+    f.value_col AS footfall_filled
+FROM masked_data m
+JOIN filled_footfall f ON m.group_col = f.group_col AND m.date_col = f.date_col;
+
 -- 5. Run the Backtest using anofox-statistics OLS
--- Note: ts_cv_forecast_by is for univariate models only.
--- For regression, use ts_prepare_regression_input + anofox-statistics:
 INSTALL anofox_statistics FROM community;
 LOAD anofox_statistics;
 
+-- Prepare regression input using model_ready_data
+-- Note: We use the cv_splits structure with features from model_ready_data
 CREATE OR REPLACE TEMP TABLE reg_input AS
-SELECT * FROM ts_prepare_regression_input(
-    'cv_splits', 'model_ready_data', store_id, date, revenue, MAP{}
-);
+SELECT
+    m.fold_id,
+    m.split,
+    m.group_col,
+    m.date_col,
+    m.revenue,
+    m.is_holiday,
+    m.footfall_filled,
+    CASE WHEN m.split = 'test' THEN NULL ELSE m.revenue END AS masked_target
+FROM model_ready_data m;
 
+-- OLS results maintain input order within each group
+WITH
+reg_input_numbered AS (
+    SELECT
+        ROW_NUMBER() OVER (PARTITION BY fold_id ORDER BY group_col, date_col) AS row_in_fold,
+        *
+    FROM reg_input
+),
+ols_raw AS (
+    SELECT
+        ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY group_id) AS row_in_fold,
+        group_id AS fold_id,
+        yhat AS forecast
+    FROM ols_fit_predict_by(
+        'reg_input', fold_id, masked_target, [is_holiday, footfall_filled]
+    )
+)
 SELECT
     ri.fold_id,
     ri.group_col AS store_id,
     ri.date_col AS date,
-    ROUND(ols.yhat, 2) AS forecast,
-    ri.actual_target AS actual
-FROM ols_fit_predict_by(
-    'reg_input', fold_id, masked_target, [is_holiday, footfall_safe]
-) ols
-JOIN reg_input ri ON ols.row_id = ri.rowid
+    ROUND(ols.forecast, 2) AS forecast,
+    ri.revenue AS actual
+FROM ols_raw ols
+JOIN reg_input_numbered ri ON ols.fold_id = ri.fold_id AND ols.row_in_fold = ri.row_in_fold
 WHERE ri.split = 'test';
 ```
 
@@ -496,8 +547,8 @@ WHERE ri.split = 'test';
 | 1 | `ts_cv_split` | Creates CV splits with train/test labels |
 | 2 | `ts_hydrate_features` | Joins data with split info, provides `_is_test` flag |
 | 3 | Manual masking | **Masks unknown features as NULL in test rows** |
-| 4 | `ts_fill_unknown` | Imputes NULL values so regression can run |
-| 5 | `ts_prepare_regression_input` + `ols_fit_predict_by` | Prepares data and runs regression (requires anofox-statistics) |
+| 4 | `ts_fill_unknown` + JOIN | Fills NULL values and joins back to original data |
+| 5 | Manual `reg_input` + `ols_fit_predict_by` | Constructs regression input and runs OLS (requires anofox-statistics) |
 
 ### Fill Methods
 
@@ -510,7 +561,7 @@ WHERE ri.split = 'test';
 
 ---
 
-## Pro Tips: Best Practices
+## Tips
 
 1. **Start Simple**
    Always run `ts_backtest_auto` with a baseline model (like `Naive` or `SeasonalNaive`) before trying complex regressions. If Naive beats your fancy model, something is wrong.
@@ -588,42 +639,3 @@ SELECT * FROM ts_backtest_auto(
 );
 ```
 
----
-
-### Q: Why does my backtest accuracy drop in production?
-
-**A:** Common causes:
-
-| Cause | Solution |
-|-------|----------|
-| Missing `gap` parameter | Set `gap` to match your ETL latency |
-| Leaking future features | Mask unknown features before forecasting |
-| Different horizon | Match backtest horizon to production horizon |
-| Concept drift | Use `window_type: 'fixed'` or `'sliding'` |
-
----
-
-### Q: How do I know if I have data leakage?
-
-**A:** Warning signs:
-- R-squared > 0.95 on business data
-- Test error much lower than training error
-- Performance drops significantly in production
-
-**Checklist:**
-- [ ] Is `gap` set to match ETL latency?
-- [ ] Are all unknown features masked?
-- [ ] Is `embargo` set for overlapping targets?
-- [ ] Are feature values truly available at forecast time?
-
----
-
-## Quick Reference
-
-| Pattern | Complexity | Use Case |
-|---------|------------|----------|
-| [Pattern 1](#pattern-1-the-quick-start) | Simple | Quick model evaluation |
-| [Pattern 2](#pattern-2-regression-with-external-features) | Intermediate | External factors (requires anofox-statistics) |
-| [Pattern 3](#pattern-3-production-reality) | Intermediate | ETL delays, label leakage prevention |
-| [Pattern 4](#pattern-4-the-composable-pipeline) | Advanced | Custom pipelines, debugging |
-| [Pattern 5](#pattern-5-unknown-vs-known-features-mask--fill) | Advanced | Complex feature handling (requires anofox-statistics) |
