@@ -167,6 +167,54 @@ SELECT len(training_end_times) >= 1 FROM ts_cv_generate_folds('cv_test', date, 3
 true
 
 #######################################
+# ts_cv_split_index - Skinny Index Tests
+#######################################
+
+# Test returns only 4 columns (no target_col)
+query I
+SELECT COUNT(*) FROM (
+    DESCRIBE SELECT * FROM ts_cv_split_index('cv_test', series_id, date, ['2024-01-10'::DATE], 5, '1d', MAP{})
+);
+----
+4
+
+# Test has same row count as ts_cv_split
+query II
+SELECT
+    (SELECT COUNT(*) FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE], 5, '1d', MAP{})) as with_target,
+    (SELECT COUNT(*) FROM ts_cv_split_index('cv_test', series_id, date, ['2024-01-10'::DATE], 5, '1d', MAP{})) as without_target;
+----
+30	30
+
+# Test has correct columns: group_col, date_col, fold_id, split
+query IIII
+SELECT group_col, date_col::DATE, fold_id, split FROM ts_cv_split_index('cv_test', series_id, date, ['2024-01-10'::DATE], 5, '1d', MAP{})
+WHERE group_col = 'A' AND split = 'test'
+ORDER BY date_col
+LIMIT 1;
+----
+A	2024-01-11	1	test
+
+# Test gap parameter works with skinny index
+query II
+SELECT split, MIN(date_col)::DATE as min_date FROM ts_cv_split_index('cv_test', series_id, date, ['2024-01-10'::DATE], 5, '1d', MAP{'gap': '2'})
+WHERE group_col = 'A'
+GROUP BY split ORDER BY split DESC;
+----
+train	2024-01-01
+test	2024-01-13
+
+# Test window_type works with skinny index
+query II
+SELECT fold_id, COUNT(*) as n_train FROM ts_cv_split_index('cv_test', series_id, date, ['2024-01-10'::DATE, '2024-01-15'::DATE], 5, '1d', MAP{'window_type': 'fixed', 'min_train_size': '5'})
+WHERE split = 'train'
+GROUP BY fold_id
+ORDER BY fold_id;
+----
+1	12
+2	12
+
+#######################################
 # Edge Cases
 #######################################
 

@@ -730,8 +730,8 @@ ORDER BY src._grp, src._dt
 R"(
 WITH _params AS (
     SELECT
-        COALESCE(params['strategy'][1], 'last_value') AS _strategy,
-        COALESCE(TRY_CAST(params['fill_value'][1] AS DOUBLE), 0.0) AS _fill_value
+        COALESCE(params['strategy'], 'last_value') AS _strategy,
+        COALESCE(TRY_CAST(params['fill_value'] AS DOUBLE), 0.0) AS _fill_value
 ),
 src AS (
     SELECT
@@ -961,6 +961,77 @@ SELECT
     s._grp AS group_col,
     s._dt AS date_col,
     s._target AS target_col,
+    fb.fold_id::BIGINT AS fold_id,
+    CASE
+        WHEN s._dt >= fb.train_start AND s._dt <= fb.train_end THEN 'train'
+        WHEN s._dt >= fb.test_start AND s._dt <= fb.test_end THEN 'test'
+        ELSE NULL
+    END AS split
+FROM src s
+CROSS JOIN fold_bounds fb
+WHERE (s._dt >= fb.train_start AND s._dt <= fb.train_end)
+   OR (s._dt >= fb.test_start AND s._dt <= fb.test_end)
+ORDER BY fb.fold_id, s._grp, s._dt
+)"},
+
+    // ts_cv_split_index: Memory-efficient CV split that returns only index columns (no data columns)
+    // C++ API: ts_cv_split_index(source, group_col, date_col, training_end_times, horizon, frequency, params)
+    // params MAP supports: window_type ('expanding', 'fixed', 'sliding'), min_train_size (BIGINT), gap (BIGINT)
+    // Returns: group_col, date_col, fold_id, split (train/test) - NO target column
+    // Use this for large datasets to avoid duplicating data across folds
+    // Join back to source using ts_hydrate_split_full for complete data
+    {"ts_cv_split_index", {"source", "group_col", "date_col", "training_end_times", "horizon", "frequency", "params", nullptr}, {{nullptr, nullptr}},
+R"(
+WITH _params AS (
+    SELECT
+        COALESCE(params['window_type'], 'expanding') AS _window_type,
+        COALESCE(TRY_CAST(params['min_train_size'] AS BIGINT), 1) AS _min_train_size,
+        COALESCE(TRY_CAST(params['gap'] AS BIGINT), 0) AS _gap
+),
+_freq AS (
+    SELECT CASE
+        WHEN frequency ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency, 'd$', ' day'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency, 'h$', ' hour'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency, '(m|min)$', ' minute'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency, 'w$', ' week'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency, 'mo$', ' month'))::INTERVAL
+        WHEN frequency ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
+        WHEN frequency ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency, 'y$', ' year'))::INTERVAL
+        ELSE frequency::INTERVAL
+    END AS _interval
+),
+src AS (
+    SELECT DISTINCT
+        group_col AS _grp,
+        date_trunc('second', date_col::TIMESTAMP) AS _dt
+    FROM query_table(source::VARCHAR)
+),
+date_bounds AS (
+    SELECT MIN(_dt) AS _min_dt FROM src
+),
+folds AS (
+    SELECT
+        ROW_NUMBER() OVER (ORDER BY _train_end) AS fold_id,
+        date_trunc('second', _train_end::TIMESTAMP) AS train_end
+    FROM (SELECT UNNEST(training_end_times) AS _train_end)
+),
+fold_bounds AS (
+    SELECT
+        f.fold_id,
+        CASE
+            WHEN (SELECT _window_type FROM _params) = 'expanding' THEN (SELECT _min_dt FROM date_bounds)
+            WHEN (SELECT _window_type FROM _params) = 'fixed' THEN f.train_end - ((SELECT _min_train_size FROM _params) * (SELECT _interval FROM _freq))
+            WHEN (SELECT _window_type FROM _params) = 'sliding' THEN f.train_end - ((SELECT _min_train_size FROM _params) * (SELECT _interval FROM _freq))
+            ELSE (SELECT _min_dt FROM date_bounds)
+        END AS train_start,
+        f.train_end,
+        f.train_end + (((SELECT _gap FROM _params) + 1) * (SELECT _interval FROM _freq)) AS test_start,
+        f.train_end + (((SELECT _gap FROM _params) + horizon) * (SELECT _interval FROM _freq)) AS test_end
+    FROM folds f
+)
+SELECT
+    s._grp AS group_col,
+    s._dt AS date_col,
     fb.fold_id::BIGINT AS fold_id,
     CASE
         WHEN s._dt >= fb.train_start AND s._dt <= fb.train_end THEN 'train'

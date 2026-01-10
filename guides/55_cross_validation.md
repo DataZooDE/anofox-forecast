@@ -9,6 +9,7 @@ The anofox-forecast extension provides a complete set of functions for time seri
 **Key Functions**:
 
 - `ts_cv_split` - Split data into train/test sets for multiple CV folds
+- `ts_cv_split_index` - **Memory-efficient** split returning only index columns (no target data)
 - `ts_cv_split_folds` - Generate fold boundary information
 - `ts_cv_generate_folds` - Automatically generate training end times
 - `ts_hydrate_split` - **Safe join** of CV splits with source data, masking unknown columns
@@ -26,6 +27,7 @@ The anofox-forecast extension provides a complete set of functions for time seri
 3. [Window Types](#window-types)
 4. [Function Reference](#function-reference)
    - [ts_cv_split](#ts_cv_split)
+   - [ts_cv_split_index](#ts_cv_split_index) ⭐ Memory-efficient
    - [ts_cv_split_folds](#ts_cv_split_folds)
    - [ts_cv_generate_folds](#ts_cv_generate_folds)
    - [ts_hydrate_split](#ts_hydrate_split) ⭐ Safe Join
@@ -258,6 +260,77 @@ SELECT * FROM ts_cv_split(
     MAP{'gap': '2'}  -- 2-day data latency
 );
 ```
+
+[Go to top](#time-series-cross-validation)
+
+---
+
+### ts_cv_split_index
+
+⭐ **Memory-efficient** variant of `ts_cv_split` that returns only index columns (group, date, fold_id, split) without the target column. Use this when you want to join back to your source data later with `ts_hydrate_split` or a manual join.
+
+**Why Use This?**
+
+- **Memory savings**: For large datasets, avoiding the target column duplication saves significant memory
+- **Flexible hydration**: Join exactly the columns you need later, with appropriate masking
+- **Pipeline-friendly**: Create a small index table, then hydrate with features as needed
+
+**Signature:**
+
+```sql
+ts_cv_split_index(
+    source              VARCHAR,    -- Table name
+    group_col           COLUMN,     -- Series identifier column
+    date_col            COLUMN,     -- Date/timestamp column
+    training_end_times  DATE[],     -- List of training cutoff dates
+    horizon             INTEGER,    -- Number of test periods
+    frequency           VARCHAR,    -- Time frequency ('1d', '1h', '1w', '1mo')
+    params              MAP         -- Optional parameters (see ts_cv_split)
+) → TABLE
+```
+
+**Output Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `group_col` | VARCHAR | Series identifier |
+| `date_col` | TIMESTAMP | Date/timestamp |
+| `fold_id` | BIGINT | Fold number (1, 2, 3, ...) |
+| `split` | VARCHAR | 'train' or 'test' |
+
+**Example:**
+
+```sql
+-- Create memory-efficient CV index
+CREATE TABLE cv_index AS
+SELECT * FROM ts_cv_split_index(
+    'sales_data',
+    store_id,
+    date,
+    ['2024-03-01', '2024-04-01']::DATE[],
+    7,
+    '1d',
+    MAP{}
+);
+
+-- Later, hydrate with specific columns
+SELECT
+    ci.group_col AS store_id,
+    ci.date_col AS date,
+    ci.fold_id,
+    ci.split,
+    sd.sales,
+    CASE WHEN ci.split = 'test' THEN NULL ELSE sd.temperature END AS temperature
+FROM cv_index ci
+JOIN sales_data sd ON ci.group_col = sd.store_id AND ci.date_col = sd.date;
+```
+
+**Comparison with ts_cv_split:**
+
+| Function | Returns target_col | Memory usage | Use case |
+|----------|-------------------|--------------|----------|
+| `ts_cv_split` | Yes | Higher | Simple workflows, direct forecasting |
+| `ts_cv_split_index` | No | Lower | Large datasets, custom hydration |
 
 [Go to top](#time-series-cross-validation)
 
@@ -614,26 +687,40 @@ Fills unknown (future) values in test periods with specified strategy.
 
 ```sql
 ts_fill_unknown(
-    source              VARCHAR,
-    group_col           COLUMN,
-    date_col            COLUMN,
-    value_col           COLUMN,
-    cutoff_date         DATE,
-    strategy            VARCHAR,    -- 'last_value' (default), 'default', or 'null'
-    fill_value          DOUBLE      -- Value for 'default' strategy
+    source              VARCHAR,    -- Table name
+    group_col           COLUMN,     -- Series identifier column
+    date_col            COLUMN,     -- Date/timestamp column
+    value_col           COLUMN,     -- Value column to fill
+    cutoff_date         DATE,       -- Cutoff date (values after this are "unknown")
+    params              MAP         -- Optional: strategy, fill_value
 ) → TABLE
 ```
 
+**Parameters (via params MAP):**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `strategy` | VARCHAR | 'last_value' | Fill strategy: 'last_value', 'default', or 'null' |
+| `fill_value` | DOUBLE | 0.0 | Value to use when strategy='default' |
+
 **Strategies:**
 
-- `'last_value'` (default): Forward fill from last known value
+- `'last_value'` (default): Forward fill from last known value per group
 - `'default'`: Fill with specified `fill_value`
 - `'null'`: Leave as NULL
+
+**Output Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `group_col` | VARCHAR | Series identifier |
+| `date_col` | TIMESTAMP | Date/timestamp |
+| `value_col` | (original type) | Filled value |
 
 **Example:**
 
 ```sql
--- Fill unknown future values with last known value
+-- Fill unknown future values with last known value (default)
 SELECT *
 FROM ts_fill_unknown(
     'feature_data',
@@ -641,10 +728,10 @@ FROM ts_fill_unknown(
     date,
     promotion_flag,
     '2024-06-01'::DATE,
-    strategy := 'last_value'
+    MAP{}
 );
 
--- Fill with default value (0)
+-- Fill with default value (20.0)
 SELECT *
 FROM ts_fill_unknown(
     'feature_data',
@@ -652,8 +739,18 @@ FROM ts_fill_unknown(
     date,
     temperature,
     '2024-06-01'::DATE,
-    strategy := 'default',
-    fill_value := 20.0
+    MAP{'strategy': 'default', 'fill_value': '20.0'}
+);
+
+-- Set unknown values to NULL
+SELECT *
+FROM ts_fill_unknown(
+    'feature_data',
+    store_id,
+    date,
+    temperature,
+    '2024-06-01'::DATE,
+    MAP{'strategy': 'null'}
 );
 ```
 
@@ -744,7 +841,7 @@ SELECT
     -- Temperature: forward fill (reasonable assumption)
     (SELECT value_col FROM ts_fill_unknown(
         'features', store_id, date, temperature,
-        '2024-06-01'::DATE, strategy := 'last_value'
+        '2024-06-01'::DATE, MAP{}  -- defaults to 'last_value'
     ) WHERE features.store_id = store_id AND features.date = date) AS temperature,
 
     -- Holiday: use known calendar
@@ -753,7 +850,7 @@ SELECT
     -- Promotion: assume no promotion if unknown
     (SELECT value_col FROM ts_fill_unknown(
         'features', store_id, date, promotion_intensity,
-        '2024-06-01'::DATE, strategy := 'default', fill_value := 0.0
+        '2024-06-01'::DATE, MAP{'strategy': 'default', 'fill_value': '0.0'}
     ) WHERE features.store_id = store_id AND features.date = date) AS promotion_intensity
 FROM features;
 ```
