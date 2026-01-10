@@ -1382,7 +1382,9 @@ LIMIT 1
 
     // ts_cv_generate_folds: Generate training end times automatically based on data range
     // C++ API: ts_cv_generate_folds(source, date_col, n_folds, horizon, frequency, params)
-    // params MAP supports: initial_train_size (BIGINT, default: 50% of data)
+    // params MAP supports:
+    //   initial_train_size (BIGINT, default: 50% of data) - periods before first fold
+    //   skip_length (BIGINT, default: horizon) - periods between folds (1=dense, horizon=default, 30=monthly)
     // Returns: LIST of training end timestamps
     {"ts_cv_generate_folds", {"source", "date_col", "n_folds", "horizon", "frequency", "params", nullptr}, {{nullptr, nullptr}},
 R"(
@@ -1411,14 +1413,15 @@ _computed AS (
         _max_dt,
         _n_dates,
         COALESCE(TRY_CAST(params['initial_train_size'][1] AS BIGINT), GREATEST((_n_dates / 2)::BIGINT, 1)) AS _init_size,
+        COALESCE(TRY_CAST(params['skip_length'][1] AS BIGINT), horizon) AS _skip_length,
         (SELECT _interval FROM _freq) AS _interval
     FROM date_bounds
 ),
 fold_end_times AS (
     SELECT
-        _min_dt + (_init_size * _interval) + ((generate_series - 1) * horizon * _interval) AS train_end
+        _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) AS train_end
     FROM _computed, generate_series(1, n_folds)
-    WHERE _min_dt + (_init_size * _interval) + ((generate_series - 1) * horizon * _interval) + (horizon * _interval) <= _max_dt
+    WHERE _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) + (horizon * _interval) <= _max_dt
 )
 SELECT LIST(train_end ORDER BY train_end) AS training_end_times
 FROM fold_end_times
@@ -1434,6 +1437,7 @@ FROM fold_end_times
     //   embargo (BIGINT) - periods to exclude from training after previous fold's test (default 0)
     //   window_type ('expanding', 'fixed', 'sliding') - training window strategy (default 'expanding')
     //   initial_train_size (BIGINT) - initial training periods before first fold
+    //   skip_length (BIGINT) - periods between folds (default: horizon). Use 1 for dense overlapping folds.
     // features: VARCHAR[] of external regressor column names (default NULL, used with regression models)
     // metric: VARCHAR for fold-level metric calculation ('rmse', 'mae', 'mape', 'mse', default 'rmse')
     // Model dispatch logic:
@@ -1450,6 +1454,7 @@ WITH _params AS (
         COALESCE(TRY_CAST(params['gap'] AS BIGINT), 0) AS _gap,
         COALESCE(TRY_CAST(params['embargo'] AS BIGINT), 0) AS _embargo,
         TRY_CAST(params['initial_train_size'] AS BIGINT) AS _init_train_size,
+        TRY_CAST(params['skip_length'] AS BIGINT) AS _skip_length_param,
         -- Model type detection: regression models from anofox-statistics
         CASE
             WHEN LOWER(COALESCE(params['method'], 'AutoETS')) IN (
@@ -1497,15 +1502,16 @@ _computed AS (
         _max_dt,
         _n_dates,
         COALESCE((SELECT _init_train_size FROM _params), GREATEST((_n_dates / 2)::BIGINT, 1)) AS _init_size,
+        COALESCE((SELECT _skip_length_param FROM _params), horizon) AS _skip_length,
         (SELECT _interval FROM _freq) AS _interval
     FROM date_bounds
 ),
 -- Generate fold end times
 fold_end_times AS (
     SELECT
-        _min_dt + (_init_size * _interval) + ((generate_series - 1) * horizon * _interval) AS train_end
+        _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) AS train_end
     FROM _computed, generate_series(1, folds)
-    WHERE _min_dt + (_init_size * _interval) + ((generate_series - 1) * horizon * _interval) + (horizon * _interval) <= _max_dt
+    WHERE _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) + (horizon * _interval) <= _max_dt
 ),
 training_end_times AS (
     SELECT LIST(train_end ORDER BY train_end) AS _times FROM fold_end_times

@@ -378,6 +378,11 @@ SELECT * FROM ts_cv_forecast_by(
 5. **Use Multiple Folds**
    Never trust a single fold. Use 3-5 folds minimum to get stable performance estimates and catch overfitting.
 
+6. **Control Fold Spacing with skip_length**
+   By default, folds are spaced by `horizon` periods. Use `skip_length` for custom spacing:
+   - `skip_length: '1'` - Dense overlapping folds (more test coverage, slower)
+   - `skip_length: '30'` - Sparse folds (faster, monthly checkpoints)
+
 ---
 
 ## Troubleshooting / FAQ
