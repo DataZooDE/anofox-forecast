@@ -57,8 +57,25 @@ You want to quickly check if AutoETS works on your sales data. No external facto
 ### The SQL Code
 
 ```sql
--- The fastest way to evaluate a model
--- Test AutoETS on the last 5 weeks of data, forecasting 7 days ahead each time
+-- ============================================
+-- SAMPLE DATA: 3 stores, 90 days of daily sales
+-- ============================================
+CREATE OR REPLACE TABLE sales_data AS
+SELECT
+    'Store_' || LPAD(s::VARCHAR, 2, '0') AS store_id,
+    '2024-01-01'::DATE + (d * INTERVAL '1 day') AS date,
+    ROUND(
+        100.0 + s * 20.0                      -- Store baseline
+        + 0.3 * d                              -- Trend
+        + 15 * SIN(2 * PI() * d / 7)          -- Weekly seasonality
+        + (RANDOM() * 10 - 5)                  -- Noise
+    , 2)::DOUBLE AS revenue
+FROM generate_series(0, 89) AS t(d)
+CROSS JOIN generate_series(1, 3) AS s(s);
+
+-- ============================================
+-- BACKTEST: Test AutoETS on 5 folds, 7-day horizon
+-- ============================================
 SELECT * FROM ts_backtest_auto(
     'sales_data',           -- source table
     store_id,               -- group column
@@ -97,20 +114,45 @@ Your sales depend on temperature, holidays, and promotions. Standard ARIMA might
 Unlike univariate models (AutoETS, ARIMA, Theta), regression models require the **anofox-statistics** extension and explicit data preparation:
 
 ```sql
+-- ============================================
+-- SAMPLE DATA: Sales with external features
+-- ============================================
+CREATE OR REPLACE TABLE sales_data AS
+SELECT
+    'Store_' || LPAD(s::VARCHAR, 2, '0') AS store_id,
+    '2024-01-01'::DATE + (d * INTERVAL '1 day') AS date,
+    -- Features
+    ROUND(15.0 + 10 * SIN(2 * PI() * d / 365) + (RANDOM() * 5), 1)::DOUBLE AS temperature,
+    CASE WHEN d % 7 IN (0, 6) THEN 1 ELSE 0 END AS is_holiday,  -- Weekends
+    CASE WHEN RANDOM() < 0.1 THEN 1 ELSE 0 END AS promotion_active,
+    -- Target: revenue depends on features
+    ROUND(
+        100.0 + s * 20.0
+        + 2.0 * (15.0 + 10 * SIN(2 * PI() * d / 365))  -- Temperature effect
+        + 30.0 * CASE WHEN d % 7 IN (0, 6) THEN 1 ELSE 0 END  -- Holiday boost
+        + 50.0 * CASE WHEN RANDOM() < 0.1 THEN 1 ELSE 0 END   -- Promotion boost
+        + (RANDOM() * 10 - 5)
+    , 2)::DOUBLE AS revenue
+FROM generate_series(0, 89) AS t(d)
+CROSS JOIN generate_series(1, 3) AS s(s);
+
+-- ============================================
+-- REGRESSION BACKTEST (requires anofox-statistics)
+-- ============================================
 -- Install the statistics extension (run once)
 INSTALL anofox_statistics FROM community;
 LOAD anofox_statistics;
 
 -- 1. Create CV splits
-CREATE TEMP TABLE cv_splits AS
+CREATE OR REPLACE TEMP TABLE cv_splits AS
 SELECT * FROM ts_cv_split(
     'sales_data', store_id, date, revenue,
-    ['2024-03-01', '2024-04-01']::DATE[],
+    ['2024-02-15', '2024-03-01']::DATE[],  -- 2 folds
     7, '1d', MAP{}
 );
 
 -- 2. Prepare regression input (masks target as NULL for test rows)
-CREATE TEMP TABLE reg_input AS
+CREATE OR REPLACE TEMP TABLE reg_input AS
 SELECT * FROM ts_prepare_regression_input(
     'cv_splits', 'sales_data', store_id, date, revenue, MAP{}
 );
@@ -120,10 +162,10 @@ SELECT
     ri.fold_id,
     ri.group_col AS store_id,
     ri.date_col AS date,
-    ols.yhat AS forecast,
+    ROUND(ols.yhat, 2) AS forecast,
     ri.actual_target AS actual,
-    ols.yhat - ri.actual_target AS error,
-    ABS(ols.yhat - ri.actual_target) AS abs_error
+    ROUND(ols.yhat - ri.actual_target, 2) AS error,
+    ROUND(ABS(ols.yhat - ri.actual_target), 2) AS abs_error
 FROM ols_fit_predict_by(
     'reg_input',
     fold_id,
@@ -156,7 +198,25 @@ In the real world, you rarely have today's data available immediately. Your ETL 
 ### The SQL Code
 
 ```sql
--- Simulate real-world data latency and prevent label leakage
+-- ============================================
+-- SAMPLE DATA: 3 stores, 90 days of daily sales
+-- ============================================
+CREATE OR REPLACE TABLE sales_data AS
+SELECT
+    'Store_' || LPAD(s::VARCHAR, 2, '0') AS store_id,
+    '2024-01-01'::DATE + (d * INTERVAL '1 day') AS date,
+    ROUND(
+        100.0 + s * 20.0
+        + 0.3 * d
+        + 15 * SIN(2 * PI() * d / 7)
+        + (RANDOM() * 10 - 5)
+    , 2)::DOUBLE AS revenue
+FROM generate_series(0, 89) AS t(d)
+CROSS JOIN generate_series(1, 3) AS s(s);
+
+-- ============================================
+-- BACKTEST: With gap to simulate ETL latency
+-- ============================================
 SELECT * FROM ts_backtest_auto(
     'sales_data',
     store_id,
@@ -197,9 +257,29 @@ You need total control: debugging specific folds, custom feature engineering, or
 ### The SQL Code
 
 ```sql
+-- ============================================
+-- SAMPLE DATA: 3 stores, 90 days of daily sales
+-- ============================================
+CREATE OR REPLACE TABLE sales_data AS
+SELECT
+    'Store_' || LPAD(s::VARCHAR, 2, '0') AS store_id,
+    '2024-01-01'::DATE + (d * INTERVAL '1 day') AS date,
+    ROUND(
+        100.0 + s * 20.0
+        + 0.3 * d
+        + 15 * SIN(2 * PI() * d / 7)
+        + (RANDOM() * 10 - 5)
+    , 2)::DOUBLE AS revenue
+FROM generate_series(0, 89) AS t(d)
+CROSS JOIN generate_series(1, 3) AS s(s);
+
+-- ============================================
+-- COMPOSABLE PIPELINE: Step-by-step backtest
+-- ============================================
+
 -- Step 1: Define the fold boundaries (Metadata only)
 -- This generates cutoff dates without touching your data
-CREATE TEMP TABLE fold_meta AS
+CREATE OR REPLACE TEMP TABLE fold_meta AS
 SELECT * FROM ts_cv_generate_folds(
     'sales_data',           -- source table
     date,                   -- date column
@@ -211,7 +291,7 @@ SELECT * FROM ts_cv_generate_folds(
 
 -- Step 2: Create the CV splits
 -- Assigns each row to folds with train/test labels
-CREATE TEMP TABLE cv_splits AS
+CREATE OR REPLACE TEMP TABLE cv_splits AS
 SELECT * FROM ts_cv_split(
     'sales_data',
     store_id,               -- group column
@@ -224,7 +304,7 @@ SELECT * FROM ts_cv_split(
 );
 
 -- Step 3: Filter to training data only
-CREATE TEMP TABLE train_splits AS
+CREATE OR REPLACE TEMP TABLE train_splits AS
 SELECT * FROM cv_splits WHERE split = 'train';
 
 -- Step 4: Run the forecast on the prepared data
@@ -319,18 +399,43 @@ To prevent "Look-ahead Bias," you must distinguish between:
 ### The SQL Code
 
 ```sql
+-- ============================================
+-- SAMPLE DATA: Sales with known and unknown features
+-- ============================================
+CREATE OR REPLACE TABLE sales_data AS
+SELECT
+    'Store_' || LPAD(s::VARCHAR, 2, '0') AS store_id,
+    '2024-01-01'::DATE + (d * INTERVAL '1 day') AS date,
+    -- KNOWN feature: Calendar-based (known in advance)
+    CASE WHEN (d % 7) IN (0, 6) THEN 1 ELSE 0 END AS is_holiday,
+    -- UNKNOWN feature: Footfall (only known after the fact)
+    ROUND(100 + 50 * CASE WHEN (d % 7) IN (0, 6) THEN 1 ELSE 0 END + RANDOM() * 30, 0)::INTEGER AS footfall,
+    -- Target: Revenue depends on both features
+    ROUND(
+        50.0 + s * 10.0
+        + 0.5 * (100 + 50 * CASE WHEN (d % 7) IN (0, 6) THEN 1 ELSE 0 END)  -- footfall effect
+        + 20.0 * CASE WHEN (d % 7) IN (0, 6) THEN 1 ELSE 0 END              -- holiday effect
+        + (RANDOM() * 10 - 5)
+    , 2)::DOUBLE AS revenue
+FROM generate_series(0, 89) AS t(d)
+CROSS JOIN generate_series(1, 2) AS s(s);
+
+-- ============================================
+-- FEATURE MASKING PIPELINE
+-- ============================================
+
 -- 1. Create the CV splits
-CREATE TEMP TABLE cv_splits AS
+CREATE OR REPLACE TEMP TABLE cv_splits AS
 SELECT * FROM ts_cv_split(
     'sales_data', store_id, date, revenue,
-    ['2024-03-01', '2024-04-01']::DATE[],  -- training end times
+    ['2024-02-15', '2024-03-01']::DATE[],  -- training end times
     7, '1d', MAP{}
 );
 
 -- 2. Hydrate & Mask using ts_hydrate_features
 -- 'is_holiday' is NOT listed, so it passes through (Known Feature).
 -- 'footfall' IS listed, so it becomes NULL in the test window (Unknown Feature).
-CREATE TEMP TABLE safe_data AS
+CREATE OR REPLACE TEMP TABLE safe_data AS
 SELECT * FROM ts_hydrate_features(
     'cv_splits',            -- CV splits table
     'sales_data',           -- source table with features
@@ -341,7 +446,7 @@ SELECT * FROM ts_hydrate_features(
 
 -- 3. Manually mask unknown features in test rows
 -- (The _is_test flag from ts_hydrate_features tells us which rows are test)
-CREATE TEMP TABLE masked_data AS
+CREATE OR REPLACE TEMP TABLE masked_data AS
 SELECT
     *,
     CASE WHEN _is_test THEN NULL ELSE footfall END AS footfall_safe
@@ -350,7 +455,7 @@ FROM safe_data;
 -- 4. Fill the Unknowns (Imputation)
 -- Since 'footfall' is now NULL in the test set, Regression would fail.
 -- We fill it using the last observed value from the training set.
-CREATE TEMP TABLE model_ready_data AS
+CREATE OR REPLACE TEMP TABLE model_ready_data AS
 SELECT * FROM ts_fill_unknown(
     'masked_data',          -- source table
     store_id,               -- group column
@@ -363,9 +468,10 @@ SELECT * FROM ts_fill_unknown(
 -- 5. Run the Backtest using anofox-statistics OLS
 -- Note: ts_cv_forecast_by is for univariate models only.
 -- For regression, use ts_prepare_regression_input + anofox-statistics:
+INSTALL anofox_statistics FROM community;
 LOAD anofox_statistics;
 
-CREATE TEMP TABLE reg_input AS
+CREATE OR REPLACE TEMP TABLE reg_input AS
 SELECT * FROM ts_prepare_regression_input(
     'cv_splits', 'model_ready_data', store_id, date, revenue, MAP{}
 );
@@ -374,7 +480,7 @@ SELECT
     ri.fold_id,
     ri.group_col AS store_id,
     ri.date_col AS date,
-    ols.yhat AS forecast,
+    ROUND(ols.yhat, 2) AS forecast,
     ri.actual_target AS actual
 FROM ols_fit_predict_by(
     'reg_input', fold_id, masked_target, [is_holiday, footfall_safe]
@@ -459,14 +565,25 @@ SELECT * FROM ts_fill_unknown(
 For explicit per-group model selection, you can:
 
 ```sql
+-- Create sample data for different store types
+CREATE OR REPLACE TABLE large_stores AS
+SELECT 'Large_' || s AS store_id, '2024-01-01'::DATE + d AS date,
+       ROUND(500 + 50*SIN(2*PI()*d/7) + RANDOM()*20, 2)::DOUBLE AS revenue
+FROM generate_series(0, 59) t(d) CROSS JOIN generate_series(1, 2) s(s);
+
+CREATE OR REPLACE TABLE small_stores AS
+SELECT 'Small_' || s AS store_id, '2024-01-01'::DATE + d AS date,
+       ROUND(100 + 10*SIN(2*PI()*d/7) + RANDOM()*5, 2)::DOUBLE AS revenue
+FROM generate_series(0, 59) t(d) CROSS JOIN generate_series(1, 2) s(s);
+
 -- Different models for different store types
 SELECT * FROM ts_backtest_auto(
-    'large_stores', store_id, date, revenue, 7, 5, '1d',
+    'large_stores', store_id, date, revenue, 7, 3, '1d',
     MAP{'method': 'AutoARIMA'}
 )
 UNION ALL
 SELECT * FROM ts_backtest_auto(
-    'small_stores', store_id, date, revenue, 7, 5, '1d',
+    'small_stores', store_id, date, revenue, 7, 3, '1d',
     MAP{'method': 'Theta'}
 );
 ```
