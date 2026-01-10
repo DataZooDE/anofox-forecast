@@ -60,16 +60,16 @@ You want to quickly check if AutoETS works on your sales data. No external facto
 -- The fastest way to evaluate a model
 -- Test AutoETS on the last 5 weeks of data, forecasting 7 days ahead each time
 SELECT * FROM ts_backtest_auto(
-    source      => 'sales_data',
-    group_col   => 'store_id',
-    date_col    => 'date',
-    target_col  => 'revenue',
-    horizon     => 7,           -- Forecast next 7 days
-    folds       => 5,           -- Test on 5 different historical periods
-    frequency   => '1d',
-    params      => MAP{'model': 'AutoETS'},
-    features    => NULL,        -- No external factors
-    metric      => 'rmse'
+    'sales_data',           -- source table
+    store_id,               -- group column
+    date,                   -- date column
+    revenue,                -- target column
+    7,                      -- horizon: forecast next 7 days
+    5,                      -- folds: test on 5 different historical periods
+    '1d',                   -- frequency
+    MAP{'method': 'AutoETS'}, -- params: model selection
+    NULL,                   -- features: no external factors
+    'rmse'                  -- metric: RMSE for evaluation
 );
 ```
 
@@ -77,51 +77,102 @@ SELECT * FROM ts_backtest_auto(
 
 | Parameter | Value | Explanation |
 |-----------|-------|-------------|
-| `horizon => 7` | 7 days | Matches your production forecast window |
-| `folds => 5` | 5 folds | Tests across 5 different time periods for robust evaluation |
-| `features => NULL` | No features | **The model only looks at its own history** - pure univariate forecasting |
-| `metric => 'rmse'` | RMSE | Returns `fold_metric_score` column with RMSE per fold |
+| `horizon = 7` | 7 days | Matches your production forecast window |
+| `folds = 5` | 5 folds | Tests across 5 different time periods for robust evaluation |
+| `features = NULL` | No features | **The model only looks at its own history** - pure univariate forecasting |
+| `metric = 'rmse'` | RMSE | Returns `fold_metric_score` column with RMSE per fold |
 
-> **Key Insight:** When `features => NULL`, the model uses only the target column's historical values. This is ideal for series with strong autocorrelation but no known external drivers.
+> **Key Insight:** When `features = NULL`, the model uses only the target column's historical values. This is ideal for series with strong autocorrelation but no known external drivers.
 
 ---
 
-## Pattern 2: Multivariate Regression
+## Pattern 2: Regression with External Features
 
 ### The Scenario
 
 Your sales depend on temperature, holidays, and promotions. Standard ARIMA might fail because it ignores these factors. You need a regression model.
 
-### The SQL Code
+### Important: Regression Models Require Separate Handling
+
+Unlike univariate models (AutoETS, ARIMA, Theta), regression models need explicit data preparation. There are two approaches:
+
+#### Option A: Single Feature with DuckDB Built-in OLS
+
+For simple linear regression with **one feature**, use `ts_backtest_regression`:
 
 ```sql
--- When sales depend on external factors, use regression
-SELECT * FROM ts_backtest_auto(
-    source      => 'sales_data',
-    group_col   => 'store_id',
-    date_col    => 'date',
-    target_col  => 'revenue',
-    horizon     => 7,
-    folds       => 5,
-    frequency   => '1d',
-    -- 1. Pass the column names of your external features
-    features    => ['temperature', 'is_holiday', 'promotion_active'],
-    -- 2. Select a regression model
-    params      => MAP{'model': 'ols'},
-    -- 3. Choose your preferred error metric
-    metric      => 'mae'
+-- First create CV splits
+CREATE TEMP TABLE cv_splits AS
+SELECT * FROM ts_cv_split(
+    'sales_data', store_id, date, revenue,
+    ['2024-03-01', '2024-04-01']::DATE[],  -- training end times
+    7, '1d', MAP{}
+);
+
+-- Run regression backtest with single feature
+SELECT * FROM ts_backtest_regression(
+    'cv_splits',            -- CV splits table
+    'sales_data',           -- source table with features
+    store_id,               -- group column
+    date,                   -- date column
+    revenue,                -- target column
+    temperature,            -- single feature column
+    MAP{}                   -- params
 );
 ```
 
-### Why It Works: Key Parameters
+#### Option B: Multiple Features with anofox-statistics Extension
 
-| Parameter | Value | Explanation |
-|-----------|-------|-------------|
-| `features => [...]` | 3 columns | External regressors included in the model |
-| `params => MAP{'model': 'ols'}` | OLS | **Switches from recursive forecasting to direct regression** |
-| `metric => 'mae'` | MAE | Mean Absolute Error - more robust to outliers than RMSE |
+For **multiple features** (temperature, is_holiday, promotion_active), install the anofox-statistics extension:
 
-> **Key Insight:** Setting `model: 'ols'` changes the forecasting engine entirely. Instead of fitting an ARIMA-style model and recursively forecasting, it fits a linear regression where `revenue = f(temperature, is_holiday, promotion_active)`.
+```sql
+-- Install the statistics extension (run once)
+INSTALL anofox_statistics FROM community;
+LOAD anofox_statistics;
+
+-- 1. Create CV splits
+CREATE TEMP TABLE cv_splits AS
+SELECT * FROM ts_cv_split(
+    'sales_data', store_id, date, revenue,
+    ['2024-03-01', '2024-04-01']::DATE[],
+    7, '1d', MAP{}
+);
+
+-- 2. Prepare regression input (masks target as NULL for test rows)
+CREATE TEMP TABLE reg_input AS
+SELECT * FROM ts_prepare_regression_input(
+    'cv_splits', 'sales_data', store_id, date, revenue, MAP{}
+);
+
+-- 3. Run OLS fit-predict with multiple features
+SELECT
+    ri.fold_id,
+    ri.group_col AS store_id,
+    ri.date_col AS date,
+    ols.yhat AS forecast,
+    ri.actual_target AS actual,
+    ols.yhat - ri.actual_target AS error,
+    ABS(ols.yhat - ri.actual_target) AS abs_error
+FROM ols_fit_predict_by(
+    'reg_input',
+    fold_id,
+    masked_target,          -- NULL for test rows, actual for train
+    [temperature, is_holiday, promotion_active]  -- multiple features
+) ols
+JOIN reg_input ri ON ols.row_id = ri.rowid
+WHERE ri.split = 'test'
+ORDER BY ri.fold_id, ri.group_col, ri.date_col;
+```
+
+### Why It Works: Key Concepts
+
+| Concept | Explanation |
+|---------|-------------|
+| `ts_prepare_regression_input` | Masks target as NULL for test rows, enabling fit-predict in one pass |
+| `ols_fit_predict_by` | From anofox-statistics - fits on non-NULL targets, predicts for NULL targets |
+| Multiple features | anofox-statistics supports any number of feature columns |
+
+> **Key Insight:** Regression backtesting requires the **modular approach** because the model needs to see features at both train and test time. The `masked_target = NULL` pattern tells the model "fit on these rows (target known), predict on those rows (target unknown)."
 
 ---
 
@@ -136,17 +187,17 @@ In the real world, you rarely have today's data available immediately. Your ETL 
 ```sql
 -- Simulate real-world data latency and prevent label leakage
 SELECT * FROM ts_backtest_auto(
-    source      => 'sales_data',
-    group_col   => 'store_id',
-    date_col    => 'date',
-    target_col  => 'revenue',
-    horizon     => 7,
-    folds       => 5,
-    frequency   => '1d',
-    params      => MAP{
-        'model': 'AutoARIMA',
-        'gap': '2',      -- Skip 2 days between Train end and Test start
-        'embargo': '0'   -- No embargo needed for point forecasts
+    'sales_data',
+    store_id,
+    date,
+    revenue,
+    7,                      -- horizon
+    5,                      -- folds
+    '1d',                   -- frequency
+    MAP{
+        'method': 'AutoARIMA',
+        'gap': '2',         -- Skip 2 days between Train end and Test start
+        'embargo': '0'      -- No embargo needed for point forecasts
     }
 );
 ```
@@ -179,45 +230,42 @@ You need total control: debugging specific folds, custom feature engineering, or
 -- This generates cutoff dates without touching your data
 CREATE TEMP TABLE fold_meta AS
 SELECT * FROM ts_cv_generate_folds(
-    source_table       => 'sales_data',
-    date_col           => 'date',
-    n_folds            => 3,
-    horizon            => 7,
-    frequency          => '1d',
-    params             => MAP{'gap': '1'}
+    'sales_data',           -- source table
+    date,                   -- date column
+    3,                      -- n_folds
+    7,                      -- horizon
+    '1d',                   -- frequency
+    MAP{'gap': '1'}         -- params
 );
 
--- Step 2: Create the split index (Efficient - pointers only, no data copying)
--- Links each row to its fold and train/test assignment
-CREATE TEMP TABLE split_idx AS
-SELECT * FROM ts_cv_split_index(
-    source_table       => 'sales_data',
-    group_col          => 'store_id',
-    date_col           => 'date',
-    fold_info_table    => 'fold_meta',
-    params             => MAP{}
+-- Step 2: Create the CV splits
+-- Assigns each row to folds with train/test labels
+CREATE TEMP TABLE cv_splits AS
+SELECT * FROM ts_cv_split(
+    'sales_data',
+    store_id,               -- group column
+    date,                   -- date column
+    revenue,                -- target column
+    (SELECT training_end_times FROM fold_meta),  -- fold dates from step 1
+    7,                      -- horizon
+    '1d',                   -- frequency
+    MAP{}                   -- params
 );
 
--- Step 3: Hydrate the data (Safe Join - Masks future 'unknown' features)
--- This creates the actual table used for training
-CREATE TEMP TABLE training_data AS
-SELECT * FROM ts_hydrate_split(
-    split_table        => 'split_idx',
-    source_table       => 'sales_data',
-    group_col          => 'store_id',
-    date_col           => 'date',
-    unknown_features   => ['temperature'] -- These will be NULL in test rows
-);
+-- Step 3: Filter to training data only
+CREATE TEMP TABLE train_splits AS
+SELECT * FROM cv_splits WHERE split = 'train';
 
 -- Step 4: Run the forecast on the prepared data
 SELECT * FROM ts_cv_forecast_by(
-    input_table        => 'training_data',
-    group_col          => 'store_id',
-    date_col           => 'date',
-    target_col         => 'revenue',
-    method             => 'AutoETS',
-    horizon            => 7,
-    params             => MAP{}
+    'train_splits',
+    group_col,              -- group column (from cv_splits output)
+    date_col,               -- date column (from cv_splits output)
+    target_col,             -- target column (from cv_splits output)
+    'AutoETS',              -- method
+    7,                      -- horizon
+    MAP{},                  -- params
+    '1d'                    -- frequency
 );
 ```
 
@@ -226,8 +274,8 @@ SELECT * FROM ts_cv_forecast_by(
 | Step | Function | Purpose |
 |------|----------|---------|
 | 1 | `ts_cv_generate_folds` | Generate fold cutoff dates only (no data movement) |
-| 2 | `ts_cv_split_index` | Create index mapping rows to folds (memory efficient) |
-| 3 | `ts_hydrate_split` | Join data with split info, masking unknown features |
+| 2 | `ts_cv_split` | Create train/test splits with fold assignments |
+| 3 | Filter | Extract training data |
 | 4 | `ts_cv_forecast_by` | Run forecasts in parallel across all folds |
 
 > **Key Insight:** This produces **identical results** to `ts_backtest_auto` but lets you inspect and modify each stage. Use this when debugging or when you need custom transformations between steps.
@@ -266,7 +314,7 @@ To prevent "Look-ahead Bias," you must distinguish between:
 │                                                                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  AFTER MASKING (ts_hydrate_split with unknown_features => ['footfall'])    │
+│  AFTER MASKING (ts_hydrate_features with unknown_features = ['footfall'])  │
 │  ─────────────────────────────────────────────────────────────────────────  │
 │                                                                             │
 │    Date       │ Split │ is_holiday │ footfall │ revenue                     │
@@ -281,7 +329,7 @@ To prevent "Look-ahead Bias," you must distinguish between:
 │                                                                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  AFTER FILLING (ts_fill_unknown with method => 'last_value')               │
+│  AFTER FILLING (ts_fill_unknown with method = 'last_value')                │
 │  ─────────────────────────────────────────────────────────────              │
 │                                                                             │
 │    Date       │ Split │ is_holiday │ footfall │ revenue                     │
@@ -300,55 +348,79 @@ To prevent "Look-ahead Bias," you must distinguish between:
 ### The SQL Code
 
 ```sql
--- 1. Create the Split Index
-CREATE TEMP TABLE split_idx AS
-SELECT * FROM ts_cv_split_index('sales_data', 'store_id', 'date', 'fold_meta', MAP{});
+-- 1. Create the CV splits
+CREATE TEMP TABLE cv_splits AS
+SELECT * FROM ts_cv_split(
+    'sales_data', store_id, date, revenue,
+    ['2024-03-01', '2024-04-01']::DATE[],  -- training end times
+    7, '1d', MAP{}
+);
 
--- 2. Hydrate & Mask
+-- 2. Hydrate & Mask using ts_hydrate_features
 -- 'is_holiday' is NOT listed, so it passes through (Known Feature).
 -- 'footfall' IS listed, so it becomes NULL in the test window (Unknown Feature).
 CREATE TEMP TABLE safe_data AS
-SELECT * FROM ts_hydrate_split(
-    split_table      => 'split_idx',
-    source_table     => 'sales_data',
-    group_col        => 'store_id',
-    date_col         => 'date',
-    unknown_features => ['footfall'] -- <--- Crucial Step: Hide the future
+SELECT * FROM ts_hydrate_features(
+    'cv_splits',            -- CV splits table
+    'sales_data',           -- source table with features
+    store_id,               -- group column
+    date,                   -- date column
+    MAP{}                   -- params
 );
 
--- 3. Fill the Unknowns (Imputation)
+-- 3. Manually mask unknown features in test rows
+-- (The _is_test flag from ts_hydrate_features tells us which rows are test)
+CREATE TEMP TABLE masked_data AS
+SELECT
+    *,
+    CASE WHEN _is_test THEN NULL ELSE footfall END AS footfall_safe
+FROM safe_data;
+
+-- 4. Fill the Unknowns (Imputation)
 -- Since 'footfall' is now NULL in the test set, Regression would fail.
 -- We fill it using the last observed value from the training set.
 CREATE TEMP TABLE model_ready_data AS
 SELECT * FROM ts_fill_unknown(
-    input_table      => 'safe_data',
-    group_col        => 'store_id',
-    date_col         => 'date',
-    columns          => ['footfall'],
-    method           => 'last_value' -- Options: 'mean', 'zero', 'linear'
+    'masked_data',          -- source table
+    store_id,               -- group column
+    date,                   -- date column
+    footfall_safe,          -- column to fill
+    (SELECT MAX(date) FROM masked_data WHERE split = 'train'),  -- cutoff
+    MAP{'strategy': 'last_value'}  -- fill method
 );
 
--- 4. Run the Backtest
--- Now the model uses "Planned Holiday" and "Estimated Footfall"
-SELECT * FROM ts_cv_forecast_by(
-    input_table      => 'model_ready_data',
-    group_col        => 'store_id',
-    date_col         => 'date',
-    target_col       => 'revenue',
-    method           => 'ols',       -- Multivariate Regression
-    horizon          => 7,
-    params           => MAP{}
+-- 5. Run the Backtest using anofox-statistics OLS
+-- Note: ts_cv_forecast_by is for univariate models only.
+-- For regression, use ts_prepare_regression_input + anofox-statistics:
+LOAD anofox_statistics;
+
+CREATE TEMP TABLE reg_input AS
+SELECT * FROM ts_prepare_regression_input(
+    'cv_splits', 'model_ready_data', store_id, date, revenue, MAP{}
 );
+
+SELECT
+    ri.fold_id,
+    ri.group_col AS store_id,
+    ri.date_col AS date,
+    ols.yhat AS forecast,
+    ri.actual_target AS actual
+FROM ols_fit_predict_by(
+    'reg_input', fold_id, masked_target, [is_holiday, footfall_safe]
+) ols
+JOIN reg_input ri ON ols.row_id = ri.rowid
+WHERE ri.split = 'test';
 ```
 
 ### Why It Works: Key Steps
 
 | Step | Function | Purpose |
 |------|----------|---------|
-| 1 | `ts_cv_split_index` | Creates row-to-fold mapping |
-| 2 | `ts_hydrate_split` | Joins data and **masks unknown features as NULL in test rows** |
-| 3 | `ts_fill_unknown` | Imputes NULL values so regression can run |
-| 4 | `ts_cv_forecast_by` | Runs model with safe, imputed data |
+| 1 | `ts_cv_split` | Creates CV splits with train/test labels |
+| 2 | `ts_hydrate_features` | Joins data with split info, provides `_is_test` flag |
+| 3 | Manual masking | **Masks unknown features as NULL in test rows** |
+| 4 | `ts_fill_unknown` | Imputes NULL values so regression can run |
+| 5 | `ts_prepare_regression_input` + `ols_fit_predict_by` | Prepares data and runs regression (requires anofox-statistics) |
 
 ### Fill Methods
 
@@ -370,7 +442,7 @@ SELECT * FROM ts_cv_forecast_by(
    If your backtest accuracy is suspiciously high (e.g., 99% R-squared), you probably forgot to set a `gap` or mask a feature. Real-world accuracy is almost never that good.
 
 3. **Scale Smart**
-   For datasets >10M rows, use `ts_cv_split_index` (Pattern 4) to avoid running out of RAM. It creates pointers instead of copying data.
+   For datasets >10M rows, use the composable pipeline (Pattern 4) to avoid running out of RAM. It creates pointers instead of copying data.
 
 4. **Match Your Horizon**
    Your backtest `horizon` should match your production forecast window. Testing with `horizon=7` but deploying with `horizon=30` will give misleading results.
@@ -394,15 +466,16 @@ SELECT * FROM ts_cv_forecast_by(
 
 **A:** You likely have 'Unknown' features in the test set that were not filled.
 
-**Solution:** Use `ts_fill_unknown` after `ts_hydrate_split`:
+**Solution:** Use `ts_fill_unknown` after masking:
 
 ```sql
 SELECT * FROM ts_fill_unknown(
-    input_table => 'your_hydrated_data',
-    group_col   => 'store_id',
-    date_col    => 'date',
-    columns     => ['your_unknown_feature'],
-    method      => 'last_value'
+    'your_masked_data',
+    store_id,
+    date,
+    your_unknown_feature,
+    cutoff_date,
+    MAP{'strategy': 'last_value'}
 );
 ```
 
@@ -418,12 +491,12 @@ For explicit per-group model selection, you can:
 -- Different models for different store types
 SELECT * FROM ts_backtest_auto(
     'large_stores', store_id, date, revenue, 7, 5, '1d',
-    MAP{'model': 'AutoARIMA'}
+    MAP{'method': 'AutoARIMA'}
 )
 UNION ALL
 SELECT * FROM ts_backtest_auto(
     'small_stores', store_id, date, revenue, 7, 5, '1d',
-    MAP{'model': 'Theta'}
+    MAP{'method': 'Theta'}
 );
 ```
 
@@ -436,7 +509,7 @@ SELECT * FROM ts_backtest_auto(
 | Cause | Solution |
 |-------|----------|
 | Missing `gap` parameter | Set `gap` to match your ETL latency |
-| Leaking future features | List unknown features in `ts_hydrate_split` |
+| Leaking future features | Mask unknown features before forecasting |
 | Different horizon | Match backtest horizon to production horizon |
 | Concept drift | Use `window_type: 'fixed'` or `'sliding'` |
 
@@ -462,7 +535,7 @@ SELECT * FROM ts_backtest_auto(
 | Pattern | Complexity | Use Case |
 |---------|------------|----------|
 | [Pattern 1](#pattern-1-the-quick-start) | Simple | Quick model evaluation |
-| [Pattern 2](#pattern-2-multivariate-regression) | Simple | External factors (weather, promotions) |
+| [Pattern 2](#pattern-2-regression-with-external-features) | Intermediate | External factors (requires anofox-statistics for multiple features) |
 | [Pattern 3](#pattern-3-production-reality) | Intermediate | ETL delays, label leakage prevention |
 | [Pattern 4](#pattern-4-the-composable-pipeline) | Advanced | Custom pipelines, debugging |
-| [Pattern 5](#pattern-5-unknown-vs-known-features-mask--fill) | Advanced | Complex feature handling |
+| [Pattern 5](#pattern-5-unknown-vs-known-features-mask--fill) | Advanced | Complex feature handling (requires anofox-statistics) |
