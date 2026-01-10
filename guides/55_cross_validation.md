@@ -11,6 +11,8 @@ The anofox-forecast extension provides a complete set of functions for time seri
 - `ts_cv_split` - Split data into train/test sets for multiple CV folds
 - `ts_cv_split_folds` - Generate fold boundary information
 - `ts_cv_generate_folds` - Automatically generate training end times
+- `ts_hydrate_split` - **Safe join** of CV splits with source data, masking unknown columns
+- `ts_hydrate_split_full` - Join all source columns with split metadata for manual masking
 - `ts_mark_unknown` - Mark data points as known/unknown for scenario testing
 - `ts_fill_unknown` - Fill future feature values in test periods
 - `ts_validate_timestamps` - Validate expected timestamps exist in data
@@ -26,6 +28,8 @@ The anofox-forecast extension provides a complete set of functions for time seri
    - [ts_cv_split](#ts_cv_split)
    - [ts_cv_split_folds](#ts_cv_split_folds)
    - [ts_cv_generate_folds](#ts_cv_generate_folds)
+   - [ts_hydrate_split](#ts_hydrate_split) ⭐ Safe Join
+   - [ts_hydrate_split_full](#ts_hydrate_split_full)
    - [ts_mark_unknown](#ts_mark_unknown)
    - [ts_fill_unknown](#ts_fill_unknown)
    - [ts_validate_timestamps](#ts_validate_timestamps)
@@ -344,6 +348,177 @@ FROM ts_cv_split(
     '1d'
 );
 ```
+
+[Go to top](#time-series-cross-validation)
+
+---
+
+### ts_hydrate_split
+
+⭐ **Safe Join** - Joins CV splits with source data while automatically masking unknown columns in test periods. This is the **recommended way** to join features back to CV splits to prevent data leakage.
+
+**Why Use This?**
+
+When you join CV splits back to your source data to get features, you can accidentally use future information (like actual temperature on test days). `ts_hydrate_split` prevents this by:
+
+1. Joining cv_splits to your source table
+2. Automatically masking specified "unknown" columns in test rows
+3. Supporting multiple fill strategies for realistic backtesting
+
+**Signature:**
+
+```sql
+ts_hydrate_split(
+    cv_splits           VARCHAR,    -- Name of cv_splits table
+    source              VARCHAR,    -- Name of source table with features
+    src_group_col       COLUMN,     -- Group column in source (e.g., category)
+    src_date_col        COLUMN,     -- Date column in source (e.g., date)
+    unknown_col         COLUMN,     -- Column to mask in test periods
+    params              MAP         -- Optional: strategy, fill_value
+) → TABLE
+```
+
+**Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `cv_splits` | Table with CV splits (from `ts_cv_split`) - must have `group_col`, `date_col`, `fold_id`, `split` columns |
+| `source` | Original source table with all features |
+| `src_group_col` | Column expression for group identifier in source table |
+| `src_date_col` | Column expression for date in source table |
+| `unknown_col` | Column to mask in test periods (not available at forecast time) |
+| `params` | MAP with `strategy` ('null', 'last_value', 'default') and `fill_value` (for 'default') |
+
+**Fill Strategies:**
+
+| Strategy | Description | Use Case |
+|----------|-------------|----------|
+| `'null'` (default) | Fill with NULL | Conservative, use when feature should be excluded |
+| `'last_value'` | Forward fill from last training value | Slowly changing features (temperature, price) |
+| `'default'` | Fill with specified value | Event-driven features (promotions = 0) |
+
+**Output Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `group_col` | VARCHAR | Series identifier |
+| `date_col` | TIMESTAMP | Date |
+| `fold_id` | BIGINT | CV fold number |
+| `split` | VARCHAR | 'train' or 'test' |
+| `unknown_col` | (original type) | Masked in test rows according to strategy |
+
+**Example:**
+
+```sql
+-- Create CV splits
+CREATE TABLE cv_splits AS
+SELECT * FROM ts_cv_split('sales_data', category, date, sales,
+    training_end_times, 7, '1d', MAP{});
+
+-- Safe join with temperature masked (NULL in test rows)
+SELECT * FROM ts_hydrate_split(
+    'cv_splits',
+    'sales_data',
+    category,          -- source group column
+    date,              -- source date column
+    temperature,       -- unknown column to mask
+    MAP{}              -- defaults to 'null' strategy
+) WHERE fold_id = 1;
+
+-- Forward fill temperature from last known value
+SELECT * FROM ts_hydrate_split(
+    'cv_splits', 'sales_data', category, date, temperature,
+    MAP{'strategy': 'last_value'}
+);
+
+-- Fill with default value (20.0) for temperature
+SELECT * FROM ts_hydrate_split(
+    'cv_splits', 'sales_data', category, date, temperature,
+    MAP{'strategy': 'default', 'fill_value': '20.0'}
+);
+```
+
+**Multiple Unknown Columns:**
+
+For multiple unknown columns, chain the macro or use `ts_hydrate_split_full`:
+
+```sql
+-- Method 1: Chain calls using CTEs
+WITH temp_masked AS (
+    SELECT * FROM ts_hydrate_split(
+        'cv_splits', 'sales_data', category, date, temperature, MAP{}
+    )
+),
+promo_masked AS (
+    SELECT tm.*,
+        CASE WHEN tm.split = 'test' THEN NULL ELSE s.promotion END AS promotion
+    FROM temp_masked tm
+    JOIN sales_data s ON tm.group_col = s.category AND tm.date_col = s.date
+)
+SELECT * FROM promo_masked;
+
+-- Method 2: Use ts_hydrate_split_full for manual masking (see below)
+```
+
+[Go to top](#time-series-cross-validation)
+
+---
+
+### ts_hydrate_split_full
+
+Joins CV splits with **all source columns**, adding metadata for manual masking. Use when you need more control over which columns to mask and how.
+
+**Signature:**
+
+```sql
+ts_hydrate_split_full(
+    cv_splits           VARCHAR,    -- Name of cv_splits table
+    source              VARCHAR,    -- Name of source table with features
+    src_group_col       COLUMN,     -- Group column in source
+    src_date_col        COLUMN,     -- Date column in source
+    params              MAP         -- Reserved for future use
+) → TABLE
+```
+
+**Output Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | CV fold number |
+| `split` | VARCHAR | 'train' or 'test' |
+| `_is_test` | BOOLEAN | TRUE if test row (use for masking) |
+| `_train_cutoff` | TIMESTAMP | Last date of training period |
+| (all source columns) | various | Original columns preserved |
+
+**Example:**
+
+```sql
+-- Get all columns with split metadata
+CREATE TABLE cv_data AS
+SELECT * FROM ts_hydrate_split_full(
+    'cv_splits', 'sales_data', category, date, MAP{}
+);
+
+-- Manually mask unknown columns using _is_test
+SELECT
+    fold_id,
+    split,
+    category,
+    date,
+    sales,
+    promotion,                                        -- Known in advance
+    CASE WHEN _is_test THEN NULL ELSE temperature END AS temperature,  -- Unknown
+    CASE WHEN _is_test THEN NULL ELSE competitor_price END AS competitor_price  -- Unknown
+FROM cv_data
+WHERE fold_id = 1;
+```
+
+**Use Cases:**
+
+1. **Multiple unknown columns** - Easier than chaining `ts_hydrate_split` calls
+2. **Different strategies per column** - Apply custom masking logic in SELECT
+3. **Debugging** - See which rows are train vs test with `_is_test` flag
+4. **Complex masking** - Use `_train_cutoff` for custom time-based logic
 
 [Go to top](#time-series-cross-validation)
 

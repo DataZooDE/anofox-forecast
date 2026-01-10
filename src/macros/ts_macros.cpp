@@ -965,6 +965,110 @@ WHERE (s._dt >= fb.train_start AND s._dt <= fb.train_end)
 ORDER BY fb.fold_id, s._grp, s._dt
 )"},
 
+    // ts_hydrate_split: Safely join cv_splits with source data, masking unknown columns in test set
+    // C++ API: ts_hydrate_split(cv_splits, source, src_group_col, src_date_col, unknown_col, params)
+    // NOTE: src_group_col and src_date_col are column EXPRESSIONS for the SOURCE table
+    // cv_splits is expected to have standardized columns: group_col, date_col, fold_id, split
+    // params MAP supports: strategy ('null', 'last_value', 'default'), fill_value (DOUBLE, for 'default')
+    // This is the SAFE way to join features back to CV splits - prevents data leakage
+    {"ts_hydrate_split", {"cv_splits", "source", "src_group_col", "src_date_col", "unknown_col", "params", nullptr}, {{nullptr, nullptr}},
+R"(
+WITH _params AS (
+    SELECT
+        COALESCE(params['strategy'], 'null') AS _strategy,
+        COALESCE(TRY_CAST(params['fill_value'] AS DOUBLE), 0.0) AS _fill_value
+),
+-- cv_splits has standardized column names: group_col, date_col, fold_id, split
+cv AS (
+    SELECT
+        "group_col" AS _cv_grp,
+        date_trunc('second', "date_col"::TIMESTAMP) AS _cv_dt,
+        fold_id AS _fold_id,
+        split AS _split,
+        MAX(CASE WHEN split = 'train' THEN date_trunc('second', "date_col"::TIMESTAMP) END)
+            OVER (PARTITION BY "group_col", fold_id) AS _train_end
+    FROM query_table(cv_splits::VARCHAR)
+),
+-- source table uses the column expressions passed as arguments
+src AS (
+    SELECT
+        src_group_col AS _src_grp,
+        date_trunc('second', src_date_col::TIMESTAMP) AS _src_dt,
+        unknown_col AS _unknown_val
+    FROM query_table(source::VARCHAR)
+),
+-- For last_value strategy, get the last known value before test period
+last_known AS (
+    SELECT DISTINCT
+        cv._cv_grp,
+        cv._fold_id,
+        LAST_VALUE(src._unknown_val IGNORE NULLS) OVER (
+            PARTITION BY cv._cv_grp, cv._fold_id
+            ORDER BY src._src_dt
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS _last_val
+    FROM cv
+    JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
+    WHERE cv._split = 'train'
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY cv._cv_grp, cv._fold_id ORDER BY src._src_dt DESC) = 1
+)
+SELECT
+    cv._cv_grp AS group_col,
+    cv._cv_dt AS date_col,
+    cv._fold_id AS fold_id,
+    cv._split AS split,
+    CASE
+        -- Training data: always use actual value
+        WHEN cv._split = 'train' THEN src._unknown_val
+        -- Test data: apply fill strategy
+        WHEN (SELECT _strategy FROM _params) = 'null' THEN NULL
+        WHEN (SELECT _strategy FROM _params) = 'default' THEN (SELECT _fill_value FROM _params)
+        WHEN (SELECT _strategy FROM _params) = 'last_value' THEN lk._last_val
+        ELSE NULL
+    END AS unknown_col
+FROM cv
+JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
+LEFT JOIN last_known lk ON cv._cv_grp = lk._cv_grp AND cv._fold_id = lk._fold_id
+ORDER BY cv._fold_id, cv._cv_grp, cv._cv_dt
+)"},
+
+    // ts_hydrate_split_full: Join cv_splits with ALL source columns, adding split metadata
+    // C++ API: ts_hydrate_split_full(cv_splits, source, src_group_col, src_date_col, params)
+    // NOTE: src_group_col and src_date_col are column EXPRESSIONS for the SOURCE table
+    // cv_splits is expected to have standardized columns: group_col, date_col, fold_id, split
+    // Returns all source columns PLUS fold_id, split, and _is_test (boolean for easy masking)
+    // Use with pattern: CASE WHEN _is_test THEN NULL ELSE unknown_col END AS unknown_col
+    // This provides the SAFE join pattern - prevents accidental direct joins
+    {"ts_hydrate_split_full", {"cv_splits", "source", "src_group_col", "src_date_col", "params", nullptr}, {{nullptr, nullptr}},
+R"(
+WITH cv AS (
+    SELECT
+        "group_col" AS _cv_grp,
+        date_trunc('second', "date_col"::TIMESTAMP) AS _cv_dt,
+        fold_id AS _fold_id,
+        split AS _split,
+        (split = 'test') AS _is_test,
+        MAX(CASE WHEN split = 'train' THEN date_trunc('second', "date_col"::TIMESTAMP) END)
+            OVER (PARTITION BY "group_col", fold_id) AS _train_cutoff
+    FROM query_table(cv_splits::VARCHAR)
+),
+src AS (
+    SELECT *,
+        src_group_col AS _src_grp,
+        date_trunc('second', src_date_col::TIMESTAMP) AS _src_dt
+    FROM query_table(source::VARCHAR)
+)
+SELECT
+    cv._fold_id AS fold_id,
+    cv._split AS split,
+    cv._is_test AS _is_test,
+    cv._train_cutoff AS _train_cutoff,
+    src.* EXCLUDE (_src_grp, _src_dt)
+FROM cv
+JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
+ORDER BY cv._fold_id, src._src_grp, src._src_dt
+)"},
+
     // ts_cv_generate_folds: Generate training end times automatically based on data range
     // C++ API: ts_cv_generate_folds(source, date_col, n_folds, horizon, frequency, params)
     // params MAP supports: initial_train_size (BIGINT, default: 50% of data)
