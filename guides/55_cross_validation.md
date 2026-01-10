@@ -15,6 +15,7 @@ The anofox-forecast extension provides a complete set of functions for time seri
 - `ts_cv_generate_folds` - Automatically generate training end times
 - `ts_hydrate_split` - **Safe join** of CV splits with source data, masking unknown columns
 - `ts_hydrate_split_full` - Join all source columns with split metadata for manual masking
+- `ts_hydrate_split_strict` - **Fail-safe** join returning only metadata (forces explicit column handling)
 - `ts_mark_unknown` - Mark data points as known/unknown for scenario testing
 - `ts_fill_unknown` - Fill future feature values in test periods
 - `ts_validate_timestamps` - Validate expected timestamps exist in data
@@ -34,6 +35,7 @@ The anofox-forecast extension provides a complete set of functions for time seri
    - [ts_cv_generate_folds](#ts_cv_generate_folds)
    - [ts_hydrate_split](#ts_hydrate_split) ⭐ Safe Join
    - [ts_hydrate_split_full](#ts_hydrate_split_full)
+   - [ts_hydrate_split_strict](#ts_hydrate_split_strict) ⭐ Fail-safe
    - [ts_mark_unknown](#ts_mark_unknown)
    - [ts_fill_unknown](#ts_fill_unknown)
    - [ts_validate_timestamps](#ts_validate_timestamps)
@@ -717,6 +719,89 @@ WHERE fold_id = 1;
 2. **Different strategies per column** - Apply custom masking logic in SELECT
 3. **Debugging** - See which rows are train vs test with `_is_test` flag
 4. **Complex masking** - Use `_train_cutoff` for custom time-based logic
+
+[Go to top](#time-series-cross-validation)
+
+---
+
+### ts_hydrate_split_strict
+
+⭐ **Fail-safe join** - Returns ONLY metadata columns with NO data columns. This is the maximally fail-safe approach that forces you to explicitly add each feature column with proper handling.
+
+**Why Use This?**
+
+The fail-safe principle: **By default, no data leaks. Only columns you explicitly handle are included.**
+
+- If you forget a column, it's excluded (not leaked)
+- Forces you to think about each feature: is it known or unknown?
+- Prevents accidental joins that include future information
+
+**Signature:**
+
+```sql
+ts_hydrate_split_strict(
+    cv_splits           VARCHAR,    -- Name of cv_splits table
+    source              VARCHAR,    -- Name of source table with features
+    src_group_col       COLUMN,     -- Group column in source
+    src_date_col        COLUMN,     -- Date column in source
+    params              MAP         -- Reserved for future use
+) → TABLE
+```
+
+**Output Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | CV fold number |
+| `split` | VARCHAR | 'train' or 'test' |
+| `group_col` | VARCHAR | Series identifier |
+| `date_col` | TIMESTAMP | Date/timestamp |
+| `_is_test` | BOOLEAN | TRUE if test row (use for masking) |
+| `_train_cutoff` | TIMESTAMP | Last date of training period |
+
+**No data columns are returned** - you must explicitly join them back with proper handling.
+
+**Example - The Fail-Safe Pattern:**
+
+```sql
+-- Step 1: Get strict metadata (no data columns)
+-- Step 2: Explicitly add each column with proper handling
+
+SELECT
+    hs.fold_id,
+    hs.split,
+    hs.group_col AS category,
+    hs.date_col AS date,
+    cv.target_col AS sales,
+
+    -- KNOWN features (available at forecast time) - pass through
+    src.promotion,
+    src.day_of_week,
+    src.is_holiday,
+
+    -- UNKNOWN features - must be masked
+    CASE WHEN hs._is_test THEN NULL ELSE src.temperature END AS temperature,
+    CASE WHEN hs._is_test THEN NULL ELSE src.competitor_price END AS competitor_price
+
+FROM ts_hydrate_split_strict('cv_splits', 'source_data', category, date, MAP{}) hs
+JOIN cv_splits cv
+    ON hs.fold_id = cv.fold_id
+    AND hs.group_col = cv.group_col
+    AND hs.date_col = cv.date_col
+JOIN source_data src
+    ON hs.group_col = src.category
+    AND hs.date_col = src.date;
+```
+
+**Key Benefit:** If you add a new column to your source data and forget to handle it in this query, it simply won't appear - no data leakage. With `ts_hydrate_split_full`, new columns would automatically appear and could leak future information.
+
+**When to Use Which:**
+
+| Function | Data Columns | Safety Level | Use Case |
+|----------|-------------|--------------|----------|
+| `ts_hydrate_split` | One masked | Medium | Quick single-column masking |
+| `ts_hydrate_split_full` | All included | Low | Debugging, exploration |
+| `ts_hydrate_split_strict` | None (explicit) | **Highest** | Production pipelines |
 
 [Go to top](#time-series-cross-validation)
 

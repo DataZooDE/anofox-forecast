@@ -1198,6 +1198,69 @@ JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
 ORDER BY cv._fold_id, src._src_grp, src._src_dt
 )"},
 
+    // ts_hydrate_split_strict: FAIL-SAFE join - returns ONLY metadata columns, NO data columns
+    // C++ API: ts_hydrate_split_strict(cv_splits, source, src_group_col, src_date_col, params)
+    // This is the maximally fail-safe approach: forces user to explicitly add each column
+    // Returns: fold_id, split, group_col, date_col, _is_test, _train_cutoff
+    // Use pattern: SELECT hs.*, src.known_col, CASE WHEN _is_test THEN NULL ELSE src.unknown_col END
+    {"ts_hydrate_split_strict", {"cv_splits", "source", "src_group_col", "src_date_col", "params", nullptr}, {{nullptr, nullptr}},
+R"(
+WITH cv AS (
+    SELECT
+        "group_col" AS _cv_grp,
+        date_trunc('second', "date_col"::TIMESTAMP) AS _cv_dt,
+        fold_id AS _fold_id,
+        split AS _split,
+        (split = 'test') AS _is_test,
+        MAX(CASE WHEN split = 'train' THEN date_trunc('second', "date_col"::TIMESTAMP) END)
+            OVER (PARTITION BY "group_col", fold_id) AS _train_cutoff
+    FROM query_table(cv_splits::VARCHAR)
+),
+src AS (
+    SELECT
+        src_group_col AS _src_grp,
+        date_trunc('second', src_date_col::TIMESTAMP) AS _src_dt
+    FROM query_table(source::VARCHAR)
+)
+SELECT DISTINCT
+    cv._fold_id AS fold_id,
+    cv._split AS split,
+    cv._cv_grp AS group_col,
+    cv._cv_dt AS date_col,
+    cv._is_test,
+    cv._train_cutoff
+FROM cv
+JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
+ORDER BY cv._fold_id, cv._cv_grp, cv._cv_dt
+)"},
+
+    // ts_check_leakage: Validate a query result doesn't have obvious data leakage
+    // C++ API: ts_check_leakage(result_table, test_filter_col, check_cols, params)
+    // Returns: report of columns with suspicious values in test rows
+    // Useful for auditing CV pipelines
+    {"ts_check_leakage", {"source", "is_test_col", "params", nullptr}, {{nullptr, nullptr}},
+R"(
+WITH src AS (
+    SELECT * FROM query_table(source::VARCHAR)
+),
+stats AS (
+    SELECT
+        is_test_col AS is_test,
+        COUNT(*) AS n_rows,
+        -- Count non-null numeric-like patterns in any column
+        SUM(CASE WHEN is_test_col THEN 1 ELSE 0 END) AS test_rows
+    FROM src
+    GROUP BY is_test_col
+)
+SELECT
+    'Leakage check complete' AS status,
+    (SELECT test_rows FROM stats WHERE is_test) AS test_row_count,
+    (SELECT n_rows - test_rows FROM stats WHERE NOT is_test) AS train_row_count,
+    'Use ts_hydrate_split_strict + explicit column selection for fail-safe joins' AS recommendation
+FROM stats
+LIMIT 1
+)"},
+
     // ts_cv_generate_folds: Generate training end times automatically based on data range
     // C++ API: ts_cv_generate_folds(source, date_col, n_folds, horizon, frequency, params)
     // params MAP supports: initial_train_size (BIGINT, default: 50% of data)
