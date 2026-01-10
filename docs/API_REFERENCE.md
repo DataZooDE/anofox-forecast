@@ -2225,16 +2225,16 @@ Time series cross-validation requires special handling because data has temporal
 
 ```sql
 -- 1. Generate fold boundaries automatically
-SELECT training_end_times FROM ts_cv_generate_folds('data', 'date', 3, 5, '1d');
+SELECT training_end_times FROM ts_cv_generate_folds('data', 'date', 3, 5, '1d', MAP{});
 
 -- 2. View the fold date ranges
 SELECT * FROM ts_cv_split_folds('data', 'group_id', 'date', [...], 5, '1d');
 
 -- 3. Create train/test splits
-SELECT * FROM ts_cv_split('data', 'group_id', 'date', 'value', [...], 5, '1d');
+SELECT * FROM ts_cv_split('data', 'group_id', 'date', 'value', [...], 5, '1d', MAP{});
 
 -- 4. Fill unknown features for backtesting
-SELECT * FROM ts_fill_unknown('data', 'group_id', 'date', 'feature', cutoff, 'last_value');
+SELECT * FROM ts_fill_unknown('data', 'group_id', 'date', 'feature', cutoff, MAP{});
 ```
 
 ---
@@ -2248,16 +2248,16 @@ Automatically generate fold boundaries based on data range. Useful when you don'
 **Signature:**
 ```sql
 ts_cv_generate_folds(
-    source VARCHAR,           -- Table name
-    date_col VARCHAR,         -- Date column name
-    n_folds BIGINT,           -- Number of folds to generate
-    horizon BIGINT,           -- Number of periods in test set
-    frequency VARCHAR,        -- Data frequency: '1d', '1w', '1mo', etc.
-    initial_train_size BIGINT -- Starting training size (optional, default: 50% of data)
+    source VARCHAR,     -- Table name
+    date_col VARCHAR,   -- Date column name
+    n_folds BIGINT,     -- Number of folds to generate
+    horizon BIGINT,     -- Number of periods in test set
+    frequency VARCHAR,  -- Data frequency: '1d', '1w', '1mo', etc.
+    params MAP          -- Optional parameters (use MAP{} for defaults)
 ) → TABLE(training_end_times DATE[])
 ```
 
-**Parameters (all positional):**
+**Parameters:**
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `source` | VARCHAR | Table containing time series data |
@@ -2265,20 +2265,26 @@ ts_cv_generate_folds(
 | `n_folds` | BIGINT | Number of CV folds to generate |
 | `horizon` | BIGINT | Number of periods per test set |
 | `frequency` | VARCHAR | Data frequency string (`'1d'`, `'1h'`, `'1w'`, `'1mo'`, `'1q'`, `'1y'`) |
-| `initial_train_size` | BIGINT | Periods for first fold's training set. If omitted, uses 50% of data |
+| `params` | MAP | Optional parameters (see below) |
+
+**Params MAP Options:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `initial_train_size` | BIGINT | 50% of data | Periods for first fold's training set |
 
 **Returns:** Single row containing a `DATE[]` array of training end times.
 
 **Example:**
 ```sql
--- Generate 3 folds with 5-day test horizon
+-- Generate 3 folds with 5-day test horizon (default: 50% initial training)
 SELECT training_end_times
-FROM ts_cv_generate_folds('sales_data', 'date', 3, 5, '1d');
+FROM ts_cv_generate_folds('sales_data', 'date', 3, 5, '1d', MAP{});
 -- Returns: [2024-01-15, 2024-01-20, 2024-01-25]
 
 -- With custom initial training size (10 periods)
 SELECT training_end_times
-FROM ts_cv_generate_folds('sales_data', 'date', 3, 5, '1d', 10);
+FROM ts_cv_generate_folds('sales_data', 'date', 3, 5, '1d',
+    MAP{'initial_train_size': '10'});
 ```
 
 ---
@@ -2348,12 +2354,11 @@ ts_cv_split(
     training_end_times DATE[], -- Cutoff dates for each fold
     horizon BIGINT,            -- Number of periods in test set
     frequency VARCHAR,         -- Data frequency
-    window_type VARCHAR,       -- 'expanding' (default), 'fixed', or 'sliding'
-    min_train_size BIGINT      -- Minimum training set size (default: 1)
+    params MAP                 -- Optional parameters (use MAP{} for defaults)
 ) → TABLE(group_col, date_col, target_col, fold_id BIGINT, split VARCHAR)
 ```
 
-**Parameters (all positional):**
+**Parameters:**
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `source` | VARCHAR | Table containing time series data |
@@ -2363,8 +2368,13 @@ ts_cv_split(
 | `training_end_times` | DATE[] | Array of dates marking end of each training period |
 | `horizon` | BIGINT | Number of test periods per fold |
 | `frequency` | VARCHAR | Data frequency string |
-| `window_type` | VARCHAR | Controls training window: `'expanding'` (default), `'fixed'`, or `'sliding'` |
-| `min_train_size` | BIGINT | Minimum periods in training set (default: 1, used with `'fixed'` window) |
+| `params` | MAP | Optional parameters (see below) |
+
+**Params MAP Options:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `window_type` | VARCHAR | `'expanding'` | Training window type: `'expanding'`, `'fixed'`, or `'sliding'` |
+| `min_train_size` | BIGINT | `1` | Minimum periods in training set (used with `'fixed'` window) |
 
 **Returns:** Rows from source with `fold_id` and `split` (`'train'` or `'test'`) columns.
 
@@ -2378,7 +2388,8 @@ SELECT * FROM ts_cv_split(
     'sales',
     ['2024-01-10'::DATE, '2024-01-15'::DATE],
     5,
-    '1d'
+    '1d',
+    MAP{}
 );
 
 -- Fixed window (8-day training) - constant training size
@@ -2390,8 +2401,7 @@ SELECT * FROM ts_cv_split(
     ['2024-01-10'::DATE, '2024-01-15'::DATE],
     5,
     '1d',
-    'fixed',  -- window_type
-    8         -- min_train_size
+    MAP{'window_type': 'fixed', 'min_train_size': '8'}
 );
 ```
 
@@ -2425,12 +2435,11 @@ ts_fill_unknown(
     date_col VARCHAR,    -- Date column name
     value_col VARCHAR,   -- Value column to fill
     cutoff_date DATE,    -- Boundary: before = known, after = unknown
-    strategy VARCHAR,    -- Fill strategy (default: 'last_value')
-    fill_value DOUBLE    -- Constant for 'default' strategy (default: 0.0)
+    params MAP           -- Optional parameters (use MAP{} for defaults)
 ) → TABLE(group_col, date_col, value_col)
 ```
 
-**Parameters (all positional):**
+**Parameters:**
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `source` | VARCHAR | Table containing time series data |
@@ -2438,21 +2447,26 @@ ts_fill_unknown(
 | `date_col` | VARCHAR | Date/timestamp column |
 | `value_col` | VARCHAR | Column containing values to fill |
 | `cutoff_date` | DATE | Rows with `date <= cutoff` are known (unchanged); rows with `date > cutoff` are unknown (filled) |
-| `strategy` | VARCHAR | Fill strategy: `'last_value'` (default), `'null'`, or `'default'` |
-| `fill_value` | DOUBLE | Value to use when `strategy='default'` (default: 0.0) |
+| `params` | MAP | Optional parameters map (see below) |
+
+**Optional Parameters (via `params` MAP):**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `strategy` | VARCHAR | `'last_value'` | Fill strategy: `'last_value'`, `'null'`, or `'default'` |
+| `fill_value` | DOUBLE | `0.0` | Value to use when `strategy='default'` |
 
 **Returns:** All rows with `value_col` modified for unknown dates.
 
 **Example:**
 ```sql
--- Forward fill temperature (last known value carried forward)
+-- Forward fill temperature (last known value carried forward, the default)
 SELECT * FROM ts_fill_unknown(
     'backtest_data',
     'category',
     'date',
     'temperature',
     '2023-06-01'::DATE,
-    'last_value'  -- strategy (default)
+    MAP{}  -- uses default strategy='last_value'
 );
 
 -- Set unknown values to NULL (let model handle missing)
@@ -2462,7 +2476,7 @@ SELECT * FROM ts_fill_unknown(
     'date',
     'temperature',
     '2023-06-01'::DATE,
-    'null'  -- strategy
+    MAP{'strategy': 'null'}
 );
 
 -- Set unknown values to a constant
@@ -2472,8 +2486,7 @@ SELECT * FROM ts_fill_unknown(
     'date',
     'temperature',
     '2023-06-01'::DATE,
-    'default',  -- strategy
-    65.0        -- fill_value
+    MAP{'strategy': 'default', 'fill_value': '65.0'}
 );
 ```
 
