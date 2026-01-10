@@ -2234,7 +2234,7 @@ SELECT * FROM ts_cv_split_folds('data', 'group_id', 'date', [...], 5, '1d');
 SELECT * FROM ts_cv_split('data', 'group_id', 'date', 'value', [...], 5, '1d');
 
 -- 4. Fill unknown features for backtesting
-SELECT * FROM ts_fill_unknown('data', 'group_id', 'date', 'feature', cutoff, strategy := 'last_value');
+SELECT * FROM ts_fill_unknown('data', 'group_id', 'date', 'feature', cutoff, 'last_value');
 ```
 
 ---
@@ -2248,22 +2248,24 @@ Automatically generate fold boundaries based on data range. Useful when you don'
 **Signature:**
 ```sql
 ts_cv_generate_folds(
-    source VARCHAR,                      -- Table name
-    date_col VARCHAR,                    -- Date column name
-    n_folds BIGINT,                      -- Number of folds to generate
-    horizon BIGINT,                      -- Number of periods in test set
-    frequency VARCHAR,                   -- Data frequency: '1d', '1w', '1mo', etc.
-    initial_train_size BIGINT := NULL    -- Starting training size (default: 50% of data)
+    source VARCHAR,           -- Table name
+    date_col VARCHAR,         -- Date column name
+    n_folds BIGINT,           -- Number of folds to generate
+    horizon BIGINT,           -- Number of periods in test set
+    frequency VARCHAR,        -- Data frequency: '1d', '1w', '1mo', etc.
+    initial_train_size BIGINT -- Starting training size (optional, default: 50% of data)
 ) → TABLE(training_end_times DATE[])
 ```
 
-**Parameters:**
-- `source`: Table containing time series data
-- `date_col`: Date/timestamp column name
-- `n_folds`: Number of CV folds to generate
-- `horizon`: Number of periods per test set
-- `frequency`: Data frequency string (`'1d'`, `'1h'`, `'1w'`, `'1mo'`, `'1q'`, `'1y'`)
-- `initial_train_size`: Periods for first fold's training set. If NULL (default), uses 50% of data
+**Parameters (all positional):**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Table containing time series data |
+| `date_col` | VARCHAR | Date/timestamp column name |
+| `n_folds` | BIGINT | Number of CV folds to generate |
+| `horizon` | BIGINT | Number of periods per test set |
+| `frequency` | VARCHAR | Data frequency string (`'1d'`, `'1h'`, `'1w'`, `'1mo'`, `'1q'`, `'1y'`) |
+| `initial_train_size` | BIGINT | Periods for first fold's training set. If omitted, uses 50% of data |
 
 **Returns:** Single row containing a `DATE[]` array of training end times.
 
@@ -2276,7 +2278,7 @@ FROM ts_cv_generate_folds('sales_data', 'date', 3, 5, '1d');
 
 -- With custom initial training size (10 periods)
 SELECT training_end_times
-FROM ts_cv_generate_folds('sales_data', 'date', 3, 5, '1d', initial_train_size := 10);
+FROM ts_cv_generate_folds('sales_data', 'date', 3, 5, '1d', 10);
 ```
 
 ---
@@ -2339,31 +2341,30 @@ Split time series data into train/test sets for cross-validation with support fo
 **Signature:**
 ```sql
 ts_cv_split(
-    source VARCHAR,                      -- Table name
-    group_col VARCHAR,                   -- Grouping column name
-    date_col VARCHAR,                    -- Date column name
-    target_col VARCHAR,                  -- Target/value column name
-    training_end_times DATE[],           -- Cutoff dates for each fold
-    horizon BIGINT,                      -- Number of periods in test set
-    frequency VARCHAR,                   -- Data frequency
-    window_type VARCHAR := 'expanding',  -- 'expanding', 'fixed', or 'sliding'
-    min_train_size BIGINT := 1           -- Minimum training set size
+    source VARCHAR,            -- Table name
+    group_col VARCHAR,         -- Grouping column name
+    date_col VARCHAR,          -- Date column name
+    target_col VARCHAR,        -- Target/value column name
+    training_end_times DATE[], -- Cutoff dates for each fold
+    horizon BIGINT,            -- Number of periods in test set
+    frequency VARCHAR,         -- Data frequency
+    window_type VARCHAR,       -- 'expanding' (default), 'fixed', or 'sliding'
+    min_train_size BIGINT      -- Minimum training set size (default: 1)
 ) → TABLE(group_col, date_col, target_col, fold_id BIGINT, split VARCHAR)
 ```
 
-**Parameters:**
-- `source`: Table containing time series data
-- `group_col`: Column for grouping multiple series
-- `date_col`: Date/timestamp column
-- `target_col`: The value column to predict
-- `training_end_times`: Array of dates marking end of each training period
-- `horizon`: Number of test periods per fold
-- `frequency`: Data frequency string
-- `window_type`: Controls how training window evolves:
-  - `'expanding'` (default): Training includes all history up to train_end
-  - `'fixed'`: Training has fixed size, slides forward
-  - `'sliding'`: Same as fixed
-- `min_train_size`: Minimum periods in training set (used with `'fixed'` window)
+**Parameters (all positional):**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Table containing time series data |
+| `group_col` | VARCHAR | Column for grouping multiple series |
+| `date_col` | VARCHAR | Date/timestamp column |
+| `target_col` | VARCHAR | The value column to predict |
+| `training_end_times` | DATE[] | Array of dates marking end of each training period |
+| `horizon` | BIGINT | Number of test periods per fold |
+| `frequency` | VARCHAR | Data frequency string |
+| `window_type` | VARCHAR | Controls training window: `'expanding'` (default), `'fixed'`, or `'sliding'` |
+| `min_train_size` | BIGINT | Minimum periods in training set (default: 1, used with `'fixed'` window) |
 
 **Returns:** Rows from source with `fold_id` and `split` (`'train'` or `'test'`) columns.
 
@@ -2389,8 +2390,8 @@ SELECT * FROM ts_cv_split(
     ['2024-01-10'::DATE, '2024-01-15'::DATE],
     5,
     '1d',
-    window_type := 'fixed',
-    min_train_size := 8
+    'fixed',  -- window_type
+    8         -- min_train_size
 );
 ```
 
@@ -2419,27 +2420,26 @@ Fill unknown future values in test sets during cross-validation to prevent data 
 **Signature:**
 ```sql
 ts_fill_unknown(
-    source VARCHAR,                      -- Table name
-    group_col VARCHAR,                   -- Grouping column name
-    date_col VARCHAR,                    -- Date column name
-    value_col VARCHAR,                   -- Value column to fill
-    cutoff_date DATE,                    -- Boundary: before = known, after = unknown
-    strategy VARCHAR := 'last_value',    -- Fill strategy
-    fill_value DOUBLE := 0.0             -- Constant for 'default' strategy
+    source VARCHAR,      -- Table name
+    group_col VARCHAR,   -- Grouping column name
+    date_col VARCHAR,    -- Date column name
+    value_col VARCHAR,   -- Value column to fill
+    cutoff_date DATE,    -- Boundary: before = known, after = unknown
+    strategy VARCHAR,    -- Fill strategy (default: 'last_value')
+    fill_value DOUBLE    -- Constant for 'default' strategy (default: 0.0)
 ) → TABLE(group_col, date_col, value_col)
 ```
 
-**Parameters:**
-- `source`: Table containing time series data
-- `group_col`: Column for grouping/identifying series
-- `date_col`: Date/timestamp column
-- `value_col`: Column containing values to fill
-- `cutoff_date`: Rows with `date <= cutoff` are known (unchanged); rows with `date > cutoff` are unknown (filled)
-- `strategy`: How to fill unknown values:
-  - `'last_value'` (default): Forward fill from last known value
-  - `'null'`: Set to NULL
-  - `'default'`: Set to constant `fill_value`
-- `fill_value`: Value to use when `strategy='default'`
+**Parameters (all positional):**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Table containing time series data |
+| `group_col` | VARCHAR | Column for grouping/identifying series |
+| `date_col` | VARCHAR | Date/timestamp column |
+| `value_col` | VARCHAR | Column containing values to fill |
+| `cutoff_date` | DATE | Rows with `date <= cutoff` are known (unchanged); rows with `date > cutoff` are unknown (filled) |
+| `strategy` | VARCHAR | Fill strategy: `'last_value'` (default), `'null'`, or `'default'` |
+| `fill_value` | DOUBLE | Value to use when `strategy='default'` (default: 0.0) |
 
 **Returns:** All rows with `value_col` modified for unknown dates.
 
@@ -2452,7 +2452,7 @@ SELECT * FROM ts_fill_unknown(
     'date',
     'temperature',
     '2023-06-01'::DATE,
-    strategy := 'last_value'
+    'last_value'  -- strategy (default)
 );
 
 -- Set unknown values to NULL (let model handle missing)
@@ -2462,18 +2462,18 @@ SELECT * FROM ts_fill_unknown(
     'date',
     'temperature',
     '2023-06-01'::DATE,
-    strategy := 'null'
+    'null'  -- strategy
 );
 
--- Set unknown values to historical mean
+-- Set unknown values to a constant
 SELECT * FROM ts_fill_unknown(
     'backtest_data',
     'category',
     'date',
     'temperature',
     '2023-06-01'::DATE,
-    strategy := 'default',
-    fill_value := 65.0
+    'default',  -- strategy
+    65.0        -- fill_value
 );
 ```
 
@@ -2495,18 +2495,20 @@ Mark rows as known/unknown based on a cutoff date without modifying values. Usef
 **Signature:**
 ```sql
 ts_mark_unknown(
-    source VARCHAR,                      -- Table name
-    group_col VARCHAR,                   -- Grouping column name
-    date_col VARCHAR,                    -- Date column name
-    cutoff_date DATE                     -- Boundary date
+    source VARCHAR,     -- Table name
+    group_col VARCHAR,  -- Grouping column name
+    date_col VARCHAR,   -- Date column name
+    cutoff_date DATE    -- Boundary date
 ) → TABLE(*, is_unknown BOOLEAN, last_known_date TIMESTAMP)
 ```
 
-**Parameters:**
-- `source`: Table containing time series data
-- `group_col`: Column for grouping/identifying series
-- `date_col`: Date/timestamp column
-- `cutoff_date`: Rows with `date <= cutoff` get `is_unknown=FALSE`; rows with `date > cutoff` get `is_unknown=TRUE`
+**Parameters (all positional):**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Table containing time series data |
+| `group_col` | VARCHAR | Column for grouping/identifying series |
+| `date_col` | VARCHAR | Date/timestamp column |
+| `cutoff_date` | DATE | Rows with `date <= cutoff` get `is_unknown=FALSE`; rows with `date > cutoff` get `is_unknown=TRUE` |
 
 **Returns:** All columns from source plus:
 - `is_unknown`: TRUE if row is in unknown (future) period
