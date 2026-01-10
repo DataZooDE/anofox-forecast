@@ -962,9 +962,10 @@ ORDER BY fb.fold_id, s._grp, s._dt
 )"},
 
     // ts_cv_generate_folds: Generate training end times automatically based on data range
-    // C++ API: ts_cv_generate_folds(source, date_col, n_folds, horizon, frequency, initial_train_size)
+    // C++ API: ts_cv_generate_folds(source, date_col, n_folds, horizon, frequency, params)
+    // params MAP supports: initial_train_size (BIGINT, default: 50% of data)
     // Returns: LIST of training end timestamps
-    {"ts_cv_generate_folds", {"source", "date_col", "n_folds", "horizon", "frequency", nullptr}, {{"initial_train_size", "NULL"}, {nullptr, nullptr}},
+    {"ts_cv_generate_folds", {"source", "date_col", "n_folds", "horizon", "frequency", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH _freq AS (
     SELECT CASE
@@ -985,19 +986,19 @@ date_bounds AS (
         COUNT(DISTINCT date_trunc('second', date_col::TIMESTAMP)) AS _n_dates
     FROM query_table(source::VARCHAR)
 ),
-params AS (
+_computed AS (
     SELECT
         _min_dt,
         _max_dt,
         _n_dates,
-        COALESCE(initial_train_size, GREATEST((_n_dates / 2)::BIGINT, 1)) AS _init_size,
+        COALESCE(TRY_CAST(params['initial_train_size'][1] AS BIGINT), GREATEST((_n_dates / 2)::BIGINT, 1)) AS _init_size,
         (SELECT _interval FROM _freq) AS _interval
     FROM date_bounds
 ),
 fold_end_times AS (
     SELECT
         _min_dt + (_init_size * _interval) + ((generate_series - 1) * horizon * _interval) AS train_end
-    FROM params, generate_series(1, n_folds)
+    FROM _computed, generate_series(1, n_folds)
     WHERE _min_dt + (_init_size * _interval) + ((generate_series - 1) * horizon * _interval) + (horizon * _interval) <= _max_dt
 )
 SELECT LIST(train_end ORDER BY train_end) AS training_end_times
