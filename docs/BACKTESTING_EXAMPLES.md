@@ -60,11 +60,12 @@ SELECT * FROM ts_backtest_auto(
     }
 );
 
--- With custom metric calculation
+-- With custom metric calculation (supports: rmse, mae, mape, mse, smape, bias, r2, coverage)
 SELECT * FROM ts_backtest_auto(
     'sales_data', store_id, date, revenue, 7, 5, '1d',
     MAP{'method': 'Theta'},
-    metric => 'mae'  -- fold_metric_score uses MAE
+    NULL,       -- features
+    'mae'       -- metric: fold_metric_score uses MAE
 );
 ```
 

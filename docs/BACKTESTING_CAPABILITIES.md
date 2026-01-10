@@ -203,12 +203,18 @@ clip_horizon=true:  Folds with partial test windows are INCLUDED
 
 ## Metrics
 
+All metrics use the same scalar functions (`ts_mae`, `ts_rmse`, etc.) ensuring consistent calculation throughout the extension.
+
 | Metric | Parameter | Description |
 |--------|-----------|-------------|
 | RMSE | `'rmse'` | Root Mean Squared Error (default) |
 | MAE | `'mae'` | Mean Absolute Error |
 | MAPE | `'mape'` | Mean Absolute Percentage Error |
 | MSE | `'mse'` | Mean Squared Error |
+| SMAPE | `'smape'` | Symmetric Mean Absolute Percentage Error |
+| Bias | `'bias'` | Mean Error (forecast - actual) |
+| R² | `'r2'` | Coefficient of Determination |
+| Coverage | `'coverage'` | Prediction interval coverage (uses lower_90/upper_90) |
 
 ---
 

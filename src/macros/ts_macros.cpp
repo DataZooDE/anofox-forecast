@@ -1448,7 +1448,9 @@ FROM fold_end_times
     //   skip_length (BIGINT) - periods between folds (default: horizon). Use 1 for dense overlapping folds.
     //   clip_horizon (BOOLEAN) - if true, allow partial test windows clipped to available data (default: false)
     // features: VARCHAR[] of external regressor column names (default NULL, used with regression models)
-    // metric: VARCHAR for fold-level metric calculation ('rmse', 'mae', 'mape', 'mse', default 'rmse')
+    // metric: VARCHAR for fold-level metric calculation (default 'rmse')
+    //   Point metrics: 'rmse', 'mae', 'mape', 'mse', 'smape', 'bias', 'r2'
+    //   Interval metrics: 'coverage' (uses lower_90/upper_90 prediction intervals)
     // Model dispatch logic:
     //   - Univariate models: uses internal _ts_forecast function
     //   - Regression models: prepares data via ts_prepare_regression_input (target=NULL for test)
@@ -1627,28 +1629,56 @@ forecasts AS (
 -- Join forecasts with test actuals
 cv_test AS (
     SELECT fold_id, _grp, _dt, _target FROM cv_splits WHERE split = 'test'
+),
+-- Raw backtest results (without metrics)
+backtest_raw AS (
+    SELECT
+        f.fold_id,
+        f.id AS group_col,
+        f._forecast_date AS date,
+        f.point_forecast AS forecast,
+        t._target AS actual,
+        f.point_forecast - t._target AS error,
+        ABS(f.point_forecast - t._target) AS abs_error,
+        f.lower_90,
+        f.upper_90,
+        f.model_name
+    FROM forecasts f
+    JOIN cv_test t ON f.fold_id = t.fold_id AND f.id = t._grp AND f._forecast_date = t._dt
+),
+-- Compute fold metrics using scalar functions (single implementation, no duplication)
+fold_metrics AS (
+    SELECT
+        fold_id,
+        CASE metric
+            WHEN 'rmse' THEN ts_rmse(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))
+            WHEN 'mae' THEN ts_mae(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))
+            WHEN 'mape' THEN ts_mape(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))
+            WHEN 'mse' THEN ts_mse(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))
+            WHEN 'smape' THEN ts_smape(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))
+            WHEN 'bias' THEN ts_bias(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))
+            WHEN 'r2' THEN ts_r2(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))
+            WHEN 'coverage' THEN ts_coverage(LIST(actual ORDER BY date), LIST(lower_90 ORDER BY date), LIST(upper_90 ORDER BY date))
+            ELSE ts_rmse(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))
+        END AS fold_metric_score
+    FROM backtest_raw
+    GROUP BY fold_id
 )
 SELECT
-    f.fold_id,
-    f.id AS group_col,
-    f._forecast_date AS date,
-    f.point_forecast AS forecast,
-    t._target AS actual,
-    f.point_forecast - t._target AS error,
-    ABS(f.point_forecast - t._target) AS abs_error,
-    f.lower_90,
-    f.upper_90,
-    f.model_name,
-    CASE metric
-        WHEN 'rmse' THEN SQRT(AVG((f.point_forecast - t._target) * (f.point_forecast - t._target)) OVER (PARTITION BY f.fold_id))
-        WHEN 'mae' THEN AVG(ABS(f.point_forecast - t._target)) OVER (PARTITION BY f.fold_id)
-        WHEN 'mape' THEN AVG(ABS((f.point_forecast - t._target) / NULLIF(t._target, 0)) * 100) OVER (PARTITION BY f.fold_id)
-        WHEN 'mse' THEN AVG((f.point_forecast - t._target) * (f.point_forecast - t._target)) OVER (PARTITION BY f.fold_id)
-        ELSE SQRT(AVG((f.point_forecast - t._target) * (f.point_forecast - t._target)) OVER (PARTITION BY f.fold_id))
-    END AS fold_metric_score
-FROM forecasts f
-JOIN cv_test t ON f.fold_id = t.fold_id AND f.id = t._grp AND f._forecast_date = t._dt
-ORDER BY f.fold_id, f.id, f._forecast_date
+    b.fold_id,
+    b.group_col,
+    b.date,
+    b.forecast,
+    b.actual,
+    b.error,
+    b.abs_error,
+    b.lower_90,
+    b.upper_90,
+    b.model_name,
+    m.fold_metric_score
+FROM backtest_raw b
+JOIN fold_metrics m ON b.fold_id = m.fold_id
+ORDER BY b.fold_id, b.group_col, b.date
 )"},
 
     // ts_prepare_regression_input: Prepare data for regression models in CV backtest
