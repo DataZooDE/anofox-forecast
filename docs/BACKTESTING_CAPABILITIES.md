@@ -89,15 +89,11 @@ ts_cv_forecast_by(
 ) → TABLE
 ```
 
-### 4. ts_backtest_regression (Regression Backtest)
-
-Backtesting for regression models using DuckDB's built-in OLS or external statistics packages.
-
-### 5. ts_prepare_regression_input (Regression Adapter)
+### 4. ts_prepare_regression_input (Regression Adapter)
 
 Prepares data for regression models by masking target values in test rows (NULL for test, actual for train).
 
-### 6. ts_hydrate_features (Feature Hydration)
+### 5. ts_hydrate_features (Feature Hydration)
 
 Safe join of CV splits with source features, with `_is_test` flag for masking unknown features.
 
@@ -258,7 +254,6 @@ clip_horizon=true:  Folds with partial test windows are INCLUDED
 ## Test Coverage
 
 - `ts_backtest_auto.test` - 48 assertions
-- `ts_backtest_regression.test` - 15 assertions
 - `ts_backtest_equivalence.test` - 58 assertions (verifies one-liner = detailed approach)
 - `ts_cv_split.test` - 100 assertions
 - `ts_hydrate_features.test` - 17 assertions

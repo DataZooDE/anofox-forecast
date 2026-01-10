@@ -92,38 +92,9 @@ SELECT * FROM ts_backtest_auto(
 
 Your sales depend on temperature, holidays, and promotions. Standard ARIMA might fail because it ignores these factors. You need a regression model.
 
-### Important: Regression Models Require Separate Handling
+### Important: Regression Models Require the anofox-statistics Extension
 
-Unlike univariate models (AutoETS, ARIMA, Theta), regression models need explicit data preparation. There are two approaches:
-
-#### Option A: Single Feature with DuckDB Built-in OLS
-
-For simple linear regression with **one feature**, use `ts_backtest_regression`:
-
-```sql
--- First create CV splits
-CREATE TEMP TABLE cv_splits AS
-SELECT * FROM ts_cv_split(
-    'sales_data', store_id, date, revenue,
-    ['2024-03-01', '2024-04-01']::DATE[],  -- training end times
-    7, '1d', MAP{}
-);
-
--- Run regression backtest with single feature
-SELECT * FROM ts_backtest_regression(
-    'cv_splits',            -- CV splits table
-    'sales_data',           -- source table with features
-    store_id,               -- group column
-    date,                   -- date column
-    revenue,                -- target column
-    temperature,            -- single feature column
-    MAP{}                   -- params
-);
-```
-
-#### Option B: Multiple Features with anofox-statistics Extension
-
-For **multiple features** (temperature, is_holiday, promotion_active), install the anofox-statistics extension:
+Unlike univariate models (AutoETS, ARIMA, Theta), regression models require the **anofox-statistics** extension and explicit data preparation:
 
 ```sql
 -- Install the statistics extension (run once)
@@ -535,7 +506,7 @@ SELECT * FROM ts_backtest_auto(
 | Pattern | Complexity | Use Case |
 |---------|------------|----------|
 | [Pattern 1](#pattern-1-the-quick-start) | Simple | Quick model evaluation |
-| [Pattern 2](#pattern-2-regression-with-external-features) | Intermediate | External factors (requires anofox-statistics for multiple features) |
+| [Pattern 2](#pattern-2-regression-with-external-features) | Intermediate | External factors (requires anofox-statistics) |
 | [Pattern 3](#pattern-3-production-reality) | Intermediate | ETL delays, label leakage prevention |
 | [Pattern 4](#pattern-4-the-composable-pipeline) | Advanced | Custom pipelines, debugging |
 | [Pattern 5](#pattern-5-unknown-vs-known-features-mask--fill) | Advanced | Complex feature handling (requires anofox-statistics) |
