@@ -207,10 +207,17 @@ ts_cv_split(
     training_end_times  DATE[],     -- List of training cutoff dates
     horizon             INTEGER,    -- Number of test periods
     frequency           VARCHAR,    -- Time frequency ('1d', '1h', '1w', '1mo')
-    window_type         VARCHAR,    -- 'expanding' (default), 'fixed', or 'sliding'
-    min_train_size      INTEGER     -- Minimum training periods (for fixed/sliding)
+    params              MAP         -- Optional parameters (see below)
 ) → TABLE
 ```
+
+**Parameters (via params MAP):**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `window_type` | VARCHAR | 'expanding' | Window type: 'expanding', 'fixed', or 'sliding' |
+| `min_train_size` | INTEGER | 1 | Minimum training periods (for fixed/sliding windows) |
+| `gap` | INTEGER | 0 | **Gap periods between training end and test start** (simulates data latency) |
 
 **Output Columns:**
 
@@ -237,10 +244,19 @@ FROM ts_cv_split(
     revenue,
     ['2024-03-01', '2024-04-01', '2024-05-01']::DATE[],
     4,      -- 4-week horizon
-    '1w'    -- Weekly frequency
+    '1w',   -- Weekly frequency
+    MAP{}   -- Default params
 )
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
+
+-- With 2-day gap (simulates ETL latency)
+-- Train ends Jan 10 → Test starts Jan 13 (skips Jan 11-12)
+SELECT * FROM ts_cv_split(
+    'daily_sales', store_id, date, revenue,
+    ['2024-01-10']::DATE[], 7, '1d',
+    MAP{'gap': '2'}  -- 2-day data latency
+);
 ```
 
 [Go to top](#time-series-cross-validation)
@@ -249,7 +265,7 @@ ORDER BY fold_id, split;
 
 ### ts_cv_split_folds
 
-Returns fold boundary information without the actual data split.
+Returns fold boundary information without the actual data split. Useful for previewing fold structure before running the full split.
 
 **Signature:**
 
@@ -260,9 +276,16 @@ ts_cv_split_folds(
     date_col            COLUMN,
     training_end_times  DATE[],
     horizon             INTEGER,
-    frequency           VARCHAR
+    frequency           VARCHAR,
+    params              MAP         -- Optional: gap parameter
 ) → TABLE
 ```
+
+**Parameters (via params MAP):**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `gap` | INTEGER | 0 | Gap periods between training end and test start |
 
 **Output Columns:**
 
@@ -274,6 +297,7 @@ ts_cv_split_folds(
 | `test_start` | TIMESTAMP | Test period start |
 | `test_end` | TIMESTAMP | Test period end |
 | `horizon` | BIGINT | Test horizon |
+| `gap` | BIGINT | Gap periods used |
 
 **Example:**
 

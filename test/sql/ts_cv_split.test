@@ -28,15 +28,37 @@ FROM generate_series(0, 29) AS t(i);
 
 # Test returns correct number of folds
 query I
-SELECT COUNT(*) FROM ts_cv_split_folds('cv_test', series_id, date, ['2024-01-10'::DATE, '2024-01-15'::DATE, '2024-01-20'::DATE], 5, '1d');
+SELECT COUNT(*) FROM ts_cv_split_folds('cv_test', series_id, date, ['2024-01-10'::DATE, '2024-01-15'::DATE, '2024-01-20'::DATE], 5, '1d', MAP{});
 ----
 3
 
 # Test fold boundaries are correct
 query II
-SELECT fold_id, horizon FROM ts_cv_split_folds('cv_test', series_id, date, ['2024-01-10'::DATE], 5, '1d');
+SELECT fold_id, horizon FROM ts_cv_split_folds('cv_test', series_id, date, ['2024-01-10'::DATE], 5, '1d', MAP{});
 ----
 1	5
+
+#######################################
+# ts_cv_split_folds - Gap Parameter Tests
+#######################################
+
+# Test gap=0 (default): test starts immediately after train
+query II
+SELECT train_end::DATE, test_start::DATE FROM ts_cv_split_folds('cv_test', series_id, date, ['2024-01-10'::DATE], 5, '1d', MAP{});
+----
+2024-01-10	2024-01-11
+
+# Test gap=2: test starts 3 days after train (2 gap days skipped)
+query III
+SELECT train_end::DATE, test_start::DATE, gap FROM ts_cv_split_folds('cv_test', series_id, date, ['2024-01-10'::DATE], 5, '1d', MAP{'gap': '2'});
+----
+2024-01-10	2024-01-13	2
+
+# Test gap affects test_end correctly
+query II
+SELECT test_start::DATE, test_end::DATE FROM ts_cv_split_folds('cv_test', series_id, date, ['2024-01-10'::DATE], 5, '1d', MAP{'gap': '2'});
+----
+2024-01-13	2024-01-17
 
 #######################################
 # ts_cv_split - Expanding Window Tests
@@ -47,13 +69,13 @@ SELECT fold_id, horizon FROM ts_cv_split_folds('cv_test', series_id, date, ['202
 # Fold 2: train 15 + test 5 = 20 × 2 series = 40
 # Total = 70
 query I
-SELECT COUNT(*) FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE, '2024-01-15'::DATE], 5, '1d');
+SELECT COUNT(*) FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE, '2024-01-15'::DATE], 5, '1d', MAP{});
 ----
 70
 
 # Test expanding window train size grows (per series)
 query II
-SELECT fold_id, COUNT(*) as n_train FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE, '2024-01-15'::DATE], 5, '1d')
+SELECT fold_id, COUNT(*) as n_train FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE, '2024-01-15'::DATE], 5, '1d', MAP{})
 WHERE split = 'train'
 GROUP BY fold_id
 ORDER BY fold_id;
@@ -63,7 +85,7 @@ ORDER BY fold_id;
 
 # Test test size is consistent (per series)
 query II
-SELECT fold_id, COUNT(*) as n_test FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE, '2024-01-15'::DATE], 5, '1d')
+SELECT fold_id, COUNT(*) as n_test FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE, '2024-01-15'::DATE], 5, '1d', MAP{})
 WHERE split = 'test'
 GROUP BY fold_id
 ORDER BY fold_id;
@@ -77,7 +99,7 @@ ORDER BY fold_id;
 
 # Test fixed window train size is constant (8 days × 2 series = 16)
 query II
-SELECT fold_id, COUNT(*) as n_train FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE, '2024-01-15'::DATE, '2024-01-20'::DATE], 5, '1d', window_type := 'fixed', min_train_size := 7)
+SELECT fold_id, COUNT(*) as n_train FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE, '2024-01-15'::DATE, '2024-01-20'::DATE], 5, '1d', MAP{'window_type': 'fixed', 'min_train_size': '7'})
 WHERE split = 'train'
 GROUP BY fold_id
 ORDER BY fold_id;
@@ -92,10 +114,41 @@ ORDER BY fold_id;
 
 # Test both series are present in each fold
 query II
-SELECT fold_id, COUNT(DISTINCT group_col) as n_series FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE], 5, '1d')
+SELECT fold_id, COUNT(DISTINCT group_col) as n_series FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE], 5, '1d', MAP{})
 GROUP BY fold_id;
 ----
 1	2
+
+#######################################
+# ts_cv_split - Gap Parameter Tests
+#######################################
+
+# Test gap=0 (default): test starts immediately after train
+query II
+SELECT split, MIN(date_col)::DATE as min_date FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE], 5, '1d', MAP{})
+WHERE group_col = 'A'
+GROUP BY split ORDER BY split DESC;
+----
+train	2024-01-01
+test	2024-01-11
+
+# Test gap=2: test starts 3 days after train (skips 2 gap days)
+query II
+SELECT split, MIN(date_col)::DATE as min_date FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE], 5, '1d', MAP{'gap': '2'})
+WHERE group_col = 'A'
+GROUP BY split ORDER BY split DESC;
+----
+train	2024-01-01
+test	2024-01-13
+
+# Test gap changes test count correctly (horizon stays same)
+query II
+SELECT split, COUNT(*) as n FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-10'::DATE], 5, '1d', MAP{'gap': '2'})
+WHERE group_col = 'A'
+GROUP BY split ORDER BY split DESC;
+----
+train	10
+test	5
 
 #######################################
 # ts_cv_generate_folds Tests
@@ -103,13 +156,13 @@ GROUP BY fold_id;
 
 # Test auto-generated folds returns a list with at least 1 element
 query I
-SELECT len(training_end_times) >= 1 FROM ts_cv_generate_folds('cv_test', date, 5, 3, '1d');
+SELECT len(training_end_times) >= 1 FROM ts_cv_generate_folds('cv_test', date, 5, 3, '1d', MAP{});
 ----
 true
 
 # Test with custom initial_train_size
 query I
-SELECT len(training_end_times) >= 1 FROM ts_cv_generate_folds('cv_test', date, 3, 5, '1d', initial_train_size := 10);
+SELECT len(training_end_times) >= 1 FROM ts_cv_generate_folds('cv_test', date, 3, 5, '1d', MAP{'initial_train_size': '10'});
 ----
 true
 
@@ -119,7 +172,7 @@ true
 
 # Test single fold
 query I
-SELECT COUNT(DISTINCT fold_id) FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-15'::DATE], 5, '1d');
+SELECT COUNT(DISTINCT fold_id) FROM ts_cv_split('cv_test', series_id, date, value, ['2024-01-15'::DATE], 5, '1d', MAP{});
 ----
 1
 

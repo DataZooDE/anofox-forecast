@@ -851,14 +851,18 @@ FROM per_group
 )"},
 
     // ts_cv_split_folds: Generate fold boundaries for time series cross-validation
-    // C++ API: ts_cv_split_folds(source, group_col, date_col, training_end_times, horizon, frequency)
+    // C++ API: ts_cv_split_folds(source, group_col, date_col, training_end_times, horizon, frequency, params)
     // training_end_times: LIST of cutoff dates for each fold
     // horizon: number of periods in test set
     // frequency: time frequency ('1d', '1h', etc.)
-    // Returns: fold_id, train_end, test_start, test_end for each fold
-    {"ts_cv_split_folds", {"source", "group_col", "date_col", "training_end_times", "horizon", "frequency", nullptr}, {{nullptr, nullptr}},
+    // params MAP supports: gap (BIGINT) - periods between training end and test start (default 0)
+    // Returns: fold_id, train_end, test_start, test_end, gap for each fold
+    {"ts_cv_split_folds", {"source", "group_col", "date_col", "training_end_times", "horizon", "frequency", "params", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH _freq AS (
+WITH _params AS (
+    SELECT COALESCE(TRY_CAST(params['gap'] AS BIGINT), 0) AS _gap
+),
+_freq AS (
     SELECT CASE
         WHEN frequency ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency, 'd$', ' day'))::INTERVAL
         WHEN frequency ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency, 'h$', ' hour'))::INTERVAL
@@ -880,8 +884,9 @@ folds AS (
     SELECT
         ROW_NUMBER() OVER (ORDER BY _train_end) AS fold_id,
         date_trunc('second', _train_end::TIMESTAMP) AS train_end,
-        date_trunc('second', _train_end::TIMESTAMP) + (SELECT _interval FROM _freq) AS test_start,
-        date_trunc('second', _train_end::TIMESTAMP) + (horizon * (SELECT _interval FROM _freq)) AS test_end
+        -- Gap: skip _gap periods after training before test starts
+        date_trunc('second', _train_end::TIMESTAMP) + (((SELECT _gap FROM _params) + 1) * (SELECT _interval FROM _freq)) AS test_start,
+        date_trunc('second', _train_end::TIMESTAMP) + (((SELECT _gap FROM _params) + horizon) * (SELECT _interval FROM _freq)) AS test_end
     FROM (SELECT UNNEST(training_end_times) AS _train_end)
 )
 SELECT
@@ -890,21 +895,24 @@ SELECT
     train_end,
     test_start,
     test_end,
-    horizon::BIGINT AS horizon
+    horizon::BIGINT AS horizon,
+    (SELECT _gap FROM _params)::BIGINT AS gap
 FROM folds
 ORDER BY fold_id
 )"},
 
     // ts_cv_split: Split time series data into train/test sets for cross-validation
     // C++ API: ts_cv_split(source, group_col, date_col, target_col, training_end_times, horizon, frequency, params)
-    // params MAP supports: window_type ('expanding', 'fixed', 'sliding'), min_train_size (BIGINT)
+    // params MAP supports: window_type ('expanding', 'fixed', 'sliding'), min_train_size (BIGINT), gap (BIGINT)
+    // gap: number of periods between training end and test start (default 0, simulates data latency)
     // Returns: group_col, date_col, target_col, fold_id, split (train/test)
     {"ts_cv_split", {"source", "group_col", "date_col", "target_col", "training_end_times", "horizon", "frequency", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH _params AS (
     SELECT
-        COALESCE(params['window_type'][1], 'expanding') AS _window_type,
-        COALESCE(TRY_CAST(params['min_train_size'][1] AS BIGINT), 1) AS _min_train_size
+        COALESCE(params['window_type'], 'expanding') AS _window_type,
+        COALESCE(TRY_CAST(params['min_train_size'] AS BIGINT), 1) AS _min_train_size,
+        COALESCE(TRY_CAST(params['gap'] AS BIGINT), 0) AS _gap
 ),
 _freq AS (
     SELECT CASE
@@ -944,8 +952,9 @@ fold_bounds AS (
             ELSE (SELECT _min_dt FROM date_bounds)
         END AS train_start,
         f.train_end,
-        f.train_end + (SELECT _interval FROM _freq) AS test_start,
-        f.train_end + (horizon * (SELECT _interval FROM _freq)) AS test_end
+        -- Gap: skip _gap periods after training before test starts
+        f.train_end + (((SELECT _gap FROM _params) + 1) * (SELECT _interval FROM _freq)) AS test_start,
+        f.train_end + (((SELECT _gap FROM _params) + horizon) * (SELECT _interval FROM _freq)) AS test_end
     FROM folds f
 )
 SELECT
