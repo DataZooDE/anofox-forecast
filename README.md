@@ -155,26 +155,6 @@ GROUP BY model_name
 ORDER BY avg_mae;
 ```
 
-### Forecasting with Exogenous Variables
-
-Include external factors like temperature or promotions in your forecasts:
-
-```sql
--- Forecast sales with promotional effect as exogenous variable
-SELECT (_ts_forecast_exog(
-    [100.0, 120.0, 110.0, 130.0, 125.0, 140.0],  -- historical sales
-    [[0.0, 1.0, 0.0, 1.0, 0.0, 1.0]],            -- historical promotions (0/1)
-    [[1.0, 0.0, 1.0]],                            -- future promotions
-    3,                                             -- forecast 3 periods
-    'AutoARIMA'                                    -- uses ARIMAX internally
-)).point AS forecast;
--- Returns: [145.2, 128.7, 148.9]
-```
-
-Supported models: ARIMA → ARIMAX, OptimizedTheta → ThetaX, MFLES → MFLESX
-
----
-
 ## 🌍 Multi-Language Support
 
 **Write SQL once, use everywhere!** The extension works from any language with DuckDB bindings.
