@@ -27,13 +27,13 @@ UNION ALL SELECT 'B', '2024-01-05', 500.0;
 
 # Test row count preserved
 query I
-SELECT COUNT(*) FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-03'::DATE);
+SELECT COUNT(*) FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-03'::DATE, MAP{});
 ----
 10
 
 # Test last_value fills with last known value per series
 query TR
-SELECT group_col, value_col FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-03'::DATE)
+SELECT group_col, value_col FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-03'::DATE, MAP{})
 WHERE date_col > '2024-01-03'::TIMESTAMP
 ORDER BY group_col, date_col;
 ----
@@ -44,7 +44,7 @@ B	300.0
 
 # Test known values unchanged
 query TR
-SELECT group_col, value_col FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-03'::DATE)
+SELECT group_col, value_col FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-03'::DATE, MAP{})
 WHERE date_col <= '2024-01-03'::TIMESTAMP
 ORDER BY group_col, date_col;
 ----
@@ -61,14 +61,14 @@ B	300.0
 
 # Test null strategy sets future values to NULL
 query I
-SELECT COUNT(*) FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-03'::DATE, strategy := 'null')
+SELECT COUNT(*) FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-03'::DATE, MAP{'strategy': 'null'})
 WHERE value_col IS NULL;
 ----
 4
 
 # Known values should not be NULL
 query I
-SELECT COUNT(*) FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-03'::DATE, strategy := 'null')
+SELECT COUNT(*) FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-03'::DATE, MAP{'strategy': 'null'})
 WHERE date_col <= '2024-01-03'::TIMESTAMP AND value_col IS NULL;
 ----
 0
@@ -79,7 +79,7 @@ WHERE date_col <= '2024-01-03'::TIMESTAMP AND value_col IS NULL;
 
 # Test default strategy with fill_value
 query TR
-SELECT group_col, value_col FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-03'::DATE, strategy := 'default', fill_value := 999.0)
+SELECT group_col, value_col FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-03'::DATE, MAP{'strategy': 'default', 'fill_value': '999.0'})
 WHERE date_col > '2024-01-03'::TIMESTAMP
 ORDER BY group_col, date_col;
 ----
@@ -90,7 +90,7 @@ B	999.0
 
 # Test default strategy with fill_value = 0
 query R
-SELECT SUM(value_col) FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-03'::DATE, strategy := 'default', fill_value := 0.0)
+SELECT SUM(value_col) FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-03'::DATE, MAP{'strategy': 'default', 'fill_value': '0.0'})
 WHERE date_col > '2024-01-03'::TIMESTAMP;
 ----
 0.0
@@ -101,14 +101,14 @@ WHERE date_col > '2024-01-03'::TIMESTAMP;
 
 # Test with cutoff at start (all values unknown with last_value - first value NULL since no prior known)
 query I
-SELECT COUNT(*) FROM ts_fill_unknown('cv_test', series_id, date, feature, '2023-12-31'::DATE, strategy := 'null')
+SELECT COUNT(*) FROM ts_fill_unknown('cv_test', series_id, date, feature, '2023-12-31'::DATE, MAP{'strategy': 'null'})
 WHERE value_col IS NULL;
 ----
 10
 
 # Test with cutoff at end (all values known)
 query I
-SELECT COUNT(*) FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-05'::DATE)
+SELECT COUNT(*) FROM ts_fill_unknown('cv_test', series_id, date, feature, '2024-01-05'::DATE, MAP{})
 WHERE value_col IS NOT NULL;
 ----
 10

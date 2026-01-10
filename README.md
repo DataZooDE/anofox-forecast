@@ -29,6 +29,7 @@ A time series forecasting extension for DuckDB with 32 models, data preparation,
 ### 📊 Complete Workflow
 - **EDA & Data Quality**: 5 functions (2 table functions, 3 macros) for exploratory analysis and data quality assessment
 - **Data Preparation**: 12 macros for cleaning and transformation
+- **Cross-Validation & Backtesting**: Time series CV with expanding/fixed/sliding windows, gap, embargo, and variable horizon support
 - **Evaluation**: 12 metrics including coverage analysis
 - **Seasonality Detection**: Automatic period identification
 - **Changepoint Detection**: Regime identification with probabilities
@@ -154,26 +155,6 @@ GROUP BY model_name
 ORDER BY avg_mae;
 ```
 
-### Forecasting with Exogenous Variables
-
-Include external factors like temperature or promotions in your forecasts:
-
-```sql
--- Forecast sales with promotional effect as exogenous variable
-SELECT (_ts_forecast_exog(
-    [100.0, 120.0, 110.0, 130.0, 125.0, 140.0],  -- historical sales
-    [[0.0, 1.0, 0.0, 1.0, 0.0, 1.0]],            -- historical promotions (0/1)
-    [[1.0, 0.0, 1.0]],                            -- future promotions
-    3,                                             -- forecast 3 periods
-    'AutoARIMA'                                    -- uses ARIMAX internally
-)).point AS forecast;
--- Returns: [145.2, 128.7, 148.9]
-```
-
-Supported models: ARIMA → ARIMAX, OptimizedTheta → ThetaX, MFLES → MFLESX
-
----
-
 ## 🌍 Multi-Language Support
 
 **Write SQL once, use everywhere!** The extension works from any language with DuckDB bindings.
@@ -209,6 +190,7 @@ For complete function signatures, parameters, and detailed documentation, see th
 | [Basic Forecasting](guides/30_basic_forecasting.md) | [Forecasting](docs/API_REFERENCE.md#forecasting) |
 | Exogenous Variables | [Exogenous Forecasting](docs/API_REFERENCE.md#_ts_forecast_exog-scalar) |
 | [Evaluation Metrics](guides/50_evaluation_metrics.md) | [Evaluation](docs/API_REFERENCE.md#evaluation) |
+| [Backtesting & Cross-Validation](examples/backtesting/README.md) | [Cross-Validation & Backtesting](docs/API_REFERENCE.md#cross-validation--backtesting) |
 | Forecasting Model Parameters | [Supported Models](docs/API_REFERENCE.md#supported-models), [Parameter Reference](docs/API_REFERENCE.md#parameter-reference) |
 
 
