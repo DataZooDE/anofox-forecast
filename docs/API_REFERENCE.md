@@ -135,6 +135,8 @@ Both forms are identical in functionality.
 11. [Forecasting](#forecasting)
    - [ts_forecast (Table Macro)](#anofox_fcst_ts_forecast--ts_forecast-table-macro)
    - [ts_forecast_by (Table Macro)](#anofox_fcst_ts_forecast_by--ts_forecast_by-table-macro)
+   - [ts_forecast_exog (Table Macro)](#ts_forecast_exog-table-macro)
+   - [ts_forecast_exog_by (Table Macro)](#ts_forecast_exog_by-table-macro)
    - [ts_forecast_agg (Aggregate)](#anofox_fcst_ts_forecast_agg--ts_forecast_agg-aggregate-function)
 12. [Evaluation Metrics](#evaluation-metrics)
    - [Mean Absolute Error (MAE)](#mean-absolute-error-mae)
@@ -2821,6 +2823,159 @@ SELECT * FROM ts_forecast_by('sales', id, date, val, 'ETS', 12,
 - The function uses the `frequency` parameter (default: `'1d'`) to generate forecast timestamps
 - Each series is forecast independently; errors in one series don't affect others
 - For very large datasets, consider filtering to relevant series before forecasting
+
+---
+
+### ts_forecast_exog (Table Macro)
+
+Table macro for single-series forecasting with exogenous variables from a DuckDB table.
+
+**Signature:**
+```sql
+ts_forecast_exog(
+    table_name,      -- Source table name
+    date_col,        -- Date column
+    target_col,      -- Target value column
+    x_cols,          -- Exogenous variable columns (comma-separated list)
+    future_table,    -- Table with future exogenous values
+    model,           -- Model name
+    horizon,         -- Forecast horizon
+    params           -- Additional parameters (MAP)
+) → TABLE
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `table_name` | `VARCHAR` | Source table name (quoted string) |
+| `date_col` | `IDENTIFIER` | Date/timestamp column (unquoted) |
+| `target_col` | `IDENTIFIER` | Target value column (unquoted) |
+| `x_cols` | `VARCHAR` | Comma-separated list of exogenous column names |
+| `future_table` | `VARCHAR` | Table containing future exogenous values |
+| `model` | `VARCHAR` | Forecasting method (see supported models below) |
+| `horizon` | `INTEGER` | Number of periods to forecast |
+| `params` | `MAP` | Model parameters (use `MAP{}` for defaults) |
+
+**Supported Models with Exogenous Variables:**
+| Base Model | With Exog | Description |
+|------------|-----------|-------------|
+| `ARIMA` | `ARIMAX` | ARIMA with exogenous regressors |
+| `AutoARIMA` | `ARIMAX` | Auto-selected ARIMA with exogenous |
+| `OptimizedTheta` | `ThetaX` | Theta method with exogenous |
+| `MFLES` | `MFLESX` | MFLES with exogenous regressors |
+
+**Returns:** A table with columns:
+- `ds` - Forecast timestamp
+- `forecast` - Point forecast value
+- `lower` - Lower prediction interval bound
+- `upper` - Upper prediction interval bound
+
+**Example:**
+```sql
+-- Create historical data with exogenous variables
+CREATE TABLE sales AS
+SELECT * FROM (VALUES
+    ('2024-01-01'::DATE, 100.0, 20.0, 0),
+    ('2024-01-02'::DATE, 120.0, 22.0, 1),
+    ('2024-01-03'::DATE, 110.0, 19.0, 0),
+    ('2024-01-04'::DATE, 130.0, 23.0, 1),
+    ('2024-01-05'::DATE, 125.0, 21.0, 0),
+    ('2024-01-06'::DATE, 140.0, 24.0, 1)
+) AS t(date, amount, temperature, promotion);
+
+-- Create future exogenous values
+CREATE TABLE future_exog AS
+SELECT * FROM (VALUES
+    ('2024-01-07'::DATE, 22.0, 1),
+    ('2024-01-08'::DATE, 20.0, 0),
+    ('2024-01-09'::DATE, 21.0, 1)
+) AS t(date, temperature, promotion);
+
+-- Forecast with exogenous variables
+SELECT * FROM ts_forecast_exog(
+    'sales', date, amount,
+    'temperature,promotion',
+    'future_exog',
+    'AutoARIMA', 3, MAP{}
+);
+```
+
+---
+
+### ts_forecast_exog_by (Table Macro)
+
+Table macro for multi-series forecasting with exogenous variables, grouped by an identifier column.
+
+**Signature:**
+```sql
+ts_forecast_exog_by(
+    table_name,      -- Source table name
+    group_col,       -- Grouping column
+    date_col,        -- Date column
+    target_col,      -- Target value column
+    x_cols,          -- Exogenous variable columns
+    future_table,    -- Table with future exogenous values
+    model,           -- Model name
+    horizon,         -- Forecast horizon
+    params           -- Additional parameters (MAP)
+) → TABLE
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `table_name` | `VARCHAR` | Source table name (quoted string) |
+| `group_col` | `IDENTIFIER` | Column for grouping series (unquoted) |
+| `date_col` | `IDENTIFIER` | Date/timestamp column (unquoted) |
+| `target_col` | `IDENTIFIER` | Target value column (unquoted) |
+| `x_cols` | `VARCHAR` | Comma-separated list of exogenous column names |
+| `future_table` | `VARCHAR` | Table containing future exogenous values (must include group column) |
+| `model` | `VARCHAR` | Forecasting method (ARIMA, AutoARIMA, OptimizedTheta, MFLES) |
+| `horizon` | `INTEGER` | Number of periods to forecast |
+| `params` | `MAP` | Model parameters (use `MAP{}` for defaults) |
+
+**Returns:** A table with columns:
+- `group_col` - The series identifier
+- `ds` - Forecast timestamp
+- `forecast` - Point forecast value
+- `lower` - Lower prediction interval bound
+- `upper` - Upper prediction interval bound
+
+**Example:**
+```sql
+-- Create historical data by product
+CREATE TABLE sales_by_product AS
+SELECT * FROM (VALUES
+    ('A', '2024-01-01'::DATE, 100.0, 20.0),
+    ('A', '2024-01-02'::DATE, 120.0, 22.0),
+    ('A', '2024-01-03'::DATE, 110.0, 19.0),
+    ('B', '2024-01-01'::DATE, 200.0, 20.0),
+    ('B', '2024-01-02'::DATE, 210.0, 22.0),
+    ('B', '2024-01-03'::DATE, 205.0, 19.0)
+) AS t(product_id, date, amount, temperature);
+
+-- Create future exogenous values per product
+CREATE TABLE future_exog_by_product AS
+SELECT * FROM (VALUES
+    ('A', '2024-01-04'::DATE, 21.0),
+    ('A', '2024-01-05'::DATE, 23.0),
+    ('B', '2024-01-04'::DATE, 21.0),
+    ('B', '2024-01-05'::DATE, 23.0)
+) AS t(product_id, date, temperature);
+
+-- Forecast each product with temperature as exogenous
+SELECT * FROM ts_forecast_exog_by(
+    'sales_by_product', product_id, date, amount,
+    'temperature',
+    'future_exog_by_product',
+    'ARIMA', 2, MAP{}
+);
+```
+
+**Notes:**
+- The `future_table` must contain the same `group_col` values as the source table
+- Each group must have exactly `horizon` future exogenous values
+- Forecasts are generated independently for each group
 
 ---
 
