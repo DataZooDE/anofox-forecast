@@ -75,10 +75,12 @@ This folder contains runnable SQL examples demonstrating peak detection and timi
 | 6 | Demand spike detection with dates |
 | 7 | Full analysis summary with filtering funnel |
 
-**Filtering funnel (typical M5 results):**
-- 50 items → 10 non-intermittent (20%) → 10 suitable for peak analysis
-- Intermittent: 64% zeros, 0.73 avg demand
-- Regular: 17% zeros, 8.6 avg demand
+**Filtering funnel (full M5 dataset):**
+- 30,490 items → 4,028 non-intermittent (13%) → 3,913 suitable (13%)
+- Intermittent: 66% zeros, 0.75 avg demand → filtered out
+- Regular + Seasonal: 19% zeros, 5.4 avg demand → suitable for peak analysis
+
+**Most common detected periods:** Weekly (1,583 items), 6-day (495), Bi-weekly (298)
 
 **See:** `m5_peak_examples.sql`
 

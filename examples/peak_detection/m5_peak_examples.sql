@@ -19,7 +19,7 @@
 --   5. Peak timing analysis using detected period
 --   6. Summary with full context
 --
--- Note: We use a subset of the data (50 items) to demonstrate the workflow.
+-- Note: Uses full M5 dataset (~30k items) to demonstrate realistic filtering.
 -- ============================================================================
 
 -- Load the extensions
@@ -40,19 +40,13 @@ LOAD httpfs;
 SELECT
     '=== Section 1: Load M5 Data ===' AS section;
 
--- Load M5 dataset subset (50 items for variety)
+-- Load full M5 dataset
 CREATE OR REPLACE TABLE m5_sample AS
 SELECT
     item_id,
     CAST(timestamp AS TIMESTAMP) AS ds,
     demand AS y
 FROM 'https://m5-benchmarks.s3.amazonaws.com/data/train/target.parquet'
-WHERE item_id IN (
-    SELECT DISTINCT item_id
-    FROM 'https://m5-benchmarks.s3.amazonaws.com/data/train/target.parquet'
-    ORDER BY item_id
-    LIMIT 50
-)
 ORDER BY item_id, timestamp;
 
 -- Show sample data info
