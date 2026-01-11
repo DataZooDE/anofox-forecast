@@ -640,6 +640,81 @@ SELECT
     'Revenue uplift from running promotions on calendar dates' AS interpretation
 FROM ols_model;
 
+-- Step 8: Bootstrap confidence intervals for promotion effect
+-- Resample training data 100 times to estimate uncertainty in the coefficient
+SELECT 'Bootstrap Confidence Intervals (95%):' AS step;
+
+-- First, prepare training data with row IDs
+CREATE OR REPLACE TABLE training_for_bootstrap AS
+SELECT ROW_NUMBER() OVER () AS row_id, target_col, temperature, is_holiday, has_promo
+FROM baseline_reg WHERE split = 'train';
+
+-- Create bootstrap samples by sampling row IDs with replacement
+-- Each iteration samples n rows (with replacement) from the training data
+CREATE OR REPLACE TABLE bootstrap_samples AS
+WITH
+n_info AS (SELECT COUNT(*) AS n FROM training_for_bootstrap),
+-- Generate bootstrap iterations and random row selections
+bootstrap_draws AS (
+    SELECT
+        iter,
+        1 + FLOOR(random() * (SELECT n FROM n_info))::INTEGER AS sampled_row_id
+    FROM
+        (SELECT UNNEST(generate_series(1, 100)) AS iter) iters,
+        (SELECT UNNEST(generate_series(1, (SELECT n FROM n_info))) AS draw_num) draws
+),
+-- Join back to get actual data for each sampled row
+resampled AS (
+    SELECT
+        b.iter,
+        t.target_col,
+        t.temperature,
+        t.is_holiday,
+        t.has_promo
+    FROM bootstrap_draws b
+    JOIN training_for_bootstrap t ON b.sampled_row_id = t.row_id
+)
+-- Fit OLS on each bootstrap sample and extract has_promo coefficient
+SELECT
+    iter,
+    (ols_fit_agg(target_col, [temperature, is_holiday, has_promo])).coefficients[3] AS promo_coef
+FROM resampled
+GROUP BY iter;
+
+-- Calculate confidence interval from bootstrap distribution
+SELECT
+    ROUND(AVG(promo_coef), 2) AS mean_effect,
+    ROUND(STDDEV(promo_coef), 2) AS std_error,
+    ROUND(PERCENTILE_CONT(0.025) WITHIN GROUP (ORDER BY promo_coef), 2) AS ci_lower_95,
+    ROUND(PERCENTILE_CONT(0.975) WITHIN GROUP (ORDER BY promo_coef), 2) AS ci_upper_95,
+    ROUND(PERCENTILE_CONT(0.05) WITHIN GROUP (ORDER BY promo_coef), 2) AS ci_lower_90,
+    ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY promo_coef), 2) AS ci_upper_90
+FROM bootstrap_samples;
+
+-- Show if true effect (30.0) is within confidence interval
+SELECT 'Effect Significance:' AS step;
+WITH ci AS (
+    SELECT
+        PERCENTILE_CONT(0.025) WITHIN GROUP (ORDER BY promo_coef) AS lower,
+        PERCENTILE_CONT(0.975) WITHIN GROUP (ORDER BY promo_coef) AS upper,
+        AVG(promo_coef) AS mean
+    FROM bootstrap_samples
+)
+SELECT
+    ROUND(mean, 2) AS estimated_effect,
+    ROUND(lower, 2) AS ci_lower,
+    ROUND(upper, 2) AS ci_upper,
+    CASE
+        WHEN lower > 0 THEN 'Significant positive effect (CI excludes zero)'
+        WHEN upper < 0 THEN 'Significant negative effect (CI excludes zero)'
+        ELSE 'Not significant (CI includes zero)'
+    END AS significance,
+    CASE
+        WHEN 30.0 >= lower AND 30.0 <= upper THEN 'Yes - true effect within CI'
+        ELSE 'No - true effect outside CI'
+    END AS true_effect_in_ci
+FROM ci;
+
 -- ============================================================================
 -- CLEANUP
 -- ============================================================================
