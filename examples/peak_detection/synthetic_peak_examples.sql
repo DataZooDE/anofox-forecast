@@ -77,19 +77,19 @@ SELECT
     detection.inter_peak_distances AS distances_between_peaks
 FROM result;
 
--- Section 1.3: Control peak spacing with min_distance
-SELECT 'Section 1.3: Peaks at Least 12 Hours Apart' AS step;
+-- Section 1.3: Filter by prominence only (for daily peaks)
+SELECT 'Section 1.3: Daily Peaks (Prominence > 0.5)' AS step;
 
 WITH traffic_array AS (
     SELECT LIST(visitors ORDER BY timestamp) AS values
     FROM website_traffic
 ),
 result AS (
-    SELECT ts_detect_peaks(values, 100.0, 12) AS detection
+    SELECT ts_detect_peaks(values, 0.5) AS detection
     FROM traffic_array
 )
 SELECT
-    detection.n_peaks AS spaced_peaks,
+    detection.n_peaks AS daily_peaks,
     detection.peaks AS peaks,
     ROUND(detection.mean_period, 2) AS mean_period
 FROM result;
@@ -189,7 +189,7 @@ WITH sales_array AS (
     FROM monthly_sales
 ),
 result AS (
-    SELECT ts_detect_peaks(values, 0.3, 8) AS detection  -- prominence > 0.3, min_distance=8 for yearly
+    SELECT ts_detect_peaks(values, 0.2) AS detection  -- prominence > 0.2 for yearly peaks
     FROM sales_array
 ),
 peaks_unnested AS (
@@ -210,7 +210,7 @@ ORDER BY s.date;
 -- Section 1.7: Heart rate R-peak detection
 SELECT 'Section 1.7: Heart Rate R-Peak Detection' AS step;
 
--- Generate simulated ECG-like signal
+-- Generate simulated ECG-like signal (clean, no baseline noise)
 CREATE OR REPLACE TABLE heart_rate AS
 SELECT
     i AS sample_index,
@@ -220,12 +220,8 @@ SELECT
             -- R-peak every ~100 samples (1 second, ~60 bpm)
             WHEN i % 100 BETWEEN 48 AND 52 THEN
                 80.0 + 40.0 * (1.0 - ABS(i % 100 - 50) / 2.0)  -- sharp peak
-            WHEN i % 100 BETWEEN 40 AND 47 THEN
-                80.0 - 5.0  -- P-wave (small dip before)
-            WHEN i % 100 BETWEEN 53 AND 60 THEN
-                80.0 - 10.0  -- T-wave (recovery)
             ELSE
-                80.0 + (i % 7 - 3) * 0.5  -- baseline with noise
+                80.0  -- flat baseline
         END
     , 2) AS signal
 FROM generate_series(0, 999) AS t(i);  -- 10 seconds of data
@@ -235,7 +231,7 @@ WITH heart_array AS (
     FROM heart_rate
 ),
 result AS (
-    SELECT ts_detect_peaks(values, 0.02, 50) AS detection  -- prominence > 0.02, min_distance 50 samples
+    SELECT ts_detect_peaks(values, 0.3) AS detection  -- prominence > 0.3 for R-peaks
     FROM heart_array
 )
 SELECT

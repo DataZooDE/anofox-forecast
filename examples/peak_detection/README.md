@@ -59,17 +59,18 @@ This folder contains runnable SQL examples demonstrating peak detection and timi
 
 ## M5 Dataset Examples
 
-The M5 examples demonstrate peak detection on real retail sales data:
+**Important:** Peak detection only makes sense for seasonal time series. The M5 examples demonstrate the correct workflow: detect seasonality first, then run peak analysis only on items with detected patterns.
 
 | Section | Description |
 |---------|-------------|
-| 1 | Load M5 data subset (10 items) |
-| 2 | Basic peak detection on sales data |
-| 3 | Weekly peak timing analysis |
-| 4 | Multi-item peak comparison |
+| 1 | Load M5 data subset (50 items) |
+| 2 | Seasonality detection (filter for meaningful analysis) |
+| 3 | Peak detection on seasonal items only |
+| 4 | Peak timing analysis using detected period |
 | 5 | Demand spike detection with dates |
-| 6 | Peak consistency across items |
-| 7 | Combined analysis summary |
+| 6 | Summary with seasonality context |
+
+**Key insight:** ~70% of M5 items have detectable seasonality. Non-seasonal items (higher % zeros, lower demand) would produce meaningless peak detection results.
 
 **See:** `m5_peak_examples.sql`
 
