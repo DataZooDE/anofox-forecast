@@ -59,18 +59,26 @@ This folder contains runnable SQL examples demonstrating peak detection and timi
 
 ## M5 Dataset Examples
 
-**Important:** Peak detection only makes sense for seasonal time series. The M5 examples demonstrate the correct workflow: detect seasonality first, then run peak analysis only on items with detected patterns.
+**Important:** Peak detection only makes sense for non-intermittent, seasonal time series. The M5 examples demonstrate a two-step filtering workflow:
+
+1. **Filter intermittent demand** using `aid_agg()` from anofox_statistics
+2. **Detect seasonality** on remaining items using `ts_detect_seasonality()`
+3. **Run peak analysis** only on suitable items
 
 | Section | Description |
 |---------|-------------|
 | 1 | Load M5 data subset (50 items) |
-| 2 | Seasonality detection (filter for meaningful analysis) |
-| 3 | Peak detection on seasonal items only |
-| 4 | Peak timing analysis using detected period |
-| 5 | Demand spike detection with dates |
-| 6 | Summary with seasonality context |
+| 2 | Intermittency detection with `aid_agg()` |
+| 3 | Seasonality detection on non-intermittent items |
+| 4 | Peak detection on suitable items |
+| 5 | Peak timing analysis using detected period |
+| 6 | Demand spike detection with dates |
+| 7 | Full analysis summary with filtering funnel |
 
-**Key insight:** ~70% of M5 items have detectable seasonality. Non-seasonal items (higher % zeros, lower demand) would produce meaningless peak detection results.
+**Filtering funnel (typical M5 results):**
+- 50 items → 10 non-intermittent (20%) → 10 suitable for peak analysis
+- Intermittent: 64% zeros, 0.73 avg demand
+- Regular: 17% zeros, 8.6 avg demand
 
 **See:** `m5_peak_examples.sql`
 
@@ -125,26 +133,36 @@ The variability score (0-1) indicates timing regularity:
 
 ## Parameter Selection Guide
 
-### Step 1: Check Data Suitability
+### Step 1: Filter Intermittent Demand
 
-Before peak detection, verify your data has patterns:
+Use `aid_agg()` from anofox_statistics to filter out intermittent items:
 
 ```sql
--- Detect seasonality first
+-- Check if data is intermittent
+SELECT (aid_agg(value)).is_intermittent, (aid_agg(value)).demand_type FROM my_data;
+```
+
+- **`is_intermittent = true`**: Skip peak detection (meaningless results)
+- **`is_intermittent = false`**: Proceed to Step 2
+
+### Step 2: Check Seasonality
+
+```sql
+-- Detect seasonality
 SELECT ts_detect_seasonality(LIST(value ORDER BY time)) AS periods FROM my_data;
 ```
 
 - **Empty result `[]`**: Data is non-seasonal, peak detection may be meaningless
 - **Result like `[7, 14]`**: Use the first period (7) for timing analysis
 
-### Step 2: Start Without Filtering
+### Step 3: Start Without Filtering
 
 ```sql
 -- See all peaks first
 SELECT (ts_detect_peaks(values)).n_peaks AS total FROM ...;
 ```
 
-### Step 3: Add Prominence Filter
+### Step 4: Add Prominence Filter
 
 | Data Type | Recommended Prominence | Rationale |
 |-----------|----------------------|-----------|
@@ -154,7 +172,7 @@ SELECT (ts_detect_peaks(values)).n_peaks AS total FROM ...;
 | Physiological signals | 0.3+ | R-peaks in ECG |
 | Noisy data | 0.1 minimum | Filter minor fluctuations |
 
-### Step 4: Use Detected Period for Timing
+### Step 5: Use Detected Period for Timing
 
 ```sql
 -- Use detected period, not hardcoded
@@ -168,7 +186,8 @@ SELECT ts_analyze_peak_timing(values, period) FROM ...;
 
 | Problem | Symptom | Solution |
 |---------|---------|----------|
-| Intermittent data | variability_score = 1.0 | Check seasonality first, filter non-seasonal items |
+| Intermittent demand | >50% zeros, variability = 1.0 | Use `aid_agg()` to filter first |
+| Non-seasonal data | variability_score = 1.0 | Check `ts_detect_seasonality()` before analysis |
 | Too strict filtering | 0 peaks found | Lower prominence threshold |
 | Too many peaks | Noise detected as peaks | Increase prominence to 0.2+ |
 | Wrong period | Meaningless timing stats | Use `ts_detect_seasonality()` to find actual period |
