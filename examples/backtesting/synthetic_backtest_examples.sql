@@ -10,6 +10,7 @@
 --   3. Production Reality - Using gap parameter for ETL latency
 --   4. Composable Pipeline - Step-by-step modular approach
 --   5. Unknown vs Known Features - Mask & Fill for feature leakage prevention
+--   6. Scenario Calendar - What-if analysis with date-specific interventions
 --
 -- Prerequisites:
 --   - anofox_forecast extension loaded
@@ -389,6 +390,213 @@ SELECT
 FROM ols_predictions_p5
 GROUP BY fold_id
 ORDER BY fold_id;
+
+-- ============================================================================
+-- PATTERN 6: Scenario Calendar (What-If Analysis)
+-- ============================================================================
+-- Scenario: Test hypothetical interventions on specific dates
+-- Example: "What if we ran promotions on Feb 20-22 and Mar 5-7?"
+--
+-- Key concept: Create a date-based calendar to apply features only during
+-- specific periods. This is useful for:
+--   - Promotions that run on specific dates
+--   - Planned price changes
+--   - Marketing campaigns
+--   - Seasonal events
+
+SELECT
+    '=== Pattern 6: Scenario Calendar ===' AS section;
+
+-- Step 1: Create base data with HISTORICAL promotions (for OLS to learn the effect)
+-- We add historical promotions to training period so OLS can estimate the coefficient
+CREATE OR REPLACE TABLE sales_scenario AS
+SELECT
+    store_id,
+    date,
+    temperature,
+    is_holiday,
+    -- Historical promotions on specific past dates (in training period)
+    CASE WHEN date IN ('2024-01-15'::DATE, '2024-01-16'::DATE, '2024-02-01'::DATE, '2024-02-02'::DATE)
+         THEN 1 ELSE 0 END AS has_promo,
+    -- Add promotion effect to revenue when promo is active
+    revenue + CASE WHEN date IN ('2024-01-15'::DATE, '2024-01-16'::DATE, '2024-02-01'::DATE, '2024-02-02'::DATE)
+                   THEN 30.0 ELSE 0 END AS revenue
+FROM sales_with_features;
+
+-- Step 2: Define scenario calendar - specific intervention periods
+CREATE OR REPLACE TABLE promo_calendar AS
+SELECT * FROM (VALUES
+    ('2024-02-20'::DATE, '2024-02-22'::DATE, 'winter_sale'),
+    ('2024-03-05'::DATE, '2024-03-07'::DATE, 'spring_launch')
+) AS t(start_date, end_date, promo_name);
+
+-- Show the calendar
+SELECT 'Promo Calendar:' AS step;
+SELECT * FROM promo_calendar;
+
+-- Step 3: Create BASELINE scenario (historical promos in training, NO promos in test period)
+CREATE OR REPLACE TABLE scenario_baseline AS
+SELECT
+    store_id,
+    date,
+    temperature,
+    is_holiday,
+    CASE
+        WHEN date >= '2024-02-15'::DATE THEN 0  -- No promos in test period
+        ELSE has_promo  -- Keep historical promos in training
+    END AS has_promo,
+    revenue
+FROM sales_scenario;
+
+-- Step 4: Create WHAT-IF scenario (historical promos + calendar promos in test period)
+-- For test period (after Feb 15), apply promo calendar; otherwise keep historical
+CREATE OR REPLACE TABLE scenario_whatif AS
+SELECT
+    s.store_id,
+    s.date,
+    s.temperature,
+    s.is_holiday,
+    CASE
+        WHEN s.date >= '2024-02-15'::DATE AND p.promo_name IS NOT NULL THEN 1  -- Calendar promo
+        ELSE s.has_promo  -- Historical promo
+    END AS has_promo,
+    s.revenue
+FROM sales_scenario s
+LEFT JOIN promo_calendar p
+    ON s.date >= p.start_date AND s.date <= p.end_date;
+
+-- Verify promotion counts
+SELECT 'Baseline promo days:' AS step, SUM(has_promo) AS promo_days FROM scenario_baseline;
+SELECT 'What-if promo days:' AS step, SUM(has_promo) AS promo_days FROM scenario_whatif;
+
+-- Step 5: Run backtest on each scenario using SeasonalNaive
+-- (SeasonalNaive ignores features, so forecast should be same - this shows structure)
+SELECT 'Baseline Scenario Results:' AS step;
+SELECT
+    fold_id,
+    COUNT(*) AS n_predictions,
+    ROUND(AVG(abs_error), 2) AS mae,
+    model_name
+FROM ts_backtest_auto(
+    'scenario_baseline', store_id, date, revenue,
+    14, 2, '1d',
+    MAP{'method': 'SeasonalNaive', 'seasonal_period': '7'}
+)
+GROUP BY fold_id, model_name
+ORDER BY fold_id;
+
+SELECT 'What-if Scenario Results:' AS step;
+SELECT
+    fold_id,
+    COUNT(*) AS n_predictions,
+    ROUND(AVG(abs_error), 2) AS mae,
+    model_name
+FROM ts_backtest_auto(
+    'scenario_whatif', store_id, date, revenue,
+    14, 2, '1d',
+    MAP{'method': 'SeasonalNaive', 'seasonal_period': '7'}
+)
+GROUP BY fold_id, model_name
+ORDER BY fold_id;
+
+-- Step 6: For models that USE the promo feature, run OLS regression
+-- This demonstrates the actual scenario comparison with feature impact
+
+-- Prepare baseline for OLS (ts_cv_split + hydrate)
+CREATE OR REPLACE TABLE cv_baseline AS
+SELECT * FROM ts_cv_split(
+    'scenario_baseline', store_id, date, revenue,
+    ['2024-02-15']::DATE[], 14, '1d', MAP{}
+);
+
+CREATE OR REPLACE TABLE baseline_hydrated AS
+SELECT
+    c.*,
+    s.temperature,
+    s.is_holiday,
+    s.has_promo
+FROM cv_baseline c
+JOIN scenario_baseline s ON c.group_col = s.store_id AND c.date_col = s.date;
+
+-- Prepare what-if for OLS
+CREATE OR REPLACE TABLE cv_whatif AS
+SELECT * FROM ts_cv_split(
+    'scenario_whatif', store_id, date, revenue,
+    ['2024-02-15']::DATE[], 14, '1d', MAP{}
+);
+
+CREATE OR REPLACE TABLE whatif_hydrated AS
+SELECT
+    c.*,
+    s.temperature,
+    s.is_holiday,
+    s.has_promo
+FROM cv_whatif c
+JOIN scenario_whatif s ON c.group_col = s.store_id AND c.date_col = s.date;
+
+-- Run OLS on each scenario using ts_prepare_regression_input
+CREATE OR REPLACE TABLE baseline_reg AS
+SELECT
+    h.fold_id,
+    h.group_col,
+    h.date_col,
+    h.target_col,
+    h.temperature,
+    h.is_holiday,
+    h.has_promo,
+    h.split,
+    CASE WHEN h.split = 'test' THEN NULL ELSE h.target_col END AS masked_target
+FROM baseline_hydrated h;
+
+CREATE OR REPLACE TABLE whatif_reg AS
+SELECT
+    h.fold_id,
+    h.group_col,
+    h.date_col,
+    h.target_col,
+    h.temperature,
+    h.is_holiday,
+    h.has_promo,
+    h.split,
+    CASE WHEN h.split = 'test' THEN NULL ELSE h.target_col END AS masked_target
+FROM whatif_hydrated h;
+
+-- Get OLS predictions for test rows only
+-- Note: Using simpler approach - aggregate at fold level to avoid join issues
+SELECT 'OLS Scenario Comparison:' AS step;
+WITH
+baseline_ols AS (
+    SELECT group_id AS fold_id, yhat, is_training, y
+    FROM ols_fit_predict_by('baseline_reg', fold_id, masked_target, [temperature, is_holiday, has_promo])
+),
+whatif_ols AS (
+    SELECT group_id AS fold_id, yhat, is_training, y
+    FROM ols_fit_predict_by('whatif_reg', fold_id, masked_target, [temperature, is_holiday, has_promo])
+),
+baseline_test AS (
+    SELECT fold_id, SUM(yhat) AS total_forecast, COUNT(*) AS n
+    FROM baseline_ols WHERE NOT is_training GROUP BY fold_id
+),
+whatif_test AS (
+    SELECT fold_id, SUM(yhat) AS total_forecast, COUNT(*) AS n
+    FROM whatif_ols WHERE NOT is_training GROUP BY fold_id
+)
+SELECT
+    'baseline' AS scenario,
+    b.fold_id,
+    b.n AS n_predictions,
+    ROUND(b.total_forecast, 2) AS total_forecast,
+    (SELECT SUM(has_promo) FROM baseline_reg WHERE split = 'test') AS promo_days
+FROM baseline_test b
+UNION ALL
+SELECT
+    'with_promos' AS scenario,
+    w.fold_id,
+    w.n AS n_predictions,
+    ROUND(w.total_forecast, 2) AS total_forecast,
+    (SELECT SUM(has_promo) FROM whatif_reg WHERE split = 'test') AS promo_days
+FROM whatif_test w
+ORDER BY scenario;
 
 -- ============================================================================
 -- CLEANUP

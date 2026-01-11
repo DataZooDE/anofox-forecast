@@ -102,6 +102,40 @@ SELECT * FROM ts_backtest_auto(
 
 ---
 
+### Pattern 6: Scenario Calendar (What-If Analysis)
+
+**Use case:** Test hypothetical interventions on specific dates.
+
+**Example questions:**
+- "What if we ran promotions on Feb 20-22?"
+- "What if we had a price change starting March 1?"
+
+**Approach:**
+1. Create a scenario calendar with date ranges and intervention values
+2. Join calendar to test data to apply interventions
+3. Compare baseline vs what-if forecasts
+
+```sql
+-- Define scenario calendar
+CREATE TABLE promo_calendar AS
+SELECT * FROM (VALUES
+    ('2024-02-20'::DATE, '2024-02-22'::DATE, 'winter_sale'),
+    ('2024-03-05'::DATE, '2024-03-07'::DATE, 'spring_launch')
+) AS t(start_date, end_date, promo_name);
+
+-- Apply to test data
+SELECT
+    s.*,
+    CASE WHEN p.promo_name IS NOT NULL THEN 1 ELSE 0 END AS promo_scenario
+FROM test_data s
+LEFT JOIN promo_calendar p
+    ON s.date >= p.start_date AND s.date <= p.end_date;
+```
+
+**See:** `synthetic_backtest_examples.sql` Section 6
+
+---
+
 ## M5 Dataset Examples
 
 The M5 examples demonstrate backtesting on real retail sales data:
