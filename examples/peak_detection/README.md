@@ -123,17 +123,71 @@ The variability score (0-1) indicates timing regularity:
 
 ---
 
+## Parameter Selection Guide
+
+### Step 1: Check Data Suitability
+
+Before peak detection, verify your data has patterns:
+
+```sql
+-- Detect seasonality first
+SELECT ts_detect_seasonality(LIST(value ORDER BY time)) AS periods FROM my_data;
+```
+
+- **Empty result `[]`**: Data is non-seasonal, peak detection may be meaningless
+- **Result like `[7, 14]`**: Use the first period (7) for timing analysis
+
+### Step 2: Start Without Filtering
+
+```sql
+-- See all peaks first
+SELECT (ts_detect_peaks(values)).n_peaks AS total FROM ...;
+```
+
+### Step 3: Add Prominence Filter
+
+| Data Type | Recommended Prominence | Rationale |
+|-----------|----------------------|-----------|
+| Sensor anomalies | 0.5-0.7 | Only major spikes |
+| Daily traffic peaks | 0.3-0.5 | Clear daily maxima |
+| Sales seasonality | 0.2-0.3 | Yearly/monthly peaks |
+| Physiological signals | 0.3+ | R-peaks in ECG |
+| Noisy data | 0.1 minimum | Filter minor fluctuations |
+
+### Step 4: Use Detected Period for Timing
+
+```sql
+-- Use detected period, not hardcoded
+WITH seasonality AS (
+    SELECT ts_detect_seasonality(values)[1] AS period FROM ...
+)
+SELECT ts_analyze_peak_timing(values, period) FROM ...;
+```
+
+### Common Pitfalls
+
+| Problem | Symptom | Solution |
+|---------|---------|----------|
+| Intermittent data | variability_score = 1.0 | Check seasonality first, filter non-seasonal items |
+| Too strict filtering | 0 peaks found | Lower prominence threshold |
+| Too many peaks | Noise detected as peaks | Increase prominence to 0.2+ |
+| Wrong period | Meaningless timing stats | Use `ts_detect_seasonality()` to find actual period |
+
+---
+
 ## Tips
 
 1. **Start with no filtering** - Run `ts_detect_peaks(values)` first to see all peaks, then add prominence filter.
 
 2. **Use prominence for noise filtering** - Real data often has small fluctuations; prominence > 0.1 usually filters noise.
 
-3. **Match period to your cycle** - For weekly patterns, use period=7. Wrong periods give meaningless results.
+3. **Detect seasonality first** - Use `ts_detect_seasonality()` to find the actual period, don't guess.
 
 4. **Check timing stability** - `is_stable = TRUE` means peaks are predictable for scheduling and planning.
 
 5. **Watch for drift** - `timing_trend` shows if peaks are shifting over time (positive = later, negative = earlier).
+
+6. **Filter non-seasonal items** - Peak detection on intermittent demand (>50% zeros) produces meaningless results.
 
 ---
 
