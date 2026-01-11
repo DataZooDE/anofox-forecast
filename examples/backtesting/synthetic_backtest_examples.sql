@@ -598,6 +598,48 @@ SELECT
 FROM whatif_test w
 ORDER BY scenario;
 
+-- Step 7: Estimate the promotion effect from OLS coefficients
+-- Use ols_fit_agg aggregate to get model coefficients and extract has_promo coefficient
+SELECT 'Promotion Effect Estimation:' AS step;
+
+-- Train OLS on historical data to estimate the promotion coefficient
+-- ols_fit_agg returns: {coefficients, intercept, r_squared, adj_r_squared, residual_std_error, n_observations, n_features}
+-- Features order: [temperature, is_holiday, has_promo] → coefficients in same order
+CREATE OR REPLACE TABLE ols_model AS
+SELECT ols_fit_agg(target_col, [temperature, is_holiday, has_promo]) AS model
+FROM baseline_reg
+WHERE split = 'train';
+
+-- Extract and display the promotion effect
+SELECT
+    'Promotion Effect' AS effect_name,
+    ROUND(model.coefficients[3], 2) AS estimated_coefficient,  -- has_promo is 3rd coefficient
+    30.0 AS true_effect,
+    ROUND(ABS(model.coefficients[3] - 30.0), 2) AS estimation_error,
+    ROUND(model.r_squared * 100, 1) AS r_squared_pct
+FROM ols_model;
+
+-- Show full model summary with all coefficients
+SELECT 'OLS Model Coefficients:' AS step;
+SELECT
+    UNNEST(['intercept', 'temperature', 'is_holiday', 'has_promo']) AS feature,
+    UNNEST([
+        ROUND(model.intercept, 2),
+        ROUND(model.coefficients[1], 2),
+        ROUND(model.coefficients[2], 2),
+        ROUND(model.coefficients[3], 2)
+    ]) AS coefficient
+FROM ols_model;
+
+-- Calculate scenario impact using estimated effect
+SELECT 'Scenario Impact Summary:' AS step;
+SELECT
+    (SELECT SUM(has_promo) FROM whatif_reg WHERE split = 'test') AS promo_days_in_scenario,
+    ROUND(model.coefficients[3], 2) AS estimated_effect_per_day,
+    ROUND((SELECT SUM(has_promo) FROM whatif_reg WHERE split = 'test') * model.coefficients[3], 2) AS expected_total_uplift,
+    'Revenue uplift from running promotions on calendar dates' AS interpretation
+FROM ols_model;
+
 -- ============================================================================
 -- CLEANUP
 -- ============================================================================
