@@ -1,0 +1,248 @@
+# name: test/sql/ts_backtest_auto.test
+# description: Tests for ts_backtest_auto - one-liner backtest macro
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup Test Data
+#######################################
+
+statement ok
+CREATE TABLE backtest_demo AS
+SELECT
+    series_id,
+    '2024-01-01'::DATE + (i * INTERVAL '1 day') AS date,
+    10.0 + CASE WHEN series_id = 'A' THEN 50 ELSE 0 END + i AS value
+FROM generate_series(0, 59) AS t(i)
+CROSS JOIN (SELECT UNNEST(['A', 'B']) AS series_id) s;
+
+#######################################
+# ts_backtest_auto - Basic Tests
+#######################################
+
+# Test returns correct number of rows (folds × series × horizon)
+# 3 folds × 2 series × 7 horizon = 42
+query I
+SELECT COUNT(*) FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
+);
+----
+42
+
+# Test has all expected columns (11 columns including fold_metric_score)
+query I
+SELECT COUNT(*) FROM (
+    DESCRIBE SELECT * FROM ts_backtest_auto(
+        'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
+    )
+);
+----
+11
+
+# Test all folds are represented
+query I
+SELECT COUNT(DISTINCT fold_id) FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
+);
+----
+3
+
+# Test all series are represented per fold
+query II
+SELECT fold_id, COUNT(DISTINCT group_col) FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
+)
+GROUP BY fold_id ORDER BY fold_id;
+----
+1	2
+2	2
+3	2
+
+# Test forecast count per fold per series matches horizon
+query III
+SELECT fold_id, group_col, COUNT(*) as n FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
+)
+GROUP BY fold_id, group_col ORDER BY fold_id, group_col;
+----
+1	A	7
+1	B	7
+2	A	7
+2	B	7
+3	A	7
+3	B	7
+
+#######################################
+# ts_backtest_auto - Method Parameter Tests
+#######################################
+
+# Test with Naive method
+query I
+SELECT DISTINCT model_name FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{'method': 'Naive'}
+);
+----
+Naive
+
+# Test with different method
+query I
+SELECT COUNT(DISTINCT model_name) >= 1 FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{'method': 'AutoETS'}
+);
+----
+true
+
+#######################################
+# ts_backtest_auto - Output Validation
+#######################################
+
+# Test forecast and actual are numeric
+query I
+SELECT COUNT(*) FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
+) WHERE forecast IS NOT NULL AND actual IS NOT NULL;
+----
+42
+
+# Test error = forecast - actual
+query I
+SELECT COUNT(*) FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
+) WHERE ABS(error - (forecast - actual)) < 0.0001;
+----
+42
+
+# Test abs_error = |error|
+query I
+SELECT COUNT(*) FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
+) WHERE ABS(abs_error - ABS(error)) < 0.0001;
+----
+42
+
+#######################################
+# ts_backtest_auto - Gap Parameter Tests
+#######################################
+
+# Test gap parameter affects forecast dates
+# With gap=2: forecast dates start 3 days after train_end instead of 1 day
+# Verify we still get some forecasts (may be fewer due to data range limits)
+query I
+SELECT COUNT(*) > 0 FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 2, '1d', MAP{'gap': '2'}
+);
+----
+true
+
+#######################################
+# ts_backtest_auto - Aggregate Metrics
+#######################################
+
+# Test can compute aggregate metrics
+query II
+SELECT
+    group_col,
+    ROUND(AVG(abs_error), 2) > 0 AS has_error
+FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{'method': 'Naive'}
+)
+GROUP BY group_col
+ORDER BY group_col;
+----
+A	true
+B	true
+
+#######################################
+# ts_backtest_auto - Metric Parameter Tests
+#######################################
+
+# Test fold_metric_score column exists and is numeric
+query I
+SELECT COUNT(*) FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
+) WHERE fold_metric_score IS NOT NULL;
+----
+42
+
+# Test metric='mae' returns MAE scores
+query I
+SELECT COUNT(DISTINCT fold_metric_score) >= 1 FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{},
+    metric => 'mae'
+);
+----
+true
+
+# Test metric='rmse' returns RMSE scores (default)
+query I
+SELECT COUNT(DISTINCT fold_metric_score) >= 1 FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{},
+    metric => 'rmse'
+);
+----
+true
+
+# Test metric='mse' returns MSE scores
+query I
+SELECT COUNT(DISTINCT fold_metric_score) >= 1 FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{},
+    metric => 'mse'
+);
+----
+true
+
+# Test fold_metric_score is consistent within each fold
+query I
+SELECT COUNT(DISTINCT n_unique_scores) FROM (
+    SELECT fold_id, COUNT(DISTINCT ROUND(fold_metric_score, 6)) AS n_unique_scores
+    FROM ts_backtest_auto(
+        'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
+    )
+    GROUP BY fold_id
+);
+----
+1
+
+#######################################
+# ts_backtest_auto - Features Parameter Tests
+#######################################
+
+# Test features parameter accepts empty array (default)
+query I
+SELECT COUNT(*) FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{},
+    features => []::VARCHAR[]
+);
+----
+42
+
+#######################################
+# Single Series Test
+#######################################
+
+statement ok
+CREATE TABLE single_series AS
+SELECT
+    'X' AS series_id,
+    '2024-01-01'::DATE + (i * INTERVAL '1 day') AS date,
+    100.0 + i AS value
+FROM generate_series(0, 59) AS t(i);
+
+# Test with single series
+query I
+SELECT COUNT(*) FROM ts_backtest_auto(
+    'single_series', series_id, date, value, 7, 3, '1d', MAP{}
+);
+----
+21
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE backtest_demo;
+
+statement ok
+DROP TABLE single_series;
