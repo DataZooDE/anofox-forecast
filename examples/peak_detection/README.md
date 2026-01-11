@@ -1,187 +1,85 @@
-# Peak Detection and Timing Analysis Example
+# Peak Detection Examples
 
-This example demonstrates peak detection and timing analysis using the anofox_forecast DuckDB extension.
+> **Peak detection identifies local maxima in time series data.**
 
-## Overview
+This folder contains runnable SQL examples demonstrating peak detection and timing analysis with the anofox-forecast extension.
 
-Peak detection identifies local maxima in time series data, which is essential for:
+## Example Files
 
-- **Demand Planning**: Find demand peaks to optimize inventory and staffing
-- **Anomaly Detection**: Identify unusual spikes that may indicate problems
-- **Seasonality Analysis**: Understand when cyclical peaks occur
-- **Signal Processing**: Detect events in sensor and IoT data
-- **Financial Analysis**: Find price peaks for trading strategies
-
-## Files
-
-Run the files in order:
-
-| File | Description |
-|------|-------------|
-| `01_sample_data.sql` | Creates sample datasets (traffic, sensors, sales, heart rate) |
-| `02_basic_peak_detection.sql` | Basic `ts_detect_peaks()` usage with various parameters |
-| `03_peak_timing_analysis.sql` | `ts_analyze_peak_timing()` for timing consistency analysis |
+| File | Description | Data Source |
+|------|-------------|-------------|
+| [`synthetic_peak_examples.sql`](synthetic_peak_examples.sql) | 2 patterns using generated data | Synthetic |
+| [`m5_peak_examples.sql`](m5_peak_examples.sql) | Real-world examples with M5 dataset | [M5 Competition](https://www.kaggle.com/c/m5-forecasting-accuracy) |
 
 ## Quick Start
 
-```sql
--- Load extension
-LOAD anofox_forecast;
+```bash
+# Run synthetic examples
+./build/release/duckdb < examples/peak_detection/synthetic_peak_examples.sql
 
--- Run sample data creation
-.read examples/peak_detection/01_sample_data.sql
-
--- Run peak detection examples
-.read examples/peak_detection/02_basic_peak_detection.sql
-
--- Run timing analysis examples
-.read examples/peak_detection/03_peak_timing_analysis.sql
+# Run M5 examples (requires httpfs for remote data)
+./build/release/duckdb < examples/peak_detection/m5_peak_examples.sql
 ```
 
-## Sample Datasets
+---
 
-| Dataset | Description | Rows | Use Case |
-|---------|-------------|------|----------|
-| `website_traffic` | Hourly visitor counts (7 days) | 168 | Daily pattern analysis |
-| `sensor_readings` | Temperature with anomaly spikes | 600 | Anomaly detection |
-| `monthly_sales` | Retail sales with seasonality (5 years) | 60 | Seasonal peak analysis |
-| `heart_rate` | ECG-like signal (10 seconds) | 1000 | Physiological peak detection |
+## Patterns Overview
 
-## Key Functions
+### Pattern 1: Basic Peak Detection
 
-### ts_detect_peaks
+**Use case:** Find local maxima in time series for demand peaks, anomaly spikes, seasonal highs.
 
-Detects local maxima in time series data.
-
-```sql
-ts_detect_peaks(values DOUBLE[]) → STRUCT
-ts_detect_peaks(values DOUBLE[], min_prominence DOUBLE) → STRUCT
-ts_detect_peaks(values DOUBLE[], min_prominence DOUBLE, min_distance INTEGER) → STRUCT
-```
+**Key function:** `ts_detect_peaks(values, min_prominence, min_distance)`
 
 **Parameters:**
-- `values`: Time series values as array
-- `min_prominence`: Minimum peak prominence threshold (default: 0.0)
-- `min_distance`: Minimum observations between peaks (default: 1)
+- `min_prominence` - Filter peaks by significance (0-1 normalized scale)
+- `min_distance` - Minimum observations between peaks
 
-**Returns:**
-```sql
-STRUCT(
-    peaks STRUCT(index BIGINT, time DOUBLE, value DOUBLE, prominence DOUBLE)[],
-    n_peaks BIGINT,
-    inter_peak_distances DOUBLE[],
-    mean_period DOUBLE
-)
-```
+**See:** `synthetic_peak_examples.sql` Pattern 1
 
-- `peaks`: Array of peak structs, each containing index, time, value, and prominence
-- `n_peaks`: Number of peaks detected
-- `inter_peak_distances`: Distances between consecutive peaks
-- `mean_period`: Average period between peaks
+---
 
-### ts_analyze_peak_timing
+### Pattern 2: Peak Timing Analysis
 
-Analyzes peak timing consistency within seasonal cycles.
+**Use case:** Analyze when peaks occur within seasonal cycles for demand planning and consistency checks.
 
-```sql
-ts_analyze_peak_timing(values DOUBLE[], period INTEGER) → STRUCT
-```
+**Key function:** `ts_analyze_peak_timing(values, period)`
 
 **Parameters:**
-- `values`: Time series values as array
-- `period`: Expected seasonal period length
+- `period` - Expected seasonal cycle length (e.g., 7 for weekly, 24 for hourly-daily)
 
-**Returns:**
-```sql
-STRUCT(
-    peak_times DOUBLE[],
-    peak_values DOUBLE[],
-    normalized_timing DOUBLE[],
-    n_peaks BIGINT,
-    mean_timing DOUBLE,
-    std_timing DOUBLE,
-    range_timing DOUBLE,
-    variability_score DOUBLE,
-    timing_trend DOUBLE,
-    is_stable BOOLEAN
-)
-```
+**Key outputs:**
+- `variability_score` - 0 = stable, 1 = highly variable
+- `is_stable` - TRUE if variability_score < 0.3
+- `timing_trend` - Positive = peaks shifting later over time
 
-- `peak_times`: Raw time positions of detected peaks
-- `peak_values`: Values at peak positions
-- `normalized_timing`: Peak positions normalized to 0-1 scale within each cycle
-- `n_peaks`: Number of peaks analyzed
-- `mean_timing`: Mean normalized timing (0-1)
-- `std_timing`: Standard deviation of normalized timing
-- `range_timing`: Max - min of normalized timing
-- `variability_score`: 0 = stable, 1 = highly variable
-- `timing_trend`: Positive = peaks getting later over time
-- `is_stable`: TRUE if variability_score < 0.3
+**See:** `synthetic_peak_examples.sql` Pattern 2
 
-## Common Patterns
+---
 
-### Finding Significant Peaks Only
+## M5 Dataset Examples
 
-```sql
--- Filter by prominence to ignore minor fluctuations
-WITH data_array AS (
-    SELECT LIST(value ORDER BY time) AS values FROM my_data
-)
-SELECT (ts_detect_peaks(values, 100.0)).n_peaks AS significant_peaks
-FROM data_array;
-```
+The M5 examples demonstrate peak detection on real retail sales data:
 
-### Ensuring Minimum Peak Spacing
+| Section | Description |
+|---------|-------------|
+| 1 | Load M5 data subset (10 items) |
+| 2 | Basic peak detection on sales data |
+| 3 | Weekly peak timing analysis |
+| 4 | Multi-item peak comparison |
+| 5 | Demand spike detection with dates |
+| 6 | Peak consistency across items |
+| 7 | Combined analysis summary |
 
-```sql
--- Require at least 12 observations between peaks
-WITH data_array AS (
-    SELECT LIST(value ORDER BY time) AS values FROM hourly_data
-)
-SELECT (ts_detect_peaks(values, 50.0, 12)).peaks AS spaced_peaks
-FROM data_array;
-```
+**See:** `m5_peak_examples.sql`
 
-### Mapping Peaks Back to Timestamps
+---
 
-```sql
-WITH data_array AS (
-    SELECT LIST(value ORDER BY time) AS values FROM my_data
-),
-result AS (
-    SELECT ts_detect_peaks(values) AS detection FROM data_array
-),
-peaks_unnested AS (
-    SELECT UNNEST(detection.peaks) AS peak FROM result
-)
-SELECT
-    d.*,
-    p.peak.prominence
-FROM my_data d
-JOIN peaks_unnested p ON d.row_number = p.peak.index + 1;  -- +1 for 0-based index
-```
+## Key Concepts
 
-### Checking Timing Consistency
+### Peak Prominence
 
-```sql
--- Check if weekly peaks are consistent
-WITH data_array AS (
-    SELECT series_id, LIST(value ORDER BY time) AS values
-    FROM daily_data
-    GROUP BY series_id
-)
-SELECT
-    series_id,
-    (ts_analyze_peak_timing(values, 7)).is_stable AS stable_pattern,
-    ROUND((ts_analyze_peak_timing(values, 7)).variability_score, 3) AS variability
-FROM data_array;
-```
-
-## Parameter Guidelines
-
-### Prominence Selection
-
-Prominence is normalized to a 0-1 scale:
+Prominence measures how much a peak "stands out" from surrounding data (normalized 0-1 scale):
 
 | Prominence Level | Use Case |
 |------------------|----------|
@@ -190,6 +88,28 @@ Prominence is normalized to a 0-1 scale:
 | 0.1-0.3 | Moderate peaks |
 | 0.3-0.5 | Significant peaks only |
 | 0.5+ | Only major peaks/anomalies |
+
+### Minimum Distance
+
+Controls peak spacing to prevent detecting minor fluctuations:
+
+| Data Frequency | Typical min_distance |
+|----------------|---------------------|
+| Hourly | 6-12 (half day) |
+| Daily | 5-7 (one week) |
+| Weekly | 4 (one month) |
+| Monthly | 8-12 (one year) |
+
+### Variability Score
+
+The variability score (0-1) indicates timing regularity:
+
+| Score Range | Interpretation |
+|-------------|----------------|
+| < 0.1 | Very consistent (peaks at same position each cycle) |
+| 0.1-0.3 | Consistent (`is_stable = TRUE`) |
+| 0.3-0.5 | Moderately variable |
+| > 0.5 | Highly variable timing |
 
 ### Period Selection for Timing Analysis
 
@@ -200,28 +120,21 @@ Prominence is normalized to a 0-1 scale:
 | Weekly | 52 (yearly) |
 | Monthly | 12 (yearly) |
 
-## Interpreting Results
+---
 
-### Peak Prominence
+## Tips
 
-Prominence measures how much a peak "stands out" from surrounding data:
-- **High prominence**: Clear, significant peak
-- **Low prominence**: Minor fluctuation, possibly noise
+1. **Start with no filtering** - Run `ts_detect_peaks(values)` first to see all peaks, then add prominence filter.
 
-### Variability Score
+2. **Use prominence for noise filtering** - Real data often has small fluctuations; prominence > 0.1 usually filters noise.
 
-The variability score (0-1) indicates timing regularity:
-- **< 0.1**: Very consistent (peaks at same position each cycle)
-- **0.1-0.3**: Consistent (is_stable = TRUE)
-- **0.3-0.5**: Moderately variable
-- **> 0.5**: Highly variable timing
+3. **Match period to your cycle** - For weekly patterns, use period=7. Wrong periods give meaningless results.
 
-### Timing Trend
+4. **Check timing stability** - `is_stable = TRUE` means peaks are predictable for scheduling and planning.
 
-The timing trend indicates if peaks are shifting over time:
-- **Positive**: Peaks occurring later in each successive cycle
-- **Negative**: Peaks occurring earlier in each successive cycle
-- **Near zero**: Stable peak timing
+5. **Watch for drift** - `timing_trend` shows if peaks are shifting over time (positive = later, negative = earlier).
+
+---
 
 ## Related Functions
 
