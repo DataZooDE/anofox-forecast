@@ -8,7 +8,7 @@ This folder contains runnable SQL examples demonstrating time series cross-valid
 
 | File | Description | Data Source |
 |------|-------------|-------------|
-| [`synthetic_backtest_examples.sql`](synthetic_backtest_examples.sql) | 5 patterns using generated data | Synthetic |
+| [`synthetic_backtest_examples.sql`](synthetic_backtest_examples.sql) | 6 patterns using generated data | Synthetic |
 | [`m5_backtest_examples.sql`](m5_backtest_examples.sql) | Real-world examples with M5 dataset | [M5 Competition](https://www.kaggle.com/c/m5-forecasting-accuracy) |
 
 ## Quick Start
@@ -104,16 +104,23 @@ SELECT * FROM ts_backtest_auto(
 
 ### Pattern 6: Scenario Calendar (What-If Analysis)
 
-**Use case:** Test hypothetical interventions on specific dates.
+**Use case:** Test hypothetical interventions on specific dates and quantify their expected impact.
 
 **Example questions:**
 - "What if we ran promotions on Feb 20-22?"
-- "What if we had a price change starting March 1?"
+- "What is the expected revenue uplift from the promotion?"
+- "Is the promotion effect statistically significant?"
 
-**Approach:**
-1. Create a scenario calendar with date ranges and intervention values
-2. Join calendar to test data to apply interventions
-3. Compare baseline vs what-if forecasts
+**Requires:** `anofox_statistics` extension for OLS regression and effect estimation.
+
+**Steps:**
+1. Create historical data with past interventions (for model to learn effect)
+2. Define scenario calendar with date ranges and intervention values
+3. Build baseline (no intervention) and what-if (with intervention) scenarios
+4. Run OLS regression on each scenario
+5. Compare forecast totals between scenarios
+6. Estimate intervention effect using `ols_fit_agg`
+7. Calculate bootstrap confidence intervals for uncertainty quantification
 
 ```sql
 -- Define scenario calendar
@@ -130,7 +137,18 @@ SELECT
 FROM test_data s
 LEFT JOIN promo_calendar p
     ON s.date >= p.start_date AND s.date <= p.end_date;
+
+-- Estimate effect using OLS
+SELECT ols_fit_agg(target, [temperature, is_holiday, has_promo]) AS model
+FROM training_data;
+-- Returns: {coefficients: [temp_coef, holiday_coef, promo_coef], intercept, r_squared, ...}
 ```
+
+**Key outputs:**
+- **OLS Model Coefficients:** Estimated effect per feature (e.g., +22 revenue per promo day)
+- **Scenario Impact Summary:** Total expected uplift (promo_days × effect)
+- **Bootstrap Confidence Intervals:** 95% CI for the effect estimate
+- **Significance Test:** Whether the effect is statistically significant (CI excludes zero)
 
 **See:** `synthetic_backtest_examples.sql` Section 6
 
@@ -206,6 +224,37 @@ GROUP BY fold_id;
 | `'mean'` | Use training set mean | Stable, centered features |
 | `'zero'` | Fill with zeros | Event indicators (default = no event) |
 | `'linear'` | Linear interpolation | Trending features |
+
+### Effect Estimation with OLS
+
+Use `ols_fit_agg` to estimate intervention effects from historical data:
+
+```sql
+-- Fit OLS and extract coefficients
+SELECT ols_fit_agg(revenue, [temperature, is_holiday, has_promo]) AS model
+FROM training_data;
+
+-- Returns struct with:
+--   coefficients: [temp_effect, holiday_effect, promo_effect]
+--   intercept: baseline value
+--   r_squared: model fit quality
+--   residual_std_error: prediction uncertainty
+```
+
+**Bootstrap Confidence Intervals:**
+
+```sql
+-- Resample training data 100 times to estimate coefficient uncertainty
+WITH bootstrap AS (
+    SELECT iter, (ols_fit_agg(y, [x1, x2])).coefficients[2] AS coef
+    FROM resampled_data
+    GROUP BY iter
+)
+SELECT
+    PERCENTILE_CONT(0.025) WITHIN GROUP (ORDER BY coef) AS ci_lower_95,
+    PERCENTILE_CONT(0.975) WITHIN GROUP (ORDER BY coef) AS ci_upper_95
+FROM bootstrap;
+```
 
 ---
 
