@@ -8,9 +8,15 @@ The anofox-forecast extension provides a complete set of functions for time seri
 
 **Key Functions**:
 
+- `ts_backtest_auto` - ⭐ **One-liner backtest** - complete backtest in a single call
 - `ts_cv_split` - Split data into train/test sets for multiple CV folds
+- `ts_cv_split_index` - **Memory-efficient** split returning only index columns (no target data)
+- `ts_cv_forecast_by` - **Parallel fold execution** - run forecasts for all folds at once
 - `ts_cv_split_folds` - Generate fold boundary information
 - `ts_cv_generate_folds` - Automatically generate training end times
+- `ts_hydrate_split` - **Safe join** of CV splits with source data, masking unknown columns
+- `ts_hydrate_split_full` - Join all source columns with split metadata for manual masking
+- `ts_hydrate_split_strict` - **Fail-safe** join returning only metadata (forces explicit column handling)
 - `ts_mark_unknown` - Mark data points as known/unknown for scenario testing
 - `ts_fill_unknown` - Fill future feature values in test periods
 - `ts_validate_timestamps` - Validate expected timestamps exist in data
@@ -23,9 +29,18 @@ The anofox-forecast extension provides a complete set of functions for time seri
 2. [Quick Start Example](#quick-start-example)
 3. [Window Types](#window-types)
 4. [Function Reference](#function-reference)
+   - [ts_backtest_auto](#ts_backtest_auto) ⭐ One-liner backtest
+   - [ts_backtest_regression](#ts_backtest_regression) ⭐ Regression backtest
+   - [ts_prepare_regression_input](#ts_prepare_regression_input) Regression adapter
+   - [ts_hydrate_features](#ts_hydrate_features) ⭐ Feature hydration
    - [ts_cv_split](#ts_cv_split)
+   - [ts_cv_split_index](#ts_cv_split_index) ⭐ Memory-efficient
+   - [ts_cv_forecast_by](#ts_cv_forecast_by) ⭐ Parallel folds
    - [ts_cv_split_folds](#ts_cv_split_folds)
    - [ts_cv_generate_folds](#ts_cv_generate_folds)
+   - [ts_hydrate_split](#ts_hydrate_split) ⭐ Safe Join
+   - [ts_hydrate_split_full](#ts_hydrate_split_full)
+   - [ts_hydrate_split_strict](#ts_hydrate_split_strict) ⭐ Fail-safe
    - [ts_mark_unknown](#ts_mark_unknown)
    - [ts_fill_unknown](#ts_fill_unknown)
    - [ts_validate_timestamps](#ts_validate_timestamps)
@@ -72,6 +87,51 @@ Data: [==========================================================]
 Fold 1: [TRAIN TRAIN TRAIN TRAIN]  [TEST TEST]
 Fold 2: [TRAIN TRAIN TRAIN TRAIN TRAIN TRAIN]  [TEST TEST]
 Fold 3: [TRAIN TRAIN TRAIN TRAIN TRAIN TRAIN TRAIN TRAIN]  [TEST TEST]
+```
+
+### Gap vs Embargo: Preventing Data Leakage
+
+Two parameters help prevent different types of data leakage:
+
+**Gap** - Simulates data latency (e.g., ETL processing delay):
+
+```
+                    gap=2
+                    vv
+Fold 1: [TRAIN TRAIN]  ##  [TEST TEST]
+        Train ends ──┘  └── 2 periods skipped before test starts
+```
+
+Use `gap` when: Your production data has a processing delay (e.g., sales data takes 2 days to consolidate).
+
+**Embargo** - Prevents label leakage with overlapping targets:
+
+When your target is forward-looking (e.g., "next 7 days' total sales"), the labels in fold 1's test period use actual data that could correlate with fold 2's training features. Embargo excludes training data after the previous fold's test period.
+
+```
+                          embargo=3
+                          vvvvvvv
+Fold 1: [TRAIN TRAIN][TEST TEST]
+Fold 2:              xxx[TRAIN TRAIN][TEST TEST]
+                      └── 3 periods excluded from fold 2's training
+```
+
+Use `embargo` when:
+- Your target aggregates future values (e.g., "revenue in next N days")
+- Features might correlate with future outcomes (e.g., lagged moving averages)
+- You want "purged" cross-validation to prevent any information leakage
+
+> **Key Distinction:**
+> - **Gap** removes data *before* the test set (simulates blindness to recent data)
+> - **Embargo** removes data *after* the previous test set (ensures fold independence)
+
+```sql
+-- Example: Target is "next 7 days total sales"
+-- Embargo ensures fold 2's training doesn't overlap with fold 1's test labels
+SELECT * FROM ts_cv_split('sales', store, date, next_7d_sales,
+    ['2024-03-01', '2024-03-15']::DATE[], 7, '1d',
+    MAP{'embargo': '7'}  -- 7 days to match target window
+);
 ```
 
 [Go to top](#time-series-cross-validation)
@@ -188,6 +248,318 @@ SELECT * FROM ts_cv_split(
 
 ## Function Reference
 
+### ts_backtest_auto
+
+⭐ **One-liner backtest** - Complete backtesting in a single call. Combines fold generation, data splitting, forecasting, and evaluation into one function.
+
+**Why Use This?**
+
+- **Simplest possible API**: One function call does everything
+- **80% use case**: Perfect when you just want forecast vs actual metrics
+- **No intermediate tables**: No need to manage split tables or joins
+
+**Signature:**
+
+```sql
+ts_backtest_auto(
+    source              VARCHAR,    -- Table name
+    group_col           COLUMN,     -- Series identifier column
+    date_col            COLUMN,     -- Date/timestamp column
+    target_col          COLUMN,     -- Target value column
+    horizon             INTEGER,    -- Forecast horizon
+    folds               INTEGER,    -- Number of CV folds
+    frequency           VARCHAR,    -- Time frequency ('1d', '1h', '1w', '1mo')
+    params              MAP,        -- Optional parameters (see below)
+    features            VARCHAR[],  -- Optional: external regressor column names (default NULL)
+    metric              VARCHAR     -- Optional: fold-level metric ('rmse', 'mae', 'mape', 'mse', default 'rmse')
+) → TABLE
+```
+
+**Parameters (via params MAP):**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `method` | VARCHAR | 'AutoETS' | Forecast method ('AutoETS', 'ARIMA', 'Naive', etc.) |
+| `window_type` | VARCHAR | 'expanding' | Window type: 'expanding', 'fixed', or 'sliding' |
+| `min_train_size` | INTEGER | 1 | Minimum training periods (for fixed/sliding) |
+| `gap` | INTEGER | 0 | Gap periods between train end and test start |
+| `embargo` | INTEGER | 0 | Periods to exclude from training after previous fold's test |
+| `initial_train_size` | INTEGER | 50% of data | Initial training size before first fold |
+
+**Named Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `features` | VARCHAR[] | NULL | External regressor column names (for regression models) |
+| `metric` | VARCHAR | 'rmse' | Fold-level metric: 'rmse', 'mae', 'mape', 'mse' |
+
+**Output Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | CV fold number |
+| `group_col` | VARCHAR | Series identifier |
+| `date` | TIMESTAMP | Forecast date |
+| `forecast` | DOUBLE | Point forecast |
+| `actual` | DOUBLE | Actual value |
+| `error` | DOUBLE | forecast - actual |
+| `abs_error` | DOUBLE | |forecast - actual| |
+| `lower_90` | DOUBLE | Lower 90% prediction interval |
+| `upper_90` | DOUBLE | Upper 90% prediction interval |
+| `model_name` | VARCHAR | Model used |
+| `fold_metric_score` | DOUBLE | Calculated metric per fold (based on `metric` param) |
+
+**Example:**
+
+```sql
+-- Complete backtest in ONE query!
+SELECT * FROM ts_backtest_auto(
+    'sales_data',
+    store_id,
+    date,
+    revenue,
+    7,          -- 7-day forecast horizon
+    5,          -- 5 CV folds
+    '1d',       -- Daily frequency
+    MAP{}       -- Default: AutoETS, expanding window
+);
+
+-- With custom options
+SELECT * FROM ts_backtest_auto(
+    'sales_data', store_id, date, revenue, 7, 5, '1d',
+    MAP{
+        'method': 'Naive',
+        'gap': '2',
+        'embargo': '3'
+    }
+);
+
+-- Aggregate metrics across all folds
+SELECT
+    group_col AS store,
+    ROUND(AVG(abs_error), 2) AS mae,
+    ROUND(SQRT(AVG(error * error)), 2) AS rmse,
+    model_name
+FROM ts_backtest_auto('sales_data', store_id, date, revenue, 7, 5, '1d', MAP{})
+GROUP BY group_col, model_name
+ORDER BY store;
+```
+
+**With Custom Metric:**
+
+```sql
+-- Use MAE instead of RMSE for fold-level metric
+SELECT
+    fold_id,
+    group_col,
+    ROUND(MIN(fold_metric_score), 2) AS fold_mae
+FROM ts_backtest_auto('sales_data', store_id, date, revenue, 7, 5, '1d', MAP{},
+    metric => 'mae')
+GROUP BY fold_id, group_col
+ORDER BY fold_id, group_col;
+```
+
+**When to Use ts_backtest_auto vs Individual Functions:**
+
+| Scenario | Recommended |
+|----------|-------------|
+| Quick evaluation | `ts_backtest_auto` |
+| Just need forecast vs actual metrics | `ts_backtest_auto` |
+| Need custom feature handling | `ts_backtest_regression` or individual functions |
+| Need exogenous variables | `ts_backtest_regression` or individual functions |
+| Complex multi-step pipeline | Individual functions |
+
+[Go to top](#time-series-cross-validation)
+
+---
+
+### ts_backtest_regression
+
+⭐ **Regression model backtest** - Backtest using regression models (OLS) with a single feature. Demonstrates the regression backtest pattern using DuckDB's built-in linear regression.
+
+**Why Use This?**
+
+- **Regression models**: Test linear relationships between features and target
+- **Pattern demonstration**: Shows the prepare → fit → predict workflow
+- **Built-in OLS**: No external dependencies needed
+
+For advanced models (Ridge, Random Forest, XGBoost), use the anofox-statistics extension.
+
+**Signature:**
+
+```sql
+ts_backtest_regression(
+    cv_splits           VARCHAR,    -- Table with CV splits (from ts_cv_split)
+    source              VARCHAR,    -- Original source table with features
+    src_group_col       COLUMN,     -- Group column in source
+    src_date_col        COLUMN,     -- Date column in source
+    target_col          COLUMN,     -- Target column in source
+    feature_col         COLUMN,     -- Single feature column for regression
+    params              MAP,        -- Optional parameters
+    metric              VARCHAR     -- Optional: fold metric (default 'rmse')
+) → TABLE
+```
+
+**Output Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | CV fold number |
+| `group_col` | VARCHAR | Series identifier |
+| `date_col` | TIMESTAMP | Forecast date |
+| `forecast` | DOUBLE | Predicted value |
+| `actual` | DOUBLE | Actual value |
+| `error` | DOUBLE | forecast - actual |
+| `abs_error` | DOUBLE | |forecast - actual| |
+| `model_name` | VARCHAR | 'LinearRegression_OLS' |
+| `fold_metric_score` | DOUBLE | Calculated metric per fold |
+
+**Example:**
+
+```sql
+-- Create data with linear relationship
+CREATE TABLE sales AS
+SELECT
+    store_id,
+    date,
+    revenue,
+    day_index  -- Feature: days since start
+FROM raw_sales;
+
+-- Create CV splits
+CREATE TABLE cv_splits AS
+SELECT * FROM ts_cv_split('sales', store_id, date, revenue,
+    ['2024-03-01', '2024-04-01']::DATE[], 7, '1d', MAP{});
+
+-- Run regression backtest
+SELECT
+    fold_id,
+    group_col AS store,
+    ROUND(AVG(abs_error), 2) AS mae,
+    model_name
+FROM ts_backtest_regression(
+    'cv_splits', 'sales', store_id, date, revenue, day_index, MAP{}
+)
+GROUP BY fold_id, group_col, model_name;
+```
+
+[Go to top](#time-series-cross-validation)
+
+---
+
+### ts_prepare_regression_input
+
+Prepares data for regression models by masking target values in test rows. This is the "adapter" that enables regression models to work with CV splits.
+
+**How It Works:**
+
+- For **TRAIN** rows: Target value is preserved (model learns from these)
+- For **TEST** rows: Target is set to NULL (model predicts these)
+- All features are preserved for both train and test
+
+**Signature:**
+
+```sql
+ts_prepare_regression_input(
+    cv_splits           VARCHAR,    -- CV splits from ts_cv_split
+    source              VARCHAR,    -- Original source table
+    src_group_col       COLUMN,     -- Group column in source
+    src_date_col        COLUMN,     -- Date column in source
+    target_col          COLUMN,     -- Target column in source
+    params              MAP         -- Reserved for future use
+) → TABLE
+```
+
+**Output Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | CV fold number |
+| `split` | VARCHAR | 'train' or 'test' |
+| `group_col` | VARCHAR | Series identifier |
+| `date_col` | TIMESTAMP | Date |
+| `masked_target` | DOUBLE | Target (NULL for test rows) |
+| `_is_test` | BOOLEAN | TRUE for test rows |
+| (source columns) | various | All other source columns |
+
+**Example:**
+
+```sql
+-- Prepare data for regression
+SELECT fold_id, split, group_col, date_col,
+       masked_target,  -- NULL for test rows
+       temperature,    -- Feature preserved
+       is_holiday      -- Feature preserved
+FROM ts_prepare_regression_input(
+    'cv_splits', 'sales_data', store_id, date, revenue, MAP{}
+)
+WHERE fold_id = 1
+LIMIT 10;
+```
+
+[Go to top](#time-series-cross-validation)
+
+---
+
+### ts_hydrate_features
+
+⭐ **Feature hydration** - Safely join CV splits with source features, with support for masking unknown features.
+
+**Why Use This?**
+
+- **Safe join**: Combines CV splits with original features
+- **Masking support**: Use `_is_test` to mask unknown features in test rows
+- **Prevents leakage**: Makes it easy to distinguish known vs unknown features
+
+**Signature:**
+
+```sql
+ts_hydrate_features(
+    cv_splits           VARCHAR,    -- CV splits from ts_cv_split
+    source              VARCHAR,    -- Original source table with features
+    src_group_col       COLUMN,     -- Group column in source
+    src_date_col        COLUMN,     -- Date column in source
+    params              MAP         -- Reserved for future use
+) → TABLE
+```
+
+**Output Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | CV fold number |
+| `split` | VARCHAR | 'train' or 'test' |
+| `group_col` | VARCHAR | Series identifier |
+| `date_col` | TIMESTAMP | Date |
+| `target_col` | DOUBLE | Target from cv_splits |
+| `_is_test` | BOOLEAN | TRUE for test rows (use for masking) |
+| `_train_cutoff` | TIMESTAMP | Last training date per fold |
+| (source columns) | various | All source columns |
+
+**Example - Known vs Unknown Features:**
+
+```sql
+-- Known features: Use actual values in test (calendar, planned promotions)
+-- Unknown features: Mask in test (actual temperature, competitor prices)
+
+SELECT
+    fold_id,
+    split,
+    group_col,
+    date_col,
+    target_col,
+    is_holiday,        -- KNOWN: calendar feature, use as-is
+    promotion_flag,    -- KNOWN: planned in advance, use as-is
+    CASE WHEN _is_test THEN NULL ELSE temperature END AS temperature,  -- UNKNOWN: mask in test
+    CASE WHEN _is_test THEN NULL ELSE competitor_price END AS competitor_price  -- UNKNOWN: mask in test
+FROM ts_hydrate_features('cv_splits', 'sales_data', store_id, date, MAP{})
+WHERE fold_id = 1;
+```
+
+[Go to top](#time-series-cross-validation)
+
+---
+
 ### ts_cv_split
 
 Splits time series data into train/test sets for cross-validation.
@@ -203,10 +575,18 @@ ts_cv_split(
     training_end_times  DATE[],     -- List of training cutoff dates
     horizon             INTEGER,    -- Number of test periods
     frequency           VARCHAR,    -- Time frequency ('1d', '1h', '1w', '1mo')
-    window_type         VARCHAR,    -- 'expanding' (default), 'fixed', or 'sliding'
-    min_train_size      INTEGER     -- Minimum training periods (for fixed/sliding)
+    params              MAP         -- Optional parameters (see below)
 ) → TABLE
 ```
+
+**Parameters (via params MAP):**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `window_type` | VARCHAR | 'expanding' | Window type: 'expanding', 'fixed', or 'sliding' |
+| `min_train_size` | INTEGER | 1 | Minimum training periods (for fixed/sliding windows) |
+| `gap` | INTEGER | 0 | Gap periods between training end and test start (simulates data latency) |
+| `embargo` | INTEGER | 0 | Periods to exclude from training after previous fold's test end (prevents label leakage) |
 
 **Output Columns:**
 
@@ -233,11 +613,190 @@ FROM ts_cv_split(
     revenue,
     ['2024-03-01', '2024-04-01', '2024-05-01']::DATE[],
     4,      -- 4-week horizon
-    '1w'    -- Weekly frequency
+    '1w',   -- Weekly frequency
+    MAP{}   -- Default params
 )
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
+
+-- With 2-day gap (simulates ETL latency)
+-- Train ends Jan 10 → Test starts Jan 13 (skips Jan 11-12)
+SELECT * FROM ts_cv_split(
+    'daily_sales', store_id, date, revenue,
+    ['2024-01-10']::DATE[], 7, '1d',
+    MAP{'gap': '2'}  -- 2-day data latency
+);
 ```
+
+[Go to top](#time-series-cross-validation)
+
+---
+
+### ts_cv_split_index
+
+⭐ **Memory-efficient** variant of `ts_cv_split` that returns only index columns (group, date, fold_id, split) without the target column. Use this when you want to join back to your source data later with `ts_hydrate_split` or a manual join.
+
+**Why Use This?**
+
+- **Memory savings**: For large datasets, avoiding the target column duplication saves significant memory
+- **Flexible hydration**: Join exactly the columns you need later, with appropriate masking
+- **Pipeline-friendly**: Create a small index table, then hydrate with features as needed
+
+**Signature:**
+
+```sql
+ts_cv_split_index(
+    source              VARCHAR,    -- Table name
+    group_col           COLUMN,     -- Series identifier column
+    date_col            COLUMN,     -- Date/timestamp column
+    training_end_times  DATE[],     -- List of training cutoff dates
+    horizon             INTEGER,    -- Number of test periods
+    frequency           VARCHAR,    -- Time frequency ('1d', '1h', '1w', '1mo')
+    params              MAP         -- Optional parameters (see ts_cv_split)
+) → TABLE
+```
+
+**Output Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `group_col` | VARCHAR | Series identifier |
+| `date_col` | TIMESTAMP | Date/timestamp |
+| `fold_id` | BIGINT | Fold number (1, 2, 3, ...) |
+| `split` | VARCHAR | 'train' or 'test' |
+
+**Example:**
+
+```sql
+-- Create memory-efficient CV index
+CREATE TABLE cv_index AS
+SELECT * FROM ts_cv_split_index(
+    'sales_data',
+    store_id,
+    date,
+    ['2024-03-01', '2024-04-01']::DATE[],
+    7,
+    '1d',
+    MAP{}
+);
+
+-- Later, hydrate with specific columns
+SELECT
+    ci.group_col AS store_id,
+    ci.date_col AS date,
+    ci.fold_id,
+    ci.split,
+    sd.sales,
+    CASE WHEN ci.split = 'test' THEN NULL ELSE sd.temperature END AS temperature
+FROM cv_index ci
+JOIN sales_data sd ON ci.group_col = sd.store_id AND ci.date_col = sd.date;
+```
+
+**Comparison with ts_cv_split:**
+
+| Function | Returns target_col | Memory usage | Use case |
+|----------|-------------------|--------------|----------|
+| `ts_cv_split` | Yes | Higher | Simple workflows, direct forecasting |
+| `ts_cv_split_index` | No | Lower | Large datasets, custom hydration |
+
+[Go to top](#time-series-cross-validation)
+
+---
+
+### ts_cv_forecast_by
+
+⭐ **Parallel fold execution** - Generate forecasts for all CV folds in a single query. DuckDB automatically parallelizes across folds and series, providing massive performance gains compared to serial fold-by-fold processing.
+
+**Why Use This?**
+
+- **Parallel execution**: All folds processed simultaneously using DuckDB's thread pool
+- **Single query**: No application-layer loop required
+- **Vectorized**: Leverages DuckDB's columnar engine for maximum throughput
+- **3-10x faster**: Compared to serial fold-by-fold execution
+
+**Signature:**
+
+```sql
+ts_cv_forecast_by(
+    cv_splits           VARCHAR,    -- Table with CV training data (filter to split='train')
+    group_col           COLUMN,     -- Series identifier column (group_col from cv_splits)
+    date_col            COLUMN,     -- Date column (date_col from cv_splits)
+    target_col          COLUMN,     -- Target column (target_col from cv_splits)
+    method              VARCHAR,    -- Forecast method ('AutoETS', 'ARIMA', 'Naive', etc.)
+    horizon             INTEGER,    -- Forecast horizon
+    params              MAP,        -- Model parameters
+    frequency           VARCHAR     -- Optional: time frequency (default '1d')
+) → TABLE
+```
+
+**Output Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | CV fold number |
+| `id` | VARCHAR | Series identifier |
+| `forecast_step` | INTEGER | Step within horizon (1 to horizon) |
+| `date` | TIMESTAMP | Forecast date |
+| `point_forecast` | DOUBLE | Point forecast |
+| `lower_90` | DOUBLE | Lower 90% prediction interval |
+| `upper_90` | DOUBLE | Upper 90% prediction interval |
+| `model_name` | VARCHAR | Model used |
+
+**Example:**
+
+```sql
+-- Create CV splits
+CREATE TABLE cv_splits AS
+SELECT * FROM ts_cv_split('sales_data', category, date, sales,
+    training_end_times, 7, '1d', MAP{});
+
+-- Extract training data
+CREATE TABLE cv_train AS
+SELECT * FROM cv_splits WHERE split = 'train';
+
+-- Generate forecasts for ALL folds in parallel!
+CREATE TABLE cv_forecasts AS
+SELECT *
+FROM ts_cv_forecast_by(
+    'cv_train',
+    group_col,      -- Use standardized column names from cv_splits
+    date_col,
+    target_col,
+    'AutoETS',
+    7,              -- 7-day horizon
+    MAP{},
+    '1d'
+);
+
+-- Join with actuals for evaluation
+SELECT
+    f.fold_id,
+    f.id AS category,
+    f.date,
+    f.point_forecast,
+    t.target_col AS actual,
+    ABS(f.point_forecast - t.target_col) AS abs_error
+FROM cv_forecasts f
+JOIN cv_splits t
+    ON f.fold_id = t.fold_id
+    AND f.id = t.group_col
+    AND f.date = t.date_col
+WHERE t.split = 'test';
+```
+
+**Performance Comparison:**
+
+```
+SERIAL (old approach):
+  FOR fold IN 1..N:
+    FOR category IN categories:
+      SELECT * FROM ts_forecast_by(...)  -- One query per fold × category
+
+PARALLEL (ts_cv_forecast_by):
+  SELECT * FROM ts_cv_forecast_by(...)   -- ALL folds + categories at once!
+```
+
+With 8 CPU cores, 3 folds, and 10 categories, the parallel version can be **up to 10x faster**.
 
 [Go to top](#time-series-cross-validation)
 
@@ -245,7 +804,7 @@ ORDER BY fold_id, split;
 
 ### ts_cv_split_folds
 
-Returns fold boundary information without the actual data split.
+Returns fold boundary information without the actual data split. Useful for previewing fold structure before running the full split.
 
 **Signature:**
 
@@ -256,20 +815,30 @@ ts_cv_split_folds(
     date_col            COLUMN,
     training_end_times  DATE[],
     horizon             INTEGER,
-    frequency           VARCHAR
+    frequency           VARCHAR,
+    params              MAP         -- Optional: gap parameter
 ) → TABLE
 ```
+
+**Parameters (via params MAP):**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `gap` | INTEGER | 0 | Gap periods between training end and test start |
+| `embargo` | INTEGER | 0 | Periods to exclude from training after previous fold's test end |
 
 **Output Columns:**
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `fold_id` | BIGINT | Fold number |
-| `train_start` | TIMESTAMP | Training period start |
+| `train_start` | TIMESTAMP | Training period start (respects embargo) |
 | `train_end` | TIMESTAMP | Training period end (cutoff) |
 | `test_start` | TIMESTAMP | Test period start |
 | `test_end` | TIMESTAMP | Test period end |
 | `horizon` | BIGINT | Test horizon |
+| `gap` | BIGINT | Gap periods used |
+| `embargo` | BIGINT | Embargo periods used |
 
 **Example:**
 
@@ -349,6 +918,260 @@ FROM ts_cv_split(
 
 ---
 
+### ts_hydrate_split
+
+⭐ **Safe Join** - Joins CV splits with source data while automatically masking unknown columns in test periods. This is the **recommended way** to join features back to CV splits to prevent data leakage.
+
+**Why Use This?**
+
+When you join CV splits back to your source data to get features, you can accidentally use future information (like actual temperature on test days). `ts_hydrate_split` prevents this by:
+
+1. Joining cv_splits to your source table
+2. Automatically masking specified "unknown" columns in test rows
+3. Supporting multiple fill strategies for realistic backtesting
+
+**Signature:**
+
+```sql
+ts_hydrate_split(
+    cv_splits           VARCHAR,    -- Name of cv_splits table
+    source              VARCHAR,    -- Name of source table with features
+    src_group_col       COLUMN,     -- Group column in source (e.g., category)
+    src_date_col        COLUMN,     -- Date column in source (e.g., date)
+    unknown_col         COLUMN,     -- Column to mask in test periods
+    params              MAP         -- Optional: strategy, fill_value
+) → TABLE
+```
+
+**Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `cv_splits` | Table with CV splits (from `ts_cv_split`) - must have `group_col`, `date_col`, `fold_id`, `split` columns |
+| `source` | Original source table with all features |
+| `src_group_col` | Column expression for group identifier in source table |
+| `src_date_col` | Column expression for date in source table |
+| `unknown_col` | Column to mask in test periods (not available at forecast time) |
+| `params` | MAP with `strategy` ('null', 'last_value', 'default') and `fill_value` (for 'default') |
+
+**Fill Strategies:**
+
+| Strategy | Description | Use Case |
+|----------|-------------|----------|
+| `'null'` (default) | Fill with NULL | Conservative, use when feature should be excluded |
+| `'last_value'` | Forward fill from last training value | Slowly changing features (temperature, price) |
+| `'default'` | Fill with specified value | Event-driven features (promotions = 0) |
+
+**Output Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `group_col` | VARCHAR | Series identifier |
+| `date_col` | TIMESTAMP | Date |
+| `fold_id` | BIGINT | CV fold number |
+| `split` | VARCHAR | 'train' or 'test' |
+| `unknown_col` | (original type) | Masked in test rows according to strategy |
+
+**Example:**
+
+```sql
+-- Create CV splits
+CREATE TABLE cv_splits AS
+SELECT * FROM ts_cv_split('sales_data', category, date, sales,
+    training_end_times, 7, '1d', MAP{});
+
+-- Safe join with temperature masked (NULL in test rows)
+SELECT * FROM ts_hydrate_split(
+    'cv_splits',
+    'sales_data',
+    category,          -- source group column
+    date,              -- source date column
+    temperature,       -- unknown column to mask
+    MAP{}              -- defaults to 'null' strategy
+) WHERE fold_id = 1;
+
+-- Forward fill temperature from last known value
+SELECT * FROM ts_hydrate_split(
+    'cv_splits', 'sales_data', category, date, temperature,
+    MAP{'strategy': 'last_value'}
+);
+
+-- Fill with default value (20.0) for temperature
+SELECT * FROM ts_hydrate_split(
+    'cv_splits', 'sales_data', category, date, temperature,
+    MAP{'strategy': 'default', 'fill_value': '20.0'}
+);
+```
+
+**Multiple Unknown Columns:**
+
+For multiple unknown columns, chain the macro or use `ts_hydrate_split_full`:
+
+```sql
+-- Method 1: Chain calls using CTEs
+WITH temp_masked AS (
+    SELECT * FROM ts_hydrate_split(
+        'cv_splits', 'sales_data', category, date, temperature, MAP{}
+    )
+),
+promo_masked AS (
+    SELECT tm.*,
+        CASE WHEN tm.split = 'test' THEN NULL ELSE s.promotion END AS promotion
+    FROM temp_masked tm
+    JOIN sales_data s ON tm.group_col = s.category AND tm.date_col = s.date
+)
+SELECT * FROM promo_masked;
+
+-- Method 2: Use ts_hydrate_split_full for manual masking (see below)
+```
+
+[Go to top](#time-series-cross-validation)
+
+---
+
+### ts_hydrate_split_full
+
+Joins CV splits with **all source columns**, adding metadata for manual masking. Use when you need more control over which columns to mask and how.
+
+**Signature:**
+
+```sql
+ts_hydrate_split_full(
+    cv_splits           VARCHAR,    -- Name of cv_splits table
+    source              VARCHAR,    -- Name of source table with features
+    src_group_col       COLUMN,     -- Group column in source
+    src_date_col        COLUMN,     -- Date column in source
+    params              MAP         -- Reserved for future use
+) → TABLE
+```
+
+**Output Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | CV fold number |
+| `split` | VARCHAR | 'train' or 'test' |
+| `_is_test` | BOOLEAN | TRUE if test row (use for masking) |
+| `_train_cutoff` | TIMESTAMP | Last date of training period |
+| (all source columns) | various | Original columns preserved |
+
+**Example:**
+
+```sql
+-- Get all columns with split metadata
+CREATE TABLE cv_data AS
+SELECT * FROM ts_hydrate_split_full(
+    'cv_splits', 'sales_data', category, date, MAP{}
+);
+
+-- Manually mask unknown columns using _is_test
+SELECT
+    fold_id,
+    split,
+    category,
+    date,
+    sales,
+    promotion,                                        -- Known in advance
+    CASE WHEN _is_test THEN NULL ELSE temperature END AS temperature,  -- Unknown
+    CASE WHEN _is_test THEN NULL ELSE competitor_price END AS competitor_price  -- Unknown
+FROM cv_data
+WHERE fold_id = 1;
+```
+
+**Use Cases:**
+
+1. **Multiple unknown columns** - Easier than chaining `ts_hydrate_split` calls
+2. **Different strategies per column** - Apply custom masking logic in SELECT
+3. **Debugging** - See which rows are train vs test with `_is_test` flag
+4. **Complex masking** - Use `_train_cutoff` for custom time-based logic
+
+[Go to top](#time-series-cross-validation)
+
+---
+
+### ts_hydrate_split_strict
+
+⭐ **Fail-safe join** - Returns ONLY metadata columns with NO data columns. This is the maximally fail-safe approach that forces you to explicitly add each feature column with proper handling.
+
+**Why Use This?**
+
+The fail-safe principle: **By default, no data leaks. Only columns you explicitly handle are included.**
+
+- If you forget a column, it's excluded (not leaked)
+- Forces you to think about each feature: is it known or unknown?
+- Prevents accidental joins that include future information
+
+**Signature:**
+
+```sql
+ts_hydrate_split_strict(
+    cv_splits           VARCHAR,    -- Name of cv_splits table
+    source              VARCHAR,    -- Name of source table with features
+    src_group_col       COLUMN,     -- Group column in source
+    src_date_col        COLUMN,     -- Date column in source
+    params              MAP         -- Reserved for future use
+) → TABLE
+```
+
+**Output Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | CV fold number |
+| `split` | VARCHAR | 'train' or 'test' |
+| `group_col` | VARCHAR | Series identifier |
+| `date_col` | TIMESTAMP | Date/timestamp |
+| `_is_test` | BOOLEAN | TRUE if test row (use for masking) |
+| `_train_cutoff` | TIMESTAMP | Last date of training period |
+
+**No data columns are returned** - you must explicitly join them back with proper handling.
+
+**Example - The Fail-Safe Pattern:**
+
+```sql
+-- Step 1: Get strict metadata (no data columns)
+-- Step 2: Explicitly add each column with proper handling
+
+SELECT
+    hs.fold_id,
+    hs.split,
+    hs.group_col AS category,
+    hs.date_col AS date,
+    cv.target_col AS sales,
+
+    -- KNOWN features (available at forecast time) - pass through
+    src.promotion,
+    src.day_of_week,
+    src.is_holiday,
+
+    -- UNKNOWN features - must be masked
+    CASE WHEN hs._is_test THEN NULL ELSE src.temperature END AS temperature,
+    CASE WHEN hs._is_test THEN NULL ELSE src.competitor_price END AS competitor_price
+
+FROM ts_hydrate_split_strict('cv_splits', 'source_data', category, date, MAP{}) hs
+JOIN cv_splits cv
+    ON hs.fold_id = cv.fold_id
+    AND hs.group_col = cv.group_col
+    AND hs.date_col = cv.date_col
+JOIN source_data src
+    ON hs.group_col = src.category
+    AND hs.date_col = src.date;
+```
+
+**Key Benefit:** If you add a new column to your source data and forget to handle it in this query, it simply won't appear - no data leakage. With `ts_hydrate_split_full`, new columns would automatically appear and could leak future information.
+
+**When to Use Which:**
+
+| Function | Data Columns | Safety Level | Use Case |
+|----------|-------------|--------------|----------|
+| `ts_hydrate_split` | One masked | Medium | Quick single-column masking |
+| `ts_hydrate_split_full` | All included | Low | Debugging, exploration |
+| `ts_hydrate_split_strict` | None (explicit) | **Highest** | Production pipelines |
+
+[Go to top](#time-series-cross-validation)
+
+---
+
 ### ts_mark_unknown
 
 Marks rows as known/unknown based on a cutoff date. Useful for scenario analysis and custom filling strategies.
@@ -415,26 +1238,40 @@ Fills unknown (future) values in test periods with specified strategy.
 
 ```sql
 ts_fill_unknown(
-    source              VARCHAR,
-    group_col           COLUMN,
-    date_col            COLUMN,
-    value_col           COLUMN,
-    cutoff_date         DATE,
-    strategy            VARCHAR,    -- 'last_value' (default), 'default', or 'null'
-    fill_value          DOUBLE      -- Value for 'default' strategy
+    source              VARCHAR,    -- Table name
+    group_col           COLUMN,     -- Series identifier column
+    date_col            COLUMN,     -- Date/timestamp column
+    value_col           COLUMN,     -- Value column to fill
+    cutoff_date         DATE,       -- Cutoff date (values after this are "unknown")
+    params              MAP         -- Optional: strategy, fill_value
 ) → TABLE
 ```
 
+**Parameters (via params MAP):**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `strategy` | VARCHAR | 'last_value' | Fill strategy: 'last_value', 'default', or 'null' |
+| `fill_value` | DOUBLE | 0.0 | Value to use when strategy='default' |
+
 **Strategies:**
 
-- `'last_value'` (default): Forward fill from last known value
+- `'last_value'` (default): Forward fill from last known value per group
 - `'default'`: Fill with specified `fill_value`
 - `'null'`: Leave as NULL
+
+**Output Columns:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `group_col` | VARCHAR | Series identifier |
+| `date_col` | TIMESTAMP | Date/timestamp |
+| `value_col` | (original type) | Filled value |
 
 **Example:**
 
 ```sql
--- Fill unknown future values with last known value
+-- Fill unknown future values with last known value (default)
 SELECT *
 FROM ts_fill_unknown(
     'feature_data',
@@ -442,10 +1279,10 @@ FROM ts_fill_unknown(
     date,
     promotion_flag,
     '2024-06-01'::DATE,
-    strategy := 'last_value'
+    MAP{}
 );
 
--- Fill with default value (0)
+-- Fill with default value (20.0)
 SELECT *
 FROM ts_fill_unknown(
     'feature_data',
@@ -453,8 +1290,18 @@ FROM ts_fill_unknown(
     date,
     temperature,
     '2024-06-01'::DATE,
-    strategy := 'default',
-    fill_value := 20.0
+    MAP{'strategy': 'default', 'fill_value': '20.0'}
+);
+
+-- Set unknown values to NULL
+SELECT *
+FROM ts_fill_unknown(
+    'feature_data',
+    store_id,
+    date,
+    temperature,
+    '2024-06-01'::DATE,
+    MAP{'strategy': 'null'}
 );
 ```
 
@@ -545,7 +1392,7 @@ SELECT
     -- Temperature: forward fill (reasonable assumption)
     (SELECT value_col FROM ts_fill_unknown(
         'features', store_id, date, temperature,
-        '2024-06-01'::DATE, strategy := 'last_value'
+        '2024-06-01'::DATE, MAP{}  -- defaults to 'last_value'
     ) WHERE features.store_id = store_id AND features.date = date) AS temperature,
 
     -- Holiday: use known calendar
@@ -554,7 +1401,7 @@ SELECT
     -- Promotion: assume no promotion if unknown
     (SELECT value_col FROM ts_fill_unknown(
         'features', store_id, date, promotion_intensity,
-        '2024-06-01'::DATE, strategy := 'default', fill_value := 0.0
+        '2024-06-01'::DATE, MAP{'strategy': 'default', 'fill_value': '0.0'}
     ) WHERE features.store_id = store_id AND features.date = date) AS promotion_intensity
 FROM features;
 ```

@@ -1,0 +1,125 @@
+# name: test/sql/ts_hydrate_features.test
+# description: Tests for ts_hydrate_features - CV feature hydration with masking support
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup Test Data
+#######################################
+
+statement ok
+CREATE TABLE feature_data AS
+SELECT
+    series_id,
+    '2024-01-01'::DATE + (i * INTERVAL '1 day') AS date,
+    10.0 + i * 2.0 AS revenue,
+    20 + i % 10 AS temperature,
+    i % 7 IN (5, 6) AS is_weekend,
+    random() > 0.7 AS has_promotion
+FROM generate_series(0, 59) AS t(i)
+CROSS JOIN (SELECT UNNEST(['A', 'B']) AS series_id) s;
+
+statement ok
+CREATE TABLE cv_splits AS
+SELECT * FROM ts_cv_split(
+    'feature_data', series_id, date, revenue,
+    ['2024-01-30'::DATE, '2024-02-15'::DATE], 7, '1d', MAP{}
+);
+
+#######################################
+# ts_hydrate_features - Basic Tests
+#######################################
+
+# Test returns rows
+query I
+SELECT COUNT(*) FROM ts_hydrate_features(
+    'cv_splits', 'feature_data', series_id, date, MAP{}
+);
+----
+180
+
+# Test has required columns
+query I
+SELECT COUNT(*) FROM (
+    DESCRIBE SELECT * FROM ts_hydrate_features(
+        'cv_splits', 'feature_data', series_id, date, MAP{}
+    )
+) WHERE column_name IN ('fold_id', 'split', 'group_col', 'date_col', 'target_col', '_is_test', '_train_cutoff');
+----
+7
+
+# Test _is_test flag is correct
+query II
+SELECT split, SUM(CASE WHEN _is_test THEN 1 ELSE 0 END) AS test_count
+FROM ts_hydrate_features('cv_splits', 'feature_data', series_id, date, MAP{})
+GROUP BY split
+ORDER BY split DESC;
+----
+train	0
+test	28
+
+#######################################
+# ts_hydrate_features - Feature Preservation
+#######################################
+
+# Test features are preserved
+query I
+SELECT COUNT(*) FROM ts_hydrate_features(
+    'cv_splits', 'feature_data', series_id, date, MAP{}
+) WHERE temperature IS NOT NULL AND is_weekend IS NOT NULL;
+----
+180
+
+#######################################
+# ts_hydrate_features - Unknown Feature Masking Pattern
+#######################################
+
+# Test masking pattern works: unknown features NULL in test rows
+query II
+SELECT
+    split,
+    SUM(CASE WHEN temp_masked IS NULL THEN 1 ELSE 0 END) AS null_count
+FROM (
+    SELECT
+        split,
+        CASE WHEN _is_test THEN NULL ELSE temperature END AS temp_masked
+    FROM ts_hydrate_features('cv_splits', 'feature_data', series_id, date, MAP{})
+)
+GROUP BY split
+ORDER BY split DESC;
+----
+train	0
+test	28
+
+#######################################
+# ts_hydrate_features - Fold Structure
+#######################################
+
+# Test all folds represented
+query I
+SELECT COUNT(DISTINCT fold_id) FROM ts_hydrate_features(
+    'cv_splits', 'feature_data', series_id, date, MAP{}
+);
+----
+2
+
+# Test target_col values match cv_splits
+query I
+SELECT COUNT(*) FROM ts_hydrate_features(
+    'cv_splits', 'feature_data', series_id, date, MAP{}
+) hf
+JOIN cv_splits cs ON hf.fold_id = cs.fold_id AND hf.group_col = cs.group_col AND hf.date_col = cs.date_col
+WHERE hf.target_col = cs.target_col;
+----
+180
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE feature_data;
+
+statement ok
+DROP TABLE cv_splits;

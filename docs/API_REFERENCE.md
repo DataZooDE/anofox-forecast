@@ -126,15 +126,19 @@ Both forms are identical in functionality.
    - [List Available Features](#list-available-features)
    - [Feature Extraction Aggregate](#feature-extraction-aggregate)
    - [Feature Configuration](#feature-configuration)
-10. [Forecasting](#forecasting)
-   - [ts_forecast (Scalar)](#ts_forecast-scalar)
+10. [Cross-Validation & Backtesting](#cross-validation--backtesting)
+   - [Generate Fold Boundaries](#generate-fold-boundaries)
+   - [View Fold Date Ranges](#view-fold-date-ranges)
+   - [Create Train/Test Splits](#create-traintest-splits)
+   - [Fill Unknown Features](#fill-unknown-features)
+   - [Mark Unknown Rows](#mark-unknown-rows)
+11. [Forecasting](#forecasting)
    - [ts_forecast (Table Macro)](#anofox_fcst_ts_forecast--ts_forecast-table-macro)
    - [ts_forecast_by (Table Macro)](#anofox_fcst_ts_forecast_by--ts_forecast_by-table-macro)
-   - [ts_forecast_exog (Scalar)](#_ts_forecast_exog-scalar)
    - [ts_forecast_exog (Table Macro)](#ts_forecast_exog-table-macro)
    - [ts_forecast_exog_by (Table Macro)](#ts_forecast_exog_by-table-macro)
    - [ts_forecast_agg (Aggregate)](#anofox_fcst_ts_forecast_agg--ts_forecast_agg-aggregate-function)
-11. [Evaluation Metrics](#evaluation-metrics)
+12. [Evaluation Metrics](#evaluation-metrics)
    - [Mean Absolute Error (MAE)](#mean-absolute-error-mae)
    - [Mean Squared Error (MSE)](#mean-squared-error-mse)
    - [Root Mean Squared Error (RMSE)](#root-mean-squared-error-rmse)
@@ -2203,17 +2207,549 @@ SELECT ts_features_config_from_json('config.json');
 
 ---
 
+## Cross-Validation & Backtesting
+
+Time series cross-validation requires special handling because data has temporal ordering. These functions help you create proper train/test splits, handle unknown features during backtesting, and prevent data leakage.
+
+### Overview
+
+| Function | Purpose |
+|----------|---------|
+| `ts_backtest_auto` | **One-liner backtest** - complete CV in a single call |
+| `ts_cv_generate_folds` | Auto-generate fold boundaries based on data range |
+| `ts_cv_split_folds` | View fold date ranges (train/test boundaries) |
+| `ts_cv_split` | Create train/test splits with fold assignments |
+| `ts_cv_forecast_by` | Generate forecasts for all CV folds in parallel |
+| `ts_prepare_regression_input` | Prepare data for regression models (masks test targets) |
+| `ts_hydrate_features` | Join CV splits with source features safely |
+| `ts_fill_unknown` | Fill future feature values to prevent data leakage |
+| `ts_mark_unknown` | Mark rows as known/unknown for custom handling |
+
+### Two Usage Patterns
+
+| Pattern | Use Case | Complexity |
+|---------|----------|------------|
+| **One-liner** (`ts_backtest_auto`) | Quick evaluation, 80% of use cases | Simple |
+| **Modular** (`ts_cv_split` + `ts_cv_forecast_by`) | Custom pipelines, regression models | Advanced |
+
+### Typical Workflow
+
+```sql
+-- 1. Generate fold boundaries automatically
+SELECT training_end_times FROM ts_cv_generate_folds('data', 'date', 3, 5, '1d', MAP{});
+
+-- 2. View the fold date ranges
+SELECT * FROM ts_cv_split_folds('data', 'group_id', 'date', [...], 5, '1d');
+
+-- 3. Create train/test splits
+SELECT * FROM ts_cv_split('data', 'group_id', 'date', 'value', [...], 5, '1d', MAP{});
+
+-- 4. Fill unknown features for backtesting
+SELECT * FROM ts_fill_unknown('data', 'group_id', 'date', 'feature', cutoff, MAP{});
+```
+
+---
+
+### One-Liner Backtest
+
+**ts_backtest_auto**
+
+Complete backtesting in a single function call. Combines fold generation, data splitting, forecasting, and evaluation. This is the recommended approach for most use cases.
+
+**Signature:**
+```sql
+ts_backtest_auto(
+    source VARCHAR,         -- Table name
+    group_col COLUMN,       -- Series identifier column
+    date_col COLUMN,        -- Date/timestamp column
+    target_col COLUMN,      -- Target value column
+    horizon BIGINT,         -- Forecast horizon (periods ahead)
+    folds BIGINT,           -- Number of CV folds
+    frequency VARCHAR,      -- Time frequency ('1d', '1h', '1w', '1mo')
+    params MAP,             -- Model and CV parameters
+    features VARCHAR[],     -- Optional: regressor column names (default NULL)
+    metric VARCHAR          -- Optional: fold metric ('rmse', 'mae', etc., default 'rmse')
+) → TABLE
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Table containing time series data |
+| `group_col` | COLUMN | Column identifying each series (unquoted) |
+| `date_col` | COLUMN | Date/timestamp column (unquoted) |
+| `target_col` | COLUMN | Target value to forecast (unquoted) |
+| `horizon` | BIGINT | Number of periods to forecast ahead |
+| `folds` | BIGINT | Number of CV folds |
+| `frequency` | VARCHAR | Data frequency (`'1d'`, `'1h'`, `'1w'`, `'1mo'`, `'1q'`, `'1y'`) |
+| `params` | MAP | Model and CV parameters (see below) |
+| `features` | VARCHAR[] | Optional regressor columns for regression models (default `NULL`) |
+| `metric` | VARCHAR | Metric for `fold_metric_score` column (default `'rmse'`) |
+
+**Params MAP Options:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `method` | VARCHAR | `'AutoETS'` | Forecasting model (see [Supported Models](#supported-models)) |
+| `gap` | BIGINT | `0` | Periods between train end and test start (simulates ETL latency) |
+| `embargo` | BIGINT | `0` | Periods to exclude from training after previous fold's test |
+| `window_type` | VARCHAR | `'expanding'` | Training window: `'expanding'`, `'fixed'`, or `'sliding'` |
+| `min_train_size` | BIGINT | `1` | Minimum training periods (used with `fixed`/`sliding`) |
+| `initial_train_size` | BIGINT | 50% of data | Periods for first fold's training set |
+| `skip_length` | BIGINT | `horizon` | Periods between fold start times |
+| `clip_horizon` | BOOLEAN | `false` | If `true`, include folds with partial test windows |
+
+**Supported Metrics:**
+
+All metrics use the same scalar functions (`ts_mae`, `ts_rmse`, etc.) ensuring consistent calculations.
+
+| Metric | Parameter | Description |
+|--------|-----------|-------------|
+| RMSE | `'rmse'` | Root Mean Squared Error (default) |
+| MAE | `'mae'` | Mean Absolute Error |
+| MAPE | `'mape'` | Mean Absolute Percentage Error |
+| MSE | `'mse'` | Mean Squared Error |
+| SMAPE | `'smape'` | Symmetric Mean Absolute Percentage Error |
+| Bias | `'bias'` | Mean Error (forecast - actual) |
+| R² | `'r2'` | Coefficient of Determination |
+| Coverage | `'coverage'` | Prediction interval coverage (uses lower_90/upper_90) |
+
+**Not available in backtest** (require additional inputs):
+| Metric | Reason |
+|--------|--------|
+| MASE | Requires baseline predictions (3rd array) |
+| rMAE | Requires second model predictions for comparison |
+| Quantile Loss | Requires quantile level parameter |
+| MQLoss | Requires multiple quantile arrays and levels |
+
+These can still be computed post-hoc using the scalar functions on the output columns.
+
+**Output Columns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | CV fold number |
+| `group_col` | ANY | Series identifier |
+| `date` | TIMESTAMP | Forecast date |
+| `forecast` | DOUBLE | Point forecast |
+| `actual` | DOUBLE | Actual value |
+| `error` | DOUBLE | forecast - actual |
+| `abs_error` | DOUBLE | \|forecast - actual\| |
+| `lower_90` | DOUBLE | Lower bound of 90% prediction interval |
+| `upper_90` | DOUBLE | Upper bound of 90% prediction interval |
+| `model_name` | VARCHAR | Model used for forecasting |
+| `fold_metric_score` | DOUBLE | Calculated metric for this fold |
+
+**Examples:**
+```sql
+-- Basic backtest with AutoETS
+SELECT * FROM ts_backtest_auto(
+    'sales_data', store_id, date, revenue,
+    7,              -- 7-day horizon
+    5,              -- 5 folds
+    '1d',           -- daily frequency
+    MAP{}           -- defaults: AutoETS, expanding window
+);
+
+-- Compare with different metric
+SELECT * FROM ts_backtest_auto(
+    'sales_data', store_id, date, revenue, 7, 5, '1d',
+    MAP{'method': 'Theta'},
+    NULL,           -- no features
+    'smape'         -- use SMAPE metric
+);
+
+-- With gap for ETL latency and fixed window
+SELECT * FROM ts_backtest_auto(
+    'sales_data', store_id, date, revenue, 7, 5, '1d',
+    MAP{
+        'method': 'SeasonalNaive',
+        'gap': '2',                 -- 2-day data delay
+        'window_type': 'fixed',
+        'min_train_size': '30'
+    }
+);
+
+-- Aggregate results by model
+SELECT
+    model_name,
+    AVG(abs_error) AS mae,
+    AVG(fold_metric_score) AS avg_rmse
+FROM ts_backtest_auto('sales_data', store_id, date, revenue, 7, 5, '1d', MAP{})
+GROUP BY model_name;
+```
+
+---
+
+### Generate Fold Boundaries
+
+**ts_cv_generate_folds**
+
+Automatically generate fold boundaries based on data range. Useful when you don't want to manually specify cutoff dates.
+
+**Signature:**
+```sql
+ts_cv_generate_folds(
+    source VARCHAR,     -- Table name
+    date_col VARCHAR,   -- Date column name
+    n_folds BIGINT,     -- Number of folds to generate
+    horizon BIGINT,     -- Number of periods in test set
+    frequency VARCHAR,  -- Data frequency: '1d', '1w', '1mo', etc.
+    params MAP          -- Optional parameters (use MAP{} for defaults)
+) → TABLE(training_end_times DATE[])
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Table containing time series data |
+| `date_col` | VARCHAR | Date/timestamp column name |
+| `n_folds` | BIGINT | Number of CV folds to generate |
+| `horizon` | BIGINT | Number of periods per test set |
+| `frequency` | VARCHAR | Data frequency string (`'1d'`, `'1h'`, `'1w'`, `'1mo'`, `'1q'`, `'1y'`) |
+| `params` | MAP | Optional parameters (see below) |
+
+**Params MAP Options:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `initial_train_size` | BIGINT | 50% of data | Periods for first fold's training set |
+| `skip_length` | BIGINT | `horizon` | Periods between fold start times (controls fold overlap) |
+| `clip_horizon` | BOOLEAN | `false` | If `true`, include folds with partial test windows |
+
+**Returns:** Single row containing a `DATE[]` array of training end times.
+
+**Example:**
+```sql
+-- Generate 3 folds with 5-day test horizon (default: 50% initial training)
+SELECT training_end_times
+FROM ts_cv_generate_folds('sales_data', 'date', 3, 5, '1d', MAP{});
+-- Returns: [2024-01-15, 2024-01-20, 2024-01-25]
+
+-- With custom initial training size (10 periods)
+SELECT training_end_times
+FROM ts_cv_generate_folds('sales_data', 'date', 3, 5, '1d',
+    MAP{'initial_train_size': '10'});
+
+-- Dense folds (1 period spacing for more test coverage)
+SELECT training_end_times
+FROM ts_cv_generate_folds('sales_data', 'date', 10, 7, '1d',
+    MAP{'skip_length': '1'});
+
+-- Monthly fold spacing for efficiency
+SELECT training_end_times
+FROM ts_cv_generate_folds('sales_data', 'date', 3, 7, '1d',
+    MAP{'skip_length': '30'});
+
+-- Allow partial test windows near end of data
+SELECT training_end_times
+FROM ts_cv_generate_folds('sales_data', 'date', 5, 7, '1d',
+    MAP{'clip_horizon': 'true'});
+```
+
+**Fold Spacing Illustrated (`skip_length`):**
+```
+skip_length=horizon (default): Non-overlapping test windows
+    Fold 1: [TRAIN════════][TEST═══]
+    Fold 2:        [TRAIN════════][TEST═══]   ← horizon periods later
+
+skip_length=1 (dense): Overlapping folds for maximum test coverage
+    Fold 1: [TRAIN════════][TEST═══]
+    Fold 2:  [TRAIN════════][TEST═══]         ← 1 period later
+    Fold 3:   [TRAIN════════][TEST═══]
+
+skip_length=30 (sparse): Monthly spacing for efficiency
+    Fold 1: [TRAIN════════][TEST═══]
+    Fold 2:                              [TRAIN════════][TEST═══]  ← 30 periods later
+```
+
+**Variable Horizon Illustrated (`clip_horizon`):**
+```
+clip_horizon=false (default): Folds with incomplete test windows are SKIPPED
+    Data:     [═══════════════════════════]
+    Fold 1: [TRAIN════════][TEST═══]        ✓ Full horizon
+    Fold 2:        [TRAIN════════][TEST═══] ✓ Full horizon
+    Fold 3:               [TRAIN════════][TE  ✗ Skipped (only 2 periods available)
+
+clip_horizon=true: Folds with partial test windows are INCLUDED
+    Data:     [═══════════════════════════]
+    Fold 1: [TRAIN════════][TEST═══]        ✓ Full horizon (7 periods)
+    Fold 2:        [TRAIN════════][TEST═══] ✓ Full horizon (7 periods)
+    Fold 3:               [TRAIN════════][TE] ✓ Partial horizon (2 periods)
+```
+
+---
+
+### View Fold Date Ranges
+
+**ts_cv_split_folds**
+
+Generate fold boundaries (train/test date ranges) for time series cross-validation. Shows when each fold's training and test periods start and end.
+
+**Signature:**
+```sql
+ts_cv_split_folds(
+    source VARCHAR,                      -- Table name
+    group_col VARCHAR,                   -- Grouping column name
+    date_col VARCHAR,                    -- Date column name
+    training_end_times DATE[],           -- Cutoff dates for each fold
+    horizon BIGINT,                      -- Number of periods in test set
+    frequency VARCHAR                    -- Data frequency
+) → TABLE(fold_id BIGINT, train_start TIMESTAMP, train_end TIMESTAMP,
+          test_start TIMESTAMP, test_end TIMESTAMP, horizon BIGINT)
+```
+
+**Parameters:**
+- `source`: Table containing time series data
+- `group_col`: Column name used for grouping (e.g., `'series_id'`)
+- `date_col`: Column containing date/timestamp values
+- `training_end_times`: Array of dates marking when each training period ends
+- `horizon`: Number of forecast periods per fold
+- `frequency`: Data frequency string
+
+**Returns:** One row per fold showing date boundaries.
+
+**Example:**
+```sql
+SELECT * FROM ts_cv_split_folds(
+    'sales_data',
+    'store_id',
+    'date',
+    ['2024-01-10'::DATE, '2024-01-15'::DATE, '2024-01-20'::DATE],
+    5,
+    '1d'
+);
+```
+
+| fold_id | train_start | train_end | test_start | test_end | horizon |
+|---------|-------------|-----------|------------|----------|---------|
+| 1 | 2024-01-01 | 2024-01-10 | 2024-01-11 | 2024-01-15 | 5 |
+| 2 | 2024-01-01 | 2024-01-15 | 2024-01-16 | 2024-01-20 | 5 |
+| 3 | 2024-01-01 | 2024-01-20 | 2024-01-21 | 2024-01-25 | 5 |
+
+---
+
+### Create Train/Test Splits
+
+**ts_cv_split**
+
+Split time series data into train/test sets for cross-validation with support for different window types.
+
+**Signature:**
+```sql
+ts_cv_split(
+    source VARCHAR,            -- Table name
+    group_col VARCHAR,         -- Grouping column name
+    date_col VARCHAR,          -- Date column name
+    target_col VARCHAR,        -- Target/value column name
+    training_end_times DATE[], -- Cutoff dates for each fold
+    horizon BIGINT,            -- Number of periods in test set
+    frequency VARCHAR,         -- Data frequency
+    params MAP                 -- Optional parameters (use MAP{} for defaults)
+) → TABLE(group_col, date_col, target_col, fold_id BIGINT, split VARCHAR)
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Table containing time series data |
+| `group_col` | VARCHAR | Column for grouping multiple series |
+| `date_col` | VARCHAR | Date/timestamp column |
+| `target_col` | VARCHAR | The value column to predict |
+| `training_end_times` | DATE[] | Array of dates marking end of each training period |
+| `horizon` | BIGINT | Number of test periods per fold |
+| `frequency` | VARCHAR | Data frequency string |
+| `params` | MAP | Optional parameters (see below) |
+
+**Params MAP Options:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `window_type` | VARCHAR | `'expanding'` | Training window type: `'expanding'`, `'fixed'`, or `'sliding'` |
+| `min_train_size` | BIGINT | `1` | Minimum periods in training set (used with `'fixed'` window) |
+
+**Returns:** Rows from source with `fold_id` and `split` (`'train'` or `'test'`) columns.
+
+**Example:**
+```sql
+-- Expanding window (default) - training grows with each fold
+SELECT * FROM ts_cv_split(
+    'sales_data',
+    'store_id',
+    'date',
+    'sales',
+    ['2024-01-10'::DATE, '2024-01-15'::DATE],
+    5,
+    '1d',
+    MAP{}
+);
+
+-- Fixed window (8-day training) - constant training size
+SELECT * FROM ts_cv_split(
+    'sales_data',
+    'store_id',
+    'date',
+    'sales',
+    ['2024-01-10'::DATE, '2024-01-15'::DATE],
+    5,
+    '1d',
+    MAP{'window_type': 'fixed', 'min_train_size': '8'}
+);
+```
+
+**Window Types Illustrated:**
+
+```
+Expanding window (default):
+Fold 1: [====TRAIN====][TEST]
+Fold 2: [======TRAIN======][TEST]
+Fold 3: [========TRAIN========][TEST]
+
+Fixed window:
+Fold 1:     [==TRAIN==][TEST]
+Fold 2:         [==TRAIN==][TEST]
+Fold 3:             [==TRAIN==][TEST]
+```
+
+---
+
+### Fill Unknown Features
+
+**ts_fill_unknown**
+
+Fill unknown future values in test sets during cross-validation to prevent data leakage. Use this for features that wouldn't be available at forecast time (e.g., weather, actual demand).
+
+**Signature:**
+```sql
+ts_fill_unknown(
+    source VARCHAR,      -- Table name
+    group_col VARCHAR,   -- Grouping column name
+    date_col VARCHAR,    -- Date column name
+    value_col VARCHAR,   -- Value column to fill
+    cutoff_date DATE,    -- Boundary: before = known, after = unknown
+    params MAP           -- Optional parameters (use MAP{} for defaults)
+) → TABLE(group_col, date_col, value_col)
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Table containing time series data |
+| `group_col` | VARCHAR | Column for grouping/identifying series |
+| `date_col` | VARCHAR | Date/timestamp column |
+| `value_col` | VARCHAR | Column containing values to fill |
+| `cutoff_date` | DATE | Rows with `date <= cutoff` are known (unchanged); rows with `date > cutoff` are unknown (filled) |
+| `params` | MAP | Optional parameters map (see below) |
+
+**Optional Parameters (via `params` MAP):**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `strategy` | VARCHAR | `'last_value'` | Fill strategy: `'last_value'`, `'null'`, or `'default'` |
+| `fill_value` | DOUBLE | `0.0` | Value to use when `strategy='default'` |
+
+**Returns:** All rows with `value_col` modified for unknown dates.
+
+**Example:**
+```sql
+-- Forward fill temperature (last known value carried forward, the default)
+SELECT * FROM ts_fill_unknown(
+    'backtest_data',
+    'category',
+    'date',
+    'temperature',
+    '2023-06-01'::DATE,
+    MAP{}  -- uses default strategy='last_value'
+);
+
+-- Set unknown values to NULL (let model handle missing)
+SELECT * FROM ts_fill_unknown(
+    'backtest_data',
+    'category',
+    'date',
+    'temperature',
+    '2023-06-01'::DATE,
+    MAP{'strategy': 'null'}
+);
+
+-- Set unknown values to a constant
+SELECT * FROM ts_fill_unknown(
+    'backtest_data',
+    'category',
+    'date',
+    'temperature',
+    '2023-06-01'::DATE,
+    MAP{'strategy': 'default', 'fill_value': '65.0'}
+);
+```
+
+**Known vs Unknown Features:**
+
+| Feature Type | Examples | Available at Forecast Time? | Handling |
+|--------------|----------|----------------------------|----------|
+| **Known** | Calendar, planned promotions | Yes | Use directly |
+| **Unknown** | Weather, actual demand | No | Must fill for backtesting |
+
+---
+
+### Mark Unknown Rows
+
+**ts_mark_unknown**
+
+Mark rows as known/unknown based on a cutoff date without modifying values. Useful for custom filling logic or tracking data availability.
+
+**Signature:**
+```sql
+ts_mark_unknown(
+    source VARCHAR,     -- Table name
+    group_col VARCHAR,  -- Grouping column name
+    date_col VARCHAR,   -- Date column name
+    cutoff_date DATE    -- Boundary date
+) → TABLE(*, is_unknown BOOLEAN, last_known_date TIMESTAMP)
+```
+
+**Parameters (all positional):**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Table containing time series data |
+| `group_col` | VARCHAR | Column for grouping/identifying series |
+| `date_col` | VARCHAR | Date/timestamp column |
+| `cutoff_date` | DATE | Rows with `date <= cutoff` get `is_unknown=FALSE`; rows with `date > cutoff` get `is_unknown=TRUE` |
+
+**Returns:** All columns from source plus:
+- `is_unknown`: TRUE if row is in unknown (future) period
+- `last_known_date`: Per-group timestamp of last known date
+
+**Example:**
+```sql
+-- Mark unknown dates and apply custom logic
+SELECT
+    category,
+    date,
+    temperature,
+    is_unknown,
+    last_known_date,
+    -- Custom fill: use group mean for unknown
+    CASE
+        WHEN is_unknown THEN AVG(temperature) OVER (PARTITION BY category)
+        ELSE temperature
+    END AS temperature_filled
+FROM ts_mark_unknown(
+    'backtest_data',
+    'category',
+    'date',
+    '2023-06-01'::DATE
+)
+ORDER BY category, date;
+```
+
+---
+
 ## Forecasting
 
-The extension provides a comprehensive forecasting system with 32 models ranging from simple baselines to sophisticated state-space methods. Forecasts can be generated using three different API styles depending on your use case.
+The extension provides a comprehensive forecasting system with 32 models ranging from simple baselines to sophisticated state-space methods.
 
 ### API Styles for Forecasting
 
 | API Style | Best For | Example |
 |-----------|----------|---------|
-| **Table Macros** | Most users; clean SQL interface | `ts_forecast_by('sales', id, date, val, 'ets', 12, MAP{})` |
+| **Table Macros** | Most users; forecasting multiple series | `ts_forecast_by('sales', id, date, val, 'ets', 12, MAP{})` |
 | **Aggregate Functions** | Custom GROUP BY patterns | `ts_forecast_agg(date, value, 'ets', 12, MAP{})` |
-| **Scalar Functions** | Array-based workflows, composition | `ts_forecast([1,2,3,4]::DOUBLE[], 3, 'naive')` |
 
 ### Choosing a Forecasting Model
 
@@ -2311,63 +2847,7 @@ The extension supports all 32 models with **exact case-sensitive naming**.
 
 ---
 
-### ts_forecast (Scalar)
-
-**ts_forecast** (alias: `anofox_fcst_ts_forecast`)
-
-Generates time series forecasts from an array.
-
-**Signature:**
-```sql
--- With default model (auto)
-ts_forecast(values DOUBLE[], horizon INTEGER) → STRUCT
-
--- With specified model
-ts_forecast(values DOUBLE[], horizon INTEGER, model VARCHAR) → STRUCT
-```
-
-**Parameters:**
-- `values`: Historical time series values (DOUBLE[])
-- `horizon`: Number of periods to forecast (INTEGER)
-- `model`: Forecasting model (VARCHAR, optional, default: 'auto')
-
-**Returns:**
-```sql
-STRUCT(
-    point     DOUBLE[],   -- Point forecasts
-    lower     DOUBLE[],   -- Lower prediction interval bounds
-    upper     DOUBLE[],   -- Upper prediction interval bounds
-    fitted    DOUBLE[],   -- In-sample fitted values
-    residuals DOUBLE[],   -- In-sample residuals
-    model     VARCHAR,    -- Model name used
-    aic       DOUBLE,     -- Akaike Information Criterion
-    bic       DOUBLE,     -- Bayesian Information Criterion
-    mse       DOUBLE      -- Mean Squared Error
-)
-```
-
-**Example:**
-```sql
--- Simple forecast
-SELECT ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]::DOUBLE[], 3);
-
--- With specific model
-SELECT ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]::DOUBLE[], 3, 'ses');
-
--- Access point forecasts
-SELECT (ts_forecast([1,2,3,4,5,6,7,8,9,10]::DOUBLE[], 3)).point;
-
--- Use with GROUP BY for multiple series
-SELECT
-    product_id,
-    (ts_forecast(LIST(value ORDER BY date), 7, 'naive')).point AS forecast
-FROM sales
-GROUP BY product_id;
-```
-
----
-
-### anofox_fcst_ts_forecast (Table Macro)
+### anofox_fcst_ts_forecast / ts_forecast (Table Macro)
 
 Generate forecasts for a single series from a table.
 
@@ -2486,93 +2966,6 @@ SELECT * FROM ts_forecast_by('sales', id, date, val, 'ETS', 12,
 
 ---
 
-### _ts_forecast_exog (Scalar)
-
-Scalar function for forecasting with exogenous variables (external regressors). This function allows you to incorporate external factors that influence your time series.
-
-**Purpose:**
-When your time series is influenced by external factors (temperature, promotions, economic indicators), you can include these as exogenous variables to improve forecast accuracy.
-
-**Signature:**
-```sql
-_ts_forecast_exog(
-    values DOUBLE[],           -- Historical target values
-    historical_x DOUBLE[][],   -- Historical exogenous variables (matrix)
-    future_x DOUBLE[][],       -- Future exogenous variables for forecast horizon
-    horizon INTEGER,           -- Number of periods to forecast
-    model VARCHAR              -- Model name (ARIMA, AutoARIMA, OptimizedTheta, MFLES)
-) → STRUCT
-```
-
-**Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `values` | `DOUBLE[]` | Historical time series values |
-| `historical_x` | `DOUBLE[][]` | Matrix of historical exogenous regressors. Each inner array is one regressor with values aligned to `values` |
-| `future_x` | `DOUBLE[][]` | Matrix of future exogenous values. Each inner array must have `horizon` elements |
-| `horizon` | `INTEGER` | Number of periods to forecast |
-| `model` | `VARCHAR` | Base model name (see supported models below) |
-
-**Returns:**
-```sql
-STRUCT(
-    point DOUBLE[],    -- Point forecasts
-    lower DOUBLE[],    -- Lower prediction interval bounds
-    upper DOUBLE[],    -- Upper prediction interval bounds
-    model VARCHAR      -- Model name used (with X suffix, e.g., ARIMAX)
-)
-```
-
-**Supported Models with Exogenous Variables:**
-| Base Model | With Exog | Description |
-|------------|-----------|-------------|
-| `ARIMA` | `ARIMAX` | ARIMA with exogenous regressors |
-| `AutoARIMA` | `ARIMAX` | Auto-selected ARIMA with exogenous |
-| `OptimizedTheta` | `ThetaX` | Theta method with exogenous |
-| `MFLES` | `MFLESX` | MFLES with exogenous regressors |
-
-**Examples:**
-```sql
--- Simple example with one regressor (e.g., promotional effect)
-SELECT (_ts_forecast_exog(
-    [100.0, 120.0, 110.0, 130.0, 125.0, 140.0],  -- sales history
-    [[0.0, 1.0, 0.0, 1.0, 0.0, 1.0]],            -- historical promotion (0/1)
-    [[1.0, 0.0, 1.0]],                            -- future promotions
-    3,                                             -- forecast 3 periods
-    'AutoARIMA'
-)).point AS forecast;
-
--- Multiple regressors (temperature + promotion)
-SELECT * FROM (
-    SELECT (_ts_forecast_exog(
-        [100.0, 120.0, 110.0, 130.0, 125.0, 140.0],
-        [[20.0, 22.0, 19.0, 23.0, 21.0, 24.0],    -- temperature
-         [0.0, 1.0, 0.0, 1.0, 0.0, 1.0]],         -- promotion
-        [[22.0, 20.0, 21.0],                       -- future temperature
-         [1.0, 0.0, 1.0]],                         -- future promotion
-        3,
-        'ARIMA'
-    )) AS result
-);
-
--- Check which model was selected
-SELECT (_ts_forecast_exog(
-    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0],
-    [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],
-    [[1.0, 2.0]],
-    2,
-    'ARIMA'
-)).model;  -- Returns 'ARIMAX'
-```
-
-**Notes:**
-- The number of regressors in `historical_x` must match `future_x`
-- Each regressor in `historical_x` must have the same length as `values`
-- Each regressor in `future_x` must have exactly `horizon` elements
-- If empty arrays are provided for exogenous variables, the function falls back to non-exogenous forecasting
-
----
-
 ### ts_forecast_exog (Table Macro)
 
 Table macro for single-series forecasting with exogenous variables from a DuckDB table.
@@ -2599,9 +2992,17 @@ ts_forecast_exog(
 | `target_col` | `IDENTIFIER` | Target value column (unquoted) |
 | `x_cols` | `VARCHAR` | Comma-separated list of exogenous column names |
 | `future_table` | `VARCHAR` | Table containing future exogenous values |
-| `model` | `VARCHAR` | Forecasting method (ARIMA, AutoARIMA, OptimizedTheta, MFLES) |
+| `model` | `VARCHAR` | Forecasting method (see supported models below) |
 | `horizon` | `INTEGER` | Number of periods to forecast |
 | `params` | `MAP` | Model parameters (use `MAP{}` for defaults) |
+
+**Supported Models with Exogenous Variables:**
+| Base Model | With Exog | Description |
+|------------|-----------|-------------|
+| `ARIMA` | `ARIMAX` | ARIMA with exogenous regressors |
+| `AutoARIMA` | `ARIMAX` | Auto-selected ARIMA with exogenous |
+| `OptimizedTheta` | `ThetaX` | Theta method with exogenous |
+| `MFLES` | `MFLESX` | MFLES with exogenous regressors |
 
 **Returns:** A table with columns:
 - `ds` - Forecast timestamp
