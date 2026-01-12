@@ -1222,3 +1222,89 @@ impl Default for AmplitudeModulationResultFFI {
         }
     }
 }
+
+// ============================================================================
+// Conformal Prediction Types
+// ============================================================================
+
+/// Result of conformal prediction with prediction intervals.
+#[repr(C)]
+pub struct ConformalResultFFI {
+    /// Point forecasts
+    pub point: *mut c_double,
+    /// Lower bounds of prediction intervals
+    pub lower: *mut c_double,
+    /// Upper bounds of prediction intervals
+    pub upper: *mut c_double,
+    /// Number of forecasts
+    pub n_forecasts: size_t,
+    /// Nominal coverage level (1 - alpha)
+    pub coverage: c_double,
+    /// The computed conformity score (quantile threshold)
+    pub conformity_score: c_double,
+    /// Method used for conformal prediction
+    pub method: [c_char; 32],
+}
+
+impl Default for ConformalResultFFI {
+    fn default() -> Self {
+        Self {
+            point: std::ptr::null_mut(),
+            lower: std::ptr::null_mut(),
+            upper: std::ptr::null_mut(),
+            n_forecasts: 0,
+            coverage: 0.0,
+            conformity_score: 0.0,
+            method: [0; 32],
+        }
+    }
+}
+
+/// A single prediction interval at a specific coverage level (for multi-level results).
+#[repr(C)]
+pub struct ConformalIntervalFFI {
+    /// Nominal coverage level (1 - alpha)
+    pub coverage: c_double,
+    /// Lower bounds
+    pub lower: *mut c_double,
+    /// Upper bounds
+    pub upper: *mut c_double,
+    /// Conformity score used
+    pub conformity_score: c_double,
+}
+
+/// Result of conformal prediction with multiple coverage levels.
+///
+/// Uses a flattened structure for safer FFI. All arrays have length
+/// `n_forecasts * n_levels`, with intervals stored level-by-level.
+#[repr(C)]
+pub struct ConformalMultiResultFFI {
+    /// Point forecasts
+    pub point: *mut c_double,
+    /// Number of point forecasts
+    pub n_forecasts: size_t,
+    /// Coverage levels (one per level)
+    pub coverage_levels: *mut c_double,
+    /// Conformity scores (one per level)
+    pub conformity_scores: *mut c_double,
+    /// Number of coverage levels
+    pub n_levels: size_t,
+    /// Flattened lower bounds (n_forecasts * n_levels, level-major order)
+    pub lower: *mut c_double,
+    /// Flattened upper bounds (n_forecasts * n_levels, level-major order)
+    pub upper: *mut c_double,
+}
+
+impl Default for ConformalMultiResultFFI {
+    fn default() -> Self {
+        Self {
+            point: std::ptr::null_mut(),
+            n_forecasts: 0,
+            coverage_levels: std::ptr::null_mut(),
+            conformity_scores: std::ptr::null_mut(),
+            n_levels: 0,
+            lower: std::ptr::null_mut(),
+            upper: std::ptr::null_mut(),
+        }
+    }
+}

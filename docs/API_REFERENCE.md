@@ -3432,6 +3432,274 @@ SELECT ts_coverage(
 
 ---
 
+## Conformal Prediction
+
+Conformal prediction provides **distribution-free prediction intervals** with guaranteed coverage probability. Unlike parametric methods, conformal prediction makes minimal assumptions about the underlying distribution and provides valid coverage even for finite samples.
+
+### Overview
+
+Conformal prediction works in two phases:
+1. **Calibration**: Compute a conformity score from calibration residuals
+2. **Prediction**: Apply the conformity score to new forecasts
+
+The resulting intervals have the property that they will cover the true value with probability at least `1 - α`, where `α` is the miscoverage rate.
+
+### ts_conformal_quantile
+
+**ts_conformal_quantile** (alias: `anofox_fcst_ts_conformal_quantile`)
+
+Computes the empirical quantile of absolute residuals for split conformal prediction.
+
+**Signature:**
+```sql
+ts_conformal_quantile(residuals DOUBLE[], alpha DOUBLE) → DOUBLE
+```
+
+**Parameters:**
+- `residuals`: Array of residuals (actual - predicted) from calibration set
+- `alpha`: Miscoverage rate (0 < alpha < 1). Use 0.1 for 90% coverage, 0.05 for 95% coverage.
+
+**Example:**
+```sql
+-- Compute 90% conformity score from backtest residuals
+SELECT ts_conformal_quantile(
+    [1.0, -0.5, 2.0, -1.5, 0.8],  -- residuals from backtest
+    0.1                           -- 90% coverage
+) AS conformity_score;
+```
+
+---
+
+### ts_conformal_intervals
+
+**ts_conformal_intervals** (alias: `anofox_fcst_ts_conformal_intervals`)
+
+Applies a pre-computed conformity score to create symmetric prediction intervals.
+
+**Signature:**
+```sql
+ts_conformal_intervals(forecasts DOUBLE[], conformity_score DOUBLE) → STRUCT(lower DOUBLE[], upper DOUBLE[])
+```
+
+**Parameters:**
+- `forecasts`: Array of point forecasts
+- `conformity_score`: Pre-computed quantile from `ts_conformal_quantile`
+
+**Returns:** Struct with `lower` and `upper` interval bounds.
+
+**Example:**
+```sql
+-- Apply conformity score to forecasts
+SELECT
+    (ts_conformal_intervals([100.0, 110.0, 120.0], 5.0)).lower AS lower,
+    (ts_conformal_intervals([100.0, 110.0, 120.0], 5.0)).upper AS upper;
+-- Returns: lower=[95,105,115], upper=[105,115,125]
+```
+
+---
+
+### ts_conformal_predict
+
+**ts_conformal_predict** (alias: `anofox_fcst_ts_conformal_predict`)
+
+Full split conformal prediction: computes conformity score from residuals and applies to forecasts.
+
+**Signature:**
+```sql
+ts_conformal_predict(residuals DOUBLE[], forecasts DOUBLE[], alpha DOUBLE)
+→ STRUCT(point DOUBLE[], lower DOUBLE[], upper DOUBLE[], coverage DOUBLE, conformity_score DOUBLE, method VARCHAR)
+```
+
+**Parameters:**
+- `residuals`: Calibration residuals (actual - predicted)
+- `forecasts`: Point forecasts to generate intervals for
+- `alpha`: Miscoverage rate
+
+**Returns:** Complete result with intervals, coverage guarantee, and method used.
+
+**Example:**
+```sql
+-- Generate conformal intervals for forecasts
+WITH backtest_residuals AS (
+    SELECT [1.2, -0.8, 1.5, -1.0, 0.5]::DOUBLE[] AS residuals
+),
+future_forecasts AS (
+    SELECT [100.0, 102.0, 104.0]::DOUBLE[] AS forecasts
+)
+SELECT
+    (ts_conformal_predict(residuals, forecasts, 0.1)).*
+FROM backtest_residuals, future_forecasts;
+```
+
+---
+
+### ts_conformal_predict_asymmetric
+
+**ts_conformal_predict_asymmetric** (alias: `anofox_fcst_ts_conformal_predict_asymmetric`)
+
+Asymmetric conformal prediction that computes separate upper and lower quantiles. Useful when residuals are not symmetric (e.g., skewed demand forecasts).
+
+**Signature:**
+```sql
+ts_conformal_predict_asymmetric(residuals DOUBLE[], forecasts DOUBLE[], alpha DOUBLE)
+→ STRUCT(point DOUBLE[], lower DOUBLE[], upper DOUBLE[], coverage DOUBLE, conformity_score DOUBLE, method VARCHAR)
+```
+
+**Parameters:**
+- `residuals`: Calibration residuals (can be asymmetric)
+- `forecasts`: Point forecasts
+- `alpha`: Miscoverage rate
+
+**Example:**
+```sql
+-- Asymmetric intervals for skewed residuals
+SELECT
+    (ts_conformal_predict_asymmetric(
+        [-0.5, -0.3, 0.2, 1.0, 2.5],  -- positively skewed residuals
+        [100.0, 110.0],               -- forecasts
+        0.1                           -- 90% coverage
+    )).*;
+```
+
+---
+
+### ts_mean_interval_width
+
+**ts_mean_interval_width** (alias: `anofox_fcst_ts_mean_interval_width`)
+
+Computes the mean width of prediction intervals. Useful for comparing interval sharpness across models.
+
+**Signature:**
+```sql
+ts_mean_interval_width(lower DOUBLE[], upper DOUBLE[]) → DOUBLE
+```
+
+**Parameters:**
+- `lower`: Array of lower bounds
+- `upper`: Array of upper bounds
+
+**Example:**
+```sql
+-- Compare interval widths from two models
+SELECT
+    ts_mean_interval_width([95.0, 105.0], [105.0, 115.0]) AS model_a_width,
+    ts_mean_interval_width([90.0, 100.0], [110.0, 120.0]) AS model_b_width;
+-- Returns: model_a_width=10.0, model_b_width=20.0 (model A has sharper intervals)
+```
+
+---
+
+### Table Macros for Conformal Prediction
+
+#### ts_conformal
+
+High-level macro that performs conformal prediction on grouped backtest results.
+
+**Signature:**
+```sql
+ts_conformal(backtest_results, group_col, actual_col, forecast_col, point_forecast_col, params)
+```
+
+**Parameters:**
+- `backtest_results`: Table name with backtest results
+- `group_col`: Column for grouping (e.g., product_id)
+- `actual_col`: Column with actual values
+- `forecast_col`: Column with in-sample forecasts
+- `point_forecast_col`: Column with point forecasts for interval generation
+- `params`: MAP with optional parameters:
+  - `alpha` (DOUBLE): Miscoverage rate (default: 0.1)
+  - `method` (VARCHAR): 'split' or 'asymmetric' (default: 'split')
+
+**Example:**
+```sql
+-- Generate conformal intervals for all products
+SELECT * FROM ts_conformal(
+    'backtest_results',
+    product_id,
+    actual,
+    forecast,
+    point_forecast,
+    MAP{'alpha': 0.1, 'method': 'split'}
+);
+```
+
+---
+
+#### ts_conformal_calibrate
+
+Calibrates a conformity score from backtest residuals.
+
+**Signature:**
+```sql
+ts_conformal_calibrate(backtest_results, actual_col, forecast_col, params)
+```
+
+**Returns:** `conformity_score`, `coverage`, `n_residuals`
+
+**Example:**
+```sql
+-- Compute global conformity score
+SELECT * FROM ts_conformal_calibrate(
+    'backtest_results',
+    actual,
+    forecast,
+    MAP{'alpha': 0.05}
+);
+```
+
+---
+
+#### ts_conformal_apply
+
+Applies a pre-computed conformity score to forecast results.
+
+**Signature:**
+```sql
+ts_conformal_apply(forecast_results, group_col, forecast_col, conformity_score)
+```
+
+**Returns:** `group_col`, `lower`, `upper`
+
+**Example:**
+```sql
+-- Apply calibrated score to new forecasts
+WITH score AS (
+    SELECT conformity_score FROM ts_conformal_calibrate('backtest', actual, forecast, MAP{'alpha': 0.1})
+)
+SELECT * FROM ts_conformal_apply(
+    'future_forecasts',
+    product_id,
+    forecast,
+    (SELECT conformity_score FROM score)
+);
+```
+
+---
+
+#### ts_interval_width
+
+Computes mean interval width for grouped forecast results.
+
+**Signature:**
+```sql
+ts_interval_width(results, group_col, lower_col, upper_col)
+```
+
+**Returns:** `group_col`, `mean_width`, `n_intervals`
+
+**Example:**
+```sql
+-- Evaluate interval sharpness by product
+SELECT * FROM ts_interval_width(
+    'forecast_results',
+    product_id,
+    lower,
+    upper
+);
+```
+
+---
+
 ## Notes
 
 ### Array-Based Design

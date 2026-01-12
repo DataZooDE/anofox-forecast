@@ -1,0 +1,176 @@
+# name: test/sql/ts_conformal.test
+# description: Tests for conformal prediction functions
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# ts_conformal_quantile - Basic quantile computation
+#######################################
+
+# Basic quantile calculation (90% coverage, alpha=0.1)
+# For residuals [1,2,3,4,5], the 90th percentile should be around 4.6
+query I
+SELECT ABS(ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.1) - 4.6) < 0.5;
+----
+true
+
+# Higher coverage (95%) should give larger quantile
+query I
+SELECT ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.05) > ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.1);
+----
+true
+
+# 50% coverage
+query I
+SELECT ABS(ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.5) - 3.0) < 0.5;
+----
+true
+
+# Alias test
+query I
+SELECT ABS(anofox_fcst_ts_conformal_quantile([1.0, 2.0, 3.0], 0.1) - ts_conformal_quantile([1.0, 2.0, 3.0], 0.1)) < 0.001;
+----
+true
+
+#######################################
+# ts_conformal_intervals - Apply quantile to forecasts
+#######################################
+
+# Basic interval computation
+# forecasts=[10, 20, 30], quantile=2
+# lower = [10-2, 20-2, 30-2] = [8, 18, 28]
+# upper = [10+2, 20+2, 30+2] = [12, 22, 32]
+query III
+SELECT
+    (ts_conformal_intervals([10.0, 20.0, 30.0], 2.0)).lower[1],
+    (ts_conformal_intervals([10.0, 20.0, 30.0], 2.0)).lower[2],
+    (ts_conformal_intervals([10.0, 20.0, 30.0], 2.0)).lower[3];
+----
+8.0
+18.0
+28.0
+
+query III
+SELECT
+    (ts_conformal_intervals([10.0, 20.0, 30.0], 2.0)).upper[1],
+    (ts_conformal_intervals([10.0, 20.0, 30.0], 2.0)).upper[2],
+    (ts_conformal_intervals([10.0, 20.0, 30.0], 2.0)).upper[3];
+----
+12.0
+22.0
+32.0
+
+# Zero quantile means point = lower = upper
+query I
+SELECT
+    (ts_conformal_intervals([5.0, 10.0], 0.0)).lower[1] = (ts_conformal_intervals([5.0, 10.0], 0.0)).upper[1];
+----
+true
+
+#######################################
+# ts_conformal_predict - Full conformal prediction
+#######################################
+
+# Basic conformal prediction with symmetric residuals
+# residuals = [-2, -1, 0, 1, 2]
+# point_forecasts = [100, 200]
+# With 90% coverage, quantile should cover most residuals
+query I
+SELECT
+    (ts_conformal_predict([-2.0, -1.0, 0.0, 1.0, 2.0], [100.0, 200.0], 0.1)).coverage = 0.9;
+----
+true
+
+# Verify point forecasts are preserved
+query II
+SELECT
+    (ts_conformal_predict([-2.0, -1.0, 0.0, 1.0, 2.0], [100.0, 200.0], 0.1)).point[1],
+    (ts_conformal_predict([-2.0, -1.0, 0.0, 1.0, 2.0], [100.0, 200.0], 0.1)).point[2];
+----
+100.0
+200.0
+
+# Verify method is 'split'
+query I
+SELECT (ts_conformal_predict([1.0, 2.0, 3.0], [50.0], 0.1)).method;
+----
+split
+
+# Lower bound should be less than upper bound
+query I
+SELECT
+    (ts_conformal_predict([1.0, 2.0, 3.0, 4.0, 5.0], [10.0], 0.1)).lower[1] <
+    (ts_conformal_predict([1.0, 2.0, 3.0, 4.0, 5.0], [10.0], 0.1)).upper[1];
+----
+true
+
+#######################################
+# ts_conformal_predict_asymmetric - Asymmetric intervals
+#######################################
+
+# Asymmetric residuals should produce asymmetric intervals
+# residuals = [-1, -1, 0, 2, 4] - skewed positive
+query I
+SELECT (ts_conformal_predict_asymmetric([-1.0, -1.0, 0.0, 2.0, 4.0], [100.0], 0.1)).method;
+----
+asymmetric
+
+# Coverage should still match requested coverage
+query I
+SELECT (ts_conformal_predict_asymmetric([1.0, 2.0, 3.0], [50.0], 0.1)).coverage = 0.9;
+----
+true
+
+#######################################
+# ts_mean_interval_width - Interval width metric
+#######################################
+
+# Basic interval width
+# lower=[8, 18], upper=[12, 22], widths=[4, 4], mean=4
+query I
+SELECT ts_mean_interval_width([8.0, 18.0], [12.0, 22.0]);
+----
+4.0
+
+# Varying widths
+# lower=[0, 10], upper=[5, 20], widths=[5, 10], mean=7.5
+query I
+SELECT ts_mean_interval_width([0.0, 10.0], [5.0, 20.0]);
+----
+7.5
+
+# Single interval
+query I
+SELECT ts_mean_interval_width([0.0], [10.0]);
+----
+10.0
+
+# Alias test
+query I
+SELECT anofox_fcst_ts_mean_interval_width([0.0, 5.0], [10.0, 15.0]);
+----
+10.0
+
+#######################################
+# Edge cases
+#######################################
+
+# Small number of residuals
+query I
+SELECT ts_conformal_quantile([1.0], 0.1) IS NOT NULL;
+----
+true
+
+# Very tight coverage (99%)
+query I
+SELECT ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 0.01) > 9.0;
+----
+true
+
+# Coverage bounds from prediction
+query I
+SELECT
+    (ts_conformal_predict([1.0, 2.0, 3.0], [100.0], 0.2)).coverage = 0.8;
+----
+true
