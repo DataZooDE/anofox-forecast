@@ -2,8 +2,8 @@
 #include "anofox_fcst_ffi.h"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
-
 #include "duckdb/function/scalar_function.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 
 namespace duckdb {
 
@@ -335,7 +335,10 @@ void RegisterTsDetectChangepointsBocpdFunction(ExtensionLoader &loader) {
         TsDetectChangepointsBocpdFunction
     ));
 
-    loader.RegisterFunction(ts_bocpd_set);
+    // Mark as internal to hide from duckdb_functions() and deprioritize in autocomplete
+    CreateScalarFunctionInfo info(ts_bocpd_set);
+    info.internal = true;
+    loader.RegisterFunction(info);
 }
 
 // Placeholder functions

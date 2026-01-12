@@ -2,8 +2,8 @@
 #include "anofox_fcst_ffi.h"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
-
 #include "duckdb/function/scalar_function.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 
 namespace duckdb {
 
@@ -442,7 +442,10 @@ void RegisterTsForecastFunction(ExtensionLoader &loader) {
         TsForecastWithModelFunction
     ));
 
-    loader.RegisterFunction(ts_forecast_set);
+    // Mark as internal to hide from duckdb_functions() and deprioritize in autocomplete
+    CreateScalarFunctionInfo forecast_info(ts_forecast_set);
+    forecast_info.internal = true;
+    loader.RegisterFunction(forecast_info);
 
     // Internal scalar function for forecasting with exogenous variables
     // _ts_forecast_exog(values, xreg, future_xreg, horizon, model)
@@ -461,7 +464,11 @@ void RegisterTsForecastFunction(ExtensionLoader &loader) {
         GetForecastResultType(),
         TsForecastExogFunction
     );
-    loader.RegisterFunction(ts_forecast_exog_func);
+
+    // Mark as internal
+    CreateScalarFunctionInfo exog_info(ts_forecast_exog_func);
+    exog_info.internal = true;
+    loader.RegisterFunction(exog_info);
 }
 
 // ts_forecast_by is implemented as a table macro in ts_macros.cpp

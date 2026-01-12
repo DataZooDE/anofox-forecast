@@ -27,7 +27,7 @@ static const TsTableMacro ts_table_macros[] = {
 R"(
 SELECT
     group_col AS id,
-    _ts_stats(LIST(value_col ORDER BY date_col)) AS stats
+    _ts_stats(LIST(value_col::DOUBLE ORDER BY date_col)) AS stats
 FROM query_table(source::VARCHAR)
 GROUP BY group_col
 )"},
@@ -65,7 +65,7 @@ FROM query_table(stats_table::VARCHAR)
 R"(
 SELECT
     unique_id_col AS unique_id,
-    _ts_data_quality(LIST(value_col ORDER BY date_col)) AS quality
+    _ts_data_quality(LIST(value_col::DOUBLE ORDER BY date_col)) AS quality
 FROM query_table(source::VARCHAR)
 GROUP BY unique_id_col
 )"},
@@ -83,7 +83,7 @@ SELECT
 FROM (
     SELECT
         unique_id_col AS unique_id,
-        _ts_data_quality(LIST(value_col ORDER BY date_col)) AS quality
+        _ts_data_quality(LIST(value_col::DOUBLE ORDER BY date_col)) AS quality
     FROM query_table(source::VARCHAR)
     GROUP BY unique_id_col
 )
@@ -399,7 +399,7 @@ WHERE group_col IN (
 R"(
 SELECT
     group_col AS id,
-    _ts_mstl_decomposition(LIST(value_col ORDER BY date_col)) AS decomposition
+    _ts_mstl_decomposition(LIST(value_col::DOUBLE ORDER BY date_col)) AS decomposition
 FROM query_table(source::VARCHAR)
 GROUP BY group_col
 )"},
@@ -418,7 +418,7 @@ WITH ordered_data AS (
 ),
 cp_result AS (
     SELECT _ts_detect_changepoints_bocpd(
-        LIST(value_col ORDER BY date_col),
+        LIST(value_col::DOUBLE ORDER BY date_col),
         COALESCE(params['hazard_lambda']::DOUBLE, 250.0),
         COALESCE(params['include_probabilities']::BOOLEAN, false)
     ) AS cp
@@ -440,7 +440,7 @@ R"(
 SELECT
     group_col AS id,
     _ts_detect_changepoints_bocpd(
-        LIST(value_col ORDER BY date_col),
+        LIST(value_col::DOUBLE ORDER BY date_col),
         COALESCE(params['hazard_lambda']::DOUBLE, 250.0),
         COALESCE(params['include_probabilities']::BOOLEAN, false)
     ) AS changepoints
@@ -453,7 +453,7 @@ GROUP BY group_col
     {"ts_forecast", {"source", "date_col", "target_col", "method", "horizon", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH forecast_result AS (
-    SELECT _ts_forecast(LIST(target_col ORDER BY date_col), horizon, method) AS fcst
+    SELECT _ts_forecast(LIST(target_col::DOUBLE ORDER BY date_col), horizon, method) AS fcst
     FROM query_table(source::VARCHAR)
 )
 SELECT
@@ -488,7 +488,7 @@ forecast_data AS (
     SELECT
         group_col AS id,
         date_trunc('second', MAX(date_col)::TIMESTAMP) AS last_date,
-        _ts_forecast(LIST(target_col ORDER BY date_col), horizon, method) AS fcst
+        _ts_forecast(LIST(target_col::DOUBLE ORDER BY date_col), horizon, method) AS fcst
     FROM query_table(source::VARCHAR)
     GROUP BY group_col
 )
@@ -537,7 +537,7 @@ forecast_data AS (
         fold_id,
         _grp AS id,
         date_trunc('second', MAX(date_col)::TIMESTAMP) AS last_date,
-        _ts_forecast(LIST(target_col ORDER BY date_col), horizon, method) AS fcst
+        _ts_forecast(LIST(target_col::DOUBLE ORDER BY date_col), horizon, method) AS fcst
     FROM cv_data
     GROUP BY fold_id, _grp
 )
@@ -589,7 +589,7 @@ _xreg_list AS (
 ),
 -- Aggregate historical target values
 _y_list AS (
-    SELECT LIST(target_col ORDER BY date_col) AS y_list FROM src
+    SELECT LIST(target_col::DOUBLE ORDER BY date_col) AS y_list FROM src
 ),
 -- Expand future xreg column names
 _future_cols_expanded AS (
@@ -683,7 +683,7 @@ grouped_historical AS (
     SELECT
         group_col AS id,
         date_trunc('second', MAX(date_col)::TIMESTAMP) AS last_date,
-        LIST(target_col ORDER BY date_col) AS _y_list
+        LIST(target_col::DOUBLE ORDER BY date_col) AS _y_list
     FROM src
     GROUP BY group_col
 ),
@@ -917,13 +917,13 @@ WITH _params AS (
 ),
 _freq AS (
     SELECT CASE
-        WHEN frequency ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency, 'd$', ' day'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency, 'h$', ' hour'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency, '(m|min)$', ' minute'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency, 'w$', ' week'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency, 'mo$', ' month'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
-        WHEN frequency ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency, 'y$', ' year'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'w$', ' week'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'mo$', ' month'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency::VARCHAR, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'y$', ' year'))::INTERVAL
         ELSE frequency::INTERVAL
     END AS _interval
 ),
@@ -993,13 +993,13 @@ WITH _params AS (
 ),
 _freq AS (
     SELECT CASE
-        WHEN frequency ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency, 'd$', ' day'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency, 'h$', ' hour'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency, '(m|min)$', ' minute'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency, 'w$', ' week'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency, 'mo$', ' month'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
-        WHEN frequency ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency, 'y$', ' year'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'w$', ' week'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'mo$', ' month'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency::VARCHAR, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'y$', ' year'))::INTERVAL
         ELSE frequency::INTERVAL
     END AS _interval
 ),
@@ -1007,7 +1007,7 @@ src AS (
     SELECT
         group_col AS _grp,
         date_trunc('second', date_col::TIMESTAMP) AS _dt,
-        target_col AS _target
+        target_col::DOUBLE AS _target
     FROM query_table(source::VARCHAR)
 ),
 date_bounds AS (
@@ -1091,13 +1091,13 @@ WITH _params AS (
 ),
 _freq AS (
     SELECT CASE
-        WHEN frequency ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency, 'd$', ' day'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency, 'h$', ' hour'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency, '(m|min)$', ' minute'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency, 'w$', ' week'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency, 'mo$', ' month'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
-        WHEN frequency ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency, 'y$', ' year'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'w$', ' week'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'mo$', ' month'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency::VARCHAR, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'y$', ' year'))::INTERVAL
         ELSE frequency::INTERVAL
     END AS _interval
 ),
@@ -1391,13 +1391,13 @@ LIMIT 1
 R"(
 WITH _freq AS (
     SELECT CASE
-        WHEN frequency ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency, 'd$', ' day'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency, 'h$', ' hour'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency, '(m|min)$', ' minute'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency, 'w$', ' week'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency, 'mo$', ' month'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
-        WHEN frequency ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency, 'y$', ' year'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'w$', ' week'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'mo$', ' month'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency::VARCHAR, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'y$', ' year'))::INTERVAL
         ELSE frequency::INTERVAL
     END AS _interval
 ),
@@ -1414,7 +1414,7 @@ _computed AS (
         _max_dt,
         _n_dates,
         COALESCE(TRY_CAST(params['initial_train_size'] AS BIGINT), GREATEST((_n_dates / 2)::BIGINT, 1)) AS _init_size,
-        COALESCE(TRY_CAST(params['skip_length'] AS BIGINT), horizon) AS _skip_length,
+        COALESCE(TRY_CAST(params['skip_length'] AS BIGINT), horizon::BIGINT) AS _skip_length,
         COALESCE(LOWER(params['clip_horizon']) IN ('true', '1', 'yes'), FALSE) AS _clip_horizon,
         (SELECT _interval FROM _freq) AS _interval
     FROM date_bounds
@@ -1422,13 +1422,13 @@ _computed AS (
 fold_end_times AS (
     SELECT
         _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) AS train_end
-    FROM _computed, generate_series(1, n_folds)
+    FROM _computed, generate_series(1, n_folds::BIGINT)
     WHERE
         -- When clip_horizon=true: only require at least 1 period of test data
         -- When clip_horizon=false (default): require full horizon of test data
         CASE WHEN _clip_horizon
             THEN _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) + _interval <= _max_dt
-            ELSE _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) + (horizon * _interval) <= _max_dt
+            ELSE _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) + (horizon::BIGINT * _interval) <= _max_dt
         END
 )
 SELECT LIST(train_end ORDER BY train_end) AS training_end_times
@@ -1481,13 +1481,13 @@ WITH _params AS (
 ),
 _freq AS (
     SELECT CASE
-        WHEN frequency ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency, 'd$', ' day'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency, 'h$', ' hour'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency, '(m|min)$', ' minute'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency, 'w$', ' week'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency, 'mo$', ' month'))::INTERVAL
-        WHEN frequency ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
-        WHEN frequency ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency, 'y$', ' year'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'w$', ' week'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'mo$', ' month'))::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency::VARCHAR, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
+        WHEN frequency::VARCHAR ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'y$', ' year'))::INTERVAL
         ELSE frequency::INTERVAL
     END AS _interval
 ),
@@ -1496,7 +1496,7 @@ src AS (
     SELECT
         group_col AS _grp,
         date_trunc('second', date_col::TIMESTAMP) AS _dt,
-        target_col AS _target
+        target_col::DOUBLE AS _target
     FROM query_table(source::VARCHAR)
 ),
 -- Date bounds for fold generation
@@ -1514,7 +1514,7 @@ _computed AS (
         _max_dt,
         _n_dates,
         COALESCE((SELECT _init_train_size FROM _params), GREATEST((_n_dates / 2)::BIGINT, 1)) AS _init_size,
-        COALESCE((SELECT _skip_length_param FROM _params), horizon) AS _skip_length,
+        COALESCE((SELECT _skip_length_param FROM _params), horizon::BIGINT) AS _skip_length,
         (SELECT _clip_horizon FROM _params) AS _clip_horizon,
         (SELECT _interval FROM _freq) AS _interval
     FROM date_bounds
@@ -1523,13 +1523,13 @@ _computed AS (
 fold_end_times AS (
     SELECT
         _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) AS train_end
-    FROM _computed, generate_series(1, folds)
+    FROM _computed, generate_series(1, folds::BIGINT)
     WHERE
         -- When clip_horizon=true: only require at least 1 period of test data
         -- When clip_horizon=false (default): require full horizon of test data
         CASE WHEN _clip_horizon
             THEN _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) + _interval <= _max_dt
-            ELSE _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) + (horizon * _interval) <= _max_dt
+            ELSE _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) + (horizon::BIGINT * _interval) <= _max_dt
         END
 ),
 training_end_times AS (

@@ -2,8 +2,8 @@
 #include "anofox_fcst_ffi.h"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
-
 #include "duckdb/function/scalar_function.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include <algorithm>
 #include <cctype>
 
@@ -204,7 +204,11 @@ void RegisterTsMstlDecompositionFunction(ExtensionLoader &loader) {
         GetMstlResultType(),
         TsMstlDecompositionFunction
     ));
-    loader.RegisterFunction(ts_mstl_set);
+
+    // Mark as internal to hide from duckdb_functions() and deprioritize in autocomplete
+    CreateScalarFunctionInfo info(ts_mstl_set);
+    info.internal = true;
+    loader.RegisterFunction(info);
 }
 
 } // namespace duckdb

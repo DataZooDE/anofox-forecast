@@ -1,0 +1,246 @@
+# name: test/sql/ts_varchar_edge_cases.test
+# description: Regression tests for VARCHAR type inference edge cases
+# group: [sql]
+#
+# These tests ensure macros work correctly when:
+# 1. Value columns are VARCHAR (e.g., from CSV imports)
+# 2. Parameters are passed as different types (string vs integer)
+# 3. Column types need explicit casting through macro parameter indirection
+
+require anofox_forecast
+
+#######################################
+# Setup: Create test data with VARCHAR columns
+# Simulates data from CSV imports where columns default to VARCHAR
+#######################################
+
+statement ok
+CREATE TABLE varchar_data AS
+SELECT
+    'A' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    (10.0 + i * 0.5 + sin(i * 3.14159 / 7) * 2)::VARCHAR AS y  -- VARCHAR column!
+FROM generate_series(0, 59) AS t(i)
+UNION ALL
+SELECT
+    'B' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    (20.0 + i * 0.3 + cos(i * 3.14159 / 7) * 3)::VARCHAR AS y
+FROM generate_series(0, 59) AS t(i);
+
+# Verify column is actually VARCHAR
+query I
+SELECT typeof(y) FROM varchar_data LIMIT 1;
+----
+VARCHAR
+
+#######################################
+# Bug 1: ts_stats with VARCHAR value column
+#######################################
+
+# ts_stats should work with VARCHAR columns (auto-cast to DOUBLE)
+query I
+SELECT COUNT(*) FROM ts_stats('varchar_data', id, ds, y, '1d');
+----
+2
+
+# Verify stats are computed correctly
+query I
+SELECT (stats).length FROM ts_stats('varchar_data', id, ds, y, '1d') WHERE id = 'A';
+----
+60
+
+#######################################
+# Bug 2: ts_forecast_by with VARCHAR target column
+#######################################
+
+# ts_forecast_by should work with VARCHAR target columns
+query I
+SELECT COUNT(*) FROM ts_forecast_by('varchar_data', id, ds, y, 'Naive', 5, MAP([], []));
+----
+10
+
+# Verify forecasts are numeric
+query I
+SELECT COUNT(*) FROM ts_forecast_by('varchar_data', id, ds, y, 'Naive', 3, MAP([], []))
+WHERE point_forecast IS NOT NULL AND typeof(point_forecast) = 'DOUBLE';
+----
+6
+
+#######################################
+# Bug 4: ts_backtest_auto with VARCHAR frequency parameter
+#######################################
+
+# Create properly typed data for backtest
+statement ok
+CREATE TABLE backtest_data AS
+SELECT
+    'A' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    (10.0 + i * 0.5 + sin(i * 3.14159 / 7) * 2)::VARCHAR AS y
+FROM generate_series(0, 99) AS t(i);
+
+# ts_backtest_auto with string frequency parameter (Polars style)
+query I
+SELECT COUNT(*) > 0 FROM ts_backtest_auto(
+    'backtest_data', id, ds, y, 7, 2, '1d',
+    MAP {'method': 'Naive'}
+);
+----
+true
+
+# ts_backtest_auto with INTERVAL style frequency
+query I
+SELECT COUNT(*) > 0 FROM ts_backtest_auto(
+    'backtest_data', id, ds, y, 7, 2, '1 day',
+    MAP {'method': 'Naive'}
+);
+----
+true
+
+#######################################
+# Bug 5: ts_cv_generate_folds with various parameter types
+#######################################
+
+# Create simple date range data
+statement ok
+CREATE TABLE fold_data AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    (i * 1.0)::VARCHAR AS y
+FROM generate_series(0, 99) AS t(i);
+
+# ts_cv_generate_folds with integer horizon
+query I
+SELECT len(training_end_times) FROM ts_cv_generate_folds(
+    'fold_data', ds, 3, 7, '1d', MAP {}
+);
+----
+3
+
+# ts_cv_generate_folds with params containing string values
+query I
+SELECT len(training_end_times) >= 1 FROM ts_cv_generate_folds(
+    'fold_data', ds, 3, 7, '1d',
+    MAP {'initial_train_size': '30', 'skip_length': '7'}
+);
+----
+true
+
+#######################################
+# Bug 6: ts_forecast_exog with VARCHAR columns
+# Note: ts_forecast_exog tests are in ts_forecast_exog.test which handles json dependency
+# The fix (LIST(target_col::DOUBLE ...)) is covered by ts_forecast_exog.test
+#######################################
+
+#######################################
+# ts_data_quality with VARCHAR value column
+#######################################
+
+query I
+SELECT COUNT(*) FROM ts_data_quality('varchar_data', id, ds, y, 10, '1d');
+----
+2
+
+# Verify quality scores are computed
+query I
+SELECT (quality).overall_score IS NOT NULL
+FROM ts_data_quality('varchar_data', id, ds, y, 10, '1d')
+WHERE unique_id = 'A';
+----
+true
+
+#######################################
+# ts_cv_forecast_by with VARCHAR target
+#######################################
+
+# First create CV splits using ts_cv_split with correct column names
+statement ok
+CREATE TABLE cv_splits_varchar AS
+SELECT * FROM ts_cv_split(
+    'varchar_data', id, ds, y,
+    [('2024-02-15'::TIMESTAMP)],
+    7, '1d', MAP {}
+);
+
+# ts_cv_forecast_by should work with VARCHAR target from splits
+# Note: ts_cv_split outputs group_col, date_col, target_col columns
+query I
+SELECT COUNT(*) > 0 FROM ts_cv_forecast_by(
+    'cv_splits_varchar',
+    group_col, date_col, target_col, 'Naive', 5, MAP([], [])
+);
+----
+true
+
+#######################################
+# Mixed type parameter tests
+#######################################
+
+# Test with integer-like string for horizon in ts_forecast_by
+# This ensures the macro handles parameter type variations
+query I
+SELECT COUNT(*) FROM ts_forecast_by('varchar_data', id, ds, y, 'Naive', 5, MAP([], []), '1d');
+----
+10
+
+#######################################
+# ts_mstl_decomposition with VARCHAR
+#######################################
+
+# Create seasonal VARCHAR data
+statement ok
+CREATE TABLE seasonal_varchar AS
+SELECT
+    'S1' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    (100 + sin(i * 2 * 3.14159 / 7) * 20)::VARCHAR AS y
+FROM generate_series(0, 55) AS t(i);
+
+query I
+SELECT (decomposition).trend IS NOT NULL
+FROM ts_mstl_decomposition('seasonal_varchar', id, ds, y, MAP {})
+WHERE id = 'S1';
+----
+true
+
+#######################################
+# ts_detect_changepoints with VARCHAR
+#######################################
+
+statement ok
+CREATE TABLE changepoint_varchar AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    (CASE WHEN i < 30 THEN 10.0 ELSE 50.0 END + random())::VARCHAR AS y
+FROM generate_series(0, 59) AS t(i);
+
+query I
+SELECT COUNT(*) > 0 FROM ts_detect_changepoints(
+    'changepoint_varchar', ds, y,
+    MAP {'hazard_lambda': '100.0'}
+);
+----
+true
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE varchar_data;
+
+statement ok
+DROP TABLE backtest_data;
+
+statement ok
+DROP TABLE fold_data;
+
+statement ok
+DROP TABLE cv_splits_varchar;
+
+statement ok
+DROP TABLE seasonal_varchar;
+
+statement ok
+DROP TABLE changepoint_varchar;
