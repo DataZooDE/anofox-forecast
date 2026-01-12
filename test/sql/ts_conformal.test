@@ -15,9 +15,13 @@ SELECT ABS(ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.1) - 4.6) < 0.5;
 ----
 true
 
-# Higher coverage (95%) should give larger quantile
+# Higher coverage (95%) should give larger quantile (need enough samples to distinguish)
 query I
-SELECT ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.05) > ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.1);
+SELECT ts_conformal_quantile(
+    [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0], 0.05
+) > ts_conformal_quantile(
+    [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0], 0.1
+);
 ----
 true
 
@@ -91,11 +95,11 @@ SELECT
 100.0
 200.0
 
-# Verify method is 'split'
+# Verify method is 'split_conformal'
 query I
 SELECT (ts_conformal_predict([1.0, 2.0, 3.0], [50.0], 0.1)).method;
 ----
-split
+split_conformal
 
 # Lower bound should be less than upper bound
 query I
@@ -114,7 +118,7 @@ true
 query I
 SELECT (ts_conformal_predict_asymmetric([-1.0, -1.0, 0.0, 2.0, 4.0], [100.0], 0.1)).method;
 ----
-asymmetric
+asymmetric_conformal
 
 # Coverage should still match requested coverage
 query I
