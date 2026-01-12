@@ -1,0 +1,386 @@
+# name: test/sql/ts_conformal_coverage.test
+# description: Large-scale conformal prediction coverage validation with 1000 series
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup: Generate 1000 Series Dataset
+#######################################
+
+# Create 1000 series with different characteristics:
+# - Base level varies by series (10-100)
+# - Trend varies (-0.5 to +0.5 per period)
+# - Seasonality (weekly pattern with amplitude 5-20)
+# - Random noise
+
+statement ok
+CREATE TABLE large_scale_ts AS
+WITH series_params AS (
+    SELECT
+        'S' || LPAD(i::VARCHAR, 4, '0') AS series_id,
+        10 + (i % 91) AS base_level,
+        -0.5 + (i % 100) / 100.0 AS trend,
+        5 + (i % 16) AS seasonal_amplitude,
+        1 + (i % 5) AS noise_scale
+    FROM generate_series(1, 1000) AS t(i)
+),
+time_points AS (
+    SELECT i AS t FROM generate_series(0, 99) AS t(i)
+)
+SELECT
+    sp.series_id,
+    '2024-01-01'::DATE + (tp.t * INTERVAL '1 day') AS date,
+    tp.t AS time_idx,
+    GREATEST(0.1,
+        sp.base_level
+        + sp.trend * tp.t
+        + sp.seasonal_amplitude * SIN(2 * PI() * tp.t / 7.0)
+        + sp.noise_scale * (RANDOM() - 0.5) * 2
+    ) AS value
+FROM series_params sp
+CROSS JOIN time_points tp;
+
+# Verify data: 1000 series x 100 time points = 100,000 rows
+query I
+SELECT COUNT(*) FROM large_scale_ts;
+----
+100000
+
+# Verify 1000 unique series
+query I
+SELECT COUNT(DISTINCT series_id) FROM large_scale_ts;
+----
+1000
+
+#######################################
+# Split: Training (70 days) / Calibration (15 days) / Validation (15 days)
+#######################################
+
+# Training set: first 70 days for fitting models
+statement ok
+CREATE TABLE training_data AS
+SELECT * FROM large_scale_ts WHERE time_idx < 70;
+
+# Calibration set: days 70-84 for computing conformity scores
+statement ok
+CREATE TABLE calibration_actuals AS
+SELECT series_id, date, time_idx, value AS actual FROM large_scale_ts WHERE time_idx >= 70 AND time_idx < 85;
+
+# Validation set: days 85-99 for final coverage evaluation
+statement ok
+CREATE TABLE validation_actuals AS
+SELECT series_id, date, time_idx, value AS actual FROM large_scale_ts WHERE time_idx >= 85;
+
+# Verify split sizes
+query III
+SELECT
+    (SELECT COUNT(*) FROM training_data) AS training,
+    (SELECT COUNT(*) FROM calibration_actuals) AS calibration,
+    (SELECT COUNT(*) FROM validation_actuals) AS validation;
+----
+70000
+15000
+15000
+
+#######################################
+# Forecast with NAIVE model
+#######################################
+
+# Generate forecasts on calibration period using NAIVE
+statement ok
+CREATE TABLE naive_calibration_forecasts AS
+SELECT
+    id AS series_id,
+    date,
+    forecast_step,
+    point_forecast AS forecast
+FROM ts_forecast_by(
+    'training_data', series_id, date, value, 'naive', 15, MAP{'frequency': '1d'}
+);
+
+# Verify we have forecasts for all series
+query I
+SELECT COUNT(DISTINCT series_id) FROM naive_calibration_forecasts;
+----
+1000
+
+# Join forecasts with actuals for calibration
+statement ok
+CREATE TABLE naive_calib_with_actuals AS
+SELECT
+    f.series_id,
+    f.date,
+    a.actual,
+    f.forecast,
+    a.actual - f.forecast AS residual
+FROM naive_calibration_forecasts f
+JOIN calibration_actuals a ON f.series_id = a.series_id AND f.forecast_step = (a.time_idx - 69);
+
+#######################################
+# Calibrate Conformal Scores (NAIVE)
+#######################################
+
+# Compute per-series conformity scores for 90% coverage
+statement ok
+CREATE TABLE naive_conformity_scores AS
+SELECT
+    series_id,
+    ts_conformal_quantile(LIST(residual), 0.1) AS conformity_score
+FROM naive_calib_with_actuals
+GROUP BY series_id;
+
+# Verify all series have conformity scores
+query I
+SELECT COUNT(*) FROM naive_conformity_scores;
+----
+1000
+
+#######################################
+# Generate Validation Forecasts (NAIVE)
+#######################################
+
+# Need to forecast from training + calibration data
+statement ok
+CREATE TABLE train_plus_calib AS
+SELECT * FROM large_scale_ts WHERE time_idx < 85;
+
+# Forecast on validation period
+statement ok
+CREATE TABLE naive_validation_forecasts AS
+SELECT
+    id AS series_id,
+    date,
+    forecast_step,
+    point_forecast AS forecast
+FROM ts_forecast_by(
+    'train_plus_calib', series_id, date, value, 'naive', 15, MAP{'frequency': '1d'}
+);
+
+#######################################
+# Apply Conformal Intervals and Check Coverage (NAIVE)
+#######################################
+
+# Join forecasts with conformity scores and actuals
+statement ok
+CREATE TABLE naive_intervals AS
+SELECT
+    f.series_id,
+    f.date,
+    a.actual,
+    f.forecast,
+    cs.conformity_score,
+    f.forecast - cs.conformity_score AS lower,
+    f.forecast + cs.conformity_score AS upper
+FROM naive_validation_forecasts f
+JOIN naive_conformity_scores cs ON f.series_id = cs.series_id
+JOIN validation_actuals a ON f.series_id = a.series_id AND f.forecast_step = (a.time_idx - 84);
+
+# Verify we have intervals for validation period
+query I
+SELECT COUNT(*) FROM naive_intervals;
+----
+15000
+
+# Check coverage: actual should be within [lower, upper] at least 85% of the time
+# Conformal prediction guarantees coverage >= (1 - alpha), so we check lower bound
+# Upper bound can be higher due to conservative intervals with non-stationary data
+query I
+SELECT
+    AVG(CASE WHEN actual >= lower AND actual <= upper THEN 1.0 ELSE 0.0 END) >= 0.85 AS coverage_meets_guarantee
+FROM naive_intervals;
+----
+true
+
+# Report actual coverage for NAIVE (should be at least 85%)
+query I
+SELECT
+    ROUND(AVG(CASE WHEN actual >= lower AND actual <= upper THEN 1.0 ELSE 0.0 END) * 100, 0) >= 85 AS naive_coverage_sufficient
+FROM naive_intervals;
+----
+true
+
+#######################################
+# Forecast with SNAIVE model (Seasonal Naive)
+#######################################
+
+# Generate forecasts on calibration period using SNAIVE
+statement ok
+CREATE TABLE snaive_calibration_forecasts AS
+SELECT
+    id AS series_id,
+    date,
+    forecast_step,
+    point_forecast AS forecast
+FROM ts_forecast_by(
+    'training_data', series_id, date, value, 'snaive', 15, MAP{'frequency': '1d', 'period': 7}
+);
+
+# Join forecasts with actuals for calibration
+statement ok
+CREATE TABLE snaive_calib_with_actuals AS
+SELECT
+    f.series_id,
+    f.date,
+    a.actual,
+    f.forecast,
+    a.actual - f.forecast AS residual
+FROM snaive_calibration_forecasts f
+JOIN calibration_actuals a ON f.series_id = a.series_id AND f.forecast_step = (a.time_idx - 69);
+
+#######################################
+# Calibrate Conformal Scores (SNAIVE)
+#######################################
+
+statement ok
+CREATE TABLE snaive_conformity_scores AS
+SELECT
+    series_id,
+    ts_conformal_quantile(LIST(residual), 0.1) AS conformity_score
+FROM snaive_calib_with_actuals
+GROUP BY series_id;
+
+#######################################
+# Generate Validation Forecasts (SNAIVE)
+#######################################
+
+statement ok
+CREATE TABLE snaive_validation_forecasts AS
+SELECT
+    id AS series_id,
+    date,
+    forecast_step,
+    point_forecast AS forecast
+FROM ts_forecast_by(
+    'train_plus_calib', series_id, date, value, 'snaive', 15, MAP{'frequency': '1d', 'period': 7}
+);
+
+#######################################
+# Apply Conformal Intervals and Check Coverage (SNAIVE)
+#######################################
+
+statement ok
+CREATE TABLE snaive_intervals AS
+SELECT
+    f.series_id,
+    f.date,
+    a.actual,
+    f.forecast,
+    cs.conformity_score,
+    f.forecast - cs.conformity_score AS lower,
+    f.forecast + cs.conformity_score AS upper
+FROM snaive_validation_forecasts f
+JOIN snaive_conformity_scores cs ON f.series_id = cs.series_id
+JOIN validation_actuals a ON f.series_id = a.series_id AND f.forecast_step = (a.time_idx - 84);
+
+# Check coverage: should be at least 85% (conformal guarantee)
+query I
+SELECT
+    AVG(CASE WHEN actual >= lower AND actual <= upper THEN 1.0 ELSE 0.0 END) >= 0.85 AS coverage_meets_guarantee
+FROM snaive_intervals;
+----
+true
+
+# Report actual coverage for SNAIVE (should be at least 85%)
+query I
+SELECT
+    ROUND(AVG(CASE WHEN actual >= lower AND actual <= upper THEN 1.0 ELSE 0.0 END) * 100, 0) >= 85 AS snaive_coverage_sufficient
+FROM snaive_intervals;
+----
+true
+
+#######################################
+# Compare Model Performance
+#######################################
+
+# SNAIVE should have better (smaller) interval widths due to capturing seasonality
+query I
+SELECT
+    (SELECT AVG(upper - lower) FROM naive_intervals) >
+    (SELECT AVG(upper - lower) FROM snaive_intervals) AS snaive_has_tighter_intervals;
+----
+true
+
+# Verify interval widths are reasonable (not too wide or narrow)
+query I
+SELECT
+    AVG(upper - lower) BETWEEN 1 AND 100 AS naive_width_reasonable
+FROM naive_intervals;
+----
+true
+
+query I
+SELECT
+    AVG(upper - lower) BETWEEN 1 AND 100 AS snaive_width_reasonable
+FROM snaive_intervals;
+----
+true
+
+#######################################
+# Per-Series Coverage Distribution
+#######################################
+
+# Check that most series have coverage close to 90%
+# At least 80% of series should have coverage between 60-100%
+query I
+WITH series_coverage AS (
+    SELECT
+        series_id,
+        AVG(CASE WHEN actual >= lower AND actual <= upper THEN 1.0 ELSE 0.0 END) AS coverage
+    FROM naive_intervals
+    GROUP BY series_id
+)
+SELECT
+    AVG(CASE WHEN coverage >= 0.6 THEN 1.0 ELSE 0.0 END) >= 0.8 AS most_series_have_good_coverage
+FROM series_coverage;
+----
+true
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE large_scale_ts;
+
+statement ok
+DROP TABLE training_data;
+
+statement ok
+DROP TABLE calibration_actuals;
+
+statement ok
+DROP TABLE validation_actuals;
+
+statement ok
+DROP TABLE train_plus_calib;
+
+statement ok
+DROP TABLE naive_calibration_forecasts;
+
+statement ok
+DROP TABLE naive_calib_with_actuals;
+
+statement ok
+DROP TABLE naive_conformity_scores;
+
+statement ok
+DROP TABLE naive_validation_forecasts;
+
+statement ok
+DROP TABLE naive_intervals;
+
+statement ok
+DROP TABLE snaive_calibration_forecasts;
+
+statement ok
+DROP TABLE snaive_calib_with_actuals;
+
+statement ok
+DROP TABLE snaive_conformity_scores;
+
+statement ok
+DROP TABLE snaive_validation_forecasts;
+
+statement ok
+DROP TABLE snaive_intervals;
