@@ -174,3 +174,183 @@ SELECT
     (ts_conformal_predict([1.0, 2.0, 3.0], [100.0], 0.2)).coverage = 0.8;
 ----
 true
+
+#######################################
+# Integration Tests - Table Macros
+#######################################
+
+# Setup test data for integration tests
+statement ok
+CREATE TABLE conformal_backtest AS
+SELECT
+    series_id,
+    '2024-01-01'::DATE + (i * INTERVAL '1 day') AS date,
+    100.0 + i + (CASE WHEN series_id = 'A' THEN 10 ELSE 0 END) AS actual,
+    100.0 + i + (CASE WHEN series_id = 'A' THEN 10 ELSE 0 END) + (RANDOM() - 0.5) * 5 AS forecast
+FROM generate_series(0, 29) AS t(i)
+CROSS JOIN (SELECT UNNEST(['A', 'B']) AS series_id) s;
+
+# Add point forecasts for future periods
+statement ok
+CREATE TABLE conformal_forecasts AS
+SELECT
+    series_id,
+    '2024-01-31'::DATE + (i * INTERVAL '1 day') AS date,
+    130.0 + i + (CASE WHEN series_id = 'A' THEN 10 ELSE 0 END) AS point_forecast
+FROM generate_series(0, 6) AS t(i)
+CROSS JOIN (SELECT UNNEST(['A', 'B']) AS series_id) s;
+
+#######################################
+# ts_conformal_calibrate - Calibrate from backtest
+#######################################
+
+# Test calibration returns expected columns
+query I
+SELECT COUNT(*) FROM (
+    DESCRIBE SELECT * FROM ts_conformal_calibrate(
+        'conformal_backtest', actual, forecast, MAP{'alpha': 0.1}
+    )
+);
+----
+3
+
+# Calibration should return positive conformity score
+query I
+SELECT conformity_score > 0 FROM ts_conformal_calibrate(
+    'conformal_backtest', actual, forecast, MAP{'alpha': 0.1}
+);
+----
+true
+
+# Calibration should return correct coverage
+query I
+SELECT coverage = 0.9 FROM ts_conformal_calibrate(
+    'conformal_backtest', actual, forecast, MAP{'alpha': 0.1}
+);
+----
+true
+
+# Calibration should count all residuals
+query I
+SELECT n_residuals = 60 FROM ts_conformal_calibrate(
+    'conformal_backtest', actual, forecast, MAP{'alpha': 0.1}
+);
+----
+true
+
+# Higher alpha (lower coverage) should give smaller conformity score
+query I
+SELECT
+    (SELECT conformity_score FROM ts_conformal_calibrate('conformal_backtest', actual, forecast, MAP{'alpha': 0.2}))
+    <
+    (SELECT conformity_score FROM ts_conformal_calibrate('conformal_backtest', actual, forecast, MAP{'alpha': 0.1}));
+----
+true
+
+#######################################
+# ts_conformal_apply - Apply score to forecasts
+#######################################
+
+# Test apply returns expected number of rows (one per group)
+query I
+SELECT COUNT(*) FROM ts_conformal_apply(
+    'conformal_forecasts', series_id, point_forecast, 5.0
+);
+----
+2
+
+# Test apply returns both groups
+query I
+SELECT COUNT(DISTINCT group_col) FROM ts_conformal_apply(
+    'conformal_forecasts', series_id, point_forecast, 5.0
+);
+----
+2
+
+# Lower bounds should be less than upper bounds
+query I
+SELECT
+    MIN(lower[1]) < MIN(upper[1])
+FROM ts_conformal_apply(
+    'conformal_forecasts', series_id, point_forecast, 5.0
+);
+----
+true
+
+#######################################
+# ts_interval_width - Compute interval widths
+#######################################
+
+# Create intervals table for testing
+statement ok
+CREATE TABLE test_intervals AS
+SELECT
+    series_id,
+    i AS idx,
+    100.0 + i AS lower_bound,
+    110.0 + i + (CASE WHEN series_id = 'A' THEN 5 ELSE 0 END) AS upper_bound
+FROM generate_series(1, 5) AS t(i)
+CROSS JOIN (SELECT UNNEST(['A', 'B']) AS series_id) s;
+
+# Test interval_width returns one row per group
+query I
+SELECT COUNT(*) FROM ts_interval_width(
+    'test_intervals', series_id, lower_bound, upper_bound
+);
+----
+2
+
+# Test interval width calculation
+# Series A: width = 15 (upper - lower = 110+5 - 100 = 15)
+# Series B: width = 10 (upper - lower = 110 - 100 = 10)
+query II
+SELECT group_col, mean_width FROM ts_interval_width(
+    'test_intervals', series_id, lower_bound, upper_bound
+) ORDER BY group_col;
+----
+A	15.0
+B	10.0
+
+# Test n_intervals count
+query II
+SELECT group_col, n_intervals FROM ts_interval_width(
+    'test_intervals', series_id, lower_bound, upper_bound
+) ORDER BY group_col;
+----
+A	5
+B	5
+
+#######################################
+# End-to-End Integration Test
+#######################################
+
+# Full workflow: calibrate → apply → evaluate
+# 1. Calibrate conformity score from backtest
+# 2. Apply to future forecasts
+# 3. Verify intervals are reasonable
+
+query I
+WITH calibration AS (
+    SELECT conformity_score FROM ts_conformal_calibrate(
+        'conformal_backtest', actual, forecast, MAP{'alpha': 0.1}
+    )
+),
+intervals AS (
+    SELECT * FROM ts_conformal_apply(
+        'conformal_forecasts', series_id, point_forecast,
+        (SELECT conformity_score FROM calibration)
+    )
+)
+SELECT COUNT(*) > 0 FROM intervals WHERE lower IS NOT NULL AND upper IS NOT NULL;
+----
+true
+
+# Cleanup
+statement ok
+DROP TABLE conformal_backtest;
+
+statement ok
+DROP TABLE conformal_forecasts;
+
+statement ok
+DROP TABLE test_intervals;
