@@ -4,6 +4,7 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/common/vector_operations/generic_executor.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 
 namespace duckdb {
 
@@ -158,7 +159,10 @@ void RegisterTsStatsFunction(ExtensionLoader &loader) {
         TsStatsFunction
     ));
 
-    loader.RegisterFunction(ts_stats_set);
+    // Mark as internal to hide from duckdb_functions() and deprioritize in autocomplete
+    CreateScalarFunctionInfo info(ts_stats_set);
+    info.internal = true;
+    loader.RegisterFunction(info);
 }
 
 } // namespace duckdb
