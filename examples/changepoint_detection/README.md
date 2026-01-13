@@ -102,15 +102,74 @@ SELECT * FROM ts_detect_changepoints(
 | `hazard_lambda` | `250` | Expected run length between changepoints. Higher = fewer changepoints (more conservative). |
 | `include_probabilities` | `false` | Return probability scores for each point. |
 
-### Tuning `hazard_lambda`
+### Understanding `hazard_lambda`
+
+The `hazard_lambda` parameter controls the algorithm's prior belief about how frequently changepoints occur. It represents the **expected number of observations between changepoints**.
+
+**Intuition**: If you believe demand typically stays stable for ~2 months before shifting, and you have daily data, use `hazard_lambda = 60`.
+
+### Tuning Guide by Data Frequency
+
+| Data Frequency | Conservative | Balanced | Sensitive |
+|----------------|--------------|----------|-----------|
+| **Daily** (retail, web traffic) | 180-365 (6mo-1yr) | 30-90 (1-3mo) | 7-14 (1-2wk) |
+| **Weekly** (inventory, reports) | 26-52 (6mo-1yr) | 8-12 (2-3mo) | 2-4 (2-4wk) |
+| **Monthly** (financial, KPIs) | 12-24 (1-2yr) | 3-6 (quarter-half) | 1-2 (1-2mo) |
+| **Hourly** (IoT, monitoring) | 720-2160 (1-3mo) | 168-336 (1-2wk) | 24-72 (1-3days) |
+
+### Domain-Specific Recommendations
+
+| Domain | Recommended `hazard_lambda` | Rationale |
+|--------|----------------------------|-----------|
+| **Retail demand** | 30-60 | Promotions, seasons cause frequent shifts |
+| **Financial markets** | 60-180 | Regime changes less frequent but impactful |
+| **Manufacturing** | 90-180 | Process changes are deliberate, less frequent |
+| **Web/app metrics** | 14-30 | Product releases, campaigns cause frequent changes |
+| **Sensor/IoT data** | 168-720 | Equipment typically stable, detect failures |
+
+### Quick Reference
 
 ```
-hazard_lambda = 10   -> Expect changepoint every ~10 observations (sensitive)
-hazard_lambda = 50   -> Expect changepoint every ~50 observations (balanced)
-hazard_lambda = 250  -> Expect changepoint every ~250 observations (conservative)
+hazard_lambda = 10   -> Very sensitive (many changepoints)
+hazard_lambda = 30   -> Sensitive (weekly patterns in daily data)
+hazard_lambda = 50   -> Balanced (good starting point)
+hazard_lambda = 100  -> Moderate (monthly patterns in daily data)
+hazard_lambda = 250  -> Conservative (default, major changes only)
+hazard_lambda = 500  -> Very conservative (rare events only)
 ```
 
-**Rule of thumb**: Start with `hazard_lambda = n/10` where `n` is series length, then adjust based on domain knowledge.
+### Sensitivity Analysis
+
+Run detection at multiple thresholds to understand your data:
+
+```sql
+-- Compare changepoint counts at different sensitivities
+WITH sensitivity_test AS (
+    SELECT 'sensitive' AS level, 30 AS lambda
+    UNION ALL SELECT 'balanced', 50
+    UNION ALL SELECT 'conservative', 100
+)
+SELECT
+    s.level,
+    s.lambda,
+    AVG(list_count((changepoints).changepoint_indices)) AS avg_changepoints
+FROM sensitivity_test s,
+LATERAL (
+    SELECT * FROM ts_detect_changepoints_by(
+        'your_table', group_col, date_col, value_col,
+        MAP{'hazard_lambda': s.lambda::VARCHAR}
+    )
+) results
+GROUP BY s.level, s.lambda
+ORDER BY s.lambda;
+```
+
+### Rule of Thumb
+
+1. **Start with `hazard_lambda = n/10`** where `n` is your series length
+2. **Validate**: Plot a few series and check if detected changepoints make sense
+3. **Adjust**: Too many? Increase lambda. Missing obvious ones? Decrease lambda
+4. **Domain knowledge wins**: If you know changes happen quarterly, use ~90 for daily data
 
 ---
 

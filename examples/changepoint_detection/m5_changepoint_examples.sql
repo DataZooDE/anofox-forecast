@@ -115,6 +115,93 @@ FROM sample_changepoints
 ORDER BY n_changepoints DESC;
 
 -- ============================================================================
+-- SECTION 2B: Parameter Sensitivity Analysis
+-- ============================================================================
+-- Understanding how hazard_lambda affects detection is crucial.
+-- Lower values = more sensitive (more changepoints detected)
+-- Higher values = more conservative (fewer changepoints, only major shifts)
+--
+-- Rule of thumb for daily data:
+--   hazard_lambda = 30  -> Detect weekly regime changes
+--   hazard_lambda = 60  -> Detect monthly regime changes
+--   hazard_lambda = 180 -> Detect quarterly regime changes
+--   hazard_lambda = 365 -> Detect yearly regime changes
+-- ============================================================================
+
+SELECT
+    '=== Section 2B: Parameter Sensitivity Analysis ===' AS section;
+
+-- Compare detection at different sensitivity levels
+SELECT 'Comparing hazard_lambda values on sample data...' AS step;
+
+CREATE OR REPLACE TABLE sensitivity_analysis AS
+WITH
+sensitive AS (
+    SELECT
+        item_id,
+        30 AS hazard_lambda,
+        'sensitive' AS sensitivity,
+        list_count(list_filter(
+            ts_detect_changepoints_agg(ds, y, MAP{'hazard_lambda': '30'}),
+            x -> x.is_changepoint
+        )) AS n_changepoints
+    FROM m5_sample
+    GROUP BY item_id
+),
+balanced AS (
+    SELECT
+        item_id,
+        60 AS hazard_lambda,
+        'balanced' AS sensitivity,
+        list_count(list_filter(
+            ts_detect_changepoints_agg(ds, y, MAP{'hazard_lambda': '60'}),
+            x -> x.is_changepoint
+        )) AS n_changepoints
+    FROM m5_sample
+    GROUP BY item_id
+),
+conservative AS (
+    SELECT
+        item_id,
+        120 AS hazard_lambda,
+        'conservative' AS sensitivity,
+        list_count(list_filter(
+            ts_detect_changepoints_agg(ds, y, MAP{'hazard_lambda': '120'}),
+            x -> x.is_changepoint
+        )) AS n_changepoints
+    FROM m5_sample
+    GROUP BY item_id
+)
+SELECT * FROM sensitive
+UNION ALL SELECT * FROM balanced
+UNION ALL SELECT * FROM conservative;
+
+-- Summary: How does sensitivity affect detection?
+SELECT
+    'Sensitivity Analysis Summary' AS analysis,
+    sensitivity,
+    hazard_lambda,
+    COUNT(*) AS n_items,
+    ROUND(AVG(n_changepoints), 1) AS avg_changepoints,
+    MIN(n_changepoints) AS min_changepoints,
+    MAX(n_changepoints) AS max_changepoints,
+    SUM(n_changepoints) AS total_changepoints
+FROM sensitivity_analysis
+GROUP BY sensitivity, hazard_lambda
+ORDER BY hazard_lambda;
+
+-- Per-item comparison across sensitivities
+SELECT
+    'Per-Item Sensitivity Comparison' AS analysis,
+    item_id,
+    MAX(CASE WHEN sensitivity = 'sensitive' THEN n_changepoints END) AS sensitive_30,
+    MAX(CASE WHEN sensitivity = 'balanced' THEN n_changepoints END) AS balanced_60,
+    MAX(CASE WHEN sensitivity = 'conservative' THEN n_changepoints END) AS conservative_120
+FROM sensitivity_analysis
+GROUP BY item_id
+ORDER BY item_id;
+
+-- ============================================================================
 -- SECTION 3: Full Dataset Changepoint Detection
 -- ============================================================================
 
