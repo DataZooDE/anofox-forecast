@@ -102,7 +102,12 @@ Both forms are identical in functionality.
    - [Edge Cleaning](#edge-cleaning)
    - [Missing Value Imputation](#missing-value-imputation)
    - [Differencing](#differencing)
-4. [Seasonality](#seasonality)
+4. [Multi-Key Hierarchy](#multi-key-hierarchy)
+   - [Validate Separator](#validate-separator)
+   - [Combine Keys](#combine-keys)
+   - [Aggregate Hierarchy](#aggregate-hierarchy)
+   - [Split Keys](#split-keys)
+5. [Seasonality](#seasonality)
    - [Period Detection](#period-detection)
    - [Seasonality Analysis](#seasonality-analysis)
    - [Seasonal Strength](#seasonal-strength)
@@ -111,34 +116,34 @@ Both forms are identical in functionality.
    - [Seasonality Change Detection](#seasonality-change-detection)
    - [Instantaneous Period](#instantaneous-period)
    - [Amplitude Modulation Detection](#amplitude-modulation-detection)
-5. [Peak Detection](#peak-detection)
+6. [Peak Detection](#peak-detection)
    - [Detect Peaks](#detect-peaks)
    - [Peak Timing Analysis](#peak-timing-analysis)
-6. [Detrending](#detrending)
+7. [Detrending](#detrending)
    - [Detrend](#detrend)
-7. [Time Series Decomposition](#time-series-decomposition)
+8. [Time Series Decomposition](#time-series-decomposition)
    - [Decompose](#decompose)
    - [MSTL Decomposition](#mstl-decomposition)
-8. [Changepoint Detection](#changepoint-detection)
+9. [Changepoint Detection](#changepoint-detection)
    - [Changepoint Detection Aggregate](#changepoint-detection-aggregate)
-9. [Feature Extraction](#feature-extraction)
+10. [Feature Extraction](#feature-extraction)
    - [Extract Features](#extract-features)
    - [List Available Features](#list-available-features)
    - [Feature Extraction Aggregate](#feature-extraction-aggregate)
    - [Feature Configuration](#feature-configuration)
-10. [Cross-Validation & Backtesting](#cross-validation--backtesting)
+11. [Cross-Validation & Backtesting](#cross-validation--backtesting)
    - [Generate Fold Boundaries](#generate-fold-boundaries)
    - [View Fold Date Ranges](#view-fold-date-ranges)
    - [Create Train/Test Splits](#create-traintest-splits)
    - [Fill Unknown Features](#fill-unknown-features)
    - [Mark Unknown Rows](#mark-unknown-rows)
-11. [Forecasting](#forecasting)
+12. [Forecasting](#forecasting)
    - [ts_forecast (Table Macro)](#anofox_fcst_ts_forecast--ts_forecast-table-macro)
    - [ts_forecast_by (Table Macro)](#anofox_fcst_ts_forecast_by--ts_forecast_by-table-macro)
    - [ts_forecast_exog (Table Macro)](#ts_forecast_exog-table-macro)
    - [ts_forecast_exog_by (Table Macro)](#ts_forecast_exog_by-table-macro)
    - [ts_forecast_agg (Aggregate)](#anofox_fcst_ts_forecast_agg--ts_forecast_agg-aggregate-function)
-12. [Evaluation Metrics](#evaluation-metrics)
+13. [Evaluation Metrics](#evaluation-metrics)
    - [Mean Absolute Error (MAE)](#mean-absolute-error-mae)
    - [Mean Squared Error (MSE)](#mean-squared-error-mse)
    - [Root Mean Squared Error (RMSE)](#root-mean-squared-error-rmse)
@@ -852,6 +857,256 @@ SELECT ts_diff([1.0, 2.0, 4.0, 7.0], 1);
 -- Second differences
 SELECT ts_diff([1.0, 2.0, 4.0, 7.0, 11.0], 2);
 -- Returns: [1.0, 1.0, 1.0]
+```
+
+---
+
+## Multi-Key Hierarchy
+
+When working with hierarchical time series data (e.g., region/store/item), you often need to combine multiple ID columns into a single `unique_id` for forecasting functions. These functions provide a complete workflow for hierarchical time series:
+
+1. **Validate separator** - Check if your chosen separator is safe
+2. **Combine keys** - Create a single unique_id from multiple columns
+3. **Aggregate hierarchy** - Combine keys AND create aggregated series at all levels
+4. **Split keys** - Split unique_id back into original columns after forecasting
+
+### Validate Separator
+
+**ts_validate_separator**
+
+Checks if a separator character exists in any ID column values. Use this before combining keys to avoid malformed unique_ids.
+
+**Signature:**
+```sql
+ts_validate_separator(source, id_col1, [id_col2], [id_col3], [id_col4], [id_col5], separator := '|')
+```
+
+**Parameters:**
+- `source`: Table name (VARCHAR)
+- `id_col1`: First ID column (required)
+- `id_col2-5`: Optional additional ID columns
+- `separator`: Separator to validate (default: `'|'`)
+
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `separator` | VARCHAR | The separator being validated |
+| `is_valid` | BOOLEAN | True if separator is safe to use |
+| `n_conflicts` | INTEGER | Number of values containing separator |
+| `conflicting_values` | VARCHAR[] | List of problematic values |
+| `message` | VARCHAR | Helpful message with alternatives if invalid |
+
+**Example:**
+```sql
+-- Check default separator
+SELECT * FROM ts_validate_separator('sales', region_id, store_id, item_id);
+-- Returns: separator='|', is_valid=true, n_conflicts=0, ...
+
+-- Check if dash is safe (for IDs that might contain pipes)
+SELECT * FROM ts_validate_separator('sales', region_id, store_id, separator := '-');
+```
+
+---
+
+### Combine Keys
+
+**ts_combine_keys**
+
+Combines multiple ID columns into a single `unique_id` column without creating aggregated series. Use this when you just need a single identifier for your time series.
+
+**Signature:**
+```sql
+ts_combine_keys(source, date_col, value_col, id_col1, [id_col2], [id_col3], [id_col4], [id_col5], params := MAP{})
+```
+
+**Parameters:**
+- `source`: Table name (VARCHAR)
+- `date_col`: Date/timestamp column
+- `value_col`: Value column
+- `id_col1`: First ID column (required)
+- `id_col2-5`: Optional additional ID columns
+- `params`: MAP with options:
+  - `'separator'`: Custom separator (default: `'|'`)
+
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `unique_id` | VARCHAR | Combined ID (e.g., `'EU\|STORE001\|SKU42'`) |
+| `date_col` | (input type) | Date column |
+| `value_col` | (input type) | Value column |
+
+**Example:**
+```sql
+-- Basic combination with 3 columns
+SELECT * FROM ts_combine_keys('sales', sale_date, quantity, region_id, store_id, item_id);
+-- unique_id: 'EU|STORE001|SKU42'
+
+-- With 2 columns (store-level granularity)
+SELECT * FROM ts_combine_keys('sales', sale_date, quantity, region_id, store_id);
+-- unique_id: 'EU|STORE001'
+
+-- Custom separator
+SELECT * FROM ts_combine_keys('sales', sale_date, quantity, region_id, store_id,
+    params := MAP{'separator': '-'});
+-- unique_id: 'EU-STORE001'
+```
+
+---
+
+### Aggregate Hierarchy
+
+**ts_aggregate_hierarchy**
+
+Combines ID columns AND creates aggregated series at all hierarchy levels. This is the main function for hierarchical forecasting workflows.
+
+**Signature:**
+```sql
+ts_aggregate_hierarchy(source, date_col, value_col, id_col1, id_col2, id_col3, params := MAP{})
+```
+
+**Parameters:**
+- `source`: Table name (VARCHAR)
+- `date_col`: Date/timestamp column
+- `value_col`: Value column (will be summed at each aggregation level)
+- `id_col1`: First ID column (broadest category, e.g., region)
+- `id_col2`: Second ID column (e.g., store)
+- `id_col3`: Third ID column (finest granularity, e.g., item)
+- `params`: MAP with options:
+  - `'separator'`: Custom separator (default: `'|'`)
+  - `'aggregate_keyword'`: Custom keyword for aggregated levels (default: `'AGGREGATED'`)
+
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `unique_id` | VARCHAR | Combined ID with aggregation markers |
+| `date_col` | (input type) | Date column |
+| `value_col` | DOUBLE | Summed value at this aggregation level |
+
+**Aggregation Levels Created:**
+
+| Level | Pattern | Description |
+|-------|---------|-------------|
+| 0 | `AGGREGATED\|AGGREGATED\|AGGREGATED` | Grand total |
+| 1 | `EU\|AGGREGATED\|AGGREGATED` | Per first column (region) |
+| 2 | `EU\|STORE001\|AGGREGATED` | Per first two columns (store) |
+| 3 | `EU\|STORE001\|SKU42` | Original item level |
+
+**Example:**
+```sql
+-- Create hierarchical time series
+SELECT * FROM ts_aggregate_hierarchy('sales', sale_date, quantity,
+    region_id, store_id, item_id);
+
+-- Results include:
+-- EU|STORE001|SKU42 (original)
+-- EU|STORE001|AGGREGATED (store total)
+-- EU|AGGREGATED|AGGREGATED (region total)
+-- AGGREGATED|AGGREGATED|AGGREGATED (grand total)
+
+-- Count series at each level
+WITH agg AS (
+    SELECT * FROM ts_aggregate_hierarchy('sales', sale_date, quantity,
+        region_id, store_id, item_id)
+)
+SELECT
+    CASE
+        WHEN unique_id = 'AGGREGATED|AGGREGATED|AGGREGATED' THEN 'Grand Total'
+        WHEN unique_id LIKE '%|AGGREGATED|AGGREGATED' THEN 'Per Region'
+        WHEN unique_id LIKE '%|AGGREGATED' THEN 'Per Store'
+        ELSE 'Original Items'
+    END AS level,
+    COUNT(DISTINCT unique_id) AS n_series
+FROM agg
+GROUP BY 1;
+
+-- Custom aggregate keyword
+SELECT DISTINCT unique_id
+FROM ts_aggregate_hierarchy('sales', sale_date, quantity,
+    region_id, store_id, item_id,
+    params := MAP{'aggregate_keyword': 'TOTAL'})
+WHERE unique_id LIKE '%TOTAL%';
+-- Returns: EU|TOTAL|TOTAL, TOTAL|TOTAL|TOTAL, etc.
+```
+
+---
+
+### Split Keys
+
+**ts_split_keys**
+
+Splits a combined unique_id back into its original component columns. Use this after forecasting to restore the hierarchical structure.
+
+**Signature:**
+```sql
+ts_split_keys(source, id_col, date_col, value_col, separator := '|')
+```
+
+**Parameters:**
+- `source`: Table name (VARCHAR)
+- `id_col`: Combined unique_id column
+- `date_col`: Date column
+- `value_col`: Value column (e.g., point_forecast)
+- `separator`: Separator used in unique_id (default: `'|'`)
+
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `id_part_1` | VARCHAR | First component of unique_id |
+| `id_part_2` | VARCHAR | Second component |
+| `id_part_3` | VARCHAR | Third component |
+| `date_col` | (input type) | Date column |
+| `value_col` | (input type) | Value column |
+
+**Example:**
+```sql
+-- After forecasting, split keys back
+SELECT * FROM ts_split_keys('forecast_results', unique_id, forecast_date, point_forecast);
+
+-- Rename columns for clarity
+SELECT
+    id_part_1 AS region_id,
+    id_part_2 AS store_id,
+    id_part_3 AS item_id,
+    date_col AS forecast_date,
+    value_col AS point_forecast
+FROM ts_split_keys('forecasts', id, ds, point_forecast);
+
+-- Filter to specific level (e.g., store-level forecasts only)
+SELECT
+    id_part_1 AS region_id,
+    id_part_2 AS store_id,
+    value_col AS store_forecast
+FROM ts_split_keys('forecasts', id, ds, point_forecast)
+WHERE id_part_3 = 'AGGREGATED' AND id_part_2 != 'AGGREGATED';
+```
+
+---
+
+### Complete Workflow Example
+
+```sql
+-- Step 1: Validate separator
+SELECT * FROM ts_validate_separator('raw_sales', region_id, store_id, item_id);
+
+-- Step 2: Create aggregated time series
+CREATE TABLE prepared_data AS
+SELECT * FROM ts_aggregate_hierarchy('raw_sales', sale_date, quantity,
+    region_id, store_id, item_id);
+
+-- Step 3: Forecast all series (original + aggregated)
+CREATE TABLE forecasts AS
+SELECT * FROM ts_forecast_by('prepared_data', unique_id, date_col, value_col,
+    'AutoETS', 28, MAP{'seasonal_period': '7'});
+
+-- Step 4: Split keys for analysis
+SELECT
+    id_part_1 AS region_id,
+    id_part_2 AS store_id,
+    id_part_3 AS item_id,
+    date_col AS forecast_date,
+    value_col AS point_forecast
+FROM ts_split_keys('forecasts', id, ds, point_forecast)
+ORDER BY region_id, store_id, item_id, forecast_date;
 ```
 
 ---
