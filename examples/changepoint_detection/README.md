@@ -8,11 +8,15 @@ This folder contains runnable SQL examples demonstrating time series changepoint
 
 | File | Description | Data Source |
 |------|-------------|-------------|
+| [`synthetic_changepoint_examples.sql`](synthetic_changepoint_examples.sql) | 5 patterns using generated data | Synthetic |
 | [`m5_changepoint_examples.sql`](m5_changepoint_examples.sql) | Full-scale analysis on M5 dataset (~30k items) | [M5 Competition](https://www.kaggle.com/c/m5-forecasting-accuracy) |
 
 ## Quick Start
 
 ```bash
+# Run synthetic examples
+./build/release/duckdb < examples/changepoint_detection/synthetic_changepoint_examples.sql
+
 # Run M5 changepoint detection (requires httpfs for remote data)
 ./build/release/duckdb -unsigned < examples/changepoint_detection/m5_changepoint_examples.sql
 ```
@@ -95,6 +99,79 @@ SELECT * FROM ts_detect_changepoints(
 
 ---
 
+## Patterns Overview
+
+### Pattern 1: Quick Start (Table Macro)
+
+**Use case:** Detect changepoints using the table macro.
+
+```sql
+SELECT * FROM ts_detect_changepoints('my_data', date_col, value_col, MAP{});
+```
+
+**See:** `synthetic_changepoint_examples.sql` Section 1
+
+---
+
+### Pattern 2: BOCPD Scalar Function
+
+**Use case:** Use the scalar BOCPD function on array data.
+
+```sql
+SELECT _ts_detect_changepoints_bocpd(
+    [1.0, 1.0, 1.0, 10.0, 10.0, 10.0],
+    250.0,  -- hazard_lambda
+    true    -- include_probabilities
+);
+```
+
+**See:** `synthetic_changepoint_examples.sql` Section 2
+
+---
+
+### Pattern 3: Parameter Tuning (hazard_lambda)
+
+**Use case:** Adjust sensitivity with the hazard_lambda parameter.
+
+```sql
+-- More sensitive detection (lower hazard_lambda)
+SELECT * FROM ts_detect_changepoints('data', ts, val, MAP{'hazard_lambda': '100.0'});
+```
+
+**See:** `synthetic_changepoint_examples.sql` Section 3
+
+---
+
+### Pattern 4: Multi-Series Detection (Grouped)
+
+**Use case:** Detect changepoints across multiple time series.
+
+```sql
+SELECT * FROM ts_detect_changepoints_by(
+    'sales', product_id, date, value, MAP{}
+);
+```
+
+**See:** `synthetic_changepoint_examples.sql` Section 4
+
+---
+
+### Pattern 5: Aggregate Function
+
+**Use case:** Use aggregate function for custom grouping.
+
+```sql
+SELECT
+    product_id,
+    ts_detect_changepoints_agg(date, value, MAP{}) AS result
+FROM sales
+GROUP BY product_id;
+```
+
+**See:** `synthetic_changepoint_examples.sql` Section 5
+
+---
+
 ## Parameters
 
 | Parameter | Default | Description |
@@ -138,170 +215,29 @@ hazard_lambda = 250  -> Conservative (default, major changes only)
 hazard_lambda = 500  -> Very conservative (rare events only)
 ```
 
-### Sensitivity Analysis
+---
 
-Run detection at multiple thresholds to understand your data:
+## Return Values
+
+### Table Macros (ts_detect_changepoints, ts_detect_changepoints_by)
+
+Returns a table with columns:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `date_col` | TIMESTAMP | Timestamp |
+| `value_col` | DOUBLE | Original value |
+| `is_changepoint` | BOOLEAN | Changepoint flag |
+| `changepoint_probability` | DOUBLE | Probability |
+
+### Scalar Function (_ts_detect_changepoints_bocpd)
 
 ```sql
--- Compare changepoint counts at different sensitivities
-WITH sensitivity_test AS (
-    SELECT 'sensitive' AS level, 30 AS lambda
-    UNION ALL SELECT 'balanced', 50
-    UNION ALL SELECT 'conservative', 100
+STRUCT(
+    is_changepoint           BOOLEAN[],   -- Per-point flags
+    changepoint_probability  DOUBLE[],    -- Per-point probabilities
+    changepoint_indices      UBIGINT[]    -- Detected indices
 )
-SELECT
-    s.level,
-    s.lambda,
-    AVG(list_count((changepoints).changepoint_indices)) AS avg_changepoints
-FROM sensitivity_test s,
-LATERAL (
-    SELECT * FROM ts_detect_changepoints_by(
-        'your_table', group_col, date_col, value_col,
-        MAP{'hazard_lambda': s.lambda::VARCHAR}
-    )
-) results
-GROUP BY s.level, s.lambda
-ORDER BY s.lambda;
-```
-
-### Rule of Thumb
-
-1. **Start with `hazard_lambda = n/10`** where `n` is your series length
-2. **Validate**: Plot a few series and check if detected changepoints make sense
-3. **Adjust**: Too many? Increase lambda. Missing obvious ones? Decrease lambda
-4. **Domain knowledge wins**: If you know changes happen quarterly, use ~90 for daily data
-
----
-
-## Example Outputs
-
-### Individual Changepoint Detection
-
-```sql
-SELECT
-    item_id,
-    list_count(cp_indices) AS n_changepoints
-FROM ts_detect_changepoints_by('m5_data', item_id, ds, y, MAP{'hazard_lambda': '50'});
-```
-
-| item_id | n_changepoints |
-|---------|----------------|
-| FOODS_1_001_CA_1 | 3 |
-| FOODS_1_002_CA_1 | 5 |
-| HOBBIES_1_001_CA_1 | 1 |
-
-### Changepoint Timing Analysis
-
-```sql
--- When do changepoints occur most frequently?
-SELECT
-    EXTRACT(MONTH FROM cp_date) AS month,
-    COUNT(*) AS n_changepoints
-FROM changepoint_dates
-GROUP BY month
-ORDER BY n_changepoints DESC;
-```
-
-| month | n_changepoints |
-|-------|----------------|
-| 12 | 4521 |
-| 11 | 3892 |
-| 1 | 3654 |
-
-### Category Patterns
-
-```sql
--- Which categories have most volatile demand?
-SELECT
-    category,
-    AVG(n_changepoints) AS avg_changepoints_per_item
-FROM item_changepoints
-GROUP BY category
-ORDER BY avg_changepoints_per_item DESC;
-```
-
-| category | avg_changepoints_per_item |
-|----------|---------------------------|
-| FOODS | 4.2 |
-| HOUSEHOLD | 3.1 |
-| HOBBIES | 2.8 |
-
----
-
-## M5 Dataset Analysis
-
-The M5 example processes the full dataset (~30,490 items) and provides:
-
-1. **Overall statistics**: Total changepoints, items affected, distribution
-2. **Temporal patterns**: When changepoints occur (month, day of week, year)
-3. **Category analysis**: Which product categories are most volatile
-4. **Store analysis**: Which stores experience more demand shifts
-5. **Event detection**: Common dates where many items change (potential external events)
-6. **Volatility classification**: Stable vs. volatile items
-
-### Key Insights from M5 Data
-
-- **Holiday effects**: December and January show elevated changepoint frequency
-- **Category differences**: FOODS items tend to have more changepoints than HOBBIES
-- **Store patterns**: Different stores may have different volatility profiles
-- **Common events**: Multiple items changing on the same date suggests external factors
-
----
-
-## Use Cases
-
-### 1. Demand Planning
-
-Identify when demand regimes change to adjust forecasting models:
-
-```sql
--- Find items that changed recently (last 30 days)
-SELECT item_id, MAX(cp_date) AS last_changepoint
-FROM changepoint_dates
-WHERE cp_date > CURRENT_DATE - INTERVAL 30 DAY
-GROUP BY item_id;
-```
-
-### 2. Anomaly Investigation
-
-Investigate dates where many items changed simultaneously:
-
-```sql
--- Potential external events (many items affected on same date)
-SELECT cp_date, COUNT(DISTINCT item_id) AS items_affected
-FROM changepoint_dates
-GROUP BY cp_date
-HAVING COUNT(DISTINCT item_id) > 100
-ORDER BY items_affected DESC;
-```
-
-### 3. Forecast Model Selection
-
-Use changepoint count to select appropriate models:
-
-```sql
--- Volatile items might need different models than stable ones
-SELECT
-    CASE
-        WHEN n_changepoints = 0 THEN 'stable'
-        WHEN n_changepoints <= 3 THEN 'moderate'
-        ELSE 'volatile'
-    END AS volatility_class,
-    COUNT(*) AS n_items
-FROM item_changepoints
-GROUP BY volatility_class;
-```
-
-### 4. Data Quality Checks
-
-Sudden changepoints might indicate data issues:
-
-```sql
--- Items with suspiciously many changepoints
-SELECT item_id, n_changepoints
-FROM item_changepoints
-WHERE n_changepoints > 10  -- Investigate these
-ORDER BY n_changepoints DESC;
 ```
 
 ---
