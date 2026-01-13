@@ -716,6 +716,185 @@ SELECT
 FROM ci;
 
 -- ============================================================================
+-- Pattern 7: Memory-Efficient CV with ts_cv_split_index
+-- ============================================================================
+-- Use case: Large datasets where duplicating data across folds is expensive.
+-- Compare: ts_cv_split (returns full data) vs ts_cv_split_index (returns only index)
+
+SELECT
+    '=== Pattern 7: Memory-Efficient CV ===' AS section;
+
+-- Create larger sample data
+CREATE OR REPLACE TABLE large_sales AS
+SELECT
+    'STORE' || ((i / 100) + 1)::VARCHAR AS store_id,
+    '2024-01-01'::DATE + INTERVAL ((i % 100)) DAY AS date,
+    (100.0 + (i % 100) * 2 + RANDOM() * 20)::DOUBLE AS sales
+FROM generate_series(1, 500) t(i);
+
+.print '>>> Pattern 7: Memory-Efficient CV with ts_cv_split_index'
+.print '-----------------------------------------------------------------------------'
+.print 'Step 1: Create index-only CV splits (no data columns)'
+
+-- ts_cv_split_index returns ONLY: group_col, date_col, fold_id, split
+-- No target column = less memory for large datasets
+CREATE OR REPLACE TABLE cv_index AS
+SELECT * FROM ts_cv_split_index(
+    'large_sales',
+    store_id,
+    date,
+    ['2024-01-15'::DATE, '2024-01-22'::DATE],  -- 2 folds
+    7,      -- 7-day horizon
+    '1d',   -- daily frequency
+    MAP{}
+);
+
+SELECT 'Index-only splits (note: no sales column):' AS info;
+SELECT fold_id, split, COUNT(*) AS n_rows
+FROM cv_index
+GROUP BY fold_id, split
+ORDER BY fold_id, split;
+
+.print ''
+.print 'Step 2: Hydrate with full data using ts_hydrate_split_full'
+
+-- Join back to get all columns from source
+SELECT 'Hydrated data (with all source columns):' AS info;
+SELECT
+    fold_id, split, store_id, date, sales,
+    _is_test, _train_cutoff
+FROM ts_hydrate_split_full(
+    'cv_index', 'large_sales', store_id, date, MAP{}
+)
+WHERE store_id = 'STORE1'
+ORDER BY fold_id, date
+LIMIT 10;
+
+.print ''
+.print 'When to use:'
+.print '  ts_cv_split       - Small/medium datasets, convenience'
+.print '  ts_cv_split_index - Large datasets, memory efficiency'
+
+-- ============================================================================
+-- Pattern 8: Hydrate Functions Comparison
+-- ============================================================================
+-- Use case: Choose the right safety level for joining CV splits with features.
+-- Compare: ts_hydrate_split vs ts_hydrate_split_full vs ts_hydrate_split_strict
+
+SELECT
+    '=== Pattern 8: Hydrate Functions Comparison ===' AS section;
+
+-- Create features table with known and unknown features
+CREATE OR REPLACE TABLE store_features AS
+SELECT
+    store_id,
+    date,
+    EXTRACT(DOW FROM date)::INTEGER AS day_of_week,  -- KNOWN: calendar feature
+    (RANDOM() * 100)::DOUBLE AS competitor_price     -- UNKNOWN: not available at forecast time
+FROM large_sales;
+
+.print '>>> Pattern 8: Hydrate Functions Comparison'
+.print '-----------------------------------------------------------------------------'
+
+.print ''
+.print 'Option A: ts_hydrate_split - Single column masking (auto)'
+.print '  Use when: One unknown feature to mask'
+
+SELECT 'ts_hydrate_split masks competitor_price in test set:' AS info;
+SELECT
+    fold_id, split, group_col AS store, date_col AS date,
+    ROUND(unknown_col, 2) AS competitor_price
+FROM ts_hydrate_split(
+    'cv_index',
+    'store_features',
+    store_id,
+    date,
+    competitor_price,
+    MAP{'strategy': 'null'}  -- mask to NULL in test
+)
+WHERE group_col = 'STORE1' AND fold_id = 1
+ORDER BY date_col
+LIMIT 5;
+
+.print ''
+.print 'Option B: ts_hydrate_split_full - All columns (manual mask)'
+.print '  Use when: Multiple unknown features, need manual control'
+
+SELECT 'ts_hydrate_split_full returns all columns with _is_test flag:' AS info;
+SELECT
+    fold_id, split, store_id, date,
+    day_of_week,  -- KNOWN: use directly
+    CASE WHEN _is_test THEN NULL ELSE ROUND(competitor_price, 2) END AS competitor_price  -- UNKNOWN: manual mask
+FROM ts_hydrate_split_full(
+    'cv_index', 'store_features', store_id, date, MAP{}
+)
+WHERE store_id = 'STORE1' AND fold_id = 1
+ORDER BY date
+LIMIT 5;
+
+.print ''
+.print 'Option C: ts_hydrate_split_strict - Metadata only (fail-safe)'
+.print '  Use when: Production systems, audit requirements'
+
+SELECT 'ts_hydrate_split_strict returns ONLY metadata:' AS info;
+SELECT
+    hs.fold_id, hs.split, hs.group_col AS store, hs.date_col AS date,
+    hs._is_test
+FROM ts_hydrate_split_strict(
+    'cv_index', 'store_features', store_id, date, MAP{}
+) hs
+WHERE hs.group_col = 'STORE1' AND hs.fold_id = 1
+ORDER BY hs.date_col
+LIMIT 5;
+
+.print ''
+.print 'Choosing a Hydrate Function:'
+.print '  ts_hydrate_split       - Single unknown feature, auto-masked'
+.print '  ts_hydrate_split_full  - Multiple features, manual CASE masking'
+.print '  ts_hydrate_split_strict - Fail-safe, explicit JOIN required'
+
+-- ============================================================================
+-- Pattern 9: Data Leakage Audit
+-- ============================================================================
+-- Use case: Audit CV pipeline to ensure no data leakage.
+
+SELECT
+    '=== Pattern 9: Data Leakage Audit ===' AS section;
+
+.print '>>> Pattern 9: Data Leakage Audit (ts_check_leakage)'
+.print '-----------------------------------------------------------------------------'
+
+-- Prepare data with _is_test flag
+CREATE OR REPLACE TABLE cv_prepared AS
+SELECT
+    fold_id, split, store_id, date,
+    _is_test,
+    day_of_week,
+    CASE WHEN _is_test THEN NULL ELSE competitor_price END AS competitor_price_masked
+FROM ts_hydrate_split_full(
+    'cv_index', 'store_features', store_id, date, MAP{}
+);
+
+.print 'Audit prepared CV data:'
+SELECT * FROM ts_check_leakage(
+    'cv_prepared',
+    _is_test,
+    MAP{}
+);
+
+.print ''
+.print 'When to use ts_check_leakage:'
+.print '  - Before running expensive backtest'
+.print '  - Audit production CV pipelines'
+.print '  - Verify train/test separation'
+
+-- Cleanup pattern 7-9 tables
+DROP TABLE IF EXISTS large_sales;
+DROP TABLE IF EXISTS cv_index;
+DROP TABLE IF EXISTS store_features;
+DROP TABLE IF EXISTS cv_prepared;
+
+-- ============================================================================
 -- CLEANUP
 -- ============================================================================
 
