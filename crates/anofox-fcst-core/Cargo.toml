@@ -28,3 +28,7 @@ fdars-core = { workspace = true, features = ["js"] }
 
 [dev-dependencies]
 approx = "0.5"
+
+[[bench]]
+name = "mstl_perf"
+harness = false
