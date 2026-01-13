@@ -1868,6 +1868,184 @@ WHERE lower_col IS NOT NULL AND upper_col IS NOT NULL
 GROUP BY group_col
 )"},
 
+    // ================================================================================
+    // Multi-key unique_id functions (Issue #78)
+    // ================================================================================
+
+    // ts_validate_separator: Check if separator is safe to use with given ID columns
+    // C++ API: ts_validate_separator(table_name, id_col1, id_col2?, id_col3?, id_col4?, id_col5?, separator?)
+    // Returns: separator, is_valid, n_conflicts, conflicting_values, message
+    {"ts_validate_separator",
+     {"source", "id_col1", nullptr},
+     {{"id_col2", "NULL"}, {"id_col3", "NULL"}, {"id_col4", "NULL"}, {"id_col5", "NULL"},
+      {"separator", "'|'"}, {nullptr, nullptr}},
+R"(
+WITH distinct_vals AS (
+    SELECT DISTINCT id_col1::VARCHAR AS v FROM query_table(source::VARCHAR) WHERE id_col1 IS NOT NULL
+    UNION
+    SELECT DISTINCT id_col2::VARCHAR AS v FROM query_table(source::VARCHAR) WHERE id_col2 IS NOT NULL
+    UNION
+    SELECT DISTINCT id_col3::VARCHAR AS v FROM query_table(source::VARCHAR) WHERE id_col3 IS NOT NULL
+    UNION
+    SELECT DISTINCT id_col4::VARCHAR AS v FROM query_table(source::VARCHAR) WHERE id_col4 IS NOT NULL
+    UNION
+    SELECT DISTINCT id_col5::VARCHAR AS v FROM query_table(source::VARCHAR) WHERE id_col5 IS NOT NULL
+),
+check_result AS (
+    SELECT
+        separator AS _sep,
+        COUNT(*) FILTER (WHERE POSITION(separator IN v) > 0) AS _found_count,
+        LIST(v ORDER BY v) FILTER (WHERE POSITION(separator IN v) > 0) AS _found_values
+    FROM distinct_vals
+)
+SELECT
+    _sep AS separator,
+    _found_count = 0 AS is_valid,
+    _found_count AS n_conflicts,
+    _found_values AS conflicting_values,
+    CASE WHEN _found_count > 0 THEN
+        'Separator ''' || _sep || ''' found in ' || _found_count::VARCHAR || ' value(s). Try: ' ||
+        CASE WHEN _sep != '-' AND POSITION('-' IN _sep) = 0 THEN '''-'', ' ELSE '' END ||
+        CASE WHEN _sep != '.' AND POSITION('.' IN _sep) = 0 THEN '''.'', ' ELSE '' END ||
+        CASE WHEN _sep != '::' AND POSITION('::' IN _sep) = 0 THEN '''::'', ' ELSE '' END ||
+        CASE WHEN _sep != '__' AND POSITION('__' IN _sep) = 0 THEN '''__'', ' ELSE '' END ||
+        CASE WHEN _sep != '#' AND POSITION('#' IN _sep) = 0 THEN '''#''' ELSE '' END
+    ELSE 'Separator is safe to use'
+    END AS message
+FROM check_result
+)"},
+
+    // ts_combine_keys: Combine multiple ID columns into single unique_id (no aggregation)
+    // C++ API: ts_combine_keys(table_name, date_col, value_col, id_col1, id_col2?, id_col3?, id_col4?, id_col5?, params?)
+    // params: separator (default '|')
+    // Returns: unique_id, date_col, value_col
+    {"ts_combine_keys",
+     {"source", "date_col", "value_col", "id_col1", nullptr},
+     {{"id_col2", "NULL"}, {"id_col3", "NULL"}, {"id_col4", "NULL"}, {"id_col5", "NULL"},
+      {"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+SELECT
+    CONCAT_WS(
+        COALESCE(params['separator'], '|'),
+        COALESCE(id_col1::VARCHAR, 'NULL'),
+        id_col2::VARCHAR,
+        id_col3::VARCHAR,
+        id_col4::VARCHAR,
+        id_col5::VARCHAR
+    ) AS unique_id,
+    date_col,
+    value_col
+FROM query_table(source::VARCHAR)
+ORDER BY 1, 2
+)"},
+
+    // ts_aggregate_hierarchy: Combine keys AND create aggregated series at all hierarchy levels
+    // C++ API: ts_aggregate_hierarchy(table_name, date_col, value_col, id_col1, id_col2, id_col3, params?)
+    // params: separator (default '|'), aggregate_keyword (default 'AGGREGATED')
+    // Returns: unique_id, date_col, value_col with original + aggregated series
+    // Generates all aggregation levels by default:
+    //   Level 0: AGGREGATED|AGGREGATED|AGGREGATED (grand total)
+    //   Level 1: id_col1|AGGREGATED|AGGREGATED (per first column)
+    //   Level 2: id_col1|id_col2|AGGREGATED (per first two columns)
+    //   Level 3: id_col1|id_col2|id_col3 (original data)
+    {"ts_aggregate_hierarchy",
+     {"source", "date_col", "value_col", "id_col1", "id_col2", "id_col3", nullptr},
+     {{"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+WITH _params AS (
+    SELECT
+        COALESCE(params['separator'], '|') AS _sep,
+        COALESCE(params['aggregate_keyword'], 'AGGREGATED') AS _agg
+),
+src AS (
+    SELECT
+        date_col AS _dt,
+        value_col::DOUBLE AS _val,
+        COALESCE(id_col1::VARCHAR, 'NULL') AS _id1,
+        COALESCE(id_col2::VARCHAR, 'NULL') AS _id2,
+        COALESCE(id_col3::VARCHAR, 'NULL') AS _id3
+    FROM query_table(source::VARCHAR)
+),
+-- Level 0: Grand total (AGGREGATED|AGGREGATED|AGGREGATED)
+level0 AS (
+    SELECT
+        (SELECT _agg FROM _params) || (SELECT _sep FROM _params) ||
+        (SELECT _agg FROM _params) || (SELECT _sep FROM _params) ||
+        (SELECT _agg FROM _params) AS unique_id,
+        _dt,
+        SUM(_val) AS _val
+    FROM src
+    GROUP BY _dt
+),
+-- Level 1: Per id_col1 (id1|AGGREGATED|AGGREGATED)
+level1 AS (
+    SELECT
+        _id1 || (SELECT _sep FROM _params) ||
+        (SELECT _agg FROM _params) || (SELECT _sep FROM _params) ||
+        (SELECT _agg FROM _params) AS unique_id,
+        _dt,
+        SUM(_val) AS _val
+    FROM src
+    GROUP BY _id1, _dt
+),
+-- Level 2: Per id_col1+id_col2 (id1|id2|AGGREGATED)
+level2 AS (
+    SELECT
+        _id1 || (SELECT _sep FROM _params) ||
+        _id2 || (SELECT _sep FROM _params) ||
+        (SELECT _agg FROM _params) AS unique_id,
+        _dt,
+        SUM(_val) AS _val
+    FROM src
+    GROUP BY _id1, _id2, _dt
+),
+-- Level 3: Original data (id1|id2|id3)
+original AS (
+    SELECT
+        _id1 || (SELECT _sep FROM _params) ||
+        _id2 || (SELECT _sep FROM _params) ||
+        _id3 AS unique_id,
+        _dt,
+        _val
+    FROM src
+)
+SELECT * FROM (
+    SELECT unique_id, _dt AS date_col, _val AS value_col FROM level0
+    UNION ALL
+    SELECT unique_id, _dt AS date_col, _val AS value_col FROM level1
+    UNION ALL
+    SELECT unique_id, _dt AS date_col, _val AS value_col FROM level2
+    UNION ALL
+    SELECT unique_id, _dt AS date_col, _val AS value_col FROM original
+) _combined
+ORDER BY 1, 2
+)"},
+
+    // ts_split_keys: Split combined unique_id back into original columns (reverse of ts_aggregate_hierarchy)
+    // C++ API: ts_split_keys(table_name, id_col, date_col, value_col, separator?)
+    // Returns: id_part_1, id_part_2, id_part_3, date_col, value_col
+    // Handles AGGREGATED keyword - preserved as-is in output
+    // Use column rename if you need different column names: SELECT id_part_1 AS region, id_part_2 AS store, ...
+    {"ts_split_keys",
+     {"source", "id_col", "date_col", "value_col", nullptr},
+     {{"separator", "'|'"}, {nullptr, nullptr}},
+R"(
+WITH src AS (
+    SELECT
+        STRING_SPLIT(id_col::VARCHAR, separator) AS _parts,
+        date_col AS _dt,
+        value_col AS _val
+    FROM query_table(source::VARCHAR)
+)
+SELECT
+    _parts[1] AS id_part_1,
+    _parts[2] AS id_part_2,
+    _parts[3] AS id_part_3,
+    _dt AS date_col,
+    _val AS value_col
+FROM src
+)"},
+
     // Sentinel
     {nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}
 };
