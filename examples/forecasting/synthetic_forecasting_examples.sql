@@ -1,0 +1,329 @@
+-- =============================================================================
+-- Forecasting Examples - Synthetic Data
+-- =============================================================================
+-- This script demonstrates time series forecasting with the anofox-forecast
+-- extension using 8 patterns from basic to advanced.
+--
+-- Run: ./build/release/duckdb < examples/forecasting/synthetic_forecasting_examples.sql
+-- =============================================================================
+
+-- Load extension
+LOAD anofox_forecast;
+
+-- Enable progress bar for long operations
+SET enable_progress_bar = true;
+
+.print '============================================================================='
+.print 'FORECASTING EXAMPLES - Synthetic Data'
+.print '============================================================================='
+
+-- =============================================================================
+-- SECTION 1: Quick Start (Basic Forecast)
+-- =============================================================================
+-- Use case: Generate forecasts for a single time series.
+
+.print ''
+.print '>>> SECTION 1: Quick Start (Basic Forecast)'
+.print '-----------------------------------------------------------------------------'
+
+-- Create simple time series data
+CREATE OR REPLACE TABLE single_series AS
+SELECT
+    '2024-01-01'::DATE + INTERVAL (i) DAY AS date,
+    100 + i * 0.5 + 10 * SIN(2 * PI() * i / 7) + (RANDOM() - 0.5) * 10 AS revenue
+FROM generate_series(0, 99) AS t(i);
+
+.print 'Input data (last 5 rows):'
+SELECT * FROM single_series ORDER BY date DESC LIMIT 5;
+
+-- Basic forecast using ts_forecast (single series)
+.print ''
+.print 'Forecast with AutoETS (12 periods):'
+SELECT * FROM ts_forecast('single_series', date, revenue, 'AutoETS', 12, MAP{});
+
+-- =============================================================================
+-- SECTION 2: Multi-Series Forecasting
+-- =============================================================================
+-- Use case: Forecast multiple products/stores in one query.
+
+.print ''
+.print '>>> SECTION 2: Multi-Series Forecasting'
+.print '-----------------------------------------------------------------------------'
+
+-- Create multi-series data
+CREATE OR REPLACE TABLE multi_series AS
+SELECT
+    CASE WHEN i % 3 = 0 THEN 'Product_A'
+         WHEN i % 3 = 1 THEN 'Product_B'
+         ELSE 'Product_C' END AS product_id,
+    '2024-01-01'::DATE + INTERVAL (i / 3) DAY AS date,
+    CASE WHEN i % 3 = 0 THEN 100 + (i / 3) * 0.3 + 15 * SIN(2 * PI() * (i / 3) / 7)
+         WHEN i % 3 = 1 THEN 200 + (i / 3) * 0.5 + 20 * SIN(2 * PI() * (i / 3) / 7)
+         ELSE 150 + (i / 3) * 0.2 + 10 * COS(2 * PI() * (i / 3) / 7) END
+    + (RANDOM() - 0.5) * 8 AS quantity
+FROM generate_series(0, 299) AS t(i);
+
+.print 'Series counts:'
+SELECT product_id, COUNT(*) AS n_rows FROM multi_series GROUP BY product_id ORDER BY product_id;
+
+-- Forecast all products at once
+.print ''
+.print 'Forecast with ETS (7 periods, all products):'
+SELECT * FROM ts_forecast_by(
+    'multi_series', product_id, date, quantity,
+    'ETS', 7, MAP{}
+) ORDER BY product_id, ds;
+
+-- =============================================================================
+-- SECTION 3: Model Selection (Baseline to Advanced)
+-- =============================================================================
+-- Use case: Compare simple baselines to sophisticated models.
+
+.print ''
+.print '>>> SECTION 3: Model Comparison'
+.print '-----------------------------------------------------------------------------'
+
+-- Create trend + seasonal data
+CREATE OR REPLACE TABLE comparison_series AS
+SELECT
+    'series_1' AS id,
+    '2024-01-01'::DATE + INTERVAL (i) DAY AS date,
+    100 + i * 0.8 + 25 * SIN(2 * PI() * i / 7) + (RANDOM() - 0.5) * 5 AS value
+FROM generate_series(0, 59) AS t(i);
+
+.print 'Naive model (baseline):'
+SELECT * FROM ts_forecast_by('comparison_series', id, date, value, 'Naive', 7, MAP{});
+
+.print ''
+.print 'SeasonalNaive model (period=7):'
+SELECT * FROM ts_forecast_by('comparison_series', id, date, value, 'SeasonalNaive', 7, MAP{'seasonal_period': '7'});
+
+.print ''
+.print 'AutoETS model (automatic selection):'
+SELECT * FROM ts_forecast_by('comparison_series', id, date, value, 'AutoETS', 7, MAP{});
+
+.print ''
+.print 'AutoARIMA model (automatic selection):'
+SELECT * FROM ts_forecast_by('comparison_series', id, date, value, 'AutoARIMA', 7, MAP{});
+
+-- =============================================================================
+-- SECTION 4: Seasonal Models
+-- =============================================================================
+-- Use case: Data with clear weekly/monthly/yearly patterns.
+
+.print ''
+.print '>>> SECTION 4: Seasonal Models'
+.print '-----------------------------------------------------------------------------'
+
+-- Create strongly seasonal data
+CREATE OR REPLACE TABLE seasonal_data AS
+SELECT
+    'store_1' AS store_id,
+    '2024-01-01'::DATE + INTERVAL (i) DAY AS week,
+    500 + i * 2 + 100 * SIN(2 * PI() * i / 7) + (RANDOM() - 0.5) * 20 AS revenue
+FROM generate_series(0, 55) AS t(i);
+
+.print 'Holt-Winters (seasonal_period=7):'
+SELECT * FROM ts_forecast_by(
+    'seasonal_data', store_id, week, revenue,
+    'HoltWinters', 14,
+    MAP{'seasonal_period': '7'}
+);
+
+.print ''
+.print 'SeasonalES (seasonal_period=7):'
+SELECT * FROM ts_forecast_by(
+    'seasonal_data', store_id, week, revenue,
+    'SeasonalES', 14,
+    MAP{'seasonal_period': '7'}
+);
+
+-- =============================================================================
+-- SECTION 5: Multiple Seasonality
+-- =============================================================================
+-- Use case: Hourly data with daily AND weekly patterns.
+
+.print ''
+.print '>>> SECTION 5: Multiple Seasonality (MSTL)'
+.print '-----------------------------------------------------------------------------'
+
+-- Create data with dual seasonality (daily + weekly patterns)
+CREATE OR REPLACE TABLE dual_seasonal AS
+SELECT
+    'sensor_1' AS sensor_id,
+    '2024-01-01 00:00:00'::TIMESTAMP + INTERVAL (i) HOUR AS timestamp,
+    100
+    + 30 * SIN(2 * PI() * i / 24)      -- daily pattern (period=24 hours)
+    + 15 * SIN(2 * PI() * i / 168)     -- weekly pattern (period=168 hours)
+    + (RANDOM() - 0.5) * 10 AS reading
+FROM generate_series(0, 503) AS t(i);  -- 3 weeks of hourly data
+
+.print 'Input summary:'
+SELECT sensor_id, COUNT(*) AS n_hours, MIN(timestamp) AS start, MAX(timestamp) AS end
+FROM dual_seasonal GROUP BY sensor_id;
+
+.print ''
+.print 'MSTL forecast (daily + weekly seasonality):'
+SELECT * FROM ts_forecast_by(
+    'dual_seasonal', sensor_id, timestamp, reading,
+    'MSTL', 48,
+    MAP{'seasonal_periods': '[24, 168]'}
+) LIMIT 10;
+
+-- =============================================================================
+-- SECTION 6: Intermittent Demand
+-- =============================================================================
+-- Use case: Spare parts, luxury items, or irregular sales.
+
+.print ''
+.print '>>> SECTION 6: Intermittent Demand Models'
+.print '-----------------------------------------------------------------------------'
+
+-- Create sparse demand data (many zeros)
+CREATE OR REPLACE TABLE spare_parts AS
+SELECT
+    'SKU_001' AS sku,
+    '2024-01-01'::DATE + INTERVAL (i) DAY AS date,
+    CASE
+        WHEN RANDOM() < 0.3 THEN FLOOR(1 + RANDOM() * 5)::INTEGER  -- 30% chance of demand
+        ELSE 0
+    END AS demand
+FROM generate_series(0, 89) AS t(i);
+
+.print 'Demand distribution:'
+SELECT sku, COUNT(*) AS total_days,
+       SUM(CASE WHEN demand = 0 THEN 1 ELSE 0 END) AS zero_days,
+       SUM(CASE WHEN demand > 0 THEN 1 ELSE 0 END) AS demand_days,
+       ROUND(AVG(demand), 2) AS avg_demand
+FROM spare_parts GROUP BY sku;
+
+.print ''
+.print 'CrostonClassic forecast:'
+SELECT * FROM ts_forecast_by('spare_parts', sku, date, demand, 'CrostonClassic', 14, MAP{});
+
+.print ''
+.print 'CrostonSBA forecast (Syntetos-Boylan Approximation):'
+SELECT * FROM ts_forecast_by('spare_parts', sku, date, demand, 'CrostonSBA', 14, MAP{});
+
+.print ''
+.print 'ADIDA forecast (Aggregate-Disaggregate):'
+SELECT * FROM ts_forecast_by('spare_parts', sku, date, demand, 'ADIDA', 14, MAP{});
+
+-- =============================================================================
+-- SECTION 7: Exogenous Variables
+-- =============================================================================
+-- Use case: Include external factors (temperature, promotions, holidays).
+
+.print ''
+.print '>>> SECTION 7: Exogenous Variables'
+.print '-----------------------------------------------------------------------------'
+
+-- Create historical data with external variables
+CREATE OR REPLACE TABLE sales_with_features AS
+SELECT
+    '2024-01-01'::DATE + INTERVAL (i) DAY AS date,
+    100 + i * 0.5 + 15 * temp + 30 * promo + (RANDOM() - 0.5) * 10 AS amount,
+    temp,
+    promo
+FROM (
+    SELECT
+        i,
+        0.8 + (RANDOM() - 0.5) * 0.4 AS temp,  -- temperature factor
+        CASE WHEN RANDOM() < 0.2 THEN 1 ELSE 0 END AS promo  -- 20% promo days
+    FROM generate_series(0, 59) AS t(i)
+) AS data;
+
+-- Create future exogenous values (known in advance)
+CREATE OR REPLACE TABLE future_features AS
+SELECT
+    '2024-01-01'::DATE + INTERVAL (60 + i) DAY AS date,
+    0.9 + (RANDOM() - 0.5) * 0.3 AS temp,     -- forecast temperature
+    CASE WHEN i IN (2, 5) THEN 1 ELSE 0 END AS promo  -- planned promotions
+FROM generate_series(0, 6) AS t(i);
+
+.print 'Historical data (last 5 rows):'
+SELECT * FROM sales_with_features ORDER BY date DESC LIMIT 5;
+
+.print ''
+.print 'Future features:'
+SELECT * FROM future_features ORDER BY date;
+
+.print ''
+.print 'Forecast with exogenous variables (AutoARIMA):'
+SELECT * FROM ts_forecast_exog(
+    'sales_with_features', date, amount,
+    'temp,promo',
+    'future_features',
+    'AutoARIMA', 7, MAP{}
+);
+
+-- =============================================================================
+-- SECTION 8: Aggregate Function (Custom Grouping)
+-- =============================================================================
+-- Use case: Complex GROUP BY logic not covered by table macros.
+
+.print ''
+.print '>>> SECTION 8: Aggregate Function (ts_forecast_agg)'
+.print '-----------------------------------------------------------------------------'
+
+-- Create hierarchical sales data
+CREATE OR REPLACE TABLE hierarchical_sales AS
+SELECT
+    CASE WHEN i % 4 < 2 THEN 'East' ELSE 'West' END AS region,
+    CASE WHEN i % 2 = 0 THEN 'Electronics' ELSE 'Clothing' END AS category,
+    '2024-01-01'::DATE + INTERVAL (i / 4) DAY AS date,
+    100 + (i / 4) * 0.5 + 20 * SIN(2 * PI() * (i / 4) / 7)
+    + (RANDOM() - 0.5) * 15 AS revenue
+FROM generate_series(0, 239) AS t(i);
+
+.print 'Data by region and category:'
+SELECT region, category, COUNT(*) AS n_rows, ROUND(SUM(revenue), 0) AS total_revenue
+FROM hierarchical_sales
+GROUP BY region, category
+ORDER BY region, category;
+
+-- Use aggregate function for custom grouping
+.print ''
+.print 'Forecasts by region + category (using aggregate function):'
+SELECT
+    region,
+    category,
+    ts_forecast_agg(date, revenue, 'ETS', 7, MAP{}) AS forecast
+FROM hierarchical_sales
+GROUP BY region, category
+ORDER BY region, category;
+
+-- Extract forecast components
+.print ''
+.print 'Extracted point forecasts:'
+SELECT
+    region,
+    category,
+    (ts_forecast_agg(date, revenue, 'ETS', 7, MAP{})).point_forecast AS forecasts
+FROM hierarchical_sales
+GROUP BY region, category
+ORDER BY region, category;
+
+-- =============================================================================
+-- CLEANUP
+-- =============================================================================
+
+.print ''
+.print '>>> CLEANUP'
+.print '-----------------------------------------------------------------------------'
+
+DROP TABLE IF EXISTS single_series;
+DROP TABLE IF EXISTS multi_series;
+DROP TABLE IF EXISTS comparison_series;
+DROP TABLE IF EXISTS seasonal_data;
+DROP TABLE IF EXISTS dual_seasonal;
+DROP TABLE IF EXISTS spare_parts;
+DROP TABLE IF EXISTS sales_with_features;
+DROP TABLE IF EXISTS future_features;
+DROP TABLE IF EXISTS hierarchical_sales;
+
+.print 'All tables cleaned up.'
+.print ''
+.print '============================================================================='
+.print 'FORECASTING EXAMPLES COMPLETE'
+.print '============================================================================='
