@@ -4,6 +4,7 @@
 //! and forecasting functions.
 
 pub mod changepoint;
+pub mod conformal;
 pub mod decomposition;
 pub mod detrending;
 pub mod error;
@@ -22,6 +23,11 @@ pub mod stats;
 // Re-exports for convenience
 pub use changepoint::{
     detect_changepoints, detect_changepoints_bocpd, BocpdResult, ChangepointResult, CostFunction,
+};
+pub use conformal::{
+    conformal_intervals, conformal_predict, conformal_predict_adaptive,
+    conformal_predict_asymmetric, conformal_predict_multi, conformal_quantile, interval_width,
+    mean_interval_width, ConformalInterval, ConformalMultiResult, ConformalResult,
 };
 pub use decomposition::{mstl_decompose, InsufficientDataMode, MstlDecomposition};
 pub use detrending::{

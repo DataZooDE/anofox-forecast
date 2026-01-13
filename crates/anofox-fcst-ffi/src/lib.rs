@@ -3925,6 +3925,454 @@ pub unsafe extern "C" fn anofox_ts_fill_nulls_interpolate(
 }
 
 // ============================================================================
+// Conformal Prediction Functions
+// ============================================================================
+
+/// Compute the conformity score (quantile) from calibration residuals.
+///
+/// Returns the (1 - alpha) quantile of absolute residuals for conformal prediction.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformal_quantile(
+    residuals: *const c_double,
+    validity: *const u64,
+    length: size_t,
+    alpha: c_double,
+    out_result: *mut c_double,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if check_null_pointers(out_error, &[residuals as *const core::ffi::c_void]) {
+        return false;
+    }
+
+    if out_result.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null output pointer");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let series = build_series(residuals, validity, length);
+        let values: Vec<f64> = series.iter().filter_map(|v| *v).collect();
+        anofox_fcst_core::conformal_quantile(&values, alpha)
+    }));
+
+    match result {
+        Ok(Ok(quantile)) => {
+            *out_result = quantile;
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in conformal_quantile",
+            );
+            false
+        }
+    }
+}
+
+/// Apply a conformity score to point forecasts to create prediction intervals.
+///
+/// Creates symmetric intervals: [forecast - score, forecast + score].
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformal_intervals(
+    forecasts: *const c_double,
+    length: size_t,
+    conformity_score: c_double,
+    out_lower: *mut *mut c_double,
+    out_upper: *mut *mut c_double,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if forecasts.is_null() || out_lower.is_null() || out_upper.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let forecast_slice = std::slice::from_raw_parts(forecasts, length);
+        anofox_fcst_core::conformal_intervals(forecast_slice, conformity_score)
+    }));
+
+    match result {
+        Ok((lower, upper)) => {
+            *out_lower = vec_to_c_double_array(&lower);
+            *out_upper = vec_to_c_double_array(&upper);
+            true
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in conformal_intervals",
+            );
+            false
+        }
+    }
+}
+
+/// Perform split conformal prediction in one step.
+///
+/// Computes conformity score from residuals and applies to forecasts.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformal_predict(
+    residuals: *const c_double,
+    residuals_validity: *const u64,
+    residuals_length: size_t,
+    forecasts: *const c_double,
+    forecasts_length: size_t,
+    alpha: c_double,
+    out_result: *mut ConformalResultFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if residuals.is_null() || forecasts.is_null() || out_result.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let residual_series = build_series(residuals, residuals_validity, residuals_length);
+        let residual_values: Vec<f64> = residual_series.iter().filter_map(|v| *v).collect();
+        let forecast_slice = std::slice::from_raw_parts(forecasts, forecasts_length);
+        anofox_fcst_core::conformal_predict(&residual_values, forecast_slice, alpha)
+    }));
+
+    match result {
+        Ok(Ok(conf_result)) => {
+            fill_conformal_result(out_result, &conf_result);
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in conformal_predict",
+            );
+            false
+        }
+    }
+}
+
+/// Perform conformal prediction with multiple coverage levels.
+///
+/// Computes prediction intervals at multiple alpha levels simultaneously.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformal_predict_multi(
+    residuals: *const c_double,
+    residuals_validity: *const u64,
+    residuals_length: size_t,
+    forecasts: *const c_double,
+    forecasts_length: size_t,
+    alphas: *const c_double,
+    n_alphas: size_t,
+    out_result: *mut ConformalMultiResultFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if residuals.is_null() || forecasts.is_null() || alphas.is_null() || out_result.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let residual_series = build_series(residuals, residuals_validity, residuals_length);
+        let residual_values: Vec<f64> = residual_series.iter().filter_map(|v| *v).collect();
+        let forecast_slice = std::slice::from_raw_parts(forecasts, forecasts_length);
+        let alpha_slice = std::slice::from_raw_parts(alphas, n_alphas);
+        anofox_fcst_core::conformal_predict_multi(&residual_values, forecast_slice, alpha_slice)
+    }));
+
+    match result {
+        Ok(Ok(multi_result)) => {
+            fill_conformal_multi_result(out_result, &multi_result);
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in conformal_predict_multi",
+            );
+            false
+        }
+    }
+}
+
+/// Perform locally-adaptive conformal prediction.
+///
+/// Scales intervals based on local difficulty estimates.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformal_predict_adaptive(
+    residuals: *const c_double,
+    residuals_validity: *const u64,
+    residuals_length: size_t,
+    forecasts: *const c_double,
+    difficulty: *const c_double,
+    forecasts_length: size_t,
+    alpha: c_double,
+    out_result: *mut ConformalResultFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if residuals.is_null() || forecasts.is_null() || difficulty.is_null() || out_result.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let residual_series = build_series(residuals, residuals_validity, residuals_length);
+        let residual_values: Vec<f64> = residual_series.iter().filter_map(|v| *v).collect();
+        let forecast_slice = std::slice::from_raw_parts(forecasts, forecasts_length);
+        let difficulty_slice = std::slice::from_raw_parts(difficulty, forecasts_length);
+        anofox_fcst_core::conformal_predict_adaptive(
+            &residual_values,
+            forecast_slice,
+            difficulty_slice,
+            alpha,
+        )
+    }));
+
+    match result {
+        Ok(Ok(conf_result)) => {
+            fill_conformal_result(out_result, &conf_result);
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in conformal_predict_adaptive",
+            );
+            false
+        }
+    }
+}
+
+/// Perform asymmetric conformal prediction.
+///
+/// Uses separate quantiles for positive and negative residuals.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformal_predict_asymmetric(
+    residuals: *const c_double,
+    residuals_validity: *const u64,
+    residuals_length: size_t,
+    forecasts: *const c_double,
+    forecasts_length: size_t,
+    alpha: c_double,
+    out_result: *mut ConformalResultFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if residuals.is_null() || forecasts.is_null() || out_result.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let residual_series = build_series(residuals, residuals_validity, residuals_length);
+        let residual_values: Vec<f64> = residual_series.iter().filter_map(|v| *v).collect();
+        let forecast_slice = std::slice::from_raw_parts(forecasts, forecasts_length);
+        anofox_fcst_core::conformal_predict_asymmetric(&residual_values, forecast_slice, alpha)
+    }));
+
+    match result {
+        Ok(Ok(conf_result)) => {
+            fill_conformal_result(out_result, &conf_result);
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in conformal_predict_asymmetric",
+            );
+            false
+        }
+    }
+}
+
+/// Compute interval width (upper - lower) for each prediction.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_interval_width(
+    lower: *const c_double,
+    upper: *const c_double,
+    length: size_t,
+    out_widths: *mut *mut c_double,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if lower.is_null() || upper.is_null() || out_widths.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let lower_slice = std::slice::from_raw_parts(lower, length);
+        let upper_slice = std::slice::from_raw_parts(upper, length);
+        anofox_fcst_core::interval_width(lower_slice, upper_slice)
+    }));
+
+    match result {
+        Ok(widths) => {
+            *out_widths = vec_to_c_double_array(&widths);
+            true
+        }
+        Err(_) => {
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in interval_width");
+            false
+        }
+    }
+}
+
+/// Compute mean interval width.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_mean_interval_width(
+    lower: *const c_double,
+    upper: *const c_double,
+    length: size_t,
+    out_result: *mut c_double,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if lower.is_null() || upper.is_null() || out_result.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let lower_slice = std::slice::from_raw_parts(lower, length);
+        let upper_slice = std::slice::from_raw_parts(upper, length);
+        anofox_fcst_core::mean_interval_width(lower_slice, upper_slice)
+    }));
+
+    match result {
+        Ok(mean_width) => {
+            *out_result = mean_width;
+            true
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in mean_interval_width",
+            );
+            false
+        }
+    }
+}
+
+/// Helper function to fill a ConformalResultFFI from a core ConformalResult.
+unsafe fn fill_conformal_result(
+    out: *mut ConformalResultFFI,
+    result: &anofox_fcst_core::ConformalResult,
+) {
+    (*out).point = vec_to_c_double_array(&result.point);
+    (*out).lower = vec_to_c_double_array(&result.lower);
+    (*out).upper = vec_to_c_double_array(&result.upper);
+    (*out).n_forecasts = result.point.len();
+    (*out).coverage = result.coverage;
+    (*out).conformity_score = result.conformity_score;
+
+    // Copy method name
+    let method_bytes = result.method.as_bytes();
+    let len = method_bytes.len().min(31);
+    for (i, &b) in method_bytes[..len].iter().enumerate() {
+        (*out).method[i] = b as c_char;
+    }
+    (*out).method[len] = 0; // Null terminator
+}
+
+/// Helper function to fill a ConformalMultiResultFFI from a core ConformalMultiResult.
+unsafe fn fill_conformal_multi_result(
+    out: *mut ConformalMultiResultFFI,
+    result: &anofox_fcst_core::ConformalMultiResult,
+) {
+    let n_forecasts = result.point.len();
+    let n_levels = result.intervals.len();
+
+    (*out).point = vec_to_c_double_array(&result.point);
+    (*out).n_forecasts = n_forecasts;
+    (*out).n_levels = n_levels;
+
+    // Allocate and fill coverage levels and conformity scores
+    (*out).coverage_levels = alloc_double_array(n_levels);
+    (*out).conformity_scores = alloc_double_array(n_levels);
+
+    for (i, interval) in result.intervals.iter().enumerate() {
+        *(*out).coverage_levels.add(i) = interval.coverage;
+        *(*out).conformity_scores.add(i) = interval.conformity_score;
+    }
+
+    // Flatten lower and upper bounds (level-major order)
+    let total_size = n_forecasts * n_levels;
+    (*out).lower = alloc_double_array(total_size);
+    (*out).upper = alloc_double_array(total_size);
+
+    for (level_idx, interval) in result.intervals.iter().enumerate() {
+        for (forecast_idx, (&l, &u)) in interval.lower.iter().zip(interval.upper.iter()).enumerate()
+        {
+            let flat_idx = level_idx * n_forecasts + forecast_idx;
+            *(*out).lower.add(flat_idx) = l;
+            *(*out).upper.add(flat_idx) = u;
+        }
+    }
+}
+
+// ============================================================================
 // Memory Management Functions
 // ============================================================================
 
@@ -4410,6 +4858,66 @@ pub unsafe extern "C" fn anofox_free_amplitude_modulation_result(
     if !r.time_points.is_null() {
         free(r.time_points as *mut core::ffi::c_void);
         r.time_points = ptr::null_mut();
+    }
+}
+
+/// Free a ConformalResultFFI.
+///
+/// # Safety
+/// The result pointer must be valid or null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_free_conformal_result(result: *mut types::ConformalResultFFI) {
+    if result.is_null() {
+        return;
+    }
+    let r = &mut *result;
+
+    if !r.point.is_null() {
+        free(r.point as *mut core::ffi::c_void);
+        r.point = ptr::null_mut();
+    }
+    if !r.lower.is_null() {
+        free(r.lower as *mut core::ffi::c_void);
+        r.lower = ptr::null_mut();
+    }
+    if !r.upper.is_null() {
+        free(r.upper as *mut core::ffi::c_void);
+        r.upper = ptr::null_mut();
+    }
+}
+
+/// Free a ConformalMultiResultFFI.
+///
+/// # Safety
+/// The result pointer must be valid or null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_free_conformal_multi_result(
+    result: *mut types::ConformalMultiResultFFI,
+) {
+    if result.is_null() {
+        return;
+    }
+    let r = &mut *result;
+
+    if !r.point.is_null() {
+        free(r.point as *mut core::ffi::c_void);
+        r.point = ptr::null_mut();
+    }
+    if !r.coverage_levels.is_null() {
+        free(r.coverage_levels as *mut core::ffi::c_void);
+        r.coverage_levels = ptr::null_mut();
+    }
+    if !r.conformity_scores.is_null() {
+        free(r.conformity_scores as *mut core::ffi::c_void);
+        r.conformity_scores = ptr::null_mut();
+    }
+    if !r.lower.is_null() {
+        free(r.lower as *mut core::ffi::c_void);
+        r.lower = ptr::null_mut();
+    }
+    if !r.upper.is_null() {
+        free(r.upper as *mut core::ffi::c_void);
+        r.upper = ptr::null_mut();
     }
 }
 

@@ -917,6 +917,7 @@ WITH _params AS (
 ),
 _freq AS (
     SELECT CASE
+        WHEN frequency::VARCHAR ~ '^[0-9]+$' THEN (frequency::VARCHAR || ' day')::INTERVAL
         WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
         WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
         WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
@@ -993,6 +994,7 @@ WITH _params AS (
 ),
 _freq AS (
     SELECT CASE
+        WHEN frequency::VARCHAR ~ '^[0-9]+$' THEN (frequency::VARCHAR || ' day')::INTERVAL
         WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
         WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
         WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
@@ -1091,6 +1093,7 @@ WITH _params AS (
 ),
 _freq AS (
     SELECT CASE
+        WHEN frequency::VARCHAR ~ '^[0-9]+$' THEN (frequency::VARCHAR || ' day')::INTERVAL
         WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
         WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
         WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
@@ -1391,6 +1394,7 @@ LIMIT 1
 R"(
 WITH _freq AS (
     SELECT CASE
+        WHEN frequency::VARCHAR ~ '^[0-9]+$' THEN (frequency::VARCHAR || ' day')::INTERVAL
         WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
         WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
         WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
@@ -1481,6 +1485,7 @@ WITH _params AS (
 ),
 _freq AS (
     SELECT CASE
+        WHEN frequency::VARCHAR ~ '^[0-9]+$' THEN (frequency::VARCHAR || ' day')::INTERVAL
         WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
         WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
         WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
@@ -1720,6 +1725,134 @@ SELECT
 FROM cv
 JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
 ORDER BY cv._fold_id, cv._cv_grp, cv._cv_dt
+)"},
+
+    // ts_conformal: Compute conformal prediction intervals for grouped series
+    // C++ API: ts_conformal(backtest_results, group_col, actual_col, forecast_col, point_forecast_col, params)
+    // backtest_results: Table with backtest residuals (actual - forecast)
+    // params MAP supports:
+    //   alpha (DOUBLE) - miscoverage rate (default 0.1 for 90% coverage)
+    //   method (VARCHAR) - 'symmetric' or 'asymmetric' (default 'symmetric')
+    // Returns: group_col, point, lower, upper, coverage, conformity_score, method
+    {"ts_conformal", {"backtest_results", "group_col", "actual_col", "forecast_col", "point_forecast_col", "params", nullptr}, {{nullptr, nullptr}},
+R"(
+WITH _params AS (
+    SELECT
+        COALESCE(TRY_CAST(params['alpha'] AS DOUBLE), 0.1) AS _alpha,
+        COALESCE(params['method'], 'symmetric') AS _method
+),
+residuals AS (
+    SELECT
+        group_col AS _grp,
+        (actual_col - forecast_col)::DOUBLE AS residual
+    FROM query_table(backtest_results::VARCHAR)
+    WHERE actual_col IS NOT NULL AND forecast_col IS NOT NULL
+),
+point_forecasts AS (
+    SELECT
+        group_col AS _grp,
+        LIST(point_forecast_col::DOUBLE ORDER BY point_forecast_col) AS _forecasts
+    FROM query_table(backtest_results::VARCHAR)
+    WHERE point_forecast_col IS NOT NULL
+    GROUP BY group_col
+),
+conformal_calc AS (
+    SELECT
+        r._grp,
+        CASE (SELECT _method FROM _params)
+            WHEN 'asymmetric' THEN
+                ts_conformal_predict_asymmetric(
+                    LIST(r.residual),
+                    pf._forecasts,
+                    (SELECT _alpha FROM _params)
+                )
+            ELSE
+                ts_conformal_predict(
+                    LIST(r.residual),
+                    pf._forecasts,
+                    (SELECT _alpha FROM _params)
+                )
+        END AS conf_result
+    FROM residuals r
+    JOIN point_forecasts pf ON r._grp = pf._grp
+    GROUP BY r._grp, pf._forecasts
+)
+SELECT
+    _grp AS group_col,
+    (conf_result).point AS point,
+    (conf_result).lower AS lower,
+    (conf_result).upper AS upper,
+    (conf_result).coverage AS coverage,
+    (conf_result).conformity_score AS conformity_score,
+    (conf_result).method AS method
+FROM conformal_calc
+)"},
+
+    // ts_conformal_calibrate: Compute conformal quantile from backtest residuals
+    // C++ API: ts_conformal_calibrate(backtest_results, actual_col, forecast_col, params)
+    // Returns a single row with the calibrated conformity score
+    // params MAP supports:
+    //   alpha (DOUBLE) - miscoverage rate (default 0.1 for 90% coverage)
+    // Returns: conformity_score, coverage, n_residuals
+    {"ts_conformal_calibrate", {"backtest_results", "actual_col", "forecast_col", "params", nullptr}, {{nullptr, nullptr}},
+R"(
+WITH _params AS (
+    SELECT
+        COALESCE(TRY_CAST(params['alpha'] AS DOUBLE), 0.1) AS _alpha
+),
+residuals AS (
+    SELECT
+        (actual_col - forecast_col)::DOUBLE AS residual
+    FROM query_table(backtest_results::VARCHAR)
+    WHERE actual_col IS NOT NULL AND forecast_col IS NOT NULL
+)
+SELECT
+    ts_conformal_quantile(LIST(residual), (SELECT _alpha FROM _params)) AS conformity_score,
+    1.0 - (SELECT _alpha FROM _params) AS coverage,
+    COUNT(*)::BIGINT AS n_residuals
+FROM residuals
+)"},
+
+    // ts_conformal_apply: Apply pre-computed conformity score to forecasts
+    // C++ API: ts_conformal_apply(forecast_results, group_col, forecast_col, conformity_score)
+    // forecast_results: Table with point forecasts
+    // conformity_score: Pre-computed score from ts_conformal_calibrate
+    // Returns: group_col, forecast, lower, upper
+    {"ts_conformal_apply", {"forecast_results", "group_col", "forecast_col", "conformity_score", nullptr}, {{nullptr, nullptr}},
+R"(
+WITH intervals AS (
+    SELECT
+        group_col AS _grp,
+        ts_conformal_intervals(
+            LIST(forecast_col::DOUBLE ORDER BY forecast_col),
+            conformity_score::DOUBLE
+        ) AS interval_result
+    FROM query_table(forecast_results::VARCHAR)
+    WHERE forecast_col IS NOT NULL
+    GROUP BY group_col
+)
+SELECT
+    _grp AS group_col,
+    (interval_result).lower AS lower,
+    (interval_result).upper AS upper
+FROM intervals
+)"},
+
+    // ts_interval_width: Compute mean interval width for grouped series
+    // C++ API: ts_interval_width(results, group_col, lower_col, upper_col)
+    // Returns: group_col, mean_width, n_intervals
+    {"ts_interval_width", {"results", "group_col", "lower_col", "upper_col", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    group_col AS group_col,
+    ts_mean_interval_width(
+        LIST(lower_col::DOUBLE ORDER BY lower_col),
+        LIST(upper_col::DOUBLE ORDER BY upper_col)
+    ) AS mean_width,
+    COUNT(*)::BIGINT AS n_intervals
+FROM query_table(results::VARCHAR)
+WHERE lower_col IS NOT NULL AND upper_col IS NOT NULL
+GROUP BY group_col
 )"},
 
     // Sentinel

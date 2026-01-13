@@ -115,6 +115,13 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsMqlossFunction(loader);
     RegisterTsCoverageFunction(loader);
 
+    // Register Conformal Prediction functions
+    RegisterTsConformalQuantileFunction(loader);
+    RegisterTsConformalIntervalsFunction(loader);
+    RegisterTsConformalPredictFunction(loader);
+    RegisterTsConformalPredictAsymmetricFunction(loader);
+    RegisterTsMeanIntervalWidthFunction(loader);
+
     // Register Table Macros
     RegisterTsTableMacros(loader);
 

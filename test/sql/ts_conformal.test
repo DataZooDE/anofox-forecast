@@ -1,0 +1,360 @@
+# name: test/sql/ts_conformal.test
+# description: Tests for conformal prediction functions
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# ts_conformal_quantile - Basic quantile computation
+#######################################
+
+# Basic quantile calculation (90% coverage, alpha=0.1)
+# For residuals [1,2,3,4,5], the 90th percentile should be around 4.6
+query I
+SELECT ABS(ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.1) - 4.6) < 0.5;
+----
+true
+
+# Higher coverage (95%) should give larger quantile (need enough samples to distinguish)
+query I
+SELECT ts_conformal_quantile(
+    [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0], 0.05
+) > ts_conformal_quantile(
+    [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0], 0.1
+);
+----
+true
+
+# 50% coverage
+query I
+SELECT ABS(ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.5) - 3.0) < 0.5;
+----
+true
+
+# Alias test
+query I
+SELECT ABS(anofox_fcst_ts_conformal_quantile([1.0, 2.0, 3.0], 0.1) - ts_conformal_quantile([1.0, 2.0, 3.0], 0.1)) < 0.001;
+----
+true
+
+#######################################
+# ts_conformal_intervals - Apply quantile to forecasts
+#######################################
+
+# Basic interval computation
+# forecasts=[10, 20, 30], quantile=2
+# lower = [10-2, 20-2, 30-2] = [8, 18, 28]
+# upper = [10+2, 20+2, 30+2] = [12, 22, 32]
+query III
+SELECT
+    (ts_conformal_intervals([10.0, 20.0, 30.0], 2.0)).lower[1],
+    (ts_conformal_intervals([10.0, 20.0, 30.0], 2.0)).lower[2],
+    (ts_conformal_intervals([10.0, 20.0, 30.0], 2.0)).lower[3];
+----
+8.0
+18.0
+28.0
+
+query III
+SELECT
+    (ts_conformal_intervals([10.0, 20.0, 30.0], 2.0)).upper[1],
+    (ts_conformal_intervals([10.0, 20.0, 30.0], 2.0)).upper[2],
+    (ts_conformal_intervals([10.0, 20.0, 30.0], 2.0)).upper[3];
+----
+12.0
+22.0
+32.0
+
+# Zero quantile means point = lower = upper
+query I
+SELECT
+    (ts_conformal_intervals([5.0, 10.0], 0.0)).lower[1] = (ts_conformal_intervals([5.0, 10.0], 0.0)).upper[1];
+----
+true
+
+#######################################
+# ts_conformal_predict - Full conformal prediction
+#######################################
+
+# Basic conformal prediction with symmetric residuals
+# residuals = [-2, -1, 0, 1, 2]
+# point_forecasts = [100, 200]
+# With 90% coverage, quantile should cover most residuals
+query I
+SELECT
+    (ts_conformal_predict([-2.0, -1.0, 0.0, 1.0, 2.0], [100.0, 200.0], 0.1)).coverage = 0.9;
+----
+true
+
+# Verify point forecasts are preserved
+query II
+SELECT
+    (ts_conformal_predict([-2.0, -1.0, 0.0, 1.0, 2.0], [100.0, 200.0], 0.1)).point[1],
+    (ts_conformal_predict([-2.0, -1.0, 0.0, 1.0, 2.0], [100.0, 200.0], 0.1)).point[2];
+----
+100.0
+200.0
+
+# Verify method is 'split_conformal'
+query I
+SELECT (ts_conformal_predict([1.0, 2.0, 3.0], [50.0], 0.1)).method;
+----
+split_conformal
+
+# Lower bound should be less than upper bound
+query I
+SELECT
+    (ts_conformal_predict([1.0, 2.0, 3.0, 4.0, 5.0], [10.0], 0.1)).lower[1] <
+    (ts_conformal_predict([1.0, 2.0, 3.0, 4.0, 5.0], [10.0], 0.1)).upper[1];
+----
+true
+
+#######################################
+# ts_conformal_predict_asymmetric - Asymmetric intervals
+#######################################
+
+# Asymmetric residuals should produce asymmetric intervals
+# residuals = [-1, -1, 0, 2, 4] - skewed positive
+query I
+SELECT (ts_conformal_predict_asymmetric([-1.0, -1.0, 0.0, 2.0, 4.0], [100.0], 0.1)).method;
+----
+asymmetric_conformal
+
+# Coverage should still match requested coverage
+query I
+SELECT (ts_conformal_predict_asymmetric([1.0, 2.0, 3.0], [50.0], 0.1)).coverage = 0.9;
+----
+true
+
+#######################################
+# ts_mean_interval_width - Interval width metric
+#######################################
+
+# Basic interval width
+# lower=[8, 18], upper=[12, 22], widths=[4, 4], mean=4
+query I
+SELECT ts_mean_interval_width([8.0, 18.0], [12.0, 22.0]);
+----
+4.0
+
+# Varying widths
+# lower=[0, 10], upper=[5, 20], widths=[5, 10], mean=7.5
+query I
+SELECT ts_mean_interval_width([0.0, 10.0], [5.0, 20.0]);
+----
+7.5
+
+# Single interval
+query I
+SELECT ts_mean_interval_width([0.0], [10.0]);
+----
+10.0
+
+# Alias test
+query I
+SELECT anofox_fcst_ts_mean_interval_width([0.0, 5.0], [10.0, 15.0]);
+----
+10.0
+
+#######################################
+# Edge cases
+#######################################
+
+# Small number of residuals
+query I
+SELECT ts_conformal_quantile([1.0], 0.1) IS NOT NULL;
+----
+true
+
+# Very tight coverage (99%)
+query I
+SELECT ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 0.01) > 9.0;
+----
+true
+
+# Coverage bounds from prediction
+query I
+SELECT
+    (ts_conformal_predict([1.0, 2.0, 3.0], [100.0], 0.2)).coverage = 0.8;
+----
+true
+
+#######################################
+# Integration Tests - Table Macros
+#######################################
+
+# Setup test data for integration tests
+statement ok
+CREATE TABLE conformal_backtest AS
+SELECT
+    series_id,
+    '2024-01-01'::DATE + (i * INTERVAL '1 day') AS date,
+    100.0 + i + (CASE WHEN series_id = 'A' THEN 10 ELSE 0 END) AS actual,
+    100.0 + i + (CASE WHEN series_id = 'A' THEN 10 ELSE 0 END) + (RANDOM() - 0.5) * 5 AS forecast
+FROM generate_series(0, 29) AS t(i)
+CROSS JOIN (SELECT UNNEST(['A', 'B']) AS series_id) s;
+
+# Add point forecasts for future periods
+statement ok
+CREATE TABLE conformal_forecasts AS
+SELECT
+    series_id,
+    '2024-01-31'::DATE + (i * INTERVAL '1 day') AS date,
+    130.0 + i + (CASE WHEN series_id = 'A' THEN 10 ELSE 0 END) AS point_forecast
+FROM generate_series(0, 6) AS t(i)
+CROSS JOIN (SELECT UNNEST(['A', 'B']) AS series_id) s;
+
+#######################################
+# ts_conformal_calibrate - Calibrate from backtest
+#######################################
+
+# Test calibration returns expected columns
+query I
+SELECT COUNT(*) FROM (
+    DESCRIBE SELECT * FROM ts_conformal_calibrate(
+        'conformal_backtest', actual, forecast, MAP{'alpha': 0.1}
+    )
+);
+----
+3
+
+# Calibration should return positive conformity score
+query I
+SELECT conformity_score > 0 FROM ts_conformal_calibrate(
+    'conformal_backtest', actual, forecast, MAP{'alpha': 0.1}
+);
+----
+true
+
+# Calibration should return correct coverage
+query I
+SELECT coverage = 0.9 FROM ts_conformal_calibrate(
+    'conformal_backtest', actual, forecast, MAP{'alpha': 0.1}
+);
+----
+true
+
+# Calibration should count all residuals
+query I
+SELECT n_residuals = 60 FROM ts_conformal_calibrate(
+    'conformal_backtest', actual, forecast, MAP{'alpha': 0.1}
+);
+----
+true
+
+# Higher alpha (lower coverage) should give smaller conformity score
+query I
+SELECT
+    (SELECT conformity_score FROM ts_conformal_calibrate('conformal_backtest', actual, forecast, MAP{'alpha': 0.2}))
+    <
+    (SELECT conformity_score FROM ts_conformal_calibrate('conformal_backtest', actual, forecast, MAP{'alpha': 0.1}));
+----
+true
+
+#######################################
+# ts_conformal_apply - Apply score to forecasts
+#######################################
+
+# Test apply returns expected number of rows (one per group)
+query I
+SELECT COUNT(*) FROM ts_conformal_apply(
+    'conformal_forecasts', series_id, point_forecast, 5.0
+);
+----
+2
+
+# Test apply returns both groups
+query I
+SELECT COUNT(DISTINCT group_col) FROM ts_conformal_apply(
+    'conformal_forecasts', series_id, point_forecast, 5.0
+);
+----
+2
+
+# Lower bounds should be less than upper bounds
+query I
+SELECT
+    MIN(lower[1]) < MIN(upper[1])
+FROM ts_conformal_apply(
+    'conformal_forecasts', series_id, point_forecast, 5.0
+);
+----
+true
+
+#######################################
+# ts_interval_width - Compute interval widths
+#######################################
+
+# Create intervals table for testing
+statement ok
+CREATE TABLE test_intervals AS
+SELECT
+    series_id,
+    i AS idx,
+    100.0 + i AS lower_bound,
+    110.0 + i + (CASE WHEN series_id = 'A' THEN 5 ELSE 0 END) AS upper_bound
+FROM generate_series(1, 5) AS t(i)
+CROSS JOIN (SELECT UNNEST(['A', 'B']) AS series_id) s;
+
+# Test interval_width returns one row per group
+query I
+SELECT COUNT(*) FROM ts_interval_width(
+    'test_intervals', series_id, lower_bound, upper_bound
+);
+----
+2
+
+# Test interval width calculation
+# Series A: width = 15 (upper - lower = 110+5 - 100 = 15)
+# Series B: width = 10 (upper - lower = 110 - 100 = 10)
+query II
+SELECT group_col, mean_width FROM ts_interval_width(
+    'test_intervals', series_id, lower_bound, upper_bound
+) ORDER BY group_col;
+----
+A	15.0
+B	10.0
+
+# Test n_intervals count
+query II
+SELECT group_col, n_intervals FROM ts_interval_width(
+    'test_intervals', series_id, lower_bound, upper_bound
+) ORDER BY group_col;
+----
+A	5
+B	5
+
+#######################################
+# End-to-End Integration Test
+#######################################
+
+# Full workflow: calibrate → apply → evaluate
+# 1. Calibrate conformity score from backtest
+# 2. Apply to future forecasts
+# 3. Verify intervals are reasonable
+
+query I
+WITH calibration AS (
+    SELECT conformity_score FROM ts_conformal_calibrate(
+        'conformal_backtest', actual, forecast, MAP{'alpha': 0.1}
+    )
+),
+intervals AS (
+    SELECT * FROM ts_conformal_apply(
+        'conformal_forecasts', series_id, point_forecast,
+        (SELECT conformity_score FROM calibration)
+    )
+)
+SELECT COUNT(*) > 0 FROM intervals WHERE lower IS NOT NULL AND upper IS NOT NULL;
+----
+true
+
+# Cleanup
+statement ok
+DROP TABLE conformal_backtest;
+
+statement ok
+DROP TABLE conformal_forecasts;
+
+statement ok
+DROP TABLE test_intervals;

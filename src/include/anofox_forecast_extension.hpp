@@ -85,6 +85,13 @@ void RegisterTsQuantileLossFunction(ExtensionLoader &loader);
 void RegisterTsMqlossFunction(ExtensionLoader &loader);
 void RegisterTsCoverageFunction(ExtensionLoader &loader);
 
+// Conformal prediction functions
+void RegisterTsConformalQuantileFunction(ExtensionLoader &loader);
+void RegisterTsConformalIntervalsFunction(ExtensionLoader &loader);
+void RegisterTsConformalPredictFunction(ExtensionLoader &loader);
+void RegisterTsConformalPredictAsymmetricFunction(ExtensionLoader &loader);
+void RegisterTsMeanIntervalWidthFunction(ExtensionLoader &loader);
+
 // Table macros
 void RegisterTsTableMacros(ExtensionLoader &loader);
 

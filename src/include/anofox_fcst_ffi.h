@@ -1144,6 +1144,77 @@ typedef struct FilledValuesResult {
 } FilledValuesResult;
 
 /**
+ * Result of conformal prediction with prediction intervals.
+ */
+typedef struct ConformalResultFFI {
+    /**
+     * Point forecasts
+     */
+    double *point;
+    /**
+     * Lower bounds of prediction intervals
+     */
+    double *lower;
+    /**
+     * Upper bounds of prediction intervals
+     */
+    double *upper;
+    /**
+     * Number of forecasts
+     */
+    size_t n_forecasts;
+    /**
+     * Nominal coverage level (1 - alpha)
+     */
+    double coverage;
+    /**
+     * The computed conformity score (quantile threshold)
+     */
+    double conformity_score;
+    /**
+     * Method used for conformal prediction
+     */
+    char method[32];
+} ConformalResultFFI;
+
+/**
+ * Result of conformal prediction with multiple coverage levels.
+ *
+ * Uses a flattened structure for safer FFI. All arrays have length
+ * `n_forecasts * n_levels`, with intervals stored level-by-level.
+ */
+typedef struct ConformalMultiResultFFI {
+    /**
+     * Point forecasts
+     */
+    double *point;
+    /**
+     * Number of point forecasts
+     */
+    size_t n_forecasts;
+    /**
+     * Coverage levels (one per level)
+     */
+    double *coverage_levels;
+    /**
+     * Conformity scores (one per level)
+     */
+    double *conformity_scores;
+    /**
+     * Number of coverage levels
+     */
+    size_t n_levels;
+    /**
+     * Flattened lower bounds (n_forecasts * n_levels, level-major order)
+     */
+    double *lower;
+    /**
+     * Flattened upper bounds (n_forecasts * n_levels, level-major order)
+     */
+    double *upper;
+} ConformalMultiResultFFI;
+
+/**
  * Nullable data array for DuckDB integration.
  *
  * The validity bitmask follows DuckDB's convention where bit i of validity[i/64]
@@ -2008,6 +2079,130 @@ bool anofox_ts_fill_nulls_interpolate(const double *values,
                                       struct AnofoxError *out_error);
 
 /**
+ * Compute the conformity score (quantile) from calibration residuals.
+ *
+ * Returns the (1 - alpha) quantile of absolute residuals for conformal prediction.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_conformal_quantile(const double *residuals,
+                                  const uint64_t *validity,
+                                  size_t length,
+                                  double alpha,
+                                  double *out_result,
+                                  struct AnofoxError *out_error);
+
+/**
+ * Apply a conformity score to point forecasts to create prediction intervals.
+ *
+ * Creates symmetric intervals: [forecast - score, forecast + score].
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_conformal_intervals(const double *forecasts,
+                                   size_t length,
+                                   double conformity_score,
+                                   double **out_lower,
+                                   double **out_upper,
+                                   struct AnofoxError *out_error);
+
+/**
+ * Perform split conformal prediction in one step.
+ *
+ * Computes conformity score from residuals and applies to forecasts.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_conformal_predict(const double *residuals,
+                                 const uint64_t *residuals_validity,
+                                 size_t residuals_length,
+                                 const double *forecasts,
+                                 size_t forecasts_length,
+                                 double alpha,
+                                 struct ConformalResultFFI *out_result,
+                                 struct AnofoxError *out_error);
+
+/**
+ * Perform conformal prediction with multiple coverage levels.
+ *
+ * Computes prediction intervals at multiple alpha levels simultaneously.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_conformal_predict_multi(const double *residuals,
+                                       const uint64_t *residuals_validity,
+                                       size_t residuals_length,
+                                       const double *forecasts,
+                                       size_t forecasts_length,
+                                       const double *alphas,
+                                       size_t n_alphas,
+                                       struct ConformalMultiResultFFI *out_result,
+                                       struct AnofoxError *out_error);
+
+/**
+ * Perform locally-adaptive conformal prediction.
+ *
+ * Scales intervals based on local difficulty estimates.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_conformal_predict_adaptive(const double *residuals,
+                                          const uint64_t *residuals_validity,
+                                          size_t residuals_length,
+                                          const double *forecasts,
+                                          const double *difficulty,
+                                          size_t forecasts_length,
+                                          double alpha,
+                                          struct ConformalResultFFI *out_result,
+                                          struct AnofoxError *out_error);
+
+/**
+ * Perform asymmetric conformal prediction.
+ *
+ * Uses separate quantiles for positive and negative residuals.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_conformal_predict_asymmetric(const double *residuals,
+                                            const uint64_t *residuals_validity,
+                                            size_t residuals_length,
+                                            const double *forecasts,
+                                            size_t forecasts_length,
+                                            double alpha,
+                                            struct ConformalResultFFI *out_result,
+                                            struct AnofoxError *out_error);
+
+/**
+ * Compute interval width (upper - lower) for each prediction.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_interval_width(const double *lower,
+                              const double *upper,
+                              size_t length,
+                              double **out_widths,
+                              struct AnofoxError *out_error);
+
+/**
+ * Compute mean interval width.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_mean_interval_width(const double *lower,
+                                   const double *upper,
+                                   size_t length,
+                                   double *out_result,
+                                   struct AnofoxError *out_error);
+
+/**
  * Free a TsStatsResult.
  *
  * # Safety
@@ -2176,6 +2371,22 @@ void anofox_free_instantaneous_period_result(struct InstantaneousPeriodResultFFI
  * The result pointer must be valid or null.
  */
 void anofox_free_amplitude_modulation_result(struct AmplitudeModulationResultFFI *result);
+
+/**
+ * Free a ConformalResultFFI.
+ *
+ * # Safety
+ * The result pointer must be valid or null.
+ */
+void anofox_free_conformal_result(struct ConformalResultFFI *result);
+
+/**
+ * Free a ConformalMultiResultFFI.
+ *
+ * # Safety
+ * The result pointer must be valid or null.
+ */
+void anofox_free_conformal_multi_result(struct ConformalMultiResultFFI *result);
 
 const char *anofox_fcst_version(void);
 
