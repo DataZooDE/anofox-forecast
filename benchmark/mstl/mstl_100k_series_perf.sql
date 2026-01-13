@@ -156,10 +156,101 @@ SELECT COUNT(*) AS forecast_rows
 FROM TS_FORECAST_BY(benchmark_10k, series_id, date_col, value_col, 'AutoMSTL', 12, {'seasonal_periods': [12]});
 
 -- =============================================================================
--- SECTION 6: Longer Series Test
+-- SECTION 6: Mixed-Length Series Test (Realistic Scenario)
 -- =============================================================================
 SELECT '';
-SELECT '--- Section 6: Longer Series Test (1k series x 500 points) ---';
+SELECT '--- Section 6: Mixed-Length Series (100k with varying lengths) ---';
+
+-- Generate 100k series with realistic length distribution:
+-- - 10% very short (5-15 points) - new products, limited history
+-- - 15% short (16-23 points) - below MSTL minimum
+-- - 25% medium (24-50 points) - just enough for decomposition
+-- - 50% long (51-200 points) - established products
+CREATE OR REPLACE TABLE benchmark_mixed AS
+WITH series_lengths AS (
+    SELECT
+        series_id,
+        CASE
+            -- 10% very short (5-15 points)
+            WHEN series_id % 100 < 10 THEN 5 + (series_id % 11)
+            -- 15% short (16-23 points) - below minimum
+            WHEN series_id % 100 < 25 THEN 16 + (series_id % 8)
+            -- 25% medium (24-50 points)
+            WHEN series_id % 100 < 50 THEN 24 + (series_id % 27)
+            -- 50% long (51-200 points)
+            ELSE 51 + (series_id % 150)
+        END AS series_length
+    FROM generate_series(1, 100000) AS t(series_id)
+)
+SELECT
+    l.series_id,
+    'series_' || LPAD(l.series_id::VARCHAR, 6, '0') AS group_col,
+    DATE '2024-01-01' + INTERVAL (t) DAY AS date_col,
+    100 + (l.series_id % 500)
+    + (l.series_id % 100) * 0.01 * t
+    + (10 + l.series_id % 20) * SIN(2 * PI() * t / 12)
+    + (RANDOM() - 0.5) * 5 AS value_col
+FROM series_lengths l
+CROSS JOIN generate_series(0, 199) AS d(t)
+WHERE t < l.series_length;
+
+-- Show length distribution
+SELECT 'Series length distribution:';
+SELECT
+    CASE
+        WHEN n_points < 16 THEN '1. Very short (5-15)'
+        WHEN n_points < 24 THEN '2. Short (16-23) - below minimum'
+        WHEN n_points < 51 THEN '3. Medium (24-50)'
+        ELSE '4. Long (51-200)'
+    END AS length_category,
+    COUNT(*) AS series_count,
+    ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS percentage,
+    MIN(n_points) AS min_len,
+    MAX(n_points) AS max_len,
+    ROUND(AVG(n_points), 1) AS avg_len
+FROM (
+    SELECT group_col, COUNT(*) AS n_points
+    FROM benchmark_mixed
+    GROUP BY group_col
+) subq
+GROUP BY length_category
+ORDER BY length_category;
+
+-- Total stats
+SELECT
+    COUNT(DISTINCT group_col) AS total_series,
+    COUNT(*) AS total_rows,
+    ROUND(AVG(n_points), 1) AS avg_series_length
+FROM (
+    SELECT group_col, COUNT(*) AS n_points
+    FROM benchmark_mixed
+    GROUP BY group_col
+) subq;
+
+-- MSTL Decomposition on mixed-length series
+SELECT 'MSTL Decomposition on 100k mixed-length series:';
+SELECT
+    COUNT(*) AS series_processed,
+    SUM(CASE WHEN len(decomposition.trend) > 0 THEN 1 ELSE 0 END) AS with_decomposition,
+    SUM(CASE WHEN len(decomposition.trend) = 0 THEN 1 ELSE 0 END) AS skipped
+FROM ts_mstl_decomposition(
+    benchmark_mixed,
+    group_col,
+    date_col,
+    value_col,
+    {'seasonal_periods': [12]}
+);
+
+-- Forecast on mixed-length series
+SELECT 'MSTL Forecast on 100k mixed-length series:';
+SELECT COUNT(*) AS forecast_rows
+FROM TS_FORECAST_BY(benchmark_mixed, series_id, date_col, value_col, 'MSTL', 12, {'seasonal_periods': [12]});
+
+-- =============================================================================
+-- SECTION 7: Longer Series Test
+-- =============================================================================
+SELECT '';
+SELECT '--- Section 7: Longer Series Test (1k series x 500 points) ---';
 
 CREATE OR REPLACE TABLE benchmark_long AS
 SELECT
@@ -200,6 +291,7 @@ DROP TABLE IF EXISTS benchmark_100k;
 DROP TABLE IF EXISTS benchmark_50k;
 DROP TABLE IF EXISTS benchmark_10k;
 DROP TABLE IF EXISTS benchmark_1k;
+DROP TABLE IF EXISTS benchmark_mixed;
 DROP TABLE IF EXISTS benchmark_long;
 
 SELECT '=============================================================================';
