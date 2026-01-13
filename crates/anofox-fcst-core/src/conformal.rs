@@ -468,7 +468,7 @@ mod tests {
         let q = conformal_quantile(&residuals, 0.5).unwrap();
 
         // For 50% coverage, should be around median of absolute values
-        assert!(q >= 2.0 && q <= 4.0);
+        assert!((2.0..=4.0).contains(&q));
     }
 
     #[test]
