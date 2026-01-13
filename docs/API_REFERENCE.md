@@ -1513,29 +1513,118 @@ FROM weekly_sales GROUP BY product_id;
 
 **ts_classify_seasonality** (alias: `anofox_fcst_ts_classify_seasonality`)
 
-Classify the type of seasonal pattern.
+Classify the type of seasonal pattern including timing stability and amplitude modulation.
 
 **Signature:**
 ```sql
-ts_classify_seasonality(values DOUBLE[]) → STRUCT
-ts_classify_seasonality(values DOUBLE[], period INTEGER) → STRUCT
+ts_classify_seasonality(values DOUBLE[], period DOUBLE) → STRUCT
+ts_classify_seasonality(values DOUBLE[], period DOUBLE, strength_threshold DOUBLE) → STRUCT
+ts_classify_seasonality(values DOUBLE[], period DOUBLE, strength_threshold DOUBLE, timing_threshold DOUBLE) → STRUCT
 ```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| values | DOUBLE[] | Time series values |
+| period | DOUBLE | Expected seasonal period |
+| strength_threshold | DOUBLE | Minimum strength to consider seasonal (default: 0.3) |
+| timing_threshold | DOUBLE | Threshold for timing variability (default: 0.1) |
 
 **Returns:**
 ```sql
 STRUCT(
-    seasonal_type       VARCHAR,      -- 'none', 'weak', 'moderate', 'strong', 'dominant'
-    pattern_type        VARCHAR,      -- 'sinusoidal', 'sawtooth', 'pulse', 'complex', 'irregular'
-    symmetry            DOUBLE,       -- Symmetry score (-1 to 1, 0 = symmetric)
-    sharpness           DOUBLE,       -- Peak sharpness (0 = smooth, 1 = sharp)
-    is_multiplicative   BOOLEAN       -- Whether pattern appears multiplicative
+    timing_classification VARCHAR,    -- Classification: 'non_seasonal', 'stable_seasonal', 'variable_seasonal', 'intermittent_seasonal'
+    modulation_type      VARCHAR,     -- Amplitude modulation: 'non_seasonal', 'stable', 'modulated', 'unknown'
+    has_stable_timing    BOOLEAN,     -- Whether seasonal timing is stable across cycles
+    timing_variability   DOUBLE,      -- Measure of timing consistency (lower = more stable)
+    seasonal_strength    DOUBLE,      -- Overall seasonal strength (0-1)
+    is_seasonal          BOOLEAN,     -- Whether series exhibits seasonality
+    cycle_strengths      DOUBLE[],    -- Strength of each detected cycle
+    weak_seasons         BIGINT[]     -- Indices of weak seasonal cycles
 )
 ```
 
 **Example:**
 ```sql
-SELECT ts_classify_seasonality(LIST(value ORDER BY date)) AS classification
-FROM sales GROUP BY product_id;
+-- Classify seasonality for a single series
+SELECT ts_classify_seasonality(LIST(value ORDER BY date), 12) AS classification
+FROM sales;
+
+-- With custom thresholds
+SELECT ts_classify_seasonality(LIST(value ORDER BY date), 7, 0.2, 0.15)
+FROM daily_metrics;
+```
+
+---
+
+### Seasonality Classification (Aggregate)
+
+**ts_classify_seasonality_agg** (alias: `anofox_fcst_ts_classify_seasonality_agg`)
+
+Aggregate function to classify seasonality from ungrouped (timestamp, value) pairs.
+
+**Signature:**
+```sql
+ts_classify_seasonality_agg(ts TIMESTAMP, value DOUBLE, period DOUBLE) → STRUCT
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| ts | TIMESTAMP | Timestamp column |
+| value | DOUBLE | Value column |
+| period | DOUBLE | Expected seasonal period |
+
+**Returns:** Same STRUCT as `ts_classify_seasonality`.
+
+**Example:**
+```sql
+-- Classify seasonality per product
+SELECT
+    product_id,
+    ts_classify_seasonality_agg(date, sales, 12) AS classification
+FROM daily_sales
+GROUP BY product_id;
+```
+
+---
+
+### Seasonality Classification (Table Macro)
+
+**ts_classify_seasonality_by**
+
+Table macro to classify seasonality for grouped time series.
+
+**Signature:**
+```sql
+ts_classify_seasonality_by(source, group_col, date_col, value_col, period) → TABLE
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| source | VARCHAR | Source table name |
+| group_col | COLUMN | Column identifying groups |
+| date_col | COLUMN | Timestamp column |
+| value_col | COLUMN | Value column |
+| period | DOUBLE | Expected seasonal period |
+
+**Returns:** Table with columns:
+- `id`: Group identifier
+- `classification`: STRUCT with all classification fields
+
+**Example:**
+```sql
+-- Classify seasonality for all products
+SELECT * FROM ts_classify_seasonality_by('daily_sales', product_id, date, sales, 12);
+
+-- Access specific fields
+SELECT
+    id,
+    (classification).timing_classification,
+    (classification).modulation_type,
+    (classification).is_seasonal
+FROM ts_classify_seasonality_by('daily_sales', product_id, date, sales, 12);
 ```
 
 ---

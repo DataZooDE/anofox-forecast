@@ -139,9 +139,9 @@ SELECT (ts_classify_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.
 ----
 true
 
-# Test classification field exists
+# Test timing_classification field exists
 query I
-SELECT (ts_classify_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0)).classification IS NOT NULL;
+SELECT (ts_classify_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4.0)).timing_classification IS NOT NULL;
 ----
 true
 

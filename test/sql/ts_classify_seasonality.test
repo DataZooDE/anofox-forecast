@@ -1,0 +1,240 @@
+# name: test/sql/ts_classify_seasonality.test
+# description: Tests for ts_classify_seasonality function (scalar, aggregate, and table macro)
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# ts_classify_seasonality - Scalar Function Tests
+#######################################
+
+# Test basic function call with clear seasonal pattern (period 4)
+query I
+SELECT ts_classify_seasonality([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4.0) IS NOT NULL;
+----
+true
+
+# Test timing_classification field exists
+query I
+SELECT (ts_classify_seasonality([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4.0)).timing_classification IS NOT NULL;
+----
+true
+
+# Test modulation_type field exists
+query I
+SELECT (ts_classify_seasonality([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4.0)).modulation_type IS NOT NULL;
+----
+true
+
+# Test has_stable_timing field exists
+query I
+SELECT (ts_classify_seasonality([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4.0)).has_stable_timing IS NOT NULL;
+----
+true
+
+# Test timing_variability field exists
+query I
+SELECT (ts_classify_seasonality([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4.0)).timing_variability IS NOT NULL;
+----
+true
+
+# Test seasonal_strength field exists
+query I
+SELECT (ts_classify_seasonality([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4.0)).seasonal_strength IS NOT NULL;
+----
+true
+
+# Test is_seasonal field exists
+query I
+SELECT (ts_classify_seasonality([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4.0)).is_seasonal IS NOT NULL;
+----
+true
+
+# Test cycle_strengths field is a list
+query I
+SELECT (ts_classify_seasonality([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4.0)).cycle_strengths IS NOT NULL;
+----
+true
+
+# Test weak_seasons field is a list
+query I
+SELECT (ts_classify_seasonality([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4.0)).weak_seasons IS NOT NULL;
+----
+true
+
+#######################################
+# ts_classify_seasonality - Value Verification
+#######################################
+
+# timing_classification should be a valid classification string
+query I
+SELECT (ts_classify_seasonality([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4.0)).timing_classification IN ('non_seasonal', 'seasonal', 'stable_seasonal', 'variable_seasonal', 'intermittent_seasonal');
+----
+true
+
+# modulation_type should be a valid type string
+query I
+SELECT (ts_classify_seasonality([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4.0)).modulation_type IN ('non_seasonal', 'stable', 'modulated', 'unknown');
+----
+true
+
+# is_seasonal should be a boolean
+query I
+SELECT typeof((ts_classify_seasonality([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4.0)).is_seasonal);
+----
+BOOLEAN
+
+#######################################
+# ts_classify_seasonality - Optional Parameters
+#######################################
+
+# Test with strength_threshold parameter
+query I
+SELECT ts_classify_seasonality([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4.0, 0.3) IS NOT NULL;
+----
+true
+
+# Test with strength_threshold and timing_threshold parameters
+query I
+SELECT ts_classify_seasonality([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4.0, 0.3, 0.1) IS NOT NULL;
+----
+true
+
+#######################################
+# ts_classify_seasonality - NULL Handling
+#######################################
+
+# NULL values input should return NULL
+query I
+SELECT ts_classify_seasonality(NULL, 4.0) IS NULL;
+----
+true
+
+# NULL period should return NULL
+query I
+SELECT ts_classify_seasonality([1.0, 2.0, 3.0, 4.0], NULL) IS NULL;
+----
+true
+
+#######################################
+# ts_classify_seasonality - Edge Cases
+#######################################
+
+# Short series (less than 2 periods) should return NULL
+query I
+SELECT ts_classify_seasonality([1.0, 2.0, 3.0, 4.0], 4.0) IS NULL;
+----
+true
+
+# Period of 0 should return NULL
+query I
+SELECT ts_classify_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 0.0) IS NULL;
+----
+true
+
+#######################################
+# ts_classify_seasonality_agg - Aggregate Function Tests
+#######################################
+
+# Test aggregate function with simple data
+statement ok
+CREATE TABLE seasonal_test AS
+SELECT ts::TIMESTAMP AS ts, val::DOUBLE AS val
+FROM (VALUES
+    ('2024-01-01', 10.0), ('2024-01-02', 20.0), ('2024-01-03', 30.0), ('2024-01-04', 40.0),
+    ('2024-01-05', 10.0), ('2024-01-06', 20.0), ('2024-01-07', 30.0), ('2024-01-08', 40.0),
+    ('2024-01-09', 10.0), ('2024-01-10', 20.0), ('2024-01-11', 30.0), ('2024-01-12', 40.0),
+    ('2024-01-13', 10.0), ('2024-01-14', 20.0), ('2024-01-15', 30.0), ('2024-01-16', 40.0)
+) AS t(ts, val);
+
+query I
+SELECT ts_classify_seasonality_agg(ts, val, 4.0) IS NOT NULL FROM seasonal_test;
+----
+true
+
+# Test aggregate result has timing_classification field
+query I
+SELECT (ts_classify_seasonality_agg(ts, val, 4.0)).timing_classification IS NOT NULL FROM seasonal_test;
+----
+true
+
+# Test aggregate result has is_seasonal field (type check)
+query I
+SELECT typeof((ts_classify_seasonality_agg(ts, val, 4.0)).is_seasonal) FROM seasonal_test;
+----
+BOOLEAN
+
+statement ok
+DROP TABLE seasonal_test;
+
+#######################################
+# ts_classify_seasonality_by - Table Macro Tests
+#######################################
+
+# Create test data with multiple groups
+statement ok
+CREATE TABLE grouped_seasonal AS
+SELECT
+    CASE WHEN id <= 16 THEN 'A' ELSE 'B' END AS group_id,
+    ('2024-01-01'::TIMESTAMP + INTERVAL (id - 1) DAY)::TIMESTAMP AS ts,
+    CASE
+        WHEN id <= 16 THEN [10.0, 20.0, 30.0, 40.0][(id - 1) % 4 + 1]
+        ELSE [5.0, 15.0, 25.0, 35.0][(id - 17) % 4 + 1]
+    END AS val
+FROM generate_series(1, 32) AS t(id);
+
+# Test table macro returns results
+query I
+SELECT COUNT(*) FROM ts_classify_seasonality_by('grouped_seasonal', group_id, ts, val, 4);
+----
+2
+
+# Test table macro returns classification struct with is_seasonal field
+query I
+SELECT typeof((classification).is_seasonal) FROM ts_classify_seasonality_by('grouped_seasonal', group_id, ts, val, 4) WHERE id = 'A';
+----
+BOOLEAN
+
+# Test table macro returns timing_classification
+query I
+SELECT (classification).timing_classification IS NOT NULL FROM ts_classify_seasonality_by('grouped_seasonal', group_id, ts, val, 4) WHERE id = 'A';
+----
+true
+
+# Test table macro returns modulation_type
+query I
+SELECT (classification).modulation_type IS NOT NULL FROM ts_classify_seasonality_by('grouped_seasonal', group_id, ts, val, 4) WHERE id = 'A';
+----
+true
+
+statement ok
+DROP TABLE grouped_seasonal;
+
+#######################################
+# anofox_fcst_ Prefix Tests
+#######################################
+
+# Test anofox_fcst_ prefixed function works
+query I
+SELECT anofox_fcst_ts_classify_seasonality([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4.0) IS NOT NULL;
+----
+true
+
+# Test anofox_fcst_ aggregate function works
+statement ok
+CREATE TABLE agg_test AS
+SELECT ts::TIMESTAMP AS ts, val::DOUBLE AS val
+FROM (VALUES
+    ('2024-01-01', 10.0), ('2024-01-02', 20.0), ('2024-01-03', 30.0), ('2024-01-04', 40.0),
+    ('2024-01-05', 10.0), ('2024-01-06', 20.0), ('2024-01-07', 30.0), ('2024-01-08', 40.0),
+    ('2024-01-09', 10.0), ('2024-01-10', 20.0), ('2024-01-11', 30.0), ('2024-01-12', 40.0),
+    ('2024-01-13', 10.0), ('2024-01-14', 20.0), ('2024-01-15', 30.0), ('2024-01-16', 40.0)
+) AS t(ts, val);
+
+query I
+SELECT anofox_fcst_ts_classify_seasonality_agg(ts, val, 4.0) IS NOT NULL FROM agg_test;
+----
+true
+
+statement ok
+DROP TABLE agg_test;
