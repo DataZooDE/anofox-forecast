@@ -177,11 +177,83 @@ The MSTL/STL implementation in this extension is efficient for the core decompos
 
 **Priority:** Fix SAZED (easiest, biggest impact), then SSA, then Matrix Profile.
 
+## SQL Interface Benchmark Results
+
+The following benchmarks were run through the DuckDB SQL interface to validate end-to-end performance.
+
+### 100k Series Benchmark
+
+**Dataset:** 100,000 series × 100 points each = 10 million rows
+
+| Operation | Time | Per Series |
+|-----------|------|------------|
+| Data Generation (10M rows) | 2.5s | - |
+| **MSTL Decomposition (100k series)** | **1.18s** | **11.8µs** |
+| Period Detection FFT (1k series) | 1ms | 1µs |
+
+### Forecast Scalability (MSTL Model)
+
+| Series Count | Time | Per Series |
+|-------------|------|------------|
+| 1,000 | 42ms | 42µs |
+| 10,000 | 205ms | 20.5µs |
+| 50,000 | 761ms | 15.2µs |
+| **100,000** | **1.6s** | **16µs** |
+
+**Key Finding:** Linear scaling with excellent throughput. 100k series forecasted in 1.6 seconds.
+
+### Model Comparison (10k series × 100 points)
+
+| Model | Time | Notes |
+|-------|------|-------|
+| MSTL | 147ms | Fastest |
+| AutoMSTL | 150ms | Similar |
+| SES | 187ms | - |
+| HoltWinters | 192ms | - |
+| Naive | 216ms | Baseline |
+
+**Surprising Result:** MSTL is actually faster than simpler models at scale, likely due to vectorized operations.
+
+### Longer Series Test (1k series × 500 points)
+
+| Operation | Time |
+|-----------|------|
+| MSTL Decomposition (2 periods) | 15ms |
+| MSTL Forecast | 359ms |
+
+### Short Series Fallback Behavior
+
+MSTL handles series shorter than 2 seasonal periods gracefully:
+
+| Series Length | Decomposition Result |
+|--------------|---------------------|
+| 5 points | Trend-only (OK) |
+| 10 points | Trend-only (OK) |
+| 15 points | Trend-only (OK) |
+| 20 points | Trend-only (OK) |
+| 23 points | Trend-only (OK) |
+| **24 points** | **Full decomposition** (minimum) |
+| 25+ points | Full decomposition |
+
+For period=12, the minimum is 24 points (2 × period). Series below this threshold receive a trend-only decomposition without error.
+
 ## Appendix: Benchmark Code
 
-See `crates/anofox-fcst-core/benches/mstl_perf.rs` for the full benchmark implementation.
+### Rust Benchmarks
+See `crates/anofox-fcst-core/benches/mstl_perf.rs` for the Rust benchmark implementation.
 
 To run:
 ```bash
 cargo bench --bench mstl_perf -p anofox-fcst-core
+```
+
+### SQL Benchmarks
+See `benchmark/mstl/` for SQL-based benchmarks:
+- `mstl_100k_series_perf.sql` - 100k series performance test
+- `mstl_short_series_fallback.sql` - Short series fallback behavior test
+
+To run:
+```bash
+duckdb -unsigned < benchmark/mstl/mstl_100k_series_perf.sql
+duckdb -unsigned < benchmark/mstl/mstl_short_series_fallback.sql
 ```
