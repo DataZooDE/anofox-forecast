@@ -210,10 +210,12 @@ pub fn detect_changepoints_bocpd(
     let hazard = 1.0 / hazard_lambda.max(1.0);
 
     // Normal-Gamma prior parameters
-    let mu0 = values.iter().sum::<f64>() / n as f64; // Prior mean
-    let kappa0 = 1.0; // Prior precision on mean
-    let alpha0 = 1.0; // Prior shape for precision
-    let beta0 = 1.0; // Prior rate for precision
+    // BUG FIX: Use uninformative prior instead of computing from all data
+    // Using the global mean "cheats" by looking at future values
+    let mu0 = 0.0; // Uninformative prior mean
+    let kappa0 = 0.01; // Very weak prior on mean (let data dominate)
+    let alpha0 = 0.01; // Weak prior shape for precision
+    let beta0 = 0.01; // Weak prior rate for precision
 
     // Run length distribution: R[t][r] = P(run length = r at time t)
     // For efficiency, we only track the current run length distribution
@@ -271,16 +273,12 @@ pub fn detect_changepoints_bocpd(
         // Update run length distribution
         let mut new_run_length_prob = vec![0.0; max_run + 1];
 
-        // Changepoint probability at this time step
-        let mut cp_prob = 0.0;
-
         for r in 0..max_run {
             let growth_prob = run_length_prob[r] * pred_prob[r] * (1.0 - hazard);
             let changepoint_contrib = run_length_prob[r] * pred_prob[r] * hazard;
 
             new_run_length_prob[r + 1] += growth_prob;
             new_run_length_prob[0] += changepoint_contrib;
-            cp_prob += changepoint_contrib;
         }
 
         // Normalize
@@ -289,30 +287,45 @@ pub fn detect_changepoints_bocpd(
             for p in &mut new_run_length_prob {
                 *p /= total;
             }
-            cp_prob /= total;
         }
 
-        changepoint_prob[t] = cp_prob;
-        is_changepoint[t] = cp_prob > cp_threshold && t > 0;
+        // FIX: P(r=0) is always ~hazard due to normalization math.
+        // P(r=1) indicates "changepoint happened 1 step ago" - this is the actual signal.
+        let cp_detected = *new_run_length_prob.get(1).unwrap_or(&0.0);
+
+        changepoint_prob[t] = cp_detected;
+        is_changepoint[t] = cp_detected > cp_threshold && t > 0;
 
         if is_changepoint[t] {
             changepoints.push(t);
         }
 
         // Update sufficient statistics
+        // BUG FIX: We need to shift the statistics from old run lengths to new ones
+        // Run length r at time t becomes run length r+1 at time t+1
+        // We need to save old values before modifying
+        let old_sum_x = sum_x.clone();
+        let old_sum_x2 = sum_x2.clone();
+        let old_run_counts = run_counts.clone();
+
         sum_x.push(0.0);
         sum_x2.push(0.0);
         run_counts.push(0);
 
         for r in 0..new_run_length_prob.len() {
             if r == 0 {
-                sum_x[r] = x;
-                sum_x2[r] = x * x;
-                run_counts[r] = 1;
+                // Run length 0 means "changepoint just happened"
+                // No data in this run yet - sufficient stats should be empty
+                // The NEXT observation will be the first in this new run
+                sum_x[r] = 0.0;
+                sum_x2[r] = 0.0;
+                run_counts[r] = 0;
             } else if r <= max_run {
-                sum_x[r] = sum_x[r - 1] + x;
-                sum_x2[r] = sum_x2[r - 1] + x * x;
-                run_counts[r] = run_counts[r - 1] + 1;
+                // Continue from previous run length (r-1 at previous time -> r at current time)
+                // Add current observation to the previous run's statistics
+                sum_x[r] = old_sum_x[r - 1] + x;
+                sum_x2[r] = old_sum_x2[r - 1] + x * x;
+                run_counts[r] = old_run_counts[r - 1] + 1;
             }
         }
 
@@ -420,6 +433,46 @@ mod tests {
             .iter()
             .fold(0.0_f64, |a, &b| a.max(b));
         assert!(max_prob >= 0.0, "Should compute valid probabilities");
+    }
+
+    #[test]
+    fn test_detect_changepoints_bocpd_step_change() {
+        // GitHub Issue #71: Test that BOCPD detects obvious step changes
+        // Series: 100 for 12 points, then 10 for 12 points (changepoint at index 12)
+        let mut values: Vec<f64> = vec![100.0; 12];
+        values.extend(vec![10.0; 12]);
+
+        let result = detect_changepoints_bocpd(&values, 10.0, true).unwrap();
+
+        // Probabilities should NOT all be constant (the original bug)
+        let first_prob = result.changepoint_probability[0];
+        let all_constant = result
+            .changepoint_probability
+            .iter()
+            .all(|&p| (p - first_prob).abs() < 1e-10);
+        assert!(
+            !all_constant,
+            "BUG: All changepoint probabilities are constant at {}",
+            first_prob
+        );
+
+        // There should be a spike at index 12 (the actual changepoint)
+        let prob_before_cp: f64 = result.changepoint_probability[5..11].iter().sum::<f64>() / 6.0;
+        let prob_at_cp = result.changepoint_probability[12];
+
+        assert!(
+            prob_at_cp > prob_before_cp * 10.0,
+            "Changepoint probability at t=12 ({:.4}) should be much higher than baseline ({:.4})",
+            prob_at_cp,
+            prob_before_cp
+        );
+
+        // Probability at changepoint should be significant (>0.5)
+        assert!(
+            prob_at_cp > 0.5,
+            "Changepoint probability at t=12 should be >0.5, got {:.4}",
+            prob_at_cp
+        );
     }
 
     #[test]

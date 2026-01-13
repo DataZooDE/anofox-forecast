@@ -77,15 +77,19 @@ SELECT (_ts_detect_changepoints_bocpd([50.1, 50.2, 50.3, 50.1, 50.4, 50.2, 50.3,
 ----
 false
 
-# Changepoint probability for first observation should be below threshold (< 0.5)
+# Note: First observation probability (P(r=1)) is naturally high since there's no prior run.
+# This is correct BOCPD behavior. The key is that is_changepoint[1] is FALSE (tested above).
+
+# Changepoint probability for middle observations in stable series should be low (< 0.1)
+# Testing position 5 (middle of series) to verify posterior is properly updating
 query I
-SELECT (_ts_detect_changepoints_bocpd([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 250.0, true)).changepoint_probability[1] < 0.5;
+SELECT (_ts_detect_changepoints_bocpd([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 250.0, true)).changepoint_probability[5] < 0.1;
 ----
 true
 
-# Changepoint probability for last observation should be below threshold (< 0.5)
+# Changepoint probability for last observation should be low (< 0.1) for stable series
 query I
-SELECT (_ts_detect_changepoints_bocpd([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 250.0, true)).changepoint_probability[8] < 0.5;
+SELECT (_ts_detect_changepoints_bocpd([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 250.0, true)).changepoint_probability[8] < 0.1;
 ----
 true
 
@@ -317,3 +321,127 @@ SELECT COUNT(*) FROM ts_detect_changepoints_by('changepoints_by_test', grp, ts, 
 
 statement ok
 DROP TABLE changepoints_by_test;
+
+#######################################
+# Issue #71 Regression Tests
+# BOCPD should return varying probabilities, not constant 1/hazard_lambda
+#######################################
+
+# Create test data with obvious step change: 100 for 12 points, then 10 for 12 points
+statement ok
+CREATE TABLE step_change_test AS
+SELECT ('2023-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+       CASE WHEN i < 12 THEN 100.0 ELSE 10.0 END AS val
+FROM generate_series(0, 23) AS t(i);
+
+# Test: Probabilities should NOT all be constant (the original bug)
+# If fixed, max probability should be much higher than min probability
+query I
+SELECT
+    max(prob) > min(prob) * 10  -- At changepoint, prob should be >>10x higher than baseline
+FROM (
+    SELECT unnest((_ts_detect_changepoints_bocpd(
+        list(val ORDER BY ts), 10.0, true
+    )).changepoint_probability) as prob
+    FROM step_change_test
+);
+----
+true
+
+# Test: Probability at changepoint (index 12) should be significant (>0.5)
+# Index is 0-based, so changepoint at position 12 is element 13 in 1-based array
+query I
+SELECT (_ts_detect_changepoints_bocpd(
+    list(val ORDER BY ts), 10.0, true
+)).changepoint_probability[13] > 0.5
+FROM step_change_test;
+----
+true
+
+# Test: Probability before changepoint (index 5-10) should be low (<0.1)
+query I
+SELECT
+    avg(prob) < 0.1
+FROM (
+    SELECT unnest((_ts_detect_changepoints_bocpd(
+        list(val ORDER BY ts), 10.0, true
+    )).changepoint_probability[6:11]) as prob
+    FROM step_change_test
+);
+----
+true
+
+# Test: Changepoint should be detected at index 12
+query I
+SELECT list_contains(
+    (_ts_detect_changepoints_bocpd(
+        list(val ORDER BY ts), 10.0, true
+    )).changepoint_indices,
+    12::UBIGINT
+)
+FROM step_change_test;
+----
+true
+
+# Test via table function: ts_detect_changepoints should detect the step change
+query I
+SELECT COUNT(*) FROM ts_detect_changepoints('step_change_test', ts, val, MAP(['hazard_lambda'], ['10.0']))
+WHERE is_changepoint = true;
+----
+1
+
+# Test via table function: The detected changepoint should be at the correct position
+query I
+SELECT EXTRACT(DAY FROM date_col - '2023-01-01'::TIMESTAMP)::INTEGER
+FROM ts_detect_changepoints('step_change_test', ts, val, MAP(['hazard_lambda'], ['10.0']))
+WHERE is_changepoint = true;
+----
+12
+
+# Test via aggregate function: Should also detect the changepoint
+query I
+SELECT list_reduce(
+    list_transform(
+        ts_detect_changepoints_agg(ts, val, MAP(['hazard_lambda'], ['10.0'])),
+        x -> CASE WHEN x.is_changepoint THEN 1 ELSE 0 END
+    ),
+    (a, b) -> a + b
+) = 1
+FROM step_change_test;
+----
+true
+
+statement ok
+DROP TABLE step_change_test;
+
+# Test with multiple step changes
+statement ok
+CREATE TABLE multi_step_test AS
+SELECT ('2023-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+       CASE
+           WHEN i < 10 THEN 100.0
+           WHEN i < 20 THEN 10.0
+           ELSE 50.0
+       END AS val
+FROM generate_series(0, 29) AS t(i);
+
+# Multiple changepoints should be detected (at least 2)
+query I
+SELECT COUNT(*) >= 2
+FROM ts_detect_changepoints('multi_step_test', ts, val, MAP(['hazard_lambda'], ['10.0']))
+WHERE is_changepoint = true;
+----
+true
+
+# First changepoint should be around index 10
+query I
+SELECT EXTRACT(DAY FROM date_col - '2023-01-01'::TIMESTAMP)::INTEGER BETWEEN 9 AND 11
+FROM ts_detect_changepoints('multi_step_test', ts, val, MAP(['hazard_lambda'], ['10.0']))
+WHERE is_changepoint = true
+ORDER BY date_col
+LIMIT 1;
+----
+true
+
+statement ok
+DROP TABLE multi_step_test;
