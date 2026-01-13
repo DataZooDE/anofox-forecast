@@ -404,6 +404,19 @@ FROM query_table(source::VARCHAR)
 GROUP BY group_col
 )"},
 
+    // ts_classify_seasonality_by: Classify seasonality type per group
+    // C++ API: ts_classify_seasonality_by(table_name, group_col, date_col, value_col, period)
+    // Returns: STRUCT(timing_classification, modulation_type, has_stable_timing, timing_variability,
+    //                 seasonal_strength, is_seasonal, cycle_strengths[], weak_seasons[])
+    {"ts_classify_seasonality_by", {"source", "group_col", "date_col", "value_col", "period", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    group_col AS id,
+    ts_classify_seasonality_agg(date_col, value_col::DOUBLE, period::DOUBLE) AS classification
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)"},
+
     // ts_detect_changepoints: Detect changepoints in a single series
     // C++ API: ts_detect_changepoints(table_name, date_col, value_col, params MAP)
     // params: hazard_lambda (default 250.0), include_probabilities (default false)

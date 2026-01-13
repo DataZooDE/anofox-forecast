@@ -75,6 +75,7 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsSeasonalStrengthFunction(loader);
     RegisterTsSeasonalStrengthWindowedFunction(loader);
     RegisterTsClassifySeasonalityFunction(loader);
+    RegisterTsClassifySeasonalityAggFunction(loader);
     RegisterTsDetectSeasonalityChangesFunction(loader);
     RegisterTsInstantaneousPeriodFunction(loader);
     RegisterTsDetectAmplitudeModulationFunction(loader);

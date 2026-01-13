@@ -56,6 +56,7 @@ void RegisterTsDecomposeSeasonalFunction(ExtensionLoader &loader);
 void RegisterTsSeasonalStrengthFunction(ExtensionLoader &loader);
 void RegisterTsSeasonalStrengthWindowedFunction(ExtensionLoader &loader);
 void RegisterTsClassifySeasonalityFunction(ExtensionLoader &loader);
+void RegisterTsClassifySeasonalityAggFunction(ExtensionLoader &loader);
 void RegisterTsDetectSeasonalityChangesFunction(ExtensionLoader &loader);
 void RegisterTsInstantaneousPeriodFunction(ExtensionLoader &loader);
 void RegisterTsDetectAmplitudeModulationFunction(ExtensionLoader &loader);
