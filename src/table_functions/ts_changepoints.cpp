@@ -19,11 +19,17 @@ static void ExtractListAsDouble(Vector &list_vec, idx_t row_idx, vector<double> 
     auto list_data = ListVector::GetData(list_vec);
     auto &list_entry = list_data[row_idx];
 
+    out_values.clear();
+
+    // Early return for empty lists to avoid accessing uninitialized child vector
+    if (list_entry.length == 0) {
+        return;
+    }
+
     auto &child_vec = ListVector::GetEntry(list_vec);
     auto child_data = FlatVector::GetData<double>(child_vec);
     auto &child_validity = FlatVector::Validity(child_vec);
 
-    out_values.clear();
     out_values.reserve(list_entry.length);
 
     for (idx_t i = 0; i < list_entry.length; i++) {
@@ -48,6 +54,12 @@ static void TsDetectChangepointsFunction(DataChunk &args, ExpressionState &state
 
         vector<double> values;
         ExtractListAsDouble(list_vec, row_idx, values);
+
+        // Handle empty or too small arrays - need at least 2 points for changepoint detection
+        if (values.size() < 2) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
 
         ChangepointResult cp_result;
         memset(&cp_result, 0, sizeof(cp_result));
@@ -121,6 +133,12 @@ static void TsDetectChangepointsWithParamsFunction(DataChunk &args, ExpressionSt
 
         vector<double> values;
         ExtractListAsDouble(list_vec, row_idx, values);
+
+        // Handle empty or too small arrays - need at least 2 points for changepoint detection
+        if (values.size() < 2) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
 
         // Get min_size from unified format (handles constant vectors correctly)
         auto min_size_idx = min_size_data.sel->get_index(row_idx);
@@ -224,6 +242,12 @@ static void TsDetectChangepointsBocpdFunction(DataChunk &args, ExpressionState &
 
         vector<double> values;
         ExtractListAsDouble(list_vec, row_idx, values);
+
+        // Handle empty or too small arrays - need at least 2 points for changepoint detection
+        if (values.size() < 2) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
 
         auto lambda_idx = lambda_data.sel->get_index(row_idx);
         double hazard_lambda = 250.0;

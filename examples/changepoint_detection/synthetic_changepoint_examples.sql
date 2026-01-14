@@ -138,9 +138,8 @@ SELECT 'Constant series' AS test, (_ts_detect_changepoints_bocpd([5.0, 5.0, 5.0,
 -- Single element (returns NULL)
 SELECT 'Single element' AS test, _ts_detect_changepoints_bocpd([5.0], 10.0, false) AS result;
 
--- NOTE: Empty arrays crash - this is a known bug (Issue #82)
--- SELECT 'Empty array' AS test, _ts_detect_changepoints_bocpd([]::DOUBLE[], 10.0, false);
--- CRASHES with: INTERNAL Error: Operation requires a flat vector but a non-flat vector was encountered
+-- Empty array (returns NULL, gracefully handled)
+SELECT 'Empty array' AS test, _ts_detect_changepoints_bocpd([]::DOUBLE[], 10.0, false) AS result;
 
 .print ''
 .print '============================================================'
