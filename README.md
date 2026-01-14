@@ -29,9 +29,11 @@ A time series forecasting extension for DuckDB with 32 models, data preparation,
 ### 📊 Complete Workflow
 - **EDA & Data Quality**: 5 functions (2 table functions, 3 macros) for exploratory analysis and data quality assessment
 - **Data Preparation**: 12 macros for cleaning and transformation
+- **Multi-Key Hierarchy**: 4 functions for combining, aggregating, and splitting hierarchical time series (region/store/item)
 - **Cross-Validation & Backtesting**: Time series CV with expanding/fixed/sliding windows, gap, embargo, and variable horizon support
+- **Conformal Prediction**: Distribution-free prediction intervals with guaranteed coverage probability
 - **Evaluation**: 12 metrics including coverage analysis
-- **Seasonality Detection**: Automatic period identification
+- **Seasonality Detection**: Automatic period identification, seasonality classification, and peak detection
 - **Changepoint Detection**: Regime identification with probabilities
 
 ### 🔢 Feature Calculation
@@ -191,6 +193,8 @@ For complete function signatures, parameters, and detailed documentation, see th
 | Exogenous Variables | [Exogenous Forecasting](docs/API_REFERENCE.md#_ts_forecast_exog-scalar) |
 | [Evaluation Metrics](guides/50_evaluation_metrics.md) | [Evaluation](docs/API_REFERENCE.md#evaluation) |
 | [Backtesting & Cross-Validation](examples/backtesting/README.md) | [Cross-Validation & Backtesting](docs/API_REFERENCE.md#cross-validation--backtesting) |
+| Conformal Prediction | [Conformal Prediction](docs/API_REFERENCE.md#conformal-prediction) |
+| [Multi-Key Hierarchy](examples/multi_key_hierarchy/README.md) | [Multi-Key Hierarchy](docs/API_REFERENCE.md#multi-key-hierarchy) |
 | Forecasting Model Parameters | [Supported Models](docs/API_REFERENCE.md#supported-models), [Parameter Reference](docs/API_REFERENCE.md#parameter-reference) |
 
 

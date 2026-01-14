@@ -8,7 +8,7 @@ This folder contains runnable SQL examples demonstrating time series cross-valid
 
 | File | Description | Data Source |
 |------|-------------|-------------|
-| [`synthetic_backtest_examples.sql`](synthetic_backtest_examples.sql) | 6 patterns using generated data | Synthetic |
+| [`synthetic_backtest_examples.sql`](synthetic_backtest_examples.sql) | 9 patterns using generated data | Synthetic |
 | [`m5_backtest_examples.sql`](m5_backtest_examples.sql) | Real-world examples with M5 dataset | [M5 Competition](https://www.kaggle.com/c/m5-forecasting-accuracy) |
 
 ## Quick Start
@@ -151,6 +151,105 @@ FROM training_data;
 - **Significance Test:** Whether the effect is statistically significant (CI excludes zero)
 
 **See:** `synthetic_backtest_examples.sql` Section 6
+
+---
+
+### Pattern 7: Memory-Efficient CV (Large Datasets)
+
+**Use case:** Large datasets where duplicating data across folds is expensive.
+
+**Key functions:**
+- `ts_cv_split_index` - Returns only index columns (no data)
+- `ts_hydrate_split_full` - Join back to get full data
+
+```sql
+-- Step 1: Create index-only CV splits (memory efficient)
+CREATE TABLE cv_index AS
+SELECT * FROM ts_cv_split_index(
+    'large_sales', store_id, date,  -- column identifiers, not strings
+    ['2024-01-15'::DATE, '2024-01-22'::DATE],
+    7, '1d', MAP{}
+);
+-- Returns: group_col, date_col, fold_id, split (NO data columns)
+
+-- Step 2: Hydrate with full data when needed
+SELECT * FROM ts_hydrate_split_full(
+    'cv_index', 'large_sales', store_id, date, MAP{}
+);
+```
+
+**When to use:**
+- `ts_cv_split` - Small/medium datasets, convenience
+- `ts_cv_split_index` - Large datasets, memory efficiency
+
+**See:** `synthetic_backtest_examples.sql` Section 7
+
+---
+
+### Pattern 8: Hydrate Functions Comparison
+
+**Use case:** Choose the right safety level for joining CV splits with features.
+
+```
+Hydrate Function Decision Tree:
+
+Safety Level →  LOW           MEDIUM              HIGH
+                ↓               ↓                   ↓
+Function    ts_hydrate_split  ts_hydrate_split_full  ts_hydrate_split_strict
+Returns     Single column     All columns + _is_test  Metadata only
+Masking     Automatic         Manual (CASE WHEN)      Manual (explicit JOIN)
+Use when    One unknown       Multiple unknown        Production/audit
+            feature           features                requirements
+```
+
+**Examples:**
+
+```sql
+-- Option A: ts_hydrate_split - Single column, auto-masked
+SELECT * FROM ts_hydrate_split(
+    'cv_index', 'features', store_id, date,
+    competitor_price,           -- Column to mask in test
+    MAP{'strategy': 'null'}     -- Mask strategy
+);
+
+-- Option B: ts_hydrate_split_full - All columns, manual masking
+SELECT
+    fold_id, split, store_id, date,
+    day_of_week,  -- KNOWN: use directly
+    CASE WHEN _is_test THEN NULL ELSE competitor_price END  -- UNKNOWN: manual mask
+FROM ts_hydrate_split_full('cv_index', 'features', store_id, date, MAP{});
+
+-- Option C: ts_hydrate_split_strict - Metadata only, fail-safe
+SELECT hs.*, src.day_of_week,
+       CASE WHEN hs._is_test THEN NULL ELSE src.competitor_price END
+FROM ts_hydrate_split_strict('cv_index', 'features', store_id, date, MAP{}) hs
+JOIN features src ON hs.group_col = src.store_id AND hs.date_col = src.date;
+```
+
+**See:** `synthetic_backtest_examples.sql` Section 8
+
+---
+
+### Pattern 9: Data Leakage Audit
+
+**Use case:** Audit CV pipeline to ensure no data leakage before running expensive backtests.
+
+```sql
+-- Audit prepared CV data
+SELECT * FROM ts_check_leakage(
+    'cv_prepared',
+    _is_test,      -- Boolean column marking test rows
+    MAP{}
+);
+-- Returns: status, test_row_count, train_row_count, recommendation
+```
+
+**When to use:**
+- Before running expensive backtests
+- Audit production CV pipelines
+- Verify train/test separation is correct
+
+**See:** `synthetic_backtest_examples.sql` Section 9
 
 ---
 

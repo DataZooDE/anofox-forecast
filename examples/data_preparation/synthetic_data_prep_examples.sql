@@ -285,6 +285,245 @@ FROM ts_drop_short('step3', series_id, 5)
 GROUP BY series_id ORDER BY series_id;
 
 -- =============================================================================
+-- SECTION 7: Statistics Summary
+-- =============================================================================
+-- Use case: Get a quick overview of dataset characteristics.
+-- Compare: ts_stats (per-series) vs ts_stats_summary (dataset-wide aggregate)
+
+.print ''
+.print '>>> SECTION 7: Statistics Summary'
+.print '-----------------------------------------------------------------------------'
+
+-- Create test data with varying characteristics
+CREATE OR REPLACE TABLE stats_test AS
+SELECT * FROM (
+    -- Short series with gaps
+    SELECT 'A' AS series_id, '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+           CASE WHEN i = 2 THEN NULL ELSE (i * 10.0) END AS value
+    FROM generate_series(0, 4) t(i)
+    UNION ALL
+    -- Longer series, no gaps
+    SELECT 'B' AS series_id, '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+           (i + 100.0) AS value
+    FROM generate_series(0, 9) t(i)
+    UNION ALL
+    -- Medium series with multiple gaps
+    SELECT 'C' AS series_id, '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+           CASE WHEN i IN (1, 3, 5) THEN NULL ELSE (i * 5.0) END AS value
+    FROM generate_series(0, 7) t(i)
+);
+
+.print 'Per-series stats with ts_stats (detailed):'
+SELECT id AS series_id,
+       (stats).length AS length,
+       (stats).n_nulls AS nulls,
+       (stats).n_zeros AS zeros
+FROM ts_stats('stats_test', series_id, ts, value, '1d');
+
+.print ''
+.print 'Dataset-wide summary (aggregated manually):'
+-- First compute stats, then summarize
+CREATE OR REPLACE TABLE computed_stats AS
+SELECT * FROM ts_stats('stats_test', series_id, ts, value, '1d');
+
+-- Manual aggregation (ts_stats_summary currently has a bug with n_gaps field)
+SELECT
+    COUNT(*) AS n_series,
+    ROUND(AVG((stats).length), 1) AS avg_length,
+    MIN((stats).length) AS min_length,
+    MAX((stats).length) AS max_length,
+    SUM((stats).n_nulls) AS total_nulls,
+    SUM((stats).n_zeros) AS total_zeros
+FROM computed_stats;
+
+.print ''
+.print 'When to use: ts_stats for investigating individual series,'
+.print '             ts_stats_summary for quick dataset health check.'
+
+-- =============================================================================
+-- SECTION 8: Data Quality Summary
+-- =============================================================================
+-- Use case: Quickly assess data quality distribution across all series.
+-- Compare: ts_data_quality (per-series) vs ts_data_quality_summary (tier counts)
+
+.print ''
+.print '>>> SECTION 8: Data Quality Summary'
+.print '-----------------------------------------------------------------------------'
+
+-- Reuse stats_test data, add more variation
+CREATE OR REPLACE TABLE quality_test AS
+SELECT * FROM (
+    -- Good quality series (long, few nulls)
+    SELECT 'GOOD1' AS series_id, '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+           (i * 10.0 + SIN(i)) AS value
+    FROM generate_series(0, 29) t(i)
+    UNION ALL
+    SELECT 'GOOD2' AS series_id, '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+           (i * 5.0 + 50.0) AS value
+    FROM generate_series(0, 24) t(i)
+    UNION ALL
+    -- Fair quality series (some nulls)
+    SELECT 'FAIR1' AS series_id, '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+           CASE WHEN i % 5 = 0 THEN NULL ELSE (i * 2.0) END AS value
+    FROM generate_series(0, 19) t(i)
+    UNION ALL
+    -- Poor quality series (short, many nulls)
+    SELECT 'POOR1' AS series_id, '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+           CASE WHEN i % 2 = 0 THEN NULL ELSE (i + 1.0) END AS value
+    FROM generate_series(0, 5) t(i)
+    UNION ALL
+    SELECT 'POOR2' AS series_id, '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+           CASE WHEN i < 2 THEN NULL ELSE (i * 3.0) END AS value
+    FROM generate_series(0, 3) t(i)
+);
+
+.print 'Per-series quality with ts_data_quality (detailed):'
+SELECT
+    unique_id,
+    ROUND((quality).overall_score, 2) AS score,
+    CASE
+        WHEN (quality).overall_score >= 0.8 THEN 'GOOD'
+        WHEN (quality).overall_score >= 0.5 THEN 'FAIR'
+        ELSE 'POOR'
+    END AS tier
+FROM ts_data_quality('quality_test', series_id, ts, value, 10, '1d');
+
+.print ''
+.print 'Dataset-wide summary with ts_data_quality_summary (tier counts):'
+SELECT * FROM ts_data_quality_summary('quality_test', series_id, ts, value, 10);
+
+.print ''
+.print 'When to use: ts_data_quality to identify which series need attention,'
+.print '             ts_data_quality_summary for quick pass/fail assessment.'
+
+-- =============================================================================
+-- SECTION 9: Drop Zeros vs Drop Gappy
+-- =============================================================================
+-- Use case: Filter out series that are inactive (all zeros) vs sparse (many nulls).
+-- Compare: ts_drop_zeros (all-zero filter) vs ts_drop_gappy (configurable null threshold)
+
+.print ''
+.print '>>> SECTION 9: Drop Zeros vs Drop Gappy'
+.print '-----------------------------------------------------------------------------'
+
+CREATE OR REPLACE TABLE filter_test AS
+SELECT * FROM (
+    -- Active series (has non-zero values)
+    SELECT 'ACTIVE' AS series_id, '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+           (i + 1.0) AS value
+    FROM generate_series(0, 9) t(i)
+    UNION ALL
+    -- Inactive series (all zeros)
+    SELECT 'ZEROS' AS series_id, '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+           0.0 AS value
+    FROM generate_series(0, 9) t(i)
+    UNION ALL
+    -- Sparse series (30% nulls)
+    SELECT 'SPARSE30' AS series_id, '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+           CASE WHEN i IN (0, 3, 6) THEN NULL ELSE (i * 5.0) END AS value
+    FROM generate_series(0, 9) t(i)
+    UNION ALL
+    -- Very sparse series (60% nulls)
+    SELECT 'SPARSE60' AS series_id, '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+           CASE WHEN i IN (0, 1, 3, 4, 6, 7) THEN NULL ELSE (i * 5.0) END AS value
+    FROM generate_series(0, 9) t(i)
+    UNION ALL
+    -- Mixed: some zeros, some nulls
+    SELECT 'MIXED' AS series_id, '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+           CASE WHEN i < 3 THEN 0.0 WHEN i = 5 THEN NULL ELSE (i * 2.0) END AS value
+    FROM generate_series(0, 9) t(i)
+);
+
+.print 'Original data summary:'
+SELECT series_id,
+       COUNT(*) AS n_rows,
+       SUM(CASE WHEN value = 0 THEN 1 ELSE 0 END) AS n_zeros,
+       SUM(CASE WHEN value IS NULL THEN 1 ELSE 0 END) AS n_nulls,
+       SUM(CASE WHEN value != 0 AND value IS NOT NULL THEN 1 ELSE 0 END) AS n_valid
+FROM filter_test GROUP BY series_id ORDER BY series_id;
+
+.print ''
+.print 'After ts_drop_zeros (removes series with NO non-zero values):'
+SELECT DISTINCT series_id FROM ts_drop_zeros('filter_test', series_id, value) ORDER BY series_id;
+
+.print ''
+.print 'After ts_drop_gappy max_ratio=0.2 (removes series with >20% nulls):'
+SELECT DISTINCT series_id FROM ts_drop_gappy('filter_test', series_id, value, 0.2) ORDER BY series_id;
+
+.print ''
+.print 'After ts_drop_gappy max_ratio=0.5 (removes series with >50% nulls):'
+SELECT DISTINCT series_id FROM ts_drop_gappy('filter_test', series_id, value, 0.5) ORDER BY series_id;
+
+.print ''
+.print 'When to use: ts_drop_zeros for removing truly inactive series,'
+.print '             ts_drop_gappy for configurable sparsity threshold.'
+
+-- =============================================================================
+-- SECTION 10: Timestamp Validation
+-- =============================================================================
+-- Use case: Verify all expected timestamps exist before forecasting.
+-- Compare: ts_validate_timestamps (per-group detail) vs ts_validate_timestamps_summary (pass/fail)
+
+.print ''
+.print '>>> SECTION 10: Timestamp Validation'
+.print '-----------------------------------------------------------------------------'
+
+-- Create test data with missing timestamps
+CREATE OR REPLACE TABLE timestamp_test AS
+SELECT * FROM (
+    -- Complete series
+    SELECT 'COMPLETE' AS series_id, '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+           (i + 1.0) AS value
+    FROM generate_series(0, 4) t(i)
+    UNION ALL
+    -- Missing middle timestamps (Jan 2, 3)
+    SELECT 'MISSING_MID' AS series_id, ts, value FROM (VALUES
+        ('2024-01-01'::TIMESTAMP, 10.0),
+        ('2024-01-04'::TIMESTAMP, 40.0),
+        ('2024-01-05'::TIMESTAMP, 50.0)
+    ) AS t(ts, value)
+    UNION ALL
+    -- Missing end timestamp (Jan 5)
+    SELECT 'MISSING_END' AS series_id, '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+           (i + 1.0) AS value
+    FROM generate_series(0, 3) t(i)
+);
+
+-- Define expected timestamps
+.print 'Expected timestamps: 2024-01-01 through 2024-01-05'
+
+.print ''
+.print 'Per-group validation with ts_validate_timestamps (detailed):'
+SELECT
+    group_col AS series_id,
+    is_valid,
+    n_expected,
+    n_found,
+    n_missing,
+    missing_timestamps
+FROM ts_validate_timestamps(
+    'timestamp_test',
+    series_id,
+    ts,
+    ['2024-01-01'::TIMESTAMP, '2024-01-02'::TIMESTAMP, '2024-01-03'::TIMESTAMP,
+     '2024-01-04'::TIMESTAMP, '2024-01-05'::TIMESTAMP]
+);
+
+.print ''
+.print 'Dataset-wide check with ts_validate_timestamps_summary (quick pass/fail):'
+SELECT * FROM ts_validate_timestamps_summary(
+    'timestamp_test',
+    series_id,
+    ts,
+    ['2024-01-01'::TIMESTAMP, '2024-01-02'::TIMESTAMP, '2024-01-03'::TIMESTAMP,
+     '2024-01-04'::TIMESTAMP, '2024-01-05'::TIMESTAMP]
+);
+
+.print ''
+.print 'When to use: ts_validate_timestamps to find exactly which timestamps are missing,'
+.print '             ts_validate_timestamps_summary for quick validation before bulk processing.'
+
+-- =============================================================================
 -- CLEANUP
 -- =============================================================================
 
@@ -301,6 +540,11 @@ DROP TABLE IF EXISTS messy_data;
 DROP TABLE IF EXISTS step1;
 DROP TABLE IF EXISTS step2;
 DROP TABLE IF EXISTS step3;
+DROP TABLE IF EXISTS stats_test;
+DROP TABLE IF EXISTS computed_stats;
+DROP TABLE IF EXISTS quality_test;
+DROP TABLE IF EXISTS filter_test;
+DROP TABLE IF EXISTS timestamp_test;
 
 .print 'All tables cleaned up.'
 .print ''
