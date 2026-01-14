@@ -116,6 +116,46 @@ SELECT _ts_detect_changepoints_bocpd(NULL, 250.0, false) IS NULL;
 true
 
 #######################################
+# Empty/Small Array Edge Cases (Issue #82)
+#######################################
+
+# Empty array should return NULL (not crash)
+query I
+SELECT _ts_detect_changepoints_bocpd([]::DOUBLE[], 250.0, false) IS NULL;
+----
+true
+
+# Single element should return NULL (need at least 3 points for BOCPD)
+query I
+SELECT _ts_detect_changepoints_bocpd([5.0], 250.0, false) IS NULL;
+----
+true
+
+# Two elements should return NULL (BOCPD needs at least 3 points)
+query I
+SELECT _ts_detect_changepoints_bocpd([5.0, 10.0], 250.0, false) IS NULL;
+----
+true
+
+# Three elements should work (minimum valid input for BOCPD)
+query I
+SELECT _ts_detect_changepoints_bocpd([5.0, 5.0, 5.0], 250.0, false) IS NOT NULL;
+----
+true
+
+# Three identical elements should have no changepoints
+query I
+SELECT length((_ts_detect_changepoints_bocpd([5.0, 5.0, 5.0], 250.0, false)).changepoint_indices);
+----
+0
+
+# Three elements returns array of length 3
+query I
+SELECT length((_ts_detect_changepoints_bocpd([5.0, 5.0, 5.0], 250.0, false)).is_changepoint);
+----
+3
+
+#######################################
 # Table Function API Tests
 #######################################
 
