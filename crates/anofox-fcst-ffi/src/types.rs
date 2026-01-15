@@ -1308,3 +1308,168 @@ impl Default for ConformalMultiResultFFI {
         }
     }
 }
+
+// ============================================================================
+// Conformal Learn/Apply API Types (v2)
+// ============================================================================
+
+/// Conformal method enumeration for FFI.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ConformalMethodFFI {
+    /// Symmetric intervals using absolute residuals
+    #[default]
+    Symmetric = 0,
+    /// Asymmetric intervals using separate quantiles for positive/negative residuals
+    Asymmetric = 1,
+    /// Adaptive intervals scaled by difficulty scores
+    Adaptive = 2,
+}
+
+impl From<anofox_fcst_core::ConformalMethod> for ConformalMethodFFI {
+    fn from(method: anofox_fcst_core::ConformalMethod) -> Self {
+        match method {
+            anofox_fcst_core::ConformalMethod::Symmetric => Self::Symmetric,
+            anofox_fcst_core::ConformalMethod::Asymmetric => Self::Asymmetric,
+            anofox_fcst_core::ConformalMethod::Adaptive => Self::Adaptive,
+        }
+    }
+}
+
+impl From<ConformalMethodFFI> for anofox_fcst_core::ConformalMethod {
+    fn from(method: ConformalMethodFFI) -> Self {
+        match method {
+            ConformalMethodFFI::Symmetric => Self::Symmetric,
+            ConformalMethodFFI::Asymmetric => Self::Asymmetric,
+            ConformalMethodFFI::Adaptive => Self::Adaptive,
+        }
+    }
+}
+
+/// Conformal strategy enumeration for FFI.
+///
+/// The strategy determines how residuals are used for calibration.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ConformalStrategyFFI {
+    /// Split conformal - uses calibration residuals directly
+    #[default]
+    Split = 0,
+    /// Cross-validation conformal - uses CV residuals
+    CrossVal = 1,
+    /// Jackknife+ conformal - stores full residual distribution
+    JackknifePlus = 2,
+}
+
+impl From<anofox_fcst_core::ConformalStrategy> for ConformalStrategyFFI {
+    fn from(strategy: anofox_fcst_core::ConformalStrategy) -> Self {
+        match strategy {
+            anofox_fcst_core::ConformalStrategy::Split => Self::Split,
+            anofox_fcst_core::ConformalStrategy::CrossVal => Self::CrossVal,
+            anofox_fcst_core::ConformalStrategy::JackknifePlus => Self::JackknifePlus,
+        }
+    }
+}
+
+impl From<ConformalStrategyFFI> for anofox_fcst_core::ConformalStrategy {
+    fn from(strategy: ConformalStrategyFFI) -> Self {
+        match strategy {
+            ConformalStrategyFFI::Split => Self::Split,
+            ConformalStrategyFFI::CrossVal => Self::CrossVal,
+            ConformalStrategyFFI::JackknifePlus => Self::JackknifePlus,
+        }
+    }
+}
+
+/// Calibration profile for conformal prediction (FFI version).
+///
+/// Contains pre-computed conformity scores that can be reused.
+#[repr(C)]
+pub struct CalibrationProfileFFI {
+    /// Method used (symmetric, asymmetric, adaptive)
+    pub method: ConformalMethodFFI,
+    /// Strategy used (split, crossval, jackknife+)
+    pub strategy: ConformalStrategyFFI,
+    /// Alpha values (miscoverage rates)
+    pub alphas: *mut c_double,
+    /// State vector (strategy-specific):
+    /// - Split/CrossVal: [lower_q1, ..., upper_q1, ...]
+    /// - JackknifePlus: sorted absolute residuals
+    pub state_vector: *mut c_double,
+    /// Length of state_vector
+    pub state_vector_len: size_t,
+    /// Lower scores (one per alpha)
+    pub scores_lower: *mut c_double,
+    /// Upper scores (one per alpha); same as lower for symmetric
+    pub scores_upper: *mut c_double,
+    /// Number of alpha levels
+    pub n_levels: size_t,
+    /// Number of residuals used for calibration
+    pub n_residuals: size_t,
+}
+
+impl Default for CalibrationProfileFFI {
+    fn default() -> Self {
+        Self {
+            method: ConformalMethodFFI::Symmetric,
+            strategy: ConformalStrategyFFI::Split,
+            alphas: std::ptr::null_mut(),
+            state_vector: std::ptr::null_mut(),
+            state_vector_len: 0,
+            scores_lower: std::ptr::null_mut(),
+            scores_upper: std::ptr::null_mut(),
+            n_levels: 0,
+            n_residuals: 0,
+        }
+    }
+}
+
+/// Prediction intervals from applying a calibration profile (FFI version).
+///
+/// Layout: lower/upper are flattened as [level0_forecasts..., level1_forecasts..., ...]
+#[repr(C)]
+pub struct PredictionIntervalsFFI {
+    /// Point forecasts
+    pub point: *mut c_double,
+    /// Number of forecasts
+    pub n_forecasts: size_t,
+    /// Coverage levels (1 - alpha)
+    pub coverage: *mut c_double,
+    /// Number of coverage levels
+    pub n_levels: size_t,
+    /// Flattened lower bounds (n_levels * n_forecasts, level-major order)
+    pub lower: *mut c_double,
+    /// Flattened upper bounds (n_levels * n_forecasts, level-major order)
+    pub upper: *mut c_double,
+    /// Method used
+    pub method: ConformalMethodFFI,
+}
+
+impl Default for PredictionIntervalsFFI {
+    fn default() -> Self {
+        Self {
+            point: std::ptr::null_mut(),
+            n_forecasts: 0,
+            coverage: std::ptr::null_mut(),
+            n_levels: 0,
+            lower: std::ptr::null_mut(),
+            upper: std::ptr::null_mut(),
+            method: ConformalMethodFFI::Symmetric,
+        }
+    }
+}
+
+/// Conformal evaluation metrics (FFI version).
+#[repr(C)]
+pub struct ConformalEvaluationFFI {
+    /// Empirical coverage (fraction within intervals)
+    pub coverage: c_double,
+    /// Violation rate (fraction outside intervals, i.e., 1 - coverage)
+    pub violation_rate: c_double,
+    /// Mean interval width
+    pub mean_width: c_double,
+    /// Winkler score
+    pub winkler_score: c_double,
+    /// Number of observations evaluated
+    pub n_observations: size_t,
+}

@@ -123,6 +123,12 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsConformalPredictAsymmetricFunction(loader);
     RegisterTsMeanIntervalWidthFunction(loader);
 
+    // Register Conformal API v2 (Learn/Apply pattern)
+    RegisterTsConformalLearnFunction(loader);
+    RegisterTsConformalApplyFunction(loader);
+    RegisterTsConformalCoverageFunction(loader);
+    RegisterTsConformalEvaluateFunction(loader);
+
     // Register Table Macros
     RegisterTsTableMacros(loader);
 
