@@ -4315,6 +4315,297 @@ pub unsafe extern "C" fn anofox_ts_mean_interval_width(
     }
 }
 
+// ============================================================================
+// Conformal Learn/Apply API (v2)
+// ============================================================================
+
+/// Learn a calibration profile from residuals.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformal_learn(
+    residuals: *const c_double,
+    residuals_validity: *const u64,
+    residuals_length: size_t,
+    alphas: *const c_double,
+    n_alphas: size_t,
+    method: types::ConformalMethodFFI,
+    strategy: types::ConformalStrategyFFI,
+    difficulty: *const c_double, // Optional, can be null for non-adaptive
+    out_profile: *mut types::CalibrationProfileFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if residuals.is_null() || alphas.is_null() || out_profile.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let residual_series = build_series(residuals, residuals_validity, residuals_length);
+        let residual_values: Vec<f64> = residual_series.iter().filter_map(|v| *v).collect();
+        let alpha_slice = std::slice::from_raw_parts(alphas, n_alphas);
+
+        let difficulty_opt = if difficulty.is_null() {
+            None
+        } else {
+            Some(std::slice::from_raw_parts(difficulty, residuals_length))
+        };
+
+        anofox_fcst_core::conformal_learn(
+            &residual_values,
+            alpha_slice,
+            method.into(),
+            strategy.into(),
+            difficulty_opt,
+        )
+    }));
+
+    match result {
+        Ok(Ok(profile)) => {
+            fill_calibration_profile(out_profile, &profile);
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in conformal_learn",
+            );
+            false
+        }
+    }
+}
+
+/// Apply a calibration profile to generate prediction intervals.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformal_apply(
+    forecasts: *const c_double,
+    n_forecasts: size_t,
+    profile: *const types::CalibrationProfileFFI,
+    difficulty: *const c_double, // Optional, can be null for non-adaptive
+    out_intervals: *mut types::PredictionIntervalsFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if forecasts.is_null() || profile.is_null() || out_intervals.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let forecast_slice = std::slice::from_raw_parts(forecasts, n_forecasts);
+
+        // Reconstruct CalibrationProfile from FFI
+        let profile_ref = &*profile;
+        let core_profile = anofox_fcst_core::CalibrationProfile {
+            method: profile_ref.method.into(),
+            strategy: profile_ref.strategy.into(),
+            alphas: std::slice::from_raw_parts(profile_ref.alphas, profile_ref.n_levels).to_vec(),
+            state_vector: if profile_ref.state_vector.is_null() {
+                Vec::new()
+            } else {
+                std::slice::from_raw_parts(profile_ref.state_vector, profile_ref.state_vector_len)
+                    .to_vec()
+            },
+            scores_lower: std::slice::from_raw_parts(
+                profile_ref.scores_lower,
+                profile_ref.n_levels,
+            )
+            .to_vec(),
+            scores_upper: std::slice::from_raw_parts(
+                profile_ref.scores_upper,
+                profile_ref.n_levels,
+            )
+            .to_vec(),
+            n_residuals: profile_ref.n_residuals,
+        };
+
+        let difficulty_opt = if difficulty.is_null() {
+            None
+        } else {
+            Some(std::slice::from_raw_parts(difficulty, n_forecasts))
+        };
+
+        anofox_fcst_core::conformal_apply(forecast_slice, &core_profile, difficulty_opt)
+    }));
+
+    match result {
+        Ok(Ok(intervals)) => {
+            fill_prediction_intervals(out_intervals, &intervals);
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in conformal_apply",
+            );
+            false
+        }
+    }
+}
+
+/// Compute empirical coverage of prediction intervals.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformal_coverage(
+    actuals: *const c_double,
+    lower: *const c_double,
+    upper: *const c_double,
+    length: size_t,
+    out_coverage: *mut c_double,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if actuals.is_null() || lower.is_null() || upper.is_null() || out_coverage.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let actuals_slice = std::slice::from_raw_parts(actuals, length);
+        let lower_slice = std::slice::from_raw_parts(lower, length);
+        let upper_slice = std::slice::from_raw_parts(upper, length);
+        anofox_fcst_core::conformal_coverage(actuals_slice, lower_slice, upper_slice)
+    }));
+
+    match result {
+        Ok(Ok(cov)) => {
+            *out_coverage = cov;
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in conformal_coverage",
+            );
+            false
+        }
+    }
+}
+
+/// Compute comprehensive conformal evaluation metrics.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformal_evaluate(
+    actuals: *const c_double,
+    lower: *const c_double,
+    upper: *const c_double,
+    length: size_t,
+    alpha: c_double,
+    out_eval: *mut types::ConformalEvaluationFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if actuals.is_null() || lower.is_null() || upper.is_null() || out_eval.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let actuals_slice = std::slice::from_raw_parts(actuals, length);
+        let lower_slice = std::slice::from_raw_parts(lower, length);
+        let upper_slice = std::slice::from_raw_parts(upper, length);
+        anofox_fcst_core::conformal_evaluate(actuals_slice, lower_slice, upper_slice, alpha)
+    }));
+
+    match result {
+        Ok(Ok(eval)) => {
+            (*out_eval).coverage = eval.coverage;
+            (*out_eval).violation_rate = eval.violation_rate;
+            (*out_eval).mean_width = eval.mean_width;
+            (*out_eval).winkler_score = eval.winkler_score;
+            (*out_eval).n_observations = eval.n_observations;
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in conformal_evaluate",
+            );
+            false
+        }
+    }
+}
+
+/// Helper function to fill a CalibrationProfileFFI from a core CalibrationProfile.
+unsafe fn fill_calibration_profile(
+    out: *mut types::CalibrationProfileFFI,
+    profile: &anofox_fcst_core::CalibrationProfile,
+) {
+    (*out).method = profile.method.into();
+    (*out).strategy = profile.strategy.into();
+    (*out).alphas = vec_to_c_double_array(&profile.alphas);
+    (*out).state_vector = vec_to_c_double_array(&profile.state_vector);
+    (*out).state_vector_len = profile.state_vector.len();
+    (*out).scores_lower = vec_to_c_double_array(&profile.scores_lower);
+    (*out).scores_upper = vec_to_c_double_array(&profile.scores_upper);
+    (*out).n_levels = profile.alphas.len();
+    (*out).n_residuals = profile.n_residuals;
+}
+
+/// Helper function to fill a PredictionIntervalsFFI from a core PredictionIntervals.
+unsafe fn fill_prediction_intervals(
+    out: *mut types::PredictionIntervalsFFI,
+    intervals: &anofox_fcst_core::PredictionIntervals,
+) {
+    let n_forecasts = intervals.point.len();
+    let n_levels = intervals.coverage.len();
+
+    (*out).point = vec_to_c_double_array(&intervals.point);
+    (*out).n_forecasts = n_forecasts;
+    (*out).coverage = vec_to_c_double_array(&intervals.coverage);
+    (*out).n_levels = n_levels;
+    (*out).method = intervals.method.into();
+
+    // Flatten lower/upper: [level0_forecasts..., level1_forecasts..., ...]
+    let total_size = n_levels * n_forecasts;
+    let lower_ptr = alloc_double_array(total_size);
+    let upper_ptr = alloc_double_array(total_size);
+
+    for level_idx in 0..n_levels {
+        for fcst_idx in 0..n_forecasts {
+            let flat_idx = level_idx * n_forecasts + fcst_idx;
+            *lower_ptr.add(flat_idx) = intervals.lower[level_idx][fcst_idx];
+            *upper_ptr.add(flat_idx) = intervals.upper[level_idx][fcst_idx];
+        }
+    }
+
+    (*out).lower = lower_ptr;
+    (*out).upper = upper_ptr;
+}
+
 /// Helper function to fill a ConformalResultFFI from a core ConformalResult.
 unsafe fn fill_conformal_result(
     out: *mut ConformalResultFFI,
@@ -4910,6 +5201,68 @@ pub unsafe extern "C" fn anofox_free_conformal_multi_result(
     if !r.conformity_scores.is_null() {
         free(r.conformity_scores as *mut core::ffi::c_void);
         r.conformity_scores = ptr::null_mut();
+    }
+    if !r.lower.is_null() {
+        free(r.lower as *mut core::ffi::c_void);
+        r.lower = ptr::null_mut();
+    }
+    if !r.upper.is_null() {
+        free(r.upper as *mut core::ffi::c_void);
+        r.upper = ptr::null_mut();
+    }
+}
+
+/// Free a CalibrationProfileFFI.
+///
+/// # Safety
+/// The result pointer must be valid or null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_free_calibration_profile(
+    result: *mut types::CalibrationProfileFFI,
+) {
+    if result.is_null() {
+        return;
+    }
+    let r = &mut *result;
+
+    if !r.alphas.is_null() {
+        free(r.alphas as *mut core::ffi::c_void);
+        r.alphas = ptr::null_mut();
+    }
+    if !r.state_vector.is_null() {
+        free(r.state_vector as *mut core::ffi::c_void);
+        r.state_vector = ptr::null_mut();
+    }
+    if !r.scores_lower.is_null() {
+        free(r.scores_lower as *mut core::ffi::c_void);
+        r.scores_lower = ptr::null_mut();
+    }
+    if !r.scores_upper.is_null() {
+        free(r.scores_upper as *mut core::ffi::c_void);
+        r.scores_upper = ptr::null_mut();
+    }
+}
+
+/// Free a PredictionIntervalsFFI.
+///
+/// # Safety
+/// The result pointer must be valid or null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_free_prediction_intervals(
+    result: *mut types::PredictionIntervalsFFI,
+) {
+    if result.is_null() {
+        return;
+    }
+    let r = &mut *result;
+
+    if !r.point.is_null() {
+        free(r.point as *mut core::ffi::c_void);
+        r.point = ptr::null_mut();
+    }
+    if !r.coverage.is_null() {
+        free(r.coverage as *mut core::ffi::c_void);
+        r.coverage = ptr::null_mut();
     }
     if !r.lower.is_null() {
         free(r.lower as *mut core::ffi::c_void);

@@ -93,6 +93,12 @@ void RegisterTsConformalPredictFunction(ExtensionLoader &loader);
 void RegisterTsConformalPredictAsymmetricFunction(ExtensionLoader &loader);
 void RegisterTsMeanIntervalWidthFunction(ExtensionLoader &loader);
 
+// Conformal API v2 (Learn/Apply pattern)
+void RegisterTsConformalLearnFunction(ExtensionLoader &loader);
+void RegisterTsConformalApplyFunction(ExtensionLoader &loader);
+void RegisterTsConformalCoverageFunction(ExtensionLoader &loader);
+void RegisterTsConformalEvaluateFunction(ExtensionLoader &loader);
+
 // Table macros
 void RegisterTsTableMacros(ExtensionLoader &loader);
 

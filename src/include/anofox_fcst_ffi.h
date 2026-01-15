@@ -11,6 +11,44 @@
 #include <stdlib.h>
 
 /**
+ * Conformal method enumeration for FFI.
+ */
+typedef enum ConformalMethodFFI {
+    /**
+     * Symmetric intervals using absolute residuals
+     */
+    SYMMETRIC = 0,
+    /**
+     * Asymmetric intervals using separate quantiles for positive/negative residuals
+     */
+    ASYMMETRIC = 1,
+    /**
+     * Adaptive intervals scaled by difficulty scores
+     */
+    ADAPTIVE = 2,
+} ConformalMethodFFI;
+
+/**
+ * Conformal strategy enumeration for FFI.
+ *
+ * The strategy determines how residuals are used for calibration.
+ */
+typedef enum ConformalStrategyFFI {
+    /**
+     * Split conformal - uses calibration residuals directly
+     */
+    SPLIT = 0,
+    /**
+     * Cross-validation conformal - uses CV residuals
+     */
+    CROSS_VAL = 1,
+    /**
+     * Jackknife+ conformal - stores full residual distribution
+     */
+    JACKKNIFE_PLUS = 2,
+} ConformalStrategyFFI;
+
+/**
  * Date type enumeration for handling different DuckDB date types.
  */
 typedef enum DateType {
@@ -1215,6 +1253,114 @@ typedef struct ConformalMultiResultFFI {
 } ConformalMultiResultFFI;
 
 /**
+ * Calibration profile for conformal prediction (FFI version).
+ *
+ * Contains pre-computed conformity scores that can be reused.
+ */
+typedef struct CalibrationProfileFFI {
+    /**
+     * Method used (symmetric, asymmetric, adaptive)
+     */
+    enum ConformalMethodFFI method;
+    /**
+     * Strategy used (split, crossval, jackknife+)
+     */
+    enum ConformalStrategyFFI strategy;
+    /**
+     * Alpha values (miscoverage rates)
+     */
+    double *alphas;
+    /**
+     * State vector (strategy-specific):
+     * - Split/CrossVal: [lower_q1, ..., upper_q1, ...]
+     * - JackknifePlus: sorted absolute residuals
+     */
+    double *state_vector;
+    /**
+     * Length of state_vector
+     */
+    size_t state_vector_len;
+    /**
+     * Lower scores (one per alpha)
+     */
+    double *scores_lower;
+    /**
+     * Upper scores (one per alpha); same as lower for symmetric
+     */
+    double *scores_upper;
+    /**
+     * Number of alpha levels
+     */
+    size_t n_levels;
+    /**
+     * Number of residuals used for calibration
+     */
+    size_t n_residuals;
+} CalibrationProfileFFI;
+
+/**
+ * Prediction intervals from applying a calibration profile (FFI version).
+ *
+ * Layout: lower/upper are flattened as [level0_forecasts..., level1_forecasts..., ...]
+ */
+typedef struct PredictionIntervalsFFI {
+    /**
+     * Point forecasts
+     */
+    double *point;
+    /**
+     * Number of forecasts
+     */
+    size_t n_forecasts;
+    /**
+     * Coverage levels (1 - alpha)
+     */
+    double *coverage;
+    /**
+     * Number of coverage levels
+     */
+    size_t n_levels;
+    /**
+     * Flattened lower bounds (n_levels * n_forecasts, level-major order)
+     */
+    double *lower;
+    /**
+     * Flattened upper bounds (n_levels * n_forecasts, level-major order)
+     */
+    double *upper;
+    /**
+     * Method used
+     */
+    enum ConformalMethodFFI method;
+} PredictionIntervalsFFI;
+
+/**
+ * Conformal evaluation metrics (FFI version).
+ */
+typedef struct ConformalEvaluationFFI {
+    /**
+     * Empirical coverage (fraction within intervals)
+     */
+    double coverage;
+    /**
+     * Violation rate (fraction outside intervals, i.e., 1 - coverage)
+     */
+    double violation_rate;
+    /**
+     * Mean interval width
+     */
+    double mean_width;
+    /**
+     * Winkler score
+     */
+    double winkler_score;
+    /**
+     * Number of observations evaluated
+     */
+    size_t n_observations;
+} ConformalEvaluationFFI;
+
+/**
  * Nullable data array for DuckDB integration.
  *
  * The validity bitmask follows DuckDB's convention where bit i of validity[i/64]
@@ -2203,6 +2349,63 @@ bool anofox_ts_mean_interval_width(const double *lower,
                                    struct AnofoxError *out_error);
 
 /**
+ * Learn a calibration profile from residuals.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_conformal_learn(const double *residuals,
+                               const uint64_t *residuals_validity,
+                               size_t residuals_length,
+                               const double *alphas,
+                               size_t n_alphas,
+                               enum ConformalMethodFFI method,
+                               enum ConformalStrategyFFI strategy,
+                               const double *difficulty,
+                               struct CalibrationProfileFFI *out_profile,
+                               struct AnofoxError *out_error);
+
+/**
+ * Apply a calibration profile to generate prediction intervals.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_conformal_apply(const double *forecasts,
+                               size_t n_forecasts,
+                               const struct CalibrationProfileFFI *profile,
+                               const double *difficulty,
+                               struct PredictionIntervalsFFI *out_intervals,
+                               struct AnofoxError *out_error);
+
+/**
+ * Compute empirical coverage of prediction intervals.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_conformal_coverage(const double *actuals,
+                                  const double *lower,
+                                  const double *upper,
+                                  size_t length,
+                                  double *out_coverage,
+                                  struct AnofoxError *out_error);
+
+/**
+ * Compute comprehensive conformal evaluation metrics.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_conformal_evaluate(const double *actuals,
+                                  const double *lower,
+                                  const double *upper,
+                                  size_t length,
+                                  double alpha,
+                                  struct ConformalEvaluationFFI *out_eval,
+                                  struct AnofoxError *out_error);
+
+/**
  * Free a TsStatsResult.
  *
  * # Safety
@@ -2387,6 +2590,22 @@ void anofox_free_conformal_result(struct ConformalResultFFI *result);
  * The result pointer must be valid or null.
  */
 void anofox_free_conformal_multi_result(struct ConformalMultiResultFFI *result);
+
+/**
+ * Free a CalibrationProfileFFI.
+ *
+ * # Safety
+ * The result pointer must be valid or null.
+ */
+void anofox_free_calibration_profile(struct CalibrationProfileFFI *result);
+
+/**
+ * Free a PredictionIntervalsFFI.
+ *
+ * # Safety
+ * The result pointer must be valid or null.
+ */
+void anofox_free_prediction_intervals(struct PredictionIntervalsFFI *result);
 
 const char *anofox_fcst_version(void);
 

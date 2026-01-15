@@ -25,9 +25,30 @@ pub use changepoint::{
     detect_changepoints, detect_changepoints_bocpd, BocpdResult, ChangepointResult, CostFunction,
 };
 pub use conformal::{
-    conformal_intervals, conformal_predict, conformal_predict_adaptive,
-    conformal_predict_asymmetric, conformal_predict_multi, conformal_quantile, interval_width,
-    mean_interval_width, ConformalInterval, ConformalMultiResult, ConformalResult,
+    // New Learn/Apply API (v2)
+    conformal_apply,
+    conformal_coverage,
+    conformal_evaluate,
+    // Legacy API (still available)
+    conformal_intervals,
+    conformal_learn,
+    conformal_predict,
+    conformal_predict_adaptive,
+    conformal_predict_asymmetric,
+    conformal_predict_multi,
+    conformal_quantile,
+    conformalize,
+    interval_width,
+    mean_interval_width,
+    winkler_score,
+    CalibrationProfile,
+    ConformalEvaluation,
+    ConformalInterval,
+    ConformalMethod,
+    ConformalMultiResult,
+    ConformalResult,
+    ConformalStrategy,
+    PredictionIntervals,
 };
 pub use decomposition::{mstl_decompose, InsufficientDataMode, MstlDecomposition};
 pub use detrending::{
