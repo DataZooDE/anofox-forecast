@@ -1609,9 +1609,9 @@ mod tests {
         assert_eq!(intervals.n_levels(), 2);
 
         // Intervals should be symmetric around point forecasts
-        for i in 0..3 {
-            let lower_diff = forecasts[i] - intervals.lower[0][i];
-            let upper_diff = intervals.upper[0][i] - forecasts[i];
+        for (i, forecast) in forecasts.iter().enumerate() {
+            let lower_diff = forecast - intervals.lower[0][i];
+            let upper_diff = intervals.upper[0][i] - forecast;
             assert_relative_eq!(lower_diff, upper_diff, epsilon = 0.001);
         }
 
@@ -1682,9 +1682,9 @@ mod tests {
         assert_relative_eq!(intervals.coverage[0], 0.9, epsilon = 0.001);
 
         // Intervals should be symmetric around point forecasts
-        for i in 0..3 {
-            let lower_diff = forecasts[i] - intervals.lower[0][i];
-            let upper_diff = intervals.upper[0][i] - forecasts[i];
+        for (i, forecast) in forecasts.iter().enumerate() {
+            let lower_diff = forecast - intervals.lower[0][i];
+            let upper_diff = intervals.upper[0][i] - forecast;
             assert_relative_eq!(lower_diff, upper_diff, epsilon = 0.001);
         }
     }
