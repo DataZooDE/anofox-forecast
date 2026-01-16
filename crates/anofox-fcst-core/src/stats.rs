@@ -47,9 +47,9 @@ pub struct TsStats {
     pub range: f64,
     /// Sum of all values
     pub sum: f64,
-    /// Skewness (measure of asymmetry)
+    /// Skewness (Fisher's G1 - bias-corrected sample skewness)
     pub skewness: f64,
-    /// Kurtosis (measure of tailedness)
+    /// Kurtosis (Fisher's G2 - bias-corrected excess kurtosis)
     pub kurtosis: f64,
     /// Coefficient of variation (std_dev / mean)
     pub coef_variation: f64,
@@ -162,18 +162,26 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
     let q3 = percentile(&sorted, 0.75);
     let iqr = q3 - q1;
 
-    // Skewness (Fisher's)
+    // Skewness (Fisher's G1 - bias-corrected sample skewness)
+    // G1 = sqrt(n(n-1)) / (n-2) * m3 / s^3
     let skewness = if n_valid > 2 && std_dev > f64::EPSILON {
-        let m3 = values.iter().map(|v| (v - mean).powi(3)).sum::<f64>() / n_valid as f64;
-        m3 / std_dev.powi(3)
+        let n = n_valid as f64;
+        let m3 = values.iter().map(|v| (v - mean).powi(3)).sum::<f64>() / n;
+        let g1 = m3 / std_dev.powi(3);
+        // Apply bias correction factor
+        g1 * (n * (n - 1.0)).sqrt() / (n - 2.0)
     } else {
         f64::NAN
     };
 
-    // Kurtosis (excess)
+    // Kurtosis (Fisher's G2 - bias-corrected excess kurtosis)
+    // G2 = (n-1) / ((n-2)(n-3)) * ((n+1) * g2 + 6)
     let kurtosis = if n_valid > 3 && std_dev > f64::EPSILON {
-        let m4 = values.iter().map(|v| (v - mean).powi(4)).sum::<f64>() / n_valid as f64;
-        (m4 / std_dev.powi(4)) - 3.0
+        let n = n_valid as f64;
+        let m4 = values.iter().map(|v| (v - mean).powi(4)).sum::<f64>() / n;
+        let g2 = m4 / std_dev.powi(4) - 3.0; // Population excess kurtosis
+                                             // Apply bias correction factor
+        (n - 1.0) / ((n - 2.0) * (n - 3.0)) * ((n + 1.0) * g2 + 6.0)
     } else {
         f64::NAN
     };
@@ -592,5 +600,21 @@ mod tests {
         ];
         let stats = compute_ts_stats(&series).unwrap();
         assert_eq!(stats.plateau_size_nonzero, 4); // Four 5.0s
+    }
+
+    #[test]
+    fn test_skewness_kurtosis_bias_corrected() {
+        // Symmetric distribution: skewness should be 0
+        let series: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), Some(3.0), Some(4.0), Some(5.0)];
+        let stats = compute_ts_stats(&series).unwrap();
+        assert_relative_eq!(stats.skewness, 0.0, epsilon = 1e-10);
+
+        // Skewed distribution: [1, 1, 1, 1, 5] should have positive skewness
+        let skewed: Vec<Option<f64>> = vec![Some(1.0), Some(1.0), Some(1.0), Some(1.0), Some(5.0)];
+        let stats_skewed = compute_ts_stats(&skewed).unwrap();
+        assert!(stats_skewed.skewness > 0.0, "Expected positive skewness");
+
+        // Verify kurtosis is computed (uniform-like has negative excess kurtosis)
+        assert!(stats.kurtosis.is_finite());
     }
 }
