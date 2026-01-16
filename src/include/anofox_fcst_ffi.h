@@ -989,6 +989,11 @@ typedef struct ForecastOptions {
      */
     char model[32];
     /**
+     * ETS model specification (e.g., "AAA", "MNM", "AAdA")
+     * Only used when model is "ETS". Empty string means use default (AAA).
+     */
+    char ets_model[8];
+    /**
      * Forecast horizon
      */
     int horizon;
@@ -1113,6 +1118,11 @@ typedef struct ForecastOptionsExog {
      * Model name (null-terminated string)
      */
     char model[32];
+    /**
+     * ETS model specification (e.g., "AAA", "MNM", "AAdA")
+     * Only used when model is "ETS". Empty string means use default (AAA).
+     */
+    char ets_model[8];
     /**
      * Forecast horizon
      */

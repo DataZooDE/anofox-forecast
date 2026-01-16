@@ -3115,8 +3115,16 @@ pub unsafe extern "C" fn anofox_ts_forecast(
             .parse()
             .unwrap_or(anofox_fcst_core::ModelType::AutoETS);
 
+        // Parse ETS model spec (e.g., "AAA", "MNM", "AAdA")
+        let ets_spec = CStr::from_ptr(opts.ets_model.as_ptr())
+            .to_str()
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
         let core_opts = anofox_fcst_core::ForecastOptions {
             model: model_type,
+            ets_spec,
             horizon: opts.horizon as usize,
             confidence_level: opts.confidence_level,
             seasonal_period: opts.seasonal_period as usize,
@@ -3165,7 +3173,19 @@ pub unsafe extern "C" fn anofox_ts_forecast(
         }
         Ok(Err(e)) => {
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                // Map ForecastError to appropriate ErrorCode
+                let error_code = match e.to_code() {
+                    1 => ErrorCode::NullPointer,
+                    2 => ErrorCode::InvalidInput,
+                    3 => ErrorCode::ComputationError,
+                    4 => ErrorCode::AllocationError,
+                    5 => ErrorCode::InvalidModel,
+                    6 => ErrorCode::InsufficientData,
+                    7 => ErrorCode::InvalidDateFormat,
+                    8 => ErrorCode::InvalidFrequency,
+                    _ => ErrorCode::InternalError,
+                };
+                (*out_error).set_error(error_code, &e.to_string());
             }
             false
         }
@@ -3238,6 +3258,13 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
             .parse()
             .unwrap_or(anofox_fcst_core::ModelType::AutoETS);
 
+        // Parse ETS model spec (e.g., "AAA", "MNM", "AAdA")
+        let ets_spec = CStr::from_ptr(opts.ets_model.as_ptr())
+            .to_str()
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
         // Build exogenous data if provided
         let exog_data = if !opts.exog.is_null() {
             let exog = &*opts.exog;
@@ -3285,6 +3312,7 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
 
         let core_opts = anofox_fcst_core::ForecastOptionsExog {
             model: model_type,
+            ets_spec,
             horizon: opts.horizon as usize,
             confidence_level: opts.confidence_level,
             seasonal_period: opts.seasonal_period as usize,
