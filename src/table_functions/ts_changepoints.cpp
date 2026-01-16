@@ -9,9 +9,9 @@ namespace duckdb {
 
 static LogicalType GetChangepointResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("changepoints", LogicalType::LIST(LogicalType::UBIGINT)));
-    children.push_back(make_pair("n_changepoints", LogicalType::UBIGINT));
-    children.push_back(make_pair("cost", LogicalType::DOUBLE));
+    children.push_back(make_pair("changepoints", LogicalType::LIST(LogicalType(LogicalTypeId::UBIGINT))));
+    children.push_back(make_pair("n_changepoints", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("cost", LogicalType(LogicalTypeId::DOUBLE)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -214,9 +214,9 @@ void RegisterTsDetectChangepointsFunction(ExtensionLoader &loader) {
 
 static LogicalType GetBocpdResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("is_changepoint", LogicalType::LIST(LogicalType::BOOLEAN)));
-    children.push_back(make_pair("changepoint_probability", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("changepoint_indices", LogicalType::LIST(LogicalType::UBIGINT)));
+    children.push_back(make_pair("is_changepoint", LogicalType::LIST(LogicalType(LogicalTypeId::BOOLEAN))));
+    children.push_back(make_pair("changepoint_probability", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("changepoint_indices", LogicalType::LIST(LogicalType(LogicalTypeId::UBIGINT))));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -354,7 +354,7 @@ void RegisterTsDetectChangepointsBocpdFunction(ExtensionLoader &loader) {
 
     // _ts_detect_changepoints_bocpd(values, hazard_lambda, include_probabilities)
     ts_bocpd_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::BOOLEAN},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::BOOLEAN)},
         GetBocpdResultType(),
         TsDetectChangepointsBocpdFunction
     ));

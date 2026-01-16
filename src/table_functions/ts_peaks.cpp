@@ -34,18 +34,18 @@ static void ExtractListAsDouble(Vector &list_vec, idx_t row_idx, vector<double> 
 static LogicalType GetPeakDetectionResultType() {
     // Inner struct for each peak
     child_list_t<LogicalType> peak_children;
-    peak_children.push_back(make_pair("index", LogicalType::BIGINT));
-    peak_children.push_back(make_pair("time", LogicalType::DOUBLE));
-    peak_children.push_back(make_pair("value", LogicalType::DOUBLE));
-    peak_children.push_back(make_pair("prominence", LogicalType::DOUBLE));
+    peak_children.push_back(make_pair("index", LogicalType(LogicalTypeId::BIGINT)));
+    peak_children.push_back(make_pair("time", LogicalType(LogicalTypeId::DOUBLE)));
+    peak_children.push_back(make_pair("value", LogicalType(LogicalTypeId::DOUBLE)));
+    peak_children.push_back(make_pair("prominence", LogicalType(LogicalTypeId::DOUBLE)));
     auto peak_type = LogicalType::STRUCT(std::move(peak_children));
 
     // Outer result struct
     child_list_t<LogicalType> children;
     children.push_back(make_pair("peaks", LogicalType::LIST(peak_type)));
-    children.push_back(make_pair("n_peaks", LogicalType::BIGINT));
-    children.push_back(make_pair("inter_peak_distances", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("mean_period", LogicalType::DOUBLE));
+    children.push_back(make_pair("n_peaks", LogicalType(LogicalTypeId::BIGINT)));
+    children.push_back(make_pair("inter_peak_distances", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("mean_period", LogicalType(LogicalTypeId::DOUBLE)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -155,25 +155,25 @@ void RegisterTsDetectPeaksFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_peaks_set("ts_detect_peaks");
     // Single-argument version
     ts_peaks_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetPeakDetectionResultType(),
         TsDetectPeaksFunction
     ));
     // With min_distance
     ts_peaks_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetPeakDetectionResultType(),
         TsDetectPeaksFunction
     ));
     // With min_distance, min_prominence
     ts_peaks_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetPeakDetectionResultType(),
         TsDetectPeaksFunction
     ));
     // With min_distance, min_prominence, smooth_first
     ts_peaks_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::BOOLEAN},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::BOOLEAN)},
         GetPeakDetectionResultType(),
         TsDetectPeaksFunction
     ));
@@ -189,16 +189,16 @@ void RegisterTsDetectPeaksFunction(ExtensionLoader &loader) {
 
 static LogicalType GetPeakTimingResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("peak_times", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("peak_values", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("normalized_timing", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("n_peaks", LogicalType::BIGINT));
-    children.push_back(make_pair("mean_timing", LogicalType::DOUBLE));
-    children.push_back(make_pair("std_timing", LogicalType::DOUBLE));
-    children.push_back(make_pair("range_timing", LogicalType::DOUBLE));
-    children.push_back(make_pair("variability_score", LogicalType::DOUBLE));
-    children.push_back(make_pair("timing_trend", LogicalType::DOUBLE));
-    children.push_back(make_pair("is_stable", LogicalType::BOOLEAN));
+    children.push_back(make_pair("peak_times", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("peak_values", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("normalized_timing", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("n_peaks", LogicalType(LogicalTypeId::BIGINT)));
+    children.push_back(make_pair("mean_timing", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("std_timing", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("range_timing", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("variability_score", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("timing_trend", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("is_stable", LogicalType(LogicalTypeId::BOOLEAN)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -276,7 +276,7 @@ static void TsAnalyzePeakTimingFunction(DataChunk &args, ExpressionState &state,
 void RegisterTsAnalyzePeakTimingFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_peak_timing_set("ts_analyze_peak_timing");
     ts_peak_timing_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetPeakTimingResultType(),
         TsAnalyzePeakTimingFunction
     ));

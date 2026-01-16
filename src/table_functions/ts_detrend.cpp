@@ -33,12 +33,12 @@ static void ExtractListAsDouble(Vector &list_vec, idx_t row_idx, vector<double> 
 
 static LogicalType GetDetrendResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("trend", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("detrended", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("method", LogicalType::VARCHAR));
-    children.push_back(make_pair("coefficients", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("rss", LogicalType::DOUBLE));
-    children.push_back(make_pair("n_params", LogicalType::BIGINT));
+    children.push_back(make_pair("trend", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("detrended", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
+    children.push_back(make_pair("coefficients", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("rss", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("n_params", LogicalType(LogicalTypeId::BIGINT)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -116,13 +116,13 @@ void RegisterTsDetrendFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_detrend_set("ts_detrend");
     // Single-argument version (auto method)
     ts_detrend_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetDetrendResultType(),
         TsDetrendFunction
     ));
     // With method
     ts_detrend_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::VARCHAR},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR)},
         GetDetrendResultType(),
         TsDetrendFunction
     ));
@@ -136,11 +136,11 @@ void RegisterTsDetrendFunction(ExtensionLoader &loader) {
 
 static LogicalType GetDecomposeResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("trend", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("seasonal", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("remainder", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("period", LogicalType::DOUBLE));
-    children.push_back(make_pair("method", LogicalType::VARCHAR));
+    children.push_back(make_pair("trend", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("seasonal", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("remainder", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("period", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -220,13 +220,13 @@ void RegisterTsDecomposeSeasonalFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_decompose_set("ts_decompose_seasonal");
     // With period (additive by default)
     ts_decompose_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetDecomposeResultType(),
         TsDecomposeSeasonalFunction
     ));
     // With period and method
     ts_decompose_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::VARCHAR},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::VARCHAR)},
         GetDecomposeResultType(),
         TsDecomposeSeasonalFunction
     ));
@@ -293,14 +293,14 @@ void RegisterTsSeasonalStrengthFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_strength_set("ts_seasonal_strength");
     // With period (variance method by default)
     ts_strength_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsSeasonalStrengthFunction
     ));
     // With period and method
     ts_strength_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::VARCHAR},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::VARCHAR)},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsSeasonalStrengthFunction
     ));
     loader.RegisterFunction(ts_strength_set);
@@ -384,20 +384,20 @@ void RegisterTsSeasonalStrengthWindowedFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_strength_win_set("ts_seasonal_strength_windowed");
     // With period
     ts_strength_win_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
-        LogicalType::LIST(LogicalType::DOUBLE),
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
+        LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
         TsSeasonalStrengthWindowedFunction
     ));
     // With period and window_size
     ts_strength_win_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::DOUBLE},
-        LogicalType::LIST(LogicalType::DOUBLE),
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
+        LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
         TsSeasonalStrengthWindowedFunction
     ));
     // With period, window_size, and method
     ts_strength_win_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::VARCHAR},
-        LogicalType::LIST(LogicalType::DOUBLE),
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::VARCHAR)},
+        LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
         TsSeasonalStrengthWindowedFunction
     ));
     loader.RegisterFunction(ts_strength_win_set);
@@ -411,17 +411,17 @@ void RegisterTsSeasonalStrengthWindowedFunction(ExtensionLoader &loader) {
 static LogicalType GetChangeDetectionResultType() {
     // Inner struct for change points
     child_list_t<LogicalType> cp_children;
-    cp_children.push_back(make_pair("index", LogicalType::BIGINT));
-    cp_children.push_back(make_pair("time", LogicalType::DOUBLE));
-    cp_children.push_back(make_pair("change_type", LogicalType::VARCHAR));
-    cp_children.push_back(make_pair("strength_before", LogicalType::DOUBLE));
-    cp_children.push_back(make_pair("strength_after", LogicalType::DOUBLE));
+    cp_children.push_back(make_pair("index", LogicalType(LogicalTypeId::BIGINT)));
+    cp_children.push_back(make_pair("time", LogicalType(LogicalTypeId::DOUBLE)));
+    cp_children.push_back(make_pair("change_type", LogicalType(LogicalTypeId::VARCHAR)));
+    cp_children.push_back(make_pair("strength_before", LogicalType(LogicalTypeId::DOUBLE)));
+    cp_children.push_back(make_pair("strength_after", LogicalType(LogicalTypeId::DOUBLE)));
     auto cp_type = LogicalType::STRUCT(std::move(cp_children));
 
     child_list_t<LogicalType> children;
     children.push_back(make_pair("change_points", LogicalType::LIST(cp_type)));
-    children.push_back(make_pair("n_changes", LogicalType::BIGINT));
-    children.push_back(make_pair("strength_curve", LogicalType::LIST(LogicalType::DOUBLE)));
+    children.push_back(make_pair("n_changes", LogicalType(LogicalTypeId::BIGINT)));
+    children.push_back(make_pair("strength_curve", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -531,25 +531,25 @@ void RegisterTsDetectSeasonalityChangesFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_changes_set("ts_detect_seasonality_changes");
     // With period
     ts_changes_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetChangeDetectionResultType(),
         TsDetectSeasonalityChangesFunction
     ));
     // With period and threshold
     ts_changes_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetChangeDetectionResultType(),
         TsDetectSeasonalityChangesFunction
     ));
     // With period, threshold, and window_size
     ts_changes_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetChangeDetectionResultType(),
         TsDetectSeasonalityChangesFunction
     ));
     // With period, threshold, window_size, and min_duration
     ts_changes_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetChangeDetectionResultType(),
         TsDetectSeasonalityChangesFunction
     ));
@@ -563,9 +563,9 @@ void RegisterTsDetectSeasonalityChangesFunction(ExtensionLoader &loader) {
 
 static LogicalType GetInstantaneousPeriodResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("periods", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("frequencies", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("amplitudes", LogicalType::LIST(LogicalType::DOUBLE)));
+    children.push_back(make_pair("periods", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("frequencies", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("amplitudes", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -632,7 +632,7 @@ static void TsInstantaneousPeriodFunction(DataChunk &args, ExpressionState &stat
 void RegisterTsInstantaneousPeriodFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_inst_period_set("ts_instantaneous_period");
     ts_inst_period_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetInstantaneousPeriodResultType(),
         TsInstantaneousPeriodFunction
     ));
@@ -647,15 +647,15 @@ void RegisterTsInstantaneousPeriodFunction(ExtensionLoader &loader) {
 
 static LogicalType GetAmplitudeModulationResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("is_seasonal", LogicalType::BOOLEAN));
-    children.push_back(make_pair("seasonal_strength", LogicalType::DOUBLE));
-    children.push_back(make_pair("has_modulation", LogicalType::BOOLEAN));
-    children.push_back(make_pair("modulation_type", LogicalType::VARCHAR));
-    children.push_back(make_pair("modulation_score", LogicalType::DOUBLE));
-    children.push_back(make_pair("amplitude_trend", LogicalType::DOUBLE));
-    children.push_back(make_pair("wavelet_amplitude", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("time_points", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("scale", LogicalType::DOUBLE));
+    children.push_back(make_pair("is_seasonal", LogicalType(LogicalTypeId::BOOLEAN)));
+    children.push_back(make_pair("seasonal_strength", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("has_modulation", LogicalType(LogicalTypeId::BOOLEAN)));
+    children.push_back(make_pair("modulation_type", LogicalType(LogicalTypeId::VARCHAR)));
+    children.push_back(make_pair("modulation_score", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("amplitude_trend", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("wavelet_amplitude", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("time_points", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("scale", LogicalType(LogicalTypeId::DOUBLE)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -745,19 +745,19 @@ void RegisterTsDetectAmplitudeModulationFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_am_set("ts_detect_amplitude_modulation");
     // With period
     ts_am_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetAmplitudeModulationResultType(),
         TsDetectAmplitudeModulationFunction
     ));
     // With period and modulation_threshold
     ts_am_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetAmplitudeModulationResultType(),
         TsDetectAmplitudeModulationFunction
     ));
     // With period, modulation_threshold, and seasonality_threshold
     ts_am_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetAmplitudeModulationResultType(),
         TsDetectAmplitudeModulationFunction
     ));

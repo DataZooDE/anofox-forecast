@@ -9,55 +9,65 @@
 namespace duckdb {
 
 // Define the output STRUCT type for ts_stats (34 metrics)
+// Note: Using LogicalType(LogicalTypeId::XXX) instead of LogicalType::XXX
+// to avoid ODR violations with constexpr static members when linking with duckdb_static
 static LogicalType GetTsStatsResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("length", LogicalType::UBIGINT));
-    children.push_back(make_pair("n_nulls", LogicalType::UBIGINT));
-    children.push_back(make_pair("n_nan", LogicalType::UBIGINT));
-    children.push_back(make_pair("n_zeros", LogicalType::UBIGINT));
-    children.push_back(make_pair("n_positive", LogicalType::UBIGINT));
-    children.push_back(make_pair("n_negative", LogicalType::UBIGINT));
-    children.push_back(make_pair("n_unique_values", LogicalType::UBIGINT));
-    children.push_back(make_pair("is_constant", LogicalType::BOOLEAN));
-    children.push_back(make_pair("n_zeros_start", LogicalType::UBIGINT));
-    children.push_back(make_pair("n_zeros_end", LogicalType::UBIGINT));
-    children.push_back(make_pair("plateau_size", LogicalType::UBIGINT));
-    children.push_back(make_pair("plateau_size_nonzero", LogicalType::UBIGINT));
-    children.push_back(make_pair("mean", LogicalType::DOUBLE));
-    children.push_back(make_pair("median", LogicalType::DOUBLE));
-    children.push_back(make_pair("std_dev", LogicalType::DOUBLE));
-    children.push_back(make_pair("variance", LogicalType::DOUBLE));
-    children.push_back(make_pair("min", LogicalType::DOUBLE));
-    children.push_back(make_pair("max", LogicalType::DOUBLE));
-    children.push_back(make_pair("range", LogicalType::DOUBLE));
-    children.push_back(make_pair("sum", LogicalType::DOUBLE));
-    children.push_back(make_pair("skewness", LogicalType::DOUBLE));
-    children.push_back(make_pair("kurtosis", LogicalType::DOUBLE));
-    children.push_back(make_pair("tail_index", LogicalType::DOUBLE));
-    children.push_back(make_pair("bimodality_coef", LogicalType::DOUBLE));
-    children.push_back(make_pair("trimmed_mean", LogicalType::DOUBLE));
-    children.push_back(make_pair("coef_variation", LogicalType::DOUBLE));
-    children.push_back(make_pair("q1", LogicalType::DOUBLE));
-    children.push_back(make_pair("q3", LogicalType::DOUBLE));
-    children.push_back(make_pair("iqr", LogicalType::DOUBLE));
-    children.push_back(make_pair("autocorr_lag1", LogicalType::DOUBLE));
-    children.push_back(make_pair("trend_strength", LogicalType::DOUBLE));
-    children.push_back(make_pair("seasonality_strength", LogicalType::DOUBLE));
-    children.push_back(make_pair("entropy", LogicalType::DOUBLE));
-    children.push_back(make_pair("stability", LogicalType::DOUBLE));
+    children.push_back(make_pair("length", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("n_nulls", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("n_nan", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("n_zeros", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("n_positive", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("n_negative", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("n_unique_values", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("is_constant", LogicalType(LogicalTypeId::BOOLEAN)));
+    children.push_back(make_pair("n_zeros_start", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("n_zeros_end", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("plateau_size", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("plateau_size_nonzero", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("mean", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("median", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("std_dev", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("variance", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("min", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("max", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("range", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("sum", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("skewness", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("kurtosis", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("tail_index", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("bimodality_coef", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("trimmed_mean", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("coef_variation", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("q1", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("q3", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("iqr", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("autocorr_lag1", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("trend_strength", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("seasonality_strength", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("entropy", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("stability", LogicalType(LogicalTypeId::DOUBLE)));
     return LogicalType::STRUCT(std::move(children));
 }
 
-// Extract values from a LIST vector into a flat array
-static void ExtractListValues(Vector &list_vec, idx_t row_idx,
+// Extract values from a LIST vector into a flat array (handles all vector types)
+static void ExtractListValues(Vector &list_vec, idx_t count, idx_t row_idx,
                               vector<double> &out_values,
                               vector<uint64_t> &out_validity) {
-    auto list_data = ListVector::GetData(list_vec);
-    auto &list_entry = list_data[row_idx];
+    // Use UnifiedVectorFormat to handle all vector types (flat, constant, dictionary)
+    UnifiedVectorFormat list_data;
+    list_vec.ToUnifiedFormat(count, list_data);
+
+    auto list_entries = UnifiedVectorFormat::GetData<list_entry_t>(list_data);
+    auto list_idx = list_data.sel->get_index(row_idx);
+    auto &list_entry = list_entries[list_idx];
 
     auto &child_vec = ListVector::GetEntry(list_vec);
-    auto child_data = FlatVector::GetData<double>(child_vec);
-    auto &child_validity = FlatVector::Validity(child_vec);
+
+    // Also use UnifiedVectorFormat for child vector
+    UnifiedVectorFormat child_data;
+    child_vec.ToUnifiedFormat(ListVector::GetListSize(list_vec), child_data);
+    auto child_values = UnifiedVectorFormat::GetData<double>(child_data);
 
     out_values.clear();
     out_validity.clear();
@@ -65,19 +75,18 @@ static void ExtractListValues(Vector &list_vec, idx_t row_idx,
     idx_t list_size = list_entry.length;
     idx_t list_offset = list_entry.offset;
 
-    // Reserve space
     out_values.resize(list_size);
     size_t validity_words = (list_size + 63) / 64;
     out_validity.resize(validity_words, 0);
 
     for (idx_t i = 0; i < list_size; i++) {
         idx_t child_idx = list_offset + i;
-        if (child_validity.RowIsValid(child_idx)) {
-            out_values[i] = child_data[child_idx];
-            // Set validity bit
+        auto unified_child_idx = child_data.sel->get_index(child_idx);
+        if (child_data.validity.RowIsValid(unified_child_idx)) {
+            out_values[i] = child_values[unified_child_idx];
             out_validity[i / 64] |= (1ULL << (i % 64));
         } else {
-            out_values[i] = 0.0; // Placeholder for NULL
+            out_values[i] = 0.0;
         }
     }
 }
@@ -97,10 +106,15 @@ static void TsStatsFunction(DataChunk &args, ExpressionState &state, Vector &res
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
+    // Use UnifiedVectorFormat to handle both constant and flat vectors
+    UnifiedVectorFormat list_format;
+    list_vec.ToUnifiedFormat(count, list_format);
+
     // Process each row
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
+        auto list_idx = list_format.sel->get_index(row_idx);
         // Check if input is NULL
-        if (FlatVector::IsNull(list_vec, row_idx)) {
+        if (!list_format.validity.RowIsValid(list_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -108,7 +122,7 @@ static void TsStatsFunction(DataChunk &args, ExpressionState &state, Vector &res
         // Extract values from the list
         vector<double> values;
         vector<uint64_t> validity;
-        ExtractListValues(list_vec, row_idx, values, validity);
+        ExtractListValues(list_vec, count, row_idx, values, validity);
 
         // Call Rust FFI function
         TsStatsResult stats_result;
@@ -173,11 +187,14 @@ void RegisterTsStatsFunction(ExtensionLoader &loader) {
     // Named with underscore prefix to match C++ API (ts_stats is table macro only)
     ScalarFunctionSet ts_stats_set("_ts_stats");
 
-    ts_stats_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
+    // Mark as VOLATILE to prevent constant folding (statistics computation shouldn't be folded)
+    ScalarFunction ts_stats_func(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetTsStatsResultType(),
         TsStatsFunction
-    ));
+    );
+    ts_stats_func.stability = FunctionStability::VOLATILE;
+    ts_stats_set.AddFunction(ts_stats_func);
 
     // Mark as internal to hide from duckdb_functions() and deprioritize in autocomplete
     CreateScalarFunctionInfo info(ts_stats_set);

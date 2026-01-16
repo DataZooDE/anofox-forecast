@@ -17,8 +17,8 @@ struct TsFillForwardNativeBindData : public TableFunctionData {
     int64_t target_date_micros = 0;
     bool target_is_raw = false;
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
-    LogicalType date_logical_type = LogicalType::TIMESTAMP;
-    LogicalType group_logical_type = LogicalType::VARCHAR;
+    LogicalType date_logical_type = LogicalType(LogicalTypeId::TIMESTAMP);
+    LogicalType group_logical_type = LogicalType(LogicalTypeId::VARCHAR);
 };
 
 // ============================================================================
@@ -102,7 +102,7 @@ static unique_ptr<FunctionData> TsFillForwardNativeBind(
                 bind_data->target_is_raw = true;
             } catch (...) {
                 // If not an integer, cast to timestamp
-                Value casted = target_val.DefaultCastAs(LogicalType::TIMESTAMP);
+                Value casted = target_val.DefaultCastAs(LogicalType(LogicalTypeId::TIMESTAMP));
                 bind_data->target_date_micros = casted.GetValue<timestamp_t>().value;
                 bind_data->target_is_raw = false;
             }
@@ -137,7 +137,7 @@ static unique_ptr<FunctionData> TsFillForwardNativeBind(
     return_types.push_back(bind_data->date_logical_type);
 
     names.push_back(input.input_table_names[2]);
-    return_types.push_back(LogicalType::DOUBLE);
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
 
     return bind_data;
 }
@@ -386,7 +386,7 @@ void RegisterTsFillForwardNativeFunction(ExtensionLoader &loader) {
     // Table-in-out function: (TABLE, target_date, frequency)
     // Input table must have 3 columns: group_col, date_col, value_col
     TableFunction func("ts_fill_forward_native",
-        {LogicalType::TABLE, LogicalType::ANY, LogicalType::VARCHAR},
+        {LogicalType::TABLE, LogicalType::ANY, LogicalType(LogicalTypeId::VARCHAR)},
         nullptr,
         TsFillForwardNativeBind,
         TsFillForwardNativeInitGlobal,

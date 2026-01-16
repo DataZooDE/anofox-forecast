@@ -69,7 +69,7 @@ static LogicalType GetScalarFeaturesResultType() {
 
     auto feature_names = GetScalarFeatureNames();
     for (const auto &name : feature_names) {
-        children.push_back(make_pair(name, LogicalType::DOUBLE));
+        children.push_back(make_pair(name, LogicalType(LogicalTypeId::DOUBLE)));
     }
 
     return LogicalType::STRUCT(std::move(children));
@@ -155,19 +155,19 @@ static unique_ptr<FunctionData> TsFeaturesListBind(ClientContext &context, Table
                                                     vector<LogicalType> &return_types, vector<string> &names) {
     // Define return columns to match C++ extension
     names.push_back("column_name");
-    return_types.push_back(LogicalType::VARCHAR);
+    return_types.push_back(LogicalType(LogicalTypeId::VARCHAR));
 
     names.push_back("feature_name");
-    return_types.push_back(LogicalType::VARCHAR);
+    return_types.push_back(LogicalType(LogicalTypeId::VARCHAR));
 
     names.push_back("parameter_suffix");
-    return_types.push_back(LogicalType::VARCHAR);
+    return_types.push_back(LogicalType(LogicalTypeId::VARCHAR));
 
     names.push_back("default_parameters");
-    return_types.push_back(LogicalType::VARCHAR);
+    return_types.push_back(LogicalType(LogicalTypeId::VARCHAR));
 
     names.push_back("parameter_keys");
-    return_types.push_back(LogicalType::VARCHAR);
+    return_types.push_back(LogicalType(LogicalTypeId::VARCHAR));
 
     return make_uniq<TsFeaturesListData>();
 }
@@ -244,10 +244,10 @@ struct TsFeaturesConfigTemplateData : public TableFunctionData {
 static unique_ptr<FunctionData> TsFeaturesConfigTemplateBind(ClientContext &context, TableFunctionBindInput &input,
                                                               vector<LogicalType> &return_types, vector<string> &names) {
     names.push_back("feature");
-    return_types.push_back(LogicalType::VARCHAR);
+    return_types.push_back(LogicalType(LogicalTypeId::VARCHAR));
 
     names.push_back("params_json");
-    return_types.push_back(LogicalType::VARCHAR);
+    return_types.push_back(LogicalType(LogicalTypeId::VARCHAR));
 
     return make_uniq<TsFeaturesConfigTemplateData>();
 }
@@ -305,13 +305,13 @@ void RegisterTsFeaturesConfigTemplateFunction(ExtensionLoader &loader) {
 static LogicalType GetFeaturesConfigResultType() {
     // Override struct type
     child_list_t<LogicalType> override_children;
-    override_children.push_back(make_pair("feature", LogicalType::VARCHAR));
-    override_children.push_back(make_pair("params_json", LogicalType::VARCHAR));
+    override_children.push_back(make_pair("feature", LogicalType(LogicalTypeId::VARCHAR)));
+    override_children.push_back(make_pair("params_json", LogicalType(LogicalTypeId::VARCHAR)));
     auto override_type = LogicalType::STRUCT(std::move(override_children));
 
     // Main config struct
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("feature_names", LogicalType::LIST(LogicalType::VARCHAR)));
+    children.push_back(make_pair("feature_names", LogicalType::LIST(LogicalType(LogicalTypeId::VARCHAR))));
     children.push_back(make_pair("overrides", LogicalType::LIST(override_type)));
     return LogicalType::STRUCT(std::move(children));
 }
@@ -373,7 +373,7 @@ static void TsFeaturesConfigFromJsonFunction(DataChunk &args, ExpressionState &s
 void RegisterTsFeaturesConfigFromJsonFunction(ExtensionLoader &loader) {
     ScalarFunctionSet config_json_set("ts_features_config_from_json");
     config_json_set.AddFunction(ScalarFunction(
-        {LogicalType::VARCHAR},
+        {LogicalType(LogicalTypeId::VARCHAR)},
         GetFeaturesConfigResultType(),
         TsFeaturesConfigFromJsonFunction
     ));
@@ -381,7 +381,7 @@ void RegisterTsFeaturesConfigFromJsonFunction(ExtensionLoader &loader) {
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_features_config_from_json");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::VARCHAR},
+        {LogicalType(LogicalTypeId::VARCHAR)},
         GetFeaturesConfigResultType(),
         TsFeaturesConfigFromJsonFunction
     ));
@@ -401,7 +401,7 @@ static void TsFeaturesConfigFromCsvFunction(DataChunk &args, ExpressionState &st
 void RegisterTsFeaturesConfigFromCsvFunction(ExtensionLoader &loader) {
     ScalarFunctionSet config_csv_set("ts_features_config_from_csv");
     config_csv_set.AddFunction(ScalarFunction(
-        {LogicalType::VARCHAR},
+        {LogicalType(LogicalTypeId::VARCHAR)},
         GetFeaturesConfigResultType(),
         TsFeaturesConfigFromCsvFunction
     ));
@@ -409,7 +409,7 @@ void RegisterTsFeaturesConfigFromCsvFunction(ExtensionLoader &loader) {
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_features_config_from_csv");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::VARCHAR},
+        {LogicalType(LogicalTypeId::VARCHAR)},
         GetFeaturesConfigResultType(),
         TsFeaturesConfigFromCsvFunction
     ));

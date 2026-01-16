@@ -465,8 +465,18 @@ GROUP BY group_col
     // C++ API: ts_forecast(table_name, date_col, target_col, method, horizon, params)
     {"ts_forecast", {"source", "date_col", "target_col", "method", "horizon", "params", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH forecast_result AS (
-    SELECT _ts_forecast(LIST(target_col::DOUBLE ORDER BY date_col), horizon, method) AS fcst
+WITH _ets_spec AS (
+    SELECT COALESCE(TRY_CAST(params['model'] AS VARCHAR), '') AS spec
+),
+forecast_result AS (
+    SELECT _ts_forecast(
+        LIST(target_col::DOUBLE ORDER BY date_col),
+        horizon,
+        CASE WHEN (SELECT spec FROM _ets_spec) != ''
+             THEN method || ':' || (SELECT spec FROM _ets_spec)
+             ELSE method
+        END
+    ) AS fcst
     FROM query_table(source::VARCHAR)
 )
 SELECT
@@ -497,11 +507,21 @@ WITH _freq AS (
         ELSE frequency::INTERVAL
     END AS _interval
 ),
+_ets_spec AS (
+    SELECT COALESCE(TRY_CAST(params['model'] AS VARCHAR), '') AS spec
+),
 forecast_data AS (
     SELECT
         group_col AS id,
         date_trunc('second', MAX(date_col)::TIMESTAMP) AS last_date,
-        _ts_forecast(LIST(target_col::DOUBLE ORDER BY date_col), horizon, method) AS fcst
+        _ts_forecast(
+            LIST(target_col::DOUBLE ORDER BY date_col),
+            horizon,
+            CASE WHEN (SELECT spec FROM _ets_spec) != ''
+                 THEN method || ':' || (SELECT spec FROM _ets_spec)
+                 ELSE method
+            END
+        ) AS fcst
     FROM query_table(source::VARCHAR)
     GROUP BY group_col
 )
@@ -545,12 +565,22 @@ cv_data AS (
         target_col
     FROM query_table(cv_splits::VARCHAR)
 ),
+_ets_spec_cv AS (
+    SELECT COALESCE(TRY_CAST(params['model'] AS VARCHAR), '') AS spec
+),
 forecast_data AS (
     SELECT
         fold_id,
         _grp AS id,
         date_trunc('second', MAX(date_col)::TIMESTAMP) AS last_date,
-        _ts_forecast(LIST(target_col::DOUBLE ORDER BY date_col), horizon, method) AS fcst
+        _ts_forecast(
+            LIST(target_col::DOUBLE ORDER BY date_col),
+            horizon,
+            CASE WHEN (SELECT spec FROM _ets_spec_cv) != ''
+                 THEN method || ':' || (SELECT spec FROM _ets_spec_cv)
+                 ELSE method
+            END
+        ) AS fcst
     FROM cv_data
     GROUP BY fold_id, _grp
 )
@@ -1623,12 +1653,22 @@ cv_splits AS (
 cv_train AS (
     SELECT fold_id, _grp, _dt, _target FROM cv_splits WHERE split = 'train'
 ),
+_ets_spec_bt AS (
+    SELECT COALESCE(TRY_CAST(params['model'] AS VARCHAR), '') AS spec
+),
 forecast_data AS (
     SELECT
         fold_id,
         _grp AS id,
         date_trunc('second', MAX(_dt)::TIMESTAMP) AS last_date,
-        _ts_forecast(LIST(_target ORDER BY _dt), horizon, (SELECT _method FROM _params)) AS fcst
+        _ts_forecast(
+            LIST(_target ORDER BY _dt),
+            horizon,
+            CASE WHEN (SELECT spec FROM _ets_spec_bt) != ''
+                 THEN (SELECT _method FROM _params) || ':' || (SELECT spec FROM _ets_spec_bt)
+                 ELSE (SELECT _method FROM _params)
+            END
+        ) AS fcst
     FROM cv_train
     GROUP BY fold_id, _grp
 ),

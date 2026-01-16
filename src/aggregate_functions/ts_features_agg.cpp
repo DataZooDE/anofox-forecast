@@ -109,7 +109,7 @@ static LogicalType GetFeaturesAggResultType() {
 
     auto feature_names = GetFeatureNames();
     for (const auto &name : feature_names) {
-        children.push_back(make_pair(name, LogicalType::DOUBLE));
+        children.push_back(make_pair(name, LogicalType(LogicalTypeId::DOUBLE)));
     }
 
     return LogicalType::STRUCT(std::move(children));
@@ -123,12 +123,12 @@ static LogicalType GetSelectedFeaturesResultType(const vector<string> &selected)
         // No selection means all features
         auto all_features = GetFeatureNames();
         for (const auto &name : all_features) {
-            children.push_back(make_pair(name, LogicalType::DOUBLE));
+            children.push_back(make_pair(name, LogicalType(LogicalTypeId::DOUBLE)));
         }
     } else {
         // Use selected features in order
         for (const auto &name : selected) {
-            children.push_back(make_pair(name, LogicalType::DOUBLE));
+            children.push_back(make_pair(name, LogicalType(LogicalTypeId::DOUBLE)));
         }
     }
 
@@ -362,7 +362,7 @@ void RegisterTsFeaturesAggFunction(ExtensionLoader &loader) {
     // =========================================================================
     AggregateFunction agg_func_2(
         "ts_features_agg",
-        {LogicalType::TIMESTAMP, LogicalType::DOUBLE},
+        {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE)},
         GetFeaturesAggResultType(),
         AggregateFunction::StateSize<TsFeaturesAggState>,
         AggregateFunction::StateInitialize<TsFeaturesAggState, TsFeaturesAggOperation>,
@@ -380,7 +380,7 @@ void RegisterTsFeaturesAggFunction(ExtensionLoader &loader) {
     // =========================================================================
     AggregateFunction agg_func_3(
         "ts_features_agg",
-        {LogicalType::TIMESTAMP, LogicalType::DOUBLE, LogicalType::LIST(LogicalType::VARCHAR)},
+        {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE), LogicalType::LIST(LogicalType(LogicalTypeId::VARCHAR))},
         GetFeaturesAggResultType(),
         AggregateFunction::StateSize<TsFeaturesAggState>,
         AggregateFunction::StateInitialize<TsFeaturesAggState, TsFeaturesAggOperation>,
@@ -399,14 +399,14 @@ void RegisterTsFeaturesAggFunction(ExtensionLoader &loader) {
     // =========================================================================
     // Define the feature_params type: LIST(STRUCT(feature VARCHAR, params_json VARCHAR))
     child_list_t<LogicalType> param_struct_children;
-    param_struct_children.push_back(make_pair("feature", LogicalType::VARCHAR));
-    param_struct_children.push_back(make_pair("params_json", LogicalType::VARCHAR));
+    param_struct_children.push_back(make_pair("feature", LogicalType(LogicalTypeId::VARCHAR)));
+    param_struct_children.push_back(make_pair("params_json", LogicalType(LogicalTypeId::VARCHAR)));
     auto param_struct_type = LogicalType::STRUCT(std::move(param_struct_children));
 
     AggregateFunction agg_func_4(
         "ts_features_agg",
-        {LogicalType::TIMESTAMP, LogicalType::DOUBLE,
-         LogicalType::LIST(LogicalType::VARCHAR),
+        {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE),
+         LogicalType::LIST(LogicalType(LogicalTypeId::VARCHAR)),
          LogicalType::LIST(param_struct_type)},
         GetFeaturesAggResultType(),
         AggregateFunction::StateSize<TsFeaturesAggState>,

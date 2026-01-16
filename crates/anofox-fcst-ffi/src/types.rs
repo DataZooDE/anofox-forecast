@@ -320,6 +320,9 @@ impl Default for ForecastResult {
 pub struct ForecastOptions {
     /// Model name (null-terminated string)
     pub model: [c_char; 32],
+    /// ETS model specification (e.g., "AAA", "MNM", "AAdA")
+    /// Only used when model is "ETS". Empty string means use default (AAA).
+    pub ets_model: [c_char; 8],
     /// Forecast horizon
     pub horizon: c_int,
     /// Confidence level (0-1)
@@ -343,6 +346,7 @@ impl Default for ForecastOptions {
             .for_each(|(i, &b)| model[i] = b as c_char);
         Self {
             model,
+            ets_model: [0; 8], // Empty = use default AAA
             horizon: 12,
             confidence_level: 0.95,
             seasonal_period: 0,
@@ -392,6 +396,9 @@ impl ExogenousData {
 pub struct ForecastOptionsExog {
     /// Model name (null-terminated string)
     pub model: [c_char; 32],
+    /// ETS model specification (e.g., "AAA", "MNM", "AAdA")
+    /// Only used when model is "ETS". Empty string means use default (AAA).
+    pub ets_model: [c_char; 8],
     /// Forecast horizon
     pub horizon: c_int,
     /// Confidence level (0-1)
@@ -417,6 +424,7 @@ impl Default for ForecastOptionsExog {
             .for_each(|(i, &b)| model[i] = b as c_char);
         Self {
             model,
+            ets_model: [0; 8], // Empty = use default AAA
             horizon: 12,
             confidence_level: 0.95,
             seasonal_period: 0,

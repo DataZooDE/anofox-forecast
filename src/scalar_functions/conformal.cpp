@@ -74,16 +74,16 @@ static void TsConformalQuantileFunction(DataChunk &args, ExpressionState &state,
 void RegisterTsConformalQuantileFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_cq_set("ts_conformal_quantile");
     ts_cq_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsConformalQuantileFunction
     ));
     loader.RegisterFunction(ts_cq_set);
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_conformal_quantile");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsConformalQuantileFunction
     ));
     loader.RegisterFunction(anofox_set);
@@ -165,13 +165,13 @@ static void TsConformalIntervalsFunction(DataChunk &args, ExpressionState &state
 
 void RegisterTsConformalIntervalsFunction(ExtensionLoader &loader) {
     child_list_t<LogicalType> struct_children;
-    struct_children.push_back(make_pair("lower", LogicalType::LIST(LogicalType::DOUBLE)));
-    struct_children.push_back(make_pair("upper", LogicalType::LIST(LogicalType::DOUBLE)));
+    struct_children.push_back(make_pair("lower", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    struct_children.push_back(make_pair("upper", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
     auto result_type = LogicalType::STRUCT(std::move(struct_children));
 
     ScalarFunctionSet ts_ci_set("ts_conformal_intervals");
     ts_ci_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         result_type,
         TsConformalIntervalsFunction
     ));
@@ -179,7 +179,7 @@ void RegisterTsConformalIntervalsFunction(ExtensionLoader &loader) {
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_conformal_intervals");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         result_type,
         TsConformalIntervalsFunction
     ));
@@ -287,17 +287,17 @@ static void TsConformalPredictFunction(DataChunk &args, ExpressionState &state, 
 
 void RegisterTsConformalPredictFunction(ExtensionLoader &loader) {
     child_list_t<LogicalType> struct_children;
-    struct_children.push_back(make_pair("point", LogicalType::LIST(LogicalType::DOUBLE)));
-    struct_children.push_back(make_pair("lower", LogicalType::LIST(LogicalType::DOUBLE)));
-    struct_children.push_back(make_pair("upper", LogicalType::LIST(LogicalType::DOUBLE)));
-    struct_children.push_back(make_pair("coverage", LogicalType::DOUBLE));
-    struct_children.push_back(make_pair("conformity_score", LogicalType::DOUBLE));
-    struct_children.push_back(make_pair("method", LogicalType::VARCHAR));
+    struct_children.push_back(make_pair("point", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    struct_children.push_back(make_pair("lower", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    struct_children.push_back(make_pair("upper", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    struct_children.push_back(make_pair("coverage", LogicalType(LogicalTypeId::DOUBLE)));
+    struct_children.push_back(make_pair("conformity_score", LogicalType(LogicalTypeId::DOUBLE)));
+    struct_children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
     auto result_type = LogicalType::STRUCT(std::move(struct_children));
 
     ScalarFunctionSet ts_cp_set("ts_conformal_predict");
     ts_cp_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         result_type,
         TsConformalPredictFunction
     ));
@@ -305,7 +305,7 @@ void RegisterTsConformalPredictFunction(ExtensionLoader &loader) {
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_conformal_predict");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         result_type,
         TsConformalPredictFunction
     ));
@@ -413,17 +413,17 @@ static void TsConformalPredictAsymmetricFunction(DataChunk &args, ExpressionStat
 
 void RegisterTsConformalPredictAsymmetricFunction(ExtensionLoader &loader) {
     child_list_t<LogicalType> struct_children;
-    struct_children.push_back(make_pair("point", LogicalType::LIST(LogicalType::DOUBLE)));
-    struct_children.push_back(make_pair("lower", LogicalType::LIST(LogicalType::DOUBLE)));
-    struct_children.push_back(make_pair("upper", LogicalType::LIST(LogicalType::DOUBLE)));
-    struct_children.push_back(make_pair("coverage", LogicalType::DOUBLE));
-    struct_children.push_back(make_pair("conformity_score", LogicalType::DOUBLE));
-    struct_children.push_back(make_pair("method", LogicalType::VARCHAR));
+    struct_children.push_back(make_pair("point", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    struct_children.push_back(make_pair("lower", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    struct_children.push_back(make_pair("upper", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    struct_children.push_back(make_pair("coverage", LogicalType(LogicalTypeId::DOUBLE)));
+    struct_children.push_back(make_pair("conformity_score", LogicalType(LogicalTypeId::DOUBLE)));
+    struct_children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
     auto result_type = LogicalType::STRUCT(std::move(struct_children));
 
     ScalarFunctionSet ts_cpa_set("ts_conformal_predict_asymmetric");
     ts_cpa_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         result_type,
         TsConformalPredictAsymmetricFunction
     ));
@@ -431,7 +431,7 @@ void RegisterTsConformalPredictAsymmetricFunction(ExtensionLoader &loader) {
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_conformal_predict_asymmetric");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         result_type,
         TsConformalPredictAsymmetricFunction
     ));
@@ -609,18 +609,18 @@ static void TsConformalLearnFunction(DataChunk &args, ExpressionState &state, Ve
 
 void RegisterTsConformalLearnFunction(ExtensionLoader &loader) {
     child_list_t<LogicalType> struct_children;
-    struct_children.push_back(make_pair("method", LogicalType::VARCHAR));
-    struct_children.push_back(make_pair("strategy", LogicalType::VARCHAR));
-    struct_children.push_back(make_pair("alphas", LogicalType::LIST(LogicalType::DOUBLE)));
-    struct_children.push_back(make_pair("state_vector", LogicalType::LIST(LogicalType::DOUBLE)));
-    struct_children.push_back(make_pair("scores_lower", LogicalType::LIST(LogicalType::DOUBLE)));
-    struct_children.push_back(make_pair("scores_upper", LogicalType::LIST(LogicalType::DOUBLE)));
-    struct_children.push_back(make_pair("n_residuals", LogicalType::BIGINT));
+    struct_children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
+    struct_children.push_back(make_pair("strategy", LogicalType(LogicalTypeId::VARCHAR)));
+    struct_children.push_back(make_pair("alphas", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    struct_children.push_back(make_pair("state_vector", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    struct_children.push_back(make_pair("scores_lower", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    struct_children.push_back(make_pair("scores_upper", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    struct_children.push_back(make_pair("n_residuals", LogicalType(LogicalTypeId::BIGINT)));
     auto result_type = LogicalType::STRUCT(std::move(struct_children));
 
     ScalarFunctionSet ts_cl_set("ts_conformal_learn");
     ts_cl_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE), LogicalType::VARCHAR, LogicalType::VARCHAR},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::VARCHAR)},
         result_type,
         TsConformalLearnFunction
     ));
@@ -628,7 +628,7 @@ void RegisterTsConformalLearnFunction(ExtensionLoader &loader) {
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_conformal_learn");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE), LogicalType::VARCHAR, LogicalType::VARCHAR},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::VARCHAR)},
         result_type,
         TsConformalLearnFunction
     ));
@@ -774,27 +774,27 @@ static void TsConformalApplyFunction(DataChunk &args, ExpressionState &state, Ve
 void RegisterTsConformalApplyFunction(ExtensionLoader &loader) {
     // Profile input type
     child_list_t<LogicalType> profile_children;
-    profile_children.push_back(make_pair("method", LogicalType::VARCHAR));
-    profile_children.push_back(make_pair("strategy", LogicalType::VARCHAR));
-    profile_children.push_back(make_pair("alphas", LogicalType::LIST(LogicalType::DOUBLE)));
-    profile_children.push_back(make_pair("state_vector", LogicalType::LIST(LogicalType::DOUBLE)));
-    profile_children.push_back(make_pair("scores_lower", LogicalType::LIST(LogicalType::DOUBLE)));
-    profile_children.push_back(make_pair("scores_upper", LogicalType::LIST(LogicalType::DOUBLE)));
-    profile_children.push_back(make_pair("n_residuals", LogicalType::BIGINT));
+    profile_children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
+    profile_children.push_back(make_pair("strategy", LogicalType(LogicalTypeId::VARCHAR)));
+    profile_children.push_back(make_pair("alphas", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    profile_children.push_back(make_pair("state_vector", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    profile_children.push_back(make_pair("scores_lower", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    profile_children.push_back(make_pair("scores_upper", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    profile_children.push_back(make_pair("n_residuals", LogicalType(LogicalTypeId::BIGINT)));
     auto profile_type = LogicalType::STRUCT(std::move(profile_children));
 
     // Result type
     child_list_t<LogicalType> result_children;
-    result_children.push_back(make_pair("point", LogicalType::LIST(LogicalType::DOUBLE)));
-    result_children.push_back(make_pair("coverage", LogicalType::LIST(LogicalType::DOUBLE)));
-    result_children.push_back(make_pair("lower", LogicalType::LIST(LogicalType::DOUBLE)));
-    result_children.push_back(make_pair("upper", LogicalType::LIST(LogicalType::DOUBLE)));
-    result_children.push_back(make_pair("method", LogicalType::VARCHAR));
+    result_children.push_back(make_pair("point", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    result_children.push_back(make_pair("coverage", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    result_children.push_back(make_pair("lower", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    result_children.push_back(make_pair("upper", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    result_children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
     auto result_type = LogicalType::STRUCT(std::move(result_children));
 
     ScalarFunctionSet ts_ca_set("ts_conformal_apply");
     ts_ca_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), profile_type},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), profile_type},
         result_type,
         TsConformalApplyFunction
     ));
@@ -802,7 +802,7 @@ void RegisterTsConformalApplyFunction(ExtensionLoader &loader) {
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_conformal_apply");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), profile_type},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), profile_type},
         result_type,
         TsConformalApplyFunction
     ));
@@ -860,16 +860,16 @@ static void TsConformalCoverageFunction(DataChunk &args, ExpressionState &state,
 void RegisterTsConformalCoverageFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_cc_set("ts_conformal_coverage");
     ts_cc_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsConformalCoverageFunction
     ));
     loader.RegisterFunction(ts_cc_set);
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_conformal_coverage");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsConformalCoverageFunction
     ));
     loader.RegisterFunction(anofox_set);
@@ -942,16 +942,16 @@ static void TsConformalEvaluateFunction(DataChunk &args, ExpressionState &state,
 
 void RegisterTsConformalEvaluateFunction(ExtensionLoader &loader) {
     child_list_t<LogicalType> struct_children;
-    struct_children.push_back(make_pair("coverage", LogicalType::DOUBLE));
-    struct_children.push_back(make_pair("violation_rate", LogicalType::DOUBLE));
-    struct_children.push_back(make_pair("mean_width", LogicalType::DOUBLE));
-    struct_children.push_back(make_pair("winkler_score", LogicalType::DOUBLE));
-    struct_children.push_back(make_pair("n_observations", LogicalType::BIGINT));
+    struct_children.push_back(make_pair("coverage", LogicalType(LogicalTypeId::DOUBLE)));
+    struct_children.push_back(make_pair("violation_rate", LogicalType(LogicalTypeId::DOUBLE)));
+    struct_children.push_back(make_pair("mean_width", LogicalType(LogicalTypeId::DOUBLE)));
+    struct_children.push_back(make_pair("winkler_score", LogicalType(LogicalTypeId::DOUBLE)));
+    struct_children.push_back(make_pair("n_observations", LogicalType(LogicalTypeId::BIGINT)));
     auto result_type = LogicalType::STRUCT(std::move(struct_children));
 
     ScalarFunctionSet ts_ce_set("ts_conformal_evaluate");
     ts_ce_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         result_type,
         TsConformalEvaluateFunction
     ));
@@ -959,7 +959,7 @@ void RegisterTsConformalEvaluateFunction(ExtensionLoader &loader) {
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_conformal_evaluate");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         result_type,
         TsConformalEvaluateFunction
     ));
@@ -1013,16 +1013,16 @@ static void TsMeanIntervalWidthFunction(DataChunk &args, ExpressionState &state,
 void RegisterTsMeanIntervalWidthFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_miw_set("ts_mean_interval_width");
     ts_miw_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsMeanIntervalWidthFunction
     ));
     loader.RegisterFunction(ts_miw_set);
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_mean_interval_width");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsMeanIntervalWidthFunction
     ));
     loader.RegisterFunction(anofox_set);

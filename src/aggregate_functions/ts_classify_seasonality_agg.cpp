@@ -30,14 +30,14 @@ struct TsClassifySeasonalityAggState {
 // Result type (same as scalar function)
 static LogicalType GetClassifySeasonalityAggResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("timing_classification", LogicalType::VARCHAR));
-    children.push_back(make_pair("modulation_type", LogicalType::VARCHAR));
-    children.push_back(make_pair("has_stable_timing", LogicalType::BOOLEAN));
-    children.push_back(make_pair("timing_variability", LogicalType::DOUBLE));
-    children.push_back(make_pair("seasonal_strength", LogicalType::DOUBLE));
-    children.push_back(make_pair("is_seasonal", LogicalType::BOOLEAN));
-    children.push_back(make_pair("cycle_strengths", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("weak_seasons", LogicalType::LIST(LogicalType::BIGINT)));
+    children.push_back(make_pair("timing_classification", LogicalType(LogicalTypeId::VARCHAR)));
+    children.push_back(make_pair("modulation_type", LogicalType(LogicalTypeId::VARCHAR)));
+    children.push_back(make_pair("has_stable_timing", LogicalType(LogicalTypeId::BOOLEAN)));
+    children.push_back(make_pair("timing_variability", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("seasonal_strength", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("is_seasonal", LogicalType(LogicalTypeId::BOOLEAN)));
+    children.push_back(make_pair("cycle_strengths", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("weak_seasons", LogicalType::LIST(LogicalType(LogicalTypeId::BIGINT))));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -305,7 +305,7 @@ void RegisterTsClassifySeasonalityAggFunction(ExtensionLoader &loader) {
     // ts_classify_seasonality_agg(ts_column, value_column, period) -> STRUCT
     AggregateFunction agg_func(
         "ts_classify_seasonality_agg",
-        {LogicalType::TIMESTAMP, LogicalType::DOUBLE, LogicalType::DOUBLE},
+        {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetClassifySeasonalityAggResultType(),
         AggregateFunction::StateSize<TsClassifySeasonalityAggState>,
         AggregateFunction::StateInitialize<TsClassifySeasonalityAggState, TsClassifySeasonalityAggOperation>,

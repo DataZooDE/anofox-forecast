@@ -3832,7 +3832,41 @@ SELECT * FROM ts_forecast_by('sales', id, date, val, 'MSTL', 30,
 SELECT * FROM ts_forecast_by('sales', id, date, val, 'ETS', 12,
     MAP{'confidence_level': '0.95'}
 );
+
+-- ETS with explicit model specification (Error-Trend-Seasonal components)
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'ETS', 12,
+    MAP{'model': 'AAA'}  -- Additive error, Additive trend, Additive seasonality
+);
+
+-- ETS with multiplicative components and damped trend
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'ETS', 12,
+    MAP{'model': 'MAdM'}  -- Multiplicative error, Additive damped trend, Multiplicative seasonality
+);
 ```
+
+**ETS Model Specification:**
+
+The `model` parameter for ETS accepts a 3 or 4 character string specifying the Error, Trend, and Seasonal components:
+
+| Position | Component | Values |
+|----------|-----------|--------|
+| 1st | Error | `A` (Additive), `M` (Multiplicative) |
+| 2nd | Trend | `N` (None), `A` (Additive), `M` (Multiplicative) |
+| 3rd (optional) | Damped | `d` (damped trend) - insert between trend and seasonal |
+| Last | Seasonal | `N` (None), `A` (Additive), `M` (Multiplicative) |
+
+**Common ETS Models:**
+| Spec | Description |
+|------|-------------|
+| `ANN` | Simple exponential smoothing (no trend, no seasonality) |
+| `AAN` | Holt's linear method (additive trend, no seasonality) |
+| `AAA` | Additive Holt-Winters (additive trend and seasonality) |
+| `MAM` | Multiplicative Holt-Winters (multiplicative seasonality) |
+| `AAdN` | Damped trend, no seasonality |
+| `AAdA` | Damped additive Holt-Winters |
+| `MAdM` | Damped multiplicative Holt-Winters |
+
+When no `model` parameter is provided, the ETS algorithm automatically selects the best model using AIC/BIC criteria.
 
 **Notes:**
 - The function uses the `frequency` parameter (default: `'1d'`) to generate forecast timestamps

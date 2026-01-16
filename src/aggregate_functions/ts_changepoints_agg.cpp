@@ -26,10 +26,10 @@ struct TsChangepointsAggState {
 static LogicalType GetChangepointsAggResultType() {
     // Return: LIST<STRUCT(timestamp, value, is_changepoint, changepoint_probability)>
     child_list_t<LogicalType> struct_children;
-    struct_children.push_back(make_pair("timestamp", LogicalType::TIMESTAMP));
-    struct_children.push_back(make_pair("value", LogicalType::DOUBLE));
-    struct_children.push_back(make_pair("is_changepoint", LogicalType::BOOLEAN));
-    struct_children.push_back(make_pair("changepoint_probability", LogicalType::DOUBLE));
+    struct_children.push_back(make_pair("timestamp", LogicalType(LogicalTypeId::TIMESTAMP)));
+    struct_children.push_back(make_pair("value", LogicalType(LogicalTypeId::DOUBLE)));
+    struct_children.push_back(make_pair("is_changepoint", LogicalType(LogicalTypeId::BOOLEAN)));
+    struct_children.push_back(make_pair("changepoint_probability", LogicalType(LogicalTypeId::DOUBLE)));
 
     return LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
 }
@@ -242,8 +242,8 @@ void RegisterTsDetectChangepointsAggFunction(ExtensionLoader &loader) {
     // (date_col, value_col, params MAP)
     AggregateFunction agg_func(
         "ts_detect_changepoints_agg",
-        {LogicalType::TIMESTAMP, LogicalType::DOUBLE,
-         LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)},
+        {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE),
+         LogicalType::MAP(LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::VARCHAR))},
         GetChangepointsAggResultType(),
         AggregateFunction::StateSize<TsChangepointsAggState>,
         AggregateFunction::StateInitialize<TsChangepointsAggState, TsChangepointsAggOperation>,

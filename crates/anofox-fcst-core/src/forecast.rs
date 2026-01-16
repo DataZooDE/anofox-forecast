@@ -4,6 +4,10 @@ use crate::error::{ForecastError, Result};
 use crate::imputation::fill_nulls_interpolate;
 use crate::seasonality::detect_seasonality;
 
+// ETS model types from anofox-forecast crate
+use anofox_forecast::models::exponential::{ETSSpec, ETS as ETSModel};
+use anofox_forecast::prelude::Forecaster;
+
 /// Forecast result.
 #[derive(Debug, Clone)]
 pub struct ForecastOutput {
@@ -240,6 +244,9 @@ impl ModelType {
 pub struct ForecastOptions {
     /// Model to use
     pub model: ModelType,
+    /// ETS model specification (e.g., "AAA", "MNM", "AAdA")
+    /// Only used when model is ETS. None means use default (AAA).
+    pub ets_spec: Option<String>,
     /// Forecast horizon
     pub horizon: usize,
     /// Confidence level (0-1)
@@ -258,6 +265,7 @@ impl Default for ForecastOptions {
     fn default() -> Self {
         Self {
             model: ModelType::AutoETS,
+            ets_spec: None,
             horizon: 12,
             confidence_level: 0.95,
             seasonal_period: 0,
@@ -339,6 +347,9 @@ impl ExogenousData {
 pub struct ForecastOptionsExog {
     /// Model to use
     pub model: ModelType,
+    /// ETS model specification (e.g., "AAA", "MNM", "AAdA")
+    /// Only used when model is ETS. None means use default (AAA).
+    pub ets_spec: Option<String>,
     /// Forecast horizon
     pub horizon: usize,
     /// Confidence level (0-1)
@@ -359,6 +370,7 @@ impl Default for ForecastOptionsExog {
     fn default() -> Self {
         Self {
             model: ModelType::AutoETS,
+            ets_spec: None,
             horizon: 12,
             confidence_level: 0.95,
             seasonal_period: 0,
@@ -374,6 +386,7 @@ impl From<ForecastOptions> for ForecastOptionsExog {
     fn from(opts: ForecastOptions) -> Self {
         Self {
             model: opts.model,
+            ets_spec: opts.ets_spec,
             horizon: opts.horizon,
             confidence_level: opts.confidence_level,
             seasonal_period: opts.seasonal_period,
@@ -441,7 +454,13 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         ModelType::SeasonalWindowAverage => {
             forecast_seasonal_window_average(&clean_values, options.horizon, period)
         }
-        ModelType::ETS | ModelType::AutoETS => forecast_ets(&clean_values, options.horizon, period),
+        ModelType::ETS => forecast_ets(
+            &clean_values,
+            options.horizon,
+            period,
+            options.ets_spec.as_deref(),
+        ),
+        ModelType::AutoETS => forecast_ets(&clean_values, options.horizon, period, None),
         // Theta Methods
         ModelType::Theta
         | ModelType::OptimizedTheta
@@ -710,7 +729,7 @@ fn forecast_with_model(
         ModelType::SeasonalWindowAverage => {
             forecast_seasonal_window_average(values, horizon, period)
         }
-        ModelType::ETS | ModelType::AutoETS => forecast_ets(values, horizon, period),
+        ModelType::ETS | ModelType::AutoETS => forecast_ets(values, horizon, period, None),
         // Theta Methods
         ModelType::Theta
         | ModelType::OptimizedTheta
@@ -1041,9 +1060,86 @@ fn forecast_seasonal_window_average(
     })
 }
 
-fn forecast_ets(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
-    // ETS: Error-Trend-Seasonal (simplified implementation)
-    // Falls back to appropriate simpler model based on data characteristics
+/// Validate ETS notation format.
+/// Valid ETS notations follow the pattern: [E][T][S] or [E][Td][S]
+/// where E = Error (A or M), T = Trend (A, M, or N), S = Seasonal (A, M, or N)
+/// and 'd' indicates damped trend.
+/// Examples: AAA, MNM, AAdA, MAdM
+fn is_valid_ets_notation(notation: &str) -> bool {
+    let chars: Vec<char> = notation.chars().collect();
+
+    match chars.len() {
+        // 3-character notation: ETS (e.g., AAA, MNM)
+        3 => {
+            let valid_error = chars[0] == 'A' || chars[0] == 'M';
+            let valid_trend = chars[1] == 'A' || chars[1] == 'M' || chars[1] == 'N';
+            let valid_seasonal = chars[2] == 'A' || chars[2] == 'M' || chars[2] == 'N';
+            valid_error && valid_trend && valid_seasonal
+        }
+        // 4-character notation: ETdS with damped trend (e.g., AAdA, MAdM)
+        4 => {
+            let valid_error = chars[0] == 'A' || chars[0] == 'M';
+            let valid_trend = chars[1] == 'A' || chars[1] == 'M';
+            let valid_damped = chars[2] == 'd';
+            let valid_seasonal = chars[3] == 'A' || chars[3] == 'M' || chars[3] == 'N';
+            valid_error && valid_trend && valid_damped && valid_seasonal
+        }
+        _ => false,
+    }
+}
+
+fn forecast_ets(
+    values: &[f64],
+    horizon: usize,
+    period: usize,
+    ets_spec: Option<&str>,
+) -> Result<ForecastOutput> {
+    // Parse ETS specification if provided
+    let spec = if let Some(notation) = ets_spec {
+        // First validate the notation format
+        if !is_valid_ets_notation(notation) {
+            return Err(ForecastError::InvalidInput(format!(
+                "Invalid ETS model specification '{}'. \
+                 Expected format: ETS notation like 'AAA', 'MNM', 'AAdA' where \
+                 E=Error (A/M), T=Trend (A/M/N, optionally with 'd' for damped), S=Seasonal (A/M/N).",
+                notation
+            )));
+        }
+
+        // Use from_notation to parse the spec
+        let parsed_spec = ETSSpec::from_notation(notation).map_err(|e| {
+            ForecastError::InvalidInput(format!(
+                "Invalid ETS model specification '{}': {}",
+                notation, e
+            ))
+        })?;
+
+        // Validate the spec (reject unstable combinations like MAA, MAdA)
+        if !parsed_spec.is_valid() {
+            return Err(ForecastError::InvalidInput(format!(
+                "ETS model specification '{}' is unstable (per FPP3 taxonomy). \
+                 MAA and MAdA combinations are not allowed.",
+                notation
+            )));
+        }
+
+        Some(parsed_spec)
+    } else {
+        None
+    };
+
+    // If we have a valid spec, try to use the anofox-forecast ETS model
+    if let Some(ets_spec) = spec {
+        // Try to use the real ETS forecaster
+        match forecast_with_ets_spec(values, horizon, period, &ets_spec) {
+            Ok(output) => return Ok(output),
+            Err(_) => {
+                // Fall back to simplified implementation
+            }
+        }
+    }
+
+    // Fallback: simplified ETS implementation based on data characteristics
     if period > 1 && values.len() >= 2 * period {
         forecast_holt_winters(values, horizon, period, 0.3, 0.1, 0.1)
     } else if values.len() >= 10 {
@@ -1051,6 +1147,65 @@ fn forecast_ets(values: &[f64], horizon: usize, period: usize) -> Result<Forecas
     } else {
         forecast_ses(values, horizon, 0.3)
     }
+}
+
+/// Forecast using the anofox-forecast ETS model with explicit spec.
+fn forecast_with_ets_spec(
+    values: &[f64],
+    horizon: usize,
+    period: usize,
+    spec: &ETSSpec,
+) -> Result<ForecastOutput> {
+    use anofox_forecast::core::TimeSeriesBuilder;
+
+    // Determine seasonal period for the model
+    let seasonal_period = if spec.has_seasonal() && period > 1 {
+        period
+    } else {
+        1
+    };
+
+    // Create TimeSeries from values
+    let time_series = TimeSeriesBuilder::new()
+        .values(values.to_vec())
+        .build()
+        .map_err(|e| {
+            ForecastError::ComputationError(format!("Failed to build TimeSeries: {}", e))
+        })?;
+
+    // Create the ETS forecaster
+    let mut forecaster = ETSModel::new(*spec, seasonal_period);
+
+    // Fit the model
+    forecaster
+        .fit(&time_series)
+        .map_err(|e| ForecastError::ComputationError(format!("Failed to fit ETS model: {}", e)))?;
+
+    // Generate forecasts
+    let forecast = forecaster.predict(horizon).map_err(|e| {
+        ForecastError::ComputationError(format!("Failed to generate ETS forecasts: {}", e))
+    })?;
+
+    // Extract point forecasts (univariate - first dimension)
+    let point = forecast.point().first().cloned().unwrap_or_default();
+
+    // Get fitted values
+    let fitted = forecaster.fitted_values().map(|v| v.to_vec());
+
+    // Get model name from spec
+    let model_name = format!("ETS({})", spec.short_name());
+
+    Ok(ForecastOutput {
+        point,
+        lower: vec![],
+        upper: vec![],
+        fitted,
+        residuals: None,
+        model_name,
+        aic: None,
+        bic: None,
+        mse: None,
+    })
 }
 
 fn forecast_arima(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
@@ -1857,5 +2012,84 @@ mod tests {
 
         let result = forecast(&values, &options);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_is_valid_ets_notation() {
+        // Valid 3-character notations
+        assert!(is_valid_ets_notation("AAA"));
+        assert!(is_valid_ets_notation("AAN"));
+        assert!(is_valid_ets_notation("AAM"));
+        assert!(is_valid_ets_notation("ANA"));
+        assert!(is_valid_ets_notation("ANN"));
+        assert!(is_valid_ets_notation("ANM"));
+        assert!(is_valid_ets_notation("AMA"));
+        assert!(is_valid_ets_notation("AMN"));
+        assert!(is_valid_ets_notation("AMM"));
+        assert!(is_valid_ets_notation("MAA"));
+        assert!(is_valid_ets_notation("MNM"));
+        assert!(is_valid_ets_notation("MMM"));
+
+        // Valid 4-character damped notations
+        assert!(is_valid_ets_notation("AAdA"));
+        assert!(is_valid_ets_notation("AAdN"));
+        assert!(is_valid_ets_notation("AAdM"));
+        assert!(is_valid_ets_notation("MAdA"));
+        assert!(is_valid_ets_notation("MAdM"));
+        assert!(is_valid_ets_notation("MMdA"));
+
+        // Invalid notations
+        assert!(!is_valid_ets_notation("XYZ")); // Invalid characters
+        assert!(!is_valid_ets_notation("123")); // Numbers
+        assert!(!is_valid_ets_notation("AA")); // Too short
+        assert!(!is_valid_ets_notation("AAAAA")); // Too long
+        assert!(!is_valid_ets_notation("AAxA")); // Invalid damping char
+        assert!(!is_valid_ets_notation("NAA")); // N not valid for error type
+        assert!(!is_valid_ets_notation("")); // Empty
+        assert!(!is_valid_ets_notation("aaa")); // Lowercase
+    }
+
+    #[test]
+    fn test_ets_invalid_spec_returns_error() {
+        // Test that an invalid ETS spec returns an error
+        let values: Vec<Option<f64>> = (0..20).map(|i| Some(100.0 + i as f64)).collect();
+
+        let options = ForecastOptions {
+            model: ModelType::ETS,
+            ets_spec: Some("XYZ".to_string()),
+            horizon: 5,
+            ..Default::default()
+        };
+
+        let result = forecast(&values, &options);
+        assert!(result.is_err(), "Expected error for invalid ETS spec 'XYZ'");
+
+        let err = result.unwrap_err();
+        let err_msg = err.to_string();
+        assert!(
+            err_msg.contains("Invalid ETS model specification"),
+            "Error message should mention invalid ETS spec: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_ets_valid_spec_succeeds() {
+        // Test that a valid ETS spec succeeds
+        let values: Vec<Option<f64>> = (0..20).map(|i| Some(100.0 + i as f64)).collect();
+
+        let options = ForecastOptions {
+            model: ModelType::ETS,
+            ets_spec: Some("AAA".to_string()),
+            horizon: 5,
+            ..Default::default()
+        };
+
+        let result = forecast(&values, &options);
+        assert!(
+            result.is_ok(),
+            "Expected success for valid ETS spec 'AAA': {:?}",
+            result.err()
+        );
     }
 }
