@@ -115,19 +115,33 @@ pub struct DateArray {
     pub date_type: DateType,
 }
 
-/// Time series statistics result (24 metrics).
+/// Time series statistics result (31 metrics).
 #[repr(C)]
 pub struct TsStatsResult {
     /// Total number of observations
     pub length: size_t,
     /// Number of NULL values
     pub n_nulls: size_t,
+    /// Number of NaN values (distinct from NULL)
+    pub n_nan: size_t,
     /// Number of zero values
     pub n_zeros: size_t,
     /// Number of positive values
     pub n_positive: size_t,
     /// Number of negative values
     pub n_negative: size_t,
+    /// Count of distinct values
+    pub n_unique_values: size_t,
+    /// Whether series has only one unique value
+    pub is_constant: bool,
+    /// Count of leading zeros
+    pub n_zeros_start: size_t,
+    /// Count of trailing zeros
+    pub n_zeros_end: size_t,
+    /// Longest run of constant values
+    pub plateau_size: size_t,
+    /// Longest run of constant non-zero values
+    pub plateau_size_nonzero: size_t,
     /// Arithmetic mean
     pub mean: c_double,
     /// Median (50th percentile)
@@ -173,9 +187,16 @@ impl Default for TsStatsResult {
         Self {
             length: 0,
             n_nulls: 0,
+            n_nan: 0,
             n_zeros: 0,
             n_positive: 0,
             n_negative: 0,
+            n_unique_values: 0,
+            is_constant: false,
+            n_zeros_start: 0,
+            n_zeros_end: 0,
+            plateau_size: 0,
+            plateau_size_nonzero: 0,
             mean: f64::NAN,
             median: f64::NAN,
             std_dev: f64::NAN,
@@ -204,9 +225,16 @@ impl From<anofox_fcst_core::TsStats> for TsStatsResult {
         Self {
             length: stats.length,
             n_nulls: stats.n_nulls,
+            n_nan: stats.n_nan,
             n_zeros: stats.n_zeros,
             n_positive: stats.n_positive,
             n_negative: stats.n_negative,
+            n_unique_values: stats.n_unique_values,
+            is_constant: stats.is_constant,
+            n_zeros_start: stats.n_zeros_start,
+            n_zeros_end: stats.n_zeros_end,
+            plateau_size: stats.plateau_size,
+            plateau_size_nonzero: stats.plateau_size_nonzero,
             mean: stats.mean,
             median: stats.median,
             std_dev: stats.std_dev,

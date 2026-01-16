@@ -4,19 +4,33 @@
 
 use crate::error::Result;
 
-/// Time series statistics result containing 24 metrics.
+/// Time series statistics result containing 31 metrics.
 #[derive(Debug, Clone, Default)]
 pub struct TsStats {
     /// Total number of observations
     pub length: usize,
     /// Number of NULL values
     pub n_nulls: usize,
+    /// Number of NaN values (distinct from NULL)
+    pub n_nan: usize,
     /// Number of zero values
     pub n_zeros: usize,
     /// Number of positive values
     pub n_positive: usize,
     /// Number of negative values
     pub n_negative: usize,
+    /// Count of distinct values
+    pub n_unique_values: usize,
+    /// Whether series has only one unique value
+    pub is_constant: bool,
+    /// Count of leading zeros
+    pub n_zeros_start: usize,
+    /// Count of trailing zeros
+    pub n_zeros_end: usize,
+    /// Longest run of constant values
+    pub plateau_size: usize,
+    /// Longest run of constant non-zero values
+    pub plateau_size_nonzero: usize,
     /// Arithmetic mean
     pub mean: f64,
     /// Median (50th percentile)
@@ -71,12 +85,14 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
         return Ok(TsStats::default());
     }
 
-    // Count NULLs and extract valid values
+    // Count NULLs, NaNs and extract valid (non-NULL, non-NaN) values
     let mut n_nulls = 0;
+    let mut n_nan = 0;
     let mut values: Vec<f64> = Vec::with_capacity(length);
 
     for val in series {
         match val {
+            Some(v) if v.is_nan() => n_nan += 1,
             Some(v) => values.push(*v),
             None => n_nulls += 1,
         }
@@ -88,6 +104,7 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
         return Ok(TsStats {
             length,
             n_nulls,
+            n_nan,
             ..Default::default()
         });
     }
@@ -96,6 +113,22 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
     let n_zeros = values.iter().filter(|&&v| v == 0.0).count();
     let n_positive = values.iter().filter(|&&v| v > 0.0).count();
     let n_negative = values.iter().filter(|&&v| v < 0.0).count();
+
+    // Count unique values (using bit representation for exact f64 comparison)
+    let mut unique_bits: std::collections::HashSet<u64> = std::collections::HashSet::new();
+    for &v in &values {
+        unique_bits.insert(v.to_bits());
+    }
+    let n_unique_values = unique_bits.len();
+    let is_constant = n_unique_values == 1;
+
+    // Count leading zeros (from original series, including NULLs as breaks)
+    let n_zeros_start = count_leading_zeros(series);
+    let n_zeros_end = count_trailing_zeros(series);
+
+    // Compute plateau sizes
+    let plateau_size = compute_plateau_size(&values);
+    let plateau_size_nonzero = compute_plateau_size_nonzero(&values);
 
     // Basic statistics
     let sum: f64 = values.iter().sum();
@@ -160,9 +193,16 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
     Ok(TsStats {
         length,
         n_nulls,
+        n_nan,
         n_zeros,
         n_positive,
         n_negative,
+        n_unique_values,
+        is_constant,
+        n_zeros_start,
+        n_zeros_end,
+        plateau_size,
+        plateau_size_nonzero,
         mean,
         median,
         std_dev,
@@ -346,6 +386,85 @@ fn compute_stability(values: &[f64]) -> f64 {
     }
 }
 
+/// Count leading zeros in a series (stops at first non-zero or NULL).
+fn count_leading_zeros(series: &[Option<f64>]) -> usize {
+    let mut count = 0;
+    for val in series {
+        match val {
+            Some(v) if *v == 0.0 => count += 1,
+            _ => break,
+        }
+    }
+    count
+}
+
+/// Count trailing zeros in a series (stops at first non-zero or NULL from end).
+fn count_trailing_zeros(series: &[Option<f64>]) -> usize {
+    let mut count = 0;
+    for val in series.iter().rev() {
+        match val {
+            Some(v) if *v == 0.0 => count += 1,
+            _ => break,
+        }
+    }
+    count
+}
+
+/// Compute the longest run of constant values.
+fn compute_plateau_size(values: &[f64]) -> usize {
+    if values.is_empty() {
+        return 0;
+    }
+
+    let mut max_run = 1;
+    let mut current_run = 1;
+
+    for i in 1..values.len() {
+        if values[i].to_bits() == values[i - 1].to_bits() {
+            current_run += 1;
+            max_run = max_run.max(current_run);
+        } else {
+            current_run = 1;
+        }
+    }
+
+    max_run
+}
+
+/// Compute the longest run of constant non-zero values.
+fn compute_plateau_size_nonzero(values: &[f64]) -> usize {
+    if values.is_empty() {
+        return 0;
+    }
+
+    let mut max_run = 0;
+    let mut current_run = 0;
+    let mut prev_nonzero: Option<u64> = None;
+
+    for &v in values {
+        if v == 0.0 {
+            // Zero breaks the run
+            max_run = max_run.max(current_run);
+            current_run = 0;
+            prev_nonzero = None;
+        } else {
+            let bits = v.to_bits();
+            match prev_nonzero {
+                Some(prev) if prev == bits => {
+                    current_run += 1;
+                }
+                _ => {
+                    max_run = max_run.max(current_run);
+                    current_run = 1;
+                }
+            }
+            prev_nonzero = Some(bits);
+        }
+    }
+
+    max_run.max(current_run)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,5 +510,87 @@ mod tests {
         assert_eq!(stats.n_zeros, 1);
         assert_eq!(stats.n_positive, 2);
         assert_eq!(stats.n_negative, 2);
+    }
+
+    #[test]
+    fn test_nan_values() {
+        let series: Vec<Option<f64>> = vec![Some(1.0), Some(f64::NAN), Some(3.0), Some(f64::NAN)];
+        let stats = compute_ts_stats(&series).unwrap();
+
+        assert_eq!(stats.length, 4);
+        assert_eq!(stats.n_nan, 2);
+        assert_eq!(stats.n_nulls, 0);
+        // Mean should be computed only from valid, non-NaN values
+        assert_relative_eq!(stats.mean, 2.0, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn test_unique_values_and_constant() {
+        // Constant series
+        let series: Vec<Option<f64>> = vec![Some(5.0), Some(5.0), Some(5.0)];
+        let stats = compute_ts_stats(&series).unwrap();
+        assert_eq!(stats.n_unique_values, 1);
+        assert!(stats.is_constant);
+
+        // Non-constant series
+        let series: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), Some(3.0), Some(1.0)];
+        let stats = compute_ts_stats(&series).unwrap();
+        assert_eq!(stats.n_unique_values, 3);
+        assert!(!stats.is_constant);
+    }
+
+    #[test]
+    fn test_leading_trailing_zeros() {
+        let series: Vec<Option<f64>> = vec![
+            Some(0.0),
+            Some(0.0),
+            Some(1.0),
+            Some(2.0),
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+        ];
+        let stats = compute_ts_stats(&series).unwrap();
+
+        assert_eq!(stats.n_zeros_start, 2);
+        assert_eq!(stats.n_zeros_end, 3);
+    }
+
+    #[test]
+    fn test_leading_zeros_with_null() {
+        // NULL breaks the leading zero count
+        let series: Vec<Option<f64>> = vec![Some(0.0), None, Some(0.0), Some(1.0)];
+        let stats = compute_ts_stats(&series).unwrap();
+        assert_eq!(stats.n_zeros_start, 1);
+    }
+
+    #[test]
+    fn test_plateau_size() {
+        let series: Vec<Option<f64>> = vec![
+            Some(1.0),
+            Some(2.0),
+            Some(2.0),
+            Some(2.0),
+            Some(3.0),
+            Some(3.0),
+        ];
+        let stats = compute_ts_stats(&series).unwrap();
+        assert_eq!(stats.plateau_size, 3); // Three 2.0s
+    }
+
+    #[test]
+    fn test_plateau_size_nonzero() {
+        let series: Vec<Option<f64>> = vec![
+            Some(0.0),
+            Some(5.0),
+            Some(5.0),
+            Some(5.0),
+            Some(5.0),
+            Some(0.0),
+            Some(3.0),
+            Some(3.0),
+        ];
+        let stats = compute_ts_stats(&series).unwrap();
+        assert_eq!(stats.plateau_size_nonzero, 4); // Four 5.0s
     }
 }
