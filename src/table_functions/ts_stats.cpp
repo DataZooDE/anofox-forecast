@@ -8,14 +8,21 @@
 
 namespace duckdb {
 
-// Define the output STRUCT type for ts_stats
+// Define the output STRUCT type for ts_stats (34 metrics)
 static LogicalType GetTsStatsResultType() {
     child_list_t<LogicalType> children;
     children.push_back(make_pair("length", LogicalType::UBIGINT));
     children.push_back(make_pair("n_nulls", LogicalType::UBIGINT));
+    children.push_back(make_pair("n_nan", LogicalType::UBIGINT));
     children.push_back(make_pair("n_zeros", LogicalType::UBIGINT));
     children.push_back(make_pair("n_positive", LogicalType::UBIGINT));
     children.push_back(make_pair("n_negative", LogicalType::UBIGINT));
+    children.push_back(make_pair("n_unique_values", LogicalType::UBIGINT));
+    children.push_back(make_pair("is_constant", LogicalType::BOOLEAN));
+    children.push_back(make_pair("n_zeros_start", LogicalType::UBIGINT));
+    children.push_back(make_pair("n_zeros_end", LogicalType::UBIGINT));
+    children.push_back(make_pair("plateau_size", LogicalType::UBIGINT));
+    children.push_back(make_pair("plateau_size_nonzero", LogicalType::UBIGINT));
     children.push_back(make_pair("mean", LogicalType::DOUBLE));
     children.push_back(make_pair("median", LogicalType::DOUBLE));
     children.push_back(make_pair("std_dev", LogicalType::DOUBLE));
@@ -26,6 +33,9 @@ static LogicalType GetTsStatsResultType() {
     children.push_back(make_pair("sum", LogicalType::DOUBLE));
     children.push_back(make_pair("skewness", LogicalType::DOUBLE));
     children.push_back(make_pair("kurtosis", LogicalType::DOUBLE));
+    children.push_back(make_pair("tail_index", LogicalType::DOUBLE));
+    children.push_back(make_pair("bimodality_coef", LogicalType::DOUBLE));
+    children.push_back(make_pair("trimmed_mean", LogicalType::DOUBLE));
     children.push_back(make_pair("coef_variation", LogicalType::DOUBLE));
     children.push_back(make_pair("q1", LogicalType::DOUBLE));
     children.push_back(make_pair("q3", LogicalType::DOUBLE));
@@ -117,31 +127,41 @@ static void TsStatsFunction(DataChunk &args, ExpressionState &state, Vector &res
             continue;
         }
 
-        // Set result fields
+        // Set result fields (34 metrics)
         SetStructField<uint64_t>(result, 0, row_idx, stats_result.length);
         SetStructField<uint64_t>(result, 1, row_idx, stats_result.n_nulls);
-        SetStructField<uint64_t>(result, 2, row_idx, stats_result.n_zeros);
-        SetStructField<uint64_t>(result, 3, row_idx, stats_result.n_positive);
-        SetStructField<uint64_t>(result, 4, row_idx, stats_result.n_negative);
-        SetStructField<double>(result, 5, row_idx, stats_result.mean);
-        SetStructField<double>(result, 6, row_idx, stats_result.median);
-        SetStructField<double>(result, 7, row_idx, stats_result.std_dev);
-        SetStructField<double>(result, 8, row_idx, stats_result.variance);
-        SetStructField<double>(result, 9, row_idx, stats_result.min);
-        SetStructField<double>(result, 10, row_idx, stats_result.max);
-        SetStructField<double>(result, 11, row_idx, stats_result.range);
-        SetStructField<double>(result, 12, row_idx, stats_result.sum);
-        SetStructField<double>(result, 13, row_idx, stats_result.skewness);
-        SetStructField<double>(result, 14, row_idx, stats_result.kurtosis);
-        SetStructField<double>(result, 15, row_idx, stats_result.coef_variation);
-        SetStructField<double>(result, 16, row_idx, stats_result.q1);
-        SetStructField<double>(result, 17, row_idx, stats_result.q3);
-        SetStructField<double>(result, 18, row_idx, stats_result.iqr);
-        SetStructField<double>(result, 19, row_idx, stats_result.autocorr_lag1);
-        SetStructField<double>(result, 20, row_idx, stats_result.trend_strength);
-        SetStructField<double>(result, 21, row_idx, stats_result.seasonality_strength);
-        SetStructField<double>(result, 22, row_idx, stats_result.entropy);
-        SetStructField<double>(result, 23, row_idx, stats_result.stability);
+        SetStructField<uint64_t>(result, 2, row_idx, stats_result.n_nan);
+        SetStructField<uint64_t>(result, 3, row_idx, stats_result.n_zeros);
+        SetStructField<uint64_t>(result, 4, row_idx, stats_result.n_positive);
+        SetStructField<uint64_t>(result, 5, row_idx, stats_result.n_negative);
+        SetStructField<uint64_t>(result, 6, row_idx, stats_result.n_unique_values);
+        SetStructField<bool>(result, 7, row_idx, stats_result.is_constant);
+        SetStructField<uint64_t>(result, 8, row_idx, stats_result.n_zeros_start);
+        SetStructField<uint64_t>(result, 9, row_idx, stats_result.n_zeros_end);
+        SetStructField<uint64_t>(result, 10, row_idx, stats_result.plateau_size);
+        SetStructField<uint64_t>(result, 11, row_idx, stats_result.plateau_size_nonzero);
+        SetStructField<double>(result, 12, row_idx, stats_result.mean);
+        SetStructField<double>(result, 13, row_idx, stats_result.median);
+        SetStructField<double>(result, 14, row_idx, stats_result.std_dev);
+        SetStructField<double>(result, 15, row_idx, stats_result.variance);
+        SetStructField<double>(result, 16, row_idx, stats_result.min);
+        SetStructField<double>(result, 17, row_idx, stats_result.max);
+        SetStructField<double>(result, 18, row_idx, stats_result.range);
+        SetStructField<double>(result, 19, row_idx, stats_result.sum);
+        SetStructField<double>(result, 20, row_idx, stats_result.skewness);
+        SetStructField<double>(result, 21, row_idx, stats_result.kurtosis);
+        SetStructField<double>(result, 22, row_idx, stats_result.tail_index);
+        SetStructField<double>(result, 23, row_idx, stats_result.bimodality_coef);
+        SetStructField<double>(result, 24, row_idx, stats_result.trimmed_mean);
+        SetStructField<double>(result, 25, row_idx, stats_result.coef_variation);
+        SetStructField<double>(result, 26, row_idx, stats_result.q1);
+        SetStructField<double>(result, 27, row_idx, stats_result.q3);
+        SetStructField<double>(result, 28, row_idx, stats_result.iqr);
+        SetStructField<double>(result, 29, row_idx, stats_result.autocorr_lag1);
+        SetStructField<double>(result, 30, row_idx, stats_result.trend_strength);
+        SetStructField<double>(result, 31, row_idx, stats_result.seasonality_strength);
+        SetStructField<double>(result, 32, row_idx, stats_result.entropy);
+        SetStructField<double>(result, 33, row_idx, stats_result.stability);
 
         // Free Rust-allocated memory (no-op for TsStatsResult)
         anofox_free_ts_stats_result(&stats_result);

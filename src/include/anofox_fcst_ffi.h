@@ -84,7 +84,7 @@ typedef enum ErrorCode {
 } ErrorCode;
 
 /**
- * Time series statistics result (24 metrics).
+ * Time series statistics result (34 metrics).
  */
 typedef struct TsStatsResult {
     /**
@@ -95,6 +95,10 @@ typedef struct TsStatsResult {
      * Number of NULL values
      */
     size_t n_nulls;
+    /**
+     * Number of NaN values (distinct from NULL)
+     */
+    size_t n_nan;
     /**
      * Number of zero values
      */
@@ -107,6 +111,30 @@ typedef struct TsStatsResult {
      * Number of negative values
      */
     size_t n_negative;
+    /**
+     * Count of distinct values
+     */
+    size_t n_unique_values;
+    /**
+     * Whether series has only one unique value
+     */
+    bool is_constant;
+    /**
+     * Count of leading zeros
+     */
+    size_t n_zeros_start;
+    /**
+     * Count of trailing zeros
+     */
+    size_t n_zeros_end;
+    /**
+     * Longest run of constant values
+     */
+    size_t plateau_size;
+    /**
+     * Longest run of constant non-zero values
+     */
+    size_t plateau_size_nonzero;
     /**
      * Arithmetic mean
      */
@@ -147,6 +175,18 @@ typedef struct TsStatsResult {
      * Kurtosis
      */
     double kurtosis;
+    /**
+     * Tail index (Hill estimator)
+     */
+    double tail_index;
+    /**
+     * Bimodality coefficient
+     */
+    double bimodality_coef;
+    /**
+     * Trimmed mean (10% trimmed)
+     */
+    double trimmed_mean;
     /**
      * Coefficient of variation
      */

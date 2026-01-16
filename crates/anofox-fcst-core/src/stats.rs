@@ -4,19 +4,33 @@
 
 use crate::error::Result;
 
-/// Time series statistics result containing 24 metrics.
+/// Time series statistics result containing 34 metrics.
 #[derive(Debug, Clone, Default)]
 pub struct TsStats {
     /// Total number of observations
     pub length: usize,
     /// Number of NULL values
     pub n_nulls: usize,
+    /// Number of NaN values (distinct from NULL)
+    pub n_nan: usize,
     /// Number of zero values
     pub n_zeros: usize,
     /// Number of positive values
     pub n_positive: usize,
     /// Number of negative values
     pub n_negative: usize,
+    /// Count of distinct values
+    pub n_unique_values: usize,
+    /// Whether series has only one unique value
+    pub is_constant: bool,
+    /// Count of leading zeros
+    pub n_zeros_start: usize,
+    /// Count of trailing zeros
+    pub n_zeros_end: usize,
+    /// Longest run of constant values
+    pub plateau_size: usize,
+    /// Longest run of constant non-zero values
+    pub plateau_size_nonzero: usize,
     /// Arithmetic mean
     pub mean: f64,
     /// Median (50th percentile)
@@ -33,10 +47,16 @@ pub struct TsStats {
     pub range: f64,
     /// Sum of all values
     pub sum: f64,
-    /// Skewness (measure of asymmetry)
+    /// Skewness (Fisher's G1 - bias-corrected sample skewness)
     pub skewness: f64,
-    /// Kurtosis (measure of tailedness)
+    /// Kurtosis (Fisher's G2 - bias-corrected excess kurtosis)
     pub kurtosis: f64,
+    /// Tail index (Hill estimator, α > 0 indicates heavy tail)
+    pub tail_index: f64,
+    /// Bimodality coefficient (BC > 0.555 suggests bimodality)
+    pub bimodality_coef: f64,
+    /// Trimmed mean (10% trimmed from each tail)
+    pub trimmed_mean: f64,
     /// Coefficient of variation (std_dev / mean)
     pub coef_variation: f64,
     /// First quartile (25th percentile)
@@ -71,12 +91,14 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
         return Ok(TsStats::default());
     }
 
-    // Count NULLs and extract valid values
+    // Count NULLs, NaNs and extract valid (non-NULL, non-NaN) values
     let mut n_nulls = 0;
+    let mut n_nan = 0;
     let mut values: Vec<f64> = Vec::with_capacity(length);
 
     for val in series {
         match val {
+            Some(v) if v.is_nan() => n_nan += 1,
             Some(v) => values.push(*v),
             None => n_nulls += 1,
         }
@@ -88,6 +110,7 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
         return Ok(TsStats {
             length,
             n_nulls,
+            n_nan,
             ..Default::default()
         });
     }
@@ -96,6 +119,22 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
     let n_zeros = values.iter().filter(|&&v| v == 0.0).count();
     let n_positive = values.iter().filter(|&&v| v > 0.0).count();
     let n_negative = values.iter().filter(|&&v| v < 0.0).count();
+
+    // Count unique values (using bit representation for exact f64 comparison)
+    let mut unique_bits: std::collections::HashSet<u64> = std::collections::HashSet::new();
+    for &v in &values {
+        unique_bits.insert(v.to_bits());
+    }
+    let n_unique_values = unique_bits.len();
+    let is_constant = n_unique_values == 1;
+
+    // Count leading zeros (from original series, including NULLs as breaks)
+    let n_zeros_start = count_leading_zeros(series);
+    let n_zeros_end = count_trailing_zeros(series);
+
+    // Compute plateau sizes
+    let plateau_size = compute_plateau_size(&values);
+    let plateau_size_nonzero = compute_plateau_size_nonzero(&values);
 
     // Basic statistics
     let sum: f64 = values.iter().sum();
@@ -129,21 +168,44 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
     let q3 = percentile(&sorted, 0.75);
     let iqr = q3 - q1;
 
-    // Skewness (Fisher's)
+    // Skewness (Fisher's G1 - bias-corrected sample skewness)
+    // G1 = sqrt(n(n-1)) / (n-2) * m3 / s^3
     let skewness = if n_valid > 2 && std_dev > f64::EPSILON {
-        let m3 = values.iter().map(|v| (v - mean).powi(3)).sum::<f64>() / n_valid as f64;
-        m3 / std_dev.powi(3)
+        let n = n_valid as f64;
+        let m3 = values.iter().map(|v| (v - mean).powi(3)).sum::<f64>() / n;
+        let g1 = m3 / std_dev.powi(3);
+        // Apply bias correction factor
+        g1 * (n * (n - 1.0)).sqrt() / (n - 2.0)
     } else {
         f64::NAN
     };
 
-    // Kurtosis (excess)
+    // Kurtosis (Fisher's G2 - bias-corrected excess kurtosis)
+    // G2 = (n-1) / ((n-2)(n-3)) * ((n+1) * g2 + 6)
     let kurtosis = if n_valid > 3 && std_dev > f64::EPSILON {
-        let m4 = values.iter().map(|v| (v - mean).powi(4)).sum::<f64>() / n_valid as f64;
-        (m4 / std_dev.powi(4)) - 3.0
+        let n = n_valid as f64;
+        let m4 = values.iter().map(|v| (v - mean).powi(4)).sum::<f64>() / n;
+        let g2 = m4 / std_dev.powi(4) - 3.0; // Population excess kurtosis
+                                             // Apply bias correction factor
+        (n - 1.0) / ((n - 2.0) * (n - 3.0)) * ((n + 1.0) * g2 + 6.0)
     } else {
         f64::NAN
     };
+
+    // Tail index (Hill estimator on absolute values)
+    let tail_index = compute_hill_estimator(&values);
+
+    // Bimodality coefficient: BC = (skewness^2 + 1) / (kurtosis + 3 * (n-1)^2 / ((n-2)(n-3)))
+    // Simplified: BC = (skewness^2 + 1) / (kurtosis_excess + 3)
+    // BC > 0.555 suggests bimodality (threshold for uniform distribution)
+    let bimodality_coef = if n_valid > 3 && kurtosis.is_finite() && skewness.is_finite() {
+        (skewness.powi(2) + 1.0) / (kurtosis + 3.0)
+    } else {
+        f64::NAN
+    };
+
+    // Trimmed mean (10% trimmed from each tail)
+    let trimmed_mean = compute_trimmed_mean(&sorted, 0.1);
 
     // Autocorrelation at lag 1
     let autocorr_lag1 = compute_autocorrelation(&values, 1);
@@ -160,9 +222,16 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
     Ok(TsStats {
         length,
         n_nulls,
+        n_nan,
         n_zeros,
         n_positive,
         n_negative,
+        n_unique_values,
+        is_constant,
+        n_zeros_start,
+        n_zeros_end,
+        plateau_size,
+        plateau_size_nonzero,
         mean,
         median,
         std_dev,
@@ -173,6 +242,9 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
         sum,
         skewness,
         kurtosis,
+        tail_index,
+        bimodality_coef,
+        trimmed_mean,
         coef_variation,
         q1,
         q3,
@@ -346,6 +418,162 @@ fn compute_stability(values: &[f64]) -> f64 {
     }
 }
 
+/// Count leading zeros in a series (stops at first non-zero or NULL).
+fn count_leading_zeros(series: &[Option<f64>]) -> usize {
+    let mut count = 0;
+    for val in series {
+        match val {
+            Some(v) if *v == 0.0 => count += 1,
+            _ => break,
+        }
+    }
+    count
+}
+
+/// Count trailing zeros in a series (stops at first non-zero or NULL from end).
+fn count_trailing_zeros(series: &[Option<f64>]) -> usize {
+    let mut count = 0;
+    for val in series.iter().rev() {
+        match val {
+            Some(v) if *v == 0.0 => count += 1,
+            _ => break,
+        }
+    }
+    count
+}
+
+/// Compute the longest run of constant values.
+fn compute_plateau_size(values: &[f64]) -> usize {
+    if values.is_empty() {
+        return 0;
+    }
+
+    let mut max_run = 1;
+    let mut current_run = 1;
+
+    for i in 1..values.len() {
+        if values[i].to_bits() == values[i - 1].to_bits() {
+            current_run += 1;
+            max_run = max_run.max(current_run);
+        } else {
+            current_run = 1;
+        }
+    }
+
+    max_run
+}
+
+/// Compute the longest run of constant non-zero values.
+fn compute_plateau_size_nonzero(values: &[f64]) -> usize {
+    if values.is_empty() {
+        return 0;
+    }
+
+    let mut max_run = 0;
+    let mut current_run = 0;
+    let mut prev_nonzero: Option<u64> = None;
+
+    for &v in values {
+        if v == 0.0 {
+            // Zero breaks the run
+            max_run = max_run.max(current_run);
+            current_run = 0;
+            prev_nonzero = None;
+        } else {
+            let bits = v.to_bits();
+            match prev_nonzero {
+                Some(prev) if prev == bits => {
+                    current_run += 1;
+                }
+                _ => {
+                    max_run = max_run.max(current_run);
+                    current_run = 1;
+                }
+            }
+            prev_nonzero = Some(bits);
+        }
+    }
+
+    max_run.max(current_run)
+}
+
+/// Compute the Hill estimator for tail index.
+///
+/// The Hill estimator estimates the tail index α of a heavy-tailed distribution.
+/// For a Pareto-like tail P(X > x) ~ x^(-α), smaller α indicates heavier tails.
+///
+/// Uses the top k = sqrt(n) order statistics by default, which is a common choice.
+/// Applied to absolute values to capture both tails symmetrically.
+fn compute_hill_estimator(values: &[f64]) -> f64 {
+    let n = values.len();
+    if n < 10 {
+        return f64::NAN;
+    }
+
+    // Use absolute values to capture both tails
+    let mut abs_values: Vec<f64> = values.iter().map(|v| v.abs()).collect();
+
+    // Filter out zeros (can't take log of zero)
+    abs_values.retain(|&v| v > f64::EPSILON);
+
+    if abs_values.len() < 10 {
+        return f64::NAN;
+    }
+
+    // Sort in descending order
+    abs_values.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Use k = sqrt(n) order statistics (common heuristic)
+    let k = (abs_values.len() as f64).sqrt().floor() as usize;
+    let k = k.max(2).min(abs_values.len() - 1);
+
+    // Hill estimator: H = (1/k) * sum_{i=1}^{k} log(X_{(i)} / X_{(k+1)})
+    // where X_{(1)} >= X_{(2)} >= ... are order statistics
+    let threshold = abs_values[k];
+
+    if threshold <= f64::EPSILON {
+        return f64::NAN;
+    }
+
+    let mut sum_log = 0.0;
+    for val in abs_values.iter().take(k) {
+        sum_log += (val / threshold).ln();
+    }
+
+    let hill_h = sum_log / k as f64;
+
+    if hill_h <= f64::EPSILON {
+        f64::NAN
+    } else {
+        // Return the tail index α = 1/H
+        1.0 / hill_h
+    }
+}
+
+/// Compute trimmed mean by removing a proportion from each tail.
+///
+/// # Arguments
+/// * `sorted` - Already sorted slice of values
+/// * `trim_proportion` - Proportion to trim from each tail (e.g., 0.1 for 10%)
+fn compute_trimmed_mean(sorted: &[f64], trim_proportion: f64) -> f64 {
+    let n = sorted.len();
+    if n == 0 {
+        return f64::NAN;
+    }
+
+    // Number of values to trim from each end
+    let trim_count = (n as f64 * trim_proportion).floor() as usize;
+
+    // Ensure we have at least one value left
+    if 2 * trim_count >= n {
+        // Not enough values to trim, return regular mean
+        return sorted.iter().sum::<f64>() / n as f64;
+    }
+
+    let trimmed_slice = &sorted[trim_count..n - trim_count];
+    trimmed_slice.iter().sum::<f64>() / trimmed_slice.len() as f64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,5 +619,103 @@ mod tests {
         assert_eq!(stats.n_zeros, 1);
         assert_eq!(stats.n_positive, 2);
         assert_eq!(stats.n_negative, 2);
+    }
+
+    #[test]
+    fn test_nan_values() {
+        let series: Vec<Option<f64>> = vec![Some(1.0), Some(f64::NAN), Some(3.0), Some(f64::NAN)];
+        let stats = compute_ts_stats(&series).unwrap();
+
+        assert_eq!(stats.length, 4);
+        assert_eq!(stats.n_nan, 2);
+        assert_eq!(stats.n_nulls, 0);
+        // Mean should be computed only from valid, non-NaN values
+        assert_relative_eq!(stats.mean, 2.0, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn test_unique_values_and_constant() {
+        // Constant series
+        let series: Vec<Option<f64>> = vec![Some(5.0), Some(5.0), Some(5.0)];
+        let stats = compute_ts_stats(&series).unwrap();
+        assert_eq!(stats.n_unique_values, 1);
+        assert!(stats.is_constant);
+
+        // Non-constant series
+        let series: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), Some(3.0), Some(1.0)];
+        let stats = compute_ts_stats(&series).unwrap();
+        assert_eq!(stats.n_unique_values, 3);
+        assert!(!stats.is_constant);
+    }
+
+    #[test]
+    fn test_leading_trailing_zeros() {
+        let series: Vec<Option<f64>> = vec![
+            Some(0.0),
+            Some(0.0),
+            Some(1.0),
+            Some(2.0),
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+        ];
+        let stats = compute_ts_stats(&series).unwrap();
+
+        assert_eq!(stats.n_zeros_start, 2);
+        assert_eq!(stats.n_zeros_end, 3);
+    }
+
+    #[test]
+    fn test_leading_zeros_with_null() {
+        // NULL breaks the leading zero count
+        let series: Vec<Option<f64>> = vec![Some(0.0), None, Some(0.0), Some(1.0)];
+        let stats = compute_ts_stats(&series).unwrap();
+        assert_eq!(stats.n_zeros_start, 1);
+    }
+
+    #[test]
+    fn test_plateau_size() {
+        let series: Vec<Option<f64>> = vec![
+            Some(1.0),
+            Some(2.0),
+            Some(2.0),
+            Some(2.0),
+            Some(3.0),
+            Some(3.0),
+        ];
+        let stats = compute_ts_stats(&series).unwrap();
+        assert_eq!(stats.plateau_size, 3); // Three 2.0s
+    }
+
+    #[test]
+    fn test_plateau_size_nonzero() {
+        let series: Vec<Option<f64>> = vec![
+            Some(0.0),
+            Some(5.0),
+            Some(5.0),
+            Some(5.0),
+            Some(5.0),
+            Some(0.0),
+            Some(3.0),
+            Some(3.0),
+        ];
+        let stats = compute_ts_stats(&series).unwrap();
+        assert_eq!(stats.plateau_size_nonzero, 4); // Four 5.0s
+    }
+
+    #[test]
+    fn test_skewness_kurtosis_bias_corrected() {
+        // Symmetric distribution: skewness should be 0
+        let series: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), Some(3.0), Some(4.0), Some(5.0)];
+        let stats = compute_ts_stats(&series).unwrap();
+        assert_relative_eq!(stats.skewness, 0.0, epsilon = 1e-10);
+
+        // Skewed distribution: [1, 1, 1, 1, 5] should have positive skewness
+        let skewed: Vec<Option<f64>> = vec![Some(1.0), Some(1.0), Some(1.0), Some(1.0), Some(5.0)];
+        let stats_skewed = compute_ts_stats(&skewed).unwrap();
+        assert!(stats_skewed.skewness > 0.0, "Expected positive skewness");
+
+        // Verify kurtosis is computed (uniform-like has negative excess kurtosis)
+        assert!(stats.kurtosis.is_finite());
     }
 }

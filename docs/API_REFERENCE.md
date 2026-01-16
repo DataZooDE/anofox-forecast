@@ -720,7 +720,7 @@ FROM sales GROUP BY product_id;
 
 **ts_stats** (alias: `anofox_fcst_ts_stats`)
 
-Computes 24 statistical metrics for a time series array.
+Computes 34 statistical metrics for a time series array.
 
 **Signature:**
 ```sql
@@ -733,11 +733,21 @@ ts_stats(values DOUBLE[]) → STRUCT
 **Returns:**
 ```sql
 STRUCT(
+    -- Count statistics
     length               UBIGINT,   -- Total number of observations
     n_nulls              UBIGINT,   -- Number of NULL values
+    n_nan                UBIGINT,   -- Number of NaN values (distinct from NULL)
     n_zeros              UBIGINT,   -- Number of zero values
     n_positive           UBIGINT,   -- Number of positive values
     n_negative           UBIGINT,   -- Number of negative values
+    n_unique_values      UBIGINT,   -- Count of distinct values
+    is_constant          BOOLEAN,   -- Whether series has only one unique value
+    n_zeros_start        UBIGINT,   -- Count of leading zeros
+    n_zeros_end          UBIGINT,   -- Count of trailing zeros
+    plateau_size         UBIGINT,   -- Longest run of constant values
+    plateau_size_nonzero UBIGINT,   -- Longest run of constant non-zero values
+
+    -- Descriptive statistics
     mean                 DOUBLE,    -- Arithmetic mean
     median               DOUBLE,    -- Median (50th percentile)
     std_dev              DOUBLE,    -- Standard deviation
@@ -746,12 +756,19 @@ STRUCT(
     max                  DOUBLE,    -- Maximum value
     range                DOUBLE,    -- Range (max - min)
     sum                  DOUBLE,    -- Sum of all values
-    skewness             DOUBLE,    -- Skewness
-    kurtosis             DOUBLE,    -- Kurtosis
+
+    -- Distribution shape statistics
+    skewness             DOUBLE,    -- Skewness (Fisher's G1, bias-corrected)
+    kurtosis             DOUBLE,    -- Excess kurtosis (Fisher's G2, bias-corrected)
+    tail_index           DOUBLE,    -- Hill estimator (smaller = heavier tails)
+    bimodality_coef      DOUBLE,    -- Bimodality coefficient (>0.555 suggests bimodal)
+    trimmed_mean         DOUBLE,    -- 10% trimmed mean (robust to outliers)
     coef_variation       DOUBLE,    -- Coefficient of variation (std_dev / mean)
     q1                   DOUBLE,    -- First quartile (25th percentile)
     q3                   DOUBLE,    -- Third quartile (75th percentile)
     iqr                  DOUBLE,    -- Interquartile range (Q3 - Q1)
+
+    -- Time series statistics
     autocorr_lag1        DOUBLE,    -- Autocorrelation at lag 1
     trend_strength       DOUBLE,    -- Trend strength (0-1)
     seasonality_strength DOUBLE,    -- Seasonality strength (0-1)
