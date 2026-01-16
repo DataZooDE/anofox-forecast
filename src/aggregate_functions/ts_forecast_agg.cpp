@@ -197,31 +197,50 @@ struct TsForecastAggOperation {
 };
 
 // Helper function to extract a string value from a params MAP
-static string GetParamFromMap(Vector &map_vec, idx_t row_idx, const string &key, const string &default_value = "") {
+static string GetParamFromMap(Vector &map_vec, idx_t count, idx_t row_idx, const string &key, const string &default_value = "") {
+    // MAP is represented as LIST(STRUCT(key, value)) in DuckDB
     UnifiedVectorFormat map_data;
-    map_vec.ToUnifiedFormat(1, map_data);
+    map_vec.ToUnifiedFormat(count, map_data);
 
     auto map_idx = map_data.sel->get_index(row_idx);
     if (!map_data.validity.RowIsValid(map_idx)) {
         return default_value;
     }
 
-    auto &map_children = StructVector::GetEntries(map_vec);
-    auto &keys = *map_children[0];  // MAP keys
-    auto &values = *map_children[1]; // MAP values
+    // Get the list entry for this row
+    auto list_entries = UnifiedVectorFormat::GetData<list_entry_t>(map_data);
+    auto &list_entry = list_entries[map_idx];
 
-    auto list_data = ListVector::GetData(map_vec);
-    auto &list_entry = list_data[map_idx];
+    if (list_entry.length == 0) {
+        return default_value;
+    }
 
-    auto &key_child = ListVector::GetEntry(keys);
-    auto &val_child = ListVector::GetEntry(values);
+    // Get the child vector (which contains STRUCT(key, value) entries)
+    auto &struct_vec = ListVector::GetEntry(map_vec);
+    auto &struct_children = StructVector::GetEntries(struct_vec);
+    auto &key_vec = *struct_children[0];  // keys
+    auto &val_vec = *struct_children[1];  // values
+
+    // Use UnifiedVectorFormat for the child vectors
+    UnifiedVectorFormat key_data, val_data;
+    key_vec.ToUnifiedFormat(ListVector::GetListSize(map_vec), key_data);
+    val_vec.ToUnifiedFormat(ListVector::GetListSize(map_vec), val_data);
+
+    auto key_values = UnifiedVectorFormat::GetData<string_t>(key_data);
+    auto val_values = UnifiedVectorFormat::GetData<string_t>(val_data);
 
     for (idx_t j = 0; j < list_entry.length; j++) {
-        auto key_idx = list_entry.offset + j;
-        auto key_str = FlatVector::GetData<string_t>(key_child)[key_idx].GetString();
-        if (key_str == key) {
-            auto val_str = FlatVector::GetData<string_t>(val_child)[key_idx].GetString();
-            return val_str;
+        auto child_idx = list_entry.offset + j;
+        auto key_unified_idx = key_data.sel->get_index(child_idx);
+        if (key_data.validity.RowIsValid(key_unified_idx)) {
+            auto key_str = key_values[key_unified_idx].GetString();
+            if (key_str == key) {
+                auto val_unified_idx = val_data.sel->get_index(child_idx);
+                if (val_data.validity.RowIsValid(val_unified_idx)) {
+                    return val_values[val_unified_idx].GetString();
+                }
+                return default_value;
+            }
         }
     }
     return default_value;
@@ -272,7 +291,7 @@ static void TsForecastAggUpdate(Vector inputs[], AggregateInputData &aggr_input,
             }
 
             // Extract 'model' from params MAP for ETS specification (e.g., "AAA", "MNM")
-            state.data->ets_model = GetParamFromMap(params_vec, i, "model", "");
+            state.data->ets_model = GetParamFromMap(params_vec, count, i, "model", "");
 
             state.data->initialized = true;
         }

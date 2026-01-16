@@ -451,19 +451,24 @@ void RegisterTsForecastFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_forecast_set("_ts_forecast");
 
     // _ts_forecast(values, horizon)
-    ts_forecast_set.AddFunction(ScalarFunction(
+    // Mark as VOLATILE to prevent constant folding (forecasting is expensive and shouldn't be folded)
+    ScalarFunction ts_forecast_basic(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::INTEGER)},
         GetForecastResultType(),
         TsForecastFunction
-    ));
+    );
+    ts_forecast_basic.stability = FunctionStability::VOLATILE;
+    ts_forecast_set.AddFunction(ts_forecast_basic);
 
     // _ts_forecast(values, horizon, model)
     // model can include ETS spec in format "ETS:AAA" or "ETS:MNM" etc.
-    ts_forecast_set.AddFunction(ScalarFunction(
+    ScalarFunction ts_forecast_with_model(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::INTEGER), LogicalType(LogicalTypeId::VARCHAR)},
         GetForecastResultType(),
         TsForecastWithModelFunction
-    ));
+    );
+    ts_forecast_with_model.stability = FunctionStability::VOLATILE;
+    ts_forecast_set.AddFunction(ts_forecast_with_model);
 
     // Mark as internal to hide from duckdb_functions() and deprioritize in autocomplete
     CreateScalarFunctionInfo forecast_info(ts_forecast_set);
@@ -487,6 +492,7 @@ void RegisterTsForecastFunction(ExtensionLoader &loader) {
         GetForecastResultType(),
         TsForecastExogFunction
     );
+    ts_forecast_exog_func.stability = FunctionStability::VOLATILE;
 
     // Mark as internal
     CreateScalarFunctionInfo exog_info(ts_forecast_exog_func);
