@@ -94,8 +94,8 @@ struct TsFillGapsNativeBindData : public TableFunctionData {
     int64_t frequency_seconds = 86400;
     bool frequency_is_raw = false;  // True if parsed as pure integer (for integer date columns)
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
-    LogicalType date_logical_type = LogicalType::TIMESTAMP;
-    LogicalType group_logical_type = LogicalType::VARCHAR;
+    LogicalType date_logical_type = LogicalType(LogicalTypeId::TIMESTAMP);
+    LogicalType group_logical_type = LogicalType(LogicalTypeId::VARCHAR);
 };
 
 // ============================================================================
@@ -187,7 +187,7 @@ static unique_ptr<FunctionData> TsFillGapsNativeBind(
     return_types.push_back(bind_data->date_logical_type);
 
     names.push_back(input.input_table_names[2]);
-    return_types.push_back(LogicalType::DOUBLE);
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
 
     return bind_data;
 }
@@ -429,7 +429,7 @@ void RegisterTsFillGapsNativeFunction(ExtensionLoader &loader) {
     // Table-in-out function: (TABLE, frequency)
     // Input table must have 3 columns: group_col, date_col, value_col
     TableFunction func("ts_fill_gaps_native",
-        {LogicalType::TABLE, LogicalType::VARCHAR},
+        {LogicalType::TABLE, LogicalType(LogicalTypeId::VARCHAR)},
         nullptr,  // No execute function - use in_out_function
         TsFillGapsNativeBind,
         TsFillGapsNativeInitGlobal,

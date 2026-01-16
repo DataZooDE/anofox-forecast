@@ -13,6 +13,7 @@ struct TsForecastAggStateData {
     vector<int64_t> timestamps;
     vector<double> values;
     string method;
+    string ets_model;  // ETS model specification (e.g., "AAA", "MNM", "AAdA")
     int32_t horizon;
     double confidence_level;
     bool initialized;
@@ -67,15 +68,15 @@ static LogicalType GetForecastAggResultType(double confidence_level = 0.90) {
     string suffix = GetConfidenceSuffix(confidence_level);
 
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("forecast_step", LogicalType::LIST(LogicalType::INTEGER)));
-    children.push_back(make_pair("forecast_timestamp", LogicalType::LIST(LogicalType::TIMESTAMP)));
-    children.push_back(make_pair("point_forecast", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("lower_" + suffix, LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("upper_" + suffix, LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("model_name", LogicalType::VARCHAR));
-    children.push_back(make_pair("insample_fitted", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("date_col_name", LogicalType::VARCHAR));
-    children.push_back(make_pair("error_message", LogicalType::VARCHAR));
+    children.push_back(make_pair("forecast_step", LogicalType::LIST(LogicalType(LogicalTypeId::INTEGER))));
+    children.push_back(make_pair("forecast_timestamp", LogicalType::LIST(LogicalType(LogicalTypeId::TIMESTAMP))));
+    children.push_back(make_pair("point_forecast", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("lower_" + suffix, LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("upper_" + suffix, LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("model_name", LogicalType(LogicalTypeId::VARCHAR)));
+    children.push_back(make_pair("insample_fitted", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("date_col_name", LogicalType(LogicalTypeId::VARCHAR)));
+    children.push_back(make_pair("error_message", LogicalType(LogicalTypeId::VARCHAR)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -154,6 +155,14 @@ struct TsForecastAggOperation {
         size_t model_len = std::min(data.method.size(), (size_t)31);
         memcpy(opts.model, data.method.c_str(), model_len);
         opts.model[model_len] = '\0';
+
+        // Set ETS model specification if provided (e.g., "AAA", "MNM", "AAdA")
+        if (!data.ets_model.empty()) {
+            size_t ets_len = std::min(data.ets_model.size(), (size_t)7);
+            memcpy(opts.ets_model, data.ets_model.c_str(), ets_len);
+            opts.ets_model[ets_len] = '\0';
+        }
+
         opts.horizon = data.horizon;
         opts.confidence_level = data.confidence_level;
         opts.include_fitted = true;
@@ -187,13 +196,44 @@ struct TsForecastAggOperation {
     }
 };
 
+// Helper function to extract a string value from a params MAP
+static string GetParamFromMap(Vector &map_vec, idx_t row_idx, const string &key, const string &default_value = "") {
+    UnifiedVectorFormat map_data;
+    map_vec.ToUnifiedFormat(1, map_data);
+
+    auto map_idx = map_data.sel->get_index(row_idx);
+    if (!map_data.validity.RowIsValid(map_idx)) {
+        return default_value;
+    }
+
+    auto &map_children = StructVector::GetEntries(map_vec);
+    auto &keys = *map_children[0];  // MAP keys
+    auto &values = *map_children[1]; // MAP values
+
+    auto list_data = ListVector::GetData(map_vec);
+    auto &list_entry = list_data[map_idx];
+
+    auto &key_child = ListVector::GetEntry(keys);
+    auto &val_child = ListVector::GetEntry(values);
+
+    for (idx_t j = 0; j < list_entry.length; j++) {
+        auto key_idx = list_entry.offset + j;
+        auto key_str = FlatVector::GetData<string_t>(key_child)[key_idx].GetString();
+        if (key_str == key) {
+            auto val_str = FlatVector::GetData<string_t>(val_child)[key_idx].GetString();
+            return val_str;
+        }
+    }
+    return default_value;
+}
+
 static void TsForecastAggUpdate(Vector inputs[], AggregateInputData &aggr_input, idx_t input_count,
                                 Vector &state_vector, idx_t count) {
     auto &ts_vec = inputs[0];
     auto &val_vec = inputs[1];
     auto &method_vec = inputs[2];
     auto &horizon_vec = inputs[3];
-    // inputs[4] is params MAP - reserved for future use
+    auto &params_vec = inputs[4];  // params MAP
 
     UnifiedVectorFormat ts_data, val_data, method_data, horizon_data;
     ts_vec.ToUnifiedFormat(count, ts_data);
@@ -230,6 +270,10 @@ static void TsForecastAggUpdate(Vector inputs[], AggregateInputData &aggr_input,
             } else {
                 state.data->horizon = 12;
             }
+
+            // Extract 'model' from params MAP for ETS specification (e.g., "AAA", "MNM")
+            state.data->ets_model = GetParamFromMap(params_vec, i, "model", "");
+
             state.data->initialized = true;
         }
 
@@ -289,6 +333,14 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
         size_t model_len = std::min(data.method.size(), (size_t)31);
         memcpy(opts.model, data.method.c_str(), model_len);
         opts.model[model_len] = '\0';
+
+        // Set ETS model specification if provided (e.g., "AAA", "MNM", "AAdA")
+        if (!data.ets_model.empty()) {
+            size_t ets_len = std::min(data.ets_model.size(), (size_t)7);
+            memcpy(opts.ets_model, data.ets_model.c_str(), ets_len);
+            opts.ets_model[ets_len] = '\0';
+        }
+
         opts.horizon = data.horizon;
         opts.confidence_level = data.confidence_level;
         opts.include_fitted = true;
@@ -510,8 +562,8 @@ void RegisterTsForecastAggFunction(ExtensionLoader &loader) {
     // (date_col, value_col, method, horizon, params)
     AggregateFunction agg_func(
         "anofox_fcst_ts_forecast_agg",
-        {LogicalType::TIMESTAMP, LogicalType::DOUBLE, LogicalType::VARCHAR, LogicalType::INTEGER,
-         LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)},
+        {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::INTEGER),
+         LogicalType::MAP(LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::VARCHAR))},
         GetForecastAggResultType(),
         AggregateFunction::StateSize<TsForecastAggState>,
         AggregateFunction::StateInitialize<TsForecastAggState, TsForecastAggOperation>,

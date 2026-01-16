@@ -9,14 +9,14 @@ namespace duckdb {
 
 static LogicalType GetDataQualityResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("structural_score", LogicalType::DOUBLE));
-    children.push_back(make_pair("temporal_score", LogicalType::DOUBLE));
-    children.push_back(make_pair("magnitude_score", LogicalType::DOUBLE));
-    children.push_back(make_pair("behavioral_score", LogicalType::DOUBLE));
-    children.push_back(make_pair("overall_score", LogicalType::DOUBLE));
-    children.push_back(make_pair("n_gaps", LogicalType::UBIGINT));
-    children.push_back(make_pair("n_missing", LogicalType::UBIGINT));
-    children.push_back(make_pair("is_constant", LogicalType::BOOLEAN));
+    children.push_back(make_pair("structural_score", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("temporal_score", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("magnitude_score", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("behavioral_score", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("overall_score", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("n_gaps", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("n_missing", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("is_constant", LogicalType(LogicalTypeId::BOOLEAN)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -106,7 +106,7 @@ void RegisterTsDataQualityFunction(ExtensionLoader &loader) {
     // Named with underscore prefix to match C++ API (ts_data_quality is table macro only)
     ScalarFunctionSet ts_dq_set("_ts_data_quality");
     ts_dq_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetDataQualityResultType(),
         TsDataQualityFunction
     ));

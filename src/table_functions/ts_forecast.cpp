@@ -9,15 +9,15 @@ namespace duckdb {
 
 static LogicalType GetForecastResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("point", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("lower", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("upper", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("fitted", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("residuals", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("model", LogicalType::VARCHAR));
-    children.push_back(make_pair("aic", LogicalType::DOUBLE));
-    children.push_back(make_pair("bic", LogicalType::DOUBLE));
-    children.push_back(make_pair("mse", LogicalType::DOUBLE));
+    children.push_back(make_pair("point", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("lower", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("upper", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("fitted", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("residuals", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("model", LogicalType(LogicalTypeId::VARCHAR)));
+    children.push_back(make_pair("aic", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("bic", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("mse", LogicalType(LogicalTypeId::DOUBLE)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -373,10 +373,20 @@ static void TsForecastWithModelFunction(DataChunk &args, ExpressionState &state,
         }
 
         // Get model from unified format (handles constant vectors correctly)
+        // Model can be in format "ETS" or "ETS:AAA" where AAA is the ETS spec
         auto model_idx = model_data.sel->get_index(row_idx);
         string model_name = "auto";
+        string ets_spec = "";
         if (model_data.validity.RowIsValid(model_idx)) {
-            model_name = UnifiedVectorFormat::GetData<string_t>(model_data)[model_idx].GetString();
+            string full_model = UnifiedVectorFormat::GetData<string_t>(model_data)[model_idx].GetString();
+            // Check for ETS spec in format "ETS:AAA"
+            auto colon_pos = full_model.find(':');
+            if (colon_pos != string::npos) {
+                model_name = full_model.substr(0, colon_pos);
+                ets_spec = full_model.substr(colon_pos + 1);
+            } else {
+                model_name = full_model;
+            }
         }
 
         ForecastOptions opts;
@@ -384,6 +394,14 @@ static void TsForecastWithModelFunction(DataChunk &args, ExpressionState &state,
         size_t model_len = std::min(model_name.size(), (size_t)31);
         memcpy(opts.model, model_name.c_str(), model_len);
         opts.model[model_len] = '\0';
+
+        // Set ETS spec if provided
+        if (!ets_spec.empty()) {
+            size_t ets_len = std::min(ets_spec.size(), (size_t)7);
+            memcpy(opts.ets_model, ets_spec.c_str(), ets_len);
+            opts.ets_model[ets_len] = '\0';
+        }
+
         opts.horizon = horizon;
         opts.confidence_level = 0.95;
         opts.seasonal_period = 0;
@@ -405,6 +423,10 @@ static void TsForecastWithModelFunction(DataChunk &args, ExpressionState &state,
         );
 
         if (!success) {
+            // For invalid input errors (including invalid ETS spec), throw exception
+            if (error.code == INVALID_INPUT || error.code == INVALID_MODEL) {
+                throw InvalidInputException(error.message);
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -430,14 +452,15 @@ void RegisterTsForecastFunction(ExtensionLoader &loader) {
 
     // _ts_forecast(values, horizon)
     ts_forecast_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::INTEGER},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::INTEGER)},
         GetForecastResultType(),
         TsForecastFunction
     ));
 
     // _ts_forecast(values, horizon, model)
+    // model can include ETS spec in format "ETS:AAA" or "ETS:MNM" etc.
     ts_forecast_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::INTEGER, LogicalType::VARCHAR},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::INTEGER), LogicalType(LogicalTypeId::VARCHAR)},
         GetForecastResultType(),
         TsForecastWithModelFunction
     ));
@@ -456,11 +479,11 @@ void RegisterTsForecastFunction(ExtensionLoader &loader) {
     // - model: VARCHAR - model name (AutoARIMA, ARIMAX, ThetaX, MFLESX, etc.)
     ScalarFunction ts_forecast_exog_func(
         "_ts_forecast_exog",
-        {LogicalType::LIST(LogicalType::DOUBLE),           // values
-         LogicalType::LIST(LogicalType::LIST(LogicalType::DOUBLE)),  // xreg
-         LogicalType::LIST(LogicalType::LIST(LogicalType::DOUBLE)),  // future_xreg
-         LogicalType::INTEGER,                             // horizon
-         LogicalType::VARCHAR},                            // model
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),           // values
+         LogicalType::LIST(LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))),  // xreg
+         LogicalType::LIST(LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))),  // future_xreg
+         LogicalType(LogicalTypeId::INTEGER),                             // horizon
+         LogicalType(LogicalTypeId::VARCHAR)},                            // model
         GetForecastResultType(),
         TsForecastExogFunction
     );

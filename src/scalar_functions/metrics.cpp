@@ -70,16 +70,16 @@ static void TsMaeFunction(DataChunk &args, ExpressionState &state, Vector &resul
 void RegisterTsMaeFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_mae_set("ts_mae");
     ts_mae_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsMaeFunction
     ));
     loader.RegisterFunction(ts_mae_set);
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_mae");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsMaeFunction
     ));
     loader.RegisterFunction(anofox_set);
@@ -127,16 +127,16 @@ static void TsMseFunction(DataChunk &args, ExpressionState &state, Vector &resul
 void RegisterTsMseFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_mse_set("ts_mse");
     ts_mse_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsMseFunction
     ));
     loader.RegisterFunction(ts_mse_set);
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_mse");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsMseFunction
     ));
     loader.RegisterFunction(anofox_set);
@@ -184,16 +184,16 @@ static void TsRmseFunction(DataChunk &args, ExpressionState &state, Vector &resu
 void RegisterTsRmseFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_rmse_set("ts_rmse");
     ts_rmse_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsRmseFunction
     ));
     loader.RegisterFunction(ts_rmse_set);
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_rmse");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsRmseFunction
     ));
     loader.RegisterFunction(anofox_set);
@@ -241,16 +241,16 @@ static void TsMapeFunction(DataChunk &args, ExpressionState &state, Vector &resu
 void RegisterTsMapeFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_mape_set("ts_mape");
     ts_mape_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsMapeFunction
     ));
     loader.RegisterFunction(ts_mape_set);
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_mape");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsMapeFunction
     ));
     loader.RegisterFunction(anofox_set);
@@ -298,16 +298,16 @@ static void TsSmapeFunction(DataChunk &args, ExpressionState &state, Vector &res
 void RegisterTsSmapeFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_smape_set("ts_smape");
     ts_smape_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsSmapeFunction
     ));
     loader.RegisterFunction(ts_smape_set);
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_smape");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsSmapeFunction
     ));
     loader.RegisterFunction(anofox_set);
@@ -360,16 +360,16 @@ static void TsMaseFunction(DataChunk &args, ExpressionState &state, Vector &resu
 void RegisterTsMaseFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_mase_set("ts_mase");
     ts_mase_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsMaseFunction
     ));
     loader.RegisterFunction(ts_mase_set);
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_mase");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsMaseFunction
     ));
     loader.RegisterFunction(anofox_set);
@@ -417,16 +417,16 @@ static void TsR2Function(DataChunk &args, ExpressionState &state, Vector &result
 void RegisterTsR2Function(ExtensionLoader &loader) {
     ScalarFunctionSet ts_r2_set("ts_r2");
     ts_r2_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsR2Function
     ));
     loader.RegisterFunction(ts_r2_set);
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_r2");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsR2Function
     ));
     loader.RegisterFunction(anofox_set);
@@ -474,16 +474,16 @@ static void TsBiasFunction(DataChunk &args, ExpressionState &state, Vector &resu
 void RegisterTsBiasFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_bias_set("ts_bias");
     ts_bias_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsBiasFunction
     ));
     loader.RegisterFunction(ts_bias_set);
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_bias");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsBiasFunction
     ));
     loader.RegisterFunction(anofox_set);
@@ -537,16 +537,16 @@ static void TsRmaeFunction(DataChunk &args, ExpressionState &state, Vector &resu
 void RegisterTsRmaeFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_rmae_set("ts_rmae");
     ts_rmae_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsRmaeFunction
     ));
     loader.RegisterFunction(ts_rmae_set);
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_rmae");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsRmaeFunction
     ));
     loader.RegisterFunction(anofox_set);
@@ -605,16 +605,16 @@ static void TsQuantileLossFunction(DataChunk &args, ExpressionState &state, Vect
 void RegisterTsQuantileLossFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_ql_set("ts_quantile_loss");
     ts_ql_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsQuantileLossFunction
     ));
     loader.RegisterFunction(ts_ql_set);
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_quantile_loss");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsQuantileLossFunction
     ));
     loader.RegisterFunction(anofox_set);
@@ -712,20 +712,20 @@ void RegisterTsMqlossFunction(ExtensionLoader &loader) {
     // C++ API: ts_mqloss(actual[], quantiles[][], levels[])
     ScalarFunctionSet ts_mqloss_set("ts_mqloss");
     ts_mqloss_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE),
-         LogicalType::LIST(LogicalType::LIST(LogicalType::DOUBLE)),
-         LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType::LIST(LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))),
+         LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsMqlossFunction
     ));
     loader.RegisterFunction(ts_mqloss_set);
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_mqloss");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE),
-         LogicalType::LIST(LogicalType::LIST(LogicalType::DOUBLE)),
-         LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType::LIST(LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))),
+         LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsMqlossFunction
     ));
     loader.RegisterFunction(anofox_set);
@@ -777,16 +777,16 @@ static void TsCoverageFunction(DataChunk &args, ExpressionState &state, Vector &
 void RegisterTsCoverageFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_coverage_set("ts_coverage");
     ts_coverage_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsCoverageFunction
     ));
     loader.RegisterFunction(ts_coverage_set);
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_coverage");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::DOUBLE,
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
         TsCoverageFunction
     ));
     loader.RegisterFunction(anofox_set);

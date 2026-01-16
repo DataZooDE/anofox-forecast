@@ -11,10 +11,10 @@ namespace duckdb {
 
 static LogicalType GetMstlResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("trend", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("seasonal", LogicalType::LIST(LogicalType::LIST(LogicalType::DOUBLE))));
-    children.push_back(make_pair("remainder", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("periods", LogicalType::LIST(LogicalType::INTEGER)));
+    children.push_back(make_pair("trend", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("seasonal", LogicalType::LIST(LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)))));
+    children.push_back(make_pair("remainder", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("periods", LogicalType::LIST(LogicalType(LogicalTypeId::INTEGER))));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -194,13 +194,13 @@ void RegisterTsMstlDecompositionFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_mstl_set("_ts_mstl_decomposition");
     // 1-arg version: just values
     ts_mstl_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetMstlResultType(),
         TsMstlDecompositionFunction
     ));
     // 2-arg version: values + insufficient_data mode
     ts_mstl_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::VARCHAR},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR)},
         GetMstlResultType(),
         TsMstlDecompositionFunction
     ));

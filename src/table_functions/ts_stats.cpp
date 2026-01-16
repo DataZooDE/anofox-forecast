@@ -9,42 +9,44 @@
 namespace duckdb {
 
 // Define the output STRUCT type for ts_stats (34 metrics)
+// Note: Using LogicalType(LogicalTypeId::XXX) instead of LogicalType::XXX
+// to avoid ODR violations with constexpr static members when linking with duckdb_static
 static LogicalType GetTsStatsResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("length", LogicalType::UBIGINT));
-    children.push_back(make_pair("n_nulls", LogicalType::UBIGINT));
-    children.push_back(make_pair("n_nan", LogicalType::UBIGINT));
-    children.push_back(make_pair("n_zeros", LogicalType::UBIGINT));
-    children.push_back(make_pair("n_positive", LogicalType::UBIGINT));
-    children.push_back(make_pair("n_negative", LogicalType::UBIGINT));
-    children.push_back(make_pair("n_unique_values", LogicalType::UBIGINT));
-    children.push_back(make_pair("is_constant", LogicalType::BOOLEAN));
-    children.push_back(make_pair("n_zeros_start", LogicalType::UBIGINT));
-    children.push_back(make_pair("n_zeros_end", LogicalType::UBIGINT));
-    children.push_back(make_pair("plateau_size", LogicalType::UBIGINT));
-    children.push_back(make_pair("plateau_size_nonzero", LogicalType::UBIGINT));
-    children.push_back(make_pair("mean", LogicalType::DOUBLE));
-    children.push_back(make_pair("median", LogicalType::DOUBLE));
-    children.push_back(make_pair("std_dev", LogicalType::DOUBLE));
-    children.push_back(make_pair("variance", LogicalType::DOUBLE));
-    children.push_back(make_pair("min", LogicalType::DOUBLE));
-    children.push_back(make_pair("max", LogicalType::DOUBLE));
-    children.push_back(make_pair("range", LogicalType::DOUBLE));
-    children.push_back(make_pair("sum", LogicalType::DOUBLE));
-    children.push_back(make_pair("skewness", LogicalType::DOUBLE));
-    children.push_back(make_pair("kurtosis", LogicalType::DOUBLE));
-    children.push_back(make_pair("tail_index", LogicalType::DOUBLE));
-    children.push_back(make_pair("bimodality_coef", LogicalType::DOUBLE));
-    children.push_back(make_pair("trimmed_mean", LogicalType::DOUBLE));
-    children.push_back(make_pair("coef_variation", LogicalType::DOUBLE));
-    children.push_back(make_pair("q1", LogicalType::DOUBLE));
-    children.push_back(make_pair("q3", LogicalType::DOUBLE));
-    children.push_back(make_pair("iqr", LogicalType::DOUBLE));
-    children.push_back(make_pair("autocorr_lag1", LogicalType::DOUBLE));
-    children.push_back(make_pair("trend_strength", LogicalType::DOUBLE));
-    children.push_back(make_pair("seasonality_strength", LogicalType::DOUBLE));
-    children.push_back(make_pair("entropy", LogicalType::DOUBLE));
-    children.push_back(make_pair("stability", LogicalType::DOUBLE));
+    children.push_back(make_pair("length", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("n_nulls", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("n_nan", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("n_zeros", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("n_positive", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("n_negative", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("n_unique_values", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("is_constant", LogicalType(LogicalTypeId::BOOLEAN)));
+    children.push_back(make_pair("n_zeros_start", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("n_zeros_end", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("plateau_size", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("plateau_size_nonzero", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("mean", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("median", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("std_dev", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("variance", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("min", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("max", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("range", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("sum", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("skewness", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("kurtosis", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("tail_index", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("bimodality_coef", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("trimmed_mean", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("coef_variation", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("q1", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("q3", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("iqr", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("autocorr_lag1", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("trend_strength", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("seasonality_strength", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("entropy", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("stability", LogicalType(LogicalTypeId::DOUBLE)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -174,7 +176,7 @@ void RegisterTsStatsFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_stats_set("_ts_stats");
 
     ts_stats_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetTsStatsResultType(),
         TsStatsFunction
     ));

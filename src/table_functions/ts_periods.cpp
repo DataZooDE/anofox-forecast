@@ -44,20 +44,20 @@ static void ExtractListAsDouble(Vector &list_vec, idx_t count, idx_t row_idx, ve
 static LogicalType GetMultiPeriodResultType() {
     // Inner struct for each detected period
     child_list_t<LogicalType> period_children;
-    period_children.push_back(make_pair("period", LogicalType::DOUBLE));
-    period_children.push_back(make_pair("confidence", LogicalType::DOUBLE));
-    period_children.push_back(make_pair("strength", LogicalType::DOUBLE));
-    period_children.push_back(make_pair("amplitude", LogicalType::DOUBLE));
-    period_children.push_back(make_pair("phase", LogicalType::DOUBLE));
-    period_children.push_back(make_pair("iteration", LogicalType::BIGINT));
+    period_children.push_back(make_pair("period", LogicalType(LogicalTypeId::DOUBLE)));
+    period_children.push_back(make_pair("confidence", LogicalType(LogicalTypeId::DOUBLE)));
+    period_children.push_back(make_pair("strength", LogicalType(LogicalTypeId::DOUBLE)));
+    period_children.push_back(make_pair("amplitude", LogicalType(LogicalTypeId::DOUBLE)));
+    period_children.push_back(make_pair("phase", LogicalType(LogicalTypeId::DOUBLE)));
+    period_children.push_back(make_pair("iteration", LogicalType(LogicalTypeId::BIGINT)));
     auto period_type = LogicalType::STRUCT(std::move(period_children));
 
     // Outer result struct
     child_list_t<LogicalType> children;
     children.push_back(make_pair("periods", LogicalType::LIST(period_type)));
-    children.push_back(make_pair("n_periods", LogicalType::BIGINT));
-    children.push_back(make_pair("primary_period", LogicalType::DOUBLE));
-    children.push_back(make_pair("method", LogicalType::VARCHAR));
+    children.push_back(make_pair("n_periods", LogicalType(LogicalTypeId::BIGINT)));
+    children.push_back(make_pair("primary_period", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -326,13 +326,13 @@ void RegisterTsDetectPeriodsFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_periods_set("ts_detect_periods");
     // Single-argument version (values only, default method)
     ts_periods_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetMultiPeriodResultType(),
         TsDetectPeriodsSimpleFunction
     ));
     // Two-argument version (values, method)
     ts_periods_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::VARCHAR},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR)},
         GetMultiPeriodResultType(),
         TsDetectPeriodsFunction
     ));
@@ -346,11 +346,11 @@ void RegisterTsDetectPeriodsFunction(ExtensionLoader &loader) {
 
 static LogicalType GetSinglePeriodResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("period", LogicalType::DOUBLE));
-    children.push_back(make_pair("frequency", LogicalType::DOUBLE));
-    children.push_back(make_pair("power", LogicalType::DOUBLE));
-    children.push_back(make_pair("confidence", LogicalType::DOUBLE));
-    children.push_back(make_pair("method", LogicalType::VARCHAR));
+    children.push_back(make_pair("period", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("frequency", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("power", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("confidence", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -397,7 +397,7 @@ static void TsEstimatePeriodFftFunction(DataChunk &args, ExpressionState &state,
 void RegisterTsEstimatePeriodFftFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_period_fft_set("ts_estimate_period_fft");
     ts_period_fft_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetSinglePeriodResultType(),
         TsEstimatePeriodFftFunction
     ));
@@ -460,13 +460,13 @@ void RegisterTsEstimatePeriodAcfFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_period_acf_set("ts_estimate_period_acf");
     // Single-argument version
     ts_period_acf_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetSinglePeriodResultType(),
         TsEstimatePeriodAcfFunction
     ));
     // Two-argument version with max_lag
     ts_period_acf_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::INTEGER},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::INTEGER)},
         GetSinglePeriodResultType(),
         TsEstimatePeriodAcfFunction
     ));
@@ -624,25 +624,25 @@ void RegisterTsDetectMultiplePeriodsFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_multi_periods_set("ts_detect_multiple_periods");
     // Single-argument version
     ts_multi_periods_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetMultiPeriodResultType(),
         TsDetectMultiplePeriodsFunction
     ));
     // With max_periods
     ts_multi_periods_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::INTEGER},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::INTEGER)},
         GetMultiPeriodResultType(),
         TsDetectMultiplePeriodsFunction
     ));
     // With max_periods, min_confidence
     ts_multi_periods_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::INTEGER, LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::INTEGER), LogicalType(LogicalTypeId::DOUBLE)},
         GetMultiPeriodResultType(),
         TsDetectMultiplePeriodsFunction
     ));
     // With max_periods, min_confidence, min_strength
     ts_multi_periods_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::INTEGER, LogicalType::DOUBLE, LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::INTEGER), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetMultiPeriodResultType(),
         TsDetectMultiplePeriodsFunction
     ));
@@ -656,11 +656,11 @@ void RegisterTsDetectMultiplePeriodsFunction(ExtensionLoader &loader) {
 
 static LogicalType GetAutoperiodResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("period", LogicalType::DOUBLE));
-    children.push_back(make_pair("fft_confidence", LogicalType::DOUBLE));
-    children.push_back(make_pair("acf_validation", LogicalType::DOUBLE));
-    children.push_back(make_pair("detected", LogicalType::BOOLEAN));
-    children.push_back(make_pair("method", LogicalType::VARCHAR));
+    children.push_back(make_pair("period", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("fft_confidence", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("acf_validation", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("detected", LogicalType(LogicalTypeId::BOOLEAN)));
+    children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -715,13 +715,13 @@ void RegisterTsAutoperiodFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_autoperiod_set("ts_autoperiod");
     // Single-argument version (uses default threshold)
     ts_autoperiod_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetAutoperiodResultType(),
         TsAutoperiodFunction
     ));
     // With explicit acf_threshold
     ts_autoperiod_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetAutoperiodResultType(),
         TsAutoperiodFunction
     ));
@@ -784,13 +784,13 @@ void RegisterTsCfdAutoperiodFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_cfd_autoperiod_set("ts_cfd_autoperiod");
     // Single-argument version (uses default threshold)
     ts_cfd_autoperiod_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetAutoperiodResultType(),
         TsCfdAutoperiodFunction
     ));
     // With explicit acf_threshold
     ts_cfd_autoperiod_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetAutoperiodResultType(),
         TsCfdAutoperiodFunction
     ));
@@ -803,11 +803,11 @@ void RegisterTsCfdAutoperiodFunction(ExtensionLoader &loader) {
 
 static LogicalType GetLombScargleResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("period", LogicalType::DOUBLE));
-    children.push_back(make_pair("frequency", LogicalType::DOUBLE));
-    children.push_back(make_pair("power", LogicalType::DOUBLE));
-    children.push_back(make_pair("false_alarm_prob", LogicalType::DOUBLE));
-    children.push_back(make_pair("method", LogicalType::VARCHAR));
+    children.push_back(make_pair("period", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("frequency", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("power", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("false_alarm_prob", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -878,25 +878,25 @@ void RegisterTsLombScargleFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_lomb_scargle_set("ts_lomb_scargle");
     // Single-argument version (uses defaults)
     ts_lomb_scargle_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetLombScargleResultType(),
         TsLombScargleFunction
     ));
     // With min_period
     ts_lomb_scargle_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetLombScargleResultType(),
         TsLombScargleFunction
     ));
     // With min_period and max_period
     ts_lomb_scargle_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetLombScargleResultType(),
         TsLombScargleFunction
     ));
     // With min_period, max_period, and n_frequencies
     ts_lomb_scargle_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::BIGINT},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::BIGINT)},
         GetLombScargleResultType(),
         TsLombScargleFunction
     ));
@@ -909,12 +909,12 @@ void RegisterTsLombScargleFunction(ExtensionLoader &loader) {
 
 static LogicalType GetAicPeriodResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("period", LogicalType::DOUBLE));
-    children.push_back(make_pair("aic", LogicalType::DOUBLE));
-    children.push_back(make_pair("bic", LogicalType::DOUBLE));
-    children.push_back(make_pair("rss", LogicalType::DOUBLE));
-    children.push_back(make_pair("r_squared", LogicalType::DOUBLE));
-    children.push_back(make_pair("method", LogicalType::VARCHAR));
+    children.push_back(make_pair("period", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("aic", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("bic", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("rss", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("r_squared", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -984,22 +984,22 @@ static void TsAicPeriodFunction(DataChunk &args, ExpressionState &state, Vector 
 void RegisterTsAicPeriodFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_aic_period_set("ts_aic_period");
     ts_aic_period_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetAicPeriodResultType(),
         TsAicPeriodFunction
     ));
     ts_aic_period_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetAicPeriodResultType(),
         TsAicPeriodFunction
     ));
     ts_aic_period_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetAicPeriodResultType(),
         TsAicPeriodFunction
     ));
     ts_aic_period_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::BIGINT},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::BIGINT)},
         GetAicPeriodResultType(),
         TsAicPeriodFunction
     ));
@@ -1012,10 +1012,10 @@ void RegisterTsAicPeriodFunction(ExtensionLoader &loader) {
 
 static LogicalType GetSsaPeriodResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("period", LogicalType::DOUBLE));
-    children.push_back(make_pair("variance_explained", LogicalType::DOUBLE));
-    children.push_back(make_pair("n_eigenvalues", LogicalType::BIGINT));
-    children.push_back(make_pair("method", LogicalType::VARCHAR));
+    children.push_back(make_pair("period", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("variance_explained", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("n_eigenvalues", LogicalType(LogicalTypeId::BIGINT)));
+    children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -1078,17 +1078,17 @@ static void TsSsaPeriodFunction(DataChunk &args, ExpressionState &state, Vector 
 void RegisterTsSsaPeriodFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_ssa_period_set("ts_ssa_period");
     ts_ssa_period_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetSsaPeriodResultType(),
         TsSsaPeriodFunction
     ));
     ts_ssa_period_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::BIGINT},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT)},
         GetSsaPeriodResultType(),
         TsSsaPeriodFunction
     ));
     ts_ssa_period_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::BIGINT, LogicalType::BIGINT},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT)},
         GetSsaPeriodResultType(),
         TsSsaPeriodFunction
     ));
@@ -1101,10 +1101,10 @@ void RegisterTsSsaPeriodFunction(ExtensionLoader &loader) {
 
 static LogicalType GetStlPeriodResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("period", LogicalType::DOUBLE));
-    children.push_back(make_pair("seasonal_strength", LogicalType::DOUBLE));
-    children.push_back(make_pair("trend_strength", LogicalType::DOUBLE));
-    children.push_back(make_pair("method", LogicalType::VARCHAR));
+    children.push_back(make_pair("period", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("seasonal_strength", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("trend_strength", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -1172,22 +1172,22 @@ static void TsStlPeriodFunction(DataChunk &args, ExpressionState &state, Vector 
 void RegisterTsStlPeriodFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_stl_period_set("ts_stl_period");
     ts_stl_period_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetStlPeriodResultType(),
         TsStlPeriodFunction
     ));
     ts_stl_period_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::BIGINT},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT)},
         GetStlPeriodResultType(),
         TsStlPeriodFunction
     ));
     ts_stl_period_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::BIGINT, LogicalType::BIGINT},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT)},
         GetStlPeriodResultType(),
         TsStlPeriodFunction
     ));
     ts_stl_period_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::BIGINT, LogicalType::BIGINT, LogicalType::BIGINT},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT)},
         GetStlPeriodResultType(),
         TsStlPeriodFunction
     ));
@@ -1200,11 +1200,11 @@ void RegisterTsStlPeriodFunction(ExtensionLoader &loader) {
 
 static LogicalType GetMatrixProfilePeriodResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("period", LogicalType::DOUBLE));
-    children.push_back(make_pair("confidence", LogicalType::DOUBLE));
-    children.push_back(make_pair("n_motifs", LogicalType::BIGINT));
-    children.push_back(make_pair("subsequence_length", LogicalType::BIGINT));
-    children.push_back(make_pair("method", LogicalType::VARCHAR));
+    children.push_back(make_pair("period", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("confidence", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("n_motifs", LogicalType(LogicalTypeId::BIGINT)));
+    children.push_back(make_pair("subsequence_length", LogicalType(LogicalTypeId::BIGINT)));
+    children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -1268,17 +1268,17 @@ static void TsMatrixProfilePeriodFunction(DataChunk &args, ExpressionState &stat
 void RegisterTsMatrixProfilePeriodFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_mp_period_set("ts_matrix_profile_period");
     ts_mp_period_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetMatrixProfilePeriodResultType(),
         TsMatrixProfilePeriodFunction
     ));
     ts_mp_period_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::BIGINT},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT)},
         GetMatrixProfilePeriodResultType(),
         TsMatrixProfilePeriodFunction
     ));
     ts_mp_period_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::BIGINT, LogicalType::BIGINT},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT)},
         GetMatrixProfilePeriodResultType(),
         TsMatrixProfilePeriodFunction
     ));
@@ -1291,10 +1291,10 @@ void RegisterTsMatrixProfilePeriodFunction(ExtensionLoader &loader) {
 
 static LogicalType GetSazedPeriodResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("period", LogicalType::DOUBLE));
-    children.push_back(make_pair("power", LogicalType::DOUBLE));
-    children.push_back(make_pair("snr", LogicalType::DOUBLE));
-    children.push_back(make_pair("method", LogicalType::VARCHAR));
+    children.push_back(make_pair("period", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("power", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("snr", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -1362,22 +1362,22 @@ static void TsSazedPeriodFunction(DataChunk &args, ExpressionState &state, Vecto
 void RegisterTsSazedPeriodFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_sazed_period_set("ts_sazed_period");
     ts_sazed_period_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetSazedPeriodResultType(),
         TsSazedPeriodFunction
     ));
     ts_sazed_period_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::BIGINT},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT)},
         GetSazedPeriodResultType(),
         TsSazedPeriodFunction
     ));
     ts_sazed_period_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::BIGINT, LogicalType::BIGINT},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT)},
         GetSazedPeriodResultType(),
         TsSazedPeriodFunction
     ));
     ts_sazed_period_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::BIGINT, LogicalType::BIGINT, LogicalType::BIGINT},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT)},
         GetSazedPeriodResultType(),
         TsSazedPeriodFunction
     ));

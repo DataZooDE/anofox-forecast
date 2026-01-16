@@ -88,16 +88,16 @@ static void TsDetectSeasonalityFunction(DataChunk &args, ExpressionState &state,
 void RegisterTsDetectSeasonalityFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_detect_set("ts_detect_seasonality");
     ts_detect_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::LIST(LogicalType::INTEGER),
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType::LIST(LogicalType(LogicalTypeId::INTEGER)),
         TsDetectSeasonalityFunction
     ));
     loader.RegisterFunction(ts_detect_set);
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_detect_seasonality");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
-        LogicalType::LIST(LogicalType::INTEGER),
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType::LIST(LogicalType(LogicalTypeId::INTEGER)),
         TsDetectSeasonalityFunction
     ));
     loader.RegisterFunction(anofox_set);
@@ -111,10 +111,10 @@ void RegisterTsDetectSeasonalityFunction(ExtensionLoader &loader) {
 
 static LogicalType GetSeasonalityResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("detected_periods", LogicalType::LIST(LogicalType::INTEGER)));
-    children.push_back(make_pair("primary_period", LogicalType::INTEGER));
-    children.push_back(make_pair("seasonal_strength", LogicalType::DOUBLE));
-    children.push_back(make_pair("trend_strength", LogicalType::DOUBLE));
+    children.push_back(make_pair("detected_periods", LogicalType::LIST(LogicalType(LogicalTypeId::INTEGER))));
+    children.push_back(make_pair("primary_period", LogicalType(LogicalTypeId::INTEGER)));
+    children.push_back(make_pair("seasonal_strength", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("trend_strength", LogicalType(LogicalTypeId::DOUBLE)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -253,13 +253,13 @@ void RegisterTsAnalyzeSeasonalityFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_analyze_set("ts_analyze_seasonality");
     // Single-argument version (convenience)
     ts_analyze_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetSeasonalityResultType(),
         TsAnalyzeSeasonalityFunction
     ));
     // Two-argument version (C++ API compatible: timestamps, values)
     ts_analyze_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::TIMESTAMP), LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::TIMESTAMP)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetSeasonalityResultType(),
         TsAnalyzeSeasonalityWithTimestampsFunction
     ));
@@ -267,12 +267,12 @@ void RegisterTsAnalyzeSeasonalityFunction(ExtensionLoader &loader) {
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_analyze_seasonality");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetSeasonalityResultType(),
         TsAnalyzeSeasonalityFunction
     ));
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::TIMESTAMP), LogicalType::LIST(LogicalType::DOUBLE)},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::TIMESTAMP)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetSeasonalityResultType(),
         TsAnalyzeSeasonalityWithTimestampsFunction
     ));
@@ -288,14 +288,14 @@ void RegisterTsAnalyzeSeasonalityFunction(ExtensionLoader &loader) {
 
 static LogicalType GetSeasonalityClassificationResultType() {
     child_list_t<LogicalType> children;
-    children.push_back(make_pair("timing_classification", LogicalType::VARCHAR));
-    children.push_back(make_pair("modulation_type", LogicalType::VARCHAR));
-    children.push_back(make_pair("has_stable_timing", LogicalType::BOOLEAN));
-    children.push_back(make_pair("timing_variability", LogicalType::DOUBLE));
-    children.push_back(make_pair("seasonal_strength", LogicalType::DOUBLE));
-    children.push_back(make_pair("is_seasonal", LogicalType::BOOLEAN));
-    children.push_back(make_pair("cycle_strengths", LogicalType::LIST(LogicalType::DOUBLE)));
-    children.push_back(make_pair("weak_seasons", LogicalType::LIST(LogicalType::BIGINT)));
+    children.push_back(make_pair("timing_classification", LogicalType(LogicalTypeId::VARCHAR)));
+    children.push_back(make_pair("modulation_type", LogicalType(LogicalTypeId::VARCHAR)));
+    children.push_back(make_pair("has_stable_timing", LogicalType(LogicalTypeId::BOOLEAN)));
+    children.push_back(make_pair("timing_variability", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("seasonal_strength", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("is_seasonal", LogicalType(LogicalTypeId::BOOLEAN)));
+    children.push_back(make_pair("cycle_strengths", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("weak_seasons", LogicalType::LIST(LogicalType(LogicalTypeId::BIGINT))));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -450,21 +450,21 @@ void RegisterTsClassifySeasonalityFunction(ExtensionLoader &loader) {
 
     // ts_classify_seasonality(values, period) -> STRUCT
     ts_classify_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetSeasonalityClassificationResultType(),
         TsClassifySeasonalityFunction
     ));
 
     // ts_classify_seasonality(values, period, strength_threshold) -> STRUCT
     ts_classify_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetSeasonalityClassificationResultType(),
         TsClassifySeasonalityFunction
     ));
 
     // ts_classify_seasonality(values, period, strength_threshold, timing_threshold) -> STRUCT
     ts_classify_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetSeasonalityClassificationResultType(),
         TsClassifySeasonalityFunction
     ));
@@ -474,17 +474,17 @@ void RegisterTsClassifySeasonalityFunction(ExtensionLoader &loader) {
     // Also register with anofox_ prefix
     ScalarFunctionSet anofox_classify_set("anofox_fcst_ts_classify_seasonality");
     anofox_classify_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetSeasonalityClassificationResultType(),
         TsClassifySeasonalityFunction
     ));
     anofox_classify_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetSeasonalityClassificationResultType(),
         TsClassifySeasonalityFunction
     ));
     anofox_classify_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::DOUBLE},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetSeasonalityClassificationResultType(),
         TsClassifySeasonalityFunction
     ));

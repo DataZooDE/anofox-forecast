@@ -69,13 +69,13 @@ static unique_ptr<FunctionData> TsFillForwardOperatorBind(
 
     // Define output columns to match the source table + filled rows
     names.push_back(bind_data->group_col);
-    return_types.push_back(LogicalType::VARCHAR);
+    return_types.push_back(LogicalType(LogicalTypeId::VARCHAR));
 
     names.push_back(bind_data->date_col);
-    return_types.push_back(LogicalType::TIMESTAMP);
+    return_types.push_back(LogicalType(LogicalTypeId::TIMESTAMP));
 
     names.push_back(bind_data->value_col);
-    return_types.push_back(LogicalType::DOUBLE);
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
 
     return bind_data;
 }
@@ -184,8 +184,8 @@ static void TsFillForwardOperatorExecute(
 
 void RegisterTsFillForwardOperatorFunction(ExtensionLoader &loader) {
     TableFunction func("ts_fill_forward_operator",
-        {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR,
-         LogicalType::VARCHAR, LogicalType::TIMESTAMP, LogicalType::VARCHAR},
+        {LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::VARCHAR),
+         LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::VARCHAR)},
         TsFillForwardOperatorExecute,
         TsFillForwardOperatorBind,
         TsFillForwardOperatorInitGlobal,
