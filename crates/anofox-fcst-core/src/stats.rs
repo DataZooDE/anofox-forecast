@@ -4,7 +4,7 @@
 
 use crate::error::Result;
 
-/// Time series statistics result containing 31 metrics.
+/// Time series statistics result containing 34 metrics.
 #[derive(Debug, Clone, Default)]
 pub struct TsStats {
     /// Total number of observations
@@ -51,6 +51,12 @@ pub struct TsStats {
     pub skewness: f64,
     /// Kurtosis (Fisher's G2 - bias-corrected excess kurtosis)
     pub kurtosis: f64,
+    /// Tail index (Hill estimator, α > 0 indicates heavy tail)
+    pub tail_index: f64,
+    /// Bimodality coefficient (BC > 0.555 suggests bimodality)
+    pub bimodality_coef: f64,
+    /// Trimmed mean (10% trimmed from each tail)
+    pub trimmed_mean: f64,
     /// Coefficient of variation (std_dev / mean)
     pub coef_variation: f64,
     /// First quartile (25th percentile)
@@ -186,6 +192,21 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
         f64::NAN
     };
 
+    // Tail index (Hill estimator on absolute values)
+    let tail_index = compute_hill_estimator(&values);
+
+    // Bimodality coefficient: BC = (skewness^2 + 1) / (kurtosis + 3 * (n-1)^2 / ((n-2)(n-3)))
+    // Simplified: BC = (skewness^2 + 1) / (kurtosis_excess + 3)
+    // BC > 0.555 suggests bimodality (threshold for uniform distribution)
+    let bimodality_coef = if n_valid > 3 && kurtosis.is_finite() && skewness.is_finite() {
+        (skewness.powi(2) + 1.0) / (kurtosis + 3.0)
+    } else {
+        f64::NAN
+    };
+
+    // Trimmed mean (10% trimmed from each tail)
+    let trimmed_mean = compute_trimmed_mean(&sorted, 0.1);
+
     // Autocorrelation at lag 1
     let autocorr_lag1 = compute_autocorrelation(&values, 1);
 
@@ -221,6 +242,9 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
         sum,
         skewness,
         kurtosis,
+        tail_index,
+        bimodality_coef,
+        trimmed_mean,
         coef_variation,
         q1,
         q3,
@@ -471,6 +495,83 @@ fn compute_plateau_size_nonzero(values: &[f64]) -> usize {
     }
 
     max_run.max(current_run)
+}
+
+/// Compute the Hill estimator for tail index.
+///
+/// The Hill estimator estimates the tail index α of a heavy-tailed distribution.
+/// For a Pareto-like tail P(X > x) ~ x^(-α), smaller α indicates heavier tails.
+///
+/// Uses the top k = sqrt(n) order statistics by default, which is a common choice.
+/// Applied to absolute values to capture both tails symmetrically.
+fn compute_hill_estimator(values: &[f64]) -> f64 {
+    let n = values.len();
+    if n < 10 {
+        return f64::NAN;
+    }
+
+    // Use absolute values to capture both tails
+    let mut abs_values: Vec<f64> = values.iter().map(|v| v.abs()).collect();
+
+    // Filter out zeros (can't take log of zero)
+    abs_values.retain(|&v| v > f64::EPSILON);
+
+    if abs_values.len() < 10 {
+        return f64::NAN;
+    }
+
+    // Sort in descending order
+    abs_values.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Use k = sqrt(n) order statistics (common heuristic)
+    let k = (abs_values.len() as f64).sqrt().floor() as usize;
+    let k = k.max(2).min(abs_values.len() - 1);
+
+    // Hill estimator: H = (1/k) * sum_{i=1}^{k} log(X_{(i)} / X_{(k+1)})
+    // where X_{(1)} >= X_{(2)} >= ... are order statistics
+    let threshold = abs_values[k];
+
+    if threshold <= f64::EPSILON {
+        return f64::NAN;
+    }
+
+    let mut sum_log = 0.0;
+    for val in abs_values.iter().take(k) {
+        sum_log += (val / threshold).ln();
+    }
+
+    let hill_h = sum_log / k as f64;
+
+    if hill_h <= f64::EPSILON {
+        f64::NAN
+    } else {
+        // Return the tail index α = 1/H
+        1.0 / hill_h
+    }
+}
+
+/// Compute trimmed mean by removing a proportion from each tail.
+///
+/// # Arguments
+/// * `sorted` - Already sorted slice of values
+/// * `trim_proportion` - Proportion to trim from each tail (e.g., 0.1 for 10%)
+fn compute_trimmed_mean(sorted: &[f64], trim_proportion: f64) -> f64 {
+    let n = sorted.len();
+    if n == 0 {
+        return f64::NAN;
+    }
+
+    // Number of values to trim from each end
+    let trim_count = (n as f64 * trim_proportion).floor() as usize;
+
+    // Ensure we have at least one value left
+    if 2 * trim_count >= n {
+        // Not enough values to trim, return regular mean
+        return sorted.iter().sum::<f64>() / n as f64;
+    }
+
+    let trimmed_slice = &sorted[trim_count..n - trim_count];
+    trimmed_slice.iter().sum::<f64>() / trimmed_slice.len() as f64
 }
 
 #[cfg(test)]

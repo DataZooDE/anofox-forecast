@@ -8,7 +8,7 @@
 
 namespace duckdb {
 
-// Define the output STRUCT type for ts_stats (31 metrics)
+// Define the output STRUCT type for ts_stats (34 metrics)
 static LogicalType GetTsStatsResultType() {
     child_list_t<LogicalType> children;
     children.push_back(make_pair("length", LogicalType::UBIGINT));
@@ -33,6 +33,9 @@ static LogicalType GetTsStatsResultType() {
     children.push_back(make_pair("sum", LogicalType::DOUBLE));
     children.push_back(make_pair("skewness", LogicalType::DOUBLE));
     children.push_back(make_pair("kurtosis", LogicalType::DOUBLE));
+    children.push_back(make_pair("tail_index", LogicalType::DOUBLE));
+    children.push_back(make_pair("bimodality_coef", LogicalType::DOUBLE));
+    children.push_back(make_pair("trimmed_mean", LogicalType::DOUBLE));
     children.push_back(make_pair("coef_variation", LogicalType::DOUBLE));
     children.push_back(make_pair("q1", LogicalType::DOUBLE));
     children.push_back(make_pair("q3", LogicalType::DOUBLE));
@@ -124,7 +127,7 @@ static void TsStatsFunction(DataChunk &args, ExpressionState &state, Vector &res
             continue;
         }
 
-        // Set result fields (31 metrics)
+        // Set result fields (34 metrics)
         SetStructField<uint64_t>(result, 0, row_idx, stats_result.length);
         SetStructField<uint64_t>(result, 1, row_idx, stats_result.n_nulls);
         SetStructField<uint64_t>(result, 2, row_idx, stats_result.n_nan);
@@ -147,15 +150,18 @@ static void TsStatsFunction(DataChunk &args, ExpressionState &state, Vector &res
         SetStructField<double>(result, 19, row_idx, stats_result.sum);
         SetStructField<double>(result, 20, row_idx, stats_result.skewness);
         SetStructField<double>(result, 21, row_idx, stats_result.kurtosis);
-        SetStructField<double>(result, 22, row_idx, stats_result.coef_variation);
-        SetStructField<double>(result, 23, row_idx, stats_result.q1);
-        SetStructField<double>(result, 24, row_idx, stats_result.q3);
-        SetStructField<double>(result, 25, row_idx, stats_result.iqr);
-        SetStructField<double>(result, 26, row_idx, stats_result.autocorr_lag1);
-        SetStructField<double>(result, 27, row_idx, stats_result.trend_strength);
-        SetStructField<double>(result, 28, row_idx, stats_result.seasonality_strength);
-        SetStructField<double>(result, 29, row_idx, stats_result.entropy);
-        SetStructField<double>(result, 30, row_idx, stats_result.stability);
+        SetStructField<double>(result, 22, row_idx, stats_result.tail_index);
+        SetStructField<double>(result, 23, row_idx, stats_result.bimodality_coef);
+        SetStructField<double>(result, 24, row_idx, stats_result.trimmed_mean);
+        SetStructField<double>(result, 25, row_idx, stats_result.coef_variation);
+        SetStructField<double>(result, 26, row_idx, stats_result.q1);
+        SetStructField<double>(result, 27, row_idx, stats_result.q3);
+        SetStructField<double>(result, 28, row_idx, stats_result.iqr);
+        SetStructField<double>(result, 29, row_idx, stats_result.autocorr_lag1);
+        SetStructField<double>(result, 30, row_idx, stats_result.trend_strength);
+        SetStructField<double>(result, 31, row_idx, stats_result.seasonality_strength);
+        SetStructField<double>(result, 32, row_idx, stats_result.entropy);
+        SetStructField<double>(result, 33, row_idx, stats_result.stability);
 
         // Free Rust-allocated memory (no-op for TsStatsResult)
         anofox_free_ts_stats_result(&stats_result);

@@ -115,7 +115,7 @@ pub struct DateArray {
     pub date_type: DateType,
 }
 
-/// Time series statistics result (31 metrics).
+/// Time series statistics result (34 metrics).
 #[repr(C)]
 pub struct TsStatsResult {
     /// Total number of observations
@@ -162,6 +162,12 @@ pub struct TsStatsResult {
     pub skewness: c_double,
     /// Kurtosis
     pub kurtosis: c_double,
+    /// Tail index (Hill estimator)
+    pub tail_index: c_double,
+    /// Bimodality coefficient
+    pub bimodality_coef: c_double,
+    /// Trimmed mean (10% trimmed)
+    pub trimmed_mean: c_double,
     /// Coefficient of variation
     pub coef_variation: c_double,
     /// First quartile
@@ -207,6 +213,9 @@ impl Default for TsStatsResult {
             sum: f64::NAN,
             skewness: f64::NAN,
             kurtosis: f64::NAN,
+            tail_index: f64::NAN,
+            bimodality_coef: f64::NAN,
+            trimmed_mean: f64::NAN,
             coef_variation: f64::NAN,
             q1: f64::NAN,
             q3: f64::NAN,
@@ -245,6 +254,9 @@ impl From<anofox_fcst_core::TsStats> for TsStatsResult {
             sum: stats.sum,
             skewness: stats.skewness,
             kurtosis: stats.kurtosis,
+            tail_index: stats.tail_index,
+            bimodality_coef: stats.bimodality_coef,
+            trimmed_mean: stats.trimmed_mean,
             coef_variation: stats.coef_variation,
             q1: stats.q1,
             q3: stats.q3,

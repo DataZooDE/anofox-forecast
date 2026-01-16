@@ -84,7 +84,7 @@ typedef enum ErrorCode {
 } ErrorCode;
 
 /**
- * Time series statistics result (31 metrics).
+ * Time series statistics result (34 metrics).
  */
 typedef struct TsStatsResult {
     /**
@@ -175,6 +175,18 @@ typedef struct TsStatsResult {
      * Kurtosis
      */
     double kurtosis;
+    /**
+     * Tail index (Hill estimator)
+     */
+    double tail_index;
+    /**
+     * Bimodality coefficient
+     */
+    double bimodality_coef;
+    /**
+     * Trimmed mean (10% trimmed)
+     */
+    double trimmed_mean;
     /**
      * Coefficient of variation
      */
