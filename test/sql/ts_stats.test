@@ -193,3 +193,32 @@ DROP TABLE test_qr_stats;
 
 statement ok
 DROP TABLE test_qr_data;
+
+#######################################
+# ts_stats_summary - Summary Statistics
+#######################################
+
+statement ok
+CREATE TABLE test_summary_data AS
+SELECT
+    CASE WHEN i <= 15 THEN 'A' ELSE 'B' END AS id,
+    '2023-01-01'::TIMESTAMP + INTERVAL (i % 15) DAY AS date,
+    (i * 1.5 + 10.0)::DOUBLE AS value
+FROM range(1, 26) t(i);
+
+statement ok
+CREATE TABLE test_summary_stats AS
+SELECT * FROM ts_stats('test_summary_data', id, date, value, '1d');
+
+# Test ts_stats_summary returns expected columns
+query IIIIII
+SELECT n_series, avg_length, min_length, max_length, total_nulls, total_nans
+FROM ts_stats_summary('test_summary_stats');
+----
+2	12.5	10	15	0	0
+
+statement ok
+DROP TABLE test_summary_stats;
+
+statement ok
+DROP TABLE test_summary_data;

@@ -710,9 +710,9 @@ _xreg_values AS (
     SELECT
         xce.id,
         xce.col_name,
-        LIST(json_extract(to_json(s), '$.' || xce.col_name)::DOUBLE ORDER BY s.date_col) AS values
+        LIST(json_extract(to_json(s), '$.' || xce.col_name)::DOUBLE ORDER BY date_col) AS values
     FROM _xreg_cols_expanded xce
-    JOIN src s ON s.group_col = xce.id
+    JOIN src s ON group_col = xce.id
     GROUP BY xce.id, xce.col_name
 ),
 -- Build list of lists for xreg per group
@@ -746,7 +746,7 @@ _future_xreg_values AS (
         fce.col_name,
         LIST(json_extract(to_json(fsrc), '$.' || fce.col_name)::DOUBLE ORDER BY future_date_col) AS values
     FROM _future_cols_expanded fce
-    JOIN future_src fsrc ON fsrc.group_col = fce.id
+    JOIN future_src fsrc ON group_col = fce.id
     GROUP BY fce.id, fce.col_name
 ),
 -- Build list of lists for future xreg per group
