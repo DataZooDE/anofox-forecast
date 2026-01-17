@@ -152,3 +152,25 @@ SELECT COUNT(*) FROM ts_data_quality('quality_test', id, date, val, 5, '1 day');
 
 statement ok
 DROP TABLE quality_test;
+
+#######################################
+# ts_data_quality_by - Alias Test
+#######################################
+
+statement ok
+CREATE TABLE test_dq_by AS
+SELECT
+    CASE WHEN i <= 10 THEN 'A' ELSE 'B' END AS unique_id,
+    '2023-01-01'::TIMESTAMP + INTERVAL (i % 10) DAY AS date,
+    (i % 10 + 1)::DOUBLE AS value
+FROM range(1, 21) t(i);
+
+# Test ts_data_quality_by alias works
+query I
+SELECT count(*) FROM ts_data_quality_by('test_dq_by', unique_id, date, value, 3, '1d');
+----
+2
+
+statement ok
+DROP TABLE test_dq_by;
+

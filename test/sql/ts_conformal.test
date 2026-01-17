@@ -358,3 +358,104 @@ DROP TABLE conformal_forecasts;
 
 statement ok
 DROP TABLE test_intervals;
+
+#######################################
+# ts_conformal_evaluate - Comprehensive Evaluation
+#######################################
+
+# Test ts_conformal_evaluate returns expected struct
+query I
+SELECT (ts_conformal_evaluate(
+    [100.0, 110.0, 120.0, 130.0, 140.0],  -- actuals
+    [95.0, 105.0, 115.0, 125.0, 135.0],   -- lower bounds
+    [105.0, 115.0, 125.0, 135.0, 145.0],  -- upper bounds
+    0.1                                    -- alpha
+)).coverage = 1.0;
+----
+true
+
+# Test ts_conformal_evaluate violation rate when values outside bounds
+query I
+SELECT (ts_conformal_evaluate(
+    [100.0, 110.0, 150.0],  -- 150 is outside [115, 125]
+    [95.0, 105.0, 115.0],
+    [105.0, 115.0, 125.0],
+    0.1
+)).violation_rate > 0;
+----
+true
+
+# Test ts_conformal_evaluate returns all expected fields
+query IIIII
+SELECT 
+    (result).coverage IS NOT NULL,
+    (result).violation_rate IS NOT NULL,
+    (result).mean_width IS NOT NULL,
+    (result).winkler_score IS NOT NULL,
+    (result).n_observations IS NOT NULL
+FROM (
+    SELECT ts_conformal_evaluate([100.0, 110.0], [95.0, 105.0], [105.0, 115.0], 0.1) AS result
+);
+----
+true	true	true	true	true
+
+#######################################
+# ts_conformal - Table Macro Wrapper
+#######################################
+
+# Create backtest results for ts_conformal test
+statement ok
+CREATE TABLE conformal_test_backtest AS
+SELECT 
+    'product_' || (i % 2 + 1) AS group_col,
+    100.0 + i AS actual,
+    100.0 + i + (CASE WHEN i % 3 = 0 THEN 2.0 ELSE -1.0 END) AS forecast,
+    100.0 + i AS point_forecast
+FROM range(1, 21) t(i);
+
+# Test ts_conformal returns results
+query I
+SELECT COUNT(*) > 0 FROM ts_conformal(
+    'conformal_test_backtest',
+    group_col,
+    actual,
+    forecast,
+    point_forecast,
+    MAP{'alpha': '0.1'}
+);
+----
+true
+
+statement ok
+DROP TABLE conformal_test_backtest;
+
+#######################################
+# ts_conformal_coverage - Coverage computation
+#######################################
+
+# Test ts_conformal_coverage with all values inside bounds
+query I
+SELECT ts_conformal_coverage(
+    [100.0, 110.0, 120.0],
+    [95.0, 105.0, 115.0],
+    [105.0, 115.0, 125.0]
+) = 1.0;
+----
+true
+
+# Test ts_conformal_coverage with some values outside bounds
+query I
+SELECT ts_conformal_coverage(
+    [100.0, 150.0, 120.0],
+    [95.0, 105.0, 115.0],
+    [105.0, 115.0, 125.0]
+) < 1.0;
+----
+true
+
+# Test ts_conformal_coverage returns value between 0 and 1
+query I
+SELECT ts_conformal_coverage([50.0, 100.0], [0.0, 0.0], [10.0, 10.0]) >= 0.0
+   AND ts_conformal_coverage([50.0, 100.0], [0.0, 0.0], [10.0, 10.0]) <= 1.0;
+----
+true

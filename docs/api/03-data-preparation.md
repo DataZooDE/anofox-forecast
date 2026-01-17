@@ -1,0 +1,470 @@
+# Data Preparation
+
+> Filtering, cleaning, and imputation table macros for time series
+
+## Overview
+
+Data preparation functions help clean and transform time series data before forecasting. These are **table macros** that operate on source tables and return transformed tables.
+
+---
+
+## Series Filtering
+
+### ts_drop_constant
+
+Filters out series where all values are constant.
+
+**Signature:**
+```sql
+ts_drop_constant(source VARCHAR, group_col COLUMN, value_col COLUMN) → TABLE
+```
+
+**Example:**
+```sql
+-- Remove constant series from sales data
+SELECT * FROM ts_drop_constant('sales', product_id, quantity);
+```
+
+---
+
+### ts_drop_short
+
+Filters out series shorter than the minimum length.
+
+**Signature:**
+```sql
+ts_drop_short(source VARCHAR, group_col COLUMN, min_length INTEGER) → TABLE
+```
+
+**Example:**
+```sql
+-- Keep only series with at least 20 observations
+SELECT * FROM ts_drop_short('sales', product_id, 20);
+```
+
+---
+
+### ts_drop_gappy
+
+Filters out series with too many gaps.
+
+**Signature:**
+```sql
+ts_drop_gappy(source VARCHAR, group_col COLUMN, value_col COLUMN, max_gap_ratio DOUBLE) → TABLE
+```
+
+**Example:**
+```sql
+-- Remove series where gaps exceed 10% of data
+SELECT * FROM ts_drop_gappy('sales', product_id, quantity, 0.1);
+```
+
+---
+
+### ts_drop_zeros
+
+Filters out series that are all zeros.
+
+**Signature:**
+```sql
+ts_drop_zeros(source VARCHAR, group_col COLUMN, value_col COLUMN) → TABLE
+```
+
+---
+
+## Edge Cleaning
+
+### ts_drop_leading_zeros
+
+Removes leading zeros from each series.
+
+**Signature:**
+```sql
+ts_drop_leading_zeros(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
+```
+
+**Example:**
+```sql
+SELECT * FROM ts_drop_leading_zeros('sales', product_id, date, quantity);
+```
+
+---
+
+### ts_drop_trailing_zeros
+
+Removes trailing zeros from each series.
+
+**Signature:**
+```sql
+ts_drop_trailing_zeros(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
+```
+
+---
+
+### ts_drop_edge_zeros
+
+Removes both leading and trailing zeros from each series.
+
+**Signature:**
+```sql
+ts_drop_edge_zeros(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
+```
+
+---
+
+## Missing Value Imputation
+
+### ts_fill_nulls_const
+
+Replaces NULL values with a constant.
+
+**Signature:**
+```sql
+ts_fill_nulls_const(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, fill_value DOUBLE) → TABLE
+```
+
+**Example:**
+```sql
+-- Fill missing values with 0
+SELECT * FROM ts_fill_nulls_const('sales', product_id, date, quantity, 0.0);
+```
+
+---
+
+### ts_fill_nulls_forward
+
+Forward fills NULL values (last observation carried forward).
+
+**Signature:**
+```sql
+ts_fill_nulls_forward(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
+```
+
+**Example:**
+```sql
+SELECT * FROM ts_fill_nulls_forward('sales', product_id, date, quantity);
+```
+
+---
+
+### ts_fill_nulls_backward
+
+Backward fills NULL values.
+
+**Signature:**
+```sql
+ts_fill_nulls_backward(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
+```
+
+---
+
+### ts_fill_nulls_mean
+
+Fills NULL values with the series mean.
+
+**Signature:**
+```sql
+ts_fill_nulls_mean(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
+```
+
+---
+
+## Gap Filling
+
+### ts_fill_gaps
+
+Fills gaps in time series by inserting rows for missing timestamps.
+
+**Signature:**
+```sql
+ts_fill_gaps(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, frequency VARCHAR) → TABLE
+```
+
+**Parameters:**
+- `frequency`: Time frequency string (e.g., `'1d'`, `'1h'`, `'1w'`)
+
+**Example:**
+```sql
+-- Fill daily gaps
+SELECT * FROM ts_fill_gaps('sales', product_id, date, quantity, '1d');
+```
+
+---
+
+### ts_fill_forward
+
+Forward fills to a target date.
+
+**Signature:**
+```sql
+ts_fill_forward(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, target_date DATE, frequency VARCHAR) → TABLE
+```
+
+---
+
+## Differencing
+
+### ts_diff
+
+Computes differences of specified order per series.
+
+**Signature:**
+```sql
+ts_diff(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, diff_order INTEGER) → TABLE
+```
+
+**Parameters:**
+- `diff_order`: Difference order (1 for first differences, 2 for second, etc.)
+
+**Example:**
+```sql
+-- Compute first differences
+SELECT * FROM ts_diff('sales', product_id, date, quantity, 1);
+
+-- Compute second differences
+SELECT * FROM ts_diff('sales', product_id, date, quantity, 2);
+```
+
+---
+
+## Advanced: Native Gap Filling
+
+> **Note:** These functions provide high-performance gap filling with type preservation.
+> For most use cases, use the simpler `ts_fill_gaps` table macro above.
+
+### Supported Frequency Formats
+
+All gap filling functions support multiple frequency formats:
+
+| Format | Example | Description |
+|--------|---------|-------------|
+| Polars style | `'1d'`, `'1h'`, `'30m'` | Day, hour, minute |
+| Weekly/Monthly | `'1w'`, `'1mo'`, `'1q'`, `'1y'` | Week, month, quarter, year |
+| DuckDB INTERVAL | `'1 day'`, `'1 hour'` | Standard interval syntax |
+| Raw integer | `'1'`, `'7'` | Interpreted as days |
+
+---
+
+### ts_fill_gaps_native
+
+High-performance native gap filling with automatic type preservation.
+
+> **Important:** This is a table-in-out function. Input must be passed as a subquery, not a table name.
+
+**Signature:**
+```sql
+ts_fill_gaps_native(
+    (SELECT group_col, date_col, value_col FROM source ORDER BY group_col, date_col),
+    frequency VARCHAR
+) → TABLE
+```
+
+**Type Preservation:** The date column type (DATE, TIMESTAMP, INTEGER, BIGINT) is automatically preserved.
+
+**Example:**
+```sql
+-- CORRECT: Pass data as ordered subquery
+SELECT * FROM ts_fill_gaps_native(
+    (SELECT product_id, date, quantity FROM sales ORDER BY product_id, date),
+    '1d'
+);
+
+-- WRONG: Cannot pass table name directly
+SELECT * FROM ts_fill_gaps_native('sales', '1d');  -- ERROR!
+```
+
+---
+
+### ts_fill_gaps_operator
+
+Operator-compatible gap filling (same as `ts_fill_gaps` but named for operator compatibility).
+
+**Signature:**
+```sql
+ts_fill_gaps_operator(
+    source VARCHAR,
+    group_col COLUMN,
+    date_col COLUMN,
+    value_col COLUMN,
+    frequency VARCHAR
+) → TABLE
+```
+
+---
+
+### ts_fill_forward_native
+
+Forward-fill time series to a target date with type preservation.
+
+> **Important:** This is a table-in-out function. Input must be passed as a subquery.
+
+**Signature:**
+```sql
+ts_fill_forward_native(
+    (SELECT group_col, date_col, value_col FROM source ORDER BY group_col, date_col),
+    target_date TIMESTAMP,
+    frequency VARCHAR
+) → TABLE
+```
+
+**Example:**
+```sql
+-- Extend series to end of year
+SELECT * FROM ts_fill_forward_native(
+    (SELECT store_id, date, sales FROM daily_sales ORDER BY store_id, date),
+    '2024-12-31'::TIMESTAMP,
+    '1d'
+);
+```
+
+---
+
+## Advanced: Future Value Handling
+
+> **Note:** These functions help handle unknown future values in cross-validation scenarios.
+
+### ts_fill_unknown
+
+Fill unknown future feature values based on a cutoff date.
+
+**Signature:**
+```sql
+ts_fill_unknown(
+    source VARCHAR,
+    group_col COLUMN,
+    date_col COLUMN,
+    value_col COLUMN,
+    cutoff_date DATE,
+    params MAP
+) → TABLE
+```
+
+**Params Options:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `strategy` | VARCHAR | `'last_value'` | `'null'`, `'last_value'`, or `'default'` |
+| `fill_value` | DOUBLE | `0.0` | Value for `'default'` strategy |
+
+**Strategies:**
+| Strategy | Description |
+|----------|-------------|
+| `'null'` | Set future values to NULL |
+| `'last_value'` | Use last known value before cutoff |
+| `'default'` | Use specified `fill_value` |
+
+**Example:**
+```sql
+-- Fill unknown temperatures with last known value
+SELECT * FROM ts_fill_unknown(
+    'weather_data', region, date, temperature, '2024-06-01'::DATE,
+    MAP{'strategy': 'last_value'}
+);
+```
+
+---
+
+### ts_mark_unknown
+
+Mark rows as known/unknown based on a cutoff date.
+
+**Signature:**
+```sql
+ts_mark_unknown(
+    source VARCHAR,
+    group_col COLUMN,
+    date_col COLUMN,
+    cutoff_date DATE
+) → TABLE
+```
+
+**Output Columns:** All source columns plus:
+| Column | Type | Description |
+|--------|------|-------------|
+| `is_unknown` | BOOLEAN | True for rows after cutoff |
+| `last_known_date` | TIMESTAMP | Last date before cutoff (per group) |
+
+**Example:**
+```sql
+-- Mark future rows and apply custom logic
+SELECT
+    *,
+    CASE WHEN is_unknown THEN 0.0 ELSE competitor_price END AS price_masked
+FROM ts_mark_unknown('sales_data', product_id, date, '2024-06-15'::DATE);
+```
+
+---
+
+## Advanced: Timestamp Validation
+
+> **Note:** These functions validate that expected timestamps exist in your data.
+
+### ts_validate_timestamps
+
+Validate that expected timestamps exist in data for each group.
+
+**Signature:**
+```sql
+ts_validate_timestamps(
+    source VARCHAR,
+    group_col COLUMN,
+    date_col COLUMN,
+    expected_timestamps DATE[]
+) → TABLE
+```
+
+**Output Columns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `group_col` | ANY | Group identifier |
+| `is_valid` | BOOLEAN | True if all timestamps found |
+| `n_expected` | BIGINT | Number of expected timestamps |
+| `n_found` | BIGINT | Number of timestamps found |
+| `n_missing` | BIGINT | Number of missing timestamps |
+| `missing_timestamps` | DATE[] | List of missing timestamps |
+
+**Example:**
+```sql
+-- Validate that specific dates exist for each series
+SELECT * FROM ts_validate_timestamps(
+    'sales_data', product_id, date,
+    ['2024-01-01'::DATE, '2024-01-02'::DATE, '2024-01-03'::DATE]
+) WHERE NOT is_valid;  -- Show only invalid series
+```
+
+---
+
+### ts_validate_timestamps_summary
+
+Quick validation summary across all groups.
+
+**Signature:**
+```sql
+ts_validate_timestamps_summary(
+    source VARCHAR,
+    group_col COLUMN,
+    date_col COLUMN,
+    expected_timestamps DATE[]
+) → TABLE
+```
+
+**Output Columns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `all_valid` | BOOLEAN | True if all groups have all timestamps |
+| `n_groups` | BIGINT | Total number of groups |
+| `n_valid_groups` | BIGINT | Groups with all timestamps |
+| `n_invalid_groups` | BIGINT | Groups missing timestamps |
+| `invalid_groups` | ANY[] | List of invalid group IDs |
+
+**Example:**
+```sql
+-- Quick check: are all series complete?
+SELECT * FROM ts_validate_timestamps_summary(
+    'sales_data', product_id, date,
+    ['2024-01-01'::DATE, '2024-01-02'::DATE, '2024-01-03'::DATE]
+);
+```
+
+---
+
+*See also: [Statistics](02-statistics.md) | [Forecasting](05-forecasting.md)*

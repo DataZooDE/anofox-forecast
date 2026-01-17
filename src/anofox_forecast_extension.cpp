@@ -4,12 +4,16 @@
 #include "anofox_fcst_ffi.h"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb/main/extension_helper.hpp"
 
 #include <cstdlib>
 
 namespace duckdb {
 
 static void LoadInternal(ExtensionLoader &loader) {
+    // Load the JSON extension for STRUCT/MAP parameter extraction in macros
+    ExtensionHelper::TryAutoLoadExtension(loader.GetDatabaseInstance(), "json");
+
     // Register EDA functions
     RegisterTsStatsFunction(loader);
     RegisterTsQualityReportFunction(loader);
