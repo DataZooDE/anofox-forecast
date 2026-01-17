@@ -38,7 +38,7 @@ GROUP BY group_col
 R"(
 SELECT
     SUM(CASE WHEN (stats).length >= min_length AND NOT (stats).is_constant THEN 1 ELSE 0 END) AS n_passed,
-    SUM(CASE WHEN (stats).n_gaps > 0 THEN 1 ELSE 0 END) AS n_gap_issues,
+    SUM(CASE WHEN (stats).n_nan > 0 THEN 1 ELSE 0 END) AS n_nan_issues,
     SUM(CASE WHEN (stats).n_nulls > 0 THEN 1 ELSE 0 END) AS n_missing_issues,
     SUM(CASE WHEN (stats).is_constant THEN 1 ELSE 0 END) AS n_constant,
     COUNT(*) AS n_total
@@ -55,7 +55,7 @@ SELECT
     MIN((stats).length) AS min_length,
     MAX((stats).length) AS max_length,
     SUM((stats).n_nulls) AS total_nulls,
-    SUM((stats).n_gaps) AS total_gaps
+    SUM((stats).n_nan) AS total_nans
 FROM query_table(stats_table::VARCHAR)
 )"},
 

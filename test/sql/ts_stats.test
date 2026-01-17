@@ -157,3 +157,39 @@ SELECT count(*) FROM ts_stats_by('test_stats_by', group_id, date, value, '1d');
 statement ok
 DROP TABLE test_stats_by;
 
+
+#######################################
+# ts_quality_report - Quality Report from Stats
+#######################################
+
+statement ok
+CREATE TABLE test_qr_data AS
+SELECT
+    CASE 
+        WHEN i <= 10 THEN 'series_ok'
+        WHEN i <= 15 THEN 'series_short'
+        ELSE 'series_constant'
+    END AS id,
+    '2023-01-01'::TIMESTAMP + INTERVAL (i % 10) DAY AS date,
+    CASE 
+        WHEN i > 15 THEN 5.0  -- constant series
+        ELSE (i % 10 + 1)::DOUBLE
+    END AS value
+FROM range(1, 21) t(i);
+
+statement ok
+CREATE TABLE test_qr_stats AS
+SELECT * FROM ts_stats('test_qr_data', id, date, value, '1d');
+
+# Test ts_quality_report returns expected columns
+query IIIII
+SELECT n_passed, n_nan_issues, n_missing_issues, n_constant, n_total
+FROM ts_quality_report('test_qr_stats', 8);
+----
+1	0	0	1	3
+
+statement ok
+DROP TABLE test_qr_stats;
+
+statement ok
+DROP TABLE test_qr_data;

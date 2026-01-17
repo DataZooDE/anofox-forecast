@@ -152,8 +152,8 @@ SELECT * FROM ts_quality_report(stats_table, min_length);
 | Column | Type | Description |
 |--------|------|-------------|
 | `n_passed` | BIGINT | Series meeting quality criteria |
-| `n_gap_issues` | BIGINT | Series with gaps |
-| `n_missing_issues` | BIGINT | Series with missing values |
+| `n_nan_issues` | BIGINT | Series with NaN values |
+| `n_missing_issues` | BIGINT | Series with NULL values |
 | `n_constant` | BIGINT | Constant series |
 | `n_total` | BIGINT | Total series count |
 
@@ -175,7 +175,7 @@ SELECT * FROM ts_stats_summary(stats_table);
 | `min_length` | BIGINT | Minimum series length |
 | `max_length` | BIGINT | Maximum series length |
 | `total_nulls` | BIGINT | Total NULL values |
-| `total_gaps` | BIGINT | Total gaps |
+| `total_nans` | BIGINT | Total NaN values |
 
 **Example:**
 ```sql
