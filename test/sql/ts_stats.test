@@ -135,3 +135,25 @@ query I
 SELECT _ts_stats(NULL) IS NULL;
 ----
 true
+
+#######################################
+# ts_stats_by - Alias Test
+#######################################
+
+statement ok
+CREATE TABLE test_stats_by AS
+SELECT
+    CASE WHEN i <= 10 THEN 'A' ELSE 'B' END AS group_id,
+    '2023-01-01'::TIMESTAMP + INTERVAL (i % 10) DAY AS date,
+    (i % 10 + 1)::DOUBLE AS value
+FROM range(1, 21) t(i);
+
+# Test ts_stats_by alias works
+query I
+SELECT count(*) FROM ts_stats_by('test_stats_by', group_id, date, value, '1d');
+----
+2
+
+statement ok
+DROP TABLE test_stats_by;
+

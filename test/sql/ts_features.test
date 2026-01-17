@@ -150,3 +150,17 @@ SELECT (SELECT ts_features(ts, val) FROM (
 )).mean IS NOT NULL;
 ----
 true
+
+#######################################
+# ts_features_agg - Alias Test
+#######################################
+
+# Test ts_features_agg alias works same as ts_features
+query I
+SELECT (SELECT ts_features_agg(ts, val) FROM (
+    SELECT '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts, i::DOUBLE as val
+    FROM range(1, 11) t(i)
+)).mean IS NOT NULL;
+----
+true
+
