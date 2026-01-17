@@ -2088,6 +2088,28 @@ SELECT
 FROM src
 )"},
 
+    // ts_stats_by: Alias for ts_stats (for API consistency with _by naming pattern)
+    // C++ API: ts_stats_by(table_name, group_col, date_col, value_col, frequency)
+    {"ts_stats_by", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    group_col AS id,
+    _ts_stats(LIST(value_col::DOUBLE ORDER BY date_col)) AS stats
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)"},
+
+    // ts_data_quality_by: Alias for ts_data_quality (for API consistency with _by naming pattern)
+    // C++ API: ts_data_quality_by(table_name, unique_id_col, date_col, value_col, n_short, frequency)
+    {"ts_data_quality_by", {"source", "unique_id_col", "date_col", "value_col", "n_short", "frequency", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    unique_id_col AS unique_id,
+    _ts_data_quality(LIST(value_col::DOUBLE ORDER BY date_col)) AS quality
+FROM query_table(source::VARCHAR)
+GROUP BY unique_id_col
+)"},
+
     // Sentinel
     {nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}
 };

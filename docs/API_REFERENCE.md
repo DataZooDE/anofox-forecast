@@ -91,6 +91,7 @@ Both forms are identical in functionality.
 
 | Category | Description | Documentation |
 |----------|-------------|---------------|
+| **API Design Guide** | Naming conventions and patterns | [00-api-design.md](api/00-api-design.md) |
 | **Table Macros** | High-level API overview | [01-table-macros.md](api/01-table-macros.md) |
 | **Statistics** | Time series statistics and data quality | [02-statistics.md](api/02-statistics.md) |
 | **Data Preparation** | Filtering, cleaning, imputation | [03-data-preparation.md](api/03-data-preparation.md) |
