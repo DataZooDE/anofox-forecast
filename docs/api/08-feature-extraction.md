@@ -156,11 +156,60 @@ GROUP BY product_id;
 
 ---
 
-## Feature Configuration
+## Advanced: Feature Configuration
 
-### ts_features_config_from_json / ts_features_config_from_csv
+> **Note:** These functions help manage feature sets for large-scale extraction.
 
-Load feature configuration from external files.
+### ts_features_config_template
+
+Generate a template configuration for feature extraction.
+
+**Signature:**
+```sql
+ts_features_config_template() → STRUCT
+```
+
+**Returns:** Configuration template with all available features and their default parameters.
+
+**Example:**
+```sql
+-- Get template to customize
+SELECT ts_features_config_template();
+```
+
+---
+
+### ts_features_config_from_csv
+
+Load feature configuration from a CSV file.
+
+**Signature:**
+```sql
+ts_features_config_from_csv(path VARCHAR) → STRUCT(
+    feature_names VARCHAR[],
+    overrides     VARCHAR[]
+)
+```
+
+**CSV Format:**
+```csv
+feature_name,enabled,custom_param
+mean,true,
+variance,true,
+autocorrelation,true,lag=5
+```
+
+**Example:**
+```sql
+-- Load custom feature set from CSV
+SELECT (ts_features_config_from_csv('features.csv')).feature_names;
+```
+
+---
+
+### ts_features_config_from_json
+
+Load feature configuration from a JSON file.
 
 **Signature:**
 ```sql
@@ -168,6 +217,22 @@ ts_features_config_from_json(path VARCHAR) → STRUCT(
     feature_names VARCHAR[],
     overrides     STRUCT(feature VARCHAR, params_json VARCHAR)[]
 )
+```
+
+**JSON Format:**
+```json
+{
+  "features": ["mean", "variance", "skewness"],
+  "parameters": {
+    "autocorrelation": {"lag": 10}
+  }
+}
+```
+
+**Example:**
+```sql
+-- Load feature configuration
+SELECT ts_features_config_from_json('config.json');
 ```
 
 ---

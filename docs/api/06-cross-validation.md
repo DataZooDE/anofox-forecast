@@ -294,4 +294,223 @@ SELECT * FROM ts_backtest_auto('data', group_id, date, value, 5, 3, '1d', MAP{})
 
 ---
 
+## Advanced: CV Data Hydration
+
+> **Note:** These functions are for building custom cross-validation pipelines.
+> For standard backtesting, use `ts_backtest_auto` which handles everything automatically.
+
+When building custom CV pipelines (e.g., with regression models or external forecasters), you need to join CV splits back to your source data. These functions prevent **data leakage** by automatically masking features that wouldn't be known at prediction time.
+
+### The Data Leakage Problem
+
+In time series CV, the test set represents "future" data. Features that depend on future values (e.g., actual temperature, competitor sales) must be masked to prevent leakage:
+
+```
+Timeline:    [====== TRAIN ======][=== TEST ===]
+                                  ↑
+                            cutoff date
+
+Known features:     ✓ Available in both train and test
+Unknown features:   ✓ Available in train, ✗ Must be masked in test
+```
+
+---
+
+### ts_hydrate_split
+
+Join CV splits with source data, masking a specific unknown column.
+
+**Signature:**
+```sql
+ts_hydrate_split(
+    cv_splits VARCHAR,        -- CV split table name
+    source VARCHAR,           -- Source data table name
+    src_group_col COLUMN,     -- Group column in source
+    src_date_col COLUMN,      -- Date column in source
+    unknown_col COLUMN,       -- Column to mask in test set
+    params MAP                -- Masking strategy options
+) → TABLE
+```
+
+**Params Options:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `strategy` | VARCHAR | `'null'` | `'null'`, `'last_value'`, or `'default'` |
+| `fill_value` | DOUBLE | `0.0` | Value for `'default'` strategy |
+
+**Masking Strategies:**
+| Strategy | Description |
+|----------|-------------|
+| `'null'` | Set unknown values to NULL (default) |
+| `'last_value'` | Use last known value before cutoff |
+| `'default'` | Use specified `fill_value` |
+
+**Example:**
+```sql
+-- Mask temperature in test set using last known value
+SELECT * FROM ts_hydrate_split(
+    'cv_splits',
+    'weather_data',
+    region,
+    date,
+    temperature,
+    MAP{'strategy': 'last_value'}
+) WHERE fold_id = 1;
+```
+
+---
+
+### ts_hydrate_split_full
+
+Join CV splits with ALL source columns, adding metadata flags for manual masking.
+
+**Signature:**
+```sql
+ts_hydrate_split_full(
+    cv_splits VARCHAR,
+    source VARCHAR,
+    src_group_col COLUMN,
+    src_date_col COLUMN,
+    params MAP
+) → TABLE
+```
+
+**Output Columns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | CV fold number |
+| `split` | VARCHAR | `'train'` or `'test'` |
+| `_is_test` | BOOLEAN | True for test rows |
+| `_train_cutoff` | TIMESTAMP | Training end date for fold |
+| *(all source columns)* | | Original data columns |
+
+**Example:**
+```sql
+-- Manual masking pattern
+SELECT
+    *,
+    CASE WHEN _is_test THEN NULL ELSE competitor_sales END AS competitor_sales_masked,
+    CASE WHEN _is_test THEN NULL ELSE actual_weather END AS weather_masked
+FROM ts_hydrate_split_full(
+    'cv_splits', 'sales_features', store_id, date, MAP{}
+);
+```
+
+---
+
+### ts_hydrate_split_strict
+
+Fail-safe join returning ONLY metadata columns, forcing explicit column selection.
+
+**Signature:**
+```sql
+ts_hydrate_split_strict(
+    cv_splits VARCHAR,
+    source VARCHAR,
+    src_group_col COLUMN,
+    src_date_col COLUMN,
+    params MAP
+) → TABLE(fold_id, split, group_col, date_col, _is_test, _train_cutoff)
+```
+
+**Example:**
+```sql
+-- Maximum safety: explicitly select and mask each column
+SELECT
+    hs.*,
+    src.price,  -- Known feature, no masking needed
+    CASE WHEN hs._is_test THEN NULL ELSE src.competitor_price END AS competitor_price
+FROM ts_hydrate_split_strict('cv_splits', 'data', store, date, MAP{}) hs
+JOIN data src ON hs.group_col = src.store AND hs.date_col = src.date;
+```
+
+---
+
+### ts_hydrate_features
+
+Automatically hydrate CV splits with features, marking test rows for masking.
+
+**Signature:**
+```sql
+ts_hydrate_features(
+    cv_splits VARCHAR,        -- Output from ts_cv_split
+    source VARCHAR,           -- Original data with features
+    src_group_col COLUMN,
+    src_date_col COLUMN,
+    params MAP
+) → TABLE
+```
+
+**Output Columns:** Same as `ts_hydrate_split_full` including `_is_test` flag.
+
+**Example:**
+```sql
+-- Hydrate and mask unknown features
+SELECT
+    *,
+    CASE WHEN _is_test THEN NULL ELSE temperature END AS temp_masked,
+    CASE WHEN _is_test THEN NULL ELSE competitor_sales END AS comp_masked
+FROM ts_hydrate_features('cv_splits', 'feature_data', series_id, date, MAP{});
+```
+
+---
+
+### ts_prepare_regression_input
+
+Prepare data for regression models in CV backtest. Masks target in test rows.
+
+**Signature:**
+```sql
+ts_prepare_regression_input(
+    cv_splits VARCHAR,
+    source VARCHAR,
+    src_group_col COLUMN,
+    src_date_col COLUMN,
+    target_col COLUMN,
+    params MAP
+) → TABLE
+```
+
+**Key Behavior:**
+- **Train rows:** Target keeps original value
+- **Test rows:** Target set to NULL (model will predict these)
+- All features from source are preserved
+
+**Output Columns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | CV fold number |
+| `split` | VARCHAR | `'train'` or `'test'` |
+| `group_col` | ANY | Group identifier |
+| `date_col` | TIMESTAMP | Date |
+| `masked_target` | DOUBLE | NULL in test, actual in train |
+| `_is_test` | BOOLEAN | Test row indicator |
+| *(all source columns)* | | Original features |
+
+**Example:**
+```sql
+-- Prepare data for external regression model
+CREATE TABLE regression_input AS
+SELECT * FROM ts_prepare_regression_input(
+    'cv_splits', 'sales_data', store_id, date, revenue, MAP{}
+);
+
+-- Train: Use rows where masked_target IS NOT NULL
+-- Test: Predict rows where masked_target IS NULL
+```
+
+---
+
+### Choosing the Right Hydration Function
+
+| Function | Use Case | Safety Level |
+|----------|----------|--------------|
+| `ts_hydrate_split` | Mask one specific column | Medium |
+| `ts_hydrate_split_full` | Manual masking with `_is_test` flag | Medium |
+| `ts_hydrate_split_strict` | Force explicit column handling | High |
+| `ts_hydrate_features` | Auto-hydrate with masking flags | Medium |
+| `ts_prepare_regression_input` | Regression model prep | High |
+
+---
+
 *See also: [Forecasting](05-forecasting.md) | [Evaluation Metrics](07-evaluation-metrics.md)*
