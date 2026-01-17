@@ -16,15 +16,12 @@ Extracts tsfresh-compatible time series features.
 
 **Signatures:**
 ```sql
--- Scalar version (array input)
-ts_features_scalar(values DOUBLE[]) → STRUCT
-
--- Aggregate version (primary function)
+-- Aggregate function (use with GROUP BY)
 ts_features(timestamp_col TIMESTAMP, value_col DOUBLE) → STRUCT
 ts_features(timestamp_col, value_col, feature_selection LIST(VARCHAR)) → STRUCT
 ts_features(timestamp_col, value_col, feature_selection, feature_params LIST(STRUCT)) → STRUCT
 
--- Alias
+-- Alias (explicit _agg suffix)
 ts_features_agg(timestamp_col TIMESTAMP, value_col DOUBLE) → STRUCT
 ```
 
@@ -70,10 +67,7 @@ ts_features_agg(timestamp_col TIMESTAMP, value_col DOUBLE) → STRUCT
 
 **Examples:**
 ```sql
--- Scalar version
-SELECT ts_features_scalar([1.0, 2.0, 3.0, 4.0, 5.0]).mean;
-
--- Aggregate version
+-- Extract features per product (aggregate)
 SELECT
     product_id,
     ts_features(date, value) AS features

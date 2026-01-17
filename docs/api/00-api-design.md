@@ -106,15 +106,17 @@ The following table shows which API variants exist for each functionality:
 | Functionality | Scalar | Aggregate | Table Macro | Table `_by` |
 |---------------|--------|-----------|-------------|-------------|
 | **Forecasting** | - | `ts_forecast_agg` | `ts_forecast` | `ts_forecast_by` |
-| **Statistics** | `ts_stats` | - | `ts_stats` | `ts_stats_by` |
-| **Features** | `ts_features_scalar` | `ts_features_agg` | - | `ts_features_by` |
-| **Changepoints** | `ts_detect_changepoints` | `ts_detect_changepoints_agg` | `ts_detect_changepoints` | `ts_detect_changepoints_by` |
+| **Statistics** | `_ts_stats`* | - | `ts_stats` | `ts_stats_by` |
+| **Features** | - | `ts_features`, `ts_features_agg` | - | - |
+| **Changepoints** | - | `ts_detect_changepoints_agg` | `ts_detect_changepoints` | `ts_detect_changepoints_by` |
 | **Seasonality** | - | `ts_classify_seasonality_agg` | - | `ts_classify_seasonality_by` |
 | **Period Detection** | `ts_detect_periods` | - | - | - |
 | **Decomposition** | - | - | `ts_mstl_decomposition` | - |
 | **Metrics** | `ts_mae`, `ts_rmse`, etc. | - | - | - |
 | **Conformal** | `ts_conformal_*` | - | `ts_conformal` macros | - |
-| **Data Quality** | `ts_data_quality` | - | `ts_data_quality` | - |
+| **Data Quality** | `_ts_data_quality`* | - | `ts_data_quality` | `ts_data_quality_by` |
+
+*Internal scalar functions (underscore prefix) used by table macros
 
 ---
 

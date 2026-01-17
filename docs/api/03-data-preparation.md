@@ -1,43 +1,73 @@
 # Data Preparation
 
-> Filtering, cleaning, and imputation functions for time series
+> Filtering, cleaning, and imputation table macros for time series
 
 ## Overview
 
-Data preparation functions help clean and transform time series data before forecasting. These functions operate on arrays and return transformed arrays.
+Data preparation functions help clean and transform time series data before forecasting. These are **table macros** that operate on source tables and return transformed tables.
+
+---
 
 ## Series Filtering
 
 ### ts_drop_constant
 
-Filters out constant values from an array, returning NULL if all values are constant.
+Filters out series where all values are constant.
 
 **Signature:**
 ```sql
-ts_drop_constant(values DOUBLE[]) → DOUBLE[]
+ts_drop_constant(source VARCHAR, group_col COLUMN, value_col COLUMN) → TABLE
 ```
 
 **Example:**
 ```sql
-SELECT ts_drop_constant([3.0, 3.0, 3.0, 3.0]);  -- Returns NULL
-SELECT ts_drop_constant([1.0, 2.0, 3.0, 4.0]);  -- Returns [1.0, 2.0, 3.0, 4.0]
+-- Remove constant series from sales data
+SELECT * FROM ts_drop_constant('sales', product_id, quantity);
 ```
 
 ---
 
 ### ts_drop_short
 
-Returns NULL if array length is below threshold.
+Filters out series shorter than the minimum length.
 
 **Signature:**
 ```sql
-ts_drop_short(values DOUBLE[], min_length INTEGER) → DOUBLE[]
+ts_drop_short(source VARCHAR, group_col COLUMN, min_length INTEGER) → TABLE
 ```
 
 **Example:**
 ```sql
-SELECT ts_drop_short([1.0, 2.0, 3.0], 5);  -- Returns NULL (length < 5)
-SELECT ts_drop_short([1.0, 2.0, 3.0, 4.0, 5.0], 5);  -- Returns the array
+-- Keep only series with at least 20 observations
+SELECT * FROM ts_drop_short('sales', product_id, 20);
+```
+
+---
+
+### ts_drop_gappy
+
+Filters out series with too many gaps.
+
+**Signature:**
+```sql
+ts_drop_gappy(source VARCHAR, group_col COLUMN, value_col COLUMN, max_gap_ratio DOUBLE) → TABLE
+```
+
+**Example:**
+```sql
+-- Remove series where gaps exceed 10% of data
+SELECT * FROM ts_drop_gappy('sales', product_id, quantity, 0.1);
+```
+
+---
+
+### ts_drop_zeros
+
+Filters out series that are all zeros.
+
+**Signature:**
+```sql
+ts_drop_zeros(source VARCHAR, group_col COLUMN, value_col COLUMN) → TABLE
 ```
 
 ---
@@ -46,51 +76,38 @@ SELECT ts_drop_short([1.0, 2.0, 3.0, 4.0, 5.0], 5);  -- Returns the array
 
 ### ts_drop_leading_zeros
 
-Removes leading zeros from an array.
+Removes leading zeros from each series.
 
 **Signature:**
 ```sql
-ts_drop_leading_zeros(values DOUBLE[]) → DOUBLE[]
+ts_drop_leading_zeros(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
 ```
 
 **Example:**
 ```sql
-SELECT ts_drop_leading_zeros([0.0, 0.0, 1.0, 2.0, 3.0]);
--- Returns: [1.0, 2.0, 3.0]
+SELECT * FROM ts_drop_leading_zeros('sales', product_id, date, quantity);
 ```
 
 ---
 
 ### ts_drop_trailing_zeros
 
-Removes trailing zeros from an array.
+Removes trailing zeros from each series.
 
 **Signature:**
 ```sql
-ts_drop_trailing_zeros(values DOUBLE[]) → DOUBLE[]
-```
-
-**Example:**
-```sql
-SELECT ts_drop_trailing_zeros([1.0, 2.0, 3.0, 0.0, 0.0]);
--- Returns: [1.0, 2.0, 3.0]
+ts_drop_trailing_zeros(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
 ```
 
 ---
 
 ### ts_drop_edge_zeros
 
-Removes both leading and trailing zeros from an array.
+Removes both leading and trailing zeros from each series.
 
 **Signature:**
 ```sql
-ts_drop_edge_zeros(values DOUBLE[]) → DOUBLE[]
-```
-
-**Example:**
-```sql
-SELECT ts_drop_edge_zeros([0.0, 0.0, 1.0, 2.0, 3.0, 0.0, 0.0]);
--- Returns: [1.0, 2.0, 3.0]
+ts_drop_edge_zeros(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
 ```
 
 ---
@@ -103,13 +120,13 @@ Replaces NULL values with a constant.
 
 **Signature:**
 ```sql
-ts_fill_nulls_const(values DOUBLE[], fill_value DOUBLE) → DOUBLE[]
+ts_fill_nulls_const(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, fill_value DOUBLE) → TABLE
 ```
 
 **Example:**
 ```sql
-SELECT ts_fill_nulls_const([1.0, NULL, 3.0, NULL, 5.0], 0.0);
--- Returns: [1.0, 0.0, 3.0, 0.0, 5.0]
+-- Fill missing values with 0
+SELECT * FROM ts_fill_nulls_const('sales', product_id, date, quantity, 0.0);
 ```
 
 ---
@@ -120,13 +137,12 @@ Forward fills NULL values (last observation carried forward).
 
 **Signature:**
 ```sql
-ts_fill_nulls_forward(values DOUBLE[]) → DOUBLE[]
+ts_fill_nulls_forward(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
 ```
 
 **Example:**
 ```sql
-SELECT ts_fill_nulls_forward([1.0, NULL, NULL, 4.0, NULL]);
--- Returns: [1.0, 1.0, 1.0, 4.0, 4.0]
+SELECT * FROM ts_fill_nulls_forward('sales', product_id, date, quantity);
 ```
 
 ---
@@ -137,13 +153,7 @@ Backward fills NULL values.
 
 **Signature:**
 ```sql
-ts_fill_nulls_backward(values DOUBLE[]) → DOUBLE[]
-```
-
-**Example:**
-```sql
-SELECT ts_fill_nulls_backward([NULL, NULL, 3.0, NULL, 5.0]);
--- Returns: [3.0, 3.0, 3.0, 5.0, 5.0]
+ts_fill_nulls_backward(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
 ```
 
 ---
@@ -154,13 +164,40 @@ Fills NULL values with the series mean.
 
 **Signature:**
 ```sql
-ts_fill_nulls_mean(values DOUBLE[]) → DOUBLE[]
+ts_fill_nulls_mean(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
 ```
+
+---
+
+## Gap Filling
+
+### ts_fill_gaps
+
+Fills gaps in time series by inserting rows for missing timestamps.
+
+**Signature:**
+```sql
+ts_fill_gaps(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, frequency VARCHAR) → TABLE
+```
+
+**Parameters:**
+- `frequency`: Time frequency string (e.g., `'1d'`, `'1h'`, `'1w'`)
 
 **Example:**
 ```sql
-SELECT ts_fill_nulls_mean([1.0, NULL, 3.0, NULL, 5.0]);
--- Returns: [1.0, 3.0, 3.0, 3.0, 5.0] (mean = 3.0)
+-- Fill daily gaps
+SELECT * FROM ts_fill_gaps('sales', product_id, date, quantity, '1d');
+```
+
+---
+
+### ts_fill_forward
+
+Forward fills to a target date.
+
+**Signature:**
+```sql
+ts_fill_forward(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, target_date DATE, frequency VARCHAR) → TABLE
 ```
 
 ---
@@ -169,26 +206,23 @@ SELECT ts_fill_nulls_mean([1.0, NULL, 3.0, NULL, 5.0]);
 
 ### ts_diff
 
-Computes differences of specified order.
+Computes differences of specified order per series.
 
 **Signature:**
 ```sql
-ts_diff(values DOUBLE[], order INTEGER) → DOUBLE[]
+ts_diff(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, diff_order INTEGER) → TABLE
 ```
 
 **Parameters:**
-- `values`: Input array
-- `order`: Difference order (must be > 0)
+- `diff_order`: Difference order (1 for first differences, 2 for second, etc.)
 
 **Example:**
 ```sql
--- First differences
-SELECT ts_diff([1.0, 2.0, 4.0, 7.0], 1);
--- Returns: [1.0, 2.0, 3.0]
+-- Compute first differences
+SELECT * FROM ts_diff('sales', product_id, date, quantity, 1);
 
--- Second differences
-SELECT ts_diff([1.0, 2.0, 4.0, 7.0, 11.0], 2);
--- Returns: [1.0, 1.0, 1.0]
+-- Compute second differences
+SELECT * FROM ts_diff('sales', product_id, date, quantity, 2);
 ```
 
 ---
