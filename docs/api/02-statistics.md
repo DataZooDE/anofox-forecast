@@ -121,21 +121,23 @@ HAVING (ts_data_quality(LIST(value ORDER BY date))).overall_score < 0.8;
 
 Compute statistics for grouped time series.
 
+**Signature:**
 ```sql
-SELECT * FROM ts_stats(table_name, group_col, date_col, value_col);
+ts_stats(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, frequency VARCHAR) → TABLE
 ```
 
 **Parameters:**
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `table_name` | VARCHAR | Source table name |
-| `group_col` | IDENTIFIER | Column for grouping series |
-| `date_col` | IDENTIFIER | Date/timestamp column |
-| `value_col` | IDENTIFIER | Value column |
+| `source` | VARCHAR | Source table name |
+| `group_col` | COLUMN | Column for grouping series |
+| `date_col` | COLUMN | Date/timestamp column |
+| `value_col` | COLUMN | Value column |
+| `frequency` | VARCHAR | Data frequency (`'1d'`, `'1h'`, `'1w'`, `'1mo'`) |
 
 **Example:**
 ```sql
-SELECT * FROM ts_stats('sales', product_id, date, quantity);
+SELECT * FROM ts_stats('sales', product_id, date, quantity, '1d');
 ```
 
 ---
@@ -180,7 +182,7 @@ SELECT * FROM ts_stats_summary(stats_table);
 **Example:**
 ```sql
 -- First compute stats, then summarize
-CREATE TABLE stats AS SELECT * FROM ts_stats('sales', product_id, date, quantity);
+CREATE TABLE stats AS SELECT * FROM ts_stats('sales', product_id, date, quantity, '1d');
 SELECT * FROM ts_stats_summary('stats');
 ```
 
@@ -190,8 +192,24 @@ SELECT * FROM ts_stats_summary('stats');
 
 Assess data quality per series.
 
+**Signature:**
 ```sql
-SELECT * FROM ts_data_quality(source, id_col, date_col, value_col, n_short);
+ts_data_quality(source VARCHAR, unique_id_col COLUMN, date_col COLUMN, value_col COLUMN, n_short INTEGER, frequency VARCHAR) → TABLE
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Source table name |
+| `unique_id_col` | COLUMN | Column for grouping series |
+| `date_col` | COLUMN | Date/timestamp column |
+| `value_col` | COLUMN | Value column |
+| `n_short` | INTEGER | Minimum series length threshold |
+| `frequency` | VARCHAR | Data frequency (`'1d'`, `'1h'`, `'1w'`, `'1mo'`) |
+
+**Example:**
+```sql
+SELECT * FROM ts_data_quality('sales', product_id, date, quantity, 10, '1d');
 ```
 
 ---
@@ -200,8 +218,23 @@ SELECT * FROM ts_data_quality(source, id_col, date_col, value_col, n_short);
 
 Generate summary of data quality across all series.
 
+**Signature:**
 ```sql
-SELECT * FROM ts_data_quality_summary(source, id_col, date_col, value_col, n_short);
+ts_data_quality_summary(source VARCHAR, unique_id_col COLUMN, date_col COLUMN, value_col COLUMN, n_short INTEGER) → TABLE
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Source table name |
+| `unique_id_col` | COLUMN | Column for grouping series |
+| `date_col` | COLUMN | Date/timestamp column |
+| `value_col` | COLUMN | Value column |
+| `n_short` | INTEGER | Minimum series length threshold |
+
+**Example:**
+```sql
+SELECT * FROM ts_data_quality_summary('sales', product_id, date, quantity, 10);
 ```
 
 ---

@@ -190,6 +190,57 @@ SELECT (ts_conformal_evaluate(
 
 ---
 
+### ts_conformal_learn
+
+Learn a calibration profile from residuals for advanced conformal prediction workflows.
+
+**Signature:**
+```sql
+ts_conformal_learn(residuals DOUBLE[], alphas DOUBLE[], method VARCHAR, strategy VARCHAR)
+→ STRUCT(
+    method VARCHAR,
+    strategy VARCHAR,
+    alphas DOUBLE[],
+    state_vector DOUBLE[],
+    scores_lower DOUBLE[],
+    scores_upper DOUBLE[]
+)
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `residuals` | DOUBLE[] | Calibration residuals (actual - predicted) |
+| `alphas` | DOUBLE[] | Array of miscoverage rates to calibrate |
+| `method` | VARCHAR | `'symmetric'` or `'asymmetric'` |
+| `strategy` | VARCHAR | `'naive'`, `'cv'`, or `'adaptive'` |
+
+**Methods:**
+| Method | Description |
+|--------|-------------|
+| `'symmetric'` | Use absolute residuals for symmetric intervals |
+| `'asymmetric'` | Separate upper/lower quantiles for asymmetric intervals |
+
+**Strategies:**
+| Strategy | Description |
+|----------|-------------|
+| `'naive'` | Simple empirical quantile (default) |
+| `'cv'` | Cross-validation based calibration |
+| `'adaptive'` | Adaptive conformal inference |
+
+**Example:**
+```sql
+-- Learn calibration profile for multiple coverage levels
+SELECT ts_conformal_learn(
+    [1.2, -0.8, 1.5, -1.0, 0.5, -0.3, 0.9, -1.2]::DOUBLE[],  -- residuals
+    [0.1, 0.05, 0.2]::DOUBLE[],                               -- 90%, 95%, 80% coverage
+    'symmetric',
+    'naive'
+) AS profile;
+```
+
+---
+
 ## Table Macros
 
 ### ts_conformal
