@@ -137,6 +137,59 @@ SELECT
 
 ---
 
+### ts_conformal_coverage
+
+Computes the empirical coverage of prediction intervals.
+
+**Signature:**
+```sql
+ts_conformal_coverage(actuals DOUBLE[], lower DOUBLE[], upper DOUBLE[]) → DOUBLE
+```
+
+**Returns:** Fraction of actuals within [lower, upper] bounds.
+
+**Example:**
+```sql
+SELECT ts_conformal_coverage(
+    [100.0, 110.0, 120.0],  -- actual values
+    [95.0, 105.0, 115.0],   -- lower bounds
+    [105.0, 115.0, 125.0]   -- upper bounds
+) AS coverage;
+-- Returns: 1.0 (all values within bounds)
+```
+
+---
+
+### ts_conformal_evaluate
+
+Comprehensive evaluation of conformal prediction intervals.
+
+**Signature:**
+```sql
+ts_conformal_evaluate(actuals DOUBLE[], lower DOUBLE[], upper DOUBLE[], alpha DOUBLE)
+→ STRUCT(coverage DOUBLE, violation_rate DOUBLE, mean_width DOUBLE,
+         winkler_score DOUBLE, n_observations INTEGER)
+```
+
+**Returns:**
+- `coverage`: Empirical coverage rate
+- `violation_rate`: Fraction of values outside intervals
+- `mean_width`: Average interval width
+- `winkler_score`: Winkler score (penalizes width and violations)
+- `n_observations`: Number of observations
+
+**Example:**
+```sql
+SELECT (ts_conformal_evaluate(
+    [100.0, 110.0, 120.0],
+    [95.0, 105.0, 115.0],
+    [105.0, 115.0, 125.0],
+    0.1
+)).*;
+```
+
+---
+
 ## Table Macros
 
 ### ts_conformal

@@ -57,19 +57,19 @@ The extension provides 11 specialized period detection algorithms, each optimize
 
 ### Method Comparison
 
-| Method | Speed | Noise Robustness | Best Use Case | Min Observations |
-|--------|-------|------------------|---------------|------------------|
-| FFT | Very Fast | Low | Clean signals | 4 |
-| ACF | Fast | Medium | Cyclical patterns | 4 |
-| Autoperiod | Fast | High | General purpose | 8 |
-| CFD-Autoperiod | Fast | Very High | Trending data | 9 |
-| Lomb-Scargle | Medium | High | Irregular sampling | 4 |
-| AIC | Slow | High | Model selection | 8 |
-| SSA | Medium | Medium | Complex patterns | 16 |
-| STL | Slow | Medium | Decomposition | 16 |
-| Matrix Profile | Slow | Very High | Pattern repetition | 32 |
-| SAZED | Medium | High | Frequency resolution | 16 |
-| Multi-Period | Medium | High | Multiple seasonalities | 8 |
+| Function | Speed | Noise Robustness | Best Use Case | Min Observations |
+|----------|-------|------------------|---------------|------------------|
+| `ts_estimate_period_fft` | Very Fast | Low | Clean signals | 4 |
+| `ts_estimate_period_acf` | Fast | Medium | Cyclical patterns | 4 |
+| `ts_autoperiod` | Fast | High | General purpose | 8 |
+| `ts_cfd_autoperiod` | Fast | Very High | Trending data | 9 |
+| `ts_lomb_scargle` | Medium | High | Irregular sampling | 4 |
+| `ts_aic_period` | Slow | High | Model selection | 8 |
+| `ts_ssa_period` | Medium | Medium | Complex patterns | 16 |
+| `ts_stl_period` | Slow | Medium | Decomposition | 16 |
+| `ts_matrix_profile_period` | Slow | Very High | Pattern repetition | 32 |
+| `ts_sazed_period` | Medium | High | Frequency resolution | 16 |
+| `ts_detect_multiple_periods` | Medium | High | Multiple seasonalities | 8 |
 
 ---
 
@@ -156,15 +156,16 @@ SELECT ts_cfd_autoperiod([1,3,5,7,2,4,6,8,3,5,7,9]::DOUBLE[]);
 
 ---
 
-### ts_estimate_period_lomb_scargle
+### ts_lomb_scargle
 
 Lomb-Scargle periodogram for unevenly sampled data.
 
 **Signature:**
 ```sql
-ts_estimate_period_lomb_scargle(values DOUBLE[]) → STRUCT
-ts_estimate_period_lomb_scargle(values DOUBLE[], times DOUBLE[]) → STRUCT
-ts_estimate_period_lomb_scargle(values DOUBLE[], times DOUBLE[], min_period DOUBLE, max_period DOUBLE) → STRUCT
+ts_lomb_scargle(values DOUBLE[]) → STRUCT
+ts_lomb_scargle(values DOUBLE[], min_freq DOUBLE) → STRUCT
+ts_lomb_scargle(values DOUBLE[], min_freq DOUBLE, max_freq DOUBLE) → STRUCT
+ts_lomb_scargle(values DOUBLE[], min_freq DOUBLE, max_freq DOUBLE, n_freqs INTEGER) → STRUCT
 ```
 
 **Returns:**
@@ -180,15 +181,74 @@ STRUCT(
 
 ---
 
-### ts_estimate_period_aic
+### ts_aic_period
 
 Information criterion-based period selection using AIC.
 
 **Signature:**
 ```sql
-ts_estimate_period_aic(values DOUBLE[]) → STRUCT
-ts_estimate_period_aic(values DOUBLE[], min_period DOUBLE, max_period DOUBLE) → STRUCT
-ts_estimate_period_aic(values DOUBLE[], min_period DOUBLE, max_period DOUBLE, n_candidates INTEGER) → STRUCT
+ts_aic_period(values DOUBLE[]) → STRUCT
+ts_aic_period(values DOUBLE[], min_period INTEGER) → STRUCT
+ts_aic_period(values DOUBLE[], min_period INTEGER, max_period INTEGER) → STRUCT
+```
+
+---
+
+### ts_ssa_period
+
+Singular Spectrum Analysis based period detection.
+
+**Signature:**
+```sql
+ts_ssa_period(values DOUBLE[]) → STRUCT
+ts_ssa_period(values DOUBLE[], window_size INTEGER) → STRUCT
+```
+
+---
+
+### ts_stl_period
+
+STL decomposition-based period detection.
+
+**Signature:**
+```sql
+ts_stl_period(values DOUBLE[]) → STRUCT
+ts_stl_period(values DOUBLE[], min_period INTEGER, max_period INTEGER) → STRUCT
+```
+
+---
+
+### ts_matrix_profile_period
+
+Matrix Profile based period detection for finding repeated patterns.
+
+**Signature:**
+```sql
+ts_matrix_profile_period(values DOUBLE[]) → STRUCT
+ts_matrix_profile_period(values DOUBLE[], min_period INTEGER, max_period INTEGER) → STRUCT
+```
+
+---
+
+### ts_sazed_period
+
+SAZED (Spectral Analysis with Zero-crossing Enhanced Detection) period detection.
+
+**Signature:**
+```sql
+ts_sazed_period(values DOUBLE[]) → STRUCT
+```
+
+---
+
+### ts_detect_multiple_periods
+
+Detects multiple concurrent periodicities using iterative residual analysis.
+
+**Signature:**
+```sql
+ts_detect_multiple_periods(values DOUBLE[]) → STRUCT
+ts_detect_multiple_periods(values DOUBLE[], max_periods INTEGER) → STRUCT
 ```
 
 ---
