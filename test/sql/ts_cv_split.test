@@ -423,6 +423,37 @@ SELECT COUNT(*) FROM ts_cv_forecast_by('cv_train', group_col, date_col, target_c
 ----
 12
 
+#######################################
+# STRUCT Params Tests (GH#95)
+# Test that STRUCT syntax works for CV functions
+#######################################
+
+# Test ts_cv_split with STRUCT params containing mixed types
+query I
+SELECT COUNT(*) FROM ts_cv_split('cv_test', series_id, date, value, ARRAY['2024-01-10'::TIMESTAMP, '2024-01-15'::TIMESTAMP], 5, '1d',
+    {'window_type': 'expanding', 'gap': 0, 'embargo': 0});
+----
+70
+
+# Test ts_cv_forecast_by with empty params (use MAP{} as empty STRUCT {} not valid)
+query I
+SELECT COUNT(*) FROM ts_cv_forecast_by('cv_train', group_col, date_col, target_col, 'Naive', 3, MAP{});
+----
+12
+
+# Test ts_cv_forecast_by with STRUCT containing model param
+query I
+SELECT COUNT(*) FROM ts_cv_forecast_by('cv_train', group_col, date_col, target_col, 'ETS', 3, {'model': 'AAA'});
+----
+12
+
+# Test backward compatibility: MAP syntax still works
+query I
+SELECT COUNT(*) FROM ts_cv_split('cv_test', series_id, date, value, ARRAY['2024-01-10'::TIMESTAMP, '2024-01-15'::TIMESTAMP], 5, '1d',
+    MAP{'window_type': 'expanding', 'gap': '0'});
+----
+70
+
 statement ok
 DROP TABLE cv_train;
 

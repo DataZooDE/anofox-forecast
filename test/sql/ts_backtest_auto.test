@@ -238,6 +238,60 @@ SELECT COUNT(*) FROM ts_backtest_auto(
 21
 
 #######################################
+# STRUCT Params Tests (GH#95)
+# Test that STRUCT syntax works with mixed types
+#######################################
+
+# Test STRUCT with method (VARCHAR)
+query I
+SELECT DISTINCT model_name FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', {'method': 'Naive'}
+);
+----
+Naive
+
+# Test STRUCT with mixed types: method (VARCHAR) + gap (INTEGER)
+query I
+SELECT COUNT(*) > 0 FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 2, '1d', {'method': 'Naive', 'gap': 2}
+);
+----
+true
+
+# Test STRUCT with boolean: clip_horizon
+query I
+SELECT COUNT(*) > 0 FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 2, '1d', {'clip_horizon': true}
+);
+----
+true
+
+# Test STRUCT with multiple mixed types: VARCHAR + INTEGER + BOOLEAN
+query I
+SELECT COUNT(*) > 0 FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 2, '1d',
+    {'method': 'Naive', 'gap': 1, 'embargo': 0, 'clip_horizon': false}
+);
+----
+true
+
+# Test backward compatibility: MAP with string values still works
+query I
+SELECT DISTINCT model_name FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{'method': 'Naive', 'gap': '0'}
+);
+----
+Naive
+
+# Test empty params - use MAP{} syntax (empty STRUCT {} not valid in DuckDB)
+query I
+SELECT COUNT(*) FROM ts_backtest_auto(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
+);
+----
+42
+
+#######################################
 # Cleanup
 #######################################
 
