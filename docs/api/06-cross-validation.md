@@ -6,26 +6,55 @@
 
 Time series cross-validation requires special handling because data has temporal ordering. These functions help you create proper train/test splits, handle unknown features during backtesting, and prevent data leakage.
 
-## Function Overview
+---
 
-| Function | Purpose |
-|----------|---------|
-| `ts_backtest_auto` | **One-liner backtest** - complete CV in a single call |
-| `ts_cv_generate_folds` | Auto-generate fold boundaries based on data range |
-| `ts_cv_split_folds` | View fold date ranges (train/test boundaries) |
-| `ts_cv_split` | Create train/test splits with fold assignments |
-| `ts_cv_forecast_by` | Generate forecasts for all CV folds |
+## Quick Start
 
-## Two Usage Patterns
+### One-Liner (Recommended)
+
+For most use cases, use `ts_backtest_auto_by` - complete backtesting in a single call:
+
+```sql
+-- Backtest with 5 folds, 7-day horizon
+SELECT * FROM ts_backtest_auto_by(
+    'sales_data', store_id, date, revenue,
+    7, 5, '1d', MAP{}
+);
+
+-- Aggregate results
+SELECT
+    model_name,
+    AVG(abs_error) AS mae,
+    AVG(fold_metric_score) AS avg_rmse
+FROM ts_backtest_auto_by('sales_data', store_id, date, revenue, 7, 5, '1d', MAP{})
+GROUP BY model_name;
+```
+
+### Modular Approach
+
+For custom pipelines or regression models:
+
+```sql
+-- 1. Generate fold boundaries
+SELECT training_end_times FROM ts_cv_generate_folds('data', 'date', 3, 5, '1d', MAP{});
+
+-- 2. View fold date ranges
+SELECT * FROM ts_cv_split_folds_by('data', 'group_id', 'date', [...], 5, '1d');
+
+-- 3. Create train/test splits
+SELECT * FROM ts_cv_split_by('data', 'group_id', 'date', 'value', [...], 5, '1d', MAP{});
+```
+
+### Usage Pattern Comparison
 
 | Pattern | Use Case | Complexity |
 |---------|----------|------------|
-| **One-liner** (`ts_backtest_auto`) | Quick evaluation, 80% of use cases | Simple |
-| **Modular** (`ts_cv_split` + `ts_cv_forecast_by`) | Custom pipelines, regression models | Advanced |
+| **One-liner** (`ts_backtest_auto_by`) | Quick evaluation, 80% of use cases | Simple |
+| **Modular** (`ts_cv_split_by` + `ts_cv_forecast_by`) | Custom pipelines, regression models | Advanced |
 
 ---
 
-## One-Liner Backtest
+## Table Macros
 
 ### ts_backtest_auto_by
 
@@ -120,19 +149,9 @@ SELECT * FROM ts_backtest_auto_by(
     MAP{'method': 'Theta'},
     NULL, 'smape'
 );
-
--- Aggregate results
-SELECT
-    model_name,
-    AVG(abs_error) AS mae,
-    AVG(fold_metric_score) AS avg_rmse
-FROM ts_backtest_auto_by('sales_data', store_id, date, revenue, 7, 5, '1d', MAP{})
-GROUP BY model_name;
 ```
 
 ---
-
-## Modular Functions
 
 ### ts_cv_generate_folds
 
@@ -276,28 +295,10 @@ SELECT * FROM ts_cv_forecast_by(
 
 ---
 
-## Typical Workflow
-
-```sql
--- 1. Generate fold boundaries
-SELECT training_end_times FROM ts_cv_generate_folds('data', 'date', 3, 5, '1d', MAP{});
-
--- 2. View fold date ranges
-SELECT * FROM ts_cv_split_folds_by('data', 'group_id', 'date', [...], 5, '1d');
-
--- 3. Create train/test splits
-SELECT * FROM ts_cv_split_by('data', 'group_id', 'date', 'value', [...], 5, '1d', MAP{});
-
--- Or use one-liner for quick evaluation
-SELECT * FROM ts_backtest_auto_by('data', group_id, date, value, 5, 3, '1d', MAP{});
-```
-
----
-
 ## Advanced: CV Data Hydration
 
-> **Note:** These functions are for building custom cross-validation pipelines.
-> For standard backtesting, use `ts_backtest_auto` which handles everything automatically.
+> These functions are for building custom cross-validation pipelines.
+> For standard backtesting, use `ts_backtest_auto_by` which handles everything automatically.
 
 When building custom CV pipelines (e.g., with regression models or external forecasters), you need to join CV splits back to your source data. These functions prevent **data leakage** by automatically masking features that wouldn't be known at prediction time.
 
@@ -441,7 +442,7 @@ ts_hydrate_features_by(
 ) → TABLE
 ```
 
-**Output Columns:** Same as `ts_hydrate_split_full` including `_is_test` flag.
+**Output Columns:** Same as `ts_hydrate_split_full_by` including `_is_test` flag.
 
 **Example:**
 ```sql
@@ -505,11 +506,11 @@ SELECT * FROM ts_prepare_regression_input_by(
 
 | Function | Use Case | Safety Level |
 |----------|----------|--------------|
-| `ts_hydrate_split` | Mask one specific column | Medium |
-| `ts_hydrate_split_full` | Manual masking with `_is_test` flag | Medium |
-| `ts_hydrate_split_strict` | Force explicit column handling | High |
-| `ts_hydrate_features` | Auto-hydrate with masking flags | Medium |
-| `ts_prepare_regression_input` | Regression model prep | High |
+| `ts_hydrate_split_by` | Mask one specific column | Medium |
+| `ts_hydrate_split_full_by` | Manual masking with `_is_test` flag | Medium |
+| `ts_hydrate_split_strict_by` | Force explicit column handling | High |
+| `ts_hydrate_features_by` | Auto-hydrate with masking flags | Medium |
+| `ts_prepare_regression_input_by` | Regression model prep | High |
 
 ---
 

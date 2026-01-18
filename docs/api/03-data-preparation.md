@@ -8,6 +8,35 @@ Data preparation functions help clean and transform time series data before fore
 
 ---
 
+## Quick Start
+
+Common data cleaning pipeline:
+
+```sql
+-- Clean raw data: remove short series, fill gaps, impute missing values
+CREATE TABLE clean_data AS
+SELECT * FROM ts_drop_short_by('raw_data', product_id, 20)
+UNION ALL
+SELECT * FROM ts_fill_gaps_by('raw_data', product_id, date, value, '1d')
+UNION ALL
+SELECT * FROM ts_fill_nulls_forward_by('raw_data', product_id, date, value);
+```
+
+Or chain operations:
+
+```sql
+-- Remove series with issues, then fill gaps
+WITH filtered AS (
+    SELECT * FROM ts_drop_constant_by('raw_data', product_id, value)
+),
+no_short AS (
+    SELECT * FROM ts_drop_short_by('filtered', product_id, 20)
+)
+SELECT * FROM ts_fill_gaps_by('no_short', product_id, date, value, '1d');
+```
+
+---
+
 ## Series Filtering
 
 ### ts_drop_constant_by

@@ -6,7 +6,7 @@
 
 Conformal prediction provides **distribution-free prediction intervals** with guaranteed coverage probability. Unlike parametric methods, conformal prediction makes minimal assumptions about the underlying distribution and provides valid coverage even for finite samples.
 
-## How It Works
+### How It Works
 
 Conformal prediction works in two phases:
 1. **Calibration**: Compute a conformity score from calibration residuals
@@ -16,7 +16,160 @@ The resulting intervals cover the true value with probability at least `1 - α`,
 
 ---
 
+## Quick Start
+
+The simplest approach uses `ts_conformal_by` on backtest results:
+
+```sql
+-- One-step: Generate conformal intervals from backtest results
+SELECT * FROM ts_conformal_by(
+    'backtest_results',
+    product_id,
+    actual,
+    forecast,
+    forecast,
+    MAP{'alpha': 0.1}  -- 90% coverage
+);
+```
+
+### Complete Workflow
+
+For more control, use the modular approach:
+
+```sql
+-- Step 1: Generate backtest results
+CREATE TABLE backtest AS
+SELECT * FROM ts_backtest_auto_by(
+    'sales', product_id, date, value, 7, 5, '1d', MAP{}
+);
+
+-- Step 2: Calibrate conformity score
+CREATE TABLE calibration AS
+SELECT * FROM ts_conformal_calibrate(
+    'backtest', actual, forecast, MAP{'alpha': 0.1}
+);
+
+-- Step 3: Generate future forecasts
+CREATE TABLE future AS
+SELECT * FROM ts_forecast_by(
+    'sales', product_id, date, value, 'AutoETS', 14, MAP{}
+);
+
+-- Step 4: Apply conformal intervals
+SELECT * FROM ts_conformal_apply_by(
+    'future',
+    product_id,
+    forecast,
+    (SELECT conformity_score FROM calibration)
+);
+```
+
+---
+
+## Table Macros
+
+### ts_conformal_by
+
+High-level macro for conformal prediction on grouped backtest results.
+
+**Signature:**
+```sql
+ts_conformal_by(backtest_results, group_col, actual_col, forecast_col, point_forecast_col, params)
+```
+
+**Params:**
+- `alpha` (DOUBLE): Miscoverage rate (default: 0.1)
+- `method` (VARCHAR): 'split' or 'asymmetric' (default: 'split')
+
+**Example:**
+```sql
+SELECT * FROM ts_conformal_by(
+    'backtest_results',
+    product_id,
+    actual,
+    forecast,
+    point_forecast,
+    MAP{'alpha': 0.1, 'method': 'split'}
+);
+```
+
+---
+
+### ts_conformal_calibrate
+
+Calibrates a conformity score from backtest residuals.
+
+**Signature:**
+```sql
+ts_conformal_calibrate(backtest_results, actual_col, forecast_col, params)
+```
+
+**Returns:** `conformity_score`, `coverage`, `n_residuals`
+
+**Example:**
+```sql
+SELECT * FROM ts_conformal_calibrate(
+    'backtest_results',
+    actual,
+    forecast,
+    MAP{'alpha': 0.05}
+);
+```
+
+---
+
+### ts_conformal_apply_by
+
+Applies a pre-computed conformity score to forecast results.
+
+**Signature:**
+```sql
+ts_conformal_apply_by(forecast_results, group_col, forecast_col, conformity_score)
+```
+
+**Example:**
+```sql
+WITH score AS (
+    SELECT conformity_score FROM ts_conformal_calibrate(
+        'backtest', actual, forecast, MAP{'alpha': 0.1}
+    )
+)
+SELECT * FROM ts_conformal_apply_by(
+    'future_forecasts',
+    product_id,
+    forecast,
+    (SELECT conformity_score FROM score)
+);
+```
+
+---
+
+### ts_interval_width_by
+
+Computes mean interval width for grouped forecast results.
+
+**Signature:**
+```sql
+ts_interval_width_by(results, group_col, lower_col, upper_col)
+```
+
+**Returns:** `group_col`, `mean_width`, `n_intervals`
+
+**Example:**
+```sql
+SELECT * FROM ts_interval_width_by(
+    'forecast_results',
+    product_id,
+    lower,
+    upper
+);
+```
+
+---
+
 ## Scalar Functions
+
+> Advanced functions for custom workflows. Most users should use the table macros above.
 
 ### ts_conformal_quantile
 
@@ -237,145 +390,6 @@ SELECT ts_conformal_learn(
     'symmetric',
     'naive'
 ) AS profile;
-```
-
----
-
-## Table Macros
-
-### ts_conformal_by
-
-High-level macro for conformal prediction on grouped backtest results.
-
-**Signature:**
-```sql
-ts_conformal_by(backtest_results, group_col, actual_col, forecast_col, point_forecast_col, params)
-```
-
-**Params:**
-- `alpha` (DOUBLE): Miscoverage rate (default: 0.1)
-- `method` (VARCHAR): 'split' or 'asymmetric' (default: 'split')
-
-**Example:**
-```sql
-SELECT * FROM ts_conformal_by(
-    'backtest_results',
-    product_id,
-    actual,
-    forecast,
-    point_forecast,
-    MAP{'alpha': 0.1, 'method': 'split'}
-);
-```
-
----
-
-### ts_conformal_calibrate
-
-Calibrates a conformity score from backtest residuals.
-
-**Signature:**
-```sql
-ts_conformal_calibrate(backtest_results, actual_col, forecast_col, params)
-```
-
-**Returns:** `conformity_score`, `coverage`, `n_residuals`
-
-**Example:**
-```sql
-SELECT * FROM ts_conformal_calibrate(
-    'backtest_results',
-    actual,
-    forecast,
-    MAP{'alpha': 0.05}
-);
-```
-
----
-
-### ts_conformal_apply_by
-
-Applies a pre-computed conformity score to forecast results.
-
-**Signature:**
-```sql
-ts_conformal_apply_by(forecast_results, group_col, forecast_col, conformity_score)
-```
-
-**Example:**
-```sql
-WITH score AS (
-    SELECT conformity_score FROM ts_conformal_calibrate(
-        'backtest', actual, forecast, MAP{'alpha': 0.1}
-    )
-)
-SELECT * FROM ts_conformal_apply_by(
-    'future_forecasts',
-    product_id,
-    forecast,
-    (SELECT conformity_score FROM score)
-);
-```
-
----
-
-### ts_interval_width_by
-
-Computes mean interval width for grouped forecast results.
-
-**Signature:**
-```sql
-ts_interval_width_by(results, group_col, lower_col, upper_col)
-```
-
-**Returns:** `group_col`, `mean_width`, `n_intervals`
-
-**Example:**
-```sql
-SELECT * FROM ts_interval_width_by(
-    'forecast_results',
-    product_id,
-    lower,
-    upper
-);
-```
-
----
-
-## Complete Workflow
-
-```sql
--- Step 1: Generate backtest results
-CREATE TABLE backtest AS
-SELECT * FROM ts_backtest_auto_by(
-    'sales', product_id, date, value, 7, 5, '1d', MAP{}
-);
-
--- Step 2: Calibrate conformity score
-CREATE TABLE calibration AS
-SELECT * FROM ts_conformal_calibrate(
-    'backtest', actual, forecast, MAP{'alpha': 0.1}
-);
-
--- Step 3: Generate future forecasts
-CREATE TABLE future AS
-SELECT * FROM ts_forecast_by(
-    'sales', product_id, date, value, 'AutoETS', 14, MAP{}
-);
-
--- Step 4: Apply conformal intervals
-SELECT * FROM ts_conformal_apply_by(
-    'future',
-    product_id,
-    forecast,
-    (SELECT conformity_score FROM calibration)
-);
-
--- Or use one-step approach
-SELECT * FROM ts_conformal_by(
-    'backtest', product_id, actual, forecast, forecast,
-    MAP{'alpha': 0.1}
-);
 ```
 
 ---

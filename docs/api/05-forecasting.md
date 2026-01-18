@@ -6,6 +6,47 @@
 
 The extension provides 32 forecasting models ranging from simple baselines to sophisticated state-space methods.
 
+---
+
+## Quick Start
+
+Generate forecasts for multiple series with a single call:
+
+```sql
+-- Forecast 14 days ahead for all products using AutoETS
+SELECT * FROM ts_forecast_by(
+    'sales_data',
+    product_id,
+    date,
+    revenue,
+    'AutoETS',
+    14,
+    MAP{}
+);
+```
+
+Compare multiple models:
+
+```sql
+-- Naive baseline
+SELECT *, 'Naive' AS model FROM ts_forecast_by('sales', id, date, val, 'Naive', 7, MAP{})
+UNION ALL
+-- AutoETS
+SELECT *, 'AutoETS' AS model FROM ts_forecast_by('sales', id, date, val, 'AutoETS', 7, MAP{});
+```
+
+For seasonal data (e.g., weekly patterns):
+
+```sql
+SELECT * FROM ts_forecast_by(
+    'daily_sales', product_id, date, value,
+    'HoltWinters', 14,
+    {'seasonal_period': 7}
+);
+```
+
+---
+
 ## API Styles
 
 | API Style | Best For | Example |
