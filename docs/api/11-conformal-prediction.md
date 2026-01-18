@@ -243,13 +243,13 @@ SELECT ts_conformal_learn(
 
 ## Table Macros
 
-### ts_conformal
+### ts_conformal_by
 
 High-level macro for conformal prediction on grouped backtest results.
 
 **Signature:**
 ```sql
-ts_conformal(backtest_results, group_col, actual_col, forecast_col, point_forecast_col, params)
+ts_conformal_by(backtest_results, group_col, actual_col, forecast_col, point_forecast_col, params)
 ```
 
 **Params:**
@@ -258,7 +258,7 @@ ts_conformal(backtest_results, group_col, actual_col, forecast_col, point_foreca
 
 **Example:**
 ```sql
-SELECT * FROM ts_conformal(
+SELECT * FROM ts_conformal_by(
     'backtest_results',
     product_id,
     actual,
@@ -293,13 +293,13 @@ SELECT * FROM ts_conformal_calibrate(
 
 ---
 
-### ts_conformal_apply
+### ts_conformal_apply_by
 
 Applies a pre-computed conformity score to forecast results.
 
 **Signature:**
 ```sql
-ts_conformal_apply(forecast_results, group_col, forecast_col, conformity_score)
+ts_conformal_apply_by(forecast_results, group_col, forecast_col, conformity_score)
 ```
 
 **Example:**
@@ -309,7 +309,7 @@ WITH score AS (
         'backtest', actual, forecast, MAP{'alpha': 0.1}
     )
 )
-SELECT * FROM ts_conformal_apply(
+SELECT * FROM ts_conformal_apply_by(
     'future_forecasts',
     product_id,
     forecast,
@@ -319,20 +319,20 @@ SELECT * FROM ts_conformal_apply(
 
 ---
 
-### ts_interval_width
+### ts_interval_width_by
 
 Computes mean interval width for grouped forecast results.
 
 **Signature:**
 ```sql
-ts_interval_width(results, group_col, lower_col, upper_col)
+ts_interval_width_by(results, group_col, lower_col, upper_col)
 ```
 
 **Returns:** `group_col`, `mean_width`, `n_intervals`
 
 **Example:**
 ```sql
-SELECT * FROM ts_interval_width(
+SELECT * FROM ts_interval_width_by(
     'forecast_results',
     product_id,
     lower,
@@ -347,7 +347,7 @@ SELECT * FROM ts_interval_width(
 ```sql
 -- Step 1: Generate backtest results
 CREATE TABLE backtest AS
-SELECT * FROM ts_backtest_auto(
+SELECT * FROM ts_backtest_auto_by(
     'sales', product_id, date, value, 7, 5, '1d', MAP{}
 );
 
@@ -364,7 +364,7 @@ SELECT * FROM ts_forecast_by(
 );
 
 -- Step 4: Apply conformal intervals
-SELECT * FROM ts_conformal_apply(
+SELECT * FROM ts_conformal_apply_by(
     'future',
     product_id,
     forecast,
@@ -372,7 +372,7 @@ SELECT * FROM ts_conformal_apply(
 );
 
 -- Or use one-step approach
-SELECT * FROM ts_conformal(
+SELECT * FROM ts_conformal_by(
     'backtest', product_id, actual, forecast, forecast,
     MAP{'alpha': 0.1}
 );

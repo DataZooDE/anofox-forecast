@@ -112,16 +112,17 @@ The following table shows which API variants exist for each functionality:
 | **Changepoints** | - | `ts_detect_changepoints_agg` | `ts_detect_changepoints` | `ts_detect_changepoints_by` |
 | **Seasonality** | - | `ts_classify_seasonality_agg` | `ts_classify_seasonality` | `ts_classify_seasonality_by` |
 | **Period Detection** | `ts_detect_periods` | - | - | - |
-| **Decomposition** | - | - | `ts_mstl_decomposition`† | - |
-| **Metrics** | `ts_mae`, `ts_rmse`, ...‡ | - | - | - |
-| **Conformal** | `ts_conformal_*`§ | - | `ts_conformal`, `ts_conformal_calibrate`, `ts_conformal_apply` | - |
-| **Data Prep** | - | - | `ts_fill_gaps`, `ts_diff`, `ts_drop_*`¶ | - |
+| **Decomposition** | - | - | - | `ts_mstl_decomposition_by` |
+| **Metrics** | `ts_mae`, `ts_rmse`, ...† | - | - | - |
+| **Conformal** | `ts_conformal_*`‡ | - | `ts_conformal_calibrate` | `ts_conformal_by`, `ts_conformal_apply_by` |
+| **Data Prep** | - | - | - | `ts_fill_gaps_by`, `ts_diff_by`, `ts_drop_*_by`§ |
+| **Cross-Val** | - | - | - | `ts_cv_split_by`, `ts_backtest_auto_by`¶ |
 
 *Internal scalar functions (underscore prefix) used by table macros
-†MSTL is algorithm name, exception to `ts_<operation>` naming pattern
-‡12 metric functions - see [Evaluation Metrics](07-evaluation-metrics.md)
-§9 conformal scalar functions - see [Conformal Prediction](11-conformal-prediction.md)
-¶15+ data preparation macros - see [Data Preparation](03-data-preparation.md)
+†12 metric functions - see [Evaluation Metrics](07-evaluation-metrics.md)
+‡9 conformal scalar functions - see [Conformal Prediction](11-conformal-prediction.md)
+§15+ data preparation macros - see [Data Preparation](03-data-preparation.md)
+¶8+ cross-validation macros - see [Cross-Validation](06-cross-validation.md)
 
 ---
 

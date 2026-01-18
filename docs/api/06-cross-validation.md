@@ -27,13 +27,13 @@ Time series cross-validation requires special handling because data has temporal
 
 ## One-Liner Backtest
 
-### ts_backtest_auto
+### ts_backtest_auto_by
 
 Complete backtesting in a single function call.
 
 **Signature:**
 ```sql
-ts_backtest_auto(
+ts_backtest_auto_by(
     source VARCHAR,
     group_col COLUMN,
     date_col COLUMN,
@@ -103,19 +103,19 @@ ts_backtest_auto(
 **Examples:**
 ```sql
 -- Basic backtest with AutoETS
-SELECT * FROM ts_backtest_auto(
+SELECT * FROM ts_backtest_auto_by(
     'sales_data', store_id, date, revenue,
     7, 5, '1d', MAP{}
 );
 
 -- With STRUCT params (mixed types)
-SELECT * FROM ts_backtest_auto(
+SELECT * FROM ts_backtest_auto_by(
     'sales_data', store_id, date, revenue, 7, 5, '1d',
     {'method': 'Naive', 'gap': 2, 'clip_horizon': true}
 );
 
 -- Different metric
-SELECT * FROM ts_backtest_auto(
+SELECT * FROM ts_backtest_auto_by(
     'sales_data', store_id, date, revenue, 7, 5, '1d',
     MAP{'method': 'Theta'},
     NULL, 'smape'
@@ -126,7 +126,7 @@ SELECT
     model_name,
     AVG(abs_error) AS mae,
     AVG(fold_metric_score) AS avg_rmse
-FROM ts_backtest_auto('sales_data', store_id, date, revenue, 7, 5, '1d', MAP{})
+FROM ts_backtest_auto_by('sales_data', store_id, date, revenue, 7, 5, '1d', MAP{})
 GROUP BY model_name;
 ```
 
@@ -159,13 +159,13 @@ FROM ts_cv_generate_folds('sales_data', 'date', 3, 5, '1d', MAP{});
 
 ---
 
-### ts_cv_split_folds
+### ts_cv_split_folds_by
 
 View fold date ranges (train/test boundaries).
 
 **Signature:**
 ```sql
-ts_cv_split_folds(
+ts_cv_split_folds_by(
     source VARCHAR,
     group_col VARCHAR,
     date_col VARCHAR,
@@ -187,13 +187,13 @@ ts_cv_split_folds(
 
 ---
 
-### ts_cv_split
+### ts_cv_split_by
 
 Split time series data into train/test sets.
 
 **Signature:**
 ```sql
-ts_cv_split(
+ts_cv_split_by(
     source VARCHAR,
     group_col VARCHAR,
     date_col VARCHAR,
@@ -222,13 +222,13 @@ Fold 3:             [==TRAIN==][TEST]
 
 ---
 
-### ts_cv_split_index
+### ts_cv_split_index_by
 
 Memory-efficient alternative returning only index columns.
 
 **Signature:**
 ```sql
-ts_cv_split_index(
+ts_cv_split_index_by(
     source VARCHAR,
     group_col VARCHAR,
     date_col VARCHAR,
@@ -263,7 +263,7 @@ ts_cv_forecast_by(
 ```sql
 -- Create splits
 CREATE TABLE cv_splits AS
-SELECT * FROM ts_cv_split('sales', 'store_id', 'date', 'sales',
+SELECT * FROM ts_cv_split_by('sales', 'store_id', 'date', 'sales',
     ['2024-01-10'::DATE, '2024-01-15'::DATE], 5, '1d', MAP{});
 
 -- Generate forecasts for training data only
@@ -283,13 +283,13 @@ SELECT * FROM ts_cv_forecast_by(
 SELECT training_end_times FROM ts_cv_generate_folds('data', 'date', 3, 5, '1d', MAP{});
 
 -- 2. View fold date ranges
-SELECT * FROM ts_cv_split_folds('data', 'group_id', 'date', [...], 5, '1d');
+SELECT * FROM ts_cv_split_folds_by('data', 'group_id', 'date', [...], 5, '1d');
 
 -- 3. Create train/test splits
-SELECT * FROM ts_cv_split('data', 'group_id', 'date', 'value', [...], 5, '1d', MAP{});
+SELECT * FROM ts_cv_split_by('data', 'group_id', 'date', 'value', [...], 5, '1d', MAP{});
 
 -- Or use one-liner for quick evaluation
-SELECT * FROM ts_backtest_auto('data', group_id, date, value, 5, 3, '1d', MAP{});
+SELECT * FROM ts_backtest_auto_by('data', group_id, date, value, 5, 3, '1d', MAP{});
 ```
 
 ---
@@ -316,13 +316,13 @@ Unknown features:   ✓ Available in train, ✗ Must be masked in test
 
 ---
 
-### ts_hydrate_split
+### ts_hydrate_split_by
 
 Join CV splits with source data, masking a specific unknown column.
 
 **Signature:**
 ```sql
-ts_hydrate_split(
+ts_hydrate_split_by(
     cv_splits VARCHAR,        -- CV split table name
     source VARCHAR,           -- Source data table name
     src_group_col COLUMN,     -- Group column in source
@@ -348,7 +348,7 @@ ts_hydrate_split(
 **Example:**
 ```sql
 -- Mask temperature in test set using last known value
-SELECT * FROM ts_hydrate_split(
+SELECT * FROM ts_hydrate_split_by(
     'cv_splits',
     'weather_data',
     region,
@@ -360,13 +360,13 @@ SELECT * FROM ts_hydrate_split(
 
 ---
 
-### ts_hydrate_split_full
+### ts_hydrate_split_full_by
 
 Join CV splits with ALL source columns, adding metadata flags for manual masking.
 
 **Signature:**
 ```sql
-ts_hydrate_split_full(
+ts_hydrate_split_full_by(
     cv_splits VARCHAR,
     source VARCHAR,
     src_group_col COLUMN,
@@ -391,20 +391,20 @@ SELECT
     *,
     CASE WHEN _is_test THEN NULL ELSE competitor_sales END AS competitor_sales_masked,
     CASE WHEN _is_test THEN NULL ELSE actual_weather END AS weather_masked
-FROM ts_hydrate_split_full(
+FROM ts_hydrate_split_full_by(
     'cv_splits', 'sales_features', store_id, date, MAP{}
 );
 ```
 
 ---
 
-### ts_hydrate_split_strict
+### ts_hydrate_split_strict_by
 
 Fail-safe join returning ONLY metadata columns, forcing explicit column selection.
 
 **Signature:**
 ```sql
-ts_hydrate_split_strict(
+ts_hydrate_split_strict_by(
     cv_splits VARCHAR,
     source VARCHAR,
     src_group_col COLUMN,
@@ -420,19 +420,19 @@ SELECT
     hs.*,
     src.price,  -- Known feature, no masking needed
     CASE WHEN hs._is_test THEN NULL ELSE src.competitor_price END AS competitor_price
-FROM ts_hydrate_split_strict('cv_splits', 'data', store, date, MAP{}) hs
+FROM ts_hydrate_split_strict_by('cv_splits', 'data', store, date, MAP{}) hs
 JOIN data src ON hs.group_col = src.store AND hs.date_col = src.date;
 ```
 
 ---
 
-### ts_hydrate_features
+### ts_hydrate_features_by
 
 Automatically hydrate CV splits with features, marking test rows for masking.
 
 **Signature:**
 ```sql
-ts_hydrate_features(
+ts_hydrate_features_by(
     cv_splits VARCHAR,        -- Output from ts_cv_split
     source VARCHAR,           -- Original data with features
     src_group_col COLUMN,
@@ -450,18 +450,18 @@ SELECT
     *,
     CASE WHEN _is_test THEN NULL ELSE temperature END AS temp_masked,
     CASE WHEN _is_test THEN NULL ELSE competitor_sales END AS comp_masked
-FROM ts_hydrate_features('cv_splits', 'feature_data', series_id, date, MAP{});
+FROM ts_hydrate_features_by('cv_splits', 'feature_data', series_id, date, MAP{});
 ```
 
 ---
 
-### ts_prepare_regression_input
+### ts_prepare_regression_input_by
 
 Prepare data for regression models in CV backtest. Masks target in test rows.
 
 **Signature:**
 ```sql
-ts_prepare_regression_input(
+ts_prepare_regression_input_by(
     cv_splits VARCHAR,
     source VARCHAR,
     src_group_col COLUMN,
@@ -491,7 +491,7 @@ ts_prepare_regression_input(
 ```sql
 -- Prepare data for external regression model
 CREATE TABLE regression_input AS
-SELECT * FROM ts_prepare_regression_input(
+SELECT * FROM ts_prepare_regression_input_by(
     'cv_splits', 'sales_data', store_id, date, revenue, MAP{}
 );
 

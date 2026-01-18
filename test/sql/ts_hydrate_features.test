@@ -22,7 +22,7 @@ CROSS JOIN (SELECT UNNEST(['A', 'B']) AS series_id) s;
 
 statement ok
 CREATE TABLE cv_splits AS
-SELECT * FROM ts_cv_split(
+SELECT * FROM ts_cv_split_by(
     'feature_data', series_id, date, revenue,
     ['2024-01-30'::DATE, '2024-02-15'::DATE], 7, '1d', MAP{}
 );
@@ -33,7 +33,7 @@ SELECT * FROM ts_cv_split(
 
 # Test returns rows
 query I
-SELECT COUNT(*) FROM ts_hydrate_features(
+SELECT COUNT(*) FROM ts_hydrate_features_by(
     'cv_splits', 'feature_data', series_id, date, MAP{}
 );
 ----
@@ -42,7 +42,7 @@ SELECT COUNT(*) FROM ts_hydrate_features(
 # Test has required columns
 query I
 SELECT COUNT(*) FROM (
-    DESCRIBE SELECT * FROM ts_hydrate_features(
+    DESCRIBE SELECT * FROM ts_hydrate_features_by(
         'cv_splits', 'feature_data', series_id, date, MAP{}
     )
 ) WHERE column_name IN ('fold_id', 'split', 'group_col', 'date_col', 'target_col', '_is_test', '_train_cutoff');
@@ -52,7 +52,7 @@ SELECT COUNT(*) FROM (
 # Test _is_test flag is correct
 query II
 SELECT split, SUM(CASE WHEN _is_test THEN 1 ELSE 0 END) AS test_count
-FROM ts_hydrate_features('cv_splits', 'feature_data', series_id, date, MAP{})
+FROM ts_hydrate_features_by('cv_splits', 'feature_data', series_id, date, MAP{})
 GROUP BY split
 ORDER BY split DESC;
 ----
@@ -65,7 +65,7 @@ test	28
 
 # Test features are preserved
 query I
-SELECT COUNT(*) FROM ts_hydrate_features(
+SELECT COUNT(*) FROM ts_hydrate_features_by(
     'cv_splits', 'feature_data', series_id, date, MAP{}
 ) WHERE temperature IS NOT NULL AND is_weekend IS NOT NULL;
 ----
@@ -84,7 +84,7 @@ FROM (
     SELECT
         split,
         CASE WHEN _is_test THEN NULL ELSE temperature END AS temp_masked
-    FROM ts_hydrate_features('cv_splits', 'feature_data', series_id, date, MAP{})
+    FROM ts_hydrate_features_by('cv_splits', 'feature_data', series_id, date, MAP{})
 )
 GROUP BY split
 ORDER BY split DESC;
@@ -98,7 +98,7 @@ test	28
 
 # Test all folds represented
 query I
-SELECT COUNT(DISTINCT fold_id) FROM ts_hydrate_features(
+SELECT COUNT(DISTINCT fold_id) FROM ts_hydrate_features_by(
     'cv_splits', 'feature_data', series_id, date, MAP{}
 );
 ----
@@ -106,7 +106,7 @@ SELECT COUNT(DISTINCT fold_id) FROM ts_hydrate_features(
 
 # Test target_col values match cv_splits
 query I
-SELECT COUNT(*) FROM ts_hydrate_features(
+SELECT COUNT(*) FROM ts_hydrate_features_by(
     'cv_splits', 'feature_data', series_id, date, MAP{}
 ) hf
 JOIN cv_splits cs ON hf.fold_id = cs.fold_id AND hf.group_col = cs.group_col AND hf.date_col = cs.date_col

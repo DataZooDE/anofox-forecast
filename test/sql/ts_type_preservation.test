@@ -28,73 +28,73 @@ DATE
 
 # ts_fill_nulls_const - uses original column names
 query T
-SELECT typeof(date) FROM ts_fill_nulls_const('date_test', id, date, val, 0.0) LIMIT 1;
+SELECT typeof(date) FROM ts_fill_nulls_const_by('date_test', id, date, val, 0.0) LIMIT 1;
 ----
 DATE
 
 # ts_fill_nulls_forward
 query T
-SELECT typeof(date) FROM ts_fill_nulls_forward('date_test', id, date, val) LIMIT 1;
+SELECT typeof(date) FROM ts_fill_nulls_forward_by('date_test', id, date, val) LIMIT 1;
 ----
 DATE
 
 # ts_fill_nulls_backward
 query T
-SELECT typeof(date) FROM ts_fill_nulls_backward('date_test', id, date, val) LIMIT 1;
+SELECT typeof(date) FROM ts_fill_nulls_backward_by('date_test', id, date, val) LIMIT 1;
 ----
 DATE
 
 # ts_fill_nulls_mean
 query T
-SELECT typeof(date) FROM ts_fill_nulls_mean('date_test', id, date, val) LIMIT 1;
+SELECT typeof(date) FROM ts_fill_nulls_mean_by('date_test', id, date, val) LIMIT 1;
 ----
 DATE
 
 # ts_diff - preserves type
 query T
-SELECT typeof(date) FROM ts_diff('date_test', id, date, val, 1) LIMIT 1;
+SELECT typeof(date) FROM ts_diff_by('date_test', id, date, val, 1) LIMIT 1;
 ----
 DATE
 
 # ts_drop_leading_zeros
 query T
-SELECT typeof(date) FROM ts_drop_leading_zeros('date_test', id, date, val) LIMIT 1;
+SELECT typeof(date) FROM ts_drop_leading_zeros_by('date_test', id, date, val) LIMIT 1;
 ----
 DATE
 
 # ts_drop_trailing_zeros
 query T
-SELECT typeof(date) FROM ts_drop_trailing_zeros('date_test', id, date, val) LIMIT 1;
+SELECT typeof(date) FROM ts_drop_trailing_zeros_by('date_test', id, date, val) LIMIT 1;
 ----
 DATE
 
 # ts_drop_edge_zeros
 query T
-SELECT typeof(date) FROM ts_drop_edge_zeros('date_test', id, date, val) LIMIT 1;
+SELECT typeof(date) FROM ts_drop_edge_zeros_by('date_test', id, date, val) LIMIT 1;
 ----
 DATE
 
 # ts_drop_constant - passes through SELECT *
 query T
-SELECT typeof(date) FROM ts_drop_constant('date_test', id, val) LIMIT 1;
+SELECT typeof(date) FROM ts_drop_constant_by('date_test', id, val) LIMIT 1;
 ----
 DATE
 
 # ts_drop_short - passes through SELECT *
 query T
-SELECT typeof(date) FROM ts_drop_short('date_test', id, 3) LIMIT 1;
+SELECT typeof(date) FROM ts_drop_short_by('date_test', id, 3) LIMIT 1;
 ----
 DATE
 
 # ts_drop_gappy - passes through SELECT *
 query T
-SELECT typeof(date) FROM ts_drop_gappy('date_test', id, val, 0.5) LIMIT 1;
+SELECT typeof(date) FROM ts_drop_gappy_by('date_test', id, val, 0.5) LIMIT 1;
 ----
 DATE
 
 # ts_drop_zeros - passes through SELECT *
 query T
-SELECT typeof(date) FROM ts_drop_zeros('date_test', id, val) LIMIT 1;
+SELECT typeof(date) FROM ts_drop_zeros_by('date_test', id, val) LIMIT 1;
 ----
 DATE
 
@@ -103,24 +103,24 @@ DATE
 # Note: These functions always return TIMESTAMP because DuckDB's
 # generate_series returns TIMESTAMP and SQL type system is determined
 # at query planning time, not runtime. Cast to DATE if needed:
-# SELECT date_col::DATE FROM ts_fill_gaps(...)
+# SELECT date_col::DATE FROM ts_fill_gaps_by(...)
 #######################################
 
 # ts_fill_gaps - returns TIMESTAMP (generate_series limitation)
 query T
-SELECT typeof(date_col) FROM ts_fill_gaps('date_test', id, date, val, '1d') LIMIT 1;
+SELECT typeof(date_col) FROM ts_fill_gaps_by('date_test', id, date, val, '1d') LIMIT 1;
 ----
 TIMESTAMP
 
 # ts_fill_forward - returns TIMESTAMP (generate_series limitation)
 query T
-SELECT typeof(date_col) FROM ts_fill_forward('date_test', id, date, val, '2023-01-10', '1d') LIMIT 1;
+SELECT typeof(date_col) FROM ts_fill_forward_by('date_test', id, date, val, '2023-01-10', '1d') LIMIT 1;
 ----
 TIMESTAMP
 
 # ts_fill_gaps_operator - returns TIMESTAMP (generate_series limitation)
 query T
-SELECT typeof(date_col) FROM ts_fill_gaps_operator('date_test', id, date, val, '1d') LIMIT 1;
+SELECT typeof(date_col) FROM ts_fill_gaps_operator_by('date_test', id, date, val, '1d') LIMIT 1;
 ----
 TIMESTAMP
 
@@ -144,13 +144,13 @@ TIMESTAMP
 
 # Pass-through functions keep TIMESTAMP
 query T
-SELECT typeof(date) FROM ts_fill_nulls_const('timestamp_test', id, date, val, 0.0) LIMIT 1;
+SELECT typeof(date) FROM ts_fill_nulls_const_by('timestamp_test', id, date, val, 0.0) LIMIT 1;
 ----
 TIMESTAMP
 
 # generate_series functions output TIMESTAMP
 query T
-SELECT typeof(date_col) FROM ts_fill_gaps('timestamp_test', id, date, val, '1d') LIMIT 1;
+SELECT typeof(date_col) FROM ts_fill_gaps_by('timestamp_test', id, date, val, '1d') LIMIT 1;
 ----
 TIMESTAMP
 

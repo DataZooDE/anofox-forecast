@@ -255,13 +255,13 @@ ts_detect_multiple_periods(values DOUBLE[], max_periods INTEGER) → STRUCT
 
 ## Decomposition
 
-### ts_mstl_decomposition
+### ts_mstl_decomposition_by
 
 Multiple Seasonal-Trend decomposition using Loess (MSTL).
 
 **Signature:**
 ```sql
-ts_mstl_decomposition(source, group_col, date_col, value_col, seasonal_periods, params)
+ts_mstl_decomposition_by(source, group_col, date_col, value_col, seasonal_periods, params)
 ```
 
 **Parameters:**
@@ -276,7 +276,7 @@ ts_mstl_decomposition(source, group_col, date_col, value_col, seasonal_periods, 
 
 **Example:**
 ```sql
-SELECT * FROM ts_mstl_decomposition(
+SELECT * FROM ts_mstl_decomposition_by(
     'sales', product_id, date, quantity,
     [7, 365],  -- weekly and yearly seasonality
     MAP{}

@@ -22,19 +22,19 @@ UNION ALL SELECT 'A', '2023-01-05', 5.0;
 
 # Test basic constant fill
 query I
-SELECT COUNT(*) FROM ts_fill_nulls_const('impute_test', id, date, val, 0.0);
+SELECT COUNT(*) FROM ts_fill_nulls_const_by('impute_test', id, date, val, 0.0);
 ----
 5
 
 # Test no NULLs remain after fill
 query I
-SELECT COUNT(*) FROM ts_fill_nulls_const('impute_test', id, date, val, 0.0) WHERE value_col IS NULL;
+SELECT COUNT(*) FROM ts_fill_nulls_const_by('impute_test', id, date, val, 0.0) WHERE value_col IS NULL;
 ----
 0
 
 # Verify filled values
 query R
-SELECT SUM(value_col) FROM ts_fill_nulls_const('impute_test', id, date, val, 0.0);
+SELECT SUM(value_col) FROM ts_fill_nulls_const_by('impute_test', id, date, val, 0.0);
 ----
 9.0
 
@@ -44,19 +44,19 @@ SELECT SUM(value_col) FROM ts_fill_nulls_const('impute_test', id, date, val, 0.0
 
 # Test basic forward fill
 query I
-SELECT COUNT(*) FROM ts_fill_nulls_forward('impute_test', id, date, val);
+SELECT COUNT(*) FROM ts_fill_nulls_forward_by('impute_test', id, date, val);
 ----
 5
 
 # Test no NULLs remain after fill
 query I
-SELECT COUNT(*) FROM ts_fill_nulls_forward('impute_test', id, date, val) WHERE value_col IS NULL;
+SELECT COUNT(*) FROM ts_fill_nulls_forward_by('impute_test', id, date, val) WHERE value_col IS NULL;
 ----
 0
 
 # Verify forward fill carries previous value
 query R
-SELECT value_col FROM ts_fill_nulls_forward('impute_test', id, date, val) ORDER BY date LIMIT 1 OFFSET 1;
+SELECT value_col FROM ts_fill_nulls_forward_by('impute_test', id, date, val) ORDER BY date LIMIT 1 OFFSET 1;
 ----
 1.0
 
@@ -66,19 +66,19 @@ SELECT value_col FROM ts_fill_nulls_forward('impute_test', id, date, val) ORDER 
 
 # Test basic backward fill
 query I
-SELECT COUNT(*) FROM ts_fill_nulls_backward('impute_test', id, date, val);
+SELECT COUNT(*) FROM ts_fill_nulls_backward_by('impute_test', id, date, val);
 ----
 5
 
 # Test no NULLs remain after fill
 query I
-SELECT COUNT(*) FROM ts_fill_nulls_backward('impute_test', id, date, val) WHERE value_col IS NULL;
+SELECT COUNT(*) FROM ts_fill_nulls_backward_by('impute_test', id, date, val) WHERE value_col IS NULL;
 ----
 0
 
 # Verify backward fill uses next value
 query R
-SELECT value_col FROM ts_fill_nulls_backward('impute_test', id, date, val) ORDER BY date LIMIT 1 OFFSET 1;
+SELECT value_col FROM ts_fill_nulls_backward_by('impute_test', id, date, val) ORDER BY date LIMIT 1 OFFSET 1;
 ----
 3.0
 
@@ -88,19 +88,19 @@ SELECT value_col FROM ts_fill_nulls_backward('impute_test', id, date, val) ORDER
 
 # Test basic mean fill
 query I
-SELECT COUNT(*) FROM ts_fill_nulls_mean('impute_test', id, date, val);
+SELECT COUNT(*) FROM ts_fill_nulls_mean_by('impute_test', id, date, val);
 ----
 5
 
 # Test no NULLs remain after fill
 query I
-SELECT COUNT(*) FROM ts_fill_nulls_mean('impute_test', id, date, val) WHERE value_col IS NULL;
+SELECT COUNT(*) FROM ts_fill_nulls_mean_by('impute_test', id, date, val) WHERE value_col IS NULL;
 ----
 0
 
 # Verify mean fill uses series mean (mean of 1,3,5 = 3)
 query R
-SELECT value_col FROM ts_fill_nulls_mean('impute_test', id, date, val) ORDER BY date LIMIT 1 OFFSET 1;
+SELECT value_col FROM ts_fill_nulls_mean_by('impute_test', id, date, val) ORDER BY date LIMIT 1 OFFSET 1;
 ----
 3.0
 
@@ -111,10 +111,10 @@ SELECT value_col FROM ts_fill_nulls_mean('impute_test', id, date, val) ORDER BY 
 # All imputation functions should preserve row count
 query IIII
 SELECT
-    (SELECT COUNT(*) FROM ts_fill_nulls_const('impute_test', id, date, val, 0.0)),
-    (SELECT COUNT(*) FROM ts_fill_nulls_forward('impute_test', id, date, val)),
-    (SELECT COUNT(*) FROM ts_fill_nulls_backward('impute_test', id, date, val)),
-    (SELECT COUNT(*) FROM ts_fill_nulls_mean('impute_test', id, date, val));
+    (SELECT COUNT(*) FROM ts_fill_nulls_const_by('impute_test', id, date, val, 0.0)),
+    (SELECT COUNT(*) FROM ts_fill_nulls_forward_by('impute_test', id, date, val)),
+    (SELECT COUNT(*) FROM ts_fill_nulls_backward_by('impute_test', id, date, val)),
+    (SELECT COUNT(*) FROM ts_fill_nulls_mean_by('impute_test', id, date, val));
 ----
 5	5	5	5
 

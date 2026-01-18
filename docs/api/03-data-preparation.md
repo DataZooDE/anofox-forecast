@@ -10,174 +10,174 @@ Data preparation functions help clean and transform time series data before fore
 
 ## Series Filtering
 
-### ts_drop_constant
+### ts_drop_constant_by
 
 Filters out series where all values are constant.
 
 **Signature:**
 ```sql
-ts_drop_constant(source VARCHAR, group_col COLUMN, value_col COLUMN) → TABLE
+ts_drop_constant_by(source VARCHAR, group_col COLUMN, value_col COLUMN) → TABLE
 ```
 
 **Example:**
 ```sql
 -- Remove constant series from sales data
-SELECT * FROM ts_drop_constant('sales', product_id, quantity);
+SELECT * FROM ts_drop_constant_by('sales', product_id, quantity);
 ```
 
 ---
 
-### ts_drop_short
+### ts_drop_short_by
 
 Filters out series shorter than the minimum length.
 
 **Signature:**
 ```sql
-ts_drop_short(source VARCHAR, group_col COLUMN, min_length INTEGER) → TABLE
+ts_drop_short_by(source VARCHAR, group_col COLUMN, min_length INTEGER) → TABLE
 ```
 
 **Example:**
 ```sql
 -- Keep only series with at least 20 observations
-SELECT * FROM ts_drop_short('sales', product_id, 20);
+SELECT * FROM ts_drop_short_by('sales', product_id, 20);
 ```
 
 ---
 
-### ts_drop_gappy
+### ts_drop_gappy_by
 
 Filters out series with too many gaps.
 
 **Signature:**
 ```sql
-ts_drop_gappy(source VARCHAR, group_col COLUMN, value_col COLUMN, max_gap_ratio DOUBLE) → TABLE
+ts_drop_gappy_by(source VARCHAR, group_col COLUMN, value_col COLUMN, max_gap_ratio DOUBLE) → TABLE
 ```
 
 **Example:**
 ```sql
 -- Remove series where gaps exceed 10% of data
-SELECT * FROM ts_drop_gappy('sales', product_id, quantity, 0.1);
+SELECT * FROM ts_drop_gappy_by('sales', product_id, quantity, 0.1);
 ```
 
 ---
 
-### ts_drop_zeros
+### ts_drop_zeros_by
 
 Filters out series that are all zeros.
 
 **Signature:**
 ```sql
-ts_drop_zeros(source VARCHAR, group_col COLUMN, value_col COLUMN) → TABLE
+ts_drop_zeros_by(source VARCHAR, group_col COLUMN, value_col COLUMN) → TABLE
 ```
 
 ---
 
 ## Edge Cleaning
 
-### ts_drop_leading_zeros
+### ts_drop_leading_zeros_by
 
 Removes leading zeros from each series.
 
 **Signature:**
 ```sql
-ts_drop_leading_zeros(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
+ts_drop_leading_zeros_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
 ```
 
 **Example:**
 ```sql
-SELECT * FROM ts_drop_leading_zeros('sales', product_id, date, quantity);
+SELECT * FROM ts_drop_leading_zeros_by('sales', product_id, date, quantity);
 ```
 
 ---
 
-### ts_drop_trailing_zeros
+### ts_drop_trailing_zeros_by
 
 Removes trailing zeros from each series.
 
 **Signature:**
 ```sql
-ts_drop_trailing_zeros(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
+ts_drop_trailing_zeros_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
 ```
 
 ---
 
-### ts_drop_edge_zeros
+### ts_drop_edge_zeros_by
 
 Removes both leading and trailing zeros from each series.
 
 **Signature:**
 ```sql
-ts_drop_edge_zeros(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
+ts_drop_edge_zeros_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
 ```
 
 ---
 
 ## Missing Value Imputation
 
-### ts_fill_nulls_const
+### ts_fill_nulls_const_by
 
 Replaces NULL values with a constant.
 
 **Signature:**
 ```sql
-ts_fill_nulls_const(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, fill_value DOUBLE) → TABLE
+ts_fill_nulls_const_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, fill_value DOUBLE) → TABLE
 ```
 
 **Example:**
 ```sql
 -- Fill missing values with 0
-SELECT * FROM ts_fill_nulls_const('sales', product_id, date, quantity, 0.0);
+SELECT * FROM ts_fill_nulls_const_by('sales', product_id, date, quantity, 0.0);
 ```
 
 ---
 
-### ts_fill_nulls_forward
+### ts_fill_nulls_forward_by
 
 Forward fills NULL values (last observation carried forward).
 
 **Signature:**
 ```sql
-ts_fill_nulls_forward(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
+ts_fill_nulls_forward_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
 ```
 
 **Example:**
 ```sql
-SELECT * FROM ts_fill_nulls_forward('sales', product_id, date, quantity);
+SELECT * FROM ts_fill_nulls_forward_by('sales', product_id, date, quantity);
 ```
 
 ---
 
-### ts_fill_nulls_backward
+### ts_fill_nulls_backward_by
 
 Backward fills NULL values.
 
 **Signature:**
 ```sql
-ts_fill_nulls_backward(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
+ts_fill_nulls_backward_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
 ```
 
 ---
 
-### ts_fill_nulls_mean
+### ts_fill_nulls_mean_by
 
 Fills NULL values with the series mean.
 
 **Signature:**
 ```sql
-ts_fill_nulls_mean(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
+ts_fill_nulls_mean_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
 ```
 
 ---
 
 ## Gap Filling
 
-### ts_fill_gaps
+### ts_fill_gaps_by
 
 Fills gaps in time series by inserting rows for missing timestamps.
 
 **Signature:**
 ```sql
-ts_fill_gaps(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, frequency VARCHAR) → TABLE
+ts_fill_gaps_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, frequency VARCHAR) → TABLE
 ```
 
 **Parameters:**
@@ -186,31 +186,31 @@ ts_fill_gaps(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN
 **Example:**
 ```sql
 -- Fill daily gaps
-SELECT * FROM ts_fill_gaps('sales', product_id, date, quantity, '1d');
+SELECT * FROM ts_fill_gaps_by('sales', product_id, date, quantity, '1d');
 ```
 
 ---
 
-### ts_fill_forward
+### ts_fill_forward_by
 
 Forward fills to a target date.
 
 **Signature:**
 ```sql
-ts_fill_forward(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, target_date DATE, frequency VARCHAR) → TABLE
+ts_fill_forward_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, target_date DATE, frequency VARCHAR) → TABLE
 ```
 
 ---
 
 ## Differencing
 
-### ts_diff
+### ts_diff_by
 
 Computes differences of specified order per series.
 
 **Signature:**
 ```sql
-ts_diff(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, diff_order INTEGER) → TABLE
+ts_diff_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, diff_order INTEGER) → TABLE
 ```
 
 **Parameters:**
@@ -219,10 +219,10 @@ ts_diff(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, dif
 **Example:**
 ```sql
 -- Compute first differences
-SELECT * FROM ts_diff('sales', product_id, date, quantity, 1);
+SELECT * FROM ts_diff_by('sales', product_id, date, quantity, 1);
 
 -- Compute second differences
-SELECT * FROM ts_diff('sales', product_id, date, quantity, 2);
+SELECT * FROM ts_diff_by('sales', product_id, date, quantity, 2);
 ```
 
 ---
@@ -275,13 +275,13 @@ SELECT * FROM ts_fill_gaps_native('sales', '1d');  -- ERROR!
 
 ---
 
-### ts_fill_gaps_operator
+### ts_fill_gaps_operator_by
 
 Operator-compatible gap filling (same as `ts_fill_gaps` but named for operator compatibility).
 
 **Signature:**
 ```sql
-ts_fill_gaps_operator(
+ts_fill_gaps_operator_by(
     source VARCHAR,
     group_col COLUMN,
     date_col COLUMN,
@@ -323,13 +323,13 @@ SELECT * FROM ts_fill_forward_native(
 
 > **Note:** These functions help handle unknown future values in cross-validation scenarios.
 
-### ts_fill_unknown
+### ts_fill_unknown_by
 
 Fill unknown future feature values based on a cutoff date.
 
 **Signature:**
 ```sql
-ts_fill_unknown(
+ts_fill_unknown_by(
     source VARCHAR,
     group_col COLUMN,
     date_col COLUMN,
@@ -355,7 +355,7 @@ ts_fill_unknown(
 **Example:**
 ```sql
 -- Fill unknown temperatures with last known value
-SELECT * FROM ts_fill_unknown(
+SELECT * FROM ts_fill_unknown_by(
     'weather_data', region, date, temperature, '2024-06-01'::DATE,
     MAP{'strategy': 'last_value'}
 );
@@ -363,13 +363,13 @@ SELECT * FROM ts_fill_unknown(
 
 ---
 
-### ts_mark_unknown
+### ts_mark_unknown_by
 
 Mark rows as known/unknown based on a cutoff date.
 
 **Signature:**
 ```sql
-ts_mark_unknown(
+ts_mark_unknown_by(
     source VARCHAR,
     group_col COLUMN,
     date_col COLUMN,
@@ -389,7 +389,7 @@ ts_mark_unknown(
 SELECT
     *,
     CASE WHEN is_unknown THEN 0.0 ELSE competitor_price END AS price_masked
-FROM ts_mark_unknown('sales_data', product_id, date, '2024-06-15'::DATE);
+FROM ts_mark_unknown_by('sales_data', product_id, date, '2024-06-15'::DATE);
 ```
 
 ---
@@ -398,13 +398,13 @@ FROM ts_mark_unknown('sales_data', product_id, date, '2024-06-15'::DATE);
 
 > **Note:** These functions validate that expected timestamps exist in your data.
 
-### ts_validate_timestamps
+### ts_validate_timestamps_by
 
 Validate that expected timestamps exist in data for each group.
 
 **Signature:**
 ```sql
-ts_validate_timestamps(
+ts_validate_timestamps_by(
     source VARCHAR,
     group_col COLUMN,
     date_col COLUMN,
@@ -425,7 +425,7 @@ ts_validate_timestamps(
 **Example:**
 ```sql
 -- Validate that specific dates exist for each series
-SELECT * FROM ts_validate_timestamps(
+SELECT * FROM ts_validate_timestamps_by(
     'sales_data', product_id, date,
     ['2024-01-01'::DATE, '2024-01-02'::DATE, '2024-01-03'::DATE]
 ) WHERE NOT is_valid;  -- Show only invalid series
@@ -433,13 +433,13 @@ SELECT * FROM ts_validate_timestamps(
 
 ---
 
-### ts_validate_timestamps_summary
+### ts_validate_timestamps_summary_by
 
 Quick validation summary across all groups.
 
 **Signature:**
 ```sql
-ts_validate_timestamps_summary(
+ts_validate_timestamps_summary_by(
     source VARCHAR,
     group_col COLUMN,
     date_col COLUMN,
@@ -459,7 +459,7 @@ ts_validate_timestamps_summary(
 **Example:**
 ```sql
 -- Quick check: are all series complete?
-SELECT * FROM ts_validate_timestamps_summary(
+SELECT * FROM ts_validate_timestamps_summary_by(
     'sales_data', product_id, date,
     ['2024-01-01'::DATE, '2024-01-02'::DATE, '2024-01-03'::DATE]
 );

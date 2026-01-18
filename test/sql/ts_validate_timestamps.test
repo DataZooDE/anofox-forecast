@@ -28,19 +28,19 @@ SELECT * FROM (VALUES
 
 # Test returns correct number of groups
 query I
-SELECT COUNT(*) FROM ts_validate_timestamps('validation_test', series_id, date, ['2024-01-02'::DATE, '2024-01-03'::DATE]);
+SELECT COUNT(*) FROM ts_validate_timestamps_by('validation_test', series_id, date, ['2024-01-02'::DATE, '2024-01-03'::DATE]);
 ----
 2
 
 # Test all groups valid when checking dates all have (cast bool to int)
 query I
-SELECT SUM(is_valid::INT) FROM ts_validate_timestamps('validation_test', series_id, date, ['2024-01-01'::DATE, '2024-01-02'::DATE, '2024-01-03'::DATE]);
+SELECT SUM(is_valid::INT) FROM ts_validate_timestamps_by('validation_test', series_id, date, ['2024-01-01'::DATE, '2024-01-02'::DATE, '2024-01-03'::DATE]);
 ----
 2
 
 # Test series A is invalid when checking dates it's missing
 query TI
-SELECT group_col, is_valid::INT FROM ts_validate_timestamps('validation_test', series_id, date, ['2024-01-02'::DATE, '2024-01-03'::DATE, '2024-01-04'::DATE])
+SELECT group_col, is_valid::INT FROM ts_validate_timestamps_by('validation_test', series_id, date, ['2024-01-02'::DATE, '2024-01-03'::DATE, '2024-01-04'::DATE])
 ORDER BY group_col;
 ----
 A	0
@@ -48,7 +48,7 @@ B	1
 
 # Test missing count is correct
 query TI
-SELECT group_col, n_missing FROM ts_validate_timestamps('validation_test', series_id, date, ['2024-01-02'::DATE, '2024-01-03'::DATE, '2024-01-04'::DATE])
+SELECT group_col, n_missing FROM ts_validate_timestamps_by('validation_test', series_id, date, ['2024-01-02'::DATE, '2024-01-03'::DATE, '2024-01-04'::DATE])
 ORDER BY group_col;
 ----
 A	1
@@ -56,13 +56,13 @@ B	0
 
 # Test n_expected equals list length
 query I
-SELECT DISTINCT n_expected FROM ts_validate_timestamps('validation_test', series_id, date, ['2024-01-02'::DATE, '2024-01-03'::DATE, '2024-01-04'::DATE]);
+SELECT DISTINCT n_expected FROM ts_validate_timestamps_by('validation_test', series_id, date, ['2024-01-02'::DATE, '2024-01-03'::DATE, '2024-01-04'::DATE]);
 ----
 3
 
 # Test n_found is correct for each group
 query TI
-SELECT group_col, n_found FROM ts_validate_timestamps('validation_test', series_id, date, ['2024-01-02'::DATE, '2024-01-03'::DATE, '2024-01-04'::DATE])
+SELECT group_col, n_found FROM ts_validate_timestamps_by('validation_test', series_id, date, ['2024-01-02'::DATE, '2024-01-03'::DATE, '2024-01-04'::DATE])
 ORDER BY group_col;
 ----
 A	2
@@ -74,31 +74,31 @@ B	3
 
 # Test all_valid is false when one group has missing timestamps (cast to int)
 query I
-SELECT all_valid::INT FROM ts_validate_timestamps_summary('validation_test', series_id, date, ['2024-01-02'::DATE, '2024-01-03'::DATE, '2024-01-04'::DATE]);
+SELECT all_valid::INT FROM ts_validate_timestamps_summary_by('validation_test', series_id, date, ['2024-01-02'::DATE, '2024-01-03'::DATE, '2024-01-04'::DATE]);
 ----
 0
 
 # Test all_valid is true when all timestamps exist for all groups
 query I
-SELECT all_valid::INT FROM ts_validate_timestamps_summary('validation_test', series_id, date, ['2024-01-01'::DATE, '2024-01-02'::DATE, '2024-01-03'::DATE]);
+SELECT all_valid::INT FROM ts_validate_timestamps_summary_by('validation_test', series_id, date, ['2024-01-01'::DATE, '2024-01-02'::DATE, '2024-01-03'::DATE]);
 ----
 1
 
 # Test n_groups count
 query I
-SELECT n_groups FROM ts_validate_timestamps_summary('validation_test', series_id, date, ['2024-01-02'::DATE]);
+SELECT n_groups FROM ts_validate_timestamps_summary_by('validation_test', series_id, date, ['2024-01-02'::DATE]);
 ----
 2
 
 # Test n_invalid_groups count
 query I
-SELECT n_invalid_groups FROM ts_validate_timestamps_summary('validation_test', series_id, date, ['2024-01-02'::DATE, '2024-01-03'::DATE, '2024-01-04'::DATE]);
+SELECT n_invalid_groups FROM ts_validate_timestamps_summary_by('validation_test', series_id, date, ['2024-01-02'::DATE, '2024-01-03'::DATE, '2024-01-04'::DATE]);
 ----
 1
 
 # Test n_valid_groups count
 query I
-SELECT n_valid_groups FROM ts_validate_timestamps_summary('validation_test', series_id, date, ['2024-01-02'::DATE, '2024-01-03'::DATE, '2024-01-04'::DATE]);
+SELECT n_valid_groups FROM ts_validate_timestamps_summary_by('validation_test', series_id, date, ['2024-01-02'::DATE, '2024-01-03'::DATE, '2024-01-04'::DATE]);
 ----
 1
 
@@ -108,13 +108,13 @@ SELECT n_valid_groups FROM ts_validate_timestamps_summary('validation_test', ser
 
 # Test with single timestamp
 query I
-SELECT SUM(n_found) FROM ts_validate_timestamps('validation_test', series_id, date, ['2024-01-02'::DATE]);
+SELECT SUM(n_found) FROM ts_validate_timestamps_by('validation_test', series_id, date, ['2024-01-02'::DATE]);
 ----
 2
 
 # Test with timestamp not in any group
 query I
-SELECT SUM(n_missing) FROM ts_validate_timestamps('validation_test', series_id, date, ['2024-12-31'::DATE]);
+SELECT SUM(n_missing) FROM ts_validate_timestamps_by('validation_test', series_id, date, ['2024-12-31'::DATE]);
 ----
 2
 

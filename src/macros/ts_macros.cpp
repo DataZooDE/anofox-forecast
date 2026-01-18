@@ -89,9 +89,9 @@ FROM (
 )
 )"},
 
-    // ts_drop_constant: Filter out constant series (table-based)
-    // C++ API: ts_drop_constant(table_name, group_col, value_col)
-    {"ts_drop_constant", {"source", "group_col", "value_col", nullptr}, {{nullptr, nullptr}},
+    // ts_drop_constant_by: Filter out constant series (table-based)
+    // C++ API: ts_drop_constant_by(table_name, group_col, value_col)
+    {"ts_drop_constant_by", {"source", "group_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT *
 FROM query_table(source::VARCHAR)
@@ -103,9 +103,9 @@ WHERE group_col IN (
 )
 )"},
 
-    // ts_drop_short: Filter out short series (table-based)
-    // C++ API: ts_drop_short(table_name, group_col, min_length)
-    {"ts_drop_short", {"source", "group_col", "min_length", nullptr}, {{nullptr, nullptr}},
+    // ts_drop_short_by: Filter out short series (table-based)
+    // C++ API: ts_drop_short_by(table_name, group_col, min_length)
+    {"ts_drop_short_by", {"source", "group_col", "min_length", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT *
 FROM query_table(source::VARCHAR)
@@ -117,9 +117,9 @@ WHERE group_col IN (
 )
 )"},
 
-    // ts_drop_leading_zeros: Remove leading zeros from series (table-based)
-    // C++ API: ts_drop_leading_zeros(table_name, group_col, date_col, value_col)
-    {"ts_drop_leading_zeros", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
+    // ts_drop_leading_zeros_by: Remove leading zeros from series (table-based)
+    // C++ API: ts_drop_leading_zeros_by(table_name, group_col, date_col, value_col)
+    {"ts_drop_leading_zeros_by", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH first_nonzero AS (
     SELECT *,
@@ -131,9 +131,9 @@ FROM first_nonzero
 WHERE date_col >= _first_nz
 )"},
 
-    // ts_drop_trailing_zeros: Remove trailing zeros from series (table-based)
-    // C++ API: ts_drop_trailing_zeros(table_name, group_col, date_col, value_col)
-    {"ts_drop_trailing_zeros", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
+    // ts_drop_trailing_zeros_by: Remove trailing zeros from series (table-based)
+    // C++ API: ts_drop_trailing_zeros_by(table_name, group_col, date_col, value_col)
+    {"ts_drop_trailing_zeros_by", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH last_nonzero AS (
     SELECT *,
@@ -145,9 +145,9 @@ FROM last_nonzero
 WHERE date_col <= _last_nz
 )"},
 
-    // ts_drop_edge_zeros: Remove both leading and trailing zeros (table-based)
-    // C++ API: ts_drop_edge_zeros(table_name, group_col, date_col, value_col)
-    {"ts_drop_edge_zeros", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
+    // ts_drop_edge_zeros_by: Remove both leading and trailing zeros (table-based)
+    // C++ API: ts_drop_edge_zeros_by(table_name, group_col, date_col, value_col)
+    {"ts_drop_edge_zeros_by", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH nonzero_bounds AS (
     SELECT *,
@@ -160,9 +160,9 @@ FROM nonzero_bounds
 WHERE date_col >= _first_nz AND date_col <= _last_nz
 )"},
 
-    // ts_fill_nulls_const: Fill NULL values with constant (table-based)
-    // C++ API: ts_fill_nulls_const(table_name, group_col, date_col, value_col, fill_value)
-    {"ts_fill_nulls_const", {"source", "group_col", "date_col", "value_col", "fill_value", nullptr}, {{nullptr, nullptr}},
+    // ts_fill_nulls_const_by: Fill NULL values with constant (table-based)
+    // C++ API: ts_fill_nulls_const_by(table_name, group_col, date_col, value_col, fill_value)
+    {"ts_fill_nulls_const_by", {"source", "group_col", "date_col", "value_col", "fill_value", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT
     group_col,
@@ -172,9 +172,9 @@ FROM query_table(source::VARCHAR)
 ORDER BY group_col, date_col
 )"},
 
-    // ts_fill_nulls_forward: Forward fill (LOCF) (table-based)
-    // C++ API: ts_fill_nulls_forward(table_name, group_col, date_col, value_col)
-    {"ts_fill_nulls_forward", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
+    // ts_fill_nulls_forward_by: Forward fill (LOCF) (table-based)
+    // C++ API: ts_fill_nulls_forward_by(table_name, group_col, date_col, value_col)
+    {"ts_fill_nulls_forward_by", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT
     group_col,
@@ -186,9 +186,9 @@ FROM query_table(source::VARCHAR)
 ORDER BY group_col, date_col
 )"},
 
-    // ts_fill_nulls_backward: Backward fill (NOCB) (table-based)
-    // C++ API: ts_fill_nulls_backward(table_name, group_col, date_col, value_col)
-    {"ts_fill_nulls_backward", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
+    // ts_fill_nulls_backward_by: Backward fill (NOCB) (table-based)
+    // C++ API: ts_fill_nulls_backward_by(table_name, group_col, date_col, value_col)
+    {"ts_fill_nulls_backward_by", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT
     group_col,
@@ -200,9 +200,9 @@ FROM query_table(source::VARCHAR)
 ORDER BY group_col, date_col
 )"},
 
-    // ts_fill_nulls_mean: Fill with series mean (table-based)
-    // C++ API: ts_fill_nulls_mean(table_name, group_col, date_col, value_col)
-    {"ts_fill_nulls_mean", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
+    // ts_fill_nulls_mean_by: Fill with series mean (table-based)
+    // C++ API: ts_fill_nulls_mean_by(table_name, group_col, date_col, value_col)
+    {"ts_fill_nulls_mean_by", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH with_mean AS (
     SELECT *,
@@ -214,9 +214,9 @@ FROM with_mean
 ORDER BY group_col, date_col
 )"},
 
-    // ts_diff: Compute differences (table-based)
-    // C++ API: ts_diff(table_name, group_col, date_col, value_col, diff_order)
-    {"ts_diff", {"source", "group_col", "date_col", "value_col", "diff_order", nullptr}, {{nullptr, nullptr}},
+    // ts_diff_by: Compute differences (table-based)
+    // C++ API: ts_diff_by(table_name, group_col, date_col, value_col, diff_order)
+    {"ts_diff_by", {"source", "group_col", "date_col", "value_col", "diff_order", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT
     group_col,
@@ -228,10 +228,10 @@ FROM query_table(source::VARCHAR)
 ORDER BY group_col, date_col
 )"},
 
-    // ts_fill_gaps: Fill date gaps with NULL values at specified frequency
-    // C++ API: ts_fill_gaps(table_name, group_col, date_col, value_col, frequency)
+    // ts_fill_gaps_by: Fill date gaps with NULL values at specified frequency
+    // C++ API: ts_fill_gaps_by(table_name, group_col, date_col, value_col, frequency)
     // Supports: integers (as days), Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y'), DuckDB INTERVAL ('1 day', '1 hour')
-    {"ts_fill_gaps", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
+    {"ts_fill_gaps_by", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH _freq AS (
     SELECT CASE
@@ -273,10 +273,10 @@ LEFT JOIN src s ON ad._grp = s._grp AND date_trunc('second', ad._dt) = date_trun
 ORDER BY ad._grp, ad._dt
 )"},
 
-    // ts_fill_forward: Fill forward to a target date with NULL values
-    // C++ API: ts_fill_forward(table_name, group_col, date_col, value_col, target_date, frequency)
+    // ts_fill_forward_by: Fill forward to a target date with NULL values
+    // C++ API: ts_fill_forward_by(table_name, group_col, date_col, value_col, target_date, frequency)
     // Supports both Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y') and DuckDB INTERVAL ('1 day', '1 hour')
-    {"ts_fill_forward", {"source", "group_col", "date_col", "value_col", "target_date", "frequency", nullptr}, {{nullptr, nullptr}},
+    {"ts_fill_forward_by", {"source", "group_col", "date_col", "value_col", "target_date", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH _freq AS (
     SELECT CASE
@@ -319,11 +319,11 @@ FROM forward_dates fd
 ORDER BY 1, 2
 )"},
 
-    // ts_fill_gaps_operator: High-performance gap filling (API compatible with C++ version)
-    // C++ API: ts_fill_gaps_operator(table_name, group_col, date_col, value_col, frequency)
+    // ts_fill_gaps_operator_by: High-performance gap filling (API compatible with C++ version)
+    // C++ API: ts_fill_gaps_operator_by(table_name, group_col, date_col, value_col, frequency)
     // Note: This is identical to ts_fill_gaps but named "operator" for C++ API compatibility
     // Supports both Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y') and DuckDB INTERVAL ('1 day', '1 hour')
-    {"ts_fill_gaps_operator", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
+    {"ts_fill_gaps_operator_by", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH _freq AS (
     SELECT CASE
@@ -365,9 +365,9 @@ LEFT JOIN src s ON ad._grp = s._grp AND date_trunc('second', ad._dt) = date_trun
 ORDER BY ad._grp, ad._dt
 )"},
 
-    // ts_drop_gappy: Filter out series with too many gaps
-    // C++ API: ts_drop_gappy(table_name, group_col, value_col, max_gap_ratio)
-    {"ts_drop_gappy", {"source", "group_col", "value_col", "max_gap_ratio", nullptr}, {{nullptr, nullptr}},
+    // ts_drop_gappy_by: Filter out series with too many gaps
+    // C++ API: ts_drop_gappy_by(table_name, group_col, value_col, max_gap_ratio)
+    {"ts_drop_gappy_by", {"source", "group_col", "value_col", "max_gap_ratio", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT *
 FROM query_table(source::VARCHAR)
@@ -379,9 +379,9 @@ WHERE group_col IN (
 )
 )"},
 
-    // ts_drop_zeros: Filter out series with all zeros
-    // C++ API: ts_drop_zeros(table_name, group_col, value_col)
-    {"ts_drop_zeros", {"source", "group_col", "value_col", nullptr}, {{nullptr, nullptr}},
+    // ts_drop_zeros_by: Filter out series with all zeros
+    // C++ API: ts_drop_zeros_by(table_name, group_col, value_col)
+    {"ts_drop_zeros_by", {"source", "group_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT *
 FROM query_table(source::VARCHAR)
@@ -393,9 +393,9 @@ WHERE group_col IN (
 )
 )"},
 
-    // ts_mstl_decomposition: MSTL decomposition for grouped series
-    // C++ API: ts_mstl_decomposition(table_name, group_col, date_col, value_col, params MAP)
-    {"ts_mstl_decomposition", {"source", "group_col", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
+    // ts_mstl_decomposition_by: MSTL decomposition for grouped series
+    // C++ API: ts_mstl_decomposition_by(table_name, group_col, date_col, value_col, params MAP)
+    {"ts_mstl_decomposition_by", {"source", "group_col", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT
     group_col AS id,
@@ -782,11 +782,11 @@ FROM forecast_data
 ORDER BY id, forecast_step
 )"},
 
-    // ts_mark_unknown: Mark rows as known/unknown based on cutoff date for scenario expressions
-    // C++ API: ts_mark_unknown(table_name, group_col, date_col, cutoff_date)
+    // ts_mark_unknown_by: Mark rows as known/unknown based on cutoff date for scenario expressions
+    // C++ API: ts_mark_unknown_by(table_name, group_col, date_col, cutoff_date)
     // Returns: all source columns plus is_unknown (boolean), last_known_date (per group)
     // Use this with custom CASE expressions for scenario-based filling
-    {"ts_mark_unknown", {"source", "group_col", "date_col", "cutoff_date", nullptr}, {{nullptr, nullptr}},
+    {"ts_mark_unknown_by", {"source", "group_col", "date_col", "cutoff_date", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH src AS (
     SELECT
@@ -815,10 +815,10 @@ LEFT JOIN last_known lk ON src._grp = lk._grp
 ORDER BY src._grp, src._dt
 )"},
 
-    // ts_fill_unknown: Fill unknown future feature values in test set for CV splits
-    // C++ API: ts_fill_unknown(table_name, group_col, date_col, value_col, cutoff_date, params)
+    // ts_fill_unknown_by: Fill unknown future feature values in test set for CV splits
+    // C++ API: ts_fill_unknown_by(table_name, group_col, date_col, value_col, cutoff_date, params)
     // params MAP supports: strategy ('last_value', 'null', 'default'), fill_value (DOUBLE, for 'default' strategy)
-    {"ts_fill_unknown", {"source", "group_col", "date_col", "value_col", "cutoff_date", "params", nullptr}, {{nullptr, nullptr}},
+    {"ts_fill_unknown_by", {"source", "group_col", "date_col", "value_col", "cutoff_date", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH _params AS (
     SELECT
@@ -853,11 +853,11 @@ FROM src
 ORDER BY _grp, _dt
 )"},
 
-    // ts_validate_timestamps: Validate that expected timestamps exist in data for each group
-    // C++ API: ts_validate_timestamps(table_name, group_col, date_col, expected_timestamps)
+    // ts_validate_timestamps_by: Validate that expected timestamps exist in data for each group
+    // C++ API: ts_validate_timestamps_by(table_name, group_col, date_col, expected_timestamps)
     // Returns: group_col, is_valid, n_expected, n_found, n_missing, missing_timestamps
     // expected_timestamps should be a LIST of DATE/TIMESTAMP values
-    {"ts_validate_timestamps", {"source", "group_col", "date_col", "expected_timestamps", nullptr}, {{nullptr, nullptr}},
+    {"ts_validate_timestamps_by", {"source", "group_col", "date_col", "expected_timestamps", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH src AS (
     SELECT DISTINCT
@@ -896,10 +896,10 @@ GROUP BY _grp
 ORDER BY _grp
 )"},
 
-    // ts_validate_timestamps_summary: Quick validation summary across all groups
-    // C++ API: ts_validate_timestamps_summary(table_name, group_col, date_col, expected_timestamps)
+    // ts_validate_timestamps_summary_by: Quick validation summary across all groups
+    // C++ API: ts_validate_timestamps_summary_by(table_name, group_col, date_col, expected_timestamps)
     // Returns: single row with all_valid, n_groups, n_valid_groups, n_invalid_groups, invalid_groups
-    {"ts_validate_timestamps_summary", {"source", "group_col", "date_col", "expected_timestamps", nullptr}, {{nullptr, nullptr}},
+    {"ts_validate_timestamps_summary_by", {"source", "group_col", "date_col", "expected_timestamps", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH src AS (
     SELECT DISTINCT
@@ -942,8 +942,8 @@ SELECT
 FROM per_group
 )"},
 
-    // ts_cv_split_folds: Generate fold boundaries for time series cross-validation
-    // C++ API: ts_cv_split_folds(source, group_col, date_col, training_end_times, horizon, frequency, params)
+    // ts_cv_split_folds_by: Generate fold boundaries for time series cross-validation
+    // C++ API: ts_cv_split_folds_by(source, group_col, date_col, training_end_times, horizon, frequency, params)
     // training_end_times: LIST of cutoff dates for each fold
     // horizon: number of periods in test set
     // frequency: time frequency ('1d', '1h', etc.)
@@ -951,7 +951,7 @@ FROM per_group
     //   gap (BIGINT) - periods between training end and test start (default 0)
     //   embargo (BIGINT) - periods to exclude from training after previous fold's test end (default 0)
     // Returns: fold_id, train_start, train_end, test_start, test_end, horizon, gap, embargo for each fold
-    {"ts_cv_split_folds", {"source", "group_col", "date_col", "training_end_times", "horizon", "frequency", "params", nullptr}, {{nullptr, nullptr}},
+    {"ts_cv_split_folds_by", {"source", "group_col", "date_col", "training_end_times", "horizon", "frequency", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH _params AS (
     SELECT
@@ -1020,13 +1020,13 @@ FROM folds_with_embargo
 ORDER BY fold_id
 )"},
 
-    // ts_cv_split: Split time series data into train/test sets for cross-validation
-    // C++ API: ts_cv_split(source, group_col, date_col, target_col, training_end_times, horizon, frequency, params)
+    // ts_cv_split_by: Split time series data into train/test sets for cross-validation
+    // C++ API: ts_cv_split_by(source, group_col, date_col, target_col, training_end_times, horizon, frequency, params)
     // params MAP supports: window_type ('expanding', 'fixed', 'sliding'), min_train_size (BIGINT), gap (BIGINT), embargo (BIGINT)
     // gap: number of periods between training end and test start (default 0, simulates data latency)
     // embargo: number of periods to exclude from training after previous fold's test end (default 0, prevents label leakage)
     // Returns: group_col, date_col, target_col, fold_id, split (train/test)
-    {"ts_cv_split", {"source", "group_col", "date_col", "target_col", "training_end_times", "horizon", "frequency", "params", nullptr}, {{nullptr, nullptr}},
+    {"ts_cv_split_by", {"source", "group_col", "date_col", "target_col", "training_end_times", "horizon", "frequency", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH _params AS (
     SELECT
@@ -1119,13 +1119,13 @@ WHERE (s._dt >= fb.train_start AND s._dt <= fb.train_end)
 ORDER BY fb.fold_id, s._grp, s._dt
 )"},
 
-    // ts_cv_split_index: Memory-efficient CV split that returns only index columns (no data columns)
-    // C++ API: ts_cv_split_index(source, group_col, date_col, training_end_times, horizon, frequency, params)
+    // ts_cv_split_index_by: Memory-efficient CV split that returns only index columns (no data columns)
+    // C++ API: ts_cv_split_index_by(source, group_col, date_col, training_end_times, horizon, frequency, params)
     // params MAP supports: window_type ('expanding', 'fixed', 'sliding'), min_train_size (BIGINT), gap (BIGINT), embargo (BIGINT)
     // Returns: group_col, date_col, fold_id, split (train/test) - NO target column
     // Use this for large datasets to avoid duplicating data across folds
     // Join back to source using ts_hydrate_split_full for complete data
-    {"ts_cv_split_index", {"source", "group_col", "date_col", "training_end_times", "horizon", "frequency", "params", nullptr}, {{nullptr, nullptr}},
+    {"ts_cv_split_index_by", {"source", "group_col", "date_col", "training_end_times", "horizon", "frequency", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH _params AS (
     SELECT
@@ -1214,13 +1214,13 @@ WHERE (s._dt >= fb.train_start AND s._dt <= fb.train_end)
 ORDER BY fb.fold_id, s._grp, s._dt
 )"},
 
-    // ts_hydrate_split: Safely join cv_splits with source data, masking unknown columns in test set
-    // C++ API: ts_hydrate_split(cv_splits, source, src_group_col, src_date_col, unknown_col, params)
+    // ts_hydrate_split_by: Safely join cv_splits with source data, masking unknown columns in test set
+    // C++ API: ts_hydrate_split_by(cv_splits, source, src_group_col, src_date_col, unknown_col, params)
     // NOTE: src_group_col and src_date_col are column EXPRESSIONS for the SOURCE table
     // cv_splits is expected to have standardized columns: group_col, date_col, fold_id, split
     // params MAP supports: strategy ('null', 'last_value', 'default'), fill_value (DOUBLE, for 'default')
     // This is the SAFE way to join features back to CV splits - prevents data leakage
-    {"ts_hydrate_split", {"cv_splits", "source", "src_group_col", "src_date_col", "unknown_col", "params", nullptr}, {{nullptr, nullptr}},
+    {"ts_hydrate_split_by", {"cv_splits", "source", "src_group_col", "src_date_col", "unknown_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH _params AS (
     SELECT
@@ -1281,14 +1281,14 @@ LEFT JOIN last_known lk ON cv._cv_grp = lk._cv_grp AND cv._fold_id = lk._fold_id
 ORDER BY cv._fold_id, cv._cv_grp, cv._cv_dt
 )"},
 
-    // ts_hydrate_split_full: Join cv_splits with ALL source columns, adding split metadata
-    // C++ API: ts_hydrate_split_full(cv_splits, source, src_group_col, src_date_col, params)
+    // ts_hydrate_split_full_by: Join cv_splits with ALL source columns, adding split metadata
+    // C++ API: ts_hydrate_split_full_by(cv_splits, source, src_group_col, src_date_col, params)
     // NOTE: src_group_col and src_date_col are column EXPRESSIONS for the SOURCE table
     // cv_splits is expected to have standardized columns: group_col, date_col, fold_id, split
     // Returns all source columns PLUS fold_id, split, and _is_test (boolean for easy masking)
     // Use with pattern: CASE WHEN _is_test THEN NULL ELSE unknown_col END AS unknown_col
     // This provides the SAFE join pattern - prevents accidental direct joins
-    {"ts_hydrate_split_full", {"cv_splits", "source", "src_group_col", "src_date_col", "params", nullptr}, {{nullptr, nullptr}},
+    {"ts_hydrate_split_full_by", {"cv_splits", "source", "src_group_col", "src_date_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH cv AS (
     SELECT
@@ -1318,8 +1318,8 @@ JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
 ORDER BY cv._fold_id, src._src_grp, src._src_dt
 )"},
 
-    // ts_hydrate_features: Automatically hydrate CV splits with features from source
-    // C++ API: ts_hydrate_features(cv_splits, source, src_group_col, src_date_col, params)
+    // ts_hydrate_features_by: Automatically hydrate CV splits with features from source
+    // C++ API: ts_hydrate_features_by(cv_splits, source, src_group_col, src_date_col, params)
     // cv_splits: Output from ts_cv_split (has group_col, date_col, target_col, fold_id, split)
     // source: Original data table with features
     // src_group_col, src_date_col: Column expressions for source table
@@ -1327,7 +1327,7 @@ ORDER BY cv._fold_id, src._src_grp, src._src_dt
     // Use _is_test to mask unknown features: CASE WHEN _is_test THEN NULL ELSE unknown_col END
     // Known features (calendar, promotions): Use directly
     // Unknown features (competitor_sales, actual temperature): Mask with CASE WHEN _is_test
-    {"ts_hydrate_features", {"cv_splits", "source", "src_group_col", "src_date_col", "params", nullptr}, {{nullptr, nullptr}},
+    {"ts_hydrate_features_by", {"cv_splits", "source", "src_group_col", "src_date_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH cv AS (
     SELECT
@@ -1363,12 +1363,12 @@ JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
 ORDER BY cv._fold_id, cv._cv_grp, cv._cv_dt
 )"},
 
-    // ts_hydrate_split_strict: FAIL-SAFE join - returns ONLY metadata columns, NO data columns
-    // C++ API: ts_hydrate_split_strict(cv_splits, source, src_group_col, src_date_col, params)
+    // ts_hydrate_split_strict_by: FAIL-SAFE join - returns ONLY metadata columns, NO data columns
+    // C++ API: ts_hydrate_split_strict_by(cv_splits, source, src_group_col, src_date_col, params)
     // This is the maximally fail-safe approach: forces user to explicitly add each column
     // Returns: fold_id, split, group_col, date_col, _is_test, _train_cutoff
     // Use pattern: SELECT hs.*, src.known_col, CASE WHEN _is_test THEN NULL ELSE src.unknown_col END
-    {"ts_hydrate_split_strict", {"cv_splits", "source", "src_group_col", "src_date_col", "params", nullptr}, {{nullptr, nullptr}},
+    {"ts_hydrate_split_strict_by", {"cv_splits", "source", "src_group_col", "src_date_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH cv AS (
     SELECT
@@ -1482,8 +1482,8 @@ SELECT LIST(train_end ORDER BY train_end) AS training_end_times
 FROM fold_end_times
 )"},
 
-    // ts_backtest_auto: One-liner backtest combining fold generation, splitting, forecasting, and evaluation
-    // C++ API: ts_backtest_auto(source, group_col, date_col, target_col, horizon, folds, frequency, params, features, metric)
+    // ts_backtest_auto_by: One-liner backtest combining fold generation, splitting, forecasting, and evaluation
+    // C++ API: ts_backtest_auto_by(source, group_col, date_col, target_col, horizon, folds, frequency, params, features, metric)
     // params accepts both MAP{'key': 'value'} and STRUCT {'key': value} syntax (GH#95)
     // STRUCT allows mixed types: {'method': 'Naive', 'gap': 2, 'clip_horizon': true}
     // params supports:
@@ -1504,7 +1504,7 @@ FROM fold_end_times
     //   - Univariate models: uses internal _ts_forecast function
     //   - Regression models: prepares data via ts_prepare_regression_input (target=NULL for test)
     // Returns: fold_id, group_col, date, forecast, actual, error, abs_error, model_name, fold_metric_score
-    {"ts_backtest_auto", {"source", "group_col", "date_col", "target_col", "horizon", "folds", "frequency", "params", nullptr}, {{"features", "NULL"}, {"metric", "'rmse'"}, {nullptr, nullptr}},
+    {"ts_backtest_auto_by", {"source", "group_col", "date_col", "target_col", "horizon", "folds", "frequency", "params", nullptr}, {{"features", "NULL"}, {"metric", "'rmse'"}, {nullptr, nullptr}},
 R"(
 WITH _params AS (
     SELECT
@@ -1741,15 +1741,15 @@ JOIN fold_metrics m ON b.fold_id = m.fold_id
 ORDER BY b.fold_id, b.group_col, b.date
 )"},
 
-    // ts_prepare_regression_input: Prepare data for regression models in CV backtest
-    // C++ API: ts_prepare_regression_input(cv_splits, source, src_group_col, src_date_col, target_col, params)
+    // ts_prepare_regression_input_by: Prepare data for regression models in CV backtest
+    // C++ API: ts_prepare_regression_input_by(cv_splits, source, src_group_col, src_date_col, target_col, params)
     // This is the "Adapter" for anofox-statistics regression models.
     // For TEST rows: target is set to NULL (model will predict these)
     // For TRAIN rows: target keeps original value
     // All features from source table are preserved
     // params MAP supports: include_features (VARCHAR[]), known_features (VARCHAR[])
     // Returns: fold_id, split, group_col, date_col, masked_target, _is_test, plus all source columns
-    {"ts_prepare_regression_input", {"cv_splits", "source", "src_group_col", "src_date_col", "target_col", "params", nullptr}, {{nullptr, nullptr}},
+    {"ts_prepare_regression_input_by", {"cv_splits", "source", "src_group_col", "src_date_col", "target_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH cv AS (
     SELECT
@@ -1782,14 +1782,14 @@ JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
 ORDER BY cv._fold_id, cv._cv_grp, cv._cv_dt
 )"},
 
-    // ts_conformal: Compute conformal prediction intervals for grouped series
-    // C++ API: ts_conformal(backtest_results, group_col, actual_col, forecast_col, point_forecast_col, params)
+    // ts_conformal_by: Compute conformal prediction intervals for grouped series
+    // C++ API: ts_conformal_by(backtest_results, group_col, actual_col, forecast_col, point_forecast_col, params)
     // backtest_results: Table with backtest residuals (actual - forecast)
     // params MAP supports:
     //   alpha (DOUBLE) - miscoverage rate (default 0.1 for 90% coverage)
     //   method (VARCHAR) - 'symmetric' or 'asymmetric' (default 'symmetric')
     // Returns: group_col, point, lower, upper, coverage, conformity_score, method
-    {"ts_conformal", {"backtest_results", "group_col", "actual_col", "forecast_col", "point_forecast_col", "params", nullptr}, {{nullptr, nullptr}},
+    {"ts_conformal_by", {"backtest_results", "group_col", "actual_col", "forecast_col", "point_forecast_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH _params AS (
     SELECT
@@ -1868,12 +1868,12 @@ SELECT
 FROM residuals
 )"},
 
-    // ts_conformal_apply: Apply pre-computed conformity score to forecasts
-    // C++ API: ts_conformal_apply(forecast_results, group_col, forecast_col, conformity_score)
+    // ts_conformal_apply_by: Apply pre-computed conformity score to forecasts
+    // C++ API: ts_conformal_apply_by(forecast_results, group_col, forecast_col, conformity_score)
     // forecast_results: Table with point forecasts
     // conformity_score: Pre-computed score from ts_conformal_calibrate
     // Returns: group_col, forecast, lower, upper
-    {"ts_conformal_apply", {"forecast_results", "group_col", "forecast_col", "conformity_score", nullptr}, {{nullptr, nullptr}},
+    {"ts_conformal_apply_by", {"forecast_results", "group_col", "forecast_col", "conformity_score", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH intervals AS (
     SELECT
@@ -1893,10 +1893,10 @@ SELECT
 FROM intervals
 )"},
 
-    // ts_interval_width: Compute mean interval width for grouped series
-    // C++ API: ts_interval_width(results, group_col, lower_col, upper_col)
+    // ts_interval_width_by: Compute mean interval width for grouped series
+    // C++ API: ts_interval_width_by(results, group_col, lower_col, upper_col)
     // Returns: group_col, mean_width, n_intervals
-    {"ts_interval_width", {"results", "group_col", "lower_col", "upper_col", nullptr}, {{nullptr, nullptr}},
+    {"ts_interval_width_by", {"results", "group_col", "lower_col", "upper_col", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT
     group_col AS group_col,

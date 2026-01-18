@@ -257,7 +257,7 @@ true
 
 # Test apply returns expected number of rows (one per group)
 query I
-SELECT COUNT(*) FROM ts_conformal_apply(
+SELECT COUNT(*) FROM ts_conformal_apply_by(
     'conformal_forecasts', series_id, point_forecast, 5.0
 );
 ----
@@ -265,7 +265,7 @@ SELECT COUNT(*) FROM ts_conformal_apply(
 
 # Test apply returns both groups
 query I
-SELECT COUNT(DISTINCT group_col) FROM ts_conformal_apply(
+SELECT COUNT(DISTINCT group_col) FROM ts_conformal_apply_by(
     'conformal_forecasts', series_id, point_forecast, 5.0
 );
 ----
@@ -275,7 +275,7 @@ SELECT COUNT(DISTINCT group_col) FROM ts_conformal_apply(
 query I
 SELECT
     MIN(lower[1]) < MIN(upper[1])
-FROM ts_conformal_apply(
+FROM ts_conformal_apply_by(
     'conformal_forecasts', series_id, point_forecast, 5.0
 );
 ----
@@ -298,7 +298,7 @@ CROSS JOIN (SELECT UNNEST(['A', 'B']) AS series_id) s;
 
 # Test interval_width returns one row per group
 query I
-SELECT COUNT(*) FROM ts_interval_width(
+SELECT COUNT(*) FROM ts_interval_width_by(
     'test_intervals', series_id, lower_bound, upper_bound
 );
 ----
@@ -308,7 +308,7 @@ SELECT COUNT(*) FROM ts_interval_width(
 # Series A: width = 15 (upper - lower = 110+5 - 100 = 15)
 # Series B: width = 10 (upper - lower = 110 - 100 = 10)
 query II
-SELECT group_col, mean_width FROM ts_interval_width(
+SELECT group_col, mean_width FROM ts_interval_width_by(
     'test_intervals', series_id, lower_bound, upper_bound
 ) ORDER BY group_col;
 ----
@@ -317,7 +317,7 @@ B	10.0
 
 # Test n_intervals count
 query II
-SELECT group_col, n_intervals FROM ts_interval_width(
+SELECT group_col, n_intervals FROM ts_interval_width_by(
     'test_intervals', series_id, lower_bound, upper_bound
 ) ORDER BY group_col;
 ----
@@ -340,7 +340,7 @@ WITH calibration AS (
     )
 ),
 intervals AS (
-    SELECT * FROM ts_conformal_apply(
+    SELECT * FROM ts_conformal_apply_by(
         'conformal_forecasts', series_id, point_forecast,
         (SELECT conformity_score FROM calibration)
     )
@@ -415,7 +415,7 @@ FROM range(1, 21) t(i);
 
 # Test ts_conformal returns results
 query I
-SELECT COUNT(*) > 0 FROM ts_conformal(
+SELECT COUNT(*) > 0 FROM ts_conformal_by(
     'conformal_test_backtest',
     group_col,
     actual,

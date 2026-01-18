@@ -121,7 +121,7 @@ SELECT 'X' AS id, ('2023-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS d
 FROM generate_series(0, 3) AS t(i);
 
 query I
-SELECT COUNT(*) FROM ts_diff('diff_test', id, date, val, 1) WHERE diff_value IS NOT NULL;
+SELECT COUNT(*) FROM ts_diff_by('diff_test', id, date, val, 1) WHERE diff_value IS NOT NULL;
 ----
 3
 
@@ -136,22 +136,22 @@ UNION ALL SELECT 'X', '2023-01-02', NULL
 UNION ALL SELECT 'X', '2023-01-03', 3.0;
 
 query I
-SELECT COUNT(*) FROM ts_fill_nulls_const('impute_test', id, date, val, 0.0);
+SELECT COUNT(*) FROM ts_fill_nulls_const_by('impute_test', id, date, val, 0.0);
 ----
 3
 
 query I
-SELECT COUNT(*) FROM ts_fill_nulls_forward('impute_test', id, date, val);
+SELECT COUNT(*) FROM ts_fill_nulls_forward_by('impute_test', id, date, val);
 ----
 3
 
 query I
-SELECT COUNT(*) FROM ts_fill_nulls_backward('impute_test', id, date, val);
+SELECT COUNT(*) FROM ts_fill_nulls_backward_by('impute_test', id, date, val);
 ----
 3
 
 query I
-SELECT COUNT(*) FROM ts_fill_nulls_mean('impute_test', id, date, val);
+SELECT COUNT(*) FROM ts_fill_nulls_mean_by('impute_test', id, date, val);
 ----
 3
 
@@ -168,17 +168,17 @@ UNION ALL SELECT 'X', '2023-01-04', 2.0
 UNION ALL SELECT 'X', '2023-01-05', 0.0;
 
 query I
-SELECT COUNT(*) FROM ts_drop_leading_zeros('drop_test', id, date, val);
+SELECT COUNT(*) FROM ts_drop_leading_zeros_by('drop_test', id, date, val);
 ----
 3
 
 query I
-SELECT COUNT(*) FROM ts_drop_trailing_zeros('drop_test', id, date, val);
+SELECT COUNT(*) FROM ts_drop_trailing_zeros_by('drop_test', id, date, val);
 ----
 4
 
 query I
-SELECT COUNT(*) FROM ts_drop_edge_zeros('drop_test', id, date, val);
+SELECT COUNT(*) FROM ts_drop_edge_zeros_by('drop_test', id, date, val);
 ----
 2
 
