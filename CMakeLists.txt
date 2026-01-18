@@ -130,6 +130,8 @@ set(EXTENSION_SOURCES
     src/aggregate_functions/ts_changepoints_agg.cpp
     src/aggregate_functions/ts_features_agg.cpp
     src/aggregate_functions/ts_classify_seasonality_agg.cpp
+    src/aggregate_functions/ts_stats_agg.cpp
+    src/aggregate_functions/ts_data_quality_agg.cpp
     src/macros/ts_macros.cpp
 )
 

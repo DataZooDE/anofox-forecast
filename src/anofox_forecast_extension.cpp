@@ -97,6 +97,8 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsFeaturesFunction(loader);
     RegisterTsFeaturesListFunction(loader);
     RegisterTsFeaturesAggFunction(loader);
+    RegisterTsStatsAggFunction(loader);
+    RegisterTsDataQualityAggFunction(loader);
     RegisterTsFeaturesConfigFromJsonFunction(loader);
     RegisterTsFeaturesConfigFromCsvFunction(loader);
     RegisterTsFeaturesConfigTemplateFunction(loader);

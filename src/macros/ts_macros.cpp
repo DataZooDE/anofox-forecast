@@ -2110,6 +2110,38 @@ FROM query_table(source::VARCHAR)
 GROUP BY unique_id_col
 )"},
 
+    // ts_features_table: Extract features from a single-series table
+    // C++ API: ts_features_table(table_name, date_col, value_col)
+    // Returns: STRUCT with all feature values
+    {"ts_features_table", {"source", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    ts_features_agg(date_col, value_col::DOUBLE) AS features
+FROM query_table(source::VARCHAR)
+)"},
+
+    // ts_features_by: Extract features per group
+    // C++ API: ts_features_by(table_name, group_col, date_col, value_col)
+    // Returns: TABLE(id, features STRUCT)
+    {"ts_features_by", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    group_col AS id,
+    ts_features_agg(date_col, value_col::DOUBLE) AS features
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)"},
+
+    // ts_classify_seasonality: Classify seasonality for a single series
+    // C++ API: ts_classify_seasonality(table_name, date_col, value_col, period)
+    // Returns: STRUCT with classification results
+    {"ts_classify_seasonality", {"source", "date_col", "value_col", "period", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    ts_classify_seasonality_agg(date_col, value_col::DOUBLE, period::DOUBLE) AS classification
+FROM query_table(source::VARCHAR)
+)"},
+
     // Sentinel
     {nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}
 };

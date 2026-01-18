@@ -156,6 +156,74 @@ GROUP BY product_id;
 
 ---
 
+## Table Macros
+
+### ts_features_table
+
+Extract features from a single-series table (no grouping).
+
+**Signature:**
+```sql
+ts_features_table(source VARCHAR, date_col COLUMN, value_col COLUMN) → TABLE
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Source table name |
+| `date_col` | COLUMN | Date/timestamp column |
+| `value_col` | COLUMN | Value column |
+
+**Returns:** Single row with `features` STRUCT containing 117 feature columns.
+
+**Example:**
+```sql
+-- Extract features from a single-series table
+SELECT * FROM ts_features_table('daily_revenue', date, amount);
+
+-- Access specific features from result
+SELECT (features).mean, (features).standard_deviation
+FROM ts_features_table('daily_revenue', date, amount);
+```
+
+---
+
+### ts_features_by
+
+Extract features per group from a multi-series table.
+
+**Signature:**
+```sql
+ts_features_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Source table name |
+| `group_col` | COLUMN | Column for grouping series |
+| `date_col` | COLUMN | Date/timestamp column |
+| `value_col` | COLUMN | Value column |
+
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | (same as group_col) | Group identifier |
+| `features` | STRUCT | 117-field feature struct |
+
+**Example:**
+```sql
+-- Extract features per product
+SELECT * FROM ts_features_by('sales', product_id, date, quantity);
+
+-- Filter by specific feature values
+SELECT id, (features).mean, (features).trend_strength
+FROM ts_features_by('sales', product_id, date, quantity)
+WHERE (features).length > 30;
+```
+
+---
+
 ## Advanced: Feature Configuration
 
 > **Note:** These functions help manage feature sets for large-scale extraction.

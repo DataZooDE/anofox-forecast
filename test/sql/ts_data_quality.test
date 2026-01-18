@@ -174,3 +174,81 @@ SELECT count(*) FROM ts_data_quality_by('test_dq_by', unique_id, date, value, 3,
 statement ok
 DROP TABLE test_dq_by;
 
+#######################################
+# ts_data_quality_agg - Aggregate Function Tests
+#######################################
+
+# Create test data for aggregate tests
+statement ok
+CREATE TABLE test_dq_agg AS
+SELECT 'A' AS id,
+       ('2023-01-01'::DATE + (i || ' days')::INTERVAL)::TIMESTAMP AS date,
+       (i + 1)::DOUBLE AS value
+FROM generate_series(0, 9) AS t(i)
+UNION ALL
+SELECT 'B' AS id,
+       ('2023-01-01'::DATE + (i || ' days')::INTERVAL)::TIMESTAMP AS date,
+       5.0::DOUBLE AS value
+FROM generate_series(0, 9) AS t(i);
+
+# Test ts_data_quality_agg returns STRUCT with overall_score
+query I
+SELECT (ts_data_quality_agg(date, value)).overall_score IS NOT NULL
+FROM test_dq_agg
+WHERE id = 'A';
+----
+true
+
+# Test ts_data_quality_agg returns STRUCT with structural_score
+query I
+SELECT (ts_data_quality_agg(date, value)).structural_score IS NOT NULL
+FROM test_dq_agg
+WHERE id = 'A';
+----
+true
+
+# Test ts_data_quality_agg detects constant series
+query I
+SELECT (ts_data_quality_agg(date, value)).is_constant
+FROM test_dq_agg
+WHERE id = 'B';
+----
+true
+
+# Test ts_data_quality_agg non-constant series
+query I
+SELECT (ts_data_quality_agg(date, value)).is_constant
+FROM test_dq_agg
+WHERE id = 'A';
+----
+false
+
+# Test ts_data_quality_agg with GROUP BY
+query II
+SELECT id, (ts_data_quality_agg(date, value)).is_constant
+FROM test_dq_agg
+GROUP BY id
+ORDER BY id;
+----
+A	false
+B	true
+
+# Test ts_data_quality_agg quality scores are between 0 and 1
+query I
+SELECT (ts_data_quality_agg(date, value)).overall_score >= 0
+   AND (ts_data_quality_agg(date, value)).overall_score <= 1
+FROM test_dq_agg
+WHERE id = 'A';
+----
+true
+
+# Test ts_data_quality_agg with aliased name
+query I
+SELECT (anofox_fcst_ts_data_quality_agg(date, value)).overall_score IS NOT NULL
+FROM test_dq_agg
+WHERE id = 'A';
+----
+true
+
+statement ok
+DROP TABLE test_dq_agg;

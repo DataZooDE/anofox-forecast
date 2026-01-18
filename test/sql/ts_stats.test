@@ -222,3 +222,77 @@ DROP TABLE test_summary_stats;
 
 statement ok
 DROP TABLE test_summary_data;
+
+#######################################
+# ts_stats_agg - Aggregate Function Tests
+#######################################
+
+# Create test data for aggregate tests
+statement ok
+CREATE TABLE test_agg_series AS
+SELECT 'A' AS id,
+       ('2023-01-01'::DATE + (i || ' days')::INTERVAL)::TIMESTAMP AS date,
+       (i + 1)::DOUBLE AS value
+FROM generate_series(0, 9) AS t(i)
+UNION ALL
+SELECT 'B' AS id,
+       ('2023-01-01'::DATE + (i || ' days')::INTERVAL)::TIMESTAMP AS date,
+       (i * 2)::DOUBLE AS value
+FROM generate_series(0, 9) AS t(i);
+
+# Test ts_stats_agg basic aggregation
+query II
+SELECT id, (ts_stats_agg(date, value)).length
+FROM test_agg_series
+GROUP BY id
+ORDER BY id;
+----
+A	10
+B	10
+
+# Test ts_stats_agg mean calculation
+query IR
+SELECT id, (ts_stats_agg(date, value)).mean
+FROM test_agg_series
+GROUP BY id
+ORDER BY id;
+----
+A	5.5
+B	9.0
+
+# Test ts_stats_agg min/max
+query IRR
+SELECT id, (ts_stats_agg(date, value)).min, (ts_stats_agg(date, value)).max
+FROM test_agg_series
+GROUP BY id
+ORDER BY id;
+----
+A	1.0	10.0
+B	0.0	18.0
+
+# Test ts_stats_agg variance (should be non-zero for non-constant series)
+query I
+SELECT (ts_stats_agg(date, value)).variance > 0
+FROM test_agg_series
+WHERE id = 'A';
+----
+true
+
+# Test ts_stats_agg returns STRUCT with expected fields
+query I
+SELECT (ts_stats_agg(date, value)).sum IS NOT NULL
+FROM test_agg_series
+WHERE id = 'A';
+----
+true
+
+# Test ts_stats_agg with aliased name
+query I
+SELECT (anofox_fcst_ts_stats_agg(date, value)).length
+FROM test_agg_series
+WHERE id = 'A';
+----
+10
+
+statement ok
+DROP TABLE test_agg_series;

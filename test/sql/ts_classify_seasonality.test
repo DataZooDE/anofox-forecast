@@ -211,6 +211,44 @@ statement ok
 DROP TABLE grouped_seasonal;
 
 #######################################
+# ts_classify_seasonality - Single-Series Table Macro Tests
+#######################################
+
+# Create single-series test data
+statement ok
+CREATE TABLE single_seasonal AS
+SELECT ('2024-01-01'::TIMESTAMP + INTERVAL (id - 1) DAY)::TIMESTAMP AS ts,
+       [10.0, 20.0, 30.0, 40.0][(id - 1) % 4 + 1] AS val
+FROM generate_series(1, 16) AS t(id);
+
+# Test single-series macro returns a result
+query I
+SELECT (classification).timing_classification IS NOT NULL FROM ts_classify_seasonality('single_seasonal', ts, val, 4.0);
+----
+true
+
+# Test single-series macro returns is_seasonal field
+query I
+SELECT (classification).is_seasonal IS NOT NULL FROM ts_classify_seasonality('single_seasonal', ts, val, 4.0);
+----
+true
+
+# Test single-series macro returns modulation_type field
+query I
+SELECT (classification).modulation_type IS NOT NULL FROM ts_classify_seasonality('single_seasonal', ts, val, 4.0);
+----
+true
+
+# Test single-series macro returns seasonal_strength field
+query I
+SELECT (classification).seasonal_strength >= 0 FROM ts_classify_seasonality('single_seasonal', ts, val, 4.0);
+----
+true
+
+statement ok
+DROP TABLE single_seasonal;
+
+#######################################
 # anofox_fcst_ Prefix Tests
 #######################################
 

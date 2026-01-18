@@ -67,6 +67,8 @@ void RegisterTsDetectChangepointsAggFunction(ExtensionLoader &loader);
 void RegisterTsFeaturesFunction(ExtensionLoader &loader);
 void RegisterTsFeaturesListFunction(ExtensionLoader &loader);
 void RegisterTsFeaturesAggFunction(ExtensionLoader &loader);
+void RegisterTsStatsAggFunction(ExtensionLoader &loader);
+void RegisterTsDataQualityAggFunction(ExtensionLoader &loader);
 void RegisterTsFeaturesConfigFromJsonFunction(ExtensionLoader &loader);
 void RegisterTsFeaturesConfigFromCsvFunction(ExtensionLoader &loader);
 void RegisterTsFeaturesConfigTemplateFunction(ExtensionLoader &loader);

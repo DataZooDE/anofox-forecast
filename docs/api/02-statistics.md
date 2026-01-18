@@ -115,6 +115,72 @@ HAVING (ts_data_quality(LIST(value ORDER BY date))).overall_score < 0.8;
 
 ---
 
+## Aggregate Functions
+
+### ts_stats_agg
+
+Compute statistics per group using GROUP BY.
+
+**Signature:**
+```sql
+ts_stats_agg(date_col TIMESTAMP, value_col DOUBLE) → STRUCT
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `date_col` | TIMESTAMP | Date/timestamp column |
+| `value_col` | DOUBLE | Value column |
+
+**Returns:** Same STRUCT as `_ts_stats` with 34 statistical metrics.
+
+**Example:**
+```sql
+-- Compute statistics per product using GROUP BY
+SELECT
+    product_id,
+    (ts_stats_agg(date, value)).mean AS mean,
+    (ts_stats_agg(date, value)).std_dev AS std_dev,
+    (ts_stats_agg(date, value)).length AS length
+FROM sales
+GROUP BY product_id;
+```
+
+---
+
+### ts_data_quality_agg
+
+Assess data quality per group using GROUP BY.
+
+**Signature:**
+```sql
+ts_data_quality_agg(date_col TIMESTAMP, value_col DOUBLE) → STRUCT
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `date_col` | TIMESTAMP | Date/timestamp column |
+| `value_col` | DOUBLE | Value column |
+
+**Returns:** STRUCT with quality metrics:
+- `structural_score`, `temporal_score`, `magnitude_score`, `behavioral_score`
+- `overall_score` (0-1, higher is better)
+- `n_gaps`, `n_missing`, `is_constant`
+
+**Example:**
+```sql
+-- Assess data quality per product
+SELECT
+    product_id,
+    (ts_data_quality_agg(date, value)).overall_score AS quality_score,
+    (ts_data_quality_agg(date, value)).is_constant AS is_constant
+FROM sales
+GROUP BY product_id;
+```
+
+---
+
 ## Table Macros
 
 ### ts_stats (Table Macro)
