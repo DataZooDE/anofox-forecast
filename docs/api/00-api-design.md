@@ -107,16 +107,21 @@ The following table shows which API variants exist for each functionality:
 |---------------|--------|-----------|-------------|-------------|
 | **Forecasting** | - | `ts_forecast_agg` | `ts_forecast` | `ts_forecast_by` |
 | **Statistics** | `_ts_stats`* | - | `ts_stats` | `ts_stats_by` |
-| **Features** | - | `ts_features`, `ts_features_agg` | - | - |
+| **Features** | `ts_features` | `ts_features_agg` | - | - |
+| **Data Quality** | `_ts_data_quality`* | - | `ts_data_quality` | `ts_data_quality_by` |
 | **Changepoints** | - | `ts_detect_changepoints_agg` | `ts_detect_changepoints` | `ts_detect_changepoints_by` |
 | **Seasonality** | - | `ts_classify_seasonality_agg` | - | `ts_classify_seasonality_by` |
 | **Period Detection** | `ts_detect_periods` | - | - | - |
-| **Decomposition** | - | - | `ts_mstl_decomposition` | - |
-| **Metrics** | `ts_mae`, `ts_rmse`, etc. | - | - | - |
-| **Conformal** | `ts_conformal_*` | - | `ts_conformal` macros | - |
-| **Data Quality** | `_ts_data_quality`* | - | `ts_data_quality` | `ts_data_quality_by` |
+| **Decomposition** | - | - | `ts_mstl_decomposition`† | - |
+| **Metrics** | `ts_mae`, `ts_rmse`, ...‡ | - | - | - |
+| **Conformal** | `ts_conformal_*`§ | - | `ts_conformal`, `ts_conformal_calibrate`, `ts_conformal_apply` | - |
+| **Data Prep** | - | - | `ts_fill_gaps`, `ts_diff`, `ts_drop_*`¶ | - |
 
 *Internal scalar functions (underscore prefix) used by table macros
+†MSTL is algorithm name, exception to `ts_<operation>` naming pattern
+‡12 metric functions - see [Evaluation Metrics](07-evaluation-metrics.md)
+§9 conformal scalar functions - see [Conformal Prediction](11-conformal-prediction.md)
+¶15+ data preparation macros - see [Data Preparation](03-data-preparation.md)
 
 ---
 
