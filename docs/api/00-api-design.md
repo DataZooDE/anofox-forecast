@@ -12,22 +12,47 @@ For any time series operation `<operation>`, the API can provide up to three var
 
 | API Type | Function Pattern | Use Case |
 |----------|------------------|----------|
-| **Scalar** | `ts_<operation>(values[], ...)` | Array input, composable with `GROUP BY + LIST()` |
+| **Scalar** | `ts_<operation>(values[], ...)` | Simple array→value computations |
 | **Aggregate** | `ts_<operation>_agg(date, value, ...)` | Direct GROUP BY accumulation |
 | **Table Macro** | `ts_<operation>_by(source, group, date, value, ...)` | Multi-series table operation |
 
-### When to Use Each
+### When to Implement Each Tier
+
+Not every operation needs all three tiers. Use this decision guide:
+
+| Tier | Implement When | Skip When |
+|------|----------------|-----------|
+| **Scalar** | Simple metrics (array→number), composable in expressions | Complex output, needs table context |
+| **Aggregate** | Natural fit for GROUP BY workflows | Operation is inherently table-level |
+| **Table `_by`** | Multi-series operations, clean table output | N/A (always implement for grouped ops) |
+| **Table (single)** | Single-series version is useful | Only grouped version makes sense |
+
+### Scalar Functions: Design Guidance
+
+**DO expose public scalars for:**
+- Simple metrics: `ts_mae(actual[], forecast[])` → `DOUBLE`
+- Composable in SQL expressions: `WHERE ts_mae(a, b) < threshold`
+- Conformal prediction workflow (arrays passed between steps)
+
+**DON'T expose public scalars for:**
+- Complex structured output (use table macro instead)
+- Operations requiring table context (dates, ordering)
+- When aggregate provides cleaner syntax
+
+**Internal scalars** (underscore prefix like `_ts_stats`) are implementation details for table macros, not user-facing API.
+
+### When to Use Each (User Perspective)
 
 ```sql
--- SCALAR: When you already have arrays or want to compose with LIST()
-SELECT product_id, ts_stats(LIST(value ORDER BY date)) AS stats
-FROM sales GROUP BY product_id;
+-- SCALAR: Simple metrics, composable in expressions
+SELECT product_id, ts_mae(LIST(actual ORDER BY date), LIST(forecast ORDER BY date)) AS mae
+FROM results GROUP BY product_id;
 
--- AGGREGATE: When you want direct GROUP BY without LIST()
+-- AGGREGATE: Complex operations with GROUP BY (avoids LIST() boilerplate)
 SELECT product_id, ts_forecast_agg(date, value, 'AutoETS', 12, MAP{}) AS forecast
 FROM sales GROUP BY product_id;
 
--- TABLE MACRO: Cleanest syntax for table-level operations
+-- TABLE MACRO: Cleanest syntax, structured table output
 SELECT * FROM ts_forecast_by('sales', product_id, date, value, 'AutoETS', 12, MAP{});
 ```
 
@@ -107,22 +132,35 @@ The following table shows which API variants exist for each functionality:
 |---------------|--------|-----------|-------------|-------------|
 | **Forecasting** | - | `ts_forecast_agg` | `ts_forecast` | `ts_forecast_by` |
 | **Statistics** | `_ts_stats`* | `ts_stats_agg` | `ts_stats` | `ts_stats_by` |
-| **Features** | `ts_features` | `ts_features_agg` | `ts_features_table` | `ts_features_by` |
+| **Features** | `_ts_features`* | `ts_features_agg` | `ts_features_table` | `ts_features_by` |
 | **Data Quality** | `_ts_data_quality`* | `ts_data_quality_agg` | `ts_data_quality` | `ts_data_quality_by` |
 | **Changepoints** | - | `ts_detect_changepoints_agg` | `ts_detect_changepoints` | `ts_detect_changepoints_by` |
 | **Seasonality** | - | `ts_classify_seasonality_agg` | `ts_classify_seasonality` | `ts_classify_seasonality_by` |
 | **Period Detection** | `ts_detect_periods` | - | - | - |
-| **Decomposition** | - | - | - | `ts_mstl_decomposition_by` |
-| **Metrics** | `ts_mae`, `ts_rmse`, ...† | - | - | - |
+| **Decomposition** | `_ts_mstl_decomposition`* | - | - | `ts_mstl_decomposition_by` |
+| **Metrics** | `ts_mae`, `ts_rmse`, ...† | - | - | ○ |
 | **Conformal** | `ts_conformal_*`‡ | - | `ts_conformal_calibrate` | `ts_conformal_by`, `ts_conformal_apply_by` |
 | **Data Prep** | - | - | - | `ts_fill_gaps_by`, `ts_diff_by`, `ts_drop_*_by`§ |
 | **Cross-Val** | - | - | - | `ts_cv_split_by`, `ts_backtest_auto_by`¶ |
 
-*Internal scalar functions (underscore prefix) used by table macros
+**Legend:** ✓ = exists, - = not applicable, ○ = planned/makes sense
+
+*Internal scalar functions (underscore prefix) - implementation details for table macros
 †12 metric functions - see [Evaluation Metrics](07-evaluation-metrics.md)
 ‡9 conformal scalar functions - see [Conformal Prediction](11-conformal-prediction.md)
 §15+ data preparation macros - see [Data Preparation](03-data-preparation.md)
 ¶8+ cross-validation macros - see [Cross-Validation](06-cross-validation.md)
+
+### API Design Rationale
+
+| Category | Scalar | Aggregate | Table `_by` | Notes |
+|----------|--------|-----------|-------------|-------|
+| **Metrics** | ✓ Public | - | ○ Planned | Scalars useful in expressions; `_by` enables per-group metrics |
+| **Statistics/Features** | Internal | ✓ | ✓ | Aggregate cleaner than `LIST()` boilerplate |
+| **Decomposition** | Internal | - | ✓ | Complex output suits table format |
+| **Data Prep** | - | - | ✓ | Requires table context (dates, ordering) |
+| **Cross-Val** | - | - | ✓ | Inherently table-level operations |
+| **Conformal** | ✓ Public | - | ✓ | Workflow passes arrays; also needs table ops |
 
 ---
 
@@ -183,7 +221,7 @@ SELECT * FROM ts_forecast_by('sales', product_id, date, value, 'AutoETS', 12, MA
 SELECT * FROM ts_stats_by('sales', product_id, date, value);
 
 -- One-liner backtest
-SELECT * FROM ts_backtest_auto('sales', product_id, date, value, 7, 3, '1d', MAP{});
+SELECT * FROM ts_backtest_auto_by('sales', product_id, date, value, 7, 3, '1d', MAP{});
 ```
 
 ---
@@ -254,9 +292,35 @@ When adding new time series functionality, follow this checklist:
 1. **Naming**: Use `ts_<operation>` pattern
 2. **Register both names**: `ts_*` and `anofox_fcst_ts_*`
 3. **Parameter order**: Follow standard column ordering
-4. **Consider all tiers**: Decide which API variants to implement
+4. **Choose appropriate tiers** (see decision guide below)
 5. **Return types**: Use STRUCT for complex results
 6. **Document**: Add to appropriate `docs/api/*.md` file
+
+### Tier Selection Guide
+
+```
+Is output simple (array → number)?
+├─ YES → Implement PUBLIC SCALAR (ts_<op>)
+│        Example: ts_mae, ts_rmse
+└─ NO → Is it a grouped/multi-series operation?
+        ├─ YES → Implement TABLE MACRO _BY (ts_<op>_by)
+        │        Also consider: Aggregate if GROUP BY natural
+        └─ NO → Implement TABLE MACRO (ts_<op>)
+
+Does it need internal array processing for table macros?
+├─ YES → Implement INTERNAL SCALAR (_ts_<op>)
+│        Keep hidden from users (underscore prefix)
+└─ NO → Skip scalar tier
+```
+
+### Examples by Category
+
+| New Function Type | Implement | Skip |
+|-------------------|-----------|------|
+| Simple metric | Scalar, Table `_by` | Aggregate (scalar suffices) |
+| Complex analysis | Aggregate, Table `_by` | Public scalar |
+| Data transformation | Table `_by` only | Scalar, Aggregate |
+| Table-level operation | Table `_by` only | Scalar, Aggregate |
 
 ---
 
