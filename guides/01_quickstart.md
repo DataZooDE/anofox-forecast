@@ -2,17 +2,17 @@
 
 ## Introduction
 
-The Anofox Forecast extension provides time series forecasting capabilities within DuckDB. The extension implements 31 forecasting models through the anofox-time C++ library, accessible via SQL table functions, aggregates, and scalar functions.
+The Anofox Forecast extension provides time series forecasting capabilities within DuckDB. The extension implements 32 forecasting models through the [anofox-forecast](https://crates.io/crates/anofox-forecast) Rust library, accessible via SQL table functions, aggregates, and scalar functions.
 
 ### Core Forecasting Functions
 
-- **anofox_fcst_ts_forecast**: Single time series forecasting
-- **anofox_fcst_ts_forecast_by**: Multiple time series forecasting with GROUP BY parallelization
-- **anofox_fcst_ts_forecast_agg**: Aggregate function for custom GROUP BY patterns
+- **ts_forecast**: Single time series forecasting
+- **ts_forecast_by**: Multiple time series forecasting with GROUP BY parallelization
+- **ts_forecast_agg**: Aggregate function for custom GROUP BY patterns
 
 ### Prerequisites
 
-- DuckDB version 1.4.2 or higher
+- DuckDB version 1.4.3 or higher
 - Anofox Forecast extension built and accessible
 - Basic SQL knowledge
 
@@ -38,24 +38,24 @@ SELECT * FROM my_sales LIMIT 5;
 
 ### Generate Forecast
 
-Use `anofox_fcst_ts_forecast` to generate forecasts for a single time series:
+Use `ts_forecast` to generate forecasts for a single time series:
 
 ```sql
 -- Create sample data
 CREATE TABLE my_sales AS
-SELECT 
+SELECT
     DATE '2023-01-01' + INTERVAL (d) DAY AS date,
     100 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales
 FROM generate_series(0, 89) t(d);  -- 90 days of data
 
 -- Forecast next 14 days
-SELECT * FROM anofox_fcst_ts_forecast(
+SELECT * FROM ts_forecast(
     'my_sales',      -- table name
     date,            -- date column
     sales,           -- value column
     'AutoETS',       -- model (automatic)
     14,              -- horizon (14 days)
-    MAP{'seasonal_period': 7}  -- weekly seasonality
+    {'seasonal_period': 7}  -- weekly seasonality
 );
 ```
 
@@ -104,33 +104,33 @@ FROM generate_series(0, 89) t(d);  -- 90 days of data
 
 -- Compare forecasts from different models using the same dataset
 -- Model 1: AutoETS (automatic exponential smoothing)
-SELECT 
-    forecast_step, 
-    date, 
+SELECT
+    forecast_step,
+    date,
     point_forecast,
     lower_90,
     upper_90
-FROM anofox_fcst_ts_forecast('my_sales', date, sales, 'AutoETS', 14, MAP{'seasonal_period': 7})
+FROM ts_forecast('my_sales', date, sales, 'AutoETS', 14, {'seasonal_period': 7})
 LIMIT 5;
 
 -- Model 2: SES (Simple Exponential Smoothing)
-SELECT 
-    forecast_step, 
-    date, 
+SELECT
+    forecast_step,
+    date,
     point_forecast,
     lower_90,
     upper_90
-FROM anofox_fcst_ts_forecast('my_sales', date, sales, 'SES', 14, MAP{})
+FROM ts_forecast('my_sales', date, sales, 'SES', 14, {})
 LIMIT 5;
 
 -- Model 3: Theta (theta decomposition method)
-SELECT 
-    forecast_step, 
-    date, 
+SELECT
+    forecast_step,
+    date,
     point_forecast,
     lower_90,
     upper_90
-FROM anofox_fcst_ts_forecast('my_sales', date, sales, 'Theta', 14, MAP{'seasonal_period': 7})
+FROM ts_forecast('my_sales', date, sales, 'Theta', 14, {'seasonal_period': 7})
 LIMIT 5;
 
 ```
@@ -145,12 +145,12 @@ All three models require the `seasonal_period` parameter for weekly seasonality 
 
 ## Multiple Series Forecasting
 
-Use `anofox_fcst_ts_forecast_by` to forecast multiple time series in parallel:
+Use `ts_forecast_by` to forecast multiple time series in parallel:
 
 ```sql
 -- Create multi-product data
 CREATE TABLE product_sales AS
-SELECT 
+SELECT
     product_id,
     DATE '2023-01-01' + INTERVAL (d) DAY AS date,
     100 + product_id * 20 + 30 * SIN(2 * PI() * d / 7) + (RANDOM() * 10) AS sales
@@ -158,18 +158,18 @@ FROM generate_series(0, 89) t(d)
 CROSS JOIN (VALUES (1), (2), (3)) products(product_id);
 
 -- Forecast all products at once
-SELECT 
+SELECT
     product_id,
     forecast_step,
     ROUND(point_forecast, 2) AS forecast
-FROM anofox_fcst_ts_forecast_by(
+FROM ts_forecast_by(
     'product_sales',
     product_id,      -- GROUP BY this column
     date,
     sales,
     'AutoETS',
     14,
-    MAP{'seasonal_period': 7}
+    {'seasonal_period': 7}
 )
 WHERE forecast_step <= 3
 ORDER BY product_id, forecast_step;
@@ -177,7 +177,7 @@ ORDER BY product_id, forecast_step;
 
 **Output Schema:**
 
-The function returns the same columns as `anofox_fcst_ts_forecast`, plus:
+The function returns the same columns as `ts_forecast`, plus:
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -204,10 +204,10 @@ The function returns the same columns as `anofox_fcst_ts_forecast`, plus:
 
 **Error: "SeasonalNaive model requires 'seasonal_period' parameter"**
 
-Seasonal models require the `seasonal_period` parameter in the `params` MAP. Ensure the parameter is provided:
+Seasonal models require the `seasonal_period` parameter in the params STRUCT. Ensure the parameter is provided:
 
 ```sql
-SELECT * FROM anofox_fcst_ts_forecast(
+SELECT * FROM ts_forecast(
     'my_sales', date, sales, 'SeasonalNaive', 14,
     {'seasonal_period': 7}  -- Required for seasonal models
 );
