@@ -4,11 +4,134 @@
 
 ## Overview
 
-All metrics accept `DOUBLE[]` arrays and return `DOUBLE`. Use with `GROUP BY` via `LIST()` aggregation.
+Metrics functions evaluate forecast accuracy by comparing actual values to predictions. Available as both scalar functions and table macros.
 
 ---
 
-## Error Metrics
+## Quick Start
+
+Compute metrics per group using table macros:
+
+```sql
+-- MAE per product
+SELECT * FROM ts_mae_by('backtest_results', product_id, date, actual, forecast);
+
+-- Multiple metrics at once
+SELECT
+    m.id,
+    m.mae,
+    r.rmse,
+    c.coverage
+FROM ts_mae_by('results', id, date, actual, forecast) m
+JOIN ts_rmse_by('results', id, date, actual, forecast) r ON m.id = r.id
+JOIN ts_coverage_by('results', id, date, actual, lower_90, upper_90) c ON m.id = c.id;
+```
+
+---
+
+## Table Macros
+
+### ts_mae_by
+
+Compute Mean Absolute Error per group.
+
+**Signature:**
+```sql
+ts_mae_by(source, group_col, date_col, actual_col, forecast_col) → TABLE(id, mae)
+```
+
+**Example:**
+```sql
+SELECT * FROM ts_mae_by('backtest_results', product_id, date, actual, forecast);
+```
+
+---
+
+### ts_mse_by, ts_rmse_by, ts_mape_by, ts_smape_by, ts_r2_by, ts_bias_by
+
+Same signature as `ts_mae_by`, returns respective metric.
+
+```sql
+ts_mse_by(source, group_col, date_col, actual_col, forecast_col) → TABLE(id, mse)
+ts_rmse_by(source, group_col, date_col, actual_col, forecast_col) → TABLE(id, rmse)
+ts_mape_by(source, group_col, date_col, actual_col, forecast_col) → TABLE(id, mape)
+ts_smape_by(source, group_col, date_col, actual_col, forecast_col) → TABLE(id, smape)
+ts_r2_by(source, group_col, date_col, actual_col, forecast_col) → TABLE(id, r2)
+ts_bias_by(source, group_col, date_col, actual_col, forecast_col) → TABLE(id, bias)
+```
+
+---
+
+### ts_mase_by
+
+Compute Mean Absolute Scaled Error per group (requires baseline).
+
+**Signature:**
+```sql
+ts_mase_by(source, group_col, date_col, actual_col, forecast_col, baseline_col) → TABLE(id, mase)
+```
+
+**Example:**
+```sql
+SELECT * FROM ts_mase_by('results', product_id, date, actual, forecast, naive_forecast);
+```
+
+---
+
+### ts_rmae_by
+
+Compute Relative MAE per group (compares two models).
+
+**Signature:**
+```sql
+ts_rmae_by(source, group_col, date_col, actual_col, pred1_col, pred2_col) → TABLE(id, rmae)
+```
+
+**Example:**
+```sql
+SELECT * FROM ts_rmae_by('results', product_id, date, actual, ets_forecast, naive_forecast);
+-- rmae < 1 means ETS outperforms naive
+```
+
+---
+
+### ts_coverage_by
+
+Compute prediction interval coverage per group.
+
+**Signature:**
+```sql
+ts_coverage_by(source, group_col, date_col, actual_col, lower_col, upper_col) → TABLE(id, coverage)
+```
+
+**Example:**
+```sql
+SELECT * FROM ts_coverage_by('results', product_id, date, actual, lower_90, upper_90);
+```
+
+---
+
+### ts_quantile_loss_by
+
+Compute quantile loss per group.
+
+**Signature:**
+```sql
+ts_quantile_loss_by(source, group_col, date_col, actual_col, forecast_col, quantile) → TABLE(id, quantile_loss)
+```
+
+**Example:**
+```sql
+SELECT * FROM ts_quantile_loss_by('results', product_id, date, actual, forecast_p50, 0.5);
+```
+
+---
+
+## Scalar Functions
+
+> Advanced usage with `LIST()` aggregation.
+
+### Error Metrics
 
 ### ts_mae
 
@@ -248,10 +371,12 @@ SELECT ts_coverage(
 
 ---
 
-## Using Metrics with Tables
+## Using Scalar Functions with Tables
+
+For custom aggregation patterns, use scalar functions with `LIST()`:
 
 ```sql
--- Compute metrics per series
+-- Compute metrics per series using scalar functions
 SELECT
     product_id,
     ts_mae(LIST(actual ORDER BY date), LIST(forecast ORDER BY date)) AS mae,
@@ -259,7 +384,11 @@ SELECT
 FROM backtest_results
 GROUP BY product_id;
 
--- Overall metrics
+-- Or use table macros (simpler syntax)
+SELECT * FROM ts_mae_by('backtest_results', product_id, date, actual, forecast);
+SELECT * FROM ts_rmse_by('backtest_results', product_id, date, actual, forecast);
+
+-- Overall metrics (no grouping)
 SELECT
     ts_mae(LIST(actual), LIST(forecast)) AS overall_mae,
     ts_coverage(LIST(actual), LIST(lower_90), LIST(upper_90)) AS coverage

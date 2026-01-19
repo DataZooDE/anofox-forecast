@@ -2142,6 +2142,185 @@ SELECT
 FROM query_table(source::VARCHAR)
 )"},
 
+    // ================================================================================
+    // Period Detection
+    // ================================================================================
+
+    // ts_detect_periods_by: Detect periods for grouped series
+    // C++ API: ts_detect_periods_by(table_name, group_col, date_col, value_col, method)
+    // Returns: TABLE(id, periods STRUCT)
+    {"ts_detect_periods_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{"method", "'fft'"}, {nullptr, nullptr}},
+R"(
+SELECT
+    group_col AS id,
+    ts_detect_periods(LIST(value_col::DOUBLE ORDER BY date_col), method) AS periods
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)"},
+
+    // ================================================================================
+    // Metrics Table Macros
+    // ================================================================================
+
+    // ts_mae_by: Compute Mean Absolute Error per group
+    // C++ API: ts_mae_by(table_name, group_col, date_col, actual_col, forecast_col)
+    {"ts_mae_by", {"source", "group_col", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    group_col AS id,
+    ts_mae(
+        LIST(actual_col::DOUBLE ORDER BY date_col),
+        LIST(forecast_col::DOUBLE ORDER BY date_col)
+    ) AS mae
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)"},
+
+    // ts_mse_by: Compute Mean Squared Error per group
+    // C++ API: ts_mse_by(table_name, group_col, date_col, actual_col, forecast_col)
+    {"ts_mse_by", {"source", "group_col", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    group_col AS id,
+    ts_mse(
+        LIST(actual_col::DOUBLE ORDER BY date_col),
+        LIST(forecast_col::DOUBLE ORDER BY date_col)
+    ) AS mse
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)"},
+
+    // ts_rmse_by: Compute Root Mean Squared Error per group
+    // C++ API: ts_rmse_by(table_name, group_col, date_col, actual_col, forecast_col)
+    {"ts_rmse_by", {"source", "group_col", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    group_col AS id,
+    ts_rmse(
+        LIST(actual_col::DOUBLE ORDER BY date_col),
+        LIST(forecast_col::DOUBLE ORDER BY date_col)
+    ) AS rmse
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)"},
+
+    // ts_mape_by: Compute Mean Absolute Percentage Error per group
+    // C++ API: ts_mape_by(table_name, group_col, date_col, actual_col, forecast_col)
+    {"ts_mape_by", {"source", "group_col", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    group_col AS id,
+    ts_mape(
+        LIST(actual_col::DOUBLE ORDER BY date_col),
+        LIST(forecast_col::DOUBLE ORDER BY date_col)
+    ) AS mape
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)"},
+
+    // ts_smape_by: Compute Symmetric Mean Absolute Percentage Error per group
+    // C++ API: ts_smape_by(table_name, group_col, date_col, actual_col, forecast_col)
+    {"ts_smape_by", {"source", "group_col", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    group_col AS id,
+    ts_smape(
+        LIST(actual_col::DOUBLE ORDER BY date_col),
+        LIST(forecast_col::DOUBLE ORDER BY date_col)
+    ) AS smape
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)"},
+
+    // ts_r2_by: Compute R-squared (coefficient of determination) per group
+    // C++ API: ts_r2_by(table_name, group_col, date_col, actual_col, forecast_col)
+    {"ts_r2_by", {"source", "group_col", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    group_col AS id,
+    ts_r2(
+        LIST(actual_col::DOUBLE ORDER BY date_col),
+        LIST(forecast_col::DOUBLE ORDER BY date_col)
+    ) AS r2
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)"},
+
+    // ts_bias_by: Compute bias (mean error) per group
+    // C++ API: ts_bias_by(table_name, group_col, date_col, actual_col, forecast_col)
+    {"ts_bias_by", {"source", "group_col", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    group_col AS id,
+    ts_bias(
+        LIST(actual_col::DOUBLE ORDER BY date_col),
+        LIST(forecast_col::DOUBLE ORDER BY date_col)
+    ) AS bias
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)"},
+
+    // ts_mase_by: Compute Mean Absolute Scaled Error per group
+    // C++ API: ts_mase_by(table_name, group_col, date_col, actual_col, forecast_col, baseline_col)
+    {"ts_mase_by", {"source", "group_col", "date_col", "actual_col", "forecast_col", "baseline_col", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    group_col AS id,
+    ts_mase(
+        LIST(actual_col::DOUBLE ORDER BY date_col),
+        LIST(forecast_col::DOUBLE ORDER BY date_col),
+        LIST(baseline_col::DOUBLE ORDER BY date_col)
+    ) AS mase
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)"},
+
+    // ts_rmae_by: Compute Relative Mean Absolute Error per group (compares two models)
+    // C++ API: ts_rmae_by(table_name, group_col, date_col, actual_col, pred1_col, pred2_col)
+    {"ts_rmae_by", {"source", "group_col", "date_col", "actual_col", "pred1_col", "pred2_col", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    group_col AS id,
+    ts_rmae(
+        LIST(actual_col::DOUBLE ORDER BY date_col),
+        LIST(pred1_col::DOUBLE ORDER BY date_col),
+        LIST(pred2_col::DOUBLE ORDER BY date_col)
+    ) AS rmae
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)"},
+
+    // ts_coverage_by: Compute prediction interval coverage per group
+    // C++ API: ts_coverage_by(table_name, group_col, date_col, actual_col, lower_col, upper_col)
+    {"ts_coverage_by", {"source", "group_col", "date_col", "actual_col", "lower_col", "upper_col", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    group_col AS id,
+    ts_coverage(
+        LIST(actual_col::DOUBLE ORDER BY date_col),
+        LIST(lower_col::DOUBLE ORDER BY date_col),
+        LIST(upper_col::DOUBLE ORDER BY date_col)
+    ) AS coverage
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)"},
+
+    // ts_quantile_loss_by: Compute quantile loss per group
+    // C++ API: ts_quantile_loss_by(table_name, group_col, date_col, actual_col, forecast_col, quantile)
+    {"ts_quantile_loss_by", {"source", "group_col", "date_col", "actual_col", "forecast_col", "quantile", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    group_col AS id,
+    ts_quantile_loss(
+        LIST(actual_col::DOUBLE ORDER BY date_col),
+        LIST(forecast_col::DOUBLE ORDER BY date_col),
+        quantile
+    ) AS quantile_loss
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)"},
+
     // Sentinel
     {nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}
 };

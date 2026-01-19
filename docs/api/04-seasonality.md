@@ -6,7 +6,57 @@
 
 Seasonality functions detect periodic patterns in time series data and decompose series into trend, seasonal, and residual components.
 
-## Period Detection
+---
+
+## Quick Start
+
+Detect periods for all series with a single call:
+
+```sql
+-- Detect periods per product
+SELECT * FROM ts_detect_periods_by('sales', product_id, date, value);
+
+-- With specific method
+SELECT * FROM ts_detect_periods_by('sales', product_id, date, value, method := 'acf');
+```
+
+---
+
+## Table Macros
+
+### ts_detect_periods_by
+
+Detect periods for grouped series.
+
+**Signature:**
+```sql
+ts_detect_periods_by(source, group_col, date_col, value_col, method := 'fft') → TABLE(id, periods)
+```
+
+**Parameters:**
+- `source`: Table name (VARCHAR)
+- `group_col`: Series identifier column
+- `date_col`: Date/timestamp column
+- `value_col`: Value column
+- `method`: Detection method (default: 'fft')
+
+**Returns:** TABLE with `id` and `periods` STRUCT containing detected periods.
+
+**Example:**
+```sql
+-- Detect periods for each product
+SELECT
+    id,
+    (periods).primary_period,
+    (periods).n_periods
+FROM ts_detect_periods_by('sales', product_id, date, value);
+```
+
+---
+
+## Scalar Functions
+
+### ts_detect_periods
 
 ### ts_detect_periods
 

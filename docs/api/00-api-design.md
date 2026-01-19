@@ -136,14 +136,14 @@ The following table shows which API variants exist for each functionality:
 | **Data Quality** | `_ts_data_quality`* | `ts_data_quality_agg` | `ts_data_quality` | `ts_data_quality_by` |
 | **Changepoints** | - | `ts_detect_changepoints_agg` | `ts_detect_changepoints` | `ts_detect_changepoints_by` |
 | **Seasonality** | - | `ts_classify_seasonality_agg` | `ts_classify_seasonality` | `ts_classify_seasonality_by` |
-| **Period Detection** | `ts_detect_periods` | - | - | - |
+| **Period Detection** | `ts_detect_periods` | - | - | `ts_detect_periods_by` |
 | **Decomposition** | `_ts_mstl_decomposition`* | - | - | `ts_mstl_decomposition_by` |
-| **Metrics** | `ts_mae`, `ts_rmse`, ...† | - | - | ○ |
+| **Metrics** | `ts_mae`, `ts_rmse`, ...† | - | - | `ts_mae_by`, `ts_rmse_by`, ...† |
 | **Conformal** | `ts_conformal_*`‡ | - | `ts_conformal_calibrate` | `ts_conformal_by`, `ts_conformal_apply_by` |
 | **Data Prep** | - | - | - | `ts_fill_gaps_by`, `ts_diff_by`, `ts_drop_*_by`§ |
 | **Cross-Val** | - | - | - | `ts_cv_split_by`, `ts_backtest_auto_by`¶ |
 
-**Legend:** ✓ = exists, - = not applicable, ○ = planned/makes sense
+**Legend:** ✓ = exists, - = not applicable
 
 *Internal scalar functions (underscore prefix) - implementation details for table macros
 †12 metric functions - see [Evaluation Metrics](07-evaluation-metrics.md)
@@ -155,7 +155,7 @@ The following table shows which API variants exist for each functionality:
 
 | Category | Scalar | Aggregate | Table `_by` | Notes |
 |----------|--------|-----------|-------------|-------|
-| **Metrics** | ✓ Public | - | ○ Planned | Scalars useful in expressions; `_by` enables per-group metrics |
+| **Metrics** | ✓ Public | - | ✓ | Scalars useful in expressions; `_by` enables per-group metrics |
 | **Statistics/Features** | Internal | ✓ | ✓ | Aggregate cleaner than `LIST()` boilerplate |
 | **Decomposition** | Internal | - | ✓ | Complex output suits table format |
 | **Data Prep** | - | - | ✓ | Requires table context (dates, ordering) |
