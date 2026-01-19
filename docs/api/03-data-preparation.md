@@ -10,29 +10,33 @@ Data preparation functions help clean and transform time series data before fore
 
 ## Quick Start
 
-Common data cleaning pipeline:
+Common data cleaning pipeline (order matters for intermittent data):
 
 ```sql
--- Clean raw data: remove short series, fill gaps, impute missing values
+-- Step 1: Fill gaps in time series (ensures regular intervals)
+CREATE TABLE gaps_filled AS
+SELECT * FROM ts_fill_gaps_by('raw_data', product_id, date, value, '1d');
+
+-- Step 2: Impute NULLs with 0.0 (preserves intermittent demand patterns)
+CREATE TABLE nulls_filled AS
+SELECT * FROM ts_fill_nulls_const_by('gaps_filled', product_id, date, value, 0.0);
+
+-- Step 3: Drop short series (after filling, so intermittent series aren't lost)
 CREATE TABLE clean_data AS
-SELECT * FROM ts_drop_short_by('raw_data', product_id, 20)
-UNION ALL
-SELECT * FROM ts_fill_gaps_by('raw_data', product_id, date, value, '1d')
-UNION ALL
-SELECT * FROM ts_fill_nulls_forward_by('raw_data', product_id, date, value);
+SELECT * FROM ts_drop_short_by('nulls_filled', product_id, 20);
 ```
 
 Or chain operations:
 
 ```sql
--- Remove series with issues, then fill gaps
-WITH filtered AS (
-    SELECT * FROM ts_drop_constant_by('raw_data', product_id, value)
+-- Fill gaps and nulls first, then filter short series
+WITH gaps_filled AS (
+    SELECT * FROM ts_fill_gaps_by('raw_data', product_id, date, value, '1d')
 ),
-no_short AS (
-    SELECT * FROM ts_drop_short_by('filtered', product_id, 20)
+nulls_filled AS (
+    SELECT * FROM ts_fill_nulls_const_by('gaps_filled', product_id, date, value, 0.0)
 )
-SELECT * FROM ts_fill_gaps_by('no_short', product_id, date, value, '1d');
+SELECT * FROM ts_drop_short_by('nulls_filled', product_id, 20);
 ```
 
 ---
