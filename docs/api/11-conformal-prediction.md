@@ -37,10 +37,14 @@ SELECT * FROM ts_conformal_by(
 For more control, use the modular approach:
 
 ```sql
+-- Step 0: Detect seasonality (e.g., weekly = 7)
+SELECT * FROM ts_detect_periods_by('sales', product_id, date, value, MAP{});
+
 -- Step 1: Generate backtest results with AutoETS
 CREATE TABLE backtest AS
 SELECT * FROM ts_backtest_auto_by(
-    'sales', product_id, date, value, 7, 5, '1d', {'method': 'AutoETS'}
+    'sales', product_id, date, value, 7, 5, '1d',
+    {'method': 'AutoETS', 'seasonal_period': 7}
 );
 
 -- Step 2: Calibrate conformity score
@@ -52,7 +56,8 @@ SELECT * FROM ts_conformal_calibrate(
 -- Step 3: Generate future forecasts
 CREATE TABLE future AS
 SELECT * FROM ts_forecast_by(
-    'sales', product_id, date, value, 'AutoETS', 14, MAP{}
+    'sales', product_id, date, value, 'AutoETS', 14,
+    {'seasonal_period': 7}
 );
 
 -- Step 4: Apply conformal intervals
