@@ -10,25 +10,25 @@ require anofox_forecast
 
 # Test decomposition returns STRUCT with trend
 query I
-SELECT (_ts_mstl_decomposition_by([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).trend IS NOT NULL;
+SELECT (_ts_mstl_decomposition([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).trend IS NOT NULL;
 ----
 true
 
 # Test decomposition returns STRUCT with seasonal
 query I
-SELECT (_ts_mstl_decomposition_by([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).seasonal IS NOT NULL;
+SELECT (_ts_mstl_decomposition([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).seasonal IS NOT NULL;
 ----
 true
 
 # Test decomposition returns STRUCT with remainder
 query I
-SELECT (_ts_mstl_decomposition_by([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).remainder IS NOT NULL;
+SELECT (_ts_mstl_decomposition([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).remainder IS NOT NULL;
 ----
 true
 
 # Test decomposition returns STRUCT with periods
 query I
-SELECT (_ts_mstl_decomposition_by([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).periods IS NOT NULL;
+SELECT (_ts_mstl_decomposition([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).periods IS NOT NULL;
 ----
 true
 
@@ -38,13 +38,13 @@ true
 
 # Trend should have same length as input
 query I
-SELECT length((_ts_mstl_decomposition_by([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).trend);
+SELECT length((_ts_mstl_decomposition([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).trend);
 ----
 12
 
 # Remainder should have same length as input
 query I
-SELECT length((_ts_mstl_decomposition_by([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).remainder);
+SELECT length((_ts_mstl_decomposition([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).remainder);
 ----
 12
 
@@ -54,13 +54,13 @@ SELECT length((_ts_mstl_decomposition_by([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0
 
 # Test with clear seasonal pattern (period 4)
 query I
-SELECT length((_ts_mstl_decomposition_by([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0])).trend);
+SELECT length((_ts_mstl_decomposition([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0])).trend);
 ----
 16
 
 # Seasonal component should be a list of lists (one per period)
 query I
-SELECT length((_ts_mstl_decomposition_by([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0])).seasonal) >= 0;
+SELECT length((_ts_mstl_decomposition([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0])).seasonal) >= 0;
 ----
 true
 
@@ -70,14 +70,14 @@ true
 
 # Linear trend - trend component should capture the linear pattern
 query I
-SELECT (_ts_mstl_decomposition_by([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).trend[1] IS NOT NULL;
+SELECT (_ts_mstl_decomposition([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).trend[1] IS NOT NULL;
 ----
 true
 
 # Trend should increase for increasing data
 query I
-SELECT (_ts_mstl_decomposition_by([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).trend[12] >
-       (_ts_mstl_decomposition_by([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).trend[1];
+SELECT (_ts_mstl_decomposition([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).trend[12] >
+       (_ts_mstl_decomposition([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).trend[1];
 ----
 true
 
@@ -87,7 +87,7 @@ true
 
 # For perfect linear trend, remainder should be small
 query I
-SELECT ABS((_ts_mstl_decomposition_by([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).remainder[6]) < 5.0;
+SELECT ABS((_ts_mstl_decomposition([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0])).remainder[6]) < 5.0;
 ----
 true
 
@@ -97,7 +97,7 @@ true
 
 # Constant series - trend should be constant
 query I
-SELECT ABS((_ts_mstl_decomposition_by([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0])).trend[1] - 5.0) < 1.0;
+SELECT ABS((_ts_mstl_decomposition([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0])).trend[1] - 5.0) < 1.0;
 ----
 true
 
@@ -107,7 +107,7 @@ true
 
 # NULL input should return NULL
 query I
-SELECT _ts_mstl_decomposition_by(NULL) IS NULL;
+SELECT _ts_mstl_decomposition(NULL) IS NULL;
 ----
 true
 

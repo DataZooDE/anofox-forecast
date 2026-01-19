@@ -573,9 +573,9 @@ SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 30, M
 # Test that STRUCT syntax works with mixed types
 #######################################
 
-# Test STRUCT with ETS model parameter
+# Test MAP with ETS model parameter
 query I
-SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'ETS', 5, {'model': 'AAA'});
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'ETS', 5, MAP{'model': 'AAA'});
 ----
 10
 

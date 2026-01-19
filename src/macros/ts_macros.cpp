@@ -432,8 +432,8 @@ WITH ordered_data AS (
 cp_result AS (
     SELECT _ts_detect_changepoints_bocpd(
         LIST(value_col::DOUBLE ORDER BY date_col),
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.hazard_lambda') AS DOUBLE), 250.0),
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.include_probabilities') AS BOOLEAN), false)
+        COALESCE(TRY_CAST(params['hazard_lambda'] AS DOUBLE), 250.0),
+        COALESCE(TRY_CAST(params['include_probabilities'] AS BOOLEAN), false)
     ) AS cp
     FROM query_table(source::VARCHAR)
 )
@@ -454,8 +454,8 @@ SELECT
     group_col AS id,
     _ts_detect_changepoints_bocpd(
         LIST(value_col::DOUBLE ORDER BY date_col),
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.hazard_lambda') AS DOUBLE), 250.0),
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.include_probabilities') AS BOOLEAN), false)
+        COALESCE(TRY_CAST(params['hazard_lambda'] AS DOUBLE), 250.0),
+        COALESCE(TRY_CAST(params['include_probabilities'] AS BOOLEAN), false)
     ) AS changepoints
 FROM query_table(source::VARCHAR)
 GROUP BY group_col
@@ -466,7 +466,7 @@ GROUP BY group_col
     {"ts_forecast", {"source", "date_col", "target_col", "method", "horizon", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
 WITH _ets_spec AS (
-    SELECT COALESCE(json_extract_string(to_json(params), '$.model'), '') AS spec
+    SELECT COALESCE(params['model']::VARCHAR, '') AS spec
 ),
 forecast_result AS (
     SELECT _ts_forecast(
@@ -508,7 +508,7 @@ WITH _freq AS (
     END AS _interval
 ),
 _ets_spec AS (
-    SELECT COALESCE(json_extract_string(to_json(params), '$.model'), '') AS spec
+    SELECT COALESCE(params['model']::VARCHAR, '') AS spec
 ),
 forecast_data AS (
     SELECT
@@ -566,7 +566,7 @@ cv_data AS (
     FROM query_table(cv_splits::VARCHAR)
 ),
 _ets_spec_cv AS (
-    SELECT COALESCE(json_extract_string(to_json(params), '$.model'), '') AS spec
+    SELECT COALESCE(params['model']::VARCHAR, '') AS spec
 ),
 forecast_data AS (
     SELECT
@@ -822,8 +822,8 @@ ORDER BY src._grp, src._dt
 R"(
 WITH _params AS (
     SELECT
-        COALESCE(json_extract_string(to_json(params), '$.strategy'), 'last_value') AS _strategy,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.fill_value') AS DOUBLE), 0.0) AS _fill_value
+        COALESCE(params['strategy']::VARCHAR, 'last_value') AS _strategy,
+        COALESCE(TRY_CAST(params['fill_value'] AS DOUBLE), 0.0) AS _fill_value
 ),
 src AS (
     SELECT
@@ -955,8 +955,8 @@ FROM per_group
 R"(
 WITH _params AS (
     SELECT
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.gap') AS BIGINT), 0) AS _gap,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.embargo') AS BIGINT), 0) AS _embargo
+        COALESCE(TRY_CAST(params['gap'] AS BIGINT), 0) AS _gap,
+        COALESCE(TRY_CAST(params['embargo'] AS BIGINT), 0) AS _embargo
 ),
 _freq AS (
     SELECT CASE
@@ -1030,10 +1030,10 @@ ORDER BY fold_id
 R"(
 WITH _params AS (
     SELECT
-        COALESCE(json_extract_string(to_json(params), '$.window_type'), 'expanding') AS _window_type,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.min_train_size') AS BIGINT), 1) AS _min_train_size,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.gap') AS BIGINT), 0) AS _gap,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.embargo') AS BIGINT), 0) AS _embargo
+        COALESCE(params['window_type']::VARCHAR, 'expanding') AS _window_type,
+        COALESCE(TRY_CAST(params['min_train_size'] AS BIGINT), 1) AS _min_train_size,
+        COALESCE(TRY_CAST(params['gap'] AS BIGINT), 0) AS _gap,
+        COALESCE(TRY_CAST(params['embargo'] AS BIGINT), 0) AS _embargo
 ),
 _freq AS (
     SELECT CASE
@@ -1129,10 +1129,10 @@ ORDER BY fb.fold_id, s._grp, s._dt
 R"(
 WITH _params AS (
     SELECT
-        COALESCE(json_extract_string(to_json(params), '$.window_type'), 'expanding') AS _window_type,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.min_train_size') AS BIGINT), 1) AS _min_train_size,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.gap') AS BIGINT), 0) AS _gap,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.embargo') AS BIGINT), 0) AS _embargo
+        COALESCE(params['window_type']::VARCHAR, 'expanding') AS _window_type,
+        COALESCE(TRY_CAST(params['min_train_size'] AS BIGINT), 1) AS _min_train_size,
+        COALESCE(TRY_CAST(params['gap'] AS BIGINT), 0) AS _gap,
+        COALESCE(TRY_CAST(params['embargo'] AS BIGINT), 0) AS _embargo
 ),
 _freq AS (
     SELECT CASE
@@ -1224,8 +1224,8 @@ ORDER BY fb.fold_id, s._grp, s._dt
 R"(
 WITH _params AS (
     SELECT
-        COALESCE(json_extract_string(to_json(params), '$.strategy'), 'null') AS _strategy,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.fill_value') AS DOUBLE), 0.0) AS _fill_value
+        COALESCE(params['strategy']::VARCHAR, 'null') AS _strategy,
+        COALESCE(TRY_CAST(params['fill_value'] AS DOUBLE), 0.0) AS _fill_value
 ),
 -- cv_splits has standardized column names: group_col, date_col, fold_id, split
 cv AS (
@@ -1460,9 +1460,9 @@ _computed AS (
         _min_dt,
         _max_dt,
         _n_dates,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.initial_train_size') AS BIGINT), GREATEST((_n_dates / 2)::BIGINT, 1)) AS _init_size,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.skip_length') AS BIGINT), horizon::BIGINT) AS _skip_length,
-        COALESCE(LOWER(json_extract_string(to_json(params), '$.clip_horizon')) IN ('true', '1', 'yes'), FALSE) AS _clip_horizon,
+        COALESCE(TRY_CAST(params['initial_train_size'] AS BIGINT), GREATEST((_n_dates / 2)::BIGINT, 1)) AS _init_size,
+        COALESCE(TRY_CAST(params['skip_length'] AS BIGINT), horizon::BIGINT) AS _skip_length,
+        COALESCE(LOWER(params['clip_horizon']) IN ('true', '1', 'yes'), FALSE) AS _clip_horizon,
         (SELECT _interval FROM _freq) AS _interval
     FROM date_bounds
 ),
@@ -1508,17 +1508,17 @@ FROM fold_end_times
 R"(
 WITH _params AS (
     SELECT
-        COALESCE(json_extract_string(to_json(params), '$.method'), 'AutoETS') AS _method,
-        COALESCE(json_extract_string(to_json(params), '$.window_type'), 'expanding') AS _window_type,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.min_train_size') AS BIGINT), 1) AS _min_train_size,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.gap') AS BIGINT), 0) AS _gap,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.embargo') AS BIGINT), 0) AS _embargo,
-        TRY_CAST(json_extract_string(to_json(params), '$.initial_train_size') AS BIGINT) AS _init_train_size,
-        TRY_CAST(json_extract_string(to_json(params), '$.skip_length') AS BIGINT) AS _skip_length_param,
-        COALESCE(LOWER(json_extract_string(to_json(params), '$.clip_horizon')) IN ('true', '1', 'yes'), FALSE) AS _clip_horizon,
+        COALESCE(params['method']::VARCHAR, 'AutoETS') AS _method,
+        COALESCE(params['window_type']::VARCHAR, 'expanding') AS _window_type,
+        COALESCE(TRY_CAST(params['min_train_size'] AS BIGINT), 1) AS _min_train_size,
+        COALESCE(TRY_CAST(params['gap'] AS BIGINT), 0) AS _gap,
+        COALESCE(TRY_CAST(params['embargo'] AS BIGINT), 0) AS _embargo,
+        TRY_CAST(params['initial_train_size'] AS BIGINT) AS _init_train_size,
+        TRY_CAST(params['skip_length'] AS BIGINT) AS _skip_length_param,
+        COALESCE(LOWER(params['clip_horizon']) IN ('true', '1', 'yes'), FALSE) AS _clip_horizon,
         -- Model type detection: regression models from anofox-statistics
         CASE
-            WHEN LOWER(COALESCE(json_extract_string(to_json(params), '$.method'), 'AutoETS')) IN (
+            WHEN LOWER(COALESCE(params['method']::VARCHAR, 'AutoETS')) IN (
                 'linear_regression_ols', 'ols', 'linear_regression',
                 'ridge', 'ridge_regression',
                 'lasso', 'lasso_regression',
@@ -1656,7 +1656,7 @@ cv_train AS (
     SELECT fold_id, _grp, _dt, _target FROM cv_splits WHERE split = 'train'
 ),
 _ets_spec_bt AS (
-    SELECT COALESCE(json_extract_string(to_json(params), '$.model'), '') AS spec
+    SELECT COALESCE(params['model']::VARCHAR, '') AS spec
 ),
 forecast_data AS (
     SELECT
@@ -1793,8 +1793,8 @@ ORDER BY cv._fold_id, cv._cv_grp, cv._cv_dt
 R"(
 WITH _params AS (
     SELECT
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.alpha') AS DOUBLE), 0.1) AS _alpha,
-        COALESCE(json_extract_string(to_json(params), '$.method'), 'symmetric') AS _method
+        COALESCE(TRY_CAST(params['alpha'] AS DOUBLE), 0.1) AS _alpha,
+        COALESCE(params['method']::VARCHAR, 'symmetric') AS _method
 ),
 residuals AS (
     SELECT
@@ -1853,7 +1853,7 @@ FROM conformal_calc
 R"(
 WITH _params AS (
     SELECT
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.alpha') AS DOUBLE), 0.1) AS _alpha
+        COALESCE(TRY_CAST(params['alpha'] AS DOUBLE), 0.1) AS _alpha
 ),
 residuals AS (
     SELECT
@@ -1968,7 +1968,7 @@ FROM check_result
 R"(
 SELECT
     CONCAT_WS(
-        COALESCE(json_extract_string(to_json(params), '$.separator'), '|'),
+        COALESCE(params['separator']::VARCHAR, '|'),
         COALESCE(id_col1::VARCHAR, 'NULL'),
         id_col2::VARCHAR,
         id_col3::VARCHAR,
@@ -1996,8 +1996,8 @@ ORDER BY 1, 2
 R"(
 WITH _params AS (
     SELECT
-        COALESCE(json_extract_string(to_json(params), '$.separator'), '|') AS _sep,
-        COALESCE(json_extract_string(to_json(params), '$.aggregate_keyword'), 'AGGREGATED') AS _agg
+        COALESCE(params['separator']::VARCHAR, '|') AS _sep,
+        COALESCE(params['aggregate_keyword']::VARCHAR, 'AGGREGATED') AS _agg
 ),
 src AS (
     SELECT
@@ -2155,7 +2155,7 @@ R"(
 SELECT
     _ts_detect_periods(
         LIST(value_col::DOUBLE ORDER BY date_col),
-        COALESCE(json_extract_string(to_json(params), '$.method'), 'fft')
+        COALESCE(params['method']::VARCHAR, 'fft')
     ) AS periods
 FROM query_table(source::VARCHAR)
 )"},
@@ -2170,7 +2170,7 @@ SELECT
     group_col AS id,
     _ts_detect_periods(
         LIST(value_col::DOUBLE ORDER BY date_col),
-        COALESCE(json_extract_string(to_json(params), '$.method'), 'fft')
+        COALESCE(params['method']::VARCHAR, 'fft')
     ) AS periods
 FROM query_table(source::VARCHAR)
 GROUP BY group_col

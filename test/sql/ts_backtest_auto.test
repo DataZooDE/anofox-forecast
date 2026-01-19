@@ -238,44 +238,44 @@ SELECT COUNT(*) FROM ts_backtest_auto_by(
 21
 
 #######################################
-# STRUCT Params Tests (GH#95)
-# Test that STRUCT syntax works with mixed types
+# MAP Params Tests
+# Test that MAP syntax works with string values
 #######################################
 
-# Test STRUCT with method (VARCHAR)
+# Test MAP with method (VARCHAR)
 query I
 SELECT DISTINCT model_name FROM ts_backtest_auto_by(
-    'backtest_demo', series_id, date, value, 7, 3, '1d', {'method': 'Naive'}
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{'method': 'Naive'}
 );
 ----
 Naive
 
-# Test STRUCT with mixed types: method (VARCHAR) + gap (INTEGER)
+# Test MAP with method and gap (both VARCHAR - MAP requires same types)
 query I
 SELECT COUNT(*) > 0 FROM ts_backtest_auto_by(
-    'backtest_demo', series_id, date, value, 7, 2, '1d', {'method': 'Naive', 'gap': 2}
+    'backtest_demo', series_id, date, value, 7, 2, '1d', MAP{'method': 'Naive', 'gap': '2'}
 );
 ----
 true
 
-# Test STRUCT with boolean: clip_horizon
+# Test MAP with clip_horizon (VARCHAR 'true')
 query I
 SELECT COUNT(*) > 0 FROM ts_backtest_auto_by(
-    'backtest_demo', series_id, date, value, 7, 2, '1d', {'clip_horizon': true}
+    'backtest_demo', series_id, date, value, 7, 2, '1d', MAP{'clip_horizon': 'true'}
 );
 ----
 true
 
-# Test STRUCT with multiple mixed types: VARCHAR + INTEGER + BOOLEAN
+# Test MAP with multiple params (all VARCHAR)
 query I
 SELECT COUNT(*) > 0 FROM ts_backtest_auto_by(
     'backtest_demo', series_id, date, value, 7, 2, '1d',
-    {'method': 'Naive', 'gap': 1, 'embargo': 0, 'clip_horizon': false}
+    MAP{'method': 'Naive', 'gap': '1', 'embargo': '0', 'clip_horizon': 'false'}
 );
 ----
 true
 
-# Test backward compatibility: MAP with string values still works
+# Test MAP with string values
 query I
 SELECT DISTINCT model_name FROM ts_backtest_auto_by(
     'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{'method': 'Naive', 'gap': '0'}

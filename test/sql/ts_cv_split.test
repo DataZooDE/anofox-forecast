@@ -425,13 +425,13 @@ SELECT COUNT(*) FROM ts_cv_forecast_by('cv_train', group_col, date_col, target_c
 
 #######################################
 # STRUCT Params Tests (GH#95)
-# Test that STRUCT syntax works for CV functions
+# Test that MAP syntax works for CV functions
 #######################################
 
-# Test ts_cv_split with STRUCT params containing mixed types
+# Test ts_cv_split with MAP params (all string values)
 query I
 SELECT COUNT(*) FROM ts_cv_split_by('cv_test', series_id, date, value, ARRAY['2024-01-10'::TIMESTAMP, '2024-01-15'::TIMESTAMP], 5, '1d',
-    {'window_type': 'expanding', 'gap': 0, 'embargo': 0});
+    MAP{'window_type': 'expanding', 'gap': '0', 'embargo': '0'});
 ----
 70
 
@@ -441,9 +441,9 @@ SELECT COUNT(*) FROM ts_cv_forecast_by('cv_train', group_col, date_col, target_c
 ----
 12
 
-# Test ts_cv_forecast_by with STRUCT containing model param
+# Test ts_cv_forecast_by with MAP containing model param
 query I
-SELECT COUNT(*) FROM ts_cv_forecast_by('cv_train', group_col, date_col, target_col, 'ETS', 3, {'model': 'AAA'});
+SELECT COUNT(*) FROM ts_cv_forecast_by('cv_train', group_col, date_col, target_col, 'ETS', 3, MAP{'model': 'AAA'});
 ----
 12
 
