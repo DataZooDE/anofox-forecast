@@ -116,6 +116,7 @@ Both forms are identical in functionality.
 | `ts_backtest_auto` | One-liner backtesting | `ts_backtest_auto('tbl', id, date, val, 7, 3, '1d', MAP{})` |
 | `ts_stats` | Compute 34 statistics | `ts_stats(LIST(val ORDER BY date))` |
 | `ts_detect_periods` | Detect seasonality | `ts_detect_periods(LIST(val ORDER BY date))` |
+| `ts_detect_periods_by` | Detect seasonality (multi-series) | `ts_detect_periods_by('tbl', id, date, val)` |
 | `ts_features` | Extract 117 features | `ts_features(date, value)` |
 
 ### Forecasting Models (32 Models)
@@ -132,20 +133,22 @@ Both forms are identical in functionality.
 
 ### Evaluation Metrics (12 Metrics)
 
-| Metric | Function | Formula |
-|--------|----------|---------|
-| MAE | `ts_mae(actual, pred)` | Mean Absolute Error |
-| MSE | `ts_mse(actual, pred)` | Mean Squared Error |
-| RMSE | `ts_rmse(actual, pred)` | Root Mean Squared Error |
-| MAPE | `ts_mape(actual, pred)` | Mean Absolute Percentage Error |
-| sMAPE | `ts_smape(actual, pred)` | Symmetric MAPE |
-| MASE | `ts_mase(actual, pred, baseline)` | Mean Absolute Scaled Error |
-| R² | `ts_r2(actual, pred)` | Coefficient of Determination |
-| Bias | `ts_bias(actual, pred)` | Forecast Bias |
-| rMAE | `ts_rmae(actual, pred1, pred2)` | Relative MAE |
-| Quantile Loss | `ts_quantile_loss(actual, pred, q)` | Pinball Loss |
-| MQLoss | `ts_mqloss(actual, quantiles, levels)` | Mean Quantile Loss |
-| Coverage | `ts_coverage(actual, lower, upper)` | Prediction Interval Coverage |
+Available as both scalar functions and `_by` table macros:
+
+| Metric | Scalar Function | Table Macro |
+|--------|-----------------|-------------|
+| MAE | `ts_mae(actual, pred)` | `ts_mae_by(source, group, date, actual, forecast)` |
+| MSE | `ts_mse(actual, pred)` | `ts_mse_by(...)` |
+| RMSE | `ts_rmse(actual, pred)` | `ts_rmse_by(...)` |
+| MAPE | `ts_mape(actual, pred)` | `ts_mape_by(...)` |
+| sMAPE | `ts_smape(actual, pred)` | `ts_smape_by(...)` |
+| R² | `ts_r2(actual, pred)` | `ts_r2_by(...)` |
+| Bias | `ts_bias(actual, pred)` | `ts_bias_by(...)` |
+| MASE | `ts_mase(actual, pred, baseline)` | `ts_mase_by(..., baseline)` |
+| rMAE | `ts_rmae(actual, pred1, pred2)` | `ts_rmae_by(..., pred1, pred2)` |
+| Coverage | `ts_coverage(actual, lower, upper)` | `ts_coverage_by(..., lower, upper)` |
+| Quantile Loss | `ts_quantile_loss(actual, pred, q)` | `ts_quantile_loss_by(..., quantile)` |
+| MQLoss | `ts_mqloss(actual, quantiles, levels)` | — |
 
 ---
 
@@ -187,5 +190,5 @@ FROM sales GROUP BY product_id;
 
 ---
 
-**Last Updated:** 2026-01-17
+**Last Updated:** 2026-01-19
 **API Version:** 0.4.0
