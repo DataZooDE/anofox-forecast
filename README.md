@@ -379,7 +379,8 @@ If you use this extension in research, please cite:
 
 Built on top of:
 - [DuckDB](https://duckdb.org) - Amazing analytical database
-- [anofox-time](https://github.com/anofox/anofox-time) - Core forecasting library
+- [anofox-forecast](https://crates.io/crates/anofox-forecast) - Core forecasting library
+- [anofox-regression](https://crates.io/crates/anofox-regression) - Regression and feature extraction
 
 Special thanks to the DuckDB team for making extensions possible!
 
