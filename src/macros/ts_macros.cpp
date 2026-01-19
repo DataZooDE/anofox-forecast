@@ -462,8 +462,8 @@ GROUP BY group_col
 )"},
 
     // ts_forecast: Generate forecasts for a single series (table-based)
-    // C++ API: ts_forecast(table_name, date_col, target_col, method, horizon, params)
-    {"ts_forecast", {"source", "date_col", "target_col", "method", "horizon", "params", nullptr}, {{nullptr, nullptr}},
+    // C++ API: ts_forecast(table_name, date_col, target_col, method, horizon, params?)
+    {"ts_forecast", {"source", "date_col", "target_col", "method", "horizon", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
 WITH _ets_spec AS (
     SELECT COALESCE(json_extract_string(to_json(params), '$.model'), '') AS spec
@@ -490,9 +490,9 @@ FROM forecast_result
 )"},
 
     // ts_forecast_by: Generate forecasts per group (long format - one row per forecast step)
-    // C++ API: ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, params, frequency)
+    // C++ API: ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, params?, frequency?)
     // Supports both Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y') and DuckDB INTERVAL ('1 day', '1 hour')
-    {"ts_forecast_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", "params", nullptr}, {{"frequency", "'1d'"}, {nullptr, nullptr}},
+    {"ts_forecast_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", nullptr}, {{"params", "MAP{}"}, {"frequency", "'1d'"}, {nullptr, nullptr}},
 R"(
 WITH _freq AS (
     SELECT CASE
@@ -542,7 +542,7 @@ ORDER BY id, forecast_step
     // C++ API: ts_cv_forecast_by(cv_splits, group_col, date_col, target_col, method, horizon, params, frequency)
     // Processes all folds in parallel using DuckDB's vectorization
     // cv_splits should be output from ts_cv_split filtered to split='train'
-    {"ts_cv_forecast_by", {"cv_splits", "group_col", "date_col", "target_col", "method", "horizon", "params", nullptr}, {{"frequency", "'1d'"}, {nullptr, nullptr}},
+    {"ts_cv_forecast_by", {"cv_splits", "group_col", "date_col", "target_col", "method", "horizon", nullptr}, {{"params", "MAP{}"}, {"frequency", "'1d'"}, {nullptr, nullptr}},
 R"(
 WITH _freq AS (
     SELECT CASE
@@ -1504,7 +1504,7 @@ FROM fold_end_times
     //   - Univariate models: uses internal _ts_forecast function
     //   - Regression models: prepares data via ts_prepare_regression_input (target=NULL for test)
     // Returns: fold_id, group_col, date, forecast, actual, error, abs_error, model_name, fold_metric_score
-    {"ts_backtest_auto_by", {"source", "group_col", "date_col", "target_col", "horizon", "folds", "frequency", "params", nullptr}, {{"features", "NULL"}, {"metric", "'rmse'"}, {nullptr, nullptr}},
+    {"ts_backtest_auto_by", {"source", "group_col", "date_col", "target_col", "horizon", "folds", "frequency", nullptr}, {{"params", "MAP{}"}, {"features", "NULL"}, {"metric", "'rmse'"}, {nullptr, nullptr}},
 R"(
 WITH _params AS (
     SELECT

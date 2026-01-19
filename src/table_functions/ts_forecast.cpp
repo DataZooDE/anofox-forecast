@@ -133,7 +133,7 @@ static void TsForecastFunction(DataChunk &args, ExpressionState &state, Vector &
         opts.horizon = horizon;
         opts.confidence_level = 0.95;
         opts.seasonal_period = 0;
-        opts.auto_detect_seasonality = true;
+        opts.auto_detect_seasonality = false;
         opts.include_fitted = true;
         opts.include_residuals = true;
 
@@ -299,7 +299,7 @@ static void TsForecastExogFunction(DataChunk &args, ExpressionState &state, Vect
         opts.horizon = horizon;
         opts.confidence_level = 0.95;
         opts.seasonal_period = 0;
-        opts.auto_detect_seasonality = true;
+        opts.auto_detect_seasonality = false;
         opts.include_fitted = true;
         opts.include_residuals = true;
         opts.exog = regressors.empty() ? nullptr : &exog_data;
@@ -405,7 +405,7 @@ static void TsForecastWithModelFunction(DataChunk &args, ExpressionState &state,
         opts.horizon = horizon;
         opts.confidence_level = 0.95;
         opts.seasonal_period = 0;
-        opts.auto_detect_seasonality = true;
+        opts.auto_detect_seasonality = false;
         opts.include_fitted = true;
         opts.include_residuals = true;
 

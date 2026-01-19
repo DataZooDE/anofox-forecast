@@ -8,7 +8,7 @@ Table macros are high-level functions that operate directly on tables. Column na
 
 ```sql
 -- Example: Generate forecasts for all product series
-SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'AutoETS', 30, MAP{});
+SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'AutoETS', 30);
 ```
 
 ## How Table Macros Work

@@ -48,7 +48,7 @@ The extension offers three ways to work with data:
 
 ```sql
 -- 1. Table Macros (recommended for most cases)
-SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'AutoETS', 12, MAP{});
+SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'AutoETS', 12);
 
 -- 2. Scalar Functions (for array operations)
 SELECT product_id, ts_stats(LIST(quantity ORDER BY date)) AS stats
@@ -122,7 +122,7 @@ GROUP BY model_name;
 ```sql
 -- Production forecasts with best model
 CREATE TABLE forecasts AS
-SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'AutoETS', 30, MAP{});
+SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'AutoETS', 30);
 ```
 
 ## Next Steps

@@ -46,7 +46,7 @@ Start here to establish a benchmark:
 
 ```sql
 -- Naive: repeats last value
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'Naive', 12, MAP{});
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'Naive', 12);
 
 -- Seasonal Naive: repeats last seasonal cycle
 SELECT * FROM ts_forecast_by('sales', id, date, val, 'SeasonalNaive', 12,
@@ -59,10 +59,10 @@ Good default choice for most business data:
 
 ```sql
 -- Simple Exponential Smoothing (no trend, no seasonality)
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'SES', 12, MAP{});
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'SES', 12);
 
 -- Holt (trend, no seasonality)
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'Holt', 12, MAP{});
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'Holt', 12);
 
 -- Holt-Winters (trend + seasonality)
 SELECT * FROM ts_forecast_by('sales', id, date, val, 'HoltWinters', 12,
@@ -75,13 +75,13 @@ Let the algorithm choose:
 
 ```sql
 -- AutoETS automatically selects error, trend, and seasonal components
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'AutoETS', 12, MAP{});
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'AutoETS', 12);
 
 -- AutoARIMA finds optimal ARIMA parameters
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'AutoARIMA', 12, MAP{});
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'AutoARIMA', 12);
 
 -- AutoTheta selects best theta variant
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'AutoTheta', 12, MAP{});
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'AutoTheta', 12);
 ```
 
 ### Multiple Seasonality
@@ -104,10 +104,10 @@ For data with many zeros (spare parts, slow-moving inventory):
 
 ```sql
 -- Croston's method for intermittent demand
-SELECT * FROM ts_forecast_by('inventory', id, date, demand, 'CrostonSBA', 12, MAP{});
+SELECT * FROM ts_forecast_by('inventory', id, date, demand, 'CrostonSBA', 12);
 
 -- TSB for better bias correction
-SELECT * FROM ts_forecast_by('inventory', id, date, demand, 'TSB', 12, MAP{});
+SELECT * FROM ts_forecast_by('inventory', id, date, demand, 'TSB', 12);
 ```
 
 ## Comparing Models

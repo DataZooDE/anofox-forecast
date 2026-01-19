@@ -15,13 +15,7 @@ Generate forecasts for multiple series with a single call:
 ```sql
 -- Forecast 14 days ahead for all products using AutoETS
 SELECT * FROM ts_forecast_by(
-    'sales_data',
-    product_id,
-    date,
-    revenue,
-    'AutoETS',
-    14,
-    MAP{}
+    'sales_data', product_id, date, revenue, 'AutoETS', 14
 );
 ```
 
@@ -29,15 +23,22 @@ Compare multiple models:
 
 ```sql
 -- Naive baseline
-SELECT *, 'Naive' AS model FROM ts_forecast_by('sales', id, date, val, 'Naive', 7, MAP{})
+SELECT *, 'Naive' AS model FROM ts_forecast_by('sales', id, date, val, 'Naive', 7)
 UNION ALL
 -- AutoETS
-SELECT *, 'AutoETS' AS model FROM ts_forecast_by('sales', id, date, val, 'AutoETS', 7, MAP{});
+SELECT *, 'AutoETS' AS model FROM ts_forecast_by('sales', id, date, val, 'AutoETS', 7);
 ```
 
-For seasonal data (e.g., weekly patterns):
+### Handling Seasonality
+
+Seasonality detection is **explicit** - you control when and how it's detected:
 
 ```sql
+-- Step 1: Detect seasonality
+SELECT * FROM ts_detect_periods_by('daily_sales', product_id, date, value, MAP{});
+-- Returns: primary_period = 7 (weekly)
+
+-- Step 2: Use detected period in forecast
 SELECT * FROM ts_forecast_by(
     'daily_sales', product_id, date, value,
     'HoltWinters', 14,
@@ -45,13 +46,18 @@ SELECT * FROM ts_forecast_by(
 );
 ```
 
+**Why explicit?** Auto-detection can produce unexpected results. By separating detection from forecasting, you can:
+- Validate detected periods make business sense
+- Use domain knowledge to override detection
+- Apply the same period consistently across models
+
 ---
 
 ## API Styles
 
 | API Style | Best For | Example |
 |-----------|----------|---------|
-| **Table Macros** | Most users; forecasting multiple series | `ts_forecast_by('sales', id, date, val, 'ETS', 12, MAP{})` |
+| **Table Macros** | Most users; forecasting multiple series | `ts_forecast_by('sales', id, date, val, 'ETS', 12)` |
 | **Aggregate Functions** | Custom GROUP BY patterns | `ts_forecast_agg(date, value, 'ETS', 12, MAP{})` |
 
 ## Model Selection Guide
@@ -186,15 +192,15 @@ ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, par
 **Examples:**
 ```sql
 -- Basic forecast with AutoETS
-SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'AutoETS', 12, MAP{});
+SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'AutoETS', 12);
 
--- With STRUCT params (mixed types)
+-- With seasonal period (explicit)
 SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'HoltWinters', 12,
     {'seasonal_period': 7, 'alpha': 0.2});
 
 -- MSTL with multiple seasonal periods
 SELECT * FROM ts_forecast_by('sales', id, date, val, 'MSTL', 30,
-    MAP{'seasonal_periods': '[7, 365]'});
+    {'seasonal_periods': '[7, 365]'});
 ```
 
 ---
