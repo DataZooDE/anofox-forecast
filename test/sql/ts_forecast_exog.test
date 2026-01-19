@@ -146,6 +146,9 @@ SELECT length((_ts_forecast_exog(
 # ts_forecast_exog_by - Grouped Exogenous Forecasting
 #######################################
 
+# The ts_forecast_exog_by macro uses json_extract for dynamic column access
+require json
+
 # Create grouped historical data with exogenous variable
 statement ok
 CREATE TABLE exog_by_history AS
