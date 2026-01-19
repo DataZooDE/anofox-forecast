@@ -2146,6 +2146,17 @@ FROM query_table(source::VARCHAR)
     // Period Detection
     // ================================================================================
 
+    // ts_detect_periods: Detect periods for a single series
+    // C++ API: ts_detect_periods(table_name, date_col, value_col, method)
+    // Returns: TABLE(periods STRUCT)
+    {"ts_detect_periods", {"source", "date_col", "value_col", nullptr},
+     {{"method", "'fft'"}, {nullptr, nullptr}},
+R"(
+SELECT
+    _ts_detect_periods(LIST(value_col::DOUBLE ORDER BY date_col), method) AS periods
+FROM query_table(source::VARCHAR)
+)"},
+
     // ts_detect_periods_by: Detect periods for grouped series
     // C++ API: ts_detect_periods_by(table_name, group_col, date_col, value_col, method)
     // Returns: TABLE(id, periods STRUCT)
@@ -2154,7 +2165,7 @@ FROM query_table(source::VARCHAR)
 R"(
 SELECT
     group_col AS id,
-    ts_detect_periods(LIST(value_col::DOUBLE ORDER BY date_col), method) AS periods
+    _ts_detect_periods(LIST(value_col::DOUBLE ORDER BY date_col), method) AS periods
 FROM query_table(source::VARCHAR)
 GROUP BY group_col
 )"},

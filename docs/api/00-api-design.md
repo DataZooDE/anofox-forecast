@@ -136,7 +136,7 @@ The following table shows which API variants exist for each functionality:
 | **Data Quality** | `_ts_data_quality`* | `ts_data_quality_agg` | `ts_data_quality` | `ts_data_quality_by` |
 | **Changepoints** | - | `ts_detect_changepoints_agg` | `ts_detect_changepoints` | `ts_detect_changepoints_by` |
 | **Seasonality** | - | `ts_classify_seasonality_agg` | `ts_classify_seasonality` | `ts_classify_seasonality_by` |
-| **Period Detection** | `ts_detect_periods` | - | - | `ts_detect_periods_by` |
+| **Period Detection** | `_ts_detect_periods`* | `ts_detect_periods_agg` | `ts_detect_periods` | `ts_detect_periods_by` |
 | **Decomposition** | `_ts_mstl_decomposition`* | - | - | `ts_mstl_decomposition_by` |
 | **Metrics** | `ts_mae`, `ts_rmse`, ...† | - | - | `ts_mae_by`, `ts_rmse_by`, ...† |
 | **Conformal** | `ts_conformal_*`‡ | - | `ts_conformal_calibrate` | `ts_conformal_by`, `ts_conformal_apply_by` |

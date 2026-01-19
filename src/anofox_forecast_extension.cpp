@@ -58,6 +58,7 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsEstimatePeriodFftFunction(loader);
     RegisterTsEstimatePeriodAcfFunction(loader);
     RegisterTsDetectMultiplePeriodsFunction(loader);
+    RegisterTsDetectPeriodsAggFunction(loader);
     RegisterTsAutoperiodFunction(loader);
     RegisterTsCfdAutoperiodFunction(loader);
     RegisterTsLombScargleFunction(loader);

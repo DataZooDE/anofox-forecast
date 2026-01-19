@@ -35,6 +35,7 @@ void RegisterTsDetectPeriodsFunction(ExtensionLoader &loader);
 void RegisterTsEstimatePeriodFftFunction(ExtensionLoader &loader);
 void RegisterTsEstimatePeriodAcfFunction(ExtensionLoader &loader);
 void RegisterTsDetectMultiplePeriodsFunction(ExtensionLoader &loader);
+void RegisterTsDetectPeriodsAggFunction(ExtensionLoader &loader);
 void RegisterTsAutoperiodFunction(ExtensionLoader &loader);
 void RegisterTsCfdAutoperiodFunction(ExtensionLoader &loader);
 void RegisterTsLombScargleFunction(ExtensionLoader &loader);

@@ -10,19 +10,57 @@ Seasonality functions detect periodic patterns in time series data and decompose
 
 ## Quick Start
 
-Detect periods for all series with a single call:
+Detect periods using table macros (recommended):
 
 ```sql
--- Detect periods per product
+-- Single series
+SELECT * FROM ts_detect_periods('daily_sales', date, value);
+
+-- Multiple series
 SELECT * FROM ts_detect_periods_by('sales', product_id, date, value);
 
 -- With specific method
 SELECT * FROM ts_detect_periods_by('sales', product_id, date, value, method := 'acf');
 ```
 
+Using the aggregate function with GROUP BY:
+
+```sql
+SELECT product_id, ts_detect_periods_agg(date, value) AS periods
+FROM sales
+GROUP BY product_id;
+```
+
 ---
 
 ## Table Macros
+
+### ts_detect_periods
+
+Detect periods for a single series.
+
+**Signature:**
+```sql
+ts_detect_periods(source, date_col, value_col, method := 'fft') → TABLE(periods)
+```
+
+**Parameters:**
+- `source`: Table name (VARCHAR)
+- `date_col`: Date/timestamp column
+- `value_col`: Value column
+- `method`: Detection method (default: 'fft')
+
+**Returns:** TABLE with `periods` STRUCT containing detected periods.
+
+**Example:**
+```sql
+SELECT
+    (periods).primary_period,
+    (periods).n_periods
+FROM ts_detect_periods('daily_sales', date, value);
+```
+
+---
 
 ### ts_detect_periods_by
 
@@ -54,49 +92,81 @@ FROM ts_detect_periods_by('sales', product_id, date, value);
 
 ---
 
-## Scalar Functions
+## Aggregate Function
 
-### ts_detect_periods
+### ts_detect_periods_agg
 
-### ts_detect_periods
-
-Detects seasonal periods using multiple methods.
+Aggregate function for period detection with GROUP BY.
 
 **Signature:**
 ```sql
-ts_detect_periods(values DOUBLE[]) → STRUCT
-ts_detect_periods(values DOUBLE[], method VARCHAR) → STRUCT
+ts_detect_periods_agg(date_col TIMESTAMP, value_col DOUBLE) → STRUCT
+ts_detect_periods_agg(date_col TIMESTAMP, value_col DOUBLE, method VARCHAR) → STRUCT
 ```
 
 **Parameters:**
-- `values`: Time series values (DOUBLE[])
-- `method`: Detection method (VARCHAR, optional, default: 'auto')
-  - `'fft'` - FFT periodogram-based estimation
-  - `'acf'` - Autocorrelation function approach
-  - `'regression'` - Fourier regression grid search
-  - `'multi'` - Iterative residual subtraction for concurrent periodicities
-  - `'wavelet'` - Wavelet-based period detection
-  - `'auto'` - Automatic method selection (default)
+- `date_col`: Date/timestamp column
+- `value_col`: Value column
+- `method`: Detection method (optional, default: 'fft')
 
 **Returns:**
 ```sql
 STRUCT(
-    periods          INTEGER[],     -- Detected periods sorted by strength
-    confidences      DOUBLE[],      -- Confidence score for each period (0-1)
-    primary_period   INTEGER,       -- Dominant period
-    method_used      VARCHAR        -- Method that was used
+    periods          STRUCT[],      -- Detected periods with metadata
+    n_periods        BIGINT,        -- Number of periods found
+    primary_period   DOUBLE,        -- Dominant period
+    method           VARCHAR        -- Method used
 )
 ```
 
 **Example:**
 ```sql
--- Detect periods using FFT
-SELECT ts_detect_periods(LIST(value ORDER BY date), 'fft') AS periods
-FROM sales GROUP BY product_id;
+-- Detect periods per product
+SELECT
+    product_id,
+    ts_detect_periods_agg(date, value) AS periods
+FROM sales
+GROUP BY product_id;
 
--- Default auto-selection
-SELECT (ts_detect_periods([1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[])).primary_period;
--- Returns: 4
+-- With specific method
+SELECT
+    product_id,
+    (ts_detect_periods_agg(date, value, 'acf')).primary_period
+FROM sales
+GROUP BY product_id;
+```
+
+---
+
+## Internal Scalar Function
+
+> **Note:** The `_ts_detect_periods` scalar function is internal and used by the table macros above.
+> For direct usage, prefer the table macros or aggregate function.
+
+### _ts_detect_periods
+
+Detects seasonal periods using multiple methods (internal).
+
+**Signature:**
+```sql
+_ts_detect_periods(values DOUBLE[]) → STRUCT
+_ts_detect_periods(values DOUBLE[], method VARCHAR) → STRUCT
+```
+
+**Parameters:**
+- `values`: Time series values (DOUBLE[])
+- `method`: Detection method (VARCHAR, optional, default: 'fft')
+  - `'fft'` - FFT periodogram-based estimation
+  - `'acf'` - Autocorrelation function approach
+
+**Returns:**
+```sql
+STRUCT(
+    periods          STRUCT[],      -- Detected periods with metadata
+    n_periods        BIGINT,        -- Number of periods found
+    primary_period   DOUBLE,        -- Dominant period
+    method           VARCHAR        -- Method used
+)
 ```
 
 ---
