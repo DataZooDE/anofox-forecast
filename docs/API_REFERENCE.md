@@ -125,15 +125,14 @@ Both forms are identical in functionality.
 
 ### Forecasting Models (32 Models)
 
-| Category | Models |
-|----------|--------|
-| **Automatic** | `AutoETS`, `AutoARIMA`, `AutoTheta`, `AutoMFLES`, `AutoMSTL`, `AutoTBATS` |
-| **Basic** | `Naive`, `SMA`, `SeasonalNaive`, `SES`, `SESOptimized`, `RandomWalkDrift` |
-| **Exponential Smoothing** | `Holt`, `HoltWinters`, `SeasonalES`, `SeasonalESOptimized` |
-| **Theta** | `Theta`, `OptimizedTheta`, `DynamicTheta`, `DynamicOptimizedTheta` |
-| **State Space** | `ETS`, `ARIMA` |
-| **Multi-Seasonality** | `MFLES`, `MSTL`, `TBATS` |
-| **Intermittent Demand** | `CrostonClassic`, `CrostonOptimized`, `CrostonSBA`, `ADIDA`, `IMAPA`, `TSB` |
+| Category | Models | Reference |
+|----------|--------|-----------|
+| **Baseline** | `Naive`, `SMA`, `SeasonalNaive`, `RandomWalkDrift`, `SeasonalWindowAverage` | [baseline/](reference/models/baseline/) |
+| **Exponential Smoothing** | `SES`, `SESOptimized`, `Holt`, `HoltWinters`, `SeasonalES`, `SeasonalESOptimized` | [exponential-smoothing/](reference/models/exponential-smoothing/) |
+| **State Space** | `ETS`, `ARIMA`, `AutoETS`, `AutoARIMA` | [state-space/](reference/models/state-space/) |
+| **Theta** | `Theta`, `OptimizedTheta`, `DynamicTheta`, `DynamicOptimizedTheta`, `AutoTheta` | [theta/](reference/models/theta/) |
+| **Multi-Seasonal** | `MFLES`, `AutoMFLES`, `MSTL`, `AutoMSTL`, `TBATS`, `AutoTBATS` | [multi-seasonal/](reference/models/multi-seasonal/) |
+| **Intermittent Demand** | `CrostonClassic`, `CrostonOptimized`, `CrostonSBA`, `ADIDA`, `IMAPA`, `TSB` | [intermittent/](reference/models/intermittent/) |
 
 ### Evaluation Metrics (12 Metrics)
 
