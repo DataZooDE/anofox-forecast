@@ -14,10 +14,10 @@ Compute statistics using table macros (recommended):
 
 ```sql
 -- Multiple series statistics
-SELECT * FROM ts_stats('sales', product_id, date, quantity, '1d');
+SELECT * FROM ts_stats_by('sales', product_id, date, quantity, '1d');
 
 -- Data quality per series
-SELECT * FROM ts_data_quality('sales', product_id, date, quantity, 10, '1d');
+SELECT * FROM ts_data_quality_by('sales', product_id, date, quantity, 10, '1d');
 ```
 
 Using aggregate functions with GROUP BY:
@@ -36,13 +36,13 @@ GROUP BY product_id;
 
 ## Table Macros
 
-### ts_stats (Table Macro)
+### ts_stats_by
 
-Compute statistics for grouped time series.
+Compute statistics for multiple time series grouped by identifier.
 
 **Signature:**
 ```sql
-ts_stats(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, frequency VARCHAR) → TABLE
+ts_stats_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, frequency VARCHAR) → TABLE
 ```
 
 **Parameters:**
@@ -56,25 +56,27 @@ ts_stats(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, fr
 
 **Example:**
 ```sql
-SELECT * FROM ts_stats('sales', product_id, date, quantity, '1d');
+SELECT * FROM ts_stats_by('sales', product_id, date, quantity, '1d');
 ```
+
+> **Alias:** `ts_stats` is an alias for `ts_stats_by`
 
 ---
 
-### ts_data_quality (Table Macro)
+### ts_data_quality_by
 
-Assess data quality per series.
+Assess data quality for multiple series grouped by identifier.
 
 **Signature:**
 ```sql
-ts_data_quality(source VARCHAR, unique_id_col COLUMN, date_col COLUMN, value_col COLUMN, n_short INTEGER, frequency VARCHAR) → TABLE
+ts_data_quality_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, n_short INTEGER, frequency VARCHAR) → TABLE
 ```
 
 **Parameters:**
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `source` | VARCHAR | Source table name |
-| `unique_id_col` | COLUMN | Column for grouping series |
+| `group_col` | COLUMN | Column for grouping series |
 | `date_col` | COLUMN | Date/timestamp column |
 | `value_col` | COLUMN | Value column |
 | `n_short` | INTEGER | Minimum series length threshold |
@@ -82,8 +84,10 @@ ts_data_quality(source VARCHAR, unique_id_col COLUMN, date_col COLUMN, value_col
 
 **Example:**
 ```sql
-SELECT * FROM ts_data_quality('sales', product_id, date, quantity, 10, '1d');
+SELECT * FROM ts_data_quality_by('sales', product_id, date, quantity, 10, '1d');
 ```
+
+> **Alias:** `ts_data_quality` is an alias for `ts_data_quality_by`
 
 ---
 
