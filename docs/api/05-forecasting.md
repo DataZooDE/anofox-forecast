@@ -13,26 +13,26 @@ The extension provides 32 forecasting models ranging from simple baselines to so
 Generate forecasts for multiple series with a single call:
 
 ```sql
--- Forecast 14 days ahead for all products using AutoETS
+-- Forecast 14 days ahead for all products using HoltWinters with weekly seasonality
 SELECT * FROM ts_forecast_by(
-    'sales_data',     -- source: table name (quoted string)
-    product_id,       -- group_col: series identifier (unquoted)
-    date,             -- date_col: timestamp column (unquoted)
-    revenue,          -- target_col: value to forecast (unquoted)
-    'AutoETS',        -- method: forecasting model
-    14,               -- horizon: periods to forecast
-    MAP{}             -- params: model configuration (empty = defaults)
+    'sales_data',              -- source: table name (quoted string)
+    product_id,                -- group_col: series identifier (unquoted)
+    date,                      -- date_col: timestamp column (unquoted)
+    revenue,                   -- target_col: value to forecast (unquoted)
+    'HoltWinters',             -- method: forecasting model (seasonal)
+    14,                        -- horizon: periods to forecast
+    MAP{'seasonal_period': '7'}  -- params: weekly seasonality (required for seasonal models)
 );
 ```
 
 Compare multiple models:
 
 ```sql
--- Naive baseline
+-- Naive baseline (no params needed)
 SELECT *, 'Naive' AS model FROM ts_forecast_by('sales', id, date, val, 'Naive', 7, MAP{})
 UNION ALL
--- AutoETS
-SELECT *, 'AutoETS' AS model FROM ts_forecast_by('sales', id, date, val, 'AutoETS', 7, MAP{});
+-- HoltWinters with weekly seasonality
+SELECT *, 'HoltWinters' AS model FROM ts_forecast_by('sales', id, date, val, 'HoltWinters', 7, MAP{'seasonal_period': '7'});
 ```
 
 ### Handling Seasonality
@@ -244,16 +244,21 @@ ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, par
 
 **Examples:**
 ```sql
--- Basic forecast with AutoETS (params empty = use defaults)
-SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'AutoETS', 12, MAP{});
-
--- With seasonal period (explicit) - all MAP values are strings
+-- HoltWinters with weekly seasonality (guaranteed seasonal model)
 SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'HoltWinters', 12,
-    MAP{'seasonal_period': '7', 'alpha': '0.2'});
+    MAP{'seasonal_period': '7'});
+
+-- AutoETS considers seasonal models when seasonal_period provided
+-- (may still select non-seasonal if it fits better)
+SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'AutoETS', 12,
+    MAP{'seasonal_period': '7'});
 
 -- MSTL with multiple seasonal periods (array as JSON string)
 SELECT * FROM ts_forecast_by('sales', id, date, val, 'MSTL', 30,
     MAP{'seasonal_periods': '[7, 365]'});
+
+-- Naive baseline (no seasonal_period needed)
+SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'Naive', 12, MAP{});
 ```
 
 ---
