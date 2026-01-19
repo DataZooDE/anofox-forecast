@@ -180,22 +180,39 @@ ORDER BY avg_mae;
 
 For complete function signatures, parameters, and detailed documentation, see the [API Reference](docs/API_REFERENCE.md).
 
-### Guides and API Sections
+### Documentation Structure
 
-| Guide | API Reference Section |
-|-------|----------------------|
-| [Quick Start](guides/01_quickstart.md) | [Forecasting](docs/API_REFERENCE.md#forecasting) |
-| [EDA & Data Preparation](guides/11_exploratory_analysis.md) | [Exploratory Data Analysis](docs/API_REFERENCE.md#exploratory-data-analysis), [Data Quality](docs/API_REFERENCE.md#data-quality), [Data Preparation](docs/API_REFERENCE.md#data-preparation) |
-| [Detecting Seasonality](guides/12_detecting_seasonality.md) | [Seasonality](docs/API_REFERENCE.md#seasonality) |
-| [Detecting Changepoints](guides/13_detecting_changepoints.md) | [Changepoint Detection](docs/API_REFERENCE.md#changepoint-detection) |
-| [Time Series Features](guides/20_time_series_features.md) | [Time Series Features](docs/API_REFERENCE.md#time-series-features) |
-| [Basic Forecasting](guides/30_basic_forecasting.md) | [Forecasting](docs/API_REFERENCE.md#forecasting) |
-| Exogenous Variables | [Exogenous Forecasting](docs/API_REFERENCE.md#_ts_forecast_exog-scalar) |
-| [Evaluation Metrics](guides/50_evaluation_metrics.md) | [Evaluation](docs/API_REFERENCE.md#evaluation) |
-| [Backtesting & Cross-Validation](examples/backtesting/README.md) | [Cross-Validation & Backtesting](docs/API_REFERENCE.md#cross-validation--backtesting) |
-| Conformal Prediction | [Conformal Prediction](docs/API_REFERENCE.md#conformal-prediction) |
-| [Multi-Key Hierarchy](examples/multi_key_hierarchy/README.md) | [Multi-Key Hierarchy](docs/API_REFERENCE.md#multi-key-hierarchy) |
-| Forecasting Model Parameters | [Supported Models](docs/API_REFERENCE.md#supported-models), [Parameter Reference](docs/API_REFERENCE.md#parameter-reference) |
+| Category | Description | Documentation |
+|----------|-------------|---------------|
+| **Getting Started** | Installation and first forecast | [Getting Started Guide](docs/guides/01-getting-started.md) |
+| **Model Selection** | Choose the right model | [Model Selection Guide](docs/guides/02-model-selection.md) |
+| **Cross-Validation** | Evaluate forecast accuracy | [Cross-Validation Guide](docs/guides/03-cross-validation.md) |
+
+### API Documentation
+
+| Topic | Description | Reference |
+|-------|-------------|-----------|
+| **Hierarchical Data** | Multi-key hierarchy functions | [02-hierarchical.md](docs/api/02-hierarchical.md) |
+| **Statistics** | 34 statistical metrics, data quality | [03-statistics.md](docs/api/03-statistics.md) |
+| **Data Preparation** | Cleaning, imputation, filtering | [04-data-preparation.md](docs/api/04-data-preparation.md) |
+| **Period Detection** | Seasonality detection (12 methods) | [05-period-detection.md](docs/api/05-period-detection.md) |
+| **Changepoint Detection** | Structural break detection | [06-changepoint-detection.md](docs/api/06-changepoint-detection.md) |
+| **Forecasting** | 32 forecasting models | [07-forecasting.md](docs/api/07-forecasting.md) |
+| **Cross-Validation** | Backtesting and CV functions | [08-cross-validation.md](docs/api/08-cross-validation.md) |
+| **Evaluation Metrics** | 12 accuracy metrics | [09-evaluation-metrics.md](docs/api/09-evaluation-metrics.md) |
+| **Conformal Prediction** | Distribution-free prediction intervals | [11-conformal-prediction.md](docs/api/11-conformal-prediction.md) |
+| **Feature Extraction** | 117 tsfresh-compatible features | [20-feature-extraction.md](docs/api/20-feature-extraction.md) |
+
+### Model Reference (32 Models)
+
+| Category | Models | Reference |
+|----------|--------|-----------|
+| **Baseline** | Naive, SMA, SeasonalNaive, RandomWalkDrift | [baseline/](docs/reference/models/baseline/) |
+| **Exponential Smoothing** | SES, Holt, HoltWinters, SeasonalES | [exponential-smoothing/](docs/reference/models/exponential-smoothing/) |
+| **State Space** | ETS, ARIMA, AutoETS, AutoARIMA | [state-space/](docs/reference/models/state-space/) |
+| **Theta** | Theta, OptimizedTheta, DynamicTheta, AutoTheta | [theta/](docs/reference/models/theta/) |
+| **Multi-Seasonal** | MFLES, MSTL, TBATS (+ Auto variants) | [multi-seasonal/](docs/reference/models/multi-seasonal/) |
+| **Intermittent Demand** | Croston, CrostonSBA, ADIDA, IMAPA, TSB | [intermittent/](docs/reference/models/intermittent/) |
 
 
 ## 📦 Development
