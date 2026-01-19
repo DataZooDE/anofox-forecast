@@ -15,7 +15,13 @@ Generate forecasts for multiple series with a single call:
 ```sql
 -- Forecast 14 days ahead for all products using AutoETS
 SELECT * FROM ts_forecast_by(
-    'sales_data', product_id, date, revenue, 'AutoETS', 14
+    'sales_data',     -- source: table name (quoted string)
+    product_id,       -- group_col: series identifier (unquoted)
+    date,             -- date_col: timestamp column (unquoted)
+    revenue,          -- target_col: value to forecast (unquoted)
+    'AutoETS',        -- method: forecasting model
+    14,               -- horizon: periods to forecast
+    MAP{}             -- params: model configuration (empty = defaults)
 );
 ```
 
@@ -23,10 +29,10 @@ Compare multiple models:
 
 ```sql
 -- Naive baseline
-SELECT *, 'Naive' AS model FROM ts_forecast_by('sales', id, date, val, 'Naive', 7)
+SELECT *, 'Naive' AS model FROM ts_forecast_by('sales', id, date, val, 'Naive', 7, MAP{})
 UNION ALL
 -- AutoETS
-SELECT *, 'AutoETS' AS model FROM ts_forecast_by('sales', id, date, val, 'AutoETS', 7);
+SELECT *, 'AutoETS' AS model FROM ts_forecast_by('sales', id, date, val, 'AutoETS', 7, MAP{});
 ```
 
 ### Handling Seasonality
@@ -45,13 +51,13 @@ SELECT * FROM ts_detect_periods_by('daily_sales', product_id, date, value, MAP{}
 SELECT * FROM ts_forecast_by(
     'daily_sales', product_id, date, value,
     'AutoETS', 14,
-    {'seasonal_period': 7}
+    MAP{'seasonal_period': '7'}  -- Pass detected period explicitly
 );
 
 -- For backtesting
 SELECT * FROM ts_backtest_auto_by(
     'daily_sales', product_id, date, value, 7, 5, '1d',
-    {'method': 'AutoETS', 'seasonal_period': 7}
+    MAP{'method': 'AutoETS', 'seasonal_period': '7'}
 );
 ```
 
@@ -65,7 +71,7 @@ WITH detected AS (
 SELECT * FROM ts_forecast_by(
     'daily_sales', product_id, date, value,
     'HoltWinters', 14,
-    {'seasonal_period': (SELECT season FROM detected)}
+    MAP{'seasonal_period': (SELECT season FROM detected)::VARCHAR}
 );
 ```
 
@@ -74,13 +80,37 @@ SELECT * FROM ts_forecast_by(
 - Use domain knowledge to override detection
 - Apply the same period consistently across models
 
+### Complete Forecasting Workflow
+
+End-to-end example showing data preparation through forecasting:
+
+```sql
+-- Step 1: Check data quality
+SELECT id, (stats).length, (stats).n_nulls
+FROM ts_stats_by('daily_sales', product_id, date, revenue, '1d');
+-- Review: check for NULLs, gaps, and series length
+
+-- Step 2: Detect seasonality (explicit control)
+SELECT id, (periods).primary_period AS period
+FROM ts_detect_periods_by('daily_sales', product_id, date, revenue, MAP{});
+-- Example output: period = 7 (weekly pattern)
+
+-- Step 3: Forecast with detected period
+SELECT * FROM ts_forecast_by(
+    'daily_sales',
+    product_id, date, revenue,
+    'HoltWinters', 14,
+    MAP{'seasonal_period': '7'}
+);
+```
+
 ---
 
 ## API Styles
 
 | API Style | Best For | Example |
 |-----------|----------|---------|
-| **Table Macros** | Most users; forecasting multiple series | `ts_forecast_by('sales', id, date, val, 'ETS', 12)` |
+| **Table Macros** | Most users; forecasting multiple series | `ts_forecast_by('sales', id, date, val, 'ETS', 12, MAP{})` |
 | **Aggregate Functions** | Custom GROUP BY patterns | `ts_forecast_agg(date, value, 'ETS', 12, MAP{})` |
 
 ## Model Selection Guide
@@ -214,16 +244,16 @@ ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, par
 
 **Examples:**
 ```sql
--- Basic forecast with AutoETS
-SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'AutoETS', 12);
+-- Basic forecast with AutoETS (params empty = use defaults)
+SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'AutoETS', 12, MAP{});
 
--- With seasonal period (explicit)
+-- With seasonal period (explicit) - all MAP values are strings
 SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'HoltWinters', 12,
-    {'seasonal_period': 7, 'alpha': 0.2});
+    MAP{'seasonal_period': '7', 'alpha': '0.2'});
 
--- MSTL with multiple seasonal periods
+-- MSTL with multiple seasonal periods (array as JSON string)
 SELECT * FROM ts_forecast_by('sales', id, date, val, 'MSTL', 30,
-    {'seasonal_periods': '[7, 365]'});
+    MAP{'seasonal_periods': '[7, 365]'});
 ```
 
 ---
