@@ -46,7 +46,7 @@ FROM constant_test GROUP BY series_id ORDER BY series_id;
 .print ''
 .print 'After ts_drop_constant (constant series removed):'
 SELECT series_id, COUNT(*) AS n_points, MIN(value) AS min_val, MAX(value) AS max_val
-FROM ts_drop_constant('constant_test', series_id, value)
+FROM ts_drop_constant_by('constant_test', series_id, value)
 GROUP BY series_id ORDER BY series_id;
 
 -- =============================================================================
@@ -80,13 +80,13 @@ SELECT series_id, COUNT(*) AS n_points FROM length_test GROUP BY series_id ORDER
 .print ''
 .print 'After ts_drop_short (min_length=5):'
 SELECT series_id, COUNT(*) AS n_points
-FROM ts_drop_short('length_test', series_id, 5)
+FROM ts_drop_short_by('length_test', series_id, 5)
 GROUP BY series_id ORDER BY series_id;
 
 .print ''
 .print 'After ts_drop_short (min_length=10):'
 SELECT series_id, COUNT(*) AS n_points
-FROM ts_drop_short('length_test', series_id, 10)
+FROM ts_drop_short_by('length_test', series_id, 10)
 GROUP BY series_id ORDER BY series_id;
 
 -- =============================================================================
@@ -123,19 +123,19 @@ SELECT series_id, LIST(value ORDER BY ts) AS values FROM edge_zeros_test GROUP B
 .print ''
 .print 'After ts_drop_leading_zeros:'
 SELECT series_id, COUNT(*) AS n_points, LIST(value ORDER BY ts) AS values
-FROM ts_drop_leading_zeros('edge_zeros_test', series_id, ts, value)
+FROM ts_drop_leading_zeros_by('edge_zeros_test', series_id, ts, value)
 GROUP BY series_id ORDER BY series_id;
 
 .print ''
 .print 'After ts_drop_trailing_zeros:'
 SELECT series_id, COUNT(*) AS n_points, LIST(value ORDER BY ts) AS values
-FROM ts_drop_trailing_zeros('edge_zeros_test', series_id, ts, value)
+FROM ts_drop_trailing_zeros_by('edge_zeros_test', series_id, ts, value)
 GROUP BY series_id ORDER BY series_id;
 
 .print ''
 .print 'After ts_drop_edge_zeros (both ends):'
 SELECT series_id, COUNT(*) AS n_points, LIST(value ORDER BY ts) AS values
-FROM ts_drop_edge_zeros('edge_zeros_test', series_id, ts, value)
+FROM ts_drop_edge_zeros_by('edge_zeros_test', series_id, ts, value)
 GROUP BY series_id ORDER BY series_id;
 
 -- =============================================================================
@@ -165,25 +165,25 @@ SELECT series_id, LIST(value ORDER BY ts) AS values FROM null_test GROUP BY seri
 .print ''
 .print 'After ts_fill_nulls_forward (LOCF):'
 SELECT series_id, LIST(value_col ORDER BY ts) AS values
-FROM ts_fill_nulls_forward('null_test', series_id, ts, value)
+FROM ts_fill_nulls_forward_by('null_test', series_id, ts, value)
 GROUP BY series_id ORDER BY series_id;
 
 .print ''
 .print 'After ts_fill_nulls_backward:'
 SELECT series_id, LIST(value_col ORDER BY ts) AS values
-FROM ts_fill_nulls_backward('null_test', series_id, ts, value)
+FROM ts_fill_nulls_backward_by('null_test', series_id, ts, value)
 GROUP BY series_id ORDER BY series_id;
 
 .print ''
 .print 'After ts_fill_nulls_mean:'
 SELECT series_id, LIST(ROUND(value_col, 2) ORDER BY ts) AS values
-FROM ts_fill_nulls_mean('null_test', series_id, ts, value)
+FROM ts_fill_nulls_mean_by('null_test', series_id, ts, value)
 GROUP BY series_id ORDER BY series_id;
 
 .print ''
 .print 'After ts_fill_nulls_const (fill with 0):'
 SELECT series_id, LIST(value_col ORDER BY ts) AS values
-FROM ts_fill_nulls_const('null_test', series_id, ts, value, 0)
+FROM ts_fill_nulls_const_by('null_test', series_id, ts, value, 0)
 GROUP BY series_id ORDER BY series_id;
 
 -- =============================================================================
@@ -209,7 +209,7 @@ SELECT series_id, LIST(value ORDER BY ts) AS values FROM trend_test GROUP BY ser
 .print ''
 .print 'After ts_diff (first difference, removes linear trend):'
 SELECT series_id, LIST(ROUND(diff_value, 2) ORDER BY ts) AS values
-FROM ts_diff('trend_test', series_id, ts, value, 1)
+FROM ts_diff_by('trend_test', series_id, ts, value, 1)
 GROUP BY series_id;
 
 -- =============================================================================
@@ -254,7 +254,7 @@ FROM messy_data GROUP BY series_id ORDER BY series_id;
 .print 'Step 1 - After filling NULLs:'
 CREATE OR REPLACE TABLE step1 AS
 SELECT series_id, ts, value_col AS value
-FROM ts_fill_nulls_forward('messy_data', series_id, ts, value);
+FROM ts_fill_nulls_forward_by('messy_data', series_id, ts, value);
 
 SELECT series_id, COUNT(*) AS n, LIST(value ORDER BY ts) AS values
 FROM step1 GROUP BY series_id ORDER BY series_id;
@@ -263,7 +263,7 @@ FROM step1 GROUP BY series_id ORDER BY series_id;
 .print ''
 .print 'Step 2 - After removing edge zeros:'
 CREATE OR REPLACE TABLE step2 AS
-SELECT * FROM ts_drop_edge_zeros('step1', series_id, ts, value);
+SELECT * FROM ts_drop_edge_zeros_by('step1', series_id, ts, value);
 
 SELECT series_id, COUNT(*) AS n, LIST(value ORDER BY ts) AS values
 FROM step2 GROUP BY series_id ORDER BY series_id;
@@ -272,7 +272,7 @@ FROM step2 GROUP BY series_id ORDER BY series_id;
 .print ''
 .print 'Step 3 - After removing constant series:'
 CREATE OR REPLACE TABLE step3 AS
-SELECT * FROM ts_drop_constant('step2', series_id, value);
+SELECT * FROM ts_drop_constant_by('step2', series_id, value);
 
 SELECT series_id, COUNT(*) AS n, LIST(value ORDER BY ts) AS values
 FROM step3 GROUP BY series_id ORDER BY series_id;
@@ -281,7 +281,7 @@ FROM step3 GROUP BY series_id ORDER BY series_id;
 .print ''
 .print 'Step 4 - After removing short series (min_length=5):'
 SELECT series_id, COUNT(*) AS n, LIST(value ORDER BY ts) AS values
-FROM ts_drop_short('step3', series_id, 5)
+FROM ts_drop_short_by('step3', series_id, 5)
 GROUP BY series_id ORDER BY series_id;
 
 -- =============================================================================
@@ -318,13 +318,13 @@ SELECT id AS series_id,
        (stats).length AS length,
        (stats).n_nulls AS nulls,
        (stats).n_zeros AS zeros
-FROM ts_stats('stats_test', series_id, ts, value, '1d');
+FROM ts_stats_by('stats_test', series_id, ts, value, '1d');
 
 .print ''
 .print 'Dataset-wide summary (aggregated manually):'
 -- First compute stats, then summarize
 CREATE OR REPLACE TABLE computed_stats AS
-SELECT * FROM ts_stats('stats_test', series_id, ts, value, '1d');
+SELECT * FROM ts_stats_by('stats_test', series_id, ts, value, '1d');
 
 -- Manual aggregation (ts_stats_summary currently has a bug with n_gaps field)
 SELECT
@@ -386,11 +386,11 @@ SELECT
         WHEN (quality).overall_score >= 0.5 THEN 'FAIR'
         ELSE 'POOR'
     END AS tier
-FROM ts_data_quality('quality_test', series_id, ts, value, 10, '1d');
+FROM ts_data_quality_by('quality_test', series_id, ts, value, 10, '1d');
 
 .print ''
 .print 'Dataset-wide summary with ts_data_quality_summary (tier counts):'
-SELECT * FROM ts_data_quality_summary('quality_test', series_id, ts, value, 10);
+SELECT * FROM ts_data_quality_summary_by('quality_test', series_id, ts, value, 10);
 
 .print ''
 .print 'When to use: ts_data_quality to identify which series need attention,'
@@ -444,15 +444,15 @@ FROM filter_test GROUP BY series_id ORDER BY series_id;
 
 .print ''
 .print 'After ts_drop_zeros (removes series with NO non-zero values):'
-SELECT DISTINCT series_id FROM ts_drop_zeros('filter_test', series_id, value) ORDER BY series_id;
+SELECT DISTINCT series_id FROM ts_drop_zeros_by('filter_test', series_id, value) ORDER BY series_id;
 
 .print ''
 .print 'After ts_drop_gappy max_ratio=0.2 (removes series with >20% nulls):'
-SELECT DISTINCT series_id FROM ts_drop_gappy('filter_test', series_id, value, 0.2) ORDER BY series_id;
+SELECT DISTINCT series_id FROM ts_drop_gappy_by('filter_test', series_id, value, 0.2) ORDER BY series_id;
 
 .print ''
 .print 'After ts_drop_gappy max_ratio=0.5 (removes series with >50% nulls):'
-SELECT DISTINCT series_id FROM ts_drop_gappy('filter_test', series_id, value, 0.5) ORDER BY series_id;
+SELECT DISTINCT series_id FROM ts_drop_gappy_by('filter_test', series_id, value, 0.5) ORDER BY series_id;
 
 .print ''
 .print 'When to use: ts_drop_zeros for removing truly inactive series,'
