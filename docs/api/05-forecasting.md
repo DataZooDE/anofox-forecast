@@ -263,13 +263,13 @@ SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'Naive', 12, MAP
 
 ---
 
-### ts_forecast_exog
+### ts_forecast_exog_by
 
-Single-series forecasting with exogenous variables.
+Multi-series forecasting with exogenous variables. This is the **primary exogenous forecasting function**.
 
 **Signature:**
 ```sql
-ts_forecast_exog(table_name, date_col, target_col, x_cols, future_table, model, horizon, params) → TABLE
+ts_forecast_exog_by(table_name, group_col, date_col, target_col, x_cols, future_table, future_date_col, future_x_cols, model, horizon, params, frequency) → TABLE
 ```
 
 **Supported Models with Exogenous:**
@@ -282,23 +282,52 @@ ts_forecast_exog(table_name, date_col, target_col, x_cols, future_table, model, 
 
 **Example:**
 ```sql
+-- Create historical data with exogenous variable
+CREATE TABLE sales_history AS
+SELECT product_id, date, revenue, temperature
+FROM sales_with_weather;
+
+-- Create future exogenous data (must cover forecast horizon)
+CREATE TABLE future_weather AS
+SELECT product_id, date, temperature
+FROM weather_forecast;
+
+-- Forecast with exogenous regressor
+SELECT * FROM ts_forecast_exog_by(
+    'sales_history',       -- historical data table
+    product_id,            -- group column
+    date,                  -- date column
+    revenue,               -- target column
+    ['temperature'],       -- exogenous columns (historical)
+    'future_weather',      -- future exogenous table
+    date,                  -- future date column
+    ['temperature'],       -- future exogenous columns
+    'AutoARIMA',           -- model
+    7,                     -- horizon
+    MAP{},                 -- params
+    '1d'                   -- frequency
+);
+```
+
+---
+
+### ts_forecast_exog
+
+Single-series forecasting with exogenous variables.
+
+**Signature:**
+```sql
+ts_forecast_exog(table_name, date_col, target_col, x_cols, future_table, model, horizon, params) → TABLE
+```
+
+**Example:**
+```sql
 SELECT * FROM ts_forecast_exog(
     'sales', date, amount,
     'temperature,promotion',
     'future_exog',
     'AutoARIMA', 3, MAP{}
 );
-```
-
----
-
-### ts_forecast_exog_by
-
-Multi-series forecasting with exogenous variables.
-
-**Signature:**
-```sql
-ts_forecast_exog_by(table_name, group_col, date_col, target_col, x_cols, future_table, model, horizon, params) → TABLE
 ```
 
 ---
@@ -336,29 +365,6 @@ SELECT
 FROM sales
 GROUP BY product_id;
 ```
-
----
-
-## ETS Model Specification
-
-The `model` parameter for ETS accepts a 3-4 character string:
-
-| Position | Component | Values |
-|----------|-----------|--------|
-| 1st | Error | `A` (Additive), `M` (Multiplicative) |
-| 2nd | Trend | `N` (None), `A` (Additive), `M` (Multiplicative) |
-| 3rd (optional) | Damped | `d` (damped trend) |
-| Last | Seasonal | `N` (None), `A` (Additive), `M` (Multiplicative) |
-
-**Common Models:**
-| Spec | Description |
-|------|-------------|
-| `ANN` | Simple exponential smoothing |
-| `AAN` | Holt's linear method |
-| `AAA` | Additive Holt-Winters |
-| `MAM` | Multiplicative Holt-Winters |
-| `AAdN` | Damped trend, no seasonality |
-| `MAdM` | Damped multiplicative Holt-Winters |
 
 ---
 
