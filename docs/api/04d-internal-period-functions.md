@@ -1,14 +1,21 @@
-# Internal: Period Detection Functions
+# Internal: Seasonality Scalar Functions
 
-> Internal scalar functions for period detection algorithms
+> Internal scalar functions for period detection and seasonality analysis
 
 ## Overview
 
-These scalar functions are internal and used by the table macros (`ts_detect_periods_by`, `ts_detect_periods`). For typical usage, prefer the table macros or aggregate functions with the `method` parameter.
+These scalar functions are internal building blocks used by the table macros. For typical usage, prefer the `_by` table macros:
+
+| Instead of... | Use... |
+|---------------|--------|
+| `ts_detect_seasonality` | `ts_detect_periods_by` |
+| `ts_analyze_seasonality` | `ts_classify_seasonality_by` |
+| `ts_decompose_seasonal` | `ts_mstl_decomposition_by` |
+| `ts_seasonal_strength` | `ts_classify_seasonality_by` (returns `.seasonal_strength`) |
 
 ---
 
-## Internal Scalar Function
+## Period Detection
 
 ### _ts_detect_periods
 
@@ -19,10 +26,6 @@ Detects seasonal periods using multiple methods (internal).
 _ts_detect_periods(values DOUBLE[]) → STRUCT
 _ts_detect_periods(values DOUBLE[], method VARCHAR) → STRUCT
 ```
-
-**Parameters:**
-- `values`: Time series values (DOUBLE[])
-- `method`: Detection method (VARCHAR, optional, default: 'fft')
 
 **Returns:**
 ```sql
@@ -36,7 +39,7 @@ STRUCT(
 
 ---
 
-## Method Reference
+### Method Reference
 
 | Function | Speed | Noise Robustness | Best Use Case | Min Observations |
 |----------|-------|------------------|---------------|------------------|
@@ -53,8 +56,6 @@ STRUCT(
 | `ts_detect_multiple_periods` | Medium | High | Multiple seasonalities | 8 |
 
 ---
-
-## Individual Period Detection Functions
 
 ### ts_estimate_period_fft
 
@@ -76,12 +77,6 @@ STRUCT(
 )
 ```
 
-**Example:**
-```sql
-SELECT ts_estimate_period_fft([1,2,3,4,1,2,3,4,1,2,3,4]::DOUBLE[]);
--- Returns: {period: 4.0, frequency: 0.25, power: ..., confidence: ..., method: "fft"}
-```
-
 ---
 
 ### ts_estimate_period_acf
@@ -93,8 +88,6 @@ Autocorrelation Function based period detection.
 ts_estimate_period_acf(values DOUBLE[]) → STRUCT
 ts_estimate_period_acf(values DOUBLE[], max_lag INTEGER) → STRUCT
 ```
-
-**Returns:** Same structure as `ts_estimate_period_fft`
 
 ---
 
@@ -129,12 +122,6 @@ Clustered Filtered Detrended variant that applies first-differencing before FFT 
 ```sql
 ts_cfd_autoperiod(values DOUBLE[]) → STRUCT
 ts_cfd_autoperiod(values DOUBLE[], acf_threshold DOUBLE) → STRUCT
-```
-
-**Example:**
-```sql
--- Better for data with trends
-SELECT ts_cfd_autoperiod([1,3,5,7,2,4,6,8,3,5,7,9]::DOUBLE[]);
 ```
 
 ---
@@ -236,4 +223,172 @@ ts_detect_multiple_periods(values DOUBLE[], max_periods INTEGER) → STRUCT
 
 ---
 
-*See also: [Period Detection](04-period-detection.md) | [Advanced Analysis](04c-seasonality-analysis.md)*
+## Seasonality Analysis
+
+> These functions are covered by `ts_classify_seasonality_by` for typical usage.
+
+### ts_detect_seasonality
+
+Detect dominant periods in a time series.
+
+**Signature:**
+```sql
+ts_detect_seasonality(values DOUBLE[]) → INTEGER[]
+```
+
+**Returns:** List of detected periods sorted by strength.
+
+---
+
+### ts_analyze_seasonality
+
+Comprehensive seasonality analysis with strength metrics.
+
+**Signature:**
+```sql
+ts_analyze_seasonality(values DOUBLE[]) → STRUCT
+```
+
+**Returns:**
+```sql
+STRUCT(
+    detected_periods    INTEGER[],   -- All detected periods
+    primary_period      INTEGER,     -- Dominant period
+    seasonal_strength   DOUBLE,      -- Seasonality strength (0-1)
+    trend_strength      DOUBLE       -- Trend strength (0-1)
+)
+```
+
+---
+
+## Decomposition
+
+> For typical usage, prefer `ts_mstl_decomposition_by`.
+
+### ts_decompose_seasonal
+
+Decompose series into trend, seasonal, and remainder components.
+
+**Signature:**
+```sql
+ts_decompose_seasonal(values DOUBLE[], period DOUBLE) → STRUCT
+ts_decompose_seasonal(values DOUBLE[], period DOUBLE, method VARCHAR) → STRUCT
+```
+
+**Parameters:**
+- `values`: Time series data
+- `period`: Seasonal period
+- `method`: `'additive'` (default) or `'multiplicative'`
+
+**Returns:**
+```sql
+STRUCT(
+    trend       DOUBLE[],    -- Trend component
+    seasonal    DOUBLE[],    -- Seasonal component
+    remainder   DOUBLE[],    -- Residual component
+    period      DOUBLE,      -- Period used
+    method      VARCHAR      -- Method used
+)
+```
+
+---
+
+### ts_detrend
+
+Remove trend from time series data.
+
+**Signature:**
+```sql
+ts_detrend(values DOUBLE[]) → STRUCT
+ts_detrend(values DOUBLE[], method VARCHAR) → STRUCT
+```
+
+**Parameters:**
+- `values`: Time series data
+- `method`: `'linear'` (default) or other methods
+
+**Returns:**
+```sql
+STRUCT(
+    trend        DOUBLE[],    -- Extracted trend
+    detrended    DOUBLE[],    -- Series with trend removed
+    method       VARCHAR,     -- Method used
+    coefficients DOUBLE[],    -- Trend coefficients (for linear: [intercept, slope])
+    rss          DOUBLE,      -- Residual sum of squares
+    n_params     BIGINT       -- Number of parameters
+)
+```
+
+---
+
+## Advanced Analysis (No `_by` Wrapper)
+
+> These functions provide unique capabilities not available via table macros.
+
+### ts_seasonal_strength
+
+Calculate seasonality strength (0-1 scale).
+
+**Signature:**
+```sql
+ts_seasonal_strength(values DOUBLE[], period DOUBLE) → DOUBLE
+ts_seasonal_strength(values DOUBLE[], period DOUBLE, method VARCHAR) → DOUBLE
+```
+
+**Returns:** Strength score from 0 (no seasonality) to 1 (strong seasonality).
+
+---
+
+### ts_seasonal_strength_windowed
+
+Calculate seasonal strength over sliding windows.
+
+**Signature:**
+```sql
+ts_seasonal_strength_windowed(values DOUBLE[], period DOUBLE) → DOUBLE[]
+```
+
+**Returns:** Array of strength scores for each window position.
+
+---
+
+### ts_detect_seasonality_changes
+
+Detect changes in seasonality pattern over time.
+
+**Signature:**
+```sql
+ts_detect_seasonality_changes(values DOUBLE[], period DOUBLE) → STRUCT
+```
+
+**Returns:** Information about detected changes in seasonal patterns.
+
+---
+
+### ts_instantaneous_period
+
+Calculate instantaneous period at each point in the time series.
+
+**Signature:**
+```sql
+ts_instantaneous_period(values DOUBLE[]) → DOUBLE[]
+```
+
+**Returns:** Array of instantaneous periods for each observation.
+
+---
+
+### ts_detect_amplitude_modulation
+
+Detect amplitude modulation in seasonal patterns.
+
+**Signature:**
+```sql
+ts_detect_amplitude_modulation(values DOUBLE[], period DOUBLE) → STRUCT
+```
+
+**Returns:** Amplitude modulation characteristics.
+
+---
+
+*See also: [Period Detection](04-period-detection.md) | [Decomposition](04a-decomposition.md) | [Peak Detection](04b-peak-detection.md)*

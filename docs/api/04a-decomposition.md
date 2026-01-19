@@ -163,4 +163,4 @@ GROUP BY product_id;
 
 ---
 
-*See also: [Period Detection](04-period-detection.md) | [Peak Detection](04b-peak-detection.md) | [Advanced Analysis](04c-seasonality-analysis.md)*
+*See also: [Period Detection](04-period-detection.md) | [Peak Detection](04b-peak-detection.md) | [Internal Reference](04d-internal-period-functions.md)*
