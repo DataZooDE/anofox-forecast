@@ -390,7 +390,7 @@ FROM ts_data_quality_by('quality_test', series_id, ts, value, 10, '1d');
 
 .print ''
 .print 'Dataset-wide summary with ts_data_quality_summary (tier counts):'
-SELECT * FROM ts_data_quality_summary_by('quality_test', series_id, ts, value, 10);
+SELECT * FROM ts_data_quality_summary('quality_test', series_id, ts, value, 10);
 
 .print ''
 .print 'When to use: ts_data_quality to identify which series need attention,'
