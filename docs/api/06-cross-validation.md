@@ -150,7 +150,7 @@ ts_backtest_auto_by(
 -- Basic backtest with AutoETS
 SELECT * FROM ts_backtest_auto_by(
     'sales_data', store_id, date, revenue,
-    7, 5, '1d', MAP{}
+    7, 5, '1d', {'method': 'AutoETS'}
 );
 
 -- With STRUCT params (mixed types)

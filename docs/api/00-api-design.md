@@ -221,7 +221,7 @@ SELECT * FROM ts_forecast_by('sales', product_id, date, value, 'AutoETS', 12, MA
 SELECT * FROM ts_stats_by('sales', product_id, date, value);
 
 -- One-liner backtest
-SELECT * FROM ts_backtest_auto_by('sales', product_id, date, value, 7, 3, '1d', MAP{});
+SELECT * FROM ts_backtest_auto_by('sales', product_id, date, value, 7, 3, '1d', {'method': 'AutoETS'});
 ```
 
 ---

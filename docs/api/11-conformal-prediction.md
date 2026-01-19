@@ -37,10 +37,10 @@ SELECT * FROM ts_conformal_by(
 For more control, use the modular approach:
 
 ```sql
--- Step 1: Generate backtest results
+-- Step 1: Generate backtest results with AutoETS
 CREATE TABLE backtest AS
 SELECT * FROM ts_backtest_auto_by(
-    'sales', product_id, date, value, 7, 5, '1d', MAP{}
+    'sales', product_id, date, value, 7, 5, '1d', {'method': 'AutoETS'}
 );
 
 -- Step 2: Calibrate conformity score
