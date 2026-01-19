@@ -501,7 +501,7 @@ SELECT
     n_found,
     n_missing,
     missing_timestamps
-FROM ts_validate_timestamps(
+FROM ts_validate_timestamps_by(
     'timestamp_test',
     series_id,
     ts,
@@ -511,7 +511,7 @@ FROM ts_validate_timestamps(
 
 .print ''
 .print 'Dataset-wide check with ts_validate_timestamps_summary (quick pass/fail):'
-SELECT * FROM ts_validate_timestamps_summary(
+SELECT * FROM ts_validate_timestamps_summary_by(
     'timestamp_test',
     series_id,
     ts,

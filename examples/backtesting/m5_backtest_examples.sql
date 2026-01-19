@@ -63,7 +63,7 @@ SELECT
     ROUND(AVG(abs_error), 2) AS mae,
     ROUND(fold_metric_score, 4) AS rmse,
     model_name
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'm5_sample',
     item_id,
     ds,
@@ -89,19 +89,19 @@ SELECT
 -- Compare multiple forecasting methods
 CREATE OR REPLACE TABLE backtest_comparison AS
 WITH naive_results AS (
-    SELECT 'Naive' AS method, * FROM ts_backtest_auto(
+    SELECT 'Naive' AS method, * FROM ts_backtest_auto_by(
         'm5_sample', item_id, ds, y, 14, 3, '1d',
         MAP{'method': 'Naive'}
     )
 ),
 seasonal_naive_results AS (
-    SELECT 'SeasonalNaive' AS method, * FROM ts_backtest_auto(
+    SELECT 'SeasonalNaive' AS method, * FROM ts_backtest_auto_by(
         'm5_sample', item_id, ds, y, 14, 3, '1d',
         MAP{'method': 'SeasonalNaive', 'seasonal_period': '7'}
     )
 ),
 theta_results AS (
-    SELECT 'Theta' AS method, * FROM ts_backtest_auto(
+    SELECT 'Theta' AS method, * FROM ts_backtest_auto_by(
         'm5_sample', item_id, ds, y, 14, 3, '1d',
         MAP{'method': 'Theta', 'seasonal_period': '7'}
     )
@@ -143,7 +143,7 @@ SELECT
     'SMAPE Metric' AS metric_type,
     fold_id,
     ROUND(AVG(fold_metric_score), 2) AS smape
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'm5_sample', item_id, ds, y, 14, 3, '1d',
     MAP{'method': 'SeasonalNaive', 'seasonal_period': '7'},
     NULL,
@@ -157,7 +157,7 @@ SELECT
     'Coverage Metric' AS metric_type,
     fold_id,
     ROUND(AVG(fold_metric_score), 2) AS coverage_90
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'm5_sample', item_id, ds, y, 14, 3, '1d',
     MAP{'method': 'SeasonalNaive', 'seasonal_period': '7'},
     NULL,
@@ -178,7 +178,7 @@ SELECT
     'No Gap' AS scenario,
     ROUND(AVG(abs_error), 2) AS mae,
     ROUND(SQRT(AVG(error * error)), 2) AS rmse
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'm5_sample', item_id, ds, y, 14, 3, '1d',
     MAP{'method': 'SeasonalNaive', 'seasonal_period': '7', 'gap': '0'}
 )
@@ -187,7 +187,7 @@ SELECT
     'Gap=2 days' AS scenario,
     ROUND(AVG(abs_error), 2) AS mae,
     ROUND(SQRT(AVG(error * error)), 2) AS rmse
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'm5_sample', item_id, ds, y, 14, 3, '1d',
     MAP{'method': 'SeasonalNaive', 'seasonal_period': '7', 'gap': '2'}
 );
@@ -322,7 +322,7 @@ SELECT
     ROUND(ts_mae(LIST(actual), LIST(forecast)), 2) AS mae,
     ROUND(ts_rmse(LIST(actual), LIST(forecast)), 2) AS rmse,
     ROUND(ts_bias(LIST(actual), LIST(forecast)), 2) AS bias
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'm5_sample', item_id, ds, y, 14, 3, '1d',
     MAP{'method': 'SeasonalNaive', 'seasonal_period': '7'}
 );
@@ -341,7 +341,7 @@ SELECT
     ROUND(SQRT(AVG(error * error)), 2) AS rmse,
     ROUND(AVG(actual), 2) AS avg_actual,
     ROUND(AVG(abs_error) / NULLIF(AVG(actual), 0) * 100, 2) AS mape_pct
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'm5_sample', item_id, ds, y, 14, 3, '1d',
     MAP{'method': 'SeasonalNaive', 'seasonal_period': '7'}
 )

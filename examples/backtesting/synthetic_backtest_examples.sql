@@ -49,7 +49,7 @@ SELECT
     ROUND(AVG(abs_error), 2) AS mae,
     ROUND(fold_metric_score, 2) AS rmse,
     model_name
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'sales_data',           -- source table
     store_id,               -- group column
     date,                   -- date column
@@ -168,7 +168,7 @@ SELECT
     fold_id,
     COUNT(*) AS n_predictions,
     ROUND(AVG(abs_error), 2) AS mae
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'sales_data',
     store_id,
     date,
@@ -191,7 +191,7 @@ SELECT
     fold_id,
     COUNT(*) AS n_predictions,
     ROUND(AVG(abs_error), 2) AS mae
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'sales_data',
     store_id,
     date,
@@ -477,7 +477,7 @@ SELECT
     COUNT(*) AS n_predictions,
     ROUND(AVG(abs_error), 2) AS mae,
     model_name
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'scenario_baseline', store_id, date, revenue,
     14, 2, '1d',
     MAP{'method': 'SeasonalNaive', 'seasonal_period': '7'}
@@ -491,7 +491,7 @@ SELECT
     COUNT(*) AS n_predictions,
     ROUND(AVG(abs_error), 2) AS mae,
     model_name
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'scenario_whatif', store_id, date, revenue,
     14, 2, '1d',
     MAP{'method': 'SeasonalNaive', 'seasonal_period': '7'}
@@ -763,7 +763,7 @@ SELECT 'Hydrated data (with all source columns):' AS info;
 SELECT
     fold_id, split, store_id, date, sales,
     _is_test, _train_cutoff
-FROM ts_hydrate_split_full(
+FROM ts_hydrate_split_full_by(
     'cv_index', 'large_sales', store_id, date, MAP{}
 )
 WHERE store_id = 'STORE1'
@@ -825,7 +825,7 @@ SELECT
     fold_id, split, store_id, date,
     day_of_week,  -- KNOWN: use directly
     CASE WHEN _is_test THEN NULL ELSE ROUND(competitor_price, 2) END AS competitor_price  -- UNKNOWN: manual mask
-FROM ts_hydrate_split_full(
+FROM ts_hydrate_split_full_by(
     'cv_index', 'store_features', store_id, date, MAP{}
 )
 WHERE store_id = 'STORE1' AND fold_id = 1
@@ -871,7 +871,7 @@ SELECT
     _is_test,
     day_of_week,
     CASE WHEN _is_test THEN NULL ELSE competitor_price END AS competitor_price_masked
-FROM ts_hydrate_split_full(
+FROM ts_hydrate_split_full_by(
     'cv_index', 'store_features', store_id, date, MAP{}
 );
 

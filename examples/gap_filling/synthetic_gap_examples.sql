@@ -42,7 +42,7 @@ FROM gappy_data GROUP BY series_id ORDER BY series_id;
 .print ''
 .print 'After ts_fill_gaps (frequency=1 day):'
 SELECT group_col AS series_id, date_col AS date, value_col AS value
-FROM ts_fill_gaps('gappy_data', series_id, date, value, '1 day')
+FROM ts_fill_gaps_by('gappy_data', series_id, date, value, '1 day')
 ORDER BY group_col, date_col;
 
 -- =============================================================================
@@ -188,13 +188,13 @@ SELECT series_id, ts, value FROM hourly_data ORDER BY series_id, ts;
 .print ''
 .print 'Fill gaps with DuckDB interval format (1 hour):'
 SELECT group_col, date_col, value_col
-FROM ts_fill_gaps('hourly_data', series_id, ts, value, '1 hour')
+FROM ts_fill_gaps_by('hourly_data', series_id, ts, value, '1 hour')
 ORDER BY group_col, date_col;
 
 .print ''
 .print 'Fill gaps with Polars-style format (1h):'
 SELECT group_col, date_col, value_col
-FROM ts_fill_gaps('hourly_data', series_id, ts, value, '1h')
+FROM ts_fill_gaps_by('hourly_data', series_id, ts, value, '1h')
 ORDER BY group_col, date_col;
 
 -- =============================================================================

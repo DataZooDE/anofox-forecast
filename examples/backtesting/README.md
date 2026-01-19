@@ -30,7 +30,7 @@ This folder contains runnable SQL examples demonstrating time series cross-valid
 **Use case:** Quick model evaluation with minimal code.
 
 ```sql
-SELECT * FROM ts_backtest_auto(
+SELECT * FROM ts_backtest_auto_by(
     'sales_data', store_id, date, revenue,
     7,              -- horizon
     5,              -- folds
@@ -63,7 +63,7 @@ SELECT * FROM ts_backtest_auto(
 **Use case:** Simulate ETL latency where data arrives with a delay.
 
 ```sql
-SELECT * FROM ts_backtest_auto(
+SELECT * FROM ts_backtest_auto_by(
     'sales_data', store_id, date, revenue, 7, 5, '1d',
     MAP{
         'method': 'AutoARIMA',
@@ -160,7 +160,7 @@ FROM training_data;
 
 **Key functions:**
 - `ts_cv_split_index` - Returns only index columns (no data)
-- `ts_hydrate_split_full` - Join back to get full data
+- `ts_hydrate_split_full_by` - Join back to get full data
 
 ```sql
 -- Step 1: Create index-only CV splits (memory efficient)
@@ -173,7 +173,7 @@ SELECT * FROM ts_cv_split_index(
 -- Returns: group_col, date_col, fold_id, split (NO data columns)
 
 -- Step 2: Hydrate with full data when needed
-SELECT * FROM ts_hydrate_split_full(
+SELECT * FROM ts_hydrate_split_full_by(
     'cv_index', 'large_sales', store_id, date, MAP{}
 );
 ```
@@ -193,36 +193,36 @@ SELECT * FROM ts_hydrate_split_full(
 ```
 Hydrate Function Decision Tree:
 
-Safety Level →  LOW           MEDIUM              HIGH
-                ↓               ↓                   ↓
-Function    ts_hydrate_split  ts_hydrate_split_full  ts_hydrate_split_strict
-Returns     Single column     All columns + _is_test  Metadata only
-Masking     Automatic         Manual (CASE WHEN)      Manual (explicit JOIN)
-Use when    One unknown       Multiple unknown        Production/audit
-            feature           features                requirements
+Safety Level →  LOW                 MEDIUM                    HIGH
+                ↓                     ↓                         ↓
+Function    ts_hydrate_split_by  ts_hydrate_split_full_by  ts_hydrate_split_strict_by
+Returns     Single column        All columns + _is_test    Metadata only
+Masking     Automatic            Manual (CASE WHEN)        Manual (explicit JOIN)
+Use when    One unknown          Multiple unknown          Production/audit
+            feature              features                  requirements
 ```
 
 **Examples:**
 
 ```sql
--- Option A: ts_hydrate_split - Single column, auto-masked
-SELECT * FROM ts_hydrate_split(
+-- Option A: ts_hydrate_split_by - Single column, auto-masked
+SELECT * FROM ts_hydrate_split_by(
     'cv_index', 'features', store_id, date,
     competitor_price,           -- Column to mask in test
     MAP{'strategy': 'null'}     -- Mask strategy
 );
 
--- Option B: ts_hydrate_split_full - All columns, manual masking
+-- Option B: ts_hydrate_split_full_by - All columns, manual masking
 SELECT
     fold_id, split, store_id, date,
     day_of_week,  -- KNOWN: use directly
     CASE WHEN _is_test THEN NULL ELSE competitor_price END  -- UNKNOWN: manual mask
-FROM ts_hydrate_split_full('cv_index', 'features', store_id, date, MAP{});
+FROM ts_hydrate_split_full_by('cv_index', 'features', store_id, date, MAP{});
 
--- Option C: ts_hydrate_split_strict - Metadata only, fail-safe
+-- Option C: ts_hydrate_split_strict_by - Metadata only, fail-safe
 SELECT hs.*, src.day_of_week,
        CASE WHEN hs._is_test THEN NULL ELSE src.competitor_price END
-FROM ts_hydrate_split_strict('cv_index', 'features', store_id, date, MAP{}) hs
+FROM ts_hydrate_split_strict_by('cv_index', 'features', store_id, date, MAP{}) hs
 JOIN features src ON hs.group_col = src.store_id AND hs.date_col = src.date;
 ```
 
@@ -391,7 +391,7 @@ SELECT * FROM ts_fill_unknown(
 **A:** Yes! Each group gets its own model. For explicit selection:
 
 ```sql
-SELECT * FROM ts_backtest_auto('large_stores', ..., MAP{'method': 'AutoARIMA'})
+SELECT * FROM ts_backtest_auto_by('large_stores', ..., MAP{'method': 'AutoARIMA'})
 UNION ALL
-SELECT * FROM ts_backtest_auto('small_stores', ..., MAP{'method': 'Theta'});
+SELECT * FROM ts_backtest_auto_by('small_stores', ..., MAP{'method': 'Theta'});
 ```
