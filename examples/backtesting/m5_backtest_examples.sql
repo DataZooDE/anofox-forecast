@@ -239,7 +239,7 @@ CREATE OR REPLACE TABLE reg_input AS
 SELECT
     ROW_NUMBER() OVER (ORDER BY fold_id, group_col, date_col) AS row_num,
     *
-FROM ts_prepare_regression_input(
+FROM ts_prepare_regression_input_by(
     'cv_splits_reg',
     'm5_with_features',
     item_id,

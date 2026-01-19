@@ -107,7 +107,7 @@ SELECT * FROM ts_cv_split_by(
 
 -- Step 2: Prepare regression input (masks target as NULL for test rows)
 CREATE OR REPLACE TABLE reg_input_p2 AS
-SELECT * FROM ts_prepare_regression_input(
+SELECT * FROM ts_prepare_regression_input_by(
     'cv_splits_p2', 'sales_with_features', store_id, date, revenue, MAP{}
 );
 
@@ -298,7 +298,7 @@ SELECT * FROM ts_cv_split_by(
 
 -- Step 2: Hydrate features (join source data with CV splits)
 CREATE OR REPLACE TABLE safe_data AS
-SELECT * FROM ts_hydrate_features(
+SELECT * FROM ts_hydrate_features_by(
     'cv_splits_p5',
     'sales_features',
     store_id,
