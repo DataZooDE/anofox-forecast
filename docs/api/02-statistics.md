@@ -54,9 +54,63 @@ ts_stats_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
 | `value_col` | COLUMN | Value column |
 | `frequency` | VARCHAR | Data frequency (`'1d'`, `'1h'`, `'1w'`, `'1mo'`) |
 
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | (same as group_col) | Series identifier |
+| `stats` | STRUCT | Statistics struct (see fields below) |
+
+**Stats STRUCT fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `length` | UBIGINT | Total number of observations |
+| `n_nulls` | UBIGINT | Number of NULL values |
+| `n_nan` | UBIGINT | Number of NaN values |
+| `n_zeros` | UBIGINT | Number of zero values |
+| `n_positive` | UBIGINT | Number of positive values |
+| `n_negative` | UBIGINT | Number of negative values |
+| `n_unique_values` | UBIGINT | Count of distinct values |
+| `is_constant` | BOOLEAN | Whether series has only one unique value |
+| `n_zeros_start` | UBIGINT | Count of leading zeros |
+| `n_zeros_end` | UBIGINT | Count of trailing zeros |
+| `plateau_size` | UBIGINT | Longest run of constant values |
+| `plateau_size_nonzero` | UBIGINT | Longest run of constant non-zero values |
+| `mean` | DOUBLE | Arithmetic mean |
+| `median` | DOUBLE | Median (50th percentile) |
+| `std_dev` | DOUBLE | Standard deviation |
+| `variance` | DOUBLE | Variance |
+| `min` | DOUBLE | Minimum value |
+| `max` | DOUBLE | Maximum value |
+| `range` | DOUBLE | Range (max - min) |
+| `sum` | DOUBLE | Sum of all values |
+| `skewness` | DOUBLE | Skewness (Fisher's G1) |
+| `kurtosis` | DOUBLE | Excess kurtosis (Fisher's G2) |
+| `tail_index` | DOUBLE | Hill estimator |
+| `bimodality_coef` | DOUBLE | Bimodality coefficient |
+| `trimmed_mean` | DOUBLE | 10% trimmed mean |
+| `coef_variation` | DOUBLE | Coefficient of variation |
+| `q1` | DOUBLE | First quartile |
+| `q3` | DOUBLE | Third quartile |
+| `iqr` | DOUBLE | Interquartile range |
+| `autocorr_lag1` | DOUBLE | Autocorrelation at lag 1 |
+| `trend_strength` | DOUBLE | Trend strength (0-1) |
+| `seasonality_strength` | DOUBLE | Seasonality strength (0-1) |
+| `entropy` | DOUBLE | Approximate entropy |
+| `stability` | DOUBLE | Stability measure |
+
 **Example:**
 ```sql
+-- Get all statistics
 SELECT * FROM ts_stats_by('sales', product_id, date, quantity, '1d');
+
+-- Access specific fields
+SELECT
+    id,
+    (stats).length,
+    (stats).mean,
+    (stats).std_dev,
+    (stats).trend_strength
+FROM ts_stats_by('sales', product_id, date, quantity, '1d');
 ```
 
 > **Alias:** `ts_stats` is an alias for `ts_stats_by`
@@ -82,9 +136,41 @@ ts_data_quality_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col 
 | `n_short` | INTEGER | Minimum series length threshold |
 | `frequency` | VARCHAR | Data frequency (`'1d'`, `'1h'`, `'1w'`, `'1mo'`) |
 
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | (same as group_col) | Series identifier |
+| `quality` | STRUCT | Quality assessment struct (see fields below) |
+
+**Quality STRUCT fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `structural_score` | DOUBLE | Structural dimension score (0-1) - measures data completeness |
+| `temporal_score` | DOUBLE | Temporal dimension score (0-1) - measures regularity of timestamps |
+| `magnitude_score` | DOUBLE | Magnitude dimension score (0-1) - measures value distribution health |
+| `behavioral_score` | DOUBLE | Behavioral dimension score (0-1) - measures predictability |
+| `overall_score` | DOUBLE | Overall quality score (0-1, higher is better) |
+| `n_gaps` | UBIGINT | Number of detected gaps in the series |
+| `n_missing` | UBIGINT | Number of missing values |
+| `is_constant` | BOOLEAN | Whether series is constant (no variation) |
+
 **Example:**
 ```sql
+-- Get all quality metrics
 SELECT * FROM ts_data_quality_by('sales', product_id, date, quantity, 10, '1d');
+
+-- Access specific fields
+SELECT
+    id,
+    (quality).overall_score,
+    (quality).n_gaps,
+    (quality).is_constant
+FROM ts_data_quality_by('sales', product_id, date, quantity, 10, '1d');
+
+-- Filter for high-quality series
+SELECT id
+FROM ts_data_quality_by('sales', product_id, date, quantity, 10, '1d')
+WHERE (quality).overall_score > 0.8;
 ```
 
 > **Alias:** `ts_data_quality` is an alias for `ts_data_quality_by`
