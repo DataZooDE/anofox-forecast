@@ -8,21 +8,143 @@ Feature extraction functions compute 117 statistical features from time series d
 
 ---
 
-## Extract Features
+## Quick Start
 
-### ts_features
+Extract features using table macros (recommended):
 
-Extracts tsfresh-compatible time series features.
+```sql
+-- Single series
+SELECT * FROM ts_features_table('daily_sales', date, value);
+
+-- Multiple series
+SELECT * FROM ts_features_by('sales', product_id, date, quantity);
+
+-- Access specific features from result
+SELECT id, (features).mean, (features).standard_deviation
+FROM ts_features_by('sales', product_id, date, quantity);
+```
+
+Using aggregate functions with GROUP BY:
+
+```sql
+SELECT product_id, ts_features_agg(date, value) AS features
+FROM sales
+GROUP BY product_id;
+```
+
+---
+
+## Table Macros
+
+### ts_features_by
+
+Extract features per group from a multi-series table.
+
+**Signature:**
+```sql
+ts_features_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Source table name |
+| `group_col` | COLUMN | Column for grouping series |
+| `date_col` | COLUMN | Date/timestamp column |
+| `value_col` | COLUMN | Value column |
+
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | (same as group_col) | Group identifier |
+| `features` | STRUCT | 117-field feature struct |
+
+**Example:**
+```sql
+-- Extract features per product
+SELECT * FROM ts_features_by('sales', product_id, date, quantity);
+
+-- Filter by specific feature values
+SELECT id, (features).mean, (features).trend_strength
+FROM ts_features_by('sales', product_id, date, quantity)
+WHERE (features).length > 30;
+```
+
+---
+
+### ts_features_table
+
+Extract features from a single-series table (no grouping).
+
+**Signature:**
+```sql
+ts_features_table(source VARCHAR, date_col COLUMN, value_col COLUMN) → TABLE
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Source table name |
+| `date_col` | COLUMN | Date/timestamp column |
+| `value_col` | COLUMN | Value column |
+
+**Returns:** Single row with `features` STRUCT containing 117 feature columns.
+
+**Example:**
+```sql
+-- Extract features from a single-series table
+SELECT * FROM ts_features_table('daily_revenue', date, amount);
+
+-- Access specific features from result
+SELECT (features).mean, (features).standard_deviation
+FROM ts_features_table('daily_revenue', date, amount);
+```
+
+---
+
+## List Available Features
+
+### ts_features_list
+
+Returns available feature metadata as a table.
+
+**Signature:**
+```sql
+ts_features_list() → TABLE(
+    column_name        VARCHAR,
+    feature_name       VARCHAR,
+    parameter_suffix   VARCHAR,
+    default_parameters VARCHAR,
+    parameter_keys     VARCHAR
+)
+```
+
+**Example:**
+```sql
+SELECT * FROM ts_features_list();
+
+-- Get just feature names
+SELECT feature_name FROM ts_features_list();
+```
+
+---
+
+## Aggregate Functions
+
+### ts_features_agg
+
+Aggregate function that extracts 117 tsfresh-compatible features from grouped time series.
 
 **Signatures:**
 ```sql
--- Aggregate function (use with GROUP BY)
-ts_features(timestamp_col TIMESTAMP, value_col DOUBLE) → STRUCT
-ts_features(timestamp_col, value_col, feature_selection LIST(VARCHAR)) → STRUCT
-ts_features(timestamp_col, value_col, feature_selection, feature_params LIST(STRUCT)) → STRUCT
-
--- Alias (explicit _agg suffix)
+-- Basic
 ts_features_agg(timestamp_col TIMESTAMP, value_col DOUBLE) → STRUCT
+
+-- With feature selection
+ts_features_agg(timestamp_col, value_col, feature_selection LIST(VARCHAR)) → STRUCT
+
+-- With custom parameters
+ts_features_agg(timestamp_col, value_col, feature_selection, feature_params LIST(STRUCT)) → STRUCT
 ```
 
 **Returns:** A STRUCT containing 117 named feature columns including:
@@ -65,78 +187,6 @@ ts_features_agg(timestamp_col TIMESTAMP, value_col DOUBLE) → STRUCT
 | `spectral_centroid` | Spectral centroid from FFT |
 | *...and 80+ more* | See `ts_features_list()` |
 
-**Examples:**
-```sql
--- Extract features per product (aggregate)
-SELECT
-    product_id,
-    ts_features(date, value) AS features
-FROM sales
-GROUP BY product_id;
-
--- Access specific features
-SELECT
-    product_id,
-    (ts_features(date, value)).mean AS avg_value,
-    (ts_features(date, value)).linear_trend_slope AS trend
-FROM sales
-GROUP BY product_id;
-
--- With feature selection
-SELECT
-    product_id,
-    ts_features(date, value, ['mean', 'variance', 'skewness']) AS features
-FROM sales
-GROUP BY product_id;
-```
-
----
-
-## List Available Features
-
-### ts_features_list
-
-Returns available feature metadata as a table.
-
-**Signature:**
-```sql
-ts_features_list() → TABLE(
-    column_name        VARCHAR,
-    feature_name       VARCHAR,
-    parameter_suffix   VARCHAR,
-    default_parameters VARCHAR,
-    parameter_keys     VARCHAR
-)
-```
-
-**Example:**
-```sql
-SELECT * FROM ts_features_list();
-
--- Get just feature names
-SELECT feature_name FROM ts_features_list();
-```
-
----
-
-## Feature Extraction Aggregate
-
-### ts_features_agg
-
-Aggregate function that extracts features from grouped time series.
-
-**Signatures:**
-```sql
--- Basic
-ts_features_agg(timestamp_col TIMESTAMP, value_col DOUBLE) → STRUCT
-
--- With feature selection
-ts_features_agg(timestamp_col, value_col, feature_selection LIST(VARCHAR)) → STRUCT
-
--- With custom parameters
-ts_features_agg(timestamp_col, value_col, feature_selection, feature_params LIST(STRUCT)) → STRUCT
-```
-
 **Example:**
 ```sql
 -- Extract features per product
@@ -146,80 +196,20 @@ SELECT
 FROM sales
 GROUP BY product_id;
 
--- Access specific feature
+-- Access specific features
 SELECT
     product_id,
-    (ts_features_agg(date, value)).autocorrelation_lag1 AS ac1
+    (ts_features_agg(date, value)).mean AS avg_value,
+    (ts_features_agg(date, value)).linear_trend_slope AS trend
 FROM sales
 GROUP BY product_id;
-```
 
----
-
-## Table Macros
-
-### ts_features_table
-
-Extract features from a single-series table (no grouping).
-
-**Signature:**
-```sql
-ts_features_table(source VARCHAR, date_col COLUMN, value_col COLUMN) → TABLE
-```
-
-**Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `source` | VARCHAR | Source table name |
-| `date_col` | COLUMN | Date/timestamp column |
-| `value_col` | COLUMN | Value column |
-
-**Returns:** Single row with `features` STRUCT containing 117 feature columns.
-
-**Example:**
-```sql
--- Extract features from a single-series table
-SELECT * FROM ts_features_table('daily_revenue', date, amount);
-
--- Access specific features from result
-SELECT (features).mean, (features).standard_deviation
-FROM ts_features_table('daily_revenue', date, amount);
-```
-
----
-
-### ts_features_by
-
-Extract features per group from a multi-series table.
-
-**Signature:**
-```sql
-ts_features_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
-```
-
-**Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `source` | VARCHAR | Source table name |
-| `group_col` | COLUMN | Column for grouping series |
-| `date_col` | COLUMN | Date/timestamp column |
-| `value_col` | COLUMN | Value column |
-
-**Returns:**
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | (same as group_col) | Group identifier |
-| `features` | STRUCT | 117-field feature struct |
-
-**Example:**
-```sql
--- Extract features per product
-SELECT * FROM ts_features_by('sales', product_id, date, quantity);
-
--- Filter by specific feature values
-SELECT id, (features).mean, (features).trend_strength
-FROM ts_features_by('sales', product_id, date, quantity)
-WHERE (features).length > 30;
+-- With feature selection
+SELECT
+    product_id,
+    ts_features_agg(date, value, ['mean', 'variance', 'skewness']) AS features
+FROM sales
+GROUP BY product_id;
 ```
 
 ---

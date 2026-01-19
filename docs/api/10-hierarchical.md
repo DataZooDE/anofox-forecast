@@ -6,7 +6,33 @@
 
 When working with hierarchical time series data (e.g., region/store/item), you often need to combine multiple ID columns into a single `unique_id` for forecasting functions.
 
-## Workflow
+---
+
+## Quick Start
+
+```sql
+-- Step 1: Validate separator is safe
+SELECT * FROM ts_validate_separator('raw_sales', region_id, store_id, item_id);
+
+-- Step 2: Create hierarchical time series with all aggregation levels
+CREATE TABLE prepared_data AS
+SELECT * FROM ts_aggregate_hierarchy('raw_sales', sale_date, quantity,
+    region_id, store_id, item_id);
+
+-- Step 3: Forecast all series (original + aggregated)
+CREATE TABLE forecasts AS
+SELECT * FROM ts_forecast_by('prepared_data', unique_id, date_col, value_col,
+    'AutoETS', 28, MAP{'seasonal_period': '7'});
+
+-- Step 4: Split keys for analysis
+SELECT id_part_1 AS region_id, id_part_2 AS store_id, id_part_3 AS item_id,
+       date_col AS forecast_date, value_col AS point_forecast
+FROM ts_split_keys('forecasts', id, ds, point_forecast);
+```
+
+---
+
+## Workflow Summary
 
 1. **Validate separator** - Check if your chosen separator is safe
 2. **Combine keys** - Create a single unique_id from multiple columns

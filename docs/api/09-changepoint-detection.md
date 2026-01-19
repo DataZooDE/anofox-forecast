@@ -8,6 +8,119 @@ Changepoint detection identifies points in time where the statistical properties
 
 ---
 
+## Quick Start
+
+Detect changepoints using table macros (recommended):
+
+```sql
+-- Multiple series
+SELECT * FROM ts_detect_changepoints_by(
+    'sales',
+    product_id,
+    date,
+    value,
+    MAP{'hazard_lambda': '100'}
+);
+```
+
+Using aggregate functions with GROUP BY:
+
+```sql
+SELECT product_id, ts_detect_changepoints_agg(date, value, MAP{}) AS changepoints
+FROM sales
+GROUP BY product_id;
+```
+
+---
+
+## Table Macros
+
+### ts_detect_changepoints_by
+
+Detect changepoints for each group in a table.
+
+**Signature:**
+```sql
+ts_detect_changepoints_by(source, group_col, date_col, value_col, params)
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Source table name |
+| `group_col` | COLUMN | Column for grouping series |
+| `date_col` | COLUMN | Date/timestamp column |
+| `value_col` | COLUMN | Value column |
+| `params` | MAP | Configuration options |
+
+**Parameters in MAP:**
+- `hazard_lambda`: Hazard rate parameter (default: 250.0)
+- `include_probabilities`: Include per-point probabilities (default: false)
+
+**Example:**
+```sql
+SELECT * FROM ts_detect_changepoints_by(
+    'sales',
+    product_id,
+    date,
+    value,
+    MAP{'hazard_lambda': '100'}
+);
+```
+
+---
+
+### ts_detect_changepoints (Table Macro)
+
+Detect changepoints across multiple series (alias for `_by` variant).
+
+**Signature:**
+```sql
+ts_detect_changepoints(source, group_col, date_col, value_col, params)
+```
+
+---
+
+## Aggregate Functions
+
+### ts_detect_changepoints_agg
+
+Aggregate function for detecting changepoints in grouped time series.
+
+**Signature:**
+```sql
+ts_detect_changepoints_agg(
+    timestamp_col TIMESTAMP,
+    value_col DOUBLE,
+    params MAP(VARCHAR, VARCHAR)
+) → LIST<STRUCT>
+```
+
+**Parameters in MAP:**
+- `hazard_lambda`: Hazard rate parameter (default: 250.0)
+- `include_probabilities`: Include per-point probabilities (default: false)
+
+**Returns:**
+```sql
+LIST<STRUCT(
+    timestamp              TIMESTAMP,
+    value                  DOUBLE,
+    is_changepoint         BOOLEAN,
+    changepoint_probability DOUBLE
+)>
+```
+
+**Example:**
+```sql
+SELECT
+    product_id,
+    ts_detect_changepoints_agg(date, value, MAP{}) AS changepoints
+FROM sales
+GROUP BY product_id;
+```
+
+---
+
 ## Scalar Functions
 
 ### ts_detect_changepoints
@@ -79,81 +192,6 @@ SELECT ts_detect_changepoints_bocpd(
     [1,1,1,1,1,10,10,10,10,10]::DOUBLE[],
     100.0,   -- expect changepoint every ~100 observations
     true     -- include probabilities
-);
-```
-
----
-
-## Aggregate Functions
-
-### ts_detect_changepoints_agg
-
-Aggregate function for detecting changepoints in grouped time series.
-
-**Signature:**
-```sql
-ts_detect_changepoints_agg(
-    timestamp_col TIMESTAMP,
-    value_col DOUBLE,
-    params MAP(VARCHAR, VARCHAR)
-) → LIST<STRUCT>
-```
-
-**Parameters in MAP:**
-- `hazard_lambda`: Hazard rate parameter (default: 250.0)
-- `include_probabilities`: Include per-point probabilities (default: false)
-
-**Returns:**
-```sql
-LIST<STRUCT(
-    timestamp              TIMESTAMP,
-    value                  DOUBLE,
-    is_changepoint         BOOLEAN,
-    changepoint_probability DOUBLE
-)>
-```
-
-**Example:**
-```sql
-SELECT
-    product_id,
-    ts_detect_changepoints_agg(date, value, MAP{}) AS changepoints
-FROM sales
-GROUP BY product_id;
-```
-
----
-
-## Table Macros
-
-### ts_detect_changepoints (Table Macro)
-
-Detect changepoints across multiple series.
-
-**Signature:**
-```sql
-ts_detect_changepoints(source, group_col, date_col, value_col, params)
-```
-
----
-
-### ts_detect_changepoints_by
-
-Detect changepoints for each group in a table.
-
-**Signature:**
-```sql
-ts_detect_changepoints_by(source, group_col, date_col, value_col, params)
-```
-
-**Example:**
-```sql
-SELECT * FROM ts_detect_changepoints_by(
-    'sales',
-    product_id,
-    date,
-    value,
-    MAP{'hazard_lambda': '100'}
 );
 ```
 
