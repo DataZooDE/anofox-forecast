@@ -15,10 +15,10 @@ Time series cross-validation requires special handling because data has temporal
 For most use cases, use `ts_backtest_auto_by` - complete backtesting in a single call:
 
 ```sql
--- Backtest with 5 folds, 7-day horizon
+-- Backtest AutoETS with 5 folds, 7-day horizon
 SELECT * FROM ts_backtest_auto_by(
     'sales_data', store_id, date, revenue,
-    7, 5, '1d', MAP{}
+    7, 5, '1d', {'method': 'AutoETS'}
 );
 
 -- Aggregate results
@@ -26,23 +26,39 @@ SELECT
     model_name,
     AVG(abs_error) AS mae,
     AVG(fold_metric_score) AS avg_rmse
-FROM ts_backtest_auto_by('sales_data', store_id, date, revenue, 7, 5, '1d', MAP{})
+FROM ts_backtest_auto_by('sales_data', store_id, date, revenue, 7, 5, '1d', {'method': 'AutoETS'})
 GROUP BY model_name;
 ```
 
 ### Modular Approach
 
-For custom pipelines or regression models:
+For custom pipelines or regression models (using `anofox_statistics` extension):
 
 ```sql
+-- Requires: LOAD 'anofox_statistics';
+
 -- 1. Generate fold boundaries
-SELECT training_end_times FROM ts_cv_generate_folds('data', 'date', 3, 5, '1d', MAP{});
+WITH folds AS (
+    SELECT training_end_times FROM ts_cv_generate_folds('data', 'date', 7, 5, '1d', MAP{})
+)
 
--- 2. View fold date ranges
-SELECT * FROM ts_cv_split_folds_by('data', 'group_id', 'date', [...], 5, '1d');
+-- 2. Create train/test splits
+SELECT * FROM ts_cv_split_by('data', 'store_id', 'date', 'revenue',
+    (SELECT training_end_times FROM folds), 7, '1d', MAP{});
 
--- 3. Create train/test splits
-SELECT * FROM ts_cv_split_by('data', 'group_id', 'date', 'value', [...], 5, '1d', MAP{});
+-- 3. Apply linear regression from anofox_statistics on each fold
+-- Train on 'train' split, predict on 'test' split
+WITH splits AS (
+    SELECT * FROM ts_cv_split_by('data', 'store_id', 'date', 'revenue',
+        (SELECT training_end_times FROM ts_cv_generate_folds('data', 'date', 7, 5, '1d', MAP{})),
+        7, '1d', MAP{})
+)
+SELECT
+    fold_id,
+    store_id,
+    linear_regression_predict(features, coefficients) AS forecast
+FROM splits
+WHERE split = 'test';
 ```
 
 ### Usage Pattern Comparison
