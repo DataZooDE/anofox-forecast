@@ -12,14 +12,16 @@ SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'AutoMFLES
 
 ## Description
 
-Automatic Multiple Frequency Local Exponential Smoothing. Automatically detects and handles multiple seasonal patterns in the data. Combines Fourier series representation with exponential smoothing for complex seasonality.
+Multiple Frequency Local Exponential Smoothing with automatic model selection. Handles multiple seasonal patterns in the data. Combines Fourier series representation with exponential smoothing for complex seasonality.
+
+> **Important:** Seasonality is NOT auto-detected. Use `ts_detect_periods_by` first to detect seasonal periods, then pass them explicitly via `seasonal_periods`.
 
 ## Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
-| `seasonal_periods` | INTEGER[] | No | auto-detect | Array of seasonal periods |
+| `seasonal_periods` | INTEGER[] | **Yes** | — | Array of seasonal periods (e.g., `'[24, 168]'` for daily+weekly) |
 | `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
 | `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
 | `include_residuals` | BOOLEAN | No | false | Return residuals |
@@ -37,23 +39,16 @@ Automatic Multiple Frequency Local Exponential Smoothing. Automatically detects 
 ## SQL Example
 
 ```sql
--- Basic usage (auto-detect seasonality)
+-- Step 1: Detect seasonality
+SELECT * FROM ts_detect_periods_by('hourly_energy', meter_id, timestamp, consumption, MAP{});
+-- Returns: periods = [24, 168] (daily and weekly)
+
+-- Step 2: Forecast with detected seasonal periods
 SELECT * FROM ts_forecast_by(
     'hourly_energy',
     meter_id,
     timestamp,
     consumption,
-    'AutoMFLES',
-    168,
-    {}
-);
-
--- With explicit multiple seasonal periods (daily and weekly)
-SELECT * FROM ts_forecast_by(
-    'hourly_sales',
-    store_id,
-    timestamp,
-    sales,
     'AutoMFLES',
     168,
     {'seasonal_periods': '[24, 168]'}

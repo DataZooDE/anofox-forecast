@@ -19,10 +19,12 @@ Dynamic Optimized Theta Method. Combines dynamic theta adaptation with automatic
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
-| `seasonal_period` | INTEGER | No | 0 | Seasonal period (0 = auto-detect) |
+| `seasonal_period` | INTEGER | No* | — | Seasonal period (required for seasonal data) |
 | `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
 | `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
 | `include_residuals` | BOOLEAN | No | false | Return residuals |
+
+*Seasonality is NOT auto-detected. Pass `seasonal_period` explicitly for seasonal data.
 
 ## Returns
 

@@ -22,10 +22,12 @@ Optimized Theta Method. Automatically finds the optimal theta parameter that min
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
-| `seasonal_period` | INTEGER | No | 0 | Seasonal period (0 = auto-detect) |
+| `seasonal_period` | INTEGER | No* | — | Seasonal period (required for seasonal data) |
 | `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
 | `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
 | `include_residuals` | BOOLEAN | No | false | Return residuals |
+
+*Seasonality is NOT auto-detected. Pass `seasonal_period` explicitly for seasonal data.
 
 ## Returns
 
@@ -40,15 +42,25 @@ Optimized Theta Method. Automatically finds the optimal theta parameter that min
 ## SQL Example
 
 ```sql
--- Basic usage (theta automatically optimized)
+-- Non-seasonal data
 SELECT * FROM ts_forecast_by(
     'monthly_sales',
     product_id,
     date,
     quantity,
     'OptimizedTheta',
-    6,
-    {}
+    6
+);
+
+-- Seasonal data (with explicit period)
+SELECT * FROM ts_forecast_by(
+    'monthly_sales',
+    product_id,
+    date,
+    quantity,
+    'OptimizedTheta',
+    12,
+    {'seasonal_period': 12}
 );
 
 -- With exogenous variables

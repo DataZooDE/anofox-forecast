@@ -12,14 +12,16 @@ SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'AutoTBATS
 
 ## Description
 
-Automatic TBATS (Trigonometric seasonality, Box-Cox transformation, ARMA errors, Trend and Seasonal components) model selection. A sophisticated model for complex seasonal patterns using trigonometric representation of seasonality.
+TBATS (Trigonometric seasonality, Box-Cox transformation, ARMA errors, Trend and Seasonal components) with automatic model selection. A sophisticated model for complex seasonal patterns using trigonometric representation of seasonality.
+
+> **Important:** Seasonality is NOT auto-detected. Use `ts_detect_periods_by` first to detect seasonal periods, then pass them explicitly via `seasonal_periods`.
 
 ## Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
-| `seasonal_periods` | INTEGER[] | No | auto-detect | Array of seasonal periods |
+| `seasonal_periods` | INTEGER[] | **Yes** | — | Array of seasonal periods (e.g., `'[24, 168]'` for daily+weekly) |
 | `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
 | `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
 | `include_residuals` | BOOLEAN | No | false | Return residuals |
@@ -37,7 +39,11 @@ Automatic TBATS (Trigonometric seasonality, Box-Cox transformation, ARMA errors,
 ## SQL Example
 
 ```sql
--- Basic usage (auto-detect seasonality)
+-- Step 1: Detect seasonality
+SELECT * FROM ts_detect_periods_by('hourly_demand', region_id, timestamp, demand, MAP{});
+-- Returns: periods = [24, 168] (daily and weekly)
+
+-- Step 2: Forecast with detected seasonal periods
 SELECT * FROM ts_forecast_by(
     'hourly_demand',
     region_id,
@@ -45,17 +51,6 @@ SELECT * FROM ts_forecast_by(
     demand,
     'AutoTBATS',
     168,
-    {}
-);
-
--- With explicit multiple seasonal periods
-SELECT * FROM ts_forecast_by(
-    'sub_daily_data',
-    sensor_id,
-    timestamp,
-    reading,
-    'AutoTBATS',
-    48,
     {'seasonal_periods': '[24, 168]'}
 );
 ```

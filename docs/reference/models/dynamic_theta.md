@@ -23,10 +23,12 @@ Dynamic Theta Method. Uses time-varying theta values that adapt to local data ch
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
 | `theta` | DOUBLE | No | 2.0 | Initial theta parameter |
-| `seasonal_period` | INTEGER | No | 0 | Seasonal period (0 = auto-detect) |
+| `seasonal_period` | INTEGER | No* | — | Seasonal period (required for seasonal data) |
 | `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
 | `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
 | `include_residuals` | BOOLEAN | No | false | Return residuals |
+
+*Seasonality is NOT auto-detected. Pass `seasonal_period` explicitly for seasonal data.
 
 ## Returns
 

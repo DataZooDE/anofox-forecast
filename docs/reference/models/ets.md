@@ -20,7 +20,7 @@ Error-Trend-Seasonal State Space Model with explicit specification. Unlike AutoE
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
 | `model` | VARCHAR | No | 'AAA' | ETS model specification (see below) |
-| `seasonal_period` | INTEGER | No | 0 | Seasonal period (0 = auto-detect) |
+| `seasonal_period` | INTEGER | **Yes*** | — | Seasonal period (required for seasonal models) |
 | `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
 | `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
 | `include_residuals` | BOOLEAN | No | false | Return residuals |
@@ -35,6 +35,8 @@ Format: `[Error][Trend][Seasonal]` or `[Error][Trend][Damped][Seasonal]`
 | 2nd | Trend | `N` (None), `A` (Additive), `M` (Multiplicative) |
 | 3rd (optional) | Damped | `d` (damped trend) |
 | Last | Seasonal | `N` (None), `A` (Additive), `M` (Multiplicative) |
+
+*Required when using seasonal models (AAA, MAM, etc.). Not needed for non-seasonal models (ANN, AAN, AAdN).
 
 **Common Models:**
 
