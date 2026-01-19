@@ -95,7 +95,7 @@ make release
 
 ## 🚀 Quick Start on M5 Dataset
 
-The forecast takes ~2 minutes on a Dell XPS 13. (You need DuckDB v1.4.2).
+The forecast takes ~2 minutes on a Dell XPS 13. (Requires DuckDB v1.4.3+).
 
 ```sql
 -- Load extension
@@ -112,38 +112,37 @@ SELECT * FROM m5 WHERE ds < DATE '2016-04-25';
 CREATE OR REPLACE TABLE m5_test AS
 SELECT * FROM m5 WHERE ds >= DATE '2016-04-25';
 
--- Perform baseline forecast and evaluate performance
+-- Forecast with multiple models
 CREATE OR REPLACE TABLE forecast_results AS (
-    SELECT *
-    FROM anofox_fcst_ts_forecast_by('m5_train', item_id, ds, y, 'SeasonalNaive', 28, {'seasonal_period': 7})
+    SELECT * FROM ts_forecast_by('m5_train', item_id, ds, y, 'SeasonalNaive', 28, {'seasonal_period': 7})
     UNION ALL
-    SELECT *
-    FROM anofox_fcst_ts_forecast_by('m5_train', item_id, ds, y, 'Theta', 28, {'seasonal_period': 7})
+    SELECT * FROM ts_forecast_by('m5_train', item_id, ds, y, 'Theta', 28, {'seasonal_period': 7})
     UNION ALL
-    SELECT *
-    FROM anofox_fcst_ts_forecast_by('m5_train', item_id, ds, y, 'AutoARIMA', 28, {'seasonal_period': 7})
+    SELECT * FROM ts_forecast_by('m5_train', item_id, ds, y, 'AutoARIMA', 28, {'seasonal_period': 7})
 );
 
--- MAE and Bias of Forecasts
-CREATE OR REPLACE TABLE evaluation_results AS (
-  SELECT 
-      item_id,
-      model_name,
-      anofox_fcst_ts_mae(LIST(y), LIST(point_forecast)) AS mae,
-      anofox_fcst_ts_bias(LIST(y), LIST(point_forecast)) AS bias
-  FROM (
-      -- Join Forecast with Test Data
-      SELECT 
-          m.item_id,
-          m.ds,
-          m.y,
-          n.model_name,
-          n.point_forecast
-      FROM forecast_results n
-      JOIN m5_test m ON n.item_id = m.item_id AND n.date = m.ds
-  )
-  GROUP BY item_id, model_name
-);
+-- Join forecasts with actuals and create composite key for grouping
+CREATE OR REPLACE TABLE forecast_vs_actual AS
+SELECT
+    f.item_id,
+    f.model_name,
+    f.item_id || '|' || f.model_name AS series_key,
+    f.date,
+    t.y AS actual,
+    f.point_forecast AS forecast
+FROM forecast_results f
+JOIN m5_test t ON f.item_id = t.item_id AND f.date = t.ds;
+
+-- MAE and Bias per series using _by pattern
+CREATE OR REPLACE TABLE evaluation_results AS
+SELECT
+    split_part(m.id, '|', 1) AS item_id,
+    split_part(m.id, '|', 2) AS model_name,
+    m.mae,
+    b.bias
+FROM ts_mae_by('forecast_vs_actual', series_key, date, actual, forecast) m
+JOIN ts_bias_by('forecast_vs_actual', series_key, date, actual, forecast) b
+  ON m.id = b.id;
 
 -- Summarise evaluation results by model
 SELECT
