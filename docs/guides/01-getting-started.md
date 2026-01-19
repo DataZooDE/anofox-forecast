@@ -92,27 +92,25 @@ GROUP BY product_id;
 ### 2. Detect Seasonality
 
 ```sql
-SELECT
-    product_id,
-    (ts_detect_periods(LIST(quantity ORDER BY date))).primary_period AS season
-FROM sales
-GROUP BY product_id;
+-- Detect seasonal patterns (e.g., weekly = 7, monthly = 30)
+SELECT * FROM ts_detect_periods_by('sales', product_id, date, quantity, MAP{});
+-- Returns: primary_period = 7 (weekly pattern)
 ```
 
 ### 3. Evaluate Models
 
 ```sql
--- Backtest to evaluate forecast accuracy
+-- Backtest with detected seasonal period
 SELECT
     model_name,
     AVG(abs_error) AS mae,
     AVG(fold_metric_score) AS rmse
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'sales', product_id, date, quantity,
     7,       -- 7-day horizon
     3,       -- 3 folds
     '1d',    -- daily frequency
-    MAP{}
+    {'method': 'AutoETS', 'seasonal_period': 7}  -- Use detected period
 )
 GROUP BY model_name;
 ```
@@ -120,9 +118,13 @@ GROUP BY model_name;
 ### 4. Generate Forecasts
 
 ```sql
--- Production forecasts with best model
+-- Production forecasts with seasonal period
 CREATE TABLE forecasts AS
-SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'AutoETS', 30);
+SELECT * FROM ts_forecast_by(
+    'sales', product_id, date, quantity,
+    'AutoETS', 30,
+    {'seasonal_period': 7}  -- Same period as backtesting
+);
 ```
 
 ## Next Steps

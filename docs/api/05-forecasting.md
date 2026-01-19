@@ -31,23 +31,46 @@ SELECT *, 'AutoETS' AS model FROM ts_forecast_by('sales', id, date, val, 'AutoET
 
 ### Handling Seasonality
 
-Seasonality detection is **explicit** - you control when and how it's detected:
+> **Important:** Forecasting models do **not** auto-detect seasonality. You must detect it separately and pass `seasonal_period` explicitly.
 
+**Step 1: Detect seasonality**
 ```sql
--- Step 1: Detect seasonality
 SELECT * FROM ts_detect_periods_by('daily_sales', product_id, date, value, MAP{});
--- Returns: primary_period = 7 (weekly)
+-- Returns: primary_period = 7 (weekly pattern detected)
+```
 
--- Step 2: Use detected period in forecast
+**Step 2: Use detected period in forecasting**
+```sql
+-- For forecasting
+SELECT * FROM ts_forecast_by(
+    'daily_sales', product_id, date, value,
+    'AutoETS', 14,
+    {'seasonal_period': 7}
+);
+
+-- For backtesting
+SELECT * FROM ts_backtest_auto_by(
+    'daily_sales', product_id, date, value, 7, 5, '1d',
+    {'method': 'AutoETS', 'seasonal_period': 7}
+);
+```
+
+**Combined workflow** (detect and forecast in one query):
+```sql
+WITH detected AS (
+    SELECT (periods).primary_period AS season
+    FROM ts_detect_periods_by('daily_sales', product_id, date, value, MAP{})
+    LIMIT 1
+)
 SELECT * FROM ts_forecast_by(
     'daily_sales', product_id, date, value,
     'HoltWinters', 14,
-    {'seasonal_period': 7}
+    {'seasonal_period': (SELECT season FROM detected)}
 );
 ```
 
 **Why explicit?** Auto-detection can produce unexpected results. By separating detection from forecasting, you can:
-- Validate detected periods make business sense
+- Validate detected periods make business sense (e.g., 7 = weekly, 12 = monthly, 365 = yearly)
 - Use domain knowledge to override detection
 - Apply the same period consistently across models
 

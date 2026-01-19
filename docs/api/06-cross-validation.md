@@ -15,10 +15,10 @@ Time series cross-validation requires special handling because data has temporal
 For most use cases, use `ts_backtest_auto_by` - complete backtesting in a single call:
 
 ```sql
--- Backtest AutoETS with 5 folds, 7-day horizon
+-- Backtest Naive (no seasonality required)
 SELECT * FROM ts_backtest_auto_by(
     'sales_data', store_id, date, revenue,
-    7, 5, '1d', {'method': 'AutoETS'}
+    7, 5, '1d', {'method': 'Naive'}
 );
 
 -- Aggregate results
@@ -26,8 +26,22 @@ SELECT
     model_name,
     AVG(abs_error) AS mae,
     AVG(fold_metric_score) AS avg_rmse
-FROM ts_backtest_auto_by('sales_data', store_id, date, revenue, 7, 5, '1d', {'method': 'AutoETS'})
+FROM ts_backtest_auto_by('sales_data', store_id, date, revenue, 7, 5, '1d', {'method': 'Naive'})
 GROUP BY model_name;
+```
+
+**For seasonal data**, first detect the period, then pass it explicitly:
+
+```sql
+-- Step 1: Detect seasonality
+SELECT * FROM ts_detect_periods_by('sales_data', store_id, date, revenue, MAP{});
+-- Returns: primary_period = 7 (weekly)
+
+-- Step 2: Backtest with seasonal model
+SELECT * FROM ts_backtest_auto_by(
+    'sales_data', store_id, date, revenue,
+    7, 5, '1d', {'method': 'AutoETS', 'seasonal_period': 7}
+);
 ```
 
 ### Modular Approach
