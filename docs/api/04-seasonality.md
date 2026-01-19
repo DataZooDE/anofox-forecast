@@ -14,13 +14,13 @@ Detect periods using table macros (recommended):
 
 ```sql
 -- Single series
-SELECT * FROM ts_detect_periods('daily_sales', date, value);
+SELECT * FROM ts_detect_periods('daily_sales', date, value, MAP{});
 
 -- Multiple series
-SELECT * FROM ts_detect_periods_by('sales', product_id, date, value);
+SELECT * FROM ts_detect_periods_by('sales', product_id, date, value, MAP{});
 
 -- With specific method
-SELECT * FROM ts_detect_periods_by('sales', product_id, date, value, method := 'acf');
+SELECT * FROM ts_detect_periods_by('sales', product_id, date, value, {'method': 'acf'});
 ```
 
 Using the aggregate function with GROUP BY:
@@ -41,14 +41,21 @@ Detect periods for a single series.
 
 **Signature:**
 ```sql
-ts_detect_periods(source, date_col, value_col, method := 'fft') → TABLE(periods)
+ts_detect_periods(source, date_col, value_col, params) → TABLE(periods)
 ```
 
 **Parameters:**
-- `source`: Table name (VARCHAR)
-- `date_col`: Date/timestamp column
-- `value_col`: Value column
-- `method`: Detection method (default: 'fft')
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Source table name |
+| `date_col` | COLUMN | Date/timestamp column |
+| `value_col` | COLUMN | Value column |
+| `params` | STRUCT/MAP | Configuration options |
+
+**Params options:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `method` | VARCHAR | `'fft'` | Detection method: `'fft'` or `'acf'` |
 
 **Returns:** TABLE with `periods` STRUCT containing detected periods.
 
@@ -57,7 +64,10 @@ ts_detect_periods(source, date_col, value_col, method := 'fft') → TABLE(period
 SELECT
     (periods).primary_period,
     (periods).n_periods
-FROM ts_detect_periods('daily_sales', date, value);
+FROM ts_detect_periods('daily_sales', date, value, MAP{});
+
+-- With ACF method
+SELECT * FROM ts_detect_periods('daily_sales', date, value, {'method': 'acf'});
 ```
 
 ---
@@ -68,15 +78,22 @@ Detect periods for grouped series.
 
 **Signature:**
 ```sql
-ts_detect_periods_by(source, group_col, date_col, value_col, method := 'fft') → TABLE(id, periods)
+ts_detect_periods_by(source, group_col, date_col, value_col, params) → TABLE(id, periods)
 ```
 
 **Parameters:**
-- `source`: Table name (VARCHAR)
-- `group_col`: Series identifier column
-- `date_col`: Date/timestamp column
-- `value_col`: Value column
-- `method`: Detection method (default: 'fft')
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Source table name |
+| `group_col` | COLUMN | Series identifier column |
+| `date_col` | COLUMN | Date/timestamp column |
+| `value_col` | COLUMN | Value column |
+| `params` | STRUCT/MAP | Configuration options |
+
+**Params options:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `method` | VARCHAR | `'fft'` | Detection method: `'fft'` or `'acf'` |
 
 **Returns:** TABLE with `id` and `periods` STRUCT containing detected periods.
 
@@ -87,7 +104,10 @@ SELECT
     id,
     (periods).primary_period,
     (periods).n_periods
-FROM ts_detect_periods_by('sales', product_id, date, value);
+FROM ts_detect_periods_by('sales', product_id, date, value, MAP{});
+
+-- With ACF method
+SELECT * FROM ts_detect_periods_by('sales', product_id, date, value, {'method': 'acf'});
 ```
 
 ---
