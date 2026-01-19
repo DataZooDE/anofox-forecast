@@ -86,8 +86,9 @@ ts_conformal_by(backtest_results, group_col, actual_col, forecast_col, point_for
 - `alpha` (DOUBLE): Miscoverage rate (default: 0.1)
 - `method` (VARCHAR): 'split' or 'asymmetric' (default: 'split')
 
-**Example:**
+**Examples:**
 ```sql
+-- Symmetric intervals (default)
 SELECT * FROM ts_conformal_by(
     'backtest_results',
     product_id,
@@ -96,7 +97,19 @@ SELECT * FROM ts_conformal_by(
     point_forecast,
     {'alpha': 0.1, 'method': 'split'}
 );
+
+-- Asymmetric intervals (for skewed residuals)
+SELECT * FROM ts_conformal_by(
+    'backtest_results',
+    product_id,
+    actual,
+    forecast,
+    point_forecast,
+    {'alpha': 0.1, 'method': 'asymmetric'}
+);
 ```
+
+**When to use asymmetric:** Use `'asymmetric'` when residuals are not symmetric (e.g., demand forecasts often under-predict more than over-predict). This creates separate upper and lower quantiles for tighter, more accurate intervals.
 
 ---
 
