@@ -1,5 +1,7 @@
 # Theta
 
+> Theta Method - decomposes series into trend and drift components
+
 ## Signature
 
 ```sql

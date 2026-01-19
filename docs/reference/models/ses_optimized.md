@@ -1,5 +1,7 @@
 # SESOptimized
 
+> Simple Exponential Smoothing with automatically optimized alpha parameter
+
 ## Signature
 
 ```sql

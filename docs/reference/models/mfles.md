@@ -1,5 +1,7 @@
 # MFLES
 
+> Multiple Frequency Local Exponential Smoothing for multi-seasonal patterns
+
 ## Signature
 
 ```sql

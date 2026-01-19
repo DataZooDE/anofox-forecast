@@ -1,5 +1,7 @@
 # ADIDA
 
+> Aggregate-Disaggregate approach for sparse intermittent demand
+
 ## Signature
 
 ```sql

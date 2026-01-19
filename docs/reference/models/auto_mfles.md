@@ -1,5 +1,7 @@
 # AutoMFLES
 
+> AutoMFLES with automatic model selection for multi-seasonality
+
 ## Signature
 
 ```sql

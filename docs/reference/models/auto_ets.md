@@ -1,5 +1,7 @@
 # AutoETS
 
+> Automatic ETS model selection based on information criteria
+
 ## Signature
 
 ```sql

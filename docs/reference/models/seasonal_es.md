@@ -1,5 +1,7 @@
 # SeasonalES
 
+> Seasonal Exponential Smoothing - captures seasonality without trend
+
 ## Signature
 
 ```sql

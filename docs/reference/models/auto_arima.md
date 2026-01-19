@@ -1,5 +1,7 @@
 # AutoARIMA
 
+> Automatic ARIMA model selection with optional exogenous variables
+
 ## Signature
 
 ```sql

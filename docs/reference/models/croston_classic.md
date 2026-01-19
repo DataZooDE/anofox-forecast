@@ -1,5 +1,7 @@
 # CrostonClassic
 
+> Classic Croston's Method for intermittent demand with many zeros
+
 ## Signature
 
 ```sql

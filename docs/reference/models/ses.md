@@ -1,5 +1,7 @@
 # SES
 
+> Simple Exponential Smoothing - weighted average with exponential decay
+
 ## Signature
 
 ```sql

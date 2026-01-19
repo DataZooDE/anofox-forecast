@@ -1,5 +1,7 @@
 # CrostonOptimized
 
+> Optimized Croston's Method with auto-tuned smoothing parameters
+
 ## Signature
 
 ```sql

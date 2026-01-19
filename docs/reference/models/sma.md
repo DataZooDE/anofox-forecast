@@ -1,5 +1,7 @@
 # SMA
 
+> Simple Moving Average - forecasts using average of recent observations
+
 ## Signature
 
 ```sql

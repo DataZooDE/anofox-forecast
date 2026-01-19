@@ -1,5 +1,7 @@
 # AutoTBATS
 
+> AutoTBATS with automatic model selection for complex seasonality
+
 ## Signature
 
 ```sql

@@ -1,5 +1,7 @@
 # ETS
 
+> Error-Trend-Seasonal state space model with explicit specification
+
 ## Signature
 
 ```sql

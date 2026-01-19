@@ -1,5 +1,7 @@
 # MSTL
 
+> Multiple Seasonal-Trend decomposition using LOESS
+
 ## Signature
 
 ```sql

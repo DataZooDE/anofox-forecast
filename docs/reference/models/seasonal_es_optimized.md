@@ -1,5 +1,7 @@
 # SeasonalESOptimized
 
+> Seasonal Exponential Smoothing with auto-optimized parameters
+
 ## Signature
 
 ```sql

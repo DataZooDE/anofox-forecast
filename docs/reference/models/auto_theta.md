@@ -1,5 +1,7 @@
 # AutoTheta
 
+> Automatic Theta method selection and optimization
+
 ## Signature
 
 ```sql

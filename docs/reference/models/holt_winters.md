@@ -1,5 +1,7 @@
 # HoltWinters
 
+> Triple Exponential Smoothing - handles trend and seasonality together
+
 ## Signature
 
 ```sql

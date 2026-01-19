@@ -1,5 +1,7 @@
 # DynamicTheta
 
+> Theta Method with time-varying parameters for non-stationary data
+
 ## Signature
 
 ```sql

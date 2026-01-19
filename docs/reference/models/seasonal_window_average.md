@@ -1,5 +1,7 @@
 # SeasonalWindowAverage
 
+> Seasonal Window Average - combines SeasonalNaive with SMA
+
 ## Signature
 
 ```sql

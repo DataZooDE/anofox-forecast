@@ -1,5 +1,7 @@
 # DynamicOptimizedTheta
 
+> Combines dynamic theta adaptation with automatic optimization
+
 ## Signature
 
 ```sql

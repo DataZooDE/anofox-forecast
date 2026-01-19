@@ -1,5 +1,7 @@
 # RandomWalkDrift
 
+> Random walk with drift - captures linear trend without seasonality
+
 ## Signature
 
 ```sql

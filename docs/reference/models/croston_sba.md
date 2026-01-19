@@ -1,5 +1,7 @@
 # CrostonSBA
 
+> Croston with Syntetos-Boylan bias correction
+
 ## Signature
 
 ```sql

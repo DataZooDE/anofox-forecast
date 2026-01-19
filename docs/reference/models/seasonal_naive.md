@@ -1,5 +1,7 @@
 # SeasonalNaive
 
+> Repeats values from the same season in the previous cycle
+
 ## Signature
 
 ```sql

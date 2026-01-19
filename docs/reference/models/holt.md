@@ -1,5 +1,7 @@
 # Holt
 
+> Holt's Linear Trend Method - handles data with trend but no seasonality
+
 ## Signature
 
 ```sql

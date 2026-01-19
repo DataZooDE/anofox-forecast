@@ -1,5 +1,7 @@
 # Naive
 
+> Simplest baseline model - repeats the last observed value
+
 ## Signature
 
 ```sql

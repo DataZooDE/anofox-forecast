@@ -1,5 +1,7 @@
 # TBATS
 
+> Trigonometric seasonality with Box-Cox, ARMA errors, and trend
+
 ## Signature
 
 ```sql

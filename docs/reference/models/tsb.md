@@ -1,5 +1,7 @@
 # TSB
 
+> Teunter-Syntetos-Babai Method for declining intermittent demand
+
 ## Signature
 
 ```sql

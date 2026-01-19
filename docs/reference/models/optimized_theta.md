@@ -1,5 +1,7 @@
 # OptimizedTheta
 
+> Theta Method with auto-optimized theta parameter
+
 ## Signature
 
 ```sql

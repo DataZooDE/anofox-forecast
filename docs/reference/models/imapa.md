@@ -1,5 +1,7 @@
 # IMAPA
 
+> Multi-aggregation prediction for intermittent demand
+
 ## Signature
 
 ```sql

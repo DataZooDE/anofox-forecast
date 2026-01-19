@@ -1,5 +1,7 @@
 # ARIMA
 
+> AutoRegressive Integrated Moving Average with explicit order specification
+
 ## Signature
 
 ```sql
