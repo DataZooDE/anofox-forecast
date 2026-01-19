@@ -6,6 +6,12 @@
 
 Statistical functions compute descriptive metrics for time series data. These functions help you understand your data before forecasting.
 
+**Use this document to:**
+- Compute 34 statistical metrics per series (mean, std, skewness, trend strength, etc.)
+- Assess data quality across four dimensions (structural, temporal, magnitude, behavioral)
+- Generate quality reports to identify problematic series before forecasting
+- Filter out low-quality or constant series that would produce poor forecasts
+
 ---
 
 ## Quick Start

@@ -6,6 +6,13 @@
 
 Changepoint detection identifies points in time where the statistical properties of a time series change significantly.
 
+**Use this document to:**
+- Detect structural breaks in mean, variance, or trend
+- Find regime changes in sales, traffic, or sensor data
+- Configure detection sensitivity with hazard rate parameter
+- Get per-point changepoint probabilities for detailed analysis
+- Identify series requiring model updates due to distribution shifts
+
 ---
 
 ## Quick Start

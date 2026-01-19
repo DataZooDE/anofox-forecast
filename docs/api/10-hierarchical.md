@@ -6,6 +6,13 @@
 
 When working with hierarchical time series data (e.g., region/store/item), you often need to combine multiple ID columns into a single `unique_id` for forecasting functions.
 
+**Use this document to:**
+- Combine multiple ID columns into a single `unique_id` for forecasting
+- Create aggregated series at all hierarchy levels (total, region, store, item)
+- Validate that separator characters don't conflict with your data
+- Split combined keys back into original columns after forecasting
+- Build hierarchical forecasting pipelines with proper aggregation
+
 ---
 
 ## Quick Start

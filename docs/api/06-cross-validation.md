@@ -6,6 +6,13 @@
 
 Time series cross-validation requires special handling because data has temporal ordering. These functions help you create proper train/test splits, handle unknown features during backtesting, and prevent data leakage.
 
+**Use this document to:**
+- Run complete backtests with a single function call (`ts_backtest_auto_by`)
+- Create proper expanding window train/test splits with temporal ordering
+- Generate cross-validation folds for custom forecasting pipelines
+- Compare model performance across multiple time periods
+- Prevent data leakage by ensuring test data is always in the future
+
 ---
 
 ## Quick Start

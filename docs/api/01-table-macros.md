@@ -6,6 +6,12 @@
 
 Table macros are high-level functions that operate directly on tables. Column names are passed as identifiers (unquoted), making them intuitive to use.
 
+**Use this document to:**
+- Learn how table macros work with DuckDB's `query_table()` function
+- Understand parameter patterns (table names as strings, columns as identifiers)
+- Choose between STRUCT and MAP syntax for parameters
+- Find the right table macro for your use case across all categories
+
 ```sql
 -- Example: Generate forecasts for all product series
 SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'AutoETS', 30);

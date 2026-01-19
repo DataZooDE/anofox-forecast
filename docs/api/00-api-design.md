@@ -6,6 +6,12 @@
 
 The extension provides three API styles for time series operations. This document defines the naming conventions, parameter ordering, and patterns that should be followed for consistency.
 
+**Use this document to:**
+- Understand the three-tier API pattern (Scalar, Aggregate, Table Macro)
+- Decide which API style to use for your workflow
+- Follow consistent naming conventions when extending the API
+- Learn when to expose public vs internal functions
+
 ## Three-Tier API Pattern
 
 For any time series operation `<operation>`, the API can provide up to three variants:

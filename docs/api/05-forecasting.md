@@ -6,6 +6,13 @@
 
 The extension provides 32 forecasting models ranging from simple baselines to sophisticated state-space methods.
 
+**Use this document to:**
+- Generate point forecasts and prediction intervals for single or multiple series
+- Choose from 32 models: baselines (Naive, SMA), exponential smoothing (ETS, Holt-Winters), state-space (ARIMA), multi-seasonal (MSTL, TBATS), and intermittent demand (Croston, TSB)
+- Use automatic model selection (AutoETS, AutoARIMA, AutoTheta) when unsure
+- Incorporate exogenous variables with supported models
+- Understand the detect-then-forecast workflow for seasonal data
+
 ---
 
 ## Quick Start

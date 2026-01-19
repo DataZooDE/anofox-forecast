@@ -6,6 +6,13 @@
 
 Peak detection identifies local maxima in time series data, useful for finding seasonal highs, demand spikes, or cyclical patterns. Peak timing analysis determines if peaks occur at consistent times within each period.
 
+**Use this document to:**
+- Detect peaks with configurable minimum distance and prominence thresholds
+- Analyze inter-peak distances to find cyclical patterns
+- Determine if peaks occur at consistent times within seasonal periods
+- Calculate peak timing variability scores to assess regularity
+- Identify products/series with stable vs variable peak patterns
+
 ---
 
 ## Table Macros

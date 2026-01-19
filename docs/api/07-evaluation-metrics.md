@@ -6,6 +6,13 @@
 
 Metrics functions evaluate forecast accuracy by comparing actual values to predictions. Available as both scalar functions and table macros.
 
+**Use this document to:**
+- Compute standard error metrics: MAE, MSE, RMSE, MAPE, sMAPE, Bias
+- Calculate scale-independent metrics: MASE (vs baseline), rMAE (relative)
+- Evaluate prediction intervals with coverage and quantile loss
+- Compare forecast quality across series or models
+- Aggregate metrics per group using table macros or GROUP BY
+
 ---
 
 ## Quick Start

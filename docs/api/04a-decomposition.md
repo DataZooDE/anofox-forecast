@@ -6,6 +6,13 @@
 
 Decomposition functions separate time series into trend, seasonal, and residual components. Classification functions analyze the type and strength of seasonality.
 
+**Use this document to:**
+- Decompose series into trend, seasonal, and residual components using MSTL
+- Handle multiple seasonal patterns (e.g., weekly + yearly) simultaneously
+- Classify seasonality type: timing (early/on_time/late), modulation (stable/growing/shrinking)
+- Measure seasonal strength to decide if seasonal models are appropriate
+- Identify weak or variable seasonal cycles within your data
+
 ---
 
 ## Table Macros

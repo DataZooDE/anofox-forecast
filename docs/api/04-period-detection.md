@@ -6,6 +6,13 @@
 
 Period detection identifies recurring patterns in time series data. Use detected periods to configure seasonal forecasting models.
 
+**Use this document to:**
+- Detect dominant seasonal periods (e.g., 7 for weekly, 12 for monthly, 365 for yearly)
+- Choose from 12 detection methods (FFT, ACF, autoperiod, Lomb-Scargle, etc.)
+- Validate detected periods with seasonality classification
+- Analyze peak timing regularity within seasonal cycles
+- Build workflows that detect seasonality before forecasting
+
 **Detection Methods:**
 | Method | Description | Best For |
 |--------|-------------|----------|

@@ -6,6 +6,13 @@
 
 Feature extraction functions compute 117 statistical features from time series data, compatible with tsfresh.
 
+**Use this document to:**
+- Extract 117 tsfresh-compatible features for machine learning pipelines
+- Compute features per series for clustering, classification, or anomaly detection
+- Access individual features (mean, std, trend_strength, entropy, etc.) from result structs
+- Build feature tables for downstream ML models outside DuckDB
+- Filter series by feature values (e.g., high trend strength, sufficient length)
+
 ---
 
 ## Quick Start

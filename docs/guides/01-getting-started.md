@@ -2,6 +2,13 @@
 
 > Quick introduction to the Anofox Forecast Extension
 
+**Use this guide to:**
+- Install and load the extension in DuckDB
+- Run your first forecast with sample data
+- Understand time series data structure (group, date, value)
+- Choose between three API styles (table macros, scalar functions, aggregates)
+- Learn essential patterns for grouped forecasting
+
 ## Installation
 
 ```sql

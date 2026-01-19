@@ -6,6 +6,13 @@
 
 Data preparation functions help clean and transform time series data before forecasting. These are **table macros** that operate on source tables and return transformed tables.
 
+**Use this document to:**
+- Fill gaps in irregular time series to ensure regular intervals
+- Impute NULL values using constants, forward-fill, or interpolation
+- Drop problematic series (constant, too short, too many NaNs/nulls)
+- Differencing to remove trends before modeling
+- Build data cleaning pipelines for production forecasting
+
 ---
 
 ## Quick Start

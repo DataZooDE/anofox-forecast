@@ -6,6 +6,13 @@
 
 The extension provides 32 forecasting models. This guide helps you select the right one.
 
+**Use this guide to:**
+- Analyze your data's characteristics (trend, seasonality, intermittency)
+- Match data patterns to appropriate model categories
+- Start with baselines (Naive, SeasonalNaive) before trying complex models
+- Use automatic selection models (AutoETS, AutoARIMA) when unsure
+- Handle special cases: multiple seasonalities, sparse demand, regime changes
+
 ## Decision Framework
 
 ### Step 1: Understand Your Data

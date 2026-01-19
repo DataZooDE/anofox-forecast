@@ -6,6 +6,13 @@
 
 Conformal prediction provides **distribution-free prediction intervals** with guaranteed coverage probability. Unlike parametric methods, conformal prediction makes minimal assumptions about the underlying distribution and provides valid coverage even for finite samples.
 
+**Use this document to:**
+- Create prediction intervals with guaranteed coverage (e.g., 90%, 95%)
+- Calibrate conformity scores from backtest residuals
+- Apply calibrated intervals to new forecasts
+- Choose between one-step, modular, or array-based approaches
+- Build production pipelines that separate calibration from application
+
 ### How It Works
 
 Conformal prediction works in two phases:

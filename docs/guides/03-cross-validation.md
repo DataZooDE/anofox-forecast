@@ -2,6 +2,13 @@
 
 > How to properly evaluate forecast accuracy
 
+**Use this guide to:**
+- Understand why standard cross-validation doesn't work for time series
+- Run one-liner backtests to quickly evaluate models
+- Configure fold parameters (horizon, number of folds, frequency)
+- Handle gaps between training and test sets
+- Compare multiple models on the same data splits
+
 ## Why Cross-Validation Matters
 
 A model that fits historical data well may forecast poorly. Cross-validation simulates real forecasting by:
