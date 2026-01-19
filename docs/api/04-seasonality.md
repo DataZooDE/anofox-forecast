@@ -6,6 +6,12 @@
 
 Seasonality functions detect periodic patterns in time series data and decompose series into trend, seasonal, and residual components.
 
+**Detection Methods:**
+| Method | Description | Best For |
+|--------|-------------|----------|
+| `'fft'` | FFT periodogram-based (default) | Clean signals, fast |
+| `'acf'` | Autocorrelation function | Cyclical patterns, noise-robust |
+
 ---
 
 ## Quick Start
@@ -13,14 +19,14 @@ Seasonality functions detect periodic patterns in time series data and decompose
 Detect periods using table macros (recommended):
 
 ```sql
--- Single series
-SELECT * FROM ts_detect_periods('daily_sales', date, value, MAP{});
-
--- Multiple series
+-- Multiple series (most common)
 SELECT * FROM ts_detect_periods_by('sales', product_id, date, value, MAP{});
 
--- With specific method
+-- With ACF method
 SELECT * FROM ts_detect_periods_by('sales', product_id, date, value, {'method': 'acf'});
+
+-- Single series
+SELECT * FROM ts_detect_periods('daily_sales', date, value, MAP{});
 ```
 
 Using the aggregate function with GROUP BY:
@@ -34,43 +40,6 @@ GROUP BY product_id;
 ---
 
 ## Table Macros
-
-### ts_detect_periods
-
-Detect periods for a single series.
-
-**Signature:**
-```sql
-ts_detect_periods(source, date_col, value_col, params) → TABLE(periods)
-```
-
-**Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `source` | VARCHAR | Source table name |
-| `date_col` | COLUMN | Date/timestamp column |
-| `value_col` | COLUMN | Value column |
-| `params` | STRUCT/MAP | Configuration options |
-
-**Params options:**
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `method` | VARCHAR | `'fft'` | Detection method: `'fft'` or `'acf'` |
-
-**Returns:** TABLE with `periods` STRUCT containing detected periods.
-
-**Example:**
-```sql
-SELECT
-    (periods).primary_period,
-    (periods).n_periods
-FROM ts_detect_periods('daily_sales', date, value, MAP{});
-
--- With ACF method
-SELECT * FROM ts_detect_periods('daily_sales', date, value, {'method': 'acf'});
-```
-
----
 
 ### ts_detect_periods_by
 
@@ -108,6 +77,43 @@ FROM ts_detect_periods_by('sales', product_id, date, value, MAP{});
 
 -- With ACF method
 SELECT * FROM ts_detect_periods_by('sales', product_id, date, value, {'method': 'acf'});
+```
+
+---
+
+### ts_detect_periods
+
+Detect periods for a single series.
+
+**Signature:**
+```sql
+ts_detect_periods(source, date_col, value_col, params) → TABLE(periods)
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Source table name |
+| `date_col` | COLUMN | Date/timestamp column |
+| `value_col` | COLUMN | Value column |
+| `params` | STRUCT/MAP | Configuration options |
+
+**Params options:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `method` | VARCHAR | `'fft'` | Detection method: `'fft'` or `'acf'` |
+
+**Returns:** TABLE with `periods` STRUCT containing detected periods.
+
+**Example:**
+```sql
+SELECT
+    (periods).primary_period,
+    (periods).n_periods
+FROM ts_detect_periods('daily_sales', date, value, MAP{});
+
+-- With ACF method
+SELECT * FROM ts_detect_periods('daily_sales', date, value, {'method': 'acf'});
 ```
 
 ---
@@ -425,50 +431,6 @@ SELECT * FROM ts_mstl_decomposition_by(
 
 ---
 
-### ts_classify_seasonality
-
-Classify the type and strength of seasonality for a single-series table.
-
-**Signature:**
-```sql
-ts_classify_seasonality(source VARCHAR, date_col COLUMN, value_col COLUMN, period DOUBLE) → TABLE
-```
-
-**Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `source` | VARCHAR | Source table name |
-| `date_col` | COLUMN | Date/timestamp column |
-| `value_col` | COLUMN | Value column |
-| `period` | DOUBLE | Expected seasonal period |
-
-**Returns:** Single row with `classification` STRUCT:
-| Field | Type | Description |
-|-------|------|-------------|
-| `timing_classification` | VARCHAR | 'early', 'on_time', 'late', or 'variable' |
-| `modulation_type` | VARCHAR | 'stable', 'growing', 'shrinking', or 'variable' |
-| `has_stable_timing` | BOOLEAN | Whether peak timing is consistent |
-| `timing_variability` | DOUBLE | Variability score (lower = more stable) |
-| `seasonal_strength` | DOUBLE | Strength of seasonality (0-1) |
-| `is_seasonal` | BOOLEAN | Whether significant seasonality exists |
-| `cycle_strengths` | DOUBLE[] | Strength per cycle |
-| `weak_seasons` | INTEGER[] | Indices of weak seasonal cycles |
-
-**Example:**
-```sql
--- Classify weekly seasonality for a single series
-SELECT * FROM ts_classify_seasonality('daily_sales', date, amount, 7.0);
-
--- Check if seasonality is strong and stable
-SELECT
-    (classification).is_seasonal,
-    (classification).seasonal_strength,
-    (classification).has_stable_timing
-FROM ts_classify_seasonality('daily_sales', date, amount, 7.0);
-```
-
----
-
 ### ts_classify_seasonality_by
 
 Classify seasonality type per group in a multi-series table.
@@ -491,7 +453,19 @@ ts_classify_seasonality_by(source VARCHAR, group_col COLUMN, date_col COLUMN, va
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | (same as group_col) | Group identifier |
-| `classification` | STRUCT | Classification results (same fields as above) |
+| `classification` | STRUCT | Classification results (see fields below) |
+
+**Classification STRUCT fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `timing_classification` | VARCHAR | 'early', 'on_time', 'late', or 'variable' |
+| `modulation_type` | VARCHAR | 'stable', 'growing', 'shrinking', or 'variable' |
+| `has_stable_timing` | BOOLEAN | Whether peak timing is consistent |
+| `timing_variability` | DOUBLE | Variability score (lower = more stable) |
+| `seasonal_strength` | DOUBLE | Strength of seasonality (0-1) |
+| `is_seasonal` | BOOLEAN | Whether significant seasonality exists |
+| `cycle_strengths` | DOUBLE[] | Strength per cycle |
+| `weak_seasons` | INTEGER[] | Indices of weak seasonal cycles |
 
 **Example:**
 ```sql
@@ -502,6 +476,40 @@ SELECT * FROM ts_classify_seasonality_by('sales', product_id, date, quantity, 7.
 SELECT id, (classification).seasonal_strength
 FROM ts_classify_seasonality_by('sales', product_id, date, quantity, 7.0)
 WHERE (classification).is_seasonal AND (classification).has_stable_timing;
+```
+
+---
+
+### ts_classify_seasonality
+
+Classify the type and strength of seasonality for a single-series table.
+
+**Signature:**
+```sql
+ts_classify_seasonality(source VARCHAR, date_col COLUMN, value_col COLUMN, period DOUBLE) → TABLE
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Source table name |
+| `date_col` | COLUMN | Date/timestamp column |
+| `value_col` | COLUMN | Value column |
+| `period` | DOUBLE | Expected seasonal period |
+
+**Returns:** Single row with `classification` STRUCT (same fields as above).
+
+**Example:**
+```sql
+-- Classify weekly seasonality for a single series
+SELECT * FROM ts_classify_seasonality('daily_sales', date, amount, 7.0);
+
+-- Check if seasonality is strong and stable
+SELECT
+    (classification).is_seasonal,
+    (classification).seasonal_strength,
+    (classification).has_stable_timing
+FROM ts_classify_seasonality('daily_sales', date, amount, 7.0);
 ```
 
 ---
