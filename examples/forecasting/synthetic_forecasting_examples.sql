@@ -72,7 +72,7 @@ SELECT product_id, COUNT(*) AS n_rows FROM multi_series GROUP BY product_id ORDE
 SELECT * FROM ts_forecast_by(
     'multi_series', product_id, date, quantity,
     'ETS', 7, MAP{}
-) ORDER BY product_id, ds;
+) ORDER BY id, date;
 
 -- =============================================================================
 -- SECTION 3: Model Selection (Baseline to Advanced)
@@ -250,9 +250,10 @@ SELECT * FROM future_features ORDER BY date;
 
 .print ''
 .print 'Forecast with exogenous variables (AutoARIMA):'
+-- Note: ts_forecast_exog expects feature columns as a list, not a comma-separated string
 SELECT * FROM ts_forecast_exog(
     'sales_with_features', date, amount,
-    'temp,promo',
+    ['temp', 'promo'],
     'future_features',
     'AutoARIMA', 7, MAP{}
 );
