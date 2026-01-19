@@ -315,7 +315,7 @@ FROM safe_data;
 
 -- Step 4: Fill unknowns using last known value
 CREATE OR REPLACE TABLE filled_footfall AS
-SELECT * FROM ts_fill_unknown(
+SELECT * FROM ts_fill_unknown_by(
     'masked_data',
     store_id,
     date,
@@ -739,7 +739,7 @@ FROM generate_series(1, 500) t(i);
 -- ts_cv_split_index returns ONLY: group_col, date_col, fold_id, split
 -- No target column = less memory for large datasets
 CREATE OR REPLACE TABLE cv_index AS
-SELECT * FROM ts_cv_split_index(
+SELECT * FROM ts_cv_split_index_by(
     'large_sales',
     store_id,
     date,
@@ -804,7 +804,7 @@ SELECT 'ts_hydrate_split masks competitor_price in test set:' AS info;
 SELECT
     fold_id, split, group_col AS store, date_col AS date,
     ROUND(unknown_col, 2) AS competitor_price
-FROM ts_hydrate_split(
+FROM ts_hydrate_split_by(
     'cv_index',
     'store_features',
     store_id,
@@ -840,7 +840,7 @@ SELECT 'ts_hydrate_split_strict returns ONLY metadata:' AS info;
 SELECT
     hs.fold_id, hs.split, hs.group_col AS store, hs.date_col AS date,
     hs._is_test
-FROM ts_hydrate_split_strict(
+FROM ts_hydrate_split_strict_by(
     'cv_index', 'store_features', store_id, date, MAP{}
 ) hs
 WHERE hs.group_col = 'STORE1' AND hs.fold_id = 1
