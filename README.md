@@ -160,18 +160,16 @@ ORDER BY avg_mae;
 
 **Write SQL once, use everywhere!** The extension works from any language with DuckDB bindings.
 
-| Language | Status | Guide |
+| Language | Status | Notes |
 |----------|--------|-------|
-| **Python** | ✅ | [Python Usage](guides/81_python_integration.md) |
-| **R** | ✅ | [R Usage](guides/82_r_integration.md) |
-| **Julia** | ✅ | [Julia Usage](guides/83_julia_integration.md) |
+| **Python** | ✅ | Via DuckDB Python bindings |
+| **R** | ✅ | Via DuckDB R bindings |
+| **Julia** | ✅ | Via DuckDB Julia bindings |
 | **C++** | ✅ | Via DuckDB C++ bindings |
 | **Rust** | ✅ | Via DuckDB Rust bindings |
 | **Node.js** | ✅ | Via DuckDB Node bindings |
 | **Go** | ✅ | Via DuckDB Go bindings |
 | **Java** | ✅ | Via DuckDB JDBC driver |
-
-**See**: [Multi-Language Overview](guides/80_multi_language_overview.md) for polyglot workflows!
 
 ---
 
@@ -357,7 +355,7 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 ## 📞 Support
 
-- **Documentation**: [guides/](guides/)
+- **Documentation**: [docs/](docs/)
 - **Issues**: [GitHub Issues](https://github.com/DataZooDE/anofox-forecast/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/DataZooDE/anofox-forecast/discussions)
 - **Email**: sm@data-zoo.de
