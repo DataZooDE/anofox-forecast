@@ -95,7 +95,9 @@ Both forms are identical in functionality.
 | **Table Macros** | High-level API overview | [01-table-macros.md](api/01-table-macros.md) |
 | **Statistics** | Time series statistics and data quality | [02-statistics.md](api/02-statistics.md) |
 | **Data Preparation** | Filtering, cleaning, imputation | [03-data-preparation.md](api/03-data-preparation.md) |
-| **Seasonality** | Period detection and decomposition | [04-seasonality.md](api/04-seasonality.md) |
+| **Period Detection** | Period detection and seasonality | [04-period-detection.md](api/04-period-detection.md) |
+| **Decomposition** | Seasonal decomposition and classification | [04a-decomposition.md](api/04a-decomposition.md) |
+| **Peak Detection** | Peak detection and timing analysis | [04b-peak-detection.md](api/04b-peak-detection.md) |
 | **Forecasting** | 32 forecasting models | [05-forecasting.md](api/05-forecasting.md) |
 | **Cross-Validation** | Backtesting and CV functions | [06-cross-validation.md](api/06-cross-validation.md) |
 | **Evaluation Metrics** | Forecast accuracy metrics | [07-evaluation-metrics.md](api/07-evaluation-metrics.md) |

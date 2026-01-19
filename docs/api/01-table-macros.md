@@ -43,7 +43,8 @@ SELECT * FROM ts_backtest_auto('sales', id, date, value, 7, 3, '1d',
 |----------|-----------|
 | [Statistics](02-statistics.md) | `ts_stats`, `ts_quality_report`, `ts_data_quality` |
 | [Data Preparation](03-data-preparation.md) | `ts_drop_*`, `ts_fill_*`, `ts_diff` |
-| [Seasonality](04-seasonality.md) | `ts_mstl_decomposition_by`, `ts_classify_seasonality_by`, `ts_detect_periods_by` |
+| [Period Detection](04-period-detection.md) | `ts_detect_periods_by`, `ts_detect_peaks_by`, `ts_analyze_peak_timing_by` |
+| [Decomposition](04a-decomposition.md) | `ts_mstl_decomposition_by`, `ts_classify_seasonality_by` |
 | [Forecasting](05-forecasting.md) | `ts_forecast`, `ts_forecast_by`, `ts_forecast_exog` |
 | [Cross-Validation](06-cross-validation.md) | `ts_backtest_auto_by`, `ts_cv_split_by`, `ts_cv_forecast_by` |
 | [Evaluation Metrics](07-evaluation-metrics.md) | `ts_mae_by`, `ts_rmse_by`, `ts_coverage_by`, ... |
