@@ -82,9 +82,21 @@ High-level macro for conformal prediction on grouped backtest results.
 ts_conformal_by(backtest_results, group_col, actual_col, forecast_col, point_forecast_col, params)
 ```
 
-**Params:**
-- `alpha` (DOUBLE): Miscoverage rate (default: 0.1)
-- `method` (VARCHAR): 'split' or 'asymmetric' (default: 'split')
+**Parameters:**
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `backtest_results` | VARCHAR | Yes | — | Table with backtest results |
+| `group_col` | COLUMN | Yes | — | Series identifier column |
+| `actual_col` | COLUMN | Yes | — | Actual values column |
+| `forecast_col` | COLUMN | Yes | — | Forecast values column |
+| `point_forecast_col` | COLUMN | Yes | — | Point forecast column |
+| `params` | STRUCT | Yes | — | Configuration parameters |
+
+**Params Options:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `alpha` | DOUBLE | `0.1` | Miscoverage rate (0.1 = 90% coverage, 0.05 = 95%) |
+| `method` | VARCHAR | `'split'` | `'split'` (symmetric) or `'asymmetric'` |
 
 **Examples:**
 ```sql
@@ -122,7 +134,25 @@ Calibrates a conformity score from backtest residuals.
 ts_conformal_calibrate(backtest_results, actual_col, forecast_col, params)
 ```
 
-**Returns:** `conformity_score`, `coverage`, `n_residuals`
+**Parameters:**
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `backtest_results` | VARCHAR | Yes | — | Table with backtest results |
+| `actual_col` | COLUMN | Yes | — | Actual values column |
+| `forecast_col` | COLUMN | Yes | — | Forecast values column |
+| `params` | STRUCT | Yes | — | Configuration parameters |
+
+**Params Options:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `alpha` | DOUBLE | `0.1` | Miscoverage rate (0.1 = 90% coverage) |
+
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `conformity_score` | DOUBLE | Calibrated score for interval construction |
+| `coverage` | DOUBLE | Empirical coverage from calibration |
+| `n_residuals` | INTEGER | Number of residuals used |
 
 **Example:**
 ```sql
@@ -144,6 +174,14 @@ Applies a pre-computed conformity score to forecast results.
 ```sql
 ts_conformal_apply_by(forecast_results, group_col, forecast_col, conformity_score)
 ```
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `forecast_results` | VARCHAR | Yes | Table with forecast results |
+| `group_col` | COLUMN | Yes | Series identifier column |
+| `forecast_col` | COLUMN | Yes | Point forecast column |
+| `conformity_score` | DOUBLE | Yes | Score from ts_conformal_calibrate |
 
 **Example:**
 ```sql
