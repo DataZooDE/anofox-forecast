@@ -16,12 +16,21 @@ The resulting intervals cover the true value with probability at least `1 - α`,
 
 ---
 
-## Quick Start
+## Choose Your Approach
 
-The simplest approach uses `ts_conformal_by` on backtest results:
+The API offers three levels of abstraction. Choose based on your needs:
+
+| Approach | Functions | Use When |
+|----------|-----------|----------|
+| **One-Step** | `ts_conformal_by` | You have backtest results and want intervals immediately |
+| **Modular** | `ts_conformal_calibrate` + `ts_conformal_apply_by` | You need to reuse calibration across multiple forecasts |
+| **Array-Based** | `ts_conformal_predict`, `ts_conformal_quantile`, etc. | You're building custom pipelines or working with array data |
+
+### One-Step Approach
+
+Best for most users. Calibrates and applies intervals in a single call.
 
 ```sql
--- One-step: Generate conformal intervals from backtest results
 SELECT * FROM ts_conformal_by(
     'backtest_results',
     product_id,
@@ -32,9 +41,156 @@ SELECT * FROM ts_conformal_by(
 );
 ```
 
-### Complete Workflow
+### Modular Approach
 
-For more control, use the modular approach:
+Use when you need to:
+- Apply the same calibration to multiple forecast tables
+- Store calibration scores for production use
+- Separate calibration from application for debugging
+
+```sql
+-- Step 1: Calibrate once
+CREATE TABLE calibration AS
+SELECT * FROM ts_conformal_calibrate(
+    'backtest', actual, forecast, {'alpha': 0.1}
+);
+
+-- Step 2: Apply to any forecast table
+SELECT * FROM ts_conformal_apply_by(
+    'future_forecasts',
+    product_id,
+    forecast,
+    (SELECT conformity_score FROM calibration)
+);
+```
+
+### Array-Based Functions
+
+Use when you need:
+- Fine-grained control over the conformal prediction process
+- Integration with custom forecasting pipelines
+- Array inputs/outputs for programmatic use
+
+```sql
+-- Direct array-based prediction
+SELECT (ts_conformal_predict(
+    residuals_array,
+    forecasts_array,
+    0.1
+)).*;
+```
+
+---
+
+## Common Scenarios
+
+### Scenario 1: Quick Uncertainty Quantification
+
+**Goal:** You have backtest results and need prediction intervals quickly.
+
+**Solution:** Use `ts_conformal_by` for a one-step solution.
+
+```sql
+-- Already have backtest results with actual vs forecast
+SELECT * FROM ts_conformal_by(
+    'my_backtest_results',
+    product_id,
+    actual,
+    forecast,
+    forecast,
+    {'alpha': 0.1}
+);
+```
+
+### Scenario 2: Production Forecasting System
+
+**Goal:** Calibrate once, apply to daily/weekly forecast batches.
+
+**Solution:** Use modular approach—store calibration, apply repeatedly.
+
+```sql
+-- Run once: calibrate from historical backtests
+CREATE TABLE calibration AS
+SELECT * FROM ts_conformal_calibrate(
+    'historical_backtest', actual, forecast, {'alpha': 0.1}
+);
+
+-- Run daily: apply to new forecasts
+INSERT INTO forecast_with_intervals
+SELECT * FROM ts_conformal_apply_by(
+    'todays_forecasts',
+    product_id,
+    forecast,
+    (SELECT conformity_score FROM calibration)
+);
+```
+
+### Scenario 3: Skewed Forecast Errors
+
+**Goal:** Your forecasts consistently under-predict (e.g., demand forecasting).
+
+**Solution:** Use asymmetric intervals for tighter, more accurate bounds.
+
+```sql
+SELECT * FROM ts_conformal_by(
+    'backtest_results',
+    product_id,
+    actual,
+    forecast,
+    forecast,
+    {'alpha': 0.1, 'method': 'asymmetric'}
+);
+```
+
+### Scenario 4: Model Comparison
+
+**Goal:** Compare which model produces sharper intervals while maintaining coverage.
+
+**Solution:** Use evaluation functions to compare interval quality.
+
+```sql
+-- Generate intervals for both models
+CREATE TABLE model_a_intervals AS ...;
+CREATE TABLE model_b_intervals AS ...;
+
+-- Compare interval widths
+SELECT 'Model A' AS model, * FROM ts_interval_width_by(
+    'model_a_intervals', product_id, lower, upper
+)
+UNION ALL
+SELECT 'Model B' AS model, * FROM ts_interval_width_by(
+    'model_b_intervals', product_id, lower, upper
+);
+```
+
+### Scenario 5: Custom Array-Based Pipeline
+
+**Goal:** Working with pre-aggregated array data in a custom pipeline.
+
+**Solution:** Use scalar functions directly.
+
+```sql
+-- Data already in array form
+WITH series_data AS (
+    SELECT
+        product_id,
+        list(actual ORDER BY date) AS actuals,
+        list(forecast ORDER BY date) AS forecasts,
+        list(actual - forecast ORDER BY date) AS residuals
+    FROM backtest_results
+    GROUP BY product_id
+)
+SELECT
+    product_id,
+    (ts_conformal_predict(residuals, forecasts, 0.1)).*
+FROM series_data;
+```
+
+---
+
+## Complete Workflow Example
+
+A full workflow from raw data to conformal intervals:
 
 ```sql
 -- Step 0: Detect seasonality (e.g., weekly = 7)
@@ -72,6 +228,8 @@ SELECT * FROM ts_conformal_apply_by(
 ---
 
 ## Table Macros
+
+> **When to use:** Table macros operate on tables directly and handle grouping automatically. Use these for standard forecasting workflows with tabular data.
 
 ### ts_conformal_by
 
@@ -225,9 +383,25 @@ SELECT * FROM ts_interval_width_by(
 
 ## Scalar Functions
 
-> Advanced functions for custom workflows. Most users should use the table macros above.
+Scalar functions operate on arrays and return scalar values or structs. They are the building blocks used internally by the table macros.
 
-### ts_conformal_quantile
+### When to Use Scalar Functions
+
+| Scenario | Recommended Functions |
+|----------|----------------------|
+| **Custom pipeline with array data** | `ts_conformal_predict`, `ts_conformal_predict_asymmetric` |
+| **Need just the quantile score** | `ts_conformal_quantile` |
+| **Apply pre-computed score to arrays** | `ts_conformal_intervals` |
+| **Evaluate interval quality** | `ts_conformal_coverage`, `ts_conformal_evaluate`, `ts_mean_interval_width` |
+| **Multi-level calibration profiles** | `ts_conformal_learn` |
+
+---
+
+### Calibration Functions
+
+These functions compute conformity scores from residuals.
+
+#### ts_conformal_quantile
 
 Computes the empirical quantile of absolute residuals for split conformal prediction.
 
@@ -250,7 +424,11 @@ SELECT ts_conformal_quantile(
 
 ---
 
-### ts_conformal_intervals
+### Prediction Functions
+
+These functions apply conformity scores to generate prediction intervals.
+
+#### ts_conformal_intervals
 
 Applies a pre-computed conformity score to create symmetric prediction intervals.
 
@@ -270,9 +448,9 @@ SELECT
 
 ---
 
-### ts_conformal_predict
+#### ts_conformal_predict
 
-Full split conformal prediction: computes conformity score and applies to forecasts.
+Full split conformal prediction: computes conformity score and applies to forecasts in one call.
 
 **Signature:**
 ```sql
@@ -302,7 +480,7 @@ FROM backtest_residuals, future_forecasts;
 
 ---
 
-### ts_conformal_predict_asymmetric
+#### ts_conformal_predict_asymmetric
 
 Asymmetric conformal prediction with separate upper and lower quantiles.
 
@@ -327,9 +505,13 @@ SELECT
 
 ---
 
-### ts_mean_interval_width
+### Evaluation Functions
 
-Computes the mean width of prediction intervals.
+These functions assess the quality of prediction intervals.
+
+#### ts_mean_interval_width
+
+Computes the mean width of prediction intervals. Narrower intervals are better (more precise) as long as coverage is maintained.
 
 **Signature:**
 ```sql
@@ -346,9 +528,9 @@ SELECT
 
 ---
 
-### ts_conformal_coverage
+#### ts_conformal_coverage
 
-Computes the empirical coverage of prediction intervals.
+Computes the empirical coverage of prediction intervals. Coverage should be close to `1 - alpha` (e.g., 90% for alpha=0.1).
 
 **Signature:**
 ```sql
@@ -369,9 +551,9 @@ SELECT ts_conformal_coverage(
 
 ---
 
-### ts_conformal_evaluate
+#### ts_conformal_evaluate
 
-Comprehensive evaluation of conformal prediction intervals.
+Comprehensive evaluation of conformal prediction intervals. Returns multiple metrics in one call.
 
 **Signature:**
 ```sql
@@ -399,9 +581,11 @@ SELECT (ts_conformal_evaluate(
 
 ---
 
-### ts_conformal_learn
+### Advanced Calibration
 
-Learn a calibration profile from residuals for advanced conformal prediction workflows.
+#### ts_conformal_learn
+
+Learn a calibration profile from residuals. Use this when you need multiple coverage levels or advanced calibration strategies.
 
 **Signature:**
 ```sql
