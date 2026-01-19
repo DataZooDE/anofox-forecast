@@ -2176,6 +2176,68 @@ FROM query_table(source::VARCHAR)
 GROUP BY group_col
 )"},
 
+    // ts_detect_peaks_by: Detect peaks for grouped series
+    // C++ API: ts_detect_peaks_by(table_name, group_col, date_col, value_col, params)
+    // params: min_distance, min_prominence, smooth_first
+    // Returns: TABLE(id, peaks STRUCT)
+    {"ts_detect_peaks_by", {"source", "group_col", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    group_col AS id,
+    ts_detect_peaks(
+        LIST(value_col::DOUBLE ORDER BY date_col),
+        COALESCE(params['min_distance']::DOUBLE, 1.0),
+        COALESCE(params['min_prominence']::DOUBLE, 0.0),
+        COALESCE(params['smooth_first']::BOOLEAN, false)
+    ) AS peaks
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)"},
+
+    // ts_detect_peaks: Detect peaks for a single series
+    // C++ API: ts_detect_peaks(table_name, date_col, value_col, params)
+    // params: min_distance, min_prominence, smooth_first
+    // Returns: TABLE(peaks STRUCT)
+    {"ts_detect_peaks", {"source", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    ts_detect_peaks(
+        LIST(value_col::DOUBLE ORDER BY date_col),
+        COALESCE(params['min_distance']::DOUBLE, 1.0),
+        COALESCE(params['min_prominence']::DOUBLE, 0.0),
+        COALESCE(params['smooth_first']::BOOLEAN, false)
+    ) AS peaks
+FROM query_table(source::VARCHAR)
+)"},
+
+    // ts_analyze_peak_timing_by: Analyze peak timing for grouped series
+    // C++ API: ts_analyze_peak_timing_by(table_name, group_col, date_col, value_col, period, params)
+    // Returns: TABLE(id, timing STRUCT)
+    {"ts_analyze_peak_timing_by", {"source", "group_col", "date_col", "value_col", "period", "params", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    group_col AS id,
+    ts_analyze_peak_timing(
+        LIST(value_col::DOUBLE ORDER BY date_col),
+        period::DOUBLE
+    ) AS timing
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)"},
+
+    // ts_analyze_peak_timing: Analyze peak timing for a single series
+    // C++ API: ts_analyze_peak_timing(table_name, date_col, value_col, period, params)
+    // Returns: TABLE(timing STRUCT)
+    {"ts_analyze_peak_timing", {"source", "date_col", "value_col", "period", "params", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT
+    ts_analyze_peak_timing(
+        LIST(value_col::DOUBLE ORDER BY date_col),
+        period::DOUBLE
+    ) AS timing
+FROM query_table(source::VARCHAR)
+)"},
+
     // ================================================================================
     // Metrics Table Macros
     // ================================================================================

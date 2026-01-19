@@ -62,21 +62,44 @@ ts_detect_periods_by(source, group_col, date_col, value_col, params) → TABLE(i
 **Params options:**
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `method` | VARCHAR | `'fft'` | Detection method: `'fft'` or `'acf'` |
+| `method` | VARCHAR | `'fft'` | Detection method (see table below) |
+
+**Supported Methods:**
+| Method | Aliases | Description | Best For |
+|--------|---------|-------------|----------|
+| `'fft'` | `'periodogram'` | FFT periodogram analysis (default) | Clean signals, fast |
+| `'acf'` | `'autocorrelation'` | Autocorrelation function | Cyclical patterns |
+| `'autoperiod'` | `'ap'` | FFT with ACF validation | General purpose, robust |
+| `'cfd'` | `'cfdautoperiod'` | First-differenced FFT + ACF | Trending data |
+| `'lombscargle'` | `'lomb_scargle'` | Lomb-Scargle periodogram | Irregular sampling |
+| `'aic'` | `'aic_comparison'` | AIC-based model selection | Model comparison |
+| `'ssa'` | `'singular_spectrum'` | Singular Spectrum Analysis | Complex patterns |
+| `'stl'` | `'stl_period'` | STL decomposition | Decomposition-based |
+| `'matrix_profile'` | `'matrixprofile'` | Matrix Profile motifs | Pattern repetition |
+| `'sazed'` | `'zero_padded'` | SAZED spectral analysis | High frequency resolution |
+| `'auto'` | — | Auto-select best method | Unknown characteristics |
+| `'multi'` | `'multiple'` | Multiple periods | Complex seasonality |
 
 **Returns:** TABLE with `id` and `periods` STRUCT containing detected periods.
 
 **Example:**
 ```sql
--- Detect periods for each product
+-- Detect periods for each product (default FFT method)
 SELECT
     id,
     (periods).primary_period,
     (periods).n_periods
 FROM ts_detect_periods_by('sales', product_id, date, value, MAP{});
 
--- With ACF method
-SELECT * FROM ts_detect_periods_by('sales', product_id, date, value, {'method': 'acf'});
+-- With different methods
+SELECT * FROM ts_detect_periods_by('sales', product_id, date, value,
+    MAP{'method': 'autoperiod'});  -- Robust FFT + ACF validation
+
+SELECT * FROM ts_detect_periods_by('sales', product_id, date, value,
+    MAP{'method': 'stl'});  -- STL decomposition-based
+
+SELECT * FROM ts_detect_periods_by('sales', product_id, date, value,
+    MAP{'method': 'auto'});  -- Auto-select best method
 ```
 
 ---
@@ -101,7 +124,7 @@ ts_detect_periods(source, date_col, value_col, params) → TABLE(periods)
 **Params options:**
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `method` | VARCHAR | `'fft'` | Detection method: `'fft'` or `'acf'` |
+| `method` | VARCHAR | `'fft'` | Detection method (see supported methods above) |
 
 **Returns:** TABLE with `periods` STRUCT containing detected periods.
 
@@ -112,8 +135,9 @@ SELECT
     (periods).n_periods
 FROM ts_detect_periods('daily_sales', date, value, MAP{});
 
--- With ACF method
-SELECT * FROM ts_detect_periods('daily_sales', date, value, {'method': 'acf'});
+-- With different methods
+SELECT * FROM ts_detect_periods('daily_sales', date, value, MAP{'method': 'autoperiod'});
+SELECT * FROM ts_detect_periods('daily_sales', date, value, MAP{'method': 'auto'});
 ```
 
 ---
@@ -197,11 +221,14 @@ STRUCT(
 
 ---
 
-## Individual Period Detection Methods
+## Internal: Period Detection Scalar Functions
+
+> **Note:** These scalar functions are internal and used by the table macros above.
+> For typical usage, prefer `ts_detect_periods_by` or `ts_detect_periods_agg` with the `method` parameter.
 
 The extension provides 11 specialized period detection algorithms, each optimized for different data characteristics.
 
-### Method Comparison
+### Method Reference
 
 | Function | Speed | Noise Robustness | Best Use Case | Min Observations |
 |----------|-------|------------------|---------------|------------------|
@@ -757,74 +784,299 @@ FROM (SELECT LIST(value ORDER BY date) AS values FROM trending_data);
 
 ---
 
-## Advanced: Peak Detection
+## Peak Detection
 
-> **Note:** These functions detect peaks and analyze timing patterns.
+Peak detection identifies local maxima in time series data, useful for finding seasonal highs, demand spikes, or cyclical patterns.
 
-### ts_detect_peaks
+### ts_detect_peaks_by
 
-Detect peaks in time series with prominence analysis.
+Detect peaks for multiple series grouped by an identifier.
 
 **Signature:**
 ```sql
-ts_detect_peaks(values DOUBLE[]) → STRUCT
-ts_detect_peaks(values DOUBLE[], min_distance DOUBLE) → STRUCT
-ts_detect_peaks(values DOUBLE[], min_distance DOUBLE, min_prominence DOUBLE) → STRUCT
-ts_detect_peaks(values DOUBLE[], min_distance DOUBLE, min_prominence DOUBLE, smooth_first BOOLEAN) → STRUCT
+ts_detect_peaks_by(source, group_col, date_col, value_col, params) → TABLE(id, peaks)
 ```
 
 **Parameters:**
-- `values`: Time series data
-- `min_distance`: Minimum distance between peaks (default: auto)
-- `min_prominence`: Minimum peak prominence threshold (default: 0)
-- `smooth_first`: Apply smoothing before detection (default: false)
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Source table name |
+| `group_col` | COLUMN | Series identifier column |
+| `date_col` | COLUMN | Date/timestamp column |
+| `value_col` | COLUMN | Value column |
+| `params` | MAP | Configuration options |
+
+**Params options:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `min_distance` | DOUBLE | `1.0` | Minimum distance between peaks |
+| `min_prominence` | DOUBLE | `0.0` | Minimum peak prominence threshold |
+| `smooth_first` | BOOLEAN | `false` | Apply smoothing before detection |
 
 **Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | (same as group_col) | Series identifier |
+| `peaks` | STRUCT | Peak detection results |
+
+**Peaks STRUCT fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `peaks` | STRUCT[] | Array of peak info (index, time, value, prominence) |
+| `n_peaks` | BIGINT | Number of peaks detected |
+| `inter_peak_distances` | DOUBLE[] | Distances between consecutive peaks |
+| `mean_period` | DOUBLE | Mean distance between peaks |
+
+**Example:**
 ```sql
-STRUCT(
-    peaks       STRUCT(index BIGINT, time DOUBLE, value DOUBLE, prominence DOUBLE)[],
-    n_peaks     BIGINT,          -- Number of peaks detected
-    inter_peak_distances DOUBLE[], -- Distances between consecutive peaks
-    mean_period DOUBLE           -- Mean distance between peaks
-)
+-- Detect peaks for each product
+SELECT
+    id,
+    (peaks).n_peaks,
+    (peaks).mean_period
+FROM ts_detect_peaks_by('sales', product_id, date, value, MAP{});
+
+-- With custom parameters (higher prominence threshold)
+SELECT * FROM ts_detect_peaks_by(
+    'sales', product_id, date, value,
+    MAP{'min_distance': '3', 'min_prominence': '10.0'}
+);
 ```
+
+---
+
+### ts_detect_peaks
+
+Detect peaks for a single series.
+
+**Signature:**
+```sql
+ts_detect_peaks(source, date_col, value_col, params) → TABLE(peaks)
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Source table name |
+| `date_col` | COLUMN | Date/timestamp column |
+| `value_col` | COLUMN | Value column |
+| `params` | MAP | Configuration options (same as `_by` version) |
 
 **Example:**
 ```sql
 SELECT
-    (ts_detect_peaks(values, 2.0, 1.0, false)).n_peaks,
-    (ts_detect_peaks(values, 2.0, 1.0, false)).mean_period
-FROM (SELECT LIST(value ORDER BY date) AS values FROM daily_sales);
+    (peaks).n_peaks,
+    (peaks).mean_period
+FROM ts_detect_peaks('daily_sales', date, value, MAP{});
+```
+
+---
+
+### ts_analyze_peak_timing_by
+
+Analyze peak timing regularity for multiple series. Determines if peaks occur at consistent times within each period.
+
+**Signature:**
+```sql
+ts_analyze_peak_timing_by(source, group_col, date_col, value_col, period, params) → TABLE(id, timing)
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Source table name |
+| `group_col` | COLUMN | Series identifier column |
+| `date_col` | COLUMN | Date/timestamp column |
+| `value_col` | COLUMN | Value column |
+| `period` | DOUBLE | Expected seasonal period |
+| `params` | MAP | Configuration options (reserved) |
+
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | (same as group_col) | Series identifier |
+| `timing` | STRUCT | Peak timing analysis |
+
+**Timing STRUCT fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `n_peaks` | BIGINT | Number of peaks detected |
+| `peak_times` | DOUBLE[] | Timing of each peak within period |
+| `variability_score` | DOUBLE | Timing variability (lower = more regular) |
+| `is_stable` | BOOLEAN | True if peak timing is consistent |
+
+**Example:**
+```sql
+-- Analyze weekly peak timing for each product
+SELECT
+    id,
+    (timing).is_stable,
+    (timing).variability_score
+FROM ts_analyze_peak_timing_by('sales', product_id, date, value, 7.0, MAP{});
+
+-- Find products with stable weekly patterns
+SELECT id
+FROM ts_analyze_peak_timing_by('sales', product_id, date, value, 7.0, MAP{})
+WHERE (timing).is_stable;
 ```
 
 ---
 
 ### ts_analyze_peak_timing
 
-Analyze peak timing regularity within expected period.
+Analyze peak timing regularity for a single series.
 
 **Signature:**
 ```sql
-ts_analyze_peak_timing(values DOUBLE[], period DOUBLE) → STRUCT
-```
-
-**Returns:**
-```sql
-STRUCT(
-    n_peaks           BIGINT,      -- Number of peaks detected
-    peak_times        DOUBLE[],    -- Timing of each peak
-    variability_score DOUBLE,      -- Timing variability (lower = more regular)
-    is_stable         BOOLEAN      -- True if timing is regular
-)
+ts_analyze_peak_timing(source, date_col, value_col, period, params) → TABLE(timing)
 ```
 
 **Example:**
 ```sql
 -- Check if weekly peaks occur at consistent times
 SELECT
-    (ts_analyze_peak_timing(values, 7.0)).is_stable,
-    (ts_analyze_peak_timing(values, 7.0)).variability_score
-FROM (SELECT LIST(value ORDER BY date) AS values FROM weekly_data);
+    (timing).is_stable,
+    (timing).variability_score
+FROM ts_analyze_peak_timing('daily_sales', date, value, 7.0, MAP{});
+```
+
+---
+
+## What You Can Do with Seasonality Analysis
+
+Seasonality analysis helps you understand, validate, and leverage periodic patterns in your data. Here's a practical guide:
+
+### 1. Detect Seasonal Periods
+
+Before forecasting, identify what periods exist in your data:
+
+```sql
+-- Detect periods for multiple products
+SELECT
+    id,
+    (periods).primary_period,      -- Dominant period (e.g., 7 = weekly)
+    (periods).n_periods            -- Number of significant periods found
+FROM ts_detect_periods_by('sales', product_id, date, value, MAP{});
+
+-- Common periods: 7 (weekly), 12 (monthly), 52 (yearly for weekly data), 365 (yearly for daily data)
+```
+
+### 2. Validate Seasonality Strength
+
+Not all detected periods are meaningful. Validate before using:
+
+```sql
+-- Check if seasonality is strong enough to model
+SELECT
+    id,
+    (classification).is_seasonal,         -- Is there significant seasonality?
+    (classification).seasonal_strength    -- 0-1 scale (>0.3 typically meaningful)
+FROM ts_classify_seasonality_by('sales', product_id, date, value, 7.0)
+WHERE (classification).is_seasonal;
+```
+
+### 3. Understand Seasonal Behavior
+
+Classify how seasonality manifests:
+
+```sql
+SELECT
+    id,
+    (classification).timing_classification,  -- 'early', 'on_time', 'late', 'variable'
+    (classification).modulation_type,        -- 'stable', 'growing', 'shrinking', 'variable'
+    (classification).has_stable_timing       -- Consistent peak timing?
+FROM ts_classify_seasonality_by('sales', product_id, date, value, 7.0);
+```
+
+### 4. Detect Peak Patterns
+
+Find when peaks occur and how regular they are:
+
+```sql
+-- Find peak timing regularity
+SELECT
+    id,
+    (timing).n_peaks,              -- How many peaks per series
+    (timing).is_stable,            -- Are peaks at regular intervals?
+    (timing).variability_score     -- Lower = more regular
+FROM ts_analyze_peak_timing_by('sales', product_id, date, value, 7.0, MAP{});
+```
+
+### 5. Decompose Series
+
+Separate trend, seasonal, and residual components:
+
+```sql
+-- MSTL decomposition with multiple seasonal periods
+SELECT * FROM ts_mstl_decomposition_by(
+    'sales', product_id, date, value,
+    [7, 365],    -- Weekly and yearly patterns
+    MAP{}
+);
+```
+
+### 6. Complete Workflow: Detect → Validate → Forecast
+
+```sql
+-- Step 1: Detect periods
+WITH detected AS (
+    SELECT id, (periods).primary_period AS period
+    FROM ts_detect_periods_by('sales', product_id, date, value, MAP{})
+),
+-- Step 2: Validate seasonality strength
+validated AS (
+    SELECT id, period
+    FROM detected d
+    JOIN (
+        SELECT id, (classification).seasonal_strength AS strength
+        FROM ts_classify_seasonality_by('sales', product_id, date, value, 7.0)
+    ) c USING (id)
+    WHERE strength > 0.3
+)
+-- Step 3: Forecast with validated period
+SELECT * FROM ts_forecast_by(
+    'sales', product_id, date, value,
+    'HoltWinters', 14,
+    MAP{'seasonal_period': '7'}  -- Use validated period
+);
+```
+
+### Use Case Summary
+
+| Goal | Function | Key Output |
+|------|----------|------------|
+| Find what periods exist | `ts_detect_periods_by` | `primary_period` |
+| Check if seasonality is real | `ts_classify_seasonality_by` | `is_seasonal`, `seasonal_strength` |
+| Understand seasonal behavior | `ts_classify_seasonality_by` | `timing_classification`, `modulation_type` |
+| Find peak timing patterns | `ts_analyze_peak_timing_by` | `is_stable`, `variability_score` |
+| Separate components | `ts_mstl_decomposition_by` | trend, seasonal, remainder |
+
+---
+
+## Internal Scalar Functions
+
+> **Note:** The following scalar functions are internal and used by the table macros above.
+> For typical usage, prefer the table macros or aggregate functions.
+
+### _ts_detect_peaks
+
+Detect peaks in time series with prominence analysis (internal).
+
+**Signature:**
+```sql
+_ts_detect_peaks(values DOUBLE[]) → STRUCT
+_ts_detect_peaks(values DOUBLE[], min_distance DOUBLE) → STRUCT
+_ts_detect_peaks(values DOUBLE[], min_distance DOUBLE, min_prominence DOUBLE) → STRUCT
+_ts_detect_peaks(values DOUBLE[], min_distance DOUBLE, min_prominence DOUBLE, smooth_first BOOLEAN) → STRUCT
+```
+
+### _ts_analyze_peak_timing
+
+Analyze peak timing regularity (internal).
+
+**Signature:**
+```sql
+_ts_analyze_peak_timing(values DOUBLE[], period DOUBLE) → STRUCT
 ```
 
 ---
