@@ -154,8 +154,8 @@ The following table shows which API variants exist for each functionality:
 *Internal scalar functions (underscore prefix) - implementation details for table macros
 †12 metric functions - see [Evaluation Metrics](07-evaluation-metrics.md)
 ‡9 conformal scalar functions - see [Conformal Prediction](11-conformal-prediction.md)
-§15+ data preparation macros - see [Data Preparation](03-data-preparation.md)
-¶8+ cross-validation macros - see [Cross-Validation](06-cross-validation.md)
+§15+ data preparation macros - see [Data Preparation](04-data-preparation.md)
+¶8+ cross-validation macros - see [Cross-Validation](08-cross-validation.md)
 
 ### API Design Rationale
 

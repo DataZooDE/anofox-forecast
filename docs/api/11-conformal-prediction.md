@@ -641,4 +641,4 @@ SELECT ts_conformal_learn(
 
 ---
 
-*See also: [Cross-Validation](06-cross-validation.md) | [Evaluation Metrics](07-evaluation-metrics.md)*
+*See also: [Cross-Validation](08-cross-validation.md) | [Evaluation Metrics](09-evaluation-metrics.md)*

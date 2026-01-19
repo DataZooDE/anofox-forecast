@@ -332,4 +332,4 @@ SELECT ts_features_config_from_json('config.json');
 
 ---
 
-*See also: [Statistics](02-statistics.md) | [Changepoint Detection](09-changepoint-detection.md)*
+*See also: [Statistics](03-statistics.md) | [Changepoint Detection](06-changepoint-detection.md)*

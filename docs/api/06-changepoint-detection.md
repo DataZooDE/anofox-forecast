@@ -256,4 +256,4 @@ FROM (
 
 ---
 
-*See also: [Statistics](02-statistics.md) | [Feature Extraction](08-feature-extraction.md)*
+*See also: [Statistics](03-statistics.md) | [Feature Extraction](20-feature-extraction.md)*

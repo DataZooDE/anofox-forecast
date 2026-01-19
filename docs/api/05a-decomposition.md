@@ -170,4 +170,4 @@ GROUP BY product_id;
 
 ---
 
-*See also: [Period Detection](04-period-detection.md) | [Peak Detection](04b-peak-detection.md) | [Internal Reference](04c-internal-period-functions.md)*
+*See also: [Period Detection](05-period-detection.md) | [Peak Detection](05b-peak-detection.md) | [Internal Reference](05c-internal-period-functions.md)*

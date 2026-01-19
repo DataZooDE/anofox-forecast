@@ -404,4 +404,4 @@ FROM backtest_results;
 
 ---
 
-*See also: [Cross-Validation](06-cross-validation.md) | [Conformal Prediction](11-conformal-prediction.md)*
+*See also: [Cross-Validation](08-cross-validation.md) | [Conformal Prediction](11-conformal-prediction.md)*

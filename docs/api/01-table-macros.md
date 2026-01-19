@@ -47,15 +47,16 @@ SELECT * FROM ts_backtest_auto('sales', id, date, value, 7, 3, '1d',
 
 | Category | Functions |
 |----------|-----------|
-| [Statistics](02-statistics.md) | `ts_stats`, `ts_quality_report`, `ts_data_quality` |
-| [Data Preparation](03-data-preparation.md) | `ts_drop_*`, `ts_fill_*`, `ts_diff` |
-| [Period Detection](04-period-detection.md) | `ts_detect_periods_by`, `ts_detect_peaks_by`, `ts_analyze_peak_timing_by` |
-| [Decomposition](04a-decomposition.md) | `ts_mstl_decomposition_by`, `ts_classify_seasonality_by` |
-| [Forecasting](05-forecasting.md) | `ts_forecast`, `ts_forecast_by`, `ts_forecast_exog` |
-| [Cross-Validation](06-cross-validation.md) | `ts_backtest_auto_by`, `ts_cv_split_by`, `ts_cv_forecast_by` |
-| [Evaluation Metrics](07-evaluation-metrics.md) | `ts_mae_by`, `ts_rmse_by`, `ts_coverage_by`, ... |
-| [Changepoint Detection](09-changepoint-detection.md) | `ts_detect_changepoints`, `ts_detect_changepoints_by` |
-| [Hierarchical](10-hierarchical.md) | `ts_combine_keys`, `ts_aggregate_hierarchy` |
+| [Hierarchical](02-hierarchical.md) | `ts_combine_keys`, `ts_aggregate_hierarchy` |
+| [Statistics](03-statistics.md) | `ts_stats`, `ts_quality_report`, `ts_data_quality` |
+| [Data Preparation](04-data-preparation.md) | `ts_drop_*`, `ts_fill_*`, `ts_diff` |
+| [Period Detection](05-period-detection.md) | `ts_detect_periods_by`, `ts_detect_peaks_by`, `ts_analyze_peak_timing_by` |
+| [Decomposition](05a-decomposition.md) | `ts_mstl_decomposition_by`, `ts_classify_seasonality_by` |
+| [Changepoint Detection](06-changepoint-detection.md) | `ts_detect_changepoints`, `ts_detect_changepoints_by` |
+| [Forecasting](07-forecasting.md) | `ts_forecast`, `ts_forecast_by`, `ts_forecast_exog` |
+| [Cross-Validation](08-cross-validation.md) | `ts_backtest_auto_by`, `ts_cv_split_by`, `ts_cv_forecast_by` |
+| [Evaluation Metrics](09-evaluation-metrics.md) | `ts_mae_by`, `ts_rmse_by`, `ts_coverage_by`, ... |
+| [Feature Extraction](20-feature-extraction.md) | `ts_features_by`, `ts_features_table` |
 | [Conformal Prediction](11-conformal-prediction.md) | `ts_conformal`, `ts_conformal_calibrate` |
 
 ## Function Naming Conventions

@@ -244,4 +244,4 @@ ORDER BY region_id, store_id, item_id, forecast_date;
 
 ---
 
-*See also: [Forecasting](05-forecasting.md) | [Cross-Validation](06-cross-validation.md)*
+*See also: [Forecasting](07-forecasting.md) | [Cross-Validation](08-cross-validation.md)*

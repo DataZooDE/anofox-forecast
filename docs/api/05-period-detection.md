@@ -307,4 +307,4 @@ SELECT * FROM ts_forecast_by(
 
 ---
 
-*See also: [Decomposition](04a-decomposition.md) | [Peak Detection](04b-peak-detection.md) | [Internal Reference](04c-internal-period-functions.md)*
+*See also: [Decomposition](05a-decomposition.md) | [Peak Detection](05b-peak-detection.md) | [Internal Reference](05c-internal-period-functions.md)*

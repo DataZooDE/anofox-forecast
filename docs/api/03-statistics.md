@@ -408,4 +408,4 @@ STRUCT(
 
 ---
 
-*See also: [Table Macros](01-table-macros.md) | [Data Preparation](03-data-preparation.md)*
+*See also: [Table Macros](01-table-macros.md) | [Data Preparation](04-data-preparation.md)*

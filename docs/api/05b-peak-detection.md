@@ -199,4 +199,4 @@ _ts_analyze_peak_timing(values DOUBLE[], period DOUBLE) → STRUCT
 
 ---
 
-*See also: [Period Detection](04-period-detection.md) | [Decomposition](04a-decomposition.md) | [Internal Reference](04c-internal-period-functions.md)*
+*See also: [Period Detection](05-period-detection.md) | [Decomposition](05a-decomposition.md) | [Internal Reference](05c-internal-period-functions.md)*

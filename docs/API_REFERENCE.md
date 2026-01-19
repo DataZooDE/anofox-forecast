@@ -95,17 +95,17 @@ Both forms are identical in functionality.
 |----------|-------------|---------------|
 | **API Design Guide** | Naming conventions and patterns | [00-api-design.md](api/00-api-design.md) |
 | **Table Macros** | High-level API overview | [01-table-macros.md](api/01-table-macros.md) |
-| **Statistics** | Time series statistics and data quality | [02-statistics.md](api/02-statistics.md) |
-| **Data Preparation** | Filtering, cleaning, imputation | [03-data-preparation.md](api/03-data-preparation.md) |
-| **Period Detection** | Period detection and seasonality | [04-period-detection.md](api/04-period-detection.md) |
-| **Decomposition** | Seasonal decomposition and classification | [04a-decomposition.md](api/04a-decomposition.md) |
-| **Peak Detection** | Peak detection and timing analysis | [04b-peak-detection.md](api/04b-peak-detection.md) |
-| **Forecasting** | 32 forecasting models | [05-forecasting.md](api/05-forecasting.md) |
-| **Cross-Validation** | Backtesting and CV functions | [06-cross-validation.md](api/06-cross-validation.md) |
-| **Evaluation Metrics** | Forecast accuracy metrics | [07-evaluation-metrics.md](api/07-evaluation-metrics.md) |
-| **Feature Extraction** | 117 tsfresh-compatible features | [08-feature-extraction.md](api/08-feature-extraction.md) |
-| **Changepoint Detection** | Structural break detection | [09-changepoint-detection.md](api/09-changepoint-detection.md) |
-| **Hierarchical** | Multi-key hierarchy functions | [10-hierarchical.md](api/10-hierarchical.md) |
+| **Hierarchical** | Multi-key hierarchy functions | [02-hierarchical.md](api/02-hierarchical.md) |
+| **Statistics** | Time series statistics and data quality | [03-statistics.md](api/03-statistics.md) |
+| **Data Preparation** | Filtering, cleaning, imputation | [04-data-preparation.md](api/04-data-preparation.md) |
+| **Period Detection** | Period detection and seasonality | [05-period-detection.md](api/05-period-detection.md) |
+| **Decomposition** | Seasonal decomposition and classification | [05a-decomposition.md](api/05a-decomposition.md) |
+| **Peak Detection** | Peak detection and timing analysis | [05b-peak-detection.md](api/05b-peak-detection.md) |
+| **Changepoint Detection** | Structural break detection | [06-changepoint-detection.md](api/06-changepoint-detection.md) |
+| **Forecasting** | 32 forecasting models | [07-forecasting.md](api/07-forecasting.md) |
+| **Cross-Validation** | Backtesting and CV functions | [08-cross-validation.md](api/08-cross-validation.md) |
+| **Evaluation Metrics** | Forecast accuracy metrics | [09-evaluation-metrics.md](api/09-evaluation-metrics.md) |
+| **Feature Extraction** | 117 tsfresh-compatible features | [20-feature-extraction.md](api/20-feature-extraction.md) |
 | **Conformal Prediction** | Distribution-free prediction intervals | [11-conformal-prediction.md](api/11-conformal-prediction.md) |
 
 ---

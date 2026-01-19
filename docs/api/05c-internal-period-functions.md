@@ -391,4 +391,4 @@ ts_detect_amplitude_modulation(values DOUBLE[], period DOUBLE) → STRUCT
 
 ---
 
-*See also: [Period Detection](04-period-detection.md) | [Decomposition](04a-decomposition.md) | [Peak Detection](04b-peak-detection.md)*
+*See also: [Period Detection](05-period-detection.md) | [Decomposition](05a-decomposition.md) | [Peak Detection](05b-peak-detection.md)*

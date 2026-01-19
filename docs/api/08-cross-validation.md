@@ -551,4 +551,4 @@ SELECT * FROM ts_prepare_regression_input_by(
 
 ---
 
-*See also: [Forecasting](05-forecasting.md) | [Evaluation Metrics](07-evaluation-metrics.md)*
+*See also: [Forecasting](07-forecasting.md) | [Evaluation Metrics](09-evaluation-metrics.md)*

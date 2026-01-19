@@ -507,4 +507,4 @@ SELECT * FROM ts_validate_timestamps_summary_by(
 
 ---
 
-*See also: [Statistics](02-statistics.md) | [Forecasting](05-forecasting.md)*
+*See also: [Statistics](03-statistics.md) | [Forecasting](07-forecasting.md)*
