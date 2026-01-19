@@ -60,7 +60,7 @@ SELECT * FROM ts_backtest_auto(
     7,              -- horizon: forecast 7 periods ahead
     5,              -- folds: 5 CV splits
     '1d',           -- frequency: daily data
-    MAP{'method': 'AutoETS'}
+    {'method': 'AutoETS'}
 );
 ```
 
@@ -191,13 +191,13 @@ ORDER BY avg_mae DESC;
 -- Compare multiple models
 WITH comparisons AS (
     SELECT 'AutoETS' AS model, * FROM ts_backtest_auto(
-        'sales', id, date, val, 7, 3, '1d', MAP{'method': 'AutoETS'})
+        'sales', id, date, val, 7, 3, '1d', {'method': 'AutoETS'})
     UNION ALL
     SELECT 'Theta' AS model, * FROM ts_backtest_auto(
-        'sales', id, date, val, 7, 3, '1d', MAP{'method': 'Theta'})
+        'sales', id, date, val, 7, 3, '1d', {'method': 'Theta'})
     UNION ALL
     SELECT 'Naive' AS model, * FROM ts_backtest_auto(
-        'sales', id, date, val, 7, 3, '1d', MAP{'method': 'Naive'})
+        'sales', id, date, val, 7, 3, '1d', {'method': 'Naive'})
 )
 SELECT
     model,

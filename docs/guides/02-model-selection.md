@@ -50,7 +50,7 @@ SELECT * FROM ts_forecast_by('sales', id, date, val, 'Naive', 12);
 
 -- Seasonal Naive: repeats last seasonal cycle
 SELECT * FROM ts_forecast_by('sales', id, date, val, 'SeasonalNaive', 12,
-    MAP{'seasonal_period': '7'});
+    {'seasonal_period': 7});
 ```
 
 ### Exponential Smoothing
@@ -66,7 +66,7 @@ SELECT * FROM ts_forecast_by('sales', id, date, val, 'Holt', 12);
 
 -- Holt-Winters (trend + seasonality)
 SELECT * FROM ts_forecast_by('sales', id, date, val, 'HoltWinters', 12,
-    MAP{'seasonal_period': '7'});
+    {'seasonal_period': 7});
 ```
 
 ### Automatic Models
@@ -91,11 +91,11 @@ For data with complex patterns (e.g., hourly data with daily and weekly cycles):
 ```sql
 -- MSTL handles multiple seasonal periods
 SELECT * FROM ts_forecast_by('sales', id, date, val, 'MSTL', 24,
-    MAP{'seasonal_periods': '[24, 168]'});  -- daily (24h) and weekly (168h)
+    {'seasonal_periods': '[24, 168]'});  -- daily (24h) and weekly (168h)
 
 -- MFLES is faster for high-frequency data
 SELECT * FROM ts_forecast_by('sales', id, date, val, 'MFLES', 24,
-    MAP{'seasonal_periods': '[24, 168]'});
+    {'seasonal_periods': '[24, 168]'});
 ```
 
 ### Intermittent Demand
@@ -118,13 +118,13 @@ Always compare multiple models using cross-validation:
 -- Compare different models using backtest
 WITH model_comparison AS (
     SELECT 'AutoETS' AS model_tested, * FROM ts_backtest_auto(
-        'sales', id, date, val, 7, 3, '1d', MAP{'method': 'AutoETS'})
+        'sales', id, date, val, 7, 3, '1d', {'method': 'AutoETS'})
     UNION ALL
     SELECT 'Theta' AS model_tested, * FROM ts_backtest_auto(
-        'sales', id, date, val, 7, 3, '1d', MAP{'method': 'Theta'})
+        'sales', id, date, val, 7, 3, '1d', {'method': 'Theta'})
     UNION ALL
     SELECT 'Naive' AS model_tested, * FROM ts_backtest_auto(
-        'sales', id, date, val, 7, 3, '1d', MAP{'method': 'Naive'})
+        'sales', id, date, val, 7, 3, '1d', {'method': 'Naive'})
 )
 SELECT
     model_tested,

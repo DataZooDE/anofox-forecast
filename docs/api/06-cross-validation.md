@@ -176,7 +176,7 @@ SELECT * FROM ts_backtest_auto_by(
 -- Different metric
 SELECT * FROM ts_backtest_auto_by(
     'sales_data', store_id, date, revenue, 7, 5, '1d',
-    MAP{'method': 'Theta'},
+    {'method': 'Theta'},
     NULL, 'smape'
 );
 ```
@@ -385,7 +385,7 @@ SELECT * FROM ts_hydrate_split_by(
     region,
     date,
     temperature,
-    MAP{'strategy': 'last_value'}
+    {'strategy': 'last_value'}
 ) WHERE fold_id = 1;
 ```
 

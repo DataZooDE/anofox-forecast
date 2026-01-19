@@ -390,7 +390,7 @@ ts_fill_unknown_by(
 -- Fill unknown temperatures with last known value
 SELECT * FROM ts_fill_unknown_by(
     'weather_data', region, date, temperature, '2024-06-01'::DATE,
-    MAP{'strategy': 'last_value'}
+    {'strategy': 'last_value'}
 );
 ```
 

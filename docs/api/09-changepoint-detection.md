@@ -19,7 +19,7 @@ SELECT * FROM ts_detect_changepoints_by(
     product_id,
     date,
     value,
-    MAP{'hazard_lambda': '100'}
+    {'hazard_lambda': 100}
 );
 ```
 
@@ -64,7 +64,7 @@ SELECT * FROM ts_detect_changepoints_by(
     product_id,
     date,
     value,
-    MAP{'hazard_lambda': '100'}
+    {'hazard_lambda': 100}
 );
 ```
 

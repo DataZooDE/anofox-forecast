@@ -28,7 +28,7 @@ SELECT * FROM ts_conformal_by(
     actual,
     forecast,
     forecast,
-    MAP{'alpha': 0.1}  -- 90% coverage
+    {'alpha': 0.1}  -- 90% coverage
 );
 ```
 
@@ -46,7 +46,7 @@ SELECT * FROM ts_backtest_auto_by(
 -- Step 2: Calibrate conformity score
 CREATE TABLE calibration AS
 SELECT * FROM ts_conformal_calibrate(
-    'backtest', actual, forecast, MAP{'alpha': 0.1}
+    'backtest', actual, forecast, {'alpha': 0.1}
 );
 
 -- Step 3: Generate future forecasts
@@ -89,7 +89,7 @@ SELECT * FROM ts_conformal_by(
     actual,
     forecast,
     point_forecast,
-    MAP{'alpha': 0.1, 'method': 'split'}
+    {'alpha': 0.1, 'method': 'split'}
 );
 ```
 
@@ -112,7 +112,7 @@ SELECT * FROM ts_conformal_calibrate(
     'backtest_results',
     actual,
     forecast,
-    MAP{'alpha': 0.05}
+    {'alpha': 0.05}
 );
 ```
 
@@ -131,7 +131,7 @@ ts_conformal_apply_by(forecast_results, group_col, forecast_col, conformity_scor
 ```sql
 WITH score AS (
     SELECT conformity_score FROM ts_conformal_calibrate(
-        'backtest', actual, forecast, MAP{'alpha': 0.1}
+        'backtest', actual, forecast, {'alpha': 0.1}
     )
 )
 SELECT * FROM ts_conformal_apply_by(

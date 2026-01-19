@@ -22,7 +22,7 @@ SELECT * FROM ts_aggregate_hierarchy('raw_sales', sale_date, quantity,
 -- Step 3: Forecast all series (original + aggregated)
 CREATE TABLE forecasts AS
 SELECT * FROM ts_forecast_by('prepared_data', unique_id, date_col, value_col,
-    'AutoETS', 28, MAP{'seasonal_period': '7'});
+    'AutoETS', 28, {'seasonal_period': 7});
 
 -- Step 4: Split keys for analysis
 SELECT id_part_1 AS region_id, id_part_2 AS store_id, id_part_3 AS item_id,
@@ -105,7 +105,7 @@ SELECT * FROM ts_combine_keys('sales', sale_date, quantity, region_id, store_id,
 
 -- Custom separator
 SELECT * FROM ts_combine_keys('sales', sale_date, quantity, region_id, store_id,
-    params := MAP{'separator': '-'});
+    params := {'separator': '-'});
 ```
 
 ---
@@ -163,7 +163,7 @@ GROUP BY 1;
 SELECT DISTINCT unique_id
 FROM ts_aggregate_hierarchy('sales', sale_date, quantity,
     region_id, store_id, item_id,
-    params := MAP{'aggregate_keyword': 'TOTAL'})
+    params := {'aggregate_keyword': 'TOTAL'})
 WHERE unique_id LIKE '%TOTAL%';
 ```
 
@@ -222,7 +222,7 @@ SELECT * FROM ts_aggregate_hierarchy('raw_sales', sale_date, quantity,
 -- Step 3: Forecast all series (original + aggregated)
 CREATE TABLE forecasts AS
 SELECT * FROM ts_forecast_by('prepared_data', unique_id, date_col, value_col,
-    'AutoETS', 28, MAP{'seasonal_period': '7'});
+    'AutoETS', 28, {'seasonal_period': 7});
 
 -- Step 4: Split keys for analysis
 SELECT
