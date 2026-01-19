@@ -197,22 +197,6 @@ SELECT * FROM ts_forecast_by(
 
 ## Table Macros
 
-### ts_forecast
-
-Generate forecasts for a single series.
-
-**Signature:**
-```sql
-ts_forecast(table_name, date_col, target_col, method, horizon, params) → TABLE
-```
-
-**Example:**
-```sql
-SELECT * FROM ts_forecast('sales', date, amount, 'Naive', 12, MAP{});
-```
-
----
-
 ### ts_forecast_by
 
 Generate forecasts for multiple time series grouped by an identifier. This is the **primary forecasting function**.
@@ -259,6 +243,22 @@ SELECT * FROM ts_forecast_by('sales', id, date, val, 'MSTL', 30,
 
 -- Naive baseline (no seasonal_period needed)
 SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'Naive', 12, MAP{});
+```
+
+---
+
+### ts_forecast
+
+Generate forecasts for a single series.
+
+**Signature:**
+```sql
+ts_forecast(table_name, date_col, target_col, method, horizon, params) → TABLE
+```
+
+**Example:**
+```sql
+SELECT * FROM ts_forecast('sales', date, amount, 'Naive', 12, MAP{});
 ```
 
 ---
