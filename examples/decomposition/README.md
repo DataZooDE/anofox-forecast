@@ -72,7 +72,7 @@ FROM my_series;
 
 ```sql
 -- Automatic multi-seasonal decomposition
-SELECT _ts_mstl_decomposition(LIST(value ORDER BY ts)) AS result
+SELECT _ts_mstl_decomposition_by(LIST(value ORDER BY ts)) AS result
 FROM my_series;
 -- Returns: {trend, seasonal[][], remainder, periods}
 ```
@@ -87,7 +87,7 @@ FROM my_series;
 
 ```sql
 SELECT id, decomposition
-FROM ts_mstl_decomposition('my_table', group_col, date_col, value_col, MAP{})
+FROM ts_mstl_decomposition_by('my_table', group_col, date_col, value_col, MAP{})
 ORDER BY id;
 ```
 

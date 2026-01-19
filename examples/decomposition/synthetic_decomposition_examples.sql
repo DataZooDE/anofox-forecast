@@ -101,9 +101,9 @@ FROM multi_seasonal;
 .print ''
 .print 'MSTL decomposition result:'
 SELECT
-    length((_ts_mstl_decomposition(LIST(value ORDER BY i))).trend) AS trend_length,
-    length((_ts_mstl_decomposition(LIST(value ORDER BY i))).remainder) AS remainder_length,
-    (_ts_mstl_decomposition(LIST(value ORDER BY i))).periods AS detected_periods
+    length((_ts_mstl_decomposition_by(LIST(value ORDER BY i))).trend) AS trend_length,
+    length((_ts_mstl_decomposition_by(LIST(value ORDER BY i))).remainder) AS remainder_length,
+    (_ts_mstl_decomposition_by(LIST(value ORDER BY i))).periods AS detected_periods
 FROM multi_seasonal;
 
 -- =============================================================================
@@ -143,7 +143,7 @@ SELECT
     id AS series_id,
     length((decomposition).trend) AS trend_length,
     (decomposition).periods AS detected_periods
-FROM ts_mstl_decomposition('multi_series_decomp', series_id, date, value, MAP{})
+FROM ts_mstl_decomposition_by('multi_series_decomp', series_id, date, value, MAP{})
 ORDER BY series_id;
 
 -- =============================================================================
@@ -178,7 +178,7 @@ FROM decomposed;
 .print ''
 .print 'MSTL components (trend first 5 values):'
 WITH mstl_result AS (
-    SELECT _ts_mstl_decomposition(LIST(value ORDER BY i)) AS result
+    SELECT _ts_mstl_decomposition_by(LIST(value ORDER BY i)) AS result
     FROM extract_demo
 )
 SELECT

@@ -99,7 +99,7 @@ LOAD anofox_statistics;
 
 -- Step 1: Create CV splits
 CREATE OR REPLACE TABLE cv_splits_p2 AS
-SELECT * FROM ts_cv_split(
+SELECT * FROM ts_cv_split_by(
     'sales_with_features', store_id, date, revenue,
     ['2024-02-15', '2024-03-01']::DATE[],  -- 2 folds
     7, '1d', MAP{}
@@ -226,7 +226,7 @@ SELECT * FROM fold_meta;
 
 -- Step 2: Create CV splits
 CREATE OR REPLACE TABLE cv_splits_p4 AS
-SELECT * FROM ts_cv_split(
+SELECT * FROM ts_cv_split_by(
     'sales_data',
     store_id,
     date,
@@ -290,7 +290,7 @@ CROSS JOIN generate_series(1, 2) AS s(s);
 
 -- Step 1: Create CV splits
 CREATE OR REPLACE TABLE cv_splits_p5 AS
-SELECT * FROM ts_cv_split(
+SELECT * FROM ts_cv_split_by(
     'sales_features', store_id, date, revenue,
     ['2024-02-15', '2024-03-01']::DATE[],
     7, '1d', MAP{}
@@ -504,7 +504,7 @@ ORDER BY fold_id;
 
 -- Prepare baseline for OLS (ts_cv_split + hydrate)
 CREATE OR REPLACE TABLE cv_baseline AS
-SELECT * FROM ts_cv_split(
+SELECT * FROM ts_cv_split_by(
     'scenario_baseline', store_id, date, revenue,
     ['2024-02-15']::DATE[], 14, '1d', MAP{}
 );
@@ -520,7 +520,7 @@ JOIN scenario_baseline s ON c.group_col = s.store_id AND c.date_col = s.date;
 
 -- Prepare what-if for OLS
 CREATE OR REPLACE TABLE cv_whatif AS
-SELECT * FROM ts_cv_split(
+SELECT * FROM ts_cv_split_by(
     'scenario_whatif', store_id, date, revenue,
     ['2024-02-15']::DATE[], 14, '1d', MAP{}
 );

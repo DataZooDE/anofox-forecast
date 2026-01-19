@@ -222,7 +222,7 @@ LOAD anofox_statistics;
 
 -- Create CV splits for regression backtest
 CREATE OR REPLACE TABLE cv_splits_reg AS
-SELECT * FROM ts_cv_split(
+SELECT * FROM ts_cv_split_by(
     'm5_with_features',
     item_id,
     ds,
