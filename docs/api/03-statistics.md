@@ -7,7 +7,7 @@
 Statistical functions compute descriptive metrics for time series data. These functions help you understand your data before forecasting.
 
 **Use this document to:**
-- Compute 34 statistical metrics per series (mean, std, skewness, trend strength, etc.)
+- Compute 36 statistical metrics per series (mean, std, skewness, trend strength, etc.)
 - Assess data quality across four dimensions (structural, temporal, magnitude, behavioral)
 - Generate quality reports to identify problematic series before forecasting
 - Filter out low-quality or constant series that would produce poor forecasts
@@ -103,6 +103,8 @@ ts_stats_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
 | `seasonality_strength` | DOUBLE | Seasonality strength (0-1) |
 | `entropy` | DOUBLE | Approximate entropy |
 | `stability` | DOUBLE | Stability measure |
+| `expected_length` | UBIGINT | Expected observations based on date range and frequency |
+| `n_gaps` | UBIGINT | Number of gaps (missing time periods) in the series |
 
 **Example:**
 ```sql
@@ -117,6 +119,16 @@ SELECT
     (stats).std_dev,
     (stats).trend_strength
 FROM ts_stats_by('sales', product_id, date, quantity, '1d');
+
+-- Detect gaps in time series
+SELECT
+    id,
+    (stats).length AS actual_length,
+    (stats).expected_length,
+    (stats).n_gaps,
+    CASE WHEN (stats).n_gaps > 0 THEN 'Has gaps' ELSE 'Complete' END AS status
+FROM ts_stats_by('sales', product_id, date, quantity, '1d')
+WHERE (stats).n_gaps > 0;
 ```
 
 > **Alias:** `ts_stats` is an alias for `ts_stats_by`
@@ -271,7 +283,9 @@ ts_stats_agg(date_col TIMESTAMP, value_col DOUBLE) → STRUCT
 | `date_col` | TIMESTAMP | Date/timestamp column |
 | `value_col` | DOUBLE | Value column |
 
-**Returns:** Same STRUCT as `_ts_stats` with 34 statistical metrics.
+**Returns:** Same STRUCT as `_ts_stats` with 36 statistical metrics.
+
+> **Note:** `expected_length` and `n_gaps` are NULL when using `ts_stats_agg` since no frequency is provided. Use `ts_stats_by` with a frequency parameter for gap detection.
 
 **Example:**
 ```sql
@@ -327,7 +341,7 @@ GROUP BY product_id;
 
 ### _ts_stats
 
-Computes 34 statistical metrics for a time series array (internal).
+Computes 36 statistical metrics for a time series array (internal).
 
 **Signature:**
 ```sql
@@ -377,7 +391,11 @@ STRUCT(
     trend_strength       DOUBLE,    -- Trend strength (0-1)
     seasonality_strength DOUBLE,    -- Seasonality strength (0-1)
     entropy              DOUBLE,    -- Approximate entropy
-    stability            DOUBLE     -- Stability measure
+    stability            DOUBLE,    -- Stability measure
+
+    -- Gap detection (requires date and frequency)
+    expected_length      UBIGINT,   -- Expected observations based on date range and frequency
+    n_gaps               UBIGINT    -- Number of gaps (missing time periods)
 )
 ```
 
