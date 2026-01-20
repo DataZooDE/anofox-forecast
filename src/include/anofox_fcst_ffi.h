@@ -223,6 +223,18 @@ typedef struct TsStatsResult {
      * Stability measure
      */
     double stability;
+    /**
+     * Expected number of observations based on date range and frequency
+     */
+    size_t expected_length;
+    /**
+     * Number of gaps (missing time periods) in the series
+     */
+    size_t n_gaps;
+    /**
+     * Whether date-based metrics (expected_length, n_gaps) are valid
+     */
+    bool has_date_metrics;
 } TsStatsResult;
 
 /**
@@ -1494,6 +1506,21 @@ bool anofox_ts_stats(const double *values,
                      size_t length,
                      struct TsStatsResult *out_result,
                      struct AnofoxError *out_error);
+
+/**
+ * Compute time series statistics with date information for gap detection.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ * The dates array must have the same length as the values array.
+ */
+bool anofox_ts_stats_with_dates(const double *values,
+                                const uint64_t *validity,
+                                const int64_t *dates,
+                                size_t length,
+                                int64_t frequency_micros,
+                                struct TsStatsResult *out_result,
+                                struct AnofoxError *out_error);
 
 /**
  * Mean Absolute Error

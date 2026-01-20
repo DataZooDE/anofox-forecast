@@ -58,6 +58,8 @@ static LogicalType GetTsStatsAggResultType() {
     children.push_back(make_pair("seasonality_strength", LogicalType(LogicalTypeId::DOUBLE)));
     children.push_back(make_pair("entropy", LogicalType(LogicalTypeId::DOUBLE)));
     children.push_back(make_pair("stability", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("expected_length", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("n_gaps", LogicalType(LogicalTypeId::UBIGINT)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -227,6 +229,16 @@ static void TsStatsAggFinalize(Vector &state_vector, AggregateInputData &aggr_in
         SetStructField<double>(result, 31, row, stats_result.seasonality_strength);
         SetStructField<double>(result, 32, row, stats_result.entropy);
         SetStructField<double>(result, 33, row, stats_result.stability);
+
+        // Set date-based metrics (NULL when no frequency provided)
+        auto &children = StructVector::GetEntries(result);
+        if (stats_result.has_date_metrics) {
+            SetStructField<uint64_t>(result, 34, row, stats_result.expected_length);
+            SetStructField<uint64_t>(result, 35, row, stats_result.n_gaps);
+        } else {
+            FlatVector::SetNull(*children[34], row, true);
+            FlatVector::SetNull(*children[35], row, true);
+        }
     }
 }
 

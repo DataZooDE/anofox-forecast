@@ -27,7 +27,11 @@ static const TsTableMacro ts_table_macros[] = {
 R"(
 SELECT
     group_col AS id,
-    _ts_stats(LIST(value_col::DOUBLE ORDER BY date_col)) AS stats
+    _ts_stats_with_dates(
+        LIST(value_col::DOUBLE ORDER BY date_col),
+        LIST(date_col::TIMESTAMP ORDER BY date_col),
+        frequency::VARCHAR
+    ) AS stats
 FROM query_table(source::VARCHAR)
 GROUP BY group_col
 )"},
@@ -2094,7 +2098,11 @@ FROM src
 R"(
 SELECT
     group_col AS id,
-    _ts_stats(LIST(value_col::DOUBLE ORDER BY date_col)) AS stats
+    _ts_stats_with_dates(
+        LIST(value_col::DOUBLE ORDER BY date_col),
+        LIST(date_col::TIMESTAMP ORDER BY date_col),
+        frequency::VARCHAR
+    ) AS stats
 FROM query_table(source::VARCHAR)
 GROUP BY group_col
 )"},
