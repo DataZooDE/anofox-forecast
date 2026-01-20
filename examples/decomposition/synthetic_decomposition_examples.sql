@@ -143,7 +143,7 @@ SELECT
     id AS series_id,
     length((decomposition).trend) AS trend_length,
     (decomposition).periods AS detected_periods
-FROM ts_mstl_decomposition('multi_series_decomp', series_id, date, value, MAP{})
+FROM ts_mstl_decomposition_by('multi_series_decomp', series_id, date, value, MAP{})
 ORDER BY series_id;
 
 -- =============================================================================

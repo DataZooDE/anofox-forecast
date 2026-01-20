@@ -4,6 +4,8 @@
 
 require anofox_forecast
 
+require json
+
 #######################################
 # Setup: Create test data
 #######################################
@@ -567,6 +569,29 @@ query I
 SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 30, MAP([], []));
 ----
 60
+
+#######################################
+# STRUCT Params Tests (GH#95)
+# Test that STRUCT syntax works with mixed types
+#######################################
+
+# Test MAP with ETS model parameter
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'ETS', 5, MAP{'model': 'AAA'});
+----
+10
+
+# Test empty params - use MAP{} syntax (empty STRUCT {} not valid in DuckDB)
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 5, MAP{});
+----
+10
+
+# Test backward compatibility: MAP syntax still works
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'ETS', 5, MAP{'model': 'AAA'});
+----
+10
 
 #######################################
 # Cleanup

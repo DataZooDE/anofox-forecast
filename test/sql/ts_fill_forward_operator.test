@@ -4,6 +4,8 @@
 
 require anofox_forecast
 
+require json
+
 #######################################
 # Setup - Create test data
 #######################################
@@ -27,27 +29,27 @@ FROM generate_series(0, 4) AS t(i);
 
 # Test function returns results
 query I
-SELECT COUNT(*) > 0 FROM ts_fill_forward('test_series', id, ds, value, '2024-01-10', '1d');
+SELECT COUNT(*) > 0 FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d');
 ----
 true
 
 # Test original data is preserved
 query I
-SELECT COUNT(*) FROM ts_fill_forward('test_series', id, ds, value, '2024-01-10', '1d')
+SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d')
 WHERE value_col IS NOT NULL;
 ----
 10
 
 # Test forward fill adds rows with NULL values
 query I
-SELECT COUNT(*) FROM ts_fill_forward('test_series', id, ds, value, '2024-01-10', '1d')
+SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d')
 WHERE value_col IS NULL;
 ----
 10
 
 # Total rows should be original + filled
 query I
-SELECT COUNT(*) FROM ts_fill_forward('test_series', id, ds, value, '2024-01-10', '1d');
+SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d');
 ----
 20
 
@@ -57,20 +59,20 @@ SELECT COUNT(*) FROM ts_fill_forward('test_series', id, ds, value, '2024-01-10',
 
 # Both groups should have filled rows
 query I
-SELECT COUNT(DISTINCT group_col) FROM ts_fill_forward('test_series', id, ds, value, '2024-01-10', '1d');
+SELECT COUNT(DISTINCT group_col) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d');
 ----
 2
 
 # Group A should have correct count (5 original + 5 filled)
 query I
-SELECT COUNT(*) FROM ts_fill_forward('test_series', id, ds, value, '2024-01-10', '1d')
+SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d')
 WHERE group_col = 'A';
 ----
 10
 
 # Group B should have correct count (5 original + 5 filled)
 query I
-SELECT COUNT(*) FROM ts_fill_forward('test_series', id, ds, value, '2024-01-10', '1d')
+SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d')
 WHERE group_col = 'B';
 ----
 10
@@ -81,14 +83,14 @@ WHERE group_col = 'B';
 
 # Filled dates should be after original last date (2024-01-05)
 query I
-SELECT COUNT(*) FROM ts_fill_forward('test_series', id, ds, value, '2024-01-10', '1d')
+SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d')
 WHERE date_col > '2024-01-05'::TIMESTAMP AND value_col IS NULL;
 ----
 10
 
 # All filled dates should be <= target date
 query I
-SELECT COUNT(*) FROM ts_fill_forward('test_series', id, ds, value, '2024-01-10', '1d')
+SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d')
 WHERE date_col > '2024-01-10'::TIMESTAMP;
 ----
 0
@@ -100,14 +102,14 @@ WHERE date_col > '2024-01-10'::TIMESTAMP;
 # Original values should be preserved exactly
 # A: 10+11+12+13+14 = 60, B: 100+105+110+115+120 = 550, Total = 610
 query R
-SELECT SUM(value_col) FROM ts_fill_forward('test_series', id, ds, value, '2024-01-10', '1d')
+SELECT SUM(value_col) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d')
 WHERE value_col IS NOT NULL;
 ----
 610.0
 
 # Filled values should be NULL
 query I
-SELECT COUNT(*) FROM ts_fill_forward('test_series', id, ds, value, '2024-01-10', '1d')
+SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d')
 WHERE date_col > '2024-01-05'::TIMESTAMP AND value_col IS NOT NULL;
 ----
 0
@@ -118,7 +120,7 @@ WHERE date_col > '2024-01-05'::TIMESTAMP AND value_col IS NOT NULL;
 
 # If target date equals last date, should return original data only
 query I
-SELECT COUNT(*) FROM ts_fill_forward('test_series', id, ds, value, '2024-01-05', '1d');
+SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-05', '1d');
 ----
 10
 
@@ -128,19 +130,19 @@ SELECT COUNT(*) FROM ts_fill_forward('test_series', id, ds, value, '2024-01-05',
 
 # Polars-style '1d' frequency
 query I
-SELECT COUNT(*) FROM ts_fill_forward('test_series', id, ds, value, '2024-01-08', '1d');
+SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-08', '1d');
 ----
 16
 
 # DuckDB INTERVAL style '1 day'
 query I
-SELECT COUNT(*) FROM ts_fill_forward('test_series', id, ds, value, '2024-01-08', '1 day');
+SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-08', '1 day');
 ----
 16
 
 # Hourly frequency (more granular)
 query I
-SELECT (SELECT COUNT(*) FROM ts_fill_forward('test_series', id, ds, value, '2024-01-05 12:00:00', '1h')) > 10;
+SELECT (SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-05 12:00:00', '1h')) > 10;
 ----
 true
 
@@ -150,7 +152,7 @@ true
 
 # Results should be ordered by group, then date
 query TT
-SELECT group_col, date_col FROM ts_fill_forward('test_series', id, ds, value, '2024-01-07', '1d')
+SELECT group_col, date_col FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-07', '1d')
 ORDER BY group_col, date_col
 LIMIT 3;
 ----
@@ -171,13 +173,13 @@ FROM generate_series(0, 2) AS t(i);
 
 # Single group should work correctly
 query I
-SELECT COUNT(*) FROM ts_fill_forward('single_group', id, ds, value, '2024-01-05', '1d');
+SELECT COUNT(*) FROM ts_fill_forward_by('single_group', id, ds, value, '2024-01-05', '1d');
 ----
 5
 
 # Verify values for single group
 query IR
-SELECT date_col, value_col FROM ts_fill_forward('single_group', id, ds, value, '2024-01-05', '1d')
+SELECT date_col, value_col FROM ts_fill_forward_by('single_group', id, ds, value, '2024-01-05', '1d')
 ORDER BY date_col;
 ----
 2024-01-01 00:00:00	0.0

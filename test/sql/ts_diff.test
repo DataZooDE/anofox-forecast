@@ -4,6 +4,8 @@
 
 require anofox_forecast
 
+require json
+
 #######################################
 # Setup Test Data
 #######################################
@@ -19,19 +21,19 @@ FROM generate_series(0, 4) AS t(i);
 
 # First order differencing
 query I
-SELECT COUNT(*) FROM ts_diff('diff_series', id, date, val, 1);
+SELECT COUNT(*) FROM ts_diff_by('diff_series', id, date, val, 1);
 ----
 5
 
 # First difference - check values
 query I
-SELECT COUNT(*) FROM ts_diff('diff_series', id, date, val, 1) WHERE diff_value IS NOT NULL;
+SELECT COUNT(*) FROM ts_diff_by('diff_series', id, date, val, 1) WHERE diff_value IS NOT NULL;
 ----
 4
 
 # First difference should be 1.0 for linear increasing
 query I
-SELECT ABS(diff_value - 1.0) < 0.01 FROM ts_diff('diff_series', id, date, val, 1) WHERE diff_value IS NOT NULL ORDER BY date LIMIT 1;
+SELECT ABS(diff_value - 1.0) < 0.01 FROM ts_diff_by('diff_series', id, date, val, 1) WHERE diff_value IS NOT NULL ORDER BY date LIMIT 1;
 ----
 true
 
@@ -41,19 +43,19 @@ true
 
 # Second difference
 query I
-SELECT COUNT(*) FROM ts_diff('diff_series', id, date, val, 2);
+SELECT COUNT(*) FROM ts_diff_by('diff_series', id, date, val, 2);
 ----
 5
 
 # Second difference - should have 3 non-null values
 query I
-SELECT COUNT(*) FROM ts_diff('diff_series', id, date, val, 2) WHERE diff_value IS NOT NULL;
+SELECT COUNT(*) FROM ts_diff_by('diff_series', id, date, val, 2) WHERE diff_value IS NOT NULL;
 ----
 3
 
 # Second lag difference of linear series with slope 1 should be 2 (val[i] - val[i-2])
 query I
-SELECT ABS(diff_value - 2.0) < 0.01 FROM ts_diff('diff_series', id, date, val, 2) WHERE diff_value IS NOT NULL ORDER BY date LIMIT 1;
+SELECT ABS(diff_value - 2.0) < 0.01 FROM ts_diff_by('diff_series', id, date, val, 2) WHERE diff_value IS NOT NULL ORDER BY date LIMIT 1;
 ----
 true
 
@@ -69,7 +71,7 @@ FROM generate_series(0, 4) AS t(i);
 # LAG-based second difference of quadratic series [(i+1)^2] gives increasing values
 # Values: [1, 4, 9, 16, 25] with LAG(2) diff: [NULL, NULL, 8, 12, 16]
 query I
-SELECT COUNT(*) FROM ts_diff('quadratic_series', id, date, val, 2) WHERE diff_value IS NOT NULL;
+SELECT COUNT(*) FROM ts_diff_by('quadratic_series', id, date, val, 2) WHERE diff_value IS NOT NULL;
 ----
 3
 

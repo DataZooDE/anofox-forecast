@@ -4,6 +4,8 @@
 
 require anofox_forecast
 
+require json
+
 #######################################
 # Internal _ts_detect_changepoints_bocpd Tests
 #######################################

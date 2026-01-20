@@ -42,7 +42,7 @@ FROM gappy_data GROUP BY series_id ORDER BY series_id;
 .print ''
 .print 'After ts_fill_gaps (frequency=1 day):'
 SELECT group_col AS series_id, date_col AS date, value_col AS value
-FROM ts_fill_gaps('gappy_data', series_id, date, value, '1 day')
+FROM ts_fill_gaps_by('gappy_data', series_id, date, value, '1 day')
 ORDER BY group_col, date_col;
 
 -- =============================================================================
@@ -71,7 +71,7 @@ FROM short_series GROUP BY series_id ORDER BY series_id;
 .print ''
 .print 'After ts_fill_forward (extend to 2024-01-07):'
 SELECT group_col AS series_id, date_col AS date, value_col AS value
-FROM ts_fill_forward('short_series', series_id, date, value, '2024-01-07'::DATE, '1 day')
+FROM ts_fill_forward_by('short_series', series_id, date, value, '2024-01-07'::DATE, '1 day')
 ORDER BY group_col, date_col;
 
 -- =============================================================================
@@ -119,7 +119,7 @@ FROM quality_test GROUP BY series_id ORDER BY series_id;
 .print ''
 .print 'After ts_drop_gappy (max_gap_ratio=0.3):';
 SELECT series_id, COUNT(*) AS n_points
-FROM ts_drop_gappy('quality_test', series_id, value, 0.3)
+FROM ts_drop_gappy_by('quality_test', series_id, value, 0.3)
 GROUP BY series_id ORDER BY series_id;
 
 -- =============================================================================
@@ -148,21 +148,21 @@ SELECT * FROM feature_data ORDER BY series_id, date;
 .print ''
 .print 'After ts_fill_unknown (cutoff=2024-01-03, strategy=last_value):'
 SELECT group_col AS series_id, date_col AS date, value_col AS feature
-FROM ts_fill_unknown('feature_data', series_id, date, feature, '2024-01-03'::TIMESTAMP, MAP{'strategy': 'last_value'})
+FROM ts_fill_unknown_by('feature_data', series_id, date, feature, '2024-01-03'::TIMESTAMP, {'strategy': 'last_value'})
 ORDER BY group_col, date_col;
 
 -- Fill with NULL instead
 .print ''
 .print 'After ts_fill_unknown (cutoff=2024-01-03, strategy=null):'
 SELECT group_col AS series_id, date_col AS date, value_col AS feature
-FROM ts_fill_unknown('feature_data', series_id, date, feature, '2024-01-03'::TIMESTAMP, MAP{'strategy': 'null'})
+FROM ts_fill_unknown_by('feature_data', series_id, date, feature, '2024-01-03'::TIMESTAMP, {'strategy': 'null'})
 ORDER BY group_col, date_col;
 
 -- Fill with default value
 .print ''
 .print 'After ts_fill_unknown (cutoff=2024-01-03, strategy=default, fill_value=0):'
 SELECT group_col AS series_id, date_col AS date, value_col AS feature
-FROM ts_fill_unknown('feature_data', series_id, date, feature, '2024-01-03'::TIMESTAMP, MAP{'strategy': 'default', 'fill_value': '0'})
+FROM ts_fill_unknown_by('feature_data', series_id, date, feature, '2024-01-03'::TIMESTAMP, {'strategy': 'default', 'fill_value': '0'})
 ORDER BY group_col, date_col;
 
 -- =============================================================================
@@ -188,13 +188,13 @@ SELECT series_id, ts, value FROM hourly_data ORDER BY series_id, ts;
 .print ''
 .print 'Fill gaps with DuckDB interval format (1 hour):'
 SELECT group_col, date_col, value_col
-FROM ts_fill_gaps('hourly_data', series_id, ts, value, '1 hour')
+FROM ts_fill_gaps_by('hourly_data', series_id, ts, value, '1 hour')
 ORDER BY group_col, date_col;
 
 .print ''
 .print 'Fill gaps with Polars-style format (1h):'
 SELECT group_col, date_col, value_col
-FROM ts_fill_gaps('hourly_data', series_id, ts, value, '1h')
+FROM ts_fill_gaps_by('hourly_data', series_id, ts, value, '1h')
 ORDER BY group_col, date_col;
 
 -- =============================================================================

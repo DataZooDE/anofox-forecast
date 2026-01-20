@@ -4,6 +4,8 @@
 
 require anofox_forecast
 
+require json
+
 #######################################
 # Setup Test Data
 #######################################
@@ -34,7 +36,7 @@ SELECT
     ROUND(error, 6) AS error,
     ROUND(abs_error, 6) AS abs_error,
     model_name
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'equiv_data', series_id, date, value,
     7, 2, '1d',
     MAP{'method': 'Naive'}
@@ -49,7 +51,7 @@ SELECT training_end_times FROM ts_cv_generate_folds('equiv_data', date, 2, 7, '1
 # Step 2 - CV splits using same fold dates
 statement ok
 CREATE TABLE cv_splits_naive AS
-SELECT * FROM ts_cv_split(
+SELECT * FROM ts_cv_split_by(
     'equiv_data', series_id, date, value,
     (SELECT training_end_times FROM fold_dates),
     7, '1d', MAP{}
@@ -152,7 +154,7 @@ SELECT
     ROUND(forecast, 6) AS forecast,
     ROUND(actual, 6) AS actual,
     model_name
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'equiv_data', series_id, date, value,
     7, 2, '1d',
     MAP{'method': 'SeasonalNaive'}
@@ -208,7 +210,7 @@ SELECT
     ROUND(forecast, 4) AS forecast,
     ROUND(actual, 4) AS actual,
     model_name
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'equiv_data', series_id, date, value,
     7, 2, '1d',
     MAP{'method': 'Theta'}
@@ -264,7 +266,7 @@ SELECT
     ROUND(forecast, 4) AS forecast,
     ROUND(actual, 4) AS actual,
     model_name
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'equiv_data', series_id, date, value,
     7, 2, '1d',
     MAP{'method': 'SES'}
@@ -354,7 +356,7 @@ SELECT * FROM equiv_data WHERE series_id = 'A';
 statement ok
 CREATE TABLE oneliner_single AS
 SELECT fold_id, group_col, date, ROUND(forecast, 4) AS forecast, ROUND(actual, 4) AS actual
-FROM ts_backtest_auto('single_series', series_id, date, value, 7, 2, '1d', MAP{'method': 'Naive'})
+FROM ts_backtest_auto_by('single_series', series_id, date, value, 7, 2, '1d', MAP{'method': 'Naive'})
 ORDER BY fold_id, date;
 
 statement ok
@@ -363,7 +365,7 @@ SELECT training_end_times FROM ts_cv_generate_folds('single_series', date, 2, 7,
 
 statement ok
 CREATE TABLE cv_splits_single AS
-SELECT * FROM ts_cv_split(
+SELECT * FROM ts_cv_split_by(
     'single_series', series_id, date, value,
     (SELECT training_end_times FROM fold_dates_single),
     7, '1d', MAP{}

@@ -4,6 +4,8 @@
 
 require anofox_forecast
 
+require json
+
 #######################################
 # Setup Test Data
 #######################################
@@ -24,7 +26,7 @@ CROSS JOIN (SELECT UNNEST(['A', 'B']) AS series_id) s;
 # Test returns correct number of rows (folds × series × horizon)
 # 3 folds × 2 series × 7 horizon = 42
 query I
-SELECT COUNT(*) FROM ts_backtest_auto(
+SELECT COUNT(*) FROM ts_backtest_auto_by(
     'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
 );
 ----
@@ -33,7 +35,7 @@ SELECT COUNT(*) FROM ts_backtest_auto(
 # Test has all expected columns (11 columns including fold_metric_score)
 query I
 SELECT COUNT(*) FROM (
-    DESCRIBE SELECT * FROM ts_backtest_auto(
+    DESCRIBE SELECT * FROM ts_backtest_auto_by(
         'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
     )
 );
@@ -42,7 +44,7 @@ SELECT COUNT(*) FROM (
 
 # Test all folds are represented
 query I
-SELECT COUNT(DISTINCT fold_id) FROM ts_backtest_auto(
+SELECT COUNT(DISTINCT fold_id) FROM ts_backtest_auto_by(
     'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
 );
 ----
@@ -50,7 +52,7 @@ SELECT COUNT(DISTINCT fold_id) FROM ts_backtest_auto(
 
 # Test all series are represented per fold
 query II
-SELECT fold_id, COUNT(DISTINCT group_col) FROM ts_backtest_auto(
+SELECT fold_id, COUNT(DISTINCT group_col) FROM ts_backtest_auto_by(
     'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
 )
 GROUP BY fold_id ORDER BY fold_id;
@@ -61,7 +63,7 @@ GROUP BY fold_id ORDER BY fold_id;
 
 # Test forecast count per fold per series matches horizon
 query III
-SELECT fold_id, group_col, COUNT(*) as n FROM ts_backtest_auto(
+SELECT fold_id, group_col, COUNT(*) as n FROM ts_backtest_auto_by(
     'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
 )
 GROUP BY fold_id, group_col ORDER BY fold_id, group_col;
@@ -79,7 +81,7 @@ GROUP BY fold_id, group_col ORDER BY fold_id, group_col;
 
 # Test with Naive method
 query I
-SELECT DISTINCT model_name FROM ts_backtest_auto(
+SELECT DISTINCT model_name FROM ts_backtest_auto_by(
     'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{'method': 'Naive'}
 );
 ----
@@ -87,7 +89,7 @@ Naive
 
 # Test with different method
 query I
-SELECT COUNT(DISTINCT model_name) >= 1 FROM ts_backtest_auto(
+SELECT COUNT(DISTINCT model_name) >= 1 FROM ts_backtest_auto_by(
     'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{'method': 'AutoETS'}
 );
 ----
@@ -99,7 +101,7 @@ true
 
 # Test forecast and actual are numeric
 query I
-SELECT COUNT(*) FROM ts_backtest_auto(
+SELECT COUNT(*) FROM ts_backtest_auto_by(
     'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
 ) WHERE forecast IS NOT NULL AND actual IS NOT NULL;
 ----
@@ -107,7 +109,7 @@ SELECT COUNT(*) FROM ts_backtest_auto(
 
 # Test error = forecast - actual
 query I
-SELECT COUNT(*) FROM ts_backtest_auto(
+SELECT COUNT(*) FROM ts_backtest_auto_by(
     'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
 ) WHERE ABS(error - (forecast - actual)) < 0.0001;
 ----
@@ -115,7 +117,7 @@ SELECT COUNT(*) FROM ts_backtest_auto(
 
 # Test abs_error = |error|
 query I
-SELECT COUNT(*) FROM ts_backtest_auto(
+SELECT COUNT(*) FROM ts_backtest_auto_by(
     'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
 ) WHERE ABS(abs_error - ABS(error)) < 0.0001;
 ----
@@ -129,7 +131,7 @@ SELECT COUNT(*) FROM ts_backtest_auto(
 # With gap=2: forecast dates start 3 days after train_end instead of 1 day
 # Verify we still get some forecasts (may be fewer due to data range limits)
 query I
-SELECT COUNT(*) > 0 FROM ts_backtest_auto(
+SELECT COUNT(*) > 0 FROM ts_backtest_auto_by(
     'backtest_demo', series_id, date, value, 7, 2, '1d', MAP{'gap': '2'}
 );
 ----
@@ -144,7 +146,7 @@ query II
 SELECT
     group_col,
     ROUND(AVG(abs_error), 2) > 0 AS has_error
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{'method': 'Naive'}
 )
 GROUP BY group_col
@@ -159,7 +161,7 @@ B	true
 
 # Test fold_metric_score column exists and is numeric
 query I
-SELECT COUNT(*) FROM ts_backtest_auto(
+SELECT COUNT(*) FROM ts_backtest_auto_by(
     'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
 ) WHERE fold_metric_score IS NOT NULL;
 ----
@@ -167,7 +169,7 @@ SELECT COUNT(*) FROM ts_backtest_auto(
 
 # Test metric='mae' returns MAE scores
 query I
-SELECT COUNT(DISTINCT fold_metric_score) >= 1 FROM ts_backtest_auto(
+SELECT COUNT(DISTINCT fold_metric_score) >= 1 FROM ts_backtest_auto_by(
     'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{},
     metric => 'mae'
 );
@@ -176,7 +178,7 @@ true
 
 # Test metric='rmse' returns RMSE scores (default)
 query I
-SELECT COUNT(DISTINCT fold_metric_score) >= 1 FROM ts_backtest_auto(
+SELECT COUNT(DISTINCT fold_metric_score) >= 1 FROM ts_backtest_auto_by(
     'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{},
     metric => 'rmse'
 );
@@ -185,7 +187,7 @@ true
 
 # Test metric='mse' returns MSE scores
 query I
-SELECT COUNT(DISTINCT fold_metric_score) >= 1 FROM ts_backtest_auto(
+SELECT COUNT(DISTINCT fold_metric_score) >= 1 FROM ts_backtest_auto_by(
     'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{},
     metric => 'mse'
 );
@@ -196,7 +198,7 @@ true
 query I
 SELECT COUNT(DISTINCT n_unique_scores) FROM (
     SELECT fold_id, COUNT(DISTINCT ROUND(fold_metric_score, 6)) AS n_unique_scores
-    FROM ts_backtest_auto(
+    FROM ts_backtest_auto_by(
         'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
     )
     GROUP BY fold_id
@@ -210,7 +212,7 @@ SELECT COUNT(DISTINCT n_unique_scores) FROM (
 
 # Test features parameter accepts empty array (default)
 query I
-SELECT COUNT(*) FROM ts_backtest_auto(
+SELECT COUNT(*) FROM ts_backtest_auto_by(
     'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{},
     features => []::VARCHAR[]
 );
@@ -231,11 +233,65 @@ FROM generate_series(0, 59) AS t(i);
 
 # Test with single series
 query I
-SELECT COUNT(*) FROM ts_backtest_auto(
+SELECT COUNT(*) FROM ts_backtest_auto_by(
     'single_series', series_id, date, value, 7, 3, '1d', MAP{}
 );
 ----
 21
+
+#######################################
+# MAP Params Tests
+# Test that MAP syntax works with string values
+#######################################
+
+# Test MAP with method (VARCHAR)
+query I
+SELECT DISTINCT model_name FROM ts_backtest_auto_by(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{'method': 'Naive'}
+);
+----
+Naive
+
+# Test MAP with method and gap (both VARCHAR - MAP requires same types)
+query I
+SELECT COUNT(*) > 0 FROM ts_backtest_auto_by(
+    'backtest_demo', series_id, date, value, 7, 2, '1d', MAP{'method': 'Naive', 'gap': '2'}
+);
+----
+true
+
+# Test MAP with clip_horizon (VARCHAR 'true')
+query I
+SELECT COUNT(*) > 0 FROM ts_backtest_auto_by(
+    'backtest_demo', series_id, date, value, 7, 2, '1d', MAP{'clip_horizon': 'true'}
+);
+----
+true
+
+# Test MAP with multiple params (all VARCHAR)
+query I
+SELECT COUNT(*) > 0 FROM ts_backtest_auto_by(
+    'backtest_demo', series_id, date, value, 7, 2, '1d',
+    MAP{'method': 'Naive', 'gap': '1', 'embargo': '0', 'clip_horizon': 'false'}
+);
+----
+true
+
+# Test MAP with string values
+query I
+SELECT DISTINCT model_name FROM ts_backtest_auto_by(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{'method': 'Naive', 'gap': '0'}
+);
+----
+Naive
+
+# Test empty params - use MAP{} syntax (empty STRUCT {} not valid in DuckDB)
+query I
+SELECT COUNT(*) FROM ts_backtest_auto_by(
+    'backtest_demo', series_id, date, value, 7, 3, '1d', MAP{}
+);
+----
+42
 
 #######################################
 # Cleanup

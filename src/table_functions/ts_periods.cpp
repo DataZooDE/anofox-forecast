@@ -3,6 +3,7 @@
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 
 namespace duckdb {
 
@@ -323,7 +324,10 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
 }
 
 void RegisterTsDetectPeriodsFunction(ExtensionLoader &loader) {
-    ScalarFunctionSet ts_periods_set("ts_detect_periods");
+    // Internal scalar function used by ts_detect_periods table macro
+    // Named with underscore prefix to match API pattern (_ts_stats, etc.)
+    ScalarFunctionSet ts_periods_set("_ts_detect_periods");
+
     // Single-argument version (values only, default method)
     ts_periods_set.AddFunction(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
@@ -336,7 +340,11 @@ void RegisterTsDetectPeriodsFunction(ExtensionLoader &loader) {
         GetMultiPeriodResultType(),
         TsDetectPeriodsFunction
     ));
-    loader.RegisterFunction(ts_periods_set);
+
+    // Mark as internal to hide from duckdb_functions() and deprioritize in autocomplete
+    CreateScalarFunctionInfo info(ts_periods_set);
+    info.internal = true;
+    loader.RegisterFunction(info);
 }
 
 // ============================================================================

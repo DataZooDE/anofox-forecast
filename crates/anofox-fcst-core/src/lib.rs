@@ -95,4 +95,4 @@ pub use seasonality::{
     ChangeDetectionResult, ChangePointType, InstantaneousPeriodResult, SeasonalType,
     SeasonalityAnalysis, SeasonalityChangePoint, SeasonalityClassification, StrengthMethod,
 };
-pub use stats::{compute_ts_stats, TsStats};
+pub use stats::{compute_ts_stats, compute_ts_stats_with_dates, TsStats};

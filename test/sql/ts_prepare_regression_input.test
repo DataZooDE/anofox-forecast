@@ -4,6 +4,8 @@
 
 require anofox_forecast
 
+require json
+
 #######################################
 # Setup Test Data
 #######################################
@@ -21,7 +23,7 @@ CROSS JOIN (SELECT UNNEST(['A', 'B']) AS series_id) s;
 
 statement ok
 CREATE TABLE cv_splits AS
-SELECT * FROM ts_cv_split(
+SELECT * FROM ts_cv_split_by(
     'sales_data', series_id, date, revenue,
     ['2024-01-30'::DATE, '2024-02-15'::DATE], 7, '1d', MAP{}
 );
@@ -32,7 +34,7 @@ SELECT * FROM ts_cv_split(
 
 # Test returns rows for both train and test
 query I
-SELECT COUNT(*) > 0 FROM ts_prepare_regression_input(
+SELECT COUNT(*) > 0 FROM ts_prepare_regression_input_by(
     'cv_splits', 'sales_data', series_id, date, revenue, MAP{}
 );
 ----
@@ -40,7 +42,7 @@ true
 
 # Test that test rows have NULL masked_target
 query II
-SELECT split, COUNT(*) AS n_null_target FROM ts_prepare_regression_input(
+SELECT split, COUNT(*) AS n_null_target FROM ts_prepare_regression_input_by(
     'cv_splits', 'sales_data', series_id, date, revenue, MAP{}
 ) WHERE masked_target IS NULL
 GROUP BY split;
@@ -50,7 +52,7 @@ test	28
 # Test that train rows have non-NULL masked_target
 query II
 SELECT split, SUM(CASE WHEN masked_target IS NOT NULL THEN 1 ELSE 0 END) > 0 AS has_targets
-FROM ts_prepare_regression_input(
+FROM ts_prepare_regression_input_by(
     'cv_splits', 'sales_data', series_id, date, revenue, MAP{}
 )
 GROUP BY split
@@ -61,7 +63,7 @@ test	false
 
 # Test _is_test flag matches split
 query I
-SELECT COUNT(*) FROM ts_prepare_regression_input(
+SELECT COUNT(*) FROM ts_prepare_regression_input_by(
     'cv_splits', 'sales_data', series_id, date, revenue, MAP{}
 ) WHERE (_is_test AND split = 'test') OR (NOT _is_test AND split = 'train');
 ----
@@ -73,7 +75,7 @@ SELECT COUNT(*) FROM ts_prepare_regression_input(
 
 # Test that feature columns are preserved
 query I
-SELECT COUNT(*) FROM ts_prepare_regression_input(
+SELECT COUNT(*) FROM ts_prepare_regression_input_by(
     'cv_splits', 'sales_data', series_id, date, revenue, MAP{}
 ) WHERE temperature IS NOT NULL AND is_weekend IS NOT NULL;
 ----
@@ -85,7 +87,7 @@ SELECT COUNT(*) FROM ts_prepare_regression_input(
 
 # Test all folds are represented
 query I
-SELECT COUNT(DISTINCT fold_id) FROM ts_prepare_regression_input(
+SELECT COUNT(DISTINCT fold_id) FROM ts_prepare_regression_input_by(
     'cv_splits', 'sales_data', series_id, date, revenue, MAP{}
 );
 ----
@@ -94,7 +96,7 @@ SELECT COUNT(DISTINCT fold_id) FROM ts_prepare_regression_input(
 # Test both series are in each fold
 query III
 SELECT fold_id, split, COUNT(DISTINCT group_col) AS n_series
-FROM ts_prepare_regression_input(
+FROM ts_prepare_regression_input_by(
     'cv_splits', 'sales_data', series_id, date, revenue, MAP{}
 )
 GROUP BY fold_id, split

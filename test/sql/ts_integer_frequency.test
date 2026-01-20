@@ -4,6 +4,8 @@
 
 require anofox_forecast
 
+require json
+
 #######################################
 # Setup Test Data
 #######################################
@@ -21,7 +23,7 @@ UNION ALL SELECT 'A', '2023-01-05'::DATE, 40.0;
 
 # Polars-style frequency works
 query III
-SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps('freq_test', id, date, val, '1d') ORDER BY dt;
+SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps_by('freq_test', id, date, val, '1d') ORDER BY dt;
 ----
 A	2023-01-01	10.0
 A	2023-01-02	20.0
@@ -31,7 +33,7 @@ A	2023-01-05	40.0
 
 # DuckDB INTERVAL style works
 query III
-SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps('freq_test', id, date, val, '1 day') ORDER BY dt;
+SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps_by('freq_test', id, date, val, '1 day') ORDER BY dt;
 ----
 A	2023-01-01	10.0
 A	2023-01-02	20.0
@@ -46,7 +48,7 @@ A	2023-01-05	40.0
 
 # Integer literal frequency works (interpreted as 1 day)
 query III
-SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps('freq_test', id, date, val, 1) ORDER BY dt;
+SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps_by('freq_test', id, date, val, 1) ORDER BY dt;
 ----
 A	2023-01-01	10.0
 A	2023-01-02	20.0
@@ -56,7 +58,7 @@ A	2023-01-05	40.0
 
 # String integer frequency works (interpreted as 1 day)
 query III
-SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps('freq_test', id, date, val, '1') ORDER BY dt;
+SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps_by('freq_test', id, date, val, '1') ORDER BY dt;
 ----
 A	2023-01-01	10.0
 A	2023-01-02	20.0
@@ -66,7 +68,7 @@ A	2023-01-05	40.0
 
 # Multi-day integer frequency (7 = weekly)
 query II
-SELECT group_col, date_col::DATE AS dt FROM ts_fill_gaps('freq_test', id, date, val, 7) ORDER BY dt;
+SELECT group_col, date_col::DATE AS dt FROM ts_fill_gaps_by('freq_test', id, date, val, 7) ORDER BY dt;
 ----
 A	2023-01-01
 
@@ -76,19 +78,19 @@ A	2023-01-01
 
 # Polars-style works (extends from last date 2023-01-05 to target 2023-01-07)
 query I
-SELECT COUNT(*) FROM ts_fill_forward('freq_test', id, date, val, '2023-01-07', '1d');
+SELECT COUNT(*) FROM ts_fill_forward_by('freq_test', id, date, val, '2023-01-07', '1d');
 ----
 6
 
 # DuckDB INTERVAL style works
 query I
-SELECT COUNT(*) FROM ts_fill_forward('freq_test', id, date, val, '2023-01-07', '1 day');
+SELECT COUNT(*) FROM ts_fill_forward_by('freq_test', id, date, val, '2023-01-07', '1 day');
 ----
 6
 
 # Integer frequency works (interpreted as days)
 query I
-SELECT COUNT(*) FROM ts_fill_forward('freq_test', id, date, val, '2023-01-07', 1);
+SELECT COUNT(*) FROM ts_fill_forward_by('freq_test', id, date, val, '2023-01-07', 1);
 ----
 6
 
@@ -98,19 +100,19 @@ SELECT COUNT(*) FROM ts_fill_forward('freq_test', id, date, val, '2023-01-07', 1
 
 # Polars-style works
 query I
-SELECT COUNT(*) FROM ts_fill_gaps_operator('freq_test', id, date, val, '1d');
+SELECT COUNT(*) FROM ts_fill_gaps_operator_by('freq_test', id, date, val, '1d');
 ----
 5
 
 # DuckDB INTERVAL style works
 query I
-SELECT COUNT(*) FROM ts_fill_gaps_operator('freq_test', id, date, val, '1 day');
+SELECT COUNT(*) FROM ts_fill_gaps_operator_by('freq_test', id, date, val, '1 day');
 ----
 5
 
 # Integer frequency works (interpreted as days)
 query I
-SELECT COUNT(*) FROM ts_fill_gaps_operator('freq_test', id, date, val, 1);
+SELECT COUNT(*) FROM ts_fill_gaps_operator_by('freq_test', id, date, val, 1);
 ----
 5
 

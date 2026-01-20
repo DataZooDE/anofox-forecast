@@ -75,6 +75,10 @@ pub struct TsStats {
     pub entropy: f64,
     /// Stability measure
     pub stability: f64,
+    /// Expected number of observations based on date range and frequency (None if no dates provided)
+    pub expected_length: Option<usize>,
+    /// Number of gaps (missing time periods) in the series (None if no dates provided)
+    pub n_gaps: Option<usize>,
 }
 
 /// Compute time series statistics for a series with potential NULL values.
@@ -254,7 +258,67 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
         seasonality_strength,
         entropy,
         stability,
+        expected_length: None,
+        n_gaps: None,
     })
+}
+
+/// Compute time series statistics with date information for gap detection.
+///
+/// # Arguments
+/// * `series` - A slice of optional f64 values (None represents NULL)
+/// * `dates` - A slice of timestamps in microseconds (must be same length as series)
+/// * `frequency_micros` - Expected frequency between observations in microseconds
+///
+/// # Returns
+/// * `Result<TsStats>` - Statistics for the series including expected_length and n_gaps
+pub fn compute_ts_stats_with_dates(
+    series: &[Option<f64>],
+    dates: &[i64],
+    frequency_micros: i64,
+) -> Result<TsStats> {
+    // First compute base stats
+    let mut stats = compute_ts_stats(series)?;
+
+    // Then compute date-based metrics if we have valid dates and frequency
+    if !dates.is_empty() && frequency_micros > 0 {
+        // Sort dates to handle potential out-of-order data
+        let mut sorted_dates = dates.to_vec();
+        sorted_dates.sort();
+
+        // Compute expected length
+        if sorted_dates.len() >= 2 {
+            let first = sorted_dates[0];
+            let last = sorted_dates[sorted_dates.len() - 1];
+            let duration = last - first;
+            let expected = ((duration / frequency_micros) + 1) as usize;
+            stats.expected_length = Some(expected);
+        } else {
+            stats.expected_length = Some(sorted_dates.len());
+        }
+
+        // Compute number of gaps
+        stats.n_gaps = Some(count_gaps_with_frequency(&sorted_dates, frequency_micros));
+    }
+
+    Ok(stats)
+}
+
+/// Count gaps in a date series given an explicit frequency.
+///
+/// A gap is detected when the difference between consecutive dates
+/// is significantly larger than the expected frequency (1.5x tolerance).
+fn count_gaps_with_frequency(sorted_dates: &[i64], frequency_micros: i64) -> usize {
+    if sorted_dates.len() < 2 || frequency_micros <= 0 {
+        return 0;
+    }
+
+    let threshold = (frequency_micros as f64 * 1.5) as i64;
+
+    sorted_dates
+        .windows(2)
+        .filter(|w| (w[1] - w[0]) > threshold)
+        .count()
 }
 
 /// Compute percentile using linear interpolation.

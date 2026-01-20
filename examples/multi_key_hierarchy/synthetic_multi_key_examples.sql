@@ -82,7 +82,7 @@ LIMIT 10;
 -- Custom separator
 SELECT '--- Custom separator ---' AS subsection;
 SELECT * FROM ts_combine_keys('sales_data', sale_date, quantity, region_id, store_id, item_id,
-    params := MAP{'separator': '-'})
+    params := {'separator': '-'})
 ORDER BY unique_id, sale_date
 LIMIT 5;
 
@@ -120,7 +120,7 @@ ORDER BY 1;
 SELECT '--- Custom aggregate keyword ---' AS subsection;
 SELECT DISTINCT unique_id
 FROM ts_aggregate_hierarchy('sales_data', sale_date, quantity, region_id, store_id, item_id,
-    params := MAP{'aggregate_keyword': 'TOTAL'})
+    params := {'aggregate_keyword': 'TOTAL'})
 WHERE unique_id LIKE '%TOTAL%'
 ORDER BY unique_id;
 

@@ -9,6 +9,8 @@
 
 require anofox_forecast
 
+require json
+
 #######################################
 # Setup: Create test data with VARCHAR columns
 # Simulates data from CSV imports where columns default to VARCHAR
@@ -82,7 +84,7 @@ FROM generate_series(0, 99) AS t(i);
 
 # ts_backtest_auto with string frequency parameter (Polars style)
 query I
-SELECT COUNT(*) > 0 FROM ts_backtest_auto(
+SELECT COUNT(*) > 0 FROM ts_backtest_auto_by(
     'backtest_data', id, ds, y, 7, 2, '1d',
     MAP {'method': 'Naive'}
 );
@@ -91,7 +93,7 @@ true
 
 # ts_backtest_auto with INTERVAL style frequency
 query I
-SELECT COUNT(*) > 0 FROM ts_backtest_auto(
+SELECT COUNT(*) > 0 FROM ts_backtest_auto_by(
     'backtest_data', id, ds, y, 7, 2, '1 day',
     MAP {'method': 'Naive'}
 );
@@ -157,7 +159,7 @@ true
 # First create CV splits using ts_cv_split with correct column names
 statement ok
 CREATE TABLE cv_splits_varchar AS
-SELECT * FROM ts_cv_split(
+SELECT * FROM ts_cv_split_by(
     'varchar_data', id, ds, y,
     [('2024-02-15'::TIMESTAMP)],
     7, '1d', MAP {}
@@ -199,7 +201,7 @@ FROM generate_series(0, 55) AS t(i);
 
 query I
 SELECT (decomposition).trend IS NOT NULL
-FROM ts_mstl_decomposition('seasonal_varchar', id, ds, y, MAP {})
+FROM ts_mstl_decomposition_by('seasonal_varchar', id, ds, y, MAP {})
 WHERE id = 'S1';
 ----
 true

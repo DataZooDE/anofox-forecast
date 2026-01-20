@@ -1,7 +1,7 @@
 # Anofox Forecast - Time Series Forecasting for DuckDB
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE)
-[![DuckDB](https://img.shields.io/badge/DuckDB-1.4.2+-green.svg)](https://duckdb.org)
+[![DuckDB](https://img.shields.io/badge/DuckDB-1.4.3+-green.svg)](https://duckdb.org)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
 [![Technical Depth](https://img.shields.io/badge/Technical%20Depth-A%20(93%25)-brightgreen.svg)](#code-quality)
 [![Code Health](https://img.shields.io/badge/Code%20Health-A--(%2090%25)-green.svg)](#code-quality)
@@ -95,7 +95,7 @@ make release
 
 ## 🚀 Quick Start on M5 Dataset
 
-The forecast takes ~2 minutes on a Dell XPS 13. (You need DuckDB v1.4.2).
+The forecast takes ~2 minutes on a Dell XPS 13. (Requires DuckDB v1.4.3+).
 
 ```sql
 -- Load extension
@@ -112,38 +112,37 @@ SELECT * FROM m5 WHERE ds < DATE '2016-04-25';
 CREATE OR REPLACE TABLE m5_test AS
 SELECT * FROM m5 WHERE ds >= DATE '2016-04-25';
 
--- Perform baseline forecast and evaluate performance
+-- Forecast with multiple models
 CREATE OR REPLACE TABLE forecast_results AS (
-    SELECT *
-    FROM anofox_fcst_ts_forecast_by('m5_train', item_id, ds, y, 'SeasonalNaive', 28, {'seasonal_period': 7})
+    SELECT * FROM ts_forecast_by('m5_train', item_id, ds, y, 'SeasonalNaive', 28, {'seasonal_period': 7})
     UNION ALL
-    SELECT *
-    FROM anofox_fcst_ts_forecast_by('m5_train', item_id, ds, y, 'Theta', 28, {'seasonal_period': 7})
+    SELECT * FROM ts_forecast_by('m5_train', item_id, ds, y, 'Theta', 28, {'seasonal_period': 7})
     UNION ALL
-    SELECT *
-    FROM anofox_fcst_ts_forecast_by('m5_train', item_id, ds, y, 'AutoARIMA', 28, {'seasonal_period': 7})
+    SELECT * FROM ts_forecast_by('m5_train', item_id, ds, y, 'AutoARIMA', 28, {'seasonal_period': 7})
 );
 
--- MAE and Bias of Forecasts
-CREATE OR REPLACE TABLE evaluation_results AS (
-  SELECT 
-      item_id,
-      model_name,
-      anofox_fcst_ts_mae(LIST(y), LIST(point_forecast)) AS mae,
-      anofox_fcst_ts_bias(LIST(y), LIST(point_forecast)) AS bias
-  FROM (
-      -- Join Forecast with Test Data
-      SELECT 
-          m.item_id,
-          m.ds,
-          m.y,
-          n.model_name,
-          n.point_forecast
-      FROM forecast_results n
-      JOIN m5_test m ON n.item_id = m.item_id AND n.date = m.ds
-  )
-  GROUP BY item_id, model_name
-);
+-- Join forecasts with actuals and create composite key for grouping
+CREATE OR REPLACE TABLE forecast_vs_actual AS
+SELECT
+    f.item_id,
+    f.model_name,
+    f.item_id || '|' || f.model_name AS series_key,
+    f.date,
+    t.y AS actual,
+    f.point_forecast AS forecast
+FROM forecast_results f
+JOIN m5_test t ON f.item_id = t.item_id AND f.date = t.ds;
+
+-- MAE and Bias per series using _by pattern
+CREATE OR REPLACE TABLE evaluation_results AS
+SELECT
+    split_part(m.id, '|', 1) AS item_id,
+    split_part(m.id, '|', 2) AS model_name,
+    m.mae,
+    b.bias
+FROM ts_mae_by('forecast_vs_actual', series_key, date, actual, forecast) m
+JOIN ts_bias_by('forecast_vs_actual', series_key, date, actual, forecast) b
+  ON m.id = b.id;
 
 -- Summarise evaluation results by model
 SELECT
@@ -161,18 +160,16 @@ ORDER BY avg_mae;
 
 **Write SQL once, use everywhere!** The extension works from any language with DuckDB bindings.
 
-| Language | Status | Guide |
+| Language | Status | Notes |
 |----------|--------|-------|
-| **Python** | ✅ | [Python Usage](guides/81_python_integration.md) |
-| **R** | ✅ | [R Usage](guides/82_r_integration.md) |
-| **Julia** | ✅ | [Julia Usage](guides/83_julia_integration.md) |
+| **Python** | ✅ | Via DuckDB Python bindings |
+| **R** | ✅ | Via DuckDB R bindings |
+| **Julia** | ✅ | Via DuckDB Julia bindings |
 | **C++** | ✅ | Via DuckDB C++ bindings |
 | **Rust** | ✅ | Via DuckDB Rust bindings |
 | **Node.js** | ✅ | Via DuckDB Node bindings |
 | **Go** | ✅ | Via DuckDB Go bindings |
 | **Java** | ✅ | Via DuckDB JDBC driver |
-
-**See**: [Multi-Language Overview](guides/80_multi_language_overview.md) for polyglot workflows!
 
 ---
 
@@ -180,22 +177,39 @@ ORDER BY avg_mae;
 
 For complete function signatures, parameters, and detailed documentation, see the [API Reference](docs/API_REFERENCE.md).
 
-### Guides and API Sections
+### Documentation Structure
 
-| Guide | API Reference Section |
-|-------|----------------------|
-| [Quick Start](guides/01_quickstart.md) | [Forecasting](docs/API_REFERENCE.md#forecasting) |
-| [EDA & Data Preparation](guides/11_exploratory_analysis.md) | [Exploratory Data Analysis](docs/API_REFERENCE.md#exploratory-data-analysis), [Data Quality](docs/API_REFERENCE.md#data-quality), [Data Preparation](docs/API_REFERENCE.md#data-preparation) |
-| [Detecting Seasonality](guides/12_detecting_seasonality.md) | [Seasonality](docs/API_REFERENCE.md#seasonality) |
-| [Detecting Changepoints](guides/13_detecting_changepoints.md) | [Changepoint Detection](docs/API_REFERENCE.md#changepoint-detection) |
-| [Time Series Features](guides/20_time_series_features.md) | [Time Series Features](docs/API_REFERENCE.md#time-series-features) |
-| [Basic Forecasting](guides/30_basic_forecasting.md) | [Forecasting](docs/API_REFERENCE.md#forecasting) |
-| Exogenous Variables | [Exogenous Forecasting](docs/API_REFERENCE.md#_ts_forecast_exog-scalar) |
-| [Evaluation Metrics](guides/50_evaluation_metrics.md) | [Evaluation](docs/API_REFERENCE.md#evaluation) |
-| [Backtesting & Cross-Validation](examples/backtesting/README.md) | [Cross-Validation & Backtesting](docs/API_REFERENCE.md#cross-validation--backtesting) |
-| Conformal Prediction | [Conformal Prediction](docs/API_REFERENCE.md#conformal-prediction) |
-| [Multi-Key Hierarchy](examples/multi_key_hierarchy/README.md) | [Multi-Key Hierarchy](docs/API_REFERENCE.md#multi-key-hierarchy) |
-| Forecasting Model Parameters | [Supported Models](docs/API_REFERENCE.md#supported-models), [Parameter Reference](docs/API_REFERENCE.md#parameter-reference) |
+| Category | Description | Documentation |
+|----------|-------------|---------------|
+| **Getting Started** | Installation and first forecast | [Getting Started Guide](docs/guides/01-getting-started.md) |
+| **Model Selection** | Choose the right model | [Model Selection Guide](docs/guides/02-model-selection.md) |
+| **Cross-Validation** | Evaluate forecast accuracy | [Cross-Validation Guide](docs/guides/03-cross-validation.md) |
+
+### API Documentation
+
+| Topic | Description | Reference |
+|-------|-------------|-----------|
+| **Hierarchical Data** | Multi-key hierarchy functions | [02-hierarchical.md](docs/api/02-hierarchical.md) |
+| **Statistics** | 34 statistical metrics, data quality | [03-statistics.md](docs/api/03-statistics.md) |
+| **Data Preparation** | Cleaning, imputation, filtering | [04-data-preparation.md](docs/api/04-data-preparation.md) |
+| **Period Detection** | Seasonality detection (12 methods) | [05-period-detection.md](docs/api/05-period-detection.md) |
+| **Changepoint Detection** | Structural break detection | [06-changepoint-detection.md](docs/api/06-changepoint-detection.md) |
+| **Forecasting** | 32 forecasting models | [07-forecasting.md](docs/api/07-forecasting.md) |
+| **Cross-Validation** | Backtesting and CV functions | [08-cross-validation.md](docs/api/08-cross-validation.md) |
+| **Evaluation Metrics** | 12 accuracy metrics | [09-evaluation-metrics.md](docs/api/09-evaluation-metrics.md) |
+| **Conformal Prediction** | Distribution-free prediction intervals | [11-conformal-prediction.md](docs/api/11-conformal-prediction.md) |
+| **Feature Extraction** | 117 tsfresh-compatible features | [20-feature-extraction.md](docs/api/20-feature-extraction.md) |
+
+### Model Reference (32 Models)
+
+| Category | Models | Reference |
+|----------|--------|-----------|
+| **Baseline** | Naive, SMA, SeasonalNaive, RandomWalkDrift | [baseline/](docs/reference/models/baseline/) |
+| **Exponential Smoothing** | SES, Holt, HoltWinters, SeasonalES | [exponential-smoothing/](docs/reference/models/exponential-smoothing/) |
+| **State Space** | ETS, ARIMA, AutoETS, AutoARIMA | [state-space/](docs/reference/models/state-space/) |
+| **Theta** | Theta, OptimizedTheta, DynamicTheta, AutoTheta | [theta/](docs/reference/models/theta/) |
+| **Multi-Seasonal** | MFLES, MSTL, TBATS (+ Auto variants) | [multi-seasonal/](docs/reference/models/multi-seasonal/) |
+| **Intermittent Demand** | Croston, CrostonSBA, ADIDA, IMAPA, TSB | [intermittent/](docs/reference/models/intermittent/) |
 
 
 ## 📦 Development
@@ -341,7 +355,7 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 ## 📞 Support
 
-- **Documentation**: [guides/](guides/)
+- **Documentation**: [docs/](docs/)
 - **Issues**: [GitHub Issues](https://github.com/DataZooDE/anofox-forecast/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/DataZooDE/anofox-forecast/discussions)
 - **Email**: sm@data-zoo.de
@@ -363,7 +377,8 @@ If you use this extension in research, please cite:
 
 Built on top of:
 - [DuckDB](https://duckdb.org) - Amazing analytical database
-- [anofox-time](https://github.com/anofox/anofox-time) - Core forecasting library
+- [anofox-forecast](https://crates.io/crates/anofox-forecast) - Core forecasting library
+- [anofox-regression](https://crates.io/crates/anofox-regression) - Regression and feature extraction
 
 Special thanks to the DuckDB team for making extensions possible!
 

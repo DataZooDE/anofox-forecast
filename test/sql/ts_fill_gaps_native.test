@@ -4,6 +4,8 @@
 
 require anofox_forecast
 
+require json
+
 # Test DATE type preservation
 statement ok
 CREATE TABLE test_date AS

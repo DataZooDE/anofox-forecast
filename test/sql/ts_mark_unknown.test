@@ -4,6 +4,8 @@
 
 require anofox_forecast
 
+require json
+
 #######################################
 # Setup Test Data
 #######################################
@@ -29,27 +31,27 @@ SELECT * FROM (VALUES
 
 # Test row count preserved
 query I
-SELECT COUNT(*) FROM ts_mark_unknown('scenario_test', series_id, date, '2024-01-03'::DATE);
+SELECT COUNT(*) FROM ts_mark_unknown_by('scenario_test', series_id, date, '2024-01-03'::DATE);
 ----
 10
 
 # Test is_unknown correctly marks future rows (4 rows after Jan 3: 2 per series)
 query I
-SELECT COUNT(*) FROM ts_mark_unknown('scenario_test', series_id, date, '2024-01-03'::DATE)
+SELECT COUNT(*) FROM ts_mark_unknown_by('scenario_test', series_id, date, '2024-01-03'::DATE)
 WHERE is_unknown = true;
 ----
 4
 
 # Test is_unknown correctly marks known rows (6 rows on or before Jan 3: 3 per series)
 query I
-SELECT COUNT(*) FROM ts_mark_unknown('scenario_test', series_id, date, '2024-01-03'::DATE)
+SELECT COUNT(*) FROM ts_mark_unknown_by('scenario_test', series_id, date, '2024-01-03'::DATE)
 WHERE is_unknown = false;
 ----
 6
 
 # Test all columns from source are preserved
 query I
-SELECT COUNT(*) FROM ts_mark_unknown('scenario_test', series_id, date, '2024-01-03'::DATE)
+SELECT COUNT(*) FROM ts_mark_unknown_by('scenario_test', series_id, date, '2024-01-03'::DATE)
 WHERE value IS NOT NULL AND is_holiday IS NOT NULL;
 ----
 10
@@ -63,7 +65,7 @@ query II
 SELECT
     series_id,
     SUM(CASE WHEN is_unknown THEN 1 ELSE is_holiday END) as scenario_sum
-FROM ts_mark_unknown('scenario_test', series_id, date, '2024-01-03'::DATE)
+FROM ts_mark_unknown_by('scenario_test', series_id, date, '2024-01-03'::DATE)
 GROUP BY series_id
 ORDER BY series_id;
 ----
@@ -76,7 +78,7 @@ B	2
 
 # Test last_known_date is correctly computed per group
 query I
-SELECT COUNT(DISTINCT last_known_date) FROM ts_mark_unknown('scenario_test', series_id, date, '2024-01-03'::DATE);
+SELECT COUNT(DISTINCT last_known_date) FROM ts_mark_unknown_by('scenario_test', series_id, date, '2024-01-03'::DATE);
 ----
 1
 
@@ -86,14 +88,14 @@ SELECT COUNT(DISTINCT last_known_date) FROM ts_mark_unknown('scenario_test', ser
 
 # Test with cutoff at start (all unknown)
 query I
-SELECT COUNT(*) FROM ts_mark_unknown('scenario_test', series_id, date, '2023-12-31'::DATE)
+SELECT COUNT(*) FROM ts_mark_unknown_by('scenario_test', series_id, date, '2023-12-31'::DATE)
 WHERE is_unknown = true;
 ----
 10
 
 # Test with cutoff at end (none unknown)
 query I
-SELECT COUNT(*) FROM ts_mark_unknown('scenario_test', series_id, date, '2024-01-05'::DATE)
+SELECT COUNT(*) FROM ts_mark_unknown_by('scenario_test', series_id, date, '2024-01-05'::DATE)
 WHERE is_unknown = true;
 ----
 0

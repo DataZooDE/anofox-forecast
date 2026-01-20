@@ -49,7 +49,7 @@ SELECT
     ROUND(AVG(abs_error), 2) AS mae,
     ROUND(fold_metric_score, 2) AS rmse,
     model_name
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'sales_data',           -- source table
     store_id,               -- group column
     date,                   -- date column
@@ -57,7 +57,7 @@ FROM ts_backtest_auto(
     7,                      -- horizon: forecast next 7 days
     5,                      -- folds: test on 5 different historical periods
     '1d',                   -- frequency
-    MAP{'method': 'AutoETS'}, -- params: model selection
+    {'method': 'AutoETS'}, -- params: model selection
     NULL,                   -- features: no external factors
     'rmse'                  -- metric: RMSE for evaluation
 )
@@ -99,7 +99,7 @@ LOAD anofox_statistics;
 
 -- Step 1: Create CV splits
 CREATE OR REPLACE TABLE cv_splits_p2 AS
-SELECT * FROM ts_cv_split(
+SELECT * FROM ts_cv_split_by(
     'sales_with_features', store_id, date, revenue,
     ['2024-02-15', '2024-03-01']::DATE[],  -- 2 folds
     7, '1d', MAP{}
@@ -107,7 +107,7 @@ SELECT * FROM ts_cv_split(
 
 -- Step 2: Prepare regression input (masks target as NULL for test rows)
 CREATE OR REPLACE TABLE reg_input_p2 AS
-SELECT * FROM ts_prepare_regression_input(
+SELECT * FROM ts_prepare_regression_input_by(
     'cv_splits_p2', 'sales_with_features', store_id, date, revenue, MAP{}
 );
 
@@ -168,7 +168,7 @@ SELECT
     fold_id,
     COUNT(*) AS n_predictions,
     ROUND(AVG(abs_error), 2) AS mae
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'sales_data',
     store_id,
     date,
@@ -191,13 +191,13 @@ SELECT
     fold_id,
     COUNT(*) AS n_predictions,
     ROUND(AVG(abs_error), 2) AS mae
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'sales_data',
     store_id,
     date,
     revenue,
     7, 5, '1d',
-    MAP{'method': 'AutoARIMA', 'gap': '0'}
+    {'method': 'AutoARIMA', 'gap': '0'}
 )
 GROUP BY fold_id
 ORDER BY fold_id;
@@ -218,7 +218,7 @@ SELECT * FROM ts_cv_generate_folds(
     3,                      -- n_folds
     7,                      -- horizon
     '1d',                   -- frequency
-    MAP{'gap': '1'}         -- params
+    {'gap': '1'}         -- params
 );
 
 SELECT 'Fold cutoff dates:' AS step;
@@ -226,7 +226,7 @@ SELECT * FROM fold_meta;
 
 -- Step 2: Create CV splits
 CREATE OR REPLACE TABLE cv_splits_p4 AS
-SELECT * FROM ts_cv_split(
+SELECT * FROM ts_cv_split_by(
     'sales_data',
     store_id,
     date,
@@ -290,7 +290,7 @@ CROSS JOIN generate_series(1, 2) AS s(s);
 
 -- Step 1: Create CV splits
 CREATE OR REPLACE TABLE cv_splits_p5 AS
-SELECT * FROM ts_cv_split(
+SELECT * FROM ts_cv_split_by(
     'sales_features', store_id, date, revenue,
     ['2024-02-15', '2024-03-01']::DATE[],
     7, '1d', MAP{}
@@ -298,7 +298,7 @@ SELECT * FROM ts_cv_split(
 
 -- Step 2: Hydrate features (join source data with CV splits)
 CREATE OR REPLACE TABLE safe_data AS
-SELECT * FROM ts_hydrate_features(
+SELECT * FROM ts_hydrate_features_by(
     'cv_splits_p5',
     'sales_features',
     store_id,
@@ -315,13 +315,13 @@ FROM safe_data;
 
 -- Step 4: Fill unknowns using last known value
 CREATE OR REPLACE TABLE filled_footfall AS
-SELECT * FROM ts_fill_unknown(
+SELECT * FROM ts_fill_unknown_by(
     'masked_data',
     store_id,
     date,
     footfall_safe,
     (SELECT MAX(date) FROM masked_data WHERE split = 'train'),
-    MAP{'strategy': 'last_value'}
+    {'strategy': 'last_value'}
 );
 
 -- Join filled values back to masked_data
@@ -477,10 +477,10 @@ SELECT
     COUNT(*) AS n_predictions,
     ROUND(AVG(abs_error), 2) AS mae,
     model_name
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'scenario_baseline', store_id, date, revenue,
     14, 2, '1d',
-    MAP{'method': 'SeasonalNaive', 'seasonal_period': '7'}
+    {'method': 'SeasonalNaive', 'seasonal_period': '7'}
 )
 GROUP BY fold_id, model_name
 ORDER BY fold_id;
@@ -491,10 +491,10 @@ SELECT
     COUNT(*) AS n_predictions,
     ROUND(AVG(abs_error), 2) AS mae,
     model_name
-FROM ts_backtest_auto(
+FROM ts_backtest_auto_by(
     'scenario_whatif', store_id, date, revenue,
     14, 2, '1d',
-    MAP{'method': 'SeasonalNaive', 'seasonal_period': '7'}
+    {'method': 'SeasonalNaive', 'seasonal_period': '7'}
 )
 GROUP BY fold_id, model_name
 ORDER BY fold_id;
@@ -504,7 +504,7 @@ ORDER BY fold_id;
 
 -- Prepare baseline for OLS (ts_cv_split + hydrate)
 CREATE OR REPLACE TABLE cv_baseline AS
-SELECT * FROM ts_cv_split(
+SELECT * FROM ts_cv_split_by(
     'scenario_baseline', store_id, date, revenue,
     ['2024-02-15']::DATE[], 14, '1d', MAP{}
 );
@@ -520,7 +520,7 @@ JOIN scenario_baseline s ON c.group_col = s.store_id AND c.date_col = s.date;
 
 -- Prepare what-if for OLS
 CREATE OR REPLACE TABLE cv_whatif AS
-SELECT * FROM ts_cv_split(
+SELECT * FROM ts_cv_split_by(
     'scenario_whatif', store_id, date, revenue,
     ['2024-02-15']::DATE[], 14, '1d', MAP{}
 );
@@ -739,7 +739,7 @@ FROM generate_series(1, 500) t(i);
 -- ts_cv_split_index returns ONLY: group_col, date_col, fold_id, split
 -- No target column = less memory for large datasets
 CREATE OR REPLACE TABLE cv_index AS
-SELECT * FROM ts_cv_split_index(
+SELECT * FROM ts_cv_split_index_by(
     'large_sales',
     store_id,
     date,
@@ -763,7 +763,7 @@ SELECT 'Hydrated data (with all source columns):' AS info;
 SELECT
     fold_id, split, store_id, date, sales,
     _is_test, _train_cutoff
-FROM ts_hydrate_split_full(
+FROM ts_hydrate_split_full_by(
     'cv_index', 'large_sales', store_id, date, MAP{}
 )
 WHERE store_id = 'STORE1'
@@ -804,13 +804,13 @@ SELECT 'ts_hydrate_split masks competitor_price in test set:' AS info;
 SELECT
     fold_id, split, group_col AS store, date_col AS date,
     ROUND(unknown_col, 2) AS competitor_price
-FROM ts_hydrate_split(
+FROM ts_hydrate_split_by(
     'cv_index',
     'store_features',
     store_id,
     date,
     competitor_price,
-    MAP{'strategy': 'null'}  -- mask to NULL in test
+    {'strategy': 'null'}  -- mask to NULL in test
 )
 WHERE group_col = 'STORE1' AND fold_id = 1
 ORDER BY date_col
@@ -825,7 +825,7 @@ SELECT
     fold_id, split, store_id, date,
     day_of_week,  -- KNOWN: use directly
     CASE WHEN _is_test THEN NULL ELSE ROUND(competitor_price, 2) END AS competitor_price  -- UNKNOWN: manual mask
-FROM ts_hydrate_split_full(
+FROM ts_hydrate_split_full_by(
     'cv_index', 'store_features', store_id, date, MAP{}
 )
 WHERE store_id = 'STORE1' AND fold_id = 1
@@ -840,7 +840,7 @@ SELECT 'ts_hydrate_split_strict returns ONLY metadata:' AS info;
 SELECT
     hs.fold_id, hs.split, hs.group_col AS store, hs.date_col AS date,
     hs._is_test
-FROM ts_hydrate_split_strict(
+FROM ts_hydrate_split_strict_by(
     'cv_index', 'store_features', store_id, date, MAP{}
 ) hs
 WHERE hs.group_col = 'STORE1' AND hs.fold_id = 1
@@ -871,7 +871,7 @@ SELECT
     _is_test,
     day_of_week,
     CASE WHEN _is_test THEN NULL ELSE competitor_price END AS competitor_price_masked
-FROM ts_hydrate_split_full(
+FROM ts_hydrate_split_full_by(
     'cv_index', 'store_features', store_id, date, MAP{}
 );
 

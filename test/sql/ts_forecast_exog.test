@@ -141,3 +141,74 @@ SELECT length((_ts_forecast_exog(
 ----
 3
 
+
+#######################################
+# ts_forecast_exog_by - Grouped Exogenous Forecasting
+#######################################
+
+# The ts_forecast_exog_by macro uses json_extract for dynamic column access
+require json
+
+# Create grouped historical data with exogenous variable
+statement ok
+CREATE TABLE exog_by_history AS
+SELECT
+    CASE WHEN i <= 20 THEN 'A' ELSE 'B' END AS group_id,
+    '2023-01-01'::TIMESTAMP + INTERVAL ((i - 1) % 20) DAY AS date,
+    (10.0 + (i % 20) * 2.0 + ((i % 20) % 7))::DOUBLE AS target,
+    ((i % 20) + 5.0)::DOUBLE AS xreg1
+FROM range(1, 41) t(i);
+
+# Create future exogenous data
+statement ok
+CREATE TABLE exog_by_future AS
+SELECT
+    group_id,
+    '2023-01-21'::TIMESTAMP + INTERVAL (i - 1) DAY AS date,
+    (25.0 + i)::DOUBLE AS xreg1
+FROM (VALUES ('A'), ('B')) AS groups(group_id),
+     range(1, 8) t(i);
+
+# Test ts_forecast_exog_by returns forecasts for both groups
+query I
+SELECT COUNT(DISTINCT id) FROM ts_forecast_exog_by(
+    'exog_by_history',
+    group_id,
+    date,
+    target,
+    ['xreg1'],
+    'exog_by_future',
+    date,
+    ['xreg1'],
+    'AutoARIMA',
+    7,
+    MAP{},
+    '1d'
+);
+----
+2
+
+# Test ts_forecast_exog_by returns correct number of forecast rows
+query I
+SELECT COUNT(*) FROM ts_forecast_exog_by(
+    'exog_by_history',
+    group_id,
+    date,
+    target,
+    ['xreg1'],
+    'exog_by_future',
+    date,
+    ['xreg1'],
+    'AutoARIMA',
+    7,
+    MAP{},
+    '1d'
+);
+----
+14
+
+statement ok
+DROP TABLE exog_by_future;
+
+statement ok
+DROP TABLE exog_by_history;

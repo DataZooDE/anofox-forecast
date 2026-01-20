@@ -224,7 +224,7 @@ FROM ts_detect_changepoints_by(
     item_id,
     ds,
     y,
-    MAP{'hazard_lambda': '50', 'include_probabilities': 'true'}
+    {'hazard_lambda': '50', 'include_probabilities': 'true'}
 );
 
 -- Show sample results
@@ -265,7 +265,7 @@ cp_unnested AS (
 SELECT
     c.item_id,
     c.cp_index,
-    d.date_list[c.cp_index + 1] AS cp_date  -- +1 because DuckDB arrays are 1-indexed
+    d.date_list[(c.cp_index + 1)::INTEGER] AS cp_date  -- +1 because DuckDB arrays are 1-indexed
 FROM cp_unnested c
 JOIN item_dates d ON c.item_id = d.item_id;
 

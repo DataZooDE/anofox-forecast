@@ -4,6 +4,8 @@
 
 require anofox_forecast
 
+require json
+
 #######################################
 # MAE - Mean Absolute Error
 #######################################

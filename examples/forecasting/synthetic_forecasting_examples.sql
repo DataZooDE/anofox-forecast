@@ -72,7 +72,7 @@ SELECT product_id, COUNT(*) AS n_rows FROM multi_series GROUP BY product_id ORDE
 SELECT * FROM ts_forecast_by(
     'multi_series', product_id, date, quantity,
     'ETS', 7, MAP{}
-) ORDER BY product_id, ds;
+) ORDER BY id, date;
 
 -- =============================================================================
 -- SECTION 3: Model Selection (Baseline to Advanced)
@@ -96,7 +96,7 @@ SELECT * FROM ts_forecast_by('comparison_series', id, date, value, 'Naive', 7, M
 
 .print ''
 .print 'SeasonalNaive model (period=7):'
-SELECT * FROM ts_forecast_by('comparison_series', id, date, value, 'SeasonalNaive', 7, MAP{'seasonal_period': '7'});
+SELECT * FROM ts_forecast_by('comparison_series', id, date, value, 'SeasonalNaive', 7, {'seasonal_period': '7'});
 
 .print ''
 .print 'AutoETS model (automatic selection):'
@@ -127,7 +127,7 @@ FROM generate_series(0, 55) AS t(i);
 SELECT * FROM ts_forecast_by(
     'seasonal_data', store_id, week, revenue,
     'HoltWinters', 14,
-    MAP{'seasonal_period': '7'}
+    {'seasonal_period': '7'}
 );
 
 .print ''
@@ -135,7 +135,7 @@ SELECT * FROM ts_forecast_by(
 SELECT * FROM ts_forecast_by(
     'seasonal_data', store_id, week, revenue,
     'SeasonalES', 14,
-    MAP{'seasonal_period': '7'}
+    {'seasonal_period': '7'}
 );
 
 -- =============================================================================
@@ -167,7 +167,7 @@ FROM dual_seasonal GROUP BY sensor_id;
 SELECT * FROM ts_forecast_by(
     'dual_seasonal', sensor_id, timestamp, reading,
     'MSTL', 48,
-    MAP{'seasonal_periods': '[24, 168]'}
+    {'seasonal_periods': '[24, 168]'}
 ) LIMIT 10;
 
 -- =============================================================================
@@ -213,6 +213,8 @@ SELECT * FROM ts_forecast_by('spare_parts', sku, date, demand, 'ADIDA', 14, MAP{
 -- SECTION 7: Exogenous Variables
 -- =============================================================================
 -- Use case: Include external factors (temperature, promotions, holidays).
+-- Note: ts_forecast_exog requires ts_forecast_exog_by for multi-series data.
+-- See docs/api/07-forecasting.md for full documentation.
 
 .print ''
 .print '>>> SECTION 7: Exogenous Variables'
@@ -221,6 +223,7 @@ SELECT * FROM ts_forecast_by('spare_parts', sku, date, demand, 'ADIDA', 14, MAP{
 -- Create historical data with external variables
 CREATE OR REPLACE TABLE sales_with_features AS
 SELECT
+    'store_1' AS store_id,
     '2024-01-01'::DATE + INTERVAL (i) DAY AS date,
     100 + i * 0.5 + 15 * temp + 30 * promo + (RANDOM() - 0.5) * 10 AS amount,
     temp,
@@ -236,6 +239,7 @@ FROM (
 -- Create future exogenous values (known in advance)
 CREATE OR REPLACE TABLE future_features AS
 SELECT
+    'store_1' AS store_id,
     '2024-01-01'::DATE + INTERVAL (60 + i) DAY AS date,
     0.9 + (RANDOM() - 0.5) * 0.3 AS temp,     -- forecast temperature
     CASE WHEN i IN (2, 5) THEN 1 ELSE 0 END AS promo  -- planned promotions
@@ -250,11 +254,20 @@ SELECT * FROM future_features ORDER BY date;
 
 .print ''
 .print 'Forecast with exogenous variables (AutoARIMA):'
-SELECT * FROM ts_forecast_exog(
-    'sales_with_features', date, amount,
-    'temp,promo',
+-- Use ts_forecast_exog_by for multi-series exogenous forecasting
+SELECT * FROM ts_forecast_exog_by(
+    'sales_with_features',
+    store_id,
+    date,
+    amount,
+    ['temp', 'promo'],
     'future_features',
-    'AutoARIMA', 7, MAP{}
+    date,
+    ['temp', 'promo'],
+    'AutoARIMA',
+    7,
+    MAP{},
+    '1d'
 );
 
 -- =============================================================================

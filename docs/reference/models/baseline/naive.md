@@ -1,0 +1,68 @@
+# Naive
+
+> Simplest baseline model - repeats the last observed value
+
+## Signature
+
+```sql
+-- Single series
+SELECT * FROM ts_forecast('table', date_col, value_col, 'Naive', horizon, params);
+
+-- Multiple series (grouped)
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'Naive', horizon, params);
+```
+
+## Description
+
+The simplest forecasting method. Repeats the last observed value for all future periods. Use as a **baseline** to evaluate more complex models.
+
+## Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `horizon` | INTEGER | Yes | — | Number of periods to forecast |
+| `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
+| `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
+| `include_residuals` | BOOLEAN | No | false | Return residuals |
+
+## Returns
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `group_col` | ANY | Series identifier (only for `_by` variant) |
+| `ds` | TIMESTAMP | Forecast timestamp |
+| `forecast` | DOUBLE | Point forecast |
+| `lower` | DOUBLE | Lower prediction interval |
+| `upper` | DOUBLE | Upper prediction interval |
+
+## SQL Example
+
+```sql
+-- Basic usage (baseline forecast)
+SELECT * FROM ts_forecast_by(
+    'daily_sales',
+    product_id,
+    date,
+    quantity,
+    'Naive',
+    7,
+    {}
+);
+
+-- Compare with more complex model
+WITH naive AS (
+    SELECT * FROM ts_forecast_by('sales', id, date, val, 'Naive', 12, {})
+),
+ets AS (
+    SELECT * FROM ts_forecast_by('sales', id, date, val, 'AutoETS', 12, {})
+)
+SELECT n.id, n.ds, n.forecast AS naive_fcst, e.forecast AS ets_fcst
+FROM naive n JOIN ets e ON n.id = e.id AND n.ds = e.ds;
+```
+
+## Best For
+
+- Establishing a baseline for model comparison
+- Random walk data (stock prices)
+- Very short forecast horizons
+- When historical patterns provide no predictive value

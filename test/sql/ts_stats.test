@@ -4,6 +4,8 @@
 
 require anofox_forecast
 
+require json
+
 #######################################
 # Table Function Tests (C++ API Compatible)
 #######################################
@@ -135,3 +137,164 @@ query I
 SELECT _ts_stats(NULL) IS NULL;
 ----
 true
+
+#######################################
+# ts_stats_by - Alias Test
+#######################################
+
+statement ok
+CREATE TABLE test_stats_by AS
+SELECT
+    CASE WHEN i <= 10 THEN 'A' ELSE 'B' END AS group_id,
+    '2023-01-01'::TIMESTAMP + INTERVAL (i % 10) DAY AS date,
+    (i % 10 + 1)::DOUBLE AS value
+FROM range(1, 21) t(i);
+
+# Test ts_stats_by alias works
+query I
+SELECT count(*) FROM ts_stats_by('test_stats_by', group_id, date, value, '1d');
+----
+2
+
+statement ok
+DROP TABLE test_stats_by;
+
+
+#######################################
+# ts_quality_report - Quality Report from Stats
+#######################################
+
+statement ok
+CREATE TABLE test_qr_data AS
+SELECT
+    CASE 
+        WHEN i <= 10 THEN 'series_ok'
+        WHEN i <= 15 THEN 'series_short'
+        ELSE 'series_constant'
+    END AS id,
+    '2023-01-01'::TIMESTAMP + INTERVAL (i % 10) DAY AS date,
+    CASE 
+        WHEN i > 15 THEN 5.0  -- constant series
+        ELSE (i % 10 + 1)::DOUBLE
+    END AS value
+FROM range(1, 21) t(i);
+
+statement ok
+CREATE TABLE test_qr_stats AS
+SELECT * FROM ts_stats('test_qr_data', id, date, value, '1d');
+
+# Test ts_quality_report returns expected columns
+query IIIII
+SELECT n_passed, n_nan_issues, n_missing_issues, n_constant, n_total
+FROM ts_quality_report('test_qr_stats', 8);
+----
+1	0	0	1	3
+
+statement ok
+DROP TABLE test_qr_stats;
+
+statement ok
+DROP TABLE test_qr_data;
+
+#######################################
+# ts_stats_summary - Summary Statistics
+#######################################
+
+statement ok
+CREATE TABLE test_summary_data AS
+SELECT
+    CASE WHEN i <= 15 THEN 'A' ELSE 'B' END AS id,
+    '2023-01-01'::TIMESTAMP + INTERVAL (i % 15) DAY AS date,
+    (i * 1.5 + 10.0)::DOUBLE AS value
+FROM range(1, 26) t(i);
+
+statement ok
+CREATE TABLE test_summary_stats AS
+SELECT * FROM ts_stats('test_summary_data', id, date, value, '1d');
+
+# Test ts_stats_summary returns expected columns
+query IIIIII
+SELECT n_series, avg_length, min_length, max_length, total_nulls, total_nans
+FROM ts_stats_summary('test_summary_stats');
+----
+2	12.5	10	15	0	0
+
+statement ok
+DROP TABLE test_summary_stats;
+
+statement ok
+DROP TABLE test_summary_data;
+
+#######################################
+# ts_stats_agg - Aggregate Function Tests
+#######################################
+
+# Create test data for aggregate tests
+statement ok
+CREATE TABLE test_agg_series AS
+SELECT 'A' AS id,
+       ('2023-01-01'::DATE + (i || ' days')::INTERVAL)::TIMESTAMP AS date,
+       (i + 1)::DOUBLE AS value
+FROM generate_series(0, 9) AS t(i)
+UNION ALL
+SELECT 'B' AS id,
+       ('2023-01-01'::DATE + (i || ' days')::INTERVAL)::TIMESTAMP AS date,
+       (i * 2)::DOUBLE AS value
+FROM generate_series(0, 9) AS t(i);
+
+# Test ts_stats_agg basic aggregation
+query II
+SELECT id, (ts_stats_agg(date, value)).length
+FROM test_agg_series
+GROUP BY id
+ORDER BY id;
+----
+A	10
+B	10
+
+# Test ts_stats_agg mean calculation
+query IR
+SELECT id, (ts_stats_agg(date, value)).mean
+FROM test_agg_series
+GROUP BY id
+ORDER BY id;
+----
+A	5.5
+B	9.0
+
+# Test ts_stats_agg min/max
+query IRR
+SELECT id, (ts_stats_agg(date, value)).min, (ts_stats_agg(date, value)).max
+FROM test_agg_series
+GROUP BY id
+ORDER BY id;
+----
+A	1.0	10.0
+B	0.0	18.0
+
+# Test ts_stats_agg variance (should be non-zero for non-constant series)
+query I
+SELECT (ts_stats_agg(date, value)).variance > 0
+FROM test_agg_series
+WHERE id = 'A';
+----
+true
+
+# Test ts_stats_agg returns STRUCT with expected fields
+query I
+SELECT (ts_stats_agg(date, value)).sum IS NOT NULL
+FROM test_agg_series
+WHERE id = 'A';
+----
+true
+
+# Test ts_stats_agg with aliased name
+query I
+SELECT (anofox_fcst_ts_stats_agg(date, value)).length
+FROM test_agg_series
+WHERE id = 'A';
+----
+10
+
+statement ok
+DROP TABLE test_agg_series;

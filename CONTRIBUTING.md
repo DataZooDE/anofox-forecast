@@ -40,8 +40,7 @@ Thank you for your interest in contributing to Anofox Forecast! This document pr
 
 4. If you're modifying documentation:
    ```bash
-   # Edit template files in guides/templates/*.md.in
-   make docs
+   # Edit files in docs/api/ or docs/guides/
    make test-docs
    ```
 
@@ -83,12 +82,10 @@ These same checks run in GitHub Actions CI, so running them locally before pushi
 
 ### Documentation
 
-- **Guide templates**: Edit files in `guides/templates/*.md.in`
+- **API documentation**: Edit files in `docs/api/`
+- **Guides**: Edit files in `docs/guides/`
 - **SQL examples**: Edit files in `test/sql/docs_examples/`
-- **Build docs**: Run `make docs` to generate final documentation
 - **Test examples**: Run `make test-docs` to validate SQL examples
-
-See [Documentation Build System](README.md#documentation-build-system) for details.
 
 ### Code Style
 
@@ -102,19 +99,19 @@ See [Documentation Build System](README.md#documentation-build-system) for detai
 When adding new forecasting models:
 
 1. **Core Library Integration**:
-   - Implement model in `anofox-time` C++ library
+   - Implement model in `anofox-forecast` Rust crate
    - Follow existing model interfaces (fit/predict pattern)
    - Ensure parameter validation in model constructor
-   - Add unit tests in `anofox-time/tests/`
+   - Add unit tests in the Rust crate
 
 2. **Extension Integration**:
-   - Register model in `src/model_factory.cpp`
-   - Add parameter parsing in model factory
+   - Register model in the extension source
+   - Add parameter parsing
    - Ensure model name is case-insensitive
    - Update model list in documentation
 
 3. **Parameter Specification**:
-   - Document all parameters in `docs/PARAMETERS.md`
+   - Document all parameters in model reference docs
    - Specify types (INTEGER, DOUBLE, BOOLEAN, INTEGER[])
    - Document ranges and validation rules
    - Include behavioral notes and use cases
@@ -127,9 +124,8 @@ When adding new forecasting models:
 
 5. **Documentation Updates**:
    - Add to model list in README.md
-   - Add to parameter guide (docs/PARAMETERS.md)
-   - Add to appropriate guide templates in `guides/templates/`
-   - Include usage examples in relevant guides
+   - Add model reference in `docs/reference/models/`
+   - Update API documentation in `docs/api/`
 
 ### Testing
 
@@ -213,10 +209,10 @@ By contributing, you agree that your contributions will be licensed under the pr
 
 ## Questions?
 
-- **Documentation**: [guides/](guides/)
+- **Documentation**: [docs/](docs/)
 - **Issues**: [GitHub Issues](https://github.com/DataZooDE/anofox-forecast/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/DataZooDE/anofox-forecast/discussions)
-- **Email**: support@anofox.com
+- **Email**: sm@data-zoo.de
 
 ## Recognition
 

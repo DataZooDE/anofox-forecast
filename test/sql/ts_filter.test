@@ -4,6 +4,8 @@
 
 require anofox_forecast
 
+require json
+
 #######################################
 # Setup Test Data
 #######################################
@@ -30,19 +32,19 @@ UNION ALL SELECT 'C', '2023-01-03', 5.0;
 
 # Should filter out constant series (C)
 query I
-SELECT COUNT(DISTINCT id) FROM ts_drop_constant('test_series', id, val);
+SELECT COUNT(DISTINCT id) FROM ts_drop_constant_by('test_series', id, val);
 ----
 2
 
 # Verify series C is excluded
 query I
-SELECT COUNT(*) FROM ts_drop_constant('test_series', id, val) WHERE id = 'C';
+SELECT COUNT(*) FROM ts_drop_constant_by('test_series', id, val) WHERE id = 'C';
 ----
 0
 
 # Verify A and B remain
 query I
-SELECT COUNT(*) FROM ts_drop_constant('test_series', id, val) WHERE id IN ('A', 'B');
+SELECT COUNT(*) FROM ts_drop_constant_by('test_series', id, val) WHERE id IN ('A', 'B');
 ----
 10
 
@@ -52,13 +54,13 @@ SELECT COUNT(*) FROM ts_drop_constant('test_series', id, val) WHERE id IN ('A', 
 
 # Series C has only 3 rows, should be filtered with min_length=5
 query I
-SELECT COUNT(DISTINCT id) FROM ts_drop_short('test_series', id, 5);
+SELECT COUNT(DISTINCT id) FROM ts_drop_short_by('test_series', id, 5);
 ----
 2
 
 # With min_length=3, all series should pass
 query I
-SELECT COUNT(DISTINCT id) FROM ts_drop_short('test_series', id, 3);
+SELECT COUNT(DISTINCT id) FROM ts_drop_short_by('test_series', id, 3);
 ----
 3
 
@@ -68,13 +70,13 @@ SELECT COUNT(DISTINCT id) FROM ts_drop_short('test_series', id, 3);
 
 # Series B starts with zeros, should remove them
 query I
-SELECT COUNT(*) FROM ts_drop_leading_zeros('test_series', id, date, val) WHERE id = 'B';
+SELECT COUNT(*) FROM ts_drop_leading_zeros_by('test_series', id, date, val) WHERE id = 'B';
 ----
 3
 
 # Series A has no leading zeros, should remain unchanged
 query I
-SELECT COUNT(*) FROM ts_drop_leading_zeros('test_series', id, date, val) WHERE id = 'A';
+SELECT COUNT(*) FROM ts_drop_leading_zeros_by('test_series', id, date, val) WHERE id = 'A';
 ----
 5
 
@@ -84,13 +86,13 @@ SELECT COUNT(*) FROM ts_drop_leading_zeros('test_series', id, date, val) WHERE i
 
 # Series B ends with zeros, should remove them
 query I
-SELECT COUNT(*) FROM ts_drop_trailing_zeros('test_series', id, date, val) WHERE id = 'B';
+SELECT COUNT(*) FROM ts_drop_trailing_zeros_by('test_series', id, date, val) WHERE id = 'B';
 ----
 4
 
 # Series A has no trailing zeros, should remain unchanged
 query I
-SELECT COUNT(*) FROM ts_drop_trailing_zeros('test_series', id, date, val) WHERE id = 'A';
+SELECT COUNT(*) FROM ts_drop_trailing_zeros_by('test_series', id, date, val) WHERE id = 'A';
 ----
 5
 
@@ -100,13 +102,13 @@ SELECT COUNT(*) FROM ts_drop_trailing_zeros('test_series', id, date, val) WHERE 
 
 # Series B has leading and trailing zeros
 query I
-SELECT COUNT(*) FROM ts_drop_edge_zeros('test_series', id, date, val) WHERE id = 'B';
+SELECT COUNT(*) FROM ts_drop_edge_zeros_by('test_series', id, date, val) WHERE id = 'B';
 ----
 2
 
 # Series A has no edge zeros
 query I
-SELECT COUNT(*) FROM ts_drop_edge_zeros('test_series', id, date, val) WHERE id = 'A';
+SELECT COUNT(*) FROM ts_drop_edge_zeros_by('test_series', id, date, val) WHERE id = 'A';
 ----
 5
 
@@ -125,13 +127,13 @@ UNION ALL SELECT 'Y', '2023-01-03', 3.0;
 
 # X has 33% gaps, Y has 0% - with 0.3 threshold, only Y passes
 query I
-SELECT COUNT(DISTINCT id) FROM ts_drop_gappy('gappy_series', id, val, 0.3);
+SELECT COUNT(DISTINCT id) FROM ts_drop_gappy_by('gappy_series', id, val, 0.3);
 ----
 1
 
 # With 0.5 threshold, both pass
 query I
-SELECT COUNT(DISTINCT id) FROM ts_drop_gappy('gappy_series', id, val, 0.5);
+SELECT COUNT(DISTINCT id) FROM ts_drop_gappy_by('gappy_series', id, val, 0.5);
 ----
 2
 
@@ -150,12 +152,12 @@ UNION ALL SELECT 'Y', '2023-01-03', 2.0;
 
 # X is all zeros, should be filtered
 query I
-SELECT COUNT(DISTINCT id) FROM ts_drop_zeros('zero_series', id, val);
+SELECT COUNT(DISTINCT id) FROM ts_drop_zeros_by('zero_series', id, val);
 ----
 1
 
 # Y has non-zero values
 query I
-SELECT COUNT(*) FROM ts_drop_zeros('zero_series', id, val) WHERE id = 'Y';
+SELECT COUNT(*) FROM ts_drop_zeros_by('zero_series', id, val) WHERE id = 'Y';
 ----
 3

@@ -186,6 +186,12 @@ pub struct TsStatsResult {
     pub entropy: c_double,
     /// Stability measure
     pub stability: c_double,
+    /// Expected number of observations based on date range and frequency
+    pub expected_length: size_t,
+    /// Number of gaps (missing time periods) in the series
+    pub n_gaps: size_t,
+    /// Whether date-based metrics (expected_length, n_gaps) are valid
+    pub has_date_metrics: bool,
 }
 
 impl Default for TsStatsResult {
@@ -225,6 +231,9 @@ impl Default for TsStatsResult {
             seasonality_strength: f64::NAN,
             entropy: f64::NAN,
             stability: f64::NAN,
+            expected_length: 0,
+            n_gaps: 0,
+            has_date_metrics: false,
         }
     }
 }
@@ -266,6 +275,9 @@ impl From<anofox_fcst_core::TsStats> for TsStatsResult {
             seasonality_strength: stats.seasonality_strength,
             entropy: stats.entropy,
             stability: stats.stability,
+            expected_length: stats.expected_length.unwrap_or(0),
+            n_gaps: stats.n_gaps.unwrap_or(0),
+            has_date_metrics: stats.expected_length.is_some(),
         }
     }
 }

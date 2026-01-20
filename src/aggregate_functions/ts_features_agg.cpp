@@ -426,6 +426,20 @@ void RegisterTsFeaturesAggFunction(ExtensionLoader &loader) {
     ts_features_set.AddFunction(agg_func_3);
     ts_features_set.AddFunction(agg_func_4);
     loader.RegisterFunction(ts_features_set);
+
+    // Register ts_features_agg alias (for API consistency with ts_forecast_agg pattern)
+    AggregateFunctionSet ts_features_agg_set("ts_features_agg");
+    ts_features_agg_set.AddFunction(agg_func_2);
+    ts_features_agg_set.AddFunction(agg_func_3);
+    ts_features_agg_set.AddFunction(agg_func_4);
+    loader.RegisterFunction(ts_features_agg_set);
+
+    // Register anofox_fcst_ts_features_agg alias (prefixed form)
+    AggregateFunctionSet anofox_features_agg_set("anofox_fcst_ts_features_agg");
+    anofox_features_agg_set.AddFunction(agg_func_2);
+    anofox_features_agg_set.AddFunction(agg_func_3);
+    anofox_features_agg_set.AddFunction(agg_func_4);
+    loader.RegisterFunction(anofox_features_agg_set);
 }
 
 } // namespace duckdb
