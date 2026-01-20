@@ -4,6 +4,8 @@
 
 require anofox_forecast
 
+require json
+
 #######################################
 # ts_detect_peaks - Basic Tests
 #######################################
