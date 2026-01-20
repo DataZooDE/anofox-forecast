@@ -10,6 +10,10 @@
 -- Load extension
 LOAD anofox_forecast;
 
+-- Load json extension (required for some internal operations)
+INSTALL json;
+LOAD json;
+
 -- Enable progress bar for long operations
 SET enable_progress_bar = true;
 
@@ -213,6 +217,8 @@ SELECT * FROM ts_forecast_by('spare_parts', sku, date, demand, 'ADIDA', 14, MAP{
 -- SECTION 7: Exogenous Variables
 -- =============================================================================
 -- Use case: Include external factors (temperature, promotions, holidays).
+-- Note: ts_forecast_exog requires ts_forecast_exog_by for multi-series data.
+-- See docs/api/07-forecasting.md for full documentation.
 
 .print ''
 .print '>>> SECTION 7: Exogenous Variables'
@@ -221,6 +227,7 @@ SELECT * FROM ts_forecast_by('spare_parts', sku, date, demand, 'ADIDA', 14, MAP{
 -- Create historical data with external variables
 CREATE OR REPLACE TABLE sales_with_features AS
 SELECT
+    'store_1' AS store_id,
     '2024-01-01'::DATE + INTERVAL (i) DAY AS date,
     100 + i * 0.5 + 15 * temp + 30 * promo + (RANDOM() - 0.5) * 10 AS amount,
     temp,
@@ -236,6 +243,7 @@ FROM (
 -- Create future exogenous values (known in advance)
 CREATE OR REPLACE TABLE future_features AS
 SELECT
+    'store_1' AS store_id,
     '2024-01-01'::DATE + INTERVAL (60 + i) DAY AS date,
     0.9 + (RANDOM() - 0.5) * 0.3 AS temp,     -- forecast temperature
     CASE WHEN i IN (2, 5) THEN 1 ELSE 0 END AS promo  -- planned promotions
@@ -250,12 +258,20 @@ SELECT * FROM future_features ORDER BY date;
 
 .print ''
 .print 'Forecast with exogenous variables (AutoARIMA):'
--- Note: ts_forecast_exog expects feature columns as a list, not a comma-separated string
-SELECT * FROM ts_forecast_exog(
-    'sales_with_features', date, amount,
+-- Use ts_forecast_exog_by for multi-series exogenous forecasting
+SELECT * FROM ts_forecast_exog_by(
+    'sales_with_features',
+    store_id,
+    date,
+    amount,
     ['temp', 'promo'],
     'future_features',
-    'AutoARIMA', 7, MAP{}
+    date,
+    ['temp', 'promo'],
+    'AutoARIMA',
+    7,
+    MAP{},
+    '1d'
 );
 
 -- =============================================================================

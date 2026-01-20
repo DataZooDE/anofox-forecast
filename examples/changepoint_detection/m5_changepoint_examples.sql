@@ -265,7 +265,7 @@ cp_unnested AS (
 SELECT
     c.item_id,
     c.cp_index,
-    d.date_list[c.cp_index + 1] AS cp_date  -- +1 because DuckDB arrays are 1-indexed
+    d.date_list[(c.cp_index + 1)::INTEGER] AS cp_date  -- +1 because DuckDB arrays are 1-indexed
 FROM cp_unnested c
 JOIN item_dates d ON c.item_id = d.item_id;
 
