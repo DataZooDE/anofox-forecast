@@ -74,7 +74,7 @@ SELECT
     id,
     (periods).primary_period AS fft_period,
     (periods).method AS method
-FROM ts_detect_periods_by('clean_sine', signal_id, ds, value, MAP{'method': 'fft'});
+FROM ts_detect_periods_by('clean_sine', signal_id, ds, value, {'method': 'fft'});
 
 -- =============================================================================
 -- SECTION 3: ACF-Based Detection (Multi-Series)
@@ -104,7 +104,7 @@ SELECT
     id,
     (periods).primary_period AS acf_period,
     (periods).method AS method
-FROM ts_detect_periods_by('noisy_data', series_id, ds, value, MAP{'method': 'acf'});
+FROM ts_detect_periods_by('noisy_data', series_id, ds, value, {'method': 'acf'});
 
 -- =============================================================================
 -- SECTION 4: Multiple Periods (Single Series)
@@ -131,7 +131,7 @@ FROM generate_series(0, 119) AS t(i);
 SELECT
     (periods).primary_period,
     (periods).n_periods AS n_periods
-FROM ts_detect_periods('dual_seasonal', ds, value, MAP{'method': 'multi'});
+FROM ts_detect_periods('dual_seasonal', ds, value, {'method': 'multi'});
 
 -- =============================================================================
 -- SECTION 5: Compare Methods (Multi-Series)
@@ -152,15 +152,15 @@ FROM generate_series(0, 69) AS t(i);
 .print 'Comparing different detection methods (expected period=7):'
 SELECT
     'fft' AS method,
-    (SELECT (periods).primary_period FROM ts_detect_periods_by('compare_data', series_id, ds, value, MAP{'method': 'fft'})) AS detected_period
+    (SELECT (periods).primary_period FROM ts_detect_periods_by('compare_data', series_id, ds, value, {'method': 'fft'})) AS detected_period
 UNION ALL
 SELECT
     'acf' AS method,
-    (SELECT (periods).primary_period FROM ts_detect_periods_by('compare_data', series_id, ds, value, MAP{'method': 'acf'})) AS detected_period
+    (SELECT (periods).primary_period FROM ts_detect_periods_by('compare_data', series_id, ds, value, {'method': 'acf'})) AS detected_period
 UNION ALL
 SELECT
     'autoperiod' AS method,
-    (SELECT (periods).primary_period FROM ts_detect_periods_by('compare_data', series_id, ds, value, MAP{'method': 'autoperiod'})) AS detected_period
+    (SELECT (periods).primary_period FROM ts_detect_periods_by('compare_data', series_id, ds, value, {'method': 'autoperiod'})) AS detected_period
 UNION ALL
 SELECT
     'ensemble (default)' AS method,

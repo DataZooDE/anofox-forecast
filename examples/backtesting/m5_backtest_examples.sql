@@ -91,19 +91,19 @@ CREATE OR REPLACE TABLE backtest_comparison AS
 WITH naive_results AS (
     SELECT 'Naive' AS method, * FROM ts_backtest_auto_by(
         'm5_sample', item_id, ds, y, 14, 3, '1d',
-        MAP{'method': 'Naive'}
+        {'method': 'Naive'}
     )
 ),
 seasonal_naive_results AS (
     SELECT 'SeasonalNaive' AS method, * FROM ts_backtest_auto_by(
         'm5_sample', item_id, ds, y, 14, 3, '1d',
-        MAP{'method': 'SeasonalNaive', 'seasonal_period': '7'}
+        {'method': 'SeasonalNaive', 'seasonal_period': '7'}
     )
 ),
 theta_results AS (
     SELECT 'Theta' AS method, * FROM ts_backtest_auto_by(
         'm5_sample', item_id, ds, y, 14, 3, '1d',
-        MAP{'method': 'Theta', 'seasonal_period': '7'}
+        {'method': 'Theta', 'seasonal_period': '7'}
     )
 )
 SELECT * FROM naive_results
@@ -145,7 +145,7 @@ SELECT
     ROUND(AVG(fold_metric_score), 2) AS smape
 FROM ts_backtest_auto_by(
     'm5_sample', item_id, ds, y, 14, 3, '1d',
-    MAP{'method': 'SeasonalNaive', 'seasonal_period': '7'},
+    {'method': 'SeasonalNaive', 'seasonal_period': '7'},
     NULL,
     'smape'
 )
@@ -159,7 +159,7 @@ SELECT
     ROUND(AVG(fold_metric_score), 2) AS coverage_90
 FROM ts_backtest_auto_by(
     'm5_sample', item_id, ds, y, 14, 3, '1d',
-    MAP{'method': 'SeasonalNaive', 'seasonal_period': '7'},
+    {'method': 'SeasonalNaive', 'seasonal_period': '7'},
     NULL,
     'coverage'
 )
@@ -180,7 +180,7 @@ SELECT
     ROUND(SQRT(AVG(error * error)), 2) AS rmse
 FROM ts_backtest_auto_by(
     'm5_sample', item_id, ds, y, 14, 3, '1d',
-    MAP{'method': 'SeasonalNaive', 'seasonal_period': '7', 'gap': '0'}
+    {'method': 'SeasonalNaive', 'seasonal_period': '7', 'gap': '0'}
 )
 UNION ALL
 SELECT
@@ -189,7 +189,7 @@ SELECT
     ROUND(SQRT(AVG(error * error)), 2) AS rmse
 FROM ts_backtest_auto_by(
     'm5_sample', item_id, ds, y, 14, 3, '1d',
-    MAP{'method': 'SeasonalNaive', 'seasonal_period': '7', 'gap': '2'}
+    {'method': 'SeasonalNaive', 'seasonal_period': '7', 'gap': '2'}
 );
 
 -- ============================================================================
@@ -324,7 +324,7 @@ SELECT
     ROUND(ts_bias(LIST(actual), LIST(forecast)), 2) AS bias
 FROM ts_backtest_auto_by(
     'm5_sample', item_id, ds, y, 14, 3, '1d',
-    MAP{'method': 'SeasonalNaive', 'seasonal_period': '7'}
+    {'method': 'SeasonalNaive', 'seasonal_period': '7'}
 );
 
 -- ============================================================================
@@ -343,7 +343,7 @@ SELECT
     ROUND(AVG(abs_error) / NULLIF(AVG(actual), 0) * 100, 2) AS mape_pct
 FROM ts_backtest_auto_by(
     'm5_sample', item_id, ds, y, 14, 3, '1d',
-    MAP{'method': 'SeasonalNaive', 'seasonal_period': '7'}
+    {'method': 'SeasonalNaive', 'seasonal_period': '7'}
 )
 GROUP BY group_col
 ORDER BY mae DESC;

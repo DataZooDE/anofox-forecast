@@ -116,17 +116,24 @@ For table macros operating on time series:
 
 ### Params Convention
 
-The `params` parameter supports both MAP and STRUCT syntax (v0.4.0+):
+The `params` parameter supports both MAP and STRUCT syntax in **table macros** (v0.4.0+):
 
 ```sql
--- STRUCT allows mixed types (recommended)
-SELECT * FROM ts_backtest_auto('sales', id, date, value, 7, 3, '1d',
+-- STRUCT allows mixed types (recommended for table macros)
+SELECT * FROM ts_backtest_auto_by('sales', id, date, value, 7, 3, '1d',
     {'method': 'Naive', 'gap': 2, 'clip_horizon': true});
 
--- MAP requires homogeneous string values (legacy)
-SELECT * FROM ts_backtest_auto('sales', id, date, value, 7, 3, '1d',
+-- MAP requires homogeneous string values (legacy, also works)
+SELECT * FROM ts_backtest_auto_by('sales', id, date, value, 7, 3, '1d',
     MAP{'method': 'Naive', 'gap': '2', 'clip_horizon': 'true'});
 ```
+
+> **Note:** Aggregate functions (e.g., `ts_detect_changepoints_agg`, `ts_forecast_agg`) require **MAP syntax only**. STRUCT syntax is not supported for aggregate functions.
+>
+> ```sql
+> -- Aggregate functions: use MAP syntax
+> SELECT ts_detect_changepoints_agg(ds, y, MAP{'hazard_lambda': '50'}) FROM data GROUP BY id;
+> ```
 
 ---
 

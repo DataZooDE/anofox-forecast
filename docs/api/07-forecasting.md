@@ -345,6 +345,8 @@ SELECT * FROM ts_forecast_exog(
 
 Aggregate function for generating forecasts with GROUP BY.
 
+> **Note:** Aggregate functions require **MAP syntax** for the params parameter. STRUCT syntax (`{...}`) is only supported for table macros.
+
 **Signature:**
 ```sql
 ts_forecast_agg(date_col, value_col, method, horizon, params) → STRUCT

@@ -57,7 +57,7 @@ FROM ts_backtest_auto_by(
     7,                      -- horizon: forecast next 7 days
     5,                      -- folds: test on 5 different historical periods
     '1d',                   -- frequency
-    MAP{'method': 'AutoETS'}, -- params: model selection
+    {'method': 'AutoETS'}, -- params: model selection
     NULL,                   -- features: no external factors
     'rmse'                  -- metric: RMSE for evaluation
 )
@@ -197,7 +197,7 @@ FROM ts_backtest_auto_by(
     date,
     revenue,
     7, 5, '1d',
-    MAP{'method': 'AutoARIMA', 'gap': '0'}
+    {'method': 'AutoARIMA', 'gap': '0'}
 )
 GROUP BY fold_id
 ORDER BY fold_id;
@@ -218,7 +218,7 @@ SELECT * FROM ts_cv_generate_folds(
     3,                      -- n_folds
     7,                      -- horizon
     '1d',                   -- frequency
-    MAP{'gap': '1'}         -- params
+    {'gap': '1'}         -- params
 );
 
 SELECT 'Fold cutoff dates:' AS step;
@@ -321,7 +321,7 @@ SELECT * FROM ts_fill_unknown_by(
     date,
     footfall_safe,
     (SELECT MAX(date) FROM masked_data WHERE split = 'train'),
-    MAP{'strategy': 'last_value'}
+    {'strategy': 'last_value'}
 );
 
 -- Join filled values back to masked_data
@@ -480,7 +480,7 @@ SELECT
 FROM ts_backtest_auto_by(
     'scenario_baseline', store_id, date, revenue,
     14, 2, '1d',
-    MAP{'method': 'SeasonalNaive', 'seasonal_period': '7'}
+    {'method': 'SeasonalNaive', 'seasonal_period': '7'}
 )
 GROUP BY fold_id, model_name
 ORDER BY fold_id;
@@ -494,7 +494,7 @@ SELECT
 FROM ts_backtest_auto_by(
     'scenario_whatif', store_id, date, revenue,
     14, 2, '1d',
-    MAP{'method': 'SeasonalNaive', 'seasonal_period': '7'}
+    {'method': 'SeasonalNaive', 'seasonal_period': '7'}
 )
 GROUP BY fold_id, model_name
 ORDER BY fold_id;
@@ -810,7 +810,7 @@ FROM ts_hydrate_split_by(
     store_id,
     date,
     competitor_price,
-    MAP{'strategy': 'null'}  -- mask to NULL in test
+    {'strategy': 'null'}  -- mask to NULL in test
 )
 WHERE group_col = 'STORE1' AND fold_id = 1
 ORDER BY date_col

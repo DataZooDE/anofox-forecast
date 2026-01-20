@@ -94,6 +94,8 @@ ts_detect_changepoints(source, group_col, date_col, value_col, params)
 
 Aggregate function for detecting changepoints in grouped time series.
 
+> **Note:** Aggregate functions require **MAP syntax** for the params parameter. STRUCT syntax (`{...}`) is only supported for table macros.
+
 **Signature:**
 ```sql
 ts_detect_changepoints_agg(

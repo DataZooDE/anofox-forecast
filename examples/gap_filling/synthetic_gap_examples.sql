@@ -148,21 +148,21 @@ SELECT * FROM feature_data ORDER BY series_id, date;
 .print ''
 .print 'After ts_fill_unknown (cutoff=2024-01-03, strategy=last_value):'
 SELECT group_col AS series_id, date_col AS date, value_col AS feature
-FROM ts_fill_unknown_by('feature_data', series_id, date, feature, '2024-01-03'::TIMESTAMP, MAP{'strategy': 'last_value'})
+FROM ts_fill_unknown_by('feature_data', series_id, date, feature, '2024-01-03'::TIMESTAMP, {'strategy': 'last_value'})
 ORDER BY group_col, date_col;
 
 -- Fill with NULL instead
 .print ''
 .print 'After ts_fill_unknown (cutoff=2024-01-03, strategy=null):'
 SELECT group_col AS series_id, date_col AS date, value_col AS feature
-FROM ts_fill_unknown_by('feature_data', series_id, date, feature, '2024-01-03'::TIMESTAMP, MAP{'strategy': 'null'})
+FROM ts_fill_unknown_by('feature_data', series_id, date, feature, '2024-01-03'::TIMESTAMP, {'strategy': 'null'})
 ORDER BY group_col, date_col;
 
 -- Fill with default value
 .print ''
 .print 'After ts_fill_unknown (cutoff=2024-01-03, strategy=default, fill_value=0):'
 SELECT group_col AS series_id, date_col AS date, value_col AS feature
-FROM ts_fill_unknown_by('feature_data', series_id, date, feature, '2024-01-03'::TIMESTAMP, MAP{'strategy': 'default', 'fill_value': '0'})
+FROM ts_fill_unknown_by('feature_data', series_id, date, feature, '2024-01-03'::TIMESTAMP, {'strategy': 'default', 'fill_value': '0'})
 ORDER BY group_col, date_col;
 
 -- =============================================================================

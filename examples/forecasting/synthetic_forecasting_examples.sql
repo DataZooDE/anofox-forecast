@@ -10,10 +10,6 @@
 -- Load extension
 LOAD anofox_forecast;
 
--- Load json extension (required for some internal operations)
-INSTALL json;
-LOAD json;
-
 -- Enable progress bar for long operations
 SET enable_progress_bar = true;
 
@@ -100,7 +96,7 @@ SELECT * FROM ts_forecast_by('comparison_series', id, date, value, 'Naive', 7, M
 
 .print ''
 .print 'SeasonalNaive model (period=7):'
-SELECT * FROM ts_forecast_by('comparison_series', id, date, value, 'SeasonalNaive', 7, MAP{'seasonal_period': '7'});
+SELECT * FROM ts_forecast_by('comparison_series', id, date, value, 'SeasonalNaive', 7, {'seasonal_period': '7'});
 
 .print ''
 .print 'AutoETS model (automatic selection):'
@@ -131,7 +127,7 @@ FROM generate_series(0, 55) AS t(i);
 SELECT * FROM ts_forecast_by(
     'seasonal_data', store_id, week, revenue,
     'HoltWinters', 14,
-    MAP{'seasonal_period': '7'}
+    {'seasonal_period': '7'}
 );
 
 .print ''
@@ -139,7 +135,7 @@ SELECT * FROM ts_forecast_by(
 SELECT * FROM ts_forecast_by(
     'seasonal_data', store_id, week, revenue,
     'SeasonalES', 14,
-    MAP{'seasonal_period': '7'}
+    {'seasonal_period': '7'}
 );
 
 -- =============================================================================
@@ -171,7 +167,7 @@ FROM dual_seasonal GROUP BY sensor_id;
 SELECT * FROM ts_forecast_by(
     'dual_seasonal', sensor_id, timestamp, reading,
     'MSTL', 48,
-    MAP{'seasonal_periods': '[24, 168]'}
+    {'seasonal_periods': '[24, 168]'}
 ) LIMIT 10;
 
 -- =============================================================================
