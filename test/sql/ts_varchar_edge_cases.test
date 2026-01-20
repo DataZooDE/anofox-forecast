@@ -9,6 +9,8 @@
 
 require anofox_forecast
 
+require json
+
 #######################################
 # Setup: Create test data with VARCHAR columns
 # Simulates data from CSV imports where columns default to VARCHAR
