@@ -1,204 +1,267 @@
--- =============================================================================
+-- ============================================================================
 -- Decomposition Examples - Synthetic Data
--- =============================================================================
+-- ============================================================================
 -- This script demonstrates time series decomposition with the anofox-forecast
--- extension using 5 patterns from basic to advanced.
+-- extension using the ts_mstl_decomposition_by table macro.
 --
 -- Run: ./build/release/duckdb < examples/decomposition/synthetic_decomposition_examples.sql
--- =============================================================================
+-- ============================================================================
 
 -- Load extension
 LOAD anofox_forecast;
+INSTALL json;
+LOAD json;
 
 .print '============================================================================='
-.print 'DECOMPOSITION EXAMPLES - Synthetic Data'
+.print 'DECOMPOSITION EXAMPLES - Using ts_mstl_decomposition_by'
 .print '============================================================================='
 
--- =============================================================================
--- SECTION 1: Detrending (ts_detrend)
--- =============================================================================
--- Use case: Remove trend component to reveal seasonal patterns.
+-- ============================================================================
+-- SECTION 1: Basic MSTL Decomposition for Multiple Series
+-- ============================================================================
+-- Use ts_mstl_decomposition_by to decompose grouped time series into
+-- trend, seasonal, and remainder components.
 
 .print ''
-.print '>>> SECTION 1: Detrending (ts_detrend)'
+.print '>>> SECTION 1: Basic MSTL Decomposition'
 .print '-----------------------------------------------------------------------------'
 
--- Create data with strong trend and seasonality
-CREATE OR REPLACE TABLE trend_data AS
-SELECT
-    i,
-    -- Base value with strong upward trend + seasonal pattern + noise
-    50.0 + i * 2.0 + 20.0 * SIN(2 * PI() * i / 12.0) + (RANDOM() - 0.5) * 10 AS value
-FROM generate_series(0, 47) AS t(i);
-
-.print 'Data with trend and seasonality (first 12 values):'
-SELECT i, ROUND(value, 2) AS value FROM trend_data WHERE i < 12 ORDER BY i;
-
-.print ''
-.print 'Detrended result (auto method):'
-SELECT
-    (ts_detrend(LIST(value ORDER BY i))).method AS detected_method,
-    (ts_detrend(LIST(value ORDER BY i))).n_params AS n_params,
-    ROUND((ts_detrend(LIST(value ORDER BY i))).rss, 2) AS residual_sum_sq,
-    length((ts_detrend(LIST(value ORDER BY i))).trend) AS n_points
-FROM trend_data;
-
--- =============================================================================
--- SECTION 2: Seasonal Decomposition (ts_decompose_seasonal)
--- =============================================================================
--- Use case: Separate trend, seasonal, and remainder components.
-
-.print ''
-.print '>>> SECTION 2: Seasonal Decomposition (ts_decompose_seasonal)'
-.print '-----------------------------------------------------------------------------'
-
--- Create clear seasonal data
-CREATE OR REPLACE TABLE seasonal_data AS
-SELECT
-    i,
-    -- Seasonal pattern with period=4 (quarterly)
-    100.0 + 5.0 * i / 24.0 + 20.0 * SIN(2 * PI() * i / 4.0) + (RANDOM() - 0.5) * 5 AS value
-FROM generate_series(0, 23) AS t(i);
-
-.print 'Data with quarterly seasonality:'
-SELECT i, ROUND(value, 2) AS value FROM seasonal_data ORDER BY i;
-
-.print ''
-.print 'Additive decomposition (period=4):'
-SELECT
-    (ts_decompose_seasonal(LIST(value ORDER BY i), 4, 'additive')).method AS method,
-    (ts_decompose_seasonal(LIST(value ORDER BY i), 4, 'additive')).period AS period,
-    length((ts_decompose_seasonal(LIST(value ORDER BY i), 4, 'additive')).trend) AS n_points
-FROM seasonal_data;
-
--- =============================================================================
--- SECTION 3: MSTL Decomposition (Multi-Seasonal)
--- =============================================================================
--- Use case: Handle multiple seasonal periods simultaneously.
-
-.print ''
-.print '>>> SECTION 3: MSTL Decomposition (Multi-Seasonal)'
-.print '-----------------------------------------------------------------------------'
-
--- Create data with multiple seasonal patterns
-CREATE OR REPLACE TABLE multi_seasonal AS
-SELECT
-    i,
-    -- Weekly (7) + Monthly (30) patterns
-    100.0
-    + 20.0 * SIN(2 * PI() * i / 7.0)   -- weekly
-    + 10.0 * SIN(2 * PI() * i / 30.0)  -- monthly
-    + (RANDOM() - 0.5) * 5 AS value
-FROM generate_series(0, 89) AS t(i);
-
-.print 'Data with multiple seasonal patterns (weekly + monthly):'
-SELECT
-    COUNT(*) AS n_points,
-    ROUND(AVG(value), 2) AS mean_value,
-    ROUND(STDDEV(value), 2) AS std_value
-FROM multi_seasonal;
-
-.print ''
-.print 'MSTL decomposition result:'
-SELECT
-    length((_ts_mstl_decomposition(LIST(value ORDER BY i))).trend) AS trend_length,
-    length((_ts_mstl_decomposition(LIST(value ORDER BY i))).remainder) AS remainder_length,
-    (_ts_mstl_decomposition(LIST(value ORDER BY i))).periods AS detected_periods
-FROM multi_seasonal;
-
--- =============================================================================
--- SECTION 4: Decomposition for Grouped Series
--- =============================================================================
--- Use case: Apply decomposition to multiple time series.
-
-.print ''
-.print '>>> SECTION 4: Decomposition for Grouped Series'
-.print '-----------------------------------------------------------------------------'
-
--- Create multi-series data
-CREATE OR REPLACE TABLE multi_series_decomp AS
+-- Create multi-series data with different seasonal patterns
+CREATE OR REPLACE TABLE multi_series AS
 SELECT * FROM (
-    -- Series A: Strong seasonality
+    -- Series A: Strong weekly seasonality
     SELECT
-        'A' AS series_id,
+        'Series_A' AS series_id,
         '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS date,
-        100.0 + 30.0 * SIN(2 * PI() * i / 7.0) + (RANDOM() - 0.5) * 5 AS value
-    FROM generate_series(0, 27) AS t(i)
+        100.0 + i * 0.5 + 30.0 * SIN(2 * PI() * i / 7.0) + (RANDOM() - 0.5) * 10 AS value
+    FROM generate_series(0, 89) AS t(i)
     UNION ALL
-    -- Series B: Trend dominant
+    -- Series B: Monthly seasonality with trend
     SELECT
-        'B' AS series_id,
+        'Series_B' AS series_id,
         '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS date,
-        50.0 + i * 2.0 + (RANDOM() - 0.5) * 10 AS value
-    FROM generate_series(0, 27) AS t(i)
+        200.0 + i * 1.0 + 50.0 * SIN(2 * PI() * i / 30.0) + (RANDOM() - 0.5) * 15 AS value
+    FROM generate_series(0, 89) AS t(i)
+    UNION ALL
+    -- Series C: Mixed weekly + monthly patterns
+    SELECT
+        'Series_C' AS series_id,
+        '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS date,
+        150.0
+        + 20.0 * SIN(2 * PI() * i / 7.0)
+        + 40.0 * SIN(2 * PI() * i / 30.0)
+        + (RANDOM() - 0.5) * 8 AS value
+    FROM generate_series(0, 89) AS t(i)
 );
 
 .print 'Multi-series data summary:'
 SELECT series_id, COUNT(*) AS n_points, ROUND(AVG(value), 2) AS avg_value
-FROM multi_series_decomp GROUP BY series_id ORDER BY series_id;
+FROM multi_series GROUP BY series_id ORDER BY series_id;
 
+-- 1.1: Basic decomposition (auto-detect periods)
 .print ''
-.print 'MSTL decomposition by series (using table macro):'
+.print 'Section 1.1: Basic MSTL Decomposition (auto-detect periods)'
+
 SELECT
-    id AS series_id,
-    length((decomposition).trend) AS trend_length,
-    (decomposition).periods AS detected_periods
-FROM ts_mstl_decomposition_by('multi_series_decomp', series_id, date, value, MAP{})
-ORDER BY series_id;
+    id,
+    length(trend) AS trend_length,
+    length(remainder) AS remainder_length,
+    periods AS detected_periods
+FROM ts_mstl_decomposition_by('multi_series', series_id, date, value, MAP{});
 
--- =============================================================================
--- SECTION 5: Extract Components
--- =============================================================================
--- Use case: Access individual decomposition components.
+-- ============================================================================
+-- SECTION 2: Decomposition with Explicit Periods
+-- ============================================================================
 
 .print ''
-.print '>>> SECTION 5: Extract Components'
+.print '>>> SECTION 2: Decomposition with Explicit Periods'
 .print '-----------------------------------------------------------------------------'
 
--- Create simple seasonal data
-CREATE OR REPLACE TABLE extract_demo AS
-SELECT
-    i,
-    100.0 + 10.0 * SIN(2 * PI() * i / 6.0) + (RANDOM() - 0.5) * 3 AS value
-FROM generate_series(0, 23) AS t(i);
+-- 2.1: Specify weekly period
+.print 'Section 2.1: Weekly decomposition (period=7)'
 
-.print 'Extract trend, seasonal, remainder components:'
-WITH decomposed AS (
-    SELECT ts_decompose_seasonal(LIST(value ORDER BY i), 6, 'additive') AS result
-    FROM extract_demo
-)
 SELECT
-    (result).method AS method,
-    (result).period AS period,
-    ROUND((result).trend[1], 2) AS first_trend,
-    ROUND((result).seasonal[1], 2) AS first_seasonal,
-    ROUND((result).remainder[1], 2) AS first_remainder
-FROM decomposed;
+    id,
+    length(trend) AS n_points,
+    periods
+FROM ts_mstl_decomposition_by('multi_series', series_id, date, value,
+    MAP{'periods': '[7]'});
+
+-- 2.2: Multiple seasonal periods
+.print ''
+.print 'Section 2.2: Multiple periods (weekly + monthly)'
+
+SELECT
+    id,
+    length(trend) AS n_points,
+    periods
+FROM ts_mstl_decomposition_by('multi_series', series_id, date, value,
+    MAP{'periods': '[7, 30]'});
+
+-- ============================================================================
+-- SECTION 3: Extracting Components
+-- ============================================================================
 
 .print ''
-.print 'MSTL components (trend first 5 values):'
-WITH mstl_result AS (
-    SELECT _ts_mstl_decomposition(LIST(value ORDER BY i)) AS result
-    FROM extract_demo
+.print '>>> SECTION 3: Extracting Components'
+.print '-----------------------------------------------------------------------------'
+
+-- 3.1: Extract trend for analysis
+.print 'Section 3.1: First 5 trend values per series'
+
+SELECT
+    id,
+    trend[1:5] AS first_5_trend,
+    remainder[1:5] AS first_5_remainder
+FROM ts_mstl_decomposition_by('multi_series', series_id, date, value, MAP{});
+
+-- 3.2: Compute trend statistics
+.print ''
+.print 'Section 3.2: Trend statistics per series'
+
+WITH decomposed AS (
+    SELECT * FROM ts_mstl_decomposition_by('multi_series', series_id, date, value, MAP{})
 )
 SELECT
-    (result).trend[1:5] AS first_5_trend,
-    (result).remainder[1:5] AS first_5_remainder
-FROM mstl_result;
+    id,
+    ROUND(list_avg(trend), 2) AS mean_trend,
+    ROUND(trend[length(trend)] - trend[1], 2) AS trend_change,
+    ROUND(list_stddev_pop(remainder), 2) AS remainder_std
+FROM decomposed;
 
--- =============================================================================
+-- ============================================================================
+-- SECTION 4: Real-World Scenarios
+-- ============================================================================
+
+.print ''
+.print '>>> SECTION 4: Real-World Scenarios'
+.print '-----------------------------------------------------------------------------'
+
+-- 4.1: Retail sales with multiple seasonalities
+.print 'Section 4.1: Retail Sales Decomposition'
+
+CREATE OR REPLACE TABLE retail_sales AS
+SELECT * FROM (
+    -- Store 1: Strong weekly pattern
+    SELECT
+        'Store_1' AS store_id,
+        '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS date,
+        ROUND(
+            5000.0
+            + i * 10  -- growth trend
+            + 1500.0 * SIN(2 * PI() * i / 7.0)  -- weekly
+            + 500.0 * SIN(2 * PI() * i / 30.0)  -- monthly
+            + (RANDOM() - 0.5) * 300
+        , 0)::INT AS sales
+    FROM generate_series(0, 179) AS t(i)
+    UNION ALL
+    -- Store 2: Declining trend, weak seasonality
+    SELECT
+        'Store_2' AS store_id,
+        '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS date,
+        ROUND(
+            8000.0
+            - i * 5  -- declining trend
+            + 800.0 * SIN(2 * PI() * i / 7.0)
+            + (RANDOM() - 0.5) * 400
+        , 0)::INT AS sales
+    FROM generate_series(0, 179) AS t(i)
+    UNION ALL
+    -- Store 3: Stable with strong seasonality
+    SELECT
+        'Store_3' AS store_id,
+        '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS date,
+        ROUND(
+            6000.0
+            + 2000.0 * SIN(2 * PI() * i / 7.0)
+            + 1000.0 * SIN(2 * PI() * i / 30.0)
+            + (RANDOM() - 0.5) * 250
+        , 0)::INT AS sales
+    FROM generate_series(0, 179) AS t(i)
+);
+
+SELECT
+    id AS store,
+    length(trend) AS n_days,
+    periods AS detected_periods,
+    ROUND(trend[length(trend)] - trend[1], 0) AS trend_change_6months
+FROM ts_mstl_decomposition_by('retail_sales', store_id, date, sales, MAP{});
+
+-- 4.2: Sensor data decomposition
+.print ''
+.print 'Section 4.2: Sensor Data Decomposition'
+
+CREATE OR REPLACE TABLE sensor_readings AS
+SELECT * FROM (
+    -- Sensor A: Daily cycle (temperature)
+    SELECT
+        'Temp_Sensor' AS sensor_id,
+        '2024-01-01 00:00:00'::TIMESTAMP + INTERVAL (i) HOUR AS timestamp,
+        ROUND(
+            20.0
+            + 5.0 * SIN(2 * PI() * i / 24.0)  -- daily cycle
+            + i * 0.01  -- slight warming trend
+            + (RANDOM() - 0.5) * 2
+        , 2) AS reading
+    FROM generate_series(0, 167) AS t(i)
+    UNION ALL
+    -- Sensor B: Weekly cycle (traffic)
+    SELECT
+        'Traffic_Sensor' AS sensor_id,
+        '2024-01-01 00:00:00'::TIMESTAMP + INTERVAL (i) HOUR AS timestamp,
+        ROUND(
+            100.0
+            + 50.0 * SIN(2 * PI() * i / 168.0)  -- weekly cycle (168 hours)
+            + 30.0 * SIN(2 * PI() * i / 24.0)   -- daily cycle
+            + (RANDOM() - 0.5) * 20
+        , 2) AS reading
+    FROM generate_series(0, 167) AS t(i)
+);
+
+SELECT
+    id AS sensor,
+    length(trend) AS n_hours,
+    periods AS detected_periods
+FROM ts_mstl_decomposition_by('sensor_readings', sensor_id, timestamp, reading, MAP{});
+
+-- ============================================================================
+-- SECTION 5: Comparing Decomposition Results
+-- ============================================================================
+
+.print ''
+.print '>>> SECTION 5: Comparing Decomposition Results'
+.print '-----------------------------------------------------------------------------'
+
+-- 5.1: Summary comparison
+.print 'Section 5.1: Decomposition Summary Comparison'
+
+WITH decomposed AS (
+    SELECT * FROM ts_mstl_decomposition_by('retail_sales', store_id, date, sales, MAP{})
+)
+SELECT
+    id AS store,
+    ROUND(list_avg(trend), 0) AS avg_trend,
+    ROUND(list_stddev_pop(trend), 0) AS trend_volatility,
+    ROUND(list_stddev_pop(remainder), 0) AS noise_level,
+    CASE
+        WHEN list_stddev_pop(remainder) < 300 THEN 'Low noise'
+        WHEN list_stddev_pop(remainder) < 500 THEN 'Moderate noise'
+        ELSE 'High noise'
+    END AS noise_assessment
+FROM decomposed
+ORDER BY noise_level;
+
+-- ============================================================================
 -- CLEANUP
--- =============================================================================
+-- ============================================================================
 
 .print ''
 .print '>>> CLEANUP'
 .print '-----------------------------------------------------------------------------'
 
-DROP TABLE IF EXISTS trend_data;
-DROP TABLE IF EXISTS seasonal_data;
-DROP TABLE IF EXISTS multi_seasonal;
-DROP TABLE IF EXISTS multi_series_decomp;
-DROP TABLE IF EXISTS extract_demo;
+DROP TABLE IF EXISTS multi_series;
+DROP TABLE IF EXISTS retail_sales;
+DROP TABLE IF EXISTS sensor_readings;
 
 .print 'All tables cleaned up.'
 .print ''

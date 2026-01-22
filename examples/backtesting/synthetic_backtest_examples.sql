@@ -142,15 +142,24 @@ FROM ols_raw ols
 JOIN reg_input_numbered ri ON ols.fold_id = ri.fold_id AND ols.row_in_fold = ri.row_in_fold
 WHERE ri.split = 'test';
 
--- Calculate metrics using built-in functions
+-- Calculate metrics using *_by table macros
+WITH mae_results AS (
+    SELECT * FROM ts_mae_by('ols_predictions_p2', fold_id, date, actual, forecast)
+),
+rmse_results AS (
+    SELECT * FROM ts_rmse_by('ols_predictions_p2', fold_id, date, actual, forecast)
+),
+bias_results AS (
+    SELECT * FROM ts_bias_by('ols_predictions_p2', fold_id, date, actual, forecast)
+)
 SELECT
-    fold_id,
-    COUNT(*) AS n_predictions,
-    ROUND(ts_mae(LIST(actual), LIST(forecast)), 2) AS mae,
-    ROUND(ts_rmse(LIST(actual), LIST(forecast)), 2) AS rmse,
-    ROUND(ts_bias(LIST(actual), LIST(forecast)), 2) AS bias
-FROM ols_predictions_p2
-GROUP BY fold_id
+    m.id AS fold_id,
+    ROUND(m.mae, 2) AS mae,
+    ROUND(r.rmse, 2) AS rmse,
+    ROUND(b.bias, 2) AS bias
+FROM mae_results m
+JOIN rmse_results r ON m.id = r.id
+JOIN bias_results b ON m.id = b.id
 ORDER BY fold_id;
 
 -- ============================================================================
@@ -380,15 +389,24 @@ FROM ols_raw ols
 JOIN reg_input_numbered ri ON ols.fold_id = ri.fold_id AND ols.row_in_fold = ri.row_in_fold
 WHERE ri.split = 'test';
 
--- Calculate metrics using built-in functions
+-- Calculate metrics using *_by table macros
+WITH mae_results AS (
+    SELECT * FROM ts_mae_by('ols_predictions_p5', fold_id, date, actual, forecast)
+),
+rmse_results AS (
+    SELECT * FROM ts_rmse_by('ols_predictions_p5', fold_id, date, actual, forecast)
+),
+bias_results AS (
+    SELECT * FROM ts_bias_by('ols_predictions_p5', fold_id, date, actual, forecast)
+)
 SELECT
-    fold_id,
-    COUNT(*) AS n_predictions,
-    ROUND(ts_mae(LIST(actual), LIST(forecast)), 2) AS mae,
-    ROUND(ts_rmse(LIST(actual), LIST(forecast)), 2) AS rmse,
-    ROUND(ts_bias(LIST(actual), LIST(forecast)), 2) AS bias
-FROM ols_predictions_p5
-GROUP BY fold_id
+    m.id AS fold_id,
+    ROUND(m.mae, 2) AS mae,
+    ROUND(r.rmse, 2) AS rmse,
+    ROUND(b.bias, 2) AS bias
+FROM mae_results m
+JOIN rmse_results r ON m.id = r.id
+JOIN bias_results b ON m.id = b.id
 ORDER BY fold_id;
 
 -- ============================================================================

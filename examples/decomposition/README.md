@@ -4,11 +4,17 @@
 
 This folder contains runnable SQL examples demonstrating time series decomposition with the anofox-forecast extension.
 
+## Function
+
+| Function | Description |
+|----------|-------------|
+| `ts_mstl_decomposition_by` | MSTL decomposition for multiple series |
+
 ## Example Files
 
 | File | Description | Data Source |
 |------|-------------|-------------|
-| [`synthetic_decomposition_examples.sql`](synthetic_decomposition_examples.sql) | 5 patterns using generated data | Synthetic |
+| [`synthetic_decomposition_examples.sql`](synthetic_decomposition_examples.sql) | Multi-series decomposition examples | Synthetic |
 
 ## Quick Start
 
@@ -19,164 +25,118 @@ This folder contains runnable SQL examples demonstrating time series decompositi
 
 ---
 
-## Overview
+## Usage
 
-The extension provides functions for decomposing time series:
-
-| Function | Algorithm | Best For |
-|----------|-----------|----------|
-| `ts_detrend` | Polynomial/linear | Remove trend |
-| `ts_decompose_seasonal` | Classical decomposition | Single season |
-| `ts_mstl_decomposition` | Multiple STL | Multi-seasonal |
-| `_ts_mstl_decomposition` | Scalar MSTL | Array input |
-
----
-
-## Patterns Overview
-
-### Pattern 1: Detrending (ts_detrend)
-
-**Use case:** Remove trend component to reveal seasonal patterns.
+### Basic Decomposition (Auto-detect Periods)
 
 ```sql
-SELECT ts_detrend(LIST(value ORDER BY ts)) AS result
-FROM my_series;
--- Returns: {trend, detrended, method, coefficients, rss, n_params}
+-- Decompose all series with automatic period detection
+SELECT * FROM ts_mstl_decomposition_by('sales', product_id, date, value, MAP{});
 ```
 
-**See:** `synthetic_decomposition_examples.sql` Section 1
-
----
-
-### Pattern 2: Seasonal Decomposition (ts_decompose_seasonal)
-
-**Use case:** Separate trend, seasonal, and remainder components.
+### With Explicit Periods
 
 ```sql
--- Additive decomposition with period=12
-SELECT ts_decompose_seasonal(LIST(value ORDER BY ts), 12, 'additive') AS result
-FROM my_series;
+-- Weekly decomposition
+SELECT * FROM ts_mstl_decomposition_by('sales', product_id, date, value,
+    MAP{'periods': '[7]'});
 
--- Multiplicative decomposition
-SELECT ts_decompose_seasonal(LIST(value ORDER BY ts), 12, 'multiplicative') AS result
-FROM my_series;
+-- Multiple seasonal periods (weekly + monthly)
+SELECT * FROM ts_mstl_decomposition_by('sales', product_id, date, value,
+    MAP{'periods': '[7, 30]'});
 ```
 
-**See:** `synthetic_decomposition_examples.sql` Section 2
-
----
-
-### Pattern 3: MSTL Decomposition (Multi-Seasonal)
-
-**Use case:** Handle multiple seasonal periods simultaneously.
+### Extracting Components
 
 ```sql
--- Automatic multi-seasonal decomposition
-SELECT _ts_mstl_decomposition_by(LIST(value ORDER BY ts)) AS result
-FROM my_series;
--- Returns: {trend, seasonal[][], remainder, periods}
+-- Access individual components
+SELECT
+    id,
+    trend[1:5] AS first_5_trend,
+    seasonal[1:5] AS first_5_seasonal,
+    remainder[1:5] AS first_5_remainder
+FROM ts_mstl_decomposition_by('sales', product_id, date, value, MAP{});
 ```
 
-**See:** `synthetic_decomposition_examples.sql` Section 3
-
----
-
-### Pattern 4: Decomposition for Grouped Series
-
-**Use case:** Apply decomposition to multiple time series.
-
-```sql
-SELECT id, decomposition
-FROM ts_mstl_decomposition_by('my_table', group_col, date_col, value_col, MAP{})
-ORDER BY id;
-```
-
-**See:** `synthetic_decomposition_examples.sql` Section 4
-
----
-
-### Pattern 5: Extract Components
-
-**Use case:** Access individual decomposition components.
+### Computing Trend Statistics
 
 ```sql
 WITH decomposed AS (
-    SELECT ts_decompose_seasonal(LIST(value ORDER BY ts), 12, 'additive') AS result
-    FROM my_series
+    SELECT * FROM ts_mstl_decomposition_by('sales', product_id, date, value, MAP{})
 )
 SELECT
-    (result).trend AS trend_component,
-    (result).seasonal AS seasonal_component,
-    (result).remainder AS remainder_component
+    id,
+    ROUND(list_avg(trend), 2) AS mean_trend,
+    ROUND(trend[length(trend)] - trend[1], 2) AS trend_change,
+    ROUND(list_stddev(remainder), 2) AS noise_level
 FROM decomposed;
 ```
 
-**See:** `synthetic_decomposition_examples.sql` Section 5
+---
+
+## Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `periods` | VARCHAR | auto | JSON array of periods, e.g., `'[7, 30]'` |
+
+When `MAP{}` is passed (empty), periods are automatically detected.
 
 ---
 
-## Output Structures
+## Output Columns
 
-### ts_detrend
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `trend` | `DOUBLE[]` | Estimated trend component |
-| `detrended` | `DOUBLE[]` | Original minus trend |
-| `method` | `VARCHAR` | Detection method used |
-| `coefficients` | `DOUBLE[]` | Trend coefficients |
-| `rss` | `DOUBLE` | Residual sum of squares |
-| `n_params` | `BIGINT` | Number of parameters |
-
-### ts_decompose_seasonal
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `trend` | `DOUBLE[]` | Trend component |
-| `seasonal` | `DOUBLE[]` | Seasonal component |
-| `remainder` | `DOUBLE[]` | Residual component |
-| `period` | `DOUBLE` | Period used |
-| `method` | `VARCHAR` | Decomposition type |
-
-### _ts_mstl_decomposition
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `trend` | `DOUBLE[]` | Trend component |
-| `seasonal` | `DOUBLE[][]` | Seasonal components (one per period) |
-| `remainder` | `DOUBLE[]` | Residual component |
-| `periods` | `INTEGER[]` | Detected periods |
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | VARCHAR | Series identifier |
+| `trend` | DOUBLE[] | Trend component |
+| `seasonal` | DOUBLE[][] | Seasonal components (one per period) |
+| `remainder` | DOUBLE[] | Residual component |
+| `periods` | INTEGER[] | Periods used/detected |
 
 ---
 
 ## Key Concepts
 
-### Additive vs Multiplicative
+### What MSTL Does
 
-| Type | Formula | Use When |
-|------|---------|----------|
-| **Additive** | Y = T + S + R | Constant seasonal amplitude |
-| **Multiplicative** | Y = T × S × R | Amplitude grows with trend |
+MSTL (Multiple Seasonal-Trend decomposition using Loess) separates your data into:
 
-### Choosing the Right Method
+1. **Trend** - Long-term direction (growth, decline, stability)
+2. **Seasonal** - Repeating patterns (daily, weekly, yearly cycles)
+3. **Remainder** - What's left after removing trend and seasonality (noise)
 
-| Data Characteristic | Recommended Function |
-|---------------------|---------------------|
-| Single seasonal period | `ts_decompose_seasonal` |
-| Multiple seasonal periods | `ts_mstl_decomposition` |
-| Just remove trend | `ts_detrend` |
-| Grouped series | `ts_mstl_decomposition` table macro |
+### Original = Trend + Seasonal + Remainder
+
+For additive decomposition: `value = trend + seasonal + remainder`
+
+### Choosing Periods
+
+| Data Frequency | Common Periods |
+|----------------|----------------|
+| Hourly | 24 (daily), 168 (weekly) |
+| Daily | 7 (weekly), 30 (monthly), 365 (yearly) |
+| Weekly | 52 (yearly) |
+| Monthly | 12 (yearly) |
 
 ---
 
 ## Tips
 
-1. **Know your period** - For classical decomposition, you need to specify the period.
+1. **Let it auto-detect** - Use `MAP{}` first to see what periods are found automatically.
 
-2. **MSTL auto-detects** - The MSTL method can automatically detect multiple periods.
+2. **Check remainder** - A good decomposition leaves only noise in the remainder. High remainder std = poor fit.
 
-3. **Check remainder** - A good decomposition leaves only noise in the remainder.
+3. **Minimum data** - Need at least 2x the longest period for reliable decomposition.
 
-4. **Use for forecasting** - Decompose, forecast components separately, then recombine.
+4. **Use trend for forecasting** - The trend component shows the underlying direction, useful for planning.
 
-5. **Minimum data** - Need at least 2× the period length for reliable decomposition.
+5. **Detect seasonality strength** - Use `ts_classify_seasonality_by()` to check if decomposition makes sense.
+
+---
+
+## Related Functions
+
+- `ts_detect_periods_by()` - Find seasonal periods automatically
+- `ts_classify_seasonality_by()` - Check if series has meaningful seasonality
+- `ts_forecast_by()` - Forecast using MSTL model

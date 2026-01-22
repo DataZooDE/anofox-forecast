@@ -4,11 +4,18 @@
 
 This folder contains runnable SQL examples demonstrating time series forecasting with the anofox-forecast extension.
 
+## Functions
+
+| Function | Description |
+|----------|-------------|
+| `ts_forecast_by` | Forecast multiple series with any model |
+| `ts_forecast_exog_by` | Forecast with exogenous variables |
+
 ## Example Files
 
 | File | Description | Data Source |
 |------|-------------|-------------|
-| [`synthetic_forecasting_examples.sql`](synthetic_forecasting_examples.sql) | 8 patterns using generated data | Synthetic |
+| [`synthetic_forecasting_examples.sql`](synthetic_forecasting_examples.sql) | Multi-series forecasting examples | Synthetic |
 
 ## Quick Start
 
@@ -20,8 +27,6 @@ This folder contains runnable SQL examples demonstrating time series forecasting
 ---
 
 ## Available Models (32 Total)
-
-The extension provides 32 forecasting models organized in 7 categories:
 
 | Category | Models | Best For |
 |----------|--------|----------|
@@ -35,197 +40,111 @@ The extension provides 32 forecasting models organized in 7 categories:
 
 ---
 
-## Patterns Overview
+## Usage
 
-### Pattern 1: Quick Start (Basic Forecast)
-
-**Use case:** Generate forecasts for a single time series.
+### Basic Multi-Series Forecasting
 
 ```sql
-SELECT * FROM ts_forecast('sales_data', date, revenue, 'AutoETS', 12, MAP{});
+-- Forecast all products with ETS model
+SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'ETS', 12, MAP{});
+
+-- Forecast with automatic model selection
+SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'AutoETS', 12, MAP{});
 ```
 
-**See:** `synthetic_forecasting_examples.sql` Section 1
-
----
-
-### Pattern 2: Multi-Series Forecasting
-
-**Use case:** Forecast multiple products/stores in one query.
+### Seasonal Models
 
 ```sql
-SELECT * FROM ts_forecast_by(
-    'sales_data', product_id, date, quantity,
-    'ETS', 30, MAP{}
-);
-```
+-- Holt-Winters with weekly seasonality
+SELECT * FROM ts_forecast_by('sales', product_id, date, value,
+    'HoltWinters', 14,
+    MAP{'seasonal_period': '7'});
 
-**See:** `synthetic_forecasting_examples.sql` Section 2
-
----
-
-### Pattern 3: Model Selection (Baseline to Advanced)
-
-**Use case:** Compare simple baselines to sophisticated models.
-
-**Models compared:**
-- `Naive` - Last value repeated
-- `SeasonalNaive` - Last season repeated
-- `AutoETS` - Automatic model selection
-- `AutoARIMA` - ARIMA with automatic tuning
-
-**See:** `synthetic_forecasting_examples.sql` Section 3
-
----
-
-### Pattern 4: Seasonal Models
-
-**Use case:** Data with clear weekly/monthly/yearly patterns.
-
-**Key models:**
-- `HoltWinters` - Classic triple exponential smoothing
-- `SeasonalES` - Seasonal exponential smoothing
-- `SeasonalNaive` - Simple seasonal baseline
-
-```sql
-SELECT * FROM ts_forecast_by(
-    'weekly_sales', store_id, week, revenue,
-    'HoltWinters', 52,
-    MAP{'seasonal_period': '52'}
-);
-```
-
-**See:** `synthetic_forecasting_examples.sql` Section 4
-
----
-
-### Pattern 5: Multiple Seasonality
-
-**Use case:** Hourly data with daily AND weekly patterns.
-
-**Key models:**
-- `MSTL` - STL decomposition with multiple periods
-- `MFLES` - Multiple Frequency Loess
-- `TBATS` - Box-Cox ARMA Trend Seasonal
-
-```sql
-SELECT * FROM ts_forecast_by(
-    'hourly_data', sensor_id, timestamp, reading,
+-- MSTL with multiple seasonalities (daily + weekly)
+SELECT * FROM ts_forecast_by('hourly_data', sensor_id, timestamp, reading,
     'MSTL', 168,
-    MAP{'seasonal_periods': '[24, 168]'}  -- daily + weekly
+    MAP{'seasonal_periods': '[24, 168]'});
+```
+
+### Intermittent Demand
+
+```sql
+-- Croston method for sparse demand
+SELECT * FROM ts_forecast_by('spare_parts', sku, date, demand, 'CrostonSBA', 14, MAP{});
+```
+
+### Exogenous Variables
+
+```sql
+-- Forecast with external features
+SELECT * FROM ts_forecast_exog_by(
+    'sales', store_id, date, amount,
+    ['temperature', 'promotion'],
+    'future_features', date,
+    ['temperature', 'promotion'],
+    'AutoARIMA', 7, MAP{}, '1d'
 );
 ```
 
-**See:** `synthetic_forecasting_examples.sql` Section 5
+---
+
+## Parameters
+
+Common parameters passed via `MAP{}`:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `seasonal_period` | VARCHAR | Single period, e.g., `'7'` |
+| `seasonal_periods` | VARCHAR | Multiple periods, e.g., `'[24, 168]'` |
+| `confidence_level` | VARCHAR | Prediction interval width, e.g., `'0.95'` |
+| `alpha` | VARCHAR | Smoothing parameter for level |
+| `beta` | VARCHAR | Smoothing parameter for trend |
+| `gamma` | VARCHAR | Smoothing parameter for seasonality |
+
+When `MAP{}` is passed (empty), uses model defaults.
 
 ---
 
-### Pattern 6: Intermittent Demand
+## Output Columns
 
-**Use case:** Spare parts, luxury items, or irregular sales.
-
-**Key models:**
-- `CrostonClassic` - Original Croston method
-- `CrostonSBA` - Syntetos-Boylan Approximation
-- `ADIDA` - Aggregate-Disaggregate approach
-- `TSB` - Teunter-Syntetos-Babai
-
-```sql
-SELECT * FROM ts_forecast_by(
-    'spare_parts', sku, date, demand,
-    'CrostonSBA', 12, MAP{}
-);
-```
-
-**See:** `synthetic_forecasting_examples.sql` Section 6
-
----
-
-### Pattern 7: Exogenous Variables
-
-**Use case:** Include external factors (temperature, promotions, holidays).
-
-**Supported models:** `AutoARIMA`, `OptimizedTheta`, `MFLES`
-
-```sql
-SELECT * FROM ts_forecast_exog(
-    'sales', date, amount,
-    'temperature,promotion',  -- external features
-    'future_exog',            -- table with future values
-    'AutoARIMA', 7, MAP{}
-);
-```
-
-**See:** `synthetic_forecasting_examples.sql` Section 7
-
----
-
-### Pattern 8: Aggregate Function (Custom Grouping)
-
-**Use case:** Complex GROUP BY logic not covered by table macros.
-
-```sql
-SELECT
-    region,
-    product_category,
-    ts_forecast_agg(date, revenue, 'ETS', 12, MAP{}) AS forecast
-FROM sales
-GROUP BY region, product_category;
-```
-
-**See:** `synthetic_forecasting_examples.sql` Section 8
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | VARCHAR | Series identifier |
+| `ds` | TIMESTAMP | Forecast timestamp |
+| `forecast` | DOUBLE | Point forecast value |
+| `lo_90` | DOUBLE | Lower 90% prediction interval |
+| `hi_90` | DOUBLE | Upper 90% prediction interval |
 
 ---
 
 ## Key Concepts
 
-### Model Parameters
+### Model Selection Guide
 
-All parameters are passed via the `params` MAP argument:
+| Situation | Recommended Model |
+|-----------|-------------------|
+| Unknown pattern | `AutoETS` or `AutoARIMA` |
+| Baseline comparison | `Naive` or `SeasonalNaive` |
+| Strong trend + seasonality | `HoltWinters` or `ETS` |
+| Multiple seasonalities | `MSTL` with `seasonal_periods` |
+| Sparse/intermittent demand | `CrostonSBA` or `ADIDA` |
+| External factors matter | `ts_forecast_exog_by` with `AutoARIMA` |
 
-```sql
--- Custom smoothing parameters
-MAP{'alpha': '0.5', 'beta': '0.2'}
+### Prediction Intervals
 
--- Seasonal period
-MAP{'seasonal_period': '7'}
-
--- Multiple seasonal periods
-MAP{'seasonal_periods': '[7, 365]'}
-
--- Confidence level for prediction intervals
-MAP{'confidence_level': '0.95'}
-```
-
-### Return Columns
-
-All forecasting functions return:
-
-| Column | Description |
-|--------|-------------|
-| `ds` | Forecast timestamp |
-| `forecast` | Point forecast value |
-| `lower` | Lower prediction interval (default 90%) |
-| `upper` | Upper prediction interval (default 90%) |
-
-### API Variants
-
-| API | Best For | Example |
-|-----|----------|---------|
-| `ts_forecast` | Single series | `ts_forecast('data', date, val, 'ETS', 12, MAP{})` |
-| `ts_forecast_by` | Multiple series | `ts_forecast_by('data', id, date, val, 'ETS', 12, MAP{})` |
-| `ts_forecast_agg` | Custom grouping | `ts_forecast_agg(date, val, 'ETS', 12, MAP{})` |
-| `ts_forecast_exog` | External features | `ts_forecast_exog('data', date, val, 'x,y', 'future', 'ARIMA', 12, MAP{})` |
+- Default interval is 90% (5th to 95th percentile)
+- Wide intervals indicate high uncertainty
+- Use `confidence_level` parameter to adjust
 
 ---
 
 ## Tips
 
-1. **Start with Baselines** - Always compare against `Naive` or `SeasonalNaive`.
+1. **Start with Auto Models** - When unsure, use `AutoETS` or `AutoARIMA`.
 
-2. **Use Auto Models** - When unsure, start with `AutoETS` or `AutoARIMA`.
+2. **Compare to Baselines** - Always test against `Naive` or `SeasonalNaive`.
 
-3. **Match Seasonality** - Ensure `seasonal_period` matches your data frequency.
+3. **Match Seasonality** - Set `seasonal_period` to match your data frequency.
 
 4. **Check Prediction Intervals** - Wide intervals indicate high uncertainty.
 
@@ -235,23 +154,9 @@ All forecasting functions return:
 
 ---
 
-## Troubleshooting
+## Related Functions
 
-### Q: Why are my forecasts flat?
-
-**A:** Model fell back to `Naive`. Check model name spelling (case-sensitive).
-
-### Q: Why are prediction intervals very wide?
-
-**A:** High volatility or short history. Try longer training data or simpler model.
-
-### Q: Which model should I use?
-
-**A:** Start with `AutoETS`. It automatically selects the best ETS variant.
-
-### Q: How do I handle multiple seasonality?
-
-**A:** Use `MSTL` with `seasonal_periods` parameter:
-```sql
-MAP{'seasonal_periods': '[7, 365]'}  -- weekly + yearly
-```
+- `ts_backtest_auto_by()` - Evaluate forecast accuracy
+- `ts_mstl_decomposition_by()` - Decompose series before forecasting
+- `ts_detect_periods_by()` - Find seasonal periods automatically
+- `ts_conformal_by()` - Add prediction intervals with guaranteed coverage
