@@ -15,12 +15,12 @@ LOAD anofox_forecast;
 .print '============================================================================='
 
 -- =============================================================================
--- SECTION 1: Fill Date Gaps (ts_fill_gaps)
+-- SECTION 1: Fill Date Gaps (ts_fill_gaps_by)
 -- =============================================================================
 -- Use case: Insert missing dates in an irregular time series.
 
 .print ''
-.print '>>> SECTION 1: Fill Date Gaps (ts_fill_gaps)'
+.print '>>> SECTION 1: Fill Date Gaps (ts_fill_gaps_by)'
 .print '-----------------------------------------------------------------------------'
 
 -- Create data with missing dates
@@ -46,12 +46,12 @@ FROM ts_fill_gaps_by('gappy_data', series_id, date, value, '1 day')
 ORDER BY group_col, date_col;
 
 -- =============================================================================
--- SECTION 2: Fill Forward to Target Date (ts_fill_forward)
+-- SECTION 2: Fill Forward to Target Date (ts_fill_forward_by)
 -- =============================================================================
 -- Use case: Extend series to a future date for forecasting.
 
 .print ''
-.print '>>> SECTION 2: Fill Forward to Target Date (ts_fill_forward)'
+.print '>>> SECTION 2: Fill Forward to Target Date (ts_fill_forward_by)'
 .print '-----------------------------------------------------------------------------'
 
 -- Create series that ends early
@@ -75,12 +75,12 @@ FROM ts_fill_forward_by('short_series', series_id, date, value, '2024-01-07'::DA
 ORDER BY group_col, date_col;
 
 -- =============================================================================
--- SECTION 3: Drop Gappy Series (ts_drop_gappy)
+-- SECTION 3: Drop Gappy Series (ts_drop_gappy_by)
 -- =============================================================================
 -- Use case: Remove series with too many missing values.
 
 .print ''
-.print '>>> SECTION 3: Drop Gappy Series (ts_drop_gappy)'
+.print '>>> SECTION 3: Drop Gappy Series (ts_drop_gappy_by)'
 .print '-----------------------------------------------------------------------------'
 
 -- Create series with different gap ratios
@@ -123,12 +123,12 @@ FROM ts_drop_gappy_by('quality_test', series_id, value, 0.3)
 GROUP BY series_id ORDER BY series_id;
 
 -- =============================================================================
--- SECTION 4: Fill Unknown Future Values (ts_fill_unknown)
+-- SECTION 4: Fill Unknown Future Values (ts_fill_unknown_by)
 -- =============================================================================
 -- Use case: Handle future feature values in cross-validation.
 
 .print ''
-.print '>>> SECTION 4: Fill Unknown Future Values (ts_fill_unknown)'
+.print '>>> SECTION 4: Fill Unknown Future Values (ts_fill_unknown_by)'
 .print '-----------------------------------------------------------------------------'
 
 -- Create time series with features
