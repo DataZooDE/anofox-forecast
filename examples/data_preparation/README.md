@@ -25,13 +25,13 @@ The extension provides functions for cleaning and preparing time series data:
 
 | Category | Functions | Purpose |
 |----------|-----------|---------|
-| **Filtering** | `ts_drop_constant`, `ts_drop_short`, `ts_drop_zeros`, `ts_drop_gappy` | Remove unusable series |
+| **Filtering** | `ts_drop_constant`, `ts_drop_short`, `ts_drop_zeros_by`, `ts_drop_gappy_by` | Remove unusable series |
 | **Edge Cleaning** | `ts_drop_leading_zeros`, `ts_drop_trailing_zeros`, `ts_drop_edge_zeros` | Clean edge artifacts |
 | **Imputation** | `ts_fill_nulls_const`, `ts_fill_nulls_forward`, `ts_fill_nulls_backward`, `ts_fill_nulls_mean` | Handle missing values |
 | **Transform** | `ts_diff` | Differencing for stationarity |
-| **Statistics** | `ts_stats`, `ts_stats_summary` | Dataset health overview |
-| **Quality** | `ts_data_quality`, `ts_data_quality_summary` | Quality tier assessment |
-| **Validation** | `ts_validate_timestamps`, `ts_validate_timestamps_summary` | Timestamp completeness |
+| **Statistics** | `ts_stats_by`, `ts_stats_summary_by` | Dataset health overview |
+| **Quality** | `ts_data_quality_by`, `ts_data_quality_summary_by` | Quality tier assessment |
+| **Validation** | `ts_validate_timestamps_by`, `ts_validate_timestamps_summary_by` | Timestamp completeness |
 
 ---
 
@@ -144,7 +144,7 @@ SELECT * FROM cleaned WHERE values IS NOT NULL;
 ```sql
 -- Step 1: Compute per-series stats
 CREATE TABLE computed_stats AS
-SELECT * FROM ts_stats('sales_data', series_id, ts, value, '1d');
+SELECT * FROM ts_stats_by('sales_data', series_id, ts, value, '1d');
 
 -- Step 2: Aggregate to dataset-wide summary
 SELECT
@@ -157,8 +157,8 @@ FROM computed_stats;
 ```
 
 **When to use:**
-- `ts_stats` - Investigate individual series issues
-- `ts_stats_summary` - Quick dataset health check
+- `ts_stats_by` - Investigate individual series issues
+- `ts_stats_summary_by` - Quick dataset health check
 
 **See:** `synthetic_data_prep_examples.sql` Section 7
 
@@ -171,16 +171,16 @@ FROM computed_stats;
 ```sql
 -- Per-series quality scores
 SELECT unique_id, (quality).overall_score
-FROM ts_data_quality('sales_data', series_id, ts, value, 10, '1d');
+FROM ts_data_quality_by('sales_data', series_id, ts, value, 10, '1d');
 
 -- Dataset-wide quality tier counts
-SELECT * FROM ts_data_quality_summary('sales_data', series_id, ts, value, 10);
+SELECT * FROM ts_data_quality_summary_by('sales_data', series_id, ts, value, 10);
 -- Returns: n_total, n_good (>=0.8), n_fair (0.5-0.8), n_poor (<0.5), avg_score
 ```
 
 **When to use:**
-- `ts_data_quality` - Identify which series need attention
-- `ts_data_quality_summary` - Quick pass/fail assessment for bulk processing
+- `ts_data_quality_by` - Identify which series need attention
+- `ts_data_quality_summary_by` - Quick pass/fail assessment for bulk processing
 
 **See:** `synthetic_data_prep_examples.sql` Section 8
 
@@ -192,15 +192,15 @@ SELECT * FROM ts_data_quality_summary('sales_data', series_id, ts, value, 10);
 
 ```sql
 -- Remove series with ALL zero values (inactive products)
-SELECT * FROM ts_drop_zeros('sales_data', series_id, value);
+SELECT * FROM ts_drop_zeros_by('sales_data', series_id, value);
 
 -- Remove series with >30% NULL values (sparse data)
-SELECT * FROM ts_drop_gappy('sales_data', series_id, value, 0.3);
+SELECT * FROM ts_drop_gappy_by('sales_data', series_id, value, 0.3);
 ```
 
 **When to use:**
-- `ts_drop_zeros` - Remove truly inactive series (all zeros)
-- `ts_drop_gappy` - Configurable threshold for null ratio
+- `ts_drop_zeros_by` - Remove truly inactive series (all zeros)
+- `ts_drop_gappy_by` - Configurable threshold for null ratio
 
 **See:** `synthetic_data_prep_examples.sql` Section 9
 
@@ -213,13 +213,13 @@ SELECT * FROM ts_drop_gappy('sales_data', series_id, value, 0.3);
 ```sql
 -- Detailed per-group validation (which timestamps missing)
 SELECT group_col, is_valid, missing_timestamps
-FROM ts_validate_timestamps(
+FROM ts_validate_timestamps_by(
     'sales_data', series_id, ts,
     ['2024-01-01'::TIMESTAMP, '2024-01-02'::TIMESTAMP, '2024-01-03'::TIMESTAMP]
 );
 
 -- Quick dataset-wide check (pass/fail)
-SELECT * FROM ts_validate_timestamps_summary(
+SELECT * FROM ts_validate_timestamps_summary_by(
     'sales_data', series_id, ts,
     ['2024-01-01'::TIMESTAMP, '2024-01-02'::TIMESTAMP, '2024-01-03'::TIMESTAMP]
 );
@@ -227,8 +227,8 @@ SELECT * FROM ts_validate_timestamps_summary(
 ```
 
 **When to use:**
-- `ts_validate_timestamps` - Debug missing data per series
-- `ts_validate_timestamps_summary` - Quick validation before bulk processing
+- `ts_validate_timestamps_by` - Debug missing data per series
+- `ts_validate_timestamps_summary_by` - Quick validation before bulk processing
 
 **See:** `synthetic_data_prep_examples.sql` Section 10
 
@@ -238,14 +238,14 @@ SELECT * FROM ts_validate_timestamps_summary(
 
 | Need | Function | Returns |
 |------|----------|---------|
-| Per-series stats | `ts_stats` | 1 row per series |
-| Dataset overview | `ts_stats_summary` | 1 aggregate row |
-| Per-series quality | `ts_data_quality` | 1 row per series |
-| Quality distribution | `ts_data_quality_summary` | Tier counts (good/fair/poor) |
-| Remove inactive series | `ts_drop_zeros` | Filter: all-zero |
-| Remove sparse series | `ts_drop_gappy` | Filter: configurable null ratio |
-| Which timestamps missing | `ts_validate_timestamps` | Per-group with missing list |
-| Quick validation check | `ts_validate_timestamps_summary` | Pass/fail + invalid group names |
+| Per-series stats | `ts_stats_by` | 1 row per series |
+| Dataset overview | `ts_stats_summary_by` | 1 aggregate row |
+| Per-series quality | `ts_data_quality_by` | 1 row per series |
+| Quality distribution | `ts_data_quality_summary_by` | Tier counts (good/fair/poor) |
+| Remove inactive series | `ts_drop_zeros_by` | Filter: all-zero |
+| Remove sparse series | `ts_drop_gappy_by` | Filter: configurable null ratio |
+| Which timestamps missing | `ts_validate_timestamps_by` | Per-group with missing list |
+| Quick validation check | `ts_validate_timestamps_summary_by` | Pass/fail + invalid group names |
 
 ---
 
