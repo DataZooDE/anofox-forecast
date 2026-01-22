@@ -178,19 +178,19 @@ FROM generate_series(0, 9) AS t(i);
 
 # Test ts_features_table returns a result
 query I
-SELECT (features).mean IS NOT NULL FROM ts_features_table('test_single_series', date, value);
+SELECT mean IS NOT NULL FROM ts_features_table('test_single_series', date, value);
 ----
 true
 
 # Test ts_features_table mean calculation
 query I
-SELECT ABS((features).mean - 5.5) < 0.01 FROM ts_features_table('test_single_series', date, value);
+SELECT ABS(mean - 5.5) < 0.01 FROM ts_features_table('test_single_series', date, value);
 ----
 true
 
 # Test ts_features_table length
 query I
-SELECT (features).length = 10 FROM ts_features_table('test_single_series', date, value);
+SELECT length = 10 FROM ts_features_table('test_single_series', date, value);
 ----
 true
 
@@ -227,17 +227,17 @@ SELECT count(DISTINCT id) FROM ts_features_by('test_multi_series', id, date, val
 
 # Test ts_features_by mean per group
 query IR
-SELECT id, (features).mean FROM ts_features_by('test_multi_series', id, date, value) ORDER BY id;
+SELECT id, mean FROM ts_features_by('test_multi_series', id, date, value) ORDER BY id;
 ----
 A	5.5
 B	9.0
 
 # Test ts_features_by length per group
-query II
-SELECT id, (features).length FROM ts_features_by('test_multi_series', id, date, value) ORDER BY id;
+query IR
+SELECT id, length FROM ts_features_by('test_multi_series', id, date, value) ORDER BY id;
 ----
-A	10
-B	10
+A	10.0
+B	10.0
 
 statement ok
 DROP TABLE test_multi_series;

@@ -48,7 +48,7 @@ SELECT COUNT(*) FROM ts_stats('varchar_data', id, ds, y, '1d');
 
 # Verify stats are computed correctly
 query I
-SELECT (stats).length FROM ts_stats('varchar_data', id, ds, y, '1d') WHERE id = 'A';
+SELECT length FROM ts_stats('varchar_data', id, ds, y, '1d') WHERE id = 'A';
 ----
 60
 

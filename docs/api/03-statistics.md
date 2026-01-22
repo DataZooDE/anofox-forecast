@@ -64,11 +64,6 @@ ts_stats_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | (same as group_col) | Series identifier |
-| `stats` | STRUCT | Statistics struct (see fields below) |
-
-**Stats STRUCT fields:**
-| Field | Type | Description |
-|-------|------|-------------|
 | `length` | UBIGINT | Total number of observations |
 | `n_nulls` | UBIGINT | Number of NULL values |
 | `n_nan` | UBIGINT | Number of NaN values |
@@ -114,21 +109,21 @@ SELECT * FROM ts_stats_by('sales', product_id, date, quantity, '1d');
 -- Access specific fields
 SELECT
     id,
-    (stats).length,
-    (stats).mean,
-    (stats).std_dev,
-    (stats).trend_strength
+    length,
+    mean,
+    std_dev,
+    trend_strength
 FROM ts_stats_by('sales', product_id, date, quantity, '1d');
 
 -- Detect gaps in time series
 SELECT
     id,
-    (stats).length AS actual_length,
-    (stats).expected_length,
-    (stats).n_gaps,
-    CASE WHEN (stats).n_gaps > 0 THEN 'Has gaps' ELSE 'Complete' END AS status
+    length AS actual_length,
+    expected_length,
+    n_gaps,
+    CASE WHEN n_gaps > 0 THEN 'Has gaps' ELSE 'Complete' END AS status
 FROM ts_stats_by('sales', product_id, date, quantity, '1d')
-WHERE (stats).n_gaps > 0;
+WHERE n_gaps > 0;
 ```
 
 > **Alias:** `ts_stats` is an alias for `ts_stats_by`
@@ -157,12 +152,7 @@ ts_data_quality_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col 
 **Returns:**
 | Column | Type | Description |
 |--------|------|-------------|
-| `id` | (same as group_col) | Series identifier |
-| `quality` | STRUCT | Quality assessment struct (see fields below) |
-
-**Quality STRUCT fields:**
-| Field | Type | Description |
-|-------|------|-------------|
+| `unique_id` | (same as group_col) | Series identifier |
 | `structural_score` | DOUBLE | Structural dimension score (0-1) - measures data completeness |
 | `temporal_score` | DOUBLE | Temporal dimension score (0-1) - measures regularity of timestamps |
 | `magnitude_score` | DOUBLE | Magnitude dimension score (0-1) - measures value distribution health |
@@ -179,16 +169,16 @@ SELECT * FROM ts_data_quality_by('sales', product_id, date, quantity, 10, '1d');
 
 -- Access specific fields
 SELECT
-    id,
-    (quality).overall_score,
-    (quality).n_gaps,
-    (quality).is_constant
+    unique_id,
+    overall_score,
+    n_gaps,
+    is_constant
 FROM ts_data_quality_by('sales', product_id, date, quantity, 10, '1d');
 
 -- Filter for high-quality series
-SELECT id
+SELECT unique_id
 FROM ts_data_quality_by('sales', product_id, date, quantity, 10, '1d')
-WHERE (quality).overall_score > 0.8;
+WHERE overall_score > 0.8;
 ```
 
 > **Alias:** `ts_data_quality` is an alias for `ts_data_quality_by`
