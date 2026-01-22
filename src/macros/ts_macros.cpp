@@ -2157,13 +2157,17 @@ FROM query_table(source::VARCHAR)
     // ts_detect_periods: Detect periods for a single series
     // C++ API: ts_detect_periods(table_name, date_col, value_col, params)
     // params: method (default 'fft') - 'fft' or 'acf'
+    //         max_period (default 365) - maximum period to search
+    //         min_confidence (default: method-specific) - minimum confidence threshold
     // Returns: TABLE(periods STRUCT)
     {"ts_detect_periods", {"source", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT
     _ts_detect_periods(
         LIST(value_col::DOUBLE ORDER BY date_col),
-        COALESCE(json_extract_string(to_json(params), '$.method'), 'fft')
+        COALESCE(json_extract_string(to_json(params), '$.method'), 'fft'),
+        COALESCE(CAST(json_extract(to_json(params), '$.max_period') AS BIGINT), 0),
+        COALESCE(CAST(json_extract(to_json(params), '$.min_confidence') AS DOUBLE), -1.0)
     ) AS periods
 FROM query_table(source::VARCHAR)
 )"},
@@ -2172,6 +2176,8 @@ FROM query_table(source::VARCHAR)
     // C++ API: ts_detect_periods_by(table_name, group_col, date_col, value_col, params)
     // params: method (default 'fft') - 'fft' or 'acf'
     //         max_period (default 365) - maximum period to search (suitable for daily data)
+    //         min_confidence (default: method-specific) - minimum confidence threshold
+    //                        Use 0 to disable filtering, positive value for custom threshold
     // Returns: TABLE(id, periods STRUCT)
     {"ts_detect_periods_by", {"source", "group_col", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
@@ -2180,7 +2186,8 @@ SELECT
     _ts_detect_periods(
         LIST(value_col::DOUBLE ORDER BY date_col),
         COALESCE(json_extract_string(to_json(params), '$.method'), 'fft'),
-        COALESCE(CAST(json_extract(to_json(params), '$.max_period') AS BIGINT), 0)
+        COALESCE(CAST(json_extract(to_json(params), '$.max_period') AS BIGINT), 0),
+        COALESCE(CAST(json_extract(to_json(params), '$.min_confidence') AS DOUBLE), -1.0)
     ) AS periods
 FROM query_table(source::VARCHAR)
 GROUP BY group_col

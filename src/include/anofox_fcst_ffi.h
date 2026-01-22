@@ -1733,6 +1733,9 @@ bool anofox_ts_detect_periods(const double *values,
  *
  * # Arguments
  * * `max_period` - Maximum period to search (0 = use default of 365)
+ * * `min_confidence` - Minimum confidence threshold; periods below this are filtered out.
+ *                      Use negative value (e.g., -1.0) to use method-specific default.
+ *                      Use 0.0 to disable filtering. Use positive value for custom threshold.
  *
  * # Safety
  * All pointer arguments must be valid and non-null.
@@ -1741,6 +1744,7 @@ bool anofox_ts_detect_periods_flat(const double *values,
                                    size_t length,
                                    const char *method,
                                    size_t max_period,
+                                   double min_confidence,
                                    struct FlatMultiPeriodResult *out_result,
                                    struct AnofoxError *out_error);
 

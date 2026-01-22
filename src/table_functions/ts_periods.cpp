@@ -88,6 +88,16 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
         max_period = static_cast<size_t>(max_period_data[0]);
     }
 
+    // Optional min_confidence parameter (default -1.0 = use method-specific default)
+    // Use 0.0 to disable filtering, positive value for custom threshold
+    double min_confidence = -1.0;
+    if (args.ColumnCount() > 3 && !IsValueNull(args.data[3], count, 0)) {
+        UnifiedVectorFormat min_conf_format;
+        args.data[3].ToUnifiedFormat(count, min_conf_format);
+        auto min_conf_data = UnifiedVectorFormat::GetData<double>(min_conf_format);
+        min_confidence = min_conf_data[0];
+    }
+
     result.Flatten(count);
 
     // Two-pass approach to avoid incremental Reserve calls which can cause memory issues:
@@ -131,6 +141,7 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
             values.size(),
             method_str,
             max_period,
+            min_confidence,
             &row_results[row_idx].result,
             &error
         );
@@ -258,6 +269,7 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
             values.size(),
             nullptr,  // default method
             0,        // default max_period (use Rust default of 365)
+            -1.0,     // default min_confidence (use method-specific default)
             &row_results[row_idx].result,
             &error
         );
@@ -380,6 +392,15 @@ void RegisterTsDetectPeriodsFunction(ExtensionLoader &loader) {
     );
     full_func.stability = FunctionStability::VOLATILE;
     ts_periods_set.AddFunction(full_func);
+
+    // Four-argument version (values, method, max_period, min_confidence)
+    auto full_func_conf = ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::DOUBLE)},
+        GetMultiPeriodResultType(),
+        TsDetectPeriodsFunction
+    );
+    full_func_conf.stability = FunctionStability::VOLATILE;
+    ts_periods_set.AddFunction(full_func_conf);
 
     // Mark as internal to hide from duckdb_functions() and deprioritize in autocomplete
     CreateScalarFunctionInfo info(ts_periods_set);

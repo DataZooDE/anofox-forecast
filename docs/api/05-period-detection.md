@@ -74,6 +74,7 @@ ts_detect_periods_by(source, group_col, date_col, value_col, params) → TABLE(i
 |-----|------|---------|-------------|
 | `method` | VARCHAR | `'fft'` | Detection method (see table below) |
 | `max_period` | VARCHAR | `'365'` | Maximum period to search (limits ACF computation on long series) |
+| `min_confidence` | VARCHAR | method-specific | Minimum confidence threshold. Periods below this are marked as "no seasonality". Use `'0'` to disable filtering. |
 
 **Supported Methods:**
 | Method | Aliases | Description | Best For |
@@ -126,7 +127,15 @@ The `confidence` field measures how reliably the period was detected. Its interp
 - **0.4 - 0.6**: Good periodicity (reliable detection)
 - **0.6 - 1.0**: Strong periodicity (very confident detection)
 
-Low confidence often indicates sparse data (many zeros), noisy signals, or series without clear seasonal patterns. Consider filtering by confidence before using detected periods in forecasting models.
+Low confidence often indicates sparse data (many zeros), noisy signals, or series without clear seasonal patterns.
+
+**Automatic Filtering:**
+
+By default, periods with confidence below the method-specific threshold are automatically filtered out and the series is marked as having "no seasonality" (`primary_period = 0.0`, `method = "acf (no seasonality)"`).
+
+- **Default thresholds:** ACF uses 0.3, FFT uses 5.0
+- **Disable filtering:** Set `min_confidence` to `'0'` in params
+- **Custom threshold:** Set `min_confidence` to your preferred value (e.g., `'0.5'`)
 
 **Example:**
 ```sql
@@ -155,6 +164,14 @@ WHERE (periods).periods[1].confidence > 0.3;
 -- Limit max_period for faster computation on long series
 SELECT * FROM ts_detect_periods_by('sales', product_id, date, value,
     MAP{'method': 'acf', 'max_period': '28'});  -- Only search up to 28 days
+
+-- Disable automatic confidence filtering (show all detected periods)
+SELECT * FROM ts_detect_periods_by('sales', product_id, date, value,
+    MAP{'method': 'acf', 'min_confidence': '0'});
+
+-- Use custom confidence threshold
+SELECT * FROM ts_detect_periods_by('sales', product_id, date, value,
+    MAP{'method': 'acf', 'min_confidence': '0.5'});  -- Stricter threshold
 ```
 
 ---
@@ -181,6 +198,7 @@ ts_detect_periods(source, date_col, value_col, params) → TABLE(periods)
 |-----|------|---------|-------------|
 | `method` | VARCHAR | `'fft'` | Detection method (see supported methods above) |
 | `max_period` | VARCHAR | `'365'` | Maximum period to search (limits ACF computation on long series) |
+| `min_confidence` | VARCHAR | method-specific | Minimum confidence threshold. Use `'0'` to disable filtering. |
 
 **Returns:** TABLE with `periods` STRUCT containing detected periods.
 

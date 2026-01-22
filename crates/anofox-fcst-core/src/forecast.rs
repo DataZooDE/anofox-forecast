@@ -616,8 +616,7 @@ pub fn forecast_with_exog(
     // Generate forecast based on model
     // For models that support exog with exog data provided, use exogenous-aware forecasting
     // Don't do auto-selection when using exog - use the requested model family
-    let result = if supports_exog && options.exog.is_some() {
-        let exog = options.exog.as_ref().unwrap();
+    let result = if let (true, Some(exog)) = (supports_exog, options.exog.as_ref()) {
         match options.model {
             ModelType::ARIMA | ModelType::AutoARIMA => {
                 forecast_arima_with_exog(&clean_values, options.horizon, exog)

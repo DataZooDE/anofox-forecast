@@ -1355,26 +1355,78 @@ pub fn sazed_period(
 /// This prevents excessive computation on long time series.
 pub const DEFAULT_MAX_PERIOD: usize = 365;
 
+/// Default minimum confidence threshold for ACF method.
+/// Periods with confidence below this are treated as "no seasonality".
+/// Set to 0.0 to disable filtering.
+pub const DEFAULT_MIN_CONFIDENCE_ACF: f64 = 0.3;
+
+/// Default minimum confidence threshold for FFT method.
+/// FFT confidence is peak-to-mean power ratio, so threshold is higher.
+/// Set to 0.0 to disable filtering.
+pub const DEFAULT_MIN_CONFIDENCE_FFT: f64 = 5.0;
+
 /// Detect periods using the specified method.
 ///
 /// # Arguments
 /// * `values` - Time series values
 /// * `method` - Detection method to use
 /// * `max_period` - Maximum period to search (default: 365, suitable for daily data)
+/// * `min_confidence` - Minimum confidence threshold; periods below this return as "no seasonality".
+///   Use 0.0 to disable filtering. If None, uses method-specific default (0.3 for ACF, 5.0 for FFT).
 ///
 /// # Returns
-/// For single-period methods: a result with one period
-/// For multi-period method: a result with multiple periods
+/// For single-period methods: a result with one period (or empty if below threshold)
+/// For multi-period method: a result with multiple periods (filtered by threshold)
 pub fn detect_periods(
     values: &[f64],
     method: PeriodMethod,
     max_period: Option<usize>,
+    min_confidence: Option<f64>,
 ) -> Result<MultiPeriodResult> {
     // Use default max_period if not specified, but cap at half the series length
     let effective_max_period = max_period
         .unwrap_or(DEFAULT_MAX_PERIOD)
         .min(values.len() / 2);
 
+    // Detect periods first
+    let mut result = detect_periods_internal(values, method, effective_max_period)?;
+
+    // Apply confidence filtering if threshold is set
+    // Use method-specific default if min_confidence is None
+    let threshold = min_confidence.unwrap_or(match method {
+        PeriodMethod::Fft => DEFAULT_MIN_CONFIDENCE_FFT,
+        PeriodMethod::Acf => DEFAULT_MIN_CONFIDENCE_ACF,
+        // For other methods, use ACF-like threshold (0-1 scale)
+        _ => DEFAULT_MIN_CONFIDENCE_ACF,
+    });
+
+    // If threshold is 0.0 or negative, skip filtering (disabled by user)
+    if threshold > 0.0 {
+        // Filter periods below confidence threshold
+        result.periods.retain(|p| p.confidence >= threshold);
+
+        // If all periods were filtered, return "no seasonality" result
+        if result.periods.is_empty() {
+            return Ok(MultiPeriodResult {
+                periods: vec![],
+                primary_period: 0.0, // 0.0 indicates no seasonality detected
+                method: format!("{} (no seasonality)", result.method),
+            });
+        }
+
+        // Update primary_period to the best remaining period
+        result.primary_period = result.periods.first().map(|p| p.period).unwrap_or(0.0);
+    }
+
+    Ok(result)
+}
+
+/// Internal period detection without confidence filtering.
+fn detect_periods_internal(
+    values: &[f64],
+    method: PeriodMethod,
+    effective_max_period: usize,
+) -> Result<MultiPeriodResult> {
     match method {
         PeriodMethod::Fft => {
             let single = estimate_period_fft_ts(values)?;
@@ -1639,7 +1691,7 @@ mod tests {
     #[test]
     fn test_detect_periods_auto() {
         let values = generate_seasonal_series(120, 12.0, 5.0);
-        let result = detect_periods(&values, PeriodMethod::Auto);
+        let result = detect_periods(&values, PeriodMethod::Auto, None, None);
 
         // Verify function runs without error
         assert!(result.is_ok());
@@ -1698,7 +1750,7 @@ mod tests {
     #[test]
     fn test_detect_periods_autoperiod() {
         let values = generate_seasonal_series(120, 12.0, 5.0);
-        let result = detect_periods(&values, PeriodMethod::Autoperiod);
+        let result = detect_periods(&values, PeriodMethod::Autoperiod, None, None);
 
         assert!(result.is_ok());
         let result = result.unwrap();
@@ -1708,7 +1760,7 @@ mod tests {
     #[test]
     fn test_detect_periods_cfd() {
         let values = generate_seasonal_series(120, 12.0, 5.0);
-        let result = detect_periods(&values, PeriodMethod::CfdAutoperiod);
+        let result = detect_periods(&values, PeriodMethod::CfdAutoperiod, None, None);
 
         assert!(result.is_ok());
         let result = result.unwrap();
@@ -1758,7 +1810,7 @@ mod tests {
     #[test]
     fn test_detect_periods_lomb_scargle() {
         let values = generate_seasonal_series(120, 12.0, 5.0);
-        let result = detect_periods(&values, PeriodMethod::LombScargle);
+        let result = detect_periods(&values, PeriodMethod::LombScargle, None, None);
 
         assert!(result.is_ok());
         let result = result.unwrap();
@@ -1786,7 +1838,7 @@ mod tests {
     #[test]
     fn test_detect_periods_aic() {
         let values = generate_seasonal_series(120, 12.0, 5.0);
-        let result = detect_periods(&values, PeriodMethod::Aic);
+        let result = detect_periods(&values, PeriodMethod::Aic, None, None);
 
         assert!(result.is_ok());
         let result = result.unwrap();
@@ -1815,7 +1867,7 @@ mod tests {
     #[test]
     fn test_detect_periods_ssa() {
         let values = generate_seasonal_series(120, 12.0, 5.0);
-        let result = detect_periods(&values, PeriodMethod::Ssa);
+        let result = detect_periods(&values, PeriodMethod::Ssa, None, None);
 
         assert!(result.is_ok());
         let result = result.unwrap();

@@ -916,8 +916,8 @@ pub unsafe extern "C" fn anofox_ts_detect_periods(
             CStr::from_ptr(method).to_str().unwrap_or("fft")
         };
         let period_method: anofox_fcst_core::PeriodMethod = method_str.parse().unwrap_or_default();
-        // Use default max_period (None = 365)
-        anofox_fcst_core::detect_periods(&values_vec, period_method, None)
+        // Use defaults: max_period (None = 365), min_confidence (None = method-specific default)
+        anofox_fcst_core::detect_periods(&values_vec, period_method, None, None)
     }));
 
     match result {
@@ -967,6 +967,9 @@ pub unsafe extern "C" fn anofox_ts_detect_periods(
 ///
 /// # Arguments
 /// * `max_period` - Maximum period to search (0 = use default of 365)
+/// * `min_confidence` - Minimum confidence threshold; periods below this are filtered out.
+///   Use negative value (e.g., -1.0) to use method-specific default.
+///   Use 0.0 to disable filtering. Use positive value for custom threshold.
 ///
 /// # Safety
 /// All pointer arguments must be valid and non-null.
@@ -976,6 +979,7 @@ pub unsafe extern "C" fn anofox_ts_detect_periods_flat(
     length: size_t,
     method: *const c_char,
     max_period: size_t,
+    min_confidence: c_double,
     out_result: *mut types::FlatMultiPeriodResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -1004,7 +1008,18 @@ pub unsafe extern "C" fn anofox_ts_detect_periods_flat(
         } else {
             Some(max_period)
         };
-        anofox_fcst_core::detect_periods(&values_vec, period_method, max_period_opt)
+        // Convert min_confidence: negative = use default, 0 or positive = use value
+        let min_confidence_opt = if min_confidence < 0.0 || min_confidence.is_nan() {
+            None // Use method-specific default
+        } else {
+            Some(min_confidence) // 0.0 disables filtering, positive value is threshold
+        };
+        anofox_fcst_core::detect_periods(
+            &values_vec,
+            period_method,
+            max_period_opt,
+            min_confidence_opt,
+        )
     }));
 
     match result {

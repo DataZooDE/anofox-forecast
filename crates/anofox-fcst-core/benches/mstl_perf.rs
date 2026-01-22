@@ -126,7 +126,7 @@ fn main() {
             };
 
             benchmark_fn(&format!("  detect_periods({})", name), iters, || {
-                anofox_fcst_core::detect_periods(&values, *method)
+                anofox_fcst_core::detect_periods(&values, *method, None, None)
             });
         }
         println!();
@@ -172,7 +172,14 @@ fn main() {
         benchmark_fn(&format!("  detect_periods(fft) x{}", n_series), 1, || {
             series_batch
                 .iter()
-                .map(|s| anofox_fcst_core::detect_periods(s, anofox_fcst_core::PeriodMethod::Fft))
+                .map(|s| {
+                    anofox_fcst_core::detect_periods(
+                        s,
+                        anofox_fcst_core::PeriodMethod::Fft,
+                        None,
+                        None,
+                    )
+                })
                 .collect::<Vec<_>>()
         });
 
@@ -236,7 +243,7 @@ fn main() {
     // This will be slow - shows the bottleneck
     println!("\nSlow methods on large series:");
     benchmark_fn("  detect_periods(stl)", 1, || {
-        anofox_fcst_core::detect_periods(&values, anofox_fcst_core::PeriodMethod::Stl)
+        anofox_fcst_core::detect_periods(&values, anofox_fcst_core::PeriodMethod::Stl, None, None)
     });
 
     // Matrix profile is O(n^2) - will be very slow
@@ -249,6 +256,8 @@ fn main() {
             anofox_fcst_core::detect_periods(
                 &medium_values,
                 anofox_fcst_core::PeriodMethod::MatrixProfile,
+                None,
+                None,
             )
         },
     );
