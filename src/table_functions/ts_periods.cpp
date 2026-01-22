@@ -71,10 +71,22 @@ static LogicalType GetMultiPeriodResultType() {
     return LogicalType::STRUCT(std::move(children));
 }
 
+// Default max_period for daily data (365 days catches weekly, monthly, quarterly patterns)
+static const size_t DEFAULT_MAX_PERIOD = 365;
+
 static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vector &result) {
     auto &values_vec = args.data[0];
     auto &method_vec = args.data[1];
     idx_t count = args.size();
+
+    // Optional max_period parameter (default 0 = use Rust default of 365)
+    size_t max_period = 0;
+    if (args.ColumnCount() > 2 && !IsValueNull(args.data[2], count, 0)) {
+        UnifiedVectorFormat max_period_format;
+        args.data[2].ToUnifiedFormat(count, max_period_format);
+        auto max_period_data = UnifiedVectorFormat::GetData<int64_t>(max_period_format);
+        max_period = static_cast<size_t>(max_period_data[0]);
+    }
 
     result.Flatten(count);
 
@@ -118,6 +130,7 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
             values.data(),
             values.size(),
             method_str,
+            max_period,
             &row_results[row_idx].result,
             &error
         );
@@ -244,6 +257,7 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
             values.data(),
             values.size(),
             nullptr,  // default method
+            0,        // default max_period (use Rust default of 365)
             &row_results[row_idx].result,
             &error
         );
@@ -357,6 +371,15 @@ void RegisterTsDetectPeriodsFunction(ExtensionLoader &loader) {
     );
     method_func.stability = FunctionStability::VOLATILE;
     ts_periods_set.AddFunction(method_func);
+
+    // Three-argument version (values, method, max_period)
+    auto full_func = ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::BIGINT)},
+        GetMultiPeriodResultType(),
+        TsDetectPeriodsFunction
+    );
+    full_func.stability = FunctionStability::VOLATILE;
+    ts_periods_set.AddFunction(full_func);
 
     // Mark as internal to hide from duckdb_functions() and deprioritize in autocomplete
     CreateScalarFunctionInfo info(ts_periods_set);

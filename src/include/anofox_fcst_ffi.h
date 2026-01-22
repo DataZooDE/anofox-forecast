@@ -1731,12 +1731,16 @@ bool anofox_ts_detect_periods(const double *values,
  * Returns a flattened result with parallel arrays for safer FFI.
  * This version avoids memory issues when used through R's DuckDB bindings.
  *
+ * # Arguments
+ * * `max_period` - Maximum period to search (0 = use default of 365)
+ *
  * # Safety
  * All pointer arguments must be valid and non-null.
  */
 bool anofox_ts_detect_periods_flat(const double *values,
                                    size_t length,
                                    const char *method,
+                                   size_t max_period,
                                    struct FlatMultiPeriodResult *out_result,
                                    struct AnofoxError *out_error);
 

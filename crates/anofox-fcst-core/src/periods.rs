@@ -1351,16 +1351,30 @@ pub fn sazed_period(
     })
 }
 
+/// Default maximum period to search (365 days for daily data).
+/// This prevents excessive computation on long time series.
+pub const DEFAULT_MAX_PERIOD: usize = 365;
+
 /// Detect periods using the specified method.
 ///
 /// # Arguments
 /// * `values` - Time series values
 /// * `method` - Detection method to use
+/// * `max_period` - Maximum period to search (default: 365, suitable for daily data)
 ///
 /// # Returns
 /// For single-period methods: a result with one period
 /// For multi-period method: a result with multiple periods
-pub fn detect_periods(values: &[f64], method: PeriodMethod) -> Result<MultiPeriodResult> {
+pub fn detect_periods(
+    values: &[f64],
+    method: PeriodMethod,
+    max_period: Option<usize>,
+) -> Result<MultiPeriodResult> {
+    // Use default max_period if not specified, but cap at half the series length
+    let effective_max_period = max_period
+        .unwrap_or(DEFAULT_MAX_PERIOD)
+        .min(values.len() / 2);
+
     match method {
         PeriodMethod::Fft => {
             let single = estimate_period_fft_ts(values)?;
@@ -1378,7 +1392,7 @@ pub fn detect_periods(values: &[f64], method: PeriodMethod) -> Result<MultiPerio
             })
         }
         PeriodMethod::Acf => {
-            let single = estimate_period_acf_ts(values, None)?;
+            let single = estimate_period_acf_ts(values, Some(effective_max_period))?;
             Ok(MultiPeriodResult {
                 periods: vec![DetectedPeriod {
                     period: single.period,
@@ -1411,7 +1425,7 @@ pub fn detect_periods(values: &[f64], method: PeriodMethod) -> Result<MultiPerio
         PeriodMethod::Auto => {
             // Use FFT first, then validate with ACF
             let fft_result = estimate_period_fft_ts(values)?;
-            let acf_result = estimate_period_acf_ts(values, None)?;
+            let acf_result = estimate_period_acf_ts(values, Some(effective_max_period))?;
 
             // Use FFT result if it agrees with ACF (within 10%)
             let agreement = (fft_result.period - acf_result.period).abs() / fft_result.period < 0.1;
