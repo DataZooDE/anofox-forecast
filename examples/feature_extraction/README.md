@@ -4,11 +4,17 @@
 
 This folder contains runnable SQL examples demonstrating time series feature extraction with the anofox-forecast extension.
 
+## Function
+
+| Function | Description |
+|----------|-------------|
+| `ts_features_by` | Extract 117 tsfresh-compatible features for multiple series |
+
 ## Example Files
 
 | File | Description | Data Source |
 |------|-------------|-------------|
-| [`synthetic_feature_examples.sql`](synthetic_feature_examples.sql) | 6 patterns using generated data | Synthetic |
+| [`synthetic_feature_examples.sql`](synthetic_feature_examples.sql) | Multi-series feature extraction examples | Synthetic |
 
 ## Quick Start
 
@@ -19,9 +25,75 @@ This folder contains runnable SQL examples demonstrating time series feature ext
 
 ---
 
-## Overview
+## Usage
 
-The extension extracts **117 tsfresh-compatible features** from time series data, organized into categories:
+### Basic Feature Extraction
+
+```sql
+-- Extract all 117 features per series
+SELECT * FROM ts_features_by('sales', product_id, date, value, MAP{});
+```
+
+### Accessing Specific Features
+
+```sql
+-- Access individual features from the result
+SELECT
+    id,
+    ROUND((features).mean, 2) AS mean,
+    ROUND((features).variance, 2) AS variance,
+    ROUND((features).skewness, 4) AS skewness,
+    ROUND((features).kurtosis, 4) AS kurtosis
+FROM ts_features_by('sales', product_id, date, value, MAP{});
+```
+
+### Feature Selection (Efficiency)
+
+```sql
+-- Extract only specific features (faster)
+SELECT
+    id,
+    features
+FROM ts_features_by('sales', product_id, date, value,
+    MAP{'features': '["mean", "variance", "skewness", "kurtosis"]'});
+```
+
+### Trend and Autocorrelation Features
+
+```sql
+SELECT
+    id,
+    ROUND((features).linear_trend_slope, 4) AS trend_slope,
+    ROUND((features).linear_trend_r_squared, 4) AS r_squared,
+    ROUND((features).autocorrelation_lag1, 4) AS ac_lag1,
+    ROUND((features).autocorrelation_lag7, 4) AS ac_lag7
+FROM ts_features_by('sales', product_id, date, value, MAP{});
+```
+
+---
+
+## Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `features` | VARCHAR | all | JSON array of feature names, e.g., `'["mean", "variance"]'` |
+
+When `MAP{}` is passed (empty), all 117 features are extracted.
+
+---
+
+## Output Columns
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | VARCHAR | Series identifier |
+| `features` | STRUCT | Struct containing all extracted features |
+
+---
+
+## Feature Categories
+
+The extension extracts **117 tsfresh-compatible features** organized into categories:
 
 | Category | Features | Examples |
 |----------|----------|----------|
@@ -39,167 +111,70 @@ The extension extracts **117 tsfresh-compatible features** from time series data
 
 ---
 
-## Patterns Overview
-
-### Pattern 1: Quick Start (Basic Extraction)
-
-**Use case:** Extract all features from a single series.
-
-```sql
-SELECT ts_features(ts, value) AS features FROM my_series;
-```
-
-**See:** `synthetic_feature_examples.sql` Section 1
-
----
-
-### Pattern 2: Access Specific Features
-
-**Use case:** Extract and use individual features.
-
-```sql
-SELECT
-    (ts_features(ts, value)).mean AS avg,
-    (ts_features(ts, value)).variance AS var,
-    (ts_features(ts, value)).skewness AS skew
-FROM my_series;
-```
-
-**See:** `synthetic_feature_examples.sql` Section 2
-
----
-
-### Pattern 3: Multi-Series Feature Extraction
-
-**Use case:** Extract features for multiple time series in one query.
-
-```sql
-SELECT
-    product_id,
-    ts_features(date, value) AS features
-FROM sales
-GROUP BY product_id;
-```
-
-**See:** `synthetic_feature_examples.sql` Section 3
-
----
-
-### Pattern 4: Feature Selection
-
-**Use case:** Extract only specific features for efficiency.
-
-```sql
-SELECT
-    product_id,
-    ts_features(date, value, ['mean', 'variance', 'autocorrelation_lag1']) AS features
-FROM sales
-GROUP BY product_id;
-```
-
-**See:** `synthetic_feature_examples.sql` Section 4
-
----
-
-### Pattern 5: List Available Features
-
-**Use case:** Discover all available features and their parameters.
-
-```sql
-SELECT * FROM ts_features_list();
-```
-
-**See:** `synthetic_feature_examples.sql` Section 5
-
----
-
-### Pattern 6: Feature-Based Classification
-
-**Use case:** Use features to classify or cluster time series.
-
-```sql
--- High-variance series
-SELECT product_id
-FROM (
-    SELECT product_id, (ts_features(date, value)).variance AS var
-    FROM sales GROUP BY product_id
-)
-WHERE var > 100;
-```
-
-**See:** `synthetic_feature_examples.sql` Section 6
-
----
-
 ## Key Concepts
-
-### API Variants
-
-| Function | Input | Best For |
-|----------|-------|----------|
-| `ts_features(ts, val)` | TIMESTAMP, DOUBLE | Single series |
-| `ts_features(ts, val)` + GROUP BY | TIMESTAMP, DOUBLE | Multiple series |
-| `ts_features(ts, val, features)` | With selection | Specific features only |
-
-### Feature Categories
-
-#### Basic Statistics
-```sql
-mean, median, variance, standard_deviation, skewness, kurtosis,
-minimum, maximum, range, sum, length, first_value, last_value
-```
-
-#### Trend Features
-```sql
-linear_trend_slope, linear_trend_intercept, linear_trend_r_squared,
-agg_linear_trend_slope, mean_change, mean_abs_change
-```
-
-#### Autocorrelation
-```sql
-autocorrelation_lag1, autocorrelation_lag2, ..., autocorrelation_lag10,
-partial_autocorrelation_lag1, ..., partial_autocorrelation_lag5
-```
-
-#### Entropy & Complexity
-```sql
-sample_entropy, approximate_entropy, permutation_entropy,
-binned_entropy, lempel_ziv_complexity, cid_ce
-```
-
-#### Spectral Features
-```sql
-spectral_centroid, spectral_variance,
-fft_coefficient_0_real, fft_coefficient_0_imag, ...
-```
 
 ### Accessing Features
 
-Features are returned as a STRUCT. Access with dot notation:
+Features are returned as a STRUCT. Access with parentheses and dot notation:
 
 ```sql
 -- Single feature
-SELECT (ts_features(ts, value)).mean FROM my_series;
+SELECT (features).mean FROM ts_features_by('sales', product_id, date, value, MAP{});
 
 -- Multiple features
 SELECT
-    (ts_features(ts, value)).mean AS avg,
-    (ts_features(ts, value)).variance AS var,
-    (ts_features(ts, value)).skewness AS skew
-FROM my_series;
+    id,
+    (features).mean,
+    (features).variance,
+    (features).skewness
+FROM ts_features_by('sales', product_id, date, value, MAP{});
+```
+
+### Feature Selection for Efficiency
+
+Extracting all 117 features can be computationally expensive. For better performance, specify only the features you need:
+
+```sql
+-- Extract only needed features
+SELECT * FROM ts_features_by('sales', product_id, date, value,
+    MAP{'features': '["mean", "variance", "linear_trend_slope"]'});
+```
+
+### Feature-Based Classification
+
+Use features to classify or compare time series:
+
+```sql
+WITH feature_data AS (
+    SELECT
+        id,
+        (features).linear_trend_slope AS trend,
+        (features).variance AS variance,
+        (features).autocorrelation_lag7 AS ac7
+    FROM ts_features_by('sales', product_id, date, value, MAP{})
+)
+SELECT
+    id,
+    CASE
+        WHEN trend > 1.0 THEN 'trending'
+        WHEN ac7 > 0.5 THEN 'seasonal'
+        WHEN variance > 400 THEN 'volatile'
+        ELSE 'stable'
+    END AS pattern_type
+FROM feature_data;
 ```
 
 ---
 
 ## Tips
 
-1. **Start Simple** - Use `ts_features_scalar` for quick exploration.
+1. **Start with all features** - Use `MAP{}` first to explore, then select specific features.
 
-2. **Select Features** - Extract only needed features to reduce computation.
+2. **Select features for production** - Extract only needed features to reduce computation.
 
-3. **Numeric Stability** - Some features (entropy) may return NULL for constant series.
+3. **Numeric stability** - Some features (entropy) may return NULL for constant series.
 
-4. **Series Length** - Most features require at least 10 data points.
+4. **Series length** - Most features require at least 10 data points.
 
 5. **Normalization** - Consider normalizing features for ML models.
 
@@ -217,10 +192,19 @@ FROM my_series;
 
 **A:** Use feature selection:
 ```sql
-ts_features(date, value, ['mean', 'variance', 'skewness'])
+SELECT * FROM ts_features_by('sales', product_id, date, value,
+    MAP{'features': '["mean", "variance", "skewness"]'});
 ```
 
 ### Q: Which features are most useful?
 
 **A:** For forecasting: `autocorrelation_lag1`, `linear_trend_slope`, `seasonal_strength`
 For classification: `mean`, `variance`, `skewness`, `kurtosis`, `entropy`
+
+---
+
+## Related Functions
+
+- `ts_detect_periods_by()` - Detect seasonal periods
+- `ts_classify_seasonality_by()` - Classify seasonality strength
+- `ts_mstl_decomposition_by()` - Decompose into trend/seasonal/remainder

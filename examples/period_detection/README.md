@@ -4,11 +4,17 @@
 
 This folder contains runnable SQL examples demonstrating period detection with the anofox-forecast extension.
 
+## Function
+
+| Function | Description |
+|----------|-------------|
+| `ts_detect_periods_by` | Detect seasonal periods for multiple series |
+
 ## Example Files
 
 | File | Description | Data Source |
 |------|-------------|-------------|
-| [`synthetic_period_examples.sql`](synthetic_period_examples.sql) | 5 patterns using generated data | Synthetic |
+| [`synthetic_period_examples.sql`](synthetic_period_examples.sql) | Multi-series period detection examples | Synthetic |
 
 ## Quick Start
 
@@ -19,81 +25,141 @@ This folder contains runnable SQL examples demonstrating period detection with t
 
 ---
 
-## Overview
+## Usage
 
-The extension provides 12 period detection algorithms:
-
-| Function | Algorithm | Best For |
-|----------|-----------|----------|
-| `ts_detect_periods` | Multi-method ensemble | General use |
-| `ts_estimate_period_fft` | Fast Fourier Transform | Long, clean series |
-| `ts_estimate_period_acf` | Autocorrelation | Noisy data |
-| `ts_autoperiod` | Automatic detection | Unknown patterns |
-| `ts_cfd_autoperiod` | CFD-based autoperiod | Robust detection |
-| `ts_detect_multiple_periods` | Multi-period | Complex seasonality |
-| `ts_aic_period` | AIC-based selection | Model-based |
-| `ts_ssa_period` | Singular Spectrum Analysis | Short series |
-| `ts_stl_period` | STL decomposition | Robust |
-| `ts_matrix_profile_period` | Matrix Profile | Anomalies present |
-| `ts_sazed_period` | SAZED algorithm | Fast estimation |
-| `ts_instantaneous_period` | Time-varying periods | Evolving seasonality |
-
----
-
-## Patterns Overview
-
-### Pattern 1: Quick Start (ts_detect_periods)
-
-**Use case:** Automatic multi-method period detection.
+### Basic Period Detection (Auto)
 
 ```sql
-SELECT ts_detect_periods(LIST(value ORDER BY ts)) AS periods
-FROM my_series;
+-- Detect periods using ensemble method (default)
+SELECT * FROM ts_detect_periods_by('sales', product_id, date, value, MAP{});
 ```
 
----
-
-### Pattern 2: FFT-Based Detection
-
-**Use case:** Fast detection on long, clean series.
+### FFT-Based Detection
 
 ```sql
-SELECT ts_estimate_period_fft(LIST(value ORDER BY ts)) AS result
-FROM my_series;
+-- Fast Fourier Transform method - best for clean signals
+SELECT * FROM ts_detect_periods_by('sales', product_id, date, value,
+    MAP{'method': 'fft'});
 ```
 
----
-
-### Pattern 3: ACF-Based Detection
-
-**Use case:** Robust detection on noisy data.
+### ACF-Based Detection
 
 ```sql
-SELECT ts_estimate_period_acf(LIST(value ORDER BY ts)) AS result
-FROM my_series;
+-- Autocorrelation method - robust to noise
+SELECT * FROM ts_detect_periods_by('sales', product_id, date, value,
+    MAP{'method': 'acf'});
 ```
 
----
-
-### Pattern 4: Multiple Periods
-
-**Use case:** Data with multiple seasonal patterns.
+### Autoperiod Detection
 
 ```sql
-SELECT ts_detect_multiple_periods(LIST(value ORDER BY ts)) AS result
-FROM my_series;
+-- Automatic detection algorithm
+SELECT * FROM ts_detect_periods_by('sales', product_id, date, value,
+    MAP{'method': 'autoperiod'});
 ```
 
----
-
-### Pattern 5: Compare Methods
-
-**Use case:** Cross-validate period estimates.
+### Multiple Periods Detection
 
 ```sql
+-- Detect multiple seasonal patterns
+SELECT * FROM ts_detect_periods_by('sales', product_id, date, value,
+    MAP{'method': 'multi'});
+```
+
+### Accessing Results
+
+```sql
+-- Extract specific fields from the result
 SELECT
-    ts_estimate_period_fft(values).period AS fft_period,
-    ts_estimate_period_acf(values).period AS acf_period,
-    ts_autoperiod(values).period AS auto_period
-FROM my_data;
+    id,
+    (periods).primary_period AS detected_period,
+    (periods).method AS method,
+    (periods).n_periods AS n_periods_found
+FROM ts_detect_periods_by('sales', product_id, date, value, MAP{});
 ```
+
+---
+
+## Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `method` | VARCHAR | 'ensemble' | Detection algorithm: 'fft', 'acf', 'autoperiod', 'multi', 'ensemble' |
+| `max_period` | VARCHAR | auto | Maximum period to search for |
+| `min_confidence` | VARCHAR | '0.5' | Minimum confidence threshold |
+
+When `MAP{}` is passed (empty), uses ensemble method with defaults.
+
+---
+
+## Output Columns
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | VARCHAR | Series identifier |
+| `periods` | STRUCT | Struct containing detection results |
+
+### Periods Struct Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `primary_period` | INTEGER | Most likely period |
+| `method` | VARCHAR | Detection method used |
+| `n_periods` | INTEGER | Number of periods detected |
+
+---
+
+## Detection Methods
+
+| Method | Best For | Description |
+|--------|----------|-------------|
+| `fft` | Long, clean series | Fast Fourier Transform - spectral analysis |
+| `acf` | Noisy data | Autocorrelation Function - correlation-based |
+| `autoperiod` | Unknown patterns | Automatic period estimation |
+| `multi` | Complex seasonality | Detect multiple seasonal patterns |
+| `ensemble` | General use | Combines multiple methods (default) |
+
+---
+
+## Key Concepts
+
+### Choosing a Method
+
+| Situation | Recommended Method |
+|-----------|-------------------|
+| Clean periodic signal | `fft` |
+| Noisy data | `acf` |
+| Unknown pattern | `ensemble` (default) |
+| Multiple seasonalities | `multi` |
+| Short series | `autoperiod` |
+
+### Common Periods by Data Frequency
+
+| Data Frequency | Common Periods |
+|----------------|----------------|
+| Hourly | 24 (daily), 168 (weekly) |
+| Daily | 7 (weekly), 30 (monthly), 365 (yearly) |
+| Weekly | 52 (yearly) |
+| Monthly | 12 (yearly) |
+
+---
+
+## Tips
+
+1. **Start with defaults** - Use `MAP{}` first to see what ensemble method detects.
+
+2. **Verify results** - Plot your data to visually confirm the detected period makes sense.
+
+3. **Minimum data requirement** - Need at least 2x the period length for reliable detection.
+
+4. **Handle noise** - Use `acf` method for noisy data as it's more robust.
+
+5. **Multiple seasonalities** - Use `multi` method if you expect both weekly and monthly patterns.
+
+---
+
+## Related Functions
+
+- `ts_classify_seasonality_by()` - Determine if seasonality is present and its type
+- `ts_mstl_decomposition_by()` - Decompose series using detected periods
+- `ts_forecast_by()` - Forecast using appropriate seasonal model

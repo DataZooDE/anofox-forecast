@@ -116,27 +116,23 @@ SELECT COUNT(*) AS n_regular_items FROM regular_items;
 SELECT
     '=== Section 3: Seasonality Detection ===' AS section;
 
--- Detect seasonality only on non-intermittent items
+-- Detect seasonality only on non-intermittent items using ts_detect_periods_by
 SELECT 'Detecting seasonality on non-intermittent items:' AS step;
 
+-- Create filtered table for seasonality detection
+CREATE OR REPLACE TABLE regular_items_data AS
+SELECT m.item_id, m.ds, m.y
+FROM m5_sample m
+JOIN regular_items r ON m.item_id = r.item_id;
+
+-- Use ts_detect_periods_by for period detection
 CREATE OR REPLACE TABLE item_seasonality AS
-WITH item_arrays AS (
-    SELECT
-        m.item_id,
-        LIST(m.y ORDER BY m.ds) AS values
-    FROM m5_sample m
-    JOIN regular_items r ON m.item_id = r.item_id
-    GROUP BY m.item_id
-)
 SELECT
-    item_id,
-    ts_detect_seasonality(values) AS detected_periods,
-    LEN(ts_detect_seasonality(values)) AS n_periods_detected,
-    CASE
-        WHEN LEN(ts_detect_seasonality(values)) > 0 THEN ts_detect_seasonality(values)[1]
-        ELSE NULL
-    END AS primary_period
-FROM item_arrays;
+    id AS item_id,
+    periods AS detected_periods,
+    n_periods AS n_periods_detected,
+    primary_period
+FROM ts_detect_periods_by('regular_items_data', item_id, ds, y, MAP{});
 
 -- Summary of seasonality detection
 SELECT 'Seasonality Detection Summary (non-intermittent items only):' AS step;
@@ -182,33 +178,34 @@ SELECT COUNT(*) AS n_suitable_items FROM suitable_items;
 SELECT
     '=== Section 4: Peak Detection ===' AS section;
 
--- Peak detection on filtered items
+-- Create table with suitable items data for peak detection
+CREATE OR REPLACE TABLE suitable_items_data AS
+SELECT m.item_id, m.ds, m.y, s.primary_period
+FROM m5_sample m
+JOIN suitable_items s ON m.item_id = s.item_id;
+
+-- Peak detection using ts_detect_peaks_by
 SELECT 'Peak Detection Results:' AS step;
-WITH item_arrays AS (
-    SELECT
-        m.item_id,
-        s.primary_period,
-        LIST(m.y ORDER BY m.ds) AS values
-    FROM m5_sample m
-    JOIN suitable_items s ON m.item_id = s.item_id
-    GROUP BY m.item_id, s.primary_period
-),
-peak_results AS (
-    SELECT
-        item_id,
-        primary_period,
-        ts_detect_peaks(values) AS detection,
-        ts_detect_peaks(values, 0.2) AS significant_detection
-    FROM item_arrays
-)
+
+-- Default detection
+CREATE OR REPLACE TABLE peak_results_default AS
+SELECT * FROM ts_detect_peaks_by('suitable_items_data', item_id, ds, y, MAP{});
+
+-- Significant detection with higher prominence threshold
+CREATE OR REPLACE TABLE peak_results_significant AS
+SELECT * FROM ts_detect_peaks_by('suitable_items_data', item_id, ds, y, MAP{'min_prominence': '0.2'});
+
+-- Join results with period info
 SELECT
-    item_id,
-    primary_period AS detected_period,
-    detection.n_peaks AS all_peaks,
-    significant_detection.n_peaks AS significant_peaks,
-    ROUND(detection.mean_period, 1) AS avg_days_between_peaks
-FROM peak_results
-ORDER BY significant_detection.n_peaks DESC
+    d.id AS item_id,
+    s.primary_period AS detected_period,
+    d.n_peaks AS all_peaks,
+    sig.n_peaks AS significant_peaks,
+    ROUND(d.mean_period, 1) AS avg_days_between_peaks
+FROM peak_results_default d
+JOIN peak_results_significant sig ON d.id = sig.id
+JOIN (SELECT DISTINCT item_id, primary_period FROM suitable_items) s ON d.id = s.item_id
+ORDER BY sig.n_peaks DESC
 LIMIT 10;
 
 -- ============================================================================
@@ -218,69 +215,42 @@ LIMIT 10;
 SELECT
     '=== Section 5: Peak Timing Analysis ===' AS section;
 
--- Analyze peak timing using each item's detected seasonal period
-SELECT 'Peak Timing Using Detected Seasonality:' AS step;
-WITH item_arrays AS (
-    SELECT
-        m.item_id,
-        s.primary_period,
-        LIST(m.y ORDER BY m.ds) AS values
-    FROM m5_sample m
-    JOIN suitable_items s ON m.item_id = s.item_id
-    GROUP BY m.item_id, s.primary_period
-),
-timing_results AS (
-    SELECT
-        item_id,
-        primary_period,
-        ts_analyze_peak_timing(values, primary_period) AS timing
-    FROM item_arrays
-)
+-- Analyze peak timing using ts_analyze_peak_timing_by with weekly period (7.0)
+SELECT 'Peak Timing Using Weekly Period:' AS step;
+
+CREATE OR REPLACE TABLE timing_results AS
+SELECT * FROM ts_analyze_peak_timing_by('suitable_items_data', item_id, ds, y, 7.0, MAP{});
+
+-- Join with suitable items to get primary period
 SELECT
-    item_id,
-    primary_period AS period,
-    timing.n_peaks AS peaks_analyzed,
-    ROUND(timing.mean_timing * primary_period, 1) AS mean_peak_position,
-    ROUND(timing.variability_score, 3) AS variability,
-    timing.is_stable AS stable_pattern,
+    t.id AS item_id,
+    s.primary_period AS period,
+    t.n_peaks AS peaks_analyzed,
+    ROUND(t.variability_score, 3) AS variability,
+    t.is_stable AS stable_pattern,
     CASE
-        WHEN timing.variability_score < 0.1 THEN 'Very Consistent'
-        WHEN timing.variability_score < 0.3 THEN 'Consistent'
-        WHEN timing.variability_score < 0.5 THEN 'Moderate'
+        WHEN t.variability_score < 0.1 THEN 'Very Consistent'
+        WHEN t.variability_score < 0.3 THEN 'Consistent'
+        WHEN t.variability_score < 0.5 THEN 'Moderate'
         ELSE 'Variable'
     END AS assessment
-FROM timing_results
-WHERE timing.n_peaks >= 5
-ORDER BY timing.variability_score
+FROM timing_results t
+JOIN (SELECT DISTINCT item_id, primary_period FROM suitable_items) s ON t.id = s.item_id
+WHERE t.n_peaks >= 5
+ORDER BY t.variability_score
 LIMIT 15;
 
 -- Find items with stable peak patterns
 SELECT 'Items with Stable Peak Patterns (is_stable = true):' AS step;
-WITH item_arrays AS (
-    SELECT
-        m.item_id,
-        s.primary_period,
-        LIST(m.y ORDER BY m.ds) AS values
-    FROM m5_sample m
-    JOIN suitable_items s ON m.item_id = s.item_id
-    GROUP BY m.item_id, s.primary_period
-),
-timing_results AS (
-    SELECT
-        item_id,
-        primary_period,
-        ts_analyze_peak_timing(values, primary_period) AS timing
-    FROM item_arrays
-)
 SELECT
-    item_id,
-    primary_period AS period,
-    timing.n_peaks AS peaks,
-    ROUND(timing.variability_score, 4) AS variability,
-    ROUND(timing.timing_trend, 4) AS trend
-FROM timing_results
-WHERE timing.is_stable = true AND timing.n_peaks >= 10
-ORDER BY timing.variability_score
+    t.id AS item_id,
+    s.primary_period AS period,
+    t.n_peaks AS peaks,
+    ROUND(t.variability_score, 4) AS variability
+FROM timing_results t
+JOIN (SELECT DISTINCT item_id, primary_period FROM suitable_items) s ON t.id = s.item_id
+WHERE t.is_stable = true AND t.n_peaks >= 10
+ORDER BY t.variability_score
 LIMIT 10;
 
 -- ============================================================================
@@ -290,34 +260,26 @@ LIMIT 10;
 SELECT
     '=== Section 6: Demand Spike Detection ===' AS section;
 
--- Find significant demand spikes for a suitable item
+-- Find significant demand spikes for a suitable item using ts_detect_peaks_by
 SELECT 'Top Demand Spikes (First Suitable Item):' AS step;
-WITH
-first_suitable AS (
-    SELECT item_id, primary_period FROM suitable_items LIMIT 1
+
+-- Get first suitable item
+CREATE OR REPLACE TABLE first_item_data AS
+SELECT m.item_id, m.ds, m.y
+FROM m5_sample m
+WHERE m.item_id = (SELECT item_id FROM suitable_items LIMIT 1);
+
+-- Detect peaks with high prominence
+CREATE OR REPLACE TABLE first_item_peaks AS
+SELECT * FROM ts_detect_peaks_by('first_item_data', item_id, ds, y, MAP{'min_prominence': '0.3'});
+
+-- Unnest and join with dates
+WITH peaks_unnested AS (
+    SELECT id AS item_id, UNNEST(peaks) AS peak FROM first_item_peaks
 ),
 numbered_data AS (
-    SELECT
-        ROW_NUMBER() OVER (ORDER BY ds) AS row_idx,
-        m.item_id,
-        m.ds,
-        m.y
-    FROM m5_sample m
-    JOIN first_suitable f ON m.item_id = f.item_id
-),
-item_data AS (
-    SELECT
-        (SELECT item_id FROM first_suitable) AS item_id,
-        LIST(y ORDER BY ds) AS values
-    FROM numbered_data
-),
-result AS (
-    SELECT item_id, ts_detect_peaks(values, 0.3) AS detection
-    FROM item_data
-),
-peaks_unnested AS (
-    SELECT item_id, UNNEST(detection.peaks) AS peak
-    FROM result
+    SELECT ROW_NUMBER() OVER (ORDER BY ds) AS row_idx, item_id, ds, y
+    FROM first_item_data
 )
 SELECT
     p.item_id,
@@ -350,48 +312,40 @@ SELECT
 
 -- Comprehensive summary for suitable items
 SELECT 'Complete Analysis (Suitable Items Only):' AS step;
-WITH item_arrays AS (
+
+-- Use existing peak results and timing results from earlier sections
+WITH demand_stats AS (
     SELECT
         m.item_id,
         s.primary_period,
         s.demand_type,
-        LIST(m.y ORDER BY m.ds) AS values,
         AVG(m.y) AS avg_demand,
         MAX(m.y) AS max_demand
     FROM m5_sample m
     JOIN suitable_items s ON m.item_id = s.item_id
     GROUP BY m.item_id, s.primary_period, s.demand_type
-),
-full_analysis AS (
-    SELECT
-        item_id,
-        primary_period,
-        demand_type,
-        avg_demand,
-        max_demand,
-        ts_detect_peaks(values, 0.1) AS detection,
-        ts_analyze_peak_timing(values, primary_period) AS timing
-    FROM item_arrays
 )
 SELECT
-    item_id,
-    demand_type,
-    primary_period AS period,
-    ROUND(avg_demand, 2) AS avg_demand,
-    max_demand::INT AS max_demand,
-    detection.n_peaks AS n_peaks,
-    ROUND(detection.mean_period, 1) AS peak_interval,
-    ROUND(timing.variability_score, 3) AS timing_var,
-    timing.is_stable AS stable,
+    d.item_id,
+    d.demand_type,
+    d.primary_period AS period,
+    ROUND(d.avg_demand, 2) AS avg_demand,
+    d.max_demand::INT AS max_demand,
+    p.n_peaks AS n_peaks,
+    ROUND(p.mean_period, 1) AS peak_interval,
+    ROUND(t.variability_score, 3) AS timing_var,
+    t.is_stable AS stable,
     CASE
-        WHEN timing.is_stable AND detection.n_peaks > 50 THEN 'Stable high-frequency'
-        WHEN timing.is_stable THEN 'Stable pattern'
-        WHEN detection.n_peaks > 50 THEN 'Variable high-frequency'
+        WHEN t.is_stable AND p.n_peaks > 50 THEN 'Stable high-frequency'
+        WHEN t.is_stable THEN 'Stable pattern'
+        WHEN p.n_peaks > 50 THEN 'Variable high-frequency'
         ELSE 'Variable pattern'
     END AS pattern_type
-FROM full_analysis
-WHERE timing.n_peaks >= 5
-ORDER BY timing.variability_score
+FROM demand_stats d
+JOIN peak_results_default p ON d.item_id = p.id
+JOIN timing_results t ON d.item_id = t.id
+WHERE t.n_peaks >= 5
+ORDER BY t.variability_score
 LIMIT 15;
 
 -- Compare all item categories
@@ -439,7 +393,7 @@ SELECT
 
 -- Key insight
 SELECT
-    'KEY INSIGHT: Use aid_agg() to filter intermittent items, then ts_detect_seasonality() to find patterns. Only then is peak detection meaningful.' AS takeaway;
+    'KEY INSIGHT: Use aid_agg() to filter intermittent items, then ts_detect_periods_by() to find patterns. Only then is peak detection meaningful.' AS takeaway;
 
 -- Optionally drop temporary tables
 -- DROP TABLE IF EXISTS m5_sample;

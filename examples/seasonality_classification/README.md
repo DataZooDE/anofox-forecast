@@ -4,11 +4,17 @@
 
 This folder contains runnable SQL examples demonstrating seasonality classification with the anofox-forecast extension.
 
+## Function
+
+| Function | Description |
+|----------|-------------|
+| `ts_classify_seasonality_by` | Classify seasonality type for multiple series |
+
 ## Example Files
 
 | File | Description | Data Source |
 |------|-------------|-------------|
-| [`synthetic_seasonality_examples.sql`](synthetic_seasonality_examples.sql) | 5 patterns using generated data | Synthetic |
+| [`synthetic_seasonality_examples.sql`](synthetic_seasonality_examples.sql) | Multi-series seasonality classification examples | Synthetic |
 
 ## Quick Start
 
@@ -19,93 +25,91 @@ This folder contains runnable SQL examples demonstrating seasonality classificat
 
 ---
 
-## Patterns Overview
+## Usage
 
-### Pattern 1: Basic Seasonality Classification
+### Basic Classification
 
-**Use case:** Determine if a series has seasonality and what type (stable, variable, intermittent).
+```sql
+-- Classify seasonality with expected period=7 (weekly)
+SELECT * FROM ts_classify_seasonality_by('sales', product_id, date, value, 7);
+```
 
-**Key function:** `ts_classify_seasonality(values, period, [strength_threshold], [timing_threshold])`
+### Accessing Classification Results
 
-**Parameters:**
-- `values` - Time series values as DOUBLE[]
-- `period` - Expected seasonal period (e.g., 7 for weekly, 12 for monthly)
-- `strength_threshold` - Minimum strength to consider seasonal (default: 0.3)
-- `timing_threshold` - Threshold for timing variability (default: 0.1)
+```sql
+-- Extract specific classification fields
+SELECT
+    id AS series_id,
+    (classification).timing_classification AS timing_class,
+    (classification).modulation_type AS modulation,
+    (classification).is_seasonal AS is_seasonal,
+    (classification).has_stable_timing AS stable_timing,
+    ROUND((classification).seasonal_strength, 4) AS strength
+FROM ts_classify_seasonality_by('sales', product_id, date, value, 7);
+```
 
-**See:** `synthetic_seasonality_examples.sql` Pattern 1
+### Filter Seasonal Series
 
----
+```sql
+-- Only show series with detected seasonality
+SELECT
+    id AS series_id,
+    (classification).timing_classification AS timing_class,
+    ROUND((classification).seasonal_strength, 4) AS strength
+FROM ts_classify_seasonality_by('sales', product_id, date, value, 7)
+WHERE (classification).is_seasonal = true;
+```
 
-### Pattern 2: Aggregate Classification
+### Forecasting Method Selection
 
-**Use case:** Classify seasonality directly from (timestamp, value) pairs without pre-aggregation.
-
-**Key function:** `ts_classify_seasonality_agg(ts, value, period)`
-
-**Parameters:**
-- `ts` - Timestamp column
-- `value` - Value column
-- `period` - Expected seasonal period
-
-**See:** `synthetic_seasonality_examples.sql` Pattern 2
-
----
-
-### Pattern 3: Table Macro for Grouped Analysis
-
-**Use case:** Classify seasonality for multiple series in a single query.
-
-**Key function:** `ts_classify_seasonality_by(source, group_col, date_col, value_col, period)`
-
-**Parameters:**
-- `source` - Table name as string
-- `group_col` - Column identifying groups/series
-- `date_col` - Timestamp column
-- `value_col` - Value column
-- `period` - Expected seasonal period
-
-**See:** `synthetic_seasonality_examples.sql` Pattern 3
-
----
-
-### Pattern 4: Forecasting Method Selection
-
-**Use case:** Use classification results to automatically select appropriate forecasting methods.
-
-**Logic:**
-| Classification | Recommended Method |
-|----------------|-------------------|
-| Non-seasonal | AutoARIMA, Theta |
-| Strong stable seasonality | MSTL, STL decomposition |
-| Moderate seasonality | ETS with seasonal component |
-| Variable seasonality | AutoARIMA with seasonal differencing |
-
-**See:** `synthetic_seasonality_examples.sql` Pattern 4
+```sql
+-- Recommend forecasting method based on classification
+SELECT
+    id AS series_id,
+    CASE
+        WHEN NOT (classification).is_seasonal THEN 'AutoARIMA (non-seasonal)'
+        WHEN (classification).has_stable_timing AND (classification).seasonal_strength > 0.5
+            THEN 'MSTL (strong stable seasonality)'
+        WHEN (classification).has_stable_timing
+            THEN 'ETS (moderate seasonality)'
+        ELSE 'AutoARIMA with seasonal differencing'
+    END AS recommended_method
+FROM ts_classify_seasonality_by('sales', product_id, date, value, 7);
+```
 
 ---
 
-### Pattern 5: Cycle Strength Analysis
+## Parameters
 
-**Use case:** Identify weak or anomalous seasonal cycles within a series.
+The function signature is:
+```sql
+ts_classify_seasonality_by(source, group_col, date_col, value_col, period)
+```
 
-**Key outputs:**
-- `cycle_strengths` - Strength of each individual cycle
-- `weak_seasons` - Indices of cycles below threshold
-
-**See:** `synthetic_seasonality_examples.sql` Pattern 5
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Table name |
+| `group_col` | COLUMN | Column identifying groups/series |
+| `date_col` | COLUMN | Timestamp column |
+| `value_col` | COLUMN | Value column |
+| `period` | INTEGER | Expected seasonal period (e.g., 7 for weekly) |
 
 ---
 
-## Return Structure
+## Output Columns
 
-All classification functions return a STRUCT with these fields:
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | VARCHAR | Series identifier |
+| `classification` | STRUCT | Struct containing classification results |
+
+### Classification Struct Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `timing_classification` | VARCHAR | Classification: 'non_seasonal', 'stable_seasonal', 'variable_seasonal', 'intermittent_seasonal' |
-| `modulation_type` | VARCHAR | Amplitude modulation: 'non_seasonal', 'stable', 'modulated', 'unknown' |
-| `has_stable_timing` | BOOLEAN | Whether seasonal timing is consistent across cycles |
+| `timing_classification` | VARCHAR | 'non_seasonal', 'stable_seasonal', 'variable_seasonal', 'intermittent_seasonal' |
+| `modulation_type` | VARCHAR | 'non_seasonal', 'stable', 'modulated', 'unknown' |
+| `has_stable_timing` | BOOLEAN | Whether seasonal timing is consistent |
 | `timing_variability` | DOUBLE | Measure of timing consistency (lower = more stable) |
 | `seasonal_strength` | DOUBLE | Overall seasonal strength (0-1) |
 | `is_seasonal` | BOOLEAN | Whether series exhibits seasonality |
@@ -143,36 +147,24 @@ All classification functions return a STRUCT with these fields:
 | Weekly | 52 (yearly) |
 | Monthly | 12 (yearly) |
 
-### Threshold Selection
-
-| Parameter | Default | Use Case |
-|-----------|---------|----------|
-| `strength_threshold = 0.3` | Default | Standard seasonality detection |
-| `strength_threshold = 0.5` | Stricter | Only strong seasonal patterns |
-| `strength_threshold = 0.1` | Lenient | Detect weak seasonality |
-| `timing_threshold = 0.1` | Default | Standard timing consistency |
-
 ---
 
 ## Tips
 
-1. **Start with detected period** - Use `ts_detect_seasonality()` to find the actual period, don't guess.
+1. **Detect period first** - Use `ts_detect_periods_by()` to find the actual period before classification.
 
 2. **Check `is_seasonal` first** - Before interpreting other fields, verify seasonality exists.
 
-3. **Use classification for method selection** - Match forecasting method to seasonality type for best results.
+3. **Use for method selection** - Match forecasting method to seasonality type for best results.
 
-4. **Monitor `timing_variability`** - Low variability (< 0.1) indicates predictable patterns suitable for scheduling.
+4. **Monitor `timing_variability`** - Low variability (< 0.1) indicates predictable patterns.
 
 5. **Inspect `weak_seasons`** - Identify anomalous cycles that may need special handling.
-
-6. **Use table macro for batch analysis** - `ts_classify_seasonality_by` is efficient for analyzing many series.
 
 ---
 
 ## Related Functions
 
-- `ts_analyze_seasonality()` - Detect period and strength without classification
-- `ts_detect_seasonality()` - Quick period detection
-- `ts_detect_amplitude_modulation()` - Detailed amplitude analysis
-- `ts_detect_seasonality_changes()` - Detect when seasonality begins/ends
+- `ts_detect_periods_by()` - Detect seasonal periods automatically
+- `ts_mstl_decomposition_by()` - Decompose series into trend/seasonal/remainder
+- `ts_forecast_by()` - Forecast using appropriate seasonal model

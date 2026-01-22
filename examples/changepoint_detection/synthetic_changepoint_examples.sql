@@ -1,147 +1,253 @@
 -- ============================================================================
--- Changepoint Detection Examples - Testing with Known Breaks
+-- Changepoint Detection Examples - Synthetic Data
 -- ============================================================================
--- This file demonstrates that changepoint detection correctly identifies
--- structural breaks in synthetic time series with known changepoints.
+-- This script demonstrates changepoint detection with the anofox-forecast
+-- extension using the ts_detect_changepoints_by table macro.
 --
--- Run with:
---   ./build/release/duckdb < examples/changepoint_detection/synthetic_changepoint_examples.sql
+-- Run: ./build/release/duckdb < examples/changepoint_detection/synthetic_changepoint_examples.sql
 -- ============================================================================
 
-LOAD 'build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension';
+-- Load extension
+LOAD anofox_forecast;
+INSTALL json;
+LOAD json;
+
+.print '============================================================================='
+.print 'CHANGEPOINT DETECTION EXAMPLES - Using ts_detect_changepoints_by'
+.print '============================================================================='
 
 -- ============================================================================
--- SECTION 1: Basic Changepoint Detection Tests
+-- SECTION 1: Basic Changepoint Detection for Multiple Series
 -- ============================================================================
+-- Use ts_detect_changepoints_by to detect structural breaks across grouped series.
 
-.print '============================================================'
-.print 'SECTION 1: Basic Changepoint Detection Tests'
-.print '============================================================'
+.print ''
+.print '>>> SECTION 1: Basic Changepoint Detection'
+.print '-----------------------------------------------------------------------------'
 
--- Test 1: Mean shift at index 50
-WITH mean_shift AS (
-    SELECT list(CASE WHEN i < 50 THEN 10.0 + (random()-0.5)*2 ELSE 50.0 + (random()-0.5)*2 END) AS v
+-- Create multi-series data with different changepoint patterns
+CREATE OR REPLACE TABLE multi_series AS
+SELECT * FROM (
+    -- Series A: Single mean shift at day 50
+    SELECT
+        'series_A' AS series_id,
+        DATE '2024-01-01' + INTERVAL (i) DAY AS ds,
+        CASE WHEN i < 50 THEN 10.0 ELSE 50.0 END + (RANDOM() - 0.5) * 4 AS value
     FROM generate_series(0, 99) AS t(i)
-)
-SELECT 'Mean Shift (expect ~50)' AS test, (_ts_detect_changepoints_bocpd(v, 100.0, false)).changepoint_indices AS detected FROM mean_shift;
-
--- Test 2: Step function (perfect break)
-SELECT 'Step Function (expect 5)' AS test, (_ts_detect_changepoints_bocpd([1,1,1,1,1,10,10,10,10,10]::DOUBLE[], 100.0, false)).changepoint_indices AS detected;
-
--- Test 3: Multiple changepoints at 33 and 67
-WITH multi AS (
-    SELECT list(CASE WHEN i < 33 THEN 10.0 WHEN i < 67 THEN 30.0 ELSE 50.0 END + (random()-0.5)*2) AS v
+    UNION ALL
+    -- Series B: Two changepoints at day 33 and 67
+    SELECT
+        'series_B' AS series_id,
+        DATE '2024-01-01' + INTERVAL (i) DAY AS ds,
+        CASE
+            WHEN i < 33 THEN 10.0
+            WHEN i < 67 THEN 30.0
+            ELSE 50.0
+        END + (RANDOM() - 0.5) * 4 AS value
     FROM generate_series(0, 99) AS t(i)
-)
-SELECT 'Multi CP (expect ~33, ~67)' AS test, (_ts_detect_changepoints_bocpd(v, 50.0, false)).changepoint_indices AS detected FROM multi;
+    UNION ALL
+    -- Series C: No changepoints (stationary)
+    SELECT
+        'series_C' AS series_id,
+        DATE '2024-01-01' + INTERVAL (i) DAY AS ds,
+        25.0 + (RANDOM() - 0.5) * 4 AS value
+    FROM generate_series(0, 99) AS t(i)
+);
 
--- Test 4: Stationary series (expect no changepoints)
-WITH stationary AS (
-    SELECT list(10.0 + (random()-0.5)*2) AS v FROM generate_series(0, 99) AS t(i)
-)
-SELECT 'Stationary (expect empty)' AS test, (_ts_detect_changepoints_bocpd(v, 100.0, false)).changepoint_indices AS detected FROM stationary;
+.print 'Multi-series data summary:'
+SELECT series_id, COUNT(*) AS n_rows, ROUND(AVG(value), 2) AS avg_value
+FROM multi_series GROUP BY series_id ORDER BY series_id;
+
+-- 1.1: Basic changepoint detection (default parameters)
+.print ''
+.print 'Section 1.1: Basic Changepoint Detection'
+
+SELECT
+    id,
+    (changepoints).changepoint_indices AS detected_indices,
+    list_count((changepoints).changepoint_indices) AS n_changepoints
+FROM ts_detect_changepoints_by('multi_series', series_id, ds, value, MAP{});
 
 -- ============================================================================
--- SECTION 2: Scale Tests
+-- SECTION 2: Tuning Detection Sensitivity
 -- ============================================================================
 
 .print ''
-.print '============================================================'
-.print 'SECTION 2: Scale Tests'
-.print '============================================================'
+.print '>>> SECTION 2: Tuning Detection Sensitivity (hazard_lambda)'
+.print '-----------------------------------------------------------------------------'
 
--- Test with 10K points
-WITH series_10k AS (
-    SELECT list(CASE WHEN i < 5000 THEN 10.0 ELSE 50.0 END + (random()-0.5)*2) AS v
-    FROM generate_series(0, 9999) AS t(i)
-)
-SELECT '10K points (expect ~5000)' AS test, (_ts_detect_changepoints_bocpd(v, 1000.0, false)).changepoint_indices AS detected FROM series_10k;
+-- 2.1: Conservative detection (higher hazard_lambda = fewer changepoints)
+.print 'Section 2.1: Conservative Detection (hazard_lambda=500)'
 
--- Test with 100K points
-WITH series_100k AS (
-    SELECT list(CASE WHEN i < 50000 THEN 10.0 ELSE 50.0 END + (random()-0.5)*2) AS v
-    FROM generate_series(0, 99999) AS t(i)
-)
-SELECT '100K points (expect ~50000)' AS test, (_ts_detect_changepoints_bocpd(v, 10000.0, false)).changepoint_indices AS detected FROM series_100k;
-
--- ============================================================================
--- SECTION 3: Table Macro Tests
--- ============================================================================
-
-.print ''
-.print '============================================================'
-.print 'SECTION 3: Table Macro Tests'
-.print '============================================================'
-
--- Create test table with multiple series
-CREATE OR REPLACE TABLE test_series AS
-WITH series_a AS (
-    SELECT
-        'series_a' AS series_id,
-        DATE '2020-01-01' + INTERVAL (i) DAY AS ds,
-        CASE WHEN i < 50 THEN 10.0 ELSE 50.0 END + (random()-0.5)*2 AS value
-    FROM generate_series(0, 99) AS t(i)
-),
-series_b AS (
-    SELECT
-        'series_b' AS series_id,
-        DATE '2020-01-01' + INTERVAL (i) DAY AS ds,
-        CASE WHEN i < 30 THEN 5.0 WHEN i < 70 THEN 25.0 ELSE 15.0 END + (random()-0.5)*1 AS value
-    FROM generate_series(0, 99) AS t(i)
-)
-SELECT * FROM series_a
-UNION ALL
-SELECT * FROM series_b;
-
--- Test ts_detect_changepoints_by with multiple series
 SELECT
     id,
     (changepoints).changepoint_indices AS detected_indices
-FROM ts_detect_changepoints_by('test_series', series_id, ds, value, MAP{});
+FROM ts_detect_changepoints_by('multi_series', series_id, ds, value, MAP{'hazard_lambda': '500'});
 
--- ============================================================================
--- SECTION 4: Aggregate Function Test
--- ============================================================================
-
+-- 2.2: Sensitive detection (lower hazard_lambda = more changepoints)
 .print ''
-.print '============================================================'
-.print 'SECTION 4: Aggregate Function Test'
-.print '============================================================'
+.print 'Section 2.2: Sensitive Detection (hazard_lambda=50)'
 
 SELECT
-    series_id,
-    list_filter(
-        ts_detect_changepoints_agg(ds, value, MAP{}),
-        x -> x.is_changepoint
-    ) AS changepoint_rows
-FROM test_series
-GROUP BY series_id;
+    id,
+    (changepoints).changepoint_indices AS detected_indices
+FROM ts_detect_changepoints_by('multi_series', series_id, ds, value, MAP{'hazard_lambda': '50'});
 
 -- ============================================================================
--- SECTION 5: Edge Cases
+-- SECTION 3: Accessing Changepoint Details
 -- ============================================================================
 
 .print ''
-.print '============================================================'
-.print 'SECTION 5: Edge Cases'
-.print '============================================================'
+.print '>>> SECTION 3: Accessing Changepoint Details'
+.print '-----------------------------------------------------------------------------'
 
--- NaN handling (returns no changepoints, doesn't crash)
-SELECT 'NaN values' AS test, (_ts_detect_changepoints_bocpd([1.0, 2.0, 'NaN'::DOUBLE, 4.0, 5.0], 10.0, false)).changepoint_indices AS result;
+-- 3.1: Get changepoint probabilities
+.print 'Section 3.1: Changepoint Probabilities (include_probabilities=true)'
 
--- Inf handling (returns no changepoints, doesn't crash)
-SELECT 'Inf values' AS test, (_ts_detect_changepoints_bocpd([1.0, 2.0, 'Inf'::DOUBLE, 4.0, 5.0], 10.0, false)).changepoint_indices AS result;
+SELECT
+    id,
+    (changepoints).changepoint_indices AS indices,
+    list_count((changepoints).changepoint_probability) AS n_probs,
+    ROUND(list_max((changepoints).changepoint_probability), 4) AS max_probability
+FROM ts_detect_changepoints_by('multi_series', series_id, ds, value, MAP{'include_probabilities': 'true'});
 
--- Constant series (no changepoints expected)
-SELECT 'Constant series' AS test, (_ts_detect_changepoints_bocpd([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 10.0, false)).changepoint_indices AS result;
-
--- Single element (returns NULL)
-SELECT 'Single element' AS test, _ts_detect_changepoints_bocpd([5.0], 10.0, false) AS result;
-
--- Empty array (returns NULL, gracefully handled)
-SELECT 'Empty array' AS test, _ts_detect_changepoints_bocpd([]::DOUBLE[], 10.0, false) AS result;
+-- ============================================================================
+-- SECTION 4: Real-World Scenarios
+-- ============================================================================
 
 .print ''
-.print '============================================================'
-.print 'All tests completed!'
-.print '============================================================'
+.print '>>> SECTION 4: Real-World Scenarios'
+.print '-----------------------------------------------------------------------------'
+
+-- Create retail demand data with promotional changepoints
+CREATE OR REPLACE TABLE retail_demand AS
+SELECT * FROM (
+    -- Store A: Promotion effect starting day 30
+    SELECT
+        'Store_A' AS store_id,
+        DATE '2024-01-01' + INTERVAL (i) DAY AS date,
+        CASE
+            WHEN i < 30 THEN 100.0
+            WHEN i < 45 THEN 180.0  -- promotion period
+            ELSE 110.0  -- post-promotion (slightly higher baseline)
+        END + (RANDOM() - 0.5) * 15 AS sales
+    FROM generate_series(0, 89) AS t(i)
+    UNION ALL
+    -- Store B: Gradual decline starting day 40
+    SELECT
+        'Store_B' AS store_id,
+        DATE '2024-01-01' + INTERVAL (i) DAY AS date,
+        CASE
+            WHEN i < 40 THEN 200.0
+            ELSE 200.0 - (i - 40) * 1.5
+        END + (RANDOM() - 0.5) * 20 AS sales
+    FROM generate_series(0, 89) AS t(i)
+    UNION ALL
+    -- Store C: Stable (no changepoints)
+    SELECT
+        'Store_C' AS store_id,
+        DATE '2024-01-01' + INTERVAL (i) DAY AS date,
+        150.0 + (RANDOM() - 0.5) * 25 AS sales
+    FROM generate_series(0, 89) AS t(i)
+);
+
+.print 'Section 4.1: Retail Demand Changepoint Detection'
+
+SELECT
+    id AS store,
+    (changepoints).changepoint_indices AS detected_changepoints,
+    list_count((changepoints).changepoint_indices) AS n_changepoints,
+    CASE
+        WHEN list_count((changepoints).changepoint_indices) = 0 THEN 'Stable demand'
+        WHEN list_count((changepoints).changepoint_indices) = 1 THEN 'Single shift detected'
+        ELSE 'Multiple shifts detected'
+    END AS pattern_description
+FROM ts_detect_changepoints_by('retail_demand', store_id, date, sales, MAP{'hazard_lambda': '30'});
+
+-- ============================================================================
+-- SECTION 5: Sensor Data Anomaly Detection
+-- ============================================================================
+
+.print ''
+.print '>>> SECTION 5: Sensor Data Anomaly Detection'
+.print '-----------------------------------------------------------------------------'
+
+-- Create sensor data with equipment failure
+CREATE OR REPLACE TABLE sensor_data AS
+SELECT * FROM (
+    -- Sensor A: Equipment failure at reading 60
+    SELECT
+        'Sensor_A' AS sensor_id,
+        '2024-01-01 00:00:00'::TIMESTAMP + INTERVAL (i) HOUR AS timestamp,
+        CASE
+            WHEN i < 60 THEN 50.0 + 5.0 * SIN(2 * PI() * i / 24)  -- normal operation
+            WHEN i < 75 THEN 80.0 + (RANDOM() - 0.5) * 30  -- erratic readings
+            ELSE 0.0  -- sensor failure
+        END + (RANDOM() - 0.5) * 3 AS reading
+    FROM generate_series(0, 119) AS t(i)
+    UNION ALL
+    -- Sensor B: Normal operation
+    SELECT
+        'Sensor_B' AS sensor_id,
+        '2024-01-01 00:00:00'::TIMESTAMP + INTERVAL (i) HOUR AS timestamp,
+        50.0 + 5.0 * SIN(2 * PI() * i / 24) + (RANDOM() - 0.5) * 3 AS reading
+    FROM generate_series(0, 119) AS t(i)
+);
+
+.print 'Section 5.1: Sensor Anomaly Detection'
+
+SELECT
+    id AS sensor,
+    (changepoints).changepoint_indices AS anomaly_indices,
+    CASE
+        WHEN list_count((changepoints).changepoint_indices) > 0 THEN 'ALERT: Anomalies detected'
+        ELSE 'Normal operation'
+    END AS status
+FROM ts_detect_changepoints_by('sensor_data', sensor_id, timestamp, reading, MAP{'hazard_lambda': '20'});
+
+-- ============================================================================
+-- SECTION 6: Comparing Detection Across Series
+-- ============================================================================
+
+.print ''
+.print '>>> SECTION 6: Comparing Detection Across Series'
+.print '-----------------------------------------------------------------------------'
+
+.print 'Section 6.1: Summary of Changepoints by Series'
+
+WITH detection_results AS (
+    SELECT
+        id,
+        (changepoints).changepoint_indices AS indices
+    FROM ts_detect_changepoints_by('multi_series', series_id, ds, value, MAP{})
+)
+SELECT
+    id,
+    list_count(indices) AS n_changepoints,
+    indices AS changepoint_positions,
+    CASE
+        WHEN list_count(indices) = 0 THEN 'Stable'
+        WHEN list_count(indices) = 1 THEN 'Single regime change'
+        WHEN list_count(indices) = 2 THEN 'Three regimes'
+        ELSE 'Complex pattern'
+    END AS regime_description
+FROM detection_results
+ORDER BY n_changepoints DESC;
+
+-- ============================================================================
+-- CLEANUP
+-- ============================================================================
+
+.print ''
+.print '>>> CLEANUP'
+.print '-----------------------------------------------------------------------------'
+
+DROP TABLE IF EXISTS multi_series;
+DROP TABLE IF EXISTS retail_demand;
+DROP TABLE IF EXISTS sensor_data;
+
+.print 'All tables cleaned up.'
+.print ''
+.print '============================================================================='
+.print 'CHANGEPOINT DETECTION EXAMPLES COMPLETE'
+.print '============================================================================='

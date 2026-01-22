@@ -94,23 +94,23 @@ WHERE item_id IN (
     SELECT DISTINCT item_id FROM m5_full ORDER BY item_id LIMIT 10
 );
 
--- Run changepoint detection on sample using ts_detect_changepoints_agg
+-- Run changepoint detection on sample using ts_detect_changepoints_by
 -- hazard_lambda controls expected run length between changepoints
 -- Higher values = fewer changepoints expected (more conservative)
 SELECT 'Running changepoint detection on 10 sample items...' AS step;
 
 CREATE OR REPLACE TABLE sample_changepoints AS
 SELECT
-    item_id,
-    ts_detect_changepoints_agg(ds, y, MAP{'hazard_lambda': '50'}) AS cp_results
-FROM m5_sample
-GROUP BY item_id;
+    id AS item_id,
+    (changepoints).changepoint_indices AS cp_indices,
+    (changepoints).is_changepoint AS is_changepoint_arr
+FROM ts_detect_changepoints_by('m5_sample', item_id, ds, y, MAP{'hazard_lambda': '50'});
 
 -- Show changepoint counts per item
 SELECT
     item_id,
-    list_count(list_filter(cp_results, x -> x.is_changepoint)) AS n_changepoints,
-    list_count(cp_results) AS n_observations
+    list_count(cp_indices) AS n_changepoints,
+    list_count(is_changepoint_arr) AS n_observations
 FROM sample_changepoints
 ORDER BY n_changepoints DESC;
 
@@ -131,50 +131,29 @@ ORDER BY n_changepoints DESC;
 SELECT
     '=== Section 2B: Parameter Sensitivity Analysis ===' AS section;
 
--- Compare detection at different sensitivity levels
+-- Compare detection at different sensitivity levels using ts_detect_changepoints_by
 SELECT 'Comparing hazard_lambda values on sample data...' AS step;
 
+-- Run detection at each sensitivity level
+CREATE OR REPLACE TABLE cp_sensitive AS
+SELECT id AS item_id, 30 AS hazard_lambda, 'sensitive' AS sensitivity,
+       list_count((changepoints).changepoint_indices) AS n_changepoints
+FROM ts_detect_changepoints_by('m5_sample', item_id, ds, y, MAP{'hazard_lambda': '30'});
+
+CREATE OR REPLACE TABLE cp_balanced AS
+SELECT id AS item_id, 60 AS hazard_lambda, 'balanced' AS sensitivity,
+       list_count((changepoints).changepoint_indices) AS n_changepoints
+FROM ts_detect_changepoints_by('m5_sample', item_id, ds, y, MAP{'hazard_lambda': '60'});
+
+CREATE OR REPLACE TABLE cp_conservative AS
+SELECT id AS item_id, 120 AS hazard_lambda, 'conservative' AS sensitivity,
+       list_count((changepoints).changepoint_indices) AS n_changepoints
+FROM ts_detect_changepoints_by('m5_sample', item_id, ds, y, MAP{'hazard_lambda': '120'});
+
 CREATE OR REPLACE TABLE sensitivity_analysis AS
-WITH
-sensitive AS (
-    SELECT
-        item_id,
-        30 AS hazard_lambda,
-        'sensitive' AS sensitivity,
-        list_count(list_filter(
-            ts_detect_changepoints_agg(ds, y, MAP{'hazard_lambda': '30'}),
-            x -> x.is_changepoint
-        )) AS n_changepoints
-    FROM m5_sample
-    GROUP BY item_id
-),
-balanced AS (
-    SELECT
-        item_id,
-        60 AS hazard_lambda,
-        'balanced' AS sensitivity,
-        list_count(list_filter(
-            ts_detect_changepoints_agg(ds, y, MAP{'hazard_lambda': '60'}),
-            x -> x.is_changepoint
-        )) AS n_changepoints
-    FROM m5_sample
-    GROUP BY item_id
-),
-conservative AS (
-    SELECT
-        item_id,
-        120 AS hazard_lambda,
-        'conservative' AS sensitivity,
-        list_count(list_filter(
-            ts_detect_changepoints_agg(ds, y, MAP{'hazard_lambda': '120'}),
-            x -> x.is_changepoint
-        )) AS n_changepoints
-    FROM m5_sample
-    GROUP BY item_id
-)
-SELECT * FROM sensitive
-UNION ALL SELECT * FROM balanced
-UNION ALL SELECT * FROM conservative;
+SELECT * FROM cp_sensitive
+UNION ALL SELECT * FROM cp_balanced
+UNION ALL SELECT * FROM cp_conservative;
 
 -- Summary: How does sensitivity affect detection?
 SELECT

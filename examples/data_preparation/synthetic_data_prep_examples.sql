@@ -315,9 +315,9 @@ SELECT * FROM (
 
 .print 'Per-series stats with ts_stats (detailed):'
 SELECT id AS series_id,
-       (stats).length AS length,
-       (stats).n_nulls AS nulls,
-       (stats).n_zeros AS zeros
+       length,
+       n_nulls AS nulls,
+       n_zeros AS zeros
 FROM ts_stats_by('stats_test', series_id, ts, value, '1d');
 
 .print ''
@@ -326,14 +326,14 @@ FROM ts_stats_by('stats_test', series_id, ts, value, '1d');
 CREATE OR REPLACE TABLE computed_stats AS
 SELECT * FROM ts_stats_by('stats_test', series_id, ts, value, '1d');
 
--- Manual aggregation (ts_stats_summary currently has a bug with n_gaps field)
+-- Manual aggregation
 SELECT
     COUNT(*) AS n_series,
-    ROUND(AVG((stats).length), 1) AS avg_length,
-    MIN((stats).length) AS min_length,
-    MAX((stats).length) AS max_length,
-    SUM((stats).n_nulls) AS total_nulls,
-    SUM((stats).n_zeros) AS total_zeros
+    ROUND(AVG(length), 1) AS avg_length,
+    MIN(length) AS min_length,
+    MAX(length) AS max_length,
+    SUM(n_nulls) AS total_nulls,
+    SUM(n_zeros) AS total_zeros
 FROM computed_stats;
 
 .print ''
@@ -380,10 +380,10 @@ SELECT * FROM (
 .print 'Per-series quality with ts_data_quality (detailed):'
 SELECT
     unique_id,
-    ROUND((quality).overall_score, 2) AS score,
+    ROUND(overall_score, 2) AS score,
     CASE
-        WHEN (quality).overall_score >= 0.8 THEN 'GOOD'
-        WHEN (quality).overall_score >= 0.5 THEN 'FAIR'
+        WHEN overall_score >= 0.8 THEN 'GOOD'
+        WHEN overall_score >= 0.5 THEN 'FAIR'
         ELSE 'POOR'
     END AS tier
 FROM ts_data_quality_by('quality_test', series_id, ts, value, 10, '1d');
