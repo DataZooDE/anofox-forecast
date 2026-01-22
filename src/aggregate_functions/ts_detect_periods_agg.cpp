@@ -207,6 +207,8 @@ static void TsDetectPeriodsAggFinalize(Vector &state_vector, AggregateInputData 
             sorted_values.data(),
             sorted_values.size(),
             data.method.c_str(),
+            0,    // default max_period (use Rust default of 365)
+            -1.0, // default min_confidence (use method-specific default)
             &period_result,
             &error
         );

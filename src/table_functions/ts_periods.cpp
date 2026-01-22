@@ -7,6 +7,15 @@
 
 namespace duckdb {
 
+// Helper to check if a value is null using UnifiedVectorFormat
+// This handles all vector types (flat, constant, dictionary)
+static bool IsValueNull(Vector &vec, idx_t count, idx_t row_idx) {
+    UnifiedVectorFormat format;
+    vec.ToUnifiedFormat(count, format);
+    auto idx = format.sel->get_index(row_idx);
+    return !format.validity.RowIsValid(idx);
+}
+
 // Helper to extract list as double values
 // Uses UnifiedVectorFormat to handle all vector types (flat, constant, dictionary)
 static void ExtractListAsDouble(Vector &list_vec, idx_t count, idx_t row_idx, vector<double> &out_values) {
@@ -62,12 +71,34 @@ static LogicalType GetMultiPeriodResultType() {
     return LogicalType::STRUCT(std::move(children));
 }
 
+// Default max_period for daily data (365 days catches weekly, monthly, quarterly patterns)
+static const size_t DEFAULT_MAX_PERIOD = 365;
+
 static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vector &result) {
     auto &values_vec = args.data[0];
     auto &method_vec = args.data[1];
     idx_t count = args.size();
 
-    result.SetVectorType(VectorType::FLAT_VECTOR);
+    // Optional max_period parameter (default 0 = use Rust default of 365)
+    size_t max_period = 0;
+    if (args.ColumnCount() > 2 && !IsValueNull(args.data[2], count, 0)) {
+        UnifiedVectorFormat max_period_format;
+        args.data[2].ToUnifiedFormat(count, max_period_format);
+        auto max_period_data = UnifiedVectorFormat::GetData<int64_t>(max_period_format);
+        max_period = static_cast<size_t>(max_period_data[0]);
+    }
+
+    // Optional min_confidence parameter (default -1.0 = use method-specific default)
+    // Use 0.0 to disable filtering, positive value for custom threshold
+    double min_confidence = -1.0;
+    if (args.ColumnCount() > 3 && !IsValueNull(args.data[3], count, 0)) {
+        UnifiedVectorFormat min_conf_format;
+        args.data[3].ToUnifiedFormat(count, min_conf_format);
+        auto min_conf_data = UnifiedVectorFormat::GetData<double>(min_conf_format);
+        min_confidence = min_conf_data[0];
+    }
+
+    result.Flatten(count);
 
     // Two-pass approach to avoid incremental Reserve calls which can cause memory issues:
     // Pass 1: Compute all results and store them, calculate total list size
@@ -86,7 +117,7 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
         row_results[row_idx].is_null = false;
         memset(&row_results[row_idx].result, 0, sizeof(FlatMultiPeriodResult));
 
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        if (IsValueNull(values_vec, count, row_idx)) {
             row_results[row_idx].is_null = true;
             FlatVector::SetNull(result, row_idx, true);
             continue;
@@ -96,9 +127,12 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
         ExtractListAsDouble(values_vec, count, row_idx, values);
 
         const char *method_str = nullptr;
-        if (!FlatVector::IsNull(method_vec, row_idx)) {
-            auto method_data = FlatVector::GetData<string_t>(method_vec);
-            method_str = method_data[row_idx].GetData();
+        if (!IsValueNull(method_vec, count, row_idx)) {
+            UnifiedVectorFormat method_format;
+            method_vec.ToUnifiedFormat(count, method_format);
+            auto method_data = UnifiedVectorFormat::GetData<string_t>(method_format);
+            auto method_idx = method_format.sel->get_index(row_idx);
+            method_str = method_data[method_idx].GetData();
         }
 
         AnofoxError error;
@@ -106,6 +140,8 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
             values.data(),
             values.size(),
             method_str,
+            max_period,
+            min_confidence,
             &row_results[row_idx].result,
             &error
         );
@@ -202,7 +238,7 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
     auto &values_vec = args.data[0];
     idx_t count = args.size();
 
-    result.SetVectorType(VectorType::FLAT_VECTOR);
+    result.Flatten(count);
 
     // Two-pass approach to avoid incremental Reserve calls which can cause memory issues
     struct RowResult {
@@ -218,7 +254,7 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
         row_results[row_idx].is_null = false;
         memset(&row_results[row_idx].result, 0, sizeof(FlatMultiPeriodResult));
 
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        if (IsValueNull(values_vec, count, row_idx)) {
             row_results[row_idx].is_null = true;
             FlatVector::SetNull(result, row_idx, true);
             continue;
@@ -232,6 +268,8 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
             values.data(),
             values.size(),
             nullptr,  // default method
+            0,        // default max_period (use Rust default of 365)
+            -1.0,     // default min_confidence (use method-specific default)
             &row_results[row_idx].result,
             &error
         );
@@ -329,17 +367,40 @@ void RegisterTsDetectPeriodsFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_periods_set("_ts_detect_periods");
 
     // Single-argument version (values only, default method)
-    ts_periods_set.AddFunction(ScalarFunction(
+    auto simple_func = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetMultiPeriodResultType(),
         TsDetectPeriodsSimpleFunction
-    ));
+    );
+    simple_func.stability = FunctionStability::VOLATILE;
+    ts_periods_set.AddFunction(simple_func);
+
     // Two-argument version (values, method)
-    ts_periods_set.AddFunction(ScalarFunction(
+    auto method_func = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR)},
         GetMultiPeriodResultType(),
         TsDetectPeriodsFunction
-    ));
+    );
+    method_func.stability = FunctionStability::VOLATILE;
+    ts_periods_set.AddFunction(method_func);
+
+    // Three-argument version (values, method, max_period)
+    auto full_func = ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::BIGINT)},
+        GetMultiPeriodResultType(),
+        TsDetectPeriodsFunction
+    );
+    full_func.stability = FunctionStability::VOLATILE;
+    ts_periods_set.AddFunction(full_func);
+
+    // Four-argument version (values, method, max_period, min_confidence)
+    auto full_func_conf = ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::DOUBLE)},
+        GetMultiPeriodResultType(),
+        TsDetectPeriodsFunction
+    );
+    full_func_conf.stability = FunctionStability::VOLATILE;
+    ts_periods_set.AddFunction(full_func_conf);
 
     // Mark as internal to hide from duckdb_functions() and deprioritize in autocomplete
     CreateScalarFunctionInfo info(ts_periods_set);
@@ -366,10 +427,10 @@ static void TsEstimatePeriodFftFunction(DataChunk &args, ExpressionState &state,
     auto &values_vec = args.data[0];
     idx_t count = args.size();
 
-    result.SetVectorType(VectorType::FLAT_VECTOR);
+    result.Flatten(count);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        if (IsValueNull(values_vec, count, row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -404,11 +465,14 @@ static void TsEstimatePeriodFftFunction(DataChunk &args, ExpressionState &state,
 
 void RegisterTsEstimatePeriodFftFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_period_fft_set("ts_estimate_period_fft");
-    ts_period_fft_set.AddFunction(ScalarFunction(
+    auto fft_func = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetSinglePeriodResultType(),
         TsEstimatePeriodFftFunction
-    ));
+    );
+    // Disable constant folding for this function - struct returns don't work well with it
+    fft_func.stability = FunctionStability::VOLATILE;
+    ts_period_fft_set.AddFunction(fft_func);
     loader.RegisterFunction(ts_period_fft_set);
 }
 
@@ -427,10 +491,10 @@ static void TsEstimatePeriodAcfFunction(DataChunk &args, ExpressionState &state,
         max_lag = FlatVector::GetData<int32_t>(args.data[1])[0];
     }
 
-    result.SetVectorType(VectorType::FLAT_VECTOR);
+    result.Flatten(count);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        if (IsValueNull(values_vec, count, row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -467,17 +531,21 @@ static void TsEstimatePeriodAcfFunction(DataChunk &args, ExpressionState &state,
 void RegisterTsEstimatePeriodAcfFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_period_acf_set("ts_estimate_period_acf");
     // Single-argument version
-    ts_period_acf_set.AddFunction(ScalarFunction(
+    auto acf_func1 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetSinglePeriodResultType(),
         TsEstimatePeriodAcfFunction
-    ));
+    );
+    acf_func1.stability = FunctionStability::VOLATILE;
+    ts_period_acf_set.AddFunction(acf_func1);
     // Two-argument version with max_lag
-    ts_period_acf_set.AddFunction(ScalarFunction(
+    auto acf_func2 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::INTEGER)},
         GetSinglePeriodResultType(),
         TsEstimatePeriodAcfFunction
-    ));
+    );
+    acf_func2.stability = FunctionStability::VOLATILE;
+    ts_period_acf_set.AddFunction(acf_func2);
     loader.RegisterFunction(ts_period_acf_set);
 }
 
@@ -505,7 +573,7 @@ static void TsDetectMultiplePeriodsFunction(DataChunk &args, ExpressionState &st
         min_strength = FlatVector::GetData<double>(args.data[3])[0];
     }
 
-    result.SetVectorType(VectorType::FLAT_VECTOR);
+    result.Flatten(count);
 
     // Two-pass approach to avoid incremental Reserve calls which can cause memory issues
     struct RowResult {
@@ -521,7 +589,7 @@ static void TsDetectMultiplePeriodsFunction(DataChunk &args, ExpressionState &st
         row_results[row_idx].is_null = false;
         memset(&row_results[row_idx].result, 0, sizeof(FlatMultiPeriodResult));
 
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        if (IsValueNull(values_vec, count, row_idx)) {
             row_results[row_idx].is_null = true;
             FlatVector::SetNull(result, row_idx, true);
             continue;
@@ -631,29 +699,37 @@ static void TsDetectMultiplePeriodsFunction(DataChunk &args, ExpressionState &st
 void RegisterTsDetectMultiplePeriodsFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_multi_periods_set("ts_detect_multiple_periods");
     // Single-argument version
-    ts_multi_periods_set.AddFunction(ScalarFunction(
+    auto func1 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetMultiPeriodResultType(),
         TsDetectMultiplePeriodsFunction
-    ));
+    );
+    func1.stability = FunctionStability::VOLATILE;
+    ts_multi_periods_set.AddFunction(func1);
     // With max_periods
-    ts_multi_periods_set.AddFunction(ScalarFunction(
+    auto func2 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::INTEGER)},
         GetMultiPeriodResultType(),
         TsDetectMultiplePeriodsFunction
-    ));
+    );
+    func2.stability = FunctionStability::VOLATILE;
+    ts_multi_periods_set.AddFunction(func2);
     // With max_periods, min_confidence
-    ts_multi_periods_set.AddFunction(ScalarFunction(
+    auto func3 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::INTEGER), LogicalType(LogicalTypeId::DOUBLE)},
         GetMultiPeriodResultType(),
         TsDetectMultiplePeriodsFunction
-    ));
+    );
+    func3.stability = FunctionStability::VOLATILE;
+    ts_multi_periods_set.AddFunction(func3);
     // With max_periods, min_confidence, min_strength
-    ts_multi_periods_set.AddFunction(ScalarFunction(
+    auto func4 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::INTEGER), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetMultiPeriodResultType(),
         TsDetectMultiplePeriodsFunction
-    ));
+    );
+    func4.stability = FunctionStability::VOLATILE;
+    ts_multi_periods_set.AddFunction(func4);
     loader.RegisterFunction(ts_multi_periods_set);
 }
 
@@ -682,10 +758,10 @@ static void TsAutoperiodFunction(DataChunk &args, ExpressionState &state, Vector
         acf_threshold = FlatVector::GetData<double>(args.data[1])[0];
     }
 
-    result.SetVectorType(VectorType::FLAT_VECTOR);
+    result.Flatten(count);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        if (IsValueNull(values_vec, count, row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -722,17 +798,21 @@ static void TsAutoperiodFunction(DataChunk &args, ExpressionState &state, Vector
 void RegisterTsAutoperiodFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_autoperiod_set("ts_autoperiod");
     // Single-argument version (uses default threshold)
-    ts_autoperiod_set.AddFunction(ScalarFunction(
+    auto func1 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetAutoperiodResultType(),
         TsAutoperiodFunction
-    ));
+    );
+    func1.stability = FunctionStability::VOLATILE;
+    ts_autoperiod_set.AddFunction(func1);
     // With explicit acf_threshold
-    ts_autoperiod_set.AddFunction(ScalarFunction(
+    auto func2 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetAutoperiodResultType(),
         TsAutoperiodFunction
-    ));
+    );
+    func2.stability = FunctionStability::VOLATILE;
+    ts_autoperiod_set.AddFunction(func2);
     loader.RegisterFunction(ts_autoperiod_set);
 }
 
@@ -751,10 +831,10 @@ static void TsCfdAutoperiodFunction(DataChunk &args, ExpressionState &state, Vec
         acf_threshold = FlatVector::GetData<double>(args.data[1])[0];
     }
 
-    result.SetVectorType(VectorType::FLAT_VECTOR);
+    result.Flatten(count);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        if (IsValueNull(values_vec, count, row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -791,17 +871,21 @@ static void TsCfdAutoperiodFunction(DataChunk &args, ExpressionState &state, Vec
 void RegisterTsCfdAutoperiodFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_cfd_autoperiod_set("ts_cfd_autoperiod");
     // Single-argument version (uses default threshold)
-    ts_cfd_autoperiod_set.AddFunction(ScalarFunction(
+    auto func1 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetAutoperiodResultType(),
         TsCfdAutoperiodFunction
-    ));
+    );
+    func1.stability = FunctionStability::VOLATILE;
+    ts_cfd_autoperiod_set.AddFunction(func1);
     // With explicit acf_threshold
-    ts_cfd_autoperiod_set.AddFunction(ScalarFunction(
+    auto func2 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetAutoperiodResultType(),
         TsCfdAutoperiodFunction
-    ));
+    );
+    func2.stability = FunctionStability::VOLATILE;
+    ts_cfd_autoperiod_set.AddFunction(func2);
     loader.RegisterFunction(ts_cfd_autoperiod_set);
 }
 
@@ -838,10 +922,10 @@ static void TsLombScargleFunction(DataChunk &args, ExpressionState &state, Vecto
         n_frequencies = static_cast<size_t>(FlatVector::GetData<int64_t>(args.data[3])[0]);
     }
 
-    result.SetVectorType(VectorType::FLAT_VECTOR);
+    result.Flatten(count);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        if (IsValueNull(values_vec, count, row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -885,29 +969,37 @@ static void TsLombScargleFunction(DataChunk &args, ExpressionState &state, Vecto
 void RegisterTsLombScargleFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_lomb_scargle_set("ts_lomb_scargle");
     // Single-argument version (uses defaults)
-    ts_lomb_scargle_set.AddFunction(ScalarFunction(
+    auto func1 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetLombScargleResultType(),
         TsLombScargleFunction
-    ));
+    );
+    func1.stability = FunctionStability::VOLATILE;
+    ts_lomb_scargle_set.AddFunction(func1);
     // With min_period
-    ts_lomb_scargle_set.AddFunction(ScalarFunction(
+    auto func2 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetLombScargleResultType(),
         TsLombScargleFunction
-    ));
+    );
+    func2.stability = FunctionStability::VOLATILE;
+    ts_lomb_scargle_set.AddFunction(func2);
     // With min_period and max_period
-    ts_lomb_scargle_set.AddFunction(ScalarFunction(
+    auto func3 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetLombScargleResultType(),
         TsLombScargleFunction
-    ));
+    );
+    func3.stability = FunctionStability::VOLATILE;
+    ts_lomb_scargle_set.AddFunction(func3);
     // With min_period, max_period, and n_frequencies
-    ts_lomb_scargle_set.AddFunction(ScalarFunction(
+    auto func4 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::BIGINT)},
         GetLombScargleResultType(),
         TsLombScargleFunction
-    ));
+    );
+    func4.stability = FunctionStability::VOLATILE;
+    ts_lomb_scargle_set.AddFunction(func4);
     loader.RegisterFunction(ts_lomb_scargle_set);
 }
 
@@ -944,10 +1036,10 @@ static void TsAicPeriodFunction(DataChunk &args, ExpressionState &state, Vector 
         n_candidates = static_cast<size_t>(FlatVector::GetData<int64_t>(args.data[3])[0]);
     }
 
-    result.SetVectorType(VectorType::FLAT_VECTOR);
+    result.Flatten(count);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        if (IsValueNull(values_vec, count, row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -991,26 +1083,34 @@ static void TsAicPeriodFunction(DataChunk &args, ExpressionState &state, Vector 
 
 void RegisterTsAicPeriodFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_aic_period_set("ts_aic_period");
-    ts_aic_period_set.AddFunction(ScalarFunction(
+    auto func1 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetAicPeriodResultType(),
         TsAicPeriodFunction
-    ));
-    ts_aic_period_set.AddFunction(ScalarFunction(
+    );
+    func1.stability = FunctionStability::VOLATILE;
+    ts_aic_period_set.AddFunction(func1);
+    auto func2 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetAicPeriodResultType(),
         TsAicPeriodFunction
-    ));
-    ts_aic_period_set.AddFunction(ScalarFunction(
+    );
+    func2.stability = FunctionStability::VOLATILE;
+    ts_aic_period_set.AddFunction(func2);
+    auto func3 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetAicPeriodResultType(),
         TsAicPeriodFunction
-    ));
-    ts_aic_period_set.AddFunction(ScalarFunction(
+    );
+    func3.stability = FunctionStability::VOLATILE;
+    ts_aic_period_set.AddFunction(func3);
+    auto func4 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::BIGINT)},
         GetAicPeriodResultType(),
         TsAicPeriodFunction
-    ));
+    );
+    func4.stability = FunctionStability::VOLATILE;
+    ts_aic_period_set.AddFunction(func4);
     loader.RegisterFunction(ts_aic_period_set);
 }
 
@@ -1041,10 +1141,10 @@ static void TsSsaPeriodFunction(DataChunk &args, ExpressionState &state, Vector 
         n_components = static_cast<size_t>(FlatVector::GetData<int64_t>(args.data[2])[0]);
     }
 
-    result.SetVectorType(VectorType::FLAT_VECTOR);
+    result.Flatten(count);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        if (IsValueNull(values_vec, count, row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -1085,21 +1185,27 @@ static void TsSsaPeriodFunction(DataChunk &args, ExpressionState &state, Vector 
 
 void RegisterTsSsaPeriodFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_ssa_period_set("ts_ssa_period");
-    ts_ssa_period_set.AddFunction(ScalarFunction(
+    auto func1 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetSsaPeriodResultType(),
         TsSsaPeriodFunction
-    ));
-    ts_ssa_period_set.AddFunction(ScalarFunction(
+    );
+    func1.stability = FunctionStability::VOLATILE;
+    ts_ssa_period_set.AddFunction(func1);
+    auto func2 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT)},
         GetSsaPeriodResultType(),
         TsSsaPeriodFunction
-    ));
-    ts_ssa_period_set.AddFunction(ScalarFunction(
+    );
+    func2.stability = FunctionStability::VOLATILE;
+    ts_ssa_period_set.AddFunction(func2);
+    auto func3 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT)},
         GetSsaPeriodResultType(),
         TsSsaPeriodFunction
-    ));
+    );
+    func3.stability = FunctionStability::VOLATILE;
+    ts_ssa_period_set.AddFunction(func3);
     loader.RegisterFunction(ts_ssa_period_set);
 }
 
@@ -1134,10 +1240,10 @@ static void TsStlPeriodFunction(DataChunk &args, ExpressionState &state, Vector 
         n_candidates = static_cast<size_t>(FlatVector::GetData<int64_t>(args.data[3])[0]);
     }
 
-    result.SetVectorType(VectorType::FLAT_VECTOR);
+    result.Flatten(count);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        if (IsValueNull(values_vec, count, row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -1179,26 +1285,34 @@ static void TsStlPeriodFunction(DataChunk &args, ExpressionState &state, Vector 
 
 void RegisterTsStlPeriodFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_stl_period_set("ts_stl_period");
-    ts_stl_period_set.AddFunction(ScalarFunction(
+    auto func1 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetStlPeriodResultType(),
         TsStlPeriodFunction
-    ));
-    ts_stl_period_set.AddFunction(ScalarFunction(
+    );
+    func1.stability = FunctionStability::VOLATILE;
+    ts_stl_period_set.AddFunction(func1);
+    auto func2 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT)},
         GetStlPeriodResultType(),
         TsStlPeriodFunction
-    ));
-    ts_stl_period_set.AddFunction(ScalarFunction(
+    );
+    func2.stability = FunctionStability::VOLATILE;
+    ts_stl_period_set.AddFunction(func2);
+    auto func3 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT)},
         GetStlPeriodResultType(),
         TsStlPeriodFunction
-    ));
-    ts_stl_period_set.AddFunction(ScalarFunction(
+    );
+    func3.stability = FunctionStability::VOLATILE;
+    ts_stl_period_set.AddFunction(func3);
+    auto func4 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT)},
         GetStlPeriodResultType(),
         TsStlPeriodFunction
-    ));
+    );
+    func4.stability = FunctionStability::VOLATILE;
+    ts_stl_period_set.AddFunction(func4);
     loader.RegisterFunction(ts_stl_period_set);
 }
 
@@ -1230,10 +1344,10 @@ static void TsMatrixProfilePeriodFunction(DataChunk &args, ExpressionState &stat
         n_best = static_cast<size_t>(FlatVector::GetData<int64_t>(args.data[2])[0]);
     }
 
-    result.SetVectorType(VectorType::FLAT_VECTOR);
+    result.Flatten(count);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        if (IsValueNull(values_vec, count, row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -1275,21 +1389,27 @@ static void TsMatrixProfilePeriodFunction(DataChunk &args, ExpressionState &stat
 
 void RegisterTsMatrixProfilePeriodFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_mp_period_set("ts_matrix_profile_period");
-    ts_mp_period_set.AddFunction(ScalarFunction(
+    auto func1 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetMatrixProfilePeriodResultType(),
         TsMatrixProfilePeriodFunction
-    ));
-    ts_mp_period_set.AddFunction(ScalarFunction(
+    );
+    func1.stability = FunctionStability::VOLATILE;
+    ts_mp_period_set.AddFunction(func1);
+    auto func2 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT)},
         GetMatrixProfilePeriodResultType(),
         TsMatrixProfilePeriodFunction
-    ));
-    ts_mp_period_set.AddFunction(ScalarFunction(
+    );
+    func2.stability = FunctionStability::VOLATILE;
+    ts_mp_period_set.AddFunction(func2);
+    auto func3 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT)},
         GetMatrixProfilePeriodResultType(),
         TsMatrixProfilePeriodFunction
-    ));
+    );
+    func3.stability = FunctionStability::VOLATILE;
+    ts_mp_period_set.AddFunction(func3);
     loader.RegisterFunction(ts_mp_period_set);
 }
 
@@ -1324,10 +1444,10 @@ static void TsSazedPeriodFunction(DataChunk &args, ExpressionState &state, Vecto
         zero_pad_factor = static_cast<size_t>(FlatVector::GetData<int64_t>(args.data[3])[0]);
     }
 
-    result.SetVectorType(VectorType::FLAT_VECTOR);
+    result.Flatten(count);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        if (IsValueNull(values_vec, count, row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -1369,26 +1489,34 @@ static void TsSazedPeriodFunction(DataChunk &args, ExpressionState &state, Vecto
 
 void RegisterTsSazedPeriodFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_sazed_period_set("ts_sazed_period");
-    ts_sazed_period_set.AddFunction(ScalarFunction(
+    auto func1 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetSazedPeriodResultType(),
         TsSazedPeriodFunction
-    ));
-    ts_sazed_period_set.AddFunction(ScalarFunction(
+    );
+    func1.stability = FunctionStability::VOLATILE;
+    ts_sazed_period_set.AddFunction(func1);
+    auto func2 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT)},
         GetSazedPeriodResultType(),
         TsSazedPeriodFunction
-    ));
-    ts_sazed_period_set.AddFunction(ScalarFunction(
+    );
+    func2.stability = FunctionStability::VOLATILE;
+    ts_sazed_period_set.AddFunction(func2);
+    auto func3 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT)},
         GetSazedPeriodResultType(),
         TsSazedPeriodFunction
-    ));
-    ts_sazed_period_set.AddFunction(ScalarFunction(
+    );
+    func3.stability = FunctionStability::VOLATILE;
+    ts_sazed_period_set.AddFunction(func3);
+    auto func4 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT)},
         GetSazedPeriodResultType(),
         TsSazedPeriodFunction
-    ));
+    );
+    func4.stability = FunctionStability::VOLATILE;
+    ts_sazed_period_set.AddFunction(func4);
     loader.RegisterFunction(ts_sazed_period_set);
 }
 
