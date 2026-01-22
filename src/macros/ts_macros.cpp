@@ -475,6 +475,30 @@ SELECT
 FROM decomposition_data
 )"},
 
+    // ts_detrend_by: Remove trend from grouped time series
+    // C++ API: ts_detrend_by(table_name, group_col, date_col, value_col, method)
+    // method: 'linear', 'quadratic', 'cubic', 'auto' (default: 'auto')
+    // Returns: TABLE(id, trend[], detrended[], method, coefficients[], rss, n_params)
+    {"ts_detrend_by", {"source", "group_col", "date_col", "value_col", "method", nullptr}, {{nullptr, nullptr}},
+R"(
+WITH detrend_data AS (
+    SELECT
+        group_col AS id,
+        ts_detrend(LIST(value_col::DOUBLE ORDER BY date_col), method::VARCHAR) AS _detrend
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+)
+SELECT
+    id,
+    (_detrend).trend AS trend,
+    (_detrend).detrended AS detrended,
+    (_detrend).method AS method,
+    (_detrend).coefficients AS coefficients,
+    (_detrend).rss AS rss,
+    (_detrend).n_params AS n_params
+FROM detrend_data
+)"},
+
     // ts_classify_seasonality_by: Classify seasonality type per group
     // C++ API: ts_classify_seasonality_by(table_name, group_col, date_col, value_col, period)
     // Returns: TABLE(id, timing_classification, modulation_type, has_stable_timing, timing_variability,
