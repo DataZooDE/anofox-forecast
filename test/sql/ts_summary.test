@@ -31,7 +31,7 @@ FROM generate_series(0, 7) AS t(i);
 # Create stats table from test_series
 statement ok
 CREATE TABLE stats_table AS
-SELECT id, stats FROM ts_stats('test_series', id, date, value, '1 day');
+SELECT * FROM ts_stats('test_series', id, date, value, '1 day');
 
 #######################################
 # ts_stats_summary - Basic Tests
@@ -52,25 +52,25 @@ SELECT COUNT(*) AS n_series FROM stats_table;
 
 # Test min_length (B has 5 observations)
 query I
-SELECT MIN((stats).length) AS min_length FROM stats_table;
+SELECT MIN(length) AS min_length FROM stats_table;
 ----
 5
 
 # Test max_length (A has 10 observations)
 query I
-SELECT MAX((stats).length) AS max_length FROM stats_table;
+SELECT MAX(length) AS max_length FROM stats_table;
 ----
 10
 
 # Test avg_length (10 + 5 + 8) / 3 = 7.67
 query I
-SELECT AVG((stats).length) > 7 AND AVG((stats).length) < 8 FROM stats_table;
+SELECT AVG(length) > 7 AND AVG(length) < 8 FROM stats_table;
 ----
 true
 
 # Test total_nulls (no nulls in test data)
 query I
-SELECT SUM((stats).n_nulls) AS total_nulls FROM stats_table;
+SELECT SUM(n_nulls) AS total_nulls FROM stats_table;
 ----
 0
 
@@ -88,11 +88,11 @@ FROM generate_series(0, 9) AS t(i);
 
 statement ok
 CREATE TABLE stats_with_nulls AS
-SELECT id, stats FROM ts_stats('series_with_nulls', id, date, value, '1 day');
+SELECT * FROM ts_stats('series_with_nulls', id, date, value, '1 day');
 
 # Should report nulls
 query I
-SELECT SUM((stats).n_nulls) AS total_nulls FROM stats_with_nulls;
+SELECT SUM(n_nulls) AS total_nulls FROM stats_with_nulls;
 ----
 2
 
@@ -256,10 +256,10 @@ true
 query I
 SELECT
     COUNT(*) IS NOT NULL AND
-    AVG((stats).length) IS NOT NULL AND
-    MIN((stats).length) IS NOT NULL AND
-    MAX((stats).length) IS NOT NULL AND
-    SUM((stats).n_nulls) IS NOT NULL
+    AVG(length) IS NOT NULL AND
+    MIN(length) IS NOT NULL AND
+    MAX(length) IS NOT NULL AND
+    SUM(n_nulls) IS NOT NULL
 FROM stats_table;
 ----
 true

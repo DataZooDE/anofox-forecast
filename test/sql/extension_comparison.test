@@ -36,12 +36,12 @@ FROM generate_series(0, 59) AS t(i);
 #######################################
 
 query I
-SELECT (stats).length FROM ts_stats('test_series', id, ds, value, '1 day') WHERE id = 'A';
+SELECT length FROM ts_stats('test_series', id, ds, value, '1 day') WHERE id = 'A';
 ----
 30
 
 query I
-SELECT round((stats).mean, 0) >= 17 FROM ts_stats('test_series', id, ds, value, '1 day') WHERE id = 'A';
+SELECT round(mean, 0) >= 17 FROM ts_stats('test_series', id, ds, value, '1 day') WHERE id = 'A';
 ----
 true
 

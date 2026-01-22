@@ -69,11 +69,6 @@ ts_classify_seasonality_by(source VARCHAR, group_col COLUMN, date_col COLUMN, va
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | (same as group_col) | Group identifier |
-| `classification` | STRUCT | Classification results (see fields below) |
-
-**Classification STRUCT fields:**
-| Field | Type | Description |
-|-------|------|-------------|
 | `timing_classification` | VARCHAR | 'early', 'on_time', 'late', or 'variable' |
 | `modulation_type` | VARCHAR | 'stable', 'growing', 'shrinking', or 'variable' |
 | `has_stable_timing` | BOOLEAN | Whether peak timing is consistent |
@@ -89,9 +84,9 @@ ts_classify_seasonality_by(source VARCHAR, group_col COLUMN, date_col COLUMN, va
 SELECT * FROM ts_classify_seasonality_by('sales', product_id, date, quantity, 7.0);
 
 -- Find products with strong, stable seasonality
-SELECT id, (classification).seasonal_strength
+SELECT id, seasonal_strength
 FROM ts_classify_seasonality_by('sales', product_id, date, quantity, 7.0)
-WHERE (classification).is_seasonal AND (classification).has_stable_timing;
+WHERE is_seasonal AND has_stable_timing;
 ```
 
 ---
@@ -113,7 +108,7 @@ ts_classify_seasonality(source VARCHAR, date_col COLUMN, value_col COLUMN, perio
 | `value_col` | COLUMN | Value column |
 | `period` | DOUBLE | Expected seasonal period |
 
-**Returns:** Single row with `classification` STRUCT (same fields as above).
+**Returns:** Single row with classification columns (same columns as `ts_classify_seasonality_by` without `id`).
 
 **Example:**
 ```sql
@@ -122,9 +117,9 @@ SELECT * FROM ts_classify_seasonality('daily_sales', date, amount, 7.0);
 
 -- Check if seasonality is strong and stable
 SELECT
-    (classification).is_seasonal,
-    (classification).seasonal_strength,
-    (classification).has_stable_timing
+    is_seasonal,
+    seasonal_strength,
+    has_stable_timing
 FROM ts_classify_seasonality('daily_sales', date, amount, 7.0);
 ```
 
