@@ -2,7 +2,17 @@
 -- Decomposition Examples - Synthetic Data
 -- ============================================================================
 -- This script demonstrates time series decomposition with the anofox-forecast
--- extension using the ts_mstl_decomposition_by table macro.
+-- extension using the ts_mstl_decomposition_by and ts_detrend_by table macros.
+--
+-- RECOMMENDED APPROACH:
+--   ts_mstl_decomposition_by - Full seasonal decomposition (trend + seasonal + remainder)
+--   ts_detrend_by            - Simple trend removal (when you only need detrended data)
+--
+-- MAP{} BEHAVIOR:
+--   When you pass MAP{} (empty params) to ts_mstl_decomposition_by:
+--   - Auto-detect seasonal periods from the data
+--   - Works well for most time series with clear patterns
+--   - For explicit control, use: MAP{'periods': '[7, 30]'} for weekly + monthly
 --
 -- Run: ./build/release/duckdb < examples/decomposition/synthetic_decomposition_examples.sql
 -- ============================================================================
@@ -225,15 +235,58 @@ SELECT
 FROM ts_mstl_decomposition_by('sensor_readings', sensor_id, timestamp, reading, MAP{});
 
 -- ============================================================================
--- SECTION 5: Comparing Decomposition Results
+-- SECTION 5: Detrending with ts_detrend_by
+-- ============================================================================
+-- Use ts_detrend_by to remove trend from grouped time series.
+-- Methods: 'linear', 'quadratic', 'cubic', 'auto' (default)
+
+.print ''
+.print '>>> SECTION 5: Detrending with ts_detrend_by'
+.print '-----------------------------------------------------------------------------'
+
+-- 5.1: Linear detrending
+.print 'Section 5.1: Linear Detrending'
+
+SELECT
+    id,
+    method,
+    n_params,
+    ROUND(rss, 2) AS rss,
+    trend[1:5] AS first_5_trend
+FROM ts_detrend_by('multi_series', series_id, date, value, 'linear');
+
+-- 5.2: Quadratic detrending
+.print ''
+.print 'Section 5.2: Quadratic Detrending'
+
+SELECT
+    id,
+    method,
+    n_params,
+    ROUND(rss, 2) AS rss
+FROM ts_detrend_by('multi_series', series_id, date, value, 'quadratic');
+
+-- 5.3: Auto detrending (automatically selects best method)
+.print ''
+.print 'Section 5.3: Auto Detrending'
+
+SELECT
+    id,
+    method,
+    n_params,
+    ROUND(rss, 2) AS rss
+FROM ts_detrend_by('multi_series', series_id, date, value, 'auto');
+
+-- ============================================================================
+-- SECTION 6: Comparing Decomposition Results
 -- ============================================================================
 
 .print ''
-.print '>>> SECTION 5: Comparing Decomposition Results'
+.print '>>> SECTION 6: Comparing Decomposition Results'
 .print '-----------------------------------------------------------------------------'
 
--- 5.1: Summary comparison
-.print 'Section 5.1: Decomposition Summary Comparison'
+-- 6.1: Summary comparison
+.print 'Section 6.1: Decomposition Summary Comparison'
 
 WITH decomposed AS (
     SELECT * FROM ts_mstl_decomposition_by('retail_sales', store_id, date, sales, MAP{})

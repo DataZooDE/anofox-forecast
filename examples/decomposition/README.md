@@ -4,11 +4,12 @@
 
 This folder contains runnable SQL examples demonstrating time series decomposition with the anofox-forecast extension.
 
-## Function
+## Functions
 
 | Function | Description |
 |----------|-------------|
-| `ts_mstl_decomposition_by` | MSTL decomposition for multiple series |
+| `ts_mstl_decomposition_by` | MSTL decomposition for multiple series (trend + seasonal + remainder) |
+| `ts_detrend_by` | Remove trend from multiple series (simple detrending) |
 
 ## Example Files
 
@@ -132,6 +133,52 @@ For additive decomposition: `value = trend + seasonal + remainder`
 4. **Use trend for forecasting** - The trend component shows the underlying direction, useful for planning.
 
 5. **Detect seasonality strength** - Use `ts_classify_seasonality_by()` to check if decomposition makes sense.
+
+---
+
+## Detrending with ts_detrend_by
+
+For simple trend removal without full decomposition, use `ts_detrend_by`:
+
+### Basic Usage
+
+```sql
+-- Auto-detect and remove trend
+SELECT * FROM ts_detrend_by('sales', product_id, date, value, 'auto');
+
+-- Force linear detrending
+SELECT * FROM ts_detrend_by('sales', product_id, date, value, 'linear');
+
+-- Quadratic detrending (for curved trends)
+SELECT * FROM ts_detrend_by('sales', product_id, date, value, 'quadratic');
+```
+
+### ts_detrend_by Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `method` | VARCHAR | 'linear', 'quadratic', 'cubic', or 'auto' |
+
+### ts_detrend_by Output Columns
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | VARCHAR | Series identifier |
+| `trend` | DOUBLE[] | Fitted trend component |
+| `detrended` | DOUBLE[] | Original values minus trend |
+| `method` | VARCHAR | Method used (may differ from input with 'auto') |
+| `coefficients` | DOUBLE[] | Polynomial coefficients |
+| `rss` | DOUBLE | Residual sum of squares |
+| `n_params` | INTEGER | Number of parameters fitted |
+
+### When to Use ts_detrend_by vs ts_mstl_decomposition_by
+
+| Use ts_detrend_by when... | Use ts_mstl_decomposition_by when... |
+|---------------------------|--------------------------------------|
+| You only need to remove trend | You need full seasonal decomposition |
+| Data has no strong seasonality | Data has seasonal patterns |
+| You want simpler, faster processing | You need trend + seasonal + remainder |
+| Preprocessing for other analysis | Analyzing seasonal components |
 
 ---
 
