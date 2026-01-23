@@ -33,19 +33,19 @@ UNION ALL SELECT 'A', '2023-01-02'::TIMESTAMP, 2.0;
 
 # Test ts_fill_gaps_operator fills missing dates with NULL
 query I
-SELECT count(*) FROM ts_fill_gaps_operator_by('test_gaps', grp, dt, val, '1 day');
+SELECT count(*) FROM ts_fill_gaps_by('test_gaps', grp, dt, val, '1 day');
 ----
 3
 
 # Test ts_fill_gaps_operator preserves existing values
 query I
-SELECT count(*) FROM ts_fill_gaps_operator_by('test_gaps', grp, dt, val, '1 day') WHERE value_col IS NOT NULL;
+SELECT count(*) FROM ts_fill_gaps_by('test_gaps', grp, dt, val, '1 day') WHERE value_col IS NOT NULL;
 ----
 2
 
 # Test ts_fill_gaps_operator with multiple groups
 query I
-SELECT count(*) FROM ts_fill_gaps_operator_by('test_multi_group', grp, dt, val, '1 day');
+SELECT count(*) FROM ts_fill_gaps_by('test_multi_group', grp, dt, val, '1 day');
 ----
 5
 
@@ -83,7 +83,7 @@ SELECT count(*) FROM ts_fill_gaps_by('test_gaps', grp, dt, val, '1d');
 
 # Test ts_fill_gaps_operator with Polars-style '1d' frequency
 query I
-SELECT count(*) FROM ts_fill_gaps_operator_by('test_gaps', grp, dt, val, '1d');
+SELECT count(*) FROM ts_fill_gaps_by('test_gaps', grp, dt, val, '1d');
 ----
 3
 

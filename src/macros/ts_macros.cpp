@@ -293,7 +293,7 @@ ORDER BY group_col, date_col
     // C++ API: ts_fill_gaps_by(table_name, group_col, date_col, value_col, frequency)
     // Supports: integers (as days), Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y'), DuckDB INTERVAL ('1 day', '1 hour')
     //
-    // This macro is a thin wrapper around the native streaming implementation (ts_fill_gaps_native)
+    // This macro is a thin wrapper around the native streaming implementation (_ts_fill_gaps_native)
     // which uses 16x less memory than the previous SQL macro approach (GH#113, GH#115).
     //
     // Performance (1M rows, 10K groups):
@@ -301,7 +301,7 @@ ORDER BY group_col, date_col
     //   Native:      11 MB peak memory (16x reduction)
     {"ts_fill_gaps_by", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM ts_fill_gaps_native(
+SELECT * FROM _ts_fill_gaps_native(
     (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
     frequency
 )
@@ -311,7 +311,7 @@ SELECT * FROM ts_fill_gaps_native(
     // C++ API: ts_fill_forward_by(table_name, group_col, date_col, value_col, target_date, frequency)
     // Supports both Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y') and DuckDB INTERVAL ('1 day', '1 hour')
     //
-    // This macro is a thin wrapper around the native streaming implementation (ts_fill_forward_native)
+    // This macro is a thin wrapper around the native streaming implementation (_ts_fill_forward_native)
     // which uses 11x less memory than the previous SQL macro approach (GH#113, GH#115).
     //
     // Performance (1M rows, 10K groups):
@@ -319,21 +319,9 @@ SELECT * FROM ts_fill_gaps_native(
     //   Native:      11 MB peak memory (11x reduction)
     {"ts_fill_forward_by", {"source", "group_col", "date_col", "value_col", "target_date", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM ts_fill_forward_native(
+SELECT * FROM _ts_fill_forward_native(
     (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
     target_date,
-    frequency
-)
-)"},
-
-    // ts_fill_gaps_operator_by: Alias for ts_fill_gaps_by (C++ API compatibility)
-    // C++ API: ts_fill_gaps_operator_by(table_name, group_col, date_col, value_col, frequency)
-    // Note: This is an alias for ts_fill_gaps_by using the native streaming implementation
-    // Supports both Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y') and DuckDB INTERVAL ('1 day', '1 hour')
-    {"ts_fill_gaps_operator_by", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
-R"(
-SELECT * FROM ts_fill_gaps_native(
-    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
     frequency
 )
 )"},
