@@ -123,6 +123,7 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsQuantileLossFunction(loader);
     RegisterTsMqlossFunction(loader);
     RegisterTsCoverageFunction(loader);
+    RegisterTsEstimateBacktestMemoryFunction(loader);
 
     // Register Conformal Prediction functions
     RegisterTsConformalQuantileFunction(loader);
@@ -139,6 +140,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 
     // Register Table Macros
     RegisterTsTableMacros(loader);
+
+    // Register Native Table Functions (streaming)
+    RegisterTsBacktestNativeFunction(loader);
 
     // Initialize telemetry (respects DATAZOO_DISABLE_TELEMETRY env var)
     anofox_telemetry_init(true, nullptr);
