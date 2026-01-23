@@ -25,7 +25,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
 
 // Re-export helper functions from submodules for internal use
-use allocation::{alloc_double_array, vec_to_c_double_array};
+use allocation::{alloc_double_array, alloc_or_error, free_ptr, vec_to_c_double_array};
 use conversion::to_option_usize;
 use error_handling::{check_null_pointers, init_error, set_error};
 
@@ -3194,14 +3194,60 @@ pub unsafe extern "C" fn anofox_ts_forecast(
             let n_forecasts = forecast.point.len();
             (*out_result).n_forecasts = n_forecasts;
 
-            // Copy point forecasts
-            (*out_result).point_forecasts = vec_to_c_array(&forecast.point);
-            (*out_result).lower_bounds = vec_to_c_array(&forecast.lower);
-            (*out_result).upper_bounds = vec_to_c_array(&forecast.upper);
+            // Copy point forecasts with allocation error checking
+            (*out_result).point_forecasts = match alloc_or_error(
+                &forecast.point,
+                out_error,
+                "Failed to allocate point forecasts",
+            ) {
+                Ok(ptr) => ptr,
+                Err(()) => return false,
+            };
+
+            (*out_result).lower_bounds = match alloc_or_error(
+                &forecast.lower,
+                out_error,
+                "Failed to allocate lower bounds",
+            ) {
+                Ok(ptr) => ptr,
+                Err(()) => {
+                    // Clean up already allocated memory
+                    free_ptr((*out_result).point_forecasts as *mut _);
+                    (*out_result).point_forecasts = ptr::null_mut();
+                    return false;
+                }
+            };
+
+            (*out_result).upper_bounds = match alloc_or_error(
+                &forecast.upper,
+                out_error,
+                "Failed to allocate upper bounds",
+            ) {
+                Ok(ptr) => ptr,
+                Err(()) => {
+                    free_ptr((*out_result).point_forecasts as *mut _);
+                    free_ptr((*out_result).lower_bounds as *mut _);
+                    (*out_result).point_forecasts = ptr::null_mut();
+                    (*out_result).lower_bounds = ptr::null_mut();
+                    return false;
+                }
+            };
 
             // Copy fitted values
             if let Some(ref fitted) = forecast.fitted {
-                (*out_result).fitted_values = vec_to_c_array(fitted);
+                (*out_result).fitted_values =
+                    match alloc_or_error(fitted, out_error, "Failed to allocate fitted values") {
+                        Ok(ptr) => ptr,
+                        Err(()) => {
+                            free_ptr((*out_result).point_forecasts as *mut _);
+                            free_ptr((*out_result).lower_bounds as *mut _);
+                            free_ptr((*out_result).upper_bounds as *mut _);
+                            (*out_result).point_forecasts = ptr::null_mut();
+                            (*out_result).lower_bounds = ptr::null_mut();
+                            (*out_result).upper_bounds = ptr::null_mut();
+                            return false;
+                        }
+                    };
                 (*out_result).n_fitted = fitted.len();
             } else {
                 (*out_result).fitted_values = ptr::null_mut();
@@ -3210,7 +3256,21 @@ pub unsafe extern "C" fn anofox_ts_forecast(
 
             // Copy residuals
             if let Some(ref resid) = forecast.residuals {
-                (*out_result).residuals = vec_to_c_array(resid);
+                (*out_result).residuals =
+                    match alloc_or_error(resid, out_error, "Failed to allocate residuals") {
+                        Ok(ptr) => ptr,
+                        Err(()) => {
+                            free_ptr((*out_result).point_forecasts as *mut _);
+                            free_ptr((*out_result).lower_bounds as *mut _);
+                            free_ptr((*out_result).upper_bounds as *mut _);
+                            free_ptr((*out_result).fitted_values as *mut _);
+                            (*out_result).point_forecasts = ptr::null_mut();
+                            (*out_result).lower_bounds = ptr::null_mut();
+                            (*out_result).upper_bounds = ptr::null_mut();
+                            (*out_result).fitted_values = ptr::null_mut();
+                            return false;
+                        }
+                    };
             } else {
                 (*out_result).residuals = ptr::null_mut();
             }
@@ -3383,14 +3443,59 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
             let n_forecasts = forecast.point.len();
             (*out_result).n_forecasts = n_forecasts;
 
-            // Copy point forecasts
-            (*out_result).point_forecasts = vec_to_c_array(&forecast.point);
-            (*out_result).lower_bounds = vec_to_c_array(&forecast.lower);
-            (*out_result).upper_bounds = vec_to_c_array(&forecast.upper);
+            // Copy point forecasts with allocation error checking
+            (*out_result).point_forecasts = match alloc_or_error(
+                &forecast.point,
+                out_error,
+                "Failed to allocate point forecasts",
+            ) {
+                Ok(ptr) => ptr,
+                Err(()) => return false,
+            };
+
+            (*out_result).lower_bounds = match alloc_or_error(
+                &forecast.lower,
+                out_error,
+                "Failed to allocate lower bounds",
+            ) {
+                Ok(ptr) => ptr,
+                Err(()) => {
+                    free_ptr((*out_result).point_forecasts as *mut _);
+                    (*out_result).point_forecasts = ptr::null_mut();
+                    return false;
+                }
+            };
+
+            (*out_result).upper_bounds = match alloc_or_error(
+                &forecast.upper,
+                out_error,
+                "Failed to allocate upper bounds",
+            ) {
+                Ok(ptr) => ptr,
+                Err(()) => {
+                    free_ptr((*out_result).point_forecasts as *mut _);
+                    free_ptr((*out_result).lower_bounds as *mut _);
+                    (*out_result).point_forecasts = ptr::null_mut();
+                    (*out_result).lower_bounds = ptr::null_mut();
+                    return false;
+                }
+            };
 
             // Copy fitted values
             if let Some(ref fitted) = forecast.fitted {
-                (*out_result).fitted_values = vec_to_c_array(fitted);
+                (*out_result).fitted_values =
+                    match alloc_or_error(fitted, out_error, "Failed to allocate fitted values") {
+                        Ok(ptr) => ptr,
+                        Err(()) => {
+                            free_ptr((*out_result).point_forecasts as *mut _);
+                            free_ptr((*out_result).lower_bounds as *mut _);
+                            free_ptr((*out_result).upper_bounds as *mut _);
+                            (*out_result).point_forecasts = ptr::null_mut();
+                            (*out_result).lower_bounds = ptr::null_mut();
+                            (*out_result).upper_bounds = ptr::null_mut();
+                            return false;
+                        }
+                    };
                 (*out_result).n_fitted = fitted.len();
             } else {
                 (*out_result).fitted_values = ptr::null_mut();
@@ -3399,7 +3504,21 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
 
             // Copy residuals
             if let Some(ref resid) = forecast.residuals {
-                (*out_result).residuals = vec_to_c_array(resid);
+                (*out_result).residuals =
+                    match alloc_or_error(resid, out_error, "Failed to allocate residuals") {
+                        Ok(ptr) => ptr,
+                        Err(()) => {
+                            free_ptr((*out_result).point_forecasts as *mut _);
+                            free_ptr((*out_result).lower_bounds as *mut _);
+                            free_ptr((*out_result).upper_bounds as *mut _);
+                            free_ptr((*out_result).fitted_values as *mut _);
+                            (*out_result).point_forecasts = ptr::null_mut();
+                            (*out_result).lower_bounds = ptr::null_mut();
+                            (*out_result).upper_bounds = ptr::null_mut();
+                            (*out_result).fitted_values = ptr::null_mut();
+                            return false;
+                        }
+                    };
             } else {
                 (*out_result).residuals = ptr::null_mut();
             }

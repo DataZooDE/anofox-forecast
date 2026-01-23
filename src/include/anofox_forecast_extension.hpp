@@ -88,6 +88,7 @@ void RegisterTsRmaeFunction(ExtensionLoader &loader);
 void RegisterTsQuantileLossFunction(ExtensionLoader &loader);
 void RegisterTsMqlossFunction(ExtensionLoader &loader);
 void RegisterTsCoverageFunction(ExtensionLoader &loader);
+void RegisterTsEstimateBacktestMemoryFunction(ExtensionLoader &loader);
 
 // Conformal prediction functions
 void RegisterTsConformalQuantileFunction(ExtensionLoader &loader);

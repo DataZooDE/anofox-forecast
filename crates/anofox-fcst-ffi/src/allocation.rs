@@ -126,6 +126,37 @@ pub unsafe fn alloc_and_copy_array<T: Copy>(
     true
 }
 
+/// Allocate and copy an array, returning Result for cleaner error handling.
+///
+/// # Safety
+/// out_error must be null or a valid pointer to an AnofoxError.
+/// Returns Ok(ptr) on success, Err(()) on allocation failure.
+///
+/// # Example
+/// ```ignore
+/// let ptr = alloc_or_error(&data, out_error, "Failed to allocate data")?;
+/// ```
+#[allow(clippy::result_unit_err)]
+pub unsafe fn alloc_or_error<T: Copy>(
+    items: &[T],
+    out_error: *mut AnofoxError,
+    error_msg: &str,
+) -> Result<*mut T, ()> {
+    if items.is_empty() {
+        return Ok(ptr::null_mut());
+    }
+
+    let ptr = slice_to_c_array(items);
+    if ptr.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::AllocationError, error_msg);
+        }
+        Err(())
+    } else {
+        Ok(ptr)
+    }
+}
+
 /// Allocate and copy a string array.
 ///
 /// # Safety

@@ -123,6 +123,7 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsQuantileLossFunction(loader);
     RegisterTsMqlossFunction(loader);
     RegisterTsCoverageFunction(loader);
+    RegisterTsEstimateBacktestMemoryFunction(loader);
 
     // Register Conformal Prediction functions
     RegisterTsConformalQuantileFunction(loader);

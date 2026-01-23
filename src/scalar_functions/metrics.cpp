@@ -792,4 +792,67 @@ void RegisterTsCoverageFunction(ExtensionLoader &loader) {
     loader.RegisterFunction(anofox_set);
 }
 
+// ============================================================================
+// ts_estimate_backtest_memory - Estimate memory usage for backtest
+// ============================================================================
+
+static void TsEstimateBacktestMemoryFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+    auto &n_series_vec = args.data[0];
+    auto &n_dates_vec = args.data[1];
+    auto &folds_vec = args.data[2];
+    auto &horizon_vec = args.data[3];
+    idx_t count = args.size();
+
+    result.SetVectorType(VectorType::FLAT_VECTOR);
+    auto result_data = FlatVector::GetData<int64_t>(result);
+
+    auto n_series_data = FlatVector::GetData<int64_t>(n_series_vec);
+    auto n_dates_data = FlatVector::GetData<int64_t>(n_dates_vec);
+    auto folds_data = FlatVector::GetData<int64_t>(folds_vec);
+    auto horizon_data = FlatVector::GetData<int64_t>(horizon_vec);
+
+    for (idx_t row_idx = 0; row_idx < count; row_idx++) {
+        if (FlatVector::IsNull(n_series_vec, row_idx) ||
+            FlatVector::IsNull(n_dates_vec, row_idx) ||
+            FlatVector::IsNull(folds_vec, row_idx) ||
+            FlatVector::IsNull(horizon_vec, row_idx)) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        int64_t n_series = n_series_data[row_idx];
+        int64_t n_dates = n_dates_data[row_idx];
+        int64_t folds = folds_data[row_idx];
+        int64_t horizon = horizon_data[row_idx];
+
+        // Estimate memory usage for ts_backtest_auto_by:
+        // 1. cv_splits: n_series × n_dates × folds × 40 bytes (5 columns × 8 bytes)
+        // 2. cv_train/cv_test: same as cv_splits but filtered (~60% train, ~10% test)
+        // 3. forecast LIST aggregation: n_series × folds × (n_dates/2) × 8 bytes
+        // 4. output: n_series × folds × horizon × 88 bytes (11 columns × 8 bytes)
+        //
+        // Note: LIST() aggregates cannot spill to disk, so this is the main bottleneck
+
+        int64_t cv_splits_bytes = n_series * n_dates * folds * 40;
+        int64_t list_agg_bytes = n_series * folds * (n_dates / 2) * 8;
+        int64_t output_bytes = n_series * folds * horizon * 88;
+
+        // Total estimate (with some overhead factor)
+        int64_t total_bytes = cv_splits_bytes + list_agg_bytes + output_bytes;
+        int64_t estimated_mb = total_bytes / (1024 * 1024);
+
+        result_data[row_idx] = estimated_mb;
+    }
+}
+
+void RegisterTsEstimateBacktestMemoryFunction(ExtensionLoader &loader) {
+    ScalarFunctionSet func_set("ts_estimate_backtest_memory");
+    func_set.AddFunction(ScalarFunction(
+        {LogicalType::BIGINT, LogicalType::BIGINT, LogicalType::BIGINT, LogicalType::BIGINT},
+        LogicalType::BIGINT,
+        TsEstimateBacktestMemoryFunction
+    ));
+    loader.RegisterFunction(func_set);
+}
+
 } // namespace duckdb
