@@ -108,6 +108,7 @@ void RegisterTsTableMacros(ExtensionLoader &loader);
 
 // Native table functions (streaming)
 void RegisterTsBacktestNativeFunction(ExtensionLoader &loader);
+void RegisterTsForecastNativeFunction(ExtensionLoader &loader);
 
 // Extension class
 class AnofoxForecastExtension : public Extension {

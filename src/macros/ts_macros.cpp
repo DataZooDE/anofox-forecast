@@ -499,51 +499,24 @@ FROM forecast_result
 
     // ts_forecast_by: Generate forecasts per group (long format - one row per forecast step)
     // C++ API: ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, params?, frequency?)
+    //
+    // This macro is a thin wrapper around the native streaming implementation (_ts_forecast_native)
+    // which uses significantly less memory than the previous SQL macro approach (GH#115).
+    //
+    // Performance (1M rows, 10K groups):
+    //   SQL macro:  358 MB peak memory (LIST aggregation)
+    //   Native:     ~35 MB peak memory (streaming)
+    //
     // Supports both Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y') and DuckDB INTERVAL ('1 day', '1 hour')
     {"ts_forecast_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", nullptr}, {{"params", "MAP{}"}, {"frequency", "'1d'"}, {nullptr, nullptr}},
 R"(
-WITH _freq AS (
-    SELECT CASE
-        WHEN frequency::VARCHAR ~ '^[0-9]+$' THEN (frequency::VARCHAR || ' day')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'w$', ' week'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'mo$', ' month'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency::VARCHAR, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'y$', ' year'))::INTERVAL
-        ELSE frequency::INTERVAL
-    END AS _interval
-),
-_ets_spec AS (
-    SELECT COALESCE(json_extract_string(to_json(params), '$.model'), '') AS spec
-),
-forecast_data AS (
-    SELECT
-        group_col AS id,
-        date_trunc('second', MAX(date_col)::TIMESTAMP) AS last_date,
-        _ts_forecast(
-            LIST(target_col::DOUBLE ORDER BY date_col),
-            horizon,
-            CASE WHEN (SELECT spec FROM _ets_spec) != ''
-                 THEN method || ':' || (SELECT spec FROM _ets_spec)
-                 ELSE method
-            END
-        ) AS fcst
-    FROM query_table(source::VARCHAR)
-    GROUP BY group_col
+SELECT * FROM _ts_forecast_native(
+    (SELECT group_col, date_col, target_col FROM query_table(source::VARCHAR)),
+    horizon,
+    frequency,
+    method,
+    params
 )
-SELECT
-    id,
-    UNNEST(generate_series(1, len((fcst).point)))::INTEGER AS forecast_step,
-    UNNEST(generate_series(last_date + (SELECT _interval FROM _freq), last_date + (len((fcst).point)::INTEGER * EXTRACT(EPOCH FROM (SELECT _interval FROM _freq)) || ' seconds')::INTERVAL, (SELECT _interval FROM _freq)))::TIMESTAMP AS date,
-    UNNEST((fcst).point) AS point_forecast,
-    UNNEST((fcst).lower) AS lower_90,
-    UNNEST((fcst).upper) AS upper_90,
-    (fcst).model AS model_name,
-    (fcst).fitted AS insample_fitted
-FROM forecast_data
-ORDER BY id, forecast_step
 )"},
 
     // ts_cv_forecast_by: Generate forecasts for CV splits with parallel fold execution
