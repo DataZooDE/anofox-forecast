@@ -357,22 +357,13 @@ WHERE group_col IN (
     // ts_mstl_decomposition_by: MSTL decomposition for grouped series
     // C++ API: ts_mstl_decomposition_by(table_name, group_col, date_col, value_col, params MAP)
     // Returns: TABLE with expanded decomposition columns
+    // Uses native streaming implementation to avoid LIST() memory issues
     {"ts_mstl_decomposition_by", {"source", "group_col", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH decomposition_data AS (
-    SELECT
-        group_col AS id,
-        _ts_mstl_decomposition(LIST(value_col::DOUBLE ORDER BY date_col)) AS _decomp
-    FROM query_table(source::VARCHAR)
-    GROUP BY group_col
+SELECT * FROM _ts_mstl_decomposition_native(
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
+    COALESCE(json_extract_string(to_json(params), '$.insufficient_data'), 'fail')
 )
-SELECT
-    id,
-    (_decomp).trend AS trend,
-    (_decomp).seasonal AS seasonal,
-    (_decomp).remainder AS remainder,
-    (_decomp).periods AS periods
-FROM decomposition_data
 )"},
 
     // ts_detrend_by: Remove trend from grouped time series

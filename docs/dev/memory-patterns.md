@@ -179,7 +179,7 @@ Based on these findings, the following functions should be audited for similar i
 | ts_detect_anomalies_by | Yes | No | ~35 MB | Low priority |
 | ts_stats_by | Yes | No | 32 MB | No action needed |
 | ts_features_by | Yes | No | 34 MB | No action needed |
-| ts_mstl_decomposition_by | Yes | No | 35 MB | No action needed |
+| ts_mstl_decomposition_by | ~~Yes~~ | No | ~35 MB | **Fixed - Native streaming** (minimal improvement, already low) |
 | ts_detect_changepoints_by | Yes | No | 33 MB | No action needed |
 | ts_detect_periods_by | Yes | No | 32 MB | No action needed |
 | ts_classify_seasonality_by | Yes | No | 36 MB | No action needed |
@@ -247,7 +247,7 @@ The following functions were profiled and found to have acceptable memory usage 
 |----------|-------------|-------|
 | ts_stats_by | ~32 MB | Simple aggregations, low overhead |
 | ts_features_by | ~34 MB | Feature extraction per group |
-| ts_mstl_decomposition_by | ~35 MB | Decomposition uses streaming internally |
+| ts_mstl_decomposition_by | ~35 MB | Converted to native streaming for consistency |
 | ts_detect_changepoints_by | ~33 MB | Point-wise detection |
 | ts_detect_periods_by | ~32 MB | FFT-based, efficient |
 | ts_classify_seasonality_by | ~36 MB | Classification results are small |
