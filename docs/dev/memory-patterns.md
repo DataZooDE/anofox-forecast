@@ -174,7 +174,8 @@ Based on these findings, the following functions should be audited for similar i
 | ts_cv_forecast_by | ~~Yes~~ | ~~Yes~~ | ~~212 MB~~ → 116 MB | **Fixed - Native streaming** |
 | ts_backtest_auto_by | ~~Yes~~ | ~~Yes~~ | ~~1951 MB~~ → 63 MB | **Fixed in #114** |
 | ts_cv_split_by | ~~Yes~~ | ~~Yes~~ | ~~36 MB~~ → 19 MB | **Fixed - Native streaming** |
-| ts_fill_gaps_by | Yes (via macro) | No | Low | See #113 |
+| ts_fill_gaps_by | ~~Yes~~ | No | ~~181 MB~~ → 11 MB | **Fixed - Native streaming** (#113) |
+| ts_fill_forward_by | ~~Yes~~ | No | ~~127 MB~~ → 11 MB | **Fixed - Native streaming** (#113) |
 | ts_stats_by | Yes | No | 32 MB | No action needed |
 | ts_features_by | Yes | No | 34 MB | No action needed |
 | ts_mstl_decomposition_by | ~~Yes~~ | No | ~35 MB | **Fixed - Native streaming** (minimal improvement, already low) |
