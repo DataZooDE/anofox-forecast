@@ -144,6 +144,7 @@ static void LoadInternal(ExtensionLoader &loader) {
     // Register Native Table Functions (streaming)
     RegisterTsBacktestNativeFunction(loader);
     RegisterTsForecastNativeFunction(loader);
+    RegisterTsCvSplitNativeFunction(loader);
 
     // Initialize telemetry (respects DATAZOO_DISABLE_TELEMETRY env var)
     anofox_telemetry_init(true, nullptr);

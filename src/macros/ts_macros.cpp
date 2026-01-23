@@ -1007,97 +1007,18 @@ ORDER BY fold_id
     // gap: number of periods between training end and test start (default 0, simulates data latency)
     // embargo: number of periods to exclude from training after previous fold's test end (default 0, prevents label leakage)
     // Returns: group_col, date_col, target_col, fold_id, split (train/test)
+    // ts_cv_split_by: Native streaming implementation for memory efficiency
+    // Uses _ts_cv_split_native table-in-out function to avoid CROSS JOIN memory explosion
     {"ts_cv_split_by", {"source", "group_col", "date_col", "target_col", "training_end_times", "horizon", "frequency", "params", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH _params AS (
-    SELECT
-        COALESCE(json_extract_string(to_json(params), '$.window_type'), 'expanding') AS _window_type,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.min_train_size') AS BIGINT), 1) AS _min_train_size,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.gap') AS BIGINT), 0) AS _gap,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.embargo') AS BIGINT), 0) AS _embargo
-),
-_freq AS (
-    SELECT CASE
-        WHEN frequency::VARCHAR ~ '^[0-9]+$' THEN (frequency::VARCHAR || ' day')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'w$', ' week'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'mo$', ' month'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency::VARCHAR, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'y$', ' year'))::INTERVAL
-        ELSE frequency::INTERVAL
-    END AS _interval
-),
-src AS (
-    SELECT
-        group_col AS _grp,
-        date_trunc('second', date_col::TIMESTAMP) AS _dt,
-        target_col::DOUBLE AS _target
-    FROM query_table(source::VARCHAR)
-),
-date_bounds AS (
-    SELECT MIN(_dt) AS _min_dt FROM src
-),
-folds_raw AS (
-    SELECT
-        ROW_NUMBER() OVER (ORDER BY _train_end) AS fold_id,
-        date_trunc('second', _train_end::TIMESTAMP) AS train_end,
-        -- Gap: skip _gap periods after training before test starts
-        date_trunc('second', _train_end::TIMESTAMP) + (((SELECT _gap FROM _params) + 1) * (SELECT _interval FROM _freq)) AS test_start,
-        date_trunc('second', _train_end::TIMESTAMP) + (((SELECT _gap FROM _params) + horizon) * (SELECT _interval FROM _freq)) AS test_end
-    FROM (SELECT UNNEST(training_end_times) AS _train_end)
-),
-folds_with_embargo AS (
-    SELECT
-        fold_id,
-        train_end,
-        test_start,
-        test_end,
-        -- Embargo: only compute cutoff if embargo > 0
-        CASE
-            WHEN (SELECT _embargo FROM _params) > 0 THEN
-                COALESCE(
-                    LAG(test_end) OVER (ORDER BY fold_id) + ((SELECT _embargo FROM _params) * (SELECT _interval FROM _freq)),
-                    (SELECT _min_dt FROM date_bounds)
-                )
-            ELSE (SELECT _min_dt FROM date_bounds)
-        END AS embargo_cutoff
-    FROM folds_raw
-),
-fold_bounds AS (
-    SELECT
-        f.fold_id,
-        -- Train start is the GREATER of: window-based start OR embargo cutoff
-        GREATEST(
-            CASE
-                WHEN (SELECT _window_type FROM _params) = 'expanding' THEN (SELECT _min_dt FROM date_bounds)
-                WHEN (SELECT _window_type FROM _params) = 'fixed' THEN f.train_end - ((SELECT _min_train_size FROM _params) * (SELECT _interval FROM _freq))
-                WHEN (SELECT _window_type FROM _params) = 'sliding' THEN f.train_end - ((SELECT _min_train_size FROM _params) * (SELECT _interval FROM _freq))
-                ELSE (SELECT _min_dt FROM date_bounds)
-            END,
-            f.embargo_cutoff
-        ) AS train_start,
-        f.train_end,
-        f.test_start,
-        f.test_end
-    FROM folds_with_embargo f
+SELECT * FROM _ts_cv_split_native(
+    (SELECT group_col, date_col, target_col FROM query_table(source::VARCHAR)),
+    horizon,
+    frequency,
+    training_end_times,
+    params
 )
-SELECT
-    s._grp AS group_col,
-    s._dt AS date_col,
-    s._target AS target_col,
-    fb.fold_id::BIGINT AS fold_id,
-    CASE
-        WHEN s._dt >= fb.train_start AND s._dt <= fb.train_end THEN 'train'
-        WHEN s._dt >= fb.test_start AND s._dt <= fb.test_end THEN 'test'
-        ELSE NULL
-    END AS split
-FROM src s
-CROSS JOIN fold_bounds fb
-WHERE (s._dt >= fb.train_start AND s._dt <= fb.train_end)
-   OR (s._dt >= fb.test_start AND s._dt <= fb.test_end)
-ORDER BY fb.fold_id, s._grp, s._dt
+ORDER BY 4, 1, 2
 )"},
 
     // ts_cv_split_index_by: Memory-efficient CV split that returns only index columns (no data columns)
