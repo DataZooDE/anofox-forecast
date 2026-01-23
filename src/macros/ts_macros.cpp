@@ -1719,61 +1719,15 @@ SELECT
 FROM src
 )"},
 
-    // ts_stats_by: Alias for ts_stats (for API consistency with _by naming pattern)
+    // ts_stats_by: Compute time series statistics per group using native streaming API
     // C++ API: ts_stats_by(table_name, group_col, date_col, value_col, frequency)
-    // Returns: TABLE with expanded statistics columns
+    // Returns: TABLE with group column (preserves original name) + 35 statistics columns
     {"ts_stats_by", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH stats_data AS (
-    SELECT
-        group_col AS id,
-        _ts_stats_with_dates(
-            LIST(value_col::DOUBLE ORDER BY date_col),
-            LIST(date_col::TIMESTAMP ORDER BY date_col),
-            frequency::VARCHAR
-        ) AS _stats
-    FROM query_table(source::VARCHAR)
-    GROUP BY group_col
+SELECT * FROM _ts_stats_native(
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
+    frequency::VARCHAR
 )
-SELECT
-    id,
-    (_stats).length AS length,
-    (_stats).n_nulls AS n_nulls,
-    (_stats).n_nan AS n_nan,
-    (_stats).n_zeros AS n_zeros,
-    (_stats).n_positive AS n_positive,
-    (_stats).n_negative AS n_negative,
-    (_stats).n_unique_values AS n_unique_values,
-    (_stats).is_constant AS is_constant,
-    (_stats).n_zeros_start AS n_zeros_start,
-    (_stats).n_zeros_end AS n_zeros_end,
-    (_stats).plateau_size AS plateau_size,
-    (_stats).plateau_size_nonzero AS plateau_size_nonzero,
-    (_stats).mean AS mean,
-    (_stats).median AS median,
-    (_stats).std_dev AS std_dev,
-    (_stats).variance AS variance,
-    (_stats).min AS min,
-    (_stats).max AS max,
-    (_stats).range AS range,
-    (_stats).sum AS sum,
-    (_stats).skewness AS skewness,
-    (_stats).kurtosis AS kurtosis,
-    (_stats).tail_index AS tail_index,
-    (_stats).bimodality_coef AS bimodality_coef,
-    (_stats).trimmed_mean AS trimmed_mean,
-    (_stats).coef_variation AS coef_variation,
-    (_stats).q1 AS q1,
-    (_stats).q3 AS q3,
-    (_stats).iqr AS iqr,
-    (_stats).autocorr_lag1 AS autocorr_lag1,
-    (_stats).trend_strength AS trend_strength,
-    (_stats).seasonality_strength AS seasonality_strength,
-    (_stats).entropy AS entropy,
-    (_stats).stability AS stability,
-    (_stats).expected_length AS expected_length,
-    (_stats).n_gaps AS n_gaps
-FROM stats_data
 )"},
 
     // ts_data_quality_by: Alias for ts_data_quality (for API consistency with _by naming pattern)
