@@ -110,6 +110,7 @@ void RegisterTsTableMacros(ExtensionLoader &loader);
 void RegisterTsBacktestNativeFunction(ExtensionLoader &loader);
 void RegisterTsForecastNativeFunction(ExtensionLoader &loader);
 void RegisterTsCvSplitNativeFunction(ExtensionLoader &loader);
+void RegisterTsCvForecastNativeFunction(ExtensionLoader &loader);
 
 // Extension class
 class AnofoxForecastExtension : public Extension {

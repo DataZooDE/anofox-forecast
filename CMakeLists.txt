@@ -124,6 +124,7 @@ set(EXTENSION_SOURCES
     src/table_functions/ts_backtest_native.cpp
     src/table_functions/ts_forecast_native.cpp
     src/table_functions/ts_cv_split_native.cpp
+    src/table_functions/ts_cv_forecast_native.cpp
     src/table_functions/ts_periods.cpp
     src/table_functions/ts_peaks.cpp
     src/table_functions/ts_detrend.cpp

@@ -302,7 +302,7 @@ ORDER BY group_col, date_col
     {"ts_fill_gaps_by", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_fill_gaps_native(
-    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
+    (SELECT columns(group_col), columns(date_col), columns(value_col) FROM query_table(source::VARCHAR)),
     frequency
 )
 )"},
@@ -320,7 +320,7 @@ SELECT * FROM _ts_fill_gaps_native(
     {"ts_fill_forward_by", {"source", "group_col", "date_col", "value_col", "target_date", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_fill_forward_native(
-    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
+    (SELECT columns(group_col), columns(date_col), columns(value_col) FROM query_table(source::VARCHAR)),
     target_date,
     frequency
 )
@@ -511,7 +511,7 @@ FROM forecast_result
     {"ts_forecast_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", nullptr}, {{"params", "MAP{}"}, {"frequency", "'1d'"}, {nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_forecast_native(
-    (SELECT group_col, date_col, target_col FROM query_table(source::VARCHAR)),
+    (SELECT columns(group_col), columns(date_col), columns(target_col) FROM query_table(source::VARCHAR)),
     horizon,
     frequency,
     method,
@@ -523,59 +523,17 @@ SELECT * FROM _ts_forecast_native(
     // C++ API: ts_cv_forecast_by(cv_splits, group_col, date_col, target_col, method, horizon, params, frequency)
     // Processes all folds in parallel using DuckDB's vectorization
     // cv_splits should be output from ts_cv_split filtered to split='train'
+    // Uses native streaming implementation to avoid LIST() memory issues
     {"ts_cv_forecast_by", {"cv_splits", "group_col", "date_col", "target_col", "method", "horizon", nullptr}, {{"params", "MAP{}"}, {"frequency", "'1d'"}, {nullptr, nullptr}},
 R"(
-WITH _freq AS (
-    SELECT CASE
-        WHEN frequency::VARCHAR ~ '^[0-9]+$' THEN (frequency::VARCHAR || ' day')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'w$', ' week'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'mo$', ' month'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency::VARCHAR, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'y$', ' year'))::INTERVAL
-        ELSE frequency::INTERVAL
-    END AS _interval
-),
-cv_data AS (
-    SELECT
-        fold_id,
-        group_col AS _grp,
-        date_col,
-        target_col
-    FROM query_table(cv_splits::VARCHAR)
-),
-_ets_spec_cv AS (
-    SELECT COALESCE(json_extract_string(to_json(params), '$.model'), '') AS spec
-),
-forecast_data AS (
-    SELECT
-        fold_id,
-        _grp AS id,
-        date_trunc('second', MAX(date_col)::TIMESTAMP) AS last_date,
-        _ts_forecast(
-            LIST(target_col::DOUBLE ORDER BY date_col),
-            horizon,
-            CASE WHEN (SELECT spec FROM _ets_spec_cv) != ''
-                 THEN method || ':' || (SELECT spec FROM _ets_spec_cv)
-                 ELSE method
-            END
-        ) AS fcst
-    FROM cv_data
-    GROUP BY fold_id, _grp
+SELECT * FROM _ts_cv_forecast_native(
+    (SELECT fold_id, columns(group_col), columns(date_col), columns(target_col) FROM query_table(cv_splits::VARCHAR)),
+    horizon,
+    frequency,
+    method,
+    params
 )
-SELECT
-    fold_id,
-    id,
-    UNNEST(generate_series(1, len((fcst).point)))::INTEGER AS forecast_step,
-    UNNEST(generate_series(last_date + (SELECT _interval FROM _freq), last_date + (len((fcst).point)::INTEGER * EXTRACT(EPOCH FROM (SELECT _interval FROM _freq)) || ' seconds')::INTERVAL, (SELECT _interval FROM _freq)))::TIMESTAMP AS date,
-    UNNEST((fcst).point) AS point_forecast,
-    UNNEST((fcst).lower) AS lower_90,
-    UNNEST((fcst).upper) AS upper_90,
-    (fcst).model AS model_name
-FROM forecast_data
-ORDER BY fold_id, id, forecast_step
+ORDER BY 1, 2, 3
 )"},
 
     // ts_forecast_exog: Generate forecasts with exogenous variables (single series)
@@ -1012,7 +970,7 @@ ORDER BY fold_id
     {"ts_cv_split_by", {"source", "group_col", "date_col", "target_col", "training_end_times", "horizon", "frequency", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_cv_split_native(
-    (SELECT group_col, date_col, target_col FROM query_table(source::VARCHAR)),
+    (SELECT columns(group_col), columns(date_col), columns(target_col) FROM query_table(source::VARCHAR)),
     horizon,
     frequency,
     training_end_times,
