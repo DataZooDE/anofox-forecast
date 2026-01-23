@@ -233,6 +233,21 @@ The following functions have also been converted to native streaming:
 - Avoids `CROSS JOIN` intermediate materialization
 - Properly handles output buffer overflow with `HAVE_MORE_OUTPUT`
 
+### Functions Not Requiring Streaming Conversion
+
+The following functions were profiled and found to have acceptable memory usage (32-36 MB for 100K rows, 1K groups). These don't require native streaming conversion:
+
+| Function | Peak Memory | Notes |
+|----------|-------------|-------|
+| ts_stats_by | ~32 MB | Simple aggregations, low overhead |
+| ts_features_by | ~34 MB | Feature extraction per group |
+| ts_mstl_decomposition_by | ~35 MB | Decomposition uses streaming internally |
+| ts_detect_changepoints_by | ~33 MB | Point-wise detection |
+| ts_detect_periods_by | ~32 MB | FFT-based, efficient |
+| ts_classify_seasonality_by | ~36 MB | Classification results are small |
+
+**Recommendation**: Focus streaming conversion efforts on functions with >100 MB memory usage, particularly those using `LIST()` aggregation or `CROSS JOIN` patterns.
+
 ### Remaining Work
 
 See GitHub issues:
