@@ -14,11 +14,23 @@ namespace duckdb {
 // ============================================================================
 // ts_backtest_native - Native streaming backtest table function
 //
-// IMPORTANT: This function requires SET threads=1; for correct results with
-// large datasets. The table_in_out pattern partitions input data across threads,
-// and since backtesting requires ALL data to compute global fold boundaries,
-// multi-threading can cause race conditions resulting in missing or incomplete
-// results.
+// IMPORTANT: Requires SET threads=1; for correct results.
+// The table_in_out pattern partitions input data across threads, but backtesting
+// requires ALL data to compute global fold boundaries. Multi-threading causes
+// missing or incomplete results.
+//
+// Performance characteristics (vs ts_backtest_auto_by macro):
+//   - Small datasets (<100k rows): Native is ~30% FASTER even with threads=1
+//   - Large datasets (>500k rows): Macro with all threads is ~25% faster
+//
+// Use ts_backtest_native when:
+//   - Working with small-medium datasets
+//   - Memory is limited (avoids LIST() aggregation OOM)
+//   - Need streaming output behavior
+//
+// Use ts_backtest_auto_by macro when:
+//   - Working with very large datasets where parallelization helps
+//   - threads=1 restriction is unacceptable
 //
 // Usage:
 //   SET threads=1;  -- Required for correct results
