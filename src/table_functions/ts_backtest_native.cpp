@@ -15,7 +15,10 @@
 namespace duckdb {
 
 // ============================================================================
-// ts_backtest_native - Native streaming backtest table function
+// _ts_backtest_native - Internal native streaming backtest table function
+//
+// This is an INTERNAL function used by ts_backtest_auto_by macro.
+// Users should call ts_backtest_auto_by() instead of this function directly.
 //
 // PARALLEL EXECUTION STRATEGY:
 // This function uses a two-phase approach to enable parallelization while
@@ -30,23 +33,14 @@ namespace duckdb {
 //   - All threads wait for fold boundaries to be ready
 //   - Each thread then processes its own groups in parallel
 //
-// MEMORY FOOTPRINT (1M rows = 5000 series x 200 dates):
-//   - ts_backtest_native:  ~29 MB peak buffer memory
-//   - ts_backtest_auto_by: ~1.1 GB peak buffer memory (38x more!)
+// MEMORY FOOTPRINT (1M rows = 10k series x 100 dates):
+//   - Native (this function): ~31 MB peak buffer memory
+//   - Old SQL macro approach: ~1.9 GB peak buffer memory (62x more!)
 //
-// The macro's LIST() aggregations create massive intermediate results that can
-// cause OOM or segfaults with limited memory. The native streaming function
-// avoids this by processing data in chunks.
-//
-// Usage:
-//   SELECT * FROM ts_backtest_native(
-//       (SELECT id, ds, y FROM my_table),
-//       7,              -- horizon
-//       5,              -- folds
-//       '1d',           -- frequency
-//       MAP{'method': 'Naive'},  -- params
-//       'rmse'          -- metric
-//   );
+// PERFORMANCE (1M rows, 10k series):
+//   - Native parallel: 0.26s latency
+//   - Native single-thread: 0.94s latency (3.6x slower)
+//   - Old SQL macro: 0.54s latency (2x slower)
 //
 // ============================================================================
 
@@ -393,7 +387,7 @@ static unique_ptr<FunctionData> TsBacktestNativeBind(
     // Input table must have exactly 3 columns: group, date, value
     if (input.input_table_types.size() != 3) {
         throw InvalidInputException(
-            "ts_backtest_native requires input with exactly 3 columns: group_col, date_col, value_col. Got %zu columns.",
+            "_ts_backtest_native requires input with exactly 3 columns: group_col, date_col, value_col. Got %zu columns.",
             input.input_table_types.size());
     }
 
@@ -927,7 +921,10 @@ static OperatorFinalizeResultType TsBacktestNativeFinalize(
 void RegisterTsBacktestNativeFunction(ExtensionLoader &loader) {
     // Table-in-out function: (TABLE, horizon, folds, frequency, params, metric)
     // Input table must have 3 columns: group_col, date_col, value_col
-    TableFunction func("ts_backtest_native",
+    //
+    // This is an internal function (underscore prefix) used by ts_backtest_auto_by macro.
+    // Direct use is discouraged - use ts_backtest_auto_by instead.
+    TableFunction func("_ts_backtest_native",
         {LogicalType::TABLE,
          LogicalType::BIGINT,   // horizon
          LogicalType::BIGINT,   // folds
@@ -944,9 +941,9 @@ void RegisterTsBacktestNativeFunction(ExtensionLoader &loader) {
 
     loader.RegisterFunction(func);
 
-    // Also register with anofox_fcst prefix
+    // Also register with anofox_fcst prefix (internal)
     TableFunction anofox_func = func;
-    anofox_func.name = "anofox_fcst_ts_backtest_native";
+    anofox_func.name = "_anofox_fcst_ts_backtest_native";
     loader.RegisterFunction(anofox_func);
 }
 

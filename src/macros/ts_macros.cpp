@@ -1488,261 +1488,41 @@ FROM fold_end_times
 
     // ts_backtest_auto_by: One-liner backtest combining fold generation, splitting, forecasting, and evaluation
     // C++ API: ts_backtest_auto_by(source, group_col, date_col, target_col, horizon, folds, frequency, params, features, metric)
+    //
+    // This macro is a thin wrapper around the native streaming implementation (_ts_backtest_native)
+    // which uses 60x less memory than the previous SQL macro approach.
+    //
     // params accepts both MAP{'key': 'value'} and STRUCT {'key': value} syntax (GH#95)
     // STRUCT allows mixed types: {'method': 'Naive', 'gap': 2, 'clip_horizon': true}
     // params supports:
     //   method (VARCHAR, default 'AutoETS') - model to use for forecasting
     //     Univariate models: 'AutoETS', 'ARIMA', 'AutoARIMA', 'Naive', 'SeasonalNaive', 'Theta', 'SES', 'Holt', 'DampedHolt'
-    //     Regression models (requires anofox-statistics): 'linear_regression_ols', 'ols', 'ridge', 'lasso', 'random_forest', 'rf', 'xgboost'
     //   gap (BIGINT) - periods between train end and test start (default 0)
     //   embargo (BIGINT) - periods to exclude from training after previous fold's test (default 0)
     //   window_type ('expanding', 'fixed', 'sliding') - training window strategy (default 'expanding')
     //   initial_train_size (BIGINT) - initial training periods before first fold
     //   skip_length (BIGINT) - periods between folds (default: horizon). Use 1 for dense overlapping folds.
     //   clip_horizon (BOOLEAN) - if true, allow partial test windows clipped to available data (default: false)
-    // features: VARCHAR[] of external regressor column names (default NULL, used with regression models)
+    // features: Reserved for future use (currently ignored)
     // metric: VARCHAR for fold-level metric calculation (default 'rmse')
     //   Point metrics: 'rmse', 'mae', 'mape', 'mse', 'smape', 'bias', 'r2'
     //   Interval metrics: 'coverage' (uses lower_90/upper_90 prediction intervals)
-    // Model dispatch logic:
-    //   - Univariate models: uses internal _ts_forecast function
-    //   - Regression models: prepares data via ts_prepare_regression_input (target=NULL for test)
-    // Returns: fold_id, group_col, date, forecast, actual, error, abs_error, model_name, fold_metric_score
+    // Returns: fold_id, group_col, date, forecast, actual, error, abs_error, lower_90, upper_90, model_name, fold_metric_score
     {"ts_backtest_auto_by", {"source", "group_col", "date_col", "target_col", "horizon", "folds", "frequency", nullptr}, {{"params", "MAP{}"}, {"features", "NULL"}, {"metric", "'rmse'"}, {nullptr, nullptr}},
 R"(
-WITH _params AS (
-    SELECT
-        COALESCE(json_extract_string(to_json(params), '$.method'), 'AutoETS') AS _method,
-        COALESCE(json_extract_string(to_json(params), '$.window_type'), 'expanding') AS _window_type,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.min_train_size') AS BIGINT), 1) AS _min_train_size,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.gap') AS BIGINT), 0) AS _gap,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.embargo') AS BIGINT), 0) AS _embargo,
-        TRY_CAST(json_extract_string(to_json(params), '$.initial_train_size') AS BIGINT) AS _init_train_size,
-        TRY_CAST(json_extract_string(to_json(params), '$.skip_length') AS BIGINT) AS _skip_length_param,
-        COALESCE(LOWER(json_extract_string(to_json(params), '$.clip_horizon')) IN ('true', '1', 'yes'), FALSE) AS _clip_horizon,
-        -- Model type detection: regression models from anofox-statistics
-        CASE
-            WHEN LOWER(COALESCE(json_extract_string(to_json(params), '$.method'), 'AutoETS')) IN (
-                'linear_regression_ols', 'ols', 'linear_regression',
-                'ridge', 'ridge_regression',
-                'lasso', 'lasso_regression',
-                'random_forest', 'rf', 'random_forest_regression',
-                'gradient_boosting', 'gbm', 'xgboost'
-            ) THEN TRUE
-            ELSE FALSE
-        END AS _is_regression_model
-),
-_freq AS (
-    SELECT CASE
-        WHEN frequency::VARCHAR ~ '^[0-9]+$' THEN (frequency::VARCHAR || ' day')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'w$', ' week'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'mo$', ' month'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency::VARCHAR, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'y$', ' year'))::INTERVAL
-        ELSE frequency::INTERVAL
-    END AS _interval
-),
--- Source data
-src AS (
-    SELECT
-        group_col AS _grp,
-        date_trunc('second', date_col::TIMESTAMP) AS _dt,
-        target_col::DOUBLE AS _target
-    FROM query_table(source::VARCHAR)
-),
--- Date bounds for fold generation
-date_bounds AS (
-    SELECT
-        MIN(_dt) AS _min_dt,
-        MAX(_dt) AS _max_dt,
-        COUNT(DISTINCT _dt) AS _n_dates
-    FROM src
-),
--- Compute fold parameters
-_computed AS (
-    SELECT
-        _min_dt,
-        _max_dt,
-        _n_dates,
-        COALESCE((SELECT _init_train_size FROM _params), GREATEST((_n_dates / 2)::BIGINT, 1)) AS _init_size,
-        COALESCE((SELECT _skip_length_param FROM _params), horizon::BIGINT) AS _skip_length,
-        (SELECT _clip_horizon FROM _params) AS _clip_horizon,
-        (SELECT _interval FROM _freq) AS _interval
-    FROM date_bounds
-),
--- Generate fold end times
-fold_end_times AS (
-    SELECT
-        _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) AS train_end
-    FROM _computed, generate_series(1, folds::BIGINT)
-    WHERE
-        -- When clip_horizon=true: only require at least 1 period of test data
-        -- When clip_horizon=false (default): require full horizon of test data
-        CASE WHEN _clip_horizon
-            THEN _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) + _interval <= _max_dt
-            ELSE _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) + (horizon::BIGINT * _interval) <= _max_dt
-        END
-),
-training_end_times AS (
-    SELECT LIST(train_end ORDER BY train_end) AS _times FROM fold_end_times
-),
--- Generate fold boundaries with gap and embargo
-folds_raw AS (
-    SELECT
-        ROW_NUMBER() OVER (ORDER BY _train_end) AS fold_id,
-        date_trunc('second', _train_end::TIMESTAMP) AS train_end,
-        date_trunc('second', _train_end::TIMESTAMP) + (((SELECT _gap FROM _params) + 1) * (SELECT _interval FROM _freq)) AS test_start,
-        -- Clip test_end to max available date when clip_horizon=true
-        CASE WHEN (SELECT _clip_horizon FROM _computed)
-            THEN LEAST(
-                date_trunc('second', _train_end::TIMESTAMP) + (((SELECT _gap FROM _params) + horizon) * (SELECT _interval FROM _freq)),
-                (SELECT _max_dt FROM date_bounds)
-            )
-            ELSE date_trunc('second', _train_end::TIMESTAMP) + (((SELECT _gap FROM _params) + horizon) * (SELECT _interval FROM _freq))
-        END AS test_end
-    FROM (SELECT UNNEST((SELECT _times FROM training_end_times)) AS _train_end)
-),
-folds_with_embargo AS (
-    SELECT
-        fold_id,
-        train_end,
-        test_start,
-        test_end,
-        CASE
-            WHEN (SELECT _embargo FROM _params) > 0 THEN
-                COALESCE(
-                    LAG(test_end) OVER (ORDER BY fold_id) + ((SELECT _embargo FROM _params) * (SELECT _interval FROM _freq)),
-                    (SELECT _min_dt FROM date_bounds)
-                )
-            ELSE (SELECT _min_dt FROM date_bounds)
-        END AS embargo_cutoff
-    FROM folds_raw
-),
-fold_bounds AS (
-    SELECT
-        f.fold_id,
-        GREATEST(
-            CASE
-                WHEN (SELECT _window_type FROM _params) = 'expanding' THEN (SELECT _min_dt FROM date_bounds)
-                WHEN (SELECT _window_type FROM _params) = 'fixed' THEN f.train_end - ((SELECT _min_train_size FROM _params) * (SELECT _interval FROM _freq))
-                WHEN (SELECT _window_type FROM _params) = 'sliding' THEN f.train_end - ((SELECT _min_train_size FROM _params) * (SELECT _interval FROM _freq))
-                ELSE (SELECT _min_dt FROM date_bounds)
-            END,
-            f.embargo_cutoff
-        ) AS train_start,
-        f.train_end,
-        f.test_start,
-        f.test_end
-    FROM folds_with_embargo f
-),
--- Create train/test splits
-cv_splits AS (
-    SELECT
-        s._grp AS _grp,
-        s._dt AS _dt,
-        s._target AS _target,
-        fb.fold_id::BIGINT AS fold_id,
-        CASE
-            WHEN s._dt >= fb.train_start AND s._dt <= fb.train_end THEN 'train'
-            WHEN s._dt >= fb.test_start AND s._dt <= fb.test_end THEN 'test'
-            ELSE NULL
-        END AS split
-    FROM src s
-    CROSS JOIN fold_bounds fb
-    WHERE (s._dt >= fb.train_start AND s._dt <= fb.train_end)
-       OR (s._dt >= fb.test_start AND s._dt <= fb.test_end)
-),
--- Generate forecasts for training data (using ts_cv_forecast_by logic)
-cv_train AS (
-    SELECT fold_id, _grp, _dt, _target FROM cv_splits WHERE split = 'train'
-),
-_ets_spec_bt AS (
-    SELECT COALESCE(json_extract_string(to_json(params), '$.model'), '') AS spec
-),
-forecast_data AS (
-    SELECT
-        fold_id,
-        _grp AS id,
-        date_trunc('second', MAX(_dt)::TIMESTAMP) AS last_date,
-        _ts_forecast(
-            LIST(_target ORDER BY _dt),
-            horizon,
-            CASE WHEN (SELECT spec FROM _ets_spec_bt) != ''
-                 THEN (SELECT _method FROM _params) || ':' || (SELECT spec FROM _ets_spec_bt)
-                 ELSE (SELECT _method FROM _params)
-            END
-        ) AS fcst
-    FROM cv_train
-    GROUP BY fold_id, _grp
-),
-forecasts AS (
-    SELECT
-        fold_id,
-        id,
-        UNNEST(generate_series(1, len((fcst).point)))::INTEGER AS forecast_step,
-        UNNEST(generate_series(last_date + (SELECT _interval FROM _freq), last_date + (len((fcst).point)::INTEGER * EXTRACT(EPOCH FROM (SELECT _interval FROM _freq)) || ' seconds')::INTERVAL, (SELECT _interval FROM _freq)))::TIMESTAMP AS _forecast_date,
-        UNNEST((fcst).point) AS point_forecast,
-        UNNEST((fcst).lower) AS lower_90,
-        UNNEST((fcst).upper) AS upper_90,
-        (fcst).model AS model_name
-    FROM forecast_data
-),
--- Join forecasts with test actuals
-cv_test AS (
-    SELECT fold_id, _grp, _dt, _target FROM cv_splits WHERE split = 'test'
-),
--- Raw backtest results (without metrics)
-backtest_raw AS (
-    SELECT
-        f.fold_id,
-        f.id AS group_col,
-        f._forecast_date AS date,
-        f.point_forecast AS forecast,
-        t._target AS actual,
-        f.point_forecast - t._target AS error,
-        ABS(f.point_forecast - t._target) AS abs_error,
-        f.lower_90,
-        f.upper_90,
-        f.model_name
-    FROM forecasts f
-    JOIN cv_test t ON f.fold_id = t.fold_id AND f.id = t._grp AND f._forecast_date = t._dt
-),
--- Compute fold metrics using scalar functions (single implementation, no duplication)
-fold_metrics AS (
-    SELECT
-        fold_id,
-        CASE metric
-            WHEN 'rmse' THEN ts_rmse(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))
-            WHEN 'mae' THEN ts_mae(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))
-            WHEN 'mape' THEN ts_mape(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))
-            WHEN 'mse' THEN ts_mse(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))
-            WHEN 'smape' THEN ts_smape(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))
-            WHEN 'bias' THEN ts_bias(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))
-            WHEN 'r2' THEN ts_r2(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))
-            WHEN 'coverage' THEN ts_coverage(LIST(actual ORDER BY date), LIST(lower_90 ORDER BY date), LIST(upper_90 ORDER BY date))
-            ELSE ts_rmse(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))
-        END AS fold_metric_score
-    FROM backtest_raw
-    GROUP BY fold_id
+SELECT * FROM _ts_backtest_native(
+    (SELECT
+        group_col AS group_col,
+        date_trunc('second', date_col::TIMESTAMP) AS date,
+        target_col::DOUBLE AS y
+    FROM query_table(source::VARCHAR)),
+    horizon,
+    folds,
+    frequency,
+    params,
+    metric
 )
-SELECT
-    b.fold_id,
-    b.group_col,
-    b.date,
-    b.forecast,
-    b.actual,
-    b.error,
-    b.abs_error,
-    b.lower_90,
-    b.upper_90,
-    b.model_name,
-    m.fold_metric_score
-FROM backtest_raw b
-JOIN fold_metrics m ON b.fold_id = m.fold_id
-ORDER BY b.fold_id, b.group_col, b.date
+ORDER BY 1, 2, 3
 )"},
 
     // ts_prepare_regression_input_by: Prepare data for regression models in CV backtest
