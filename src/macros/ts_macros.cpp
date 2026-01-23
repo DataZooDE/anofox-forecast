@@ -302,7 +302,7 @@ ORDER BY group_col, date_col
     {"ts_fill_gaps_by", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_fill_gaps_native(
-    (SELECT columns(group_col), columns(date_col), columns(value_col) FROM query_table(source::VARCHAR)),
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
     frequency
 )
 )"},
@@ -320,7 +320,7 @@ SELECT * FROM _ts_fill_gaps_native(
     {"ts_fill_forward_by", {"source", "group_col", "date_col", "value_col", "target_date", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_fill_forward_native(
-    (SELECT columns(group_col), columns(date_col), columns(value_col) FROM query_table(source::VARCHAR)),
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
     target_date,
     frequency
 )
@@ -511,7 +511,7 @@ FROM forecast_result
     {"ts_forecast_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", nullptr}, {{"params", "MAP{}"}, {"frequency", "'1d'"}, {nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_forecast_native(
-    (SELECT columns(group_col), columns(date_col), columns(target_col) FROM query_table(source::VARCHAR)),
+    (SELECT group_col, date_col, target_col FROM query_table(source::VARCHAR)),
     horizon,
     frequency,
     method,
@@ -527,7 +527,7 @@ SELECT * FROM _ts_forecast_native(
     {"ts_cv_forecast_by", {"cv_splits", "group_col", "date_col", "target_col", "method", "horizon", nullptr}, {{"params", "MAP{}"}, {"frequency", "'1d'"}, {nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_cv_forecast_native(
-    (SELECT fold_id, columns(group_col), columns(date_col), columns(target_col) FROM query_table(cv_splits::VARCHAR)),
+    (SELECT fold_id, group_col, date_col, target_col FROM query_table(cv_splits::VARCHAR)),
     horizon,
     frequency,
     method,
@@ -970,7 +970,7 @@ ORDER BY fold_id
     {"ts_cv_split_by", {"source", "group_col", "date_col", "target_col", "training_end_times", "horizon", "frequency", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_cv_split_native(
-    (SELECT columns(group_col), columns(date_col), columns(target_col) FROM query_table(source::VARCHAR)),
+    (SELECT group_col, date_col, target_col FROM query_table(source::VARCHAR)),
     horizon,
     frequency,
     training_end_times,

@@ -171,7 +171,7 @@ Based on these findings, the following functions should be audited for similar i
 | Function | Uses LIST() | Uses CROSS JOIN | Peak Memory | Status |
 |----------|-------------|-----------------|-------------|--------|
 | ts_forecast_by | ~~Yes~~ | No | ~~358 MB~~ → 4 MB | **Fixed - Native streaming** |
-| ts_cv_forecast_by | Yes | Yes | 212 MB | **High priority** |
+| ts_cv_forecast_by | ~~Yes~~ | ~~Yes~~ | ~~212 MB~~ → 116 MB | **Fixed - Native streaming** |
 | ts_backtest_auto_by | ~~Yes~~ | ~~Yes~~ | ~~1951 MB~~ → 63 MB | **Fixed in #114** |
 | ts_cv_split_by | ~~Yes~~ | ~~Yes~~ | ~~36 MB~~ → 19 MB | **Fixed - Native streaming** |
 | ts_fill_gaps_by | Yes (via macro) | No | Low | See #113 |
