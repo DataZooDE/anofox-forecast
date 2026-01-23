@@ -112,13 +112,25 @@ static unique_ptr<FunctionData> TsDetectChangepointsNativeBind(
 }
 
 // ============================================================================
+// Global State - single-threaded to avoid BatchedDataCollection::Merge errors
+// ============================================================================
+
+struct TsDetectChangepointsNativeGlobalState : public GlobalTableFunctionState {
+    idx_t max_threads = 1;
+
+    idx_t MaxThreads() const override {
+        return max_threads;
+    }
+};
+
+// ============================================================================
 // Init Functions
 // ============================================================================
 
 static unique_ptr<GlobalTableFunctionState> TsDetectChangepointsNativeInitGlobal(
     ClientContext &context,
     TableFunctionInitInput &input) {
-    return make_uniq<GlobalTableFunctionState>();
+    return make_uniq<TsDetectChangepointsNativeGlobalState>();
 }
 
 static unique_ptr<LocalTableFunctionState> TsDetectChangepointsNativeInitLocal(
@@ -189,8 +201,8 @@ static OperatorFinalizeResultType TsDetectChangepointsNativeFinalize(
             TsDetectChangepointsNativeLocalState::ChangepointGroup cp_grp;
             cp_grp.group_value = grp.group_value;
 
-            // Need at least 2 points for changepoint detection
-            if (grp.values.size() < 2) {
+            // Need at least 3 points for BOCPD changepoint detection
+            if (grp.values.size() < 3) {
                 // Return empty results for too-small series
                 cp_grp.n_changepoints = 0;
                 local_state.changepoint_results.push_back(std::move(cp_grp));
