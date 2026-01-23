@@ -2757,7 +2757,10 @@ pub unsafe extern "C" fn anofox_ts_mstl_decomposition(
             // Copy trend (may be None if decomposition was skipped)
             if let Some(ref trend) = decomp.trend {
                 (*out_result).n_observations = trend.len();
-                (*out_result).trend = vec_to_c_array(trend);
+                match alloc_or_error(trend, out_error, "Failed to allocate trend") {
+                    Ok(ptr) => (*out_result).trend = ptr,
+                    Err(()) => return false,
+                }
             } else {
                 (*out_result).n_observations = length;
                 (*out_result).trend = ptr::null_mut();
@@ -2765,7 +2768,14 @@ pub unsafe extern "C" fn anofox_ts_mstl_decomposition(
 
             // Copy remainder (may be None if decomposition was skipped)
             if let Some(ref remainder) = decomp.remainder {
-                (*out_result).remainder = vec_to_c_array(remainder);
+                match alloc_or_error(remainder, out_error, "Failed to allocate remainder") {
+                    Ok(ptr) => (*out_result).remainder = ptr,
+                    Err(()) => {
+                        free_ptr((*out_result).trend as *mut core::ffi::c_void);
+                        (*out_result).trend = ptr::null_mut();
+                        return false;
+                    }
+                }
             } else {
                 (*out_result).remainder = ptr::null_mut();
             }
@@ -2774,6 +2784,19 @@ pub unsafe extern "C" fn anofox_ts_mstl_decomposition(
             if !decomp.periods.is_empty() {
                 let periods_ptr =
                     malloc(decomp.periods.len() * std::mem::size_of::<c_int>()) as *mut c_int;
+                if periods_ptr.is_null() {
+                    if !out_error.is_null() {
+                        (*out_error).set_error(
+                            ErrorCode::AllocationError,
+                            "Failed to allocate seasonal periods",
+                        );
+                    }
+                    free_ptr((*out_result).trend as *mut core::ffi::c_void);
+                    free_ptr((*out_result).remainder as *mut core::ffi::c_void);
+                    (*out_result).trend = ptr::null_mut();
+                    (*out_result).remainder = ptr::null_mut();
+                    return false;
+                }
                 for (i, &p) in decomp.periods.iter().enumerate() {
                     *periods_ptr.add(i) = p;
                 }
@@ -2786,8 +2809,39 @@ pub unsafe extern "C" fn anofox_ts_mstl_decomposition(
             if !decomp.seasonal.is_empty() {
                 let comps_ptr = malloc(decomp.seasonal.len() * std::mem::size_of::<*mut c_double>())
                     as *mut *mut c_double;
+                if comps_ptr.is_null() {
+                    if !out_error.is_null() {
+                        (*out_error).set_error(
+                            ErrorCode::AllocationError,
+                            "Failed to allocate seasonal components array",
+                        );
+                    }
+                    free_ptr((*out_result).trend as *mut core::ffi::c_void);
+                    free_ptr((*out_result).remainder as *mut core::ffi::c_void);
+                    free_ptr((*out_result).seasonal_periods as *mut core::ffi::c_void);
+                    (*out_result).trend = ptr::null_mut();
+                    (*out_result).remainder = ptr::null_mut();
+                    (*out_result).seasonal_periods = ptr::null_mut();
+                    return false;
+                }
                 for (i, comp) in decomp.seasonal.iter().enumerate() {
-                    *comps_ptr.add(i) = vec_to_c_array(comp);
+                    match alloc_or_error(comp, out_error, "Failed to allocate seasonal component") {
+                        Ok(ptr) => *comps_ptr.add(i) = ptr,
+                        Err(()) => {
+                            // Clean up already allocated seasonal components
+                            for j in 0..i {
+                                free_ptr(*comps_ptr.add(j) as *mut core::ffi::c_void);
+                            }
+                            free_ptr(comps_ptr as *mut core::ffi::c_void);
+                            free_ptr((*out_result).trend as *mut core::ffi::c_void);
+                            free_ptr((*out_result).remainder as *mut core::ffi::c_void);
+                            free_ptr((*out_result).seasonal_periods as *mut core::ffi::c_void);
+                            (*out_result).trend = ptr::null_mut();
+                            (*out_result).remainder = ptr::null_mut();
+                            (*out_result).seasonal_periods = ptr::null_mut();
+                            return false;
+                        }
+                    }
                 }
                 (*out_result).seasonal_components = comps_ptr;
             } else {
@@ -3662,9 +3716,14 @@ pub unsafe extern "C" fn anofox_ts_fill_nulls_const(
 
     let series = build_series(values, validity, length);
     let filled = anofox_fcst_core::fill_nulls_const(&series, fill_value);
-    *out_values = vec_to_c_array(&filled);
 
-    true
+    match alloc_or_error(&filled, out_error, "Failed to allocate filled values") {
+        Ok(ptr) => {
+            *out_values = ptr;
+            true
+        }
+        Err(()) => false,
+    }
 }
 
 /// Fill NULL values with the series mean.
@@ -3692,9 +3751,14 @@ pub unsafe extern "C" fn anofox_ts_fill_nulls_mean(
 
     let series = build_series(values, validity, length);
     let filled = anofox_fcst_core::fill_nulls_mean(&series);
-    *out_values = vec_to_c_array(&filled);
 
-    true
+    match alloc_or_error(&filled, out_error, "Failed to allocate filled values") {
+        Ok(ptr) => {
+            *out_values = ptr;
+            true
+        }
+        Err(()) => false,
+    }
 }
 
 // ============================================================================
@@ -3733,8 +3797,13 @@ pub unsafe extern "C" fn anofox_ts_diff(
     match result {
         Ok(Ok(diffed)) => {
             *out_length = diffed.len();
-            *out_values = vec_to_c_array(&diffed);
-            true
+            match alloc_or_error(&diffed, out_error, "Failed to allocate diff result") {
+                Ok(ptr) => {
+                    *out_values = ptr;
+                    true
+                }
+                Err(()) => false,
+            }
         }
         Ok(Err(e)) => {
             if !out_error.is_null() {
@@ -4145,9 +4214,14 @@ pub unsafe extern "C" fn anofox_ts_fill_nulls_interpolate(
 
     let series = build_series(values, validity, length);
     let filled = anofox_fcst_core::fill_nulls_interpolate(&series);
-    *out_values = vec_to_c_array(&filled);
 
-    true
+    match alloc_or_error(&filled, out_error, "Failed to allocate interpolated values") {
+        Ok(ptr) => {
+            *out_values = ptr;
+            true
+        }
+        Err(()) => false,
+    }
 }
 
 // ============================================================================
@@ -4235,9 +4309,26 @@ pub unsafe extern "C" fn anofox_ts_conformal_intervals(
 
     match result {
         Ok((lower, upper)) => {
-            *out_lower = vec_to_c_double_array(&lower);
-            *out_upper = vec_to_c_double_array(&upper);
-            true
+            // Allocate lower bounds with null check
+            let lower_ptr =
+                match alloc_or_error(&lower, out_error, "Failed to allocate lower bounds") {
+                    Ok(ptr) => ptr,
+                    Err(()) => return false,
+                };
+
+            // Allocate upper bounds with null check
+            match alloc_or_error(&upper, out_error, "Failed to allocate upper bounds") {
+                Ok(upper_ptr) => {
+                    *out_lower = lower_ptr;
+                    *out_upper = upper_ptr;
+                    true
+                }
+                Err(()) => {
+                    // Clean up already allocated lower bounds
+                    free_ptr(lower_ptr as *mut core::ffi::c_void);
+                    false
+                }
+            }
         }
         Err(_) => {
             set_error(
