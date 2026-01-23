@@ -168,15 +168,21 @@ Before releasing a new `_by` function, verify:
 
 Based on these findings, the following functions should be audited for similar issues (see #115):
 
-| Function | Uses LIST() | Uses CROSS JOIN | FFI Allocations | Status |
-|----------|-------------|-----------------|-----------------|--------|
-| ts_forecast_by | ~~Yes~~ | No | Yes | **Fixed - Native streaming** |
-| ts_decompose_by | Yes | No | Yes | To audit |
-| ts_detect_anomalies_by | Yes | No | Yes | To audit |
-| ts_fill_gaps_by | Yes (via macro) | No | Yes (native) | See #113 |
-| ts_backtest_auto_by | ~~Yes~~ | ~~Yes~~ | Yes | **Fixed in #114** |
-| ts_cv_split_by | ~~Yes~~ | ~~Yes~~ | No | **Fixed - Native streaming** |
-| ts_cv_forecast_by | Yes | Yes | Yes | High priority |
+| Function | Uses LIST() | Uses CROSS JOIN | Peak Memory | Status |
+|----------|-------------|-----------------|-------------|--------|
+| ts_forecast_by | ~~Yes~~ | No | ~~358 MB~~ → 4 MB | **Fixed - Native streaming** |
+| ts_cv_forecast_by | Yes | Yes | 212 MB | **High priority** |
+| ts_backtest_auto_by | ~~Yes~~ | ~~Yes~~ | ~~1951 MB~~ → 63 MB | **Fixed in #114** |
+| ts_cv_split_by | ~~Yes~~ | ~~Yes~~ | ~~36 MB~~ → 19 MB | **Fixed - Native streaming** |
+| ts_fill_gaps_by | Yes (via macro) | No | Low | See #113 |
+| ts_decompose_by | Yes | No | ~35 MB | Low priority |
+| ts_detect_anomalies_by | Yes | No | ~35 MB | Low priority |
+| ts_stats_by | Yes | No | 32 MB | No action needed |
+| ts_features_by | Yes | No | 34 MB | No action needed |
+| ts_mstl_decomposition_by | Yes | No | 35 MB | No action needed |
+| ts_detect_changepoints_by | Yes | No | 33 MB | No action needed |
+| ts_detect_periods_by | Yes | No | 32 MB | No action needed |
+| ts_classify_seasonality_by | Yes | No | 36 MB | No action needed |
 
 ## Mitigations Implemented for #105
 
