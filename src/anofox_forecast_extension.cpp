@@ -147,6 +147,7 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsCvSplitNativeFunction(loader);
     RegisterTsCvForecastNativeFunction(loader);
     RegisterTsMstlDecompositionNativeFunction(loader);
+    RegisterTsFeaturesNativeFunction(loader);
 
     // Initialize telemetry (respects DATAZOO_DISABLE_TELEMETRY env var)
     anofox_telemetry_init(true, nullptr);
