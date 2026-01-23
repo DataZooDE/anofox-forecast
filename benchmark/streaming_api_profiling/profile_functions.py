@@ -274,6 +274,10 @@ def run_profile_query(
     formatted_query = query.format(table=table)
 
     # Build the complete SQL script
+    # NOTE: We wrap the query in SELECT COUNT(*) FROM (...) to work around a DuckDB bug
+    # where table_in_out functions fail with BatchedDataCollection::Merge errors when
+    # returning all rows with profiling enabled. COUNT(*) still executes the full query
+    # so memory/CPU measurements are accurate.
     sql_script = f"""
 -- Load extension
 LOAD '{extension_path}';
@@ -282,8 +286,8 @@ LOAD '{extension_path}';
 PRAGMA enable_profiling = 'json';
 PRAGMA profiling_output = '{profile_output}';
 
--- Run the query (results go to /dev/null, we only care about profile)
-{formatted_query};
+-- Run the query wrapped in COUNT(*) to avoid BatchedDataCollection bug with profiling
+SELECT COUNT(*) FROM ({formatted_query}) _profiled_query;
 
 -- Disable profiling
 PRAGMA disable_profiling;
@@ -297,8 +301,11 @@ FROM '{profile_output}';
 """
 
     try:
+        # NOTE: Using -csv alone (not -csv -noheader) to work around DuckDB bug
+        # where combining -csv -noheader with profiling causes BatchedDataCollection
+        # errors for table_in_out functions. We parse the output to skip headers.
         result = subprocess.run(
-            [duckdb_path, db_path, "-csv", "-noheader"],
+            [duckdb_path, db_path, "-csv"],
             input=sql_script,
             capture_output=True,
             text=True,
@@ -320,9 +327,9 @@ FROM '{profile_output}';
                 query=formatted_query
             )
 
-        # Parse output (CSV format: latency,memory_bytes,temp_bytes)
+        # Parse output (CSV format with header: latency,memory_bytes,temp_bytes)
         lines = result.stdout.strip().split('\n')
-        if not lines or not lines[-1]:
+        if len(lines) < 2:  # Need at least header + data
             return ProfileResult(
                 function_name=function_name,
                 dataset=table,
@@ -337,7 +344,7 @@ FROM '{profile_output}';
                 query=formatted_query
             )
 
-        # Get the last line (the metrics)
+        # Get the last line (the metrics), skip header
         parts = lines[-1].split(',')
         latency_ms = float(parts[0]) if len(parts) > 0 else 0
         memory_bytes = float(parts[1]) if len(parts) > 1 else 0
@@ -346,7 +353,7 @@ FROM '{profile_output}';
         memory_mb = memory_bytes / (1024 * 1024)
         temp_mb = temp_bytes / (1024 * 1024)
 
-        # Get row count for the table
+        # Get row count for the table (no profiling, can use -noheader)
         row_count_result = subprocess.run(
             [duckdb_path, db_path, "-csv", "-noheader"],
             input=f"LOAD '{extension_path}'; SELECT COUNT(*), COUNT(DISTINCT series_id) FROM {table};",
@@ -354,8 +361,8 @@ FROM '{profile_output}';
             text=True
         )
         row_parts = row_count_result.stdout.strip().split(',')
-        rows = int(row_parts[0]) if row_parts else 0
-        groups = int(row_parts[1]) if len(row_parts) > 1 else 0
+        rows = int(row_parts[0]) if row_parts and row_parts[0].isdigit() else 0
+        groups = int(row_parts[1]) if len(row_parts) > 1 and row_parts[1].isdigit() else 0
 
         return ProfileResult(
             function_name=function_name,
