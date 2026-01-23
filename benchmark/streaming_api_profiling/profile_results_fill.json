@@ -1,0 +1,58 @@
+{
+  "timestamp": "2026-01-23T12:44:04.665346",
+  "dataset": "profile_test_data",
+  "results": [
+    {
+      "function_name": "ts_fill_gaps_by",
+      "dataset": "profile_test_data",
+      "rows": 1000000,
+      "groups": 10000,
+      "latency_ms": 0.151811419,
+      "memory_peak_mb": 181.39,
+      "temp_dir_mb": 0.0,
+      "total_memory_mb": 181.39,
+      "status": "success",
+      "error": null,
+      "query": "\n            SELECT * FROM ts_fill_gaps_by('profile_test_data', series_id, date, value, '1d')\n        "
+    },
+    {
+      "function_name": "ts_fill_gaps_native",
+      "dataset": "profile_test_data",
+      "rows": 1000000,
+      "groups": 10000,
+      "latency_ms": 0.20588776,
+      "memory_peak_mb": 10.86,
+      "temp_dir_mb": 0.0,
+      "total_memory_mb": 10.86,
+      "status": "success",
+      "error": null,
+      "query": "\n            SELECT * FROM ts_fill_gaps_native(\n                (SELECT series_id, date, value FROM profile_test_data),\n                '1d'\n            )\n        "
+    },
+    {
+      "function_name": "ts_fill_forward_by",
+      "dataset": "profile_test_data",
+      "rows": 1000000,
+      "groups": 10000,
+      "latency_ms": 0.081338182,
+      "memory_peak_mb": 126.62,
+      "temp_dir_mb": 0.0,
+      "total_memory_mb": 126.62,
+      "status": "success",
+      "error": null,
+      "query": "\n            SELECT * FROM ts_fill_forward_by(\n                'profile_test_data', series_id, date, value,\n                '2023-04-30'::DATE, '1d'\n            )\n        "
+    },
+    {
+      "function_name": "ts_fill_forward_native",
+      "dataset": "profile_test_data",
+      "rows": 1000000,
+      "groups": 10000,
+      "latency_ms": 0.207723781,
+      "memory_peak_mb": 10.86,
+      "temp_dir_mb": 0.0,
+      "total_memory_mb": 10.86,
+      "status": "success",
+      "error": null,
+      "query": "\n            SELECT * FROM ts_fill_forward_native(\n                (SELECT series_id, date, value FROM profile_test_data),\n                '2023-04-30'::DATE,\n                '1d'\n            )\n        "
+    }
+  ]
+}
