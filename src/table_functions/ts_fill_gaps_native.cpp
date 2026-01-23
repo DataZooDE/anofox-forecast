@@ -426,9 +426,10 @@ static OperatorFinalizeResultType TsFillGapsNativeFinalize(
 // ============================================================================
 
 void RegisterTsFillGapsNativeFunction(ExtensionLoader &loader) {
-    // Table-in-out function: (TABLE, frequency)
+    // Internal table-in-out function: (TABLE, frequency)
     // Input table must have 3 columns: group_col, date_col, value_col
-    TableFunction func("ts_fill_gaps_native",
+    // Note: This is an internal function (prefixed with _) called by ts_fill_gaps_by macro
+    TableFunction func("_ts_fill_gaps_native",
         {LogicalType::TABLE, LogicalType(LogicalTypeId::VARCHAR)},
         nullptr,  // No execute function - use in_out_function
         TsFillGapsNativeBind,
@@ -439,11 +440,6 @@ void RegisterTsFillGapsNativeFunction(ExtensionLoader &loader) {
     func.in_out_function_final = TsFillGapsNativeFinalize;
 
     loader.RegisterFunction(func);
-
-    // Also register with anofox_fcst prefix
-    TableFunction anofox_func = func;
-    anofox_func.name = "anofox_fcst_ts_fill_gaps_native";
-    loader.RegisterFunction(anofox_func);
 }
 
 } // namespace duckdb

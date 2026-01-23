@@ -100,19 +100,19 @@ SELECT COUNT(*) FROM ts_fill_forward_by('freq_test', id, date, val, '2023-01-07'
 
 # Polars-style works
 query I
-SELECT COUNT(*) FROM ts_fill_gaps_operator_by('freq_test', id, date, val, '1d');
+SELECT COUNT(*) FROM ts_fill_gaps_by('freq_test', id, date, val, '1d');
 ----
 5
 
 # DuckDB INTERVAL style works
 query I
-SELECT COUNT(*) FROM ts_fill_gaps_operator_by('freq_test', id, date, val, '1 day');
+SELECT COUNT(*) FROM ts_fill_gaps_by('freq_test', id, date, val, '1 day');
 ----
 5
 
 # Integer frequency works (interpreted as days)
 query I
-SELECT COUNT(*) FROM ts_fill_gaps_operator_by('freq_test', id, date, val, 1);
+SELECT COUNT(*) FROM ts_fill_gaps_by('freq_test', id, date, val, 1);
 ----
 5
 

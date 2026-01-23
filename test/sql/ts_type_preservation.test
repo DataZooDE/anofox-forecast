@@ -122,7 +122,7 @@ TIMESTAMP
 
 # ts_fill_gaps_operator - returns TIMESTAMP (generate_series limitation)
 query T
-SELECT typeof(date_col) FROM ts_fill_gaps_operator_by('date_test', id, date, val, '1d') LIMIT 1;
+SELECT typeof(date_col) FROM ts_fill_gaps_by('date_test', id, date, val, '1d') LIMIT 1;
 ----
 TIMESTAMP
 

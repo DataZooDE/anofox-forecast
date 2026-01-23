@@ -383,9 +383,10 @@ static OperatorFinalizeResultType TsFillForwardNativeFinalize(
 // ============================================================================
 
 void RegisterTsFillForwardNativeFunction(ExtensionLoader &loader) {
-    // Table-in-out function: (TABLE, target_date, frequency)
+    // Internal table-in-out function: (TABLE, target_date, frequency)
     // Input table must have 3 columns: group_col, date_col, value_col
-    TableFunction func("ts_fill_forward_native",
+    // Note: This is an internal function (prefixed with _) called by ts_fill_forward_by macro
+    TableFunction func("_ts_fill_forward_native",
         {LogicalType::TABLE, LogicalType::ANY, LogicalType(LogicalTypeId::VARCHAR)},
         nullptr,
         TsFillForwardNativeBind,
@@ -396,11 +397,6 @@ void RegisterTsFillForwardNativeFunction(ExtensionLoader &loader) {
     func.in_out_function_final = TsFillForwardNativeFinalize;
 
     loader.RegisterFunction(func);
-
-    // Also register with anofox_fcst prefix
-    TableFunction anofox_func = func;
-    anofox_func.name = "anofox_fcst_ts_fill_forward_native";
-    loader.RegisterFunction(anofox_func);
 }
 
 } // namespace duckdb
