@@ -12,6 +12,28 @@
 namespace duckdb {
 
 // ============================================================================
+// ts_backtest_native - Native streaming backtest table function
+//
+// IMPORTANT: This function requires SET threads=1; for correct results with
+// large datasets. The table_in_out pattern partitions input data across threads,
+// and since backtesting requires ALL data to compute global fold boundaries,
+// multi-threading can cause race conditions resulting in missing or incomplete
+// results.
+//
+// Usage:
+//   SET threads=1;  -- Required for correct results
+//   SELECT * FROM ts_backtest_native(
+//       (SELECT id, ds, y FROM my_table),
+//       7,              -- horizon
+//       5,              -- folds
+//       '1d',           -- frequency
+//       MAP{'method': 'Naive'},  -- params
+//       'rmse'          -- metric
+//   );
+//
+// ============================================================================
+
+// ============================================================================
 // Bind Data - captures all parameters
 // ============================================================================
 
@@ -40,6 +62,18 @@ struct TsBacktestNativeBindData : public TableFunctionData {
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
     LogicalType date_logical_type = LogicalType(LogicalTypeId::TIMESTAMP);
     LogicalType group_logical_type = LogicalType(LogicalTypeId::VARCHAR);
+};
+
+// ============================================================================
+// Global State - enforces single-threaded execution
+// ============================================================================
+
+struct TsBacktestNativeGlobalState : public GlobalTableFunctionState {
+    // Force single-threaded execution (note: this doesn't work for table_in_out,
+    // user must SET threads=1)
+    idx_t MaxThreads() const override {
+        return 1;
+    }
 };
 
 // ============================================================================
@@ -87,9 +121,7 @@ struct TsBacktestNativeLocalState : public LocalTableFunctionState {
     // Processing state
     bool folds_computed = false;
     idx_t current_fold = 0;
-    idx_t current_group = 0;
     idx_t output_offset = 0;
-    bool finished = false;
 };
 
 // ============================================================================
@@ -424,7 +456,7 @@ static unique_ptr<FunctionData> TsBacktestNativeBind(
 static unique_ptr<GlobalTableFunctionState> TsBacktestNativeInitGlobal(
     ClientContext &context,
     TableFunctionInitInput &input) {
-    return make_uniq<GlobalTableFunctionState>();
+    return make_uniq<TsBacktestNativeGlobalState>();
 }
 
 static unique_ptr<LocalTableFunctionState> TsBacktestNativeInitLocal(
@@ -744,14 +776,22 @@ static OperatorFinalizeResultType TsBacktestNativeFinalize(
     }
 
     // Process folds one at a time (memory efficient)
-    while (local_state.current_fold < local_state.fold_bounds.size() &&
-           local_state.results.size() < STANDARD_VECTOR_SIZE * 2) {
-        ProcessFold(local_state, bind_data, local_state.current_fold);
-        local_state.current_fold++;
+    // Only process new folds if we've output all previous results
+    if (local_state.output_offset >= local_state.results.size()) {
+        // Clear results buffer and reset offset for next batch
+        local_state.results.clear();
+        local_state.output_offset = 0;
+
+        // Process more folds
+        while (local_state.current_fold < local_state.fold_bounds.size() &&
+               local_state.results.size() < STANDARD_VECTOR_SIZE * 2) {
+            ProcessFold(local_state, bind_data, local_state.current_fold);
+            local_state.current_fold++;
+        }
     }
 
-    // Output results
-    if (local_state.output_offset >= local_state.results.size()) {
+    // Output results - if no results, we're done
+    if (local_state.results.empty()) {
         return OperatorFinalizeResultType::FINISHED;
     }
 
