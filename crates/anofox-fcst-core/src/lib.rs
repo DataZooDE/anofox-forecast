@@ -38,6 +38,7 @@ pub use conformal::{
     conformal_predict_multi,
     conformal_quantile,
     conformalize,
+    difficulty_score,
     interval_width,
     mean_interval_width,
     winkler_score,
@@ -48,6 +49,7 @@ pub use conformal::{
     ConformalMultiResult,
     ConformalResult,
     ConformalStrategy,
+    DifficultyMethod,
     PredictionIntervals,
 };
 pub use decomposition::{mstl_decompose, InsufficientDataMode, MstlDecomposition};

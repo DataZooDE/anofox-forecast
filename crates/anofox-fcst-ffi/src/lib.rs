@@ -4666,6 +4666,156 @@ pub unsafe extern "C" fn anofox_ts_conformal_evaluate(
     }
 }
 
+/// Compute difficulty scores for adaptive conformal prediction.
+///
+/// # Arguments
+/// * `values` - Time series values
+/// * `values_length` - Number of values
+/// * `method` - Method for computing difficulty (Volatility, ChangepointProb, RollingStd)
+/// * `window` - Window size (0 for default)
+/// * `out_result` - Output difficulty score result
+/// * `out_error` - Error output
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_difficulty_score(
+    values: *const c_double,
+    values_length: size_t,
+    method: types::DifficultyMethodFFI,
+    window: size_t,
+    out_result: *mut types::DifficultyScoreResultFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if values.is_null() || out_result.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let values_slice = std::slice::from_raw_parts(values, values_length);
+        let core_method: anofox_fcst_core::DifficultyMethod = method.into();
+        let window_opt = if window > 0 { Some(window) } else { None };
+        anofox_fcst_core::difficulty_score(values_slice, core_method, window_opt)
+    }));
+
+    match result {
+        Ok(Ok(scores)) => {
+            (*out_result).scores = vec_to_c_double_array(&scores);
+            (*out_result).length = scores.len();
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in difficulty_score",
+            );
+            false
+        }
+    }
+}
+
+/// Free a DifficultyScoreResultFFI.
+///
+/// # Safety
+/// Pointer must have been allocated by anofox_ts_difficulty_score.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_free_difficulty_score_result(
+    result: *mut types::DifficultyScoreResultFFI,
+) {
+    if result.is_null() {
+        return;
+    }
+
+    if !(*result).scores.is_null() {
+        let len = (*result).length;
+        if len > 0 {
+            let _ = Vec::from_raw_parts((*result).scores, len, len);
+        }
+    }
+}
+
+/// Convenience function combining conformal_learn and conformal_apply in one step.
+///
+/// # Arguments
+/// * `residuals` - Calibration residuals
+/// * `residuals_validity` - Validity bitmask (NULL means all valid)
+/// * `residuals_length` - Number of residuals
+/// * `forecasts` - Point forecasts to wrap with intervals
+/// * `forecasts_length` - Number of forecasts
+/// * `alphas` - Miscoverage rates
+/// * `n_alphas` - Number of alphas
+/// * `method` - Conformal method (Symmetric, Asymmetric, Adaptive)
+/// * `strategy` - Calibration strategy (Split, CrossVal, JackknifePlus)
+/// * `out_intervals` - Output prediction intervals
+/// * `out_error` - Error output
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformalize(
+    residuals: *const c_double,
+    residuals_validity: *const u64,
+    residuals_length: size_t,
+    forecasts: *const c_double,
+    forecasts_length: size_t,
+    alphas: *const c_double,
+    n_alphas: size_t,
+    method: types::ConformalMethodFFI,
+    strategy: types::ConformalStrategyFFI,
+    out_intervals: *mut types::PredictionIntervalsFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if residuals.is_null() || forecasts.is_null() || alphas.is_null() || out_intervals.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let residual_series = build_series(residuals, residuals_validity, residuals_length);
+        let residual_values: Vec<f64> = residual_series.iter().filter_map(|v| *v).collect();
+        let forecast_slice = std::slice::from_raw_parts(forecasts, forecasts_length);
+        let alpha_slice = std::slice::from_raw_parts(alphas, n_alphas);
+
+        let core_method: anofox_fcst_core::ConformalMethod = method.into();
+        let core_strategy: anofox_fcst_core::ConformalStrategy = strategy.into();
+
+        anofox_fcst_core::conformalize(
+            &residual_values,
+            forecast_slice,
+            alpha_slice,
+            core_method,
+            core_strategy,
+            None, // No difficulty scores in simple version
+            None,
+        )
+    }));
+
+    match result {
+        Ok(Ok(intervals)) => {
+            fill_prediction_intervals(out_intervals, &intervals);
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in conformalize");
+            false
+        }
+    }
+}
+
 /// Helper function to fill a CalibrationProfileFFI from a core CalibrationProfile.
 unsafe fn fill_calibration_profile(
     out: *mut types::CalibrationProfileFFI,

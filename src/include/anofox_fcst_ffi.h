@@ -67,6 +67,24 @@ typedef enum DateType {
 } DateType;
 
 /**
+ * Method for computing difficulty scores (FFI version).
+ */
+typedef enum DifficultyMethodFFI {
+    /**
+     * Rolling standard deviation of percent changes (returns)
+     */
+    VOLATILITY = 0,
+    /**
+     * Changepoint probability from Bayesian Online Changepoint Detection
+     */
+    CHANGEPOINT_PROB = 1,
+    /**
+     * Rolling standard deviation of raw values
+     */
+    ROLLING_STD = 2,
+} DifficultyMethodFFI;
+
+/**
  * Error codes for FFI boundary.
  */
 typedef enum ErrorCode {
@@ -1423,6 +1441,20 @@ typedef struct ConformalEvaluationFFI {
 } ConformalEvaluationFFI;
 
 /**
+ * Result from difficulty score computation (FFI version).
+ */
+typedef struct DifficultyScoreResultFFI {
+    /**
+     * Array of difficulty scores (same length as input)
+     */
+    double *scores;
+    /**
+     * Number of scores
+     */
+    size_t length;
+} DifficultyScoreResultFFI;
+
+/**
  * Nullable data array for DuckDB integration.
  *
  * The validity bitmask follows DuckDB's convention where bit i of validity[i/64]
@@ -2489,6 +2521,66 @@ bool anofox_ts_conformal_evaluate(const double *actuals,
                                   double alpha,
                                   struct ConformalEvaluationFFI *out_eval,
                                   struct AnofoxError *out_error);
+
+/**
+ * Compute difficulty scores for adaptive conformal prediction.
+ *
+ * # Arguments
+ * * `values` - Time series values
+ * * `values_length` - Number of values
+ * * `method` - Method for computing difficulty (Volatility, ChangepointProb, RollingStd)
+ * * `window` - Window size (0 for default)
+ * * `out_result` - Output difficulty score result
+ * * `out_error` - Error output
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_difficulty_score(const double *values,
+                                size_t values_length,
+                                enum DifficultyMethodFFI method,
+                                size_t window,
+                                struct DifficultyScoreResultFFI *out_result,
+                                struct AnofoxError *out_error);
+
+/**
+ * Free a DifficultyScoreResultFFI.
+ *
+ * # Safety
+ * Pointer must have been allocated by anofox_ts_difficulty_score.
+ */
+void anofox_free_difficulty_score_result(struct DifficultyScoreResultFFI *result);
+
+/**
+ * Convenience function combining conformal_learn and conformal_apply in one step.
+ *
+ * # Arguments
+ * * `residuals` - Calibration residuals
+ * * `residuals_validity` - Validity bitmask (NULL means all valid)
+ * * `residuals_length` - Number of residuals
+ * * `forecasts` - Point forecasts to wrap with intervals
+ * * `forecasts_length` - Number of forecasts
+ * * `alphas` - Miscoverage rates
+ * * `n_alphas` - Number of alphas
+ * * `method` - Conformal method (Symmetric, Asymmetric, Adaptive)
+ * * `strategy` - Calibration strategy (Split, CrossVal, JackknifePlus)
+ * * `out_intervals` - Output prediction intervals
+ * * `out_error` - Error output
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null.
+ */
+bool anofox_ts_conformalize(const double *residuals,
+                            const uint64_t *residuals_validity,
+                            size_t residuals_length,
+                            const double *forecasts,
+                            size_t forecasts_length,
+                            const double *alphas,
+                            size_t n_alphas,
+                            enum ConformalMethodFFI method,
+                            enum ConformalStrategyFFI strategy,
+                            struct PredictionIntervalsFFI *out_intervals,
+                            struct AnofoxError *out_error);
 
 /**
  * Free a TsStatsResult.

@@ -1533,3 +1533,45 @@ pub struct ConformalEvaluationFFI {
     /// Number of observations evaluated
     pub n_observations: size_t,
 }
+
+/// Method for computing difficulty scores (FFI version).
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DifficultyMethodFFI {
+    /// Rolling standard deviation of percent changes (returns)
+    #[default]
+    Volatility = 0,
+    /// Changepoint probability from Bayesian Online Changepoint Detection
+    ChangepointProb = 1,
+    /// Rolling standard deviation of raw values
+    RollingStd = 2,
+}
+
+impl From<anofox_fcst_core::DifficultyMethod> for DifficultyMethodFFI {
+    fn from(method: anofox_fcst_core::DifficultyMethod) -> Self {
+        match method {
+            anofox_fcst_core::DifficultyMethod::Volatility => Self::Volatility,
+            anofox_fcst_core::DifficultyMethod::ChangepointProb => Self::ChangepointProb,
+            anofox_fcst_core::DifficultyMethod::RollingStd => Self::RollingStd,
+        }
+    }
+}
+
+impl From<DifficultyMethodFFI> for anofox_fcst_core::DifficultyMethod {
+    fn from(method: DifficultyMethodFFI) -> Self {
+        match method {
+            DifficultyMethodFFI::Volatility => Self::Volatility,
+            DifficultyMethodFFI::ChangepointProb => Self::ChangepointProb,
+            DifficultyMethodFFI::RollingStd => Self::RollingStd,
+        }
+    }
+}
+
+/// Result from difficulty score computation (FFI version).
+#[repr(C)]
+pub struct DifficultyScoreResultFFI {
+    /// Array of difficulty scores (same length as input)
+    pub scores: *mut c_double,
+    /// Number of scores
+    pub length: size_t,
+}
