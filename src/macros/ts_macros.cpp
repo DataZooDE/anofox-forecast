@@ -445,19 +445,16 @@ FROM ordered_data od, cp_result cp
 ORDER BY od._dt
 )"},
 
-    // ts_detect_changepoints_by: Detect changepoints per group
+    // ts_detect_changepoints_by: Detect changepoints per group using native streaming API
     // C++ API: ts_detect_changepoints_by(table_name, group_col, date_col, value_col, params MAP)
+    // Returns: TABLE with group column (preserves original name) + changepoint columns
     {"ts_detect_changepoints_by", {"source", "group_col", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT
-    group_col AS id,
-    _ts_detect_changepoints_bocpd(
-        LIST(value_col::DOUBLE ORDER BY date_col),
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.hazard_lambda') AS DOUBLE), 250.0),
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.include_probabilities') AS BOOLEAN), false)
-    ) AS changepoints
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+SELECT * FROM _ts_detect_changepoints_native(
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR) ORDER BY group_col, date_col),
+    COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.hazard_lambda') AS DOUBLE), 250.0),
+    COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.include_probabilities') AS BOOLEAN), false)
+)
 )"},
 
     // ts_forecast: Generate forecasts for a single series (table-based)
