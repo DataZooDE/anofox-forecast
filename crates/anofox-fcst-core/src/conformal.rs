@@ -1176,6 +1176,139 @@ pub fn conformal_evaluate(
     })
 }
 
+/// Method for computing difficulty scores
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DifficultyMethod {
+    /// Rolling standard deviation of percent changes (returns)
+    Volatility,
+    /// Changepoint probability from Bayesian Online Changepoint Detection
+    ChangepointProb,
+    /// Rolling standard deviation of raw values
+    RollingStd,
+}
+
+impl std::str::FromStr for DifficultyMethod {
+    type Err = ForecastError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "volatility" | "vol" => Ok(DifficultyMethod::Volatility),
+            "changepoint_prob" | "changepoint" | "cp" => Ok(DifficultyMethod::ChangepointProb),
+            "rolling_std" | "rollingstd" | "std" => Ok(DifficultyMethod::RollingStd),
+            _ => Err(ForecastError::InvalidInput(format!(
+                "Unknown difficulty method '{}'. Valid options: volatility, changepoint_prob, rolling_std",
+                s
+            ))),
+        }
+    }
+}
+
+/// Compute difficulty scores for adaptive conformal prediction.
+///
+/// Difficulty scores estimate the local prediction uncertainty at each point.
+/// Higher scores indicate harder-to-predict regions where intervals should be wider.
+///
+/// # Arguments
+/// * `values` - Time series values
+/// * `method` - Method for computing difficulty
+/// * `window` - Optional window size (default: 20)
+///
+/// # Methods
+/// * **volatility** - Rolling standard deviation of percent changes (returns)
+/// * **changepoint_prob** - Probability of changepoint from BOCPD
+/// * **rolling_std** - Rolling standard deviation of raw values
+///
+/// # Returns
+/// Vector of difficulty scores (always positive, mean-normalized to 1.0)
+pub fn difficulty_score(
+    values: &[f64],
+    method: DifficultyMethod,
+    window: Option<usize>,
+) -> Result<Vec<f64>> {
+    let n = values.len();
+    if n < 3 {
+        return Err(ForecastError::InsufficientData { needed: 3, got: n });
+    }
+
+    let win = window.unwrap_or(20).max(2).min(n);
+
+    let raw_scores = match method {
+        DifficultyMethod::Volatility => compute_volatility(values, win),
+        DifficultyMethod::ChangepointProb => compute_changepoint_prob(values)?,
+        DifficultyMethod::RollingStd => compute_rolling_std(values, win),
+    };
+
+    // Ensure all scores are positive and normalize to mean 1.0
+    let min_score = raw_scores.iter().cloned().fold(f64::INFINITY, f64::min);
+    let shifted: Vec<f64> = raw_scores.iter().map(|&s| s - min_score + 1e-6).collect();
+
+    let mean: f64 = shifted.iter().sum::<f64>() / shifted.len() as f64;
+    if mean <= 0.0 {
+        return Ok(vec![1.0; n]);
+    }
+
+    Ok(shifted.iter().map(|&s| s / mean).collect())
+}
+
+/// Compute rolling volatility (std of returns)
+fn compute_volatility(values: &[f64], window: usize) -> Vec<f64> {
+    let n = values.len();
+    let mut result = vec![1.0; n];
+
+    // Compute returns (percent changes)
+    let returns: Vec<f64> = values
+        .windows(2)
+        .map(|w| {
+            if w[0].abs() > 1e-10 {
+                (w[1] - w[0]) / w[0].abs()
+            } else {
+                w[1] - w[0]
+            }
+        })
+        .collect();
+
+    // Rolling std of returns
+    for (i, res) in result.iter_mut().enumerate() {
+        let start = i.saturating_sub(window);
+        let end = (i + 1).min(returns.len());
+        if end > start {
+            let slice = &returns[start..end];
+            let mean: f64 = slice.iter().sum::<f64>() / slice.len() as f64;
+            let variance: f64 =
+                slice.iter().map(|&r| (r - mean).powi(2)).sum::<f64>() / slice.len() as f64;
+            *res = variance.sqrt().max(1e-10);
+        }
+    }
+
+    result
+}
+
+/// Compute changepoint probability using BOCPD
+fn compute_changepoint_prob(values: &[f64]) -> Result<Vec<f64>> {
+    use crate::changepoint::detect_changepoints_bocpd;
+
+    let bocpd = detect_changepoints_bocpd(values, 50.0, true)?;
+    Ok(bocpd.changepoint_probability)
+}
+
+/// Compute rolling standard deviation
+fn compute_rolling_std(values: &[f64], window: usize) -> Vec<f64> {
+    let n = values.len();
+    let mut result = vec![1.0; n];
+
+    for (i, res) in result.iter_mut().enumerate() {
+        let start = i.saturating_sub(window);
+        let end = i + 1;
+        let slice = &values[start..end];
+        let mean: f64 = slice.iter().sum::<f64>() / slice.len() as f64;
+        let variance: f64 =
+            slice.iter().map(|&v| (v - mean).powi(2)).sum::<f64>() / slice.len() as f64;
+        *res = variance.sqrt().max(1e-10);
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

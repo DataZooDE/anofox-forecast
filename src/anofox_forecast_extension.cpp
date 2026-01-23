@@ -125,18 +125,14 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsCoverageFunction(loader);
     RegisterTsEstimateBacktestMemoryFunction(loader);
 
-    // Register Conformal Prediction functions
-    RegisterTsConformalQuantileFunction(loader);
-    RegisterTsConformalIntervalsFunction(loader);
-    RegisterTsConformalPredictFunction(loader);
-    RegisterTsConformalPredictAsymmetricFunction(loader);
+    // Register Conformal Prediction functions (v2 API)
     RegisterTsMeanIntervalWidthFunction(loader);
-
-    // Register Conformal API v2 (Learn/Apply pattern)
     RegisterTsConformalLearnFunction(loader);
     RegisterTsConformalApplyFunction(loader);
     RegisterTsConformalCoverageFunction(loader);
     RegisterTsConformalEvaluateFunction(loader);
+    RegisterTsDifficultyScoreFunction(loader);
+    RegisterTsConformalizeFunction(loader);
 
     // Register Table Macros
     RegisterTsTableMacros(loader);
