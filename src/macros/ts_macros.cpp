@@ -292,138 +292,50 @@ ORDER BY group_col, date_col
     // ts_fill_gaps_by: Fill date gaps with NULL values at specified frequency
     // C++ API: ts_fill_gaps_by(table_name, group_col, date_col, value_col, frequency)
     // Supports: integers (as days), Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y'), DuckDB INTERVAL ('1 day', '1 hour')
+    //
+    // This macro is a thin wrapper around the native streaming implementation (ts_fill_gaps_native)
+    // which uses 16x less memory than the previous SQL macro approach (GH#113, GH#115).
+    //
+    // Performance (1M rows, 10K groups):
+    //   SQL macro:  181 MB peak memory
+    //   Native:      11 MB peak memory (16x reduction)
     {"ts_fill_gaps_by", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH _freq AS (
-    SELECT CASE
-        WHEN frequency::VARCHAR ~ '^[0-9]+$' THEN (frequency::VARCHAR || ' day')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'w$', ' week'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'mo$', ' month'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency::VARCHAR, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'y$', ' year'))::INTERVAL
-        ELSE frequency::INTERVAL
-    END AS _interval
-),
-src AS (
-    SELECT group_col AS _grp, date_col AS _dt, value_col AS _val
-    FROM query_table(source::VARCHAR)
-),
-date_range AS (
-    SELECT
-        _grp,
-        date_trunc('second', MIN(_dt)::TIMESTAMP) AS _min_dt,
-        date_trunc('second', MAX(_dt)::TIMESTAMP) AS _max_dt
-    FROM src
-    GROUP BY _grp
-),
-all_dates AS (
-    SELECT
-        dr._grp,
-        UNNEST(generate_series(dr._min_dt, dr._max_dt, (SELECT _interval FROM _freq))) AS _dt
-    FROM date_range dr
+SELECT * FROM ts_fill_gaps_native(
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
+    frequency
 )
-SELECT
-    ad._grp AS group_col,
-    ad._dt AS date_col,
-    s._val AS value_col
-FROM all_dates ad
-LEFT JOIN src s ON ad._grp = s._grp AND date_trunc('second', ad._dt) = date_trunc('second', s._dt::TIMESTAMP)
-ORDER BY ad._grp, ad._dt
 )"},
 
     // ts_fill_forward_by: Fill forward to a target date with NULL values
     // C++ API: ts_fill_forward_by(table_name, group_col, date_col, value_col, target_date, frequency)
     // Supports both Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y') and DuckDB INTERVAL ('1 day', '1 hour')
+    //
+    // This macro is a thin wrapper around the native streaming implementation (ts_fill_forward_native)
+    // which uses 11x less memory than the previous SQL macro approach (GH#113, GH#115).
+    //
+    // Performance (1M rows, 10K groups):
+    //   SQL macro:  127 MB peak memory
+    //   Native:      11 MB peak memory (11x reduction)
     {"ts_fill_forward_by", {"source", "group_col", "date_col", "value_col", "target_date", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH _freq AS (
-    SELECT CASE
-        WHEN frequency::VARCHAR ~ '^[0-9]+$' THEN (frequency::VARCHAR || ' day')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'w$', ' week'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'mo$', ' month'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency::VARCHAR, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'y$', ' year'))::INTERVAL
-        ELSE frequency::INTERVAL
-    END AS _interval
-),
-src AS (
-    SELECT group_col AS _grp, date_col AS _dt, value_col AS _val
-    FROM query_table(source::VARCHAR)
-),
-last_dates AS (
-    SELECT
-        _grp,
-        date_trunc('second', MAX(_dt)::TIMESTAMP) AS _max_dt
-    FROM src
-    GROUP BY _grp
-),
-forward_dates AS (
-    SELECT
-        ld._grp,
-        UNNEST(generate_series(ld._max_dt + (SELECT _interval FROM _freq), date_trunc('second', target_date::TIMESTAMP), (SELECT _interval FROM _freq))) AS _dt
-    FROM last_dates ld
-    WHERE ld._max_dt < date_trunc('second', target_date::TIMESTAMP)
+SELECT * FROM ts_fill_forward_native(
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
+    target_date,
+    frequency
 )
-SELECT _grp AS group_col, _dt AS date_col, _val AS value_col FROM src
-UNION ALL
-SELECT
-    fd._grp AS group_col,
-    fd._dt AS date_col,
-    NULL::DOUBLE AS value_col
-FROM forward_dates fd
-ORDER BY 1, 2
 )"},
 
-    // ts_fill_gaps_operator_by: High-performance gap filling (API compatible with C++ version)
+    // ts_fill_gaps_operator_by: Alias for ts_fill_gaps_by (C++ API compatibility)
     // C++ API: ts_fill_gaps_operator_by(table_name, group_col, date_col, value_col, frequency)
-    // Note: This is identical to ts_fill_gaps but named "operator" for C++ API compatibility
+    // Note: This is an alias for ts_fill_gaps_by using the native streaming implementation
     // Supports both Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y') and DuckDB INTERVAL ('1 day', '1 hour')
     {"ts_fill_gaps_operator_by", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH _freq AS (
-    SELECT CASE
-        WHEN frequency::VARCHAR ~ '^[0-9]+$' THEN (frequency::VARCHAR || ' day')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'w$', ' week'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'mo$', ' month'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency::VARCHAR, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'y$', ' year'))::INTERVAL
-        ELSE frequency::INTERVAL
-    END AS _interval
-),
-src AS (
-    SELECT group_col AS _grp, date_col AS _dt, value_col AS _val
-    FROM query_table(source::VARCHAR)
-),
-date_range AS (
-    SELECT
-        _grp,
-        date_trunc('second', MIN(_dt)::TIMESTAMP) AS _min_dt,
-        date_trunc('second', MAX(_dt)::TIMESTAMP) AS _max_dt
-    FROM src
-    GROUP BY _grp
-),
-all_dates AS (
-    SELECT
-        dr._grp,
-        UNNEST(generate_series(dr._min_dt, dr._max_dt, (SELECT _interval FROM _freq))) AS _dt
-    FROM date_range dr
+SELECT * FROM ts_fill_gaps_native(
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
+    frequency
 )
-SELECT
-    ad._grp AS group_col,
-    ad._dt AS date_col,
-    s._val AS value_col
-FROM all_dates ad
-LEFT JOIN src s ON ad._grp = s._grp AND date_trunc('second', ad._dt) = date_trunc('second', s._dt::TIMESTAMP)
-ORDER BY ad._grp, ad._dt
 )"},
 
     // ts_drop_gappy_by: Filter out series with too many gaps
