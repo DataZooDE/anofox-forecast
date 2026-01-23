@@ -26,8 +26,8 @@ SELECT * FROM ts_features_table('daily_sales', date, value);
 -- Multiple series
 SELECT * FROM ts_features_by('sales', product_id, date, quantity);
 
--- Access specific features from result
-SELECT id, mean, standard_deviation
+-- Access specific features from result (group column name preserved)
+SELECT product_id, mean, standard_deviation
 FROM ts_features_by('sales', product_id, date, quantity);
 ```
 
@@ -60,15 +60,15 @@ ts_features_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLU
 | `date_col` | COLUMN | Date/timestamp column |
 | `value_col` | COLUMN | Value column |
 
-**Returns:** TABLE with `id` and 116 feature columns including `mean`, `standard_deviation`, `skewness`, `kurtosis`, `length`, `linear_trend_slope`, `autocorrelation_lag1`, etc.
+**Returns:** TABLE with the original group column (preserving its name) and 116 feature columns including `mean`, `standard_deviation`, `skewness`, `kurtosis`, `length`, `linear_trend_slope`, `autocorrelation_lag1`, etc.
 
 **Example:**
 ```sql
 -- Extract features per product
 SELECT * FROM ts_features_by('sales', product_id, date, quantity);
 
--- Filter by specific feature values
-SELECT id, mean, linear_trend_slope
+-- Filter by specific feature values (note: group column name is preserved)
+SELECT product_id, mean, linear_trend_slope
 FROM ts_features_by('sales', product_id, date, quantity)
 WHERE length > 30;
 ```
