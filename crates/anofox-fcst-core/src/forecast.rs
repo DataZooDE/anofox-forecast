@@ -631,16 +631,15 @@ pub fn forecast_with_exog(
                 // Shouldn't happen due to supports_exog check, but fallback to ARIMA with exog
                 forecast_arima_with_exog(&clean_values, options.horizon, exog)
             }
-        },
-        _ => {
-            // No exog data or model doesn't support exog - use standard forecasting with auto-selection
-            let model = if is_auto_model(options.model) {
-                select_best_model(&clean_values, period)
-            } else {
-                options.model
-            };
-            forecast_with_model(&clean_values, options.horizon, model, period)
         }
+    } else {
+        // No exog data or model doesn't support exog - use standard forecasting with auto-selection
+        let model = if is_auto_model(options.model) {
+            select_best_model(&clean_values, period)
+        } else {
+            options.model
+        };
+        forecast_with_model(&clean_values, options.horizon, model, period)
     }?;
 
     // For fitted values calculation, determine actual model used
