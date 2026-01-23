@@ -451,7 +451,7 @@ ORDER BY od._dt
     {"ts_detect_changepoints_by", {"source", "group_col", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_detect_changepoints_native(
-    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR) ORDER BY group_col, date_col),
+    (SELECT group_col, date_col, value_col::DOUBLE FROM query_table(source::VARCHAR) ORDER BY group_col, date_col),
     COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.hazard_lambda') AS DOUBLE), 250.0),
     COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.include_probabilities') AS BOOLEAN), false)
 )

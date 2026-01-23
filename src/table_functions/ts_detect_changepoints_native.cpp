@@ -112,25 +112,13 @@ static unique_ptr<FunctionData> TsDetectChangepointsNativeBind(
 }
 
 // ============================================================================
-// Global State - single-threaded to avoid BatchedDataCollection::Merge errors
-// ============================================================================
-
-struct TsDetectChangepointsNativeGlobalState : public GlobalTableFunctionState {
-    idx_t max_threads = 1;
-
-    idx_t MaxThreads() const override {
-        return max_threads;
-    }
-};
-
-// ============================================================================
 // Init Functions
 // ============================================================================
 
 static unique_ptr<GlobalTableFunctionState> TsDetectChangepointsNativeInitGlobal(
     ClientContext &context,
     TableFunctionInitInput &input) {
-    return make_uniq<TsDetectChangepointsNativeGlobalState>();
+    return make_uniq<GlobalTableFunctionState>();
 }
 
 static unique_ptr<LocalTableFunctionState> TsDetectChangepointsNativeInitLocal(
@@ -280,59 +268,32 @@ static OperatorFinalizeResultType TsDetectChangepointsNativeFinalize(
 
         // Column 1: is_changepoint (LIST of BOOLEAN)
         {
-            auto &list_vec = output.data[1];
-            auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
-            auto &list_child = ListVector::GetEntry(list_vec);
-            auto current_size = ListVector::GetListSize(list_vec);
-
-            list_data[out_idx].offset = current_size;
-            list_data[out_idx].length = grp.is_changepoint.size();
-
-            ListVector::Reserve(list_vec, current_size + grp.is_changepoint.size());
-            ListVector::SetListSize(list_vec, current_size + grp.is_changepoint.size());
-
-            auto child_data = FlatVector::GetData<bool>(list_child);
-            for (size_t i = 0; i < grp.is_changepoint.size(); i++) {
-                child_data[current_size + i] = grp.is_changepoint[i];
+            vector<Value> values;
+            values.reserve(grp.is_changepoint.size());
+            for (auto v : grp.is_changepoint) {
+                values.push_back(Value::BOOLEAN(v));
             }
+            output.data[1].SetValue(out_idx, Value::LIST(LogicalType::BOOLEAN, std::move(values)));
         }
 
         // Column 2: changepoint_probability (LIST of DOUBLE)
         {
-            auto &list_vec = output.data[2];
-            auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
-            auto &list_child = ListVector::GetEntry(list_vec);
-            auto current_size = ListVector::GetListSize(list_vec);
-
-            list_data[out_idx].offset = current_size;
-            list_data[out_idx].length = grp.changepoint_probability.size();
-
-            ListVector::Reserve(list_vec, current_size + grp.changepoint_probability.size());
-            ListVector::SetListSize(list_vec, current_size + grp.changepoint_probability.size());
-
-            auto child_data = FlatVector::GetData<double>(list_child);
-            for (size_t i = 0; i < grp.changepoint_probability.size(); i++) {
-                child_data[current_size + i] = grp.changepoint_probability[i];
+            vector<Value> values;
+            values.reserve(grp.changepoint_probability.size());
+            for (auto v : grp.changepoint_probability) {
+                values.push_back(Value::DOUBLE(v));
             }
+            output.data[2].SetValue(out_idx, Value::LIST(LogicalType::DOUBLE, std::move(values)));
         }
 
         // Column 3: changepoint_indices (LIST of UBIGINT)
         {
-            auto &list_vec = output.data[3];
-            auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
-            auto &list_child = ListVector::GetEntry(list_vec);
-            auto current_size = ListVector::GetListSize(list_vec);
-
-            list_data[out_idx].offset = current_size;
-            list_data[out_idx].length = grp.changepoint_indices.size();
-
-            ListVector::Reserve(list_vec, current_size + grp.changepoint_indices.size());
-            ListVector::SetListSize(list_vec, current_size + grp.changepoint_indices.size());
-
-            auto child_data = FlatVector::GetData<uint64_t>(list_child);
-            for (size_t i = 0; i < grp.changepoint_indices.size(); i++) {
-                child_data[current_size + i] = grp.changepoint_indices[i];
+            vector<Value> values;
+            values.reserve(grp.changepoint_indices.size());
+            for (auto v : grp.changepoint_indices) {
+                values.push_back(Value::UBIGINT(v));
             }
+            output.data[3].SetValue(out_idx, Value::LIST(LogicalType::UBIGINT, std::move(values)));
         }
 
         // Column 4: n_changepoints (UBIGINT)
