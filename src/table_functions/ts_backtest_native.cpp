@@ -8,32 +8,37 @@
 #include <cmath>
 #include <cstring>
 #include <set>
+#include <atomic>
+#include <mutex>
+#include <condition_variable>
 
 namespace duckdb {
 
 // ============================================================================
 // ts_backtest_native - Native streaming backtest table function
 //
-// IMPORTANT: Requires SET threads=1; for correct results.
-// The table_in_out pattern partitions input data across threads, but backtesting
-// requires ALL data to compute global fold boundaries. Multi-threading causes
-// missing or incomplete results.
+// PARALLEL EXECUTION STRATEGY:
+// This function uses a two-phase approach to enable parallelization while
+// maintaining correctness for fold boundary computation:
 //
-// Performance characteristics (vs ts_backtest_auto_by macro):
-//   - Small datasets (<100k rows): Native is ~30% FASTER even with threads=1
-//   - Large datasets (>500k rows): Macro with all threads is ~25% faster
+// Phase 1 (in_out_function):
+//   - Each thread buffers its partition of data in LocalState
+//   - Atomically updates global min/max dates in GlobalState
 //
-// Use ts_backtest_native when:
-//   - Working with small-medium datasets
-//   - Memory is limited (avoids LIST() aggregation OOM)
-//   - Need streaming output behavior
+// Phase 2 (finalize):
+//   - First thread to enter computes fold boundaries from global date range
+//   - All threads wait for fold boundaries to be ready
+//   - Each thread then processes its own groups in parallel
 //
-// Use ts_backtest_auto_by macro when:
-//   - Working with very large datasets where parallelization helps
-//   - threads=1 restriction is unacceptable
+// MEMORY FOOTPRINT (1M rows = 5000 series x 200 dates):
+//   - ts_backtest_native:  ~29 MB peak buffer memory
+//   - ts_backtest_auto_by: ~1.1 GB peak buffer memory (38x more!)
+//
+// The macro's LIST() aggregations create massive intermediate results that can
+// cause OOM or segfaults with limited memory. The native streaming function
+// avoids this by processing data in chunks.
 //
 // Usage:
-//   SET threads=1;  -- Required for correct results
 //   SELECT * FROM ts_backtest_native(
 //       (SELECT id, ds, y FROM my_table),
 //       7,              -- horizon
@@ -77,23 +82,53 @@ struct TsBacktestNativeBindData : public TableFunctionData {
 };
 
 // ============================================================================
-// Global State - enforces single-threaded execution
+// Fold Boundary Structure (shared between Global and Local state)
 // ============================================================================
 
-struct TsBacktestNativeGlobalState : public GlobalTableFunctionState {
-    // Force single-threaded execution (note: this doesn't work for table_in_out,
-    // user must SET threads=1)
-    idx_t MaxThreads() const override {
-        return 1;
-    }
+struct FoldBoundary {
+    int64_t fold_id;
+    int64_t train_start;  // microseconds
+    int64_t train_end;
+    int64_t test_start;
+    int64_t test_end;
 };
 
 // ============================================================================
-// Local State - buffers data and manages streaming output
+// Global State - manages synchronization and shared fold boundaries
+// ============================================================================
+
+struct TsBacktestNativeGlobalState : public GlobalTableFunctionState {
+    // Allow parallel execution - each thread processes its groups
+    idx_t MaxThreads() const override {
+        return 999999;  // Unlimited - let DuckDB decide
+    }
+
+    // Atomic date range tracking (updated by all threads)
+    std::atomic<int64_t> global_min_date{std::numeric_limits<int64_t>::max()};
+    std::atomic<int64_t> global_max_date{std::numeric_limits<int64_t>::min()};
+
+    // Unique dates collection (protected by mutex)
+    std::mutex dates_mutex;
+    std::set<int64_t> unique_dates;
+
+    // Fold boundaries (computed once, read by all threads)
+    std::mutex fold_mutex;
+    std::condition_variable fold_cv;
+    std::atomic<bool> fold_bounds_computed{false};
+    vector<FoldBoundary> fold_bounds;
+
+    // Thread synchronization for finalize phase
+    std::atomic<int> threads_contributing{0};
+    std::atomic<int> threads_waiting{0};
+    std::atomic<bool> all_dates_collected{false};
+};
+
+// ============================================================================
+// Local State - buffers data per thread and manages streaming output
 // ============================================================================
 
 struct TsBacktestNativeLocalState : public LocalTableFunctionState {
-    // Input data buffer per group
+    // Input data buffer per group (this thread's partition)
     struct GroupData {
         Value group_value;
         vector<int64_t> dates;  // microseconds
@@ -103,15 +138,10 @@ struct TsBacktestNativeLocalState : public LocalTableFunctionState {
     std::map<string, GroupData> groups;
     vector<string> group_order;
 
-    // Fold boundaries (computed once)
-    struct FoldBoundary {
-        int64_t fold_id;
-        int64_t train_start;  // microseconds
-        int64_t train_end;
-        int64_t test_start;
-        int64_t test_end;
-    };
-    vector<FoldBoundary> fold_bounds;
+    // Local date stats (merged into global at end of in_out phase)
+    int64_t local_min_date = std::numeric_limits<int64_t>::max();
+    int64_t local_max_date = std::numeric_limits<int64_t>::min();
+    std::set<int64_t> local_unique_dates;
 
     // Output results
     struct BacktestResult {
@@ -131,7 +161,8 @@ struct TsBacktestNativeLocalState : public LocalTableFunctionState {
     vector<BacktestResult> results;
 
     // Processing state
-    bool folds_computed = false;
+    bool dates_contributed = false;
+    bool processing_started = false;
     idx_t current_fold = 0;
     idx_t output_offset = 0;
 };
@@ -479,7 +510,7 @@ static unique_ptr<LocalTableFunctionState> TsBacktestNativeInitLocal(
 }
 
 // ============================================================================
-// In-Out Function - buffers incoming data
+// In-Out Function - buffers incoming data and tracks date range
 // ============================================================================
 
 static OperatorResultType TsBacktestNativeInOut(
@@ -491,7 +522,7 @@ static OperatorResultType TsBacktestNativeInOut(
     auto &bind_data = data_p.bind_data->Cast<TsBacktestNativeBindData>();
     auto &local_state = data_p.local_state->Cast<TsBacktestNativeLocalState>();
 
-    // Buffer all incoming data - we need complete groups and full date range
+    // Buffer all incoming data - we need complete groups
     for (idx_t i = 0; i < input.size(); i++) {
         Value group_val = input.data[0].GetValue(i);
         Value date_val = input.data[1].GetValue(i);
@@ -528,6 +559,11 @@ static OperatorResultType TsBacktestNativeInOut(
 
         grp.dates.push_back(date_micros);
         grp.values.push_back(value_val.GetValue<double>());
+
+        // Track local date stats
+        local_state.local_min_date = std::min(local_state.local_min_date, date_micros);
+        local_state.local_max_date = std::max(local_state.local_max_date, date_micros);
+        local_state.local_unique_dates.insert(date_micros);
     }
 
     // Don't output anything during input phase
@@ -536,29 +572,17 @@ static OperatorResultType TsBacktestNativeInOut(
 }
 
 // ============================================================================
-// Finalize - compute folds and stream output
+// Compute Fold Boundaries (called once from first thread)
 // ============================================================================
 
 static void ComputeFoldBoundaries(
-    TsBacktestNativeLocalState &local_state,
+    TsBacktestNativeGlobalState &global_state,
     const TsBacktestNativeBindData &bind_data) {
 
-    if (local_state.groups.empty()) return;
+    int64_t min_date = global_state.global_min_date.load();
+    int64_t max_date = global_state.global_max_date.load();
+    int64_t n_dates = global_state.unique_dates.size();
 
-    // Find global date range
-    int64_t min_date = std::numeric_limits<int64_t>::max();
-    int64_t max_date = std::numeric_limits<int64_t>::min();
-    std::set<int64_t> unique_dates;
-
-    for (auto &[key, grp] : local_state.groups) {
-        for (auto dt : grp.dates) {
-            min_date = std::min(min_date, dt);
-            max_date = std::max(max_date, dt);
-            unique_dates.insert(dt);
-        }
-    }
-
-    int64_t n_dates = unique_dates.size();
     if (n_dates < 2) return;
 
     // Compute frequency in microseconds
@@ -609,169 +633,143 @@ static void ComputeFoldBoundaries(
         }
 
         // Apply embargo from previous fold
-        if (fold > 0 && bind_data.embargo > 0 && !local_state.fold_bounds.empty()) {
-            int64_t embargo_cutoff = local_state.fold_bounds.back().test_end + bind_data.embargo * freq_micros;
+        if (fold > 0 && bind_data.embargo > 0 && !global_state.fold_bounds.empty()) {
+            int64_t embargo_cutoff = global_state.fold_bounds.back().test_end + bind_data.embargo * freq_micros;
             train_start = std::max(train_start, embargo_cutoff);
         }
 
-        TsBacktestNativeLocalState::FoldBoundary fb;
+        FoldBoundary fb;
         fb.fold_id = fold + 1;
         fb.train_start = train_start;
         fb.train_end = train_end;
         fb.test_start = test_start;
         fb.test_end = test_end;
 
-        local_state.fold_bounds.push_back(fb);
+        global_state.fold_bounds.push_back(fb);
     }
 }
 
-static void ProcessFold(
+// ============================================================================
+// Process Fold for a single group
+// ============================================================================
+
+static void ProcessGroupFold(
     TsBacktestNativeLocalState &local_state,
     const TsBacktestNativeBindData &bind_data,
-    idx_t fold_idx) {
+    const FoldBoundary &fold,
+    const string &group_key,
+    TsBacktestNativeLocalState::GroupData &grp,
+    vector<double> &fold_actuals,
+    vector<double> &fold_forecasts,
+    vector<double> &fold_lower,
+    vector<double> &fold_upper) {
 
-    if (fold_idx >= local_state.fold_bounds.size()) return;
+    // Extract training data for this fold
+    vector<std::pair<int64_t, double>> train_data;
+    std::map<int64_t, double> test_data;
 
-    auto &fold = local_state.fold_bounds[fold_idx];
-
-    // Store per-group results for metric computation
-    struct GroupFoldResults {
-        vector<double> actuals;
-        vector<double> forecasts;
-        vector<double> lower_90;
-        vector<double> upper_90;
-        vector<TsBacktestNativeLocalState::BacktestResult> results;
-    };
-    std::map<string, GroupFoldResults> group_results;
-
-    // Process each group for this fold
-    for (const auto &group_key : local_state.group_order) {
-        auto &grp = local_state.groups[group_key];
-
-        // Extract training data for this fold
-        vector<std::pair<int64_t, double>> train_data;
-        std::map<int64_t, double> test_data;
-
-        for (size_t i = 0; i < grp.dates.size(); i++) {
-            int64_t dt = grp.dates[i];
-            if (dt >= fold.train_start && dt <= fold.train_end) {
-                train_data.push_back({dt, grp.values[i]});
-            }
-            if (dt >= fold.test_start && dt <= fold.test_end) {
-                test_data[dt] = grp.values[i];
-            }
+    for (size_t i = 0; i < grp.dates.size(); i++) {
+        int64_t dt = grp.dates[i];
+        if (dt >= fold.train_start && dt <= fold.train_end) {
+            train_data.push_back({dt, grp.values[i]});
         }
-
-        // Sort training data by date
-        std::sort(train_data.begin(), train_data.end());
-
-        if (train_data.empty() || test_data.empty()) continue;
-
-        // Extract values for FFI
-        vector<double> train_values;
-        int64_t last_train_date = train_data.back().first;
-        for (auto &[dt, val] : train_data) {
-            train_values.push_back(val);
-        }
-
-        // Compute frequency in microseconds for date arithmetic
-        int64_t freq_micros;
-        if (bind_data.date_col_type == DateColumnType::INTEGER ||
-            bind_data.date_col_type == DateColumnType::BIGINT) {
-            freq_micros = bind_data.frequency_is_raw ? bind_data.frequency_seconds : bind_data.frequency_seconds;
-        } else {
-            freq_micros = bind_data.frequency_is_raw
-                ? bind_data.frequency_seconds * 86400LL * 1000000LL
-                : bind_data.frequency_seconds * 1000000LL;
-        }
-
-        // Call FFI forecast
-        ForecastOptions opts = {};
-        opts.horizon = static_cast<int32_t>(bind_data.horizon);
-
-        // Build method string and copy to opts.model char array
-        string full_method = bind_data.method;
-        if (!bind_data.model_spec.empty()) {
-            full_method += ":" + bind_data.model_spec;
-        }
-        std::strncpy(opts.model, full_method.c_str(), sizeof(opts.model) - 1);
-        opts.model[sizeof(opts.model) - 1] = '\0';
-
-        ForecastResult fcst = {};
-        AnofoxError error = {};
-
-        bool success = anofox_ts_forecast(
-            train_values.data(),
-            nullptr,  // No validity mask
-            train_values.size(),
-            &opts,
-            &fcst,
-            &error
-        );
-
-        if (!success) {
-            // Skip this group on error
-            continue;
-        }
-
-        // Generate forecast dates and match with test data
-        auto &gfr = group_results[group_key];
-
-        for (size_t h = 0; h < fcst.n_forecasts; h++) {
-            int64_t forecast_date = last_train_date + (h + 1) * freq_micros;
-
-            // Find matching test actual
-            auto it = test_data.find(forecast_date);
-            if (it == test_data.end()) continue;
-
-            double actual = it->second;
-            double forecast_val = fcst.point_forecasts[h];
-            double lower = fcst.lower_bounds ? fcst.lower_bounds[h] : 0.0;
-            double upper = fcst.upper_bounds ? fcst.upper_bounds[h] : 0.0;
-
-            TsBacktestNativeLocalState::BacktestResult res;
-            res.fold_id = fold.fold_id;
-            res.group_key = group_key;
-            res.group_value = grp.group_value;
-            res.date = forecast_date;
-            res.forecast = forecast_val;
-            res.actual = actual;
-            res.error = forecast_val - actual;
-            res.abs_error = std::abs(res.error);
-            res.lower_90 = lower;
-            res.upper_90 = upper;
-            res.model_name = fcst.model_name[0] != '\0' ? string(fcst.model_name) : bind_data.method;
-            res.fold_metric_score = 0.0;  // Will be filled later
-
-            gfr.actuals.push_back(actual);
-            gfr.forecasts.push_back(forecast_val);
-            gfr.lower_90.push_back(lower);
-            gfr.upper_90.push_back(upper);
-            gfr.results.push_back(res);
-        }
-
-        anofox_free_forecast_result(&fcst);
-    }
-
-    // Compute fold metric across all groups
-    vector<double> all_actuals, all_forecasts, all_lower, all_upper;
-    for (auto &[key, gfr] : group_results) {
-        all_actuals.insert(all_actuals.end(), gfr.actuals.begin(), gfr.actuals.end());
-        all_forecasts.insert(all_forecasts.end(), gfr.forecasts.begin(), gfr.forecasts.end());
-        all_lower.insert(all_lower.end(), gfr.lower_90.begin(), gfr.lower_90.end());
-        all_upper.insert(all_upper.end(), gfr.upper_90.begin(), gfr.upper_90.end());
-    }
-
-    double fold_metric = ComputeMetric(bind_data.metric, all_actuals, all_forecasts, all_lower, all_upper);
-
-    // Add results with fold metric score
-    for (auto &[key, gfr] : group_results) {
-        for (auto &res : gfr.results) {
-            res.fold_metric_score = fold_metric;
-            local_state.results.push_back(res);
+        if (dt >= fold.test_start && dt <= fold.test_end) {
+            test_data[dt] = grp.values[i];
         }
     }
+
+    // Sort training data by date
+    std::sort(train_data.begin(), train_data.end());
+
+    if (train_data.empty() || test_data.empty()) return;
+
+    // Extract values for FFI
+    vector<double> train_values;
+    int64_t last_train_date = train_data.back().first;
+    for (auto &[dt, val] : train_data) {
+        train_values.push_back(val);
+    }
+
+    // Compute frequency in microseconds for date arithmetic
+    int64_t freq_micros;
+    if (bind_data.date_col_type == DateColumnType::INTEGER ||
+        bind_data.date_col_type == DateColumnType::BIGINT) {
+        freq_micros = bind_data.frequency_is_raw ? bind_data.frequency_seconds : bind_data.frequency_seconds;
+    } else {
+        freq_micros = bind_data.frequency_is_raw
+            ? bind_data.frequency_seconds * 86400LL * 1000000LL
+            : bind_data.frequency_seconds * 1000000LL;
+    }
+
+    // Call FFI forecast
+    ForecastOptions opts = {};
+    opts.horizon = static_cast<int32_t>(bind_data.horizon);
+
+    // Build method string and copy to opts.model char array
+    string full_method = bind_data.method;
+    if (!bind_data.model_spec.empty()) {
+        full_method += ":" + bind_data.model_spec;
+    }
+    std::strncpy(opts.model, full_method.c_str(), sizeof(opts.model) - 1);
+    opts.model[sizeof(opts.model) - 1] = '\0';
+
+    ForecastResult fcst = {};
+    AnofoxError error = {};
+
+    bool success = anofox_ts_forecast(
+        train_values.data(),
+        nullptr,  // No validity mask
+        train_values.size(),
+        &opts,
+        &fcst,
+        &error
+    );
+
+    if (!success) {
+        // Skip this group on error
+        return;
+    }
+
+    // Generate forecast dates and match with test data
+    for (size_t h = 0; h < fcst.n_forecasts; h++) {
+        int64_t forecast_date = last_train_date + (h + 1) * freq_micros;
+
+        // Find matching test actual
+        auto it = test_data.find(forecast_date);
+        if (it == test_data.end()) continue;
+
+        double actual = it->second;
+        double forecast_val = fcst.point_forecasts[h];
+        double lower = fcst.lower_bounds ? fcst.lower_bounds[h] : 0.0;
+        double upper = fcst.upper_bounds ? fcst.upper_bounds[h] : 0.0;
+
+        TsBacktestNativeLocalState::BacktestResult res;
+        res.fold_id = fold.fold_id;
+        res.group_key = group_key;
+        res.group_value = grp.group_value;
+        res.date = forecast_date;
+        res.forecast = forecast_val;
+        res.actual = actual;
+        res.error = forecast_val - actual;
+        res.abs_error = std::abs(res.error);
+        res.lower_90 = lower;
+        res.upper_90 = upper;
+        res.model_name = fcst.model_name[0] != '\0' ? string(fcst.model_name) : bind_data.method;
+        res.fold_metric_score = 0.0;  // Will be filled later
+
+        fold_actuals.push_back(actual);
+        fold_forecasts.push_back(forecast_val);
+        fold_lower.push_back(lower);
+        fold_upper.push_back(upper);
+        local_state.results.push_back(res);
+    }
+
+    anofox_free_forecast_result(&fcst);
 }
+
+// ============================================================================
+// Finalize - synchronize threads, compute folds, and stream output
+// ============================================================================
 
 static OperatorFinalizeResultType TsBacktestNativeFinalize(
     ExecutionContext &context,
@@ -779,31 +777,79 @@ static OperatorFinalizeResultType TsBacktestNativeFinalize(
     DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsBacktestNativeBindData>();
+    auto &global_state = data_p.global_state->Cast<TsBacktestNativeGlobalState>();
     auto &local_state = data_p.local_state->Cast<TsBacktestNativeLocalState>();
 
-    // Compute fold boundaries on first call
-    if (!local_state.folds_computed) {
-        ComputeFoldBoundaries(local_state, bind_data);
-        local_state.folds_computed = true;
+    // Phase 1: Contribute local date stats to global state (once per thread)
+    if (!local_state.dates_contributed) {
+        // Atomically update global min/max dates
+        int64_t current_min = global_state.global_min_date.load();
+        while (local_state.local_min_date < current_min &&
+               !global_state.global_min_date.compare_exchange_weak(current_min, local_state.local_min_date)) {
+            // Retry if CAS failed
+        }
+
+        int64_t current_max = global_state.global_max_date.load();
+        while (local_state.local_max_date > current_max &&
+               !global_state.global_max_date.compare_exchange_weak(current_max, local_state.local_max_date)) {
+            // Retry if CAS failed
+        }
+
+        // Contribute unique dates under lock
+        {
+            std::lock_guard<std::mutex> lock(global_state.dates_mutex);
+            global_state.unique_dates.insert(
+                local_state.local_unique_dates.begin(),
+                local_state.local_unique_dates.end());
+        }
+
+        local_state.dates_contributed = true;
+
+        // Signal that this thread has contributed
+        global_state.threads_contributing.fetch_add(1);
     }
 
-    // Process folds one at a time (memory efficient)
-    // Only process new folds if we've output all previous results
-    if (local_state.output_offset >= local_state.results.size()) {
-        // Clear results buffer and reset offset for next batch
-        local_state.results.clear();
-        local_state.output_offset = 0;
+    // Phase 2: Wait for fold boundaries to be computed
+    if (!global_state.fold_bounds_computed.load()) {
+        std::unique_lock<std::mutex> lock(global_state.fold_mutex);
 
-        // Process more folds
-        while (local_state.current_fold < local_state.fold_bounds.size() &&
-               local_state.results.size() < STANDARD_VECTOR_SIZE * 2) {
-            ProcessFold(local_state, bind_data, local_state.current_fold);
-            local_state.current_fold++;
+        // Double-check after acquiring lock
+        if (!global_state.fold_bounds_computed.load()) {
+            // First thread to get here computes fold boundaries
+            ComputeFoldBoundaries(global_state, bind_data);
+            global_state.fold_bounds_computed.store(true);
+            global_state.fold_cv.notify_all();
         }
     }
 
-    // Output results - if no results, we're done
-    if (local_state.results.empty()) {
+    // Phase 3: Process this thread's groups (parallel across threads)
+    if (!local_state.processing_started) {
+        local_state.processing_started = true;
+
+        // Process all folds for this thread's groups
+        for (const auto &fold : global_state.fold_bounds) {
+            vector<double> fold_actuals, fold_forecasts, fold_lower, fold_upper;
+            size_t results_start = local_state.results.size();
+
+            // Process each group this thread owns
+            for (const auto &group_key : local_state.group_order) {
+                auto &grp = local_state.groups[group_key];
+                ProcessGroupFold(local_state, bind_data, fold, group_key, grp,
+                               fold_actuals, fold_forecasts, fold_lower, fold_upper);
+            }
+
+            // Compute fold metric for this thread's groups
+            double fold_metric = ComputeMetric(bind_data.metric, fold_actuals, fold_forecasts, fold_lower, fold_upper);
+
+            // Update fold_metric_score for all results from this fold
+            for (size_t i = results_start; i < local_state.results.size(); i++) {
+                local_state.results[i].fold_metric_score = fold_metric;
+            }
+        }
+    }
+
+    // Phase 4: Stream output
+    if (local_state.results.empty() || local_state.output_offset >= local_state.results.size()) {
         return OperatorFinalizeResultType::FINISHED;
     }
 
@@ -867,9 +913,7 @@ static OperatorFinalizeResultType TsBacktestNativeFinalize(
 
     output.SetCardinality(output_count);
 
-    // Check if more folds to process or more results to output
-    if (local_state.current_fold < local_state.fold_bounds.size() ||
-        local_state.output_offset < local_state.results.size()) {
+    if (local_state.output_offset < local_state.results.size()) {
         return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;
     }
 
