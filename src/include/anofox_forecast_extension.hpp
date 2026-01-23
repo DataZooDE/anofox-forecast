@@ -106,6 +106,9 @@ void RegisterTsConformalEvaluateFunction(ExtensionLoader &loader);
 // Table macros
 void RegisterTsTableMacros(ExtensionLoader &loader);
 
+// Native table functions (streaming)
+void RegisterTsBacktestNativeFunction(ExtensionLoader &loader);
+
 // Extension class
 class AnofoxForecastExtension : public Extension {
 public:

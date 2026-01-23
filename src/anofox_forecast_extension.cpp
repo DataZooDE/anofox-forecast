@@ -141,6 +141,9 @@ static void LoadInternal(ExtensionLoader &loader) {
     // Register Table Macros
     RegisterTsTableMacros(loader);
 
+    // Register Native Table Functions (streaming)
+    RegisterTsBacktestNativeFunction(loader);
+
     // Initialize telemetry (respects DATAZOO_DISABLE_TELEMETRY env var)
     anofox_telemetry_init(true, nullptr);
     anofox_telemetry_capture_extension_load();
