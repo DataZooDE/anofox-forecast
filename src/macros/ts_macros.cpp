@@ -23,17 +23,59 @@ struct TsTableMacro {
 static const TsTableMacro ts_table_macros[] = {
     // ts_stats: Compute statistics for grouped time series
     // C++ API: ts_stats(table_name, group_col, date_col, value_col, frequency)
+    // Returns: TABLE with expanded statistics columns
     {"ts_stats", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
+WITH stats_data AS (
+    SELECT
+        group_col AS id,
+        _ts_stats_with_dates(
+            LIST(value_col::DOUBLE ORDER BY date_col),
+            LIST(date_col::TIMESTAMP ORDER BY date_col),
+            frequency::VARCHAR
+        ) AS _stats
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+)
 SELECT
-    group_col AS id,
-    _ts_stats_with_dates(
-        LIST(value_col::DOUBLE ORDER BY date_col),
-        LIST(date_col::TIMESTAMP ORDER BY date_col),
-        frequency::VARCHAR
-    ) AS stats
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+    id,
+    (_stats).length AS length,
+    (_stats).n_nulls AS n_nulls,
+    (_stats).n_nan AS n_nan,
+    (_stats).n_zeros AS n_zeros,
+    (_stats).n_positive AS n_positive,
+    (_stats).n_negative AS n_negative,
+    (_stats).n_unique_values AS n_unique_values,
+    (_stats).is_constant AS is_constant,
+    (_stats).n_zeros_start AS n_zeros_start,
+    (_stats).n_zeros_end AS n_zeros_end,
+    (_stats).plateau_size AS plateau_size,
+    (_stats).plateau_size_nonzero AS plateau_size_nonzero,
+    (_stats).mean AS mean,
+    (_stats).median AS median,
+    (_stats).std_dev AS std_dev,
+    (_stats).variance AS variance,
+    (_stats).min AS min,
+    (_stats).max AS max,
+    (_stats).range AS range,
+    (_stats).sum AS sum,
+    (_stats).skewness AS skewness,
+    (_stats).kurtosis AS kurtosis,
+    (_stats).tail_index AS tail_index,
+    (_stats).bimodality_coef AS bimodality_coef,
+    (_stats).trimmed_mean AS trimmed_mean,
+    (_stats).coef_variation AS coef_variation,
+    (_stats).q1 AS q1,
+    (_stats).q3 AS q3,
+    (_stats).iqr AS iqr,
+    (_stats).autocorr_lag1 AS autocorr_lag1,
+    (_stats).trend_strength AS trend_strength,
+    (_stats).seasonality_strength AS seasonality_strength,
+    (_stats).entropy AS entropy,
+    (_stats).stability AS stability,
+    (_stats).expected_length AS expected_length,
+    (_stats).n_gaps AS n_gaps
+FROM stats_data
 )"},
 
     // ts_quality_report: Generate quality report from stats table
@@ -41,10 +83,10 @@ GROUP BY group_col
     {"ts_quality_report", {"stats_table", "min_length", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT
-    SUM(CASE WHEN (stats).length >= min_length AND NOT (stats).is_constant THEN 1 ELSE 0 END) AS n_passed,
-    SUM(CASE WHEN (stats).n_nan > 0 THEN 1 ELSE 0 END) AS n_nan_issues,
-    SUM(CASE WHEN (stats).n_nulls > 0 THEN 1 ELSE 0 END) AS n_missing_issues,
-    SUM(CASE WHEN (stats).is_constant THEN 1 ELSE 0 END) AS n_constant,
+    SUM(CASE WHEN length >= min_length AND NOT is_constant THEN 1 ELSE 0 END) AS n_passed,
+    SUM(CASE WHEN n_nan > 0 THEN 1 ELSE 0 END) AS n_nan_issues,
+    SUM(CASE WHEN n_nulls > 0 THEN 1 ELSE 0 END) AS n_missing_issues,
+    SUM(CASE WHEN is_constant THEN 1 ELSE 0 END) AS n_constant,
     COUNT(*) AS n_total
 FROM query_table(stats_table::VARCHAR)
 )"},
@@ -55,42 +97,57 @@ FROM query_table(stats_table::VARCHAR)
 R"(
 SELECT
     COUNT(*) AS n_series,
-    AVG((stats).length) AS avg_length,
-    MIN((stats).length) AS min_length,
-    MAX((stats).length) AS max_length,
-    SUM((stats).n_nulls) AS total_nulls,
-    SUM((stats).n_nan) AS total_nans
+    AVG(length) AS avg_length,
+    MIN(length) AS min_length,
+    MAX(length) AS max_length,
+    SUM(n_nulls) AS total_nulls,
+    SUM(n_nan) AS total_nans
 FROM query_table(stats_table::VARCHAR)
 )"},
 
     // ts_data_quality: Assess data quality per series
     // C++ API: ts_data_quality(table_name, unique_id_col, date_col, value_col, n_short, frequency)
+    // Returns: TABLE with expanded quality columns
     {"ts_data_quality", {"source", "unique_id_col", "date_col", "value_col", "n_short", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
+WITH quality_data AS (
+    SELECT
+        unique_id_col AS unique_id,
+        _ts_data_quality(LIST(value_col::DOUBLE ORDER BY date_col)) AS _quality
+    FROM query_table(source::VARCHAR)
+    GROUP BY unique_id_col
+)
 SELECT
-    unique_id_col AS unique_id,
-    _ts_data_quality(LIST(value_col::DOUBLE ORDER BY date_col)) AS quality
-FROM query_table(source::VARCHAR)
-GROUP BY unique_id_col
+    unique_id,
+    (_quality).structural_score AS structural_score,
+    (_quality).temporal_score AS temporal_score,
+    (_quality).magnitude_score AS magnitude_score,
+    (_quality).behavioral_score AS behavioral_score,
+    (_quality).overall_score AS overall_score,
+    (_quality).n_gaps AS n_gaps,
+    (_quality).n_missing AS n_missing,
+    (_quality).is_constant AS is_constant
+FROM quality_data
 )"},
 
     // ts_data_quality_summary: Summarize data quality across series
     // C++ API: ts_data_quality_summary(table_name, unique_id_col, date_col, value_col, n_short)
     {"ts_data_quality_summary", {"source", "unique_id_col", "date_col", "value_col", "n_short", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT
-    COUNT(*) AS n_total,
-    SUM(CASE WHEN (quality).overall_score >= 0.8 THEN 1 ELSE 0 END) AS n_good,
-    SUM(CASE WHEN (quality).overall_score >= 0.5 AND (quality).overall_score < 0.8 THEN 1 ELSE 0 END) AS n_fair,
-    SUM(CASE WHEN (quality).overall_score < 0.5 THEN 1 ELSE 0 END) AS n_poor,
-    AVG((quality).overall_score) AS avg_score
-FROM (
+WITH quality_data AS (
     SELECT
         unique_id_col AS unique_id,
-        _ts_data_quality(LIST(value_col::DOUBLE ORDER BY date_col)) AS quality
+        _ts_data_quality(LIST(value_col::DOUBLE ORDER BY date_col)) AS _quality
     FROM query_table(source::VARCHAR)
     GROUP BY unique_id_col
 )
+SELECT
+    COUNT(*) AS n_total,
+    SUM(CASE WHEN (_quality).overall_score >= 0.8 THEN 1 ELSE 0 END) AS n_good,
+    SUM(CASE WHEN (_quality).overall_score >= 0.5 AND (_quality).overall_score < 0.8 THEN 1 ELSE 0 END) AS n_fair,
+    SUM(CASE WHEN (_quality).overall_score < 0.5 THEN 1 ELSE 0 END) AS n_poor,
+    AVG((_quality).overall_score) AS avg_score
+FROM quality_data
 )"},
 
     // ts_drop_constant_by: Filter out constant series (table-based)
@@ -399,26 +456,73 @@ WHERE group_col IN (
 
     // ts_mstl_decomposition_by: MSTL decomposition for grouped series
     // C++ API: ts_mstl_decomposition_by(table_name, group_col, date_col, value_col, params MAP)
+    // Returns: TABLE with expanded decomposition columns
     {"ts_mstl_decomposition_by", {"source", "group_col", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
+WITH decomposition_data AS (
+    SELECT
+        group_col AS id,
+        _ts_mstl_decomposition(LIST(value_col::DOUBLE ORDER BY date_col)) AS _decomp
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+)
 SELECT
-    group_col AS id,
-    _ts_mstl_decomposition(LIST(value_col::DOUBLE ORDER BY date_col)) AS decomposition
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+    id,
+    (_decomp).trend AS trend,
+    (_decomp).seasonal AS seasonal,
+    (_decomp).remainder AS remainder,
+    (_decomp).periods AS periods
+FROM decomposition_data
+)"},
+
+    // ts_detrend_by: Remove trend from grouped time series
+    // C++ API: ts_detrend_by(table_name, group_col, date_col, value_col, method)
+    // method: 'linear', 'quadratic', 'cubic', 'auto' (default: 'auto')
+    // Returns: TABLE(id, trend[], detrended[], method, coefficients[], rss, n_params)
+    {"ts_detrend_by", {"source", "group_col", "date_col", "value_col", "method", nullptr}, {{nullptr, nullptr}},
+R"(
+WITH detrend_data AS (
+    SELECT
+        group_col AS id,
+        ts_detrend(LIST(value_col::DOUBLE ORDER BY date_col), method::VARCHAR) AS _detrend
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+)
+SELECT
+    id,
+    (_detrend).trend AS trend,
+    (_detrend).detrended AS detrended,
+    (_detrend).method AS method,
+    (_detrend).coefficients AS coefficients,
+    (_detrend).rss AS rss,
+    (_detrend).n_params AS n_params
+FROM detrend_data
 )"},
 
     // ts_classify_seasonality_by: Classify seasonality type per group
     // C++ API: ts_classify_seasonality_by(table_name, group_col, date_col, value_col, period)
-    // Returns: STRUCT(timing_classification, modulation_type, has_stable_timing, timing_variability,
-    //                 seasonal_strength, is_seasonal, cycle_strengths[], weak_seasons[])
+    // Returns: TABLE(id, timing_classification, modulation_type, has_stable_timing, timing_variability,
+    //                seasonal_strength, is_seasonal, cycle_strengths[], weak_seasons[])
     {"ts_classify_seasonality_by", {"source", "group_col", "date_col", "value_col", "period", nullptr}, {{nullptr, nullptr}},
 R"(
+WITH classification_data AS (
+    SELECT
+        group_col AS id,
+        ts_classify_seasonality_agg(date_col, value_col::DOUBLE, period::DOUBLE) AS _cls
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+)
 SELECT
-    group_col AS id,
-    ts_classify_seasonality_agg(date_col, value_col::DOUBLE, period::DOUBLE) AS classification
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+    id,
+    (_cls).timing_classification AS timing_classification,
+    (_cls).modulation_type AS modulation_type,
+    (_cls).has_stable_timing AS has_stable_timing,
+    (_cls).timing_variability AS timing_variability,
+    (_cls).seasonal_strength AS seasonal_strength,
+    (_cls).is_seasonal AS is_seasonal,
+    (_cls).cycle_strengths AS cycle_strengths,
+    (_cls).weak_seasons AS weak_seasons
+FROM classification_data
 )"},
 
     // ts_detect_changepoints: Detect changepoints in a single series
@@ -1874,60 +1978,369 @@ FROM src
 
     // ts_stats_by: Alias for ts_stats (for API consistency with _by naming pattern)
     // C++ API: ts_stats_by(table_name, group_col, date_col, value_col, frequency)
+    // Returns: TABLE with expanded statistics columns
     {"ts_stats_by", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
+WITH stats_data AS (
+    SELECT
+        group_col AS id,
+        _ts_stats_with_dates(
+            LIST(value_col::DOUBLE ORDER BY date_col),
+            LIST(date_col::TIMESTAMP ORDER BY date_col),
+            frequency::VARCHAR
+        ) AS _stats
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+)
 SELECT
-    group_col AS id,
-    _ts_stats_with_dates(
-        LIST(value_col::DOUBLE ORDER BY date_col),
-        LIST(date_col::TIMESTAMP ORDER BY date_col),
-        frequency::VARCHAR
-    ) AS stats
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+    id,
+    (_stats).length AS length,
+    (_stats).n_nulls AS n_nulls,
+    (_stats).n_nan AS n_nan,
+    (_stats).n_zeros AS n_zeros,
+    (_stats).n_positive AS n_positive,
+    (_stats).n_negative AS n_negative,
+    (_stats).n_unique_values AS n_unique_values,
+    (_stats).is_constant AS is_constant,
+    (_stats).n_zeros_start AS n_zeros_start,
+    (_stats).n_zeros_end AS n_zeros_end,
+    (_stats).plateau_size AS plateau_size,
+    (_stats).plateau_size_nonzero AS plateau_size_nonzero,
+    (_stats).mean AS mean,
+    (_stats).median AS median,
+    (_stats).std_dev AS std_dev,
+    (_stats).variance AS variance,
+    (_stats).min AS min,
+    (_stats).max AS max,
+    (_stats).range AS range,
+    (_stats).sum AS sum,
+    (_stats).skewness AS skewness,
+    (_stats).kurtosis AS kurtosis,
+    (_stats).tail_index AS tail_index,
+    (_stats).bimodality_coef AS bimodality_coef,
+    (_stats).trimmed_mean AS trimmed_mean,
+    (_stats).coef_variation AS coef_variation,
+    (_stats).q1 AS q1,
+    (_stats).q3 AS q3,
+    (_stats).iqr AS iqr,
+    (_stats).autocorr_lag1 AS autocorr_lag1,
+    (_stats).trend_strength AS trend_strength,
+    (_stats).seasonality_strength AS seasonality_strength,
+    (_stats).entropy AS entropy,
+    (_stats).stability AS stability,
+    (_stats).expected_length AS expected_length,
+    (_stats).n_gaps AS n_gaps
+FROM stats_data
 )"},
 
     // ts_data_quality_by: Alias for ts_data_quality (for API consistency with _by naming pattern)
     // C++ API: ts_data_quality_by(table_name, unique_id_col, date_col, value_col, n_short, frequency)
+    // Returns: TABLE with expanded quality columns
     {"ts_data_quality_by", {"source", "unique_id_col", "date_col", "value_col", "n_short", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
+WITH quality_data AS (
+    SELECT
+        unique_id_col AS unique_id,
+        _ts_data_quality(LIST(value_col::DOUBLE ORDER BY date_col)) AS _quality
+    FROM query_table(source::VARCHAR)
+    GROUP BY unique_id_col
+)
 SELECT
-    unique_id_col AS unique_id,
-    _ts_data_quality(LIST(value_col::DOUBLE ORDER BY date_col)) AS quality
-FROM query_table(source::VARCHAR)
-GROUP BY unique_id_col
+    unique_id,
+    (_quality).structural_score AS structural_score,
+    (_quality).temporal_score AS temporal_score,
+    (_quality).magnitude_score AS magnitude_score,
+    (_quality).behavioral_score AS behavioral_score,
+    (_quality).overall_score AS overall_score,
+    (_quality).n_gaps AS n_gaps,
+    (_quality).n_missing AS n_missing,
+    (_quality).is_constant AS is_constant
+FROM quality_data
 )"},
 
     // ts_features_table: Extract features from a single-series table
     // C++ API: ts_features_table(table_name, date_col, value_col)
-    // Returns: STRUCT with all feature values
+    // Returns: TABLE with 117 expanded feature columns
     {"ts_features_table", {"source", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
+WITH features_data AS (
+    SELECT ts_features_agg(date_col, value_col::DOUBLE) AS _feat
+    FROM query_table(source::VARCHAR)
+)
 SELECT
-    ts_features_agg(date_col, value_col::DOUBLE) AS features
-FROM query_table(source::VARCHAR)
+    (_feat).abs_energy AS abs_energy,
+    (_feat).absolute_sum_of_changes AS absolute_sum_of_changes,
+    (_feat).agg_linear_trend_intercept AS agg_linear_trend_intercept,
+    (_feat).agg_linear_trend_rvalue AS agg_linear_trend_rvalue,
+    (_feat).agg_linear_trend_slope AS agg_linear_trend_slope,
+    (_feat).agg_linear_trend_stderr AS agg_linear_trend_stderr,
+    (_feat).approximate_entropy AS approximate_entropy,
+    (_feat).autocorrelation_lag1 AS autocorrelation_lag1,
+    (_feat).autocorrelation_lag2 AS autocorrelation_lag2,
+    (_feat).autocorrelation_lag3 AS autocorrelation_lag3,
+    (_feat).autocorrelation_lag4 AS autocorrelation_lag4,
+    (_feat).autocorrelation_lag5 AS autocorrelation_lag5,
+    (_feat).autocorrelation_lag6 AS autocorrelation_lag6,
+    (_feat).autocorrelation_lag7 AS autocorrelation_lag7,
+    (_feat).autocorrelation_lag8 AS autocorrelation_lag8,
+    (_feat).autocorrelation_lag9 AS autocorrelation_lag9,
+    (_feat).benford_correlation AS benford_correlation,
+    (_feat).binned_entropy AS binned_entropy,
+    (_feat).c3_lag1 AS c3_lag1,
+    (_feat).c3_lag2 AS c3_lag2,
+    (_feat).c3_lag3 AS c3_lag3,
+    (_feat).cid_ce AS cid_ce,
+    (_feat).count_above_mean AS count_above_mean,
+    (_feat).count_below_mean AS count_below_mean,
+    (_feat).count_unique AS count_unique,
+    (_feat).fft_coefficient_0_abs AS fft_coefficient_0_abs,
+    (_feat).fft_coefficient_0_imag AS fft_coefficient_0_imag,
+    (_feat).fft_coefficient_0_real AS fft_coefficient_0_real,
+    (_feat).fft_coefficient_1_abs AS fft_coefficient_1_abs,
+    (_feat).fft_coefficient_1_imag AS fft_coefficient_1_imag,
+    (_feat).fft_coefficient_1_real AS fft_coefficient_1_real,
+    (_feat).fft_coefficient_2_abs AS fft_coefficient_2_abs,
+    (_feat).fft_coefficient_2_imag AS fft_coefficient_2_imag,
+    (_feat).fft_coefficient_2_real AS fft_coefficient_2_real,
+    (_feat).fft_coefficient_3_abs AS fft_coefficient_3_abs,
+    (_feat).fft_coefficient_3_imag AS fft_coefficient_3_imag,
+    (_feat).fft_coefficient_3_real AS fft_coefficient_3_real,
+    (_feat).fft_coefficient_4_abs AS fft_coefficient_4_abs,
+    (_feat).fft_coefficient_4_imag AS fft_coefficient_4_imag,
+    (_feat).fft_coefficient_4_real AS fft_coefficient_4_real,
+    (_feat).fft_coefficient_5_abs AS fft_coefficient_5_abs,
+    (_feat).fft_coefficient_5_imag AS fft_coefficient_5_imag,
+    (_feat).fft_coefficient_5_real AS fft_coefficient_5_real,
+    (_feat).fft_coefficient_6_abs AS fft_coefficient_6_abs,
+    (_feat).fft_coefficient_6_imag AS fft_coefficient_6_imag,
+    (_feat).fft_coefficient_6_real AS fft_coefficient_6_real,
+    (_feat).fft_coefficient_7_abs AS fft_coefficient_7_abs,
+    (_feat).fft_coefficient_7_imag AS fft_coefficient_7_imag,
+    (_feat).fft_coefficient_7_real AS fft_coefficient_7_real,
+    (_feat).fft_coefficient_8_abs AS fft_coefficient_8_abs,
+    (_feat).fft_coefficient_8_imag AS fft_coefficient_8_imag,
+    (_feat).fft_coefficient_8_real AS fft_coefficient_8_real,
+    (_feat).fft_coefficient_9_abs AS fft_coefficient_9_abs,
+    (_feat).fft_coefficient_9_imag AS fft_coefficient_9_imag,
+    (_feat).fft_coefficient_9_real AS fft_coefficient_9_real,
+    (_feat).first_location_of_maximum AS first_location_of_maximum,
+    (_feat).first_location_of_minimum AS first_location_of_minimum,
+    (_feat).first_value AS first_value,
+    (_feat).has_duplicate AS has_duplicate,
+    (_feat).has_duplicate_max AS has_duplicate_max,
+    (_feat).has_duplicate_min AS has_duplicate_min,
+    (_feat).kurtosis AS kurtosis,
+    (_feat).large_standard_deviation AS large_standard_deviation,
+    (_feat).last_location_of_maximum AS last_location_of_maximum,
+    (_feat).last_location_of_minimum AS last_location_of_minimum,
+    (_feat).last_value AS last_value,
+    (_feat).lempel_ziv_complexity AS lempel_ziv_complexity,
+    (_feat).length AS length,
+    (_feat).linear_trend_intercept AS linear_trend_intercept,
+    (_feat).linear_trend_r_squared AS linear_trend_r_squared,
+    (_feat).linear_trend_slope AS linear_trend_slope,
+    (_feat).longest_strike_above_mean AS longest_strike_above_mean,
+    (_feat).longest_strike_below_mean AS longest_strike_below_mean,
+    (_feat).maximum AS maximum,
+    (_feat).mean AS mean,
+    (_feat).mean_abs_change AS mean_abs_change,
+    (_feat).mean_change AS mean_change,
+    (_feat).mean_second_derivative_central AS mean_second_derivative_central,
+    (_feat).median AS median,
+    (_feat).minimum AS minimum,
+    (_feat).number_peaks AS number_peaks,
+    (_feat).number_peaks_threshold_1 AS number_peaks_threshold_1,
+    (_feat).number_peaks_threshold_2 AS number_peaks_threshold_2,
+    (_feat).partial_autocorrelation_lag1 AS partial_autocorrelation_lag1,
+    (_feat).partial_autocorrelation_lag2 AS partial_autocorrelation_lag2,
+    (_feat).partial_autocorrelation_lag3 AS partial_autocorrelation_lag3,
+    (_feat).partial_autocorrelation_lag4 AS partial_autocorrelation_lag4,
+    (_feat).partial_autocorrelation_lag5 AS partial_autocorrelation_lag5,
+    (_feat).percentage_above_mean AS percentage_above_mean,
+    (_feat).percentage_of_reoccurring_datapoints_to_all_datapoints AS percentage_of_reoccurring_datapoints_to_all_datapoints,
+    (_feat).percentage_of_reoccurring_values_to_all_values AS percentage_of_reoccurring_values_to_all_values,
+    (_feat).permutation_entropy AS permutation_entropy,
+    (_feat)."quantile_0.1" AS "quantile_0.1",
+    (_feat)."quantile_0.25" AS "quantile_0.25",
+    (_feat)."quantile_0.75" AS "quantile_0.75",
+    (_feat)."quantile_0.9" AS "quantile_0.9",
+    (_feat).range AS range,
+    (_feat).ratio_beyond_r_sigma_1 AS ratio_beyond_r_sigma_1,
+    (_feat).ratio_beyond_r_sigma_2 AS ratio_beyond_r_sigma_2,
+    (_feat).ratio_beyond_r_sigma_3 AS ratio_beyond_r_sigma_3,
+    (_feat).ratio_value_number_to_length AS ratio_value_number_to_length,
+    (_feat).root_mean_square AS root_mean_square,
+    (_feat).sample_entropy AS sample_entropy,
+    (_feat).skewness AS skewness,
+    (_feat).spectral_centroid AS spectral_centroid,
+    (_feat).spectral_variance AS spectral_variance,
+    (_feat).standard_deviation AS standard_deviation,
+    (_feat).sum AS sum,
+    (_feat).sum_of_reoccurring_datapoints AS sum_of_reoccurring_datapoints,
+    (_feat).sum_of_reoccurring_values AS sum_of_reoccurring_values,
+    (_feat).time_reversal_asymmetry_stat_1 AS time_reversal_asymmetry_stat_1,
+    (_feat).time_reversal_asymmetry_stat_2 AS time_reversal_asymmetry_stat_2,
+    (_feat).time_reversal_asymmetry_stat_3 AS time_reversal_asymmetry_stat_3,
+    (_feat).variance AS variance,
+    (_feat).variation_coefficient AS variation_coefficient,
+    (_feat).zero_crossing_rate AS zero_crossing_rate
+FROM features_data
 )"},
 
     // ts_features_by: Extract features per group
     // C++ API: ts_features_by(table_name, group_col, date_col, value_col)
-    // Returns: TABLE(id, features STRUCT)
+    // Returns: TABLE with id and 117 expanded feature columns
     {"ts_features_by", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
+WITH features_data AS (
+    SELECT
+        group_col AS id,
+        ts_features_agg(date_col, value_col::DOUBLE) AS _feat
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+)
 SELECT
-    group_col AS id,
-    ts_features_agg(date_col, value_col::DOUBLE) AS features
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+    id,
+    (_feat).abs_energy AS abs_energy,
+    (_feat).absolute_sum_of_changes AS absolute_sum_of_changes,
+    (_feat).agg_linear_trend_intercept AS agg_linear_trend_intercept,
+    (_feat).agg_linear_trend_rvalue AS agg_linear_trend_rvalue,
+    (_feat).agg_linear_trend_slope AS agg_linear_trend_slope,
+    (_feat).agg_linear_trend_stderr AS agg_linear_trend_stderr,
+    (_feat).approximate_entropy AS approximate_entropy,
+    (_feat).autocorrelation_lag1 AS autocorrelation_lag1,
+    (_feat).autocorrelation_lag2 AS autocorrelation_lag2,
+    (_feat).autocorrelation_lag3 AS autocorrelation_lag3,
+    (_feat).autocorrelation_lag4 AS autocorrelation_lag4,
+    (_feat).autocorrelation_lag5 AS autocorrelation_lag5,
+    (_feat).autocorrelation_lag6 AS autocorrelation_lag6,
+    (_feat).autocorrelation_lag7 AS autocorrelation_lag7,
+    (_feat).autocorrelation_lag8 AS autocorrelation_lag8,
+    (_feat).autocorrelation_lag9 AS autocorrelation_lag9,
+    (_feat).benford_correlation AS benford_correlation,
+    (_feat).binned_entropy AS binned_entropy,
+    (_feat).c3_lag1 AS c3_lag1,
+    (_feat).c3_lag2 AS c3_lag2,
+    (_feat).c3_lag3 AS c3_lag3,
+    (_feat).cid_ce AS cid_ce,
+    (_feat).count_above_mean AS count_above_mean,
+    (_feat).count_below_mean AS count_below_mean,
+    (_feat).count_unique AS count_unique,
+    (_feat).fft_coefficient_0_abs AS fft_coefficient_0_abs,
+    (_feat).fft_coefficient_0_imag AS fft_coefficient_0_imag,
+    (_feat).fft_coefficient_0_real AS fft_coefficient_0_real,
+    (_feat).fft_coefficient_1_abs AS fft_coefficient_1_abs,
+    (_feat).fft_coefficient_1_imag AS fft_coefficient_1_imag,
+    (_feat).fft_coefficient_1_real AS fft_coefficient_1_real,
+    (_feat).fft_coefficient_2_abs AS fft_coefficient_2_abs,
+    (_feat).fft_coefficient_2_imag AS fft_coefficient_2_imag,
+    (_feat).fft_coefficient_2_real AS fft_coefficient_2_real,
+    (_feat).fft_coefficient_3_abs AS fft_coefficient_3_abs,
+    (_feat).fft_coefficient_3_imag AS fft_coefficient_3_imag,
+    (_feat).fft_coefficient_3_real AS fft_coefficient_3_real,
+    (_feat).fft_coefficient_4_abs AS fft_coefficient_4_abs,
+    (_feat).fft_coefficient_4_imag AS fft_coefficient_4_imag,
+    (_feat).fft_coefficient_4_real AS fft_coefficient_4_real,
+    (_feat).fft_coefficient_5_abs AS fft_coefficient_5_abs,
+    (_feat).fft_coefficient_5_imag AS fft_coefficient_5_imag,
+    (_feat).fft_coefficient_5_real AS fft_coefficient_5_real,
+    (_feat).fft_coefficient_6_abs AS fft_coefficient_6_abs,
+    (_feat).fft_coefficient_6_imag AS fft_coefficient_6_imag,
+    (_feat).fft_coefficient_6_real AS fft_coefficient_6_real,
+    (_feat).fft_coefficient_7_abs AS fft_coefficient_7_abs,
+    (_feat).fft_coefficient_7_imag AS fft_coefficient_7_imag,
+    (_feat).fft_coefficient_7_real AS fft_coefficient_7_real,
+    (_feat).fft_coefficient_8_abs AS fft_coefficient_8_abs,
+    (_feat).fft_coefficient_8_imag AS fft_coefficient_8_imag,
+    (_feat).fft_coefficient_8_real AS fft_coefficient_8_real,
+    (_feat).fft_coefficient_9_abs AS fft_coefficient_9_abs,
+    (_feat).fft_coefficient_9_imag AS fft_coefficient_9_imag,
+    (_feat).fft_coefficient_9_real AS fft_coefficient_9_real,
+    (_feat).first_location_of_maximum AS first_location_of_maximum,
+    (_feat).first_location_of_minimum AS first_location_of_minimum,
+    (_feat).first_value AS first_value,
+    (_feat).has_duplicate AS has_duplicate,
+    (_feat).has_duplicate_max AS has_duplicate_max,
+    (_feat).has_duplicate_min AS has_duplicate_min,
+    (_feat).kurtosis AS kurtosis,
+    (_feat).large_standard_deviation AS large_standard_deviation,
+    (_feat).last_location_of_maximum AS last_location_of_maximum,
+    (_feat).last_location_of_minimum AS last_location_of_minimum,
+    (_feat).last_value AS last_value,
+    (_feat).lempel_ziv_complexity AS lempel_ziv_complexity,
+    (_feat).length AS length,
+    (_feat).linear_trend_intercept AS linear_trend_intercept,
+    (_feat).linear_trend_r_squared AS linear_trend_r_squared,
+    (_feat).linear_trend_slope AS linear_trend_slope,
+    (_feat).longest_strike_above_mean AS longest_strike_above_mean,
+    (_feat).longest_strike_below_mean AS longest_strike_below_mean,
+    (_feat).maximum AS maximum,
+    (_feat).mean AS mean,
+    (_feat).mean_abs_change AS mean_abs_change,
+    (_feat).mean_change AS mean_change,
+    (_feat).mean_second_derivative_central AS mean_second_derivative_central,
+    (_feat).median AS median,
+    (_feat).minimum AS minimum,
+    (_feat).number_peaks AS number_peaks,
+    (_feat).number_peaks_threshold_1 AS number_peaks_threshold_1,
+    (_feat).number_peaks_threshold_2 AS number_peaks_threshold_2,
+    (_feat).partial_autocorrelation_lag1 AS partial_autocorrelation_lag1,
+    (_feat).partial_autocorrelation_lag2 AS partial_autocorrelation_lag2,
+    (_feat).partial_autocorrelation_lag3 AS partial_autocorrelation_lag3,
+    (_feat).partial_autocorrelation_lag4 AS partial_autocorrelation_lag4,
+    (_feat).partial_autocorrelation_lag5 AS partial_autocorrelation_lag5,
+    (_feat).percentage_above_mean AS percentage_above_mean,
+    (_feat).percentage_of_reoccurring_datapoints_to_all_datapoints AS percentage_of_reoccurring_datapoints_to_all_datapoints,
+    (_feat).percentage_of_reoccurring_values_to_all_values AS percentage_of_reoccurring_values_to_all_values,
+    (_feat).permutation_entropy AS permutation_entropy,
+    (_feat)."quantile_0.1" AS "quantile_0.1",
+    (_feat)."quantile_0.25" AS "quantile_0.25",
+    (_feat)."quantile_0.75" AS "quantile_0.75",
+    (_feat)."quantile_0.9" AS "quantile_0.9",
+    (_feat).range AS range,
+    (_feat).ratio_beyond_r_sigma_1 AS ratio_beyond_r_sigma_1,
+    (_feat).ratio_beyond_r_sigma_2 AS ratio_beyond_r_sigma_2,
+    (_feat).ratio_beyond_r_sigma_3 AS ratio_beyond_r_sigma_3,
+    (_feat).ratio_value_number_to_length AS ratio_value_number_to_length,
+    (_feat).root_mean_square AS root_mean_square,
+    (_feat).sample_entropy AS sample_entropy,
+    (_feat).skewness AS skewness,
+    (_feat).spectral_centroid AS spectral_centroid,
+    (_feat).spectral_variance AS spectral_variance,
+    (_feat).standard_deviation AS standard_deviation,
+    (_feat).sum AS sum,
+    (_feat).sum_of_reoccurring_datapoints AS sum_of_reoccurring_datapoints,
+    (_feat).sum_of_reoccurring_values AS sum_of_reoccurring_values,
+    (_feat).time_reversal_asymmetry_stat_1 AS time_reversal_asymmetry_stat_1,
+    (_feat).time_reversal_asymmetry_stat_2 AS time_reversal_asymmetry_stat_2,
+    (_feat).time_reversal_asymmetry_stat_3 AS time_reversal_asymmetry_stat_3,
+    (_feat).variance AS variance,
+    (_feat).variation_coefficient AS variation_coefficient,
+    (_feat).zero_crossing_rate AS zero_crossing_rate
+FROM features_data
 )"},
 
     // ts_classify_seasonality: Classify seasonality for a single series
     // C++ API: ts_classify_seasonality(table_name, date_col, value_col, period)
-    // Returns: STRUCT with classification results
+    // Returns: TABLE(timing_classification, modulation_type, has_stable_timing, timing_variability,
+    //                seasonal_strength, is_seasonal, cycle_strengths[], weak_seasons[])
     {"ts_classify_seasonality", {"source", "date_col", "value_col", "period", nullptr}, {{nullptr, nullptr}},
 R"(
+WITH classification_data AS (
+    SELECT
+        ts_classify_seasonality_agg(date_col, value_col::DOUBLE, period::DOUBLE) AS _cls
+    FROM query_table(source::VARCHAR)
+)
 SELECT
-    ts_classify_seasonality_agg(date_col, value_col::DOUBLE, period::DOUBLE) AS classification
-FROM query_table(source::VARCHAR)
+    (_cls).timing_classification AS timing_classification,
+    (_cls).modulation_type AS modulation_type,
+    (_cls).has_stable_timing AS has_stable_timing,
+    (_cls).timing_variability AS timing_variability,
+    (_cls).seasonal_strength AS seasonal_strength,
+    (_cls).is_seasonal AS is_seasonal,
+    (_cls).cycle_strengths AS cycle_strengths,
+    (_cls).weak_seasons AS weak_seasons
+FROM classification_data
 )"},
 
     // ================================================================================
@@ -1937,93 +2350,153 @@ FROM query_table(source::VARCHAR)
     // ts_detect_periods: Detect periods for a single series
     // C++ API: ts_detect_periods(table_name, date_col, value_col, params)
     // params: method (default 'fft') - 'fft' or 'acf'
-    // Returns: TABLE(periods STRUCT)
+    //         max_period (default 365) - maximum period to search
+    //         min_confidence (default: method-specific) - minimum confidence threshold
+    // Returns: TABLE with expanded period columns
     {"ts_detect_periods", {"source", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
+WITH periods_data AS (
+    SELECT
+        _ts_detect_periods(
+            LIST(value_col::DOUBLE ORDER BY date_col),
+            COALESCE(json_extract_string(to_json(params), '$.method'), 'fft'),
+            COALESCE(CAST(json_extract(to_json(params), '$.max_period') AS BIGINT), 0),
+            COALESCE(CAST(json_extract(to_json(params), '$.min_confidence') AS DOUBLE), -1.0)
+        ) AS _periods
+    FROM query_table(source::VARCHAR)
+)
 SELECT
-    _ts_detect_periods(
-        LIST(value_col::DOUBLE ORDER BY date_col),
-        COALESCE(json_extract_string(to_json(params), '$.method'), 'fft')
-    ) AS periods
-FROM query_table(source::VARCHAR)
+    (_periods).periods AS periods,
+    (_periods).n_periods AS n_periods,
+    (_periods).primary_period AS primary_period,
+    (_periods).method AS method
+FROM periods_data
 )"},
 
     // ts_detect_periods_by: Detect periods for grouped series
     // C++ API: ts_detect_periods_by(table_name, group_col, date_col, value_col, params)
     // params: method (default 'fft') - 'fft' or 'acf'
-    // Returns: TABLE(id, periods STRUCT)
+    //         max_period (default 365) - maximum period to search (suitable for daily data)
+    //         min_confidence (default: method-specific) - minimum confidence threshold
+    //                        Use 0 to disable filtering, positive value for custom threshold
+    // Returns: TABLE with id and expanded period columns
     {"ts_detect_periods_by", {"source", "group_col", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
+WITH periods_data AS (
+    SELECT
+        group_col AS id,
+        _ts_detect_periods(
+            LIST(value_col::DOUBLE ORDER BY date_col),
+            COALESCE(json_extract_string(to_json(params), '$.method'), 'fft'),
+            COALESCE(CAST(json_extract(to_json(params), '$.max_period') AS BIGINT), 0),
+            COALESCE(CAST(json_extract(to_json(params), '$.min_confidence') AS DOUBLE), -1.0)
+        ) AS _periods
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+)
 SELECT
-    group_col AS id,
-    _ts_detect_periods(
-        LIST(value_col::DOUBLE ORDER BY date_col),
-        COALESCE(json_extract_string(to_json(params), '$.method'), 'fft')
-    ) AS periods
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+    id,
+    (_periods).periods AS periods,
+    (_periods).n_periods AS n_periods,
+    (_periods).primary_period AS primary_period,
+    (_periods).method AS method
+FROM periods_data
 )"},
 
     // ts_detect_peaks_by: Detect peaks for grouped series
     // C++ API: ts_detect_peaks_by(table_name, group_col, date_col, value_col, params)
     // params: min_distance, min_prominence, smooth_first
-    // Returns: TABLE(id, peaks STRUCT)
+    // Returns: TABLE with id and expanded peak columns
     {"ts_detect_peaks_by", {"source", "group_col", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
+WITH peaks_data AS (
+    SELECT
+        group_col AS id,
+        ts_detect_peaks(
+            LIST(value_col::DOUBLE ORDER BY date_col),
+            COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.min_distance') AS DOUBLE), 1.0),
+            COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.min_prominence') AS DOUBLE), 0.0),
+            COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.smooth_first') AS BOOLEAN), false)
+        ) AS _peaks
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+)
 SELECT
-    group_col AS id,
-    ts_detect_peaks(
-        LIST(value_col::DOUBLE ORDER BY date_col),
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.min_distance') AS DOUBLE), 1.0),
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.min_prominence') AS DOUBLE), 0.0),
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.smooth_first') AS BOOLEAN), false)
-    ) AS peaks
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+    id,
+    (_peaks).peaks AS peaks,
+    (_peaks).n_peaks AS n_peaks,
+    (_peaks).inter_peak_distances AS inter_peak_distances,
+    (_peaks).mean_period AS mean_period
+FROM peaks_data
 )"},
 
     // ts_detect_peaks: Detect peaks for a single series
     // C++ API: ts_detect_peaks(table_name, date_col, value_col, params)
     // params: min_distance, min_prominence, smooth_first
-    // Returns: TABLE(peaks STRUCT)
+    // Returns: TABLE with expanded peak columns
     {"ts_detect_peaks", {"source", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
+WITH peaks_data AS (
+    SELECT
+        ts_detect_peaks(
+            LIST(value_col::DOUBLE ORDER BY date_col),
+            COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.min_distance') AS DOUBLE), 1.0),
+            COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.min_prominence') AS DOUBLE), 0.0),
+            COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.smooth_first') AS BOOLEAN), false)
+        ) AS _peaks
+    FROM query_table(source::VARCHAR)
+)
 SELECT
-    ts_detect_peaks(
-        LIST(value_col::DOUBLE ORDER BY date_col),
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.min_distance') AS DOUBLE), 1.0),
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.min_prominence') AS DOUBLE), 0.0),
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.smooth_first') AS BOOLEAN), false)
-    ) AS peaks
-FROM query_table(source::VARCHAR)
+    (_peaks).peaks AS peaks,
+    (_peaks).n_peaks AS n_peaks,
+    (_peaks).inter_peak_distances AS inter_peak_distances,
+    (_peaks).mean_period AS mean_period
+FROM peaks_data
 )"},
 
     // ts_analyze_peak_timing_by: Analyze peak timing for grouped series
     // C++ API: ts_analyze_peak_timing_by(table_name, group_col, date_col, value_col, period, params)
-    // Returns: TABLE(id, timing STRUCT)
+    // Returns: TABLE with id and expanded timing columns
     {"ts_analyze_peak_timing_by", {"source", "group_col", "date_col", "value_col", "period", "params", nullptr}, {{nullptr, nullptr}},
 R"(
+WITH timing_data AS (
+    SELECT
+        group_col AS id,
+        ts_analyze_peak_timing(
+            LIST(value_col::DOUBLE ORDER BY date_col),
+            period::DOUBLE
+        ) AS _timing
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+)
 SELECT
-    group_col AS id,
-    ts_analyze_peak_timing(
-        LIST(value_col::DOUBLE ORDER BY date_col),
-        period::DOUBLE
-    ) AS timing
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+    id,
+    (_timing).n_peaks AS n_peaks,
+    (_timing).peak_times AS peak_times,
+    (_timing).variability_score AS variability_score,
+    (_timing).is_stable AS is_stable
+FROM timing_data
 )"},
 
     // ts_analyze_peak_timing: Analyze peak timing for a single series
     // C++ API: ts_analyze_peak_timing(table_name, date_col, value_col, period, params)
-    // Returns: TABLE(timing STRUCT)
+    // Returns: TABLE with expanded timing columns
     {"ts_analyze_peak_timing", {"source", "date_col", "value_col", "period", "params", nullptr}, {{nullptr, nullptr}},
 R"(
+WITH timing_data AS (
+    SELECT
+        ts_analyze_peak_timing(
+            LIST(value_col::DOUBLE ORDER BY date_col),
+            period::DOUBLE
+        ) AS _timing
+    FROM query_table(source::VARCHAR)
+)
 SELECT
-    ts_analyze_peak_timing(
-        LIST(value_col::DOUBLE ORDER BY date_col),
-        period::DOUBLE
-    ) AS timing
-FROM query_table(source::VARCHAR)
+    (_timing).n_peaks AS n_peaks,
+    (_timing).peak_times AS peak_times,
+    (_timing).variability_score AS variability_score,
+    (_timing).is_stable AS is_stable
+FROM timing_data
 )"},
 
     // ================================================================================

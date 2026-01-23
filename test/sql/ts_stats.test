@@ -25,21 +25,21 @@ FROM generate_series(0, 4) AS t(i);
 
 # Test basic ts_stats table function
 query II
-SELECT id, (stats).length FROM ts_stats('test_series', id, date, value, '1 day') ORDER BY id;
+SELECT id, length FROM ts_stats('test_series', id, date, value, '1 day') ORDER BY id;
 ----
 A	5
 B	5
 
 # Test mean calculation
 query IR
-SELECT id, (stats).mean FROM ts_stats('test_series', id, date, value, '1 day') ORDER BY id;
+SELECT id, mean FROM ts_stats('test_series', id, date, value, '1 day') ORDER BY id;
 ----
 A	3.0
 B	4.0
 
 # Test min/max
 query IRR
-SELECT id, (stats).min, (stats).max FROM ts_stats('test_series', id, date, value, '1 day') ORDER BY id;
+SELECT id, min, max FROM ts_stats('test_series', id, date, value, '1 day') ORDER BY id;
 ----
 A	1.0	5.0
 B	0.0	8.0

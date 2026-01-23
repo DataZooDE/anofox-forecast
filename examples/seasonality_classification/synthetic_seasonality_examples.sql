@@ -1,294 +1,271 @@
 -- ============================================================================
--- Synthetic Seasonality Classification Examples
+-- Seasonality Classification Examples - Synthetic Data
 -- ============================================================================
--- This file demonstrates seasonality classification using synthetic
--- (generated) data. Use this to learn the API before applying to your datasets.
+-- This script demonstrates seasonality classification with the anofox-forecast
+-- extension using the ts_classify_seasonality_by table macro.
 --
--- Patterns included:
---   1. Basic Classification - Classify seasonality type with ts_classify_seasonality
---   2. Aggregate Classification - Group-level analysis with ts_classify_seasonality_agg
---   3. Table Macro - Batch processing with ts_classify_seasonality_by
---
--- Prerequisites:
---   - anofox_forecast extension loaded
+-- Run: ./build/release/duckdb < examples/seasonality_classification/synthetic_seasonality_examples.sql
 -- ============================================================================
 
--- Load the extension
-LOAD 'build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension';
+-- Load extension
+LOAD anofox_forecast;
+INSTALL json;
+LOAD json;
+
+.print '============================================================================='
+.print 'SEASONALITY CLASSIFICATION EXAMPLES - Using ts_classify_seasonality_by'
+.print '============================================================================='
 
 -- ============================================================================
--- PATTERN 1: Basic Seasonality Classification
+-- SECTION 1: Basic Seasonality Classification for Multiple Series
 -- ============================================================================
--- Scenario: Classify the type of seasonal pattern in time series
--- Use cases: Forecasting method selection, demand characterization, pattern recognition
+-- Use ts_classify_seasonality_by to classify seasonality type across grouped series.
 
-SELECT
-    '=== Pattern 1: Basic Seasonality Classification ===' AS section;
+.print ''
+.print '>>> SECTION 1: Basic Seasonality Classification'
+.print '-----------------------------------------------------------------------------'
 
--- Section 1.1: Generate stable weekly seasonal data
-SELECT 'Section 1.1: Stable Weekly Seasonal Pattern' AS step;
-
--- Create weekly seasonal data: 12 weeks of daily data
-CREATE OR REPLACE TABLE weekly_seasonal AS
-SELECT
-    '2024-01-01'::DATE + (i * INTERVAL '1 day') AS date,
-    i + 1 AS day_index,
-    EXTRACT(DOW FROM ('2024-01-01'::DATE + (i * INTERVAL '1 day')))::INT AS day_of_week,
-    ROUND(
-        1000.0  -- base value
-        + 400.0 * SIN(2 * PI() * (i % 7) / 7.0)  -- weekly pattern
-        + 200.0 * COS(2 * PI() * (i % 7) / 7.0)  -- secondary weekly component
-        + (RANDOM() - 0.5) * 50  -- small noise
-    , 2) AS value
-FROM generate_series(0, 83) AS t(i);  -- 84 days = 12 weeks
-
--- Classify the seasonality
-WITH values_list AS (
-    SELECT LIST(value ORDER BY date) AS values
-    FROM weekly_seasonal
-)
-SELECT
-    (ts_classify_seasonality(values, 7.0)).timing_classification AS timing_class,
-    (ts_classify_seasonality(values, 7.0)).modulation_type AS modulation,
-    (ts_classify_seasonality(values, 7.0)).is_seasonal AS is_seasonal,
-    (ts_classify_seasonality(values, 7.0)).has_stable_timing AS stable_timing,
-    ROUND((ts_classify_seasonality(values, 7.0)).seasonal_strength, 4) AS strength,
-    ROUND((ts_classify_seasonality(values, 7.0)).timing_variability, 4) AS variability
-FROM values_list;
-
--- Section 1.2: Generate non-seasonal (random) data
-SELECT 'Section 1.2: Non-Seasonal (Random) Pattern' AS step;
-
-CREATE OR REPLACE TABLE random_data AS
-SELECT
-    '2024-01-01'::DATE + (i * INTERVAL '1 day') AS date,
-    i + 1 AS day_index,
-    ROUND(1000.0 + (RANDOM() - 0.5) * 500, 2) AS value
-FROM generate_series(0, 83) AS t(i);
-
-WITH values_list AS (
-    SELECT LIST(value ORDER BY date) AS values
-    FROM random_data
-)
-SELECT
-    (ts_classify_seasonality(values, 7.0)).timing_classification AS timing_class,
-    (ts_classify_seasonality(values, 7.0)).modulation_type AS modulation,
-    (ts_classify_seasonality(values, 7.0)).is_seasonal AS is_seasonal,
-    (ts_classify_seasonality(values, 7.0)).has_stable_timing AS stable_timing,
-    ROUND((ts_classify_seasonality(values, 7.0)).seasonal_strength, 4) AS strength
-FROM values_list;
-
--- Section 1.3: Generate trend-only data (no seasonality)
-SELECT 'Section 1.3: Trend-Only Pattern (No Seasonality)' AS step;
-
-CREATE OR REPLACE TABLE trend_data AS
-SELECT
-    '2024-01-01'::DATE + (i * INTERVAL '1 day') AS date,
-    i + 1 AS day_index,
-    ROUND(500.0 + i * 10.0 + (RANDOM() - 0.5) * 30, 2) AS value
-FROM generate_series(0, 83) AS t(i);
-
-WITH values_list AS (
-    SELECT LIST(value ORDER BY date) AS values
-    FROM trend_data
-)
-SELECT
-    (ts_classify_seasonality(values, 7.0)).timing_classification AS timing_class,
-    (ts_classify_seasonality(values, 7.0)).is_seasonal AS is_seasonal
-FROM values_list;
-
--- Section 1.4: Full classification struct output
-SELECT 'Section 1.4: Full Classification Structure' AS step;
-
-WITH values_list AS (
-    SELECT LIST(value ORDER BY date) AS values
-    FROM weekly_seasonal
-)
-SELECT ts_classify_seasonality(values, 7.0) AS full_classification
-FROM values_list;
-
--- Section 1.5: Custom threshold parameters
-SELECT 'Section 1.5: Custom Threshold Parameters' AS step;
-
-WITH values_list AS (
-    SELECT LIST(value ORDER BY date) AS values
-    FROM weekly_seasonal
-)
-SELECT
-    -- Default thresholds
-    (ts_classify_seasonality(values, 7.0)).is_seasonal AS default_seasonal,
-    -- Stricter strength threshold
-    (ts_classify_seasonality(values, 7.0, 0.5)).is_seasonal AS strict_seasonal,
-    -- Very strict
-    (ts_classify_seasonality(values, 7.0, 0.7, 0.05)).is_seasonal AS very_strict_seasonal
-FROM values_list;
-
--- ============================================================================
--- PATTERN 2: Aggregate Seasonality Classification
--- ============================================================================
--- Scenario: Classify seasonality from raw (timestamp, value) pairs
--- Use cases: Group-level analysis, SQL aggregation workflows
-
-SELECT
-    '=== Pattern 2: Aggregate Classification ===' AS section;
-
--- Section 2.1: Direct aggregate classification
-SELECT 'Section 2.1: Aggregate Function on Single Series' AS step;
-
-SELECT
-    ts_classify_seasonality_agg(date, value, 7.0) AS classification
-FROM weekly_seasonal;
-
--- Section 2.2: Access specific fields from aggregate
-SELECT 'Section 2.2: Extract Specific Fields from Aggregate' AS step;
-
-SELECT
-    (ts_classify_seasonality_agg(date, value, 7.0)).timing_classification AS timing_class,
-    (ts_classify_seasonality_agg(date, value, 7.0)).modulation_type AS modulation,
-    (ts_classify_seasonality_agg(date, value, 7.0)).is_seasonal AS is_seasonal,
-    ROUND((ts_classify_seasonality_agg(date, value, 7.0)).seasonal_strength, 4) AS strength
-FROM weekly_seasonal;
-
--- ============================================================================
--- PATTERN 3: Table Macro for Grouped Analysis
--- ============================================================================
--- Scenario: Classify seasonality for multiple series at once
--- Use cases: Product portfolio analysis, multi-store demand classification
-
-SELECT
-    '=== Pattern 3: Table Macro for Grouped Analysis ===' AS section;
-
--- Section 3.1: Create multi-series dataset
-SELECT 'Section 3.1: Create Multi-Series Dataset' AS step;
-
+-- Create multi-series data with different seasonal patterns
 CREATE OR REPLACE TABLE multi_series AS
--- Series A: Strong weekly seasonality
-SELECT
-    'series_a' AS series_id,
-    '2024-01-01'::TIMESTAMP + (i * INTERVAL '1 day') AS ts,
-    ROUND(1000.0 + 400.0 * SIN(2 * PI() * (i % 7) / 7.0) + (RANDOM() - 0.5) * 30, 2) AS value
-FROM generate_series(0, 55) AS t(i)
-UNION ALL
--- Series B: Weak seasonality
-SELECT
-    'series_b' AS series_id,
-    '2024-01-01'::TIMESTAMP + (i * INTERVAL '1 day') AS ts,
-    ROUND(800.0 + 50.0 * SIN(2 * PI() * (i % 7) / 7.0) + (RANDOM() - 0.5) * 100, 2) AS value
-FROM generate_series(0, 55) AS t(i)
-UNION ALL
--- Series C: No seasonality (random walk)
-SELECT
-    'series_c' AS series_id,
-    '2024-01-01'::TIMESTAMP + (i * INTERVAL '1 day') AS ts,
-    ROUND(500.0 + i * 2.0 + (RANDOM() - 0.5) * 80, 2) AS value
-FROM generate_series(0, 55) AS t(i);
+SELECT * FROM (
+    -- Series A: Strong weekly seasonality
+    SELECT
+        'series_A' AS series_id,
+        '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+        ROUND(1000.0 + 400.0 * SIN(2 * PI() * i / 7.0) + (RANDOM() - 0.5) * 30, 2) AS value
+    FROM generate_series(0, 55) AS t(i)
+    UNION ALL
+    -- Series B: Weak seasonality
+    SELECT
+        'series_B' AS series_id,
+        '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+        ROUND(800.0 + 50.0 * SIN(2 * PI() * i / 7.0) + (RANDOM() - 0.5) * 100, 2) AS value
+    FROM generate_series(0, 55) AS t(i)
+    UNION ALL
+    -- Series C: No seasonality (random walk)
+    SELECT
+        'series_C' AS series_id,
+        '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+        ROUND(500.0 + i * 2.0 + (RANDOM() - 0.5) * 80, 2) AS value
+    FROM generate_series(0, 55) AS t(i)
+);
 
--- Section 3.2: Classify all series using table macro
-SELECT 'Section 3.2: Batch Classification with Table Macro' AS step;
+.print 'Multi-series data summary:'
+SELECT series_id, COUNT(*) AS n_rows, ROUND(AVG(value), 2) AS avg_value
+FROM multi_series GROUP BY series_id ORDER BY series_id;
+
+-- 1.1: Basic classification (all series at once)
+.print ''
+.print 'Section 1.1: Basic Seasonality Classification (period=7)'
 
 SELECT * FROM ts_classify_seasonality_by('multi_series', series_id, ts, value, 7);
 
--- Section 3.3: Extract and compare classifications
-SELECT 'Section 3.3: Compare Series Classifications' AS step;
+-- ============================================================================
+-- SECTION 2: Accessing Classification Results
+-- ============================================================================
+
+.print ''
+.print '>>> SECTION 2: Accessing Classification Results'
+.print '-----------------------------------------------------------------------------'
+
+-- 2.1: Extract specific classification fields
+.print 'Section 2.1: Extract Specific Fields'
 
 SELECT
     id AS series_id,
-    (classification).timing_classification AS timing_class,
-    (classification).modulation_type AS modulation,
-    (classification).is_seasonal AS is_seasonal,
-    (classification).has_stable_timing AS stable_timing,
-    ROUND((classification).seasonal_strength, 4) AS strength,
-    ROUND((classification).timing_variability, 4) AS variability
+    timing_classification AS timing_class,
+    modulation_type AS modulation,
+    is_seasonal AS is_seasonal,
+    has_stable_timing AS stable_timing,
+    ROUND(seasonal_strength, 4) AS strength,
+    ROUND(timing_variability, 4) AS variability
 FROM ts_classify_seasonality_by('multi_series', series_id, ts, value, 7)
 ORDER BY series_id;
 
--- Section 3.4: Filter series by seasonality type
-SELECT 'Section 3.4: Filter Seasonal Series Only' AS step;
+-- 2.2: Filter only seasonal series
+.print ''
+.print 'Section 2.2: Filter Seasonal Series Only'
 
 SELECT
     id AS series_id,
-    (classification).timing_classification AS timing_class,
-    ROUND((classification).seasonal_strength, 4) AS strength
+    timing_classification AS timing_class,
+    ROUND(seasonal_strength, 4) AS strength
 FROM ts_classify_seasonality_by('multi_series', series_id, ts, value, 7)
-WHERE (classification).is_seasonal = true;
-
--- Section 3.5: Group-level analysis with aggregate
-SELECT 'Section 3.5: Group-Level Analysis with Aggregate Function' AS step;
-
-SELECT
-    series_id,
-    (ts_classify_seasonality_agg(ts, value, 7.0)).timing_classification AS timing_class,
-    (ts_classify_seasonality_agg(ts, value, 7.0)).is_seasonal AS is_seasonal,
-    ROUND((ts_classify_seasonality_agg(ts, value, 7.0)).seasonal_strength, 4) AS strength
-FROM multi_series
-GROUP BY series_id
-ORDER BY series_id;
+WHERE is_seasonal = true;
 
 -- ============================================================================
--- PATTERN 4: Practical Application - Forecasting Method Selection
+-- SECTION 3: Different Seasonal Patterns
 -- ============================================================================
--- Scenario: Use classification to select appropriate forecasting method
--- Use cases: Automated forecasting pipelines, method selection logic
 
-SELECT
-    '=== Pattern 4: Forecasting Method Selection ===' AS section;
+.print ''
+.print '>>> SECTION 3: Different Seasonal Patterns'
+.print '-----------------------------------------------------------------------------'
 
-SELECT 'Section 4.1: Recommend Forecasting Method Based on Classification' AS step;
-
-WITH classifications AS (
+-- Create series with different seasonal behaviors
+CREATE OR REPLACE TABLE varied_patterns AS
+SELECT * FROM (
+    -- Stable seasonal: Regular weekly pattern
     SELECT
-        id AS series_id,
-        classification
-    FROM ts_classify_seasonality_by('multi_series', series_id, ts, value, 7)
-)
+        'stable_seasonal' AS series_id,
+        '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+        1000.0 + 400.0 * SIN(2 * PI() * i / 7.0) + (RANDOM() - 0.5) * 20 AS value
+    FROM generate_series(0, 83) AS t(i)
+    UNION ALL
+    -- Variable seasonal: Pattern strength varies
+    SELECT
+        'variable_seasonal' AS series_id,
+        '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+        1000.0 + (200.0 + 200.0 * (i / 84.0)) * SIN(2 * PI() * i / 7.0) + (RANDOM() - 0.5) * 30 AS value
+    FROM generate_series(0, 83) AS t(i)
+    UNION ALL
+    -- Intermittent seasonal: Seasonality comes and goes
+    SELECT
+        'intermittent' AS series_id,
+        '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+        1000.0 + CASE WHEN i % 28 < 14 THEN 300.0 * SIN(2 * PI() * i / 7.0) ELSE 0 END + (RANDOM() - 0.5) * 50 AS value
+    FROM generate_series(0, 83) AS t(i)
+    UNION ALL
+    -- Non-seasonal: Trend only
+    SELECT
+        'non_seasonal' AS series_id,
+        '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
+        500.0 + i * 5.0 + (RANDOM() - 0.5) * 40 AS value
+    FROM generate_series(0, 83) AS t(i)
+);
+
+.print 'Section 3.1: Classification of Different Patterns'
+
 SELECT
-    series_id,
-    (classification).timing_classification AS timing_class,
-    (classification).is_seasonal AS is_seasonal,
-    (classification).has_stable_timing AS stable_timing,
-    ROUND((classification).seasonal_strength, 4) AS strength,
+    id AS pattern_type,
+    timing_classification AS timing_class,
+    modulation_type AS modulation,
+    is_seasonal AS is_seasonal,
+    has_stable_timing AS stable_timing,
+    ROUND(seasonal_strength, 4) AS strength
+FROM ts_classify_seasonality_by('varied_patterns', series_id, ts, value, 7)
+ORDER BY id;
+
+-- ============================================================================
+-- SECTION 4: Forecasting Method Selection
+-- ============================================================================
+
+.print ''
+.print '>>> SECTION 4: Forecasting Method Selection Based on Classification'
+.print '-----------------------------------------------------------------------------'
+
+.print 'Section 4.1: Recommend Forecasting Method Based on Classification'
+
+SELECT
+    id AS series_id,
+    timing_classification AS timing_class,
+    is_seasonal AS is_seasonal,
+    has_stable_timing AS stable_timing,
+    ROUND(seasonal_strength, 4) AS strength,
     CASE
-        WHEN NOT (classification).is_seasonal THEN 'AutoARIMA or Theta (non-seasonal)'
-        WHEN (classification).has_stable_timing AND (classification).seasonal_strength > 0.5
+        WHEN NOT is_seasonal THEN 'AutoARIMA or Theta (non-seasonal)'
+        WHEN has_stable_timing AND seasonal_strength > 0.5
             THEN 'MSTL or STL decomposition (strong stable seasonality)'
-        WHEN (classification).has_stable_timing
+        WHEN has_stable_timing
             THEN 'ETS with seasonal component (moderate seasonality)'
         ELSE 'AutoARIMA with seasonal differencing (variable seasonality)'
     END AS recommended_method
-FROM classifications
+FROM ts_classify_seasonality_by('multi_series', series_id, ts, value, 7)
 ORDER BY series_id;
 
 -- ============================================================================
--- PATTERN 5: Cycle Strength and Weak Season Analysis
+-- SECTION 5: Real-World Scenarios
 -- ============================================================================
--- Scenario: Identify which cycles are weak or anomalous
--- Use cases: Quality control, anomaly detection in seasonal patterns
+
+.print ''
+.print '>>> SECTION 5: Real-World Scenarios'
+.print '-----------------------------------------------------------------------------'
+
+-- Create retail sales data with different seasonal behaviors
+CREATE OR REPLACE TABLE retail_sales AS
+SELECT * FROM (
+    -- Store A: Strong weekly pattern (weekend peaks)
+    SELECT
+        'Store_A' AS store_id,
+        '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS date,
+        ROUND(
+            5000.0
+            + 1500.0 * SIN(2 * PI() * i / 7.0)
+            + (RANDOM() - 0.5) * 200
+        , 0)::DOUBLE AS sales
+    FROM generate_series(0, 83) AS t(i)
+    UNION ALL
+    -- Store B: Weak weekly pattern (online store)
+    SELECT
+        'Store_B' AS store_id,
+        '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS date,
+        ROUND(
+            3000.0
+            + 200.0 * SIN(2 * PI() * i / 7.0)
+            + i * 10  -- growth trend
+            + (RANDOM() - 0.5) * 300
+        , 0)::DOUBLE AS sales
+    FROM generate_series(0, 83) AS t(i)
+    UNION ALL
+    -- Store C: No weekly pattern (B2B)
+    SELECT
+        'Store_C' AS store_id,
+        '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS date,
+        ROUND(
+            4000.0
+            + i * 5
+            + (RANDOM() - 0.5) * 400
+        , 0)::DOUBLE AS sales
+    FROM generate_series(0, 83) AS t(i)
+);
+
+.print 'Section 5.1: Retail Sales Seasonality Classification'
 
 SELECT
-    '=== Pattern 5: Cycle Strength Analysis ===' AS section;
+    id AS store,
+    timing_classification AS timing_class,
+    is_seasonal AS is_seasonal,
+    ROUND(seasonal_strength, 4) AS strength,
+    CASE
+        WHEN seasonal_strength > 0.5 THEN 'Strong weekly pattern'
+        WHEN is_seasonal THEN 'Weak weekly pattern'
+        ELSE 'No weekly pattern'
+    END AS pattern_description
+FROM ts_classify_seasonality_by('retail_sales', store_id, date, sales, 7)
+ORDER BY strength DESC;
 
-SELECT 'Section 5.1: Analyze Individual Cycle Strengths' AS step;
+-- ============================================================================
+-- SECTION 6: Cycle Strength Analysis
+-- ============================================================================
 
-WITH values_list AS (
-    SELECT LIST(value ORDER BY date) AS values
-    FROM weekly_seasonal
-)
+.print ''
+.print '>>> SECTION 6: Cycle Strength Analysis'
+.print '-----------------------------------------------------------------------------'
+
+.print 'Section 6.1: Analyze Individual Cycle Strengths'
+
 SELECT
-    (ts_classify_seasonality(values, 7.0)).cycle_strengths AS cycle_strengths,
-    (ts_classify_seasonality(values, 7.0)).weak_seasons AS weak_season_indices,
-    LENGTH((ts_classify_seasonality(values, 7.0)).cycle_strengths) AS total_cycles,
-    LENGTH((ts_classify_seasonality(values, 7.0)).weak_seasons) AS weak_cycle_count
-FROM values_list;
+    id AS series_id,
+    cycle_strengths AS cycle_strengths,
+    weak_seasons AS weak_season_indices,
+    list_count(cycle_strengths) AS total_cycles,
+    list_count(weak_seasons) AS weak_cycle_count
+FROM ts_classify_seasonality_by('multi_series', series_id, ts, value, 7)
+ORDER BY series_id;
 
 -- ============================================================================
 -- CLEANUP
 -- ============================================================================
 
-SELECT
-    '=== Examples Complete ===' AS section;
+.print ''
+.print '>>> CLEANUP'
+.print '-----------------------------------------------------------------------------'
 
--- Optionally drop temporary tables
--- DROP TABLE IF EXISTS weekly_seasonal;
--- DROP TABLE IF EXISTS random_data;
--- DROP TABLE IF EXISTS trend_data;
--- DROP TABLE IF EXISTS multi_series;
+DROP TABLE IF EXISTS multi_series;
+DROP TABLE IF EXISTS varied_patterns;
+DROP TABLE IF EXISTS retail_sales;
+
+.print 'All tables cleaned up.'
+.print ''
+.print '============================================================================='
+.print 'SEASONALITY CLASSIFICATION EXAMPLES COMPLETE'
+.print '============================================================================='

@@ -297,35 +297,52 @@ SELECT
 FROM joined
 WHERE split = 'test';
 
--- OLS Results Summary using built-in metric functions
+-- OLS Results Summary using *_by table macros
+WITH mae_results AS (
+    SELECT * FROM ts_mae_by('ols_backtest_results', fold_id, date_col, actual, forecast)
+),
+rmse_results AS (
+    SELECT * FROM ts_rmse_by('ols_backtest_results', fold_id, date_col, actual, forecast)
+),
+bias_results AS (
+    SELECT * FROM ts_bias_by('ols_backtest_results', fold_id, date_col, actual, forecast)
+)
 SELECT
     'OLS Regression' AS model,
-    fold_id,
-    COUNT(*) AS n_predictions,
-    ROUND(ts_mae(LIST(actual), LIST(forecast)), 2) AS mae,
-    ROUND(ts_rmse(LIST(actual), LIST(forecast)), 2) AS rmse,
-    ROUND(ts_bias(LIST(actual), LIST(forecast)), 2) AS bias
-FROM ols_backtest_results
-GROUP BY fold_id
+    m.id AS fold_id,
+    ROUND(m.mae, 2) AS mae,
+    ROUND(r.rmse, 2) AS rmse,
+    ROUND(b.bias, 2) AS bias
+FROM mae_results m
+JOIN rmse_results r ON m.id = r.id
+JOIN bias_results b ON m.id = b.id
 ORDER BY fold_id;
 
--- Overall OLS vs SeasonalNaive comparison using built-in metrics
-SELECT
-    'OLS Regression' AS model,
-    ROUND(ts_mae(LIST(actual), LIST(forecast)), 2) AS mae,
-    ROUND(ts_rmse(LIST(actual), LIST(forecast)), 2) AS rmse,
-    ROUND(ts_bias(LIST(actual), LIST(forecast)), 2) AS bias
-FROM ols_backtest_results
-UNION ALL
-SELECT
-    'SeasonalNaive' AS model,
-    ROUND(ts_mae(LIST(actual), LIST(forecast)), 2) AS mae,
-    ROUND(ts_rmse(LIST(actual), LIST(forecast)), 2) AS rmse,
-    ROUND(ts_bias(LIST(actual), LIST(forecast)), 2) AS bias
-FROM ts_backtest_auto_by(
+-- Overall OLS vs SeasonalNaive comparison using *_by table macros
+-- Add model column to OLS results for comparison
+CREATE OR REPLACE TABLE ols_with_model AS
+SELECT 'ols' AS model_key, date_col, * FROM ols_backtest_results;
+
+-- Save SeasonalNaive backtest results with date
+CREATE OR REPLACE TABLE snaive_results AS
+SELECT 'snaive' AS model_key, date AS date_col, actual, forecast FROM ts_backtest_auto_by(
     'm5_sample', item_id, ds, y, 14, 3, '1d',
     {'method': 'SeasonalNaive', 'seasonal_period': '7'}
 );
+
+-- Calculate OLS metrics
+WITH ols_mae AS (SELECT 'OLS Regression' AS model, mae FROM ts_mae_by('ols_with_model', model_key, date_col, actual, forecast)),
+ols_rmse AS (SELECT rmse FROM ts_rmse_by('ols_with_model', model_key, date_col, actual, forecast)),
+ols_bias AS (SELECT bias FROM ts_bias_by('ols_with_model', model_key, date_col, actual, forecast)),
+-- Calculate SeasonalNaive metrics
+snaive_mae AS (SELECT 'SeasonalNaive' AS model, mae FROM ts_mae_by('snaive_results', model_key, date_col, actual, forecast)),
+snaive_rmse AS (SELECT rmse FROM ts_rmse_by('snaive_results', model_key, date_col, actual, forecast)),
+snaive_bias AS (SELECT bias FROM ts_bias_by('snaive_results', model_key, date_col, actual, forecast))
+SELECT model, ROUND(mae, 2) AS mae, ROUND(rmse, 2) AS rmse, ROUND(bias, 2) AS bias
+FROM ols_mae, ols_rmse, ols_bias
+UNION ALL
+SELECT model, ROUND(mae, 2) AS mae, ROUND(rmse, 2) AS rmse, ROUND(bias, 2) AS bias
+FROM snaive_mae, snaive_rmse, snaive_bias;
 
 -- ============================================================================
 -- SECTION 7: Per-Item Performance Analysis

@@ -1,226 +1,168 @@
--- =============================================================================
+-- ============================================================================
 -- Feature Extraction Examples - Synthetic Data
--- =============================================================================
+-- ============================================================================
 -- This script demonstrates time series feature extraction with the anofox-forecast
--- extension using 6 patterns from basic to advanced.
+-- extension using ts_features_by table macro.
 --
 -- Run: ./build/release/duckdb < examples/feature_extraction/synthetic_feature_examples.sql
--- =============================================================================
+-- ============================================================================
 
 -- Load extension
 LOAD anofox_forecast;
+INSTALL json;
+LOAD json;
 
 .print '============================================================================='
-.print 'FEATURE EXTRACTION EXAMPLES - Synthetic Data'
+.print 'FEATURE EXTRACTION EXAMPLES - Using ts_features_by'
 .print '============================================================================='
 
--- =============================================================================
--- SECTION 1: Quick Start (Basic Extraction)
--- =============================================================================
--- Use case: Extract all features from a single series.
+-- ============================================================================
+-- SECTION 1: Basic Feature Extraction for Multiple Series
+-- ============================================================================
+-- Use ts_features_by to extract features from grouped time series.
 
 .print ''
-.print '>>> SECTION 1: Quick Start (Basic Extraction)'
+.print '>>> SECTION 1: Basic Feature Extraction'
 .print '-----------------------------------------------------------------------------'
 
--- Create a simple time series
-CREATE OR REPLACE TABLE simple_series AS
-SELECT
-    '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
-    (i + 1.0)::DOUBLE AS value
-FROM generate_series(0, 9) AS t(i);
-
-.print 'Input data:'
-SELECT * FROM simple_series;
-
-.print ''
-.print 'Extract all 117 features:'
-SELECT ts_features(ts, value) AS features FROM simple_series;
-
--- =============================================================================
--- SECTION 2: Access Specific Features
--- =============================================================================
--- Use case: Extract and use individual features.
-
-.print ''
-.print '>>> SECTION 2: Access Specific Features'
-.print '-----------------------------------------------------------------------------'
-
--- Create sample data with trend
-CREATE OR REPLACE TABLE sample_data AS
-SELECT
-    '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS ts,
-    CASE i
-        WHEN 0 THEN 10.0 WHEN 1 THEN 12.0 WHEN 2 THEN 14.0 WHEN 3 THEN 13.0 WHEN 4 THEN 15.0
-        WHEN 5 THEN 18.0 WHEN 6 THEN 16.0 WHEN 7 THEN 19.0 WHEN 8 THEN 21.0 WHEN 9 THEN 20.0
-        WHEN 10 THEN 22.0 WHEN 11 THEN 25.0 WHEN 12 THEN 23.0 WHEN 13 THEN 26.0 WHEN 14 THEN 28.0
-        WHEN 15 THEN 27.0 WHEN 16 THEN 30.0 WHEN 17 THEN 32.0 WHEN 18 THEN 31.0 ELSE 34.0
-    END AS value
-FROM generate_series(0, 19) AS t(i);
-
-.print 'Basic statistics:'
-SELECT
-    (ts_features(ts, value)).mean AS mean,
-    (ts_features(ts, value)).median AS median,
-    (ts_features(ts, value)).variance AS variance,
-    (ts_features(ts, value)).standard_deviation AS std_dev
-FROM sample_data;
-
-.print ''
-.print 'Distribution features:'
-SELECT
-    (ts_features(ts, value)).skewness AS skewness,
-    (ts_features(ts, value)).kurtosis AS kurtosis,
-    (ts_features(ts, value)).minimum AS min_val,
-    (ts_features(ts, value)).maximum AS max_val,
-    (ts_features(ts, value))."range" AS range
-FROM sample_data;
-
-.print ''
-.print 'Trend features:'
-SELECT
-    (ts_features(ts, value)).linear_trend_slope AS trend_slope,
-    (ts_features(ts, value)).linear_trend_intercept AS trend_intercept,
-    (ts_features(ts, value)).linear_trend_r_squared AS trend_r2
-FROM sample_data;
-
-.print ''
-.print 'Autocorrelation features:'
-SELECT
-    (ts_features(ts, value)).autocorrelation_lag1 AS ac_lag1,
-    (ts_features(ts, value)).autocorrelation_lag2 AS ac_lag2,
-    (ts_features(ts, value)).autocorrelation_lag3 AS ac_lag3,
-    (ts_features(ts, value)).partial_autocorrelation_lag1 AS pac_lag1
-FROM sample_data;
-
-.print ''
-.print 'Entropy and complexity:'
-SELECT
-    (ts_features(ts, value)).sample_entropy AS sample_ent,
-    (ts_features(ts, value)).permutation_entropy AS perm_ent,
-    (ts_features(ts, value)).binned_entropy AS binned_ent,
-    (ts_features(ts, value)).cid_ce AS complexity
-FROM sample_data;
-
--- =============================================================================
--- SECTION 3: Multi-Series Feature Extraction
--- =============================================================================
--- Use case: Extract features for multiple time series in one query.
-
-.print ''
-.print '>>> SECTION 3: Multi-Series Feature Extraction'
-.print '-----------------------------------------------------------------------------'
-
--- Create multi-series data
-CREATE OR REPLACE TABLE multi_series AS
-SELECT
-    CASE WHEN i % 3 = 0 THEN 'Product_A'
-         WHEN i % 3 = 1 THEN 'Product_B'
-         ELSE 'Product_C' END AS product_id,
-    '2024-01-01'::TIMESTAMP + INTERVAL (i / 3) DAY AS date,
-    CASE WHEN i % 3 = 0 THEN 100 + (i / 3) * 0.5 + (RANDOM() - 0.5) * 10
-         WHEN i % 3 = 1 THEN 200 + 30 * SIN(2 * PI() * (i / 3) / 7) + (RANDOM() - 0.5) * 5
-         ELSE 150 + (RANDOM() - 0.5) * 50 END AS value
-FROM generate_series(0, 89) AS t(i);
+-- Create multi-series data with different patterns
+CREATE OR REPLACE TABLE product_data AS
+SELECT * FROM (
+    -- Product A: Trending upward
+    SELECT
+        'Product_A' AS product_id,
+        '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS date,
+        100 + i * 0.5 + (RANDOM() - 0.5) * 10 AS value
+    FROM generate_series(0, 29) AS t(i)
+    UNION ALL
+    -- Product B: Strong weekly seasonality
+    SELECT
+        'Product_B' AS product_id,
+        '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS date,
+        200 + 30 * SIN(2 * PI() * i / 7) + (RANDOM() - 0.5) * 5 AS value
+    FROM generate_series(0, 29) AS t(i)
+    UNION ALL
+    -- Product C: High volatility (random walk)
+    SELECT
+        'Product_C' AS product_id,
+        '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS date,
+        150 + (RANDOM() - 0.5) * 50 AS value
+    FROM generate_series(0, 29) AS t(i)
+);
 
 .print 'Data overview:'
 SELECT product_id, COUNT(*) AS n_rows, ROUND(AVG(value), 2) AS avg_val
-FROM multi_series GROUP BY product_id ORDER BY product_id;
+FROM product_data GROUP BY product_id ORDER BY product_id;
 
--- Extract features using aggregate function
+-- 1.1: Extract all 117 features per series
 .print ''
-.print 'Feature extraction per product (aggregate function):'
-SELECT
-    product_id,
-    ts_features(date, value) AS features
-FROM multi_series
-GROUP BY product_id
-ORDER BY product_id;
+.print 'Section 1.1: All Features per Series'
 
--- Extract specific features per product
-.print ''
-.print 'Selected features per product:'
-SELECT
-    product_id,
-    ROUND((ts_features(date, value)).mean, 2) AS mean,
-    ROUND((ts_features(date, value)).variance, 2) AS variance,
-    ROUND((ts_features(date, value)).linear_trend_slope, 4) AS trend,
-    ROUND((ts_features(date, value)).autocorrelation_lag1, 4) AS ac1
-FROM multi_series
-GROUP BY product_id
-ORDER BY product_id;
-
--- =============================================================================
--- SECTION 4: Feature Selection
--- =============================================================================
--- Use case: Extract only specific features for efficiency.
-
-.print ''
-.print '>>> SECTION 4: Feature Selection'
-.print '-----------------------------------------------------------------------------'
-
--- Create data
-CREATE OR REPLACE TABLE feature_select_data AS
-SELECT
-    'series_1' AS id,
-    '2024-01-01'::TIMESTAMP + INTERVAL (i) DAY AS date,
-    100 + i * 0.3 + 20 * SIN(2 * PI() * i / 7) + (RANDOM() - 0.5) * 10 AS value
-FROM generate_series(0, 59) AS t(i);
-
--- Extract only selected features
-.print 'Extract specific features only:'
 SELECT
     id,
-    ts_features(date, value, ['mean', 'variance', 'skewness', 'kurtosis']) AS features
-FROM feature_select_data
-GROUP BY id;
+    mean,
+    variance,
+    skewness
+FROM ts_features_by('product_data', product_id, date, value);
+
+-- ============================================================================
+-- SECTION 2: Accessing Specific Features
+-- ============================================================================
 
 .print ''
-.print 'Extract trend and autocorrelation features:'
+.print '>>> SECTION 2: Accessing Specific Features'
+.print '-----------------------------------------------------------------------------'
+
+-- 2.1: Basic statistics
+.print 'Section 2.1: Basic Statistics'
+
 SELECT
     id,
-    ts_features(date, value,
-        ['linear_trend_slope', 'linear_trend_r_squared', 'autocorrelation_lag1', 'autocorrelation_lag7']
-    ) AS features
-FROM feature_select_data
-GROUP BY id;
+    ROUND(mean, 2) AS mean,
+    ROUND(median, 2) AS median,
+    ROUND(variance, 2) AS variance,
+    ROUND(standard_deviation, 2) AS std_dev
+FROM ts_features_by('product_data', product_id, date, value);
 
--- =============================================================================
--- SECTION 5: List Available Features
--- =============================================================================
--- Use case: Discover all available features and their parameters.
+-- 2.2: Trend features
+.print ''
+.print 'Section 2.2: Trend Features'
+
+SELECT
+    id,
+    ROUND(linear_trend_slope, 4) AS trend_slope,
+    ROUND(linear_trend_intercept, 2) AS intercept,
+    ROUND(linear_trend_r_squared, 4) AS r_squared
+FROM ts_features_by('product_data', product_id, date, value);
+
+-- 2.3: Autocorrelation features
+.print ''
+.print 'Section 2.3: Autocorrelation Features'
+
+SELECT
+    id,
+    ROUND(autocorrelation_lag1, 4) AS ac_lag1,
+    ROUND(autocorrelation_lag7, 4) AS ac_lag7,
+    ROUND(partial_autocorrelation_lag1, 4) AS pac_lag1
+FROM ts_features_by('product_data', product_id, date, value);
+
+-- 2.4: Distribution features
+.print ''
+.print 'Section 2.4: Distribution Features'
+
+SELECT
+    id,
+    ROUND(skewness, 4) AS skewness,
+    ROUND(kurtosis, 4) AS kurtosis,
+    ROUND(minimum, 2) AS min_val,
+    ROUND(maximum, 2) AS max_val
+FROM ts_features_by('product_data', product_id, date, value);
+
+-- ============================================================================
+-- SECTION 3: Feature Selection
+-- ============================================================================
 
 .print ''
-.print '>>> SECTION 5: List Available Features'
+.print '>>> SECTION 3: Feature Selection'
 .print '-----------------------------------------------------------------------------'
 
-.print 'First 20 available features:'
-SELECT feature_name FROM ts_features_list() LIMIT 20;
+-- 3.1: Extract selected features (select specific columns from full feature set)
+.print 'Section 3.1: Selected Features Only'
+
+SELECT
+    id,
+    ROUND(mean, 2) AS mean,
+    ROUND(variance, 2) AS variance,
+    ROUND(skewness, 4) AS skewness,
+    ROUND(kurtosis, 4) AS kurtosis
+FROM ts_features_by('product_data', product_id, date, value);
+
+-- 3.2: Trend and seasonality features
+.print ''
+.print 'Section 3.2: Trend and Seasonality Features'
+
+SELECT
+    id,
+    ROUND(linear_trend_slope, 4) AS linear_trend_slope,
+    ROUND(linear_trend_r_squared, 4) AS linear_trend_r_squared,
+    ROUND(autocorrelation_lag1, 4) AS autocorrelation_lag1
+FROM ts_features_by('product_data', product_id, date, value);
+
+-- ============================================================================
+-- SECTION 4: Feature-Based Classification
+-- ============================================================================
 
 .print ''
-.print 'Total feature count:'
-SELECT COUNT(*) AS total_features FROM ts_features_list();
-
-.print ''
-.print 'Feature details (first 10):'
-SELECT * FROM ts_features_list() LIMIT 10;
-
--- =============================================================================
--- SECTION 6: Feature-Based Classification
--- =============================================================================
--- Use case: Use features to classify or cluster time series.
-
-.print ''
-.print '>>> SECTION 6: Feature-Based Classification'
+.print '>>> SECTION 4: Feature-Based Classification'
 .print '-----------------------------------------------------------------------------'
 
--- Create diverse series with different characteristics
+-- Create diverse series with labeled patterns
 CREATE OR REPLACE TABLE diverse_series AS
 SELECT * FROM (
     -- Trending series
     SELECT
-        'trending' AS pattern,
-        'series_' || i AS series_id,
+        'trending_' || i AS series_id,
+        'trending' AS actual_pattern,
         '2024-01-01'::TIMESTAMP + INTERVAL (j) DAY AS date,
         50 + j * 2 + (RANDOM() - 0.5) * 5 AS value
     FROM generate_series(1, 3) AS t(i),
@@ -228,8 +170,8 @@ SELECT * FROM (
     UNION ALL
     -- Seasonal series
     SELECT
-        'seasonal' AS pattern,
-        'series_' || (i + 3) AS series_id,
+        'seasonal_' || i AS series_id,
+        'seasonal' AS actual_pattern,
         '2024-01-01'::TIMESTAMP + INTERVAL (j) DAY AS date,
         100 + 30 * SIN(2 * PI() * j / 7) + (RANDOM() - 0.5) * 5 AS value
     FROM generate_series(1, 3) AS t(i),
@@ -237,83 +179,100 @@ SELECT * FROM (
     UNION ALL
     -- Volatile series
     SELECT
-        'volatile' AS pattern,
-        'series_' || (i + 6) AS series_id,
+        'volatile_' || i AS series_id,
+        'volatile' AS actual_pattern,
         '2024-01-01'::TIMESTAMP + INTERVAL (j) DAY AS date,
         100 + (RANDOM() - 0.5) * 80 AS value
     FROM generate_series(1, 3) AS t(i),
          generate_series(0, 29) AS s(j)
 );
 
-.print 'Series patterns:'
-SELECT pattern, COUNT(DISTINCT series_id) AS n_series
-FROM diverse_series GROUP BY pattern ORDER BY pattern;
+.print 'Patterns in dataset:'
+SELECT actual_pattern, COUNT(DISTINCT series_id) AS n_series
+FROM diverse_series GROUP BY actual_pattern ORDER BY actual_pattern;
 
--- Extract features and analyze patterns
+-- 4.1: Extract classification features
 .print ''
-.print 'Features by pattern:'
-WITH per_series_features AS (
+.print 'Section 4.1: Classification Features per Series'
+
+SELECT
+    id,
+    ROUND(linear_trend_slope, 4) AS trend,
+    ROUND(variance, 2) AS variance,
+    ROUND(autocorrelation_lag7, 4) AS ac7
+FROM ts_features_by('diverse_series', series_id, date, value);
+
+-- 4.2: Feature-based pattern classification
+.print ''
+.print 'Section 4.2: Pattern Classification Using Features'
+
+WITH feature_data AS (
     SELECT
-        pattern,
-        series_id,
-        (ts_features(date, value)).linear_trend_slope AS trend_slope,
-        (ts_features(date, value)).variance AS variance,
-        (ts_features(date, value)).autocorrelation_lag1 AS ac1,
-        (ts_features(date, value)).autocorrelation_lag7 AS ac7
-    FROM diverse_series
-    GROUP BY pattern, series_id
+        id,
+        linear_trend_slope AS trend,
+        variance AS variance,
+        autocorrelation_lag7 AS ac7
+    FROM ts_features_by('diverse_series', series_id, date, value)
 )
 SELECT
-    pattern,
-    ROUND(AVG(trend_slope), 4) AS avg_trend,
+    f.id AS series,
+    d.actual_pattern,
+    CASE
+        WHEN f.trend > 1.0 THEN 'trending'
+        WHEN f.ac7 > 0.5 THEN 'seasonal'
+        WHEN f.variance > 400 THEN 'volatile'
+        ELSE 'other'
+    END AS predicted_pattern,
+    ROUND(f.trend, 4) AS trend,
+    ROUND(f.variance, 2) AS variance,
+    ROUND(f.ac7, 4) AS ac7
+FROM feature_data f
+JOIN (SELECT DISTINCT series_id, actual_pattern FROM diverse_series) d ON f.id = d.series_id
+ORDER BY d.actual_pattern, f.id;
+
+-- ============================================================================
+-- SECTION 5: Comparing Series by Features
+-- ============================================================================
+
+.print ''
+.print '>>> SECTION 5: Comparing Series by Features'
+.print '-----------------------------------------------------------------------------'
+
+.print 'Feature Summary by Pattern:'
+
+WITH feature_data AS (
+    SELECT
+        id,
+        linear_trend_slope AS trend,
+        variance AS variance,
+        autocorrelation_lag1 AS ac1,
+        autocorrelation_lag7 AS ac7
+    FROM ts_features_by('diverse_series', series_id, date, value)
+),
+with_pattern AS (
+    SELECT f.*, d.actual_pattern
+    FROM feature_data f
+    JOIN (SELECT DISTINCT series_id, actual_pattern FROM diverse_series) d ON f.id = d.series_id
+)
+SELECT
+    actual_pattern,
+    ROUND(AVG(trend), 4) AS avg_trend,
     ROUND(AVG(variance), 2) AS avg_variance,
     ROUND(AVG(ac1), 4) AS avg_ac1,
     ROUND(AVG(ac7), 4) AS avg_ac7
-FROM per_series_features
-GROUP BY pattern
-ORDER BY pattern;
+FROM with_pattern
+GROUP BY actual_pattern
+ORDER BY actual_pattern;
 
--- Classify series based on features
-.print ''
-.print 'Feature-based classification:'
-WITH series_features AS (
-    SELECT
-        series_id,
-        pattern AS actual_pattern,
-        (ts_features(date, value)).linear_trend_slope AS trend,
-        (ts_features(date, value)).variance AS variance,
-        (ts_features(date, value)).autocorrelation_lag1 AS ac1,
-        (ts_features(date, value)).autocorrelation_lag7 AS ac7
-    FROM diverse_series
-    GROUP BY series_id, pattern
-)
-SELECT
-    series_id,
-    actual_pattern,
-    CASE
-        WHEN trend > 1.0 THEN 'trending'
-        WHEN ac7 > 0.5 THEN 'seasonal'
-        WHEN variance > 400 THEN 'volatile'
-        ELSE 'other'
-    END AS predicted_pattern,
-    ROUND(trend, 4) AS trend,
-    ROUND(variance, 2) AS variance,
-    ROUND(ac7, 4) AS ac7
-FROM series_features
-ORDER BY actual_pattern, series_id;
-
--- =============================================================================
+-- ============================================================================
 -- CLEANUP
--- =============================================================================
+-- ============================================================================
 
 .print ''
 .print '>>> CLEANUP'
 .print '-----------------------------------------------------------------------------'
 
-DROP TABLE IF EXISTS simple_series;
-DROP TABLE IF EXISTS sample_data;
-DROP TABLE IF EXISTS multi_series;
-DROP TABLE IF EXISTS feature_select_data;
+DROP TABLE IF EXISTS product_data;
 DROP TABLE IF EXISTS diverse_series;
 
 .print 'All tables cleaned up.'

@@ -8,6 +8,7 @@ Decomposition functions separate time series into trend, seasonal, and residual 
 
 **Use this document to:**
 - Decompose series into trend, seasonal, and residual components using MSTL
+- Remove trend from series using polynomial fitting (linear, quadratic, cubic)
 - Handle multiple seasonal patterns (e.g., weekly + yearly) simultaneously
 - Classify seasonality type: timing (early/on_time/late), modulation (stable/growing/shrinking)
 - Measure seasonal strength to decide if seasonal models are appropriate
@@ -47,6 +48,61 @@ SELECT * FROM ts_mstl_decomposition_by(
 
 ---
 
+### ts_detrend_by
+
+Remove trend from grouped time series using polynomial fitting.
+
+**Signature:**
+```sql
+ts_detrend_by(source, group_col, date_col, value_col, method)
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `source` | VARCHAR | Source table name |
+| `group_col` | IDENTIFIER | Series grouping column |
+| `date_col` | IDENTIFIER | Date/timestamp column |
+| `value_col` | IDENTIFIER | Value column |
+| `method` | VARCHAR | Detrending method: 'linear', 'quadratic', 'cubic', or 'auto' |
+
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | (same as group_col) | Group identifier |
+| `trend` | DOUBLE[] | Fitted trend component |
+| `detrended` | DOUBLE[] | Original values minus trend |
+| `method` | VARCHAR | Method used (may differ from input when using 'auto') |
+| `coefficients` | DOUBLE[] | Polynomial coefficients |
+| `rss` | DOUBLE | Residual sum of squares |
+| `n_params` | BIGINT | Number of parameters fitted |
+
+**Example:**
+```sql
+-- Auto-detect and remove trend
+SELECT * FROM ts_detrend_by('sales', product_id, date, quantity, 'auto');
+
+-- Force linear detrending
+SELECT * FROM ts_detrend_by('sales', product_id, date, quantity, 'linear');
+
+-- Quadratic detrending for curved trends
+SELECT * FROM ts_detrend_by('sales', product_id, date, quantity, 'quadratic');
+
+-- Access detrended data
+SELECT
+    id,
+    detrended[1:5] AS first_5_detrended,
+    method,
+    n_params
+FROM ts_detrend_by('sensor_data', sensor_id, timestamp, reading, 'auto');
+```
+
+**When to use:**
+- Use `ts_detrend_by` for simple trend removal without seasonal decomposition
+- Use `ts_mstl_decomposition_by` when you need full seasonal decomposition (trend + seasonal + remainder)
+
+---
+
 ### ts_classify_seasonality_by
 
 Classify seasonality type per group in a multi-series table.
@@ -69,11 +125,6 @@ ts_classify_seasonality_by(source VARCHAR, group_col COLUMN, date_col COLUMN, va
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | (same as group_col) | Group identifier |
-| `classification` | STRUCT | Classification results (see fields below) |
-
-**Classification STRUCT fields:**
-| Field | Type | Description |
-|-------|------|-------------|
 | `timing_classification` | VARCHAR | 'early', 'on_time', 'late', or 'variable' |
 | `modulation_type` | VARCHAR | 'stable', 'growing', 'shrinking', or 'variable' |
 | `has_stable_timing` | BOOLEAN | Whether peak timing is consistent |
@@ -89,9 +140,9 @@ ts_classify_seasonality_by(source VARCHAR, group_col COLUMN, date_col COLUMN, va
 SELECT * FROM ts_classify_seasonality_by('sales', product_id, date, quantity, 7.0);
 
 -- Find products with strong, stable seasonality
-SELECT id, (classification).seasonal_strength
+SELECT id, seasonal_strength
 FROM ts_classify_seasonality_by('sales', product_id, date, quantity, 7.0)
-WHERE (classification).is_seasonal AND (classification).has_stable_timing;
+WHERE is_seasonal AND has_stable_timing;
 ```
 
 ---
@@ -113,7 +164,7 @@ ts_classify_seasonality(source VARCHAR, date_col COLUMN, value_col COLUMN, perio
 | `value_col` | COLUMN | Value column |
 | `period` | DOUBLE | Expected seasonal period |
 
-**Returns:** Single row with `classification` STRUCT (same fields as above).
+**Returns:** Single row with classification columns (same columns as `ts_classify_seasonality_by` without `id`).
 
 **Example:**
 ```sql
@@ -122,9 +173,9 @@ SELECT * FROM ts_classify_seasonality('daily_sales', date, amount, 7.0);
 
 -- Check if seasonality is strong and stable
 SELECT
-    (classification).is_seasonal,
-    (classification).seasonal_strength,
-    (classification).has_stable_timing
+    is_seasonal,
+    seasonal_strength,
+    has_stable_timing
 FROM ts_classify_seasonality('daily_sales', date, amount, 7.0);
 ```
 

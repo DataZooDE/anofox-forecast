@@ -1,186 +1,257 @@
--- =============================================================================
+-- ============================================================================
 -- Metrics Examples - Synthetic Data
--- =============================================================================
+-- ============================================================================
 -- This script demonstrates forecast accuracy metrics with the anofox-forecast
--- extension using 5 patterns from basic to advanced.
+-- extension using *_by table macros.
 --
 -- Run: ./build/release/duckdb < examples/metrics/synthetic_metrics_examples.sql
--- =============================================================================
+-- ============================================================================
 
 -- Load extension
 LOAD anofox_forecast;
+INSTALL json;
+LOAD json;
 
 .print '============================================================================='
-.print 'METRICS EXAMPLES - Synthetic Data'
+.print 'METRICS EXAMPLES - Using *_by Table Macros'
 .print '============================================================================='
 
--- =============================================================================
--- SECTION 1: Basic Point Metrics
--- =============================================================================
--- Use case: Evaluate point forecast accuracy.
+-- ============================================================================
+-- SECTION 1: Basic Point Metrics for Multiple Series
+-- ============================================================================
+-- Use ts_*_by macros to evaluate forecast accuracy across grouped series.
 
 .print ''
 .print '>>> SECTION 1: Basic Point Metrics'
 .print '-----------------------------------------------------------------------------'
 
--- Create actual vs forecast data
-CREATE OR REPLACE TABLE forecast_eval AS
-SELECT
-    i,
-    100.0 + i * 2.0 + (RANDOM() - 0.5) * 10 AS actual,
-    100.0 + i * 2.0 + (RANDOM() - 0.5) * 5 AS forecast
-FROM generate_series(1, 20) AS t(i);
+-- Create multi-series forecast evaluation data
+CREATE OR REPLACE TABLE forecast_results AS
+SELECT * FROM (
+    -- Product A: Good forecast quality
+    SELECT
+        'Product_A' AS product_id,
+        DATE '2024-01-01' + INTERVAL (i) DAY AS date,
+        100.0 + i * 2.0 + (RANDOM() - 0.5) * 10 AS actual,
+        100.0 + i * 2.0 + (RANDOM() - 0.5) * 5 AS predicted
+    FROM generate_series(1, 20) AS t(i)
+    UNION ALL
+    -- Product B: Poor forecast quality (higher errors)
+    SELECT
+        'Product_B' AS product_id,
+        DATE '2024-01-01' + INTERVAL (i) DAY AS date,
+        200.0 + i * 3.0 + (RANDOM() - 0.5) * 20 AS actual,
+        200.0 + i * 3.0 + (RANDOM() - 0.5) * 30 AS predicted
+    FROM generate_series(1, 20) AS t(i)
+    UNION ALL
+    -- Product C: Biased forecast (consistently under-predicting)
+    SELECT
+        'Product_C' AS product_id,
+        DATE '2024-01-01' + INTERVAL (i) DAY AS date,
+        150.0 + i * 1.5 + (RANDOM() - 0.5) * 8 AS actual,
+        140.0 + i * 1.5 + (RANDOM() - 0.5) * 5 AS predicted
+    FROM generate_series(1, 20) AS t(i)
+);
 
-.print 'Forecast evaluation data summary:'
-SELECT
-    COUNT(*) AS n_points,
-    ROUND(AVG(actual), 2) AS mean_actual,
-    ROUND(AVG(forecast), 2) AS mean_forecast,
-    ROUND(AVG(actual - forecast), 2) AS mean_error
-FROM forecast_eval;
+.print 'Forecast results summary:'
+SELECT product_id, COUNT(*) AS n_points, ROUND(AVG(actual), 2) AS mean_actual
+FROM forecast_results GROUP BY product_id ORDER BY product_id;
+
+-- 1.1: MAE (Mean Absolute Error) per series
+.print ''
+.print 'Section 1.1: Mean Absolute Error (MAE)'
+
+SELECT * FROM ts_mae_by('forecast_results', product_id, date, actual, predicted);
+
+-- 1.2: RMSE (Root Mean Squared Error) per series
+.print ''
+.print 'Section 1.2: Root Mean Squared Error (RMSE)'
+
+SELECT * FROM ts_rmse_by('forecast_results', product_id, date, actual, predicted);
+
+-- 1.3: MSE (Mean Squared Error) per series
+.print ''
+.print 'Section 1.3: Mean Squared Error (MSE)'
+
+SELECT * FROM ts_mse_by('forecast_results', product_id, date, actual, predicted);
+
+-- ============================================================================
+-- SECTION 2: Percentage Metrics
+-- ============================================================================
 
 .print ''
-.print 'Point forecast metrics:'
-SELECT
-    ROUND(ts_mae(LIST(actual), LIST(forecast)), 4) AS mae,
-    ROUND(ts_rmse(LIST(actual), LIST(forecast)), 4) AS rmse,
-    ROUND(ts_mape(LIST(actual), LIST(forecast)), 4) AS mape,
-    ROUND(ts_smape(LIST(actual), LIST(forecast)), 4) AS smape
-FROM forecast_eval;
-
--- =============================================================================
--- SECTION 2: Understanding Each Metric
--- =============================================================================
--- Use case: Compare metric behavior on different error patterns.
-
-.print ''
-.print '>>> SECTION 2: Understanding Each Metric'
+.print '>>> SECTION 2: Percentage Metrics'
 .print '-----------------------------------------------------------------------------'
 
--- Create different error scenarios
-.print 'Scenario A: Small uniform errors:'
-SELECT
-    ts_mae([100.0, 100.0, 100.0]::DOUBLE[], [101.0, 99.0, 100.5]::DOUBLE[]) AS mae,
-    ts_rmse([100.0, 100.0, 100.0]::DOUBLE[], [101.0, 99.0, 100.5]::DOUBLE[]) AS rmse;
+-- 2.1: MAPE (Mean Absolute Percentage Error)
+.print 'Section 2.1: Mean Absolute Percentage Error (MAPE)'
+
+SELECT * FROM ts_mape_by('forecast_results', product_id, date, actual, predicted);
+
+-- 2.2: SMAPE (Symmetric Mean Absolute Percentage Error)
+.print ''
+.print 'Section 2.2: Symmetric MAPE (SMAPE)'
+
+SELECT * FROM ts_smape_by('forecast_results', product_id, date, actual, predicted);
 
 .print ''
-.print 'Scenario B: One large error (outlier):'
-SELECT
-    ts_mae([100.0, 100.0, 100.0]::DOUBLE[], [100.0, 100.0, 110.0]::DOUBLE[]) AS mae,
-    ts_rmse([100.0, 100.0, 100.0]::DOUBLE[], [100.0, 100.0, 110.0]::DOUBLE[]) AS rmse;
+.print 'Note: SMAPE is bounded [0, 200%], while MAPE can exceed 100%'
+
+-- ============================================================================
+-- SECTION 3: Additional Metrics
+-- ============================================================================
 
 .print ''
-.print 'Note: RMSE is more sensitive to outliers (10 vs 3.33 for MAE)'
-
--- =============================================================================
--- SECTION 3: Percentage Metrics (MAPE vs SMAPE)
--- =============================================================================
--- Use case: Scale-independent error measurement.
-
-.print ''
-.print '>>> SECTION 3: Percentage Metrics (MAPE vs SMAPE)'
+.print '>>> SECTION 3: Additional Metrics'
 .print '-----------------------------------------------------------------------------'
 
--- MAPE vs SMAPE behavior
-.print 'Standard case (values around 100):'
-SELECT
-    ROUND(ts_mape([100.0, 110.0, 120.0]::DOUBLE[], [105.0, 108.0, 125.0]::DOUBLE[]), 2) AS mape,
-    ROUND(ts_smape([100.0, 110.0, 120.0]::DOUBLE[], [105.0, 108.0, 125.0]::DOUBLE[]), 2) AS smape;
+-- 3.1: R-squared
+.print 'Section 3.1: R-squared (Coefficient of Determination)'
+
+SELECT * FROM ts_r2_by('forecast_results', product_id, date, actual, predicted);
+
+-- 3.2: Bias (Mean Error)
+.print ''
+.print 'Section 3.2: Bias (Mean Error)'
+
+SELECT * FROM ts_bias_by('forecast_results', product_id, date, actual, predicted);
 
 .print ''
-.print 'Small actuals (MAPE can explode):'
-SELECT
-    ROUND(ts_mape([1.0, 2.0, 3.0]::DOUBLE[], [2.0, 3.0, 4.0]::DOUBLE[]), 2) AS mape,
-    ROUND(ts_smape([1.0, 2.0, 3.0]::DOUBLE[], [2.0, 3.0, 4.0]::DOUBLE[]), 2) AS smape;
+.print 'Note: Negative bias = under-predicting, Positive bias = over-predicting'
+
+-- ============================================================================
+-- SECTION 4: Interval Metrics
+-- ============================================================================
 
 .print ''
-.print 'Note: SMAPE is bounded [0, 200], MAPE can exceed 100%'
-
--- =============================================================================
--- SECTION 4: Quantile and Interval Metrics
--- =============================================================================
--- Use case: Evaluate probabilistic forecasts.
-
-.print ''
-.print '>>> SECTION 4: Quantile and Interval Metrics'
+.print '>>> SECTION 4: Interval Metrics'
 .print '-----------------------------------------------------------------------------'
 
--- Create quantile forecast data
-CREATE OR REPLACE TABLE quantile_eval AS
-SELECT
-    i,
-    100.0 + (RANDOM() - 0.5) * 20 AS actual,
-    90.0 + (RANDOM() - 0.5) * 5 AS q10,
-    95.0 + (RANDOM() - 0.5) * 5 AS q25,
-    100.0 + (RANDOM() - 0.5) * 5 AS q50,
-    105.0 + (RANDOM() - 0.5) * 5 AS q75,
-    110.0 + (RANDOM() - 0.5) * 5 AS q90
-FROM generate_series(1, 30) AS t(i);
+-- Create data with prediction intervals
+CREATE OR REPLACE TABLE interval_forecasts AS
+SELECT * FROM (
+    -- Product A: Well-calibrated intervals
+    SELECT
+        'Product_A' AS product_id,
+        DATE '2024-01-01' + INTERVAL (i) DAY AS date,
+        100.0 + (RANDOM() - 0.5) * 20 AS actual,
+        90.0 + (RANDOM() - 0.5) * 5 AS lower_90,
+        110.0 + (RANDOM() - 0.5) * 5 AS upper_90
+    FROM generate_series(1, 30) AS t(i)
+    UNION ALL
+    -- Product B: Too narrow intervals
+    SELECT
+        'Product_B' AS product_id,
+        DATE '2024-01-01' + INTERVAL (i) DAY AS date,
+        100.0 + (RANDOM() - 0.5) * 30 AS actual,
+        95.0 + (RANDOM() - 0.5) * 2 AS lower_90,
+        105.0 + (RANDOM() - 0.5) * 2 AS upper_90
+    FROM generate_series(1, 30) AS t(i)
+    UNION ALL
+    -- Product C: Too wide intervals
+    SELECT
+        'Product_C' AS product_id,
+        DATE '2024-01-01' + INTERVAL (i) DAY AS date,
+        100.0 + (RANDOM() - 0.5) * 10 AS actual,
+        70.0 + (RANDOM() - 0.5) * 5 AS lower_90,
+        130.0 + (RANDOM() - 0.5) * 5 AS upper_90
+    FROM generate_series(1, 30) AS t(i)
+);
 
-.print 'Quantile loss for different quantiles:'
-SELECT
-    ROUND(ts_quantile_loss(LIST(actual), LIST(q10), 0.1), 4) AS ql_10,
-    ROUND(ts_quantile_loss(LIST(actual), LIST(q25), 0.25), 4) AS ql_25,
-    ROUND(ts_quantile_loss(LIST(actual), LIST(q50), 0.5), 4) AS ql_50,
-    ROUND(ts_quantile_loss(LIST(actual), LIST(q75), 0.75), 4) AS ql_75,
-    ROUND(ts_quantile_loss(LIST(actual), LIST(q90), 0.9), 4) AS ql_90
-FROM quantile_eval;
+-- 4.1: Coverage (what % of actuals fall within intervals)
+.print 'Section 4.1: Prediction Interval Coverage'
+
+SELECT * FROM ts_coverage_by('interval_forecasts', product_id, date, actual, lower_90, upper_90);
 
 .print ''
-.print 'Mean interval width (90% prediction interval):'
-SELECT
-    ROUND(ts_mean_interval_width(LIST(q10), LIST(q90)), 2) AS mean_width_90
-FROM quantile_eval;
+.print 'Note: Target coverage for 90% interval should be ~0.90'
 
--- =============================================================================
--- SECTION 5: Comparing Models
--- =============================================================================
--- Use case: Evaluate multiple forecast methods.
+-- 4.2: Interval Width
+.print ''
+.print 'Section 4.2: Mean Interval Width'
+
+SELECT * FROM ts_interval_width_by('interval_forecasts', product_id, lower_90, upper_90);
+
+-- ============================================================================
+-- SECTION 5: Comparing Multiple Models
+-- ============================================================================
 
 .print ''
-.print '>>> SECTION 5: Comparing Models'
+.print '>>> SECTION 5: Comparing Multiple Models'
 .print '-----------------------------------------------------------------------------'
 
--- Create multi-model comparison
-CREATE OR REPLACE TABLE model_comparison AS
-SELECT
-    i,
-    100.0 + i * 2.0 + 10.0 * SIN(2 * PI() * i / 7.0) + (RANDOM() - 0.5) * 5 AS actual,
-    100.0 + i * 2.0 AS naive_forecast,  -- Trend only
-    100.0 + i * 2.0 + 10.0 * SIN(2 * PI() * i / 7.0) AS seasonal_forecast  -- With seasonality
-FROM generate_series(1, 28) AS t(i);
+-- Create multi-model backtest results
+CREATE OR REPLACE TABLE model_backtest AS
+SELECT * FROM (
+    -- Naive model results
+    SELECT
+        'Product_A' AS product_id,
+        'Naive' AS model,
+        DATE '2024-01-01' + INTERVAL (i) DAY AS date,
+        100.0 + i * 2.0 + 10.0 * SIN(2 * PI() * i / 7.0) + (RANDOM() - 0.5) * 5 AS actual,
+        100.0 + i * 2.0 AS predicted  -- Trend only, no seasonality
+    FROM generate_series(1, 28) AS t(i)
+    UNION ALL
+    -- MSTL model results
+    SELECT
+        'Product_A' AS product_id,
+        'MSTL' AS model,
+        DATE '2024-01-01' + INTERVAL (i) DAY AS date,
+        100.0 + i * 2.0 + 10.0 * SIN(2 * PI() * i / 7.0) + (RANDOM() - 0.5) * 5 AS actual,
+        100.0 + i * 2.0 + 10.0 * SIN(2 * PI() * i / 7.0) + (RANDOM() - 0.5) * 2 AS predicted  -- Captures seasonality
+    FROM generate_series(1, 28) AS t(i)
+);
 
-.print 'Model comparison (trend with weekly seasonality):'
+.print 'Model comparison for Product A:'
+
+-- Compare MAE across models
+SELECT * FROM ts_mae_by('model_backtest', model, date, actual, predicted);
+
 .print ''
-.print 'Naive model (trend only):'
-SELECT
-    ROUND(ts_mae(LIST(actual), LIST(naive_forecast)), 2) AS mae,
-    ROUND(ts_rmse(LIST(actual), LIST(naive_forecast)), 2) AS rmse,
-    ROUND(ts_mape(LIST(actual), LIST(naive_forecast)), 2) AS mape
-FROM model_comparison;
+.print 'MSTL should have lower MAE because it captures weekly seasonality'
+
+-- ============================================================================
+-- SECTION 6: Combined Metrics Summary
+-- ============================================================================
 
 .print ''
-.print 'Seasonal model (with weekly pattern):'
+.print '>>> SECTION 6: Combined Metrics Summary'
+.print '-----------------------------------------------------------------------------'
+
+.print 'All metrics for forecast_results:'
+
+WITH mae AS (SELECT * FROM ts_mae_by('forecast_results', product_id, date, actual, predicted)),
+rmse AS (SELECT * FROM ts_rmse_by('forecast_results', product_id, date, actual, predicted)),
+mape AS (SELECT * FROM ts_mape_by('forecast_results', product_id, date, actual, predicted)),
+bias AS (SELECT * FROM ts_bias_by('forecast_results', product_id, date, actual, predicted))
 SELECT
-    ROUND(ts_mae(LIST(actual), LIST(seasonal_forecast)), 2) AS mae,
-    ROUND(ts_rmse(LIST(actual), LIST(seasonal_forecast)), 2) AS rmse,
-    ROUND(ts_mape(LIST(actual), LIST(seasonal_forecast)), 2) AS mape
-FROM model_comparison;
+    mae.id AS product,
+    ROUND(mae.mae, 2) AS mae,
+    ROUND(rmse.rmse, 2) AS rmse,
+    ROUND(mape.mape, 2) AS mape_pct,
+    ROUND(bias.bias, 2) AS bias,
+    CASE
+        WHEN ABS(bias.bias) < 2 THEN 'Unbiased'
+        WHEN bias.bias < 0 THEN 'Under-predicting'
+        ELSE 'Over-predicting'
+    END AS bias_assessment
+FROM mae
+JOIN rmse ON mae.id = rmse.id
+JOIN mape ON mae.id = mape.id
+JOIN bias ON mae.id = bias.id
+ORDER BY mae.mae;
 
-.print ''
-.print 'The seasonal model should have lower errors.'
-
--- =============================================================================
+-- ============================================================================
 -- CLEANUP
--- =============================================================================
+-- ============================================================================
 
 .print ''
 .print '>>> CLEANUP'
 .print '-----------------------------------------------------------------------------'
 
-DROP TABLE IF EXISTS forecast_eval;
-DROP TABLE IF EXISTS quantile_eval;
-DROP TABLE IF EXISTS model_comparison;
+DROP TABLE IF EXISTS forecast_results;
+DROP TABLE IF EXISTS interval_forecasts;
+DROP TABLE IF EXISTS model_backtest;
 
 .print 'All tables cleaned up.'
 .print ''

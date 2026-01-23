@@ -27,7 +27,7 @@ SELECT * FROM ts_features_table('daily_sales', date, value);
 SELECT * FROM ts_features_by('sales', product_id, date, quantity);
 
 -- Access specific features from result
-SELECT id, (features).mean, (features).standard_deviation
+SELECT id, mean, standard_deviation
 FROM ts_features_by('sales', product_id, date, quantity);
 ```
 
@@ -60,11 +60,7 @@ ts_features_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLU
 | `date_col` | COLUMN | Date/timestamp column |
 | `value_col` | COLUMN | Value column |
 
-**Returns:**
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | (same as group_col) | Group identifier |
-| `features` | STRUCT | 117-field feature struct |
+**Returns:** TABLE with `id` and 116 feature columns including `mean`, `standard_deviation`, `skewness`, `kurtosis`, `length`, `linear_trend_slope`, `autocorrelation_lag1`, etc.
 
 **Example:**
 ```sql
@@ -72,9 +68,9 @@ ts_features_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLU
 SELECT * FROM ts_features_by('sales', product_id, date, quantity);
 
 -- Filter by specific feature values
-SELECT id, (features).mean, (features).trend_strength
+SELECT id, mean, linear_trend_slope
 FROM ts_features_by('sales', product_id, date, quantity)
-WHERE (features).length > 30;
+WHERE length > 30;
 ```
 
 ---
@@ -95,7 +91,7 @@ ts_features_table(source VARCHAR, date_col COLUMN, value_col COLUMN) → TABLE
 | `date_col` | COLUMN | Date/timestamp column |
 | `value_col` | COLUMN | Value column |
 
-**Returns:** Single row with `features` STRUCT containing 117 feature columns.
+**Returns:** Single row with 116 feature columns including `mean`, `standard_deviation`, `skewness`, `kurtosis`, `length`, etc.
 
 **Example:**
 ```sql
@@ -103,7 +99,7 @@ ts_features_table(source VARCHAR, date_col COLUMN, value_col COLUMN) → TABLE
 SELECT * FROM ts_features_table('daily_revenue', date, amount);
 
 -- Access specific features from result
-SELECT (features).mean, (features).standard_deviation
+SELECT mean, standard_deviation
 FROM ts_features_table('daily_revenue', date, amount);
 ```
 

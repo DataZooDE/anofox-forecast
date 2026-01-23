@@ -4,11 +4,18 @@
 
 This folder contains runnable SQL examples demonstrating conformal prediction with the anofox-forecast extension.
 
+## Functions
+
+| Function | Description |
+|----------|-------------|
+| `ts_conformal_by` | Compute conformal prediction intervals for multiple series |
+| `ts_conformal_apply_by` | Apply pre-computed conformity score to forecasts |
+
 ## Example Files
 
 | File | Description | Data Source |
 |------|-------------|-------------|
-| [`synthetic_conformal_examples.sql`](synthetic_conformal_examples.sql) | 5 patterns using generated data | Synthetic |
+| [`synthetic_conformal_examples.sql`](synthetic_conformal_examples.sql) | Multi-series conformal prediction examples | Synthetic |
 
 ## Quick Start
 
@@ -19,125 +26,77 @@ This folder contains runnable SQL examples demonstrating conformal prediction wi
 
 ---
 
-## Overview
+## Usage
 
-The extension provides functions for conformal prediction:
-
-| Function | Type | Purpose |
-|----------|------|---------|
-| `ts_conformal_predict` | Scalar | Compute intervals from residuals |
-| `ts_conformal_predict_asymmetric` | Scalar | Asymmetric intervals |
-| `ts_conformal_quantile` | Scalar | Compute conformity score |
-| `ts_conformal_intervals` | Scalar | Apply score to forecasts |
-| `ts_conformal_calibrate` | Table Macro | Calibrate from backtest |
-| `ts_conformal_apply` | Table Macro | Apply to new forecasts |
-| `ts_conformal` | Table Macro | End-to-end workflow |
-
----
-
-## Patterns Overview
-
-### Pattern 1: Quick Start (Scalar Functions)
-
-**Use case:** Create prediction intervals from residuals.
+### Basic Conformal Prediction
 
 ```sql
-SELECT ts_conformal_predict(
-    calibration_residuals,  -- DOUBLE[]
-    point_forecasts,        -- DOUBLE[]
-    alpha                   -- DOUBLE (miscoverage rate)
-) AS result;
+-- Compute prediction intervals from backtest data
+-- Table needs: actual, forecast (calibration), point_forecast (to add intervals)
+SELECT * FROM ts_conformal_by('backtest_data', product_id, actual, forecast, point_forecast, MAP{});
 ```
 
-**See:** `synthetic_conformal_examples.sql` Section 1
-
----
-
-### Pattern 2: Compute Conformity Score
-
-**Use case:** Calibrate conformity score from historical residuals.
+### Different Coverage Levels
 
 ```sql
-SELECT ts_conformal_quantile(
-    LIST(actual - forecast),  -- residuals
-    0.1                       -- alpha for 90% coverage
-) AS conformity_score;
+-- 95% coverage (alpha=0.05)
+SELECT * FROM ts_conformal_by('backtest_data', product_id, actual, forecast, point_forecast,
+    MAP{'alpha': '0.05'});
+
+-- 80% coverage (alpha=0.20) - narrower intervals
+SELECT * FROM ts_conformal_by('backtest_data', product_id, actual, forecast, point_forecast,
+    MAP{'alpha': '0.20'});
 ```
 
-**See:** `synthetic_conformal_examples.sql` Section 2
-
----
-
-### Pattern 3: Full Calibration Workflow
-
-**Use case:** Calibrate from backtest results table.
+### Asymmetric Intervals
 
 ```sql
-SELECT * FROM ts_conformal_calibrate(
-    'backtest_results',  -- table name
-    actual_col,          -- actual values column
-    forecast_col,        -- forecast values column
-    MAP{'alpha': '0.1'}  -- 90% coverage
-);
+-- For skewed residual distributions
+SELECT * FROM ts_conformal_by('backtest_data', product_id, actual, forecast, point_forecast,
+    MAP{'asymmetric': 'true'});
 ```
 
-**See:** `synthetic_conformal_examples.sql` Section 3
-
----
-
-### Pattern 4: Apply to New Forecasts
-
-**Use case:** Apply calibrated intervals to new point forecasts.
+### Apply Pre-Computed Score
 
 ```sql
-SELECT * FROM ts_conformal_apply(
-    'forecast_results',  -- table with forecasts
-    group_col,           -- series identifier
-    forecast_col,        -- point forecasts
-    conformity_score     -- from calibration
-);
+-- Apply a known conformity score to forecasts
+SELECT * FROM ts_conformal_apply_by('forecast_table', product_id, point_forecast, 15.0);
 ```
-
-**See:** `synthetic_conformal_examples.sql` Section 4
 
 ---
 
-### Pattern 5: Asymmetric Intervals
+## Parameters
 
-**Use case:** Handle skewed residual distributions.
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `alpha` | VARCHAR | '0.1' | Miscoverage rate (1 - coverage). 0.1 = 90% coverage |
+| `asymmetric` | VARCHAR | 'false' | Use asymmetric intervals for skewed residuals |
 
-```sql
--- Symmetric (equal-tailed)
-SELECT ts_conformal_predict(residuals, forecasts, alpha);
-
--- Asymmetric (separate upper/lower quantiles)
-SELECT ts_conformal_predict_asymmetric(residuals, forecasts, alpha);
-```
-
-**See:** `synthetic_conformal_examples.sql` Section 5
+When `MAP{}` is passed (empty), defaults to 90% coverage with symmetric intervals.
 
 ---
 
-## Output Structures
+## Output Columns
 
-### ts_conformal_predict
+### ts_conformal_by
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `point` | `DOUBLE[]` | Point forecasts |
-| `lower` | `DOUBLE[]` | Lower bounds |
-| `upper` | `DOUBLE[]` | Upper bounds |
-| `coverage` | `DOUBLE` | Target coverage (1 - alpha) |
-| `conformity_score` | `DOUBLE` | Calibrated quantile |
-| `method` | `VARCHAR` | Method used |
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | VARCHAR | Series identifier |
+| `point` | DOUBLE[] | Point forecasts |
+| `lower` | DOUBLE[] | Lower bounds |
+| `upper` | DOUBLE[] | Upper bounds |
+| `conformity_score` | DOUBLE | Calibrated quantile |
+| `coverage` | DOUBLE | Target coverage (1 - alpha) |
 
-### ts_conformal_calibrate
+### ts_conformal_apply_by
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `conformity_score` | `DOUBLE` | Calibrated score |
-| `coverage` | `DOUBLE` | Target coverage |
-| `n_residuals` | `BIGINT` | Number of calibration points |
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | VARCHAR | Series identifier |
+| `forecast` | DOUBLE | Point forecast |
+| `lower` | DOUBLE | Lower bound |
+| `upper` | DOUBLE | Upper bound |
 
 ---
 
@@ -148,40 +107,71 @@ SELECT ts_conformal_predict_asymmetric(residuals, forecasts, alpha);
 Conformal prediction creates prediction intervals with **guaranteed coverage** without distributional assumptions.
 
 ```
-Coverage Guarantee: P(Y ∈ [lower, upper]) ≥ 1 - α
+Coverage Guarantee: P(Y in [lower, upper]) >= 1 - alpha
 ```
 
 ### The Workflow
 
-1. **Generate residuals** from backtest/validation
-2. **Calibrate** conformity score using `ts_conformal_quantile`
-3. **Apply** to new forecasts: `forecast ± conformity_score`
+1. **Calibrate** from backtest residuals (actual - forecast)
+2. **Compute** conformity score at target quantile
+3. **Apply** to new forecasts: `forecast +/- conformity_score`
 
 ### Alpha and Coverage
 
-| Alpha | Coverage | Meaning |
-|-------|----------|---------|
-| 0.10 | 90% | Wide intervals |
-| 0.05 | 95% | Wider intervals |
-| 0.01 | 99% | Very wide intervals |
+| Alpha | Coverage | Interval Width |
+|-------|----------|----------------|
+| 0.20 | 80% | Narrower |
+| 0.10 | 90% | Medium |
+| 0.05 | 95% | Wider |
+| 0.01 | 99% | Very wide |
 
 ### Symmetric vs Asymmetric
 
 | Method | Use When |
 |--------|----------|
 | **Symmetric** | Residuals are roughly symmetric |
-| **Asymmetric** | Residuals are skewed |
+| **Asymmetric** | Residuals are skewed (e.g., demand forecasting) |
+
+---
+
+## Data Requirements
+
+The `ts_conformal_by` function expects a table with:
+
+1. **Calibration rows**: `actual` and `forecast` are non-NULL, `point_forecast` is NULL
+2. **Forecast rows**: `actual` and `forecast` are NULL, `point_forecast` is non-NULL
+
+```sql
+-- Example table structure
+CREATE TABLE backtest_data AS
+SELECT * FROM (
+    -- Calibration data
+    SELECT 'A' AS id, 100.0 AS actual, 98.0 AS forecast, NULL::DOUBLE AS point_forecast
+    UNION ALL
+    -- ... more calibration rows
+    -- Forecast data
+    SELECT 'A' AS id, NULL AS actual, NULL AS forecast, 150.0 AS point_forecast
+);
+```
 
 ---
 
 ## Tips
 
-1. **More calibration data = better** - Use at least 50+ residuals.
+1. **More calibration data = better** - Use at least 50+ residuals for reliable scores.
 
-2. **Match the forecast horizon** - Calibrate on residuals from the same horizon.
+2. **Match the forecast horizon** - Calibrate on residuals from the same horizon you're forecasting.
 
-3. **Check coverage empirically** - Verify intervals achieve target coverage.
+3. **Check interval widths** - Wide intervals indicate high uncertainty in your forecasts.
 
 4. **Use asymmetric for demand** - Demand forecasts often have skewed errors.
 
-5. **Combine with forecasting** - Use backtest results from `ts_cv_forecast_by`.
+5. **Combine with backtesting** - Use backtest results from `ts_backtest_auto_by` as calibration data.
+
+---
+
+## Related Functions
+
+- `ts_backtest_auto_by()` - Generate backtest results for calibration
+- `ts_forecast_by()` - Generate point forecasts to conformalize
+- `ts_coverage_by()` - Evaluate interval coverage

@@ -4,11 +4,27 @@
 
 This folder contains runnable SQL examples demonstrating forecast accuracy metrics with the anofox-forecast extension.
 
+## Functions
+
+| Function | Full Name | Best For |
+|----------|-----------|----------|
+| `ts_mae_by` | Mean Absolute Error | General purpose |
+| `ts_mse_by` | Mean Squared Error | Variance analysis |
+| `ts_rmse_by` | Root Mean Squared Error | Penalize large errors |
+| `ts_mape_by` | Mean Absolute Percentage Error | Scale-independent |
+| `ts_smape_by` | Symmetric MAPE | Bounded percentage |
+| `ts_r2_by` | R-squared | Model fit quality |
+| `ts_bias_by` | Bias (Mean Error) | Detect systematic errors |
+| `ts_mase_by` | Mean Absolute Scaled Error | Cross-series comparison |
+| `ts_coverage_by` | Interval Coverage | Calibration check |
+| `ts_interval_width_by` | Interval Width | Interval sharpness |
+| `ts_quantile_loss_by` | Quantile Loss | Probabilistic forecasts |
+
 ## Example Files
 
 | File | Description | Data Source |
 |------|-------------|-------------|
-| [`synthetic_metrics_examples.sql`](synthetic_metrics_examples.sql) | 5 patterns using generated data | Synthetic |
+| [`synthetic_metrics_examples.sql`](synthetic_metrics_examples.sql) | Multi-series metrics examples | Synthetic |
 
 ## Quick Start
 
@@ -19,102 +35,58 @@ This folder contains runnable SQL examples demonstrating forecast accuracy metri
 
 ---
 
-## Overview
+## Usage
 
-The extension provides functions for evaluating forecast accuracy:
-
-| Function | Full Name | Best For |
-|----------|-----------|----------|
-| `ts_mae` | Mean Absolute Error | General purpose |
-| `ts_rmse` | Root Mean Squared Error | Penalize large errors |
-| `ts_mape` | Mean Absolute Percentage Error | Scale-independent |
-| `ts_smape` | Symmetric MAPE | Bounded percentage |
-| `ts_mase` | Mean Absolute Scaled Error | Cross-series comparison |
-| `ts_quantile_loss` | Quantile Loss | Probabilistic forecasts |
-| `ts_mean_interval_width` | Mean Interval Width | Interval sharpness |
-
----
-
-## Patterns Overview
-
-### Pattern 1: Basic Point Metrics
-
-**Use case:** Evaluate point forecast accuracy.
+### Point Forecast Metrics
 
 ```sql
-SELECT
-    ts_mae(LIST(actual), LIST(forecast)) AS mae,
-    ts_rmse(LIST(actual), LIST(forecast)) AS rmse,
-    ts_mape(LIST(actual), LIST(forecast)) AS mape,
-    ts_smape(LIST(actual), LIST(forecast)) AS smape
-FROM my_forecasts;
+-- Mean Absolute Error per series
+SELECT * FROM ts_mae_by('backtest_results', product_id, actual, predicted);
+
+-- Root Mean Squared Error per series
+SELECT * FROM ts_rmse_by('backtest_results', product_id, actual, predicted);
+
+-- Mean Absolute Percentage Error per series
+SELECT * FROM ts_mape_by('backtest_results', product_id, actual, predicted);
+
+-- Symmetric MAPE per series
+SELECT * FROM ts_smape_by('backtest_results', product_id, actual, predicted);
+
+-- R-squared per series
+SELECT * FROM ts_r2_by('backtest_results', product_id, actual, predicted);
+
+-- Bias (Mean Error) per series
+SELECT * FROM ts_bias_by('backtest_results', product_id, actual, predicted);
 ```
 
-**See:** `synthetic_metrics_examples.sql` Section 1
-
----
-
-### Pattern 2: Understanding Each Metric
-
-**Use case:** Compare metric behavior on different error patterns.
+### Interval Metrics
 
 ```sql
--- MAE: Mean of |actual - forecast|
--- RMSE: sqrt(Mean of (actual - forecast)^2)
--- RMSE is more sensitive to outliers
-```
-
-**See:** `synthetic_metrics_examples.sql` Section 2
-
----
-
-### Pattern 3: Percentage Metrics
-
-**Use case:** Scale-independent error measurement.
-
-```sql
--- MAPE: Mean of |actual - forecast| / |actual| * 100
--- SMAPE: Mean of |actual - forecast| / (|actual| + |forecast|) * 200
--- SMAPE is bounded [0, 200], MAPE can exceed 100%
-```
-
-**See:** `synthetic_metrics_examples.sql` Section 3
-
----
-
-### Pattern 4: Quantile and Interval Metrics
-
-**Use case:** Evaluate probabilistic forecasts.
-
-```sql
--- Quantile loss for 90th percentile
-SELECT ts_quantile_loss(actual_array, forecast_array, 0.9);
+-- Coverage (% of actuals within prediction interval)
+SELECT * FROM ts_coverage_by('forecast_intervals', product_id, actual, lower_90, upper_90);
 
 -- Mean interval width
-SELECT ts_mean_interval_width(lower_array, upper_array);
+SELECT * FROM ts_interval_width_by('forecast_intervals', product_id, lower_90, upper_90);
+
+-- Quantile loss
+SELECT * FROM ts_quantile_loss_by('forecasts', product_id, actual, predicted, 0.9);
 ```
 
-**See:** `synthetic_metrics_examples.sql` Section 4
-
----
-
-### Pattern 5: Comparing Models
-
-**Use case:** Evaluate multiple forecast methods.
+### Combining Metrics
 
 ```sql
+WITH mae AS (SELECT * FROM ts_mae_by('results', id, actual, predicted)),
+rmse AS (SELECT * FROM ts_rmse_by('results', id, actual, predicted)),
+bias AS (SELECT * FROM ts_bias_by('results', id, actual, predicted))
 SELECT
-    'Model A' AS model,
-    ts_mae(actual, forecast_a) AS mae,
-    ts_rmse(actual, forecast_a) AS rmse
-UNION ALL
-SELECT
-    'Model B' AS model,
-    ts_mae(actual, forecast_b) AS mae,
-    ts_rmse(actual, forecast_b) AS rmse;
+    mae.id,
+    ROUND(mae.mae, 2) AS mae,
+    ROUND(rmse.rmse, 2) AS rmse,
+    ROUND(bias.bias, 2) AS bias
+FROM mae
+JOIN rmse ON mae.id = rmse.id
+JOIN bias ON mae.id = bias.id;
 ```
-
-**See:** `synthetic_metrics_examples.sql` Section 5
 
 ---
 
@@ -124,17 +96,19 @@ SELECT
 
 | Metric | Formula | Range |
 |--------|---------|-------|
-| MAE | `mean(|y - ŷ|)` | [0, ∞) |
+| MAE | `mean(\|y - ŷ\|)` | [0, ∞) |
+| MSE | `mean((y - ŷ)²)` | [0, ∞) |
 | RMSE | `sqrt(mean((y - ŷ)²))` | [0, ∞) |
-| MAPE | `mean(|y - ŷ| / |y|) × 100` | [0, ∞) |
-| SMAPE | `mean(|y - ŷ| / (|y| + |ŷ|)) × 200` | [0, 200] |
+| MAPE | `mean(\|y - ŷ\| / \|y\|) × 100` | [0, ∞) |
+| SMAPE | `mean(\|y - ŷ\| / (\|y\| + \|ŷ\|)) × 200` | [0, 200] |
+| Bias | `mean(y - ŷ)` | (-∞, ∞) |
 
-### Probabilistic Metrics
+### Interval Metrics
 
 | Metric | Formula | Purpose |
 |--------|---------|---------|
-| Quantile Loss | `mean(max(q(y-ŷ), (q-1)(y-ŷ)))` | Penalize quantile errors |
-| Interval Width | `mean(upper - lower)` | Measure sharpness |
+| Coverage | `mean(lower ≤ actual ≤ upper)` | Calibration |
+| Interval Width | `mean(upper - lower)` | Sharpness |
 
 ---
 
@@ -145,9 +119,10 @@ SELECT
 | General comparison | MAE or RMSE |
 | Large errors are costly | RMSE |
 | Scale-independent | MAPE or SMAPE |
-| Small values possible | SMAPE (avoids division by zero) |
+| Small values possible | SMAPE (avoids division issues) |
 | Cross-series comparison | MASE |
-| Probabilistic forecasts | Quantile Loss |
+| Probabilistic forecasts | Quantile Loss, Coverage |
+| Detect systematic bias | Bias |
 
 ---
 
@@ -169,17 +144,13 @@ SELECT
 | Symmetric | No | Yes |
 | Zero actuals | Undefined | Defined |
 
-### When MAPE Fails
+### Bias Interpretation
 
-```sql
--- Actual is 1, forecast is 2
--- MAPE = |1-2|/|1| × 100 = 100%
-
--- Actual is 100, forecast is 101
--- MAPE = |100-101|/|100| × 100 = 1%
-
--- Same absolute error, very different MAPE
-```
+| Bias Value | Interpretation |
+|------------|----------------|
+| Negative | Under-predicting (forecasts too low) |
+| Near zero | Unbiased |
+| Positive | Over-predicting (forecasts too high) |
 
 ---
 
@@ -189,8 +160,16 @@ SELECT
 
 2. **Match metric to business** - If large errors are costly, use RMSE.
 
-3. **Beware of MAPE** - It can be undefined or misleading for small values.
+3. **Beware of MAPE** - It can be misleading for small values.
 
-4. **Quantile loss for intervals** - Use when evaluating prediction intervals.
+4. **Check bias** - Systematic over/under-prediction affects planning.
 
-5. **Report in context** - An MAE of 10 means nothing without knowing the scale.
+5. **Verify calibration** - Coverage should match the nominal level (e.g., 90% for 90% intervals).
+
+---
+
+## Related Functions
+
+- `ts_backtest_auto_by()` - Generate backtest results to evaluate
+- `ts_forecast_by()` - Generate forecasts
+- `ts_conformal_by()` - Create prediction intervals
