@@ -166,31 +166,48 @@ Before releasing a new `_by` function, verify:
 
 ## Functions to Audit
 
-Based on these findings, the following functions should be audited for similar issues:
+Based on these findings, the following functions should be audited for similar issues (see #115):
 
-| Function | Uses LIST() | Uses CROSS JOIN | FFI Allocations |
-|----------|-------------|-----------------|-----------------|
-| ts_forecast_by | Yes | No | Yes |
-| ts_decompose_by | Yes | No | Yes |
-| ts_detect_anomalies_by | Yes | No | Yes |
-| ts_fill_gaps_by | Yes (via macro) | No | Yes (native) |
-| ts_backtest_auto_by | Yes | Yes | Yes |
-| ts_cv_forecast_by | Yes | Yes | Yes |
+| Function | Uses LIST() | Uses CROSS JOIN | FFI Allocations | Status |
+|----------|-------------|-----------------|-----------------|--------|
+| ts_forecast_by | Yes | No | Yes | To audit |
+| ts_decompose_by | Yes | No | Yes | To audit |
+| ts_detect_anomalies_by | Yes | No | Yes | To audit |
+| ts_fill_gaps_by | Yes (via macro) | No | Yes (native) | See #113 |
+| ts_backtest_auto_by | ~~Yes~~ | ~~Yes~~ | Yes | **Fixed in #114** |
+| ts_cv_forecast_by | Yes | Yes | Yes | High priority |
 
-## Recommended Mitigations for #105
+## Mitigations Implemented for #105
 
-### Short-term (Investigation complete, implementation pending):
-1. Add null checks to FFI allocation calls in `anofox_ts_forecast`
-2. Return proper error instead of segfault
+### Completed (PR #114):
 
-### Medium-term:
-1. Add memory estimation before backtest execution
-2. Warn or fail early if estimated memory exceeds threshold
+1. **FFI Allocation Safety** - Added null checks to `vec_to_c_array` calls in `anofox_ts_forecast`
+   - Returns proper error instead of segfault when allocation fails
+   - See `crates/anofox-fcst-ffi/src/lib.rs:3198-3225`
 
-### Long-term:
-1. Convert `ts_backtest_auto_by` to table_in_out pattern
-2. Process folds one at a time, stream results
-3. Avoid materializing all intermediate CTEs
+2. **Native Streaming Implementation** - Converted `ts_backtest_auto_by` to use `table_in_out` pattern
+   - New internal function: `_ts_backtest_native` (see `src/table_functions/ts_backtest_native.cpp`)
+   - Processes groups in parallel across threads
+   - Streams output instead of materializing all results
+   - **Result: 31x memory reduction** (1,951 MB → 63 MB for 1M rows)
+
+3. **Macro Refactoring** - `ts_backtest_auto_by` is now a thin wrapper
+   - Public API unchanged
+   - Internally calls `_ts_backtest_native`
+   - Removed 259 lines of complex SQL CTEs
+
+### Performance Comparison (1M rows, 10k series)
+
+| Metric | Old SQL Macro | New Native | Improvement |
+|--------|---------------|------------|-------------|
+| Memory | 1,951 MB | 63 MB | **31x less** |
+| Latency | 0.54s | 0.31s | **1.7x faster** |
+
+### Remaining Work
+
+See GitHub issues:
+- #115 - Research streaming API adoption for other memory-intensive functions
+- #116 - Add null checks to remaining FFI allocation calls (~35 sites)
 
 ## DuckDB Memory Configuration
 
