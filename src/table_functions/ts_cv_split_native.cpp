@@ -214,33 +214,34 @@ static unique_ptr<FunctionData> TsCvSplitNativeBind(
         }
     }
 
-    // Determine input types from the table argument
-    auto &table_arg = input.input_table_types;
-    if (table_arg.size() >= 3) {
-        bind_data->group_logical_type = table_arg[0];
-        bind_data->date_logical_type = table_arg[1];
-        bind_data->value_logical_type = table_arg[2];
+    // Determine input types and names from the table argument
+    auto &table_types = input.input_table_types;
+    auto &table_names = input.input_table_names;
+    if (table_types.size() >= 3) {
+        bind_data->group_logical_type = table_types[0];
+        bind_data->date_logical_type = table_types[1];
+        bind_data->value_logical_type = table_types[2];
 
         // Detect date column type
-        if (table_arg[1].id() == LogicalTypeId::DATE) {
+        if (table_types[1].id() == LogicalTypeId::DATE) {
             bind_data->date_col_type = DateColumnType::DATE;
-        } else if (table_arg[1].id() == LogicalTypeId::TIMESTAMP) {
+        } else if (table_types[1].id() == LogicalTypeId::TIMESTAMP) {
             bind_data->date_col_type = DateColumnType::TIMESTAMP;
-        } else if (table_arg[1].id() == LogicalTypeId::BIGINT ||
-                   table_arg[1].id() == LogicalTypeId::INTEGER) {
+        } else if (table_types[1].id() == LogicalTypeId::BIGINT ||
+                   table_types[1].id() == LogicalTypeId::INTEGER) {
             bind_data->date_col_type = DateColumnType::BIGINT;
         }
     }
 
-    // Output columns: group_col, date_col, target_col, fold_id, split
+    // Output columns: preserve original column names, add fold_id and split
     return_types.push_back(bind_data->group_logical_type);
-    names.push_back("group_col");
+    names.push_back(table_names.size() > 0 ? table_names[0] : "group_col");
 
     return_types.push_back(bind_data->date_logical_type);
-    names.push_back("date_col");
+    names.push_back(table_names.size() > 1 ? table_names[1] : "date_col");
 
     return_types.push_back(bind_data->value_logical_type);
-    names.push_back("target_col");
+    names.push_back(table_names.size() > 2 ? table_names[2] : "target_col");
 
     return_types.push_back(LogicalType::BIGINT);
     names.push_back("fold_id");

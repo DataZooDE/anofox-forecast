@@ -272,17 +272,22 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
                 input.input_table_types[2].ToString().c_str());
     }
 
-    // Output schema: fold_id, id, forecast_step, date, point_forecast, lower_90, upper_90, model_name
+    // Output schema: fold_id, group_col, forecast_step, date_col, point_forecast, lower_90, upper_90, model_name
+    // Preserve original column names from input table
+    auto &table_names = input.input_table_names;
+    string group_col_name = table_names.size() > 1 ? table_names[1] : "id";
+    string date_col_name = table_names.size() > 2 ? table_names[2] : "date";
+
     names.push_back("fold_id");
     return_types.push_back(LogicalType::BIGINT);
 
-    names.push_back("id");
+    names.push_back(group_col_name);
     return_types.push_back(bind_data->group_logical_type);
 
     names.push_back("forecast_step");
     return_types.push_back(LogicalType::INTEGER);
 
-    names.push_back("date");
+    names.push_back(date_col_name);
     return_types.push_back(bind_data->date_logical_type);
 
     names.push_back("point_forecast");
