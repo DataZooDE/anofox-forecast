@@ -175,8 +175,6 @@ Based on these findings, the following functions should be audited for similar i
 | ts_backtest_auto_by | ~~Yes~~ | ~~Yes~~ | ~~1951 MB~~ → 63 MB | **Fixed in #114** |
 | ts_cv_split_by | ~~Yes~~ | ~~Yes~~ | ~~36 MB~~ → 19 MB | **Fixed - Native streaming** |
 | ts_fill_gaps_by | Yes (via macro) | No | Low | See #113 |
-| ts_decompose_by | Yes | No | ~35 MB | Low priority |
-| ts_detect_anomalies_by | Yes | No | ~35 MB | Low priority |
 | ts_stats_by | Yes | No | 32 MB | No action needed |
 | ts_features_by | Yes | No | 34 MB | No action needed |
 | ts_mstl_decomposition_by | ~~Yes~~ | No | ~35 MB | **Fixed - Native streaming** (minimal improvement, already low) |
