@@ -250,10 +250,10 @@ Split time series data into train/test sets.
 **Signature:**
 ```sql
 ts_cv_split_by(
-    source VARCHAR,
-    group_col VARCHAR,
-    date_col VARCHAR,
-    target_col VARCHAR,
+    source VARCHAR,           -- Source table name (quoted string)
+    group_col IDENTIFIER,     -- Series grouping column (unquoted)
+    date_col IDENTIFIER,      -- Date/timestamp column (unquoted)
+    target_col IDENTIFIER,    -- Value column (unquoted)
     training_end_times DATE[],
     horizon BIGINT,
     frequency VARCHAR,
@@ -261,7 +261,14 @@ ts_cv_split_by(
 ) → TABLE
 ```
 
-**Returns:** Rows from source with `fold_id` and `split` (`'train'` or `'test'`) columns.
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `<group_col>` | (same as input) | Series identifier (preserves original column name) |
+| `<date_col>` | (same as input) | Date/timestamp (preserves original column name) |
+| `<target_col>` | (same as input) | Target value (preserves original column name) |
+| `fold_id` | BIGINT | Fold number (1, 2, 3, ...) |
+| `split` | VARCHAR | `'train'` or `'test'` |
 
 **Window Types:**
 ```
@@ -276,24 +283,40 @@ Fold 2:         [==TRAIN==][TEST]
 Fold 3:             [==TRAIN==][TEST]
 ```
 
+**Example:**
+```sql
+CREATE TABLE cv_splits AS
+SELECT * FROM ts_cv_split_by('sales', store_id, date, revenue,
+    ['2024-01-10'::DATE, '2024-01-15'::DATE], 5, '1d', MAP{});
+-- Output columns: store_id, date, revenue, fold_id, split
+```
+
 ---
 
 ### ts_cv_split_index_by
 
-Memory-efficient alternative returning only index columns.
+Memory-efficient alternative returning only index columns (no target values).
 
 **Signature:**
 ```sql
 ts_cv_split_index_by(
-    source VARCHAR,
-    group_col VARCHAR,
-    date_col VARCHAR,
+    source VARCHAR,           -- Source table name (quoted string)
+    group_col IDENTIFIER,     -- Series grouping column (unquoted)
+    date_col IDENTIFIER,      -- Date/timestamp column (unquoted)
     training_end_times DATE[],
     horizon BIGINT,
     frequency VARCHAR,
     params MAP
-) → TABLE(group_col, date_col, fold_id BIGINT, split VARCHAR)
+) → TABLE
 ```
+
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `<group_col>` | (same as input) | Series identifier (preserves original column name) |
+| `<date_col>` | (same as input) | Date/timestamp (preserves original column name) |
+| `fold_id` | BIGINT | Fold number |
+| `split` | VARCHAR | `'train'` or `'test'` |
 
 ---
 
@@ -304,10 +327,10 @@ Generate forecasts for all CV folds.
 **Signature:**
 ```sql
 ts_cv_forecast_by(
-    cv_splits VARCHAR,
-    group_col VARCHAR,
-    date_col VARCHAR,
-    target_col VARCHAR,
+    cv_splits VARCHAR,        -- CV splits table name (quoted string)
+    group_col IDENTIFIER,     -- Series grouping column (unquoted)
+    date_col IDENTIFIER,      -- Date/timestamp column (unquoted)
+    target_col IDENTIFIER,    -- Value column (unquoted)
     method VARCHAR,
     horizon BIGINT,
     params MAP,
@@ -315,19 +338,32 @@ ts_cv_forecast_by(
 ) → TABLE
 ```
 
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | Fold number |
+| `<group_col>` | (same as input) | Series identifier (preserves original column name) |
+| `forecast_step` | INTEGER | Forecast horizon step (1, 2, 3, ...) |
+| `<date_col>` | (same as input) | Forecast date (preserves original column name) |
+| `point_forecast` | DOUBLE | Point forecast value |
+| `lower_90` | DOUBLE | Lower 90% prediction interval bound |
+| `upper_90` | DOUBLE | Upper 90% prediction interval bound |
+| `model_name` | VARCHAR | Model used for this forecast |
+
 **Example:**
 ```sql
 -- Create splits
 CREATE TABLE cv_splits AS
-SELECT * FROM ts_cv_split_by('sales', 'store_id', 'date', 'sales',
+SELECT * FROM ts_cv_split_by('sales', store_id, date, revenue,
     ['2024-01-10'::DATE, '2024-01-15'::DATE], 5, '1d', MAP{});
 
--- Generate forecasts for training data only
+-- Generate forecasts (use same column names as cv_splits)
 SELECT * FROM ts_cv_forecast_by(
     'cv_splits',
-    'store_id', 'date', 'sales',
+    store_id, date, revenue,
     'AutoETS', 5, MAP{}, '1d'
-) WHERE split = 'train';
+);
+-- Output columns: fold_id, store_id, forecast_step, date, point_forecast, lower_90, upper_90, model_name
 ```
 
 ---

@@ -292,138 +292,38 @@ ORDER BY group_col, date_col
     // ts_fill_gaps_by: Fill date gaps with NULL values at specified frequency
     // C++ API: ts_fill_gaps_by(table_name, group_col, date_col, value_col, frequency)
     // Supports: integers (as days), Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y'), DuckDB INTERVAL ('1 day', '1 hour')
+    //
+    // This macro is a thin wrapper around the native streaming implementation (_ts_fill_gaps_native)
+    // which uses 16x less memory than the previous SQL macro approach (GH#113, GH#115).
+    //
+    // Performance (1M rows, 10K groups):
+    //   SQL macro:  181 MB peak memory
+    //   Native:      11 MB peak memory (16x reduction)
     {"ts_fill_gaps_by", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH _freq AS (
-    SELECT CASE
-        WHEN frequency::VARCHAR ~ '^[0-9]+$' THEN (frequency::VARCHAR || ' day')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'w$', ' week'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'mo$', ' month'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency::VARCHAR, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'y$', ' year'))::INTERVAL
-        ELSE frequency::INTERVAL
-    END AS _interval
-),
-src AS (
-    SELECT group_col AS _grp, date_col AS _dt, value_col AS _val
-    FROM query_table(source::VARCHAR)
-),
-date_range AS (
-    SELECT
-        _grp,
-        date_trunc('second', MIN(_dt)::TIMESTAMP) AS _min_dt,
-        date_trunc('second', MAX(_dt)::TIMESTAMP) AS _max_dt
-    FROM src
-    GROUP BY _grp
-),
-all_dates AS (
-    SELECT
-        dr._grp,
-        UNNEST(generate_series(dr._min_dt, dr._max_dt, (SELECT _interval FROM _freq))) AS _dt
-    FROM date_range dr
+SELECT * FROM _ts_fill_gaps_native(
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
+    frequency
 )
-SELECT
-    ad._grp AS group_col,
-    ad._dt AS date_col,
-    s._val AS value_col
-FROM all_dates ad
-LEFT JOIN src s ON ad._grp = s._grp AND date_trunc('second', ad._dt) = date_trunc('second', s._dt::TIMESTAMP)
-ORDER BY ad._grp, ad._dt
 )"},
 
     // ts_fill_forward_by: Fill forward to a target date with NULL values
     // C++ API: ts_fill_forward_by(table_name, group_col, date_col, value_col, target_date, frequency)
     // Supports both Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y') and DuckDB INTERVAL ('1 day', '1 hour')
+    //
+    // This macro is a thin wrapper around the native streaming implementation (_ts_fill_forward_native)
+    // which uses 11x less memory than the previous SQL macro approach (GH#113, GH#115).
+    //
+    // Performance (1M rows, 10K groups):
+    //   SQL macro:  127 MB peak memory
+    //   Native:      11 MB peak memory (11x reduction)
     {"ts_fill_forward_by", {"source", "group_col", "date_col", "value_col", "target_date", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH _freq AS (
-    SELECT CASE
-        WHEN frequency::VARCHAR ~ '^[0-9]+$' THEN (frequency::VARCHAR || ' day')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'w$', ' week'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'mo$', ' month'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency::VARCHAR, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'y$', ' year'))::INTERVAL
-        ELSE frequency::INTERVAL
-    END AS _interval
-),
-src AS (
-    SELECT group_col AS _grp, date_col AS _dt, value_col AS _val
-    FROM query_table(source::VARCHAR)
-),
-last_dates AS (
-    SELECT
-        _grp,
-        date_trunc('second', MAX(_dt)::TIMESTAMP) AS _max_dt
-    FROM src
-    GROUP BY _grp
-),
-forward_dates AS (
-    SELECT
-        ld._grp,
-        UNNEST(generate_series(ld._max_dt + (SELECT _interval FROM _freq), date_trunc('second', target_date::TIMESTAMP), (SELECT _interval FROM _freq))) AS _dt
-    FROM last_dates ld
-    WHERE ld._max_dt < date_trunc('second', target_date::TIMESTAMP)
+SELECT * FROM _ts_fill_forward_native(
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
+    target_date,
+    frequency
 )
-SELECT _grp AS group_col, _dt AS date_col, _val AS value_col FROM src
-UNION ALL
-SELECT
-    fd._grp AS group_col,
-    fd._dt AS date_col,
-    NULL::DOUBLE AS value_col
-FROM forward_dates fd
-ORDER BY 1, 2
-)"},
-
-    // ts_fill_gaps_operator_by: High-performance gap filling (API compatible with C++ version)
-    // C++ API: ts_fill_gaps_operator_by(table_name, group_col, date_col, value_col, frequency)
-    // Note: This is identical to ts_fill_gaps but named "operator" for C++ API compatibility
-    // Supports both Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y') and DuckDB INTERVAL ('1 day', '1 hour')
-    {"ts_fill_gaps_operator_by", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
-R"(
-WITH _freq AS (
-    SELECT CASE
-        WHEN frequency::VARCHAR ~ '^[0-9]+$' THEN (frequency::VARCHAR || ' day')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'w$', ' week'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'mo$', ' month'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency::VARCHAR, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'y$', ' year'))::INTERVAL
-        ELSE frequency::INTERVAL
-    END AS _interval
-),
-src AS (
-    SELECT group_col AS _grp, date_col AS _dt, value_col AS _val
-    FROM query_table(source::VARCHAR)
-),
-date_range AS (
-    SELECT
-        _grp,
-        date_trunc('second', MIN(_dt)::TIMESTAMP) AS _min_dt,
-        date_trunc('second', MAX(_dt)::TIMESTAMP) AS _max_dt
-    FROM src
-    GROUP BY _grp
-),
-all_dates AS (
-    SELECT
-        dr._grp,
-        UNNEST(generate_series(dr._min_dt, dr._max_dt, (SELECT _interval FROM _freq))) AS _dt
-    FROM date_range dr
-)
-SELECT
-    ad._grp AS group_col,
-    ad._dt AS date_col,
-    s._val AS value_col
-FROM all_dates ad
-LEFT JOIN src s ON ad._grp = s._grp AND date_trunc('second', ad._dt) = date_trunc('second', s._dt::TIMESTAMP)
-ORDER BY ad._grp, ad._dt
 )"},
 
     // ts_drop_gappy_by: Filter out series with too many gaps
@@ -457,22 +357,13 @@ WHERE group_col IN (
     // ts_mstl_decomposition_by: MSTL decomposition for grouped series
     // C++ API: ts_mstl_decomposition_by(table_name, group_col, date_col, value_col, params MAP)
     // Returns: TABLE with expanded decomposition columns
+    // Uses native streaming implementation to avoid LIST() memory issues
     {"ts_mstl_decomposition_by", {"source", "group_col", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH decomposition_data AS (
-    SELECT
-        group_col AS id,
-        _ts_mstl_decomposition(LIST(value_col::DOUBLE ORDER BY date_col)) AS _decomp
-    FROM query_table(source::VARCHAR)
-    GROUP BY group_col
+SELECT * FROM _ts_mstl_decomposition_native(
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
+    COALESCE(json_extract_string(to_json(params), '$.insufficient_data'), 'fail')
 )
-SELECT
-    id,
-    (_decomp).trend AS trend,
-    (_decomp).seasonal AS seasonal,
-    (_decomp).remainder AS remainder,
-    (_decomp).periods AS periods
-FROM decomposition_data
 )"},
 
     // ts_detrend_by: Remove trend from grouped time series
@@ -599,110 +490,41 @@ FROM forecast_result
 
     // ts_forecast_by: Generate forecasts per group (long format - one row per forecast step)
     // C++ API: ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, params?, frequency?)
+    //
+    // This macro is a thin wrapper around the native streaming implementation (_ts_forecast_native)
+    // which uses significantly less memory than the previous SQL macro approach (GH#115).
+    //
+    // Performance (1M rows, 10K groups):
+    //   SQL macro:  358 MB peak memory (LIST aggregation)
+    //   Native:     ~35 MB peak memory (streaming)
+    //
     // Supports both Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y') and DuckDB INTERVAL ('1 day', '1 hour')
     {"ts_forecast_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", nullptr}, {{"params", "MAP{}"}, {"frequency", "'1d'"}, {nullptr, nullptr}},
 R"(
-WITH _freq AS (
-    SELECT CASE
-        WHEN frequency::VARCHAR ~ '^[0-9]+$' THEN (frequency::VARCHAR || ' day')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'w$', ' week'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'mo$', ' month'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency::VARCHAR, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'y$', ' year'))::INTERVAL
-        ELSE frequency::INTERVAL
-    END AS _interval
-),
-_ets_spec AS (
-    SELECT COALESCE(json_extract_string(to_json(params), '$.model'), '') AS spec
-),
-forecast_data AS (
-    SELECT
-        group_col AS id,
-        date_trunc('second', MAX(date_col)::TIMESTAMP) AS last_date,
-        _ts_forecast(
-            LIST(target_col::DOUBLE ORDER BY date_col),
-            horizon,
-            CASE WHEN (SELECT spec FROM _ets_spec) != ''
-                 THEN method || ':' || (SELECT spec FROM _ets_spec)
-                 ELSE method
-            END
-        ) AS fcst
-    FROM query_table(source::VARCHAR)
-    GROUP BY group_col
+SELECT * FROM _ts_forecast_native(
+    (SELECT group_col, date_col, target_col FROM query_table(source::VARCHAR)),
+    horizon,
+    frequency,
+    method,
+    params
 )
-SELECT
-    id,
-    UNNEST(generate_series(1, len((fcst).point)))::INTEGER AS forecast_step,
-    UNNEST(generate_series(last_date + (SELECT _interval FROM _freq), last_date + (len((fcst).point)::INTEGER * EXTRACT(EPOCH FROM (SELECT _interval FROM _freq)) || ' seconds')::INTERVAL, (SELECT _interval FROM _freq)))::TIMESTAMP AS date,
-    UNNEST((fcst).point) AS point_forecast,
-    UNNEST((fcst).lower) AS lower_90,
-    UNNEST((fcst).upper) AS upper_90,
-    (fcst).model AS model_name,
-    (fcst).fitted AS insample_fitted
-FROM forecast_data
-ORDER BY id, forecast_step
 )"},
 
     // ts_cv_forecast_by: Generate forecasts for CV splits with parallel fold execution
     // C++ API: ts_cv_forecast_by(cv_splits, group_col, date_col, target_col, method, horizon, params, frequency)
     // Processes all folds in parallel using DuckDB's vectorization
     // cv_splits should be output from ts_cv_split filtered to split='train'
+    // Uses native streaming implementation to avoid LIST() memory issues
     {"ts_cv_forecast_by", {"cv_splits", "group_col", "date_col", "target_col", "method", "horizon", nullptr}, {{"params", "MAP{}"}, {"frequency", "'1d'"}, {nullptr, nullptr}},
 R"(
-WITH _freq AS (
-    SELECT CASE
-        WHEN frequency::VARCHAR ~ '^[0-9]+$' THEN (frequency::VARCHAR || ' day')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'w$', ' week'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'mo$', ' month'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency::VARCHAR, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'y$', ' year'))::INTERVAL
-        ELSE frequency::INTERVAL
-    END AS _interval
-),
-cv_data AS (
-    SELECT
-        fold_id,
-        group_col AS _grp,
-        date_col,
-        target_col
-    FROM query_table(cv_splits::VARCHAR)
-),
-_ets_spec_cv AS (
-    SELECT COALESCE(json_extract_string(to_json(params), '$.model'), '') AS spec
-),
-forecast_data AS (
-    SELECT
-        fold_id,
-        _grp AS id,
-        date_trunc('second', MAX(date_col)::TIMESTAMP) AS last_date,
-        _ts_forecast(
-            LIST(target_col::DOUBLE ORDER BY date_col),
-            horizon,
-            CASE WHEN (SELECT spec FROM _ets_spec_cv) != ''
-                 THEN method || ':' || (SELECT spec FROM _ets_spec_cv)
-                 ELSE method
-            END
-        ) AS fcst
-    FROM cv_data
-    GROUP BY fold_id, _grp
+SELECT * FROM _ts_cv_forecast_native(
+    (SELECT fold_id, group_col, date_col, target_col FROM query_table(cv_splits::VARCHAR)),
+    horizon,
+    frequency,
+    method,
+    params
 )
-SELECT
-    fold_id,
-    id,
-    UNNEST(generate_series(1, len((fcst).point)))::INTEGER AS forecast_step,
-    UNNEST(generate_series(last_date + (SELECT _interval FROM _freq), last_date + (len((fcst).point)::INTEGER * EXTRACT(EPOCH FROM (SELECT _interval FROM _freq)) || ' seconds')::INTERVAL, (SELECT _interval FROM _freq)))::TIMESTAMP AS date,
-    UNNEST((fcst).point) AS point_forecast,
-    UNNEST((fcst).lower) AS lower_90,
-    UNNEST((fcst).upper) AS upper_90,
-    (fcst).model AS model_name
-FROM forecast_data
-ORDER BY fold_id, id, forecast_step
+ORDER BY 1, 2, 3
 )"},
 
     // ts_forecast_exog: Generate forecasts with exogenous variables (single series)
@@ -1134,97 +956,18 @@ ORDER BY fold_id
     // gap: number of periods between training end and test start (default 0, simulates data latency)
     // embargo: number of periods to exclude from training after previous fold's test end (default 0, prevents label leakage)
     // Returns: group_col, date_col, target_col, fold_id, split (train/test)
+    // ts_cv_split_by: Native streaming implementation for memory efficiency
+    // Uses _ts_cv_split_native table-in-out function to avoid CROSS JOIN memory explosion
     {"ts_cv_split_by", {"source", "group_col", "date_col", "target_col", "training_end_times", "horizon", "frequency", "params", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH _params AS (
-    SELECT
-        COALESCE(json_extract_string(to_json(params), '$.window_type'), 'expanding') AS _window_type,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.min_train_size') AS BIGINT), 1) AS _min_train_size,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.gap') AS BIGINT), 0) AS _gap,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.embargo') AS BIGINT), 0) AS _embargo
-),
-_freq AS (
-    SELECT CASE
-        WHEN frequency::VARCHAR ~ '^[0-9]+$' THEN (frequency::VARCHAR || ' day')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'w$', ' week'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'mo$', ' month'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency::VARCHAR, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'y$', ' year'))::INTERVAL
-        ELSE frequency::INTERVAL
-    END AS _interval
-),
-src AS (
-    SELECT
-        group_col AS _grp,
-        date_trunc('second', date_col::TIMESTAMP) AS _dt,
-        target_col::DOUBLE AS _target
-    FROM query_table(source::VARCHAR)
-),
-date_bounds AS (
-    SELECT MIN(_dt) AS _min_dt FROM src
-),
-folds_raw AS (
-    SELECT
-        ROW_NUMBER() OVER (ORDER BY _train_end) AS fold_id,
-        date_trunc('second', _train_end::TIMESTAMP) AS train_end,
-        -- Gap: skip _gap periods after training before test starts
-        date_trunc('second', _train_end::TIMESTAMP) + (((SELECT _gap FROM _params) + 1) * (SELECT _interval FROM _freq)) AS test_start,
-        date_trunc('second', _train_end::TIMESTAMP) + (((SELECT _gap FROM _params) + horizon) * (SELECT _interval FROM _freq)) AS test_end
-    FROM (SELECT UNNEST(training_end_times) AS _train_end)
-),
-folds_with_embargo AS (
-    SELECT
-        fold_id,
-        train_end,
-        test_start,
-        test_end,
-        -- Embargo: only compute cutoff if embargo > 0
-        CASE
-            WHEN (SELECT _embargo FROM _params) > 0 THEN
-                COALESCE(
-                    LAG(test_end) OVER (ORDER BY fold_id) + ((SELECT _embargo FROM _params) * (SELECT _interval FROM _freq)),
-                    (SELECT _min_dt FROM date_bounds)
-                )
-            ELSE (SELECT _min_dt FROM date_bounds)
-        END AS embargo_cutoff
-    FROM folds_raw
-),
-fold_bounds AS (
-    SELECT
-        f.fold_id,
-        -- Train start is the GREATER of: window-based start OR embargo cutoff
-        GREATEST(
-            CASE
-                WHEN (SELECT _window_type FROM _params) = 'expanding' THEN (SELECT _min_dt FROM date_bounds)
-                WHEN (SELECT _window_type FROM _params) = 'fixed' THEN f.train_end - ((SELECT _min_train_size FROM _params) * (SELECT _interval FROM _freq))
-                WHEN (SELECT _window_type FROM _params) = 'sliding' THEN f.train_end - ((SELECT _min_train_size FROM _params) * (SELECT _interval FROM _freq))
-                ELSE (SELECT _min_dt FROM date_bounds)
-            END,
-            f.embargo_cutoff
-        ) AS train_start,
-        f.train_end,
-        f.test_start,
-        f.test_end
-    FROM folds_with_embargo f
+SELECT * FROM _ts_cv_split_native(
+    (SELECT group_col, date_col, target_col FROM query_table(source::VARCHAR)),
+    horizon,
+    frequency,
+    training_end_times,
+    params
 )
-SELECT
-    s._grp AS group_col,
-    s._dt AS date_col,
-    s._target AS target_col,
-    fb.fold_id::BIGINT AS fold_id,
-    CASE
-        WHEN s._dt >= fb.train_start AND s._dt <= fb.train_end THEN 'train'
-        WHEN s._dt >= fb.test_start AND s._dt <= fb.test_end THEN 'test'
-        ELSE NULL
-    END AS split
-FROM src s
-CROSS JOIN fold_bounds fb
-WHERE (s._dt >= fb.train_start AND s._dt <= fb.train_end)
-   OR (s._dt >= fb.test_start AND s._dt <= fb.test_end)
-ORDER BY fb.fold_id, s._grp, s._dt
+ORDER BY 4, 1, 2
 )"},
 
     // ts_cv_split_index_by: Memory-efficient CV split that returns only index columns (no data columns)

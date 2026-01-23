@@ -168,14 +168,20 @@ Before releasing a new `_by` function, verify:
 
 Based on these findings, the following functions should be audited for similar issues (see #115):
 
-| Function | Uses LIST() | Uses CROSS JOIN | FFI Allocations | Status |
-|----------|-------------|-----------------|-----------------|--------|
-| ts_forecast_by | Yes | No | Yes | To audit |
-| ts_decompose_by | Yes | No | Yes | To audit |
-| ts_detect_anomalies_by | Yes | No | Yes | To audit |
-| ts_fill_gaps_by | Yes (via macro) | No | Yes (native) | See #113 |
-| ts_backtest_auto_by | ~~Yes~~ | ~~Yes~~ | Yes | **Fixed in #114** |
-| ts_cv_forecast_by | Yes | Yes | Yes | High priority |
+| Function | Uses LIST() | Uses CROSS JOIN | Peak Memory | Status |
+|----------|-------------|-----------------|-------------|--------|
+| ts_forecast_by | ~~Yes~~ | No | ~~358 MB~~ → 4 MB | **Fixed - Native streaming** |
+| ts_cv_forecast_by | ~~Yes~~ | ~~Yes~~ | ~~212 MB~~ → 116 MB | **Fixed - Native streaming** |
+| ts_backtest_auto_by | ~~Yes~~ | ~~Yes~~ | ~~1951 MB~~ → 63 MB | **Fixed in #114** |
+| ts_cv_split_by | ~~Yes~~ | ~~Yes~~ | ~~36 MB~~ → 19 MB | **Fixed - Native streaming** |
+| ts_fill_gaps_by | ~~Yes~~ | No | ~~181 MB~~ → 11 MB | **Fixed - Native streaming** (#113) |
+| ts_fill_forward_by | ~~Yes~~ | No | ~~127 MB~~ → 11 MB | **Fixed - Native streaming** (#113) |
+| ts_stats_by | Yes | No | 32 MB | No action needed |
+| ts_features_by | Yes | No | 34 MB | No action needed |
+| ts_mstl_decomposition_by | ~~Yes~~ | No | ~35 MB | **Fixed - Native streaming** (minimal improvement, already low) |
+| ts_detect_changepoints_by | Yes | No | 33 MB | No action needed |
+| ts_detect_periods_by | Yes | No | 32 MB | No action needed |
+| ts_classify_seasonality_by | Yes | No | 36 MB | No action needed |
 
 ## Mitigations Implemented for #105
 
@@ -196,12 +202,56 @@ Based on these findings, the following functions should be audited for similar i
    - Internally calls `_ts_backtest_native`
    - Removed 259 lines of complex SQL CTEs
 
-### Performance Comparison (1M rows, 10k series)
+### Performance Comparison: ts_backtest_auto_by (1M rows, 10k series)
 
 | Metric | Old SQL Macro | New Native | Improvement |
 |--------|---------------|------------|-------------|
 | Memory | 1,951 MB | 63 MB | **31x less** |
 | Latency | 0.54s | 0.31s | **1.7x faster** |
+
+### Additional Streaming Conversions (#105)
+
+The following functions have also been converted to native streaming:
+
+#### ts_forecast_by (100K rows, 1K groups)
+
+| Metric | Old SQL Macro | New Native | Improvement |
+|--------|---------------|------------|-------------|
+| Peak Memory | 358 MB | 4 MB | **99% reduction** |
+| Latency | N/A | 67ms | Excellent |
+
+**Implementation**: `src/table_functions/ts_forecast_native.cpp`
+- Uses `table_in_out` streaming pattern
+- Buffers data per group, processes in finalize
+- Avoids `LIST()` aggregation memory explosion
+
+#### ts_cv_split_by (100K rows, 1K groups, 3 folds)
+
+| Metric | Old SQL Macro | New Native | Improvement |
+|--------|---------------|------------|-------------|
+| Peak Memory | 35.7 MB | 18.9 MB | **47% reduction** |
+| Latency | ~100ms | ~82ms | Slightly faster |
+| Result rows | 143,000 | 143,000 | 100% match |
+
+**Implementation**: `src/table_functions/ts_cv_split_native.cpp`
+- Buffers input rows, expands in finalize phase
+- Avoids `CROSS JOIN` intermediate materialization
+- Properly handles output buffer overflow with `HAVE_MORE_OUTPUT`
+
+### Functions Not Requiring Streaming Conversion
+
+The following functions were profiled and found to have acceptable memory usage (32-36 MB for 100K rows, 1K groups). These don't require native streaming conversion:
+
+| Function | Peak Memory | Notes |
+|----------|-------------|-------|
+| ts_stats_by | ~32 MB | Simple aggregations, low overhead |
+| ts_features_by | ~34 MB | Feature extraction per group |
+| ts_mstl_decomposition_by | ~35 MB | Converted to native streaming for consistency |
+| ts_detect_changepoints_by | ~33 MB | Point-wise detection |
+| ts_detect_periods_by | ~32 MB | FFT-based, efficient |
+| ts_classify_seasonality_by | ~36 MB | Classification results are small |
+
+**Recommendation**: Focus streaming conversion efforts on functions with >100 MB memory usage, particularly those using `LIST()` aggregation or `CROSS JOIN` patterns.
 
 ### Remaining Work
 

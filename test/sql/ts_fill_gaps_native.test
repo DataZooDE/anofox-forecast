@@ -1,5 +1,5 @@
-# name: test/sql/ts_fill_gaps_native.test
-# description: Test ts_fill_gaps_native table-in-out function with type preservation
+# name: test/sql/_ts_fill_gaps_native.test
+# description: Test _ts_fill_gaps_native table-in-out function with type preservation
 # group: [anofox_forecast]
 
 require anofox_forecast
@@ -17,7 +17,7 @@ FROM (VALUES
 ) AS t(d, v);
 
 query III
-SELECT * FROM ts_fill_gaps_native(
+SELECT * FROM _ts_fill_gaps_native(
     (SELECT group_col, date_col, value FROM test_date ORDER BY group_col, date_col),
     '1d'
 );
@@ -29,7 +29,7 @@ A	2024-01-04	40.0
 
 # Verify DATE type is preserved
 query I
-SELECT typeof(date_col) FROM ts_fill_gaps_native(
+SELECT typeof(date_col) FROM _ts_fill_gaps_native(
     (SELECT group_col, date_col, value FROM test_date ORDER BY group_col, date_col),
     '1d'
 ) LIMIT 1;
@@ -50,7 +50,7 @@ FROM (VALUES
 ) AS t(ts, val);
 
 query III
-SELECT * FROM ts_fill_gaps_native(
+SELECT * FROM _ts_fill_gaps_native(
     (SELECT group_col, date_col, value FROM test_timestamp ORDER BY group_col, date_col),
     '1h'
 );
@@ -62,7 +62,7 @@ B	2024-01-01 03:00:00	40.0
 
 # Verify TIMESTAMP type is preserved
 query I
-SELECT typeof(date_col) FROM ts_fill_gaps_native(
+SELECT typeof(date_col) FROM _ts_fill_gaps_native(
     (SELECT group_col, date_col, value FROM test_timestamp ORDER BY group_col, date_col),
     '1h'
 ) LIMIT 1;
@@ -83,7 +83,7 @@ FROM (VALUES
 ) AS t(ts, val);
 
 query III
-SELECT * FROM ts_fill_gaps_native(
+SELECT * FROM _ts_fill_gaps_native(
     (SELECT group_col, date_col, value FROM test_bigint ORDER BY group_col, date_col),
     '1'
 );
@@ -95,7 +95,7 @@ C	4	40.0
 
 # Verify BIGINT type is preserved
 query I
-SELECT typeof(date_col) FROM ts_fill_gaps_native(
+SELECT typeof(date_col) FROM _ts_fill_gaps_native(
     (SELECT group_col, date_col, value FROM test_bigint ORDER BY group_col, date_col),
     '1'
 ) LIMIT 1;
@@ -116,7 +116,7 @@ FROM (VALUES
 ) AS t(ts, val);
 
 query III
-SELECT * FROM ts_fill_gaps_native(
+SELECT * FROM _ts_fill_gaps_native(
     (SELECT group_col, date_col, value FROM test_integer ORDER BY group_col, date_col),
     '100'
 );
@@ -141,7 +141,7 @@ SELECT group_col, date_col::DATE as date_col, value FROM (VALUES
 ) AS t(group_col, date_col, value);
 
 query III
-SELECT * FROM ts_fill_gaps_native(
+SELECT * FROM _ts_fill_gaps_native(
     (SELECT group_col, date_col, value FROM test_multi ORDER BY group_col, date_col),
     '1d'
 ) ORDER BY group_col, date_col;
@@ -167,7 +167,7 @@ FROM (VALUES
 ) AS t(d, v);
 
 query III
-SELECT * FROM ts_fill_gaps_native(
+SELECT * FROM _ts_fill_gaps_native(
     (SELECT group_col, date_col, value FROM test_interval ORDER BY group_col, date_col),
     '1 week'
 );
@@ -177,7 +177,7 @@ E	2024-01-08	80.0
 
 # Test alias with anofox_fcst prefix
 query III
-SELECT * FROM anofox_fcst_ts_fill_gaps_native(
+SELECT * FROM anofox_fcst__ts_fill_gaps_native(
     (SELECT group_col, date_col, value FROM test_date ORDER BY group_col, date_col),
     '1d'
 );
