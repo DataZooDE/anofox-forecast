@@ -141,8 +141,8 @@ static unique_ptr<FunctionData> TsFeaturesNativeBind(
     bind_data->group_logical_type = input.input_table_types[0];
     bind_data->group_col_name = input.input_table_names.size() > 0 ? input.input_table_names[0] : "id";
 
-    // Output schema: group_col (renamed to 'id' for API compatibility) + feature columns
-    names.push_back("id");
+    // Output schema: preserve original group column name + feature columns
+    names.push_back(bind_data->group_col_name);
     return_types.push_back(bind_data->group_logical_type);
 
     // Add all feature columns
