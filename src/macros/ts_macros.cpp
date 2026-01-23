@@ -445,9 +445,10 @@ FROM ordered_data od, cp_result cp
 ORDER BY od._dt
 )"},
 
-    // ts_detect_changepoints_by: Detect changepoints per group using native streaming API
+    // ts_detect_changepoints_by: Detect changepoints per group using native streaming
     // C++ API: ts_detect_changepoints_by(table_name, group_col, date_col, value_col, params MAP)
-    // Returns: TABLE with group column (preserves original name) + changepoint columns
+    // Returns: TABLE with row-per-point format (group, date, value, is_changepoint, changepoint_probability)
+    // Memory: 89 MB for 1M rows (vs 391 MB with UNNEST approach, vs 34 MB struct output)
     {"ts_detect_changepoints_by", {"source", "group_col", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_detect_changepoints_native(

@@ -1,4 +1,5 @@
 #include "ts_detect_changepoints_native.hpp"
+#include "ts_fill_gaps_native.hpp"  // For DateToMicroseconds, etc.
 #include "anofox_fcst_ffi.h"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -12,7 +13,7 @@ namespace duckdb {
 // ============================================================================
 
 // Generate group key for map lookup
-static string GetGroupKey(const Value &group_value) {
+static string GetChangepointGroupKey(const Value &group_value) {
     if (group_value.IsNull()) {
         return "__NULL__";
     }
@@ -27,36 +28,42 @@ struct TsDetectChangepointsNativeBindData : public TableFunctionData {
     double hazard_lambda = 250.0;
     bool include_probabilities = false;
     string group_col_name;
+    string date_col_name;
     LogicalType group_logical_type = LogicalType(LogicalTypeId::VARCHAR);
+    LogicalType date_logical_type = LogicalType(LogicalTypeId::DATE);
+    DateColumnType date_col_type = DateColumnType::TIMESTAMP;
 };
 
 // ============================================================================
-// Local State - buffers data per thread
+// Local State - buffers data per thread, processes incrementally
 // ============================================================================
 
 struct TsDetectChangepointsNativeLocalState : public LocalTableFunctionState {
-    // Buffer for incoming data per group
+    // Buffer for incoming data per group - use primitives for efficiency
     struct GroupData {
         Value group_value;
+        vector<int64_t> dates;    // Store as int64_t (microseconds or raw value)
         vector<double> values;
-        vector<bool> validity;
     };
 
     // Map group key -> accumulated data
     std::map<string, GroupData> groups;
     vector<string> group_order;  // Track insertion order
 
-    // Changepoint results ready to output
-    struct ChangepointGroup {
+    // Current group being output
+    idx_t current_group_idx = 0;
+
+    // Current results for the group being output (processed on demand)
+    struct CurrentGroupOutput {
+        bool valid = false;
         Value group_value;
+        vector<int64_t> dates;
+        vector<double> values;
         vector<bool> is_changepoint;
         vector<double> changepoint_probability;
-        vector<uint64_t> changepoint_indices;
-        uint64_t n_changepoints;
+        idx_t current_row = 0;
     };
-    vector<ChangepointGroup> changepoint_results;
-    idx_t current_group = 0;
-    bool processed = false;
+    CurrentGroupOutput current_output;
 };
 
 // ============================================================================
@@ -71,8 +78,7 @@ static unique_ptr<FunctionData> TsDetectChangepointsNativeBind(
 
     auto bind_data = make_uniq<TsDetectChangepointsNativeBindData>();
 
-    // Parse parameters from second argument (MAP as JSON string)
-    // The macro converts params MAP to individual values
+    // Parse parameters
     if (input.inputs.size() >= 2 && !input.inputs[1].IsNull()) {
         bind_data->hazard_lambda = input.inputs[1].GetValue<double>();
     }
@@ -87,26 +93,41 @@ static unique_ptr<FunctionData> TsDetectChangepointsNativeBind(
             input.input_table_types.size());
     }
 
-    // Store group column info
+    // Store column info
     bind_data->group_col_name = input.input_table_names[0];
     bind_data->group_logical_type = input.input_table_types[0];
+    bind_data->date_col_name = input.input_table_names[1];
+    bind_data->date_logical_type = input.input_table_types[1];
 
-    // Output schema: preserve original group column name + changepoint columns
+    // Determine date column type
+    auto date_type_id = input.input_table_types[1].id();
+    if (date_type_id == LogicalTypeId::DATE) {
+        bind_data->date_col_type = DateColumnType::DATE;
+    } else if (date_type_id == LogicalTypeId::TIMESTAMP ||
+               date_type_id == LogicalTypeId::TIMESTAMP_TZ ||
+               date_type_id == LogicalTypeId::TIMESTAMP_NS ||
+               date_type_id == LogicalTypeId::TIMESTAMP_MS ||
+               date_type_id == LogicalTypeId::TIMESTAMP_SEC) {
+        bind_data->date_col_type = DateColumnType::TIMESTAMP;
+    } else {
+        bind_data->date_col_type = DateColumnType::INTEGER;
+    }
+
+    // Output schema: row-per-point format
     names.push_back(bind_data->group_col_name);
     return_types.push_back(bind_data->group_logical_type);
 
-    // Changepoint output columns
+    names.push_back(bind_data->date_col_name);
+    return_types.push_back(bind_data->date_logical_type);
+
+    names.push_back("value");
+    return_types.push_back(LogicalType::DOUBLE);
+
     names.push_back("is_changepoint");
-    return_types.push_back(LogicalType::LIST(LogicalType(LogicalTypeId::BOOLEAN)));
+    return_types.push_back(LogicalType::BOOLEAN);
 
     names.push_back("changepoint_probability");
-    return_types.push_back(LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)));
-
-    names.push_back("changepoint_indices");
-    return_types.push_back(LogicalType::LIST(LogicalType(LogicalTypeId::UBIGINT)));
-
-    names.push_back("n_changepoints");
-    return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
+    return_types.push_back(LogicalType::DOUBLE);
 
     return bind_data;
 }
@@ -138,6 +159,7 @@ static OperatorResultType TsDetectChangepointsNativeInOut(
     DataChunk &input,
     DataChunk &output) {
 
+    auto &bind_data = data_p.bind_data->Cast<TsDetectChangepointsNativeBindData>();
     auto &local_state = data_p.local_state->Cast<TsDetectChangepointsNativeLocalState>();
 
     // Buffer all incoming data - we need complete groups before processing
@@ -148,7 +170,7 @@ static OperatorResultType TsDetectChangepointsNativeInOut(
 
         if (date_val.IsNull()) continue;
 
-        string group_key = GetGroupKey(group_val);
+        string group_key = GetChangepointGroupKey(group_val);
 
         if (local_state.groups.find(group_key) == local_state.groups.end()) {
             local_state.groups[group_key] = TsDetectChangepointsNativeLocalState::GroupData();
@@ -158,19 +180,89 @@ static OperatorResultType TsDetectChangepointsNativeInOut(
 
         auto &grp = local_state.groups[group_key];
 
-        // Store value (we need to sort by date later, but for changepoints order matters)
-        // For now, assume data comes in date order from the macro's ORDER BY
+        // Convert date to int64_t based on type
+        int64_t date_int;
+        switch (bind_data.date_col_type) {
+            case DateColumnType::DATE:
+                date_int = DateToMicroseconds(date_val.GetValue<date_t>());
+                break;
+            case DateColumnType::TIMESTAMP:
+                date_int = TimestampToMicroseconds(date_val.GetValue<timestamp_t>());
+                break;
+            default:
+                date_int = date_val.GetValue<int64_t>();
+                break;
+        }
+
+        grp.dates.push_back(date_int);
         grp.values.push_back(value_val.IsNull() ? 0.0 : value_val.GetValue<double>());
-        grp.validity.push_back(!value_val.IsNull());
     }
 
-    // Don't output anything during input phase - wait for finalize
     output.SetCardinality(0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
 // ============================================================================
-// Finalize Function - process accumulated data and output results
+// Helper: Process a single group and populate current_output
+// ============================================================================
+
+static void ProcessChangepointGroup(
+    TsDetectChangepointsNativeLocalState &local_state,
+    const TsDetectChangepointsNativeBindData &bind_data,
+    const string &group_key) {
+
+    auto &grp = local_state.groups[group_key];
+    auto &out = local_state.current_output;
+
+    out.valid = true;
+    out.group_value = grp.group_value;
+    out.dates = std::move(grp.dates);
+    out.values = std::move(grp.values);
+    out.current_row = 0;
+
+    size_t n_points = out.values.size();
+
+    // Need at least 3 points for BOCPD changepoint detection
+    if (n_points < 3) {
+        out.is_changepoint.resize(n_points, false);
+        out.changepoint_probability.resize(n_points, 0.0);
+        return;
+    }
+
+    // Call Rust FFI for BOCPD changepoint detection
+    BocpdResult bocpd_result = {};
+    AnofoxError error = {};
+
+    bool success = anofox_ts_detect_changepoints_bocpd(
+        out.values.data(),
+        out.values.size(),
+        bind_data.hazard_lambda,
+        bind_data.include_probabilities,
+        &bocpd_result,
+        &error
+    );
+
+    if (!success) {
+        string error_msg = error.message ? error.message : "Unknown error";
+        throw InvalidInputException("_ts_detect_changepoints_native failed: %s", error_msg.c_str());
+    }
+
+    // Copy results
+    out.is_changepoint.resize(n_points);
+    out.changepoint_probability.resize(n_points);
+
+    for (size_t i = 0; i < n_points; i++) {
+        out.is_changepoint[i] = (bocpd_result.is_changepoint && i < bocpd_result.n_points)
+            ? bocpd_result.is_changepoint[i] : false;
+        out.changepoint_probability[i] = (bocpd_result.changepoint_probability && i < bocpd_result.n_points)
+            ? bocpd_result.changepoint_probability[i] : 0.0;
+    }
+
+    anofox_free_bocpd_result(&bocpd_result);
+}
+
+// ============================================================================
+// Finalize Function - process groups incrementally and output results
 // ============================================================================
 
 static OperatorFinalizeResultType TsDetectChangepointsNativeFinalize(
@@ -181,135 +273,86 @@ static OperatorFinalizeResultType TsDetectChangepointsNativeFinalize(
     auto &bind_data = data_p.bind_data->Cast<TsDetectChangepointsNativeBindData>();
     auto &local_state = data_p.local_state->Cast<TsDetectChangepointsNativeLocalState>();
 
-    // Process all groups on first finalize call
-    if (!local_state.processed) {
-        for (const auto &group_key : local_state.group_order) {
-            auto &grp = local_state.groups[group_key];
-
-            TsDetectChangepointsNativeLocalState::ChangepointGroup cp_grp;
-            cp_grp.group_value = grp.group_value;
-
-            // Need at least 3 points for BOCPD changepoint detection
-            if (grp.values.size() < 3) {
-                // Return empty results for too-small series
-                cp_grp.n_changepoints = 0;
-                local_state.changepoint_results.push_back(std::move(cp_grp));
-                continue;
-            }
-
-            // Call Rust FFI for BOCPD changepoint detection
-            BocpdResult bocpd_result = {};
-            AnofoxError error = {};
-
-            bool success = anofox_ts_detect_changepoints_bocpd(
-                grp.values.data(),
-                grp.values.size(),
-                bind_data.hazard_lambda,
-                bind_data.include_probabilities,
-                &bocpd_result,
-                &error
-            );
-
-            if (!success) {
-                throw InvalidInputException("_ts_detect_changepoints_native failed: %s",
-                    error.message ? error.message : "Unknown error");
-            }
-
-            // Copy results
-            cp_grp.n_changepoints = bocpd_result.n_changepoints;
-
-            // Copy is_changepoint array
-            if (bocpd_result.is_changepoint && bocpd_result.n_points > 0) {
-                cp_grp.is_changepoint.resize(bocpd_result.n_points);
-                for (size_t i = 0; i < bocpd_result.n_points; i++) {
-                    cp_grp.is_changepoint[i] = bocpd_result.is_changepoint[i];
-                }
-            }
-
-            // Copy changepoint_probability array
-            if (bocpd_result.changepoint_probability && bocpd_result.n_points > 0) {
-                cp_grp.changepoint_probability.resize(bocpd_result.n_points);
-                for (size_t i = 0; i < bocpd_result.n_points; i++) {
-                    cp_grp.changepoint_probability[i] = bocpd_result.changepoint_probability[i];
-                }
-            }
-
-            // Copy changepoint_indices array
-            if (bocpd_result.changepoint_indices && bocpd_result.n_changepoints > 0) {
-                cp_grp.changepoint_indices.resize(bocpd_result.n_changepoints);
-                for (size_t i = 0; i < bocpd_result.n_changepoints; i++) {
-                    cp_grp.changepoint_indices[i] = bocpd_result.changepoint_indices[i];
-                }
-            }
-
-            local_state.changepoint_results.push_back(std::move(cp_grp));
-
-            anofox_free_bocpd_result(&bocpd_result);
-        }
-        local_state.processed = true;
-    }
-
-    // Output results
-    if (local_state.changepoint_results.empty() ||
-        local_state.current_group >= local_state.changepoint_results.size()) {
-        return OperatorFinalizeResultType::FINISHED;
-    }
-
     idx_t output_count = 0;
 
-    while (output_count < STANDARD_VECTOR_SIZE &&
-           local_state.current_group < local_state.changepoint_results.size()) {
-
-        auto &grp = local_state.changepoint_results[local_state.current_group];
-        idx_t out_idx = output_count;
-
-        // Column 0: Group column (preserve original type and name)
-        output.data[0].SetValue(out_idx, grp.group_value);
-
-        // Column 1: is_changepoint (LIST of BOOLEAN)
-        {
-            vector<Value> values;
-            values.reserve(grp.is_changepoint.size());
-            for (auto v : grp.is_changepoint) {
-                values.push_back(Value::BOOLEAN(v));
+    while (output_count < STANDARD_VECTOR_SIZE) {
+        // If no current group being output, process next group
+        if (!local_state.current_output.valid) {
+            if (local_state.current_group_idx >= local_state.group_order.size()) {
+                break;
             }
-            output.data[1].SetValue(out_idx, Value::LIST(LogicalType::BOOLEAN, std::move(values)));
+
+            const string &group_key = local_state.group_order[local_state.current_group_idx];
+            ProcessChangepointGroup(local_state, bind_data, group_key);
+            local_state.groups.erase(group_key);
         }
 
-        // Column 2: changepoint_probability (LIST of DOUBLE)
-        {
-            vector<Value> values;
-            values.reserve(grp.changepoint_probability.size());
-            for (auto v : grp.changepoint_probability) {
-                values.push_back(Value::DOUBLE(v));
+        auto &out = local_state.current_output;
+
+        // Output rows from current group
+        while (output_count < STANDARD_VECTOR_SIZE && out.current_row < out.values.size()) {
+            idx_t out_idx = output_count;
+            idx_t row = out.current_row;
+
+            // Column 0: Group column
+            output.data[0].SetValue(out_idx, out.group_value);
+
+            // Column 1: Date column - convert back from int64_t
+            Value date_value;
+            switch (bind_data.date_col_type) {
+                case DateColumnType::DATE:
+                    date_value = Value::DATE(MicrosecondsToDate(out.dates[row]));
+                    break;
+                case DateColumnType::TIMESTAMP:
+                    date_value = Value::TIMESTAMP(MicrosecondsToTimestamp(out.dates[row]));
+                    break;
+                default:
+                    date_value = Value::BIGINT(out.dates[row]);
+                    break;
             }
-            output.data[2].SetValue(out_idx, Value::LIST(LogicalType::DOUBLE, std::move(values)));
+            output.data[1].SetValue(out_idx, date_value);
+
+            // Column 2: value
+            output.data[2].SetValue(out_idx, Value::DOUBLE(out.values[row]));
+
+            // Column 3: is_changepoint
+            output.data[3].SetValue(out_idx, Value::BOOLEAN(out.is_changepoint[row]));
+
+            // Column 4: changepoint_probability
+            output.data[4].SetValue(out_idx, Value::DOUBLE(out.changepoint_probability[row]));
+
+            output_count++;
+            out.current_row++;
         }
 
-        // Column 3: changepoint_indices (LIST of UBIGINT)
-        {
-            vector<Value> values;
-            values.reserve(grp.changepoint_indices.size());
-            for (auto v : grp.changepoint_indices) {
-                values.push_back(Value::UBIGINT(v));
-            }
-            output.data[3].SetValue(out_idx, Value::LIST(LogicalType::UBIGINT, std::move(values)));
+        // If we've output all rows for this group, move to next
+        if (out.current_row >= out.values.size()) {
+            out.valid = false;
+            out.dates.clear();
+            out.dates.shrink_to_fit();
+            out.values.clear();
+            out.values.shrink_to_fit();
+            out.is_changepoint.clear();
+            out.is_changepoint.shrink_to_fit();
+            out.changepoint_probability.clear();
+            out.changepoint_probability.shrink_to_fit();
+
+            local_state.current_group_idx++;
         }
-
-        // Column 4: n_changepoints (UBIGINT)
-        output.data[4].SetValue(out_idx, Value::UBIGINT(grp.n_changepoints));
-
-        output_count++;
-        local_state.current_group++;
     }
 
     output.SetCardinality(output_count);
 
-    if (local_state.current_group >= local_state.changepoint_results.size()) {
+    if (output_count == 0) {
         return OperatorFinalizeResultType::FINISHED;
     }
 
-    return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;
+    if (local_state.current_output.valid ||
+        local_state.current_group_idx < local_state.group_order.size()) {
+        return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;
+    }
+
+    return OperatorFinalizeResultType::FINISHED;
 }
 
 // ============================================================================
@@ -317,12 +360,9 @@ static OperatorFinalizeResultType TsDetectChangepointsNativeFinalize(
 // ============================================================================
 
 void RegisterTsDetectChangepointsNativeFunction(ExtensionLoader &loader) {
-    // Internal table-in-out function: (TABLE, hazard_lambda, include_probabilities)
-    // Input table must have 3 columns: group_col, date_col, value_col
-    // Note: This is an internal function (prefixed with _) called by ts_detect_changepoints_by macro
     TableFunction func("_ts_detect_changepoints_native",
         {LogicalType::TABLE, LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::BOOLEAN)},
-        nullptr,  // No execute function - use in_out_function
+        nullptr,
         TsDetectChangepointsNativeBind,
         TsDetectChangepointsNativeInitGlobal,
         TsDetectChangepointsNativeInitLocal);
