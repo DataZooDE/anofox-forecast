@@ -170,11 +170,12 @@ Based on these findings, the following functions should be audited for similar i
 
 | Function | Uses LIST() | Uses CROSS JOIN | FFI Allocations | Status |
 |----------|-------------|-----------------|-----------------|--------|
-| ts_forecast_by | Yes | No | Yes | To audit |
+| ts_forecast_by | ~~Yes~~ | No | Yes | **Fixed - Native streaming** |
 | ts_decompose_by | Yes | No | Yes | To audit |
 | ts_detect_anomalies_by | Yes | No | Yes | To audit |
 | ts_fill_gaps_by | Yes (via macro) | No | Yes (native) | See #113 |
 | ts_backtest_auto_by | ~~Yes~~ | ~~Yes~~ | Yes | **Fixed in #114** |
+| ts_cv_split_by | ~~Yes~~ | ~~Yes~~ | No | **Fixed - Native streaming** |
 | ts_cv_forecast_by | Yes | Yes | Yes | High priority |
 
 ## Mitigations Implemented for #105
@@ -196,12 +197,41 @@ Based on these findings, the following functions should be audited for similar i
    - Internally calls `_ts_backtest_native`
    - Removed 259 lines of complex SQL CTEs
 
-### Performance Comparison (1M rows, 10k series)
+### Performance Comparison: ts_backtest_auto_by (1M rows, 10k series)
 
 | Metric | Old SQL Macro | New Native | Improvement |
 |--------|---------------|------------|-------------|
 | Memory | 1,951 MB | 63 MB | **31x less** |
 | Latency | 0.54s | 0.31s | **1.7x faster** |
+
+### Additional Streaming Conversions (#105)
+
+The following functions have also been converted to native streaming:
+
+#### ts_forecast_by (100K rows, 1K groups)
+
+| Metric | Old SQL Macro | New Native | Improvement |
+|--------|---------------|------------|-------------|
+| Peak Memory | 358 MB | 4 MB | **99% reduction** |
+| Latency | N/A | 67ms | Excellent |
+
+**Implementation**: `src/table_functions/ts_forecast_native.cpp`
+- Uses `table_in_out` streaming pattern
+- Buffers data per group, processes in finalize
+- Avoids `LIST()` aggregation memory explosion
+
+#### ts_cv_split_by (100K rows, 1K groups, 3 folds)
+
+| Metric | Old SQL Macro | New Native | Improvement |
+|--------|---------------|------------|-------------|
+| Peak Memory | 35.7 MB | 18.9 MB | **47% reduction** |
+| Latency | ~100ms | ~82ms | Slightly faster |
+| Result rows | 143,000 | 143,000 | 100% match |
+
+**Implementation**: `src/table_functions/ts_cv_split_native.cpp`
+- Buffers input rows, expands in finalize phase
+- Avoids `CROSS JOIN` intermediate materialization
+- Properly handles output buffer overflow with `HAVE_MORE_OUTPUT`
 
 ### Remaining Work
 
