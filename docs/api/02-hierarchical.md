@@ -22,19 +22,21 @@ When working with hierarchical time series data (e.g., region/store/item), you o
 SELECT * FROM ts_validate_separator('raw_sales', region_id, store_id, item_id);
 
 -- Step 2: Create hierarchical time series with all aggregation levels
+-- Use ts_aggregate_hierarchy_native for arbitrary hierarchy depth (2-N levels)
 CREATE TABLE prepared_data AS
-SELECT * FROM ts_aggregate_hierarchy('raw_sales', sale_date, quantity,
-    region_id, store_id, item_id);
+SELECT * FROM ts_aggregate_hierarchy_native(
+    (SELECT sale_date, quantity, region_id, store_id, item_id FROM raw_sales)
+);
 
 -- Step 3: Forecast all series (original + aggregated)
 CREATE TABLE forecasts AS
-SELECT * FROM ts_forecast_by('prepared_data', unique_id, date_col, value_col,
+SELECT * FROM ts_forecast_by('prepared_data', unique_id, date, value,
     'AutoETS', 28, {'seasonal_period': 7});
 
 -- Step 4: Split keys for analysis
 SELECT id_part_1 AS region_id, id_part_2 AS store_id, id_part_3 AS item_id,
        date_col AS forecast_date, value_col AS point_forecast
-FROM ts_split_keys('forecasts', id, ds, point_forecast);
+FROM ts_split_keys('forecasts', unique_id, date, value);
 ```
 
 ---
@@ -119,9 +121,75 @@ SELECT * FROM ts_combine_keys('sales', sale_date, quantity, region_id, store_id,
 
 ## Aggregate Hierarchy
 
-### ts_aggregate_hierarchy
+### ts_aggregate_hierarchy_native (Recommended)
 
-Combines ID columns AND creates aggregated series at all hierarchy levels.
+Native table function that supports **arbitrary hierarchy levels** (2-N columns).
+
+**Signature:**
+```sql
+ts_aggregate_hierarchy_native(
+    (SELECT date_col, value_col, id_col1, id_col2, ... FROM source),
+    separator := '|',
+    aggregate_keyword := 'AGGREGATED'
+)
+```
+
+**Input Table:**
+- First column: Date/timestamp column
+- Second column: Value column (will be summed at each aggregation level)
+- Columns 3+: ID columns (broadest to finest granularity) - **any number of columns**
+
+**Parameters:**
+- `separator`: Character(s) to join ID parts (default: `'|'`)
+- `aggregate_keyword`: Keyword for aggregated levels (default: `'AGGREGATED'`)
+
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `unique_id` | VARCHAR | Combined hierarchical ID |
+| `date` | (input type) | Date column (preserved type) |
+| `value` | DOUBLE | Aggregated value |
+
+**Aggregation Levels Created (for N ID columns):**
+
+For N ID columns, generates N+1 aggregation levels:
+| Level | Pattern (3 columns) | Description |
+|-------|---------------------|-------------|
+| 0 | `AGGREGATED|AGGREGATED|AGGREGATED` | Grand total |
+| 1 | `EU|AGGREGATED|AGGREGATED` | Per first column |
+| 2 | `EU|STORE001|AGGREGATED` | Per first two columns |
+| 3 | `EU|STORE001|SKU42` | Original item level |
+
+**Examples:**
+```sql
+-- 2-level hierarchy (region → store)
+SELECT * FROM ts_aggregate_hierarchy_native(
+    (SELECT sale_date, quantity, region_id, store_id FROM sales)
+);
+
+-- 3-level hierarchy (region → store → item)
+SELECT * FROM ts_aggregate_hierarchy_native(
+    (SELECT sale_date, quantity, region_id, store_id, item_id FROM sales)
+);
+
+-- 4-level hierarchy (country → region → store → item)
+SELECT * FROM ts_aggregate_hierarchy_native(
+    (SELECT sale_date, quantity, country_id, region_id, store_id, item_id FROM sales)
+);
+
+-- Custom separator and keyword
+SELECT * FROM ts_aggregate_hierarchy_native(
+    (SELECT sale_date, quantity, region_id, store_id FROM sales),
+    separator := '::',
+    aggregate_keyword := 'ALL'
+);
+```
+
+---
+
+### ts_aggregate_hierarchy (Legacy - 3 levels only)
+
+SQL macro for 3-level hierarchies. For arbitrary levels, use `ts_aggregate_hierarchy_native`.
 
 **Signature:**
 ```sql
@@ -135,36 +203,11 @@ ts_aggregate_hierarchy(source, date_col, value_col, id_col1, id_col2, id_col3, p
 - `id_col1-3`: ID columns (broadest to finest granularity)
 - `params`: MAP with `'separator'` and `'aggregate_keyword'` options
 
-**Aggregation Levels Created:**
-
-| Level | Pattern | Description |
-|-------|---------|-------------|
-| 0 | `AGGREGATED|AGGREGATED|AGGREGATED` | Grand total |
-| 1 | `EU|AGGREGATED|AGGREGATED` | Per first column |
-| 2 | `EU|STORE001|AGGREGATED` | Per first two columns |
-| 3 | `EU|STORE001|SKU42` | Original item level |
-
 **Example:**
 ```sql
--- Create hierarchical time series
+-- Create hierarchical time series (3 levels only)
 SELECT * FROM ts_aggregate_hierarchy('sales', sale_date, quantity,
     region_id, store_id, item_id);
-
--- Count series at each level
-WITH agg AS (
-    SELECT * FROM ts_aggregate_hierarchy('sales', sale_date, quantity,
-        region_id, store_id, item_id)
-)
-SELECT
-    CASE
-        WHEN unique_id = 'AGGREGATED|AGGREGATED|AGGREGATED' THEN 'Grand Total'
-        WHEN unique_id LIKE '%|AGGREGATED|AGGREGATED' THEN 'Per Region'
-        WHEN unique_id LIKE '%|AGGREGATED' THEN 'Per Store'
-        ELSE 'Original Items'
-    END AS level,
-    COUNT(DISTINCT unique_id) AS n_series
-FROM agg
-GROUP BY 1;
 
 -- Custom aggregate keyword
 SELECT DISTINCT unique_id
@@ -221,14 +264,15 @@ WHERE id_part_3 = 'AGGREGATED' AND id_part_2 != 'AGGREGATED';
 -- Step 1: Validate separator
 SELECT * FROM ts_validate_separator('raw_sales', region_id, store_id, item_id);
 
--- Step 2: Create aggregated time series
+-- Step 2: Create aggregated time series (supports any number of hierarchy levels)
 CREATE TABLE prepared_data AS
-SELECT * FROM ts_aggregate_hierarchy('raw_sales', sale_date, quantity,
-    region_id, store_id, item_id);
+SELECT * FROM ts_aggregate_hierarchy_native(
+    (SELECT sale_date, quantity, region_id, store_id, item_id FROM raw_sales)
+);
 
 -- Step 3: Forecast all series (original + aggregated)
 CREATE TABLE forecasts AS
-SELECT * FROM ts_forecast_by('prepared_data', unique_id, date_col, value_col,
+SELECT * FROM ts_forecast_by('prepared_data', unique_id, date, value,
     'AutoETS', 28, {'seasonal_period': 7});
 
 -- Step 4: Split keys for analysis
@@ -238,7 +282,7 @@ SELECT
     id_part_3 AS item_id,
     date_col AS forecast_date,
     value_col AS point_forecast
-FROM ts_split_keys('forecasts', id, ds, point_forecast)
+FROM ts_split_keys('forecasts', unique_id, date, value)
 ORDER BY region_id, store_id, item_id, forecast_date;
 ```
 

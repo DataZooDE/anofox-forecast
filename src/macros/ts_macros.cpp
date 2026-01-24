@@ -1612,15 +1612,9 @@ FROM query_table(source::VARCHAR)
 ORDER BY 1, 2
 )"},
 
-    // ts_aggregate_hierarchy: Combine keys AND create aggregated series at all hierarchy levels
+    // ts_aggregate_hierarchy: 3-level hierarchy (backward compatible SQL macro)
+    // NOTE: For arbitrary hierarchy levels, use ts_aggregate_hierarchy_native instead
     // C++ API: ts_aggregate_hierarchy(table_name, date_col, value_col, id_col1, id_col2, id_col3, params?)
-    // params: separator (default '|'), aggregate_keyword (default 'AGGREGATED')
-    // Returns: unique_id, date_col, value_col with original + aggregated series
-    // Generates all aggregation levels by default:
-    //   Level 0: AGGREGATED|AGGREGATED|AGGREGATED (grand total)
-    //   Level 1: id_col1|AGGREGATED|AGGREGATED (per first column)
-    //   Level 2: id_col1|id_col2|AGGREGATED (per first two columns)
-    //   Level 3: id_col1|id_col2|id_col3 (original data)
     {"ts_aggregate_hierarchy",
      {"source", "date_col", "value_col", "id_col1", "id_col2", "id_col3", nullptr},
      {{"params", "MAP{}"}, {nullptr, nullptr}},
@@ -1639,62 +1633,47 @@ src AS (
         COALESCE(id_col3::VARCHAR, 'NULL') AS _id3
     FROM query_table(source::VARCHAR)
 ),
--- Level 0: Grand total (AGGREGATED|AGGREGATED|AGGREGATED)
 level0 AS (
     SELECT
         (SELECT _agg FROM _params) || (SELECT _sep FROM _params) ||
         (SELECT _agg FROM _params) || (SELECT _sep FROM _params) ||
         (SELECT _agg FROM _params) AS unique_id,
-        _dt,
-        SUM(_val) AS _val
-    FROM src
-    GROUP BY _dt
+        _dt, SUM(_val) AS _val
+    FROM src GROUP BY _dt
 ),
--- Level 1: Per id_col1 (id1|AGGREGATED|AGGREGATED)
 level1 AS (
     SELECT
         _id1 || (SELECT _sep FROM _params) ||
         (SELECT _agg FROM _params) || (SELECT _sep FROM _params) ||
         (SELECT _agg FROM _params) AS unique_id,
-        _dt,
-        SUM(_val) AS _val
-    FROM src
-    GROUP BY _id1, _dt
+        _dt, SUM(_val) AS _val
+    FROM src GROUP BY _id1, _dt
 ),
--- Level 2: Per id_col1+id_col2 (id1|id2|AGGREGATED)
 level2 AS (
     SELECT
         _id1 || (SELECT _sep FROM _params) ||
         _id2 || (SELECT _sep FROM _params) ||
         (SELECT _agg FROM _params) AS unique_id,
-        _dt,
-        SUM(_val) AS _val
-    FROM src
-    GROUP BY _id1, _id2, _dt
+        _dt, SUM(_val) AS _val
+    FROM src GROUP BY _id1, _id2, _dt
 ),
--- Level 3: Original data (id1|id2|id3)
 original AS (
     SELECT
         _id1 || (SELECT _sep FROM _params) ||
-        _id2 || (SELECT _sep FROM _params) ||
-        _id3 AS unique_id,
-        _dt,
-        _val
+        _id2 || (SELECT _sep FROM _params) || _id3 AS unique_id,
+        _dt, _val
     FROM src
 )
 SELECT * FROM (
     SELECT unique_id, _dt AS date_col, _val AS value_col FROM level0
-    UNION ALL
-    SELECT unique_id, _dt AS date_col, _val AS value_col FROM level1
-    UNION ALL
-    SELECT unique_id, _dt AS date_col, _val AS value_col FROM level2
-    UNION ALL
-    SELECT unique_id, _dt AS date_col, _val AS value_col FROM original
-) _combined
-ORDER BY 1, 2
+    UNION ALL SELECT unique_id, _dt AS date_col, _val AS value_col FROM level1
+    UNION ALL SELECT unique_id, _dt AS date_col, _val AS value_col FROM level2
+    UNION ALL SELECT unique_id, _dt AS date_col, _val AS value_col FROM original
+) _combined ORDER BY 1, 2
 )"},
 
-    // ts_split_keys: Split combined unique_id back into original columns (reverse of ts_aggregate_hierarchy)
+    // ts_split_keys: Split 3-level hierarchy keys (backward compatible SQL macro)
+    // NOTE: For arbitrary hierarchy levels, use ts_aggregate_hierarchy_native instead
     // C++ API: ts_split_keys(table_name, id_col, date_col, value_col, separator?)
     // Returns: id_part_1, id_part_2, id_part_3, date_col, value_col
     // Handles AGGREGATED keyword - preserved as-is in output
