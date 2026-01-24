@@ -127,6 +127,7 @@ set(EXTENSION_SOURCES
     src/table_functions/ts_cv_forecast_native.cpp
     src/table_functions/ts_mstl_decomposition_native.cpp
     src/table_functions/ts_detect_changepoints_native.cpp
+    src/table_functions/ts_features_native.cpp
     src/table_functions/ts_periods.cpp
     src/table_functions/ts_peaks.cpp
     src/table_functions/ts_detrend.cpp
