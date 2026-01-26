@@ -356,7 +356,7 @@ CREATE TABLE forecast_results AS SELECT * FROM (VALUES
 # Test split returns 3 id parts
 query III
 SELECT id_part_1, id_part_2, id_part_3 FROM ts_split_keys(
-    (SELECT unique_id, forecast_date, point_forecast FROM forecast_results), MAP{}
+    (SELECT unique_id, forecast_date, point_forecast FROM forecast_results)
 ) WHERE id_part_1 = 'EU' AND id_part_3 = 'SKU42';
 ----
 EU	STORE001	SKU42
@@ -364,7 +364,7 @@ EU	STORE001	SKU42
 # Test AGGREGATED keyword preserved
 query III
 SELECT id_part_1, id_part_2, id_part_3 FROM ts_split_keys(
-    (SELECT unique_id, forecast_date, point_forecast FROM forecast_results), MAP{}
+    (SELECT unique_id, forecast_date, point_forecast FROM forecast_results)
 ) WHERE id_part_1 = 'EU' AND id_part_3 = 'AGGREGATED' AND id_part_2 = 'STORE001';
 ----
 EU	STORE001	AGGREGATED
@@ -372,7 +372,7 @@ EU	STORE001	AGGREGATED
 # Test grand total split
 query III
 SELECT id_part_1, id_part_2, id_part_3 FROM ts_split_keys(
-    (SELECT unique_id, forecast_date, point_forecast FROM forecast_results), MAP{}
+    (SELECT unique_id, forecast_date, point_forecast FROM forecast_results)
 ) WHERE id_part_1 = 'AGGREGATED' AND id_part_2 = 'AGGREGATED' AND id_part_3 = 'AGGREGATED';
 ----
 AGGREGATED	AGGREGATED	AGGREGATED
@@ -386,7 +386,7 @@ CREATE TABLE dash_results AS SELECT * FROM (VALUES
 query III
 SELECT id_part_1, id_part_2, id_part_3 FROM ts_split_keys(
     (SELECT unique_id, ds, forecast FROM dash_results),
-    MAP{'separator': '-'}
+    separator := '-'
 );
 ----
 EU	STORE001	SKU42
@@ -394,7 +394,7 @@ EU	STORE001	SKU42
 # Test row count preserved
 query I
 SELECT COUNT(*) FROM ts_split_keys(
-    (SELECT unique_id, forecast_date, point_forecast FROM forecast_results), MAP{}
+    (SELECT unique_id, forecast_date, point_forecast FROM forecast_results)
 );
 ----
 4
@@ -403,7 +403,7 @@ SELECT COUNT(*) FROM ts_split_keys(
 query III
 SELECT region, store, item FROM ts_split_keys(
     (SELECT unique_id, forecast_date, point_forecast FROM forecast_results),
-    MAP{'columns': 'region,store,item'}
+    columns := ['region', 'store', 'item']
 ) WHERE region = 'EU' AND item = 'SKU42';
 ----
 EU	STORE001	SKU42
@@ -435,7 +435,7 @@ SELECT qty FROM agg_data WHERE unique_id = 'AGGREGATED|AGGREGATED|AGGREGATED';
 # Split keys back
 statement ok
 CREATE TABLE split_data AS SELECT * FROM ts_split_keys(
-    (SELECT unique_id, dt, qty FROM agg_data), MAP{}
+    (SELECT unique_id, dt, qty FROM agg_data)
 );
 
 # Verify split preserves data

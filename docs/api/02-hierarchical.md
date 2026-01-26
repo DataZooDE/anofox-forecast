@@ -37,7 +37,7 @@ SELECT * FROM ts_forecast_by('prepared_data', unique_id, date, value,
 -- Step 4: Split keys for analysis (with custom column names)
 SELECT * FROM ts_split_keys(
     (SELECT unique_id, date, value FROM forecasts),
-    MAP{'columns': 'region_id,store_id,item_id'}
+    columns := ['region_id', 'store_id', 'item_id']
 );
 ```
 
@@ -217,7 +217,8 @@ Native table function that splits a combined unique_id back into its original co
 ```sql
 ts_split_keys(
     (SELECT unique_id, date_col, value_col FROM source),
-    MAP{'separator': '|', 'columns': 'region,store,item'}  -- optional params
+    separator := '|',                          -- optional
+    columns := ['region', 'store', 'item']     -- optional
 )
 ```
 
@@ -226,9 +227,9 @@ ts_split_keys(
 - Second column: Date/timestamp column
 - Third column: Value column
 
-**Parameters (optional MAP{}):**
+**Named Parameters (optional):**
 - `separator`: Character(s) used to split (default: `'|'`)
-- `columns`: Comma-separated column names for the split parts (e.g., `'region,store,item'`)
+- `columns`: LIST of column names for the split parts
 
 **Returns:**
 | Column | Type | Description |
@@ -244,27 +245,25 @@ ts_split_keys(
 ```sql
 -- Default column names (id_part_1, id_part_2, id_part_3)
 SELECT * FROM ts_split_keys(
-    (SELECT unique_id, forecast_date, point_forecast FROM forecasts),
-    MAP{}
+    (SELECT unique_id, forecast_date, point_forecast FROM forecasts)
 );
 
 -- With custom column names
 SELECT * FROM ts_split_keys(
     (SELECT unique_id, forecast_date, point_forecast FROM forecasts),
-    MAP{'columns': 'region_id,store_id,item_id'}
+    columns := ['region_id', 'store_id', 'item_id']
 );
 -- Returns: region_id, store_id, item_id, forecast_date, point_forecast
 
 -- Custom separator
 SELECT * FROM ts_split_keys(
     (SELECT unique_id, ds, forecast FROM results),
-    MAP{'separator': '-'}
+    separator := '-'
 );
 
 -- Filter to store-level forecasts
 SELECT * FROM ts_split_keys(
-    (SELECT unique_id, ds, point_forecast FROM forecasts),
-    MAP{}
+    (SELECT unique_id, ds, point_forecast FROM forecasts)
 ) WHERE id_part_3 = 'AGGREGATED' AND id_part_2 != 'AGGREGATED';
 ```
 
@@ -292,7 +291,7 @@ SELECT * FROM ts_forecast_by('prepared_data', unique_id, sale_date, quantity,
 SELECT *
 FROM ts_split_keys(
     (SELECT unique_id, sale_date, quantity FROM forecasts),
-    MAP{'columns': 'region_id,store_id,item_id'}
+    columns := ['region_id', 'store_id', 'item_id']
 )
 ORDER BY region_id, store_id, item_id, sale_date;
 ```
