@@ -1,0 +1,13 @@
+# Minimal Python image with statsforecast for forecasting
+# For size comparison benchmarks
+FROM python:3.11-slim
+
+# Install forecasting dependencies
+RUN pip install --no-cache-dir \
+    statsforecast>=2.0.2 \
+    pandas>=2.2.0 \
+    numpy>=1.26.0
+
+WORKDIR /app
+
+CMD ["python"]
