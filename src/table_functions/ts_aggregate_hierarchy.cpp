@@ -1,4 +1,4 @@
-#include "ts_aggregate_hierarchy_native.hpp"
+#include "ts_aggregate_hierarchy.hpp"
 #include "ts_fill_gaps_native.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -9,7 +9,7 @@
 namespace duckdb {
 
 // ============================================================================
-// ts_aggregate_hierarchy_native - Native hierarchical aggregation function
+// ts_aggregate_hierarchy - Native hierarchical aggregation function
 //
 // Supports arbitrary hierarchy levels (2-N ID columns).
 // Input table format: date_col, value_col, id_col1, id_col2, ...
@@ -19,13 +19,17 @@ namespace duckdb {
 // - Level 0: All IDs = AGGREGATED (grand total)
 // - Level 1: First ID kept, rest = AGGREGATED
 // - Level N: All IDs kept (original data)
+//
+// Parameters via MAP{}:
+// - separator: Character(s) to join ID parts (default: '|')
+// - aggregate_keyword: Keyword for aggregated levels (default: 'AGGREGATED')
 // ============================================================================
 
 // ============================================================================
 // Bind Data
 // ============================================================================
 
-struct TsAggregateHierarchyNativeBindData : public TableFunctionData {
+struct TsAggregateHierarchyBindData : public TableFunctionData {
     // Parameters
     string separator = "|";
     string aggregate_keyword = "AGGREGATED";
@@ -45,7 +49,7 @@ struct TsAggregateHierarchyNativeBindData : public TableFunctionData {
 // Local State - buffers data and produces aggregated output
 // ============================================================================
 
-struct TsAggregateHierarchyNativeLocalState : public LocalTableFunctionState {
+struct TsAggregateHierarchyLocalState : public LocalTableFunctionState {
     // Buffered raw rows
     struct RowData {
         int64_t date_micros;
@@ -69,7 +73,7 @@ struct TsAggregateHierarchyNativeLocalState : public LocalTableFunctionState {
 // Global State
 // ============================================================================
 
-struct TsAggregateHierarchyNativeGlobalState : public GlobalTableFunctionState {
+struct TsAggregateHierarchyGlobalState : public GlobalTableFunctionState {
     idx_t max_threads = 1;
 
     idx_t MaxThreads() const override {
@@ -110,30 +114,49 @@ static string BuildUniqueId(
 }
 
 // ============================================================================
+// Helper: Extract string from MAP parameter
+// ============================================================================
+
+static string ExtractMapString(const Value& map_val, const string& key, const string& default_val) {
+    if (map_val.IsNull() || map_val.type().id() != LogicalTypeId::MAP) {
+        return default_val;
+    }
+
+    auto &map_children = MapValue::GetChildren(map_val);
+    for (auto &entry : map_children) {
+        auto &key_val = StructValue::GetChildren(entry)[0];
+        auto &val_val = StructValue::GetChildren(entry)[1];
+        if (!key_val.IsNull() && key_val.ToString() == key) {
+            return val_val.IsNull() ? default_val : val_val.ToString();
+        }
+    }
+    return default_val;
+}
+
+// ============================================================================
 // Bind Function
 // ============================================================================
 
-static unique_ptr<FunctionData> TsAggregateHierarchyNativeBind(
+static unique_ptr<FunctionData> TsAggregateHierarchyBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
     vector<string> &names) {
 
-    auto bind_data = make_uniq<TsAggregateHierarchyNativeBindData>();
+    auto bind_data = make_uniq<TsAggregateHierarchyBindData>();
 
-    // Parse named parameters
+    // Parse MAP{} parameters from named parameter
     for (auto &kv : input.named_parameters) {
-        if (kv.first == "separator") {
-            bind_data->separator = kv.second.GetValue<string>();
-        } else if (kv.first == "aggregate_keyword") {
-            bind_data->aggregate_keyword = kv.second.GetValue<string>();
+        if (kv.first == "params" && !kv.second.IsNull()) {
+            bind_data->separator = ExtractMapString(kv.second, "separator", "|");
+            bind_data->aggregate_keyword = ExtractMapString(kv.second, "aggregate_keyword", "AGGREGATED");
         }
     }
 
     // Input table validation: minimum 3 columns (date, value, at least 1 id)
     if (input.input_table_types.size() < 3) {
         throw InvalidInputException(
-            "ts_aggregate_hierarchy_native requires at least 3 columns: "
+            "ts_aggregate_hierarchy requires at least 3 columns: "
             "date_col, value_col, and at least one id_col. Got %zu columns.",
             input.input_table_types.size());
     }
@@ -186,33 +209,33 @@ static unique_ptr<FunctionData> TsAggregateHierarchyNativeBind(
 // Init Functions
 // ============================================================================
 
-static unique_ptr<GlobalTableFunctionState> TsAggregateHierarchyNativeInitGlobal(
+static unique_ptr<GlobalTableFunctionState> TsAggregateHierarchyInitGlobal(
     ClientContext &context,
     TableFunctionInitInput &input) {
 
-    return make_uniq<TsAggregateHierarchyNativeGlobalState>();
+    return make_uniq<TsAggregateHierarchyGlobalState>();
 }
 
-static unique_ptr<LocalTableFunctionState> TsAggregateHierarchyNativeInitLocal(
+static unique_ptr<LocalTableFunctionState> TsAggregateHierarchyInitLocal(
     ExecutionContext &context,
     TableFunctionInitInput &input,
     GlobalTableFunctionState *global_state) {
 
-    return make_uniq<TsAggregateHierarchyNativeLocalState>();
+    return make_uniq<TsAggregateHierarchyLocalState>();
 }
 
 // ============================================================================
 // In-Out Function - buffers all input rows
 // ============================================================================
 
-static OperatorResultType TsAggregateHierarchyNativeInOut(
+static OperatorResultType TsAggregateHierarchyInOut(
     ExecutionContext &context,
     TableFunctionInput &data,
     DataChunk &input,
     DataChunk &output) {
 
-    auto &bind_data = data.bind_data->Cast<TsAggregateHierarchyNativeBindData>();
-    auto &local_state = data.local_state->Cast<TsAggregateHierarchyNativeLocalState>();
+    auto &bind_data = data.bind_data->Cast<TsAggregateHierarchyBindData>();
+    auto &local_state = data.local_state->Cast<TsAggregateHierarchyLocalState>();
 
     // Buffer all incoming rows
     for (idx_t row_idx = 0; row_idx < input.size(); row_idx++) {
@@ -223,7 +246,7 @@ static OperatorResultType TsAggregateHierarchyNativeInOut(
             continue;
         }
 
-        TsAggregateHierarchyNativeLocalState::RowData row;
+        TsAggregateHierarchyLocalState::RowData row;
 
         // Convert date to microseconds
         switch (bind_data.date_col_type) {
@@ -261,13 +284,13 @@ static OperatorResultType TsAggregateHierarchyNativeInOut(
 // Finalize Function - aggregates and outputs results
 // ============================================================================
 
-static OperatorFinalizeResultType TsAggregateHierarchyNativeFinalize(
+static OperatorFinalizeResultType TsAggregateHierarchyFinalize(
     ExecutionContext &context,
     TableFunctionInput &data,
     DataChunk &output) {
 
-    auto &bind_data = data.bind_data->Cast<TsAggregateHierarchyNativeBindData>();
-    auto &local_state = data.local_state->Cast<TsAggregateHierarchyNativeLocalState>();
+    auto &bind_data = data.bind_data->Cast<TsAggregateHierarchyBindData>();
+    auto &local_state = data.local_state->Cast<TsAggregateHierarchyLocalState>();
 
     if (!local_state.processed) {
         // Build aggregation for each hierarchy level
@@ -293,7 +316,7 @@ static OperatorFinalizeResultType TsAggregateHierarchyNativeFinalize(
         for (const auto& agg_entry : aggregations) {
             const string& unique_id = agg_entry.first;
             for (const auto& date_entry : agg_entry.second) {
-                TsAggregateHierarchyNativeLocalState::OutputRow out_row;
+                TsAggregateHierarchyLocalState::OutputRow out_row;
                 out_row.unique_id = unique_id;
                 out_row.date_micros = date_entry.first;
                 out_row.value = date_entry.second;
@@ -303,8 +326,8 @@ static OperatorFinalizeResultType TsAggregateHierarchyNativeFinalize(
 
         // Sort by unique_id, then date
         std::sort(local_state.results.begin(), local_state.results.end(),
-            [](const TsAggregateHierarchyNativeLocalState::OutputRow& a,
-               const TsAggregateHierarchyNativeLocalState::OutputRow& b) {
+            [](const TsAggregateHierarchyLocalState::OutputRow& a,
+               const TsAggregateHierarchyLocalState::OutputRow& b) {
                 if (a.unique_id != b.unique_id) return a.unique_id < b.unique_id;
                 return a.date_micros < b.date_micros;
             });
@@ -361,21 +384,21 @@ static OperatorFinalizeResultType TsAggregateHierarchyNativeFinalize(
 // Registration
 // ============================================================================
 
-void RegisterTsAggregateHierarchyNativeFunction(ExtensionLoader &loader) {
-    TableFunction func("ts_aggregate_hierarchy_native",
+void RegisterTsAggregateHierarchyFunction(ExtensionLoader &loader) {
+    // Single function with optional MAP{} parameter
+    TableFunction func("ts_aggregate_hierarchy",
                        {LogicalType::TABLE},
                        nullptr,
-                       TsAggregateHierarchyNativeBind,
-                       TsAggregateHierarchyNativeInitGlobal,
-                       TsAggregateHierarchyNativeInitLocal);
+                       TsAggregateHierarchyBind,
+                       TsAggregateHierarchyInitGlobal,
+                       TsAggregateHierarchyInitLocal);
 
-    // Named parameters
-    func.named_parameters["separator"] = LogicalType::VARCHAR;
-    func.named_parameters["aggregate_keyword"] = LogicalType::VARCHAR;
+    // Named parameter for MAP{} - this allows optional params while keeping single overload
+    func.named_parameters["params"] = LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR);
 
     // Set up as table-in-out function
-    func.in_out_function = TsAggregateHierarchyNativeInOut;
-    func.in_out_function_final = TsAggregateHierarchyNativeFinalize;
+    func.in_out_function = TsAggregateHierarchyInOut;
+    func.in_out_function_final = TsAggregateHierarchyFinalize;
 
     loader.RegisterFunction(func);
 }
