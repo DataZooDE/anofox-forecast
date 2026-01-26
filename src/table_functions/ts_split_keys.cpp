@@ -101,32 +101,40 @@ static string ExtractMapString(const Value& map_val, const string& key, const st
 }
 
 // ============================================================================
-// Helper: Extract list of strings from MAP parameter
+// Helper: Extract list of strings from MAP parameter (comma-separated string)
 // ============================================================================
 
 static vector<string> ExtractMapStringList(const Value& map_val, const string& key) {
     vector<string> result;
 
-    if (map_val.IsNull() || map_val.type().id() != LogicalTypeId::MAP) {
+    // First get the value as a string
+    string value_str = ExtractMapString(map_val, key, "");
+    if (value_str.empty()) {
         return result;
     }
 
-    auto &map_children = MapValue::GetChildren(map_val);
-    for (auto &entry : map_children) {
-        auto &key_val = StructValue::GetChildren(entry)[0];
-        auto &val_val = StructValue::GetChildren(entry)[1];
-        if (!key_val.IsNull() && key_val.ToString() == key && !val_val.IsNull()) {
-            // val_val should be a LIST
-            if (val_val.type().id() == LogicalTypeId::LIST) {
-                auto &list_children = ListValue::GetChildren(val_val);
-                for (auto &item : list_children) {
-                    if (!item.IsNull()) {
-                        result.push_back(item.ToString());
-                    }
-                }
-            }
+    // Split by comma
+    size_t start = 0;
+    size_t end = value_str.find(',');
+    while (end != string::npos) {
+        string item = value_str.substr(start, end - start);
+        // Trim whitespace
+        size_t first = item.find_first_not_of(" \t");
+        size_t last = item.find_last_not_of(" \t");
+        if (first != string::npos) {
+            result.push_back(item.substr(first, last - first + 1));
         }
+        start = end + 1;
+        end = value_str.find(',', start);
     }
+    // Last item
+    string item = value_str.substr(start);
+    size_t first = item.find_first_not_of(" \t");
+    size_t last = item.find_last_not_of(" \t");
+    if (first != string::npos) {
+        result.push_back(item.substr(first, last - first + 1));
+    }
+
     return result;
 }
 
@@ -172,18 +180,10 @@ static unique_ptr<FunctionData> TsSplitKeysBind(
 
     auto bind_data = make_uniq<TsSplitKeysBindData>();
 
-    // Parse named parameters
-    for (auto &kv : input.named_parameters) {
-        if (kv.first == "separator" && !kv.second.IsNull()) {
-            bind_data->separator = kv.second.GetValue<string>();
-        } else if (kv.first == "columns" && !kv.second.IsNull()) {
-            auto &list_children = ListValue::GetChildren(kv.second);
-            for (auto &item : list_children) {
-                if (!item.IsNull()) {
-                    bind_data->column_names.push_back(item.ToString());
-                }
-            }
-        }
+    // Parse MAP{} parameters from positional argument (index 1, after TABLE at index 0)
+    if (input.inputs.size() > 1 && !input.inputs[1].IsNull()) {
+        bind_data->separator = ExtractMapString(input.inputs[1], "separator", "|");
+        bind_data->column_names = ExtractMapStringList(input.inputs[1], "columns");
     }
 
     // Input table validation: exactly 3 columns (unique_id, date, value)
@@ -378,17 +378,13 @@ static OperatorFinalizeResultType TsSplitKeysFinalize(
 // ============================================================================
 
 void RegisterTsSplitKeysFunction(ExtensionLoader &loader) {
-    // Single function with optional MAP{} parameter
+    // Single function with positional TABLE and MAP{} parameters
     TableFunction func("ts_split_keys",
-                       {LogicalType::TABLE},
+                       {LogicalType::TABLE, LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)},
                        nullptr,
                        TsSplitKeysBind,
                        TsSplitKeysInitGlobal,
                        TsSplitKeysInitLocal);
-
-    // Named parameters for flexibility
-    func.named_parameters["separator"] = LogicalType::VARCHAR;
-    func.named_parameters["columns"] = LogicalType::LIST(LogicalType::VARCHAR);
 
     // Set up as table-in-out function
     func.in_out_function = TsSplitKeysInOut;

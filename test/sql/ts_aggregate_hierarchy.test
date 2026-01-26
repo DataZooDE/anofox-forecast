@@ -20,7 +20,7 @@ CREATE TABLE hier_sales_3 AS SELECT * FROM (VALUES
 # 1 grand total + 2 regions + 3 stores + 4 items = 10 unique IDs
 query I
 SELECT COUNT(DISTINCT unique_id) FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, region_id, store_id, item_id FROM hier_sales_3)
+    (SELECT sale_date, quantity, region_id, store_id, item_id FROM hier_sales_3), MAP{}
 );
 ----
 10
@@ -28,7 +28,7 @@ SELECT COUNT(DISTINCT unique_id) FROM ts_aggregate_hierarchy(
 # Test grand total exists
 query I
 SELECT COUNT(*) FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, region_id, store_id, item_id FROM hier_sales_3)
+    (SELECT sale_date, quantity, region_id, store_id, item_id FROM hier_sales_3), MAP{}
 ) WHERE unique_id = 'AGGREGATED|AGGREGATED|AGGREGATED';
 ----
 1
@@ -36,7 +36,7 @@ SELECT COUNT(*) FROM ts_aggregate_hierarchy(
 # Test grand total value is correct (100+50+75+200 = 425)
 query R
 SELECT quantity FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, region_id, store_id, item_id FROM hier_sales_3)
+    (SELECT sale_date, quantity, region_id, store_id, item_id FROM hier_sales_3), MAP{}
 ) WHERE unique_id = 'AGGREGATED|AGGREGATED|AGGREGATED';
 ----
 425.0
@@ -44,7 +44,7 @@ SELECT quantity FROM ts_aggregate_hierarchy(
 # Test region level aggregation (EU = 100+50+75 = 225)
 query R
 SELECT quantity FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, region_id, store_id, item_id FROM hier_sales_3)
+    (SELECT sale_date, quantity, region_id, store_id, item_id FROM hier_sales_3), MAP{}
 ) WHERE unique_id = 'EU|AGGREGATED|AGGREGATED';
 ----
 225.0
@@ -52,7 +52,7 @@ SELECT quantity FROM ts_aggregate_hierarchy(
 # Test store level aggregation (EU|STORE001 = 100+50 = 150)
 query R
 SELECT quantity FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, region_id, store_id, item_id FROM hier_sales_3)
+    (SELECT sale_date, quantity, region_id, store_id, item_id FROM hier_sales_3), MAP{}
 ) WHERE unique_id = 'EU|STORE001|AGGREGATED';
 ----
 150.0
@@ -60,7 +60,7 @@ SELECT quantity FROM ts_aggregate_hierarchy(
 # Test original data preserved
 query R
 SELECT quantity FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, region_id, store_id, item_id FROM hier_sales_3)
+    (SELECT sale_date, quantity, region_id, store_id, item_id FROM hier_sales_3), MAP{}
 ) WHERE unique_id = 'EU|STORE001|SKU42';
 ----
 100.0
@@ -79,7 +79,7 @@ CREATE TABLE hier_sales_2 AS SELECT * FROM (VALUES
 # Test 2-level hierarchy generates 3 levels (1 grand total + 2 regions + 3 stores = 6)
 query I
 SELECT COUNT(DISTINCT unique_id) FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, region, store FROM hier_sales_2)
+    (SELECT sale_date, quantity, region, store FROM hier_sales_2), MAP{}
 );
 ----
 6
@@ -87,7 +87,7 @@ SELECT COUNT(DISTINCT unique_id) FROM ts_aggregate_hierarchy(
 # Test 2-level grand total
 query R
 SELECT quantity FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, region, store FROM hier_sales_2)
+    (SELECT sale_date, quantity, region, store FROM hier_sales_2), MAP{}
 ) WHERE unique_id = 'AGGREGATED|AGGREGATED';
 ----
 450.0
@@ -95,7 +95,7 @@ SELECT quantity FROM ts_aggregate_hierarchy(
 # Test 2-level region aggregation
 query R
 SELECT quantity FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, region, store FROM hier_sales_2)
+    (SELECT sale_date, quantity, region, store FROM hier_sales_2), MAP{}
 ) WHERE unique_id = 'East|AGGREGATED';
 ----
 250.0
@@ -103,7 +103,7 @@ SELECT quantity FROM ts_aggregate_hierarchy(
 # Test 2-level original data
 query R
 SELECT quantity FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, region, store FROM hier_sales_2)
+    (SELECT sale_date, quantity, region, store FROM hier_sales_2), MAP{}
 ) WHERE unique_id = 'East|Store1';
 ----
 100.0
@@ -124,7 +124,7 @@ CREATE TABLE hier_sales_4 AS SELECT * FROM (VALUES
 # 1 grand total + 2 countries + 3 regions + 3 stores + 4 items = 13 unique IDs
 query I
 SELECT COUNT(DISTINCT unique_id) FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, country, region, store, item FROM hier_sales_4)
+    (SELECT sale_date, quantity, country, region, store, item FROM hier_sales_4), MAP{}
 );
 ----
 13
@@ -132,7 +132,7 @@ SELECT COUNT(DISTINCT unique_id) FROM ts_aggregate_hierarchy(
 # Test 4-level grand total (100+150+200+250 = 700)
 query R
 SELECT quantity FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, country, region, store, item FROM hier_sales_4)
+    (SELECT sale_date, quantity, country, region, store, item FROM hier_sales_4), MAP{}
 ) WHERE unique_id = 'AGGREGATED|AGGREGATED|AGGREGATED|AGGREGATED';
 ----
 700.0
@@ -140,7 +140,7 @@ SELECT quantity FROM ts_aggregate_hierarchy(
 # Test 4-level country aggregation (US = 100+150+200 = 450)
 query R
 SELECT quantity FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, country, region, store, item FROM hier_sales_4)
+    (SELECT sale_date, quantity, country, region, store, item FROM hier_sales_4), MAP{}
 ) WHERE unique_id = 'US|AGGREGATED|AGGREGATED|AGGREGATED';
 ----
 450.0
@@ -148,7 +148,7 @@ SELECT quantity FROM ts_aggregate_hierarchy(
 # Test 4-level region aggregation (US|East = 100+150 = 250)
 query R
 SELECT quantity FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, country, region, store, item FROM hier_sales_4)
+    (SELECT sale_date, quantity, country, region, store, item FROM hier_sales_4), MAP{}
 ) WHERE unique_id = 'US|East|AGGREGATED|AGGREGATED';
 ----
 250.0
@@ -161,7 +161,7 @@ SELECT quantity FROM ts_aggregate_hierarchy(
 query I
 SELECT COUNT(*) FROM ts_aggregate_hierarchy(
     (SELECT sale_date, quantity, region, store FROM hier_sales_2),
-    params := {'separator': '::'}
+    MAP{'separator': '::'}
 ) WHERE unique_id = 'AGGREGATED::AGGREGATED';
 ----
 1
@@ -170,7 +170,7 @@ SELECT COUNT(*) FROM ts_aggregate_hierarchy(
 query I
 SELECT COUNT(*) FROM ts_aggregate_hierarchy(
     (SELECT sale_date, quantity, region, store FROM hier_sales_2),
-    params := {'aggregate_keyword': 'ALL'}
+    MAP{'aggregate_keyword': 'ALL'}
 ) WHERE unique_id = 'ALL|ALL';
 ----
 1
@@ -179,7 +179,7 @@ SELECT COUNT(*) FROM ts_aggregate_hierarchy(
 query R
 SELECT quantity FROM ts_aggregate_hierarchy(
     (SELECT sale_date, quantity, region, store FROM hier_sales_2),
-    params := {'separator': '-', 'aggregate_keyword': 'TOTAL'}
+    MAP{'separator': '-', 'aggregate_keyword': 'TOTAL'}
 ) WHERE unique_id = 'TOTAL-TOTAL';
 ----
 450.0
@@ -191,7 +191,7 @@ SELECT quantity FROM ts_aggregate_hierarchy(
 # Test DATE type preserved
 query I
 SELECT typeof(sale_date) FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, region, store FROM hier_sales_2)
+    (SELECT sale_date, quantity, region, store FROM hier_sales_2), MAP{}
 ) LIMIT 1;
 ----
 DATE
@@ -205,7 +205,7 @@ CREATE TABLE ts_sales AS SELECT * FROM (VALUES
 
 query I
 SELECT typeof(ts) FROM ts_aggregate_hierarchy(
-    (SELECT ts, quantity, region, store FROM ts_sales)
+    (SELECT ts, quantity, region, store FROM ts_sales), MAP{}
 ) LIMIT 1;
 ----
 TIMESTAMP
@@ -226,7 +226,7 @@ CREATE TABLE multi_date_sales AS SELECT * FROM (VALUES
 # Grand total: 2 dates, East: 2 dates, West: 2 dates, Store1: 2 dates, Store2: 2 dates = 10 rows
 query I
 SELECT COUNT(*) FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, region, store FROM multi_date_sales)
+    (SELECT sale_date, quantity, region, store FROM multi_date_sales), MAP{}
 );
 ----
 10
@@ -234,7 +234,7 @@ SELECT COUNT(*) FROM ts_aggregate_hierarchy(
 # Test aggregation across dates for grand total on day 1 (100+200 = 300)
 query R
 SELECT quantity FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, region, store FROM multi_date_sales)
+    (SELECT sale_date, quantity, region, store FROM multi_date_sales), MAP{}
 ) WHERE unique_id = 'AGGREGATED|AGGREGATED' AND sale_date = DATE '2024-01-01';
 ----
 300.0
@@ -242,7 +242,7 @@ SELECT quantity FROM ts_aggregate_hierarchy(
 # Test aggregation across dates for grand total on day 2 (110+210 = 320)
 query R
 SELECT quantity FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, region, store FROM multi_date_sales)
+    (SELECT sale_date, quantity, region, store FROM multi_date_sales), MAP{}
 ) WHERE unique_id = 'AGGREGATED|AGGREGATED' AND sale_date = DATE '2024-01-02';
 ----
 320.0
@@ -261,7 +261,7 @@ CREATE TABLE null_sales AS SELECT * FROM (VALUES
 # Test NULL values converted to 'NULL' string
 query I
 SELECT COUNT(*) FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, region, store FROM null_sales)
+    (SELECT sale_date, quantity, region, store FROM null_sales), MAP{}
 ) WHERE unique_id LIKE '%NULL%';
 ----
 3
@@ -269,7 +269,7 @@ SELECT COUNT(*) FROM ts_aggregate_hierarchy(
 # Test grand total includes rows with NULL IDs (100+50+200 = 350)
 query R
 SELECT quantity FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, region, store FROM null_sales)
+    (SELECT sale_date, quantity, region, store FROM null_sales), MAP{}
 ) WHERE unique_id = 'AGGREGATED|AGGREGATED';
 ----
 350.0
@@ -281,7 +281,7 @@ SELECT quantity FROM ts_aggregate_hierarchy(
 # Test output is sorted by unique_id then sale_date
 query IT
 SELECT unique_id, sale_date FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, region, store FROM multi_date_sales)
+    (SELECT sale_date, quantity, region, store FROM multi_date_sales), MAP{}
 ) ORDER BY unique_id, sale_date LIMIT 4;
 ----
 AGGREGATED|AGGREGATED	2024-01-01
@@ -303,7 +303,7 @@ CREATE TABLE sales AS SELECT * FROM (VALUES
 # Test basic combination with 3 columns
 query I
 SELECT COUNT(DISTINCT unique_id) FROM ts_combine_keys(
-    (SELECT sale_date, quantity, region_id, store_id, item_id FROM sales)
+    (SELECT sale_date, quantity, region_id, store_id, item_id FROM sales), MAP{}
 );
 ----
 2
@@ -311,7 +311,7 @@ SELECT COUNT(DISTINCT unique_id) FROM ts_combine_keys(
 # Test correct unique_id format
 query I
 SELECT unique_id FROM ts_combine_keys(
-    (SELECT sale_date, quantity, region_id, store_id, item_id FROM sales)
+    (SELECT sale_date, quantity, region_id, store_id, item_id FROM sales), MAP{}
 ) WHERE unique_id LIKE 'EU%SKU42' LIMIT 1;
 ----
 EU|STORE001|SKU42
@@ -319,7 +319,7 @@ EU|STORE001|SKU42
 # Test with 2 columns
 query I
 SELECT unique_id FROM ts_combine_keys(
-    (SELECT sale_date, quantity, region_id, store_id FROM sales)
+    (SELECT sale_date, quantity, region_id, store_id FROM sales), MAP{}
 ) WHERE unique_id LIKE 'EU%' LIMIT 1;
 ----
 EU|STORE001
@@ -328,7 +328,7 @@ EU|STORE001
 query I
 SELECT unique_id FROM ts_combine_keys(
     (SELECT sale_date, quantity, region_id, store_id, item_id FROM sales),
-    params := {'separator': '-'}
+    MAP{'separator': '-'}
 ) WHERE unique_id LIKE 'EU%' LIMIT 1;
 ----
 EU-STORE001-SKU42
@@ -336,7 +336,7 @@ EU-STORE001-SKU42
 # Test row count preserved
 query I
 SELECT COUNT(*) FROM ts_combine_keys(
-    (SELECT sale_date, quantity, region_id, store_id, item_id FROM sales)
+    (SELECT sale_date, quantity, region_id, store_id, item_id FROM sales), MAP{}
 );
 ----
 3
@@ -356,7 +356,7 @@ CREATE TABLE forecast_results AS SELECT * FROM (VALUES
 # Test split returns 3 id parts
 query III
 SELECT id_part_1, id_part_2, id_part_3 FROM ts_split_keys(
-    (SELECT unique_id, forecast_date, point_forecast FROM forecast_results)
+    (SELECT unique_id, forecast_date, point_forecast FROM forecast_results), MAP{}
 ) WHERE id_part_1 = 'EU' AND id_part_3 = 'SKU42';
 ----
 EU	STORE001	SKU42
@@ -364,7 +364,7 @@ EU	STORE001	SKU42
 # Test AGGREGATED keyword preserved
 query III
 SELECT id_part_1, id_part_2, id_part_3 FROM ts_split_keys(
-    (SELECT unique_id, forecast_date, point_forecast FROM forecast_results)
+    (SELECT unique_id, forecast_date, point_forecast FROM forecast_results), MAP{}
 ) WHERE id_part_1 = 'EU' AND id_part_3 = 'AGGREGATED' AND id_part_2 = 'STORE001';
 ----
 EU	STORE001	AGGREGATED
@@ -372,7 +372,7 @@ EU	STORE001	AGGREGATED
 # Test grand total split
 query III
 SELECT id_part_1, id_part_2, id_part_3 FROM ts_split_keys(
-    (SELECT unique_id, forecast_date, point_forecast FROM forecast_results)
+    (SELECT unique_id, forecast_date, point_forecast FROM forecast_results), MAP{}
 ) WHERE id_part_1 = 'AGGREGATED' AND id_part_2 = 'AGGREGATED' AND id_part_3 = 'AGGREGATED';
 ----
 AGGREGATED	AGGREGATED	AGGREGATED
@@ -386,7 +386,7 @@ CREATE TABLE dash_results AS SELECT * FROM (VALUES
 query III
 SELECT id_part_1, id_part_2, id_part_3 FROM ts_split_keys(
     (SELECT unique_id, ds, forecast FROM dash_results),
-    separator := '-'
+    MAP{'separator': '-'}
 );
 ----
 EU	STORE001	SKU42
@@ -394,7 +394,7 @@ EU	STORE001	SKU42
 # Test row count preserved
 query I
 SELECT COUNT(*) FROM ts_split_keys(
-    (SELECT unique_id, forecast_date, point_forecast FROM forecast_results)
+    (SELECT unique_id, forecast_date, point_forecast FROM forecast_results), MAP{}
 );
 ----
 4
@@ -403,7 +403,7 @@ SELECT COUNT(*) FROM ts_split_keys(
 query III
 SELECT region, store, item FROM ts_split_keys(
     (SELECT unique_id, forecast_date, point_forecast FROM forecast_results),
-    columns := ['region', 'store', 'item']
+    MAP{'columns': 'region,store,item'}
 ) WHERE region = 'EU' AND item = 'SKU42';
 ----
 EU	STORE001	SKU42
@@ -423,7 +423,7 @@ CREATE TABLE workflow_sales AS SELECT * FROM (VALUES
 # Create aggregated data
 statement ok
 CREATE TABLE agg_data AS SELECT * FROM ts_aggregate_hierarchy(
-    (SELECT dt, qty, region, store, item FROM workflow_sales)
+    (SELECT dt, qty, region, store, item FROM workflow_sales), MAP{}
 );
 
 # Verify grand total
@@ -435,7 +435,7 @@ SELECT qty FROM agg_data WHERE unique_id = 'AGGREGATED|AGGREGATED|AGGREGATED';
 # Split keys back
 statement ok
 CREATE TABLE split_data AS SELECT * FROM ts_split_keys(
-    (SELECT unique_id, dt, qty FROM agg_data)
+    (SELECT unique_id, dt, qty FROM agg_data), MAP{}
 );
 
 # Verify split preserves data

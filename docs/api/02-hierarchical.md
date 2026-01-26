@@ -25,7 +25,8 @@ SELECT * FROM ts_validate_separator('raw_sales', region_id, store_id, item_id);
 -- Supports arbitrary hierarchy depth (2-N levels)
 CREATE TABLE prepared_data AS
 SELECT * FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, region_id, store_id, item_id FROM raw_sales)
+    (SELECT sale_date, quantity, region_id, store_id, item_id FROM raw_sales),
+    MAP{}
 );
 
 -- Step 3: Forecast all series (original + aggregated)
@@ -36,7 +37,7 @@ SELECT * FROM ts_forecast_by('prepared_data', unique_id, date, value,
 -- Step 4: Split keys for analysis (with custom column names)
 SELECT * FROM ts_split_keys(
     (SELECT unique_id, date, value FROM forecasts),
-    columns := ['region_id', 'store_id', 'item_id']
+    MAP{'columns': 'region_id,store_id,item_id'}
 );
 ```
 
@@ -113,22 +114,24 @@ ts_combine_keys(
 
 **Examples:**
 ```sql
--- Basic combination with 3 columns
+-- Basic combination with 3 columns (with default params)
 SELECT * FROM ts_combine_keys(
-    (SELECT sale_date, quantity, region_id, store_id, item_id FROM sales)
+    (SELECT sale_date, quantity, region_id, store_id, item_id FROM sales),
+    MAP{}
 );
 -- unique_id: 'EU|STORE001|SKU42'
 
 -- Custom separator
 SELECT * FROM ts_combine_keys(
     (SELECT sale_date, quantity, region_id, store_id FROM sales),
-    {'separator': '-'}
+    MAP{'separator': '-'}
 );
 -- unique_id: 'EU-STORE001'
 
 -- 5-level hierarchy
 SELECT * FROM ts_combine_keys(
-    (SELECT sale_date, quantity, country, region, city, store, item FROM sales)
+    (SELECT sale_date, quantity, country, region, city, store, item FROM sales),
+    MAP{}
 );
 -- unique_id: 'US|West|Seattle|Store1|SKU42'
 ```
@@ -179,23 +182,26 @@ For N ID columns, generates N+1 aggregation levels:
 ```sql
 -- 2-level hierarchy (region -> store)
 SELECT * FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, region_id, store_id FROM sales)
+    (SELECT sale_date, quantity, region_id, store_id FROM sales),
+    MAP{}
 );
 
 -- 3-level hierarchy (region -> store -> item)
 SELECT * FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, region_id, store_id, item_id FROM sales)
+    (SELECT sale_date, quantity, region_id, store_id, item_id FROM sales),
+    MAP{}
 );
 
 -- 4-level hierarchy (country -> region -> store -> item)
 SELECT * FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, country_id, region_id, store_id, item_id FROM sales)
+    (SELECT sale_date, quantity, country_id, region_id, store_id, item_id FROM sales),
+    MAP{}
 );
 
 -- Custom separator and keyword
 SELECT * FROM ts_aggregate_hierarchy(
     (SELECT sale_date, quantity, region_id, store_id FROM sales),
-    {'separator': '::', 'aggregate_keyword': 'ALL'}
+    MAP{'separator': '::', 'aggregate_keyword': 'ALL'}
 );
 ```
 
@@ -211,8 +217,7 @@ Native table function that splits a combined unique_id back into its original co
 ```sql
 ts_split_keys(
     (SELECT unique_id, date_col, value_col FROM source),
-    separator := '|',                          -- optional
-    columns := ['region', 'store', 'item']     -- optional
+    MAP{'separator': '|', 'columns': 'region,store,item'}  -- optional params
 )
 ```
 
@@ -221,9 +226,9 @@ ts_split_keys(
 - Second column: Date/timestamp column
 - Third column: Value column
 
-**Named Parameters (optional):**
+**Parameters (optional MAP{}):**
 - `separator`: Character(s) used to split (default: `'|'`)
-- `columns`: Optional LIST of column names for the split parts
+- `columns`: Comma-separated column names for the split parts (e.g., `'region,store,item'`)
 
 **Returns:**
 | Column | Type | Description |
@@ -239,25 +244,27 @@ ts_split_keys(
 ```sql
 -- Default column names (id_part_1, id_part_2, id_part_3)
 SELECT * FROM ts_split_keys(
-    (SELECT unique_id, forecast_date, point_forecast FROM forecasts)
+    (SELECT unique_id, forecast_date, point_forecast FROM forecasts),
+    MAP{}
 );
 
 -- With custom column names
 SELECT * FROM ts_split_keys(
     (SELECT unique_id, forecast_date, point_forecast FROM forecasts),
-    columns := ['region_id', 'store_id', 'item_id']
+    MAP{'columns': 'region_id,store_id,item_id'}
 );
 -- Returns: region_id, store_id, item_id, forecast_date, point_forecast
 
 -- Custom separator
 SELECT * FROM ts_split_keys(
     (SELECT unique_id, ds, forecast FROM results),
-    separator := '-'
+    MAP{'separator': '-'}
 );
 
 -- Filter to store-level forecasts
 SELECT * FROM ts_split_keys(
-    (SELECT unique_id, ds, point_forecast FROM forecasts)
+    (SELECT unique_id, ds, point_forecast FROM forecasts),
+    MAP{}
 ) WHERE id_part_3 = 'AGGREGATED' AND id_part_2 != 'AGGREGATED';
 ```
 
@@ -272,7 +279,8 @@ SELECT * FROM ts_validate_separator('raw_sales', region_id, store_id, item_id);
 -- Step 2: Create aggregated time series (supports any number of hierarchy levels)
 CREATE TABLE prepared_data AS
 SELECT * FROM ts_aggregate_hierarchy(
-    (SELECT sale_date, quantity, region_id, store_id, item_id FROM raw_sales)
+    (SELECT sale_date, quantity, region_id, store_id, item_id FROM raw_sales),
+    MAP{}
 );
 
 -- Step 3: Forecast all series (original + aggregated)
@@ -284,7 +292,7 @@ SELECT * FROM ts_forecast_by('prepared_data', unique_id, sale_date, quantity,
 SELECT *
 FROM ts_split_keys(
     (SELECT unique_id, sale_date, quantity FROM forecasts),
-    columns := ['region_id', 'store_id', 'item_id']
+    MAP{'columns': 'region_id,store_id,item_id'}
 )
 ORDER BY region_id, store_id, item_id, sale_date;
 ```

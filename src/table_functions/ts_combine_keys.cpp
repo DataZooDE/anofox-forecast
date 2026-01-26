@@ -88,11 +88,9 @@ static unique_ptr<FunctionData> TsCombineKeysBind(
 
     auto bind_data = make_uniq<TsCombineKeysBindData>();
 
-    // Parse MAP{} parameters from named parameter
-    for (auto &kv : input.named_parameters) {
-        if (kv.first == "params" && !kv.second.IsNull()) {
-            bind_data->separator = ExtractMapString(kv.second, "separator", "|");
-        }
+    // Parse MAP{} parameters from positional argument (index 1, after TABLE at index 0)
+    if (input.inputs.size() > 1 && !input.inputs[1].IsNull()) {
+        bind_data->separator = ExtractMapString(input.inputs[1], "separator", "|");
     }
 
     // Input table validation: minimum 3 columns (date, value, at least 1 id)
@@ -210,16 +208,13 @@ static OperatorResultType TsCombineKeysInOut(
 // ============================================================================
 
 void RegisterTsCombineKeysFunction(ExtensionLoader &loader) {
-    // Single function with optional MAP{} parameter
+    // Single function with positional TABLE and MAP{} parameters
     TableFunction func("ts_combine_keys",
-                       {LogicalType::TABLE},
+                       {LogicalType::TABLE, LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)},
                        nullptr,
                        TsCombineKeysBind,
                        TsCombineKeysInitGlobal,
                        TsCombineKeysInitLocal);
-
-    // Named parameter for MAP{} - this allows optional params while keeping single overload
-    func.named_parameters["params"] = LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR);
 
     // Set up as table-in-out function
     func.in_out_function = TsCombineKeysInOut;

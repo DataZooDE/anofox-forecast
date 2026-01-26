@@ -145,12 +145,11 @@ static unique_ptr<FunctionData> TsAggregateHierarchyBind(
 
     auto bind_data = make_uniq<TsAggregateHierarchyBindData>();
 
-    // Parse MAP{} parameters from named parameter
-    for (auto &kv : input.named_parameters) {
-        if (kv.first == "params" && !kv.second.IsNull()) {
-            bind_data->separator = ExtractMapString(kv.second, "separator", "|");
-            bind_data->aggregate_keyword = ExtractMapString(kv.second, "aggregate_keyword", "AGGREGATED");
-        }
+    // Parse MAP{} parameters from positional argument (index 1, after TABLE at index 0)
+    if (input.inputs.size() > 1 && !input.inputs[1].IsNull()) {
+        auto& map_val = input.inputs[1];
+        bind_data->separator = ExtractMapString(map_val, "separator", "|");
+        bind_data->aggregate_keyword = ExtractMapString(map_val, "aggregate_keyword", "AGGREGATED");
     }
 
     // Input table validation: minimum 3 columns (date, value, at least 1 id)
@@ -385,16 +384,13 @@ static OperatorFinalizeResultType TsAggregateHierarchyFinalize(
 // ============================================================================
 
 void RegisterTsAggregateHierarchyFunction(ExtensionLoader &loader) {
-    // Single function with optional MAP{} parameter
+    // Single function with positional TABLE and MAP{} parameters
     TableFunction func("ts_aggregate_hierarchy",
-                       {LogicalType::TABLE},
+                       {LogicalType::TABLE, LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)},
                        nullptr,
                        TsAggregateHierarchyBind,
                        TsAggregateHierarchyInitGlobal,
                        TsAggregateHierarchyInitLocal);
-
-    // Named parameter for MAP{} - this allows optional params while keeping single overload
-    func.named_parameters["params"] = LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR);
 
     // Set up as table-in-out function
     func.in_out_function = TsAggregateHierarchyInOut;
