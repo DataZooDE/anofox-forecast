@@ -9,7 +9,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-BSL%201.1-blue.svg" alt="License: BSL 1.1"></a>
   <a href="https://duckdb.org"><img src="https://img.shields.io/badge/DuckDB-1.4.3+-green.svg" alt="DuckDB"></a>
   <img src="https://img.shields.io/badge/build-passing-brightgreen.svg" alt="Build Status">
-  <img src="https://img.shields.io/badge/Tests-138%20passed-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-206%20passed-brightgreen.svg" alt="Tests">
 </p>
 
 <p align="center">
