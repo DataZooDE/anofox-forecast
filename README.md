@@ -60,10 +60,10 @@ A time series forecasting extension for DuckDB with 32 models, data preparation,
 | Metric | DuckDB + anofox | Python + statsforecast | Advantage |
 |--------|-----------------|------------------------|-----------|
 | **Docker Image** | ~180 MB | 849 MB | **4.7x smaller** |
-| **Execution Speed** | 0.84s | 19.8s | **23x faster** |
-| **Memory (1M rows)** | 725 MB | 729 MB | Similar |
+| **AutoARIMA Speed** | 0.1s | 129s | **912x faster** |
+| **AutoARIMA Memory** | 174 MB | 329 MB | **1.9x less** |
 
-<sub>Benchmark: 5,000 time series × 200 points = 1M rows, SeasonalNaive + Theta models, 28-day horizon</sub>
+<sub>Benchmark: M5 dataset (10 series, ~15K rows), AutoARIMA with seasonal_period=7, 28-day horizon</sub>
 
 ### 🎨 User-Friendly API
 - **Zero Setup**: All macros load automatically
