@@ -1,13 +1,20 @@
-# Anofox Forecast - Time Series Forecasting for DuckDB
+<p align="center">
+  <img src="docs/assets/logo.svg" alt="Anofox Logo" width="80" height="80">
+</p>
 
-[![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE)
-[![DuckDB](https://img.shields.io/badge/DuckDB-1.4.3+-green.svg)](https://duckdb.org)
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
-[![Technical Depth](https://img.shields.io/badge/Technical%20Depth-A%20(93%25)-brightgreen.svg)](#code-quality)
-[![Code Health](https://img.shields.io/badge/Code%20Health-A--(%2090%25)-green.svg)](#code-quality)
-[![Tests](https://img.shields.io/badge/Tests-138%20passed-brightgreen.svg)]()
+<h1 align="center">Anofox Forecast</h1>
+<p align="center"><strong>Time Series Forecasting for DuckDB</strong></p>
 
-<sub>Technical Depth and Code Health scores calculated using [PMAT](https://github.com/paiml/paiml-mcp-agent-toolkit)</sub>
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-BSL%201.1-blue.svg" alt="License: BSL 1.1"></a>
+  <a href="https://duckdb.org"><img src="https://img.shields.io/badge/DuckDB-1.4.3+-green.svg" alt="DuckDB"></a>
+  <img src="https://img.shields.io/badge/build-passing-brightgreen.svg" alt="Build Status">
+  <img src="https://img.shields.io/badge/Tests-138%20passed-brightgreen.svg" alt="Tests">
+</p>
+
+<p align="center">
+  <sub>Technical Depth: A (93%) | Code Health: A- (90%) - calculated using <a href="https://github.com/paiml/paiml-mcp-agent-toolkit">PMAT</a></sub>
+</p>
 
 
 > [!IMPORTANT]
@@ -48,6 +55,16 @@ A time series forecasting extension for DuckDB with 32 models, data preparation,
 - **Memory Efficient**: Columnar storage, streaming operations
 - **Native Rust Core**: High-performance native implementations for data preparation and forecasting
 
+#### Benchmarks vs Python statsforecast
+
+| Metric | DuckDB + anofox | Python + statsforecast | Advantage |
+|--------|-----------------|------------------------|-----------|
+| **Docker Image** | ~180 MB | 849 MB | **4.7x smaller** |
+| **Execution Speed** | 0.84s | 19.8s | **23x faster** |
+| **Memory (1M rows)** | 725 MB | 729 MB | Similar |
+
+<sub>Benchmark: 5,000 time series × 200 points = 1M rows, SeasonalNaive + Theta models, 28-day horizon</sub>
+
 ### 🎨 User-Friendly API
 - **Zero Setup**: All macros load automatically
 - **Consistent**: MAP-based parameters
@@ -60,7 +77,7 @@ A time series forecasting extension for DuckDB with 32 models, data preparation,
 - [Multi-Language Support](#multi-language-support)
 - [API Reference](#api-reference)
 - [Guides](#guides)
-- [Performance](#performance)
+- [Benchmarks](#benchmarks-vs-python-statsforecast)
 - [License](#license)
 
 
