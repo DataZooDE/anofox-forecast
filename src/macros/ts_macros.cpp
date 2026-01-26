@@ -1544,52 +1544,9 @@ GROUP BY group_col
     // ================================================================================
     // Multi-key unique_id functions (Issue #78)
     // ================================================================================
-
-    // ts_validate_separator: Check if separator is safe to use with given ID columns
-    // C++ API: ts_validate_separator(table_name, id_col1, id_col2?, id_col3?, id_col4?, id_col5?, separator?)
-    // Returns: separator, is_valid, n_conflicts, conflicting_values, message
-    {"ts_validate_separator",
-     {"source", "id_col1", nullptr},
-     {{"id_col2", "NULL"}, {"id_col3", "NULL"}, {"id_col4", "NULL"}, {"id_col5", "NULL"},
-      {"separator", "'|'"}, {nullptr, nullptr}},
-R"(
-WITH distinct_vals AS (
-    SELECT DISTINCT id_col1::VARCHAR AS v FROM query_table(source::VARCHAR) WHERE id_col1 IS NOT NULL
-    UNION
-    SELECT DISTINCT id_col2::VARCHAR AS v FROM query_table(source::VARCHAR) WHERE id_col2 IS NOT NULL
-    UNION
-    SELECT DISTINCT id_col3::VARCHAR AS v FROM query_table(source::VARCHAR) WHERE id_col3 IS NOT NULL
-    UNION
-    SELECT DISTINCT id_col4::VARCHAR AS v FROM query_table(source::VARCHAR) WHERE id_col4 IS NOT NULL
-    UNION
-    SELECT DISTINCT id_col5::VARCHAR AS v FROM query_table(source::VARCHAR) WHERE id_col5 IS NOT NULL
-),
-check_result AS (
-    SELECT
-        separator AS _sep,
-        COUNT(*) FILTER (WHERE POSITION(separator IN v) > 0) AS _found_count,
-        LIST(v ORDER BY v) FILTER (WHERE POSITION(separator IN v) > 0) AS _found_values
-    FROM distinct_vals
-)
-SELECT
-    _sep AS separator,
-    _found_count = 0 AS is_valid,
-    _found_count AS n_conflicts,
-    _found_values AS conflicting_values,
-    CASE WHEN _found_count > 0 THEN
-        'Separator ''' || _sep || ''' found in ' || _found_count::VARCHAR || ' value(s). Try: ' ||
-        CASE WHEN _sep != '-' AND POSITION('-' IN _sep) = 0 THEN '''-'', ' ELSE '' END ||
-        CASE WHEN _sep != '.' AND POSITION('.' IN _sep) = 0 THEN '''.'', ' ELSE '' END ||
-        CASE WHEN _sep != '::' AND POSITION('::' IN _sep) = 0 THEN '''::'', ' ELSE '' END ||
-        CASE WHEN _sep != '__' AND POSITION('__' IN _sep) = 0 THEN '''__'', ' ELSE '' END ||
-        CASE WHEN _sep != '#' AND POSITION('#' IN _sep) = 0 THEN '''#''' ELSE '' END
-    ELSE 'Separator is safe to use'
-    END AS message
-FROM check_result
-)"},
-
-    // NOTE: ts_combine_keys, ts_aggregate_hierarchy, and ts_split_keys are now native table functions
-    // See: ts_aggregate_hierarchy.cpp, ts_combine_keys.cpp, ts_split_keys.cpp
+    // NOTE: ts_validate_separator, ts_combine_keys, ts_aggregate_hierarchy, and ts_split_keys
+    // are now native table functions supporting arbitrary hierarchy levels.
+    // See: ts_validate_separator.cpp, ts_aggregate_hierarchy.cpp, ts_combine_keys.cpp, ts_split_keys.cpp
 
     // ts_stats_by: Alias for ts_stats (for API consistency with _by naming pattern)
     // C++ API: ts_stats_by(table_name, group_col, date_col, value_col, frequency)

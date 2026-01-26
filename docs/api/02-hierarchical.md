@@ -19,7 +19,9 @@ When working with hierarchical time series data (e.g., region/store/item), you o
 
 ```sql
 -- Step 1: Validate separator is safe
-SELECT * FROM ts_validate_separator('raw_sales', region_id, store_id, item_id);
+SELECT * FROM ts_validate_separator(
+    (SELECT region_id, store_id, item_id FROM raw_sales)
+);
 
 -- Step 2: Create hierarchical time series with all aggregation levels
 -- Supports arbitrary hierarchy depth (2-N levels)
@@ -56,12 +58,21 @@ SELECT * FROM ts_split_keys(
 
 ### ts_validate_separator
 
-Checks if a separator character exists in any ID column values.
+Native table function that checks if a separator character exists in any ID column values. Supports **arbitrary number of ID columns**.
 
 **Signature:**
 ```sql
-ts_validate_separator(source, id_col1, [id_col2], [id_col3], [id_col4], [id_col5], separator := '|')
+ts_validate_separator(
+    (SELECT id_col1, id_col2, ... FROM source),
+    separator := '|'  -- optional
+)
 ```
+
+**Input Table:**
+- All columns are treated as ID columns to validate
+
+**Named Parameters (optional):**
+- `separator`: Character(s) to validate (default: `'|'`)
 
 **Returns:**
 | Column | Type | Description |
@@ -72,13 +83,23 @@ ts_validate_separator(source, id_col1, [id_col2], [id_col3], [id_col4], [id_col5
 | `conflicting_values` | VARCHAR[] | Problematic values |
 | `message` | VARCHAR | Helpful message if invalid |
 
-**Example:**
+**Examples:**
 ```sql
--- Check default separator
-SELECT * FROM ts_validate_separator('sales', region_id, store_id, item_id);
+-- Check default separator with 3 columns
+SELECT * FROM ts_validate_separator(
+    (SELECT region_id, store_id, item_id FROM sales)
+);
 
 -- Check if dash is safe
-SELECT * FROM ts_validate_separator('sales', region_id, store_id, separator := '-');
+SELECT * FROM ts_validate_separator(
+    (SELECT region_id, store_id FROM sales),
+    separator := '-'
+);
+
+-- Check with 6-level hierarchy
+SELECT * FROM ts_validate_separator(
+    (SELECT country, region, state, city, store, item FROM sales)
+);
 ```
 
 ---
@@ -273,7 +294,9 @@ SELECT * FROM ts_split_keys(
 
 ```sql
 -- Step 1: Validate separator
-SELECT * FROM ts_validate_separator('raw_sales', region_id, store_id, item_id);
+SELECT * FROM ts_validate_separator(
+    (SELECT region_id, store_id, item_id FROM raw_sales)
+);
 
 -- Step 2: Create aggregated time series (supports any number of hierarchy levels)
 CREATE TABLE prepared_data AS
