@@ -16,6 +16,9 @@
   <sub>Technical Depth: A (93%) | Code Health: A- (90%) - calculated using <a href="https://github.com/paiml/paiml-mcp-agent-toolkit">PMAT</a></sub>
 </p>
 
+<p align="center">
+  <strong>912x faster</strong> than Python statsforecast · <strong>4.7x smaller</strong> Docker image · <strong>1.9x less</strong> memory
+</p>
 
 > [!IMPORTANT]
 > This extension is in early development, so bugs and breaking changes are expected.
@@ -55,16 +58,6 @@ A time series forecasting extension for DuckDB with 32 models, data preparation,
 - **Memory Efficient**: Columnar storage, streaming operations
 - **Native Rust Core**: High-performance native implementations for data preparation and forecasting
 
-#### Benchmarks vs Python statsforecast
-
-| Metric | DuckDB + anofox | Python + statsforecast | Advantage |
-|--------|-----------------|------------------------|-----------|
-| **Docker Image** | ~180 MB | 849 MB | **4.7x smaller** |
-| **AutoARIMA Speed** | 0.1s | 129s | **912x faster** |
-| **AutoARIMA Memory** | 174 MB | 329 MB | **1.9x less** |
-
-<sub>Benchmark: M5 dataset (10 series, ~15K rows), AutoARIMA with seasonal_period=7, 28-day horizon</sub>
-
 ### 🎨 User-Friendly API
 - **Zero Setup**: All macros load automatically
 - **Consistent**: MAP-based parameters
@@ -77,7 +70,6 @@ A time series forecasting extension for DuckDB with 32 models, data preparation,
 - [Multi-Language Support](#multi-language-support)
 - [API Reference](#api-reference)
 - [Guides](#guides)
-- [Benchmarks](#benchmarks-vs-python-statsforecast)
 - [License](#license)
 
 
