@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <strong>912x faster</strong> than Python statsforecast · <strong>4.7x smaller</strong> Docker image · <strong>1.9x less</strong> memory
+  AutoARIMA: <strong>912x faster</strong> and <strong>1.9x less memory</strong> than fast Python equivalents · <strong>4.7x smaller</strong> Docker image
 </p>
 
 > [!IMPORTANT]
