@@ -19,22 +19,28 @@ When working with hierarchical time series data (e.g., region/store/item), you o
 
 ```sql
 -- Step 1: Validate separator is safe
-SELECT * FROM ts_validate_separator('raw_sales', region_id, store_id, item_id);
+SELECT * FROM ts_validate_separator(
+    (SELECT region_id, store_id, item_id FROM raw_sales)
+);
 
 -- Step 2: Create hierarchical time series with all aggregation levels
+-- Supports arbitrary hierarchy depth (2-N levels)
 CREATE TABLE prepared_data AS
-SELECT * FROM ts_aggregate_hierarchy('raw_sales', sale_date, quantity,
-    region_id, store_id, item_id);
+SELECT * FROM ts_aggregate_hierarchy(
+    (SELECT sale_date, quantity, region_id, store_id, item_id FROM raw_sales),
+    MAP{}
+);
 
 -- Step 3: Forecast all series (original + aggregated)
 CREATE TABLE forecasts AS
-SELECT * FROM ts_forecast_by('prepared_data', unique_id, date_col, value_col,
+SELECT * FROM ts_forecast_by('prepared_data', unique_id, date, value,
     'AutoETS', 28, {'seasonal_period': 7});
 
--- Step 4: Split keys for analysis
-SELECT id_part_1 AS region_id, id_part_2 AS store_id, id_part_3 AS item_id,
-       date_col AS forecast_date, value_col AS point_forecast
-FROM ts_split_keys('forecasts', id, ds, point_forecast);
+-- Step 4: Split keys for analysis (with custom column names)
+SELECT * FROM ts_split_keys(
+    (SELECT unique_id, date, value FROM forecasts),
+    columns := ['region_id', 'store_id', 'item_id']
+);
 ```
 
 ---
@@ -42,7 +48,7 @@ FROM ts_split_keys('forecasts', id, ds, point_forecast);
 ## Workflow Summary
 
 1. **Validate separator** - Check if your chosen separator is safe
-2. **Combine keys** - Create a single unique_id from multiple columns
+2. **Combine keys** - Create a single unique_id from multiple columns (no aggregation)
 3. **Aggregate hierarchy** - Combine keys AND create aggregated series at all levels
 4. **Split keys** - Split unique_id back into original columns after forecasting
 
@@ -52,12 +58,21 @@ FROM ts_split_keys('forecasts', id, ds, point_forecast);
 
 ### ts_validate_separator
 
-Checks if a separator character exists in any ID column values.
+Native table function that checks if a separator character exists in any ID column values. Supports **arbitrary number of ID columns**.
 
 **Signature:**
 ```sql
-ts_validate_separator(source, id_col1, [id_col2], [id_col3], [id_col4], [id_col5], separator := '|')
+ts_validate_separator(
+    (SELECT id_col1, id_col2, ... FROM source),
+    separator := '|'  -- optional
+)
 ```
+
+**Input Table:**
+- All columns are treated as ID columns to validate
+
+**Named Parameters (optional):**
+- `separator`: Character(s) to validate (default: `'|'`)
 
 **Returns:**
 | Column | Type | Description |
@@ -68,13 +83,23 @@ ts_validate_separator(source, id_col1, [id_col2], [id_col3], [id_col4], [id_col5
 | `conflicting_values` | VARCHAR[] | Problematic values |
 | `message` | VARCHAR | Helpful message if invalid |
 
-**Example:**
+**Examples:**
 ```sql
--- Check default separator
-SELECT * FROM ts_validate_separator('sales', region_id, store_id, item_id);
+-- Check default separator with 3 columns
+SELECT * FROM ts_validate_separator(
+    (SELECT region_id, store_id, item_id FROM sales)
+);
 
 -- Check if dash is safe
-SELECT * FROM ts_validate_separator('sales', region_id, store_id, separator := '-');
+SELECT * FROM ts_validate_separator(
+    (SELECT region_id, store_id FROM sales),
+    separator := '-'
+);
+
+-- Check with 6-level hierarchy
+SELECT * FROM ts_validate_separator(
+    (SELECT country, region, state, city, store, item FROM sales)
+);
 ```
 
 ---
@@ -83,36 +108,53 @@ SELECT * FROM ts_validate_separator('sales', region_id, store_id, separator := '
 
 ### ts_combine_keys
 
-Combines multiple ID columns into a single `unique_id` column without creating aggregated series.
+Native table function that combines multiple ID columns into a single `unique_id` column without creating aggregated series. Supports **arbitrary hierarchy levels** (2-N columns).
 
 **Signature:**
 ```sql
-ts_combine_keys(source, date_col, value_col, id_col1, [id_col2], [id_col3], [id_col4], [id_col5], params := MAP{})
+ts_combine_keys(
+    (SELECT date_col, value_col, id_col1, id_col2, ... FROM source),
+    {'separator': '|'}  -- optional params
+)
 ```
 
-**Parameters:**
-- `source`: Table name (VARCHAR)
-- `date_col`: Date/timestamp column
-- `value_col`: Value column
-- `id_col1-5`: ID columns (1 required, up to 5)
-- `params`: MAP with `'separator'` option (default: `'|'`)
+**Input Table:**
+- First column: Date/timestamp column
+- Second column: Value column
+- Columns 3+: ID columns - **any number of columns**
+
+**Parameters (optional MAP{}):**
+- `separator`: Character(s) to join ID parts (default: `'|'`)
 
 **Returns:**
 | Column | Type | Description |
 |--------|------|-------------|
 | `unique_id` | VARCHAR | Combined ID (e.g., `'EU|STORE001|SKU42'`) |
-| `date_col` | (input type) | Date column |
-| `value_col` | (input type) | Value column |
+| `date_col` | (input type) | Date column (name preserved) |
+| `value_col` | (input type) | Value column (name and type preserved) |
 
-**Example:**
+**Examples:**
 ```sql
--- Basic combination with 3 columns
-SELECT * FROM ts_combine_keys('sales', sale_date, quantity, region_id, store_id, item_id);
+-- Basic combination with 3 columns (with default params)
+SELECT * FROM ts_combine_keys(
+    (SELECT sale_date, quantity, region_id, store_id, item_id FROM sales),
+    MAP{}
+);
 -- unique_id: 'EU|STORE001|SKU42'
 
 -- Custom separator
-SELECT * FROM ts_combine_keys('sales', sale_date, quantity, region_id, store_id,
-    params := {'separator': '-'});
+SELECT * FROM ts_combine_keys(
+    (SELECT sale_date, quantity, region_id, store_id FROM sales),
+    MAP{'separator': '-'}
+);
+-- unique_id: 'EU-STORE001'
+
+-- 5-level hierarchy
+SELECT * FROM ts_combine_keys(
+    (SELECT sale_date, quantity, country, region, city, store, item FROM sales),
+    MAP{}
+);
+-- unique_id: 'US|West|Seattle|Store1|SKU42'
 ```
 
 ---
@@ -121,57 +163,67 @@ SELECT * FROM ts_combine_keys('sales', sale_date, quantity, region_id, store_id,
 
 ### ts_aggregate_hierarchy
 
-Combines ID columns AND creates aggregated series at all hierarchy levels.
+Native table function that supports **arbitrary hierarchy levels** (2-N columns).
 
 **Signature:**
 ```sql
-ts_aggregate_hierarchy(source, date_col, value_col, id_col1, id_col2, id_col3, params := MAP{})
+ts_aggregate_hierarchy(
+    (SELECT date_col, value_col, id_col1, id_col2, ... FROM source),
+    {'separator': '|', 'aggregate_keyword': 'AGGREGATED'}  -- optional params
+)
 ```
 
-**Parameters:**
-- `source`: Table name
-- `date_col`: Date/timestamp column
-- `value_col`: Value column (will be summed at each aggregation level)
-- `id_col1-3`: ID columns (broadest to finest granularity)
-- `params`: MAP with `'separator'` and `'aggregate_keyword'` options
+**Input Table:**
+- First column: Date/timestamp column
+- Second column: Value column (will be summed at each aggregation level)
+- Columns 3+: ID columns (broadest to finest granularity) - **any number of columns**
 
-**Aggregation Levels Created:**
+**Parameters (optional MAP{}):**
+- `separator`: Character(s) to join ID parts (default: `'|'`)
+- `aggregate_keyword`: Keyword for aggregated levels (default: `'AGGREGATED'`)
 
-| Level | Pattern | Description |
-|-------|---------|-------------|
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `unique_id` | VARCHAR | Combined hierarchical ID |
+| `date` | (input type) | Date column (preserved name and type) |
+| `value` | DOUBLE | Aggregated value (preserved column name) |
+
+**Aggregation Levels Created (for N ID columns):**
+
+For N ID columns, generates N+1 aggregation levels:
+| Level | Pattern (3 columns) | Description |
+|-------|---------------------|-------------|
 | 0 | `AGGREGATED|AGGREGATED|AGGREGATED` | Grand total |
 | 1 | `EU|AGGREGATED|AGGREGATED` | Per first column |
 | 2 | `EU|STORE001|AGGREGATED` | Per first two columns |
 | 3 | `EU|STORE001|SKU42` | Original item level |
 
-**Example:**
+**Examples:**
 ```sql
--- Create hierarchical time series
-SELECT * FROM ts_aggregate_hierarchy('sales', sale_date, quantity,
-    region_id, store_id, item_id);
+-- 2-level hierarchy (region -> store)
+SELECT * FROM ts_aggregate_hierarchy(
+    (SELECT sale_date, quantity, region_id, store_id FROM sales),
+    MAP{}
+);
 
--- Count series at each level
-WITH agg AS (
-    SELECT * FROM ts_aggregate_hierarchy('sales', sale_date, quantity,
-        region_id, store_id, item_id)
-)
-SELECT
-    CASE
-        WHEN unique_id = 'AGGREGATED|AGGREGATED|AGGREGATED' THEN 'Grand Total'
-        WHEN unique_id LIKE '%|AGGREGATED|AGGREGATED' THEN 'Per Region'
-        WHEN unique_id LIKE '%|AGGREGATED' THEN 'Per Store'
-        ELSE 'Original Items'
-    END AS level,
-    COUNT(DISTINCT unique_id) AS n_series
-FROM agg
-GROUP BY 1;
+-- 3-level hierarchy (region -> store -> item)
+SELECT * FROM ts_aggregate_hierarchy(
+    (SELECT sale_date, quantity, region_id, store_id, item_id FROM sales),
+    MAP{}
+);
 
--- Custom aggregate keyword
-SELECT DISTINCT unique_id
-FROM ts_aggregate_hierarchy('sales', sale_date, quantity,
-    region_id, store_id, item_id,
-    params := {'aggregate_keyword': 'TOTAL'})
-WHERE unique_id LIKE '%TOTAL%';
+-- 4-level hierarchy (country -> region -> store -> item)
+SELECT * FROM ts_aggregate_hierarchy(
+    (SELECT sale_date, quantity, country_id, region_id, store_id, item_id FROM sales),
+    MAP{}
+);
+
+-- Custom separator and keyword
+SELECT * FROM ts_aggregate_hierarchy(
+    (SELECT sale_date, quantity, region_id, store_id FROM sales),
+    MAP{'separator': '::', 'aggregate_keyword': 'ALL'}
+);
 ```
 
 ---
@@ -180,37 +232,60 @@ WHERE unique_id LIKE '%TOTAL%';
 
 ### ts_split_keys
 
-Splits a combined unique_id back into its original component columns.
+Native table function that splits a combined unique_id back into its original component columns. Auto-detects the number of parts from the data.
 
 **Signature:**
 ```sql
-ts_split_keys(source, id_col, date_col, value_col, separator := '|')
+ts_split_keys(
+    (SELECT unique_id, date_col, value_col FROM source),
+    separator := '|',                          -- optional
+    columns := ['region', 'store', 'item']     -- optional
+)
 ```
+
+**Input Table:**
+- First column: unique_id (VARCHAR)
+- Second column: Date/timestamp column
+- Third column: Value column
+
+**Named Parameters (optional):**
+- `separator`: Character(s) used to split (default: `'|'`)
+- `columns`: LIST of column names for the split parts
 
 **Returns:**
 | Column | Type | Description |
 |--------|------|-------------|
-| `id_part_1` | VARCHAR | First component |
-| `id_part_2` | VARCHAR | Second component |
-| `id_part_3` | VARCHAR | Third component |
-| `date_col` | (input type) | Date column |
-| `value_col` | (input type) | Value column |
+| `id_part_1` or `<col1>` | VARCHAR | First component |
+| `id_part_2` or `<col2>` | VARCHAR | Second component |
+| `id_part_3` or `<col3>` | VARCHAR | Third component |
+| ... | VARCHAR | Additional components |
+| `date_col` | (input type) | Date column (preserved name) |
+| `value_col` | (input type) | Value column (preserved name and type) |
 
-**Example:**
+**Examples:**
 ```sql
--- Split keys after forecasting
-SELECT
-    id_part_1 AS region_id,
-    id_part_2 AS store_id,
-    id_part_3 AS item_id,
-    date_col AS forecast_date,
-    value_col AS point_forecast
-FROM ts_split_keys('forecasts', id, ds, point_forecast);
+-- Default column names (id_part_1, id_part_2, id_part_3)
+SELECT * FROM ts_split_keys(
+    (SELECT unique_id, forecast_date, point_forecast FROM forecasts)
+);
+
+-- With custom column names
+SELECT * FROM ts_split_keys(
+    (SELECT unique_id, forecast_date, point_forecast FROM forecasts),
+    columns := ['region_id', 'store_id', 'item_id']
+);
+-- Returns: region_id, store_id, item_id, forecast_date, point_forecast
+
+-- Custom separator
+SELECT * FROM ts_split_keys(
+    (SELECT unique_id, ds, forecast FROM results),
+    separator := '-'
+);
 
 -- Filter to store-level forecasts
-SELECT *
-FROM ts_split_keys('forecasts', id, ds, point_forecast)
-WHERE id_part_3 = 'AGGREGATED' AND id_part_2 != 'AGGREGATED';
+SELECT * FROM ts_split_keys(
+    (SELECT unique_id, ds, point_forecast FROM forecasts)
+) WHERE id_part_3 = 'AGGREGATED' AND id_part_2 != 'AGGREGATED';
 ```
 
 ---
@@ -219,27 +294,29 @@ WHERE id_part_3 = 'AGGREGATED' AND id_part_2 != 'AGGREGATED';
 
 ```sql
 -- Step 1: Validate separator
-SELECT * FROM ts_validate_separator('raw_sales', region_id, store_id, item_id);
+SELECT * FROM ts_validate_separator(
+    (SELECT region_id, store_id, item_id FROM raw_sales)
+);
 
--- Step 2: Create aggregated time series
+-- Step 2: Create aggregated time series (supports any number of hierarchy levels)
 CREATE TABLE prepared_data AS
-SELECT * FROM ts_aggregate_hierarchy('raw_sales', sale_date, quantity,
-    region_id, store_id, item_id);
+SELECT * FROM ts_aggregate_hierarchy(
+    (SELECT sale_date, quantity, region_id, store_id, item_id FROM raw_sales),
+    MAP{}
+);
 
 -- Step 3: Forecast all series (original + aggregated)
 CREATE TABLE forecasts AS
-SELECT * FROM ts_forecast_by('prepared_data', unique_id, date_col, value_col,
+SELECT * FROM ts_forecast_by('prepared_data', unique_id, sale_date, quantity,
     'AutoETS', 28, {'seasonal_period': 7});
 
--- Step 4: Split keys for analysis
-SELECT
-    id_part_1 AS region_id,
-    id_part_2 AS store_id,
-    id_part_3 AS item_id,
-    date_col AS forecast_date,
-    value_col AS point_forecast
-FROM ts_split_keys('forecasts', id, ds, point_forecast)
-ORDER BY region_id, store_id, item_id, forecast_date;
+-- Step 4: Split keys for analysis with original column names
+SELECT *
+FROM ts_split_keys(
+    (SELECT unique_id, sale_date, quantity FROM forecasts),
+    columns := ['region_id', 'store_id', 'item_id']
+)
+ORDER BY region_id, store_id, item_id, sale_date;
 ```
 
 ---

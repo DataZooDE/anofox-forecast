@@ -113,6 +113,11 @@ void RegisterTsCvSplitNativeFunction(ExtensionLoader &loader);
 void RegisterTsCvForecastNativeFunction(ExtensionLoader &loader);
 void RegisterTsMstlDecompositionNativeFunction(ExtensionLoader &loader);
 void RegisterTsFeaturesNativeFunction(ExtensionLoader &loader);
+void RegisterTsDetectChangepointsNativeFunction(ExtensionLoader &loader);
+void RegisterTsAggregateHierarchyFunction(ExtensionLoader &loader);
+void RegisterTsCombineKeysFunction(ExtensionLoader &loader);
+void RegisterTsSplitKeysFunction(ExtensionLoader &loader);
+void RegisterTsValidateSeparatorFunction(ExtensionLoader &loader);
 
 // Extension class
 class AnofoxForecastExtension : public Extension {
