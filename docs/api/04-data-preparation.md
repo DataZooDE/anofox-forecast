@@ -15,6 +15,20 @@ Data preparation functions help clean and transform time series data before fore
 
 ---
 
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Series Filtering](#series-filtering) — `ts_drop_constant_by`, `ts_drop_short_by`, `ts_drop_gappy_by`, `ts_drop_zeros_by`
+- [Edge Cleaning](#edge-cleaning) — `ts_drop_leading_zeros_by`, `ts_drop_trailing_zeros_by`, `ts_drop_edge_zeros_by`
+- [Missing Value Imputation](#missing-value-imputation) — `ts_fill_nulls_const_by`, `ts_fill_nulls_forward_by`, `ts_fill_nulls_backward_by`, `ts_fill_nulls_mean_by`
+- [Gap Filling](#gap-filling) — `ts_fill_gaps_by`, `ts_fill_forward_by`
+- [Differencing](#differencing) — `ts_diff_by`
+- [Advanced: Native Gap Filling](#advanced-native-gap-filling) — Supported frequency formats
+- [Advanced: Future Value Handling](#advanced-future-value-handling) — `ts_fill_unknown_by`, `ts_mark_unknown_by`
+- [Advanced: Timestamp Validation](#advanced-timestamp-validation) — `ts_validate_timestamps_by`, `ts_validate_timestamps_summary_by`
+
+---
+
 ## Quick Start
 
 Common data cleaning pipeline (order matters for intermittent data):

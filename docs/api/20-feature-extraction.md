@@ -17,26 +17,15 @@ Feature extraction functions compute 117 statistical features from time series d
 
 ## Quick Start
 
-Extract features using table macros (recommended):
+Extract features per group using `ts_features_by`:
 
 ```sql
--- Single series
-SELECT * FROM ts_features_table('daily_sales', date, value);
-
--- Multiple series
+-- Extract all features per product
 SELECT * FROM ts_features_by('sales', product_id, date, quantity);
 
 -- Access specific features from result (group column name preserved)
 SELECT product_id, mean, standard_deviation
 FROM ts_features_by('sales', product_id, date, quantity);
-```
-
-Using aggregate functions with GROUP BY:
-
-```sql
-SELECT product_id, ts_features_agg(date, value) AS features
-FROM sales
-GROUP BY product_id;
 ```
 
 ---
@@ -75,36 +64,6 @@ WHERE length > 30;
 
 ---
 
-### ts_features_table
-
-Extract features from a single-series table (no grouping).
-
-**Signature:**
-```sql
-ts_features_table(source VARCHAR, date_col COLUMN, value_col COLUMN) → TABLE
-```
-
-**Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `source` | VARCHAR | Source table name |
-| `date_col` | COLUMN | Date/timestamp column |
-| `value_col` | COLUMN | Value column |
-
-**Returns:** Single row with 116 feature columns including `mean`, `standard_deviation`, `skewness`, `kurtosis`, `length`, etc.
-
-**Example:**
-```sql
--- Extract features from a single-series table
-SELECT * FROM ts_features_table('daily_revenue', date, amount);
-
--- Access specific features from result
-SELECT mean, standard_deviation
-FROM ts_features_table('daily_revenue', date, amount);
-```
-
----
-
 ## List Available Features
 
 ### ts_features_list
@@ -128,91 +87,6 @@ SELECT * FROM ts_features_list();
 
 -- Get just feature names
 SELECT feature_name FROM ts_features_list();
-```
-
----
-
-## Aggregate Functions
-
-### ts_features_agg
-
-Aggregate function that extracts 117 tsfresh-compatible features from grouped time series.
-
-**Signatures:**
-```sql
--- Basic
-ts_features_agg(timestamp_col TIMESTAMP, value_col DOUBLE) → STRUCT
-
--- With feature selection
-ts_features_agg(timestamp_col, value_col, feature_selection LIST(VARCHAR)) → STRUCT
-
--- With custom parameters
-ts_features_agg(timestamp_col, value_col, feature_selection, feature_params LIST(STRUCT)) → STRUCT
-```
-
-**Returns:** A STRUCT containing 117 named feature columns including:
-
-| Feature | Description |
-|---------|-------------|
-| `abs_energy` | Sum of squared values |
-| `absolute_sum_of_changes` | Sum of absolute differences |
-| `autocorrelation_lag1` | Autocorrelation at lag 1 |
-| `benford_correlation` | Correlation with Benford's law |
-| `binned_entropy` | Entropy of binned distribution |
-| `cid_ce` | Complexity-invariant distance |
-| `count_above_mean` | Count of values above mean |
-| `count_below_mean` | Count of values below mean |
-| `first_value` | First value in series |
-| `kurtosis` | Kurtosis |
-| `last_value` | Last value in series |
-| `length` | Series length |
-| `linear_trend_intercept` | Linear trend intercept |
-| `linear_trend_r_squared` | R² of linear fit |
-| `linear_trend_slope` | Linear trend slope |
-| `longest_strike_above_mean` | Longest run above mean |
-| `longest_strike_below_mean` | Longest run below mean |
-| `maximum` | Maximum value |
-| `mean` | Mean value |
-| `mean_abs_change` | Mean absolute change |
-| `median` | Median value |
-| `minimum` | Minimum value |
-| `number_peaks` | Number of peaks |
-| `quantile_0.25` | 25th percentile |
-| `quantile_0.75` | 75th percentile |
-| `range` | Range (max - min) |
-| `skewness` | Skewness |
-| `standard_deviation` | Standard deviation |
-| `variance` | Variance |
-| `sample_entropy` | Sample entropy |
-| `approximate_entropy` | Approximate entropy |
-| `permutation_entropy` | Permutation entropy |
-| `lempel_ziv_complexity` | Lempel-Ziv complexity |
-| `spectral_centroid` | Spectral centroid from FFT |
-| *...and 80+ more* | See `ts_features_list()` |
-
-**Example:**
-```sql
--- Extract features per product
-SELECT
-    product_id,
-    ts_features_agg(date, value) AS features
-FROM sales
-GROUP BY product_id;
-
--- Access specific features
-SELECT
-    product_id,
-    (ts_features_agg(date, value)).mean AS avg_value,
-    (ts_features_agg(date, value)).linear_trend_slope AS trend
-FROM sales
-GROUP BY product_id;
-
--- With feature selection
-SELECT
-    product_id,
-    ts_features_agg(date, value, ['mean', 'variance', 'skewness']) AS features
-FROM sales
-GROUP BY product_id;
 ```
 
 ---
@@ -295,36 +169,6 @@ ts_features_config_from_json(path VARCHAR) → STRUCT(
 -- Load feature configuration
 SELECT ts_features_config_from_json('config.json');
 ```
-
----
-
-## Common Feature Categories
-
-### Basic Statistics
-- `mean`, `median`, `minimum`, `maximum`, `range`
-- `variance`, `standard_deviation`, `skewness`, `kurtosis`
-- `sum`, `length`, `first_value`, `last_value`
-
-### Trend Features
-- `linear_trend_slope`, `linear_trend_intercept`, `linear_trend_r_squared`
-- `mean_change`, `mean_abs_change`, `mean_second_derivative_central`
-
-### Autocorrelation
-- `autocorrelation_lag1` through `autocorrelation_lag10`
-- `partial_autocorrelation_lag1` through `partial_autocorrelation_lag5`
-
-### Entropy & Complexity
-- `sample_entropy`, `approximate_entropy`, `permutation_entropy`
-- `binned_entropy`, `lempel_ziv_complexity`
-
-### Spectral
-- `spectral_centroid`, `spectral_variance`
-- `fft_coefficient_0_real`, `fft_coefficient_0_imag`
-
-### Distribution
-- `quantile_0.1`, `quantile_0.25`, `quantile_0.75`, `quantile_0.9`
-- `count_above_mean`, `count_below_mean`, `percentage_above_mean`
-- `ratio_beyond_r_sigma_1`, `ratio_beyond_r_sigma_2`, `ratio_beyond_r_sigma_3`
 
 ---
 

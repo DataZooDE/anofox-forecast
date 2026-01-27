@@ -37,6 +37,15 @@ ts_mstl_decomposition_by(source, group_col, date_col, value_col, seasonal_period
 | `seasonal_periods` | INTEGER[] | Array of seasonal periods |
 | `params` | MAP | Additional parameters |
 
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | (same as group_col) | Group identifier |
+| `trend` | DOUBLE[] | Trend component |
+| `seasonal` | DOUBLE[][] | Seasonal components (one array per period) |
+| `remainder` | DOUBLE[] | Residual component after removing trend and seasonal |
+| `periods` | INTEGER[] | Detected seasonal period lengths |
+
 **Example:**
 ```sql
 SELECT * FROM ts_mstl_decomposition_by(
@@ -181,44 +190,4 @@ FROM ts_classify_seasonality('daily_sales', date, amount, 7.0);
 
 ---
 
-## Aggregate Function
-
-### ts_classify_seasonality_agg
-
-Aggregate function for classifying seasonality with GROUP BY.
-
-**Signature:**
-```sql
-ts_classify_seasonality_agg(date_col TIMESTAMP, value_col DOUBLE, period DOUBLE) → STRUCT
-```
-
-**Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `date_col` | TIMESTAMP | Date/timestamp column |
-| `value_col` | DOUBLE | Value column |
-| `period` | DOUBLE | Expected seasonal period |
-
-**Returns:** Same STRUCT as `ts_classify_seasonality`.
-
-**Example:**
-```sql
--- Classify seasonality per product using GROUP BY
-SELECT
-    product_id,
-    ts_classify_seasonality_agg(date, value, 7.0) AS classification
-FROM sales
-GROUP BY product_id;
-
--- Access specific fields
-SELECT
-    product_id,
-    (ts_classify_seasonality_agg(date, value, 7.0)).is_seasonal,
-    (ts_classify_seasonality_agg(date, value, 7.0)).seasonal_strength
-FROM sales
-GROUP BY product_id;
-```
-
----
-
-*See also: [Period Detection](05-period-detection.md) | [Peak Detection](05b-peak-detection.md) | [Internal Reference](05c-internal-period-functions.md)*
+*See also: [Period Detection](05-period-detection.md) | [Peak Detection](05b-peak-detection.md)*

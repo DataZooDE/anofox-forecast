@@ -74,33 +74,6 @@ SELECT * FROM ts_detect_peaks_by(
 
 ---
 
-### ts_detect_peaks
-
-Detect peaks for a single series.
-
-**Signature:**
-```sql
-ts_detect_peaks(source, date_col, value_col, params) → TABLE(peaks)
-```
-
-**Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `source` | VARCHAR | Source table name |
-| `date_col` | COLUMN | Date/timestamp column |
-| `value_col` | COLUMN | Value column |
-| `params` | MAP | Configuration options (same as `_by` version) |
-
-**Example:**
-```sql
-SELECT
-    (peaks).n_peaks,
-    (peaks).mean_period
-FROM ts_detect_peaks('daily_sales', date, value, MAP{});
-```
-
----
-
 ### ts_analyze_peak_timing_by
 
 Analyze peak timing regularity for multiple series. Determines if peaks occur at consistent times within each period.
@@ -151,52 +124,4 @@ WHERE (timing).is_stable;
 
 ---
 
-### ts_analyze_peak_timing
-
-Analyze peak timing regularity for a single series.
-
-**Signature:**
-```sql
-ts_analyze_peak_timing(source, date_col, value_col, period, params) → TABLE(timing)
-```
-
-**Example:**
-```sql
--- Check if weekly peaks occur at consistent times
-SELECT
-    (timing).is_stable,
-    (timing).variability_score
-FROM ts_analyze_peak_timing('daily_sales', date, value, 7.0, MAP{});
-```
-
----
-
-## Internal Scalar Functions
-
-> **Note:** The following scalar functions are internal and used by the table macros above.
-> For typical usage, prefer the table macros.
-
-### _ts_detect_peaks
-
-Detect peaks in time series with prominence analysis (internal).
-
-**Signature:**
-```sql
-_ts_detect_peaks(values DOUBLE[]) → STRUCT
-_ts_detect_peaks(values DOUBLE[], min_distance DOUBLE) → STRUCT
-_ts_detect_peaks(values DOUBLE[], min_distance DOUBLE, min_prominence DOUBLE) → STRUCT
-_ts_detect_peaks(values DOUBLE[], min_distance DOUBLE, min_prominence DOUBLE, smooth_first BOOLEAN) → STRUCT
-```
-
-### _ts_analyze_peak_timing
-
-Analyze peak timing regularity (internal).
-
-**Signature:**
-```sql
-_ts_analyze_peak_timing(values DOUBLE[], period DOUBLE) → STRUCT
-```
-
----
-
-*See also: [Period Detection](05-period-detection.md) | [Decomposition](05a-decomposition.md) | [Internal Reference](05c-internal-period-functions.md)*
+*See also: [Period Detection](05-period-detection.md) | [Decomposition](05a-decomposition.md)*

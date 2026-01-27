@@ -25,7 +25,7 @@ Period detection identifies recurring patterns in time series data. Use detected
 
 ## Quick Start
 
-Detect periods using table macros (recommended):
+Detect periods using table macros:
 
 ```sql
 -- Multiple series (most common)
@@ -34,17 +34,6 @@ SELECT * FROM ts_detect_periods_by('sales', product_id, date, value, MAP{});
 -- With different method
 SELECT * FROM ts_detect_periods_by('sales', product_id, date, value,
     MAP{'method': 'autoperiod'});
-
--- Single series
-SELECT * FROM ts_detect_periods('daily_sales', date, value, MAP{});
-```
-
-Using the aggregate function with GROUP BY:
-
-```sql
-SELECT product_id, ts_detect_periods_agg(date, value) AS periods
-FROM sales
-GROUP BY product_id;
 ```
 
 ---
@@ -176,92 +165,6 @@ SELECT * FROM ts_detect_periods_by('sales', product_id, date, value,
 
 ---
 
-### ts_detect_periods
-
-Detect periods for a single series.
-
-**Signature:**
-```sql
-ts_detect_periods(source, date_col, value_col, params) → TABLE(periods)
-```
-
-**Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `source` | VARCHAR | Source table name |
-| `date_col` | COLUMN | Date/timestamp column |
-| `value_col` | COLUMN | Value column |
-| `params` | STRUCT/MAP | Configuration options |
-
-**Params options:**
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `method` | VARCHAR | `'fft'` | Detection method (see supported methods above) |
-| `max_period` | VARCHAR | `'365'` | Maximum period to search (limits ACF computation on long series) |
-| `min_confidence` | VARCHAR | method-specific | Minimum confidence threshold. Use `'0'` to disable filtering. |
-
-**Returns:** TABLE with `periods` STRUCT containing detected periods.
-
-**Example:**
-```sql
-SELECT
-    (periods).primary_period,
-    (periods).n_periods
-FROM ts_detect_periods('daily_sales', date, value, MAP{});
-
--- With different methods
-SELECT * FROM ts_detect_periods('daily_sales', date, value, MAP{'method': 'autoperiod'});
-SELECT * FROM ts_detect_periods('daily_sales', date, value, MAP{'method': 'auto'});
-```
-
----
-
-## Aggregate Function
-
-### ts_detect_periods_agg
-
-Aggregate function for period detection with GROUP BY.
-
-**Signature:**
-```sql
-ts_detect_periods_agg(date_col TIMESTAMP, value_col DOUBLE) → STRUCT
-ts_detect_periods_agg(date_col TIMESTAMP, value_col DOUBLE, method VARCHAR) → STRUCT
-```
-
-**Parameters:**
-- `date_col`: Date/timestamp column
-- `value_col`: Value column
-- `method`: Detection method (optional, default: 'fft')
-
-**Returns:**
-```sql
-STRUCT(
-    periods          STRUCT[],      -- Detected periods with metadata
-    n_periods        BIGINT,        -- Number of periods found
-    primary_period   DOUBLE,        -- Dominant period
-    method           VARCHAR        -- Method used
-)
-```
-
-**Example:**
-```sql
--- Detect periods per product
-SELECT
-    product_id,
-    ts_detect_periods_agg(date, value) AS periods
-FROM sales
-GROUP BY product_id;
-
--- With specific method
-SELECT
-    product_id,
-    (ts_detect_periods_agg(date, value, 'acf')).primary_period
-FROM sales
-GROUP BY product_id;
-```
-
----
-
 ## Seasonality Analysis Workflow
 
 ### 1. Detect Seasonal Periods
@@ -371,4 +274,4 @@ SELECT * FROM ts_forecast_by(
 
 ---
 
-*See also: [Decomposition](05a-decomposition.md) | [Peak Detection](05b-peak-detection.md) | [Internal Reference](05c-internal-period-functions.md)*
+*See also: [Decomposition](05a-decomposition.md) | [Peak Detection](05b-peak-detection.md)*
