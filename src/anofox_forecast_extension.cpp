@@ -147,6 +147,7 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsCvSplitNativeFunction(loader);
     RegisterTsCvForecastNativeFunction(loader);
     RegisterTsMstlDecompositionNativeFunction(loader);
+    RegisterTsDetectChangepointsNativeFunction(loader);
     RegisterTsFeaturesNativeFunction(loader);
     RegisterTsAggregateHierarchyFunction(loader);
     RegisterTsCombineKeysFunction(loader);
