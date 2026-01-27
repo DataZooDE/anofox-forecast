@@ -6,7 +6,7 @@ LOAD 'httpfs';
 
 CREATE OR REPLACE TABLE m5 AS 
 SELECT item_id, CAST(timestamp AS TIMESTAMP) AS ds, demand AS y FROM 'https://m5-benchmarks.s3.amazonaws.com/data/train/target.parquet'
-ORDER BY item_id, timestamp;
+ORDER BY item_id, ds;
 
 
 -- Show summary statistics
@@ -29,24 +29,24 @@ SELECT
     COUNT(*)::VARCHAR
 FROM m5
 UNION ALL
-SELECT 
+SELECT
     'Date Range:',
-    MIN(timestamp)::VARCHAR || ' to ' || MAX(timestamp)::VARCHAR
+    MIN(ds)::VARCHAR || ' to ' || MAX(ds)::VARCHAR
 FROM m5
 UNION ALL
 SELECT
     'Avg Value:',
-    ROUND(AVG(demand), 2)::VARCHAR
+    ROUND(AVG(y), 2)::VARCHAR
 FROM m5
 UNION ALL
 SELECT
     'Min Value:',
-    ROUND(MIN(demand), 2)::VARCHAR
+    ROUND(MIN(y), 2)::VARCHAR
 FROM m5
 UNION ALL
 SELECT
     'Max Value:',
-    ROUND(MAX(demand), 2)::VARCHAR
+    ROUND(MAX(y), 2)::VARCHAR
 FROM m5;
 
 
@@ -60,7 +60,7 @@ SELECT
 SELECT 
     COUNT(*) AS total_rows,
     COUNT(DISTINCT item_id) AS unique_items,
-    COUNT(DISTINCT timestamp) AS unique_timestamps,
+    COUNT(DISTINCT ds) AS unique_timestamps,
 FROM m5;
 
 SELECT

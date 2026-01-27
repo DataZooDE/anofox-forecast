@@ -8,7 +8,7 @@
 -- (10k series × 600 rows = 6M rows) due to missing vector type initialization in the
 -- MSTL operator implementation.
 --
--- Error (now fixed): "PhysicalBatchInsert::AddCollection error: batch index 9999999999999 
+-- Error (now fixed): "PhysicalBatchInsert::AddCollection error: batch index 9999999999999
 --                    is present in multiple collections"
 --
 -- Root Cause: The MSTL operator was missing explicit vector type initialization
@@ -20,7 +20,7 @@
 --      requiring batching workarounds.
 
 -- Load the extension (Adjust path as needed for your environment)
--- LOAD 'anofox_forecast'; 
+-- LOAD 'anofox_forecast';
 -- Or if building locally:
 LOAD 'build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension';
 
@@ -37,7 +37,7 @@ LOAD 'build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension';
 -- Note: MSTL requires at least 2 * min(seasonal_periods) observations.
 --       For period 30, we need at least 60, but use 600 for reliable decomposition.
 CREATE OR REPLACE TABLE multi_series_data AS
-SELECT 
+SELECT
     ('2023-01-01'::DATE + INTERVAL (t) DAY) AS date_col,
     'series_' || series_id::VARCHAR AS group_col,
     -- Components with series-specific variations:
@@ -50,7 +50,7 @@ FROM generate_series(0, 9999) series(series_id)
 CROSS JOIN generate_series(0, 599) t(t);  -- 600 days (0-599)
 
 -- Show summary of generated data
-SELECT 
+SELECT
     COUNT(DISTINCT group_col) AS total_series,
     COUNT(*) AS total_rows,
     MIN(date_col) AS start_date,
@@ -61,7 +61,7 @@ FROM multi_series_data;
 
 -- Verify data quality: Check that each series has sufficient observations
 -- MSTL requires at least 2 * min(seasonal_periods) observations per series
-SELECT 
+SELECT
     group_col,
     COUNT(*) AS n_observations,
     COUNT(DISTINCT date_col) AS n_unique_dates,
@@ -76,131 +76,103 @@ LIMIT 10;
 -------------------------------------------------------------------------------
 -- 2. Apply MSTL Decomposition to All 10,000 Series
 -------------------------------------------------------------------------------
--- This will process all series in parallel, decomposing each into:
--- - trend
--- - seasonal_7 (weekly pattern)
--- - seasonal_30 (monthly pattern)
--- - residual
--- Note: For period 30, each series needs at least 60 observations (2 * 30).
---       With 600 observations per series, we have 10x the minimum requirement.
+-- ts_mstl_decomposition_by returns per-group arrays:
+--   id, trend[], seasonal[][], remainder[], periods[]
+.timer on
+
 CREATE OR REPLACE TABLE mstl_result_10k AS
-SELECT * FROM ts_mstl_decomposition(
-    table_name='multi_series_data',
-    group_col='group_col',
-    date_col='date_col',
-    value_col='value_col',
-    params={'seasonal_periods': [7, 30]}  -- Weekly (7) and monthly (30) patterns
+SELECT * FROM ts_mstl_decomposition_by(
+    multi_series_data,
+    group_col,
+    date_col,
+    value_col,
+    {'seasonal_periods': [7, 30]}
 );
+
+.timer off
 
 -------------------------------------------------------------------------------
 -- 3. Verify Results
 -------------------------------------------------------------------------------
 -- Check that all series were processed
-SELECT 
-    COUNT(DISTINCT group_col) AS series_processed,
-    COUNT(*) AS total_rows,
-    COUNT(*) / COUNT(DISTINCT group_col) AS rows_per_series
+SELECT
+    COUNT(*) AS series_processed,
+    AVG(len(trend)) AS avg_observations_per_series
 FROM mstl_result_10k;
 
--- Sample a few series to verify decomposition quality
-SELECT 
-    group_col,
-    date_col,
-    value_col AS original,
-    trend,
-    seasonal_7 AS weekly_pattern,
-    seasonal_30 AS monthly_pattern,
-    residual,
-    (trend + seasonal_7 + seasonal_30 + residual) AS reconstructed,
-    ABS(value_col - (trend + seasonal_7 + seasonal_30 + residual)) AS reconstruction_error
+-- Sample a few series to verify decomposition
+SELECT
+    id,
+    len(trend) AS n_observations,
+    periods AS detected_periods,
+    trend[1:3] AS trend_first_3,
+    remainder[1:3] AS remainder_first_3
 FROM mstl_result_10k
-WHERE group_col IN ('series_0', 'series_100', 'series_1000', 'series_5000', 'series_9999')
-ORDER BY group_col, date_col
-LIMIT 50;
+WHERE id IN ('series_0', 'series_100', 'series_1000', 'series_5000', 'series_9999')
+ORDER BY id;
 
 -------------------------------------------------------------------------------
 -- 4. Aggregate Statistics Across All Series
 -------------------------------------------------------------------------------
--- Calculate reconstruction error statistics per series
+-- Calculate statistics per series from the array-based results
 CREATE OR REPLACE TABLE series_quality_stats AS
-SELECT 
+WITH unnested AS (
+    SELECT
+        id AS group_col,
+        unnest(trend) AS trend_val,
+        unnest(seasonal[1]) AS seasonal_7_val,
+        unnest(seasonal[2]) AS seasonal_30_val,
+        unnest(remainder) AS remainder_val
+    FROM mstl_result_10k
+)
+SELECT
     group_col,
     COUNT(*) AS n_points,
-    AVG(ABS(value_col - (trend + seasonal_7 + seasonal_30 + residual))) AS mean_abs_error,
-    MAX(ABS(value_col - (trend + seasonal_7 + seasonal_30 + residual))) AS max_error,
-    STDDEV(value_col) AS original_stddev,
-    STDDEV(residual) AS residual_stddev,
-    -- Ratio of residual stddev to original stddev (lower is better)
-    STDDEV(residual) / NULLIF(STDDEV(value_col), 0) AS noise_reduction_ratio
-FROM mstl_result_10k
+    STDDEV(remainder_val) AS residual_stddev,
+    STDDEV(trend_val) AS trend_stddev,
+    STDDEV(seasonal_7_val) AS seasonal_7_stddev,
+    STDDEV(seasonal_30_val) AS seasonal_30_stddev,
+    STDDEV(trend_val + seasonal_7_val + seasonal_30_val + remainder_val) AS orig_stddev,
+    STDDEV(remainder_val) / NULLIF(STDDEV(trend_val + seasonal_7_val + seasonal_30_val + remainder_val), 0) AS noise_reduction_ratio
+FROM unnested
 GROUP BY group_col;
 
 -- Summary statistics across all series
-SELECT 
+SELECT
     COUNT(*) AS total_series,
-    AVG(mean_abs_error) AS avg_mean_abs_error,
-    MAX(max_error) AS worst_max_error,
     AVG(noise_reduction_ratio) AS avg_noise_reduction_ratio,
-    COUNT(*) FILTER (WHERE mean_abs_error < 0.001) AS series_with_excellent_decomposition,
-    COUNT(*) FILTER (WHERE mean_abs_error < 0.01) AS series_with_good_decomposition
+    AVG(residual_stddev) AS avg_residual_stddev
 FROM series_quality_stats;
-
--- Distribution of reconstruction errors
-SELECT 
-    CASE 
-        WHEN mean_abs_error < 0.0001 THEN '< 0.0001'
-        WHEN mean_abs_error < 0.001 THEN '0.0001 - 0.001'
-        WHEN mean_abs_error < 0.01 THEN '0.001 - 0.01'
-        WHEN mean_abs_error < 0.1 THEN '0.01 - 0.1'
-        ELSE '>= 0.1'
-    END AS error_range,
-    COUNT(*) AS series_count,
-    ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS percentage
-FROM series_quality_stats
-GROUP BY error_range
-ORDER BY MIN(mean_abs_error);
 
 -------------------------------------------------------------------------------
 -- 5. Component Analysis
 -------------------------------------------------------------------------------
 -- Analyze the strength of each component across all series
-WITH component_stats AS (
-    SELECT 
-        group_col,
-        STDDEV(value_col) AS orig_stddev,
-        STDDEV(trend) AS trend_stddev,
-        STDDEV(seasonal_7) AS seasonal_7_stddev,
-        STDDEV(seasonal_30) AS seasonal_30_stddev,
-        STDDEV(residual) AS residual_stddev
-    FROM mstl_result_10k
-    GROUP BY group_col
-)
-SELECT 
+SELECT
     'Trend' AS component,
     AVG(trend_stddev) AS avg_stddev,
     AVG(trend_stddev / NULLIF(orig_stddev, 0)) AS avg_relative_strength
-FROM component_stats
+FROM series_quality_stats
 UNION ALL
-SELECT 
+SELECT
     'Seasonal_7' AS component,
     AVG(seasonal_7_stddev) AS avg_stddev,
     AVG(seasonal_7_stddev / NULLIF(orig_stddev, 0)) AS avg_relative_strength
-FROM component_stats
+FROM series_quality_stats
 UNION ALL
-SELECT 
+SELECT
     'Seasonal_30' AS component,
     AVG(seasonal_30_stddev) AS avg_stddev,
     AVG(seasonal_30_stddev / NULLIF(orig_stddev, 0)) AS avg_relative_strength
-FROM component_stats
+FROM series_quality_stats
 UNION ALL
-SELECT 
+SELECT
     'Residual' AS component,
     AVG(residual_stddev) AS avg_stddev,
     AVG(residual_stddev / NULLIF(orig_stddev, 0)) AS avg_relative_strength
-FROM component_stats;
+FROM series_quality_stats;
 
 -- Cleanup (optional)
 -- DROP TABLE IF EXISTS multi_series_data;
 -- DROP TABLE IF EXISTS mstl_result_10k;
 -- DROP TABLE IF EXISTS series_quality_stats;
-

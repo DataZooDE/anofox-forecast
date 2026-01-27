@@ -66,9 +66,9 @@ SELECT 'Starting MSTL decomposition on 100,000 series...';
 
 SELECT
     COUNT(*) AS series_processed,
-    SUM(CASE WHEN len(decomposition.trend) > 0 THEN 1 ELSE 0 END) AS with_trend,
-    SUM(CASE WHEN len(decomposition.periods) > 0 THEN 1 ELSE 0 END) AS with_seasonal
-FROM ts_mstl_decomposition(
+    SUM(CASE WHEN len(trend) > 0 THEN 1 ELSE 0 END) AS with_trend,
+    SUM(CASE WHEN len(periods) > 0 THEN 1 ELSE 0 END) AS with_seasonal
+FROM ts_mstl_decomposition_by(
     benchmark_100k,
     group_col,
     date_col,
@@ -86,16 +86,10 @@ SELECT '--- Section 3: Period Detection Performance ---';
 CREATE OR REPLACE TABLE benchmark_1k AS
 SELECT * FROM benchmark_100k WHERE series_id <= 1000;
 
--- Test FFT period detection (fast) using aggregate
+-- Test FFT period detection (fast) using table macro
 SELECT 'Period Detection: FFT (1000 series)';
 SELECT COUNT(*) AS series_with_periods
-FROM (
-    SELECT
-        series_id,
-        ts_detect_periods(list(value_col ORDER BY date_col), 'fft') AS detected_period
-    FROM benchmark_1k
-    GROUP BY series_id
-);
+FROM ts_detect_periods_by(benchmark_1k, group_col, date_col, value_col, {'method': 'fft'});
 
 -- =============================================================================
 -- SECTION 4: Forecasting with MSTL Model (Scalability Test)
@@ -231,9 +225,9 @@ FROM (
 SELECT 'MSTL Decomposition on 100k mixed-length series:';
 SELECT
     COUNT(*) AS series_processed,
-    SUM(CASE WHEN len(decomposition.trend) > 0 THEN 1 ELSE 0 END) AS with_decomposition,
-    SUM(CASE WHEN len(decomposition.trend) = 0 THEN 1 ELSE 0 END) AS skipped
-FROM ts_mstl_decomposition(
+    SUM(CASE WHEN len(trend) > 0 THEN 1 ELSE 0 END) AS with_decomposition,
+    SUM(CASE WHEN len(trend) = 0 THEN 1 ELSE 0 END) AS skipped
+FROM ts_mstl_decomposition_by(
     benchmark_mixed,
     group_col,
     date_col,
@@ -270,7 +264,7 @@ FROM benchmark_long;
 SELECT 'MSTL Decomposition on longer series (1k x 500 points)';
 SELECT
     COUNT(*) AS series_processed
-FROM ts_mstl_decomposition(
+FROM ts_mstl_decomposition_by(
     benchmark_long,
     group_col,
     date_col,
