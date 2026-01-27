@@ -365,6 +365,11 @@ static OperatorFinalizeResultType TsFillGapsNativeFinalize(
 
     idx_t output_count = 0;
 
+    // Initialize all output vectors as FLAT_VECTOR for parallel-safe batch merging
+    for (idx_t col = 0; col < output.ColumnCount(); col++) {
+        output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
+    }
+
     while (output_count < STANDARD_VECTOR_SIZE &&
            local_state.current_group < local_state.filled_results.size()) {
 

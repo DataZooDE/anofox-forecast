@@ -313,6 +313,11 @@ static OperatorFinalizeResultType TsFeaturesNativeFinalize(
     output.Reset();
     idx_t output_idx = 0;
 
+    // Initialize all output vectors as FLAT_VECTOR for parallel-safe batch merging
+    for (idx_t col = 0; col < output.ColumnCount(); col++) {
+        output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
+    }
+
     while (local_state.current_result < local_state.results.size() && output_idx < STANDARD_VECTOR_SIZE) {
         auto& result = local_state.results[local_state.current_result];
 
