@@ -7,7 +7,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-BSL%201.1-blue.svg" alt="License: BSL 1.1"></a>
-  <a href="https://duckdb.org"><img src="https://img.shields.io/badge/DuckDB-1.4.3+-green.svg" alt="DuckDB"></a>
+  <a href="https://duckdb.org"><img src="https://img.shields.io/badge/DuckDB-1.4.4+-green.svg" alt="DuckDB"></a>
   <img src="https://img.shields.io/badge/build-passing-brightgreen.svg" alt="Build Status">
   <img src="https://img.shields.io/badge/Tests-206%20passed-brightgreen.svg" alt="Tests">
 </p>
@@ -104,7 +104,7 @@ make release
 
 ## 🚀 Quick Start on M5 Dataset
 
-The forecast takes ~2 minutes on a Dell XPS 13. (Requires DuckDB v1.4.3+).
+The forecast takes ~2 minutes on a Dell XPS 13. (Requires DuckDB v1.4.4+).
 
 ```sql
 -- Load extension
