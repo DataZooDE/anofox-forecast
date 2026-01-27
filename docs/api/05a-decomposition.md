@@ -37,6 +37,15 @@ ts_mstl_decomposition_by(source, group_col, date_col, value_col, seasonal_period
 | `seasonal_periods` | INTEGER[] | Array of seasonal periods |
 | `params` | MAP | Additional parameters |
 
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | (same as group_col) | Group identifier |
+| `trend` | DOUBLE[] | Trend component |
+| `seasonal` | DOUBLE[][] | Seasonal components (one array per period) |
+| `remainder` | DOUBLE[] | Residual component after removing trend and seasonal |
+| `periods` | INTEGER[] | Detected seasonal period lengths |
+
 **Example:**
 ```sql
 SELECT * FROM ts_mstl_decomposition_by(
