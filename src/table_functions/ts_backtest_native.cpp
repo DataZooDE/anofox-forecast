@@ -849,6 +849,11 @@ static OperatorFinalizeResultType TsBacktestNativeFinalize(
 
     idx_t output_count = 0;
 
+    // Initialize all output vectors as FLAT_VECTOR for parallel-safe batch merging
+    for (idx_t col = 0; col < output.ColumnCount(); col++) {
+        output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
+    }
+
     while (output_count < STANDARD_VECTOR_SIZE &&
            local_state.output_offset < local_state.results.size()) {
 

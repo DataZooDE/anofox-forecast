@@ -335,6 +335,11 @@ static OperatorFinalizeResultType TsCvSplitNativeFinalize(
     output.Reset();
     idx_t output_idx = 0;
 
+    // Initialize all output vectors as FLAT_VECTOR for parallel-safe batch merging
+    for (idx_t col = 0; col < output.ColumnCount(); col++) {
+        output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
+    }
+
     int64_t freq_micros = bind_data.frequency_seconds * 1000000;
 
     // Continue from where we left off

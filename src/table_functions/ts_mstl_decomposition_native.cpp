@@ -295,6 +295,11 @@ static OperatorFinalizeResultType TsMstlDecompositionNativeFinalize(
     idx_t to_output = std::min(remaining, static_cast<idx_t>(STANDARD_VECTOR_SIZE));
     output.SetCardinality(to_output);
 
+    // Initialize all output vectors as FLAT_VECTOR for parallel-safe batch merging
+    for (idx_t col = 0; col < output.ColumnCount(); col++) {
+        output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
+    }
+
     for (idx_t i = 0; i < to_output; i++) {
         auto &row = local_state.results[local_state.output_offset + i];
 
