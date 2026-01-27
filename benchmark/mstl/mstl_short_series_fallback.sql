@@ -80,10 +80,10 @@ SELECT * FROM short_series_test WHERE group_col IN ('len_24', 'len_25', 'len_36'
 SELECT 'Testing MSTL with sufficient data series:';
 SELECT
     id AS group_col,
-    len(decomposition.trend) AS trend_length,
-    len(decomposition.remainder) AS remainder_length,
-    decomposition.periods AS detected_periods
-FROM ts_mstl_decomposition(
+    len(trend) AS trend_length,
+    len(remainder) AS remainder_length,
+    periods AS detected_periods
+FROM ts_mstl_decomposition_by(
     sufficient_series,
     group_col,
     date_col,
@@ -101,16 +101,16 @@ SELECT '--- Section 3: MSTL Decomposition with All Series ---';
 SELECT 'Testing MSTL with all series (including short):';
 SELECT
     id AS group_col,
-    len(decomposition.trend) AS trend_length,
-    CASE WHEN len(decomposition.trend) > 0 THEN 'SUCCESS' ELSE 'NO_DECOMPOSITION' END AS status
-FROM ts_mstl_decomposition(
+    len(trend) AS trend_length,
+    CASE WHEN len(trend) > 0 THEN 'SUCCESS' ELSE 'NO_DECOMPOSITION' END AS status
+FROM ts_mstl_decomposition_by(
     short_series_test,
     group_col,
     date_col,
     value_col,
     {'seasonal_periods': [12]}
 )
-ORDER BY len(decomposition.trend);
+ORDER BY len(trend);
 
 -- =============================================================================
 -- SECTION 4: Edge Cases
@@ -120,12 +120,15 @@ SELECT '--- Section 4: Edge Cases ---';
 
 -- Test exactly at the boundary (24 points for period 12)
 SELECT 'Edge case: Exactly 24 points (2 * period):';
+CREATE OR REPLACE TABLE edge_case_24 AS
+SELECT * FROM short_series_test WHERE group_col = 'len_24';
+
 SELECT
     id,
-    decomposition.trend[1:5] AS trend_first_5,
-    decomposition.remainder[1:5] AS remainder_first_5
-FROM ts_mstl_decomposition(
-    (SELECT * FROM short_series_test WHERE group_col = 'len_24'),
+    trend[1:5] AS trend_first_5,
+    remainder[1:5] AS remainder_first_5
+FROM ts_mstl_decomposition_by(
+    edge_case_24,
     group_col,
     date_col,
     value_col,
@@ -134,12 +137,15 @@ FROM ts_mstl_decomposition(
 
 -- Test one below boundary (23 points)
 SELECT 'Edge case: 23 points (just under 2 * period):';
+CREATE OR REPLACE TABLE edge_case_23 AS
+SELECT * FROM short_series_test WHERE group_col = 'len_23';
+
 SELECT
     id,
-    len(decomposition.trend) AS trend_length,
-    CASE WHEN len(decomposition.trend) > 0 THEN 'DECOMPOSED' ELSE 'SKIPPED' END AS result
-FROM ts_mstl_decomposition(
-    (SELECT * FROM short_series_test WHERE group_col = 'len_23'),
+    len(trend) AS trend_length,
+    CASE WHEN len(trend) > 0 THEN 'DECOMPOSED' ELSE 'SKIPPED' END AS result
+FROM ts_mstl_decomposition_by(
+    edge_case_23,
     group_col,
     date_col,
     value_col,
@@ -190,9 +196,9 @@ ORDER BY length_category;
 SELECT 'Processing 10k mixed-length series with MSTL:';
 SELECT
     COUNT(*) AS series_processed,
-    SUM(CASE WHEN len(decomposition.trend) > 0 THEN 1 ELSE 0 END) AS decomposed_count,
-    SUM(CASE WHEN len(decomposition.trend) = 0 THEN 1 ELSE 0 END) AS skipped_count
-FROM ts_mstl_decomposition(
+    SUM(CASE WHEN len(trend) > 0 THEN 1 ELSE 0 END) AS decomposed_count,
+    SUM(CASE WHEN len(trend) = 0 THEN 1 ELSE 0 END) AS skipped_count
+FROM ts_mstl_decomposition_by(
     mixed_length_series,
     group_col,
     date_col,
@@ -215,7 +221,7 @@ WHERE group_col IN ('len_10', 'len_15', 'len_20');
 -- MSTL should gracefully handle short series
 SELECT
     COUNT(*) AS total_forecast_rows,
-    COUNT(DISTINCT series_id) AS series_count
+    COUNT(DISTINCT id) AS series_count
 FROM TS_FORECAST_BY(
     forecast_test_short,
     group_col,
@@ -230,7 +236,7 @@ FROM TS_FORECAST_BY(
 SELECT 'Forecasting same series with Naive model:';
 SELECT
     COUNT(*) AS total_forecast_rows,
-    COUNT(DISTINCT series_id) AS series_count
+    COUNT(DISTINCT id) AS series_count
 FROM TS_FORECAST_BY(
     forecast_test_short,
     group_col,
@@ -257,19 +263,19 @@ SELECT * FROM short_series_test WHERE group_col IN ('len_24', 'len_25', 'len_36'
 SELECT 'Decomposition results - SHORT series (<24 points):';
 SELECT
     id,
-    len(decomposition.trend) AS trend_len,
-    len(decomposition.remainder) AS remainder_len,
-    CASE WHEN len(decomposition.trend) > 0 THEN 'OK' ELSE 'SKIPPED' END AS status
-FROM ts_mstl_decomposition(short_only, group_col, date_col, value_col, {'seasonal_periods': [12]})
+    len(trend) AS trend_len,
+    len(remainder) AS remainder_len,
+    CASE WHEN len(trend) > 0 THEN 'OK' ELSE 'SKIPPED' END AS status
+FROM ts_mstl_decomposition_by(short_only, group_col, date_col, value_col, {'seasonal_periods': [12]})
 ORDER BY id;
 
 SELECT 'Decomposition results - SUFFICIENT series (>=24 points):';
 SELECT
     id,
-    len(decomposition.trend) AS trend_len,
-    len(decomposition.remainder) AS remainder_len,
-    CASE WHEN len(decomposition.trend) > 0 THEN 'OK' ELSE 'SKIPPED' END AS status
-FROM ts_mstl_decomposition(sufficient_only, group_col, date_col, value_col, {'seasonal_periods': [12]})
+    len(trend) AS trend_len,
+    len(remainder) AS remainder_len,
+    CASE WHEN len(trend) > 0 THEN 'OK' ELSE 'SKIPPED' END AS status
+FROM ts_mstl_decomposition_by(sufficient_only, group_col, date_col, value_col, {'seasonal_periods': [12]})
 ORDER BY id;
 
 -- =============================================================================
@@ -283,6 +289,8 @@ DROP TABLE IF EXISTS mixed_length_series;
 DROP TABLE IF EXISTS forecast_test_short;
 DROP TABLE IF EXISTS short_only;
 DROP TABLE IF EXISTS sufficient_only;
+DROP TABLE IF EXISTS edge_case_24;
+DROP TABLE IF EXISTS edge_case_23;
 
 SELECT '=============================================================================';
 SELECT 'Short Series Fallback Test Complete';
