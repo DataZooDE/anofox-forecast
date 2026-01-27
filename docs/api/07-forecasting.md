@@ -113,13 +113,6 @@ SELECT * FROM ts_forecast_by(
 
 ---
 
-## API Styles
-
-| API Style | Best For | Example |
-|-----------|----------|---------|
-| **Table Macros** | Most users; forecasting multiple series | `ts_forecast_by('sales', id, date, val, 'ETS', 12, MAP{})` |
-| **Aggregate Functions** | Custom GROUP BY patterns | `ts_forecast_agg(date, value, 'ETS', 12, MAP{})` |
-
 ## Model Selection Guide
 
 **For beginners:** Start with `Naive` or `SES` to establish baselines, then try `AutoETS` for automatic model selection.
@@ -254,22 +247,6 @@ SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'Naive', 12, MAP
 
 ---
 
-### ts_forecast
-
-Generate forecasts for a single series.
-
-**Signature:**
-```sql
-ts_forecast(table_name, date_col, target_col, method, horizon, params) → TABLE
-```
-
-**Example:**
-```sql
-SELECT * FROM ts_forecast('sales', date, amount, 'Naive', 12, MAP{});
-```
-
----
-
 ### ts_forecast_exog_by
 
 Multi-series forecasting with exogenous variables. This is the **primary exogenous forecasting function**.
@@ -314,65 +291,6 @@ SELECT * FROM ts_forecast_exog_by(
     MAP{},                 -- params
     '1d'                   -- frequency
 );
-```
-
----
-
-### ts_forecast_exog
-
-Single-series forecasting with exogenous variables.
-
-**Signature:**
-```sql
-ts_forecast_exog(table_name, date_col, target_col, x_cols, future_table, model, horizon, params) → TABLE
-```
-
-**Example:**
-```sql
-SELECT * FROM ts_forecast_exog(
-    'sales', date, amount,
-    'temperature,promotion',
-    'future_exog',
-    'AutoARIMA', 3, MAP{}
-);
-```
-
----
-
-## Aggregate Function
-
-### ts_forecast_agg
-
-Aggregate function for generating forecasts with GROUP BY.
-
-> **Note:** Aggregate functions require **MAP syntax** for the params parameter. STRUCT syntax (`{...}`) is only supported for table macros.
-
-**Signature:**
-```sql
-ts_forecast_agg(date_col, value_col, method, horizon, params) → STRUCT
-```
-
-**Returns:**
-```sql
-STRUCT(
-    forecast_step      INTEGER[],
-    forecast_timestamp TIMESTAMP[],
-    point_forecast     DOUBLE[],
-    lower_90           DOUBLE[],
-    upper_90           DOUBLE[],
-    model_name         VARCHAR,
-    insample_fitted    DOUBLE[],
-    error_message      VARCHAR
-)
-```
-
-**Example:**
-```sql
-SELECT
-    product_id,
-    ts_forecast_agg(ts, value, 'ETS', 12, MAP{}) AS forecast
-FROM sales
-GROUP BY product_id;
 ```
 
 ---
