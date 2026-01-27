@@ -3,6 +3,11 @@
 
 LOAD 'build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension';
 
+-- Required for CREATE TABLE AS SELECT from table-in-out functions at scale.
+-- DuckDB's PhysicalBatchInsert requires batch index support which table-in-out
+-- functions don't provide. This setting uses regular parallel insert instead.
+SET preserve_insertion_order = false;
+
 -- Drop table if exists
 DROP TABLE IF EXISTS timeseries_10k;
 
