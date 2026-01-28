@@ -223,46 +223,43 @@ WHERE date_col >= _first_nz AND date_col <= _last_nz
 
     // ts_fill_nulls_const_by: Fill NULL values with constant (table-based)
     // C++ API: ts_fill_nulls_const_by(table_name, group_col, date_col, value_col, fill_value)
+    // Note: All input columns are preserved; filled value is added as 'filled_value' column
     {"ts_fill_nulls_const_by", {"source", "group_col", "date_col", "value_col", "fill_value", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT
-    group_col,
-    date_col,
-    COALESCE(value_col, fill_value) AS value_col
+SELECT *, COALESCE(value_col, fill_value) AS filled_value
 FROM query_table(source::VARCHAR)
 ORDER BY group_col, date_col
 )"},
 
     // ts_fill_nulls_forward_by: Forward fill (LOCF) (table-based)
     // C++ API: ts_fill_nulls_forward_by(table_name, group_col, date_col, value_col)
+    // Note: All input columns are preserved; filled value is added as 'filled_value' column
     {"ts_fill_nulls_forward_by", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT
-    group_col,
-    date_col,
+SELECT *,
     COALESCE(value_col, LAG(value_col IGNORE NULLS) OVER (
         PARTITION BY group_col ORDER BY date_col
-    )) AS value_col
+    )) AS filled_value
 FROM query_table(source::VARCHAR)
 ORDER BY group_col, date_col
 )"},
 
     // ts_fill_nulls_backward_by: Backward fill (NOCB) (table-based)
     // C++ API: ts_fill_nulls_backward_by(table_name, group_col, date_col, value_col)
+    // Note: All input columns are preserved; filled value is added as 'filled_value' column
     {"ts_fill_nulls_backward_by", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT
-    group_col,
-    date_col,
+SELECT *,
     COALESCE(value_col, LEAD(value_col IGNORE NULLS) OVER (
         PARTITION BY group_col ORDER BY date_col
-    )) AS value_col
+    )) AS filled_value
 FROM query_table(source::VARCHAR)
 ORDER BY group_col, date_col
 )"},
 
     // ts_fill_nulls_mean_by: Fill with series mean (table-based)
     // C++ API: ts_fill_nulls_mean_by(table_name, group_col, date_col, value_col)
+    // Note: All input columns are preserved; filled value is added as 'filled_value' column
     {"ts_fill_nulls_mean_by", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH with_mean AS (
@@ -270,7 +267,7 @@ WITH with_mean AS (
            AVG(value_col) OVER (PARTITION BY group_col) AS _mean_val
     FROM query_table(source::VARCHAR)
 )
-SELECT group_col, date_col, COALESCE(value_col, _mean_val) AS value_col
+SELECT * EXCLUDE (_mean_val), COALESCE(value_col, _mean_val) AS filled_value
 FROM with_mean
 ORDER BY group_col, date_col
 )"},
