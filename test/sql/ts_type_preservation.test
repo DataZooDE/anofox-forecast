@@ -4,8 +4,6 @@
 
 require anofox_forecast
 
-require json
-
 #######################################
 # Setup Test Data with DATE type
 #######################################
@@ -101,30 +99,26 @@ SELECT typeof(date) FROM ts_drop_zeros_by('date_test', id, val) LIMIT 1;
 DATE
 
 #######################################
-# Functions using generate_series
-# Note: These functions always return TIMESTAMP because DuckDB's
-# generate_series returns TIMESTAMP and SQL type system is determined
-# at query planning time, not runtime. Cast to DATE if needed:
-# SELECT date_col::DATE FROM ts_fill_gaps_by(...)
+# Functions using generate_series (now preserve input type)
 #######################################
 
-# ts_fill_gaps - returns TIMESTAMP (generate_series limitation)
+# ts_fill_gaps - preserves input DATE type
 query T
-SELECT typeof(date_col) FROM ts_fill_gaps_by('date_test', id, date, val, '1d') LIMIT 1;
+SELECT typeof(date) FROM ts_fill_gaps_by('date_test', id, date, val, '1d') LIMIT 1;
 ----
-TIMESTAMP
+DATE
 
-# ts_fill_forward - returns TIMESTAMP (generate_series limitation)
+# ts_fill_forward - preserves input DATE type
 query T
-SELECT typeof(date_col) FROM ts_fill_forward_by('date_test', id, date, val, '2023-01-10', '1d') LIMIT 1;
+SELECT typeof(date) FROM ts_fill_forward_by('date_test', id, date, val, '2023-01-10', '1d') LIMIT 1;
 ----
-TIMESTAMP
+DATE
 
-# ts_fill_gaps_operator - returns TIMESTAMP (generate_series limitation)
+# ts_fill_gaps_operator - preserves input DATE type
 query T
-SELECT typeof(date_col) FROM ts_fill_gaps_by('date_test', id, date, val, '1d') LIMIT 1;
+SELECT typeof(date) FROM ts_fill_gaps_by('date_test', id, date, val, '1d') LIMIT 1;
 ----
-TIMESTAMP
+DATE
 
 #######################################
 # TIMESTAMP Input Tests
@@ -152,7 +146,7 @@ TIMESTAMP
 
 # generate_series functions output TIMESTAMP
 query T
-SELECT typeof(date_col) FROM ts_fill_gaps_by('timestamp_test', id, date, val, '1d') LIMIT 1;
+SELECT typeof(date) FROM ts_fill_gaps_by('timestamp_test', id, date, val, '1d') LIMIT 1;
 ----
 TIMESTAMP
 

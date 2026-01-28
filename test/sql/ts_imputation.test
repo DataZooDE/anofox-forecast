@@ -4,8 +4,6 @@
 
 require anofox_forecast
 
-require json
-
 #######################################
 # Setup Test Data
 #######################################
@@ -30,13 +28,13 @@ SELECT COUNT(*) FROM ts_fill_nulls_const_by('impute_test', id, date, val, 0.0);
 
 # Test no NULLs remain after fill
 query I
-SELECT COUNT(*) FROM ts_fill_nulls_const_by('impute_test', id, date, val, 0.0) WHERE value_col IS NULL;
+SELECT COUNT(*) FROM ts_fill_nulls_const_by('impute_test', id, date, val, 0.0) WHERE filled_value IS NULL;
 ----
 0
 
 # Verify filled values
 query R
-SELECT SUM(value_col) FROM ts_fill_nulls_const_by('impute_test', id, date, val, 0.0);
+SELECT SUM(filled_value) FROM ts_fill_nulls_const_by('impute_test', id, date, val, 0.0);
 ----
 9.0
 
@@ -52,13 +50,13 @@ SELECT COUNT(*) FROM ts_fill_nulls_forward_by('impute_test', id, date, val);
 
 # Test no NULLs remain after fill
 query I
-SELECT COUNT(*) FROM ts_fill_nulls_forward_by('impute_test', id, date, val) WHERE value_col IS NULL;
+SELECT COUNT(*) FROM ts_fill_nulls_forward_by('impute_test', id, date, val) WHERE filled_value IS NULL;
 ----
 0
 
 # Verify forward fill carries previous value
 query R
-SELECT value_col FROM ts_fill_nulls_forward_by('impute_test', id, date, val) ORDER BY date LIMIT 1 OFFSET 1;
+SELECT filled_value FROM ts_fill_nulls_forward_by('impute_test', id, date, val) ORDER BY date LIMIT 1 OFFSET 1;
 ----
 1.0
 
@@ -74,13 +72,13 @@ SELECT COUNT(*) FROM ts_fill_nulls_backward_by('impute_test', id, date, val);
 
 # Test no NULLs remain after fill
 query I
-SELECT COUNT(*) FROM ts_fill_nulls_backward_by('impute_test', id, date, val) WHERE value_col IS NULL;
+SELECT COUNT(*) FROM ts_fill_nulls_backward_by('impute_test', id, date, val) WHERE filled_value IS NULL;
 ----
 0
 
 # Verify backward fill uses next value
 query R
-SELECT value_col FROM ts_fill_nulls_backward_by('impute_test', id, date, val) ORDER BY date LIMIT 1 OFFSET 1;
+SELECT filled_value FROM ts_fill_nulls_backward_by('impute_test', id, date, val) ORDER BY date LIMIT 1 OFFSET 1;
 ----
 3.0
 
@@ -96,13 +94,13 @@ SELECT COUNT(*) FROM ts_fill_nulls_mean_by('impute_test', id, date, val);
 
 # Test no NULLs remain after fill
 query I
-SELECT COUNT(*) FROM ts_fill_nulls_mean_by('impute_test', id, date, val) WHERE value_col IS NULL;
+SELECT COUNT(*) FROM ts_fill_nulls_mean_by('impute_test', id, date, val) WHERE filled_value IS NULL;
 ----
 0
 
 # Verify mean fill uses series mean (mean of 1,3,5 = 3)
 query R
-SELECT value_col FROM ts_fill_nulls_mean_by('impute_test', id, date, val) ORDER BY date LIMIT 1 OFFSET 1;
+SELECT filled_value FROM ts_fill_nulls_mean_by('impute_test', id, date, val) ORDER BY date LIMIT 1 OFFSET 1;
 ----
 3.0
 
@@ -119,6 +117,50 @@ SELECT
     (SELECT COUNT(*) FROM ts_fill_nulls_mean_by('impute_test', id, date, val));
 ----
 5	5	5	5
+
+#######################################
+# Column Preservation Tests
+#######################################
+
+# Create table with extra columns
+statement ok
+CREATE TABLE impute_extra AS
+SELECT 'A' AS id, '2023-01-01'::TIMESTAMP AS date, 1.0 AS val, 'x' AS extra_col, 100 AS num_col
+UNION ALL SELECT 'A', '2023-01-02', NULL, 'y', 200;
+
+# Test that extra columns are preserved by ts_fill_nulls_const_by
+query I
+SELECT COUNT(*) FROM ts_fill_nulls_const_by('impute_extra', id, date, val, 0.0) WHERE extra_col IS NOT NULL AND num_col IS NOT NULL;
+----
+2
+
+# Test that extra columns are preserved by ts_fill_nulls_forward_by
+query I
+SELECT COUNT(*) FROM ts_fill_nulls_forward_by('impute_extra', id, date, val) WHERE extra_col IS NOT NULL AND num_col IS NOT NULL;
+----
+2
+
+# Test that extra columns are preserved by ts_fill_nulls_backward_by
+query I
+SELECT COUNT(*) FROM ts_fill_nulls_backward_by('impute_extra', id, date, val) WHERE extra_col IS NOT NULL AND num_col IS NOT NULL;
+----
+2
+
+# Test that extra columns are preserved by ts_fill_nulls_mean_by
+query I
+SELECT COUNT(*) FROM ts_fill_nulls_mean_by('impute_extra', id, date, val) WHERE extra_col IS NOT NULL AND num_col IS NOT NULL;
+----
+2
+
+# Verify column values are preserved correctly
+query TI
+SELECT extra_col, num_col FROM ts_fill_nulls_const_by('impute_extra', id, date, val, 0.0) ORDER BY date;
+----
+x	100
+y	200
+
+statement ok
+DROP TABLE impute_extra;
 
 #######################################
 # Cleanup
