@@ -139,7 +139,7 @@ SELECT _ts_stats(NULL) IS NULL;
 true
 
 #######################################
-# ts_stats_by - Alias Test
+# ts_stats_by - Native Table Function Tests (Issue #147)
 #######################################
 
 statement ok
@@ -150,14 +150,151 @@ SELECT
     (i % 10 + 1)::DOUBLE AS value
 FROM range(1, 21) t(i);
 
-# Test ts_stats_by alias works
+# Test ts_stats_by works
 query I
 SELECT count(*) FROM ts_stats_by('test_stats_by', group_id, date, value, '1d');
 ----
 2
 
+# Test column name is preserved (Issue #147 bug 1)
+# The first column should be named 'group_id', not 'id'
+# We verify this by selecting the column by name
+query T
+SELECT group_id FROM ts_stats_by('test_stats_by', group_id, date, value, '1d') ORDER BY group_id LIMIT 1;
+----
+A
+
 statement ok
 DROP TABLE test_stats_by;
+
+#######################################
+# ts_stats_by - Monthly Frequency Tests (Issue #147 bugs 2 & 3)
+#######################################
+
+# Create monthly data: Jan 2023 through Dec 2023 (12 months, no gaps)
+statement ok
+CREATE TABLE test_monthly_complete AS
+SELECT
+    'series_1' AS product_id,
+    ('2023-' || LPAD(CAST(i AS VARCHAR), 2, '0') || '-15')::TIMESTAMP AS date,
+    (100 + i * 10)::DOUBLE AS sales
+FROM generate_series(1, 12) AS t(i);
+
+# Test monthly expected_length - should be 12 (12 months from Jan to Dec)
+query II
+SELECT length, expected_length
+FROM ts_stats_by('test_monthly_complete', product_id, date, sales, '1mo');
+----
+12	12
+
+# Test monthly n_gaps - should be 0 (no missing months)
+query I
+SELECT n_gaps
+FROM ts_stats_by('test_monthly_complete', product_id, date, sales, '1mo');
+----
+0
+
+statement ok
+DROP TABLE test_monthly_complete;
+
+# Create monthly data with gaps: Jan, Feb, Mar, May, Jun (missing April)
+statement ok
+CREATE TABLE test_monthly_gaps AS
+SELECT
+    'series_1' AS product_id,
+    ('2023-' || LPAD(CAST(m AS VARCHAR), 2, '0') || '-15')::TIMESTAMP AS date,
+    (100 + m * 10)::DOUBLE AS sales
+FROM (VALUES (1), (2), (3), (5), (6)) AS t(m);
+
+# Test monthly expected_length with gaps - should be 6 (Jan to Jun = 6 months)
+query II
+SELECT length, expected_length
+FROM ts_stats_by('test_monthly_gaps', product_id, date, sales, '1mo');
+----
+5	6
+
+# Test monthly n_gaps - should be 1 (April is missing)
+query I
+SELECT n_gaps
+FROM ts_stats_by('test_monthly_gaps', product_id, date, sales, '1mo');
+----
+1
+
+statement ok
+DROP TABLE test_monthly_gaps;
+
+# Create quarterly data: Q1-Q4 2023 (4 quarters, no gaps)
+statement ok
+CREATE TABLE test_quarterly AS
+SELECT
+    'product_A' AS sku,
+    ('2023-' || LPAD(CAST((q-1) * 3 + 1 AS VARCHAR), 2, '0') || '-01')::TIMESTAMP AS quarter_start,
+    (1000 + q * 100)::DOUBLE AS revenue
+FROM generate_series(1, 4) AS t(q);
+
+# Test quarterly expected_length - should be 4
+query II
+SELECT length, expected_length
+FROM ts_stats_by('test_quarterly', sku, quarter_start, revenue, '1q');
+----
+4	4
+
+# Test quarterly n_gaps - should be 0
+query I
+SELECT n_gaps
+FROM ts_stats_by('test_quarterly', sku, quarter_start, revenue, '1q');
+----
+0
+
+statement ok
+DROP TABLE test_quarterly;
+
+# Create yearly data: 2020-2024 with 2022 missing (gap)
+statement ok
+CREATE TABLE test_yearly_gaps AS
+SELECT
+    'region_1' AS region,
+    (CAST(y AS VARCHAR) || '-06-15')::TIMESTAMP AS year_mid,
+    (50000 + (y - 2020) * 5000)::DOUBLE AS annual_sales
+FROM (VALUES (2020), (2021), (2023), (2024)) AS t(y);
+
+# Test yearly expected_length with gaps - should be 5 (2020 to 2024 = 5 years)
+query II
+SELECT length, expected_length
+FROM ts_stats_by('test_yearly_gaps', region, year_mid, annual_sales, '1y');
+----
+4	5
+
+# Test yearly n_gaps - should be 1 (2022 is missing)
+query I
+SELECT n_gaps
+FROM ts_stats_by('test_yearly_gaps', region, year_mid, annual_sales, '1y');
+----
+1
+
+statement ok
+DROP TABLE test_yearly_gaps;
+
+#######################################
+# ts_stats_by - Column Name Preservation with Different Names
+#######################################
+
+statement ok
+CREATE TABLE test_custom_cols AS
+SELECT
+    'SKU_' || i AS my_custom_product_name,
+    '2023-01-01'::TIMESTAMP + INTERVAL i DAY AS transaction_date,
+    (100 + i)::DOUBLE AS amount
+FROM generate_series(1, 5) AS t(i);
+
+# Verify the output column preserves the input name 'my_custom_product_name'
+query T
+SELECT my_custom_product_name FROM ts_stats_by('test_custom_cols', my_custom_product_name, transaction_date, amount, '1d') ORDER BY my_custom_product_name LIMIT 1;
+----
+SKU_1
+
+statement ok
+DROP TABLE test_custom_cols;
 
 
 #######################################

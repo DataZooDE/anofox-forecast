@@ -3,6 +3,21 @@
 //! Provides ts_stats functionality that computes 24 metrics per series.
 
 use crate::error::Result;
+use chrono::{Datelike, NaiveDateTime};
+
+/// Frequency type for calendar vs fixed frequencies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FrequencyType {
+    /// Fixed duration frequencies (daily, hourly, weekly, etc.)
+    #[default]
+    Fixed,
+    /// Monthly frequency - variable duration (28-31 days)
+    Monthly,
+    /// Quarterly frequency - variable duration (3 months)
+    Quarterly,
+    /// Yearly frequency - variable duration (365 or 366 days)
+    Yearly,
+}
 
 /// Time series statistics result containing 34 metrics.
 #[derive(Debug, Clone, Default)]
@@ -277,31 +292,170 @@ pub fn compute_ts_stats_with_dates(
     dates: &[i64],
     frequency_micros: i64,
 ) -> Result<TsStats> {
+    // Delegate to the new function with Fixed frequency type for backward compatibility
+    compute_ts_stats_with_dates_and_type(series, dates, frequency_micros, FrequencyType::Fixed)
+}
+
+/// Compute time series statistics with date information and frequency type for gap detection.
+///
+/// This version properly handles calendar frequencies (monthly, quarterly, yearly) which
+/// have variable durations that cannot be accurately represented in microseconds.
+///
+/// # Arguments
+/// * `series` - A slice of optional f64 values (None represents NULL)
+/// * `dates` - A slice of timestamps in microseconds (must be same length as series)
+/// * `frequency_micros` - Expected frequency between observations in microseconds (used for Fixed type)
+/// * `frequency_type` - The type of frequency (Fixed, Monthly, Quarterly, Yearly)
+///
+/// # Returns
+/// * `Result<TsStats>` - Statistics for the series including expected_length and n_gaps
+pub fn compute_ts_stats_with_dates_and_type(
+    series: &[Option<f64>],
+    dates: &[i64],
+    frequency_micros: i64,
+    frequency_type: FrequencyType,
+) -> Result<TsStats> {
     // First compute base stats
     let mut stats = compute_ts_stats(series)?;
 
-    // Then compute date-based metrics if we have valid dates and frequency
-    if !dates.is_empty() && frequency_micros > 0 {
+    // Then compute date-based metrics if we have valid dates
+    if !dates.is_empty() {
         // Sort dates to handle potential out-of-order data
         let mut sorted_dates = dates.to_vec();
         sorted_dates.sort();
 
-        // Compute expected length
+        // Compute expected length and gaps based on frequency type
         if sorted_dates.len() >= 2 {
             let first = sorted_dates[0];
             let last = sorted_dates[sorted_dates.len() - 1];
-            let duration = last - first;
-            let expected = ((duration / frequency_micros) + 1) as usize;
-            stats.expected_length = Some(expected);
+
+            match frequency_type {
+                FrequencyType::Monthly => {
+                    stats.expected_length = Some(compute_expected_months(first, last));
+                    stats.n_gaps = Some(count_monthly_gaps(&sorted_dates));
+                }
+                FrequencyType::Quarterly => {
+                    stats.expected_length = Some(compute_expected_quarters(first, last));
+                    stats.n_gaps = Some(count_quarterly_gaps(&sorted_dates));
+                }
+                FrequencyType::Yearly => {
+                    stats.expected_length = Some(compute_expected_years(first, last));
+                    stats.n_gaps = Some(count_yearly_gaps(&sorted_dates));
+                }
+                FrequencyType::Fixed => {
+                    if frequency_micros > 0 {
+                        let duration = last - first;
+                        let expected = ((duration / frequency_micros) + 1) as usize;
+                        stats.expected_length = Some(expected);
+                        stats.n_gaps =
+                            Some(count_gaps_with_frequency(&sorted_dates, frequency_micros));
+                    }
+                }
+            }
         } else {
             stats.expected_length = Some(sorted_dates.len());
+            stats.n_gaps = Some(0);
         }
-
-        // Compute number of gaps
-        stats.n_gaps = Some(count_gaps_with_frequency(&sorted_dates, frequency_micros));
     }
 
     Ok(stats)
+}
+
+/// Convert microseconds since epoch to NaiveDateTime.
+fn micros_to_datetime(micros: i64) -> NaiveDateTime {
+    let secs = micros / 1_000_000;
+    let nsecs = ((micros % 1_000_000) * 1000) as u32;
+    chrono::DateTime::from_timestamp(secs, nsecs)
+        .map(|dt| dt.naive_utc())
+        .unwrap_or_default()
+}
+
+/// Compute expected number of monthly observations between two timestamps.
+fn compute_expected_months(first_micros: i64, last_micros: i64) -> usize {
+    let first = micros_to_datetime(first_micros);
+    let last = micros_to_datetime(last_micros);
+
+    let first_months = first.year() * 12 + first.month() as i32;
+    let last_months = last.year() * 12 + last.month() as i32;
+
+    ((last_months - first_months) + 1) as usize
+}
+
+/// Compute expected number of quarterly observations between two timestamps.
+fn compute_expected_quarters(first_micros: i64, last_micros: i64) -> usize {
+    let first = micros_to_datetime(first_micros);
+    let last = micros_to_datetime(last_micros);
+
+    let first_quarters = first.year() * 4 + ((first.month() - 1) / 3) as i32;
+    let last_quarters = last.year() * 4 + ((last.month() - 1) / 3) as i32;
+
+    ((last_quarters - first_quarters) + 1) as usize
+}
+
+/// Compute expected number of yearly observations between two timestamps.
+fn compute_expected_years(first_micros: i64, last_micros: i64) -> usize {
+    let first = micros_to_datetime(first_micros);
+    let last = micros_to_datetime(last_micros);
+
+    ((last.year() - first.year()) + 1) as usize
+}
+
+/// Count gaps in monthly data.
+/// A gap is when consecutive observations span more than 1 month.
+fn count_monthly_gaps(sorted_dates: &[i64]) -> usize {
+    if sorted_dates.len() < 2 {
+        return 0;
+    }
+
+    sorted_dates
+        .windows(2)
+        .filter(|w| {
+            let d1 = micros_to_datetime(w[0]);
+            let d2 = micros_to_datetime(w[1]);
+            let months1 = d1.year() * 12 + d1.month() as i32;
+            let months2 = d2.year() * 12 + d2.month() as i32;
+            // Gap if more than 1 month difference
+            (months2 - months1) > 1
+        })
+        .count()
+}
+
+/// Count gaps in quarterly data.
+/// A gap is when consecutive observations span more than 1 quarter.
+fn count_quarterly_gaps(sorted_dates: &[i64]) -> usize {
+    if sorted_dates.len() < 2 {
+        return 0;
+    }
+
+    sorted_dates
+        .windows(2)
+        .filter(|w| {
+            let d1 = micros_to_datetime(w[0]);
+            let d2 = micros_to_datetime(w[1]);
+            let q1 = d1.year() * 4 + ((d1.month() - 1) / 3) as i32;
+            let q2 = d2.year() * 4 + ((d2.month() - 1) / 3) as i32;
+            // Gap if more than 1 quarter difference
+            (q2 - q1) > 1
+        })
+        .count()
+}
+
+/// Count gaps in yearly data.
+/// A gap is when consecutive observations span more than 1 year.
+fn count_yearly_gaps(sorted_dates: &[i64]) -> usize {
+    if sorted_dates.len() < 2 {
+        return 0;
+    }
+
+    sorted_dates
+        .windows(2)
+        .filter(|w| {
+            let d1 = micros_to_datetime(w[0]);
+            let d2 = micros_to_datetime(w[1]);
+            // Gap if more than 1 year difference
+            (d2.year() - d1.year()) > 1
+        })
+        .count()
 }
 
 /// Count gaps in a date series given an explicit frequency.

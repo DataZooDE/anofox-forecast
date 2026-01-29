@@ -84,6 +84,32 @@ typedef enum ErrorCode {
 } ErrorCode;
 
 /**
+ * Frequency type enumeration for calendar vs fixed frequencies.
+ *
+ * Calendar frequencies (monthly, quarterly, yearly) have variable durations
+ * and require special handling for expected_length and gap detection.
+ */
+typedef enum FrequencyType {
+    /**
+     * Fixed duration frequencies (daily, hourly, weekly, etc.)
+     * These have consistent microsecond durations.
+     */
+    FIXED = 0,
+    /**
+     * Monthly frequency - variable duration (28-31 days)
+     */
+    MONTHLY = 1,
+    /**
+     * Quarterly frequency - variable duration (3 months)
+     */
+    QUARTERLY = 2,
+    /**
+     * Yearly frequency - variable duration (365 or 366 days)
+     */
+    YEARLY = 3,
+} FrequencyType;
+
+/**
  * Time series statistics result (34 metrics).
  */
 typedef struct TsStatsResult {
@@ -1521,6 +1547,25 @@ bool anofox_ts_stats_with_dates(const double *values,
                                 int64_t frequency_micros,
                                 struct TsStatsResult *out_result,
                                 struct AnofoxError *out_error);
+
+/**
+ * Compute time series statistics with date information and frequency type for gap detection.
+ *
+ * This version properly handles calendar frequencies (monthly, quarterly, yearly) which
+ * have variable durations that cannot be accurately represented in microseconds.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ * The dates array must have the same length as the values array.
+ */
+bool anofox_ts_stats_with_dates_and_type(const double *values,
+                                         const uint64_t *validity,
+                                         const int64_t *dates,
+                                         size_t length,
+                                         int64_t frequency_micros,
+                                         enum FrequencyType frequency_type,
+                                         struct TsStatsResult *out_result,
+                                         struct AnofoxError *out_error);
 
 /**
  * Mean Absolute Error

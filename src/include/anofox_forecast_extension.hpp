@@ -6,6 +6,7 @@ namespace duckdb {
 
 // Forward declarations for function registration
 void RegisterTsStatsFunction(ExtensionLoader &loader);
+void RegisterTsStatsByFunction(ExtensionLoader &loader);
 void RegisterTsQualityReportFunction(ExtensionLoader &loader);
 void RegisterTsStatsSummaryFunction(ExtensionLoader &loader);
 void RegisterTsDataQualityFunction(ExtensionLoader &loader);

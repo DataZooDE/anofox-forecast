@@ -235,6 +235,69 @@ pub unsafe extern "C" fn anofox_ts_stats_with_dates(
     }
 }
 
+/// Compute time series statistics with date information and frequency type for gap detection.
+///
+/// This version properly handles calendar frequencies (monthly, quarterly, yearly) which
+/// have variable durations that cannot be accurately represented in microseconds.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+/// The dates array must have the same length as the values array.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_stats_with_dates_and_type(
+    values: *const c_double,
+    validity: *const u64,
+    dates: *const i64,
+    length: size_t,
+    frequency_micros: i64,
+    frequency_type: FrequencyType,
+    out_result: *mut TsStatsResult,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    let ptrs = &[
+        values as *const core::ffi::c_void,
+        dates as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
+        return false;
+    }
+
+    if length == 0 {
+        *out_result = TsStatsResult::default();
+        return true;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let series = build_series(values, validity, length);
+        let dates_slice = std::slice::from_raw_parts(dates, length);
+        let freq_type: anofox_fcst_core::FrequencyType = frequency_type.into();
+        anofox_fcst_core::compute_ts_stats_with_dates_and_type(
+            &series,
+            dates_slice,
+            frequency_micros,
+            freq_type,
+        )
+    }));
+
+    match result {
+        Ok(Ok(stats)) => {
+            *out_result = stats.into();
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in Rust code");
+            false
+        }
+    }
+}
+
 // ============================================================================
 // Metric Functions
 // ============================================================================
