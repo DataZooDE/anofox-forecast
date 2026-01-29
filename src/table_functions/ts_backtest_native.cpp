@@ -724,15 +724,22 @@ static void ProcessGroupFold(
         return;
     }
 
-    // Generate forecast dates and match with test data
-    for (size_t h = 0; h < fcst.n_forecasts; h++) {
-        int64_t forecast_date = last_train_date + (h + 1) * freq_micros;
+    // Convert test_data map to sorted vector for position-based matching
+    // This handles calendar frequencies (monthly, quarterly, yearly) where
+    // calculated dates don't exactly match actual data timestamps
+    vector<std::pair<int64_t, double>> sorted_test;
+    sorted_test.reserve(test_data.size());
+    for (const auto &[dt, val] : test_data) {
+        sorted_test.push_back({dt, val});
+    }
+    // Map is already sorted by key, but ensure it's sorted
+    std::sort(sorted_test.begin(), sorted_test.end());
 
-        // Find matching test actual
-        auto it = test_data.find(forecast_date);
-        if (it == test_data.end()) continue;
-
-        double actual = it->second;
+    // Match forecasts with test data by position (forecast[h] -> test[h])
+    size_t n_matches = std::min(static_cast<size_t>(fcst.n_forecasts), sorted_test.size());
+    for (size_t h = 0; h < n_matches; h++) {
+        int64_t actual_date = sorted_test[h].first;
+        double actual = sorted_test[h].second;
         double forecast_val = fcst.point_forecasts[h];
         double lower = fcst.lower_bounds ? fcst.lower_bounds[h] : 0.0;
         double upper = fcst.upper_bounds ? fcst.upper_bounds[h] : 0.0;
@@ -741,7 +748,7 @@ static void ProcessGroupFold(
         res.fold_id = fold.fold_id;
         res.group_key = group_key;
         res.group_value = grp.group_value;
-        res.date = forecast_date;
+        res.date = actual_date;  // Use actual test date, not calculated
         res.forecast = forecast_val;
         res.actual = actual;
         res.error = forecast_val - actual;
