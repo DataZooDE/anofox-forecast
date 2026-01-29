@@ -294,6 +294,242 @@ SELECT COUNT(*) FROM ts_backtest_auto_by(
 42
 
 #######################################
+# ts_backtest_auto - All Frequency Tests (GH#151)
+# Tests ensure backtest works correctly for all supported frequencies:
+# - Fixed: hourly (1h), daily (1d), weekly (1w)
+# - Calendar: monthly (1mo), quarterly (1q), yearly (1y)
+# Calendar frequencies have irregular intervals that don't align with
+# fixed-interval calculations (28-31 days for months, etc.)
+#######################################
+
+# --- Hourly Frequency Tests ---
+
+statement ok
+CREATE TABLE hourly_data AS
+SELECT
+    'sensor_A' AS sensor_id,
+    '2023-01-01'::TIMESTAMP + INTERVAL (i) HOUR AS ts,
+    100.0 + i AS reading
+FROM generate_series(0, 167) t(i);
+
+# Test hourly frequency returns results
+query I
+SELECT COUNT(*) FROM ts_backtest_auto_by(
+    'hourly_data', sensor_id, ts, reading, 24, 1, '1h', MAP{'method': 'Naive'}
+);
+----
+24
+
+# Test hourly with multiple folds
+query I
+SELECT COUNT(DISTINCT fold_id) FROM ts_backtest_auto_by(
+    'hourly_data', sensor_id, ts, reading, 12, 2, '1h', MAP{'method': 'Naive'}
+);
+----
+2
+
+statement ok
+DROP TABLE hourly_data;
+
+# --- Daily Frequency Tests (already covered in main tests, verify here) ---
+
+statement ok
+CREATE TABLE daily_data AS
+SELECT
+    'store_A' AS store_id,
+    '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY AS dt,
+    100.0 + i AS sales
+FROM generate_series(0, 99) t(i);
+
+# Test daily frequency returns expected rows
+query I
+SELECT COUNT(*) FROM ts_backtest_auto_by(
+    'daily_data', store_id, dt, sales, 7, 1, '1d', MAP{'method': 'Naive'}
+);
+----
+7
+
+statement ok
+DROP TABLE daily_data;
+
+# --- Weekly Frequency Tests ---
+
+statement ok
+CREATE TABLE weekly_data AS
+SELECT
+    'region_A' AS region_id,
+    '2023-01-01'::TIMESTAMP + INTERVAL (i) WEEK AS week_start,
+    100.0 + i * 5 AS metric
+FROM generate_series(0, 51) t(i);
+
+# Test weekly frequency returns results
+query I
+SELECT COUNT(*) FROM ts_backtest_auto_by(
+    'weekly_data', region_id, week_start, metric, 4, 1, '1w', MAP{'method': 'Naive'}
+);
+----
+4
+
+# Test weekly with multiple folds
+query I
+SELECT COUNT(DISTINCT fold_id) FROM ts_backtest_auto_by(
+    'weekly_data', region_id, week_start, metric, 4, 3, '1w', MAP{'method': 'Naive'}
+);
+----
+3
+
+statement ok
+DROP TABLE weekly_data;
+
+# --- Monthly Frequency Tests (Calendar - irregular intervals) ---
+
+statement ok
+CREATE TABLE monthly_data AS
+SELECT
+    'product_A' AS item_id,
+    '2022-01-01'::TIMESTAMP + INTERVAL (i) MONTH AS ds,
+    100.0 + i * 2 AS value
+FROM generate_series(0, 35) t(i);
+
+# Test monthly frequency returns results (not 0 rows - was bug in GH#151)
+query I
+SELECT COUNT(*) > 0 FROM ts_backtest_auto_by(
+    'monthly_data', item_id, ds, value, 6, 1, '1mo', MAP{'method': 'Naive'}
+);
+----
+true
+
+# Test monthly frequency returns expected number of results
+query I
+SELECT COUNT(*) FROM ts_backtest_auto_by(
+    'monthly_data', item_id, ds, value, 6, 1, '1mo', MAP{'method': 'Naive'}
+);
+----
+6
+
+# Test monthly frequency with multiple folds
+query I
+SELECT COUNT(DISTINCT fold_id) FROM ts_backtest_auto_by(
+    'monthly_data', item_id, ds, value, 3, 2, '1mo', MAP{'method': 'Naive'}
+);
+----
+2
+
+# Test monthly data returns actual calendar dates (1st of month, not calculated dates)
+query I
+SELECT COUNT(*) FROM ts_backtest_auto_by(
+    'monthly_data', item_id, ds, value, 3, 1, '1mo', MAP{'method': 'Naive'}
+) WHERE EXTRACT(DAY FROM date) = 1;
+----
+3
+
+# Test column name preserved
+query I
+SELECT COUNT(DISTINCT item_id) FROM ts_backtest_auto_by(
+    'monthly_data', item_id, ds, value, 3, 1, '1mo', MAP{'method': 'Naive'}
+);
+----
+1
+
+statement ok
+DROP TABLE monthly_data;
+
+# --- Quarterly Frequency Tests (Calendar - irregular intervals) ---
+
+statement ok
+CREATE TABLE quarterly_data AS
+SELECT
+    'company_A' AS company_id,
+    '2018-01-01'::TIMESTAMP + INTERVAL (i * 3) MONTH AS quarter_start,
+    1000.0 + i * 50 AS revenue
+FROM generate_series(0, 23) t(i);
+
+# Test quarterly frequency returns results (not 0 rows)
+query I
+SELECT COUNT(*) > 0 FROM ts_backtest_auto_by(
+    'quarterly_data', company_id, quarter_start, revenue, 4, 1, '1q', MAP{'method': 'Naive'}
+);
+----
+true
+
+# Test quarterly returns expected rows
+query I
+SELECT COUNT(*) FROM ts_backtest_auto_by(
+    'quarterly_data', company_id, quarter_start, revenue, 4, 1, '1q', MAP{'method': 'Naive'}
+);
+----
+4
+
+# Test quarterly data returns actual quarter start dates (1st of quarter month)
+query I
+SELECT COUNT(*) FROM ts_backtest_auto_by(
+    'quarterly_data', company_id, quarter_start, revenue, 2, 1, '1q', MAP{'method': 'Naive'}
+) WHERE EXTRACT(DAY FROM date) = 1 AND EXTRACT(MONTH FROM date) IN (1, 4, 7, 10);
+----
+2
+
+statement ok
+DROP TABLE quarterly_data;
+
+# --- Yearly Frequency Tests (Calendar - irregular intervals due to leap years) ---
+
+statement ok
+CREATE TABLE yearly_data AS
+SELECT
+    'country_A' AS country_id,
+    '2005-01-01'::TIMESTAMP + INTERVAL (i) YEAR AS year_start,
+    10000.0 + i * 500 AS gdp
+FROM generate_series(0, 19) t(i);
+
+# Test yearly frequency returns results (not 0 rows)
+query I
+SELECT COUNT(*) > 0 FROM ts_backtest_auto_by(
+    'yearly_data', country_id, year_start, gdp, 3, 1, '1y', MAP{'method': 'Naive'}
+);
+----
+true
+
+# Test yearly returns expected rows
+query I
+SELECT COUNT(*) FROM ts_backtest_auto_by(
+    'yearly_data', country_id, year_start, gdp, 3, 1, '1y', MAP{'method': 'Naive'}
+);
+----
+3
+
+# Test yearly data returns actual year start dates (Jan 1st)
+query I
+SELECT COUNT(*) FROM ts_backtest_auto_by(
+    'yearly_data', country_id, year_start, gdp, 2, 1, '1y', MAP{'method': 'Naive'}
+) WHERE EXTRACT(DAY FROM date) = 1 AND EXTRACT(MONTH FROM date) = 1;
+----
+2
+
+statement ok
+DROP TABLE yearly_data;
+
+# --- Multi-period Frequency Tests (e.g., 2d, 4h, 2w) ---
+
+statement ok
+CREATE TABLE biweekly_data AS
+SELECT
+    'team_A' AS team_id,
+    '2023-01-01'::TIMESTAMP + INTERVAL (i * 2) WEEK AS sprint_start,
+    50.0 + i * 3 AS velocity
+FROM generate_series(0, 25) t(i);
+
+# Test 2-week frequency returns results
+query I
+SELECT COUNT(*) FROM ts_backtest_auto_by(
+    'biweekly_data', team_id, sprint_start, velocity, 3, 1, '2w', MAP{'method': 'Naive'}
+);
+----
+3
+
+statement ok
+DROP TABLE biweekly_data;
+
+#######################################
 # Cleanup
 #######################################
 

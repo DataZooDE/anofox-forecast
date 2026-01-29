@@ -13,6 +13,26 @@ Time series cross-validation requires special handling because data has temporal
 - Compare model performance across multiple time periods
 - Prevent data leakage by ensuring test data is always in the future
 
+### Data Preparation Requirement
+
+**Important:** Cross-validation functions assume your data is **pre-cleaned**:
+- No missing dates/gaps in the time series
+- Consistent frequency throughout each series
+- Data sorted by date within each group
+
+These functions use **position-based fold assignment** (not date arithmetic), which correctly handles all frequency types including calendar-based frequencies (monthly, quarterly, yearly) where intervals are irregular.
+
+If your data has gaps or irregular frequency, use [`ts_fill_gaps_by`](04-data-preparation.md#ts_fill_gaps_by) to prepare it before running cross-validation:
+
+```sql
+-- Prepare data: fill gaps and ensure consistent frequency
+CREATE TABLE prepared_data AS
+SELECT * FROM ts_fill_gaps_by('raw_data', series_id, date, value, '1mo', MAP{});
+
+-- Then run backtest on prepared data
+SELECT * FROM ts_backtest_auto_by('prepared_data', series_id, date, value, 6, 3, '1mo', MAP{});
+```
+
 ---
 
 ## Quick Start
