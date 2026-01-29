@@ -4,7 +4,7 @@
 
 ## Overview
 
-Changepoint detection identifies points in time where the statistical properties of a time series change significantly.
+Changepoint detection identifies points in time where the statistical properties of a time series change significantly. The function returns row-level results, providing changepoint information for each data point in the input.
 
 **Use this document to:**
 - Detect structural breaks in mean, variance, or trend
@@ -20,7 +20,7 @@ Changepoint detection identifies points in time where the statistical properties
 Detect changepoints using table macros:
 
 ```sql
--- Multiple series
+-- Multiple series with row-level output
 SELECT * FROM ts_detect_changepoints_by(
     'sales',
     product_id,
@@ -28,6 +28,16 @@ SELECT * FROM ts_detect_changepoints_by(
     value,
     {'hazard_lambda': 100}
 );
+
+-- Filter to only changepoints
+SELECT * FROM ts_detect_changepoints_by(
+    'sales',
+    product_id,
+    date,
+    value,
+    {'hazard_lambda': 100}
+)
+WHERE is_changepoint = true;
 ```
 
 ---
@@ -36,7 +46,7 @@ SELECT * FROM ts_detect_changepoints_by(
 
 ### ts_detect_changepoints_by
 
-Detect changepoints for each group in a table.
+Detect changepoints for each group in a table. Returns one row per data point with changepoint indicators.
 
 **Signature:**
 ```sql
@@ -53,19 +63,58 @@ ts_detect_changepoints_by(source, group_col, date_col, value_col, params)
 | `params` | MAP | Configuration options |
 
 **Parameters in MAP:**
-- `hazard_lambda`: Hazard rate parameter (default: 250.0)
-- `include_probabilities`: Include per-point probabilities (default: false)
+- `hazard_lambda`: Hazard rate parameter (default: 250.0). Lower values detect more changepoints.
+
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `<group_col>` | (same as input) | Series identifier (column name preserved from input) |
+| `<date_col>` | TIMESTAMP | Date/timestamp (column name preserved from input) |
+| `is_changepoint` | BOOLEAN | Whether this point is a detected changepoint |
+| `changepoint_probability` | DOUBLE | Probability of changepoint at this point (0-1) |
 
 **Example:**
 ```sql
+-- Detect changepoints with custom sensitivity
 SELECT * FROM ts_detect_changepoints_by(
     'sales',
     product_id,
     date,
-    value,
+    quantity,
     {'hazard_lambda': 100}
 );
+
+-- Find all changepoints with their dates
+SELECT
+    product_id,
+    date,
+    quantity,
+    changepoint_probability
+FROM ts_detect_changepoints_by(
+    'sales',
+    product_id,
+    date,
+    quantity,
+    {'hazard_lambda': 100}
+)
+WHERE is_changepoint = true
+ORDER BY product_id, date;
+
+-- Count changepoints per series
+SELECT
+    product_id,
+    COUNT(*) FILTER (WHERE is_changepoint) AS n_changepoints
+FROM ts_detect_changepoints_by(
+    'sales',
+    product_id,
+    date,
+    quantity,
+    {'hazard_lambda': 100}
+)
+GROUP BY product_id;
 ```
+
+> **Alias:** `ts_detect_changepoints` is an alias for `ts_detect_changepoints_by`
 
 ---
 
