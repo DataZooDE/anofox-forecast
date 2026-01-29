@@ -17,6 +17,12 @@
 --   - Works online (streaming) - no need to see future data
 --   - Adapts to different series characteristics automatically
 --
+-- ts_detect_changepoints_by returns row-level results:
+--   - group_col (preserved name): Series identifier
+--   - date_col (preserved name): Timestamp for each point
+--   - is_changepoint: Boolean indicating if point is a changepoint
+--   - changepoint_probability: Probability score (0-1)
+--
 -- Examples included:
 --   1. Load M5 data (full dataset)
 --   2. Basic changepoint detection on sample items
@@ -99,19 +105,13 @@ WHERE item_id IN (
 -- Higher values = fewer changepoints expected (more conservative)
 SELECT 'Running changepoint detection on 10 sample items...' AS step;
 
-CREATE OR REPLACE TABLE sample_changepoints AS
-SELECT
-    id AS item_id,
-    (changepoints).changepoint_indices AS cp_indices,
-    (changepoints).is_changepoint AS is_changepoint_arr
-FROM ts_detect_changepoints_by('m5_sample', item_id, ds, y, MAP{'hazard_lambda': '50'});
-
 -- Show changepoint counts per item
 SELECT
     item_id,
-    list_count(cp_indices) AS n_changepoints,
-    list_count(is_changepoint_arr) AS n_observations
-FROM sample_changepoints
+    COUNT(*) FILTER (WHERE is_changepoint) AS n_changepoints,
+    COUNT(*) AS n_observations
+FROM ts_detect_changepoints_by('m5_sample', item_id, ds, y, MAP{'hazard_lambda': '50'})
+GROUP BY item_id
 ORDER BY n_changepoints DESC;
 
 -- ============================================================================
@@ -136,19 +136,22 @@ SELECT 'Comparing hazard_lambda values on sample data...' AS step;
 
 -- Run detection at each sensitivity level
 CREATE OR REPLACE TABLE cp_sensitive AS
-SELECT id AS item_id, 30 AS hazard_lambda, 'sensitive' AS sensitivity,
-       list_count((changepoints).changepoint_indices) AS n_changepoints
-FROM ts_detect_changepoints_by('m5_sample', item_id, ds, y, MAP{'hazard_lambda': '30'});
+SELECT item_id, 30 AS hazard_lambda, 'sensitive' AS sensitivity,
+       COUNT(*) FILTER (WHERE is_changepoint) AS n_changepoints
+FROM ts_detect_changepoints_by('m5_sample', item_id, ds, y, MAP{'hazard_lambda': '30'})
+GROUP BY item_id;
 
 CREATE OR REPLACE TABLE cp_balanced AS
-SELECT id AS item_id, 60 AS hazard_lambda, 'balanced' AS sensitivity,
-       list_count((changepoints).changepoint_indices) AS n_changepoints
-FROM ts_detect_changepoints_by('m5_sample', item_id, ds, y, MAP{'hazard_lambda': '60'});
+SELECT item_id, 60 AS hazard_lambda, 'balanced' AS sensitivity,
+       COUNT(*) FILTER (WHERE is_changepoint) AS n_changepoints
+FROM ts_detect_changepoints_by('m5_sample', item_id, ds, y, MAP{'hazard_lambda': '60'})
+GROUP BY item_id;
 
 CREATE OR REPLACE TABLE cp_conservative AS
-SELECT id AS item_id, 120 AS hazard_lambda, 'conservative' AS sensitivity,
-       list_count((changepoints).changepoint_indices) AS n_changepoints
-FROM ts_detect_changepoints_by('m5_sample', item_id, ds, y, MAP{'hazard_lambda': '120'});
+SELECT item_id, 120 AS hazard_lambda, 'conservative' AS sensitivity,
+       COUNT(*) FILTER (WHERE is_changepoint) AS n_changepoints
+FROM ts_detect_changepoints_by('m5_sample', item_id, ds, y, MAP{'hazard_lambda': '120'})
+GROUP BY item_id;
 
 CREATE OR REPLACE TABLE sensitivity_analysis AS
 SELECT * FROM cp_sensitive
@@ -192,26 +195,29 @@ SELECT
 SELECT 'Running changepoint detection on full M5 dataset (~30k items)...' AS step;
 SELECT 'This may take a few minutes...' AS note;
 
+-- Store changepoint dates directly from row-level output
 CREATE OR REPLACE TABLE m5_changepoints AS
 SELECT
-    id AS item_id,
-    (changepoints).is_changepoint AS is_changepoint_arr,
-    (changepoints).changepoint_probability AS cp_probability_arr,
-    (changepoints).changepoint_indices AS cp_indices
+    item_id,
+    ds AS cp_date,
+    changepoint_probability
 FROM ts_detect_changepoints_by(
     'm5_full',
     item_id,
     ds,
     y,
-    {'hazard_lambda': '50', 'include_probabilities': 'true'}
-);
+    {'hazard_lambda': '50'}
+)
+WHERE is_changepoint = true;
 
 -- Show sample results
 SELECT
-    'Sample Results (first 10 items)' AS info,
+    'Sample Results (first 10 items with changepoints)' AS info,
     item_id,
-    list_count(cp_indices) AS n_changepoints
+    COUNT(*) AS n_changepoints
 FROM m5_changepoints
+GROUP BY item_id
+ORDER BY item_id
 LIMIT 10;
 
 -- ============================================================================
@@ -221,34 +227,7 @@ LIMIT 10;
 SELECT
     '=== Section 4: Changepoint Timing Analysis ===' AS section;
 
--- Extract individual changepoint dates for analysis
--- We need to map indices back to dates
-CREATE OR REPLACE TABLE cp_dates AS
-WITH
--- Get the date list for each item
-item_dates AS (
-    SELECT
-        item_id,
-        LIST(ds ORDER BY ds) AS date_list
-    FROM m5_full
-    GROUP BY item_id
-),
--- Unnest changepoint indices
-cp_unnested AS (
-    SELECT
-        item_id,
-        UNNEST(cp_indices) AS cp_index
-    FROM m5_changepoints
-    WHERE list_count(cp_indices) > 0
-)
-SELECT
-    c.item_id,
-    c.cp_index,
-    d.date_list[(c.cp_index + 1)::INTEGER] AS cp_date  -- +1 because DuckDB arrays are 1-indexed
-FROM cp_unnested c
-JOIN item_dates d ON c.item_id = d.item_id;
-
--- Add metadata
+-- Add metadata to changepoints
 CREATE OR REPLACE TABLE cp_dates_with_meta AS
 SELECT
     c.*,
@@ -260,7 +239,7 @@ SELECT
     EXTRACT(MONTH FROM cp_date) AS cp_month,
     EXTRACT(DOW FROM cp_date) AS cp_dow,  -- 0=Sunday, 6=Saturday
     EXTRACT(WEEK FROM cp_date) AS cp_week
-FROM cp_dates c
+FROM m5_changepoints c
 JOIN m5_items i ON c.item_id = i.item_id;
 
 -- When do changepoints occur? Monthly distribution
@@ -360,17 +339,23 @@ SELECT
     '=== Section 6: Summary Statistics ===' AS section;
 
 -- Overall changepoint summary
+CREATE OR REPLACE TABLE cp_counts AS
+SELECT
+    item_id,
+    COUNT(*) AS n_changepoints
+FROM m5_changepoints
+GROUP BY item_id;
+
 CREATE OR REPLACE TABLE cp_summary AS
 SELECT
-    COUNT(DISTINCT m.item_id) AS total_items,
-    COUNT(DISTINCT CASE WHEN list_count(c.cp_indices) > 0 THEN m.item_id END) AS items_with_changepoints,
-    COUNT(DISTINCT CASE WHEN list_count(c.cp_indices) = 0 THEN m.item_id END) AS items_without_changepoints,
-    SUM(list_count(c.cp_indices)) AS total_changepoints,
-    ROUND(AVG(list_count(c.cp_indices)), 2) AS avg_changepoints_per_item,
-    MAX(list_count(c.cp_indices)) AS max_changepoints,
-    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY list_count(c.cp_indices)) AS median_changepoints
-FROM (SELECT DISTINCT item_id FROM m5_full) m
-LEFT JOIN m5_changepoints c ON m.item_id = c.item_id;
+    (SELECT COUNT(DISTINCT item_id) FROM m5_full) AS total_items,
+    COUNT(DISTINCT c.item_id) AS items_with_changepoints,
+    (SELECT COUNT(DISTINCT item_id) FROM m5_full) - COUNT(DISTINCT c.item_id) AS items_without_changepoints,
+    SUM(c.n_changepoints) AS total_changepoints,
+    ROUND(AVG(c.n_changepoints), 2) AS avg_changepoints_per_item_with_cp,
+    MAX(c.n_changepoints) AS max_changepoints,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY c.n_changepoints) AS median_changepoints
+FROM cp_counts c;
 
 -- Display summary
 SELECT
@@ -382,7 +367,7 @@ SELECT
     items_without_changepoints,
     ROUND(items_with_changepoints * 100.0 / total_items, 1) AS pct_with_changepoints,
     total_changepoints,
-    avg_changepoints_per_item,
+    avg_changepoints_per_item_with_cp,
     max_changepoints,
     median_changepoints
 FROM cp_summary;
@@ -394,11 +379,10 @@ SELECT
 SELECT
     i.category,
     COUNT(DISTINCT i.item_id) AS total_items,
-    COUNT(DISTINCT CASE WHEN list_count(c.cp_indices) > 0 THEN i.item_id END) AS items_with_cp,
-    ROUND(COUNT(DISTINCT CASE WHEN list_count(c.cp_indices) > 0 THEN i.item_id END) * 100.0 /
-          COUNT(DISTINCT i.item_id), 1) AS pct_with_cp,
-    COALESCE(SUM(list_count(c.cp_indices)), 0) AS total_cps,
-    ROUND(COALESCE(AVG(list_count(c.cp_indices)), 0), 2) AS avg_cps_per_item
+    COUNT(DISTINCT c.item_id) AS items_with_cp,
+    ROUND(COUNT(DISTINCT c.item_id) * 100.0 / COUNT(DISTINCT i.item_id), 1) AS pct_with_cp,
+    COALESCE(COUNT(c.item_id), 0) AS total_cps,
+    ROUND(COALESCE(COUNT(c.item_id) * 1.0 / NULLIF(COUNT(DISTINCT c.item_id), 0), 0), 2) AS avg_cps_per_item
 FROM m5_items i
 LEFT JOIN m5_changepoints c ON i.item_id = c.item_id
 GROUP BY i.category
@@ -434,10 +418,11 @@ SELECT
     c.item_id,
     i.category,
     i.store,
-    list_count(c.cp_indices) AS n_changepoints
+    COUNT(*) AS n_changepoints
 FROM m5_changepoints c
 JOIN m5_items i ON c.item_id = i.item_id
-ORDER BY list_count(c.cp_indices) DESC
+GROUP BY c.item_id, i.category, i.store
+ORDER BY n_changepoints DESC
 LIMIT 10;
 
 -- Stable items (no changepoints detected)
@@ -445,12 +430,12 @@ SELECT
     '=== STABLE ITEMS SAMPLE (no changepoints) ===' AS report_section;
 
 SELECT
-    c.item_id,
+    i.item_id,
     i.category,
     i.store
-FROM m5_changepoints c
-JOIN m5_items i ON c.item_id = i.item_id
-WHERE list_count(c.cp_indices) = 0
+FROM m5_items i
+LEFT JOIN m5_changepoints c ON i.item_id = c.item_id
+WHERE c.item_id IS NULL
 LIMIT 10;
 
 -- ============================================================================
@@ -465,20 +450,21 @@ CREATE OR REPLACE TABLE changepoint_analysis_summary AS
 WITH
 item_stats AS (
     SELECT
-        c.item_id,
+        i.item_id,
         i.category,
         i.dept,
         i.store,
         i.state,
-        list_count(c.cp_indices) AS n_changepoints,
+        COALESCE(cp.n_cps, 0) AS n_changepoints,
         CASE
-            WHEN list_count(c.cp_indices) = 0 THEN 'Stable'
-            WHEN list_count(c.cp_indices) <= 2 THEN 'Low volatility'
-            WHEN list_count(c.cp_indices) <= 5 THEN 'Medium volatility'
+            WHEN COALESCE(cp.n_cps, 0) = 0 THEN 'Stable'
+            WHEN COALESCE(cp.n_cps, 0) <= 2 THEN 'Low volatility'
+            WHEN COALESCE(cp.n_cps, 0) <= 5 THEN 'Medium volatility'
             ELSE 'High volatility'
         END AS volatility_class
-    FROM m5_changepoints c
-    JOIN m5_items i ON c.item_id = i.item_id
+    FROM m5_items i
+    LEFT JOIN (SELECT item_id, COUNT(*) AS n_cps FROM m5_changepoints GROUP BY item_id) cp
+        ON i.item_id = cp.item_id
 ),
 category_stats AS (
     SELECT
@@ -509,8 +495,7 @@ SELECT
 -- DROP TABLE IF EXISTS m5_sample;
 -- DROP TABLE IF EXISTS m5_items;
 -- DROP TABLE IF EXISTS m5_changepoints;
--- DROP TABLE IF EXISTS sample_changepoints;
--- DROP TABLE IF EXISTS cp_dates;
 -- DROP TABLE IF EXISTS cp_dates_with_meta;
+-- DROP TABLE IF EXISTS cp_counts;
 -- DROP TABLE IF EXISTS cp_summary;
 -- DROP TABLE IF EXISTS changepoint_analysis_summary;

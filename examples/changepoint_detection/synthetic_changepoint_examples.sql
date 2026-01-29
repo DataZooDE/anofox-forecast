@@ -4,13 +4,17 @@
 -- This script demonstrates changepoint detection with the anofox-forecast
 -- extension using the ts_detect_changepoints_by table macro.
 --
+-- The function returns row-level results with:
+--   - group_col (preserved name): Series identifier
+--   - date_col (preserved name): Timestamp for each point
+--   - is_changepoint: Boolean indicating if point is a changepoint
+--   - changepoint_probability: Probability score (0-1)
+--
 -- Run: ./build/release/duckdb < examples/changepoint_detection/synthetic_changepoint_examples.sql
 -- ============================================================================
 
 -- Load extension
 LOAD anofox_forecast;
-INSTALL json;
-LOAD json;
 
 .print '============================================================================='
 .print 'CHANGEPOINT DETECTION EXAMPLES - Using ts_detect_changepoints_by'
@@ -58,15 +62,26 @@ SELECT * FROM (
 SELECT series_id, COUNT(*) AS n_rows, ROUND(AVG(value), 2) AS avg_value
 FROM multi_series GROUP BY series_id ORDER BY series_id;
 
--- 1.1: Basic changepoint detection (default parameters)
+-- 1.1: Basic changepoint detection - show row-level results
 .print ''
-.print 'Section 1.1: Basic Changepoint Detection'
+.print 'Section 1.1: Row-Level Changepoint Detection Results'
+
+SELECT series_id, ds, is_changepoint, ROUND(changepoint_probability, 4) AS probability
+FROM ts_detect_changepoints_by('multi_series', series_id, ds, value, MAP{})
+WHERE is_changepoint = true
+ORDER BY series_id, ds;
+
+-- 1.2: Count changepoints per series
+.print ''
+.print 'Section 1.2: Changepoint Summary by Series'
 
 SELECT
-    id,
-    (changepoints).changepoint_indices AS detected_indices,
-    list_count((changepoints).changepoint_indices) AS n_changepoints
-FROM ts_detect_changepoints_by('multi_series', series_id, ds, value, MAP{});
+    series_id,
+    COUNT(*) AS total_points,
+    COUNT(*) FILTER (WHERE is_changepoint) AS n_changepoints
+FROM ts_detect_changepoints_by('multi_series', series_id, ds, value, MAP{})
+GROUP BY series_id
+ORDER BY series_id;
 
 -- ============================================================================
 -- SECTION 2: Tuning Detection Sensitivity
@@ -80,18 +95,22 @@ FROM ts_detect_changepoints_by('multi_series', series_id, ds, value, MAP{});
 .print 'Section 2.1: Conservative Detection (hazard_lambda=500)'
 
 SELECT
-    id,
-    (changepoints).changepoint_indices AS detected_indices
-FROM ts_detect_changepoints_by('multi_series', series_id, ds, value, MAP{'hazard_lambda': '500'});
+    series_id,
+    COUNT(*) FILTER (WHERE is_changepoint) AS n_changepoints
+FROM ts_detect_changepoints_by('multi_series', series_id, ds, value, MAP{'hazard_lambda': '500'})
+GROUP BY series_id
+ORDER BY series_id;
 
 -- 2.2: Sensitive detection (lower hazard_lambda = more changepoints)
 .print ''
 .print 'Section 2.2: Sensitive Detection (hazard_lambda=50)'
 
 SELECT
-    id,
-    (changepoints).changepoint_indices AS detected_indices
-FROM ts_detect_changepoints_by('multi_series', series_id, ds, value, MAP{'hazard_lambda': '50'});
+    series_id,
+    COUNT(*) FILTER (WHERE is_changepoint) AS n_changepoints
+FROM ts_detect_changepoints_by('multi_series', series_id, ds, value, MAP{'hazard_lambda': '50'})
+GROUP BY series_id
+ORDER BY series_id;
 
 -- ============================================================================
 -- SECTION 3: Accessing Changepoint Details
@@ -101,15 +120,28 @@ FROM ts_detect_changepoints_by('multi_series', series_id, ds, value, MAP{'hazard
 .print '>>> SECTION 3: Accessing Changepoint Details'
 .print '-----------------------------------------------------------------------------'
 
--- 3.1: Get changepoint probabilities
-.print 'Section 3.1: Changepoint Probabilities (include_probabilities=true)'
+-- 3.1: Get changepoints with their dates and probabilities
+.print 'Section 3.1: Changepoint Dates and Probabilities'
 
 SELECT
-    id,
-    (changepoints).changepoint_indices AS indices,
-    list_count((changepoints).changepoint_probability) AS n_probs,
-    ROUND(list_max((changepoints).changepoint_probability), 4) AS max_probability
-FROM ts_detect_changepoints_by('multi_series', series_id, ds, value, MAP{'include_probabilities': 'true'});
+    series_id,
+    ds AS changepoint_date,
+    ROUND(changepoint_probability, 4) AS probability
+FROM ts_detect_changepoints_by('multi_series', series_id, ds, value, MAP{'hazard_lambda': '50'})
+WHERE is_changepoint = true
+ORDER BY series_id, ds;
+
+-- 3.2: High confidence changepoints only
+.print ''
+.print 'Section 3.2: High Confidence Changepoints (probability > 0.8)'
+
+SELECT
+    series_id,
+    ds AS changepoint_date,
+    ROUND(changepoint_probability, 4) AS probability
+FROM ts_detect_changepoints_by('multi_series', series_id, ds, value, MAP{'hazard_lambda': '50'})
+WHERE is_changepoint = true AND changepoint_probability > 0.8
+ORDER BY series_id, ds;
 
 -- ============================================================================
 -- SECTION 4: Real-World Scenarios
@@ -154,15 +186,28 @@ SELECT * FROM (
 .print 'Section 4.1: Retail Demand Changepoint Detection'
 
 SELECT
-    id AS store,
-    (changepoints).changepoint_indices AS detected_changepoints,
-    list_count((changepoints).changepoint_indices) AS n_changepoints,
+    store_id AS store,
+    COUNT(*) FILTER (WHERE is_changepoint) AS n_changepoints,
     CASE
-        WHEN list_count((changepoints).changepoint_indices) = 0 THEN 'Stable demand'
-        WHEN list_count((changepoints).changepoint_indices) = 1 THEN 'Single shift detected'
+        WHEN COUNT(*) FILTER (WHERE is_changepoint) = 0 THEN 'Stable demand'
+        WHEN COUNT(*) FILTER (WHERE is_changepoint) = 1 THEN 'Single shift detected'
         ELSE 'Multiple shifts detected'
     END AS pattern_description
-FROM ts_detect_changepoints_by('retail_demand', store_id, date, sales, MAP{'hazard_lambda': '30'});
+FROM ts_detect_changepoints_by('retail_demand', store_id, date, sales, MAP{'hazard_lambda': '30'})
+GROUP BY store_id
+ORDER BY store_id;
+
+-- Show detected changepoint dates
+.print ''
+.print 'Section 4.2: Detected Changepoint Dates'
+
+SELECT
+    store_id,
+    date AS changepoint_date,
+    ROUND(changepoint_probability, 3) AS probability
+FROM ts_detect_changepoints_by('retail_demand', store_id, date, sales, MAP{'hazard_lambda': '30'})
+WHERE is_changepoint = true
+ORDER BY store_id, date;
 
 -- ============================================================================
 -- SECTION 5: Sensor Data Anomaly Detection
@@ -197,13 +242,27 @@ SELECT * FROM (
 .print 'Section 5.1: Sensor Anomaly Detection'
 
 SELECT
-    id AS sensor,
-    (changepoints).changepoint_indices AS anomaly_indices,
+    sensor_id AS sensor,
+    COUNT(*) FILTER (WHERE is_changepoint) AS n_anomalies,
     CASE
-        WHEN list_count((changepoints).changepoint_indices) > 0 THEN 'ALERT: Anomalies detected'
+        WHEN COUNT(*) FILTER (WHERE is_changepoint) > 0 THEN 'ALERT: Anomalies detected'
         ELSE 'Normal operation'
     END AS status
-FROM ts_detect_changepoints_by('sensor_data', sensor_id, timestamp, reading, MAP{'hazard_lambda': '20'});
+FROM ts_detect_changepoints_by('sensor_data', sensor_id, timestamp, reading, MAP{'hazard_lambda': '20'})
+GROUP BY sensor_id
+ORDER BY sensor_id;
+
+-- Show anomaly timestamps
+.print ''
+.print 'Section 5.2: Anomaly Timestamps'
+
+SELECT
+    sensor_id,
+    timestamp AS anomaly_time,
+    ROUND(changepoint_probability, 3) AS probability
+FROM ts_detect_changepoints_by('sensor_data', sensor_id, timestamp, reading, MAP{'hazard_lambda': '20'})
+WHERE is_changepoint = true
+ORDER BY sensor_id, timestamp;
 
 -- ============================================================================
 -- SECTION 6: Comparing Detection Across Series
@@ -217,21 +276,22 @@ FROM ts_detect_changepoints_by('sensor_data', sensor_id, timestamp, reading, MAP
 
 WITH detection_results AS (
     SELECT
-        id,
-        (changepoints).changepoint_indices AS indices
+        series_id,
+        ds,
+        is_changepoint
     FROM ts_detect_changepoints_by('multi_series', series_id, ds, value, MAP{})
 )
 SELECT
-    id,
-    list_count(indices) AS n_changepoints,
-    indices AS changepoint_positions,
+    series_id,
+    COUNT(*) FILTER (WHERE is_changepoint) AS n_changepoints,
     CASE
-        WHEN list_count(indices) = 0 THEN 'Stable'
-        WHEN list_count(indices) = 1 THEN 'Single regime change'
-        WHEN list_count(indices) = 2 THEN 'Three regimes'
+        WHEN COUNT(*) FILTER (WHERE is_changepoint) = 0 THEN 'Stable'
+        WHEN COUNT(*) FILTER (WHERE is_changepoint) = 1 THEN 'Single regime change'
+        WHEN COUNT(*) FILTER (WHERE is_changepoint) = 2 THEN 'Three regimes'
         ELSE 'Complex pattern'
     END AS regime_description
 FROM detection_results
+GROUP BY series_id
 ORDER BY n_changepoints DESC;
 
 -- ============================================================================
