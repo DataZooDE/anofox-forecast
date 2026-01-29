@@ -51,7 +51,7 @@ ts_stats_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
 **Returns:**
 | Column | Type | Description |
 |--------|------|-------------|
-| `id` | (same as group_col) | Series identifier |
+| *(group_col name)* | (same as group_col) | Series identifier (column name preserved from input) |
 | `length` | UBIGINT | Total number of observations |
 | `n_nulls` | UBIGINT | Number of NULL values |
 | `n_nan` | UBIGINT | Number of NaN values |
@@ -96,7 +96,7 @@ SELECT * FROM ts_stats_by('sales', product_id, date, quantity, '1d');
 
 -- Access specific fields
 SELECT
-    id,
+    product_id,  -- column name is preserved from input
     length,
     mean,
     std_dev,
@@ -105,14 +105,24 @@ FROM ts_stats_by('sales', product_id, date, quantity, '1d');
 
 -- Detect gaps in time series
 SELECT
-    id,
+    product_id,
     length AS actual_length,
     expected_length,
     n_gaps,
     CASE WHEN n_gaps > 0 THEN 'Has gaps' ELSE 'Complete' END AS status
 FROM ts_stats_by('sales', product_id, date, quantity, '1d')
 WHERE n_gaps > 0;
+
+-- Monthly data with calendar-aware gap detection
+SELECT
+    product_id,  -- column name is preserved!
+    length,
+    expected_length,
+    n_gaps
+FROM ts_stats_by('monthly_sales', product_id, month_date, revenue, '1mo');
 ```
+
+> **Note:** Calendar frequencies (`'1mo'`, `'1q'`, `'1y'`) use calendar-aware calculations for `expected_length` and `n_gaps`. For example, monthly data correctly counts months between dates rather than using a fixed 30-day approximation.
 
 > **Alias:** `ts_stats` is an alias for `ts_stats_by`
 
