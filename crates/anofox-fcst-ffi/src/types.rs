@@ -102,6 +102,47 @@ pub enum DateType {
     Integer = 2,
 }
 
+/// Frequency type enumeration for calendar vs fixed frequencies.
+///
+/// Calendar frequencies (monthly, quarterly, yearly) have variable durations
+/// and require special handling for expected_length and gap detection.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FrequencyType {
+    /// Fixed duration frequencies (daily, hourly, weekly, etc.)
+    /// These have consistent microsecond durations.
+    #[default]
+    Fixed = 0,
+    /// Monthly frequency - variable duration (28-31 days)
+    Monthly = 1,
+    /// Quarterly frequency - variable duration (3 months)
+    Quarterly = 2,
+    /// Yearly frequency - variable duration (365 or 366 days)
+    Yearly = 3,
+}
+
+impl From<FrequencyType> for anofox_fcst_core::FrequencyType {
+    fn from(ftype: FrequencyType) -> Self {
+        match ftype {
+            FrequencyType::Fixed => Self::Fixed,
+            FrequencyType::Monthly => Self::Monthly,
+            FrequencyType::Quarterly => Self::Quarterly,
+            FrequencyType::Yearly => Self::Yearly,
+        }
+    }
+}
+
+impl From<anofox_fcst_core::FrequencyType> for FrequencyType {
+    fn from(ftype: anofox_fcst_core::FrequencyType) -> Self {
+        match ftype {
+            anofox_fcst_core::FrequencyType::Fixed => Self::Fixed,
+            anofox_fcst_core::FrequencyType::Monthly => Self::Monthly,
+            anofox_fcst_core::FrequencyType::Quarterly => Self::Quarterly,
+            anofox_fcst_core::FrequencyType::Yearly => Self::Yearly,
+        }
+    }
+}
+
 /// Date array supporting multiple date types.
 #[repr(C)]
 pub struct DateArray {

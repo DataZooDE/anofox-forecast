@@ -17,6 +17,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 
     // Register EDA functions
     RegisterTsStatsFunction(loader);
+    RegisterTsStatsByFunction(loader);  // Native table function for ts_stats_by
     RegisterTsQualityReportFunction(loader);
     RegisterTsStatsSummaryFunction(loader);
 

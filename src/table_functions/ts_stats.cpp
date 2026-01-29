@@ -1,5 +1,6 @@
 #include "anofox_forecast_extension.hpp"
 #include "anofox_fcst_ffi.h"
+#include "ts_fill_gaps_native.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -7,15 +8,17 @@
 #include "duckdb/common/vector_operations/generic_executor.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include <regex>
+#include <map>
 
 namespace duckdb {
 
-// Parse frequency string to microseconds (e.g., "1d" -> 86400000000)
-static int64_t ParseFrequencyToMicroseconds(const string &frequency_str) {
+// Parse frequency string to microseconds and frequency type (e.g., "1d" -> 86400000000, FIXED)
+// Returns (microseconds, FrequencyType)
+static std::pair<int64_t, FrequencyType> ParseFrequencyWithType(const string &frequency_str) {
     string upper = StringUtil::Upper(frequency_str);
     StringUtil::Trim(upper);
 
-    // Try to parse Polars-style frequency (e.g., "1d", "1h", "30m")
+    // Try to parse Polars-style frequency (e.g., "1d", "1h", "30m", "1mo")
     std::regex polars_regex("^([0-9]+)(d|h|m|min|w|mo|q|y)$", std::regex::icase);
     std::smatch match;
 
@@ -23,32 +26,40 @@ static int64_t ParseFrequencyToMicroseconds(const string &frequency_str) {
         int64_t count = std::stoll(match[1].str());
         string unit = StringUtil::Lower(match[2].str());
 
-        if (unit == "d") return count * 86400LL * 1000000LL;
-        if (unit == "h") return count * 3600LL * 1000000LL;
-        if (unit == "m" || unit == "min") return count * 60LL * 1000000LL;
-        if (unit == "w") return count * 86400LL * 7LL * 1000000LL;
-        if (unit == "mo") return count * 86400LL * 30LL * 1000000LL;
-        if (unit == "q") return count * 86400LL * 90LL * 1000000LL;
-        if (unit == "y") return count * 86400LL * 365LL * 1000000LL;
+        if (unit == "d") return std::make_pair(count * 86400LL * 1000000LL, FIXED);
+        if (unit == "h") return std::make_pair(count * 3600LL * 1000000LL, FIXED);
+        if (unit == "m" || unit == "min") return std::make_pair(count * 60LL * 1000000LL, FIXED);
+        if (unit == "w") return std::make_pair(count * 86400LL * 7LL * 1000000LL, FIXED);
+        // Calendar frequencies
+        if (unit == "mo") return std::make_pair(count * 86400LL * 30LL * 1000000LL, MONTHLY);
+        if (unit == "q") return std::make_pair(count * 86400LL * 90LL * 1000000LL, QUARTERLY);
+        if (unit == "y") return std::make_pair(count * 86400LL * 365LL * 1000000LL, YEARLY);
     }
 
-    // Try to parse DuckDB INTERVAL style (e.g., "1 day", "1 hour")
-    std::regex interval_regex("^([0-9]+)\\s*(day|days|hour|hours|minute|minutes|week|weeks|month|months|year|years)$", std::regex::icase);
+    // Try to parse DuckDB INTERVAL style (e.g., "1 day", "1 hour", "1 month")
+    std::regex interval_regex("^([0-9]+)\\s*(day|days|hour|hours|minute|minutes|week|weeks|month|months|quarter|quarters|year|years)$", std::regex::icase);
 
     if (std::regex_match(upper, match, interval_regex)) {
         int64_t count = std::stoll(match[1].str());
         string unit = StringUtil::Lower(match[2].str());
 
-        if (unit == "day" || unit == "days") return count * 86400LL * 1000000LL;
-        if (unit == "hour" || unit == "hours") return count * 3600LL * 1000000LL;
-        if (unit == "minute" || unit == "minutes") return count * 60LL * 1000000LL;
-        if (unit == "week" || unit == "weeks") return count * 86400LL * 7LL * 1000000LL;
-        if (unit == "month" || unit == "months") return count * 86400LL * 30LL * 1000000LL;
-        if (unit == "year" || unit == "years") return count * 86400LL * 365LL * 1000000LL;
+        if (unit == "day" || unit == "days") return std::make_pair(count * 86400LL * 1000000LL, FIXED);
+        if (unit == "hour" || unit == "hours") return std::make_pair(count * 3600LL * 1000000LL, FIXED);
+        if (unit == "minute" || unit == "minutes") return std::make_pair(count * 60LL * 1000000LL, FIXED);
+        if (unit == "week" || unit == "weeks") return std::make_pair(count * 86400LL * 7LL * 1000000LL, FIXED);
+        // Calendar frequencies
+        if (unit == "month" || unit == "months") return std::make_pair(count * 86400LL * 30LL * 1000000LL, MONTHLY);
+        if (unit == "quarter" || unit == "quarters") return std::make_pair(count * 86400LL * 90LL * 1000000LL, QUARTERLY);
+        if (unit == "year" || unit == "years") return std::make_pair(count * 86400LL * 365LL * 1000000LL, YEARLY);
     }
 
-    // Default to 1 day
-    return 86400LL * 1000000LL;
+    // Default to 1 day (fixed frequency)
+    return std::make_pair(86400LL * 1000000LL, FIXED);
+}
+
+// Parse frequency string to microseconds (e.g., "1d" -> 86400000000) - backward compatible version
+static int64_t ParseFrequencyToMicroseconds(const string &frequency_str) {
+    return ParseFrequencyWithType(frequency_str).first;
 }
 
 // Define the output STRUCT type for ts_stats (34 metrics)
@@ -334,6 +345,384 @@ static void TsStatsWithDatesFunction(DataChunk &args, ExpressionState &state, Ve
         anofox_free_ts_stats_result(&stats_result);
     }
 }
+
+// ============================================================================
+// ts_stats_by - Native Table Function
+// ============================================================================
+// This replaces the SQL macro to properly preserve input column names and
+// correctly handle calendar frequencies (monthly, quarterly, yearly).
+
+struct TsStatsByBindData : public TableFunctionData {
+    int64_t frequency_micros = 86400LL * 1000000LL;  // Default: 1 day
+    FrequencyType frequency_type = FIXED;
+    string group_col_name;  // Preserved from input
+    LogicalType group_logical_type = LogicalType(LogicalTypeId::VARCHAR);
+    DateColumnType date_col_type = DateColumnType::TIMESTAMP;
+};
+
+struct TsStatsByLocalState : public LocalTableFunctionState {
+    // Buffer incoming data per group
+    struct GroupData {
+        Value group_value;
+        vector<int64_t> timestamps;  // microseconds
+        vector<double> values;
+        vector<bool> validity;
+    };
+
+    std::map<string, GroupData> groups;
+    vector<string> group_order;
+
+    // Output results
+    struct StatsOutputRow {
+        string group_key;
+        Value group_value;
+        TsStatsResult stats;
+    };
+    vector<StatsOutputRow> results;
+
+    // Processing state
+    bool processed = false;
+    idx_t output_offset = 0;
+};
+
+static unique_ptr<FunctionData> TsStatsByBind(
+    ClientContext &context,
+    TableFunctionBindInput &input,
+    vector<LogicalType> &return_types,
+    vector<string> &names) {
+
+    auto bind_data = make_uniq<TsStatsByBindData>();
+
+    // Parse frequency from second argument (index 1, since index 0 is TABLE placeholder)
+    if (input.inputs.size() >= 2) {
+        string freq_str = input.inputs[1].GetValue<string>();
+        auto [micros, ftype] = ParseFrequencyWithType(freq_str);
+        bind_data->frequency_micros = micros;
+        bind_data->frequency_type = ftype;
+    }
+
+    // Input table must have exactly 3 columns: group, date, value
+    if (input.input_table_types.size() != 3) {
+        throw InvalidInputException(
+            "ts_stats_by requires input with exactly 3 columns: group_col, date_col, value_col. Got %zu columns.",
+            input.input_table_types.size());
+    }
+
+    // Preserve the group column name from input
+    bind_data->group_col_name = input.input_table_names[0];
+    bind_data->group_logical_type = input.input_table_types[0];
+
+    // Detect date column type from input (column 1)
+    switch (input.input_table_types[1].id()) {
+        case LogicalTypeId::DATE:
+            bind_data->date_col_type = DateColumnType::DATE;
+            break;
+        case LogicalTypeId::TIMESTAMP:
+        case LogicalTypeId::TIMESTAMP_TZ:
+            bind_data->date_col_type = DateColumnType::TIMESTAMP;
+            break;
+        default:
+            throw InvalidInputException(
+                "Date column must be DATE or TIMESTAMP, got: %s",
+                input.input_table_types[1].ToString().c_str());
+    }
+
+    // Output schema: group_col (with preserved name), then all 36 stats columns
+    names.push_back(bind_data->group_col_name);  // Use the preserved input column name!
+    return_types.push_back(bind_data->group_logical_type);
+
+    // Add all 36 stats columns
+    names.push_back("length");
+    return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
+    names.push_back("n_nulls");
+    return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
+    names.push_back("n_nan");
+    return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
+    names.push_back("n_zeros");
+    return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
+    names.push_back("n_positive");
+    return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
+    names.push_back("n_negative");
+    return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
+    names.push_back("n_unique_values");
+    return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
+    names.push_back("is_constant");
+    return_types.push_back(LogicalType(LogicalTypeId::BOOLEAN));
+    names.push_back("n_zeros_start");
+    return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
+    names.push_back("n_zeros_end");
+    return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
+    names.push_back("plateau_size");
+    return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
+    names.push_back("plateau_size_nonzero");
+    return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
+    names.push_back("mean");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("median");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("std_dev");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("variance");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("min");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("max");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("range");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("sum");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("skewness");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("kurtosis");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("tail_index");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("bimodality_coef");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("trimmed_mean");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("coef_variation");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("q1");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("q3");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("iqr");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("autocorr_lag1");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("trend_strength");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("seasonality_strength");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("entropy");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("stability");
+    return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
+    names.push_back("expected_length");
+    return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
+    names.push_back("n_gaps");
+    return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
+
+    return bind_data;
+}
+
+static unique_ptr<GlobalTableFunctionState> TsStatsByInitGlobal(
+    ClientContext &context,
+    TableFunctionInitInput &input) {
+    return make_uniq<GlobalTableFunctionState>();
+}
+
+static unique_ptr<LocalTableFunctionState> TsStatsByInitLocal(
+    ExecutionContext &context,
+    TableFunctionInitInput &input,
+    GlobalTableFunctionState *global_state) {
+    return make_uniq<TsStatsByLocalState>();
+}
+
+static OperatorResultType TsStatsByInOut(
+    ExecutionContext &context,
+    TableFunctionInput &data_p,
+    DataChunk &input,
+    DataChunk &output) {
+
+    auto &bind_data = data_p.bind_data->Cast<TsStatsByBindData>();
+    auto &local_state = data_p.local_state->Cast<TsStatsByLocalState>();
+
+    // Buffer all incoming data - we need complete groups before processing
+    for (idx_t i = 0; i < input.size(); i++) {
+        Value group_val = input.data[0].GetValue(i);
+        Value date_val = input.data[1].GetValue(i);
+        Value value_val = input.data[2].GetValue(i);
+
+        if (date_val.IsNull()) continue;
+
+        string group_key = GetGroupKey(group_val);
+
+        if (local_state.groups.find(group_key) == local_state.groups.end()) {
+            local_state.groups[group_key] = TsStatsByLocalState::GroupData();
+            local_state.groups[group_key].group_value = group_val;
+            local_state.group_order.push_back(group_key);
+        }
+
+        auto &grp = local_state.groups[group_key];
+
+        // Convert date to microseconds
+        int64_t date_micros;
+        switch (bind_data.date_col_type) {
+            case DateColumnType::DATE:
+                date_micros = DateToMicroseconds(date_val.GetValue<date_t>());
+                break;
+            case DateColumnType::TIMESTAMP:
+            default:
+                date_micros = TimestampToMicroseconds(date_val.GetValue<timestamp_t>());
+                break;
+        }
+
+        grp.timestamps.push_back(date_micros);
+        grp.values.push_back(value_val.IsNull() ? 0.0 : value_val.GetValue<double>());
+        grp.validity.push_back(!value_val.IsNull());
+    }
+
+    // Don't output anything during input phase - wait for finalize
+    output.SetCardinality(0);
+    return OperatorResultType::NEED_MORE_INPUT;
+}
+
+static OperatorFinalizeResultType TsStatsByFinalize(
+    ExecutionContext &context,
+    TableFunctionInput &data_p,
+    DataChunk &output) {
+
+    auto &bind_data = data_p.bind_data->Cast<TsStatsByBindData>();
+    auto &local_state = data_p.local_state->Cast<TsStatsByLocalState>();
+
+    // Process all groups on first finalize call
+    if (!local_state.processed) {
+        for (const auto &group_key : local_state.group_order) {
+            auto &grp = local_state.groups[group_key];
+
+            if (grp.timestamps.empty()) continue;
+
+            // Build validity bitmask for Rust
+            size_t validity_words = (grp.timestamps.size() + 63) / 64;
+            vector<uint64_t> validity(validity_words, 0);
+            for (size_t i = 0; i < grp.validity.size(); i++) {
+                if (grp.validity[i]) {
+                    validity[i / 64] |= (1ULL << (i % 64));
+                }
+            }
+
+            // Call Rust FFI function with dates and frequency type
+            TsStatsResult stats_result = {};
+            AnofoxError error = {};
+
+            bool success = anofox_ts_stats_with_dates_and_type(
+                grp.values.data(),
+                validity.empty() ? nullptr : validity.data(),
+                grp.timestamps.data(),
+                grp.values.size(),
+                bind_data.frequency_micros,
+                bind_data.frequency_type,
+                &stats_result,
+                &error
+            );
+
+            if (!success) {
+                throw InvalidInputException("ts_stats_by failed: %s",
+                    error.message ? error.message : "Unknown error");
+            }
+
+            // Store results
+            TsStatsByLocalState::StatsOutputRow row;
+            row.group_key = group_key;
+            row.group_value = grp.group_value;
+            row.stats = stats_result;
+            local_state.results.push_back(std::move(row));
+        }
+        local_state.processed = true;
+    }
+
+    // Output results
+    if (local_state.results.empty() || local_state.output_offset >= local_state.results.size()) {
+        return OperatorFinalizeResultType::FINISHED;
+    }
+
+    idx_t output_count = 0;
+
+    // Initialize all output vectors as FLAT_VECTOR
+    for (idx_t col = 0; col < output.ColumnCount(); col++) {
+        output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
+    }
+
+    while (output_count < STANDARD_VECTOR_SIZE && local_state.output_offset < local_state.results.size()) {
+        auto &row = local_state.results[local_state.output_offset];
+        auto &stats = row.stats;
+        idx_t out_idx = output_count;
+
+        // Column 0: Group column (with preserved name)
+        output.data[0].SetValue(out_idx, row.group_value);
+
+        // Columns 1-36: Stats values
+        FlatVector::GetData<uint64_t>(output.data[1])[out_idx] = stats.length;
+        FlatVector::GetData<uint64_t>(output.data[2])[out_idx] = stats.n_nulls;
+        FlatVector::GetData<uint64_t>(output.data[3])[out_idx] = stats.n_nan;
+        FlatVector::GetData<uint64_t>(output.data[4])[out_idx] = stats.n_zeros;
+        FlatVector::GetData<uint64_t>(output.data[5])[out_idx] = stats.n_positive;
+        FlatVector::GetData<uint64_t>(output.data[6])[out_idx] = stats.n_negative;
+        FlatVector::GetData<uint64_t>(output.data[7])[out_idx] = stats.n_unique_values;
+        FlatVector::GetData<bool>(output.data[8])[out_idx] = stats.is_constant;
+        FlatVector::GetData<uint64_t>(output.data[9])[out_idx] = stats.n_zeros_start;
+        FlatVector::GetData<uint64_t>(output.data[10])[out_idx] = stats.n_zeros_end;
+        FlatVector::GetData<uint64_t>(output.data[11])[out_idx] = stats.plateau_size;
+        FlatVector::GetData<uint64_t>(output.data[12])[out_idx] = stats.plateau_size_nonzero;
+        FlatVector::GetData<double>(output.data[13])[out_idx] = stats.mean;
+        FlatVector::GetData<double>(output.data[14])[out_idx] = stats.median;
+        FlatVector::GetData<double>(output.data[15])[out_idx] = stats.std_dev;
+        FlatVector::GetData<double>(output.data[16])[out_idx] = stats.variance;
+        FlatVector::GetData<double>(output.data[17])[out_idx] = stats.min;
+        FlatVector::GetData<double>(output.data[18])[out_idx] = stats.max;
+        FlatVector::GetData<double>(output.data[19])[out_idx] = stats.range;
+        FlatVector::GetData<double>(output.data[20])[out_idx] = stats.sum;
+        FlatVector::GetData<double>(output.data[21])[out_idx] = stats.skewness;
+        FlatVector::GetData<double>(output.data[22])[out_idx] = stats.kurtosis;
+        FlatVector::GetData<double>(output.data[23])[out_idx] = stats.tail_index;
+        FlatVector::GetData<double>(output.data[24])[out_idx] = stats.bimodality_coef;
+        FlatVector::GetData<double>(output.data[25])[out_idx] = stats.trimmed_mean;
+        FlatVector::GetData<double>(output.data[26])[out_idx] = stats.coef_variation;
+        FlatVector::GetData<double>(output.data[27])[out_idx] = stats.q1;
+        FlatVector::GetData<double>(output.data[28])[out_idx] = stats.q3;
+        FlatVector::GetData<double>(output.data[29])[out_idx] = stats.iqr;
+        FlatVector::GetData<double>(output.data[30])[out_idx] = stats.autocorr_lag1;
+        FlatVector::GetData<double>(output.data[31])[out_idx] = stats.trend_strength;
+        FlatVector::GetData<double>(output.data[32])[out_idx] = stats.seasonality_strength;
+        FlatVector::GetData<double>(output.data[33])[out_idx] = stats.entropy;
+        FlatVector::GetData<double>(output.data[34])[out_idx] = stats.stability;
+
+        // expected_length and n_gaps - handle NULL if no date metrics
+        if (stats.has_date_metrics) {
+            FlatVector::GetData<uint64_t>(output.data[35])[out_idx] = stats.expected_length;
+            FlatVector::GetData<uint64_t>(output.data[36])[out_idx] = stats.n_gaps;
+        } else {
+            FlatVector::SetNull(output.data[35], out_idx, true);
+            FlatVector::SetNull(output.data[36], out_idx, true);
+        }
+
+        output_count++;
+        local_state.output_offset++;
+    }
+
+    output.SetCardinality(output_count);
+
+    if (local_state.output_offset >= local_state.results.size()) {
+        return OperatorFinalizeResultType::FINISHED;
+    }
+
+    return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;
+}
+
+void RegisterTsStatsByFunction(ExtensionLoader &loader) {
+    // Internal native table function: _ts_stats_by_native(TABLE, frequency)
+    // Input table must have 3 columns: group_col, date_col, value_col
+    // Called by ts_stats_by SQL macro to preserve column names and handle calendar frequencies
+    // This is an internal function - users should call ts_stats_by() instead
+    TableFunction func("_ts_stats_by_native",
+        {LogicalType::TABLE, LogicalType(LogicalTypeId::VARCHAR)},
+        nullptr,  // No execute function - use in_out_function
+        TsStatsByBind,
+        TsStatsByInitGlobal,
+        TsStatsByInitLocal);
+
+    func.in_out_function = TsStatsByInOut;
+    func.in_out_function_final = TsStatsByFinalize;
+
+    loader.RegisterFunction(func);
+}
+
+// ============================================================================
+// Scalar Functions Registration
+// ============================================================================
 
 void RegisterTsStatsFunction(ExtensionLoader &loader) {
     // Internal scalar function used by ts_stats table macro (values only)
