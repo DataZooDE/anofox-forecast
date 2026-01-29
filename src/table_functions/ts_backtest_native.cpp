@@ -76,15 +76,20 @@ struct TsBacktestNativeBindData : public TableFunctionData {
 };
 
 // ============================================================================
-// Fold Boundary Structure (shared between Global and Local state)
+// Fold Boundary Structure (position-based indices)
+//
+// IMPORTANT: This uses position-based indices, not timestamps.
+// The assumption is that input data is pre-cleaned (no gaps, proper frequency).
+// This design eliminates calendar frequency issues (monthly, quarterly, yearly)
+// where date arithmetic doesn't align with actual data timestamps.
 // ============================================================================
 
 struct FoldBoundary {
     int64_t fold_id;
-    int64_t train_start;  // microseconds
-    int64_t train_end;
-    int64_t test_start;
-    int64_t test_end;
+    idx_t train_start_idx;   // Start index in sorted data (inclusive)
+    idx_t train_end_idx;     // End index in sorted data (inclusive)
+    idx_t test_start_idx;    // Start index for test set (inclusive)
+    idx_t test_end_idx;      // End index for test set (inclusive)
 };
 
 // ============================================================================
@@ -566,85 +571,111 @@ static OperatorResultType TsBacktestNativeInOut(
 }
 
 // ============================================================================
-// Compute Fold Boundaries (called once from first thread)
+// Compute Fold Boundaries (position-based, called once from first thread)
+//
+// POSITION-BASED FOLD COMPUTATION:
+// This function computes fold boundaries as array indices, not timestamps.
+// This handles all frequency types (hourly, daily, weekly, monthly, quarterly,
+// yearly) correctly because it relies on data positions, not date arithmetic.
+//
+// ASSUMPTION: Input data is pre-cleaned with no gaps and consistent frequency.
+// Any frequency issues should be resolved before calling backtest functions.
+//
+// Walk-forward CV approach:
+//   Fold 1: train [0..init_train-1], test [init_train+gap..init_train+gap+horizon-1]
+//   Fold 2: train [0..init_train+skip-1], test [init_train+skip+gap..]
+//   etc.
 // ============================================================================
 
 static void ComputeFoldBoundaries(
     TsBacktestNativeGlobalState &global_state,
     const TsBacktestNativeBindData &bind_data) {
 
-    int64_t min_date = global_state.global_min_date.load();
-    int64_t max_date = global_state.global_max_date.load();
-    int64_t n_dates = global_state.unique_dates.size();
+    idx_t n_dates = global_state.unique_dates.size();
 
     if (n_dates < 2) return;
 
-    // Compute frequency in microseconds
-    int64_t freq_micros;
-    if (bind_data.date_col_type == DateColumnType::INTEGER ||
-        bind_data.date_col_type == DateColumnType::BIGINT) {
-        freq_micros = bind_data.frequency_is_raw ? bind_data.frequency_seconds : bind_data.frequency_seconds;
-    } else {
-        freq_micros = bind_data.frequency_is_raw
-            ? bind_data.frequency_seconds * 86400LL * 1000000LL
-            : bind_data.frequency_seconds * 1000000LL;
-    }
+    // Compute initial train size (number of data points, not time periods)
+    idx_t init_train_size = bind_data.initial_train_size > 0
+        ? static_cast<idx_t>(bind_data.initial_train_size)
+        : std::max(n_dates / 2, static_cast<idx_t>(1));
 
-    // Compute initial train size
-    int64_t init_train_size = bind_data.initial_train_size > 0
-        ? bind_data.initial_train_size
-        : std::max(static_cast<int64_t>(n_dates / 2), static_cast<int64_t>(1));
+    // Compute skip length (number of data points to advance between folds)
+    idx_t skip_length = bind_data.skip_length > 0
+        ? static_cast<idx_t>(bind_data.skip_length)
+        : static_cast<idx_t>(bind_data.horizon);
 
-    // Compute skip length
-    int64_t skip_length = bind_data.skip_length > 0
-        ? bind_data.skip_length
-        : bind_data.horizon;
+    idx_t gap = static_cast<idx_t>(bind_data.gap);
+    idx_t horizon = static_cast<idx_t>(bind_data.horizon);
+    idx_t embargo = static_cast<idx_t>(bind_data.embargo);
+    idx_t min_train = static_cast<idx_t>(bind_data.min_train_size);
 
-    // Generate fold boundaries
+    // Generate fold boundaries using position indices
     for (int64_t fold = 0; fold < bind_data.folds; fold++) {
-        int64_t train_end = min_date + (init_train_size + fold * skip_length) * freq_micros;
-        int64_t test_start = train_end + (bind_data.gap + 1) * freq_micros;
-        int64_t test_end = train_end + (bind_data.gap + bind_data.horizon) * freq_micros;
+        // Training end index (inclusive) - advances by skip_length each fold
+        idx_t train_end_idx = init_train_size - 1 + fold * skip_length;
+
+        // Test start index (inclusive) - starts after gap
+        idx_t test_start_idx = train_end_idx + 1 + gap;
+
+        // Test end index (inclusive)
+        idx_t test_end_idx = test_start_idx + horizon - 1;
 
         // Clip test_end if clip_horizon is true
-        if (bind_data.clip_horizon) {
-            test_end = std::min(test_end, max_date);
+        if (bind_data.clip_horizon && test_end_idx >= n_dates) {
+            test_end_idx = n_dates - 1;
         }
 
-        // Check if fold is valid (has test data)
+        // Check if fold is valid (has test data within data range)
         bool valid = bind_data.clip_horizon
-            ? (test_start <= max_date)
-            : (test_end <= max_date);
+            ? (test_start_idx < n_dates)
+            : (test_end_idx < n_dates);
 
         if (!valid) break;
 
         // Compute train_start based on window type
-        int64_t train_start;
+        idx_t train_start_idx;
         if (bind_data.window_type == "expanding") {
-            train_start = min_date;
-        } else {  // fixed or sliding
-            train_start = train_end - bind_data.min_train_size * freq_micros;
+            train_start_idx = 0;
+        } else {
+            // fixed or sliding window - use min_train_size points
+            if (train_end_idx + 1 >= min_train) {
+                train_start_idx = train_end_idx + 1 - min_train;
+            } else {
+                train_start_idx = 0;
+            }
         }
 
         // Apply embargo from previous fold
-        if (fold > 0 && bind_data.embargo > 0 && !global_state.fold_bounds.empty()) {
-            int64_t embargo_cutoff = global_state.fold_bounds.back().test_end + bind_data.embargo * freq_micros;
-            train_start = std::max(train_start, embargo_cutoff);
+        if (fold > 0 && embargo > 0 && !global_state.fold_bounds.empty()) {
+            idx_t embargo_cutoff = global_state.fold_bounds.back().test_end_idx + 1 + embargo;
+            if (embargo_cutoff > train_start_idx) {
+                train_start_idx = embargo_cutoff;
+            }
         }
 
         FoldBoundary fb;
         fb.fold_id = fold + 1;
-        fb.train_start = train_start;
-        fb.train_end = train_end;
-        fb.test_start = test_start;
-        fb.test_end = test_end;
+        fb.train_start_idx = train_start_idx;
+        fb.train_end_idx = train_end_idx;
+        fb.test_start_idx = test_start_idx;
+        fb.test_end_idx = test_end_idx;
 
         global_state.fold_bounds.push_back(fb);
     }
 }
 
 // ============================================================================
-// Process Fold for a single group
+// Process Fold for a single group (position-based)
+//
+// POSITION-BASED APPROACH:
+// 1. Sort group data by date once
+// 2. Slice train data by indices [train_start_idx..train_end_idx]
+// 3. Slice test data by indices [test_start_idx..test_end_idx]
+// 4. Match forecast[h] to test[h] directly by position
+//
+// No date arithmetic needed - dates come directly from the data at each index.
+// This correctly handles all frequency types including calendar-based ones.
 // ============================================================================
 
 static void ProcessGroupFold(
@@ -658,42 +689,40 @@ static void ProcessGroupFold(
     vector<double> &fold_lower,
     vector<double> &fold_upper) {
 
-    // Extract training data for this fold
-    vector<std::pair<int64_t, double>> train_data;
-    std::map<int64_t, double> test_data;
+    // Sort group data by date (creates sorted indices)
+    vector<size_t> sorted_indices(grp.dates.size());
+    for (size_t i = 0; i < sorted_indices.size(); i++) {
+        sorted_indices[i] = i;
+    }
+    std::sort(sorted_indices.begin(), sorted_indices.end(),
+        [&grp](size_t a, size_t b) { return grp.dates[a] < grp.dates[b]; });
 
-    for (size_t i = 0; i < grp.dates.size(); i++) {
-        int64_t dt = grp.dates[i];
-        if (dt >= fold.train_start && dt <= fold.train_end) {
-            train_data.push_back({dt, grp.values[i]});
-        }
-        if (dt >= fold.test_start && dt <= fold.test_end) {
-            test_data[dt] = grp.values[i];
-        }
+    idx_t n_points = sorted_indices.size();
+
+    // Validate fold indices against this group's data size
+    if (fold.train_end_idx >= n_points || fold.test_start_idx >= n_points) {
+        return;  // Not enough data for this fold
     }
 
-    // Sort training data by date
-    std::sort(train_data.begin(), train_data.end());
+    // Clip test_end_idx to available data
+    idx_t effective_test_end = std::min(fold.test_end_idx, n_points - 1);
 
-    if (train_data.empty() || test_data.empty()) return;
-
-    // Extract values for FFI
+    // Extract training data by position
     vector<double> train_values;
-    int64_t last_train_date = train_data.back().first;
-    for (auto &[dt, val] : train_data) {
-        train_values.push_back(val);
+    for (idx_t i = fold.train_start_idx; i <= fold.train_end_idx && i < n_points; i++) {
+        train_values.push_back(grp.values[sorted_indices[i]]);
     }
 
-    // Compute frequency in microseconds for date arithmetic
-    int64_t freq_micros;
-    if (bind_data.date_col_type == DateColumnType::INTEGER ||
-        bind_data.date_col_type == DateColumnType::BIGINT) {
-        freq_micros = bind_data.frequency_is_raw ? bind_data.frequency_seconds : bind_data.frequency_seconds;
-    } else {
-        freq_micros = bind_data.frequency_is_raw
-            ? bind_data.frequency_seconds * 86400LL * 1000000LL
-            : bind_data.frequency_seconds * 1000000LL;
+    if (train_values.empty()) return;
+
+    // Prepare test data (dates and values at test positions)
+    vector<std::pair<int64_t, double>> test_points;
+    for (idx_t i = fold.test_start_idx; i <= effective_test_end && i < n_points; i++) {
+        size_t orig_idx = sorted_indices[i];
+        test_points.push_back({grp.dates[orig_idx], grp.values[orig_idx]});
     }
+
+    if (test_points.empty()) return;
 
     // Call FFI forecast
     ForecastOptions opts = {};
@@ -724,22 +753,12 @@ static void ProcessGroupFold(
         return;
     }
 
-    // Convert test_data map to sorted vector for position-based matching
-    // This handles calendar frequencies (monthly, quarterly, yearly) where
-    // calculated dates don't exactly match actual data timestamps
-    vector<std::pair<int64_t, double>> sorted_test;
-    sorted_test.reserve(test_data.size());
-    for (const auto &[dt, val] : test_data) {
-        sorted_test.push_back({dt, val});
-    }
-    // Map is already sorted by key, but ensure it's sorted
-    std::sort(sorted_test.begin(), sorted_test.end());
-
     // Match forecasts with test data by position (forecast[h] -> test[h])
-    size_t n_matches = std::min(static_cast<size_t>(fcst.n_forecasts), sorted_test.size());
+    // No date arithmetic - we use the actual dates from test_points
+    size_t n_matches = std::min(static_cast<size_t>(fcst.n_forecasts), test_points.size());
     for (size_t h = 0; h < n_matches; h++) {
-        int64_t actual_date = sorted_test[h].first;
-        double actual = sorted_test[h].second;
+        int64_t actual_date = test_points[h].first;
+        double actual = test_points[h].second;
         double forecast_val = fcst.point_forecasts[h];
         double lower = fcst.lower_bounds ? fcst.lower_bounds[h] : 0.0;
         double upper = fcst.upper_bounds ? fcst.upper_bounds[h] : 0.0;
@@ -748,7 +767,7 @@ static void ProcessGroupFold(
         res.fold_id = fold.fold_id;
         res.group_key = group_key;
         res.group_value = grp.group_value;
-        res.date = actual_date;  // Use actual test date, not calculated
+        res.date = actual_date;  // Use actual date from data, not calculated
         res.forecast = forecast_val;
         res.actual = actual;
         res.error = forecast_val - actual;
