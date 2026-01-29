@@ -5,6 +5,8 @@
 #include "duckdb/common/string_util.hpp"
 #include <algorithm>
 #include <map>
+#include <set>
+#include <mutex>
 #include <cmath>
 #include <cstring>
 
@@ -44,6 +46,31 @@ struct TsCvForecastNativeBindData : public TableFunctionData {
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
     LogicalType date_logical_type = LogicalType(LogicalTypeId::TIMESTAMP);
     LogicalType group_logical_type = LogicalType(LogicalTypeId::VARCHAR);
+};
+
+// ============================================================================
+// Global State - enables parallel execution
+//
+// IMPORTANT: This custom GlobalState is required for proper parallel execution.
+// Using the base GlobalTableFunctionState directly causes batch index collisions
+// with large datasets (300k+ groups) during BatchedDataCollection::Merge.
+// ============================================================================
+
+struct TsCvForecastNativeGlobalState : public GlobalTableFunctionState {
+    // Allow parallel execution - each thread processes its partition of groups
+    idx_t MaxThreads() const override {
+        return 999999;  // Unlimited - let DuckDB decide based on hardware
+    }
+
+    // Global group tracking to prevent duplicate processing
+    std::mutex processed_groups_mutex;
+    std::set<string> processed_groups;
+
+    bool ClaimGroup(const string &group_key) {
+        std::lock_guard<std::mutex> lock(processed_groups_mutex);
+        auto result = processed_groups.insert(group_key);
+        return result.second;
+    }
 };
 
 // ============================================================================
@@ -312,7 +339,7 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
 static unique_ptr<GlobalTableFunctionState> TsCvForecastNativeInitGlobal(
     ClientContext &context,
     TableFunctionInitInput &input) {
-    return make_uniq<GlobalTableFunctionState>();
+    return make_uniq<TsCvForecastNativeGlobalState>();
 }
 
 static unique_ptr<LocalTableFunctionState> TsCvForecastNativeInitLocal(
@@ -395,11 +422,17 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
     DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsCvForecastNativeBindData>();
+    auto &global_state = data_p.global_state->Cast<TsCvForecastNativeGlobalState>();
     auto &local_state = data_p.local_state->Cast<TsCvForecastNativeLocalState>();
 
     // Process all groups on first finalize call
     if (!local_state.processed) {
         for (const auto &composite_key : local_state.group_order) {
+            // Skip if another thread already claimed this group
+            if (!global_state.ClaimGroup(composite_key)) {
+                continue;
+            }
+
             auto &grp = local_state.groups[composite_key];
 
             if (grp.dates.empty()) continue;

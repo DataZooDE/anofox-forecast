@@ -5,6 +5,8 @@
 #include "duckdb/common/string_util.hpp"
 #include <algorithm>
 #include <map>
+#include <set>
+#include <mutex>
 #include <cmath>
 #include <cstring>
 
@@ -42,6 +44,36 @@ struct TsForecastNativeBindData : public TableFunctionData {
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
     LogicalType date_logical_type = LogicalType(LogicalTypeId::TIMESTAMP);
     LogicalType group_logical_type = LogicalType(LogicalTypeId::VARCHAR);
+};
+
+// ============================================================================
+// Global State - enables parallel execution
+//
+// IMPORTANT: This custom GlobalState is required for proper parallel execution.
+// Using the base GlobalTableFunctionState directly causes batch index collisions
+// with large datasets (300k+ groups) during BatchedDataCollection::Merge.
+// ============================================================================
+
+struct TsForecastNativeGlobalState : public GlobalTableFunctionState {
+    // Allow parallel execution - each thread processes its partition of groups
+    // DuckDB assigns unique batch indices per thread when we properly declare
+    // parallel support via this MaxThreads override.
+    idx_t MaxThreads() const override {
+        return 999999;  // Unlimited - let DuckDB decide based on hardware
+    }
+
+    // Global group tracking to prevent duplicate processing
+    // When DuckDB partitions input, the same group may be sent to multiple threads.
+    // We use this set to ensure each group is only processed once.
+    std::mutex processed_groups_mutex;
+    std::set<string> processed_groups;
+
+    // Try to claim a group for processing. Returns true if this thread should process it.
+    bool ClaimGroup(const string &group_key) {
+        std::lock_guard<std::mutex> lock(processed_groups_mutex);
+        auto result = processed_groups.insert(group_key);
+        return result.second;  // true if insertion happened (group was not already claimed)
+    }
 };
 
 // ============================================================================
@@ -323,7 +355,7 @@ static unique_ptr<FunctionData> TsForecastNativeBind(
 static unique_ptr<GlobalTableFunctionState> TsForecastNativeInitGlobal(
     ClientContext &context,
     TableFunctionInitInput &input) {
-    return make_uniq<GlobalTableFunctionState>();
+    return make_uniq<TsForecastNativeGlobalState>();
 }
 
 static unique_ptr<LocalTableFunctionState> TsForecastNativeInitLocal(
@@ -401,11 +433,17 @@ static OperatorFinalizeResultType TsForecastNativeFinalize(
     DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsForecastNativeBindData>();
+    auto &global_state = data_p.global_state->Cast<TsForecastNativeGlobalState>();
     auto &local_state = data_p.local_state->Cast<TsForecastNativeLocalState>();
 
     // Process all groups on first finalize call
     if (!local_state.processed) {
         for (const auto &group_key : local_state.group_order) {
+            // Skip if another thread already claimed this group
+            if (!global_state.ClaimGroup(group_key)) {
+                continue;
+            }
+
             auto &grp = local_state.groups[group_key];
 
             if (grp.dates.empty()) continue;
