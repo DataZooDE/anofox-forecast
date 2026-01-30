@@ -145,13 +145,28 @@ static unique_ptr<FunctionData> TsFillForwardNativeBind(
 }
 
 // ============================================================================
+// Global State - enables parallel execution
+//
+// IMPORTANT: This custom GlobalState is required for proper parallel execution.
+// Using the base GlobalTableFunctionState directly causes batch index collisions
+// with large datasets (300k+ groups) during BatchedDataCollection::Merge.
+// ============================================================================
+
+struct TsFillForwardNativeGlobalState : public GlobalTableFunctionState {
+    // Allow parallel execution - each thread processes its partition of groups
+    idx_t MaxThreads() const override {
+        return 999999;  // Unlimited - let DuckDB decide based on hardware
+    }
+};
+
+// ============================================================================
 // Init Functions
 // ============================================================================
 
 static unique_ptr<GlobalTableFunctionState> TsFillForwardNativeInitGlobal(
     ClientContext &context,
     TableFunctionInitInput &input) {
-    return make_uniq<GlobalTableFunctionState>();
+    return make_uniq<TsFillForwardNativeGlobalState>();
 }
 
 static unique_ptr<LocalTableFunctionState> TsFillForwardNativeInitLocal(
