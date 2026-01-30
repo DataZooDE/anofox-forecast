@@ -109,6 +109,12 @@ pub struct DetectedPeriod {
     pub phase: f64,
     /// Iteration number (1-indexed)
     pub iteration: usize,
+    /// Whether this period matches an expected period within tolerance
+    pub matches_expected: bool,
+    /// The expected period that was matched (None if no match)
+    pub matched_expected_period: Option<f64>,
+    /// Relative deviation from the matched expected period (None if no match)
+    pub match_deviation: Option<f64>,
 }
 
 impl From<FdarsDetectedPeriod> for DetectedPeriod {
@@ -120,6 +126,9 @@ impl From<FdarsDetectedPeriod> for DetectedPeriod {
             amplitude: dp.amplitude,
             phase: dp.phase,
             iteration: dp.iteration,
+            matches_expected: false,
+            matched_expected_period: None,
+            match_deviation: None,
         }
     }
 }
@@ -1365,6 +1374,95 @@ pub const DEFAULT_MIN_CONFIDENCE_ACF: f64 = 0.3;
 /// Set to 0.0 to disable filtering.
 pub const DEFAULT_MIN_CONFIDENCE_FFT: f64 = 5.0;
 
+/// Default tolerance for matching detected periods to expected periods.
+/// A detected period `p` matches expected `e` if: |p - e| / e <= tolerance
+pub const DEFAULT_TOLERANCE: f64 = 0.1;
+
+/// Validate a detected period against expected periods.
+///
+/// Returns (matches_expected, matched_expected_period, match_deviation).
+/// A detected period `p` matches expected `e` if: |p - e| / e <= tolerance
+fn validate_period(
+    detected: f64,
+    expected_periods: Option<&[f64]>,
+    tolerance: f64,
+) -> (bool, Option<f64>, Option<f64>) {
+    let Some(expected) = expected_periods else {
+        return (false, None, None);
+    };
+
+    if expected.is_empty() {
+        return (false, None, None);
+    }
+
+    // Find the expected period with the smallest relative deviation
+    let mut best_match: Option<(f64, f64)> = None; // (expected_period, deviation)
+
+    for &exp in expected {
+        if exp <= 0.0 {
+            continue;
+        }
+        let deviation = (detected - exp).abs() / exp;
+        if deviation <= tolerance {
+            match best_match {
+                None => best_match = Some((exp, deviation)),
+                Some((_, prev_dev)) if deviation < prev_dev => {
+                    best_match = Some((exp, deviation));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    match best_match {
+        Some((matched_period, deviation)) => (true, Some(matched_period), Some(deviation)),
+        None => (false, None, None),
+    }
+}
+
+/// Detect periods using the specified method with optional expected period validation.
+///
+/// # Arguments
+/// * `values` - Time series values
+/// * `method` - Detection method to use
+/// * `max_period` - Maximum period to search (default: 365, suitable for daily data)
+/// * `min_confidence` - Minimum confidence threshold; periods below this return as "no seasonality".
+///   Use 0.0 to disable filtering. If None, uses method-specific default (0.3 for ACF, 5.0 for FFT).
+/// * `expected_periods` - Optional list of expected periods to validate against
+/// * `tolerance` - Relative tolerance for matching (default: 0.1 = 10%)
+///
+/// # Returns
+/// For single-period methods: a result with one period (or empty if below threshold)
+/// For multi-period method: a result with multiple periods (filtered by threshold)
+/// Each detected period includes validation fields if expected_periods is provided.
+pub fn detect_periods_with_validation(
+    values: &[f64],
+    method: PeriodMethod,
+    max_period: Option<usize>,
+    min_confidence: Option<f64>,
+    expected_periods: Option<&[f64]>,
+    tolerance: Option<f64>,
+) -> Result<MultiPeriodResult> {
+    // First, detect periods using the existing function
+    let mut result = detect_periods(values, method, max_period, min_confidence)?;
+
+    // If expected_periods is provided, validate each detected period
+    if let Some(expected) = expected_periods {
+        if !expected.is_empty() {
+            let tol = tolerance.unwrap_or(DEFAULT_TOLERANCE);
+            for period in &mut result.periods {
+                let (matches, matched, deviation) =
+                    validate_period(period.period, Some(expected), tol);
+                period.matches_expected = matches;
+                period.matched_expected_period = matched;
+                period.match_deviation = deviation;
+            }
+        }
+    }
+
+    Ok(result)
+}
+
 /// Detect periods using the specified method.
 ///
 /// # Arguments
@@ -1438,6 +1536,9 @@ fn detect_periods_internal(
                     amplitude: 0.0,
                     phase: 0.0,
                     iteration: 1,
+                    matches_expected: false,
+                    matched_expected_period: None,
+                    match_deviation: None,
                 }],
                 primary_period: single.period,
                 method: single.method,
@@ -1453,6 +1554,9 @@ fn detect_periods_internal(
                     amplitude: 0.0,
                     phase: 0.0,
                     iteration: 1,
+                    matches_expected: false,
+                    matched_expected_period: None,
+                    match_deviation: None,
                 }],
                 primary_period: single.period,
                 method: single.method,
@@ -1468,6 +1572,9 @@ fn detect_periods_internal(
                     amplitude: 0.0,
                     phase: 0.0,
                     iteration: 1,
+                    matches_expected: false,
+                    matched_expected_period: None,
+                    match_deviation: None,
                 }],
                 primary_period: single.period,
                 method: single.method,
@@ -1497,6 +1604,9 @@ fn detect_periods_internal(
                     amplitude: 0.0,
                     phase: 0.0,
                     iteration: 1,
+                    matches_expected: false,
+                    matched_expected_period: None,
+                    match_deviation: None,
                 }],
                 primary_period: best.period,
                 method: method_name.to_string(),
@@ -1512,6 +1622,9 @@ fn detect_periods_internal(
                     amplitude: 0.0,
                     phase: 0.0,
                     iteration: 1,
+                    matches_expected: false,
+                    matched_expected_period: None,
+                    match_deviation: None,
                 }],
                 primary_period: result.period,
                 method: result.method,
@@ -1527,6 +1640,9 @@ fn detect_periods_internal(
                     amplitude: 0.0,
                     phase: 0.0,
                     iteration: 1,
+                    matches_expected: false,
+                    matched_expected_period: None,
+                    match_deviation: None,
                 }],
                 primary_period: result.period,
                 method: result.method,
@@ -1542,6 +1658,9 @@ fn detect_periods_internal(
                     amplitude: 0.0,
                     phase: 0.0,
                     iteration: 1,
+                    matches_expected: false,
+                    matched_expected_period: None,
+                    match_deviation: None,
                 }],
                 primary_period: result.period,
                 method: result.method,
@@ -1557,6 +1676,9 @@ fn detect_periods_internal(
                     amplitude: 0.0,
                     phase: 0.0,
                     iteration: 1,
+                    matches_expected: false,
+                    matched_expected_period: None,
+                    match_deviation: None,
                 }],
                 primary_period: result.period,
                 method: result.method,
@@ -1572,6 +1694,9 @@ fn detect_periods_internal(
                     amplitude: 0.0,
                     phase: 0.0,
                     iteration: 1,
+                    matches_expected: false,
+                    matched_expected_period: None,
+                    match_deviation: None,
                 }],
                 primary_period: result.period,
                 method: result.method,
@@ -1587,6 +1712,9 @@ fn detect_periods_internal(
                     amplitude: 0.0,
                     phase: 0.0,
                     iteration: 1,
+                    matches_expected: false,
+                    matched_expected_period: None,
+                    match_deviation: None,
                 }],
                 primary_period: result.period,
                 method: result.method,
@@ -1602,6 +1730,9 @@ fn detect_periods_internal(
                     amplitude: 0.0,
                     phase: 0.0,
                     iteration: 1,
+                    matches_expected: false,
+                    matched_expected_period: None,
+                    match_deviation: None,
                 }],
                 primary_period: result.period,
                 method: result.method,
@@ -1617,6 +1748,9 @@ fn detect_periods_internal(
                     amplitude: 0.0,
                     phase: 0.0,
                     iteration: 1,
+                    matches_expected: false,
+                    matched_expected_period: None,
+                    match_deviation: None,
                 }],
                 primary_period: result.period,
                 method: result.method,
@@ -1872,5 +2006,98 @@ mod tests {
         assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(result.method, "ssa");
+    }
+
+    #[test]
+    fn test_validate_period_helper() {
+        // Test exact match
+        let (matches, matched, deviation) = validate_period(12.0, Some(&[7.0, 12.0, 365.0]), 0.1);
+        assert!(matches);
+        assert_eq!(matched, Some(12.0));
+        assert_eq!(deviation, Some(0.0));
+
+        // Test match within tolerance (10% tolerance)
+        let (matches, matched, deviation) = validate_period(12.5, Some(&[7.0, 12.0, 365.0]), 0.1);
+        assert!(matches);
+        assert_eq!(matched, Some(12.0));
+        assert!(deviation.unwrap() < 0.05); // 0.5/12 ≈ 0.0417
+
+        // Test no match (outside tolerance)
+        let (matches, matched, deviation) = validate_period(15.0, Some(&[7.0, 12.0, 365.0]), 0.1);
+        assert!(!matches);
+        assert_eq!(matched, None);
+        assert_eq!(deviation, None);
+
+        // Test empty expected periods
+        let (matches, matched, deviation) = validate_period(12.0, Some(&[]), 0.1);
+        assert!(!matches);
+        assert_eq!(matched, None);
+        assert_eq!(deviation, None);
+
+        // Test None expected periods
+        let (matches, matched, deviation) = validate_period(12.0, None, 0.1);
+        assert!(!matches);
+        assert_eq!(matched, None);
+        assert_eq!(deviation, None);
+    }
+
+    #[test]
+    fn test_detect_periods_with_validation() {
+        // Generate data with period ~12
+        let values = generate_seasonal_series(120, 12.0, 5.0);
+
+        // Test with expected periods that include a match
+        let result = detect_periods_with_validation(
+            &values,
+            PeriodMethod::Fft,
+            None,
+            Some(0.0), // disable confidence filtering
+            Some(&[7.0, 12.0, 365.0]),
+            Some(0.1),
+        );
+
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert!(!result.periods.is_empty());
+
+        let first_period = &result.periods[0];
+        eprintln!(
+            "Detected period: {:.2}, matches_expected: {}, matched: {:?}, deviation: {:?}",
+            first_period.period,
+            first_period.matches_expected,
+            first_period.matched_expected_period,
+            first_period.match_deviation
+        );
+
+        // Period 12 should match expected 12 within 10% tolerance
+        assert!(first_period.matches_expected);
+        assert_eq!(first_period.matched_expected_period, Some(12.0));
+        assert!(first_period.match_deviation.unwrap() < 0.1);
+    }
+
+    #[test]
+    fn test_detect_periods_with_validation_no_match() {
+        // Generate data with period ~12
+        let values = generate_seasonal_series(120, 12.0, 5.0);
+
+        // Test with expected periods that don't include a match
+        let result = detect_periods_with_validation(
+            &values,
+            PeriodMethod::Fft,
+            None,
+            Some(0.0),           // disable confidence filtering
+            Some(&[7.0, 365.0]), // No 12
+            Some(0.1),
+        );
+
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert!(!result.periods.is_empty());
+
+        let first_period = &result.periods[0];
+        // Period ~12 should NOT match 7 or 365 within 10% tolerance
+        assert!(!first_period.matches_expected);
+        assert_eq!(first_period.matched_expected_period, None);
+        assert_eq!(first_period.match_deviation, None);
     }
 }

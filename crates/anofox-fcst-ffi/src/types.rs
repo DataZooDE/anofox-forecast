@@ -808,6 +808,12 @@ pub struct FlatMultiPeriodResult {
     pub phase_values: *mut c_double,
     /// Array of iteration values (1-indexed)
     pub iteration_values: *mut size_t,
+    /// Array of matches_expected flags
+    pub matches_expected_values: *mut bool,
+    /// Array of matched_expected_period values (NaN if no match)
+    pub matched_expected_values: *mut c_double,
+    /// Array of match_deviation values (NaN if no match)
+    pub match_deviation_values: *mut c_double,
     /// Number of detected periods
     pub n_periods: size_t,
     /// Primary (strongest) period
@@ -825,6 +831,9 @@ impl Default for FlatMultiPeriodResult {
             amplitude_values: std::ptr::null_mut(),
             phase_values: std::ptr::null_mut(),
             iteration_values: std::ptr::null_mut(),
+            matches_expected_values: std::ptr::null_mut(),
+            matched_expected_values: std::ptr::null_mut(),
+            match_deviation_values: std::ptr::null_mut(),
             n_periods: 0,
             primary_period: 0.0,
             method: [0; 32],

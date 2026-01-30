@@ -1033,6 +1033,9 @@ pub unsafe extern "C" fn anofox_ts_detect_periods(
 /// * `min_confidence` - Minimum confidence threshold; periods below this are filtered out.
 ///   Use negative value (e.g., -1.0) to use method-specific default.
 ///   Use 0.0 to disable filtering. Use positive value for custom threshold.
+/// * `expected_periods` - Optional array of expected periods to validate against (NULL = no validation)
+/// * `n_expected` - Number of expected periods (0 if expected_periods is NULL)
+/// * `tolerance` - Relative tolerance for matching (negative = use default 0.1)
 ///
 /// # Safety
 /// All pointer arguments must be valid and non-null.
@@ -1043,6 +1046,9 @@ pub unsafe extern "C" fn anofox_ts_detect_periods_flat(
     method: *const c_char,
     max_period: size_t,
     min_confidence: c_double,
+    expected_periods: *const c_double,
+    n_expected: size_t,
+    tolerance: c_double,
     out_result: *mut types::FlatMultiPeriodResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -1077,11 +1083,28 @@ pub unsafe extern "C" fn anofox_ts_detect_periods_flat(
         } else {
             Some(min_confidence) // 0.0 disables filtering, positive value is threshold
         };
-        anofox_fcst_core::detect_periods(
+
+        // Convert expected_periods: NULL or n_expected=0 means no validation
+        let expected_vec: Option<Vec<f64>> = if expected_periods.is_null() || n_expected == 0 {
+            None
+        } else {
+            Some(std::slice::from_raw_parts(expected_periods, n_expected).to_vec())
+        };
+
+        // Convert tolerance: negative = use default
+        let tolerance_opt = if tolerance < 0.0 || tolerance.is_nan() {
+            None
+        } else {
+            Some(tolerance)
+        };
+
+        anofox_fcst_core::detect_periods_with_validation(
             &values_vec,
             period_method,
             max_period_opt,
             min_confidence_opt,
+            expected_vec.as_deref(),
+            tolerance_opt,
         )
     }));
 
@@ -1100,6 +1123,11 @@ pub unsafe extern "C" fn anofox_ts_detect_periods_flat(
                 let amplitude_ptr = malloc(n * std::mem::size_of::<c_double>()) as *mut c_double;
                 let phase_ptr = malloc(n * std::mem::size_of::<c_double>()) as *mut c_double;
                 let iteration_ptr = malloc(n * std::mem::size_of::<size_t>()) as *mut size_t;
+                let matches_expected_ptr = malloc(n * std::mem::size_of::<bool>()) as *mut bool;
+                let matched_expected_ptr =
+                    malloc(n * std::mem::size_of::<c_double>()) as *mut c_double;
+                let match_deviation_ptr =
+                    malloc(n * std::mem::size_of::<c_double>()) as *mut c_double;
 
                 for (i, dp) in multi_result.periods.iter().enumerate() {
                     *period_ptr.add(i) = dp.period;
@@ -1108,6 +1136,9 @@ pub unsafe extern "C" fn anofox_ts_detect_periods_flat(
                     *amplitude_ptr.add(i) = dp.amplitude;
                     *phase_ptr.add(i) = dp.phase;
                     *iteration_ptr.add(i) = dp.iteration;
+                    *matches_expected_ptr.add(i) = dp.matches_expected;
+                    *matched_expected_ptr.add(i) = dp.matched_expected_period.unwrap_or(f64::NAN);
+                    *match_deviation_ptr.add(i) = dp.match_deviation.unwrap_or(f64::NAN);
                 }
 
                 (*out_result).period_values = period_ptr;
@@ -1116,6 +1147,9 @@ pub unsafe extern "C" fn anofox_ts_detect_periods_flat(
                 (*out_result).amplitude_values = amplitude_ptr;
                 (*out_result).phase_values = phase_ptr;
                 (*out_result).iteration_values = iteration_ptr;
+                (*out_result).matches_expected_values = matches_expected_ptr;
+                (*out_result).matched_expected_values = matched_expected_ptr;
+                (*out_result).match_deviation_values = match_deviation_ptr;
             } else {
                 (*out_result).period_values = ptr::null_mut();
                 (*out_result).confidence_values = ptr::null_mut();
@@ -1123,6 +1157,9 @@ pub unsafe extern "C" fn anofox_ts_detect_periods_flat(
                 (*out_result).amplitude_values = ptr::null_mut();
                 (*out_result).phase_values = ptr::null_mut();
                 (*out_result).iteration_values = ptr::null_mut();
+                (*out_result).matches_expected_values = ptr::null_mut();
+                (*out_result).matched_expected_values = ptr::null_mut();
+                (*out_result).match_deviation_values = ptr::null_mut();
             }
 
             true
@@ -1398,6 +1435,11 @@ pub unsafe extern "C" fn anofox_ts_detect_multiple_periods_flat(
                 let amplitude_ptr = malloc(n * std::mem::size_of::<c_double>()) as *mut c_double;
                 let phase_ptr = malloc(n * std::mem::size_of::<c_double>()) as *mut c_double;
                 let iteration_ptr = malloc(n * std::mem::size_of::<size_t>()) as *mut size_t;
+                let matches_expected_ptr = malloc(n * std::mem::size_of::<bool>()) as *mut bool;
+                let matched_expected_ptr =
+                    malloc(n * std::mem::size_of::<c_double>()) as *mut c_double;
+                let match_deviation_ptr =
+                    malloc(n * std::mem::size_of::<c_double>()) as *mut c_double;
 
                 for (i, dp) in multi_result.periods.iter().enumerate() {
                     *period_ptr.add(i) = dp.period;
@@ -1406,6 +1448,9 @@ pub unsafe extern "C" fn anofox_ts_detect_multiple_periods_flat(
                     *amplitude_ptr.add(i) = dp.amplitude;
                     *phase_ptr.add(i) = dp.phase;
                     *iteration_ptr.add(i) = dp.iteration;
+                    *matches_expected_ptr.add(i) = dp.matches_expected;
+                    *matched_expected_ptr.add(i) = dp.matched_expected_period.unwrap_or(f64::NAN);
+                    *match_deviation_ptr.add(i) = dp.match_deviation.unwrap_or(f64::NAN);
                 }
 
                 (*out_result).period_values = period_ptr;
@@ -1414,6 +1459,9 @@ pub unsafe extern "C" fn anofox_ts_detect_multiple_periods_flat(
                 (*out_result).amplitude_values = amplitude_ptr;
                 (*out_result).phase_values = phase_ptr;
                 (*out_result).iteration_values = iteration_ptr;
+                (*out_result).matches_expected_values = matches_expected_ptr;
+                (*out_result).matched_expected_values = matched_expected_ptr;
+                (*out_result).match_deviation_values = match_deviation_ptr;
             } else {
                 (*out_result).period_values = ptr::null_mut();
                 (*out_result).confidence_values = ptr::null_mut();
@@ -1421,6 +1469,9 @@ pub unsafe extern "C" fn anofox_ts_detect_multiple_periods_flat(
                 (*out_result).amplitude_values = ptr::null_mut();
                 (*out_result).phase_values = ptr::null_mut();
                 (*out_result).iteration_values = ptr::null_mut();
+                (*out_result).matches_expected_values = ptr::null_mut();
+                (*out_result).matched_expected_values = ptr::null_mut();
+                (*out_result).match_deviation_values = ptr::null_mut();
             }
 
             true
@@ -5378,6 +5429,18 @@ pub unsafe extern "C" fn anofox_free_flat_multi_period_result(
     if !r.iteration_values.is_null() {
         free(r.iteration_values as *mut core::ffi::c_void);
         r.iteration_values = ptr::null_mut();
+    }
+    if !r.matches_expected_values.is_null() {
+        free(r.matches_expected_values as *mut core::ffi::c_void);
+        r.matches_expected_values = ptr::null_mut();
+    }
+    if !r.matched_expected_values.is_null() {
+        free(r.matched_expected_values as *mut core::ffi::c_void);
+        r.matched_expected_values = ptr::null_mut();
+    }
+    if !r.match_deviation_values.is_null() {
+        free(r.match_deviation_values as *mut core::ffi::c_void);
+        r.match_deviation_values = ptr::null_mut();
     }
 }
 

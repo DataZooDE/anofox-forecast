@@ -79,10 +79,11 @@ pub use peaks::{
 };
 pub use periods::{
     aic_comparison, autoperiod, cfd_autoperiod, detect_multiple_periods_ts, detect_periods,
-    estimate_period_acf_ts, estimate_period_fft_ts, estimate_period_regression_ts, lomb_scargle,
-    matrix_profile_period, sazed_period, ssa_period, stl_period, AicPeriodResult, AutoperiodResult,
-    DetectedPeriod, LombScargleResult, MatrixProfilePeriodResult, MultiPeriodResult, PeriodMethod,
-    SazedPeriodResult, SinglePeriodResult, SsaPeriodResult, StlPeriodResult,
+    detect_periods_with_validation, estimate_period_acf_ts, estimate_period_fft_ts,
+    estimate_period_regression_ts, lomb_scargle, matrix_profile_period, sazed_period, ssa_period,
+    stl_period, AicPeriodResult, AutoperiodResult, DetectedPeriod, LombScargleResult,
+    MatrixProfilePeriodResult, MultiPeriodResult, PeriodMethod, SazedPeriodResult,
+    SinglePeriodResult, SsaPeriodResult, StlPeriodResult, DEFAULT_TOLERANCE,
 };
 pub use quality::{
     compute_data_quality, generate_quality_report, DataQuality, QualityReport, QualityThresholds,

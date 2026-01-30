@@ -383,6 +383,18 @@ typedef struct FlatMultiPeriodResult {
      */
     size_t *iteration_values;
     /**
+     * Array of matches_expected flags
+     */
+    bool *matches_expected_values;
+    /**
+     * Array of matched_expected_period values (NaN if no match)
+     */
+    double *matched_expected_values;
+    /**
+     * Array of match_deviation values (NaN if no match)
+     */
+    double *match_deviation_values;
+    /**
      * Number of detected periods
      */
     size_t n_periods;
@@ -1781,6 +1793,9 @@ bool anofox_ts_detect_periods(const double *values,
  * * `min_confidence` - Minimum confidence threshold; periods below this are filtered out.
  *   Use negative value (e.g., -1.0) to use method-specific default.
  *   Use 0.0 to disable filtering. Use positive value for custom threshold.
+ * * `expected_periods` - Optional array of expected periods to validate against (NULL = no validation)
+ * * `n_expected` - Number of expected periods (0 if expected_periods is NULL)
+ * * `tolerance` - Relative tolerance for matching (negative = use default 0.1)
  *
  * # Safety
  * All pointer arguments must be valid and non-null.
@@ -1790,6 +1805,9 @@ bool anofox_ts_detect_periods_flat(const double *values,
                                    const char *method,
                                    size_t max_period,
                                    double min_confidence,
+                                   const double *expected_periods,
+                                   size_t n_expected,
+                                   double tolerance,
                                    struct FlatMultiPeriodResult *out_result,
                                    struct AnofoxError *out_error);
 
