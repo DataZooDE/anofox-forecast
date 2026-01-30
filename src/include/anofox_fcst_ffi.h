@@ -2283,12 +2283,23 @@ bool anofox_ts_diff(const double *values,
  *
  * # Safety
  * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ *
+ * # Arguments
+ * * `dates` - Array of timestamps in microseconds
+ * * `values` - Array of values
+ * * `validity` - Validity bitmask (NULL means all valid)
+ * * `length` - Number of elements
+ * * `frequency_micros` - Frequency in microseconds (used for Fixed type)
+ * * `frequency_type` - Type of frequency (0=Fixed, 1=Monthly, 2=Quarterly, 3=Yearly)
+ * * `out_result` - Output result structure
+ * * `out_error` - Output error structure
  */
 bool anofox_ts_fill_gaps(const int64_t *dates,
                          const double *values,
                          const uint64_t *validity,
                          size_t length,
-                         int64_t frequency_seconds,
+                         int64_t frequency_micros,
+                         enum FrequencyType frequency_type,
                          struct GapFillResult *out_result,
                          struct AnofoxError *out_error);
 
@@ -2297,13 +2308,25 @@ bool anofox_ts_fill_gaps(const int64_t *dates,
  *
  * # Safety
  * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ *
+ * # Arguments
+ * * `dates` - Array of timestamps in microseconds
+ * * `values` - Array of values
+ * * `validity` - Validity bitmask (NULL means all valid)
+ * * `length` - Number of elements
+ * * `target_date` - Target date to extend to (microseconds since epoch)
+ * * `frequency_micros` - Frequency in microseconds (used for Fixed type)
+ * * `frequency_type` - Type of frequency (0=Fixed, 1=Monthly, 2=Quarterly, 3=Yearly)
+ * * `out_result` - Output result structure
+ * * `out_error` - Output error structure
  */
 bool anofox_ts_fill_forward_dates(const int64_t *dates,
                                   const double *values,
                                   const uint64_t *validity,
                                   size_t length,
                                   int64_t target_date,
-                                  int64_t frequency_seconds,
+                                  int64_t frequency_micros,
+                                  enum FrequencyType frequency_type,
                                   struct GapFillResult *out_result,
                                   struct AnofoxError *out_error);
 

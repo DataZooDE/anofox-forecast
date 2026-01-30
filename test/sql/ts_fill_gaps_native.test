@@ -186,3 +186,129 @@ A	2024-01-01	10.0
 A	2024-01-02	20.0
 A	2024-01-03	NULL
 A	2024-01-04	40.0
+
+# ==============================================================================
+# Test monthly frequency with calendar-aware gap filling
+# ==============================================================================
+
+statement ok
+DROP TABLE IF EXISTS test_monthly;
+
+statement ok
+CREATE TABLE test_monthly AS
+SELECT 'M' as group_col, d::DATE as date_col, v as value
+FROM (VALUES
+    ('2023-01-01', 100.0),
+    ('2023-03-01', 300.0)
+) AS t(d, v);
+
+# Monthly frequency should correctly insert February (not Jan 31)
+query III
+SELECT * FROM _ts_fill_gaps_native(
+    (SELECT group_col, date_col, value FROM test_monthly ORDER BY group_col, date_col),
+    '1mo'
+);
+----
+M	2023-01-01	100.0
+M	2023-02-01	NULL
+M	2023-03-01	300.0
+
+# Test monthly with multiple missing months
+statement ok
+DROP TABLE IF EXISTS test_monthly_multi;
+
+statement ok
+CREATE TABLE test_monthly_multi AS
+SELECT 'N' as group_col, d::DATE as date_col, v as value
+FROM (VALUES
+    ('2023-01-15', 100.0),
+    ('2023-05-15', 500.0)
+) AS t(d, v);
+
+# Should fill Feb, Mar, Apr (4 gaps)
+query III
+SELECT * FROM _ts_fill_gaps_native(
+    (SELECT group_col, date_col, value FROM test_monthly_multi ORDER BY group_col, date_col),
+    '1mo'
+);
+----
+N	2023-01-15	100.0
+N	2023-02-01	NULL
+N	2023-03-01	NULL
+N	2023-04-01	NULL
+N	2023-05-15	500.0
+
+# Test monthly with DuckDB interval-style "1 month"
+statement ok
+DROP TABLE IF EXISTS test_monthly_interval;
+
+statement ok
+CREATE TABLE test_monthly_interval AS
+SELECT 'O' as group_col, d::DATE as date_col, v as value
+FROM (VALUES
+    ('2024-10-01', 100.0),
+    ('2024-12-01', 300.0)
+) AS t(d, v);
+
+query III
+SELECT * FROM _ts_fill_gaps_native(
+    (SELECT group_col, date_col, value FROM test_monthly_interval ORDER BY group_col, date_col),
+    '1 month'
+);
+----
+O	2024-10-01	100.0
+O	2024-11-01	NULL
+O	2024-12-01	300.0
+
+# ==============================================================================
+# Test quarterly frequency
+# ==============================================================================
+
+statement ok
+DROP TABLE IF EXISTS test_quarterly;
+
+statement ok
+CREATE TABLE test_quarterly AS
+SELECT 'Q' as group_col, d::DATE as date_col, v as value
+FROM (VALUES
+    ('2023-01-01', 100.0),
+    ('2023-07-01', 300.0)
+) AS t(d, v);
+
+# Should fill Q2 (Apr 1)
+query III
+SELECT * FROM _ts_fill_gaps_native(
+    (SELECT group_col, date_col, value FROM test_quarterly ORDER BY group_col, date_col),
+    '1q'
+);
+----
+Q	2023-01-01	100.0
+Q	2023-04-01	NULL
+Q	2023-07-01	300.0
+
+# ==============================================================================
+# Test yearly frequency
+# ==============================================================================
+
+statement ok
+DROP TABLE IF EXISTS test_yearly;
+
+statement ok
+CREATE TABLE test_yearly AS
+SELECT 'Y' as group_col, d::DATE as date_col, v as value
+FROM (VALUES
+    ('2020-01-01', 100.0),
+    ('2023-01-01', 400.0)
+) AS t(d, v);
+
+# Should fill 2021, 2022
+query III
+SELECT * FROM _ts_fill_gaps_native(
+    (SELECT group_col, date_col, value FROM test_yearly ORDER BY group_col, date_col),
+    '1y'
+);
+----
+Y	2020-01-01	100.0
+Y	2021-01-01	NULL
+Y	2022-01-01	NULL
+Y	2023-01-01	400.0

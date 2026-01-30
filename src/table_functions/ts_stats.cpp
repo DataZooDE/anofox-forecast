@@ -13,53 +13,35 @@
 namespace duckdb {
 
 // Parse frequency string to microseconds and frequency type (e.g., "1d" -> 86400000000, FIXED)
-// Returns (microseconds, FrequencyType)
-static std::pair<int64_t, FrequencyType> ParseFrequencyWithType(const string &frequency_str) {
-    string upper = StringUtil::Upper(frequency_str);
-    StringUtil::Trim(upper);
-
-    // Try to parse Polars-style frequency (e.g., "1d", "1h", "30m", "1mo")
-    std::regex polars_regex("^([0-9]+)(d|h|m|min|w|mo|q|y)$", std::regex::icase);
-    std::smatch match;
-
-    if (std::regex_match(upper, match, polars_regex)) {
-        int64_t count = std::stoll(match[1].str());
-        string unit = StringUtil::Lower(match[2].str());
-
-        if (unit == "d") return std::make_pair(count * 86400LL * 1000000LL, FIXED);
-        if (unit == "h") return std::make_pair(count * 3600LL * 1000000LL, FIXED);
-        if (unit == "m" || unit == "min") return std::make_pair(count * 60LL * 1000000LL, FIXED);
-        if (unit == "w") return std::make_pair(count * 86400LL * 7LL * 1000000LL, FIXED);
-        // Calendar frequencies
-        if (unit == "mo") return std::make_pair(count * 86400LL * 30LL * 1000000LL, MONTHLY);
-        if (unit == "q") return std::make_pair(count * 86400LL * 90LL * 1000000LL, QUARTERLY);
-        if (unit == "y") return std::make_pair(count * 86400LL * 365LL * 1000000LL, YEARLY);
+// Returns (microseconds, FrequencyType) - for ts_stats usage
+static std::pair<int64_t, FrequencyType> ParseFrequencyForStats(const string &frequency_str) {
+    auto parsed = ParseFrequencyWithType(frequency_str);
+    // Convert seconds to microseconds for fixed frequencies
+    int64_t micros;
+    if (parsed.type == FrequencyType::FIXED) {
+        micros = parsed.seconds * 1000000LL;
+    } else {
+        // For calendar frequencies, use approximate values for stats computation
+        switch (parsed.type) {
+            case FrequencyType::MONTHLY:
+                micros = parsed.seconds * 86400LL * 30LL * 1000000LL;
+                break;
+            case FrequencyType::QUARTERLY:
+                micros = parsed.seconds * 86400LL * 90LL * 1000000LL;
+                break;
+            case FrequencyType::YEARLY:
+                micros = parsed.seconds * 86400LL * 365LL * 1000000LL;
+                break;
+            default:
+                micros = parsed.seconds * 1000000LL;
+        }
     }
-
-    // Try to parse DuckDB INTERVAL style (e.g., "1 day", "1 hour", "1 month")
-    std::regex interval_regex("^([0-9]+)\\s*(day|days|hour|hours|minute|minutes|week|weeks|month|months|quarter|quarters|year|years)$", std::regex::icase);
-
-    if (std::regex_match(upper, match, interval_regex)) {
-        int64_t count = std::stoll(match[1].str());
-        string unit = StringUtil::Lower(match[2].str());
-
-        if (unit == "day" || unit == "days") return std::make_pair(count * 86400LL * 1000000LL, FIXED);
-        if (unit == "hour" || unit == "hours") return std::make_pair(count * 3600LL * 1000000LL, FIXED);
-        if (unit == "minute" || unit == "minutes") return std::make_pair(count * 60LL * 1000000LL, FIXED);
-        if (unit == "week" || unit == "weeks") return std::make_pair(count * 86400LL * 7LL * 1000000LL, FIXED);
-        // Calendar frequencies
-        if (unit == "month" || unit == "months") return std::make_pair(count * 86400LL * 30LL * 1000000LL, MONTHLY);
-        if (unit == "quarter" || unit == "quarters") return std::make_pair(count * 86400LL * 90LL * 1000000LL, QUARTERLY);
-        if (unit == "year" || unit == "years") return std::make_pair(count * 86400LL * 365LL * 1000000LL, YEARLY);
-    }
-
-    // Default to 1 day (fixed frequency)
-    return std::make_pair(86400LL * 1000000LL, FIXED);
+    return std::make_pair(micros, parsed.type);
 }
 
 // Parse frequency string to microseconds (e.g., "1d" -> 86400000000) - backward compatible version
 static int64_t ParseFrequencyToMicroseconds(const string &frequency_str) {
-    return ParseFrequencyWithType(frequency_str).first;
+    return ParseFrequencyForStats(frequency_str).first;
 }
 
 // Define the output STRUCT type for ts_stats (34 metrics)
@@ -396,7 +378,7 @@ static unique_ptr<FunctionData> TsStatsByBind(
     // Parse frequency from second argument (index 1, since index 0 is TABLE placeholder)
     if (input.inputs.size() >= 2) {
         string freq_str = input.inputs[1].GetValue<string>();
-        auto [micros, ftype] = ParseFrequencyWithType(freq_str);
+        auto [micros, ftype] = ParseFrequencyForStats(freq_str);
         bind_data->frequency_micros = micros;
         bind_data->frequency_type = ftype;
     }

@@ -3926,13 +3926,24 @@ unsafe fn alloc_i64_array(n: size_t) -> *mut i64 {
 ///
 /// # Safety
 /// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+///
+/// # Arguments
+/// * `dates` - Array of timestamps in microseconds
+/// * `values` - Array of values
+/// * `validity` - Validity bitmask (NULL means all valid)
+/// * `length` - Number of elements
+/// * `frequency_micros` - Frequency in microseconds (used for Fixed type)
+/// * `frequency_type` - Type of frequency (0=Fixed, 1=Monthly, 2=Quarterly, 3=Yearly)
+/// * `out_result` - Output result structure
+/// * `out_error` - Output error structure
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_fill_gaps(
     dates: *const i64,
     values: *const c_double,
     validity: *const u64,
     length: size_t,
-    frequency_seconds: i64,
+    frequency_micros: i64,
+    frequency_type: FrequencyType,
     out_result: *mut GapFillResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -3947,17 +3958,24 @@ pub unsafe extern "C" fn anofox_ts_fill_gaps(
         return false;
     }
 
-    if frequency_seconds <= 0 {
+    // For Fixed frequency, require positive frequency_micros
+    // For calendar frequencies, the value is ignored
+    if frequency_type == FrequencyType::Fixed && frequency_micros <= 0 {
         if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::InvalidFrequency, "Frequency must be positive");
+            (*out_error).set_error(
+                ErrorCode::InvalidFrequency,
+                "Frequency must be positive for fixed intervals",
+            );
         }
         return false;
     }
 
+    let freq_type_core: anofox_fcst_core::FrequencyType = frequency_type.into();
+
     let result = catch_unwind(AssertUnwindSafe(|| {
         let dates_vec: Vec<i64> = std::slice::from_raw_parts(dates, length).to_vec();
         let series = build_series(values, validity, length);
-        anofox_fcst_core::fill_gaps(&dates_vec, &series, frequency_seconds)
+        anofox_fcst_core::fill_gaps(&dates_vec, &series, frequency_micros, freq_type_core)
     }));
 
     match result {
@@ -4015,6 +4033,17 @@ pub unsafe extern "C" fn anofox_ts_fill_gaps(
 ///
 /// # Safety
 /// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+///
+/// # Arguments
+/// * `dates` - Array of timestamps in microseconds
+/// * `values` - Array of values
+/// * `validity` - Validity bitmask (NULL means all valid)
+/// * `length` - Number of elements
+/// * `target_date` - Target date to extend to (microseconds since epoch)
+/// * `frequency_micros` - Frequency in microseconds (used for Fixed type)
+/// * `frequency_type` - Type of frequency (0=Fixed, 1=Monthly, 2=Quarterly, 3=Yearly)
+/// * `out_result` - Output result structure
+/// * `out_error` - Output error structure
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_fill_forward_dates(
     dates: *const i64,
@@ -4022,7 +4051,8 @@ pub unsafe extern "C" fn anofox_ts_fill_forward_dates(
     validity: *const u64,
     length: size_t,
     target_date: i64,
-    frequency_seconds: i64,
+    frequency_micros: i64,
+    frequency_type: FrequencyType,
     out_result: *mut GapFillResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -4037,17 +4067,30 @@ pub unsafe extern "C" fn anofox_ts_fill_forward_dates(
         return false;
     }
 
-    if frequency_seconds <= 0 {
+    // For Fixed frequency, require positive frequency_micros
+    // For calendar frequencies, the value is ignored
+    if frequency_type == FrequencyType::Fixed && frequency_micros <= 0 {
         if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::InvalidFrequency, "Frequency must be positive");
+            (*out_error).set_error(
+                ErrorCode::InvalidFrequency,
+                "Frequency must be positive for fixed intervals",
+            );
         }
         return false;
     }
 
+    let freq_type_core: anofox_fcst_core::FrequencyType = frequency_type.into();
+
     let result = catch_unwind(AssertUnwindSafe(|| {
         let dates_vec: Vec<i64> = std::slice::from_raw_parts(dates, length).to_vec();
         let series = build_series(values, validity, length);
-        anofox_fcst_core::fill_forward(&dates_vec, &series, target_date, frequency_seconds)
+        anofox_fcst_core::fill_forward(
+            &dates_vec,
+            &series,
+            target_date,
+            frequency_micros,
+            freq_type_core,
+        )
     }));
 
     match result {

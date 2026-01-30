@@ -14,6 +14,7 @@ namespace duckdb {
 struct TsFillForwardNativeBindData : public TableFunctionData {
     int64_t frequency_seconds = 86400;
     bool frequency_is_raw = false;
+    FrequencyType frequency_type = FrequencyType::FIXED;  // Calendar vs fixed frequency
     int64_t target_date_micros = 0;
     bool target_is_raw = false;
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
@@ -124,9 +125,10 @@ static unique_ptr<FunctionData> TsFillForwardNativeBind(
     // Parse frequency (index 2)
     if (input.inputs.size() >= 3 && !input.inputs[2].IsNull()) {
         string freq_str = input.inputs[2].GetValue<string>();
-        auto [freq, is_raw] = ParseFrequencyToSeconds(freq_str);
-        bind_data->frequency_seconds = freq;
-        bind_data->frequency_is_raw = is_raw;
+        auto parsed = ParseFrequencyWithType(freq_str);
+        bind_data->frequency_seconds = parsed.seconds;
+        bind_data->frequency_is_raw = parsed.is_raw;
+        bind_data->frequency_type = parsed.type;
     }
 
     // Output schema: group_col, date_col, value_col with preserved types
@@ -283,6 +285,7 @@ static OperatorFinalizeResultType TsFillForwardNativeFinalize(
                 grp.dates.size(),
                 target_for_rust,
                 freq_for_rust,
+                bind_data.frequency_type,
                 &ffi_result,
                 &error
             );

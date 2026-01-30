@@ -13,9 +13,8 @@ namespace duckdb {
 // Helper Functions
 // ============================================================================
 
-// Returns (frequency_seconds, is_raw)
-// is_raw=true means the input was a pure integer with no unit
-std::pair<int64_t, bool> ParseFrequencyToSeconds(const string &frequency_str) {
+// Returns frequency info including type for calendar frequencies
+ParsedFrequency ParseFrequencyWithType(const string &frequency_str) {
     string upper = StringUtil::Upper(frequency_str);
     StringUtil::Trim(upper);
 
@@ -27,39 +26,46 @@ std::pair<int64_t, bool> ParseFrequencyToSeconds(const string &frequency_str) {
         int64_t count = std::stoll(match[1].str());
         string unit = StringUtil::Lower(match[2].str());
 
-        if (unit == "d") return {count * 86400, false};
-        if (unit == "h") return {count * 3600, false};
-        if (unit == "m" || unit == "min") return {count * 60, false};
-        if (unit == "w") return {count * 86400 * 7, false};
-        if (unit == "mo") return {count * 86400 * 30, false};
-        if (unit == "q") return {count * 86400 * 90, false};
-        if (unit == "y") return {count * 86400 * 365, false};
+        if (unit == "d") return {count * 86400, false, FrequencyType::FIXED};
+        if (unit == "h") return {count * 3600, false, FrequencyType::FIXED};
+        if (unit == "m" || unit == "min") return {count * 60, false, FrequencyType::FIXED};
+        if (unit == "w") return {count * 86400 * 7, false, FrequencyType::FIXED};
+        if (unit == "mo") return {count, false, FrequencyType::MONTHLY};
+        if (unit == "q") return {count, false, FrequencyType::QUARTERLY};
+        if (unit == "y") return {count, false, FrequencyType::YEARLY};
     }
 
     // Try to parse DuckDB INTERVAL style (e.g., "1 day", "1 hour")
-    std::regex interval_regex("^([0-9]+)\\s*(day|days|hour|hours|minute|minutes|week|weeks|month|months|year|years)$", std::regex::icase);
+    std::regex interval_regex("^([0-9]+)\\s*(day|days|hour|hours|minute|minutes|week|weeks|month|months|quarter|quarters|year|years)$", std::regex::icase);
 
     if (std::regex_match(upper, match, interval_regex)) {
         int64_t count = std::stoll(match[1].str());
         string unit = StringUtil::Lower(match[2].str());
 
-        if (unit == "day" || unit == "days") return {count * 86400, false};
-        if (unit == "hour" || unit == "hours") return {count * 3600, false};
-        if (unit == "minute" || unit == "minutes") return {count * 60, false};
-        if (unit == "week" || unit == "weeks") return {count * 86400 * 7, false};
-        if (unit == "month" || unit == "months") return {count * 86400 * 30, false};
-        if (unit == "year" || unit == "years") return {count * 86400 * 365, false};
+        if (unit == "day" || unit == "days") return {count * 86400, false, FrequencyType::FIXED};
+        if (unit == "hour" || unit == "hours") return {count * 3600, false, FrequencyType::FIXED};
+        if (unit == "minute" || unit == "minutes") return {count * 60, false, FrequencyType::FIXED};
+        if (unit == "week" || unit == "weeks") return {count * 86400 * 7, false, FrequencyType::FIXED};
+        if (unit == "month" || unit == "months") return {count, false, FrequencyType::MONTHLY};
+        if (unit == "quarter" || unit == "quarters") return {count, false, FrequencyType::QUARTERLY};
+        if (unit == "year" || unit == "years") return {count, false, FrequencyType::YEARLY};
     }
 
     // Try to parse as pure integer - mark as raw for integer date columns
     std::regex int_regex("^[0-9]+$");
     if (std::regex_match(upper, int_regex)) {
         // For pure integers, store the raw value. The caller will interpret based on date type.
-        return {std::stoll(upper), true};
+        return {std::stoll(upper), true, FrequencyType::FIXED};
     }
 
     // Default to 1 day
-    return {86400, false};
+    return {86400, false, FrequencyType::FIXED};
+}
+
+// Legacy function for backward compatibility
+std::pair<int64_t, bool> ParseFrequencyToSeconds(const string &frequency_str) {
+    auto parsed = ParseFrequencyWithType(frequency_str);
+    return {parsed.seconds, parsed.is_raw};
 }
 
 int64_t DateToMicroseconds(date_t date) {
@@ -93,6 +99,7 @@ string GetGroupKey(const Value &group_value) {
 struct TsFillGapsNativeBindData : public TableFunctionData {
     int64_t frequency_seconds = 86400;
     bool frequency_is_raw = false;  // True if parsed as pure integer (for integer date columns)
+    FrequencyType frequency_type = FrequencyType::FIXED;  // Calendar vs fixed frequency
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
     LogicalType date_logical_type = LogicalType(LogicalTypeId::TIMESTAMP);
     LogicalType group_logical_type = LogicalType(LogicalTypeId::VARCHAR);
@@ -143,9 +150,10 @@ static unique_ptr<FunctionData> TsFillGapsNativeBind(
     // Parse frequency from second argument (index 1, since index 0 is TABLE placeholder)
     if (input.inputs.size() >= 2) {
         string freq_str = input.inputs[1].GetValue<string>();
-        auto [freq, is_raw] = ParseFrequencyToSeconds(freq_str);
-        bind_data->frequency_seconds = freq;
-        bind_data->frequency_is_raw = is_raw;
+        auto parsed = ParseFrequencyWithType(freq_str);
+        bind_data->frequency_seconds = parsed.seconds;
+        bind_data->frequency_is_raw = parsed.is_raw;
+        bind_data->frequency_type = parsed.type;
     }
 
     // Input table must have exactly 3 columns: group, date, value
@@ -326,6 +334,7 @@ static OperatorFinalizeResultType TsFillGapsNativeFinalize(
                 validity.empty() ? nullptr : validity.data(),
                 grp.dates.size(),
                 freq_for_rust,
+                bind_data.frequency_type,
                 &ffi_result,
                 &error
             );
