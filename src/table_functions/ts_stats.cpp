@@ -9,6 +9,8 @@
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include <regex>
 #include <map>
+#include <mutex>
+#include <set>
 
 namespace duckdb {
 
@@ -342,6 +344,31 @@ struct TsStatsByBindData : public TableFunctionData {
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
 };
 
+// ============================================================================
+// Global State - enables parallel execution
+//
+// IMPORTANT: This custom GlobalState is required for proper parallel execution.
+// Using the base GlobalTableFunctionState directly causes batch index collisions
+// with large datasets (300k+ groups) during BatchedDataCollection::Merge.
+// ============================================================================
+
+struct TsStatsByGlobalState : public GlobalTableFunctionState {
+    // Allow parallel execution - each thread processes its partition of groups
+    idx_t MaxThreads() const override {
+        return 999999;  // Unlimited - let DuckDB decide based on hardware
+    }
+
+    // Global group tracking to prevent duplicate processing
+    std::mutex processed_groups_mutex;
+    std::set<string> processed_groups;
+
+    bool ClaimGroup(const string &group_key) {
+        std::lock_guard<std::mutex> lock(processed_groups_mutex);
+        auto result = processed_groups.insert(group_key);
+        return result.second;
+    }
+};
+
 struct TsStatsByLocalState : public LocalTableFunctionState {
     // Buffer incoming data per group
     struct GroupData {
@@ -493,7 +520,7 @@ static unique_ptr<FunctionData> TsStatsByBind(
 static unique_ptr<GlobalTableFunctionState> TsStatsByInitGlobal(
     ClientContext &context,
     TableFunctionInitInput &input) {
-    return make_uniq<GlobalTableFunctionState>();
+    return make_uniq<TsStatsByGlobalState>();
 }
 
 static unique_ptr<LocalTableFunctionState> TsStatsByInitLocal(
