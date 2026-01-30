@@ -1759,6 +1759,8 @@ FROM classification_data
     // params: method (default 'fft') - 'fft' or 'acf'
     //         max_period (default 365) - maximum period to search
     //         min_confidence (default: method-specific) - minimum confidence threshold
+    //         expected_periods (optional) - list of expected periods for validation
+    //         tolerance (default 0.1) - relative tolerance for period matching
     // Returns: TABLE with expanded period columns
     {"ts_detect_periods", {"source", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
@@ -1768,7 +1770,9 @@ WITH periods_data AS (
             LIST(value_col::DOUBLE ORDER BY date_col),
             COALESCE(json_extract_string(to_json(params), '$.method'), 'fft'),
             COALESCE(CAST(json_extract(to_json(params), '$.max_period') AS BIGINT), 0),
-            COALESCE(CAST(json_extract(to_json(params), '$.min_confidence') AS DOUBLE), -1.0)
+            COALESCE(CAST(json_extract(to_json(params), '$.min_confidence') AS DOUBLE), -1.0),
+            COALESCE(CAST(json_extract(to_json(params), '$.expected_periods') AS DOUBLE[]), NULL),
+            COALESCE(CAST(json_extract(to_json(params), '$.tolerance') AS DOUBLE), -1.0)
         ) AS _periods
     FROM query_table(source::VARCHAR)
 )
@@ -1786,6 +1790,8 @@ FROM periods_data
     //         max_period (default 365) - maximum period to search (suitable for daily data)
     //         min_confidence (default: method-specific) - minimum confidence threshold
     //                        Use 0 to disable filtering, positive value for custom threshold
+    //         expected_periods (optional) - list of expected periods for validation
+    //         tolerance (default 0.1) - relative tolerance for period matching
     // Returns: TABLE with id and expanded period columns
     {"ts_detect_periods_by", {"source", "group_col", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
@@ -1796,7 +1802,9 @@ WITH periods_data AS (
             LIST(value_col::DOUBLE ORDER BY date_col),
             COALESCE(json_extract_string(to_json(params), '$.method'), 'fft'),
             COALESCE(CAST(json_extract(to_json(params), '$.max_period') AS BIGINT), 0),
-            COALESCE(CAST(json_extract(to_json(params), '$.min_confidence') AS DOUBLE), -1.0)
+            COALESCE(CAST(json_extract(to_json(params), '$.min_confidence') AS DOUBLE), -1.0),
+            COALESCE(CAST(json_extract(to_json(params), '$.expected_periods') AS DOUBLE[]), NULL),
+            COALESCE(CAST(json_extract(to_json(params), '$.tolerance') AS DOUBLE), -1.0)
         ) AS _periods
     FROM query_table(source::VARCHAR)
     GROUP BY group_col

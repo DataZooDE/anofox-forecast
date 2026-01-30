@@ -37,6 +37,9 @@ static LogicalType GetDetectPeriodsAggResultType() {
     period_children.push_back(make_pair("amplitude", LogicalType(LogicalTypeId::DOUBLE)));
     period_children.push_back(make_pair("phase", LogicalType(LogicalTypeId::DOUBLE)));
     period_children.push_back(make_pair("iteration", LogicalType(LogicalTypeId::BIGINT)));
+    period_children.push_back(make_pair("matches_expected", LogicalType(LogicalTypeId::BOOLEAN)));
+    period_children.push_back(make_pair("matched_expected_period", LogicalType(LogicalTypeId::DOUBLE)));
+    period_children.push_back(make_pair("match_deviation", LogicalType(LogicalTypeId::DOUBLE)));
     auto period_type = LogicalType::STRUCT(std::move(period_children));
 
     // Outer result struct
@@ -209,6 +212,9 @@ static void TsDetectPeriodsAggFinalize(Vector &state_vector, AggregateInputData 
             data.method.c_str(),
             0,    // default max_period (use Rust default of 365)
             -1.0, // default min_confidence (use method-specific default)
+            nullptr, // no expected_periods for aggregate
+            0,       // n_expected = 0
+            -1.0,    // default tolerance
             &period_result,
             &error
         );
@@ -243,6 +249,9 @@ static void TsDetectPeriodsAggFinalize(Vector &state_vector, AggregateInputData 
                 auto amplitude_data = FlatVector::GetData<double>(*struct_entries[3]);
                 auto phase_data = FlatVector::GetData<double>(*struct_entries[4]);
                 auto iteration_data = FlatVector::GetData<int64_t>(*struct_entries[5]);
+                auto matches_expected_data = FlatVector::GetData<bool>(*struct_entries[6]);
+                auto matched_expected_period_data = FlatVector::GetData<double>(*struct_entries[7]);
+                auto match_deviation_data = FlatVector::GetData<double>(*struct_entries[8]);
 
                 for (size_t j = 0; j < period_result.n_periods; j++) {
                     period_data[current_size + j] = period_result.period_values[j];
@@ -251,6 +260,9 @@ static void TsDetectPeriodsAggFinalize(Vector &state_vector, AggregateInputData 
                     amplitude_data[current_size + j] = period_result.amplitude_values[j];
                     phase_data[current_size + j] = period_result.phase_values[j];
                     iteration_data[current_size + j] = period_result.iteration_values[j];
+                    matches_expected_data[current_size + j] = period_result.matches_expected_values[j];
+                    matched_expected_period_data[current_size + j] = period_result.matched_expected_values[j];
+                    match_deviation_data[current_size + j] = period_result.match_deviation_values[j];
                 }
             }
         }

@@ -60,6 +60,9 @@ static LogicalType GetMultiPeriodResultType() {
     period_children.push_back(make_pair("amplitude", LogicalType(LogicalTypeId::DOUBLE)));
     period_children.push_back(make_pair("phase", LogicalType(LogicalTypeId::DOUBLE)));
     period_children.push_back(make_pair("iteration", LogicalType(LogicalTypeId::BIGINT)));
+    period_children.push_back(make_pair("matches_expected", LogicalType(LogicalTypeId::BOOLEAN)));
+    period_children.push_back(make_pair("matched_expected_period", LogicalType(LogicalTypeId::DOUBLE)));
+    period_children.push_back(make_pair("match_deviation", LogicalType(LogicalTypeId::DOUBLE)));
     auto period_type = LogicalType::STRUCT(std::move(period_children));
 
     // Outer result struct
@@ -96,6 +99,21 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
         args.data[3].ToUnifiedFormat(count, min_conf_format);
         auto min_conf_data = UnifiedVectorFormat::GetData<double>(min_conf_format);
         min_confidence = min_conf_data[0];
+    }
+
+    // Optional expected_periods parameter (LIST of DOUBLE)
+    vector<double> expected_periods;
+    if (args.ColumnCount() > 4 && !IsValueNull(args.data[4], count, 0)) {
+        ExtractListAsDouble(args.data[4], count, 0, expected_periods);
+    }
+
+    // Optional tolerance parameter (default -1.0 = use Rust default of 0.1)
+    double tolerance = -1.0;
+    if (args.ColumnCount() > 5 && !IsValueNull(args.data[5], count, 0)) {
+        UnifiedVectorFormat tol_format;
+        args.data[5].ToUnifiedFormat(count, tol_format);
+        auto tol_data = UnifiedVectorFormat::GetData<double>(tol_format);
+        tolerance = tol_data[0];
     }
 
     result.Flatten(count);
@@ -142,6 +160,9 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
             method_str,
             max_period,
             min_confidence,
+            expected_periods.empty() ? nullptr : expected_periods.data(),
+            expected_periods.size(),
+            tolerance,
             &row_results[row_idx].result,
             &error
         );
@@ -180,6 +201,9 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
     double *amplitude_data = nullptr;
     double *phase_data = nullptr;
     int64_t *iteration_data = nullptr;
+    bool *matches_expected_data = nullptr;
+    double *matched_expected_data = nullptr;
+    double *match_deviation_data = nullptr;
 
     if (total_periods > 0) {
         auto &list_child = ListVector::GetEntry(periods_list);
@@ -190,6 +214,9 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
         amplitude_data = FlatVector::GetData<double>(*struct_entries[3]);
         phase_data = FlatVector::GetData<double>(*struct_entries[4]);
         iteration_data = FlatVector::GetData<int64_t>(*struct_entries[5]);
+        matches_expected_data = FlatVector::GetData<bool>(*struct_entries[6]);
+        matched_expected_data = FlatVector::GetData<double>(*struct_entries[7]);
+        match_deviation_data = FlatVector::GetData<double>(*struct_entries[8]);
     }
 
     auto n_periods_data = FlatVector::GetData<int64_t>(*children[1]);
@@ -218,6 +245,9 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
                 amplitude_data[current_offset + i] = res.amplitude_values[i];
                 phase_data[current_offset + i] = res.phase_values[i];
                 iteration_data[current_offset + i] = res.iteration_values[i];
+                matches_expected_data[current_offset + i] = res.matches_expected_values[i];
+                matched_expected_data[current_offset + i] = res.matched_expected_values[i];
+                match_deviation_data[current_offset + i] = res.match_deviation_values[i];
             }
         }
 
@@ -270,6 +300,9 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
             nullptr,  // default method
             0,        // default max_period (use Rust default of 365)
             -1.0,     // default min_confidence (use method-specific default)
+            nullptr,  // no expected_periods validation
+            0,        // n_expected = 0
+            -1.0,     // default tolerance
             &row_results[row_idx].result,
             &error
         );
@@ -308,6 +341,9 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
     double *amplitude_data = nullptr;
     double *phase_data = nullptr;
     int64_t *iteration_data = nullptr;
+    bool *matches_expected_data = nullptr;
+    double *matched_expected_data = nullptr;
+    double *match_deviation_data = nullptr;
 
     if (total_periods > 0) {
         auto &list_child = ListVector::GetEntry(periods_list);
@@ -318,6 +354,9 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
         amplitude_data = FlatVector::GetData<double>(*struct_entries[3]);
         phase_data = FlatVector::GetData<double>(*struct_entries[4]);
         iteration_data = FlatVector::GetData<int64_t>(*struct_entries[5]);
+        matches_expected_data = FlatVector::GetData<bool>(*struct_entries[6]);
+        matched_expected_data = FlatVector::GetData<double>(*struct_entries[7]);
+        match_deviation_data = FlatVector::GetData<double>(*struct_entries[8]);
     }
 
     auto n_periods_data = FlatVector::GetData<int64_t>(*children[1]);
@@ -346,6 +385,9 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
                 amplitude_data[current_offset + i] = res.amplitude_values[i];
                 phase_data[current_offset + i] = res.phase_values[i];
                 iteration_data[current_offset + i] = res.iteration_values[i];
+                matches_expected_data[current_offset + i] = res.matches_expected_values[i];
+                matched_expected_data[current_offset + i] = res.matched_expected_values[i];
+                match_deviation_data[current_offset + i] = res.match_deviation_values[i];
             }
         }
 
@@ -401,6 +443,24 @@ void RegisterTsDetectPeriodsFunction(ExtensionLoader &loader) {
     );
     full_func_conf.stability = FunctionStability::VOLATILE;
     ts_periods_set.AddFunction(full_func_conf);
+
+    // Five-argument version (values, method, max_period, min_confidence, expected_periods)
+    auto func5 = ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::DOUBLE), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        GetMultiPeriodResultType(),
+        TsDetectPeriodsFunction
+    );
+    func5.stability = FunctionStability::VOLATILE;
+    ts_periods_set.AddFunction(func5);
+
+    // Six-argument version (values, method, max_period, min_confidence, expected_periods, tolerance)
+    auto func6 = ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::DOUBLE), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
+        GetMultiPeriodResultType(),
+        TsDetectPeriodsFunction
+    );
+    func6.stability = FunctionStability::VOLATILE;
+    ts_periods_set.AddFunction(func6);
 
     // Mark as internal to hide from duckdb_functions() and deprioritize in autocomplete
     CreateScalarFunctionInfo info(ts_periods_set);
@@ -643,6 +703,9 @@ static void TsDetectMultiplePeriodsFunction(DataChunk &args, ExpressionState &st
     double *amplitude_data = nullptr;
     double *phase_data = nullptr;
     int64_t *iteration_data = nullptr;
+    bool *matches_expected_data = nullptr;
+    double *matched_expected_data = nullptr;
+    double *match_deviation_data = nullptr;
 
     if (total_periods > 0) {
         auto &list_child = ListVector::GetEntry(periods_list);
@@ -653,6 +716,9 @@ static void TsDetectMultiplePeriodsFunction(DataChunk &args, ExpressionState &st
         amplitude_data = FlatVector::GetData<double>(*struct_entries[3]);
         phase_data = FlatVector::GetData<double>(*struct_entries[4]);
         iteration_data = FlatVector::GetData<int64_t>(*struct_entries[5]);
+        matches_expected_data = FlatVector::GetData<bool>(*struct_entries[6]);
+        matched_expected_data = FlatVector::GetData<double>(*struct_entries[7]);
+        match_deviation_data = FlatVector::GetData<double>(*struct_entries[8]);
     }
 
     auto n_periods_data = FlatVector::GetData<int64_t>(*children[1]);
@@ -681,6 +747,9 @@ static void TsDetectMultiplePeriodsFunction(DataChunk &args, ExpressionState &st
                 amplitude_data[current_offset + i] = res.amplitude_values[i];
                 phase_data[current_offset + i] = res.phase_values[i];
                 iteration_data[current_offset + i] = res.iteration_values[i];
+                matches_expected_data[current_offset + i] = res.matches_expected_values[i];
+                matched_expected_data[current_offset + i] = res.matched_expected_values[i];
+                match_deviation_data[current_offset + i] = res.match_deviation_values[i];
             }
         }
 
