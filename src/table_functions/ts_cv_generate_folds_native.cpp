@@ -4,6 +4,8 @@
 #include "duckdb/common/string_util.hpp"
 #include <algorithm>
 #include <set>
+#include <mutex>
+#include <atomic>
 
 namespace duckdb {
 
@@ -41,14 +43,17 @@ struct TsCvGenerateFoldsBindData : public TableFunctionData {
 
 struct TsCvGenerateFoldsLocalState : public LocalTableFunctionState {
     std::set<int64_t> unique_dates;
-    bool has_output = false;
 };
 
 // ============================================================================
-// Global State
+// Global State - collects all dates and produces single output
 // ============================================================================
 
 struct TsCvGenerateFoldsGlobalState : public GlobalTableFunctionState {
+    std::mutex mutex;
+    std::set<int64_t> all_dates;
+    std::atomic<bool> output_done{false};
+
     idx_t MaxThreads() const override { return 1; }
 };
 
@@ -271,14 +276,23 @@ static OperatorFinalizeResultType TsCvGenerateFoldsFinalize(
 
     auto &bind_data = data.bind_data->Cast<TsCvGenerateFoldsBindData>();
     auto &local_state = data.local_state->Cast<TsCvGenerateFoldsLocalState>();
+    auto &global_state = data.global_state->Cast<TsCvGenerateFoldsGlobalState>();
 
-    if (local_state.has_output) {
+    // Merge local dates into global state
+    {
+        std::lock_guard<std::mutex> lock(global_state.mutex);
+        global_state.all_dates.insert(local_state.unique_dates.begin(), local_state.unique_dates.end());
+    }
+
+    // Only the first thread to finish outputs the result
+    bool expected = false;
+    if (!global_state.output_done.compare_exchange_strong(expected, true)) {
+        // Another thread already output, we're done
         return OperatorFinalizeResultType::FINISHED;
     }
-    local_state.has_output = true;
 
     // Convert set to sorted vector
-    vector<int64_t> sorted_dates(local_state.unique_dates.begin(), local_state.unique_dates.end());
+    vector<int64_t> sorted_dates(global_state.all_dates.begin(), global_state.all_dates.end());
     idx_t n_dates = sorted_dates.size();
 
     if (n_dates < 2) {
