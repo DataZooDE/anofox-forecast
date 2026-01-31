@@ -80,7 +80,7 @@ For custom pipelines or regression models (using `anofox_statistics` extension):
 
 -- 1. Generate fold boundaries
 WITH folds AS (
-    SELECT training_end_times FROM ts_cv_generate_folds('data', 'date', 7, 5, '1d', MAP{})
+    SELECT training_end_times FROM ts_cv_generate_folds(data, date, 7, 5, '1d', MAP{})
 )
 
 -- 2. Create train/test splits
@@ -91,7 +91,7 @@ SELECT * FROM ts_cv_split_by('data', 'store_id', 'date', 'revenue',
 -- Train on 'train' split, predict on 'test' split
 WITH splits AS (
     SELECT * FROM ts_cv_split_by('data', 'store_id', 'date', 'revenue',
-        (SELECT training_end_times FROM ts_cv_generate_folds('data', 'date', 7, 5, '1d', MAP{})),
+        (SELECT training_end_times FROM ts_cv_generate_folds(data, date, 7, 5, '1d', MAP{})),
         7, '1d', MAP{})
 )
 SELECT
@@ -217,20 +217,20 @@ Automatically generate fold boundaries based on data range.
 **Signature:**
 ```sql
 ts_cv_generate_folds(
-    source VARCHAR,
-    date_col VARCHAR,
+    source TABLE or VARCHAR,  -- Source table or table name
+    date_col COLUMN,          -- Date column (unquoted identifier)
     n_folds BIGINT,
     horizon BIGINT,
     frequency VARCHAR,
     params MAP
-) → TABLE(training_end_times DATE[])
+) → TABLE(training_end_times TIMESTAMP[])
 ```
 
 **Example:**
 ```sql
 SELECT training_end_times
-FROM ts_cv_generate_folds('sales_data', 'date', 3, 5, '1d', MAP{});
--- Returns: [2024-01-15, 2024-01-20, 2024-01-25]
+FROM ts_cv_generate_folds('sales_data', date, 3, 5, '1d', MAP{});
+-- Returns: ['2024-01-15 00:00:00', '2024-01-20 00:00:00', '2024-01-25 00:00:00']
 ```
 
 ---

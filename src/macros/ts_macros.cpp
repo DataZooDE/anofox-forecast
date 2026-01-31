@@ -1278,7 +1278,7 @@ LIMIT 1
     // ts_cv_generate_folds: Generate training end times automatically based on data range
     // C++ API: ts_cv_generate_folds(source, date_col, n_folds, horizon, frequency, params)
     // params MAP supports:
-    //   initial_train_size (BIGINT, default: 50% of data) - periods before first fold
+    //   initial_train_size (BIGINT, default: n_dates - n_folds * horizon) - periods before first fold
     //   skip_length (BIGINT, default: horizon) - periods between folds (1=dense, horizon=default, 30=monthly)
     //   clip_horizon (BOOLEAN, default: false) - if true, allow folds with partial test windows
     // Returns: LIST of training end timestamps
@@ -1309,7 +1309,12 @@ _computed AS (
         _min_dt,
         _max_dt,
         _n_dates,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.initial_train_size') AS BIGINT), GREATEST((_n_dates / 2)::BIGINT, 1)) AS _init_size,
+        -- Default: position folds so last fold's test ends at data end
+        -- Formula: n_dates - n_folds * horizon (with skip_length = horizon)
+        COALESCE(
+            TRY_CAST(json_extract_string(to_json(params), '$.initial_train_size') AS BIGINT),
+            GREATEST((_n_dates - n_folds::BIGINT * horizon::BIGINT)::BIGINT, 1)
+        ) AS _init_size,
         COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.skip_length') AS BIGINT), horizon::BIGINT) AS _skip_length,
         COALESCE(LOWER(json_extract_string(to_json(params), '$.clip_horizon')) IN ('true', '1', 'yes'), FALSE) AS _clip_horizon,
         (SELECT _interval FROM _freq) AS _interval
@@ -1322,9 +1327,10 @@ fold_end_times AS (
     WHERE
         -- When clip_horizon=true: only require at least 1 period of test data
         -- When clip_horizon=false (default): require full horizon of test data
+        -- Note: train_end is first test date, so last test date is train_end + (horizon-1) * interval
         CASE WHEN _clip_horizon
-            THEN _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) + _interval <= _max_dt
-            ELSE _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) + (horizon::BIGINT * _interval) <= _max_dt
+            THEN _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) <= _max_dt
+            ELSE _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) + ((horizon::BIGINT - 1) * _interval) <= _max_dt
         END
 )
 SELECT LIST(train_end ORDER BY train_end) AS training_end_times
