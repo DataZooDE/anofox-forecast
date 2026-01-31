@@ -8,6 +8,8 @@ use crate::seasonality::detect_seasonality;
 use anofox_forecast::core::TimeSeries;
 use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig};
 use anofox_forecast::models::exponential::{AutoETS, AutoETSConfig, ETSSpec, ETS as ETSModel};
+use anofox_forecast::models::tbats::AutoTBATS;
+use anofox_forecast::models::theta::AutoTheta;
 use anofox_forecast::prelude::Forecaster;
 
 /// Forecast result.
@@ -462,8 +464,8 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         ModelType::Theta
         | ModelType::OptimizedTheta
         | ModelType::DynamicTheta
-        | ModelType::DynamicOptimizedTheta
-        | ModelType::AutoTheta => forecast_theta(&clean_values, options.horizon),
+        | ModelType::DynamicOptimizedTheta => forecast_theta(&clean_values, options.horizon),
+        ModelType::AutoTheta => forecast_auto_theta(&clean_values, options.horizon, period),
         // ARIMA
         ModelType::ARIMA => forecast_arima(&clean_values, options.horizon),
         ModelType::AutoARIMA => forecast_auto_arima(&clean_values, options.horizon, period),
@@ -474,9 +476,8 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         ModelType::MSTL | ModelType::AutoMSTL => {
             forecast_mstl(&clean_values, options.horizon, period)
         }
-        ModelType::TBATS | ModelType::AutoTBATS => {
-            forecast_tbats(&clean_values, options.horizon, period)
-        }
+        ModelType::TBATS => forecast_tbats(&clean_values, options.horizon, period),
+        ModelType::AutoTBATS => forecast_auto_tbats(&clean_values, options.horizon, period),
         // Intermittent Demand
         ModelType::CrostonClassic | ModelType::CrostonOptimized | ModelType::CrostonSBA => {
             forecast_croston(&clean_values, options.horizon)
@@ -728,15 +729,16 @@ fn forecast_with_model(
         ModelType::Theta
         | ModelType::OptimizedTheta
         | ModelType::DynamicTheta
-        | ModelType::DynamicOptimizedTheta
-        | ModelType::AutoTheta => forecast_theta(values, horizon),
+        | ModelType::DynamicOptimizedTheta => forecast_theta(values, horizon),
+        ModelType::AutoTheta => forecast_auto_theta(values, horizon, period),
         // ARIMA
         ModelType::ARIMA => forecast_arima(values, horizon),
         ModelType::AutoARIMA => forecast_auto_arima(values, horizon, period),
         // Multiple Seasonality
         ModelType::MFLES | ModelType::AutoMFLES => forecast_mfles(values, horizon, period),
         ModelType::MSTL | ModelType::AutoMSTL => forecast_mstl(values, horizon, period),
-        ModelType::TBATS | ModelType::AutoTBATS => forecast_tbats(values, horizon, period),
+        ModelType::TBATS => forecast_tbats(values, horizon, period),
+        ModelType::AutoTBATS => forecast_auto_tbats(values, horizon, period),
         // Intermittent Demand
         ModelType::CrostonClassic | ModelType::CrostonOptimized | ModelType::CrostonSBA => {
             forecast_croston(values, horizon)
@@ -1377,6 +1379,137 @@ fn forecast_auto_ets(values: &[f64], horizon: usize, period: usize) -> Result<Fo
         )
     } else {
         "AutoETS".to_string()
+    };
+
+    // Extract point forecasts (primary dimension)
+    let point = forecast.primary().to_vec();
+
+    // Extract confidence intervals (first dimension for univariate)
+    let lower = forecast
+        .lower()
+        .and_then(|intervals| intervals.first())
+        .cloned()
+        .unwrap_or_default();
+    let upper = forecast
+        .upper()
+        .and_then(|intervals| intervals.first())
+        .cloned()
+        .unwrap_or_default();
+
+    Ok(ForecastOutput {
+        point,
+        lower,
+        upper,
+        fitted: model.fitted_values().map(|v| v.to_vec()),
+        residuals: model.residuals().map(|v| v.to_vec()),
+        model_name,
+        aic: None,
+        bic: None,
+        mse: None,
+    })
+}
+
+/// AutoTheta: Automatic selection of best Theta variant (STM, OTM, DSTM, DOTM).
+/// Uses the proper AutoTheta implementation from anofox-forecast library.
+fn forecast_auto_theta(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
+    use chrono::{Duration, TimeZone, Utc};
+
+    // Create timestamps for TimeSeries (required by anofox-forecast)
+    let base = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+    let timestamps: Vec<_> = (0..values.len())
+        .map(|i| base + Duration::hours(i as i64))
+        .collect();
+
+    let ts = TimeSeries::univariate(timestamps, values.to_vec()).map_err(|e| {
+        ForecastError::ComputationError(format!("Failed to create TimeSeries: {}", e))
+    })?;
+
+    // Configure AutoTheta with seasonal period if provided
+    let mut model = if period > 1 {
+        AutoTheta::seasonal(period)
+    } else {
+        AutoTheta::new()
+    };
+
+    // Fit the model
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("AutoTheta fit failed: {}", e)))?;
+
+    // Get forecasts
+    let forecast = model
+        .predict(horizon)
+        .map_err(|e| ForecastError::ComputationError(format!("AutoTheta predict failed: {}", e)))?;
+
+    // Get the selected model type for model name
+    let model_name = if let Some(selected) = model.selected_model() {
+        format!("AutoTheta({})", selected)
+    } else {
+        "AutoTheta".to_string()
+    };
+
+    // Extract point forecasts (primary dimension)
+    let point = forecast.primary().to_vec();
+
+    // Extract confidence intervals (first dimension for univariate)
+    let lower = forecast
+        .lower()
+        .and_then(|intervals| intervals.first())
+        .cloned()
+        .unwrap_or_default();
+    let upper = forecast
+        .upper()
+        .and_then(|intervals| intervals.first())
+        .cloned()
+        .unwrap_or_default();
+
+    Ok(ForecastOutput {
+        point,
+        lower,
+        upper,
+        fitted: model.fitted_values().map(|v| v.to_vec()),
+        residuals: model.residuals().map(|v| v.to_vec()),
+        model_name,
+        aic: None,
+        bic: None,
+        mse: None,
+    })
+}
+
+/// AutoTBATS: Automatic TBATS configuration selection.
+/// Uses the proper AutoTBATS implementation from anofox-forecast library.
+fn forecast_auto_tbats(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
+    use chrono::{Duration, TimeZone, Utc};
+
+    // Create timestamps for TimeSeries (required by anofox-forecast)
+    let base = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+    let timestamps: Vec<_> = (0..values.len())
+        .map(|i| base + Duration::hours(i as i64))
+        .collect();
+
+    let ts = TimeSeries::univariate(timestamps, values.to_vec()).map_err(|e| {
+        ForecastError::ComputationError(format!("Failed to create TimeSeries: {}", e))
+    })?;
+
+    // Configure AutoTBATS with seasonal period
+    let seasonal_periods = if period > 1 { vec![period] } else { vec![12] };
+    let mut model = AutoTBATS::new(seasonal_periods);
+
+    // Fit the model
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("AutoTBATS fit failed: {}", e)))?;
+
+    // Get forecasts
+    let forecast = model
+        .predict(horizon)
+        .map_err(|e| ForecastError::ComputationError(format!("AutoTBATS predict failed: {}", e)))?;
+
+    // Get the selected configuration for model name
+    let model_name = if let Some(config) = model.selected_config() {
+        format!("AutoTBATS({})", config)
+    } else {
+        "AutoTBATS".to_string()
     };
 
     // Extract point forecasts (primary dimension)
