@@ -539,15 +539,19 @@ static OperatorResultType TsBacktestNativeInOut(
 
         auto &grp = local_state.groups[group_key];
 
-        // Convert date to microseconds
+        // Convert date to microseconds (truncate to seconds for timestamp consistency)
         int64_t date_micros;
         switch (bind_data.date_col_type) {
             case DateColumnType::DATE:
                 date_micros = DateToMicroseconds(date_val.GetValue<date_t>());
                 break;
-            case DateColumnType::TIMESTAMP:
+            case DateColumnType::TIMESTAMP: {
                 date_micros = TimestampToMicroseconds(date_val.GetValue<timestamp_t>());
+                // Truncate to seconds (remove sub-second precision)
+                constexpr int64_t MICROS_PER_SECOND = 1000000;
+                date_micros = (date_micros / MICROS_PER_SECOND) * MICROS_PER_SECOND;
                 break;
+            }
             case DateColumnType::INTEGER:
                 date_micros = date_val.GetValue<int32_t>();
                 break;
@@ -596,9 +600,20 @@ static void ComputeFoldBoundaries(
     if (n_dates < 2) return;
 
     // Compute initial train size (number of data points, not time periods)
-    idx_t init_train_size = bind_data.initial_train_size > 0
-        ? static_cast<idx_t>(bind_data.initial_train_size)
-        : std::max(n_dates / 2, static_cast<idx_t>(1));
+    // Default: position folds so the last fold's test ends at data end
+    // Formula: init = n_dates - horizon * folds (with skip_length = horizon)
+    // This ensures test set covers the most recent data
+    idx_t init_train_size;
+    if (bind_data.initial_train_size > 0) {
+        init_train_size = static_cast<idx_t>(bind_data.initial_train_size);
+    } else {
+        idx_t folds = static_cast<idx_t>(bind_data.folds);
+        idx_t horizon = static_cast<idx_t>(bind_data.horizon);
+        // For folds=1, horizon=12, n_dates=36: init = 36 - 12 = 24
+        // Test will be indices 24-35 (last 12 points)
+        idx_t needed = horizon * folds;
+        init_train_size = (n_dates > needed) ? (n_dates - needed) : 1;
+    }
 
     // Compute skip length (number of data points to advance between folds)
     idx_t skip_length = bind_data.skip_length > 0

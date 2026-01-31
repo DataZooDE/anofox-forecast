@@ -1352,13 +1352,13 @@ FROM fold_end_times
     // metric: VARCHAR for fold-level metric calculation (default 'rmse')
     //   Point metrics: 'rmse', 'mae', 'mape', 'mse', 'smape', 'bias', 'r2'
     //   Interval metrics: 'coverage' (uses lower_90/upper_90 prediction intervals)
-    // Returns: fold_id, <original_group_col_name>, date, forecast, actual, error, abs_error, lower_90, upper_90, model_name, fold_metric_score
+    // Returns: fold_id, <original_group_col>, <original_date_col>, forecast, actual, error, abs_error, lower_90, upper_90, model_name, fold_metric_score
     {"ts_backtest_auto_by", {"source", "group_col", "date_col", "target_col", "horizon", "folds", "frequency", nullptr}, {{"params", "MAP{}"}, {"features", "NULL"}, {"metric", "'rmse'"}, {nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_backtest_native(
     (SELECT
         group_col,
-        date_trunc('second', date_col::TIMESTAMP) AS date,
+        date_col,
         target_col::DOUBLE AS y
     FROM query_table(source::VARCHAR)),
     horizon,
