@@ -1276,65 +1276,24 @@ LIMIT 1
 )"},
 
     // ts_cv_generate_folds: Generate training end times automatically based on data range
-    // C++ API: ts_cv_generate_folds(source, date_col, n_folds, horizon, frequency, params)
+    // C++ API: ts_cv_generate_folds(source, date_col, n_folds, horizon, params)
+    //
+    // IMPORTANT: Assumes pre-cleaned data with no gaps. Use ts_fill_gaps_by first if needed.
+    // Uses position-based indexing (not date arithmetic) - works correctly with all frequencies.
+    //
     // params MAP supports:
     //   initial_train_size (BIGINT, default: n_dates - n_folds * horizon) - periods before first fold
-    //   skip_length (BIGINT, default: horizon) - periods between folds (1=dense, horizon=default, 30=monthly)
+    //   skip_length (BIGINT, default: horizon) - periods between folds (1=dense, horizon=default)
     //   clip_horizon (BOOLEAN, default: false) - if true, allow folds with partial test windows
-    // Returns: LIST of training end timestamps
-    {"ts_cv_generate_folds", {"source", "date_col", "n_folds", "horizon", "frequency", "params", nullptr}, {{nullptr, nullptr}},
+    // Returns: LIST of training end dates (preserves original date type)
+    {"ts_cv_generate_folds", {"source", "date_col", "n_folds", "horizon", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
-WITH _freq AS (
-    SELECT CASE
-        WHEN frequency::VARCHAR ~ '^[0-9]+$' THEN (frequency::VARCHAR || ' day')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+d$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'd$', ' day'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+h$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'h$', ' hour'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+(m|min)$' THEN (REGEXP_REPLACE(frequency::VARCHAR, '(m|min)$', ' minute'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+w$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'w$', ' week'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+mo$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'mo$', ' month'))::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+q$' THEN ((CAST(REGEXP_EXTRACT(frequency::VARCHAR, '^([0-9]+)', 1) AS INTEGER) * 3)::VARCHAR || ' month')::INTERVAL
-        WHEN frequency::VARCHAR ~ '^[0-9]+y$' THEN (REGEXP_REPLACE(frequency::VARCHAR, 'y$', ' year'))::INTERVAL
-        ELSE frequency::INTERVAL
-    END AS _interval
-),
-date_bounds AS (
-    SELECT
-        MIN(date_trunc('second', date_col::TIMESTAMP)) AS _min_dt,
-        MAX(date_trunc('second', date_col::TIMESTAMP)) AS _max_dt,
-        COUNT(DISTINCT date_trunc('second', date_col::TIMESTAMP)) AS _n_dates
-    FROM query_table(source::VARCHAR)
-),
-_computed AS (
-    SELECT
-        _min_dt,
-        _max_dt,
-        _n_dates,
-        -- Default: position folds so last fold's test ends at data end
-        -- Formula: n_dates - n_folds * horizon (with skip_length = horizon)
-        COALESCE(
-            TRY_CAST(json_extract_string(to_json(params), '$.initial_train_size') AS BIGINT),
-            GREATEST((_n_dates - n_folds::BIGINT * horizon::BIGINT)::BIGINT, 1)
-        ) AS _init_size,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.skip_length') AS BIGINT), horizon::BIGINT) AS _skip_length,
-        COALESCE(LOWER(json_extract_string(to_json(params), '$.clip_horizon')) IN ('true', '1', 'yes'), FALSE) AS _clip_horizon,
-        (SELECT _interval FROM _freq) AS _interval
-    FROM date_bounds
-),
-fold_end_times AS (
-    SELECT
-        _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) AS train_end
-    FROM _computed, generate_series(1, n_folds::BIGINT)
-    WHERE
-        -- When clip_horizon=true: only require at least 1 period of test data
-        -- When clip_horizon=false (default): require full horizon of test data
-        -- Note: train_end is first test date, so last test date is train_end + (horizon-1) * interval
-        CASE WHEN _clip_horizon
-            THEN _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) <= _max_dt
-            ELSE _min_dt + (_init_size * _interval) + ((generate_series - 1) * _skip_length * _interval) + ((horizon::BIGINT - 1) * _interval) <= _max_dt
-        END
+SELECT * FROM _ts_cv_generate_folds_native(
+    (SELECT date_col FROM query_table(source::VARCHAR)),
+    n_folds,
+    horizon,
+    params
 )
-SELECT LIST(train_end ORDER BY train_end) AS training_end_times
-FROM fold_end_times
 )"},
 
     // ts_backtest_auto_by: One-liner backtest combining fold generation, splitting, forecasting, and evaluation
