@@ -949,19 +949,20 @@ ORDER BY fold_id
 )"},
 
     // ts_cv_split_by: Split time series data into train/test sets for cross-validation
-    // C++ API: ts_cv_split_by(source, group_col, date_col, target_col, training_end_times, horizon, frequency, params)
+    // C++ API: ts_cv_split_by(source, group_col, date_col, target_col, training_end_times, horizon, params)
+    //
+    // IMPORTANT: Assumes pre-cleaned data with no gaps. Use ts_fill_gaps_by first if needed.
+    // Uses position-based indexing (not date arithmetic) - works correctly with all frequencies.
+    //
     // params MAP supports: window_type ('expanding', 'fixed', 'sliding'), min_train_size (BIGINT), gap (BIGINT), embargo (BIGINT)
-    // gap: number of periods between training end and test start (default 0, simulates data latency)
-    // embargo: number of periods to exclude from training after previous fold's test end (default 0, prevents label leakage)
-    // Returns: group_col, date_col, target_col, fold_id, split (train/test)
-    // ts_cv_split_by: Native streaming implementation for memory efficiency
-    // Uses _ts_cv_split_native table-in-out function to avoid CROSS JOIN memory explosion
-    {"ts_cv_split_by", {"source", "group_col", "date_col", "target_col", "training_end_times", "horizon", "frequency", "params", nullptr}, {{nullptr, nullptr}},
+    // gap: number of positions between training end and test start (default 0)
+    // embargo: number of positions to exclude from training after previous fold's test end (default 0)
+    // Returns: <group_col>, <date_col>, <target_col>, fold_id, split (train/test)
+    {"ts_cv_split_by", {"source", "group_col", "date_col", "target_col", "training_end_times", "horizon", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_cv_split_native(
     (SELECT group_col, date_col, target_col FROM query_table(source::VARCHAR)),
     horizon,
-    frequency,
     training_end_times,
     params
 )

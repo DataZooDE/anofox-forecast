@@ -51,7 +51,6 @@ struct TsCvSplitNativeBindData : public TableFunctionData {
 
     // Parameters
     int64_t horizon = 7;
-    int64_t frequency_seconds = 86400;
     string window_type = "expanding";
     int64_t min_train_size = 1;
     int64_t gap = 0;
@@ -183,26 +182,19 @@ static unique_ptr<FunctionData> TsCvSplitNativeBind(
         bind_data->horizon = input.inputs[1].GetValue<int64_t>();
     }
 
-    // Parse frequency (parameter index 2)
-    if (input.inputs.size() > 2 && !input.inputs[2].IsNull()) {
-        string freq_str = input.inputs[2].ToString();
-        auto [freq_seconds, is_raw] = ParseFrequencyToSeconds(freq_str);
-        bind_data->frequency_seconds = freq_seconds;
-    }
-
-    // Parse params MAP (parameter index 4)
+    // Parse params MAP (parameter index 3)
     Value params_value;
-    if (input.inputs.size() > 4 && !input.inputs[4].IsNull()) {
-        params_value = input.inputs[4];
+    if (input.inputs.size() > 3 && !input.inputs[3].IsNull()) {
+        params_value = input.inputs[3];
         bind_data->window_type = ParseStringParam(params_value, "window_type", "expanding");
         bind_data->min_train_size = ParseIntParam(params_value, "min_train_size", 1);
         bind_data->gap = ParseIntParam(params_value, "gap", 0);
         bind_data->embargo = ParseIntParam(params_value, "embargo", 0);
     }
 
-    // Parse training_end_times array (parameter index 3)
-    if (input.inputs.size() > 3 && !input.inputs[3].IsNull()) {
-        auto &training_ends = input.inputs[3];
+    // Parse training_end_times array (parameter index 2)
+    if (input.inputs.size() > 2 && !input.inputs[2].IsNull()) {
+        auto &training_ends = input.inputs[2];
         if (training_ends.type().id() != LogicalTypeId::LIST) {
             throw InvalidInputException("training_end_times must be an array of timestamps");
         }
@@ -480,10 +472,11 @@ static OperatorFinalizeResultType TsCvSplitNativeFinalize(
 
 void RegisterTsCvSplitNativeFunction(ExtensionLoader &loader) {
     // Create the table function with table input
+    // NOTE: No frequency parameter needed - uses position-based indexing
+    //       Assumes pre-cleaned data with no gaps
     TableFunction func("_ts_cv_split_native",
                        {LogicalType::TABLE,           // Input table (group, date, value)
                         LogicalType::INTEGER,         // horizon
-                        LogicalType::VARCHAR,         // frequency
                         LogicalType::LIST(LogicalType::TIMESTAMP),  // training_end_times
                         LogicalType::ANY},            // params MAP
                        nullptr,                       // main function (unused for in-out)
