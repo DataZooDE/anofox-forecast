@@ -58,8 +58,13 @@ ParsedFrequency ParseFrequencyWithType(const string &frequency_str) {
         return {std::stoll(upper), true, FrequencyType::FIXED};
     }
 
-    // Default to 1 day
-    return {86400, false, FrequencyType::FIXED};
+    // Invalid frequency - throw error with helpful message
+    throw InvalidInputException(
+        "Invalid frequency '%s'. Valid formats:\n"
+        "  Polars-style: '1d', '1h', '30m', '1w', '1mo', '1q', '1y'\n"
+        "  DuckDB INTERVAL: '1 day', '1 hour', '1 minute', '1 week', '1 month', '1 quarter', '1 year'\n"
+        "  Raw integer: '86400' (for integer date columns)",
+        frequency_str.c_str());
 }
 
 // Legacy function for backward compatibility
