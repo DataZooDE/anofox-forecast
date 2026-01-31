@@ -1297,6 +1297,35 @@ SELECT * FROM _ts_cv_generate_folds_native(
 )
 )"},
 
+    // ts_ml_folds_by: Create train/test splits for ML model backtesting
+    // C++ API: ts_ml_folds_by(source, group_col, date_col, target_col, n_folds, horizon, params)
+    //
+    // This function combines fold boundary generation and train/test splitting in a single call,
+    // suitable for ML model backtesting. Unlike ts_cv_split_by which requires pre-computed
+    // training_end_times, this function automatically computes fold boundaries from the data.
+    //
+    // IMPORTANT: Assumes pre-cleaned data with no gaps. Use ts_fill_gaps_by first if needed.
+    // Uses position-based indexing (not date arithmetic) - works correctly with all frequencies.
+    //
+    // params MAP supports:
+    //   gap (BIGINT, default 0) - periods between train end and test start
+    //   embargo (BIGINT, default 0) - periods to exclude from training after previous test
+    //   window_type ('expanding', 'fixed', 'sliding', default 'expanding') - training window strategy
+    //   min_train_size (BIGINT, default 1) - minimum training size for fixed/sliding windows
+    //   initial_train_size (BIGINT, default: n_dates - n_folds * horizon) - periods before first fold
+    //   skip_length (BIGINT, default: horizon) - periods between folds (1=dense, horizon=default)
+    //   clip_horizon (BOOLEAN, default: false) - if true, allow folds with partial test windows
+    // Returns: <group_col>, <date_col>, <target_col>, fold_id, split (train/test)
+    {"ts_ml_folds_by", {"source", "group_col", "date_col", "target_col", "n_folds", "horizon", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+SELECT * FROM _ts_ml_folds_native(
+    (SELECT group_col, date_col, target_col::DOUBLE AS y FROM query_table(source::VARCHAR)),
+    n_folds,
+    horizon,
+    params
+)
+)"},
+
     // ts_backtest_auto_by: One-liner backtest combining fold generation, splitting, forecasting, and evaluation
     // C++ API: ts_backtest_auto_by(source, group_col, date_col, target_col, horizon, folds, frequency, params, features, metric)
     //

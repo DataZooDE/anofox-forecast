@@ -1,0 +1,201 @@
+# name: test/sql/ts_ml_folds.test
+# description: Tests for ts_ml_folds_by - ML-ready train/test fold generation
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Basic Functionality Tests
+#######################################
+
+# Test basic fold generation with default parameters
+query III
+WITH data AS (
+    SELECT 'A' AS series_id, CAST(d AS DATE) AS ds, CAST(i AS DOUBLE) AS y
+    FROM (VALUES
+        ('2023-01-01', 1), ('2023-02-01', 2), ('2023-03-01', 3), ('2023-04-01', 4),
+        ('2023-05-01', 5), ('2023-06-01', 6), ('2023-07-01', 7), ('2023-08-01', 8),
+        ('2023-09-01', 9), ('2023-10-01', 10), ('2023-11-01', 11), ('2023-12-01', 12),
+        ('2024-01-01', 13), ('2024-02-01', 14), ('2024-03-01', 15), ('2024-04-01', 16),
+        ('2024-05-01', 17), ('2024-06-01', 18), ('2024-07-01', 19), ('2024-08-01', 20),
+        ('2024-09-01', 21), ('2024-10-01', 22), ('2024-11-01', 23), ('2024-12-01', 24)
+    ) AS t(d, i)
+)
+SELECT fold_id, split, COUNT(*) AS cnt
+FROM ts_ml_folds_by(data, series_id, ds, y, 2, 6, MAP{})
+GROUP BY fold_id, split
+ORDER BY fold_id, split;
+----
+1	test	6
+1	train	12
+2	test	6
+2	train	18
+
+# Test column type preservation - DATE
+query I
+WITH data AS (
+    SELECT 'A' AS series_id, CAST(d AS DATE) AS ds, CAST(i AS DOUBLE) AS y
+    FROM (VALUES
+        ('2023-01-01', 1), ('2023-02-01', 2), ('2023-03-01', 3), ('2023-04-01', 4),
+        ('2023-05-01', 5), ('2023-06-01', 6), ('2023-07-01', 7), ('2023-08-01', 8),
+        ('2023-09-01', 9), ('2023-10-01', 10), ('2023-11-01', 11), ('2023-12-01', 12)
+    ) AS t(d, i)
+)
+SELECT typeof(ds) FROM ts_ml_folds_by(data, series_id, ds, y, 1, 3, MAP{}) LIMIT 1;
+----
+DATE
+
+# Test column type preservation - TIMESTAMP
+query I
+WITH data AS (
+    SELECT 'A' AS series_id, CAST(d AS TIMESTAMP) AS ds, CAST(i AS DOUBLE) AS y
+    FROM (VALUES
+        ('2023-01-01', 1), ('2023-02-01', 2), ('2023-03-01', 3), ('2023-04-01', 4),
+        ('2023-05-01', 5), ('2023-06-01', 6), ('2023-07-01', 7), ('2023-08-01', 8),
+        ('2023-09-01', 9), ('2023-10-01', 10), ('2023-11-01', 11), ('2023-12-01', 12)
+    ) AS t(d, i)
+)
+SELECT typeof(ds) FROM ts_ml_folds_by(data, series_id, ds, y, 1, 3, MAP{}) LIMIT 1;
+----
+TIMESTAMP
+
+# Test column type preservation - INTEGER
+query I
+WITH data AS (
+    SELECT 'A' AS series_id, CAST(i AS INTEGER) AS ds, CAST(i AS DOUBLE) AS y
+    FROM generate_series(1, 24) AS t(i)
+)
+SELECT typeof(ds) FROM ts_ml_folds_by(data, series_id, ds, y, 1, 3, MAP{}) LIMIT 1;
+----
+INTEGER
+
+#######################################
+# Parameter Tests
+#######################################
+
+# Test initial_train_size parameter
+query III
+WITH data AS (
+    SELECT 'A' AS series_id, CAST(d AS DATE) AS ds, CAST(i AS DOUBLE) AS y
+    FROM (VALUES
+        ('2023-01-01', 1), ('2023-02-01', 2), ('2023-03-01', 3), ('2023-04-01', 4),
+        ('2023-05-01', 5), ('2023-06-01', 6), ('2023-07-01', 7), ('2023-08-01', 8),
+        ('2023-09-01', 9), ('2023-10-01', 10), ('2023-11-01', 11), ('2023-12-01', 12),
+        ('2024-01-01', 13), ('2024-02-01', 14), ('2024-03-01', 15), ('2024-04-01', 16),
+        ('2024-05-01', 17), ('2024-06-01', 18), ('2024-07-01', 19), ('2024-08-01', 20),
+        ('2024-09-01', 21), ('2024-10-01', 22), ('2024-11-01', 23), ('2024-12-01', 24)
+    ) AS t(d, i)
+)
+SELECT fold_id, split, COUNT(*) AS cnt
+FROM ts_ml_folds_by(data, series_id, ds, y, 1, 3, MAP{'initial_train_size': 6})
+GROUP BY fold_id, split
+ORDER BY fold_id, split;
+----
+1	test	3
+1	train	6
+
+# Test skip_length parameter (dense folds)
+query III
+WITH data AS (
+    SELECT 'A' AS series_id, CAST(d AS DATE) AS ds, CAST(i AS DOUBLE) AS y
+    FROM (VALUES
+        ('2023-01-01', 1), ('2023-02-01', 2), ('2023-03-01', 3), ('2023-04-01', 4),
+        ('2023-05-01', 5), ('2023-06-01', 6), ('2023-07-01', 7), ('2023-08-01', 8),
+        ('2023-09-01', 9), ('2023-10-01', 10), ('2023-11-01', 11), ('2023-12-01', 12)
+    ) AS t(d, i)
+)
+SELECT fold_id, split, COUNT(*) AS cnt
+FROM ts_ml_folds_by(data, series_id, ds, y, 3, 3, MAP{'initial_train_size': 6, 'skip_length': 1})
+GROUP BY fold_id, split
+ORDER BY fold_id, split;
+----
+1	test	3
+1	train	6
+2	test	3
+2	train	7
+3	test	3
+3	train	8
+
+# Test gap parameter
+query III
+WITH data AS (
+    SELECT 'A' AS series_id, CAST(d AS DATE) AS ds, CAST(i AS DOUBLE) AS y
+    FROM (VALUES
+        ('2023-01-01', 1), ('2023-02-01', 2), ('2023-03-01', 3), ('2023-04-01', 4),
+        ('2023-05-01', 5), ('2023-06-01', 6), ('2023-07-01', 7), ('2023-08-01', 8),
+        ('2023-09-01', 9), ('2023-10-01', 10), ('2023-11-01', 11), ('2023-12-01', 12)
+    ) AS t(d, i)
+)
+SELECT fold_id, split, COUNT(*) AS cnt
+FROM ts_ml_folds_by(data, series_id, ds, y, 1, 2, MAP{'initial_train_size': 6, 'gap': 2})
+GROUP BY fold_id, split
+ORDER BY fold_id, split;
+----
+1	test	2
+1	train	6
+
+# Test fixed window_type (use STRUCT for mixed types)
+query III
+WITH data AS (
+    SELECT 'A' AS series_id, CAST(d AS DATE) AS ds, CAST(i AS DOUBLE) AS y
+    FROM (VALUES
+        ('2023-01-01', 1), ('2023-02-01', 2), ('2023-03-01', 3), ('2023-04-01', 4),
+        ('2023-05-01', 5), ('2023-06-01', 6), ('2023-07-01', 7), ('2023-08-01', 8),
+        ('2023-09-01', 9), ('2023-10-01', 10), ('2023-11-01', 11), ('2023-12-01', 12)
+    ) AS t(d, i)
+)
+SELECT fold_id, split, COUNT(*) AS cnt
+FROM ts_ml_folds_by(data, series_id, ds, y, 2, 3, {'window_type': 'fixed', 'min_train_size': 6})
+GROUP BY fold_id, split
+ORDER BY fold_id, split;
+----
+1	test	3
+1	train	6
+2	test	3
+2	train	6
+
+#######################################
+# Multiple Groups Test
+#######################################
+
+# Test with multiple groups
+query IIII
+WITH data AS (
+    SELECT series_id, CAST(d AS DATE) AS ds, CAST(i AS DOUBLE) AS y
+    FROM (VALUES
+        ('A', '2023-01-01', 1), ('A', '2023-02-01', 2), ('A', '2023-03-01', 3),
+        ('A', '2023-04-01', 4), ('A', '2023-05-01', 5), ('A', '2023-06-01', 6),
+        ('A', '2023-07-01', 7), ('A', '2023-08-01', 8), ('A', '2023-09-01', 9),
+        ('B', '2023-01-01', 10), ('B', '2023-02-01', 20), ('B', '2023-03-01', 30),
+        ('B', '2023-04-01', 40), ('B', '2023-05-01', 50), ('B', '2023-06-01', 60),
+        ('B', '2023-07-01', 70), ('B', '2023-08-01', 80), ('B', '2023-09-01', 90)
+    ) AS t(series_id, d, i)
+)
+SELECT series_id, fold_id, split, COUNT(*) AS cnt
+FROM ts_ml_folds_by(data, series_id, ds, y, 1, 3, MAP{})
+GROUP BY series_id, fold_id, split
+ORDER BY series_id, fold_id, split;
+----
+A	1	test	3
+A	1	train	6
+B	1	test	3
+B	1	train	6
+
+#######################################
+# Edge Cases
+#######################################
+
+# Test with minimum data for one fold
+query III
+WITH data AS (
+    SELECT 'A' AS series_id, CAST(d AS DATE) AS ds, CAST(i AS DOUBLE) AS y
+    FROM (VALUES ('2023-01-01', 1), ('2023-02-01', 2), ('2023-03-01', 3)) AS t(d, i)
+)
+SELECT fold_id, split, COUNT(*) AS cnt
+FROM ts_ml_folds_by(data, series_id, ds, y, 1, 1, MAP{})
+GROUP BY fold_id, split
+ORDER BY fold_id, split;
+----
+1	test	1
+1	train	2
+

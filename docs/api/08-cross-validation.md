@@ -237,6 +237,94 @@ FROM ts_cv_generate_folds('sales_data', date, 3, 5, MAP{});
 
 ---
 
+### ts_ml_folds_by
+
+Create train/test splits for ML model backtesting in a single function call.
+
+This function combines fold boundary generation and train/test splitting, suitable for ML model backtesting. Unlike using `ts_cv_generate_folds` + `ts_cv_split_by` separately, this function avoids DuckDB's subquery limitation and provides a simpler API.
+
+**Signature:**
+```sql
+ts_ml_folds_by(
+    source TABLE or VARCHAR,  -- Source table or table name
+    group_col COLUMN,         -- Series grouping column (unquoted identifier)
+    date_col COLUMN,          -- Date column (unquoted identifier)
+    target_col COLUMN,        -- Value column (unquoted identifier)
+    n_folds BIGINT,           -- Number of folds to generate
+    horizon BIGINT,           -- Number of periods in test window
+    params MAP or STRUCT      -- Optional parameters (see below)
+) → TABLE
+```
+
+> **Important:** Assumes pre-cleaned data with no gaps. Use `ts_fill_gaps_by` first if your data has missing dates.
+> Uses position-based indexing (not date arithmetic) - works correctly with all frequencies.
+
+**Params Options:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `gap` | BIGINT | `0` | Periods between train end and test start |
+| `embargo` | BIGINT | `0` | Periods to exclude from training after previous test |
+| `window_type` | VARCHAR | `'expanding'` | `'expanding'`, `'fixed'`, or `'sliding'` |
+| `min_train_size` | BIGINT | `1` | Minimum training size for fixed/sliding windows |
+| `initial_train_size` | BIGINT | auto | Periods before first fold (default: n_dates - n_folds * horizon) |
+| `skip_length` | BIGINT | `horizon` | Periods between folds (1=dense, horizon=default) |
+| `clip_horizon` | BOOLEAN | `false` | If true, allow folds with partial test windows |
+
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `<group_col>` | (same as input) | Series identifier (preserves original column name) |
+| `<date_col>` | (same as input) | Date/timestamp (preserves original column name and type) |
+| `<target_col>` | DOUBLE | Target value |
+| `fold_id` | BIGINT | Fold number (1, 2, 3, ...) |
+| `split` | VARCHAR | `'train'` or `'test'` |
+
+**Examples:**
+```sql
+-- Basic ML backtesting with 3 folds, 6-period horizon
+SELECT * FROM ts_ml_folds_by(
+    'sales_data', store_id, date, revenue,
+    3, 6, MAP{}
+);
+
+-- With gap between train and test (e.g., for "next week" predictions)
+SELECT * FROM ts_ml_folds_by(
+    'sales_data', store_id, date, revenue,
+    3, 7, {'gap': 1}
+);
+
+-- Fixed window with custom initial training size
+SELECT * FROM ts_ml_folds_by(
+    'sales_data', store_id, date, revenue,
+    5, 12, {'window_type': 'fixed', 'min_train_size': 24, 'initial_train_size': 24}
+);
+
+-- Dense overlapping folds (skip_length=1)
+SELECT * FROM ts_ml_folds_by(
+    'sales_data', store_id, date, revenue,
+    10, 3, {'skip_length': 1}
+);
+```
+
+**Use Case - ML Model Backtesting:**
+```sql
+-- Create CV splits
+CREATE TABLE ml_splits AS
+SELECT * FROM ts_ml_folds_by('prepared_data', series_id, date, value, 5, 12, MAP{});
+
+-- Join with your features table
+CREATE TABLE ml_input AS
+SELECT s.*, f.feature1, f.feature2, f.feature3
+FROM ml_splits s
+JOIN feature_table f ON s.series_id = f.series_id AND s.date = f.date;
+
+-- Train: Use rows where split = 'train' for each fold
+-- Test: Predict rows where split = 'test' for each fold
+-- Then join predictions back to actuals for evaluation
+```
+
+---
+
 ### ts_cv_split_folds_by
 
 View fold date ranges (train/test boundaries).
