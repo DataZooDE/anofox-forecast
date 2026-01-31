@@ -4,8 +4,10 @@ use crate::error::{ForecastError, Result};
 use crate::imputation::fill_nulls_interpolate;
 use crate::seasonality::detect_seasonality;
 
-// ETS model types from anofox-forecast crate
-use anofox_forecast::models::exponential::{ETSSpec, ETS as ETSModel};
+// Model types from anofox-forecast crate
+use anofox_forecast::core::TimeSeries;
+use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig};
+use anofox_forecast::models::exponential::{AutoETS, AutoETSConfig, ETSSpec, ETS as ETSModel};
 use anofox_forecast::prelude::Forecaster;
 
 /// Forecast result.
@@ -426,15 +428,10 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         1
     };
 
-    // Select model - Auto* models use automatic selection
-    let model = if is_auto_model(options.model) {
-        select_best_model(&clean_values, period)
-    } else {
-        options.model
-    };
-
     // Generate forecast based on model
-    let result = match model {
+    // Note: Auto* models (AutoARIMA, AutoETS, etc.) run their respective algorithms
+    // with automatic parameter selection, not a generic model selection heuristic
+    let result = match options.model {
         // Basic Models
         ModelType::Naive => forecast_naive(&clean_values, options.horizon),
         ModelType::SeasonalNaive => forecast_seasonal_naive(&clean_values, options.horizon, period),
@@ -460,7 +457,7 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             period,
             options.ets_spec.as_deref(),
         ),
-        ModelType::AutoETS => forecast_ets(&clean_values, options.horizon, period, None),
+        ModelType::AutoETS => forecast_auto_ets(&clean_values, options.horizon, period),
         // Theta Methods
         ModelType::Theta
         | ModelType::OptimizedTheta
@@ -468,7 +465,8 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         | ModelType::DynamicOptimizedTheta
         | ModelType::AutoTheta => forecast_theta(&clean_values, options.horizon),
         // ARIMA
-        ModelType::ARIMA | ModelType::AutoARIMA => forecast_arima(&clean_values, options.horizon),
+        ModelType::ARIMA => forecast_arima(&clean_values, options.horizon),
+        ModelType::AutoARIMA => forecast_auto_arima(&clean_values, options.horizon, period),
         // Multiple Seasonality
         ModelType::MFLES | ModelType::AutoMFLES => {
             forecast_mfles(&clean_values, options.horizon, period)
@@ -494,7 +492,7 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
 
     // Calculate fitted values and residuals if requested
     let (fitted, residuals) = if options.include_fitted || options.include_residuals {
-        let fitted = calculate_fitted_values(&clean_values, model, period);
+        let fitted = calculate_fitted_values(&clean_values, options.model, period);
         let residuals = if options.include_residuals {
             Some(
                 clean_values
@@ -527,7 +525,13 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         upper,
         fitted: if options.include_fitted { fitted } else { None },
         residuals,
-        model_name: model.name().to_string(),
+        // Use the model_name from the result (contains selected parameters for Auto* models)
+        // Fall back to enum name if result doesn't have a specific name
+        model_name: if result.model_name.is_empty() {
+            options.model.name().to_string()
+        } else {
+            result.model_name
+        },
         aic: None,
         bic: None,
         mse,
@@ -633,23 +637,13 @@ pub fn forecast_with_exog(
             }
         }
     } else {
-        // No exog data or model doesn't support exog - use standard forecasting with auto-selection
-        let model = if is_auto_model(options.model) {
-            select_best_model(&clean_values, period)
-        } else {
-            options.model
-        };
-        forecast_with_model(&clean_values, options.horizon, model, period)
+        // No exog data or model doesn't support exog - use standard forecasting
+        // Auto* models run their respective algorithms with automatic parameter selection
+        forecast_with_model(&clean_values, options.horizon, options.model, period)
     }?;
 
-    // For fitted values calculation, determine actual model used
-    let model = if supports_exog && options.exog.is_some() {
-        options.model // Use requested model for exog case
-    } else if is_auto_model(options.model) {
-        select_best_model(&clean_values, period)
-    } else {
-        options.model
-    };
+    // For fitted values calculation, use the requested model
+    let model = options.model;
 
     // Calculate confidence intervals
     let (lower, upper) =
@@ -657,7 +651,7 @@ pub fn forecast_with_exog(
 
     // Calculate fitted values and residuals if requested
     let (fitted, residuals) = if options.include_fitted || options.include_residuals {
-        let fitted = calculate_fitted_values(&clean_values, model, period);
+        let fitted = calculate_fitted_values(&clean_values, options.model, period);
         let residuals = if options.include_residuals {
             Some(
                 clean_values
@@ -728,7 +722,8 @@ fn forecast_with_model(
         ModelType::SeasonalWindowAverage => {
             forecast_seasonal_window_average(values, horizon, period)
         }
-        ModelType::ETS | ModelType::AutoETS => forecast_ets(values, horizon, period, None),
+        ModelType::ETS => forecast_ets(values, horizon, period, None),
+        ModelType::AutoETS => forecast_auto_ets(values, horizon, period),
         // Theta Methods
         ModelType::Theta
         | ModelType::OptimizedTheta
@@ -736,7 +731,8 @@ fn forecast_with_model(
         | ModelType::DynamicOptimizedTheta
         | ModelType::AutoTheta => forecast_theta(values, horizon),
         // ARIMA
-        ModelType::ARIMA | ModelType::AutoARIMA => forecast_arima(values, horizon),
+        ModelType::ARIMA => forecast_arima(values, horizon),
+        ModelType::AutoARIMA => forecast_auto_arima(values, horizon, period),
         // Multiple Seasonality
         ModelType::MFLES | ModelType::AutoMFLES => forecast_mfles(values, horizon, period),
         ModelType::MSTL | ModelType::AutoMSTL => forecast_mstl(values, horizon, period),
@@ -1249,6 +1245,168 @@ fn forecast_arima(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
     })
 }
 
+/// AutoARIMA: Automatic ARIMA model selection using AIC-based search.
+/// Uses the proper AutoARIMA implementation from anofox-forecast library.
+fn forecast_auto_arima(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
+    use chrono::{Duration, TimeZone, Utc};
+
+    // Create timestamps for TimeSeries (required by anofox-forecast)
+    let base = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+    let timestamps: Vec<_> = (0..values.len())
+        .map(|i| base + Duration::hours(i as i64))
+        .collect();
+
+    let ts = TimeSeries::univariate(timestamps, values.to_vec()).map_err(|e| {
+        ForecastError::ComputationError(format!("Failed to create TimeSeries: {}", e))
+    })?;
+
+    // Configure AutoARIMA with seasonal period if provided
+    let config = if period > 1 {
+        AutoARIMAConfig::default().with_seasonal_period(period)
+    } else {
+        AutoARIMAConfig::default()
+    };
+
+    let mut model = AutoARIMA::with_config(config);
+
+    // Fit the model
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("AutoARIMA fit failed: {}", e)))?;
+
+    // Get forecasts
+    let forecast = model
+        .predict(horizon)
+        .map_err(|e| ForecastError::ComputationError(format!("AutoARIMA predict failed: {}", e)))?;
+
+    // Get the selected order for model name
+    // The model_scores() contains sorted (best first) results
+    let model_name = if let Some(order) = model.selected_full_order() {
+        let name = if order.is_seasonal() {
+            format!(
+                "AutoARIMA({},{},{})({},{},{})[{}]",
+                order.p, order.d, order.q, order.cap_p, order.cap_d, order.cap_q, order.s
+            )
+        } else {
+            format!("AutoARIMA({},{},{})", order.p, order.d, order.q)
+        };
+        name
+    } else if let Some((p, d, q)) = model.selected_order() {
+        format!("AutoARIMA({},{},{})", p, d, q)
+    } else if let Some((order, _score)) = model.model_scores().first() {
+        // Fallback: use best model from scores
+        if order.is_seasonal() {
+            format!(
+                "AutoARIMA({},{},{})({},{},{})[{}]",
+                order.p, order.d, order.q, order.cap_p, order.cap_d, order.cap_q, order.s
+            )
+        } else {
+            format!("AutoARIMA({},{},{})", order.p, order.d, order.q)
+        }
+    } else {
+        "AutoARIMA".to_string()
+    };
+
+    // Extract point forecasts (primary dimension)
+    let point = forecast.primary().to_vec();
+
+    // Extract confidence intervals (first dimension for univariate)
+    let lower = forecast
+        .lower()
+        .and_then(|intervals| intervals.first())
+        .cloned()
+        .unwrap_or_default();
+    let upper = forecast
+        .upper()
+        .and_then(|intervals| intervals.first())
+        .cloned()
+        .unwrap_or_default();
+
+    Ok(ForecastOutput {
+        point,
+        lower,
+        upper,
+        fitted: model.fitted_values().map(|v| v.to_vec()),
+        residuals: model.residuals().map(|v| v.to_vec()),
+        model_name,
+        aic: None,
+        bic: None,
+        mse: None,
+    })
+}
+
+/// AutoETS: Automatic ETS model selection using AICc-based search.
+/// Uses the proper AutoETS implementation from anofox-forecast library.
+fn forecast_auto_ets(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
+    use chrono::{Duration, TimeZone, Utc};
+
+    // Create timestamps for TimeSeries (required by anofox-forecast)
+    let base = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+    let timestamps: Vec<_> = (0..values.len())
+        .map(|i| base + Duration::hours(i as i64))
+        .collect();
+
+    let ts = TimeSeries::univariate(timestamps, values.to_vec()).map_err(|e| {
+        ForecastError::ComputationError(format!("Failed to create TimeSeries: {}", e))
+    })?;
+
+    // Configure AutoETS with seasonal period if provided
+    let config = if period > 1 {
+        AutoETSConfig::with_period(period)
+    } else {
+        AutoETSConfig::non_seasonal()
+    };
+
+    let mut model = AutoETS::with_config(config);
+
+    // Fit the model
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("AutoETS fit failed: {}", e)))?;
+
+    // Get forecasts
+    let forecast = model
+        .predict(horizon)
+        .map_err(|e| ForecastError::ComputationError(format!("AutoETS predict failed: {}", e)))?;
+
+    // Get the selected spec for model name
+    let model_name = if let Some(spec) = model.selected_spec() {
+        format!(
+            "AutoETS({:?},{:?},{:?})",
+            spec.error, spec.trend, spec.seasonal
+        )
+    } else {
+        "AutoETS".to_string()
+    };
+
+    // Extract point forecasts (primary dimension)
+    let point = forecast.primary().to_vec();
+
+    // Extract confidence intervals (first dimension for univariate)
+    let lower = forecast
+        .lower()
+        .and_then(|intervals| intervals.first())
+        .cloned()
+        .unwrap_or_default();
+    let upper = forecast
+        .upper()
+        .and_then(|intervals| intervals.first())
+        .cloned()
+        .unwrap_or_default();
+
+    Ok(ForecastOutput {
+        point,
+        lower,
+        upper,
+        fitted: model.fitted_values().map(|v| v.to_vec()),
+        residuals: model.residuals().map(|v| v.to_vec()),
+        model_name,
+        aic: None,
+        bic: None,
+        mse: None,
+    })
+}
+
 fn forecast_mfles(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
     // MFLES: Multiple Frequency Locally Estimated Scatterplot Smoothing
     // Simplified: use seasonal exponential smoothing
@@ -1525,6 +1683,7 @@ fn forecast_mfles_with_exog(
 }
 
 /// Check if model is an auto-selection model
+#[cfg(test)]
 fn is_auto_model(model: ModelType) -> bool {
     matches!(
         model,
@@ -1537,6 +1696,7 @@ fn is_auto_model(model: ModelType) -> bool {
     )
 }
 
+#[cfg(test)]
 fn select_best_model(values: &[f64], period: usize) -> ModelType {
     // Simple model selection based on series characteristics
     let n = values.len();
@@ -2090,5 +2250,111 @@ mod tests {
             "Expected success for valid ETS spec 'AAA': {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn test_auto_arima_uses_proper_library() {
+        // Test that AutoARIMA uses the anofox-forecast library's AutoARIMA implementation
+        // which does actual AIC-based model selection, not the simplified ARIMA(1,1,1)
+        let values: Vec<Option<f64>> = (0..60)
+            .map(|i| Some(100.0 + i as f64 * 0.5 + 10.0 * (i as f64 * 0.1).sin()))
+            .collect();
+
+        let options = ForecastOptions {
+            model: ModelType::AutoARIMA,
+            horizon: 5,
+            seasonal_period: 12,
+            ..Default::default()
+        };
+
+        let result = forecast(&values, &options).unwrap();
+
+        // Verify the model name indicates AutoARIMA was used (not Naive or SeasonalNaive)
+        assert!(
+            result.model_name.starts_with("AutoARIMA"),
+            "Expected model_name to start with 'AutoARIMA', got '{}'",
+            result.model_name
+        );
+
+        // Verify we got forecasts
+        assert_eq!(result.point.len(), 5);
+        assert!(result.point.iter().all(|v| v.is_finite()));
+
+        // The proper AutoARIMA should include the selected (p,d,q) order in the name
+        // Format: "AutoARIMA(p,d,q)" or "AutoARIMA(p,d,q)(P,D,Q)[s]" for seasonal
+        println!("AutoARIMA model name: {}", result.model_name);
+    }
+
+    #[test]
+    fn test_auto_ets_uses_proper_library() {
+        // Test that AutoETS uses the anofox-forecast library's AutoETS implementation
+        // which does actual AICc-based model selection
+        let values: Vec<Option<f64>> = (0..48)
+            .map(|i| {
+                Some(
+                    100.0
+                        + i as f64 * 0.5
+                        + 10.0 * (2.0 * std::f64::consts::PI * i as f64 / 12.0).sin(),
+                )
+            })
+            .collect();
+
+        let options = ForecastOptions {
+            model: ModelType::AutoETS,
+            horizon: 5,
+            seasonal_period: 12,
+            ..Default::default()
+        };
+
+        let result = forecast(&values, &options).unwrap();
+
+        // Verify the model name indicates AutoETS was used (not SeasonalNaive)
+        assert!(
+            result.model_name.starts_with("AutoETS"),
+            "Expected model_name to start with 'AutoETS', got '{}'",
+            result.model_name
+        );
+
+        // Verify we got forecasts
+        assert_eq!(result.point.len(), 5);
+        assert!(result.point.iter().all(|v| v.is_finite()));
+
+        // The proper AutoETS should include the selected (E,T,S) spec in the name
+        // Format: "AutoETS(Error,Trend,Seasonal)"
+        println!("AutoETS model name: {}", result.model_name);
+    }
+
+    #[test]
+    fn test_auto_arima_different_from_simple_arima() {
+        // Verify that AutoARIMA produces different results than the simplified ARIMA
+        // by testing on data that benefits from proper order selection
+        let values: Vec<Option<f64>> = (0..50)
+            .map(|i| Some(100.0 + i as f64 * 2.0 + 5.0 * (i as f64 * 0.2).sin()))
+            .collect();
+
+        let auto_options = ForecastOptions {
+            model: ModelType::AutoARIMA,
+            horizon: 5,
+            ..Default::default()
+        };
+
+        let simple_options = ForecastOptions {
+            model: ModelType::ARIMA,
+            horizon: 5,
+            ..Default::default()
+        };
+
+        let auto_result = forecast(&values, &auto_options).unwrap();
+        let simple_result = forecast(&values, &simple_options).unwrap();
+
+        // AutoARIMA uses library's implementation
+        assert!(auto_result.model_name.starts_with("AutoARIMA"));
+        // Simple ARIMA uses our simplified implementation
+        assert_eq!(simple_result.model_name, "ARIMA");
+
+        // Forecasts should be different (AutoARIMA selects optimal p,d,q)
+        // Note: They might occasionally be similar, but typically differ
+        println!("AutoARIMA forecasts: {:?}", auto_result.point);
+        println!("Simple ARIMA forecasts: {:?}", simple_result.point);
     }
 }

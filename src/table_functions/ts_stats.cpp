@@ -353,10 +353,15 @@ struct TsStatsByBindData : public TableFunctionData {
 // ============================================================================
 
 struct TsStatsByGlobalState : public GlobalTableFunctionState {
-    // Allow parallel execution - each thread processes its partition of groups
+    // Use single-threaded execution to avoid batch index collision issues
+    // The batch index collision occurs with PhysicalBatchInsert when multiple threads
+    // produce output chunks without properly coordinated batch indices
     idx_t MaxThreads() const override {
-        return 999999;  // Unlimited - let DuckDB decide based on hardware
+        return 1;
     }
+
+    // Atomic counter for unique batch indices - still needed for proper ordering
+    std::atomic<idx_t> next_batch_index{0};
 
     // Global group tracking to prevent duplicate processing
     std::mutex processed_groups_mutex;
@@ -392,6 +397,9 @@ struct TsStatsByLocalState : public LocalTableFunctionState {
     // Processing state
     bool processed = false;
     idx_t output_offset = 0;
+
+    // Batch index for this local state - assigned in init and incremented each time we produce output
+    idx_t batch_index = 0;
 };
 
 static unique_ptr<FunctionData> TsStatsByBind(
@@ -527,7 +535,11 @@ static unique_ptr<LocalTableFunctionState> TsStatsByInitLocal(
     ExecutionContext &context,
     TableFunctionInitInput &input,
     GlobalTableFunctionState *global_state) {
-    return make_uniq<TsStatsByLocalState>();
+    auto local_state = make_uniq<TsStatsByLocalState>();
+    // Assign an initial batch index from the global counter
+    auto &g_state = global_state->Cast<TsStatsByGlobalState>();
+    local_state->batch_index = g_state.next_batch_index++;
+    return local_state;
 }
 
 static OperatorResultType TsStatsByInOut(
@@ -638,6 +650,10 @@ static OperatorFinalizeResultType TsStatsByFinalize(
         return OperatorFinalizeResultType::FINISHED;
     }
 
+    // Get a unique batch index for this output chunk
+    auto &global_state = data_p.global_state->Cast<TsStatsByGlobalState>();
+    local_state.batch_index = global_state.next_batch_index++;
+
     idx_t output_count = 0;
 
     // Initialize all output vectors as FLAT_VECTOR
@@ -725,6 +741,7 @@ void RegisterTsStatsByFunction(ExtensionLoader &loader) {
 
     func.in_out_function = TsStatsByInOut;
     func.in_out_function_final = TsStatsByFinalize;
+    // Note: get_partition_data removed - causes batch index issues with PhysicalBatchInsert
 
     loader.RegisterFunction(func);
 }
