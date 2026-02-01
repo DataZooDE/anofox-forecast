@@ -246,7 +246,7 @@ This function combines fold boundary generation and train/test splitting, suitab
 **Signature:**
 ```sql
 ts_ml_folds_by(
-    source TABLE or VARCHAR,  -- Source table or table name
+    source VARCHAR,           -- Source table name (quoted string, NOT a CTE reference)
     group_col COLUMN,         -- Series grouping column (unquoted identifier)
     date_col COLUMN,          -- Date column (unquoted identifier)
     target_col COLUMN,        -- Value column (unquoted identifier)
@@ -256,8 +256,11 @@ ts_ml_folds_by(
 ) → TABLE
 ```
 
-> **Important:** Assumes pre-cleaned data with no gaps. Use `ts_fill_gaps_by` first if your data has missing dates.
-> Uses position-based indexing (not date arithmetic) - works correctly with all frequencies.
+> **Important:**
+> - **Source must be a table name as a string** (e.g., `'my_table'`), not a CTE reference. CTEs are not supported.
+> - Assumes pre-cleaned data with no gaps. Use `ts_fill_gaps_by` first if your data has missing dates.
+> - Uses position-based indexing (not date arithmetic) - works correctly with all frequencies.
+> - **Parameter validation:** Unknown parameter names will throw an informative error listing all available parameters.
 
 **Params Options:**
 | Key | Type | Default | Description |
@@ -265,10 +268,12 @@ ts_ml_folds_by(
 | `gap` | BIGINT | `0` | Periods between train end and test start |
 | `embargo` | BIGINT | `0` | Periods to exclude from training after previous test |
 | `window_type` | VARCHAR | `'expanding'` | `'expanding'`, `'fixed'`, or `'sliding'` |
-| `min_train_size` | BIGINT | `1` | Minimum training size for fixed/sliding windows |
+| `min_train_size` | BIGINT | `1` | Minimum training size for fixed/sliding windows only (ignored for expanding) |
 | `initial_train_size` | BIGINT | auto | Periods before first fold (default: n_dates - n_folds * horizon) |
 | `skip_length` | BIGINT | `horizon` | Periods between folds (1=dense, horizon=default) |
 | `clip_horizon` | BOOLEAN | `false` | If true, allow folds with partial test windows |
+
+> **Note on `min_train_size`:** This parameter only affects `fixed` and `sliding` window types. For the default `expanding` window, training always starts from position 0. If you need a minimum training size with expanding windows, use `initial_train_size` instead.
 
 **Returns:**
 | Column | Type | Description |
