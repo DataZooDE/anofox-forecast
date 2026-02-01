@@ -1,5 +1,5 @@
-# name: test/sql/ts_ml_folds.test
-# description: Tests for ts_ml_folds_by - ML-ready train/test fold generation
+# name: test/sql/ts_cv_folds.test
+# description: Tests for ts_cv_folds_by - ML-ready train/test fold generation
 # group: [sql]
 
 require anofox_forecast
@@ -23,7 +23,7 @@ FROM (VALUES
 # Test basic fold generation with default parameters
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_data_24', series_id, ds, y, 2, 6, MAP{})
+FROM ts_cv_folds_by('test_data_24', series_id, ds, y, 2, 6, MAP{})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -47,7 +47,7 @@ FROM (VALUES
 
 # Test column type preservation - DATE
 query I
-SELECT typeof(ds) FROM ts_ml_folds_by('test_data_date', series_id, ds, y, 1, 3, MAP{}) LIMIT 1;
+SELECT typeof(ds) FROM ts_cv_folds_by('test_data_date', series_id, ds, y, 1, 3, MAP{}) LIMIT 1;
 ----
 DATE
 
@@ -62,7 +62,7 @@ FROM (VALUES
 
 # Test column type preservation - TIMESTAMP
 query I
-SELECT typeof(ds) FROM ts_ml_folds_by('test_data_timestamp', series_id, ds, y, 1, 3, MAP{}) LIMIT 1;
+SELECT typeof(ds) FROM ts_cv_folds_by('test_data_timestamp', series_id, ds, y, 1, 3, MAP{}) LIMIT 1;
 ----
 TIMESTAMP
 
@@ -73,7 +73,7 @@ FROM generate_series(1, 24) AS t(i);
 
 # Test column type preservation - INTEGER
 query I
-SELECT typeof(ds) FROM ts_ml_folds_by('test_data_int', series_id, ds, y, 1, 3, MAP{}) LIMIT 1;
+SELECT typeof(ds) FROM ts_cv_folds_by('test_data_int', series_id, ds, y, 1, 3, MAP{}) LIMIT 1;
 ----
 INTEGER
 
@@ -84,7 +84,7 @@ FROM generate_series(1, 24) AS t(i);
 
 # Test column type preservation - BIGINT
 query I
-SELECT typeof(ds) FROM ts_ml_folds_by('test_data_bigint', series_id, ds, y, 1, 3, MAP{}) LIMIT 1;
+SELECT typeof(ds) FROM ts_cv_folds_by('test_data_bigint', series_id, ds, y, 1, 3, MAP{}) LIMIT 1;
 ----
 BIGINT
 
@@ -103,7 +103,7 @@ FROM (VALUES
 # Test that original column names are preserved
 query IIIII
 SELECT my_group, my_date, y, fold_id, split
-FROM ts_ml_folds_by('test_named_cols', my_group, my_date, my_value, 1, 2, MAP{})
+FROM ts_cv_folds_by('test_named_cols', my_group, my_date, my_value, 1, 2, MAP{})
 ORDER BY fold_id, split DESC, my_date
 LIMIT 6;
 ----
@@ -121,7 +121,7 @@ A	2023-06-01	6.0	1	test
 # Test initial_train_size parameter
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_data_24', series_id, ds, y, 1, 3, MAP{'initial_train_size': 6})
+FROM ts_cv_folds_by('test_data_24', series_id, ds, y, 1, 3, MAP{'initial_train_size': 6})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -136,7 +136,7 @@ FROM generate_series(1, 20) AS t(i);
 # Test initial_train_size with multiple folds
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_data_20', series_id, ds, y, 3, 3, MAP{'initial_train_size': 8})
+FROM ts_cv_folds_by('test_data_20', series_id, ds, y, 3, 3, MAP{'initial_train_size': 8})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -154,7 +154,7 @@ ORDER BY fold_id, split;
 # Test skip_length parameter (dense folds with skip_length=1)
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_data_date', series_id, ds, y, 3, 3, MAP{'initial_train_size': 6, 'skip_length': 1})
+FROM ts_cv_folds_by('test_data_date', series_id, ds, y, 3, 3, MAP{'initial_train_size': 6, 'skip_length': 1})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -173,7 +173,7 @@ FROM generate_series(1, 30) AS t(i);
 # Test skip_length with large value (sparse folds)
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_data_30', series_id, ds, y, 2, 3, MAP{'initial_train_size': 10, 'skip_length': 10})
+FROM ts_cv_folds_by('test_data_30', series_id, ds, y, 2, 3, MAP{'initial_train_size': 10, 'skip_length': 10})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -189,7 +189,7 @@ ORDER BY fold_id, split;
 # Test gap parameter - gap between train end and test start
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_data_date', series_id, ds, y, 1, 2, MAP{'initial_train_size': 6, 'gap': 2})
+FROM ts_cv_folds_by('test_data_date', series_id, ds, y, 1, 2, MAP{'initial_train_size': 6, 'gap': 2})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -204,7 +204,7 @@ FROM generate_series(1, 12) AS t(i);
 # Verify gap creates actual gap in dates
 query IIII
 SELECT fold_id, split, MIN(ds) AS min_ds, MAX(ds) AS max_ds
-FROM ts_ml_folds_by('test_data_12_int', series_id, ds, y, 1, 2, MAP{'initial_train_size': 6, 'gap': 2})
+FROM ts_cv_folds_by('test_data_12_int', series_id, ds, y, 1, 2, MAP{'initial_train_size': 6, 'gap': 2})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -214,7 +214,7 @@ ORDER BY fold_id, split;
 # Test gap=0 (no gap, default behavior)
 query IIII
 SELECT fold_id, split, MIN(ds) AS min_ds, MAX(ds) AS max_ds
-FROM ts_ml_folds_by('test_data_12_int', series_id, ds, y, 1, 3, MAP{'initial_train_size': 6, 'gap': 0})
+FROM ts_cv_folds_by('test_data_12_int', series_id, ds, y, 1, 3, MAP{'initial_train_size': 6, 'gap': 0})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -228,7 +228,7 @@ ORDER BY fold_id, split;
 # Test fixed window_type - training size stays constant
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_data_date', series_id, ds, y, 2, 3, {'window_type': 'fixed', 'min_train_size': 6})
+FROM ts_cv_folds_by('test_data_date', series_id, ds, y, 2, 3, {'window_type': 'fixed', 'min_train_size': 6})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -245,7 +245,7 @@ FROM generate_series(1, 15) AS t(i);
 # Test sliding window_type (same as fixed)
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_data_15', series_id, ds, y, 2, 3, {'window_type': 'sliding', 'min_train_size': 6})
+FROM ts_cv_folds_by('test_data_15', series_id, ds, y, 2, 3, {'window_type': 'sliding', 'min_train_size': 6})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -257,7 +257,7 @@ ORDER BY fold_id, split;
 # Test expanding window_type (default) - training grows
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_data_15', series_id, ds, y, 2, 3, {'window_type': 'expanding', 'initial_train_size': 6})
+FROM ts_cv_folds_by('test_data_15', series_id, ds, y, 2, 3, {'window_type': 'expanding', 'initial_train_size': 6})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -274,7 +274,7 @@ FROM generate_series(1, 18) AS t(i);
 # Verify fixed window has sliding start position
 query IIII
 SELECT fold_id, split, MIN(ds) AS min_ds, MAX(ds) AS max_ds
-FROM ts_ml_folds_by('test_data_18', series_id, ds, y, 3, 3, {'window_type': 'fixed', 'min_train_size': 6, 'initial_train_size': 6})
+FROM ts_cv_folds_by('test_data_18', series_id, ds, y, 3, 3, {'window_type': 'fixed', 'min_train_size': 6, 'initial_train_size': 6})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -288,7 +288,7 @@ ORDER BY fold_id, split;
 # Verify expanding window starts from beginning
 query IIII
 SELECT fold_id, split, MIN(ds) AS min_ds, MAX(ds) AS max_ds
-FROM ts_ml_folds_by('test_data_18', series_id, ds, y, 3, 3, {'window_type': 'expanding', 'initial_train_size': 6})
+FROM ts_cv_folds_by('test_data_18', series_id, ds, y, 3, 3, {'window_type': 'expanding', 'initial_train_size': 6})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -306,7 +306,7 @@ ORDER BY fold_id, split;
 # Test min_train_size with fixed window
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_data_20', series_id, ds, y, 2, 3, {'window_type': 'fixed', 'min_train_size': 10})
+FROM ts_cv_folds_by('test_data_20', series_id, ds, y, 2, 3, {'window_type': 'fixed', 'min_train_size': 10})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -330,7 +330,7 @@ FROM (
 # Only 'medium' and 'large' should be included (min_train_size=12)
 query IIII
 SELECT series_id, fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_mixed_sizes', series_id, ds, y, 1, 2, {'window_type': 'fixed', 'min_train_size': 12})
+FROM ts_cv_folds_by('test_mixed_sizes', series_id, ds, y, 1, 2, {'window_type': 'fixed', 'min_train_size': 12})
 GROUP BY series_id, fold_id, split
 ORDER BY series_id, fold_id, split;
 ----
@@ -342,7 +342,7 @@ medium	1	train	12
 # Test min_train_size=10 - 'small' still excluded, others included
 query IIII
 SELECT series_id, fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_mixed_sizes', series_id, ds, y, 1, 2, {'window_type': 'fixed', 'min_train_size': 10})
+FROM ts_cv_folds_by('test_mixed_sizes', series_id, ds, y, 1, 2, {'window_type': 'fixed', 'min_train_size': 10})
 GROUP BY series_id, fold_id, split
 ORDER BY series_id, fold_id, split;
 ----
@@ -354,7 +354,7 @@ medium	1	train	10
 # Test min_train_size=5 - 'small' still excluded (only 5 points, need 5+2=7 for train+test)
 query IIII
 SELECT series_id, fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_mixed_sizes', series_id, ds, y, 1, 2, {'window_type': 'fixed', 'min_train_size': 5})
+FROM ts_cv_folds_by('test_mixed_sizes', series_id, ds, y, 1, 2, {'window_type': 'fixed', 'min_train_size': 5})
 GROUP BY series_id, fold_id, split
 ORDER BY series_id, fold_id, split;
 ----
@@ -366,7 +366,7 @@ medium	1	train	5
 # Test that min_train_size is ignored for expanding window (default behavior)
 query IIII
 SELECT series_id, fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_mixed_sizes', series_id, ds, y, 1, 2, {'window_type': 'expanding', 'min_train_size': 12})
+FROM ts_cv_folds_by('test_mixed_sizes', series_id, ds, y, 1, 2, {'window_type': 'expanding', 'min_train_size': 12})
 GROUP BY series_id, fold_id, split
 ORDER BY series_id, fold_id, split;
 ----
@@ -380,7 +380,7 @@ small	1	train	3
 # Test sliding window also respects min_train_size
 query IIII
 SELECT series_id, fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_mixed_sizes', series_id, ds, y, 1, 2, {'window_type': 'sliding', 'min_train_size': 12})
+FROM ts_cv_folds_by('test_mixed_sizes', series_id, ds, y, 1, 2, {'window_type': 'sliding', 'min_train_size': 12})
 GROUP BY series_id, fold_id, split
 ORDER BY series_id, fold_id, split;
 ----
@@ -398,7 +398,7 @@ FROM generate_series(1, 14) AS t(i);
 # 14 points with min_train_size=12, horizon=2: should get exactly 12 train + 2 test
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_exact_boundary', series_id, ds, y, 1, 2, {'window_type': 'fixed', 'min_train_size': 12})
+FROM ts_cv_folds_by('test_exact_boundary', series_id, ds, y, 1, 2, {'window_type': 'fixed', 'min_train_size': 12})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -414,14 +414,14 @@ FROM generate_series(1, 12) AS t(i);
 # 12 points with min_train_size=12, horizon=2: no room for test, should return empty
 query I
 SELECT COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_no_test_room', series_id, ds, y, 1, 2, {'window_type': 'fixed', 'min_train_size': 12});
+FROM ts_cv_folds_by('test_no_test_room', series_id, ds, y, 1, 2, {'window_type': 'fixed', 'min_train_size': 12});
 ----
 0
 
 # Test with initial_train_size less than min_train_size - min_train_size should be enforced
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_data_20', series_id, ds, y, 1, 3, {'window_type': 'fixed', 'min_train_size': 10, 'initial_train_size': 5})
+FROM ts_cv_folds_by('test_data_20', series_id, ds, y, 1, 3, {'window_type': 'fixed', 'min_train_size': 10, 'initial_train_size': 5})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -431,7 +431,7 @@ ORDER BY fold_id, split;
 # Test multiple folds with min_train_size - each fold should have exactly min_train_size training rows
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_data_30', series_id, ds, y, 3, 3, {'window_type': 'fixed', 'min_train_size': 8})
+FROM ts_cv_folds_by('test_data_30', series_id, ds, y, 3, 3, {'window_type': 'fixed', 'min_train_size': 8})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -463,7 +463,7 @@ FROM (
 # g14 (14 pts): included (12 train + 2 test)
 query IIII
 SELECT series_id, fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_boundary_groups', series_id, ds, y, 1, 2, {'window_type': 'fixed', 'min_train_size': 12})
+FROM ts_cv_folds_by('test_boundary_groups', series_id, ds, y, 1, 2, {'window_type': 'fixed', 'min_train_size': 12})
 GROUP BY series_id, fold_id, split
 ORDER BY series_id, fold_id, split;
 ----
@@ -473,7 +473,7 @@ g14	1	train	12
 # Test with clip_horizon=true - g13 should now be included (partial test window)
 query IIII
 SELECT series_id, fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_boundary_groups', series_id, ds, y, 1, 2, {'window_type': 'fixed', 'min_train_size': 12, 'clip_horizon': true})
+FROM ts_cv_folds_by('test_boundary_groups', series_id, ds, y, 1, 2, {'window_type': 'fixed', 'min_train_size': 12, 'clip_horizon': true})
 GROUP BY series_id, fold_id, split
 ORDER BY series_id, fold_id, split;
 ----
@@ -494,7 +494,7 @@ FROM generate_series(1, 10) AS t(i);
 # Test clip_horizon=false (default) - requires full horizon
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_data_10', series_id, ds, y, 3, 3, {'initial_train_size': 4, 'clip_horizon': false})
+FROM ts_cv_folds_by('test_data_10', series_id, ds, y, 3, 3, {'initial_train_size': 4, 'clip_horizon': false})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -510,7 +510,7 @@ ORDER BY fold_id, split;
 # - Fold 3 would need test starting at 11 which is out of bounds
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_data_10', series_id, ds, y, 3, 3, {'initial_train_size': 4, 'clip_horizon': true})
+FROM ts_cv_folds_by('test_data_10', series_id, ds, y, 3, 3, {'initial_train_size': 4, 'clip_horizon': true})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -526,7 +526,7 @@ ORDER BY fold_id, split;
 # Test gap + fixed window
 query IIII
 SELECT fold_id, split, MIN(ds) AS min_ds, MAX(ds) AS max_ds
-FROM ts_ml_folds_by('test_data_20', series_id, ds, y, 2, 3, {'window_type': 'fixed', 'min_train_size': 6, 'gap': 1, 'initial_train_size': 6})
+FROM ts_cv_folds_by('test_data_20', series_id, ds, y, 2, 3, {'window_type': 'fixed', 'min_train_size': 6, 'gap': 1, 'initial_train_size': 6})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -538,7 +538,7 @@ ORDER BY fold_id, split;
 # Test initial_train_size + skip_length + gap
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_data_30', series_id, ds, y, 3, 3, {'initial_train_size': 10, 'skip_length': 5, 'gap': 2})
+FROM ts_cv_folds_by('test_data_30', series_id, ds, y, 3, 3, {'initial_train_size': 10, 'skip_length': 5, 'gap': 2})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -568,7 +568,7 @@ FROM (VALUES
 # Test with multiple groups - each gets independent folds
 query IIII
 SELECT series_id, fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_multi_group', series_id, ds, y, 1, 3, MAP{})
+FROM ts_cv_folds_by('test_multi_group', series_id, ds, y, 1, 3, MAP{})
 GROUP BY series_id, fold_id, split
 ORDER BY series_id, fold_id, split;
 ----
@@ -589,7 +589,7 @@ FROM (
 # Test groups with different lengths
 query IIII
 SELECT series_id, fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_diff_lengths', series_id, ds, y, 2, 3, MAP{})
+FROM ts_cv_folds_by('test_diff_lengths', series_id, ds, y, 2, 3, MAP{})
 GROUP BY series_id, fold_id, split
 ORDER BY series_id, fold_id, split;
 ----
@@ -613,7 +613,7 @@ FROM generate_series(1, 10) AS t1(g),
 # Test with many groups
 query II
 SELECT COUNT(DISTINCT series_id) AS num_groups, COUNT(*) AS total_rows
-FROM ts_ml_folds_by('test_many_groups', series_id, ds, y, 1, 3, MAP{});
+FROM ts_cv_folds_by('test_many_groups', series_id, ds, y, 1, 3, MAP{});
 ----
 10	120
 
@@ -629,7 +629,7 @@ FROM (VALUES ('2023-01-01', 1), ('2023-02-01', 2), ('2023-03-01', 3)) AS t(d, i)
 # Test with minimum data for one fold
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_minimal', series_id, ds, y, 1, 1, MAP{})
+FROM ts_cv_folds_by('test_minimal', series_id, ds, y, 1, 1, MAP{})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -639,7 +639,7 @@ ORDER BY fold_id, split;
 # Test with horizon=1
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_data_10', series_id, ds, y, 3, 1, MAP{})
+FROM ts_cv_folds_by('test_data_10', series_id, ds, y, 3, 1, MAP{})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -653,7 +653,7 @@ ORDER BY fold_id, split;
 # Test single fold
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_data_10', series_id, ds, y, 1, 5, MAP{})
+FROM ts_cv_folds_by('test_data_10', series_id, ds, y, 1, 5, MAP{})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -672,7 +672,7 @@ FROM generate_series(1, 100) AS t(i);
 # Total grows with each fold
 query II
 SELECT COUNT(DISTINCT fold_id) AS num_folds, COUNT(*) AS total_rows
-FROM ts_ml_folds_by('test_data_100', series_id, ds, y, 10, 5, MAP{});
+FROM ts_cv_folds_by('test_data_100', series_id, ds, y, 10, 5, MAP{});
 ----
 10	775
 
@@ -685,7 +685,7 @@ FROM generate_series(1, 12) AS t(i);
 # Test with NULL values in target
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_with_nulls', series_id, ds, y, 1, 3, MAP{})
+FROM ts_cv_folds_by('test_with_nulls', series_id, ds, y, 1, 3, MAP{})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -699,7 +699,7 @@ ORDER BY fold_id, split;
 # Verify exact fold boundaries with dates
 query IIIII
 SELECT fold_id, split, MIN(ds) AS min_ds, MAX(ds) AS max_ds, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_data_date', series_id, ds, y, 2, 3, MAP{})
+FROM ts_cv_folds_by('test_data_date', series_id, ds, y, 2, 3, MAP{})
 GROUP BY fold_id, split
 ORDER BY fold_id, split DESC;
 ----
@@ -711,7 +711,7 @@ ORDER BY fold_id, split DESC;
 # Verify test always follows train (no overlap)
 query I
 WITH folds AS (
-    SELECT * FROM ts_ml_folds_by('test_data_20', series_id, ds, y, 3, 3, MAP{})
+    SELECT * FROM ts_cv_folds_by('test_data_20', series_id, ds, y, 3, 3, MAP{})
 ),
 bounds AS (
     SELECT fold_id,
@@ -731,7 +731,7 @@ SELECT COUNT(*) AS violations FROM bounds WHERE train_max >= test_min;
 # Test STRUCT syntax for params with mixed types
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_data_15', series_id, ds, y, 2, 3, {'initial_train_size': 6, 'gap': 1})
+FROM ts_cv_folds_by('test_data_15', series_id, ds, y, 2, 3, {'initial_train_size': 6, 'gap': 1})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -744,7 +744,7 @@ ORDER BY fold_id, split;
 # With 12 points, fold 3 would need test starting at position 13 (out of bounds)
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('test_data_12_int', series_id, ds, y, 3, 3, {'initial_train_size': 6, 'clip_horizon': true})
+FROM ts_cv_folds_by('test_data_12_int', series_id, ds, y, 3, 3, {'initial_train_size': 6, 'clip_horizon': true})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -763,13 +763,13 @@ ORDER BY fold_id, split;
 
 # Test that unknown parameters throw informative error
 statement error
-SELECT * FROM ts_ml_folds_by('test_data_10', series_id, ds, y, 1, 3, {'min_training_size': 12});
+SELECT * FROM ts_cv_folds_by('test_data_10', series_id, ds, y, 1, 3, {'min_training_size': 12});
 ----
 Unknown parameter
 
 # Test multiple unknown parameters
 statement error
-SELECT * FROM ts_ml_folds_by('test_data_10', series_id, ds, y, 1, 3, {'foo': 1, 'bar': 2});
+SELECT * FROM ts_cv_folds_by('test_data_10', series_id, ds, y, 1, 3, {'foo': 1, 'bar': 2});
 ----
 Unknown parameter
 
@@ -781,12 +781,12 @@ Unknown parameter
 query IIII
 WITH explicit AS (
     SELECT fold_id, split, MIN(ds) AS min_ds, MAX(ds) AS max_ds
-    FROM ts_ml_folds_by('test_data_20', series_id, ds, y, 2, 5, MAP{'skip_length': 5})
+    FROM ts_cv_folds_by('test_data_20', series_id, ds, y, 2, 5, MAP{'skip_length': 5})
     GROUP BY fold_id, split
 ),
 default_skip AS (
     SELECT fold_id, split, MIN(ds) AS min_ds, MAX(ds) AS max_ds
-    FROM ts_ml_folds_by('test_data_20', series_id, ds, y, 2, 5, MAP{})
+    FROM ts_cv_folds_by('test_data_20', series_id, ds, y, 2, 5, MAP{})
     GROUP BY fold_id, split
 )
 SELECT e.fold_id, e.split,
@@ -818,7 +818,7 @@ FROM generate_series(1, 24) AS t(i);
 
 # Test features are passed through
 query I
-SELECT COUNT(DISTINCT temperature) > 1 FROM ts_ml_folds_by(
+SELECT COUNT(DISTINCT temperature) > 1 FROM ts_cv_folds_by(
     'feature_data', series_id, ds, y, 2, 4, MAP{}
 );
 ----
@@ -827,7 +827,7 @@ true
 # Test all feature columns present in output
 query I
 SELECT COUNT(*) FROM (
-    DESCRIBE SELECT * FROM ts_ml_folds_by('feature_data', series_id, ds, y, 2, 4, MAP{})
+    DESCRIBE SELECT * FROM ts_cv_folds_by('feature_data', series_id, ds, y, 2, 4, MAP{})
 ) WHERE column_name IN ('temperature', 'promo_flag', 'category');
 ----
 3
@@ -835,7 +835,7 @@ SELECT COUNT(*) FROM (
 # Test feature values match original data
 query I
 WITH folds AS (
-    SELECT * FROM ts_ml_folds_by('feature_data', series_id, ds, y, 2, 4, MAP{})
+    SELECT * FROM ts_cv_folds_by('feature_data', series_id, ds, y, 2, 4, MAP{})
 )
 SELECT COUNT(*) FROM folds f
 JOIN feature_data d ON f.series_id = d.series_id AND f.ds = d.ds
@@ -846,7 +846,7 @@ WHERE f.temperature != d.temperature OR f.promo_flag != d.promo_flag;
 # Test feature types preserved
 query III
 SELECT typeof(temperature), typeof(promo_flag), typeof(category)
-FROM ts_ml_folds_by('feature_data', series_id, ds, y, 2, 4, MAP{})
+FROM ts_cv_folds_by('feature_data', series_id, ds, y, 2, 4, MAP{})
 LIMIT 1;
 ----
 DOUBLE	BIGINT	VARCHAR
@@ -864,7 +864,7 @@ FROM generate_series(1, 30) AS t(i);
 
 query IIII
 SELECT series_id, fold_id, split, COUNT(DISTINCT feature1) > 0 AS has_features
-FROM ts_ml_folds_by('multi_group_features', series_id, ds, y, 1, 3, MAP{})
+FROM ts_cv_folds_by('multi_group_features', series_id, ds, y, 1, 3, MAP{})
 GROUP BY series_id, fold_id, split
 ORDER BY series_id, fold_id, split;
 ----
@@ -876,7 +876,7 @@ B	1	train	true
 # Test features work with window_type=fixed
 query III
 SELECT fold_id, split, COUNT(DISTINCT temperature) > 0 AS has_temp
-FROM ts_ml_folds_by('feature_data', series_id, ds, y, 2, 4, {'window_type': 'fixed', 'min_train_size': 8})
+FROM ts_cv_folds_by('feature_data', series_id, ds, y, 2, 4, {'window_type': 'fixed', 'min_train_size': 8})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
@@ -893,7 +893,7 @@ FROM generate_series(1, 20) AS t(i);
 
 query III
 SELECT fold_id, split, COUNT(*) AS cnt
-FROM ts_ml_folds_by('no_features', series_id, ds, y, 2, 3, MAP{})
+FROM ts_cv_folds_by('no_features', series_id, ds, y, 2, 3, MAP{})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----

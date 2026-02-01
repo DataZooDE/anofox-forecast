@@ -1,5 +1,5 @@
 # name: test/sql/ts_cv_forecast.test
-# description: Tests for ts_cv_forecast_by - CV forecast using ts_ml_folds_by output
+# description: Tests for ts_cv_forecast_by - CV forecast using ts_cv_folds_by output
 # group: [sql]
 
 require anofox_forecast
@@ -17,10 +17,10 @@ FROM generate_series(1, 24) AS t(i);
 # Basic Workflow Tests
 #######################################
 
-# Create folds using ts_ml_folds_by
+# Create folds using ts_cv_folds_by
 statement ok
 CREATE TABLE cv_folds AS
-SELECT * FROM ts_ml_folds_by('cv_data_24', series_id, ds, y, 3, 4, MAP{});
+SELECT * FROM ts_cv_folds_by('cv_data_24', series_id, ds, y, 3, 4, MAP{});
 
 # Verify folds have both train and test
 query III
@@ -135,7 +135,7 @@ FROM generate_series(1, 18) AS t(i);
 
 statement ok
 CREATE TABLE cv_date_folds AS
-SELECT * FROM ts_ml_folds_by('cv_dates', series_id, ds, y, 2, 3, MAP{});
+SELECT * FROM ts_cv_folds_by('cv_dates', series_id, ds, y, 2, 3, MAP{});
 
 query I
 SELECT typeof(ds) FROM ts_cv_forecast_by('cv_date_folds', series_id, ds, y, 'Naive', 3, MAP{}) LIMIT 1;
@@ -196,7 +196,7 @@ FROM (
 
 statement ok
 CREATE TABLE cv_multi_folds AS
-SELECT * FROM ts_ml_folds_by('cv_multi_data', series_id, ds, y, 2, 3, MAP{});
+SELECT * FROM ts_cv_folds_by('cv_multi_data', series_id, ds, y, 2, 3, MAP{});
 
 # Each group gets independent forecasts
 query III
@@ -222,7 +222,7 @@ DROP TABLE cv_multi_folds;
 # Test single fold
 statement ok
 CREATE TABLE cv_single_fold AS
-SELECT * FROM ts_ml_folds_by('cv_data_24', series_id, ds, y, 1, 6, MAP{});
+SELECT * FROM ts_cv_folds_by('cv_data_24', series_id, ds, y, 1, 6, MAP{});
 
 query I
 SELECT COUNT(DISTINCT fold_id) FROM ts_cv_forecast_by('cv_single_fold', series_id, ds, y, 'Naive', 6, MAP{});
@@ -235,7 +235,7 @@ DROP TABLE cv_single_fold;
 # Test horizon=1
 statement ok
 CREATE TABLE cv_horizon_1 AS
-SELECT * FROM ts_ml_folds_by('cv_data_24', series_id, ds, y, 3, 1, MAP{});
+SELECT * FROM ts_cv_folds_by('cv_data_24', series_id, ds, y, 3, 1, MAP{});
 
 query II
 SELECT fold_id, COUNT(*)

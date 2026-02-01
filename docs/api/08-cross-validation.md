@@ -29,7 +29,7 @@ CREATE TABLE prepared_data AS
 SELECT * FROM ts_fill_gaps_by('raw_data', series_id, date, value, '1mo', MAP{});
 
 -- Then generate folds on prepared data
-SELECT * FROM ts_ml_folds_by('prepared_data', series_id, date, value, 3, 12, MAP{});
+SELECT * FROM ts_cv_folds_by('prepared_data', series_id, date, value, 3, 12, MAP{});
 ```
 
 ---
@@ -43,7 +43,7 @@ Use the two-step workflow for cross-validation:
 ```sql
 -- Step 1: Generate folds (both train and test rows with actual dates)
 CREATE TABLE cv_folds AS
-SELECT * FROM ts_ml_folds_by('data', unique_id, ds, y, 3, 12, MAP{});
+SELECT * FROM ts_cv_folds_by('data', unique_id, ds, y, 3, 12, MAP{});
 
 -- Step 2: Generate forecasts (matches to existing test dates)
 CREATE TABLE cv_forecasts AS
@@ -54,13 +54,13 @@ SELECT * FROM ts_rmse_by('cv_forecasts', fold_id, ds, y, forecast);
 SELECT * FROM ts_mae_by('cv_forecasts', fold_id, ds, y, forecast);
 ```
 
-**Key insight:** `ts_ml_folds_by` outputs both train AND test rows with their actual dates, so `ts_cv_forecast_by` doesn't need to generate dates.
+**Key insight:** `ts_cv_folds_by` outputs both train AND test rows with their actual dates, so `ts_cv_forecast_by` doesn't need to generate dates.
 
 ### Usage Pattern Comparison
 
 | Pattern | Use Case | Complexity |
 |---------|----------|------------|
-| **Two-step** (`ts_ml_folds_by` + `ts_cv_forecast_by`) | Standard backtesting, most use cases | Simple |
+| **Two-step** (`ts_cv_folds_by` + `ts_cv_forecast_by`) | Standard backtesting, most use cases | Simple |
 | **Custom cutoffs** (`ts_cv_split_by`) | Specific business dates as fold boundaries | Moderate |
 | **Modular** (`ts_cv_split_by` + custom models) | Regression models, external forecasters | Advanced |
 
@@ -68,7 +68,7 @@ SELECT * FROM ts_mae_by('cv_forecasts', fold_id, ds, y, forecast);
 
 ## Table Macros
 
-### ts_ml_folds_by
+### ts_cv_folds_by
 
 Create train/test splits for ML model backtesting in a single function call.
 
@@ -76,7 +76,7 @@ This function combines fold boundary generation and train/test splitting, suitab
 
 **Signature:**
 ```sql
-ts_ml_folds_by(
+ts_cv_folds_by(
     source VARCHAR,           -- Source table name (quoted string, NOT a CTE reference)
     group_col COLUMN,         -- Series grouping column (unquoted identifier)
     date_col COLUMN,          -- Date column (unquoted identifier)
@@ -121,25 +121,25 @@ ts_ml_folds_by(
 **Examples:**
 ```sql
 -- Basic ML backtesting with 3 folds, 6-period horizon
-SELECT * FROM ts_ml_folds_by(
+SELECT * FROM ts_cv_folds_by(
     'sales_data', store_id, date, revenue,
     3, 6, MAP{}
 );
 
 -- With gap between train and test (e.g., for "next week" predictions)
-SELECT * FROM ts_ml_folds_by(
+SELECT * FROM ts_cv_folds_by(
     'sales_data', store_id, date, revenue,
     3, 7, {'gap': 1}
 );
 
 -- Fixed window with custom initial training size
-SELECT * FROM ts_ml_folds_by(
+SELECT * FROM ts_cv_folds_by(
     'sales_data', store_id, date, revenue,
     5, 12, {'window_type': 'fixed', 'min_train_size': 24, 'initial_train_size': 24}
 );
 
 -- Dense overlapping folds (skip_length=1)
-SELECT * FROM ts_ml_folds_by(
+SELECT * FROM ts_cv_folds_by(
     'sales_data', store_id, date, revenue,
     10, 3, {'skip_length': 1}
 );
@@ -149,7 +149,7 @@ CREATE TABLE sales_features AS
 SELECT store_id, date, revenue, temperature, promo_flag, day_of_week
 FROM sales_data;
 
-SELECT * FROM ts_ml_folds_by(
+SELECT * FROM ts_cv_folds_by(
     'sales_features', store_id, date, revenue,
     3, 6, MAP{}
 );
@@ -160,15 +160,15 @@ SELECT * FROM ts_ml_folds_by(
 
 ### ts_cv_forecast_by
 
-Generate forecasts for pre-computed cross-validation folds. **Use this with output from `ts_ml_folds_by`.**
+Generate forecasts for pre-computed cross-validation folds. **Use this with output from `ts_cv_folds_by`.**
 
 **Signature:**
 ```sql
 ts_cv_forecast_by(
-    ml_folds VARCHAR,         -- Output from ts_ml_folds_by
+    ml_folds VARCHAR,         -- Output from ts_cv_folds_by
     group_col COLUMN,         -- Group column
     date_col COLUMN,          -- Date column
-    target_col COLUMN,        -- Target column (usually 'y' from ts_ml_folds_by)
+    target_col COLUMN,        -- Target column (usually 'y' from ts_cv_folds_by)
     method VARCHAR,           -- Forecast method
     horizon BIGINT,           -- Forecast horizon
     params MAP = {}           -- Model parameters
@@ -177,7 +177,7 @@ ts_cv_forecast_by(
 
 **Input Requirements:**
 
-The input table must be the output of `ts_ml_folds_by` containing:
+The input table must be the output of `ts_cv_folds_by` containing:
 - `fold_id`: Fold identifier
 - `split`: 'train' or 'test'
 - Group, date, and target columns
@@ -203,14 +203,14 @@ Returns the test rows with forecast columns added:
 - **Date preservation**: Original date values are preserved (no date generation)
 - **Position-based matching**: 1st forecast → 1st test row, 2nd forecast → 2nd test row, etc.
 
-> **Note on Features:** `ts_cv_forecast_by` uses only the target column (`y`) for univariate forecasting. If your input from `ts_ml_folds_by` includes feature columns, they are ignored by the forecaster but preserved in the output. For regression models that use features, use `ts_prepare_regression_input_by` instead.
+> **Note on Features:** `ts_cv_forecast_by` uses only the target column (`y`) for univariate forecasting. If your input from `ts_cv_folds_by` includes feature columns, they are ignored by the forecaster but preserved in the output. For regression models that use features, use `ts_prepare_regression_input_by` instead.
 
 **Example:**
 
 ```sql
 -- Step 1: Create folds
 CREATE TABLE folds AS
-SELECT * FROM ts_ml_folds_by('data', unique_id, ds, y, 3, 6, MAP{});
+SELECT * FROM ts_cv_folds_by('data', unique_id, ds, y, 3, 6, MAP{});
 
 -- Step 2: Generate forecasts
 CREATE TABLE cv_results AS
@@ -304,7 +304,7 @@ Split time series data into train/test sets using explicit training cutoff dates
 - **Regulatory requirements**: Auditable, reproducible fold boundaries
 - **Custom spacing**: Non-uniform spacing between folds (e.g., monthly for recent, quarterly for historical)
 
-For most standard backtesting, prefer `ts_ml_folds_by` which automatically computes fold boundaries.
+For most standard backtesting, prefer `ts_cv_folds_by` which automatically computes fold boundaries.
 
 **Signature:**
 ```sql

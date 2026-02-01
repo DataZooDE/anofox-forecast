@@ -4,6 +4,6 @@
 
 namespace duckdb {
 
-void RegisterTsMlFoldsNativeFunction(ExtensionLoader &loader);
+void RegisterTsCvFoldsNativeFunction(ExtensionLoader &loader);
 
 } // namespace duckdb

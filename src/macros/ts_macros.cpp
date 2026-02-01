@@ -512,7 +512,7 @@ SELECT * FROM _ts_forecast_native(
     // C++ API: ts_cv_forecast_by(ml_folds, group_col, date_col, target_col, method, horizon, params)
     // Processes all folds in parallel using DuckDB's vectorization
     //
-    // IMPORTANT: ml_folds should be output from ts_ml_folds_by containing BOTH train and test rows.
+    // IMPORTANT: ml_folds should be output from ts_cv_folds_by containing BOTH train and test rows.
     // The function trains on 'train' rows and matches forecasts to existing 'test' row dates.
     // No frequency parameter needed - dates come from the input data.
     //
@@ -1300,8 +1300,8 @@ SELECT * FROM _ts_cv_generate_folds_native(
 )
 )"},
 
-    // ts_ml_folds_by: Create train/test splits for ML model backtesting
-    // C++ API: ts_ml_folds_by(source, group_col, date_col, target_col, n_folds, horizon, params)
+    // ts_cv_folds_by: Create train/test splits for ML model backtesting
+    // C++ API: ts_cv_folds_by(source, group_col, date_col, target_col, n_folds, horizon, params)
     //
     // This function combines fold boundary generation and train/test splitting in a single call,
     // suitable for ML model backtesting. Unlike ts_cv_split_by which requires pre-computed
@@ -1319,9 +1319,9 @@ SELECT * FROM _ts_cv_generate_folds_native(
     //   skip_length (BIGINT, default: horizon) - periods between folds (1=dense, horizon=default)
     //   clip_horizon (BOOLEAN, default: false) - if true, allow folds with partial test windows
     // Returns: <group_col>, <date_col>, <target_col>, fold_id, split (train/test)
-    {"ts_ml_folds_by", {"source", "group_col", "date_col", "target_col", "n_folds", "horizon", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
+    {"ts_cv_folds_by", {"source", "group_col", "date_col", "target_col", "n_folds", "horizon", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_ml_folds_native(
+SELECT * FROM _ts_cv_folds_native(
     (SELECT
         group_col AS "__ml_grp__",
         date_col AS "__ml_dt__",

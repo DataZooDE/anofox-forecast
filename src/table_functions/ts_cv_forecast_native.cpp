@@ -19,7 +19,7 @@ namespace duckdb {
 // Users should call ts_cv_forecast_by() instead of this function directly.
 //
 // REDESIGNED WORKFLOW (no frequency parameter needed):
-// 1. Accepts input with BOTH train and test splits from ts_ml_folds_by
+// 1. Accepts input with BOTH train and test splits from ts_cv_folds_by
 // 2. Trains model on 'train' rows per (fold_id, group) combination
 // 3. Generates horizon forecasts
 // 4. Matches forecasts to 'test' rows by position (1st forecast → 1st test row, etc.)

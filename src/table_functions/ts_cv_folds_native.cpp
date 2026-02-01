@@ -1,4 +1,4 @@
-#include "ts_ml_folds_native.hpp"
+#include "ts_cv_folds_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For DateColumnType, helper functions
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -10,7 +10,7 @@
 namespace duckdb {
 
 // ============================================================================
-// _ts_ml_folds_native - Native ML-ready train/test fold generator
+// _ts_cv_folds_native - Native ML-ready train/test fold generator
 //
 // This function combines fold boundary generation and train/test splitting
 // in a single native function, suitable for ML model backtesting.
@@ -35,7 +35,7 @@ namespace duckdb {
 // Bind Data
 // ============================================================================
 
-struct TsMlFoldsBindData : public TableFunctionData {
+struct TsCvFoldsBindData : public TableFunctionData {
     // Fold generation parameters
     int64_t n_folds = 3;
     int64_t horizon = 7;
@@ -65,7 +65,7 @@ struct TsMlFoldsBindData : public TableFunctionData {
 // Local State
 // ============================================================================
 
-struct TsMlFoldsLocalState : public LocalTableFunctionState {
+struct TsCvFoldsLocalState : public LocalTableFunctionState {
     // Buffered input data
     struct InputRow {
         Value group_val;
@@ -101,7 +101,7 @@ struct TsMlFoldsLocalState : public LocalTableFunctionState {
 // Global State
 // ============================================================================
 
-struct TsMlFoldsGlobalState : public GlobalTableFunctionState {
+struct TsCvFoldsGlobalState : public GlobalTableFunctionState {
     idx_t MaxThreads() const override { return 1; }
 };
 
@@ -274,7 +274,7 @@ static void ValidateParams(const Value &params) {
             unknown_list += "'" + unknown_keys[i] + "'";
         }
         throw InvalidInputException(
-            "ts_ml_folds_by: Unknown parameter(s): %s\n\n"
+            "ts_cv_folds_by: Unknown parameter(s): %s\n\n"
             "Available parameters:\n"
             "  - gap (BIGINT, default 0): Periods between train end and test start\n"
             "  - embargo (BIGINT, default 0): Periods to exclude from training after previous test\n"
@@ -291,13 +291,13 @@ static void ValidateParams(const Value &params) {
 // Bind Function
 // ============================================================================
 
-static unique_ptr<FunctionData> TsMlFoldsBind(
+static unique_ptr<FunctionData> TsCvFoldsBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
     vector<string> &names) {
 
-    auto bind_data = make_uniq<TsMlFoldsBindData>();
+    auto bind_data = make_uniq<TsCvFoldsBindData>();
 
     // Input layout (from macro):
     // - Columns 0-2: prefixed aliases (__ml_grp__, __ml_dt__, __ml_y__)
@@ -308,7 +308,7 @@ static unique_ptr<FunctionData> TsMlFoldsBind(
     // Tables with features will have 6+ columns
     if (input.input_table_types.size() < 6) {
         throw InvalidInputException(
-            "_ts_ml_folds_native requires at least 6 columns: prefixed group/date/target (3) + original columns from * (3+). Got %zu columns. "
+            "_ts_cv_folds_native requires at least 6 columns: prefixed group/date/target (3) + original columns from * (3+). Got %zu columns. "
             "This usually means the source table has fewer than 3 columns.",
             input.input_table_types.size());
     }
@@ -398,31 +398,31 @@ static unique_ptr<FunctionData> TsMlFoldsBind(
 // Init Functions
 // ============================================================================
 
-static unique_ptr<GlobalTableFunctionState> TsMlFoldsInitGlobal(
+static unique_ptr<GlobalTableFunctionState> TsCvFoldsInitGlobal(
     ClientContext &context,
     TableFunctionInitInput &input) {
-    return make_uniq<TsMlFoldsGlobalState>();
+    return make_uniq<TsCvFoldsGlobalState>();
 }
 
-static unique_ptr<LocalTableFunctionState> TsMlFoldsInitLocal(
+static unique_ptr<LocalTableFunctionState> TsCvFoldsInitLocal(
     ExecutionContext &context,
     TableFunctionInitInput &input,
     GlobalTableFunctionState *global_state) {
-    return make_uniq<TsMlFoldsLocalState>();
+    return make_uniq<TsCvFoldsLocalState>();
 }
 
 // ============================================================================
 // In-Out Function - buffer all input rows
 // ============================================================================
 
-static OperatorResultType TsMlFoldsInOut(
+static OperatorResultType TsCvFoldsInOut(
     ExecutionContext &context,
     TableFunctionInput &data,
     DataChunk &input,
     DataChunk &output) {
 
-    auto &bind_data = data.bind_data->Cast<TsMlFoldsBindData>();
-    auto &local_state = data.local_state->Cast<TsMlFoldsLocalState>();
+    auto &bind_data = data.bind_data->Cast<TsCvFoldsBindData>();
+    auto &local_state = data.local_state->Cast<TsCvFoldsLocalState>();
 
     // Buffer input rows
     // Input layout:
@@ -437,7 +437,7 @@ static OperatorResultType TsMlFoldsInOut(
 
         if (date_val.IsNull()) continue;
 
-        TsMlFoldsLocalState::InputRow row;
+        TsCvFoldsLocalState::InputRow row;
         row.group_val = group_val;
         row.date_val = date_val;
         row.group_key = GetGroupKeyForMl(group_val);
@@ -481,13 +481,13 @@ static OperatorResultType TsMlFoldsInOut(
 // Finalize Function - compute folds and output splits
 // ============================================================================
 
-static OperatorFinalizeResultType TsMlFoldsFinalize(
+static OperatorFinalizeResultType TsCvFoldsFinalize(
     ExecutionContext &context,
     TableFunctionInput &data,
     DataChunk &output) {
 
-    auto &bind_data = data.bind_data->Cast<TsMlFoldsBindData>();
-    auto &local_state = data.local_state->Cast<TsMlFoldsLocalState>();
+    auto &bind_data = data.bind_data->Cast<TsCvFoldsBindData>();
+    auto &local_state = data.local_state->Cast<TsCvFoldsLocalState>();
 
     if (!local_state.preprocessing_done) {
         // Step 1: Build group indices and sort by date
@@ -615,7 +615,7 @@ static OperatorFinalizeResultType TsMlFoldsFinalize(
 
                 // Generate train rows
                 for (idx_t pos = train_start_pos; pos <= train_end_pos && pos < n_points; pos++) {
-                    TsMlFoldsLocalState::OutputRow out;
+                    TsCvFoldsLocalState::OutputRow out;
                     out.input_idx = sorted_indices[pos];
                     out.fold_id = fold_id;
                     out.is_train = true;
@@ -624,7 +624,7 @@ static OperatorFinalizeResultType TsMlFoldsFinalize(
 
                 // Generate test rows
                 for (idx_t pos = test_start_pos; pos <= test_end_pos && pos < n_points; pos++) {
-                    TsMlFoldsLocalState::OutputRow out;
+                    TsCvFoldsLocalState::OutputRow out;
                     out.input_idx = sorted_indices[pos];
                     out.fold_id = fold_id;
                     out.is_train = false;
@@ -681,22 +681,22 @@ static OperatorFinalizeResultType TsMlFoldsFinalize(
 // Registration
 // ============================================================================
 
-void RegisterTsMlFoldsNativeFunction(ExtensionLoader &loader) {
+void RegisterTsCvFoldsNativeFunction(ExtensionLoader &loader) {
     // Table-in-out function: (TABLE, n_folds, horizon, params)
     // Input table must have 3 columns: group_col, date_col, target_col
     TableFunction func(
-        "_ts_ml_folds_native",
+        "_ts_cv_folds_native",
         {LogicalType::TABLE,     // Input table
          LogicalType::BIGINT,    // n_folds
          LogicalType::BIGINT,    // horizon
          LogicalType::ANY},      // params (MAP or STRUCT)
         nullptr,
-        TsMlFoldsBind,
-        TsMlFoldsInitGlobal,
-        TsMlFoldsInitLocal);
+        TsCvFoldsBind,
+        TsCvFoldsInitGlobal,
+        TsCvFoldsInitLocal);
 
-    func.in_out_function = TsMlFoldsInOut;
-    func.in_out_function_final = TsMlFoldsFinalize;
+    func.in_out_function = TsCvFoldsInOut;
+    func.in_out_function_final = TsCvFoldsFinalize;
 
     loader.RegisterFunction(func);
 }
