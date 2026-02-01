@@ -95,7 +95,6 @@ ts_ml_folds_by(
 > - Assumes pre-cleaned data with no gaps. Use `ts_fill_gaps_by` first if your data has missing dates.
 > - Uses position-based indexing (not date arithmetic) - works correctly with all frequencies.
 > - **Parameter validation:** Unknown parameter names will throw an informative error listing all available parameters.
-> - **Features are NOT passed through.** Only group, date, and target columns are included in output. For feature handling, use `ts_cv_split_by` with hydration functions.
 
 **Params Options:**
 | Key | Type | Default | Description |
@@ -118,6 +117,9 @@ ts_ml_folds_by(
 | `y` | DOUBLE | Target value |
 | `fold_id` | BIGINT | Fold number (1, 2, 3, ...) |
 | `split` | VARCHAR | `'train'` or `'test'` |
+| `<feature_cols...>` | (same as input) | All other columns from source table |
+
+> **Feature Pass-Through:** All columns in the source table (except group, date, and target) are automatically passed through as features. Column names and types are preserved. Features are correctly associated with each row through the fold assignment process.
 
 **Examples:**
 ```sql
@@ -144,6 +146,17 @@ SELECT * FROM ts_ml_folds_by(
     'sales_data', store_id, date, revenue,
     10, 3, {'skip_length': 1}
 );
+
+-- With feature columns (all non-group/date/target columns pass through)
+CREATE TABLE sales_features AS
+SELECT store_id, date, revenue, temperature, promo_flag, day_of_week
+FROM sales_data;
+
+SELECT * FROM ts_ml_folds_by(
+    'sales_features', store_id, date, revenue,
+    3, 6, MAP{}
+);
+-- Output: store_id, date, y, fold_id, split, temperature, promo_flag, day_of_week
 ```
 
 ---
@@ -192,6 +205,8 @@ Returns the test rows with forecast columns added:
 - **No frequency parameter needed**: Forecasts are matched to existing test dates from input
 - **Date preservation**: Original date values are preserved (no date generation)
 - **Position-based matching**: 1st forecast → 1st test row, 2nd forecast → 2nd test row, etc.
+
+> **Note on Features:** `ts_cv_forecast_by` uses only the target column (`y`) for univariate forecasting. If your input from `ts_ml_folds_by` includes feature columns, they are ignored by the forecaster but preserved in the output. For regression models that use features, use `ts_prepare_regression_input_by` instead.
 
 **Example:**
 

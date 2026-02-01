@@ -1322,7 +1322,12 @@ SELECT * FROM _ts_cv_generate_folds_native(
     {"ts_ml_folds_by", {"source", "group_col", "date_col", "target_col", "n_folds", "horizon", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_ml_folds_native(
-    (SELECT group_col, date_col, target_col::DOUBLE AS y FROM query_table(source::VARCHAR)),
+    (SELECT
+        group_col AS "__ml_grp__",
+        date_col AS "__ml_dt__",
+        target_col::DOUBLE AS "__ml_y__",
+        *
+     FROM query_table(source::VARCHAR)),
     n_folds,
     horizon,
     params

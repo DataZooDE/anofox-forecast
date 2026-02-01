@@ -54,6 +54,11 @@ struct TsMlFoldsBindData : public TableFunctionData {
     LogicalType date_logical_type = LogicalType(LogicalTypeId::TIMESTAMP);
     LogicalType group_logical_type = LogicalType(LogicalTypeId::VARCHAR);
     LogicalType value_logical_type = LogicalType(LogicalTypeId::DOUBLE);
+
+    // Feature column metadata
+    idx_t n_feature_cols = 0;
+    vector<LogicalType> feature_types;
+    vector<string> feature_names;
 };
 
 // ============================================================================
@@ -69,6 +74,7 @@ struct TsMlFoldsLocalState : public LocalTableFunctionState {
         double value;
         bool valid;
         string group_key;
+        vector<Value> feature_vals;  // Feature column values
     };
     vector<InputRow> input_rows;
 
@@ -293,19 +299,38 @@ static unique_ptr<FunctionData> TsMlFoldsBind(
 
     auto bind_data = make_uniq<TsMlFoldsBindData>();
 
-    // Validate input table has 3 columns (group, date, value)
-    if (input.input_table_types.size() != 3) {
+    // Input layout (from macro):
+    // - Columns 0-2: prefixed aliases (__ml_grp__, __ml_dt__, __ml_y__)
+    // - Columns 3-5: original columns from * (group, date, target duplicates)
+    // - Columns 6+: actual feature columns
+    //
+    // Tables without features will have exactly 6 columns (3 prefixed + 3 original)
+    // Tables with features will have 6+ columns
+    if (input.input_table_types.size() < 6) {
         throw InvalidInputException(
-            "_ts_ml_folds_native requires input with exactly 3 columns: group_col, date_col, target_col. Got %zu columns.",
+            "_ts_ml_folds_native requires at least 6 columns: prefixed group/date/target (3) + original columns from * (3+). Got %zu columns. "
+            "This usually means the source table has fewer than 3 columns.",
             input.input_table_types.size());
     }
 
-    // Detect column types
-    bind_data->group_logical_type = input.input_table_types[0];
-    bind_data->date_logical_type = input.input_table_types[1];
-    bind_data->value_logical_type = input.input_table_types[2];
+    // Detect column types from prefixed columns (positions 0-2)
+    // But get column NAMES from the original columns (positions 3-5)
+    bind_data->group_logical_type = input.input_table_types[3];  // Use type from original
+    bind_data->date_logical_type = input.input_table_types[4];   // Use type from original
+    bind_data->value_logical_type = LogicalType::DOUBLE;         // Target is always cast to DOUBLE
 
-    auto &date_type = input.input_table_types[1];
+    // Store feature column metadata (columns 6+, skipping the original group/date/target at 3-5)
+    bind_data->n_feature_cols = input.input_table_types.size() - 6;
+    for (idx_t i = 6; i < input.input_table_types.size(); i++) {
+        bind_data->feature_types.push_back(input.input_table_types[i]);
+        bind_data->feature_names.push_back(
+            i < input.input_table_names.size() ?
+            input.input_table_names[i] : "feature_" + std::to_string(i - 5)
+        );
+    }
+
+    // Use the original (non-prefixed) date column type for date handling
+    auto &date_type = input.input_table_types[4];
     if (date_type.id() == LogicalTypeId::DATE) {
         bind_data->date_col_type = DateColumnType::DATE;
     } else if (date_type.id() == LogicalTypeId::TIMESTAMP) {
@@ -342,23 +367,29 @@ static unique_ptr<FunctionData> TsMlFoldsBind(
         bind_data->min_train_size = ParseInt64ParamMl(params, "min_train_size", 1);
     }
 
-    // Output columns: preserve original column names, add fold_id and split
+    // Output columns: preserve original column names (from positions 3-5), add fold_id and split
     auto &table_names = input.input_table_names;
 
     return_types.push_back(bind_data->group_logical_type);
-    names.push_back(table_names.size() > 0 ? table_names[0] : "group_col");
+    names.push_back(table_names.size() > 3 ? table_names[3] : "group_col");
 
     return_types.push_back(bind_data->date_logical_type);
-    names.push_back(table_names.size() > 1 ? table_names[1] : "date_col");
+    names.push_back(table_names.size() > 4 ? table_names[4] : "date_col");
 
     return_types.push_back(bind_data->value_logical_type);
-    names.push_back(table_names.size() > 2 ? table_names[2] : "target_col");
+    names.push_back("y");  // Target is always named 'y'
 
     return_types.push_back(LogicalType::BIGINT);
     names.push_back("fold_id");
 
     return_types.push_back(LogicalType::VARCHAR);
     names.push_back("split");
+
+    // Add feature columns to output schema
+    for (idx_t i = 0; i < bind_data->n_feature_cols; i++) {
+        return_types.push_back(bind_data->feature_types[i]);
+        names.push_back(bind_data->feature_names[i]);
+    }
 
     return std::move(bind_data);
 }
@@ -394,10 +425,15 @@ static OperatorResultType TsMlFoldsInOut(
     auto &local_state = data.local_state->Cast<TsMlFoldsLocalState>();
 
     // Buffer input rows
+    // Input layout:
+    // - 0-2: prefixed aliases (__ml_grp__, __ml_dt__, __ml_y__) - used for logic
+    // - 3-5: original columns from * (duplicates) - used for output values/types
+    // - 6+: actual feature columns
     for (idx_t row_idx = 0; row_idx < input.size(); row_idx++) {
-        Value group_val = input.GetValue(0, row_idx);
-        Value date_val = input.GetValue(1, row_idx);
-        Value value_val = input.GetValue(2, row_idx);
+        // Read from original columns (3-5) for correct types
+        Value group_val = input.GetValue(3, row_idx);
+        Value date_val = input.GetValue(4, row_idx);
+        Value value_val = input.GetValue(2, row_idx);  // Use prefixed target (already cast to DOUBLE)
 
         if (date_val.IsNull()) continue;
 
@@ -406,7 +442,7 @@ static OperatorResultType TsMlFoldsInOut(
         row.date_val = date_val;
         row.group_key = GetGroupKeyForMl(group_val);
 
-        // Convert date to microseconds
+        // Convert date to microseconds using original date column
         switch (bind_data.date_col_type) {
             case DateColumnType::DATE:
                 row.date_micros = DateToMicroseconds(date_val.GetValue<date_t>());
@@ -428,6 +464,11 @@ static OperatorResultType TsMlFoldsInOut(
 
         row.value = value_val.IsNull() ? 0.0 : value_val.GetValue<double>();
         row.valid = !value_val.IsNull();
+
+        // Buffer feature columns (columns 6+, skipping original group/date/target at 3-5)
+        for (idx_t i = 6; i < input.ColumnCount(); i++) {
+            row.feature_vals.push_back(input.GetValue(i, row_idx));
+        }
 
         local_state.input_rows.push_back(std::move(row));
     }
@@ -618,6 +659,11 @@ static OperatorFinalizeResultType TsMlFoldsFinalize(
 
         output.SetValue(3, output_idx, Value::BIGINT(out_row.fold_id));
         output.SetValue(4, output_idx, Value(out_row.is_train ? "train" : "test"));
+
+        // Output feature columns
+        for (idx_t i = 0; i < input_row.feature_vals.size(); i++) {
+            output.SetValue(5 + i, output_idx, input_row.feature_vals[i]);
+        }
 
         output_idx++;
         local_state.output_offset++;
