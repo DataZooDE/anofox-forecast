@@ -1,5 +1,5 @@
 #include "ts_cv_forecast_native.hpp"
-#include "ts_fill_gaps_native.hpp"  // For ParseFrequencyToSeconds, etc.
+#include "ts_fill_gaps_native.hpp"  // For DateColumnType, helper functions
 #include "anofox_fcst_ffi.h"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -18,12 +18,15 @@ namespace duckdb {
 // This is an INTERNAL function used by ts_cv_forecast_by macro.
 // Users should call ts_cv_forecast_by() instead of this function directly.
 //
-// MEMORY FOOTPRINT:
-//   - Native (this function): O(group_size) per (fold_id, group) combination
-//   - Old SQL macro approach: O(total_rows) due to LIST() aggregations
+// REDESIGNED WORKFLOW (no frequency parameter needed):
+// 1. Accepts input with BOTH train and test splits from ts_ml_folds_by
+// 2. Trains model on 'train' rows per (fold_id, group) combination
+// 3. Generates horizon forecasts
+// 4. Matches forecasts to 'test' rows by position (1st forecast → 1st test row, etc.)
+// 5. Returns test rows with forecast values
 //
-// Input columns: fold_id, group_col, date_col, target_col
-// Groups by (fold_id, group_col) and generates forecasts for each combination.
+// Input columns: fold_id, split, group_col, date_col, target_col
+// Output: All test rows with forecast, lower_90, upper_90, model_name columns added
 // ============================================================================
 
 // ============================================================================
@@ -33,8 +36,6 @@ namespace duckdb {
 struct TsCvForecastNativeBindData : public TableFunctionData {
     // Required parameters
     int64_t horizon = 7;
-    int64_t frequency_seconds = 86400;
-    bool frequency_is_raw = false;
 
     // Model parameters
     string method = "AutoETS";
@@ -50,10 +51,6 @@ struct TsCvForecastNativeBindData : public TableFunctionData {
 
 // ============================================================================
 // Global State - enables parallel execution
-//
-// IMPORTANT: This custom GlobalState is required for proper parallel execution.
-// Using the base GlobalTableFunctionState directly causes batch index collisions
-// with large datasets (300k+ groups) during BatchedDataCollection::Merge.
 // ============================================================================
 
 struct TsCvForecastNativeGlobalState : public GlobalTableFunctionState {
@@ -79,26 +76,30 @@ struct TsCvForecastNativeGlobalState : public GlobalTableFunctionState {
 
 struct TsCvForecastNativeLocalState : public LocalTableFunctionState {
     // Input data buffer per (fold_id, group) combination
+    // Stores both train and test data separately
     struct GroupData {
         int64_t fold_id;
         Value group_value;
-        vector<int64_t> dates;  // microseconds
-        vector<double> values;
-        vector<bool> validity;
+        // Training data (split='train')
+        vector<int64_t> train_dates;  // microseconds
+        vector<double> train_values;
+        // Test data (split='test') - these have actual dates we'll match to
+        vector<int64_t> test_dates;
+        vector<double> test_actuals;
     };
 
     // Key is "fold_id:group_key"
     std::map<string, GroupData> groups;
     vector<string> group_order;
 
-    // Output results
+    // Output results - one row per test data point with forecast
     struct ForecastOutputRow {
         int64_t fold_id;
         string group_key;
         Value group_value;
-        int64_t forecast_step;
-        int64_t date;  // microseconds
-        double point_forecast;
+        int64_t date;  // microseconds - from actual test data
+        double y;      // actual value from test data
+        double forecast;
         double lower_90;
         double upper_90;
         string model_name;
@@ -245,41 +246,39 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
 
     auto bind_data = make_uniq<TsCvForecastNativeBindData>();
 
-    // Input table has columns: fold_id, group_col, date_col, value_col
-    // Arguments after table: horizon, frequency, method, params
+    // Input table has columns: fold_id, split, group_col, date_col, value_col
+    // Arguments after table: horizon, method, params
+    if (input.input_table_types.size() != 5) {
+        throw InvalidInputException(
+            "_ts_cv_forecast_native requires input with exactly 5 columns: "
+            "fold_id, split, group_col, date_col, target_col. Got %zu columns.",
+            input.input_table_types.size());
+    }
 
     // Parse horizon (index 1)
     if (input.inputs.size() >= 2) {
         bind_data->horizon = input.inputs[1].GetValue<int64_t>();
     }
 
-    // Parse frequency (index 2)
-    if (input.inputs.size() >= 3) {
-        string freq_str = input.inputs[2].GetValue<string>();
-        auto [freq, is_raw] = ParseFrequencyToSeconds(freq_str);
-        bind_data->frequency_seconds = freq;
-        bind_data->frequency_is_raw = is_raw;
+    // Parse method (index 2)
+    if (input.inputs.size() >= 3 && !input.inputs[2].IsNull()) {
+        bind_data->method = input.inputs[2].GetValue<string>();
     }
 
-    // Parse method (index 3)
+    // Parse params (index 3)
     if (input.inputs.size() >= 4 && !input.inputs[3].IsNull()) {
-        bind_data->method = input.inputs[3].GetValue<string>();
-    }
-
-    // Parse params (index 4)
-    if (input.inputs.size() >= 5 && !input.inputs[4].IsNull()) {
-        auto &params = input.inputs[4];
+        auto &params = input.inputs[3];
         bind_data->model_spec = ParseStringFromParams(params, "model", "");
         bind_data->seasonal_period = ParseInt64FromParams(params, "seasonal_period", 0);
         bind_data->confidence_level = ParseDoubleFromParams(params, "confidence_level", 0.90);
     }
 
     // Detect column types from input
-    // Input table: fold_id (BIGINT), group_col, date_col, value_col
-    bind_data->group_logical_type = input.input_table_types[1];
-    bind_data->date_logical_type = input.input_table_types[2];
+    // Input table: fold_id (BIGINT), split (VARCHAR), group_col, date_col, value_col
+    bind_data->group_logical_type = input.input_table_types[2];
+    bind_data->date_logical_type = input.input_table_types[3];
 
-    switch (input.input_table_types[2].id()) {
+    switch (input.input_table_types[3].id()) {
         case LogicalTypeId::DATE:
             bind_data->date_col_type = DateColumnType::DATE;
             break;
@@ -296,14 +295,14 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
         default:
             throw InvalidInputException(
                 "Date column must be DATE, TIMESTAMP, INTEGER, or BIGINT, got: %s",
-                input.input_table_types[2].ToString().c_str());
+                input.input_table_types[3].ToString().c_str());
     }
 
-    // Output schema: fold_id, group_col, forecast_step, date_col, point_forecast, lower_90, upper_90, model_name
+    // Output schema: fold_id, group_col, date_col, y, split, forecast, lower_90, upper_90, model_name
     // Preserve original column names from input table
     auto &table_names = input.input_table_names;
-    string group_col_name = table_names.size() > 1 ? table_names[1] : "id";
-    string date_col_name = table_names.size() > 2 ? table_names[2] : "date";
+    string group_col_name = table_names.size() > 2 ? table_names[2] : "id";
+    string date_col_name = table_names.size() > 3 ? table_names[3] : "date";
 
     names.push_back("fold_id");
     return_types.push_back(LogicalType::BIGINT);
@@ -311,13 +310,16 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
     names.push_back(group_col_name);
     return_types.push_back(bind_data->group_logical_type);
 
-    names.push_back("forecast_step");
-    return_types.push_back(LogicalType::INTEGER);
-
     names.push_back(date_col_name);
     return_types.push_back(bind_data->date_logical_type);
 
-    names.push_back("point_forecast");
+    names.push_back("y");
+    return_types.push_back(LogicalType::DOUBLE);
+
+    names.push_back("split");
+    return_types.push_back(LogicalType::VARCHAR);
+
+    names.push_back("forecast");
     return_types.push_back(LogicalType::DOUBLE);
 
     names.push_back("lower_90");
@@ -350,7 +352,7 @@ static unique_ptr<LocalTableFunctionState> TsCvForecastNativeInitLocal(
 }
 
 // ============================================================================
-// In-Out Function - buffers incoming data
+// In-Out Function - buffers incoming data, separates train and test
 // ============================================================================
 
 static OperatorResultType TsCvForecastNativeInOut(
@@ -363,16 +365,18 @@ static OperatorResultType TsCvForecastNativeInOut(
     auto &local_state = data_p.local_state->Cast<TsCvForecastNativeLocalState>();
 
     // Buffer all incoming data - we need complete groups
-    // Input columns: fold_id, group_col, date_col, value_col
+    // Input columns: fold_id, split, group_col, date_col, value_col
     for (idx_t i = 0; i < input.size(); i++) {
         Value fold_id_val = input.data[0].GetValue(i);
-        Value group_val = input.data[1].GetValue(i);
-        Value date_val = input.data[2].GetValue(i);
-        Value value_val = input.data[3].GetValue(i);
+        Value split_val = input.data[1].GetValue(i);
+        Value group_val = input.data[2].GetValue(i);
+        Value date_val = input.data[3].GetValue(i);
+        Value value_val = input.data[4].GetValue(i);
 
-        if (fold_id_val.IsNull() || date_val.IsNull()) continue;
+        if (fold_id_val.IsNull() || split_val.IsNull() || date_val.IsNull()) continue;
 
         int64_t fold_id = fold_id_val.GetValue<int64_t>();
+        string split = split_val.ToString();
         string group_key = GetGroupKey(group_val);
         string composite_key = MakeCompositeKey(fold_id, group_key);
 
@@ -402,9 +406,17 @@ static OperatorResultType TsCvForecastNativeInOut(
                 break;
         }
 
-        grp.dates.push_back(date_micros);
-        grp.values.push_back(value_val.IsNull() ? 0.0 : value_val.GetValue<double>());
-        grp.validity.push_back(!value_val.IsNull());
+        double value = value_val.IsNull() ? 0.0 : value_val.GetValue<double>();
+
+        // Separate train and test data
+        if (split == "train") {
+            grp.train_dates.push_back(date_micros);
+            grp.train_values.push_back(value);
+        } else if (split == "test") {
+            grp.test_dates.push_back(date_micros);
+            grp.test_actuals.push_back(value);
+        }
+        // Ignore other split values
     }
 
     // Don't output anything during input phase
@@ -435,30 +447,30 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
 
             auto &grp = local_state.groups[composite_key];
 
-            if (grp.dates.empty()) continue;
+            if (grp.train_dates.empty() || grp.test_dates.empty()) continue;
 
-            // Sort by date
-            vector<size_t> indices(grp.dates.size());
-            for (size_t i = 0; i < indices.size(); i++) indices[i] = i;
-            std::sort(indices.begin(), indices.end(),
-                [&grp](size_t a, size_t b) { return grp.dates[a] < grp.dates[b]; });
+            // Sort training data by date
+            vector<size_t> train_indices(grp.train_dates.size());
+            for (size_t i = 0; i < train_indices.size(); i++) train_indices[i] = i;
+            std::sort(train_indices.begin(), train_indices.end(),
+                [&grp](size_t a, size_t b) { return grp.train_dates[a] < grp.train_dates[b]; });
 
-            vector<double> sorted_values(grp.values.size());
-            vector<bool> sorted_validity(grp.validity.size());
-            int64_t last_date = 0;
-            for (size_t i = 0; i < indices.size(); i++) {
-                sorted_values[i] = grp.values[indices[i]];
-                sorted_validity[i] = grp.validity[indices[i]];
-                last_date = grp.dates[indices[i]];
+            vector<double> sorted_train_values(grp.train_values.size());
+            for (size_t i = 0; i < train_indices.size(); i++) {
+                sorted_train_values[i] = grp.train_values[train_indices[i]];
             }
 
-            // Build validity bitmask for Rust
-            size_t validity_words = (sorted_values.size() + 63) / 64;
-            vector<uint64_t> validity(validity_words, 0);
-            for (size_t i = 0; i < sorted_validity.size(); i++) {
-                if (sorted_validity[i]) {
-                    validity[i / 64] |= (1ULL << (i % 64));
-                }
+            // Sort test data by date
+            vector<size_t> test_indices(grp.test_dates.size());
+            for (size_t i = 0; i < test_indices.size(); i++) test_indices[i] = i;
+            std::sort(test_indices.begin(), test_indices.end(),
+                [&grp](size_t a, size_t b) { return grp.test_dates[a] < grp.test_dates[b]; });
+
+            vector<int64_t> sorted_test_dates(grp.test_dates.size());
+            vector<double> sorted_test_actuals(grp.test_actuals.size());
+            for (size_t i = 0; i < test_indices.size(); i++) {
+                sorted_test_dates[i] = grp.test_dates[test_indices[i]];
+                sorted_test_actuals[i] = grp.test_actuals[test_indices[i]];
             }
 
             // Build ForecastOptions
@@ -486,9 +498,9 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
             AnofoxError error;
 
             bool success = anofox_ts_forecast(
-                sorted_values.data(),
-                validity.empty() ? nullptr : validity.data(),
-                sorted_values.size(),
+                sorted_train_values.data(),
+                nullptr,  // No validity mask
+                sorted_train_values.size(),
                 &opts,
                 &fcst_result,
                 &error
@@ -499,26 +511,17 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
                 continue;
             }
 
-            // Compute forecast dates
-            int64_t freq_micros;
-            if (bind_data.date_col_type == DateColumnType::INTEGER ||
-                bind_data.date_col_type == DateColumnType::BIGINT) {
-                freq_micros = bind_data.frequency_is_raw ? bind_data.frequency_seconds : bind_data.frequency_seconds;
-            } else {
-                freq_micros = bind_data.frequency_is_raw
-                    ? bind_data.frequency_seconds * 86400LL * 1000000LL
-                    : bind_data.frequency_seconds * 1000000LL;
-            }
-
-            // Generate output rows
-            for (size_t i = 0; i < fcst_result.n_forecasts; i++) {
+            // Match forecasts to test rows by position
+            // forecast[0] -> test row 0, forecast[1] -> test row 1, etc.
+            size_t n_matches = std::min(static_cast<size_t>(fcst_result.n_forecasts), sorted_test_dates.size());
+            for (size_t i = 0; i < n_matches; i++) {
                 TsCvForecastNativeLocalState::ForecastOutputRow row;
                 row.fold_id = grp.fold_id;
                 row.group_key = composite_key;
                 row.group_value = grp.group_value;
-                row.forecast_step = static_cast<int64_t>(i + 1);
-                row.date = last_date + freq_micros * static_cast<int64_t>(i + 1);
-                row.point_forecast = fcst_result.point_forecasts[i];
+                row.date = sorted_test_dates[i];  // Use actual test date
+                row.y = sorted_test_actuals[i];   // Actual value
+                row.forecast = fcst_result.point_forecasts[i];
                 row.lower_90 = fcst_result.lower_bounds[i];
                 row.upper_90 = fcst_result.upper_bounds[i];
                 row.model_name = string(fcst_result.model_name);
@@ -554,35 +557,38 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
         // fold_id
         output.data[0].SetValue(i, Value::BIGINT(row.fold_id));
 
-        // id (group)
+        // group_col
         output.data[1].SetValue(i, row.group_value);
-
-        // forecast_step
-        output.data[2].SetValue(i, Value::INTEGER(static_cast<int32_t>(row.forecast_step)));
 
         // date - convert back from microseconds
         switch (bind_data.date_col_type) {
             case DateColumnType::DATE:
-                output.data[3].SetValue(i, Value::DATE(MicrosecondsToDate(row.date)));
+                output.data[2].SetValue(i, Value::DATE(MicrosecondsToDate(row.date)));
                 break;
             case DateColumnType::TIMESTAMP:
-                output.data[3].SetValue(i, Value::TIMESTAMP(MicrosecondsToTimestamp(row.date)));
+                output.data[2].SetValue(i, Value::TIMESTAMP(MicrosecondsToTimestamp(row.date)));
                 break;
             case DateColumnType::INTEGER:
-                output.data[3].SetValue(i, Value::INTEGER(static_cast<int32_t>(row.date)));
+                output.data[2].SetValue(i, Value::INTEGER(static_cast<int32_t>(row.date)));
                 break;
             case DateColumnType::BIGINT:
-                output.data[3].SetValue(i, Value::BIGINT(row.date));
+                output.data[2].SetValue(i, Value::BIGINT(row.date));
                 break;
         }
 
-        // point_forecast, lower_90, upper_90
-        output.data[4].SetValue(i, Value::DOUBLE(row.point_forecast));
-        output.data[5].SetValue(i, Value::DOUBLE(row.lower_90));
-        output.data[6].SetValue(i, Value::DOUBLE(row.upper_90));
+        // y (actual)
+        output.data[3].SetValue(i, Value::DOUBLE(row.y));
+
+        // split (always 'test' since we only output test rows)
+        output.data[4].SetValue(i, Value("test"));
+
+        // forecast, lower_90, upper_90
+        output.data[5].SetValue(i, Value::DOUBLE(row.forecast));
+        output.data[6].SetValue(i, Value::DOUBLE(row.lower_90));
+        output.data[7].SetValue(i, Value::DOUBLE(row.upper_90));
 
         // model_name
-        output.data[7].SetValue(i, Value(row.model_name));
+        output.data[8].SetValue(i, Value(row.model_name));
     }
 
     local_state.output_offset += to_output;
@@ -598,11 +604,13 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
 // ============================================================================
 
 void RegisterTsCvForecastNativeFunction(ExtensionLoader &loader) {
-    // Internal table-in-out function: (TABLE, horizon, frequency, method, params)
-    // Input table must have 4 columns: fold_id, group_col, date_col, value_col
-    // Note: This is an internal function (prefixed with _) called by ts_cv_forecast_by macro
+    // Internal table-in-out function: (TABLE, horizon, method, params)
+    // Input table must have 5 columns: fold_id, split, group_col, date_col, value_col
+    //
+    // This is an internal function (prefixed with _) called by ts_cv_forecast_by macro.
+    // Frequency parameter removed - uses position-based matching to existing test dates.
     TableFunction func("_ts_cv_forecast_native",
-        {LogicalType::TABLE, LogicalType::INTEGER, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::ANY},
+        {LogicalType::TABLE, LogicalType::INTEGER, LogicalType::VARCHAR, LogicalType::ANY},
         nullptr,  // No execute function - use in_out_function
         TsCvForecastNativeBind,
         TsCvForecastNativeInitGlobal,

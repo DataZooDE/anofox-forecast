@@ -1,5 +1,5 @@
 #include "ts_backtest_native.hpp"
-#include "ts_fill_gaps_native.hpp"  // For ParseFrequencyToSeconds, etc.
+#include "ts_fill_gaps_native.hpp"  // For DateColumnType, helper functions
 #include "anofox_fcst_ffi.h"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -52,8 +52,6 @@ struct TsBacktestNativeBindData : public TableFunctionData {
     // Required parameters
     int64_t horizon = 7;
     int64_t folds = 5;
-    int64_t frequency_seconds = 86400;
-    bool frequency_is_raw = false;
 
     // Optional parameters (from params MAP/STRUCT)
     string method = "AutoETS";
@@ -396,23 +394,17 @@ static unique_ptr<FunctionData> TsBacktestNativeBind(
             input.input_table_types.size());
     }
 
-    // Parse positional arguments: horizon, folds, frequency
+    // Parse positional arguments: horizon, folds
     if (input.inputs.size() >= 2) {
         bind_data->horizon = input.inputs[1].GetValue<int64_t>();
     }
     if (input.inputs.size() >= 3) {
         bind_data->folds = input.inputs[2].GetValue<int64_t>();
     }
-    if (input.inputs.size() >= 4) {
-        string freq_str = input.inputs[3].GetValue<string>();
-        auto [freq, is_raw] = ParseFrequencyToSeconds(freq_str);
-        bind_data->frequency_seconds = freq;
-        bind_data->frequency_is_raw = is_raw;
-    }
 
-    // Parse optional params (index 4)
-    if (input.inputs.size() >= 5 && !input.inputs[4].IsNull()) {
-        auto &params = input.inputs[4];
+    // Parse optional params (index 3)
+    if (input.inputs.size() >= 4 && !input.inputs[3].IsNull()) {
+        auto &params = input.inputs[3];
         bind_data->method = ParseMethodFromParams(params);
         bind_data->model_spec = ParseStringFromParams(params, "model", "");
         bind_data->window_type = ParseStringFromParams(params, "window_type", "expanding");
@@ -424,9 +416,9 @@ static unique_ptr<FunctionData> TsBacktestNativeBind(
         bind_data->clip_horizon = ParseBoolFromParams(params, "clip_horizon", false);
     }
 
-    // Parse metric (index 5)
-    if (input.inputs.size() >= 6 && !input.inputs[5].IsNull()) {
-        bind_data->metric = input.inputs[5].GetValue<string>();
+    // Parse metric (index 4)
+    if (input.inputs.size() >= 5 && !input.inputs[4].IsNull()) {
+        bind_data->metric = input.inputs[4].GetValue<string>();
     }
 
     // Detect date column type from input (column 1)
@@ -965,16 +957,18 @@ static OperatorFinalizeResultType TsBacktestNativeFinalize(
 // ============================================================================
 
 void RegisterTsBacktestNativeFunction(ExtensionLoader &loader) {
-    // Table-in-out function: (TABLE, horizon, folds, frequency, params, metric)
+    // Table-in-out function: (TABLE, horizon, folds, params, metric)
     // Input table must have 3 columns: group_col, date_col, value_col
     //
     // This is an internal function (underscore prefix) used by ts_backtest_auto_by macro.
     // Direct use is discouraged - use ts_backtest_auto_by instead.
+    //
+    // Uses position-based indexing (not date arithmetic) - frequency parameter removed.
+    // Input data must be pre-cleaned, sorted by date, with no gaps.
     TableFunction func("_ts_backtest_native",
         {LogicalType::TABLE,
          LogicalType::BIGINT,   // horizon
          LogicalType::BIGINT,   // folds
-         LogicalType::VARCHAR,  // frequency
          LogicalType::ANY,      // params (MAP or STRUCT)
          LogicalType::VARCHAR}, // metric
         nullptr,  // No execute function - use in_out_function

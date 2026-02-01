@@ -7,7 +7,6 @@
 Time series cross-validation requires special handling because data has temporal ordering. These functions help you create proper train/test splits, handle unknown features during backtesting, and prevent data leakage.
 
 **Use this document to:**
-- Run complete backtests with a single function call (`ts_backtest_auto_by`)
 - Create proper expanding window train/test splits with temporal ordering
 - Generate cross-validation folds for custom forecasting pipelines
 - Compare model performance across multiple time periods
@@ -29,183 +28,190 @@ If your data has gaps or irregular frequency, use [`ts_fill_gaps_by`](04-data-pr
 CREATE TABLE prepared_data AS
 SELECT * FROM ts_fill_gaps_by('raw_data', series_id, date, value, '1mo', MAP{});
 
--- Then run backtest on prepared data
-SELECT * FROM ts_backtest_auto_by('prepared_data', series_id, date, value, 6, 3, '1mo', MAP{});
+-- Then generate folds on prepared data
+SELECT * FROM ts_ml_folds_by('prepared_data', series_id, date, value, 3, 12, MAP{});
 ```
 
 ---
 
 ## Quick Start
 
-### One-Liner (Recommended)
+### Cross-Validation Workflow (Recommended)
 
-For most use cases, use `ts_backtest_auto_by` - complete backtesting in a single call:
-
-```sql
--- Backtest Naive (no seasonality required)
-SELECT * FROM ts_backtest_auto_by(
-    'sales_data', store_id, date, revenue,
-    7, 5, '1d', {'method': 'Naive'}
-);
-
--- Aggregate results
-SELECT
-    model_name,
-    AVG(abs_error) AS mae,
-    AVG(fold_metric_score) AS avg_rmse
-FROM ts_backtest_auto_by('sales_data', store_id, date, revenue, 7, 5, '1d', {'method': 'Naive'})
-GROUP BY model_name;
-```
-
-**For seasonal data**, first detect the period, then pass it explicitly:
+Use the two-step workflow for cross-validation:
 
 ```sql
--- Step 1: Detect seasonality
-SELECT * FROM ts_detect_periods_by('sales_data', store_id, date, revenue, MAP{});
--- Returns: primary_period = 7 (weekly)
+-- Step 1: Generate folds (both train and test rows with actual dates)
+CREATE TABLE cv_folds AS
+SELECT * FROM ts_ml_folds_by('data', unique_id, ds, y, 3, 12, MAP{});
 
--- Step 2: Backtest with seasonal model
-SELECT * FROM ts_backtest_auto_by(
-    'sales_data', store_id, date, revenue,
-    7, 5, '1d', {'method': 'AutoETS', 'seasonal_period': 7}
-);
-```
+-- Step 2: Generate forecasts (matches to existing test dates)
+SELECT * FROM ts_cv_forecast_by('cv_folds', unique_id, ds, y, 'Naive', 12, MAP{});
 
-### Modular Approach
-
-For custom pipelines or regression models (using `anofox_statistics` extension):
-
-```sql
--- Requires: LOAD 'anofox_statistics';
-
--- 1. Generate fold boundaries
-WITH folds AS (
-    SELECT training_end_times FROM ts_cv_generate_folds(data, date, 7, 5, MAP{})
-)
-
--- 2. Create train/test splits
-SELECT * FROM ts_cv_split_by('data', 'store_id', 'date', 'revenue',
-    (SELECT training_end_times FROM folds), 7, '1d', MAP{});
-
--- 3. Apply linear regression from anofox_statistics on each fold
--- Train on 'train' split, predict on 'test' split
-WITH splits AS (
-    SELECT * FROM ts_cv_split_by('data', 'store_id', 'date', 'revenue',
-        (SELECT training_end_times FROM ts_cv_generate_folds(data, date, 7, 5, MAP{})),
-        7, '1d', MAP{})
-)
+-- Step 3: Compute metrics
 SELECT
     fold_id,
-    store_id,
-    linear_regression_predict(features, coefficients) AS forecast
-FROM splits
-WHERE split = 'test';
+    ts_rmse(LIST(y), LIST(forecast)) AS rmse,
+    ts_mae(LIST(y), LIST(forecast)) AS mae
+FROM ts_cv_forecast_by('cv_folds', unique_id, ds, y, 'Naive', 12, MAP{})
+GROUP BY fold_id;
 ```
+
+**Key insight:** `ts_ml_folds_by` outputs both train AND test rows with their actual dates, so `ts_cv_forecast_by` doesn't need to generate dates.
 
 ### Usage Pattern Comparison
 
 | Pattern | Use Case | Complexity |
 |---------|----------|------------|
-| **One-liner** (`ts_backtest_auto_by`) | Quick evaluation, 80% of use cases | Simple |
-| **Modular** (`ts_cv_split_by` + `ts_cv_forecast_by`) | Custom pipelines, regression models | Advanced |
+| **Two-step** (`ts_ml_folds_by` + `ts_cv_forecast_by`) | Standard backtesting, most use cases | Simple |
+| **Custom cutoffs** (`ts_cv_split_by`) | Specific business dates as fold boundaries | Moderate |
+| **Modular** (`ts_cv_split_by` + custom models) | Regression models, external forecasters | Advanced |
 
 ---
 
 ## Table Macros
 
-### ts_backtest_auto_by
+### ts_ml_folds_by
 
-Complete backtesting in a single function call.
+Create train/test splits for ML model backtesting in a single function call.
+
+This function combines fold boundary generation and train/test splitting, suitable for ML model backtesting. Unlike using `ts_cv_generate_folds` + `ts_cv_split_by` separately, this function avoids DuckDB's subquery limitation and provides a simpler API.
 
 **Signature:**
 ```sql
-ts_backtest_auto_by(
-    source VARCHAR,
-    group_col COLUMN,
-    date_col COLUMN,
-    target_col COLUMN,
-    horizon BIGINT,
-    folds BIGINT,
-    frequency VARCHAR,
-    params MAP or STRUCT,
-    features VARCHAR[],      -- Optional
-    metric VARCHAR           -- Optional, default 'rmse'
+ts_ml_folds_by(
+    source VARCHAR,           -- Source table name (quoted string, NOT a CTE reference)
+    group_col COLUMN,         -- Series grouping column (unquoted identifier)
+    date_col COLUMN,          -- Date column (unquoted identifier)
+    target_col COLUMN,        -- Value column (unquoted identifier)
+    n_folds BIGINT,           -- Number of folds to generate
+    horizon BIGINT,           -- Number of periods in test window
+    params MAP or STRUCT      -- Optional parameters (see below)
 ) → TABLE
 ```
 
-**Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `source` | VARCHAR | Table containing time series data |
-| `group_col` | COLUMN | Series identifier column |
-| `date_col` | COLUMN | Date/timestamp column |
-| `target_col` | COLUMN | Target value to forecast |
-| `horizon` | BIGINT | Number of periods to forecast ahead |
-| `folds` | BIGINT | Number of CV folds |
-| `frequency` | VARCHAR | Data frequency (`'1d'`, `'1h'`, `'1w'`, `'1mo'`) |
-| `params` | MAP/STRUCT | Model and CV parameters |
-| `features` | VARCHAR[] | Optional regressor columns |
-| `metric` | VARCHAR | Metric for fold_metric_score (default `'rmse'`) |
+> **Important:**
+> - **Source must be a table name as a string** (e.g., `'my_table'`), not a CTE reference. CTEs are not supported.
+> - Assumes pre-cleaned data with no gaps. Use `ts_fill_gaps_by` first if your data has missing dates.
+> - Uses position-based indexing (not date arithmetic) - works correctly with all frequencies.
+> - **Parameter validation:** Unknown parameter names will throw an informative error listing all available parameters.
+> - **Features are NOT passed through.** Only group, date, and target columns are included in output. For feature handling, use `ts_cv_split_by` with hydration functions.
 
 **Params Options:**
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `method` | VARCHAR | `'AutoETS'` | Forecasting model |
 | `gap` | BIGINT | `0` | Periods between train end and test start |
-| `embargo` | BIGINT | `0` | Periods to exclude after previous test |
+| `embargo` | BIGINT | `0` | Periods to exclude from training after previous test |
 | `window_type` | VARCHAR | `'expanding'` | `'expanding'`, `'fixed'`, or `'sliding'` |
-| `min_train_size` | BIGINT | `1` | Minimum training periods |
-| `initial_train_size` | BIGINT | 50% | Periods for first fold |
-| `skip_length` | BIGINT | `horizon` | Periods between fold starts |
-| `clip_horizon` | BOOLEAN | `false` | Include partial test windows |
+| `min_train_size` | BIGINT | `1` | Minimum training size for fixed/sliding windows only (ignored for expanding) |
+| `initial_train_size` | BIGINT | auto | Periods before first fold (default: n_dates - n_folds * horizon) |
+| `skip_length` | BIGINT | `horizon` | Periods between folds (1=dense, horizon=default) |
+| `clip_horizon` | BOOLEAN | `false` | If true, allow folds with partial test windows |
 
-**Supported Metrics:**
-| Metric | Parameter | Description |
-|--------|-----------|-------------|
-| RMSE | `'rmse'` | Root Mean Squared Error (default) |
-| MAE | `'mae'` | Mean Absolute Error |
-| MAPE | `'mape'` | Mean Absolute Percentage Error |
-| MSE | `'mse'` | Mean Squared Error |
-| SMAPE | `'smape'` | Symmetric MAPE |
-| Bias | `'bias'` | Mean Error |
-| R² | `'r2'` | Coefficient of Determination |
-| Coverage | `'coverage'` | Prediction interval coverage |
+> **Note on `min_train_size`:** This parameter only affects `fixed` and `sliding` window types. For the default `expanding` window, training always starts from position 0. If you need a minimum training size with expanding windows, use `initial_train_size` instead.
 
-**Output Columns:**
+**Returns:**
 | Column | Type | Description |
 |--------|------|-------------|
-| `fold_id` | BIGINT | CV fold number |
-| `group_col` | ANY | Series identifier |
-| `date` | TIMESTAMP | Forecast date |
-| `forecast` | DOUBLE | Point forecast |
-| `actual` | DOUBLE | Actual value |
-| `error` | DOUBLE | forecast - actual |
-| `abs_error` | DOUBLE | |forecast - actual| |
-| `lower_90` | DOUBLE | Lower 90% prediction interval |
-| `upper_90` | DOUBLE | Upper 90% prediction interval |
-| `model_name` | VARCHAR | Model used |
-| `fold_metric_score` | DOUBLE | Calculated metric for fold |
+| `<group_col>` | (same as input) | Series identifier (preserves original column name) |
+| `<date_col>` | (same as input) | Date/timestamp (preserves original column name and type) |
+| `y` | DOUBLE | Target value |
+| `fold_id` | BIGINT | Fold number (1, 2, 3, ...) |
+| `split` | VARCHAR | `'train'` or `'test'` |
 
 **Examples:**
 ```sql
--- Basic backtest with AutoETS
-SELECT * FROM ts_backtest_auto_by(
+-- Basic ML backtesting with 3 folds, 6-period horizon
+SELECT * FROM ts_ml_folds_by(
     'sales_data', store_id, date, revenue,
-    7, 5, '1d', {'method': 'AutoETS'}
+    3, 6, MAP{}
 );
 
--- With STRUCT params (mixed types)
-SELECT * FROM ts_backtest_auto_by(
-    'sales_data', store_id, date, revenue, 7, 5, '1d',
-    {'method': 'Naive', 'gap': 2, 'clip_horizon': true}
+-- With gap between train and test (e.g., for "next week" predictions)
+SELECT * FROM ts_ml_folds_by(
+    'sales_data', store_id, date, revenue,
+    3, 7, {'gap': 1}
 );
 
--- Different metric
-SELECT * FROM ts_backtest_auto_by(
-    'sales_data', store_id, date, revenue, 7, 5, '1d',
-    {'method': 'Theta'},
-    NULL, 'smape'
+-- Fixed window with custom initial training size
+SELECT * FROM ts_ml_folds_by(
+    'sales_data', store_id, date, revenue,
+    5, 12, {'window_type': 'fixed', 'min_train_size': 24, 'initial_train_size': 24}
 );
+
+-- Dense overlapping folds (skip_length=1)
+SELECT * FROM ts_ml_folds_by(
+    'sales_data', store_id, date, revenue,
+    10, 3, {'skip_length': 1}
+);
+```
+
+---
+
+### ts_cv_forecast_by
+
+Generate forecasts for pre-computed cross-validation folds. **Use this with output from `ts_ml_folds_by`.**
+
+**Signature:**
+```sql
+ts_cv_forecast_by(
+    ml_folds VARCHAR,         -- Output from ts_ml_folds_by
+    group_col COLUMN,         -- Group column
+    date_col COLUMN,          -- Date column
+    target_col COLUMN,        -- Target column (usually 'y' from ts_ml_folds_by)
+    method VARCHAR,           -- Forecast method
+    horizon BIGINT,           -- Forecast horizon
+    params MAP = {}           -- Model parameters
+) → TABLE
+```
+
+**Input Requirements:**
+
+The input table must be the output of `ts_ml_folds_by` containing:
+- `fold_id`: Fold identifier
+- `split`: 'train' or 'test'
+- Group, date, and target columns
+
+**Output:**
+
+Returns the test rows with forecast columns added:
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | Fold number |
+| `<group_col>` | (same as input) | Series identifier |
+| `<date_col>` | (same as input) | Forecast date |
+| `y` | DOUBLE | Actual value from test data |
+| `split` | VARCHAR | Always 'test' |
+| `forecast` | DOUBLE | Point forecast |
+| `lower_90` | DOUBLE | Lower 90% prediction interval |
+| `upper_90` | DOUBLE | Upper 90% prediction interval |
+| `model_name` | VARCHAR | Model used |
+
+**Key Features:**
+
+- **No frequency parameter needed**: Forecasts are matched to existing test dates from input
+- **Date preservation**: Original date values are preserved (no date generation)
+- **Position-based matching**: 1st forecast → 1st test row, 2nd forecast → 2nd test row, etc.
+
+**Example:**
+
+```sql
+-- Step 1: Create folds
+CREATE TABLE folds AS
+SELECT * FROM ts_ml_folds_by('data', unique_id, ds, y, 3, 6, MAP{});
+
+-- Step 2: Generate forecasts
+SELECT fold_id, ds, y AS actual, forecast
+FROM ts_cv_forecast_by('folds', unique_id, ds, y, 'Naive', 6, MAP{});
+
+-- Step 3: Compute aggregate metrics
+SELECT
+    fold_id,
+    ts_rmse(LIST(y), LIST(forecast)) AS rmse,
+    ts_mae(LIST(y), LIST(forecast)) AS mae,
+    ts_mape(LIST(y), LIST(forecast)) AS mape
+FROM ts_cv_forecast_by('folds', unique_id, ds, y, 'Naive', 6, MAP{})
+GROUP BY fold_id;
 ```
 
 ---
@@ -237,102 +243,14 @@ FROM ts_cv_generate_folds('sales_data', date, 3, 5, MAP{});
 
 ---
 
-### ts_ml_folds_by
-
-Create train/test splits for ML model backtesting in a single function call.
-
-This function combines fold boundary generation and train/test splitting, suitable for ML model backtesting. Unlike using `ts_cv_generate_folds` + `ts_cv_split_by` separately, this function avoids DuckDB's subquery limitation and provides a simpler API.
-
-**Signature:**
-```sql
-ts_ml_folds_by(
-    source VARCHAR,           -- Source table name (quoted string, NOT a CTE reference)
-    group_col COLUMN,         -- Series grouping column (unquoted identifier)
-    date_col COLUMN,          -- Date column (unquoted identifier)
-    target_col COLUMN,        -- Value column (unquoted identifier)
-    n_folds BIGINT,           -- Number of folds to generate
-    horizon BIGINT,           -- Number of periods in test window
-    params MAP or STRUCT      -- Optional parameters (see below)
-) → TABLE
-```
-
-> **Important:**
-> - **Source must be a table name as a string** (e.g., `'my_table'`), not a CTE reference. CTEs are not supported.
-> - Assumes pre-cleaned data with no gaps. Use `ts_fill_gaps_by` first if your data has missing dates.
-> - Uses position-based indexing (not date arithmetic) - works correctly with all frequencies.
-> - **Parameter validation:** Unknown parameter names will throw an informative error listing all available parameters.
-
-**Params Options:**
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `gap` | BIGINT | `0` | Periods between train end and test start |
-| `embargo` | BIGINT | `0` | Periods to exclude from training after previous test |
-| `window_type` | VARCHAR | `'expanding'` | `'expanding'`, `'fixed'`, or `'sliding'` |
-| `min_train_size` | BIGINT | `1` | Minimum training size for fixed/sliding windows only (ignored for expanding) |
-| `initial_train_size` | BIGINT | auto | Periods before first fold (default: n_dates - n_folds * horizon) |
-| `skip_length` | BIGINT | `horizon` | Periods between folds (1=dense, horizon=default) |
-| `clip_horizon` | BOOLEAN | `false` | If true, allow folds with partial test windows |
-
-> **Note on `min_train_size`:** This parameter only affects `fixed` and `sliding` window types. For the default `expanding` window, training always starts from position 0. If you need a minimum training size with expanding windows, use `initial_train_size` instead.
-
-**Returns:**
-| Column | Type | Description |
-|--------|------|-------------|
-| `<group_col>` | (same as input) | Series identifier (preserves original column name) |
-| `<date_col>` | (same as input) | Date/timestamp (preserves original column name and type) |
-| `<target_col>` | DOUBLE | Target value |
-| `fold_id` | BIGINT | Fold number (1, 2, 3, ...) |
-| `split` | VARCHAR | `'train'` or `'test'` |
-
-**Examples:**
-```sql
--- Basic ML backtesting with 3 folds, 6-period horizon
-SELECT * FROM ts_ml_folds_by(
-    'sales_data', store_id, date, revenue,
-    3, 6, MAP{}
-);
-
--- With gap between train and test (e.g., for "next week" predictions)
-SELECT * FROM ts_ml_folds_by(
-    'sales_data', store_id, date, revenue,
-    3, 7, {'gap': 1}
-);
-
--- Fixed window with custom initial training size
-SELECT * FROM ts_ml_folds_by(
-    'sales_data', store_id, date, revenue,
-    5, 12, {'window_type': 'fixed', 'min_train_size': 24, 'initial_train_size': 24}
-);
-
--- Dense overlapping folds (skip_length=1)
-SELECT * FROM ts_ml_folds_by(
-    'sales_data', store_id, date, revenue,
-    10, 3, {'skip_length': 1}
-);
-```
-
-**Use Case - ML Model Backtesting:**
-```sql
--- Create CV splits
-CREATE TABLE ml_splits AS
-SELECT * FROM ts_ml_folds_by('prepared_data', series_id, date, value, 5, 12, MAP{});
-
--- Join with your features table
-CREATE TABLE ml_input AS
-SELECT s.*, f.feature1, f.feature2, f.feature3
-FROM ml_splits s
-JOIN feature_table f ON s.series_id = f.series_id AND s.date = f.date;
-
--- Train: Use rows where split = 'train' for each fold
--- Test: Predict rows where split = 'test' for each fold
--- Then join predictions back to actuals for evaluation
-```
-
----
-
 ### ts_cv_split_folds_by
 
-View fold date ranges (train/test boundaries).
+View fold date ranges (train/test boundaries) for pre-specified training cutoff dates.
+
+**Use Case:** When you need to inspect or visualize the actual date boundaries for each fold before running the full split. Useful for:
+- Verifying fold boundaries align with business periods (quarters, fiscal years)
+- Documentation and reporting
+- Debugging cross-validation setups
 
 **Signature:**
 ```sql
@@ -342,7 +260,7 @@ ts_cv_split_folds_by(
     date_col VARCHAR,
     training_end_times DATE[],
     horizon BIGINT,
-    frequency VARCHAR
+    frequency VARCHAR          -- Required for date arithmetic ('1d', '1mo', etc.)
 ) → TABLE
 ```
 
@@ -356,11 +274,29 @@ ts_cv_split_folds_by(
 | `test_end` | TIMESTAMP | Test period end |
 | `horizon` | BIGINT | Test period length |
 
+**Example:**
+```sql
+-- View boundaries for quarterly backtests
+SELECT * FROM ts_cv_split_folds_by(
+    'sales_data', 'store_id', 'date',
+    ['2024-03-31'::DATE, '2024-06-30'::DATE, '2024-09-30'::DATE],
+    30, '1d'
+);
+```
+
 ---
 
 ### ts_cv_split_by
 
-Split time series data into train/test sets.
+Split time series data into train/test sets using explicit training cutoff dates.
+
+**Use Case:** When you need **precise control over fold boundaries** rather than automatic fold generation. Common scenarios:
+- **Fiscal calendar alignment**: Folds must end at quarter/year boundaries
+- **Business events**: Train up to a specific known event date
+- **Regulatory requirements**: Auditable, reproducible fold boundaries
+- **Custom spacing**: Non-uniform spacing between folds (e.g., monthly for recent, quarterly for historical)
+
+For most standard backtesting, prefer `ts_ml_folds_by` which automatically computes fold boundaries.
 
 **Signature:**
 ```sql
@@ -369,9 +305,8 @@ ts_cv_split_by(
     group_col IDENTIFIER,     -- Series grouping column (unquoted)
     date_col IDENTIFIER,      -- Date/timestamp column (unquoted)
     target_col IDENTIFIER,    -- Value column (unquoted)
-    training_end_times DATE[],
+    training_end_times DATE[],-- Explicit cutoff dates for each fold
     horizon BIGINT,
-    frequency VARCHAR,
     params MAP
 ) → TABLE
 ```
@@ -400,9 +335,13 @@ Fold 3:             [==TRAIN==][TEST]
 
 **Example:**
 ```sql
+-- Quarterly backtests with explicit fiscal quarter end dates
 CREATE TABLE cv_splits AS
-SELECT * FROM ts_cv_split_by('sales', store_id, date, revenue,
-    ['2024-01-10'::DATE, '2024-01-15'::DATE], 5, '1d', MAP{});
+SELECT * FROM ts_cv_split_by(
+    'sales', store_id, date, revenue,
+    ['2024-03-31'::DATE, '2024-06-30'::DATE, '2024-09-30'::DATE],
+    30, MAP{}
+);
 -- Output columns: store_id, date, revenue, fold_id, split
 ```
 
@@ -411,6 +350,8 @@ SELECT * FROM ts_cv_split_by('sales', store_id, date, revenue,
 ### ts_cv_split_index_by
 
 Memory-efficient alternative returning only index columns (no target values).
+
+**Use Case:** For large datasets where duplicating target values across folds would consume too much memory. Use with hydration functions to join back to source data.
 
 **Signature:**
 ```sql
@@ -435,60 +376,11 @@ ts_cv_split_index_by(
 
 ---
 
-### ts_cv_forecast_by
-
-Generate forecasts for all CV folds.
-
-**Signature:**
-```sql
-ts_cv_forecast_by(
-    cv_splits VARCHAR,        -- CV splits table name (quoted string)
-    group_col IDENTIFIER,     -- Series grouping column (unquoted)
-    date_col IDENTIFIER,      -- Date/timestamp column (unquoted)
-    target_col IDENTIFIER,    -- Value column (unquoted)
-    method VARCHAR,
-    horizon BIGINT,
-    params MAP,
-    frequency VARCHAR
-) → TABLE
-```
-
-**Returns:**
-| Column | Type | Description |
-|--------|------|-------------|
-| `fold_id` | BIGINT | Fold number |
-| `<group_col>` | (same as input) | Series identifier (preserves original column name) |
-| `forecast_step` | INTEGER | Forecast horizon step (1, 2, 3, ...) |
-| `<date_col>` | (same as input) | Forecast date (preserves original column name) |
-| `point_forecast` | DOUBLE | Point forecast value |
-| `lower_90` | DOUBLE | Lower 90% prediction interval bound |
-| `upper_90` | DOUBLE | Upper 90% prediction interval bound |
-| `model_name` | VARCHAR | Model used for this forecast |
-
-**Example:**
-```sql
--- Create splits
-CREATE TABLE cv_splits AS
-SELECT * FROM ts_cv_split_by('sales', store_id, date, revenue,
-    ['2024-01-10'::DATE, '2024-01-15'::DATE], 5, '1d', MAP{});
-
--- Generate forecasts (use same column names as cv_splits)
-SELECT * FROM ts_cv_forecast_by(
-    'cv_splits',
-    store_id, date, revenue,
-    'AutoETS', 5, MAP{}, '1d'
-);
--- Output columns: fold_id, store_id, forecast_step, date, point_forecast, lower_90, upper_90, model_name
-```
-
----
-
 ## Advanced: CV Data Hydration
 
-> These functions are for building custom cross-validation pipelines.
-> For standard backtesting, use `ts_backtest_auto_by` which handles everything automatically.
+> These functions are for building custom cross-validation pipelines with regression models or external forecasters.
 
-When building custom CV pipelines (e.g., with regression models or external forecasters), you need to join CV splits back to your source data. These functions prevent **data leakage** by automatically masking features that wouldn't be known at prediction time.
+When building custom CV pipelines, you need to join CV splits back to your source data. These functions prevent **data leakage** by automatically masking features that wouldn't be known at prediction time.
 
 ### The Data Leakage Problem
 

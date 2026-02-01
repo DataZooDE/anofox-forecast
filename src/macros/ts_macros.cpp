@@ -509,16 +509,19 @@ SELECT * FROM _ts_forecast_native(
 )"},
 
     // ts_cv_forecast_by: Generate forecasts for CV splits with parallel fold execution
-    // C++ API: ts_cv_forecast_by(cv_splits, group_col, date_col, target_col, method, horizon, params, frequency)
+    // C++ API: ts_cv_forecast_by(ml_folds, group_col, date_col, target_col, method, horizon, params)
     // Processes all folds in parallel using DuckDB's vectorization
-    // cv_splits should be output from ts_cv_split filtered to split='train'
+    //
+    // IMPORTANT: ml_folds should be output from ts_ml_folds_by containing BOTH train and test rows.
+    // The function trains on 'train' rows and matches forecasts to existing 'test' row dates.
+    // No frequency parameter needed - dates come from the input data.
+    //
     // Uses native streaming implementation to avoid LIST() memory issues
-    {"ts_cv_forecast_by", {"cv_splits", "group_col", "date_col", "target_col", "method", "horizon", nullptr}, {{"params", "MAP{}"}, {"frequency", "'1d'"}, {nullptr, nullptr}},
+    {"ts_cv_forecast_by", {"ml_folds", "group_col", "date_col", "target_col", "method", "horizon", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_cv_forecast_native(
-    (SELECT fold_id, group_col, date_col, target_col FROM query_table(cv_splits::VARCHAR)),
+    (SELECT fold_id, split, group_col, date_col, target_col FROM query_table(ml_folds::VARCHAR)),
     horizon,
-    frequency,
     method,
     params
 )
@@ -1324,45 +1327,6 @@ SELECT * FROM _ts_ml_folds_native(
     horizon,
     params
 )
-)"},
-
-    // ts_backtest_auto_by: One-liner backtest combining fold generation, splitting, forecasting, and evaluation
-    // C++ API: ts_backtest_auto_by(source, group_col, date_col, target_col, horizon, folds, frequency, params, features, metric)
-    //
-    // This macro is a thin wrapper around the native streaming implementation (_ts_backtest_native)
-    // which uses 60x less memory than the previous SQL macro approach.
-    //
-    // params accepts both MAP{'key': 'value'} and STRUCT {'key': value} syntax (GH#95)
-    // STRUCT allows mixed types: {'method': 'Naive', 'gap': 2, 'clip_horizon': true}
-    // params supports:
-    //   method (VARCHAR, default 'AutoETS') - model to use for forecasting
-    //     Univariate models: 'AutoETS', 'ARIMA', 'AutoARIMA', 'Naive', 'SeasonalNaive', 'Theta', 'SES', 'Holt', 'DampedHolt'
-    //   gap (BIGINT) - periods between train end and test start (default 0)
-    //   embargo (BIGINT) - periods to exclude from training after previous fold's test (default 0)
-    //   window_type ('expanding', 'fixed', 'sliding') - training window strategy (default 'expanding')
-    //   initial_train_size (BIGINT) - initial training periods before first fold
-    //   skip_length (BIGINT) - periods between folds (default: horizon). Use 1 for dense overlapping folds.
-    //   clip_horizon (BOOLEAN) - if true, allow partial test windows clipped to available data (default: false)
-    // features: Reserved for future use (currently ignored)
-    // metric: VARCHAR for fold-level metric calculation (default 'rmse')
-    //   Point metrics: 'rmse', 'mae', 'mape', 'mse', 'smape', 'bias', 'r2'
-    //   Interval metrics: 'coverage' (uses lower_90/upper_90 prediction intervals)
-    // Returns: fold_id, <original_group_col>, <original_date_col>, forecast, actual, error, abs_error, lower_90, upper_90, model_name, fold_metric_score
-    {"ts_backtest_auto_by", {"source", "group_col", "date_col", "target_col", "horizon", "folds", "frequency", nullptr}, {{"params", "MAP{}"}, {"features", "NULL"}, {"metric", "'rmse'"}, {nullptr, nullptr}},
-R"(
-SELECT * FROM _ts_backtest_native(
-    (SELECT
-        group_col,
-        date_col,
-        target_col::DOUBLE AS y
-    FROM query_table(source::VARCHAR)),
-    horizon,
-    folds,
-    frequency,
-    params,
-    metric
-)
-ORDER BY 1, 2, 3
 )"},
 
     // ts_prepare_regression_input_by: Prepare data for regression models in CV backtest
