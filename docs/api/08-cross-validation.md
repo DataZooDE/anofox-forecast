@@ -72,7 +72,7 @@ SELECT * FROM ts_mae_by('cv_forecasts', fold_id, ds, y, forecast);
 
 Create train/test splits for ML model backtesting in a single function call.
 
-This function combines fold boundary generation and train/test splitting, suitable for ML model backtesting. Unlike using `ts_cv_generate_folds` + `ts_cv_split_by` separately, this function avoids DuckDB's subquery limitation and provides a simpler API.
+This function combines fold boundary generation and train/test splitting, suitable for ML model backtesting. Unlike `ts_cv_split_by` which requires pre-computed training cutoff dates, this function automatically computes fold boundaries from the data.
 
 **Signature:**
 ```sql
@@ -220,33 +220,6 @@ SELECT * FROM ts_cv_forecast_by('folds', unique_id, ds, y, 'Naive', 6, MAP{});
 SELECT * FROM ts_rmse_by('cv_results', fold_id, ds, y, forecast);
 SELECT * FROM ts_mae_by('cv_results', fold_id, ds, y, forecast);
 SELECT * FROM ts_mape_by('cv_results', fold_id, ds, y, forecast);
-```
-
----
-
-### ts_cv_generate_folds
-
-Automatically generate fold boundaries based on data range.
-
-**Signature:**
-```sql
-ts_cv_generate_folds(
-    source TABLE or VARCHAR,  -- Source table or table name
-    date_col COLUMN,          -- Date column (unquoted identifier)
-    n_folds BIGINT,
-    horizon BIGINT,
-    params MAP                -- Optional: {initial_train_size, skip_length, clip_horizon}
-) → TABLE(training_end_times DATE[] or TIMESTAMP[])
-```
-
-> **Important:** Assumes pre-cleaned data with no gaps. Use `ts_fill_gaps_by` first if your data has missing dates.
-> Uses position-based indexing internally, so no frequency parameter is needed.
-
-**Example:**
-```sql
-SELECT training_end_times
-FROM ts_cv_generate_folds('sales_data', date, 3, 5, MAP{});
--- Returns: ['2024-01-15', '2024-01-20', '2024-01-25'] (preserves original date type)
 ```
 
 ---

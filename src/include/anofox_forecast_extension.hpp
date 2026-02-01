@@ -112,7 +112,6 @@ void RegisterTsBacktestNativeFunction(ExtensionLoader &loader);
 void RegisterTsForecastNativeFunction(ExtensionLoader &loader);
 void RegisterTsCvSplitNativeFunction(ExtensionLoader &loader);
 void RegisterTsCvForecastNativeFunction(ExtensionLoader &loader);
-void RegisterTsCvGenerateFoldsNativeFunction(ExtensionLoader &loader);
 void RegisterTsCvFoldsNativeFunction(ExtensionLoader &loader);
 void RegisterTsMstlDecompositionNativeFunction(ExtensionLoader &loader);
 void RegisterTsFeaturesNativeFunction(ExtensionLoader &loader);

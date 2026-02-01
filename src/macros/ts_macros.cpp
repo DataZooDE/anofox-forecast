@@ -1279,27 +1279,6 @@ FROM stats
 LIMIT 1
 )"},
 
-    // ts_cv_generate_folds: Generate training end times automatically based on data range
-    // C++ API: ts_cv_generate_folds(source, date_col, n_folds, horizon, params)
-    //
-    // IMPORTANT: Assumes pre-cleaned data with no gaps. Use ts_fill_gaps_by first if needed.
-    // Uses position-based indexing (not date arithmetic) - works correctly with all frequencies.
-    //
-    // params MAP supports:
-    //   initial_train_size (BIGINT, default: n_dates - n_folds * horizon) - periods before first fold
-    //   skip_length (BIGINT, default: horizon) - periods between folds (1=dense, horizon=default)
-    //   clip_horizon (BOOLEAN, default: false) - if true, allow folds with partial test windows
-    // Returns: LIST of training end dates (preserves original date type)
-    {"ts_cv_generate_folds", {"source", "date_col", "n_folds", "horizon", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
-R"(
-SELECT * FROM _ts_cv_generate_folds_native(
-    (SELECT date_col FROM query_table(source::VARCHAR)),
-    n_folds,
-    horizon,
-    params
-)
-)"},
-
     // ts_cv_folds_by: Create train/test splits for ML model backtesting
     // C++ API: ts_cv_folds_by(source, group_col, date_col, target_col, n_folds, horizon, params)
     //

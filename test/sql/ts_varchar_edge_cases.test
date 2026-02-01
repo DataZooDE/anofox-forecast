@@ -101,36 +101,7 @@ SELECT COUNT(*) > 0 FROM ts_backtest_auto_by(
 true
 
 #######################################
-# Bug 5: ts_cv_generate_folds with various parameter types
-#######################################
-
-# Create simple date range data
-statement ok
-CREATE TABLE fold_data AS
-SELECT
-    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
-    (i * 1.0)::VARCHAR AS y
-FROM generate_series(0, 99) AS t(i);
-
-# ts_cv_generate_folds with integer horizon
-query I
-SELECT len(training_end_times) FROM ts_cv_generate_folds(
-    'fold_data', ds, 3, 7, '1d', MAP {}
-);
-----
-3
-
-# ts_cv_generate_folds with params containing string values
-query I
-SELECT len(training_end_times) >= 1 FROM ts_cv_generate_folds(
-    'fold_data', ds, 3, 7, '1d',
-    MAP {'initial_train_size': '30', 'skip_length': '7'}
-);
-----
-true
-
-#######################################
-# Bug 6: ts_forecast_exog with VARCHAR columns
+# Bug 5: ts_forecast_exog with VARCHAR columns
 # Note: ts_forecast_exog tests are in ts_forecast_exog.test which handles json dependency
 # The fix (LIST(target_col::DOUBLE ...)) is covered by ts_forecast_exog.test
 #######################################

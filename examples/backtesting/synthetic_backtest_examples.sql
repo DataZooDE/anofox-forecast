@@ -219,16 +219,10 @@ ORDER BY fold_id;
 SELECT
     '=== Pattern 4: Composable Pipeline ===' AS section;
 
--- Step 1: Define fold boundaries (metadata only)
+-- Step 1: Define fold boundaries (explicit dates for full control)
+-- For automatic fold generation, use ts_cv_folds_by instead
 CREATE OR REPLACE TABLE fold_meta AS
-SELECT * FROM ts_cv_generate_folds(
-    'sales_data',           -- source table
-    date,                   -- date column
-    3,                      -- n_folds
-    7,                      -- horizon
-    '1d',                   -- frequency
-    {'gap': '1'}         -- params
-);
+SELECT ['2024-01-22'::DATE, '2024-01-29'::DATE, '2024-02-05'::DATE] AS training_end_times;
 
 SELECT 'Fold cutoff dates:' AS step;
 SELECT * FROM fold_meta;

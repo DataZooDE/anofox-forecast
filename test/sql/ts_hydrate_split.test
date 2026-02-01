@@ -22,16 +22,11 @@ FROM generate_series(1, 24) AS t(i)
 CROSS JOIN (SELECT 'A' AS category UNION ALL SELECT 'B') AS c;
 
 statement ok
-CREATE TABLE cv_fold_times AS
-SELECT training_end_times
-FROM ts_cv_generate_folds('backtest_sample', date, 3, 3, '1mo', MAP{});
-
-statement ok
 CREATE TABLE cv_splits AS
 SELECT *
 FROM ts_cv_split_by(
     'backtest_sample', category, date, sales,
-    (SELECT training_end_times FROM cv_fold_times), 3, '1mo', MAP{}
+    ['2022-12-01'::DATE, '2023-03-01'::DATE, '2023-06-01'::DATE], 3, '1mo', MAP{}
 );
 
 #######################################

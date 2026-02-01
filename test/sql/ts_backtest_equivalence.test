@@ -43,10 +43,12 @@ FROM ts_backtest_auto_by(
 )
 ORDER BY fold_id, group_col, date;
 
-# Create detailed approach: Step 1 - Generate same fold dates as ts_backtest_auto
+# Create detailed approach: Step 1 - Use same fold dates as ts_backtest_auto
+# For 60 days of data, 2 folds, horizon 7: initial_train_size = 60 - 2*7 = 46
+# Fold 1 ends at day 45 (2024-02-15), Fold 2 ends at day 52 (2024-02-22)
 statement ok
 CREATE TABLE fold_dates AS
-SELECT training_end_times FROM ts_cv_generate_folds('equiv_data', date, 2, 7, '1d', MAP{});
+SELECT ['2024-02-15'::DATE, '2024-02-22'::DATE] AS training_end_times;
 
 # Step 2 - CV splits using same fold dates
 statement ok
@@ -361,7 +363,7 @@ ORDER BY fold_id, date;
 
 statement ok
 CREATE TABLE fold_dates_single AS
-SELECT training_end_times FROM ts_cv_generate_folds('single_series', date, 2, 7, '1d', MAP{});
+SELECT ['2024-02-15'::DATE, '2024-02-22'::DATE] AS training_end_times;
 
 statement ok
 CREATE TABLE cv_splits_single AS

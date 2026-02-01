@@ -81,7 +81,7 @@ SELECT * FROM ts_backtest_auto_by(
 **Use case:** Need full control for debugging or custom transformations.
 
 **Steps:**
-1. `ts_cv_generate_folds` - Generate fold cutoff dates
+1. Define explicit fold cutoff dates (or use `ts_cv_folds_by` for automatic generation)
 2. `ts_cv_split` - Create train/test splits
 3. Filter to training data
 4. `ts_cv_forecast_by` - Run forecasts in parallel
