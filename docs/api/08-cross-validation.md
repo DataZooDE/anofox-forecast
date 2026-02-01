@@ -46,15 +46,12 @@ CREATE TABLE cv_folds AS
 SELECT * FROM ts_ml_folds_by('data', unique_id, ds, y, 3, 12, MAP{});
 
 -- Step 2: Generate forecasts (matches to existing test dates)
+CREATE TABLE cv_forecasts AS
 SELECT * FROM ts_cv_forecast_by('cv_folds', unique_id, ds, y, 'Naive', 12, MAP{});
 
--- Step 3: Compute metrics
-SELECT
-    fold_id,
-    ts_rmse(LIST(y), LIST(forecast)) AS rmse,
-    ts_mae(LIST(y), LIST(forecast)) AS mae
-FROM ts_cv_forecast_by('cv_folds', unique_id, ds, y, 'Naive', 12, MAP{})
-GROUP BY fold_id;
+-- Step 3: Compute metrics per fold
+SELECT * FROM ts_rmse_by('cv_forecasts', fold_id, ds, y, forecast);
+SELECT * FROM ts_mae_by('cv_forecasts', fold_id, ds, y, forecast);
 ```
 
 **Key insight:** `ts_ml_folds_by` outputs both train AND test rows with their actual dates, so `ts_cv_forecast_by` doesn't need to generate dates.
@@ -216,17 +213,13 @@ CREATE TABLE folds AS
 SELECT * FROM ts_ml_folds_by('data', unique_id, ds, y, 3, 6, MAP{});
 
 -- Step 2: Generate forecasts
-SELECT fold_id, ds, y AS actual, forecast
-FROM ts_cv_forecast_by('folds', unique_id, ds, y, 'Naive', 6, MAP{});
+CREATE TABLE cv_results AS
+SELECT * FROM ts_cv_forecast_by('folds', unique_id, ds, y, 'Naive', 6, MAP{});
 
--- Step 3: Compute aggregate metrics
-SELECT
-    fold_id,
-    ts_rmse(LIST(y), LIST(forecast)) AS rmse,
-    ts_mae(LIST(y), LIST(forecast)) AS mae,
-    ts_mape(LIST(y), LIST(forecast)) AS mape
-FROM ts_cv_forecast_by('folds', unique_id, ds, y, 'Naive', 6, MAP{})
-GROUP BY fold_id;
+-- Step 3: Compute metrics per fold
+SELECT * FROM ts_rmse_by('cv_results', fold_id, ds, y, forecast);
+SELECT * FROM ts_mae_by('cv_results', fold_id, ds, y, forecast);
+SELECT * FROM ts_mape_by('cv_results', fold_id, ds, y, forecast);
 ```
 
 ---
