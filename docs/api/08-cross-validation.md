@@ -162,16 +162,18 @@ SELECT * FROM ts_hydrate_split_full_by(
 
 ### ts_cv_forecast_by
 
-Generate forecasts for pre-computed cross-validation folds. **Use this with output from `ts_cv_folds_by`.**
+Generate **univariate** forecasts for pre-computed cross-validation folds. **Use this with output from `ts_cv_folds_by`.**
+
+> **Univariate only:** This function forecasts using only the target column history. It does not support exogenous variables or feature columns. For models with features, use `ts_prepare_regression_input_by` with your own regression model.
 
 **Signature:**
 ```sql
 ts_cv_forecast_by(
-    ml_folds VARCHAR,         -- Output from ts_cv_folds_by
+    ml_folds VARCHAR,         -- Output from ts_cv_folds_by or ts_cv_split_by
     group_col COLUMN,         -- Group column
     date_col COLUMN,          -- Date column
-    target_col COLUMN,        -- Target column (usually 'y' from ts_cv_folds_by)
-    method VARCHAR,           -- Forecast method
+    target_col COLUMN,        -- Target column (original name preserved)
+    method VARCHAR,           -- Forecast method (e.g., 'Naive', 'AutoETS', 'AutoARIMA')
     horizon BIGINT,           -- Forecast horizon
     params MAP = {}           -- Model parameters
 ) → TABLE
@@ -205,7 +207,6 @@ Returns the test rows with forecast columns added:
 - **Date preservation**: Original date values are preserved (no date generation)
 - **Position-based matching**: 1st forecast → 1st test row, 2nd forecast → 2nd test row, etc.
 
-> **Note on Features:** `ts_cv_forecast_by` uses only the target column for univariate forecasting. For regression models that use features, use `ts_cv_split_by` with `ts_prepare_regression_input_by` (see below).
 
 **Example:**
 
