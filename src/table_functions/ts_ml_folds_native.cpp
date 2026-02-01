@@ -222,6 +222,66 @@ static bool ParseBoolParamMl(const Value &params, const string &key, bool defaul
 }
 
 // ============================================================================
+// Parameter Validation
+// ============================================================================
+
+static const std::set<string> VALID_PARAMS = {
+    "gap", "embargo", "window_type", "min_train_size",
+    "initial_train_size", "skip_length", "clip_horizon"
+};
+
+static void ValidateParams(const Value &params) {
+    if (params.IsNull()) return;
+
+    vector<string> provided_keys;
+    vector<string> unknown_keys;
+
+    if (params.type().id() == LogicalTypeId::MAP) {
+        auto &map_children = MapValue::GetChildren(params);
+        for (auto &child : map_children) {
+            auto &kv = StructValue::GetChildren(child);
+            if (kv.size() >= 2 && !kv[0].IsNull()) {
+                auto key = kv[0].ToString();
+                StringUtil::Trim(key);
+                provided_keys.push_back(key);
+                if (VALID_PARAMS.find(StringUtil::Lower(key)) == VALID_PARAMS.end()) {
+                    unknown_keys.push_back(key);
+                }
+            }
+        }
+    } else if (params.type().id() == LogicalTypeId::STRUCT) {
+        auto &struct_type = StructType::GetChildTypes(params.type());
+        for (idx_t i = 0; i < struct_type.size(); i++) {
+            auto key = struct_type[i].first;
+            StringUtil::Trim(key);
+            provided_keys.push_back(key);
+            if (VALID_PARAMS.find(StringUtil::Lower(key)) == VALID_PARAMS.end()) {
+                unknown_keys.push_back(key);
+            }
+        }
+    }
+
+    if (!unknown_keys.empty()) {
+        string unknown_list;
+        for (size_t i = 0; i < unknown_keys.size(); i++) {
+            if (i > 0) unknown_list += ", ";
+            unknown_list += "'" + unknown_keys[i] + "'";
+        }
+        throw InvalidInputException(
+            "ts_ml_folds_by: Unknown parameter(s): %s\n\n"
+            "Available parameters:\n"
+            "  - gap (BIGINT, default 0): Periods between train end and test start\n"
+            "  - embargo (BIGINT, default 0): Periods to exclude from training after previous test\n"
+            "  - window_type (VARCHAR, default 'expanding'): 'expanding', 'fixed', or 'sliding'\n"
+            "  - min_train_size (BIGINT, default 1): Minimum training size for fixed/sliding windows\n"
+            "  - initial_train_size (BIGINT, default auto): Periods before first fold\n"
+            "  - skip_length (BIGINT, default horizon): Periods between folds\n"
+            "  - clip_horizon (BOOLEAN, default false): Allow partial test windows",
+            unknown_list.c_str());
+    }
+}
+
+// ============================================================================
 // Bind Function
 // ============================================================================
 
@@ -269,6 +329,10 @@ static unique_ptr<FunctionData> TsMlFoldsBind(
     // Parse optional params MAP (index 3)
     if (input.inputs.size() >= 4 && !input.inputs[3].IsNull()) {
         auto &params = input.inputs[3];
+
+        // Validate parameter names first
+        ValidateParams(params);
+
         bind_data->initial_train_size = ParseInt64ParamMl(params, "initial_train_size", -1);
         bind_data->skip_length = ParseInt64ParamMl(params, "skip_length", -1);
         bind_data->clip_horizon = ParseBoolParamMl(params, "clip_horizon", false);

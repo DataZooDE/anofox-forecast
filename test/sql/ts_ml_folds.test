@@ -600,6 +600,26 @@ ORDER BY fold_id, split;
 # Default Parameter Behavior Tests
 #######################################
 
+#######################################
+# Parameter Validation Tests
+#######################################
+
+# Test that unknown parameters throw informative error
+statement error
+SELECT * FROM ts_ml_folds_by('test_data_10', series_id, ds, y, 1, 3, {'min_training_size': 12});
+----
+Unknown parameter
+
+# Test multiple unknown parameters
+statement error
+SELECT * FROM ts_ml_folds_by('test_data_10', series_id, ds, y, 1, 3, {'foo': 1, 'bar': 2});
+----
+Unknown parameter
+
+#######################################
+# Default Parameter Behavior Tests
+#######################################
+
 # Test default skip_length equals horizon
 query IIII
 WITH explicit AS (
