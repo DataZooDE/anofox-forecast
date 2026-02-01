@@ -54,8 +54,6 @@ SELECT * FROM ts_rmse_by('cv_forecasts', fold_id, ds, y, forecast);
 SELECT * FROM ts_mae_by('cv_forecasts', fold_id, ds, y, forecast);
 ```
 
-**Key insight:** `ts_cv_folds_by` outputs both train AND test rows with their actual dates, so `ts_cv_forecast_by` doesn't need to generate dates.
-
 ### Usage Pattern Comparison
 
 | Pattern | Use Case | Complexity |
