@@ -109,12 +109,11 @@ ts_cv_folds_by(
 |--------|------|-------------|
 | `<group_col>` | (same as input) | Series identifier (preserves original column name) |
 | `<date_col>` | (same as input) | Date/timestamp (preserves original column name and type) |
-| `y` | DOUBLE | Target value |
+| `<target_col>` | DOUBLE | Target value (preserves original column name) |
 | `fold_id` | BIGINT | Fold number (1, 2, 3, ...) |
 | `split` | VARCHAR | `'train'` or `'test'` |
-| `<feature_cols...>` | (same as input) | All other columns from source table |
 
-> **Feature Pass-Through:** All columns in the source table (except group, date, and target) are automatically passed through as features. Column names and types are preserved. Features are correctly associated with each row through the fold assignment process.
+> **Note:** Output contains exactly 5 columns. Features are not passed through. Use hydration functions (`ts_hydrate_split_full_by`, `ts_prepare_regression_input_by`) to join features from the source table when needed.
 
 **Examples:**
 ```sql
@@ -142,16 +141,21 @@ SELECT * FROM ts_cv_folds_by(
     10, 3, {'skip_length': 1}
 );
 
--- With feature columns (all non-group/date/target columns pass through)
-CREATE TABLE sales_features AS
-SELECT store_id, date, revenue, temperature, promo_flag, day_of_week
-FROM sales_data;
-
+-- Output preserves original column names
 SELECT * FROM ts_cv_folds_by(
-    'sales_features', store_id, date, revenue,
+    'sales_data', store_id, date, revenue,
     3, 6, MAP{}
 );
--- Output: store_id, date, y, fold_id, split, temperature, promo_flag, day_of_week
+-- Output: store_id, date, revenue, fold_id, split
+
+-- To add features, use hydration functions after creating folds
+CREATE TABLE folds AS
+SELECT * FROM ts_cv_folds_by('sales_data', store_id, date, revenue, 3, 6, MAP{});
+
+SELECT * FROM ts_hydrate_split_full_by(
+    'folds', 'sales_data', store_id, date, MAP{}
+);
+-- Output: fold_id, split, _is_test, _train_cutoff, store_id, date, revenue, temperature, ...
 ```
 
 ---
@@ -178,7 +182,7 @@ ts_cv_forecast_by(
 The input table must be the output of `ts_cv_folds_by` containing:
 - `fold_id`: Fold identifier
 - `split`: 'train' or 'test'
-- Group, date, and target columns
+- Group, date, and target columns (original names preserved)
 
 **Output:**
 
@@ -188,7 +192,7 @@ Returns the test rows with forecast columns added:
 | `fold_id` | BIGINT | Fold number |
 | `<group_col>` | (same as input) | Series identifier |
 | `<date_col>` | (same as input) | Forecast date |
-| `y` | DOUBLE | Actual value from test data |
+| `<target_col>` | DOUBLE | Actual value from test data (original name preserved) |
 | `split` | VARCHAR | Always 'test' |
 | `forecast` | DOUBLE | Point forecast |
 | `lower_90` | DOUBLE | Lower 90% prediction interval |
@@ -201,7 +205,7 @@ Returns the test rows with forecast columns added:
 - **Date preservation**: Original date values are preserved (no date generation)
 - **Position-based matching**: 1st forecast → 1st test row, 2nd forecast → 2nd test row, etc.
 
-> **Note on Features:** `ts_cv_forecast_by` uses only the target column (`y`) for univariate forecasting. Feature columns from `ts_cv_folds_by` are ignored by the forecaster. For regression models that use features, use `ts_cv_split_by` with `ts_prepare_regression_input_by` (see below).
+> **Note on Features:** `ts_cv_forecast_by` uses only the target column for univariate forecasting. For regression models that use features, use `ts_cv_split_by` with `ts_prepare_regression_input_by` (see below).
 
 **Example:**
 
@@ -227,11 +231,11 @@ SELECT * FROM ts_mape_by('cv_results', fold_id, ds, y, forecast);
 > These functions work with `ts_cv_split_by` output to build custom cross-validation pipelines with regression models or external forecasters.
 
 **When to use these functions:**
-- You're using `ts_cv_split_by` (which outputs only group, date, target columns - no features)
+- You're using `ts_cv_split_by` or `ts_cv_folds_by` and need to add feature columns
 - You need to join features back from your source table
 - You want to mask unknown features in test rows to prevent data leakage
 
-**Not needed if:** You're using `ts_cv_folds_by`, which already passes through all feature columns.
+> **Note:** Both `ts_cv_split_by` and `ts_cv_folds_by` output the same schema (group, date, target, fold_id, split). Use hydration functions to add feature columns from the source table.
 
 ### Workflow with ts_cv_split_by
 
@@ -436,10 +440,11 @@ Automatically hydrate CV splits with features, marking test rows for masking.
 **Signature:**
 ```sql
 ts_hydrate_features_by(
-    cv_splits VARCHAR,        -- Output from ts_cv_split
+    cv_splits VARCHAR,        -- Output from ts_cv_split_by or ts_cv_folds_by
     source VARCHAR,           -- Original data with features
     src_group_col COLUMN,
     src_date_col COLUMN,
+    target_col COLUMN,        -- Target column in cv_splits
     params MAP
 ) → TABLE
 ```
@@ -453,7 +458,7 @@ SELECT
     *,
     CASE WHEN _is_test THEN NULL ELSE temperature END AS temp_masked,
     CASE WHEN _is_test THEN NULL ELSE competitor_sales END AS comp_masked
-FROM ts_hydrate_features_by('cv_splits', 'feature_data', series_id, date, MAP{});
+FROM ts_hydrate_features_by('cv_splits', 'feature_data', series_id, date, revenue, MAP{});
 ```
 
 ---

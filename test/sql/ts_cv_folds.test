@@ -100,9 +100,9 @@ FROM (VALUES
     ('2023-04-01', 4), ('2023-05-01', 5), ('2023-06-01', 6)
 ) AS t(d, i);
 
-# Test that original column names are preserved
+# Test that original column names are preserved (including target column name)
 query IIIII
-SELECT my_group, my_date, y, fold_id, split
+SELECT my_group, my_date, my_value, fold_id, split
 FROM ts_cv_folds_by('test_named_cols', my_group, my_date, my_value, 1, 2, MAP{})
 ORDER BY fold_id, split DESC, my_date
 LIMIT 6;
@@ -113,6 +113,30 @@ A	2023-03-01	3.0	1	train
 A	2023-04-01	4.0	1	train
 A	2023-05-01	5.0	1	test
 A	2023-06-01	6.0	1	test
+
+# Test: Original target column name preserved (not 'y')
+query I
+SELECT COUNT(*) FROM (
+    DESCRIBE SELECT * FROM ts_cv_folds_by('test_named_cols', my_group, my_date, my_value, 1, 2, MAP{})
+) WHERE column_name = 'my_value';
+----
+1
+
+# Test: No 'y' column when target has different name
+query I
+SELECT COUNT(*) FROM (
+    DESCRIBE SELECT * FROM ts_cv_folds_by('test_named_cols', my_group, my_date, my_value, 1, 2, MAP{})
+) WHERE column_name = 'y';
+----
+0
+
+# Test: Exactly 5 columns (group, date, target, fold_id, split - no features)
+query I
+SELECT COUNT(*) FROM (
+    DESCRIBE SELECT * FROM ts_cv_folds_by('test_named_cols', my_group, my_date, my_value, 1, 2, MAP{})
+);
+----
+5
 
 #######################################
 # initial_train_size Parameter Tests
@@ -802,8 +826,11 @@ ORDER BY e.fold_id, e.split;
 2	train	MATCH	1
 
 #######################################
-# Feature Pass-Through Tests
+# Feature Handling Tests (Features NOT Passed Through)
 #######################################
+
+# ts_cv_folds_by outputs only 5 columns: group, date, target, fold_id, split
+# Features should be hydrated separately using ts_hydrate_split_full_by or similar
 
 statement ok
 CREATE TEMP TABLE feature_data AS
@@ -816,76 +843,35 @@ SELECT
     'category_' || (i % 3) AS category
 FROM generate_series(1, 24) AS t(i);
 
-# Test features are passed through
+# Test: No feature columns in output (only 5 columns)
 query I
-SELECT COUNT(DISTINCT temperature) > 1 FROM ts_cv_folds_by(
-    'feature_data', series_id, ds, y, 2, 4, MAP{}
+SELECT COUNT(*) FROM (
+    DESCRIBE SELECT * FROM ts_cv_folds_by('feature_data', series_id, ds, y, 2, 4, MAP{})
 );
 ----
-true
+5
 
-# Test all feature columns present in output
+# Test: Feature columns NOT present in output
 query I
 SELECT COUNT(*) FROM (
     DESCRIBE SELECT * FROM ts_cv_folds_by('feature_data', series_id, ds, y, 2, 4, MAP{})
 ) WHERE column_name IN ('temperature', 'promo_flag', 'category');
 ----
-3
-
-# Test feature values match original data
-query I
-WITH folds AS (
-    SELECT * FROM ts_cv_folds_by('feature_data', series_id, ds, y, 2, 4, MAP{})
-)
-SELECT COUNT(*) FROM folds f
-JOIN feature_data d ON f.series_id = d.series_id AND f.ds = d.ds
-WHERE f.temperature != d.temperature OR f.promo_flag != d.promo_flag;
-----
 0
 
-# Test feature types preserved
+# Test: Basic functionality still works with tables that have extra columns
 query III
-SELECT typeof(temperature), typeof(promo_flag), typeof(category)
+SELECT fold_id, split, COUNT(*) AS cnt
 FROM ts_cv_folds_by('feature_data', series_id, ds, y, 2, 4, MAP{})
-LIMIT 1;
-----
-DOUBLE	BIGINT	VARCHAR
-
-# Test features work with multiple groups
-statement ok
-CREATE TEMP TABLE multi_group_features AS
-SELECT
-    CASE WHEN i <= 15 THEN 'A' ELSE 'B' END AS series_id,
-    CAST(CASE WHEN i <= 15 THEN i ELSE i - 15 END AS INTEGER) AS ds,
-    CAST(i AS DOUBLE) AS y,
-    CAST(i * 2.0 AS DOUBLE) AS feature1,
-    i % 3 AS feature2
-FROM generate_series(1, 30) AS t(i);
-
-query IIII
-SELECT series_id, fold_id, split, COUNT(DISTINCT feature1) > 0 AS has_features
-FROM ts_cv_folds_by('multi_group_features', series_id, ds, y, 1, 3, MAP{})
-GROUP BY series_id, fold_id, split
-ORDER BY series_id, fold_id, split;
-----
-A	1	test	true
-A	1	train	true
-B	1	test	true
-B	1	train	true
-
-# Test features work with window_type=fixed
-query III
-SELECT fold_id, split, COUNT(DISTINCT temperature) > 0 AS has_temp
-FROM ts_cv_folds_by('feature_data', series_id, ds, y, 2, 4, {'window_type': 'fixed', 'min_train_size': 8})
 GROUP BY fold_id, split
 ORDER BY fold_id, split;
 ----
-1	test	true
-1	train	true
-2	test	true
-2	train	true
+1	test	4
+1	train	16
+2	test	4
+2	train	20
 
-# Test no features (original behavior still works)
+# Test: Table without extra columns still works
 statement ok
 CREATE TEMP TABLE no_features AS
 SELECT 'A' AS series_id, CAST(i AS INTEGER) AS ds, CAST(i AS DOUBLE) AS y
@@ -904,9 +890,6 @@ ORDER BY fold_id, split;
 
 statement ok
 DROP TABLE feature_data;
-
-statement ok
-DROP TABLE multi_group_features;
 
 statement ok
 DROP TABLE no_features;

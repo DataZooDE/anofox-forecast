@@ -1069,8 +1069,8 @@ ORDER BY fb.fold_id, s._grp, s._dt
 
     // ts_hydrate_split_by: Safely join cv_splits with source data, masking unknown columns in test set
     // C++ API: ts_hydrate_split_by(cv_splits, source, src_group_col, src_date_col, unknown_col, params)
-    // NOTE: src_group_col and src_date_col are column EXPRESSIONS for the SOURCE table
-    // cv_splits is expected to have standardized columns: group_col, date_col, fold_id, split
+    // NOTE: src_group_col and src_date_col are column EXPRESSIONS used for BOTH cv_splits and source
+    // cv_splits uses same column names as source (original names preserved from ts_cv_split_by/ts_cv_folds_by)
     // params MAP supports: strategy ('null', 'last_value', 'default'), fill_value (DOUBLE, for 'default')
     // This is the SAFE way to join features back to CV splits - prevents data leakage
     {"ts_hydrate_split_by", {"cv_splits", "source", "src_group_col", "src_date_col", "unknown_col", "params", nullptr}, {{nullptr, nullptr}},
@@ -1080,18 +1080,18 @@ WITH _params AS (
         COALESCE(json_extract_string(to_json(params), '$.strategy'), 'null') AS _strategy,
         COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.fill_value') AS DOUBLE), 0.0) AS _fill_value
 ),
--- cv_splits has standardized column names: group_col, date_col, fold_id, split
+-- cv_splits uses original column names (preserved from ts_cv_split_by/ts_cv_folds_by)
 cv AS (
     SELECT
-        "group_col" AS _cv_grp,
-        date_trunc('second', "date_col"::TIMESTAMP) AS _cv_dt,
+        src_group_col AS _cv_grp,
+        date_trunc('second', src_date_col::TIMESTAMP) AS _cv_dt,
         fold_id AS _fold_id,
         split AS _split,
-        MAX(CASE WHEN split = 'train' THEN date_trunc('second', "date_col"::TIMESTAMP) END)
-            OVER (PARTITION BY "group_col", fold_id) AS _train_end
+        MAX(CASE WHEN split = 'train' THEN date_trunc('second', src_date_col::TIMESTAMP) END)
+            OVER (PARTITION BY src_group_col, fold_id) AS _train_end
     FROM query_table(cv_splits::VARCHAR)
 ),
--- source table uses the column expressions passed as arguments
+-- source table uses the same column expressions
 src AS (
     SELECT
         src_group_col AS _src_grp,
@@ -1136,8 +1136,8 @@ ORDER BY cv._fold_id, cv._cv_grp, cv._cv_dt
 
     // ts_hydrate_split_full_by: Join cv_splits with ALL source columns, adding split metadata
     // C++ API: ts_hydrate_split_full_by(cv_splits, source, src_group_col, src_date_col, params)
-    // NOTE: src_group_col and src_date_col are column EXPRESSIONS for the SOURCE table
-    // cv_splits is expected to have standardized columns: group_col, date_col, fold_id, split
+    // NOTE: src_group_col and src_date_col are column EXPRESSIONS used for BOTH cv_splits and source
+    // cv_splits uses same column names as source (original names preserved from ts_cv_split_by/ts_cv_folds_by)
     // Returns all source columns PLUS fold_id, split, and _is_test (boolean for easy masking)
     // Use with pattern: CASE WHEN _is_test THEN NULL ELSE unknown_col END AS unknown_col
     // This provides the SAFE join pattern - prevents accidental direct joins
@@ -1145,13 +1145,13 @@ ORDER BY cv._fold_id, cv._cv_grp, cv._cv_dt
 R"(
 WITH cv AS (
     SELECT
-        "group_col" AS _cv_grp,
-        date_trunc('second', "date_col"::TIMESTAMP) AS _cv_dt,
+        src_group_col AS _cv_grp,
+        date_trunc('second', src_date_col::TIMESTAMP) AS _cv_dt,
         fold_id AS _fold_id,
         split AS _split,
         (split = 'test') AS _is_test,
-        MAX(CASE WHEN split = 'train' THEN date_trunc('second', "date_col"::TIMESTAMP) END)
-            OVER (PARTITION BY "group_col", fold_id) AS _train_cutoff
+        MAX(CASE WHEN split = 'train' THEN date_trunc('second', src_date_col::TIMESTAMP) END)
+            OVER (PARTITION BY src_group_col, fold_id) AS _train_cutoff
     FROM query_table(cv_splits::VARCHAR)
 ),
 src AS (
@@ -1172,26 +1172,26 @@ ORDER BY cv._fold_id, src._src_grp, src._src_dt
 )"},
 
     // ts_hydrate_features_by: Automatically hydrate CV splits with features from source
-    // C++ API: ts_hydrate_features_by(cv_splits, source, src_group_col, src_date_col, params)
-    // cv_splits: Output from ts_cv_split (has group_col, date_col, target_col, fold_id, split)
+    // C++ API: ts_hydrate_features_by(cv_splits, source, src_group_col, src_date_col, target_col, params)
+    // cv_splits: Output from ts_cv_split (has original column names, fold_id, split)
     // source: Original data table with features
-    // src_group_col, src_date_col: Column expressions for source table
+    // src_group_col, src_date_col, target_col: Column expressions for cv_splits and source
     // Returns: fold_id, split, group_col, date_col, target_col, _is_test, _train_cutoff, plus all source columns
     // Use _is_test to mask unknown features: CASE WHEN _is_test THEN NULL ELSE unknown_col END
     // Known features (calendar, promotions): Use directly
     // Unknown features (competitor_sales, actual temperature): Mask with CASE WHEN _is_test
-    {"ts_hydrate_features_by", {"cv_splits", "source", "src_group_col", "src_date_col", "params", nullptr}, {{nullptr, nullptr}},
+    {"ts_hydrate_features_by", {"cv_splits", "source", "src_group_col", "src_date_col", "target_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH cv AS (
     SELECT
-        "group_col" AS _cv_grp,
-        date_trunc('second', "date_col"::TIMESTAMP) AS _cv_dt,
-        "target_col" AS _target,
+        src_group_col AS _cv_grp,
+        date_trunc('second', src_date_col::TIMESTAMP) AS _cv_dt,
+        target_col AS _target,
         fold_id AS _fold_id,
         split AS _split,
         (split = 'test') AS _is_test,
-        MAX(CASE WHEN split = 'train' THEN date_trunc('second', "date_col"::TIMESTAMP) END)
-            OVER (PARTITION BY "group_col", fold_id) AS _train_cutoff
+        MAX(CASE WHEN split = 'train' THEN date_trunc('second', src_date_col::TIMESTAMP) END)
+            OVER (PARTITION BY src_group_col, fold_id) AS _train_cutoff
     FROM query_table(cv_splits::VARCHAR)
     WHERE split IN ('train', 'test')
 ),
@@ -1225,13 +1225,13 @@ ORDER BY cv._fold_id, cv._cv_grp, cv._cv_dt
 R"(
 WITH cv AS (
     SELECT
-        "group_col" AS _cv_grp,
-        date_trunc('second', "date_col"::TIMESTAMP) AS _cv_dt,
+        src_group_col AS _cv_grp,
+        date_trunc('second', src_date_col::TIMESTAMP) AS _cv_dt,
         fold_id AS _fold_id,
         split AS _split,
         (split = 'test') AS _is_test,
-        MAX(CASE WHEN split = 'train' THEN date_trunc('second', "date_col"::TIMESTAMP) END)
-            OVER (PARTITION BY "group_col", fold_id) AS _train_cutoff
+        MAX(CASE WHEN split = 'train' THEN date_trunc('second', src_date_col::TIMESTAMP) END)
+            OVER (PARTITION BY src_group_col, fold_id) AS _train_cutoff
     FROM query_table(cv_splits::VARCHAR)
 ),
 src AS (
@@ -1302,10 +1302,12 @@ LIMIT 1
 R"(
 SELECT * FROM _ts_cv_folds_native(
     (SELECT
-        group_col AS "__ml_grp__",
-        date_col AS "__ml_dt__",
-        target_col::DOUBLE AS "__ml_y__",
-        *
+        group_col AS "__cv_grp__",
+        date_col AS "__cv_dt__",
+        target_col::DOUBLE AS "__cv_y__",
+        group_col,      -- Original name (position 3)
+        date_col,       -- Original name (position 4)
+        target_col      -- Original name (position 5)
      FROM query_table(source::VARCHAR)),
     n_folds,
     horizon,
@@ -1325,8 +1327,8 @@ SELECT * FROM _ts_cv_folds_native(
 R"(
 WITH cv AS (
     SELECT
-        "group_col" AS _cv_grp,
-        date_trunc('second', "date_col"::TIMESTAMP) AS _cv_dt,
+        src_group_col AS _cv_grp,
+        date_trunc('second', src_date_col::TIMESTAMP) AS _cv_dt,
         fold_id AS _fold_id,
         split AS _split,
         (split = 'test') AS _is_test

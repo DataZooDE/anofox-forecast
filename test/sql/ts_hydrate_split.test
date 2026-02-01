@@ -21,19 +21,29 @@ SELECT
 FROM generate_series(1, 24) AS t(i)
 CROSS JOIN (SELECT 'A' AS category UNION ALL SELECT 'B') AS c;
 
+# ts_cv_split_by preserves original column names: category, date, sales, fold_id, split
 statement ok
 CREATE TABLE cv_splits AS
 SELECT *
 FROM ts_cv_split_by(
     'backtest_sample', category, date, sales,
-    ['2022-12-01'::DATE, '2023-03-01'::DATE, '2023-06-01'::DATE], 3, '1mo', MAP{}
+    ['2022-12-01'::DATE, '2023-03-01'::DATE, '2023-06-01'::DATE], 3, MAP{}
 );
+
+# Verify cv_splits has original column names (not group_col, date_col, target_col)
+query I
+SELECT COUNT(*) FROM (
+    DESCRIBE SELECT * FROM cv_splits
+) WHERE column_name IN ('category', 'date', 'sales');
+----
+3
 
 #######################################
 # ts_hydrate_split - NULL Strategy
 #######################################
 
 # Default strategy is null - test rows should have NULL
+# Hydration functions now use original column names
 query II
 SELECT split, unknown_col IS NULL as is_masked FROM ts_hydrate_split_by(
     'cv_splits', 'backtest_sample', category, date, temperature, MAP{}
@@ -226,9 +236,6 @@ ORDER BY split DESC;
 
 statement ok
 DROP TABLE backtest_sample;
-
-statement ok
-DROP TABLE cv_fold_times;
 
 statement ok
 DROP TABLE cv_splits;
