@@ -467,6 +467,15 @@ static OperatorFinalizeResultType TsMlFoldsFinalize(
             idx_t n_points = sorted_indices.size();
             if (n_points < 2) continue;
 
+            // For fixed/sliding windows, check if group has enough data for min_train_size
+            idx_t min_train = static_cast<idx_t>(bind_data.min_train_size);
+            bool is_fixed_window = (bind_data.window_type == "fixed" || bind_data.window_type == "sliding");
+
+            if (is_fixed_window && n_points < min_train) {
+                // Group doesn't have enough data points for minimum training size - skip it
+                continue;
+            }
+
             // Compute initial_train_size
             idx_t init_train_size;
             if (bind_data.initial_train_size > 0) {
@@ -477,6 +486,11 @@ static OperatorFinalizeResultType TsMlFoldsFinalize(
                 idx_t horizon = static_cast<idx_t>(bind_data.horizon);
                 idx_t needed = horizon * folds;
                 init_train_size = (n_points > needed) ? (n_points - needed) : 1;
+            }
+
+            // For fixed/sliding windows, ensure initial_train_size respects min_train_size
+            if (is_fixed_window && init_train_size < min_train) {
+                init_train_size = min_train;
             }
 
             // Compute skip_length
@@ -493,11 +507,23 @@ static OperatorFinalizeResultType TsMlFoldsFinalize(
                 // Training end position (0-indexed, inclusive)
                 idx_t train_end_pos = init_train_size - 1 + fold * skip_length;
 
+                // For fixed/sliding windows, verify we have enough training data
+                idx_t actual_train_size = train_end_pos + 1;  // train from 0 to train_end_pos
+                if (is_fixed_window) {
+                    // For fixed window, train size is min_train_size
+                    actual_train_size = min_train;
+                    // Check if we can fit min_train_size ending at train_end_pos
+                    if (train_end_pos + 1 < min_train) {
+                        // Not enough room for min_train_size - skip this fold
+                        continue;
+                    }
+                }
+
                 // Test start and end positions
                 idx_t test_start_pos = train_end_pos + 1 + gap;
                 idx_t test_end_pos = test_start_pos + horizon - 1;
 
-                // Check if fold is valid
+                // Check if fold is valid (has room for test data)
                 bool valid = bind_data.clip_horizon
                     ? (test_start_pos < n_points)  // At least 1 test point
                     : (test_end_pos < n_points);   // Full horizon fits
