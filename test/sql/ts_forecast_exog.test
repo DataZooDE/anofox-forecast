@@ -130,9 +130,10 @@ MFLESX
 #######################################
 
 # Test with empty exogenous arrays (should still work, falls back to non-exog)
+# Note: AutoARIMA requires 10+ data points when no exogenous variables are provided
 query I
 SELECT length((_ts_forecast_exog(
-    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0],
+    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0, 25.0, 35.0, 30.0, 40.0],
     [],
     [],
     3,
