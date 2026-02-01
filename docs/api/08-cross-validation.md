@@ -222,140 +222,7 @@ SELECT * FROM ts_mape_by('cv_results', fold_id, ds, y, forecast);
 
 ---
 
-### ts_cv_split_folds_by
-
-View fold date ranges (train/test boundaries) for pre-specified training cutoff dates.
-
-**Use Case:** When you need to inspect or visualize the actual date boundaries for each fold before running the full split. Useful for:
-- Verifying fold boundaries align with business periods (quarters, fiscal years)
-- Documentation and reporting
-- Debugging cross-validation setups
-
-**Signature:**
-```sql
-ts_cv_split_folds_by(
-    source VARCHAR,
-    group_col VARCHAR,
-    date_col VARCHAR,
-    training_end_times DATE[],
-    horizon BIGINT,
-    frequency VARCHAR          -- Required for date arithmetic ('1d', '1mo', etc.)
-) → TABLE
-```
-
-**Returns:**
-| Column | Type | Description |
-|--------|------|-------------|
-| `fold_id` | BIGINT | Fold number |
-| `train_start` | TIMESTAMP | Training period start |
-| `train_end` | TIMESTAMP | Training period end |
-| `test_start` | TIMESTAMP | Test period start |
-| `test_end` | TIMESTAMP | Test period end |
-| `horizon` | BIGINT | Test period length |
-
-**Example:**
-```sql
--- View boundaries for quarterly backtests
-SELECT * FROM ts_cv_split_folds_by(
-    'sales_data', 'store_id', 'date',
-    ['2024-03-31'::DATE, '2024-06-30'::DATE, '2024-09-30'::DATE],
-    30, '1d'
-);
-```
-
----
-
-### ts_cv_split_by
-
-Split time series data into train/test sets using explicit training cutoff dates.
-
-**Use Case:** When you need **precise control over fold boundaries** rather than automatic fold generation. Common scenarios:
-- **Fiscal calendar alignment**: Folds must end at quarter/year boundaries
-- **Business events**: Train up to a specific known event date
-- **Regulatory requirements**: Auditable, reproducible fold boundaries
-- **Custom spacing**: Non-uniform spacing between folds (e.g., monthly for recent, quarterly for historical)
-
-For most standard backtesting, prefer `ts_cv_folds_by` which automatically computes fold boundaries.
-
-**Signature:**
-```sql
-ts_cv_split_by(
-    source VARCHAR,           -- Source table name (quoted string)
-    group_col IDENTIFIER,     -- Series grouping column (unquoted)
-    date_col IDENTIFIER,      -- Date/timestamp column (unquoted)
-    target_col IDENTIFIER,    -- Value column (unquoted)
-    training_end_times DATE[],-- Explicit cutoff dates for each fold
-    horizon BIGINT,
-    params MAP
-) → TABLE
-```
-
-**Returns:**
-| Column | Type | Description |
-|--------|------|-------------|
-| `<group_col>` | (same as input) | Series identifier (preserves original column name) |
-| `<date_col>` | (same as input) | Date/timestamp (preserves original column name) |
-| `<target_col>` | (same as input) | Target value (preserves original column name) |
-| `fold_id` | BIGINT | Fold number (1, 2, 3, ...) |
-| `split` | VARCHAR | `'train'` or `'test'` |
-
-**Window Types:**
-```
-Expanding window (default):
-Fold 1: [====TRAIN====][TEST]
-Fold 2: [======TRAIN======][TEST]
-Fold 3: [========TRAIN========][TEST]
-
-Fixed window:
-Fold 1:     [==TRAIN==][TEST]
-Fold 2:         [==TRAIN==][TEST]
-Fold 3:             [==TRAIN==][TEST]
-```
-
-**Example:**
-```sql
--- Quarterly backtests with explicit fiscal quarter end dates
-CREATE TABLE cv_splits AS
-SELECT * FROM ts_cv_split_by(
-    'sales', store_id, date, revenue,
-    ['2024-03-31'::DATE, '2024-06-30'::DATE, '2024-09-30'::DATE],
-    30, MAP{}
-);
--- Output columns: store_id, date, revenue, fold_id, split
-```
-
----
-
-### ts_cv_split_index_by
-
-Memory-efficient alternative returning only index columns (no target values).
-
-**Use Case:** For large datasets where duplicating target values across folds would consume too much memory. Use with hydration functions to join back to source data.
-
-**Signature:**
-```sql
-ts_cv_split_index_by(
-    source VARCHAR,           -- Source table name (quoted string)
-    group_col IDENTIFIER,     -- Series grouping column (unquoted)
-    date_col IDENTIFIER,      -- Date/timestamp column (unquoted)
-    training_end_times DATE[],
-    horizon BIGINT,
-    frequency VARCHAR,
-    params MAP
-) → TABLE
-```
-
-**Returns:**
-| Column | Type | Description |
-|--------|------|-------------|
-| `<group_col>` | (same as input) | Series identifier (preserves original column name) |
-| `<date_col>` | (same as input) | Date/timestamp (preserves original column name) |
-| `fold_id` | BIGINT | Fold number |
-| `split` | VARCHAR | `'train'` or `'test'` |
-
----
-
-## Advanced: CV Data Hydration
+## Regression & ML Model Backtesting
 
 > These functions are for building custom cross-validation pipelines with regression models or external forecasters.
 
@@ -372,6 +239,52 @@ Timeline:    [====== TRAIN ======][=== TEST ===]
 
 Known features:     ✓ Available in both train and test
 Unknown features:   ✓ Available in train, ✗ Must be masked in test
+```
+
+---
+
+### ts_prepare_regression_input_by
+
+Prepare data for regression models in CV backtest. Masks target in test rows.
+
+**Signature:**
+```sql
+ts_prepare_regression_input_by(
+    cv_splits VARCHAR,
+    source VARCHAR,
+    src_group_col COLUMN,
+    src_date_col COLUMN,
+    target_col COLUMN,
+    params MAP
+) → TABLE
+```
+
+**Key Behavior:**
+- **Train rows:** Target keeps original value
+- **Test rows:** Target set to NULL (model will predict these)
+- All features from source are preserved
+
+**Output Columns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | CV fold number |
+| `split` | VARCHAR | `'train'` or `'test'` |
+| `group_col` | ANY | Group identifier |
+| `date_col` | TIMESTAMP | Date |
+| `masked_target` | DOUBLE | NULL in test, actual in train |
+| `_is_test` | BOOLEAN | Test row indicator |
+| *(all source columns)* | | Original features |
+
+**Example:**
+```sql
+-- Prepare data for external regression model
+CREATE TABLE regression_input AS
+SELECT * FROM ts_prepare_regression_input_by(
+    'cv_splits', 'sales_data', store_id, date, revenue, MAP{}
+);
+
+-- Train: Use rows where masked_target IS NOT NULL
+-- Test: Predict rows where masked_target IS NULL
 ```
 
 ---
@@ -515,52 +428,6 @@ FROM ts_hydrate_features_by('cv_splits', 'feature_data', series_id, date, MAP{})
 
 ---
 
-### ts_prepare_regression_input_by
-
-Prepare data for regression models in CV backtest. Masks target in test rows.
-
-**Signature:**
-```sql
-ts_prepare_regression_input_by(
-    cv_splits VARCHAR,
-    source VARCHAR,
-    src_group_col COLUMN,
-    src_date_col COLUMN,
-    target_col COLUMN,
-    params MAP
-) → TABLE
-```
-
-**Key Behavior:**
-- **Train rows:** Target keeps original value
-- **Test rows:** Target set to NULL (model will predict these)
-- All features from source are preserved
-
-**Output Columns:**
-| Column | Type | Description |
-|--------|------|-------------|
-| `fold_id` | BIGINT | CV fold number |
-| `split` | VARCHAR | `'train'` or `'test'` |
-| `group_col` | ANY | Group identifier |
-| `date_col` | TIMESTAMP | Date |
-| `masked_target` | DOUBLE | NULL in test, actual in train |
-| `_is_test` | BOOLEAN | Test row indicator |
-| *(all source columns)* | | Original features |
-
-**Example:**
-```sql
--- Prepare data for external regression model
-CREATE TABLE regression_input AS
-SELECT * FROM ts_prepare_regression_input_by(
-    'cv_splits', 'sales_data', store_id, date, revenue, MAP{}
-);
-
--- Train: Use rows where masked_target IS NOT NULL
--- Test: Predict rows where masked_target IS NULL
-```
-
----
-
 ### Choosing the Right Hydration Function
 
 | Function | Use Case | Safety Level |
@@ -570,6 +437,143 @@ SELECT * FROM ts_prepare_regression_input_by(
 | `ts_hydrate_split_strict_by` | Force explicit column handling | High |
 | `ts_hydrate_features_by` | Auto-hydrate with masking flags | Medium |
 | `ts_prepare_regression_input_by` | Regression model prep | High |
+
+---
+
+## Advanced: Custom Fold Boundaries
+
+> Use these functions when you need precise control over fold cutoff dates (fiscal calendars, business events, regulatory requirements).
+
+For most standard backtesting, prefer `ts_cv_folds_by` which automatically computes fold boundaries.
+
+### ts_cv_split_folds_by
+
+View fold date ranges (train/test boundaries) for pre-specified training cutoff dates.
+
+**Use Case:** When you need to inspect or visualize the actual date boundaries for each fold before running the full split. Useful for:
+- Verifying fold boundaries align with business periods (quarters, fiscal years)
+- Documentation and reporting
+- Debugging cross-validation setups
+
+**Signature:**
+```sql
+ts_cv_split_folds_by(
+    source VARCHAR,
+    group_col VARCHAR,
+    date_col VARCHAR,
+    training_end_times DATE[],
+    horizon BIGINT,
+    frequency VARCHAR          -- Required for date arithmetic ('1d', '1mo', etc.)
+) → TABLE
+```
+
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | Fold number |
+| `train_start` | TIMESTAMP | Training period start |
+| `train_end` | TIMESTAMP | Training period end |
+| `test_start` | TIMESTAMP | Test period start |
+| `test_end` | TIMESTAMP | Test period end |
+| `horizon` | BIGINT | Test period length |
+
+**Example:**
+```sql
+-- View boundaries for quarterly backtests
+SELECT * FROM ts_cv_split_folds_by(
+    'sales_data', 'store_id', 'date',
+    ['2024-03-31'::DATE, '2024-06-30'::DATE, '2024-09-30'::DATE],
+    30, '1d'
+);
+```
+
+---
+
+### ts_cv_split_by
+
+Split time series data into train/test sets using explicit training cutoff dates.
+
+**Use Case:** When you need **precise control over fold boundaries** rather than automatic fold generation. Common scenarios:
+- **Fiscal calendar alignment**: Folds must end at quarter/year boundaries
+- **Business events**: Train up to a specific known event date
+- **Regulatory requirements**: Auditable, reproducible fold boundaries
+- **Custom spacing**: Non-uniform spacing between folds (e.g., monthly for recent, quarterly for historical)
+
+**Signature:**
+```sql
+ts_cv_split_by(
+    source VARCHAR,           -- Source table name (quoted string)
+    group_col IDENTIFIER,     -- Series grouping column (unquoted)
+    date_col IDENTIFIER,      -- Date/timestamp column (unquoted)
+    target_col IDENTIFIER,    -- Value column (unquoted)
+    training_end_times DATE[],-- Explicit cutoff dates for each fold
+    horizon BIGINT,
+    params MAP
+) → TABLE
+```
+
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `<group_col>` | (same as input) | Series identifier (preserves original column name) |
+| `<date_col>` | (same as input) | Date/timestamp (preserves original column name) |
+| `<target_col>` | (same as input) | Target value (preserves original column name) |
+| `fold_id` | BIGINT | Fold number (1, 2, 3, ...) |
+| `split` | VARCHAR | `'train'` or `'test'` |
+
+**Window Types:**
+```
+Expanding window (default):
+Fold 1: [====TRAIN====][TEST]
+Fold 2: [======TRAIN======][TEST]
+Fold 3: [========TRAIN========][TEST]
+
+Fixed window:
+Fold 1:     [==TRAIN==][TEST]
+Fold 2:         [==TRAIN==][TEST]
+Fold 3:             [==TRAIN==][TEST]
+```
+
+**Example:**
+```sql
+-- Quarterly backtests with explicit fiscal quarter end dates
+CREATE TABLE cv_splits AS
+SELECT * FROM ts_cv_split_by(
+    'sales', store_id, date, revenue,
+    ['2024-03-31'::DATE, '2024-06-30'::DATE, '2024-09-30'::DATE],
+    30, MAP{}
+);
+-- Output columns: store_id, date, revenue, fold_id, split
+```
+
+---
+
+### ts_cv_split_index_by
+
+Memory-efficient alternative returning only index columns (no target values).
+
+**Use Case:** For large datasets where duplicating target values across folds would consume too much memory. Use with hydration functions to join back to source data.
+
+**Signature:**
+```sql
+ts_cv_split_index_by(
+    source VARCHAR,           -- Source table name (quoted string)
+    group_col IDENTIFIER,     -- Series grouping column (unquoted)
+    date_col IDENTIFIER,      -- Date/timestamp column (unquoted)
+    training_end_times DATE[],
+    horizon BIGINT,
+    frequency VARCHAR,
+    params MAP
+) → TABLE
+```
+
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `<group_col>` | (same as input) | Series identifier (preserves original column name) |
+| `<date_col>` | (same as input) | Date/timestamp (preserves original column name) |
+| `fold_id` | BIGINT | Fold number |
+| `split` | VARCHAR | `'train'` or `'test'` |
 
 ---
 
