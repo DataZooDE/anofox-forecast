@@ -201,7 +201,7 @@ Returns the test rows with forecast columns added:
 - **Date preservation**: Original date values are preserved (no date generation)
 - **Position-based matching**: 1st forecast → 1st test row, 2nd forecast → 2nd test row, etc.
 
-> **Note on Features:** `ts_cv_forecast_by` uses only the target column (`y`) for univariate forecasting. If your input from `ts_cv_folds_by` includes feature columns, they are ignored by the forecaster but preserved in the output. For regression models that use features, use `ts_prepare_regression_input_by` instead.
+> **Note on Features:** `ts_cv_forecast_by` uses only the target column (`y`) for univariate forecasting. Feature columns from `ts_cv_folds_by` are ignored by the forecaster. For regression models that use features, use `ts_cv_split_by` with `ts_prepare_regression_input_by` (see below).
 
 **Example:**
 
@@ -224,7 +224,37 @@ SELECT * FROM ts_mape_by('cv_results', fold_id, ds, y, forecast);
 
 ## Regression & ML Model Backtesting
 
-> These functions are for building custom cross-validation pipelines with regression models or external forecasters.
+> These functions work with `ts_cv_split_by` output to build custom cross-validation pipelines with regression models or external forecasters.
+
+**When to use these functions:**
+- You're using `ts_cv_split_by` (which outputs only group, date, target columns - no features)
+- You need to join features back from your source table
+- You want to mask unknown features in test rows to prevent data leakage
+
+**Not needed if:** You're using `ts_cv_folds_by`, which already passes through all feature columns.
+
+### Workflow with ts_cv_split_by
+
+```sql
+-- Step 1: Create splits with explicit cutoff dates (no features in output)
+CREATE TABLE cv_splits AS
+SELECT * FROM ts_cv_split_by(
+    'sales', store_id, date, revenue,
+    ['2024-03-31'::DATE, '2024-06-30'::DATE],
+    30, MAP{}
+);
+
+-- Step 2: Hydrate with features from source, masking target in test rows
+CREATE TABLE regression_input AS
+SELECT * FROM ts_prepare_regression_input_by(
+    'cv_splits', 'sales', store_id, date, revenue, MAP{}
+);
+
+-- Step 3: Train your regression model on rows where masked_target IS NOT NULL
+-- Step 4: Predict on rows where masked_target IS NULL
+```
+
+### The Data Leakage Problem
 
 When building custom CV pipelines, you need to join CV splits back to your source data. These functions prevent **data leakage** by automatically masking features that wouldn't be known at prediction time.
 
@@ -245,13 +275,13 @@ Unknown features:   ✓ Available in train, ✗ Must be masked in test
 
 ### ts_prepare_regression_input_by
 
-Prepare data for regression models in CV backtest. Masks target in test rows.
+Prepare data for regression models in CV backtest. Joins `ts_cv_split_by` output with source data and masks target in test rows.
 
 **Signature:**
 ```sql
 ts_prepare_regression_input_by(
-    cv_splits VARCHAR,
-    source VARCHAR,
+    cv_splits VARCHAR,        -- Output from ts_cv_split_by
+    source VARCHAR,           -- Original source table with features
     src_group_col COLUMN,
     src_date_col COLUMN,
     target_col COLUMN,
@@ -291,13 +321,13 @@ SELECT * FROM ts_prepare_regression_input_by(
 
 ### ts_hydrate_split_by
 
-Join CV splits with source data, masking a specific unknown column.
+Join `ts_cv_split_by` output with source data, masking a specific unknown column.
 
 **Signature:**
 ```sql
 ts_hydrate_split_by(
-    cv_splits VARCHAR,        -- CV split table name
-    source VARCHAR,           -- Source data table name
+    cv_splits VARCHAR,        -- Output from ts_cv_split_by
+    source VARCHAR,           -- Original source table with features
     src_group_col COLUMN,     -- Group column in source
     src_date_col COLUMN,      -- Date column in source
     unknown_col COLUMN,       -- Column to mask in test set
@@ -335,7 +365,7 @@ SELECT * FROM ts_hydrate_split_by(
 
 ### ts_hydrate_split_full_by
 
-Join CV splits with ALL source columns, adding metadata flags for manual masking.
+Join `ts_cv_split_by` output with ALL source columns, adding metadata flags for manual masking.
 
 **Signature:**
 ```sql
@@ -373,7 +403,7 @@ FROM ts_hydrate_split_full_by(
 
 ### ts_hydrate_split_strict_by
 
-Fail-safe join returning ONLY metadata columns, forcing explicit column selection.
+Fail-safe join of `ts_cv_split_by` output returning ONLY metadata columns, forcing explicit column selection.
 
 **Signature:**
 ```sql
