@@ -284,3 +284,129 @@ SELECT ts_coverage([0.0, 10.0], [0.0, 5.0], [5.0, 10.0]);
 ----
 1.0
 
+
+#######################################
+# Table Macros with GROUP BY ALL
+#######################################
+
+# Setup test data for single grouping column
+statement ok
+CREATE TABLE test_metrics AS
+SELECT 'A' AS id, i AS ds, i::DOUBLE AS y, (i + 1)::DOUBLE AS forecast
+FROM generate_series(1, 10) t(i)
+UNION ALL
+SELECT 'B' AS id, i AS ds, i::DOUBLE AS y, (i + 2)::DOUBLE AS forecast
+FROM generate_series(1, 10) t(i);
+
+# ts_rmse_by - Returns 20 rows (per-row metrics due to GROUP BY ALL)
+query I
+SELECT COUNT(*) FROM ts_rmse_by('test_metrics', ds, y, forecast);
+----
+20
+
+# Verify all columns are preserved
+query I
+SELECT COUNT(DISTINCT id) FROM ts_rmse_by('test_metrics', ds, y, forecast);
+----
+2
+
+# ts_mae_by
+query I
+SELECT COUNT(*) FROM ts_mae_by('test_metrics', ds, y, forecast);
+----
+20
+
+# ts_mse_by
+query I
+SELECT COUNT(*) FROM ts_mse_by('test_metrics', ds, y, forecast);
+----
+20
+
+# ts_mape_by
+query I
+SELECT COUNT(*) FROM ts_mape_by('test_metrics', ds, y, forecast);
+----
+20
+
+# ts_smape_by
+query I
+SELECT COUNT(*) FROM ts_smape_by('test_metrics', ds, y, forecast);
+----
+20
+
+# ts_r2_by
+query I
+SELECT COUNT(*) FROM ts_r2_by('test_metrics', ds, y, forecast);
+----
+20
+
+# ts_bias_by
+query I
+SELECT COUNT(*) FROM ts_bias_by('test_metrics', ds, y, forecast);
+----
+20
+
+# Aggregate metrics to get per-group values
+query I
+SELECT COUNT(*) FROM (
+    SELECT id, AVG(rmse) AS rmse
+    FROM ts_rmse_by('test_metrics', ds, y, forecast)
+    GROUP BY id
+);
+----
+2
+
+# Verify aggregated RMSE values are correct
+# For id='A': all errors are 1.0, so RMSE = 1.0
+# For id='B': all errors are 2.0, so RMSE = 2.0
+query IR
+SELECT id, AVG(rmse) AS avg_rmse
+FROM ts_rmse_by('test_metrics', ds, y, forecast)
+GROUP BY id
+ORDER BY id;
+----
+A	1.0
+B	2.0
+
+# Setup test data for multiple grouping columns (CV-like)
+statement ok
+CREATE TABLE test_cv_metrics AS
+SELECT
+    series_id, fold_id, 'Naive' AS model_name,
+    i AS ds, i::DOUBLE AS y, (i + 1)::DOUBLE AS forecast
+FROM generate_series(1, 5) t(i)
+CROSS JOIN (SELECT UNNEST(['A', 'B']) AS series_id) s
+CROSS JOIN (SELECT UNNEST([1, 2]) AS fold_id) f;
+
+# ts_rmse_by - Returns 20 rows (5 ds × 2 series × 2 folds)
+query I
+SELECT COUNT(*) FROM ts_rmse_by('test_cv_metrics', ds, y, forecast);
+----
+20
+
+# Verify all columns are present
+query I
+SELECT COUNT(DISTINCT series_id || fold_id::VARCHAR || model_name)
+FROM ts_rmse_by('test_cv_metrics', ds, y, forecast);
+----
+4
+
+# Aggregate to get metrics per series/fold/model
+query IIIR
+SELECT series_id, fold_id, model_name, AVG(rmse) AS avg_rmse
+FROM ts_rmse_by('test_cv_metrics', ds, y, forecast)
+GROUP BY series_id, fold_id, model_name
+ORDER BY 1, 2, 3;
+----
+A	1	Naive	1.0
+A	2	Naive	1.0
+B	1	Naive	1.0
+B	2	Naive	1.0
+
+# Cleanup
+statement ok
+DROP TABLE test_metrics;
+
+statement ok
+DROP TABLE test_cv_metrics;
+

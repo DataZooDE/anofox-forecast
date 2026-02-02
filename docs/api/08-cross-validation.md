@@ -49,9 +49,10 @@ SELECT * FROM ts_cv_folds_by('data', unique_id, ds, y, 3, 12, MAP{});
 CREATE TABLE cv_forecasts AS
 SELECT * FROM ts_cv_forecast_by('cv_folds', unique_id, ds, y, 'Naive', MAP{});
 
--- Step 3: Compute metrics per fold
-SELECT * FROM ts_rmse_by('cv_forecasts', fold_id, ds, y, forecast);
-SELECT * FROM ts_mae_by('cv_forecasts', fold_id, ds, y, forecast);
+-- Step 3: Compute metrics per series/fold/model
+SELECT unique_id, fold_id, model_name, AVG(rmse) AS rmse
+FROM ts_rmse_by('cv_forecasts', ds, y, forecast)
+GROUP BY unique_id, fold_id, model_name;
 ```
 
 ### Usage Pattern Comparison
@@ -204,10 +205,10 @@ SELECT * FROM ts_cv_folds_by('data', unique_id, ds, y, 3, 6, MAP{});
 CREATE TABLE cv_results AS
 SELECT * FROM ts_cv_forecast_by('folds', unique_id, ds, y, 'Naive', MAP{});
 
--- Step 3: Compute metrics per fold
-SELECT * FROM ts_rmse_by('cv_results', fold_id, ds, y, forecast);
-SELECT * FROM ts_mae_by('cv_results', fold_id, ds, y, forecast);
-SELECT * FROM ts_mape_by('cv_results', fold_id, ds, y, forecast);
+-- Step 3: Compute metrics per series/fold/model
+SELECT unique_id, fold_id, model_name, AVG(rmse) AS rmse
+FROM ts_rmse_by('cv_results', ds, y, forecast)
+GROUP BY unique_id, fold_id, model_name;
 ```
 
 ---
