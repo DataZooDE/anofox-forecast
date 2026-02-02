@@ -50,8 +50,14 @@ CREATE TABLE cv_forecasts AS
 SELECT * FROM ts_cv_forecast_by('cv_folds', unique_id, ds, y, 'Naive', MAP{});
 
 -- Step 3: Compute metrics per fold
-SELECT * FROM ts_rmse_by('cv_forecasts', fold_id, ds, y, forecast);
-SELECT * FROM ts_mae_by('cv_forecasts', fold_id, ds, y, forecast);
+SELECT * FROM ts_rmse_by(
+    (SELECT fold_id, ds, y, forecast FROM cv_forecasts),
+    'ds', 'y', 'forecast'
+);
+SELECT * FROM ts_mae_by(
+    (SELECT fold_id, ds, y, forecast FROM cv_forecasts),
+    'ds', 'y', 'forecast'
+);
 ```
 
 ### Usage Pattern Comparison
@@ -205,9 +211,18 @@ CREATE TABLE cv_results AS
 SELECT * FROM ts_cv_forecast_by('folds', unique_id, ds, y, 'Naive', MAP{});
 
 -- Step 3: Compute metrics per fold
-SELECT * FROM ts_rmse_by('cv_results', fold_id, ds, y, forecast);
-SELECT * FROM ts_mae_by('cv_results', fold_id, ds, y, forecast);
-SELECT * FROM ts_mape_by('cv_results', fold_id, ds, y, forecast);
+SELECT * FROM ts_rmse_by(
+    (SELECT fold_id, ds, y, forecast FROM cv_results),
+    'ds', 'y', 'forecast'
+);
+SELECT * FROM ts_mae_by(
+    (SELECT fold_id, ds, y, forecast FROM cv_results),
+    'ds', 'y', 'forecast'
+);
+SELECT * FROM ts_mape_by(
+    (SELECT fold_id, ds, y, forecast FROM cv_results),
+    'ds', 'y', 'forecast'
+);
 ```
 
 ---
