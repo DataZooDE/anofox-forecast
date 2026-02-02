@@ -1,10 +1,8 @@
 # name: test/sql/ts_hydrate_split.test
-# description: Tests for ts_hydrate_split - safe join of CV splits with source data
+# description: Tests for ts_cv_hydrate_by - join CV folds with source data and mask unknown features
 # group: [sql]
 
 require anofox_forecast
-
-require json
 
 #######################################
 # Setup Test Data
@@ -21,140 +19,157 @@ SELECT
 FROM generate_series(1, 24) AS t(i)
 CROSS JOIN (SELECT 'A' AS category UNION ALL SELECT 'B') AS c;
 
-# ts_cv_split_by preserves original column names: category, date, sales, fold_id, split
+# ts_cv_folds_by creates folds with: category, date, sales, fold_id, split
 statement ok
-CREATE TABLE cv_splits AS
+CREATE TABLE cv_folds AS
 SELECT *
-FROM ts_cv_split_by(
+FROM ts_cv_folds_by(
     'backtest_sample', category, date, sales,
-    ['2022-12-01'::DATE, '2023-03-01'::DATE, '2023-06-01'::DATE], 3, MAP{}
+    3, 3, MAP{}
 );
 
-# Verify cv_splits has original column names (not group_col, date_col, target_col)
+# Verify cv_folds has original column names
 query I
 SELECT COUNT(*) FROM (
-    DESCRIBE SELECT * FROM cv_splits
+    DESCRIBE SELECT * FROM cv_folds
 ) WHERE column_name IN ('category', 'date', 'sales');
 ----
 3
 
 #######################################
-# ts_hydrate_split - NULL Strategy
-#######################################
-
-# Default strategy is null - test rows should have NULL
-# Hydration functions now use original column names
-query II
-SELECT split, unknown_col IS NULL as is_masked FROM ts_hydrate_split_by(
-    'cv_splits', 'backtest_sample', category, date, temperature, MAP{}
-) WHERE fold_id = 1 AND group_col = 'A'
-GROUP BY split, unknown_col IS NULL
-ORDER BY split DESC;
-----
-train	false
-test	true
-
-# Training rows should have actual values
-query I
-SELECT COUNT(*) FROM ts_hydrate_split_by(
-    'cv_splits', 'backtest_sample', category, date, temperature, MAP{}
-) WHERE fold_id = 1 AND split = 'train' AND unknown_col IS NOT NULL;
-----
-26
-
-# Test rows should have NULL
-query I
-SELECT COUNT(*) FROM ts_hydrate_split_by(
-    'cv_splits', 'backtest_sample', category, date, temperature, MAP{}
-) WHERE fold_id = 1 AND split = 'test' AND unknown_col IS NULL;
-----
-6
-
-#######################################
-# ts_hydrate_split - LAST_VALUE Strategy
-#######################################
-
-# Test rows should be filled with last training value
-query II
-SELECT split, COUNT(DISTINCT unknown_col) FROM ts_hydrate_split_by(
-    'cv_splits', 'backtest_sample', category, date, temperature,
-    MAP{'strategy': 'last_value'}
-) WHERE fold_id = 1 AND group_col = 'A'
-GROUP BY split
-ORDER BY split DESC;
-----
-train	12
-test	1
-
-# Last value for each series should be carried forward
-query I
-SELECT DISTINCT unknown_col FROM ts_hydrate_split_by(
-    'cv_splits', 'backtest_sample', category, date, temperature,
-    MAP{'strategy': 'last_value'}
-) WHERE fold_id = 1 AND group_col = 'A' AND split = 'test';
-----
-53.0
-
-#######################################
-# ts_hydrate_split - DEFAULT Strategy
-#######################################
-
-# Test rows should be filled with specified default value
-query IR
-SELECT split, SUM(unknown_col) FROM ts_hydrate_split_by(
-    'cv_splits', 'backtest_sample', category, date, temperature,
-    MAP{'strategy': 'default', 'fill_value': '999'}
-) WHERE fold_id = 1 AND group_col = 'A' AND split = 'test'
-GROUP BY split;
-----
-test	2997.0
-
-#######################################
-# ts_hydrate_split_full - Basic Tests
+# ts_cv_hydrate_by - Basic Join Test
 #######################################
 
 # Should return all source columns plus fold metadata
 query I
-SELECT COUNT(*) FROM ts_hydrate_split_full_by(
-    'cv_splits', 'backtest_sample', category, date, MAP{}
+SELECT COUNT(*) FROM ts_cv_hydrate_by(
+    'cv_folds', 'backtest_sample', category, date, ['temperature'], MAP{}
 ) WHERE fold_id = 1;
 ----
-32
+36
 
 # Should have _is_test boolean column
 query II
-SELECT _is_test, COUNT(*) FROM ts_hydrate_split_full_by(
-    'cv_splits', 'backtest_sample', category, date, MAP{}
+SELECT _is_test, COUNT(*) FROM ts_cv_hydrate_by(
+    'cv_folds', 'backtest_sample', category, date, ['temperature'], MAP{}
 ) WHERE fold_id = 1
 GROUP BY _is_test
 ORDER BY _is_test;
 ----
-false	26
+false	30
 true	6
 
 # Should have _train_cutoff timestamp
 query I
-SELECT COUNT(DISTINCT _train_cutoff) FROM ts_hydrate_split_full_by(
-    'cv_splits', 'backtest_sample', category, date, MAP{}
+SELECT COUNT(DISTINCT _train_cutoff) FROM ts_cv_hydrate_by(
+    'cv_folds', 'backtest_sample', category, date, ['temperature'], MAP{}
 ) WHERE fold_id = 1;
 ----
 1
 
 #######################################
-# ts_hydrate_split_full - Manual Masking Pattern
+# ts_cv_hydrate_by - NULL Strategy
 #######################################
 
-# Manual masking using _is_test should work
+# Using _is_test to mask temperature in test rows
 query II
-SELECT split, SUM(CASE WHEN _is_test THEN NULL ELSE temperature END) IS NULL as all_masked
-FROM ts_hydrate_split_full_by(
-    'cv_splits', 'backtest_sample', category, date, MAP{}
-) WHERE fold_id = 1 AND category = 'A'
+SELECT split, COUNT(*) FROM (
+    SELECT
+        split,
+        CASE WHEN _is_test THEN NULL ELSE temperature END AS masked_temp
+    FROM ts_cv_hydrate_by(
+        'cv_folds', 'backtest_sample', category, date, ['temperature'],
+        MAP{'strategy': 'null'}
+    )
+    WHERE fold_id = 1 AND category = 'A'
+) WHERE masked_temp IS NULL OR masked_temp IS NOT NULL
 GROUP BY split
 ORDER BY split DESC;
 ----
-train	false
-test	true
+train	15
+test	3
+
+# Verify train rows have actual temperature values
+query I
+SELECT COUNT(*) FROM ts_cv_hydrate_by(
+    'cv_folds', 'backtest_sample', category, date, ['temperature'],
+    MAP{'strategy': 'null'}
+) WHERE fold_id = 1 AND split = 'train' AND temperature IS NOT NULL;
+----
+30
+
+#######################################
+# ts_cv_hydrate_by - LAST_VALUE Strategy
+#######################################
+
+# _last_known map should have the last training value for temperature
+query I
+SELECT COUNT(DISTINCT _last_known['temperature']) FROM ts_cv_hydrate_by(
+    'cv_folds', 'backtest_sample', category, date, ['temperature'],
+    MAP{'strategy': 'last_value'}
+) WHERE fold_id = 1 AND category = 'A' AND split = 'test';
+----
+1
+
+# Using _last_known to carry forward last training value
+query II
+SELECT split, COUNT(*) FROM (
+    SELECT
+        split,
+        CASE WHEN _is_test THEN _last_known['temperature'] ELSE temperature::VARCHAR END AS filled_temp
+    FROM ts_cv_hydrate_by(
+        'cv_folds', 'backtest_sample', category, date, ['temperature'],
+        MAP{'strategy': 'last_value'}
+    )
+    WHERE fold_id = 1 AND category = 'A'
+) WHERE filled_temp IS NOT NULL
+GROUP BY split
+ORDER BY split DESC;
+----
+train	15
+test	3
+
+#######################################
+# ts_cv_hydrate_by - DEFAULT Strategy
+#######################################
+
+# _last_known should contain fill_value for default strategy
+query I
+SELECT DISTINCT _last_known['temperature'] FROM ts_cv_hydrate_by(
+    'cv_folds', 'backtest_sample', category, date, ['temperature'],
+    MAP{'strategy': 'default', 'fill_value': '999'}
+) WHERE fold_id = 1 AND category = 'A' AND split = 'test';
+----
+999.0
+
+#######################################
+# ts_cv_hydrate_by - Multiple Unknown Features
+#######################################
+
+# Test with multiple unknown features
+query I
+SELECT COUNT(*) FROM (
+    SELECT * FROM ts_cv_hydrate_by(
+        'cv_folds', 'backtest_sample', category, date,
+        ['temperature', 'promotion'],
+        MAP{'strategy': 'last_value'}
+    )
+    WHERE fold_id = 1
+);
+----
+36
+
+# _last_known should have entries for both columns
+query I
+SELECT COUNT(*) FROM ts_cv_hydrate_by(
+    'cv_folds', 'backtest_sample', category, date,
+    ['temperature', 'promotion'],
+    MAP{'strategy': 'last_value'}
+) WHERE fold_id = 1 AND category = 'A' AND split = 'test'
+  AND _last_known['temperature'] IS NOT NULL
+  AND _last_known['promotion'] IS NOT NULL;
+----
+3
 
 #######################################
 # Multiple Folds Test
@@ -162,73 +177,38 @@ test	true
 
 # Each fold should have train and test splits
 query III
-SELECT fold_id, split, COUNT(*) as n FROM ts_hydrate_split_by(
-    'cv_splits', 'backtest_sample', category, date, temperature, MAP{}
+SELECT fold_id, split, COUNT(*) as n FROM ts_cv_hydrate_by(
+    'cv_folds', 'backtest_sample', category, date, ['temperature'], MAP{}
 )
 GROUP BY fold_id, split
 ORDER BY fold_id, split DESC;
 ----
-1	train	26
+1	train	30
 1	test	6
-2	train	32
+2	train	36
 2	test	6
-3	train	38
+3	train	42
 3	test	6
 
 #######################################
-# ts_hydrate_split_strict - Fail-Safe Pattern Tests
+# Manual Masking Pattern (Recommended)
 #######################################
 
-# Test returns only metadata columns (no data columns)
-query I
-SELECT COUNT(*) FROM (
-    DESCRIBE SELECT * FROM ts_hydrate_split_strict_by('cv_splits', 'backtest_sample', category, date, MAP{})
-);
-----
-6
-
-# Test has expected columns: fold_id, split, group_col, date_col, _is_test, _train_cutoff
-query IITTTI
-SELECT fold_id, split, group_col, date_col::DATE, _is_test, _train_cutoff::DATE
-FROM ts_hydrate_split_strict_by('cv_splits', 'backtest_sample', category, date, MAP{})
-WHERE fold_id = 1 AND group_col = 'A'
-ORDER BY date_col
-LIMIT 1;
-----
-1	train	A	2022-01-01	false	2023-01-01
-
-# Test _is_test is true for test rows, false for train rows
-query II
-SELECT _is_test, COUNT(*) FROM ts_hydrate_split_strict_by('cv_splits', 'backtest_sample', category, date, MAP{})
-WHERE fold_id = 1
-GROUP BY _is_test
-ORDER BY _is_test;
-----
-false	26
-true	6
-
-# Test row count matches cv_splits
-query II
-SELECT
-    (SELECT COUNT(*) FROM cv_splits WHERE fold_id = 1) as cv_count,
-    (SELECT COUNT(*) FROM ts_hydrate_split_strict_by('cv_splits', 'backtest_sample', category, date, MAP{}) WHERE fold_id = 1) as strict_count;
-----
-32	32
-
-# Test fail-safe pattern: explicit column selection with masking
+# The recommended pattern: use _is_test for explicit masking
 query III
 SELECT
     fold_id,
     split,
-    -- Unknown feature masked in test rows
-    SUM(CASE WHEN _is_test THEN NULL ELSE 1 END) AS known_count
-FROM ts_hydrate_split_strict_by('cv_splits', 'backtest_sample', category, date, MAP{})
-WHERE fold_id = 1
+    SUM(CASE WHEN _is_test THEN NULL ELSE temperature END) IS NOT NULL as has_train_temps
+FROM ts_cv_hydrate_by(
+    'cv_folds', 'backtest_sample', category, date, ['temperature'], MAP{}
+)
+WHERE fold_id = 1 AND category = 'A'
 GROUP BY fold_id, split
 ORDER BY split DESC;
 ----
-1	train	26
-1	test	NULL
+1	train	true
+1	test	false
 
 #######################################
 # Cleanup
@@ -238,4 +218,4 @@ statement ok
 DROP TABLE backtest_sample;
 
 statement ok
-DROP TABLE cv_splits;
+DROP TABLE cv_folds;

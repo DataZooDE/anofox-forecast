@@ -1067,191 +1067,6 @@ WHERE (s._dt >= fb.train_start AND s._dt <= fb.train_end)
 ORDER BY fb.fold_id, s._grp, s._dt
 )"},
 
-    // ts_hydrate_split_by: Safely join cv_splits with source data, masking unknown columns in test set
-    // C++ API: ts_hydrate_split_by(cv_splits, source, src_group_col, src_date_col, unknown_col, params)
-    // NOTE: src_group_col and src_date_col are column EXPRESSIONS used for BOTH cv_splits and source
-    // cv_splits uses same column names as source (original names preserved from ts_cv_split_by/ts_cv_folds_by)
-    // params MAP supports: strategy ('null', 'last_value', 'default'), fill_value (DOUBLE, for 'default')
-    // This is the SAFE way to join features back to CV splits - prevents data leakage
-    {"ts_hydrate_split_by", {"cv_splits", "source", "src_group_col", "src_date_col", "unknown_col", "params", nullptr}, {{nullptr, nullptr}},
-R"(
-WITH _params AS (
-    SELECT
-        COALESCE(json_extract_string(to_json(params), '$.strategy'), 'null') AS _strategy,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.fill_value') AS DOUBLE), 0.0) AS _fill_value
-),
--- cv_splits uses original column names (preserved from ts_cv_split_by/ts_cv_folds_by)
-cv AS (
-    SELECT
-        src_group_col AS _cv_grp,
-        date_trunc('second', src_date_col::TIMESTAMP) AS _cv_dt,
-        fold_id AS _fold_id,
-        split AS _split,
-        MAX(CASE WHEN split = 'train' THEN date_trunc('second', src_date_col::TIMESTAMP) END)
-            OVER (PARTITION BY src_group_col, fold_id) AS _train_end
-    FROM query_table(cv_splits::VARCHAR)
-),
--- source table uses the same column expressions
-src AS (
-    SELECT
-        src_group_col AS _src_grp,
-        date_trunc('second', src_date_col::TIMESTAMP) AS _src_dt,
-        unknown_col AS _unknown_val
-    FROM query_table(source::VARCHAR)
-),
--- For last_value strategy, get the last known value before test period
-last_known AS (
-    SELECT DISTINCT
-        cv._cv_grp,
-        cv._fold_id,
-        LAST_VALUE(src._unknown_val IGNORE NULLS) OVER (
-            PARTITION BY cv._cv_grp, cv._fold_id
-            ORDER BY src._src_dt
-            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-        ) AS _last_val
-    FROM cv
-    JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
-    WHERE cv._split = 'train'
-    QUALIFY ROW_NUMBER() OVER (PARTITION BY cv._cv_grp, cv._fold_id ORDER BY src._src_dt DESC) = 1
-)
-SELECT
-    cv._cv_grp AS group_col,
-    cv._cv_dt AS date_col,
-    cv._fold_id AS fold_id,
-    cv._split AS split,
-    CASE
-        -- Training data: always use actual value
-        WHEN cv._split = 'train' THEN src._unknown_val
-        -- Test data: apply fill strategy
-        WHEN (SELECT _strategy FROM _params) = 'null' THEN NULL
-        WHEN (SELECT _strategy FROM _params) = 'default' THEN (SELECT _fill_value FROM _params)
-        WHEN (SELECT _strategy FROM _params) = 'last_value' THEN lk._last_val
-        ELSE NULL
-    END AS unknown_col
-FROM cv
-JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
-LEFT JOIN last_known lk ON cv._cv_grp = lk._cv_grp AND cv._fold_id = lk._fold_id
-ORDER BY cv._fold_id, cv._cv_grp, cv._cv_dt
-)"},
-
-    // ts_hydrate_split_full_by: Join cv_splits with ALL source columns, adding split metadata
-    // C++ API: ts_hydrate_split_full_by(cv_splits, source, src_group_col, src_date_col, params)
-    // NOTE: src_group_col and src_date_col are column EXPRESSIONS used for BOTH cv_splits and source
-    // cv_splits uses same column names as source (original names preserved from ts_cv_split_by/ts_cv_folds_by)
-    // Returns all source columns PLUS fold_id, split, and _is_test (boolean for easy masking)
-    // Use with pattern: CASE WHEN _is_test THEN NULL ELSE unknown_col END AS unknown_col
-    // This provides the SAFE join pattern - prevents accidental direct joins
-    {"ts_hydrate_split_full_by", {"cv_splits", "source", "src_group_col", "src_date_col", "params", nullptr}, {{nullptr, nullptr}},
-R"(
-WITH cv AS (
-    SELECT
-        src_group_col AS _cv_grp,
-        date_trunc('second', src_date_col::TIMESTAMP) AS _cv_dt,
-        fold_id AS _fold_id,
-        split AS _split,
-        (split = 'test') AS _is_test,
-        MAX(CASE WHEN split = 'train' THEN date_trunc('second', src_date_col::TIMESTAMP) END)
-            OVER (PARTITION BY src_group_col, fold_id) AS _train_cutoff
-    FROM query_table(cv_splits::VARCHAR)
-),
-src AS (
-    SELECT *,
-        src_group_col AS _src_grp,
-        date_trunc('second', src_date_col::TIMESTAMP) AS _src_dt
-    FROM query_table(source::VARCHAR)
-)
-SELECT
-    cv._fold_id AS fold_id,
-    cv._split AS split,
-    cv._is_test AS _is_test,
-    cv._train_cutoff AS _train_cutoff,
-    src.* EXCLUDE (_src_grp, _src_dt)
-FROM cv
-JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
-ORDER BY cv._fold_id, src._src_grp, src._src_dt
-)"},
-
-    // ts_hydrate_features_by: Automatically hydrate CV splits with features from source
-    // C++ API: ts_hydrate_features_by(cv_splits, source, src_group_col, src_date_col, target_col, params)
-    // cv_splits: Output from ts_cv_split (has original column names, fold_id, split)
-    // source: Original data table with features
-    // src_group_col, src_date_col, target_col: Column expressions for cv_splits and source
-    // Returns: fold_id, split, group_col, date_col, target_col, _is_test, _train_cutoff, plus all source columns
-    // Use _is_test to mask unknown features: CASE WHEN _is_test THEN NULL ELSE unknown_col END
-    // Known features (calendar, promotions): Use directly
-    // Unknown features (competitor_sales, actual temperature): Mask with CASE WHEN _is_test
-    {"ts_hydrate_features_by", {"cv_splits", "source", "src_group_col", "src_date_col", "target_col", "params", nullptr}, {{nullptr, nullptr}},
-R"(
-WITH cv AS (
-    SELECT
-        src_group_col AS _cv_grp,
-        date_trunc('second', src_date_col::TIMESTAMP) AS _cv_dt,
-        target_col AS _target,
-        fold_id AS _fold_id,
-        split AS _split,
-        (split = 'test') AS _is_test,
-        MAX(CASE WHEN split = 'train' THEN date_trunc('second', src_date_col::TIMESTAMP) END)
-            OVER (PARTITION BY src_group_col, fold_id) AS _train_cutoff
-    FROM query_table(cv_splits::VARCHAR)
-    WHERE split IN ('train', 'test')
-),
-src AS (
-    SELECT *,
-        src_group_col AS _src_grp,
-        date_trunc('second', src_date_col::TIMESTAMP) AS _src_dt
-    FROM query_table(source::VARCHAR)
-)
-SELECT
-    cv._fold_id AS fold_id,
-    cv._split AS split,
-    cv._cv_grp AS group_col,
-    cv._cv_dt AS date_col,
-    cv._target AS target_col,
-    cv._is_test,
-    cv._train_cutoff,
-    -- Include all source columns; user should mask unknown features: CASE WHEN _is_test THEN NULL ELSE col END
-    src.* EXCLUDE (_src_grp, _src_dt)
-FROM cv
-JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
-ORDER BY cv._fold_id, cv._cv_grp, cv._cv_dt
-)"},
-
-    // ts_hydrate_split_strict_by: FAIL-SAFE join - returns ONLY metadata columns, NO data columns
-    // C++ API: ts_hydrate_split_strict_by(cv_splits, source, src_group_col, src_date_col, params)
-    // This is the maximally fail-safe approach: forces user to explicitly add each column
-    // Returns: fold_id, split, group_col, date_col, _is_test, _train_cutoff
-    // Use pattern: SELECT hs.*, src.known_col, CASE WHEN _is_test THEN NULL ELSE src.unknown_col END
-    {"ts_hydrate_split_strict_by", {"cv_splits", "source", "src_group_col", "src_date_col", "params", nullptr}, {{nullptr, nullptr}},
-R"(
-WITH cv AS (
-    SELECT
-        src_group_col AS _cv_grp,
-        date_trunc('second', src_date_col::TIMESTAMP) AS _cv_dt,
-        fold_id AS _fold_id,
-        split AS _split,
-        (split = 'test') AS _is_test,
-        MAX(CASE WHEN split = 'train' THEN date_trunc('second', src_date_col::TIMESTAMP) END)
-            OVER (PARTITION BY src_group_col, fold_id) AS _train_cutoff
-    FROM query_table(cv_splits::VARCHAR)
-),
-src AS (
-    SELECT
-        src_group_col AS _src_grp,
-        date_trunc('second', src_date_col::TIMESTAMP) AS _src_dt
-    FROM query_table(source::VARCHAR)
-)
-SELECT DISTINCT
-    cv._fold_id AS fold_id,
-    cv._split AS split,
-    cv._cv_grp AS group_col,
-    cv._cv_dt AS date_col,
-    cv._is_test,
-    cv._train_cutoff
-FROM cv
-JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
-ORDER BY cv._fold_id, cv._cv_grp, cv._cv_dt
-)"},
-
     // ts_check_leakage: Validate a query result doesn't have obvious data leakage
     // C++ API: ts_check_leakage(result_table, test_filter_col, check_cols, params)
     // Returns: report of columns with suspicious values in test rows
@@ -1315,44 +1130,105 @@ SELECT * FROM _ts_cv_folds_native(
 )
 )"},
 
-    // ts_prepare_regression_input_by: Prepare data for regression models in CV backtest
-    // C++ API: ts_prepare_regression_input_by(cv_splits, source, src_group_col, src_date_col, target_col, params)
-    // This is the "Adapter" for anofox-statistics regression models.
-    // For TEST rows: target is set to NULL (model will predict these)
-    // For TRAIN rows: target keeps original value
-    // All features from source table are preserved
-    // params MAP supports: include_features (VARCHAR[]), known_features (VARCHAR[])
-    // Returns: fold_id, split, group_col, date_col, masked_target, _is_test, plus all source columns
-    {"ts_prepare_regression_input_by", {"cv_splits", "source", "src_group_col", "src_date_col", "target_col", "params", nullptr}, {{nullptr, nullptr}},
+    // ts_cv_hydrate_by: Join CV folds with source data and provide masking tools
+    // C++ API: ts_cv_hydrate_by(cv_folds, source, group_col, date_col, unknown_features, params)
+    //
+    // This function joins CV folds from ts_cv_folds_by with the source data table,
+    // providing tools to mask "unknown" feature columns in test rows to prevent data leakage.
+    //
+    // cv_folds: Output from ts_cv_folds_by (has group_col, date_col, target_col, fold_id, split)
+    // source: Original data table with all features
+    // group_col, date_col: Column identifiers for joining (same in both tables)
+    // unknown_features: VARCHAR[] list of column names to mask in test rows
+    // params MAP supports:
+    //   strategy (VARCHAR, default 'last_value') - 'last_value', 'null', or 'default'
+    //   fill_value (DOUBLE, default 0.0) - value for 'default' strategy
+    //
+    // Fill strategies:
+    //   'last_value' - carry forward last training value per group (default)
+    //   'null' - set unknown features to NULL in test rows
+    //   'default' - set to specified fill_value
+    //
+    // Returns:
+    //   fold_id, split, _is_test, _train_cutoff, all source columns,
+    //   _last_known (MAP with last training values for unknown columns per group/fold)
+    //
+    // Usage: Mask unknown columns using _is_test or _last_known:
+    //   -- Null strategy (mask with NULL):
+    //   SELECT *, CASE WHEN _is_test THEN NULL ELSE competitor_sales END AS competitor_sales_masked
+    //   FROM ts_cv_hydrate_by('folds', 'source', store, date, ['competitor_sales'], MAP{});
+    //
+    //   -- last_value strategy (carry forward):
+    //   SELECT *, CASE WHEN _is_test THEN _last_known['competitor_sales'] ELSE competitor_sales END
+    //   FROM ts_cv_hydrate_by('folds', 'source', store, date, ['competitor_sales'], MAP{});
+    {"ts_cv_hydrate_by", {"cv_folds", "source", "group_col", "date_col", "unknown_features", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
-WITH cv AS (
+WITH _params AS (
     SELECT
-        src_group_col AS _cv_grp,
-        date_trunc('second', src_date_col::TIMESTAMP) AS _cv_dt,
+        COALESCE(json_extract_string(to_json(params), '$.strategy'), 'last_value') AS _strategy,
+        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.fill_value') AS DOUBLE), 0.0) AS _fill_value
+),
+-- CV folds with metadata
+cv AS (
+    SELECT
         fold_id AS _fold_id,
         split AS _split,
-        (split = 'test') AS _is_test
-    FROM query_table(cv_splits::VARCHAR)
-    WHERE split IN ('train', 'test')
+        group_col AS _cv_grp,
+        date_trunc('second', date_col::TIMESTAMP) AS _cv_dt,
+        (split = 'test') AS _is_test,
+        MAX(CASE WHEN split = 'train' THEN date_trunc('second', date_col::TIMESTAMP) END)
+            OVER (PARTITION BY group_col, fold_id) AS _train_cutoff
+    FROM query_table(cv_folds::VARCHAR)
 ),
+-- Source data with join keys
 src AS (
     SELECT *,
-        src_group_col AS _src_grp,
-        date_trunc('second', src_date_col::TIMESTAMP) AS _src_dt,
-        target_col AS _original_target
+        group_col AS _src_grp,
+        date_trunc('second', date_col::TIMESTAMP) AS _src_dt
     FROM query_table(source::VARCHAR)
+),
+-- For each group/fold, get the last training row's JSON representation
+-- This allows us to extract any column's last known value
+last_known_per_fold AS (
+    SELECT
+        cv._cv_grp,
+        cv._fold_id,
+        to_json(src) AS _last_row_json
+    FROM cv
+    JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
+    WHERE cv._split = 'train'
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY cv._cv_grp, cv._fold_id ORDER BY cv._cv_dt DESC) = 1
+),
+-- Build a map of last known values for each unknown column
+last_known_maps AS (
+    SELECT
+        lk._cv_grp,
+        lk._fold_id,
+        -- Create MAP from unknown column names to their last known values
+        MAP_FROM_ENTRIES(
+            LIST(STRUCT_PACK(
+                k := col_name,
+                v := CASE
+                    WHEN (SELECT _strategy FROM _params) = 'null' THEN NULL
+                    WHEN (SELECT _strategy FROM _params) = 'default' THEN (SELECT _fill_value FROM _params)::VARCHAR
+                    ELSE TRY_CAST(json_extract(lk._last_row_json, '$.' || col_name) AS VARCHAR)
+                END
+            ))
+        ) AS _last_known
+    FROM last_known_per_fold lk
+    CROSS JOIN (SELECT UNNEST(unknown_features) AS col_name) uf
+    GROUP BY lk._cv_grp, lk._fold_id
 )
 SELECT
     cv._fold_id AS fold_id,
     cv._split AS split,
-    cv._cv_grp AS group_col,
-    cv._cv_dt AS date_col,
-    -- Mask target for test rows (regression model will predict NULLs)
-    CASE WHEN cv._is_test THEN NULL ELSE src._original_target END AS masked_target,
-    cv._is_test,
-    src.* EXCLUDE (_src_grp, _src_dt, _original_target)
+    cv._is_test AS _is_test,
+    cv._train_cutoff AS _train_cutoff,
+    src.* EXCLUDE (_src_grp, _src_dt),
+    COALESCE(lkm._last_known, MAP{}) AS _last_known
 FROM cv
 JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
+LEFT JOIN last_known_maps lkm ON cv._cv_grp = lkm._cv_grp AND cv._fold_id = lkm._fold_id
 ORDER BY cv._fold_id, cv._cv_grp, cv._cv_dt
 )"},
 

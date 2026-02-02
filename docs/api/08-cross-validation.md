@@ -60,7 +60,7 @@ SELECT * FROM ts_mae_by('cv_forecasts', fold_id, ds, y, forecast);
 |---------|----------|------------|
 | **Two-step** (`ts_cv_folds_by` + `ts_cv_forecast_by`) | Standard backtesting, most use cases | Simple |
 | **Custom cutoffs** (`ts_cv_split_by`) | Specific business dates as fold boundaries | Moderate |
-| **Modular** (`ts_cv_split_by` + custom models) | Regression models, external forecasters | Advanced |
+| **With features** (`ts_cv_hydrate_by`) | Regression models, external forecasters | Moderate |
 
 ---
 
@@ -113,7 +113,7 @@ ts_cv_folds_by(
 | `fold_id` | BIGINT | Fold number (1, 2, 3, ...) |
 | `split` | VARCHAR | `'train'` or `'test'` |
 
-> **Note:** Output contains exactly 5 columns. Features are not passed through. Use hydration functions (`ts_hydrate_split_full_by`, `ts_prepare_regression_input_by`) to join features from the source table when needed.
+> **Note:** Output contains exactly 5 columns. Features are not passed through. Use `ts_cv_hydrate_by` to join features from the source table when needed.
 
 **Examples:**
 ```sql
@@ -140,22 +140,6 @@ SELECT * FROM ts_cv_folds_by(
     'sales_data', store_id, date, revenue,
     10, 3, {'skip_length': 1}
 );
-
--- Output preserves original column names
-SELECT * FROM ts_cv_folds_by(
-    'sales_data', store_id, date, revenue,
-    3, 6, MAP{}
-);
--- Output: store_id, date, revenue, fold_id, split
-
--- To add features, use hydration functions after creating folds
-CREATE TABLE folds AS
-SELECT * FROM ts_cv_folds_by('sales_data', store_id, date, revenue, 3, 6, MAP{});
-
-SELECT * FROM ts_hydrate_split_full_by(
-    'folds', 'sales_data', store_id, date, MAP{}
-);
--- Output: fold_id, split, _is_test, _train_cutoff, store_id, date, revenue, temperature, ...
 ```
 
 ---
@@ -164,7 +148,7 @@ SELECT * FROM ts_hydrate_split_full_by(
 
 Generate **univariate** forecasts for pre-computed cross-validation folds. **Use this with output from `ts_cv_folds_by`.**
 
-> **Univariate only:** This function forecasts using only the target column history. It does not support exogenous variables or feature columns. For models with features, use `ts_prepare_regression_input_by` with your own regression model.
+> **Univariate only:** This function forecasts using only the target column history. It does not support exogenous variables or feature columns. For models with features, use `ts_cv_hydrate_by` with your own regression model.
 
 **Signature:**
 ```sql
@@ -229,38 +213,82 @@ SELECT * FROM ts_mape_by('cv_results', fold_id, ds, y, forecast);
 
 ## Regression & ML Model Backtesting
 
-> Use these hydration functions to add feature columns for regression models or external forecasters.
+> Use `ts_cv_hydrate_by` to add feature columns for regression models or external forecasters.
 
-**When to use these functions:**
+**When to use this function:**
 - You need to add feature columns from your source table to CV folds
 - You want to mask unknown features in test rows to prevent data leakage
 - You're using regression models that need exogenous variables
 
-> **Note:** Both `ts_cv_folds_by` and `ts_cv_split_by` output the same schema (group, date, target, fold_id, split). Use hydration functions to add feature columns from the source table.
+### ts_cv_hydrate_by
 
-### Regression Workflow
+Join CV folds with source data and provide tools for masking unknown features in test rows.
+
+**Signature:**
+```sql
+ts_cv_hydrate_by(
+    cv_folds VARCHAR,         -- Output from ts_cv_folds_by or ts_cv_split_by
+    source VARCHAR,           -- Original source table with features
+    group_col COLUMN,         -- Group column (same in both tables)
+    date_col COLUMN,          -- Date column (same in both tables)
+    unknown_features VARCHAR[], -- List of column names to track for masking
+    params MAP = {}           -- Masking strategy options
+) → TABLE
+```
+
+**Params Options:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `strategy` | VARCHAR | `'last_value'` | `'last_value'`, `'null'`, or `'default'` |
+| `fill_value` | DOUBLE | `0.0` | Value for `'default'` strategy |
+
+**Fill Strategies:**
+| Strategy | Description |
+|----------|-------------|
+| `'last_value'` (default) | Carry forward last value from training period per group |
+| `'null'` | Set unknown features to NULL in test rows |
+| `'default'` | Set to specified `fill_value` |
+
+**Output Columns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `fold_id` | BIGINT | CV fold number |
+| `split` | VARCHAR | `'train'` or `'test'` |
+| `_is_test` | BOOLEAN | True for test rows (use for masking) |
+| `_train_cutoff` | TIMESTAMP | Training end date for fold |
+| *(all source columns)* | | Original data columns |
+| `_last_known` | MAP | Last training values for unknown features |
+
+**Usage Patterns:**
 
 ```sql
--- Step 1: Create folds (preferred approach - auto-generates fold boundaries)
+-- Step 1: Create folds
 CREATE TABLE cv_folds AS
-SELECT * FROM ts_cv_folds_by(
-    'sales', store_id, date, revenue,
-    3, 30, MAP{}  -- 3 folds, 30-period horizon
+SELECT * FROM ts_cv_folds_by('sales', store_id, date, revenue, 3, 30, MAP{});
+
+-- Step 2: Hydrate with features from source
+CREATE TABLE hydrated AS
+SELECT * FROM ts_cv_hydrate_by(
+    'cv_folds', 'sales', store_id, date,
+    ['competitor_sales', 'actual_temp'],  -- Unknown features
+    MAP{'strategy': 'last_value'}
 );
 
--- Step 2: Hydrate with features from source, masking target in test rows
-CREATE TABLE regression_input AS
-SELECT * FROM ts_prepare_regression_input_by(
-    'cv_folds', 'sales', store_id, date, revenue, MAP{}
-);
-
--- Step 3: Train your regression model on rows where masked_target IS NOT NULL
--- Step 4: Predict on rows where masked_target IS NULL
+-- Step 3: Mask unknown features using _is_test
+SELECT
+    fold_id, split, store_id, date, revenue,
+    -- Known features: use directly
+    day_of_week,
+    is_holiday,
+    -- Unknown features: mask in test rows
+    CASE WHEN _is_test THEN NULL ELSE competitor_sales END AS competitor_sales,
+    CASE WHEN _is_test THEN _last_known['actual_temp'] ELSE actual_temp::VARCHAR END AS actual_temp
+FROM hydrated;
 ```
 
 ### The Data Leakage Problem
 
-When building custom CV pipelines, you need to join CV folds back to your source data. These functions prevent **data leakage** by automatically masking features that wouldn't be known at prediction time.
+When building custom CV pipelines, you need to join CV folds back to your source data. This function prevents **data leakage** by providing tools to mask features that wouldn't be known at prediction time.
 
 In time series CV, the test set represents "future" data. Features that depend on future values (e.g., actual temperature, competitor sales) must be masked to prevent leakage:
 
@@ -273,203 +301,39 @@ Known features:     ✓ Available in both train and test
 Unknown features:   ✓ Available in train, ✗ Must be masked in test
 ```
 
----
+### Regression Workflow Example
 
-### ts_prepare_regression_input_by
-
-Prepare data for regression models in CV backtest. Joins CV folds with source data and masks target in test rows.
-
-**Signature:**
 ```sql
-ts_prepare_regression_input_by(
-    cv_folds VARCHAR,         -- Output from ts_cv_folds_by or ts_cv_split_by
-    source VARCHAR,           -- Original source table with features
-    src_group_col COLUMN,
-    src_date_col COLUMN,
-    target_col COLUMN,
-    params MAP
-) → TABLE
-```
+-- Step 1: Create folds
+CREATE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by(
+    'sales', store_id, date, revenue,
+    3, 30, MAP{}
+);
 
-**Key Behavior:**
-- **Train rows:** Target keeps original value
-- **Test rows:** Target set to NULL (model will predict these)
-- All features from source are preserved
-
-**Output Columns:**
-| Column | Type | Description |
-|--------|------|-------------|
-| `fold_id` | BIGINT | CV fold number |
-| `split` | VARCHAR | `'train'` or `'test'` |
-| `group_col` | ANY | Group identifier |
-| `date_col` | TIMESTAMP | Date |
-| `masked_target` | DOUBLE | NULL in test, actual in train |
-| `_is_test` | BOOLEAN | Test row indicator |
-| *(all source columns)* | | Original features |
-
-**Example:**
-```sql
--- Prepare data for external regression model
+-- Step 2: Hydrate with features, specifying unknown columns
 CREATE TABLE regression_input AS
-SELECT * FROM ts_prepare_regression_input_by(
-    'cv_folds', 'sales_data', store_id, date, revenue, MAP{}
+SELECT
+    fold_id, split, _is_test,
+    store_id, date,
+    -- Target: mask in test rows for prediction
+    CASE WHEN _is_test THEN NULL ELSE revenue END AS masked_target,
+    -- Known features: use directly
+    day_of_week,
+    month,
+    is_holiday,
+    -- Unknown features: mask with appropriate strategy
+    CASE WHEN _is_test THEN _last_known['competitor_sales'] ELSE competitor_sales::VARCHAR END AS competitor_sales,
+    CASE WHEN _is_test THEN NULL ELSE actual_temp END AS actual_temp
+FROM ts_cv_hydrate_by(
+    'cv_folds', 'sales', store_id, date,
+    ['competitor_sales', 'actual_temp'],
+    MAP{'strategy': 'last_value'}
 );
 
--- Train: Use rows where masked_target IS NOT NULL
--- Test: Predict rows where masked_target IS NULL
+-- Step 3: Train your regression model on rows where masked_target IS NOT NULL
+-- Step 4: Predict on rows where masked_target IS NULL
 ```
-
----
-
-### ts_hydrate_split_by
-
-Join CV folds with source data, masking a specific unknown column.
-
-**Signature:**
-```sql
-ts_hydrate_split_by(
-    cv_folds VARCHAR,         -- Output from ts_cv_folds_by or ts_cv_split_by
-    source VARCHAR,           -- Original source table with features
-    src_group_col COLUMN,     -- Group column in source
-    src_date_col COLUMN,      -- Date column in source
-    unknown_col COLUMN,       -- Column to mask in test set
-    params MAP                -- Masking strategy options
-) → TABLE
-```
-
-**Params Options:**
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `strategy` | VARCHAR | `'null'` | `'null'`, `'last_value'`, or `'default'` |
-| `fill_value` | DOUBLE | `0.0` | Value for `'default'` strategy |
-
-**Masking Strategies:**
-| Strategy | Description |
-|----------|-------------|
-| `'null'` | Set unknown values to NULL (default) |
-| `'last_value'` | Use last known value before cutoff |
-| `'default'` | Use specified `fill_value` |
-
-**Example:**
-```sql
--- Mask temperature in test set using last known value
-SELECT * FROM ts_hydrate_split_by(
-    'cv_folds',
-    'weather_data',
-    region,
-    date,
-    temperature,
-    {'strategy': 'last_value'}
-) WHERE fold_id = 1;
-```
-
----
-
-### ts_hydrate_split_full_by
-
-Join CV folds with ALL source columns, adding metadata flags for manual masking.
-
-**Signature:**
-```sql
-ts_hydrate_split_full_by(
-    cv_splits VARCHAR,
-    source VARCHAR,
-    src_group_col COLUMN,
-    src_date_col COLUMN,
-    params MAP
-) → TABLE
-```
-
-**Output Columns:**
-| Column | Type | Description |
-|--------|------|-------------|
-| `fold_id` | BIGINT | CV fold number |
-| `split` | VARCHAR | `'train'` or `'test'` |
-| `_is_test` | BOOLEAN | True for test rows |
-| `_train_cutoff` | TIMESTAMP | Training end date for fold |
-| *(all source columns)* | | Original data columns |
-
-**Example:**
-```sql
--- Manual masking pattern
-SELECT
-    *,
-    CASE WHEN _is_test THEN NULL ELSE competitor_sales END AS competitor_sales_masked,
-    CASE WHEN _is_test THEN NULL ELSE actual_weather END AS weather_masked
-FROM ts_hydrate_split_full_by(
-    'cv_folds', 'sales_features', store_id, date, MAP{}
-);
-```
-
----
-
-### ts_hydrate_split_strict_by
-
-Fail-safe join returning ONLY metadata columns, forcing explicit column selection.
-
-**Signature:**
-```sql
-ts_hydrate_split_strict_by(
-    cv_splits VARCHAR,
-    source VARCHAR,
-    src_group_col COLUMN,
-    src_date_col COLUMN,
-    params MAP
-) → TABLE(fold_id, split, group_col, date_col, _is_test, _train_cutoff)
-```
-
-**Example:**
-```sql
--- Maximum safety: explicitly select and mask each column
-SELECT
-    hs.*,
-    src.price,  -- Known feature, no masking needed
-    CASE WHEN hs._is_test THEN NULL ELSE src.competitor_price END AS competitor_price
-FROM ts_hydrate_split_strict_by('cv_folds', 'data', store, date, MAP{}) hs
-JOIN data src ON hs.group_col = src.store AND hs.date_col = src.date;
-```
-
----
-
-### ts_hydrate_features_by
-
-Automatically hydrate CV folds with features, marking test rows for masking.
-
-**Signature:**
-```sql
-ts_hydrate_features_by(
-    cv_folds VARCHAR,         -- Output from ts_cv_folds_by or ts_cv_split_by
-    source VARCHAR,           -- Original data with features
-    src_group_col COLUMN,
-    src_date_col COLUMN,
-    target_col COLUMN,        -- Target column in cv_folds
-    params MAP
-) → TABLE
-```
-
-**Output Columns:** Same as `ts_hydrate_split_full_by` including `_is_test` flag.
-
-**Example:**
-```sql
--- Hydrate and mask unknown features
-SELECT
-    *,
-    CASE WHEN _is_test THEN NULL ELSE temperature END AS temp_masked,
-    CASE WHEN _is_test THEN NULL ELSE competitor_sales END AS comp_masked
-FROM ts_hydrate_features_by('cv_folds', 'feature_data', series_id, date, revenue, MAP{});
-```
-
----
-
-### Choosing the Right Hydration Function
-
-| Function | Use Case | Safety Level |
-|----------|----------|--------------|
-| `ts_hydrate_split_by` | Mask one specific column | Medium |
-| `ts_hydrate_split_full_by` | Manual masking with `_is_test` flag | Medium |
-| `ts_hydrate_split_strict_by` | Force explicit column handling | High |
-| `ts_hydrate_features_by` | Auto-hydrate with masking flags | Medium |
-| `ts_prepare_regression_input_by` | Regression model prep | High |
 
 ---
 
