@@ -102,66 +102,133 @@ ts_bias_by(source, date_col, actual_col, forecast_col) → TABLE(...group_cols, 
 
 ### ts_mase_by
 
-Compute Mean Absolute Scaled Error per group (requires baseline).
+Compute Mean Absolute Scaled Error grouped by selected columns (requires baseline).
 
 **Signature:**
 ```sql
-ts_mase_by(source, group_col, date_col, actual_col, forecast_col, baseline_col) → TABLE(id, mase)
+ts_mase_by(source, date_col, actual_col, forecast_col, baseline_col) → TABLE(...group_cols, mase)
 ```
 
-**Example:**
+**Parameters:**
+- `source` - Table expression (subquery or view) with grouping + metric columns
+- `date_col` - VARCHAR column name for date/time ordering
+- `actual_col` - VARCHAR column name for actual values
+- `forecast_col` - VARCHAR column name for predicted values
+- `baseline_col` - VARCHAR column name for baseline/naive forecast values
+
+**Examples:**
 ```sql
-SELECT * FROM ts_mase_by('results', product_id, date, actual, forecast, naive_forecast);
+-- Group by series
+SELECT * FROM ts_mase_by(
+    (SELECT unique_id, ds, y, forecast, naive_forecast FROM results),
+    'ds', 'y', 'forecast', 'naive_forecast'
+);
+
+-- Group by series and fold
+SELECT * FROM ts_mase_by(
+    (SELECT unique_id, fold_id, ds, y, forecast, naive_forecast FROM cv_results),
+    'ds', 'y', 'forecast', 'naive_forecast'
+);
 ```
 
 ---
 
 ### ts_rmae_by
 
-Compute Relative MAE per group (compares two models).
+Compute Relative MAE grouped by selected columns (compares two models).
 
 **Signature:**
 ```sql
-ts_rmae_by(source, group_col, date_col, actual_col, pred1_col, pred2_col) → TABLE(id, rmae)
+ts_rmae_by(source, date_col, actual_col, pred1_col, pred2_col) → TABLE(...group_cols, rmae)
 ```
 
-**Example:**
+**Parameters:**
+- `source` - Table expression (subquery or view) with grouping + metric columns
+- `date_col` - VARCHAR column name for date/time ordering
+- `actual_col` - VARCHAR column name for actual values
+- `pred1_col` - VARCHAR column name for first model's predictions
+- `pred2_col` - VARCHAR column name for second model's predictions (baseline)
+
+**Examples:**
 ```sql
-SELECT * FROM ts_rmae_by('results', product_id, date, actual, ets_forecast, naive_forecast);
+-- Group by series
+SELECT * FROM ts_rmae_by(
+    (SELECT unique_id, ds, y, ets_forecast, naive_forecast FROM results),
+    'ds', 'y', 'ets_forecast', 'naive_forecast'
+);
 -- rmae < 1 means ETS outperforms naive
+
+-- Group by series and fold
+SELECT * FROM ts_rmae_by(
+    (SELECT unique_id, fold_id, ds, y, model_pred, baseline_pred FROM cv_results),
+    'ds', 'y', 'model_pred', 'baseline_pred'
+);
 ```
 
 ---
 
 ### ts_coverage_by
 
-Compute prediction interval coverage per group.
+Compute prediction interval coverage grouped by selected columns.
 
 **Signature:**
 ```sql
-ts_coverage_by(source, group_col, date_col, actual_col, lower_col, upper_col) → TABLE(id, coverage)
+ts_coverage_by(source, date_col, actual_col, lower_col, upper_col) → TABLE(...group_cols, coverage)
 ```
 
-**Example:**
+**Parameters:**
+- `source` - Table expression (subquery or view) with grouping + metric columns
+- `date_col` - VARCHAR column name for date/time ordering
+- `actual_col` - VARCHAR column name for actual values
+- `lower_col` - VARCHAR column name for lower prediction interval bound
+- `upper_col` - VARCHAR column name for upper prediction interval bound
+
+**Examples:**
 ```sql
-SELECT * FROM ts_coverage_by('results', product_id, date, actual, lower_90, upper_90);
+-- Group by series
+SELECT * FROM ts_coverage_by(
+    (SELECT unique_id, ds, y, lower_90, upper_90 FROM results),
+    'ds', 'y', 'lower_90', 'upper_90'
+);
+
+-- Group by series and fold
+SELECT * FROM ts_coverage_by(
+    (SELECT unique_id, fold_id, ds, y, lower_90, upper_90 FROM cv_results),
+    'ds', 'y', 'lower_90', 'upper_90'
+);
 ```
 
 ---
 
 ### ts_quantile_loss_by
 
-Compute quantile loss per group.
+Compute quantile loss grouped by selected columns.
 
 **Signature:**
 ```sql
-ts_quantile_loss_by(source, group_col, date_col, actual_col, forecast_col, quantile) → TABLE(id, quantile_loss)
+ts_quantile_loss_by(source, date_col, actual_col, forecast_col, quantile) → TABLE(...group_cols, quantile_loss)
 ```
 
-**Example:**
+**Parameters:**
+- `source` - Table expression (subquery or view) with grouping + metric columns
+- `date_col` - VARCHAR column name for date/time ordering
+- `actual_col` - VARCHAR column name for actual values
+- `forecast_col` - VARCHAR column name for quantile forecast values
+- `quantile` - DOUBLE quantile level (0.0 to 1.0)
+
+**Examples:**
 ```sql
-SELECT * FROM ts_quantile_loss_by('results', product_id, date, actual, forecast_p50, 0.5);
-```
+-- Group by series
+SELECT * FROM ts_quantile_loss_by(
+    (SELECT unique_id, ds, y, forecast_p50 FROM results),
+    'ds', 'y', 'forecast_p50', 0.5
+);
+
+-- Group by series and fold
+SELECT * FROM ts_quantile_loss_by(
+    (SELECT unique_id, fold_id, ds, y, forecast_p90 FROM cv_results),
+    'ds', 'y', 'forecast_p90', 0.9
+);
 
 ---
 

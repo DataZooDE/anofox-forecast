@@ -1804,64 +1804,32 @@ R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'bias')
 )"},
 
-    // ts_mase_by: Compute Mean Absolute Scaled Error per group
-    // C++ API: ts_mase_by(table_name, group_col, date_col, actual_col, forecast_col, baseline_col)
-    {"ts_mase_by", {"source", "group_col", "date_col", "actual_col", "forecast_col", "baseline_col", nullptr}, {{nullptr, nullptr}},
+    // ts_mase_by: Compute Mean Absolute Scaled Error with GROUP BY ALL
+    // C++ API: ts_mase_by(source, date_col, actual_col, forecast_col, baseline_col)
+    {"ts_mase_by", {"source", "date_col", "actual_col", "forecast_col", "baseline_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT
-    group_col AS id,
-    ts_mase(
-        LIST(actual_col::DOUBLE ORDER BY date_col),
-        LIST(forecast_col::DOUBLE ORDER BY date_col),
-        LIST(baseline_col::DOUBLE ORDER BY date_col)
-    ) AS mase
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+SELECT * FROM _ts_mase_native(source, date_col, actual_col, forecast_col, baseline_col)
 )"},
 
-    // ts_rmae_by: Compute Relative Mean Absolute Error per group (compares two models)
-    // C++ API: ts_rmae_by(table_name, group_col, date_col, actual_col, pred1_col, pred2_col)
-    {"ts_rmae_by", {"source", "group_col", "date_col", "actual_col", "pred1_col", "pred2_col", nullptr}, {{nullptr, nullptr}},
+    // ts_rmae_by: Compute Relative Mean Absolute Error with GROUP BY ALL
+    // C++ API: ts_rmae_by(source, date_col, actual_col, pred1_col, pred2_col)
+    {"ts_rmae_by", {"source", "date_col", "actual_col", "pred1_col", "pred2_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT
-    group_col AS id,
-    ts_rmae(
-        LIST(actual_col::DOUBLE ORDER BY date_col),
-        LIST(pred1_col::DOUBLE ORDER BY date_col),
-        LIST(pred2_col::DOUBLE ORDER BY date_col)
-    ) AS rmae
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+SELECT * FROM _ts_rmae_native(source, date_col, actual_col, pred1_col, pred2_col)
 )"},
 
-    // ts_coverage_by: Compute prediction interval coverage per group
-    // C++ API: ts_coverage_by(table_name, group_col, date_col, actual_col, lower_col, upper_col)
-    {"ts_coverage_by", {"source", "group_col", "date_col", "actual_col", "lower_col", "upper_col", nullptr}, {{nullptr, nullptr}},
+    // ts_coverage_by: Compute prediction interval coverage with GROUP BY ALL
+    // C++ API: ts_coverage_by(source, date_col, actual_col, lower_col, upper_col)
+    {"ts_coverage_by", {"source", "date_col", "actual_col", "lower_col", "upper_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT
-    group_col AS id,
-    ts_coverage(
-        LIST(actual_col::DOUBLE ORDER BY date_col),
-        LIST(lower_col::DOUBLE ORDER BY date_col),
-        LIST(upper_col::DOUBLE ORDER BY date_col)
-    ) AS coverage
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+SELECT * FROM _ts_coverage_native(source, date_col, actual_col, lower_col, upper_col)
 )"},
 
-    // ts_quantile_loss_by: Compute quantile loss per group
-    // C++ API: ts_quantile_loss_by(table_name, group_col, date_col, actual_col, forecast_col, quantile)
-    {"ts_quantile_loss_by", {"source", "group_col", "date_col", "actual_col", "forecast_col", "quantile", nullptr}, {{nullptr, nullptr}},
+    // ts_quantile_loss_by: Compute quantile loss with GROUP BY ALL
+    // C++ API: ts_quantile_loss_by(source, date_col, actual_col, forecast_col, quantile)
+    {"ts_quantile_loss_by", {"source", "date_col", "actual_col", "forecast_col", "quantile", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT
-    group_col AS id,
-    ts_quantile_loss(
-        LIST(actual_col::DOUBLE ORDER BY date_col),
-        LIST(forecast_col::DOUBLE ORDER BY date_col),
-        quantile
-    ) AS quantile_loss
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+SELECT * FROM _ts_quantile_loss_native(source, date_col, actual_col, forecast_col, quantile)
 )"},
 
     // Sentinel

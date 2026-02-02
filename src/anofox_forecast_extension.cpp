@@ -155,6 +155,10 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsSplitKeysFunction(loader);
     RegisterTsValidateSeparatorFunction(loader);
     RegisterTsMetricsNativeFunction(loader);
+    RegisterTsMaseNativeFunction(loader);
+    RegisterTsRmaeNativeFunction(loader);
+    RegisterTsCoverageNativeFunction(loader);
+    RegisterTsQuantileLossNativeFunction(loader);
 
     // Initialize telemetry (respects DATAZOO_DISABLE_TELEMETRY env var)
     anofox_telemetry_init(true, nullptr);

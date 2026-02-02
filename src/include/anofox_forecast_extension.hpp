@@ -121,6 +121,10 @@ void RegisterTsCombineKeysFunction(ExtensionLoader &loader);
 void RegisterTsSplitKeysFunction(ExtensionLoader &loader);
 void RegisterTsValidateSeparatorFunction(ExtensionLoader &loader);
 void RegisterTsMetricsNativeFunction(ExtensionLoader &loader);
+void RegisterTsMaseNativeFunction(ExtensionLoader &loader);
+void RegisterTsRmaeNativeFunction(ExtensionLoader &loader);
+void RegisterTsCoverageNativeFunction(ExtensionLoader &loader);
+void RegisterTsQuantileLossNativeFunction(ExtensionLoader &loader);
 
 // Extension class
 class AnofoxForecastExtension : public Extension {
