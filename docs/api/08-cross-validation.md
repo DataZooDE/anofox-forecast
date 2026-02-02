@@ -45,9 +45,9 @@ Use the two-step workflow for cross-validation:
 CREATE TABLE cv_folds AS
 SELECT * FROM ts_cv_folds_by('data', unique_id, ds, y, 3, 12, MAP{});
 
--- Step 2: Generate forecasts (matches to existing test dates)
+-- Step 2: Generate forecasts (horizon inferred from test data)
 CREATE TABLE cv_forecasts AS
-SELECT * FROM ts_cv_forecast_by('cv_folds', unique_id, ds, y, 'Naive', 12, MAP{});
+SELECT * FROM ts_cv_forecast_by('cv_folds', unique_id, ds, y, 'Naive', MAP{});
 
 -- Step 3: Compute metrics per fold
 SELECT * FROM ts_rmse_by('cv_forecasts', fold_id, ds, y, forecast);
@@ -158,14 +158,15 @@ ts_cv_forecast_by(
     date_col COLUMN,          -- Date column
     target_col COLUMN,        -- Target column (original name preserved)
     method VARCHAR,           -- Forecast method (e.g., 'Naive', 'AutoETS', 'AutoARIMA')
-    horizon BIGINT,           -- Forecast horizon
     params MAP = {}           -- Model parameters
 ) → TABLE
 ```
 
+> **Note:** Horizon is automatically inferred from the number of test rows per fold/group. No need to specify it separately.
+
 **Input Requirements:**
 
-The input table must be the output of `ts_cv_folds_by` containing:
+The input table must be the output of `ts_cv_folds_by` (or `ts_cv_split_by`) containing **both train and test** rows:
 - `fold_id`: Fold identifier
 - `split`: 'train' or 'test'
 - Group, date, and target columns (original names preserved)
@@ -195,13 +196,13 @@ Returns the test rows with forecast columns added:
 **Example:**
 
 ```sql
--- Step 1: Create folds
+-- Step 1: Create folds (both train and test rows)
 CREATE TABLE folds AS
 SELECT * FROM ts_cv_folds_by('data', unique_id, ds, y, 3, 6, MAP{});
 
--- Step 2: Generate forecasts
+-- Step 2: Generate forecasts (horizon inferred from test data)
 CREATE TABLE cv_results AS
-SELECT * FROM ts_cv_forecast_by('folds', unique_id, ds, y, 'Naive', 6, MAP{});
+SELECT * FROM ts_cv_forecast_by('folds', unique_id, ds, y, 'Naive', MAP{});
 
 -- Step 3: Compute metrics per fold
 SELECT * FROM ts_rmse_by('cv_results', fold_id, ds, y, forecast);

@@ -34,9 +34,6 @@ namespace duckdb {
 // ============================================================================
 
 struct TsCvForecastNativeBindData : public TableFunctionData {
-    // Required parameters
-    int64_t horizon = 7;
-
     // Model parameters
     string method = "AutoETS";
     string model_spec = "";  // ETS model spec like "ZZZ"
@@ -247,7 +244,7 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
     auto bind_data = make_uniq<TsCvForecastNativeBindData>();
 
     // Input table has columns: fold_id, split, group_col, date_col, value_col
-    // Arguments after table: horizon, method, params
+    // Arguments after table: method, params
     if (input.input_table_types.size() != 5) {
         throw InvalidInputException(
             "_ts_cv_forecast_native requires input with exactly 5 columns: "
@@ -255,19 +252,14 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
             input.input_table_types.size());
     }
 
-    // Parse horizon (index 1)
-    if (input.inputs.size() >= 2) {
-        bind_data->horizon = input.inputs[1].GetValue<int64_t>();
+    // Parse method (index 1)
+    if (input.inputs.size() >= 2 && !input.inputs[1].IsNull()) {
+        bind_data->method = input.inputs[1].GetValue<string>();
     }
 
-    // Parse method (index 2)
+    // Parse params (index 2)
     if (input.inputs.size() >= 3 && !input.inputs[2].IsNull()) {
-        bind_data->method = input.inputs[2].GetValue<string>();
-    }
-
-    // Parse params (index 3)
-    if (input.inputs.size() >= 4 && !input.inputs[3].IsNull()) {
-        auto &params = input.inputs[3];
+        auto &params = input.inputs[2];
         bind_data->model_spec = ParseStringFromParams(params, "model", "");
         bind_data->seasonal_period = ParseInt64FromParams(params, "seasonal_period", 0);
         bind_data->confidence_level = ParseDoubleFromParams(params, "confidence_level", 0.90);
@@ -485,7 +477,8 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
             strncpy(opts.model, full_method.c_str(), sizeof(opts.model) - 1);
             opts.model[sizeof(opts.model) - 1] = '\0';
 
-            opts.horizon = static_cast<int>(bind_data.horizon);
+            // Horizon is inferred from test data size
+            opts.horizon = static_cast<int>(sorted_test_dates.size());
             opts.confidence_level = bind_data.confidence_level;
             opts.seasonal_period = static_cast<int>(bind_data.seasonal_period);
             opts.auto_detect_seasonality = (bind_data.seasonal_period == 0);
@@ -604,13 +597,13 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
 // ============================================================================
 
 void RegisterTsCvForecastNativeFunction(ExtensionLoader &loader) {
-    // Internal table-in-out function: (TABLE, horizon, method, params)
+    // Internal table-in-out function: (TABLE, method, params)
     // Input table must have 5 columns: fold_id, split, group_col, date_col, value_col
     //
     // This is an internal function (prefixed with _) called by ts_cv_forecast_by macro.
-    // Frequency parameter removed - uses position-based matching to existing test dates.
+    // Horizon is inferred from the number of test rows per fold/group.
     TableFunction func("_ts_cv_forecast_native",
-        {LogicalType::TABLE, LogicalType::INTEGER, LogicalType::VARCHAR, LogicalType::ANY},
+        {LogicalType::TABLE, LogicalType::VARCHAR, LogicalType::ANY},
         nullptr,  // No execute function - use in_out_function
         TsCvForecastNativeBind,
         TsCvForecastNativeInitGlobal,

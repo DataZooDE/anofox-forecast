@@ -509,19 +509,18 @@ SELECT * FROM _ts_forecast_native(
 )"},
 
     // ts_cv_forecast_by: Generate forecasts for CV splits with parallel fold execution
-    // C++ API: ts_cv_forecast_by(ml_folds, group_col, date_col, target_col, method, horizon, params)
+    // C++ API: ts_cv_forecast_by(ml_folds, group_col, date_col, target_col, method, params)
     // Processes all folds in parallel using DuckDB's vectorization
     //
     // IMPORTANT: ml_folds should be output from ts_cv_folds_by containing BOTH train and test rows.
     // The function trains on 'train' rows and matches forecasts to existing 'test' row dates.
-    // No frequency parameter needed - dates come from the input data.
+    // Horizon is inferred from the number of test rows per fold/group.
     //
     // Uses native streaming implementation to avoid LIST() memory issues
-    {"ts_cv_forecast_by", {"ml_folds", "group_col", "date_col", "target_col", "method", "horizon", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
+    {"ts_cv_forecast_by", {"ml_folds", "group_col", "date_col", "target_col", "method", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_cv_forecast_native(
     (SELECT fold_id, split, group_col, date_col, target_col FROM query_table(ml_folds::VARCHAR)),
-    horizon,
     method,
     params
 )

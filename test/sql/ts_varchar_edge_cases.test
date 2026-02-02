@@ -133,15 +133,15 @@ CREATE TABLE cv_splits_varchar AS
 SELECT * FROM ts_cv_split_by(
     'varchar_data', id, ds, y,
     [('2024-02-15'::TIMESTAMP)],
-    7, '1d', MAP {}
+    7, MAP {}
 );
 
 # ts_cv_forecast_by should work with VARCHAR target from splits
-# Note: ts_cv_split outputs group_col, date_col, target_col columns
+# Note: ts_cv_split preserves original column names
 query I
 SELECT COUNT(*) > 0 FROM ts_cv_forecast_by(
     'cv_splits_varchar',
-    group_col, date_col, target_col, 'Naive', 5, MAP([], [])
+    id, ds, y, 'Naive', MAP{}
 );
 ----
 true

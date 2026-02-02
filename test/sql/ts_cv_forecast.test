@@ -36,7 +36,7 @@ SELECT fold_id, split, COUNT(*) AS cnt FROM cv_folds GROUP BY fold_id, split ORD
 # Test ts_cv_forecast_by with pre-generated folds
 query III
 SELECT fold_id, split, COUNT(*)
-FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', 4, MAP{})
+FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', MAP{})
 GROUP BY fold_id, split ORDER BY fold_id, split;
 ----
 1	test	4
@@ -50,7 +50,7 @@ GROUP BY fold_id, split ORDER BY fold_id, split;
 # Verify output has expected columns
 query I
 SELECT COUNT(*) FROM (
-    DESCRIBE SELECT * FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', 4, MAP{})
+    DESCRIBE SELECT * FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', MAP{})
 );
 ----
 9
@@ -58,7 +58,7 @@ SELECT COUNT(*) FROM (
 # Verify output column names
 query I
 SELECT column_name FROM (
-    DESCRIBE SELECT * FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', 4, MAP{})
+    DESCRIBE SELECT * FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', MAP{})
 ) ORDER BY column_name;
 ----
 ds
@@ -74,7 +74,7 @@ y
 # Verify forecast values are not NULL for test rows
 query I
 SELECT COUNT(*) AS null_forecasts
-FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', 4, MAP{})
+FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', MAP{})
 WHERE forecast IS NULL;
 ----
 0
@@ -82,7 +82,7 @@ WHERE forecast IS NULL;
 # Verify y (actual) values are preserved
 query I
 SELECT COUNT(*) AS null_actuals
-FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', 4, MAP{})
+FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', MAP{})
 WHERE y IS NULL;
 ----
 0
@@ -94,7 +94,7 @@ WHERE y IS NULL;
 # Verify forecasts match existing test dates (not generated)
 query I
 WITH forecasts AS (
-    SELECT * FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', 4, MAP{})
+    SELECT * FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', MAP{})
 ),
 original_test AS (
     SELECT * FROM cv_folds WHERE split = 'test'
@@ -108,7 +108,7 @@ JOIN original_test t ON f.series_id = t.series_id AND f.fold_id = t.fold_id AND 
 # Verify all forecast dates exist in original test data
 query I
 WITH forecasts AS (
-    SELECT DISTINCT ds FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', 4, MAP{})
+    SELECT DISTINCT ds FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', MAP{})
 ),
 test_dates AS (
     SELECT DISTINCT ds FROM cv_folds WHERE split = 'test'
@@ -123,7 +123,7 @@ SELECT COUNT(*) FROM forecasts f LEFT JOIN test_dates t ON f.ds = t.ds WHERE t.d
 
 # Test INTEGER column preserved
 query I
-SELECT typeof(ds) FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', 4, MAP{}) LIMIT 1;
+SELECT typeof(ds) FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', MAP{}) LIMIT 1;
 ----
 INTEGER
 
@@ -138,7 +138,7 @@ CREATE TABLE cv_date_folds AS
 SELECT * FROM ts_cv_folds_by('cv_dates', series_id, ds, y, 2, 3, MAP{});
 
 query I
-SELECT typeof(ds) FROM ts_cv_forecast_by('cv_date_folds', series_id, ds, y, 'Naive', 3, MAP{}) LIMIT 1;
+SELECT typeof(ds) FROM ts_cv_forecast_by('cv_date_folds', series_id, ds, y, 'Naive', MAP{}) LIMIT 1;
 ----
 DATE
 
@@ -154,13 +154,13 @@ DROP TABLE cv_date_folds;
 
 # Test Naive method
 query I
-SELECT DISTINCT model_name FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', 4, MAP{});
+SELECT DISTINCT model_name FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', MAP{});
 ----
 Naive
 
 # Test Drift method
 query I
-SELECT DISTINCT model_name FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Drift', 4, MAP{});
+SELECT DISTINCT model_name FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Drift', MAP{});
 ----
 Drift
 
@@ -168,11 +168,11 @@ Drift
 query I
 WITH naive AS (
     SELECT fold_id, ds, forecast AS naive_fcst
-    FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', 4, MAP{})
+    FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', MAP{})
 ),
 drift AS (
     SELECT fold_id, ds, forecast AS drift_fcst
-    FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Drift', 4, MAP{})
+    FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Drift', MAP{})
 )
 SELECT COUNT(*) > 0 AS forecasts_differ
 FROM naive n
@@ -201,7 +201,7 @@ SELECT * FROM ts_cv_folds_by('cv_multi_data', series_id, ds, y, 2, 3, MAP{});
 # Each group gets independent forecasts
 query III
 SELECT series_id, fold_id, COUNT(*)
-FROM ts_cv_forecast_by('cv_multi_folds', series_id, ds, y, 'Naive', 3, MAP{})
+FROM ts_cv_forecast_by('cv_multi_folds', series_id, ds, y, 'Naive', MAP{})
 GROUP BY series_id, fold_id ORDER BY series_id, fold_id;
 ----
 A	1	3
@@ -225,7 +225,7 @@ CREATE TABLE cv_single_fold AS
 SELECT * FROM ts_cv_folds_by('cv_data_24', series_id, ds, y, 1, 6, MAP{});
 
 query I
-SELECT COUNT(DISTINCT fold_id) FROM ts_cv_forecast_by('cv_single_fold', series_id, ds, y, 'Naive', 6, MAP{});
+SELECT COUNT(DISTINCT fold_id) FROM ts_cv_forecast_by('cv_single_fold', series_id, ds, y, 'Naive', MAP{});
 ----
 1
 
@@ -239,7 +239,7 @@ SELECT * FROM ts_cv_folds_by('cv_data_24', series_id, ds, y, 3, 1, MAP{});
 
 query II
 SELECT fold_id, COUNT(*)
-FROM ts_cv_forecast_by('cv_horizon_1', series_id, ds, y, 'Naive', 1, MAP{})
+FROM ts_cv_forecast_by('cv_horizon_1', series_id, ds, y, 'Naive', MAP{})
 GROUP BY fold_id ORDER BY fold_id;
 ----
 1	1
@@ -255,7 +255,7 @@ DROP TABLE cv_horizon_1;
 
 # Test error when fold data missing required columns (fold_id, split)
 statement error
-SELECT * FROM ts_cv_forecast_by('cv_data_24', series_id, ds, y, 'Naive', 4, MAP{});
+SELECT * FROM ts_cv_forecast_by('cv_data_24', series_id, ds, y, 'Naive', MAP{});
 ----
 fold_id
 
@@ -265,7 +265,7 @@ fold_id
 
 # Test params with seasonal_period
 query I
-SELECT COUNT(*) FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'SeasonalNaive', 4, {'seasonal_period': 4});
+SELECT COUNT(*) FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'SeasonalNaive', {'seasonal_period': 4});
 ----
 12
 
@@ -277,7 +277,7 @@ SELECT COUNT(*) FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'SeasonalNa
 query I
 WITH forecasts AS (
     SELECT fold_id, ds, y AS fcst_y
-    FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', 4, MAP{})
+    FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', MAP{})
 ),
 original AS (
     SELECT fold_id, ds, y AS orig_y
@@ -294,7 +294,7 @@ WHERE ABS(f.fcst_y - o.orig_y) > 0.0001;
 # Verify we can compute error metrics
 query I
 SELECT AVG(ABS(forecast - y)) > 0 AS has_errors
-FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', 4, MAP{});
+FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', MAP{});
 ----
 true
 
