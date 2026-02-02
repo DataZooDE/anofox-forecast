@@ -4,8 +4,6 @@
 
 require anofox_forecast
 
-require json
-
 #######################################
 # MAE - Mean Absolute Error
 #######################################
@@ -283,4 +281,122 @@ query I
 SELECT ts_coverage([0.0, 10.0], [0.0, 5.0], [5.0, 10.0]);
 ----
 1.0
+
+
+#######################################
+# Table Macros - GROUP BY ALL pattern
+#######################################
+
+# Setup test data
+statement ok
+CREATE TABLE test_metrics AS
+SELECT 'A' AS id, i AS ds, i::DOUBLE AS y, (i + 1)::DOUBLE AS forecast
+FROM generate_series(1, 10) t(i)
+UNION ALL
+SELECT 'B' AS id, i AS ds, i::DOUBLE AS y, (i + 2)::DOUBLE AS forecast
+FROM generate_series(1, 10) t(i);
+
+# Test single grouping column - returns 2 rows (A, B)
+query I
+SELECT COUNT(*) FROM ts_rmse_by(
+    (SELECT id, ds, y, forecast FROM test_metrics),
+    'ds', 'y', 'forecast'
+);
+----
+2
+
+# Verify grouping columns are preserved in output
+query I
+SELECT COUNT(DISTINCT id) FROM ts_rmse_by(
+    (SELECT id, ds, y, forecast FROM test_metrics),
+    'ds', 'y', 'forecast'
+);
+----
+2
+
+# Test RMSE values are correct
+query II
+SELECT id, rmse FROM ts_rmse_by(
+    (SELECT id, ds, y, forecast FROM test_metrics),
+    'ds', 'y', 'forecast'
+) ORDER BY id;
+----
+A	1.0
+B	2.0
+
+# Test multiple grouping columns
+statement ok
+CREATE TABLE test_cv_metrics AS
+SELECT
+    series_id, fold_id, 'Naive' AS model_name,
+    i AS ds, i::DOUBLE AS y, (i + 1)::DOUBLE AS forecast
+FROM generate_series(1, 5) t(i)
+CROSS JOIN (SELECT UNNEST(['A', 'B']) AS series_id) s
+CROSS JOIN (SELECT UNNEST([1, 2]) AS fold_id) f;
+
+# Multi-group - returns 4 rows (2 series × 2 folds × 1 model)
+query I
+SELECT COUNT(*) FROM ts_rmse_by(
+    (SELECT series_id, fold_id, model_name, ds, y, forecast FROM test_cv_metrics),
+    'ds', 'y', 'forecast'
+);
+----
+4
+
+# Verify all grouping columns present in output
+query IIII
+SELECT series_id, fold_id, model_name, rmse FROM ts_rmse_by(
+    (SELECT series_id, fold_id, model_name, ds, y, forecast FROM test_cv_metrics),
+    'ds', 'y', 'forecast'
+) ORDER BY 1, 2, 3;
+----
+A	1	Naive	1.0
+A	2	Naive	1.0
+B	1	Naive	1.0
+B	2	Naive	1.0
+
+# Test no grouping (global metric)
+query I
+SELECT COUNT(*) FROM ts_rmse_by(
+    (SELECT ds, y, forecast FROM test_metrics),
+    'ds', 'y', 'forecast'
+);
+----
+1
+
+# Test ts_mae_by with multi-group
+query I
+SELECT COUNT(*) FROM ts_mae_by(
+    (SELECT series_id, fold_id, ds, y, forecast FROM test_cv_metrics),
+    'ds', 'y', 'forecast'
+);
+----
+4
+
+# Test ts_mse_by
+query II
+SELECT id, mse FROM ts_mse_by(
+    (SELECT id, ds, y, forecast FROM test_metrics),
+    'ds', 'y', 'forecast'
+) ORDER BY id;
+----
+A	1.0
+B	4.0
+
+# Test ts_bias_by
+query II
+SELECT id, bias FROM ts_bias_by(
+    (SELECT id, ds, y, forecast FROM test_metrics),
+    'ds', 'y', 'forecast'
+) ORDER BY id;
+----
+A	1.0
+B	2.0
+
+# Cleanup
+statement ok
+DROP TABLE test_metrics;
+
+statement ok
+DROP TABLE test_cv_metrics;
 

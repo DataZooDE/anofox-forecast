@@ -1735,105 +1735,73 @@ FROM timing_data
 )"},
 
     // ================================================================================
-    // Metrics Table Macros
+    // Metrics Table Macros (GROUP BY ALL pattern)
+    //
+    // These macros use _ts_metrics_native for dynamic column exclusion.
+    // User controls grouping by selecting columns in source subquery.
+    // Column names are passed as VARCHAR strings.
+    //
+    // Usage:
+    //   -- Group by series
+    //   SELECT * FROM ts_rmse_by(
+    //       (SELECT unique_id, ds, y, forecast FROM results),
+    //       'ds', 'y', 'forecast'
+    //   );
+    //
+    //   -- Group by series, fold, and model
+    //   SELECT * FROM ts_rmse_by(
+    //       (SELECT unique_id, fold_id, model_name, ds, y, forecast FROM cv_results),
+    //       'ds', 'y', 'forecast'
+    //   );
     // ================================================================================
 
-    // ts_mae_by: Compute Mean Absolute Error per group
-    // C++ API: ts_mae_by(table_name, group_col, date_col, actual_col, forecast_col)
-    {"ts_mae_by", {"source", "group_col", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
+    // ts_mae_by: Compute Mean Absolute Error grouped by selected columns
+    // C++ API: ts_mae_by(source, date_col, actual_col, forecast_col)
+    {"ts_mae_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT
-    group_col AS id,
-    ts_mae(
-        LIST(actual_col::DOUBLE ORDER BY date_col),
-        LIST(forecast_col::DOUBLE ORDER BY date_col)
-    ) AS mae
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'mae')
 )"},
 
-    // ts_mse_by: Compute Mean Squared Error per group
-    // C++ API: ts_mse_by(table_name, group_col, date_col, actual_col, forecast_col)
-    {"ts_mse_by", {"source", "group_col", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
+    // ts_mse_by: Compute Mean Squared Error grouped by selected columns
+    // C++ API: ts_mse_by(source, date_col, actual_col, forecast_col)
+    {"ts_mse_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT
-    group_col AS id,
-    ts_mse(
-        LIST(actual_col::DOUBLE ORDER BY date_col),
-        LIST(forecast_col::DOUBLE ORDER BY date_col)
-    ) AS mse
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'mse')
 )"},
 
-    // ts_rmse_by: Compute Root Mean Squared Error per group
-    // C++ API: ts_rmse_by(table_name, group_col, date_col, actual_col, forecast_col)
-    {"ts_rmse_by", {"source", "group_col", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
+    // ts_rmse_by: Compute Root Mean Squared Error grouped by selected columns
+    // C++ API: ts_rmse_by(source, date_col, actual_col, forecast_col)
+    {"ts_rmse_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT
-    group_col AS id,
-    ts_rmse(
-        LIST(actual_col::DOUBLE ORDER BY date_col),
-        LIST(forecast_col::DOUBLE ORDER BY date_col)
-    ) AS rmse
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'rmse')
 )"},
 
-    // ts_mape_by: Compute Mean Absolute Percentage Error per group
-    // C++ API: ts_mape_by(table_name, group_col, date_col, actual_col, forecast_col)
-    {"ts_mape_by", {"source", "group_col", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
+    // ts_mape_by: Compute Mean Absolute Percentage Error grouped by selected columns
+    // C++ API: ts_mape_by(source, date_col, actual_col, forecast_col)
+    {"ts_mape_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT
-    group_col AS id,
-    ts_mape(
-        LIST(actual_col::DOUBLE ORDER BY date_col),
-        LIST(forecast_col::DOUBLE ORDER BY date_col)
-    ) AS mape
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'mape')
 )"},
 
-    // ts_smape_by: Compute Symmetric Mean Absolute Percentage Error per group
-    // C++ API: ts_smape_by(table_name, group_col, date_col, actual_col, forecast_col)
-    {"ts_smape_by", {"source", "group_col", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
+    // ts_smape_by: Compute Symmetric Mean Absolute Percentage Error grouped by selected columns
+    // C++ API: ts_smape_by(source, date_col, actual_col, forecast_col)
+    {"ts_smape_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT
-    group_col AS id,
-    ts_smape(
-        LIST(actual_col::DOUBLE ORDER BY date_col),
-        LIST(forecast_col::DOUBLE ORDER BY date_col)
-    ) AS smape
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'smape')
 )"},
 
-    // ts_r2_by: Compute R-squared (coefficient of determination) per group
-    // C++ API: ts_r2_by(table_name, group_col, date_col, actual_col, forecast_col)
-    {"ts_r2_by", {"source", "group_col", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
+    // ts_r2_by: Compute R-squared (coefficient of determination) grouped by selected columns
+    // C++ API: ts_r2_by(source, date_col, actual_col, forecast_col)
+    {"ts_r2_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT
-    group_col AS id,
-    ts_r2(
-        LIST(actual_col::DOUBLE ORDER BY date_col),
-        LIST(forecast_col::DOUBLE ORDER BY date_col)
-    ) AS r2
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'r2')
 )"},
 
-    // ts_bias_by: Compute bias (mean error) per group
-    // C++ API: ts_bias_by(table_name, group_col, date_col, actual_col, forecast_col)
-    {"ts_bias_by", {"source", "group_col", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
+    // ts_bias_by: Compute bias (mean error) grouped by selected columns
+    // C++ API: ts_bias_by(source, date_col, actual_col, forecast_col)
+    {"ts_bias_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT
-    group_col AS id,
-    ts_bias(
-        LIST(actual_col::DOUBLE ORDER BY date_col),
-        LIST(forecast_col::DOUBLE ORDER BY date_col)
-    ) AS bias
-FROM query_table(source::VARCHAR)
-GROUP BY group_col
+SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'bias')
 )"},
 
     // ts_mase_by: Compute Mean Absolute Scaled Error per group

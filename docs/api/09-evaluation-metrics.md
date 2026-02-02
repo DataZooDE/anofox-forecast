@@ -21,35 +21,66 @@ Compute metrics per group using table macros:
 
 ```sql
 -- MAE per product
-SELECT * FROM ts_mae_by('backtest_results', product_id, date, actual, forecast);
+SELECT * FROM ts_mae_by(
+    (SELECT product_id, date, actual, forecast FROM backtest_results),
+    'date', 'actual', 'forecast'
+);
 
 -- Multiple metrics at once
 SELECT
     m.id,
     m.mae,
-    r.rmse,
-    c.coverage
-FROM ts_mae_by('results', id, date, actual, forecast) m
-JOIN ts_rmse_by('results', id, date, actual, forecast) r ON m.id = r.id
-JOIN ts_coverage_by('results', id, date, actual, lower_90, upper_90) c ON m.id = c.id;
+    r.rmse
+FROM ts_mae_by(
+    (SELECT id, date, actual, forecast FROM results),
+    'date', 'actual', 'forecast'
+) m
+JOIN ts_rmse_by(
+    (SELECT id, date, actual, forecast FROM results),
+    'date', 'actual', 'forecast'
+) r USING (id);
 ```
 
 ---
 
-## Table Macros
+## Table Macros (GROUP BY ALL Pattern)
+
+The `_by` macros use a flexible grouping pattern. User controls grouping by selecting columns in the source subquery - all columns except date/actual/forecast become grouping columns.
 
 ### ts_mae_by
 
-Compute Mean Absolute Error per group.
+Compute Mean Absolute Error grouped by selected columns.
 
 **Signature:**
 ```sql
-ts_mae_by(source, group_col, date_col, actual_col, forecast_col) → TABLE(id, mae)
+ts_mae_by(source, date_col, actual_col, forecast_col) → TABLE(...group_cols, mae)
 ```
 
-**Example:**
+**Parameters:**
+- `source` - Table expression (subquery or view) with grouping + metric columns
+- `date_col` - VARCHAR column name for date/time ordering
+- `actual_col` - VARCHAR column name for actual values
+- `forecast_col` - VARCHAR column name for predicted values
+
+**Examples:**
 ```sql
-SELECT * FROM ts_mae_by('backtest_results', product_id, date, actual, forecast);
+-- Group by series
+SELECT * FROM ts_mae_by(
+    (SELECT unique_id, ds, y, forecast FROM results),
+    'ds', 'y', 'forecast'
+);
+
+-- Group by series, fold, and model
+SELECT * FROM ts_mae_by(
+    (SELECT unique_id, fold_id, model_name, ds, y, forecast FROM cv_results),
+    'ds', 'y', 'forecast'
+);
+
+-- Global metric (no grouping)
+SELECT * FROM ts_mae_by(
+    (SELECT ds, y, forecast FROM results),
+    'ds', 'y', 'forecast'
+);
 ```
 
 ---
@@ -59,12 +90,12 @@ SELECT * FROM ts_mae_by('backtest_results', product_id, date, actual, forecast);
 Same signature as `ts_mae_by`, returns respective metric.
 
 ```sql
-ts_mse_by(source, group_col, date_col, actual_col, forecast_col) → TABLE(id, mse)
-ts_rmse_by(source, group_col, date_col, actual_col, forecast_col) → TABLE(id, rmse)
-ts_mape_by(source, group_col, date_col, actual_col, forecast_col) → TABLE(id, mape)
-ts_smape_by(source, group_col, date_col, actual_col, forecast_col) → TABLE(id, smape)
-ts_r2_by(source, group_col, date_col, actual_col, forecast_col) → TABLE(id, r2)
-ts_bias_by(source, group_col, date_col, actual_col, forecast_col) → TABLE(id, bias)
+ts_mse_by(source, date_col, actual_col, forecast_col) → TABLE(...group_cols, mse)
+ts_rmse_by(source, date_col, actual_col, forecast_col) → TABLE(...group_cols, rmse)
+ts_mape_by(source, date_col, actual_col, forecast_col) → TABLE(...group_cols, mape)
+ts_smape_by(source, date_col, actual_col, forecast_col) → TABLE(...group_cols, smape)
+ts_r2_by(source, date_col, actual_col, forecast_col) → TABLE(...group_cols, r2)
+ts_bias_by(source, date_col, actual_col, forecast_col) → TABLE(...group_cols, bias)
 ```
 
 ---
@@ -130,6 +161,26 @@ ts_quantile_loss_by(source, group_col, date_col, actual_col, forecast_col, quant
 **Example:**
 ```sql
 SELECT * FROM ts_quantile_loss_by('results', product_id, date, actual, forecast_p50, 0.5);
+```
+
+---
+
+## Cross-Validation Workflow Example
+
+```sql
+-- Step 1: Generate CV folds
+CREATE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by('data', unique_id, ds, y, 3, 12, MAP{});
+
+-- Step 2: Generate forecasts
+CREATE TABLE cv_forecasts AS
+SELECT * FROM ts_cv_forecast_by('cv_folds', unique_id, ds, y, 'Naive', MAP{});
+
+-- Step 3: Compute metrics per series/fold/model
+SELECT * FROM ts_rmse_by(
+    (SELECT unique_id, fold_id, model_name, ds, y, forecast FROM cv_forecasts),
+    'ds', 'y', 'forecast'
+);
 ```
 
 ---

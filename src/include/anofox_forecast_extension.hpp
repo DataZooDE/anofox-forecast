@@ -120,6 +120,7 @@ void RegisterTsAggregateHierarchyFunction(ExtensionLoader &loader);
 void RegisterTsCombineKeysFunction(ExtensionLoader &loader);
 void RegisterTsSplitKeysFunction(ExtensionLoader &loader);
 void RegisterTsValidateSeparatorFunction(ExtensionLoader &loader);
+void RegisterTsMetricsNativeFunction(ExtensionLoader &loader);
 
 // Extension class
 class AnofoxForecastExtension : public Extension {

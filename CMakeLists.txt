@@ -132,6 +132,7 @@ set(EXTENSION_SOURCES
     src/table_functions/ts_combine_keys.cpp
     src/table_functions/ts_split_keys.cpp
     src/table_functions/ts_validate_separator.cpp
+    src/table_functions/ts_metrics_native.cpp
     src/table_functions/ts_periods.cpp
     src/table_functions/ts_peaks.cpp
     src/table_functions/ts_detrend.cpp
