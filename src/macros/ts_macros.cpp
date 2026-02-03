@@ -1182,7 +1182,6 @@ src AS (
     FROM query_table(source::VARCHAR)
 ),
 -- For each group/fold, get the last training row's JSON representation
--- This allows us to extract any column's last known value
 last_known_per_fold AS (
     SELECT
         cv._cv_grp,
@@ -1193,33 +1192,36 @@ last_known_per_fold AS (
     WHERE cv.split = 'train'
     QUALIFY ROW_NUMBER() OVER (PARTITION BY cv._cv_grp, cv.fold_id ORDER BY cv._cv_dt DESC) = 1
 ),
--- Build a map of last known values for each unknown column
-last_known_maps AS (
+-- Join cv with src and last_known, store JSON for value extraction
+joined AS (
     SELECT
-        lk._cv_grp,
-        lk._fold_id,
-        -- Create MAP from unknown column names to their last known values
-        MAP_FROM_ENTRIES(
-            LIST(STRUCT_PACK(
-                k := col_name,
-                v := CASE
-                    WHEN (SELECT _strategy FROM _params) = 'null' THEN NULL
-                    WHEN (SELECT _strategy FROM _params) = 'default' THEN (SELECT _fill_value FROM _params)::VARCHAR
-                    ELSE TRY_CAST(json_extract(lk._last_row_json, '$.' || col_name) AS VARCHAR)
-                END
-            ))
-        ) AS _last_known
-    FROM last_known_per_fold lk
-    CROSS JOIN (SELECT UNNEST(unknown_features) AS col_name) uf
-    GROUP BY lk._cv_grp, lk._fold_id
+        cv.*,
+        to_json(src) AS _src_json,
+        lk._last_row_json
+    FROM cv
+    JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
+    LEFT JOIN last_known_per_fold lk ON cv._cv_grp = lk._cv_grp AND cv.fold_id = lk._fold_id
 )
 SELECT
-    cv.* EXCLUDE (_cv_grp, _cv_dt),
-    COALESCE(lkm._last_known, MAP{}) AS _last_known
-FROM cv
-JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
-LEFT JOIN last_known_maps lkm ON cv._cv_grp = lkm._cv_grp AND cv.fold_id = lkm._fold_id
-ORDER BY cv.fold_id, cv._cv_grp, cv._cv_dt
+    j.* EXCLUDE (_cv_grp, _cv_dt, _src_json, _last_row_json),
+    -- Unknown features MAP: actual values for train, filled values for test
+    MAP_FROM_ENTRIES((
+        SELECT LIST(STRUCT_PACK(
+            k := col_name,
+            v := CASE
+                WHEN j.split = 'test' THEN
+                    CASE
+                        WHEN (SELECT _strategy FROM _params) = 'null' THEN NULL
+                        WHEN (SELECT _strategy FROM _params) = 'default' THEN (SELECT _fill_value FROM _params)::VARCHAR
+                        ELSE TRY_CAST(json_extract(j._last_row_json, '$.' || col_name) AS VARCHAR)
+                    END
+                ELSE TRY_CAST(json_extract(j._src_json, '$.' || col_name) AS VARCHAR)
+            END
+        ))
+        FROM (SELECT UNNEST(unknown_features) AS col_name)
+    )) AS unknown
+FROM joined j
+ORDER BY j.fold_id, j._cv_grp, j._cv_dt
 )"},
 
     // ts_conformal_by: Compute conformal prediction intervals for grouped series

@@ -233,17 +233,17 @@ GROUP BY unique_id, fold_id;
 
 ### ts_cv_hydrate_by
 
-Join CV folds with source data and provide tools for masking unknown features in test rows.
+Hydrate CV folds with unknown features from a source table. **Masking is applied automatically** - train rows get actual values, test rows get filled values per strategy.
 
 **Signature:**
 ```sql
 ts_cv_hydrate_by(
-    cv_folds VARCHAR,         -- Output from ts_cv_folds_by or ts_cv_split_by
-    source VARCHAR,           -- Original source table with features
-    group_col COLUMN,         -- Group column (same in both tables)
-    date_col COLUMN,          -- Date column (same in both tables)
-    unknown_features VARCHAR[], -- List of column names to track for masking
-    params MAP = {}           -- Masking strategy options
+    cv_folds VARCHAR,           -- Output from ts_cv_folds_by
+    source VARCHAR,             -- Source table containing unknown features
+    group_col COLUMN,           -- Group column (same in both tables)
+    date_col COLUMN,            -- Date column (same in both tables)
+    unknown_features VARCHAR[], -- Column names to hydrate with masking
+    params MAP = {}             -- Fill strategy options
 ) → TABLE
 ```
 
@@ -253,96 +253,84 @@ ts_cv_hydrate_by(
 | `strategy` | VARCHAR | `'last_value'` | `'last_value'`, `'null'`, or `'default'` |
 | `fill_value` | DOUBLE | `0.0` | Value for `'default'` strategy |
 
-**Fill Strategies:**
-| Strategy | Description |
-|----------|-------------|
-| `'last_value'` (default) | Carry forward last value from training period per group |
-| `'null'` | Set unknown features to NULL in test rows |
-| `'default'` | Set to specified `fill_value` |
+**Fill Strategies (for test rows):**
+| Strategy | Train Rows | Test Rows |
+|----------|------------|-----------|
+| `'last_value'` (default) | Actual values | Last training value per group/fold |
+| `'null'` | Actual values | NULL |
+| `'default'` | Actual values | Specified `fill_value` |
 
 **Output Columns:**
 | Column | Type | Description |
 |--------|------|-------------|
-| *(all cv_folds columns)* | | All columns from cv_folds input (group, date, target, fold_id, split) |
-| `_last_known` | MAP | Last training values for unknown features (per strategy) |
+| *(all cv_folds columns)* | | group, date, target, fold_id, split |
+| `unknown` | MAP(VARCHAR, VARCHAR) | Unknown features with masking applied |
 
-**Usage Patterns:**
+**Basic Usage:**
 
 ```sql
--- Step 1: Create folds
+-- Create folds
 CREATE TABLE cv_folds AS
 SELECT * FROM ts_cv_folds_by('sales', store_id, date, revenue, 3, 30, MAP{});
 
--- Step 2: Hydrate with unknown features from source
-CREATE TABLE hydrated AS
-SELECT * FROM ts_cv_hydrate_by(
+-- Hydrate with unknown features (masking applied automatically)
+SELECT
+    store_id, date, revenue, fold_id, split,
+    unknown['competitor_sales'] AS competitor_sales,
+    unknown['actual_temp'] AS actual_temp
+FROM ts_cv_hydrate_by(
     'cv_folds', 'sales', store_id, date,
-    ['competitor_sales', 'actual_temp'],  -- Unknown features to track
+    ['competitor_sales', 'actual_temp'],
     MAP{'strategy': 'last_value'}
 );
-
--- Step 3: Join with source to get additional columns, mask unknown features
-SELECT
-    h.fold_id, h.split, h.store_id, h.date,
-    s.revenue,
-    -- Known features: join from source
-    s.day_of_week,
-    s.is_holiday,
-    -- Unknown features: mask in test rows using _last_known
-    CASE WHEN h.split = 'test' THEN h._last_known['competitor_sales'] ELSE s.competitor_sales::VARCHAR END AS competitor_sales,
-    CASE WHEN h.split = 'test' THEN h._last_known['actual_temp'] ELSE s.actual_temp::VARCHAR END AS actual_temp
-FROM hydrated h
-JOIN sales s ON h.store_id = s.store_id AND h.date = s.date;
 ```
+
+The `unknown` MAP contains:
+- **Train rows**: Actual values from source
+- **Test rows**: Filled values per strategy (no data leakage)
 
 ### The Data Leakage Problem
 
-When building custom CV pipelines, you need to join CV folds back to your source data. This function prevents **data leakage** by providing tools to mask features that wouldn't be known at prediction time.
-
-In time series CV, the test set represents "future" data. Features that depend on future values (e.g., actual temperature, competitor sales) must be masked to prevent leakage:
+In time series CV, the test set represents "future" data. Features that depend on future values must be masked to prevent leakage:
 
 ```
 Timeline:    [====== TRAIN ======][=== TEST ===]
                                   ↑
                             cutoff date
 
-Known features:     ✓ Available in both train and test
-Unknown features:   ✓ Available in train, ✗ Must be masked in test
+Known features:     ✓ Use directly (day_of_week, is_holiday)
+Unknown features:   ✓ Train: actual values
+                    ✗ Test: must be masked → use ts_cv_hydrate_by
 ```
 
-### Regression Workflow Example
+### ML Regression Workflow
 
 ```sql
 -- Step 1: Create folds
 CREATE TABLE cv_folds AS
-SELECT * FROM ts_cv_folds_by(
-    'sales', store_id, date, revenue,
-    3, 30, MAP{}
-);
+SELECT * FROM ts_cv_folds_by('sales', store_id, date, revenue, 3, 30, MAP{});
 
--- Step 2: Hydrate with unknown features, then join with source for full data
-CREATE TABLE regression_input AS
+-- Step 2: Build ML-ready dataset
+CREATE TABLE ml_input AS
 SELECT
-    h.fold_id, h.split,
-    h.store_id, h.date,
-    -- Target: mask in test rows for prediction
-    CASE WHEN h.split = 'test' THEN NULL ELSE s.revenue END AS masked_target,
+    fold_id, split, store_id, date,
+    -- Target: NULL for test rows (to predict)
+    CASE WHEN split = 'test' THEN NULL ELSE revenue END AS target,
     -- Known features: join from source
     s.day_of_week,
-    s.month,
     s.is_holiday,
-    -- Unknown features: mask with appropriate strategy
-    CASE WHEN h.split = 'test' THEN h._last_known['competitor_sales'] ELSE s.competitor_sales::VARCHAR END AS competitor_sales,
-    CASE WHEN h.split = 'test' THEN NULL ELSE s.actual_temp END AS actual_temp
+    -- Unknown features: automatically masked
+    h.unknown['competitor_sales']::DOUBLE AS competitor_sales,
+    h.unknown['actual_temp']::DOUBLE AS actual_temp
 FROM ts_cv_hydrate_by(
     'cv_folds', 'sales', store_id, date,
     ['competitor_sales', 'actual_temp'],
     MAP{'strategy': 'last_value'}
 ) h
-JOIN sales s ON h.store_id = s.store_id AND h.date = s.date;
+JOIN sales s USING (store_id, date);
 
--- Step 3: Train your regression model on rows where masked_target IS NOT NULL
--- Step 4: Predict on rows where masked_target IS NULL
+-- Step 3: Train on rows WHERE target IS NOT NULL
+-- Step 4: Predict on rows WHERE target IS NULL
 ```
 
 ---
