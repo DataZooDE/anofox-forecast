@@ -1167,16 +1167,11 @@ WITH _params AS (
         COALESCE(json_extract_string(to_json(params), '$.strategy'), 'last_value') AS _strategy,
         COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.fill_value') AS DOUBLE), 0.0) AS _fill_value
 ),
--- CV folds with metadata
+-- CV folds with join keys
 cv AS (
-    SELECT
-        fold_id AS _fold_id,
-        split AS _split,
+    SELECT *,
         group_col AS _cv_grp,
-        date_trunc('second', date_col::TIMESTAMP) AS _cv_dt,
-        (split = 'test') AS _is_test,
-        MAX(CASE WHEN split = 'train' THEN date_trunc('second', date_col::TIMESTAMP) END)
-            OVER (PARTITION BY group_col, fold_id) AS _train_cutoff
+        date_trunc('second', date_col::TIMESTAMP) AS _cv_dt
     FROM query_table(cv_folds::VARCHAR)
 ),
 -- Source data with join keys
@@ -1191,12 +1186,12 @@ src AS (
 last_known_per_fold AS (
     SELECT
         cv._cv_grp,
-        cv._fold_id,
+        cv.fold_id AS _fold_id,
         to_json(src) AS _last_row_json
     FROM cv
     JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
-    WHERE cv._split = 'train'
-    QUALIFY ROW_NUMBER() OVER (PARTITION BY cv._cv_grp, cv._fold_id ORDER BY cv._cv_dt DESC) = 1
+    WHERE cv.split = 'train'
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY cv._cv_grp, cv.fold_id ORDER BY cv._cv_dt DESC) = 1
 ),
 -- Build a map of last known values for each unknown column
 last_known_maps AS (
@@ -1219,16 +1214,12 @@ last_known_maps AS (
     GROUP BY lk._cv_grp, lk._fold_id
 )
 SELECT
-    cv._fold_id AS fold_id,
-    cv._split AS split,
-    cv._is_test AS _is_test,
-    cv._train_cutoff AS _train_cutoff,
-    src.* EXCLUDE (_src_grp, _src_dt),
+    cv.* EXCLUDE (_cv_grp, _cv_dt),
     COALESCE(lkm._last_known, MAP{}) AS _last_known
 FROM cv
 JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
-LEFT JOIN last_known_maps lkm ON cv._cv_grp = lkm._cv_grp AND cv._fold_id = lkm._fold_id
-ORDER BY cv._fold_id, cv._cv_grp, cv._cv_dt
+LEFT JOIN last_known_maps lkm ON cv._cv_grp = lkm._cv_grp AND cv.fold_id = lkm._fold_id
+ORDER BY cv.fold_id, cv._cv_grp, cv._cv_dt
 )"},
 
     // ts_conformal_by: Compute conformal prediction intervals for grouped series
