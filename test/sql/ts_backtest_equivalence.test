@@ -1,10 +1,8 @@
 # name: test/sql/ts_backtest_equivalence.test
-# description: Tests verifying ts_backtest_auto produces identical results to detailed approach
+# description: Tests verifying ts_cv_folds_by + ts_cv_forecast_by produces identical results to ts_cv_split_by detailed approach
 # group: [sql]
 
 require anofox_forecast
-
-require json
 
 #######################################
 # Setup Test Data
@@ -14,132 +12,111 @@ statement ok
 CREATE TABLE equiv_data AS
 SELECT
     series_id,
-    '2024-01-01'::DATE + (i * INTERVAL '1 day') AS date,
+    '2024-01-01'::DATE + (i || ' day')::INTERVAL AS date,
     100.0 + i * 2.0 + (CASE WHEN series_id = 'A' THEN 50 ELSE 0 END) + (i % 7) * 3.0 AS value
 FROM generate_series(0, 59) AS t(i)
 CROSS JOIN (SELECT UNNEST(['A', 'B']) AS series_id) s;
 
 #######################################
 # Test 1: Basic Equivalence - Naive Method
-# Compare ts_backtest_auto vs ts_cv_split + ts_cv_forecast_by
+# Compare ts_cv_folds_by vs ts_cv_split_by with explicit fold dates
 #######################################
 
-# Create one-liner results
+# Create folds using simplified approach (ts_cv_folds_by)
+# For 60 days of data, 2 folds, horizon 7
 statement ok
-CREATE TABLE oneliner_naive AS
+CREATE TABLE folds_simple AS
+SELECT * FROM ts_cv_folds_by('equiv_data', series_id, date, value, 2, 7, MAP{});
+
+# Generate forecasts using simplified workflow
+statement ok
+CREATE TABLE forecast_simple_naive AS
 SELECT
     fold_id,
-    group_col,
+    series_id,
     date,
     ROUND(forecast, 6) AS forecast,
-    ROUND(actual, 6) AS actual,
-    ROUND(error, 6) AS error,
-    ROUND(abs_error, 6) AS abs_error,
+    ROUND(y, 6) AS actual,
+    ROUND(forecast - y, 6) AS error,
+    ROUND(ABS(forecast - y), 6) AS abs_error,
     model_name
-FROM ts_backtest_auto_by(
-    'equiv_data', series_id, date, value,
-    7, 2, '1d',
-    MAP{'method': 'Naive'}
-)
-ORDER BY fold_id, group_col, date;
+FROM ts_cv_forecast_by('folds_simple', series_id, date, value, 'Naive', MAP{})
+ORDER BY fold_id, series_id, date;
 
-# Create detailed approach: Step 1 - Use same fold dates as ts_backtest_auto
-# For 60 days of data, 2 folds, horizon 7: initial_train_size = 60 - 2*7 = 46
-# Fold 1 ends at day 45 (2024-02-15), Fold 2 ends at day 52 (2024-02-22)
+# Create detailed approach: Use ts_cv_split_by with explicit fold dates
+# ts_cv_folds_by with n_folds=2, horizon=7 on 60-day data creates:
+# Fold 1: train ends at day 45 (2024-02-15), test is days 46-52
+# Fold 2: train ends at day 52 (2024-02-22), test is days 53-59
 statement ok
-CREATE TABLE fold_dates AS
-SELECT ['2024-02-15'::DATE, '2024-02-22'::DATE] AS training_end_times;
-
-# Step 2 - CV splits using same fold dates
-statement ok
-CREATE TABLE cv_splits_naive AS
+CREATE TABLE cv_splits_detailed AS
 SELECT * FROM ts_cv_split_by(
     'equiv_data', series_id, date, value,
-    (SELECT training_end_times FROM fold_dates),
-    7, '1d', MAP{}
+    ['2024-02-15'::DATE, '2024-02-22'::DATE],
+    7, MAP{}
 );
 
-# Step 3 - Filter to train split only
+# Generate forecasts using detailed workflow
 statement ok
-CREATE TABLE train_splits_naive AS
-SELECT * FROM cv_splits_naive WHERE split = 'train';
-
-# Step 4 - Generate forecasts using ts_cv_forecast_by
-statement ok
-CREATE TABLE forecasts_naive AS
-SELECT * FROM ts_cv_forecast_by(
-    'train_splits_naive',
-    group_col, date_col, target_col,
-    'Naive', 7, MAP{}, '1d'
-);
-
-# Step 5 - Join forecasts with test data to get actuals
-statement ok
-CREATE TABLE detailed_naive AS
+CREATE TABLE forecast_detailed_naive AS
 SELECT
-    f.fold_id,
-    f.id AS group_col,
-    f.date,
-    ROUND(f.point_forecast, 6) AS forecast,
-    ROUND(t.target_col, 6) AS actual,
-    ROUND(f.point_forecast - t.target_col, 6) AS error,
-    ROUND(ABS(f.point_forecast - t.target_col), 6) AS abs_error,
-    f.model_name
-FROM forecasts_naive f
-JOIN cv_splits_naive t
-    ON f.fold_id = t.fold_id
-    AND f.id = t.group_col
-    AND f.date = t.date_col
-WHERE t.split = 'test'
-ORDER BY f.fold_id, f.id, f.date;
+    fold_id,
+    series_id,
+    date,
+    ROUND(forecast, 6) AS forecast,
+    ROUND(y, 6) AS actual,
+    ROUND(forecast - y, 6) AS error,
+    ROUND(ABS(forecast - y), 6) AS abs_error,
+    model_name
+FROM ts_cv_forecast_by('cv_splits_detailed', series_id, date, value, 'Naive', MAP{})
+ORDER BY fold_id, series_id, date;
 
 # Verify same number of rows
 query I
-SELECT (SELECT COUNT(*) FROM oneliner_naive) = (SELECT COUNT(*) FROM detailed_naive);
+SELECT (SELECT COUNT(*) FROM forecast_simple_naive) = (SELECT COUNT(*) FROM forecast_detailed_naive);
 ----
 true
 
 # Verify forecasts match
 query I
-SELECT COUNT(*) FROM oneliner_naive o
-JOIN detailed_naive d
-    ON o.fold_id = d.fold_id
-    AND o.group_col = d.group_col
-    AND o.date = d.date
-WHERE o.forecast = d.forecast;
+SELECT COUNT(*) FROM forecast_simple_naive s
+JOIN forecast_detailed_naive d
+    ON s.fold_id = d.fold_id
+    AND s.series_id = d.series_id
+    AND s.date = d.date
+WHERE s.forecast = d.forecast;
 ----
 28
 
 # Verify actuals match
 query I
-SELECT COUNT(*) FROM oneliner_naive o
-JOIN detailed_naive d
-    ON o.fold_id = d.fold_id
-    AND o.group_col = d.group_col
-    AND o.date = d.date
-WHERE o.actual = d.actual;
+SELECT COUNT(*) FROM forecast_simple_naive s
+JOIN forecast_detailed_naive d
+    ON s.fold_id = d.fold_id
+    AND s.series_id = d.series_id
+    AND s.date = d.date
+WHERE s.actual = d.actual;
 ----
 28
 
 # Verify errors match
 query I
-SELECT COUNT(*) FROM oneliner_naive o
-JOIN detailed_naive d
-    ON o.fold_id = d.fold_id
-    AND o.group_col = d.group_col
-    AND o.date = d.date
-WHERE o.error = d.error AND o.abs_error = d.abs_error;
+SELECT COUNT(*) FROM forecast_simple_naive s
+JOIN forecast_detailed_naive d
+    ON s.fold_id = d.fold_id
+    AND s.series_id = d.series_id
+    AND s.date = d.date
+WHERE s.error = d.error AND s.abs_error = d.abs_error;
 ----
 28
 
 # Verify model names match
 query I
-SELECT COUNT(*) FROM oneliner_naive o
-JOIN detailed_naive d
-    ON o.fold_id = d.fold_id
-    AND o.group_col = d.group_col
-    AND o.date = d.date
-WHERE o.model_name = d.model_name;
+SELECT COUNT(*) FROM forecast_simple_naive s
+JOIN forecast_detailed_naive d
+    ON s.fold_id = d.fold_id
+    AND s.series_id = d.series_id
+    AND s.date = d.date
+WHERE s.model_name = d.model_name;
 ----
 28
 
@@ -148,54 +125,37 @@ WHERE o.model_name = d.model_name;
 #######################################
 
 statement ok
-CREATE TABLE oneliner_snaive AS
+CREATE TABLE forecast_simple_snaive AS
 SELECT
     fold_id,
-    group_col,
+    series_id,
     date,
     ROUND(forecast, 6) AS forecast,
-    ROUND(actual, 6) AS actual,
+    ROUND(y, 6) AS actual,
     model_name
-FROM ts_backtest_auto_by(
-    'equiv_data', series_id, date, value,
-    7, 2, '1d',
-    MAP{'method': 'SeasonalNaive'}
-)
-ORDER BY fold_id, group_col, date;
+FROM ts_cv_forecast_by('folds_simple', series_id, date, value, 'SeasonalNaive', MAP{})
+ORDER BY fold_id, series_id, date;
 
 statement ok
-CREATE TABLE forecasts_snaive AS
-SELECT * FROM ts_cv_forecast_by(
-    'train_splits_naive',
-    group_col, date_col, target_col,
-    'SeasonalNaive', 7, MAP{}, '1d'
-);
-
-statement ok
-CREATE TABLE detailed_snaive AS
+CREATE TABLE forecast_detailed_snaive AS
 SELECT
-    f.fold_id,
-    f.id AS group_col,
-    f.date,
-    ROUND(f.point_forecast, 6) AS forecast,
-    ROUND(t.target_col, 6) AS actual,
-    f.model_name
-FROM forecasts_snaive f
-JOIN cv_splits_naive t
-    ON f.fold_id = t.fold_id
-    AND f.id = t.group_col
-    AND f.date = t.date_col
-WHERE t.split = 'test'
-ORDER BY f.fold_id, f.id, f.date;
+    fold_id,
+    series_id,
+    date,
+    ROUND(forecast, 6) AS forecast,
+    ROUND(y, 6) AS actual,
+    model_name
+FROM ts_cv_forecast_by('cv_splits_detailed', series_id, date, value, 'SeasonalNaive', MAP{})
+ORDER BY fold_id, series_id, date;
 
 # Verify forecasts match for SeasonalNaive
 query I
-SELECT COUNT(*) FROM oneliner_snaive o
-JOIN detailed_snaive d
-    ON o.fold_id = d.fold_id
-    AND o.group_col = d.group_col
-    AND o.date = d.date
-WHERE o.forecast = d.forecast AND o.actual = d.actual;
+SELECT COUNT(*) FROM forecast_simple_snaive s
+JOIN forecast_detailed_snaive d
+    ON s.fold_id = d.fold_id
+    AND s.series_id = d.series_id
+    AND s.date = d.date
+WHERE s.forecast = d.forecast AND s.actual = d.actual;
 ----
 28
 
@@ -204,54 +164,37 @@ WHERE o.forecast = d.forecast AND o.actual = d.actual;
 #######################################
 
 statement ok
-CREATE TABLE oneliner_theta AS
+CREATE TABLE forecast_simple_theta AS
 SELECT
     fold_id,
-    group_col,
+    series_id,
     date,
     ROUND(forecast, 4) AS forecast,
-    ROUND(actual, 4) AS actual,
+    ROUND(y, 4) AS actual,
     model_name
-FROM ts_backtest_auto_by(
-    'equiv_data', series_id, date, value,
-    7, 2, '1d',
-    MAP{'method': 'Theta'}
-)
-ORDER BY fold_id, group_col, date;
+FROM ts_cv_forecast_by('folds_simple', series_id, date, value, 'Theta', MAP{})
+ORDER BY fold_id, series_id, date;
 
 statement ok
-CREATE TABLE forecasts_theta AS
-SELECT * FROM ts_cv_forecast_by(
-    'train_splits_naive',
-    group_col, date_col, target_col,
-    'Theta', 7, MAP{}, '1d'
-);
-
-statement ok
-CREATE TABLE detailed_theta AS
+CREATE TABLE forecast_detailed_theta AS
 SELECT
-    f.fold_id,
-    f.id AS group_col,
-    f.date,
-    ROUND(f.point_forecast, 4) AS forecast,
-    ROUND(t.target_col, 4) AS actual,
-    f.model_name
-FROM forecasts_theta f
-JOIN cv_splits_naive t
-    ON f.fold_id = t.fold_id
-    AND f.id = t.group_col
-    AND f.date = t.date_col
-WHERE t.split = 'test'
-ORDER BY f.fold_id, f.id, f.date;
+    fold_id,
+    series_id,
+    date,
+    ROUND(forecast, 4) AS forecast,
+    ROUND(y, 4) AS actual,
+    model_name
+FROM ts_cv_forecast_by('cv_splits_detailed', series_id, date, value, 'Theta', MAP{})
+ORDER BY fold_id, series_id, date;
 
 # Verify Theta forecasts match (with tolerance for floating point)
 query I
-SELECT COUNT(*) FROM oneliner_theta o
-JOIN detailed_theta d
-    ON o.fold_id = d.fold_id
-    AND o.group_col = d.group_col
-    AND o.date = d.date
-WHERE ABS(o.forecast - d.forecast) < 0.01 AND o.actual = d.actual;
+SELECT COUNT(*) FROM forecast_simple_theta s
+JOIN forecast_detailed_theta d
+    ON s.fold_id = d.fold_id
+    AND s.series_id = d.series_id
+    AND s.date = d.date
+WHERE ABS(s.forecast - d.forecast) < 0.01 AND s.actual = d.actual;
 ----
 28
 
@@ -260,54 +203,37 @@ WHERE ABS(o.forecast - d.forecast) < 0.01 AND o.actual = d.actual;
 #######################################
 
 statement ok
-CREATE TABLE oneliner_ses AS
+CREATE TABLE forecast_simple_ses AS
 SELECT
     fold_id,
-    group_col,
+    series_id,
     date,
     ROUND(forecast, 4) AS forecast,
-    ROUND(actual, 4) AS actual,
+    ROUND(y, 4) AS actual,
     model_name
-FROM ts_backtest_auto_by(
-    'equiv_data', series_id, date, value,
-    7, 2, '1d',
-    MAP{'method': 'SES'}
-)
-ORDER BY fold_id, group_col, date;
+FROM ts_cv_forecast_by('folds_simple', series_id, date, value, 'SES', MAP{})
+ORDER BY fold_id, series_id, date;
 
 statement ok
-CREATE TABLE forecasts_ses AS
-SELECT * FROM ts_cv_forecast_by(
-    'train_splits_naive',
-    group_col, date_col, target_col,
-    'SES', 7, MAP{}, '1d'
-);
-
-statement ok
-CREATE TABLE detailed_ses AS
+CREATE TABLE forecast_detailed_ses AS
 SELECT
-    f.fold_id,
-    f.id AS group_col,
-    f.date,
-    ROUND(f.point_forecast, 4) AS forecast,
-    ROUND(t.target_col, 4) AS actual,
-    f.model_name
-FROM forecasts_ses f
-JOIN cv_splits_naive t
-    ON f.fold_id = t.fold_id
-    AND f.id = t.group_col
-    AND f.date = t.date_col
-WHERE t.split = 'test'
-ORDER BY f.fold_id, f.id, f.date;
+    fold_id,
+    series_id,
+    date,
+    ROUND(forecast, 4) AS forecast,
+    ROUND(y, 4) AS actual,
+    model_name
+FROM ts_cv_forecast_by('cv_splits_detailed', series_id, date, value, 'SES', MAP{})
+ORDER BY fold_id, series_id, date;
 
 # Verify SES forecasts match
 query I
-SELECT COUNT(*) FROM oneliner_ses o
-JOIN detailed_ses d
-    ON o.fold_id = d.fold_id
-    AND o.group_col = d.group_col
-    AND o.date = d.date
-WHERE ABS(o.forecast - d.forecast) < 0.01 AND o.actual = d.actual;
+SELECT COUNT(*) FROM forecast_simple_ses s
+JOIN forecast_detailed_ses d
+    ON s.fold_id = d.fold_id
+    AND s.series_id = d.series_id
+    AND s.date = d.date
+WHERE ABS(s.forecast - d.forecast) < 0.01 AND s.actual = d.actual;
 ----
 28
 
@@ -319,8 +245,8 @@ WHERE ABS(o.forecast - d.forecast) < 0.01 AND o.actual = d.actual;
 query I
 SELECT
     ABS(
-        (SELECT ROUND(AVG(abs_error), 4) FROM oneliner_naive) -
-        (SELECT ROUND(AVG(abs_error), 4) FROM detailed_naive)
+        (SELECT ROUND(AVG(abs_error), 4) FROM forecast_simple_naive) -
+        (SELECT ROUND(AVG(abs_error), 4) FROM forecast_detailed_naive)
     ) < 0.001;
 ----
 true
@@ -329,8 +255,8 @@ true
 query I
 SELECT
     ABS(
-        (SELECT ROUND(SQRT(AVG(error * error)), 4) FROM oneliner_naive) -
-        (SELECT ROUND(SQRT(AVG(error * error)), 4) FROM detailed_naive)
+        (SELECT ROUND(SQRT(AVG(error * error)), 4) FROM forecast_simple_naive) -
+        (SELECT ROUND(SQRT(AVG(error * error)), 4) FROM forecast_detailed_naive)
     ) < 0.001;
 ----
 true
@@ -338,12 +264,12 @@ true
 # Compare per-fold metrics
 query I
 SELECT COUNT(*) FROM (
-    SELECT fold_id, ROUND(AVG(abs_error), 4) AS mae FROM oneliner_naive GROUP BY fold_id
-) o
+    SELECT fold_id, ROUND(AVG(abs_error), 4) AS mae FROM forecast_simple_naive GROUP BY fold_id
+) s
 JOIN (
-    SELECT fold_id, ROUND(AVG(abs_error), 4) AS mae FROM detailed_naive GROUP BY fold_id
-) d ON o.fold_id = d.fold_id
-WHERE o.mae = d.mae;
+    SELECT fold_id, ROUND(AVG(abs_error), 4) AS mae FROM forecast_detailed_naive GROUP BY fold_id
+) d ON s.fold_id = d.fold_id
+WHERE s.mae = d.mae;
 ----
 2
 
@@ -356,55 +282,39 @@ CREATE TABLE single_series AS
 SELECT * FROM equiv_data WHERE series_id = 'A';
 
 statement ok
-CREATE TABLE oneliner_single AS
-SELECT fold_id, group_col, date, ROUND(forecast, 4) AS forecast, ROUND(actual, 4) AS actual
-FROM ts_backtest_auto_by('single_series', series_id, date, value, 7, 2, '1d', MAP{'method': 'Naive'})
-ORDER BY fold_id, date;
+CREATE TABLE folds_single AS
+SELECT * FROM ts_cv_folds_by('single_series', series_id, date, value, 2, 7, MAP{});
 
 statement ok
-CREATE TABLE fold_dates_single AS
-SELECT ['2024-02-15'::DATE, '2024-02-22'::DATE] AS training_end_times;
+CREATE TABLE forecast_simple_single AS
+SELECT fold_id, series_id, date, ROUND(forecast, 4) AS forecast, ROUND(y, 4) AS actual
+FROM ts_cv_forecast_by('folds_single', series_id, date, value, 'Naive', MAP{})
+ORDER BY fold_id, date;
 
 statement ok
 CREATE TABLE cv_splits_single AS
 SELECT * FROM ts_cv_split_by(
     'single_series', series_id, date, value,
-    (SELECT training_end_times FROM fold_dates_single),
-    7, '1d', MAP{}
+    ['2024-02-15'::DATE, '2024-02-22'::DATE],
+    7, MAP{}
 );
 
 statement ok
-CREATE TABLE train_splits_single AS
-SELECT * FROM cv_splits_single WHERE split = 'train';
-
-statement ok
-CREATE TABLE forecasts_single AS
-SELECT * FROM ts_cv_forecast_by(
-    'train_splits_single',
-    group_col, date_col, target_col, 'Naive', 7, MAP{}, '1d'
-);
-
-statement ok
-CREATE TABLE detailed_single AS
+CREATE TABLE forecast_detailed_single AS
 SELECT
-    f.fold_id,
-    f.id AS group_col,
-    f.date,
-    ROUND(f.point_forecast, 4) AS forecast,
-    ROUND(t.target_col, 4) AS actual
-FROM forecasts_single f
-JOIN cv_splits_single t
-    ON f.fold_id = t.fold_id
-    AND f.id = t.group_col
-    AND f.date = t.date_col
-WHERE t.split = 'test'
-ORDER BY f.fold_id, f.date;
+    fold_id,
+    series_id,
+    date,
+    ROUND(forecast, 4) AS forecast,
+    ROUND(y, 4) AS actual
+FROM ts_cv_forecast_by('cv_splits_single', series_id, date, value, 'Naive', MAP{})
+ORDER BY fold_id, date;
 
 # Verify single series results match
 query I
-SELECT COUNT(*) FROM oneliner_single o
-JOIN detailed_single d ON o.fold_id = d.fold_id AND o.date = d.date
-WHERE o.forecast = d.forecast AND o.actual = d.actual;
+SELECT COUNT(*) FROM forecast_simple_single s
+JOIN forecast_detailed_single d ON s.fold_id = d.fold_id AND s.date = d.date
+WHERE s.forecast = d.forecast AND s.actual = d.actual;
 ----
 14
 
@@ -416,67 +326,46 @@ statement ok
 DROP TABLE equiv_data;
 
 statement ok
-DROP TABLE fold_dates;
+DROP TABLE folds_simple;
 
 statement ok
-DROP TABLE oneliner_naive;
+DROP TABLE forecast_simple_naive;
 
 statement ok
-DROP TABLE cv_splits_naive;
+DROP TABLE cv_splits_detailed;
 
 statement ok
-DROP TABLE train_splits_naive;
+DROP TABLE forecast_detailed_naive;
 
 statement ok
-DROP TABLE forecasts_naive;
+DROP TABLE forecast_simple_snaive;
 
 statement ok
-DROP TABLE detailed_naive;
+DROP TABLE forecast_detailed_snaive;
 
 statement ok
-DROP TABLE oneliner_snaive;
+DROP TABLE forecast_simple_theta;
 
 statement ok
-DROP TABLE forecasts_snaive;
+DROP TABLE forecast_detailed_theta;
 
 statement ok
-DROP TABLE detailed_snaive;
+DROP TABLE forecast_simple_ses;
 
 statement ok
-DROP TABLE oneliner_theta;
-
-statement ok
-DROP TABLE forecasts_theta;
-
-statement ok
-DROP TABLE detailed_theta;
-
-statement ok
-DROP TABLE oneliner_ses;
-
-statement ok
-DROP TABLE forecasts_ses;
-
-statement ok
-DROP TABLE detailed_ses;
+DROP TABLE forecast_detailed_ses;
 
 statement ok
 DROP TABLE single_series;
 
 statement ok
-DROP TABLE fold_dates_single;
+DROP TABLE folds_single;
 
 statement ok
-DROP TABLE oneliner_single;
+DROP TABLE forecast_simple_single;
 
 statement ok
 DROP TABLE cv_splits_single;
 
 statement ok
-DROP TABLE train_splits_single;
-
-statement ok
-DROP TABLE forecasts_single;
-
-statement ok
-DROP TABLE detailed_single;
+DROP TABLE forecast_detailed_single;
