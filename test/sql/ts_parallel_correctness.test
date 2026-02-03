@@ -1,0 +1,358 @@
+# name: test/sql/ts_parallel_correctness.test
+# description: Validates that parallel execution produces identical results to single-threaded execution
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup Test Data
+# 50 series × 60 days = 3000 rows
+# Enough data to trigger parallel execution
+#######################################
+
+statement ok
+CREATE TABLE parallel_test_data AS
+SELECT
+    'series_' || LPAD(CAST(series_num AS VARCHAR), 3, '0') AS unique_id,
+    DATE '2024-01-01' + (day_num || ' day')::INTERVAL AS ds,
+    100.0 + series_num * 10.0 + day_num * 0.5 + (day_num % 7) * 3.0 AS y
+FROM generate_series(0, 59) t(day_num)
+CROSS JOIN generate_series(1, 50) s(series_num);
+
+# Verify test data created correctly
+query II
+SELECT COUNT(*), COUNT(DISTINCT unique_id) FROM parallel_test_data;
+----
+3000	50
+
+#######################################
+# Test 1: ts_forecast_by - Parallel vs Single Thread
+#######################################
+
+# Run with default parallel execution
+statement ok
+CREATE TABLE forecast_parallel AS
+SELECT id, date, point_forecast, model_name
+FROM ts_forecast_by('parallel_test_data', unique_id, ds, y, 'Naive', 7, MAP{})
+ORDER BY id, date;
+
+# Run with single thread
+statement ok
+SET threads=1;
+
+statement ok
+CREATE TABLE forecast_single AS
+SELECT id, date, point_forecast, model_name
+FROM ts_forecast_by('parallel_test_data', unique_id, ds, y, 'Naive', 7, MAP{})
+ORDER BY id, date;
+
+# Reset threads
+statement ok
+RESET threads;
+
+# Verify same row count
+query I
+SELECT (SELECT COUNT(*) FROM forecast_parallel) = (SELECT COUNT(*) FROM forecast_single);
+----
+true
+
+# Verify all forecasts match exactly
+query I
+SELECT COUNT(*) FROM forecast_parallel p
+JOIN forecast_single s ON p.id = s.id AND p.date = s.date
+WHERE p.point_forecast = s.point_forecast AND p.model_name = s.model_name;
+----
+350
+
+# Verify no differences exist
+query I
+SELECT COUNT(*) FROM (
+    SELECT * FROM forecast_parallel
+    EXCEPT
+    SELECT * FROM forecast_single
+);
+----
+0
+
+#######################################
+# Test 2: ts_fill_gaps - Parallel vs Single Thread
+#######################################
+
+# Create data with gaps (remove some dates)
+statement ok
+CREATE TABLE gaps_test_data AS
+SELECT unique_id, ds, y
+FROM parallel_test_data
+WHERE EXTRACT(day FROM ds) NOT IN (5, 15, 25);
+
+# Run with default parallel execution
+statement ok
+CREATE TABLE fill_gaps_parallel AS
+SELECT unique_id, ds, y
+FROM ts_fill_gaps_by('gaps_test_data', unique_id, ds, y, '1d')
+ORDER BY unique_id, ds;
+
+# Run with single thread
+statement ok
+SET threads=1;
+
+statement ok
+CREATE TABLE fill_gaps_single AS
+SELECT unique_id, ds, y
+FROM ts_fill_gaps_by('gaps_test_data', unique_id, ds, y, '1d')
+ORDER BY unique_id, ds;
+
+# Reset threads
+statement ok
+RESET threads;
+
+# Verify same row count
+query I
+SELECT (SELECT COUNT(*) FROM fill_gaps_parallel) = (SELECT COUNT(*) FROM fill_gaps_single);
+----
+true
+
+# Verify all filled values match
+query I
+SELECT COUNT(*) FROM (
+    SELECT * FROM fill_gaps_parallel
+    EXCEPT
+    SELECT * FROM fill_gaps_single
+);
+----
+0
+
+#######################################
+# Test 3: ts_detect_changepoints - Parallel vs Single Thread
+#######################################
+
+# Create data with obvious changepoints (deterministic, no random())
+statement ok
+CREATE TABLE changepoint_test_data AS
+SELECT
+    'series_' || LPAD(CAST(series_num AS VARCHAR), 3, '0') AS unique_id,
+    DATE '2024-01-01' + (day_num || ' day')::INTERVAL AS ds,
+    CASE
+        WHEN day_num < 30 THEN 100.0 + series_num * 0.1
+        ELSE 200.0 + series_num * 0.1  -- Level shift at day 30
+    END AS y
+FROM generate_series(0, 59) t(day_num)
+CROSS JOIN generate_series(1, 10) s(series_num);
+
+# Run with default parallel execution
+statement ok
+CREATE TABLE changepoints_parallel AS
+SELECT unique_id, ds, changepoint_probability
+FROM ts_detect_changepoints_by('changepoint_test_data', unique_id, ds, y, MAP{})
+ORDER BY unique_id, ds;
+
+# Run with single thread
+statement ok
+SET threads=1;
+
+statement ok
+CREATE TABLE changepoints_single AS
+SELECT unique_id, ds, changepoint_probability
+FROM ts_detect_changepoints_by('changepoint_test_data', unique_id, ds, y, MAP{})
+ORDER BY unique_id, ds;
+
+# Reset threads
+statement ok
+RESET threads;
+
+# Verify same row count
+query I
+SELECT (SELECT COUNT(*) FROM changepoints_parallel) = (SELECT COUNT(*) FROM changepoints_single);
+----
+true
+
+# Verify changepoint probabilities match (with tolerance for floating point)
+query I
+SELECT COUNT(*) FROM changepoints_parallel p
+JOIN changepoints_single s ON p.unique_id = s.unique_id AND p.ds = s.ds
+WHERE ABS(p.changepoint_probability - s.changepoint_probability) < 0.0001;
+----
+600
+
+#######################################
+# Test 4: ts_cv_forecast - Parallel vs Single Thread
+#######################################
+
+# Create subset for CV testing
+statement ok
+CREATE TABLE cv_test_data AS
+SELECT * FROM parallel_test_data
+WHERE unique_id IN ('series_001', 'series_002', 'series_003', 'series_004', 'series_005');
+
+# Create CV folds first
+statement ok
+CREATE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by('cv_test_data', unique_id, ds, y, 7, 2, MAP{});
+
+# Run with default parallel execution
+statement ok
+CREATE TABLE cv_forecast_parallel AS
+SELECT fold_id, unique_id, ds, split, ROUND(forecast, 4) as forecast, model_name
+FROM ts_cv_forecast_by('cv_folds', unique_id, ds, y, 'Naive', MAP{})
+ORDER BY fold_id, unique_id, ds;
+
+# Run with single thread
+statement ok
+SET threads=1;
+
+statement ok
+CREATE TABLE cv_forecast_single AS
+SELECT fold_id, unique_id, ds, split, ROUND(forecast, 4) as forecast, model_name
+FROM ts_cv_forecast_by('cv_folds', unique_id, ds, y, 'Naive', MAP{})
+ORDER BY fold_id, unique_id, ds;
+
+# Reset threads
+statement ok
+RESET threads;
+
+# Verify same row count
+query I
+SELECT (SELECT COUNT(*) FROM cv_forecast_parallel) = (SELECT COUNT(*) FROM cv_forecast_single);
+----
+true
+
+# Verify forecasts match
+query I
+SELECT COUNT(*) FROM (
+    SELECT * FROM cv_forecast_parallel
+    EXCEPT
+    SELECT * FROM cv_forecast_single
+);
+----
+0
+
+#######################################
+# Test 5: Large Dataset Stress Test
+# Verify consistent results with many series
+#######################################
+
+# Create larger test data: 100 series × 90 days = 9000 rows
+statement ok
+CREATE TABLE stress_test_data AS
+SELECT
+    'series_' || LPAD(CAST(series_num AS VARCHAR), 3, '0') AS unique_id,
+    DATE '2024-01-01' + (day_num || ' day')::INTERVAL AS ds,
+    100.0 + series_num * 5.0 + day_num * 0.3 + SIN(day_num * 0.5) * 10 AS y
+FROM generate_series(0, 89) t(day_num)
+CROSS JOIN generate_series(1, 100) s(series_num);
+
+# Verify data created
+query II
+SELECT COUNT(*), COUNT(DISTINCT unique_id) FROM stress_test_data;
+----
+9000	100
+
+# Run forecast with parallel
+statement ok
+CREATE TABLE stress_forecast AS
+SELECT id, date, point_forecast
+FROM ts_forecast_by('stress_test_data', unique_id, ds, y, 'Naive', 14, MAP{});
+
+# Verify we got expected number of forecast rows (100 series × 14 horizon)
+query I
+SELECT COUNT(*) FROM stress_forecast;
+----
+1400
+
+# Verify all series have forecasts
+query I
+SELECT COUNT(DISTINCT id) FROM stress_forecast;
+----
+100
+
+# Verify no NULL forecasts
+query I
+SELECT COUNT(*) FROM stress_forecast WHERE point_forecast IS NULL;
+----
+0
+
+# Verify forecasts are reasonable (no negative values for positive data)
+query I
+SELECT COUNT(*) FROM stress_forecast WHERE point_forecast < 0;
+----
+0
+
+#######################################
+# Test 6: Result Hash Consistency
+# Verify deterministic output across runs
+#######################################
+
+# Run forecast twice and compare hashes
+statement ok
+CREATE TABLE hash_test_1 AS
+SELECT md5(CAST(id AS VARCHAR) || CAST(date AS VARCHAR) || CAST(ROUND(point_forecast, 8) AS VARCHAR)) as row_hash
+FROM ts_forecast_by('parallel_test_data', unique_id, ds, y, 'SES', 7, MAP{})
+ORDER BY id, date;
+
+statement ok
+CREATE TABLE hash_test_2 AS
+SELECT md5(CAST(id AS VARCHAR) || CAST(date AS VARCHAR) || CAST(ROUND(point_forecast, 8) AS VARCHAR)) as row_hash
+FROM ts_forecast_by('parallel_test_data', unique_id, ds, y, 'SES', 7, MAP{})
+ORDER BY id, date;
+
+# Verify hashes match between runs
+query I
+SELECT COUNT(*) FROM hash_test_1 h1
+JOIN hash_test_2 h2 ON h1.row_hash = h2.row_hash;
+----
+350
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE parallel_test_data;
+
+statement ok
+DROP TABLE forecast_parallel;
+
+statement ok
+DROP TABLE forecast_single;
+
+statement ok
+DROP TABLE gaps_test_data;
+
+statement ok
+DROP TABLE fill_gaps_parallel;
+
+statement ok
+DROP TABLE fill_gaps_single;
+
+statement ok
+DROP TABLE changepoint_test_data;
+
+statement ok
+DROP TABLE changepoints_parallel;
+
+statement ok
+DROP TABLE changepoints_single;
+
+statement ok
+DROP TABLE cv_test_data;
+
+statement ok
+DROP TABLE cv_folds;
+
+statement ok
+DROP TABLE cv_forecast_parallel;
+
+statement ok
+DROP TABLE cv_forecast_single;
+
+statement ok
+DROP TABLE stress_test_data;
+
+statement ok
+DROP TABLE stress_forecast;
+
+statement ok
+DROP TABLE hash_test_1;
+
+statement ok
+DROP TABLE hash_test_2;
