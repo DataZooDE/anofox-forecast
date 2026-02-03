@@ -1171,13 +1171,14 @@ src AS (
     FROM query_table(source::VARCHAR)
     QUALIFY ROW_NUMBER() OVER (PARTITION BY group_col, date_trunc('second', date_col::TIMESTAMP) ORDER BY date_col) = 1
 ),
--- Join cv with src, keeping source row as JSON for native function
+-- Join cv with src, extracting unknown feature values as LIST(VARCHAR)
 -- cv_folds from ts_cv_folds_by has exactly 5 columns: group, date, target, fold_id, split
--- The native function expects: group, date, target, fold_id, split, __src_json
+-- The native function expects: group, date, target, fold_id, split, __feature_values (LIST)
+-- Performance: list_transform extracts only needed features (not entire row)
 joined AS (
     SELECT
         cv.* EXCLUDE (__cv_grp, __cv_dt),
-        to_json(src) AS __src_json
+        list_transform(unknown_features, f -> json_extract_string(to_json(src), '$.' || f)) AS __feature_values
     FROM cv
     JOIN src ON cv.__cv_grp = src.__src_grp AND cv.__cv_dt = src.__src_dt
 )

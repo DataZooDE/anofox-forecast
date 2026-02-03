@@ -12,19 +12,23 @@ namespace duckdb {
 // ============================================================================
 // _ts_cv_hydrate_native - Native CV hydration with unknown features as columns
 //
-// Takes pre-joined CV folds + source JSON and outputs unknown features as
+// Takes pre-joined CV folds + feature values LIST and outputs unknown features as
 // actual columns (not a MAP). Applies masking automatically:
-// - Train rows: actual values from source JSON
+// - Train rows: actual values from feature list
 // - Test rows: filled values per strategy (last_value, null, default)
 //
 // Input (from SQL wrapper):
-//   Table with: group, date, target, fold_id, split, __src_json (JSON of source row)
+//   Table with: group, date, target, fold_id, split, __feature_values (LIST(VARCHAR))
 //
 // Parameters:
-//   - unknown_features: VARCHAR[] of feature column names to extract from JSON
+//   - unknown_features: VARCHAR[] of feature column names (for output column names)
 //   - params MAP: {strategy, fill_value}
 //
 // Output: cv_folds columns (group, date, target, fold_id, split) + unknown features as VARCHAR
+//
+// Performance: SQL wrapper extracts features as LIST via list_transform + json_extract_string,
+// avoiding full row JSON serialization. This function reads LIST directly (O(1) per feature)
+// instead of parsing JSON strings (O(JSON_size) per feature).
 // ============================================================================
 
 // ============================================================================
@@ -175,64 +179,6 @@ static int64_t DateValueToMicros(const Value &date_val, DateColumnType date_type
     return 0;
 }
 
-// Extract a value from a JSON string by key
-// Returns empty string if not found or null
-static string ExtractJsonValue(const string &json_str, const string &key) {
-    // Simple JSON extraction - look for "key": value pattern
-    // This handles basic cases; DuckDB's json_extract would be more robust
-    // but we're working with the raw string here
-
-    // Look for "key":
-    string search_key = "\"" + key + "\":";
-    size_t pos = json_str.find(search_key);
-    if (pos == string::npos) {
-        return "";
-    }
-
-    pos += search_key.length();
-
-    // Skip whitespace
-    while (pos < json_str.length() && (json_str[pos] == ' ' || json_str[pos] == '\t')) {
-        pos++;
-    }
-
-    if (pos >= json_str.length()) {
-        return "";
-    }
-
-    // Check for null
-    if (json_str.substr(pos, 4) == "null") {
-        return "";
-    }
-
-    // Check if it's a string value (starts with quote)
-    if (json_str[pos] == '"') {
-        pos++;  // Skip opening quote
-        size_t end = pos;
-        while (end < json_str.length() && json_str[end] != '"') {
-            if (json_str[end] == '\\' && end + 1 < json_str.length()) {
-                end += 2;  // Skip escaped character
-            } else {
-                end++;
-            }
-        }
-        return json_str.substr(pos, end - pos);
-    }
-
-    // It's a number, boolean, or other value - read until comma, }, or ]
-    size_t end = pos;
-    while (end < json_str.length() &&
-           json_str[end] != ',' &&
-           json_str[end] != '}' &&
-           json_str[end] != ']') {
-        end++;
-    }
-
-    string value = json_str.substr(pos, end - pos);
-    // Trim whitespace
-    StringUtil::Trim(value);
-    return value;
-}
 
 // ============================================================================
 // Parameter Validation
@@ -299,7 +245,7 @@ static unique_ptr<FunctionData> TsCvHydrateNativeBind(
 
     // Input layout from SQL wrapper:
     // Columns 0-4: group, date, target, fold_id, split (cv_folds columns)
-    // Column 5: __src_json (JSON string of source row)
+    // Column 5: __feature_values (LIST(VARCHAR) of extracted feature values)
     //
     // Parameters:
     // input.inputs[0] is TABLE
@@ -420,9 +366,8 @@ static OperatorResultType TsCvHydrateNativeInOut(
         Value fold_id_val = input.GetValue(3, row_idx);
         Value split_val = input.GetValue(4, row_idx);
 
-        // Read JSON column (5)
-        Value json_val = input.GetValue(5, row_idx);
-        string json_str = json_val.IsNull() ? "{}" : json_val.ToString();
+        // Read feature values LIST column (5)
+        Value list_val = input.GetValue(5, row_idx);
 
         // Skip rows with null date (shouldn't happen after join, but be safe)
         if (date_val.IsNull()) continue;
@@ -435,10 +380,18 @@ static OperatorResultType TsCvHydrateNativeInOut(
         row.split = split_val.IsNull() ? "" : split_val.ToString();
         row.date_micros = DateValueToMicros(date_val, date_col_type);
 
-        // Extract unknown feature values from JSON
-        for (const auto &feat_name : bind_data.unknown_feature_names) {
-            string val = ExtractJsonValue(json_str, feat_name);
-            row.unknown_values.push_back(val);
+        // Extract unknown feature values directly from LIST (O(1) per feature)
+        if (!list_val.IsNull() && list_val.type().id() == LogicalTypeId::LIST) {
+            auto &list_children = ListValue::GetChildren(list_val);
+            for (idx_t i = 0; i < list_children.size(); i++) {
+                string val = list_children[i].IsNull() ? "" : list_children[i].ToString();
+                row.unknown_values.push_back(val);
+            }
+        } else {
+            // Fallback: empty values for all features
+            for (idx_t i = 0; i < bind_data.unknown_feature_names.size(); i++) {
+                row.unknown_values.push_back("");
+            }
         }
 
         local_state.rows.push_back(std::move(row));
@@ -577,8 +530,8 @@ static OperatorFinalizeResultType TsCvHydrateNativeFinalize(
 
 void RegisterTsCvHydrateNativeFunction(ExtensionLoader &loader) {
     // Table-in-out function: (TABLE, unknown_features, params)
-    // Input table: pre-joined cv_folds + __src_json column
-    // Columns: group, date, target, fold_id, split, __src_json
+    // Input table: pre-joined cv_folds + __feature_values column
+    // Columns: group, date, target, fold_id, split, __feature_values (LIST(VARCHAR))
     TableFunction func(
         "_ts_cv_hydrate_native",
         {LogicalType::TABLE,                    // Input table (pre-joined)
