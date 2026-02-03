@@ -1163,12 +1163,13 @@ WITH cv AS (
         date_trunc('second', date_col::TIMESTAMP) AS __cv_dt
     FROM query_table(cv_folds::VARCHAR)
 ),
--- Source data with join keys
+-- Source data with join keys (deduplicated to avoid row multiplication)
 src AS (
     SELECT *,
         group_col AS __src_grp,
         date_trunc('second', date_col::TIMESTAMP) AS __src_dt
     FROM query_table(source::VARCHAR)
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY group_col, date_trunc('second', date_col::TIMESTAMP) ORDER BY date_col) = 1
 ),
 -- Join cv with src, keeping source row as JSON for native function
 -- cv_folds from ts_cv_folds_by has exactly 5 columns: group, date, target, fold_id, split
