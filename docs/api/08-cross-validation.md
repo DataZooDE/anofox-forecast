@@ -310,24 +310,24 @@ Unknown features:   ✓ Train: actual values
 CREATE TABLE cv_folds AS
 SELECT * FROM ts_cv_folds_by('sales', store_id, date, revenue, 3, 30, MAP{});
 
--- Step 2: Build ML-ready dataset
+-- Step 2: Build ML-ready dataset (unknown features already masked)
 CREATE TABLE ml_input AS
 SELECT
-    fold_id, split, store_id, date,
+    store_id, date, fold_id, split,
     -- Target: NULL for test rows (to predict)
     CASE WHEN split = 'test' THEN NULL ELSE revenue END AS target,
-    -- Known features: join from source
-    s.day_of_week,
-    s.is_holiday,
-    -- Unknown features: automatically masked
-    h.unknown['competitor_sales']::DOUBLE AS competitor_sales,
-    h.unknown['actual_temp']::DOUBLE AS actual_temp
+    -- Unknown features: automatically masked (actual for train, filled for test)
+    unknown['competitor_sales']::DOUBLE AS competitor_sales,
+    unknown['actual_temp']::DOUBLE AS actual_temp
 FROM ts_cv_hydrate_by(
     'cv_folds', 'sales', store_id, date,
     ['competitor_sales', 'actual_temp'],
     MAP{'strategy': 'last_value'}
-) h
-JOIN sales s USING (store_id, date);
+);
+
+-- Optional: join with source for additional known features
+-- SELECT ml.*, s.day_of_week, s.is_holiday
+-- FROM ml_input ml JOIN sales s USING (store_id, date);
 
 -- Step 3: Train on rows WHERE target IS NOT NULL
 -- Step 4: Predict on rows WHERE target IS NULL
