@@ -1735,24 +1735,24 @@ FROM timing_data
 )"},
 
     // ================================================================================
-    // Metrics Table Macros (GROUP BY ALL pattern)
+    // Metrics Table Macros (DEPRECATED)
     //
-    // These macros use _ts_metrics_native for dynamic column exclusion.
-    // User controls grouping by selecting columns in source subquery.
-    // Column names are passed as VARCHAR strings.
+    // DEPRECATED: These table macros are ~2400x slower than using scalar functions
+    // with GROUP BY. Use the scalar function pattern instead:
     //
-    // Usage:
-    //   -- Group by series
-    //   SELECT * FROM ts_rmse_by(
-    //       (SELECT unique_id, ds, y, forecast FROM results),
-    //       'ds', 'y', 'forecast'
-    //   );
+    //   SELECT
+    //       unique_id,
+    //       fold_id,
+    //       ts_mae(LIST(y ORDER BY ds), LIST(forecast ORDER BY ds)) AS mae,
+    //       ts_rmse(LIST(y ORDER BY ds), LIST(forecast ORDER BY ds)) AS rmse
+    //   FROM my_data
+    //   GROUP BY unique_id, fold_id;
     //
-    //   -- Group by series, fold, and model
-    //   SELECT * FROM ts_rmse_by(
-    //       (SELECT unique_id, fold_id, model_name, ds, y, forecast FROM cv_results),
-    //       'ds', 'y', 'forecast'
-    //   );
+    // The table macros also have threading issues requiring SET threads=1 for
+    // correct results on large datasets (DuckDB issues #18222, #19939).
+    //
+    // These macros are kept for backward compatibility but will be removed in
+    // a future version.
     // ================================================================================
 
     // ts_mae_by: Compute Mean Absolute Error grouped by selected columns
