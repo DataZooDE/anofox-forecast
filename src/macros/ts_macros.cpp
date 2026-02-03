@@ -1129,11 +1129,11 @@ SELECT * FROM _ts_cv_folds_native(
 )
 )"},
 
-    // ts_cv_hydrate_by: Join CV folds with source data and provide masking tools
+    // ts_cv_hydrate_by: Hydrate CV folds with unknown features as direct columns
     // C++ API: ts_cv_hydrate_by(cv_folds, source, group_col, date_col, unknown_features, params)
     //
     // This function joins CV folds from ts_cv_folds_by with the source data table,
-    // providing tools to mask "unknown" feature columns in test rows to prevent data leakage.
+    // outputting unknown feature columns with masking applied automatically.
     //
     // cv_folds: Output from ts_cv_folds_by (has group_col, date_col, target_col, fold_id, split)
     // source: Original data table with all features
@@ -1141,7 +1141,7 @@ SELECT * FROM _ts_cv_folds_native(
     // unknown_features: VARCHAR[] list of column names to mask in test rows
     // params MAP supports:
     //   strategy (VARCHAR, default 'last_value') - 'last_value', 'null', or 'default'
-    //   fill_value (DOUBLE, default 0.0) - value for 'default' strategy
+    //   fill_value (VARCHAR, default '') - value for 'default' strategy
     //
     // Fill strategies:
     //   'last_value' - carry forward last training value per group (default)
@@ -1149,79 +1149,42 @@ SELECT * FROM _ts_cv_folds_native(
     //   'default' - set to specified fill_value
     //
     // Returns:
-    //   fold_id, split, _is_test, _train_cutoff, all source columns,
-    //   _last_known (MAP with last training values for unknown columns per group/fold)
+    //   cv_folds columns (group, date, target, fold_id, split) + unknown features as VARCHAR columns
     //
-    // Usage: Mask unknown columns using _is_test or _last_known:
-    //   -- Null strategy (mask with NULL):
-    //   SELECT *, CASE WHEN _is_test THEN NULL ELSE competitor_sales END AS competitor_sales_masked
-    //   FROM ts_cv_hydrate_by('folds', 'source', store, date, ['competitor_sales'], MAP{});
-    //
-    //   -- last_value strategy (carry forward):
-    //   SELECT *, CASE WHEN _is_test THEN _last_known['competitor_sales'] ELSE competitor_sales END
-    //   FROM ts_cv_hydrate_by('folds', 'source', store, date, ['competitor_sales'], MAP{});
+    // Usage: Direct column access (no MAP extraction needed):
+    //   SELECT temperature, promotion
+    //   FROM ts_cv_hydrate_by('cv_folds', 'source', id, date, ['temperature', 'promotion'], MAP{});
     {"ts_cv_hydrate_by", {"cv_folds", "source", "group_col", "date_col", "unknown_features", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
-WITH _params AS (
-    SELECT
-        COALESCE(json_extract_string(to_json(params), '$.strategy'), 'last_value') AS _strategy,
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.fill_value') AS DOUBLE), 0.0) AS _fill_value
-),
 -- CV folds with join keys
-cv AS (
+WITH cv AS (
     SELECT *,
-        group_col AS _cv_grp,
-        date_trunc('second', date_col::TIMESTAMP) AS _cv_dt
+        group_col AS __cv_grp,
+        date_trunc('second', date_col::TIMESTAMP) AS __cv_dt
     FROM query_table(cv_folds::VARCHAR)
 ),
 -- Source data with join keys
 src AS (
     SELECT *,
-        group_col AS _src_grp,
-        date_trunc('second', date_col::TIMESTAMP) AS _src_dt
+        group_col AS __src_grp,
+        date_trunc('second', date_col::TIMESTAMP) AS __src_dt
     FROM query_table(source::VARCHAR)
 ),
--- For each group/fold, get the last training row's JSON representation
-last_known_per_fold AS (
-    SELECT
-        cv._cv_grp,
-        cv.fold_id AS _fold_id,
-        to_json(src) AS _last_row_json
-    FROM cv
-    JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
-    WHERE cv.split = 'train'
-    QUALIFY ROW_NUMBER() OVER (PARTITION BY cv._cv_grp, cv.fold_id ORDER BY cv._cv_dt DESC) = 1
-),
--- Join cv with src and last_known, store JSON for value extraction
+-- Join cv with src, keeping source row as JSON for native function
+-- cv_folds from ts_cv_folds_by has exactly 5 columns: group, date, target, fold_id, split
+-- The native function expects: group, date, target, fold_id, split, __src_json
 joined AS (
     SELECT
-        cv.*,
-        to_json(src) AS _src_json,
-        lk._last_row_json
+        cv.* EXCLUDE (__cv_grp, __cv_dt),
+        to_json(src) AS __src_json
     FROM cv
-    JOIN src ON cv._cv_grp = src._src_grp AND cv._cv_dt = src._src_dt
-    LEFT JOIN last_known_per_fold lk ON cv._cv_grp = lk._cv_grp AND cv.fold_id = lk._fold_id
+    JOIN src ON cv.__cv_grp = src.__src_grp AND cv.__cv_dt = src.__src_dt
 )
-SELECT
-    j.* EXCLUDE (_cv_grp, _cv_dt, _src_json, _last_row_json),
-    -- Unknown features MAP: actual values for train, filled values for test
-    MAP_FROM_ENTRIES((
-        SELECT LIST(STRUCT_PACK(
-            k := col_name,
-            v := CASE
-                WHEN j.split = 'test' THEN
-                    CASE
-                        WHEN (SELECT _strategy FROM _params) = 'null' THEN NULL
-                        WHEN (SELECT _strategy FROM _params) = 'default' THEN (SELECT _fill_value FROM _params)::VARCHAR
-                        ELSE TRY_CAST(json_extract(j._last_row_json, '$.' || col_name) AS VARCHAR)
-                    END
-                ELSE TRY_CAST(json_extract(j._src_json, '$.' || col_name) AS VARCHAR)
-            END
-        ))
-        FROM (SELECT UNNEST(unknown_features) AS col_name)
-    )) AS unknown
-FROM joined j
-ORDER BY j.fold_id, j._cv_grp, j._cv_dt
+SELECT * FROM _ts_cv_hydrate_native(
+    (SELECT * FROM joined),
+    unknown_features,
+    params
+)
 )"},
 
     // ts_conformal_by: Compute conformal prediction intervals for grouped series

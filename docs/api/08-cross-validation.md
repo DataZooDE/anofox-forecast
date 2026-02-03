@@ -233,7 +233,7 @@ GROUP BY unique_id, fold_id;
 
 ### ts_cv_hydrate_by
 
-Hydrate CV folds with unknown features from a source table. **Masking is applied automatically** - train rows get actual values, test rows get filled values per strategy.
+Hydrate CV folds with unknown features from a source table. **Masking is applied automatically** - train rows get actual values, test rows get filled values per strategy. **Unknown features are output as direct columns** (not a MAP), making them immediately usable without extraction.
 
 **Signature:**
 ```sql
@@ -251,7 +251,7 @@ ts_cv_hydrate_by(
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `strategy` | VARCHAR | `'last_value'` | `'last_value'`, `'null'`, or `'default'` |
-| `fill_value` | DOUBLE | `0.0` | Value for `'default'` strategy |
+| `fill_value` | VARCHAR | `''` | Value for `'default'` strategy |
 
 **Fill Strategies (for test rows):**
 | Strategy | Train Rows | Test Rows |
@@ -263,8 +263,14 @@ ts_cv_hydrate_by(
 **Output Columns:**
 | Column | Type | Description |
 |--------|------|-------------|
-| *(all cv_folds columns)* | | group, date, target, fold_id, split |
-| `unknown` | MAP(VARCHAR, VARCHAR) | Unknown features with masking applied |
+| `<group_col>` | (same as input) | Series identifier |
+| `<date_col>` | (same as input) | Date/timestamp |
+| `<target_col>` | DOUBLE | Target value |
+| `fold_id` | BIGINT | Fold number |
+| `split` | VARCHAR | `'train'` or `'test'` |
+| `<feature_1>` | VARCHAR | First unknown feature (with masking) |
+| `<feature_2>` | VARCHAR | Second unknown feature (with masking) |
+| ... | VARCHAR | Additional unknown features |
 
 **Basic Usage:**
 
@@ -274,10 +280,11 @@ CREATE TABLE cv_folds AS
 SELECT * FROM ts_cv_folds_by('sales', store_id, date, revenue, 3, 30, MAP{});
 
 -- Hydrate with unknown features (masking applied automatically)
+-- Unknown features are direct columns - no MAP extraction needed!
 SELECT
     store_id, date, revenue, fold_id, split,
-    unknown['competitor_sales'] AS competitor_sales,
-    unknown['actual_temp'] AS actual_temp
+    competitor_sales,  -- Direct column access
+    actual_temp        -- Direct column access
 FROM ts_cv_hydrate_by(
     'cv_folds', 'sales', store_id, date,
     ['competitor_sales', 'actual_temp'],
@@ -285,7 +292,7 @@ FROM ts_cv_hydrate_by(
 );
 ```
 
-The `unknown` MAP contains:
+The unknown feature columns contain:
 - **Train rows**: Actual values from source
 - **Test rows**: Filled values per strategy (no data leakage)
 
@@ -311,14 +318,15 @@ CREATE TABLE cv_folds AS
 SELECT * FROM ts_cv_folds_by('sales', store_id, date, revenue, 3, 30, MAP{});
 
 -- Step 2: Build ML-ready dataset (unknown features already masked)
+-- Unknown features are direct columns - no extraction needed!
 CREATE TABLE ml_input AS
 SELECT
     store_id, date, fold_id, split,
     -- Target: NULL for test rows (to predict)
     CASE WHEN split = 'test' THEN NULL ELSE revenue END AS target,
     -- Unknown features: automatically masked (actual for train, filled for test)
-    unknown['competitor_sales']::DOUBLE AS competitor_sales,
-    unknown['actual_temp']::DOUBLE AS actual_temp
+    competitor_sales::DOUBLE AS competitor_sales,
+    actual_temp::DOUBLE AS actual_temp
 FROM ts_cv_hydrate_by(
     'cv_folds', 'sales', store_id, date,
     ['competitor_sales', 'actual_temp'],

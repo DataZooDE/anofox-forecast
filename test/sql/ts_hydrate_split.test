@@ -1,5 +1,5 @@
 # name: test/sql/ts_hydrate_split.test
-# description: Tests for ts_cv_hydrate_by - hydrate CV folds with unknown features (masking applied automatically)
+# description: Tests for ts_cv_hydrate_by - hydrate CV folds with unknown features as direct columns
 # group: [sql]
 
 require anofox_forecast
@@ -42,7 +42,7 @@ SELECT COUNT(*) FROM (
 # ts_cv_hydrate_by - Basic Join Test
 #######################################
 
-# Should return all cv_folds columns plus unknown MAP
+# Should return all cv_folds columns plus unknown feature columns
 query I
 SELECT COUNT(*) FROM ts_cv_hydrate_by(
     'cv_folds', 'backtest_sample', category, date, ['temperature'], MAP{}
@@ -62,13 +62,25 @@ test	6
 train	30
 
 #######################################
+# ts_cv_hydrate_by - Direct Column Access
+#######################################
+
+# Unknown features should be accessible as direct columns (not MAP)
+query I
+SELECT COUNT(*) FROM ts_cv_hydrate_by(
+    'cv_folds', 'backtest_sample', category, date, ['temperature'], MAP{}
+) WHERE temperature IS NOT NULL;
+----
+180
+
+#######################################
 # ts_cv_hydrate_by - Automatic Masking
 #######################################
 
 # Train rows should have actual values (multiple distinct temps)
 # Test rows should have filled values (single value per strategy)
 query II
-SELECT split, COUNT(DISTINCT unknown['temperature']) AS distinct_temps
+SELECT split, COUNT(DISTINCT temperature) AS distinct_temps
 FROM ts_cv_hydrate_by(
     'cv_folds', 'backtest_sample', category, date, ['temperature'],
     MAP{'strategy': 'last_value'}
@@ -90,7 +102,7 @@ SELECT split, COUNT(*) FROM ts_cv_hydrate_by(
     'cv_folds', 'backtest_sample', category, date, ['temperature'],
     MAP{'strategy': 'null'}
 )
-WHERE fold_id = 1 AND category = 'A' AND unknown['temperature'] IS NULL
+WHERE fold_id = 1 AND category = 'A' AND temperature IS NULL
 GROUP BY split;
 ----
 test	3
@@ -101,7 +113,7 @@ SELECT COUNT(*) FROM ts_cv_hydrate_by(
     'cv_folds', 'backtest_sample', category, date, ['temperature'],
     MAP{'strategy': 'null'}
 )
-WHERE fold_id = 1 AND split = 'train' AND unknown['temperature'] IS NOT NULL;
+WHERE fold_id = 1 AND split = 'train' AND temperature IS NOT NULL;
 ----
 30
 
@@ -111,7 +123,7 @@ WHERE fold_id = 1 AND split = 'train' AND unknown['temperature'] IS NOT NULL;
 
 # Test rows should all have the same last known value
 query I
-SELECT COUNT(DISTINCT unknown['temperature']) FROM ts_cv_hydrate_by(
+SELECT COUNT(DISTINCT temperature) FROM ts_cv_hydrate_by(
     'cv_folds', 'backtest_sample', category, date, ['temperature'],
     MAP{'strategy': 'last_value'}
 ) WHERE fold_id = 1 AND category = 'A' AND split = 'test';
@@ -120,7 +132,7 @@ SELECT COUNT(DISTINCT unknown['temperature']) FROM ts_cv_hydrate_by(
 
 # Train rows should have varied actual values
 query I
-SELECT COUNT(DISTINCT unknown['temperature']) > 1 AS has_variety FROM ts_cv_hydrate_by(
+SELECT COUNT(DISTINCT temperature) > 1 AS has_variety FROM ts_cv_hydrate_by(
     'cv_folds', 'backtest_sample', category, date, ['temperature'],
     MAP{'strategy': 'last_value'}
 ) WHERE fold_id = 1 AND category = 'A' AND split = 'train';
@@ -133,12 +145,12 @@ true
 
 # Test rows should have fill_value
 query I
-SELECT DISTINCT unknown['temperature'] FROM ts_cv_hydrate_by(
+SELECT DISTINCT temperature FROM ts_cv_hydrate_by(
     'cv_folds', 'backtest_sample', category, date, ['temperature'],
     MAP{'strategy': 'default', 'fill_value': '999'}
 ) WHERE fold_id = 1 AND category = 'A' AND split = 'test';
 ----
-999.0
+999
 
 #######################################
 # ts_cv_hydrate_by - Multiple Unknown Features
@@ -157,15 +169,15 @@ SELECT COUNT(*) FROM (
 ----
 36
 
-# Both columns should be present in unknown MAP
+# Both columns should be present and accessible directly
 query I
 SELECT COUNT(*) FROM ts_cv_hydrate_by(
     'cv_folds', 'backtest_sample', category, date,
     ['temperature', 'promotion'],
     MAP{'strategy': 'last_value'}
 ) WHERE fold_id = 1 AND category = 'A' AND split = 'test'
-  AND unknown['temperature'] IS NOT NULL
-  AND unknown['promotion'] IS NOT NULL;
+  AND temperature IS NOT NULL
+  AND promotion IS NOT NULL;
 ----
 3
 
@@ -192,18 +204,18 @@ ORDER BY fold_id, split DESC;
 # Direct Usage Pattern (No CASE WHEN needed)
 #######################################
 
-# Output is immediately usable - just extract from unknown MAP
+# Output is immediately usable - just access columns directly
 query III
 SELECT
     fold_id,
     split,
-    unknown['temperature'] IS NOT NULL AS has_temp
+    temperature IS NOT NULL AS has_temp
 FROM ts_cv_hydrate_by(
     'cv_folds', 'backtest_sample', category, date, ['temperature'],
     MAP{'strategy': 'last_value'}
 )
 WHERE fold_id = 1 AND category = 'A'
-GROUP BY fold_id, split, unknown['temperature'] IS NOT NULL
+GROUP BY fold_id, split, temperature IS NOT NULL
 ORDER BY split DESC;
 ----
 1	train	true
