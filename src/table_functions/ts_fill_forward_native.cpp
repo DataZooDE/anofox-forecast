@@ -23,30 +23,29 @@ struct TsFillForwardNativeBindData : public TableFunctionData {
 };
 
 // ============================================================================
-// Local State - buffers data per thread
+// Shared Group Data Structure
+// ============================================================================
+
+struct FillForwardGroupData {
+    Value group_value;
+    vector<int64_t> dates;
+    vector<double> values;
+    vector<bool> validity;
+};
+
+struct FillForwardFilledGroup {
+    Value group_value;
+    vector<int64_t> dates;
+    vector<double> values;
+    vector<bool> validity;
+};
+
+// ============================================================================
+// Local State - minimal per-thread state
 // ============================================================================
 
 struct TsFillForwardNativeLocalState : public LocalTableFunctionState {
-    struct GroupData {
-        Value group_value;
-        vector<int64_t> dates;
-        vector<double> values;
-        vector<bool> validity;
-    };
-
-    std::map<string, GroupData> groups;
-    vector<string> group_order;
-
-    struct FilledGroup {
-        Value group_value;
-        vector<int64_t> dates;
-        vector<double> values;
-        vector<bool> validity;
-    };
-    vector<FilledGroup> filled_results;
-    idx_t current_group = 0;
-    idx_t current_row = 0;
-    bool processed = false;
+    // No longer needed - output iteration is in global state
 };
 
 // ============================================================================
@@ -145,17 +144,32 @@ static unique_ptr<FunctionData> TsFillForwardNativeBind(
 }
 
 // ============================================================================
-// Global State - enables parallel execution
+// Global State - thread-safe accumulation
 //
-// IMPORTANT: This custom GlobalState is required for proper parallel execution.
-// Using the base GlobalTableFunctionState directly causes batch index collisions
-// with large datasets (300k+ groups) during BatchedDataCollection::Merge.
+// IMPORTANT: DuckDB's PhysicalTableInOutFunction::ParallelOperator() always
+// returns true, ignoring MaxThreads(). To handle parallel execution correctly,
+// we accumulate all input data in GlobalState (protected by mutex), then
+// process everything in a single-threaded finalize phase.
 // ============================================================================
 
 struct TsFillForwardNativeGlobalState : public GlobalTableFunctionState {
-    // Allow parallel execution - each thread processes its partition of groups
+    // Mutex to protect shared data structures
+    mutex mtx;
+
+    // Shared accumulator for all input data (protected by mtx)
+    std::map<string, FillForwardGroupData> groups;
+    vector<string> group_order;
+
+    // Processed results (populated in finalize, read during output)
+    vector<FillForwardFilledGroup> filled_results;
+    bool processed = false;
+
+    // Output iteration state (protected by mtx)
+    idx_t current_group = 0;
+    idx_t current_row = 0;
+
     idx_t MaxThreads() const override {
-        return 999999;  // Unlimited - let DuckDB decide based on hardware
+        return 1;  // Hint (ignored by DuckDB for in_out functions, but kept for documentation)
     }
 };
 
@@ -187,9 +201,12 @@ static OperatorResultType TsFillForwardNativeInOut(
     DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsFillForwardNativeBindData>();
-    auto &local_state = data_p.local_state->Cast<TsFillForwardNativeLocalState>();
+    auto &global_state = data_p.global_state->Cast<TsFillForwardNativeGlobalState>();
 
-    // Buffer all incoming data
+    // Lock the global state for thread-safe accumulation
+    lock_guard<mutex> lock(global_state.mtx);
+
+    // Buffer all incoming data in global state
     for (idx_t i = 0; i < input.size(); i++) {
         Value group_val = input.data[0].GetValue(i);
         Value date_val = input.data[1].GetValue(i);
@@ -199,13 +216,13 @@ static OperatorResultType TsFillForwardNativeInOut(
 
         string group_key = GetGroupKey(group_val);
 
-        if (local_state.groups.find(group_key) == local_state.groups.end()) {
-            local_state.groups[group_key] = TsFillForwardNativeLocalState::GroupData();
-            local_state.groups[group_key].group_value = group_val;
-            local_state.group_order.push_back(group_key);
+        if (global_state.groups.find(group_key) == global_state.groups.end()) {
+            global_state.groups[group_key] = FillForwardGroupData();
+            global_state.groups[group_key].group_value = group_val;
+            global_state.group_order.push_back(group_key);
         }
 
-        auto &grp = local_state.groups[group_key];
+        auto &grp = global_state.groups[group_key];
 
         // Convert date to microseconds for Rust
         int64_t date_micros;
@@ -252,12 +269,15 @@ static OperatorFinalizeResultType TsFillForwardNativeFinalize(
     DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsFillForwardNativeBindData>();
-    auto &local_state = data_p.local_state->Cast<TsFillForwardNativeLocalState>();
+    auto &global_state = data_p.global_state->Cast<TsFillForwardNativeGlobalState>();
 
-    // Process all groups on first finalize call
-    if (!local_state.processed) {
-        for (const auto &group_key : local_state.group_order) {
-            auto &grp = local_state.groups[group_key];
+    // Lock for thread-safe access to global state
+    lock_guard<mutex> lock(global_state.mtx);
+
+    // Process all groups on first finalize call (only one thread does this)
+    if (!global_state.processed) {
+        for (const auto &group_key : global_state.group_order) {
+            auto &grp = global_state.groups[group_key];
 
             if (grp.dates.empty()) continue;
 
@@ -276,7 +296,6 @@ static OperatorFinalizeResultType TsFillForwardNativeFinalize(
 
             if (bind_data.date_col_type == DateColumnType::INTEGER ||
                 bind_data.date_col_type == DateColumnType::BIGINT) {
-                // For integer date columns
                 if (bind_data.frequency_is_raw) {
                     freq_for_rust = bind_data.frequency_seconds;
                 } else {
@@ -284,13 +303,11 @@ static OperatorFinalizeResultType TsFillForwardNativeFinalize(
                 }
                 target_for_rust = bind_data.target_date_micros;
             } else {
-                // For DATE/TIMESTAMP, convert to microseconds
                 if (bind_data.frequency_is_raw) {
                     freq_for_rust = bind_data.frequency_seconds * 86400LL * 1000000LL;
                 } else {
                     freq_for_rust = bind_data.frequency_seconds * 1000000LL;
                 }
-                // Target date is already in microseconds if not raw
                 if (bind_data.target_is_raw) {
                     target_for_rust = bind_data.target_date_micros * 86400LL * 1000000LL;
                 } else {
@@ -319,8 +336,8 @@ static OperatorFinalizeResultType TsFillForwardNativeFinalize(
                     error.message ? error.message : "Unknown error");
             }
 
-            // Store results
-            TsFillForwardNativeLocalState::FilledGroup filled;
+            // Store results in global state
+            FillForwardFilledGroup filled;
             filled.group_value = grp.group_value;
 
             for (size_t i = 0; i < ffi_result.length; i++) {
@@ -334,33 +351,33 @@ static OperatorFinalizeResultType TsFillForwardNativeFinalize(
                 filled.validity.push_back(valid);
             }
 
-            local_state.filled_results.push_back(std::move(filled));
+            global_state.filled_results.push_back(std::move(filled));
 
             anofox_free_gap_fill_result(&ffi_result);
         }
-        local_state.processed = true;
+        global_state.processed = true;
     }
 
-    // Output results
-    if (local_state.filled_results.empty() ||
-        local_state.current_group >= local_state.filled_results.size()) {
+    // Output results (using global_state for iteration position)
+    if (global_state.filled_results.empty() ||
+        global_state.current_group >= global_state.filled_results.size()) {
         return OperatorFinalizeResultType::FINISHED;
     }
 
     idx_t output_count = 0;
 
-    // Initialize all output vectors as FLAT_VECTOR for parallel-safe batch merging
+    // Initialize all output vectors as FLAT_VECTOR
     for (idx_t col = 0; col < output.ColumnCount(); col++) {
         output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
     }
 
     while (output_count < STANDARD_VECTOR_SIZE &&
-           local_state.current_group < local_state.filled_results.size()) {
+           global_state.current_group < global_state.filled_results.size()) {
 
-        auto &grp = local_state.filled_results[local_state.current_group];
+        auto &grp = global_state.filled_results[global_state.current_group];
 
         while (output_count < STANDARD_VECTOR_SIZE &&
-               local_state.current_row < grp.dates.size()) {
+               global_state.current_row < grp.dates.size()) {
 
             idx_t out_idx = output_count;
 
@@ -368,7 +385,7 @@ static OperatorFinalizeResultType TsFillForwardNativeFinalize(
             output.data[0].SetValue(out_idx, grp.group_value);
 
             // Date column (with type preservation!)
-            int64_t date_micros = grp.dates[local_state.current_row];
+            int64_t date_micros = grp.dates[global_state.current_row];
             switch (bind_data.date_col_type) {
                 case DateColumnType::DATE:
                     output.data[1].SetValue(out_idx, Value::DATE(MicrosecondsToDate(date_micros)));
@@ -385,25 +402,25 @@ static OperatorFinalizeResultType TsFillForwardNativeFinalize(
             }
 
             // Value column
-            if (grp.validity[local_state.current_row]) {
-                output.data[2].SetValue(out_idx, Value::DOUBLE(grp.values[local_state.current_row]));
+            if (grp.validity[global_state.current_row]) {
+                output.data[2].SetValue(out_idx, Value::DOUBLE(grp.values[global_state.current_row]));
             } else {
                 output.data[2].SetValue(out_idx, Value());
             }
 
             output_count++;
-            local_state.current_row++;
+            global_state.current_row++;
         }
 
-        if (local_state.current_row >= grp.dates.size()) {
-            local_state.current_group++;
-            local_state.current_row = 0;
+        if (global_state.current_row >= grp.dates.size()) {
+            global_state.current_group++;
+            global_state.current_row = 0;
         }
     }
 
     output.SetCardinality(output_count);
 
-    if (local_state.current_group >= local_state.filled_results.size()) {
+    if (global_state.current_group >= global_state.filled_results.size()) {
         return OperatorFinalizeResultType::FINISHED;
     }
 
