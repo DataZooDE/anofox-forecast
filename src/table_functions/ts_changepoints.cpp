@@ -424,11 +424,20 @@ struct TsDetectChangepointsByLocalState : public LocalTableFunctionState {
     std::map<string, GroupData> groups;
     vector<string> group_order;
 
+    // Track rows with NULL dates for warning and output
+    struct NullDateRow {
+        Value group_value;
+        // timestamp not available for NULL date rows
+    };
+    vector<NullDateRow> null_date_rows;
+
     struct OutputRow {
         Value group_value;
         int64_t timestamp;
         bool is_changepoint;
         double changepoint_probability;
+        bool changepoint_probability_null = false;  // True when probability should be NULL
+        bool date_is_null = false;  // True for NULL date rows
     };
     vector<OutputRow> results;
 
@@ -548,7 +557,13 @@ static OperatorResultType TsDetectChangepointsByInOut(
         Value date_val = input.data[1].GetValue(i);
         Value value_val = input.data[2].GetValue(i);
 
-        if (date_val.IsNull()) continue;
+        // Track NULL date rows for warning and output (instead of skipping)
+        if (date_val.IsNull()) {
+            TsDetectChangepointsByLocalState::NullDateRow null_row;
+            null_row.group_value = group_val;
+            local_state.null_date_rows.push_back(null_row);
+            continue;  // Still skip from BOCPD processing
+        }
 
         string group_key = GetGroupKey(group_val);
 
@@ -589,10 +604,31 @@ static OperatorFinalizeResultType TsDetectChangepointsByFinalize(
 
     // Process all groups on first finalize call
     if (!local_state.processed) {
+        // Emit warning if there are NULL date rows
+        if (!local_state.null_date_rows.empty()) {
+            string warning = StringUtil::Format(
+                "ts_detect_changepoints_by: %zu rows with NULL dates - these will have is_changepoint=false, probability=NULL",
+                local_state.null_date_rows.size()
+            );
+            Printer::Print(warning);
+        }
+
         for (const auto &group_key : local_state.group_order) {
             auto &grp = local_state.groups[group_key];
 
-            if (grp.values.size() < 2) continue;
+            // Handle groups with < 2 points: output with default values instead of skipping
+            if (grp.values.size() < 2) {
+                for (size_t i = 0; i < grp.timestamps.size(); i++) {
+                    TsDetectChangepointsByLocalState::OutputRow row;
+                    row.group_value = grp.group_value;
+                    row.timestamp = grp.timestamps[i];
+                    row.is_changepoint = false;
+                    row.changepoint_probability = 0.0;
+                    row.changepoint_probability_null = true;
+                    local_state.results.push_back(row);
+                }
+                continue;
+            }
 
             // Sort by timestamp while preserving correspondence
             vector<pair<int64_t, double>> sorted_data;
@@ -622,7 +658,16 @@ static OperatorFinalizeResultType TsDetectChangepointsByFinalize(
             );
 
             if (!success) {
-                // Skip this group on error
+                // Output rows with default values on error instead of skipping
+                for (size_t i = 0; i < sorted_values.size(); i++) {
+                    TsDetectChangepointsByLocalState::OutputRow row;
+                    row.group_value = grp.group_value;
+                    row.timestamp = sorted_timestamps[i];
+                    row.is_changepoint = false;
+                    row.changepoint_probability = 0.0;
+                    row.changepoint_probability_null = true;
+                    local_state.results.push_back(row);
+                }
                 continue;
             }
 
@@ -638,6 +683,19 @@ static OperatorFinalizeResultType TsDetectChangepointsByFinalize(
 
             anofox_free_bocpd_result(&bocpd_result);
         }
+
+        // Output NULL date rows with default values
+        for (const auto &null_row : local_state.null_date_rows) {
+            TsDetectChangepointsByLocalState::OutputRow row;
+            row.group_value = null_row.group_value;
+            row.timestamp = 0;  // Placeholder, will be output as NULL
+            row.is_changepoint = false;
+            row.changepoint_probability = 0.0;
+            row.changepoint_probability_null = true;
+            row.date_is_null = true;
+            local_state.results.push_back(row);
+        }
+
         local_state.processed = true;
     }
 
@@ -659,22 +717,30 @@ static OperatorFinalizeResultType TsDetectChangepointsByFinalize(
         // Group column
         output.data[0].SetValue(out_idx, row.group_value);
 
-        // Date column
-        switch (bind_data.date_col_type) {
-            case DateColumnType::DATE:
-                output.data[1].SetValue(out_idx, Value::DATE(MicrosecondsToDate(row.timestamp)));
-                break;
-            case DateColumnType::TIMESTAMP:
-            default:
-                output.data[1].SetValue(out_idx, Value::TIMESTAMP(MicrosecondsToTimestamp(row.timestamp)));
-                break;
+        // Date column - output NULL for NULL date rows
+        if (row.date_is_null) {
+            FlatVector::SetNull(output.data[1], out_idx, true);
+        } else {
+            switch (bind_data.date_col_type) {
+                case DateColumnType::DATE:
+                    output.data[1].SetValue(out_idx, Value::DATE(MicrosecondsToDate(row.timestamp)));
+                    break;
+                case DateColumnType::TIMESTAMP:
+                default:
+                    output.data[1].SetValue(out_idx, Value::TIMESTAMP(MicrosecondsToTimestamp(row.timestamp)));
+                    break;
+            }
         }
 
         // is_changepoint
         FlatVector::GetData<bool>(output.data[2])[out_idx] = row.is_changepoint;
 
-        // changepoint_probability
-        FlatVector::GetData<double>(output.data[3])[out_idx] = row.changepoint_probability;
+        // changepoint_probability - output NULL when flagged
+        if (row.changepoint_probability_null) {
+            FlatVector::SetNull(output.data[3], out_idx, true);
+        } else {
+            FlatVector::GetData<double>(output.data[3])[out_idx] = row.changepoint_probability;
+        }
 
         output_count++;
         local_state.output_offset++;

@@ -512,3 +512,111 @@ true
 
 statement ok
 DROP TABLE multi_step_test;
+
+#######################################
+# Row Preservation Tests
+# Ensure output row count = input row count
+#######################################
+
+# Test 1: NULL dates should be preserved with default values
+statement ok
+CREATE TABLE cp_null_dates AS
+SELECT 'A' AS grp, '2024-01-01'::DATE AS dt, 100.0 AS val
+UNION ALL SELECT 'A', '2024-01-02', 110.0
+UNION ALL SELECT 'A', '2024-01-03', 105.0
+UNION ALL SELECT 'A', NULL, 120.0;
+
+# Should return 4 rows (not 3) - NULL date row preserved
+query I
+SELECT COUNT(*) FROM ts_detect_changepoints_by('cp_null_dates', grp, dt, val, MAP{});
+----
+4
+
+# NULL date row should have is_changepoint=false
+query I
+SELECT COUNT(*) FROM ts_detect_changepoints_by('cp_null_dates', grp, dt, val, MAP{})
+WHERE dt IS NULL AND is_changepoint = false;
+----
+1
+
+# NULL date row should have probability=NULL
+query I
+SELECT COUNT(*) FROM ts_detect_changepoints_by('cp_null_dates', grp, dt, val, MAP{})
+WHERE dt IS NULL AND changepoint_probability IS NULL;
+----
+1
+
+statement ok
+DROP TABLE cp_null_dates;
+
+# Test 2: Singleton groups (< 2 points) should be preserved
+statement ok
+CREATE TABLE cp_singleton AS
+SELECT 'A' AS grp, '2024-01-01'::DATE AS dt, 100.0 AS val
+UNION ALL SELECT 'A', '2024-01-02', 110.0
+UNION ALL SELECT 'A', '2024-01-03', 105.0
+UNION ALL SELECT 'B', '2024-01-01', 50.0;
+
+# Should return 4 rows (not 3) - singleton group preserved
+query I
+SELECT COUNT(*) FROM ts_detect_changepoints_by('cp_singleton', grp, dt, val, MAP{});
+----
+4
+
+# Singleton group should have is_changepoint=false
+query I
+SELECT COUNT(*) FROM ts_detect_changepoints_by('cp_singleton', grp, dt, val, MAP{})
+WHERE grp = 'B' AND is_changepoint = false;
+----
+1
+
+# Singleton group should have probability=NULL
+query I
+SELECT COUNT(*) FROM ts_detect_changepoints_by('cp_singleton', grp, dt, val, MAP{})
+WHERE grp = 'B' AND changepoint_probability IS NULL;
+----
+1
+
+statement ok
+DROP TABLE cp_singleton;
+
+# Test 3: Combined - both NULL dates and singleton group
+statement ok
+CREATE TABLE cp_combined AS
+SELECT 'A' AS grp, '2024-01-01'::DATE AS dt, 100.0 AS val
+UNION ALL SELECT 'A', '2024-01-02', 110.0
+UNION ALL SELECT 'A', NULL, 120.0
+UNION ALL SELECT 'B', '2024-01-01', 50.0;
+
+# Should return 4 rows (input = output)
+query I
+SELECT COUNT(*) FROM ts_detect_changepoints_by('cp_combined', grp, dt, val, MAP{});
+----
+4
+
+# Both problematic rows should have is_changepoint=false, probability=NULL
+query I
+SELECT COUNT(*) FROM ts_detect_changepoints_by('cp_combined', grp, dt, val, MAP{})
+WHERE is_changepoint = false AND changepoint_probability IS NULL;
+----
+2
+
+statement ok
+DROP TABLE cp_combined;
+
+# Test 4: Large dataset row preservation
+statement ok
+CREATE TABLE cp_large AS
+SELECT 'grp_' || (i / 10) AS grp,
+       CASE WHEN i % 10 = 5 THEN NULL ELSE '2024-01-01'::DATE + (i % 10) END AS dt,
+       (100 + i)::DOUBLE AS val
+FROM range(0, 100) t(i);
+
+# 100 input rows = 100 output rows (10 groups × 10 rows, 10 NULL dates)
+query I
+SELECT COUNT(*) FROM ts_detect_changepoints_by('cp_large', grp, dt, val, MAP{});
+----
+100
+
+statement ok
+DROP TABLE cp_large;

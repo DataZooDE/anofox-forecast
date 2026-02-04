@@ -73,6 +73,18 @@ ts_detect_changepoints_by(source, group_col, date_col, value_col, params)
 | `is_changepoint` | BOOLEAN | Whether this point is a detected changepoint |
 | `changepoint_probability` | DOUBLE | Probability of changepoint at this point (0-1) |
 
+**Row Preservation:**
+
+The function guarantees **output rows = input rows**. Rows that cannot be processed normally receive default values:
+
+| Condition | is_changepoint | changepoint_probability |
+|-----------|---------------|------------------------|
+| NULL date | `false` | `NULL` |
+| Group has < 2 data points | `false` | `NULL` |
+| Processing error | `false` | `NULL` |
+
+A warning is emitted when rows have NULL dates.
+
 **Example:**
 ```sql
 -- Detect changepoints with custom sensitivity
