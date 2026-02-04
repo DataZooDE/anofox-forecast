@@ -2,8 +2,11 @@
 #include "anofox_fcst_ffi.h"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
+#include "duckdb/common/types/hash.hpp"
+#include "duckdb/parallel/task_scheduler.hpp"
 #include <algorithm>
 #include <map>
+#include <atomic>
 
 namespace duckdb {
 
@@ -41,11 +44,27 @@ struct FillForwardFilledGroup {
 };
 
 // ============================================================================
-// Local State - minimal per-thread state
+// Per-Slot Storage - hash-based partitioning for parallel execution
+// ============================================================================
+
+struct FillForwardSlot {
+    mutex mtx;  // Per-slot mutex for thread-safe writes
+    std::map<string, FillForwardGroupData> groups;
+    vector<string> group_order;
+
+    // Processing and output state
+    vector<FillForwardFilledGroup> results;
+    bool processed = false;
+    idx_t current_group = 0;
+    idx_t current_row = 0;
+};
+
+// ============================================================================
+// Local State - tracks which slot this thread is outputting from
 // ============================================================================
 
 struct TsFillForwardNativeLocalState : public LocalTableFunctionState {
-    // No longer needed - output iteration is in global state
+    idx_t current_slot = 0;  // Which slot we're currently outputting from
 };
 
 // ============================================================================
@@ -144,32 +163,21 @@ static unique_ptr<FunctionData> TsFillForwardNativeBind(
 }
 
 // ============================================================================
-// Global State - thread-safe accumulation
+// Global State - hash-based slot partitioning for parallel execution
 //
-// IMPORTANT: DuckDB's PhysicalTableInOutFunction::ParallelOperator() always
-// returns true, ignoring MaxThreads(). To handle parallel execution correctly,
-// we accumulate all input data in GlobalState (protected by mutex), then
-// process everything in a single-threaded finalize phase.
+// Groups are assigned to slots based on hash(group_key) % num_slots.
+// Each slot has its own mutex, allowing parallel writes to different slots.
 // ============================================================================
 
 struct TsFillForwardNativeGlobalState : public GlobalTableFunctionState {
-    // Mutex to protect shared data structures
-    mutex mtx;
+    idx_t num_slots;
+    vector<unique_ptr<FillForwardSlot>> slots;
 
-    // Shared accumulator for all input data (protected by mtx)
-    std::map<string, FillForwardGroupData> groups;
-    vector<string> group_order;
-
-    // Processed results (populated in finalize, read during output)
-    vector<FillForwardFilledGroup> filled_results;
-    bool processed = false;
-
-    // Output iteration state (protected by mtx)
-    idx_t current_group = 0;
-    idx_t current_row = 0;
+    // Atomic counter for finalize slot assignment
+    std::atomic<idx_t> next_output_slot{0};
 
     idx_t MaxThreads() const override {
-        return 1;  // Hint (ignored by DuckDB for in_out functions, but kept for documentation)
+        return num_slots;
     }
 };
 
@@ -180,7 +188,17 @@ struct TsFillForwardNativeGlobalState : public GlobalTableFunctionState {
 static unique_ptr<GlobalTableFunctionState> TsFillForwardNativeInitGlobal(
     ClientContext &context,
     TableFunctionInitInput &input) {
-    return make_uniq<TsFillForwardNativeGlobalState>();
+    auto state = make_uniq<TsFillForwardNativeGlobalState>();
+    state->num_slots = TaskScheduler::GetScheduler(context).NumberOfThreads();
+    if (state->num_slots == 0) state->num_slots = 1;
+
+    // Pre-allocate slots
+    state->slots.resize(state->num_slots);
+    for (idx_t i = 0; i < state->num_slots; i++) {
+        state->slots[i] = make_uniq<FillForwardSlot>();
+    }
+
+    return state;
 }
 
 static unique_ptr<LocalTableFunctionState> TsFillForwardNativeInitLocal(
@@ -191,7 +209,7 @@ static unique_ptr<LocalTableFunctionState> TsFillForwardNativeInitLocal(
 }
 
 // ============================================================================
-// In-Out Function - receives streaming input
+// In-Out Function - hash-based slot assignment for parallel writes
 // ============================================================================
 
 static OperatorResultType TsFillForwardNativeInOut(
@@ -201,12 +219,9 @@ static OperatorResultType TsFillForwardNativeInOut(
     DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsFillForwardNativeBindData>();
-    auto &global_state = data_p.global_state->Cast<TsFillForwardNativeGlobalState>();
+    auto &gstate = data_p.global_state->Cast<TsFillForwardNativeGlobalState>();
 
-    // Lock the global state for thread-safe accumulation
-    lock_guard<mutex> lock(global_state.mtx);
-
-    // Buffer all incoming data in global state
+    // Process all rows, assigning each to the appropriate slot based on group hash
     for (idx_t i = 0; i < input.size(); i++) {
         Value group_val = input.data[0].GetValue(i);
         Value date_val = input.data[1].GetValue(i);
@@ -216,13 +231,21 @@ static OperatorResultType TsFillForwardNativeInOut(
 
         string group_key = GetGroupKey(group_val);
 
-        if (global_state.groups.find(group_key) == global_state.groups.end()) {
-            global_state.groups[group_key] = FillForwardGroupData();
-            global_state.groups[group_key].group_value = group_val;
-            global_state.group_order.push_back(group_key);
+        // Hash-based slot assignment
+        hash_t group_hash = Hash(group_key.c_str(), group_key.size());
+        idx_t slot_idx = group_hash % gstate.num_slots;
+        auto &slot = *gstate.slots[slot_idx];
+
+        // Lock only this slot (allows parallel writes to different slots)
+        lock_guard<mutex> lock(slot.mtx);
+
+        if (slot.groups.find(group_key) == slot.groups.end()) {
+            slot.groups[group_key] = FillForwardGroupData();
+            slot.groups[group_key].group_value = group_val;
+            slot.group_order.push_back(group_key);
         }
 
-        auto &grp = global_state.groups[group_key];
+        auto &grp = slot.groups[group_key];
 
         // Convert date to microseconds for Rust
         int64_t date_micros;
@@ -260,7 +283,7 @@ static OperatorResultType TsFillForwardNativeInOut(
 }
 
 // ============================================================================
-// Finalize Function - process accumulated data and output results
+// Finalize Function - parallel processing and output by slot
 // ============================================================================
 
 static OperatorFinalizeResultType TsFillForwardNativeFinalize(
@@ -269,162 +292,166 @@ static OperatorFinalizeResultType TsFillForwardNativeFinalize(
     DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsFillForwardNativeBindData>();
-    auto &global_state = data_p.global_state->Cast<TsFillForwardNativeGlobalState>();
+    auto &gstate = data_p.global_state->Cast<TsFillForwardNativeGlobalState>();
+    auto &lstate = data_p.local_state->Cast<TsFillForwardNativeLocalState>();
 
-    // Lock for thread-safe access to global state
-    lock_guard<mutex> lock(global_state.mtx);
+    // Find the next slot to output from
+    while (lstate.current_slot < gstate.num_slots) {
+        auto &slot = *gstate.slots[lstate.current_slot];
 
-    // Process all groups on first finalize call (only one thread does this)
-    if (!global_state.processed) {
-        for (const auto &group_key : global_state.group_order) {
-            auto &grp = global_state.groups[group_key];
+        // Lock the slot to check/update state
+        lock_guard<mutex> lock(slot.mtx);
 
-            if (grp.dates.empty()) continue;
+        // Process this slot if not yet processed
+        if (!slot.processed) {
+            for (const auto &group_key : slot.group_order) {
+                auto &grp = slot.groups[group_key];
 
-            // Build validity bitmask for Rust
-            size_t validity_words = (grp.dates.size() + 63) / 64;
-            vector<uint64_t> validity(validity_words, 0);
-            for (size_t i = 0; i < grp.validity.size(); i++) {
-                if (grp.validity[i]) {
-                    validity[i / 64] |= (1ULL << (i % 64));
+                if (grp.dates.empty()) continue;
+
+                // Build validity bitmask for Rust
+                size_t validity_words = (grp.dates.size() + 63) / 64;
+                vector<uint64_t> validity(validity_words, 0);
+                for (size_t i = 0; i < grp.validity.size(); i++) {
+                    if (grp.validity[i]) {
+                        validity[i / 64] |= (1ULL << (i % 64));
+                    }
                 }
-            }
 
-            // Convert frequency and target_date for Rust based on date type
-            int64_t freq_for_rust;
-            int64_t target_for_rust;
+                // Convert frequency and target_date for Rust based on date type
+                int64_t freq_for_rust;
+                int64_t target_for_rust;
 
-            if (bind_data.date_col_type == DateColumnType::INTEGER ||
-                bind_data.date_col_type == DateColumnType::BIGINT) {
-                if (bind_data.frequency_is_raw) {
+                if (bind_data.date_col_type == DateColumnType::INTEGER ||
+                    bind_data.date_col_type == DateColumnType::BIGINT) {
                     freq_for_rust = bind_data.frequency_seconds;
-                } else {
-                    freq_for_rust = bind_data.frequency_seconds;
-                }
-                target_for_rust = bind_data.target_date_micros;
-            } else {
-                if (bind_data.frequency_is_raw) {
-                    freq_for_rust = bind_data.frequency_seconds * 86400LL * 1000000LL;
-                } else {
-                    freq_for_rust = bind_data.frequency_seconds * 1000000LL;
-                }
-                if (bind_data.target_is_raw) {
-                    target_for_rust = bind_data.target_date_micros * 86400LL * 1000000LL;
-                } else {
                     target_for_rust = bind_data.target_date_micros;
+                } else {
+                    if (bind_data.frequency_is_raw) {
+                        freq_for_rust = bind_data.frequency_seconds * 86400LL * 1000000LL;
+                    } else {
+                        freq_for_rust = bind_data.frequency_seconds * 1000000LL;
+                    }
+                    if (bind_data.target_is_raw) {
+                        target_for_rust = bind_data.target_date_micros * 86400LL * 1000000LL;
+                    } else {
+                        target_for_rust = bind_data.target_date_micros;
+                    }
                 }
-            }
 
-            // Call Rust FFI
-            GapFillResult ffi_result = {};
-            AnofoxError error = {};
+                // Call Rust FFI
+                GapFillResult ffi_result = {};
+                AnofoxError error = {};
 
-            bool success = anofox_ts_fill_forward_dates(
-                grp.dates.data(),
-                grp.values.data(),
-                validity.empty() ? nullptr : validity.data(),
-                grp.dates.size(),
-                target_for_rust,
-                freq_for_rust,
-                bind_data.frequency_type,
-                &ffi_result,
-                &error
-            );
+                bool success = anofox_ts_fill_forward_dates(
+                    grp.dates.data(),
+                    grp.values.data(),
+                    validity.empty() ? nullptr : validity.data(),
+                    grp.dates.size(),
+                    target_for_rust,
+                    freq_for_rust,
+                    bind_data.frequency_type,
+                    &ffi_result,
+                    &error
+                );
 
-            if (!success) {
-                throw InvalidInputException("ts_fill_forward failed: %s",
-                    error.message ? error.message : "Unknown error");
-            }
-
-            // Store results in global state
-            FillForwardFilledGroup filled;
-            filled.group_value = grp.group_value;
-
-            for (size_t i = 0; i < ffi_result.length; i++) {
-                filled.dates.push_back(ffi_result.dates[i]);
-                filled.values.push_back(ffi_result.values[i]);
-
-                bool valid = false;
-                if (ffi_result.validity) {
-                    valid = (ffi_result.validity[i / 64] >> (i % 64)) & 1;
+                if (!success) {
+                    throw InvalidInputException("ts_fill_forward failed: %s",
+                        error.message ? error.message : "Unknown error");
                 }
-                filled.validity.push_back(valid);
+
+                // Store results
+                FillForwardFilledGroup filled;
+                filled.group_value = grp.group_value;
+
+                for (size_t i = 0; i < ffi_result.length; i++) {
+                    filled.dates.push_back(ffi_result.dates[i]);
+                    filled.values.push_back(ffi_result.values[i]);
+
+                    bool valid = false;
+                    if (ffi_result.validity) {
+                        valid = (ffi_result.validity[i / 64] >> (i % 64)) & 1;
+                    }
+                    filled.validity.push_back(valid);
+                }
+
+                slot.results.push_back(std::move(filled));
+
+                anofox_free_gap_fill_result(&ffi_result);
             }
-
-            global_state.filled_results.push_back(std::move(filled));
-
-            anofox_free_gap_fill_result(&ffi_result);
-        }
-        global_state.processed = true;
-    }
-
-    // Output results (using global_state for iteration position)
-    if (global_state.filled_results.empty() ||
-        global_state.current_group >= global_state.filled_results.size()) {
-        return OperatorFinalizeResultType::FINISHED;
-    }
-
-    idx_t output_count = 0;
-
-    // Initialize all output vectors as FLAT_VECTOR
-    for (idx_t col = 0; col < output.ColumnCount(); col++) {
-        output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
-    }
-
-    while (output_count < STANDARD_VECTOR_SIZE &&
-           global_state.current_group < global_state.filled_results.size()) {
-
-        auto &grp = global_state.filled_results[global_state.current_group];
-
-        while (output_count < STANDARD_VECTOR_SIZE &&
-               global_state.current_row < grp.dates.size()) {
-
-            idx_t out_idx = output_count;
-
-            // Group column
-            output.data[0].SetValue(out_idx, grp.group_value);
-
-            // Date column (with type preservation!)
-            int64_t date_micros = grp.dates[global_state.current_row];
-            switch (bind_data.date_col_type) {
-                case DateColumnType::DATE:
-                    output.data[1].SetValue(out_idx, Value::DATE(MicrosecondsToDate(date_micros)));
-                    break;
-                case DateColumnType::TIMESTAMP:
-                    output.data[1].SetValue(out_idx, Value::TIMESTAMP(MicrosecondsToTimestamp(date_micros)));
-                    break;
-                case DateColumnType::INTEGER:
-                    output.data[1].SetValue(out_idx, Value::INTEGER(static_cast<int32_t>(date_micros)));
-                    break;
-                case DateColumnType::BIGINT:
-                    output.data[1].SetValue(out_idx, Value::BIGINT(date_micros));
-                    break;
-            }
-
-            // Value column
-            if (grp.validity[global_state.current_row]) {
-                output.data[2].SetValue(out_idx, Value::DOUBLE(grp.values[global_state.current_row]));
-            } else {
-                output.data[2].SetValue(out_idx, Value());
-            }
-
-            output_count++;
-            global_state.current_row++;
+            slot.processed = true;
         }
 
-        if (global_state.current_row >= grp.dates.size()) {
-            global_state.current_group++;
-            global_state.current_row = 0;
+        // Check if this slot has more output
+        if (slot.results.empty() || slot.current_group >= slot.results.size()) {
+            // This slot is done, move to next slot
+            lstate.current_slot++;
+            continue;
         }
+
+        // Output from this slot
+        idx_t output_count = 0;
+
+        // Initialize all output vectors as FLAT_VECTOR
+        for (idx_t col = 0; col < output.ColumnCount(); col++) {
+            output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
+        }
+
+        while (output_count < STANDARD_VECTOR_SIZE && slot.current_group < slot.results.size()) {
+            auto &grp = slot.results[slot.current_group];
+
+            while (output_count < STANDARD_VECTOR_SIZE && slot.current_row < grp.dates.size()) {
+                idx_t out_idx = output_count;
+
+                // Group column
+                output.data[0].SetValue(out_idx, grp.group_value);
+
+                // Date column (with type preservation!)
+                int64_t date_micros = grp.dates[slot.current_row];
+                switch (bind_data.date_col_type) {
+                    case DateColumnType::DATE:
+                        output.data[1].SetValue(out_idx, Value::DATE(MicrosecondsToDate(date_micros)));
+                        break;
+                    case DateColumnType::TIMESTAMP:
+                        output.data[1].SetValue(out_idx, Value::TIMESTAMP(MicrosecondsToTimestamp(date_micros)));
+                        break;
+                    case DateColumnType::INTEGER:
+                        output.data[1].SetValue(out_idx, Value::INTEGER(static_cast<int32_t>(date_micros)));
+                        break;
+                    case DateColumnType::BIGINT:
+                        output.data[1].SetValue(out_idx, Value::BIGINT(date_micros));
+                        break;
+                }
+
+                // Value column
+                if (grp.validity[slot.current_row]) {
+                    output.data[2].SetValue(out_idx, Value::DOUBLE(grp.values[slot.current_row]));
+                } else {
+                    output.data[2].SetValue(out_idx, Value());
+                }
+
+                output_count++;
+                slot.current_row++;
+            }
+
+            if (slot.current_row >= grp.dates.size()) {
+                slot.current_group++;
+                slot.current_row = 0;
+            }
+        }
+
+        output.SetCardinality(output_count);
+
+        // Check if we need to continue with this slot or move to next
+        if (slot.current_group >= slot.results.size()) {
+            lstate.current_slot++;
+        }
+
+        return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;
     }
 
-    output.SetCardinality(output_count);
-
-    if (global_state.current_group >= global_state.filled_results.size()) {
-        return OperatorFinalizeResultType::FINISHED;
-    }
-
-    return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;
+    // All slots processed
+    return OperatorFinalizeResultType::FINISHED;
 }
 
 // ============================================================================
