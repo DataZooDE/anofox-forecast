@@ -268,8 +268,16 @@ static unique_ptr<LocalTableFunctionState> TsFillGapsNativeInitLocal(
 }
 
 // ============================================================================
-// In-Out Function - hash-based slot assignment for parallel writes
+// In-Out Function - batched slot assignment to minimize lock acquisitions
 // ============================================================================
+
+// Temporary row data for batching
+struct TempRow {
+    Value group_val;
+    int64_t date_micros;
+    double value;
+    bool valid;
+};
 
 static OperatorResultType TsFillGapsNativeInOut(
     ExecutionContext &context,
@@ -280,7 +288,9 @@ static OperatorResultType TsFillGapsNativeInOut(
     auto &bind_data = data_p.bind_data->Cast<TsFillGapsNativeBindData>();
     auto &gstate = data_p.global_state->Cast<TsFillGapsNativeGlobalState>();
 
-    // Process all rows, assigning each to the appropriate slot based on group hash
+    // Step 1: Collect all rows locally, grouped by slot (no locking)
+    vector<vector<std::pair<string, TempRow>>> slot_batches(gstate.num_slots);
+
     for (idx_t i = 0; i < input.size(); i++) {
         Value group_val = input.data[0].GetValue(i);
         Value date_val = input.data[1].GetValue(i);
@@ -290,23 +300,7 @@ static OperatorResultType TsFillGapsNativeInOut(
 
         string group_key = GetGroupKey(group_val);
 
-        // Hash-based slot assignment
-        hash_t group_hash = Hash(group_key.c_str(), group_key.size());
-        idx_t slot_idx = group_hash % gstate.num_slots;
-        auto &slot = *gstate.slots[slot_idx];
-
-        // Lock only this slot (allows parallel writes to different slots)
-        lock_guard<mutex> lock(slot.mtx);
-
-        if (slot.groups.find(group_key) == slot.groups.end()) {
-            slot.groups[group_key] = FillGapsGroupData();
-            slot.groups[group_key].group_value = group_val;
-            slot.group_order.push_back(group_key);
-        }
-
-        auto &grp = slot.groups[group_key];
-
-        // Convert date to microseconds for Rust
+        // Convert date to microseconds
         int64_t date_micros;
         switch (bind_data.date_col_type) {
             case DateColumnType::DATE:
@@ -323,18 +317,49 @@ static OperatorResultType TsFillGapsNativeInOut(
                 break;
         }
 
-        // Check for duplicate date within this group
-        if (std::find(grp.dates.begin(), grp.dates.end(), date_micros) != grp.dates.end()) {
-            throw InvalidInputException(
-                "ts_fill_gaps_by: Duplicate (group, date) pair detected. "
-                "Group '%s' has multiple rows for the same date. "
-                "Please deduplicate your input data before calling this function.",
-                group_key.c_str());
-        }
+        // Hash-based slot assignment
+        hash_t group_hash = Hash(group_key.c_str(), group_key.size());
+        idx_t slot_idx = group_hash % gstate.num_slots;
 
-        grp.dates.push_back(date_micros);
-        grp.values.push_back(value_val.IsNull() ? 0.0 : value_val.GetValue<double>());
-        grp.validity.push_back(!value_val.IsNull());
+        TempRow row;
+        row.group_val = group_val;
+        row.date_micros = date_micros;
+        row.value = value_val.IsNull() ? 0.0 : value_val.GetValue<double>();
+        row.valid = !value_val.IsNull();
+
+        slot_batches[slot_idx].emplace_back(std::move(group_key), std::move(row));
+    }
+
+    // Step 2: Lock each slot once and insert all its rows
+    for (idx_t slot_idx = 0; slot_idx < gstate.num_slots; slot_idx++) {
+        auto &batch = slot_batches[slot_idx];
+        if (batch.empty()) continue;
+
+        auto &slot = *gstate.slots[slot_idx];
+        lock_guard<mutex> lock(slot.mtx);
+
+        for (auto &[group_key, row] : batch) {
+            if (slot.groups.find(group_key) == slot.groups.end()) {
+                slot.groups[group_key] = FillGapsGroupData();
+                slot.groups[group_key].group_value = row.group_val;
+                slot.group_order.push_back(group_key);
+            }
+
+            auto &grp = slot.groups[group_key];
+
+            // Check for duplicate date within this group
+            if (std::find(grp.dates.begin(), grp.dates.end(), row.date_micros) != grp.dates.end()) {
+                throw InvalidInputException(
+                    "ts_fill_gaps_by: Duplicate (group, date) pair detected. "
+                    "Group '%s' has multiple rows for the same date. "
+                    "Please deduplicate your input data before calling this function.",
+                    group_key.c_str());
+            }
+
+            grp.dates.push_back(row.date_micros);
+            grp.values.push_back(row.value);
+            grp.validity.push_back(row.valid);
+        }
     }
 
     // Don't output anything during input phase - wait for finalize
