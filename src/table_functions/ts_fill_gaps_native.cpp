@@ -285,6 +285,15 @@ static OperatorResultType TsFillGapsNativeInOut(
                 break;
         }
 
+        // Check for duplicate date within this group
+        if (std::find(grp.dates.begin(), grp.dates.end(), date_micros) != grp.dates.end()) {
+            throw InvalidInputException(
+                "ts_fill_gaps_by: Duplicate (group, date) pair detected. "
+                "Group '%s' has multiple rows for the same date. "
+                "Please deduplicate your input data before calling this function.",
+                group_key.c_str());
+        }
+
         grp.dates.push_back(date_micros);
         grp.values.push_back(value_val.IsNull() ? 0.0 : value_val.GetValue<double>());
         grp.validity.push_back(!value_val.IsNull());

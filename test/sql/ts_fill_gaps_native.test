@@ -312,3 +312,32 @@ Y	2020-01-01	100.0
 Y	2021-01-01	NULL
 Y	2022-01-01	NULL
 Y	2023-01-01	400.0
+
+# ==============================================================================
+# Test duplicate (group, date) pair detection
+# ==============================================================================
+
+# Create data with duplicate (group, date) pairs
+statement ok
+DROP TABLE IF EXISTS dup_test;
+
+statement ok
+CREATE TABLE dup_test AS
+SELECT 'A' as group_col, d::DATE as date_col, v as value
+FROM (VALUES
+    ('2024-01-01', 100.0),
+    ('2024-01-01', 200.0),
+    ('2024-01-03', 300.0)
+) AS t(d, v);
+
+# Should throw error on duplicate (group, date)
+statement error
+SELECT * FROM _ts_fill_gaps_native(
+    (SELECT group_col, date_col, value FROM dup_test ORDER BY group_col, date_col),
+    '1d'
+);
+----
+Duplicate (group, date) pair detected
+
+statement ok
+DROP TABLE dup_test;
