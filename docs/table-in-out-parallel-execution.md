@@ -13,6 +13,8 @@ This causes issues for stateful table functions that accumulate data across batc
 - **Duplicate output** when multiple threads read/output from shared state
 - **Data loss** when threads overwrite each other's work
 
+Additionally, DuckDB does **not** provide a cross-thread barrier between `Execute` and `FinalExecute`. Thread A can enter `FinalExecute` while Thread B is still in `Execute`, meaning accumulated data may be incomplete when finalize begins.
+
 ## Failed Approaches
 
 ### 1. Single Global Mutex (Serialization)
@@ -48,6 +50,30 @@ for (each row) {
 ```
 
 **Result**: Correct but slow. Lock acquisition per row creates significant overhead, often worse than single global mutex.
+
+### 4. Multi-Thread Finalize with Per-Slot Mutex
+```cpp
+static OperatorFinalizeResultType Finalize(...) {
+    while (lstate.current_slot < num_slots) {
+        lock_guard<mutex> lock(slot.mtx);
+        if (!slot.processed) { /* process */ }
+        // output from slot...
+        lstate.current_slot++;
+    }
+    return FINISHED;
+}
+```
+
+**Result**: Crashes with `CREATE TABLE AS SELECT`. DuckDB's `PhysicalBatchInsert` requires unique batch indexes per thread. After the pipeline source is exhausted, all threads share the sentinel batch index `9999999999999` (from `PipelineExecutor::NextBatch` setting `max_batch_index`). Multiple threads producing output during `FinalExecute` all use this same index, causing: `"PhysicalBatchInsert::AddCollection error: batch index 9999999999999 is present in multiple collections"`.
+
+### 5. Multi-Thread Finalize with Atomic Slot Claiming
+```cpp
+// Each thread atomically claims exclusive slots
+lstate.current_slot = gstate.next_output_slot.fetch_add(1);
+// Process and output from exclusively owned slot (no mutex needed)
+```
+
+**Result**: Same `PhysicalBatchInsert` crash as approach 4 (all threads share the sentinel batch index). Also suffers from a **data race**: Thread A can claim a slot and start processing it while Thread B is still in `in_out_function` adding data to that slot, causing silent data loss (~0.5% of groups dropped at 500k groups).
 
 ## Working Solution: Hash-Based Slot Partitioning with Batched Locking
 
@@ -104,11 +130,11 @@ for (idx_t slot = 0; slot < num_slots; slot++) {
 ```cpp
 // Per-slot storage
 struct Slot {
-    mutex mtx;
+    mutex mtx;  // Protects concurrent writes during in_out phase
     map<string, GroupData> groups;
     vector<string> group_order;
 
-    // Output state
+    // Output state (only accessed by the single finalize thread)
     vector<FilledGroup> results;
     bool processed = false;
     idx_t current_group = 0;
@@ -120,12 +146,22 @@ struct GlobalState : public GlobalTableFunctionState {
     idx_t num_slots;
     vector<unique_ptr<Slot>> slots;
 
+    // Single-thread finalize: only one thread produces output
+    std::atomic<bool> finalize_claimed{false};
+
+    // Barrier: ensures all in_out calls complete before finalize processes data
+    std::atomic<idx_t> threads_collecting{0};
+    std::atomic<idx_t> threads_done_collecting{0};
+
     idx_t MaxThreads() const override { return num_slots; }
 };
 
-// Local state (for output iteration)
+// Local state
 struct LocalState : public LocalTableFunctionState {
     idx_t current_slot = 0;
+    bool owns_finalize = false;      // True if this thread owns finalize work
+    bool registered_collector = false; // True if this thread called in_out
+    bool registered_finalizer = false; // True if this thread entered finalize
 };
 ```
 
@@ -133,6 +169,12 @@ struct LocalState : public LocalTableFunctionState {
 
 ```cpp
 static OperatorResultType InOut(...) {
+    // Register this thread as a data collector (first call only)
+    if (!lstate.registered_collector) {
+        gstate.threads_collecting.fetch_add(1);
+        lstate.registered_collector = true;
+    }
+
     // Step 1: Batch rows locally by slot
     vector<vector<pair<string, TempRow>>> slot_batches(num_slots);
 
@@ -161,15 +203,43 @@ static OperatorResultType InOut(...) {
 
 ### Finalize Function (Output Phase)
 
+Finalize must be serialized to a single thread for two reasons:
+1. **Batch index conflict**: After source exhaustion, all threads share the sentinel batch index — multi-thread output crashes `PhysicalBatchInsert`
+2. **Data race**: DuckDB has no cross-thread barrier between `Execute` and `FinalExecute` — one thread can enter finalize while another is still collecting data
+
+The solution uses an atomic barrier to wait for all collecting threads to finish, then a single thread processes and outputs all data.
+
 ```cpp
 static OperatorFinalizeResultType Finalize(...) {
-    // Each thread iterates through slots sequentially
+    // Signal that this thread has finished collecting data
+    if (!lstate.registered_finalizer) {
+        if (lstate.registered_collector) {
+            gstate.threads_done_collecting.fetch_add(1);
+        }
+        lstate.registered_finalizer = true;
+    }
+
+    // Only one thread can own finalize output
+    if (!lstate.owns_finalize) {
+        bool expected = false;
+        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true)) {
+            return FINISHED;  // Other threads: bail out immediately
+        }
+        lstate.owns_finalize = true;
+        lstate.current_slot = 0;
+
+        // Wait for all threads that called in_out to enter finalize,
+        // ensuring all data has been collected before we process it
+        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load()) {
+            std::this_thread::yield();
+        }
+    }
+
+    // Single thread processes all slots sequentially
     while (lstate.current_slot < num_slots) {
         auto& slot = *gstate.slots[lstate.current_slot];
 
-        lock_guard<mutex> lock(slot.mtx);
-
-        // Process slot if not yet done
+        // Process slot if not yet done (call FFI, store results)
         if (!slot.processed) {
             for (auto& group : slot.groups) {
                 // Call FFI, store results
@@ -192,6 +262,8 @@ static OperatorFinalizeResultType Finalize(...) {
 
 ## Performance Characteristics
 
+### Input Phase (Parallel)
+
 | Approach | Lock Acquisitions | Parallelism | Correctness |
 |----------|------------------|-------------|-------------|
 | Single mutex | O(batches) | None | ✓ |
@@ -200,11 +272,19 @@ static OperatorFinalizeResultType Finalize(...) {
 
 The batched approach typically acquires locks `num_slots` times per batch (once per non-empty slot), compared to once per row. With `STANDARD_VECTOR_SIZE = 2048` rows per batch and 8 slots, this is ~256x fewer lock acquisitions.
 
+### Output Phase (Single-Thread)
+
+Finalize runs on a single thread. This is a necessary trade-off — DuckDB's `PhysicalBatchInsert` makes multi-thread finalize output impossible for table-in-out functions (see Failed Approaches 4 and 5). In practice, the FFI processing and output streaming are fast relative to the input collection phase.
+
+Tested at 500k groups (4M input rows → 5M output rows): ~3.7s total with 8 threads.
+
 ## Caveats
 
 1. **Memory overhead**: Temporary batch storage adds memory usage proportional to batch size
 2. **Hash distribution**: Performance depends on groups being well-distributed across slots
 3. **Finalize ordering**: Output order depends on slot iteration order, not input order
+4. **Single-thread finalize**: Output phase cannot be parallelized due to DuckDB batch index constraints; input collection is still fully parallel
+5. **Barrier spin-wait**: The finalize thread uses `std::this_thread::yield()` while waiting for other threads to complete their `in_out` calls
 
 ## Files
 

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <map>
 #include <atomic>
+#include <thread>
 
 namespace duckdb {
 
@@ -64,7 +65,10 @@ struct FillForwardSlot {
 // ============================================================================
 
 struct TsFillForwardNativeLocalState : public LocalTableFunctionState {
-    idx_t current_slot = 0;  // Which slot we're currently outputting from
+    idx_t current_slot = 0;       // Which slot we're currently outputting from
+    bool owns_finalize = false;   // True if this thread owns finalize work
+    bool registered_collector = false;  // True if this thread called in_out
+    bool registered_finalizer = false;  // True if this thread entered finalize
 };
 
 // ============================================================================
@@ -173,8 +177,12 @@ struct TsFillForwardNativeGlobalState : public GlobalTableFunctionState {
     idx_t num_slots;
     vector<unique_ptr<FillForwardSlot>> slots;
 
-    // Atomic counter for finalize slot assignment
-    std::atomic<idx_t> next_output_slot{0};
+    // Only one thread can own finalize output to avoid batch index conflicts
+    std::atomic<bool> finalize_claimed{false};
+
+    // Barrier: track threads that collected data vs entered finalize
+    std::atomic<idx_t> threads_collecting{0};
+    std::atomic<idx_t> threads_done_collecting{0};
 
     idx_t MaxThreads() const override {
         return num_slots;
@@ -228,6 +236,13 @@ static OperatorResultType TsFillForwardNativeInOut(
 
     auto &bind_data = data_p.bind_data->Cast<TsFillForwardNativeBindData>();
     auto &gstate = data_p.global_state->Cast<TsFillForwardNativeGlobalState>();
+    auto &lstate = data_p.local_state->Cast<TsFillForwardNativeLocalState>();
+
+    // Register this thread as a collector (first call only)
+    if (!lstate.registered_collector) {
+        gstate.threads_collecting.fetch_add(1);
+        lstate.registered_collector = true;
+    }
 
     // Step 1: Collect all rows locally, grouped by slot (no locking)
     vector<vector<std::pair<string, FillForwardTempRow>>> slot_batches(gstate.num_slots);
@@ -320,12 +335,33 @@ static OperatorFinalizeResultType TsFillForwardNativeFinalize(
     auto &gstate = data_p.global_state->Cast<TsFillForwardNativeGlobalState>();
     auto &lstate = data_p.local_state->Cast<TsFillForwardNativeLocalState>();
 
-    // Find the next slot to output from
+    // Signal that this thread has entered finalize (done with in_out calls)
+    if (!lstate.registered_finalizer) {
+        if (lstate.registered_collector) {
+            gstate.threads_done_collecting.fetch_add(1);
+        }
+        lstate.registered_finalizer = true;
+    }
+
+    // Only one thread can own finalize output to avoid batch index conflicts
+    // with DuckDB's PhysicalBatchInsert (used by CREATE TABLE AS SELECT).
+    if (!lstate.owns_finalize) {
+        bool expected = false;
+        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true)) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.owns_finalize = true;
+        lstate.current_slot = 0;
+
+        // Wait for all threads that called in_out to enter finalize
+        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load()) {
+            std::this_thread::yield();
+        }
+    }
+
+    // Process all slots sequentially on this single thread
     while (lstate.current_slot < gstate.num_slots) {
         auto &slot = *gstate.slots[lstate.current_slot];
-
-        // Lock the slot to check/update state
-        lock_guard<mutex> lock(slot.mtx);
 
         // Process this slot if not yet processed
         if (!slot.processed) {
@@ -409,7 +445,6 @@ static OperatorFinalizeResultType TsFillForwardNativeFinalize(
 
         // Check if this slot has more output
         if (slot.results.empty() || slot.current_group >= slot.results.size()) {
-            // This slot is done, move to next slot
             lstate.current_slot++;
             continue;
         }
