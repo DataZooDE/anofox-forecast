@@ -3,6 +3,9 @@
 #include "duckdb/common/string_util.hpp"
 #include <set>
 #include <vector>
+#include <mutex>
+#include <atomic>
+#include <thread>
 
 namespace duckdb {
 
@@ -28,25 +31,34 @@ struct TsValidateSeparatorBindData : public TableFunctionData {
 };
 
 // ============================================================================
-// Local State
-// ============================================================================
-
-struct TsValidateSeparatorLocalState : public LocalTableFunctionState {
-    std::set<string> distinct_values;
-    bool processed = false;
-    bool output_done = false;
-};
-
-// ============================================================================
-// Global State
+// Global State - holds all mutable data storage for thread safety
 // ============================================================================
 
 struct TsValidateSeparatorGlobalState : public GlobalTableFunctionState {
-    idx_t max_threads = 1;
+    // All data storage (protected by mutex)
+    std::mutex groups_mutex;
+    std::set<string> distinct_values;
+    bool processed = false;
+    bool output_done = false;
+
+    // Finalize coordination
+    std::atomic<bool> finalize_claimed{false};
+    std::atomic<idx_t> threads_collecting{0};
+    std::atomic<idx_t> threads_done_collecting{0};
 
     idx_t MaxThreads() const override {
-        return max_threads;
+        return 1;
     }
+};
+
+// ============================================================================
+// Local State - minimal per-thread tracking
+// ============================================================================
+
+struct TsValidateSeparatorLocalState : public LocalTableFunctionState {
+    bool owns_finalize = false;
+    bool registered_collector = false;
+    bool registered_finalizer = false;
 };
 
 // ============================================================================
@@ -125,15 +137,32 @@ static OperatorResultType TsValidateSeparatorInOut(
     DataChunk &output) {
 
     auto &bind_data = data.bind_data->Cast<TsValidateSeparatorBindData>();
-    auto &local_state = data.local_state->Cast<TsValidateSeparatorLocalState>();
+    auto &gstate = data.global_state->Cast<TsValidateSeparatorGlobalState>();
+    auto &lstate = data.local_state->Cast<TsValidateSeparatorLocalState>();
+
+    if (!lstate.registered_collector) {
+        gstate.threads_collecting.fetch_add(1);
+        lstate.registered_collector = true;
+    }
+
+    // Extract batch locally first
+    std::set<string> local_batch;
 
     // Collect all distinct values from all ID columns
     for (idx_t row_idx = 0; row_idx < input.size(); row_idx++) {
         for (idx_t col_idx = 0; col_idx < bind_data.num_id_cols; col_idx++) {
             Value val = input.GetValue(col_idx, row_idx);
             if (!val.IsNull()) {
-                local_state.distinct_values.insert(val.ToString());
+                local_batch.insert(val.ToString());
             }
+        }
+    }
+
+    // Insert into global state under lock
+    {
+        std::lock_guard<std::mutex> lock(gstate.groups_mutex);
+        for (auto &val : local_batch) {
+            gstate.distinct_values.insert(val);
         }
     }
 
@@ -152,15 +181,31 @@ static OperatorFinalizeResultType TsValidateSeparatorFinalize(
     DataChunk &output) {
 
     auto &bind_data = data.bind_data->Cast<TsValidateSeparatorBindData>();
-    auto &local_state = data.local_state->Cast<TsValidateSeparatorLocalState>();
+    auto &gstate = data.global_state->Cast<TsValidateSeparatorGlobalState>();
+    auto &lstate = data.local_state->Cast<TsValidateSeparatorLocalState>();
 
-    if (local_state.output_done) {
+    // Barrier + claim: ensure all collecting threads are done before processing
+    if (!lstate.registered_finalizer) {
+        if (lstate.registered_collector)
+            gstate.threads_done_collecting.fetch_add(1);
+        lstate.registered_finalizer = true;
+    }
+    if (!lstate.owns_finalize) {
+        bool expected = false;
+        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true))
+            return OperatorFinalizeResultType::FINISHED;
+        lstate.owns_finalize = true;
+        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load())
+            std::this_thread::yield();
+    }
+
+    if (gstate.output_done) {
         return OperatorFinalizeResultType::FINISHED;
     }
 
     // Find conflicting values (values containing the separator)
     vector<Value> conflicting_values;
-    for (const auto& val : local_state.distinct_values) {
+    for (const auto& val : gstate.distinct_values) {
         if (val.find(bind_data.separator) != string::npos) {
             conflicting_values.push_back(Value(val));
         }
@@ -209,7 +254,7 @@ static OperatorFinalizeResultType TsValidateSeparatorFinalize(
     output.SetValue(4, 0, Value(message));
     output.SetCardinality(1);
 
-    local_state.output_done = true;
+    gstate.output_done = true;
     return OperatorFinalizeResultType::FINISHED;
 }
 

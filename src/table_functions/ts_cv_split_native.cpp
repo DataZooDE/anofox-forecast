@@ -5,6 +5,9 @@
 #include <algorithm>
 #include <map>
 #include <vector>
+#include <mutex>
+#include <atomic>
+#include <thread>
 
 namespace duckdb {
 
@@ -64,48 +67,63 @@ struct TsCvSplitNativeBindData : public TableFunctionData {
 };
 
 // ============================================================================
-// Local State - buffers input and manages output
+// Data Structs (standalone to avoid collisions)
 // ============================================================================
 
-struct TsCvSplitNativeLocalState : public LocalTableFunctionState {
-    // Buffered input data
-    struct InputRow {
-        Value group_val;
-        Value date_val;
-        int64_t date_micros;
-        double value;
-        bool valid;
-        string group_key;  // For grouping
-    };
-    vector<InputRow> input_rows;
+struct TsCvSplitInputRow {
+    Value group_val;
+    Value date_val;
+    int64_t date_micros;
+    double value;
+    bool valid;
+    string group_key;  // For grouping
+};
 
-    // Position-based processing state
-    // After preprocessing: for each group, sorted indices within input_rows
-    std::map<string, vector<idx_t>> group_sorted_indices;
-    bool preprocessing_done = false;
-
-    // Output state - pre-computed output rows
-    struct OutputRow {
-        idx_t input_idx;
-        int64_t fold_id;
-        bool is_train;
-    };
-    vector<OutputRow> output_rows;
-
-    // Streaming output state
-    idx_t output_offset = 0;
+struct TsCvSplitOutputRow {
+    idx_t input_idx;
+    int64_t fold_id;
+    bool is_train;
 };
 
 // ============================================================================
-// Global State
+// Global State - holds all mutable data with mutex protection
 // ============================================================================
 
 struct TsCvSplitNativeGlobalState : public GlobalTableFunctionState {
     idx_t max_threads = 1;
 
+    // Buffered input data (protected by groups_mutex)
+    std::mutex groups_mutex;
+    vector<TsCvSplitInputRow> input_rows;
+
+    // Position-based processing state
+    std::map<string, vector<idx_t>> group_sorted_indices;
+    bool preprocessing_done = false;
+
+    // Output state - pre-computed output rows
+    vector<TsCvSplitOutputRow> output_rows;
+
+    // Streaming output state
+    idx_t output_offset = 0;
+
+    // Single-thread finalize + barrier
+    std::atomic<bool> finalize_claimed{false};
+    std::atomic<idx_t> threads_collecting{0};
+    std::atomic<idx_t> threads_done_collecting{0};
+
     idx_t MaxThreads() const override {
         return max_threads;
     }
+};
+
+// ============================================================================
+// Local State
+// ============================================================================
+
+struct TsCvSplitNativeLocalState : public LocalTableFunctionState {
+    bool owns_finalize = false;
+    bool registered_collector = false;
+    bool registered_finalizer = false;
 };
 
 // ============================================================================
@@ -292,9 +310,18 @@ static OperatorResultType TsCvSplitNativeInOut(
     DataChunk &output) {
 
     auto &bind_data = data.bind_data->CastNoConst<TsCvSplitNativeBindData>();
-    auto &local_state = data.local_state->Cast<TsCvSplitNativeLocalState>();
+    auto &gstate = data.global_state->Cast<TsCvSplitNativeGlobalState>();
+    auto &lstate = data.local_state->Cast<TsCvSplitNativeLocalState>();
 
-    // Buffer all input rows
+    // Register this thread as a collector (first call only)
+    if (!lstate.registered_collector) {
+        gstate.threads_collecting.fetch_add(1);
+        lstate.registered_collector = true;
+    }
+
+    // Extract batch locally first
+    vector<TsCvSplitInputRow> local_rows;
+
     for (idx_t row_idx = 0; row_idx < input.size(); row_idx++) {
         Value group_val = input.GetValue(0, row_idx);
         Value date_val = input.GetValue(1, row_idx);
@@ -304,7 +331,7 @@ static OperatorResultType TsCvSplitNativeInOut(
             continue;
         }
 
-        TsCvSplitNativeLocalState::InputRow row;
+        TsCvSplitInputRow row;
         row.group_val = group_val;
         row.date_val = date_val;
         row.group_key = GetGroupKey(group_val);
@@ -322,7 +349,15 @@ static OperatorResultType TsCvSplitNativeInOut(
         row.value = value_val.IsNull() ? 0.0 : value_val.GetValue<double>();
         row.valid = !value_val.IsNull();
 
-        local_state.input_rows.push_back(std::move(row));
+        local_rows.push_back(std::move(row));
+    }
+
+    // Insert into global state under lock
+    {
+        std::lock_guard<std::mutex> lock(gstate.groups_mutex);
+        for (auto &row : local_rows) {
+            gstate.input_rows.push_back(std::move(row));
+        }
     }
 
     // Don't output anything during input phase
@@ -349,33 +384,52 @@ static OperatorFinalizeResultType TsCvSplitNativeFinalize(
     DataChunk &output) {
 
     auto &bind_data = data.bind_data->CastNoConst<TsCvSplitNativeBindData>();
-    auto &local_state = data.local_state->Cast<TsCvSplitNativeLocalState>();
+    auto &gstate = data.global_state->Cast<TsCvSplitNativeGlobalState>();
+    auto &lstate = data.local_state->Cast<TsCvSplitNativeLocalState>();
+
+    // Barrier + claim
+    if (!lstate.registered_finalizer) {
+        if (lstate.registered_collector) {
+            gstate.threads_done_collecting.fetch_add(1);
+        }
+        lstate.registered_finalizer = true;
+    }
+    if (!lstate.owns_finalize) {
+        bool expected = false;
+        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true)) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.owns_finalize = true;
+        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load()) {
+            std::this_thread::yield();
+        }
+    }
 
     // Preprocessing: group rows and compute output rows (done once)
-    if (!local_state.preprocessing_done) {
+    if (!gstate.preprocessing_done) {
         // Step 1: Build group indices
-        for (idx_t i = 0; i < local_state.input_rows.size(); i++) {
-            auto &row = local_state.input_rows[i];
-            local_state.group_sorted_indices[row.group_key].push_back(i);
+        for (idx_t i = 0; i < gstate.input_rows.size(); i++) {
+            auto &row = gstate.input_rows[i];
+            gstate.group_sorted_indices[row.group_key].push_back(i);
         }
 
         // Step 2: Sort each group by date
-        for (auto &[group_key, indices] : local_state.group_sorted_indices) {
+        for (auto &[group_key, indices] : gstate.group_sorted_indices) {
             std::sort(indices.begin(), indices.end(),
-                [&local_state](idx_t a, idx_t b) {
-                    return local_state.input_rows[a].date_micros < local_state.input_rows[b].date_micros;
+                [&gstate](idx_t a, idx_t b) {
+                    return gstate.input_rows[a].date_micros < gstate.input_rows[b].date_micros;
                 });
         }
 
         // Step 3: For each group and fold, compute train/test membership by position
-        for (auto &[group_key, sorted_indices] : local_state.group_sorted_indices) {
+        for (auto &[group_key, sorted_indices] : gstate.group_sorted_indices) {
             idx_t n_points = sorted_indices.size();
 
             for (auto &fold : bind_data.folds) {
                 // Find train_end position: largest index where date <= fold.train_end
                 idx_t train_end_pos = 0;
                 for (idx_t i = 0; i < n_points; i++) {
-                    if (local_state.input_rows[sorted_indices[i]].date_micros <= fold.train_end) {
+                    if (gstate.input_rows[sorted_indices[i]].date_micros <= fold.train_end) {
                         train_end_pos = i;
                     } else {
                         break;
@@ -408,25 +462,25 @@ static OperatorFinalizeResultType TsCvSplitNativeFinalize(
 
                 // Generate output rows for training data
                 for (idx_t pos = train_start_pos; pos <= train_end_pos && pos < n_points; pos++) {
-                    TsCvSplitNativeLocalState::OutputRow out;
+                    TsCvSplitOutputRow out;
                     out.input_idx = sorted_indices[pos];
                     out.fold_id = fold.fold_id;
                     out.is_train = true;
-                    local_state.output_rows.push_back(out);
+                    gstate.output_rows.push_back(out);
                 }
 
                 // Generate output rows for test data
                 for (idx_t pos = test_start_pos; pos <= test_end_pos && pos < n_points; pos++) {
-                    TsCvSplitNativeLocalState::OutputRow out;
+                    TsCvSplitOutputRow out;
                     out.input_idx = sorted_indices[pos];
                     out.fold_id = fold.fold_id;
                     out.is_train = false;
-                    local_state.output_rows.push_back(out);
+                    gstate.output_rows.push_back(out);
                 }
             }
         }
 
-        local_state.preprocessing_done = true;
+        gstate.preprocessing_done = true;
     }
 
     // Stream output from pre-computed output_rows
@@ -438,9 +492,9 @@ static OperatorFinalizeResultType TsCvSplitNativeFinalize(
         output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
     }
 
-    while (local_state.output_offset < local_state.output_rows.size() && output_idx < STANDARD_VECTOR_SIZE) {
-        auto &out_row = local_state.output_rows[local_state.output_offset];
-        auto &input_row = local_state.input_rows[out_row.input_idx];
+    while (gstate.output_offset < gstate.output_rows.size() && output_idx < STANDARD_VECTOR_SIZE) {
+        auto &out_row = gstate.output_rows[gstate.output_offset];
+        auto &input_row = gstate.input_rows[out_row.input_idx];
 
         output.SetValue(0, output_idx, input_row.group_val);
         output.SetValue(1, output_idx, input_row.date_val);
@@ -455,12 +509,12 @@ static OperatorFinalizeResultType TsCvSplitNativeFinalize(
         output.SetValue(4, output_idx, Value(out_row.is_train ? "train" : "test"));
 
         output_idx++;
-        local_state.output_offset++;
+        gstate.output_offset++;
     }
 
     output.SetCardinality(output_idx);
 
-    if (local_state.output_offset >= local_state.output_rows.size()) {
+    if (gstate.output_offset >= gstate.output_rows.size()) {
         return OperatorFinalizeResultType::FINISHED;
     }
     return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;

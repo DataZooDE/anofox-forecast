@@ -9,6 +9,8 @@
 #include <mutex>
 #include <cmath>
 #include <cstring>
+#include <atomic>
+#include <thread>
 
 namespace duckdb {
 
@@ -47,24 +49,55 @@ struct TsCvForecastNativeBindData : public TableFunctionData {
 };
 
 // ============================================================================
+// Shared Data Structures
+// ============================================================================
+
+struct CvForecastGroupData {
+    int64_t fold_id;
+    Value group_value;
+    // Training data (split='train')
+    vector<int64_t> train_dates;  // microseconds
+    vector<double> train_values;
+    // Test data (split='test') - these have actual dates we'll match to
+    vector<int64_t> test_dates;
+    vector<double> test_actuals;
+};
+
+struct CvForecastOutputRow {
+    int64_t fold_id;
+    string group_key;
+    Value group_value;
+    int64_t date;  // microseconds - from actual test data
+    double y;      // actual value from test data
+    double forecast;
+    double lower_90;
+    double upper_90;
+    string model_name;
+};
+
+// ============================================================================
 // Global State - enables parallel execution
 // ============================================================================
 
 struct TsCvForecastNativeGlobalState : public GlobalTableFunctionState {
-    // Allow parallel execution - each thread processes its partition of groups
     idx_t MaxThreads() const override {
-        return 999999;  // Unlimited - let DuckDB decide based on hardware
+        return 999999;
     }
 
-    // Global group tracking to prevent duplicate processing
-    std::mutex processed_groups_mutex;
-    std::set<string> processed_groups;
+    // Thread-safe group storage (moved from LocalState)
+    std::mutex groups_mutex;
+    std::map<string, CvForecastGroupData> groups;
+    vector<string> group_order;
 
-    bool ClaimGroup(const string &group_key) {
-        std::lock_guard<std::mutex> lock(processed_groups_mutex);
-        auto result = processed_groups.insert(group_key);
-        return result.second;
-    }
+    // Processing results (used by finalize owner)
+    vector<CvForecastOutputRow> results;
+    bool processed = false;
+    idx_t output_offset = 0;
+
+    // Single-thread finalize + barrier
+    std::atomic<bool> finalize_claimed{false};
+    std::atomic<idx_t> threads_collecting{0};
+    std::atomic<idx_t> threads_done_collecting{0};
 };
 
 // ============================================================================
@@ -72,40 +105,9 @@ struct TsCvForecastNativeGlobalState : public GlobalTableFunctionState {
 // ============================================================================
 
 struct TsCvForecastNativeLocalState : public LocalTableFunctionState {
-    // Input data buffer per (fold_id, group) combination
-    // Stores both train and test data separately
-    struct GroupData {
-        int64_t fold_id;
-        Value group_value;
-        // Training data (split='train')
-        vector<int64_t> train_dates;  // microseconds
-        vector<double> train_values;
-        // Test data (split='test') - these have actual dates we'll match to
-        vector<int64_t> test_dates;
-        vector<double> test_actuals;
-    };
-
-    // Key is "fold_id:group_key"
-    std::map<string, GroupData> groups;
-    vector<string> group_order;
-
-    // Output results - one row per test data point with forecast
-    struct ForecastOutputRow {
-        int64_t fold_id;
-        string group_key;
-        Value group_value;
-        int64_t date;  // microseconds - from actual test data
-        double y;      // actual value from test data
-        double forecast;
-        double lower_90;
-        double upper_90;
-        string model_name;
-    };
-    vector<ForecastOutputRow> results;
-
-    // Processing state
-    bool processed = false;
-    idx_t output_offset = 0;
+    bool owns_finalize = false;
+    bool registered_collector = false;
+    bool registered_finalizer = false;
 };
 
 // ============================================================================
@@ -354,10 +356,29 @@ static OperatorResultType TsCvForecastNativeInOut(
     DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsCvForecastNativeBindData>();
-    auto &local_state = data_p.local_state->Cast<TsCvForecastNativeLocalState>();
+    auto &lstate = data_p.local_state->Cast<TsCvForecastNativeLocalState>();
+    auto &gstate = data_p.global_state->Cast<TsCvForecastNativeGlobalState>();
+
+    // Register this thread as a collector
+    if (!lstate.registered_collector) {
+        gstate.threads_collecting.fetch_add(1);
+        lstate.registered_collector = true;
+    }
 
     // Buffer all incoming data - we need complete groups
     // Input columns: fold_id, split, group_col, date_col, value_col
+    // Extract batch locally first, then lock once
+    struct LocalRow {
+        string composite_key;
+        int64_t fold_id;
+        Value group_val;
+        string split;
+        int64_t date_micros;
+        double value;
+    };
+    vector<LocalRow> local_rows;
+    local_rows.reserve(input.size());
+
     for (idx_t i = 0; i < input.size(); i++) {
         Value fold_id_val = input.data[0].GetValue(i);
         Value split_val = input.data[1].GetValue(i);
@@ -371,15 +392,6 @@ static OperatorResultType TsCvForecastNativeInOut(
         string split = split_val.ToString();
         string group_key = GetGroupKey(group_val);
         string composite_key = MakeCompositeKey(fold_id, group_key);
-
-        if (local_state.groups.find(composite_key) == local_state.groups.end()) {
-            local_state.groups[composite_key] = TsCvForecastNativeLocalState::GroupData();
-            local_state.groups[composite_key].fold_id = fold_id;
-            local_state.groups[composite_key].group_value = group_val;
-            local_state.group_order.push_back(composite_key);
-        }
-
-        auto &grp = local_state.groups[composite_key];
 
         // Convert date to microseconds
         int64_t date_micros;
@@ -400,15 +412,32 @@ static OperatorResultType TsCvForecastNativeInOut(
 
         double value = value_val.IsNull() ? 0.0 : value_val.GetValue<double>();
 
-        // Separate train and test data
-        if (split == "train") {
-            grp.train_dates.push_back(date_micros);
-            grp.train_values.push_back(value);
-        } else if (split == "test") {
-            grp.test_dates.push_back(date_micros);
-            grp.test_actuals.push_back(value);
+        local_rows.push_back({std::move(composite_key), fold_id, group_val, std::move(split), date_micros, value});
+    }
+
+    // Lock once and insert all rows into global state
+    {
+        std::lock_guard<std::mutex> lock(gstate.groups_mutex);
+        for (auto &row : local_rows) {
+            if (gstate.groups.find(row.composite_key) == gstate.groups.end()) {
+                gstate.groups[row.composite_key] = CvForecastGroupData();
+                gstate.groups[row.composite_key].fold_id = row.fold_id;
+                gstate.groups[row.composite_key].group_value = row.group_val;
+                gstate.group_order.push_back(row.composite_key);
+            }
+
+            auto &grp = gstate.groups[row.composite_key];
+
+            // Separate train and test data
+            if (row.split == "train") {
+                grp.train_dates.push_back(row.date_micros);
+                grp.train_values.push_back(row.value);
+            } else if (row.split == "test") {
+                grp.test_dates.push_back(row.date_micros);
+                grp.test_actuals.push_back(row.value);
+            }
+            // Ignore other split values
         }
-        // Ignore other split values
     }
 
     // Don't output anything during input phase
@@ -426,18 +455,28 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
     DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsCvForecastNativeBindData>();
-    auto &global_state = data_p.global_state->Cast<TsCvForecastNativeGlobalState>();
-    auto &local_state = data_p.local_state->Cast<TsCvForecastNativeLocalState>();
+    auto &gstate = data_p.global_state->Cast<TsCvForecastNativeGlobalState>();
+    auto &lstate = data_p.local_state->Cast<TsCvForecastNativeLocalState>();
+
+    // Barrier + claim pattern: ensure all collectors are done before processing
+    if (!lstate.registered_finalizer) {
+        if (lstate.registered_collector)
+            gstate.threads_done_collecting.fetch_add(1);
+        lstate.registered_finalizer = true;
+    }
+    if (!lstate.owns_finalize) {
+        bool expected = false;
+        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true))
+            return OperatorFinalizeResultType::FINISHED;
+        lstate.owns_finalize = true;
+        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load())
+            std::this_thread::yield();
+    }
 
     // Process all groups on first finalize call
-    if (!local_state.processed) {
-        for (const auto &composite_key : local_state.group_order) {
-            // Skip if another thread already claimed this group
-            if (!global_state.ClaimGroup(composite_key)) {
-                continue;
-            }
-
-            auto &grp = local_state.groups[composite_key];
+    if (!gstate.processed) {
+        for (const auto &composite_key : gstate.group_order) {
+            auto &grp = gstate.groups[composite_key];
 
             if (grp.train_dates.empty() || grp.test_dates.empty()) continue;
 
@@ -508,7 +547,7 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
             // forecast[0] -> test row 0, forecast[1] -> test row 1, etc.
             size_t n_matches = std::min(static_cast<size_t>(fcst_result.n_forecasts), sorted_test_dates.size());
             for (size_t i = 0; i < n_matches; i++) {
-                TsCvForecastNativeLocalState::ForecastOutputRow row;
+                CvForecastOutputRow row;
                 row.fold_id = grp.fold_id;
                 row.group_key = composite_key;
                 row.group_value = grp.group_value;
@@ -519,18 +558,18 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
                 row.upper_90 = fcst_result.upper_bounds[i];
                 row.model_name = string(fcst_result.model_name);
 
-                local_state.results.push_back(row);
+                gstate.results.push_back(row);
             }
 
             // Free Rust-allocated memory
             anofox_free_forecast_result(&fcst_result);
         }
 
-        local_state.processed = true;
+        gstate.processed = true;
     }
 
     // Output results in batches
-    idx_t remaining = local_state.results.size() - local_state.output_offset;
+    idx_t remaining = gstate.results.size() - gstate.output_offset;
     if (remaining == 0) {
         output.SetCardinality(0);
         return OperatorFinalizeResultType::FINISHED;
@@ -545,7 +584,7 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
     }
 
     for (idx_t i = 0; i < to_output; i++) {
-        auto &row = local_state.results[local_state.output_offset + i];
+        auto &row = gstate.results[gstate.output_offset + i];
 
         // fold_id
         output.data[0].SetValue(i, Value::BIGINT(row.fold_id));
@@ -584,9 +623,9 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
         output.data[8].SetValue(i, Value(row.model_name));
     }
 
-    local_state.output_offset += to_output;
+    gstate.output_offset += to_output;
 
-    if (local_state.output_offset >= local_state.results.size()) {
+    if (gstate.output_offset >= gstate.results.size()) {
         return OperatorFinalizeResultType::FINISHED;
     }
     return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;

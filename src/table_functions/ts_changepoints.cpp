@@ -11,6 +11,8 @@
 #include <mutex>
 #include <regex>
 #include <set>
+#include <atomic>
+#include <thread>
 
 namespace duckdb {
 
@@ -390,59 +392,58 @@ struct TsDetectChangepointsByBindData : public TableFunctionData {
 };
 
 // ============================================================================
-// Global State - enables parallel execution
-//
-// IMPORTANT: This custom GlobalState is required for proper parallel execution.
-// Using the base GlobalTableFunctionState directly causes batch index collisions
-// with large datasets (300k+ groups) during BatchedDataCollection::Merge.
+// Group Data and Result Structures (standalone for GlobalState access)
+// ============================================================================
+
+struct ChangepointGroupData {
+    Value group_value;
+    vector<int64_t> timestamps;
+    vector<double> values;
+};
+
+struct ChangepointNullDateRow {
+    Value group_value;
+};
+
+struct ChangepointOutputRow {
+    Value group_value;
+    int64_t timestamp;
+    bool is_changepoint;
+    double changepoint_probability;
+    bool changepoint_probability_null = false;
+    bool date_is_null = false;
+};
+
+// ============================================================================
+// Global State - thread-safe group collection + single-thread finalize
 // ============================================================================
 
 struct TsDetectChangepointsByGlobalState : public GlobalTableFunctionState {
-    // Allow parallel execution - each thread processes its partition of groups
     idx_t MaxThreads() const override {
-        return 999999;  // Unlimited - let DuckDB decide based on hardware
+        return 999999;
     }
 
-    // Global group tracking to prevent duplicate processing
-    std::mutex processed_groups_mutex;
-    std::set<string> processed_groups;
+    // Thread-safe group storage (moved from LocalState)
+    std::mutex groups_mutex;
+    std::map<string, ChangepointGroupData> groups;
+    vector<string> group_order;
+    vector<ChangepointNullDateRow> null_date_rows;
 
-    bool ClaimGroup(const string &group_key) {
-        std::lock_guard<std::mutex> lock(processed_groups_mutex);
-        auto result = processed_groups.insert(group_key);
-        return result.second;
-    }
+    // Processing results (used by finalize owner)
+    vector<ChangepointOutputRow> results;
+    bool processed = false;
+    idx_t output_offset = 0;
+
+    // Single-thread finalize + barrier
+    std::atomic<bool> finalize_claimed{false};
+    std::atomic<idx_t> threads_collecting{0};
+    std::atomic<idx_t> threads_done_collecting{0};
 };
 
 struct TsDetectChangepointsByLocalState : public LocalTableFunctionState {
-    struct GroupData {
-        Value group_value;
-        vector<int64_t> timestamps;
-        vector<double> values;
-    };
-
-    std::map<string, GroupData> groups;
-    vector<string> group_order;
-
-    // Track rows with NULL dates for warning and output
-    struct NullDateRow {
-        Value group_value;
-        // timestamp not available for NULL date rows
-    };
-    vector<NullDateRow> null_date_rows;
-
-    struct OutputRow {
-        Value group_value;
-        int64_t timestamp;
-        bool is_changepoint;
-        double changepoint_probability;
-        bool changepoint_probability_null = false;  // True when probability should be NULL
-        bool date_is_null = false;  // True for NULL date rows
-    };
-    vector<OutputRow> results;
-
-    bool processed = false;
-    idx_t output_offset = 0;
+    bool owns_finalize = false;
+    bool registered_collector = false;
+    bool registered_finalizer = false;
 };
 
 // Parse hazard_lambda from params string (simple numeric value or JSON-like format)
@@ -549,45 +550,71 @@ static OperatorResultType TsDetectChangepointsByInOut(
     DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsDetectChangepointsByBindData>();
-    auto &local_state = data_p.local_state->Cast<TsDetectChangepointsByLocalState>();
+    auto &gstate = data_p.global_state->Cast<TsDetectChangepointsByGlobalState>();
+    auto &lstate = data_p.local_state->Cast<TsDetectChangepointsByLocalState>();
 
-    // Buffer all incoming data
+    // Register this thread as a collector (first call only)
+    if (!lstate.registered_collector) {
+        gstate.threads_collecting.fetch_add(1);
+        lstate.registered_collector = true;
+    }
+
+    // Extract batch locally (no lock)
+    struct TempRow {
+        Value group_val;
+        string group_key;
+        int64_t date_micros;
+        double value;
+    };
+    vector<TempRow> batch;
+    vector<ChangepointNullDateRow> null_batch;
+
     for (idx_t i = 0; i < input.size(); i++) {
         Value group_val = input.data[0].GetValue(i);
         Value date_val = input.data[1].GetValue(i);
         Value value_val = input.data[2].GetValue(i);
 
-        // Track NULL date rows for warning and output (instead of skipping)
         if (date_val.IsNull()) {
-            TsDetectChangepointsByLocalState::NullDateRow null_row;
+            ChangepointNullDateRow null_row;
             null_row.group_value = group_val;
-            local_state.null_date_rows.push_back(null_row);
-            continue;  // Still skip from BOCPD processing
+            null_batch.push_back(null_row);
+            continue;
         }
 
-        string group_key = GetGroupKey(group_val);
+        TempRow row;
+        row.group_val = group_val;
+        row.group_key = GetGroupKey(group_val);
 
-        if (local_state.groups.find(group_key) == local_state.groups.end()) {
-            local_state.groups[group_key] = TsDetectChangepointsByLocalState::GroupData();
-            local_state.groups[group_key].group_value = group_val;
-            local_state.group_order.push_back(group_key);
-        }
-
-        auto &grp = local_state.groups[group_key];
-
-        int64_t date_micros;
         switch (bind_data.date_col_type) {
             case DateColumnType::DATE:
-                date_micros = DateToMicroseconds(date_val.GetValue<date_t>());
+                row.date_micros = DateToMicroseconds(date_val.GetValue<date_t>());
                 break;
             case DateColumnType::TIMESTAMP:
             default:
-                date_micros = TimestampToMicroseconds(date_val.GetValue<timestamp_t>());
+                row.date_micros = TimestampToMicroseconds(date_val.GetValue<timestamp_t>());
                 break;
         }
 
-        grp.timestamps.push_back(date_micros);
-        grp.values.push_back(value_val.IsNull() ? 0.0 : value_val.GetValue<double>());
+        row.value = value_val.IsNull() ? 0.0 : value_val.GetValue<double>();
+        batch.push_back(std::move(row));
+    }
+
+    // Lock once, insert all
+    {
+        std::lock_guard<std::mutex> lock(gstate.groups_mutex);
+        for (auto &nr : null_batch) {
+            gstate.null_date_rows.push_back(std::move(nr));
+        }
+        for (auto &row : batch) {
+            if (gstate.groups.find(row.group_key) == gstate.groups.end()) {
+                gstate.groups[row.group_key] = ChangepointGroupData();
+                gstate.groups[row.group_key].group_value = row.group_val;
+                gstate.group_order.push_back(row.group_key);
+            }
+            auto &grp = gstate.groups[row.group_key];
+            grp.timestamps.push_back(row.date_micros);
+            grp.values.push_back(row.value);
+        }
     }
 
     output.SetCardinality(0);
@@ -600,32 +627,51 @@ static OperatorFinalizeResultType TsDetectChangepointsByFinalize(
     DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsDetectChangepointsByBindData>();
-    auto &local_state = data_p.local_state->Cast<TsDetectChangepointsByLocalState>();
+    auto &gstate = data_p.global_state->Cast<TsDetectChangepointsByGlobalState>();
+    auto &lstate = data_p.local_state->Cast<TsDetectChangepointsByLocalState>();
 
-    // Process all groups on first finalize call
-    if (!local_state.processed) {
+    // Barrier + claim
+    if (!lstate.registered_finalizer) {
+        if (lstate.registered_collector) {
+            gstate.threads_done_collecting.fetch_add(1);
+        }
+        lstate.registered_finalizer = true;
+    }
+    if (!lstate.owns_finalize) {
+        bool expected = false;
+        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true)) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.owns_finalize = true;
+        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load()) {
+            std::this_thread::yield();
+        }
+    }
+
+    // Process all groups (single thread)
+    if (!gstate.processed) {
         // Emit warning if there are NULL date rows
-        if (!local_state.null_date_rows.empty()) {
+        if (!gstate.null_date_rows.empty()) {
             string warning = StringUtil::Format(
                 "ts_detect_changepoints_by: %zu rows with NULL dates - these will have is_changepoint=false, probability=NULL",
-                local_state.null_date_rows.size()
+                gstate.null_date_rows.size()
             );
             Printer::Print(warning);
         }
 
-        for (const auto &group_key : local_state.group_order) {
-            auto &grp = local_state.groups[group_key];
+        for (const auto &group_key : gstate.group_order) {
+            auto &grp = gstate.groups[group_key];
 
             // Handle groups with < 2 points: output with default values instead of skipping
             if (grp.values.size() < 2) {
                 for (size_t i = 0; i < grp.timestamps.size(); i++) {
-                    TsDetectChangepointsByLocalState::OutputRow row;
+                    ChangepointOutputRow row;
                     row.group_value = grp.group_value;
                     row.timestamp = grp.timestamps[i];
                     row.is_changepoint = false;
                     row.changepoint_probability = 0.0;
                     row.changepoint_probability_null = true;
-                    local_state.results.push_back(row);
+                    gstate.results.push_back(row);
                 }
                 continue;
             }
@@ -660,47 +706,47 @@ static OperatorFinalizeResultType TsDetectChangepointsByFinalize(
             if (!success) {
                 // Output rows with default values on error instead of skipping
                 for (size_t i = 0; i < sorted_values.size(); i++) {
-                    TsDetectChangepointsByLocalState::OutputRow row;
+                    ChangepointOutputRow row;
                     row.group_value = grp.group_value;
                     row.timestamp = sorted_timestamps[i];
                     row.is_changepoint = false;
                     row.changepoint_probability = 0.0;
                     row.changepoint_probability_null = true;
-                    local_state.results.push_back(row);
+                    gstate.results.push_back(row);
                 }
                 continue;
             }
 
             // Create output rows
             for (size_t i = 0; i < bocpd_result.n_points; i++) {
-                TsDetectChangepointsByLocalState::OutputRow row;
+                ChangepointOutputRow row;
                 row.group_value = grp.group_value;
                 row.timestamp = sorted_timestamps[i];
                 row.is_changepoint = bocpd_result.is_changepoint ? bocpd_result.is_changepoint[i] : false;
                 row.changepoint_probability = bocpd_result.changepoint_probability ? bocpd_result.changepoint_probability[i] : 0.0;
-                local_state.results.push_back(row);
+                gstate.results.push_back(row);
             }
 
             anofox_free_bocpd_result(&bocpd_result);
         }
 
         // Output NULL date rows with default values
-        for (const auto &null_row : local_state.null_date_rows) {
-            TsDetectChangepointsByLocalState::OutputRow row;
+        for (const auto &null_row : gstate.null_date_rows) {
+            ChangepointOutputRow row;
             row.group_value = null_row.group_value;
             row.timestamp = 0;  // Placeholder, will be output as NULL
             row.is_changepoint = false;
             row.changepoint_probability = 0.0;
             row.changepoint_probability_null = true;
             row.date_is_null = true;
-            local_state.results.push_back(row);
+            gstate.results.push_back(row);
         }
 
-        local_state.processed = true;
+        gstate.processed = true;
     }
 
     // Output results
-    if (local_state.results.empty() || local_state.output_offset >= local_state.results.size()) {
+    if (gstate.results.empty() || gstate.output_offset >= gstate.results.size()) {
         return OperatorFinalizeResultType::FINISHED;
     }
 
@@ -710,8 +756,8 @@ static OperatorFinalizeResultType TsDetectChangepointsByFinalize(
         output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
     }
 
-    while (output_count < STANDARD_VECTOR_SIZE && local_state.output_offset < local_state.results.size()) {
-        auto &row = local_state.results[local_state.output_offset];
+    while (output_count < STANDARD_VECTOR_SIZE && gstate.output_offset < gstate.results.size()) {
+        auto &row = gstate.results[gstate.output_offset];
         idx_t out_idx = output_count;
 
         // Group column
@@ -743,12 +789,12 @@ static OperatorFinalizeResultType TsDetectChangepointsByFinalize(
         }
 
         output_count++;
-        local_state.output_offset++;
+        gstate.output_offset++;
     }
 
     output.SetCardinality(output_count);
 
-    if (local_state.output_offset >= local_state.results.size()) {
+    if (gstate.output_offset >= gstate.results.size()) {
         return OperatorFinalizeResultType::FINISHED;
     }
 

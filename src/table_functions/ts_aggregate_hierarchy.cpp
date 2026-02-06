@@ -5,6 +5,9 @@
 #include <algorithm>
 #include <map>
 #include <vector>
+#include <mutex>
+#include <atomic>
+#include <thread>
 
 namespace duckdb {
 
@@ -46,39 +49,51 @@ struct TsAggregateHierarchyBindData : public TableFunctionData {
 };
 
 // ============================================================================
-// Local State - buffers data and produces aggregated output
+// Standalone data structs (moved out of LocalState for parallel safety)
 // ============================================================================
 
-struct TsAggregateHierarchyLocalState : public LocalTableFunctionState {
-    // Buffered raw rows
-    struct RowData {
-        int64_t date_micros;
-        double value;
-        vector<string> id_values;
-    };
-    vector<RowData> rows;
+struct TsAggHierRowData {
+    int64_t date_micros;
+    double value;
+    vector<string> id_values;
+};
 
-    // Results ready to output
-    struct OutputRow {
-        string unique_id;
-        int64_t date_micros;
-        double value;
-    };
-    vector<OutputRow> results;
-    idx_t current_result = 0;
-    bool processed = false;
+struct TsAggHierOutputRow {
+    string unique_id;
+    int64_t date_micros;
+    double value;
 };
 
 // ============================================================================
-// Global State
+// Global State - holds all mutable data storage for thread safety
 // ============================================================================
 
 struct TsAggregateHierarchyGlobalState : public GlobalTableFunctionState {
-    idx_t max_threads = 1;
+    // All data storage (protected by mutex)
+    std::mutex groups_mutex;
+    vector<TsAggHierRowData> rows;
+    vector<TsAggHierOutputRow> results;
+    idx_t current_result = 0;
+    bool processed = false;
+
+    // Finalize coordination
+    std::atomic<bool> finalize_claimed{false};
+    std::atomic<idx_t> threads_collecting{0};
+    std::atomic<idx_t> threads_done_collecting{0};
 
     idx_t MaxThreads() const override {
-        return max_threads;
+        return 1;
     }
+};
+
+// ============================================================================
+// Local State - minimal per-thread tracking
+// ============================================================================
+
+struct TsAggregateHierarchyLocalState : public LocalTableFunctionState {
+    bool owns_finalize = false;
+    bool registered_collector = false;
+    bool registered_finalizer = false;
 };
 
 // ============================================================================
@@ -234,7 +249,16 @@ static OperatorResultType TsAggregateHierarchyInOut(
     DataChunk &output) {
 
     auto &bind_data = data.bind_data->Cast<TsAggregateHierarchyBindData>();
-    auto &local_state = data.local_state->Cast<TsAggregateHierarchyLocalState>();
+    auto &gstate = data.global_state->Cast<TsAggregateHierarchyGlobalState>();
+    auto &lstate = data.local_state->Cast<TsAggregateHierarchyLocalState>();
+
+    if (!lstate.registered_collector) {
+        gstate.threads_collecting.fetch_add(1);
+        lstate.registered_collector = true;
+    }
+
+    // Extract batch locally first
+    vector<TsAggHierRowData> local_batch;
 
     // Buffer all incoming rows
     for (idx_t row_idx = 0; row_idx < input.size(); row_idx++) {
@@ -245,7 +269,7 @@ static OperatorResultType TsAggregateHierarchyInOut(
             continue;
         }
 
-        TsAggregateHierarchyLocalState::RowData row;
+        TsAggHierRowData row;
 
         // Convert date to microseconds
         switch (bind_data.date_col_type) {
@@ -271,7 +295,15 @@ static OperatorResultType TsAggregateHierarchyInOut(
             row.id_values.push_back(id_val.IsNull() ? "NULL" : id_val.ToString());
         }
 
-        local_state.rows.push_back(std::move(row));
+        local_batch.push_back(std::move(row));
+    }
+
+    // Insert into global state under lock
+    {
+        std::lock_guard<std::mutex> lock(gstate.groups_mutex);
+        for (auto &row : local_batch) {
+            gstate.rows.push_back(std::move(row));
+        }
     }
 
     // Don't output anything during input phase
@@ -289,14 +321,30 @@ static OperatorFinalizeResultType TsAggregateHierarchyFinalize(
     DataChunk &output) {
 
     auto &bind_data = data.bind_data->Cast<TsAggregateHierarchyBindData>();
-    auto &local_state = data.local_state->Cast<TsAggregateHierarchyLocalState>();
+    auto &gstate = data.global_state->Cast<TsAggregateHierarchyGlobalState>();
+    auto &lstate = data.local_state->Cast<TsAggregateHierarchyLocalState>();
 
-    if (!local_state.processed) {
+    // Barrier + claim: ensure all collecting threads are done before processing
+    if (!lstate.registered_finalizer) {
+        if (lstate.registered_collector)
+            gstate.threads_done_collecting.fetch_add(1);
+        lstate.registered_finalizer = true;
+    }
+    if (!lstate.owns_finalize) {
+        bool expected = false;
+        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true))
+            return OperatorFinalizeResultType::FINISHED;
+        lstate.owns_finalize = true;
+        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load())
+            std::this_thread::yield();
+    }
+
+    if (!gstate.processed) {
         // Build aggregation for each hierarchy level
         // Key: unique_id -> (date -> sum)
         std::map<string, std::map<int64_t, double>> aggregations;
 
-        for (const auto& row : local_state.rows) {
+        for (const auto& row : gstate.rows) {
             // Generate unique_id for each hierarchy level (0 to num_id_cols)
             for (idx_t level = 0; level <= bind_data.num_id_cols; level++) {
                 string unique_id = BuildUniqueId(
@@ -315,35 +363,35 @@ static OperatorFinalizeResultType TsAggregateHierarchyFinalize(
         for (const auto& agg_entry : aggregations) {
             const string& unique_id = agg_entry.first;
             for (const auto& date_entry : agg_entry.second) {
-                TsAggregateHierarchyLocalState::OutputRow out_row;
+                TsAggHierOutputRow out_row;
                 out_row.unique_id = unique_id;
                 out_row.date_micros = date_entry.first;
                 out_row.value = date_entry.second;
-                local_state.results.push_back(std::move(out_row));
+                gstate.results.push_back(std::move(out_row));
             }
         }
 
         // Sort by unique_id, then date
-        std::sort(local_state.results.begin(), local_state.results.end(),
-            [](const TsAggregateHierarchyLocalState::OutputRow& a,
-               const TsAggregateHierarchyLocalState::OutputRow& b) {
+        std::sort(gstate.results.begin(), gstate.results.end(),
+            [](const TsAggHierOutputRow& a,
+               const TsAggHierOutputRow& b) {
                 if (a.unique_id != b.unique_id) return a.unique_id < b.unique_id;
                 return a.date_micros < b.date_micros;
             });
 
         // Clear input buffer to free memory
-        local_state.rows.clear();
-        local_state.processed = true;
+        gstate.rows.clear();
+        gstate.processed = true;
     }
 
     // Output results in batches
     output.Reset();
     idx_t output_idx = 0;
 
-    while (local_state.current_result < local_state.results.size() &&
+    while (gstate.current_result < gstate.results.size() &&
            output_idx < STANDARD_VECTOR_SIZE) {
 
-        auto& result = local_state.results[local_state.current_result];
+        auto& result = gstate.results[gstate.current_result];
 
         // Column 0: unique_id
         output.SetValue(0, output_idx, Value(result.unique_id));
@@ -368,12 +416,12 @@ static OperatorFinalizeResultType TsAggregateHierarchyFinalize(
         output.SetValue(2, output_idx, Value::DOUBLE(result.value));
 
         output_idx++;
-        local_state.current_result++;
+        gstate.current_result++;
     }
 
     output.SetCardinality(output_idx);
 
-    if (local_state.current_result >= local_state.results.size()) {
+    if (gstate.current_result >= gstate.results.size()) {
         return OperatorFinalizeResultType::FINISHED;
     }
     return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;

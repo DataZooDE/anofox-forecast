@@ -6,6 +6,9 @@
 #include <algorithm>
 #include <map>
 #include <cstring>
+#include <mutex>
+#include <atomic>
+#include <thread>
 
 namespace duckdb {
 
@@ -36,33 +39,31 @@ struct TsMstlDecompositionNativeBindData : public TableFunctionData {
 };
 
 // ============================================================================
-// Local State - buffers data per thread and manages streaming output
+// Group Data and Result Structures
+// ============================================================================
+
+struct MstlGroupData {
+    Value group_value;
+    vector<int64_t> dates;  // microseconds for sorting
+    vector<double> values;
+};
+
+struct DecompositionOutputRow {
+    Value group_value;
+    vector<double> trend;
+    vector<vector<double>> seasonal;  // one array per period
+    vector<double> remainder;
+    vector<int32_t> periods;
+};
+
+// ============================================================================
+// Local State - per-thread flags only
 // ============================================================================
 
 struct TsMstlDecompositionNativeLocalState : public LocalTableFunctionState {
-    // Input data buffer per group
-    struct GroupData {
-        Value group_value;
-        vector<int64_t> dates;  // microseconds for sorting
-        vector<double> values;
-    };
-
-    std::map<string, GroupData> groups;
-    vector<string> group_order;
-
-    // Output results
-    struct DecompositionOutputRow {
-        Value group_value;
-        vector<double> trend;
-        vector<vector<double>> seasonal;  // one array per period
-        vector<double> remainder;
-        vector<int32_t> periods;
-    };
-    vector<DecompositionOutputRow> results;
-
-    // Processing state
-    bool processed = false;
-    idx_t output_offset = 0;
+    bool owns_finalize = false;
+    bool registered_collector = false;
+    bool registered_finalizer = false;
 };
 
 // ============================================================================
@@ -118,18 +119,28 @@ static unique_ptr<FunctionData> TsMstlDecompositionNativeBind(
 }
 
 // ============================================================================
-// Global State - enables parallel execution
-//
-// IMPORTANT: This custom GlobalState is required for proper parallel execution.
-// Using the base GlobalTableFunctionState directly causes batch index collisions
-// with large datasets (300k+ groups) during BatchedDataCollection::Merge.
+// Global State - thread-safe group collection + single-thread finalize
 // ============================================================================
 
 struct TsMstlDecompositionNativeGlobalState : public GlobalTableFunctionState {
-    // Allow parallel execution - each thread processes its partition of groups
     idx_t MaxThreads() const override {
-        return 999999;  // Unlimited - let DuckDB decide based on hardware
+        return 999999;
     }
+
+    // Thread-safe group storage (moved from LocalState)
+    std::mutex groups_mutex;
+    std::map<string, MstlGroupData> groups;
+    vector<string> group_order;
+
+    // Processing results (used by finalize owner)
+    vector<DecompositionOutputRow> results;
+    bool processed = false;
+    idx_t output_offset = 0;
+
+    // Single-thread finalize + barrier
+    std::atomic<bool> finalize_claimed{false};
+    std::atomic<idx_t> threads_collecting{0};
+    std::atomic<idx_t> threads_done_collecting{0};
 };
 
 // ============================================================================
@@ -159,10 +170,24 @@ static OperatorResultType TsMstlDecompositionNativeInOut(
     DataChunk &input,
     DataChunk &output) {
 
-    auto &local_state = data_p.local_state->Cast<TsMstlDecompositionNativeLocalState>();
+    auto &gstate = data_p.global_state->Cast<TsMstlDecompositionNativeGlobalState>();
+    auto &lstate = data_p.local_state->Cast<TsMstlDecompositionNativeLocalState>();
 
-    // Buffer all incoming data - we need complete groups
-    // Input columns: group_col, date_col, value_col
+    // Register this thread as a collector (first call only)
+    if (!lstate.registered_collector) {
+        gstate.threads_collecting.fetch_add(1);
+        lstate.registered_collector = true;
+    }
+
+    // Extract batch locally (no lock)
+    struct TempRow {
+        Value group_val;
+        string group_key;
+        int64_t date_micros;
+        double value;
+    };
+    vector<TempRow> batch;
+
     for (idx_t i = 0; i < input.size(); i++) {
         Value group_val = input.data[0].GetValue(i);
         Value date_val = input.data[1].GetValue(i);
@@ -170,30 +195,39 @@ static OperatorResultType TsMstlDecompositionNativeInOut(
 
         if (date_val.IsNull()) continue;
 
-        string group_key = GetGroupKey(group_val);
-
-        if (local_state.groups.find(group_key) == local_state.groups.end()) {
-            local_state.groups[group_key] = TsMstlDecompositionNativeLocalState::GroupData();
-            local_state.groups[group_key].group_value = group_val;
-            local_state.group_order.push_back(group_key);
-        }
-
-        auto &grp = local_state.groups[group_key];
+        TempRow row;
+        row.group_val = group_val;
+        row.group_key = GetGroupKey(group_val);
 
         // Get date as microseconds for sorting
-        int64_t date_micros = 0;
+        row.date_micros = 0;
         if (date_val.type().id() == LogicalTypeId::TIMESTAMP) {
-            date_micros = TimestampToMicroseconds(date_val.GetValue<timestamp_t>());
+            row.date_micros = TimestampToMicroseconds(date_val.GetValue<timestamp_t>());
         } else if (date_val.type().id() == LogicalTypeId::DATE) {
-            date_micros = DateToMicroseconds(date_val.GetValue<date_t>());
+            row.date_micros = DateToMicroseconds(date_val.GetValue<date_t>());
         } else if (date_val.type().id() == LogicalTypeId::BIGINT) {
-            date_micros = date_val.GetValue<int64_t>();
+            row.date_micros = date_val.GetValue<int64_t>();
         } else if (date_val.type().id() == LogicalTypeId::INTEGER) {
-            date_micros = date_val.GetValue<int32_t>();
+            row.date_micros = date_val.GetValue<int32_t>();
         }
 
-        grp.dates.push_back(date_micros);
-        grp.values.push_back(value_val.IsNull() ? 0.0 : value_val.GetValue<double>());
+        row.value = value_val.IsNull() ? 0.0 : value_val.GetValue<double>();
+        batch.push_back(std::move(row));
+    }
+
+    // Lock once, insert all
+    {
+        std::lock_guard<std::mutex> lock(gstate.groups_mutex);
+        for (auto &row : batch) {
+            if (gstate.groups.find(row.group_key) == gstate.groups.end()) {
+                gstate.groups[row.group_key] = MstlGroupData();
+                gstate.groups[row.group_key].group_value = row.group_val;
+                gstate.group_order.push_back(row.group_key);
+            }
+            auto &grp = gstate.groups[row.group_key];
+            grp.dates.push_back(row.date_micros);
+            grp.values.push_back(row.value);
+        }
     }
 
     // Don't output anything during input phase
@@ -211,12 +245,31 @@ static OperatorFinalizeResultType TsMstlDecompositionNativeFinalize(
     DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsMstlDecompositionNativeBindData>();
-    auto &local_state = data_p.local_state->Cast<TsMstlDecompositionNativeLocalState>();
+    auto &gstate = data_p.global_state->Cast<TsMstlDecompositionNativeGlobalState>();
+    auto &lstate = data_p.local_state->Cast<TsMstlDecompositionNativeLocalState>();
 
-    // Process all groups on first finalize call
-    if (!local_state.processed) {
-        for (const auto &group_key : local_state.group_order) {
-            auto &grp = local_state.groups[group_key];
+    // Barrier + claim
+    if (!lstate.registered_finalizer) {
+        if (lstate.registered_collector) {
+            gstate.threads_done_collecting.fetch_add(1);
+        }
+        lstate.registered_finalizer = true;
+    }
+    if (!lstate.owns_finalize) {
+        bool expected = false;
+        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true)) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.owns_finalize = true;
+        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load()) {
+            std::this_thread::yield();
+        }
+    }
+
+    // Process all groups (single thread)
+    if (!gstate.processed) {
+        for (const auto &group_key : gstate.group_order) {
+            auto &grp = gstate.groups[group_key];
 
             if (grp.dates.empty()) continue;
 
@@ -246,7 +299,7 @@ static OperatorFinalizeResultType TsMstlDecompositionNativeFinalize(
                 &error
             );
 
-            TsMstlDecompositionNativeLocalState::DecompositionOutputRow row;
+            DecompositionOutputRow row;
             row.group_value = grp.group_value;
 
             if (success && mstl_result.decomposition_applied) {
@@ -294,14 +347,14 @@ static OperatorFinalizeResultType TsMstlDecompositionNativeFinalize(
                 continue;
             }
 
-            local_state.results.push_back(row);
+            gstate.results.push_back(row);
         }
 
-        local_state.processed = true;
+        gstate.processed = true;
     }
 
     // Output results in batches
-    idx_t remaining = local_state.results.size() - local_state.output_offset;
+    idx_t remaining = gstate.results.size() - gstate.output_offset;
     if (remaining == 0) {
         output.SetCardinality(0);
         return OperatorFinalizeResultType::FINISHED;
@@ -316,7 +369,7 @@ static OperatorFinalizeResultType TsMstlDecompositionNativeFinalize(
     }
 
     for (idx_t i = 0; i < to_output; i++) {
-        auto &row = local_state.results[local_state.output_offset + i];
+        auto &row = gstate.results[gstate.output_offset + i];
 
         // id
         output.data[0].SetValue(i, row.group_value);
@@ -354,9 +407,9 @@ static OperatorFinalizeResultType TsMstlDecompositionNativeFinalize(
         output.data[4].SetValue(i, Value::LIST(LogicalType::INTEGER, periods_values));
     }
 
-    local_state.output_offset += to_output;
+    gstate.output_offset += to_output;
 
-    if (local_state.output_offset >= local_state.results.size()) {
+    if (gstate.output_offset >= gstate.results.size()) {
         return OperatorFinalizeResultType::FINISHED;
     }
     return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;

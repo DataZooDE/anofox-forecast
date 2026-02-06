@@ -12,6 +12,8 @@
 #include <set>
 #include <mutex>
 #include <cmath>
+#include <atomic>
+#include <thread>
 
 namespace duckdb {
 
@@ -88,6 +90,23 @@ struct TsMetricsNativeBindData : public TableFunctionData {
 };
 
 // ============================================================================
+// Standalone structs for TsMetricsNative
+// ============================================================================
+
+struct MetricsGroupData {
+    vector<Value> group_values;
+    vector<int64_t> dates;
+    vector<double> actuals;
+    vector<double> forecasts;
+};
+
+struct MetricsOutputRow {
+    string group_key;
+    vector<Value> group_values;
+    double metric_value;
+};
+
+// ============================================================================
 // Global State
 // ============================================================================
 
@@ -96,14 +115,16 @@ struct TsMetricsNativeGlobalState : public GlobalTableFunctionState {
         return 999999;
     }
 
-    std::mutex processed_groups_mutex;
-    std::set<string> processed_groups;
+    std::mutex groups_mutex;
+    std::map<string, MetricsGroupData> groups;
+    vector<string> group_order;
 
-    bool ClaimGroup(const string &group_key) {
-        std::lock_guard<std::mutex> lock(processed_groups_mutex);
-        auto result = processed_groups.insert(group_key);
-        return result.second;
-    }
+    vector<MetricsOutputRow> results;
+    bool processed = false;
+    idx_t output_offset = 0;
+    std::atomic<bool> finalize_claimed{false};
+    std::atomic<idx_t> threads_collecting{0};
+    std::atomic<idx_t> threads_done_collecting{0};
 };
 
 // ============================================================================
@@ -111,27 +132,9 @@ struct TsMetricsNativeGlobalState : public GlobalTableFunctionState {
 // ============================================================================
 
 struct TsMetricsNativeLocalState : public LocalTableFunctionState {
-    // Data per group
-    struct GroupData {
-        vector<Value> group_values;  // Values for grouping columns
-        vector<int64_t> dates;       // For ordering
-        vector<double> actuals;
-        vector<double> forecasts;
-    };
-
-    std::map<string, GroupData> groups;
-    vector<string> group_order;
-
-    // Output buffer
-    struct OutputRow {
-        string group_key;
-        vector<Value> group_values;
-        double metric_value;
-    };
-    vector<OutputRow> results;
-
-    bool processed = false;
-    idx_t output_offset = 0;
+    bool owns_finalize = false;
+    bool registered_collector = false;
+    bool registered_finalizer = false;
 };
 
 // ============================================================================
@@ -339,11 +342,26 @@ static OperatorResultType TsMetricsNativeInOut(
     DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsMetricsNativeBindData>();
-    auto &local_state = data_p.local_state->Cast<TsMetricsNativeLocalState>();
+    auto &gstate = data_p.global_state->Cast<TsMetricsNativeGlobalState>();
+    auto &lstate = data_p.local_state->Cast<TsMetricsNativeLocalState>();
 
-    // Buffer incoming data
+    if (!lstate.registered_collector) {
+        gstate.threads_collecting.fetch_add(1);
+        lstate.registered_collector = true;
+    }
+
+    // Extract batch locally first (no lock)
+    struct LocalEntry {
+        string group_key;
+        vector<Value> group_vals;
+        int64_t date_int;
+        double actual_dbl;
+        double forecast_dbl;
+    };
+    vector<LocalEntry> batch;
+    batch.reserve(input.size());
+
     for (idx_t i = 0; i < input.size(); i++) {
-        // Extract group column values
         vector<Value> group_vals;
         for (idx_t col_idx : bind_data.group_col_indices) {
             group_vals.push_back(input.data[col_idx].GetValue(i));
@@ -351,29 +369,34 @@ static OperatorResultType TsMetricsNativeInOut(
 
         string group_key = BuildGroupKey(group_vals);
 
-        // Get date, actual, forecast values
         Value date_val = input.data[bind_data.date_col_idx].GetValue(i);
         Value actual_val = input.data[bind_data.actual_col_idx].GetValue(i);
         Value forecast_val = input.data[bind_data.forecast_col_idx].GetValue(i);
 
         if (date_val.IsNull()) continue;
 
-        // Initialize group if needed
-        if (local_state.groups.find(group_key) == local_state.groups.end()) {
-            local_state.groups[group_key] = TsMetricsNativeLocalState::GroupData();
-            local_state.groups[group_key].group_values = group_vals;
-            local_state.group_order.push_back(group_key);
-        }
-
-        auto &grp = local_state.groups[group_key];
-
         int64_t date_int = DateValueToInt64(date_val, bind_data.date_col_type);
         double actual_dbl = actual_val.IsNull() ? std::nan("") : actual_val.GetValue<double>();
         double forecast_dbl = forecast_val.IsNull() ? std::nan("") : forecast_val.GetValue<double>();
 
-        grp.dates.push_back(date_int);
-        grp.actuals.push_back(actual_dbl);
-        grp.forecasts.push_back(forecast_dbl);
+        batch.push_back({std::move(group_key), std::move(group_vals), date_int, actual_dbl, forecast_dbl});
+    }
+
+    // Lock once and insert all
+    {
+        std::lock_guard<std::mutex> lock(gstate.groups_mutex);
+        for (auto &entry : batch) {
+            if (gstate.groups.find(entry.group_key) == gstate.groups.end()) {
+                gstate.groups[entry.group_key] = MetricsGroupData();
+                gstate.groups[entry.group_key].group_values = entry.group_vals;
+                gstate.group_order.push_back(entry.group_key);
+            }
+
+            auto &grp = gstate.groups[entry.group_key];
+            grp.dates.push_back(entry.date_int);
+            grp.actuals.push_back(entry.actual_dbl);
+            grp.forecasts.push_back(entry.forecast_dbl);
+        }
     }
 
     output.SetCardinality(0);
@@ -390,18 +413,29 @@ static OperatorFinalizeResultType TsMetricsNativeFinalize(
     DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsMetricsNativeBindData>();
-    auto &global_state = data_p.global_state->Cast<TsMetricsNativeGlobalState>();
-    auto &local_state = data_p.local_state->Cast<TsMetricsNativeLocalState>();
+    auto &gstate = data_p.global_state->Cast<TsMetricsNativeGlobalState>();
+    auto &lstate = data_p.local_state->Cast<TsMetricsNativeLocalState>();
+
+    // Barrier + claim pattern
+    if (!lstate.registered_finalizer) {
+        if (lstate.registered_collector)
+            gstate.threads_done_collecting.fetch_add(1);
+        lstate.registered_finalizer = true;
+    }
+
+    if (!lstate.owns_finalize) {
+        bool expected = false;
+        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true))
+            return OperatorFinalizeResultType::FINISHED;
+        lstate.owns_finalize = true;
+        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load())
+            std::this_thread::yield();
+    }
 
     // Process all groups on first finalize call
-    if (!local_state.processed) {
-        for (const auto &group_key : local_state.group_order) {
-            // Skip if another thread claimed this group
-            if (!global_state.ClaimGroup(group_key)) {
-                continue;
-            }
-
-            auto &grp = local_state.groups[group_key];
+    if (!gstate.processed) {
+        for (const auto &group_key : gstate.group_order) {
+            auto &grp = gstate.groups[group_key];
 
             if (grp.dates.empty()) continue;
 
@@ -427,18 +461,18 @@ static OperatorFinalizeResultType TsMetricsNativeFinalize(
             double metric_val = ComputeMetric(bind_data.metric_type, sorted_actuals, sorted_forecasts);
 
             // Add to results
-            TsMetricsNativeLocalState::OutputRow row;
+            MetricsOutputRow row;
             row.group_key = group_key;
             row.group_values = grp.group_values;
             row.metric_value = metric_val;
-            local_state.results.push_back(std::move(row));
+            gstate.results.push_back(std::move(row));
         }
 
-        local_state.processed = true;
+        gstate.processed = true;
     }
 
     // Stream results
-    idx_t remaining = local_state.results.size() - local_state.output_offset;
+    idx_t remaining = gstate.results.size() - gstate.output_offset;
     if (remaining == 0) {
         output.SetCardinality(0);
         return OperatorFinalizeResultType::FINISHED;
@@ -452,7 +486,7 @@ static OperatorFinalizeResultType TsMetricsNativeFinalize(
     }
 
     for (idx_t i = 0; i < to_output; i++) {
-        auto &row = local_state.results[local_state.output_offset + i];
+        auto &row = gstate.results[gstate.output_offset + i];
 
         // Output group columns
         for (idx_t col = 0; col < row.group_values.size(); col++) {
@@ -464,9 +498,9 @@ static OperatorFinalizeResultType TsMetricsNativeFinalize(
         output.data[metric_col].SetValue(i, Value::DOUBLE(row.metric_value));
     }
 
-    local_state.output_offset += to_output;
+    gstate.output_offset += to_output;
 
-    if (local_state.output_offset >= local_state.results.size()) {
+    if (gstate.output_offset >= gstate.results.size()) {
         return OperatorFinalizeResultType::FINISHED;
     }
     return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;
@@ -513,39 +547,43 @@ struct TsMaseNativeBindData : public TableFunctionData {
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
 };
 
+// ============================================================================
+// Standalone structs for TsMaseNative
+// ============================================================================
+
+struct MaseGroupData {
+    vector<Value> group_values;
+    vector<int64_t> dates;
+    vector<double> actuals;
+    vector<double> forecasts;
+    vector<double> baselines;
+};
+
+struct MaseOutputRow {
+    string group_key;
+    vector<Value> group_values;
+    double metric_value;
+};
+
 struct TsMaseNativeGlobalState : public GlobalTableFunctionState {
     idx_t MaxThreads() const override { return 999999; }
-    std::mutex processed_groups_mutex;
-    std::set<string> processed_groups;
 
-    bool ClaimGroup(const string &group_key) {
-        std::lock_guard<std::mutex> lock(processed_groups_mutex);
-        auto result = processed_groups.insert(group_key);
-        return result.second;
-    }
+    std::mutex groups_mutex;
+    std::map<string, MaseGroupData> groups;
+    vector<string> group_order;
+
+    vector<MaseOutputRow> results;
+    bool processed = false;
+    idx_t output_offset = 0;
+    std::atomic<bool> finalize_claimed{false};
+    std::atomic<idx_t> threads_collecting{0};
+    std::atomic<idx_t> threads_done_collecting{0};
 };
 
 struct TsMaseNativeLocalState : public LocalTableFunctionState {
-    struct GroupData {
-        vector<Value> group_values;
-        vector<int64_t> dates;
-        vector<double> actuals;
-        vector<double> forecasts;
-        vector<double> baselines;
-    };
-
-    std::map<string, GroupData> groups;
-    vector<string> group_order;
-
-    struct OutputRow {
-        string group_key;
-        vector<Value> group_values;
-        double metric_value;
-    };
-    vector<OutputRow> results;
-
-    bool processed = false;
-    idx_t output_offset = 0;
+    bool owns_finalize = false;
+    bool registered_collector = false;
+    bool registered_finalizer = false;
 };
 
 static unique_ptr<FunctionData> TsMaseNativeBind(
@@ -636,7 +674,25 @@ static OperatorResultType TsMaseNativeInOut(
     ExecutionContext &context, TableFunctionInput &data_p, DataChunk &input, DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsMaseNativeBindData>();
-    auto &local_state = data_p.local_state->Cast<TsMaseNativeLocalState>();
+    auto &gstate = data_p.global_state->Cast<TsMaseNativeGlobalState>();
+    auto &lstate = data_p.local_state->Cast<TsMaseNativeLocalState>();
+
+    if (!lstate.registered_collector) {
+        gstate.threads_collecting.fetch_add(1);
+        lstate.registered_collector = true;
+    }
+
+    // Extract batch locally first (no lock)
+    struct LocalEntry {
+        string group_key;
+        vector<Value> group_vals;
+        int64_t date_int;
+        double actual_dbl;
+        double forecast_dbl;
+        double baseline_dbl;
+    };
+    vector<LocalEntry> batch;
+    batch.reserve(input.size());
 
     for (idx_t i = 0; i < input.size(); i++) {
         vector<Value> group_vals;
@@ -648,22 +704,35 @@ static OperatorResultType TsMaseNativeInOut(
         Value date_val = input.data[bind_data.date_col_idx].GetValue(i);
         if (date_val.IsNull()) continue;
 
-        if (local_state.groups.find(group_key) == local_state.groups.end()) {
-            local_state.groups[group_key] = TsMaseNativeLocalState::GroupData();
-            local_state.groups[group_key].group_values = group_vals;
-            local_state.group_order.push_back(group_key);
-        }
-
-        auto &grp = local_state.groups[group_key];
-        grp.dates.push_back(DateValueToInt64(date_val, bind_data.date_col_type));
-
         Value actual_val = input.data[bind_data.actual_col_idx].GetValue(i);
         Value forecast_val = input.data[bind_data.forecast_col_idx].GetValue(i);
         Value baseline_val = input.data[bind_data.baseline_col_idx].GetValue(i);
 
-        grp.actuals.push_back(actual_val.IsNull() ? std::nan("") : actual_val.GetValue<double>());
-        grp.forecasts.push_back(forecast_val.IsNull() ? std::nan("") : forecast_val.GetValue<double>());
-        grp.baselines.push_back(baseline_val.IsNull() ? std::nan("") : baseline_val.GetValue<double>());
+        batch.push_back({
+            std::move(group_key), std::move(group_vals),
+            DateValueToInt64(date_val, bind_data.date_col_type),
+            actual_val.IsNull() ? std::nan("") : actual_val.GetValue<double>(),
+            forecast_val.IsNull() ? std::nan("") : forecast_val.GetValue<double>(),
+            baseline_val.IsNull() ? std::nan("") : baseline_val.GetValue<double>()
+        });
+    }
+
+    // Lock once and insert all
+    {
+        std::lock_guard<std::mutex> lock(gstate.groups_mutex);
+        for (auto &entry : batch) {
+            if (gstate.groups.find(entry.group_key) == gstate.groups.end()) {
+                gstate.groups[entry.group_key] = MaseGroupData();
+                gstate.groups[entry.group_key].group_values = entry.group_vals;
+                gstate.group_order.push_back(entry.group_key);
+            }
+
+            auto &grp = gstate.groups[entry.group_key];
+            grp.dates.push_back(entry.date_int);
+            grp.actuals.push_back(entry.actual_dbl);
+            grp.forecasts.push_back(entry.forecast_dbl);
+            grp.baselines.push_back(entry.baseline_dbl);
+        }
     }
 
     output.SetCardinality(0);
@@ -674,14 +743,28 @@ static OperatorFinalizeResultType TsMaseNativeFinalize(
     ExecutionContext &context, TableFunctionInput &data_p, DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsMaseNativeBindData>();
-    auto &global_state = data_p.global_state->Cast<TsMaseNativeGlobalState>();
-    auto &local_state = data_p.local_state->Cast<TsMaseNativeLocalState>();
+    auto &gstate = data_p.global_state->Cast<TsMaseNativeGlobalState>();
+    auto &lstate = data_p.local_state->Cast<TsMaseNativeLocalState>();
 
-    if (!local_state.processed) {
-        for (const auto &group_key : local_state.group_order) {
-            if (!global_state.ClaimGroup(group_key)) continue;
+    // Barrier + claim pattern
+    if (!lstate.registered_finalizer) {
+        if (lstate.registered_collector)
+            gstate.threads_done_collecting.fetch_add(1);
+        lstate.registered_finalizer = true;
+    }
 
-            auto &grp = local_state.groups[group_key];
+    if (!lstate.owns_finalize) {
+        bool expected = false;
+        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true))
+            return OperatorFinalizeResultType::FINISHED;
+        lstate.owns_finalize = true;
+        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load())
+            std::this_thread::yield();
+    }
+
+    if (!gstate.processed) {
+        for (const auto &group_key : gstate.group_order) {
+            auto &grp = gstate.groups[group_key];
             if (grp.dates.empty()) continue;
 
             vector<size_t> indices(grp.dates.size());
@@ -710,16 +793,16 @@ static OperatorFinalizeResultType TsMaseNativeFinalize(
                 if (success) metric_val = result;
             }
 
-            TsMaseNativeLocalState::OutputRow row;
+            MaseOutputRow row;
             row.group_key = group_key;
             row.group_values = grp.group_values;
             row.metric_value = metric_val;
-            local_state.results.push_back(std::move(row));
+            gstate.results.push_back(std::move(row));
         }
-        local_state.processed = true;
+        gstate.processed = true;
     }
 
-    idx_t remaining = local_state.results.size() - local_state.output_offset;
+    idx_t remaining = gstate.results.size() - gstate.output_offset;
     if (remaining == 0) {
         output.SetCardinality(0);
         return OperatorFinalizeResultType::FINISHED;
@@ -733,15 +816,15 @@ static OperatorFinalizeResultType TsMaseNativeFinalize(
     }
 
     for (idx_t i = 0; i < to_output; i++) {
-        auto &row = local_state.results[local_state.output_offset + i];
+        auto &row = gstate.results[gstate.output_offset + i];
         for (idx_t col = 0; col < row.group_values.size(); col++) {
             output.data[col].SetValue(i, row.group_values[col]);
         }
         output.data[row.group_values.size()].SetValue(i, Value::DOUBLE(row.metric_value));
     }
 
-    local_state.output_offset += to_output;
-    return (local_state.output_offset >= local_state.results.size())
+    gstate.output_offset += to_output;
+    return (gstate.output_offset >= gstate.results.size())
         ? OperatorFinalizeResultType::FINISHED
         : OperatorFinalizeResultType::HAVE_MORE_OUTPUT;
 }
@@ -774,38 +857,43 @@ struct TsRmaeNativeBindData : public TableFunctionData {
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
 };
 
+// ============================================================================
+// Standalone structs for TsRmaeNative
+// ============================================================================
+
+struct RmaeGroupData {
+    vector<Value> group_values;
+    vector<int64_t> dates;
+    vector<double> actuals;
+    vector<double> pred1s;
+    vector<double> pred2s;
+};
+
+struct RmaeOutputRow {
+    string group_key;
+    vector<Value> group_values;
+    double metric_value;
+};
+
 struct TsRmaeNativeGlobalState : public GlobalTableFunctionState {
     idx_t MaxThreads() const override { return 999999; }
-    std::mutex processed_groups_mutex;
-    std::set<string> processed_groups;
 
-    bool ClaimGroup(const string &group_key) {
-        std::lock_guard<std::mutex> lock(processed_groups_mutex);
-        return processed_groups.insert(group_key).second;
-    }
+    std::mutex groups_mutex;
+    std::map<string, RmaeGroupData> groups;
+    vector<string> group_order;
+
+    vector<RmaeOutputRow> results;
+    bool processed = false;
+    idx_t output_offset = 0;
+    std::atomic<bool> finalize_claimed{false};
+    std::atomic<idx_t> threads_collecting{0};
+    std::atomic<idx_t> threads_done_collecting{0};
 };
 
 struct TsRmaeNativeLocalState : public LocalTableFunctionState {
-    struct GroupData {
-        vector<Value> group_values;
-        vector<int64_t> dates;
-        vector<double> actuals;
-        vector<double> pred1s;
-        vector<double> pred2s;
-    };
-
-    std::map<string, GroupData> groups;
-    vector<string> group_order;
-
-    struct OutputRow {
-        string group_key;
-        vector<Value> group_values;
-        double metric_value;
-    };
-    vector<OutputRow> results;
-
-    bool processed = false;
-    idx_t output_offset = 0;
+    bool owns_finalize = false;
+    bool registered_collector = false;
+    bool registered_finalizer = false;
 };
 
 static unique_ptr<FunctionData> TsRmaeNativeBind(
@@ -881,7 +969,25 @@ static OperatorResultType TsRmaeNativeInOut(
     ExecutionContext &context, TableFunctionInput &data_p, DataChunk &input, DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsRmaeNativeBindData>();
-    auto &local_state = data_p.local_state->Cast<TsRmaeNativeLocalState>();
+    auto &gstate = data_p.global_state->Cast<TsRmaeNativeGlobalState>();
+    auto &lstate = data_p.local_state->Cast<TsRmaeNativeLocalState>();
+
+    if (!lstate.registered_collector) {
+        gstate.threads_collecting.fetch_add(1);
+        lstate.registered_collector = true;
+    }
+
+    // Extract batch locally first (no lock)
+    struct LocalEntry {
+        string group_key;
+        vector<Value> group_vals;
+        int64_t date_int;
+        double actual_dbl;
+        double pred1_dbl;
+        double pred2_dbl;
+    };
+    vector<LocalEntry> batch;
+    batch.reserve(input.size());
 
     for (idx_t i = 0; i < input.size(); i++) {
         vector<Value> group_vals;
@@ -893,22 +999,35 @@ static OperatorResultType TsRmaeNativeInOut(
         Value date_val = input.data[bind_data.date_col_idx].GetValue(i);
         if (date_val.IsNull()) continue;
 
-        if (local_state.groups.find(group_key) == local_state.groups.end()) {
-            local_state.groups[group_key] = TsRmaeNativeLocalState::GroupData();
-            local_state.groups[group_key].group_values = group_vals;
-            local_state.group_order.push_back(group_key);
-        }
-
-        auto &grp = local_state.groups[group_key];
-        grp.dates.push_back(DateValueToInt64(date_val, bind_data.date_col_type));
-
         Value actual_val = input.data[bind_data.actual_col_idx].GetValue(i);
         Value pred1_val = input.data[bind_data.pred1_col_idx].GetValue(i);
         Value pred2_val = input.data[bind_data.pred2_col_idx].GetValue(i);
 
-        grp.actuals.push_back(actual_val.IsNull() ? std::nan("") : actual_val.GetValue<double>());
-        grp.pred1s.push_back(pred1_val.IsNull() ? std::nan("") : pred1_val.GetValue<double>());
-        grp.pred2s.push_back(pred2_val.IsNull() ? std::nan("") : pred2_val.GetValue<double>());
+        batch.push_back({
+            std::move(group_key), std::move(group_vals),
+            DateValueToInt64(date_val, bind_data.date_col_type),
+            actual_val.IsNull() ? std::nan("") : actual_val.GetValue<double>(),
+            pred1_val.IsNull() ? std::nan("") : pred1_val.GetValue<double>(),
+            pred2_val.IsNull() ? std::nan("") : pred2_val.GetValue<double>()
+        });
+    }
+
+    // Lock once and insert all
+    {
+        std::lock_guard<std::mutex> lock(gstate.groups_mutex);
+        for (auto &entry : batch) {
+            if (gstate.groups.find(entry.group_key) == gstate.groups.end()) {
+                gstate.groups[entry.group_key] = RmaeGroupData();
+                gstate.groups[entry.group_key].group_values = entry.group_vals;
+                gstate.group_order.push_back(entry.group_key);
+            }
+
+            auto &grp = gstate.groups[entry.group_key];
+            grp.dates.push_back(entry.date_int);
+            grp.actuals.push_back(entry.actual_dbl);
+            grp.pred1s.push_back(entry.pred1_dbl);
+            grp.pred2s.push_back(entry.pred2_dbl);
+        }
     }
 
     output.SetCardinality(0);
@@ -919,14 +1038,28 @@ static OperatorFinalizeResultType TsRmaeNativeFinalize(
     ExecutionContext &context, TableFunctionInput &data_p, DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsRmaeNativeBindData>();
-    auto &global_state = data_p.global_state->Cast<TsRmaeNativeGlobalState>();
-    auto &local_state = data_p.local_state->Cast<TsRmaeNativeLocalState>();
+    auto &gstate = data_p.global_state->Cast<TsRmaeNativeGlobalState>();
+    auto &lstate = data_p.local_state->Cast<TsRmaeNativeLocalState>();
 
-    if (!local_state.processed) {
-        for (const auto &group_key : local_state.group_order) {
-            if (!global_state.ClaimGroup(group_key)) continue;
+    // Barrier + claim pattern
+    if (!lstate.registered_finalizer) {
+        if (lstate.registered_collector)
+            gstate.threads_done_collecting.fetch_add(1);
+        lstate.registered_finalizer = true;
+    }
 
-            auto &grp = local_state.groups[group_key];
+    if (!lstate.owns_finalize) {
+        bool expected = false;
+        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true))
+            return OperatorFinalizeResultType::FINISHED;
+        lstate.owns_finalize = true;
+        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load())
+            std::this_thread::yield();
+    }
+
+    if (!gstate.processed) {
+        for (const auto &group_key : gstate.group_order) {
+            auto &grp = gstate.groups[group_key];
             if (grp.dates.empty()) continue;
 
             vector<size_t> indices(grp.dates.size());
@@ -955,16 +1088,16 @@ static OperatorFinalizeResultType TsRmaeNativeFinalize(
                 if (success) metric_val = result;
             }
 
-            TsRmaeNativeLocalState::OutputRow row;
+            RmaeOutputRow row;
             row.group_key = group_key;
             row.group_values = grp.group_values;
             row.metric_value = metric_val;
-            local_state.results.push_back(std::move(row));
+            gstate.results.push_back(std::move(row));
         }
-        local_state.processed = true;
+        gstate.processed = true;
     }
 
-    idx_t remaining = local_state.results.size() - local_state.output_offset;
+    idx_t remaining = gstate.results.size() - gstate.output_offset;
     if (remaining == 0) {
         output.SetCardinality(0);
         return OperatorFinalizeResultType::FINISHED;
@@ -978,15 +1111,15 @@ static OperatorFinalizeResultType TsRmaeNativeFinalize(
     }
 
     for (idx_t i = 0; i < to_output; i++) {
-        auto &row = local_state.results[local_state.output_offset + i];
+        auto &row = gstate.results[gstate.output_offset + i];
         for (idx_t col = 0; col < row.group_values.size(); col++) {
             output.data[col].SetValue(i, row.group_values[col]);
         }
         output.data[row.group_values.size()].SetValue(i, Value::DOUBLE(row.metric_value));
     }
 
-    local_state.output_offset += to_output;
-    return (local_state.output_offset >= local_state.results.size())
+    gstate.output_offset += to_output;
+    return (gstate.output_offset >= gstate.results.size())
         ? OperatorFinalizeResultType::FINISHED
         : OperatorFinalizeResultType::HAVE_MORE_OUTPUT;
 }
@@ -1019,38 +1152,43 @@ struct TsCoverageNativeBindData : public TableFunctionData {
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
 };
 
+// ============================================================================
+// Standalone structs for TsCoverageNative
+// ============================================================================
+
+struct CoverageGroupData {
+    vector<Value> group_values;
+    vector<int64_t> dates;
+    vector<double> actuals;
+    vector<double> lowers;
+    vector<double> uppers;
+};
+
+struct CoverageOutputRow {
+    string group_key;
+    vector<Value> group_values;
+    double metric_value;
+};
+
 struct TsCoverageNativeGlobalState : public GlobalTableFunctionState {
     idx_t MaxThreads() const override { return 999999; }
-    std::mutex processed_groups_mutex;
-    std::set<string> processed_groups;
 
-    bool ClaimGroup(const string &group_key) {
-        std::lock_guard<std::mutex> lock(processed_groups_mutex);
-        return processed_groups.insert(group_key).second;
-    }
+    std::mutex groups_mutex;
+    std::map<string, CoverageGroupData> groups;
+    vector<string> group_order;
+
+    vector<CoverageOutputRow> results;
+    bool processed = false;
+    idx_t output_offset = 0;
+    std::atomic<bool> finalize_claimed{false};
+    std::atomic<idx_t> threads_collecting{0};
+    std::atomic<idx_t> threads_done_collecting{0};
 };
 
 struct TsCoverageNativeLocalState : public LocalTableFunctionState {
-    struct GroupData {
-        vector<Value> group_values;
-        vector<int64_t> dates;
-        vector<double> actuals;
-        vector<double> lowers;
-        vector<double> uppers;
-    };
-
-    std::map<string, GroupData> groups;
-    vector<string> group_order;
-
-    struct OutputRow {
-        string group_key;
-        vector<Value> group_values;
-        double metric_value;
-    };
-    vector<OutputRow> results;
-
-    bool processed = false;
-    idx_t output_offset = 0;
+    bool owns_finalize = false;
+    bool registered_collector = false;
+    bool registered_finalizer = false;
 };
 
 static unique_ptr<FunctionData> TsCoverageNativeBind(
@@ -1126,7 +1264,25 @@ static OperatorResultType TsCoverageNativeInOut(
     ExecutionContext &context, TableFunctionInput &data_p, DataChunk &input, DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsCoverageNativeBindData>();
-    auto &local_state = data_p.local_state->Cast<TsCoverageNativeLocalState>();
+    auto &gstate = data_p.global_state->Cast<TsCoverageNativeGlobalState>();
+    auto &lstate = data_p.local_state->Cast<TsCoverageNativeLocalState>();
+
+    if (!lstate.registered_collector) {
+        gstate.threads_collecting.fetch_add(1);
+        lstate.registered_collector = true;
+    }
+
+    // Extract batch locally first (no lock)
+    struct LocalEntry {
+        string group_key;
+        vector<Value> group_vals;
+        int64_t date_int;
+        double actual_dbl;
+        double lower_dbl;
+        double upper_dbl;
+    };
+    vector<LocalEntry> batch;
+    batch.reserve(input.size());
 
     for (idx_t i = 0; i < input.size(); i++) {
         vector<Value> group_vals;
@@ -1138,22 +1294,35 @@ static OperatorResultType TsCoverageNativeInOut(
         Value date_val = input.data[bind_data.date_col_idx].GetValue(i);
         if (date_val.IsNull()) continue;
 
-        if (local_state.groups.find(group_key) == local_state.groups.end()) {
-            local_state.groups[group_key] = TsCoverageNativeLocalState::GroupData();
-            local_state.groups[group_key].group_values = group_vals;
-            local_state.group_order.push_back(group_key);
-        }
-
-        auto &grp = local_state.groups[group_key];
-        grp.dates.push_back(DateValueToInt64(date_val, bind_data.date_col_type));
-
         Value actual_val = input.data[bind_data.actual_col_idx].GetValue(i);
         Value lower_val = input.data[bind_data.lower_col_idx].GetValue(i);
         Value upper_val = input.data[bind_data.upper_col_idx].GetValue(i);
 
-        grp.actuals.push_back(actual_val.IsNull() ? std::nan("") : actual_val.GetValue<double>());
-        grp.lowers.push_back(lower_val.IsNull() ? std::nan("") : lower_val.GetValue<double>());
-        grp.uppers.push_back(upper_val.IsNull() ? std::nan("") : upper_val.GetValue<double>());
+        batch.push_back({
+            std::move(group_key), std::move(group_vals),
+            DateValueToInt64(date_val, bind_data.date_col_type),
+            actual_val.IsNull() ? std::nan("") : actual_val.GetValue<double>(),
+            lower_val.IsNull() ? std::nan("") : lower_val.GetValue<double>(),
+            upper_val.IsNull() ? std::nan("") : upper_val.GetValue<double>()
+        });
+    }
+
+    // Lock once and insert all
+    {
+        std::lock_guard<std::mutex> lock(gstate.groups_mutex);
+        for (auto &entry : batch) {
+            if (gstate.groups.find(entry.group_key) == gstate.groups.end()) {
+                gstate.groups[entry.group_key] = CoverageGroupData();
+                gstate.groups[entry.group_key].group_values = entry.group_vals;
+                gstate.group_order.push_back(entry.group_key);
+            }
+
+            auto &grp = gstate.groups[entry.group_key];
+            grp.dates.push_back(entry.date_int);
+            grp.actuals.push_back(entry.actual_dbl);
+            grp.lowers.push_back(entry.lower_dbl);
+            grp.uppers.push_back(entry.upper_dbl);
+        }
     }
 
     output.SetCardinality(0);
@@ -1164,14 +1333,28 @@ static OperatorFinalizeResultType TsCoverageNativeFinalize(
     ExecutionContext &context, TableFunctionInput &data_p, DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsCoverageNativeBindData>();
-    auto &global_state = data_p.global_state->Cast<TsCoverageNativeGlobalState>();
-    auto &local_state = data_p.local_state->Cast<TsCoverageNativeLocalState>();
+    auto &gstate = data_p.global_state->Cast<TsCoverageNativeGlobalState>();
+    auto &lstate = data_p.local_state->Cast<TsCoverageNativeLocalState>();
 
-    if (!local_state.processed) {
-        for (const auto &group_key : local_state.group_order) {
-            if (!global_state.ClaimGroup(group_key)) continue;
+    // Barrier + claim pattern
+    if (!lstate.registered_finalizer) {
+        if (lstate.registered_collector)
+            gstate.threads_done_collecting.fetch_add(1);
+        lstate.registered_finalizer = true;
+    }
 
-            auto &grp = local_state.groups[group_key];
+    if (!lstate.owns_finalize) {
+        bool expected = false;
+        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true))
+            return OperatorFinalizeResultType::FINISHED;
+        lstate.owns_finalize = true;
+        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load())
+            std::this_thread::yield();
+    }
+
+    if (!gstate.processed) {
+        for (const auto &group_key : gstate.group_order) {
+            auto &grp = gstate.groups[group_key];
             if (grp.dates.empty()) continue;
 
             vector<size_t> indices(grp.dates.size());
@@ -1200,16 +1383,16 @@ static OperatorFinalizeResultType TsCoverageNativeFinalize(
                 if (success) metric_val = result;
             }
 
-            TsCoverageNativeLocalState::OutputRow row;
+            CoverageOutputRow row;
             row.group_key = group_key;
             row.group_values = grp.group_values;
             row.metric_value = metric_val;
-            local_state.results.push_back(std::move(row));
+            gstate.results.push_back(std::move(row));
         }
-        local_state.processed = true;
+        gstate.processed = true;
     }
 
-    idx_t remaining = local_state.results.size() - local_state.output_offset;
+    idx_t remaining = gstate.results.size() - gstate.output_offset;
     if (remaining == 0) {
         output.SetCardinality(0);
         return OperatorFinalizeResultType::FINISHED;
@@ -1223,15 +1406,15 @@ static OperatorFinalizeResultType TsCoverageNativeFinalize(
     }
 
     for (idx_t i = 0; i < to_output; i++) {
-        auto &row = local_state.results[local_state.output_offset + i];
+        auto &row = gstate.results[gstate.output_offset + i];
         for (idx_t col = 0; col < row.group_values.size(); col++) {
             output.data[col].SetValue(i, row.group_values[col]);
         }
         output.data[row.group_values.size()].SetValue(i, Value::DOUBLE(row.metric_value));
     }
 
-    local_state.output_offset += to_output;
-    return (local_state.output_offset >= local_state.results.size())
+    gstate.output_offset += to_output;
+    return (gstate.output_offset >= gstate.results.size())
         ? OperatorFinalizeResultType::FINISHED
         : OperatorFinalizeResultType::HAVE_MORE_OUTPUT;
 }
@@ -1264,37 +1447,42 @@ struct TsQuantileLossNativeBindData : public TableFunctionData {
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
 };
 
+// ============================================================================
+// Standalone structs for TsQuantileLossNative
+// ============================================================================
+
+struct QuantileLossGroupData {
+    vector<Value> group_values;
+    vector<int64_t> dates;
+    vector<double> actuals;
+    vector<double> forecasts;
+};
+
+struct QuantileLossOutputRow {
+    string group_key;
+    vector<Value> group_values;
+    double metric_value;
+};
+
 struct TsQuantileLossNativeGlobalState : public GlobalTableFunctionState {
     idx_t MaxThreads() const override { return 999999; }
-    std::mutex processed_groups_mutex;
-    std::set<string> processed_groups;
 
-    bool ClaimGroup(const string &group_key) {
-        std::lock_guard<std::mutex> lock(processed_groups_mutex);
-        return processed_groups.insert(group_key).second;
-    }
+    std::mutex groups_mutex;
+    std::map<string, QuantileLossGroupData> groups;
+    vector<string> group_order;
+
+    vector<QuantileLossOutputRow> results;
+    bool processed = false;
+    idx_t output_offset = 0;
+    std::atomic<bool> finalize_claimed{false};
+    std::atomic<idx_t> threads_collecting{0};
+    std::atomic<idx_t> threads_done_collecting{0};
 };
 
 struct TsQuantileLossNativeLocalState : public LocalTableFunctionState {
-    struct GroupData {
-        vector<Value> group_values;
-        vector<int64_t> dates;
-        vector<double> actuals;
-        vector<double> forecasts;
-    };
-
-    std::map<string, GroupData> groups;
-    vector<string> group_order;
-
-    struct OutputRow {
-        string group_key;
-        vector<Value> group_values;
-        double metric_value;
-    };
-    vector<OutputRow> results;
-
-    bool processed = false;
-    idx_t output_offset = 0;
+    bool owns_finalize = false;
+    bool registered_collector = false;
+    bool registered_finalizer = false;
 };
 
 static unique_ptr<FunctionData> TsQuantileLossNativeBind(
@@ -1367,7 +1555,24 @@ static OperatorResultType TsQuantileLossNativeInOut(
     ExecutionContext &context, TableFunctionInput &data_p, DataChunk &input, DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsQuantileLossNativeBindData>();
-    auto &local_state = data_p.local_state->Cast<TsQuantileLossNativeLocalState>();
+    auto &gstate = data_p.global_state->Cast<TsQuantileLossNativeGlobalState>();
+    auto &lstate = data_p.local_state->Cast<TsQuantileLossNativeLocalState>();
+
+    if (!lstate.registered_collector) {
+        gstate.threads_collecting.fetch_add(1);
+        lstate.registered_collector = true;
+    }
+
+    // Extract batch locally first (no lock)
+    struct LocalEntry {
+        string group_key;
+        vector<Value> group_vals;
+        int64_t date_int;
+        double actual_dbl;
+        double forecast_dbl;
+    };
+    vector<LocalEntry> batch;
+    batch.reserve(input.size());
 
     for (idx_t i = 0; i < input.size(); i++) {
         vector<Value> group_vals;
@@ -1379,20 +1584,32 @@ static OperatorResultType TsQuantileLossNativeInOut(
         Value date_val = input.data[bind_data.date_col_idx].GetValue(i);
         if (date_val.IsNull()) continue;
 
-        if (local_state.groups.find(group_key) == local_state.groups.end()) {
-            local_state.groups[group_key] = TsQuantileLossNativeLocalState::GroupData();
-            local_state.groups[group_key].group_values = group_vals;
-            local_state.group_order.push_back(group_key);
-        }
-
-        auto &grp = local_state.groups[group_key];
-        grp.dates.push_back(DateValueToInt64(date_val, bind_data.date_col_type));
-
         Value actual_val = input.data[bind_data.actual_col_idx].GetValue(i);
         Value forecast_val = input.data[bind_data.forecast_col_idx].GetValue(i);
 
-        grp.actuals.push_back(actual_val.IsNull() ? std::nan("") : actual_val.GetValue<double>());
-        grp.forecasts.push_back(forecast_val.IsNull() ? std::nan("") : forecast_val.GetValue<double>());
+        batch.push_back({
+            std::move(group_key), std::move(group_vals),
+            DateValueToInt64(date_val, bind_data.date_col_type),
+            actual_val.IsNull() ? std::nan("") : actual_val.GetValue<double>(),
+            forecast_val.IsNull() ? std::nan("") : forecast_val.GetValue<double>()
+        });
+    }
+
+    // Lock once and insert all
+    {
+        std::lock_guard<std::mutex> lock(gstate.groups_mutex);
+        for (auto &entry : batch) {
+            if (gstate.groups.find(entry.group_key) == gstate.groups.end()) {
+                gstate.groups[entry.group_key] = QuantileLossGroupData();
+                gstate.groups[entry.group_key].group_values = entry.group_vals;
+                gstate.group_order.push_back(entry.group_key);
+            }
+
+            auto &grp = gstate.groups[entry.group_key];
+            grp.dates.push_back(entry.date_int);
+            grp.actuals.push_back(entry.actual_dbl);
+            grp.forecasts.push_back(entry.forecast_dbl);
+        }
     }
 
     output.SetCardinality(0);
@@ -1403,14 +1620,28 @@ static OperatorFinalizeResultType TsQuantileLossNativeFinalize(
     ExecutionContext &context, TableFunctionInput &data_p, DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsQuantileLossNativeBindData>();
-    auto &global_state = data_p.global_state->Cast<TsQuantileLossNativeGlobalState>();
-    auto &local_state = data_p.local_state->Cast<TsQuantileLossNativeLocalState>();
+    auto &gstate = data_p.global_state->Cast<TsQuantileLossNativeGlobalState>();
+    auto &lstate = data_p.local_state->Cast<TsQuantileLossNativeLocalState>();
 
-    if (!local_state.processed) {
-        for (const auto &group_key : local_state.group_order) {
-            if (!global_state.ClaimGroup(group_key)) continue;
+    // Barrier + claim pattern
+    if (!lstate.registered_finalizer) {
+        if (lstate.registered_collector)
+            gstate.threads_done_collecting.fetch_add(1);
+        lstate.registered_finalizer = true;
+    }
 
-            auto &grp = local_state.groups[group_key];
+    if (!lstate.owns_finalize) {
+        bool expected = false;
+        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true))
+            return OperatorFinalizeResultType::FINISHED;
+        lstate.owns_finalize = true;
+        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load())
+            std::this_thread::yield();
+    }
+
+    if (!gstate.processed) {
+        for (const auto &group_key : gstate.group_order) {
+            auto &grp = gstate.groups[group_key];
             if (grp.dates.empty()) continue;
 
             vector<size_t> indices(grp.dates.size());
@@ -1438,16 +1669,16 @@ static OperatorFinalizeResultType TsQuantileLossNativeFinalize(
                 if (success) metric_val = result;
             }
 
-            TsQuantileLossNativeLocalState::OutputRow row;
+            QuantileLossOutputRow row;
             row.group_key = group_key;
             row.group_values = grp.group_values;
             row.metric_value = metric_val;
-            local_state.results.push_back(std::move(row));
+            gstate.results.push_back(std::move(row));
         }
-        local_state.processed = true;
+        gstate.processed = true;
     }
 
-    idx_t remaining = local_state.results.size() - local_state.output_offset;
+    idx_t remaining = gstate.results.size() - gstate.output_offset;
     if (remaining == 0) {
         output.SetCardinality(0);
         return OperatorFinalizeResultType::FINISHED;
@@ -1461,15 +1692,15 @@ static OperatorFinalizeResultType TsQuantileLossNativeFinalize(
     }
 
     for (idx_t i = 0; i < to_output; i++) {
-        auto &row = local_state.results[local_state.output_offset + i];
+        auto &row = gstate.results[gstate.output_offset + i];
         for (idx_t col = 0; col < row.group_values.size(); col++) {
             output.data[col].SetValue(i, row.group_values[col]);
         }
         output.data[row.group_values.size()].SetValue(i, Value::DOUBLE(row.metric_value));
     }
 
-    local_state.output_offset += to_output;
-    return (local_state.output_offset >= local_state.results.size())
+    gstate.output_offset += to_output;
+    return (gstate.output_offset >= gstate.results.size())
         ? OperatorFinalizeResultType::FINISHED
         : OperatorFinalizeResultType::HAVE_MORE_OUTPUT;
 }

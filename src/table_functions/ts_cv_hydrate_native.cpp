@@ -6,6 +6,9 @@
 #include <map>
 #include <vector>
 #include <set>
+#include <mutex>
+#include <atomic>
+#include <thread>
 
 namespace duckdb {
 
@@ -49,38 +52,53 @@ struct TsCvHydrateNativeBindData : public TableFunctionData {
 };
 
 // ============================================================================
-// Local State
+// Standalone data structs (moved out of LocalState for parallel safety)
 // ============================================================================
 
-struct TsCvHydrateNativeLocalState : public LocalTableFunctionState {
-    // Buffered row from input
-    struct Row {
-        Value group;
-        Value date;
-        Value target;
-        int64_t fold_id;
-        string split;
-        int64_t date_micros;  // For sorting
-        vector<string> unknown_values;  // Values for each unknown feature (as strings)
-    };
-    vector<Row> rows;
+struct TsCvHydrateRow {
+    Value group;
+    Value date;
+    Value target;
+    int64_t fold_id;
+    string split;
+    int64_t date_micros;  // For sorting
+    vector<string> unknown_values;  // Values for each unknown feature (as strings)
+};
+
+// ============================================================================
+// Global State - holds all mutable data storage for thread safety
+// ============================================================================
+
+struct TsCvHydrateNativeGlobalState : public GlobalTableFunctionState {
+    // All data storage (protected by mutex)
+    std::mutex groups_mutex;
+    vector<TsCvHydrateRow> rows;
 
     // Last known values per (group, fold) for each unknown feature
     // Key: "group_key|fold_id" -> vector of string values (one per unknown feature)
     std::map<string, vector<string>> last_known;
 
     // Output buffer (after processing)
-    vector<Row> output;
+    vector<TsCvHydrateRow> output;
     idx_t offset = 0;
     bool processed = false;
+
+    // Finalize coordination
+    std::atomic<bool> finalize_claimed{false};
+    std::atomic<idx_t> threads_collecting{0};
+    std::atomic<idx_t> threads_done_collecting{0};
+
+    idx_t MaxThreads() const override { return 1; }
 };
 
 // ============================================================================
-// Global State
+// Local State - minimal per-thread tracking
 // ============================================================================
 
-struct TsCvHydrateNativeGlobalState : public GlobalTableFunctionState {
-    idx_t MaxThreads() const override { return 1; }
+struct TsCvHydrateNativeLocalState : public LocalTableFunctionState {
+    bool owns_finalize = false;
+    bool registered_collector = false;
+    bool registered_finalizer = false;
 };
 
 // ============================================================================
@@ -407,9 +425,18 @@ static OperatorResultType TsCvHydrateNativeInOut(
     DataChunk &output) {
 
     auto &bind_data = data.bind_data->Cast<TsCvHydrateNativeBindData>();
-    auto &local_state = data.local_state->Cast<TsCvHydrateNativeLocalState>();
+    auto &gstate = data.global_state->Cast<TsCvHydrateNativeGlobalState>();
+    auto &lstate = data.local_state->Cast<TsCvHydrateNativeLocalState>();
+
+    if (!lstate.registered_collector) {
+        gstate.threads_collecting.fetch_add(1);
+        lstate.registered_collector = true;
+    }
 
     DateColumnType date_col_type = DetectDateColType(bind_data.date_type);
+
+    // Extract batch locally first
+    vector<TsCvHydrateRow> local_batch;
 
     // Buffer input rows
     for (idx_t row_idx = 0; row_idx < input.size(); row_idx++) {
@@ -427,7 +454,7 @@ static OperatorResultType TsCvHydrateNativeInOut(
         // Skip rows with null date (shouldn't happen after join, but be safe)
         if (date_val.IsNull()) continue;
 
-        TsCvHydrateNativeLocalState::Row row;
+        TsCvHydrateRow row;
         row.group = group_val;
         row.date = date_val;
         row.target = target_val;
@@ -441,7 +468,15 @@ static OperatorResultType TsCvHydrateNativeInOut(
             row.unknown_values.push_back(val);
         }
 
-        local_state.rows.push_back(std::move(row));
+        local_batch.push_back(std::move(row));
+    }
+
+    // Insert into global state under lock
+    {
+        std::lock_guard<std::mutex> lock(gstate.groups_mutex);
+        for (auto &row : local_batch) {
+            gstate.rows.push_back(std::move(row));
+        }
     }
 
     output.SetCardinality(0);
@@ -458,12 +493,28 @@ static OperatorFinalizeResultType TsCvHydrateNativeFinalize(
     DataChunk &output) {
 
     auto &bind_data = data.bind_data->Cast<TsCvHydrateNativeBindData>();
-    auto &local_state = data.local_state->Cast<TsCvHydrateNativeLocalState>();
+    auto &gstate = data.global_state->Cast<TsCvHydrateNativeGlobalState>();
+    auto &lstate = data.local_state->Cast<TsCvHydrateNativeLocalState>();
 
-    if (!local_state.processed) {
+    // Barrier + claim: ensure all collecting threads are done before processing
+    if (!lstate.registered_finalizer) {
+        if (lstate.registered_collector)
+            gstate.threads_done_collecting.fetch_add(1);
+        lstate.registered_finalizer = true;
+    }
+    if (!lstate.owns_finalize) {
+        bool expected = false;
+        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true))
+            return OperatorFinalizeResultType::FINISHED;
+        lstate.owns_finalize = true;
+        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load())
+            std::this_thread::yield();
+    }
+
+    if (!gstate.processed) {
         // Step 1: Sort rows by (group, fold_id, date)
-        std::sort(local_state.rows.begin(), local_state.rows.end(),
-            [](const TsCvHydrateNativeLocalState::Row &a, const TsCvHydrateNativeLocalState::Row &b) {
+        std::sort(gstate.rows.begin(), gstate.rows.end(),
+            [](const TsCvHydrateRow &a, const TsCvHydrateRow &b) {
                 string key_a = GetGroupKeyForHydrate(a.group) + "|" + std::to_string(a.fold_id);
                 string key_b = GetGroupKeyForHydrate(b.group) + "|" + std::to_string(b.fold_id);
                 if (key_a != key_b) return key_a < key_b;
@@ -473,10 +524,10 @@ static OperatorFinalizeResultType TsCvHydrateNativeFinalize(
         // Step 2: Process rows, tracking last_known for train rows
         idx_t num_features = bind_data.unknown_feature_names.size();
 
-        for (auto &row : local_state.rows) {
+        for (auto &row : gstate.rows) {
             string key = GetGroupKeyForHydrate(row.group) + "|" + std::to_string(row.fold_id);
 
-            TsCvHydrateNativeLocalState::Row out_row;
+            TsCvHydrateRow out_row;
             out_row.group = row.group;
             out_row.date = row.date;
             out_row.target = row.target;
@@ -487,7 +538,7 @@ static OperatorFinalizeResultType TsCvHydrateNativeFinalize(
             if (row.split == "train") {
                 // Train rows: use actual values and update last_known
                 out_row.unknown_values = row.unknown_values;
-                local_state.last_known[key] = row.unknown_values;
+                gstate.last_known[key] = row.unknown_values;
             } else {
                 // Test rows: apply masking strategy
                 out_row.unknown_values.resize(num_features);
@@ -504,8 +555,8 @@ static OperatorFinalizeResultType TsCvHydrateNativeFinalize(
                     }
                 } else {
                     // last_value: use last known from train
-                    auto it = local_state.last_known.find(key);
-                    if (it != local_state.last_known.end() && it->second.size() == num_features) {
+                    auto it = gstate.last_known.find(key);
+                    if (it != gstate.last_known.end() && it->second.size() == num_features) {
                         out_row.unknown_values = it->second;
                     } else {
                         // No last_known available, use empty (will be NULL)
@@ -516,13 +567,13 @@ static OperatorFinalizeResultType TsCvHydrateNativeFinalize(
                 }
             }
 
-            local_state.output.push_back(std::move(out_row));
+            gstate.output.push_back(std::move(out_row));
         }
 
         // Clear input rows to free memory
-        local_state.rows.clear();
-        local_state.last_known.clear();
-        local_state.processed = true;
+        gstate.rows.clear();
+        gstate.last_known.clear();
+        gstate.processed = true;
     }
 
     // Stream output
@@ -535,8 +586,8 @@ static OperatorFinalizeResultType TsCvHydrateNativeFinalize(
 
     idx_t num_features = bind_data.unknown_feature_names.size();
 
-    while (local_state.offset < local_state.output.size() && output_idx < STANDARD_VECTOR_SIZE) {
-        auto &row = local_state.output[local_state.offset];
+    while (gstate.offset < gstate.output.size() && output_idx < STANDARD_VECTOR_SIZE) {
+        auto &row = gstate.output[gstate.offset];
 
         // cv_folds columns
         output.SetValue(0, output_idx, row.group);
@@ -560,12 +611,12 @@ static OperatorFinalizeResultType TsCvHydrateNativeFinalize(
         }
 
         output_idx++;
-        local_state.offset++;
+        gstate.offset++;
     }
 
     output.SetCardinality(output_idx);
 
-    if (local_state.offset >= local_state.output.size()) {
+    if (gstate.offset >= gstate.output.size()) {
         return OperatorFinalizeResultType::FINISHED;
     }
     return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;

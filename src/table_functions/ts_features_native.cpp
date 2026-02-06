@@ -6,6 +6,9 @@
 #include <map>
 #include <vector>
 #include <cstring>
+#include <mutex>
+#include <atomic>
+#include <thread>
 
 namespace duckdb {
 
@@ -70,41 +73,55 @@ struct TsFeaturesNativeBindData : public TableFunctionData {
 };
 
 // ============================================================================
-// Local State - buffers data per group
+// Data Structs (standalone to avoid collisions)
 // ============================================================================
 
-struct TsFeaturesNativeLocalState : public LocalTableFunctionState {
-    // Buffer for incoming data per group
-    struct GroupData {
-        Value group_value;
-        vector<int64_t> timestamps;
-        vector<double> values;
-    };
+struct TsFeaturesGroupData {
+    Value group_value;
+    vector<int64_t> timestamps;
+    vector<double> values;
+};
 
-    // Map group key -> accumulated data
-    std::map<string, GroupData> groups;
-    vector<string> group_order;  // Track insertion order
-
-    // Results ready to output
-    struct FeatureResult {
-        Value group_value;
-        vector<double> features;
-    };
-    vector<FeatureResult> results;
-    idx_t current_result = 0;
-    bool processed = false;
+struct TsFeaturesFeatureResult {
+    Value group_value;
+    vector<double> features;
 };
 
 // ============================================================================
-// Global State
+// Global State - holds all mutable data with mutex protection
 // ============================================================================
 
 struct TsFeaturesNativeGlobalState : public GlobalTableFunctionState {
     idx_t max_threads = 1;
 
+    // Group data storage (protected by groups_mutex)
+    std::mutex groups_mutex;
+    std::map<string, TsFeaturesGroupData> groups;
+    vector<string> group_order;
+
+    // Results ready to output
+    vector<TsFeaturesFeatureResult> results;
+    idx_t current_result = 0;
+    bool processed = false;
+
+    // Single-thread finalize + barrier
+    std::atomic<bool> finalize_claimed{false};
+    std::atomic<idx_t> threads_collecting{0};
+    std::atomic<idx_t> threads_done_collecting{0};
+
     idx_t MaxThreads() const override {
         return max_threads;
     }
+};
+
+// ============================================================================
+// Local State
+// ============================================================================
+
+struct TsFeaturesNativeLocalState : public LocalTableFunctionState {
+    bool owns_finalize = false;
+    bool registered_collector = false;
+    bool registered_finalizer = false;
 };
 
 // ============================================================================
@@ -185,9 +202,24 @@ static OperatorResultType TsFeaturesNativeInOut(
     DataChunk &input,
     DataChunk &output) {
 
-    auto &local_state = data.local_state->Cast<TsFeaturesNativeLocalState>();
+    auto &gstate = data.global_state->Cast<TsFeaturesNativeGlobalState>();
+    auto &lstate = data.local_state->Cast<TsFeaturesNativeLocalState>();
 
-    // Buffer all input rows
+    // Register this thread as a collector (first call only)
+    if (!lstate.registered_collector) {
+        gstate.threads_collecting.fetch_add(1);
+        lstate.registered_collector = true;
+    }
+
+    // Extract batch locally first
+    struct LocalRow {
+        Value group_val;
+        string group_key;
+        int64_t ts;
+        double value;
+    };
+    vector<LocalRow> local_rows;
+
     for (idx_t row_idx = 0; row_idx < input.size(); row_idx++) {
         Value group_val = input.GetValue(0, row_idx);
         Value date_val = input.GetValue(1, row_idx);
@@ -197,33 +229,41 @@ static OperatorResultType TsFeaturesNativeInOut(
             continue;
         }
 
-        string group_key = GetGroupKey(group_val);
-
-        // Get or create group
-        auto it = local_state.groups.find(group_key);
-        if (it == local_state.groups.end()) {
-            TsFeaturesNativeLocalState::GroupData new_group;
-            new_group.group_value = group_val;
-            local_state.groups[group_key] = std::move(new_group);
-            local_state.group_order.push_back(group_key);
-            it = local_state.groups.find(group_key);
-        }
-
-        auto &group = it->second;
+        LocalRow lr;
+        lr.group_val = group_val;
+        lr.group_key = GetGroupKey(group_val);
 
         // Convert timestamp to int64
-        int64_t ts;
         if (date_val.type().id() == LogicalTypeId::TIMESTAMP) {
-            ts = date_val.GetValue<timestamp_t>().value;
+            lr.ts = date_val.GetValue<timestamp_t>().value;
         } else if (date_val.type().id() == LogicalTypeId::DATE) {
             auto date = date_val.GetValue<date_t>();
-            ts = static_cast<int64_t>(date.days) * 24LL * 60LL * 60LL * 1000000LL;
+            lr.ts = static_cast<int64_t>(date.days) * 24LL * 60LL * 60LL * 1000000LL;
         } else {
-            ts = date_val.GetValue<int64_t>();
+            lr.ts = date_val.GetValue<int64_t>();
         }
 
-        group.timestamps.push_back(ts);
-        group.values.push_back(value_val.IsNull() ? std::numeric_limits<double>::quiet_NaN() : value_val.GetValue<double>());
+        lr.value = value_val.IsNull() ? std::numeric_limits<double>::quiet_NaN() : value_val.GetValue<double>();
+        local_rows.push_back(std::move(lr));
+    }
+
+    // Insert into global state under lock
+    {
+        std::lock_guard<std::mutex> lock(gstate.groups_mutex);
+        for (auto &lr : local_rows) {
+            auto it = gstate.groups.find(lr.group_key);
+            if (it == gstate.groups.end()) {
+                TsFeaturesGroupData new_group;
+                new_group.group_value = lr.group_val;
+                gstate.groups[lr.group_key] = std::move(new_group);
+                gstate.group_order.push_back(lr.group_key);
+                it = gstate.groups.find(lr.group_key);
+            }
+
+            auto &group = it->second;
+            group.timestamps.push_back(lr.ts);
+            group.values.push_back(lr.value);
+        }
     }
 
     // Don't output anything during input phase
@@ -240,13 +280,32 @@ static OperatorFinalizeResultType TsFeaturesNativeFinalize(
     TableFunctionInput &data,
     DataChunk &output) {
 
-    auto &local_state = data.local_state->Cast<TsFeaturesNativeLocalState>();
+    auto &gstate = data.global_state->Cast<TsFeaturesNativeGlobalState>();
+    auto &lstate = data.local_state->Cast<TsFeaturesNativeLocalState>();
     const auto& feature_names = GetFeatureNames();
 
+    // Barrier + claim
+    if (!lstate.registered_finalizer) {
+        if (lstate.registered_collector) {
+            gstate.threads_done_collecting.fetch_add(1);
+        }
+        lstate.registered_finalizer = true;
+    }
+    if (!lstate.owns_finalize) {
+        bool expected = false;
+        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true)) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.owns_finalize = true;
+        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load()) {
+            std::this_thread::yield();
+        }
+    }
+
     // Process all groups if not yet done
-    if (!local_state.processed) {
-        for (const auto& group_key : local_state.group_order) {
-            auto& group = local_state.groups[group_key];
+    if (!gstate.processed) {
+        for (const auto& group_key : gstate.group_order) {
+            auto& group = gstate.groups[group_key];
 
             if (group.values.empty()) {
                 continue;
@@ -276,7 +335,7 @@ static OperatorFinalizeResultType TsFeaturesNativeFinalize(
                 &error
             );
 
-            TsFeaturesNativeLocalState::FeatureResult result;
+            TsFeaturesFeatureResult result;
             result.group_value = group.group_value;
             result.features.resize(feature_names.size(), std::numeric_limits<double>::quiet_NaN());
 
@@ -300,13 +359,13 @@ static OperatorFinalizeResultType TsFeaturesNativeFinalize(
                 anofox_free_features_result(&feat_result);
             }
 
-            local_state.results.push_back(std::move(result));
+            gstate.results.push_back(std::move(result));
         }
 
         // Clear input data to free memory
-        local_state.groups.clear();
-        local_state.group_order.clear();
-        local_state.processed = true;
+        gstate.groups.clear();
+        gstate.group_order.clear();
+        gstate.processed = true;
     }
 
     // Output results
@@ -318,8 +377,8 @@ static OperatorFinalizeResultType TsFeaturesNativeFinalize(
         output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
     }
 
-    while (local_state.current_result < local_state.results.size() && output_idx < STANDARD_VECTOR_SIZE) {
-        auto& result = local_state.results[local_state.current_result];
+    while (gstate.current_result < gstate.results.size() && output_idx < STANDARD_VECTOR_SIZE) {
+        auto& result = gstate.results[gstate.current_result];
 
         // Set group value (column 0 = id)
         output.SetValue(0, output_idx, result.group_value);
@@ -330,12 +389,12 @@ static OperatorFinalizeResultType TsFeaturesNativeFinalize(
         }
 
         output_idx++;
-        local_state.current_result++;
+        gstate.current_result++;
     }
 
     output.SetCardinality(output_idx);
 
-    if (local_state.current_result >= local_state.results.size()) {
+    if (gstate.current_result >= gstate.results.size()) {
         return OperatorFinalizeResultType::FINISHED;
     }
     return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;

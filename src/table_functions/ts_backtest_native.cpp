@@ -10,7 +10,7 @@
 #include <set>
 #include <atomic>
 #include <mutex>
-#include <condition_variable>
+#include <thread>
 
 namespace duckdb {
 
@@ -21,17 +21,16 @@ namespace duckdb {
 // Users should call ts_backtest_auto_by() instead of this function directly.
 //
 // PARALLEL EXECUTION STRATEGY:
-// This function uses a two-phase approach to enable parallelization while
-// maintaining correctness for fold boundary computation:
+// This function uses mutex-protected GlobalState + single-thread finalize:
 //
 // Phase 1 (in_out_function):
-//   - Each thread buffers its partition of data in LocalState
-//   - Atomically updates global min/max dates in GlobalState
+//   - Each thread extracts batch locally, then locks mutex to insert into GlobalState
+//   - Atomically updates global min/max dates, collects unique dates under lock
 //
 // Phase 2 (finalize):
-//   - First thread to enter computes fold boundaries from global date range
-//   - All threads wait for fold boundaries to be ready
-//   - Each thread then processes its own groups in parallel
+//   - Barrier waits for all collector threads to finish
+//   - Single thread claims finalize, computes fold boundaries, processes all groups
+//   - Streams output from global results vector
 //
 // MEMORY FOOTPRINT (1M rows = 10k series x 100 dates):
 //   - Native (this function): ~31 MB peak buffer memory
@@ -91,77 +90,75 @@ struct FoldBoundary {
 };
 
 // ============================================================================
-// Global State - manages synchronization and shared fold boundaries
+// Group Data and Result Structures
 // ============================================================================
 
-struct TsBacktestNativeGlobalState : public GlobalTableFunctionState {
-    // Allow parallel execution - each thread processes its groups
-    idx_t MaxThreads() const override {
-        return 999999;  // Unlimited - let DuckDB decide
-    }
+struct BacktestGroupData {
+    Value group_value;
+    vector<int64_t> dates;
+    vector<double> values;
+};
 
-    // Atomic date range tracking (updated by all threads)
-    std::atomic<int64_t> global_min_date{std::numeric_limits<int64_t>::max()};
-    std::atomic<int64_t> global_max_date{std::numeric_limits<int64_t>::min()};
-
-    // Unique dates collection (protected by mutex)
-    std::mutex dates_mutex;
-    std::set<int64_t> unique_dates;
-
-    // Fold boundaries (computed once, read by all threads)
-    std::mutex fold_mutex;
-    std::condition_variable fold_cv;
-    std::atomic<bool> fold_bounds_computed{false};
-    vector<FoldBoundary> fold_bounds;
-
-    // Thread synchronization for finalize phase
-    std::atomic<int> threads_contributing{0};
-    std::atomic<int> threads_waiting{0};
-    std::atomic<bool> all_dates_collected{false};
+struct BacktestResultRow {
+    int64_t fold_id;
+    string group_key;
+    Value group_value;
+    int64_t date;
+    double forecast;
+    double actual;
+    double error;
+    double abs_error;
+    double lower_90;
+    double upper_90;
+    string model_name;
+    double fold_metric_score;
 };
 
 // ============================================================================
-// Local State - buffers data per thread and manages streaming output
+// Global State - thread-safe group collection + single-thread finalize
+//
+// IMPORTANT: This custom GlobalState is required for proper parallel execution.
+// Using per-thread LocalState for data + multi-thread finalize causes batch
+// index collisions during BatchedDataCollection::Merge with CTAS.
+// ============================================================================
+
+struct TsBacktestNativeGlobalState : public GlobalTableFunctionState {
+    idx_t MaxThreads() const override {
+        return 999999;
+    }
+
+    // Thread-safe group storage (moved from LocalState)
+    std::mutex groups_mutex;
+    std::map<string, BacktestGroupData> groups;
+    vector<string> group_order;
+
+    // Global date range tracking (for fold computation)
+    std::atomic<int64_t> global_min_date{INT64_MAX};
+    std::atomic<int64_t> global_max_date{INT64_MIN};
+    std::set<int64_t> unique_dates;  // protected by groups_mutex
+
+    // Processing results (used by finalize owner)
+    vector<BacktestResultRow> results;
+    bool processed = false;
+    idx_t output_offset = 0;
+
+    // Fold boundaries (computed by finalize owner)
+    vector<FoldBoundary> fold_bounds;
+
+    // Single-thread finalize + barrier
+    std::atomic<bool> finalize_claimed{false};
+    std::atomic<idx_t> threads_collecting{0};
+    std::atomic<idx_t> threads_done_collecting{0};
+};
+
+// ============================================================================
+// Local State - per-thread flags only
 // ============================================================================
 
 struct TsBacktestNativeLocalState : public LocalTableFunctionState {
-    // Input data buffer per group (this thread's partition)
-    struct GroupData {
-        Value group_value;
-        vector<int64_t> dates;  // microseconds
-        vector<double> values;
-    };
-
-    std::map<string, GroupData> groups;
-    vector<string> group_order;
-
-    // Local date stats (merged into global at end of in_out phase)
-    int64_t local_min_date = std::numeric_limits<int64_t>::max();
-    int64_t local_max_date = std::numeric_limits<int64_t>::min();
-    std::set<int64_t> local_unique_dates;
-
-    // Output results
-    struct BacktestResult {
-        int64_t fold_id;
-        string group_key;
-        Value group_value;
-        int64_t date;  // microseconds
-        double forecast;
-        double actual;
-        double error;
-        double abs_error;
-        double lower_90;
-        double upper_90;
-        string model_name;
-        double fold_metric_score;
-    };
-    vector<BacktestResult> results;
-
-    // Processing state
-    bool dates_contributed = false;
-    bool processing_started = false;
-    idx_t current_fold = 0;
-    idx_t output_offset = 0;
+    bool owns_finalize = false;
+    bool registered_collector = false;
+    bool registered_finalizer = false;
 };
 
 // ============================================================================
@@ -511,9 +508,27 @@ static OperatorResultType TsBacktestNativeInOut(
     DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsBacktestNativeBindData>();
-    auto &local_state = data_p.local_state->Cast<TsBacktestNativeLocalState>();
+    auto &gstate = data_p.global_state->Cast<TsBacktestNativeGlobalState>();
+    auto &lstate = data_p.local_state->Cast<TsBacktestNativeLocalState>();
 
-    // Buffer all incoming data - we need complete groups
+    // Register this thread as a collector (first call only)
+    if (!lstate.registered_collector) {
+        gstate.threads_collecting.fetch_add(1);
+        lstate.registered_collector = true;
+    }
+
+    // Extract batch locally (no lock)
+    struct TempRow {
+        Value group_val;
+        string group_key;
+        int64_t date_micros;
+        double value;
+    };
+    vector<TempRow> batch;
+    int64_t batch_min_date = INT64_MAX;
+    int64_t batch_max_date = INT64_MIN;
+    std::set<int64_t> batch_dates;
+
     for (idx_t i = 0; i < input.size(); i++) {
         Value group_val = input.data[0].GetValue(i);
         Value date_val = input.data[1].GetValue(i);
@@ -521,44 +536,66 @@ static OperatorResultType TsBacktestNativeInOut(
 
         if (date_val.IsNull() || value_val.IsNull()) continue;
 
-        string group_key = GetGroupKey(group_val);
-
-        if (local_state.groups.find(group_key) == local_state.groups.end()) {
-            local_state.groups[group_key] = TsBacktestNativeLocalState::GroupData();
-            local_state.groups[group_key].group_value = group_val;
-            local_state.group_order.push_back(group_key);
-        }
-
-        auto &grp = local_state.groups[group_key];
+        TempRow row;
+        row.group_val = group_val;
+        row.group_key = GetGroupKey(group_val);
 
         // Convert date to microseconds (truncate to seconds for timestamp consistency)
-        int64_t date_micros;
         switch (bind_data.date_col_type) {
             case DateColumnType::DATE:
-                date_micros = DateToMicroseconds(date_val.GetValue<date_t>());
+                row.date_micros = DateToMicroseconds(date_val.GetValue<date_t>());
                 break;
             case DateColumnType::TIMESTAMP: {
-                date_micros = TimestampToMicroseconds(date_val.GetValue<timestamp_t>());
+                row.date_micros = TimestampToMicroseconds(date_val.GetValue<timestamp_t>());
                 // Truncate to seconds (remove sub-second precision)
                 constexpr int64_t MICROS_PER_SECOND = 1000000;
-                date_micros = (date_micros / MICROS_PER_SECOND) * MICROS_PER_SECOND;
+                row.date_micros = (row.date_micros / MICROS_PER_SECOND) * MICROS_PER_SECOND;
                 break;
             }
             case DateColumnType::INTEGER:
-                date_micros = date_val.GetValue<int32_t>();
+                row.date_micros = date_val.GetValue<int32_t>();
                 break;
             case DateColumnType::BIGINT:
-                date_micros = date_val.GetValue<int64_t>();
+                row.date_micros = date_val.GetValue<int64_t>();
                 break;
         }
 
-        grp.dates.push_back(date_micros);
-        grp.values.push_back(value_val.GetValue<double>());
+        row.value = value_val.GetValue<double>();
 
-        // Track local date stats
-        local_state.local_min_date = std::min(local_state.local_min_date, date_micros);
-        local_state.local_max_date = std::max(local_state.local_max_date, date_micros);
-        local_state.local_unique_dates.insert(date_micros);
+        batch_min_date = std::min(batch_min_date, row.date_micros);
+        batch_max_date = std::max(batch_max_date, row.date_micros);
+        batch_dates.insert(row.date_micros);
+
+        batch.push_back(std::move(row));
+    }
+
+    // Atomically update global min/max dates (lock-free)
+    if (!batch.empty()) {
+        int64_t current_min = gstate.global_min_date.load();
+        while (batch_min_date < current_min &&
+               !gstate.global_min_date.compare_exchange_weak(current_min, batch_min_date)) {
+        }
+
+        int64_t current_max = gstate.global_max_date.load();
+        while (batch_max_date > current_max &&
+               !gstate.global_max_date.compare_exchange_weak(current_max, batch_max_date)) {
+        }
+    }
+
+    // Lock once, insert all rows and unique dates
+    {
+        std::lock_guard<std::mutex> lock(gstate.groups_mutex);
+        for (auto &row : batch) {
+            if (gstate.groups.find(row.group_key) == gstate.groups.end()) {
+                gstate.groups[row.group_key] = BacktestGroupData();
+                gstate.groups[row.group_key].group_value = row.group_val;
+                gstate.group_order.push_back(row.group_key);
+            }
+            auto &grp = gstate.groups[row.group_key];
+            grp.dates.push_back(row.date_micros);
+            grp.values.push_back(row.value);
+        }
+        gstate.unique_dates.insert(batch_dates.begin(), batch_dates.end());
     }
 
     // Don't output anything during input phase
@@ -686,11 +723,11 @@ static void ComputeFoldBoundaries(
 // ============================================================================
 
 static void ProcessGroupFold(
-    TsBacktestNativeLocalState &local_state,
+    vector<BacktestResultRow> &results,
     const TsBacktestNativeBindData &bind_data,
     const FoldBoundary &fold,
     const string &group_key,
-    TsBacktestNativeLocalState::GroupData &grp,
+    BacktestGroupData &grp,
     vector<double> &fold_actuals,
     vector<double> &fold_forecasts,
     vector<double> &fold_lower,
@@ -770,7 +807,7 @@ static void ProcessGroupFold(
         double lower = fcst.lower_bounds ? fcst.lower_bounds[h] : 0.0;
         double upper = fcst.upper_bounds ? fcst.upper_bounds[h] : 0.0;
 
-        TsBacktestNativeLocalState::BacktestResult res;
+        BacktestResultRow res;
         res.fold_id = fold.fold_id;
         res.group_key = group_key;
         res.group_value = grp.group_value;
@@ -788,14 +825,14 @@ static void ProcessGroupFold(
         fold_forecasts.push_back(forecast_val);
         fold_lower.push_back(lower);
         fold_upper.push_back(upper);
-        local_state.results.push_back(res);
+        results.push_back(res);
     }
 
     anofox_free_forecast_result(&fcst);
 }
 
 // ============================================================================
-// Finalize - synchronize threads, compute folds, and stream output
+// Finalize - barrier + single-thread claim, compute folds, stream output
 // ============================================================================
 
 static OperatorFinalizeResultType TsBacktestNativeFinalize(
@@ -804,93 +841,71 @@ static OperatorFinalizeResultType TsBacktestNativeFinalize(
     DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsBacktestNativeBindData>();
-    auto &global_state = data_p.global_state->Cast<TsBacktestNativeGlobalState>();
-    auto &local_state = data_p.local_state->Cast<TsBacktestNativeLocalState>();
+    auto &gstate = data_p.global_state->Cast<TsBacktestNativeGlobalState>();
+    auto &lstate = data_p.local_state->Cast<TsBacktestNativeLocalState>();
 
-    // Phase 1: Contribute local date stats to global state (once per thread)
-    if (!local_state.dates_contributed) {
-        // Atomically update global min/max dates
-        int64_t current_min = global_state.global_min_date.load();
-        while (local_state.local_min_date < current_min &&
-               !global_state.global_min_date.compare_exchange_weak(current_min, local_state.local_min_date)) {
-            // Retry if CAS failed
+    // Barrier + claim
+    if (!lstate.registered_finalizer) {
+        if (lstate.registered_collector) {
+            gstate.threads_done_collecting.fetch_add(1);
         }
-
-        int64_t current_max = global_state.global_max_date.load();
-        while (local_state.local_max_date > current_max &&
-               !global_state.global_max_date.compare_exchange_weak(current_max, local_state.local_max_date)) {
-            // Retry if CAS failed
-        }
-
-        // Contribute unique dates under lock
-        {
-            std::lock_guard<std::mutex> lock(global_state.dates_mutex);
-            global_state.unique_dates.insert(
-                local_state.local_unique_dates.begin(),
-                local_state.local_unique_dates.end());
-        }
-
-        local_state.dates_contributed = true;
-
-        // Signal that this thread has contributed
-        global_state.threads_contributing.fetch_add(1);
+        lstate.registered_finalizer = true;
     }
-
-    // Phase 2: Wait for fold boundaries to be computed
-    if (!global_state.fold_bounds_computed.load()) {
-        std::unique_lock<std::mutex> lock(global_state.fold_mutex);
-
-        // Double-check after acquiring lock
-        if (!global_state.fold_bounds_computed.load()) {
-            // First thread to get here computes fold boundaries
-            ComputeFoldBoundaries(global_state, bind_data);
-            global_state.fold_bounds_computed.store(true);
-            global_state.fold_cv.notify_all();
+    if (!lstate.owns_finalize) {
+        bool expected = false;
+        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true)) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.owns_finalize = true;
+        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load()) {
+            std::this_thread::yield();
         }
     }
 
-    // Phase 3: Process this thread's groups (parallel across threads)
-    if (!local_state.processing_started) {
-        local_state.processing_started = true;
+    // Process all groups (single thread)
+    if (!gstate.processed) {
+        // Compute fold boundaries from collected unique dates
+        ComputeFoldBoundaries(gstate, bind_data);
 
-        // Process all folds for this thread's groups
-        for (const auto &fold : global_state.fold_bounds) {
+        // Process all folds for all groups
+        for (const auto &fold : gstate.fold_bounds) {
             vector<double> fold_actuals, fold_forecasts, fold_lower, fold_upper;
-            size_t results_start = local_state.results.size();
+            size_t results_start = gstate.results.size();
 
-            // Process each group this thread owns
-            for (const auto &group_key : local_state.group_order) {
-                auto &grp = local_state.groups[group_key];
-                ProcessGroupFold(local_state, bind_data, fold, group_key, grp,
+            for (const auto &group_key : gstate.group_order) {
+                auto &grp = gstate.groups[group_key];
+                ProcessGroupFold(gstate.results, bind_data, fold, group_key, grp,
                                fold_actuals, fold_forecasts, fold_lower, fold_upper);
             }
 
-            // Compute fold metric for this thread's groups
+            // Compute fold metric across all groups for this fold
             double fold_metric = ComputeMetric(bind_data.metric, fold_actuals, fold_forecasts, fold_lower, fold_upper);
 
             // Update fold_metric_score for all results from this fold
-            for (size_t i = results_start; i < local_state.results.size(); i++) {
-                local_state.results[i].fold_metric_score = fold_metric;
+            for (size_t i = results_start; i < gstate.results.size(); i++) {
+                gstate.results[i].fold_metric_score = fold_metric;
             }
         }
+
+        gstate.processed = true;
     }
 
-    // Phase 4: Stream output
-    if (local_state.results.empty() || local_state.output_offset >= local_state.results.size()) {
+    // Stream output from global results
+    if (gstate.results.empty() || gstate.output_offset >= gstate.results.size()) {
         return OperatorFinalizeResultType::FINISHED;
     }
 
     idx_t output_count = 0;
 
-    // Initialize all output vectors as FLAT_VECTOR for parallel-safe batch merging
+    // Initialize all output vectors as FLAT_VECTOR for safe batch merging
     for (idx_t col = 0; col < output.ColumnCount(); col++) {
         output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
     }
 
     while (output_count < STANDARD_VECTOR_SIZE &&
-           local_state.output_offset < local_state.results.size()) {
+           gstate.output_offset < gstate.results.size()) {
 
-        auto &res = local_state.results[local_state.output_offset];
+        auto &res = gstate.results[gstate.output_offset];
         idx_t out_idx = output_count;
 
         // fold_id
@@ -940,12 +955,12 @@ static OperatorFinalizeResultType TsBacktestNativeFinalize(
         output.data[10].SetValue(out_idx, Value::DOUBLE(res.fold_metric_score));
 
         output_count++;
-        local_state.output_offset++;
+        gstate.output_offset++;
     }
 
     output.SetCardinality(output_count);
 
-    if (local_state.output_offset < local_state.results.size()) {
+    if (gstate.output_offset < gstate.results.size()) {
         return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;
     }
 

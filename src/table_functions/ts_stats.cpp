@@ -11,6 +11,8 @@
 #include <map>
 #include <mutex>
 #include <set>
+#include <atomic>
+#include <thread>
 
 namespace duckdb {
 
@@ -345,61 +347,51 @@ struct TsStatsByBindData : public TableFunctionData {
 };
 
 // ============================================================================
-// Global State - enables parallel execution
-//
-// IMPORTANT: This custom GlobalState is required for proper parallel execution.
-// Using the base GlobalTableFunctionState directly causes batch index collisions
-// with large datasets (300k+ groups) during BatchedDataCollection::Merge.
+// Group Data and Result Structures (standalone for GlobalState access)
+// ============================================================================
+
+struct StatsGroupData {
+    Value group_value;
+    vector<int64_t> timestamps;  // microseconds
+    vector<double> values;
+    vector<bool> validity;
+};
+
+struct StatsOutputRow {
+    string group_key;
+    Value group_value;
+    TsStatsResult stats;
+};
+
+// ============================================================================
+// Global State - thread-safe group collection + single-thread finalize
 // ============================================================================
 
 struct TsStatsByGlobalState : public GlobalTableFunctionState {
-    // Use single-threaded execution to avoid batch index collision issues
-    // The batch index collision occurs with PhysicalBatchInsert when multiple threads
-    // produce output chunks without properly coordinated batch indices
     idx_t MaxThreads() const override {
-        return 1;
+        return 999999;
     }
 
-    // Atomic counter for unique batch indices - still needed for proper ordering
-    std::atomic<idx_t> next_batch_index{0};
-
-    // Global group tracking to prevent duplicate processing
-    std::mutex processed_groups_mutex;
-    std::set<string> processed_groups;
-
-    bool ClaimGroup(const string &group_key) {
-        std::lock_guard<std::mutex> lock(processed_groups_mutex);
-        auto result = processed_groups.insert(group_key);
-        return result.second;
-    }
-};
-
-struct TsStatsByLocalState : public LocalTableFunctionState {
-    // Buffer incoming data per group
-    struct GroupData {
-        Value group_value;
-        vector<int64_t> timestamps;  // microseconds
-        vector<double> values;
-        vector<bool> validity;
-    };
-
-    std::map<string, GroupData> groups;
+    // Thread-safe group storage (moved from LocalState)
+    std::mutex groups_mutex;
+    std::map<string, StatsGroupData> groups;
     vector<string> group_order;
 
-    // Output results
-    struct StatsOutputRow {
-        string group_key;
-        Value group_value;
-        TsStatsResult stats;
-    };
+    // Processing results (used by finalize owner)
     vector<StatsOutputRow> results;
-
-    // Processing state
     bool processed = false;
     idx_t output_offset = 0;
 
-    // Batch index for this local state - assigned in init and incremented each time we produce output
-    idx_t batch_index = 0;
+    // Single-thread finalize + barrier
+    std::atomic<bool> finalize_claimed{false};
+    std::atomic<idx_t> threads_collecting{0};
+    std::atomic<idx_t> threads_done_collecting{0};
+};
+
+struct TsStatsByLocalState : public LocalTableFunctionState {
+    bool owns_finalize = false;
+    bool registered_collector = false;
+    bool registered_finalizer = false;
 };
 
 static unique_ptr<FunctionData> TsStatsByBind(
@@ -535,11 +527,7 @@ static unique_ptr<LocalTableFunctionState> TsStatsByInitLocal(
     ExecutionContext &context,
     TableFunctionInitInput &input,
     GlobalTableFunctionState *global_state) {
-    auto local_state = make_uniq<TsStatsByLocalState>();
-    // Assign an initial batch index from the global counter
-    auto &g_state = global_state->Cast<TsStatsByGlobalState>();
-    local_state->batch_index = g_state.next_batch_index++;
-    return local_state;
+    return make_uniq<TsStatsByLocalState>();
 }
 
 static OperatorResultType TsStatsByInOut(
@@ -549,9 +537,25 @@ static OperatorResultType TsStatsByInOut(
     DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsStatsByBindData>();
-    auto &local_state = data_p.local_state->Cast<TsStatsByLocalState>();
+    auto &gstate = data_p.global_state->Cast<TsStatsByGlobalState>();
+    auto &lstate = data_p.local_state->Cast<TsStatsByLocalState>();
 
-    // Buffer all incoming data - we need complete groups before processing
+    // Register this thread as a collector (first call only)
+    if (!lstate.registered_collector) {
+        gstate.threads_collecting.fetch_add(1);
+        lstate.registered_collector = true;
+    }
+
+    // Extract batch locally (no lock)
+    struct TempRow {
+        Value group_val;
+        string group_key;
+        int64_t date_micros;
+        double value;
+        bool valid;
+    };
+    vector<TempRow> batch;
+
     for (idx_t i = 0; i < input.size(); i++) {
         Value group_val = input.data[0].GetValue(i);
         Value date_val = input.data[1].GetValue(i);
@@ -559,31 +563,39 @@ static OperatorResultType TsStatsByInOut(
 
         if (date_val.IsNull()) continue;
 
-        string group_key = GetGroupKey(group_val);
+        TempRow row;
+        row.group_val = group_val;
+        row.group_key = GetGroupKey(group_val);
 
-        if (local_state.groups.find(group_key) == local_state.groups.end()) {
-            local_state.groups[group_key] = TsStatsByLocalState::GroupData();
-            local_state.groups[group_key].group_value = group_val;
-            local_state.group_order.push_back(group_key);
-        }
-
-        auto &grp = local_state.groups[group_key];
-
-        // Convert date to microseconds
-        int64_t date_micros;
         switch (bind_data.date_col_type) {
             case DateColumnType::DATE:
-                date_micros = DateToMicroseconds(date_val.GetValue<date_t>());
+                row.date_micros = DateToMicroseconds(date_val.GetValue<date_t>());
                 break;
             case DateColumnType::TIMESTAMP:
             default:
-                date_micros = TimestampToMicroseconds(date_val.GetValue<timestamp_t>());
+                row.date_micros = TimestampToMicroseconds(date_val.GetValue<timestamp_t>());
                 break;
         }
 
-        grp.timestamps.push_back(date_micros);
-        grp.values.push_back(value_val.IsNull() ? 0.0 : value_val.GetValue<double>());
-        grp.validity.push_back(!value_val.IsNull());
+        row.value = value_val.IsNull() ? 0.0 : value_val.GetValue<double>();
+        row.valid = !value_val.IsNull();
+        batch.push_back(std::move(row));
+    }
+
+    // Lock once, insert all
+    {
+        std::lock_guard<std::mutex> lock(gstate.groups_mutex);
+        for (auto &row : batch) {
+            if (gstate.groups.find(row.group_key) == gstate.groups.end()) {
+                gstate.groups[row.group_key] = StatsGroupData();
+                gstate.groups[row.group_key].group_value = row.group_val;
+                gstate.group_order.push_back(row.group_key);
+            }
+            auto &grp = gstate.groups[row.group_key];
+            grp.timestamps.push_back(row.date_micros);
+            grp.values.push_back(row.value);
+            grp.validity.push_back(row.valid);
+        }
     }
 
     // Don't output anything during input phase - wait for finalize
@@ -597,12 +609,31 @@ static OperatorFinalizeResultType TsStatsByFinalize(
     DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsStatsByBindData>();
-    auto &local_state = data_p.local_state->Cast<TsStatsByLocalState>();
+    auto &gstate = data_p.global_state->Cast<TsStatsByGlobalState>();
+    auto &lstate = data_p.local_state->Cast<TsStatsByLocalState>();
 
-    // Process all groups on first finalize call
-    if (!local_state.processed) {
-        for (const auto &group_key : local_state.group_order) {
-            auto &grp = local_state.groups[group_key];
+    // Barrier + claim
+    if (!lstate.registered_finalizer) {
+        if (lstate.registered_collector) {
+            gstate.threads_done_collecting.fetch_add(1);
+        }
+        lstate.registered_finalizer = true;
+    }
+    if (!lstate.owns_finalize) {
+        bool expected = false;
+        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true)) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.owns_finalize = true;
+        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load()) {
+            std::this_thread::yield();
+        }
+    }
+
+    // Process all groups (single thread)
+    if (!gstate.processed) {
+        for (const auto &group_key : gstate.group_order) {
+            auto &grp = gstate.groups[group_key];
 
             if (grp.timestamps.empty()) continue;
 
@@ -636,23 +667,19 @@ static OperatorFinalizeResultType TsStatsByFinalize(
             }
 
             // Store results
-            TsStatsByLocalState::StatsOutputRow row;
+            StatsOutputRow row;
             row.group_key = group_key;
             row.group_value = grp.group_value;
             row.stats = stats_result;
-            local_state.results.push_back(std::move(row));
+            gstate.results.push_back(std::move(row));
         }
-        local_state.processed = true;
+        gstate.processed = true;
     }
 
     // Output results
-    if (local_state.results.empty() || local_state.output_offset >= local_state.results.size()) {
+    if (gstate.results.empty() || gstate.output_offset >= gstate.results.size()) {
         return OperatorFinalizeResultType::FINISHED;
     }
-
-    // Get a unique batch index for this output chunk
-    auto &global_state = data_p.global_state->Cast<TsStatsByGlobalState>();
-    local_state.batch_index = global_state.next_batch_index++;
 
     idx_t output_count = 0;
 
@@ -661,8 +688,8 @@ static OperatorFinalizeResultType TsStatsByFinalize(
         output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
     }
 
-    while (output_count < STANDARD_VECTOR_SIZE && local_state.output_offset < local_state.results.size()) {
-        auto &row = local_state.results[local_state.output_offset];
+    while (output_count < STANDARD_VECTOR_SIZE && gstate.output_offset < gstate.results.size()) {
+        auto &row = gstate.results[gstate.output_offset];
         auto &stats = row.stats;
         idx_t out_idx = output_count;
 
@@ -715,12 +742,12 @@ static OperatorFinalizeResultType TsStatsByFinalize(
         }
 
         output_count++;
-        local_state.output_offset++;
+        gstate.output_offset++;
     }
 
     output.SetCardinality(output_count);
 
-    if (local_state.output_offset >= local_state.results.size()) {
+    if (gstate.output_offset >= gstate.results.size()) {
         return OperatorFinalizeResultType::FINISHED;
     }
 

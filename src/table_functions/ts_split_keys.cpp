@@ -4,6 +4,9 @@
 #include "duckdb/common/string_util.hpp"
 #include <vector>
 #include <sstream>
+#include <mutex>
+#include <atomic>
+#include <thread>
 
 namespace duckdb {
 
@@ -45,39 +48,55 @@ struct TsSplitKeysBindData : public TableFunctionData {
 };
 
 // ============================================================================
-// Local State
+// Data Structs (standalone to avoid collisions)
 // ============================================================================
 
-struct TsSplitKeysLocalState : public LocalTableFunctionState {
-    // Buffered rows for late binding
-    struct BufferedRow {
-        string unique_id;
-        Value date_val;
-        Value value_val;
-    };
-    vector<BufferedRow> buffered_rows;
+struct TsSplitKeysBufferedRow {
+    string unique_id;
+    Value date_val;
+    Value value_val;
+};
 
-    // Results ready to output (after schema detection)
-    struct OutputRow {
-        vector<string> id_parts;
-        Value date_val;
-        Value value_val;
-    };
-    vector<OutputRow> results;
-    idx_t current_result = 0;
-    bool processed = false;
+struct TsSplitKeysOutputRow {
+    vector<string> id_parts;
+    Value date_val;
+    Value value_val;
 };
 
 // ============================================================================
-// Global State
+// Global State - holds all mutable data with mutex protection
 // ============================================================================
 
 struct TsSplitKeysGlobalState : public GlobalTableFunctionState {
     idx_t max_threads = 1;
 
+    // Buffered rows (protected by groups_mutex)
+    std::mutex groups_mutex;
+    vector<TsSplitKeysBufferedRow> buffered_rows;
+
+    // Results ready to output
+    vector<TsSplitKeysOutputRow> results;
+    idx_t current_result = 0;
+    bool processed = false;
+
+    // Single-thread finalize + barrier
+    std::atomic<bool> finalize_claimed{false};
+    std::atomic<idx_t> threads_collecting{0};
+    std::atomic<idx_t> threads_done_collecting{0};
+
     idx_t MaxThreads() const override {
         return max_threads;
     }
+};
+
+// ============================================================================
+// Local State
+// ============================================================================
+
+struct TsSplitKeysLocalState : public LocalTableFunctionState {
+    bool owns_finalize = false;
+    bool registered_collector = false;
+    bool registered_finalizer = false;
 };
 
 // ============================================================================
@@ -245,9 +264,18 @@ static OperatorResultType TsSplitKeysInOut(
     DataChunk &output) {
 
     auto &bind_data = data.bind_data->Cast<TsSplitKeysBindData>();
-    auto &local_state = data.local_state->Cast<TsSplitKeysLocalState>();
+    auto &gstate = data.global_state->Cast<TsSplitKeysGlobalState>();
+    auto &lstate = data.local_state->Cast<TsSplitKeysLocalState>();
 
-    // Buffer all incoming rows
+    // Register this thread as a collector (first call only)
+    if (!lstate.registered_collector) {
+        gstate.threads_collecting.fetch_add(1);
+        lstate.registered_collector = true;
+    }
+
+    // Extract batch locally first
+    vector<TsSplitKeysBufferedRow> local_rows;
+
     for (idx_t row_idx = 0; row_idx < input.size(); row_idx++) {
         Value id_val = input.GetValue(0, row_idx);
         Value date_val = input.GetValue(1, row_idx);
@@ -257,12 +285,20 @@ static OperatorResultType TsSplitKeysInOut(
             continue;
         }
 
-        TsSplitKeysLocalState::BufferedRow row;
+        TsSplitKeysBufferedRow row;
         row.unique_id = id_val.ToString();
         row.date_val = date_val;
         row.value_val = value_val;
 
-        local_state.buffered_rows.push_back(std::move(row));
+        local_rows.push_back(std::move(row));
+    }
+
+    // Insert into global state under lock
+    {
+        std::lock_guard<std::mutex> lock(gstate.groups_mutex);
+        for (auto &row : local_rows) {
+            gstate.buffered_rows.push_back(std::move(row));
+        }
     }
 
     // Don't output anything during input phase
@@ -280,12 +316,31 @@ static OperatorFinalizeResultType TsSplitKeysFinalize(
     DataChunk &output) {
 
     auto &bind_data = data.bind_data->Cast<TsSplitKeysBindData>();
-    auto &local_state = data.local_state->Cast<TsSplitKeysLocalState>();
+    auto &gstate = data.global_state->Cast<TsSplitKeysGlobalState>();
+    auto &lstate = data.local_state->Cast<TsSplitKeysLocalState>();
 
-    if (!local_state.processed) {
+    // Barrier + claim
+    if (!lstate.registered_finalizer) {
+        if (lstate.registered_collector) {
+            gstate.threads_done_collecting.fetch_add(1);
+        }
+        lstate.registered_finalizer = true;
+    }
+    if (!lstate.owns_finalize) {
+        bool expected = false;
+        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true)) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.owns_finalize = true;
+        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load()) {
+            std::this_thread::yield();
+        }
+    }
+
+    if (!gstate.processed) {
         // Process all buffered rows
-        for (const auto& row : local_state.buffered_rows) {
-            TsSplitKeysLocalState::OutputRow out_row;
+        for (const auto& row : gstate.buffered_rows) {
+            TsSplitKeysOutputRow out_row;
             out_row.id_parts = SplitString(row.unique_id, bind_data.separator);
             out_row.date_val = row.date_val;
             out_row.value_val = row.value_val;
@@ -298,22 +353,22 @@ static OperatorFinalizeResultType TsSplitKeysFinalize(
                 out_row.id_parts.resize(bind_data.num_parts);
             }
 
-            local_state.results.push_back(std::move(out_row));
+            gstate.results.push_back(std::move(out_row));
         }
 
         // Clear buffer to free memory
-        local_state.buffered_rows.clear();
-        local_state.processed = true;
+        gstate.buffered_rows.clear();
+        gstate.processed = true;
     }
 
     // Output results in batches
     output.Reset();
     idx_t output_idx = 0;
 
-    while (local_state.current_result < local_state.results.size() &&
+    while (gstate.current_result < gstate.results.size() &&
            output_idx < STANDARD_VECTOR_SIZE) {
 
-        auto& result = local_state.results[local_state.current_result];
+        auto& result = gstate.results[gstate.current_result];
 
         // Output id parts
         for (idx_t i = 0; i < bind_data.num_parts; i++) {
@@ -327,12 +382,12 @@ static OperatorFinalizeResultType TsSplitKeysFinalize(
         output.SetValue(bind_data.num_parts + 1, output_idx, result.value_val);
 
         output_idx++;
-        local_state.current_result++;
+        gstate.current_result++;
     }
 
     output.SetCardinality(output_idx);
 
-    if (local_state.current_result >= local_state.results.size()) {
+    if (gstate.current_result >= gstate.results.size()) {
         return OperatorFinalizeResultType::FINISHED;
     }
     return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;
