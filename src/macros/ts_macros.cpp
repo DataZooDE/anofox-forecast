@@ -28,7 +28,7 @@ static const TsTableMacro ts_table_macros[] = {
 R"(
 WITH stats_data AS (
     SELECT
-        group_col AS id,
+        group_col,
         _ts_stats_with_dates(
             LIST(value_col::DOUBLE ORDER BY date_col),
             LIST(date_col::TIMESTAMP ORDER BY date_col),
@@ -38,7 +38,7 @@ WITH stats_data AS (
     GROUP BY group_col
 )
 SELECT
-    id,
+    group_col,
     (_stats).length AS length,
     (_stats).n_nulls AS n_nulls,
     (_stats).n_nan AS n_nan,
@@ -371,13 +371,13 @@ SELECT * FROM _ts_mstl_decomposition_native(
 R"(
 WITH detrend_data AS (
     SELECT
-        group_col AS id,
+        group_col,
         ts_detrend(LIST(value_col::DOUBLE ORDER BY date_col), method::VARCHAR) AS _detrend
     FROM query_table(source::VARCHAR)
     GROUP BY group_col
 )
 SELECT
-    id,
+    group_col,
     (_detrend).trend AS trend,
     (_detrend).detrended AS detrended,
     (_detrend).method AS method,
@@ -395,13 +395,13 @@ FROM detrend_data
 R"(
 WITH classification_data AS (
     SELECT
-        group_col AS id,
+        group_col,
         ts_classify_seasonality_agg(date_col, value_col::DOUBLE, period::DOUBLE) AS _cls
     FROM query_table(source::VARCHAR)
     GROUP BY group_col
 )
 SELECT
-    id,
+    group_col,
     (_cls).timing_classification AS timing_classification,
     (_cls).modulation_type AS modulation_type,
     (_cls).has_stable_timing AS has_stable_timing,
@@ -628,33 +628,33 @@ future_src AS (
 ),
 -- Get unique groups from source
 _groups AS (
-    SELECT DISTINCT group_col AS id FROM src
+    SELECT DISTINCT group_col FROM src
 ),
 -- Expand xreg column names per group for historical data
 _xreg_cols_expanded AS (
-    SELECT g.id, UNNEST(xreg_cols) AS col_name
+    SELECT g.group_col, UNNEST(xreg_cols) AS col_name
     FROM _groups g
 ),
 -- For each (group, col_name), extract values using JSON via JOIN
 _xreg_values AS (
     SELECT
-        xce.id,
+        xce.group_col,
         xce.col_name,
         LIST(json_extract(to_json(s), '$.' || xce.col_name)::DOUBLE ORDER BY date_col) AS values
     FROM _xreg_cols_expanded xce
-    JOIN src s ON group_col = xce.id
-    GROUP BY xce.id, xce.col_name
+    JOIN src s ON s.group_col = xce.group_col
+    GROUP BY xce.group_col, xce.col_name
 ),
 -- Build list of lists for xreg per group
 _xreg_lists AS (
-    SELECT id, LIST(values ORDER BY col_name) AS _xreg_list
+    SELECT group_col, LIST(values ORDER BY col_name) AS _xreg_list
     FROM _xreg_values
-    GROUP BY id
+    GROUP BY group_col
 ),
 -- Aggregate historical target values per group
 grouped_historical AS (
     SELECT
-        group_col AS id,
+        group_col,
         date_trunc('second', MAX(date_col)::TIMESTAMP) AS last_date,
         LIST(target_col::DOUBLE ORDER BY date_col) AS _y_list
     FROM src
@@ -662,32 +662,32 @@ grouped_historical AS (
 ),
 -- Get unique groups from future source
 _future_groups AS (
-    SELECT DISTINCT group_col AS id FROM future_src
+    SELECT DISTINCT group_col FROM future_src
 ),
 -- Expand future xreg column names per group
 _future_cols_expanded AS (
-    SELECT g.id, UNNEST(future_xreg_cols) AS col_name
+    SELECT g.group_col, UNNEST(future_xreg_cols) AS col_name
     FROM _future_groups g
 ),
 -- For each (group, col_name), extract future values using JSON via JOIN
 _future_xreg_values AS (
     SELECT
-        fce.id,
+        fce.group_col,
         fce.col_name,
         LIST(json_extract(to_json(fsrc), '$.' || fce.col_name)::DOUBLE ORDER BY future_date_col) AS values
     FROM _future_cols_expanded fce
-    JOIN future_src fsrc ON group_col = fce.id
-    GROUP BY fce.id, fce.col_name
+    JOIN future_src fsrc ON fsrc.group_col = fce.group_col
+    GROUP BY fce.group_col, fce.col_name
 ),
 -- Build list of lists for future xreg per group
 _future_xreg_lists AS (
-    SELECT id, LIST(values ORDER BY col_name) AS _future_xreg_list
+    SELECT group_col, LIST(values ORDER BY col_name) AS _future_xreg_list
     FROM _future_xreg_values
-    GROUP BY id
+    GROUP BY group_col
 ),
 forecast_data AS (
     SELECT
-        h.id,
+        h.group_col,
         h.last_date,
         _ts_forecast_exog(
             h._y_list,
@@ -697,19 +697,19 @@ forecast_data AS (
             method
         ) AS fcst
     FROM grouped_historical h
-    LEFT JOIN _xreg_lists x ON h.id = x.id
-    LEFT JOIN _future_xreg_lists fx ON h.id = fx.id
+    LEFT JOIN _xreg_lists x ON h.group_col = x.group_col
+    LEFT JOIN _future_xreg_lists fx ON h.group_col = fx.group_col
 )
 SELECT
-    id,
+    group_col,
     UNNEST(generate_series(1, len((fcst).point)))::INTEGER AS forecast_step,
     UNNEST(generate_series(last_date + (SELECT _interval FROM _freq), last_date + (len((fcst).point)::INTEGER * EXTRACT(EPOCH FROM (SELECT _interval FROM _freq)) || ' seconds')::INTERVAL, (SELECT _interval FROM _freq)))::TIMESTAMP AS date,
-    UNNEST((fcst).point) AS point_forecast,
-    UNNEST((fcst).lower) AS lower_90,
-    UNNEST((fcst).upper) AS upper_90,
+    UNNEST((fcst).point) AS yhat,
+    UNNEST((fcst).lower) AS yhat_lower,
+    UNNEST((fcst).upper) AS yhat_upper,
     (fcst).model AS model_name
 FROM forecast_data
-ORDER BY id, forecast_step
+ORDER BY group_col, forecast_step
 )"},
 
     // ts_mark_unknown_by: Mark rows as known/unknown based on cutoff date for scenario expressions
@@ -1574,7 +1574,7 @@ FROM periods_data
 R"(
 WITH periods_data AS (
     SELECT
-        group_col AS id,
+        group_col,
         _ts_detect_periods(
             LIST(value_col::DOUBLE ORDER BY date_col),
             COALESCE(json_extract_string(to_json(params), '$.method'), 'fft'),
@@ -1587,7 +1587,7 @@ WITH periods_data AS (
     GROUP BY group_col
 )
 SELECT
-    id,
+    group_col,
     (_periods).periods AS periods,
     (_periods).n_periods AS n_periods,
     (_periods).primary_period AS primary_period,
@@ -1603,7 +1603,7 @@ FROM periods_data
 R"(
 WITH peaks_data AS (
     SELECT
-        group_col AS id,
+        group_col,
         ts_detect_peaks(
             LIST(value_col::DOUBLE ORDER BY date_col),
             COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.min_distance') AS DOUBLE), 1.0),
@@ -1614,7 +1614,7 @@ WITH peaks_data AS (
     GROUP BY group_col
 )
 SELECT
-    id,
+    group_col,
     (_peaks).peaks AS peaks,
     (_peaks).n_peaks AS n_peaks,
     (_peaks).inter_peak_distances AS inter_peak_distances,
@@ -1653,7 +1653,7 @@ FROM peaks_data
 R"(
 WITH timing_data AS (
     SELECT
-        group_col AS id,
+        group_col,
         ts_analyze_peak_timing(
             LIST(value_col::DOUBLE ORDER BY date_col),
             period::DOUBLE
@@ -1662,7 +1662,7 @@ WITH timing_data AS (
     GROUP BY group_col
 )
 SELECT
-    id,
+    group_col,
     (_timing).n_peaks AS n_peaks,
     (_timing).peak_times AS peak_times,
     (_timing).variability_score AS variability_score,

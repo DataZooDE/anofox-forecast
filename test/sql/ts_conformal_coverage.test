@@ -93,10 +93,10 @@ SELECT
 statement ok
 CREATE TABLE naive_calibration_forecasts AS
 SELECT
-    id AS series_id,
+    series_id,
     date,
     forecast_step,
-    point_forecast AS forecast
+    yhat AS forecast
 FROM ts_forecast_by(
     'training_data', series_id, date, value, 'naive', 15, MAP{'frequency': '1d'}
 );
@@ -151,10 +151,10 @@ SELECT * FROM large_scale_ts WHERE time_idx < 85;
 statement ok
 CREATE TABLE naive_validation_forecasts AS
 SELECT
-    id AS series_id,
+    series_id,
     date,
     forecast_step,
-    point_forecast AS forecast
+    yhat AS forecast
 FROM ts_forecast_by(
     'train_plus_calib', series_id, date, value, 'naive', 15, MAP{'frequency': '1d'}
 );
@@ -210,10 +210,10 @@ true
 statement ok
 CREATE TABLE snaive_calibration_forecasts AS
 SELECT
-    id AS series_id,
+    series_id,
     date,
     forecast_step,
-    point_forecast AS forecast
+    yhat AS forecast
 FROM ts_forecast_by(
     'training_data', series_id, date, value, 'snaive', 15, MAP{'frequency': '1d', 'period': '7'}
 );
@@ -249,10 +249,10 @@ GROUP BY series_id;
 statement ok
 CREATE TABLE snaive_validation_forecasts AS
 SELECT
-    id AS series_id,
+    series_id,
     date,
     forecast_step,
-    point_forecast AS forecast
+    yhat AS forecast
 FROM ts_forecast_by(
     'train_plus_calib', series_id, date, value, 'snaive', 15, MAP{'frequency': '1d', 'period': '7'}
 );

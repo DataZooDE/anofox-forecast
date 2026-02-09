@@ -35,10 +35,10 @@ SELECT
     fold_id,
     series_id,
     date,
-    ROUND(forecast, 6) AS forecast,
+    ROUND(yhat, 6) AS forecast,
     ROUND(y, 6) AS actual,
-    ROUND(forecast - y, 6) AS error,
-    ROUND(ABS(forecast - y), 6) AS abs_error,
+    ROUND(yhat - y, 6) AS error,
+    ROUND(ABS(yhat - y), 6) AS abs_error,
     model_name
 FROM ts_cv_forecast_by('folds_simple', series_id, date, value, 'Naive', MAP{})
 ORDER BY fold_id, series_id, date;
@@ -62,10 +62,10 @@ SELECT
     fold_id,
     series_id,
     date,
-    ROUND(forecast, 6) AS forecast,
+    ROUND(yhat, 6) AS forecast,
     ROUND(y, 6) AS actual,
-    ROUND(forecast - y, 6) AS error,
-    ROUND(ABS(forecast - y), 6) AS abs_error,
+    ROUND(yhat - y, 6) AS error,
+    ROUND(ABS(yhat - y), 6) AS abs_error,
     model_name
 FROM ts_cv_forecast_by('cv_splits_detailed', series_id, date, value, 'Naive', MAP{})
 ORDER BY fold_id, series_id, date;
@@ -130,7 +130,7 @@ SELECT
     fold_id,
     series_id,
     date,
-    ROUND(forecast, 6) AS forecast,
+    ROUND(yhat, 6) AS forecast,
     ROUND(y, 6) AS actual,
     model_name
 FROM ts_cv_forecast_by('folds_simple', series_id, date, value, 'SeasonalNaive', MAP{})
@@ -142,7 +142,7 @@ SELECT
     fold_id,
     series_id,
     date,
-    ROUND(forecast, 6) AS forecast,
+    ROUND(yhat, 6) AS forecast,
     ROUND(y, 6) AS actual,
     model_name
 FROM ts_cv_forecast_by('cv_splits_detailed', series_id, date, value, 'SeasonalNaive', MAP{})
@@ -169,7 +169,7 @@ SELECT
     fold_id,
     series_id,
     date,
-    ROUND(forecast, 4) AS forecast,
+    ROUND(yhat, 4) AS forecast,
     ROUND(y, 4) AS actual,
     model_name
 FROM ts_cv_forecast_by('folds_simple', series_id, date, value, 'Theta', MAP{})
@@ -181,7 +181,7 @@ SELECT
     fold_id,
     series_id,
     date,
-    ROUND(forecast, 4) AS forecast,
+    ROUND(yhat, 4) AS forecast,
     ROUND(y, 4) AS actual,
     model_name
 FROM ts_cv_forecast_by('cv_splits_detailed', series_id, date, value, 'Theta', MAP{})
@@ -208,7 +208,7 @@ SELECT
     fold_id,
     series_id,
     date,
-    ROUND(forecast, 4) AS forecast,
+    ROUND(yhat, 4) AS forecast,
     ROUND(y, 4) AS actual,
     model_name
 FROM ts_cv_forecast_by('folds_simple', series_id, date, value, 'SES', MAP{})
@@ -220,7 +220,7 @@ SELECT
     fold_id,
     series_id,
     date,
-    ROUND(forecast, 4) AS forecast,
+    ROUND(yhat, 4) AS forecast,
     ROUND(y, 4) AS actual,
     model_name
 FROM ts_cv_forecast_by('cv_splits_detailed', series_id, date, value, 'SES', MAP{})
@@ -287,7 +287,7 @@ SELECT * FROM ts_cv_folds_by('single_series', series_id, date, value, 2, 7, MAP{
 
 statement ok
 CREATE TABLE forecast_simple_single AS
-SELECT fold_id, series_id, date, ROUND(forecast, 4) AS forecast, ROUND(y, 4) AS actual
+SELECT fold_id, series_id, date, ROUND(yhat, 4) AS forecast, ROUND(y, 4) AS actual
 FROM ts_cv_forecast_by('folds_single', series_id, date, value, 'Naive', MAP{})
 ORDER BY fold_id, date;
 
@@ -305,7 +305,7 @@ SELECT
     fold_id,
     series_id,
     date,
-    ROUND(forecast, 4) AS forecast,
+    ROUND(yhat, 4) AS forecast,
     ROUND(y, 4) AS actual
 FROM ts_cv_forecast_by('cv_splits_single', series_id, date, value, 'Naive', MAP{})
 ORDER BY fold_id, date;

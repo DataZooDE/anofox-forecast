@@ -193,19 +193,19 @@ SELECT COUNT(*) FROM ts_classify_seasonality_by('grouped_seasonal', group_id, ts
 
 # Test table macro returns is_seasonal as column
 query I
-SELECT typeof(is_seasonal) FROM ts_classify_seasonality_by('grouped_seasonal', group_id, ts, val, 4) WHERE id = 'A';
+SELECT typeof(is_seasonal) FROM ts_classify_seasonality_by('grouped_seasonal', group_id, ts, val, 4) WHERE group_id = 'A';
 ----
 BOOLEAN
 
 # Test table macro returns timing_classification column
 query I
-SELECT timing_classification IS NOT NULL FROM ts_classify_seasonality_by('grouped_seasonal', group_id, ts, val, 4) WHERE id = 'A';
+SELECT timing_classification IS NOT NULL FROM ts_classify_seasonality_by('grouped_seasonal', group_id, ts, val, 4) WHERE group_id = 'A';
 ----
 true
 
 # Test table macro returns modulation_type column
 query I
-SELECT modulation_type IS NOT NULL FROM ts_classify_seasonality_by('grouped_seasonal', group_id, ts, val, 4) WHERE id = 'A';
+SELECT modulation_type IS NOT NULL FROM ts_classify_seasonality_by('grouped_seasonal', group_id, ts, val, 4) WHERE group_id = 'A';
 ----
 true
 

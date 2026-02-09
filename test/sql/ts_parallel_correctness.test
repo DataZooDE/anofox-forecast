@@ -32,9 +32,9 @@ SELECT COUNT(*), COUNT(DISTINCT unique_id) FROM parallel_test_data;
 # Run with default parallel execution
 statement ok
 CREATE TABLE forecast_parallel AS
-SELECT id, date, point_forecast, model_name
+SELECT unique_id, ds, yhat, model_name
 FROM ts_forecast_by('parallel_test_data', unique_id, ds, y, 'Naive', 7, MAP{})
-ORDER BY id, date;
+ORDER BY unique_id, ds;
 
 # Run with single thread
 statement ok
@@ -42,9 +42,9 @@ SET threads=1;
 
 statement ok
 CREATE TABLE forecast_single AS
-SELECT id, date, point_forecast, model_name
+SELECT unique_id, ds, yhat, model_name
 FROM ts_forecast_by('parallel_test_data', unique_id, ds, y, 'Naive', 7, MAP{})
-ORDER BY id, date;
+ORDER BY unique_id, ds;
 
 # Reset threads
 statement ok
@@ -59,8 +59,8 @@ true
 # Verify all forecasts match exactly
 query I
 SELECT COUNT(*) FROM forecast_parallel p
-JOIN forecast_single s ON p.id = s.id AND p.date = s.date
-WHERE p.point_forecast = s.point_forecast AND p.model_name = s.model_name;
+JOIN forecast_single s ON p.unique_id = s.unique_id AND p.ds = s.ds
+WHERE p.yhat = s.yhat AND p.model_name = s.model_name;
 ----
 350
 
@@ -192,7 +192,7 @@ SELECT * FROM ts_cv_folds_by('cv_test_data', unique_id, ds, y, 7, 2, MAP{});
 # Run with default parallel execution
 statement ok
 CREATE TABLE cv_forecast_parallel AS
-SELECT fold_id, unique_id, ds, split, ROUND(forecast, 4) as forecast, model_name
+SELECT fold_id, unique_id, ds, split, ROUND(yhat, 4) as yhat, model_name
 FROM ts_cv_forecast_by('cv_folds', unique_id, ds, y, 'Naive', MAP{})
 ORDER BY fold_id, unique_id, ds;
 
@@ -202,7 +202,7 @@ SET threads=1;
 
 statement ok
 CREATE TABLE cv_forecast_single AS
-SELECT fold_id, unique_id, ds, split, ROUND(forecast, 4) as forecast, model_name
+SELECT fold_id, unique_id, ds, split, ROUND(yhat, 4) as yhat, model_name
 FROM ts_cv_forecast_by('cv_folds', unique_id, ds, y, 'Naive', MAP{})
 ORDER BY fold_id, unique_id, ds;
 
@@ -250,7 +250,7 @@ SELECT COUNT(*), COUNT(DISTINCT unique_id) FROM stress_test_data;
 # Run forecast with parallel
 statement ok
 CREATE TABLE stress_forecast AS
-SELECT id, date, point_forecast
+SELECT unique_id, ds, yhat
 FROM ts_forecast_by('stress_test_data', unique_id, ds, y, 'Naive', 14, MAP{});
 
 # Verify we got expected number of forecast rows (100 series × 14 horizon)
@@ -261,19 +261,19 @@ SELECT COUNT(*) FROM stress_forecast;
 
 # Verify all series have forecasts
 query I
-SELECT COUNT(DISTINCT id) FROM stress_forecast;
+SELECT COUNT(DISTINCT unique_id) FROM stress_forecast;
 ----
 100
 
 # Verify no NULL forecasts
 query I
-SELECT COUNT(*) FROM stress_forecast WHERE point_forecast IS NULL;
+SELECT COUNT(*) FROM stress_forecast WHERE yhat IS NULL;
 ----
 0
 
 # Verify forecasts are reasonable (no negative values for positive data)
 query I
-SELECT COUNT(*) FROM stress_forecast WHERE point_forecast < 0;
+SELECT COUNT(*) FROM stress_forecast WHERE yhat < 0;
 ----
 0
 
@@ -285,15 +285,15 @@ SELECT COUNT(*) FROM stress_forecast WHERE point_forecast < 0;
 # Run forecast twice and compare hashes
 statement ok
 CREATE TABLE hash_test_1 AS
-SELECT md5(CAST(id AS VARCHAR) || CAST(date AS VARCHAR) || CAST(ROUND(point_forecast, 8) AS VARCHAR)) as row_hash
+SELECT md5(CAST(unique_id AS VARCHAR) || CAST(ds AS VARCHAR) || CAST(ROUND(yhat, 8) AS VARCHAR)) as row_hash
 FROM ts_forecast_by('parallel_test_data', unique_id, ds, y, 'SES', 7, MAP{})
-ORDER BY id, date;
+ORDER BY unique_id, ds;
 
 statement ok
 CREATE TABLE hash_test_2 AS
-SELECT md5(CAST(id AS VARCHAR) || CAST(date AS VARCHAR) || CAST(ROUND(point_forecast, 8) AS VARCHAR)) as row_hash
+SELECT md5(CAST(unique_id AS VARCHAR) || CAST(ds AS VARCHAR) || CAST(ROUND(yhat, 8) AS VARCHAR)) as row_hash
 FROM ts_forecast_by('parallel_test_data', unique_id, ds, y, 'SES', 7, MAP{})
-ORDER BY id, date;
+ORDER BY unique_id, ds;
 
 # Verify hashes match between runs
 query I

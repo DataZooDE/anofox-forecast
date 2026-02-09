@@ -68,7 +68,7 @@ SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 5, MA
 # Test output has expected columns
 query I
 SELECT COUNT(*) FROM (
-    SELECT id, forecast_step, date, point_forecast, lower_90, upper_90, model_name, insample_fitted
+    SELECT id, forecast_step, ds, yhat, yhat_lower, yhat_upper, model_name, insample_fitted
     FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 3, MAP([], []))
 );
 ----
@@ -89,7 +89,7 @@ SELECT COUNT(DISTINCT id) FROM ts_forecast_by('test_groups', id, ds, value, 'Nai
 # Test dates are sequential after last observation
 query I
 SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 3, MAP([], []))
-WHERE date > '2024-02-29'::TIMESTAMP;
+WHERE ds > '2024-02-29'::TIMESTAMP;
 ----
 6
 
@@ -525,14 +525,14 @@ SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 3, MA
 # Test point forecast is numeric and not NULL
 query I
 SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 3, MAP([], []))
-WHERE point_forecast IS NOT NULL;
+WHERE yhat IS NOT NULL;
 ----
 6
 
 # Test confidence bounds are valid (lower <= point <= upper)
 query I
 SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 3, MAP([], []))
-WHERE lower_90 <= point_forecast AND point_forecast <= upper_90;
+WHERE yhat_lower <= yhat AND yhat <= yhat_upper;
 ----
 6
 

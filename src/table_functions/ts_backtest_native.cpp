@@ -453,7 +453,7 @@ static unique_ptr<FunctionData> TsBacktestNativeBind(
     names.push_back(input.input_table_names[1]);  // date
     return_types.push_back(bind_data->date_logical_type);
 
-    names.push_back("forecast");
+    names.push_back("yhat");
     return_types.push_back(LogicalType::DOUBLE);
 
     names.push_back("actual");
@@ -465,10 +465,10 @@ static unique_ptr<FunctionData> TsBacktestNativeBind(
     names.push_back("abs_error");
     return_types.push_back(LogicalType::DOUBLE);
 
-    names.push_back("lower_90");
+    names.push_back("yhat_lower");
     return_types.push_back(LogicalType::DOUBLE);
 
-    names.push_back("upper_90");
+    names.push_back("yhat_upper");
     return_types.push_back(LogicalType::DOUBLE);
 
     names.push_back("model_name");

@@ -313,13 +313,13 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
     names.push_back("split");
     return_types.push_back(LogicalType::VARCHAR);
 
-    names.push_back("forecast");
+    names.push_back("yhat");
     return_types.push_back(LogicalType::DOUBLE);
 
-    names.push_back("lower_90");
+    names.push_back("yhat_lower");
     return_types.push_back(LogicalType::DOUBLE);
 
-    names.push_back("upper_90");
+    names.push_back("yhat_upper");
     return_types.push_back(LogicalType::DOUBLE);
 
     names.push_back("model_name");
