@@ -57,8 +57,9 @@ def run_anofox_benchmark(
     print(f"Loaded {len(train_df)} rows from {train_df['unique_id'].nunique()} series")
     print(f"Forecast horizon: {horizon}, Seasonality: {seasonality}")
 
-    # Convert ds column to proper dates
-    train_df['ds'] = pd.to_datetime('2020-01-01') + pd.to_timedelta(train_df['ds'].astype(int) - 1, unit='D')
+    # Convert ds column to proper dates (M4 has integer indices, M5 has datetime)
+    if not pd.api.types.is_datetime64_any_dtype(train_df['ds']):
+        train_df['ds'] = pd.to_datetime('2020-01-01') + pd.to_timedelta(train_df['ds'].astype(int) - 1, unit='D')
     train_df['ds'] = train_df['ds'].dt.date
 
     # Find the extension

@@ -112,14 +112,18 @@ def evaluate_forecasts(
     print(f"Loaded {len(test_df)} test rows from {test_df['unique_id'].n_unique()} series")
     print(f"Seasonality: {seasonality}")
 
-    # Convert ds to date using Polars expressions
-    test_df = test_df.with_columns([
-        (pl.datetime(2020, 1, 1) + pl.duration(days=pl.col('ds').cast(pl.Int64) - 1)).dt.date().alias('ds')
-    ])
-
-    train_df = train_df.with_columns([
-        (pl.datetime(2020, 1, 1) + pl.duration(days=pl.col('ds').cast(pl.Int64) - 1)).dt.date().alias('ds')
-    ])
+    # Convert ds to date using Polars expressions (M4 has integer indices, M5 has datetime)
+    ds_dtype_str = str(test_df['ds'].dtype)
+    if 'Date' in ds_dtype_str or 'Datetime' in ds_dtype_str:
+        test_df = test_df.with_columns([pl.col('ds').cast(pl.Date)])
+        train_df = train_df.with_columns([pl.col('ds').cast(pl.Date)])
+    else:
+        test_df = test_df.with_columns([
+            (pl.datetime(2020, 1, 1) + pl.duration(days=pl.col('ds').cast(pl.Int64) - 1)).dt.date().alias('ds')
+        ])
+        train_df = train_df.with_columns([
+            (pl.datetime(2020, 1, 1) + pl.duration(days=pl.col('ds').cast(pl.Int64) - 1)).dt.date().alias('ds')
+        ])
 
     # Find all forecast files
     anofox_files = list(results_dir.glob(f'anofox-*-{group}.parquet'))
@@ -141,9 +145,10 @@ def evaluate_forecasts(
                          and not col.endswith('-hi-95')]
 
         # Convert ds to date to match test_df
-        if fcst_df['ds'].dtype in [pl.Datetime, pl.Datetime('ms'), pl.Datetime('us'), pl.Datetime('ns')]:
-            fcst_df = fcst_df.with_columns([pl.col('ds').dt.date()])
-        elif fcst_df['ds'].dtype == pl.Utf8:
+        fcst_ds_dtype = str(fcst_df['ds'].dtype)
+        if 'Datetime' in fcst_ds_dtype:
+            fcst_df = fcst_df.with_columns([pl.col('ds').cast(pl.Date)])
+        elif fcst_ds_dtype == 'String' or fcst_ds_dtype == 'Utf8':
             fcst_df = fcst_df.with_columns([pl.col('ds').str.to_date().cast(pl.Date)])
 
         # Evaluate each model
@@ -167,9 +172,10 @@ def evaluate_forecasts(
                          and not col.endswith('-hi-95')]
 
         # Convert ds to date to match test_df
-        if fcst_df['ds'].dtype in [pl.Datetime, pl.Datetime('ms'), pl.Datetime('us'), pl.Datetime('ns')]:
-            fcst_df = fcst_df.with_columns([pl.col('ds').dt.date()])
-        elif fcst_df['ds'].dtype == pl.Utf8:
+        fcst_ds_dtype = str(fcst_df['ds'].dtype)
+        if 'Datetime' in fcst_ds_dtype:
+            fcst_df = fcst_df.with_columns([pl.col('ds').cast(pl.Date)])
+        elif fcst_ds_dtype == 'String' or fcst_ds_dtype == 'Utf8':
             fcst_df = fcst_df.with_columns([pl.col('ds').str.to_date().cast(pl.Date)])
 
         # Evaluate each model

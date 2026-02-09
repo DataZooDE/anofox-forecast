@@ -58,9 +58,12 @@ def run_statsforecast_benchmark(
     print(f"Forecast horizon: {horizon}, Seasonality: {seasonality}")
 
     # Convert integer indices to actual dates for proper time series modeling
-    print(f"Converting integer indices to dates...")
     train_df = train_df.copy()
-    train_df['ds'] = pd.to_datetime('2020-01-01') + pd.to_timedelta(train_df['ds'].astype(int) - 1, unit='D')
+    if not pd.api.types.is_datetime64_any_dtype(train_df['ds']):
+        print(f"Converting integer indices to dates...")
+        train_df['ds'] = pd.to_datetime('2020-01-01') + pd.to_timedelta(train_df['ds'].astype(int) - 1, unit='D')
+    else:
+        print(f"Using existing datetime dates...")
 
     # Prepare output directory
     output_dir.mkdir(parents=True, exist_ok=True)

@@ -65,19 +65,28 @@ def run_all(
     benchmark_module = __import__(f'{dataset}.mstl_benchmark.run', fromlist=['run'])
     run_mstl = benchmark_module.run
 
-    # Theta benchmark has a custom structure - import its components
+    # Theta benchmark - try custom structure first, fall back to standard factory
     try:
-        theta_module = __import__(f'{dataset}.theta_benchmark.run', fromlist=['run_anofox', 'evaluate'])
-        theta_anofox = theta_module.run_anofox
-        theta_evaluate = theta_module.evaluate
-        theta_sf_module = __import__(f'{dataset}.theta_benchmark.run_statsforecast', fromlist=['run_benchmark'])
-        theta_statsforecast = theta_sf_module.run_benchmark
+        theta_module = __import__(f'{dataset}.theta_benchmark.run', fromlist=['run_anofox', 'run', 'evaluate'])
+        if hasattr(theta_module, 'run_anofox'):
+            # Custom structure (M4): separate run_anofox, run_statsforecast, evaluate
+            theta_anofox = theta_module.run_anofox
+            theta_evaluate = theta_module.evaluate
+            theta_sf_module = __import__(f'{dataset}.theta_benchmark.run_statsforecast', fromlist=['run_benchmark'])
+            theta_statsforecast = theta_sf_module.run_benchmark
+            THETA_CUSTOM = True
+        else:
+            # Standard factory structure (M5): uses run() which does anofox + statsforecast + evaluate
+            theta_run = theta_module.run
+            THETA_CUSTOM = False
         THETA_AVAILABLE = True
     except (ImportError, AttributeError):
         THETA_AVAILABLE = False
+        THETA_CUSTOM = False
         theta_anofox = None
         theta_evaluate = None
         theta_statsforecast = None
+        theta_run = None
 
     print(f"{'='*80}")
     print(f"RUNNING ALL BENCHMARKS - {dataset.upper()} {group}")
@@ -120,7 +129,10 @@ def run_all(
 
     # Filter benchmarks if specified
     if benchmarks:
-        requested = [b.strip().lower() for b in benchmarks.split(',')]
+        if isinstance(benchmarks, (list, tuple)):
+            requested = [b.strip().lower() for b in benchmarks]
+        else:
+            requested = [b.strip().lower() for b in benchmarks.split(',')]
         benchmarks_to_run = {k: v for k, v in all_benchmarks.items() if k in requested}
         if not benchmarks_to_run:
             print(f"Error: No valid benchmarks found in '{benchmarks}'")
@@ -150,15 +162,19 @@ def run_all(
 
         try:
             if benchmark_key == 'theta':
-                # Theta has custom structure - run anofox, statsforecast, then evaluate
-                print(f"STEP 1: Running Anofox {benchmark_name} models...")
-                theta_anofox(group=group, dataset=dataset)
-                
-                print(f"\nSTEP 2: Running Statsforecast {benchmark_name} models...")
-                theta_statsforecast(group=group, dataset=dataset)
-                
-                print(f"\nSTEP 3: Evaluating {benchmark_name} forecasts...")
-                theta_evaluate(group=group, dataset=dataset)
+                if THETA_CUSTOM:
+                    # Custom structure (M4): separate steps
+                    print(f"STEP 1: Running Anofox {benchmark_name} models...")
+                    theta_anofox(group=group, dataset=dataset)
+
+                    print(f"\nSTEP 2: Running Statsforecast {benchmark_name} models...")
+                    theta_statsforecast(group=group, dataset=dataset)
+
+                    print(f"\nSTEP 3: Evaluating {benchmark_name} forecasts...")
+                    theta_evaluate(group=group, dataset=dataset)
+                else:
+                    # Standard factory structure (M5): run() handles everything
+                    theta_run(group=group, dataset=dataset)
             else:
                 # Other benchmarks use the standard run function
                 benchmark_info['run'](group=group, dataset=dataset)
