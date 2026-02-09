@@ -271,7 +271,7 @@ SELECT * FROM ts_conformal_by(
     product_id,
     actual,
     forecast,
-    point_forecast,
+    yhat,
     {'alpha': 0.1, 'method': 'split'}
 );
 
@@ -281,7 +281,7 @@ SELECT * FROM ts_conformal_by(
     product_id,
     actual,
     forecast,
-    point_forecast,
+    yhat,
     {'alpha': 0.1, 'method': 'asymmetric'}
 );
 ```

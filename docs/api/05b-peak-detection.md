@@ -45,7 +45,7 @@ ts_detect_peaks_by(source, group_col, date_col, value_col, params) → TABLE(id,
 **Returns:**
 | Column | Type | Description |
 |--------|------|-------------|
-| `id` | (same as group_col) | Series identifier |
+| `<group_col>` | (same as input) | Series identifier |
 | `peaks` | STRUCT | Peak detection results |
 
 **Peaks STRUCT fields:**
@@ -96,7 +96,7 @@ ts_analyze_peak_timing_by(source, group_col, date_col, value_col, period, params
 **Returns:**
 | Column | Type | Description |
 |--------|------|-------------|
-| `id` | (same as group_col) | Series identifier |
+| `<group_col>` | (same as input) | Series identifier |
 | `timing` | STRUCT | Peak timing analysis |
 
 **Timing STRUCT fields:**

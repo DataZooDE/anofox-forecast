@@ -186,9 +186,9 @@ Returns the test rows with forecast columns added:
 | `<date_col>` | (same as input) | Forecast date |
 | `<target_col>` | DOUBLE | Actual value from test data (original name preserved) |
 | `split` | VARCHAR | Always 'test' |
-| `forecast` | DOUBLE | Point forecast |
-| `lower_90` | DOUBLE | Lower 90% prediction interval |
-| `upper_90` | DOUBLE | Upper 90% prediction interval |
+| `yhat` | DOUBLE | Point forecast |
+| `yhat_lower` | DOUBLE | Lower prediction interval |
+| `yhat_upper` | DOUBLE | Upper prediction interval |
 | `model_name` | VARCHAR | Model used |
 
 **Key Features:**

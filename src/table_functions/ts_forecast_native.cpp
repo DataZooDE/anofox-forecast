@@ -323,23 +323,27 @@ static unique_ptr<FunctionData> TsForecastNativeBind(
                 input.input_table_types[1].ToString().c_str());
     }
 
-    // Output schema: id, forecast_step, date, point_forecast, lower_90, upper_90, model_name
-    names.push_back("id");
+    // Output schema: <group_col>, forecast_step, <date_col>, yhat, yhat_lower, yhat_upper, model_name
+    auto &table_names = input.input_table_names;
+    string group_col_name = table_names.size() > 0 ? table_names[0] : "id";
+    string date_col_name = table_names.size() > 1 ? table_names[1] : "date";
+
+    names.push_back(group_col_name);
     return_types.push_back(bind_data->group_logical_type);
 
     names.push_back("forecast_step");
     return_types.push_back(LogicalType::INTEGER);
 
-    names.push_back("date");
+    names.push_back(date_col_name);
     return_types.push_back(bind_data->date_logical_type);
 
-    names.push_back("point_forecast");
+    names.push_back("yhat");
     return_types.push_back(LogicalType::DOUBLE);
 
-    names.push_back("lower_90");
+    names.push_back("yhat_lower");
     return_types.push_back(LogicalType::DOUBLE);
 
-    names.push_back("upper_90");
+    names.push_back("yhat_upper");
     return_types.push_back(LogicalType::DOUBLE);
 
     names.push_back("model_name");

@@ -172,7 +172,7 @@ FROM (VALUES ('A'), ('B')) AS groups(group_id),
 
 # Test ts_forecast_exog_by returns forecasts for both groups
 query I
-SELECT COUNT(DISTINCT id) FROM ts_forecast_exog_by(
+SELECT COUNT(DISTINCT group_id) FROM ts_forecast_exog_by(
     'exog_by_history',
     group_id,
     date,

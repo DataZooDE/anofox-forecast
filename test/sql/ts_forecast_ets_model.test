@@ -38,7 +38,7 @@ SELECT COUNT(*) FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, MAP{});
 # Test: ETS returns valid forecasts by default
 query I
 SELECT COUNT(*) FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, MAP{})
-WHERE point_forecast IS NOT NULL AND point_forecast > 0;
+WHERE yhat IS NOT NULL AND yhat > 0;
 ----
 14
 
@@ -177,13 +177,13 @@ SELECT COUNT(*) FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7,
 # Test: Forecasts have valid confidence intervals
 query I
 SELECT COUNT(*) FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, MAP{'model': 'AAA'})
-WHERE lower_90 <= point_forecast AND point_forecast <= upper_90;
+WHERE yhat_lower <= yhat AND yhat <= yhat_upper;
 ----
 14
 
 # Test: Different models produce different forecasts (not all identical)
 query I
-SELECT COUNT(DISTINCT round(point_forecast, 2)) > 1 AS has_variation
+SELECT COUNT(DISTINCT round(yhat, 2)) > 1 AS has_variation
 FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, MAP{'model': 'AAA'});
 ----
 true

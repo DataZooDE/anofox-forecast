@@ -51,7 +51,7 @@ ts_stats_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
 **Returns:**
 | Column | Type | Description |
 |--------|------|-------------|
-| `id` | (same as group_col) | Series identifier |
+| `<group_col>` | (same as input) | Series identifier |
 | `length` | UBIGINT | Total number of observations |
 | `n_nulls` | UBIGINT | Number of NULL values |
 | `n_nan` | UBIGINT | Number of NaN values |

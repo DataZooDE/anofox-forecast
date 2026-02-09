@@ -220,11 +220,11 @@ ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, par
 **Returns:**
 | Column | Type | Description |
 |--------|------|-------------|
-| `group_col` | ANY | Series identifier |
-| `ds` | TIMESTAMP | Forecast timestamp |
-| `forecast` | DOUBLE | Point forecast |
-| `lower` | DOUBLE | Lower prediction interval |
-| `upper` | DOUBLE | Upper prediction interval |
+| `<group_col>` | (same as input) | Series identifier |
+| `<date_col>` | (same as input) | Forecast timestamp |
+| `yhat` | DOUBLE | Point forecast |
+| `yhat_lower` | DOUBLE | Lower prediction interval |
+| `yhat_upper` | DOUBLE | Upper prediction interval |
 
 **Examples:**
 ```sql

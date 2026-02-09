@@ -158,7 +158,7 @@ SELECT
     COUNT(*) AS n_forecasts,
     ROUND(AVG(abs_error), 2) AS avg_mae,
     ROUND(AVG(fold_metric_score), 2) AS avg_rmse,
-    ROUND(AVG(CASE WHEN actual BETWEEN lower_90 AND upper_90 THEN 1 ELSE 0 END), 2) AS coverage
+    ROUND(AVG(CASE WHEN actual BETWEEN yhat_lower AND yhat_upper THEN 1 ELSE 0 END), 2) AS coverage
 FROM ts_backtest_auto('sales', id, date, val, 7, 5, '1d', MAP{})
 GROUP BY model_name;
 ```

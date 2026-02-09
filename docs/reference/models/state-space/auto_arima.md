@@ -36,10 +36,10 @@ Automatic ARIMA (AutoRegressive Integrated Moving Average) model selection. Auto
 | Column | Type | Description |
 |--------|------|-------------|
 | `group_col` | ANY | Series identifier (only for `_by` variant) |
-| `ds` | TIMESTAMP | Forecast timestamp |
-| `forecast` | DOUBLE | Point forecast |
-| `lower` | DOUBLE | Lower prediction interval |
-| `upper` | DOUBLE | Upper prediction interval |
+| `<date_col>` | (same as input) | Forecast timestamp |
+| `yhat` | DOUBLE | Point forecast |
+| `yhat_lower` | DOUBLE | Lower prediction interval |
+| `yhat_upper` | DOUBLE | Upper prediction interval |
 
 *Required for seasonal data. Without `seasonal_period`, AutoARIMA will select a non-seasonal model.
 

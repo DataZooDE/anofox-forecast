@@ -137,15 +137,15 @@ def run_anofox_benchmark(
             fcst_df = con.execute(forecast_query).fetchdf()
             
             # Rename columns to standardized names (matching statsforecast format)
+            # Note: group/date columns now preserve their input names (e.g., 'ds' stays 'ds')
             rename_map = {
-                'date': 'ds',
-                'point_forecast': model_name
+                'yhat': model_name
             }
-            
+
             # Handle different prediction interval column names
-            if 'lower_90' in fcst_df.columns:
-                rename_map['lower_90'] = f'{model_name}-lo-95'
-                rename_map['upper_90'] = f'{model_name}-hi-95'
+            if 'yhat_lower' in fcst_df.columns:
+                rename_map['yhat_lower'] = f'{model_name}-lo-95'
+                rename_map['yhat_upper'] = f'{model_name}-hi-95'
             elif 'lower_95' in fcst_df.columns:
                 rename_map['lower_95'] = f'{model_name}-lo-95'
                 rename_map['upper_95'] = f'{model_name}-hi-95'

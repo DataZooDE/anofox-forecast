@@ -65,7 +65,7 @@ SELECT COUNT(*) FROM ts_forecast_by('varchar_data', id, ds, y, 'Naive', 5, MAP([
 # Verify forecasts are numeric
 query I
 SELECT COUNT(*) FROM ts_forecast_by('varchar_data', id, ds, y, 'Naive', 3, MAP([], []))
-WHERE point_forecast IS NOT NULL AND typeof(point_forecast) = 'DOUBLE';
+WHERE yhat IS NOT NULL AND typeof(yhat) = 'DOUBLE';
 ----
 6
 

@@ -63,19 +63,19 @@ SELECT column_name FROM (
 ----
 ds
 fold_id
-forecast
-lower_90
 model_name
 series_id
 split
-upper_90
 y
+yhat
+yhat_lower
+yhat_upper
 
 # Verify forecast values are not NULL for test rows
 query I
 SELECT COUNT(*) AS null_forecasts
 FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', MAP{})
-WHERE forecast IS NULL;
+WHERE yhat IS NULL;
 ----
 0
 
@@ -167,11 +167,11 @@ Drift
 # Test different methods produce different forecasts
 query I
 WITH naive AS (
-    SELECT fold_id, ds, forecast AS naive_fcst
+    SELECT fold_id, ds, yhat AS naive_fcst
     FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', MAP{})
 ),
 drift AS (
-    SELECT fold_id, ds, forecast AS drift_fcst
+    SELECT fold_id, ds, yhat AS drift_fcst
     FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Drift', MAP{})
 )
 SELECT COUNT(*) > 0 AS forecasts_differ
@@ -293,7 +293,7 @@ WHERE ABS(f.fcst_y - o.orig_y) > 0.0001;
 
 # Verify we can compute error metrics
 query I
-SELECT AVG(ABS(forecast - y)) > 0 AS has_errors
+SELECT AVG(ABS(yhat - y)) > 0 AS has_errors
 FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', MAP{});
 ----
 true

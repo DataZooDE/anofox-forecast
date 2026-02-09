@@ -99,8 +99,9 @@ static unique_ptr<FunctionData> TsMstlDecompositionNativeBind(
     // Input table: group_col, date_col, value_col
     bind_data->group_logical_type = input.input_table_types[0];
 
-    // Output schema: id, trend[], seasonal[][], remainder[], periods[]
-    names.push_back("id");
+    // Output schema: <group_col>, trend[], seasonal[][], remainder[], periods[]
+    string group_col_name = input.input_table_names.size() > 0 ? input.input_table_names[0] : "id";
+    names.push_back(group_col_name);
     return_types.push_back(bind_data->group_logical_type);
 
     names.push_back("trend");
