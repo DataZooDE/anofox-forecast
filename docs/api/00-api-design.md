@@ -261,8 +261,8 @@ Always return `STRUCT` with operation-specific fields:
 
 ```sql
 ts_forecast_agg(...) → STRUCT(
-    forecast_step[], forecast_timestamp[], point_forecast[],
-    lower_90[], upper_90[], model_name, ...
+    forecast_step[], forecast_timestamp[], yhat[],
+    yhat_lower[], yhat_upper[], model_name, ...
 )
 ```
 

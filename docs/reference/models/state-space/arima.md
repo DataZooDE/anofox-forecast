@@ -47,10 +47,10 @@ AutoRegressive Integrated Moving Average with explicit order specification. Unli
 | Column | Type | Description |
 |--------|------|-------------|
 | `group_col` | ANY | Series identifier (only for `_by` variant) |
-| `ds` | TIMESTAMP | Forecast timestamp |
-| `forecast` | DOUBLE | Point forecast |
-| `lower` | DOUBLE | Lower prediction interval |
-| `upper` | DOUBLE | Upper prediction interval |
+| `<date_col>` | (same as input) | Forecast timestamp |
+| `yhat` | DOUBLE | Point forecast |
+| `yhat_lower` | DOUBLE | Lower prediction interval |
+| `yhat_upper` | DOUBLE | Upper prediction interval |
 
 ## SQL Example
 

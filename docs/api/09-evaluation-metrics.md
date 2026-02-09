@@ -145,8 +145,8 @@ SELECT
     unique_id,
     ts_coverage(
         LIST(y ORDER BY ds),
-        LIST(lower_90 ORDER BY ds),
-        LIST(upper_90 ORDER BY ds)
+        LIST(yhat_lower ORDER BY ds),
+        LIST(yhat_upper ORDER BY ds)
     ) AS coverage_90
 FROM results
 GROUP BY unique_id;

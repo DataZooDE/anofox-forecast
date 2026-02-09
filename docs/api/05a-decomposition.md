@@ -40,7 +40,7 @@ ts_mstl_decomposition_by(source, group_col, date_col, value_col, seasonal_period
 **Returns:**
 | Column | Type | Description |
 |--------|------|-------------|
-| `id` | (same as group_col) | Group identifier |
+| `<group_col>` | (same as input) | Group identifier |
 | `trend` | DOUBLE[] | Trend component |
 | `seasonal` | DOUBLE[][] | Seasonal components (one array per period) |
 | `remainder` | DOUBLE[] | Residual component after removing trend and seasonal |
@@ -78,7 +78,7 @@ ts_detrend_by(source, group_col, date_col, value_col, method)
 **Returns:**
 | Column | Type | Description |
 |--------|------|-------------|
-| `id` | (same as group_col) | Group identifier |
+| `<group_col>` | (same as input) | Group identifier |
 | `trend` | DOUBLE[] | Fitted trend component |
 | `detrended` | DOUBLE[] | Original values minus trend |
 | `method` | VARCHAR | Method used (may differ from input when using 'auto') |
@@ -133,7 +133,7 @@ ts_classify_seasonality_by(source VARCHAR, group_col COLUMN, date_col COLUMN, va
 **Returns:**
 | Column | Type | Description |
 |--------|------|-------------|
-| `id` | (same as group_col) | Group identifier |
+| `<group_col>` | (same as input) | Group identifier |
 | `timing_classification` | VARCHAR | 'early', 'on_time', 'late', or 'variable' |
 | `modulation_type` | VARCHAR | 'stable', 'growing', 'shrinking', or 'variable' |
 | `has_stable_timing` | BOOLEAN | Whether peak timing is consistent |
