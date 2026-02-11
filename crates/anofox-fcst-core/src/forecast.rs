@@ -757,7 +757,7 @@ fn forecast_naive(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
         upper: vec![],
         fitted: None,
         residuals: None,
-        model_name: "Naive".to_string(),
+        model_name: String::new(),
         aic: None,
         bic: None,
         mse: None,
@@ -780,7 +780,7 @@ fn forecast_seasonal_naive(
         upper: vec![],
         fitted: None,
         residuals: None,
-        model_name: "SeasonalNaive".to_string(),
+        model_name: String::new(),
         aic: None,
         bic: None,
         mse: None,
@@ -797,7 +797,7 @@ fn forecast_sma(values: &[f64], horizon: usize, window: usize) -> Result<Forecas
         upper: vec![],
         fitted: None,
         residuals: None,
-        model_name: "SMA".to_string(),
+        model_name: String::new(),
         aic: None,
         bic: None,
         mse: None,
@@ -818,7 +818,7 @@ fn forecast_drift(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
         upper: vec![],
         fitted: None,
         residuals: None,
-        model_name: "Drift".to_string(),
+        model_name: String::new(),
         aic: None,
         bic: None,
         mse: None,
@@ -838,7 +838,7 @@ fn forecast_ses(values: &[f64], horizon: usize, alpha: f64) -> Result<ForecastOu
         upper: vec![],
         fitted: None,
         residuals: None,
-        model_name: "SES".to_string(),
+        model_name: String::new(),
         aic: None,
         bic: None,
         mse: None,
@@ -867,7 +867,7 @@ fn forecast_holt(values: &[f64], horizon: usize, alpha: f64, beta: f64) -> Resul
         upper: vec![],
         fitted: None,
         residuals: None,
-        model_name: "Holt".to_string(),
+        model_name: String::new(),
         aic: None,
         bic: None,
         mse: None,
@@ -920,7 +920,7 @@ fn forecast_holt_winters(
         upper: vec![],
         fitted: None,
         residuals: None,
-        model_name: "HoltWinters".to_string(),
+        model_name: String::new(),
         aic: None,
         bic: None,
         mse: None,
@@ -946,7 +946,7 @@ fn forecast_theta(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
         upper: vec![],
         fitted: None,
         residuals: None,
-        model_name: "Theta".to_string(),
+        model_name: String::new(),
         aic: None,
         bic: None,
         mse: None,
@@ -987,7 +987,7 @@ fn forecast_seasonal_es(values: &[f64], horizon: usize, period: usize) -> Result
         upper: vec![],
         fitted: None,
         residuals: None,
-        model_name: "SeasonalES".to_string(),
+        model_name: String::new(),
         aic: None,
         bic: None,
         mse: None,
@@ -1015,7 +1015,7 @@ fn forecast_seasonal_window_average(
             upper: vec![],
             fitted: None,
             residuals: None,
-            model_name: "SeasonalWindowAverage".to_string(),
+            model_name: String::new(),
             aic: None,
             bic: None,
             mse: None,
@@ -1050,7 +1050,7 @@ fn forecast_seasonal_window_average(
         upper: vec![],
         fitted: None,
         residuals: None,
-        model_name: "SeasonalWindowAverage".to_string(),
+        model_name: String::new(),
         aic: None,
         bic: None,
         mse: None,
@@ -1240,7 +1240,7 @@ fn forecast_arima(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
         upper: vec![],
         fitted: None,
         residuals: None,
-        model_name: "ARIMA".to_string(),
+        model_name: String::new(),
         aic: None,
         bic: None,
         mse: None,
@@ -1545,7 +1545,7 @@ fn forecast_mfles(values: &[f64], horizon: usize, period: usize) -> Result<Forec
     // Simplified: use seasonal exponential smoothing
     let result = forecast_seasonal_es(values, horizon, period)?;
     Ok(ForecastOutput {
-        model_name: "MFLES".to_string(),
+        model_name: String::new(),
         ..result
     })
 }
@@ -1559,7 +1559,7 @@ fn forecast_mstl(values: &[f64], horizon: usize, period: usize) -> Result<Foreca
         forecast_holt(values, horizon, 0.3, 0.1)?
     };
     Ok(ForecastOutput {
-        model_name: "MSTL".to_string(),
+        model_name: String::new(),
         ..result
     })
 }
@@ -1573,7 +1573,7 @@ fn forecast_tbats(values: &[f64], horizon: usize, period: usize) -> Result<Forec
         forecast_ses(values, horizon, 0.3)?
     };
     Ok(ForecastOutput {
-        model_name: "TBATS".to_string(),
+        model_name: String::new(),
         ..result
     })
 }
@@ -1621,7 +1621,7 @@ fn forecast_croston(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
         upper: vec![],
         fitted: None,
         residuals: None,
-        model_name: "CrostonClassic".to_string(),
+        model_name: String::new(),
         aic: None,
         bic: None,
         mse: None,
@@ -2150,6 +2150,114 @@ mod tests {
         // All forecast values should be the same
         let first = result.point[0];
         assert!(result.point.iter().all(|v| (*v - first).abs() < 1e-10));
+    }
+
+    /// Regression test for #167: every ModelType must return a model_name that
+    /// either equals or starts with model.name(). Guards against shared helpers
+    /// hardcoding a wrong model name.
+    #[test]
+    fn test_all_model_names_match_enum() {
+        // Intermittent demand data (many zeros)
+        let intermittent: Vec<Option<f64>> = vec![
+            Some(0.0),
+            Some(0.0),
+            Some(5.0),
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+            Some(3.0),
+            Some(0.0),
+            Some(4.0),
+            Some(0.0),
+            Some(0.0),
+            Some(6.0),
+        ];
+
+        // Trend + seasonality data (60 points, period ~7)
+        let seasonal: Vec<Option<f64>> = (0..60)
+            .map(|i| {
+                Some(10.0 + i as f64 * 0.5 + (i as f64 * std::f64::consts::PI / 7.0).sin() * 3.0)
+            })
+            .collect();
+
+        // Non-auto models: model_name must equal model.name() exactly
+        let exact_cases: Vec<(ModelType, &[Option<f64>])> = vec![
+            // Basic models
+            (ModelType::Naive, &seasonal),
+            (ModelType::SMA, &seasonal),
+            (ModelType::SeasonalNaive, &seasonal),
+            (ModelType::SES, &seasonal),
+            (ModelType::SESOptimized, &seasonal),
+            (ModelType::RandomWalkDrift, &seasonal),
+            // Exponential Smoothing
+            (ModelType::Holt, &seasonal),
+            (ModelType::HoltWinters, &seasonal),
+            (ModelType::SeasonalES, &seasonal),
+            (ModelType::SeasonalESOptimized, &seasonal),
+            (ModelType::SeasonalWindowAverage, &seasonal),
+            // Theta variants
+            (ModelType::Theta, &seasonal),
+            (ModelType::OptimizedTheta, &seasonal),
+            (ModelType::DynamicTheta, &seasonal),
+            (ModelType::DynamicOptimizedTheta, &seasonal),
+            // State Space / ARIMA
+            (ModelType::ETS, &seasonal),
+            (ModelType::ARIMA, &seasonal),
+            // Multiple Seasonality
+            (ModelType::MFLES, &seasonal),
+            (ModelType::MSTL, &seasonal),
+            (ModelType::TBATS, &seasonal),
+            // Intermittent Demand
+            (ModelType::CrostonClassic, &intermittent),
+            (ModelType::CrostonOptimized, &intermittent),
+            (ModelType::CrostonSBA, &intermittent),
+            (ModelType::ADIDA, &intermittent),
+            (ModelType::IMAPA, &intermittent),
+            (ModelType::TSB, &intermittent),
+        ];
+
+        for (model_type, data) in &exact_cases {
+            let expected = model_type.name();
+            let options = ForecastOptions {
+                model: *model_type,
+                horizon: 3,
+                ..Default::default()
+            };
+            let result = forecast(data, &options).unwrap();
+            assert_eq!(
+                result.model_name, expected,
+                "{:?} returned model_name='{}', expected '{}'",
+                model_type, result.model_name, expected
+            );
+        }
+
+        // Auto models: model_name must start with model.name()
+        // (they append details like "AutoARIMA(1,0,0)" or "AutoETS(A,N,N)")
+        let prefix_cases: Vec<(ModelType, &[Option<f64>])> = vec![
+            (ModelType::AutoETS, &seasonal),
+            (ModelType::AutoARIMA, &seasonal),
+            (ModelType::AutoTheta, &seasonal),
+            (ModelType::AutoMFLES, &seasonal),
+            (ModelType::AutoMSTL, &seasonal),
+            (ModelType::AutoTBATS, &seasonal),
+        ];
+
+        for (model_type, data) in &prefix_cases {
+            let prefix = model_type.name();
+            let options = ForecastOptions {
+                model: *model_type,
+                horizon: 3,
+                ..Default::default()
+            };
+            let result = forecast(data, &options).unwrap();
+            assert!(
+                result.model_name.starts_with(prefix),
+                "{:?} returned model_name='{}', expected prefix '{}'",
+                model_type,
+                result.model_name,
+                prefix
+            );
+        }
     }
 
     #[test]

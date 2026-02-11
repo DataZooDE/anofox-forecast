@@ -1,0 +1,438 @@
+# name: test/sql/ts_native_model_names.test
+# description: Regression test for #167 - verify all model types return correct model_name
+#              through _ts_forecast_native and _ts_cv_forecast_native (no json dependency)
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup: test data
+#######################################
+
+# Trend + seasonality data (2 groups x 60 days)
+statement ok
+CREATE TABLE model_name_data AS
+SELECT
+    'G1' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    10.0 + i * 0.5 + sin(i * 3.14159 / 7) * 3 AS y
+FROM generate_series(0, 59) AS t(i)
+UNION ALL
+SELECT
+    'G2' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    20.0 + i * 0.3 + cos(i * 3.14159 / 7) * 2 AS y
+FROM generate_series(0, 59) AS t(i);
+
+# Intermittent demand data (2 groups x 60 days)
+statement ok
+CREATE TABLE model_name_intermittent AS
+SELECT
+    'I1' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    CASE WHEN i % 5 = 0 THEN 10.0 ELSE 0.0 END AS y
+FROM generate_series(0, 59) AS t(i)
+UNION ALL
+SELECT
+    'I2' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    CASE WHEN i % 4 = 0 THEN 8.0 ELSE 0.0 END AS y
+FROM generate_series(0, 59) AS t(i);
+
+# CV folds: 1 fold, 2 groups, train (30d) + test (3d)
+statement ok
+CREATE TABLE model_name_cv AS
+SELECT 1::BIGINT AS fold_id, 'train' AS split, id, ds, y
+FROM model_name_data
+WHERE ds < '2024-02-15'::TIMESTAMP
+UNION ALL
+SELECT 1::BIGINT AS fold_id, 'test' AS split, id, ds, y
+FROM model_name_data
+WHERE ds >= '2024-02-15'::TIMESTAMP AND ds < '2024-02-18'::TIMESTAMP;
+
+# CV folds for intermittent data
+statement ok
+CREATE TABLE model_name_cv_intermittent AS
+SELECT 1::BIGINT AS fold_id, 'train' AS split, id, ds, y
+FROM model_name_intermittent
+WHERE ds < '2024-02-15'::TIMESTAMP
+UNION ALL
+SELECT 1::BIGINT AS fold_id, 'test' AS split, id, ds, y
+FROM model_name_intermittent
+WHERE ds >= '2024-02-15'::TIMESTAMP AND ds < '2024-02-18'::TIMESTAMP;
+
+#######################################
+# _ts_forecast_native: Basic Models
+#######################################
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'Naive', MAP{});
+----
+Naive
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'SMA', MAP{});
+----
+SMA
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'SeasonalNaive', MAP{});
+----
+SeasonalNaive
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'SES', MAP{});
+----
+SES
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'SESOptimized', MAP{});
+----
+SESOptimized
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'RandomWalkDrift', MAP{});
+----
+RandomWalkDrift
+
+#######################################
+# _ts_forecast_native: Exponential Smoothing
+#######################################
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'Holt', MAP{});
+----
+Holt
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'HoltWinters', MAP{});
+----
+HoltWinters
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'SeasonalES', MAP{});
+----
+SeasonalES
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'SeasonalESOptimized', MAP{});
+----
+SeasonalESOptimized
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'SeasonalWindowAverage', MAP{});
+----
+SeasonalWindowAverage
+
+#######################################
+# _ts_forecast_native: Theta Methods
+#######################################
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'Theta', MAP{});
+----
+Theta
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'OptimizedTheta', MAP{});
+----
+OptimizedTheta
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'DynamicTheta', MAP{});
+----
+DynamicTheta
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'DynamicOptimizedTheta', MAP{});
+----
+DynamicOptimizedTheta
+
+#######################################
+# _ts_forecast_native: State Space / ARIMA
+#######################################
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'ETS', MAP{});
+----
+ETS
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'ARIMA', MAP{});
+----
+ARIMA
+
+#######################################
+# _ts_forecast_native: Multiple Seasonality
+#######################################
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'MFLES', MAP{});
+----
+MFLES
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'MSTL', MAP{});
+----
+MSTL
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'TBATS', MAP{});
+----
+TBATS
+
+#######################################
+# _ts_forecast_native: Intermittent Demand
+#######################################
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_intermittent), 3, '1d', 'CrostonClassic', MAP{});
+----
+CrostonClassic
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_intermittent), 3, '1d', 'CrostonOptimized', MAP{});
+----
+CrostonOptimized
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_intermittent), 3, '1d', 'CrostonSBA', MAP{});
+----
+CrostonSBA
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_intermittent), 3, '1d', 'ADIDA', MAP{});
+----
+ADIDA
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_intermittent), 3, '1d', 'IMAPA', MAP{});
+----
+IMAPA
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_intermittent), 3, '1d', 'TSB', MAP{});
+----
+TSB
+
+#######################################
+# _ts_forecast_native: Auto Models (name starts with prefix)
+#######################################
+
+query I
+SELECT DISTINCT model_name LIKE 'AutoETS%' FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'AutoETS', MAP{});
+----
+true
+
+query I
+SELECT DISTINCT model_name LIKE 'AutoARIMA%' FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'AutoARIMA', MAP{});
+----
+true
+
+query I
+SELECT DISTINCT model_name LIKE 'AutoTheta%' FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'AutoTheta', MAP{});
+----
+true
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'AutoMFLES', MAP{});
+----
+AutoMFLES
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'AutoMSTL', MAP{});
+----
+AutoMSTL
+
+query I
+SELECT DISTINCT model_name LIKE 'AutoTBATS%' FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'AutoTBATS', MAP{});
+----
+true
+
+#######################################
+# _ts_cv_forecast_native: representative models
+# Covers each helper-sharing group plus Auto
+#######################################
+
+query I
+SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'Naive', MAP{})
+WHERE split = 'test';
+----
+Naive
+
+query I
+SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'SESOptimized', MAP{})
+WHERE split = 'test';
+----
+SESOptimized
+
+query I
+SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'RandomWalkDrift', MAP{})
+WHERE split = 'test';
+----
+RandomWalkDrift
+
+query I
+SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'HoltWinters', MAP{})
+WHERE split = 'test';
+----
+HoltWinters
+
+query I
+SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'SeasonalESOptimized', MAP{})
+WHERE split = 'test';
+----
+SeasonalESOptimized
+
+query I
+SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'OptimizedTheta', MAP{})
+WHERE split = 'test';
+----
+OptimizedTheta
+
+query I
+SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'DynamicOptimizedTheta', MAP{})
+WHERE split = 'test';
+----
+DynamicOptimizedTheta
+
+query I
+SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'ETS', MAP{})
+WHERE split = 'test';
+----
+ETS
+
+query I
+SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'ARIMA', MAP{})
+WHERE split = 'test';
+----
+ARIMA
+
+query I
+SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'MFLES', MAP{})
+WHERE split = 'test';
+----
+MFLES
+
+query I
+SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'MSTL', MAP{})
+WHERE split = 'test';
+----
+MSTL
+
+query I
+SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'TBATS', MAP{})
+WHERE split = 'test';
+----
+TBATS
+
+# Intermittent demand models via CV
+query I
+SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv_intermittent), 'CrostonClassic', MAP{})
+WHERE split = 'test';
+----
+CrostonClassic
+
+query I
+SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv_intermittent), 'IMAPA', MAP{})
+WHERE split = 'test';
+----
+IMAPA
+
+query I
+SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv_intermittent), 'TSB', MAP{})
+WHERE split = 'test';
+----
+TSB
+
+query I
+SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv_intermittent), 'ADIDA', MAP{})
+WHERE split = 'test';
+----
+ADIDA
+
+query I
+SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv_intermittent), 'CrostonOptimized', MAP{})
+WHERE split = 'test';
+----
+CrostonOptimized
+
+query I
+SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv_intermittent), 'CrostonSBA', MAP{})
+WHERE split = 'test';
+----
+CrostonSBA
+
+# Auto model via CV
+query I
+SELECT DISTINCT model_name LIKE 'AutoARIMA%' FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'AutoARIMA', MAP{})
+WHERE split = 'test';
+----
+true
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE model_name_data;
+
+statement ok
+DROP TABLE model_name_intermittent;
+
+statement ok
+DROP TABLE model_name_cv;
+
+statement ok
+DROP TABLE model_name_cv_intermittent;

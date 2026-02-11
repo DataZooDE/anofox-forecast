@@ -162,7 +162,7 @@ Naive
 query I
 SELECT DISTINCT model_name FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Drift', MAP{});
 ----
-Drift
+RandomWalkDrift
 
 # Test different methods produce different forecasts
 query I
