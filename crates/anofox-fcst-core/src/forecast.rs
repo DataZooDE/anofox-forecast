@@ -2219,7 +2219,7 @@ mod tests {
         for (model_type, data) in &exact_cases {
             let expected = model_type.name();
             let options = ForecastOptions {
-                model: model_type.clone(),
+                model: *model_type,
                 horizon: 3,
                 ..Default::default()
             };
@@ -2245,7 +2245,7 @@ mod tests {
         for (model_type, data) in &prefix_cases {
             let prefix = model_type.name();
             let options = ForecastOptions {
-                model: model_type.clone(),
+                model: *model_type,
                 horizon: 3,
                 ..Default::default()
             };
