@@ -31,7 +31,7 @@ name = "anofox-fcst-core"
 version = "0.1.0"
 dependencies = [
  "anofox-forecast",
- "anofox-regression 0.4.0",
+ "anofox-regression 0.5.1",
  "approx",
  "chrono",
  "faer",
@@ -54,11 +54,11 @@ dependencies = [
 
 [[package]]
 name = "anofox-forecast"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29afa9a69e89aad60959e6d95ccd3d28bd505c673685fc8f3123df51c468bab2"
+checksum = "750f8a1fe8a49ad89c42301dcc073c8203680fbbafdc260dbaaedc73970b55d6"
 dependencies = [
- "anofox-regression 0.5.0",
+ "anofox-regression 0.5.1",
  "chrono",
  "faer",
  "getrandom 0.2.16",
@@ -85,9 +85,9 @@ dependencies = [
 
 [[package]]
 name = "anofox-regression"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "555ef752bfbe9c07b89cacbd680b85c82c83be9b99121bcd909a6b4984b1216d"
+checksum = "cd3b58561594f97e5b3d4b104d649b64cd23c3674bca025b007db950064a3b30"
 dependencies = [
  "argmin",
  "argmin-math",
