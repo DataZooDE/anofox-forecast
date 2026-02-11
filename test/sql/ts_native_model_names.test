@@ -422,6 +422,34 @@ WHERE split = 'test';
 true
 
 #######################################
+# Invalid model names should error
+#######################################
+
+statement error
+SELECT * FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'AIDA', MAP{});
+----
+Unknown model: 'AIDA'
+
+statement error
+SELECT * FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'AIDA', MAP{});
+----
+Unknown model: 'AIDA'
+
+statement error
+SELECT * FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'NotAModel', MAP{});
+----
+Unknown model: 'NotAModel'
+
+statement error
+SELECT * FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'NotAModel', MAP{});
+----
+Unknown model: 'NotAModel'
+
+#######################################
 # Cleanup
 #######################################
 
