@@ -1,0 +1,84 @@
+# name: test/sql/ts_forecast_mfles_stability.test
+# description: Regression test for issue #168 - MFLES catastrophic forecasts on high-CV data
+# group: [sql]
+
+require anofox_forecast
+
+require json
+
+#######################################
+# Setup: Intermittent demand data (high coefficient of variation)
+#######################################
+
+statement ok
+CREATE TABLE intermittent_demand AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    CASE
+        WHEN i % 6 = 2 THEN 5.0 + (i % 13)::DOUBLE
+        WHEN i % 6 = 0 THEN 3.0 + (i % 7)::DOUBLE
+        ELSE 0.0
+    END AS value
+FROM generate_series(0, 37) AS t(i);
+
+#######################################
+# AutoMFLES should produce reasonable forecasts on intermittent data
+#######################################
+
+# Forecasts should not be catastrophically large (issue #168)
+query I
+SELECT bool_and(abs(unnest(f.point_forecast)) < 1000.0)
+FROM (
+    SELECT ts_forecast_agg(ts, value, 'AutoMFLES', 6, MAP([], [])) AS f
+    FROM intermittent_demand
+);
+----
+true
+
+# All forecasts should be finite
+query I
+SELECT bool_and(isfinite(unnest(f.point_forecast)))
+FROM (
+    SELECT ts_forecast_agg(ts, value, 'AutoMFLES', 6, MAP([], [])) AS f
+    FROM intermittent_demand
+);
+----
+true
+
+#######################################
+# MFLES should also work on regular seasonal data
+#######################################
+
+statement ok
+CREATE TABLE regular_seasonal AS
+SELECT
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ts,
+    100.0 + (i % 7) * 10.0 + i * 0.5 AS value
+FROM generate_series(0, 55) AS t(i);
+
+# MFLES produces correct horizon length
+query I
+SELECT length((ts_forecast_agg(ts, value, 'MFLES', 7, MAP([], []))).point_forecast)
+FROM regular_seasonal;
+----
+7
+
+# MFLES forecasts are finite on regular data
+query I
+SELECT bool_and(isfinite(unnest(f.point_forecast)))
+FROM (
+    SELECT ts_forecast_agg(ts, value, 'MFLES', 7, MAP([], [])) AS f
+    FROM regular_seasonal
+);
+----
+true
+
+# MFLES forecasts are in a reasonable range for this data (values roughly 100-135)
+query I
+SELECT bool_and(abs(unnest(f.point_forecast)) < 500.0)
+FROM (
+    SELECT ts_forecast_agg(ts, value, 'MFLES', 7, MAP([], [])) AS f
+    FROM regular_seasonal
+);
+----
+true

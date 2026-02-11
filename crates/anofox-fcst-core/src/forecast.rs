@@ -10,6 +10,7 @@ use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig};
 use anofox_forecast::models::exponential::{AutoETS, AutoETSConfig, ETSSpec, ETS as ETSModel};
 use anofox_forecast::models::tbats::AutoTBATS;
 use anofox_forecast::models::theta::AutoTheta;
+use anofox_forecast::models::MFLES;
 use anofox_forecast::prelude::Forecaster;
 
 /// Forecast result.
@@ -1541,12 +1542,57 @@ fn forecast_auto_tbats(values: &[f64], horizon: usize, period: usize) -> Result<
 }
 
 fn forecast_mfles(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
-    // MFLES: Multiple Frequency Locally Estimated Scatterplot Smoothing
-    // Simplified: use seasonal exponential smoothing
-    let result = forecast_seasonal_es(values, horizon, period)?;
+    use chrono::{Duration, TimeZone, Utc};
+
+    // Create timestamps for TimeSeries (required by anofox-forecast)
+    let base = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+    let timestamps: Vec<_> = (0..values.len())
+        .map(|i| base + Duration::hours(i as i64))
+        .collect();
+
+    let ts = TimeSeries::univariate(timestamps, values.to_vec()).map_err(|e| {
+        ForecastError::ComputationError(format!("Failed to create TimeSeries: {}", e))
+    })?;
+
+    let seasonal_periods = if period > 1 { vec![period] } else { vec![] };
+    let mut model = MFLES::new(seasonal_periods);
+
+    // Fit the model
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("MFLES fit failed: {}", e)))?;
+
+    // Get forecasts
+    let forecast = model
+        .predict(horizon)
+        .map_err(|e| ForecastError::ComputationError(format!("MFLES predict failed: {}", e)))?;
+
+    // Extract point forecasts
+    let point = forecast.primary().to_vec();
+
+    // Extract confidence intervals
+    let lower = forecast
+        .lower()
+        .and_then(|intervals| intervals.first())
+        .cloned()
+        .unwrap_or_default();
+    let upper = forecast
+        .upper()
+        .and_then(|intervals| intervals.first())
+        .cloned()
+        .unwrap_or_default();
+
     Ok(ForecastOutput {
+        point,
+        lower,
+        upper,
+        fitted: model.fitted_values().map(|v| v.to_vec()),
+        residuals: model.residuals().map(|v| v.to_vec()),
+        // Empty model_name: the caller uses enum name (MFLES or AutoMFLES)
         model_name: String::new(),
-        ..result
+        aic: None,
+        bic: None,
+        mse: None,
     })
 }
 
@@ -2597,5 +2643,149 @@ mod tests {
         // Note: They might occasionally be similar, but typically differ
         println!("AutoARIMA forecasts: {:?}", auto_result.point);
         println!("Simple ARIMA forecasts: {:?}", simple_result.point);
+    }
+
+    #[test]
+    fn test_mfles_uses_proper_implementation() {
+        // Verify MFLES uses the proper anofox-forecast MFLES model
+        let values: Vec<Option<f64>> = (0..48)
+            .map(|i| {
+                let trend = i as f64 * 0.5;
+                let seasonal = 10.0 * ((i % 12) as f64 * std::f64::consts::PI / 6.0).sin();
+                Some(100.0 + trend + seasonal)
+            })
+            .collect();
+
+        let options = ForecastOptions {
+            model: ModelType::MFLES,
+            horizon: 12,
+            include_fitted: true,
+            ..Default::default()
+        };
+
+        let result = forecast(&values, &options).unwrap();
+        assert_eq!(result.point.len(), 12);
+        assert_eq!(result.model_name, "MFLES");
+        assert!(result.point.iter().all(|v| v.is_finite()));
+        assert!(result.fitted.is_some());
+    }
+
+    #[test]
+    fn test_mfles_high_cv_no_catastrophe() {
+        // High coefficient-of-variation series that previously caused catastrophic forecasts
+        // Simulates intermittent demand with high variance
+        let values: Vec<Option<f64>> = vec![
+            Some(0.0),
+            Some(0.0),
+            Some(5.0),
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+            Some(12.0),
+            Some(0.0),
+            Some(0.0),
+            Some(3.0),
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+            Some(8.0),
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+            Some(15.0),
+            Some(0.0),
+            Some(0.0),
+            Some(1.0),
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+            Some(6.0),
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+            Some(10.0),
+            Some(0.0),
+            Some(0.0),
+            Some(2.0),
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+        ];
+
+        let options = ForecastOptions {
+            model: ModelType::AutoMFLES,
+            horizon: 12,
+            ..Default::default()
+        };
+
+        let result = forecast(&values, &options).unwrap();
+        assert_eq!(result.point.len(), 12);
+        // Forecasts should be reasonable — not in the billions
+        let max_actual = 15.0;
+        for (i, &v) in result.point.iter().enumerate() {
+            assert!(v.is_finite(), "Forecast at step {} is not finite: {}", i, v);
+            assert!(
+                v.abs() < max_actual * 100.0,
+                "Forecast at step {} is catastrophic: {} (max actual was {})",
+                i,
+                v,
+                max_actual
+            );
+        }
+    }
+
+    #[test]
+    fn test_mfles_intermittent_stable() {
+        // Pure intermittent demand — lots of zeros with occasional spikes
+        let values: Vec<Option<f64>> = vec![
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+            Some(1.0),
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+            Some(2.0),
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+            Some(1.0),
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+            Some(3.0),
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+            Some(0.0),
+            Some(1.0),
+        ];
+
+        let options = ForecastOptions {
+            model: ModelType::MFLES,
+            horizon: 6,
+            ..Default::default()
+        };
+
+        let result = forecast(&values, &options).unwrap();
+        assert_eq!(result.point.len(), 6);
+        // All forecasts should be finite and within a reasonable range
+        let max_actual = 3.0;
+        for (i, &v) in result.point.iter().enumerate() {
+            assert!(v.is_finite(), "Forecast at step {} is not finite: {}", i, v);
+            assert!(
+                v.abs() < max_actual * 100.0,
+                "Forecast at step {} diverged: {} (max actual was {})",
+                i,
+                v,
+                max_actual
+            );
+        }
     }
 }
