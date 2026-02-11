@@ -548,6 +548,9 @@ static OperatorFinalizeResultType TsForecastNativeFinalize(
             );
 
             if (!success) {
+                if (error.code == INVALID_MODEL) {
+                    throw InvalidInputException(string(error.message));
+                }
                 // Skip this group on error
                 continue;
             }

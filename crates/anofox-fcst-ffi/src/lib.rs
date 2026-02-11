@@ -3358,9 +3358,15 @@ pub unsafe extern "C" fn anofox_ts_forecast(
             .to_str()
             .unwrap_or("auto");
 
-        let model_type: anofox_fcst_core::ModelType = model_str
-            .parse()
-            .unwrap_or(anofox_fcst_core::ModelType::AutoETS);
+        let model_type: anofox_fcst_core::ModelType = match model_str.parse() {
+            Ok(m) => m,
+            Err(_) => {
+                return Err(anofox_fcst_core::ForecastError::InvalidModel(format!(
+                    "Unknown model: '{}'",
+                    model_str
+                )))
+            }
+        };
 
         // Parse ETS model spec (e.g., "AAA", "MNM", "AAdA")
         let ets_spec = CStr::from_ptr(opts.ets_model.as_ptr())
@@ -3561,9 +3567,15 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
             .to_str()
             .unwrap_or("auto");
 
-        let model_type: anofox_fcst_core::ModelType = model_str
-            .parse()
-            .unwrap_or(anofox_fcst_core::ModelType::AutoETS);
+        let model_type: anofox_fcst_core::ModelType = match model_str.parse() {
+            Ok(m) => m,
+            Err(_) => {
+                return Err(anofox_fcst_core::ForecastError::InvalidModel(format!(
+                    "Unknown model: '{}'",
+                    model_str
+                )))
+            }
+        };
 
         // Parse ETS model spec (e.g., "AAA", "MNM", "AAdA")
         let ets_spec = CStr::from_ptr(opts.ets_model.as_ptr())
