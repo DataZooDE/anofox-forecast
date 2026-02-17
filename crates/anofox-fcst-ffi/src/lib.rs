@@ -3496,6 +3496,7 @@ pub unsafe extern "C" fn anofox_ts_forecast(
                     6 => ErrorCode::InsufficientData,
                     7 => ErrorCode::InvalidDateFormat,
                     8 => ErrorCode::InvalidFrequency,
+                    9 => ErrorCode::InvalidInput, // InvalidParameter → InvalidInput at FFI boundary
                     _ => ErrorCode::InternalError,
                 };
                 (*out_error).set_error(error_code, &e.to_string());
@@ -3740,7 +3741,19 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
         }
         Ok(Err(e)) => {
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                let error_code = match e.to_code() {
+                    1 => ErrorCode::NullPointer,
+                    2 => ErrorCode::InvalidInput,
+                    3 => ErrorCode::ComputationError,
+                    4 => ErrorCode::AllocationError,
+                    5 => ErrorCode::InvalidModel,
+                    6 => ErrorCode::InsufficientData,
+                    7 => ErrorCode::InvalidDateFormat,
+                    8 => ErrorCode::InvalidFrequency,
+                    9 => ErrorCode::InvalidInput, // InvalidParameter → InvalidInput at FFI boundary
+                    _ => ErrorCode::InternalError,
+                };
+                (*out_error).set_error(error_code, &e.to_string());
             }
             false
         }
