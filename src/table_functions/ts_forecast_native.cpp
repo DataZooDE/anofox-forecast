@@ -5,6 +5,7 @@
 #include "duckdb/common/string_util.hpp"
 #include <algorithm>
 #include <map>
+#include <unordered_set>
 #include <mutex>
 #include <atomic>
 #include <thread>
@@ -258,6 +259,47 @@ static double ParseDoubleFromParams(const Value &params_value, const string &key
 }
 
 // ============================================================================
+// Parameter Validation
+// ============================================================================
+
+static void ValidateParamKeys(const Value &params_value) {
+    static const unordered_set<string> valid_keys = {
+        "model", "seasonal_period", "confidence_level"
+    };
+
+    vector<string> unknown_keys;
+
+    if (params_value.type().id() == LogicalTypeId::MAP) {
+        auto &map_children = MapValue::GetChildren(params_value);
+        for (auto &child : map_children) {
+            auto &key = StructValue::GetChildren(child)[0];
+            string key_str = key.ToString();
+            if (valid_keys.find(key_str) == valid_keys.end()) {
+                unknown_keys.push_back(key_str);
+            }
+        }
+    } else if (params_value.type().id() == LogicalTypeId::STRUCT) {
+        auto &child_types = StructType::GetChildTypes(params_value.type());
+        for (idx_t i = 0; i < child_types.size(); i++) {
+            if (valid_keys.find(child_types[i].first) == valid_keys.end()) {
+                unknown_keys.push_back(child_types[i].first);
+            }
+        }
+    }
+
+    if (!unknown_keys.empty()) {
+        string unknown_list;
+        for (size_t i = 0; i < unknown_keys.size(); i++) {
+            if (i > 0) unknown_list += ", ";
+            unknown_list += "'" + unknown_keys[i] + "'";
+        }
+        throw InvalidInputException(
+            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, confidence_level",
+            unknown_list);
+    }
+}
+
+// ============================================================================
 // Bind Function
 // ============================================================================
 
@@ -294,9 +336,26 @@ static unique_ptr<FunctionData> TsForecastNativeBind(
     // Parse params (index 4)
     if (input.inputs.size() >= 5 && !input.inputs[4].IsNull()) {
         auto &params = input.inputs[4];
+        ValidateParamKeys(params);
         bind_data->model_spec = ParseStringFromParams(params, "model", "");
         bind_data->seasonal_period = ParseInt64FromParams(params, "seasonal_period", 0);
         bind_data->confidence_level = ParseDoubleFromParams(params, "confidence_level", 0.90);
+
+        // Validate confidence_level range
+        if (bind_data->confidence_level <= 0.0 || bind_data->confidence_level >= 1.0) {
+            throw InvalidInputException(
+                "Invalid confidence_level: %.2f. Must be between 0.0 and 1.0 (exclusive). "
+                "Common values: 0.80 (80%%), 0.90 (90%%), 0.95 (95%%), 0.99 (99%%)",
+                bind_data->confidence_level);
+        }
+
+        // Validate 'model' param is only used with ETS method
+        if (!bind_data->model_spec.empty() && bind_data->method != "ETS") {
+            throw InvalidInputException(
+                "Parameter 'model' (value: '%s') is only valid when method='ETS'. "
+                "Current method is '%s'. Remove the 'model' parameter or change method to 'ETS'.",
+                bind_data->model_spec, bind_data->method);
+        }
     }
 
     // Detect column types from input
@@ -518,13 +577,12 @@ static OperatorFinalizeResultType TsForecastNativeFinalize(
             ForecastOptions opts;
             memset(&opts, 0, sizeof(opts));
 
-            // Combine method and model_spec
-            string full_method = bind_data.method;
-            if (!bind_data.model_spec.empty()) {
-                full_method += ":" + bind_data.model_spec;
-            }
-            strncpy(opts.model, full_method.c_str(), sizeof(opts.model) - 1);
+            strncpy(opts.model, bind_data.method.c_str(), sizeof(opts.model) - 1);
             opts.model[sizeof(opts.model) - 1] = '\0';
+            if (!bind_data.model_spec.empty()) {
+                strncpy(opts.ets_model, bind_data.model_spec.c_str(), sizeof(opts.ets_model) - 1);
+                opts.ets_model[sizeof(opts.ets_model) - 1] = '\0';
+            }
 
             opts.horizon = static_cast<int>(bind_data.horizon);
             opts.confidence_level = bind_data.confidence_level;
@@ -548,10 +606,10 @@ static OperatorFinalizeResultType TsForecastNativeFinalize(
             );
 
             if (!success) {
-                if (error.code == INVALID_MODEL) {
+                if (error.code == INVALID_MODEL || error.code == INVALID_INPUT) {
                     throw InvalidInputException(string(error.message));
                 }
-                // Skip this group on error
+                // Skip this group on computation/data errors
                 continue;
             }
 

@@ -431,6 +431,38 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         1
     };
 
+    // Validate seasonal_period vs model compatibility
+    // Only error when user explicitly set seasonal_period (auto_detect_seasonality == false)
+    if !options.auto_detect_seasonality && options.seasonal_period > 1 {
+        let non_seasonal = matches!(
+            options.model,
+            ModelType::Naive
+                | ModelType::SES
+                | ModelType::SESOptimized
+                | ModelType::Holt
+                | ModelType::RandomWalkDrift
+                | ModelType::ARIMA
+                | ModelType::Theta
+                | ModelType::OptimizedTheta
+                | ModelType::DynamicTheta
+                | ModelType::DynamicOptimizedTheta
+                | ModelType::CrostonClassic
+                | ModelType::CrostonOptimized
+                | ModelType::CrostonSBA
+                | ModelType::TSB
+                | ModelType::ADIDA
+                | ModelType::IMAPA
+        );
+        if non_seasonal {
+            return Err(ForecastError::InvalidInput(format!(
+                "Model '{}' does not use seasonal_period (got {}). \
+                 For seasonal forecasting, use: SeasonalNaive, HoltWinters, SeasonalES, AutoETS, AutoMFLES, AutoMSTL, or AutoTBATS.",
+                options.model.name(),
+                options.seasonal_period
+            )));
+        }
+    }
+
     // Generate forecast based on model
     // Note: Auto* models (AutoARIMA, AutoETS, etc.) run their respective algorithms
     // with automatic parameter selection, not a generic model selection heuristic
@@ -1092,19 +1124,22 @@ fn forecast_ets(
     period: usize,
     ets_spec: Option<&str>,
 ) -> Result<ForecastOutput> {
-    // Parse ETS specification if provided
-    let spec = if let Some(notation) = ets_spec {
-        // First validate the notation format
+    // Parse and validate ETS specification if provided
+    if let Some(notation) = ets_spec {
+        // Validate the notation format
         if !is_valid_ets_notation(notation) {
             return Err(ForecastError::InvalidInput(format!(
                 "Invalid ETS model specification '{}'. \
-                 Expected format: ETS notation like 'AAA', 'MNM', 'AAdA' where \
-                 E=Error (A/M), T=Trend (A/M/N, optionally with 'd' for damped), S=Seasonal (A/M/N).",
+                 Expected 3 or 4 character notation: Error(A/M) + Trend(A/M/N) + Seasonal(A/M/N), \
+                 with optional 'd' for damped trend. \
+                 Examples: 'AAA' (additive), 'MNM' (multiplicative error, no trend), \
+                 'AAdA' (additive damped trend). \
+                 Valid characters: A=Additive, M=Multiplicative, N=None, d=Damped.",
                 notation
             )));
         }
 
-        // Use from_notation to parse the spec
+        // Parse the spec
         let parsed_spec = ETSSpec::from_notation(notation).map_err(|e| {
             ForecastError::InvalidInput(format!(
                 "Invalid ETS model specification '{}': {}",
@@ -1112,32 +1147,27 @@ fn forecast_ets(
             ))
         })?;
 
-        // Validate the spec (reject unstable combinations like MAA, MAdA)
+        // Reject unstable combinations (multiplicative error with additive components)
         if !parsed_spec.is_valid() {
             return Err(ForecastError::InvalidInput(format!(
-                "ETS model specification '{}' is unstable (per FPP3 taxonomy). \
-                 MAA and MAdA combinations are not allowed.",
+                "ETS model '{}' is an unstable combination (multiplicative error with additive components). \
+                 Try one of: 'AAA', 'ANA', 'AAdA', 'MNM', 'MAM', 'MAdM', 'MMM', 'MMdM', or use 'AutoETS' for automatic selection.",
                 notation
             )));
         }
 
-        Some(parsed_spec)
-    } else {
-        None
-    };
-
-    // If we have a valid spec, try to use the anofox-forecast ETS model
-    if let Some(ets_spec) = spec {
-        // Try to use the real ETS forecaster
-        match forecast_with_ets_spec(values, horizon, period, &ets_spec) {
-            Ok(output) => return Ok(output),
-            Err(_) => {
-                // Fall back to simplified implementation
-            }
-        }
+        // User explicitly requested this spec — if it fails to fit,
+        // return ComputationError so the group is skipped (null forecast),
+        // not an InvalidInput error that would abort the whole pipeline.
+        return forecast_with_ets_spec(values, horizon, period, &parsed_spec).map_err(|e| {
+            ForecastError::ComputationError(format!(
+                "ETS model '{}' failed to fit: {}",
+                notation, e
+            ))
+        });
     }
 
-    // Fallback: simplified ETS implementation based on data characteristics
+    // No explicit spec: use simplified ETS implementation based on data characteristics
     if period > 1 && values.len() >= 2 * period {
         forecast_holt_winters(values, horizon, period, 0.3, 0.1, 0.1)
     } else if values.len() >= 10 {
@@ -2520,13 +2550,40 @@ mod tests {
     }
 
     #[test]
-    fn test_ets_valid_spec_succeeds() {
-        // Test that a valid ETS spec succeeds
-        let values: Vec<Option<f64>> = (0..20).map(|i| Some(100.0 + i as f64)).collect();
+    fn test_ets_explicit_spec_computation_error_not_input_error() {
+        // When user explicitly requests a valid ETS spec and the underlying library
+        // fails to fit, return ComputationError (group skipped, null forecast)
+        // rather than InvalidInput (which would abort the pipeline).
+        let values: Vec<Option<f64>> = (0..60).map(|i| Some(100.0 + i as f64)).collect();
 
         let options = ForecastOptions {
             model: ModelType::ETS,
-            ets_spec: Some("AAA".to_string()),
+            ets_spec: Some("AAN".to_string()),
+            horizon: 5,
+            ..Default::default()
+        };
+
+        let result = forecast(&values, &options);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        // Must be ComputationError (skippable), not InvalidInput (pipeline-aborting)
+        assert_eq!(
+            err.to_code(),
+            3,
+            "Expected ComputationError (code 3), got code {} for: {}",
+            err.to_code(),
+            err
+        );
+    }
+
+    #[test]
+    fn test_ets_without_spec_falls_back() {
+        // ETS without explicit spec should still fall back to simplified implementation
+        let values: Vec<Option<f64>> = (0..60).map(|i| Some(100.0 + i as f64)).collect();
+
+        let options = ForecastOptions {
+            model: ModelType::ETS,
+            ets_spec: None,
             horizon: 5,
             ..Default::default()
         };
@@ -2534,7 +2591,7 @@ mod tests {
         let result = forecast(&values, &options);
         assert!(
             result.is_ok(),
-            "Expected success for valid ETS spec 'AAA': {:?}",
+            "ETS without explicit spec should fall back: {:?}",
             result.err()
         );
     }

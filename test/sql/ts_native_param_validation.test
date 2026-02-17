@@ -1,0 +1,247 @@
+# name: test/sql/ts_native_param_validation.test
+# description: Tests for parameter validation in _ts_forecast_native and _ts_cv_forecast_native
+#              Verifies explicit error messages for invalid parameters (#177)
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup: test data
+#######################################
+
+statement ok
+CREATE TABLE param_test_data AS
+SELECT
+    'G1' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    10.0 + i * 0.5 + sin(i * 3.14159 / 7) * 3 AS y
+FROM generate_series(0, 59) AS t(i)
+UNION ALL
+SELECT
+    'G2' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    20.0 + i * 0.3 + cos(i * 3.14159 / 7) * 2 AS y
+FROM generate_series(0, 59) AS t(i);
+
+statement ok
+CREATE TABLE param_test_cv AS
+SELECT 1::BIGINT AS fold_id, 'train' AS split, id, ds, y
+FROM param_test_data
+WHERE ds < '2024-02-15'::TIMESTAMP
+UNION ALL
+SELECT 1::BIGINT AS fold_id, 'test' AS split, id, ds, y
+FROM param_test_data
+WHERE ds >= '2024-02-15'::TIMESTAMP AND ds < '2024-02-18'::TIMESTAMP;
+
+#######################################
+# Unknown parameter key → error
+#######################################
+
+# Typo in param name: 'methd' instead of 'model'
+statement error
+SELECT * FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'AutoETS', MAP{'methd': 'ETS'});
+----
+Unknown parameter
+
+# Multiple unknown keys
+statement error
+SELECT * FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'AutoETS', MAP{'foo': '1', 'bar': '2'});
+----
+Unknown parameter
+
+# Unknown key in CV function
+statement error
+SELECT * FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM param_test_cv), 'AutoETS', MAP{'methd': 'ETS'});
+----
+Unknown parameter
+
+#######################################
+# Invalid confidence_level → range error
+#######################################
+
+# confidence_level = 0 (boundary)
+statement error
+SELECT * FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'AutoETS', MAP{'confidence_level': '0.0'});
+----
+Invalid confidence_level
+
+# confidence_level negative
+statement error
+SELECT * FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'AutoETS', MAP{'confidence_level': '-0.5'});
+----
+Invalid confidence_level
+
+# confidence_level >= 1.0
+statement error
+SELECT * FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'AutoETS', MAP{'confidence_level': '1.0'});
+----
+Invalid confidence_level
+
+# confidence_level way out of range
+statement error
+SELECT * FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'AutoETS', MAP{'confidence_level': '5.0'});
+----
+Invalid confidence_level
+
+# CV function: confidence_level out of range
+statement error
+SELECT * FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM param_test_cv), 'AutoETS', MAP{'confidence_level': '1.5'});
+----
+Invalid confidence_level
+
+#######################################
+# 'model' param with non-ETS method → error
+#######################################
+
+# model param with Naive method
+statement error
+SELECT * FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'Naive', MAP{'model': 'AAA'});
+----
+only valid when method='ETS'
+
+# model param with AutoMFLES method
+statement error
+SELECT * FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'AutoMFLES', MAP{'model': 'AAA'});
+----
+only valid when method='ETS'
+
+# CV function: model param with non-ETS method
+statement error
+SELECT * FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM param_test_cv), 'Holt', MAP{'model': 'ANA'});
+----
+only valid when method='ETS'
+
+#######################################
+# Invalid ETS notation → error with format explanation
+#######################################
+
+statement error
+SELECT * FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'ETS', MAP{'model': 'XYZ'});
+----
+Invalid ETS model specification
+
+statement error
+SELECT * FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'ETS', MAP{'model': 'AAAAA'});
+----
+Invalid ETS model specification
+
+#######################################
+# Unstable ETS combination → error with alternatives
+#######################################
+
+statement error
+SELECT * FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'ETS', MAP{'model': 'MAA'});
+----
+unstable
+
+statement error
+SELECT * FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'ETS', MAP{'model': 'MAdA'});
+----
+unstable
+
+#######################################
+# ETS spec is passed through to Rust (no longer silently ignored)
+#######################################
+
+# ETS with explicit spec that fails to fit → groups skipped (0 rows), not an error
+# The spec is valid but the underlying model can't converge — pipeline continues
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'ETS', MAP{'model': 'AAA'});
+----
+0
+
+# ETS without model spec should fall back to simplified implementation
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'ETS', MAP{});
+----
+6
+
+#######################################
+# seasonal_period with non-seasonal model → error
+#######################################
+
+# Naive does not use seasonal_period
+statement error
+SELECT * FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'Naive', MAP{'seasonal_period': '7'});
+----
+does not use seasonal_period
+
+# SES does not use seasonal_period
+statement error
+SELECT * FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'SES', MAP{'seasonal_period': '7'});
+----
+does not use seasonal_period
+
+# CrostonClassic does not use seasonal_period
+statement error
+SELECT * FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'CrostonClassic', MAP{'seasonal_period': '52'});
+----
+does not use seasonal_period
+
+# Theta does not use seasonal_period
+statement error
+SELECT * FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'Theta', MAP{'seasonal_period': '12'});
+----
+does not use seasonal_period
+
+# But seasonal models with seasonal_period should work fine
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'SeasonalNaive', MAP{'seasonal_period': '7'});
+----
+6
+
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'HoltWinters', MAP{'seasonal_period': '7'});
+----
+6
+
+#######################################
+# Valid params still work correctly
+#######################################
+
+# Valid confidence_level
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'AutoETS', MAP{'confidence_level': '0.95'});
+----
+6
+
+# Empty MAP is fine
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'AutoETS', MAP{});
+----
+6
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE param_test_data;
+
+statement ok
+DROP TABLE param_test_cv;
