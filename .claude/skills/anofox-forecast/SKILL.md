@@ -1,17 +1,17 @@
 ---
 name: anofox-forecast
 description: >
-  Comprehensive reference for the Anofox Forecast DuckDB extension (v0.4.3).
+  Comprehensive reference for the Anofox Forecast DuckDB extension (v0.4.5).
   Use when working with ts_* or anofox_fcst_ts_* functions, time series
   forecasting in DuckDB, or the anofox_forecast extension. Provides API
   signatures, model selection, common workflows, and critical gotchas.
-version: 0.4.3
+version: 0.4.5
 user-invocable: false
 ---
 
 # Anofox Forecast DuckDB Extension — Cheat Sheet
 
-**Extension:** `anofox_forecast` v0.4.3 | **DuckDB:** v1.4.x+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` v0.4.5 | **DuckDB:** v1.4.x+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 ## Installation
 
