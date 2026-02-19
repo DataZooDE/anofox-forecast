@@ -6,7 +6,7 @@
 
 ```sql
 -- Multiple series (grouped) - recommended
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'AutoETS', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'AutoETS', horizon, frequency, params);
 
 -- Single series
 SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoETS', horizon, params);
@@ -55,6 +55,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'AutoETS',
     30,
+    '1d',
     {'seasonal_period': 7}
 );
 
@@ -65,7 +66,8 @@ SELECT * FROM ts_forecast_by(
     date,
     quantity,
     'AutoETS',
-    12
+    12,
+    '1d'
 );
 
 -- With custom confidence level
@@ -76,6 +78,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'AutoETS',
     12,
+    '1d',
     {'seasonal_period': 7, 'confidence_level': 0.90}
 );
 ```

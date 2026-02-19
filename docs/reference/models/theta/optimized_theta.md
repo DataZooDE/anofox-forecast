@@ -9,10 +9,10 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'OptimizedTheta', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'OptimizedTheta', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'OptimizedTheta', horizon, frequency, params);
 
 -- With exogenous variables
-SELECT * FROM ts_forecast_exog_by('table', group_col, date_col, value_col, 'x1,x2', 'future_table', 'OptimizedTheta', horizon, params);
+SELECT * FROM ts_forecast_exog_by('table', group_col, date_col, value_col, 'x1,x2', 'future_table', 'OptimizedTheta', horizon, frequency, params);
 ```
 
 ## Description
@@ -51,7 +51,8 @@ SELECT * FROM ts_forecast_by(
     date,
     quantity,
     'OptimizedTheta',
-    6
+    6,
+    '1mo'
 );
 
 -- Seasonal data (with explicit period)
@@ -62,6 +63,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'OptimizedTheta',
     12,
+    '1mo',
     {'seasonal_period': 12}
 );
 
@@ -75,7 +77,7 @@ SELECT * FROM ts_forecast_exog_by(
     'future_exog',
     'OptimizedTheta',
     6,
-    {}
+    '1mo'
 );
 ```
 

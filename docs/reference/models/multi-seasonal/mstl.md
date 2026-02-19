@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'MSTL', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'MSTL', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'MSTL', horizon, frequency, params);
 ```
 
 ## Description
@@ -47,6 +47,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'MSTL',
     30,
+    '1d',
     {'seasonal_periods': '[7, 365]'}
 );
 
@@ -58,6 +59,7 @@ SELECT * FROM ts_forecast_by(
     consumption,
     'MSTL',
     168,
+    '1h',
     {'seasonal_periods': '[24, 168]'}
 );
 ```

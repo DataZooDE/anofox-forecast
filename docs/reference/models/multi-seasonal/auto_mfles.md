@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoMFLES', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'AutoMFLES', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'AutoMFLES', horizon, frequency, params);
 ```
 
 ## Description
@@ -53,6 +53,7 @@ SELECT * FROM ts_forecast_by(
     consumption,
     'AutoMFLES',
     168,
+    '1h',
     {'seasonal_periods': '[24, 168]'}
 );
 ```

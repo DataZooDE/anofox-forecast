@@ -28,6 +28,7 @@ SELECT * FROM ts_forecast_by(
     revenue,                   -- target_col: value to forecast (unquoted)
     'HoltWinters',             -- method: forecasting model (seasonal)
     14,                        -- horizon: periods to forecast
+    '1d',                      -- frequency: time step between observations
     MAP{'seasonal_period': '7'}  -- params: weekly seasonality (required for seasonal models)
 );
 ```
@@ -36,10 +37,10 @@ Compare multiple models:
 
 ```sql
 -- Naive baseline (no params needed)
-SELECT *, 'Naive' AS model FROM ts_forecast_by('sales', id, date, val, 'Naive', 7, MAP{})
+SELECT *, 'Naive' AS model FROM ts_forecast_by('sales', id, date, val, 'Naive', 7, '1d', MAP{})
 UNION ALL
 -- HoltWinters with weekly seasonality
-SELECT *, 'HoltWinters' AS model FROM ts_forecast_by('sales', id, date, val, 'HoltWinters', 7, MAP{'seasonal_period': '7'});
+SELECT *, 'HoltWinters' AS model FROM ts_forecast_by('sales', id, date, val, 'HoltWinters', 7, '1d', MAP{'seasonal_period': '7'});
 ```
 
 ### Handling Seasonality
@@ -57,7 +58,7 @@ SELECT * FROM ts_detect_periods_by('daily_sales', product_id, date, value, MAP{}
 -- For forecasting
 SELECT * FROM ts_forecast_by(
     'daily_sales', product_id, date, value,
-    'AutoETS', 14,
+    'AutoETS', 14, '1d',
     MAP{'seasonal_period': '7'}  -- Pass detected period explicitly
 );
 
@@ -77,7 +78,7 @@ WITH detected AS (
 )
 SELECT * FROM ts_forecast_by(
     'daily_sales', product_id, date, value,
-    'HoltWinters', 14,
+    'HoltWinters', 14, '1d',
     MAP{'seasonal_period': (SELECT season FROM detected)::VARCHAR}
 );
 ```
@@ -106,7 +107,7 @@ FROM ts_detect_periods_by('daily_sales', product_id, date, revenue, MAP{});
 SELECT * FROM ts_forecast_by(
     'daily_sales',
     product_id, date, revenue,
-    'HoltWinters', 14,
+    'HoltWinters', 14, '1d',
     MAP{'seasonal_period': '7'}
 );
 ```
@@ -203,7 +204,7 @@ Generate forecasts for multiple time series grouped by an identifier. This is th
 
 **Signature:**
 ```sql
-ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, params) → TABLE
+ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, frequency, params?) → TABLE
 ```
 
 **Parameters:**
@@ -215,7 +216,8 @@ ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, par
 | `target_col` | IDENTIFIER | Target value column (unquoted) |
 | `method` | VARCHAR | Forecasting method (case-sensitive) |
 | `horizon` | INTEGER | Number of periods to forecast |
-| `params` | MAP or STRUCT | Model parameters |
+| `frequency` | VARCHAR | Time step between observations (e.g., `'1d'`, `'1h'`, `'1mo'`) |
+| `params` | MAP or STRUCT | Model parameters (optional) |
 
 **Returns:**
 | Column | Type | Description |
@@ -229,20 +231,20 @@ ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, par
 **Examples:**
 ```sql
 -- HoltWinters with weekly seasonality (guaranteed seasonal model)
-SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'HoltWinters', 12,
+SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'HoltWinters', 12, '1d',
     MAP{'seasonal_period': '7'});
 
 -- AutoETS considers seasonal models when seasonal_period provided
 -- (may still select non-seasonal if it fits better)
-SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'AutoETS', 12,
+SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'AutoETS', 12, '1d',
     MAP{'seasonal_period': '7'});
 
 -- MSTL with multiple seasonal periods (array as JSON string)
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'MSTL', 30,
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'MSTL', 30, '1d',
     MAP{'seasonal_periods': '[7, 365]'});
 
 -- Naive baseline (no seasonal_period needed)
-SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'Naive', 12, MAP{});
+SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'Naive', 12, '1d', MAP{});
 ```
 
 ---
@@ -253,7 +255,7 @@ Multi-series forecasting with exogenous variables. This is the **primary exogeno
 
 **Signature:**
 ```sql
-ts_forecast_exog_by(table_name, group_col, date_col, target_col, x_cols, future_table, future_date_col, future_x_cols, model, horizon, params, frequency) → TABLE
+ts_forecast_exog_by(table_name, group_col, date_col, target_col, x_cols, future_table, future_date_col, future_x_cols, frequency, model, horizon, params?) → TABLE
 ```
 
 **Supported Models with Exogenous:**
@@ -286,10 +288,10 @@ SELECT * FROM ts_forecast_exog_by(
     'future_weather',      -- future exogenous table
     date,                  -- future date column
     ['temperature'],       -- future exogenous columns
+    '1d',                  -- frequency
     'AutoARIMA',           -- model
     7,                     -- horizon
-    MAP{},                 -- params
-    '1d'                   -- frequency
+    MAP{}                  -- params (optional)
 );
 ```
 

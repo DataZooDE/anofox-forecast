@@ -59,7 +59,7 @@ SELECT product_id, ts_forecast_agg(date, value, 'AutoETS', 12, MAP{}) AS forecas
 FROM sales GROUP BY product_id;
 
 -- TABLE MACRO: Cleanest syntax, structured table output
-SELECT * FROM ts_forecast_by('sales', product_id, date, value, 'AutoETS', 12);
+SELECT * FROM ts_forecast_by('sales', product_id, date, value, 'AutoETS', 12, '1d');
 ```
 
 ---
@@ -225,10 +225,10 @@ Operate on entire tables:
 
 ```sql
 -- Single series forecast
-SELECT * FROM ts_forecast('single_series', date, value, 'AutoETS', 12);
+SELECT * FROM ts_forecast('single_series', date, value, 'AutoETS', 12, '1d');
 
 -- Multi-series forecast
-SELECT * FROM ts_forecast_by('sales', product_id, date, value, 'AutoETS', 12);
+SELECT * FROM ts_forecast_by('sales', product_id, date, value, 'AutoETS', 12, '1d');
 
 -- Statistics per series
 SELECT * FROM ts_stats_by('sales', product_id, date, value);

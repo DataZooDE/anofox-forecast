@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'TBATS', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'TBATS', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'TBATS', horizon, frequency, params);
 ```
 
 ## Description
@@ -48,6 +48,7 @@ SELECT * FROM ts_forecast_by(
     demand,
     'TBATS',
     168,
+    '1h',
     {'seasonal_periods': '[24, 168]'}
 );
 
@@ -59,6 +60,7 @@ SELECT * FROM ts_forecast_by(
     reading,
     'TBATS',
     48,
+    '1h',
     {'seasonal_periods': '[24, 168]', 'use_box_cox': false}
 );
 ```

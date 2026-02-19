@@ -36,7 +36,7 @@ SELECT * FROM ts_forecast_by(
     quantity,          -- value column
     'AutoETS',         -- forecasting model
     14,                -- forecast horizon
-    MAP{}              -- default parameters
+    '1d'               -- frequency: daily
 );
 ```
 
@@ -55,7 +55,7 @@ The extension offers three ways to work with data:
 
 ```sql
 -- 1. Table Macros (recommended for most cases)
-SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'AutoETS', 12);
+SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'AutoETS', 12, '1d');
 
 -- 2. Scalar Functions (for array operations)
 SELECT product_id, ts_stats(LIST(quantity ORDER BY date)) AS stats
@@ -72,11 +72,11 @@ Parameters can be passed as MAP (string values) or STRUCT (mixed types):
 
 ```sql
 -- STRUCT (recommended)
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'HoltWinters', 12,
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'HoltWinters', 12, '1d',
     {'seasonal_period': 7, 'alpha': 0.2});
 
 -- MAP (legacy)
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'HoltWinters', 12,
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'HoltWinters', 12, '1d',
     MAP{'seasonal_period': '7', 'alpha': '0.2'});
 ```
 
@@ -129,7 +129,7 @@ GROUP BY model_name;
 CREATE TABLE forecasts AS
 SELECT * FROM ts_forecast_by(
     'sales', product_id, date, quantity,
-    'AutoETS', 30,
+    'AutoETS', 30, '1d',
     {'seasonal_period': 7}  -- Same period as backtesting
 );
 ```

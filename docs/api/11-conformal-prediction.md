@@ -219,7 +219,7 @@ SELECT * FROM ts_conformal_calibrate(
 -- Step 3: Generate future forecasts
 CREATE TABLE future AS
 SELECT * FROM ts_forecast_by(
-    'sales', product_id, date, value, 'AutoETS', 14,
+    'sales', product_id, date, value, 'AutoETS', 14, '1d',
     {'seasonal_period': 7}
 );
 

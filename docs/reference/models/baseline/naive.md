@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'Naive', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'Naive', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'Naive', horizon, frequency, params);
 ```
 
 ## Description
@@ -46,15 +46,16 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'Naive',
     7,
+    '1d',
     {}
 );
 
 -- Compare with more complex model
 WITH naive AS (
-    SELECT * FROM ts_forecast_by('sales', id, date, val, 'Naive', 12, {})
+    SELECT * FROM ts_forecast_by('sales', id, date, val, 'Naive', 12, '1d', {})
 ),
 ets AS (
-    SELECT * FROM ts_forecast_by('sales', id, date, val, 'AutoETS', 12, {})
+    SELECT * FROM ts_forecast_by('sales', id, date, val, 'AutoETS', 12, '1d', {})
 )
 SELECT n.id, n.ds, n.forecast AS naive_fcst, e.forecast AS ets_fcst
 FROM naive n JOIN ets e ON n.id = e.id AND n.ds = e.ds;

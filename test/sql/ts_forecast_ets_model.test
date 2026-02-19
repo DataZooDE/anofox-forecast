@@ -31,13 +31,13 @@ FROM generate_series(0, 83) AS t(i);
 
 # Test: ETS without model parameter uses simplified fallback
 query I
-SELECT COUNT(*) FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, MAP{});
+SELECT COUNT(*) FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, '1d', MAP{});
 ----
 14
 
 # Test: ETS returns valid forecasts by default
 query I
-SELECT COUNT(*) FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, MAP{})
+SELECT COUNT(*) FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, '1d', MAP{})
 WHERE yhat IS NOT NULL AND yhat > 0;
 ----
 14
@@ -52,13 +52,13 @@ WHERE yhat IS NOT NULL AND yhat > 0;
 # Test: ETS with explicit model='AAA' — valid spec, but if fit fails groups are
 # skipped (0 rows returned). Pipeline continues, no error thrown.
 query I
-SELECT COUNT(*) FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, MAP{'model': 'AAA'});
+SELECT COUNT(*) FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, '1d', MAP{'model': 'AAA'});
 ----
 0
 
 # Test: ETS with model='ANN' — same: valid spec, groups skipped if fit fails
 query I
-SELECT COUNT(*) FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, MAP{'model': 'ANN'});
+SELECT COUNT(*) FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, '1d', MAP{'model': 'ANN'});
 ----
 0
 
@@ -68,13 +68,13 @@ SELECT COUNT(*) FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, MAP{'mo
 
 # Test: Invalid model spec returns error
 statement error
-SELECT * FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, MAP{'model': 'XYZ'});
+SELECT * FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, '1d', MAP{'model': 'XYZ'});
 ----
 Invalid ETS model specification
 
 # Test: Invalid model spec with wrong characters
 statement error
-SELECT * FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, MAP{'model': '123'});
+SELECT * FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, '1d', MAP{'model': '123'});
 ----
 Invalid ETS model specification
 
@@ -84,13 +84,13 @@ Invalid ETS model specification
 
 # Test: MAA (Multiplicative error, Additive trend, Additive seasonal) is unstable - rejected
 statement error
-SELECT * FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, MAP{'model': 'MAA'});
+SELECT * FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, '1d', MAP{'model': 'MAA'});
 ----
 unstable
 
 # Test: MAdA (Multiplicative error, Additive damped trend, Additive seasonal) is unstable - rejected
 statement error
-SELECT * FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, MAP{'model': 'MAdA'});
+SELECT * FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, '1d', MAP{'model': 'MAdA'});
 ----
 unstable
 
@@ -100,19 +100,19 @@ unstable
 
 # Test: 'model' param is only valid with ETS method
 statement error
-SELECT * FROM ts_forecast_by('test_ets', id, ds, value, 'Naive', 7, MAP{'model': 'AAA'});
+SELECT * FROM ts_forecast_by('test_ets', id, ds, value, 'Naive', 7, '1d', MAP{'model': 'AAA'});
 ----
 only valid when method='ETS'
 
 # Test: Unknown parameter key gives error
 statement error
-SELECT * FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, MAP{'methd': 'AAA'});
+SELECT * FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, '1d', MAP{'methd': 'AAA'});
 ----
 Unknown parameter
 
 # Test: model parameter with confidence_level (no model spec)
 query I
-SELECT COUNT(*) FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7,
+SELECT COUNT(*) FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, '1d',
     MAP{'confidence_level': '0.95'});
 ----
 14

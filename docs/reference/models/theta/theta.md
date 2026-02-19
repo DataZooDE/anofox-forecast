@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'Theta', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'Theta', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'Theta', horizon, frequency, params);
 ```
 
 ## Description
@@ -50,7 +50,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'Theta',
     6,
-    {}
+    '1mo'
 );
 
 -- With custom theta parameter
@@ -61,6 +61,7 @@ SELECT * FROM ts_forecast_by(
     revenue,
     'Theta',
     4,
+    '3mo',
     {'theta': 3.0}
 );
 ```

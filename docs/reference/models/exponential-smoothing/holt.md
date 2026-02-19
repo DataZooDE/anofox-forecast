@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'Holt', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'Holt', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'Holt', horizon, frequency, params);
 ```
 
 ## Description
@@ -48,6 +48,7 @@ SELECT * FROM ts_forecast_by(
     revenue,
     'Holt',
     6,
+    '1d',
     {}
 );
 
@@ -59,6 +60,7 @@ SELECT * FROM ts_forecast_by(
     sales,
     'Holt',
     4,
+    '1d',
     {'alpha': 0.4, 'beta': 0.2}
 );
 ```

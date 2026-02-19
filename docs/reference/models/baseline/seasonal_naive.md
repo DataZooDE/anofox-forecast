@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'SeasonalNaive', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'SeasonalNaive', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'SeasonalNaive', horizon, frequency, params);
 ```
 
 ## Description
@@ -47,6 +47,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'SeasonalNaive',
     14,
+    '1d',
     {'seasonal_period': 7}
 );
 
@@ -58,6 +59,7 @@ SELECT * FROM ts_forecast_by(
     revenue,
     'SeasonalNaive',
     12,
+    '1d',
     {'seasonal_period': 12}
 );
 ```

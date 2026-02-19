@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'CrostonOptimized', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'CrostonOptimized', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'CrostonOptimized', horizon, frequency, params);
 ```
 
 ## Description
@@ -46,7 +46,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'CrostonOptimized',
     30,
-    {}
+    '1d'
 );
 
 -- Production forecasting
@@ -57,6 +57,7 @@ SELECT * FROM ts_forecast_by(
     units,
     'CrostonOptimized',
     14,
+    '1d',
     {'include_fitted': true}
 );
 ```

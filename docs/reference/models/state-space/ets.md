@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'ETS', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'ETS', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'ETS', horizon, frequency, params);
 ```
 
 ## Description
@@ -72,6 +72,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'ETS',
     14,
+    '1d',
     {'seasonal_period': 7}
 );
 
@@ -83,6 +84,7 @@ SELECT * FROM ts_forecast_by(
     revenue,
     'ETS',
     12,
+    '1mo',
     {'model': 'MAM', 'seasonal_period': 12}
 );
 
@@ -94,6 +96,7 @@ SELECT * FROM ts_forecast_by(
     sales,
     'ETS',
     4,
+    '3mo',
     {'model': 'AAdN'}
 );
 ```

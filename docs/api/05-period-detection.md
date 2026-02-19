@@ -257,7 +257,7 @@ validated AS (
 -- Step 3: Forecast with validated period
 SELECT * FROM ts_forecast_by(
     'sales', product_id, date, value,
-    'HoltWinters', 14,
+    'HoltWinters', 14, '1d',
     MAP{'seasonal_period': '7'}  -- Use validated period
 );
 ```

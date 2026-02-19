@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'SES', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'SES', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'SES', horizon, frequency, params);
 ```
 
 ## Description
@@ -47,6 +47,7 @@ SELECT * FROM ts_forecast_by(
     stock_level,
     'SES',
     7,
+    '1d',
     {}
 );
 
@@ -58,6 +59,7 @@ SELECT * FROM ts_forecast_by(
     reading,
     'SES',
     24,
+    '1d',
     {'alpha': 0.5}
 );
 ```
