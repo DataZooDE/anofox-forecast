@@ -1837,8 +1837,14 @@ static unique_ptr<CreateMacroInfo> CreateTableMacro(const TsTableMacro &macro_de
 
 void RegisterTsTableMacros(ExtensionLoader &loader) {
     for (idx_t i = 0; ts_table_macros[i].name != nullptr; i++) {
+        // Register the short name (e.g. ts_forecast_by)
         auto info = CreateTableMacro(ts_table_macros[i]);
         loader.RegisterFunction(*info);
+
+        // Register the prefixed alias (e.g. anofox_fcst_ts_forecast_by)
+        auto alias_info = CreateTableMacro(ts_table_macros[i]);
+        alias_info->name = "anofox_fcst_" + string(ts_table_macros[i].name);
+        loader.RegisterFunction(*alias_info);
     }
 }
 

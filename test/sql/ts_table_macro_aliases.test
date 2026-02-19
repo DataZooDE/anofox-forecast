@@ -1,0 +1,75 @@
+# name: test/sql/ts_table_macro_aliases.test
+# description: Tests that anofox_fcst_ prefix aliases exist for all table macros
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup: Create test data
+#######################################
+
+statement ok
+CREATE TABLE test_data(id VARCHAR, date DATE, value DOUBLE);
+
+statement ok
+INSERT INTO test_data
+SELECT 'series1', DATE '2023-01-01' + INTERVAL (i) DAY, 100.0 + i
+FROM generate_series(0, 59) t(i);
+
+#######################################
+# Forecasting aliases
+#######################################
+
+# anofox_fcst_ts_forecast_by should work as alias
+query I
+SELECT count(*) FROM anofox_fcst_ts_forecast_by(test_data, id, date, value, 'Naive', 3);
+----
+3
+
+#######################################
+# Data preparation aliases
+#######################################
+
+# anofox_fcst_ts_fill_gaps_by should work as alias
+query I
+SELECT count(*) FROM anofox_fcst_ts_fill_gaps_by(test_data, id, date, value, '1d');
+----
+60
+
+# anofox_fcst_ts_fill_forward_by should work as alias
+query I
+SELECT count(*) FROM anofox_fcst_ts_fill_forward_by(test_data, id, date, value, '2023-03-10', '1d');
+----
+60
+
+# anofox_fcst_ts_fill_nulls_forward_by should work as alias
+query I
+SELECT count(*) FROM anofox_fcst_ts_fill_nulls_forward_by(test_data, id, date, value);
+----
+60
+
+# anofox_fcst_ts_diff_by should work as alias
+query I
+SELECT count(*) FROM anofox_fcst_ts_diff_by(test_data, id, date, value, 1);
+----
+60
+
+#######################################
+# Filtering aliases
+#######################################
+
+# anofox_fcst_ts_drop_short_by should work as alias
+query I
+SELECT count(*) FROM anofox_fcst_ts_drop_short_by(test_data, id, 100);
+----
+0
+
+#######################################
+# Stats aliases
+#######################################
+
+# anofox_fcst_ts_stats_by should work as alias
+query I
+SELECT count(*) FROM anofox_fcst_ts_stats_by(test_data, id, date, value, '1d');
+----
+1
