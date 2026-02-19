@@ -207,9 +207,6 @@ statement ok
 DROP TABLE backtest_data;
 
 statement ok
-DROP TABLE fold_data;
-
-statement ok
 DROP TABLE cv_splits_varchar;
 
 statement ok

@@ -53,8 +53,8 @@ SELECT * FROM ts_cv_forecast_by('cv_folds', unique_id, ds, y, 'Naive', MAP{});
 SELECT
     unique_id,
     fold_id,
-    ts_rmse(LIST(y ORDER BY ds), LIST(forecast ORDER BY ds)) AS rmse,
-    ts_mae(LIST(y ORDER BY ds), LIST(forecast ORDER BY ds)) AS mae
+    ts_rmse(LIST(y ORDER BY ds), LIST(yhat ORDER BY ds)) AS rmse,
+    ts_mae(LIST(y ORDER BY ds), LIST(yhat ORDER BY ds)) AS mae
 FROM cv_forecasts
 GROUP BY unique_id, fold_id;
 ```
@@ -176,6 +176,8 @@ The input table must be the output of `ts_cv_folds_by` (or `ts_cv_split_by`) con
 - `split`: 'train' or 'test'
 - Group, date, and target columns (original names preserved)
 
+If `fold_id` or `split` columns are missing, the function throws an error with instructions to create folds first.
+
 **Output:**
 
 Returns the test rows with forecast columns added:
@@ -184,7 +186,7 @@ Returns the test rows with forecast columns added:
 | `fold_id` | BIGINT | Fold number |
 | `<group_col>` | (same as input) | Series identifier |
 | `<date_col>` | (same as input) | Forecast date |
-| `<target_col>` | DOUBLE | Actual value from test data (original name preserved) |
+| `y` | DOUBLE | Actual value from test data |
 | `split` | VARCHAR | Always 'test' |
 | `yhat` | DOUBLE | Point forecast |
 | `yhat_lower` | DOUBLE | Lower prediction interval |
@@ -196,7 +198,6 @@ Returns the test rows with forecast columns added:
 - **No frequency parameter needed**: Forecasts are matched to existing test dates from input
 - **Date preservation**: Original date values are preserved (no date generation)
 - **Position-based matching**: 1st forecast → 1st test row, 2nd forecast → 2nd test row, etc.
-
 
 **Example:**
 
@@ -211,11 +212,9 @@ SELECT * FROM ts_cv_forecast_by('folds', unique_id, ds, y, 'Naive', MAP{});
 
 -- Step 3: Compute metrics per series and fold
 SELECT
-    unique_id,
-    fold_id,
-    ts_rmse(LIST(y ORDER BY ds), LIST(forecast ORDER BY ds)) AS rmse,
-    ts_mae(LIST(y ORDER BY ds), LIST(forecast ORDER BY ds)) AS mae,
-    ts_mape(LIST(y ORDER BY ds), LIST(forecast ORDER BY ds)) AS mape
+    unique_id, fold_id,
+    ts_rmse(LIST(y ORDER BY ds), LIST(yhat ORDER BY ds)) AS rmse,
+    ts_mae(LIST(y ORDER BY ds), LIST(yhat ORDER BY ds)) AS mae
 FROM cv_results
 GROUP BY unique_id, fold_id;
 ```

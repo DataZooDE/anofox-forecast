@@ -516,11 +516,19 @@ SELECT * FROM _ts_forecast_native(
     // The function trains on 'train' rows and matches forecasts to existing 'test' row dates.
     // Horizon is inferred from the number of test rows per fold/group.
     //
+    // If fold_id/split columns are missing, the native function throws a clear error
+    // directing users to create folds first with ts_cv_folds_by().
+    //
     // Uses native streaming implementation to avoid LIST() memory issues
     {"ts_cv_forecast_by", {"ml_folds", "group_col", "date_col", "target_col", "method", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_cv_forecast_native(
-    (SELECT fold_id, split, group_col, date_col, target_col FROM query_table(ml_folds::VARCHAR)),
+    (SELECT
+        group_col AS "__cv_grp__",
+        date_col AS "__cv_dt__",
+        target_col::DOUBLE AS "__cv_tgt__",
+        *
+     FROM query_table(ml_folds::VARCHAR)),
     method,
     params
 )
