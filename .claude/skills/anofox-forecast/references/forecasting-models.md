@@ -4,7 +4,7 @@
 
 Signature:
 ```sql
-ts_forecast_by(table_name VARCHAR, group_col COLUMN, date_col COLUMN, target_col COLUMN, method VARCHAR, horizon INTEGER, params MAP/STRUCT) -> TABLE
+ts_forecast_by(table_name VARCHAR, group_col COLUMN, date_col COLUMN, target_col COLUMN, method VARCHAR, horizon INTEGER, frequency VARCHAR, params MAP/STRUCT) -> TABLE
 ```
 
 Parameters:
@@ -14,13 +14,14 @@ Parameters:
 - target_col: Value to forecast (unquoted)
 - method: Model name (case-sensitive)
 - horizon: Periods to forecast
+- frequency: Time step between observations ('1d', '1h', '1mo', etc.) — **required**
 - params: MAP or STRUCT with model parameters
 
 Returns: group_col, date_col, yhat (DOUBLE), yhat_lower (DOUBLE), yhat_upper (DOUBLE)
 
 Example:
 ```sql
-SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'HoltWinters', 12,
+SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'HoltWinters', 12, '1d',
     MAP{'seasonal_period': '7'});
 ```
 

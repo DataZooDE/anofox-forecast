@@ -1,17 +1,17 @@
 ---
 name: anofox-forecast
 description: >
-  Comprehensive reference for the Anofox Forecast DuckDB extension (v0.4.2).
+  Comprehensive reference for the Anofox Forecast DuckDB extension (v0.4.3).
   Use when working with ts_* or anofox_fcst_ts_* functions, time series
   forecasting in DuckDB, or the anofox_forecast extension. Provides API
   signatures, model selection, common workflows, and critical gotchas.
-version: 0.4.2
+version: 0.4.3
 user-invocable: false
 ---
 
 # Anofox Forecast DuckDB Extension — Cheat Sheet
 
-**Extension:** `anofox_forecast` v0.4.2 | **DuckDB:** v1.1.x+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` v0.4.3 | **DuckDB:** v1.4.x+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 ## Installation
 
@@ -41,7 +41,18 @@ LOAD anofox_forecast;
 
 3. **Model names are case-sensitive.** `'AutoETS'` works, `'autoets'` errors.
 
-4. **Metric `_by` table macros are deprecated.** Use scalar functions with `GROUP BY`:
+4. **`ts_cv_forecast_by` requires pre-created folds.** Input table must have `fold_id` and `split` columns
+   (from `ts_cv_folds_by` or `ts_cv_split_by`). Passing raw data throws a clear error.
+
+5. **`ts_forecast_by` requires frequency as 7th positional parameter.** No default — you must specify it:
+   ```sql
+   -- WRONG: missing frequency
+   SELECT * FROM ts_forecast_by('sales', id, date, val, 'Naive', 12);
+   -- CORRECT:
+   SELECT * FROM ts_forecast_by('sales', id, date, val, 'Naive', 12, '1d');
+   ```
+
+6. **Metric `_by` table macros are deprecated.** Use scalar functions with `GROUP BY`:
    ```sql
    -- Deprecated: SELECT * FROM ts_mae_by(...)
    -- Use instead:
@@ -49,7 +60,7 @@ LOAD anofox_forecast;
    FROM results GROUP BY id;
    ```
 
-5. **Always use `ORDER BY` in `LIST()` for temporal correctness:**
+7. **Always use `ORDER BY` in `LIST()` for temporal correctness:**
    ```sql
    LIST(value ORDER BY date)  -- correct
    LIST(value)                -- wrong: order not guaranteed
@@ -62,7 +73,7 @@ LOAD anofox_forecast;
 ### 1. Table Macros (primary — use these)
 Operate on table names as strings. Handle grouping automatically.
 ```sql
-SELECT * FROM ts_forecast_by('sales', product_id, date, revenue, 'AutoETS', 14,
+SELECT * FROM ts_forecast_by('sales', product_id, date, revenue, 'AutoETS', 14, '1d',
     MAP{'seasonal_period': '7'});
 ```
 
@@ -111,7 +122,7 @@ All param values are strings (even numbers). Arrays use JSON syntax: `'[7, 365]'
 -- Forecast 14 days ahead with weekly seasonality
 SELECT * FROM ts_forecast_by(
     'sales', product_id, date, revenue,
-    'HoltWinters', 14,
+    'HoltWinters', 14, '1d',
     MAP{'seasonal_period': '7'}
 );
 ```
@@ -143,7 +154,7 @@ FROM ts_detect_periods_by('sales', product_id, date, value, MAP{});
 -- Step 2: Forecast with detected period
 SELECT * FROM ts_forecast_by(
     'sales', product_id, date, value,
-    'AutoETS', 14, MAP{'seasonal_period': '7'}
+    'AutoETS', 14, '1d', MAP{'seasonal_period': '7'}
 );
 ```
 
@@ -205,14 +216,14 @@ SELECT * FROM ts_cv_forecast_by('cv_folds', product_id, date, value, 'AutoETS',
 
 -- 5. Evaluate
 SELECT product_id,
-    ts_mae(LIST(value ORDER BY date), LIST(yhat ORDER BY date)) AS mae,
-    ts_rmse(LIST(value ORDER BY date), LIST(yhat ORDER BY date)) AS rmse
+    ts_mae(LIST(y ORDER BY date), LIST(yhat ORDER BY date)) AS mae,
+    ts_rmse(LIST(y ORDER BY date), LIST(yhat ORDER BY date)) AS rmse
 FROM backtest GROUP BY product_id;
 
 -- 6. Forecast
 CREATE TABLE forecasts AS
 SELECT * FROM ts_forecast_by('clean', product_id, date, value,
-    'AutoETS', 14, MAP{'seasonal_period': '7'});
+    'AutoETS', 14, '1d', MAP{'seasonal_period': '7'});
 
 -- 7. Conformal intervals
 CREATE TABLE calibration AS
@@ -321,7 +332,7 @@ SELECT * FROM ts_conformal_apply_by(
 ### Forecasting
 | Function | Purpose |
 |----------|---------|
-| `ts_forecast_by(table, group, date, value, method, horizon, params)` | Multi-series forecast |
+| `ts_forecast_by(table, group, date, value, method, horizon, frequency, params)` | Multi-series forecast |
 | `ts_forecast_exog_by(table, group, date, value, x_cols, future_table, future_date, future_x, model, horizon, params, freq)` | Forecast with exogenous variables |
 
 ### Data Preparation
