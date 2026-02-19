@@ -294,32 +294,22 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
 
     auto bind_data = make_uniq<TsCvForecastNativeBindData>();
 
-    // Input table layout (from macro):
-    //   col 0: __cv_grp__   (group values)
-    //   col 1: __cv_dt__    (date values)
-    //   col 2: __cv_tgt__   (target as DOUBLE)
-    //   col 3+: original columns from source table (including fold_id, split if present)
+    // Supports two input layouts:
+    // A) Via macro: __cv_grp__(0), __cv_dt__(1), __cv_tgt__(2), fold_id, split, group, date, value, ...
+    // B) Direct call: fold_id(0), split(1), group(2), date(3), value(4)
     auto &table_names = input.input_table_names;
 
-    if (input.input_table_types.size() < 3) {
+    if (input.input_table_types.size() < 5) {
         throw InvalidInputException(
-            "_ts_cv_forecast_native requires at least 3 input columns. Got %zu.",
+            "_ts_cv_forecast_native requires at least 5 input columns. Got %zu.",
             input.input_table_types.size());
     }
 
-    // Columns 0-2 are always group/date/target
-    bind_data->group_col = 0;
-    bind_data->date_col = 1;
-    bind_data->value_col = 2;
-
-    // Find fold_id and split by name in remaining columns
+    // Find fold_id and split by name across ALL columns
     idx_t fold_id_idx = DConstants::INVALID_INDEX;
     idx_t split_idx = DConstants::INVALID_INDEX;
-    // Also find the original group and date column names (first non-special columns after pos 2)
-    string group_col_name;
-    string date_col_name;
 
-    for (idx_t i = 3; i < table_names.size(); i++) {
+    for (idx_t i = 0; i < table_names.size(); i++) {
         if (table_names[i] == "fold_id") {
             fold_id_idx = i;
         } else if (table_names[i] == "split") {
@@ -338,18 +328,36 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
     bind_data->fold_id_col = fold_id_idx;
     bind_data->split_col = split_idx;
 
-    // Find original column names (first columns after __cv_* aliases that aren't fold_id/split)
-    for (idx_t i = 3; i < table_names.size(); i++) {
-        if (table_names[i] == "fold_id" || table_names[i] == "split" ||
-            table_names[i] == "__cv_grp__" || table_names[i] == "__cv_dt__" || table_names[i] == "__cv_tgt__") {
-            continue;
+    // Detect layout: macro (has __cv_grp__ at pos 0) vs direct call
+    string group_col_name;
+    string date_col_name;
+    bool macro_layout = (table_names.size() > 0 && table_names[0] == "__cv_grp__");
+
+    if (macro_layout) {
+        // Layout A: cols 0-2 are __cv_grp__, __cv_dt__, __cv_tgt__
+        bind_data->group_col = 0;
+        bind_data->date_col = 1;
+        bind_data->value_col = 2;
+        // Find original column names from remaining columns
+        for (idx_t i = 3; i < table_names.size(); i++) {
+            if (table_names[i] == "fold_id" || table_names[i] == "split" ||
+                table_names[i] == "__cv_grp__" || table_names[i] == "__cv_dt__" || table_names[i] == "__cv_tgt__") {
+                continue;
+            }
+            if (group_col_name.empty()) {
+                group_col_name = table_names[i];
+            } else if (date_col_name.empty()) {
+                date_col_name = table_names[i];
+                break;
+            }
         }
-        if (group_col_name.empty()) {
-            group_col_name = table_names[i];
-        } else if (date_col_name.empty()) {
-            date_col_name = table_names[i];
-            break;
-        }
+    } else {
+        // Layout B: fold_id(0), split(1), group(2), date(3), value(4)
+        bind_data->group_col = 2;
+        bind_data->date_col = 3;
+        bind_data->value_col = 4;
+        group_col_name = table_names[2];
+        date_col_name = table_names[3];
     }
     if (group_col_name.empty()) group_col_name = "id";
     if (date_col_name.empty()) date_col_name = "date";
@@ -384,11 +392,11 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
         }
     }
 
-    // Detect column types from input (group=col0, date=col1, value=col2)
-    bind_data->group_logical_type = input.input_table_types[0];
-    bind_data->date_logical_type = input.input_table_types[1];
+    // Detect column types from input using resolved column indices
+    bind_data->group_logical_type = input.input_table_types[bind_data->group_col];
+    bind_data->date_logical_type = input.input_table_types[bind_data->date_col];
 
-    switch (input.input_table_types[1].id()) {
+    switch (input.input_table_types[bind_data->date_col].id()) {
         case LogicalTypeId::DATE:
             bind_data->date_col_type = DateColumnType::DATE;
             break;
@@ -405,7 +413,7 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
         default:
             throw InvalidInputException(
                 "Date column must be DATE, TIMESTAMP, INTEGER, or BIGINT, got: %s",
-                input.input_table_types[3].ToString().c_str());
+                input.input_table_types[bind_data->date_col].ToString().c_str());
     }
 
     // Output schema: fold_id, group_col, date_col, y, split, yhat, yhat_lower, yhat_upper, model_name
