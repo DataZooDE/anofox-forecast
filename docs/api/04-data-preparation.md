@@ -47,10 +47,29 @@ CREATE TABLE clean_data AS
 SELECT * FROM ts_drop_short_by('nulls_filled', product_id, 20);
 ```
 
-Or chain operations:
+!!! warning "Do not chain table functions in CTEs"
+    Chaining multiple `_by` table functions via CTEs (e.g., `ts_fill_gaps_by` → `ts_fill_forward_by`) can return **0 rows** under parallel execution. This is a DuckDB engine limitation where the FinalExecute output of one table-in-out operator is not visible to a downstream table-in-out operator within the same query.
+
+    **Always materialize each step as a separate table:**
 
 ```sql
--- Fill gaps and nulls first, then filter short series
+-- Step 1: Fill gaps
+CREATE TABLE gaps_filled AS
+SELECT * FROM ts_fill_gaps_by('raw_data', product_id, date, value, '1d');
+
+-- Step 2: Fill nulls (reads from materialized table)
+CREATE TABLE nulls_filled AS
+SELECT * FROM ts_fill_nulls_const_by('gaps_filled', product_id, date, value, 0.0);
+
+-- Step 3: Filter short series
+CREATE TABLE clean_data AS
+SELECT * FROM ts_drop_short_by('nulls_filled', product_id, 20);
+```
+
+The following CTE pattern is **broken** and will silently return 0 rows with large datasets:
+
+```sql
+-- ❌ BROKEN: CTE chaining of table functions returns 0 rows
 WITH gaps_filled AS (
     SELECT * FROM ts_fill_gaps_by('raw_data', product_id, date, value, '1d')
 ),

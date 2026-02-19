@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'RandomWalkDrift', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'RandomWalkDrift', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'RandomWalkDrift', horizon, frequency, params);
 ```
 
 ## Description
@@ -46,6 +46,7 @@ SELECT * FROM ts_forecast_by(
     revenue,
     'RandomWalkDrift',
     6,
+    '1d',
     {}
 );
 
@@ -57,6 +58,7 @@ SELECT * FROM ts_forecast_by(
     value,
     'RandomWalkDrift',
     12,
+    '1d',
     {'confidence_level': 0.90}
 );
 ```

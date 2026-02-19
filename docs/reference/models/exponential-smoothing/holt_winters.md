@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'HoltWinters', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'HoltWinters', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'HoltWinters', horizon, frequency, params);
 ```
 
 ## Description
@@ -50,6 +50,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'HoltWinters',
     14,
+    '1d',
     {'seasonal_period': 7}
 );
 
@@ -61,6 +62,7 @@ SELECT * FROM ts_forecast_by(
     revenue,
     'HoltWinters',
     12,
+    '1d',
     {'seasonal_period': 12, 'alpha': 0.2, 'beta': 0.1, 'gamma': 0.15}
 );
 ```

@@ -120,27 +120,21 @@ SELECT COUNT(*) FROM ts_fill_gaps_by('freq_test', id, date, val, 1);
 # ts_forecast_by with various frequencies
 #######################################
 
-# Polars-style frequency works (default is '1d')
+# Polars-style frequency works
 query I
-SELECT COUNT(*) FROM ts_forecast_by('freq_test', id, date, val, 'naive', 2, MAP{});
-----
-2
-
-# Explicit Polars-style
-query I
-SELECT COUNT(*) FROM ts_forecast_by('freq_test', id, date, val, 'naive', 2, MAP{}, frequency := '1d');
+SELECT COUNT(*) FROM ts_forecast_by('freq_test', id, date, val, 'naive', 2, '1d', MAP{});
 ----
 2
 
 # DuckDB INTERVAL style works
 query I
-SELECT COUNT(*) FROM ts_forecast_by('freq_test', id, date, val, 'naive', 2, MAP{}, frequency := '1 day');
+SELECT COUNT(*) FROM ts_forecast_by('freq_test', id, date, val, 'naive', 2, '1 day', MAP{});
 ----
 2
 
 # Integer frequency works (interpreted as days)
 query I
-SELECT COUNT(*) FROM ts_forecast_by('freq_test', id, date, val, 'naive', 2, MAP{}, frequency := 1);
+SELECT COUNT(*) FROM ts_forecast_by('freq_test', id, date, val, 'naive', 2, 1, MAP{});
 ----
 2
 

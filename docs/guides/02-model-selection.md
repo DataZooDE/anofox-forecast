@@ -53,10 +53,10 @@ Start here to establish a benchmark:
 
 ```sql
 -- Naive: repeats last value
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'Naive', 12);
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'Naive', 12, '1d');
 
 -- Seasonal Naive: repeats last seasonal cycle
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'SeasonalNaive', 12,
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'SeasonalNaive', 12, '1d',
     {'seasonal_period': 7});
 ```
 
@@ -66,13 +66,13 @@ Good default choice for most business data:
 
 ```sql
 -- Simple Exponential Smoothing (no trend, no seasonality)
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'SES', 12);
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'SES', 12, '1d');
 
 -- Holt (trend, no seasonality)
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'Holt', 12);
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'Holt', 12, '1d');
 
 -- Holt-Winters (trend + seasonality)
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'HoltWinters', 12,
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'HoltWinters', 12, '1d',
     {'seasonal_period': 7});
 ```
 
@@ -82,13 +82,13 @@ Let the algorithm choose:
 
 ```sql
 -- AutoETS automatically selects error, trend, and seasonal components
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'AutoETS', 12);
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'AutoETS', 12, '1d');
 
 -- AutoARIMA finds optimal ARIMA parameters
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'AutoARIMA', 12);
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'AutoARIMA', 12, '1d');
 
 -- AutoTheta selects best theta variant
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'AutoTheta', 12);
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'AutoTheta', 12, '1d');
 ```
 
 ### Multiple Seasonality
@@ -97,11 +97,11 @@ For data with complex patterns (e.g., hourly data with daily and weekly cycles):
 
 ```sql
 -- MSTL handles multiple seasonal periods
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'MSTL', 24,
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'MSTL', 24, '1h',
     {'seasonal_periods': '[24, 168]'});  -- daily (24h) and weekly (168h)
 
 -- MFLES is faster for high-frequency data
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'MFLES', 24,
+SELECT * FROM ts_forecast_by('sales', id, date, val, 'MFLES', 24, '1h',
     {'seasonal_periods': '[24, 168]'});
 ```
 
@@ -111,10 +111,10 @@ For data with many zeros (spare parts, slow-moving inventory):
 
 ```sql
 -- Croston's method for intermittent demand
-SELECT * FROM ts_forecast_by('inventory', id, date, demand, 'CrostonSBA', 12);
+SELECT * FROM ts_forecast_by('inventory', id, date, demand, 'CrostonSBA', 12, '1d');
 
 -- TSB for better bias correction
-SELECT * FROM ts_forecast_by('inventory', id, date, demand, 'TSB', 12);
+SELECT * FROM ts_forecast_by('inventory', id, date, demand, 'TSB', 12, '1d');
 ```
 
 ## Comparing Models

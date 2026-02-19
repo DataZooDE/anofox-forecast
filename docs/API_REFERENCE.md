@@ -27,7 +27,7 @@ All computations are performed by the **anofox-fcst-core** library, implemented 
 LOAD anofox_forecast;
 
 -- Generate forecasts for multiple products
-SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'AutoETS', 30);
+SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'AutoETS', 30, '1d');
 
 -- Analyze seasonality
 SELECT ts_detect_periods(LIST(quantity ORDER BY date)) FROM sales GROUP BY product_id;
@@ -52,7 +52,7 @@ FROM sales GROUP BY product_id;
 High-level macros that operate directly on tables. Column names are passed as identifiers (unquoted).
 
 ```sql
-SELECT * FROM ts_forecast_by('sales', product_id, date, value, 'AutoETS', 12);
+SELECT * FROM ts_forecast_by('sales', product_id, date, value, 'AutoETS', 12, '1d');
 ```
 
 #### 3. Aggregate Functions
@@ -116,7 +116,7 @@ Both forms are identical in functionality.
 
 | Function | Purpose | Example |
 |----------|---------|---------|
-| `ts_forecast_by` | Forecast multiple series | `ts_forecast_by('tbl', id, date, val, 'AutoETS', 12)` |
+| `ts_forecast_by` | Forecast multiple series | `ts_forecast_by('tbl', id, date, val, 'AutoETS', 12, '1d')` |
 | `ts_backtest_auto` | One-liner backtesting | `ts_backtest_auto('tbl', id, date, val, 7, 3, '1d')` |
 | `ts_stats` | Compute 34 statistics | `ts_stats(LIST(val ORDER BY date))` |
 | `ts_detect_periods` | Detect seasonality | `ts_detect_periods(LIST(val ORDER BY date))` |

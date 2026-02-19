@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'DynamicOptimizedTheta', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'DynamicOptimizedTheta', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'DynamicOptimizedTheta', horizon, frequency, params);
 ```
 
 ## Description
@@ -49,7 +49,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'DynamicOptimizedTheta',
     6,
-    {}
+    '1mo'
 );
 
 -- With seasonal period hint
@@ -60,6 +60,7 @@ SELECT * FROM ts_forecast_by(
     revenue,
     'DynamicOptimizedTheta',
     8,
+    '3mo',
     {'seasonal_period': 4}
 );
 ```

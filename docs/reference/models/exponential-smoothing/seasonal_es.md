@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'SeasonalES', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'SeasonalES', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'SeasonalES', horizon, frequency, params);
 ```
 
 ## Description
@@ -49,6 +49,7 @@ SELECT * FROM ts_forecast_by(
     visitors,
     'SeasonalES',
     14,
+    '1d',
     {'seasonal_period': 7}
 );
 
@@ -60,6 +61,7 @@ SELECT * FROM ts_forecast_by(
     traffic,
     'SeasonalES',
     21,
+    '1d',
     {'seasonal_period': 7, 'alpha': 0.4, 'gamma': 0.2}
 );
 ```

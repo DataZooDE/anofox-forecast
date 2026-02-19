@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'ARIMA', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'ARIMA', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'ARIMA', horizon, frequency, params);
 ```
 
 ## Description
@@ -63,6 +63,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'ARIMA',
     14,
+    '1d',
     {'p': 1, 'd': 1, 'q': 1}
 );
 
@@ -74,6 +75,7 @@ SELECT * FROM ts_forecast_by(
     revenue,
     'ARIMA',
     28,
+    '1d',
     {'p': 1, 'd': 1, 'q': 1, 'P': 1, 'D': 1, 'Q': 1, 's': 7}
 );
 ```

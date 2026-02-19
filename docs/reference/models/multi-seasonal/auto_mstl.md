@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoMSTL', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'AutoMSTL', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'AutoMSTL', horizon, frequency, params);
 ```
 
 ## Description
@@ -53,6 +53,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'AutoMSTL',
     90,
+    '1d',
     {'seasonal_periods': '[7, 365]'}
 );
 ```

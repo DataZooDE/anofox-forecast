@@ -181,10 +181,10 @@ SELECT COUNT(DISTINCT group_id) FROM ts_forecast_exog_by(
     'exog_by_future',
     date,
     ['xreg1'],
+    '1d',
     'AutoARIMA',
     7,
-    MAP{},
-    '1d'
+    MAP{}
 );
 ----
 2
@@ -200,10 +200,10 @@ SELECT COUNT(*) FROM ts_forecast_exog_by(
     'exog_by_future',
     date,
     ['xreg1'],
+    '1d',
     'AutoARIMA',
     7,
-    MAP{},
-    '1d'
+    MAP{}
 );
 ----
 14

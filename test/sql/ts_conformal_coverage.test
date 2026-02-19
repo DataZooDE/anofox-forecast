@@ -98,7 +98,7 @@ SELECT
     forecast_step,
     yhat AS forecast
 FROM ts_forecast_by(
-    'training_data', series_id, date, value, 'naive', 15, MAP{'frequency': '1d'}
+    'training_data', series_id, date, value, 'naive', 15, '1d'
 );
 
 # Verify we have forecasts for all series
@@ -156,7 +156,7 @@ SELECT
     forecast_step,
     yhat AS forecast
 FROM ts_forecast_by(
-    'train_plus_calib', series_id, date, value, 'naive', 15, MAP{'frequency': '1d'}
+    'train_plus_calib', series_id, date, value, 'naive', 15, '1d'
 );
 
 #######################################
@@ -215,7 +215,7 @@ SELECT
     forecast_step,
     yhat AS forecast
 FROM ts_forecast_by(
-    'training_data', series_id, date, value, 'snaive', 15, MAP{'frequency': '1d', 'period': '7'}
+    'training_data', series_id, date, value, 'snaive', 15, '1d', MAP{'period': '7'}
 );
 
 # Join forecasts with actuals for calibration
@@ -254,7 +254,7 @@ SELECT
     forecast_step,
     yhat AS forecast
 FROM ts_forecast_by(
-    'train_plus_calib', series_id, date, value, 'snaive', 15, MAP{'frequency': '1d', 'period': '7'}
+    'train_plus_calib', series_id, date, value, 'snaive', 15, '1d', MAP{'period': '7'}
 );
 
 #######################################

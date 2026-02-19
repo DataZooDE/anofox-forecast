@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'TSB', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'TSB', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'TSB', horizon, frequency, params);
 ```
 
 ## Description
@@ -48,7 +48,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'TSB',
     30,
-    {}
+    '1d'
 );
 
 -- With custom smoothing parameters
@@ -59,6 +59,7 @@ SELECT * FROM ts_forecast_by(
     demand,
     'TSB',
     14,
+    '1d',
     {'alpha_d': 0.2, 'alpha_p': 0.3}
 );
 ```

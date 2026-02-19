@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'IMAPA', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'IMAPA', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'IMAPA', horizon, frequency, params);
 ```
 
 ## Description
@@ -46,7 +46,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'IMAPA',
     30,
-    {}
+    '1d'
 );
 
 -- For spare parts inventory
@@ -57,6 +57,7 @@ SELECT * FROM ts_forecast_by(
     demand,
     'IMAPA',
     60,
+    '1d',
     {'confidence_level': 0.95}
 );
 ```

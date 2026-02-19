@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'CrostonSBA', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'CrostonSBA', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'CrostonSBA', horizon, frequency, params);
 ```
 
 ## Description
@@ -46,7 +46,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'CrostonSBA',
     30,
-    {}
+    '1d'
 );
 
 -- For inventory planning
@@ -57,6 +57,7 @@ SELECT * FROM ts_forecast_by(
     demand,
     'CrostonSBA',
     28,
+    '1d',
     {'confidence_level': 0.90}
 );
 ```

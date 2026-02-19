@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'SESOptimized', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'SESOptimized', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'SESOptimized', horizon, frequency, params);
 ```
 
 ## Description
@@ -46,6 +46,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'SESOptimized',
     14,
+    '1d',
     {}
 );
 
@@ -57,6 +58,7 @@ SELECT * FROM ts_forecast_by(
     revenue,
     'SESOptimized',
     8,
+    '1d',
     {'include_fitted': true}
 );
 ```

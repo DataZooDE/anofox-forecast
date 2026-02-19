@@ -34,7 +34,7 @@ SELECT * FROM ts_aggregate_hierarchy(
 -- Step 3: Forecast all series (original + aggregated)
 CREATE TABLE forecasts AS
 SELECT * FROM ts_forecast_by('prepared_data', unique_id, date, value,
-    'AutoETS', 28, {'seasonal_period': 7});
+    'AutoETS', 28, '1d', {'seasonal_period': 7});
 
 -- Step 4: Split keys for analysis (with custom column names)
 SELECT * FROM ts_split_keys(
@@ -308,7 +308,7 @@ SELECT * FROM ts_aggregate_hierarchy(
 -- Step 3: Forecast all series (original + aggregated)
 CREATE TABLE forecasts AS
 SELECT * FROM ts_forecast_by('prepared_data', unique_id, sale_date, quantity,
-    'AutoETS', 28, {'seasonal_period': 7});
+    'AutoETS', 28, '1d', {'seasonal_period': 7});
 
 -- Step 4: Split keys for analysis with original column names
 SELECT *

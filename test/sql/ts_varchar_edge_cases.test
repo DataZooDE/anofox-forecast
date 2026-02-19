@@ -58,13 +58,13 @@ SELECT length FROM ts_stats('varchar_data', id, ds, y, '1d') WHERE id = 'A';
 
 # ts_forecast_by should work with VARCHAR target columns
 query I
-SELECT COUNT(*) FROM ts_forecast_by('varchar_data', id, ds, y, 'Naive', 5, MAP([], []));
+SELECT COUNT(*) FROM ts_forecast_by('varchar_data', id, ds, y, 'Naive', 5, '1d', MAP([], []));
 ----
 10
 
 # Verify forecasts are numeric
 query I
-SELECT COUNT(*) FROM ts_forecast_by('varchar_data', id, ds, y, 'Naive', 3, MAP([], []))
+SELECT COUNT(*) FROM ts_forecast_by('varchar_data', id, ds, y, 'Naive', 3, '1d', MAP([], []))
 WHERE yhat IS NOT NULL AND typeof(yhat) = 'DOUBLE';
 ----
 6
@@ -153,7 +153,7 @@ true
 # Test with integer-like string for horizon in ts_forecast_by
 # This ensures the macro handles parameter type variations
 query I
-SELECT COUNT(*) FROM ts_forecast_by('varchar_data', id, ds, y, 'Naive', 5, MAP([], []), '1d');
+SELECT COUNT(*) FROM ts_forecast_by('varchar_data', id, ds, y, 'Naive', 5, '1d', MAP([], []));
 ----
 10
 

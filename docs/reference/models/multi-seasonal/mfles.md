@@ -9,10 +9,10 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'MFLES', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'MFLES', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'MFLES', horizon, frequency, params);
 
 -- With exogenous variables
-SELECT * FROM ts_forecast_exog_by('table', group_col, date_col, value_col, 'x1,x2', 'future_table', 'MFLES', horizon, params);
+SELECT * FROM ts_forecast_exog_by('table', group_col, date_col, value_col, 'x1,x2', 'future_table', 'MFLES', horizon, frequency, params);
 ```
 
 ## Description
@@ -50,6 +50,7 @@ SELECT * FROM ts_forecast_by(
     consumption,
     'MFLES',
     168,
+    '1h',
     {'seasonal_periods': '[24, 168]'}
 );
 
@@ -61,6 +62,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'MFLES',
     90,
+    '1d',
     {'seasonal_periods': '[7, 365]'}
 );
 
@@ -74,6 +76,7 @@ SELECT * FROM ts_forecast_exog_by(
     'future_exog',
     'MFLES',
     30,
+    '1d',
     {'seasonal_periods': '[7, 365]'}
 );
 ```

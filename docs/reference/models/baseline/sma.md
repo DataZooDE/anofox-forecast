@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'SMA', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'SMA', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'SMA', horizon, frequency, params);
 ```
 
 ## Description
@@ -47,6 +47,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'SMA',
     7,
+    '1d',
     {}
 );
 
@@ -58,6 +59,7 @@ SELECT * FROM ts_forecast_by(
     revenue,
     'SMA',
     4,
+    '1d',
     {'window': 12}
 );
 ```

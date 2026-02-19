@@ -9,10 +9,10 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoARIMA', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'AutoARIMA', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'AutoARIMA', horizon, frequency, params);
 
 -- With exogenous variables
-SELECT * FROM ts_forecast_exog_by('table', group_col, date_col, value_col, 'x1,x2', 'future_table', 'AutoARIMA', horizon, params);
+SELECT * FROM ts_forecast_exog_by('table', group_col, date_col, value_col, 'x1,x2', 'future_table', 'AutoARIMA', horizon, frequency, params);
 ```
 
 ## Description
@@ -57,6 +57,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'AutoARIMA',
     12,
+    '1d',
     {'seasonal_period': 7}
 );
 
@@ -70,7 +71,7 @@ SELECT * FROM ts_forecast_exog_by(
     'future_exog',
     'AutoARIMA',
     12,
-    {}
+    '1d'
 );
 ```
 

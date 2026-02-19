@@ -487,7 +487,7 @@ FROM forecast_result
 )"},
 
     // ts_forecast_by: Generate forecasts per group (long format - one row per forecast step)
-    // C++ API: ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, params?, frequency?)
+    // C++ API: ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, frequency, params?)
     //
     // This macro is a thin wrapper around the native streaming implementation (_ts_forecast_native)
     // which uses significantly less memory than the previous SQL macro approach (GH#115).
@@ -497,7 +497,7 @@ FROM forecast_result
     //   Native:     ~35 MB peak memory (streaming)
     //
     // Supports both Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y') and DuckDB INTERVAL ('1 day', '1 hour')
-    {"ts_forecast_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", nullptr}, {{"params", "MAP{}"}, {"frequency", "'1d'"}, {nullptr, nullptr}},
+    {"ts_forecast_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", "frequency", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_forecast_native(
     (SELECT group_col, date_col, target_col FROM query_table(source::VARCHAR)),
@@ -603,9 +603,9 @@ FROM forecast_result
 )"},
 
     // ts_forecast_exog_by: Generate forecasts with exogenous variables per group
-    // C++ API: ts_forecast_exog_by(source, group_col, date_col, target_col, xreg_cols, future_source, future_date_col, future_xreg_cols, method, horizon, params, frequency)
+    // C++ API: ts_forecast_exog_by(source, group_col, date_col, target_col, xreg_cols, future_source, future_date_col, future_xreg_cols, frequency, method?, horizon?, params?)
     // Note: Requires JSON extension for dynamic column access (auto-loaded if available)
-    {"ts_forecast_exog_by", {"source", "group_col", "date_col", "target_col", "xreg_cols", "future_source", "future_date_col", "future_xreg_cols", nullptr}, {{"method", "'AutoARIMA'"}, {"horizon", "12"}, {"params", "MAP{}"}, {"frequency", "'1d'"}, {nullptr, nullptr}},
+    {"ts_forecast_exog_by", {"source", "group_col", "date_col", "target_col", "xreg_cols", "future_source", "future_date_col", "future_xreg_cols", "frequency", nullptr}, {{"method", "'AutoARIMA'"}, {"horizon", "12"}, {"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
 WITH _freq AS (
     SELECT CASE

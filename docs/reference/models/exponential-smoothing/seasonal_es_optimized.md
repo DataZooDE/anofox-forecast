@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'SeasonalESOptimized', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'SeasonalESOptimized', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'SeasonalESOptimized', horizon, frequency, params);
 ```
 
 ## Description
@@ -47,6 +47,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'SeasonalESOptimized',
     14,
+    '1d',
     {'seasonal_period': 7}
 );
 
@@ -58,6 +59,7 @@ SELECT * FROM ts_forecast_by(
     revenue,
     'SeasonalESOptimized',
     28,
+    '1d',
     {'seasonal_period': 7, 'include_fitted': true}
 );
 ```

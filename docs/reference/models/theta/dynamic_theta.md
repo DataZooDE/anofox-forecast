@@ -9,10 +9,10 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'DynamicTheta', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'DynamicTheta', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'DynamicTheta', horizon, frequency, params);
 
 -- With exogenous variables
-SELECT * FROM ts_forecast_exog_by('table', group_col, date_col, value_col, 'x1,x2', 'future_table', 'DynamicTheta', horizon, params);
+SELECT * FROM ts_forecast_exog_by('table', group_col, date_col, value_col, 'x1,x2', 'future_table', 'DynamicTheta', horizon, frequency, params);
 ```
 
 ## Description
@@ -53,7 +53,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'DynamicTheta',
     6,
-    {}
+    '1mo'
 );
 
 -- With custom initial theta
@@ -64,6 +64,7 @@ SELECT * FROM ts_forecast_by(
     revenue,
     'DynamicTheta',
     4,
+    '3mo',
     {'theta': 2.5}
 );
 ```

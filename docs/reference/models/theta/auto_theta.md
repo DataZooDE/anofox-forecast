@@ -9,7 +9,7 @@
 SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoTheta', horizon, params);
 
 -- Multiple series (grouped)
-SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'AutoTheta', horizon, params);
+SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'AutoTheta', horizon, frequency, params);
 ```
 
 ## Description
@@ -54,6 +54,7 @@ SELECT * FROM ts_forecast_by(
     quantity,
     'AutoTheta',
     12,
+    '1mo',
     {'seasonal_period': 12}
 );
 
@@ -64,7 +65,8 @@ SELECT * FROM ts_forecast_by(
     date,
     quantity,
     'AutoTheta',
-    6
+    6,
+    '1mo'
 );
 ```
 
