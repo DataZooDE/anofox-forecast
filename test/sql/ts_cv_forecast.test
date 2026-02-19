@@ -253,11 +253,11 @@ DROP TABLE cv_horizon_1;
 # Error Handling Tests
 #######################################
 
-# Test error when fold data missing required columns (fold_id, split)
+# Test clear error when fold data missing required columns (fold_id, split)
 statement error
 SELECT * FROM ts_cv_forecast_by('cv_data_24', series_id, ds, y, 'Naive', MAP{});
 ----
-fold_id
+missing required columns 'fold_id' and/or 'split'
 
 #######################################
 # Params Tests

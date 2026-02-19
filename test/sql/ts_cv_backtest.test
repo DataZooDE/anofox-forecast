@@ -1,0 +1,107 @@
+# name: test/sql/ts_cv_backtest.test
+# description: Tests for ts_cv_forecast_by error handling when fold_id is missing (GH#180)
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup Test Data
+#######################################
+
+statement ok
+CREATE TABLE backtest_data AS
+SELECT
+    'A' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    100.0 + i * 0.5 + sin(i * 2 * 3.14159 / 7) * 10 AS value
+FROM generate_series(0, 83) AS t(i)
+UNION ALL
+SELECT
+    'B' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    200.0 + i * 0.3 + cos(i * 2 * 3.14159 / 7) * 5 AS value
+FROM generate_series(0, 83) AS t(i);
+
+#######################################
+# Error: raw data without fold_id (GH#180)
+#######################################
+
+# Passing raw data (no fold_id/split) should throw a clear error
+statement error
+SELECT * FROM ts_cv_forecast_by('backtest_data', id, ds, value, 'Naive', MAP{});
+----
+missing required columns 'fold_id' and/or 'split'
+
+# Same error with AutoMFLES (the original model from GH#180)
+statement error
+SELECT * FROM ts_cv_forecast_by('backtest_data', id, ds, value, 'AutoMFLES', MAP{});
+----
+missing required columns 'fold_id' and/or 'split'
+
+#######################################
+# Correct two-step workflow works
+#######################################
+
+# Step 1: Create folds
+statement ok
+CREATE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by('backtest_data', id, ds, value, 3, 7, MAP{});
+
+# Step 2: Forecast on folds (3 folds × 2 series × 7 horizon = 42 rows)
+query I
+SELECT COUNT(*) FROM ts_cv_forecast_by('cv_folds', id, ds, value, 'Naive', MAP{});
+----
+42
+
+# Test all folds are represented
+query I
+SELECT COUNT(DISTINCT fold_id) FROM ts_cv_forecast_by('cv_folds', id, ds, value, 'Naive', MAP{});
+----
+3
+
+# Test both groups are present per fold
+query II
+SELECT fold_id, COUNT(DISTINCT id) AS n_series
+FROM ts_cv_forecast_by('cv_folds', id, ds, value, 'Naive', MAP{})
+GROUP BY fold_id ORDER BY fold_id;
+----
+1	2
+2	2
+3	2
+
+# Test output has correct number of columns (9)
+query I
+SELECT COUNT(*) FROM (
+    DESCRIBE SELECT * FROM ts_cv_forecast_by('cv_folds', id, ds, value, 'Naive', MAP{})
+);
+----
+9
+
+# Test point forecasts are non-null
+query I
+SELECT COUNT(*) FROM ts_cv_forecast_by('cv_folds', id, ds, value, 'Naive', MAP{})
+WHERE yhat IS NOT NULL;
+----
+42
+
+# Test with AutoETS
+query I
+SELECT COUNT(*) FROM ts_cv_forecast_by('cv_folds', id, ds, value, 'AutoETS', MAP{});
+----
+42
+
+# Test with AutoMFLES
+query I
+SELECT COUNT(*) FROM ts_cv_forecast_by('cv_folds', id, ds, value, 'AutoMFLES', MAP{});
+----
+42
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE backtest_data;
+
+statement ok
+DROP TABLE cv_folds;

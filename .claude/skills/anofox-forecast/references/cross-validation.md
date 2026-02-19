@@ -140,3 +140,4 @@ FROM cv_forecasts GROUP BY unique_id, fold_id;
 - Uses position-based fold assignment (works with all frequencies including monthly/quarterly)
 - Unknown parameter names throw informative errors
 - Horizon is auto-inferred in ts_cv_forecast_by
+- **ts_cv_forecast_by requires fold_id/split columns.** Passing raw data (without calling ts_cv_folds_by first) throws a clear error with instructions. Always create folds first.

@@ -43,6 +43,13 @@ struct TsCvForecastNativeBindData : public TableFunctionData {
     int64_t seasonal_period = 0;
     double confidence_level = 0.90;
 
+    // Column indices (resolved by name in bind)
+    idx_t fold_id_col = 0;
+    idx_t split_col = 1;
+    idx_t group_col = 2;
+    idx_t date_col = 3;
+    idx_t value_col = 4;
+
     // Type preservation
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
     LogicalType date_logical_type = LogicalType(LogicalTypeId::TIMESTAMP);
@@ -287,14 +294,73 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
 
     auto bind_data = make_uniq<TsCvForecastNativeBindData>();
 
-    // Input table has columns: fold_id, split, group_col, date_col, value_col
-    // Arguments after table: method, params
-    if (input.input_table_types.size() != 5) {
+    // Supports two input layouts:
+    // A) Via macro: __cv_grp__(0), __cv_dt__(1), __cv_tgt__(2), fold_id, split, group, date, value, ...
+    // B) Direct call: fold_id(0), split(1), group(2), date(3), value(4)
+    auto &table_names = input.input_table_names;
+
+    if (input.input_table_types.size() < 5) {
         throw InvalidInputException(
-            "_ts_cv_forecast_native requires input with exactly 5 columns: "
-            "fold_id, split, group_col, date_col, target_col. Got %zu columns.",
+            "_ts_cv_forecast_native requires at least 5 input columns. Got %zu.",
             input.input_table_types.size());
     }
+
+    // Find fold_id and split by name across ALL columns
+    idx_t fold_id_idx = DConstants::INVALID_INDEX;
+    idx_t split_idx = DConstants::INVALID_INDEX;
+
+    for (idx_t i = 0; i < table_names.size(); i++) {
+        if (table_names[i] == "fold_id") {
+            fold_id_idx = i;
+        } else if (table_names[i] == "split") {
+            split_idx = i;
+        }
+    }
+
+    if (fold_id_idx == DConstants::INVALID_INDEX || split_idx == DConstants::INVALID_INDEX) {
+        throw InvalidInputException(
+            "ts_cv_forecast_by: Input table is missing required columns 'fold_id' and/or 'split'. "
+            "Create folds first:\n"
+            "  CREATE TABLE folds AS SELECT * FROM ts_cv_folds_by('your_table', group, date, value, n_folds, horizon, MAP{});\n"
+            "  SELECT * FROM ts_cv_forecast_by('folds', group, date, value, 'Naive', MAP{});");
+    }
+
+    bind_data->fold_id_col = fold_id_idx;
+    bind_data->split_col = split_idx;
+
+    // Detect layout: macro (has __cv_grp__ at pos 0) vs direct call
+    string group_col_name;
+    string date_col_name;
+    bool macro_layout = (table_names.size() > 0 && table_names[0] == "__cv_grp__");
+
+    if (macro_layout) {
+        // Layout A: cols 0-2 are __cv_grp__, __cv_dt__, __cv_tgt__
+        bind_data->group_col = 0;
+        bind_data->date_col = 1;
+        bind_data->value_col = 2;
+        // Find original column names from remaining columns
+        for (idx_t i = 3; i < table_names.size(); i++) {
+            if (table_names[i] == "fold_id" || table_names[i] == "split" ||
+                table_names[i] == "__cv_grp__" || table_names[i] == "__cv_dt__" || table_names[i] == "__cv_tgt__") {
+                continue;
+            }
+            if (group_col_name.empty()) {
+                group_col_name = table_names[i];
+            } else if (date_col_name.empty()) {
+                date_col_name = table_names[i];
+                break;
+            }
+        }
+    } else {
+        // Layout B: fold_id(0), split(1), group(2), date(3), value(4)
+        bind_data->group_col = 2;
+        bind_data->date_col = 3;
+        bind_data->value_col = 4;
+        group_col_name = table_names[2];
+        date_col_name = table_names[3];
+    }
+    if (group_col_name.empty()) group_col_name = "id";
+    if (date_col_name.empty()) date_col_name = "date";
 
     // Parse method (index 1)
     if (input.inputs.size() >= 2 && !input.inputs[1].IsNull()) {
@@ -326,12 +392,11 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
         }
     }
 
-    // Detect column types from input
-    // Input table: fold_id (BIGINT), split (VARCHAR), group_col, date_col, value_col
-    bind_data->group_logical_type = input.input_table_types[2];
-    bind_data->date_logical_type = input.input_table_types[3];
+    // Detect column types from input using resolved column indices
+    bind_data->group_logical_type = input.input_table_types[bind_data->group_col];
+    bind_data->date_logical_type = input.input_table_types[bind_data->date_col];
 
-    switch (input.input_table_types[3].id()) {
+    switch (input.input_table_types[bind_data->date_col].id()) {
         case LogicalTypeId::DATE:
             bind_data->date_col_type = DateColumnType::DATE;
             break;
@@ -348,15 +413,10 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
         default:
             throw InvalidInputException(
                 "Date column must be DATE, TIMESTAMP, INTEGER, or BIGINT, got: %s",
-                input.input_table_types[3].ToString().c_str());
+                input.input_table_types[bind_data->date_col].ToString().c_str());
     }
 
-    // Output schema: fold_id, group_col, date_col, y, split, forecast, lower_90, upper_90, model_name
-    // Preserve original column names from input table
-    auto &table_names = input.input_table_names;
-    string group_col_name = table_names.size() > 2 ? table_names[2] : "id";
-    string date_col_name = table_names.size() > 3 ? table_names[3] : "date";
-
+    // Output schema: fold_id, group_col, date_col, y, split, yhat, yhat_lower, yhat_upper, model_name
     names.push_back("fold_id");
     return_types.push_back(LogicalType::BIGINT);
 
@@ -425,7 +485,7 @@ static OperatorResultType TsCvForecastNativeInOut(
     }
 
     // Buffer all incoming data - we need complete groups
-    // Input columns: fold_id, split, group_col, date_col, value_col
+    // Input columns are at indices stored in bind_data
     // Extract batch locally first, then lock once
     struct LocalRow {
         string composite_key;
@@ -439,11 +499,11 @@ static OperatorResultType TsCvForecastNativeInOut(
     local_rows.reserve(input.size());
 
     for (idx_t i = 0; i < input.size(); i++) {
-        Value fold_id_val = input.data[0].GetValue(i);
-        Value split_val = input.data[1].GetValue(i);
-        Value group_val = input.data[2].GetValue(i);
-        Value date_val = input.data[3].GetValue(i);
-        Value value_val = input.data[4].GetValue(i);
+        Value fold_id_val = input.data[bind_data.fold_id_col].GetValue(i);
+        Value split_val = input.data[bind_data.split_col].GetValue(i);
+        Value group_val = input.data[bind_data.group_col].GetValue(i);
+        Value date_val = input.data[bind_data.date_col].GetValue(i);
+        Value value_val = input.data[bind_data.value_col].GetValue(i);
 
         if (fold_id_val.IsNull() || split_val.IsNull() || date_val.IsNull()) continue;
 

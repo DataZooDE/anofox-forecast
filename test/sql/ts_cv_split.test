@@ -306,7 +306,7 @@ GROUP BY fold_id ORDER BY fold_id;
 # Test point forecasts are numeric
 query I
 SELECT COUNT(*) FROM ts_cv_forecast_by('cv_splits', series_id, date, value, 'Naive', MAP{})
-WHERE forecast IS NOT NULL;
+WHERE yhat IS NOT NULL;
 ----
 20
 
