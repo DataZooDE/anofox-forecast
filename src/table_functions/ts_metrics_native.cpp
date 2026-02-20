@@ -31,7 +31,7 @@ namespace duckdb {
 // ============================================================================
 
 // Supported metric types
-enum class MetricType {
+enum class TsMetricType {
     MAE,
     MSE,
     RMSE,
@@ -41,27 +41,27 @@ enum class MetricType {
     BIAS
 };
 
-static MetricType ParseMetricType(const string &metric_str) {
+static TsMetricType ParseMetricType(const string &metric_str) {
     string lower = StringUtil::Lower(metric_str);
-    if (lower == "mae") return MetricType::MAE;
-    if (lower == "mse") return MetricType::MSE;
-    if (lower == "rmse") return MetricType::RMSE;
-    if (lower == "mape") return MetricType::MAPE;
-    if (lower == "smape") return MetricType::SMAPE;
-    if (lower == "r2") return MetricType::R2;
-    if (lower == "bias") return MetricType::BIAS;
+    if (lower == "mae") return TsMetricType::MAE;
+    if (lower == "mse") return TsMetricType::MSE;
+    if (lower == "rmse") return TsMetricType::RMSE;
+    if (lower == "mape") return TsMetricType::MAPE;
+    if (lower == "smape") return TsMetricType::SMAPE;
+    if (lower == "r2") return TsMetricType::R2;
+    if (lower == "bias") return TsMetricType::BIAS;
     throw InvalidInputException("Unknown metric type: %s. Supported: mae, mse, rmse, mape, smape, r2, bias", metric_str);
 }
 
-static string MetricColumnName(MetricType type) {
+static string MetricColumnName(TsMetricType type) {
     switch (type) {
-        case MetricType::MAE: return "mae";
-        case MetricType::MSE: return "mse";
-        case MetricType::RMSE: return "rmse";
-        case MetricType::MAPE: return "mape";
-        case MetricType::SMAPE: return "smape";
-        case MetricType::R2: return "r2";
-        case MetricType::BIAS: return "bias";
+        case TsMetricType::MAE: return "mae";
+        case TsMetricType::MSE: return "mse";
+        case TsMetricType::RMSE: return "rmse";
+        case TsMetricType::MAPE: return "mape";
+        case TsMetricType::SMAPE: return "smape";
+        case TsMetricType::R2: return "r2";
+        case TsMetricType::BIAS: return "bias";
     }
     return "metric";
 }
@@ -71,7 +71,7 @@ static string MetricColumnName(MetricType type) {
 // ============================================================================
 
 struct TsMetricsNativeBindData : public TableFunctionData {
-    MetricType metric_type = MetricType::RMSE;
+    TsMetricType metric_type = TsMetricType::RMSE;
 
     // Column indices in input table
     idx_t date_col_idx = 0;
@@ -174,7 +174,7 @@ static int64_t DateValueToInt64(const Value &date_val, DateColumnType date_type)
 // Helper: Compute metric
 // ============================================================================
 
-static double ComputeMetric(MetricType type, const vector<double> &actuals,
+static double ComputeMetric(TsMetricType type, const vector<double> &actuals,
                            const vector<double> &forecasts) {
     if (actuals.size() != forecasts.size() || actuals.empty()) {
         return std::nan("");
@@ -185,37 +185,37 @@ static double ComputeMetric(MetricType type, const vector<double> &actuals,
     bool success = false;
 
     switch (type) {
-        case MetricType::MAE:
+        case TsMetricType::MAE:
             success = anofox_ts_mae(actuals.data(), actuals.size(),
                                     forecasts.data(), forecasts.size(),
                                     &result, &error);
             break;
-        case MetricType::MSE:
+        case TsMetricType::MSE:
             success = anofox_ts_mse(actuals.data(), actuals.size(),
                                     forecasts.data(), forecasts.size(),
                                     &result, &error);
             break;
-        case MetricType::RMSE:
+        case TsMetricType::RMSE:
             success = anofox_ts_rmse(actuals.data(), actuals.size(),
                                      forecasts.data(), forecasts.size(),
                                      &result, &error);
             break;
-        case MetricType::MAPE:
+        case TsMetricType::MAPE:
             success = anofox_ts_mape(actuals.data(), actuals.size(),
                                      forecasts.data(), forecasts.size(),
                                      &result, &error);
             break;
-        case MetricType::SMAPE:
+        case TsMetricType::SMAPE:
             success = anofox_ts_smape(actuals.data(), actuals.size(),
                                       forecasts.data(), forecasts.size(),
                                       &result, &error);
             break;
-        case MetricType::R2:
+        case TsMetricType::R2:
             success = anofox_ts_r2(actuals.data(), actuals.size(),
                                    forecasts.data(), forecasts.size(),
                                    &result, &error);
             break;
-        case MetricType::BIAS:
+        case TsMetricType::BIAS:
             success = anofox_ts_bias(actuals.data(), actuals.size(),
                                      forecasts.data(), forecasts.size(),
                                      &result, &error);
