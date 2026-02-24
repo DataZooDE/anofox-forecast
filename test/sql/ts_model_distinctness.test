@@ -116,7 +116,32 @@ FROM forecasts;
 18.943503	19.537535	14.451866	18.803254	1
 
 ###############################################################################
-# 4. Sanity check: Auto* models that already use the library MUST stay distinct
+# 4. MSTL/TBATS vs HoltWinters — FIXED (forecast-extension-tlye)
+#
+#    MSTL and TBATS previously fell back to HoltWinters. Now they use
+#    their own library implementations (MSTLForecaster, TBATS).
+#    Holt included to guard against ETS fallback collapse.
+###############################################################################
+
+query IIIII
+WITH vals AS (SELECT list(y) AS y FROM distinctness_ts),
+forecasts AS (
+  SELECT
+    ROUND((_ts_forecast(y, 3, 'Holt')).point[1], 6) AS holt,
+    ROUND((_ts_forecast(y, 3, 'HoltWinters')).point[1], 6) AS hw,
+    ROUND((_ts_forecast(y, 3, 'MSTL')).point[1], 6) AS mstl,
+    ROUND((_ts_forecast(y, 3, 'TBATS')).point[1], 6) AS tbats,
+  FROM vals
+)
+SELECT holt, hw, mstl, tbats,
+  -- all_distinct: MSTL and TBATS must differ from HoltWinters and from each other
+  (holt != hw AND mstl != hw AND tbats != hw AND mstl != tbats)::INT AS all_distinct
+FROM forecasts;
+----
+20.330877	19.953912	17.364756	17.46623	1
+
+###############################################################################
+# 5. Sanity check: Auto* models that use the library MUST stay distinct
 #
 #    These models correctly use anofox-forecast library implementations.
 #    This section guards against someone breaking them in the future.
