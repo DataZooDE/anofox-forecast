@@ -7,9 +7,13 @@ use crate::seasonality::detect_seasonality;
 // Model types from anofox-forecast crate
 use anofox_forecast::core::TimeSeries;
 use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig};
-use anofox_forecast::models::exponential::{AutoETS, AutoETSConfig, ETSSpec, ETS as ETSModel};
+use anofox_forecast::models::exponential::{
+    AutoETS, AutoETSConfig, ETSSpec, HoltLinearTrend, HoltWinters as HoltWintersModel,
+    SeasonalES as SeasonalESModel, SimpleExponentialSmoothing, ETS as ETSModel,
+};
 use anofox_forecast::models::intermittent::{Croston, ADIDA, IMAPA, TSB};
-use anofox_forecast::models::tbats::AutoTBATS;
+use anofox_forecast::models::mstl_forecaster::MSTLForecaster;
+use anofox_forecast::models::tbats::{AutoTBATS, TBATS as TBATSModel};
 use anofox_forecast::models::theta::{AutoTheta, DynamicTheta, OptimizedTheta, Theta};
 use anofox_forecast::models::MFLES;
 use anofox_forecast::prelude::Forecaster;
@@ -495,15 +499,13 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         }
         ModelType::RandomWalkDrift => forecast_drift(&clean_values, options.horizon),
         // Exponential Smoothing
-        ModelType::SES | ModelType::SESOptimized => {
-            forecast_ses(&clean_values, options.horizon, 0.3)
-        }
-        ModelType::Holt => forecast_holt(&clean_values, options.horizon, 0.3, 0.1),
-        ModelType::HoltWinters => {
-            forecast_holt_winters(&clean_values, options.horizon, period, 0.3, 0.1, 0.1)
-        }
-        ModelType::SeasonalES | ModelType::SeasonalESOptimized => {
-            forecast_seasonal_es(&clean_values, options.horizon, period)
+        ModelType::SES => forecast_ses_fixed(&clean_values, options.horizon),
+        ModelType::SESOptimized => forecast_ses_optimized(&clean_values, options.horizon),
+        ModelType::Holt => forecast_holt_lib(&clean_values, options.horizon),
+        ModelType::HoltWinters => forecast_holt_winters_lib(&clean_values, options.horizon, period),
+        ModelType::SeasonalES => forecast_seasonal_es_lib(&clean_values, options.horizon, period),
+        ModelType::SeasonalESOptimized => {
+            forecast_seasonal_es_optimized(&clean_values, options.horizon, period)
         }
         ModelType::SeasonalWindowAverage => {
             forecast_seasonal_window_average(&clean_values, options.horizon, period)
@@ -540,20 +542,28 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             forecast_mfles(&clean_values, options.horizon, periods)
         }
         ModelType::MSTL | ModelType::AutoMSTL => {
-            let p = if !options.seasonal_periods.is_empty() {
-                options.seasonal_periods.first().copied().unwrap_or(1)
+            let periods = if !options.seasonal_periods.is_empty() {
+                options.seasonal_periods.clone()
+            } else if period > 1 {
+                vec![period]
             } else {
-                period
+                vec![12]
             };
-            forecast_mstl(&clean_values, options.horizon, p)
+            let mut result = forecast_mstl_lib(&clean_values, options.horizon, &periods)?;
+            if options.model == ModelType::AutoMSTL {
+                result.model_name = "AutoMSTL".to_string();
+            }
+            Ok(result)
         }
         ModelType::TBATS => {
-            let p = if !options.seasonal_periods.is_empty() {
-                options.seasonal_periods.first().copied().unwrap_or(1)
+            let periods = if !options.seasonal_periods.is_empty() {
+                options.seasonal_periods.clone()
+            } else if period > 1 {
+                vec![period]
             } else {
-                period
+                vec![12]
             };
-            forecast_tbats(&clean_values, options.horizon, p)
+            forecast_tbats_lib(&clean_values, options.horizon, &periods)
         }
         ModelType::AutoTBATS => {
             let periods = if !options.seasonal_periods.is_empty() {
@@ -820,12 +830,12 @@ fn forecast_with_model(
         }
         ModelType::RandomWalkDrift => forecast_drift(values, horizon),
         // Exponential Smoothing
-        ModelType::SES | ModelType::SESOptimized => forecast_ses(values, horizon, 0.3),
-        ModelType::Holt => forecast_holt(values, horizon, 0.3, 0.1),
-        ModelType::HoltWinters => forecast_holt_winters(values, horizon, period, 0.3, 0.1, 0.1),
-        ModelType::SeasonalES | ModelType::SeasonalESOptimized => {
-            forecast_seasonal_es(values, horizon, period)
-        }
+        ModelType::SES => forecast_ses_fixed(values, horizon),
+        ModelType::SESOptimized => forecast_ses_optimized(values, horizon),
+        ModelType::Holt => forecast_holt_lib(values, horizon),
+        ModelType::HoltWinters => forecast_holt_winters_lib(values, horizon, period),
+        ModelType::SeasonalES => forecast_seasonal_es_lib(values, horizon, period),
+        ModelType::SeasonalESOptimized => forecast_seasonal_es_optimized(values, horizon, period),
         ModelType::SeasonalWindowAverage => {
             forecast_seasonal_window_average(values, horizon, period)
         }
@@ -854,20 +864,28 @@ fn forecast_with_model(
             forecast_mfles(values, horizon, periods)
         }
         ModelType::MSTL | ModelType::AutoMSTL => {
-            let p = if !seasonal_periods.is_empty() {
-                seasonal_periods.first().copied().unwrap_or(1)
+            let periods = if !seasonal_periods.is_empty() {
+                seasonal_periods.to_vec()
+            } else if period > 1 {
+                vec![period]
             } else {
-                period
+                vec![12]
             };
-            forecast_mstl(values, horizon, p)
+            let mut result = forecast_mstl_lib(values, horizon, &periods)?;
+            if model == ModelType::AutoMSTL {
+                result.model_name = "AutoMSTL".to_string();
+            }
+            Ok(result)
         }
         ModelType::TBATS => {
-            let p = if !seasonal_periods.is_empty() {
-                seasonal_periods.first().copied().unwrap_or(1)
+            let periods = if !seasonal_periods.is_empty() {
+                seasonal_periods.to_vec()
+            } else if period > 1 {
+                vec![period]
             } else {
-                period
+                vec![12]
             };
-            forecast_tbats(values, horizon, p)
+            forecast_tbats_lib(values, horizon, &periods)
         }
         ModelType::AutoTBATS => {
             let periods = if !seasonal_periods.is_empty() {
@@ -967,106 +985,48 @@ fn forecast_drift(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
     })
 }
 
-fn forecast_ses(values: &[f64], horizon: usize, alpha: f64) -> Result<ForecastOutput> {
-    let mut level = values[0];
-
-    for &v in values.iter().skip(1) {
-        level = alpha * v + (1.0 - alpha) * level;
-    }
-
-    Ok(ForecastOutput {
-        point: vec![level; horizon],
-        lower: vec![],
-        upper: vec![],
-        fitted: None,
-        residuals: None,
-        model_name: String::new(),
-        aic: None,
-        bic: None,
-        mse: None,
-    })
+fn forecast_ses_fixed(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+    let ts = make_timeseries(values)?;
+    let mut model = SimpleExponentialSmoothing::new(0.3);
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("SES fit failed: {}", e)))?;
+    extract_forecast(&model, horizon, "SES")
 }
 
-fn forecast_holt(values: &[f64], horizon: usize, alpha: f64, beta: f64) -> Result<ForecastOutput> {
-    if values.len() < 2 {
-        return forecast_ses(values, horizon, alpha);
-    }
-
-    let mut level = values[0];
-    let mut trend = values[1] - values[0];
-
-    for &v in values.iter().skip(1) {
-        let prev_level = level;
-        level = alpha * v + (1.0 - alpha) * (level + trend);
-        trend = beta * (level - prev_level) + (1.0 - beta) * trend;
-    }
-
-    let point: Vec<f64> = (1..=horizon).map(|h| level + trend * h as f64).collect();
-
-    Ok(ForecastOutput {
-        point,
-        lower: vec![],
-        upper: vec![],
-        fitted: None,
-        residuals: None,
-        model_name: String::new(),
-        aic: None,
-        bic: None,
-        mse: None,
-    })
+fn forecast_ses_optimized(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+    let ts = make_timeseries(values)?;
+    let mut model = SimpleExponentialSmoothing::auto();
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("SESOptimized fit failed: {}", e)))?;
+    extract_forecast(&model, horizon, "SESOptimized")
 }
 
-fn forecast_holt_winters(
+fn forecast_holt_lib(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+    let ts = make_timeseries(values)?;
+    let mut model = HoltLinearTrend::auto();
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("Holt fit failed: {}", e)))?;
+    extract_forecast(&model, horizon, "Holt")
+}
+
+fn forecast_holt_winters_lib(
     values: &[f64],
     horizon: usize,
     period: usize,
-    alpha: f64,
-    beta: f64,
-    gamma: f64,
 ) -> Result<ForecastOutput> {
-    let p = period.max(2).min(values.len() / 2);
-
-    if values.len() < 2 * p {
-        return forecast_holt(values, horizon, alpha, beta);
-    }
-
-    // Initialize
-    let initial_level: f64 = values[..p].iter().sum::<f64>() / p as f64;
-    let mut level = initial_level;
-    let mut trend = (values[p..2 * p].iter().sum::<f64>() / p as f64 - initial_level) / p as f64;
-
-    // Initialize seasonal
-    let mut seasonal: Vec<f64> = values[..p]
-        .iter()
-        .map(|v| v / initial_level.max(0.001))
-        .collect();
-
-    // Update
-    for (i, &v) in values.iter().enumerate().skip(p) {
-        let s_idx = i % p;
-        let prev_level = level;
-
-        level = alpha * (v / seasonal[s_idx].max(0.001)) + (1.0 - alpha) * (level + trend);
-        trend = beta * (level - prev_level) + (1.0 - beta) * trend;
-        seasonal[s_idx] = gamma * (v / level.max(0.001)) + (1.0 - gamma) * seasonal[s_idx];
-    }
-
-    // Forecast
-    let point: Vec<f64> = (1..=horizon)
-        .map(|h| (level + trend * h as f64) * seasonal[(values.len() + h - 1) % p])
-        .collect();
-
-    Ok(ForecastOutput {
-        point,
-        lower: vec![],
-        upper: vec![],
-        fitted: None,
-        residuals: None,
-        model_name: String::new(),
-        aic: None,
-        bic: None,
-        mse: None,
-    })
+    let ts = make_timeseries(values)?;
+    let p = period.max(2);
+    let mut model = HoltWintersModel::auto(
+        p,
+        anofox_forecast::models::exponential::SeasonalType::Additive,
+    );
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("HoltWinters fit failed: {}", e)))?;
+    extract_forecast(&model, horizon, "HoltWinters")
 }
 
 fn forecast_theta_stm(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
@@ -1129,45 +1089,32 @@ fn forecast_dynamic_optimized_theta(
     extract_forecast(&model, horizon, "DynamicOptimizedTheta")
 }
 
-fn forecast_seasonal_es(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
-    // Seasonal exponential smoothing (simplified Holt-Winters without trend)
-    let p = period.max(2).min(values.len() / 2);
+fn forecast_seasonal_es_lib(
+    values: &[f64],
+    horizon: usize,
+    period: usize,
+) -> Result<ForecastOutput> {
+    let ts = make_timeseries(values)?;
+    let p = period.max(2);
+    let mut model = SeasonalESModel::new(p);
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("SeasonalES fit failed: {}", e)))?;
+    extract_forecast(&model, horizon, "SeasonalES")
+}
 
-    if values.len() < 2 * p {
-        return forecast_ses(values, horizon, 0.3);
-    }
-
-    let alpha = 0.3;
-    let gamma = 0.1;
-
-    let initial_level: f64 = values[..p].iter().sum::<f64>() / p as f64;
-    let mut level = initial_level;
-    let mut seasonal: Vec<f64> = values[..p]
-        .iter()
-        .map(|v| v / initial_level.max(0.001))
-        .collect();
-
-    for (i, &v) in values.iter().enumerate().skip(p) {
-        let s_idx = i % p;
-        level = alpha * (v / seasonal[s_idx].max(0.001)) + (1.0 - alpha) * level;
-        seasonal[s_idx] = gamma * (v / level.max(0.001)) + (1.0 - gamma) * seasonal[s_idx];
-    }
-
-    let point: Vec<f64> = (1..=horizon)
-        .map(|h| level * seasonal[(values.len() + h - 1) % p])
-        .collect();
-
-    Ok(ForecastOutput {
-        point,
-        lower: vec![],
-        upper: vec![],
-        fitted: None,
-        residuals: None,
-        model_name: String::new(),
-        aic: None,
-        bic: None,
-        mse: None,
-    })
+fn forecast_seasonal_es_optimized(
+    values: &[f64],
+    horizon: usize,
+    period: usize,
+) -> Result<ForecastOutput> {
+    let ts = make_timeseries(values)?;
+    let p = period.max(2);
+    let mut model = SeasonalESModel::optimized(p);
+    model.fit(&ts).map_err(|e| {
+        ForecastError::ComputationError(format!("SeasonalESOptimized fit failed: {}", e))
+    })?;
+    extract_forecast(&model, horizon, "SeasonalESOptimized")
 }
 
 fn forecast_seasonal_window_average(
@@ -1310,14 +1257,16 @@ fn forecast_ets(
         });
     }
 
-    // No explicit spec: use simplified ETS implementation based on data characteristics
-    if period > 1 && values.len() >= 2 * period {
-        forecast_holt_winters(values, horizon, period, 0.3, 0.1, 0.1)
+    // No explicit spec: use library ETS implementations based on data characteristics
+    let mut result = if period > 1 && values.len() >= 2 * period {
+        forecast_holt_winters_lib(values, horizon, period)
     } else if values.len() >= 10 {
-        forecast_holt(values, horizon, 0.3, 0.1)
+        forecast_holt_lib(values, horizon)
     } else {
-        forecast_ses(values, horizon, 0.3)
-    }
+        forecast_ses_fixed(values, horizon)
+    }?;
+    result.model_name = "ETS".to_string();
+    Ok(result)
 }
 
 /// Forecast using the anofox-forecast ETS model with explicit spec.
@@ -1771,32 +1720,22 @@ fn forecast_mfles(values: &[f64], horizon: usize, periods: &[usize]) -> Result<F
     })
 }
 
-fn forecast_mstl(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
-    // MSTL: Multiple Seasonal-Trend decomposition using Loess
-    // Simplified: use Holt-Winters as it handles trend and seasonality
-    let result = if period > 1 && values.len() >= 2 * period {
-        forecast_holt_winters(values, horizon, period, 0.3, 0.1, 0.1)?
-    } else {
-        forecast_holt(values, horizon, 0.3, 0.1)?
-    };
-    Ok(ForecastOutput {
-        model_name: String::new(),
-        ..result
-    })
+fn forecast_mstl_lib(values: &[f64], horizon: usize, periods: &[usize]) -> Result<ForecastOutput> {
+    let ts = make_timeseries(values)?;
+    let mut model = MSTLForecaster::new(periods.to_vec());
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("MSTL fit failed: {}", e)))?;
+    extract_forecast(&model, horizon, "MSTL")
 }
 
-fn forecast_tbats(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
-    // TBATS: Trigonometric, Box-Cox, ARMA, Trend, Seasonal
-    // Simplified: use Holt-Winters
-    let result = if period > 1 && values.len() >= 2 * period {
-        forecast_holt_winters(values, horizon, period, 0.3, 0.1, 0.1)?
-    } else {
-        forecast_ses(values, horizon, 0.3)?
-    };
-    Ok(ForecastOutput {
-        model_name: String::new(),
-        ..result
-    })
+fn forecast_tbats_lib(values: &[f64], horizon: usize, periods: &[usize]) -> Result<ForecastOutput> {
+    let ts = make_timeseries(values)?;
+    let mut model = TBATSModel::new(periods.to_vec());
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("TBATS fit failed: {}", e)))?;
+    extract_forecast(&model, horizon, "TBATS")
 }
 
 /// Helper to create a TimeSeries from values (hourly timestamps).
