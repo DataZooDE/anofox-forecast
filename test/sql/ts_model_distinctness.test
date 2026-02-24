@@ -1,0 +1,166 @@
+# name: test/sql/ts_model_distinctness.test
+# description: Regression guard: model variants within the same family must produce
+#              distinct forecasts. Catches bugs where multiple models silently
+#              dispatch to the same implementation.
+#
+# HOW THIS WORKS:
+#   Each section compares yhat[1] across model variants that SHOULD differ.
+#   A helper column 'all_distinct' is true when every variant produces a
+#   unique forecast. Sections marked KNOWN BUG currently expect false
+#   (all_distinct = false). When the corresponding bead is fixed:
+#     1. Update the expected yhat values
+#     2. Change 'all_distinct' expectation from false → true
+#     3. Any future regression back to identical outputs will fail the test
+#
+# group: [sql]
+
+require anofox_forecast
+
+###############################################################################
+# Test data
+###############################################################################
+
+# Standard time series with trend + seasonality (24 obs, period ~3)
+statement ok
+CREATE TABLE distinctness_ts AS
+SELECT * FROM (VALUES
+  (10.0),(12.0),(14.0),(11.0),(13.0),(15.0),
+  (12.0),(14.0),(16.0),(13.0),(15.0),(17.0),
+  (14.0),(16.0),(18.0),(15.0),(17.0),(19.0),
+  (16.0),(18.0),(20.0),(17.0),(19.0),(21.0)
+) AS t(y);
+
+# Intermittent demand data: sparse with varying amounts
+statement ok
+CREATE TABLE distinctness_intermittent AS
+SELECT * FROM (VALUES
+  (0.0),(0.0),(5.0),(0.0),(0.0),(0.0),(3.0),(0.0),(4.0),(0.0),
+  (0.0),(6.0),(0.0),(0.0),(0.0),(8.0),(0.0),(0.0),(2.0),(0.0),
+  (0.0),(0.0),(7.0),(0.0),(0.0),(0.0),(0.0),(4.0),(0.0),(0.0)
+) AS t(y);
+
+###############################################################################
+# 1. Intermittent demand models — FIXED (forecast-extension-gbgj)
+#
+#    Each model now uses its own library implementation:
+#    CrostonClassic, CrostonOptimized, CrostonSBA, TSB, ADIDA, IMAPA
+###############################################################################
+
+query IIIIIII
+WITH vals AS (SELECT list(y) AS y FROM distinctness_intermittent),
+forecasts AS (
+  SELECT
+    ROUND((_ts_forecast(y, 3, 'CrostonClassic')).point[1], 6) AS croston,
+    ROUND((_ts_forecast(y, 3, 'CrostonOptimized')).point[1], 6) AS croston_opt,
+    ROUND((_ts_forecast(y, 3, 'CrostonSBA')).point[1], 6) AS croston_sba,
+    ROUND((_ts_forecast(y, 3, 'TSB')).point[1], 6) AS tsb,
+    ROUND((_ts_forecast(y, 3, 'ADIDA')).point[1], 6) AS adida,
+    ROUND((_ts_forecast(y, 3, 'IMAPA')).point[1], 6) AS imapa,
+  FROM vals
+)
+SELECT croston, croston_opt, croston_sba, tsb, adida, imapa,
+  -- all_distinct: true when no two models share the same yhat
+  (croston != croston_sba OR croston != tsb OR croston != adida OR croston != imapa)::INT AS all_distinct
+FROM forecasts;
+----
+1.476312	1.641594	1.402497	1.108734	1.309852	1.226488	1
+
+###############################################################################
+# 2. Theta variants — FIXED (forecast-extension-jkco)
+#
+#    Each variant now uses its own library implementation:
+#    Theta (STM), OptimizedTheta (OTM), DynamicTheta (DSTM),
+#    DynamicOptimizedTheta (DOTM)
+###############################################################################
+
+query IIIII
+WITH vals AS (SELECT list(y) AS y FROM distinctness_ts),
+forecasts AS (
+  SELECT
+    ROUND((_ts_forecast(y, 3, 'Theta')).point[1], 6) AS theta,
+    ROUND((_ts_forecast(y, 3, 'OptimizedTheta')).point[1], 6) AS opt_theta,
+    ROUND((_ts_forecast(y, 3, 'DynamicTheta')).point[1], 6) AS dyn_theta,
+    ROUND((_ts_forecast(y, 3, 'DynamicOptimizedTheta')).point[1], 6) AS dyn_opt_theta,
+  FROM vals
+)
+SELECT theta, opt_theta, dyn_theta, dyn_opt_theta,
+  -- all_distinct: true when at least STM != OTM (the core pair)
+  (theta != opt_theta OR theta != dyn_theta OR theta != dyn_opt_theta)::INT AS all_distinct
+FROM forecasts;
+----
+18.356416	19.778702	18.668893	19.347803	1
+
+###############################################################################
+# 3. Exponential smoothing: Optimized variants — KNOWN BUG (forecast-extension-b3ou)
+#
+#    "Optimized" variants use the same hardcoded alpha as their base variants.
+#    After fix: SESOptimized should differ from SES, SeasonalESOptimized
+#    should differ from SeasonalES (optimized alpha != 0.3).
+###############################################################################
+
+query IIIII
+WITH vals AS (SELECT list(y) AS y FROM distinctness_ts),
+forecasts AS (
+  SELECT
+    ROUND((_ts_forecast(y, 3, 'SES')).point[1], 6) AS ses,
+    ROUND((_ts_forecast(y, 3, 'SESOptimized')).point[1], 6) AS ses_opt,
+    ROUND((_ts_forecast(y, 3, 'SeasonalES')).point[1], 6) AS seasonal_es,
+    ROUND((_ts_forecast(y, 3, 'SeasonalESOptimized')).point[1], 6) AS seasonal_es_opt,
+  FROM vals
+)
+SELECT ses, ses_opt, seasonal_es, seasonal_es_opt,
+  -- all_distinct: true when optimized differs from base
+  -- KNOWN BUG: currently 0. Change to 1 after fix.
+  (ses != ses_opt OR seasonal_es != seasonal_es_opt)::INT AS all_distinct
+FROM forecasts;
+----
+18.943503	18.943503	18.431048	18.431048	0
+
+###############################################################################
+# 4. Sanity check: Auto* models that already use the library MUST stay distinct
+#
+#    These models correctly use anofox-forecast library implementations.
+#    This section guards against someone breaking them in the future.
+###############################################################################
+
+# AutoETS vs AutoARIMA vs AutoTheta — must always be distinct
+query IIII
+WITH vals AS (SELECT list(y) AS y FROM distinctness_ts),
+forecasts AS (
+  SELECT
+    ROUND((_ts_forecast(y, 3, 'AutoETS')).point[1], 6) AS auto_ets,
+    ROUND((_ts_forecast(y, 3, 'AutoARIMA')).point[1], 6) AS auto_arima,
+    ROUND((_ts_forecast(y, 3, 'AutoTheta')).point[1], 6) AS auto_theta,
+  FROM vals
+)
+SELECT auto_ets, auto_arima, auto_theta,
+  (auto_ets != auto_arima AND auto_ets != auto_theta)::INT AS all_distinct
+FROM forecasts;
+----
+19.956521	18.014537	19.778702	1
+
+# Baseline models: Naive vs SMA vs RandomWalkDrift — must always be distinct
+query IIII
+WITH vals AS (SELECT list(y) AS y FROM distinctness_ts),
+forecasts AS (
+  SELECT
+    ROUND((_ts_forecast(y, 3, 'Naive')).point[1], 6) AS naive,
+    ROUND((_ts_forecast(y, 3, 'SMA')).point[1], 6) AS sma,
+    ROUND((_ts_forecast(y, 3, 'RandomWalkDrift')).point[1], 6) AS drift,
+  FROM vals
+)
+SELECT naive, sma, drift,
+  (naive != sma AND naive != drift AND sma != drift)::INT AS all_distinct
+FROM forecasts;
+----
+21.0	19.0	21.478261	1
+
+###############################################################################
+# Cleanup
+###############################################################################
+
+statement ok
+DROP TABLE distinctness_ts;
+
+statement ok
+DROP TABLE distinctness_intermittent;

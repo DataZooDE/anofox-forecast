@@ -388,6 +388,10 @@ pub struct ForecastOptions {
     pub include_fitted: bool,
     /// Include residuals
     pub include_residuals: bool,
+    /// SMA window size (0 = not set)
+    pub window: c_int,
+    /// Multiple seasonal periods as string (e.g. "[24, 168]"), empty = not set
+    pub seasonal_periods_str: [c_char; 64],
 }
 
 impl Default for ForecastOptions {
@@ -406,6 +410,8 @@ impl Default for ForecastOptions {
             auto_detect_seasonality: true,
             include_fitted: false,
             include_residuals: false,
+            window: 0,
+            seasonal_periods_str: [0; 64],
         }
     }
 }
@@ -466,6 +472,10 @@ pub struct ForecastOptionsExog {
     pub include_residuals: bool,
     /// Exogenous data (may be null if no exogenous variables)
     pub exog: *const ExogenousData,
+    /// SMA window size (0 = not set)
+    pub window: c_int,
+    /// Multiple seasonal periods as string (e.g. "[24, 168]"), empty = not set
+    pub seasonal_periods_str: [c_char; 64],
 }
 
 impl Default for ForecastOptionsExog {
@@ -485,6 +495,8 @@ impl Default for ForecastOptionsExog {
             include_fitted: false,
             include_residuals: false,
             exog: std::ptr::null(),
+            window: 0,
+            seasonal_periods_str: [0; 64],
         }
     }
 }

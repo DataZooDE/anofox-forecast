@@ -237,6 +237,148 @@ SELECT COUNT(*) FROM _ts_forecast_native(
 6
 
 #######################################
+# SMA 'window' parameter
+#######################################
+
+# SMA with valid window should succeed
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'SMA', MAP{'window': '12'});
+----
+6
+
+# SMA with negative window → error
+statement error
+SELECT * FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'SMA', MAP{'window': '-1'});
+----
+must be a positive integer
+
+# 'window' with non-SMA method → error
+statement error
+SELECT * FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'Naive', MAP{'window': '5'});
+----
+only valid when method='SMA'
+
+#######################################
+# 'seasonal_periods' parameter
+#######################################
+
+# AutoMFLES with seasonal_periods should succeed
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'AutoMFLES', MAP{'seasonal_periods': '[7, 14]'});
+----
+6
+
+# seasonal_periods with non-multi-seasonal model → error
+statement error
+SELECT * FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'Naive', MAP{'seasonal_periods': '[7]'});
+----
+only valid for multi-seasonal models
+
+# seasonal_periods overrides seasonal_period for multi-seasonal models
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'AutoMFLES', MAP{'seasonal_period': '7', 'seasonal_periods': '[7, 14]'});
+----
+6
+
+###############################################################################
+# PARAMETER ACCEPTANCE REGRESSION GUARD
+#
+# Every MAP{} parameter supported by _ts_forecast_native and
+# _ts_cv_forecast_native MUST have a positive acceptance test below.
+# When adding a new parameter:
+#   1. Add it to ValidateParamKeys in ts_forecast_native.cpp AND ts_cv_forecast_native.cpp
+#   2. Add a positive test here for BOTH _ts_forecast_native AND _ts_cv_forecast_native
+#   3. Add negative tests (wrong model, bad value) in the sections above
+#
+# Documented params NOT yet wired through MAP{}:
+#   alpha, beta, gamma, theta, p, d, q, P, D, Q, s, alpha_d, alpha_p, use_box_cox
+###############################################################################
+
+# --- confidence_level: accepted by all models ---
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'AutoETS', MAP{'confidence_level': '0.80'});
+----
+6
+
+query I
+SELECT COUNT(*) FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM param_test_cv), 'AutoETS', MAP{'confidence_level': '0.80'});
+----
+6
+
+# --- model (ETS spec): accepted only with method='ETS' ---
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'ETS', MAP{'model': 'ANA'});
+----
+0
+
+query I
+SELECT COUNT(*) FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM param_test_cv), 'ETS', MAP{'model': 'ANA'});
+----
+0
+
+# --- seasonal_period: accepted by seasonal models ---
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'AutoETS', MAP{'seasonal_period': '7'});
+----
+6
+
+query I
+SELECT COUNT(*) FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM param_test_cv), 'AutoETS', MAP{'seasonal_period': '7'});
+----
+6
+
+# --- window: accepted only with method='SMA' ---
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'SMA', MAP{'window': '5'});
+----
+6
+
+query I
+SELECT COUNT(*) FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM param_test_cv), 'SMA', MAP{'window': '5'});
+----
+6
+
+# --- seasonal_periods: accepted only with multi-seasonal models ---
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'AutoMFLES', MAP{'seasonal_periods': '[7]'});
+----
+6
+
+query I
+SELECT COUNT(*) FROM _ts_cv_forecast_native(
+    (SELECT fold_id, split, id, ds, y FROM param_test_cv), 'AutoMFLES', MAP{'seasonal_periods': '[7]'});
+----
+6
+
+# --- seasonal_periods with other multi-seasonal models ---
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'MSTL', MAP{'seasonal_periods': '[7]'});
+----
+6
+
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'AutoTBATS', MAP{'seasonal_periods': '[7]'});
+----
+6
+
+#######################################
 # Cleanup
 #######################################
 

@@ -8,8 +8,9 @@ use crate::seasonality::detect_seasonality;
 use anofox_forecast::core::TimeSeries;
 use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig};
 use anofox_forecast::models::exponential::{AutoETS, AutoETSConfig, ETSSpec, ETS as ETSModel};
+use anofox_forecast::models::intermittent::{Croston, ADIDA, IMAPA, TSB};
 use anofox_forecast::models::tbats::AutoTBATS;
-use anofox_forecast::models::theta::AutoTheta;
+use anofox_forecast::models::theta::{AutoTheta, DynamicTheta, OptimizedTheta, Theta};
 use anofox_forecast::models::MFLES;
 use anofox_forecast::prelude::Forecaster;
 
@@ -264,6 +265,10 @@ pub struct ForecastOptions {
     pub include_fitted: bool,
     /// Include residuals
     pub include_residuals: bool,
+    /// SMA window size (0 = not set, use period.max(3))
+    pub window: usize,
+    /// Multiple seasonal periods (empty = not set, use seasonal_period)
+    pub seasonal_periods: Vec<usize>,
 }
 
 impl Default for ForecastOptions {
@@ -277,6 +282,8 @@ impl Default for ForecastOptions {
             auto_detect_seasonality: true,
             include_fitted: false,
             include_residuals: false,
+            window: 0,
+            seasonal_periods: vec![],
         }
     }
 }
@@ -369,6 +376,10 @@ pub struct ForecastOptionsExog {
     pub include_residuals: bool,
     /// Exogenous data (optional)
     pub exog: Option<ExogenousData>,
+    /// SMA window size (0 = not set, use period.max(3))
+    pub window: usize,
+    /// Multiple seasonal periods (empty = not set, use seasonal_period)
+    pub seasonal_periods: Vec<usize>,
 }
 
 impl Default for ForecastOptionsExog {
@@ -383,6 +394,8 @@ impl Default for ForecastOptionsExog {
             include_fitted: false,
             include_residuals: false,
             exog: None,
+            window: 0,
+            seasonal_periods: vec![],
         }
     }
 }
@@ -399,6 +412,8 @@ impl From<ForecastOptions> for ForecastOptionsExog {
             include_fitted: opts.include_fitted,
             include_residuals: opts.include_residuals,
             exog: None,
+            window: opts.window,
+            seasonal_periods: opts.seasonal_periods,
         }
     }
 }
@@ -470,7 +485,14 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         // Basic Models
         ModelType::Naive => forecast_naive(&clean_values, options.horizon),
         ModelType::SeasonalNaive => forecast_seasonal_naive(&clean_values, options.horizon, period),
-        ModelType::SMA => forecast_sma(&clean_values, options.horizon, period.max(3)),
+        ModelType::SMA => {
+            let w = if options.window > 0 {
+                options.window
+            } else {
+                period.max(3)
+            };
+            forecast_sma(&clean_values, options.horizon, w)
+        }
         ModelType::RandomWalkDrift => forecast_drift(&clean_values, options.horizon),
         // Exponential Smoothing
         ModelType::SES | ModelType::SESOptimized => {
@@ -494,30 +516,62 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         ),
         ModelType::AutoETS => forecast_auto_ets(&clean_values, options.horizon, period),
         // Theta Methods
-        ModelType::Theta
-        | ModelType::OptimizedTheta
-        | ModelType::DynamicTheta
-        | ModelType::DynamicOptimizedTheta => forecast_theta(&clean_values, options.horizon),
+        ModelType::Theta => forecast_theta_stm(&clean_values, options.horizon, period),
+        ModelType::OptimizedTheta => {
+            forecast_optimized_theta(&clean_values, options.horizon, period)
+        }
+        ModelType::DynamicTheta => forecast_dynamic_theta(&clean_values, options.horizon, period),
+        ModelType::DynamicOptimizedTheta => {
+            forecast_dynamic_optimized_theta(&clean_values, options.horizon, period)
+        }
         ModelType::AutoTheta => forecast_auto_theta(&clean_values, options.horizon, period),
         // ARIMA
         ModelType::ARIMA => forecast_arima(&clean_values, options.horizon),
         ModelType::AutoARIMA => forecast_auto_arima(&clean_values, options.horizon, period),
         // Multiple Seasonality
         ModelType::MFLES | ModelType::AutoMFLES => {
-            forecast_mfles(&clean_values, options.horizon, period)
+            let periods = if !options.seasonal_periods.is_empty() {
+                &options.seasonal_periods
+            } else if period > 1 {
+                &vec![period]
+            } else {
+                &vec![]
+            };
+            forecast_mfles(&clean_values, options.horizon, periods)
         }
         ModelType::MSTL | ModelType::AutoMSTL => {
-            forecast_mstl(&clean_values, options.horizon, period)
+            let p = if !options.seasonal_periods.is_empty() {
+                options.seasonal_periods.first().copied().unwrap_or(1)
+            } else {
+                period
+            };
+            forecast_mstl(&clean_values, options.horizon, p)
         }
-        ModelType::TBATS => forecast_tbats(&clean_values, options.horizon, period),
-        ModelType::AutoTBATS => forecast_auto_tbats(&clean_values, options.horizon, period),
+        ModelType::TBATS => {
+            let p = if !options.seasonal_periods.is_empty() {
+                options.seasonal_periods.first().copied().unwrap_or(1)
+            } else {
+                period
+            };
+            forecast_tbats(&clean_values, options.horizon, p)
+        }
+        ModelType::AutoTBATS => {
+            let periods = if !options.seasonal_periods.is_empty() {
+                &options.seasonal_periods
+            } else if period > 1 {
+                &vec![period]
+            } else {
+                &vec![12]
+            };
+            forecast_auto_tbats(&clean_values, options.horizon, periods)
+        }
         // Intermittent Demand
-        ModelType::CrostonClassic | ModelType::CrostonOptimized | ModelType::CrostonSBA => {
-            forecast_croston(&clean_values, options.horizon)
-        }
-        ModelType::TSB | ModelType::ADIDA | ModelType::IMAPA => {
-            forecast_croston(&clean_values, options.horizon)
-        }
+        ModelType::CrostonClassic => forecast_croston_classic(&clean_values, options.horizon),
+        ModelType::CrostonOptimized => forecast_croston_optimized(&clean_values, options.horizon),
+        ModelType::CrostonSBA => forecast_croston_sba(&clean_values, options.horizon),
+        ModelType::TSB => forecast_tsb(&clean_values, options.horizon),
+        ModelType::ADIDA => forecast_adida(&clean_values, options.horizon),
+        ModelType::IMAPA => forecast_imapa(&clean_values, options.horizon),
     }?;
 
     // Calculate confidence intervals
@@ -663,7 +717,14 @@ pub fn forecast_with_exog(
                 forecast_theta_with_exog(&clean_values, options.horizon, exog)
             }
             ModelType::MFLES | ModelType::AutoMFLES => {
-                forecast_mfles_with_exog(&clean_values, options.horizon, period, exog)
+                let periods = if !options.seasonal_periods.is_empty() {
+                    &options.seasonal_periods
+                } else if period > 1 {
+                    &vec![period]
+                } else {
+                    &vec![]
+                };
+                forecast_mfles_with_exog(&clean_values, options.horizon, periods, exog)
             }
             _ => {
                 // Shouldn't happen due to supports_exog check, but fallback to ARIMA with exog
@@ -673,7 +734,14 @@ pub fn forecast_with_exog(
     } else {
         // No exog data or model doesn't support exog - use standard forecasting
         // Auto* models run their respective algorithms with automatic parameter selection
-        forecast_with_model(&clean_values, options.horizon, options.model, period)
+        forecast_with_model(
+            &clean_values,
+            options.horizon,
+            options.model,
+            period,
+            options.window,
+            &options.seasonal_periods,
+        )
     }?;
 
     // For fitted values calculation, use the requested model
@@ -739,12 +807,17 @@ fn forecast_with_model(
     horizon: usize,
     model: ModelType,
     period: usize,
+    window: usize,
+    seasonal_periods: &[usize],
 ) -> Result<ForecastOutput> {
     match model {
         // Basic Models
         ModelType::Naive => forecast_naive(values, horizon),
         ModelType::SeasonalNaive => forecast_seasonal_naive(values, horizon, period),
-        ModelType::SMA => forecast_sma(values, horizon, period.max(3)),
+        ModelType::SMA => {
+            let w = if window > 0 { window } else { period.max(3) };
+            forecast_sma(values, horizon, w)
+        }
         ModelType::RandomWalkDrift => forecast_drift(values, horizon),
         // Exponential Smoothing
         ModelType::SES | ModelType::SESOptimized => forecast_ses(values, horizon, 0.3),
@@ -759,24 +832,60 @@ fn forecast_with_model(
         ModelType::ETS => forecast_ets(values, horizon, period, None),
         ModelType::AutoETS => forecast_auto_ets(values, horizon, period),
         // Theta Methods
-        ModelType::Theta
-        | ModelType::OptimizedTheta
-        | ModelType::DynamicTheta
-        | ModelType::DynamicOptimizedTheta => forecast_theta(values, horizon),
+        ModelType::Theta => forecast_theta_stm(values, horizon, period),
+        ModelType::OptimizedTheta => forecast_optimized_theta(values, horizon, period),
+        ModelType::DynamicTheta => forecast_dynamic_theta(values, horizon, period),
+        ModelType::DynamicOptimizedTheta => {
+            forecast_dynamic_optimized_theta(values, horizon, period)
+        }
         ModelType::AutoTheta => forecast_auto_theta(values, horizon, period),
         // ARIMA
         ModelType::ARIMA => forecast_arima(values, horizon),
         ModelType::AutoARIMA => forecast_auto_arima(values, horizon, period),
         // Multiple Seasonality
-        ModelType::MFLES | ModelType::AutoMFLES => forecast_mfles(values, horizon, period),
-        ModelType::MSTL | ModelType::AutoMSTL => forecast_mstl(values, horizon, period),
-        ModelType::TBATS => forecast_tbats(values, horizon, period),
-        ModelType::AutoTBATS => forecast_auto_tbats(values, horizon, period),
-        // Intermittent Demand
-        ModelType::CrostonClassic | ModelType::CrostonOptimized | ModelType::CrostonSBA => {
-            forecast_croston(values, horizon)
+        ModelType::MFLES | ModelType::AutoMFLES => {
+            let periods = if !seasonal_periods.is_empty() {
+                seasonal_periods
+            } else if period > 1 {
+                &vec![period]
+            } else {
+                &vec![]
+            };
+            forecast_mfles(values, horizon, periods)
         }
-        ModelType::TSB | ModelType::ADIDA | ModelType::IMAPA => forecast_croston(values, horizon),
+        ModelType::MSTL | ModelType::AutoMSTL => {
+            let p = if !seasonal_periods.is_empty() {
+                seasonal_periods.first().copied().unwrap_or(1)
+            } else {
+                period
+            };
+            forecast_mstl(values, horizon, p)
+        }
+        ModelType::TBATS => {
+            let p = if !seasonal_periods.is_empty() {
+                seasonal_periods.first().copied().unwrap_or(1)
+            } else {
+                period
+            };
+            forecast_tbats(values, horizon, p)
+        }
+        ModelType::AutoTBATS => {
+            let periods = if !seasonal_periods.is_empty() {
+                seasonal_periods
+            } else if period > 1 {
+                &vec![period]
+            } else {
+                &vec![12]
+            };
+            forecast_auto_tbats(values, horizon, periods)
+        }
+        // Intermittent Demand
+        ModelType::CrostonClassic => forecast_croston_classic(values, horizon),
+        ModelType::CrostonOptimized => forecast_croston_optimized(values, horizon),
+        ModelType::CrostonSBA => forecast_croston_sba(values, horizon),
+        ModelType::TSB => forecast_tsb(values, horizon),
+        ModelType::ADIDA => forecast_adida(values, horizon),
+        ModelType::IMAPA => forecast_imapa(values, horizon),
     }
 }
 
@@ -960,30 +1069,64 @@ fn forecast_holt_winters(
     })
 }
 
-fn forecast_theta(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
-    // Simple Theta method: combine SES with drift
-    let ses_forecast = forecast_ses(values, horizon, 0.3)?;
-    let drift_forecast = forecast_drift(values, horizon)?;
+fn forecast_theta_stm(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
+    let ts = make_timeseries(values)?;
+    let mut model = if period > 1 {
+        Theta::seasonal(period)
+    } else {
+        Theta::new()
+    };
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("Theta fit failed: {}", e)))?;
+    extract_forecast(&model, horizon, "Theta")
+}
 
-    // Theta = 2 means equal weight to SES and drift
-    let point: Vec<f64> = ses_forecast
-        .point
-        .iter()
-        .zip(drift_forecast.point.iter())
-        .map(|(s, d)| (s + d) / 2.0)
-        .collect();
+fn forecast_optimized_theta(
+    values: &[f64],
+    horizon: usize,
+    period: usize,
+) -> Result<ForecastOutput> {
+    let ts = make_timeseries(values)?;
+    let mut model = if period > 1 {
+        OptimizedTheta::seasonal(period)
+    } else {
+        OptimizedTheta::new()
+    };
+    model.fit(&ts).map_err(|e| {
+        ForecastError::ComputationError(format!("OptimizedTheta fit failed: {}", e))
+    })?;
+    extract_forecast(&model, horizon, "OptimizedTheta")
+}
 
-    Ok(ForecastOutput {
-        point,
-        lower: vec![],
-        upper: vec![],
-        fitted: None,
-        residuals: None,
-        model_name: String::new(),
-        aic: None,
-        bic: None,
-        mse: None,
-    })
+fn forecast_dynamic_theta(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
+    let ts = make_timeseries(values)?;
+    let mut model = if period > 1 {
+        DynamicTheta::seasonal(period)
+    } else {
+        DynamicTheta::new(0.1)
+    };
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("DynamicTheta fit failed: {}", e)))?;
+    extract_forecast(&model, horizon, "DynamicTheta")
+}
+
+fn forecast_dynamic_optimized_theta(
+    values: &[f64],
+    horizon: usize,
+    period: usize,
+) -> Result<ForecastOutput> {
+    let ts = make_timeseries(values)?;
+    let mut model = if period > 1 {
+        DynamicTheta::seasonal_optimized(period)
+    } else {
+        DynamicTheta::optimized()
+    };
+    model.fit(&ts).map_err(|e| {
+        ForecastError::ComputationError(format!("DynamicOptimizedTheta fit failed: {}", e))
+    })?;
+    extract_forecast(&model, horizon, "DynamicOptimizedTheta")
 }
 
 fn forecast_seasonal_es(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
@@ -1509,7 +1652,11 @@ fn forecast_auto_theta(values: &[f64], horizon: usize, period: usize) -> Result<
 
 /// AutoTBATS: Automatic TBATS configuration selection.
 /// Uses the proper AutoTBATS implementation from anofox-forecast library.
-fn forecast_auto_tbats(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
+fn forecast_auto_tbats(
+    values: &[f64],
+    horizon: usize,
+    periods: &[usize],
+) -> Result<ForecastOutput> {
     use chrono::{Duration, TimeZone, Utc};
 
     // Create timestamps for TimeSeries (required by anofox-forecast)
@@ -1522,9 +1669,8 @@ fn forecast_auto_tbats(values: &[f64], horizon: usize, period: usize) -> Result<
         ForecastError::ComputationError(format!("Failed to create TimeSeries: {}", e))
     })?;
 
-    // Configure AutoTBATS with seasonal period
-    let seasonal_periods = if period > 1 { vec![period] } else { vec![12] };
-    let mut model = AutoTBATS::new(seasonal_periods);
+    // Configure AutoTBATS with seasonal periods
+    let mut model = AutoTBATS::new(periods.to_vec());
 
     // Fit the model
     model
@@ -1571,7 +1717,7 @@ fn forecast_auto_tbats(values: &[f64], horizon: usize, period: usize) -> Result<
     })
 }
 
-fn forecast_mfles(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
+fn forecast_mfles(values: &[f64], horizon: usize, periods: &[usize]) -> Result<ForecastOutput> {
     use chrono::{Duration, TimeZone, Utc};
 
     // Create timestamps for TimeSeries (required by anofox-forecast)
@@ -1584,8 +1730,7 @@ fn forecast_mfles(values: &[f64], horizon: usize, period: usize) -> Result<Forec
         ForecastError::ComputationError(format!("Failed to create TimeSeries: {}", e))
     })?;
 
-    let seasonal_periods = if period > 1 { vec![period] } else { vec![] };
-    let mut model = MFLES::new(seasonal_periods);
+    let mut model = MFLES::new(periods.to_vec());
 
     // Fit the model
     model
@@ -1654,54 +1799,105 @@ fn forecast_tbats(values: &[f64], horizon: usize, period: usize) -> Result<Forec
     })
 }
 
-fn forecast_croston(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
-    // Croston's method for intermittent demand
-    let alpha = 0.1;
+/// Helper to create a TimeSeries from values (hourly timestamps).
+fn make_timeseries(values: &[f64]) -> Result<TimeSeries> {
+    use chrono::{Duration, TimeZone, Utc};
+    let base = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+    let timestamps: Vec<_> = (0..values.len())
+        .map(|i| base + Duration::hours(i as i64))
+        .collect();
+    TimeSeries::univariate(timestamps, values.to_vec())
+        .map_err(|e| ForecastError::ComputationError(format!("Failed to create TimeSeries: {}", e)))
+}
 
-    // Separate demand and intervals
-    let mut demand_level = 0.0;
-    let mut interval_level = 1.0;
-    let mut last_nonzero_idx = 0;
-    let mut first_nonzero = true;
+/// Helper to extract ForecastOutput from a fitted Forecaster model.
+/// `name_override`: use this instead of model.name() to match our ModelType enum names.
+fn extract_forecast(
+    model: &dyn Forecaster,
+    horizon: usize,
+    name_override: &str,
+) -> Result<ForecastOutput> {
+    let forecast = model.predict(horizon).map_err(|e| {
+        ForecastError::ComputationError(format!("{} predict failed: {}", name_override, e))
+    })?;
 
-    for (i, &v) in values.iter().enumerate() {
-        if v > 0.0 {
-            let interval = if first_nonzero {
-                1.0
-            } else {
-                (i - last_nonzero_idx) as f64
-            };
-
-            if first_nonzero {
-                demand_level = v;
-                interval_level = 1.0;
-                first_nonzero = false;
-            } else {
-                demand_level = alpha * v + (1.0 - alpha) * demand_level;
-                interval_level = alpha * interval + (1.0 - alpha) * interval_level;
-            }
-            last_nonzero_idx = i;
-        }
-    }
-
-    // Forecast = demand / interval
-    let forecast_value = if interval_level > 0.0 {
-        demand_level / interval_level
-    } else {
-        demand_level
-    };
+    let point = forecast.primary().to_vec();
+    let lower = forecast
+        .lower()
+        .and_then(|i| i.first())
+        .cloned()
+        .unwrap_or_default();
+    let upper = forecast
+        .upper()
+        .and_then(|i| i.first())
+        .cloned()
+        .unwrap_or_default();
 
     Ok(ForecastOutput {
-        point: vec![forecast_value; horizon],
-        lower: vec![],
-        upper: vec![],
-        fitted: None,
-        residuals: None,
-        model_name: String::new(),
+        point,
+        lower,
+        upper,
+        fitted: model.fitted_values().map(|v| v.to_vec()),
+        residuals: model.residuals().map(|v| v.to_vec()),
+        model_name: name_override.to_string(),
         aic: None,
         bic: None,
         mse: None,
     })
+}
+
+fn forecast_croston_classic(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+    let ts = make_timeseries(values)?;
+    let mut model = Croston::new();
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("Croston fit failed: {}", e)))?;
+    extract_forecast(&model, horizon, "CrostonClassic")
+}
+
+fn forecast_croston_optimized(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+    let ts = make_timeseries(values)?;
+    let mut model = Croston::new().optimized();
+    model.fit(&ts).map_err(|e| {
+        ForecastError::ComputationError(format!("CrostonOptimized fit failed: {}", e))
+    })?;
+    extract_forecast(&model, horizon, "CrostonOptimized")
+}
+
+fn forecast_croston_sba(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+    let ts = make_timeseries(values)?;
+    let mut model = Croston::new().sba();
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("CrostonSBA fit failed: {}", e)))?;
+    extract_forecast(&model, horizon, "CrostonSBA")
+}
+
+fn forecast_tsb(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+    let ts = make_timeseries(values)?;
+    let mut model = TSB::new();
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("TSB fit failed: {}", e)))?;
+    extract_forecast(&model, horizon, "TSB")
+}
+
+fn forecast_adida(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+    let ts = make_timeseries(values)?;
+    let mut model = ADIDA::new();
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("ADIDA fit failed: {}", e)))?;
+    extract_forecast(&model, horizon, "ADIDA")
+}
+
+fn forecast_imapa(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+    let ts = make_timeseries(values)?;
+    let mut model = IMAPA::new();
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("IMAPA fit failed: {}", e)))?;
+    extract_forecast(&model, horizon, "IMAPA")
 }
 
 // ============================================================================
@@ -1827,8 +2023,8 @@ fn forecast_theta_with_exog(
     // Fit regression
     let (coeffs, residuals) = fit_ols_regression(values, &exog.historical);
 
-    // Forecast residuals with Theta
-    let residual_forecast = forecast_theta(&residuals, horizon)?;
+    // Forecast residuals with Theta (STM for exog path)
+    let residual_forecast = forecast_theta_stm(&residuals, horizon, 1)?;
 
     // Calculate exogenous effect for future
     let exog_effect = apply_regression(&coeffs, &exog.future, horizon);
@@ -1858,14 +2054,14 @@ fn forecast_theta_with_exog(
 fn forecast_mfles_with_exog(
     values: &[f64],
     horizon: usize,
-    period: usize,
+    periods: &[usize],
     exog: &ExogenousData,
 ) -> Result<ForecastOutput> {
     // Fit regression
     let (coeffs, residuals) = fit_ols_regression(values, &exog.historical);
 
     // Forecast residuals with MFLES
-    let residual_forecast = forecast_mfles(&residuals, horizon, period)?;
+    let residual_forecast = forecast_mfles(&residuals, horizon, periods)?;
 
     // Calculate exogenous effect for future
     let exog_effect = apply_regression(&coeffs, &exog.future, horizon);
