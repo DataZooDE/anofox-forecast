@@ -42,6 +42,8 @@ struct TsForecastNativeBindData : public TableFunctionData {
     string model_spec = "";  // ETS model spec like "ZZZ"
     int64_t seasonal_period = 0;
     double confidence_level = 0.90;
+    int64_t window = 0;
+    string seasonal_periods_str = "";
 
     // Type preservation
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
@@ -264,7 +266,7 @@ static double ParseDoubleFromParams(const Value &params_value, const string &key
 
 static void ValidateParamKeys(const Value &params_value) {
     static const unordered_set<string> valid_keys = {
-        "model", "seasonal_period", "confidence_level"
+        "model", "seasonal_period", "seasonal_periods", "confidence_level", "window"
     };
 
     vector<string> unknown_keys;
@@ -294,7 +296,7 @@ static void ValidateParamKeys(const Value &params_value) {
             unknown_list += "'" + unknown_keys[i] + "'";
         }
         throw InvalidInputException(
-            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, confidence_level",
+            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window",
             unknown_list);
     }
 }
@@ -340,6 +342,8 @@ static unique_ptr<FunctionData> TsForecastNativeBind(
         bind_data->model_spec = ParseStringFromParams(params, "model", "");
         bind_data->seasonal_period = ParseInt64FromParams(params, "seasonal_period", 0);
         bind_data->confidence_level = ParseDoubleFromParams(params, "confidence_level", 0.90);
+        bind_data->window = ParseInt64FromParams(params, "window", 0);
+        bind_data->seasonal_periods_str = ParseStringFromParams(params, "seasonal_periods", "");
 
         // Validate confidence_level range
         if (bind_data->confidence_level <= 0.0 || bind_data->confidence_level >= 1.0) {
@@ -355,6 +359,35 @@ static unique_ptr<FunctionData> TsForecastNativeBind(
                 "Parameter 'model' (value: '%s') is only valid when method='ETS'. "
                 "Current method is '%s'. Remove the 'model' parameter or change method to 'ETS'.",
                 bind_data->model_spec, bind_data->method);
+        }
+
+        // Validate 'window' is only used with SMA method
+        if (bind_data->window != 0) {
+            if (bind_data->method != "SMA") {
+                throw InvalidInputException(
+                    "Parameter 'window' is only valid when method='SMA'. "
+                    "Current method is '%s'. Remove the 'window' parameter or change method to 'SMA'.",
+                    bind_data->method);
+            }
+            if (bind_data->window < 1) {
+                throw InvalidInputException(
+                    "Parameter 'window' must be a positive integer. Got %lld.",
+                    (long long)bind_data->window);
+            }
+        }
+
+        // Validate 'seasonal_periods' is only used with multi-seasonal models
+        if (!bind_data->seasonal_periods_str.empty()) {
+            static const unordered_set<string> multi_seasonal_models = {
+                "MFLES", "AutoMFLES", "MSTL", "AutoMSTL", "TBATS", "AutoTBATS"
+            };
+            if (multi_seasonal_models.find(bind_data->method) == multi_seasonal_models.end()) {
+                throw InvalidInputException(
+                    "Parameter 'seasonal_periods' is only valid for multi-seasonal models "
+                    "(MFLES, AutoMFLES, MSTL, AutoMSTL, TBATS, AutoTBATS). "
+                    "Current method is '%s'.",
+                    bind_data->method);
+            }
         }
     }
 
@@ -587,9 +620,15 @@ static OperatorFinalizeResultType TsForecastNativeFinalize(
             opts.horizon = static_cast<int>(bind_data.horizon);
             opts.confidence_level = bind_data.confidence_level;
             opts.seasonal_period = static_cast<int>(bind_data.seasonal_period);
-            opts.auto_detect_seasonality = (bind_data.seasonal_period == 0);
+            opts.auto_detect_seasonality = (bind_data.seasonal_period == 0 && bind_data.seasonal_periods_str.empty());
             opts.include_fitted = false;
             opts.include_residuals = false;
+            opts.window = static_cast<int>(bind_data.window);
+            if (!bind_data.seasonal_periods_str.empty()) {
+                strncpy(opts.seasonal_periods_str, bind_data.seasonal_periods_str.c_str(),
+                        sizeof(opts.seasonal_periods_str) - 1);
+                opts.seasonal_periods_str[sizeof(opts.seasonal_periods_str) - 1] = '\0';
+            }
 
             // Call Rust FFI
             ForecastResult fcst_result;
