@@ -3327,6 +3327,20 @@ pub unsafe extern "C" fn anofox_ts_features_list(
 
 /// Generate forecasts for a time series.
 ///
+/// Parse a seasonal_periods_str like "[24, 168]" into Vec<usize>.
+fn parse_seasonal_periods_str(s: &str) -> Vec<usize> {
+    if s.is_empty() {
+        return vec![];
+    }
+    s.trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .split(',')
+        .filter_map(|p| p.trim().parse::<usize>().ok())
+        .filter(|&v| v > 0)
+        .collect()
+}
+
 /// # Safety
 /// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
 #[no_mangle]
@@ -3375,6 +3389,12 @@ pub unsafe extern "C" fn anofox_ts_forecast(
             .filter(|s| !s.is_empty())
             .map(String::from);
 
+        // Parse seasonal_periods_str
+        let sp_str = CStr::from_ptr(opts.seasonal_periods_str.as_ptr())
+            .to_str()
+            .unwrap_or("");
+        let seasonal_periods = parse_seasonal_periods_str(sp_str);
+
         let core_opts = anofox_fcst_core::ForecastOptions {
             model: model_type,
             ets_spec,
@@ -3384,6 +3404,8 @@ pub unsafe extern "C" fn anofox_ts_forecast(
             auto_detect_seasonality: opts.auto_detect_seasonality,
             include_fitted: opts.include_fitted,
             include_residuals: opts.include_residuals,
+            window: opts.window.max(0) as usize,
+            seasonal_periods,
         };
 
         anofox_fcst_core::forecast(&series, &core_opts)
@@ -3630,6 +3652,12 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
             None
         };
 
+        // Parse seasonal_periods_str
+        let sp_str = CStr::from_ptr(opts.seasonal_periods_str.as_ptr())
+            .to_str()
+            .unwrap_or("");
+        let seasonal_periods = parse_seasonal_periods_str(sp_str);
+
         let core_opts = anofox_fcst_core::ForecastOptionsExog {
             model: model_type,
             ets_spec,
@@ -3640,6 +3668,8 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
             include_fitted: opts.include_fitted,
             include_residuals: opts.include_residuals,
             exog: exog_data,
+            window: opts.window.max(0) as usize,
+            seasonal_periods,
         };
 
         anofox_fcst_core::forecast_with_exog(&series, &core_opts)

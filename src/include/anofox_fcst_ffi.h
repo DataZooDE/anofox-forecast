@@ -1067,6 +1067,14 @@ typedef struct ForecastOptions {
      * Include residuals
      */
     bool include_residuals;
+    /**
+     * SMA window size (0 = not set)
+     */
+    int window;
+    /**
+     * Multiple seasonal periods as string (e.g. "[24, 168]"), empty = not set
+     */
+    char seasonal_periods_str[64];
 } ForecastOptions;
 
 /**
@@ -1201,6 +1209,14 @@ typedef struct ForecastOptionsExog {
      * Exogenous data (may be null if no exogenous variables)
      */
     const struct ExogenousData *exog;
+    /**
+     * SMA window size (0 = not set)
+     */
+    int window;
+    /**
+     * Multiple seasonal periods as string (e.g. "[24, 168]"), empty = not set
+     */
+    char seasonal_periods_str[64];
 } ForecastOptionsExog;
 
 /**
@@ -2198,8 +2214,6 @@ void anofox_free_warnings(char **warnings, size_t n_warnings);
 bool anofox_ts_features_list(char **out_names, size_t *out_count);
 
 /**
- * Generate forecasts for a time series.
- *
  * # Safety
  * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
  */
