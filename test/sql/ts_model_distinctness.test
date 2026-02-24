@@ -91,11 +91,11 @@ FROM forecasts;
 18.356416	19.778702	18.668893	19.347803	1
 
 ###############################################################################
-# 3. Exponential smoothing: Optimized variants — KNOWN BUG (forecast-extension-b3ou)
+# 3. Exponential smoothing: Optimized variants — FIXED (forecast-extension-b3ou)
 #
-#    "Optimized" variants use the same hardcoded alpha as their base variants.
-#    After fix: SESOptimized should differ from SES, SeasonalESOptimized
-#    should differ from SeasonalES (optimized alpha != 0.3).
+#    Each variant now uses library implementations:
+#    SES (fixed alpha=0.3), SESOptimized (auto-tuned alpha),
+#    SeasonalES (fixed), SeasonalESOptimized (auto-tuned)
 ###############################################################################
 
 query IIIII
@@ -110,11 +110,10 @@ forecasts AS (
 )
 SELECT ses, ses_opt, seasonal_es, seasonal_es_opt,
   -- all_distinct: true when optimized differs from base
-  -- KNOWN BUG: currently 0. Change to 1 after fix.
   (ses != ses_opt OR seasonal_es != seasonal_es_opt)::INT AS all_distinct
 FROM forecasts;
 ----
-18.943503	18.943503	18.431048	18.431048	0
+18.943503	19.537535	14.451866	18.803254	1
 
 ###############################################################################
 # 4. Sanity check: Auto* models that already use the library MUST stay distinct
