@@ -92,14 +92,16 @@ LOAD anofox_forecast;
 
 ```bash
 # Clone the repository
-git clone https://github.com/DataZooDE/anofox-forecast.git
+git clone --recurse-submodules https://github.com/DataZooDE/anofox-forecast.git
 cd anofox-forecast
 
-# Build the extension (requires Rust toolchain and CMake)
-make release
+# Build the extension (choose one)
+# This step requires Rust toolchain and CMake
+make release -j$(nproc)      # With Make OR
+GEN=ninja make release       # With Ninja (faster)
 
 # The extension will be built to:
-# build/extension/anofox_forecast/anofox_forecast.duckdb_extension
+# build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension
 ```
 
 ## 🚀 Quick Start on M5 Dataset
