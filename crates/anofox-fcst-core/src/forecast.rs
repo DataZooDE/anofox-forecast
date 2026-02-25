@@ -1225,8 +1225,6 @@ fn forecast_with_ets_spec(
     period: usize,
     spec: &ETSSpec,
 ) -> Result<ForecastOutput> {
-    use anofox_forecast::core::TimeSeriesBuilder;
-
     // Determine seasonal period for the model
     let seasonal_period = if spec.has_seasonal() && period > 1 {
         period
@@ -1234,13 +1232,8 @@ fn forecast_with_ets_spec(
         1
     };
 
-    // Create TimeSeries from values
-    let time_series = TimeSeriesBuilder::new()
-        .values(values.to_vec())
-        .build()
-        .map_err(|e| {
-            ForecastError::ComputationError(format!("Failed to build TimeSeries: {}", e))
-        })?;
+    // Create TimeSeries from values (must include timestamps)
+    let time_series = make_timeseries(values)?;
 
     // Create the ETS forecaster
     let mut forecaster = ETSModel::new(*spec, seasonal_period);
@@ -2638,11 +2631,14 @@ mod tests {
         // When user explicitly requests a valid ETS spec and the underlying library
         // fails to fit, return ComputationError (group skipped, null forecast)
         // rather than InvalidInput (which would abort the pipeline).
-        let values: Vec<Option<f64>> = (0..60).map(|i| Some(100.0 + i as f64)).collect();
+        // Use seasonal spec "AAA" with period=12 but only 5 data points — too few
+        // for a seasonal model to fit.
+        let values: Vec<Option<f64>> = (0..5).map(|i| Some(100.0 + i as f64)).collect();
 
         let options = ForecastOptions {
             model: ModelType::ETS,
-            ets_spec: Some("AAN".to_string()),
+            ets_spec: Some("AAA".to_string()),
+            seasonal_period: 12,
             horizon: 5,
             ..Default::default()
         };

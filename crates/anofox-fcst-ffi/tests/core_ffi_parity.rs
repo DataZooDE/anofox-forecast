@@ -17,7 +17,8 @@ use anofox_forecast::models::baseline::{
     Naive, RandomWalkWithDrift, SeasonalNaive, SeasonalWindowAverage, SimpleMovingAverage,
 };
 use anofox_forecast::models::exponential::{
-    AutoETS, AutoETSConfig, HoltLinearTrend, HoltWinters, SeasonalES, SimpleExponentialSmoothing,
+    AutoETS, AutoETSConfig, ETSSpec, HoltLinearTrend, HoltWinters, SeasonalES,
+    SimpleExponentialSmoothing, ETS,
 };
 use anofox_forecast::models::intermittent::{Croston, ADIDA, IMAPA, TSB};
 use anofox_forecast::models::mstl_forecaster::MSTLForecaster;
@@ -97,6 +98,44 @@ fn make_ffi_options(model_name: &str, horizon: i32, seasonal_period: i32) -> Ffi
     opts
 }
 
+/// Build FFI options with explicit SMA window.
+fn make_ffi_options_with_window(
+    model: &str,
+    horizon: i32,
+    seasonal_period: i32,
+    window: i32,
+) -> FfiForecastOptions {
+    let mut opts = make_ffi_options(model, horizon, seasonal_period);
+    opts.window = window;
+    opts
+}
+
+/// Build FFI options with an explicit ETS spec string (e.g. "AAA", "MNM").
+fn make_ffi_options_with_ets(spec: &str, horizon: i32, seasonal_period: i32) -> FfiForecastOptions {
+    let mut opts = make_ffi_options("ETS", horizon, seasonal_period);
+    let bytes = spec.as_bytes();
+    for (i, &b) in bytes.iter().enumerate().take(7) {
+        opts.ets_model[i] = b as c_char;
+    }
+    opts.ets_model[bytes.len().min(7)] = 0;
+    opts
+}
+
+/// Build FFI options with a seasonal_periods_str (e.g. "[6, 12]").
+fn make_ffi_options_with_periods(
+    model: &str,
+    horizon: i32,
+    periods_str: &str,
+) -> FfiForecastOptions {
+    let mut opts = make_ffi_options(model, horizon, 0);
+    let bytes = periods_str.as_bytes();
+    for (i, &b) in bytes.iter().enumerate().take(63) {
+        opts.seasonal_periods_str[i] = b as c_char;
+    }
+    opts.seasonal_periods_str[bytes.len().min(63)] = 0;
+    opts
+}
+
 /// Call the FFI function and return point forecasts + model name.
 fn call_ffi(data: &[f64], opts: &FfiForecastOptions) -> (Vec<f64>, String) {
     let n_words = (data.len() + 63) / 64;
@@ -146,6 +185,28 @@ fn lib_predict(model: &mut dyn Forecaster, ts: &TimeSeries, horizon: usize) -> V
         .predict(horizon)
         .unwrap_or_else(|e| panic!("[{}] library predict failed: {e}", model.name()));
     forecast.primary().to_vec()
+}
+
+/// Assert two f64 slices are approximately equal (within `max_ulps` ULPs).
+/// Use for hand-rolled models where floating-point summation order may differ.
+fn assert_f64_near(label: &str, lib: &[f64], ffi: &[f64], max_ulps: i64) {
+    assert_eq!(
+        lib.len(),
+        ffi.len(),
+        "[{label}] length mismatch: lib={} ffi={}",
+        lib.len(),
+        ffi.len()
+    );
+    for (i, (l, f)) in lib.iter().zip(ffi.iter()).enumerate() {
+        if l.is_nan() && f.is_nan() {
+            continue;
+        }
+        let diff = (l.to_bits() as i64).wrapping_sub(f.to_bits() as i64).abs();
+        assert!(
+            diff <= max_ulps,
+            "[{label}] point[{i}] mismatch beyond {max_ulps} ULPs: lib={l} ffi={f} (diff={diff} ULPs)"
+        );
+    }
 }
 
 /// Assert two f64 slices are bit-identical (or both NaN).
@@ -640,4 +701,273 @@ fn parity_arima() {
     let (ffi_point, _) = call_ffi(&data, &ffi_opts);
     // ARIMA is hand-rolled, so compare against the hand-rolled expected values
     assert_f64_eq("ARIMA", &expected, &ffi_point);
+}
+
+// ── Parameter grid tests ───────────────────────────────────────────────
+//
+// Each test sweeps a parameter across multiple values, verifying parity
+// between the library and FFI for every combination.
+
+mod param_grid {
+    use super::*;
+
+    #[test]
+    fn grid_sma_window() {
+        let data = seasonal_data();
+        let ts = make_timeseries(&data);
+
+        for window in [3, 5, 12, 30, 60] {
+            let mut model = SimpleMovingAverage::new(window);
+            let lib_point = lib_predict(&mut model, &ts, HORIZON);
+
+            let ffi_opts = make_ffi_options_with_window("SMA", HORIZON as i32, 0, window as i32);
+            let (ffi_point, _) = call_ffi(&data, &ffi_opts);
+            // SMA is hand-rolled in core; summation order may differ by ≤1 ULP.
+            assert_f64_near(&format!("SMA(window={window})"), &lib_point, &ffi_point, 1);
+        }
+    }
+
+    #[test]
+    fn grid_seasonal_period() {
+        let data = seasonal_data();
+        let ts = make_timeseries(&data);
+
+        for period in [4_usize, 6, 12] {
+            let label = |name: &str| format!("{name}(period={period})");
+
+            // HoltWinters
+            {
+                let mut model = HoltWinters::auto(
+                    period,
+                    anofox_forecast::models::exponential::SeasonalType::Additive,
+                );
+                let lib_point = lib_predict(&mut model, &ts, HORIZON);
+                let ffi_opts = make_ffi_options("HoltWinters", HORIZON as i32, period as i32);
+                let (ffi_point, _) = call_ffi(&data, &ffi_opts);
+                assert_f64_eq(&label("HoltWinters"), &lib_point, &ffi_point);
+            }
+
+            // SeasonalES
+            {
+                let mut model = SeasonalES::new(period);
+                let lib_point = lib_predict(&mut model, &ts, HORIZON);
+                let ffi_opts = make_ffi_options("SeasonalES", HORIZON as i32, period as i32);
+                let (ffi_point, _) = call_ffi(&data, &ffi_opts);
+                assert_f64_eq(&label("SeasonalES"), &lib_point, &ffi_point);
+            }
+
+            // SeasonalESOptimized
+            {
+                let mut model = SeasonalES::optimized(period);
+                let lib_point = lib_predict(&mut model, &ts, HORIZON);
+                let ffi_opts =
+                    make_ffi_options("SeasonalESOptimized", HORIZON as i32, period as i32);
+                let (ffi_point, _) = call_ffi(&data, &ffi_opts);
+                assert_f64_eq(&label("SeasonalESOptimized"), &lib_point, &ffi_point);
+            }
+
+            // SeasonalNaive
+            {
+                let mut model = SeasonalNaive::new(period);
+                let lib_point = lib_predict(&mut model, &ts, HORIZON);
+                let ffi_opts = make_ffi_options("SeasonalNaive", HORIZON as i32, period as i32);
+                let (ffi_point, _) = call_ffi(&data, &ffi_opts);
+                assert_f64_eq(&label("SeasonalNaive"), &lib_point, &ffi_point);
+            }
+
+            // SeasonalWindowAverage
+            {
+                let n_seasons = data.len() / period;
+                let mut model = SeasonalWindowAverage::new(period, n_seasons);
+                let lib_point = lib_predict(&mut model, &ts, HORIZON);
+                let ffi_opts =
+                    make_ffi_options("SeasonalWindowAverage", HORIZON as i32, period as i32);
+                let (ffi_point, _) = call_ffi(&data, &ffi_opts);
+                assert_f64_eq(&label("SeasonalWindowAverage"), &lib_point, &ffi_point);
+            }
+
+            // Theta
+            {
+                let mut model = Theta::seasonal(period);
+                let lib_point = lib_predict(&mut model, &ts, HORIZON);
+                let ffi_opts = make_ffi_options("Theta", HORIZON as i32, period as i32);
+                let (ffi_point, _) = call_ffi(&data, &ffi_opts);
+                assert_f64_eq(&label("Theta"), &lib_point, &ffi_point);
+            }
+
+            // OptimizedTheta
+            {
+                let mut model = OptimizedTheta::seasonal(period);
+                let lib_point = lib_predict(&mut model, &ts, HORIZON);
+                let ffi_opts = make_ffi_options("OptimizedTheta", HORIZON as i32, period as i32);
+                let (ffi_point, _) = call_ffi(&data, &ffi_opts);
+                assert_f64_eq(&label("OptimizedTheta"), &lib_point, &ffi_point);
+            }
+
+            // DynamicTheta
+            {
+                let mut model = DynamicTheta::seasonal(period);
+                let lib_point = lib_predict(&mut model, &ts, HORIZON);
+                let ffi_opts = make_ffi_options("DynamicTheta", HORIZON as i32, period as i32);
+                let (ffi_point, _) = call_ffi(&data, &ffi_opts);
+                assert_f64_eq(&label("DynamicTheta"), &lib_point, &ffi_point);
+            }
+
+            // DynamicOptimizedTheta
+            {
+                let mut model = DynamicTheta::seasonal_optimized(period);
+                let lib_point = lib_predict(&mut model, &ts, HORIZON);
+                let ffi_opts =
+                    make_ffi_options("DynamicOptimizedTheta", HORIZON as i32, period as i32);
+                let (ffi_point, _) = call_ffi(&data, &ffi_opts);
+                assert_f64_eq(&label("DynamicOptimizedTheta"), &lib_point, &ffi_point);
+            }
+
+            // AutoTheta
+            {
+                let mut model = AutoTheta::seasonal(period);
+                let lib_point = lib_predict(&mut model, &ts, HORIZON);
+                let ffi_opts = make_ffi_options("AutoTheta", HORIZON as i32, period as i32);
+                let (ffi_point, _) = call_ffi(&data, &ffi_opts);
+                assert_f64_eq(&label("AutoTheta"), &lib_point, &ffi_point);
+            }
+
+            // AutoETS
+            {
+                let config = AutoETSConfig::with_period(period);
+                let mut model = AutoETS::with_config(config);
+                let lib_point = lib_predict(&mut model, &ts, HORIZON);
+                let ffi_opts = make_ffi_options("AutoETS", HORIZON as i32, period as i32);
+                let (ffi_point, _) = call_ffi(&data, &ffi_opts);
+                assert_f64_eq(&label("AutoETS"), &lib_point, &ffi_point);
+            }
+
+            // AutoARIMA
+            {
+                let config = AutoARIMAConfig::default().with_seasonal_period(period);
+                let mut model = AutoARIMA::with_config(config);
+                let lib_point = lib_predict(&mut model, &ts, HORIZON);
+                let ffi_opts = make_ffi_options("AutoARIMA", HORIZON as i32, period as i32);
+                let (ffi_point, _) = call_ffi(&data, &ffi_opts);
+                assert_f64_eq(&label("AutoARIMA"), &lib_point, &ffi_point);
+            }
+        }
+    }
+
+    #[test]
+    fn grid_ets_spec() {
+        let data = seasonal_data();
+        let ts = make_timeseries(&data);
+
+        for spec_str in ["AAA", "ANA", "MNM", "MAM", "AAdA", "MAdM"] {
+            let spec = ETSSpec::from_notation(spec_str).unwrap();
+            let seasonal_period = if spec.has_seasonal() && SEASONAL_PERIOD > 1 {
+                SEASONAL_PERIOD
+            } else {
+                1
+            };
+
+            let mut model = ETS::new(spec, seasonal_period);
+            let lib_point = lib_predict(&mut model, &ts, HORIZON);
+
+            let ffi_opts =
+                make_ffi_options_with_ets(spec_str, HORIZON as i32, SEASONAL_PERIOD as i32);
+            let (ffi_point, _) = call_ffi(&data, &ffi_opts);
+            assert_f64_eq(&format!("ETS({spec_str})"), &lib_point, &ffi_point);
+        }
+    }
+
+    #[test]
+    fn grid_multi_seasonal_periods() {
+        let data = seasonal_data();
+        let ts = make_timeseries(&data);
+
+        let period_combos: &[(&str, Vec<usize>)] = &[
+            ("[6]", vec![6]),
+            ("[12]", vec![12]),
+            ("[6, 12]", vec![6, 12]),
+        ];
+
+        let models: &[&str] = &[
+            "MSTL",
+            "AutoMSTL",
+            "TBATS",
+            "AutoTBATS",
+            "MFLES",
+            "AutoMFLES",
+        ];
+
+        for (periods_str, periods) in period_combos {
+            for &model_name in models {
+                let mut model: Box<dyn Forecaster> = match model_name {
+                    "MSTL" | "AutoMSTL" => Box::new(MSTLForecaster::new(periods.clone())),
+                    "TBATS" => Box::new(TBATS::new(periods.clone())),
+                    "AutoTBATS" => Box::new(AutoTBATS::new(periods.clone())),
+                    "MFLES" | "AutoMFLES" => Box::new(MFLES::new(periods.clone())),
+                    _ => unreachable!(),
+                };
+                let lib_point = lib_predict(model.as_mut(), &ts, HORIZON);
+
+                let ffi_opts =
+                    make_ffi_options_with_periods(model_name, HORIZON as i32, periods_str);
+                let (ffi_point, _) = call_ffi(&data, &ffi_opts);
+                assert_f64_eq(
+                    &format!("{model_name}(periods={periods_str})"),
+                    &lib_point,
+                    &ffi_point,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn grid_horizon() {
+        let data = seasonal_data();
+        let ts = make_timeseries(&data);
+
+        for horizon in [1_usize, 3, 10, 20] {
+            let mut model = SimpleExponentialSmoothing::new(0.3);
+            let lib_point = lib_predict(&mut model, &ts, horizon);
+
+            let ffi_opts = make_ffi_options("SES", horizon as i32, 0);
+            let (ffi_point, _) = call_ffi(&data, &ffi_opts);
+            assert_eq!(
+                lib_point.len(),
+                horizon,
+                "SES(horizon={horizon}) lib length mismatch"
+            );
+            assert_eq!(
+                ffi_point.len(),
+                horizon,
+                "SES(horizon={horizon}) ffi length mismatch"
+            );
+            assert_f64_eq(&format!("SES(horizon={horizon})"), &lib_point, &ffi_point);
+        }
+    }
+
+    #[test]
+    fn grid_theta_nonseasonal() {
+        let data = seasonal_data();
+        let ts = make_timeseries(&data);
+
+        let models: Vec<(&str, Box<dyn Forecaster>)> = vec![
+            ("Theta", Box::new(Theta::new())),
+            ("OptimizedTheta", Box::new(OptimizedTheta::new())),
+            ("DynamicTheta", Box::new(DynamicTheta::new(0.1))),
+            ("DynamicOptimizedTheta", Box::new(DynamicTheta::optimized())),
+            ("AutoTheta", Box::new(AutoTheta::new())),
+        ];
+
+        for (model_name, mut model) in models {
+            let lib_point = lib_predict(model.as_mut(), &ts, HORIZON);
+
+            let ffi_opts = make_ffi_options(model_name, HORIZON as i32, 0);
+            let (ffi_point, _) = call_ffi(&data, &ffi_opts);
+            assert_f64_eq(
+                &format!("{model_name}(nonseasonal)"),
+                &lib_point,
+                &ffi_point,
+            );
+        }
+    }
 }
