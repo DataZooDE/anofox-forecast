@@ -1122,62 +1122,15 @@ fn forecast_seasonal_window_average(
     horizon: usize,
     period: usize,
 ) -> Result<ForecastOutput> {
-    // Seasonal Window Average: average of values at the same seasonal position
-    // Uses a window of seasonal periods to compute forecasts
+    use anofox_forecast::models::baseline::SeasonalWindowAverage as SWA;
+    let ts = make_timeseries(values)?;
     let p = period.max(1).min(values.len());
-    let n = values.len();
-
-    // Calculate the number of complete seasons we can use
-    let n_seasons = n / p;
-    if n_seasons == 0 {
-        // Fall back to simple average if not enough data
-        let avg = values.iter().sum::<f64>() / n as f64;
-        return Ok(ForecastOutput {
-            point: vec![avg; horizon],
-            lower: vec![],
-            upper: vec![],
-            fitted: None,
-            residuals: None,
-            model_name: String::new(),
-            aic: None,
-            bic: None,
-            mse: None,
-        });
-    }
-
-    // Calculate seasonal averages for each position in the period
-    let mut seasonal_avg = vec![0.0; p];
-    let mut seasonal_count = vec![0usize; p];
-
-    for (i, &val) in values.iter().enumerate() {
-        let pos = i % p;
-        seasonal_avg[pos] += val;
-        seasonal_count[pos] += 1;
-    }
-
-    for i in 0..p {
-        if seasonal_count[i] > 0 {
-            seasonal_avg[i] /= seasonal_count[i] as f64;
-        }
-    }
-
-    // Generate forecasts using the seasonal averages
-    let start_pos = n % p;
-    let point: Vec<f64> = (0..horizon)
-        .map(|h| seasonal_avg[(start_pos + h) % p])
-        .collect();
-
-    Ok(ForecastOutput {
-        point,
-        lower: vec![],
-        upper: vec![],
-        fitted: None,
-        residuals: None,
-        model_name: String::new(),
-        aic: None,
-        bic: None,
-        mse: None,
-    })
+    let n_seasons = (values.len() / p).max(1);
+    let mut model = SWA::new(p, n_seasons);
+    model.fit(&ts).map_err(|e| {
+        ForecastError::ComputationError(format!("SeasonalWindowAverage fit failed: {}", e))
+    })?;
+    extract_forecast(&model, horizon, "SeasonalWindowAverage")
 }
 
 /// Validate ETS notation format.

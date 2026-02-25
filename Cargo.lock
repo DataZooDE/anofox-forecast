@@ -45,7 +45,9 @@ name = "anofox-fcst-ffi"
 version = "0.1.0"
 dependencies = [
  "anofox-fcst-core",
+ "anofox-forecast",
  "cbindgen",
+ "chrono",
  "libc",
  "serde_json",
  "ureq",

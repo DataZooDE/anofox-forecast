@@ -28,7 +28,8 @@ uuid = { workspace = true, optional = true }
 uuid = { version = "1.7", features = ["v4", "js"], optional = true }
 
 [dev-dependencies]
-anofox-fcst-core = { path = "../anofox-fcst-core" }
+anofox-forecast = { workspace = true }
+chrono = { workspace = true }
 
 [build-dependencies]
 cbindgen = "0.27"
