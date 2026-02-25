@@ -461,10 +461,6 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
                 | ModelType::Holt
                 | ModelType::RandomWalkDrift
                 | ModelType::ARIMA
-                | ModelType::Theta
-                | ModelType::OptimizedTheta
-                | ModelType::DynamicTheta
-                | ModelType::DynamicOptimizedTheta
                 | ModelType::CrostonClassic
                 | ModelType::CrostonOptimized
                 | ModelType::CrostonSBA

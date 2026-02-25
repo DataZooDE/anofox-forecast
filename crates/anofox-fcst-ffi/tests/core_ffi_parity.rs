@@ -263,11 +263,11 @@ fn parity_seasonal_es_optimized() {
 fn parity_theta() {
     let data = seasonal_data();
     let ts = make_timeseries(&data);
-    // Core rejects explicit seasonal_period for Theta; with period=1 → Theta::new()
-    let mut model = Theta::new();
+    // forecast.rs: Theta::seasonal(period) when period > 1
+    let mut model = Theta::seasonal(SEASONAL_PERIOD);
     let lib_point = lib_predict(&mut model, &ts, HORIZON);
 
-    let ffi_opts = make_ffi_options("Theta", HORIZON as i32, 0);
+    let ffi_opts = make_ffi_options("Theta", HORIZON as i32, SEASONAL_PERIOD as i32);
     let (ffi_point, _) = call_ffi(&data, &ffi_opts);
     assert_f64_eq("Theta", &lib_point, &ffi_point);
 }
@@ -276,11 +276,11 @@ fn parity_theta() {
 fn parity_optimized_theta() {
     let data = seasonal_data();
     let ts = make_timeseries(&data);
-    // Core rejects explicit seasonal_period; with period=1 → OptimizedTheta::new()
-    let mut model = OptimizedTheta::new();
+    // forecast.rs: OptimizedTheta::seasonal(period) when period > 1
+    let mut model = OptimizedTheta::seasonal(SEASONAL_PERIOD);
     let lib_point = lib_predict(&mut model, &ts, HORIZON);
 
-    let ffi_opts = make_ffi_options("OptimizedTheta", HORIZON as i32, 0);
+    let ffi_opts = make_ffi_options("OptimizedTheta", HORIZON as i32, SEASONAL_PERIOD as i32);
     let (ffi_point, _) = call_ffi(&data, &ffi_opts);
     assert_f64_eq("OptimizedTheta", &lib_point, &ffi_point);
 }
@@ -289,11 +289,11 @@ fn parity_optimized_theta() {
 fn parity_dynamic_theta() {
     let data = seasonal_data();
     let ts = make_timeseries(&data);
-    // Core rejects explicit seasonal_period; with period=1 → DynamicTheta::new(0.1)
-    let mut model = DynamicTheta::new(0.1);
+    // forecast.rs: DynamicTheta::seasonal(period) when period > 1
+    let mut model = DynamicTheta::seasonal(SEASONAL_PERIOD);
     let lib_point = lib_predict(&mut model, &ts, HORIZON);
 
-    let ffi_opts = make_ffi_options("DynamicTheta", HORIZON as i32, 0);
+    let ffi_opts = make_ffi_options("DynamicTheta", HORIZON as i32, SEASONAL_PERIOD as i32);
     let (ffi_point, _) = call_ffi(&data, &ffi_opts);
     assert_f64_eq("DynamicTheta", &lib_point, &ffi_point);
 }
@@ -302,11 +302,15 @@ fn parity_dynamic_theta() {
 fn parity_dynamic_optimized_theta() {
     let data = seasonal_data();
     let ts = make_timeseries(&data);
-    // Core rejects explicit seasonal_period; with period=1 → DynamicTheta::optimized()
-    let mut model = DynamicTheta::optimized();
+    // forecast.rs: DynamicTheta::seasonal_optimized(period) when period > 1
+    let mut model = DynamicTheta::seasonal_optimized(SEASONAL_PERIOD);
     let lib_point = lib_predict(&mut model, &ts, HORIZON);
 
-    let ffi_opts = make_ffi_options("DynamicOptimizedTheta", HORIZON as i32, 0);
+    let ffi_opts = make_ffi_options(
+        "DynamicOptimizedTheta",
+        HORIZON as i32,
+        SEASONAL_PERIOD as i32,
+    );
     let (ffi_point, _) = call_ffi(&data, &ffi_opts);
     assert_f64_eq("DynamicOptimizedTheta", &lib_point, &ffi_point);
 }
