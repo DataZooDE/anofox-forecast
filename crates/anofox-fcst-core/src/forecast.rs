@@ -1436,10 +1436,15 @@ fn forecast_auto_ets(values: &[f64], horizon: usize, period: usize) -> Result<Fo
         .predict(horizon)
         .map_err(|e| ForecastError::ComputationError(format!("AutoETS predict failed: {}", e)))?;
 
-    // Use canonical model name (AutoETS) for consistency with user expectations.
-    // The selected spec details are useful but should not appear in model_name
-    // since downstream tests/dashboards expect the canonical label (#194).
-    let model_name = "AutoETS".to_string();
+    // Get the selected spec for model name
+    let model_name = if let Some(spec) = model.selected_spec() {
+        format!(
+            "AutoETS({:?},{:?},{:?})",
+            spec.error, spec.trend, spec.seasonal
+        )
+    } else {
+        "AutoETS".to_string()
+    };
 
     // Extract point forecasts (primary dimension)
     let point = forecast.primary().to_vec();
@@ -1501,8 +1506,12 @@ fn forecast_auto_theta(values: &[f64], horizon: usize, period: usize) -> Result<
         .predict(horizon)
         .map_err(|e| ForecastError::ComputationError(format!("AutoTheta predict failed: {}", e)))?;
 
-    // Use canonical model name for consistency (#195).
-    let model_name = "AutoTheta".to_string();
+    // Get the selected model type for model name
+    let model_name = if let Some(selected) = model.selected_model() {
+        format!("AutoTheta({})", selected)
+    } else {
+        "AutoTheta".to_string()
+    };
 
     // Extract point forecasts (primary dimension)
     let point = forecast.primary().to_vec();
@@ -2734,8 +2743,9 @@ mod tests {
         assert_eq!(result.point.len(), 5);
         assert!(result.point.iter().all(|v| v.is_finite()));
 
-        // AutoETS returns canonical name "AutoETS" (#194)
-        assert_eq!(result.model_name, "AutoETS");
+        // AutoETS includes the selected (E,T,S) spec in the name
+        // Format: "AutoETS(Error,Trend,Seasonal)"
+        assert!(result.model_name.starts_with("AutoETS"));
     }
 
     #[test]
