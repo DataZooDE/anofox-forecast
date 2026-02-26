@@ -44,23 +44,20 @@ WHERE yhat IS NOT NULL AND yhat > 0;
 
 #######################################
 # Explicit Model Specification Tests
-# Note: Explicit ETS specs are now passed through properly (fix for #177).
-# The ETS library has a known issue where explicit specs fail to fit.
-# Instead of silently falling back, we now return an actionable error.
+# Explicit ETS specs are passed through and fitted correctly (fix for #177).
 #######################################
 
-# Test: ETS with explicit model='AAA' — valid spec, but if fit fails groups are
-# skipped (0 rows returned). Pipeline continues, no error thrown.
+# Test: ETS with explicit model='AAA'
 query I
 SELECT COUNT(*) FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, '1d', MAP{'model': 'AAA'});
 ----
-0
+14
 
-# Test: ETS with model='ANN' — same: valid spec, groups skipped if fit fails
+# Test: ETS with model='ANN'
 query I
 SELECT COUNT(*) FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, '1d', MAP{'model': 'ANN'});
 ----
-0
+14
 
 #######################################
 # Invalid Specification Tests

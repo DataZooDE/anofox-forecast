@@ -158,13 +158,12 @@ unstable
 # ETS spec is passed through to Rust (no longer silently ignored)
 #######################################
 
-# ETS with explicit spec that fails to fit → groups skipped (0 rows), not an error
-# The spec is valid but the underlying model can't converge — pipeline continues
+# ETS with explicit spec now fits correctly (bugfix: make_timeseries replaces TimeSeriesBuilder)
 query I
 SELECT COUNT(*) FROM _ts_forecast_native(
     (SELECT id, ds, y FROM param_test_data), 3, '1d', 'ETS', MAP{'model': 'AAA'});
 ----
-0
+6
 
 # ETS without model spec should fall back to simplified implementation
 query I
@@ -198,12 +197,12 @@ SELECT * FROM _ts_forecast_native(
 ----
 does not use seasonal_period
 
-# Theta does not use seasonal_period
-statement error
-SELECT * FROM _ts_forecast_native(
+# Theta now accepts seasonal_period (ecfc22f)
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
     (SELECT id, ds, y FROM param_test_data), 3, '1d', 'Theta', MAP{'seasonal_period': '12'});
 ----
-does not use seasonal_period
+6
 
 # But seasonal models with seasonal_period should work fine
 query I
@@ -318,13 +317,13 @@ query I
 SELECT COUNT(*) FROM _ts_forecast_native(
     (SELECT id, ds, y FROM param_test_data), 3, '1d', 'ETS', MAP{'model': 'ANA'});
 ----
-0
+6
 
 query I
 SELECT COUNT(*) FROM _ts_cv_forecast_native(
     (SELECT fold_id, split, id, ds, y FROM param_test_cv), 'ETS', MAP{'model': 'ANA'});
 ----
-0
+6
 
 # --- seasonal_period: accepted by seasonal models ---
 query I

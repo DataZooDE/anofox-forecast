@@ -1,0 +1,372 @@
+# name: test/sql/ts_forecast_param_grid.test
+# description: Parameter grid coverage tests for _ts_forecast_native.
+#              Verifies that parameter values survive the full
+#              SQL MAP -> C++ ParseFromParams -> ForecastOptions -> Rust FFI pipeline.
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup: test data (2 groups, 60 points each, trend + seasonality)
+#######################################
+
+statement ok
+CREATE TABLE param_grid_data AS
+SELECT
+    'G1' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    10.0 + i * 0.5 + sin(i * 3.14159 / 7) * 3 AS y
+FROM generate_series(0, 59) AS t(i)
+UNION ALL
+SELECT
+    'G2' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    20.0 + i * 0.3 + cos(i * 3.14159 / 7) * 2 AS y
+FROM generate_series(0, 59) AS t(i);
+
+#######################################
+# 3a. SMA window grid
+#######################################
+
+# SMA window=3
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'SMA', MAP{'window': '3'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# SMA window=5
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'SMA', MAP{'window': '5'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# SMA window=12
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'SMA', MAP{'window': '12'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# SMA window=30
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'SMA', MAP{'window': '30'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# Different window sizes produce different forecasts
+query I
+SELECT COUNT(DISTINCT round_sum) FROM (
+    SELECT ROUND(SUM(yhat), 4) AS round_sum FROM _ts_forecast_native(
+        (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'SMA', MAP{'window': '3'})
+    UNION ALL
+    SELECT ROUND(SUM(yhat), 4) AS round_sum FROM _ts_forecast_native(
+        (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'SMA', MAP{'window': '30'})
+);
+----
+2
+
+#######################################
+# 3b. Seasonal period grid
+#######################################
+
+# SeasonalNaive with seasonal_period=4
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'SeasonalNaive', MAP{'seasonal_period': '4'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# SeasonalNaive with seasonal_period=7
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'SeasonalNaive', MAP{'seasonal_period': '7'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# SeasonalNaive with seasonal_period=12
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'SeasonalNaive', MAP{'seasonal_period': '12'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# HoltWinters with seasonal_period=7
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'HoltWinters', MAP{'seasonal_period': '7'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# SeasonalES with seasonal_period=7
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'SeasonalES', MAP{'seasonal_period': '7'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# SeasonalESOptimized with seasonal_period=7
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'SeasonalESOptimized', MAP{'seasonal_period': '7'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# AutoETS with seasonal_period=7
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'AutoETS', MAP{'seasonal_period': '7'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# AutoARIMA with seasonal_period=7
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'AutoARIMA', MAP{'seasonal_period': '7'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# Different seasonal periods produce different forecasts for SeasonalNaive
+query I
+SELECT COUNT(DISTINCT round_sum) FROM (
+    SELECT ROUND(SUM(yhat), 4) AS round_sum FROM _ts_forecast_native(
+        (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'SeasonalNaive', MAP{'seasonal_period': '4'})
+    UNION ALL
+    SELECT ROUND(SUM(yhat), 4) AS round_sum FROM _ts_forecast_native(
+        (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'SeasonalNaive', MAP{'seasonal_period': '12'})
+);
+----
+2
+
+#######################################
+# 3c. ETS spec grid
+#######################################
+
+# ETS with model='AAA' (Additive error, Additive trend, Additive seasonal)
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'ETS', MAP{'model': 'AAA', 'seasonal_period': '7'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# ETS with model='ANA' (Additive error, None trend, Additive seasonal)
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'ETS', MAP{'model': 'ANA', 'seasonal_period': '7'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# ETS with model='MNM' (Multiplicative error, None trend, Multiplicative seasonal)
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'ETS', MAP{'model': 'MNM', 'seasonal_period': '7'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# ETS with model='AAdA' (Additive error, Additive damped trend, Additive seasonal)
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'ETS', MAP{'model': 'AAdA', 'seasonal_period': '7'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# ETS with model='MAdM' (Multiplicative error, Additive damped trend, Multiplicative seasonal)
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'ETS', MAP{'model': 'MAdM', 'seasonal_period': '7'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# Different ETS specs produce different forecasts
+query I
+SELECT COUNT(DISTINCT round_sum) FROM (
+    SELECT ROUND(SUM(yhat), 4) AS round_sum FROM _ts_forecast_native(
+        (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'ETS', MAP{'model': 'AAA', 'seasonal_period': '7'})
+    UNION ALL
+    SELECT ROUND(SUM(yhat), 4) AS round_sum FROM _ts_forecast_native(
+        (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'ETS', MAP{'model': 'ANA', 'seasonal_period': '7'})
+);
+----
+2
+
+#######################################
+# 3d. Multi-seasonal periods grid
+#######################################
+
+# MSTL with seasonal_periods=[7]
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'MSTL', MAP{'seasonal_periods': '[7]'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# MSTL with seasonal_periods=[14]
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'MSTL', MAP{'seasonal_periods': '[14]'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# MSTL with seasonal_periods=[7, 14]
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'MSTL', MAP{'seasonal_periods': '[7, 14]'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# TBATS with seasonal_periods=[7]
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'TBATS', MAP{'seasonal_periods': '[7]'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# TBATS with seasonal_periods=[7, 14]
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'TBATS', MAP{'seasonal_periods': '[7, 14]'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# MFLES with seasonal_periods=[7]
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'MFLES', MAP{'seasonal_periods': '[7]'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# MFLES with seasonal_periods=[7, 14]
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'MFLES', MAP{'seasonal_periods': '[7, 14]'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# AutoMFLES with seasonal_periods=[7]
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'AutoMFLES', MAP{'seasonal_periods': '[7]'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# AutoMFLES with seasonal_periods=[7, 14]
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'AutoMFLES', MAP{'seasonal_periods': '[7, 14]'})
+WHERE yhat IS NOT NULL;
+----
+6
+
+#######################################
+# 3e. Horizon grid
+#######################################
+
+# Horizon=1 → 1 × 2 groups = 2 rows
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 1, '1d', 'Naive', MAP{})
+WHERE yhat IS NOT NULL;
+----
+2
+
+# Horizon=3 → 3 × 2 groups = 6 rows
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'Naive', MAP{})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# Horizon=10 → 10 × 2 groups = 20 rows
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 10, '1d', 'Naive', MAP{})
+WHERE yhat IS NOT NULL;
+----
+20
+
+# Horizon=20 → 20 × 2 groups = 40 rows
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 20, '1d', 'Naive', MAP{})
+WHERE yhat IS NOT NULL;
+----
+40
+
+#######################################
+# 3f. Theta nonseasonal
+#######################################
+
+# Theta (no seasonal_period, defaults to nonseasonal)
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'Theta', MAP{})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# OptimizedTheta
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'OptimizedTheta', MAP{})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# DynamicTheta
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'DynamicTheta', MAP{})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# DynamicOptimizedTheta
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'DynamicOptimizedTheta', MAP{})
+WHERE yhat IS NOT NULL;
+----
+6
+
+# AutoTheta
+query I
+SELECT COUNT(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_grid_data), 3, '1d', 'AutoTheta', MAP{})
+WHERE yhat IS NOT NULL;
+----
+6
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE param_grid_data;
