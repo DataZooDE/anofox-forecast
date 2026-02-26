@@ -138,7 +138,7 @@ fn make_ffi_options_with_periods(
 
 /// Call the FFI function and return point forecasts + model name.
 fn call_ffi(data: &[f64], opts: &FfiForecastOptions) -> (Vec<f64>, String) {
-    let n_words = (data.len() + 63) / 64;
+    let n_words = data.len().div_ceil(64);
     let validity: Vec<u64> = vec![u64::MAX; n_words];
 
     let mut result = ForecastResult::default();
