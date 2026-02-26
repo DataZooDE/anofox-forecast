@@ -22,7 +22,7 @@ FROM generate_series(0, 59) t(i);
 
 # anofox_fcst_ts_forecast_by should work as alias
 query I
-SELECT count(*) FROM anofox_fcst_ts_forecast_by(test_data, id, date, value, 'Naive', 3, '1d');
+SELECT count(*) FROM anofox_fcst_ts_forecast_by(test_data, id, date, value, 'Naive', 3);
 ----
 3
 
