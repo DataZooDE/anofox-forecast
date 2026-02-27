@@ -33,7 +33,7 @@ SELECT COUNT(*), COUNT(DISTINCT unique_id) FROM parallel_test_data;
 statement ok
 CREATE TABLE forecast_parallel AS
 SELECT unique_id, ds, yhat, model_name
-FROM ts_forecast_by('parallel_test_data', unique_id, ds, y, 'Naive', 7)
+FROM ts_forecast_by('parallel_test_data', unique_id, ds, y, 'Naive', 7, '1d', MAP{})
 ORDER BY unique_id, ds;
 
 # Run with single thread
@@ -43,7 +43,7 @@ SET threads=1;
 statement ok
 CREATE TABLE forecast_single AS
 SELECT unique_id, ds, yhat, model_name
-FROM ts_forecast_by('parallel_test_data', unique_id, ds, y, 'Naive', 7)
+FROM ts_forecast_by('parallel_test_data', unique_id, ds, y, 'Naive', 7, '1d', MAP{})
 ORDER BY unique_id, ds;
 
 # Reset threads
@@ -251,7 +251,7 @@ SELECT COUNT(*), COUNT(DISTINCT unique_id) FROM stress_test_data;
 statement ok
 CREATE TABLE stress_forecast AS
 SELECT unique_id, ds, yhat
-FROM ts_forecast_by('stress_test_data', unique_id, ds, y, 'Naive', 14);
+FROM ts_forecast_by('stress_test_data', unique_id, ds, y, 'Naive', 14, '1d', MAP{});
 
 # Verify we got expected number of forecast rows (100 series × 14 horizon)
 query I
@@ -286,13 +286,13 @@ SELECT COUNT(*) FROM stress_forecast WHERE yhat < 0;
 statement ok
 CREATE TABLE hash_test_1 AS
 SELECT md5(CAST(unique_id AS VARCHAR) || CAST(ds AS VARCHAR) || CAST(ROUND(yhat, 8) AS VARCHAR)) as row_hash
-FROM ts_forecast_by('parallel_test_data', unique_id, ds, y, 'SES', 7)
+FROM ts_forecast_by('parallel_test_data', unique_id, ds, y, 'SES', 7, '1d', MAP{})
 ORDER BY unique_id, ds;
 
 statement ok
 CREATE TABLE hash_test_2 AS
 SELECT md5(CAST(unique_id AS VARCHAR) || CAST(ds AS VARCHAR) || CAST(ROUND(yhat, 8) AS VARCHAR)) as row_hash
-FROM ts_forecast_by('parallel_test_data', unique_id, ds, y, 'SES', 7)
+FROM ts_forecast_by('parallel_test_data', unique_id, ds, y, 'SES', 7, '1d', MAP{})
 ORDER BY unique_id, ds;
 
 # Verify hashes match between runs

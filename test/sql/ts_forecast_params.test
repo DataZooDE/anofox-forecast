@@ -160,25 +160,26 @@ true
 
 # MAP with confidence_level should not error (syntax accepted)
 query I
-SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, MAP(['confidence_level'], [0.80]));
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, '1d', MAP(['confidence_level'], [0.80]));
 ----
 6
 
 # MAP with seasonal_period should not error (syntax accepted)
 query I
-SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'SeasonalNaive', 3, MAP(['seasonal_period'], [7]));
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'SeasonalNaive', 3, '1d', MAP(['seasonal_period'], [7]));
 ----
 6
 
 # MAP with multiple parameters should not error (syntax accepted)
 query I
-SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'HoltWinters', 3, MAP(['confidence_level', 'seasonal_period'], [0.95, 7]));
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'HoltWinters', 3, '1d',
+    MAP(['confidence_level', 'seasonal_period'], [0.95, 7]));
 ----
 6
 
 # Empty MAP should work
 query I
-SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3);
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, '1d', MAP([], []));
 ----
 6
 
@@ -212,49 +213,49 @@ SELECT COUNT(*) FROM (
 
 # Polars-style '1d' frequency
 query I
-SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3);
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, '1d', MAP([], []));
 ----
 6
 
 # DuckDB INTERVAL style '1 day'
 query I
-SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, frequency := '1 day');
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, '1 day', MAP([], []));
 ----
 6
 
 # Weekly frequency
 query I
-SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, frequency := '1w');
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, '1w', MAP([], []));
 ----
 6
 
 # Hourly frequency
 query I
-SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, frequency := '1h');
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, '1h', MAP([], []));
 ----
 6
 
 # Minute frequency
 query I
-SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, frequency := '30m');
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, '30m', MAP([], []));
 ----
 6
 
 # Monthly frequency
 query I
-SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, frequency := '1mo');
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, '1mo', MAP([], []));
 ----
 6
 
 # Quarterly frequency
 query I
-SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, frequency := '1q');
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, '1q', MAP([], []));
 ----
 6
 
 # Yearly frequency
 query I
-SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, frequency := '1y');
+SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'Naive', 3, '1y', MAP([], []));
 ----
 6
 

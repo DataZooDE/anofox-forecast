@@ -125,11 +125,11 @@ SELECT * FROM m5 WHERE ds >= DATE '2016-04-25';
 
 -- Forecast with multiple models
 CREATE OR REPLACE TABLE forecast_results AS (
-    SELECT * FROM ts_forecast_by('m5_train', item_id, ds, y, 'SeasonalNaive', 28, {'seasonal_period': 7})
+    SELECT * FROM ts_forecast_by('m5_train', item_id, ds, y, 'SeasonalNaive', 28, '1d', MAP{'seasonal_period': '7'})
     UNION ALL
-    SELECT * FROM ts_forecast_by('m5_train', item_id, ds, y, 'Theta', 28, {'seasonal_period': 7})
+    SELECT * FROM ts_forecast_by('m5_train', item_id, ds, y, 'Theta', 28, '1d', MAP{'seasonal_period': '7'})
     UNION ALL
-    SELECT * FROM ts_forecast_by('m5_train', item_id, ds, y, 'AutoARIMA', 28, {'seasonal_period': 7})
+    SELECT * FROM ts_forecast_by('m5_train', item_id, ds, y, 'AutoARIMA', 28, '1d', MAP{'seasonal_period': '7'})
 );
 
 -- Join forecasts with actuals and create composite key for grouping

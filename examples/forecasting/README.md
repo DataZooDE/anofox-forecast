@@ -46,10 +46,10 @@ This folder contains runnable SQL examples demonstrating time series forecasting
 
 ```sql
 -- Forecast all products with ETS model
-SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'ETS', 12, MAP{});
+SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'ETS', 12, '1d', MAP{});
 
 -- Forecast with automatic model selection
-SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'AutoETS', 12, MAP{});
+SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'AutoETS', 12, '1d', MAP{});
 ```
 
 ### Seasonal Models
@@ -57,12 +57,12 @@ SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'AutoETS', 12,
 ```sql
 -- Holt-Winters with weekly seasonality
 SELECT * FROM ts_forecast_by('sales', product_id, date, value,
-    'HoltWinters', 14,
+    'HoltWinters', 14, '1d',
     MAP{'seasonal_period': '7'});
 
 -- MSTL with multiple seasonalities (daily + weekly)
 SELECT * FROM ts_forecast_by('hourly_data', sensor_id, timestamp, reading,
-    'MSTL', 168,
+    'MSTL', 168, '1h',
     MAP{'seasonal_periods': '[24, 168]'});
 ```
 
@@ -70,7 +70,7 @@ SELECT * FROM ts_forecast_by('hourly_data', sensor_id, timestamp, reading,
 
 ```sql
 -- Croston method for sparse demand
-SELECT * FROM ts_forecast_by('spare_parts', sku, date, demand, 'CrostonSBA', 14, MAP{});
+SELECT * FROM ts_forecast_by('spare_parts', sku, date, demand, 'CrostonSBA', 14, '1d', MAP{});
 ```
 
 ### Exogenous Variables
