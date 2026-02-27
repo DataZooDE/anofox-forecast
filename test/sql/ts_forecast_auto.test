@@ -87,6 +87,18 @@ FROM trend_data;
 ----
 true
 
+# Test AutoETS with constant series does not panic (issue #192)
+query I
+SELECT length((_ts_forecast([42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0], 5, 'AutoETS')).point);
+----
+5
+
+# Test AutoETS constant series produces finite forecasts near the constant value
+query I
+SELECT ABS((_ts_forecast([42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0], 5, 'AutoETS')).point[1] - 42.0) < 1.0;
+----
+true
+
 # Test AutoETS confidence bounds
 query I
 SELECT (_ts_forecast([10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0], 3, 'AutoETS')).lower[1] <=

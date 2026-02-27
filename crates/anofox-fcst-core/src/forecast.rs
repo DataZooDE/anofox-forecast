@@ -1404,74 +1404,91 @@ fn forecast_auto_arima(values: &[f64], horizon: usize, period: usize) -> Result<
 
 /// AutoETS: Automatic ETS model selection using AICc-based search.
 /// Uses the proper AutoETS implementation from anofox-forecast library.
+/// Falls back to simplified ETS if the library panics (e.g. constant series
+/// causing NaN in optimizer — see #192).
 fn forecast_auto_ets(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
-    use chrono::{Duration, TimeZone, Utc};
+    use std::panic::{catch_unwind, AssertUnwindSafe};
 
-    // Create timestamps for TimeSeries (required by anofox-forecast)
-    let base = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
-    let timestamps: Vec<_> = (0..values.len())
-        .map(|i| base + Duration::hours(i as i64))
-        .collect();
+    let lib_result = catch_unwind(AssertUnwindSafe(|| -> Result<ForecastOutput> {
+        use chrono::{Duration, TimeZone, Utc};
 
-    let ts = TimeSeries::univariate(timestamps, values.to_vec()).map_err(|e| {
-        ForecastError::ComputationError(format!("Failed to create TimeSeries: {}", e))
-    })?;
+        // Create timestamps for TimeSeries (required by anofox-forecast)
+        let base = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let timestamps: Vec<_> = (0..values.len())
+            .map(|i| base + Duration::hours(i as i64))
+            .collect();
 
-    // Configure AutoETS with seasonal period if provided
-    let config = if period > 1 {
-        AutoETSConfig::with_period(period)
-    } else {
-        AutoETSConfig::non_seasonal()
-    };
+        let ts = TimeSeries::univariate(timestamps, values.to_vec()).map_err(|e| {
+            ForecastError::ComputationError(format!("Failed to create TimeSeries: {}", e))
+        })?;
 
-    let mut model = AutoETS::with_config(config);
+        // Configure AutoETS with seasonal period if provided
+        let config = if period > 1 {
+            AutoETSConfig::with_period(period)
+        } else {
+            AutoETSConfig::non_seasonal()
+        };
 
-    // Fit the model
-    model
-        .fit(&ts)
-        .map_err(|e| ForecastError::ComputationError(format!("AutoETS fit failed: {}", e)))?;
+        let mut model = AutoETS::with_config(config);
 
-    // Get forecasts
-    let forecast = model
-        .predict(horizon)
-        .map_err(|e| ForecastError::ComputationError(format!("AutoETS predict failed: {}", e)))?;
+        // Fit the model
+        model
+            .fit(&ts)
+            .map_err(|e| ForecastError::ComputationError(format!("AutoETS fit failed: {}", e)))?;
 
-    // Get the selected spec for model name
-    let model_name = if let Some(spec) = model.selected_spec() {
-        format!(
-            "AutoETS({:?},{:?},{:?})",
-            spec.error, spec.trend, spec.seasonal
-        )
-    } else {
-        "AutoETS".to_string()
-    };
+        // Get forecasts
+        let forecast = model.predict(horizon).map_err(|e| {
+            ForecastError::ComputationError(format!("AutoETS predict failed: {}", e))
+        })?;
 
-    // Extract point forecasts (primary dimension)
-    let point = forecast.primary().to_vec();
+        // Get the selected spec for model name
+        let model_name = if let Some(spec) = model.selected_spec() {
+            format!(
+                "AutoETS({:?},{:?},{:?})",
+                spec.error, spec.trend, spec.seasonal
+            )
+        } else {
+            "AutoETS".to_string()
+        };
 
-    // Extract confidence intervals (first dimension for univariate)
-    let lower = forecast
-        .lower()
-        .and_then(|intervals| intervals.first())
-        .cloned()
-        .unwrap_or_default();
-    let upper = forecast
-        .upper()
-        .and_then(|intervals| intervals.first())
-        .cloned()
-        .unwrap_or_default();
+        // Extract point forecasts (primary dimension)
+        let point = forecast.primary().to_vec();
 
-    Ok(ForecastOutput {
-        point,
-        lower,
-        upper,
-        fitted: model.fitted_values().map(|v| v.to_vec()),
-        residuals: model.residuals().map(|v| v.to_vec()),
-        model_name,
-        aic: None,
-        bic: None,
-        mse: None,
-    })
+        // Extract confidence intervals (first dimension for univariate)
+        let lower = forecast
+            .lower()
+            .and_then(|intervals| intervals.first())
+            .cloned()
+            .unwrap_or_default();
+        let upper = forecast
+            .upper()
+            .and_then(|intervals| intervals.first())
+            .cloned()
+            .unwrap_or_default();
+
+        Ok(ForecastOutput {
+            point,
+            lower,
+            upper,
+            fitted: model.fitted_values().map(|v| v.to_vec()),
+            residuals: model.residuals().map(|v| v.to_vec()),
+            model_name,
+            aic: None,
+            bic: None,
+            mse: None,
+        })
+    }));
+
+    match lib_result {
+        Ok(Ok(output)) => Ok(output),
+        Ok(Err(_)) | Err(_) => {
+            // Library error or panic (e.g. constant series → NaN optimizer → unwrap panic).
+            // Fall back to simplified ETS which handles edge cases gracefully.
+            let mut fallback = forecast_ets(values, horizon, period, None)?;
+            fallback.model_name = "AutoETS".to_string();
+            Ok(fallback)
+        }
+    }
 }
 
 /// AutoTheta: Automatic selection of best Theta variant (STM, OTM, DSTM, DOTM).
@@ -2443,6 +2460,29 @@ mod tests {
         assert_eq!(result.point.len(), 7);
         // AutoETS selects a model automatically
         assert!(result.point.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn test_forecast_auto_ets_constant_series() {
+        // Constant series triggers NaN in the anofox-forecast optimizer (issue #192).
+        // The catch_unwind fallback should produce valid forecasts near the constant value.
+        let values: Vec<Option<f64>> = vec![Some(42.0); 30];
+
+        let options = ForecastOptions {
+            model: ModelType::AutoETS,
+            horizon: 5,
+            ..Default::default()
+        };
+
+        let result = forecast(&values, &options).unwrap();
+        assert_eq!(result.point.len(), 5);
+        assert!(result.point.iter().all(|v| v.is_finite()));
+        // Forecasts should be close to the constant value
+        assert!(
+            result.point.iter().all(|v| (v - 42.0).abs() < 1.0),
+            "Expected forecasts near 42.0, got {:?}",
+            result.point
+        );
     }
 
     #[test]
