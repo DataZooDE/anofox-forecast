@@ -59,13 +59,13 @@ SELECT product_id, COUNT(*) AS n_rows FROM multi_series GROUP BY product_id ORDE
 -- 1.1: Basic forecast with ETS
 .print ''
 .print 'Section 1.1: Forecast with ETS (7 periods, all products):'
-SELECT * FROM ts_forecast_by('multi_series', product_id, date, quantity, 'ETS', 7, MAP{})
+SELECT * FROM ts_forecast_by('multi_series', product_id, date, quantity, 'ETS', 7, '1d', MAP{})
 ORDER BY id, date;
 
 -- 1.2: Forecast with AutoETS (automatic model selection)
 .print ''
 .print 'Section 1.2: Forecast with AutoETS (automatic selection):'
-SELECT * FROM ts_forecast_by('multi_series', product_id, date, quantity, 'AutoETS', 7, MAP{})
+SELECT * FROM ts_forecast_by('multi_series', product_id, date, quantity, 'AutoETS', 7, '1d', MAP{})
 ORDER BY id, date;
 
 -- ============================================================================
@@ -85,19 +85,19 @@ SELECT
 FROM generate_series(0, 59) AS t(i);
 
 .print 'Section 2.1: Naive model (baseline):'
-SELECT * FROM ts_forecast_by('comparison_series', id, date, value, 'Naive', 7, MAP{});
+SELECT * FROM ts_forecast_by('comparison_series', id, date, value, 'Naive', 7, '1d', MAP{});
 
 .print ''
 .print 'Section 2.2: SeasonalNaive model (period=7):'
-SELECT * FROM ts_forecast_by('comparison_series', id, date, value, 'SeasonalNaive', 7, MAP{'seasonal_period': '7'});
+SELECT * FROM ts_forecast_by('comparison_series', id, date, value, 'SeasonalNaive', 7, '1d', MAP{'seasonal_period': '7'});
 
 .print ''
 .print 'Section 2.3: AutoETS model (automatic selection):'
-SELECT * FROM ts_forecast_by('comparison_series', id, date, value, 'AutoETS', 7, MAP{});
+SELECT * FROM ts_forecast_by('comparison_series', id, date, value, 'AutoETS', 7, '1d', MAP{});
 
 .print ''
 .print 'Section 2.4: AutoARIMA model (automatic selection):'
-SELECT * FROM ts_forecast_by('comparison_series', id, date, value, 'AutoARIMA', 7, MAP{});
+SELECT * FROM ts_forecast_by('comparison_series', id, date, value, 'AutoARIMA', 7, '1d', MAP{});
 
 -- ============================================================================
 -- SECTION 3: Seasonal Models
@@ -116,11 +116,11 @@ SELECT
 FROM generate_series(0, 55) AS t(i);
 
 .print 'Section 3.1: Holt-Winters (seasonal_period=7):'
-SELECT * FROM ts_forecast_by('seasonal_data', store_id, week, revenue, 'HoltWinters', 14, MAP{'seasonal_period': '7'});
+SELECT * FROM ts_forecast_by('seasonal_data', store_id, week, revenue, 'HoltWinters', 14, '1d', MAP{'seasonal_period': '7'});
 
 .print ''
 .print 'Section 3.2: SeasonalES (seasonal_period=7):'
-SELECT * FROM ts_forecast_by('seasonal_data', store_id, week, revenue, 'SeasonalES', 14, MAP{'seasonal_period': '7'});
+SELECT * FROM ts_forecast_by('seasonal_data', store_id, week, revenue, 'SeasonalES', 14, '1d', MAP{'seasonal_period': '7'});
 
 -- ============================================================================
 -- SECTION 4: Multiple Seasonality (MSTL)
@@ -147,7 +147,7 @@ FROM dual_seasonal GROUP BY sensor_id;
 
 .print ''
 .print 'Section 4.1: MSTL forecast (daily + weekly seasonality):'
-SELECT * FROM ts_forecast_by('dual_seasonal', sensor_id, timestamp, reading, 'MSTL', 48, MAP{'seasonal_periods': '[24, 168]'})
+SELECT * FROM ts_forecast_by('dual_seasonal', sensor_id, timestamp, reading, 'MSTL', 48, '1h', MAP{'seasonal_periods': '[24, 168]'})
 LIMIT 10;
 
 -- ============================================================================
@@ -178,15 +178,15 @@ FROM spare_parts GROUP BY sku;
 
 .print ''
 .print 'Section 5.1: CrostonClassic forecast:'
-SELECT * FROM ts_forecast_by('spare_parts', sku, date, demand, 'CrostonClassic', 14, MAP{});
+SELECT * FROM ts_forecast_by('spare_parts', sku, date, demand, 'CrostonClassic', 14, '1d', MAP{});
 
 .print ''
 .print 'Section 5.2: CrostonSBA forecast (Syntetos-Boylan Approximation):'
-SELECT * FROM ts_forecast_by('spare_parts', sku, date, demand, 'CrostonSBA', 14, MAP{});
+SELECT * FROM ts_forecast_by('spare_parts', sku, date, demand, 'CrostonSBA', 14, '1d', MAP{});
 
 .print ''
 .print 'Section 5.3: ADIDA forecast (Aggregate-Disaggregate):'
-SELECT * FROM ts_forecast_by('spare_parts', sku, date, demand, 'ADIDA', 14, MAP{});
+SELECT * FROM ts_forecast_by('spare_parts', sku, date, demand, 'ADIDA', 14, '1d', MAP{});
 
 -- ============================================================================
 -- SECTION 6: Exogenous Variables
@@ -284,7 +284,7 @@ SELECT
     COUNT(*) AS n_forecasts,
     ROUND(AVG(point_forecast), 2) AS avg_forecast,
     ROUND(AVG(upper_90 - lower_90), 2) AS avg_interval_width
-FROM ts_forecast_by('forecast_comparison', series_id, date, value, 'AutoETS', 7, MAP{}, '1d')
+FROM ts_forecast_by('forecast_comparison', series_id, date, value, 'AutoETS', 7, '1d', MAP{})
 GROUP BY id
 ORDER BY id;
 

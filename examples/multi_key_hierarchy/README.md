@@ -130,7 +130,7 @@ SELECT * FROM ts_aggregate_hierarchy(
 CREATE TABLE forecasts AS
 SELECT * FROM ts_forecast_by(
     'prepared_data', unique_id, date_col, value_col,
-    'AutoETS', 28, MAP{'seasonal_period': '7'}
+    'AutoETS', 28, '1d', MAP{'seasonal_period': '7'}
 );
 
 -- Step 3: Split keys for analysis
