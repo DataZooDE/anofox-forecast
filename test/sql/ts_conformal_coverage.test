@@ -97,9 +97,7 @@ SELECT
     date,
     forecast_step,
     yhat AS forecast
-FROM ts_forecast_by(
-    'training_data', series_id, date, value, 'naive', 15, '1d'
-);
+FROM ts_forecast_by('training_data', series_id, date, value, 'naive', 15);
 
 # Verify we have forecasts for all series
 query I
@@ -155,9 +153,7 @@ SELECT
     date,
     forecast_step,
     yhat AS forecast
-FROM ts_forecast_by(
-    'train_plus_calib', series_id, date, value, 'naive', 15, '1d'
-);
+FROM ts_forecast_by('train_plus_calib', series_id, date, value, 'naive', 15);
 
 #######################################
 # Apply Conformal Intervals and Check Coverage (NAIVE)
@@ -214,9 +210,7 @@ SELECT
     date,
     forecast_step,
     yhat AS forecast
-FROM ts_forecast_by(
-    'training_data', series_id, date, value, 'snaive', 15, '1d', MAP{'period': '7'}
-);
+FROM ts_forecast_by('training_data', series_id, date, value, 'snaive', 15, MAP{'period': '7'});
 
 # Join forecasts with actuals for calibration
 statement ok
@@ -253,9 +247,7 @@ SELECT
     date,
     forecast_step,
     yhat AS forecast
-FROM ts_forecast_by(
-    'train_plus_calib', series_id, date, value, 'snaive', 15, '1d', MAP{'period': '7'}
-);
+FROM ts_forecast_by('train_plus_calib', series_id, date, value, 'snaive', 15, MAP{'period': '7'});
 
 #######################################
 # Apply Conformal Intervals and Check Coverage (SNAIVE)

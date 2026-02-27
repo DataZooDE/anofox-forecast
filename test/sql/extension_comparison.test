@@ -68,19 +68,19 @@ FROM (
 
 # Test ts_forecast_by returns long format with correct columns using MAP
 query I
-SELECT COUNT(*) FROM ts_forecast_by('test_series', id, ds, value, 'NAIVE', 3, '1d', MAP([], []));
+SELECT COUNT(*) FROM ts_forecast_by('test_series', id, ds, value, 'NAIVE', 3);
 ----
 6
 
 # Test ts_forecast_by has forecast_step column
 query I
-SELECT COUNT(DISTINCT forecast_step) FROM ts_forecast_by('test_series', id, ds, value, 'NAIVE', 3, '1d', MAP([], []));
+SELECT COUNT(DISTINCT forecast_step) FROM ts_forecast_by('test_series', id, ds, value, 'NAIVE', 3);
 ----
 3
 
 # Test ts_forecast_by has id column
 query I
-SELECT COUNT(DISTINCT id) FROM ts_forecast_by('test_series', id, ds, value, 'NAIVE', 3, '1d', MAP([], []));
+SELECT COUNT(DISTINCT id) FROM ts_forecast_by('test_series', id, ds, value, 'NAIVE', 3);
 ----
 2
 

@@ -125,11 +125,11 @@ TEST_CASES = [
 
     # ts_forecast_by - both extensions support table macro API (use uppercase model names)
     ("ts_forecast_by row count", """
-        SELECT COUNT(*) FROM ts_forecast_by('test_series', id, ds, value, 'ARIMA', 3, NULL)
+        SELECT COUNT(*) FROM ts_forecast_by('test_series', id, ds, value, 'ARIMA', 3)
     """),
 
     ("ts_forecast_by distinct steps", """
-        SELECT COUNT(DISTINCT forecast_step) FROM ts_forecast_by('test_series', id, ds, value, 'ARIMA', 3, NULL)
+        SELECT COUNT(DISTINCT forecast_step) FROM ts_forecast_by('test_series', id, ds, value, 'ARIMA', 3)
     """),
 ]
 

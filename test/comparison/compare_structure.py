@@ -129,11 +129,11 @@ def setup_test_data(conn: duckdb.DuckDBPyConnection):
 TEST_CASES = [
     # ts_forecast_by structure (long format) - use 'ARIMA' model (uppercase required by C++)
     ("ts_forecast_by columns",
-     "SELECT * FROM ts_forecast_by('test_series', id, ds, value, 'ARIMA', 3, NULL) LIMIT 1",
+     "SELECT * FROM ts_forecast_by('test_series', id, ds, value, 'ARIMA', 3) LIMIT 1",
      None),
 
     ("ts_forecast_by row count for 2 groups x 3 steps = 6",
-     "SELECT COUNT(*) FROM ts_forecast_by('test_series', id, ds, value, 'ARIMA', 3, NULL)",
+     "SELECT COUNT(*) FROM ts_forecast_by('test_series', id, ds, value, 'ARIMA', 3)",
      None),
 
     # Metrics - simple scalar returns (same in both)
