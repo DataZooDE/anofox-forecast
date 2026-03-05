@@ -12,7 +12,7 @@ SELECT * FROM ts_forecast('table', date_col, value_col, 'OptimizedTheta', horizo
 SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'OptimizedTheta', horizon, frequency, params);
 
 -- With exogenous variables
-SELECT * FROM ts_forecast_exog_by('table', group_col, date_col, value_col, 'x1,x2', 'future_table', 'OptimizedTheta', horizon, frequency, params);
+SELECT * FROM ts_forecast_exog_by('table', group_col, date_col, value_col, ['x1','x2'], 'future_table', future_date_col, ['x1','x2'], frequency, 'OptimizedTheta', horizon, params);
 ```
 
 ## Description
@@ -64,7 +64,7 @@ SELECT * FROM ts_forecast_by(
     'OptimizedTheta',
     12,
     '1mo',
-    {'seasonal_period': 12}
+    MAP{'seasonal_period': '12'}
 );
 
 -- With exogenous variables
@@ -73,11 +73,13 @@ SELECT * FROM ts_forecast_exog_by(
     product_id,
     date,
     amount,
-    'temperature,promotion',
+    ['temperature', 'promotion'],
     'future_exog',
+    date,
+    ['temperature', 'promotion'],
+    '1mo',
     'OptimizedTheta',
-    6,
-    '1mo'
+    6
 );
 ```
 

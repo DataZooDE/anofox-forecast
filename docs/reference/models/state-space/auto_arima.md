@@ -12,7 +12,7 @@ SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoARIMA', horizon, pa
 SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'AutoARIMA', horizon, frequency, params);
 
 -- With exogenous variables
-SELECT * FROM ts_forecast_exog_by('table', group_col, date_col, value_col, 'x1,x2', 'future_table', 'AutoARIMA', horizon, frequency, params);
+SELECT * FROM ts_forecast_exog_by('table', group_col, date_col, value_col, ['x1','x2'], 'future_table', future_date_col, ['x1','x2'], frequency, 'AutoARIMA', horizon, params);
 ```
 
 ## Description
@@ -58,7 +58,7 @@ SELECT * FROM ts_forecast_by(
     'AutoARIMA',
     12,
     '1d',
-    {'seasonal_period': 7}
+    MAP{'seasonal_period': '7'}
 );
 
 -- With exogenous variables (ARIMAX)
@@ -67,11 +67,13 @@ SELECT * FROM ts_forecast_exog_by(
     product_id,
     date,
     amount,
-    'temperature,promotion',
+    ['temperature', 'promotion'],
     'future_exog',
+    date,
+    ['temperature', 'promotion'],
+    '1d',
     'AutoARIMA',
-    12,
-    '1d'
+    12
 );
 ```
 

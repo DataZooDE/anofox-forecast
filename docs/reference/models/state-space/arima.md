@@ -64,7 +64,7 @@ SELECT * FROM ts_forecast_by(
     'ARIMA',
     14,
     '1d',
-    {'p': 1, 'd': 1, 'q': 1}
+    MAP{'p': '1', 'd': '1', 'q': '1'}
 );
 
 -- Seasonal ARIMA(1,1,1)(1,1,1)7
@@ -76,7 +76,7 @@ SELECT * FROM ts_forecast_by(
     'ARIMA',
     28,
     '1d',
-    {'p': 1, 'd': 1, 'q': 1, 'P': 1, 'D': 1, 'Q': 1, 's': 7}
+    MAP{'p': '1', 'd': '1', 'q': '1', 'P': '1', 'D': '1', 'Q': '1', 's': '7'}
 );
 ```
 

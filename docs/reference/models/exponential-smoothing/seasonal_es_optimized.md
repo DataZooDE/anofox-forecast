@@ -48,7 +48,7 @@ SELECT * FROM ts_forecast_by(
     'SeasonalESOptimized',
     14,
     '1d',
-    {'seasonal_period': 7}
+    MAP{'seasonal_period': '7'}
 );
 
 -- With fitted values for analysis
@@ -60,7 +60,7 @@ SELECT * FROM ts_forecast_by(
     'SeasonalESOptimized',
     28,
     '1d',
-    {'seasonal_period': 7, 'include_fitted': true}
+    MAP{'seasonal_period': '7', 'include_fitted': 'true'}
 );
 ```
 

@@ -48,7 +48,7 @@ SELECT * FROM ts_forecast_by(
     'MSTL',
     30,
     '1d',
-    {'seasonal_periods': '[7, 365]'}
+    MAP{'seasonal_periods': '[7, 365]'}
 );
 
 -- Daily and weekly for hourly data
@@ -60,7 +60,7 @@ SELECT * FROM ts_forecast_by(
     'MSTL',
     168,
     '1h',
-    {'seasonal_periods': '[24, 168]'}
+    MAP{'seasonal_periods': '[24, 168]'}
 );
 ```
 

@@ -61,7 +61,7 @@ SELECT * FROM ts_forecast_by(
     'DynamicOptimizedTheta',
     8,
     '3mo',
-    {'seasonal_period': 4}
+    MAP{'seasonal_period': '4'}
 );
 ```
 

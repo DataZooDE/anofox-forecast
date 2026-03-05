@@ -12,7 +12,7 @@ SELECT * FROM ts_forecast('table', date_col, value_col, 'DynamicTheta', horizon,
 SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'DynamicTheta', horizon, frequency, params);
 
 -- With exogenous variables
-SELECT * FROM ts_forecast_exog_by('table', group_col, date_col, value_col, 'x1,x2', 'future_table', 'DynamicTheta', horizon, frequency, params);
+SELECT * FROM ts_forecast_exog_by('table', group_col, date_col, value_col, ['x1','x2'], 'future_table', future_date_col, ['x1','x2'], frequency, 'DynamicTheta', horizon, params);
 ```
 
 ## Description
@@ -65,7 +65,7 @@ SELECT * FROM ts_forecast_by(
     'DynamicTheta',
     4,
     '3mo',
-    {'theta': 2.5}
+    MAP{'theta': '2.5'}
 );
 ```
 

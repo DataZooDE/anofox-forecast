@@ -73,7 +73,7 @@ Parameters can be passed as MAP (string values) or STRUCT (mixed types):
 ```sql
 -- STRUCT (recommended)
 SELECT * FROM ts_forecast_by('sales', id, date, val, 'HoltWinters', 12, '1d',
-    {'seasonal_period': 7, 'alpha': 0.2});
+    MAP{'seasonal_period': '7', 'alpha': '0.2'});
 
 -- MAP (legacy)
 SELECT * FROM ts_forecast_by('sales', id, date, val, 'HoltWinters', 12, '1d',
@@ -117,7 +117,7 @@ FROM ts_backtest_auto_by(
     7,       -- 7-day horizon
     3,       -- 3 folds
     '1d',    -- daily frequency
-    {'method': 'AutoETS', 'seasonal_period': 7}  -- Use detected period
+    MAP{'method': 'AutoETS', 'seasonal_period': '7'}  -- Use detected period
 )
 GROUP BY model_name;
 ```
@@ -130,7 +130,7 @@ CREATE TABLE forecasts AS
 SELECT * FROM ts_forecast_by(
     'sales', product_id, date, quantity,
     'AutoETS', 30, '1d',
-    {'seasonal_period': 7}  -- Same period as backtesting
+    MAP{'seasonal_period': '7'}  -- Same period as backtesting
 );
 ```
 

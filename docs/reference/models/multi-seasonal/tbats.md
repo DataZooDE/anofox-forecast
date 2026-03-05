@@ -49,7 +49,7 @@ SELECT * FROM ts_forecast_by(
     'TBATS',
     168,
     '1h',
-    {'seasonal_periods': '[24, 168]'}
+    MAP{'seasonal_periods': '[24, 168]'}
 );
 
 -- Without Box-Cox transformation
@@ -61,7 +61,7 @@ SELECT * FROM ts_forecast_by(
     'TBATS',
     48,
     '1h',
-    {'seasonal_periods': '[24, 168]', 'use_box_cox': false}
+    MAP{'seasonal_periods': '[24, 168]', 'use_box_cox': 'false'}
 );
 ```
 

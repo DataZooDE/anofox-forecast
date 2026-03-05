@@ -59,7 +59,7 @@ SELECT * FROM ts_forecast_by(
     'SESOptimized',
     8,
     '1d',
-    {'include_fitted': true}
+    MAP{'include_fitted': 'true'}
 );
 ```
 

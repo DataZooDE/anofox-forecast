@@ -50,7 +50,7 @@ SELECT * FROM ts_forecast_by(
     'SeasonalES',
     14,
     '1d',
-    {'seasonal_period': 7}
+    MAP{'seasonal_period': '7'}
 );
 
 -- With custom smoothing
@@ -62,7 +62,7 @@ SELECT * FROM ts_forecast_by(
     'SeasonalES',
     21,
     '1d',
-    {'seasonal_period': 7, 'alpha': 0.4, 'gamma': 0.2}
+    MAP{'seasonal_period': '7', 'alpha': '0.4', 'gamma': '0.2'}
 );
 ```
 

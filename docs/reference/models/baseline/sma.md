@@ -60,7 +60,7 @@ SELECT * FROM ts_forecast_by(
     'SMA',
     4,
     '1d',
-    {'window': 12}
+    MAP{'window': '12'}
 );
 ```
 

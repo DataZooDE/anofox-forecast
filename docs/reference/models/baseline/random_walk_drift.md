@@ -59,7 +59,7 @@ SELECT * FROM ts_forecast_by(
     'RandomWalkDrift',
     12,
     '1d',
-    {'confidence_level': 0.90}
+    MAP{'confidence_level': '0.90'}
 );
 ```
 

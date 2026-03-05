@@ -131,19 +131,19 @@ SELECT * FROM ts_cv_folds_by(
 -- With gap between train and test (e.g., for "next week" predictions)
 SELECT * FROM ts_cv_folds_by(
     'sales_data', store_id, date, revenue,
-    3, 7, {'gap': 1}
+    3, 7, MAP{'gap': '1'}
 );
 
 -- Fixed window with custom initial training size
 SELECT * FROM ts_cv_folds_by(
     'sales_data', store_id, date, revenue,
-    5, 12, {'window_type': 'fixed', 'min_train_size': 24, 'initial_train_size': 24}
+    5, 12, MAP{'window_type': 'fixed', 'min_train_size': '24', 'initial_train_size': '24'}
 );
 
 -- Dense overlapping folds (skip_length=1)
 SELECT * FROM ts_cv_folds_by(
     'sales_data', store_id, date, revenue,
-    10, 3, {'skip_length': 1}
+    10, 3, MAP{'skip_length': '1'}
 );
 ```
 

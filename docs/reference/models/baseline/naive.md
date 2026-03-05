@@ -52,10 +52,10 @@ SELECT * FROM ts_forecast_by(
 
 -- Compare with more complex model
 WITH naive AS (
-    SELECT * FROM ts_forecast_by('sales', id, date, val, 'Naive', 12, '1d', {})
+    SELECT * FROM ts_forecast_by('sales', id, date, val, 'Naive', 12, '1d', MAP{})
 ),
 ets AS (
-    SELECT * FROM ts_forecast_by('sales', id, date, val, 'AutoETS', 12, '1d', {})
+    SELECT * FROM ts_forecast_by('sales', id, date, val, 'AutoETS', 12, '1d', MAP{})
 )
 SELECT n.id, n.ds, n.forecast AS naive_fcst, e.forecast AS ets_fcst
 FROM naive n JOIN ets e ON n.id = e.id AND n.ds = e.ds;

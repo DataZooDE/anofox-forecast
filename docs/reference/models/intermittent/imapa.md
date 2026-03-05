@@ -58,7 +58,7 @@ SELECT * FROM ts_forecast_by(
     'IMAPA',
     60,
     '1d',
-    {'confidence_level': 0.95}
+    MAP{'confidence_level': '0.95'}
 );
 ```
 

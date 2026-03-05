@@ -73,7 +73,7 @@ SELECT * FROM ts_forecast_by(
     'ETS',
     14,
     '1d',
-    {'seasonal_period': 7}
+    MAP{'seasonal_period': '7'}
 );
 
 -- Multiplicative Holt-Winters
@@ -85,7 +85,7 @@ SELECT * FROM ts_forecast_by(
     'ETS',
     12,
     '1mo',
-    {'model': 'MAM', 'seasonal_period': 12}
+    MAP{'model': 'MAM', 'seasonal_period': '12'}
 );
 
 -- Damped trend, no seasonality
@@ -97,7 +97,7 @@ SELECT * FROM ts_forecast_by(
     'ETS',
     4,
     '3mo',
-    {'model': 'AAdN'}
+    MAP{'model': 'AAdN'}
 );
 ```
 

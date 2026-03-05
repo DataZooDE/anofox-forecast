@@ -26,7 +26,7 @@ SELECT * FROM ts_detect_changepoints_by(
     product_id,
     date,
     value,
-    {'hazard_lambda': 100}
+    MAP{'hazard_lambda': '100'}
 );
 
 -- Filter to only changepoints
@@ -35,7 +35,7 @@ SELECT * FROM ts_detect_changepoints_by(
     product_id,
     date,
     value,
-    {'hazard_lambda': 100}
+    MAP{'hazard_lambda': '100'}
 )
 WHERE is_changepoint = true;
 ```
@@ -93,7 +93,7 @@ SELECT * FROM ts_detect_changepoints_by(
     product_id,
     date,
     quantity,
-    {'hazard_lambda': 100}
+    MAP{'hazard_lambda': '100'}
 );
 
 -- Find all changepoints with their dates
@@ -107,7 +107,7 @@ FROM ts_detect_changepoints_by(
     product_id,
     date,
     quantity,
-    {'hazard_lambda': 100}
+    MAP{'hazard_lambda': '100'}
 )
 WHERE is_changepoint = true
 ORDER BY product_id, date;
@@ -121,7 +121,7 @@ FROM ts_detect_changepoints_by(
     product_id,
     date,
     quantity,
-    {'hazard_lambda': 100}
+    MAP{'hazard_lambda': '100'}
 )
 GROUP BY product_id;
 ```

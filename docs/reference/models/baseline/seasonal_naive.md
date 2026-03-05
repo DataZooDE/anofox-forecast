@@ -48,7 +48,7 @@ SELECT * FROM ts_forecast_by(
     'SeasonalNaive',
     14,
     '1d',
-    {'seasonal_period': 7}
+    MAP{'seasonal_period': '7'}
 );
 
 -- Monthly seasonality (monthly data)
@@ -60,7 +60,7 @@ SELECT * FROM ts_forecast_by(
     'SeasonalNaive',
     12,
     '1d',
-    {'seasonal_period': 12}
+    MAP{'seasonal_period': '12'}
 );
 ```
 

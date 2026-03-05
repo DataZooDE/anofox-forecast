@@ -58,7 +58,7 @@ SELECT * FROM ts_forecast_by(
     'CrostonSBA',
     28,
     '1d',
-    {'confidence_level': 0.90}
+    MAP{'confidence_level': '0.90'}
 );
 ```
 
