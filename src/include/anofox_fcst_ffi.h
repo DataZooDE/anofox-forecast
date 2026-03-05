@@ -2794,24 +2794,6 @@ void anofox_free_prediction_intervals(struct PredictionIntervalsFFI *result);
 
 const char *anofox_fcst_version(void);
 
-/**
- * Initialize telemetry from C/C++.
- *
- * # Safety
- * The api_key pointer must be valid or null.
- */
-void anofox_telemetry_init(bool enabled, const char *api_key);
-
-/**
- * Check if telemetry is enabled.
- */
-bool anofox_telemetry_is_enabled(void);
-
-/**
- * Capture extension load event from C/C++.
- */
-void anofox_telemetry_capture_extension_load(void);
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

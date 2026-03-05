@@ -6,7 +6,10 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/main/extension_helper.hpp"
 
-#include <cstdlib>
+#ifdef HAS_POSTHOG_TELEMETRY
+#include "telemetry.hpp"
+#endif
+
 
 namespace duckdb {
 
@@ -161,9 +164,34 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsCoverageNativeFunction(loader);
     RegisterTsQuantileLossNativeFunction(loader);
 
-    // Initialize telemetry (respects DATAZOO_DISABLE_TELEMETRY env var)
-    anofox_telemetry_init(true, nullptr);
-    anofox_telemetry_capture_extension_load();
+    // Initialize PostHog telemetry (respects DATAZOO_DISABLE_TELEMETRY env var)
+#ifdef HAS_POSTHOG_TELEMETRY
+    auto& telemetry = PostHogTelemetry::Instance();
+
+    // Auto-disable telemetry in CI environments
+    if (std::getenv("CI") || std::getenv("GITHUB_ACTIONS") || std::getenv("GITLAB_CI") ||
+        std::getenv("CIRCLECI") || std::getenv("TRAVIS") || std::getenv("JENKINS_URL") ||
+        std::getenv("BUILDKITE") || std::getenv("TEAMCITY_VERSION") ||
+        std::getenv("TF_BUILD") || std::getenv("CODEBUILD_BUILD_ID")) {
+        telemetry.SetEnabled(false);
+    }
+
+    telemetry.SetAPIKey("phc_t3wwRLtpyEmLHYaZCSszG0MqVr74J6wnCrj9D41zk2t");
+    telemetry.SetDuckDBVersion(DuckDB::LibraryVersion());
+    telemetry.CaptureExtensionLoad("anofox_forecast", AnofoxForecastExtension().Version());
+
+    // Register telemetry opt-out setting
+    auto &config = DBConfig::GetConfig(db);
+    config.AddExtensionOption(
+        "anofox_telemetry_enabled",
+        "Enable or disable anonymous usage telemetry for anofox_forecast",
+        LogicalType::BOOLEAN,
+        Value::BOOLEAN(true),
+        [](ClientContext &context, SetScope scope, Value &parameter) {
+            PostHogTelemetry::Instance().SetEnabled(BooleanValue::Get(parameter));
+        }
+    );
+#endif
 }
 
 void AnofoxForecastExtension::Load(ExtensionLoader &loader) {

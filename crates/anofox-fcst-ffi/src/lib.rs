@@ -9,13 +9,10 @@
 //! - `error_handling` - Standardized error handling utilities
 //! - `conversion` - Parameter conversion helpers
 //! - `allocation` - Memory allocation helpers
-//! - `telemetry` - Usage telemetry (native only)
 
 pub mod allocation;
 pub mod conversion;
 pub mod error_handling;
-#[cfg(not(target_family = "wasm"))]
-pub mod telemetry;
 pub mod types;
 
 // Use core::ffi types which work on all platforms including WASM
