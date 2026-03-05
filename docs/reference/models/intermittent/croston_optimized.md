@@ -58,7 +58,7 @@ SELECT * FROM ts_forecast_by(
     'CrostonOptimized',
     14,
     '1d',
-    {'include_fitted': true}
+    MAP{'include_fitted': 'true'}
 );
 ```
 

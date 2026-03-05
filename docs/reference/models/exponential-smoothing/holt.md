@@ -61,7 +61,7 @@ SELECT * FROM ts_forecast_by(
     'Holt',
     4,
     '1d',
-    {'alpha': 0.4, 'beta': 0.2}
+    MAP{'alpha': '0.4', 'beta': '0.2'}
 );
 ```
 

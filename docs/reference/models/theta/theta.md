@@ -62,7 +62,7 @@ SELECT * FROM ts_forecast_by(
     'Theta',
     4,
     '3mo',
-    {'theta': 3.0}
+    MAP{'theta': '3.0'}
 );
 ```
 

@@ -36,7 +36,7 @@ As of v0.4.0, all table macros support STRUCT syntax for parameters with mixed t
 ```sql
 -- STRUCT allows mixed types (recommended)
 SELECT * FROM ts_backtest_auto('sales', id, date, value, 7, 3, '1d',
-    {'method': 'Naive', 'gap': 2, 'clip_horizon': true});
+    MAP{'method': 'Naive', 'gap': '2', 'clip_horizon': 'true'});
 
 -- MAP requires homogeneous string values (legacy)
 SELECT * FROM ts_backtest_auto('sales', id, date, value, 7, 3, '1d',

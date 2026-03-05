@@ -51,7 +51,7 @@ SELECT * FROM ts_forecast_by(
     'HoltWinters',
     14,
     '1d',
-    {'seasonal_period': 7}
+    MAP{'seasonal_period': '7'}
 );
 
 -- Monthly data with yearly seasonality
@@ -63,7 +63,7 @@ SELECT * FROM ts_forecast_by(
     'HoltWinters',
     12,
     '1d',
-    {'seasonal_period': 12, 'alpha': 0.2, 'beta': 0.1, 'gamma': 0.15}
+    MAP{'seasonal_period': '12', 'alpha': '0.2', 'beta': '0.1', 'gamma': '0.15'}
 );
 ```
 

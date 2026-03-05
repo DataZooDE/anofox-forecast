@@ -12,7 +12,7 @@ SELECT * FROM ts_forecast('table', date_col, value_col, 'MFLES', horizon, params
 SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'MFLES', horizon, frequency, params);
 
 -- With exogenous variables
-SELECT * FROM ts_forecast_exog_by('table', group_col, date_col, value_col, 'x1,x2', 'future_table', 'MFLES', horizon, frequency, params);
+SELECT * FROM ts_forecast_exog_by('table', group_col, date_col, value_col, ['x1','x2'], 'future_table', future_date_col, ['x1','x2'], frequency, 'MFLES', horizon, params);
 ```
 
 ## Description
@@ -51,7 +51,7 @@ SELECT * FROM ts_forecast_by(
     'MFLES',
     168,
     '1h',
-    {'seasonal_periods': '[24, 168]'}
+    MAP{'seasonal_periods': '[24, 168]'}
 );
 
 -- Weekly and yearly seasonality (daily data)
@@ -63,7 +63,7 @@ SELECT * FROM ts_forecast_by(
     'MFLES',
     90,
     '1d',
-    {'seasonal_periods': '[7, 365]'}
+    MAP{'seasonal_periods': '[7, 365]'}
 );
 
 -- With exogenous variables
@@ -72,12 +72,14 @@ SELECT * FROM ts_forecast_exog_by(
     product_id,
     date,
     amount,
-    'temperature,holiday',
+    ['temperature', 'holiday'],
     'future_exog',
+    date,
+    ['temperature', 'holiday'],
+    '1d',
     'MFLES',
     30,
-    '1d',
-    {'seasonal_periods': '[7, 365]'}
+    MAP{'seasonal_periods': '[7, 365]'}
 );
 ```
 

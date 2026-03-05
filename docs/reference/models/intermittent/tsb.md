@@ -60,7 +60,7 @@ SELECT * FROM ts_forecast_by(
     'TSB',
     14,
     '1d',
-    {'alpha_d': 0.2, 'alpha_p': 0.3}
+    MAP{'alpha_d': '0.2', 'alpha_p': '0.3'}
 );
 ```
 

@@ -54,7 +54,7 @@ SELECT * FROM ts_forecast_by(
     'AutoMSTL',
     90,
     '1d',
-    {'seasonal_periods': '[7, 365]'}
+    MAP{'seasonal_periods': '[7, 365]'}
 );
 ```
 

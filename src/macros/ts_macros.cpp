@@ -545,10 +545,10 @@ ORDER BY 1, 2, 3
     {"ts_forecast_exog", {"source", "date_col", "target_col", "xreg_cols", "future_source", "future_date_col", "future_xreg_cols", nullptr}, {{"method", "'AutoARIMA'"}, {"horizon", "12"}, {"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
 WITH src AS (
-    SELECT * FROM query_table(source::VARCHAR)
+    SELECT date_col AS __exog_dt__, target_col AS __exog_tgt__, * FROM query_table(source::VARCHAR)
 ),
 future_src AS (
-    SELECT * FROM query_table(future_source::VARCHAR)
+    SELECT future_date_col AS __exog_fdt__, * FROM query_table(future_source::VARCHAR)
 ),
 -- Expand xreg column names (single series, no groups)
 _xreg_cols_expanded AS (
@@ -558,7 +558,7 @@ _xreg_cols_expanded AS (
 _xreg_values AS (
     SELECT
         xce.col_name,
-        LIST(json_extract(to_json(s), '$.' || xce.col_name)::DOUBLE ORDER BY s.date_col) AS values
+        LIST(json_extract(to_json(s), '$.' || xce.col_name)::DOUBLE ORDER BY s.__exog_dt__) AS values
     FROM _xreg_cols_expanded xce
     CROSS JOIN src s
     GROUP BY xce.col_name
@@ -570,7 +570,7 @@ _xreg_list AS (
 ),
 -- Aggregate historical target values
 _y_list AS (
-    SELECT LIST(target_col::DOUBLE ORDER BY date_col) AS y_list FROM src
+    SELECT LIST(__exog_tgt__::DOUBLE ORDER BY __exog_dt__) AS y_list FROM src
 ),
 -- Expand future xreg column names
 _future_cols_expanded AS (
@@ -580,7 +580,7 @@ _future_cols_expanded AS (
 _future_xreg_values AS (
     SELECT
         fce.col_name,
-        LIST(json_extract(to_json(fsrc), '$.' || fce.col_name)::DOUBLE ORDER BY future_date_col) AS values
+        LIST(json_extract(to_json(fsrc), '$.' || fce.col_name)::DOUBLE ORDER BY fsrc.__exog_fdt__) AS values
     FROM _future_cols_expanded fce
     CROSS JOIN future_src fsrc
     GROUP BY fce.col_name
@@ -629,73 +629,73 @@ WITH _freq AS (
     END AS _interval
 ),
 src AS (
-    SELECT * FROM query_table(source::VARCHAR)
+    SELECT group_col AS __exog_grp__, date_col AS __exog_dt__, target_col AS __exog_tgt__, * FROM query_table(source::VARCHAR)
 ),
 future_src AS (
-    SELECT * FROM query_table(future_source::VARCHAR)
+    SELECT group_col AS __exog_fgrp__, future_date_col AS __exog_fdt__, * FROM query_table(future_source::VARCHAR)
 ),
 -- Get unique groups from source
 _groups AS (
-    SELECT DISTINCT group_col FROM src
+    SELECT DISTINCT __exog_grp__ FROM src
 ),
 -- Expand xreg column names per group for historical data
 _xreg_cols_expanded AS (
-    SELECT g.group_col, UNNEST(xreg_cols) AS col_name
+    SELECT g.__exog_grp__, UNNEST(xreg_cols) AS col_name
     FROM _groups g
 ),
 -- For each (group, col_name), extract values using JSON via JOIN
 _xreg_values AS (
     SELECT
-        xce.group_col,
+        xce.__exog_grp__,
         xce.col_name,
-        LIST(json_extract(to_json(s), '$.' || xce.col_name)::DOUBLE ORDER BY date_col) AS values
+        LIST(json_extract(to_json(s), '$.' || xce.col_name)::DOUBLE ORDER BY s.__exog_dt__) AS values
     FROM _xreg_cols_expanded xce
-    JOIN src s ON s.group_col = xce.group_col
-    GROUP BY xce.group_col, xce.col_name
+    JOIN src s ON s.__exog_grp__ = xce.__exog_grp__
+    GROUP BY xce.__exog_grp__, xce.col_name
 ),
 -- Build list of lists for xreg per group
 _xreg_lists AS (
-    SELECT group_col, LIST(values ORDER BY col_name) AS _xreg_list
+    SELECT __exog_grp__, LIST(values ORDER BY col_name) AS _xreg_list
     FROM _xreg_values
-    GROUP BY group_col
+    GROUP BY __exog_grp__
 ),
 -- Aggregate historical target values per group
 grouped_historical AS (
     SELECT
-        group_col,
-        date_trunc('second', MAX(date_col)::TIMESTAMP) AS last_date,
-        LIST(target_col::DOUBLE ORDER BY date_col) AS _y_list
+        __exog_grp__,
+        date_trunc('second', MAX(__exog_dt__)::TIMESTAMP) AS last_date,
+        LIST(__exog_tgt__::DOUBLE ORDER BY __exog_dt__) AS _y_list
     FROM src
-    GROUP BY group_col
+    GROUP BY __exog_grp__
 ),
 -- Get unique groups from future source
 _future_groups AS (
-    SELECT DISTINCT group_col FROM future_src
+    SELECT DISTINCT __exog_fgrp__ FROM future_src
 ),
 -- Expand future xreg column names per group
 _future_cols_expanded AS (
-    SELECT g.group_col, UNNEST(future_xreg_cols) AS col_name
+    SELECT g.__exog_fgrp__, UNNEST(future_xreg_cols) AS col_name
     FROM _future_groups g
 ),
 -- For each (group, col_name), extract future values using JSON via JOIN
 _future_xreg_values AS (
     SELECT
-        fce.group_col,
+        fce.__exog_fgrp__,
         fce.col_name,
-        LIST(json_extract(to_json(fsrc), '$.' || fce.col_name)::DOUBLE ORDER BY future_date_col) AS values
+        LIST(json_extract(to_json(fsrc), '$.' || fce.col_name)::DOUBLE ORDER BY fsrc.__exog_fdt__) AS values
     FROM _future_cols_expanded fce
-    JOIN future_src fsrc ON fsrc.group_col = fce.group_col
-    GROUP BY fce.group_col, fce.col_name
+    JOIN future_src fsrc ON fsrc.__exog_fgrp__ = fce.__exog_fgrp__
+    GROUP BY fce.__exog_fgrp__, fce.col_name
 ),
 -- Build list of lists for future xreg per group
 _future_xreg_lists AS (
-    SELECT group_col, LIST(values ORDER BY col_name) AS _future_xreg_list
+    SELECT __exog_fgrp__, LIST(values ORDER BY col_name) AS _future_xreg_list
     FROM _future_xreg_values
-    GROUP BY group_col
+    GROUP BY __exog_fgrp__
 ),
 forecast_data AS (
     SELECT
-        h.group_col,
+        h.__exog_grp__,
         h.last_date,
         _ts_forecast_exog(
             h._y_list,
@@ -705,11 +705,11 @@ forecast_data AS (
             method
         ) AS fcst
     FROM grouped_historical h
-    LEFT JOIN _xreg_lists x ON h.group_col = x.group_col
-    LEFT JOIN _future_xreg_lists fx ON h.group_col = fx.group_col
+    LEFT JOIN _xreg_lists x ON h.__exog_grp__ = x.__exog_grp__
+    LEFT JOIN _future_xreg_lists fx ON h.__exog_grp__ = fx.__exog_fgrp__
 )
 SELECT
-    group_col,
+    __exog_grp__ AS id,
     UNNEST(generate_series(1, len((fcst).point)))::INTEGER AS forecast_step,
     UNNEST(generate_series(last_date + (SELECT _interval FROM _freq), last_date + (len((fcst).point)::INTEGER * EXTRACT(EPOCH FROM (SELECT _interval FROM _freq)) || ' seconds')::INTERVAL, (SELECT _interval FROM _freq)))::TIMESTAMP AS date,
     UNNEST((fcst).point) AS yhat,
@@ -717,7 +717,7 @@ SELECT
     UNNEST((fcst).upper) AS yhat_upper,
     (fcst).model AS model_name
 FROM forecast_data
-ORDER BY group_col, forecast_step
+ORDER BY __exog_grp__, forecast_step
 )"},
 
     // ts_mark_unknown_by: Mark rows as known/unknown based on cutoff date for scenario expressions

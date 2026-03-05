@@ -60,7 +60,7 @@ SELECT * FROM ts_forecast_by(
     'SES',
     24,
     '1d',
-    {'alpha': 0.5}
+    MAP{'alpha': '0.5'}
 );
 ```
 

@@ -34,7 +34,7 @@ SELECT * FROM ts_aggregate_hierarchy(
 -- Step 3: Forecast all series (original + aggregated)
 CREATE TABLE forecasts AS
 SELECT * FROM ts_forecast_by('prepared_data', unique_id, date, value,
-    'AutoETS', 28, '1d', {'seasonal_period': 7});
+    'AutoETS', 28, '1d', MAP{'seasonal_period': '7'});
 
 -- Step 4: Split keys for analysis (with custom column names)
 SELECT * FROM ts_split_keys(
@@ -114,7 +114,7 @@ Native table function that combines multiple ID columns into a single `unique_id
 ```sql
 ts_combine_keys(
     (SELECT date_col, value_col, id_col1, id_col2, ... FROM source),
-    {'separator': '|'}  -- optional params
+    MAP{'separator': '|'}  -- optional params
 )
 ```
 
@@ -169,7 +169,7 @@ Native table function that supports **arbitrary hierarchy levels** (2-N columns)
 ```sql
 ts_aggregate_hierarchy(
     (SELECT date_col, value_col, id_col1, id_col2, ... FROM source),
-    {'separator': '|', 'aggregate_keyword': 'AGGREGATED'}  -- optional params
+    MAP{'separator': '|', 'aggregate_keyword': 'AGGREGATED'}  -- optional params
 )
 ```
 
@@ -308,7 +308,7 @@ SELECT * FROM ts_aggregate_hierarchy(
 -- Step 3: Forecast all series (original + aggregated)
 CREATE TABLE forecasts AS
 SELECT * FROM ts_forecast_by('prepared_data', unique_id, sale_date, quantity,
-    'AutoETS', 28, '1d', {'seasonal_period': 7});
+    'AutoETS', 28, '1d', MAP{'seasonal_period': '7'});
 
 -- Step 4: Split keys for analysis with original column names
 SELECT *

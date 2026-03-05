@@ -56,7 +56,7 @@ SELECT * FROM ts_forecast_by(
     'AutoETS',
     30,
     '1d',
-    {'seasonal_period': 7}
+    MAP{'seasonal_period': '7'}
 );
 
 -- Non-seasonal data (no seasonal_period needed)
@@ -79,7 +79,7 @@ SELECT * FROM ts_forecast_by(
     'AutoETS',
     12,
     '1d',
-    {'seasonal_period': 7, 'confidence_level': 0.90}
+    MAP{'seasonal_period': '7', 'confidence_level': '0.90'}
 );
 ```
 

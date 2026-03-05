@@ -44,7 +44,7 @@ SELECT * FROM ts_conformal_by(
     actual,
     forecast,
     forecast,
-    {'alpha': 0.1}  -- 90% coverage
+    MAP{'alpha': '0.1'}  -- 90% coverage
 );
 ```
 
@@ -59,7 +59,7 @@ Use when you need to:
 -- Step 1: Calibrate once
 CREATE TABLE calibration AS
 SELECT * FROM ts_conformal_calibrate(
-    'backtest', actual, forecast, {'alpha': 0.1}
+    'backtest', actual, forecast, MAP{'alpha': '0.1'}
 );
 
 -- Step 2: Apply to any forecast table
@@ -105,7 +105,7 @@ SELECT * FROM ts_conformal_by(
     actual,
     forecast,
     forecast,
-    {'alpha': 0.1}
+    MAP{'alpha': '0.1'}
 );
 ```
 
@@ -119,7 +119,7 @@ SELECT * FROM ts_conformal_by(
 -- Run once: calibrate from historical backtests
 CREATE TABLE calibration AS
 SELECT * FROM ts_conformal_calibrate(
-    'historical_backtest', actual, forecast, {'alpha': 0.1}
+    'historical_backtest', actual, forecast, MAP{'alpha': '0.1'}
 );
 
 -- Run daily: apply to new forecasts
@@ -145,7 +145,7 @@ SELECT * FROM ts_conformal_by(
     actual,
     forecast,
     forecast,
-    {'alpha': 0.1, 'method': 'asymmetric'}
+    MAP{'alpha': '0.1', 'method': 'asymmetric'}
 );
 ```
 
@@ -207,20 +207,20 @@ SELECT * FROM ts_detect_periods_by('sales', product_id, date, value, MAP{});
 CREATE TABLE backtest AS
 SELECT * FROM ts_backtest_auto_by(
     'sales', product_id, date, value, 7, 5, '1d',
-    {'method': 'AutoETS', 'seasonal_period': 7}
+    MAP{'method': 'AutoETS', 'seasonal_period': '7'}
 );
 
 -- Step 2: Calibrate conformity score
 CREATE TABLE calibration AS
 SELECT * FROM ts_conformal_calibrate(
-    'backtest', actual, forecast, {'alpha': 0.1}
+    'backtest', actual, forecast, MAP{'alpha': '0.1'}
 );
 
 -- Step 3: Generate future forecasts
 CREATE TABLE future AS
 SELECT * FROM ts_forecast_by(
     'sales', product_id, date, value, 'AutoETS', 14, '1d',
-    {'seasonal_period': 7}
+    MAP{'seasonal_period': '7'}
 );
 
 -- Step 4: Apply conformal intervals
@@ -272,7 +272,7 @@ SELECT * FROM ts_conformal_by(
     actual,
     forecast,
     yhat,
-    {'alpha': 0.1, 'method': 'split'}
+    MAP{'alpha': '0.1', 'method': 'split'}
 );
 
 -- Asymmetric intervals (for skewed residuals)
@@ -282,7 +282,7 @@ SELECT * FROM ts_conformal_by(
     actual,
     forecast,
     yhat,
-    {'alpha': 0.1, 'method': 'asymmetric'}
+    MAP{'alpha': '0.1', 'method': 'asymmetric'}
 );
 ```
 
@@ -325,7 +325,7 @@ SELECT * FROM ts_conformal_calibrate(
     'backtest_results',
     actual,
     forecast,
-    {'alpha': 0.05}
+    MAP{'alpha': '0.05'}
 );
 ```
 
@@ -352,7 +352,7 @@ ts_conformal_apply_by(forecast_results, group_col, forecast_col, conformity_scor
 ```sql
 WITH score AS (
     SELECT conformity_score FROM ts_conformal_calibrate(
-        'backtest', actual, forecast, {'alpha': 0.1}
+        'backtest', actual, forecast, MAP{'alpha': '0.1'}
     )
 )
 SELECT * FROM ts_conformal_apply_by(

@@ -54,7 +54,7 @@ SELECT * FROM ts_forecast_by(
     'AutoMFLES',
     168,
     '1h',
-    {'seasonal_periods': '[24, 168]'}
+    MAP{'seasonal_periods': '[24, 168]'}
 );
 ```
 

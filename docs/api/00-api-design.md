@@ -121,7 +121,7 @@ The `params` parameter supports both MAP and STRUCT syntax in **table macros** (
 ```sql
 -- STRUCT allows mixed types (recommended for table macros)
 SELECT * FROM ts_backtest_auto_by('sales', id, date, value, 7, 3, '1d',
-    {'method': 'Naive', 'gap': 2, 'clip_horizon': true});
+    MAP{'method': 'Naive', 'gap': '2', 'clip_horizon': 'true'});
 
 -- MAP requires homogeneous string values (legacy, also works)
 SELECT * FROM ts_backtest_auto_by('sales', id, date, value, 7, 3, '1d',
@@ -234,7 +234,7 @@ SELECT * FROM ts_forecast_by('sales', product_id, date, value, 'AutoETS', 12, '1
 SELECT * FROM ts_stats_by('sales', product_id, date, value);
 
 -- One-liner backtest
-SELECT * FROM ts_backtest_auto_by('sales', product_id, date, value, 7, 3, '1d', {'method': 'AutoETS'});
+SELECT * FROM ts_backtest_auto_by('sales', product_id, date, value, 7, 3, '1d', MAP{'method': 'AutoETS'});
 ```
 
 ---

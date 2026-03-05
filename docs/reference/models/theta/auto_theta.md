@@ -55,7 +55,7 @@ SELECT * FROM ts_forecast_by(
     'AutoTheta',
     12,
     '1mo',
-    {'seasonal_period': 12}
+    MAP{'seasonal_period': '12'}
 );
 
 -- Non-seasonal data
