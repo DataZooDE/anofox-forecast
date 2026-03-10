@@ -52,6 +52,19 @@ if (NOT WASM_TARGET_FOUND EQUAL -1)
     set(Rust_CARGO_TARGET "wasm32-unknown-emscripten")
 endif()
 
+# Fallback: detect host target from rustc when CI variables (OS_NAME/OS_ARCH) are not set
+if("${Rust_CARGO_TARGET}" STREQUAL "")
+    execute_process(
+        COMMAND rustc --version --verbose
+        OUTPUT_VARIABLE _RUSTC_VERBOSE
+        ERROR_QUIET
+    )
+    if(_RUSTC_VERBOSE MATCHES "host: ([a-zA-Z0-9_-]+)")
+        set(Rust_CARGO_TARGET "${CMAKE_MATCH_1}")
+        message(STATUS "Detected Rust host target: ${Rust_CARGO_TARGET}")
+    endif()
+endif()
+
 message(STATUS "Rust_CARGO_TARGET: ${Rust_CARGO_TARGET}")
 message(STATUS "OS_NAME: ${OS_NAME}")
 message(STATUS "OS_ARCH: ${OS_ARCH}")
@@ -76,7 +89,7 @@ include(FetchContent)
 FetchContent_Declare(
     Corrosion
     GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git
-    GIT_TAG v0.5.2
+    GIT_TAG v0.6.1
 )
 FetchContent_MakeAvailable(Corrosion)
 
