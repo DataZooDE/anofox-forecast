@@ -29,4 +29,10 @@ fn main() {
     println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rerun-if-changed=src/types.rs");
     println!("cargo:rerun-if-changed=cbindgen.toml");
+
+    // On Windows, ensure bcrypt is linked (required by getrandom 0.3+)
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if target_os == "windows" {
+        println!("cargo:rustc-link-lib=bcrypt");
+    }
 }
