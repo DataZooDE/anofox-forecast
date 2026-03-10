@@ -21,7 +21,8 @@ jobs:
       extension_name: anofox_forecast
       enable_rust: true
       # windows_amd64_rtools: only needed for R package builds
-      exclude_archs: 'windows_amd64_rtools'
+      # windows_amd64_mingw: rtools42 MinGW lacks libbcrypt.a needed by Rust getrandom 0.3+
+      exclude_archs: 'windows_amd64_rtools;windows_amd64_mingw'
 
   build-and-test-rust:
     name: Rust Tests
