@@ -91,18 +91,14 @@ void RegisterTsMqlossFunction(ExtensionLoader &loader);
 void RegisterTsCoverageFunction(ExtensionLoader &loader);
 void RegisterTsEstimateBacktestMemoryFunction(ExtensionLoader &loader);
 
-// Conformal prediction functions
-void RegisterTsConformalQuantileFunction(ExtensionLoader &loader);
-void RegisterTsConformalIntervalsFunction(ExtensionLoader &loader);
-void RegisterTsConformalPredictFunction(ExtensionLoader &loader);
-void RegisterTsConformalPredictAsymmetricFunction(ExtensionLoader &loader);
+// Conformal prediction functions (v2 API)
 void RegisterTsMeanIntervalWidthFunction(ExtensionLoader &loader);
-
-// Conformal API v2 (Learn/Apply pattern)
 void RegisterTsConformalLearnFunction(ExtensionLoader &loader);
 void RegisterTsConformalApplyFunction(ExtensionLoader &loader);
 void RegisterTsConformalCoverageFunction(ExtensionLoader &loader);
 void RegisterTsConformalEvaluateFunction(ExtensionLoader &loader);
+void RegisterTsDifficultyScoreFunction(ExtensionLoader &loader);
+void RegisterTsConformalizeFunction(ExtensionLoader &loader);
 
 // Table macros
 void RegisterTsTableMacros(ExtensionLoader &loader);
