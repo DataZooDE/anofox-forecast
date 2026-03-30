@@ -1851,4 +1851,88 @@ mod tests {
         assert_relative_eq!(eval.violation_rate, 1.0 / 3.0, epsilon = 0.001);
         assert_eq!(eval.n_observations, 3);
     }
+
+    #[test]
+    fn test_conformal_per_step_basic() {
+        // 3 folds, horizon 2
+        let fold_forecasts = vec![vec![100.0, 105.0], vec![110.0, 115.0], vec![120.0, 125.0]];
+        let fold_actuals = vec![vec![101.0, 108.0], vec![109.0, 118.0], vec![121.0, 122.0]];
+        let result =
+            conformal_predict_per_step(&fold_forecasts, &fold_actuals, &[100.0, 105.0], 0.1)
+                .unwrap();
+        assert_eq!(result.lower.len(), 2);
+        assert_eq!(result.upper.len(), 2);
+        assert_eq!(result.half_widths.len(), 2);
+    }
+}
+
+/// Result of per-step conformal prediction.
+#[derive(Debug, Clone)]
+pub struct ConformalPerStepResult {
+    /// Point forecasts (unchanged from input)
+    pub point: Vec<f64>,
+    /// Lower bounds (per-step widths)
+    pub lower: Vec<f64>,
+    /// Upper bounds (per-step widths)
+    pub upper: Vec<f64>,
+    /// Per-step half-widths
+    pub half_widths: Vec<f64>,
+    /// Coverage level (1 - alpha)
+    pub coverage: f64,
+}
+
+/// Compute per-step conformal prediction intervals.
+///
+/// Each horizon step gets its own interval width based on the actual forecast error
+/// at that step. Early steps (h=1) typically get tighter intervals than later steps.
+///
+/// # Arguments
+/// * `fold_forecasts` - Forecasts from each CV fold, each inner Vec is one fold's forecast horizon
+/// * `fold_actuals` - Actuals from each CV fold, aligned with fold_forecasts
+/// * `point_forecasts` - New point forecasts to wrap with intervals
+/// * `alpha` - Miscoverage rate (e.g., 0.1 for 90% coverage)
+pub fn conformal_predict_per_step(
+    fold_forecasts: &[Vec<f64>],
+    fold_actuals: &[Vec<f64>],
+    point_forecasts: &[f64],
+    alpha: f64,
+) -> Result<ConformalPerStepResult> {
+    use anofox_forecast::postprocess::ConformalPredictor;
+
+    if fold_forecasts.len() < 2 {
+        return Err(ForecastError::InsufficientData {
+            needed: 2,
+            got: fold_forecasts.len(),
+        });
+    }
+    if fold_forecasts.len() != fold_actuals.len() {
+        return Err(ForecastError::InvalidInput(format!(
+            "fold_forecasts has {} folds but fold_actuals has {}",
+            fold_forecasts.len(),
+            fold_actuals.len()
+        )));
+    }
+    if !(0.0..1.0).contains(&alpha) {
+        return Err(ForecastError::InvalidInput(
+            "Alpha must be between 0 and 1 (exclusive)".to_string(),
+        ));
+    }
+
+    let coverage = 1.0 - alpha;
+    let cp = ConformalPredictor::split(coverage);
+
+    let per_step = cp.fit_per_step(fold_forecasts, fold_actuals).map_err(|e| {
+        ForecastError::ComputationError(format!("Per-step conformal fit failed: {}", e))
+    })?;
+
+    let (lower, upper) = per_step.predict(point_forecasts);
+    let half_widths = per_step.half_widths().to_vec();
+
+    Ok(ConformalPerStepResult {
+        point: point_forecasts.to_vec(),
+        lower,
+        upper,
+        half_widths,
+        coverage,
+    })
 }

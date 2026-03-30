@@ -104,6 +104,13 @@ void RegisterTsConformalApplyFunction(ExtensionLoader &loader);
 void RegisterTsConformalCoverageFunction(ExtensionLoader &loader);
 void RegisterTsConformalEvaluateFunction(ExtensionLoader &loader);
 
+// Per-step conformal prediction
+void RegisterTsConformalPredictPerStepFunction(ExtensionLoader &loader);
+
+// Bootstrap prediction
+void RegisterTsBootstrapIntervalsFunction(ExtensionLoader &loader);
+void RegisterTsBootstrapQuantilesFunction(ExtensionLoader &loader);
+
 // Table macros
 void RegisterTsTableMacros(ExtensionLoader &loader);
 

@@ -3,7 +3,7 @@
 > Complete function and macro reference for time series analysis and forecasting in DuckDB
 
 **Version:** 0.4.0
-**DuckDB Version:** >= v1.5.0
+**DuckDB Version:** >= v1.5.1
 **Forecasting Engine:** anofox-fcst-core (Rust)
 
 ---

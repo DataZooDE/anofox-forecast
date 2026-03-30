@@ -5,7 +5,7 @@ description = "ARIMA Benchmark Suite - Comparing anofox-forecast with other impl
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
-    "duckdb>=1.5.0",
+    "duckdb>=1.5.1",
     "pandas>=2.2.0",
     "polars>=1.0.0",
     "pyarrow>=10.0.0",

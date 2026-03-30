@@ -167,6 +167,7 @@ set(EXTENSION_SOURCES
     src/table_functions/ts_detrend.cpp
     src/scalar_functions/metrics.cpp
     src/scalar_functions/conformal.cpp
+    src/scalar_functions/bootstrap.cpp
     src/aggregate_functions/ts_forecast_agg.cpp
     src/aggregate_functions/ts_changepoints_agg.cpp
     src/aggregate_functions/ts_features_agg.cpp

@@ -44,6 +44,7 @@ struct TsCvForecastNativeBindData : public TableFunctionData {
     double confidence_level = 0.90;
     int64_t window = 0;
     string seasonal_periods_str = "";
+    string model_pool = "";
 
     // Column indices (resolved by name in bind)
     idx_t fold_id_col = 0;
@@ -249,7 +250,7 @@ static string MakeCompositeKey(int64_t fold_id, const string &group_key) {
 
 static void ValidateParamKeys(const Value &params_value) {
     static const unordered_set<string> valid_keys = {
-        "model", "seasonal_period", "seasonal_periods", "confidence_level", "window"
+        "model", "seasonal_period", "seasonal_periods", "confidence_level", "window", "model_pool"
     };
 
     vector<string> unknown_keys;
@@ -279,7 +280,7 @@ static void ValidateParamKeys(const Value &params_value) {
             unknown_list += "'" + unknown_keys[i] + "'";
         }
         throw InvalidInputException(
-            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window",
+            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool",
             unknown_list);
     }
 }
@@ -378,6 +379,7 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
         bind_data->confidence_level = ParseDoubleFromParams(params, "confidence_level", 0.90);
         bind_data->window = ParseInt64FromParams(params, "window", 0);
         bind_data->seasonal_periods_str = ParseStringFromParams(params, "seasonal_periods", "");
+        bind_data->model_pool = ParseStringFromParams(params, "model_pool", "");
 
         // Validate confidence_level range
         if (bind_data->confidence_level <= 0.0 || bind_data->confidence_level >= 1.0) {
@@ -679,6 +681,11 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
                 strncpy(opts.seasonal_periods_str, bind_data.seasonal_periods_str.c_str(),
                         sizeof(opts.seasonal_periods_str) - 1);
                 opts.seasonal_periods_str[sizeof(opts.seasonal_periods_str) - 1] = '\0';
+            }
+            if (!bind_data.model_pool.empty()) {
+                strncpy(opts.model_pool, bind_data.model_pool.c_str(),
+                        sizeof(opts.model_pool) - 1);
+                opts.model_pool[sizeof(opts.model_pool) - 1] = '\0';
             }
 
             // Call Rust FFI

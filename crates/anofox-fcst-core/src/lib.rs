@@ -3,6 +3,7 @@
 //! This crate provides the Rust implementation of time series analysis
 //! and forecasting functions.
 
+pub mod bootstrap;
 pub mod changepoint;
 pub mod conformal;
 pub mod decomposition;
@@ -21,6 +22,9 @@ pub mod seasonality;
 pub mod stats;
 
 // Re-exports for convenience
+pub use bootstrap::{
+    bootstrap_intervals, bootstrap_quantiles, BootstrapIntervalsResult, BootstrapQuantilesResult,
+};
 pub use changepoint::{
     detect_changepoints, detect_changepoints_bocpd, BocpdResult, ChangepointResult, CostFunction,
 };
@@ -46,6 +50,7 @@ pub use conformal::{
     ConformalInterval,
     ConformalMethod,
     ConformalMultiResult,
+    ConformalPerStepResult,
     ConformalResult,
     ConformalStrategy,
     PredictionIntervals,

@@ -3392,6 +3392,13 @@ pub unsafe extern "C" fn anofox_ts_forecast(
             .unwrap_or("");
         let seasonal_periods = parse_seasonal_periods_str(sp_str);
 
+        // Parse model_pool
+        let model_pool = CStr::from_ptr(opts.model_pool.as_ptr())
+            .to_str()
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
         let core_opts = anofox_fcst_core::ForecastOptions {
             model: model_type,
             ets_spec,
@@ -3403,6 +3410,7 @@ pub unsafe extern "C" fn anofox_ts_forecast(
             include_residuals: opts.include_residuals,
             window: opts.window.max(0) as usize,
             seasonal_periods,
+            model_pool,
         };
 
         anofox_fcst_core::forecast(&series, &core_opts)
@@ -3655,6 +3663,13 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
             .unwrap_or("");
         let seasonal_periods = parse_seasonal_periods_str(sp_str);
 
+        // Parse model_pool
+        let model_pool = CStr::from_ptr(opts.model_pool.as_ptr())
+            .to_str()
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
         let core_opts = anofox_fcst_core::ForecastOptionsExog {
             model: model_type,
             ets_spec,
@@ -3667,6 +3682,7 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
             exog: exog_data,
             window: opts.window.max(0) as usize,
             seasonal_periods,
+            model_pool,
         };
 
         anofox_fcst_core::forecast_with_exog(&series, &core_opts)
@@ -5083,6 +5099,339 @@ pub unsafe extern "C" fn anofox_ts_conformal_evaluate(
             false
         }
     }
+}
+
+// ============================================================================
+// Bootstrap Prediction Functions
+// ============================================================================
+
+/// Compute bootstrap prediction intervals from residuals and point forecasts.
+///
+/// # Safety
+/// All pointers must be valid. Output struct must be zeroed before calling.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_bootstrap_intervals(
+    residuals: *const c_double,
+    residuals_len: size_t,
+    forecasts: *const c_double,
+    forecasts_len: size_t,
+    n_paths: c_int,
+    coverage: c_double,
+    seed: i64,
+    out_result: *mut types::BootstrapResultFFI,
+    out_error: *mut types::AnofoxError,
+) -> bool {
+    init_error(out_error);
+    if check_null_pointers(
+        out_error,
+        &[
+            residuals as *const _,
+            forecasts as *const _,
+            out_result as *const _,
+        ],
+    ) {
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let res_slice = std::slice::from_raw_parts(residuals, residuals_len);
+        let fcst_slice = std::slice::from_raw_parts(forecasts, forecasts_len);
+        let seed_opt = if seed >= 0 { Some(seed as u64) } else { None };
+
+        anofox_fcst_core::bootstrap_intervals(
+            res_slice,
+            fcst_slice,
+            n_paths.max(1) as usize,
+            coverage,
+            seed_opt,
+        )
+    }));
+
+    match result {
+        Ok(Ok(intervals)) => {
+            (*out_result).n_forecasts = intervals.point.len();
+            (*out_result).coverage = intervals.coverage;
+
+            (*out_result).point =
+                match alloc_or_error(&intervals.point, out_error, "Failed to allocate point") {
+                    Ok(ptr) => ptr,
+                    Err(()) => return false,
+                };
+            (*out_result).lower =
+                match alloc_or_error(&intervals.lower, out_error, "Failed to allocate lower") {
+                    Ok(ptr) => ptr,
+                    Err(()) => return false,
+                };
+            (*out_result).upper =
+                match alloc_or_error(&intervals.upper, out_error, "Failed to allocate upper") {
+                    Ok(ptr) => ptr,
+                    Err(()) => return false,
+                };
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ErrorCode::ComputationError, &format!("{}", e));
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in bootstrap_intervals",
+            );
+            false
+        }
+    }
+}
+
+/// Compute bootstrap quantile forecasts at multiple quantile levels.
+///
+/// # Safety
+/// All pointers must be valid. Output struct must be zeroed before calling.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_bootstrap_quantiles(
+    residuals: *const c_double,
+    residuals_len: size_t,
+    forecasts: *const c_double,
+    forecasts_len: size_t,
+    n_paths: c_int,
+    quantile_levels: *const c_double,
+    n_quantiles: size_t,
+    seed: i64,
+    out_result: *mut types::BootstrapQuantileResultFFI,
+    out_error: *mut types::AnofoxError,
+) -> bool {
+    init_error(out_error);
+    if check_null_pointers(
+        out_error,
+        &[
+            residuals as *const _,
+            forecasts as *const _,
+            quantile_levels as *const _,
+            out_result as *const _,
+        ],
+    ) {
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let res_slice = std::slice::from_raw_parts(residuals, residuals_len);
+        let fcst_slice = std::slice::from_raw_parts(forecasts, forecasts_len);
+        let q_slice = std::slice::from_raw_parts(quantile_levels, n_quantiles);
+        let seed_opt = if seed >= 0 { Some(seed as u64) } else { None };
+
+        anofox_fcst_core::bootstrap_quantiles(
+            res_slice,
+            fcst_slice,
+            n_paths.max(1) as usize,
+            q_slice,
+            seed_opt,
+        )
+    }));
+
+    match result {
+        Ok(Ok(qr)) => {
+            (*out_result).n_forecasts = qr.point.len();
+            (*out_result).n_quantiles = qr.quantiles.len();
+
+            (*out_result).point =
+                match alloc_or_error(&qr.point, out_error, "Failed to allocate point") {
+                    Ok(ptr) => ptr,
+                    Err(()) => return false,
+                };
+            (*out_result).quantiles =
+                match alloc_or_error(&qr.quantiles, out_error, "Failed to allocate quantiles") {
+                    Ok(ptr) => ptr,
+                    Err(()) => return false,
+                };
+
+            // Flatten values matrix: values[q * n_forecasts + t]
+            let n_f = qr.point.len();
+            let mut flat: Vec<f64> = Vec::with_capacity(qr.quantiles.len() * n_f);
+            for q_vals in &qr.values {
+                flat.extend_from_slice(q_vals);
+            }
+            (*out_result).values =
+                match alloc_or_error(&flat, out_error, "Failed to allocate values") {
+                    Ok(ptr) => ptr,
+                    Err(()) => return false,
+                };
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ErrorCode::ComputationError, &format!("{}", e));
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in bootstrap_quantiles",
+            );
+            false
+        }
+    }
+}
+
+/// Free a BootstrapResultFFI.
+///
+/// # Safety
+/// Must only be called with a valid pointer returned by `anofox_ts_bootstrap_intervals`.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_free_bootstrap_result(result: *mut types::BootstrapResultFFI) {
+    if result.is_null() {
+        return;
+    }
+    free_ptr((*result).point as *mut _);
+    free_ptr((*result).lower as *mut _);
+    free_ptr((*result).upper as *mut _);
+    (*result).point = ptr::null_mut();
+    (*result).lower = ptr::null_mut();
+    (*result).upper = ptr::null_mut();
+}
+
+/// Free a BootstrapQuantileResultFFI.
+///
+/// # Safety
+/// Must only be called with a valid pointer returned by `anofox_ts_bootstrap_quantiles`.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_free_bootstrap_quantile_result(
+    result: *mut types::BootstrapQuantileResultFFI,
+) {
+    if result.is_null() {
+        return;
+    }
+    free_ptr((*result).point as *mut _);
+    free_ptr((*result).quantiles as *mut _);
+    free_ptr((*result).values as *mut _);
+    (*result).point = ptr::null_mut();
+    (*result).quantiles = ptr::null_mut();
+    (*result).values = ptr::null_mut();
+}
+
+// ============================================================================
+// Per-Step Conformal Prediction Functions
+// ============================================================================
+
+/// Compute per-step conformal prediction intervals.
+///
+/// Each horizon step gets its own interval width. Requires fold-organized data.
+///
+/// # Safety
+/// All pointers must be valid. fold_forecasts and fold_actuals are flat arrays
+/// of n_folds * horizon doubles. Output struct must be zeroed before calling.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformal_predict_per_step(
+    fold_forecasts: *const c_double,
+    fold_actuals: *const c_double,
+    n_folds: size_t,
+    horizon: size_t,
+    point_forecasts: *const c_double,
+    n_point_forecasts: size_t,
+    alpha: c_double,
+    out_result: *mut types::ConformalPerStepResultFFI,
+    out_error: *mut types::AnofoxError,
+) -> bool {
+    init_error(out_error);
+    if check_null_pointers(
+        out_error,
+        &[
+            fold_forecasts as *const _,
+            fold_actuals as *const _,
+            point_forecasts as *const _,
+            out_result as *const _,
+        ],
+    ) {
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        // Reshape flat arrays into Vec<Vec<f64>>
+        let fcst_flat = std::slice::from_raw_parts(fold_forecasts, n_folds * horizon);
+        let act_flat = std::slice::from_raw_parts(fold_actuals, n_folds * horizon);
+        let point = std::slice::from_raw_parts(point_forecasts, n_point_forecasts);
+
+        let mut fold_fcsts: Vec<Vec<f64>> = Vec::with_capacity(n_folds);
+        let mut fold_acts: Vec<Vec<f64>> = Vec::with_capacity(n_folds);
+        for i in 0..n_folds {
+            let start = i * horizon;
+            let end = start + horizon;
+            fold_fcsts.push(fcst_flat[start..end].to_vec());
+            fold_acts.push(act_flat[start..end].to_vec());
+        }
+
+        anofox_fcst_core::conformal::conformal_predict_per_step(
+            &fold_fcsts,
+            &fold_acts,
+            point,
+            alpha,
+        )
+    }));
+
+    match result {
+        Ok(Ok(ps)) => {
+            (*out_result).n_forecasts = ps.point.len();
+            (*out_result).coverage = ps.coverage;
+
+            (*out_result).point =
+                match alloc_or_error(&ps.point, out_error, "Failed to allocate point") {
+                    Ok(ptr) => ptr,
+                    Err(()) => return false,
+                };
+            (*out_result).lower =
+                match alloc_or_error(&ps.lower, out_error, "Failed to allocate lower") {
+                    Ok(ptr) => ptr,
+                    Err(()) => return false,
+                };
+            (*out_result).upper =
+                match alloc_or_error(&ps.upper, out_error, "Failed to allocate upper") {
+                    Ok(ptr) => ptr,
+                    Err(()) => return false,
+                };
+            (*out_result).half_widths = match alloc_or_error(
+                &ps.half_widths,
+                out_error,
+                "Failed to allocate half_widths",
+            ) {
+                Ok(ptr) => ptr,
+                Err(()) => return false,
+            };
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ErrorCode::ComputationError, &format!("{}", e));
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in conformal_predict_per_step",
+            );
+            false
+        }
+    }
+}
+
+/// Free a ConformalPerStepResultFFI.
+///
+/// # Safety
+/// Must only be called with a valid pointer returned by `anofox_ts_conformal_predict_per_step`.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_free_conformal_per_step_result(
+    result: *mut types::ConformalPerStepResultFFI,
+) {
+    if result.is_null() {
+        return;
+    }
+    free_ptr((*result).point as *mut _);
+    free_ptr((*result).lower as *mut _);
+    free_ptr((*result).upper as *mut _);
+    free_ptr((*result).half_widths as *mut _);
+    (*result).point = ptr::null_mut();
+    (*result).lower = ptr::null_mut();
+    (*result).upper = ptr::null_mut();
+    (*result).half_widths = ptr::null_mut();
 }
 
 /// Helper function to fill a CalibrationProfileFFI from a core CalibrationProfile.

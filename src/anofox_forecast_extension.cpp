@@ -142,6 +142,13 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsConformalCoverageFunction(loader);
     RegisterTsConformalEvaluateFunction(loader);
 
+    // Register Per-Step Conformal Prediction
+    RegisterTsConformalPredictPerStepFunction(loader);
+
+    // Register Bootstrap Prediction
+    RegisterTsBootstrapIntervalsFunction(loader);
+    RegisterTsBootstrapQuantilesFunction(loader);
+
     // Register Table Macros
     RegisterTsTableMacros(loader);
 
