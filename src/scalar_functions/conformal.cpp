@@ -1028,4 +1028,140 @@ void RegisterTsMeanIntervalWidthFunction(ExtensionLoader &loader) {
     loader.RegisterFunction(anofox_set);
 }
 
+// ============================================================================
+// ts_conformal_predict_per_step
+// ts_conformal_predict_per_step(fold_forecasts[], fold_actuals[], point_forecasts[], alpha, horizon)
+//   -> STRUCT(point[], lower[], upper[], half_widths[], coverage)
+//
+// fold_forecasts and fold_actuals are flat lists: [f1_h1, f1_h2, ..., f2_h1, f2_h2, ...]
+// ============================================================================
+
+static void TsConformalPredictPerStepFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+    auto &fold_fcst_vec = args.data[0];
+    auto &fold_act_vec = args.data[1];
+    auto &point_vec = args.data[2];
+    auto &alpha_vec = args.data[3];
+    auto &horizon_vec = args.data[4];
+    idx_t count = args.size();
+
+    UnifiedVectorFormat alpha_data, horizon_data;
+    alpha_vec.ToUnifiedFormat(count, alpha_data);
+    horizon_vec.ToUnifiedFormat(count, horizon_data);
+
+    auto &struct_entries = StructVector::GetEntries(result);
+    auto &point_out = *struct_entries[0];
+    auto &lower_out = *struct_entries[1];
+    auto &upper_out = *struct_entries[2];
+    auto &hw_out = *struct_entries[3];
+    auto &coverage_out = *struct_entries[4];
+
+    for (idx_t row_idx = 0; row_idx < count; row_idx++) {
+        auto alpha_idx = alpha_data.sel->get_index(row_idx);
+        auto hz_idx = horizon_data.sel->get_index(row_idx);
+
+        if (FlatVector::IsNull(fold_fcst_vec, row_idx) ||
+            FlatVector::IsNull(fold_act_vec, row_idx) ||
+            FlatVector::IsNull(point_vec, row_idx) ||
+            !alpha_data.validity.RowIsValid(alpha_idx) ||
+            !horizon_data.validity.RowIsValid(hz_idx)) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        vector<double> fold_forecasts, fold_actuals, point_forecasts;
+        ExtractListAsDouble(fold_fcst_vec, row_idx, fold_forecasts);
+        ExtractListAsDouble(fold_act_vec, row_idx, fold_actuals);
+        ExtractListAsDouble(point_vec, row_idx, point_forecasts);
+        double alpha = UnifiedVectorFormat::GetData<double>(alpha_data)[alpha_idx];
+        int32_t horizon = UnifiedVectorFormat::GetData<int32_t>(horizon_data)[hz_idx];
+
+        if (horizon <= 0 || fold_forecasts.empty() || fold_actuals.empty()) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        size_t n_folds = fold_forecasts.size() / static_cast<size_t>(horizon);
+        if (n_folds < 2 || fold_forecasts.size() != fold_actuals.size()) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        ConformalPerStepResultFFI ps_result = {};
+        AnofoxError error;
+        bool success = anofox_ts_conformal_predict_per_step(
+            fold_forecasts.data(),
+            fold_actuals.data(),
+            n_folds,
+            static_cast<size_t>(horizon),
+            point_forecasts.data(),
+            point_forecasts.size(),
+            alpha,
+            &ps_result, &error
+        );
+
+        if (!success) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        // Write results
+        auto write_list = [](Vector &list_vec, idx_t row, const double *data, size_t n) {
+            auto offset = ListVector::GetListSize(list_vec);
+            auto &child = ListVector::GetEntry(list_vec);
+            ListVector::Reserve(list_vec, offset + n);
+            auto child_data = FlatVector::GetData<double>(child);
+            for (idx_t i = 0; i < n; i++) {
+                child_data[offset + i] = data[i];
+            }
+            ListVector::SetListSize(list_vec, offset + n);
+            auto list_data = ListVector::GetData(list_vec);
+            list_data[row].offset = offset;
+            list_data[row].length = n;
+        };
+
+        write_list(point_out, row_idx, ps_result.point, ps_result.n_forecasts);
+        write_list(lower_out, row_idx, ps_result.lower, ps_result.n_forecasts);
+        write_list(upper_out, row_idx, ps_result.upper, ps_result.n_forecasts);
+        write_list(hw_out, row_idx, ps_result.half_widths, ps_result.n_forecasts);
+        FlatVector::GetData<double>(coverage_out)[row_idx] = ps_result.coverage;
+
+        anofox_free_conformal_per_step_result(&ps_result);
+    }
+}
+
+void RegisterTsConformalPredictPerStepFunction(ExtensionLoader &loader) {
+    child_list_t<LogicalType> struct_children;
+    struct_children.push_back(make_pair("point", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    struct_children.push_back(make_pair("lower", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    struct_children.push_back(make_pair("upper", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    struct_children.push_back(make_pair("half_widths", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    struct_children.push_back(make_pair("coverage", LogicalType(LogicalTypeId::DOUBLE)));
+    auto result_type = LogicalType::STRUCT(std::move(struct_children));
+
+    // ts_conformal_predict_per_step(fold_forecasts[], fold_actuals[], point_forecasts[], alpha, horizon)
+    ScalarFunctionSet ps_set("ts_conformal_predict_per_step");
+    ps_set.AddFunction(ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType(LogicalTypeId::DOUBLE),
+         LogicalType(LogicalTypeId::INTEGER)},
+        result_type,
+        TsConformalPredictPerStepFunction
+    ));
+    loader.RegisterFunction(ps_set);
+
+    ScalarFunctionSet anofox_set("anofox_fcst_ts_conformal_predict_per_step");
+    anofox_set.AddFunction(ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType(LogicalTypeId::DOUBLE),
+         LogicalType(LogicalTypeId::INTEGER)},
+        result_type,
+        TsConformalPredictPerStepFunction
+    ));
+    loader.RegisterFunction(anofox_set);
+}
+
 } // namespace duckdb

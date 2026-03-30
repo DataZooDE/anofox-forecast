@@ -1075,6 +1075,10 @@ typedef struct ForecastOptions {
      * Multiple seasonal periods as string (e.g. "[24, 168]"), empty = not set
      */
     char seasonal_periods_str[64];
+    /**
+     * AutoETS model pool (e.g. "reduced", "complete"), empty = default (complete)
+     */
+    char model_pool[32];
 } ForecastOptions;
 
 /**
@@ -1217,6 +1221,10 @@ typedef struct ForecastOptionsExog {
      * Multiple seasonal periods as string (e.g. "[24, 168]"), empty = not set
      */
     char seasonal_periods_str[64];
+    /**
+     * AutoETS model pool (e.g. "reduced", "complete"), empty = default (complete)
+     */
+    char model_pool[32];
 } ForecastOptionsExog;
 
 /**
@@ -1475,6 +1483,89 @@ typedef struct ConformalEvaluationFFI {
      */
     size_t n_observations;
 } ConformalEvaluationFFI;
+
+/**
+ * Result of bootstrap prediction intervals.
+ */
+typedef struct BootstrapResultFFI {
+    /**
+     * Point forecasts
+     */
+    double *point;
+    /**
+     * Lower bounds of prediction intervals
+     */
+    double *lower;
+    /**
+     * Upper bounds of prediction intervals
+     */
+    double *upper;
+    /**
+     * Number of forecasts
+     */
+    size_t n_forecasts;
+    /**
+     * Coverage level (e.g., 0.95)
+     */
+    double coverage;
+} BootstrapResultFFI;
+
+/**
+ * Result of bootstrap quantile prediction.
+ */
+typedef struct BootstrapQuantileResultFFI {
+    /**
+     * Point forecasts
+     */
+    double *point;
+    /**
+     * Number of point forecasts
+     */
+    size_t n_forecasts;
+    /**
+     * Quantile levels array
+     */
+    double *quantiles;
+    /**
+     * Number of quantile levels
+     */
+    size_t n_quantiles;
+    /**
+     * Values matrix: flat array of n_quantiles * n_forecasts
+     * Layout: values[q * n_forecasts + t] = quantile q at time t
+     */
+    double *values;
+} BootstrapQuantileResultFFI;
+
+/**
+ * Result of per-step conformal prediction.
+ */
+typedef struct ConformalPerStepResultFFI {
+    /**
+     * Point forecasts
+     */
+    double *point;
+    /**
+     * Lower bounds (per-step widths)
+     */
+    double *lower;
+    /**
+     * Upper bounds (per-step widths)
+     */
+    double *upper;
+    /**
+     * Per-step half-widths
+     */
+    double *half_widths;
+    /**
+     * Number of forecasts / steps
+     */
+    size_t n_forecasts;
+    /**
+     * Coverage level (1 - alpha)
+     */
+    double coverage;
+} ConformalPerStepResultFFI;
 
 /**
  * Nullable data array for DuckDB integration.
@@ -2589,6 +2680,82 @@ bool anofox_ts_conformal_evaluate(const double *actuals,
                                   double alpha,
                                   struct ConformalEvaluationFFI *out_eval,
                                   struct AnofoxError *out_error);
+
+/**
+ * Compute bootstrap prediction intervals from residuals and point forecasts.
+ *
+ * # Safety
+ * All pointers must be valid. Output struct must be zeroed before calling.
+ */
+bool anofox_ts_bootstrap_intervals(const double *residuals,
+                                   size_t residuals_len,
+                                   const double *forecasts,
+                                   size_t forecasts_len,
+                                   int n_paths,
+                                   double coverage,
+                                   int64_t seed,
+                                   struct BootstrapResultFFI *out_result,
+                                   struct AnofoxError *out_error);
+
+/**
+ * Compute bootstrap quantile forecasts at multiple quantile levels.
+ *
+ * # Safety
+ * All pointers must be valid. Output struct must be zeroed before calling.
+ */
+bool anofox_ts_bootstrap_quantiles(const double *residuals,
+                                   size_t residuals_len,
+                                   const double *forecasts,
+                                   size_t forecasts_len,
+                                   int n_paths,
+                                   const double *quantile_levels,
+                                   size_t n_quantiles,
+                                   int64_t seed,
+                                   struct BootstrapQuantileResultFFI *out_result,
+                                   struct AnofoxError *out_error);
+
+/**
+ * Free a BootstrapResultFFI.
+ *
+ * # Safety
+ * Must only be called with a valid pointer returned by `anofox_ts_bootstrap_intervals`.
+ */
+void anofox_free_bootstrap_result(struct BootstrapResultFFI *result);
+
+/**
+ * Free a BootstrapQuantileResultFFI.
+ *
+ * # Safety
+ * Must only be called with a valid pointer returned by `anofox_ts_bootstrap_quantiles`.
+ */
+void anofox_free_bootstrap_quantile_result(struct BootstrapQuantileResultFFI *result);
+
+/**
+ * Compute per-step conformal prediction intervals.
+ *
+ * Each horizon step gets its own interval width. Requires fold-organized data.
+ *
+ * # Safety
+ * All pointers must be valid. fold_forecasts and fold_actuals are flat arrays
+ * of n_folds * horizon doubles. Output struct must be zeroed before calling.
+ */
+bool anofox_ts_conformal_predict_per_step(const double *fold_forecasts,
+                                          const double *fold_actuals,
+                                          size_t n_folds,
+                                          size_t horizon,
+                                          const double *point_forecasts,
+                                          size_t n_point_forecasts,
+                                          double alpha,
+                                          struct ConformalPerStepResultFFI *out_result,
+                                          struct AnofoxError *out_error);
+
+/**
+ * Free a ConformalPerStepResultFFI.
+ *
+ * # Safety
+ * Must only be called with a valid pointer returned by `anofox_ts_conformal_predict_per_step`.
+ */
+void anofox_free_conformal_per_step_result(struct ConformalPerStepResultFFI *result);
 
 /**
  * Free a TsStatsResult.

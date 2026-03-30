@@ -9,7 +9,7 @@ use anofox_forecast::core::TimeSeries;
 use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig};
 use anofox_forecast::models::exponential::{
     AutoETS, AutoETSConfig, ETSSpec, HoltLinearTrend, HoltWinters as HoltWintersModel,
-    SeasonalES as SeasonalESModel, SimpleExponentialSmoothing, ETS as ETSModel,
+    ModelPool, SeasonalES as SeasonalESModel, SimpleExponentialSmoothing, ETS as ETSModel,
 };
 use anofox_forecast::models::intermittent::{Croston, ADIDA, IMAPA, TSB};
 use anofox_forecast::models::mstl_forecaster::MSTLForecaster;
@@ -273,6 +273,8 @@ pub struct ForecastOptions {
     pub window: usize,
     /// Multiple seasonal periods (empty = not set, use seasonal_period)
     pub seasonal_periods: Vec<usize>,
+    /// AutoETS model pool (None = Complete/default)
+    pub model_pool: Option<String>,
 }
 
 impl Default for ForecastOptions {
@@ -288,6 +290,7 @@ impl Default for ForecastOptions {
             include_residuals: false,
             window: 0,
             seasonal_periods: vec![],
+            model_pool: None,
         }
     }
 }
@@ -384,6 +387,8 @@ pub struct ForecastOptionsExog {
     pub window: usize,
     /// Multiple seasonal periods (empty = not set, use seasonal_period)
     pub seasonal_periods: Vec<usize>,
+    /// AutoETS model pool (None = Complete/default)
+    pub model_pool: Option<String>,
 }
 
 impl Default for ForecastOptionsExog {
@@ -400,6 +405,7 @@ impl Default for ForecastOptionsExog {
             exog: None,
             window: 0,
             seasonal_periods: vec![],
+            model_pool: None,
         }
     }
 }
@@ -418,6 +424,7 @@ impl From<ForecastOptions> for ForecastOptionsExog {
             exog: None,
             window: opts.window,
             seasonal_periods: opts.seasonal_periods,
+            model_pool: opts.model_pool,
         }
     }
 }
@@ -512,7 +519,9 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             period,
             options.ets_spec.as_deref(),
         ),
-        ModelType::AutoETS => forecast_auto_ets(&clean_values, options.horizon, period),
+        ModelType::AutoETS => {
+            forecast_auto_ets(&clean_values, options.horizon, period, options.model_pool.as_deref())
+        }
         // Theta Methods
         ModelType::Theta => forecast_theta_stm(&clean_values, options.horizon, period),
         ModelType::OptimizedTheta => {
@@ -747,6 +756,7 @@ pub fn forecast_with_exog(
             period,
             options.window,
             &options.seasonal_periods,
+            options.model_pool.as_deref(),
         )
     }?;
 
@@ -815,6 +825,7 @@ fn forecast_with_model(
     period: usize,
     window: usize,
     seasonal_periods: &[usize],
+    model_pool: Option<&str>,
 ) -> Result<ForecastOutput> {
     match model {
         // Basic Models
@@ -836,7 +847,7 @@ fn forecast_with_model(
             forecast_seasonal_window_average(values, horizon, period)
         }
         ModelType::ETS => forecast_ets(values, horizon, period, None),
-        ModelType::AutoETS => forecast_auto_ets(values, horizon, period),
+        ModelType::AutoETS => forecast_auto_ets(values, horizon, period, model_pool),
         // Theta Methods
         ModelType::Theta => forecast_theta_stm(values, horizon, period),
         ModelType::OptimizedTheta => forecast_optimized_theta(values, horizon, period),
@@ -1120,7 +1131,7 @@ fn forecast_seasonal_window_average(
 ) -> Result<ForecastOutput> {
     use anofox_forecast::models::baseline::SeasonalWindowAverage as SWA;
     let ts = make_timeseries(values)?;
-    let p = period.max(1).min(values.len());
+    let p = period.max(2).min(values.len());
     let n_seasons = (values.len() / p).max(1);
     let mut model = SWA::new(p, n_seasons);
     model.fit(&ts).map_err(|e| {
@@ -1402,12 +1413,39 @@ fn forecast_auto_arima(values: &[f64], horizon: usize, period: usize) -> Result<
     })
 }
 
+/// Parse a model pool string into the `ModelPool` enum.
+fn parse_model_pool(s: &str) -> Result<ModelPool> {
+    match s.to_lowercase().replace(['-', '_'], "").as_str() {
+        "complete" => Ok(ModelPool::Complete),
+        "nomultiplicativetrend" => Ok(ModelPool::NoMultiplicativeTrend),
+        "dampedtrendonly" => Ok(ModelPool::DampedTrendOnly),
+        "matcherrorseasonal" => Ok(ModelPool::MatchErrorSeasonal),
+        "reduced" => Ok(ModelPool::Reduced),
+        _ => Err(ForecastError::InvalidInput(format!(
+            "Unknown model_pool '{}'. Valid options: complete, no_multiplicative_trend, \
+             damped_trend_only, match_error_seasonal, reduced",
+            s
+        ))),
+    }
+}
+
 /// AutoETS: Automatic ETS model selection using AICc-based search.
 /// Uses the proper AutoETS implementation from anofox-forecast library.
 /// Falls back to simplified ETS if the library panics (e.g. constant series
 /// causing NaN in optimizer — see #192).
-fn forecast_auto_ets(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
+fn forecast_auto_ets(
+    values: &[f64],
+    horizon: usize,
+    period: usize,
+    model_pool: Option<&str>,
+) -> Result<ForecastOutput> {
     use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    // Parse model_pool before entering catch_unwind (error reporting is cleaner)
+    let pool = match model_pool {
+        Some(s) => Some(parse_model_pool(s)?),
+        None => None,
+    };
 
     let lib_result = catch_unwind(AssertUnwindSafe(|| -> Result<ForecastOutput> {
         use chrono::{Duration, TimeZone, Utc};
@@ -1423,11 +1461,15 @@ fn forecast_auto_ets(values: &[f64], horizon: usize, period: usize) -> Result<Fo
         })?;
 
         // Configure AutoETS with seasonal period if provided
-        let config = if period > 1 {
+        let mut config = if period > 1 {
             AutoETSConfig::with_period(period)
         } else {
             AutoETSConfig::non_seasonal()
         };
+
+        if let Some(p) = pool {
+            config = config.with_model_pool(p);
+        }
 
         let mut model = AutoETS::with_config(config);
 

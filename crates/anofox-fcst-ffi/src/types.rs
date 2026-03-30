@@ -392,6 +392,8 @@ pub struct ForecastOptions {
     pub window: c_int,
     /// Multiple seasonal periods as string (e.g. "[24, 168]"), empty = not set
     pub seasonal_periods_str: [c_char; 64],
+    /// AutoETS model pool (e.g. "reduced", "complete"), empty = default (complete)
+    pub model_pool: [c_char; 32],
 }
 
 impl Default for ForecastOptions {
@@ -412,6 +414,7 @@ impl Default for ForecastOptions {
             include_residuals: false,
             window: 0,
             seasonal_periods_str: [0; 64],
+            model_pool: [0; 32],
         }
     }
 }
@@ -476,6 +479,8 @@ pub struct ForecastOptionsExog {
     pub window: c_int,
     /// Multiple seasonal periods as string (e.g. "[24, 168]"), empty = not set
     pub seasonal_periods_str: [c_char; 64],
+    /// AutoETS model pool (e.g. "reduced", "complete"), empty = default (complete)
+    pub model_pool: [c_char; 32],
 }
 
 impl Default for ForecastOptionsExog {
@@ -497,6 +502,7 @@ impl Default for ForecastOptionsExog {
             exog: std::ptr::null(),
             window: 0,
             seasonal_periods_str: [0; 64],
+            model_pool: [0; 32],
         }
     }
 }
@@ -1346,8 +1352,60 @@ impl Default for AmplitudeModulationResultFFI {
 }
 
 // ============================================================================
+// Bootstrap Prediction Types
+// ============================================================================
+
+/// Result of bootstrap prediction intervals.
+#[repr(C)]
+pub struct BootstrapResultFFI {
+    /// Point forecasts
+    pub point: *mut c_double,
+    /// Lower bounds of prediction intervals
+    pub lower: *mut c_double,
+    /// Upper bounds of prediction intervals
+    pub upper: *mut c_double,
+    /// Number of forecasts
+    pub n_forecasts: size_t,
+    /// Coverage level (e.g., 0.95)
+    pub coverage: c_double,
+}
+
+/// Result of bootstrap quantile prediction.
+#[repr(C)]
+pub struct BootstrapQuantileResultFFI {
+    /// Point forecasts
+    pub point: *mut c_double,
+    /// Number of point forecasts
+    pub n_forecasts: size_t,
+    /// Quantile levels array
+    pub quantiles: *mut c_double,
+    /// Number of quantile levels
+    pub n_quantiles: size_t,
+    /// Values matrix: flat array of n_quantiles * n_forecasts
+    /// Layout: values[q * n_forecasts + t] = quantile q at time t
+    pub values: *mut c_double,
+}
+
+// ============================================================================
 // Conformal Prediction Types
 // ============================================================================
+
+/// Result of per-step conformal prediction.
+#[repr(C)]
+pub struct ConformalPerStepResultFFI {
+    /// Point forecasts
+    pub point: *mut c_double,
+    /// Lower bounds (per-step widths)
+    pub lower: *mut c_double,
+    /// Upper bounds (per-step widths)
+    pub upper: *mut c_double,
+    /// Per-step half-widths
+    pub half_widths: *mut c_double,
+    /// Number of forecasts / steps
+    pub n_forecasts: size_t,
+    /// Coverage level (1 - alpha)
+    pub coverage: c_double,
+}
 
 /// Result of conformal prediction with prediction intervals.
 #[repr(C)]
