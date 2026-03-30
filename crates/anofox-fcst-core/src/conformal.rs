@@ -1855,16 +1855,8 @@ mod tests {
     #[test]
     fn test_conformal_per_step_basic() {
         // 3 folds, horizon 2
-        let fold_forecasts = vec![
-            vec![100.0, 105.0],
-            vec![110.0, 115.0],
-            vec![120.0, 125.0],
-        ];
-        let fold_actuals = vec![
-            vec![101.0, 108.0],
-            vec![109.0, 118.0],
-            vec![121.0, 122.0],
-        ];
+        let fold_forecasts = vec![vec![100.0, 105.0], vec![110.0, 115.0], vec![120.0, 125.0]];
+        let fold_actuals = vec![vec![101.0, 108.0], vec![109.0, 118.0], vec![121.0, 122.0]];
         let result =
             conformal_predict_per_step(&fold_forecasts, &fold_actuals, &[100.0, 105.0], 0.1)
                 .unwrap();

@@ -5152,32 +5152,25 @@ pub unsafe extern "C" fn anofox_ts_bootstrap_intervals(
             (*out_result).n_forecasts = intervals.point.len();
             (*out_result).coverage = intervals.coverage;
 
-            (*out_result).point = match alloc_or_error(
-                &intervals.point, out_error, "Failed to allocate point",
-            ) {
-                Ok(ptr) => ptr,
-                Err(()) => return false,
-            };
-            (*out_result).lower = match alloc_or_error(
-                &intervals.lower, out_error, "Failed to allocate lower",
-            ) {
-                Ok(ptr) => ptr,
-                Err(()) => return false,
-            };
-            (*out_result).upper = match alloc_or_error(
-                &intervals.upper, out_error, "Failed to allocate upper",
-            ) {
-                Ok(ptr) => ptr,
-                Err(()) => return false,
-            };
+            (*out_result).point =
+                match alloc_or_error(&intervals.point, out_error, "Failed to allocate point") {
+                    Ok(ptr) => ptr,
+                    Err(()) => return false,
+                };
+            (*out_result).lower =
+                match alloc_or_error(&intervals.lower, out_error, "Failed to allocate lower") {
+                    Ok(ptr) => ptr,
+                    Err(()) => return false,
+                };
+            (*out_result).upper =
+                match alloc_or_error(&intervals.upper, out_error, "Failed to allocate upper") {
+                    Ok(ptr) => ptr,
+                    Err(()) => return false,
+                };
             true
         }
         Ok(Err(e)) => {
-            set_error(
-                out_error,
-                ErrorCode::ComputationError,
-                &format!("{}", e),
-            );
+            set_error(out_error, ErrorCode::ComputationError, &format!("{}", e));
             false
         }
         Err(_) => {
@@ -5241,18 +5234,16 @@ pub unsafe extern "C" fn anofox_ts_bootstrap_quantiles(
             (*out_result).n_forecasts = qr.point.len();
             (*out_result).n_quantiles = qr.quantiles.len();
 
-            (*out_result).point = match alloc_or_error(
-                &qr.point, out_error, "Failed to allocate point",
-            ) {
-                Ok(ptr) => ptr,
-                Err(()) => return false,
-            };
-            (*out_result).quantiles = match alloc_or_error(
-                &qr.quantiles, out_error, "Failed to allocate quantiles",
-            ) {
-                Ok(ptr) => ptr,
-                Err(()) => return false,
-            };
+            (*out_result).point =
+                match alloc_or_error(&qr.point, out_error, "Failed to allocate point") {
+                    Ok(ptr) => ptr,
+                    Err(()) => return false,
+                };
+            (*out_result).quantiles =
+                match alloc_or_error(&qr.quantiles, out_error, "Failed to allocate quantiles") {
+                    Ok(ptr) => ptr,
+                    Err(()) => return false,
+                };
 
             // Flatten values matrix: values[q * n_forecasts + t]
             let n_f = qr.point.len();
@@ -5260,20 +5251,15 @@ pub unsafe extern "C" fn anofox_ts_bootstrap_quantiles(
             for q_vals in &qr.values {
                 flat.extend_from_slice(q_vals);
             }
-            (*out_result).values = match alloc_or_error(
-                &flat, out_error, "Failed to allocate values",
-            ) {
-                Ok(ptr) => ptr,
-                Err(()) => return false,
-            };
+            (*out_result).values =
+                match alloc_or_error(&flat, out_error, "Failed to allocate values") {
+                    Ok(ptr) => ptr,
+                    Err(()) => return false,
+                };
             true
         }
         Ok(Err(e)) => {
-            set_error(
-                out_error,
-                ErrorCode::ComputationError,
-                &format!("{}", e),
-            );
+            set_error(out_error, ErrorCode::ComputationError, &format!("{}", e));
             false
         }
         Err(_) => {
@@ -5375,7 +5361,10 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict_per_step(
         }
 
         anofox_fcst_core::conformal::conformal_predict_per_step(
-            &fold_fcsts, &fold_acts, point, alpha,
+            &fold_fcsts,
+            &fold_acts,
+            point,
+            alpha,
         )
     }));
 
@@ -5384,26 +5373,25 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict_per_step(
             (*out_result).n_forecasts = ps.point.len();
             (*out_result).coverage = ps.coverage;
 
-            (*out_result).point = match alloc_or_error(
-                &ps.point, out_error, "Failed to allocate point",
-            ) {
-                Ok(ptr) => ptr,
-                Err(()) => return false,
-            };
-            (*out_result).lower = match alloc_or_error(
-                &ps.lower, out_error, "Failed to allocate lower",
-            ) {
-                Ok(ptr) => ptr,
-                Err(()) => return false,
-            };
-            (*out_result).upper = match alloc_or_error(
-                &ps.upper, out_error, "Failed to allocate upper",
-            ) {
-                Ok(ptr) => ptr,
-                Err(()) => return false,
-            };
+            (*out_result).point =
+                match alloc_or_error(&ps.point, out_error, "Failed to allocate point") {
+                    Ok(ptr) => ptr,
+                    Err(()) => return false,
+                };
+            (*out_result).lower =
+                match alloc_or_error(&ps.lower, out_error, "Failed to allocate lower") {
+                    Ok(ptr) => ptr,
+                    Err(()) => return false,
+                };
+            (*out_result).upper =
+                match alloc_or_error(&ps.upper, out_error, "Failed to allocate upper") {
+                    Ok(ptr) => ptr,
+                    Err(()) => return false,
+                };
             (*out_result).half_widths = match alloc_or_error(
-                &ps.half_widths, out_error, "Failed to allocate half_widths",
+                &ps.half_widths,
+                out_error,
+                "Failed to allocate half_widths",
             ) {
                 Ok(ptr) => ptr,
                 Err(()) => return false,
@@ -5411,11 +5399,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict_per_step(
             true
         }
         Ok(Err(e)) => {
-            set_error(
-                out_error,
-                ErrorCode::ComputationError,
-                &format!("{}", e),
-            );
+            set_error(out_error, ErrorCode::ComputationError, &format!("{}", e));
             false
         }
         Err(_) => {

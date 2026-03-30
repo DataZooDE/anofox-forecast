@@ -8,8 +8,8 @@ use crate::seasonality::detect_seasonality;
 use anofox_forecast::core::TimeSeries;
 use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig};
 use anofox_forecast::models::exponential::{
-    AutoETS, AutoETSConfig, ETSSpec, HoltLinearTrend, HoltWinters as HoltWintersModel,
-    ModelPool, SeasonalES as SeasonalESModel, SimpleExponentialSmoothing, ETS as ETSModel,
+    AutoETS, AutoETSConfig, ETSSpec, HoltLinearTrend, HoltWinters as HoltWintersModel, ModelPool,
+    SeasonalES as SeasonalESModel, SimpleExponentialSmoothing, ETS as ETSModel,
 };
 use anofox_forecast::models::intermittent::{Croston, ADIDA, IMAPA, TSB};
 use anofox_forecast::models::mstl_forecaster::MSTLForecaster;
@@ -519,9 +519,12 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             period,
             options.ets_spec.as_deref(),
         ),
-        ModelType::AutoETS => {
-            forecast_auto_ets(&clean_values, options.horizon, period, options.model_pool.as_deref())
-        }
+        ModelType::AutoETS => forecast_auto_ets(
+            &clean_values,
+            options.horizon,
+            period,
+            options.model_pool.as_deref(),
+        ),
         // Theta Methods
         ModelType::Theta => forecast_theta_stm(&clean_values, options.horizon, period),
         ModelType::OptimizedTheta => {

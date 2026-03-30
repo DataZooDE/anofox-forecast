@@ -71,9 +71,9 @@ pub fn bootstrap_intervals(
     // BootstrapPredictor.fit(forecasts, actuals) computes residuals = actuals - forecasts
     // We have residuals directly, so actuals = residuals (with forecasts = zeros)
     let zeros: Vec<f64> = vec![0.0; residuals.len()];
-    let result = predictor.fit(&zeros, residuals).map_err(|e| {
-        ForecastError::ComputationError(format!("Bootstrap fit failed: {}", e))
-    })?;
+    let result = predictor
+        .fit(&zeros, residuals)
+        .map_err(|e| ForecastError::ComputationError(format!("Bootstrap fit failed: {}", e)))?;
 
     // Predict intervals
     let intervals = predictor.predict(&result, forecasts);
@@ -132,9 +132,9 @@ pub fn bootstrap_quantiles(
     }
 
     let zeros: Vec<f64> = vec![0.0; residuals.len()];
-    let result = predictor.fit(&zeros, residuals).map_err(|e| {
-        ForecastError::ComputationError(format!("Bootstrap fit failed: {}", e))
-    })?;
+    let result = predictor
+        .fit(&zeros, residuals)
+        .map_err(|e| ForecastError::ComputationError(format!("Bootstrap fit failed: {}", e)))?;
 
     let qf = predictor.predict_quantiles(&result, forecasts, quantile_levels);
 
