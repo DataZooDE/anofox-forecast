@@ -28,7 +28,7 @@ chrono = "0.4"
 statrs = "0.18"
 
 # Regression analysis
-anofox-regression = "0.5.3"
+anofox-regression = "=0.5.3"
 faer = { version = "0.23", default-features = false, features = ["std", "linalg"] }
 
 
