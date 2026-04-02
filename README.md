@@ -16,10 +16,6 @@
   <sub>Technical Depth: A (93%) | Code Health: A- (90%) - calculated using <a href="https://github.com/paiml/paiml-mcp-agent-toolkit">PMAT</a></sub>
 </p>
 
-<p align="center">
-  AutoARIMA: <strong>912x faster</strong> and <strong>1.9x less memory</strong> than fast Python equivalents · <strong>4.7x smaller</strong> Docker image
-</p>
-
 > [!IMPORTANT]
 > This extension is in early development, so bugs and breaking changes are expected.
 > Please use the [issues page](https://github.com/DataZooDE/anofox-forecast/issues) to report bugs or request features.

@@ -47,9 +47,9 @@ dependencies = [
 
 [[package]]
 name = "anofox-forecast"
-version = "0.5.2"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d14d463e9d63ef0d05a9f895bc4fbb20ad0ada72aa930f0b25b7412c7b538388"
+checksum = "4985d4fb654424b11ee57c6f308e0359f96d6a082729972d87bf16f3373b5b69"
 dependencies = [
  "anofox-regression 0.5.3",
  "anofox-statistics",
