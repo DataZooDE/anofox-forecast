@@ -3,10 +3,11 @@
 BENCHMARK_NAME = 'theta'
 
 # Define models with their parameter functions
+# Note: theta_param is not a valid MAP parameter — theta value is set internally
 MODELS = [
     {
         'name': 'Theta',
-        'params': lambda seasonality: {'seasonal_period': seasonality, 'theta_param': 2.0}
+        'params': lambda seasonality: {'seasonal_period': seasonality}
     },
     {
         'name': 'OptimizedTheta',
@@ -14,7 +15,7 @@ MODELS = [
     },
     {
         'name': 'DynamicTheta',
-        'params': lambda seasonality: {'seasonal_period': seasonality, 'theta_param': 2.0}
+        'params': lambda seasonality: {'seasonal_period': seasonality}
     },
     {
         'name': 'DynamicOptimizedTheta',

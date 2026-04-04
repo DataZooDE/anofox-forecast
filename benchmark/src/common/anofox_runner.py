@@ -21,6 +21,7 @@ def run_anofox_benchmark(
     models_config: List[Dict],
     output_dir: Path,
     group: str = 'Daily',
+    freq: str = '1d',
     extension_path: Optional[Path] = None,
     use_community_extension: bool = True
 ):
@@ -86,12 +87,16 @@ def run_anofox_benchmark(
 
     # Connect to DuckDB and load extension
     con = duckdb.connect(':memory:', config={'allow_unsigned_extensions': 'true'})
-    if use_community_extension:
+    if extension_path and extension_path.exists():
+        con.execute(f"LOAD '{extension_path}'")
+        print(f"Loaded extension from {extension_path}")
+    elif use_community_extension:
         con.execute("FORCE INSTALL anofox_forecast FROM community;")
         con.execute("LOAD 'anofox_forecast';")
+        print("Loaded community extension")
     else:
         con.execute(f"LOAD '{extension_path}'")
-    print(f"Loaded extension from {extension_path}")
+        print(f"Loaded extension from {extension_path}")
 
     # Create table from data
     con.execute("CREATE TABLE train AS SELECT * FROM train_df")
@@ -118,8 +123,14 @@ def run_anofox_benchmark(
         try:
             start_time = time.time()
 
-            # Get model parameters
+            # Get model parameters and convert to MAP syntax
             params = params_fn(seasonality)
+            map_entries = ", ".join(f"'{k}': '{v}'" for k, v in params.items())
+            map_literal = f"MAP{{{map_entries}}}" if params else "MAP{}"
+
+            # Determine frequency string for DuckDB
+            freq_map = {'D': '1d', 'h': '1h', 'W': '1w'}
+            freq_str = freq_map.get(freq, freq)
 
             forecast_query = f"""
                 SELECT *
@@ -130,7 +141,8 @@ def run_anofox_benchmark(
                     y,
                     '{model_name}',
                     {horizon},
-                    {params}
+                    '{freq_str}',
+                    {map_literal}
                 )
             """
             

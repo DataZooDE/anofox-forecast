@@ -84,7 +84,8 @@ def create_benchmark_functions(
             seasonality=seasonality,
             models_config=anofox_config.MODELS,
             output_dir=output_dir,
-            group=group
+            group=group,
+            freq=freq
         )
 
     def evaluate(group: str = 'Daily', dataset: str = 'm4'):
