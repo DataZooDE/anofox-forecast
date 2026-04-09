@@ -4,6 +4,8 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/aggregate_function.hpp"
 #include "duckdb/common/types/timestamp.hpp"
+#include "duckdb/common/types/vector.hpp"
+#include "duckdb/parser/parsed_data/create_aggregate_function_info.hpp"
 
 namespace duckdb {
 
@@ -236,12 +238,33 @@ void RegisterTsDataQualityAggFunction(ExtensionLoader &loader) {
     // Register ts_data_quality_agg
     AggregateFunctionSet ts_dq_agg_set("ts_data_quality_agg");
     ts_dq_agg_set.AddFunction(agg_func);
-    loader.RegisterFunction(ts_dq_agg_set);
+    {
+        CreateAggregateFunctionInfo info(ts_dq_agg_set);
+        FunctionDescription desc;
+        desc.description = "Aggregate function: assesses time series data quality for each group, reporting null counts, gap counts, duplicates, and quality score.";
+        desc.examples = {"SELECT product_id, ts_data_quality_agg(date, value) FROM sales GROUP BY product_id"};
+        desc.categories = {"time-series", "data-quality"};
+        desc.parameter_names = {"date", "value"};
+        desc.parameter_types = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE)};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     // Register anofox_fcst_ts_data_quality_agg alias
     AggregateFunctionSet anofox_dq_agg_set("anofox_fcst_ts_data_quality_agg");
     anofox_dq_agg_set.AddFunction(agg_func);
-    loader.RegisterFunction(anofox_dq_agg_set);
+    {
+        CreateAggregateFunctionInfo info(anofox_dq_agg_set);
+        info.alias_of = "ts_data_quality_agg";
+        FunctionDescription desc;
+        desc.description = "Aggregate function: assesses time series data quality for each group, reporting null counts, gap counts, duplicates, and quality score.";
+        desc.examples = {"SELECT product_id, anofox_fcst_ts_data_quality_agg(date, value) FROM sales GROUP BY product_id"};
+        desc.categories = {"time-series", "data-quality"};
+        desc.parameter_names = {"date", "value"};
+        desc.parameter_types = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE)};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 } // namespace duckdb

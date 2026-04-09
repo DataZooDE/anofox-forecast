@@ -4,6 +4,8 @@
 #include "duckdb/common/exception.hpp"
 
 #include "duckdb/function/scalar_function.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
+#include "duckdb/common/types/vector.hpp"
 
 namespace duckdb {
 
@@ -92,7 +94,17 @@ void RegisterTsDetectSeasonalityFunction(ExtensionLoader &loader) {
         LogicalType::LIST(LogicalType(LogicalTypeId::INTEGER)),
         TsDetectSeasonalityFunction
     ));
-    loader.RegisterFunction(ts_detect_set);
+    {
+        CreateScalarFunctionInfo info(ts_detect_set);
+        FunctionDescription desc;
+        desc.description = "Tests whether a time series exhibits statistically significant seasonality. Returns TRUE/FALSE or a confidence score.";
+        desc.examples = {"ts_detect_seasonality(LIST(value ORDER BY date))", "ts_detect_seasonality(LIST(value ORDER BY date), 7)"};
+        desc.categories = {"time-series", "seasonality"};
+        desc.parameter_names = {"values"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_detect_seasonality");
     anofox_set.AddFunction(ScalarFunction(
@@ -100,7 +112,18 @@ void RegisterTsDetectSeasonalityFunction(ExtensionLoader &loader) {
         LogicalType::LIST(LogicalType(LogicalTypeId::INTEGER)),
         TsDetectSeasonalityFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_detect_seasonality";
+        FunctionDescription desc;
+        desc.description = "Tests whether a time series exhibits statistically significant seasonality. Returns TRUE/FALSE or a confidence score.";
+        desc.examples = {"ts_detect_seasonality(LIST(value ORDER BY date))"};
+        desc.categories = {"time-series", "seasonality"};
+        desc.parameter_names = {"values"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -263,7 +286,24 @@ void RegisterTsAnalyzeSeasonalityFunction(ExtensionLoader &loader) {
         GetSeasonalityResultType(),
         TsAnalyzeSeasonalityWithTimestampsFunction
     ));
-    loader.RegisterFunction(ts_analyze_set);
+    {
+        CreateScalarFunctionInfo info(ts_analyze_set);
+        FunctionDescription desc;
+        desc.description = "Analyzes seasonal patterns in detail, returning amplitude, phase, strength, and period information.";
+        desc.examples = {"ts_analyze_seasonality(LIST(value ORDER BY date), 7)"};
+        desc.categories = {"time-series", "seasonality"};
+        desc.parameter_names = {"values"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        FunctionDescription desc2;
+        desc2.description = "Analyzes seasonal patterns in detail, returning amplitude, phase, strength, and period information.";
+        desc2.examples = {"ts_analyze_seasonality(LIST(ts ORDER BY ts), LIST(value ORDER BY ts))"};
+        desc2.categories = {"time-series", "seasonality"};
+        desc2.parameter_names = {"timestamps", "values"};
+        desc2.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::TIMESTAMP)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc2));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_analyze_seasonality");
     anofox_set.AddFunction(ScalarFunction(
@@ -276,7 +316,25 @@ void RegisterTsAnalyzeSeasonalityFunction(ExtensionLoader &loader) {
         GetSeasonalityResultType(),
         TsAnalyzeSeasonalityWithTimestampsFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_analyze_seasonality";
+        FunctionDescription desc;
+        desc.description = "Analyzes seasonal patterns in detail, returning amplitude, phase, strength, and period information.";
+        desc.examples = {"ts_analyze_seasonality(LIST(value ORDER BY date), 7)"};
+        desc.categories = {"time-series", "seasonality"};
+        desc.parameter_names = {"values"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        FunctionDescription desc2;
+        desc2.description = "Analyzes seasonal patterns in detail, returning amplitude, phase, strength, and period information.";
+        desc2.examples = {"ts_analyze_seasonality(LIST(ts ORDER BY ts), LIST(value ORDER BY ts))"};
+        desc2.categories = {"time-series", "seasonality"};
+        desc2.parameter_names = {"timestamps", "values"};
+        desc2.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::TIMESTAMP)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc2));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -469,7 +527,17 @@ void RegisterTsClassifySeasonalityFunction(ExtensionLoader &loader) {
         TsClassifySeasonalityFunction
     ));
 
-    loader.RegisterFunction(ts_classify_set);
+    {
+        CreateScalarFunctionInfo info(ts_classify_set);
+        FunctionDescription desc;
+        desc.description = "Classifies the seasonality type (timing and modulation) of a time series, returning timing_classification, modulation_type, and seasonal strength.";
+        desc.examples = {"ts_classify_seasonality(LIST(value ORDER BY date), 7)"};
+        desc.categories = {"time-series", "seasonality"};
+        desc.parameter_names = {"values"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     // Also register with anofox_ prefix
     ScalarFunctionSet anofox_classify_set("anofox_fcst_ts_classify_seasonality");
@@ -488,7 +556,18 @@ void RegisterTsClassifySeasonalityFunction(ExtensionLoader &loader) {
         GetSeasonalityClassificationResultType(),
         TsClassifySeasonalityFunction
     ));
-    loader.RegisterFunction(anofox_classify_set);
+    {
+        CreateScalarFunctionInfo info(anofox_classify_set);
+        info.alias_of = "ts_classify_seasonality";
+        FunctionDescription desc;
+        desc.description = "Classifies the seasonality type (timing and modulation) of a time series, returning timing_classification, modulation_type, and seasonal strength.";
+        desc.examples = {"ts_classify_seasonality(LIST(value ORDER BY date), 7)"};
+        desc.categories = {"time-series", "seasonality"};
+        desc.parameter_names = {"values"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 } // namespace duckdb

@@ -4,6 +4,8 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/aggregate_function.hpp"
 #include "duckdb/common/types/timestamp.hpp"
+#include "duckdb/common/types/vector.hpp"
+#include "duckdb/parser/parsed_data/create_aggregate_function_info.hpp"
 
 namespace duckdb {
 
@@ -257,12 +259,33 @@ void RegisterTsDetectChangepointsAggFunction(ExtensionLoader &loader) {
 
     AggregateFunctionSet func_set("ts_detect_changepoints_agg");
     func_set.AddFunction(agg_func);
-    loader.RegisterFunction(func_set);
+    {
+        CreateAggregateFunctionInfo info(func_set);
+        FunctionDescription desc;
+        desc.description = "Aggregate function: detects structural changepoints in time series for each group using Bayesian Online Changepoint Detection (BOCPD).";
+        desc.examples = {"SELECT product_id, ts_detect_changepoints_agg(date, value, MAP{}) FROM sales GROUP BY product_id"};
+        desc.categories = {"time-series", "changepoint-detection"};
+        desc.parameter_names = {"date", "value", "params"};
+        desc.parameter_types = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE), LogicalType::MAP(LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::VARCHAR))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     // Also register with anofox_fcst_ prefix
     AggregateFunctionSet alias_set("anofox_fcst_ts_detect_changepoints_agg");
     alias_set.AddFunction(agg_func);
-    loader.RegisterFunction(alias_set);
+    {
+        CreateAggregateFunctionInfo info(alias_set);
+        info.alias_of = "ts_detect_changepoints_agg";
+        FunctionDescription desc;
+        desc.description = "Aggregate function: detects structural changepoints in time series for each group using Bayesian Online Changepoint Detection (BOCPD).";
+        desc.examples = {"SELECT product_id, anofox_fcst_ts_detect_changepoints_agg(date, value, MAP{}) FROM sales GROUP BY product_id"};
+        desc.categories = {"time-series", "changepoint-detection"};
+        desc.parameter_names = {"date", "value", "params"};
+        desc.parameter_types = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE), LogicalType::MAP(LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::VARCHAR))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 } // namespace duckdb

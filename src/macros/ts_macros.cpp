@@ -2,6 +2,7 @@
 #include "duckdb.hpp"
 #include "duckdb/parser/parser.hpp"
 #include "duckdb/parser/parsed_data/create_macro_info.hpp"
+#include "duckdb/parser/parsed_data/create_function_info.hpp"
 #include "duckdb/parser/statement/select_statement.hpp"
 #include "duckdb/parser/expression/columnref_expression.hpp"
 #include "duckdb/function/table_macro_function.hpp"
@@ -17,6 +18,9 @@ struct TsTableMacro {
         const char *default_value;
     } named_params[8];                  // Named parameters with defaults
     const char *macro;                  // SQL definition
+    const char *description;            // Added: human-readable description
+    const char *example;                // Added: example SQL usage
+    const char *category;               // Added: primary category
 };
 
 // clang-format off
@@ -76,7 +80,10 @@ SELECT
     (_stats).expected_length AS expected_length,
     (_stats).n_gaps AS n_gaps
 FROM stats_data
-)"},
+)",
+    "Computes 34 time series statistics per group. Returns a wide table with one column per statistic.",
+    "SELECT * FROM ts_stats('sales', product_id, date, qty, '1d')",
+    "statistics"},
 
     // ts_quality_report: Generate quality report from stats table
     // C++ API: ts_quality_report(stats_table, min_length)
@@ -89,7 +96,10 @@ SELECT
     SUM(CASE WHEN is_constant THEN 1 ELSE 0 END) AS n_constant,
     COUNT(*) AS n_total
 FROM query_table(stats_table::VARCHAR)
-)"},
+)",
+    "Generates a data quality report with null counts, gap counts, duplicate timestamps, and quality score per group.",
+    "SELECT * FROM ts_quality_report('sales', product_id, date, qty)",
+    "statistics"},
 
     // ts_stats_summary: Summary statistics from stats table
     // C++ API: ts_stats_summary(stats_table)
@@ -103,7 +113,10 @@ SELECT
     SUM(n_nulls) AS total_nulls,
     SUM(n_nan) AS total_nans
 FROM query_table(stats_table::VARCHAR)
-)"},
+)",
+    "Aggregates ts_stats output across all groups into summary statistics (mean, std, min, max per metric).",
+    "SELECT * FROM ts_stats_summary('sales', product_id, date, qty, '1d')",
+    "statistics"},
 
     // ts_data_quality: Assess data quality per series
     // C++ API: ts_data_quality(table_name, unique_id_col, date_col, value_col, n_short, frequency)
@@ -128,7 +141,10 @@ SELECT
     (_quality).n_missing AS n_missing,
     (_quality).is_constant AS is_constant
 FROM quality_data
-)"},
+)",
+    "Assesses time series data quality per group, returning null rate, gap rate, duplicate count, and quality score.",
+    "SELECT * FROM ts_data_quality('sales', product_id, date, qty)",
+    "data-quality"},
 
     // ts_data_quality_summary: Summarize data quality across series
     // C++ API: ts_data_quality_summary(table_name, unique_id_col, date_col, value_col, n_short)
@@ -148,7 +164,10 @@ SELECT
     SUM(CASE WHEN (_quality).overall_score < 0.5 THEN 1 ELSE 0 END) AS n_poor,
     AVG((_quality).overall_score) AS avg_score
 FROM quality_data
-)"},
+)",
+    "Summarizes ts_data_quality output across all groups into aggregate quality metrics.",
+    "SELECT * FROM ts_data_quality_summary('sales', product_id, date, qty)",
+    "data-quality"},
 
     // ts_drop_constant_by: Filter out constant series (table-based)
     // C++ API: ts_drop_constant_by(table_name, group_col, value_col)
@@ -162,7 +181,10 @@ WHERE group_col IN (
     GROUP BY group_col
     HAVING MIN(value_col) != MAX(value_col) OR MIN(value_col) IS NULL OR MAX(value_col) IS NULL
 )
-)"},
+)",
+    "Removes groups whose time series values are all constant (zero variance).",
+    "SELECT * FROM ts_drop_constant_by('sales', product_id, date, qty)",
+    "data-preparation"},
 
     // ts_drop_short_by: Filter out short series (table-based)
     // C++ API: ts_drop_short_by(table_name, group_col, min_length)
@@ -176,7 +198,10 @@ WHERE group_col IN (
     GROUP BY group_col
     HAVING COUNT(*) >= min_length
 )
-)"},
+)",
+    "Removes groups with fewer observations than the specified minimum length.",
+    "SELECT * FROM ts_drop_short_by('sales', product_id, date, qty, 20)",
+    "data-preparation"},
 
     // ts_drop_leading_zeros_by: Remove leading zeros from series (table-based)
     // C++ API: ts_drop_leading_zeros_by(table_name, group_col, date_col, value_col)
@@ -190,7 +215,10 @@ WITH first_nonzero AS (
 SELECT * EXCLUDE (_first_nz)
 FROM first_nonzero
 WHERE date_col >= _first_nz
-)"},
+)",
+    "Removes leading zeros from each group's time series, trimming the start of the series.",
+    "SELECT * FROM ts_drop_leading_zeros_by('sales', product_id, date, qty)",
+    "data-preparation"},
 
     // ts_drop_trailing_zeros_by: Remove trailing zeros from series (table-based)
     // C++ API: ts_drop_trailing_zeros_by(table_name, group_col, date_col, value_col)
@@ -204,7 +232,10 @@ WITH last_nonzero AS (
 SELECT * EXCLUDE (_last_nz)
 FROM last_nonzero
 WHERE date_col <= _last_nz
-)"},
+)",
+    "Removes trailing zeros from each group's time series, trimming the end of the series.",
+    "SELECT * FROM ts_drop_trailing_zeros_by('sales', product_id, date, qty)",
+    "data-preparation"},
 
     // ts_drop_edge_zeros_by: Remove both leading and trailing zeros (table-based)
     // C++ API: ts_drop_edge_zeros_by(table_name, group_col, date_col, value_col)
@@ -219,7 +250,10 @@ WITH nonzero_bounds AS (
 SELECT * EXCLUDE (_first_nz, _last_nz)
 FROM nonzero_bounds
 WHERE date_col >= _first_nz AND date_col <= _last_nz
-)"},
+)",
+    "Removes both leading and trailing zeros from each group's time series.",
+    "SELECT * FROM ts_drop_edge_zeros_by('sales', product_id, date, qty)",
+    "data-preparation"},
 
     // ts_fill_nulls_const_by: Fill NULL values with constant (table-based)
     // C++ API: ts_fill_nulls_const_by(table_name, group_col, date_col, value_col, fill_value)
@@ -229,7 +263,10 @@ R"(
 SELECT *, COALESCE(value_col, fill_value) AS filled_value
 FROM query_table(source::VARCHAR)
 ORDER BY group_col, date_col
-)"},
+)",
+    "Fills NULL values in each group's time series with a constant value.",
+    "SELECT * FROM ts_fill_nulls_const_by('sales', product_id, date, qty, 0.0)",
+    "data-preparation"},
 
     // ts_fill_nulls_forward_by: Forward fill (LOCF) (table-based)
     // C++ API: ts_fill_nulls_forward_by(table_name, group_col, date_col, value_col)
@@ -242,7 +279,10 @@ SELECT *,
     )) AS filled_value
 FROM query_table(source::VARCHAR)
 ORDER BY group_col, date_col
-)"},
+)",
+    "Forward-fills NULL values in each group's time series using the last known value.",
+    "SELECT * FROM ts_fill_nulls_forward_by('sales', product_id, date, qty)",
+    "data-preparation"},
 
     // ts_fill_nulls_backward_by: Backward fill (NOCB) (table-based)
     // C++ API: ts_fill_nulls_backward_by(table_name, group_col, date_col, value_col)
@@ -255,7 +295,10 @@ SELECT *,
     )) AS filled_value
 FROM query_table(source::VARCHAR)
 ORDER BY group_col, date_col
-)"},
+)",
+    "Backward-fills NULL values in each group's time series using the next known value.",
+    "SELECT * FROM ts_fill_nulls_backward_by('sales', product_id, date, qty)",
+    "data-preparation"},
 
     // ts_fill_nulls_mean_by: Fill with series mean (table-based)
     // C++ API: ts_fill_nulls_mean_by(table_name, group_col, date_col, value_col)
@@ -270,7 +313,10 @@ WITH with_mean AS (
 SELECT * EXCLUDE (_mean_val), COALESCE(value_col, _mean_val) AS filled_value
 FROM with_mean
 ORDER BY group_col, date_col
-)"},
+)",
+    "Fills NULL values in each group's time series with the group mean.",
+    "SELECT * FROM ts_fill_nulls_mean_by('sales', product_id, date, qty)",
+    "data-preparation"},
 
     // ts_diff_by: Compute differences (table-based)
     // C++ API: ts_diff_by(table_name, group_col, date_col, value_col, diff_order)
@@ -284,7 +330,10 @@ SELECT
     ) AS diff_value
 FROM query_table(source::VARCHAR)
 ORDER BY group_col, date_col
-)"},
+)",
+    "Computes first-order differences for each group's time series (value[t] - value[t-1]).",
+    "SELECT * FROM ts_diff_by('sales', product_id, date, qty)",
+    "data-preparation"},
 
     // ts_fill_gaps_by: Fill date gaps with NULL values at specified frequency
     // C++ API: ts_fill_gaps_by(table_name, group_col, date_col, value_col, frequency)
@@ -302,7 +351,10 @@ SELECT * FROM _ts_fill_gaps_native(
     (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
     frequency
 )
-)"},
+)",
+    "Fills missing timestamps in each group's time series to create a regular frequency grid.",
+    "SELECT * FROM ts_fill_gaps_by('sales', product_id, date, qty, '1d')",
+    "data-preparation"},
 
     // ts_fill_forward_by: Fill forward to a target date with NULL values
     // C++ API: ts_fill_forward_by(table_name, group_col, date_col, value_col, target_date, frequency)
@@ -321,7 +373,10 @@ SELECT * FROM _ts_fill_forward_native(
     target_date,
     frequency
 )
-)"},
+)",
+    "Forward-fills missing timestamps in each group's time series using the last known value.",
+    "SELECT * FROM ts_fill_forward_by('sales', product_id, date, qty, '1d')",
+    "data-preparation"},
 
     // ts_drop_gappy_by: Filter out series with too many gaps
     // C++ API: ts_drop_gappy_by(table_name, group_col, value_col, max_gap_ratio)
@@ -335,7 +390,10 @@ WHERE group_col IN (
     GROUP BY group_col
     HAVING (SUM(CASE WHEN value_col IS NULL THEN 1 ELSE 0 END)::DOUBLE / NULLIF(COUNT(*), 0)) <= max_gap_ratio
 )
-)"},
+)",
+    "Removes groups whose time series have a gap rate exceeding a threshold.",
+    "SELECT * FROM ts_drop_gappy_by('sales', product_id, date, qty, '1d', 0.1)",
+    "data-preparation"},
 
     // ts_drop_zeros_by: Filter out series with all zeros
     // C++ API: ts_drop_zeros_by(table_name, group_col, value_col)
@@ -349,7 +407,10 @@ WHERE group_col IN (
     GROUP BY group_col
     HAVING SUM(CASE WHEN value_col != 0 AND value_col IS NOT NULL THEN 1 ELSE 0 END) > 0
 )
-)"},
+)",
+    "Removes groups whose time series are predominantly zero values.",
+    "SELECT * FROM ts_drop_zeros_by('sales', product_id, date, qty, 0.8)",
+    "data-preparation"},
 
     // ts_mstl_decomposition_by: MSTL decomposition for grouped series
     // C++ API: ts_mstl_decomposition_by(table_name, group_col, date_col, value_col, params MAP)
@@ -361,7 +422,10 @@ SELECT * FROM _ts_mstl_decomposition_native(
     (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
     COALESCE(json_extract_string(to_json(params), '$.insufficient_data'), 'fail')
 )
-)"},
+)",
+    "Decomposes each group's time series into trend, seasonal, and remainder components using MSTL.",
+    "SELECT * FROM ts_mstl_decomposition_by('sales', product_id, date, qty, '[7,365]')",
+    "decomposition"},
 
     // ts_detrend_by: Remove trend from grouped time series
     // C++ API: ts_detrend_by(table_name, group_col, date_col, value_col, method)
@@ -385,7 +449,10 @@ SELECT
     (_detrend).rss AS rss,
     (_detrend).n_params AS n_params
 FROM detrend_data
-)"},
+)",
+    "Removes the trend component from each group's time series.",
+    "SELECT * FROM ts_detrend_by('sales', product_id, date, qty, 7)",
+    "decomposition"},
 
     // ts_classify_seasonality_by: Classify seasonality type per group
     // C++ API: ts_classify_seasonality_by(table_name, group_col, date_col, value_col, period)
@@ -411,7 +478,10 @@ SELECT
     (_cls).cycle_strengths AS cycle_strengths,
     (_cls).weak_seasons AS weak_seasons
 FROM classification_data
-)"},
+)",
+    "Classifies seasonality type (additive/multiplicative/none) for each group.",
+    "SELECT * FROM ts_classify_seasonality_by('sales', product_id, date, qty)",
+    "seasonality"},
 
     // ts_detect_changepoints: Detect changepoints in a single series
     // C++ API: ts_detect_changepoints(table_name, date_col, value_col, params MAP)
@@ -440,7 +510,10 @@ SELECT
     (cp.cp).changepoint_probability[od._idx] AS changepoint_probability
 FROM ordered_data od, cp_result cp
 ORDER BY od._dt
-)"},
+)",
+    "Detects structural changepoints in a single time series using Bayesian Online Changepoint Detection.",
+    "SELECT * FROM ts_detect_changepoints('sales', product_id, date, qty)",
+    "changepoint-detection"},
 
     // ts_detect_changepoints_by: Detect changepoints per group (row-level output)
     // C++ API: ts_detect_changepoints_by(table_name, group_col, date_col, value_col, params MAP)
@@ -456,7 +529,10 @@ SELECT * FROM _ts_detect_changepoints_by_native(
     (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
     COALESCE(TRY_CAST(params['hazard_lambda'] AS VARCHAR), '250.0')
 )
-)"},
+)",
+    "Detects structural changepoints for each group using Bayesian Online Changepoint Detection.",
+    "SELECT * FROM ts_detect_changepoints_by('sales', product_id, date, qty)",
+    "changepoint-detection"},
 
     // ts_forecast: Generate forecasts for a single series (table-based)
     // C++ API: ts_forecast(table_name, date_col, target_col, method, horizon, params?)
@@ -484,7 +560,10 @@ SELECT
     (fcst).aic,
     (fcst).bic
 FROM forecast_result
-)"},
+)",
+    "Generates a forecast for a single time series. Returns point forecasts with prediction intervals.",
+    "SELECT * FROM ts_forecast('sales', product_id, date, qty, 'AutoETS', 12, '1d')",
+    "forecasting"},
 
     // ts_forecast_by: Generate forecasts per group (long format - one row per forecast step)
     // C++ API: ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, frequency, params?)
@@ -509,7 +588,10 @@ FROM (
     FROM query_table(source::VARCHAR)
     GROUP BY group_col
 )
-)"},
+)",
+    "Generates forecasts for multiple time series grouped by one or more keys. Returns point forecasts with prediction intervals.",
+    "SELECT * FROM ts_forecast_by('sales', product_id, date, qty, 'AutoETS', 12, '1d')",
+    "forecasting"},
 
     // ts_cv_forecast_by: Generate forecasts for CV splits with parallel fold execution
     // C++ API: ts_cv_forecast_by(ml_folds, group_col, date_col, target_col, method, params)
@@ -536,7 +618,10 @@ SELECT * FROM _ts_cv_forecast_native(
     params
 )
 ORDER BY 1, 2, 3
-)"},
+)",
+    "Runs forecasts on all cross-validation folds and returns predictions with fold metadata.",
+    "SELECT * FROM ts_cv_forecast_by('cv_splits', product_id, date, qty, 'AutoETS')",
+    "cross-validation"},
 
     // ts_forecast_exog: Generate forecasts with exogenous variables (single series)
     // C++ API: ts_forecast_exog(source, date_col, target_col, xreg_cols, future_source, future_date_col, future_xreg_cols, method, horizon, params)
@@ -611,7 +696,10 @@ SELECT
     (fcst).bic,
     (fcst).mse
 FROM forecast_result
-)"},
+)",
+    "Generates a forecast for a single time series using exogenous regressors.",
+    "SELECT * FROM ts_forecast_exog('sales', product_id, date, qty, 'future_features', 'AutoARIMA', 12, '1d')",
+    "forecasting"},
 
     // ts_forecast_exog_by: Generate forecasts with exogenous variables per group
     // C++ API: ts_forecast_exog_by(source, group_col, date_col, target_col, xreg_cols, future_source, future_date_col, future_xreg_cols, frequency, method?, horizon?, params?)
@@ -721,7 +809,10 @@ SELECT
     (fcst).model AS model_name
 FROM forecast_data
 ORDER BY __exog_grp__, forecast_step
-)"},
+)",
+    "Generates forecasts for multiple time series using exogenous regressors.",
+    "SELECT * FROM ts_forecast_exog_by('sales', product_id, date, qty, 'future_features', 'AutoARIMA', 12, '1d')",
+    "forecasting"},
 
     // ts_mark_unknown_by: Mark rows as known/unknown based on cutoff date for scenario expressions
     // C++ API: ts_mark_unknown_by(table_name, group_col, date_col, cutoff_date)
@@ -754,7 +845,10 @@ SELECT
 FROM src
 LEFT JOIN last_known lk ON src._grp = lk._grp
 ORDER BY src._grp, src._dt
-)"},
+)",
+    "Marks future values as unknown (NULL) for cross-validation leakage prevention.",
+    "SELECT * FROM ts_mark_unknown_by('features', product_id, date, feature_col, cutoff_date)",
+    "data-preparation"},
 
     // ts_fill_unknown_by: Fill unknown future feature values in test set for CV splits
     // C++ API: ts_fill_unknown_by(table_name, group_col, date_col, value_col, cutoff_date, params)
@@ -792,7 +886,10 @@ SELECT
     END AS value_col
 FROM src
 ORDER BY _grp, _dt
-)"},
+)",
+    "Fills unknown (NULL) feature values using a specified strategy for cross-validation.",
+    "SELECT * FROM ts_fill_unknown_by('cv_data', product_id, date, feature_col, 'last_value')",
+    "data-preparation"},
 
     // ts_validate_timestamps_by: Validate that expected timestamps exist in data for each group
     // C++ API: ts_validate_timestamps_by(table_name, group_col, date_col, expected_timestamps)
@@ -835,7 +932,10 @@ SELECT
 FROM validation
 GROUP BY _grp
 ORDER BY _grp
-)"},
+)",
+    "Validates that timestamps are unique, monotonically increasing, and match the expected frequency per group.",
+    "SELECT * FROM ts_validate_timestamps_by('sales', product_id, date, qty, '1d')",
+    "data-quality"},
 
     // ts_validate_timestamps_summary_by: Quick validation summary across all groups
     // C++ API: ts_validate_timestamps_summary_by(table_name, group_col, date_col, expected_timestamps)
@@ -881,7 +981,10 @@ SELECT
     SUM(CASE WHEN NOT is_valid THEN 1 ELSE 0 END)::BIGINT AS n_invalid_groups,
     LIST(_grp) FILTER (WHERE NOT is_valid) AS invalid_groups
 FROM per_group
-)"},
+)",
+    "Summarizes ts_validate_timestamps_by results across all groups.",
+    "SELECT * FROM ts_validate_timestamps_summary_by('sales', product_id, date, qty, '1d')",
+    "data-quality"},
 
     // ts_cv_split_folds_by: Generate fold boundaries for time series cross-validation
     // C++ API: ts_cv_split_folds_by(source, group_col, date_col, training_end_times, horizon, frequency, params)
@@ -959,7 +1062,10 @@ SELECT
     (SELECT _embargo FROM _params)::BIGINT AS embargo
 FROM folds_with_embargo
 ORDER BY fold_id
-)"},
+)",
+    "Splits time series into cross-validation folds with configurable gap, embargo, and window parameters.",
+    "SELECT * FROM ts_cv_split_folds_by('sales', product_id, date, qty, 3, 12, '1d')",
+    "cross-validation"},
 
     // ts_cv_split_by: Split time series data into train/test sets for cross-validation
     // C++ API: ts_cv_split_by(source, group_col, date_col, target_col, training_end_times, horizon, params)
@@ -980,7 +1086,10 @@ SELECT * FROM _ts_cv_split_native(
     params
 )
 ORDER BY 4, 1, 2
-)"},
+)",
+    "Creates cross-validation train/test splits from explicit fold boundary dates.",
+    "SELECT * FROM ts_cv_split_by('sales', product_id, date, qty, 'folds', fold_id, cutoff)",
+    "cross-validation"},
 
     // ts_cv_split_index_by: Memory-efficient CV split that returns only index columns (no data columns)
     // C++ API: ts_cv_split_index_by(source, group_col, date_col, training_end_times, horizon, frequency, params)
@@ -1075,7 +1184,10 @@ CROSS JOIN fold_bounds fb
 WHERE (s._dt >= fb.train_start AND s._dt <= fb.train_end)
    OR (s._dt >= fb.test_start AND s._dt <= fb.test_end)
 ORDER BY fb.fold_id, s._grp, s._dt
-)"},
+)",
+    "Memory-efficient cross-validation split using row indices instead of full data copies.",
+    "SELECT * FROM ts_cv_split_index_by('sales', product_id, date, qty, 3, 12, '1d')",
+    "cross-validation"},
 
     // ts_check_leakage: Validate a query result doesn't have obvious data leakage
     // C++ API: ts_check_leakage(result_table, test_filter_col, check_cols, params)
@@ -1102,7 +1214,10 @@ SELECT
     'Use ts_hydrate_split_strict + explicit column selection for fail-safe joins' AS recommendation
 FROM stats
 LIMIT 1
-)"},
+)",
+    "Audits a cross-validation dataset for data leakage by checking that test features are not visible during training.",
+    "SELECT * FROM ts_check_leakage('cv_splits', product_id, date, fold_id, split)",
+    "cross-validation"},
 
     // ts_cv_folds_by: Create train/test splits for ML model backtesting
     // C++ API: ts_cv_folds_by(source, group_col, date_col, target_col, n_folds, horizon, params)
@@ -1138,7 +1253,10 @@ SELECT * FROM _ts_cv_folds_native(
     horizon,
     params
 )
-)"},
+)",
+    "Generates cross-validation fold definitions (cutoff dates) without splitting the data.",
+    "SELECT * FROM ts_cv_folds_by('sales', product_id, date, qty, 3, 12, '1d')",
+    "cross-validation"},
 
     // ts_cv_hydrate_by: Hydrate CV folds with unknown features as direct columns
     // C++ API: ts_cv_hydrate_by(cv_folds, source, group_col, date_col, unknown_features, params)
@@ -1197,7 +1315,10 @@ SELECT * FROM _ts_cv_hydrate_native(
     unknown_features,
     params
 )
-)"},
+)",
+    "Joins external features to CV splits with proper masking to prevent data leakage.",
+    "SELECT * FROM ts_cv_hydrate_by('cv_splits', product_id, date, qty, 'features', unknown_cols)",
+    "cross-validation"},
 
     // ts_conformal_by: Compute conformal prediction intervals for grouped series
     // C++ API: ts_conformal_by(backtest_results, group_col, actual_col, forecast_col, point_forecast_col, params)
@@ -1258,7 +1379,10 @@ SELECT
     (conf_result).conformity_score AS conformity_score,
     (conf_result).method AS method
 FROM conformal_calc
-)"},
+)",
+    "One-step conformal prediction: calibrates on backtest residuals and applies to new forecasts.",
+    "SELECT * FROM ts_conformal_by('backtest', product_id, actual, forecast, point_forecast)",
+    "conformal-prediction"},
 
     // ts_conformal_calibrate: Compute conformal quantile from backtest residuals
     // C++ API: ts_conformal_calibrate(backtest_results, actual_col, forecast_col, params)
@@ -1283,7 +1407,10 @@ SELECT
     1.0 - (SELECT _alpha FROM _params) AS coverage,
     COUNT(*)::BIGINT AS n_residuals
 FROM residuals
-)"},
+)",
+    "Calibrates a conformal predictor from backtest residuals and returns the calibration profile for reuse.",
+    "SELECT * FROM ts_conformal_calibrate('backtest', product_id, actual, forecast)",
+    "conformal-prediction"},
 
     // ts_conformal_apply_by: Apply pre-computed conformity score to forecasts
     // C++ API: ts_conformal_apply_by(forecast_results, group_col, forecast_col, conformity_score)
@@ -1308,7 +1435,10 @@ SELECT
     (interval_result).lower AS lower,
     (interval_result).upper AS upper
 FROM intervals
-)"},
+)",
+    "Applies a pre-calibrated conformal profile to new point forecasts to generate prediction intervals.",
+    "SELECT * FROM ts_conformal_apply_by('forecasts', product_id, date, point_forecast, calibration_profile)",
+    "conformal-prediction"},
 
     // ts_interval_width_by: Compute mean interval width for grouped series
     // C++ API: ts_interval_width_by(results, group_col, lower_col, upper_col)
@@ -1325,7 +1455,10 @@ SELECT
 FROM query_table(results::VARCHAR)
 WHERE lower_col IS NOT NULL AND upper_col IS NOT NULL
 GROUP BY group_col
-)"},
+)",
+    "Computes the mean width of prediction intervals for each group.",
+    "SELECT * FROM ts_interval_width_by('forecasts', product_id, lower, upper)",
+    "conformal-prediction"},
 
     // ================================================================================
     // Multi-key unique_id functions (Issue #78)
@@ -1349,7 +1482,10 @@ SELECT * FROM _ts_stats_by_native(
     (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
     frequency
 )
-)"},
+)",
+    "Alias for ts_stats. Computes 34 time series statistics per group.",
+    "SELECT * FROM ts_stats_by('sales', product_id, date, qty, '1d')",
+    "statistics"},
 
     // ts_data_quality_by: Alias for ts_data_quality (for API consistency with _by naming pattern)
     // C++ API: ts_data_quality_by(table_name, unique_id_col, date_col, value_col, n_short, frequency)
@@ -1374,7 +1510,10 @@ SELECT
     (_quality).n_missing AS n_missing,
     (_quality).is_constant AS is_constant
 FROM quality_data
-)"},
+)",
+    "Alias for ts_data_quality. Assesses time series data quality per group.",
+    "SELECT * FROM ts_data_quality_by('sales', product_id, date, qty)",
+    "data-quality"},
 
     // ts_features_table: Extract features from a single-series table
     // C++ API: ts_features_table(table_name, date_col, value_col)
@@ -1503,7 +1642,10 @@ SELECT
     (_feat).variation_coefficient AS variation_coefficient,
     (_feat).zero_crossing_rate AS zero_crossing_rate
 FROM features_data
-)"},
+)",
+    "Extracts 117 tsfresh-compatible features and returns them as a wide table (one column per feature).",
+    "SELECT * FROM ts_features_table('sales', product_id, date, qty)",
+    "feature-extraction"},
 
     // ts_features_by: Extract features per group (native streaming implementation)
     // C++ API: ts_features_by(table_name, group_col, date_col, value_col)
@@ -1513,7 +1655,10 @@ R"(
 SELECT * FROM _ts_features_native(
     (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR))
 )
-)"},
+)",
+    "Extracts time series features for each group and returns results as a structured table.",
+    "SELECT * FROM ts_features_by('sales', product_id, date, qty)",
+    "feature-extraction"},
 
     // ts_classify_seasonality: Classify seasonality for a single series
     // C++ API: ts_classify_seasonality(table_name, date_col, value_col, period)
@@ -1536,7 +1681,10 @@ SELECT
     (_cls).cycle_strengths AS cycle_strengths,
     (_cls).weak_seasons AS weak_seasons
 FROM classification_data
-)"},
+)",
+    "Single-series seasonality classification. Classifies seasonality type and returns timing metadata.",
+    "SELECT * FROM ts_classify_seasonality('sales', product_id, date, qty)",
+    "seasonality"},
 
     // ================================================================================
     // Period Detection
@@ -1570,7 +1718,10 @@ SELECT
     (_periods).primary_period AS primary_period,
     (_periods).method AS method
 FROM periods_data
-)"},
+)",
+    "Detects seasonal periods for a single time series, returning ranked period candidates with confidence scores.",
+    "SELECT * FROM ts_detect_periods('sales', product_id, date, qty)",
+    "period-detection"},
 
     // ts_detect_periods_by: Detect periods for grouped series
     // C++ API: ts_detect_periods_by(table_name, group_col, date_col, value_col, params)
@@ -1604,7 +1755,10 @@ SELECT
     (_periods).primary_period AS primary_period,
     (_periods).method AS method
 FROM periods_data
-)"},
+)",
+    "Detects seasonal periods for each group, returning ranked period candidates with confidence scores.",
+    "SELECT * FROM ts_detect_periods_by('sales', product_id, date, qty)",
+    "period-detection"},
 
     // ts_detect_peaks_by: Detect peaks for grouped series
     // C++ API: ts_detect_peaks_by(table_name, group_col, date_col, value_col, params)
@@ -1631,7 +1785,10 @@ SELECT
     (_peaks).inter_peak_distances AS inter_peak_distances,
     (_peaks).mean_period AS mean_period
 FROM peaks_data
-)"},
+)",
+    "Detects peaks in each group's time series, returning peak indices, values, and prominence scores.",
+    "SELECT * FROM ts_detect_peaks_by('sales', product_id, date, qty)",
+    "peak-detection"},
 
     // ts_detect_peaks: Detect peaks for a single series
     // C++ API: ts_detect_peaks(table_name, date_col, value_col, params)
@@ -1655,7 +1812,10 @@ SELECT
     (_peaks).inter_peak_distances AS inter_peak_distances,
     (_peaks).mean_period AS mean_period
 FROM peaks_data
-)"},
+)",
+    "Detects peaks in a single time series, returning peak indices, values, and prominence scores.",
+    "SELECT * FROM ts_detect_peaks('sales', product_id, date, qty)",
+    "peak-detection"},
 
     // ts_analyze_peak_timing_by: Analyze peak timing for grouped series
     // C++ API: ts_analyze_peak_timing_by(table_name, group_col, date_col, value_col, period, params)
@@ -1679,7 +1839,10 @@ SELECT
     (_timing).variability_score AS variability_score,
     (_timing).is_stable AS is_stable
 FROM timing_data
-)"},
+)",
+    "Analyzes peak timing variability for each group, returning timing statistics and stability score.",
+    "SELECT * FROM ts_analyze_peak_timing_by('sales', product_id, date, qty, 7)",
+    "peak-detection"},
 
     // ts_analyze_peak_timing: Analyze peak timing for a single series
     // C++ API: ts_analyze_peak_timing(table_name, date_col, value_col, period, params)
@@ -1700,7 +1863,10 @@ SELECT
     (_timing).variability_score AS variability_score,
     (_timing).is_stable AS is_stable
 FROM timing_data
-)"},
+)",
+    "Analyzes peak timing variability for a single time series.",
+    "SELECT * FROM ts_analyze_peak_timing('sales', product_id, date, qty, 7)",
+    "peak-detection"},
 
     // ================================================================================
     // Metrics Table Macros (DEPRECATED)
@@ -1728,80 +1894,113 @@ FROM timing_data
     {"ts_mae_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'mae')
-)"},
+)",
+    "Computes Mean Absolute Error between actual and forecast columns per group.",
+    "SELECT * FROM ts_mae_by('results', product_id, date, actual, forecast)",
+    "metrics"},
 
     // ts_mse_by: Compute Mean Squared Error grouped by selected columns
     // C++ API: ts_mse_by(source, date_col, actual_col, forecast_col)
     {"ts_mse_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'mse')
-)"},
+)",
+    "Computes Mean Squared Error between actual and forecast columns per group.",
+    "SELECT * FROM ts_mse_by('results', product_id, date, actual, forecast)",
+    "metrics"},
 
     // ts_rmse_by: Compute Root Mean Squared Error grouped by selected columns
     // C++ API: ts_rmse_by(source, date_col, actual_col, forecast_col)
     {"ts_rmse_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'rmse')
-)"},
+)",
+    "Computes Root Mean Squared Error between actual and forecast columns per group.",
+    "SELECT * FROM ts_rmse_by('results', product_id, date, actual, forecast)",
+    "metrics"},
 
     // ts_mape_by: Compute Mean Absolute Percentage Error grouped by selected columns
     // C++ API: ts_mape_by(source, date_col, actual_col, forecast_col)
     {"ts_mape_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'mape')
-)"},
+)",
+    "Computes Mean Absolute Percentage Error between actual and forecast columns per group.",
+    "SELECT * FROM ts_mape_by('results', product_id, date, actual, forecast)",
+    "metrics"},
 
     // ts_smape_by: Compute Symmetric Mean Absolute Percentage Error grouped by selected columns
     // C++ API: ts_smape_by(source, date_col, actual_col, forecast_col)
     {"ts_smape_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'smape')
-)"},
+)",
+    "Computes Symmetric Mean Absolute Percentage Error between actual and forecast columns per group.",
+    "SELECT * FROM ts_smape_by('results', product_id, date, actual, forecast)",
+    "metrics"},
 
     // ts_r2_by: Compute R-squared (coefficient of determination) grouped by selected columns
     // C++ API: ts_r2_by(source, date_col, actual_col, forecast_col)
     {"ts_r2_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'r2')
-)"},
+)",
+    "Computes R-squared (coefficient of determination) between actual and forecast columns per group.",
+    "SELECT * FROM ts_r2_by('results', product_id, date, actual, forecast)",
+    "metrics"},
 
     // ts_bias_by: Compute bias (mean error) grouped by selected columns
     // C++ API: ts_bias_by(source, date_col, actual_col, forecast_col)
     {"ts_bias_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'bias')
-)"},
+)",
+    "Computes mean forecast bias between actual and forecast columns per group.",
+    "SELECT * FROM ts_bias_by('results', product_id, date, actual, forecast)",
+    "metrics"},
 
     // ts_mase_by: Compute Mean Absolute Scaled Error with GROUP BY ALL
     // C++ API: ts_mase_by(source, date_col, actual_col, forecast_col, baseline_col)
     {"ts_mase_by", {"source", "date_col", "actual_col", "forecast_col", "baseline_col", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_mase_native(source, date_col, actual_col, forecast_col, baseline_col)
-)"},
+)",
+    "Computes Mean Absolute Scaled Error comparing forecast to a baseline model per group.",
+    "SELECT * FROM ts_mase_by('results', product_id, date, actual, forecast, baseline)",
+    "metrics"},
 
     // ts_rmae_by: Compute Relative Mean Absolute Error with GROUP BY ALL
     // C++ API: ts_rmae_by(source, date_col, actual_col, pred1_col, pred2_col)
     {"ts_rmae_by", {"source", "date_col", "actual_col", "pred1_col", "pred2_col", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_rmae_native(source, date_col, actual_col, pred1_col, pred2_col)
-)"},
+)",
+    "Computes Relative MAE (MAE ratio between two models) per group.",
+    "SELECT * FROM ts_rmae_by('results', product_id, date, actual, pred1, pred2)",
+    "metrics"},
 
     // ts_coverage_by: Compute prediction interval coverage with GROUP BY ALL
     // C++ API: ts_coverage_by(source, date_col, actual_col, lower_col, upper_col)
     {"ts_coverage_by", {"source", "date_col", "actual_col", "lower_col", "upper_col", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_coverage_native(source, date_col, actual_col, lower_col, upper_col)
-)"},
+)",
+    "Computes prediction interval coverage rate per group.",
+    "SELECT * FROM ts_coverage_by('results', product_id, date, actual, lower, upper)",
+    "metrics"},
 
     // ts_quantile_loss_by: Compute quantile loss with GROUP BY ALL
     // C++ API: ts_quantile_loss_by(source, date_col, actual_col, forecast_col, quantile)
     {"ts_quantile_loss_by", {"source", "date_col", "actual_col", "forecast_col", "quantile", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_quantile_loss_native(source, date_col, actual_col, forecast_col, quantile)
-)"},
+)",
+    "Computes quantile (pinball) loss at a specified quantile level per group.",
+    "SELECT * FROM ts_quantile_loss_by('results', product_id, date, actual, forecast, 0.9)",
+    "metrics"},
 
     // Sentinel
-    {nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}
+    {nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr, nullptr, nullptr, nullptr}
 };
 // clang-format on
 
@@ -1843,6 +2042,20 @@ static unique_ptr<CreateMacroInfo> CreateTableMacro(const TsTableMacro &macro_de
     info->internal = true;
     info->macros.push_back(std::move(function));
 
+    // Populate description if provided
+    if (macro_def.description) {
+        FunctionDescription desc;
+        desc.description = macro_def.description;
+        if (macro_def.example) {
+            desc.examples.push_back(macro_def.example);
+        }
+        if (macro_def.category) {
+            desc.categories.push_back("time-series");
+            desc.categories.push_back(macro_def.category);
+        }
+        info->descriptions.push_back(std::move(desc));
+    }
+
     return info;
 }
 
@@ -1855,6 +2068,7 @@ void RegisterTsTableMacros(ExtensionLoader &loader) {
         // Register the prefixed alias (e.g. anofox_fcst_ts_forecast_by)
         auto alias_info = CreateTableMacro(ts_table_macros[i]);
         alias_info->name = "anofox_fcst_" + string(ts_table_macros[i].name);
+        alias_info->alias_of = string(ts_table_macros[i].name);
         loader.RegisterFunction(*alias_info);
     }
 }

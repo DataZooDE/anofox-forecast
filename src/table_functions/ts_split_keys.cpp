@@ -2,6 +2,7 @@
 #include "ts_fill_gaps_native.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
+#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include <vector>
 #include <sstream>
 #include <mutex>
@@ -414,7 +415,15 @@ void RegisterTsSplitKeysFunction(ExtensionLoader &loader) {
     func.in_out_function = TsSplitKeysInOut;
     func.in_out_function_final = TsSplitKeysFinalize;
 
-    loader.RegisterFunction(func);
+    {
+        CreateTableFunctionInfo info(func);
+        FunctionDescription desc;
+        desc.description = "Splits a composite group key column back into its original multiple key columns.";
+        desc.examples = {"SELECT * FROM ts_split_keys(TABLE(SELECT unique_id, date, value FROM t), separator='|', columns=['region', 'store', 'item'])"};
+        desc.categories = {"time-series", "hierarchical"};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 } // namespace duckdb

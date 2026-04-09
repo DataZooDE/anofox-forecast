@@ -3,6 +3,8 @@
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
+#include "duckdb/common/types/vector.hpp"
 
 namespace duckdb {
 
@@ -177,7 +179,17 @@ void RegisterTsDetectPeaksFunction(ExtensionLoader &loader) {
         GetPeakDetectionResultType(),
         TsDetectPeaksFunction
     ));
-    loader.RegisterFunction(ts_peaks_set);
+    {
+        CreateScalarFunctionInfo info(ts_peaks_set);
+        FunctionDescription desc;
+        desc.description = "Detects peaks in a time series array using prominence-based peak finding. Returns STRUCT with peak indices and properties.";
+        desc.examples = {"ts_detect_peaks(LIST(value ORDER BY date))", "ts_detect_peaks(LIST(value ORDER BY date), MAP{'min_prominence': '0.5'})"};
+        desc.categories = {"time-series", "peak-detection"};
+        desc.parameter_names = {"values"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -280,7 +292,17 @@ void RegisterTsAnalyzePeakTimingFunction(ExtensionLoader &loader) {
         GetPeakTimingResultType(),
         TsAnalyzePeakTimingFunction
     ));
-    loader.RegisterFunction(ts_peak_timing_set);
+    {
+        CreateScalarFunctionInfo info(ts_peak_timing_set);
+        FunctionDescription desc;
+        desc.description = "Analyzes timing patterns of peaks detected by ts_detect_peaks, returning periodicity and phase statistics.";
+        desc.examples = {"ts_analyze_peak_timing(LIST(value ORDER BY date), LIST(date ORDER BY date))"};
+        desc.categories = {"time-series", "peak-detection"};
+        desc.parameter_names = {"values", "period"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 } // namespace duckdb
