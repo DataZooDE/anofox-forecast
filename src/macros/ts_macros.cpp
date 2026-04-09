@@ -2034,11 +2034,6 @@ static unique_ptr<CreateMacroInfo> CreateTableMacro(const TsTableMacro &macro_de
         }
     }
 
-    // Set parameter types to ANY (SQL macros accept any expression type)
-    for (idx_t i = 0; i < function->parameters.size(); i++) {
-        function->types.push_back(LogicalType::ANY);
-    }
-
     // Create the macro info
     auto info = make_uniq<CreateMacroInfo>(CatalogType::TABLE_MACRO_ENTRY);
     info->schema = DEFAULT_SCHEMA;
