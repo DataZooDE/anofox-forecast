@@ -4,6 +4,7 @@
 #include "duckdb/common/exception.hpp"
 
 #include "duckdb/function/scalar_function.hpp"
+#include "duckdb/common/types/vector.hpp"
 
 namespace duckdb {
 

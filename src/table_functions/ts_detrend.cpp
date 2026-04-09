@@ -3,6 +3,8 @@
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
+#include "duckdb/common/types/vector.hpp"
 
 namespace duckdb {
 
@@ -126,7 +128,17 @@ void RegisterTsDetrendFunction(ExtensionLoader &loader) {
         GetDetrendResultType(),
         TsDetrendFunction
     ));
-    loader.RegisterFunction(ts_detrend_set);
+    {
+        CreateScalarFunctionInfo info(ts_detrend_set);
+        FunctionDescription desc;
+        desc.description = "Removes the trend component from a time series using linear or seasonal decomposition, returning detrended values.";
+        desc.examples = {"ts_detrend(LIST(value ORDER BY date), 7)"};
+        desc.categories = {"time-series", "decomposition"};
+        desc.parameter_names = {"values"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -230,7 +242,17 @@ void RegisterTsDecomposeSeasonalFunction(ExtensionLoader &loader) {
         GetDecomposeResultType(),
         TsDecomposeSeasonalFunction
     ));
-    loader.RegisterFunction(ts_decompose_set);
+    {
+        CreateScalarFunctionInfo info(ts_decompose_set);
+        FunctionDescription desc;
+        desc.description = "Extracts the seasonal component from a time series, returning seasonal indices or adjusted values.";
+        desc.examples = {"ts_decompose_seasonal(LIST(value ORDER BY date), 7)"};
+        desc.categories = {"time-series", "decomposition"};
+        desc.parameter_names = {"values", "period"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -303,7 +325,17 @@ void RegisterTsSeasonalStrengthFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsSeasonalStrengthFunction
     ));
-    loader.RegisterFunction(ts_strength_set);
+    {
+        CreateScalarFunctionInfo info(ts_strength_set);
+        FunctionDescription desc;
+        desc.description = "Computes the seasonal strength metric (0-1) indicating how strongly seasonal patterns dominate the time series.";
+        desc.examples = {"ts_seasonal_strength(LIST(value ORDER BY date), 7)"};
+        desc.categories = {"time-series", "decomposition", "seasonality"};
+        desc.parameter_names = {"values", "period"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -400,7 +432,17 @@ void RegisterTsSeasonalStrengthWindowedFunction(ExtensionLoader &loader) {
         LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
         TsSeasonalStrengthWindowedFunction
     ));
-    loader.RegisterFunction(ts_strength_win_set);
+    {
+        CreateScalarFunctionInfo info(ts_strength_win_set);
+        FunctionDescription desc;
+        desc.description = "Computes rolling seasonal strength over a sliding window, returning strength estimates per window position.";
+        desc.examples = {"ts_seasonal_strength_windowed(LIST(value ORDER BY date), 7, 52)"};
+        desc.categories = {"time-series", "decomposition", "seasonality"};
+        desc.parameter_names = {"values", "period", "window_size"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -553,7 +595,17 @@ void RegisterTsDetectSeasonalityChangesFunction(ExtensionLoader &loader) {
         GetChangeDetectionResultType(),
         TsDetectSeasonalityChangesFunction
     ));
-    loader.RegisterFunction(ts_changes_set);
+    {
+        CreateScalarFunctionInfo info(ts_changes_set);
+        FunctionDescription desc;
+        desc.description = "Detects structural changes in seasonal patterns over time, returning periods where seasonality changes significantly.";
+        desc.examples = {"ts_detect_seasonality_changes(LIST(value ORDER BY date), 7)"};
+        desc.categories = {"time-series", "seasonality"};
+        desc.parameter_names = {"values", "period"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -636,7 +688,17 @@ void RegisterTsInstantaneousPeriodFunction(ExtensionLoader &loader) {
         GetInstantaneousPeriodResultType(),
         TsInstantaneousPeriodFunction
     ));
-    loader.RegisterFunction(ts_inst_period_set);
+    {
+        CreateScalarFunctionInfo info(ts_inst_period_set);
+        FunctionDescription desc;
+        desc.description = "Estimates the instantaneous period of a time series using the Hilbert transform analytic signal method. Returns STRUCT(periods[], frequencies[], amplitudes[]).";
+        desc.examples = {"ts_instantaneous_period(LIST(value ORDER BY date))"};
+        desc.categories = {"time-series", "period-detection"};
+        desc.parameter_names = {"values"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -761,7 +823,17 @@ void RegisterTsDetectAmplitudeModulationFunction(ExtensionLoader &loader) {
         GetAmplitudeModulationResultType(),
         TsDetectAmplitudeModulationFunction
     ));
-    loader.RegisterFunction(ts_am_set);
+    {
+        CreateScalarFunctionInfo info(ts_am_set);
+        FunctionDescription desc;
+        desc.description = "Detects amplitude modulation in a seasonal time series, identifying whether peak amplitudes vary significantly over time. Returns STRUCT with modulation type, score, and amplitude trend.";
+        desc.examples = {"ts_detect_amplitude_modulation(LIST(value ORDER BY date), 7)"};
+        desc.categories = {"time-series", "seasonality"};
+        desc.parameter_names = {"values", "period"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 } // namespace duckdb

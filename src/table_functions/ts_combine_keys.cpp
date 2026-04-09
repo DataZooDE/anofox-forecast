@@ -2,6 +2,7 @@
 #include "ts_fill_gaps_native.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
+#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include <vector>
 
 namespace duckdb {
@@ -219,7 +220,15 @@ void RegisterTsCombineKeysFunction(ExtensionLoader &loader) {
     // Set up as table-in-out function
     func.in_out_function = TsCombineKeysInOut;
 
-    loader.RegisterFunction(func);
+    {
+        CreateTableFunctionInfo info(func);
+        FunctionDescription desc;
+        desc.description = "Combines multiple group key columns into a single composite key column for multi-key time series operations.";
+        desc.examples = {"SELECT * FROM ts_combine_keys(TABLE(SELECT date, value, region, store FROM t), MAP {'separator': '|'})"};
+        desc.categories = {"time-series", "hierarchical"};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 } // namespace duckdb

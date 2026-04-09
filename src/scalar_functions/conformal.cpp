@@ -4,7 +4,9 @@
 #include "duckdb/common/exception.hpp"
 
 #include "duckdb/function/scalar_function.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/common/vector_operations/generic_executor.hpp"
+#include "duckdb/common/types/vector.hpp"
 
 namespace duckdb {
 
@@ -78,7 +80,20 @@ void RegisterTsConformalQuantileFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsConformalQuantileFunction
     ));
-    loader.RegisterFunction(ts_cq_set);
+    {
+        CreateScalarFunctionInfo info(ts_cq_set);
+        FunctionDescription desc;
+        desc.description = "Computes the conformal quantile from calibration nonconformity scores at a given miscoverage rate alpha.";
+        desc.examples = {"ts_conformal_quantile(calibration_scores, 0.1)"};
+        desc.categories = {"time-series", "uncertainty", "conformal-prediction"};
+        desc.parameter_names = {"calibration_scores", "alpha"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::DOUBLE)
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_conformal_quantile");
     anofox_set.AddFunction(ScalarFunction(
@@ -86,7 +101,21 @@ void RegisterTsConformalQuantileFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsConformalQuantileFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_conformal_quantile";
+        FunctionDescription desc;
+        desc.description = "Computes the conformal quantile from calibration nonconformity scores at a given miscoverage rate alpha.";
+        desc.examples = {"ts_conformal_quantile(calibration_scores, 0.1)"};
+        desc.categories = {"time-series", "uncertainty", "conformal-prediction"};
+        desc.parameter_names = {"calibration_scores", "alpha"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::DOUBLE)
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -175,7 +204,20 @@ void RegisterTsConformalIntervalsFunction(ExtensionLoader &loader) {
         result_type,
         TsConformalIntervalsFunction
     ));
-    loader.RegisterFunction(ts_ci_set);
+    {
+        CreateScalarFunctionInfo info(ts_ci_set);
+        FunctionDescription desc;
+        desc.description = "Computes symmetric conformal prediction intervals by applying a conformal quantile to point forecasts.";
+        desc.examples = {"ts_conformal_intervals(point_forecast, conformal_q)"};
+        desc.categories = {"time-series", "uncertainty", "conformal-prediction"};
+        desc.parameter_names = {"point_forecast", "conformal_q"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::DOUBLE)
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_conformal_intervals");
     anofox_set.AddFunction(ScalarFunction(
@@ -183,7 +225,21 @@ void RegisterTsConformalIntervalsFunction(ExtensionLoader &loader) {
         result_type,
         TsConformalIntervalsFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_conformal_intervals";
+        FunctionDescription desc;
+        desc.description = "Computes symmetric conformal prediction intervals by applying a conformal quantile to point forecasts.";
+        desc.examples = {"ts_conformal_intervals(point_forecast, conformal_q)"};
+        desc.categories = {"time-series", "uncertainty", "conformal-prediction"};
+        desc.parameter_names = {"point_forecast", "conformal_q"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::DOUBLE)
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -301,7 +357,21 @@ void RegisterTsConformalPredictFunction(ExtensionLoader &loader) {
         result_type,
         TsConformalPredictFunction
     ));
-    loader.RegisterFunction(ts_cp_set);
+    {
+        CreateScalarFunctionInfo info(ts_cp_set);
+        FunctionDescription desc;
+        desc.description = "End-to-end symmetric conformal prediction: calibrates on residuals and applies to forecasts in one step.";
+        desc.examples = {"ts_conformal_predict(calibration_actuals, calibration_forecasts, point_forecast, 0.1)"};
+        desc.categories = {"time-series", "uncertainty", "conformal-prediction"};
+        desc.parameter_names = {"residuals", "forecasts", "alpha"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::DOUBLE)
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_conformal_predict");
     anofox_set.AddFunction(ScalarFunction(
@@ -309,7 +379,22 @@ void RegisterTsConformalPredictFunction(ExtensionLoader &loader) {
         result_type,
         TsConformalPredictFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_conformal_predict";
+        FunctionDescription desc;
+        desc.description = "End-to-end symmetric conformal prediction: calibrates on residuals and applies to forecasts in one step.";
+        desc.examples = {"ts_conformal_predict(calibration_actuals, calibration_forecasts, point_forecast, 0.1)"};
+        desc.categories = {"time-series", "uncertainty", "conformal-prediction"};
+        desc.parameter_names = {"residuals", "forecasts", "alpha"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::DOUBLE)
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -427,7 +512,21 @@ void RegisterTsConformalPredictAsymmetricFunction(ExtensionLoader &loader) {
         result_type,
         TsConformalPredictAsymmetricFunction
     ));
-    loader.RegisterFunction(ts_cpa_set);
+    {
+        CreateScalarFunctionInfo info(ts_cpa_set);
+        FunctionDescription desc;
+        desc.description = "End-to-end asymmetric conformal prediction using separate upper and lower quantiles for skewed errors.";
+        desc.examples = {"ts_conformal_predict_asymmetric(calibration_actuals, calibration_forecasts, point_forecast, 0.1)"};
+        desc.categories = {"time-series", "uncertainty", "conformal-prediction"};
+        desc.parameter_names = {"residuals", "forecasts", "alpha"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::DOUBLE)
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_conformal_predict_asymmetric");
     anofox_set.AddFunction(ScalarFunction(
@@ -435,7 +534,22 @@ void RegisterTsConformalPredictAsymmetricFunction(ExtensionLoader &loader) {
         result_type,
         TsConformalPredictAsymmetricFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_conformal_predict_asymmetric";
+        FunctionDescription desc;
+        desc.description = "End-to-end asymmetric conformal prediction using separate upper and lower quantiles for skewed errors.";
+        desc.examples = {"ts_conformal_predict_asymmetric(calibration_actuals, calibration_forecasts, point_forecast, 0.1)"};
+        desc.categories = {"time-series", "uncertainty", "conformal-prediction"};
+        desc.parameter_names = {"residuals", "forecasts", "alpha"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::DOUBLE)
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -624,7 +738,22 @@ void RegisterTsConformalLearnFunction(ExtensionLoader &loader) {
         result_type,
         TsConformalLearnFunction
     ));
-    loader.RegisterFunction(ts_cl_set);
+    {
+        CreateScalarFunctionInfo info(ts_cl_set);
+        FunctionDescription desc;
+        desc.description = "Calibrates a conformal predictor from calibration set actuals and forecasts. Returns conformal quantile for reuse.";
+        desc.examples = {"ts_conformal_learn(LIST(actual ORDER BY date), LIST(forecast ORDER BY date), 0.1)"};
+        desc.categories = {"time-series", "uncertainty", "conformal-prediction"};
+        desc.parameter_names = {"residuals", "alphas", "method", "strategy"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::VARCHAR),
+            LogicalType(LogicalTypeId::VARCHAR)
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_conformal_learn");
     anofox_set.AddFunction(ScalarFunction(
@@ -632,7 +761,23 @@ void RegisterTsConformalLearnFunction(ExtensionLoader &loader) {
         result_type,
         TsConformalLearnFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_conformal_learn";
+        FunctionDescription desc;
+        desc.description = "Calibrates a conformal predictor from calibration set actuals and forecasts. Returns conformal quantile for reuse.";
+        desc.examples = {"ts_conformal_learn(LIST(actual ORDER BY date), LIST(forecast ORDER BY date), 0.1)"};
+        desc.categories = {"time-series", "uncertainty", "conformal-prediction"};
+        desc.parameter_names = {"residuals", "alphas", "method", "strategy"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::VARCHAR),
+            LogicalType(LogicalTypeId::VARCHAR)
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -798,7 +943,20 @@ void RegisterTsConformalApplyFunction(ExtensionLoader &loader) {
         result_type,
         TsConformalApplyFunction
     ));
-    loader.RegisterFunction(ts_ca_set);
+    {
+        CreateScalarFunctionInfo info(ts_ca_set);
+        FunctionDescription desc;
+        desc.description = "Applies a pre-calibrated conformal quantile to new point forecasts to produce prediction intervals.";
+        desc.examples = {"ts_conformal_apply(point_forecast, conformal_q)"};
+        desc.categories = {"time-series", "uncertainty", "conformal-prediction"};
+        desc.parameter_names = {"point_forecast", "profile"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            profile_type
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_conformal_apply");
     anofox_set.AddFunction(ScalarFunction(
@@ -806,7 +964,21 @@ void RegisterTsConformalApplyFunction(ExtensionLoader &loader) {
         result_type,
         TsConformalApplyFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_conformal_apply";
+        FunctionDescription desc;
+        desc.description = "Applies a pre-calibrated conformal quantile to new point forecasts to produce prediction intervals.";
+        desc.examples = {"ts_conformal_apply(point_forecast, conformal_q)"};
+        desc.categories = {"time-series", "uncertainty", "conformal-prediction"};
+        desc.parameter_names = {"point_forecast", "profile"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            profile_type
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -864,7 +1036,21 @@ void RegisterTsConformalCoverageFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsConformalCoverageFunction
     ));
-    loader.RegisterFunction(ts_cc_set);
+    {
+        CreateScalarFunctionInfo info(ts_cc_set);
+        FunctionDescription desc;
+        desc.description = "Computes empirical coverage rate of conformal prediction intervals on a test set.";
+        desc.examples = {"ts_conformal_coverage(actual, lower, upper)"};
+        desc.categories = {"time-series", "uncertainty", "conformal-prediction"};
+        desc.parameter_names = {"actual", "lower", "upper"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_conformal_coverage");
     anofox_set.AddFunction(ScalarFunction(
@@ -872,7 +1058,22 @@ void RegisterTsConformalCoverageFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsConformalCoverageFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_conformal_coverage";
+        FunctionDescription desc;
+        desc.description = "Computes empirical coverage rate of conformal prediction intervals on a test set.";
+        desc.examples = {"ts_conformal_coverage(actual, lower, upper)"};
+        desc.categories = {"time-series", "uncertainty", "conformal-prediction"};
+        desc.parameter_names = {"actual", "lower", "upper"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -955,7 +1156,22 @@ void RegisterTsConformalEvaluateFunction(ExtensionLoader &loader) {
         result_type,
         TsConformalEvaluateFunction
     ));
-    loader.RegisterFunction(ts_ce_set);
+    {
+        CreateScalarFunctionInfo info(ts_ce_set);
+        FunctionDescription desc;
+        desc.description = "Evaluates conformal interval quality returning coverage, mean width, and efficiency metrics.";
+        desc.examples = {"ts_conformal_evaluate(actual, lower, upper, 0.1)"};
+        desc.categories = {"time-series", "uncertainty", "conformal-prediction"};
+        desc.parameter_names = {"actual", "lower", "upper", "alpha"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::DOUBLE)
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_conformal_evaluate");
     anofox_set.AddFunction(ScalarFunction(
@@ -963,7 +1179,23 @@ void RegisterTsConformalEvaluateFunction(ExtensionLoader &loader) {
         result_type,
         TsConformalEvaluateFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_conformal_evaluate";
+        FunctionDescription desc;
+        desc.description = "Evaluates conformal interval quality returning coverage, mean width, and efficiency metrics.";
+        desc.examples = {"ts_conformal_evaluate(actual, lower, upper, 0.1)"};
+        desc.categories = {"time-series", "uncertainty", "conformal-prediction"};
+        desc.parameter_names = {"actual", "lower", "upper", "alpha"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::DOUBLE)
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -1017,7 +1249,20 @@ void RegisterTsMeanIntervalWidthFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsMeanIntervalWidthFunction
     ));
-    loader.RegisterFunction(ts_miw_set);
+    {
+        CreateScalarFunctionInfo info(ts_miw_set);
+        FunctionDescription desc;
+        desc.description = "Computes the mean width of prediction intervals: average of (upper - lower) across all steps.";
+        desc.examples = {"ts_mean_interval_width(lower, upper)"};
+        desc.categories = {"time-series", "uncertainty"};
+        desc.parameter_names = {"lower", "upper"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_mean_interval_width");
     anofox_set.AddFunction(ScalarFunction(
@@ -1025,7 +1270,21 @@ void RegisterTsMeanIntervalWidthFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsMeanIntervalWidthFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_mean_interval_width";
+        FunctionDescription desc;
+        desc.description = "Computes the mean width of prediction intervals: average of (upper - lower) across all steps.";
+        desc.examples = {"ts_mean_interval_width(lower, upper)"};
+        desc.categories = {"time-series", "uncertainty"};
+        desc.parameter_names = {"lower", "upper"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -1149,7 +1408,23 @@ void RegisterTsConformalPredictPerStepFunction(ExtensionLoader &loader) {
         result_type,
         TsConformalPredictPerStepFunction
     ));
-    loader.RegisterFunction(ps_set);
+    {
+        CreateScalarFunctionInfo info(ps_set);
+        FunctionDescription desc;
+        desc.description = "Per-step conformal prediction that calibrates separate intervals for each forecast horizon step.";
+        desc.examples = {"ts_conformal_predict_per_step(calibration_actuals, calibration_forecasts, point_forecast, 0.1)"};
+        desc.categories = {"time-series", "uncertainty", "conformal-prediction"};
+        desc.parameter_names = {"fold_forecasts", "fold_actuals", "point_forecasts", "alpha", "horizon"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::DOUBLE),
+            LogicalType(LogicalTypeId::INTEGER)
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_conformal_predict_per_step");
     anofox_set.AddFunction(ScalarFunction(
@@ -1161,7 +1436,24 @@ void RegisterTsConformalPredictPerStepFunction(ExtensionLoader &loader) {
         result_type,
         TsConformalPredictPerStepFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_conformal_predict_per_step";
+        FunctionDescription desc;
+        desc.description = "Per-step conformal prediction that calibrates separate intervals for each forecast horizon step.";
+        desc.examples = {"ts_conformal_predict_per_step(calibration_actuals, calibration_forecasts, point_forecast, 0.1)"};
+        desc.categories = {"time-series", "uncertainty", "conformal-prediction"};
+        desc.parameter_names = {"fold_forecasts", "fold_actuals", "point_forecasts", "alpha", "horizon"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::DOUBLE),
+            LogicalType(LogicalTypeId::INTEGER)
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 } // namespace duckdb

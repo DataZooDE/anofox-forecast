@@ -5,6 +5,8 @@
 #include "duckdb/common/printer.hpp"
 #include "duckdb/function/aggregate_function.hpp"
 #include "duckdb/common/types/timestamp.hpp"
+#include "duckdb/common/types/vector.hpp"
+#include "duckdb/parser/parsed_data/create_aggregate_function_info.hpp"
 #include <unordered_map>
 #include <unordered_set>
 #include <limits>
@@ -425,21 +427,112 @@ void RegisterTsFeaturesAggFunction(ExtensionLoader &loader) {
     ts_features_set.AddFunction(agg_func_2);
     ts_features_set.AddFunction(agg_func_3);
     ts_features_set.AddFunction(agg_func_4);
-    loader.RegisterFunction(ts_features_set);
+    {
+        CreateAggregateFunctionInfo info(ts_features_set);
+        {
+            FunctionDescription desc;
+            desc.description = "Aggregate function: extracts 117 tsfresh-compatible time series features for each group. Returns a STRUCT with all computed features.";
+            desc.examples = {"SELECT product_id, ts_features(date, value) FROM sales GROUP BY product_id"};
+            desc.categories = {"time-series", "feature-extraction"};
+            desc.parameter_names = {"date", "value"};
+            desc.parameter_types = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE)};
+            info.descriptions.push_back(std::move(desc));
+        }
+        {
+            FunctionDescription desc;
+            desc.description = "Aggregate function: extracts 117 tsfresh-compatible time series features for each group. Returns a STRUCT with all computed features.";
+            desc.examples = {"SELECT product_id, ts_features(date, value, ['mean', 'std_dev']) FROM sales GROUP BY product_id"};
+            desc.categories = {"time-series", "feature-extraction"};
+            desc.parameter_names = {"date", "value", "feature_selection"};
+            desc.parameter_types = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE), LogicalType::LIST(LogicalType(LogicalTypeId::VARCHAR))};
+            info.descriptions.push_back(std::move(desc));
+        }
+        {
+            FunctionDescription desc;
+            desc.description = "Aggregate function: extracts 117 tsfresh-compatible time series features for each group. Returns a STRUCT with all computed features.";
+            desc.examples = {"SELECT product_id, ts_features(date, value, ['mean'], NULL) FROM sales GROUP BY product_id"};
+            desc.categories = {"time-series", "feature-extraction"};
+            desc.parameter_names = {"date", "value", "feature_selection", "feature_params"};
+            desc.parameter_types = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE), LogicalType::LIST(LogicalType(LogicalTypeId::VARCHAR)), LogicalType::LIST(param_struct_type)};
+            info.descriptions.push_back(std::move(desc));
+        }
+        loader.RegisterFunction(std::move(info));
+    }
 
     // Register ts_features_agg alias (for API consistency with ts_forecast_agg pattern)
     AggregateFunctionSet ts_features_agg_set("ts_features_agg");
     ts_features_agg_set.AddFunction(agg_func_2);
     ts_features_agg_set.AddFunction(agg_func_3);
     ts_features_agg_set.AddFunction(agg_func_4);
-    loader.RegisterFunction(ts_features_agg_set);
+    {
+        CreateAggregateFunctionInfo info(ts_features_agg_set);
+        {
+            FunctionDescription desc;
+            desc.description = "Aggregate function: extracts 117 tsfresh-compatible time series features for each group. Returns a STRUCT with all computed features.";
+            desc.examples = {"SELECT product_id, ts_features_agg(date, value) FROM sales GROUP BY product_id"};
+            desc.categories = {"time-series", "feature-extraction"};
+            desc.parameter_names = {"date", "value"};
+            desc.parameter_types = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE)};
+            info.descriptions.push_back(std::move(desc));
+        }
+        {
+            FunctionDescription desc;
+            desc.description = "Aggregate function: extracts 117 tsfresh-compatible time series features for each group. Returns a STRUCT with all computed features.";
+            desc.examples = {"SELECT product_id, ts_features_agg(date, value, config) FROM sales GROUP BY product_id"};
+            desc.categories = {"time-series", "feature-extraction"};
+            desc.parameter_names = {"date", "value", "feature_selection"};
+            desc.parameter_types = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE), LogicalType::LIST(LogicalType(LogicalTypeId::VARCHAR))};
+            info.descriptions.push_back(std::move(desc));
+        }
+        {
+            FunctionDescription desc;
+            desc.description = "Aggregate function: extracts 117 tsfresh-compatible time series features for each group. Returns a STRUCT with all computed features.";
+            desc.examples = {"SELECT product_id, ts_features_agg(date, value, ['mean'], NULL) FROM sales GROUP BY product_id"};
+            desc.categories = {"time-series", "feature-extraction"};
+            desc.parameter_names = {"date", "value", "feature_selection", "feature_params"};
+            desc.parameter_types = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE), LogicalType::LIST(LogicalType(LogicalTypeId::VARCHAR)), LogicalType::LIST(param_struct_type)};
+            info.descriptions.push_back(std::move(desc));
+        }
+        loader.RegisterFunction(std::move(info));
+    }
 
     // Register anofox_fcst_ts_features_agg alias (prefixed form)
     AggregateFunctionSet anofox_features_agg_set("anofox_fcst_ts_features_agg");
     anofox_features_agg_set.AddFunction(agg_func_2);
     anofox_features_agg_set.AddFunction(agg_func_3);
     anofox_features_agg_set.AddFunction(agg_func_4);
-    loader.RegisterFunction(anofox_features_agg_set);
+    {
+        CreateAggregateFunctionInfo info(anofox_features_agg_set);
+        info.alias_of = "ts_features_agg";
+        {
+            FunctionDescription desc;
+            desc.description = "Aggregate function: extracts 117 tsfresh-compatible time series features for each group. Returns a STRUCT with all computed features.";
+            desc.examples = {"SELECT product_id, anofox_fcst_ts_features_agg(date, value) FROM sales GROUP BY product_id"};
+            desc.categories = {"time-series", "feature-extraction"};
+            desc.parameter_names = {"date", "value"};
+            desc.parameter_types = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE)};
+            info.descriptions.push_back(std::move(desc));
+        }
+        {
+            FunctionDescription desc;
+            desc.description = "Aggregate function: extracts 117 tsfresh-compatible time series features for each group. Returns a STRUCT with all computed features.";
+            desc.examples = {"SELECT product_id, anofox_fcst_ts_features_agg(date, value, config) FROM sales GROUP BY product_id"};
+            desc.categories = {"time-series", "feature-extraction"};
+            desc.parameter_names = {"date", "value", "feature_selection"};
+            desc.parameter_types = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE), LogicalType::LIST(LogicalType(LogicalTypeId::VARCHAR))};
+            info.descriptions.push_back(std::move(desc));
+        }
+        {
+            FunctionDescription desc;
+            desc.description = "Aggregate function: extracts 117 tsfresh-compatible time series features for each group. Returns a STRUCT with all computed features.";
+            desc.examples = {"SELECT product_id, anofox_fcst_ts_features_agg(date, value, ['mean'], NULL) FROM sales GROUP BY product_id"};
+            desc.categories = {"time-series", "feature-extraction"};
+            desc.parameter_names = {"date", "value", "feature_selection", "feature_params"};
+            desc.parameter_types = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE), LogicalType::LIST(LogicalType(LogicalTypeId::VARCHAR)), LogicalType::LIST(param_struct_type)};
+            info.descriptions.push_back(std::move(desc));
+        }
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 } // namespace duckdb

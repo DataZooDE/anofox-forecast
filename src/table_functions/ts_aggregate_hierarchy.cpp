@@ -2,6 +2,7 @@
 #include "ts_fill_gaps_native.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
+#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include <algorithm>
 #include <map>
 #include <vector>
@@ -444,7 +445,15 @@ void RegisterTsAggregateHierarchyFunction(ExtensionLoader &loader) {
     func.in_out_function = TsAggregateHierarchyInOut;
     func.in_out_function_final = TsAggregateHierarchyFinalize;
 
-    loader.RegisterFunction(func);
+    {
+        CreateTableFunctionInfo info(func);
+        FunctionDescription desc;
+        desc.description = "Aggregates time series data up through a hierarchy of group keys, rolling up lower-level series to higher levels.";
+        desc.examples = {"SELECT * FROM ts_aggregate_hierarchy(TABLE(SELECT date, value, region, store, item FROM t), MAP {'separator': '|'})"};
+        desc.categories = {"time-series", "hierarchical"};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 } // namespace duckdb
