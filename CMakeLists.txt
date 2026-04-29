@@ -121,6 +121,9 @@ elseif(APPLE AND DEFINED OSX_BUILD_ARCH AND NOT "${OSX_BUILD_ARCH}" STREQUAL "${
 endif()
 
 if(TELEMETRY_SUPPORTED)
+    # Static OpenSSL avoids a runtime dependency on libssl.so.1.1, which is no longer
+    # available on Ubuntu 22.04+, Fedora 36+, Arch, etc. (issue #211).
+    set(OPENSSL_USE_STATIC_LIBS ON)
     find_package(OpenSSL QUIET)
     if(OPENSSL_FOUND)
         set(DUCKDB_SRC_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/duckdb/src/include")
