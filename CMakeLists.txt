@@ -121,13 +121,11 @@ elseif(APPLE AND DEFINED OSX_BUILD_ARCH AND NOT "${OSX_BUILD_ARCH}" STREQUAL "${
 endif()
 
 if(TELEMETRY_SUPPORTED)
-    # Static OpenSSL on Linux/macOS avoids a runtime dependency on libssl.so.1.1,
-    # which is no longer available on Ubuntu 22.04+, Fedora 36+, Arch, etc. (issue #211).
-    # Skip on Windows: vcpkg's x64-windows-static-release triplet already handles
-    # bundling, and forcing static here causes a CRT mismatch (LNK2019 on __imp_fgets etc.).
-    if(NOT WIN32)
-        set(OPENSSL_USE_STATIC_LIBS ON)
-    endif()
+    # Static OpenSSL avoids runtime dependencies on libssl.so.1.1 (Linux, issue #211)
+    # and libssl-3-x64.dll / libcrypto-3-x64.dll (Windows, issue #215). On Windows this
+    # requires `openssl` in vcpkg.json so the x64-windows-static-release triplet
+    # supplies static libs built with /MT (matching the extension's CRT).
+    set(OPENSSL_USE_STATIC_LIBS ON)
     find_package(OpenSSL QUIET)
     if(OPENSSL_FOUND)
         set(DUCKDB_SRC_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/duckdb/src/include")
