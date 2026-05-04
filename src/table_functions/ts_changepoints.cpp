@@ -6,6 +6,7 @@
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/function/table_function.hpp"
+#include "duckdb/common/types/vector.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include <map>
 #include <mutex>

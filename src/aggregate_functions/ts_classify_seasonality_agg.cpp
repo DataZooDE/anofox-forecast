@@ -4,6 +4,8 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/aggregate_function.hpp"
 #include "duckdb/common/types/timestamp.hpp"
+#include "duckdb/common/types/vector.hpp"
+#include "duckdb/parser/parsed_data/create_aggregate_function_info.hpp"
 
 namespace duckdb {
 
@@ -319,12 +321,33 @@ void RegisterTsClassifySeasonalityAggFunction(ExtensionLoader &loader) {
 
     AggregateFunctionSet agg_set("ts_classify_seasonality_agg");
     agg_set.AddFunction(agg_func);
-    loader.RegisterFunction(agg_set);
+    {
+        CreateAggregateFunctionInfo info(agg_set);
+        FunctionDescription desc;
+        desc.description = "Aggregate function: classifies the seasonality type (none, additive, multiplicative) for each group.";
+        desc.examples = {"SELECT product_id, ts_classify_seasonality_agg(date, value, MAP{}) FROM sales GROUP BY product_id"};
+        desc.categories = {"time-series", "seasonality"};
+        desc.parameter_names = {"date", "value", "period"};
+        desc.parameter_types = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     // Also register with anofox_ prefix
     AggregateFunctionSet anofox_agg_set("anofox_fcst_ts_classify_seasonality_agg");
     anofox_agg_set.AddFunction(agg_func);
-    loader.RegisterFunction(anofox_agg_set);
+    {
+        CreateAggregateFunctionInfo info(anofox_agg_set);
+        info.alias_of = "ts_classify_seasonality_agg";
+        FunctionDescription desc;
+        desc.description = "Aggregate function: classifies the seasonality type (none, additive, multiplicative) for each group.";
+        desc.examples = {"SELECT product_id, anofox_fcst_ts_classify_seasonality_agg(date, value, MAP{}) FROM sales GROUP BY product_id"};
+        desc.categories = {"time-series", "seasonality"};
+        desc.parameter_names = {"date", "value", "period"};
+        desc.parameter_types = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 } // namespace duckdb

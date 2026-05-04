@@ -4,6 +4,8 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/aggregate_function.hpp"
 #include "duckdb/common/types/timestamp.hpp"
+#include "duckdb/common/types/vector.hpp"
+#include "duckdb/parser/parsed_data/create_aggregate_function_info.hpp"
 
 namespace duckdb {
 
@@ -357,13 +359,56 @@ void RegisterTsDetectPeriodsAggFunction(ExtensionLoader &loader) {
     AggregateFunctionSet agg_set("ts_detect_periods_agg");
     agg_set.AddFunction(agg_func_2);
     agg_set.AddFunction(agg_func_3);
-    loader.RegisterFunction(agg_set);
+    {
+        CreateAggregateFunctionInfo info(agg_set);
+        {
+            FunctionDescription desc;
+            desc.description = "Aggregate function: detects seasonal periods for each group, returning the primary period, confidence, and a ranked list of candidates.";
+            desc.examples = {"SELECT product_id, ts_detect_periods_agg(date, value) FROM sales GROUP BY product_id"};
+            desc.categories = {"time-series", "period-detection"};
+            desc.parameter_names = {"date", "value"};
+            desc.parameter_types = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE)};
+            info.descriptions.push_back(std::move(desc));
+        }
+        {
+            FunctionDescription desc;
+            desc.description = "Aggregate function: detects seasonal periods for each group, returning the primary period, confidence, and a ranked list of candidates.";
+            desc.examples = {"SELECT product_id, ts_detect_periods_agg(date, value, MAP{'method': 'auto'}) FROM sales GROUP BY product_id"};
+            desc.categories = {"time-series", "period-detection"};
+            desc.parameter_names = {"date", "value", "method"};
+            desc.parameter_types = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::VARCHAR)};
+            info.descriptions.push_back(std::move(desc));
+        }
+        loader.RegisterFunction(std::move(info));
+    }
 
     // Also register with anofox_ prefix
     AggregateFunctionSet anofox_agg_set("anofox_fcst_ts_detect_periods_agg");
     anofox_agg_set.AddFunction(agg_func_2);
     anofox_agg_set.AddFunction(agg_func_3);
-    loader.RegisterFunction(anofox_agg_set);
+    {
+        CreateAggregateFunctionInfo info(anofox_agg_set);
+        info.alias_of = "ts_detect_periods_agg";
+        {
+            FunctionDescription desc;
+            desc.description = "Aggregate function: detects seasonal periods for each group, returning the primary period, confidence, and a ranked list of candidates.";
+            desc.examples = {"SELECT product_id, anofox_fcst_ts_detect_periods_agg(date, value) FROM sales GROUP BY product_id"};
+            desc.categories = {"time-series", "period-detection"};
+            desc.parameter_names = {"date", "value"};
+            desc.parameter_types = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE)};
+            info.descriptions.push_back(std::move(desc));
+        }
+        {
+            FunctionDescription desc;
+            desc.description = "Aggregate function: detects seasonal periods for each group, returning the primary period, confidence, and a ranked list of candidates.";
+            desc.examples = {"SELECT product_id, anofox_fcst_ts_detect_periods_agg(date, value, MAP{'method': 'auto'}) FROM sales GROUP BY product_id"};
+            desc.categories = {"time-series", "period-detection"};
+            desc.parameter_names = {"date", "value", "method"};
+            desc.parameter_types = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::VARCHAR)};
+            info.descriptions.push_back(std::move(desc));
+        }
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 } // namespace duckdb

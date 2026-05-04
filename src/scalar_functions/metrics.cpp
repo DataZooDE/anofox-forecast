@@ -5,6 +5,7 @@
 
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/common/vector_operations/generic_executor.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 
 namespace duckdb {
 
@@ -74,7 +75,17 @@ void RegisterTsMaeFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsMaeFunction
     ));
-    loader.RegisterFunction(ts_mae_set);
+    {
+        CreateScalarFunctionInfo info(ts_mae_set);
+        FunctionDescription desc;
+        desc.description = "Computes Mean Absolute Error (MAE) between actual and predicted value arrays.";
+        desc.examples = {"ts_mae(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "predicted"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_mae");
     anofox_set.AddFunction(ScalarFunction(
@@ -82,7 +93,18 @@ void RegisterTsMaeFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsMaeFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_mae";
+        FunctionDescription desc;
+        desc.description = "Computes Mean Absolute Error (MAE) between actual and predicted value arrays.";
+        desc.examples = {"ts_mae(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "predicted"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -131,7 +153,17 @@ void RegisterTsMseFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsMseFunction
     ));
-    loader.RegisterFunction(ts_mse_set);
+    {
+        CreateScalarFunctionInfo info(ts_mse_set);
+        FunctionDescription desc;
+        desc.description = "Computes Mean Squared Error (MSE) between actual and predicted value arrays.";
+        desc.examples = {"ts_mse(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "predicted"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_mse");
     anofox_set.AddFunction(ScalarFunction(
@@ -139,7 +171,18 @@ void RegisterTsMseFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsMseFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_mse";
+        FunctionDescription desc;
+        desc.description = "Computes Mean Squared Error (MSE) between actual and predicted value arrays.";
+        desc.examples = {"ts_mse(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "predicted"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -188,7 +231,17 @@ void RegisterTsRmseFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsRmseFunction
     ));
-    loader.RegisterFunction(ts_rmse_set);
+    {
+        CreateScalarFunctionInfo info(ts_rmse_set);
+        FunctionDescription desc;
+        desc.description = "Computes Root Mean Squared Error (RMSE) between actual and predicted value arrays.";
+        desc.examples = {"ts_rmse(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "predicted"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_rmse");
     anofox_set.AddFunction(ScalarFunction(
@@ -196,7 +249,18 @@ void RegisterTsRmseFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsRmseFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_rmse";
+        FunctionDescription desc;
+        desc.description = "Computes Root Mean Squared Error (RMSE) between actual and predicted value arrays.";
+        desc.examples = {"ts_rmse(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "predicted"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -245,7 +309,17 @@ void RegisterTsMapeFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsMapeFunction
     ));
-    loader.RegisterFunction(ts_mape_set);
+    {
+        CreateScalarFunctionInfo info(ts_mape_set);
+        FunctionDescription desc;
+        desc.description = "Computes Mean Absolute Percentage Error (MAPE) between actual and predicted value arrays.";
+        desc.examples = {"ts_mape(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "predicted"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_mape");
     anofox_set.AddFunction(ScalarFunction(
@@ -253,7 +327,18 @@ void RegisterTsMapeFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsMapeFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_mape";
+        FunctionDescription desc;
+        desc.description = "Computes Mean Absolute Percentage Error (MAPE) between actual and predicted value arrays.";
+        desc.examples = {"ts_mape(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "predicted"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -302,7 +387,17 @@ void RegisterTsSmapeFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsSmapeFunction
     ));
-    loader.RegisterFunction(ts_smape_set);
+    {
+        CreateScalarFunctionInfo info(ts_smape_set);
+        FunctionDescription desc;
+        desc.description = "Computes Symmetric Mean Absolute Percentage Error (sMAPE) between actual and predicted value arrays.";
+        desc.examples = {"ts_smape(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "predicted"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_smape");
     anofox_set.AddFunction(ScalarFunction(
@@ -310,7 +405,18 @@ void RegisterTsSmapeFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsSmapeFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_smape";
+        FunctionDescription desc;
+        desc.description = "Computes Symmetric Mean Absolute Percentage Error (sMAPE) between actual and predicted value arrays.";
+        desc.examples = {"ts_smape(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "predicted"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -364,7 +470,17 @@ void RegisterTsMaseFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsMaseFunction
     ));
-    loader.RegisterFunction(ts_mase_set);
+    {
+        CreateScalarFunctionInfo info(ts_mase_set);
+        FunctionDescription desc;
+        desc.description = "Computes Mean Absolute Scaled Error (MASE) comparing forecast error to a baseline model.";
+        desc.examples = {"ts_mase(LIST(actual ORDER BY date), LIST(forecast ORDER BY date), LIST(naive ORDER BY date))"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "predicted", "baseline"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_mase");
     anofox_set.AddFunction(ScalarFunction(
@@ -372,7 +488,18 @@ void RegisterTsMaseFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsMaseFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_mase";
+        FunctionDescription desc;
+        desc.description = "Computes Mean Absolute Scaled Error (MASE) comparing forecast error to a baseline model.";
+        desc.examples = {"ts_mase(LIST(actual ORDER BY date), LIST(forecast ORDER BY date), LIST(naive ORDER BY date))"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "predicted", "baseline"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -421,7 +548,17 @@ void RegisterTsR2Function(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsR2Function
     ));
-    loader.RegisterFunction(ts_r2_set);
+    {
+        CreateScalarFunctionInfo info(ts_r2_set);
+        FunctionDescription desc;
+        desc.description = "Computes the R-squared (coefficient of determination) between actual and predicted value arrays.";
+        desc.examples = {"ts_r2(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "predicted"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_r2");
     anofox_set.AddFunction(ScalarFunction(
@@ -429,7 +566,18 @@ void RegisterTsR2Function(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsR2Function
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_r2";
+        FunctionDescription desc;
+        desc.description = "Computes the R-squared (coefficient of determination) between actual and predicted value arrays.";
+        desc.examples = {"ts_r2(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "predicted"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -478,7 +626,17 @@ void RegisterTsBiasFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsBiasFunction
     ));
-    loader.RegisterFunction(ts_bias_set);
+    {
+        CreateScalarFunctionInfo info(ts_bias_set);
+        FunctionDescription desc;
+        desc.description = "Computes mean forecast bias (mean error) between actual and predicted value arrays.";
+        desc.examples = {"ts_bias(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "predicted"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_bias");
     anofox_set.AddFunction(ScalarFunction(
@@ -486,7 +644,18 @@ void RegisterTsBiasFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsBiasFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_bias";
+        FunctionDescription desc;
+        desc.description = "Computes mean forecast bias (mean error) between actual and predicted value arrays.";
+        desc.examples = {"ts_bias(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "predicted"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -541,7 +710,17 @@ void RegisterTsRmaeFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsRmaeFunction
     ));
-    loader.RegisterFunction(ts_rmae_set);
+    {
+        CreateScalarFunctionInfo info(ts_rmae_set);
+        FunctionDescription desc;
+        desc.description = "Computes Relative MAE: ratio of MAE(actual, pred1) to MAE(actual, pred2). Values < 1 mean pred1 is better.";
+        desc.examples = {"ts_rmae(LIST(actual ORDER BY date), LIST(model_a ORDER BY date), LIST(model_b ORDER BY date))"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "pred1", "pred2"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_rmae");
     anofox_set.AddFunction(ScalarFunction(
@@ -549,7 +728,18 @@ void RegisterTsRmaeFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsRmaeFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_rmae";
+        FunctionDescription desc;
+        desc.description = "Computes Relative MAE: ratio of MAE(actual, pred1) to MAE(actual, pred2). Values < 1 mean pred1 is better.";
+        desc.examples = {"ts_rmae(LIST(actual ORDER BY date), LIST(model_a ORDER BY date), LIST(model_b ORDER BY date))"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "pred1", "pred2"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -609,7 +799,17 @@ void RegisterTsQuantileLossFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsQuantileLossFunction
     ));
-    loader.RegisterFunction(ts_ql_set);
+    {
+        CreateScalarFunctionInfo info(ts_ql_set);
+        FunctionDescription desc;
+        desc.description = "Computes the quantile (pinball) loss for a single quantile level.";
+        desc.examples = {"ts_quantile_loss(LIST(actual ORDER BY date), LIST(forecast ORDER BY date), 0.9)"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "predicted", "quantile"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_quantile_loss");
     anofox_set.AddFunction(ScalarFunction(
@@ -617,7 +817,18 @@ void RegisterTsQuantileLossFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsQuantileLossFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_quantile_loss";
+        FunctionDescription desc;
+        desc.description = "Computes the quantile (pinball) loss for a single quantile level.";
+        desc.examples = {"ts_quantile_loss(LIST(actual ORDER BY date), LIST(forecast ORDER BY date), 0.9)"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "predicted", "quantile"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -718,7 +929,17 @@ void RegisterTsMqlossFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsMqlossFunction
     ));
-    loader.RegisterFunction(ts_mqloss_set);
+    {
+        CreateScalarFunctionInfo info(ts_mqloss_set);
+        FunctionDescription desc;
+        desc.description = "Computes Mean Quantile Loss (MQLoss) across multiple quantile levels.";
+        desc.examples = {"ts_mqloss(LIST(actual ORDER BY date), LIST([lower, upper] ORDER BY date), [0.1, 0.9])"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "quantiles", "levels"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_mqloss");
     anofox_set.AddFunction(ScalarFunction(
@@ -728,7 +949,18 @@ void RegisterTsMqlossFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsMqlossFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_mqloss";
+        FunctionDescription desc;
+        desc.description = "Computes Mean Quantile Loss (MQLoss) across multiple quantile levels.";
+        desc.examples = {"ts_mqloss(LIST(actual ORDER BY date), LIST([lower, upper] ORDER BY date), [0.1, 0.9])"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "quantiles", "levels"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -781,7 +1013,17 @@ void RegisterTsCoverageFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsCoverageFunction
     ));
-    loader.RegisterFunction(ts_coverage_set);
+    {
+        CreateScalarFunctionInfo info(ts_coverage_set);
+        FunctionDescription desc;
+        desc.description = "Computes the empirical coverage rate of prediction intervals: fraction of actuals within [lower, upper].";
+        desc.examples = {"ts_coverage(LIST(actual ORDER BY date), LIST(lower ORDER BY date), LIST(upper ORDER BY date))"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "lower", "upper"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_coverage");
     anofox_set.AddFunction(ScalarFunction(
@@ -789,7 +1031,18 @@ void RegisterTsCoverageFunction(ExtensionLoader &loader) {
         LogicalType(LogicalTypeId::DOUBLE),
         TsCoverageFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_coverage";
+        FunctionDescription desc;
+        desc.description = "Computes the empirical coverage rate of prediction intervals: fraction of actuals within [lower, upper].";
+        desc.examples = {"ts_coverage(LIST(actual ORDER BY date), LIST(lower ORDER BY date), LIST(upper ORDER BY date))"};
+        desc.categories = {"time-series", "metrics"};
+        desc.parameter_names = {"actual", "lower", "upper"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -852,7 +1105,17 @@ void RegisterTsEstimateBacktestMemoryFunction(ExtensionLoader &loader) {
         LogicalType::BIGINT,
         TsEstimateBacktestMemoryFunction
     ));
-    loader.RegisterFunction(func_set);
+    {
+        CreateScalarFunctionInfo info(func_set);
+        FunctionDescription desc;
+        desc.description = "Estimates memory usage in MB for a ts_backtest_auto_by run given series count, length, folds, and horizon.";
+        desc.examples = {"ts_estimate_backtest_memory(100, 365, 3, 30)"};
+        desc.categories = {"time-series", "utilities"};
+        desc.parameter_names = {"n_series", "n_dates", "folds", "horizon"};
+        desc.parameter_types = {LogicalType::BIGINT, LogicalType::BIGINT, LogicalType::BIGINT, LogicalType::BIGINT};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 } // namespace duckdb

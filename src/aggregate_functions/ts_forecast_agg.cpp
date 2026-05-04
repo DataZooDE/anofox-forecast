@@ -4,6 +4,8 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/aggregate_function.hpp"
 #include "duckdb/common/types/timestamp.hpp"
+#include "duckdb/common/types/vector.hpp"
+#include "duckdb/parser/parsed_data/create_aggregate_function_info.hpp"
 #include <cmath>
 
 namespace duckdb {
@@ -596,12 +598,33 @@ void RegisterTsForecastAggFunction(ExtensionLoader &loader) {
 
     AggregateFunctionSet func_set("anofox_fcst_ts_forecast_agg");
     func_set.AddFunction(agg_func);
-    loader.RegisterFunction(func_set);
+    {
+        CreateAggregateFunctionInfo info(func_set);
+        info.alias_of = "ts_forecast_agg";
+        FunctionDescription desc;
+        desc.description = "Aggregate function: produces a time series forecast for each group. Supports 32 forecasting models. Returns STRUCT(point[], lower[], upper[], fitted[], residuals[], model, aic, bic, mse).";
+        desc.examples = {"SELECT product_id, anofox_fcst_ts_forecast_agg(date, value, 'AutoETS', 12, MAP{}) FROM sales GROUP BY product_id"};
+        desc.categories = {"time-series", "forecasting"};
+        desc.parameter_names = {"date", "value", "method", "horizon", "params"};
+        desc.parameter_types = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::INTEGER), LogicalType::MAP(LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::VARCHAR))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     // Also register as ts_forecast_agg alias
     AggregateFunctionSet alias_set("ts_forecast_agg");
     alias_set.AddFunction(agg_func);
-    loader.RegisterFunction(alias_set);
+    {
+        CreateAggregateFunctionInfo info(alias_set);
+        FunctionDescription desc;
+        desc.description = "Aggregate function: produces a time series forecast for each group. Supports 32 forecasting models. Returns STRUCT(point[], lower[], upper[], fitted[], residuals[], model, aic, bic, mse).";
+        desc.examples = {"SELECT product_id, ts_forecast_agg(date, value, 'AutoETS', 12, MAP{}) FROM sales GROUP BY product_id"};
+        desc.categories = {"time-series", "forecasting"};
+        desc.parameter_names = {"date", "value", "method", "horizon", "params"};
+        desc.parameter_types = {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::INTEGER), LogicalType::MAP(LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::VARCHAR))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 } // namespace duckdb

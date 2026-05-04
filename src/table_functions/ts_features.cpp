@@ -4,6 +4,9 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/function/table_function.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
+#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
+#include "duckdb/common/types/vector.hpp"
 #include <unordered_map>
 #include <limits>
 
@@ -227,7 +230,15 @@ static void TsFeaturesListExecute(ClientContext &context, TableFunctionInput &da
 
 void RegisterTsFeaturesListFunction(ExtensionLoader &loader) {
     TableFunction ts_features_list_func("ts_features_list", {}, TsFeaturesListExecute, TsFeaturesListBind);
-    loader.RegisterFunction(ts_features_list_func);
+    {
+        CreateTableFunctionInfo info(ts_features_list_func);
+        FunctionDescription desc;
+        desc.description = "Returns a table listing all 117 available tsfresh-compatible feature names and their categories.";
+        desc.examples = {"SELECT * FROM ts_features_list()"};
+        desc.categories = {"time-series", "feature-extraction"};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -294,7 +305,15 @@ static void TsFeaturesConfigTemplateExecute(ClientContext &context, TableFunctio
 
 void RegisterTsFeaturesConfigTemplateFunction(ExtensionLoader &loader) {
     TableFunction func("ts_features_config_template", {}, TsFeaturesConfigTemplateExecute, TsFeaturesConfigTemplateBind);
-    loader.RegisterFunction(func);
+    {
+        CreateTableFunctionInfo info(func);
+        FunctionDescription desc;
+        desc.description = "Returns a JSON template for configuring which features to compute with ts_features_by().";
+        desc.examples = {"SELECT * FROM ts_features_config_template()"};
+        desc.categories = {"time-series", "feature-extraction"};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -377,7 +396,17 @@ void RegisterTsFeaturesConfigFromJsonFunction(ExtensionLoader &loader) {
         GetFeaturesConfigResultType(),
         TsFeaturesConfigFromJsonFunction
     ));
-    loader.RegisterFunction(config_json_set);
+    {
+        CreateScalarFunctionInfo info(config_json_set);
+        FunctionDescription desc;
+        desc.description = "Parses a feature configuration JSON string for use with ts_features_by() to select specific features.";
+        desc.examples = {"ts_features_config_from_json('{\"features\": [\"mean\", \"std\"]}')"};
+        desc.categories = {"time-series", "feature-extraction"};
+        desc.parameter_names = {"config_json"};
+        desc.parameter_types = {LogicalType(LogicalTypeId::VARCHAR)};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_features_config_from_json");
     anofox_set.AddFunction(ScalarFunction(
@@ -385,7 +414,18 @@ void RegisterTsFeaturesConfigFromJsonFunction(ExtensionLoader &loader) {
         GetFeaturesConfigResultType(),
         TsFeaturesConfigFromJsonFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_features_config_from_json";
+        FunctionDescription desc;
+        desc.description = "Parses a feature configuration JSON string for use with ts_features_by() to select specific features.";
+        desc.examples = {"ts_features_config_from_json('{\"features\": [\"mean\", \"std\"]}')"};
+        desc.categories = {"time-series", "feature-extraction"};
+        desc.parameter_names = {"config_json"};
+        desc.parameter_types = {LogicalType(LogicalTypeId::VARCHAR)};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -405,7 +445,17 @@ void RegisterTsFeaturesConfigFromCsvFunction(ExtensionLoader &loader) {
         GetFeaturesConfigResultType(),
         TsFeaturesConfigFromCsvFunction
     ));
-    loader.RegisterFunction(config_csv_set);
+    {
+        CreateScalarFunctionInfo info(config_csv_set);
+        FunctionDescription desc;
+        desc.description = "Parses a CSV string of feature names into a feature configuration for use with ts_features_by().";
+        desc.examples = {"ts_features_config_from_csv('mean,std,skewness')"};
+        desc.categories = {"time-series", "feature-extraction"};
+        desc.parameter_names = {"config_csv"};
+        desc.parameter_types = {LogicalType(LogicalTypeId::VARCHAR)};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_features_config_from_csv");
     anofox_set.AddFunction(ScalarFunction(
@@ -413,7 +463,18 @@ void RegisterTsFeaturesConfigFromCsvFunction(ExtensionLoader &loader) {
         GetFeaturesConfigResultType(),
         TsFeaturesConfigFromCsvFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_features_config_from_csv";
+        FunctionDescription desc;
+        desc.description = "Parses a CSV string of feature names into a feature configuration for use with ts_features_by().";
+        desc.examples = {"ts_features_config_from_csv('mean,std,skewness')"};
+        desc.categories = {"time-series", "feature-extraction"};
+        desc.parameter_names = {"config_csv"};
+        desc.parameter_types = {LogicalType(LogicalTypeId::VARCHAR)};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 } // namespace duckdb

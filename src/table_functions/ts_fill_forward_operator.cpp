@@ -5,6 +5,7 @@
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/parser/parser.hpp"
+#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 
 #include <algorithm>
 #include <map>
@@ -191,12 +192,29 @@ void RegisterTsFillForwardOperatorFunction(ExtensionLoader &loader) {
         TsFillForwardOperatorInitGlobal,
         TsFillForwardOperatorInitLocal);
 
-    loader.RegisterFunction(func);
+    {
+        CreateTableFunctionInfo info(func);
+        FunctionDescription desc;
+        desc.description = "Native table function: forward-fills NULL values in time series within groups. Used internally by ts_fill_forward_by().";
+        desc.examples = {"SELECT * FROM ts_fill_forward_operator(source_table, group_col, date_col, value_col, target_date, frequency)"};
+        desc.categories = {"time-series", "data-preparation"};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     // Also register with anofox_fcst prefix for API compatibility
     TableFunction anofox_func = func;
     anofox_func.name = "anofox_fcst_ts_fill_forward_operator";
-    loader.RegisterFunction(anofox_func);
+    {
+        CreateTableFunctionInfo anofox_info(anofox_func);
+        anofox_info.alias_of = "ts_fill_forward_operator";
+        FunctionDescription desc;
+        desc.description = "Native table function: forward-fills NULL values in time series within groups. Used internally by ts_fill_forward_by().";
+        desc.examples = {"SELECT * FROM anofox_fcst_ts_fill_forward_operator(source_table, group_col, date_col, value_col, target_date, frequency)"};
+        desc.categories = {"time-series", "data-preparation"};
+        anofox_info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(anofox_info));
+    }
 }
 
 } // namespace duckdb

@@ -1,6 +1,7 @@
 #include "ts_validate_separator.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
+#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include <set>
 #include <vector>
 #include <mutex>
@@ -278,7 +279,15 @@ void RegisterTsValidateSeparatorFunction(ExtensionLoader &loader) {
     func.in_out_function = TsValidateSeparatorInOut;
     func.in_out_function_final = TsValidateSeparatorFinalize;
 
-    loader.RegisterFunction(func);
+    {
+        CreateTableFunctionInfo info(func);
+        FunctionDescription desc;
+        desc.description = "Validates that group key separators in composite keys are consistent and non-ambiguous.";
+        desc.examples = {"SELECT * FROM ts_validate_separator(TABLE(SELECT region, store FROM t), separator='|')"};
+        desc.categories = {"time-series", "utilities"};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 } // namespace duckdb

@@ -4,6 +4,8 @@
 #include "duckdb/common/exception.hpp"
 
 #include "duckdb/function/scalar_function.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
+#include "duckdb/common/types/vector.hpp"
 
 namespace duckdb {
 
@@ -131,7 +133,23 @@ void RegisterTsBootstrapIntervalsFunction(ExtensionLoader &loader) {
         result_type,
         TsBootstrapIntervalsFunction
     ));
-    loader.RegisterFunction(bs_set);
+    {
+        CreateScalarFunctionInfo info(bs_set);
+        FunctionDescription desc;
+        desc.description = "Generates bootstrap prediction intervals by resampling historical residuals. Returns STRUCT(point[], lower[], upper[], coverage).";
+        desc.examples = {"ts_bootstrap_intervals(residuals, point_forecast, 1000, 0.90, 42)"};
+        desc.categories = {"time-series", "uncertainty"};
+        desc.parameter_names = {"residuals", "forecasts", "n_paths", "coverage", "seed"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::INTEGER),
+            LogicalType(LogicalTypeId::DOUBLE),
+            LogicalType(LogicalTypeId::BIGINT)
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_bootstrap_intervals");
     anofox_set.AddFunction(ScalarFunction(
@@ -143,7 +161,24 @@ void RegisterTsBootstrapIntervalsFunction(ExtensionLoader &loader) {
         result_type,
         TsBootstrapIntervalsFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_bootstrap_intervals";
+        FunctionDescription desc;
+        desc.description = "Generates bootstrap prediction intervals by resampling historical residuals. Returns STRUCT(point[], lower[], upper[], coverage).";
+        desc.examples = {"ts_bootstrap_intervals(residuals, point_forecast, 1000, 0.90, 42)"};
+        desc.categories = {"time-series", "uncertainty"};
+        desc.parameter_names = {"residuals", "forecasts", "n_paths", "coverage", "seed"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::INTEGER),
+            LogicalType(LogicalTypeId::DOUBLE),
+            LogicalType(LogicalTypeId::BIGINT)
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -236,7 +271,23 @@ void RegisterTsBootstrapQuantilesFunction(ExtensionLoader &loader) {
         result_type,
         TsBootstrapQuantilesFunction
     ));
-    loader.RegisterFunction(bq_set);
+    {
+        CreateScalarFunctionInfo info(bq_set);
+        FunctionDescription desc;
+        desc.description = "Generates bootstrap quantile intervals by resampling historical residuals. Returns STRUCT(point[], quantiles[], values[][]).";
+        desc.examples = {"ts_bootstrap_quantiles(residuals, point_forecast, 1000, [0.1, 0.5, 0.9], 42)"};
+        desc.categories = {"time-series", "uncertainty"};
+        desc.parameter_names = {"residuals", "forecasts", "n_paths", "quantiles", "seed"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::INTEGER),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::BIGINT)
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_bootstrap_quantiles");
     anofox_set.AddFunction(ScalarFunction(
@@ -248,7 +299,24 @@ void RegisterTsBootstrapQuantilesFunction(ExtensionLoader &loader) {
         result_type,
         TsBootstrapQuantilesFunction
     ));
-    loader.RegisterFunction(anofox_set);
+    {
+        CreateScalarFunctionInfo info(anofox_set);
+        info.alias_of = "ts_bootstrap_quantiles";
+        FunctionDescription desc;
+        desc.description = "Generates bootstrap quantile intervals by resampling historical residuals. Returns STRUCT(point[], quantiles[], values[][]).";
+        desc.examples = {"ts_bootstrap_quantiles(residuals, point_forecast, 1000, [0.1, 0.5, 0.9], 42)"};
+        desc.categories = {"time-series", "uncertainty"};
+        desc.parameter_names = {"residuals", "forecasts", "n_paths", "quantiles", "seed"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::INTEGER),
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::BIGINT)
+        };
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 } // namespace duckdb

@@ -4,6 +4,7 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
+#include "duckdb/common/types/vector.hpp"
 
 namespace duckdb {
 
@@ -533,7 +534,17 @@ void RegisterTsEstimatePeriodFftFunction(ExtensionLoader &loader) {
     // Disable constant folding for this function - struct returns don't work well with it
     fft_func.stability = FunctionStability::VOLATILE;
     ts_period_fft_set.AddFunction(fft_func);
-    loader.RegisterFunction(ts_period_fft_set);
+    {
+        CreateScalarFunctionInfo info(ts_period_fft_set);
+        FunctionDescription desc;
+        desc.description = "Estimates the dominant seasonal period using Fast Fourier Transform spectral analysis.";
+        desc.examples = {"ts_estimate_period_fft(LIST(value ORDER BY date))"};
+        desc.categories = {"time-series", "period-detection"};
+        desc.parameter_names = {"values"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -606,7 +617,17 @@ void RegisterTsEstimatePeriodAcfFunction(ExtensionLoader &loader) {
     );
     acf_func2.stability = FunctionStability::VOLATILE;
     ts_period_acf_set.AddFunction(acf_func2);
-    loader.RegisterFunction(ts_period_acf_set);
+    {
+        CreateScalarFunctionInfo info(ts_period_acf_set);
+        FunctionDescription desc;
+        desc.description = "Estimates the seasonal period using the Autocorrelation Function (ACF) by finding the lag of maximum autocorrelation.";
+        desc.examples = {"ts_estimate_period_acf(LIST(value ORDER BY date))"};
+        desc.categories = {"time-series", "period-detection"};
+        desc.parameter_names = {"values"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -799,7 +820,17 @@ void RegisterTsDetectMultiplePeriodsFunction(ExtensionLoader &loader) {
     );
     func4.stability = FunctionStability::VOLATILE;
     ts_multi_periods_set.AddFunction(func4);
-    loader.RegisterFunction(ts_multi_periods_set);
+    {
+        CreateScalarFunctionInfo info(ts_multi_periods_set);
+        FunctionDescription desc;
+        desc.description = "Detects multiple seasonal periods simultaneously, returning a ranked list of period candidates with confidence scores.";
+        desc.examples = {"ts_detect_multiple_periods(LIST(value ORDER BY date))"};
+        desc.categories = {"time-series", "period-detection"};
+        desc.parameter_names = {"values"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -882,7 +913,17 @@ void RegisterTsAutoperiodFunction(ExtensionLoader &loader) {
     );
     func2.stability = FunctionStability::VOLATILE;
     ts_autoperiod_set.AddFunction(func2);
-    loader.RegisterFunction(ts_autoperiod_set);
+    {
+        CreateScalarFunctionInfo info(ts_autoperiod_set);
+        FunctionDescription desc;
+        desc.description = "Estimates the seasonal period using the Autoperiod algorithm combining FFT and autocorrelation.";
+        desc.examples = {"ts_autoperiod(LIST(value ORDER BY date))"};
+        desc.categories = {"time-series", "period-detection"};
+        desc.parameter_names = {"values"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -955,7 +996,17 @@ void RegisterTsCfdAutoperiodFunction(ExtensionLoader &loader) {
     );
     func2.stability = FunctionStability::VOLATILE;
     ts_cfd_autoperiod_set.AddFunction(func2);
-    loader.RegisterFunction(ts_cfd_autoperiod_set);
+    {
+        CreateScalarFunctionInfo info(ts_cfd_autoperiod_set);
+        FunctionDescription desc;
+        desc.description = "Estimates the seasonal period using Conditional Frequency Distribution (CFD) autoperiod method.";
+        desc.examples = {"ts_cfd_autoperiod(LIST(value ORDER BY date))"};
+        desc.categories = {"time-series", "period-detection"};
+        desc.parameter_names = {"values"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -1069,7 +1120,17 @@ void RegisterTsLombScargleFunction(ExtensionLoader &loader) {
     );
     func4.stability = FunctionStability::VOLATILE;
     ts_lomb_scargle_set.AddFunction(func4);
-    loader.RegisterFunction(ts_lomb_scargle_set);
+    {
+        CreateScalarFunctionInfo info(ts_lomb_scargle_set);
+        FunctionDescription desc;
+        desc.description = "Estimates the dominant period using the Lomb-Scargle periodogram, suitable for unevenly-sampled time series.";
+        desc.examples = {"ts_lomb_scargle(LIST(value ORDER BY date))"};
+        desc.categories = {"time-series", "period-detection"};
+        desc.parameter_names = {"values"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -1180,7 +1241,17 @@ void RegisterTsAicPeriodFunction(ExtensionLoader &loader) {
     );
     func4.stability = FunctionStability::VOLATILE;
     ts_aic_period_set.AddFunction(func4);
-    loader.RegisterFunction(ts_aic_period_set);
+    {
+        CreateScalarFunctionInfo info(ts_aic_period_set);
+        FunctionDescription desc;
+        desc.description = "Estimates the seasonal period by minimizing the Akaike Information Criterion (AIC) over candidate periods.";
+        desc.examples = {"ts_aic_period(LIST(value ORDER BY date))"};
+        desc.categories = {"time-series", "period-detection"};
+        desc.parameter_names = {"values"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // ============================================================================
@@ -1275,7 +1346,17 @@ void RegisterTsSsaPeriodFunction(ExtensionLoader &loader) {
     );
     func3.stability = FunctionStability::VOLATILE;
     ts_ssa_period_set.AddFunction(func3);
-    loader.RegisterFunction(ts_ssa_period_set);
+    {
+        CreateScalarFunctionInfo info(ts_ssa_period_set);
+        FunctionDescription desc;
+        desc.description = "Estimates the seasonal period using Singular Spectrum Analysis (SSA).";
+        desc.examples = {"ts_ssa_period(LIST(value ORDER BY date))"};
+        desc.categories = {"time-series", "period-detection"};
+        desc.parameter_names = {"values"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // =============================================================================
@@ -1382,7 +1463,17 @@ void RegisterTsStlPeriodFunction(ExtensionLoader &loader) {
     );
     func4.stability = FunctionStability::VOLATILE;
     ts_stl_period_set.AddFunction(func4);
-    loader.RegisterFunction(ts_stl_period_set);
+    {
+        CreateScalarFunctionInfo info(ts_stl_period_set);
+        FunctionDescription desc;
+        desc.description = "Estimates the seasonal period using Seasonal and Trend decomposition using Loess (STL).";
+        desc.examples = {"ts_stl_period(LIST(value ORDER BY date))"};
+        desc.categories = {"time-series", "period-detection"};
+        desc.parameter_names = {"values"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // =============================================================================
@@ -1479,7 +1570,17 @@ void RegisterTsMatrixProfilePeriodFunction(ExtensionLoader &loader) {
     );
     func3.stability = FunctionStability::VOLATILE;
     ts_mp_period_set.AddFunction(func3);
-    loader.RegisterFunction(ts_mp_period_set);
+    {
+        CreateScalarFunctionInfo info(ts_mp_period_set);
+        FunctionDescription desc;
+        desc.description = "Estimates the seasonal period using Matrix Profile motif discovery.";
+        desc.examples = {"ts_matrix_profile_period(LIST(value ORDER BY date))"};
+        desc.categories = {"time-series", "period-detection"};
+        desc.parameter_names = {"values"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 // =============================================================================
@@ -1586,7 +1687,17 @@ void RegisterTsSazedPeriodFunction(ExtensionLoader &loader) {
     );
     func4.stability = FunctionStability::VOLATILE;
     ts_sazed_period_set.AddFunction(func4);
-    loader.RegisterFunction(ts_sazed_period_set);
+    {
+        CreateScalarFunctionInfo info(ts_sazed_period_set);
+        FunctionDescription desc;
+        desc.description = "Estimates the seasonal period using the SAZED (Self-Adaptive Zero-crossing Estimation of Dominant period) algorithm.";
+        desc.examples = {"ts_sazed_period(LIST(value ORDER BY date))"};
+        desc.categories = {"time-series", "period-detection"};
+        desc.parameter_names = {"values"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
 }
 
 } // namespace duckdb

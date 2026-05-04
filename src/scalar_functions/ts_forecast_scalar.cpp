@@ -7,6 +7,7 @@
 #include "duckdb/planner/expression/bound_function_expression.hpp"
 #include "duckdb/common/types/date.hpp"
 #include "duckdb/common/types/timestamp.hpp"
+#include "duckdb/common/types/vector.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
