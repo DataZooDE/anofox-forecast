@@ -266,15 +266,15 @@ ts_split_keys(
 ```sql
 -- Default column names (id_part_1, id_part_2, id_part_3)
 SELECT * FROM ts_split_keys(
-    (SELECT unique_id, forecast_date, yhat FROM forecasts)
+    (SELECT unique_id, ds, yhat FROM forecasts)
 );
 
 -- With custom column names
 SELECT * FROM ts_split_keys(
-    (SELECT unique_id, forecast_date, yhat FROM forecasts),
+    (SELECT unique_id, ds, yhat FROM forecasts),
     columns := ['region_id', 'store_id', 'item_id']
 );
--- Returns: region_id, store_id, item_id, forecast_date, yhat
+-- Returns: region_id, store_id, item_id, ds, yhat
 
 -- Custom separator
 SELECT * FROM ts_split_keys(
