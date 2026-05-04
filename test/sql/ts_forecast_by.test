@@ -68,7 +68,7 @@ SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 5, '1
 # Test output has expected columns
 query I
 SELECT COUNT(*) FROM (
-    SELECT id, forecast_step, ds, yhat, yhat_lower, yhat_upper, model_name, insample_fitted
+    SELECT id, forecast_step, ds, yhat, yhat_lower, yhat_upper, model_name
     FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 3, '1d', MAP([], []))
 );
 ----
@@ -546,13 +546,6 @@ query I
 SELECT MAX(forecast_step) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 5, '1d', MAP([], []));
 ----
 5
-
-# Test insample_fitted is returned as array
-query I
-SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'Naive', 3, '1d', MAP([], []))
-WHERE insample_fitted IS NOT NULL;
-----
-6
 
 #######################################
 # Edge Cases

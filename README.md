@@ -134,11 +134,11 @@ SELECT
     f.item_id,
     f.model_name,
     f.item_id || '|' || f.model_name AS series_key,
-    f.date,
+    f.ds,
     t.y AS actual,
-    f.point_forecast AS forecast
+    f.yhat AS forecast
 FROM forecast_results f
-JOIN m5_test t ON f.item_id = t.item_id AND f.date = t.ds;
+JOIN m5_test t ON f.item_id = t.item_id AND f.ds = t.ds;
 
 -- MAE and Bias per series using _by pattern
 CREATE OR REPLACE TABLE evaluation_results AS
@@ -147,8 +147,8 @@ SELECT
     split_part(m.id, '|', 2) AS model_name,
     m.mae,
     b.bias
-FROM ts_mae_by('forecast_vs_actual', series_key, date, actual, forecast) m
-JOIN ts_bias_by('forecast_vs_actual', series_key, date, actual, forecast) b
+FROM ts_mae_by('forecast_vs_actual', series_key, ds, actual, forecast) m
+JOIN ts_bias_by('forecast_vs_actual', series_key, ds, actual, forecast) b
   ON m.id = b.id;
 
 -- Summarise evaluation results by model
