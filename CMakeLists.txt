@@ -1,7 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
 
 set(CORROSION_VERBOSE_OUTPUT ON)
-set(CMAKE_CXX_STANDARD 17)
+# Force C++17 globally (CACHE FORCE) so DuckDB's submodule build picks it up too.
+# Without this, DuckDB's CMake sets CMAKE_CXX_STANDARD 11 and the static constexpr
+# class-type member duckdb::BufferedFileWriter::DEFAULT_OPEN_FLAGS gets emitted as
+# a strong symbol in multiple translation units, breaking the plan_serializer link
+# on arm64 / GCC 14 (duckdb/duckdb#22097). In C++17 the member is implicitly inline.
+set(CMAKE_CXX_STANDARD 17 CACHE STRING "C++ standard to enforce" FORCE)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Get installed Rust targets
