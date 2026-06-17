@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `extension-ci-tools` to the maintained line branches `v1.4-andium` (LTS) and
   `v1.5-variegata` (latest); `duckdb` submodule moved to v1.5.4.
 
+### Fixed
+- Linux build against DuckDB v1.4.5 LTS: pass `-Wl,--allow-multiple-definition` so GNU ld on
+  glibc/GCC-14 tolerates DuckDB's byte-identical constexpr static members (`LogicalType::FLOAT`,
+  etc.) that the v1.4 line emits into multiple static archives. No-op on the v1.5 line.
+
 ## [0.2.4] - 2026-01-03
 
 ### Changed

@@ -9,6 +9,21 @@ set(CORROSION_VERBOSE_OUTPUT ON)
 set(CMAKE_CXX_STANDARD 17 CACHE STRING "C++ standard to enforce" FORCE)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Allow the GNU linker to pick the first of duplicate, byte-identical symbols.
+# DuckDB's v1.4 LTS line emits the constexpr static members duckdb::LogicalType::FLOAT,
+# ::DOUBLE, ::VARCHAR, duckdb::MultiFileReader::COLUMN_IDENTIFIER_* etc. as strong symbols
+# in more than one static archive (libduckdb_static.a and libcore_functions_extension.a /
+# libparquet_extension.a). Combined with the forced C++17 above, strict GNU ld on
+# glibc/GCC-14 rejects these as "multiple definition" when linking libduckdb.so /
+# libsqlite3_api_wrapper.so (the musl toolchain's linker already tolerates them). The
+# definitions are identical, so picking the first is safe; this is a no-op on the v1.5
+# line, which emits no duplicates. GNU-ld only -> scope to Linux (excludes Darwin/Windows/WASM).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    foreach(_lf CMAKE_EXE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS CMAKE_MODULE_LINKER_FLAGS)
+        set(${_lf} "${${_lf}} -Wl,--allow-multiple-definition" CACHE STRING "" FORCE)
+    endforeach()
+endif()
+
 # Get installed Rust targets
 execute_process(
     COMMAND rustup target list --installed
