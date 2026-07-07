@@ -62,11 +62,13 @@ A time series forecasting extension for DuckDB with 32 models, data preparation,
 
 ## 📋 Table of Contents
 
+- [Key Features](#-key-features)
 - [Installation](#installation)
-- [Multi-Language Support](#multi-language-support)
-- [API Reference](#api-reference)
-- [Guides](#guides)
-- [License](#license)
+- [Quick Start on M5 Dataset](#-quick-start-on-m5-dataset)
+- [Multi-Language Support](#-multi-language-support)
+- [API Reference](#-api-reference)
+- [Development](#-development)
+- [License](#-license)
 
 
 ## Attribution
