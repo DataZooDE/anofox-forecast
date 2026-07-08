@@ -47,9 +47,9 @@ dependencies = [
 
 [[package]]
 name = "anofox-forecast"
-version = "0.5.7"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4985d4fb654424b11ee57c6f308e0359f96d6a082729972d87bf16f3373b5b69"
+checksum = "c603e79764528354bc705153bd8f3cc009dbf8ed54a24d55bf8bd8d7d715f1f7"
 dependencies = [
  "anofox-regression 0.5.3",
  "anofox-statistics",
@@ -57,7 +57,7 @@ dependencies = [
  "faer",
  "getrandom 0.2.16",
  "lbfgs",
- "rand 0.8.5",
+ "rand 0.8.6",
  "statrs",
  "thiserror 2.0.17",
  "trueno",
@@ -97,7 +97,7 @@ version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4248509e270e5fb61677e7a4909ea44c33ec4177c61feb9f438fd36566e834bf"
 dependencies = [
- "rand 0.8.5",
+ "rand 0.8.6",
  "rand_chacha 0.3.1",
  "statrs",
  "thiserror 2.0.17",
@@ -607,7 +607,7 @@ dependencies = [
  "getrandom 0.2.16",
  "nalgebra",
  "num-complex",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rand_distr 0.4.3",
  "rayon",
  "rustfft",
@@ -989,7 +989,7 @@ dependencies = [
  "num-complex",
  "num-rational",
  "num-traits",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rand_distr 0.4.3",
  "simba",
  "typenum",
@@ -1114,7 +1114,7 @@ checksum = "73f88a1307638156682bada9d7604135552957b7818057dcef22705b4d509495"
 dependencies = [
  "bytemuck",
  "num-traits",
- "rand 0.8.5",
+ "rand 0.8.6",
 ]
 
 [[package]]
@@ -1323,9 +1323,9 @@ checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 
 [[package]]
 name = "rand"
-version = "0.8.5"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
+checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
@@ -1387,7 +1387,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32cb0b9bc82b0a0876c2dd994a7e7a2683d3e7390ca40e6886785ef0c7e3ee31"
 dependencies = [
  "num-traits",
- "rand 0.8.5",
+ "rand 0.8.6",
 ]
 
 [[package]]
@@ -1649,7 +1649,7 @@ dependencies = [
  "approx",
  "nalgebra",
  "num-traits",
- "rand 0.8.5",
+ "rand 0.8.6",
 ]
 
 [[package]]
