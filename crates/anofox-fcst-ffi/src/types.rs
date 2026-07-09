@@ -394,6 +394,9 @@ pub struct ForecastOptions {
     pub seasonal_periods_str: [c_char; 64],
     /// AutoETS model pool (e.g. "reduced", "complete"), empty = default (complete)
     pub model_pool: [c_char; 32],
+    /// Laplace forecaster variant ("auto", "auto_aid", "skaters"), empty = "auto".
+    /// Only consulted when model is "Laplace".
+    pub laplace_variant: [c_char; 16],
 }
 
 impl Default for ForecastOptions {
@@ -415,6 +418,7 @@ impl Default for ForecastOptions {
             window: 0,
             seasonal_periods_str: [0; 64],
             model_pool: [0; 32],
+            laplace_variant: [0; 16],
         }
     }
 }
@@ -481,6 +485,8 @@ pub struct ForecastOptionsExog {
     pub seasonal_periods_str: [c_char; 64],
     /// AutoETS model pool (e.g. "reduced", "complete"), empty = default (complete)
     pub model_pool: [c_char; 32],
+    /// Laplace forecaster variant ("auto", "auto_aid", "skaters"), empty = "auto".
+    pub laplace_variant: [c_char; 16],
 }
 
 impl Default for ForecastOptionsExog {
@@ -503,6 +509,7 @@ impl Default for ForecastOptionsExog {
             window: 0,
             seasonal_periods_str: [0; 64],
             model_pool: [0; 32],
+            laplace_variant: [0; 16],
         }
     }
 }

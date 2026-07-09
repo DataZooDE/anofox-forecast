@@ -3399,6 +3399,14 @@ pub unsafe extern "C" fn anofox_ts_forecast(
             .filter(|s| !s.is_empty())
             .map(String::from);
 
+        // Parse laplace_variant (empty → default Auto handled downstream)
+        let laplace_variant = CStr::from_ptr(opts.laplace_variant.as_ptr())
+            .to_str()
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(anofox_fcst_core::LaplaceVariant::parse)
+            .transpose()?;
+
         let core_opts = anofox_fcst_core::ForecastOptions {
             model: model_type,
             ets_spec,
@@ -3411,6 +3419,7 @@ pub unsafe extern "C" fn anofox_ts_forecast(
             window: opts.window.max(0) as usize,
             seasonal_periods,
             model_pool,
+            laplace_variant,
         };
 
         anofox_fcst_core::forecast(&series, &core_opts)
@@ -3670,6 +3679,14 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
             .filter(|s| !s.is_empty())
             .map(String::from);
 
+        // Parse laplace_variant (empty → default Auto handled downstream)
+        let laplace_variant = CStr::from_ptr(opts.laplace_variant.as_ptr())
+            .to_str()
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(anofox_fcst_core::LaplaceVariant::parse)
+            .transpose()?;
+
         let core_opts = anofox_fcst_core::ForecastOptionsExog {
             model: model_type,
             ets_spec,
@@ -3683,6 +3700,7 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
             window: opts.window.max(0) as usize,
             seasonal_periods,
             model_pool,
+            laplace_variant,
         };
 
         anofox_fcst_core::forecast_with_exog(&series, &core_opts)
