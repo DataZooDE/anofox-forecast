@@ -1679,9 +1679,9 @@ fn forecast_laplace(
         // predict_with_intervals uses a symmetric two-sided level; clamp to
         // [0.5, 0.999] to stay within the LaplaceForecaster's supported range.
         let level = confidence_level.clamp(0.5, 0.999);
-        let forecast = model.predict_with_intervals(horizon, level).map_err(|e| {
-            ForecastError::ComputationError(format!("Laplace predict failed: {e}"))
-        })?;
+        let forecast = model
+            .predict_with_intervals(horizon, level)
+            .map_err(|e| ForecastError::ComputationError(format!("Laplace predict failed: {e}")))?;
 
         let point = forecast.primary().to_vec();
         let lower = forecast
@@ -2787,7 +2787,10 @@ mod tests {
             LaplaceVariant::parse("Auto_Aid").unwrap(),
             LaplaceVariant::AutoAid
         );
-        assert_eq!(LaplaceVariant::parse("AID").unwrap(), LaplaceVariant::AutoAid);
+        assert_eq!(
+            LaplaceVariant::parse("AID").unwrap(),
+            LaplaceVariant::AutoAid
+        );
         assert_eq!(
             LaplaceVariant::parse("skaters").unwrap(),
             LaplaceVariant::Skaters
