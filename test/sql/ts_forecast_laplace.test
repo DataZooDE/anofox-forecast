@@ -1,0 +1,154 @@
+# name: test/sql/ts_forecast_laplace.test
+# description: Smoke tests for the Laplace distributional forecaster (three variants + seasonal + intermittent).
+# group: [sql]
+
+require anofox_forecast
+
+require json
+
+#######################################
+# Setup
+#######################################
+
+# Trend + weekly seasonality (80 points — enough warmup for auto/skaters)
+statement ok
+CREATE TABLE laplace_seasonal AS
+SELECT
+    'A' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    10.0 + i * 0.1 + sin(i * pi() / 7.0) * 3.0 AS y
+FROM generate_series(0, 79) AS t(i);
+
+# Intermittent-demand series (mostly zeros, occasional counts) for auto_aid
+statement ok
+CREATE TABLE laplace_intermittent AS
+SELECT
+    'B' AS id,
+    ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS ds,
+    CASE
+        WHEN i % 5 = 0 THEN 3.0
+        WHEN i % 11 = 0 THEN 2.0
+        ELSE 0.0
+    END AS y
+FROM generate_series(0, 99) AS t(i);
+
+#######################################
+# Variant: auto (default when laplace_variant not set)
+#######################################
+
+query I
+SELECT COUNT(*) FROM ts_forecast_by(
+    'laplace_seasonal', id, ds, y, 'Laplace', 7, '1d', MAP{'seasonal_period': '7'}
+);
+----
+7
+
+# Auto variant produces finite point + interval forecasts
+query I
+SELECT bool_and(yhat IS NOT NULL AND yhat_lower IS NOT NULL AND yhat_upper IS NOT NULL
+                AND yhat_lower <= yhat AND yhat <= yhat_upper)
+FROM ts_forecast_by('laplace_seasonal', id, ds, y, 'Laplace', 7, '1d', MAP{'seasonal_period': '7'});
+----
+true
+
+# model_name for auto includes the variant tag
+query I
+SELECT model_name LIKE 'Laplace(auto%'
+FROM ts_forecast_by('laplace_seasonal', id, ds, y, 'Laplace', 5, '1d', MAP{'seasonal_period': '7'})
+LIMIT 1;
+----
+true
+
+# seasonal_period appears in model_name
+query I
+SELECT model_name LIKE '%seasonal=7%'
+FROM ts_forecast_by('laplace_seasonal', id, ds, y, 'Laplace', 5, '1d', MAP{'seasonal_period': '7'})
+LIMIT 1;
+----
+true
+
+#######################################
+# Variant: auto_aid (intermittent-friendly selector)
+#######################################
+
+query I
+SELECT model_name LIKE 'Laplace(auto_aid%'
+FROM ts_forecast_by('laplace_intermittent', id, ds, y, 'Laplace', 7, '1d',
+    MAP{'laplace_variant': 'auto_aid'})
+LIMIT 1;
+----
+true
+
+# auto_aid returns non-negative point forecasts on non-negative intermittent series
+query I
+SELECT bool_and(yhat IS NOT NULL AND yhat >= 0.0)
+FROM ts_forecast_by('laplace_intermittent', id, ds, y, 'Laplace', 7, '1d',
+    MAP{'laplace_variant': 'auto_aid'});
+----
+true
+
+#######################################
+# Variant: skaters (full ensemble)
+#######################################
+
+query I
+SELECT model_name LIKE 'Laplace(skaters%'
+FROM ts_forecast_by('laplace_seasonal', id, ds, y, 'Laplace', 5, '1d',
+    MAP{'laplace_variant': 'skaters', 'seasonal_period': '7'})
+LIMIT 1;
+----
+true
+
+#######################################
+# STRUCT params (typed keys — the recommended surface)
+#######################################
+
+query I
+SELECT COUNT(*) FROM ts_forecast_by(
+    'laplace_seasonal', id, ds, y, 'Laplace', 5, '1d',
+    {laplace_variant: 'auto_aid', seasonal_period: 7}
+);
+----
+5
+
+#######################################
+# laplace_seasonal_batch_init toggle (opt-in per 0.15.1 for amplitude-decline series)
+#######################################
+
+# Flag off (default) — model_name has no batch_init tag
+query I
+SELECT model_name LIKE '%batch_init%'
+FROM ts_forecast_by('laplace_seasonal', id, ds, y, 'Laplace', 5, '1d',
+    MAP{'seasonal_period': '7'})
+LIMIT 1;
+----
+false
+
+# Flag on — model_name gains batch_init tag
+query I
+SELECT model_name LIKE '%batch_init%'
+FROM ts_forecast_by('laplace_seasonal', id, ds, y, 'Laplace', 5, '1d',
+    MAP{'seasonal_period': '7', 'laplace_seasonal_batch_init': '1'})
+LIMIT 1;
+----
+true
+
+# STRUCT syntax also honours the flag
+query I
+SELECT COUNT(*) FROM ts_forecast_by(
+    'laplace_seasonal', id, ds, y, 'Laplace', 5, '1d',
+    {seasonal_period: 7, laplace_seasonal_batch_init: 1}
+);
+----
+5
+
+#######################################
+# Error path: unknown variant string
+#######################################
+
+statement error
+SELECT * FROM ts_forecast_by(
+    'laplace_seasonal', id, ds, y, 'Laplace', 5, '1d',
+    MAP{'laplace_variant': 'bogus_variant'}
+);
+----

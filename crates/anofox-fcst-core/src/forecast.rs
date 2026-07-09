@@ -12,6 +12,7 @@ use anofox_forecast::models::exponential::{
     SeasonalES as SeasonalESModel, SimpleExponentialSmoothing, ETS as ETSModel,
 };
 use anofox_forecast::models::intermittent::{Croston, ADIDA, IMAPA, TSB};
+use anofox_forecast::models::laplace::LaplaceForecaster;
 use anofox_forecast::models::mstl_forecaster::MSTLForecaster;
 use anofox_forecast::models::tbats::{AutoTBATS, TBATS as TBATSModel};
 use anofox_forecast::models::theta::{AutoTheta, DynamicTheta, OptimizedTheta, Theta};
@@ -39,6 +40,51 @@ pub struct ForecastOutput {
     pub bic: Option<f64>,
     /// MSE of in-sample fit
     pub mse: Option<f64>,
+}
+
+/// Selector variant for [`ModelType::Laplace`].
+///
+/// The Laplace forecaster is a streaming distributional shell over
+/// EMA / drift / AR(1) / damped-Holt (and optional seasonal) leaves.
+/// The variant chooses which zero-config selector is used at fit time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LaplaceVariant {
+    /// `LaplaceForecaster::auto()` — balanced defaults for smooth
+    /// economic/continuous series with adequate history.
+    #[default]
+    Auto,
+    /// `LaplaceForecaster::auto_aid()` — AID-based distribution-family
+    /// selection; best for retail SKU / intermittent-demand panels.
+    AutoAid,
+    /// `LaplaceForecaster::skaters()` — the fuller skaters ensemble
+    /// (multi-h scoring, stacking, larger leaf set). Slower, more robust.
+    Skaters,
+}
+
+impl LaplaceVariant {
+    /// Parse a variant name (case-insensitive; `auto`, `auto_aid`, `aid`,
+    /// `skaters`).
+    pub fn parse(s: &str) -> Result<Self> {
+        match s.trim().to_lowercase().as_str() {
+            "" | "auto" => Ok(LaplaceVariant::Auto),
+            "auto_aid" | "autoaid" | "aid" => Ok(LaplaceVariant::AutoAid),
+            "skaters" | "skater" => Ok(LaplaceVariant::Skaters),
+            other => Err(ForecastError::InvalidParameter {
+                param: "laplace_variant".to_string(),
+                value: other.to_string(),
+                reason: "expected one of: auto, auto_aid, skaters".to_string(),
+            }),
+        }
+    }
+
+    /// Short tag used inside the returned `model_name` string.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            LaplaceVariant::Auto => "auto",
+            LaplaceVariant::AutoAid => "auto_aid",
+            LaplaceVariant::Skaters => "skaters",
+        }
+    }
 }
 
 /// Available forecast models - matches C++ extension exactly.
@@ -92,6 +138,11 @@ pub enum ModelType {
     ADIDA,
     IMAPA,
     TSB,
+
+    // Distributional Models (1) — Laplace shell over EMA/drift/AR(1)/Holt
+    // leaves. Variant (Auto / AutoAid / Skaters) is carried in
+    // `ForecastOptions.laplace_variant`.
+    Laplace,
 }
 
 impl std::str::FromStr for ModelType {
@@ -140,6 +191,8 @@ impl std::str::FromStr for ModelType {
             "ADIDA" => return Ok(ModelType::ADIDA),
             "IMAPA" => return Ok(ModelType::IMAPA),
             "TSB" => return Ok(ModelType::TSB),
+            // Distributional
+            "Laplace" => return Ok(ModelType::Laplace),
             _ => {}
         }
 
@@ -194,6 +247,8 @@ impl std::str::FromStr for ModelType {
             "adida" => Ok(ModelType::ADIDA),
             "imapa" => Ok(ModelType::IMAPA),
             "tsb" => Ok(ModelType::TSB),
+            // Distributional
+            "laplace" => Ok(ModelType::Laplace),
             // Auto selection (legacy, maps to AutoETS)
             "auto" => Ok(ModelType::AutoETS),
             _ => Err(ForecastError::InvalidModel(format!("Unknown model: {}", s))),
@@ -245,6 +300,8 @@ impl ModelType {
             ModelType::ADIDA => "ADIDA",
             ModelType::IMAPA => "IMAPA",
             ModelType::TSB => "TSB",
+            // Distributional
+            ModelType::Laplace => "Laplace",
         }
     }
 }
@@ -275,6 +332,18 @@ pub struct ForecastOptions {
     pub seasonal_periods: Vec<usize>,
     /// AutoETS model pool (None = Complete/default)
     pub model_pool: Option<String>,
+    /// Laplace forecaster selector (None = Auto). Only consulted when
+    /// [`ModelType::Laplace`] is selected.
+    pub laplace_variant: Option<LaplaceVariant>,
+    /// Enable `LaplaceForecaster::with_seasonal_batch_init()` (opt-in).
+    /// Batch-initialises the seasonal-EMA phase levels from the last
+    /// training cycle. Safe on stationary or amplitude-declining
+    /// seasonal series (large MAE win on the amplitude-decline pathology
+    /// tracked at sipemu/anofox-forecast#195). NOT safe on
+    /// growing-amplitude or phase-shifted seasonality — the softmax
+    /// abandons the seasonal-EMA leaf for a differenced-EMA leaf and
+    /// the forecast collapses to flat. Default `false`.
+    pub laplace_seasonal_batch_init: bool,
 }
 
 impl Default for ForecastOptions {
@@ -291,6 +360,8 @@ impl Default for ForecastOptions {
             window: 0,
             seasonal_periods: vec![],
             model_pool: None,
+            laplace_variant: None,
+            laplace_seasonal_batch_init: false,
         }
     }
 }
@@ -389,6 +460,10 @@ pub struct ForecastOptionsExog {
     pub seasonal_periods: Vec<usize>,
     /// AutoETS model pool (None = Complete/default)
     pub model_pool: Option<String>,
+    /// Laplace forecaster selector (None = Auto).
+    pub laplace_variant: Option<LaplaceVariant>,
+    /// Enable `LaplaceForecaster::with_seasonal_batch_init()` (opt-in).
+    pub laplace_seasonal_batch_init: bool,
 }
 
 impl Default for ForecastOptionsExog {
@@ -406,6 +481,8 @@ impl Default for ForecastOptionsExog {
             window: 0,
             seasonal_periods: vec![],
             model_pool: None,
+            laplace_variant: None,
+            laplace_seasonal_batch_init: false,
         }
     }
 }
@@ -425,6 +502,8 @@ impl From<ForecastOptions> for ForecastOptionsExog {
             window: opts.window,
             seasonal_periods: opts.seasonal_periods,
             model_pool: opts.model_pool,
+            laplace_variant: opts.laplace_variant,
+            laplace_seasonal_batch_init: opts.laplace_seasonal_batch_init,
         }
     }
 }
@@ -590,6 +669,15 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         ModelType::TSB => forecast_tsb(&clean_values, options.horizon),
         ModelType::ADIDA => forecast_adida(&clean_values, options.horizon),
         ModelType::IMAPA => forecast_imapa(&clean_values, options.horizon),
+        // Distributional
+        ModelType::Laplace => forecast_laplace(
+            &clean_values,
+            options.horizon,
+            period,
+            options.laplace_variant.unwrap_or_default(),
+            options.laplace_seasonal_batch_init,
+            options.confidence_level,
+        ),
     }?;
 
     // Calculate confidence intervals
@@ -760,6 +848,9 @@ pub fn forecast_with_exog(
             options.window,
             &options.seasonal_periods,
             options.model_pool.as_deref(),
+            options.laplace_variant.unwrap_or_default(),
+            options.laplace_seasonal_batch_init,
+            options.confidence_level,
         )
     }?;
 
@@ -821,6 +912,7 @@ pub fn forecast_with_exog(
 }
 
 /// Internal helper to forecast with a specific model (no exog).
+#[allow(clippy::too_many_arguments)]
 fn forecast_with_model(
     values: &[f64],
     horizon: usize,
@@ -829,6 +921,9 @@ fn forecast_with_model(
     window: usize,
     seasonal_periods: &[usize],
     model_pool: Option<&str>,
+    laplace_variant: LaplaceVariant,
+    laplace_seasonal_batch_init: bool,
+    confidence_level: f64,
 ) -> Result<ForecastOutput> {
     match model {
         // Basic Models
@@ -914,6 +1009,15 @@ fn forecast_with_model(
         ModelType::TSB => forecast_tsb(values, horizon),
         ModelType::ADIDA => forecast_adida(values, horizon),
         ModelType::IMAPA => forecast_imapa(values, horizon),
+        // Distributional
+        ModelType::Laplace => forecast_laplace(
+            values,
+            horizon,
+            period,
+            laplace_variant,
+            laplace_seasonal_batch_init,
+            confidence_level,
+        ),
     }
 }
 
@@ -1533,6 +1637,89 @@ fn forecast_auto_ets(
             fallback.model_name = "AutoETS".to_string();
             Ok(fallback)
         }
+    }
+}
+
+/// Laplace: streaming distributional shell over EMA / drift / AR(1) / damped-Holt
+/// (and optional seasonal) leaves. Returns a point + interval forecast; the
+/// full mixture parameters are surfaced by the `ts_forecast_dist_by` table
+/// function (PR B of the distributional series).
+fn forecast_laplace(
+    values: &[f64],
+    horizon: usize,
+    period: usize,
+    variant: LaplaceVariant,
+    seasonal_batch_init: bool,
+    confidence_level: f64,
+) -> Result<ForecastOutput> {
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    let lib_result = catch_unwind(AssertUnwindSafe(|| -> Result<ForecastOutput> {
+        let ts = make_timeseries(values)?;
+
+        let mut model = match variant {
+            LaplaceVariant::Auto => LaplaceForecaster::new().auto(),
+            LaplaceVariant::AutoAid => LaplaceForecaster::new().auto_aid(),
+            LaplaceVariant::Skaters => LaplaceForecaster::new().skaters(),
+        };
+        if period > 1 {
+            model = model.with_seasonal(period);
+        }
+        if seasonal_batch_init && period > 1 {
+            // Opt-in per anofox-forecast 0.15.1 guidance: safe on stationary
+            // or declining amplitude, unsafe on growing amplitude / phase-shifted
+            // seasonality. See sipemu/anofox-forecast#195.
+            model = model.with_seasonal_batch_init();
+        }
+
+        model
+            .fit(&ts)
+            .map_err(|e| ForecastError::ComputationError(format!("Laplace fit failed: {e}")))?;
+
+        // predict_with_intervals uses a symmetric two-sided level; clamp to
+        // [0.5, 0.999] to stay within the LaplaceForecaster's supported range.
+        let level = confidence_level.clamp(0.5, 0.999);
+        let forecast = model.predict_with_intervals(horizon, level).map_err(|e| {
+            ForecastError::ComputationError(format!("Laplace predict failed: {e}"))
+        })?;
+
+        let point = forecast.primary().to_vec();
+        let lower = forecast
+            .lower()
+            .and_then(|intervals| intervals.first())
+            .cloned()
+            .unwrap_or_default();
+        let upper = forecast
+            .upper()
+            .and_then(|intervals| intervals.first())
+            .cloned()
+            .unwrap_or_default();
+
+        let model_name = match (period > 1, seasonal_batch_init && period > 1) {
+            (true, true) => format!("Laplace({},seasonal={},batch_init)", variant.tag(), period),
+            (true, false) => format!("Laplace({},seasonal={})", variant.tag(), period),
+            (false, _) => format!("Laplace({})", variant.tag()),
+        };
+
+        Ok(ForecastOutput {
+            point,
+            lower,
+            upper,
+            fitted: None,
+            residuals: None,
+            model_name,
+            aic: None,
+            bic: None,
+            mse: None,
+        })
+    }));
+
+    match lib_result {
+        Ok(Ok(output)) => Ok(output),
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err(ForecastError::ComputationError(
+            "Laplace forecast panicked (likely constant or near-empty series)".to_string(),
+        )),
     }
 }
 
@@ -2206,6 +2393,8 @@ pub fn list_models() -> Vec<String> {
         "ADIDA",
         "IMAPA",
         "TSB",
+        // Distributional Models (1)
+        "Laplace",
     ]
     .into_iter()
     .map(String::from)
@@ -2455,6 +2644,9 @@ mod tests {
             (ModelType::AutoMFLES, &seasonal),
             (ModelType::AutoMSTL, &seasonal),
             (ModelType::AutoTBATS, &seasonal),
+            // Laplace's model_name is `Laplace(<variant>)` or
+            // `Laplace(<variant>,seasonal=<p>)`; must start with "Laplace".
+            (ModelType::Laplace, &seasonal),
         ];
 
         for (model_type, data) in &prefix_cases {
@@ -2489,6 +2681,118 @@ mod tests {
         assert_eq!(result.point.len(), 5);
         assert_eq!(result.model_name, "Theta");
         assert!(result.point.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn test_forecast_laplace_variants() {
+        // Trend + weekly-ish seasonality series that all three Laplace
+        // variants can handle in a smoke test.
+        let values: Vec<Option<f64>> = (0..80)
+            .map(|i| {
+                let trend = i as f64 * 0.1;
+                let seasonal = (i as f64 * std::f64::consts::PI / 7.0).sin() * 2.0;
+                Some(10.0 + trend + seasonal)
+            })
+            .collect();
+
+        for (variant, tag) in [
+            (LaplaceVariant::Auto, "auto"),
+            (LaplaceVariant::AutoAid, "auto_aid"),
+            (LaplaceVariant::Skaters, "skaters"),
+        ] {
+            let options = ForecastOptions {
+                model: ModelType::Laplace,
+                horizon: 6,
+                laplace_variant: Some(variant),
+                ..Default::default()
+            };
+
+            let result = forecast(&values, &options).expect("Laplace forecast should succeed");
+            assert_eq!(result.point.len(), 6, "variant={tag}");
+            assert!(
+                result.point.iter().all(|v| v.is_finite()),
+                "variant={tag} produced non-finite point forecasts"
+            );
+            assert!(
+                result.model_name.starts_with("Laplace("),
+                "variant={tag} model_name={} should start with 'Laplace('",
+                result.model_name
+            );
+            assert!(
+                result.model_name.contains(tag),
+                "variant={tag} model_name={} should contain '{tag}'",
+                result.model_name
+            );
+        }
+    }
+
+    #[test]
+    fn test_forecast_laplace_seasonal_batch_init_in_name() {
+        // Toggle the 0.15.1 opt-in flag; verify it round-trips into model_name.
+        let values: Vec<Option<f64>> = (0..60)
+            .map(|i| Some(10.0 + (i as f64 * std::f64::consts::PI / 7.0).sin() * 5.0))
+            .collect();
+
+        let options = ForecastOptions {
+            model: ModelType::Laplace,
+            horizon: 5,
+            seasonal_period: 7,
+            auto_detect_seasonality: false,
+            laplace_variant: Some(LaplaceVariant::Auto),
+            laplace_seasonal_batch_init: true,
+            ..Default::default()
+        };
+
+        let result = forecast(&values, &options).expect("Laplace batch_init should succeed");
+        assert!(
+            result.model_name.contains("batch_init"),
+            "expected batch_init tag in model_name, got '{}'",
+            result.model_name
+        );
+        assert!(
+            result.model_name.contains("seasonal=7"),
+            "expected seasonal tag in model_name, got '{}'",
+            result.model_name
+        );
+    }
+
+    #[test]
+    fn test_forecast_laplace_seasonal_period_in_name() {
+        let values: Vec<Option<f64>> = (0..60)
+            .map(|i| Some(10.0 + (i as f64 * std::f64::consts::PI / 7.0).sin() * 5.0))
+            .collect();
+
+        let options = ForecastOptions {
+            model: ModelType::Laplace,
+            horizon: 5,
+            seasonal_period: 7,
+            auto_detect_seasonality: false,
+            laplace_variant: Some(LaplaceVariant::Auto),
+            ..Default::default()
+        };
+
+        let result = forecast(&values, &options).expect("seasonal Laplace should succeed");
+        assert!(
+            result.model_name.contains("seasonal=7"),
+            "expected seasonal tag in model_name, got '{}'",
+            result.model_name
+        );
+    }
+
+    #[test]
+    fn test_laplace_variant_parse_roundtrip() {
+        assert_eq!(LaplaceVariant::parse("").unwrap(), LaplaceVariant::Auto);
+        assert_eq!(LaplaceVariant::parse("auto").unwrap(), LaplaceVariant::Auto);
+        assert_eq!(
+            LaplaceVariant::parse("Auto_Aid").unwrap(),
+            LaplaceVariant::AutoAid
+        );
+        assert_eq!(LaplaceVariant::parse("AID").unwrap(), LaplaceVariant::AutoAid);
+        assert_eq!(
+            LaplaceVariant::parse("skaters").unwrap(),
+            LaplaceVariant::Skaters
+        );
+        assert!(LaplaceVariant::parse("bogus").is_err());
     }
 
     #[test]

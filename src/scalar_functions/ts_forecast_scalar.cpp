@@ -46,6 +46,8 @@ struct TsForecastScalarBindData : public FunctionData {
     int64_t window = 0;
     string seasonal_periods_str = "";
     string model_pool = "";
+    string laplace_variant = "";
+    bool laplace_seasonal_batch_init = false;
 
     DateColumnType date_col_type = DateColumnType::DATE;
 
@@ -62,6 +64,8 @@ struct TsForecastScalarBindData : public FunctionData {
         copy->window = window;
         copy->seasonal_periods_str = seasonal_periods_str;
         copy->model_pool = model_pool;
+        copy->laplace_variant = laplace_variant;
+        copy->laplace_seasonal_batch_init = laplace_seasonal_batch_init;
         copy->date_col_type = date_col_type;
         return std::move(copy);
     }
@@ -87,6 +91,17 @@ static string ParseStringParam(const Value &params_value, const string &key, con
             auto &v = StructValue::GetChildren(child)[1];
             if (k.ToString() == key && !v.IsNull()) return v.ToString();
         }
+    } else if (params_value.type().id() == LogicalTypeId::STRUCT) {
+        // Mirrors ts_forecast_native.cpp — accept typed STRUCT params too,
+        // so `{seasonal_period: 7, laplace_variant: 'auto'}` behaves the same
+        // as the equivalent MAP.
+        auto &struct_children = StructValue::GetChildren(params_value);
+        auto &child_types = StructType::GetChildTypes(params_value.type());
+        for (idx_t i = 0; i < child_types.size(); i++) {
+            if (child_types[i].first == key && !struct_children[i].IsNull()) {
+                return struct_children[i].ToString();
+            }
+        }
     }
     return default_val;
 }
@@ -105,7 +120,8 @@ static double ParseDoubleParam(const Value &params_value, const string &key, dou
 
 static void ValidateParams(const Value &params_value, const string &method) {
     static const unordered_set<string> valid_keys = {
-        "model", "seasonal_period", "seasonal_periods", "confidence_level", "window", "model_pool"
+        "model", "seasonal_period", "seasonal_periods", "confidence_level", "window", "model_pool",
+        "laplace_variant", "laplace_seasonal_batch_init"
     };
 
     if (params_value.IsNull()) return;
@@ -120,6 +136,13 @@ static void ValidateParams(const Value &params_value, const string &method) {
                 unknown_keys.push_back(key_str);
             }
         }
+    } else if (params_value.type().id() == LogicalTypeId::STRUCT) {
+        auto &child_types = StructType::GetChildTypes(params_value.type());
+        for (idx_t i = 0; i < child_types.size(); i++) {
+            if (valid_keys.find(child_types[i].first) == valid_keys.end()) {
+                unknown_keys.push_back(child_types[i].first);
+            }
+        }
     }
 
     if (!unknown_keys.empty()) {
@@ -129,7 +152,7 @@ static void ValidateParams(const Value &params_value, const string &method) {
             unknown_list += "'" + unknown_keys[i] + "'";
         }
         throw InvalidInputException(
-            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool",
+            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init",
             unknown_list);
     }
 }
@@ -394,6 +417,8 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
         string model_spec = bind_data.model_spec;
         string seasonal_periods_str = bind_data.seasonal_periods_str;
         string model_pool = bind_data.model_pool;
+        string laplace_variant = bind_data.laplace_variant;
+        bool laplace_seasonal_batch_init = bind_data.laplace_seasonal_batch_init;
 
         auto p_idx = params_data.sel->get_index(row_idx);
         if (params_data.validity.RowIsValid(p_idx)) {
@@ -405,6 +430,9 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
             window_param = ParseInt64Param(params_val, "window", 0);
             seasonal_periods_str = ParseStringParam(params_val, "seasonal_periods", "");
             model_pool = ParseStringParam(params_val, "model_pool", "");
+            laplace_variant = ParseStringParam(params_val, "laplace_variant", "");
+            laplace_seasonal_batch_init =
+                ParseInt64Param(params_val, "laplace_seasonal_batch_init", 0) != 0;
         }
 
         // --- Build ForecastOptions ---
@@ -432,6 +460,12 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
             strncpy(opts.model_pool, model_pool.c_str(), sizeof(opts.model_pool) - 1);
             opts.model_pool[sizeof(opts.model_pool) - 1] = '\0';
         }
+        if (!laplace_variant.empty()) {
+            strncpy(opts.laplace_variant, laplace_variant.c_str(),
+                    sizeof(opts.laplace_variant) - 1);
+            opts.laplace_variant[sizeof(opts.laplace_variant) - 1] = '\0';
+        }
+        opts.laplace_seasonal_batch_init = laplace_seasonal_batch_init;
 
         // --- Call Rust FFI ---
         ForecastResult fcst_result;
