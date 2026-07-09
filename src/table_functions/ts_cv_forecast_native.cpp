@@ -45,6 +45,7 @@ struct TsCvForecastNativeBindData : public TableFunctionData {
     int64_t window = 0;
     string seasonal_periods_str = "";
     string model_pool = "";
+    string laplace_variant = "";
 
     // Column indices (resolved by name in bind)
     idx_t fold_id_col = 0;
@@ -250,7 +251,8 @@ static string MakeCompositeKey(int64_t fold_id, const string &group_key) {
 
 static void ValidateParamKeys(const Value &params_value) {
     static const unordered_set<string> valid_keys = {
-        "model", "seasonal_period", "seasonal_periods", "confidence_level", "window", "model_pool"
+        "model", "seasonal_period", "seasonal_periods", "confidence_level", "window", "model_pool",
+        "laplace_variant"
     };
 
     vector<string> unknown_keys;
@@ -280,7 +282,7 @@ static void ValidateParamKeys(const Value &params_value) {
             unknown_list += "'" + unknown_keys[i] + "'";
         }
         throw InvalidInputException(
-            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool",
+            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant",
             unknown_list);
     }
 }
@@ -380,6 +382,7 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
         bind_data->window = ParseInt64FromParams(params, "window", 0);
         bind_data->seasonal_periods_str = ParseStringFromParams(params, "seasonal_periods", "");
         bind_data->model_pool = ParseStringFromParams(params, "model_pool", "");
+        bind_data->laplace_variant = ParseStringFromParams(params, "laplace_variant", "");
 
         // Validate confidence_level range
         if (bind_data->confidence_level <= 0.0 || bind_data->confidence_level >= 1.0) {
@@ -686,6 +689,11 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
                 strncpy(opts.model_pool, bind_data.model_pool.c_str(),
                         sizeof(opts.model_pool) - 1);
                 opts.model_pool[sizeof(opts.model_pool) - 1] = '\0';
+            }
+            if (!bind_data.laplace_variant.empty()) {
+                strncpy(opts.laplace_variant, bind_data.laplace_variant.c_str(),
+                        sizeof(opts.laplace_variant) - 1);
+                opts.laplace_variant[sizeof(opts.laplace_variant) - 1] = '\0';
             }
 
             // Call Rust FFI

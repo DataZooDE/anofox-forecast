@@ -1079,6 +1079,11 @@ typedef struct ForecastOptions {
      * AutoETS model pool (e.g. "reduced", "complete"), empty = default (complete)
      */
     char model_pool[32];
+    /**
+     * Laplace forecaster variant ("auto", "auto_aid", "skaters"), empty = "auto".
+     * Only consulted when model is "Laplace".
+     */
+    char laplace_variant[16];
 } ForecastOptions;
 
 /**
@@ -1225,6 +1230,10 @@ typedef struct ForecastOptionsExog {
      * AutoETS model pool (e.g. "reduced", "complete"), empty = default (complete)
      */
     char model_pool[32];
+    /**
+     * Laplace forecaster variant ("auto", "auto_aid", "skaters"), empty = "auto".
+     */
+    char laplace_variant[16];
 } ForecastOptionsExog;
 
 /**
