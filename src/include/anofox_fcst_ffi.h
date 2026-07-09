@@ -1079,6 +1079,19 @@ typedef struct ForecastOptions {
      * AutoETS model pool (e.g. "reduced", "complete"), empty = default (complete)
      */
     char model_pool[32];
+    /**
+     * Laplace forecaster variant ("auto", "auto_aid", "skaters"), empty = "auto".
+     * Only consulted when model is "Laplace".
+     */
+    char laplace_variant[16];
+    /**
+     * Enable `LaplaceForecaster::with_seasonal_batch_init()` (opt-in).
+     * Only consulted when model is "Laplace" and seasonal_period > 1.
+     * Safe on stationary or amplitude-declining seasonal series; avoid on
+     * growing amplitude / phase-shifted seasonality (softmax abandons the
+     * seasonal-EMA leaf and forecast collapses to flat).
+     */
+    bool laplace_seasonal_batch_init;
 } ForecastOptions;
 
 /**
@@ -1225,6 +1238,14 @@ typedef struct ForecastOptionsExog {
      * AutoETS model pool (e.g. "reduced", "complete"), empty = default (complete)
      */
     char model_pool[32];
+    /**
+     * Laplace forecaster variant ("auto", "auto_aid", "skaters"), empty = "auto".
+     */
+    char laplace_variant[16];
+    /**
+     * Enable `LaplaceForecaster::with_seasonal_batch_init()` (opt-in).
+     */
+    bool laplace_seasonal_batch_init;
 } ForecastOptionsExog;
 
 /**
