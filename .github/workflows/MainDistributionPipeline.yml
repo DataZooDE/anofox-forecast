@@ -7,6 +7,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+# OIDC token needed for AWS credentials in the deploy job.
+permissions:
+  id-token: write
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref || '' }}-${{ github.base_ref || '' }}-${{ github.ref != 'refs/heads/main' || github.sha }}
   cancel-in-progress: true
@@ -24,6 +29,23 @@ jobs:
       # windows_amd64_mingw: rtools42 MinGW lacks libbcrypt.a needed by Rust getrandom 0.3+
       exclude_archs: 'windows_amd64_rtools;windows_amd64_mingw'
 
+  duckdb-lts-deploy:
+    name: Deploy extension binaries (v1.4.5 LTS)
+    needs: duckdb-lts-build
+    # Run the deploy step even when a non-essential build matrix entry fails.
+    # The deploy job itself fans out per arch and only pushes the artifacts
+    # that actually exist.
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/_extension_deploy.yml
+    secrets: inherit
+    with:
+      duckdb_version: v1.4.5
+      ci_tools_version: v1.4-andium
+      extension_name: anofox_forecast
+      exclude_archs: 'windows_amd64_rtools;windows_amd64_mingw'
+      deploy_latest: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
+      deploy_versioned: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
+
   duckdb-latest-build:
     name: Build extension binaries (DuckDB latest v1.5.4)
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.5-variegata
@@ -35,6 +57,20 @@ jobs:
       # windows_amd64_rtools: only needed for R package builds
       # windows_amd64_mingw: rtools42 MinGW lacks libbcrypt.a needed by Rust getrandom 0.3+
       exclude_archs: 'windows_amd64_rtools;windows_amd64_mingw'
+
+  duckdb-latest-deploy:
+    name: Deploy extension binaries (v1.5.4)
+    needs: duckdb-latest-build
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/_extension_deploy.yml
+    secrets: inherit
+    with:
+      duckdb_version: v1.5.4
+      ci_tools_version: v1.5-variegata
+      extension_name: anofox_forecast
+      exclude_archs: 'windows_amd64_rtools;windows_amd64_mingw'
+      deploy_latest: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
+      deploy_versioned: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
 
   build-and-test-rust:
     name: Rust Tests

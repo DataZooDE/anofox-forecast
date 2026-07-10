@@ -1,36 +1,56 @@
 #
-# Reusable workflow that deploys the artifacts produced by the extension distribution pipeline
+# Reusable workflow that deploys the artifacts produced by github.com/duckdb/duckdb/.github/workflows/_extension_distribution.yml
 #
+# note: this workflow needs to be located in the extension repository, as it requires secrets to be passed to the
+# deploy script. However, it should generally not be necessary to modify this workflow in your extension repository, as
+# this workflow can be configured to use a custom deploy script.
+
+
 name: Extension Deployment
 on:
   workflow_call:
     inputs:
+      # The name of the extension
       extension_name:
         required: true
         type: string
+      # DuckDB version to build against
       duckdb_version:
         required: true
         type: string
+      # The extension-ci-tools ref (branch/tag) matching duckdb_version. Required
+      # because the rolling patch releases (e.g. v1.5.4 / v1.4.5) have no matching
+      # extension-ci-tools branch — the codename branches (v1.5-variegata /
+      # v1.4-andium) are the canonical targets instead.
+      ci_tools_version:
+        required: true
+        type: string
+      # ';' separated list of architectures to exclude, for example: 'linux_amd64;osx_arm64'
       exclude_archs:
         required: false
         type: string
         default: ""
+      # Whether to upload this deployment as the latest. This may overwrite a previous deployment.
       deploy_latest:
         required: false
         type: boolean
         default: false
+      # Whether to upload this deployment under a versioned path. These will not be deleted automatically
       deploy_versioned:
         required: false
         type: boolean
         default: false
+      # Postfix added to artifact names. Can be used to guarantee unique names when this workflow is called multiple times
       artifact_postfix:
         required: false
         type: string
         default: ""
+      # Override the default deploy script with a custom script
       deploy_script:
         required: false
         type: string
         default: "./scripts/extension-upload.sh"
+      # Override the default matrix parse script with a custom script
       matrix_parse_script:
         required: false
         type: string
@@ -43,7 +63,7 @@ jobs:
     outputs:
       deploy_matrix: ${{ steps.parse-matrices.outputs.deploy_matrix }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
         with:
           fetch-depth: 0
           submodules: 'true'
@@ -51,13 +71,26 @@ jobs:
       - name: Checkout DuckDB to version
         run: |
           cd duckdb
+          git fetch --depth 1 origin tag ${{ inputs.duckdb_version }}
           git checkout ${{ inputs.duckdb_version }}
+
+      - name: Checkout extension-ci-tools to version
+        # Submodules are pinned to the stable DuckDB version; for the
+        # LTS deploy we need the matching tools so the parsed
+        # architecture matrix lines up with what the LTS build job
+        # produced. Branch first, tag fallback.
+        run: |
+          cd extension-ci-tools
+          git fetch --depth 1 origin ${{ inputs.ci_tools_version }} || \
+            git fetch --depth 1 origin tag ${{ inputs.ci_tools_version }}
+          git checkout FETCH_HEAD
 
       - id: parse-matrices
         run: |
-          python3 ${{ inputs.matrix_parse_script }} --input ./extension-ci-tools/config/distribution_matrix.json --deploy_matrix --output deploy_matrix.json --exclude "${{ inputs.exclude_archs }}" --pretty
+          python3 ${{ inputs.matrix_parse_script }} --input ./extension-ci-tools/config/distribution_matrix.json --deploy_matrix --output deploy_matrix.json --exclude "${{ inputs.exclude_archs }}" --reduced_ci_mode auto --pretty
           deploy_matrix="`cat deploy_matrix.json`"
           echo deploy_matrix=$deploy_matrix >> $GITHUB_OUTPUT
+          echo `cat $GITHUB_OUTPUT`
 
   deploy:
     name: Deploy
@@ -65,6 +98,10 @@ jobs:
     needs: generate_matrix
     if: ${{ needs.generate_matrix.outputs.deploy_matrix != '{}' && needs.generate_matrix.outputs.deploy_matrix != '' }}
     strategy:
+      # One missing artifact (e.g. a Windows build that didn't produce one)
+      # must not cancel sibling per-arch deploys — Linux / macOS / wasm
+      # publishing should proceed independently.
+      fail-fast: false
       matrix: ${{fromJson(needs.generate_matrix.outputs.deploy_matrix)}}
 
     steps:
@@ -73,9 +110,17 @@ jobs:
           fetch-depth: 0
           submodules: 'true'
 
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: arn:aws:iam::331993160594:role/ErplGithubOicdRole
+          role-session-name: ErplGithubOicdSession
+          aws-region: eu-west-1
+
       - name: Checkout DuckDB to version
         run: |
           cd duckdb
+          git fetch --depth 1 origin tag ${{ inputs.duckdb_version }}
           git checkout ${{ inputs.duckdb_version }}
 
       - uses: actions/download-artifact@v4
@@ -89,6 +134,7 @@ jobs:
         env:
           BUCKET_NAME: ${{ vars.DEPLOY_S3_BUCKET }}
         run: |
+          pwd
           python3 -m pip install pip awscli
           git config --global --add safe.directory '*'
           cd duckdb
