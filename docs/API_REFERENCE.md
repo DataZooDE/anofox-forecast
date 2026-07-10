@@ -123,7 +123,7 @@ Both forms are identical in functionality.
 | `ts_detect_periods_by` | Detect seasonality (multi-series) | `ts_detect_periods_by('tbl', id, date, val)` |
 | `ts_features` | Extract 117 features | `ts_features(date, value)` |
 
-### Forecasting Models (32 Models)
+### Forecasting Models (33 Models)
 
 | Category | Models | Reference |
 |----------|--------|-----------|
@@ -133,6 +133,7 @@ Both forms are identical in functionality.
 | **Theta** | `Theta`, `OptimizedTheta`, `DynamicTheta`, `DynamicOptimizedTheta`, `AutoTheta` | [theta/](reference/models/theta/) |
 | **Multi-Seasonal** | `MFLES`, `AutoMFLES`, `MSTL`, `AutoMSTL`, `TBATS`, `AutoTBATS` | [multi-seasonal/](reference/models/multi-seasonal/) |
 | **Intermittent Demand** | `CrostonClassic`, `CrostonOptimized`, `CrostonSBA`, `ADIDA`, `IMAPA`, `TSB` | [intermittent/](reference/models/intermittent/) |
+| **Distributional** | `Laplace` (variants: `auto`, `auto_aid`, `skaters`) | [distributional/laplace.md](reference/models/distributional/laplace.md) |
 
 ### Evaluation Metrics (12 Metrics)
 

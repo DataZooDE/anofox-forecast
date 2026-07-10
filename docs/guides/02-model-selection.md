@@ -4,7 +4,7 @@
 
 ## Overview
 
-The extension provides 32 forecasting models. This guide helps you select the right one.
+The extension provides 33 forecasting models. This guide helps you select the right one.
 
 **Use this guide to:**
 - Analyze your data's characteristics (trend, seasonality, intermittency)
@@ -40,10 +40,11 @@ GROUP BY product_id;
 |---------------|-------------------|-----|
 | No clear patterns | `Naive`, `SES`, `SESOptimized` | Simple baselines work well |
 | Upward/downward trend | `Holt`, `Theta`, `RandomWalkDrift` | Captures trend component |
-| Single seasonal pattern | `SeasonalNaive`, `HoltWinters`, `SeasonalES` | Models one seasonal cycle |
+| Single seasonal pattern | `SeasonalNaive`, `HoltWinters`, `SeasonalES`, `Laplace` | Models one seasonal cycle |
 | Multiple seasons (e.g., weekly + yearly) | `MSTL`, `MFLES`, `TBATS` | Handles complex seasonality |
-| Many zeros (intermittent demand) | `CrostonClassic`, `CrostonSBA`, `TSB` | Specialized for sparse data |
-| Unknown patterns | `AutoETS`, `AutoARIMA`, `AutoTheta` | Automatic model selection |
+| Many zeros (intermittent demand) | `CrostonClassic`, `CrostonSBA`, `TSB`, `Laplace` (`auto_aid`) | Specialized for sparse data; AID leaf selection for retail counts |
+| Unknown patterns | `AutoETS`, `AutoARIMA`, `AutoTheta`, `Laplace` | Automatic model selection |
+| Need speed on large panels | `Laplace`, `SeasonalES` | Streaming leaves; ~30× faster than AutoETS on M5-monthly |
 
 ## Model Categories
 
@@ -117,6 +118,31 @@ SELECT * FROM ts_forecast_by('inventory', id, date, demand, 'CrostonSBA', 12, '1
 SELECT * FROM ts_forecast_by('inventory', id, date, demand, 'TSB', 12, '1d');
 ```
 
+### Distributional (Laplace)
+
+Streaming likelihood-weighted mixture — one call, three zero-config selectors. Fast (~30× faster than AutoETS on M5-monthly), competitive on MAE, non-negative-safe on `auto` / `auto_aid`.
+
+```sql
+-- Default: auto — balanced for smooth / continuous series
+SELECT * FROM ts_forecast_by('sales', id, ds, y, 'Laplace', 12, '1mo',
+    MAP{'seasonal_period': '12'});
+
+-- Retail / intermittent counts — AID-based leaf selection
+SELECT * FROM ts_forecast_by('sales', id, ds, y, 'Laplace', 12, '1mo',
+    MAP{'seasonal_period': '12', 'laplace_variant': 'auto_aid'});
+
+-- Fuller ensemble — slower, more robust
+SELECT * FROM ts_forecast_by('sales', id, ds, y, 'Laplace', 12, '1mo',
+    MAP{'seasonal_period': '12', 'laplace_variant': 'skaters'});
+
+-- Opt-in batch init — helps on stationary / amplitude-declining series
+-- (avoid on growing amplitude / phase-shifted seasonality — collapses the forecast)
+SELECT * FROM ts_forecast_by('sales', id, ds, y, 'Laplace', 12, '1mo',
+    MAP{'seasonal_period': '12', 'laplace_seasonal_batch_init': '1'});
+```
+
+See [reference/models/distributional/laplace.md](../reference/models/distributional/laplace.md) for the full variant trade-off table and benchmark numbers.
+
 ## Comparing Models
 
 Always compare multiple models using cross-validation:
@@ -154,11 +180,13 @@ ORDER BY avg_mae;
 
 | Scenario | First Try | Alternative |
 |----------|-----------|-------------|
-| Don't know data characteristics | `AutoETS` | `AutoARIMA` |
+| Don't know data characteristics | `AutoETS` | `Laplace` (`auto`) |
 | Daily retail sales | `HoltWinters` | `MSTL` |
+| Monthly retail SKU counts | `Laplace` (`auto_aid`) | `AutoTheta` |
 | Weekly financial data | `Theta` | `AutoETS` |
 | Hourly sensor data | `MFLES` | `MSTL` |
-| Spare parts demand | `CrostonSBA` | `TSB` |
+| Spare parts demand | `CrostonSBA` | `Laplace` (`auto_aid`) |
+| Large panel, need speed | `Laplace` | `SeasonalES` |
 | Short series (< 20 points) | `Naive` | `SES` |
 
 ---
