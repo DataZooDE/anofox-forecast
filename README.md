@@ -20,16 +20,17 @@
 > This extension is in early development, so bugs and breaking changes are expected.
 > Please use the [issues page](https://github.com/DataZooDE/anofox-forecast/issues) to report bugs or request features.
 
-A time series forecasting extension for DuckDB with 32 models, data preparation, and analytics — all in pure SQL.
+A time series forecasting extension for DuckDB with 33 models, data preparation, and analytics — all in pure SQL.
 
 
 ## ✨ Key Features
 
-### 🎯 Forecasting (32 Models)
+### 🎯 Forecasting (33 Models)
 - **AutoML**: AutoETS, AutoARIMA, AutoMFLES, AutoMSTL, AutoTBATS
 - **Statistical**: ETS, ARIMA, Theta, Holt-Winters, Seasonal Naive
 - **Advanced**: TBATS, MSTL, MFLES (multiple seasonality)
 - **Intermittent Demand**: Croston, ADIDA, IMAPA, TSB
+- **Distributional**: Laplace (streaming likelihood-weighted mixture, three zero-config selectors: `auto` / `auto_aid` / `skaters`)
 - **Exogenous Variables**: ARIMAX, ThetaX, MFLESX (external regressors support)
 
 ### 📊 Complete Workflow
@@ -209,7 +210,7 @@ For complete function signatures, parameters, and detailed documentation, see th
 | **Conformal Prediction** | Distribution-free prediction intervals | [11-conformal-prediction.md](docs/api/11-conformal-prediction.md) |
 | **Feature Extraction** | 117 tsfresh-compatible features | [20-feature-extraction.md](docs/api/20-feature-extraction.md) |
 
-### Model Reference (32 Models)
+### Model Reference (33 Models)
 
 | Category | Models | Reference |
 |----------|--------|-----------|
@@ -219,6 +220,7 @@ For complete function signatures, parameters, and detailed documentation, see th
 | **Theta** | Theta, OptimizedTheta, DynamicTheta, AutoTheta | [theta/](docs/reference/models/theta/) |
 | **Multi-Seasonal** | MFLES, MSTL, TBATS (+ Auto variants) | [multi-seasonal/](docs/reference/models/multi-seasonal/) |
 | **Intermittent Demand** | Croston, CrostonSBA, ADIDA, IMAPA, TSB | [intermittent/](docs/reference/models/intermittent/) |
+| **Distributional** | Laplace (variants: auto, auto_aid, skaters) | [distributional/laplace.md](docs/reference/models/distributional/laplace.md) |
 
 
 ## 📦 Development

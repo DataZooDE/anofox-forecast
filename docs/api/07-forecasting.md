@@ -4,11 +4,11 @@
 
 ## Overview
 
-The extension provides 32 forecasting models ranging from simple baselines to sophisticated state-space methods.
+The extension provides 33 forecasting models ranging from simple baselines to sophisticated state-space methods and streaming distributional forecasters.
 
 **Use this document to:**
 - Generate point forecasts and prediction intervals for single or multiple series
-- Choose from 32 models: baselines (Naive, SMA), exponential smoothing (ETS, Holt-Winters), state-space (ARIMA), multi-seasonal (MSTL, TBATS), and intermittent demand (Croston, TSB)
+- Choose from 33 models: baselines (Naive, SMA), exponential smoothing (ETS, Holt-Winters), state-space (ARIMA), multi-seasonal (MSTL, TBATS), intermittent demand (Croston, TSB), and distributional (Laplace)
 - Use automatic model selection (AutoETS, AutoARIMA, AutoTheta) when unsure
 - Incorporate exogenous variables with supported models
 - Understand the detect-then-forecast workflow for seasonal data
@@ -122,12 +122,13 @@ SELECT * FROM ts_forecast_by(
 |---------------------|-------------------|
 | No trend, no seasonality | `Naive`, `SES`, `SESOptimized` |
 | Trend, no seasonality | `Holt`, `Theta`, `RandomWalkDrift` |
-| Seasonality (single period) | `SeasonalNaive`, `HoltWinters`, `SeasonalES` |
+| Seasonality (single period) | `SeasonalNaive`, `HoltWinters`, `SeasonalES`, `Laplace` |
 | Multiple seasonalities | `MSTL`, `MFLES`, `TBATS` |
-| Intermittent demand (many zeros) | `CrostonClassic`, `CrostonSBA`, `TSB` |
-| Unknown characteristics | `AutoETS`, `AutoARIMA`, `AutoTheta` |
+| Intermittent demand (many zeros) | `CrostonClassic`, `CrostonSBA`, `TSB`, `Laplace` (with `auto_aid`) |
+| Unknown characteristics | `AutoETS`, `AutoARIMA`, `AutoTheta`, `Laplace` |
+| Streaming / distributional | `Laplace` |
 
-## Supported Models (32 Models)
+## Supported Models (33 Models)
 
 ### Automatic Selection Models (6)
 | Model | Description | Optional Params |
@@ -193,6 +194,23 @@ SELECT * FROM ts_forecast_by(
 | `ADIDA` | Aggregate-Disaggregate IDA | — |
 | `IMAPA` | Intermittent Multiple Aggregation | — |
 | `TSB` | Teunter-Syntetos-Babai method | *alpha_d*, *alpha_p* |
+
+### Distributional Models (1)
+
+Streaming likelihood-weighted mixture of leaves (EMA / drift / AR(1) / damped-Holt + optional seasonal / distribution-family leaves). Point + interval forecasts; the full mixture parameters will be exposed by the upcoming `ts_forecast_dist_by` (PR B).
+
+| Model | Description | Optional |
+|-------|-------------|----------|
+| `Laplace` | Streaming distributional forecaster with three zero-config selectors (`auto` / `auto_aid` / `skaters`) | *seasonal_period*, *laplace_variant*, *laplace_seasonal_batch_init* |
+
+**Variants** (`laplace_variant`):
+- `auto` (default) — balanced for smooth / continuous series with adequate history
+- `auto_aid` — AID-based distribution-family selection; best for retail SKU / intermittent counts
+- `skaters` — fuller skaters ensemble (multi-h scoring, stacking, larger leaf set); slower, more robust
+
+**Batch init** (`laplace_seasonal_batch_init: 1`) initialises the seasonal-EMA phase levels from the last training cycle. Safe on stationary or amplitude-declining seasonal series; avoid on growing amplitude or phase-shifted seasonality (the softmax abandons the seasonal-EMA leaf and the forecast collapses to flat).
+
+See [reference/models/distributional/laplace.md](../reference/models/distributional/laplace.md) for the full trade-off table and worked examples.
 
 ---
 
