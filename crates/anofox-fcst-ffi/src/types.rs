@@ -394,6 +394,15 @@ pub struct ForecastOptions {
     pub seasonal_periods_str: [c_char; 64],
     /// AutoETS model pool (e.g. "reduced", "complete"), empty = default (complete)
     pub model_pool: [c_char; 32],
+    /// Laplace forecaster variant ("auto", "auto_aid", "skaters"), empty = "auto".
+    /// Only consulted when model is "Laplace".
+    pub laplace_variant: [c_char; 16],
+    /// Enable `LaplaceForecaster::with_seasonal_batch_init()` (opt-in).
+    /// Only consulted when model is "Laplace" and seasonal_period > 1.
+    /// Safe on stationary or amplitude-declining seasonal series; avoid on
+    /// growing amplitude / phase-shifted seasonality (softmax abandons the
+    /// seasonal-EMA leaf and forecast collapses to flat).
+    pub laplace_seasonal_batch_init: bool,
 }
 
 impl Default for ForecastOptions {
@@ -415,6 +424,8 @@ impl Default for ForecastOptions {
             window: 0,
             seasonal_periods_str: [0; 64],
             model_pool: [0; 32],
+            laplace_variant: [0; 16],
+            laplace_seasonal_batch_init: false,
         }
     }
 }
@@ -481,6 +492,10 @@ pub struct ForecastOptionsExog {
     pub seasonal_periods_str: [c_char; 64],
     /// AutoETS model pool (e.g. "reduced", "complete"), empty = default (complete)
     pub model_pool: [c_char; 32],
+    /// Laplace forecaster variant ("auto", "auto_aid", "skaters"), empty = "auto".
+    pub laplace_variant: [c_char; 16],
+    /// Enable `LaplaceForecaster::with_seasonal_batch_init()` (opt-in).
+    pub laplace_seasonal_batch_init: bool,
 }
 
 impl Default for ForecastOptionsExog {
@@ -503,6 +518,8 @@ impl Default for ForecastOptionsExog {
             window: 0,
             seasonal_periods_str: [0; 64],
             model_pool: [0; 32],
+            laplace_variant: [0; 16],
+            laplace_seasonal_batch_init: false,
         }
     }
 }

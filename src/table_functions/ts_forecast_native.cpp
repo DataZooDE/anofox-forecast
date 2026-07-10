@@ -45,6 +45,8 @@ struct TsForecastNativeBindData : public TableFunctionData {
     int64_t window = 0;
     string seasonal_periods_str = "";
     string model_pool = "";
+    string laplace_variant = "";
+    bool laplace_seasonal_batch_init = false;
 
     // Type preservation
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
@@ -267,7 +269,8 @@ static double ParseDoubleFromParams(const Value &params_value, const string &key
 
 static void ValidateParamKeys(const Value &params_value) {
     static const unordered_set<string> valid_keys = {
-        "model", "seasonal_period", "seasonal_periods", "confidence_level", "window", "model_pool"
+        "model", "seasonal_period", "seasonal_periods", "confidence_level", "window", "model_pool",
+        "laplace_variant", "laplace_seasonal_batch_init"
     };
 
     vector<string> unknown_keys;
@@ -297,7 +300,7 @@ static void ValidateParamKeys(const Value &params_value) {
             unknown_list += "'" + unknown_keys[i] + "'";
         }
         throw InvalidInputException(
-            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool",
+            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init",
             unknown_list);
     }
 }
@@ -346,6 +349,9 @@ static unique_ptr<FunctionData> TsForecastNativeBind(
         bind_data->window = ParseInt64FromParams(params, "window", 0);
         bind_data->seasonal_periods_str = ParseStringFromParams(params, "seasonal_periods", "");
         bind_data->model_pool = ParseStringFromParams(params, "model_pool", "");
+        bind_data->laplace_variant = ParseStringFromParams(params, "laplace_variant", "");
+        bind_data->laplace_seasonal_batch_init =
+            ParseInt64FromParams(params, "laplace_seasonal_batch_init", 0) != 0;
 
         // Validate confidence_level range
         if (bind_data->confidence_level <= 0.0 || bind_data->confidence_level >= 1.0) {
@@ -636,6 +642,12 @@ static OperatorFinalizeResultType TsForecastNativeFinalize(
                         sizeof(opts.model_pool) - 1);
                 opts.model_pool[sizeof(opts.model_pool) - 1] = '\0';
             }
+            if (!bind_data.laplace_variant.empty()) {
+                strncpy(opts.laplace_variant, bind_data.laplace_variant.c_str(),
+                        sizeof(opts.laplace_variant) - 1);
+                opts.laplace_variant[sizeof(opts.laplace_variant) - 1] = '\0';
+            }
+            opts.laplace_seasonal_batch_init = bind_data.laplace_seasonal_batch_init;
 
             // Call Rust FFI
             ForecastResult fcst_result;
