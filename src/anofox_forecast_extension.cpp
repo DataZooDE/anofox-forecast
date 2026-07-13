@@ -186,6 +186,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
     telemetry.SetAPIKey("phc_t3wwRLtpyEmLHYaZCSszG0MqVr74J6wnCrj9D41zk2t");
     telemetry.SetDuckDBVersion(DuckDB::LibraryVersion());
+    telemetry.SetProduct("anofox_forecast", AnofoxForecastExtension().Version(), "oss");
+    telemetry.AssociateGroup("deployment", PostHogTelemetry::GetDistinctId());
     telemetry.CaptureExtensionLoad("anofox_forecast", AnofoxForecastExtension().Version());
 
     // Register telemetry opt-out setting
