@@ -1736,12 +1736,9 @@ fn forecast_laplace(
 /// - LaplaceForecaster (distributional)
 ///
 /// Unsupported models return an `InvalidModel` error naming the model.
-pub fn forecast_inspect(
-    values: &[Option<f64>],
-    options: &ForecastOptions,
-) -> Result<String> {
-    use anofox_forecast::models::exponential::{AutoETS, AutoETSConfig};
+pub fn forecast_inspect(values: &[Option<f64>], options: &ForecastOptions) -> Result<String> {
     use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig};
+    use anofox_forecast::models::exponential::{AutoETS, AutoETSConfig};
     use anofox_forecast::models::mstl_forecaster::MSTLForecaster;
     use anofox_forecast::models::tbats::AutoTBATS;
     use anofox_forecast::models::theta::AutoTheta;
@@ -1938,9 +1935,9 @@ pub fn forecast_explain(
                 ForecastError::ComputationError(format!("Invalid ETS spec '{spec}': {e}"))
             })?;
             let mut model = ETSModel::new(parsed, period);
-            model.fit(&ts).map_err(|e| {
-                ForecastError::ComputationError(format!("ETS fit failed: {e}"))
-            })?;
+            model
+                .fit(&ts)
+                .map_err(|e| ForecastError::ComputationError(format!("ETS fit failed: {e}")))?;
             model.explain(horizon)
         }
         ModelType::MSTL | ModelType::AutoMSTL => {
@@ -1952,9 +1949,9 @@ pub fn forecast_explain(
                 vec![12]
             };
             let mut model = MSTLForecaster::new(periods);
-            model.fit(&ts).map_err(|e| {
-                ForecastError::ComputationError(format!("MSTL fit failed: {e}"))
-            })?;
+            model
+                .fit(&ts)
+                .map_err(|e| ForecastError::ComputationError(format!("MSTL fit failed: {e}")))?;
             model.explain(horizon)
         }
         ModelType::Theta => {
@@ -1963,9 +1960,9 @@ pub fn forecast_explain(
             } else {
                 Theta::new()
             };
-            model.fit(&ts).map_err(|e| {
-                ForecastError::ComputationError(format!("Theta fit failed: {e}"))
-            })?;
+            model
+                .fit(&ts)
+                .map_err(|e| ForecastError::ComputationError(format!("Theta fit failed: {e}")))?;
             model.explain(horizon)
         }
         other => {
@@ -2005,7 +2002,12 @@ pub fn forecast_explain(
     let named: serde_json::Value = explanation
         .named_components
         .iter()
-        .map(|(k, v)| (k.clone(), serde_json::to_value(v).unwrap_or(serde_json::Value::Null)))
+        .map(|(k, v)| {
+            (
+                k.clone(),
+                serde_json::to_value(v).unwrap_or(serde_json::Value::Null),
+            )
+        })
         .collect::<serde_json::Map<_, _>>()
         .into();
     obj.insert("named_components".to_string(), named);
