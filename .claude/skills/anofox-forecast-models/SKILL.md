@@ -234,9 +234,54 @@ FROM forecasts
 ORDER BY product_id, forecast_step;
 ```
 
+## Explainability surfaces (Tier 6)
+
+Two macros expose per-group fit-state and forecast decomposition, each
+returning a nullable **wide STRUCT** so the shape is stable across model
+families. Both require the `json` extension.
+
+### `ts_forecast_inspect_by(source, group_col, date_col, target_col, method, params?)`
+
+Fit-state snapshot. Signature returns `TABLE(group_col, inspection STRUCT(...))`.
+`(inspection).model_family` names which sub-fields are populated:
+
+| `model_family` | Key fields |
+|---|---|
+| `Ets` | `spec`, `alpha`, `beta`, `gamma`, `phi`, `trend_component`, `seasonal_component`, `residuals` |
+| `Arima` | `order_p/d/q`, `seasonal_order_P/D/Q/s`, `coefficients`, `aic`, `bic` |
+| `Theta` | `variant`, `theta`, `alpha` |
+| `Tbats` | `seasonal_periods`, `box_cox_lambda`, `selected_config`, `aic` |
+| `Mfles` | `max_rounds`, `multiplicative`, `penalty`, `trend_component`, `seasonal_component` |
+| `Mstl` | `seasonal_periods`, `iterations`, `trend_component`, `seasonal_component` |
+| `Laplace` | `leaf_names`, `leaf_weights`, `horizon_dists_json` |
+
+Fields not in the current family are `NULL`. `raw_json` carries the full serde payload.
+
+Supported models: `AutoETS`, `AutoARIMA`, `AutoTheta`, `AutoTBATS`, `MFLES`, `AutoMFLES`, `MSTL`, `AutoMSTL`, `Laplace`. Others raise `does not implement Inspectable`.
+
+```sql
+-- Read AutoETS smoothing params per group
+SELECT product_id, (inspection).spec, (inspection).alpha
+FROM ts_forecast_inspect_by('sales', product_id, ds, y, 'AutoETS',
+    {seasonal_period: 12});
+```
+
+### `ts_forecast_explain_by(source, group_col, date_col, target_col, method, horizon, params?)`
+
+Per-horizon decomposition. Returns `TABLE(group_col, decomposition STRUCT(horizon, level DOUBLE[], trend DOUBLE[], seasonal DOUBLE[], residual DOUBLE[], named_components_json, raw_json))`. Each array has `horizon` elements; components not produced by a family are `NULL`.
+
+Supported models: `ETS` (fixed spec), `MSTL`, `AutoMSTL`, `Theta`. Others raise `does not implement Explainable`.
+
+```sql
+-- Reconstruct: yhat = level + trend + seasonal + residual
+SELECT product_id, (decomposition).level, (decomposition).trend, (decomposition).seasonal
+FROM ts_forecast_explain_by('sales', product_id, ds, y, 'ETS', 12,
+    {seasonal_period: 12});
+```
+
 See also: `anofox-forecast-data-prep` (clean input required), `anofox-forecast-detection` (produce `seasonal_period`), `anofox-forecast-backtest` (any model string usable in `ts_cv_forecast_by`), `anofox-forecast-eda` (understand series before picking model).
 
 Reference docs:
-- `docs/api/07-forecasting.md`
+- `docs/api/07-forecasting.md` (§ Explainability)
 - `docs/reference/models/distributional/laplace.md` (Laplace deep-dive)
 - `docs/guides/02-model-selection.md`

@@ -3830,6 +3830,281 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
 }
 
 // ============================================================================
+// Forecast Explainability (Inspectable + Explainable)
+// ============================================================================
+
+/// Allocate a NUL-terminated C string on the FFI heap and hand ownership to the
+/// caller. Returns null if allocation fails.
+///
+/// # Safety
+/// The caller must eventually free the returned pointer via `anofox_free_string`.
+unsafe fn alloc_c_string(s: &str) -> *mut c_char {
+    let bytes = s.as_bytes();
+    let len = bytes.len();
+    let buf = malloc(len + 1) as *mut c_char;
+    if buf.is_null() {
+        return ptr::null_mut();
+    }
+    ptr::copy_nonoverlapping(bytes.as_ptr() as *const c_char, buf, len);
+    *buf.add(len) = 0;
+    buf
+}
+
+/// Free a C string previously allocated by an inspect / explain call.
+///
+/// # Safety
+/// `ptr` must be either null or a pointer previously returned by one of
+/// `anofox_ts_forecast_inspect` / `anofox_ts_forecast_explain` via their
+/// `out_json` out-argument.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_free_string(ptr: *mut c_char) {
+    if !ptr.is_null() {
+        free(ptr as *mut _);
+    }
+}
+
+/// Fit the requested model and serialise its `Inspectable::explanation()`
+/// snapshot as JSON.
+///
+/// The JSON structure is the serde-serialised
+/// `anofox_forecast::models::inspect::Explanation` enum: an object with a
+/// single key equal to the model family (e.g. `AutoETS`, `Arima`,
+/// `Laplace`) whose value is the per-family payload struct.
+///
+/// # Arguments
+/// * `values`, `validity`, `length` — series (validity may be null for
+///   fully-valid data)
+/// * `options` — the same `ForecastOptions` used by `anofox_ts_forecast`;
+///   the `horizon` field is ignored (inspect is a fit-state snapshot)
+/// * `out_json` — receives ownership of a newly-allocated NUL-terminated
+///   JSON string; must be freed with `anofox_free_string`
+/// * `out_error` — optional error slot
+///
+/// # Supported models
+/// AutoETS, AutoARIMA, AutoTheta, AutoTBATS, MFLES, AutoMFLES, MSTL,
+/// AutoMSTL, Laplace. Any other model returns an `InvalidModel` error.
+///
+/// # Safety
+/// Pointer arguments must be valid; `out_json` and `options` must be non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_forecast_inspect(
+    values: *const c_double,
+    validity: *const u64,
+    length: size_t,
+    options: *const ForecastOptions,
+    out_json: *mut *mut c_char,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if values.is_null() || options.is_null() || out_json.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+    *out_json = ptr::null_mut();
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let series = build_series(values, validity, length);
+        let core_opts = build_core_options(&*options)?;
+        anofox_fcst_core::forecast_inspect(&series, &core_opts)
+    }));
+
+    match result {
+        Ok(Ok(json)) => {
+            let ptr = alloc_c_string(&json);
+            if ptr.is_null() {
+                if !out_error.is_null() {
+                    (*out_error).set_error(
+                        ErrorCode::AllocationError,
+                        "Failed to allocate JSON output buffer",
+                    );
+                }
+                return false;
+            }
+            *out_json = ptr;
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                let code = match e.to_code() {
+                    1 => ErrorCode::NullPointer,
+                    2 => ErrorCode::InvalidInput,
+                    3 => ErrorCode::ComputationError,
+                    4 => ErrorCode::AllocationError,
+                    5 => ErrorCode::InvalidModel,
+                    6 => ErrorCode::InsufficientData,
+                    7 => ErrorCode::InvalidDateFormat,
+                    8 => ErrorCode::InvalidFrequency,
+                    9 => ErrorCode::InvalidInput,
+                    _ => ErrorCode::InternalError,
+                };
+                (*out_error).set_error(code, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
+/// Fit the requested model and serialise its per-horizon
+/// `Explainable::explain(horizon)` decomposition as JSON.
+///
+/// The JSON has keys `level`, `trend`, `seasonal`, `residual` (each a
+/// Vec\<f64\> of length `horizon`, absent when the family has no such
+/// component) and `named_components` (a map of arbitrary named additive
+/// components).
+///
+/// # Arguments
+/// * `values`, `validity`, `length` — historical series
+/// * `horizon` — number of periods ahead to explain (must equal the
+///   horizon you'll subsequently forecast with; internally we call
+///   `.explain(horizon)`)
+/// * `options` — `ForecastOptions`; `horizon` field is ignored (uses the
+///   explicit `horizon` argument instead)
+/// * `out_json`, `out_error` — see `anofox_ts_forecast_inspect`
+///
+/// # Supported models
+/// ETS (fixed spec), MSTL / AutoMSTL, Theta. Any other model returns an
+/// `InvalidModel` error.
+///
+/// # Safety
+/// Pointer arguments must be valid; `out_json` and `options` must be non-null.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_forecast_explain(
+    values: *const c_double,
+    validity: *const u64,
+    length: size_t,
+    horizon: size_t,
+    options: *const ForecastOptions,
+    out_json: *mut *mut c_char,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if values.is_null() || options.is_null() || out_json.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+    *out_json = ptr::null_mut();
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let series = build_series(values, validity, length);
+        let core_opts = build_core_options(&*options)?;
+        anofox_fcst_core::forecast_explain(&series, horizon, &core_opts)
+    }));
+
+    match result {
+        Ok(Ok(json)) => {
+            let ptr = alloc_c_string(&json);
+            if ptr.is_null() {
+                if !out_error.is_null() {
+                    (*out_error).set_error(
+                        ErrorCode::AllocationError,
+                        "Failed to allocate JSON output buffer",
+                    );
+                }
+                return false;
+            }
+            *out_json = ptr;
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                let code = match e.to_code() {
+                    1 => ErrorCode::NullPointer,
+                    2 => ErrorCode::InvalidInput,
+                    3 => ErrorCode::ComputationError,
+                    4 => ErrorCode::AllocationError,
+                    5 => ErrorCode::InvalidModel,
+                    6 => ErrorCode::InsufficientData,
+                    7 => ErrorCode::InvalidDateFormat,
+                    8 => ErrorCode::InvalidFrequency,
+                    9 => ErrorCode::InvalidInput,
+                    _ => ErrorCode::InternalError,
+                };
+                (*out_error).set_error(code, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
+/// Shared FFI → core `ForecastOptions` conversion used by inspect + explain.
+///
+/// Extracted so both entry points parse the buffered string fields
+/// (`model`, `ets_model`, `seasonal_periods_str`, `model_pool`,
+/// `laplace_variant`) identically to `anofox_ts_forecast`.
+unsafe fn build_core_options(
+    opts: &ForecastOptions,
+) -> Result<anofox_fcst_core::ForecastOptions, anofox_fcst_core::ForecastError> {
+    let model_str = CStr::from_ptr(opts.model.as_ptr())
+        .to_str()
+        .unwrap_or("auto");
+    let model_type: anofox_fcst_core::ModelType = model_str.parse().map_err(|_| {
+        anofox_fcst_core::ForecastError::InvalidModel(format!("Unknown model: '{}'", model_str))
+    })?;
+
+    let ets_spec = CStr::from_ptr(opts.ets_model.as_ptr())
+        .to_str()
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+
+    let sp_str = CStr::from_ptr(opts.seasonal_periods_str.as_ptr())
+        .to_str()
+        .unwrap_or("");
+    let seasonal_periods = parse_seasonal_periods_str(sp_str);
+
+    let model_pool = CStr::from_ptr(opts.model_pool.as_ptr())
+        .to_str()
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+
+    let laplace_variant = CStr::from_ptr(opts.laplace_variant.as_ptr())
+        .to_str()
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(anofox_fcst_core::LaplaceVariant::parse)
+        .transpose()?;
+
+    Ok(anofox_fcst_core::ForecastOptions {
+        model: model_type,
+        ets_spec,
+        horizon: opts.horizon as usize,
+        confidence_level: opts.confidence_level,
+        seasonal_period: opts.seasonal_period as usize,
+        auto_detect_seasonality: opts.auto_detect_seasonality,
+        include_fitted: opts.include_fitted,
+        include_residuals: opts.include_residuals,
+        window: opts.window.max(0) as usize,
+        seasonal_periods,
+        model_pool,
+        laplace_variant,
+        laplace_seasonal_batch_init: opts.laplace_seasonal_batch_init,
+    })
+}
+
+// ============================================================================
 // Data Quality Functions
 // ============================================================================
 

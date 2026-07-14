@@ -78,6 +78,7 @@ void RegisterTsForecastFunction(ExtensionLoader &loader);
 void RegisterTsForecastByFunction(ExtensionLoader &loader);
 void RegisterTsForecastAggFunction(ExtensionLoader &loader);
 void RegisterTsForecastScalarFunction(ExtensionLoader &loader);
+void RegisterTsForecastInspectScalarFunction(ExtensionLoader &loader);
 void RegisterTsMaeFunction(ExtensionLoader &loader);
 void RegisterTsMseFunction(ExtensionLoader &loader);
 void RegisterTsRmseFunction(ExtensionLoader &loader);

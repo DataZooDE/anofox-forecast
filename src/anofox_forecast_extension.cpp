@@ -114,6 +114,7 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsForecastByFunction(loader);
     RegisterTsForecastAggFunction(loader);
     RegisterTsForecastScalarFunction(loader);
+    RegisterTsForecastInspectScalarFunction(loader);
 
     // Register Metric functions
     RegisterTsMaeFunction(loader);

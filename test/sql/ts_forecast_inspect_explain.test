@@ -1,0 +1,174 @@
+# name: test/sql/ts_forecast_inspect_explain.test
+# description: Tests for ts_forecast_inspect_by / ts_forecast_explain_by (Tier 6 explainability)
+# group: [sql]
+
+require anofox_forecast
+
+require json
+
+# Setup: monthly-seasonal panel with 60 obs per group — enough for AutoETS /
+# AutoARIMA / Laplace / MSTL to fit and expose non-trivial state.
+statement ok
+CREATE TABLE explain_panel AS
+SELECT
+    ('A', 'B', 'C')[(i // 60) + 1] AS product_id,
+    (DATE '2024-01-01' + ((i % 60) || ' month')::INTERVAL)::DATE AS ds,
+    10.0 + 3.0 * sin(2 * pi() * ((i % 60) % 12) / 12.0) + 0.05 * (i % 60) AS y
+FROM generate_series(0, 179) AS t(i);
+
+#######################################
+# ts_forecast_inspect_by — supported models
+#######################################
+
+# AutoETS: family / spec / fitted length
+query IIII
+SELECT product_id,
+       (inspection).model_family,
+       (inspection).seasonal_period,
+       array_length((inspection).fitted_values)
+FROM ts_forecast_inspect_by('explain_panel', product_id, ds, y, 'AutoETS', {seasonal_period: 12})
+ORDER BY product_id;
+----
+A	Ets	12	60
+B	Ets	12	60
+C	Ets	12	60
+
+# AutoARIMA: order tuple + AIC populated
+query III
+SELECT product_id,
+       (inspection).model_family,
+       (inspection).aic IS NOT NULL
+FROM ts_forecast_inspect_by('explain_panel', product_id, ds, y, 'AutoARIMA', {seasonal_period: 12})
+ORDER BY product_id;
+----
+A	Arima	true
+B	Arima	true
+C	Arima	true
+
+# Laplace: leaf ensemble metadata
+query III
+SELECT product_id,
+       (inspection).model_family,
+       array_length((inspection).leaf_names) > 0
+FROM ts_forecast_inspect_by('explain_panel', product_id, ds, y, 'Laplace', {seasonal_period: 12})
+ORDER BY product_id;
+----
+A	Laplace	true
+B	Laplace	true
+C	Laplace	true
+
+# AutoTheta: variant string populated
+query III
+SELECT product_id,
+       (inspection).model_family,
+       (inspection).variant IS NOT NULL
+FROM ts_forecast_inspect_by('explain_panel', product_id, ds, y, 'AutoTheta', {seasonal_period: 12})
+ORDER BY product_id;
+----
+A	Theta	true
+B	Theta	true
+C	Theta	true
+
+# Cross-family unused fields are NULL — wide STRUCT contract.
+# AutoARIMA has no `spec` field; AutoETS has no `order_p` field.
+query II
+SELECT (inspection).spec, (inspection).order_p
+FROM ts_forecast_inspect_by('explain_panel', product_id, ds, y, 'AutoARIMA', {seasonal_period: 12})
+WHERE product_id = 'A';
+----
+NULL	0
+
+query II
+SELECT (inspection).spec IS NOT NULL, (inspection).order_p
+FROM ts_forecast_inspect_by('explain_panel', product_id, ds, y, 'AutoETS', {seasonal_period: 12})
+WHERE product_id = 'A';
+----
+true	NULL
+
+#######################################
+# ts_forecast_inspect_by — rejection of non-Inspectable models
+#######################################
+
+statement error
+SELECT * FROM ts_forecast_inspect_by('explain_panel', product_id, ds, y, 'Naive');
+----
+does not implement Inspectable
+
+statement error
+SELECT * FROM ts_forecast_inspect_by('explain_panel', product_id, ds, y, 'SeasonalNaive', {seasonal_period: 12});
+----
+does not implement Inspectable
+
+#######################################
+# ts_forecast_explain_by — supported models (ETS / Theta / MSTL)
+#######################################
+
+# ETS explain: level / trend / seasonal each has `horizon` entries
+query IIIII
+SELECT product_id,
+       (decomposition).horizon,
+       array_length((decomposition).level),
+       array_length((decomposition).trend),
+       array_length((decomposition).seasonal)
+FROM ts_forecast_explain_by('explain_panel', product_id, ds, y, 'ETS', 12, {seasonal_period: 12})
+ORDER BY product_id;
+----
+A	12	12	12	12
+B	12	12	12	12
+C	12	12	12	12
+
+# Theta explain: at least `level` present; seasonal may be optional
+query III
+SELECT product_id,
+       (decomposition).horizon,
+       array_length((decomposition).level)
+FROM ts_forecast_explain_by('explain_panel', product_id, ds, y, 'Theta', 6, {seasonal_period: 12})
+ORDER BY product_id;
+----
+A	6	6
+B	6	6
+C	6	6
+
+# MSTL explain
+query III
+SELECT product_id,
+       (decomposition).horizon,
+       array_length((decomposition).level)
+FROM ts_forecast_explain_by('explain_panel', product_id, ds, y, 'MSTL', 4, {seasonal_periods: '[12]'})
+ORDER BY product_id;
+----
+A	4	4
+B	4	4
+C	4	4
+
+#######################################
+# ts_forecast_explain_by — rejection of non-Explainable models
+#######################################
+
+statement error
+SELECT * FROM ts_forecast_explain_by('explain_panel', product_id, ds, y, 'AutoETS', 12, {seasonal_period: 12});
+----
+does not implement Explainable
+
+statement error
+SELECT * FROM ts_forecast_explain_by('explain_panel', product_id, ds, y, 'Naive', 12);
+----
+does not implement Explainable
+
+#######################################
+# Dual-name alias exposure
+#######################################
+
+query II
+SELECT (inspection).model_family, (inspection).seasonal_period
+FROM anofox_fcst_ts_forecast_inspect_by('explain_panel', product_id, ds, y, 'AutoETS', {seasonal_period: 12})
+WHERE product_id = 'A';
+----
+Ets	12
+
+query II
+SELECT (decomposition).horizon, array_length((decomposition).trend)
+FROM anofox_fcst_ts_forecast_explain_by('explain_panel', product_id, ds, y, 'ETS', 8, {seasonal_period: 12})
+WHERE product_id = 'A';
+----
+8	8
