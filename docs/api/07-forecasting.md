@@ -315,4 +315,80 @@ SELECT * FROM ts_forecast_exog_by(
 
 ---
 
+## Explainability — inspecting fit state and decomposing forecasts
+
+Two macros expose the crate's `Inspectable` and `Explainable` surfaces
+as wide-STRUCT tables. Both require the `json` extension (auto-loaded
+if `autoload_known_extensions` is on).
+
+### `ts_forecast_inspect_by` — fit-state snapshot per group
+
+Returns one row per group with a nullable, uniformly-typed STRUCT
+`inspection` that carries the union of every family's payload.
+`model_family` names which fields are populated:
+
+| `model_family` | Populated fields |
+|----------------|------------------|
+| `Ets` | `spec`, `alpha`, `beta`, `gamma`, `phi`, `seasonal_period`, `fitted_values`, `trend_component`, `seasonal_component`, `residuals` |
+| `Arima` | `order_p/d/q`, `seasonal_order_P/D/Q/s`, `coefficients`, `aic`, `bic`, `fitted_values`, `residuals` |
+| `Theta` | `variant`, `theta`, `alpha`, `seasonal_period`, `fitted_values`, `residuals` |
+| `Tbats` | `seasonal_periods`, `box_cox_lambda`, `selected_config`, `aic`, `fitted_values`, `residuals` |
+| `Mfles` | `seasonal_period`, `max_rounds`, `multiplicative`, `penalty`, `fitted_values`, `trend_component`, `seasonal_component`, `residuals` |
+| `Mstl` | `seasonal_periods`, `iterations`, `fitted_values`, `trend_component`, `seasonal_component`, `residuals` |
+| `Laplace` | `leaf_names`, `leaf_weights`, `horizon_dists_json`, `fitted_values`, `residuals` |
+| `Regression` | `backend`, `feature_names`, `coefficients`, `intercept`, `coef_std_errors`, `intercept_std_error`, `r_squared`, `fitted_values` |
+
+All other fields are `NULL` for a given family. `raw_json` carries the
+untransformed serde payload for callers that need shapes the wide
+struct doesn't expose (nested Laplace `GaussianMixture` state, etc.).
+
+**Supported models (fit state):** `AutoETS`, `AutoARIMA`, `AutoTheta`,
+`AutoTBATS`, `MFLES`, `AutoMFLES`, `MSTL`, `AutoMSTL`, `Laplace`. Any
+other model errors with `does not implement Inspectable`.
+
+```sql
+-- ETS: read out per-group smoothing parameters
+SELECT product_id,
+       (inspection).spec,
+       (inspection).alpha,
+       (inspection).gamma
+FROM ts_forecast_inspect_by('sales', product_id, ds, y, 'AutoETS',
+    {seasonal_period: 12});
+
+-- Laplace: see the ensemble the shell picked and each leaf's weight
+SELECT product_id,
+       list_zip((inspection).leaf_names, (inspection).leaf_weights)
+FROM ts_forecast_inspect_by('sales', product_id, ds, y, 'Laplace',
+    {seasonal_period: 12, laplace_variant: 'auto_aid'});
+
+-- ARIMA: pull the selected order and BIC
+SELECT product_id,
+       (inspection).order_p, (inspection).order_d, (inspection).order_q,
+       (inspection).bic
+FROM ts_forecast_inspect_by('sales', product_id, ds, y, 'AutoARIMA',
+    {seasonal_period: 12});
+```
+
+### `ts_forecast_explain_by` — per-horizon forecast decomposition
+
+Returns per-group `decomposition` STRUCT with `level` / `trend` /
+`seasonal` / `residual` (each a `DOUBLE[]` of length `horizon`; absent
+components are `NULL`) plus `named_components_json` for family-specific
+extras. `raw_json` carries the untransformed payload.
+
+**Supported models (decomposition):** `ETS` (fixed spec), `MSTL`,
+`AutoMSTL`, `Theta`. Other models error with `does not implement Explainable`.
+
+```sql
+-- Reconstruct: yhat = level + trend + seasonal + residual
+SELECT product_id,
+       (decomposition).level,
+       (decomposition).trend,
+       (decomposition).seasonal
+FROM ts_forecast_explain_by('sales', product_id, ds, y, 'ETS', 12,
+    {seasonal_period: 12});
+```
+
+---
+
 *See also: [Cross-Validation](08-cross-validation.md) | [Evaluation Metrics](09-evaluation-metrics.md)*

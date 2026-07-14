@@ -30,6 +30,7 @@ dependencies = [
  "chrono",
  "faer",
  "fdars-core",
+ "serde_json",
  "statrs",
  "thiserror 2.0.17",
 ]
@@ -53,11 +54,14 @@ checksum = "b19a55d4357d5ee6b02f623e9046fa5f51b96611ec794640b0acad4b6f8fecb2"
 dependencies = [
  "anofox-regression 0.5.3",
  "anofox-statistics",
+ "bincode",
  "chrono",
  "faer",
  "getrandom 0.2.16",
  "lbfgs",
  "rand 0.8.6",
+ "serde",
+ "serde_json",
  "statrs",
  "thiserror 2.0.17",
  "trueno",
@@ -211,6 +215,15 @@ name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
+
+[[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "bitflags"

@@ -1723,6 +1723,297 @@ fn forecast_laplace(
     }
 }
 
+/// Fit-state inspection via the crate's `Inspectable` trait.
+///
+/// Fits the requested model, calls `.explanation()`, and returns the
+/// per-family `Explanation` variant as a JSON string. C++ side unpacks
+/// the JSON into a wide STRUCT via `struct_pack + json_extract` in
+/// `ts_forecast_inspect_by`.
+///
+/// Models covered (Inspectable in anofox-forecast 0.15.3):
+/// - AutoETS, AutoARIMA, AutoTheta, AutoTBATS (auto-selection family)
+/// - MFLES, MSTL (multi-seasonal)
+/// - LaplaceForecaster (distributional)
+///
+/// Unsupported models return an `InvalidModel` error naming the model.
+pub fn forecast_inspect(
+    values: &[Option<f64>],
+    options: &ForecastOptions,
+) -> Result<String> {
+    use anofox_forecast::models::exponential::{AutoETS, AutoETSConfig};
+    use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig};
+    use anofox_forecast::models::mstl_forecaster::MSTLForecaster;
+    use anofox_forecast::models::tbats::AutoTBATS;
+    use anofox_forecast::models::theta::AutoTheta;
+    use anofox_forecast::models::{Inspectable, MFLES};
+    use anofox_forecast::prelude::Forecaster;
+
+    let clean_values: Vec<f64> = fill_nulls_interpolate(values);
+    if clean_values.len() < 3 {
+        return Err(ForecastError::InsufficientData {
+            needed: 3,
+            got: clean_values.len(),
+        });
+    }
+
+    let period = if options.auto_detect_seasonality && options.seasonal_period == 0 {
+        detect_seasonality(&clean_values, None)
+            .ok()
+            .and_then(|p| p.first().cloned())
+            .unwrap_or(1) as usize
+    } else if options.seasonal_period > 0 {
+        options.seasonal_period
+    } else {
+        1
+    };
+
+    let ts = make_timeseries(&clean_values)?;
+
+    // Build → fit → introspect, per model. `.explanation()` returns
+    // the typed enum; we serialise to JSON so the wire is one string.
+    let explanation = match options.model {
+        ModelType::AutoETS => {
+            let mut config = if period > 1 {
+                AutoETSConfig::with_period(period)
+            } else {
+                AutoETSConfig::non_seasonal()
+            };
+            if let Some(pool) = options.model_pool.as_deref() {
+                if let Ok(p) = parse_model_pool(pool) {
+                    config = config.with_model_pool(p);
+                }
+            }
+            let mut model = AutoETS::with_config(config);
+            model.fit(&ts).map_err(|e| {
+                ForecastError::ComputationError(format!("AutoETS fit failed: {e}"))
+            })?;
+            Inspectable::explanation(&model)
+        }
+        ModelType::AutoARIMA => {
+            let config = if period > 1 {
+                AutoARIMAConfig::default().with_seasonal_period(period)
+            } else {
+                AutoARIMAConfig::default()
+            };
+            let mut model = AutoARIMA::with_config(config);
+            model.fit(&ts).map_err(|e| {
+                ForecastError::ComputationError(format!("AutoARIMA fit failed: {e}"))
+            })?;
+            Inspectable::explanation(&model)
+        }
+        ModelType::AutoTheta => {
+            let mut model = if period > 1 {
+                AutoTheta::seasonal(period)
+            } else {
+                AutoTheta::new()
+            };
+            model.fit(&ts).map_err(|e| {
+                ForecastError::ComputationError(format!("AutoTheta fit failed: {e}"))
+            })?;
+            Inspectable::explanation(&model)
+        }
+        ModelType::AutoTBATS => {
+            let periods: Vec<usize> = if !options.seasonal_periods.is_empty() {
+                options.seasonal_periods.clone()
+            } else if period > 1 {
+                vec![period]
+            } else {
+                vec![]
+            };
+            let mut model = AutoTBATS::new(periods);
+            model.fit(&ts).map_err(|e| {
+                ForecastError::ComputationError(format!("AutoTBATS fit failed: {e}"))
+            })?;
+            Inspectable::explanation(&model)
+        }
+        ModelType::MFLES | ModelType::AutoMFLES => {
+            let periods: Vec<usize> = if !options.seasonal_periods.is_empty() {
+                options.seasonal_periods.clone()
+            } else if period > 1 {
+                vec![period]
+            } else {
+                vec![]
+            };
+            let mut model = MFLES::new(periods);
+            model.fit(&ts).map_err(|e| {
+                ForecastError::ComputationError(format!("MFLES fit failed: {e}"))
+            })?;
+            Inspectable::explanation(&model)
+        }
+        ModelType::MSTL | ModelType::AutoMSTL => {
+            let periods: Vec<usize> = if !options.seasonal_periods.is_empty() {
+                options.seasonal_periods.clone()
+            } else if period > 1 {
+                vec![period]
+            } else {
+                vec![12]
+            };
+            let mut model = MSTLForecaster::new(periods);
+            model.fit(&ts).map_err(|e| {
+                ForecastError::ComputationError(format!("MSTL fit failed: {e}"))
+            })?;
+            Inspectable::explanation(&model)
+        }
+        ModelType::Laplace => {
+            let variant = options.laplace_variant.unwrap_or_default();
+            let mut model = match variant {
+                LaplaceVariant::Auto => LaplaceForecaster::new().auto(),
+                LaplaceVariant::AutoAid => LaplaceForecaster::new().auto_aid(),
+                LaplaceVariant::Skaters => LaplaceForecaster::new().skaters(),
+            };
+            if period > 1 {
+                model = model.with_seasonal(period);
+            }
+            if options.laplace_seasonal_batch_init && period > 1 {
+                model = model.with_seasonal_batch_init();
+            }
+            model.fit(&ts).map_err(|e| {
+                ForecastError::ComputationError(format!("Laplace fit failed: {e}"))
+            })?;
+            Inspectable::explanation(&model)
+        }
+        other => {
+            return Err(ForecastError::InvalidModel(format!(
+                "Model '{}' does not implement Inspectable. Supported models: \
+                 AutoETS, AutoARIMA, AutoTheta, AutoTBATS, MFLES, AutoMFLES, MSTL, AutoMSTL, Laplace.",
+                other.name()
+            )));
+        }
+    }
+    .map_err(|e| ForecastError::ComputationError(format!("explanation() failed: {e}")))?;
+
+    serde_json::to_string(&explanation).map_err(|e| {
+        ForecastError::ComputationError(format!("Failed to serialise Explanation: {e}"))
+    })
+}
+
+/// Per-horizon forecast decomposition via the crate's `Explainable` trait.
+///
+/// Fits the model, calls `.explain(horizon)`, and returns the
+/// `ForecastExplanation` (level / trend / seasonal / residual +
+/// named_components) as a JSON string.
+///
+/// Models covered (Explainable in anofox-forecast 0.15.3):
+/// - ETS (fixed-spec)
+/// - MSTLForecaster
+/// - Theta (single-spec, not AutoTheta)
+///
+/// Unsupported models return an `InvalidModel` error naming the model.
+pub fn forecast_explain(
+    values: &[Option<f64>],
+    horizon: usize,
+    options: &ForecastOptions,
+) -> Result<String> {
+    use anofox_forecast::models::explain::Explainable;
+    use anofox_forecast::models::exponential::{ETSSpec, ETS as ETSModel};
+    use anofox_forecast::models::mstl_forecaster::MSTLForecaster;
+    use anofox_forecast::models::theta::Theta;
+    use anofox_forecast::prelude::Forecaster;
+
+    let clean_values: Vec<f64> = fill_nulls_interpolate(values);
+    if clean_values.len() < 3 {
+        return Err(ForecastError::InsufficientData {
+            needed: 3,
+            got: clean_values.len(),
+        });
+    }
+
+    let period = if options.auto_detect_seasonality && options.seasonal_period == 0 {
+        detect_seasonality(&clean_values, None)
+            .ok()
+            .and_then(|p| p.first().cloned())
+            .unwrap_or(1) as usize
+    } else if options.seasonal_period > 0 {
+        options.seasonal_period
+    } else {
+        1
+    };
+
+    let ts = make_timeseries(&clean_values)?;
+
+    let explanation = match options.model {
+        ModelType::ETS => {
+            let spec = options.ets_spec.as_deref().unwrap_or("AAA");
+            let parsed = ETSSpec::from_notation(spec).map_err(|e| {
+                ForecastError::ComputationError(format!("Invalid ETS spec '{spec}': {e}"))
+            })?;
+            let mut model = ETSModel::new(parsed, period);
+            model.fit(&ts).map_err(|e| {
+                ForecastError::ComputationError(format!("ETS fit failed: {e}"))
+            })?;
+            model.explain(horizon)
+        }
+        ModelType::MSTL | ModelType::AutoMSTL => {
+            let periods: Vec<usize> = if !options.seasonal_periods.is_empty() {
+                options.seasonal_periods.clone()
+            } else if period > 1 {
+                vec![period]
+            } else {
+                vec![12]
+            };
+            let mut model = MSTLForecaster::new(periods);
+            model.fit(&ts).map_err(|e| {
+                ForecastError::ComputationError(format!("MSTL fit failed: {e}"))
+            })?;
+            model.explain(horizon)
+        }
+        ModelType::Theta => {
+            let mut model = if period > 1 {
+                Theta::seasonal(period)
+            } else {
+                Theta::new()
+            };
+            model.fit(&ts).map_err(|e| {
+                ForecastError::ComputationError(format!("Theta fit failed: {e}"))
+            })?;
+            model.explain(horizon)
+        }
+        other => {
+            return Err(ForecastError::InvalidModel(format!(
+                "Model '{}' does not implement Explainable. Supported models: \
+                 ETS, MSTL, AutoMSTL, Theta.",
+                other.name()
+            )));
+        }
+    }
+    .map_err(|e| ForecastError::ComputationError(format!("explain() failed: {e}")))?;
+
+    // ForecastExplanation isn't Serialize; hand-build the JSON.
+    let mut obj = serde_json::Map::new();
+    obj.insert(
+        "level".to_string(),
+        serde_json::to_value(&explanation.level).unwrap_or(serde_json::Value::Null),
+    );
+    if let Some(trend) = &explanation.trend {
+        obj.insert(
+            "trend".to_string(),
+            serde_json::to_value(trend).unwrap_or(serde_json::Value::Null),
+        );
+    }
+    if let Some(seasonal) = &explanation.seasonal {
+        obj.insert(
+            "seasonal".to_string(),
+            serde_json::to_value(seasonal).unwrap_or(serde_json::Value::Null),
+        );
+    }
+    if let Some(residual) = &explanation.residual {
+        obj.insert(
+            "residual".to_string(),
+            serde_json::to_value(residual).unwrap_or(serde_json::Value::Null),
+        );
+    }
+    let named: serde_json::Value = explanation
+        .named_components
+        .iter()
+        .map(|(k, v)| (k.clone(), serde_json::to_value(v).unwrap_or(serde_json::Value::Null)))
+        .collect::<serde_json::Map<_, _>>()
+        .into();
+    obj.insert("named_components".to_string(), named);
+    serde_json::to_string(&serde_json::Value::Object(obj)).map_err(|e| {
+        ForecastError::ComputationError(format!("Failed to serialise ForecastExplanation: {e}"))
+    })
+}
+
 /// AutoTheta: Automatic selection of best Theta variant (STM, OTM, DSTM, DOTM).
 /// Uses the proper AutoTheta implementation from anofox-forecast library.
 fn forecast_auto_theta(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {

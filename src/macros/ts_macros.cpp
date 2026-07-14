@@ -593,6 +593,129 @@ FROM (
     "SELECT * FROM ts_forecast_by('sales', product_id, date, qty, 'AutoETS', 12, '1d')",
     "forecasting"},
 
+    // ts_forecast_inspect_by: Return per-group fit-state snapshot for Inspectable models.
+    // C++ API: ts_forecast_inspect_by(source, group_col, date_col, target_col, method, params?)
+    //
+    // Underlying scalar returns the serde-serialised Explanation enum
+    // (`{"Ets": {...}}`, `{"Arima": {...}}`, …). This macro unpacks the wire
+    // JSON into a wide, uniformly-typed STRUCT — every field is nullable so
+    // the shape stays stable regardless of which family fit.
+    //
+    // Requires the json extension for json_extract / json_keys.
+    {"ts_forecast_inspect_by", {"source", "group_col", "date_col", "target_col", "method", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+WITH _raw AS (
+    SELECT
+        group_col,
+        _ts_forecast_inspect_scalar(
+            LIST(target_col::DOUBLE ORDER BY date_col),
+            method,
+            params
+        ) AS _j
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+),
+_tagged AS (
+    SELECT group_col, _j,
+           json_keys(_j)[1] AS _family,
+           '$.' || json_keys(_j)[1] || '.' AS _base
+    FROM _raw
+    WHERE _j IS NOT NULL
+)
+SELECT
+    group_col,
+    struct_pack(
+        model_family        := _family,
+        spec                := json_extract_string(_j, _base || 'spec'),
+        variant             := json_extract_string(_j, _base || 'variant'),
+        backend             := json_extract_string(_j, _base || 'backend'),
+        selected_config     := json_extract_string(_j, _base || 'selected_config'),
+        alpha               := TRY_CAST(json_extract(_j, _base || 'alpha') AS DOUBLE),
+        beta                := TRY_CAST(json_extract(_j, _base || 'beta') AS DOUBLE),
+        gamma               := TRY_CAST(json_extract(_j, _base || 'gamma') AS DOUBLE),
+        phi                 := TRY_CAST(json_extract(_j, _base || 'phi') AS DOUBLE),
+        theta               := TRY_CAST(json_extract(_j, _base || 'theta') AS DOUBLE),
+        aic                 := TRY_CAST(json_extract(_j, _base || 'aic') AS DOUBLE),
+        bic                 := TRY_CAST(json_extract(_j, _base || 'bic') AS DOUBLE),
+        r_squared           := TRY_CAST(json_extract(_j, _base || 'r_squared') AS DOUBLE),
+        intercept           := TRY_CAST(json_extract(_j, _base || 'intercept') AS DOUBLE),
+        intercept_std_error := TRY_CAST(json_extract(_j, _base || 'intercept_std_error') AS DOUBLE),
+        box_cox_lambda      := TRY_CAST(json_extract(_j, _base || 'box_cox_lambda') AS DOUBLE),
+        penalty             := TRY_CAST(json_extract(_j, _base || 'penalty') AS DOUBLE),
+        seasonal_period     := TRY_CAST(json_extract(_j, _base || 'seasonal_period') AS BIGINT),
+        seasonal_periods    := TRY_CAST(json_extract(_j, _base || 'seasonal_periods') AS BIGINT[]),
+        iterations          := TRY_CAST(json_extract(_j, _base || 'iterations') AS BIGINT),
+        max_rounds          := TRY_CAST(json_extract(_j, _base || 'max_rounds') AS BIGINT),
+        multiplicative      := TRY_CAST(json_extract(_j, _base || 'multiplicative') AS BOOLEAN),
+        order_p             := TRY_CAST(json_extract(_j, _base || 'order[0]') AS BIGINT),
+        order_d             := TRY_CAST(json_extract(_j, _base || 'order[1]') AS BIGINT),
+        order_q             := TRY_CAST(json_extract(_j, _base || 'order[2]') AS BIGINT),
+        seasonal_order_P    := TRY_CAST(json_extract(_j, _base || 'seasonal_order[0]') AS BIGINT),
+        seasonal_order_D    := TRY_CAST(json_extract(_j, _base || 'seasonal_order[1]') AS BIGINT),
+        seasonal_order_Q    := TRY_CAST(json_extract(_j, _base || 'seasonal_order[2]') AS BIGINT),
+        seasonal_order_s    := TRY_CAST(json_extract(_j, _base || 'seasonal_order[3]') AS BIGINT),
+        coefficients        := TRY_CAST(json_extract(_j, _base || 'coefficients') AS DOUBLE[]),
+        coef_std_errors     := TRY_CAST(json_extract(_j, _base || 'coef_std_errors') AS DOUBLE[]),
+        feature_names       := TRY_CAST(json_extract(_j, _base || 'feature_names') AS VARCHAR[]),
+        leaf_weights        := TRY_CAST(json_extract(_j, _base || 'leaf_weights') AS DOUBLE[]),
+        leaf_names          := TRY_CAST(json_extract(_j, _base || 'leaf_names') AS VARCHAR[]),
+        fitted_values       := TRY_CAST(json_extract(_j, _base || 'fitted_values') AS DOUBLE[]),
+        residuals           := TRY_CAST(json_extract(_j, _base || 'residuals') AS DOUBLE[]),
+        trend_component     := TRY_CAST(json_extract(_j, _base || 'trend_component') AS DOUBLE[]),
+        seasonal_component  := TRY_CAST(json_extract(_j, _base || 'seasonal_component') AS DOUBLE[]),
+        horizon_dists_json  := CAST(json_extract(_j, _base || 'horizon_dists') AS VARCHAR),
+        raw_json            := _j
+    ) AS inspection
+FROM _tagged
+)",
+    "Returns per-group Inspectable fit-state snapshot (coefficients, AIC/BIC, components, residuals) as a wide STRUCT.",
+    "SELECT group_col, (inspection).spec, (inspection).aic FROM ts_forecast_inspect_by('sales', product_id, ds, y, 'AutoETS')",
+    "forecasting"},
+
+    // ts_forecast_explain_by: Return per-group per-horizon forecast decomposition.
+    // C++ API: ts_forecast_explain_by(source, group_col, date_col, target_col, method, horizon, params?)
+    //
+    // Underlying scalar returns JSON with `level`, `trend`, `seasonal`,
+    // `residual` (each a DOUBLE[] of length `horizon`, absent when a family
+    // doesn't produce it) and `named_components` (a JSON object of extra
+    // additive contributions).
+    //
+    // Only ETS (fixed spec), MSTL / AutoMSTL, and Theta implement Explainable;
+    // other models return an InvalidModel error from the underlying scalar.
+    //
+    // Requires the json extension for json_extract.
+    {"ts_forecast_explain_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+WITH _raw AS (
+    SELECT
+        group_col,
+        _ts_forecast_explain_scalar(
+            LIST(target_col::DOUBLE ORDER BY date_col),
+            horizon,
+            method,
+            params
+        ) AS _j
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+)
+SELECT
+    group_col,
+    struct_pack(
+        horizon                := horizon,
+        level                  := TRY_CAST(json_extract(_j, '$.level') AS DOUBLE[]),
+        trend                  := TRY_CAST(json_extract(_j, '$.trend') AS DOUBLE[]),
+        seasonal               := TRY_CAST(json_extract(_j, '$.seasonal') AS DOUBLE[]),
+        residual               := TRY_CAST(json_extract(_j, '$.residual') AS DOUBLE[]),
+        named_components_json  := CAST(json_extract(_j, '$.named_components') AS VARCHAR),
+        raw_json               := _j
+    ) AS decomposition
+FROM _raw
+WHERE _j IS NOT NULL
+)",
+    "Returns per-horizon forecast decomposition (level, trend, seasonal, residual) per group as a wide STRUCT. Supports ETS, MSTL, Theta.",
+    "SELECT group_col, (decomposition).trend, (decomposition).seasonal FROM ts_forecast_explain_by('sales', product_id, ds, y, 'ETS', 12, {seasonal_period: 12})",
+    "forecasting"},
+
     // ts_cv_forecast_by: Generate forecasts for CV splits with parallel fold execution
     // C++ API: ts_cv_forecast_by(ml_folds, group_col, date_col, target_col, method, params)
     // Processes all folds in parallel using DuckDB's vectorization

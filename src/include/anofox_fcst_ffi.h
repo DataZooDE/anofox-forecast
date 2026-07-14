@@ -2373,6 +2373,81 @@ bool anofox_ts_forecast_exog(const double *values,
                              struct AnofoxError *out_error);
 
 /**
+ * Free a C string previously allocated by an inspect / explain call.
+ *
+ * # Safety
+ * `ptr` must be either null or a pointer previously returned by one of
+ * `anofox_ts_forecast_inspect` / `anofox_ts_forecast_explain` via their
+ * `out_json` out-argument.
+ */
+void anofox_free_string(char *ptr);
+
+/**
+ * Fit the requested model and serialise its `Inspectable::explanation()`
+ * snapshot as JSON.
+ *
+ * The JSON structure is the serde-serialised
+ * `anofox_forecast::models::inspect::Explanation` enum: an object with a
+ * single key equal to the model family (e.g. `AutoETS`, `Arima`,
+ * `Laplace`) whose value is the per-family payload struct.
+ *
+ * # Arguments
+ * * `values`, `validity`, `length` — series (validity may be null for
+ *   fully-valid data)
+ * * `options` — the same `ForecastOptions` used by `anofox_ts_forecast`;
+ *   the `horizon` field is ignored (inspect is a fit-state snapshot)
+ * * `out_json` — receives ownership of a newly-allocated NUL-terminated
+ *   JSON string; must be freed with `anofox_free_string`
+ * * `out_error` — optional error slot
+ *
+ * # Supported models
+ * AutoETS, AutoARIMA, AutoTheta, AutoTBATS, MFLES, AutoMFLES, MSTL,
+ * AutoMSTL, Laplace. Any other model returns an `InvalidModel` error.
+ *
+ * # Safety
+ * Pointer arguments must be valid; `out_json` and `options` must be non-null.
+ */
+bool anofox_ts_forecast_inspect(const double *values,
+                                const uint64_t *validity,
+                                size_t length,
+                                const struct ForecastOptions *options,
+                                char **out_json,
+                                struct AnofoxError *out_error);
+
+/**
+ * Fit the requested model and serialise its per-horizon
+ * `Explainable::explain(horizon)` decomposition as JSON.
+ *
+ * The JSON has keys `level`, `trend`, `seasonal`, `residual` (each a
+ * Vec\<f64\> of length `horizon`, absent when the family has no such
+ * component) and `named_components` (a map of arbitrary named additive
+ * components).
+ *
+ * # Arguments
+ * * `values`, `validity`, `length` — historical series
+ * * `horizon` — number of periods ahead to explain (must equal the
+ *   horizon you'll subsequently forecast with; internally we call
+ *   `.explain(horizon)`)
+ * * `options` — `ForecastOptions`; `horizon` field is ignored (uses the
+ *   explicit `horizon` argument instead)
+ * * `out_json`, `out_error` — see `anofox_ts_forecast_inspect`
+ *
+ * # Supported models
+ * ETS (fixed spec), MSTL / AutoMSTL, Theta. Any other model returns an
+ * `InvalidModel` error.
+ *
+ * # Safety
+ * Pointer arguments must be valid; `out_json` and `options` must be non-null.
+ */
+bool anofox_ts_forecast_explain(const double *values,
+                                const uint64_t *validity,
+                                size_t length,
+                                size_t horizon,
+                                const struct ForecastOptions *options,
+                                char **out_json,
+                                struct AnofoxError *out_error);
+
+/**
  * Compute data quality metrics.
  *
  * # Safety
