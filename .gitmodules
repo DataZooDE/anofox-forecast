@@ -8,3 +8,6 @@
 [submodule "posthog-telemetry"]
 	path = posthog-telemetry
 	url = https://github.com/DataZooDE/posthog-telemetry.git
+[submodule "datazoo-banner"]
+	path = datazoo-banner
+	url = https://github.com/DataZooDE/duckdb-extension-banner.git

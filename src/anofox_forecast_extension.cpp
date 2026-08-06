@@ -8,8 +8,14 @@
 
 #ifdef HAS_POSTHOG_TELEMETRY
 #include "telemetry.hpp"
+#include "anofox_forecast_banner.hpp"
 #endif
 
+
+// Deliberately outside namespace duckdb: the banner library is DuckDB-agnostic
+// and the guard macro refers to this object from every guarded source file.
+const datazoo::BannerInfo ANOFOX_FORECAST_BANNER {
+    "anofox_forecast", "0.1.0", "https://github.com/DataZooDE/anofox-forecast"};
 
 namespace duckdb {
 
@@ -203,6 +209,11 @@ static void LoadInternal(ExtensionLoader &loader) {
         }
     );
 #endif
+
+	datazoo::RegisterBannerOption(loader);
+	// Last, so a load that fails earlier never advertises itself. Silent unless
+	// stderr is a terminal and the ~/.duckdb stamp is over a day old.
+	datazoo::ShowBanner(ANOFOX_FORECAST_BANNER);
 }
 
 void AnofoxForecastExtension::Load(ExtensionLoader &loader) {
