@@ -5,10 +5,10 @@
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/main/extension_helper.hpp"
+#include "anofox_forecast_banner.hpp"
 
 #ifdef HAS_POSTHOG_TELEMETRY
 #include "telemetry.hpp"
-#include "anofox_forecast_banner.hpp"
 #endif
 
 
