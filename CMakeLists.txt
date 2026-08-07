@@ -206,10 +206,27 @@ set(EXTENSION_SOURCES
 )
 
 # Build the static extension
+# Feedback banner (header-only). Its banner_shown event goes through
+# posthog-telemetry, so the flag follows TELEMETRY_SUPPORTED -- set after that
+# variable is computed, since reading it earlier yields an empty value and would
+# silently disable the event everywhere.
+set(DATAZOO_BANNER_TELEMETRY ${TELEMETRY_SUPPORTED} CACHE BOOL "" FORCE)
+set(DATAZOO_BANNER_TELEMETRY_INCLUDE_DIR
+    ${CMAKE_CURRENT_SOURCE_DIR}/posthog-telemetry/include CACHE PATH "" FORCE)
+add_subdirectory(datazoo-banner)
+# This repo puts dependency headers on the global include path rather than
+# relying on target propagation (see posthog-telemetry above), and the extension
+# targets are created by DuckDB's macros in a way that does not pick up the
+# INTERFACE include from target_link_libraries here. Match the local convention.
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/datazoo-banner/include)
+
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 
 # Build the loadable extension
 build_loadable_extension(${TARGET_NAME} "" ${EXTENSION_SOURCES})
+
+target_link_libraries(${EXTENSION_NAME} datazoo_banner)
+target_link_libraries(${LOADABLE_EXTENSION_NAME} datazoo_banner)
 
 # Telemetry library + OpenSSL (only when OpenSSL was found)
 set(TELEMETRY_LIBS "")

@@ -402,3 +402,17 @@ Special thanks to the DuckDB team for making extensions possible!
 📢 **Follow us** for updates: [@datazoo](https://www.linkedin.com/company/datazoo/)
 
 🚀 **Get started now**: `LOAD 'anofox_forecast';`
+
+## Feedback
+
+If a forecast looks wrong or `anofox_forecast` misbehaves, please
+[open an issue](https://github.com/DataZooDE/anofox-forecast/issues). Forecast quality
+depends on real seasonality, gaps and outliers we cannot reproduce from synthetic
+series, so a report with your data shape is the fastest path to a fix.
+
+If it saved you time, a star on the repo helps other people find it.
+
+The first time you load the extension in an interactive terminal each day, a small
+banner says the same thing. It never prints when output is piped, in notebooks, or in
+CI. Silence it with `SET datazoo_banner = false;` or `DATAZOO_NO_BANNER=1`.
+

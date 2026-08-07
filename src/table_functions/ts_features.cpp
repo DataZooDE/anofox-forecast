@@ -9,6 +9,7 @@
 #include "duckdb/common/types/vector.hpp"
 #include <unordered_map>
 #include <limits>
+#include "anofox_forecast_banner.hpp"
 
 namespace duckdb {
 
@@ -229,7 +230,7 @@ static void TsFeaturesListExecute(ClientContext &context, TableFunctionInput &da
 }
 
 void RegisterTsFeaturesListFunction(ExtensionLoader &loader) {
-    TableFunction ts_features_list_func("ts_features_list", {}, TsFeaturesListExecute, TsFeaturesListBind);
+    TableFunction ts_features_list_func("ts_features_list", {}, DATAZOO_GUARD(ANOFOX_FORECAST_BANNER, TsFeaturesListExecute), DATAZOO_GUARD(ANOFOX_FORECAST_BANNER, TsFeaturesListBind));
     {
         CreateTableFunctionInfo info(ts_features_list_func);
         FunctionDescription desc;
@@ -304,7 +305,7 @@ static void TsFeaturesConfigTemplateExecute(ClientContext &context, TableFunctio
 }
 
 void RegisterTsFeaturesConfigTemplateFunction(ExtensionLoader &loader) {
-    TableFunction func("ts_features_config_template", {}, TsFeaturesConfigTemplateExecute, TsFeaturesConfigTemplateBind);
+    TableFunction func("ts_features_config_template", {}, DATAZOO_GUARD(ANOFOX_FORECAST_BANNER, TsFeaturesConfigTemplateExecute), DATAZOO_GUARD(ANOFOX_FORECAST_BANNER, TsFeaturesConfigTemplateBind));
     {
         CreateTableFunctionInfo info(func);
         FunctionDescription desc;
