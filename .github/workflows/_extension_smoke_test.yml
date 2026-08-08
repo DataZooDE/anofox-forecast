@@ -58,12 +58,27 @@ jobs:
       - name: Check whether this arch is excluded
         id: gate
         shell: bash
+        env:
+          # Via env, not direct interpolation: exclude_archs is sometimes a
+          # GitHub expression whose value contains quotes, which would break
+          # the shell if pasted into the script body.
+          EXCLUDE_ARCHS: ${{ inputs.exclude_archs }}
+          ARCH: ${{ matrix.arch }}
         run: |
-          if [[ "${{ inputs.exclude_archs }}" == *"${{ matrix.arch }}"* ]]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "${{ matrix.arch }} is excluded by the build job; nothing to smoke test."
+          # Exact-token match, never a substring test. Nearly every caller
+          # excludes `windows_amd64_mingw`; a substring test also matches
+          # `windows_amd64` and would silently skip the real Windows smoke
+          # test while still reporting the job green.
+          skip=false
+          IFS=';, ' read -ra tokens <<< "$EXCLUDE_ARCHS"
+          for t in "${tokens[@]}"; do
+            if [[ "$t" == "$ARCH" ]]; then skip=true; fi
+          done
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          if [[ "$skip" == "true" ]]; then
+            echo "$ARCH is excluded by the build job; nothing to smoke test."
           else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "$ARCH will be smoke tested."
           fi
 
       - uses: actions/checkout@v4
