@@ -29,9 +29,18 @@ jobs:
       # windows_amd64_mingw: rtools42 MinGW lacks libbcrypt.a needed by Rust getrandom 0.3+
       exclude_archs: 'windows_amd64_rtools;windows_amd64_mingw'
 
+  duckdb-lts-smoke-test:
+    name: Smoke test (v1.4.5)
+    needs: duckdb-lts-build
+    uses: ./.github/workflows/_extension_smoke_test.yml
+    with:
+      duckdb_version: v1.4.5
+      extension_name: anofox_forecast
+      exclude_archs: 'windows_amd64_rtools;windows_amd64_mingw'
+
   duckdb-lts-deploy:
     name: Deploy extension binaries (v1.4.5 LTS)
-    needs: duckdb-lts-build
+    needs: [duckdb-lts-build, duckdb-lts-smoke-test]
     # Run the deploy step even when a non-essential build matrix entry fails.
     # The deploy job itself fans out per arch and only pushes the artifacts
     # that actually exist.
@@ -58,9 +67,18 @@ jobs:
       # windows_amd64_mingw: rtools42 MinGW lacks libbcrypt.a needed by Rust getrandom 0.3+
       exclude_archs: 'windows_amd64_rtools;windows_amd64_mingw'
 
+  duckdb-latest-smoke-test:
+    name: Smoke test (v1.5.5)
+    needs: duckdb-latest-build
+    uses: ./.github/workflows/_extension_smoke_test.yml
+    with:
+      duckdb_version: v1.5.5
+      extension_name: anofox_forecast
+      exclude_archs: 'windows_amd64_rtools;windows_amd64_mingw'
+
   duckdb-latest-deploy:
     name: Deploy extension binaries (v1.5.5)
-    needs: duckdb-latest-build
+    needs: [duckdb-latest-build, duckdb-latest-smoke-test]
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/_extension_deploy.yml
     secrets: inherit

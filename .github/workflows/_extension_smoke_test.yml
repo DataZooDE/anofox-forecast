@@ -1,0 +1,112 @@
+#
+# Reusable workflow: post-build smoke test.
+#
+# Downloads the official DuckDB CLI for the target version, installs the built
+# artifact into it, loads it, and calls a real function. This is what a user
+# does when installing the extension.
+#
+# Why it exists: every other job in this pipeline exercises build/release/duckdb
+# -- a shell with the extension statically linked in -- which never loads the
+# .duckdb_extension file we actually ship. An artifact can build green and still
+# fail to instantiate.
+#
+# Call it AFTER build and BEFORE deploy, so a broken artifact on any platform
+# blocks distribution.
+#
+name: Extension Smoke Test
+
+on:
+  workflow_call:
+    inputs:
+      extension_name:
+        required: true
+        type: string
+      duckdb_version:
+        required: true
+        type: string
+      # ';'-separated, must match the build job so we never try to download an
+      # artifact that was never produced.
+      exclude_archs:
+        required: false
+        type: string
+        default: ""
+      artifact_postfix:
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  smoke-test:
+    name: Smoke test (${{ matrix.arch }})
+    strategy:
+      # Run every platform even if one fails, so a single broken arch does not
+      # hide the state of the others.
+      fail-fast: false
+      matrix:
+        include:
+          - arch: linux_amd64
+            runner: ubuntu-24.04
+          - arch: osx_arm64
+            runner: macos-latest
+          - arch: windows_amd64
+            runner: windows-latest
+    runs-on: ${{ matrix.runner }}
+    steps:
+      # Skip at step level, not job level: a job-level `if:` is evaluated before
+      # the matrix expands, so matrix.arch is not in scope there and the whole
+      # workflow fails to validate (zero jobs, no logs, no useful error).
+      - name: Check whether this arch is excluded
+        id: gate
+        shell: bash
+        env:
+          # Via env, not direct interpolation: exclude_archs is sometimes a
+          # GitHub expression whose value contains quotes, which would break
+          # the shell if pasted into the script body.
+          EXCLUDE_ARCHS: ${{ inputs.exclude_archs }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          # Exact-token match, never a substring test. Nearly every caller
+          # excludes `windows_amd64_mingw`; a substring test also matches
+          # `windows_amd64` and would silently skip the real Windows smoke
+          # test while still reporting the job green.
+          skip=false
+          IFS=';, ' read -ra tokens <<< "$EXCLUDE_ARCHS"
+          for t in "${tokens[@]}"; do
+            if [[ "$t" == "$ARCH" ]]; then skip=true; fi
+          done
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          if [[ "$skip" == "true" ]]; then
+            echo "$ARCH is excluded by the build job; nothing to smoke test."
+          else
+            echo "$ARCH will be smoke tested."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.skip != 'true'
+
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.skip != 'true'
+        with:
+          python-version: '3.11'
+
+      - name: Download extension artifact
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.extension_name }}-${{ inputs.duckdb_version }}-extension-${{ matrix.arch }}${{ inputs.artifact_postfix }}
+          path: ./extension_artifact
+
+      - name: Smoke test (Linux / macOS)
+        if: steps.gate.outputs.skip != 'true' && runner.os != 'Windows'
+        run: |
+          python3 scripts/smoke_test.py \
+            "$(pwd)/extension_artifact/${{ inputs.extension_name }}.duckdb_extension" \
+            "${{ inputs.duckdb_version }}" \
+            "${{ matrix.arch }}"
+
+      - name: Smoke test (Windows)
+        if: steps.gate.outputs.skip != 'true' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ext = Join-Path $PWD "extension_artifact\${{ inputs.extension_name }}.duckdb_extension"
+          python scripts/smoke_test.py "$ext" "${{ inputs.duckdb_version }}" "${{ matrix.arch }}"
