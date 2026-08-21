@@ -1,19 +1,19 @@
 ---
 gsd_state_version: 1.0
-current_phase: 01
-current_phase_name: Statistical Diagnostics
+current_phase: 02
+current_phase_name: Global / Panel Models
 status: executing
-stopped_at: Completed 01-1-PLAN.md (STAT-01 ADF tracer)
-last_updated: "2026-08-21T10:09:06.487Z"
+stopped_at: Completed 02-global-panel-models plan 1 (GlobalETS tracer)
+last_updated: "2026-08-21T19:46:19.919Z"
 last_activity: 2026-08-21
-last_activity_desc: Phase 01 execution started
-state_head: 3e5f2defd8b2a227f04deebf2cbab3b7e97aaf99
+last_activity_desc: Phase 02 execution started
+state_head: 559ea2f3cc539880f3f4727293d0142b038b1926
 progress:
   total_phases: 3
   completed_phases: 0
-  total_plans: 3
-  completed_plans: 3
-  percent: 33
+  total_plans: 6
+  completed_plans: 4
+  percent: 0
 ---
 
 # Project State
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-21)
 
 **Core value:** SQL users can validate whether a series/model is statistically sound (stationarity, residual adequacy, demand regime) and can reach the crate's higher-coverage models (global + classical) — all without leaving DuckDB.
-**Current focus:** Phase 01 — Statistical Diagnostics
+**Current focus:** Phase 02 — Global / Panel Models
 
 ## Current Position
 
-Phase: 01 (Statistical Diagnostics) — EXECUTING
+Phase: 02 (Global / Panel Models) — EXECUTING
 Plan: 2 of 3
 Status: Ready to execute
-Last activity: 2026-08-21 — Phase 01 execution started
+Last activity: 2026-08-21 — Phase 02 execution started
 
-Progress: [███░░░░░░░] 33%
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -61,6 +61,7 @@ Progress: [███░░░░░░░] 33%
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 01-diagnostics-demand-classification P01-1 | 120 | 3 tasks | 16 files |
+| Phase 02-global-panel-models P1 | 90 | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -75,6 +76,9 @@ Recent decisions affecting current work:
 - VAR: Dedicated multivariate function anticipated (`ts_forecast_var_by`); column-mapping API design deferred to Phase 3 plan
 - [Phase 01]: Behavioral cross-check instead of exact numeric parity for ADF; statsmodels and anofox use different lag selection formulas
 - [Phase 01]: CLI subprocess in run_anofox.py to avoid Python duckdb package version mismatch (venv v1.5.1 vs extension v1.5.4)
+- [Phase 02]: GlobalAutoETS safe_period=1 for seasonal_period=0: prevents t%period panic, has_seasonal=false means non-seasonal candidates only
+- [Phase 02]: PanelForecastError wrapper for dual-crate FFI boundary: anofox_forecast::ForecastError != anofox_fcst_core::ForecastError, no From impl cross-crate
+- [Phase 02]: Subselect TABLE arg pattern in macros: query_table() direct as TABLE arg silently fails macro registration; use (SELECT ... FROM query_table(...)) instead
 
 ### Pending Todos
 
@@ -99,6 +103,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-08-21
-Stopped at: Phase 1 (Statistical Diagnostics) COMPLETE — 7 functions shipped, built, verified, committed (441bbc3..4dcf9aa). Ready for Phase 2.
+**Resume file:** None
+
+Last session: 2026-08-21T19:46:19.908Z
+Stopped at: Completed 02-global-panel-models plan 1 (GlobalETS tracer)
 Resume: /gsd-autonomous --from 2  (Phase 2 needs a panel-aware SQL surface design — discuss first). Note: set workflow.use_worktrees=false to avoid worktree split-brain.

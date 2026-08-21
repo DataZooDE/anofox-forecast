@@ -52,9 +52,9 @@ a runnable example, docs, and a numerical reference cross-check before it counts
   4. Each model is documented in `docs/api/` and `docs/reference/models/` with a runnable `examples/*.sql` snippet verified against the built extension
 
 **Risk / Design consideration**: GlobalETS, GlobalTheta, and GlobalCroston (`crate::batch`) cross-learn across all series simultaneously — the existing per-series `ts_forecast_by` dispatch is insufficient. The SQL surface must accept a full panel (all series at once), fit the global model once, then emit per-series forecasts. This requires a new table-function signature distinct from `ts_forecast_by`; design must be settled in the plan for this phase before implementation begins.
-**Plans**: 3 plans
+**Plans**: 1/3 plans executed
 
-- [ ] 02-1-PLAN.md — GlobalETS tracer: FFI export + PanelForecastResult + _ts_forecast_panel_native (ragged alignment, single-fit) + ts_forecast_panel_by macro + runnable example, end-to-end (GLOB-01)
+- [x] 02-1-PLAN.md — GlobalETS tracer: FFI export + PanelForecastResult + _ts_forecast_panel_native (ragged alignment, single-fit) + ts_forecast_panel_by macro + runnable example, end-to-end (GLOB-01)
 - [ ] 02-2-PLAN.md — GlobalTheta + GlobalCroston FFI arms + three model docs + docs/api panel section + example coverage (GLOB-02, GLOB-03)
 - [ ] 02-3-PLAN.md — statsforecast parity benchmark on the M4 subset, committed results (GLOB-01..03, success criterion 3)
 
@@ -79,7 +79,7 @@ a runnable example, docs, and a numerical reference cross-check before it counts
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Statistical Diagnostics | 0/3 | Planned    |  |
-| 2. Global / Panel Models | 0/3 | Planned | - |
+| 2. Global / Panel Models | 1/3 | In Progress|  |
 | 3. Classical & Multivariate Models | 0/TBD | Not started | - |
 
 ---
