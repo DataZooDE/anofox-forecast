@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 02
 current_phase_name: Global / Panel Models
 status: executing
-stopped_at: Completed 02-global-panel-models plan 1 (GlobalETS tracer)
-last_updated: "2026-08-21T19:46:19.919Z"
+stopped_at: Completed 02-2 plan (GlobalTheta + GlobalCroston + docs)
+last_updated: "2026-08-21T20:08:25.672Z"
 last_activity: 2026-08-21
 last_activity_desc: Phase 02 execution started
-state_head: 559ea2f3cc539880f3f4727293d0142b038b1926
+state_head: 1ee15957eabad322ce907ec85782eb81870f217a
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 6
-  completed_plans: 4
+  completed_plans: 5
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-08-21)
 ## Current Position
 
 Phase: 02 (Global / Panel Models) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-08-21 — Phase 02 execution started
 
@@ -62,6 +62,7 @@ Progress: [░░░░░░░░░░] 0%
 |------|----------|-------|-------|
 | Phase 01-diagnostics-demand-classification P01-1 | 120 | 3 tasks | 16 files |
 | Phase 02-global-panel-models P1 | 90 | 3 tasks | 11 files |
+| Phase 02 P2 | 17 min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -79,6 +80,9 @@ Recent decisions affecting current work:
 - [Phase 02]: GlobalAutoETS safe_period=1 for seasonal_period=0: prevents t%period panic, has_seasonal=false means non-seasonal candidates only
 - [Phase 02]: PanelForecastError wrapper for dual-crate FFI boundary: anofox_forecast::ForecastError != anofox_fcst_core::ForecastError, no From impl cross-crate
 - [Phase 02]: Subselect TABLE arg pattern in macros: query_table() direct as TABLE arg silently fails macro registration; use (SELECT ... FROM query_table(...)) instead
+- [Phase 02]: Use GlobalCroston::new()/sba() constructors: CrostonVariant private type mismatch — global_croston::CrostonVariant ≠ croston::CrostonVariant, with_variant() fails at compile time
+- [Phase 02]: Add variant_str param to forecast_panel_impl: threads Croston variant from FFI outer wrapper through testable inner function; all 8-arg call sites updated
+- [Phase 02]: Fix model_name from hardcoded 'GlobalETS' to actual method string: 02-1 tracer hardcoded result; GlobalTheta/GlobalCroston now correctly self-name
 
 ### Pending Todos
 
@@ -105,6 +109,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 **Resume file:** None
 
-Last session: 2026-08-21T19:46:19.908Z
-Stopped at: Completed 02-global-panel-models plan 1 (GlobalETS tracer)
+Last session: 2026-08-21T20:08:25.662Z
+Stopped at: Completed 02-2 plan (GlobalTheta + GlobalCroston + docs)
 Resume: /gsd-autonomous --from 2  (Phase 2 needs a panel-aware SQL surface design — discuss first). Note: set workflow.use_worktrees=false to avoid worktree split-brain.

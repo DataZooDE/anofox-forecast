@@ -30,8 +30,8 @@ Each requirement is "Complete" only when ALL of the following hold:
 ### Global / Panel Models
 
 - [x] **GLOB-01**: User can forecast a grouped panel with GlobalETS (cross-series learning) via the panel-aware forecast surface.
-- [ ] **GLOB-02**: User can forecast a grouped panel with GlobalTheta.
-- [ ] **GLOB-03**: User can forecast a grouped panel with GlobalCroston (intermittent panel).
+- [x] **GLOB-02**: User can forecast a grouped panel with GlobalTheta.
+- [x] **GLOB-03**: User can forecast a grouped panel with GlobalCroston (intermittent panel).
 
 ### Classical Models
 
@@ -92,8 +92,8 @@ Deferred to a future milestone. Tracked, not in this roadmap.
 | RESID-04 | Phase 1 | Complete |
 | INTER-01 | Deferred | Descoped — advanced approach TBD |
 | GLOB-01 | Phase 2 | Complete |
-| GLOB-02 | Phase 2 | Pending |
-| GLOB-03 | Phase 2 | Pending |
+| GLOB-02 | Phase 2 | Complete |
+| GLOB-03 | Phase 2 | Complete |
 | CLAS-01 | Phase 3 | Pending |
 | CLAS-02 | Phase 3 | Pending |
 | CLAS-03 | Phase 3 | Pending |
