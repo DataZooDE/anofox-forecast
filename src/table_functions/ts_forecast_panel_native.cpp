@@ -743,6 +743,10 @@ static OperatorFinalizeResultType TsForecastPanelNativeFinalize(
     gstate.output_offset += to_output;
 
     if (gstate.output_offset >= gstate.results.size()) {
+        // All rows flushed; raise any deferred error from the n_kept<3 path.
+        if (!gstate.deferred_error_message.empty()) {
+            throw InvalidInputException("%s", gstate.deferred_error_message);
+        }
         return OperatorFinalizeResultType::FINISHED;
     }
     return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;
