@@ -593,6 +593,35 @@ FROM (
     "SELECT * FROM ts_forecast_by('sales', product_id, date, qty, 'AutoETS', 12, '1d')",
     "forecasting"},
 
+    // ts_forecast_panel_by: Panel forecasting via cross-series global learners (Phase 2: GLOB-01..03)
+    //
+    // Fits a single shared-parameter model across all series simultaneously, then emits
+    // one row per (series, horizon step) — the fit-once-emit-many pattern. Unlike
+    // ts_forecast_by which fits independently per series, this achieves true cross-series
+    // learning. Ragged panels are auto-aligned to a shared date grid.
+    //
+    // Signature: ts_forecast_panel_by(source, group_col, date_col, target_col, method,
+    //                                  horizon, frequency, params := MAP{})
+    // Supported methods: 'GlobalETS' (GlobalTheta, GlobalCroston added in 02-2)
+    {"ts_forecast_panel_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", "frequency", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+SELECT group_col, forecast_step, date_col, yhat, model_name
+FROM _ts_forecast_panel_native(
+    (SELECT group_col, date_col, target_col::DOUBLE FROM query_table(source::VARCHAR)),
+    horizon,
+    frequency,
+    method,
+    params
+)
+)",
+    "Forecasts a grouped panel using cross-series global learners (GlobalETS, GlobalTheta, GlobalCroston). "
+    "All series are fitted simultaneously with shared parameters (fit-once-emit-many). "
+    "Ragged panels are auto-aligned to a shared date grid before the global fit. "
+    "Returns one row per (group, horizon step). "
+    "Series with fewer than 10 valid observations are surfaced with model_name = 'DROPPED: too_short'.",
+    "SELECT * FROM ts_forecast_panel_by('sales', product_id, date, qty, 'GlobalETS', 14, '1d', MAP{'seasonal_period': '7'})",
+    "forecasting"},
+
     // ts_forecast_inspect_by: Return per-group fit-state snapshot for Inspectable models.
     // C++ API: ts_forecast_inspect_by(source, group_col, date_col, target_col, method, params?)
     //
