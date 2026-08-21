@@ -7023,8 +7023,26 @@ pub unsafe extern "C" fn anofox_ts_forecast_panel(
 
     match result {
         Ok(Ok((preds, method_name))) => {
+            // Validate output dimensions before allocating.
+            if horizon == 0 {
+                if !out_error.is_null() {
+                    (*out_error).set_error(ErrorCode::InvalidInput, "horizon must be > 0");
+                }
+                return false;
+            }
+            let total = match n_series.checked_mul(horizon) {
+                Some(t) => t,
+                None => {
+                    if !out_error.is_null() {
+                        (*out_error).set_error(
+                            ErrorCode::InvalidInput,
+                            "Panel output dimensions overflow (n_series * horizon > usize::MAX)",
+                        );
+                    }
+                    return false;
+                }
+            };
             // Allocate flat output buffer and copy predictions
-            let total = n_series.checked_mul(horizon).unwrap_or(0);
             let buf = if total > 0 {
                 let raw = alloc_double_array(total);
                 if raw.is_null() {
