@@ -642,19 +642,21 @@ FROM _ts_forecast_panel_native(
      {"source", "date_col", "value_cols", "horizon", "frequency", nullptr},
      {{"p", "1"}, {"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
-SELECT variable, forecast_step, date_col, forecast_value
+SELECT *
 FROM _ts_forecast_var_native(
-    (SELECT date_col, * FROM query_table(source::VARCHAR)),
+    (SELECT * FROM query_table(source::VARCHAR)),
     horizon,
     frequency,
     p,
     value_cols,
+    date_col,
     params
 )
 )",
     "VAR multivariate forecasting. Fits a single VAR(p) model across all K value columns and "
     "returns one row per (variable, horizon step) in long format (LONG output shape). "
     "value_cols is a VARCHAR[] of column names from source (e.g. ['y1','y2']). "
+    "date_col is the name of the date column (VARCHAR string, e.g. 'ds'). "
     "p is the VAR lag order (default 1). "
     "forecast_value is a point forecast (no prediction intervals in v1). "
     "v1 is single-panel only (no group_col — one VAR fit for the entire input table).",

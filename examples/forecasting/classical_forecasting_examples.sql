@@ -116,3 +116,71 @@ ORDER BY product_id, forecast_step;
 .print '============================================================================='
 .print 'END — CLAS-01 (GARCH) and CLAS-02 (Kalman) verified end-to-end'
 .print '============================================================================='
+
+-- ============================================================================
+-- SECTION 3: VAR — Multivariate Vector Autoregression Forecasting (CLAS-03)
+-- ============================================================================
+-- ts_forecast_var_by fits a single VAR(p) model across ALL K value columns
+-- simultaneously (true multivariate cross-variable learning via VAR coefficient
+-- matrix). It returns forecasts in LONG format: one row per (variable, step).
+--
+-- KEY NOTES:
+--   - Output is LONG format: {variable VARCHAR, forecast_step BIGINT,
+--     <date_col>, forecast_value DOUBLE} — one row per (variable, horizon step).
+--   - forecast_value is a POINT forecast only (no prediction intervals in v1).
+--   - v1 is SINGLE-PANEL ONLY — no group_col; one VAR fit over the entire table.
+--   - Lag order (p) is set via the 'p' named parameter (default p=1).
+--   - NaN / NULL values in any column are imputed via linear interpolation before
+--     fitting. All value columns must have the same number of valid observations.
+--   - Requires n > k*p + 1 valid observations (under-determination guard).
+--   - The date column type is preserved in the output (DATE → DATE, etc.)
+--
+-- Run: ./build/release/duckdb -unsigned < examples/forecasting/classical_forecasting_examples.sql
+-- ============================================================================
+
+.print ''
+.print '============================================================================='
+.print 'SECTION 3: VAR — Multivariate Vector Autoregression (CLAS-03)'
+.print '============================================================================='
+
+-- Build a small synthetic multivariate table with 2 correlated variables (y1, y2)
+-- and a shared date column (60 observations — well above VAR(1) minimum of k*p+1=3)
+CREATE OR REPLACE TABLE var_src AS
+    SELECT
+        (DATE '2020-01-01' + INTERVAL (i) DAY) AS ds,
+        -- y1: sinusoidal + cosine cross-variable influence
+        (0.6 * SIN(i * 0.4) + 0.1 * COS(i * 0.2)) AS y1,
+        -- y2: cos-dominated + sin cross-variable influence (correlated with y1)
+        (0.05 * SIN(i * 0.4) + 0.7 * COS(i * 0.2)) AS y2
+    FROM range(60) t(i);
+
+.print ''
+.print 'VAR(1) forecast — default lag order p=1, horizon=14, 2 variables'
+.print 'Output: LONG format (one row per variable x horizon step = 2 x 14 = 28 rows)'
+
+SELECT * REPLACE(ROUND(forecast_value, 6) AS forecast_value)
+FROM ts_forecast_var_by('var_src', 'ds', ['y1', 'y2'], 14, '1d')
+ORDER BY variable, forecast_step;
+
+.print ''
+.print 'VAR(2) forecast — lag order p=2 via p:=2 named parameter'
+.print 'Captures longer-range cross-variable dynamics'
+
+SELECT * REPLACE(ROUND(forecast_value, 6) AS forecast_value)
+FROM ts_forecast_var_by('var_src', 'ds', ['y1', 'y2'], 14, '1d', p:=2)
+ORDER BY variable, forecast_step;
+
+.print ''
+.print 'Row count verification: ts_forecast_var_by returns k_vars * horizon rows'
+
+SELECT
+    count(*) AS total_rows,
+    count(DISTINCT variable) AS distinct_variables,
+    count(*) FILTER (WHERE variable = 'y1') AS y1_rows,
+    count(*) FILTER (WHERE variable = 'y2') AS y2_rows
+FROM ts_forecast_var_by('var_src', 'ds', ['y1', 'y2'], 14, '1d');
+
+.print ''
+.print '============================================================================='
+.print 'END — CLAS-03 (VAR multivariate) verified end-to-end'
+.print '============================================================================='

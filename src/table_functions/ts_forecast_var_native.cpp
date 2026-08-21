@@ -44,6 +44,7 @@ struct TsForecastVarNativeBindData : public TableFunctionData {
     // Value column information (resolved in Bind from input.input_table_names)
     vector<string> value_col_names;    // column names from the value_cols VARCHAR[] arg
     vector<idx_t>  value_col_indices;  // column indices in the input table schema
+    idx_t date_col_idx = 0;            // column index of the date column in the input table
 };
 
 // ============================================================================
@@ -175,9 +176,17 @@ static unique_ptr<FunctionData> TsForecastVarNativeBind(
         throw InvalidInputException("ts_forecast_var_by: value_cols argument is required and must be non-empty");
     }
 
+    // Parse date_col (index 5) — VARCHAR name of the date column.
+    // Passed as the 6th positional arg from the macro (after TABLE, horizon, frequency, order, value_cols).
+    string date_col_name = "date";  // fallback
+    if (input.inputs.size() >= 6 && !input.inputs[5].IsNull()) {
+        date_col_name = input.inputs[5].GetValue<string>();
+    }
+
     // Resolve value column names → indices in the input table schema.
-    // The input table schema: col 0 = date_col, then all other cols (from the * in the subselect).
-    // The first column (index 0) is always the date column.
+    // The input table has ALL source columns (from SELECT * in the macro subselect).
+    // The date column is identified by name (date_col_name).
+    idx_t date_col_idx = std::numeric_limits<idx_t>::max();
     for (const auto &col_name : bind_data->value_col_names) {
         bool found = false;
         for (idx_t i = 0; i < input.input_table_names.size(); i++) {
@@ -196,12 +205,33 @@ static unique_ptr<FunctionData> TsForecastVarNativeBind(
         }
     }
 
-    // Detect date column type from input table (always index 0 from the subselect)
-    if (input.input_table_types.empty()) {
-        throw InvalidInputException("ts_forecast_var_by: input table has no columns");
+    // Resolve date column index by name
+    for (idx_t i = 0; i < input.input_table_names.size(); i++) {
+        if (input.input_table_names[i] == date_col_name) {
+            date_col_idx = i;
+            break;
+        }
     }
-    bind_data->date_logical_type = input.input_table_types[0];
-    switch (input.input_table_types[0].id()) {
+    if (date_col_idx == std::numeric_limits<idx_t>::max()) {
+        throw InvalidInputException(
+            "ts_forecast_var_by: date column '%s' not found in input table. "
+            "Available columns: %s",
+            date_col_name.c_str(),
+            StringUtil::Join(input.input_table_names, ", ").c_str());
+    }
+
+    // Store date_col_idx in bind_data for use in InOut
+    // (repurpose value_col_indices[0] convention: store date index separately)
+    // We add a dedicated field by stuffing the date col index as a bind_data member.
+    // Use a new dedicated member (added below).
+    bind_data->date_col_idx = date_col_idx;
+
+    // Detect date column type from the identified date column
+    if (date_col_idx >= input.input_table_types.size()) {
+        throw InvalidInputException("ts_forecast_var_by: date column index out of range");
+    }
+    bind_data->date_logical_type = input.input_table_types[date_col_idx];
+    switch (input.input_table_types[date_col_idx].id()) {
         case LogicalTypeId::DATE:
             bind_data->date_col_type = DateColumnType::DATE;
             break;
@@ -217,13 +247,10 @@ static unique_ptr<FunctionData> TsForecastVarNativeBind(
             break;
         default:
             throw InvalidInputException(
-                "ts_forecast_var_by: date column (first column in subselect) must be "
-                "DATE, TIMESTAMP, INTEGER, or BIGINT, got: %s",
-                input.input_table_types[0].ToString().c_str());
+                "ts_forecast_var_by: date column '%s' must be DATE, TIMESTAMP, INTEGER, or BIGINT, got: %s",
+                date_col_name.c_str(),
+                input.input_table_types[date_col_idx].ToString().c_str());
     }
-
-    // Output schema: variable VARCHAR, forecast_step BIGINT, <date_col_name> <date_type>, forecast_value DOUBLE
-    string date_col_name = input.input_table_names.size() > 0 ? input.input_table_names[0] : "date";
 
     names.push_back("variable");
     return_types.push_back(LogicalType::VARCHAR);
@@ -294,8 +321,8 @@ static OperatorResultType TsForecastVarNativeInOut(
     vector<TempRow> batch;
 
     for (idx_t i = 0; i < input.size(); i++) {
-        // Column 0 is always the date column
-        Value date_val = input.data[0].GetValue(i);
+        // Date column is at the index resolved in Bind
+        Value date_val = input.data[bind_data.date_col_idx].GetValue(i);
         if (date_val.IsNull()) continue;
 
         TempRow row;
@@ -607,7 +634,8 @@ void RegisterTsForecastVarNativeFunction(ExtensionLoader &loader) {
     // v1: single-panel only — no group_col. One VAR fit over the entire input table.
     TableFunction func("_ts_forecast_var_native",
         {LogicalType::TABLE, LogicalType::INTEGER, LogicalType::VARCHAR,
-         LogicalType::INTEGER, LogicalType::LIST(LogicalType::VARCHAR), LogicalType::ANY},
+         LogicalType::INTEGER, LogicalType::LIST(LogicalType::VARCHAR),
+         LogicalType::VARCHAR, LogicalType::ANY},
         nullptr,  // No execute function — use in_out_function
         TsForecastVarNativeBind,
         TsForecastVarNativeInitGlobal,
