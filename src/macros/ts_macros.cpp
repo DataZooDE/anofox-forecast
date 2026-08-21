@@ -622,6 +622,45 @@ FROM _ts_forecast_panel_native(
     "SELECT * FROM ts_forecast_panel_by('sales', product_id, date, qty, 'GlobalETS', 14, '1d', MAP{'seasonal_period': '7'})",
     "forecasting"},
 
+    // ts_forecast_var_by: VAR multivariate forecasting (Phase 3: CLAS-03)
+    //
+    // Fits a single VAR(p) model across ALL K value columns simultaneously, then emits
+    // one row per (variable, horizon step) in LONG format. Unlike ts_forecast_by which
+    // fits independently per series, this achieves true multivariate cross-variable
+    // learning via the VAR coefficient matrix.
+    //
+    // v1: single-panel only — no group_col. All rows in source are treated as one panel.
+    // forecast_value is a point forecast (no prediction intervals in v1).
+    //
+    // Signature: ts_forecast_var_by(source, date_col, value_cols, horizon, frequency,
+    //                                order := 1, params := MAP{})
+    // output: variable VARCHAR, forecast_step BIGINT, <date_col> <date_type>, forecast_value DOUBLE
+    //
+    // IMPORTANT: uses the subselect pattern to avoid silent macro-registration failure
+    // (Phase-2 lesson: bare query_table() TABLE arg silently produces 0 rows in duckdb_functions())
+    {"ts_forecast_var_by",
+     {"source", "date_col", "value_cols", "horizon", "frequency", nullptr},
+     {{"p", "1"}, {"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+SELECT variable, forecast_step, date_col, forecast_value
+FROM _ts_forecast_var_native(
+    (SELECT date_col, * FROM query_table(source::VARCHAR)),
+    horizon,
+    frequency,
+    p,
+    value_cols,
+    params
+)
+)",
+    "VAR multivariate forecasting. Fits a single VAR(p) model across all K value columns and "
+    "returns one row per (variable, horizon step) in long format (LONG output shape). "
+    "value_cols is a VARCHAR[] of column names from source (e.g. ['y1','y2']). "
+    "p is the VAR lag order (default 1). "
+    "forecast_value is a point forecast (no prediction intervals in v1). "
+    "v1 is single-panel only (no group_col — one VAR fit for the entire input table).",
+    "SELECT * FROM ts_forecast_var_by('returns', 'ds', ['equity','bond','fx'], 12, '1d', p:=2)",
+    "forecasting"},
+
     // ts_forecast_inspect_by: Return per-group fit-state snapshot for Inspectable models.
     // C++ API: ts_forecast_inspect_by(source, group_col, date_col, target_col, method, params?)
     //
