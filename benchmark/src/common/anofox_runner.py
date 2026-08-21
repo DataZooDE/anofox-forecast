@@ -300,11 +300,17 @@ def run_anofox_benchmark(
                 last_train_date.columns = ['unique_id', 'last_ds']
                 # Merge forecast_step with last training date
                 fcst_df = fcst_df.merge(last_train_date, on='unique_id', how='left')
-                # Re-compute ds: last_train_date + forecast_step days
-                fcst_df['ds'] = fcst_df.apply(
-                    lambda row: row['last_ds'] + pd.Timedelta(days=int(row['forecast_step'])),
-                    axis=1
-                )
+                # Re-compute ds: last_train_date + forecast_step * one_period
+                # Map freq ('D', 'h', 'W', 'M', ...) to the appropriate Timedelta/DateOffset
+                # so non-daily panels (hourly, weekly) produce correct dates.
+                _FREQ_DELTA = {
+                    'D': pd.Timedelta(days=1),
+                    'h': pd.Timedelta(hours=1),
+                    'W': pd.Timedelta(weeks=1),
+                    'M': pd.DateOffset(months=1),
+                }
+                step_delta = _FREQ_DELTA.get(freq, pd.Timedelta(days=1))
+                fcst_df['ds'] = fcst_df['last_ds'] + step_delta * fcst_df['forecast_step'].astype(int)
                 fcst_df = fcst_df.drop(columns=['last_ds', 'forecast_step', 'model_name'],
                                        errors='ignore')
             else:
