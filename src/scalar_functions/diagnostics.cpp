@@ -222,4 +222,244 @@ void RegisterTsAdfFunction(ExtensionLoader &loader) {
     }
 }
 
+// ============================================================================
+// ts_kpss(series LIST(DOUBLE) [, lags INTEGER]) → STRUCT(statistic, p_value,
+//   lags, is_stationary, cv_1pct, cv_5pct, cv_10pct)   [STAT-02]
+//
+// Same 7-field STRUCT as ts_adf (KPSS returns the crate's StationarityResult).
+// For KPSS, is_stationary=true means the statistic FAILS to reject the
+// stationarity null (statistic below the 5% critical value).
+// ============================================================================
+
+static void TsKpssFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+    auto &values_vec = args.data[0];
+    idx_t count = args.size();
+
+    UnifiedVectorFormat lags_data_fmt;
+    bool has_lags = (args.ColumnCount() >= 2);
+    if (has_lags) {
+        args.data[1].ToUnifiedFormat(count, lags_data_fmt);
+    }
+
+    auto &struct_entries = StructVector::GetEntries(result);
+    auto stat_data  = FlatVector::GetData<double>(*struct_entries[0]);
+    auto pval_data  = FlatVector::GetData<double>(*struct_entries[1]);
+    auto lags_data  = FlatVector::GetData<int64_t>(*struct_entries[2]);
+    auto istat_data = FlatVector::GetData<bool>(*struct_entries[3]);
+    auto cv1_data   = FlatVector::GetData<double>(*struct_entries[4]);
+    auto cv5_data   = FlatVector::GetData<double>(*struct_entries[5]);
+    auto cv10_data  = FlatVector::GetData<double>(*struct_entries[6]);
+
+    vector<double> series;
+
+    for (idx_t row_idx = 0; row_idx < count; row_idx++) {
+        if (FlatVector::IsNull(values_vec, row_idx)) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        int32_t lags_val = -1;
+        if (has_lags) {
+            auto l_idx = lags_data_fmt.sel->get_index(row_idx);
+            if (lags_data_fmt.validity.RowIsValid(l_idx)) {
+                lags_val = UnifiedVectorFormat::GetData<int32_t>(lags_data_fmt)[l_idx];
+            }
+        }
+
+        ExtractListAsDoubleLocal(values_vec, row_idx, series);
+
+        AnofoxStationarityResult r = {};
+        AnofoxError err = {};
+        bool ok = anofox_ts_kpss(
+            series.data(), nullptr, series.size(),
+            static_cast<int>(lags_val), &r, &err);
+
+        if (!ok) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        stat_data[row_idx]  = r.statistic;
+        pval_data[row_idx]  = r.p_value;
+        lags_data[row_idx]  = static_cast<int64_t>(r.lags);
+        istat_data[row_idx] = r.is_stationary;
+        cv1_data[row_idx]   = r.cv_1pct;
+        cv5_data[row_idx]   = r.cv_5pct;
+        cv10_data[row_idx]  = r.cv_10pct;
+    }
+}
+
+// ============================================================================
+// ts_stationarity(series LIST(DOUBLE)) → STRUCT(adf_statistic, adf_p_value,
+//   kpss_statistic, kpss_p_value, adf_is_stationary, kpss_is_stationary,
+//   verdict)   [STAT-03]
+//
+// Runs both ADF and KPSS and derives the four-way verdict
+// (stationary / trend_stationary / difference_stationary / non_stationary).
+// STRUCT field order must match AnofoxCombinedStationarityResult.
+// ============================================================================
+
+static void TsStationarityFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+    auto &values_vec = args.data[0];
+    idx_t count = args.size();
+
+    auto &struct_entries = StructVector::GetEntries(result);
+    auto adf_stat_data  = FlatVector::GetData<double>(*struct_entries[0]);
+    auto adf_pval_data  = FlatVector::GetData<double>(*struct_entries[1]);
+    auto kpss_stat_data = FlatVector::GetData<double>(*struct_entries[2]);
+    auto kpss_pval_data = FlatVector::GetData<double>(*struct_entries[3]);
+    auto adf_istat_data = FlatVector::GetData<bool>(*struct_entries[4]);
+    auto kpss_istat_data = FlatVector::GetData<bool>(*struct_entries[5]);
+    auto &verdict_vec   = *struct_entries[6];
+    auto verdict_data   = FlatVector::GetData<string_t>(verdict_vec);
+
+    vector<double> series;
+
+    for (idx_t row_idx = 0; row_idx < count; row_idx++) {
+        if (FlatVector::IsNull(values_vec, row_idx)) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        ExtractListAsDoubleLocal(values_vec, row_idx, series);
+
+        AnofoxCombinedStationarityResult r = {};
+        AnofoxError err = {};
+        bool ok = anofox_ts_stationarity(
+            series.data(), nullptr, series.size(), &r, &err);
+
+        if (!ok) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        adf_stat_data[row_idx]   = r.adf_statistic;
+        adf_pval_data[row_idx]   = r.adf_p_value;
+        kpss_stat_data[row_idx]  = r.kpss_statistic;
+        kpss_pval_data[row_idx]  = r.kpss_p_value;
+        adf_istat_data[row_idx]  = r.adf_is_stationary;
+        kpss_istat_data[row_idx] = r.kpss_is_stationary;
+        // r.verdict is a NUL-terminated char[32]
+        verdict_data[row_idx]    = StringVector::AddString(verdict_vec, r.verdict);
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+static child_list_t<LogicalType> StationarityStructChildren() {
+    child_list_t<LogicalType> c;
+    c.push_back(make_pair("statistic",     LogicalType(LogicalTypeId::DOUBLE)));
+    c.push_back(make_pair("p_value",       LogicalType(LogicalTypeId::DOUBLE)));
+    c.push_back(make_pair("lags",          LogicalType(LogicalTypeId::BIGINT)));
+    c.push_back(make_pair("is_stationary", LogicalType(LogicalTypeId::BOOLEAN)));
+    c.push_back(make_pair("cv_1pct",       LogicalType(LogicalTypeId::DOUBLE)));
+    c.push_back(make_pair("cv_5pct",       LogicalType(LogicalTypeId::DOUBLE)));
+    c.push_back(make_pair("cv_10pct",      LogicalType(LogicalTypeId::DOUBLE)));
+    return c;
+}
+
+static child_list_t<LogicalType> CombinedStationarityStructChildren() {
+    child_list_t<LogicalType> c;
+    c.push_back(make_pair("adf_statistic",      LogicalType(LogicalTypeId::DOUBLE)));
+    c.push_back(make_pair("adf_p_value",        LogicalType(LogicalTypeId::DOUBLE)));
+    c.push_back(make_pair("kpss_statistic",     LogicalType(LogicalTypeId::DOUBLE)));
+    c.push_back(make_pair("kpss_p_value",       LogicalType(LogicalTypeId::DOUBLE)));
+    c.push_back(make_pair("adf_is_stationary",  LogicalType(LogicalTypeId::BOOLEAN)));
+    c.push_back(make_pair("kpss_is_stationary", LogicalType(LogicalTypeId::BOOLEAN)));
+    c.push_back(make_pair("verdict",            LogicalType(LogicalTypeId::VARCHAR)));
+    return c;
+}
+
+void RegisterTsKpssFunction(ExtensionLoader &loader) {
+    auto result_type = LogicalType::STRUCT(StationarityStructChildren());
+
+    ScalarFunctionSet kpss_set("ts_kpss");
+    kpss_set.AddFunction(ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        result_type, TsKpssFunction));
+    kpss_set.AddFunction(ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType(LogicalTypeId::INTEGER)},
+        result_type, TsKpssFunction));
+    {
+        CreateScalarFunctionInfo info(kpss_set);
+        FunctionDescription desc;
+        desc.description =
+            "Kwiatkowski-Phillips-Schmidt-Shin (KPSS) stationarity test. "
+            "Null hypothesis: the series is level-stationary. "
+            "Returns STRUCT(statistic DOUBLE, p_value DOUBLE, lags BIGINT, "
+            "is_stationary BOOLEAN, cv_1pct DOUBLE, cv_5pct DOUBLE, cv_10pct DOUBLE); "
+            "is_stationary=true means the null is NOT rejected at 5%. "
+            "Uses level ('c') specification; p-values are approximate (interpolated, "
+            "clamped to [0.01, 0.10]).";
+        desc.examples = {"ts_kpss(LIST(y ORDER BY ds))", "ts_kpss(LIST(y ORDER BY ds), 4)"};
+        desc.categories = {"time-series", "diagnostics"};
+        desc.parameter_names = {"series", "lags"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::INTEGER)};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
+
+    ScalarFunctionSet alias_set("anofox_fcst_ts_kpss");
+    alias_set.AddFunction(ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType::STRUCT(StationarityStructChildren()), TsKpssFunction));
+    alias_set.AddFunction(ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType(LogicalTypeId::INTEGER)},
+        LogicalType::STRUCT(StationarityStructChildren()), TsKpssFunction));
+    {
+        CreateScalarFunctionInfo info(alias_set);
+        info.alias_of = "ts_kpss";
+        FunctionDescription desc;
+        desc.description = "KPSS stationarity test (prefixed alias).";
+        desc.examples = {"anofox_fcst_ts_kpss(LIST(y ORDER BY ds))"};
+        desc.categories = {"time-series", "diagnostics"};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
+}
+
+void RegisterTsStationarityFunction(ExtensionLoader &loader) {
+    auto result_type = LogicalType::STRUCT(CombinedStationarityStructChildren());
+
+    ScalarFunctionSet stat_set("ts_stationarity");
+    stat_set.AddFunction(ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        result_type, TsStationarityFunction));
+    {
+        CreateScalarFunctionInfo info(stat_set);
+        FunctionDescription desc;
+        desc.description =
+            "Combined ADF + KPSS stationarity verdict. Runs both tests and returns "
+            "STRUCT(adf_statistic DOUBLE, adf_p_value DOUBLE, kpss_statistic DOUBLE, "
+            "kpss_p_value DOUBLE, adf_is_stationary BOOLEAN, kpss_is_stationary BOOLEAN, "
+            "verdict VARCHAR). verdict is one of "
+            "'stationary', 'trend_stationary', 'difference_stationary', 'non_stationary'.";
+        desc.examples = {"ts_stationarity(LIST(y ORDER BY ds))"};
+        desc.categories = {"time-series", "diagnostics"};
+        desc.parameter_names = {"series"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
+
+    ScalarFunctionSet alias_set("anofox_fcst_ts_stationarity");
+    alias_set.AddFunction(ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType::STRUCT(CombinedStationarityStructChildren()), TsStationarityFunction));
+    {
+        CreateScalarFunctionInfo info(alias_set);
+        info.alias_of = "ts_stationarity";
+        FunctionDescription desc;
+        desc.description = "Combined ADF + KPSS stationarity verdict (prefixed alias).";
+        desc.examples = {"anofox_fcst_ts_stationarity(LIST(y ORDER BY ds))"};
+        desc.categories = {"time-series", "diagnostics"};
+        info.descriptions.push_back(std::move(desc));
+        loader.RegisterFunction(std::move(info));
+    }
+}
+
 } // namespace duckdb

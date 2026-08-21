@@ -171,3 +171,64 @@ SELECT isfinite((anofox_fcst_ts_adf(LIST(val ORDER BY ds))).statistic)
 FROM diag_series WHERE grp = 'B';
 ----
 true
+
+#######################################
+# ts_kpss (STAT-02)
+#######################################
+
+# ts_kpss returns a STRUCT with a finite statistic and a valid p-value
+query II
+SELECT isfinite((ts_kpss(LIST(val ORDER BY ds))).statistic),
+       (ts_kpss(LIST(val ORDER BY ds))).p_value BETWEEN 0 AND 1
+FROM diag_series WHERE grp = 'A';
+----
+true	true
+
+# ts_kpss_by returns one row per group with a boolean is_stationary
+query I
+SELECT count(*) FROM ts_kpss_by('diag_series', grp, ds, val);
+----
+2
+
+# ts_kpss lags override is respected
+query I
+SELECT (ts_kpss(LIST(val ORDER BY ds), 2)).lags <= 2
+FROM diag_series WHERE grp = 'A';
+----
+true
+
+# anofox_fcst_ts_kpss alias produces the same statistic
+query I
+SELECT (anofox_fcst_ts_kpss(LIST(val ORDER BY ds))).statistic
+     = (ts_kpss(LIST(val ORDER BY ds))).statistic
+FROM diag_series WHERE grp = 'B';
+----
+true
+
+#######################################
+# ts_stationarity (STAT-03)
+#######################################
+
+# ts_stationarity returns the combined STRUCT; verdict is one of the four labels
+query I
+SELECT (ts_stationarity(LIST(val ORDER BY ds))).verdict IN
+       ('stationary','trend_stationary','difference_stationary','non_stationary')
+FROM diag_series WHERE grp = 'A';
+----
+true
+
+# combined statistics match the individual tests
+query II
+SELECT (ts_stationarity(LIST(val ORDER BY ds))).adf_statistic
+     = (ts_adf(LIST(val ORDER BY ds))).statistic,
+       (ts_stationarity(LIST(val ORDER BY ds))).kpss_statistic
+     = (ts_kpss(LIST(val ORDER BY ds))).statistic
+FROM diag_series WHERE grp = 'B';
+----
+true	true
+
+# ts_stationarity_by returns one verdict per group
+query I
+SELECT count(*) FROM ts_stationarity_by('diag_series', grp, ds, val);
+----
+2

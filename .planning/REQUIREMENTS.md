@@ -17,8 +17,8 @@ Each requirement is "Complete" only when ALL of the following hold:
 ### Stationarity Tests
 
 - [x] **STAT-01**: User can test a series for stationarity with the Augmented Dickey-Fuller test (`ts_adf` / `ts_adf_by`), returning statistic, p-value, and lag.
-- [ ] **STAT-02**: User can test a series for stationarity with the KPSS test (`ts_kpss` / `ts_kpss_by`), returning statistic and p-value.
-- [ ] **STAT-03**: User can get a combined ADF+KPSS stationarity verdict (`ts_stationarity` / `ts_stationarity_by`) classifying the series as stationary / trend-stationary / difference-stationary / non-stationary.
+- [x] **STAT-02**: User can test a series for stationarity with the KPSS test (`ts_kpss` / `ts_kpss_by`), returning statistic and p-value.
+- [x] **STAT-03**: User can get a combined ADF+KPSS stationarity verdict (`ts_stationarity` / `ts_stationarity_by`) classifying the series as stationary / trend-stationary / difference-stationary / non-stationary.
 
 ### Residual Diagnostics
 
@@ -84,8 +84,8 @@ Deferred to a future milestone. Tracked, not in this roadmap.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | STAT-01 | Phase 1 | Complete |
-| STAT-02 | Phase 1 | Pending |
-| STAT-03 | Phase 1 | Pending |
+| STAT-02 | Phase 1 | Complete |
+| STAT-03 | Phase 1 | Complete |
 | RESID-01 | Phase 1 | Pending |
 | RESID-02 | Phase 1 | Pending |
 | RESID-03 | Phase 1 | Pending |

@@ -8,12 +8,12 @@ Diagnostic functions test statistical properties of time series and model residu
 They operate on a single column of values (no date column required inside the function;
 ordering is supplied via `ORDER BY` in `LIST()`).
 
-**This document covers (Phase 1, Plan 01-1 — STAT-01 ADF):**
-- `ts_adf` / `ts_adf_by`: Augmented Dickey-Fuller unit-root test (stationarity)
-
-**Placeholders for Plans 01-2 and 01-3 (sections to be filled in):**
+**This document covers (Phase 1 — Statistical Diagnostics):**
+- `ts_adf` / `ts_adf_by`: Augmented Dickey-Fuller unit-root test (STAT-01)
 - `ts_kpss` / `ts_kpss_by`: KPSS level-stationarity test (STAT-02)
-- `ts_stationarity` / `ts_stationarity_by`: combined ADF + KPSS verdict (STAT-03)
+- `ts_stationarity` / `ts_stationarity_by`: combined ADF + KPSS four-way verdict (STAT-03)
+
+**Placeholders for Plan 01-3 (sections to be filled in):**
 - `ts_ljung_box` / `ts_ljung_box_by`: Ljung-Box white-noise test (RESID-01)
 - `ts_durbin_watson` / `ts_durbin_watson_by`: Durbin-Watson autocorrelation test (RESID-02)
 - `ts_jarque_bera` / `ts_jarque_bera_by`: Jarque-Bera normality test (RESID-03)
@@ -171,19 +171,74 @@ fewer than 4 observations. No error is raised; check for `isnan((adf).statistic)
 
 ---
 
-## Placeholders (Plans 01-2 and 01-3)
+## `ts_kpss` / `ts_kpss_by` (STAT-02)
 
-The following functions will be documented here once implemented:
+KPSS (Kwiatkowski–Phillips–Schmidt–Shin) stationarity test. Its null hypothesis
+is the **opposite** of ADF's: `H0 = the series is level-stationary`. A large
+statistic rejects that null (evidence of non-stationarity).
 
-### `ts_kpss` / `ts_kpss_by` *(Plan 01-2 — STAT-02)*
+```sql
+-- scalar form
+SELECT (ts_kpss(LIST(y ORDER BY ds))).* FROM sales;
 
-> KPSS level-stationarity test. Tests the null that the series **is** stationary
-> (opposite null from ADF). Returns same STRUCT layout as `ts_adf`.
+-- optional bandwidth override (number of lags for the long-run variance)
+SELECT ts_kpss(LIST(y ORDER BY ds), 4) FROM sales;
 
-### `ts_stationarity` / `ts_stationarity_by` *(Plan 01-2 — STAT-03)*
+-- grouped form
+SELECT group_col, (kpss).statistic, (kpss).is_stationary
+FROM ts_kpss_by('sales', product_id, ds, y);
+```
 
-> Combined ADF + KPSS verdict. Returns extended STRUCT with both test results
-> and a four-way verdict string.
+**Signatures**
+
+- `ts_kpss(series LIST(DOUBLE) [, lags INTEGER]) → STRUCT(...)`
+- `ts_kpss_by(source, group_col, date_col, value_col [, lags := -1]) → TABLE(group_col, kpss STRUCT(...))`
+
+**Returned STRUCT** — same layout as `ts_adf`: `statistic DOUBLE`, `p_value DOUBLE`,
+`lags BIGINT`, `is_stationary BOOLEAN`, `cv_1pct DOUBLE`, `cv_5pct DOUBLE`, `cv_10pct DOUBLE`.
+For KPSS, `is_stationary = true` means the statistic is **below** the 5% critical
+value (fails to reject the stationarity null).
+
+**Caveats**
+
+- Level (`'c'`) specification only; the trend (`'ct'`) specification is not exposed in
+  `anofox-forecast` v0.15.3. `lags := -1` (default) selects the bandwidth automatically.
+- p-values are approximate (piecewise-linear interpolation of the KPSS table, clamped
+  to `[0.01, 0.10]`).
+
+## `ts_stationarity` / `ts_stationarity_by` (STAT-03)
+
+Runs **both** ADF and KPSS and derives a four-way verdict by combining the two
+per-test stationarity flags.
+
+```sql
+SELECT (ts_stationarity(LIST(y ORDER BY ds))).verdict FROM sales;
+
+SELECT group_col, (stationarity).verdict
+FROM ts_stationarity_by('sales', product_id, ds, y);
+```
+
+**Signatures**
+
+- `ts_stationarity(series LIST(DOUBLE)) → STRUCT(...)`
+- `ts_stationarity_by(source, group_col, date_col, value_col) → TABLE(group_col, stationarity STRUCT(...))`
+
+**Returned STRUCT**: `adf_statistic DOUBLE`, `adf_p_value DOUBLE`, `kpss_statistic DOUBLE`,
+`kpss_p_value DOUBLE`, `adf_is_stationary BOOLEAN`, `kpss_is_stationary BOOLEAN`,
+`verdict VARCHAR`.
+
+**Verdict truth table** (both flags mean "this test judges the series stationary"):
+
+| `adf_is_stationary` | `kpss_is_stationary` | `verdict` | Interpretation |
+|---|---|---|---|
+| true  | true  | `stationary`            | Both tests agree — use as-is |
+| true  | false | `trend_stationary`      | Stationary around a deterministic trend — detrend (e.g. `ts_detrend_by`) |
+| false | false | `difference_stationary` | Unit root — apply differencing (`ts_diff_by`) |
+| false | true  | `non_stationary`        | Conflicting / inconclusive — treat conservatively as non-stationary |
+
+> Note: this follows the standard ADF+KPSS combination. `trend_stationary` is the case
+> where ADF rejects the unit root but KPSS rejects level-stationarity (a deterministic
+> trend is present); `difference_stationary` is where both tests point to a unit root.
 
 ### `ts_ljung_box` / `ts_ljung_box_by` *(Plan 01-3 — RESID-01)*
 

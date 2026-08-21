@@ -1627,6 +1627,46 @@ typedef struct AnofoxStationarityResult {
 } AnofoxStationarityResult;
 
 /**
+ * C-compatible result of a combined ADF + KPSS stationarity verdict.
+ *
+ * Field order is fixed and must match the STRUCT fields declared in
+ * `src/scalar_functions/diagnostics.cpp` (RegisterTsStationarityFunction):
+ *   adf_statistic, adf_p_value, kpss_statistic, kpss_p_value,
+ *   adf_is_stationary, kpss_is_stationary, verdict
+ */
+typedef struct AnofoxCombinedStationarityResult {
+    /**
+     * ADF test statistic
+     */
+    double adf_statistic;
+    /**
+     * ADF approximate p-value
+     */
+    double adf_p_value;
+    /**
+     * KPSS test statistic
+     */
+    double kpss_statistic;
+    /**
+     * KPSS approximate p-value
+     */
+    double kpss_p_value;
+    /**
+     * `true` if ADF alone judges the series stationary
+     */
+    bool adf_is_stationary;
+    /**
+     * `true` if KPSS alone judges the series stationary
+     */
+    bool kpss_is_stationary;
+    /**
+     * Four-way verdict, NUL-terminated:
+     * `stationary` / `trend_stationary` / `difference_stationary` / `non_stationary`
+     */
+    char verdict[32];
+} AnofoxCombinedStationarityResult;
+
+/**
  * Nullable data array for DuckDB integration.
  *
  * The validity bitmask follows DuckDB's convention where bit i of validity[i/64]
@@ -3123,6 +3163,35 @@ bool anofox_ts_adf(const double *values,
                    int max_lags,
                    struct AnofoxStationarityResult *out_result,
                    struct AnofoxError *out_error);
+
+/**
+ * Run the KPSS stationarity test on a single series (STAT-02).
+ *
+ * # Safety
+ *
+ * `values` and `out_result` must be non-null. `validity` may be null (all valid).
+ * `length` must equal the number of `f64` elements at `values`.
+ */
+bool anofox_ts_kpss(const double *values,
+                    const uint64_t *validity,
+                    size_t length,
+                    int lags,
+                    struct AnofoxStationarityResult *out_result,
+                    struct AnofoxError *out_error);
+
+/**
+ * Run the combined ADF + KPSS stationarity verdict on a single series (STAT-03).
+ *
+ * # Safety
+ *
+ * `values` and `out_result` must be non-null. `validity` may be null (all valid).
+ * `length` must equal the number of `f64` elements at `values`.
+ */
+bool anofox_ts_stationarity(const double *values,
+                            const uint64_t *validity,
+                            size_t length,
+                            struct AnofoxCombinedStationarityResult *out_result,
+                            struct AnofoxError *out_error);
 
 const char *anofox_fcst_version(void);
 

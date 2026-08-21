@@ -135,3 +135,25 @@ ORDER BY product_id;
 .print 'Done. For KPSS and combined stationarity tests, see plans 01-2/01-3.'
 .print '       For residual diagnostics, see examples/diagnostics/residual_diagnostics.sql'
 .print '============================================================================='
+
+-- ============================================================================
+-- Section 5: KPSS test (STAT-02)
+-- KPSS null hypothesis = series IS level-stationary (opposite of ADF).
+-- ============================================================================
+.print '--- ts_kpss: scalar form ---'
+WITH s AS (SELECT i AS ds, sin(i/6.0) + (i%5)*0.01 AS y FROM range(1, 80) t(i))
+SELECT (ts_kpss(LIST(y ORDER BY ds))).statistic     AS kpss_stat,
+       (ts_kpss(LIST(y ORDER BY ds))).is_stationary AS is_stationary
+FROM s;
+
+.print '--- ts_kpss_by: grouped form ---'
+SELECT product_id, (kpss).statistic, (kpss).is_stationary
+FROM ts_kpss_by('sales_data', product_id, ds, y) ORDER BY product_id;
+
+-- ============================================================================
+-- Section 6: Combined ADF + KPSS four-way verdict (STAT-03)
+-- ============================================================================
+.print '--- ts_stationarity: four-way verdict ---'
+SELECT product_id, (stationarity).verdict,
+       (stationarity).adf_is_stationary, (stationarity).kpss_is_stationary
+FROM ts_stationarity_by('sales_data', product_id, ds, y) ORDER BY product_id;

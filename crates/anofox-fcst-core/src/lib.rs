@@ -107,5 +107,7 @@ pub use stats::{
     FrequencyType, TsStats,
 };
 
-// Statistical validation (Phase 1: STAT-01 ADF)
-pub use validation::{adf, StationarityOut};
+// Statistical validation (Phase 1: STAT-01 ADF, STAT-02 KPSS, STAT-03 combined verdict)
+pub use validation::{
+    adf, classify_stationarity, kpss, stationarity, CombinedStationarityOut, StationarityOut,
+};

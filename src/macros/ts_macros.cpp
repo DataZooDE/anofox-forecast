@@ -2142,6 +2142,38 @@ GROUP BY group_col
     "SELECT group_col, (adf).statistic, (adf).p_value FROM ts_adf_by('sales', product_id, ds, y)",
     "diagnostics"},
 
+    // ts_kpss_by: KPSS stationarity test per group (STAT-02)
+    // C++ API: ts_kpss_by(source, group_col, date_col, value_col [, lags:=-1])
+    // Returns: TABLE(group_col, kpss STRUCT(statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct))
+    {"ts_kpss_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{"lags", "-1"}, {nullptr, nullptr}},
+R"(
+SELECT group_col, ts_kpss(LIST(value_col::DOUBLE ORDER BY date_col), lags::INTEGER) AS kpss
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)",
+    "KPSS stationarity test per group. Returns STRUCT(statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct) per group. "
+    "Null hypothesis is level-stationarity; is_stationary=true means the null is not rejected at 5%. "
+    "Pass lags:=N to override the automatic bandwidth.",
+    "SELECT group_col, (kpss).statistic, (kpss).is_stationary FROM ts_kpss_by('sales', product_id, ds, y)",
+    "diagnostics"},
+
+    // ts_stationarity_by: combined ADF + KPSS four-way verdict per group (STAT-03)
+    // C++ API: ts_stationarity_by(source, group_col, date_col, value_col)
+    // Returns: TABLE(group_col, stationarity STRUCT(adf_statistic, adf_p_value, kpss_statistic, kpss_p_value, adf_is_stationary, kpss_is_stationary, verdict))
+    {"ts_stationarity_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{nullptr, nullptr}},
+R"(
+SELECT group_col, ts_stationarity(LIST(value_col::DOUBLE ORDER BY date_col)) AS stationarity
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)",
+    "Combined ADF + KPSS stationarity verdict per group. Returns STRUCT(adf_statistic, adf_p_value, kpss_statistic, kpss_p_value, "
+    "adf_is_stationary, kpss_is_stationary, verdict) per group. verdict is one of "
+    "'stationary', 'trend_stationary', 'difference_stationary', 'non_stationary'.",
+    "SELECT group_col, (stationarity).verdict FROM ts_stationarity_by('sales', product_id, ds, y)",
+    "diagnostics"},
+
     // Sentinel
     {nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr, nullptr, nullptr, nullptr}
 };

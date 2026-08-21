@@ -6536,6 +6536,113 @@ pub unsafe extern "C" fn anofox_ts_adf(
     }
 }
 
+/// Run the KPSS stationarity test on a single series (STAT-02).
+///
+/// # Safety
+///
+/// `values` and `out_result` must be non-null. `validity` may be null (all valid).
+/// `length` must equal the number of `f64` elements at `values`.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_kpss(
+    values: *const c_double,
+    validity: *const u64,
+    length: size_t,
+    lags: c_int,
+    out_result: *mut AnofoxStationarityResult,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    let ptrs = &[
+        values as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
+        return false;
+    }
+
+    *out_result = AnofoxStationarityResult::default();
+
+    if length == 0 {
+        return true;
+    }
+
+    let lags_opt: Option<usize> = if lags < 0 { None } else { Some(lags as usize) };
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let series = build_values(values, validity, length);
+        anofox_fcst_core::kpss(&series, lags_opt)
+    }));
+
+    match result {
+        Ok(r) => {
+            *out_result = r.into();
+            true
+        }
+        Err(_) => {
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in anofox_ts_kpss");
+            false
+        }
+    }
+}
+
+/// Run the combined ADF + KPSS stationarity verdict on a single series (STAT-03).
+///
+/// # Safety
+///
+/// `values` and `out_result` must be non-null. `validity` may be null (all valid).
+/// `length` must equal the number of `f64` elements at `values`.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_stationarity(
+    values: *const c_double,
+    validity: *const u64,
+    length: size_t,
+    out_result: *mut AnofoxCombinedStationarityResult,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    let ptrs = &[
+        values as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
+        return false;
+    }
+
+    *out_result = AnofoxCombinedStationarityResult::default();
+
+    if length == 0 {
+        return true;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let series = build_values(values, validity, length);
+        anofox_fcst_core::stationarity(&series)
+    }));
+
+    match result {
+        Ok(r) => {
+            (*out_result).adf_statistic = r.adf_statistic;
+            (*out_result).adf_p_value = r.adf_p_value;
+            (*out_result).kpss_statistic = r.kpss_statistic;
+            (*out_result).kpss_p_value = r.kpss_p_value;
+            (*out_result).adf_is_stationary = r.adf_is_stationary;
+            (*out_result).kpss_is_stationary = r.kpss_is_stationary;
+            copy_string_to_buffer(r.verdict, &mut (*out_result).verdict);
+            true
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in anofox_ts_stationarity",
+            );
+            false
+        }
+    }
+}
+
 // ============================================================================
 // Version
 // ============================================================================

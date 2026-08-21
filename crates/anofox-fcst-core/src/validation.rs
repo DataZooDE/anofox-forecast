@@ -72,6 +72,80 @@ pub fn adf(series: &[f64], max_lags: Option<usize>) -> StationarityOut {
     validation::adf_test(series, max_lags).into()
 }
 
+/// Run the KPSS test for (level) stationarity.
+///
+/// # Arguments
+///
+/// * `series` — Time series values.
+/// * `lags` — Bandwidth (number of lags) for the long-run variance estimator.
+///   `None` → automatic Schwert/Newey-West rule.
+///
+/// # Notes
+///
+/// KPSS reverses the ADF null hypothesis: H0 = the series *is* level-stationary.
+/// `is_stationary` is `true` when the statistic fails to reject that null
+/// (statistic below the 5% critical value). The crate uses a level ('c')
+/// specification; the trend ('ct') specification is not exposed in v0.15.3.
+/// p-values are approximate (piecewise-linear interpolation of the KPSS table,
+/// clamped to [0.01, 0.10]).
+pub fn kpss(series: &[f64], lags: Option<usize>) -> StationarityOut {
+    validation::kpss_test(series, lags).into()
+}
+
+/// Combined ADF + KPSS stationarity verdict.
+///
+/// Field order is fixed for FFI consumers.
+#[derive(Debug, Clone)]
+pub struct CombinedStationarityOut {
+    /// ADF test statistic
+    pub adf_statistic: f64,
+    /// ADF approximate p-value
+    pub adf_p_value: f64,
+    /// KPSS test statistic
+    pub kpss_statistic: f64,
+    /// KPSS approximate p-value
+    pub kpss_p_value: f64,
+    /// Whether ADF alone judges the series stationary (rejects unit root)
+    pub adf_is_stationary: bool,
+    /// Whether KPSS alone judges the series stationary (fails to reject stationarity)
+    pub kpss_is_stationary: bool,
+    /// Four-way verdict: one of
+    /// `stationary`, `trend_stationary`, `difference_stationary`, `non_stationary`
+    pub verdict: &'static str,
+}
+
+/// Classify the four-way stationarity verdict from the two per-test stationarity flags.
+///
+/// Standard ADF+KPSS combination (both flags mean "this test says stationary"):
+/// * both stationary               → `stationary`
+/// * ADF stationary, KPSS not      → `trend_stationary` (stationary around a deterministic trend)
+/// * both non-stationary           → `difference_stationary` (unit root → difference it)
+/// * ADF not, KPSS stationary      → `non_stationary` (conflicting / inconclusive)
+pub fn classify_stationarity(adf_is_stationary: bool, kpss_is_stationary: bool) -> &'static str {
+    match (adf_is_stationary, kpss_is_stationary) {
+        (true, true) => "stationary",
+        (true, false) => "trend_stationary",
+        (false, false) => "difference_stationary",
+        (false, true) => "non_stationary",
+    }
+}
+
+/// Run both ADF and KPSS and derive the combined four-way verdict.
+pub fn stationarity(series: &[f64]) -> CombinedStationarityOut {
+    let adf_r = adf(series, None);
+    let kpss_r = kpss(series, None);
+    let verdict = classify_stationarity(adf_r.is_stationary, kpss_r.is_stationary);
+    CombinedStationarityOut {
+        adf_statistic: adf_r.statistic,
+        adf_p_value: adf_r.p_value,
+        kpss_statistic: kpss_r.statistic,
+        kpss_p_value: kpss_r.p_value,
+        adf_is_stationary: adf_r.is_stationary,
+        kpss_is_stationary: kpss_r.is_stationary,
+        verdict,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,5 +236,57 @@ mod tests {
         assert_relative_eq!(result.cv_1pct, -3.43, epsilon = 0.1);
         assert_relative_eq!(result.cv_5pct, -2.86, epsilon = 0.1);
         assert_relative_eq!(result.cv_10pct, -2.57, epsilon = 0.1);
+    }
+
+    #[test]
+    fn kpss_returns_finite_statistic_and_valid_pvalue() {
+        let series = ar1_stationary(80, 5);
+        let result = kpss(&series, None);
+        assert!(result.statistic.is_finite(), "KPSS statistic should be finite");
+        assert!(
+            result.p_value >= 0.0 && result.p_value <= 1.0,
+            "p_value should be in [0, 1], got {}",
+            result.p_value
+        );
+    }
+
+    #[test]
+    fn kpss_random_walk_statistic_exceeds_stationary() {
+        // KPSS statistic is LARGER for non-stationary series (rejects the stationarity null)
+        let rw = random_walk(120, 3);
+        let ar = ar1_stationary(120, 3);
+        let rw_k = kpss(&rw, None);
+        let ar_k = kpss(&ar, None);
+        assert!(
+            rw_k.statistic > ar_k.statistic,
+            "random-walk KPSS ({:.4}) should exceed stationary KPSS ({:.4})",
+            rw_k.statistic,
+            ar_k.statistic
+        );
+    }
+
+    #[test]
+    fn classify_stationarity_truth_table() {
+        assert_eq!(classify_stationarity(true, true), "stationary");
+        assert_eq!(classify_stationarity(true, false), "trend_stationary");
+        assert_eq!(classify_stationarity(false, false), "difference_stationary");
+        assert_eq!(classify_stationarity(false, true), "non_stationary");
+    }
+
+    #[test]
+    fn stationarity_verdict_is_one_of_four_labels() {
+        let series = ar1_stationary(100, 11);
+        let combined = stationarity(&series);
+        assert!(
+            matches!(
+                combined.verdict,
+                "stationary" | "trend_stationary" | "difference_stationary" | "non_stationary"
+            ),
+            "verdict must be one of the four labels, got {}",
+            combined.verdict
+        );
+        // The combined statistics must match the individual test outputs.
+        assert_relative_eq!(combined.adf_statistic, adf(&series, None).statistic);
+        assert_relative_eq!(combined.kpss_statistic, kpss(&series, None).statistic);
     }
 }

@@ -115,6 +115,8 @@ void RegisterTsBootstrapQuantilesFunction(ExtensionLoader &loader);
 
 // Statistical diagnostic tests (Phase 1: STAT-01..03, RESID-01..04)
 void RegisterTsAdfFunction(ExtensionLoader &loader);
+void RegisterTsKpssFunction(ExtensionLoader &loader);
+void RegisterTsStationarityFunction(ExtensionLoader &loader);
 
 // Table macros
 void RegisterTsTableMacros(ExtensionLoader &loader);

@@ -1725,3 +1725,42 @@ impl From<anofox_fcst_core::StationarityOut> for AnofoxStationarityResult {
         }
     }
 }
+
+/// C-compatible result of a combined ADF + KPSS stationarity verdict.
+///
+/// Field order is fixed and must match the STRUCT fields declared in
+/// `src/scalar_functions/diagnostics.cpp` (RegisterTsStationarityFunction):
+///   adf_statistic, adf_p_value, kpss_statistic, kpss_p_value,
+///   adf_is_stationary, kpss_is_stationary, verdict
+#[repr(C)]
+pub struct AnofoxCombinedStationarityResult {
+    /// ADF test statistic
+    pub adf_statistic: c_double,
+    /// ADF approximate p-value
+    pub adf_p_value: c_double,
+    /// KPSS test statistic
+    pub kpss_statistic: c_double,
+    /// KPSS approximate p-value
+    pub kpss_p_value: c_double,
+    /// `true` if ADF alone judges the series stationary
+    pub adf_is_stationary: bool,
+    /// `true` if KPSS alone judges the series stationary
+    pub kpss_is_stationary: bool,
+    /// Four-way verdict, NUL-terminated:
+    /// `stationary` / `trend_stationary` / `difference_stationary` / `non_stationary`
+    pub verdict: [c_char; 32],
+}
+
+impl Default for AnofoxCombinedStationarityResult {
+    fn default() -> Self {
+        Self {
+            adf_statistic: f64::NAN,
+            adf_p_value: f64::NAN,
+            kpss_statistic: f64::NAN,
+            kpss_p_value: f64::NAN,
+            adf_is_stationary: false,
+            kpss_is_stationary: false,
+            verdict: [0; 32],
+        }
+    }
+}

@@ -151,8 +151,10 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsBootstrapIntervalsFunction(loader);
     RegisterTsBootstrapQuantilesFunction(loader);
 
-    // Register Diagnostic functions (Phase 1: STAT-01 ADF; 01-2/01-3 extend this block)
+    // Register Diagnostic functions (Phase 1: STAT-01 ADF, STAT-02 KPSS, STAT-03 combined; 01-3 extends this block)
     RegisterTsAdfFunction(loader);
+    RegisterTsKpssFunction(loader);
+    RegisterTsStationarityFunction(loader);
 
     // Register Table Macros
     RegisterTsTableMacros(loader);
