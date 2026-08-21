@@ -23,4 +23,5 @@ comparison = [
     "statsforecast>=2.0.2",
     "pmdarima>=2.0.4",
     "prophet>=1.1.6",
+    "arch>=5.3.0",
 ]
