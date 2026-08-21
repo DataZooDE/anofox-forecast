@@ -2,17 +2,17 @@
 gsd_state_version: 1.0
 current_phase: 02
 current_phase_name: Global / Panel Models
-status: executing
-stopped_at: Completed 02-2 plan (GlobalTheta + GlobalCroston + docs)
-last_updated: "2026-08-21T20:08:25.672Z"
+status: verifying
+stopped_at: Completed 02-global-panel-models-3-PLAN.md
+last_updated: "2026-08-21T20:41:46.787Z"
 last_activity: 2026-08-21
 last_activity_desc: Phase 02 execution started
-state_head: 1ee15957eabad322ce907ec85782eb81870f217a
+state_head: 3949aec9a45f1b2659621bce2615bd1a39acc340
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 6
-  completed_plans: 5
+  completed_plans: 6
   percent: 0
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-08-21)
 
 Phase: 02 (Global / Panel Models) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-21 — Phase 02 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -63,6 +63,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01-diagnostics-demand-classification P01-1 | 120 | 3 tasks | 16 files |
 | Phase 02-global-panel-models P1 | 90 | 3 tasks | 11 files |
 | Phase 02 P2 | 17 min | 3 tasks | 7 files |
+| Phase 02-global-panel-models P3 | 25 | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -83,6 +84,10 @@ Recent decisions affecting current work:
 - [Phase 02]: Use GlobalCroston::new()/sba() constructors: CrostonVariant private type mismatch — global_croston::CrostonVariant ≠ croston::CrostonVariant, with_variant() fails at compile time
 - [Phase 02]: Add variant_str param to forecast_panel_impl: threads Croston variant from FFI outer wrapper through testable inner function; all 8-arg call sites updated
 - [Phase 02]: Fix model_name from hardcoded 'GlobalETS' to actual method string: 02-1 tracer hardcoded result; GlobalTheta/GlobalCroston now correctly self-name
+- [Phase 02]: CLI subprocess for panel queries: build/release/duckdb -unsigned avoids venv duckdb v1.5.1 / extension v1.5.4 version mismatch
+- [Phase 02]: Per-series date re-alignment: panel function aligns to shared grid; restore correct M4 horizon dates via forecast_step
+- [Phase 02]: MAX_SERIES=500 for global panel benchmark: GlobalETS Reduced pool takes ~18s for 500 series vs ~6 min for all 4,227
+- [Phase 02]: statsforecast reference: GlobalETS->AutoETS, GlobalTheta->AutoTheta, GlobalCroston->CrostonOptimized (pinned v1.4.0 has no Global* variants)
 
 ### Pending Todos
 
@@ -109,6 +114,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 **Resume file:** None
 
-Last session: 2026-08-21T20:08:25.662Z
-Stopped at: Completed 02-2 plan (GlobalTheta + GlobalCroston + docs)
+Last session: 2026-08-21T20:41:46.777Z
+Stopped at: Completed 02-global-panel-models-3-PLAN.md
 Resume: /gsd-autonomous --from 2  (Phase 2 needs a panel-aware SQL surface design — discuss first). Note: set workflow.use_worktrees=false to avoid worktree split-brain.
