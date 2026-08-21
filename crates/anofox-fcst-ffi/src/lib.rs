@@ -45,9 +45,15 @@ unsafe fn malloc(size: usize) -> *mut core::ffi::c_void {
 unsafe fn free(ptr: *mut core::ffi::c_void) {
     use std::alloc::{dealloc, Layout};
     if !ptr.is_null() {
-        // Note: We don't know the actual size, so we use a minimal layout
-        // This is safe because DuckDB manages the actual memory
-        let layout = Layout::from_size_align(1, 8).expect("8-byte alignment is always valid");
+        // SAFETY NOTE: The Rust allocator contract requires that `dealloc` receives the exact
+        // same `Layout` used during the corresponding `alloc` call. On WASM the Rust global
+        // allocator is used for these buffers (not DuckDB's allocator), so passing a mismatched
+        // layout is technically undefined behaviour. The size used here (8 bytes, align 8) is a
+        // conservative placeholder; a correct implementation would store the allocation size in a
+        // header alongside the allocation. This stub is retained for WASM build compatibility
+        // while the proper fix (size-tracked header or arena) is pending.
+        // TODO: replace with size-tracked header or arena allocator to eliminate the UB path.
+        let layout = Layout::from_size_align(8, 8).expect("8-byte alignment is always valid");
         dealloc(ptr as *mut u8, layout);
     }
 }
@@ -6956,7 +6962,8 @@ pub(crate) fn forecast_panel_impl(
 /// # Safety
 /// - `values`, `method`, and `out_result` must be non-null.
 /// - `out_error` may be null (errors are still reported via `false` return).
-/// - `variant` may be null (reserved for GlobalCroston in 02-2).
+/// - `variant` may be null (GlobalCroston "SBA" variant; None/empty = Classic).
+/// - `model_pool` may be null (GlobalETS pool override; None/empty = Reduced, "Complete" = full pool).
 /// - `values` must point to a buffer of at least `n_series * series_len` doubles.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_forecast_panel(
@@ -6967,6 +6974,7 @@ pub unsafe extern "C" fn anofox_ts_forecast_panel(
     horizon: size_t,
     seasonal_period: size_t,
     variant: *const c_char,
+    model_pool: *const c_char,
     out_result: *mut PanelForecastResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -6994,18 +7002,29 @@ pub unsafe extern "C" fn anofox_ts_forecast_panel(
             CStr::from_ptr(variant).to_str().ok().filter(|s| !s.is_empty())
         };
 
+        // Parse optional model_pool (used by GlobalETS — "Complete" or None/empty = Reduced)
+        let model_pool_str: Option<&str> = if model_pool.is_null() {
+            None
+        } else {
+            CStr::from_ptr(model_pool).to_str().ok().filter(|s| !s.is_empty())
+        };
+
         // Slice the flat matrix — Rust owns nothing, just a view
-        let flat = std::slice::from_raw_parts(values, n_series * series_len);
+        let len = n_series.checked_mul(series_len)
+            .ok_or_else(|| PanelForecastError::InvalidModel(
+                "Panel dimensions overflow (n_series * series_len > usize::MAX)".into()
+            ))?;
+        let flat = std::slice::from_raw_parts(values, len);
 
         // Inner logic (testable separately)
-        forecast_panel_impl(flat, n_series, series_len, method_str, horizon, seasonal_period, None, variant_str)
+        forecast_panel_impl(flat, n_series, series_len, method_str, horizon, seasonal_period, model_pool_str, variant_str)
             .map(|preds| (preds, method_str.to_owned()))
     }));
 
     match result {
         Ok(Ok((preds, method_name))) => {
             // Allocate flat output buffer and copy predictions
-            let total = n_series * horizon;
+            let total = n_series.checked_mul(horizon).unwrap_or(0);
             let buf = if total > 0 {
                 let raw = alloc_double_array(total);
                 if raw.is_null() {

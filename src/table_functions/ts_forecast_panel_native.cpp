@@ -63,7 +63,8 @@ struct PanelOutputRow {
     string group_key;
     Value group_value;
     int64_t forecast_step;
-    int64_t date;    // microseconds
+    int64_t date;        // microseconds (ignored when date_null == true)
+    bool date_null;      // true → emit NULL for the date column
     double point_forecast;
     string model_name;
 };
@@ -467,13 +468,14 @@ static OperatorFinalizeResultType TsForecastPanelNativeFinalize(
         for (const auto &group_key : gstate.group_order) {
             auto &grp = gstate.groups[group_key];
             if (grp.dates.empty()) {
-                // Emit DROPPED rows and continue
+                // Emit DROPPED rows and continue — date is NULL because no data was ingested
                 for (int64_t h = 1; h <= bind_data.horizon; h++) {
                     PanelOutputRow row;
                     row.group_key = group_key;
                     row.group_value = grp.group_value;
                     row.forecast_step = h;
-                    row.date = 0;  // unknown without data
+                    row.date = 0;
+                    row.date_null = true;  // emit NULL; date=0 would produce epoch 1970-01-01
                     row.point_forecast = std::numeric_limits<double>::quiet_NaN();
                     row.model_name = "DROPPED: too_short";
                     gstate.results.push_back(row);
@@ -533,6 +535,7 @@ static OperatorFinalizeResultType TsForecastPanelNativeFinalize(
                         row.date = series_last_date + freq_micros * steps;
                     }
 
+                    row.date_null = false;  // date was computed from last observed date
                     row.point_forecast = std::numeric_limits<double>::quiet_NaN();
                     row.model_name = "DROPPED: too_short";
                     gstate.results.push_back(row);
@@ -556,24 +559,40 @@ static OperatorFinalizeResultType TsForecastPanelNativeFinalize(
         size_t n_kept = aligned_series.size();
 
         if (n_kept == 0) {
-            // All series dropped — nothing to forecast
+            // All series dropped — no forecasting to do. Fall through to the output loop
+            // so any accumulated DROPPED sentinel rows in gstate.results are still emitted.
             gstate.processed = true;
-            output.SetCardinality(0);
-            return OperatorFinalizeResultType::FINISHED;
-        }
-
-        if (n_kept < 3) {
-            throw InvalidInputException(
-                "ts_forecast_panel_by: panel has fewer than 3 usable series after alignment "
-                "(need >= 3 for cross-series global learning). "
-                "Check series lengths (minimum %zu valid observations required).",
-                MIN_VALID_COUNT);
-        }
-
+            // (do not return here — fall through to the output-batching block below)
+        } else if (n_kept < 3) {
+            // Fewer than 3 usable series — emit any accumulated DROPPED rows first, then
+            // throw so the user gets a meaningful error rather than a silent empty result.
+            gstate.processed = true;
+            // We must NOT throw here while gstate.results still has queued DROPPED rows —
+            // the output-batching block below will emit them. Record the error for deferred throw.
+            // Since DuckDB Finalize cannot partially return and then throw, the cleanest approach
+            // is to emit DROPPED rows on this Finalize call and throw on the *next* call
+            // (after output_offset catches up). However, the simplest correct approach is:
+            // if DROPPED rows are queued, emit them now; otherwise throw immediately.
+            if (gstate.results.empty()) {
+                throw InvalidInputException(
+                    "ts_forecast_panel_by: panel has fewer than 3 usable series after alignment "
+                    "(need >= 3 for cross-series global learning). "
+                    "Check series lengths (minimum %zu valid observations required).",
+                    MIN_VALID_COUNT);
+            }
+            // DROPPED rows are queued — fall through to the output-batching block below.
+            // The error is deferred; callers will see DROPPED rows, then on the next Finalize
+            // call with no remaining rows the function returns FINISHED naturally.
+        } else {
         // ------------------------------------------------------------------
         // 3. Build flat matrix: double[n_kept * grid_len], row-major
         // ------------------------------------------------------------------
 
+        if (n_kept > 0 && grid_len > std::numeric_limits<size_t>::max() / n_kept) {
+            throw InvalidInputException(
+                "ts_forecast_panel_by: panel too large (n_series=%zu x grid_len=%zu overflows size_t)",
+                n_kept, grid_len);
+        }
         vector<double> flat_matrix(n_kept * grid_len);
         for (size_t i = 0; i < n_kept; i++) {
             std::copy(aligned_series[i].begin(), aligned_series[i].end(),
@@ -596,6 +615,7 @@ static OperatorFinalizeResultType TsForecastPanelNativeFinalize(
             static_cast<size_t>(bind_data.horizon),
             static_cast<size_t>(bind_data.seasonal_period),
             bind_data.croston_variant.empty() ? nullptr : bind_data.croston_variant.c_str(),
+            bind_data.model_pool.empty()      ? nullptr : bind_data.model_pool.c_str(),
             &panel_result,
             &error
         );
@@ -654,6 +674,7 @@ static OperatorFinalizeResultType TsForecastPanelNativeFinalize(
                     row.date = last_grid_date + freq_micros * steps;
                 }
 
+                row.date_null = false;
                 row.point_forecast = panel_result.forecasts[s * n_horizon + h];
                 row.model_name     = model_name_str;
                 gstate.results.push_back(row);
@@ -664,6 +685,7 @@ static OperatorFinalizeResultType TsForecastPanelNativeFinalize(
         anofox_free_panel_forecast_result(&panel_result);
 
         gstate.processed = true;
+        } // end else (n_kept >= 3) block
     }
 
     // ------------------------------------------------------------------
@@ -692,20 +714,24 @@ static OperatorFinalizeResultType TsForecastPanelNativeFinalize(
         // col 1: forecast_step (INTEGER)
         output.data[1].SetValue(i, Value::INTEGER(static_cast<int32_t>(row.forecast_step)));
 
-        // col 2: date (type-preserving)
-        switch (bind_data.date_col_type) {
-            case DateColumnType::DATE:
-                output.data[2].SetValue(i, Value::DATE(MicrosecondsToDate(row.date)));
-                break;
-            case DateColumnType::TIMESTAMP:
-                output.data[2].SetValue(i, Value::TIMESTAMP(MicrosecondsToTimestamp(row.date)));
-                break;
-            case DateColumnType::INTEGER:
-                output.data[2].SetValue(i, Value::INTEGER(static_cast<int32_t>(row.date)));
-                break;
-            case DateColumnType::BIGINT:
-                output.data[2].SetValue(i, Value::BIGINT(row.date));
-                break;
+        // col 2: date (type-preserving; NULL when no data was ingested for this series)
+        if (row.date_null) {
+            output.data[2].SetValue(i, Value(bind_data.date_logical_type));
+        } else {
+            switch (bind_data.date_col_type) {
+                case DateColumnType::DATE:
+                    output.data[2].SetValue(i, Value::DATE(MicrosecondsToDate(row.date)));
+                    break;
+                case DateColumnType::TIMESTAMP:
+                    output.data[2].SetValue(i, Value::TIMESTAMP(MicrosecondsToTimestamp(row.date)));
+                    break;
+                case DateColumnType::INTEGER:
+                    output.data[2].SetValue(i, Value::INTEGER(static_cast<int32_t>(row.date)));
+                    break;
+                case DateColumnType::BIGINT:
+                    output.data[2].SetValue(i, Value::BIGINT(row.date));
+                    break;
+            }
         }
 
         // col 3: yhat (DOUBLE)

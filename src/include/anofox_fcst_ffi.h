@@ -3337,7 +3337,8 @@ bool anofox_ts_residual_diagnostics(const double *values,
  * # Safety
  * - `values`, `method`, and `out_result` must be non-null.
  * - `out_error` may be null (errors are still reported via `false` return).
- * - `variant` may be null (reserved for GlobalCroston in 02-2).
+ * - `variant` may be null (GlobalCroston "SBA" variant; None/empty = Classic).
+ * - `model_pool` may be null (GlobalETS pool override; None/empty = Reduced, "Complete" = full pool).
  * - `values` must point to a buffer of at least `n_series * series_len` doubles.
  */
 bool anofox_ts_forecast_panel(const double *values,
@@ -3347,6 +3348,7 @@ bool anofox_ts_forecast_panel(const double *values,
                               size_t horizon,
                               size_t seasonal_period,
                               const char *variant,
+                              const char *model_pool,
                               struct PanelForecastResult *out_result,
                               struct AnofoxError *out_error);
 
