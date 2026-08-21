@@ -6827,6 +6827,324 @@ pub unsafe extern "C" fn anofox_ts_residual_diagnostics(
 }
 
 // ============================================================================
+// Panel Forecasting (Phase 2: GLOB-01..03)
+// ============================================================================
+
+// Imports for global panel models (GlobalETS only in plan 02-1; Theta/Croston added in 02-2)
+use anofox_forecast::models::exponential::{GlobalAutoETS, ModelPool};
+use anofox_fcst_core::fill_nulls_interpolate;
+
+/// Error type used by panel FFI impl — wraps upstream ForecastError for uniformity.
+#[derive(Debug)]
+pub(crate) enum PanelForecastError {
+    /// Model is not supported by the panel function.
+    InvalidModel(String),
+    /// Upstream forecast error (fit/predict failure).
+    Upstream(anofox_forecast::ForecastError),
+}
+
+impl std::fmt::Display for PanelForecastError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PanelForecastError::InvalidModel(msg) => write!(f, "invalid model: {}", msg),
+            PanelForecastError::Upstream(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+impl From<anofox_forecast::ForecastError> for PanelForecastError {
+    fn from(e: anofox_forecast::ForecastError) -> Self {
+        PanelForecastError::Upstream(e)
+    }
+}
+
+/// Inner logic for panel forecasting — testable without FFI pointer marshalling.
+///
+/// # Arguments
+/// - `flat`: flat packed matrix `[n_series * series_len]`; NaN marks gaps.
+/// - `n_series`: number of series in the panel.
+/// - `series_len`: number of time steps per series (all equal after alignment).
+/// - `method`: model method string ("GlobalETS"; "GlobalTheta"/"GlobalCroston" added in 02-2).
+/// - `horizon`: forecast horizon.
+/// - `seasonal_period`: seasonal period (0 = non-seasonal Reduced pool for GlobalETS).
+/// - `model_pool_str`: optional model pool override ("Complete" or empty = Reduced).
+///
+/// # Returns
+/// `Vec<Vec<f64>>` of shape `[n_series][horizon]`, all finite values.
+pub(crate) fn forecast_panel_impl(
+    flat: &[f64],
+    n_series: usize,
+    series_len: usize,
+    method: &str,
+    horizon: usize,
+    seasonal_period: usize,
+    model_pool_str: Option<&str>,
+) -> std::result::Result<Vec<Vec<f64>>, PanelForecastError> {
+    // Chunk flat array into per-series slices, convert NaN to None, then
+    // impute with linear interpolation (fill_nulls_interpolate handles
+    // leading/trailing/interior gaps).
+    let panel: Vec<Vec<f64>> = (0..n_series)
+        .map(|i| {
+            let slice = &flat[i * series_len..(i + 1) * series_len];
+            let with_opts: Vec<Option<f64>> = slice
+                .iter()
+                .map(|&v| if v.is_nan() { None } else { Some(v) })
+                .collect();
+            fill_nulls_interpolate(&with_opts)
+        })
+        .collect();
+
+    match method {
+        "GlobalETS" => {
+            let pool = match model_pool_str {
+                Some("Complete") => ModelPool::Complete,
+                _ => ModelPool::Reduced,
+            };
+            // period=0 means "non-seasonal"; map to 1 so the ETS update loop
+            // (`t % period`) never divides by zero. With period=1, has_seasonal
+            // evaluates to false and only non-seasonal candidates are tried.
+            let safe_period = if seasonal_period == 0 { 1 } else { seasonal_period };
+            let mut model = GlobalAutoETS::new(safe_period, pool);
+            model.fit(&panel)?;
+            Ok(model.predict(horizon))
+        }
+        other => Err(PanelForecastError::InvalidModel(format!(
+            "Unknown panel method: {}. Supported: GlobalETS (GlobalTheta/GlobalCroston in 02-2)",
+            other
+        ))),
+    }
+}
+
+/// Forecast a panel of equal-length time series using a single cross-series global model.
+///
+/// `values` is a flat packed matrix in series-major order:
+/// `values[s * series_len + t]` is the value of series `s` at time step `t`.
+/// `NaN` values in the flat matrix are treated as missing and will be imputed
+/// by `fill_nulls_interpolate` inside the Rust body before fitting.
+///
+/// On success writes to `*out_result` and returns `true`.
+/// On failure writes to `*out_error` and returns `false`.
+///
+/// The `forecasts` buffer in `*out_result` must be freed by calling
+/// `anofox_free_panel_forecast_result`.
+///
+/// # Safety
+/// - `values`, `method`, and `out_result` must be non-null.
+/// - `out_error` may be null (errors are still reported via `false` return).
+/// - `variant` may be null (reserved for GlobalCroston in 02-2).
+/// - `values` must point to a buffer of at least `n_series * series_len` doubles.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_forecast_panel(
+    values: *const c_double,
+    n_series: size_t,
+    series_len: size_t,
+    method: *const c_char,
+    horizon: size_t,
+    seasonal_period: size_t,
+    variant: *const c_char,
+    out_result: *mut PanelForecastResult,
+    out_error: *mut AnofoxError,
+) -> bool {
+    // Initialise error slot first
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    // Null-check mandatory pointers
+    if values.is_null() || method.is_null() || out_result.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        // Parse method string
+        let method_str = CStr::from_ptr(method).to_str().unwrap_or("");
+
+        // Parse optional variant (used by GlobalCroston in 02-2; ignored here)
+        let _variant_str: Option<&str> = if variant.is_null() {
+            None
+        } else {
+            CStr::from_ptr(variant).to_str().ok().filter(|s| !s.is_empty())
+        };
+
+        // Slice the flat matrix — Rust owns nothing, just a view
+        let flat = std::slice::from_raw_parts(values, n_series * series_len);
+
+        // Inner logic (testable separately)
+        forecast_panel_impl(flat, n_series, series_len, method_str, horizon, seasonal_period, None)
+    }));
+
+    match result {
+        Ok(Ok(preds)) => {
+            // Allocate flat output buffer and copy predictions
+            let total = n_series * horizon;
+            let buf = if total > 0 {
+                let raw = alloc_double_array(total);
+                if raw.is_null() {
+                    if !out_error.is_null() {
+                        (*out_error).set_error(
+                            ErrorCode::AllocationError,
+                            "Failed to allocate panel forecast buffer",
+                        );
+                    }
+                    return false;
+                }
+                for (s, series_preds) in preds.iter().enumerate() {
+                    for (h, &v) in series_preds.iter().enumerate() {
+                        *raw.add(s * horizon + h) = v;
+                    }
+                }
+                raw
+            } else {
+                std::ptr::null_mut()
+            };
+
+            // Populate result struct
+            (*out_result).forecasts = buf;
+            (*out_result).n_series = n_series;
+            (*out_result).n_horizon = horizon;
+
+            // Write null-padded model name
+            let name_bytes = b"GlobalETS";
+            let dest = &mut (*out_result).model_name;
+            for b in dest.iter_mut() {
+                *b = 0;
+            }
+            let copy_len = name_bytes.len().min(63);
+            for (i, &b) in name_bytes[..copy_len].iter().enumerate() {
+                dest[i] = b as c_char;
+            }
+
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                // Map PanelForecastError variant to ErrorCode
+                let code = match &e {
+                    PanelForecastError::InvalidModel(_) => ErrorCode::InvalidModel,
+                    PanelForecastError::Upstream(anofox_forecast::ForecastError::InsufficientData { .. }) => {
+                        ErrorCode::InsufficientData
+                    }
+                    _ => ErrorCode::ComputationError,
+                };
+                (*out_error).set_error(code, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in anofox_ts_forecast_panel");
+            }
+            false
+        }
+    }
+}
+
+/// Free a `PanelForecastResult` allocated by `anofox_ts_forecast_panel`.
+///
+/// Nulls the `forecasts` pointer after freeing to prevent double-free.
+///
+/// # Safety
+/// `result` must be null or a valid pointer to a `PanelForecastResult` whose
+/// `forecasts` field was set by `anofox_ts_forecast_panel`.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_free_panel_forecast_result(result: *mut PanelForecastResult) {
+    if result.is_null() {
+        return;
+    }
+    let r = &mut *result;
+    if !r.forecasts.is_null() {
+        anofox_free_double_array(r.forecasts);
+        r.forecasts = ptr::null_mut();
+    }
+}
+
+// ============================================================================
+// Panel FFI tests (Task 1)
+// ============================================================================
+
+#[cfg(test)]
+mod panel_ffi_tests {
+    use super::*;
+
+    /// Helper: call `forecast_panel_impl` with a flat matrix built from `series` rows.
+    fn flat_from_series(series: &[&[f64]]) -> Vec<f64> {
+        let n = series[0].len();
+        let mut flat = Vec::with_capacity(series.len() * n);
+        for s in series {
+            assert_eq!(s.len(), n, "all series must have the same length");
+            flat.extend_from_slice(s);
+        }
+        flat
+    }
+
+    /// Test 1 — happy path: 3-series equal-length panel, GlobalETS, horizon=4.
+    #[test]
+    fn test_happy_path_global_ets() {
+        let s1: Vec<f64> = (1..=12).map(|x| x as f64).collect();
+        let s2: Vec<f64> = (2..=13).map(|x| x as f64 * 1.5).collect();
+        let s3: Vec<f64> = (3..=14).map(|x| x as f64 * 0.8).collect();
+        let series: &[&[f64]] = &[&s1, &s2, &s3];
+        let flat = flat_from_series(series);
+
+        let result = forecast_panel_impl(&flat, 3, 12, "GlobalETS", 4, 0, None);
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
+        let preds = result.unwrap();
+        assert_eq!(preds.len(), 3, "expected 3 series forecasts");
+        for (i, series_preds) in preds.iter().enumerate() {
+            assert_eq!(series_preds.len(), 4, "expected horizon=4 for series {}", i);
+            for &v in series_preds {
+                assert!(v.is_finite(), "expected finite forecast, got NaN/Inf for series {}", i);
+            }
+        }
+    }
+
+    /// Test 2 — NaN imputation: series with interior gap is densified before fit.
+    #[test]
+    fn test_nan_imputation() {
+        let mut s1: Vec<f64> = (1..=12).map(|x| x as f64).collect();
+        s1[5] = f64::NAN; // interior gap
+        let s2: Vec<f64> = (2..=13).map(|x| x as f64 * 1.5).collect();
+        let s3: Vec<f64> = (3..=14).map(|x| x as f64 * 0.8).collect();
+        let series: &[&[f64]] = &[&s1, &s2, &s3];
+        let flat = flat_from_series(series);
+
+        let result = forecast_panel_impl(&flat, 3, 12, "GlobalETS", 4, 0, None);
+        assert!(result.is_ok(), "expected Ok after NaN imputation, got: {:?}", result.err());
+        let preds = result.unwrap();
+        assert_eq!(preds.len(), 3);
+        for series_preds in &preds {
+            assert_eq!(series_preds.len(), 4);
+            for &v in series_preds {
+                assert!(v.is_finite(), "expected no NaN after imputation");
+            }
+        }
+    }
+
+    /// Test 3 — unknown method returns InvalidModel error.
+    #[test]
+    fn test_unknown_method_returns_error() {
+        let s1: Vec<f64> = (1..=12).map(|x| x as f64).collect();
+        let s2: Vec<f64> = (2..=13).map(|x| x as f64 * 1.5).collect();
+        let s3: Vec<f64> = (3..=14).map(|x| x as f64 * 0.8).collect();
+        let series: &[&[f64]] = &[&s1, &s2, &s3];
+        let flat = flat_from_series(series);
+
+        let result = forecast_panel_impl(&flat, 3, 12, "Nope", 4, 0, None);
+        assert!(result.is_err(), "expected error for unknown method");
+        let err = result.unwrap_err();
+        match &err {
+            PanelForecastError::InvalidModel(msg) => {
+                assert!(msg.contains("Nope"), "error should mention the model name");
+            }
+            other => panic!("expected InvalidModel, got: {:?}", other),
+        }
+    }
+}
+
+// ============================================================================
 // Version
 // ============================================================================
 

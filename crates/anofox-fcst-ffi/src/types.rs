@@ -405,6 +405,36 @@ pub struct ForecastOptions {
     pub laplace_seasonal_batch_init: bool,
 }
 
+/// Panel forecast result — returned by `anofox_ts_forecast_panel`.
+///
+/// `forecasts` is a flat `[n_series * n_horizon]` array of `f64` in series-major
+/// order: `forecasts[s * n_horizon + h]` is the forecast for series `s` at
+/// horizon step `h` (0-based).  The buffer is allocated by Rust and must be
+/// freed exactly once via `anofox_free_panel_forecast_result`.
+#[repr(C)]
+pub struct PanelForecastResult {
+    /// Flat `[n_series * n_horizon]` forecast buffer; series-major order.
+    /// Allocated by Rust; freed by `anofox_free_panel_forecast_result`.
+    pub forecasts: *mut c_double,
+    /// Number of series in the panel.
+    pub n_series: size_t,
+    /// Number of horizon steps per series.
+    pub n_horizon: size_t,
+    /// Null-terminated model name (e.g. "GlobalETS").
+    pub model_name: [c_char; 64],
+}
+
+impl Default for PanelForecastResult {
+    fn default() -> Self {
+        Self {
+            forecasts: std::ptr::null_mut(),
+            n_series: 0,
+            n_horizon: 0,
+            model_name: [0; 64],
+        }
+    }
+}
+
 impl Default for ForecastOptions {
     fn default() -> Self {
         let mut model = [0 as c_char; 32];

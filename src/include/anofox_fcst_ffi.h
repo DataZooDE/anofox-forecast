@@ -1715,6 +1715,34 @@ typedef struct AnofoxResidualDiagnosticsResult {
 } AnofoxResidualDiagnosticsResult;
 
 /**
+ * Panel forecast result — returned by `anofox_ts_forecast_panel`.
+ *
+ * `forecasts` is a flat `[n_series * n_horizon]` array of `f64` in series-major
+ * order: `forecasts[s * n_horizon + h]` is the forecast for series `s` at
+ * horizon step `h` (0-based).  The buffer is allocated by Rust and must be
+ * freed exactly once via `anofox_free_panel_forecast_result`.
+ */
+typedef struct PanelForecastResult {
+    /**
+     * Flat `[n_series * n_horizon]` forecast buffer; series-major order.
+     * Allocated by Rust; freed by `anofox_free_panel_forecast_result`.
+     */
+    double *forecasts;
+    /**
+     * Number of series in the panel.
+     */
+    size_t n_series;
+    /**
+     * Number of horizon steps per series.
+     */
+    size_t n_horizon;
+    /**
+     * Null-terminated model name (e.g. "GlobalETS").
+     */
+    char model_name[64];
+} PanelForecastResult;
+
+/**
  * Nullable data array for DuckDB integration.
  *
  * The validity bitmask follows DuckDB's convention where bit i of validity[i/64]
@@ -3291,6 +3319,47 @@ bool anofox_ts_residual_diagnostics(const double *values,
                                     double alpha,
                                     struct AnofoxResidualDiagnosticsResult *out_result,
                                     struct AnofoxError *out_error);
+
+/**
+ * Forecast a panel of equal-length time series using a single cross-series global model.
+ *
+ * `values` is a flat packed matrix in series-major order:
+ * `values[s * series_len + t]` is the value of series `s` at time step `t`.
+ * `NaN` values in the flat matrix are treated as missing and will be imputed
+ * by `fill_nulls_interpolate` inside the Rust body before fitting.
+ *
+ * On success writes to `*out_result` and returns `true`.
+ * On failure writes to `*out_error` and returns `false`.
+ *
+ * The `forecasts` buffer in `*out_result` must be freed by calling
+ * `anofox_free_panel_forecast_result`.
+ *
+ * # Safety
+ * - `values`, `method`, and `out_result` must be non-null.
+ * - `out_error` may be null (errors are still reported via `false` return).
+ * - `variant` may be null (reserved for GlobalCroston in 02-2).
+ * - `values` must point to a buffer of at least `n_series * series_len` doubles.
+ */
+bool anofox_ts_forecast_panel(const double *values,
+                              size_t n_series,
+                              size_t series_len,
+                              const char *method,
+                              size_t horizon,
+                              size_t seasonal_period,
+                              const char *variant,
+                              struct PanelForecastResult *out_result,
+                              struct AnofoxError *out_error);
+
+/**
+ * Free a `PanelForecastResult` allocated by `anofox_ts_forecast_panel`.
+ *
+ * Nulls the `forecasts` pointer after freeing to prevent double-free.
+ *
+ * # Safety
+ * `result` must be null or a valid pointer to a `PanelForecastResult` whose
+ * `forecasts` field was set by `anofox_ts_forecast_panel`.
+ */
+void anofox_free_panel_forecast_result(struct PanelForecastResult *result);
 
 const char *anofox_fcst_version(void);
 

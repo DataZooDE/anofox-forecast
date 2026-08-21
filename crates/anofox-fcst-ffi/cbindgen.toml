@@ -16,6 +16,7 @@ include = [
     "TsStatsResult",
     "ForecastResult",
     "ForecastOptions",
+    "PanelForecastResult",
     "ChangepointResult",
     "FeaturesResult",
     "SeasonalityResult",
