@@ -93,6 +93,7 @@ struct TsForecastPanelNativeGlobalState : public GlobalTableFunctionState {
     vector<PanelOutputRow> results;
     bool processed = false;
     idx_t output_offset = 0;
+    string deferred_error_message;  // set in n_kept<3 branch; thrown after DROPPED rows are flushed
 
     std::atomic<bool> finalize_claimed{false};
     std::atomic<idx_t> threads_collecting{0};
@@ -564,25 +565,17 @@ static OperatorFinalizeResultType TsForecastPanelNativeFinalize(
             gstate.processed = true;
             // (do not return here — fall through to the output-batching block below)
         } else if (n_kept < 3) {
-            // Fewer than 3 usable series — emit any accumulated DROPPED rows first, then
-            // throw so the user gets a meaningful error rather than a silent empty result.
+            // Fewer than 3 usable series — we must still emit any accumulated DROPPED rows
+            // first, then raise an error.  Throwing here would discard them; instead record
+            // the message for a deferred throw once the output-batching block has flushed
+            // all DROPPED rows (checked just before returning FINISHED below).
             gstate.processed = true;
-            // We must NOT throw here while gstate.results still has queued DROPPED rows —
-            // the output-batching block below will emit them. Record the error for deferred throw.
-            // Since DuckDB Finalize cannot partially return and then throw, the cleanest approach
-            // is to emit DROPPED rows on this Finalize call and throw on the *next* call
-            // (after output_offset catches up). However, the simplest correct approach is:
-            // if DROPPED rows are queued, emit them now; otherwise throw immediately.
-            if (gstate.results.empty()) {
-                throw InvalidInputException(
-                    "ts_forecast_panel_by: panel has fewer than 3 usable series after alignment "
-                    "(need >= 3 for cross-series global learning). "
-                    "Check series lengths (minimum %zu valid observations required).",
-                    MIN_VALID_COUNT);
-            }
-            // DROPPED rows are queued — fall through to the output-batching block below.
-            // The error is deferred; callers will see DROPPED rows, then on the next Finalize
-            // call with no remaining rows the function returns FINISHED naturally.
+            gstate.deferred_error_message = StringUtil::Format(
+                "ts_forecast_panel_by: panel has fewer than 3 usable series after alignment "
+                "(need >= 3 for cross-series global learning). "
+                "Check series lengths (minimum %llu valid observations required).",
+                (unsigned long long)MIN_VALID_COUNT);
+            // Fall through to the output-batching block to emit any DROPPED rows first.
         } else {
         // ------------------------------------------------------------------
         // 3. Build flat matrix: double[n_kept * grid_len], row-major
@@ -694,6 +687,12 @@ static OperatorFinalizeResultType TsForecastPanelNativeFinalize(
 
     idx_t remaining = gstate.results.size() - gstate.output_offset;
     if (remaining == 0) {
+        // All rows (including any DROPPED sentinels) have been emitted.
+        // If n_kept<3 deferred an error, raise it now so the caller gets both
+        // the DROPPED diagnostics and a clear exception.
+        if (!gstate.deferred_error_message.empty()) {
+            throw InvalidInputException("%s", gstate.deferred_error_message);
+        }
         output.SetCardinality(0);
         return OperatorFinalizeResultType::FINISHED;
     }
