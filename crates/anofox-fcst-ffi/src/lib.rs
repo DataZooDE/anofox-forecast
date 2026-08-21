@@ -6830,8 +6830,10 @@ pub unsafe extern "C" fn anofox_ts_residual_diagnostics(
 // Panel Forecasting (Phase 2: GLOB-01..03)
 // ============================================================================
 
-// Imports for global panel models (GlobalETS only in plan 02-1; Theta/Croston added in 02-2)
+// Imports for global panel models (Phase 2: GLOB-01..03)
 use anofox_forecast::models::exponential::{GlobalAutoETS, ModelPool};
+use anofox_forecast::models::theta::GlobalTheta;
+use anofox_forecast::models::intermittent::GlobalCroston;
 use anofox_fcst_core::fill_nulls_interpolate;
 
 /// Error type used by panel FFI impl — wraps upstream ForecastError for uniformity.
@@ -6864,10 +6866,12 @@ impl From<anofox_forecast::ForecastError> for PanelForecastError {
 /// - `flat`: flat packed matrix `[n_series * series_len]`; NaN marks gaps.
 /// - `n_series`: number of series in the panel.
 /// - `series_len`: number of time steps per series (all equal after alignment).
-/// - `method`: model method string ("GlobalETS"; "GlobalTheta"/"GlobalCroston" added in 02-2).
+/// - `method`: model method string: "GlobalETS", "GlobalTheta", or "GlobalCroston".
 /// - `horizon`: forecast horizon.
-/// - `seasonal_period`: seasonal period (0 = non-seasonal Reduced pool for GlobalETS).
-/// - `model_pool_str`: optional model pool override ("Complete" or empty = Reduced).
+/// - `seasonal_period`: seasonal period (0 = non-seasonal Reduced pool for GlobalETS;
+///    ignored for GlobalTheta and GlobalCroston).
+/// - `model_pool_str`: optional model pool override for GlobalETS ("Complete" or None = Reduced).
+/// - `variant_str`: optional variant override for GlobalCroston ("SBA" or None = Classic).
 ///
 /// # Returns
 /// `Vec<Vec<f64>>` of shape `[n_series][horizon]`, all finite values.
@@ -6879,6 +6883,7 @@ pub(crate) fn forecast_panel_impl(
     horizon: usize,
     seasonal_period: usize,
     model_pool_str: Option<&str>,
+    variant_str: Option<&str>,
 ) -> std::result::Result<Vec<Vec<f64>>, PanelForecastError> {
     // Chunk flat array into per-series slices, convert NaN to None, then
     // impute with linear interpolation (fill_nulls_interpolate handles
@@ -6908,8 +6913,28 @@ pub(crate) fn forecast_panel_impl(
             model.fit(&panel)?;
             Ok(model.predict(horizon))
         }
+        "GlobalTheta" => {
+            // GlobalTheta requires no seasonal period — pooled Theta fits a shared
+            // smoothing parameter across all series, with per-series level and slope.
+            let mut model = GlobalTheta::new();
+            model.fit(&panel)?;
+            Ok(model.predict(horizon))
+        }
+        "GlobalCroston" => {
+            // Select Croston variant from the params MAP key `croston_variant`.
+            // "SBA" → Syntetos-Boylan Approximation (multiplies forecast by 1 - α/2).
+            // Default (None or any other string) → Classic Croston.
+            // Use the named constructors (new/sba) rather than with_variant, since
+            // global_croston::CrostonVariant is not re-exported at the module level.
+            let mut model = match variant_str {
+                Some("SBA") => GlobalCroston::sba(),
+                _ => GlobalCroston::new(),
+            };
+            model.fit(&panel)?;
+            Ok(model.predict(horizon))
+        }
         other => Err(PanelForecastError::InvalidModel(format!(
-            "Unknown panel method: {}. Supported: GlobalETS (GlobalTheta/GlobalCroston in 02-2)",
+            "Unknown panel method: {}. Supported: GlobalETS, GlobalTheta, GlobalCroston",
             other
         ))),
     }
@@ -6962,8 +6987,8 @@ pub unsafe extern "C" fn anofox_ts_forecast_panel(
         // Parse method string
         let method_str = CStr::from_ptr(method).to_str().unwrap_or("");
 
-        // Parse optional variant (used by GlobalCroston in 02-2; ignored here)
-        let _variant_str: Option<&str> = if variant.is_null() {
+        // Parse optional variant (used by GlobalCroston — "SBA" or None/empty = Classic)
+        let variant_str: Option<&str> = if variant.is_null() {
             None
         } else {
             CStr::from_ptr(variant).to_str().ok().filter(|s| !s.is_empty())
@@ -6973,11 +6998,12 @@ pub unsafe extern "C" fn anofox_ts_forecast_panel(
         let flat = std::slice::from_raw_parts(values, n_series * series_len);
 
         // Inner logic (testable separately)
-        forecast_panel_impl(flat, n_series, series_len, method_str, horizon, seasonal_period, None)
+        forecast_panel_impl(flat, n_series, series_len, method_str, horizon, seasonal_period, None, variant_str)
+            .map(|preds| (preds, method_str.to_owned()))
     }));
 
     match result {
-        Ok(Ok(preds)) => {
+        Ok(Ok((preds, method_name))) => {
             // Allocate flat output buffer and copy predictions
             let total = n_series * horizon;
             let buf = if total > 0 {
@@ -7006,8 +7032,9 @@ pub unsafe extern "C" fn anofox_ts_forecast_panel(
             (*out_result).n_series = n_series;
             (*out_result).n_horizon = horizon;
 
-            // Write null-padded model name
-            let name_bytes = b"GlobalETS";
+            // Write null-padded model name from the actual method string
+            // (not hardcoded) so the emitted model_name column reflects the method used.
+            let name_bytes = method_name.as_bytes();
             let dest = &mut (*out_result).model_name;
             for b in dest.iter_mut() {
                 *b = 0;
@@ -7089,7 +7116,7 @@ mod panel_ffi_tests {
         let series: &[&[f64]] = &[&s1, &s2, &s3];
         let flat = flat_from_series(series);
 
-        let result = forecast_panel_impl(&flat, 3, 12, "GlobalETS", 4, 0, None);
+        let result = forecast_panel_impl(&flat, 3, 12, "GlobalETS", 4, 0, None, None);
         assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
         let preds = result.unwrap();
         assert_eq!(preds.len(), 3, "expected 3 series forecasts");
@@ -7111,7 +7138,7 @@ mod panel_ffi_tests {
         let series: &[&[f64]] = &[&s1, &s2, &s3];
         let flat = flat_from_series(series);
 
-        let result = forecast_panel_impl(&flat, 3, 12, "GlobalETS", 4, 0, None);
+        let result = forecast_panel_impl(&flat, 3, 12, "GlobalETS", 4, 0, None, None);
         assert!(result.is_ok(), "expected Ok after NaN imputation, got: {:?}", result.err());
         let preds = result.unwrap();
         assert_eq!(preds.len(), 3);
@@ -7132,7 +7159,7 @@ mod panel_ffi_tests {
         let series: &[&[f64]] = &[&s1, &s2, &s3];
         let flat = flat_from_series(series);
 
-        let result = forecast_panel_impl(&flat, 3, 12, "Nope", 4, 0, None);
+        let result = forecast_panel_impl(&flat, 3, 12, "Nope", 4, 0, None, None);
         assert!(result.is_err(), "expected error for unknown method");
         let err = result.unwrap_err();
         match &err {
@@ -7140,6 +7167,100 @@ mod panel_ffi_tests {
                 assert!(msg.contains("Nope"), "error should mention the model name");
             }
             other => panic!("expected InvalidModel, got: {:?}", other),
+        }
+    }
+
+    /// Test 4 — GlobalTheta: 3-series equal-length panel, horizon=4, all finite.
+    #[test]
+    fn test_global_theta_happy_path() {
+        let s1: Vec<f64> = (1..=12).map(|x| x as f64).collect();
+        let s2: Vec<f64> = (2..=13).map(|x| x as f64 * 1.5).collect();
+        let s3: Vec<f64> = (3..=14).map(|x| x as f64 * 0.8).collect();
+        let series: &[&[f64]] = &[&s1, &s2, &s3];
+        let flat = flat_from_series(series);
+
+        let result = forecast_panel_impl(&flat, 3, 12, "GlobalTheta", 4, 0, None, None);
+        assert!(result.is_ok(), "GlobalTheta expected Ok, got: {:?}", result.err());
+        let preds = result.unwrap();
+        assert_eq!(preds.len(), 3, "expected 3 series forecasts");
+        for (i, series_preds) in preds.iter().enumerate() {
+            assert_eq!(series_preds.len(), 4, "expected horizon=4 for series {}", i);
+            for &v in series_preds {
+                assert!(v.is_finite(), "expected finite Theta forecast for series {}", i);
+            }
+        }
+    }
+
+    /// Test 5 — GlobalCroston Classic: 3-series intermittent panel, horizon=4.
+    /// Values should be non-negative and flat per series (Croston is constant forecast).
+    #[test]
+    fn test_global_croston_classic() {
+        // Intermittent panel: mostly zeros, ≥2 demands in each series
+        let s1: Vec<f64> = vec![0.0, 3.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 4.0];
+        let s2: Vec<f64> = vec![1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 3.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let s3: Vec<f64> = vec![0.0, 0.0, 5.0, 0.0, 0.0, 2.0, 0.0, 0.0, 4.0, 0.0, 0.0, 3.0];
+        let series: &[&[f64]] = &[&s1, &s2, &s3];
+        let flat = flat_from_series(series);
+
+        let result = forecast_panel_impl(&flat, 3, 12, "GlobalCroston", 4, 0, None, None);
+        assert!(result.is_ok(), "GlobalCroston Classic expected Ok, got: {:?}", result.err());
+        let preds = result.unwrap();
+        assert_eq!(preds.len(), 3, "expected 3 series forecasts");
+        for (i, series_preds) in preds.iter().enumerate() {
+            assert_eq!(series_preds.len(), 4, "expected horizon=4 for series {}", i);
+            for &v in series_preds {
+                assert!(v.is_finite(), "expected finite Croston Classic forecast for series {}", i);
+                assert!(v >= 0.0, "Croston forecasts must be non-negative, got {} for series {}", v, i);
+            }
+            // Croston is a flat forecast: all horizon steps should be equal
+            let first = series_preds[0];
+            for &v in &series_preds[1..] {
+                assert!(
+                    (v - first).abs() < 1e-10,
+                    "Croston Classic should be flat (constant) per series {}: {} != {}",
+                    i, v, first
+                );
+            }
+        }
+    }
+
+    /// Test 6 — GlobalCroston SBA: same panel, SBA forecast ≤ Classic (bias correction).
+    #[test]
+    fn test_global_croston_sba_le_classic() {
+        let s1: Vec<f64> = vec![0.0, 3.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 4.0];
+        let s2: Vec<f64> = vec![1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 3.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let s3: Vec<f64> = vec![0.0, 0.0, 5.0, 0.0, 0.0, 2.0, 0.0, 0.0, 4.0, 0.0, 0.0, 3.0];
+        let series: &[&[f64]] = &[&s1, &s2, &s3];
+        let flat = flat_from_series(series);
+
+        let classic_result = forecast_panel_impl(&flat, 3, 12, "GlobalCroston", 4, 0, None, None);
+        let sba_result = forecast_panel_impl(&flat, 3, 12, "GlobalCroston", 4, 0, None, Some("SBA"));
+
+        assert!(classic_result.is_ok(), "Classic expected Ok, got: {:?}", classic_result.err());
+        assert!(sba_result.is_ok(), "SBA expected Ok, got: {:?}", sba_result.err());
+
+        let classic_preds = classic_result.unwrap();
+        let sba_preds = sba_result.unwrap();
+        assert_eq!(classic_preds.len(), 3);
+        assert_eq!(sba_preds.len(), 3);
+
+        for i in 0..3 {
+            let c = classic_preds[i][0]; // flat forecast, just check first step
+            let s = sba_preds[i][0];
+            assert!(
+                s.is_finite(),
+                "SBA forecast must be finite for series {}", i
+            );
+            assert!(
+                s >= 0.0,
+                "SBA forecasts must be non-negative, got {} for series {}", s, i
+            );
+            // SBA multiplies by (1 - alpha/2) so SBA ≤ Classic
+            assert!(
+                s <= c + 1e-10,
+                "SBA forecast {} should be ≤ Classic {} for series {}",
+                s, c, i
+            );
         }
     }
 }
