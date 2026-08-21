@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 current_phase: 03
 current_phase_name: Classical & Multivariate Models
 status: executing
-stopped_at: Completed 03-1-PLAN.md (GARCH + Kalman via ts_forecast_by)
-last_updated: "2026-08-21T22:11:50.026Z"
+stopped_at: Completed 03-2-PLAN.md (VAR multivariate ts_forecast_var_by, CLAS-03)
+last_updated: "2026-08-21T22:28:42.655Z"
 last_activity: 2026-08-21
 last_activity_desc: Phase 03 execution started
-state_head: 1b75e64856109592fef188598fba69ff73787b9f
+state_head: 8bf457744466107eee0cd2236cd81ba3be47886f
 progress:
   total_phases: 3
   completed_phases: 1
   total_plans: 9
-  completed_plans: 6
+  completed_plans: 8
   percent: 33
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-08-21)
 ## Current Position
 
 Phase: 03 (Classical & Multivariate Models) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-08-21 — Phase 03 execution started
 
@@ -66,6 +66,7 @@ Progress: [███░░░░░░░] 33%
 | Phase 02 P2 | 17 min | 3 tasks | 7 files |
 | Phase 02-global-panel-models P3 | 25 | 2 tasks | 10 files |
 | Phase 03 P01 | 38 | 3 tasks | 6 files |
+| Phase 03-classical-multivariate-models P02 | 11 min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -92,6 +93,11 @@ Recent decisions affecting current work:
 - [Phase 02]: statsforecast reference: GlobalETS->AutoETS, GlobalTheta->AutoTheta, GlobalCroston->CrostonOptimized (pinned v1.4.0 has no Global* variants)
 - [Phase 03]: GARCH output is sqrt(forecast_variance(h)) — volatility not variance; forecast_variance gives analytical conditional variance vs predict() which gives simulated innovations
 - [Phase 03]: ts_forecast_by routes through _ts_forecast_scalar (scalar_functions/), not _ts_forecast_native (table_functions/); both files have independent ValidateParams
+- [Phase 03]: Named param 'p' (not 'order') for VAR lag order — ORDER is a SQL reserved keyword causing parser error at macro registration time
+- [Phase 03]: date_col passed as explicit 6th VARCHAR arg to _ts_forecast_var_native; Bind resolves by name (not identifier substitution in macro body)
+- [Phase 03]: SELECT * in ts_forecast_var_by macro outer query — avoids referencing date column by its runtime string value in the static template
+- [Phase 03]: VARForecastResult variable-major flat buffer: variable names stay in C++ BindData.value_col_names and are emitted at Finalize time, never crossing the FFI boundary
+- [Phase 03]: v1 is single-panel VAR (no group_col): one VAR(p) fit for the entire input table; per-panel VAR deferred to v2
 
 ### Pending Todos
 
@@ -118,6 +124,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 **Resume file:** None
 
-Last session: 2026-08-21T22:11:49.999Z
-Stopped at: Completed 03-1-PLAN.md (GARCH + Kalman via ts_forecast_by)
+Last session: 2026-08-21T22:28:42.629Z
+Stopped at: Completed 03-2-PLAN.md (VAR multivariate ts_forecast_var_by, CLAS-03)
 Resume: /gsd-autonomous --from 2  (Phase 2 needs a panel-aware SQL surface design — discuss first). Note: set workflow.use_worktrees=false to avoid worktree split-brain.

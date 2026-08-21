@@ -37,7 +37,7 @@ Each requirement is "Complete" only when ALL of the following hold:
 
 - [x] **CLAS-01**: User can forecast conditional volatility with GARCH (`ts_forecast_by` method `'GARCH'`).
 - [x] **CLAS-02**: User can forecast with a Kalman-filter model (`ts_forecast_by` method `'Kalman'`).
-- [ ] **CLAS-03**: User can produce multivariate forecasts with VAR via a dedicated multivariate function (`ts_forecast_var` / `_by`), accepting multiple value columns and returning per-variable forecasts.
+- [x] **CLAS-03**: User can produce multivariate forecasts with VAR via a dedicated multivariate function (`ts_forecast_var` / `_by`), accepting multiple value columns and returning per-variable forecasts.
 
 ## v2 Requirements
 
@@ -96,7 +96,7 @@ Deferred to a future milestone. Tracked, not in this roadmap.
 | GLOB-03 | Phase 2 | Complete |
 | CLAS-01 | Phase 3 | Complete |
 | CLAS-02 | Phase 3 | Complete |
-| CLAS-03 | Phase 3 | Pending |
+| CLAS-03 | Phase 3 | Complete |
 
 **Coverage:**
 
