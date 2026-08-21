@@ -69,6 +69,10 @@ None yet.
 - Phase 2: Panel-aware SQL surface for GlobalETS/Theta/Croston needs design decision before coding starts — flag in Phase 2 plan
 - Phase 3: VAR multivariate I/O shape (N input columns → N forecast columns) is novel; dedicated function design required
 
+### Execution Notes (Phase 1)
+
+- **statsmodels cross-check must use the benchmark uv venv, NOT system python3.** `statsmodels 0.14.5` + `scipy 1.15.3` live in `benchmark/.venv` (transitive via tsfresh); system `python3` lacks them. Run all `benchmark/diagnostics/*.py` cross-check scripts with `benchmark/.venv/bin/python` (or `cd benchmark && uv run python ...`). Plans' verify commands that say `python3 benchmark/diagnostics/...` should be adapted to `benchmark/.venv/bin/python benchmark/diagnostics/...`.
+
 ## Deferred Items
 
 Items acknowledged and deferred at milestone close, most recent first:
