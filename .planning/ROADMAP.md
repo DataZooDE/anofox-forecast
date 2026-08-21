@@ -11,7 +11,7 @@ a runnable example, docs, and a numerical reference cross-check before it counts
 
 ## Phases
 
-- [ ] **Phase 1: Statistical Diagnostics** - Expose stationarity tests (ADF, KPSS, combined verdict) and residual diagnostics (Ljung-Box, Durbin-Watson, Jarque-Bera, combined adequacy report) as scalar functions + `ts_*_by` macros. (Demand classification / INTER-01 deferred — user has a more advanced approach to be specified separately.)
+- [x] **Phase 1: Statistical Diagnostics** - Expose stationarity tests (ADF, KPSS, combined verdict) and residual diagnostics (Ljung-Box, Durbin-Watson, Jarque-Bera, combined adequacy report) as scalar functions + `ts_*_by` macros. (Demand classification / INTER-01 deferred — user has a more advanced approach to be specified separately.)
 - [ ] **Phase 2: Global / Panel Models** - Expose GlobalETS, GlobalTheta, and GlobalCroston via a panel-aware SQL surface that cross-learns across series
 - [ ] **Phase 3: Classical & Multivariate Models** - Expose GARCH and Kalman as new `ts_forecast_by` methods and VAR as a dedicated multivariate function
 
@@ -34,9 +34,9 @@ a runnable example, docs, and a numerical reference cross-check before it counts
 **Deferred from this phase**: INTER-01 (intermittent-demand classification) — user has a more advanced approach than standard ADI/CV²; to be specified and scheduled separately.
 **Plans**: 0/3 plans executed
 
-- [ ] 01-1-PLAN.md — ADF tracer: ts_adf / ts_adf_by end-to-end through all five layers + scaffolding (STAT-01)
-- [ ] 01-2-PLAN.md — Stationarity completion: ts_kpss + ts_stationarity four-way verdict (STAT-02, STAT-03)
-- [ ] 01-3-PLAN.md — Residual diagnostics: ts_ljung_box, ts_durbin_watson, ts_jarque_bera, ts_residual_diagnostics (RESID-01..04)
+- [x] 01-1-PLAN.md — ADF tracer: ts_adf / ts_adf_by end-to-end through all five layers + scaffolding (STAT-01)
+- [x] 01-2-PLAN.md — Stationarity completion: ts_kpss + ts_stationarity four-way verdict (STAT-02, STAT-03)
+- [x] 01-3-PLAN.md — Residual diagnostics: ts_ljung_box, ts_durbin_watson, ts_jarque_bera, ts_residual_diagnostics (RESID-01..04)
 
 ### Phase 2: Global / Panel Models
 
