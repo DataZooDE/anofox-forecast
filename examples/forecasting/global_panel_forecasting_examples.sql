@@ -160,5 +160,166 @@ GROUP BY uid, model_name
 ORDER BY uid;
 
 -- ============================================================================
--- [02-2] GlobalTheta + GlobalCroston sections appended here
+-- SECTION 4: GlobalTheta — pooled Theta, no seasonal_period required
 -- ============================================================================
+-- GlobalTheta fits a shared smoothing parameter alpha across all series using
+-- the Theta Method (theta=2.0 default). No seasonal period is needed — Theta
+-- fits a linear trend + exponential smoothing per series.
+-- Best for panels of trended series where minimal configuration is desired.
+
+.print ''
+.print '>>> SECTION 4: GlobalTheta (no seasonal_period required)'
+.print '--------------------------------------------------------------------------'
+
+CREATE OR REPLACE TABLE panel_sales AS
+    SELECT 'Series_A' AS product_id,
+           DATE '2024-01-01' + INTERVAL (i) DAY AS ds,
+           100.0 + i * 0.6 + 5.0 * SIN(2 * PI() * i / 7.0) AS y
+    FROM generate_series(0, 29) t(i)
+    UNION ALL
+    SELECT 'Series_B',
+           DATE '2024-01-01' + INTERVAL (i) DAY,
+           80.0 + i * 0.4 + 4.0 * COS(2 * PI() * i / 7.0)
+    FROM generate_series(0, 27) t(i)
+    UNION ALL
+    SELECT 'Series_C',
+           DATE '2024-01-01' + INTERVAL (i) DAY,
+           60.0 + i * 0.8 + 3.0 * SIN(2 * PI() * i / 7.0 + 1.0)
+    FROM generate_series(0, 24) t(i);
+
+.print 'GlobalTheta panel forecast (horizon=14, frequency=1d):'
+SELECT product_id, forecast_step, ds, ROUND(yhat, 2) AS yhat, model_name
+FROM ts_forecast_panel_by(
+    'panel_sales',
+    product_id,
+    ds,
+    y,
+    'GlobalTheta',
+    14,
+    '1d'
+)
+ORDER BY product_id, forecast_step;
+
+.print ''
+.print 'Forecast count check (expect 14 rows per series, 42 total):'
+SELECT product_id, count(*) AS n_forecasts
+FROM ts_forecast_panel_by(
+    'panel_sales', product_id, ds, y, 'GlobalTheta', 14, '1d'
+)
+GROUP BY product_id
+ORDER BY product_id;
+
+-- ============================================================================
+-- SECTION 5: GlobalCroston — intermittent demand panel (Classic + SBA variants)
+-- ============================================================================
+-- GlobalCroston fits shared alpha across all intermittent series. The forecast
+-- is a FLAT constant per series (demand rate / inter-demand interval).
+-- croston_variant: 'Classic' (default) or 'SBA' (Syntetos-Boylan bias correction).
+-- Best for spare-parts or irregular-demand panels; output is always non-negative.
+
+.print ''
+.print '>>> SECTION 5: GlobalCroston — intermittent demand panel (Classic + SBA)'
+.print '--------------------------------------------------------------------------'
+
+-- Intermittent panel: mostly zeros with occasional demand spikes
+CREATE OR REPLACE TABLE panel_intermittent AS
+    SELECT 'Item_A' AS item_id,
+           DATE '2024-01-01' + INTERVAL (i) DAY AS ds,
+           CASE WHEN i % 4 = 0 THEN 3.0 WHEN i % 7 = 0 THEN 5.0 ELSE 0.0 END AS qty
+    FROM generate_series(0, 29) t(i)
+    UNION ALL
+    SELECT 'Item_B',
+           DATE '2024-01-01' + INTERVAL (i) DAY,
+           CASE WHEN i % 5 = 0 THEN 2.0 WHEN i % 9 = 0 THEN 4.0 ELSE 0.0 END
+    FROM generate_series(0, 27) t(i)
+    UNION ALL
+    SELECT 'Item_C',
+           DATE '2024-01-01' + INTERVAL (i) DAY,
+           CASE WHEN i % 3 = 0 THEN 1.0 WHEN i % 11 = 0 THEN 6.0 ELSE 0.0 END
+    FROM generate_series(0, 24) t(i);
+
+.print 'Panel demand statistics:'
+SELECT item_id,
+       count(*) AS n_obs,
+       sum(qty) AS total_demand,
+       count(CASE WHEN qty > 0 THEN 1 END) AS demand_occurrences
+FROM panel_intermittent
+GROUP BY item_id
+ORDER BY item_id;
+
+.print ''
+.print 'GlobalCroston Classic forecast (horizon=6, frequency=1d):'
+CREATE OR REPLACE TABLE croston_classic AS
+SELECT item_id, forecast_step, ds, ROUND(yhat, 4) AS yhat, model_name
+FROM ts_forecast_panel_by(
+    'panel_intermittent',
+    item_id,
+    ds,
+    qty,
+    'GlobalCroston',
+    6,
+    '1d'
+)
+ORDER BY item_id, forecast_step;
+
+SELECT * FROM croston_classic;
+
+.print ''
+.print 'GlobalCroston SBA forecast (croston_variant := SBA):'
+CREATE OR REPLACE TABLE croston_sba AS
+SELECT item_id, forecast_step, ds, ROUND(yhat, 4) AS yhat, model_name
+FROM ts_forecast_panel_by(
+    'panel_intermittent',
+    item_id,
+    ds,
+    qty,
+    'GlobalCroston',
+    6,
+    '1d',
+    MAP {'croston_variant': 'SBA'}
+)
+ORDER BY item_id, forecast_step;
+
+SELECT * FROM croston_sba;
+
+.print ''
+.print 'Croston flatness check (each series should have identical yhat across steps):'
+SELECT item_id,
+       model_name,
+       min(ROUND(yhat, 6)) AS min_yhat,
+       max(ROUND(yhat, 6)) AS max_yhat,
+       CASE WHEN min(yhat) = max(yhat) THEN 'FLAT' ELSE 'NOT_FLAT' END AS flat_check
+FROM croston_classic
+GROUP BY item_id, model_name
+ORDER BY item_id;
+
+.print ''
+.print 'SBA <= Classic check (SBA applies downward bias correction):'
+SELECT c.item_id,
+       ROUND(c.yhat, 4) AS classic_yhat,
+       ROUND(s.yhat, 4) AS sba_yhat,
+       CASE WHEN s.yhat <= c.yhat + 0.0001 THEN 'SBA_LE_CLASSIC' ELSE 'FAIL' END AS check
+FROM croston_classic c
+JOIN croston_sba s ON c.item_id = s.item_id AND c.forecast_step = s.forecast_step
+ORDER BY c.item_id, c.forecast_step
+LIMIT 9;
+
+-- ============================================================================
+-- SECTION 6: Method comparison — GlobalETS vs GlobalTheta on the same panel
+-- ============================================================================
+-- Shows that ts_forecast_panel_by is method-swappable: same source table,
+-- same columns, different method string.
+
+.print ''
+.print '>>> SECTION 6: Method comparison — GlobalETS vs GlobalTheta'
+.print '--------------------------------------------------------------------------'
+
+SELECT 'GlobalETS' AS method, product_id, forecast_step, ROUND(yhat, 2) AS yhat
+FROM ts_forecast_panel_by('panel_sales', product_id, ds, y, 'GlobalETS', 7, '1d')
+UNION ALL
+SELECT 'GlobalTheta', product_id, forecast_step, ROUND(yhat, 2)
+FROM ts_forecast_panel_by('panel_sales', product_id, ds, y, 'GlobalTheta', 7, '1d')
+ORDER BY product_id, method, forecast_step;
+
+.print ''
+.print 'All sections complete — GLOB-02 (GlobalTheta) and GLOB-03 (GlobalCroston) verified.'
