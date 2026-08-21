@@ -2122,6 +2122,26 @@ SELECT * FROM _ts_quantile_loss_native(source, date_col, actual_col, forecast_co
     "SELECT * FROM ts_quantile_loss_by('results', product_id, date, actual, forecast, 0.9)",
     "metrics"},
 
+    // ================================================================================
+    // Diagnostic macros (Phase 1: STAT-01 ADF — plans 01-2/01-3 extend this section)
+    // ================================================================================
+
+    // ts_adf_by: ADF stationarity test per group (STAT-01)
+    // C++ API: ts_adf_by(source, group_col, date_col, value_col [, max_lags:=-1])
+    // Returns: TABLE(group_col, adf STRUCT(statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct))
+    {"ts_adf_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{"max_lags", "-1"}, {nullptr, nullptr}},
+R"(
+SELECT group_col, ts_adf(LIST(value_col::DOUBLE ORDER BY date_col), max_lags::INTEGER) AS adf
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)",
+    "ADF stationarity test per group. Returns STRUCT(statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct) per group. "
+    "Uses constant-only ('c') regression and AIC lag selection. "
+    "Pass max_lags:=N to override automatic lag selection.",
+    "SELECT group_col, (adf).statistic, (adf).p_value FROM ts_adf_by('sales', product_id, ds, y)",
+    "diagnostics"},
+
     // Sentinel
     {nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr, nullptr, nullptr, nullptr}
 };

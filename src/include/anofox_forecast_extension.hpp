@@ -113,6 +113,9 @@ void RegisterTsConformalPredictPerStepFunction(ExtensionLoader &loader);
 void RegisterTsBootstrapIntervalsFunction(ExtensionLoader &loader);
 void RegisterTsBootstrapQuantilesFunction(ExtensionLoader &loader);
 
+// Statistical diagnostic tests (Phase 1: STAT-01..03, RESID-01..04)
+void RegisterTsAdfFunction(ExtensionLoader &loader);
+
 // Table macros
 void RegisterTsTableMacros(ExtensionLoader &loader);
 

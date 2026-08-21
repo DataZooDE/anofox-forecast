@@ -1670,3 +1670,58 @@ pub struct ConformalEvaluationFFI {
     /// Number of observations evaluated
     pub n_observations: size_t,
 }
+
+// ============================================================================
+// Stationarity test result types (Phase 1: STAT-01 ADF — ts_adf / ts_adf_by)
+// ============================================================================
+
+/// C-compatible result of an ADF stationarity test.
+///
+/// Field order is fixed and must match the STRUCT fields declared in
+/// `src/scalar_functions/diagnostics.cpp` (RegisterTsAdfFunction):
+///   statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct
+#[repr(C)]
+pub struct AnofoxStationarityResult {
+    /// ADF t-statistic (negative; more negative → stronger evidence of stationarity)
+    pub statistic: c_double,
+    /// Approximate p-value (MacKinnon 9-point lookup table)
+    pub p_value: c_double,
+    /// Number of lags used (AIC-selected or override)
+    pub lags: size_t,
+    /// `true` if series is stationary at the 5% level (`statistic < cv_5pct`)
+    pub is_stationary: bool,
+    /// Critical value at 1% significance (constant regression: -3.43)
+    pub cv_1pct: c_double,
+    /// Critical value at 5% significance (constant regression: -2.86)
+    pub cv_5pct: c_double,
+    /// Critical value at 10% significance (constant regression: -2.57)
+    pub cv_10pct: c_double,
+}
+
+impl Default for AnofoxStationarityResult {
+    fn default() -> Self {
+        Self {
+            statistic: f64::NAN,
+            p_value: f64::NAN,
+            lags: 0,
+            is_stationary: false,
+            cv_1pct: f64::NAN,
+            cv_5pct: f64::NAN,
+            cv_10pct: f64::NAN,
+        }
+    }
+}
+
+impl From<anofox_fcst_core::StationarityOut> for AnofoxStationarityResult {
+    fn from(r: anofox_fcst_core::StationarityOut) -> Self {
+        Self {
+            statistic: r.statistic,
+            p_value: r.p_value,
+            lags: r.lags,
+            is_stationary: r.is_stationary,
+            cv_1pct: r.cv_1pct,
+            cv_5pct: r.cv_5pct,
+            cv_10pct: r.cv_10pct,
+        }
+    }
+}

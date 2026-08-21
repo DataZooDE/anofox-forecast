@@ -1589,6 +1589,44 @@ typedef struct ConformalPerStepResultFFI {
 } ConformalPerStepResultFFI;
 
 /**
+ * C-compatible result of an ADF stationarity test.
+ *
+ * Field order is fixed and must match the STRUCT fields declared in
+ * `src/scalar_functions/diagnostics.cpp` (RegisterTsAdfFunction):
+ *   statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct
+ */
+typedef struct AnofoxStationarityResult {
+    /**
+     * ADF t-statistic (negative; more negative → stronger evidence of stationarity)
+     */
+    double statistic;
+    /**
+     * Approximate p-value (MacKinnon 9-point lookup table)
+     */
+    double p_value;
+    /**
+     * Number of lags used (AIC-selected or override)
+     */
+    size_t lags;
+    /**
+     * `true` if series is stationary at the 5% level (`statistic < cv_5pct`)
+     */
+    bool is_stationary;
+    /**
+     * Critical value at 1% significance (constant regression: -3.43)
+     */
+    double cv_1pct;
+    /**
+     * Critical value at 5% significance (constant regression: -2.86)
+     */
+    double cv_5pct;
+    /**
+     * Critical value at 10% significance (constant regression: -2.57)
+     */
+    double cv_10pct;
+} AnofoxStationarityResult;
+
+/**
  * Nullable data array for DuckDB integration.
  *
  * The validity bitmask follows DuckDB's convention where bit i of validity[i/64]
@@ -3054,6 +3092,37 @@ void anofox_free_calibration_profile(struct CalibrationProfileFFI *result);
  * The result pointer must be valid or null.
  */
 void anofox_free_prediction_intervals(struct PredictionIntervalsFFI *result);
+
+/**
+ * Run the Augmented Dickey-Fuller (ADF) unit-root test.
+ *
+ * # Arguments
+ *
+ * * `values`     — Pointer to a contiguous array of `f64` values (the time series).
+ * * `validity`   — DuckDB validity bitmask (`NULL` means all valid). Bit i of
+ *                  `validity[i/64]` is 1 when element i is non-NULL.
+ *                  NULL entries become `NaN` in the series passed to the crate.
+ * * `length`     — Number of elements in `values`.
+ * * `max_lags`   — Maximum lag count for AIC selection. Pass `-1` for automatic
+ *                  selection (`floor((n-1)^(1/3))`). Clamped to `[0, n/2-1]` by the crate.
+ * * `out_result` — Pointer to caller-allocated `AnofoxStationarityResult`.
+ *                  Initialised to `Default` before the computation so that
+ *                  partial results are never exposed on error.
+ * * `out_error`  — Pointer to caller-allocated `AnofoxError`. Set on failure.
+ *
+ * Returns `true` on success, `false` on error (check `out_error`).
+ *
+ * # Safety
+ *
+ * `values` and `out_result` must be non-null. `validity` may be null (meaning all valid).
+ * `length` must equal the number of valid `f64` elements at `values`.
+ */
+bool anofox_ts_adf(const double *values,
+                   const uint64_t *validity,
+                   size_t length,
+                   int max_lags,
+                   struct AnofoxStationarityResult *out_result,
+                   struct AnofoxError *out_error);
 
 const char *anofox_fcst_version(void);
 

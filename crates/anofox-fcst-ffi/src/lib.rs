@@ -6457,6 +6457,86 @@ pub unsafe extern "C" fn anofox_free_prediction_intervals(
 }
 
 // ============================================================================
+// Stationarity / Diagnostic Functions (Phase 1: STAT-01 ADF)
+// ============================================================================
+
+/// Run the Augmented Dickey-Fuller (ADF) unit-root test.
+///
+/// # Arguments
+///
+/// * `values`     — Pointer to a contiguous array of `f64` values (the time series).
+/// * `validity`   — DuckDB validity bitmask (`NULL` means all valid). Bit i of
+///                  `validity[i/64]` is 1 when element i is non-NULL.
+///                  NULL entries become `NaN` in the series passed to the crate.
+/// * `length`     — Number of elements in `values`.
+/// * `max_lags`   — Maximum lag count for AIC selection. Pass `-1` for automatic
+///                  selection (`floor((n-1)^(1/3))`). Clamped to `[0, n/2-1]` by the crate.
+/// * `out_result` — Pointer to caller-allocated `AnofoxStationarityResult`.
+///                  Initialised to `Default` before the computation so that
+///                  partial results are never exposed on error.
+/// * `out_error`  — Pointer to caller-allocated `AnofoxError`. Set on failure.
+///
+/// Returns `true` on success, `false` on error (check `out_error`).
+///
+/// # Safety
+///
+/// `values` and `out_result` must be non-null. `validity` may be null (meaning all valid).
+/// `length` must equal the number of valid `f64` elements at `values`.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_adf(
+    values: *const c_double,
+    validity: *const u64,
+    length: size_t,
+    max_lags: c_int,
+    out_result: *mut AnofoxStationarityResult,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    // Threat T-01-01: null pointer check
+    let ptrs = &[
+        values as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
+        return false;
+    }
+
+    // Initialise output to Default so callers never see uninitialised memory
+    *out_result = AnofoxStationarityResult::default();
+
+    // Threat T-01-03: empty series → return Default (NaN statistic), not an error
+    if length == 0 {
+        return true;
+    }
+
+    // Threat T-01-04: clamp max_lags; negative → auto (None)
+    let max_lags_opt: Option<usize> = if max_lags < 0 {
+        None
+    } else {
+        Some(max_lags as usize)
+    };
+
+    // Threat T-01-02: catch panics in the Rust computation
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        // Use build_values: NULLs become NaN (consistent with crate NaN-propagation behaviour)
+        let series = build_values(values, validity, length);
+        anofox_fcst_core::adf(&series, max_lags_opt)
+    }));
+
+    match result {
+        Ok(r) => {
+            *out_result = r.into();
+            true
+        }
+        Err(_) => {
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in anofox_ts_adf");
+            false
+        }
+    }
+}
+
+// ============================================================================
 // Version
 // ============================================================================
 

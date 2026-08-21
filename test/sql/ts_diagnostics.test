@@ -1,0 +1,173 @@
+# name: test/sql/ts_diagnostics.test
+# description: Tests for ts_adf and ts_adf_by diagnostic functions (STAT-01)
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup Test Data
+#######################################
+
+# Two deterministic series for reproducible tests:
+#   Group A: random-walk-like (non-stationary trend)
+#   Group B: mean-reverting AR(1)-like (stationary)
+
+statement ok
+CREATE TABLE diag_series AS
+SELECT grp, ds, val FROM (
+    -- Group A: cumulative sum of periodic increments (trending)
+    SELECT 'A' AS grp,
+           i AS ds,
+           SUM(CASE WHEN i % 7 < 4 THEN 0.5 ELSE -0.3 END) OVER (ORDER BY i) AS val
+    FROM generate_series(1, 40) t(i)
+    UNION ALL
+    -- Group B: bounded sinusoidal (stationary around mean 2.0)
+    SELECT 'B' AS grp,
+           i AS ds,
+           2.0 + 0.4 * SIN(i * 0.6) + 0.1 * COS(i * 1.2) AS val
+    FROM generate_series(1, 40) t(i)
+) x;
+
+#######################################
+# ts_adf: scalar function (1-arg)
+#######################################
+
+# ts_adf returns a non-null STRUCT
+query I
+SELECT (ts_adf(LIST(val ORDER BY ds)) IS NOT NULL) AS not_null
+FROM diag_series WHERE grp = 'B';
+----
+true
+
+# STRUCT has correct type (STRUCT with 7 fields)
+query I
+SELECT typeof(ts_adf(LIST(val ORDER BY ds)))
+FROM diag_series WHERE grp = 'B';
+----
+STRUCT(statistic DOUBLE, p_value DOUBLE, lags BIGINT, is_stationary BOOLEAN, cv_1pct DOUBLE, cv_5pct DOUBLE, cv_10pct DOUBLE)
+
+# statistic is finite (non-NaN) for n=40 series
+query I
+SELECT isfinite((ts_adf(LIST(val ORDER BY ds))).statistic)
+FROM diag_series WHERE grp = 'B';
+----
+true
+
+# p_value is in [0, 1]
+query I
+SELECT (adf).p_value BETWEEN 0 AND 1
+FROM (SELECT ts_adf(LIST(val ORDER BY ds)) AS adf FROM diag_series WHERE grp = 'B');
+----
+true
+
+# lags >= 0 (BIGINT, always non-negative)
+query I
+SELECT (adf).lags >= 0
+FROM (SELECT ts_adf(LIST(val ORDER BY ds)) AS adf FROM diag_series WHERE grp = 'B');
+----
+true
+
+# critical values match expected MacKinnon constants for constant regression
+query I
+SELECT ABS((adf).cv_1pct - (-3.43)) < 0.05
+FROM (SELECT ts_adf(LIST(val ORDER BY ds)) AS adf FROM diag_series WHERE grp = 'B');
+----
+true
+
+query I
+SELECT ABS((adf).cv_5pct - (-2.86)) < 0.05
+FROM (SELECT ts_adf(LIST(val ORDER BY ds)) AS adf FROM diag_series WHERE grp = 'B');
+----
+true
+
+query I
+SELECT ABS((adf).cv_10pct - (-2.57)) < 0.05
+FROM (SELECT ts_adf(LIST(val ORDER BY ds)) AS adf FROM diag_series WHERE grp = 'B');
+----
+true
+
+#######################################
+# ts_adf: 2-arg overload (max_lags)
+#######################################
+
+# max_lags=1 forces lags=1
+query I
+SELECT (ts_adf(LIST(val ORDER BY ds), 1)).lags
+FROM diag_series WHERE grp = 'A';
+----
+1
+
+# statistic is still finite with max_lags=2
+query I
+SELECT isfinite((ts_adf(LIST(val ORDER BY ds), 2)).statistic)
+FROM diag_series WHERE grp = 'A';
+----
+true
+
+#######################################
+# ts_adf: short series returns NaN
+#######################################
+
+# Series of 3 elements: n < 4 → NaN statistic (crate contract)
+query I
+SELECT isnan((ts_adf(LIST(v ORDER BY i))).statistic)
+FROM (SELECT 1 AS i, 1.0 AS v UNION ALL SELECT 2, 2.0 UNION ALL SELECT 3, 3.0) s;
+----
+true
+
+#######################################
+# ts_adf_by: grouped macro
+#######################################
+
+# ts_adf_by returns one row per group
+query I
+SELECT COUNT(*) FROM ts_adf_by('diag_series', grp, ds, val);
+----
+2
+
+# adf STRUCT is non-null for both groups
+query II
+SELECT grp, (adf IS NOT NULL) AS not_null
+FROM ts_adf_by('diag_series', grp, ds, val)
+ORDER BY grp;
+----
+A	true
+B	true
+
+# p_value between 0 and 1 for both groups
+query II
+SELECT grp, ((adf).p_value BETWEEN 0 AND 1) AS p_valid
+FROM ts_adf_by('diag_series', grp, ds, val)
+ORDER BY grp;
+----
+A	true
+B	true
+
+# lags >= 0 for both groups
+query II
+SELECT grp, ((adf).lags >= 0) AS lags_valid
+FROM ts_adf_by('diag_series', grp, ds, val)
+ORDER BY grp;
+----
+A	true
+B	true
+
+# ts_adf_by with max_lags override
+query II
+SELECT grp, (adf).lags
+FROM ts_adf_by('diag_series', grp, ds, val, max_lags:=1)
+ORDER BY grp;
+----
+A	1
+B	1
+
+#######################################
+# anofox_fcst_ts_adf alias
+#######################################
+
+# The prefixed alias must produce the same result
+query I
+SELECT isfinite((anofox_fcst_ts_adf(LIST(val ORDER BY ds))).statistic)
+FROM diag_series WHERE grp = 'B';
+----
+true

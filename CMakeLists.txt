@@ -193,6 +193,7 @@ set(EXTENSION_SOURCES
     src/scalar_functions/metrics.cpp
     src/scalar_functions/conformal.cpp
     src/scalar_functions/bootstrap.cpp
+    src/scalar_functions/diagnostics.cpp
     src/scalar_functions/ts_forecast_scalar.cpp
     src/scalar_functions/ts_forecast_inspect_scalar.cpp
     src/aggregate_functions/ts_forecast_agg.cpp

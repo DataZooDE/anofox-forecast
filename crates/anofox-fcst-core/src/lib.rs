@@ -5,6 +5,7 @@
 
 pub mod bootstrap;
 pub mod changepoint;
+pub mod validation;
 pub mod conformal;
 pub mod decomposition;
 pub mod detrending;
@@ -105,3 +106,6 @@ pub use stats::{
     compute_ts_stats, compute_ts_stats_with_dates, compute_ts_stats_with_dates_and_type,
     FrequencyType, TsStats,
 };
+
+// Statistical validation (Phase 1: STAT-01 ADF)
+pub use validation::{adf, StationarityOut};
