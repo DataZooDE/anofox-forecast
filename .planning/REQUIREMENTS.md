@@ -22,10 +22,10 @@ Each requirement is "Complete" only when ALL of the following hold:
 
 ### Residual Diagnostics
 
-- [ ] **RESID-01**: User can run a Ljung-Box white-noise test on residuals (`ts_ljung_box` / `ts_ljung_box_by`) at a chosen lag.
-- [ ] **RESID-02**: User can compute the Durbin-Watson statistic on residuals (`ts_durbin_watson` / `ts_durbin_watson_by`).
-- [ ] **RESID-03**: User can run a Jarque-Bera normality test on residuals (`ts_jarque_bera` / `ts_jarque_bera_by`).
-- [ ] **RESID-04**: User can get a combined residual-diagnostics report (`ts_residual_diagnostics_by`) returning all three tests plus a pass/fail adequacy verdict.
+- [x] **RESID-01**: User can run a Ljung-Box white-noise test on residuals (`ts_ljung_box` / `ts_ljung_box_by`) at a chosen lag.
+- [x] **RESID-02**: User can compute the Durbin-Watson statistic on residuals (`ts_durbin_watson` / `ts_durbin_watson_by`).
+- [x] **RESID-03**: User can run a Jarque-Bera normality test on residuals (`ts_jarque_bera` / `ts_jarque_bera_by`).
+- [x] **RESID-04**: User can get a combined residual-diagnostics report (`ts_residual_diagnostics_by`) returning all three tests plus a pass/fail adequacy verdict.
 
 ### Global / Panel Models
 
@@ -86,10 +86,10 @@ Deferred to a future milestone. Tracked, not in this roadmap.
 | STAT-01 | Phase 1 | Complete |
 | STAT-02 | Phase 1 | Complete |
 | STAT-03 | Phase 1 | Complete |
-| RESID-01 | Phase 1 | Pending |
-| RESID-02 | Phase 1 | Pending |
-| RESID-03 | Phase 1 | Pending |
-| RESID-04 | Phase 1 | Pending |
+| RESID-01 | Phase 1 | Complete |
+| RESID-02 | Phase 1 | Complete |
+| RESID-03 | Phase 1 | Complete |
+| RESID-04 | Phase 1 | Complete |
 | INTER-01 | Deferred | Descoped — advanced approach TBD |
 | GLOB-01 | Phase 2 | Pending |
 | GLOB-02 | Phase 2 | Pending |

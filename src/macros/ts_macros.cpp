@@ -2174,6 +2174,59 @@ GROUP BY group_col
     "SELECT group_col, (stationarity).verdict FROM ts_stationarity_by('sales', product_id, ds, y)",
     "diagnostics"},
 
+    // ts_ljung_box_by: Ljung-Box residual white-noise test per group (RESID-01)
+    {"ts_ljung_box_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{"lags", "-1"}, {nullptr, nullptr}},
+R"(
+SELECT group_col, ts_ljung_box(LIST(value_col::DOUBLE ORDER BY date_col), lags::INTEGER) AS ljung_box
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)",
+    "Ljung-Box white-noise test on residuals per group. Returns STRUCT(statistic, p_value, lags, df). "
+    "value_col should be model residuals; default lags = min(10, n/5). Pass lags:=N to override.",
+    "SELECT group_col, (ljung_box).p_value FROM ts_ljung_box_by('resids', product_id, ds, e)",
+    "diagnostics"},
+
+    // ts_durbin_watson_by: Durbin-Watson statistic per group (RESID-02)
+    {"ts_durbin_watson_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{nullptr, nullptr}},
+R"(
+SELECT group_col, ts_durbin_watson(LIST(value_col::DOUBLE ORDER BY date_col)) AS durbin_watson
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)",
+    "Durbin-Watson first-order autocorrelation statistic on residuals per group. "
+    "Returns STRUCT(statistic, interpretation); statistic in [0,4], ~2 means no autocorrelation.",
+    "SELECT group_col, (durbin_watson).statistic FROM ts_durbin_watson_by('resids', product_id, ds, e)",
+    "diagnostics"},
+
+    // ts_jarque_bera_by: Jarque-Bera normality test per group (RESID-03)
+    {"ts_jarque_bera_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{nullptr, nullptr}},
+R"(
+SELECT group_col, ts_jarque_bera(LIST(value_col::DOUBLE ORDER BY date_col)) AS jarque_bera
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)",
+    "Jarque-Bera normality test on residuals per group. Returns STRUCT(statistic, p_value, skewness, excess_kurtosis). "
+    "A small p-value rejects normality.",
+    "SELECT group_col, (jarque_bera).p_value FROM ts_jarque_bera_by('resids', product_id, ds, e)",
+    "diagnostics"},
+
+    // ts_residual_diagnostics_by: combined residual adequacy report per group (RESID-04)
+    {"ts_residual_diagnostics_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{"alpha", "0.05"}, {nullptr, nullptr}},
+R"(
+SELECT group_col, ts_residual_diagnostics(LIST(value_col::DOUBLE ORDER BY date_col), alpha::DOUBLE) AS residual_diagnostics
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)",
+    "Combined residual adequacy report per group: Ljung-Box + Durbin-Watson + Jarque-Bera. "
+    "Returns STRUCT(lb_statistic, lb_p_value, lb_lags, dw_statistic, dw_interpretation, jb_statistic, "
+    "jb_p_value, jb_skewness, jb_excess_kurtosis, adequate). adequate = (lb_p_value > alpha), alpha default 0.05.",
+    "SELECT group_col, (residual_diagnostics).adequate FROM ts_residual_diagnostics_by('resids', product_id, ds, e)",
+    "diagnostics"},
+
     // Sentinel
     {nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr, nullptr, nullptr, nullptr}
 };

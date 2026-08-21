@@ -146,6 +146,135 @@ pub fn stationarity(series: &[f64]) -> CombinedStationarityOut {
     }
 }
 
+// ============================================================================
+// Residual diagnostics (RESID-01..04)
+// ============================================================================
+
+/// Ljung-Box white-noise test result.
+#[derive(Debug, Clone)]
+pub struct LjungBoxOut {
+    pub statistic: f64,
+    pub p_value: f64,
+    pub lags: usize,
+    pub df: usize,
+}
+
+impl From<validation::LjungBoxResult> for LjungBoxOut {
+    fn from(r: validation::LjungBoxResult) -> Self {
+        Self {
+            statistic: r.statistic,
+            p_value: r.p_value,
+            lags: r.lags,
+            df: r.df,
+        }
+    }
+}
+
+/// Ljung-Box test on residuals (RESID-01).
+///
+/// `lags` — number of autocorrelation lags to test; `None` → `min(10, n/5)`.
+/// `fitted_params` is fixed at 0 (the caller supplies raw residuals, not a
+/// model), so `df == lags`.
+pub fn ljung_box(residuals: &[f64], lags: Option<usize>) -> LjungBoxOut {
+    validation::ljung_box(residuals, lags, 0).into()
+}
+
+/// Map the crate's autocorrelation classification to a stable string label.
+fn autocorrelation_label(t: validation::AutocorrelationType) -> &'static str {
+    use validation::AutocorrelationType::*;
+    match t {
+        PositiveStrong => "positive_strong",
+        PositiveWeak => "positive_weak",
+        None => "none",
+        NegativeWeak => "negative_weak",
+        NegativeStrong => "negative_strong",
+    }
+}
+
+/// Durbin-Watson result.
+#[derive(Debug, Clone)]
+pub struct DurbinWatsonOut {
+    /// Statistic in [0, 4]; ≈2 indicates no first-order autocorrelation.
+    pub statistic: f64,
+    /// Interpretation label (positive_strong / positive_weak / none / negative_weak / negative_strong).
+    pub interpretation: &'static str,
+}
+
+/// Durbin-Watson first-order autocorrelation statistic on residuals (RESID-02).
+pub fn durbin_watson(residuals: &[f64]) -> DurbinWatsonOut {
+    let r = validation::durbin_watson(residuals);
+    DurbinWatsonOut {
+        statistic: r.statistic,
+        interpretation: autocorrelation_label(r.interpretation),
+    }
+}
+
+/// Jarque-Bera normality test result.
+#[derive(Debug, Clone)]
+pub struct JarqueBeraOut {
+    pub statistic: f64,
+    pub p_value: f64,
+    pub skewness: f64,
+    pub excess_kurtosis: f64,
+}
+
+impl From<validation::JarqueBeraResult> for JarqueBeraOut {
+    fn from(r: validation::JarqueBeraResult) -> Self {
+        Self {
+            statistic: r.statistic,
+            p_value: r.p_value,
+            skewness: r.skewness,
+            excess_kurtosis: r.excess_kurtosis,
+        }
+    }
+}
+
+/// Jarque-Bera normality test on residuals (RESID-03).
+pub fn jarque_bera(residuals: &[f64]) -> JarqueBeraOut {
+    validation::jarque_bera(residuals).into()
+}
+
+/// Combined residual-diagnostics report (RESID-04).
+#[derive(Debug, Clone)]
+pub struct ResidualDiagnosticsOut {
+    pub lb_statistic: f64,
+    pub lb_p_value: f64,
+    pub lb_lags: usize,
+    pub dw_statistic: f64,
+    pub dw_interpretation: &'static str,
+    pub jb_statistic: f64,
+    pub jb_p_value: f64,
+    pub jb_skewness: f64,
+    pub jb_excess_kurtosis: f64,
+    /// `true` if residuals pass the adequacy gate: Ljung-Box p-value > `alpha`
+    /// (no significant autocorrelation). JB and DW are advisory.
+    pub adequate: bool,
+}
+
+/// Run all three residual tests and derive a pass/fail adequacy verdict (RESID-04).
+///
+/// Adequacy gate: Ljung-Box p-value > `alpha` (default caller passes 0.05).
+/// Jarque-Bera (normality) and Durbin-Watson (first-order autocorrelation) are
+/// reported as advisory fields but do not gate adequacy.
+pub fn residual_diagnostics(residuals: &[f64], alpha: f64) -> ResidualDiagnosticsOut {
+    let lb = ljung_box(residuals, None);
+    let dw = durbin_watson(residuals);
+    let jb = jarque_bera(residuals);
+    let adequate = lb.p_value.is_finite() && lb.p_value > alpha;
+    ResidualDiagnosticsOut {
+        lb_statistic: lb.statistic,
+        lb_p_value: lb.p_value,
+        lb_lags: lb.lags,
+        dw_statistic: dw.statistic,
+        dw_interpretation: dw.interpretation,
+        jb_statistic: jb.statistic,
+        jb_p_value: jb.p_value,
+        jb_skewness: jb.skewness,
+        jb_excess_kurtosis: jb.excess_kurtosis,
+        adequate,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,5 +417,71 @@ mod tests {
         // The combined statistics must match the individual test outputs.
         assert_relative_eq!(combined.adf_statistic, adf(&series, None).statistic);
         assert_relative_eq!(combined.kpss_statistic, kpss(&series, None).statistic);
+    }
+
+    /// White-noise-ish residuals: LCG uniform noise, roughly independent.
+    fn white_noise(n: usize, seed: u64) -> Vec<f64> {
+        let mut x = seed;
+        (0..n)
+            .map(|_| {
+                x = x.wrapping_mul(1664525).wrapping_add(1013904223);
+                (x as f64 / u64::MAX as f64) - 0.5
+            })
+            .collect()
+    }
+
+    #[test]
+    fn ljung_box_valid_output_and_df_equals_lags() {
+        let resid = white_noise(100, 21);
+        let r = ljung_box(&resid, Some(8));
+        assert!(r.statistic.is_finite() && r.statistic >= 0.0);
+        assert!(r.p_value >= 0.0 && r.p_value <= 1.0);
+        // fitted_params = 0 → df == lags
+        assert_eq!(r.df, r.lags);
+        assert_eq!(r.lags, 8);
+    }
+
+    #[test]
+    fn durbin_watson_in_range_and_labeled() {
+        let resid = white_noise(100, 22);
+        let r = durbin_watson(&resid);
+        assert!(r.statistic >= 0.0 && r.statistic <= 4.0, "DW in [0,4], got {}", r.statistic);
+        assert!(matches!(
+            r.interpretation,
+            "positive_strong" | "positive_weak" | "none" | "negative_weak" | "negative_strong"
+        ));
+    }
+
+    #[test]
+    fn durbin_watson_detects_positive_autocorrelation() {
+        // Strongly positively autocorrelated residuals → DW well below 2
+        let n = 100;
+        let noise = white_noise(n, 23);
+        let mut resid = vec![0.0; n];
+        for i in 1..n {
+            resid[i] = 0.9 * resid[i - 1] + noise[i];
+        }
+        let r = durbin_watson(&resid);
+        assert!(r.statistic < 2.0, "positively autocorrelated DW should be < 2, got {}", r.statistic);
+    }
+
+    #[test]
+    fn jarque_bera_valid_output() {
+        let resid = white_noise(200, 24);
+        let r = jarque_bera(&resid);
+        assert!(r.statistic.is_finite() && r.statistic >= 0.0);
+        assert!(r.p_value >= 0.0 && r.p_value <= 1.0);
+        assert!(r.skewness.is_finite() && r.excess_kurtosis.is_finite());
+    }
+
+    #[test]
+    fn residual_diagnostics_adequacy_gate_uses_ljung_box() {
+        let resid = white_noise(120, 25);
+        let d = residual_diagnostics(&resid, 0.05);
+        // adequate must equal the Ljung-Box gate
+        assert_eq!(d.adequate, d.lb_p_value > 0.05);
+        // sub-statistics match the individual functions
+        assert_relative_eq!(d.dw_statistic, durbin_watson(&resid).statistic);
+        assert_relative_eq!(d.jb_statistic, jarque_bera(&resid).statistic);
     }
 }

@@ -13,11 +13,11 @@ ordering is supplied via `ORDER BY` in `LIST()`).
 - `ts_kpss` / `ts_kpss_by`: KPSS level-stationarity test (STAT-02)
 - `ts_stationarity` / `ts_stationarity_by`: combined ADF + KPSS four-way verdict (STAT-03)
 
-**Placeholders for Plan 01-3 (sections to be filled in):**
+**Residual diagnostics (operate on residuals, not the raw series):**
 - `ts_ljung_box` / `ts_ljung_box_by`: Ljung-Box white-noise test (RESID-01)
 - `ts_durbin_watson` / `ts_durbin_watson_by`: Durbin-Watson autocorrelation test (RESID-02)
 - `ts_jarque_bera` / `ts_jarque_bera_by`: Jarque-Bera normality test (RESID-03)
-- `ts_residual_diagnostics_by`: combined residual adequacy report (RESID-04)
+- `ts_residual_diagnostics` / `ts_residual_diagnostics_by`: combined residual adequacy report (RESID-04)
 
 ---
 
@@ -240,21 +240,61 @@ FROM ts_stationarity_by('sales', product_id, ds, y);
 > where ADF rejects the unit root but KPSS rejects level-stationarity (a deterministic
 > trend is present); `difference_stationary` is where both tests point to a unit root.
 
-### `ts_ljung_box` / `ts_ljung_box_by` *(Plan 01-3 — RESID-01)*
+## Residual Diagnostics
 
-> Ljung-Box white-noise test for residual autocorrelation.
+These operate on **residuals** (forecast error series `y - ŷ`), not the raw
+series. Supply the residual column as `value_col` to the `_by` macros.
 
-### `ts_durbin_watson` / `ts_durbin_watson_by` *(Plan 01-3 — RESID-02)*
+### `ts_ljung_box` / `ts_ljung_box_by` (RESID-01)
 
-> Durbin-Watson first-order autocorrelation statistic.
+Ljung-Box white-noise test — the primary check for leftover autocorrelation in
+residuals. A small p-value means the residuals are **not** white noise (the model
+missed structure).
 
-### `ts_jarque_bera` / `ts_jarque_bera_by` *(Plan 01-3 — RESID-03)*
+- `ts_ljung_box(residuals LIST(DOUBLE) [, lags INTEGER]) → STRUCT(statistic DOUBLE, p_value DOUBLE, lags BIGINT, df BIGINT)`
+- `ts_ljung_box_by(source, group_col, date_col, value_col [, lags := -1])`
 
-> Jarque-Bera normality test (skewness + excess kurtosis).
+Default `lags = min(10, n/5)`. Residuals are treated as raw (0 fitted params), so
+`df == lags`.
 
-### `ts_residual_diagnostics_by` *(Plan 01-3 — RESID-04)*
+```sql
+SELECT group_col, (ljung_box).p_value FROM ts_ljung_box_by('resids', series_id, ds, e);
+```
 
-> Combined residual adequacy report: Ljung-Box gate + Durbin-Watson + Jarque-Bera.
+### `ts_durbin_watson` / `ts_durbin_watson_by` (RESID-02)
+
+Durbin-Watson first-order autocorrelation statistic (range `[0, 4]`; `≈2` means no
+autocorrelation, `<2` positive, `>2` negative).
+
+- `ts_durbin_watson(residuals LIST(DOUBLE)) → STRUCT(statistic DOUBLE, interpretation VARCHAR)`
+- `interpretation` ∈ `positive_strong` / `positive_weak` / `none` / `negative_weak` / `negative_strong`.
+
+### `ts_jarque_bera` / `ts_jarque_bera_by` (RESID-03)
+
+Jarque-Bera normality test based on residual skewness and excess kurtosis. A small
+p-value rejects normality.
+
+- `ts_jarque_bera(residuals LIST(DOUBLE)) → STRUCT(statistic DOUBLE, p_value DOUBLE, skewness DOUBLE, excess_kurtosis DOUBLE)`
+
+### `ts_residual_diagnostics` / `ts_residual_diagnostics_by` (RESID-04)
+
+One-shot residual adequacy report combining all three tests.
+
+- `ts_residual_diagnostics(residuals LIST(DOUBLE) [, alpha DOUBLE]) → STRUCT(...)`
+- `ts_residual_diagnostics_by(source, group_col, date_col, value_col [, alpha := 0.05])`
+
+**Returned STRUCT**: `lb_statistic`, `lb_p_value`, `lb_lags`, `dw_statistic`,
+`dw_interpretation`, `jb_statistic`, `jb_p_value`, `jb_skewness`,
+`jb_excess_kurtosis`, `adequate BOOLEAN`.
+
+**Adequacy rule**: `adequate = (lb_p_value > alpha)` — the Ljung-Box white-noise
+test is the gate (residuals must be free of autocorrelation). Durbin-Watson and
+Jarque-Bera are reported as **advisory** fields and do not affect `adequate`.
+
+```sql
+SELECT group_col, (rd).adequate, (rd).dw_interpretation
+FROM ts_residual_diagnostics_by('resids', series_id, ds, e) AS t(group_col, rd);
+```
 
 ---
 

@@ -1764,3 +1764,104 @@ impl Default for AnofoxCombinedStationarityResult {
         }
     }
 }
+
+/// C-compatible Ljung-Box white-noise test result (RESID-01).
+#[repr(C)]
+pub struct AnofoxLjungBoxResult {
+    pub statistic: c_double,
+    pub p_value: c_double,
+    pub lags: size_t,
+    pub df: size_t,
+}
+
+impl Default for AnofoxLjungBoxResult {
+    fn default() -> Self {
+        Self { statistic: f64::NAN, p_value: f64::NAN, lags: 0, df: 0 }
+    }
+}
+
+impl From<anofox_fcst_core::LjungBoxOut> for AnofoxLjungBoxResult {
+    fn from(r: anofox_fcst_core::LjungBoxOut) -> Self {
+        Self { statistic: r.statistic, p_value: r.p_value, lags: r.lags, df: r.df }
+    }
+}
+
+/// C-compatible Durbin-Watson result (RESID-02). `interpretation` is NUL-terminated.
+#[repr(C)]
+pub struct AnofoxDurbinWatsonResult {
+    pub statistic: c_double,
+    pub interpretation: [c_char; 32],
+}
+
+impl Default for AnofoxDurbinWatsonResult {
+    fn default() -> Self {
+        Self { statistic: f64::NAN, interpretation: [0; 32] }
+    }
+}
+
+/// C-compatible Jarque-Bera normality test result (RESID-03).
+#[repr(C)]
+pub struct AnofoxJarqueBeraResult {
+    pub statistic: c_double,
+    pub p_value: c_double,
+    pub skewness: c_double,
+    pub excess_kurtosis: c_double,
+}
+
+impl Default for AnofoxJarqueBeraResult {
+    fn default() -> Self {
+        Self {
+            statistic: f64::NAN,
+            p_value: f64::NAN,
+            skewness: f64::NAN,
+            excess_kurtosis: f64::NAN,
+        }
+    }
+}
+
+impl From<anofox_fcst_core::JarqueBeraOut> for AnofoxJarqueBeraResult {
+    fn from(r: anofox_fcst_core::JarqueBeraOut) -> Self {
+        Self {
+            statistic: r.statistic,
+            p_value: r.p_value,
+            skewness: r.skewness,
+            excess_kurtosis: r.excess_kurtosis,
+        }
+    }
+}
+
+/// C-compatible combined residual-diagnostics report (RESID-04).
+///
+/// Field order is fixed and must match the STRUCT fields declared in
+/// `src/scalar_functions/diagnostics.cpp` (RegisterTsResidualDiagnosticsFunction).
+/// `dw_interpretation` is NUL-terminated.
+#[repr(C)]
+pub struct AnofoxResidualDiagnosticsResult {
+    pub lb_statistic: c_double,
+    pub lb_p_value: c_double,
+    pub lb_lags: size_t,
+    pub dw_statistic: c_double,
+    pub dw_interpretation: [c_char; 32],
+    pub jb_statistic: c_double,
+    pub jb_p_value: c_double,
+    pub jb_skewness: c_double,
+    pub jb_excess_kurtosis: c_double,
+    pub adequate: bool,
+}
+
+impl Default for AnofoxResidualDiagnosticsResult {
+    fn default() -> Self {
+        Self {
+            lb_statistic: f64::NAN,
+            lb_p_value: f64::NAN,
+            lb_lags: 0,
+            dw_statistic: f64::NAN,
+            dw_interpretation: [0; 32],
+            jb_statistic: f64::NAN,
+            jb_p_value: f64::NAN,
+            jb_skewness: f64::NAN,
+            jb_excess_kurtosis: f64::NAN,
+            adequate: false,
+        }
+    }
+}

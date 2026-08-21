@@ -232,3 +232,69 @@ query I
 SELECT count(*) FROM ts_stationarity_by('diag_series', grp, ds, val);
 ----
 2
+
+#######################################
+# Residual diagnostics (RESID-01..04)
+#######################################
+
+# ts_ljung_box returns statistic/p_value/lags/df; df == lags for raw residuals
+query III
+SELECT isfinite((ts_ljung_box(LIST(val ORDER BY ds), 5)).statistic),
+       (ts_ljung_box(LIST(val ORDER BY ds), 5)).p_value BETWEEN 0 AND 1,
+       (ts_ljung_box(LIST(val ORDER BY ds), 5)).lags = (ts_ljung_box(LIST(val ORDER BY ds), 5)).df
+FROM diag_series WHERE grp = 'A';
+----
+true	true	true
+
+# ts_ljung_box_by returns one row per group
+query I
+SELECT count(*) FROM ts_ljung_box_by('diag_series', grp, ds, val);
+----
+2
+
+# ts_durbin_watson statistic in [0,4] with a valid interpretation label
+query II
+SELECT (ts_durbin_watson(LIST(val ORDER BY ds))).statistic BETWEEN 0 AND 4,
+       (ts_durbin_watson(LIST(val ORDER BY ds))).interpretation IN
+         ('positive_strong','positive_weak','none','negative_weak','negative_strong')
+FROM diag_series WHERE grp = 'A';
+----
+true	true
+
+# ts_jarque_bera returns finite statistic + valid p-value
+query II
+SELECT isfinite((ts_jarque_bera(LIST(val ORDER BY ds))).statistic),
+       (ts_jarque_bera(LIST(val ORDER BY ds))).p_value BETWEEN 0 AND 1
+FROM diag_series WHERE grp = 'B';
+----
+true	true
+
+# ts_residual_diagnostics adequacy gate equals the Ljung-Box p > alpha rule
+query I
+SELECT (ts_residual_diagnostics(LIST(val ORDER BY ds))).adequate
+     = ((ts_residual_diagnostics(LIST(val ORDER BY ds))).lb_p_value > 0.05)
+FROM diag_series WHERE grp = 'A';
+----
+true
+
+# combined report sub-stats match the individual functions
+query I
+SELECT (ts_residual_diagnostics(LIST(val ORDER BY ds))).dw_statistic
+     = (ts_durbin_watson(LIST(val ORDER BY ds))).statistic
+FROM diag_series WHERE grp = 'B';
+----
+true
+
+# ts_residual_diagnostics_by returns one row per group
+query I
+SELECT count(*) FROM ts_residual_diagnostics_by('diag_series', grp, ds, val);
+----
+2
+
+# alias produces same statistic
+query I
+SELECT (anofox_fcst_ts_jarque_bera(LIST(val ORDER BY ds))).statistic
+     = (ts_jarque_bera(LIST(val ORDER BY ds))).statistic
+FROM diag_series WHERE grp = 'A';
+----
+true

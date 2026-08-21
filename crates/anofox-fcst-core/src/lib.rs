@@ -107,7 +107,9 @@ pub use stats::{
     FrequencyType, TsStats,
 };
 
-// Statistical validation (Phase 1: STAT-01 ADF, STAT-02 KPSS, STAT-03 combined verdict)
+// Statistical validation (Phase 1: STAT-01..03 stationarity, RESID-01..04 residual diagnostics)
 pub use validation::{
-    adf, classify_stationarity, kpss, stationarity, CombinedStationarityOut, StationarityOut,
+    adf, classify_stationarity, durbin_watson, jarque_bera, kpss, ljung_box, residual_diagnostics,
+    stationarity, CombinedStationarityOut, DurbinWatsonOut, JarqueBeraOut, LjungBoxOut,
+    ResidualDiagnosticsOut, StationarityOut,
 };

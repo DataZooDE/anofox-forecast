@@ -117,6 +117,10 @@ void RegisterTsBootstrapQuantilesFunction(ExtensionLoader &loader);
 void RegisterTsAdfFunction(ExtensionLoader &loader);
 void RegisterTsKpssFunction(ExtensionLoader &loader);
 void RegisterTsStationarityFunction(ExtensionLoader &loader);
+void RegisterTsLjungBoxFunction(ExtensionLoader &loader);
+void RegisterTsDurbinWatsonFunction(ExtensionLoader &loader);
+void RegisterTsJarqueBeraFunction(ExtensionLoader &loader);
+void RegisterTsResidualDiagnosticsFunction(ExtensionLoader &loader);
 
 // Table macros
 void RegisterTsTableMacros(ExtensionLoader &loader);

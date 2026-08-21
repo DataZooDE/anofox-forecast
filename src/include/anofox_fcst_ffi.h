@@ -1667,6 +1667,54 @@ typedef struct AnofoxCombinedStationarityResult {
 } AnofoxCombinedStationarityResult;
 
 /**
+ * C-compatible Ljung-Box white-noise test result (RESID-01).
+ */
+typedef struct AnofoxLjungBoxResult {
+    double statistic;
+    double p_value;
+    size_t lags;
+    size_t df;
+} AnofoxLjungBoxResult;
+
+/**
+ * C-compatible Durbin-Watson result (RESID-02). `interpretation` is NUL-terminated.
+ */
+typedef struct AnofoxDurbinWatsonResult {
+    double statistic;
+    char interpretation[32];
+} AnofoxDurbinWatsonResult;
+
+/**
+ * C-compatible Jarque-Bera normality test result (RESID-03).
+ */
+typedef struct AnofoxJarqueBeraResult {
+    double statistic;
+    double p_value;
+    double skewness;
+    double excess_kurtosis;
+} AnofoxJarqueBeraResult;
+
+/**
+ * C-compatible combined residual-diagnostics report (RESID-04).
+ *
+ * Field order is fixed and must match the STRUCT fields declared in
+ * `src/scalar_functions/diagnostics.cpp` (RegisterTsResidualDiagnosticsFunction).
+ * `dw_interpretation` is NUL-terminated.
+ */
+typedef struct AnofoxResidualDiagnosticsResult {
+    double lb_statistic;
+    double lb_p_value;
+    size_t lb_lags;
+    double dw_statistic;
+    char dw_interpretation[32];
+    double jb_statistic;
+    double jb_p_value;
+    double jb_skewness;
+    double jb_excess_kurtosis;
+    bool adequate;
+} AnofoxResidualDiagnosticsResult;
+
+/**
  * Nullable data array for DuckDB integration.
  *
  * The validity bitmask follows DuckDB's convention where bit i of validity[i/64]
@@ -3192,6 +3240,57 @@ bool anofox_ts_stationarity(const double *values,
                             size_t length,
                             struct AnofoxCombinedStationarityResult *out_result,
                             struct AnofoxError *out_error);
+
+/**
+ * Ljung-Box white-noise test on residuals (RESID-01).
+ *
+ * # Safety
+ * `values` and `out_result` must be non-null. `validity` may be null (all valid).
+ */
+bool anofox_ts_ljung_box(const double *values,
+                         const uint64_t *validity,
+                         size_t length,
+                         int lags,
+                         struct AnofoxLjungBoxResult *out_result,
+                         struct AnofoxError *out_error);
+
+/**
+ * Durbin-Watson first-order autocorrelation statistic on residuals (RESID-02).
+ *
+ * # Safety
+ * `values` and `out_result` must be non-null. `validity` may be null (all valid).
+ */
+bool anofox_ts_durbin_watson(const double *values,
+                             const uint64_t *validity,
+                             size_t length,
+                             struct AnofoxDurbinWatsonResult *out_result,
+                             struct AnofoxError *out_error);
+
+/**
+ * Jarque-Bera normality test on residuals (RESID-03).
+ *
+ * # Safety
+ * `values` and `out_result` must be non-null. `validity` may be null (all valid).
+ */
+bool anofox_ts_jarque_bera(const double *values,
+                           const uint64_t *validity,
+                           size_t length,
+                           struct AnofoxJarqueBeraResult *out_result,
+                           struct AnofoxError *out_error);
+
+/**
+ * Combined residual-diagnostics report (RESID-04): Ljung-Box + Durbin-Watson +
+ * Jarque-Bera with a pass/fail adequacy verdict (Ljung-Box p-value > `alpha`).
+ *
+ * # Safety
+ * `values` and `out_result` must be non-null. `validity` may be null (all valid).
+ */
+bool anofox_ts_residual_diagnostics(const double *values,
+                                    const uint64_t *validity,
+                                    size_t length,
+                                    double alpha,
+                                    struct AnofoxResidualDiagnosticsResult *out_result,
+                                    struct AnofoxError *out_error);
 
 const char *anofox_fcst_version(void);
 

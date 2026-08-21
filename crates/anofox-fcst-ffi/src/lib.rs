@@ -6643,6 +6643,189 @@ pub unsafe extern "C" fn anofox_ts_stationarity(
     }
 }
 
+/// Ljung-Box white-noise test on residuals (RESID-01).
+///
+/// # Safety
+/// `values` and `out_result` must be non-null. `validity` may be null (all valid).
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_ljung_box(
+    values: *const c_double,
+    validity: *const u64,
+    length: size_t,
+    lags: c_int,
+    out_result: *mut AnofoxLjungBoxResult,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+    let ptrs = &[
+        values as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
+        return false;
+    }
+    *out_result = AnofoxLjungBoxResult::default();
+    if length == 0 {
+        return true;
+    }
+    let lags_opt: Option<usize> = if lags < 0 { None } else { Some(lags as usize) };
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let series = build_values(values, validity, length);
+        anofox_fcst_core::ljung_box(&series, lags_opt)
+    }));
+    match result {
+        Ok(r) => {
+            *out_result = r.into();
+            true
+        }
+        Err(_) => {
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in anofox_ts_ljung_box");
+            false
+        }
+    }
+}
+
+/// Durbin-Watson first-order autocorrelation statistic on residuals (RESID-02).
+///
+/// # Safety
+/// `values` and `out_result` must be non-null. `validity` may be null (all valid).
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_durbin_watson(
+    values: *const c_double,
+    validity: *const u64,
+    length: size_t,
+    out_result: *mut AnofoxDurbinWatsonResult,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+    let ptrs = &[
+        values as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
+        return false;
+    }
+    *out_result = AnofoxDurbinWatsonResult::default();
+    if length == 0 {
+        return true;
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let series = build_values(values, validity, length);
+        anofox_fcst_core::durbin_watson(&series)
+    }));
+    match result {
+        Ok(r) => {
+            (*out_result).statistic = r.statistic;
+            copy_string_to_buffer(r.interpretation, &mut (*out_result).interpretation);
+            true
+        }
+        Err(_) => {
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in anofox_ts_durbin_watson");
+            false
+        }
+    }
+}
+
+/// Jarque-Bera normality test on residuals (RESID-03).
+///
+/// # Safety
+/// `values` and `out_result` must be non-null. `validity` may be null (all valid).
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_jarque_bera(
+    values: *const c_double,
+    validity: *const u64,
+    length: size_t,
+    out_result: *mut AnofoxJarqueBeraResult,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+    let ptrs = &[
+        values as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
+        return false;
+    }
+    *out_result = AnofoxJarqueBeraResult::default();
+    if length == 0 {
+        return true;
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let series = build_values(values, validity, length);
+        anofox_fcst_core::jarque_bera(&series)
+    }));
+    match result {
+        Ok(r) => {
+            *out_result = r.into();
+            true
+        }
+        Err(_) => {
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in anofox_ts_jarque_bera");
+            false
+        }
+    }
+}
+
+/// Combined residual-diagnostics report (RESID-04): Ljung-Box + Durbin-Watson +
+/// Jarque-Bera with a pass/fail adequacy verdict (Ljung-Box p-value > `alpha`).
+///
+/// # Safety
+/// `values` and `out_result` must be non-null. `validity` may be null (all valid).
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_residual_diagnostics(
+    values: *const c_double,
+    validity: *const u64,
+    length: size_t,
+    alpha: c_double,
+    out_result: *mut AnofoxResidualDiagnosticsResult,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+    let ptrs = &[
+        values as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
+        return false;
+    }
+    *out_result = AnofoxResidualDiagnosticsResult::default();
+    if length == 0 {
+        return true;
+    }
+    let alpha_val = if alpha.is_finite() && alpha > 0.0 && alpha < 1.0 {
+        alpha
+    } else {
+        0.05
+    };
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let series = build_values(values, validity, length);
+        anofox_fcst_core::residual_diagnostics(&series, alpha_val)
+    }));
+    match result {
+        Ok(r) => {
+            (*out_result).lb_statistic = r.lb_statistic;
+            (*out_result).lb_p_value = r.lb_p_value;
+            (*out_result).lb_lags = r.lb_lags;
+            (*out_result).dw_statistic = r.dw_statistic;
+            copy_string_to_buffer(r.dw_interpretation, &mut (*out_result).dw_interpretation);
+            (*out_result).jb_statistic = r.jb_statistic;
+            (*out_result).jb_p_value = r.jb_p_value;
+            (*out_result).jb_skewness = r.jb_skewness;
+            (*out_result).jb_excess_kurtosis = r.jb_excess_kurtosis;
+            (*out_result).adequate = r.adequate;
+            true
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in anofox_ts_residual_diagnostics",
+            );
+            false
+        }
+    }
+}
+
 // ============================================================================
 // Version
 // ============================================================================
