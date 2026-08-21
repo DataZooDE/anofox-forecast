@@ -84,7 +84,9 @@ def create_benchmark_functions(
             all_ids = train_df['unique_id'].unique()
             if len(all_ids) > max_series:
                 print(f"Capping to {max_series} series (config MAX_SERIES={max_series}; total={len(all_ids)})")
-                selected_ids = all_ids[:max_series]
+                # Sort before slicing to guarantee a stable, reproducible subset regardless of
+                # Parquet reader ordering, pandas version, or re-sorted input files.
+                selected_ids = sorted(all_ids)[:max_series]
                 train_df = train_df[train_df['unique_id'].isin(selected_ids)].copy()
                 print(f"Subset shape: {train_df.shape} ({train_df['unique_id'].nunique()} series)")
 
@@ -153,7 +155,8 @@ def create_benchmark_functions(
                 all_ids = train_df['unique_id'].unique()
                 if len(all_ids) > max_series:
                     print(f"Capping to {max_series} series (matching anofox MAX_SERIES cap)")
-                    selected_ids = all_ids[:max_series]
+                    # Sort before slicing — must match the deterministic subset on the anofox side.
+                    selected_ids = sorted(all_ids)[:max_series]
                     train_df = train_df[train_df['unique_id'].isin(selected_ids)].copy()
 
             # Get models configuration
