@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-current_phase: 3
+current_phase: 03
 current_phase_name: Classical & Multivariate Models
-status: planning
-stopped_at: Phase 02 complete, ready to plan Phase 3
-last_updated: "2026-08-21T20:48:17.417Z"
+status: executing
+stopped_at: Completed 03-1-PLAN.md (GARCH + Kalman via ts_forecast_by)
+last_updated: "2026-08-21T22:11:50.026Z"
 last_activity: 2026-08-21
-last_activity_desc: Phase 02 complete, transitioned to Phase 3
-state_head: 4439084cfea51e6e0e53f077773c1643e1fa4960
+last_activity_desc: Phase 03 execution started
+state_head: 1b75e64856109592fef188598fba69ff73787b9f
 progress:
   total_phases: 3
   completed_phases: 1
-  total_plans: 6
+  total_plans: 9
   completed_plans: 6
   percent: 33
 ---
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-21)
 
 **Core value:** SQL users can validate whether a series/model is statistically sound (stationarity, residual adequacy, demand regime) and can reach the crate's higher-coverage models (global + classical) — all without leaving DuckDB.
-**Current focus:** Phase 02 — Global / Panel Models
+**Current focus:** Phase 03 — Classical & Multivariate Models
 
 ## Current Position
 
-Phase: 3 — Classical & Multivariate Models
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-08-21 — Phase 02 complete, transitioned to Phase 3
+Phase: 03 (Classical & Multivariate Models) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-08-21 — Phase 03 execution started
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [███░░░░░░░] 33%
 
 ## Performance Metrics
 
@@ -65,6 +65,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02-global-panel-models P1 | 90 | 3 tasks | 11 files |
 | Phase 02 P2 | 17 min | 3 tasks | 7 files |
 | Phase 02-global-panel-models P3 | 25 | 2 tasks | 10 files |
+| Phase 03 P01 | 38 | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -89,6 +90,8 @@ Recent decisions affecting current work:
 - [Phase 02]: Per-series date re-alignment: panel function aligns to shared grid; restore correct M4 horizon dates via forecast_step
 - [Phase 02]: MAX_SERIES=500 for global panel benchmark: GlobalETS Reduced pool takes ~18s for 500 series vs ~6 min for all 4,227
 - [Phase 02]: statsforecast reference: GlobalETS->AutoETS, GlobalTheta->AutoTheta, GlobalCroston->CrostonOptimized (pinned v1.4.0 has no Global* variants)
+- [Phase 03]: GARCH output is sqrt(forecast_variance(h)) — volatility not variance; forecast_variance gives analytical conditional variance vs predict() which gives simulated innovations
+- [Phase 03]: ts_forecast_by routes through _ts_forecast_scalar (scalar_functions/), not _ts_forecast_native (table_functions/); both files have independent ValidateParams
 
 ### Pending Todos
 
@@ -115,6 +118,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 **Resume file:** None
 
-Last session: 2026-08-21T20:41:46.777Z
-Stopped at: Phase 02 complete, ready to plan Phase 3
+Last session: 2026-08-21T22:11:49.999Z
+Stopped at: Completed 03-1-PLAN.md (GARCH + Kalman via ts_forecast_by)
 Resume: /gsd-autonomous --from 2  (Phase 2 needs a panel-aware SQL surface design — discuss first). Note: set workflow.use_worktrees=false to avoid worktree split-brain.
