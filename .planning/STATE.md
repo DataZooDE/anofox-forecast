@@ -99,6 +99,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-08-21T10:09:06.472Z
-Stopped at: Completed 01-1-PLAN.md (STAT-01 ADF tracer)
-Resume file: None
+Last session: 2026-08-21
+Stopped at: Phase 1 (Statistical Diagnostics) COMPLETE — 7 functions shipped, built, verified, committed (441bbc3..4dcf9aa). Ready for Phase 2.
+Resume: /gsd-autonomous --from 2  (Phase 2 needs a panel-aware SQL surface design — discuss first). Note: set workflow.use_worktrees=false to avoid worktree split-brain.
