@@ -1769,6 +1769,30 @@ typedef struct PanelForecastResult {
 } PanelForecastResult;
 
 /**
+ * VAR multivariate forecast result — returned by `anofox_ts_forecast_var`.
+ *
+ * `forecasts` is a flat `[k_vars * n_horizon]` array of `f64` in variable-major order:
+ * `forecasts[v * n_horizon + h]` is the forecast for variable `v` at horizon step `h` (0-based).
+ * The buffer is allocated by Rust and must be freed exactly once via
+ * `anofox_free_var_forecast_result`.
+ */
+typedef struct VARForecastResult {
+    /**
+     * Flat `[k_vars * n_horizon]` forecast buffer; variable-major order.
+     * Allocated by Rust; freed by `anofox_free_var_forecast_result`.
+     */
+    double *forecasts;
+    /**
+     * Number of variables (K) in the VAR model.
+     */
+    size_t k_vars;
+    /**
+     * Number of horizon steps per variable.
+     */
+    size_t n_horizon;
+} VARForecastResult;
+
+/**
  * Nullable data array for DuckDB integration.
  *
  * The validity bitmask follows DuckDB's convention where bit i of validity[i/64]
@@ -3388,6 +3412,46 @@ bool anofox_ts_forecast_panel(const double *values,
  * `forecasts` field was set by `anofox_ts_forecast_panel`.
  */
 void anofox_free_panel_forecast_result(struct PanelForecastResult *result);
+
+/**
+ * Forecast a multivariate time series using a VAR(p) model.
+ *
+ * `flat_data` is a flat packed matrix in variable-major order:
+ * `flat_data[v * series_len + t]` is the value of variable `v` at time step `t`.
+ * NaN values in the flat matrix are treated as missing and imputed by
+ * `fill_nulls_interpolate` before fitting.
+ *
+ * On success writes to `*out_result` and returns `true`.
+ * On failure writes to `*out_error` and returns `false`.
+ *
+ * The `forecasts` buffer in `*out_result` must be freed by calling
+ * `anofox_free_var_forecast_result`.
+ *
+ * # Safety
+ * - `flat_data` and `out_result` must be non-null.
+ * - `out_error` may be null (errors are still reported via `false` return).
+ * - `flat_data` must point to a buffer of at least `k_vars * series_len` doubles.
+ * - `k_vars * series_len` must not overflow `usize`.
+ * - `k_vars * horizon` must not overflow `usize`.
+ */
+bool anofox_ts_forecast_var(const double *flat_data,
+                            size_t k_vars,
+                            size_t series_len,
+                            size_t order,
+                            size_t horizon,
+                            struct VARForecastResult *out_result,
+                            struct AnofoxError *out_error);
+
+/**
+ * Free a `VARForecastResult` allocated by `anofox_ts_forecast_var`.
+ *
+ * Nulls the `forecasts` pointer after freeing to prevent double-free.
+ *
+ * # Safety
+ * `result` must be null or a valid pointer to a `VARForecastResult` whose
+ * `forecasts` field was set by `anofox_ts_forecast_var`.
+ */
+void anofox_free_var_forecast_result(struct VARForecastResult *result);
 
 const char *anofox_fcst_version(void);
 

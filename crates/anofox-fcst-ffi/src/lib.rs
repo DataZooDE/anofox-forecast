@@ -7441,6 +7441,326 @@ mod kalman_garch_ffi_tests {
 }
 
 // ============================================================================
+// VAR Multivariate Forecasting (Phase 3 CLAS-03)
+// ============================================================================
+
+/// Inner logic for VAR multivariate forecasting — testable without FFI pointer marshalling.
+///
+/// # Arguments
+/// - `flat`: flat packed matrix `[k_vars * series_len]` in variable-major order;
+///   `flat[v * series_len + t]` is the value of variable `v` at time step `t`.
+///   NaN values are imputed via linear interpolation before fitting.
+/// - `k_vars`: number of variables K.
+/// - `series_len`: number of observations per variable N (all equal).
+/// - `order`: lag order p (0 is treated as 1).
+/// - `horizon`: forecast horizon H.
+///
+/// # Returns
+/// `Vec<Vec<f64>>` of shape `[k_vars][horizon]`.
+pub(crate) fn forecast_var_impl(
+    flat: &[f64],
+    k_vars: usize,
+    series_len: usize,
+    order: usize,
+    horizon: usize,
+) -> std::result::Result<Vec<Vec<f64>>, String> {
+    if k_vars == 0 || series_len == 0 {
+        return Err("VAR: empty data (k_vars=0 or series_len=0)".into());
+    }
+
+    // Reconstruct K series from flat variable-major matrix, imputing NaN via interpolation.
+    let data: Vec<Vec<f64>> = (0..k_vars)
+        .map(|v| {
+            let slice = &flat[v * series_len..(v + 1) * series_len];
+            // Convert to Option<f64> for fill_nulls_interpolate
+            let with_opts: Vec<Option<f64>> = slice
+                .iter()
+                .map(|&x| if x.is_nan() { None } else { Some(x) })
+                .collect();
+            fill_nulls_interpolate(&with_opts)
+        })
+        .collect();
+
+    let safe_order = order.max(1);
+    let mut model = anofox_forecast::models::var::VAR::new(safe_order);
+    model
+        .fit(&data)
+        .map_err(|e| format!("VAR fit failed: {}", e))?;
+    model
+        .predict(horizon)
+        .map_err(|e| format!("VAR predict failed: {}", e))
+}
+
+/// Forecast a multivariate time series using a VAR(p) model.
+///
+/// `flat_data` is a flat packed matrix in variable-major order:
+/// `flat_data[v * series_len + t]` is the value of variable `v` at time step `t`.
+/// NaN values in the flat matrix are treated as missing and imputed by
+/// `fill_nulls_interpolate` before fitting.
+///
+/// On success writes to `*out_result` and returns `true`.
+/// On failure writes to `*out_error` and returns `false`.
+///
+/// The `forecasts` buffer in `*out_result` must be freed by calling
+/// `anofox_free_var_forecast_result`.
+///
+/// # Safety
+/// - `flat_data` and `out_result` must be non-null.
+/// - `out_error` may be null (errors are still reported via `false` return).
+/// - `flat_data` must point to a buffer of at least `k_vars * series_len` doubles.
+/// - `k_vars * series_len` must not overflow `usize`.
+/// - `k_vars * horizon` must not overflow `usize`.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_forecast_var(
+    flat_data: *const c_double, // flat [k_vars * series_len] matrix, variable-major; NaN = missing
+    k_vars: size_t,
+    series_len: size_t,
+    order: size_t,    // lag order p (0 → 1)
+    horizon: size_t,
+    out_result: *mut VARForecastResult,
+    out_error: *mut AnofoxError,
+) -> bool {
+    // Initialise error slot first
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    // Null-check mandatory pointers
+    if flat_data.is_null() || out_result.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument to anofox_ts_forecast_var");
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        // Checked multiplication: k_vars * series_len must not overflow usize
+        let len = k_vars
+            .checked_mul(series_len)
+            .ok_or_else(|| "VAR dimensions overflow (k_vars * series_len > usize::MAX)".to_string())?;
+
+        // Slice the flat matrix — Rust owns nothing, just a view
+        let flat = std::slice::from_raw_parts(flat_data, len);
+
+        // Inner logic (testable separately)
+        forecast_var_impl(flat, k_vars, series_len, order, horizon)
+    }));
+
+    match result {
+        Ok(Ok(preds)) => {
+            // Validate output dimensions before allocating
+            if horizon == 0 {
+                if !out_error.is_null() {
+                    (*out_error).set_error(ErrorCode::InvalidInput, "horizon must be > 0");
+                }
+                return false;
+            }
+            // Checked multiplication: k_vars * horizon must not overflow usize
+            let total = match k_vars.checked_mul(horizon) {
+                Some(t) => t,
+                None => {
+                    if !out_error.is_null() {
+                        (*out_error).set_error(
+                            ErrorCode::InvalidInput,
+                            "VAR output dimensions overflow (k_vars * horizon > usize::MAX)",
+                        );
+                    }
+                    return false;
+                }
+            };
+
+            // Allocate flat output buffer and copy predictions (variable-major order)
+            let raw = alloc_double_array(total);
+            if raw.is_null() && total > 0 {
+                if !out_error.is_null() {
+                    (*out_error).set_error(ErrorCode::AllocationError, "Failed to allocate VAR forecast buffer");
+                }
+                return false;
+            }
+
+            for (v, var_preds) in preds.iter().enumerate() {
+                for (h, &val) in var_preds.iter().enumerate() {
+                    *raw.add(v * horizon + h) = val;
+                }
+            }
+
+            (*out_result).forecasts = raw;
+            (*out_result).k_vars = k_vars;
+            (*out_result).n_horizon = horizon;
+
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::ComputationError, &e);
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in anofox_ts_forecast_var");
+            }
+            false
+        }
+    }
+}
+
+/// Free a `VARForecastResult` allocated by `anofox_ts_forecast_var`.
+///
+/// Nulls the `forecasts` pointer after freeing to prevent double-free.
+///
+/// # Safety
+/// `result` must be null or a valid pointer to a `VARForecastResult` whose
+/// `forecasts` field was set by `anofox_ts_forecast_var`.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_free_var_forecast_result(result: *mut VARForecastResult) {
+    if result.is_null() {
+        return;
+    }
+    let r = &mut *result;
+    if !r.forecasts.is_null() {
+        // Use anofox_free_double_array (the public C fn) to match the alloc_double_array pairing
+        anofox_free_double_array(r.forecasts);
+        r.forecasts = ptr::null_mut();
+    }
+}
+
+// ============================================================================
+// VAR FFI tests (Task 1 — RED phase: these tests drive the implementation)
+// ============================================================================
+
+#[cfg(test)]
+mod var_ffi_tests {
+    use super::*;
+
+    /// Helper: generate synthetic VAR(1) data as a flat variable-major matrix.
+    /// Returns [k_vars * series_len] vector.
+    fn generate_var1_flat(k_vars: usize, series_len: usize) -> Vec<f64> {
+        let mut flat = vec![0.0f64; k_vars * series_len];
+        // Simple VAR(1): each variable is a weighted sum of lagged values + noise
+        let a = [[0.6f64, 0.1], [0.05, 0.7]];
+        let c = [0.5f64, 0.3];
+        // Initialise
+        for v in 0..k_vars.min(2) {
+            flat[v * series_len] = c[v];
+        }
+        for t in 1..series_len {
+            for v in 0..k_vars.min(2) {
+                let mut val = c[v];
+                for u in 0..k_vars.min(2) {
+                    val += a[v][u] * flat[u * series_len + (t - 1)];
+                }
+                // Small deterministic perturbation (no rng needed)
+                val += 0.01 * (t as f64).sin();
+                flat[v * series_len + t] = val;
+            }
+        }
+        flat
+    }
+
+    /// Test 1 — happy path: forecast_var_impl on 2-variable VAR(1) data, order=1, horizon=5.
+    #[test]
+    fn test_var_impl_happy_path() {
+        let k_vars = 2usize;
+        let series_len = 50usize;
+        let flat = generate_var1_flat(k_vars, series_len);
+
+        let result = forecast_var_impl(&flat, k_vars, series_len, 1, 5);
+        assert!(result.is_ok(), "forecast_var_impl should succeed: {:?}", result.err());
+        let preds = result.unwrap();
+        assert_eq!(preds.len(), k_vars, "expected {} variable forecasts", k_vars);
+        for (v, var_preds) in preds.iter().enumerate() {
+            assert_eq!(var_preds.len(), 5, "expected horizon=5 for variable {}", v);
+            for &val in var_preds {
+                assert!(val.is_finite(), "expected finite forecast for variable {}, got NaN/Inf", v);
+            }
+        }
+    }
+
+    /// Test 2 — empty data: forecast_var_impl on k_vars=0 or series_len=0 returns Err.
+    #[test]
+    fn test_var_impl_empty_returns_err() {
+        let result_empty_k = forecast_var_impl(&[], 0, 0, 1, 5);
+        assert!(result_empty_k.is_err(), "k_vars=0 should return Err");
+
+        let result_zero_len = forecast_var_impl(&[1.0, 2.0], 2, 0, 1, 5);
+        assert!(result_zero_len.is_err(), "series_len=0 should return Err");
+    }
+
+    /// Test 3 — FFI fill+free: anofox_ts_forecast_var with valid data fills out_result
+    /// and returns true; then anofox_free_var_forecast_result nulls the forecasts pointer.
+    #[test]
+    fn test_ffi_var_fill_and_free() {
+        let k_vars = 2usize;
+        let series_len = 50usize;
+        let flat = generate_var1_flat(k_vars, series_len);
+        let horizon = 5usize;
+
+        let mut out_result = VARForecastResult::default();
+        let mut out_error = AnofoxError::success();
+
+        let ok = unsafe {
+            anofox_ts_forecast_var(
+                flat.as_ptr(),
+                k_vars,
+                series_len,
+                1, // order
+                horizon,
+                &mut out_result as *mut VARForecastResult,
+                &mut out_error as *mut AnofoxError,
+            )
+        };
+
+        assert!(ok, "anofox_ts_forecast_var should return true on valid input");
+        assert!(!out_result.forecasts.is_null(), "forecasts pointer must be non-null");
+        assert_eq!(out_result.k_vars, k_vars, "k_vars must match");
+        assert_eq!(out_result.n_horizon, horizon, "n_horizon must match");
+
+        // Read some values to verify they are finite
+        unsafe {
+            for idx in 0..(k_vars * horizon) {
+                let val = *out_result.forecasts.add(idx);
+                assert!(val.is_finite(), "forecast[{}] must be finite, got {}", idx, val);
+            }
+        }
+
+        // Free the result — this should null the forecasts pointer
+        unsafe {
+            anofox_free_var_forecast_result(&mut out_result as *mut VARForecastResult);
+        }
+        assert!(
+            out_result.forecasts.is_null(),
+            "forecasts pointer must be null after free"
+        );
+    }
+
+    /// Test 4 — null guard: passing null flat_data sets out_error to NullPointer and returns false.
+    #[test]
+    fn test_ffi_var_null_guard() {
+        let mut out_result = VARForecastResult::default();
+        let mut out_error = AnofoxError::success();
+
+        let ok = unsafe {
+            anofox_ts_forecast_var(
+                std::ptr::null(), // null flat_data — should trigger NullPointer error
+                2,
+                50,
+                1,
+                5,
+                &mut out_result as *mut VARForecastResult,
+                &mut out_error as *mut AnofoxError,
+            )
+        };
+
+        assert!(!ok, "null flat_data should return false");
+        // The error code should be NullPointer
+        let code = unsafe { CStr::from_ptr(out_error.message.as_ptr()) }
+            .to_string_lossy();
+        assert!(!code.is_empty(), "error message must be non-empty on null input");
+    }
+}
+
+// ============================================================================
 // Version
 // ============================================================================
 

@@ -443,6 +443,33 @@ impl Default for PanelForecastResult {
     }
 }
 
+/// VAR multivariate forecast result — returned by `anofox_ts_forecast_var`.
+///
+/// `forecasts` is a flat `[k_vars * n_horizon]` array of `f64` in variable-major order:
+/// `forecasts[v * n_horizon + h]` is the forecast for variable `v` at horizon step `h` (0-based).
+/// The buffer is allocated by Rust and must be freed exactly once via
+/// `anofox_free_var_forecast_result`.
+#[repr(C)]
+pub struct VARForecastResult {
+    /// Flat `[k_vars * n_horizon]` forecast buffer; variable-major order.
+    /// Allocated by Rust; freed by `anofox_free_var_forecast_result`.
+    pub forecasts: *mut c_double,
+    /// Number of variables (K) in the VAR model.
+    pub k_vars: size_t,
+    /// Number of horizon steps per variable.
+    pub n_horizon: size_t,
+}
+
+impl Default for VARForecastResult {
+    fn default() -> Self {
+        Self {
+            forecasts: std::ptr::null_mut(),
+            k_vars: 0,
+            n_horizon: 0,
+        }
+    }
+}
+
 impl Default for ForecastOptions {
     fn default() -> Self {
         let mut model = [0 as c_char; 32];
