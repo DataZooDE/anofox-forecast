@@ -1092,6 +1092,20 @@ typedef struct ForecastOptions {
      * seasonal-EMA leaf and forecast collapses to flat).
      */
     bool laplace_seasonal_batch_init;
+    /**
+     * GARCH p order (0 → default 1). Only consulted when model is "GARCH".
+     */
+    int garch_p;
+    /**
+     * GARCH q order (0 → default 1). Only consulted when model is "GARCH".
+     */
+    int garch_q;
+    /**
+     * Kalman state-space spec. Empty string = "local_level" (default).
+     * Accepted values: "" | "local_level" | "local_linear_trend".
+     * Only consulted when model is "Kalman".
+     */
+    char kalman_model[32];
 } ForecastOptions;
 
 /**
@@ -1246,6 +1260,18 @@ typedef struct ForecastOptionsExog {
      * Enable `LaplaceForecaster::with_seasonal_batch_init()` (opt-in).
      */
     bool laplace_seasonal_batch_init;
+    /**
+     * GARCH p order (0 → default 1). Only consulted when model is "GARCH".
+     */
+    int garch_p;
+    /**
+     * GARCH q order (0 → default 1). Only consulted when model is "GARCH".
+     */
+    int garch_q;
+    /**
+     * Kalman state-space spec. Empty string = "local_level" (default).
+     */
+    char kalman_model[32];
 } ForecastOptionsExog;
 
 /**

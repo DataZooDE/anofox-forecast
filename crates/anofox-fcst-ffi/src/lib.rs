@@ -3413,6 +3413,13 @@ pub unsafe extern "C" fn anofox_ts_forecast(
             .map(anofox_fcst_core::LaplaceVariant::parse)
             .transpose()?;
 
+        // Parse kalman_model spec (empty → None → local_level default)
+        let kalman_model = CStr::from_ptr(opts.kalman_model.as_ptr())
+            .to_str()
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+
         let core_opts = anofox_fcst_core::ForecastOptions {
             model: model_type,
             ets_spec,
@@ -3427,6 +3434,9 @@ pub unsafe extern "C" fn anofox_ts_forecast(
             model_pool,
             laplace_variant,
             laplace_seasonal_batch_init: opts.laplace_seasonal_batch_init,
+            garch_p: opts.garch_p as usize,
+            garch_q: opts.garch_q as usize,
+            kalman_model,
         };
 
         anofox_fcst_core::forecast(&series, &core_opts)
@@ -3694,6 +3704,13 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
             .map(anofox_fcst_core::LaplaceVariant::parse)
             .transpose()?;
 
+        // Parse kalman_model spec (empty → None → local_level default)
+        let kalman_model_exog = CStr::from_ptr(opts.kalman_model.as_ptr())
+            .to_str()
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+
         let core_opts = anofox_fcst_core::ForecastOptionsExog {
             model: model_type,
             ets_spec,
@@ -3709,6 +3726,9 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
             model_pool,
             laplace_variant,
             laplace_seasonal_batch_init: opts.laplace_seasonal_batch_init,
+            garch_p: opts.garch_p as usize,
+            garch_q: opts.garch_q as usize,
+            kalman_model: kalman_model_exog,
         };
 
         anofox_fcst_core::forecast_with_exog(&series, &core_opts)
@@ -4093,6 +4113,13 @@ unsafe fn build_core_options(
         .map(anofox_fcst_core::LaplaceVariant::parse)
         .transpose()?;
 
+    // Parse kalman_model spec (empty → None → local_level default)
+    let kalman_model = CStr::from_ptr(opts.kalman_model.as_ptr())
+        .to_str()
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned);
+
     Ok(anofox_fcst_core::ForecastOptions {
         model: model_type,
         ets_spec,
@@ -4107,6 +4134,9 @@ unsafe fn build_core_options(
         model_pool,
         laplace_variant,
         laplace_seasonal_batch_init: opts.laplace_seasonal_batch_init,
+        garch_p: opts.garch_p as usize,
+        garch_q: opts.garch_q as usize,
+        kalman_model,
     })
 }
 
@@ -7299,6 +7329,114 @@ mod panel_ffi_tests {
                 s, c, i
             );
         }
+    }
+}
+
+// ============================================================================
+// Phase 3: Kalman + GARCH FFI tests
+// ============================================================================
+
+#[cfg(test)]
+mod kalman_garch_ffi_tests {
+    use super::*;
+    use std::ffi::CStr;
+
+    /// Helper: call anofox_ts_forecast with a model name and opts override function.
+    fn call_ts_forecast<F>(
+        values: &[f64],
+        horizon: usize,
+        model_name: &[u8],
+        configure_opts: F,
+    ) -> Result<Vec<f64>, String>
+    where
+        F: FnOnce(&mut ForecastOptions),
+    {
+        // Build validity bitmap: all valid (1-bit per observation)
+        let n_words = (values.len() + 63) / 64;
+        let mut validity: Vec<u64> = vec![!0u64; n_words];
+        // Pad last word for exact count
+        if values.len() % 64 != 0 {
+            let remainder = values.len() % 64;
+            validity[n_words - 1] = (1u64 << remainder) - 1;
+        }
+
+        let mut opts = ForecastOptions::default();
+        // Set model string
+        let name_bytes = model_name;
+        let copy_len = name_bytes.len().min(31);
+        for (i, &b) in name_bytes[..copy_len].iter().enumerate() {
+            opts.model[i] = b as i8;
+        }
+        opts.model[copy_len] = 0;
+        opts.horizon = horizon as i32;
+        configure_opts(&mut opts);
+
+        let mut result = ForecastResult::default();
+        let mut error = AnofoxError::default();
+
+        let ok = unsafe {
+            anofox_ts_forecast(
+                values.as_ptr(),
+                validity.as_ptr(),
+                values.len(),
+                &opts as *const ForecastOptions,
+                &mut result as *mut ForecastResult,
+                &mut error as *mut AnofoxError,
+            )
+        };
+
+        if ok {
+            let n = result.n_forecasts;
+            let point = unsafe { std::slice::from_raw_parts(result.point_forecasts, n).to_vec() };
+            // Free the result
+            unsafe {
+                anofox_free_forecast_result(&mut result as *mut ForecastResult);
+            }
+            Ok(point)
+        } else {
+            let msg = unsafe {
+                CStr::from_ptr(error.message.as_ptr()).to_string_lossy().into_owned()
+            };
+            Err(msg)
+        }
+    }
+
+    #[test]
+    fn test_ffi_kalman_local_level_returns_horizon_rows() {
+        let values: Vec<f64> = (0..25).map(|i| 10.0 + i as f64 * 0.5).collect();
+        let result = call_ts_forecast(&values, 5, b"Kalman", |_opts| {
+            // kalman_model stays empty => local_level (default)
+        });
+        assert!(result.is_ok(), "Kalman FFI should succeed: {:?}", result.err());
+        let point = result.unwrap();
+        assert_eq!(point.len(), 5, "Kalman FFI must return 5 point forecasts");
+        for &v in &point {
+            assert!(v.is_finite(), "Kalman FFI forecast must be finite");
+        }
+    }
+
+    #[test]
+    fn test_ffi_kalman_local_linear_trend_differs_from_local_level() {
+        let values: Vec<f64> = (0..30).map(|i| 5.0 + i as f64 * 1.2).collect();
+
+        let result_ll = call_ts_forecast(&values, 5, b"Kalman", |_opts| {
+            // local_level default
+        });
+        let result_llt = call_ts_forecast(&values, 5, b"Kalman", |opts| {
+            let spec = b"local_linear_trend\0";
+            for (i, &b) in spec.iter().enumerate() {
+                opts.kalman_model[i] = b as i8;
+            }
+        });
+
+        assert!(result_ll.is_ok(), "Kalman local_level FFI: {:?}", result_ll.err());
+        assert!(result_llt.is_ok(), "Kalman local_linear_trend FFI: {:?}", result_llt.err());
+        let ll = result_ll.unwrap();
+        let llt = result_llt.unwrap();
+        assert_eq!(ll.len(), 5);
+        assert_eq!(llt.len(), 5);
+        // On a trended series the two specs should produce different forecasts
+        assert_ne!(ll[0], llt[0], "local_level and local_linear_trend must produce different forecasts");
     }
 }
 

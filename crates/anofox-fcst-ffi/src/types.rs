@@ -403,6 +403,14 @@ pub struct ForecastOptions {
     /// growing amplitude / phase-shifted seasonality (softmax abandons the
     /// seasonal-EMA leaf and forecast collapses to flat).
     pub laplace_seasonal_batch_init: bool,
+    /// GARCH p order (0 → default 1). Only consulted when model is "GARCH".
+    pub garch_p: c_int,
+    /// GARCH q order (0 → default 1). Only consulted when model is "GARCH".
+    pub garch_q: c_int,
+    /// Kalman state-space spec. Empty string = "local_level" (default).
+    /// Accepted values: "" | "local_level" | "local_linear_trend".
+    /// Only consulted when model is "Kalman".
+    pub kalman_model: [c_char; 32],
 }
 
 /// Panel forecast result — returned by `anofox_ts_forecast_panel`.
@@ -456,6 +464,9 @@ impl Default for ForecastOptions {
             model_pool: [0; 32],
             laplace_variant: [0; 16],
             laplace_seasonal_batch_init: false,
+            garch_p: 0,
+            garch_q: 0,
+            kalman_model: [0; 32],
         }
     }
 }
@@ -526,6 +537,12 @@ pub struct ForecastOptionsExog {
     pub laplace_variant: [c_char; 16],
     /// Enable `LaplaceForecaster::with_seasonal_batch_init()` (opt-in).
     pub laplace_seasonal_batch_init: bool,
+    /// GARCH p order (0 → default 1). Only consulted when model is "GARCH".
+    pub garch_p: c_int,
+    /// GARCH q order (0 → default 1). Only consulted when model is "GARCH".
+    pub garch_q: c_int,
+    /// Kalman state-space spec. Empty string = "local_level" (default).
+    pub kalman_model: [c_char; 32],
 }
 
 impl Default for ForecastOptionsExog {
@@ -550,6 +567,9 @@ impl Default for ForecastOptionsExog {
             model_pool: [0; 32],
             laplace_variant: [0; 16],
             laplace_seasonal_batch_init: false,
+            garch_p: 0,
+            garch_q: 0,
+            kalman_model: [0; 32],
         }
     }
 }
