@@ -29,7 +29,10 @@ a runnable example, docs, and a numerical reference cross-check before it counts
   4. User can call `ts_residual_diagnostics_by` and receive all three residual tests plus a combined pass/fail adequacy verdict in one query
   5. Every function is verified against statsmodels/R reference outputs and documented in `docs/api/`
 **Deferred from this phase**: INTER-01 (intermittent-demand classification) — user has a more advanced approach than standard ADI/CV²; to be specified and scheduled separately.
-**Plans**: TBD
+**Plans**: 3 plans
+- [ ] 01-1-PLAN.md — ADF tracer: ts_adf / ts_adf_by end-to-end through all five layers + scaffolding (STAT-01)
+- [ ] 01-2-PLAN.md — Stationarity completion: ts_kpss + ts_stationarity four-way verdict (STAT-02, STAT-03)
+- [ ] 01-3-PLAN.md — Residual diagnostics: ts_ljung_box, ts_durbin_watson, ts_jarque_bera, ts_residual_diagnostics (RESID-01..04)
 
 ### Phase 2: Global / Panel Models
 **Goal**: SQL users can forecast a grouped panel using cross-series global learners (GlobalETS, GlobalTheta, GlobalCroston) via a panel-aware SQL surface
