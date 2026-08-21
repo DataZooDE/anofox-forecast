@@ -16,7 +16,7 @@ Each requirement is "Complete" only when ALL of the following hold:
 
 ### Stationarity Tests
 
-- [ ] **STAT-01**: User can test a series for stationarity with the Augmented Dickey-Fuller test (`ts_adf` / `ts_adf_by`), returning statistic, p-value, and lag.
+- [x] **STAT-01**: User can test a series for stationarity with the Augmented Dickey-Fuller test (`ts_adf` / `ts_adf_by`), returning statistic, p-value, and lag.
 - [ ] **STAT-02**: User can test a series for stationarity with the KPSS test (`ts_kpss` / `ts_kpss_by`), returning statistic and p-value.
 - [ ] **STAT-03**: User can get a combined ADF+KPSS stationarity verdict (`ts_stationarity` / `ts_stationarity_by`) classifying the series as stationary / trend-stationary / difference-stationary / non-stationary.
 
@@ -44,22 +44,28 @@ Each requirement is "Complete" only when ALL of the following hold:
 Deferred to a future milestone. Tracked, not in this roadmap.
 
 ### Anomaly Detection
+
 - **ANOM-01**: Streaming anomaly detection (Mahalanobis / Parade / ZBank) — `anomaly` feature already compiled in.
 
 ### Hierarchical Reconciliation
+
 - **HIER-01**: Coherent reconciliation (BottomUp / TopDown / MiddleOut / MinTrace variants).
 
 ### Forecastability / Triage
+
 - **FCST-01**: Forecastability scoring + triage (AMI, GCMI, transfer entropy, Lyapunov, STI, `run_triage`) — requires enabling the `forecastability` crate feature.
 
 ### Exogenous-Regression Track
+
 - **REGR-01**: Regression forecasters (Linear/Ridge/Auto/Polynomial) with multicollinearity/VIF diagnostics.
 - **TRAN-01**: Power transforms (Box-Cox / Yeo-Johnson + inverse) and scaling/rolling/EWM windows.
 
 ### Ensemble
+
 - **ENSB-01**: AutoEnsemble / weighted model combination as a forecast method.
 
 ### Intermittent-Demand Classification (deferred from v1)
+
 - **INTER-01**: Classify a series' demand pattern and recommend a model family. Standard ADI/CV² (Syntetos-Boylan) taxonomy was descoped from Phase 1 — the user has a more advanced classification approach to be specified separately before this is scheduled.
 
 ## Out of Scope
@@ -77,7 +83,7 @@ Deferred to a future milestone. Tracked, not in this roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| STAT-01 | Phase 1 | Pending |
+| STAT-01 | Phase 1 | Complete |
 | STAT-02 | Phase 1 | Pending |
 | STAT-03 | Phase 1 | Pending |
 | RESID-01 | Phase 1 | Pending |
@@ -93,6 +99,7 @@ Deferred to a future milestone. Tracked, not in this roadmap.
 | CLAS-03 | Phase 3 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 13 total (INTER-01 deferred to a later milestone)
 - Mapped to phases: 13 ✓
 - Unmapped: 0

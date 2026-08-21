@@ -1,10 +1,17 @@
 ---
-gsd_state_version: '1.0'
-status: planning
+gsd_state_version: 1.0
+current_phase: 01
+current_phase_name: Statistical Diagnostics
+status: executing
+stopped_at: Completed 01-1-PLAN.md (STAT-01 ADF tracer)
+last_updated: "2026-08-21T10:09:06.487Z"
+last_activity: 2026-08-21
+last_activity_desc: Phase 01 execution started
+state_head: 3e5f2defd8b2a227f04deebf2cbab3b7e97aaf99
 progress:
   total_phases: 3
   completed_phases: 0
-  total_plans: 0
+  total_plans: 3
   completed_plans: 0
   percent: 0
 ---
@@ -16,20 +23,21 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-21)
 
 **Core value:** SQL users can validate whether a series/model is statistically sound (stationarity, residual adequacy, demand regime) and can reach the crate's higher-coverage models (global + classical) — all without leaving DuckDB.
-**Current focus:** Phase 1 — Diagnostics & Demand Classification
+**Current focus:** Phase 01 — Statistical Diagnostics
 
 ## Current Position
 
-Phase: 1 of 3 (Diagnostics & Demand Classification)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-08-21 — Roadmap created; 14 requirements mapped to 3 phases
+Phase: 01 (Statistical Diagnostics) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-08-21 — Phase 01 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
 **Velocity:**
+
 - Total plans completed: 0
 - Average duration: -
 - Total execution time: 0 hours
@@ -43,10 +51,16 @@ Progress: [░░░░░░░░░░] 0%
 | 3. Classical & Multivariate Models | 0/TBD | - | - |
 
 **Recent Trend:**
+
 - Last 5 plans: none yet
 - Trend: -
 
 *Updated after each plan completion*
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 01-diagnostics-demand-classification P01-1 | 120 | 3 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -59,6 +73,8 @@ Recent decisions affecting current work:
 - Diagnostics: Will be exposed as scalar functions + `ts_*_by` macros, mirroring the existing `ts_metrics_*` surface
 - Global models: `ts_forecast_by` per-series dispatch is insufficient; panel-aware surface design must be settled in Phase 2 plan before implementation
 - VAR: Dedicated multivariate function anticipated (`ts_forecast_var_by`); column-mapping API design deferred to Phase 3 plan
+- [Phase 01]: Behavioral cross-check instead of exact numeric parity for ADF; statsmodels and anofox use different lag selection formulas
+- [Phase 01]: CLI subprocess in run_anofox.py to avoid Python duckdb package version mismatch (venv v1.5.1 vs extension v1.5.4)
 
 ### Pending Todos
 
@@ -83,6 +99,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-08-21
-Stopped at: Roadmap written; REQUIREMENTS.md traceability updated; ready to plan Phase 1
+Last session: 2026-08-21T10:09:06.472Z
+Stopped at: Completed 01-1-PLAN.md (STAT-01 ADF tracer)
 Resume file: None
