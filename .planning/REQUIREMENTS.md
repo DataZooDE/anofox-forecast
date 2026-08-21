@@ -76,30 +76,28 @@ Deferred to a future milestone. Tracked, not in this roadmap.
 
 ## Traceability
 
-Populated during roadmap creation.
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| STAT-01 | TBD | Pending |
-| STAT-02 | TBD | Pending |
-| STAT-03 | TBD | Pending |
-| RESID-01 | TBD | Pending |
-| RESID-02 | TBD | Pending |
-| RESID-03 | TBD | Pending |
-| RESID-04 | TBD | Pending |
-| INTER-01 | TBD | Pending |
-| GLOB-01 | TBD | Pending |
-| GLOB-02 | TBD | Pending |
-| GLOB-03 | TBD | Pending |
-| CLAS-01 | TBD | Pending |
-| CLAS-02 | TBD | Pending |
-| CLAS-03 | TBD | Pending |
+| STAT-01 | Phase 1 | Pending |
+| STAT-02 | Phase 1 | Pending |
+| STAT-03 | Phase 1 | Pending |
+| RESID-01 | Phase 1 | Pending |
+| RESID-02 | Phase 1 | Pending |
+| RESID-03 | Phase 1 | Pending |
+| RESID-04 | Phase 1 | Pending |
+| INTER-01 | Phase 1 | Pending |
+| GLOB-01 | Phase 2 | Pending |
+| GLOB-02 | Phase 2 | Pending |
+| GLOB-03 | Phase 2 | Pending |
+| CLAS-01 | Phase 3 | Pending |
+| CLAS-02 | Phase 3 | Pending |
+| CLAS-03 | Phase 3 | Pending |
 
 **Coverage:**
 - v1 requirements: 14 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 14 ⚠️
+- Mapped to phases: 14 ✓
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-08-21*
-*Last updated: 2026-08-21 after initial definition*
+*Last updated: 2026-08-21 — traceability populated after roadmap creation*
