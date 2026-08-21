@@ -315,6 +315,125 @@ SELECT * FROM ts_forecast_exog_by(
 
 ---
 
+## Panel / Global Forecasting (`ts_forecast_panel_by`)
+
+Global cross-series learners that fit **one shared model across all series simultaneously** and predict per-series forecasts. Unlike `ts_forecast_by` (N independent fits), panel models pool the parameter optimization across the full panel — making them faster and better-regularized when individual series are short.
+
+**Three supported methods:**
+
+| Method | Description | When to Use |
+|--------|-------------|-------------|
+| `'GlobalETS'` | Pooled ETS with automatic spec selection (`GlobalAutoETS`) | Many related series with shared seasonal dynamics |
+| `'GlobalTheta'` | Pooled Theta (Standard Theta Method, theta=2.0) | Trended panels; no seasonal config needed |
+| `'GlobalCroston'` | Pooled Croston (Classic or SBA bias correction) | Intermittent/spare-parts panels with many zeros |
+
+### Signature
+
+```sql
+ts_forecast_panel_by(
+    source_table  VARCHAR,     -- table name (quoted string)
+    group_col     IDENTIFIER,  -- series identifier (unquoted)
+    date_col      IDENTIFIER,  -- date/timestamp column (unquoted)
+    target_col    IDENTIFIER,  -- value column (unquoted)
+    method        VARCHAR,     -- 'GlobalETS' | 'GlobalTheta' | 'GlobalCroston'
+    horizon       INTEGER,     -- periods to forecast
+    frequency     VARCHAR,     -- '1d', '1h', '1mo', ...
+    params        MAP{}        -- optional; see per-method params below
+) → TABLE(group_col, forecast_step INT, date_col TIMESTAMP, yhat DOUBLE, model_name VARCHAR)
+```
+
+### Ragged panel handling
+
+Series with different lengths or start dates are automatically handled:
+1. A shared date grid is built as the **union of all dates** across the panel, at the declared `frequency`.
+2. Each series is aligned to the shared grid; gaps are filled with NaN and then imputed via linear interpolation.
+3. Series with **fewer than 10 valid observations** after alignment are **dropped** and emitted as `DROPPED: too_short` rows (not as errors).
+4. At least **3 series** must survive the drop step for the global fit to proceed.
+
+### Point forecasts only (v1)
+
+`ts_forecast_panel_by` returns point forecasts only — `yhat_lower` / `yhat_upper` are not available in this release. Prediction intervals via conformal prediction are planned for a future increment (D-Area3).
+
+### Method-specific params
+
+**GlobalETS:**
+```sql
+MAP {
+    'seasonal_period': '7',    -- period for seasonal ETS (0 or omit = non-seasonal only)
+    'model_pool': 'Reduced'    -- 'Reduced' (8 candidates, default) or 'Complete' (19)
+}
+```
+
+**GlobalTheta:** No params accepted (seasonal_period is ignored).
+
+**GlobalCroston:**
+```sql
+MAP {
+    'croston_variant': 'SBA'   -- 'Classic' (default) or 'SBA' (bias correction)
+}
+```
+
+### Examples
+
+```sql
+-- GlobalETS: weekly seasonal panel (verified end-to-end)
+SELECT uid AS series, forecast_step, ROUND(yhat, 2) AS yhat, model_name
+FROM ts_forecast_panel_by(
+    'seasonal_panel',
+    uid,
+    ds,
+    y,
+    'GlobalETS',
+    7,
+    '1d',
+    MAP {'seasonal_period': '7'}
+)
+ORDER BY series, forecast_step;
+
+-- GlobalTheta: trended panel, no seasonal config (verified end-to-end)
+SELECT product_id, forecast_step, ds, ROUND(yhat, 2) AS yhat, model_name
+FROM ts_forecast_panel_by(
+    'panel_sales',
+    product_id,
+    ds,
+    y,
+    'GlobalTheta',
+    14,
+    '1d'
+)
+ORDER BY product_id, forecast_step;
+
+-- GlobalCroston SBA: intermittent demand panel (verified end-to-end)
+SELECT item_id, forecast_step, ds, ROUND(yhat, 4) AS yhat, model_name
+FROM ts_forecast_panel_by(
+    'panel_intermittent',
+    item_id,
+    ds,
+    qty,
+    'GlobalCroston',
+    6,
+    '1d',
+    MAP {'croston_variant': 'SBA'}
+)
+ORDER BY item_id, forecast_step;
+
+-- Method comparison (GlobalETS vs GlobalTheta on same panel)
+SELECT 'GlobalETS' AS method, product_id, forecast_step, ROUND(yhat, 2) AS yhat
+FROM ts_forecast_panel_by('panel_sales', product_id, ds, y, 'GlobalETS', 7, '1d')
+UNION ALL
+SELECT 'GlobalTheta', product_id, forecast_step, ROUND(yhat, 2)
+FROM ts_forecast_panel_by('panel_sales', product_id, ds, y, 'GlobalTheta', 7, '1d')
+ORDER BY product_id, method, forecast_step;
+```
+
+### Per-method reference
+
+- [GlobalETS](../reference/models/exponential-smoothing/global_ets.md) — pooled ETS with optional seasonality
+- [GlobalTheta](../reference/models/theta/global_theta.md) — pooled Theta, minimal config
+- [GlobalCroston](../reference/models/intermittent/global_croston.md) — pooled Croston for intermittent demand
+
+---
+
 ## Explainability — inspecting fit state and decomposing forecasts
 
 Two macros expose the crate's `Inspectable` and `Explainable` surfaces

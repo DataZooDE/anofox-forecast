@@ -61,6 +61,57 @@ ts_forecast_by(
 ) → TABLE(group_col, forecast_step INT, ds, yhat DOUBLE, yhat_lower, yhat_upper, model_name)
 ```
 
+## `ts_forecast_panel_by` (panel / global models)
+
+**Fit-once-emit-many** panel API — pools parameter optimization across all series, then predicts per-series. Use when individual series are short but collectively form a large, homogeneous panel. **Three panel methods:**
+
+```sql
+ts_forecast_panel_by(
+    source VARCHAR,       -- table name (quoted string)
+    group_col COLUMN,     -- series identifier (unquoted)
+    date_col COLUMN,      -- date / timestamp (unquoted)
+    target_col COLUMN,    -- value to forecast (unquoted)
+    method VARCHAR,       -- 'GlobalETS' | 'GlobalTheta' | 'GlobalCroston'
+    horizon INTEGER,
+    frequency VARCHAR,    -- '1d', '1mo', ...
+    params MAP{}          -- optional; see below
+) → TABLE(group_col, forecast_step INT, date_col TIMESTAMP, yhat DOUBLE, model_name)
+```
+
+### Panel methods
+
+| Method | Best for | Key params |
+|---|---|---|
+| `'GlobalETS'` | Many related series, shared seasonal dynamics | `seasonal_period` (0=non-seasonal default), `model_pool` ('Reduced' default \| 'Complete') |
+| `'GlobalTheta'` | Trended panels, minimal config | none (seasonal_period ignored) |
+| `'GlobalCroston'` | Intermittent/spare-parts panels (many zeros) | `croston_variant` ('Classic' default \| 'SBA') |
+
+### Critical panel gotchas
+
+1. **Series dropped below 10 obs:** Short series after alignment emit `DROPPED: too_short` rows — not errors. Check `model_name` in the result.
+2. **Minimum 3 series after drop:** Fewer than 3 kept series → `InvalidInputException`. Ensure your panel has enough history.
+3. **Point forecasts only (v1):** `yhat_lower`/`yhat_upper` are not populated. Use `ts_conformal_by` separately if intervals needed.
+4. **TABLE arg must be a subselect:** The underlying `_ts_forecast_panel_native` uses the subselect pattern internally. Pass only a table name (quoted string) to `ts_forecast_panel_by` — do NOT pass a CTE or subquery as `source`.
+5. **GlobalCroston with all-zero panel fails:** Ensure at least one series has ≥ 2 non-zero demand events in the aligned window.
+6. **GlobalETS `seasonal_period=0`** → non-seasonal (Reduced pool, `ANN`/`AAdN`/`MNN`/`MAdN` candidates only). Period=1 has the same effect.
+
+### Panel quick examples
+
+```sql
+-- GlobalETS weekly seasonal panel
+SELECT * FROM ts_forecast_panel_by('sales', product_id, ds, y, 'GlobalETS', 14, '1d',
+    MAP {'seasonal_period': '7'});
+
+-- GlobalTheta trended panel (no config needed)
+SELECT * FROM ts_forecast_panel_by('sales', product_id, ds, y, 'GlobalTheta', 14, '1d');
+
+-- GlobalCroston SBA for spare-parts panel
+SELECT * FROM ts_forecast_panel_by('spares', item_id, ds, qty, 'GlobalCroston', 6, '1d',
+    MAP {'croston_variant': 'SBA'});
+```
+
+---
+
 ## `ts_forecast_agg` (aggregate)
 
 For custom `GROUP BY` shapes.
