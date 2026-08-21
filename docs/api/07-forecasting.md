@@ -4,11 +4,11 @@
 
 ## Overview
 
-The extension provides 33 forecasting models ranging from simple baselines to sophisticated state-space methods and streaming distributional forecasters.
+The extension provides 36 forecasting models ranging from simple baselines to sophisticated state-space methods, classical volatility models, and multivariate Vector Autoregression.
 
 **Use this document to:**
 - Generate point forecasts and prediction intervals for single or multiple series
-- Choose from 33 models: baselines (Naive, SMA), exponential smoothing (ETS, Holt-Winters), state-space (ARIMA), multi-seasonal (MSTL, TBATS), intermittent demand (Croston, TSB), and distributional (Laplace)
+- Choose from 36 models: baselines (Naive, SMA), exponential smoothing (ETS, Holt-Winters), state-space (ARIMA, Kalman), classical (GARCH), multi-seasonal (MSTL, TBATS), intermittent demand (Croston, TSB), distributional (Laplace), and multivariate (VAR)
 - Use automatic model selection (AutoETS, AutoARIMA, AutoTheta) when unsure
 - Incorporate exogenous variables with supported models
 - Understand the detect-then-forecast workflow for seasonal data
@@ -431,6 +431,147 @@ ORDER BY product_id, method, forecast_step;
 - [GlobalETS](../reference/models/exponential-smoothing/global_ets.md) — pooled ETS with optional seasonality
 - [GlobalTheta](../reference/models/theta/global_theta.md) — pooled Theta, minimal config
 - [GlobalCroston](../reference/models/intermittent/global_croston.md) — pooled Croston for intermittent demand
+
+---
+
+## Classical Models — GARCH and Kalman
+
+Univariate models for conditional volatility (GARCH) and state-space smoothing (Kalman),
+accessible via the standard `ts_forecast_by` surface with `method = 'GARCH'` or `method = 'Kalman'`.
+
+### GARCH — Conditional Volatility Forecasting
+
+> **forecast_value (yhat) is conditional VOLATILITY (std-dev), not variance.**
+> `yhat = sqrt(forecast_variance(h))`. Square it for variance: `yhat * yhat`.
+
+Use GARCH on **returns** (first differences), not raw price levels. GARCH models volatility
+clustering in financial time series: periods of high volatility tend to be followed by high
+volatility, and low by low.
+
+**Default:** GARCH(1,1). Override `p` and `q` via the `params` MAP.
+
+```sql
+-- GARCH(1,1) — conditional volatility on returns (verified end-to-end)
+CREATE OR REPLACE TABLE returns AS
+    SELECT 'Asset_A' AS asset_id,
+           DATE '2024-01-01' + INTERVAL (i) DAY AS ds,
+           0.5 * SIN(i * 0.7) + 0.3 * COS(i * 0.3) AS y
+    FROM range(40) t(i);
+
+SELECT
+    asset_id,
+    forecast_step,
+    ds,
+    ROUND(yhat, 6) AS conditional_volatility,
+    model_name
+FROM ts_forecast_by('returns', asset_id, ds, y, 'GARCH', 7, '1d')
+ORDER BY asset_id, forecast_step;
+
+-- GARCH(1,1) — explicit p=1, q=1 via params
+SELECT asset_id, forecast_step, ds, ROUND(yhat, 6) AS conditional_volatility, model_name
+FROM ts_forecast_by(
+    'returns', asset_id, ds, y, 'GARCH', 7, '1d',
+    params := MAP{'garch_p':'1','garch_q':'1'}
+)
+ORDER BY asset_id, forecast_step;
+```
+
+**Minimum observations:** p + q + 10 (GARCH(1,1): 12 minimum).
+
+See [GARCH reference](../reference/models/classical/garch.md) for full parameter docs and pitfalls.
+
+### Kalman — State-Space Smoothing + h-Step Forecasting
+
+Two state-space specifications via the `kalman_model` param:
+
+| Spec | `kalman_model` value | Description |
+|------|----------------------|-------------|
+| Local level | `'local_level'` (default) | Random walk + noise; flat h-step forecast |
+| Local linear trend | `'local_linear_trend'` | Level + slope; linearly growing/shrinking forecast |
+
+```sql
+-- Kalman local_level (default) — verified end-to-end
+CREATE OR REPLACE TABLE sales AS
+    SELECT 'Product_X' AS product_id,
+           DATE '2024-01-01' + INTERVAL (i) DAY AS ds,
+           100.0 + i * 0.8 + 5.0 * SIN(2 * PI() * i / 7.0) AS y
+    FROM range(30) t(i);
+
+SELECT product_id, forecast_step, ds, ROUND(yhat, 4) AS yhat, model_name
+FROM ts_forecast_by('sales', product_id, ds, y, 'Kalman', 7, '1d')
+ORDER BY product_id, forecast_step;
+
+-- Kalman local_linear_trend — captures trend direction
+SELECT product_id, forecast_step, ds, ROUND(yhat, 4) AS yhat, model_name
+FROM ts_forecast_by(
+    'sales', product_id, ds, y, 'Kalman', 7, '1d',
+    params := MAP{'kalman_model': 'local_linear_trend'}
+)
+ORDER BY product_id, forecast_step;
+```
+
+See [Kalman reference](../reference/models/state-space/kalman.md) for full docs.
+
+---
+
+## Multivariate Forecasting (`ts_forecast_var_by`)
+
+VAR (Vector Autoregression) fits **one model across K variables simultaneously**,
+capturing cross-variable dynamics. Unlike `ts_forecast_by` (one model per series per group),
+`ts_forecast_var_by` uses all variable columns together in a single multivariate fit.
+
+> **v1 constraint:** Single-panel only (no `group_col`). One VAR fit over the entire input table.
+> **Lag order:** Use named param `p` (not `order` — SQL reserved word).
+> **Output:** Long format — one row per (variable, horizon step).
+
+### Signature
+
+```sql
+ts_forecast_var_by(
+    source     VARCHAR,     -- source table name (quoted string)
+    date_col   VARCHAR,     -- date column name (quoted string)
+    value_cols VARCHAR[],   -- array of value column names
+    horizon    INTEGER,     -- periods to forecast
+    frequency  VARCHAR,     -- time step between observations
+    p          INTEGER,     -- lag order (named param, default: 1)
+    params     MAP          -- reserved for future use (default: MAP{})
+)
+→ TABLE(variable VARCHAR, forecast_step BIGINT, <date_col>, forecast_value DOUBLE)
+```
+
+### Examples (verified end-to-end)
+
+```sql
+-- VAR(1) — 2-variable system, 14-step ahead, long format output
+CREATE OR REPLACE TABLE var_src AS
+    SELECT
+        (DATE '2020-01-01' + INTERVAL (i) DAY) AS ds,
+        (0.6 * SIN(i * 0.4) + 0.1 * COS(i * 0.2)) AS y1,
+        (0.05 * SIN(i * 0.4) + 0.7 * COS(i * 0.2)) AS y2
+    FROM range(60) t(i);
+
+-- Returns 2 variables * 14 steps = 28 rows in long format
+SELECT * REPLACE(ROUND(forecast_value, 6) AS forecast_value)
+FROM ts_forecast_var_by('var_src', 'ds', ['y1', 'y2'], 14, '1d')
+ORDER BY variable, forecast_step;
+
+-- VAR(2) — higher lag order for longer-range cross-variable dynamics
+SELECT * REPLACE(ROUND(forecast_value, 6) AS forecast_value)
+FROM ts_forecast_var_by('var_src', 'ds', ['y1', 'y2'], 14, '1d', p:=2)
+ORDER BY variable, forecast_step;
+```
+
+### Key notes
+
+- **Input format:** Wide — one column per variable, one row per time point. Use standard DuckDB
+  pivoting (`PIVOT`) to convert long format to wide before calling `ts_forecast_var_by`.
+- **Output format:** Long — `(variable VARCHAR, forecast_step BIGINT, <date_col>, forecast_value DOUBLE)`.
+  Use DuckDB `PIVOT` on `variable` to convert back to wide format.
+- **Null handling:** Missing values are imputed via linear interpolation before fitting.
+  All `value_cols` must have the same number of valid observations after imputation.
+- **Minimum obs:** n > k × p + 1 (n = valid obs, k = number of variables, p = lag order).
+
+See [VAR reference](../reference/models/multivariate/var.md) for full docs, pitfalls, and benchmark results.
 
 ---
 
