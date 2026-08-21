@@ -11,23 +11,24 @@ a runnable example, docs, and a numerical reference cross-check before it counts
 
 ## Phases
 
-- [ ] **Phase 1: Diagnostics & Demand Classification** - Expose stationarity tests (ADF, KPSS), residual diagnostics (Ljung-Box, Durbin-Watson, Jarque-Bera), and ADI/CV² demand classification as scalar functions + `ts_*_by` macros
+- [ ] **Phase 1: Statistical Diagnostics** - Expose stationarity tests (ADF, KPSS, combined verdict) and residual diagnostics (Ljung-Box, Durbin-Watson, Jarque-Bera, combined adequacy report) as scalar functions + `ts_*_by` macros. (Demand classification / INTER-01 deferred — user has a more advanced approach to be specified separately.)
 - [ ] **Phase 2: Global / Panel Models** - Expose GlobalETS, GlobalTheta, and GlobalCroston via a panel-aware SQL surface that cross-learns across series
 - [ ] **Phase 3: Classical & Multivariate Models** - Expose GARCH and Kalman as new `ts_forecast_by` methods and VAR as a dedicated multivariate function
 
 ## Phase Details
 
-### Phase 1: Diagnostics & Demand Classification
-**Goal**: SQL users can validate a series' statistical properties and classify its demand regime without leaving DuckDB
+### Phase 1: Statistical Diagnostics
+**Goal**: SQL users can validate a series' statistical properties (stationarity, residual adequacy) without leaving DuckDB
 **Mode:** mvp
 **Depends on**: Nothing (first phase)
-**Requirements**: STAT-01, STAT-02, STAT-03, RESID-01, RESID-02, RESID-03, RESID-04, INTER-01
+**Requirements**: STAT-01, STAT-02, STAT-03, RESID-01, RESID-02, RESID-03, RESID-04
 **Success Criteria** (what must be TRUE):
   1. User can call `ts_adf_by` and `ts_kpss_by` on a grouped table and receive test statistic, p-value, and (for ADF) lag per series
   2. User can call `ts_stationarity_by` and receive a four-way verdict (stationary / trend-stationary / difference-stationary / non-stationary) combining ADF and KPSS results
   3. User can call `ts_ljung_box_by`, `ts_durbin_watson_by`, and `ts_jarque_bera_by` on residuals and receive the relevant statistic and p-value per series
   4. User can call `ts_residual_diagnostics_by` and receive all three residual tests plus a combined pass/fail adequacy verdict in one query
-  5. User can call `ts_classify_demand_by` and receive ADI, CV², and the recommended intermittent model family (smooth / erratic / lumpy / intermittent) per series; every function is verified against statsmodels/R reference outputs and documented in `docs/api/`
+  5. Every function is verified against statsmodels/R reference outputs and documented in `docs/api/`
+**Deferred from this phase**: INTER-01 (intermittent-demand classification) — user has a more advanced approach than standard ADI/CV²; to be specified and scheduled separately.
 **Plans**: TBD
 
 ### Phase 2: Global / Panel Models
@@ -60,7 +61,7 @@ a runnable example, docs, and a numerical reference cross-check before it counts
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Diagnostics & Demand Classification | 0/TBD | Not started | - |
+| 1. Statistical Diagnostics | 0/TBD | Not started | - |
 | 2. Global / Panel Models | 0/TBD | Not started | - |
 | 3. Classical & Multivariate Models | 0/TBD | Not started | - |
 

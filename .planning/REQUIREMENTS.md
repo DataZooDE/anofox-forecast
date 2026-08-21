@@ -27,10 +27,6 @@ Each requirement is "Complete" only when ALL of the following hold:
 - [ ] **RESID-03**: User can run a Jarque-Bera normality test on residuals (`ts_jarque_bera` / `ts_jarque_bera_by`).
 - [ ] **RESID-04**: User can get a combined residual-diagnostics report (`ts_residual_diagnostics_by`) returning all three tests plus a pass/fail adequacy verdict.
 
-### Intermittent-Demand Classification
-
-- [ ] **INTER-01**: User can classify a series' demand pattern via ADI/CV² taxonomy (`ts_classify_demand` / `ts_classify_demand_by`) into smooth / erratic / lumpy / intermittent, returning ADI, CV², and the recommended intermittent model family.
-
 ### Global / Panel Models
 
 - [ ] **GLOB-01**: User can forecast a grouped panel with GlobalETS (cross-series learning) via the panel-aware forecast surface.
@@ -63,6 +59,9 @@ Deferred to a future milestone. Tracked, not in this roadmap.
 ### Ensemble
 - **ENSB-01**: AutoEnsemble / weighted model combination as a forecast method.
 
+### Intermittent-Demand Classification (deferred from v1)
+- **INTER-01**: Classify a series' demand pattern and recommend a model family. Standard ADI/CV² (Syntetos-Boylan) taxonomy was descoped from Phase 1 — the user has a more advanced classification approach to be specified separately before this is scheduled.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -85,7 +84,7 @@ Deferred to a future milestone. Tracked, not in this roadmap.
 | RESID-02 | Phase 1 | Pending |
 | RESID-03 | Phase 1 | Pending |
 | RESID-04 | Phase 1 | Pending |
-| INTER-01 | Phase 1 | Pending |
+| INTER-01 | Deferred | Descoped — advanced approach TBD |
 | GLOB-01 | Phase 2 | Pending |
 | GLOB-02 | Phase 2 | Pending |
 | GLOB-03 | Phase 2 | Pending |
@@ -94,8 +93,8 @@ Deferred to a future milestone. Tracked, not in this roadmap.
 | CLAS-03 | Phase 3 | Pending |
 
 **Coverage:**
-- v1 requirements: 14 total
-- Mapped to phases: 14 ✓
+- v1 requirements: 13 total (INTER-01 deferred to a later milestone)
+- Mapped to phases: 13 ✓
 - Unmapped: 0
 
 ---
