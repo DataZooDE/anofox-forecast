@@ -2,8 +2,8 @@
 phase: 01-diagnostics-demand-classification
 plan: 3
 type: execute
-wave: 2
-depends_on: ["01-1"]
+wave: 3
+depends_on: ["01-1", "01-2"]
 files_modified:
   - crates/anofox-fcst-core/src/validation.rs
   - crates/anofox-fcst-core/src/lib.rs
