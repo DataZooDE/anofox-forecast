@@ -23,7 +23,8 @@ def run_anofox_benchmark(
     group: str = 'Daily',
     freq: str = '1d',
     extension_path: Optional[Path] = None,
-    use_community_extension: bool = True
+    use_community_extension: bool = True,
+    function_name: str = 'TS_FORECAST_BY',
 ):
     """
     Run Anofox benchmarks with specified models.
@@ -132,22 +133,40 @@ def run_anofox_benchmark(
             freq_map = {'D': '1d', 'h': '1h', 'W': '1w'}
             freq_str = freq_map.get(freq, freq)
 
-            forecast_query = f"""
-                SELECT *
-                FROM TS_FORECAST_BY(
-                    'train',
-                    unique_id,
-                    ds,
-                    y,
-                    '{model_name}',
-                    {horizon},
-                    '{freq_str}',
-                    {map_literal}
-                )
-            """
-            
+            if function_name == 'TS_FORECAST_PANEL_BY':
+                # Panel query: single call over the whole panel via ts_forecast_panel_by.
+                # Output columns: unique_id, forecast_step, ds, yhat, model_name
+                forecast_query = f"""
+                    SELECT *
+                    FROM TS_FORECAST_PANEL_BY(
+                        'train',
+                        unique_id,
+                        ds,
+                        y,
+                        '{model_name}',
+                        {horizon},
+                        '{freq_str}',
+                        {map_literal}
+                    )
+                """
+            else:
+                # Default per-series query via ts_forecast_by
+                forecast_query = f"""
+                    SELECT *
+                    FROM TS_FORECAST_BY(
+                        'train',
+                        unique_id,
+                        ds,
+                        y,
+                        '{model_name}',
+                        {horizon},
+                        '{freq_str}',
+                        {map_literal}
+                    )
+                """
+
             fcst_df = con.execute(forecast_query).fetchdf()
-            
+
             # Rename columns to standardized names (matching statsforecast format)
             # Note: group/date columns now preserve their input names (e.g., 'ds' stays 'ds')
             rename_map = {
@@ -161,15 +180,15 @@ def run_anofox_benchmark(
             elif 'lower_95' in fcst_df.columns:
                 rename_map['lower_95'] = f'{model_name}-lo-95'
                 rename_map['upper_95'] = f'{model_name}-hi-95'
-            
+
             fcst_df = fcst_df.rename(columns=rename_map)
-            
+
             # Keep only the columns we need for merging
             keep_cols = ['unique_id', 'ds', model_name]
             for col in [f'{model_name}-lo-95', f'{model_name}-hi-95']:
                 if col in fcst_df.columns:
                     keep_cols.append(col)
-            
+
             fcst_df = fcst_df[keep_cols].sort_values(['unique_id', 'ds'])
             
             elapsed_time = time.time() - start_time

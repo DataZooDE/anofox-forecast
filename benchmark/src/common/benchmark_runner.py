@@ -77,6 +77,9 @@ def create_benchmark_functions(
         print(f"Loading {dataset_display} {group} data for {benchmark_name} benchmark...")
         train_df, horizon, freq, seasonality = get_data(dataset_key, group, train=True)
 
+        # Allow config to specify the DuckDB function name (e.g., TS_FORECAST_PANEL_BY
+        # for global/panel models). Defaults to TS_FORECAST_BY for per-series benchmarks.
+        fn_name = getattr(anofox_config, 'FUNCTION_NAME', 'TS_FORECAST_BY')
         run_anofox_benchmark(
             benchmark_name=benchmark_name,
             train_df=train_df,
@@ -85,7 +88,8 @@ def create_benchmark_functions(
             models_config=anofox_config.MODELS,
             output_dir=output_dir,
             group=group,
-            freq=freq
+            freq=freq,
+            function_name=fn_name,
         )
 
     def evaluate(group: str = 'Daily', dataset: str = 'm4'):
