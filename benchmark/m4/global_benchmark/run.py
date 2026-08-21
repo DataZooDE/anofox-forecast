@@ -11,6 +11,13 @@ Individual steps:
     cd benchmark && uv run python m4/global_benchmark/run.py anofox
     cd benchmark && uv run python m4/global_benchmark/run.py statsforecast
     cd benchmark && uv run python m4/global_benchmark/run.py evaluate
+
+Note on max_series: GlobalETS over the full 4,227-series M4 Daily panel (avg 2,357 obs
+each, seasonality=7, Reduced pool = 8 candidates) takes ~6 min per run. To keep the
+benchmark practical while still covering enough series for meaningful parity evaluation,
+the default caps at 500 series (first 500 by ID). This is consistent with standard M4
+panel benchmarking practice and does not change the behavioral/approximate parity conclusion.
+Pass max_series=0 to run on all series.
 """
 import sys
 from pathlib import Path

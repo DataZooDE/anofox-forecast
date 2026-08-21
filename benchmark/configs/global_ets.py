@@ -10,6 +10,12 @@ BENCHMARK_NAME = 'global_ets'
 # The panel function fits all series jointly via GlobalETS/GlobalTheta/GlobalCroston.
 FUNCTION_NAME = 'TS_FORECAST_PANEL_BY'
 
+# Limit to a representative subset for GlobalETS (full M4 Daily = 4,227 series with
+# avg 2,357 obs and seasonality=7 takes ~6 min per GlobalETS run with Reduced pool).
+# 500 series is sufficient for behavioral/approximate parity evaluation (CONTEXT D-Area4).
+# Set to 0 to run on all series.
+MAX_SERIES = 500
+
 MODELS = [
     {
         'name': 'GlobalETS',
