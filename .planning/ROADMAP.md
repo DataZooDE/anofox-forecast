@@ -72,11 +72,11 @@ a runnable example, docs, and a numerical reference cross-check before it counts
   4. All three models are documented in `docs/api/` and `docs/reference/models/` and cross-checked against a statsforecast or R reference baseline in `benchmark/`
 
 **Risk / Design consideration**: VAR is multivariate — it accepts N value columns and returns N forecast columns, a different I/O shape from all existing univariate `ts_forecast_by` methods. A dedicated function (`ts_forecast_var` / `ts_forecast_var_by`) is the anticipated design, but the exact multivariate column-mapping API must be settled in the plan before implementation.
-**Plans**: 2/3 plans executed
+**Plans**: 3/3 plans executed
 
 - [x] 03-1-PLAN.md — GARCH + Kalman tracer: extend ForecastOptions ABI, new ModelType arms on ts_forecast_by, param plumbing, verified example (CLAS-01, CLAS-02)
 - [x] 03-2-PLAN.md — VAR multivariate surface: anofox_ts_forecast_var FFI + VARForecastResult + _ts_forecast_var_native + ts_forecast_var_by macro, long-format K→K×h output (CLAS-03)
-- [ ] 03-3-PLAN.md — Benchmarks (GARCH/Kalman/VAR vs arch/statsmodels) + docs + SKILL.md update (CLAS-01/02/03 full DoD)
+- [x] 03-3-PLAN.md — Benchmarks (GARCH/Kalman/VAR vs arch/statsmodels) + docs + SKILL.md update (CLAS-01/02/03 full DoD)
 
 ## Progress
 
@@ -84,7 +84,7 @@ a runnable example, docs, and a numerical reference cross-check before it counts
 |-------|----------------|--------|-----------|
 | 1. Statistical Diagnostics | 0/3 | Planned    |  |
 | 2. Global / Panel Models | 3/3 | Complete    | 2026-08-21 |
-| 3. Classical & Multivariate Models | 2/3 | In Progress|  |
+| 3. Classical & Multivariate Models | 3/3 | In Progress|  |
 
 ---
 *Roadmap created: 2026-08-21*
