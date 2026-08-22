@@ -1,0 +1,30 @@
+# name: test/sql/feedback.test
+# description: Feedback banner wiring: the opt-out knob exists, and errors DuckDB
+#              raises before dispatch are not annotated.
+# group: [sql]
+
+require anofox_forecast
+
+# --- Errors DuckDB raises before dispatch (binder, catalog, arity) are
+#     deliberately NOT annotated -- they are not ours, and claiming them would
+#     send users to the wrong tracker.
+statement error
+SELECT * FROM ts_features_list('bogus');
+----
+Binder Error
+
+# NOTE: no assertion here that a guarded entry point emits the issue footer.
+# The two table functions carrying DATAZOO_GUARD (ts_features_list and
+# ts_features_config_template) take no arguments and cannot fail from SQL --
+# ts_features_list() simply returns its 117 rows. The guards are in place and
+# have nothing to catch today. Add an assertion here if either grows a failure
+# mode, or when guards are extended to the ts_* scalar and aggregate surface.
+
+# --- The opt-out knob exists and is settable. The banner itself cannot be
+#     observed from a .test file at all -- stderr is not a tty here, which is
+#     precisely the guarantee that keeps this suite's expected output unchanged.
+statement ok
+SET datazoo_banner = false;
+
+statement ok
+SET datazoo_banner = true;
