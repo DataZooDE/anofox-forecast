@@ -82,7 +82,7 @@ a runnable example, docs, and a numerical reference cross-check before it counts
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Statistical Diagnostics | 0/3 | Planned    |  |
+| 1. Statistical Diagnostics | 3/3 | Complete    | 2026-08-22 |
 | 2. Global / Panel Models | 3/3 | Complete    | 2026-08-21 |
 | 3. Classical & Multivariate Models | 3/3 | Complete    | 2026-08-22 |
 
