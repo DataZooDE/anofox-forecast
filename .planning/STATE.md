@@ -1,7 +1,7 @@
 ---
 gsd_state_version: 1.0
 status: Awaiting next milestone
-stopped_at: Phase 01 complete, ready to plan Phase 02
+stopped_at: Milestone v0.6.0 complete and archived — awaiting next milestone
 last_updated: "2026-08-22T14:10:15.749Z"
 last_activity: 2026-08-22
 last_activity_desc: Milestone v0.6.0 completed and archived
@@ -12,18 +12,18 @@ progress:
   total_plans: 9
   completed_plans: 9
   percent: 100
-current_phase: 02
-current_phase_name: Global / Panel Models
+current_phase: null
+current_phase_name: null
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-21)
+See: .planning/PROJECT.md (updated 2026-08-22 after v0.6.0 milestone)
 
 **Core value:** SQL users can validate whether a series/model is statistically sound (stationarity, residual adequacy, demand regime) and can reach the crate's higher-coverage models (global + classical) — all without leaving DuckDB.
-**Current focus:** Phase 03 — Classical & Multivariate Models
+**Current focus:** Planning next milestone (`/gsd-new-milestone`)
 
 ## Current Position
 
@@ -107,8 +107,7 @@ None yet.
 
 ### Blockers/Concerns
 
-- Phase 2: Panel-aware SQL surface for GlobalETS/Theta/Croston needs design decision before coding starts — flag in Phase 2 plan
-- Phase 3: VAR multivariate I/O shape (N input columns → N forecast columns) is novel; dedicated function design required
+- None. (v0.6.0 design flags resolved: panel-aware `ts_forecast_panel_by` shipped in Phase 2; multivariate `ts_forecast_var_by` shipped in Phase 3.)
 
 ### Execution Notes (Phase 1)
 
@@ -126,9 +125,9 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 **Resume file:** None
 
-Last session: 2026-08-21T22:41:27.804Z
-Stopped at: Phase 01 complete, ready to plan Phase 02
-Resume: /gsd-autonomous --from 2  (Phase 2 needs a panel-aware SQL surface design — discuss first). Note: set workflow.use_worktrees=false to avoid worktree split-brain.
+Last session: 2026-08-22
+Stopped at: Milestone v0.6.0 complete and archived (Phases 1-3 shipped + verified; git tag v0.6.0 created locally, not pushed).
+Resume: /gsd-new-milestone to start the next milestone. Note: keep workflow.use_worktrees=false for autonomous runs on this repo (worktree split-brain).
 
 ## Operator Next Steps
 
