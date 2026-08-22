@@ -1,6 +1,6 @@
 # Milestones
 
-## v0.6.0 Close the Crate→Extension Gap (Diagnostics + Model Coverage) (Shipped: 2026-08-22)
+## v0.7.0 Close the Crate→Extension Gap (Diagnostics + Model Coverage) (Shipped: 2026-08-22)
 
 **Phases completed:** 3 phases, 9 plans, 10 tasks
 

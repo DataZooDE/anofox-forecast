@@ -1,10 +1,10 @@
 ---
 gsd_state_version: 1.0
 status: Awaiting next milestone
-stopped_at: Milestone v0.6.0 complete and archived — awaiting next milestone
+stopped_at: Milestone v0.7.0 complete and archived — awaiting next milestone
 last_updated: "2026-08-22T14:10:15.749Z"
 last_activity: 2026-08-22
-last_activity_desc: Milestone v0.6.0 completed and archived
+last_activity_desc: Milestone v0.7.0 completed and archived
 state_head: 225595f6416012451d58ffb2a91bf19cf37ce997
 progress:
   total_phases: 3
@@ -20,17 +20,17 @@ current_phase_name: null
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-22 after v0.6.0 milestone)
+See: .planning/PROJECT.md (updated 2026-08-22 after v0.7.0 milestone)
 
 **Core value:** SQL users can validate whether a series/model is statistically sound (stationarity, residual adequacy, demand regime) and can reach the crate's higher-coverage models (global + classical) — all without leaving DuckDB.
 **Current focus:** Planning next milestone (`/gsd-new-milestone`)
 
 ## Current Position
 
-Phase: Milestone v0.6.0 complete
+Phase: Milestone v0.7.0 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-08-22 — Milestone v0.6.0 completed and archived
+Last activity: 2026-08-22 — Milestone v0.7.0 completed and archived
 
 ## Performance Metrics
 
@@ -107,7 +107,7 @@ None yet.
 
 ### Blockers/Concerns
 
-- None. (v0.6.0 design flags resolved: panel-aware `ts_forecast_panel_by` shipped in Phase 2; multivariate `ts_forecast_var_by` shipped in Phase 3.)
+- None. (v0.7.0 design flags resolved: panel-aware `ts_forecast_panel_by` shipped in Phase 2; multivariate `ts_forecast_var_by` shipped in Phase 3.)
 
 ### Execution Notes (Phase 1)
 
@@ -126,7 +126,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 **Resume file:** None
 
 Last session: 2026-08-22
-Stopped at: Milestone v0.6.0 complete and archived (Phases 1-3 shipped + verified; git tag v0.6.0 created locally, not pushed).
+Stopped at: Milestone v0.7.0 complete and archived (Phases 1-3 shipped + verified; git tag v0.7.0 created locally, not pushed).
 Resume: /gsd-new-milestone to start the next milestone. Note: keep workflow.use_worktrees=false for autonomous runs on this repo (worktree split-brain).
 
 ## Operator Next Steps

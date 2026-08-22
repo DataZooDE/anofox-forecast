@@ -2,7 +2,7 @@
 
 Living retrospective across milestones. Newest milestone first.
 
-## Milestone: v0.6.0 — Close the Crate→Extension Gap (Diagnostics + Model Coverage)
+## Milestone: v0.7.0 — Close the Crate→Extension Gap (Diagnostics + Model Coverage)
 
 **Shipped:** 2026-08-22
 **Phases:** 3 | **Plans:** 9 | **Commits:** 57 | **Diff:** +17,869 / −163 across 111 files
@@ -42,4 +42,4 @@ Living retrospective across milestones. Newest milestone first.
 
 ## Cross-Milestone Trends
 
-_(first tracked milestone — trends accrue from v0.6.0 onward)_
+_(first tracked milestone — trends accrue from v0.7.0 onward)_

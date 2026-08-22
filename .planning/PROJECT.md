@@ -23,11 +23,11 @@ SQL users can validate whether a series/model is statistically sound (stationari
 - ✓ Period/seasonality detection (~15 methods), MSTL decomposition, changepoints (PELT + BOCPD), peaks — existing
 - ✓ 12 accuracy metrics, data-quality scoring, gap/null/differencing data prep — existing
 - ✓ FFI + native-table-function + SQL-macro exposure pattern; DuckDB GROUP BY parallelism (no custom threading) — existing
-- ✓ Stationarity tests: `ts_adf(_by)`, `ts_kpss(_by)`, combined `ts_stationarity(_by)` four-way verdict — v0.6.0 (statsmodels-cross-checked)
-- ✓ Residual diagnostics: `ts_ljung_box_by`, `ts_durbin_watson_by`, `ts_jarque_bera_by`, combined `ts_residual_diagnostics_by` — v0.6.0
-- ✓ Global/panel models: `ts_forecast_panel_by` (GlobalETS/GlobalTheta/GlobalCroston, cross-series learning) — v0.6.0 (statsforecast M4 parity)
-- ✓ Classical models: `ts_forecast_by` methods `'GARCH'` (conditional volatility) and `'Kalman'` (state-space) — v0.6.0
-- ✓ Multivariate: `ts_forecast_var_by` (VAR, N value columns → per-variable long-format forecasts) — v0.6.0 (statsmodels VAR parity)
+- ✓ Stationarity tests: `ts_adf(_by)`, `ts_kpss(_by)`, combined `ts_stationarity(_by)` four-way verdict — v0.7.0 (statsmodels-cross-checked)
+- ✓ Residual diagnostics: `ts_ljung_box_by`, `ts_durbin_watson_by`, `ts_jarque_bera_by`, combined `ts_residual_diagnostics_by` — v0.7.0
+- ✓ Global/panel models: `ts_forecast_panel_by` (GlobalETS/GlobalTheta/GlobalCroston, cross-series learning) — v0.7.0 (statsforecast M4 parity)
+- ✓ Classical models: `ts_forecast_by` methods `'GARCH'` (conditional volatility) and `'Kalman'` (state-space) — v0.7.0
+- ✓ Multivariate: `ts_forecast_var_by` (VAR, N value columns → per-variable long-format forecasts) — v0.7.0 (statsmodels VAR parity)
 - ✓ Milestone DoD upheld for every new function: runnable verified `examples/*.sql`, committed benchmark parity, `docs/api/` + `docs/reference/models/`, statsmodels/arch/R cross-checks
 
 ### Active
@@ -36,7 +36,7 @@ SQL users can validate whether a series/model is statistically sound (stationari
 
 - [ ] (none yet — define via `/gsd-new-milestone`)
 
-Deferred from v0.6.0 (candidates for a future milestone):
+Deferred from v0.7.0 (candidates for a future milestone):
 - Intermittent-demand classification (ADI/CV² taxonomy) — INTER-01 descoped; user has a more advanced approach TBD
 - Prediction intervals for the new global/panel + GARCH/Kalman/VAR surfaces (route through the existing conformal path)
 - VAR automatic lag-order selection (AIC/BIC); per-panel VAR; GARCH advanced coefficient overrides beyond p/q
@@ -60,8 +60,8 @@ Deferred from v0.6.0 (candidates for a future milestone):
 - **VAR** is multivariate — output/interface shape differs from univariate models; may warrant its own function rather than a `method` string on `ts_forecast_by`.
 - **Diagnostics** operate on residuals or a raw series and return scalar/struct verdicts — natural fit for scalar functions + `_by` macros, mirroring the metrics functions.
 - Verified reference: docs SQL examples must be run through the built extension, not eyeballed (established rule from PR #230).
-- **Shipped v0.6.0** (2026-08-22): +17.9k LOC across 57 commits / 111 files. Extension now surfaces 36 forecasting models (incl. GARCH, Kalman, panel Global*, multivariate VAR via `ts_forecast_var_by`) plus 7 statistical-diagnostic functions. `arch` added to `benchmark/.venv` (comparison group) for GARCH parity. New non-globbed C++ sources (`diagnostics.cpp`, `ts_forecast_panel_native.cpp`, `ts_forecast_var_native.cpp`) are explicitly listed in CMakeLists.
-- **Panel/table-in macro convention (v0.6.0 lesson):** table-in macros must wrap `query_table(...)` in a subselect `(SELECT ... FROM query_table(...))`; a bare TABLE arg silently fails to register.
+- **Shipped v0.7.0** (2026-08-22): +17.9k LOC across 57 commits / 111 files. Extension now surfaces 36 forecasting models (incl. GARCH, Kalman, panel Global*, multivariate VAR via `ts_forecast_var_by`) plus 7 statistical-diagnostic functions. `arch` added to `benchmark/.venv` (comparison group) for GARCH parity. New non-globbed C++ sources (`diagnostics.cpp`, `ts_forecast_panel_native.cpp`, `ts_forecast_var_native.cpp`) are explicitly listed in CMakeLists.
+- **Panel/table-in macro convention (v0.7.0 lesson):** table-in macros must wrap `query_table(...)` in a subselect `(SELECT ... FROM query_table(...))`; a bare TABLE arg silently fails to register.
 
 ## Constraints
 
@@ -75,7 +75,7 @@ Deferred from v0.6.0 (candidates for a future milestone):
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Scope milestone to diagnostics + model coverage (defer anomaly, reconciliation, triage) | Both chosen themes reuse already-enabled crate features and the existing exposure pattern; lower risk than new-feature-flag work | ✓ Good — v0.6.0 shipped all diagnostics + 6 new models via the existing pattern with no new crate feature flags |
+| Scope milestone to diagnostics + model coverage (defer anomaly, reconciliation, triage) | Both chosen themes reuse already-enabled crate features and the existing exposure pattern; lower risk than new-feature-flag work | ✓ Good — v0.7.0 shipped all diagnostics + 6 new models via the existing pattern with no new crate feature flags |
 | Expose diagnostics as scalar functions + `ts_*_by` macros | Mirrors existing metrics surface; returns scalar/struct verdicts per series | ✓ Good — 7 diagnostic functions shipped, statsmodels-cross-checked |
 | Global/panel models need a panel-aware SQL surface | GlobalETS/Theta/Croston cross-learn across series; per-series `ts_forecast_by` dispatch is insufficient | ✓ Good — `ts_forecast_panel_by` fit-once-emit-many native table function delivered |
 | VAR is a dedicated multivariate function (`ts_forecast_var_by`), not a `method` string | Multivariate I/O shape (N cols → N forecasts) differs from univariate `ts_forecast_by` | ✓ Good — long-format `{variable, forecast_date, forecast_value}` surface delivered |
@@ -101,4 +101,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-22 after v0.6.0 milestone*
+*Last updated: 2026-08-22 after v0.7.0 milestone*
