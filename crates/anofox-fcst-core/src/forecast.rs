@@ -925,9 +925,12 @@ pub fn forecast_with_exog(
     // For fitted values calculation, use the requested model
     let model = options.model;
 
-    // Calculate confidence intervals
-    let (lower, upper) =
-        calculate_confidence_intervals(&result.point, &clean_values, options.confidence_level);
+    // Calculate confidence intervals — skip for GARCH and Kalman (no synthetic
+    // historical-volatility bounds on volatility forecasts or state-space outputs).
+    let (lower, upper) = match options.model {
+        ModelType::GARCH | ModelType::Kalman => (vec![], vec![]),
+        _ => calculate_confidence_intervals(&result.point, &clean_values, options.confidence_level),
+    };
 
     // Calculate fitted values and residuals if requested
     let (fitted, residuals) = if options.include_fitted || options.include_residuals {
