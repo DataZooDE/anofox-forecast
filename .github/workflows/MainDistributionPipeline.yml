@@ -23,6 +23,12 @@ jobs:
     with:
       duckdb_version: v1.4.5
       ci_tools_version: v1.4-andium
+      # Override the stale vcpkg commit that v1.4-andium defaults to
+      # (ce613c41…): its OpenSSL port fetches msys2-runtime-3.5.4-2, which has
+      # been pruned from all msys2 mirrors (404) and breaks the Windows build.
+      # Pin the same vcpkg commit the green v1.5.5 lane uses (v1.5-variegata
+      # default), whose OpenSSL pulls an available msys2-runtime.
+      vcpkg_commit: "84bab45d415d22042bd0b9081aea57f362da3f35"
       extension_name: anofox_forecast
       enable_rust: true
       # windows_amd64_rtools: only needed for R package builds
