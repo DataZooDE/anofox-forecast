@@ -735,9 +735,14 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         ),
     }?;
 
-    // Calculate confidence intervals
-    let (lower, upper) =
-        calculate_confidence_intervals(&result.point, &clean_values, options.confidence_level);
+    // Calculate confidence intervals — skip for models that document no v1 intervals.
+    // GARCH point forecasts are conditional standard deviations (not level forecasts), so
+    // wrapping them with ±z×σ_historical produces meaningless bounds. Kalman v1 likewise
+    // has no prediction intervals. Emit empty vecs for both, matching the docs.
+    let (lower, upper) = match options.model {
+        ModelType::GARCH | ModelType::Kalman => (vec![], vec![]),
+        _ => calculate_confidence_intervals(&result.point, &clean_values, options.confidence_level),
+    };
 
     // Calculate fitted values and residuals if requested
     let (fitted, residuals) = if options.include_fitted || options.include_residuals {
