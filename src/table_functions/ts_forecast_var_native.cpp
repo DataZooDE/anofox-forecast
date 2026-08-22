@@ -463,14 +463,30 @@ static OperatorFinalizeResultType TsForecastVarNativeFinalize(
                 min_valid, max_valid);
         }
 
-        // Soft under-determination check (Pitfall 5): n_eff < k*order+1 → error
+        // Early under-determination check (Pitfall 5): n_eff < k*order+1 → error.
+        //
+        // DIVERGENCE NOTE: n_eff here is the count of non-NaN values in the *pre-imputation*
+        // data. Rust's anofox_ts_forecast_var calls fill_nulls_interpolate internally, which
+        // can fill scattered NaN values through linear interpolation, changing the effective
+        // observation count before fitting. This means:
+        //   - If interpolation fills NaN values: this guard may be more conservative than
+        //     necessary (some inputs rejected here would succeed in Rust).
+        //   - If the series has leading NaN values that cannot be interpolated: Rust truncates
+        //     the series and the effective n post-imputation may be smaller than n_eff here,
+        //     meaning this guard passes but Rust still returns InsufficientData.
+        //
+        // This guard is therefore advisory / defence-in-depth for the common case. The
+        // authoritative underdetermination check is the Rust-side InsufficientData error
+        // returned via the out_error path at line 507, which fires on the actual
+        // post-imputation observation count. Both paths produce a clear error message for
+        // the user.
         size_t n_eff = min_valid;
         size_t order = static_cast<size_t>(bind_data.order);
         size_t min_required = k_vars * order + 1;
         if (n_eff < min_required) {
             throw InvalidInputException(
                 "ts_forecast_var_by: insufficient observations for VAR(%zu) with %zu variables. "
-                "Need at least k*p+1=%zu valid observations, got %zu. "
+                "Need at least k*p+1=%zu valid observations, got %zu (pre-imputation count). "
                 "Reduce order or provide more data.",
                 order, k_vars, min_required, n_eff);
         }
