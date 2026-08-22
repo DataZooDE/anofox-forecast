@@ -744,21 +744,29 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         _ => calculate_confidence_intervals(&result.point, &clean_values, options.confidence_level),
     };
 
-    // Calculate fitted values and residuals if requested
+    // Calculate fitted values and residuals if requested.
+    // Some models (GARCH, Kalman) return empty fitted from calculate_fitted_values — treat
+    // empty as "not available" and emit None for both fitted and residuals rather than
+    // propagating SES-approximated values that would be semantically wrong.
     let (fitted, residuals) = if options.include_fitted || options.include_residuals {
-        let fitted = calculate_fitted_values(&clean_values, options.model, period);
-        let residuals = if options.include_residuals {
-            Some(
-                clean_values
-                    .iter()
-                    .zip(fitted.iter())
-                    .map(|(a, f)| a - f)
-                    .collect(),
-            )
+        let fitted_vec = calculate_fitted_values(&clean_values, options.model, period);
+        if fitted_vec.is_empty() {
+            // Model does not surface fitted values in v1; return NULL for both.
+            (None, None)
         } else {
-            None
-        };
-        (Some(fitted), residuals)
+            let residuals = if options.include_residuals {
+                Some(
+                    clean_values
+                        .iter()
+                        .zip(fitted_vec.iter())
+                        .map(|(a, f)| a - f)
+                        .collect(),
+                )
+            } else {
+                None
+            };
+            (Some(fitted_vec), residuals)
+        }
     } else {
         (None, None)
     };
@@ -2713,6 +2721,10 @@ fn calculate_confidence_intervals(
 
 fn calculate_fitted_values(values: &[f64], model: ModelType, period: usize) -> Vec<f64> {
     match model {
+        // GARCH and Kalman do not surface true fitted values in v1.
+        // Return empty so the caller emits NULL for fitted/residuals rather than
+        // the misleading SES-approximated values the catch-all would produce.
+        ModelType::GARCH | ModelType::Kalman => vec![],
         ModelType::Naive => {
             let mut fitted = vec![values[0]];
             fitted.extend(values[..values.len() - 1].iter().cloned());
