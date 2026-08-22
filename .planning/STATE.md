@@ -1,19 +1,19 @@
 ---
 gsd_state_version: 1.0
-current_phase: 02
-current_phase_name: Global / Panel Models
-status: planning
+status: Awaiting next milestone
 stopped_at: Phase 01 complete, ready to plan Phase 02
-last_updated: "2026-08-22T13:54:14.763Z"
+last_updated: "2026-08-22T14:10:15.749Z"
 last_activity: 2026-08-22
-last_activity_desc: Phase 01 complete, transitioned to Phase 02
-state_head: 71a428f9e178a33c9c35a206c5f372042aeee3e4
+last_activity_desc: Milestone v0.6.0 completed and archived
+state_head: 225595f6416012451d58ffb2a91bf19cf37ce997
 progress:
   total_phases: 3
   completed_phases: 3
   total_plans: 9
   completed_plans: 9
   percent: 100
+current_phase: 02
+current_phase_name: Global / Panel Models
 ---
 
 # Project State
@@ -27,12 +27,10 @@ See: .planning/PROJECT.md (updated 2026-08-21)
 
 ## Current Position
 
-Phase: 02 — Global / Panel Models
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-08-22 — Phase 01 complete, transitioned to Phase 02
-
-Progress: [███░░░░░░░] 33%
+Phase: Milestone v0.6.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-08-22 — Milestone v0.6.0 completed and archived
 
 ## Performance Metrics
 
@@ -131,3 +129,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 Last session: 2026-08-21T22:41:27.804Z
 Stopped at: Phase 01 complete, ready to plan Phase 02
 Resume: /gsd-autonomous --from 2  (Phase 2 needs a panel-aware SQL surface design — discuss first). Note: set workflow.use_worktrees=false to avoid worktree split-brain.
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone
