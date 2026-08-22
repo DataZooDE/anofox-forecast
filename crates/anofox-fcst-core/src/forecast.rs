@@ -2763,7 +2763,7 @@ fn calculate_fitted_values(values: &[f64], model: ModelType, period: usize) -> V
     }
 }
 
-/// List all available model names (32 models matching C++ extension).
+/// List all available model names (34 models matching C++ extension).
 /// See: <https://github.com/DataZooDE/anofox-forecast/blob/main/docs/API_REFERENCE.md#supported-models>
 pub fn list_models() -> Vec<String> {
     vec![
@@ -2809,6 +2809,9 @@ pub fn list_models() -> Vec<String> {
         "TSB",
         // Distributional Models (1)
         "Laplace",
+        // Classical Models (2) — Phase 3 additions
+        "GARCH",
+        "Kalman",
     ]
     .into_iter()
     .map(String::from)
