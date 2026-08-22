@@ -11,20 +11,37 @@ use std::ptr;
 #[cfg(not(target_family = "wasm"))]
 use libc::{free, malloc};
 
+// WASM allocator — size-prefixed to satisfy Rust's dealloc(Layout) contract.
+// See lib.rs for full explanation. This file uses the identical header format:
+//   [ usize header (size of data region) | data ... ]
+//                                          ^-- returned pointer
+// Both files must match so that pointers allocated in one can be freed by the other.
 #[cfg(target_family = "wasm")]
 unsafe fn malloc(size: usize) -> *mut core::ffi::c_void {
     use std::alloc::{alloc, Layout};
-    let layout = Layout::from_size_align(size, 8).expect("8-byte alignment is always valid");
-    alloc(layout) as *mut core::ffi::c_void
+    use std::mem::size_of;
+    let total = size_of::<usize>().checked_add(size).expect("allocation size overflow");
+    let layout = Layout::from_size_align(total, 8).expect("8-byte alignment is always valid");
+    let base = alloc(layout);
+    if base.is_null() {
+        return base as *mut core::ffi::c_void;
+    }
+    *(base as *mut usize) = size;
+    base.add(size_of::<usize>()) as *mut core::ffi::c_void
 }
 
 #[cfg(target_family = "wasm")]
 unsafe fn free(ptr: *mut core::ffi::c_void) {
     use std::alloc::{dealloc, Layout};
-    if !ptr.is_null() {
-        let layout = Layout::from_size_align(1, 8).expect("8-byte alignment is always valid");
-        dealloc(ptr as *mut u8, layout);
+    use std::mem::size_of;
+    if ptr.is_null() {
+        return;
     }
+    let base = (ptr as *mut u8).sub(size_of::<usize>());
+    let size = *(base as *const usize);
+    let total = size_of::<usize>().checked_add(size).expect("allocation size overflow");
+    let layout = Layout::from_size_align(total, 8).expect("8-byte alignment is always valid");
+    dealloc(base, layout);
 }
 
 /// Allocate a C array of doubles.

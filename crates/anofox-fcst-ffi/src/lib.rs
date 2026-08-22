@@ -34,28 +34,50 @@ type size_t = usize;
 #[cfg(not(target_family = "wasm"))]
 use libc::{free, malloc};
 
+// WASM allocator — size-prefixed to satisfy Rust's dealloc(Layout) contract.
+//
+// Rust's global allocator requires that `dealloc` is called with the exact same `Layout` as
+// `alloc`. On WASM there is no libc free() that carries its own size metadata, so a hardcoded
+// layout would be UB. We solve this by prepending a `usize` header that stores the requested
+// allocation size; `free` reads it back to reconstruct the correct Layout.
+//
+// Memory layout per allocation:
+//   [ usize header (size of data region) | data ... ]
+//                                         ^-- returned pointer
+//
+// Total allocation: size_of::<usize>() + size bytes, aligned to 8.
+// This is compatible across all alloc/free pairings in both lib.rs and allocation.rs
+// as long as both files use the identical header format (they do — see allocation.rs).
 #[cfg(target_family = "wasm")]
 unsafe fn malloc(size: usize) -> *mut core::ffi::c_void {
     use std::alloc::{alloc, Layout};
-    let layout = Layout::from_size_align(size, 8).expect("8-byte alignment is always valid");
-    alloc(layout) as *mut core::ffi::c_void
+    use std::mem::size_of;
+    // Allocate header + data. Alignment 8 covers both usize (≤8 bytes) and f64 (8 bytes).
+    let total = size_of::<usize>().checked_add(size).expect("allocation size overflow");
+    let layout = Layout::from_size_align(total, 8).expect("8-byte alignment is always valid");
+    let base = alloc(layout);
+    if base.is_null() {
+        return base as *mut core::ffi::c_void;
+    }
+    // Store the data size (not the total) in the header for dealloc.
+    *(base as *mut usize) = size;
+    // Return pointer to the data region (after the header).
+    base.add(size_of::<usize>()) as *mut core::ffi::c_void
 }
 
 #[cfg(target_family = "wasm")]
 unsafe fn free(ptr: *mut core::ffi::c_void) {
     use std::alloc::{dealloc, Layout};
-    if !ptr.is_null() {
-        // SAFETY NOTE: The Rust allocator contract requires that `dealloc` receives the exact
-        // same `Layout` used during the corresponding `alloc` call. On WASM the Rust global
-        // allocator is used for these buffers (not DuckDB's allocator), so passing a mismatched
-        // layout is technically undefined behaviour. The size used here (8 bytes, align 8) is a
-        // conservative placeholder; a correct implementation would store the allocation size in a
-        // header alongside the allocation. This stub is retained for WASM build compatibility
-        // while the proper fix (size-tracked header or arena) is pending.
-        // TODO: replace with size-tracked header or arena allocator to eliminate the UB path.
-        let layout = Layout::from_size_align(8, 8).expect("8-byte alignment is always valid");
-        dealloc(ptr as *mut u8, layout);
+    use std::mem::size_of;
+    if ptr.is_null() {
+        return;
     }
+    // Recover base pointer and stored size from the header.
+    let base = (ptr as *mut u8).sub(size_of::<usize>());
+    let size = *(base as *const usize);
+    let total = size_of::<usize>().checked_add(size).expect("allocation size overflow");
+    let layout = Layout::from_size_align(total, 8).expect("8-byte alignment is always valid");
+    dealloc(base, layout);
 }
 
 pub use types::*;
