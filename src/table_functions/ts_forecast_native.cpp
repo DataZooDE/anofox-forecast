@@ -745,8 +745,15 @@ static OperatorFinalizeResultType TsForecastNativeFinalize(
                 }
 
                 row.point_forecast = fcst_result.point_forecasts[i];
-                row.lower_90 = fcst_result.lower_bounds[i];
-                row.upper_90 = fcst_result.upper_bounds[i];
+                // lower_bounds / upper_bounds are null when the model does not provide
+                // prediction intervals (e.g. GARCH, Kalman in v1). Use NaN as sentinel
+                // so the output layer can emit SQL NULL rather than crashing.
+                row.lower_90 = (fcst_result.lower_bounds != nullptr)
+                    ? fcst_result.lower_bounds[i]
+                    : std::numeric_limits<double>::quiet_NaN();
+                row.upper_90 = (fcst_result.upper_bounds != nullptr)
+                    ? fcst_result.upper_bounds[i]
+                    : std::numeric_limits<double>::quiet_NaN();
                 row.model_name = string(fcst_result.model_name);
 
                 gstate.results.push_back(row);
@@ -800,9 +807,14 @@ static OperatorFinalizeResultType TsForecastNativeFinalize(
         }
 
         // point_forecast, lower_90, upper_90
+        // NaN sentinel (set above) means "no interval" — emit SQL NULL.
         output.data[3].SetValue(i, Value::DOUBLE(row.point_forecast));
-        output.data[4].SetValue(i, Value::DOUBLE(row.lower_90));
-        output.data[5].SetValue(i, Value::DOUBLE(row.upper_90));
+        output.data[4].SetValue(i, std::isnan(row.lower_90)
+            ? Value(LogicalType::DOUBLE)
+            : Value::DOUBLE(row.lower_90));
+        output.data[5].SetValue(i, std::isnan(row.upper_90)
+            ? Value(LogicalType::DOUBLE)
+            : Value::DOUBLE(row.upper_90));
 
         // model_name
         output.data[6].SetValue(i, Value(row.model_name));

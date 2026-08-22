@@ -528,8 +528,16 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
             struct_values.push_back(make_pair("forecast_step", Value::INTEGER(static_cast<int32_t>(step))));
             struct_values.push_back(make_pair("ds", MicrosToDateValue(forecast_date, bind_data.date_col_type)));
             struct_values.push_back(make_pair("yhat", Value::DOUBLE(fcst_result.point_forecasts[i])));
-            struct_values.push_back(make_pair("yhat_lower", Value::DOUBLE(fcst_result.lower_bounds[i])));
-            struct_values.push_back(make_pair("yhat_upper", Value::DOUBLE(fcst_result.upper_bounds[i])));
+            // lower_bounds / upper_bounds are null when the model does not provide prediction
+            // intervals (e.g. GARCH, Kalman in v1). Emit SQL NULL rather than crashing.
+            struct_values.push_back(make_pair("yhat_lower",
+                (fcst_result.lower_bounds != nullptr)
+                    ? Value::DOUBLE(fcst_result.lower_bounds[i])
+                    : Value(LogicalType::DOUBLE)));
+            struct_values.push_back(make_pair("yhat_upper",
+                (fcst_result.upper_bounds != nullptr)
+                    ? Value::DOUBLE(fcst_result.upper_bounds[i])
+                    : Value(LogicalType::DOUBLE)));
             struct_values.push_back(make_pair("model_name", Value(string(fcst_result.model_name))));
 
             forecast_structs.push_back(Value::STRUCT(std::move(struct_values)));
