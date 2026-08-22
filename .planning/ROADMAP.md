@@ -13,7 +13,7 @@ a runnable example, docs, and a numerical reference cross-check before it counts
 
 - [x] **Phase 1: Statistical Diagnostics** - Expose stationarity tests (ADF, KPSS, combined verdict) and residual diagnostics (Ljung-Box, Durbin-Watson, Jarque-Bera, combined adequacy report) as scalar functions + `ts_*_by` macros. (Demand classification / INTER-01 deferred — user has a more advanced approach to be specified separately.)
 - [x] **Phase 2: Global / Panel Models** - Expose GlobalETS, GlobalTheta, and GlobalCroston via a panel-aware SQL surface that cross-learns across series (completed 2026-08-21)
-- [ ] **Phase 3: Classical & Multivariate Models** - Expose GARCH and Kalman as new `ts_forecast_by` methods and VAR as a dedicated multivariate function
+- [x] **Phase 3: Classical & Multivariate Models** - Expose GARCH and Kalman as new `ts_forecast_by` methods and VAR as a dedicated multivariate function (completed 2026-08-22)
 
 ## Phase Details
 
@@ -84,7 +84,7 @@ a runnable example, docs, and a numerical reference cross-check before it counts
 |-------|----------------|--------|-----------|
 | 1. Statistical Diagnostics | 0/3 | Planned    |  |
 | 2. Global / Panel Models | 3/3 | Complete    | 2026-08-21 |
-| 3. Classical & Multivariate Models | 3/3 | In Progress|  |
+| 3. Classical & Multivariate Models | 3/3 | Complete    | 2026-08-22 |
 
 ---
 *Roadmap created: 2026-08-21*
