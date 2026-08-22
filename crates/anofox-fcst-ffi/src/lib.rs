@@ -10,6 +10,16 @@
 //! - `conversion` - Parameter conversion helpers
 //! - `allocation` - Memory allocation helpers
 
+// Newer clippy lints, firing after a stable-toolchain bump past this repo's last
+// green CI. Suppressed rather than rewritten: the `.is_multiple_of()`/`.div_ceil()`
+// method forms are newer than the project MSRV (Rust 1.86; `is_multiple_of`
+// stabilized in 1.87), the many-arg exports are idiomatic at the C FFI boundary,
+// and the aligned doc-comment argument lists are intentional for readability.
+#![allow(clippy::doc_overindented_list_items)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::manual_div_ceil)]
+#![allow(clippy::manual_is_multiple_of)]
+
 pub mod allocation;
 pub mod conversion;
 pub mod error_handling;
@@ -53,7 +63,9 @@ unsafe fn malloc(size: usize) -> *mut core::ffi::c_void {
     use std::alloc::{alloc, Layout};
     use std::mem::size_of;
     // Allocate header + data. Alignment 8 covers both usize (≤8 bytes) and f64 (8 bytes).
-    let total = size_of::<usize>().checked_add(size).expect("allocation size overflow");
+    let total = size_of::<usize>()
+        .checked_add(size)
+        .expect("allocation size overflow");
     let layout = Layout::from_size_align(total, 8).expect("8-byte alignment is always valid");
     let base = alloc(layout);
     if base.is_null() {
@@ -75,7 +87,9 @@ unsafe fn free(ptr: *mut core::ffi::c_void) {
     // Recover base pointer and stored size from the header.
     let base = (ptr as *mut u8).sub(size_of::<usize>());
     let size = *(base as *const usize);
-    let total = size_of::<usize>().checked_add(size).expect("allocation size overflow");
+    let total = size_of::<usize>()
+        .checked_add(size)
+        .expect("allocation size overflow");
     let layout = Layout::from_size_align(total, 8).expect("8-byte alignment is always valid");
     dealloc(base, layout);
 }
@@ -6737,7 +6751,11 @@ pub unsafe extern "C" fn anofox_ts_ljung_box(
             true
         }
         Err(_) => {
-            set_error(out_error, ErrorCode::PanicCaught, "Panic in anofox_ts_ljung_box");
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in anofox_ts_ljung_box",
+            );
             false
         }
     }
@@ -6778,7 +6796,11 @@ pub unsafe extern "C" fn anofox_ts_durbin_watson(
             true
         }
         Err(_) => {
-            set_error(out_error, ErrorCode::PanicCaught, "Panic in anofox_ts_durbin_watson");
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in anofox_ts_durbin_watson",
+            );
             false
         }
     }
@@ -6818,7 +6840,11 @@ pub unsafe extern "C" fn anofox_ts_jarque_bera(
             true
         }
         Err(_) => {
-            set_error(out_error, ErrorCode::PanicCaught, "Panic in anofox_ts_jarque_bera");
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in anofox_ts_jarque_bera",
+            );
             false
         }
     }
@@ -6889,10 +6915,10 @@ pub unsafe extern "C" fn anofox_ts_residual_diagnostics(
 // ============================================================================
 
 // Imports for global panel models (Phase 2: GLOB-01..03)
-use anofox_forecast::models::exponential::{GlobalAutoETS, ModelPool};
-use anofox_forecast::models::theta::GlobalTheta;
-use anofox_forecast::models::intermittent::GlobalCroston;
 use anofox_fcst_core::fill_nulls_interpolate;
+use anofox_forecast::models::exponential::{GlobalAutoETS, ModelPool};
+use anofox_forecast::models::intermittent::GlobalCroston;
+use anofox_forecast::models::theta::GlobalTheta;
 
 /// Error type used by panel FFI impl — wraps upstream ForecastError for uniformity.
 #[derive(Debug)]
@@ -6966,7 +6992,11 @@ pub(crate) fn forecast_panel_impl(
             // period=0 means "non-seasonal"; map to 1 so the ETS update loop
             // (`t % period`) never divides by zero. With period=1, has_seasonal
             // evaluates to false and only non-seasonal candidates are tried.
-            let safe_period = if seasonal_period == 0 { 1 } else { seasonal_period };
+            let safe_period = if seasonal_period == 0 {
+                1
+            } else {
+                seasonal_period
+            };
             let mut model = GlobalAutoETS::new(safe_period, pool);
             model.fit(&panel)?;
             Ok(model.predict(horizon))
@@ -7051,26 +7081,42 @@ pub unsafe extern "C" fn anofox_ts_forecast_panel(
         let variant_str: Option<&str> = if variant.is_null() {
             None
         } else {
-            CStr::from_ptr(variant).to_str().ok().filter(|s| !s.is_empty())
+            CStr::from_ptr(variant)
+                .to_str()
+                .ok()
+                .filter(|s| !s.is_empty())
         };
 
         // Parse optional model_pool (used by GlobalETS — "Complete" or None/empty = Reduced)
         let model_pool_str: Option<&str> = if model_pool.is_null() {
             None
         } else {
-            CStr::from_ptr(model_pool).to_str().ok().filter(|s| !s.is_empty())
+            CStr::from_ptr(model_pool)
+                .to_str()
+                .ok()
+                .filter(|s| !s.is_empty())
         };
 
         // Slice the flat matrix — Rust owns nothing, just a view
-        let len = n_series.checked_mul(series_len)
-            .ok_or_else(|| PanelForecastError::InvalidModel(
-                "Panel dimensions overflow (n_series * series_len > usize::MAX)".into()
-            ))?;
+        let len = n_series.checked_mul(series_len).ok_or_else(|| {
+            PanelForecastError::InvalidModel(
+                "Panel dimensions overflow (n_series * series_len > usize::MAX)".into(),
+            )
+        })?;
         let flat = std::slice::from_raw_parts(values, len);
 
         // Inner logic (testable separately)
-        forecast_panel_impl(flat, n_series, series_len, method_str, horizon, seasonal_period, model_pool_str, variant_str)
-            .map(|preds| (preds, method_str.to_owned()))
+        forecast_panel_impl(
+            flat,
+            n_series,
+            series_len,
+            method_str,
+            horizon,
+            seasonal_period,
+            model_pool_str,
+            variant_str,
+        )
+        .map(|preds| (preds, method_str.to_owned()))
     }));
 
     match result {
@@ -7140,9 +7186,9 @@ pub unsafe extern "C" fn anofox_ts_forecast_panel(
                 // Map PanelForecastError variant to ErrorCode
                 let code = match &e {
                     PanelForecastError::InvalidModel(_) => ErrorCode::InvalidModel,
-                    PanelForecastError::Upstream(anofox_forecast::ForecastError::InsufficientData { .. }) => {
-                        ErrorCode::InsufficientData
-                    }
+                    PanelForecastError::Upstream(
+                        anofox_forecast::ForecastError::InsufficientData { .. },
+                    ) => ErrorCode::InsufficientData,
                     _ => ErrorCode::ComputationError,
                 };
                 (*out_error).set_error(code, &e.to_string());
@@ -7212,7 +7258,11 @@ mod panel_ffi_tests {
         for (i, series_preds) in preds.iter().enumerate() {
             assert_eq!(series_preds.len(), 4, "expected horizon=4 for series {}", i);
             for &v in series_preds {
-                assert!(v.is_finite(), "expected finite forecast, got NaN/Inf for series {}", i);
+                assert!(
+                    v.is_finite(),
+                    "expected finite forecast, got NaN/Inf for series {}",
+                    i
+                );
             }
         }
     }
@@ -7228,7 +7278,11 @@ mod panel_ffi_tests {
         let flat = flat_from_series(series);
 
         let result = forecast_panel_impl(&flat, 3, 12, "GlobalETS", 4, 0, None, None);
-        assert!(result.is_ok(), "expected Ok after NaN imputation, got: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "expected Ok after NaN imputation, got: {:?}",
+            result.err()
+        );
         let preds = result.unwrap();
         assert_eq!(preds.len(), 3);
         for series_preds in &preds {
@@ -7269,13 +7323,21 @@ mod panel_ffi_tests {
         let flat = flat_from_series(series);
 
         let result = forecast_panel_impl(&flat, 3, 12, "GlobalTheta", 4, 0, None, None);
-        assert!(result.is_ok(), "GlobalTheta expected Ok, got: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "GlobalTheta expected Ok, got: {:?}",
+            result.err()
+        );
         let preds = result.unwrap();
         assert_eq!(preds.len(), 3, "expected 3 series forecasts");
         for (i, series_preds) in preds.iter().enumerate() {
             assert_eq!(series_preds.len(), 4, "expected horizon=4 for series {}", i);
             for &v in series_preds {
-                assert!(v.is_finite(), "expected finite Theta forecast for series {}", i);
+                assert!(
+                    v.is_finite(),
+                    "expected finite Theta forecast for series {}",
+                    i
+                );
             }
         }
     }
@@ -7292,14 +7354,27 @@ mod panel_ffi_tests {
         let flat = flat_from_series(series);
 
         let result = forecast_panel_impl(&flat, 3, 12, "GlobalCroston", 4, 0, None, None);
-        assert!(result.is_ok(), "GlobalCroston Classic expected Ok, got: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "GlobalCroston Classic expected Ok, got: {:?}",
+            result.err()
+        );
         let preds = result.unwrap();
         assert_eq!(preds.len(), 3, "expected 3 series forecasts");
         for (i, series_preds) in preds.iter().enumerate() {
             assert_eq!(series_preds.len(), 4, "expected horizon=4 for series {}", i);
             for &v in series_preds {
-                assert!(v.is_finite(), "expected finite Croston Classic forecast for series {}", i);
-                assert!(v >= 0.0, "Croston forecasts must be non-negative, got {} for series {}", v, i);
+                assert!(
+                    v.is_finite(),
+                    "expected finite Croston Classic forecast for series {}",
+                    i
+                );
+                assert!(
+                    v >= 0.0,
+                    "Croston forecasts must be non-negative, got {} for series {}",
+                    v,
+                    i
+                );
             }
             // Croston is a flat forecast: all horizon steps should be equal
             let first = series_preds[0];
@@ -7307,7 +7382,9 @@ mod panel_ffi_tests {
                 assert!(
                     (v - first).abs() < 1e-10,
                     "Croston Classic should be flat (constant) per series {}: {} != {}",
-                    i, v, first
+                    i,
+                    v,
+                    first
                 );
             }
         }
@@ -7323,10 +7400,19 @@ mod panel_ffi_tests {
         let flat = flat_from_series(series);
 
         let classic_result = forecast_panel_impl(&flat, 3, 12, "GlobalCroston", 4, 0, None, None);
-        let sba_result = forecast_panel_impl(&flat, 3, 12, "GlobalCroston", 4, 0, None, Some("SBA"));
+        let sba_result =
+            forecast_panel_impl(&flat, 3, 12, "GlobalCroston", 4, 0, None, Some("SBA"));
 
-        assert!(classic_result.is_ok(), "Classic expected Ok, got: {:?}", classic_result.err());
-        assert!(sba_result.is_ok(), "SBA expected Ok, got: {:?}", sba_result.err());
+        assert!(
+            classic_result.is_ok(),
+            "Classic expected Ok, got: {:?}",
+            classic_result.err()
+        );
+        assert!(
+            sba_result.is_ok(),
+            "SBA expected Ok, got: {:?}",
+            sba_result.err()
+        );
 
         let classic_preds = classic_result.unwrap();
         let sba_preds = sba_result.unwrap();
@@ -7338,17 +7424,22 @@ mod panel_ffi_tests {
             let s = sba_preds[i][0];
             assert!(
                 s.is_finite(),
-                "SBA forecast must be finite for series {}", i
+                "SBA forecast must be finite for series {}",
+                i
             );
             assert!(
                 s >= 0.0,
-                "SBA forecasts must be non-negative, got {} for series {}", s, i
+                "SBA forecasts must be non-negative, got {} for series {}",
+                s,
+                i
             );
             // SBA multiplies by (1 - alpha/2) so SBA ≤ Classic
             assert!(
                 s <= c + 1e-10,
                 "SBA forecast {} should be ≤ Classic {} for series {}",
-                s, c, i
+                s,
+                c,
+                i
             );
         }
     }
@@ -7417,7 +7508,9 @@ mod kalman_garch_ffi_tests {
             Ok(point)
         } else {
             let msg = unsafe {
-                CStr::from_ptr(error.message.as_ptr()).to_string_lossy().into_owned()
+                CStr::from_ptr(error.message.as_ptr())
+                    .to_string_lossy()
+                    .into_owned()
             };
             Err(msg)
         }
@@ -7429,7 +7522,11 @@ mod kalman_garch_ffi_tests {
         let result = call_ts_forecast(&values, 5, b"Kalman", |_opts| {
             // kalman_model stays empty => local_level (default)
         });
-        assert!(result.is_ok(), "Kalman FFI should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Kalman FFI should succeed: {:?}",
+            result.err()
+        );
         let point = result.unwrap();
         assert_eq!(point.len(), 5, "Kalman FFI must return 5 point forecasts");
         for &v in &point {
@@ -7451,14 +7548,25 @@ mod kalman_garch_ffi_tests {
             }
         });
 
-        assert!(result_ll.is_ok(), "Kalman local_level FFI: {:?}", result_ll.err());
-        assert!(result_llt.is_ok(), "Kalman local_linear_trend FFI: {:?}", result_llt.err());
+        assert!(
+            result_ll.is_ok(),
+            "Kalman local_level FFI: {:?}",
+            result_ll.err()
+        );
+        assert!(
+            result_llt.is_ok(),
+            "Kalman local_linear_trend FFI: {:?}",
+            result_llt.err()
+        );
         let ll = result_ll.unwrap();
         let llt = result_llt.unwrap();
         assert_eq!(ll.len(), 5);
         assert_eq!(llt.len(), 5);
         // On a trended series the two specs should produce different forecasts
-        assert_ne!(ll[0], llt[0], "local_level and local_linear_trend must produce different forecasts");
+        assert_ne!(
+            ll[0], llt[0],
+            "local_level and local_linear_trend must produce different forecasts"
+        );
     }
 }
 
@@ -7537,7 +7645,7 @@ pub unsafe extern "C" fn anofox_ts_forecast_var(
     flat_data: *const c_double, // flat [k_vars * series_len] matrix, variable-major; NaN = missing
     k_vars: size_t,
     series_len: size_t,
-    order: size_t,    // lag order p (0 → 1)
+    order: size_t, // lag order p (0 → 1)
     horizon: size_t,
     out_result: *mut VARForecastResult,
     out_error: *mut AnofoxError,
@@ -7550,16 +7658,19 @@ pub unsafe extern "C" fn anofox_ts_forecast_var(
     // Null-check mandatory pointers
     if flat_data.is_null() || out_result.is_null() {
         if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument to anofox_ts_forecast_var");
+            (*out_error).set_error(
+                ErrorCode::NullPointer,
+                "Null pointer argument to anofox_ts_forecast_var",
+            );
         }
         return false;
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         // Checked multiplication: k_vars * series_len must not overflow usize
-        let len = k_vars
-            .checked_mul(series_len)
-            .ok_or_else(|| "VAR dimensions overflow (k_vars * series_len > usize::MAX)".to_string())?;
+        let len = k_vars.checked_mul(series_len).ok_or_else(|| {
+            "VAR dimensions overflow (k_vars * series_len > usize::MAX)".to_string()
+        })?;
 
         // Slice the flat matrix — Rust owns nothing, just a view
         let flat = std::slice::from_raw_parts(flat_data, len);
@@ -7595,7 +7706,10 @@ pub unsafe extern "C" fn anofox_ts_forecast_var(
             let raw = alloc_double_array(total);
             if raw.is_null() && total > 0 {
                 if !out_error.is_null() {
-                    (*out_error).set_error(ErrorCode::AllocationError, "Failed to allocate VAR forecast buffer");
+                    (*out_error).set_error(
+                        ErrorCode::AllocationError,
+                        "Failed to allocate VAR forecast buffer",
+                    );
                 }
                 return false;
             }
@@ -7688,13 +7802,26 @@ mod var_ffi_tests {
         let flat = generate_var1_flat(k_vars, series_len);
 
         let result = forecast_var_impl(&flat, k_vars, series_len, 1, 5);
-        assert!(result.is_ok(), "forecast_var_impl should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "forecast_var_impl should succeed: {:?}",
+            result.err()
+        );
         let preds = result.unwrap();
-        assert_eq!(preds.len(), k_vars, "expected {} variable forecasts", k_vars);
+        assert_eq!(
+            preds.len(),
+            k_vars,
+            "expected {} variable forecasts",
+            k_vars
+        );
         for (v, var_preds) in preds.iter().enumerate() {
             assert_eq!(var_preds.len(), 5, "expected horizon=5 for variable {}", v);
             for &val in var_preds {
-                assert!(val.is_finite(), "expected finite forecast for variable {}, got NaN/Inf", v);
+                assert!(
+                    val.is_finite(),
+                    "expected finite forecast for variable {}, got NaN/Inf",
+                    v
+                );
             }
         }
     }
@@ -7733,8 +7860,14 @@ mod var_ffi_tests {
             )
         };
 
-        assert!(ok, "anofox_ts_forecast_var should return true on valid input");
-        assert!(!out_result.forecasts.is_null(), "forecasts pointer must be non-null");
+        assert!(
+            ok,
+            "anofox_ts_forecast_var should return true on valid input"
+        );
+        assert!(
+            !out_result.forecasts.is_null(),
+            "forecasts pointer must be non-null"
+        );
         assert_eq!(out_result.k_vars, k_vars, "k_vars must match");
         assert_eq!(out_result.n_horizon, horizon, "n_horizon must match");
 
@@ -7742,7 +7875,12 @@ mod var_ffi_tests {
         unsafe {
             for idx in 0..(k_vars * horizon) {
                 let val = *out_result.forecasts.add(idx);
-                assert!(val.is_finite(), "forecast[{}] must be finite, got {}", idx, val);
+                assert!(
+                    val.is_finite(),
+                    "forecast[{}] must be finite, got {}",
+                    idx,
+                    val
+                );
             }
         }
 
@@ -7776,9 +7914,11 @@ mod var_ffi_tests {
 
         assert!(!ok, "null flat_data should return false");
         // The error code should be NullPointer
-        let code = unsafe { CStr::from_ptr(out_error.message.as_ptr()) }
-            .to_string_lossy();
-        assert!(!code.is_empty(), "error message must be non-empty on null input");
+        let code = unsafe { CStr::from_ptr(out_error.message.as_ptr()) }.to_string_lossy();
+        assert!(
+            !code.is_empty(),
+            "error message must be non-empty on null input"
+        );
     }
 }
 

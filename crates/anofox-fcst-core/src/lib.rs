@@ -5,7 +5,6 @@
 
 pub mod bootstrap;
 pub mod changepoint;
-pub mod validation;
 pub mod conformal;
 pub mod decomposition;
 pub mod detrending;
@@ -21,6 +20,7 @@ pub mod periods;
 pub mod quality;
 pub mod seasonality;
 pub mod stats;
+pub mod validation;
 
 // Re-exports for convenience
 pub use bootstrap::{

@@ -20,7 +20,9 @@ use libc::{free, malloc};
 unsafe fn malloc(size: usize) -> *mut core::ffi::c_void {
     use std::alloc::{alloc, Layout};
     use std::mem::size_of;
-    let total = size_of::<usize>().checked_add(size).expect("allocation size overflow");
+    let total = size_of::<usize>()
+        .checked_add(size)
+        .expect("allocation size overflow");
     let layout = Layout::from_size_align(total, 8).expect("8-byte alignment is always valid");
     let base = alloc(layout);
     if base.is_null() {
@@ -39,7 +41,9 @@ unsafe fn free(ptr: *mut core::ffi::c_void) {
     }
     let base = (ptr as *mut u8).sub(size_of::<usize>());
     let size = *(base as *const usize);
-    let total = size_of::<usize>().checked_add(size).expect("allocation size overflow");
+    let total = size_of::<usize>()
+        .checked_add(size)
+        .expect("allocation size overflow");
     let layout = Layout::from_size_align(total, 8).expect("8-byte alignment is always valid");
     dealloc(base, layout);
 }

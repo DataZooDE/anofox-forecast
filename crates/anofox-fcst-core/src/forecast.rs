@@ -725,8 +725,16 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         ModelType::GARCH => forecast_garch(
             &clean_values,
             options.horizon,
-            if options.garch_p == 0 { 1 } else { options.garch_p },
-            if options.garch_q == 0 { 1 } else { options.garch_q },
+            if options.garch_p == 0 {
+                1
+            } else {
+                options.garch_p
+            },
+            if options.garch_q == 0 {
+                1
+            } else {
+                options.garch_q
+            },
         ),
         ModelType::Kalman => forecast_kalman(
             &clean_values,
@@ -3766,16 +3774,21 @@ mod tests {
             ..Default::default()
         };
         let result = forecast(&values, &options).unwrap();
-        assert_eq!(result.point.len(), 5, "Kalman must return horizon=5 point values");
+        assert_eq!(
+            result.point.len(),
+            5,
+            "Kalman must return horizon=5 point values"
+        );
         assert_eq!(result.model_name, "Kalman");
-        assert!(result.point.iter().all(|v| v.is_finite()), "All Kalman forecasts must be finite");
+        assert!(
+            result.point.iter().all(|v| v.is_finite()),
+            "All Kalman forecasts must be finite"
+        );
     }
 
     #[test]
     fn test_forecast_kalman_local_linear_trend() {
-        let values: Vec<Option<f64>> = (0..30)
-            .map(|i| Some(5.0 + i as f64 * 1.2))
-            .collect();
+        let values: Vec<Option<f64>> = (0..30).map(|i| Some(5.0 + i as f64 * 1.2)).collect();
         let options_ll = ForecastOptions {
             model: ModelType::Kalman,
             kalman_model: None, // local_level
@@ -3803,9 +3816,21 @@ mod tests {
     fn test_forecast_garch_basic() {
         // Returns-like series of length >= 12 (GARCH(1,1) minimum)
         let values: Vec<Option<f64>> = vec![
-            Some(0.01), Some(-0.02), Some(0.03), Some(-0.015), Some(0.025),
-            Some(-0.01), Some(0.02), Some(-0.03), Some(0.015), Some(-0.025),
-            Some(0.012), Some(-0.018), Some(0.022), Some(-0.011), Some(0.028),
+            Some(0.01),
+            Some(-0.02),
+            Some(0.03),
+            Some(-0.015),
+            Some(0.025),
+            Some(-0.01),
+            Some(0.02),
+            Some(-0.03),
+            Some(0.015),
+            Some(-0.025),
+            Some(0.012),
+            Some(-0.018),
+            Some(0.022),
+            Some(-0.011),
+            Some(0.028),
         ];
         let options = ForecastOptions {
             model: ModelType::GARCH,
@@ -3813,7 +3838,11 @@ mod tests {
             ..Default::default()
         };
         let result = forecast(&values, &options).unwrap();
-        assert_eq!(result.point.len(), 5, "GARCH must return horizon=5 point values");
+        assert_eq!(
+            result.point.len(),
+            5,
+            "GARCH must return horizon=5 point values"
+        );
         assert_eq!(result.model_name, "GARCH(1,1)");
         for &v in &result.point {
             assert!(v >= 0.0, "GARCH volatility must be non-negative, got {}", v);
@@ -3824,9 +3853,8 @@ mod tests {
     fn test_forecast_garch_sqrt_of_variance() {
         // Verify that point values equal sqrt of variance (spot-check element 0)
         let values: Vec<f64> = vec![
-            0.01, -0.02, 0.03, -0.015, 0.025,
-            -0.01, 0.02, -0.03, 0.015, -0.025,
-            0.012, -0.018, 0.022, -0.011, 0.028,
+            0.01, -0.02, 0.03, -0.015, 0.025, -0.01, 0.02, -0.03, 0.015, -0.025, 0.012, -0.018,
+            0.022, -0.011, 0.028,
         ];
         let ts = make_timeseries(&values).unwrap();
         let mut model = GARCH::new(1, 1);
@@ -3839,7 +3867,8 @@ mod tests {
         assert!(
             (actual - expected).abs() < 1e-9,
             "GARCH forecast[0] = {} but expected sqrt(variance[0]) = {}",
-            actual, expected
+            actual,
+            expected
         );
     }
 

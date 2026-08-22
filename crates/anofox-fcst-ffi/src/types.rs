@@ -1853,13 +1853,23 @@ pub struct AnofoxLjungBoxResult {
 
 impl Default for AnofoxLjungBoxResult {
     fn default() -> Self {
-        Self { statistic: f64::NAN, p_value: f64::NAN, lags: 0, df: 0 }
+        Self {
+            statistic: f64::NAN,
+            p_value: f64::NAN,
+            lags: 0,
+            df: 0,
+        }
     }
 }
 
 impl From<anofox_fcst_core::LjungBoxOut> for AnofoxLjungBoxResult {
     fn from(r: anofox_fcst_core::LjungBoxOut) -> Self {
-        Self { statistic: r.statistic, p_value: r.p_value, lags: r.lags, df: r.df }
+        Self {
+            statistic: r.statistic,
+            p_value: r.p_value,
+            lags: r.lags,
+            df: r.df,
+        }
     }
 }
 
@@ -1872,7 +1882,10 @@ pub struct AnofoxDurbinWatsonResult {
 
 impl Default for AnofoxDurbinWatsonResult {
     fn default() -> Self {
-        Self { statistic: f64::NAN, interpretation: [0; 32] }
+        Self {
+            statistic: f64::NAN,
+            interpretation: [0; 32],
+        }
     }
 }
 

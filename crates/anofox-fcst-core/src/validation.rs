@@ -310,7 +310,10 @@ mod tests {
     fn adf_returns_finite_statistic_and_nonneg_lags() {
         let series = random_walk(50, 42);
         let result = adf(&series, None);
-        assert!(result.statistic.is_finite(), "statistic should be finite for n=50");
+        assert!(
+            result.statistic.is_finite(),
+            "statistic should be finite for n=50"
+        );
         // lags is usize, always >= 0
         assert!(
             result.p_value >= 0.0 && result.p_value <= 1.0,
@@ -371,7 +374,10 @@ mod tests {
     fn kpss_returns_finite_statistic_and_valid_pvalue() {
         let series = ar1_stationary(80, 5);
         let result = kpss(&series, None);
-        assert!(result.statistic.is_finite(), "KPSS statistic should be finite");
+        assert!(
+            result.statistic.is_finite(),
+            "KPSS statistic should be finite"
+        );
         assert!(
             result.p_value >= 0.0 && result.p_value <= 1.0,
             "p_value should be in [0, 1], got {}",
@@ -445,7 +451,11 @@ mod tests {
     fn durbin_watson_in_range_and_labeled() {
         let resid = white_noise(100, 22);
         let r = durbin_watson(&resid);
-        assert!(r.statistic >= 0.0 && r.statistic <= 4.0, "DW in [0,4], got {}", r.statistic);
+        assert!(
+            r.statistic >= 0.0 && r.statistic <= 4.0,
+            "DW in [0,4], got {}",
+            r.statistic
+        );
         assert!(matches!(
             r.interpretation,
             "positive_strong" | "positive_weak" | "none" | "negative_weak" | "negative_strong"
@@ -462,7 +472,11 @@ mod tests {
             resid[i] = 0.9 * resid[i - 1] + noise[i];
         }
         let r = durbin_watson(&resid);
-        assert!(r.statistic < 2.0, "positively autocorrelated DW should be < 2, got {}", r.statistic);
+        assert!(
+            r.statistic < 2.0,
+            "positively autocorrelated DW should be < 2, got {}",
+            r.statistic
+        );
     }
 
     #[test]
