@@ -77,6 +77,22 @@ def create_benchmark_functions(
         print(f"Loading {dataset_display} {group} data for {benchmark_name} benchmark...")
         train_df, horizon, freq, seasonality = get_data(dataset_key, group, train=True)
 
+        # Allow config to cap the number of series (useful for global/panel models
+        # where full-panel fitting can be slow). MAX_SERIES=0 means no cap.
+        max_series = getattr(anofox_config, 'MAX_SERIES', 0)
+        if max_series and max_series > 0:
+            all_ids = train_df['unique_id'].unique()
+            if len(all_ids) > max_series:
+                print(f"Capping to {max_series} series (config MAX_SERIES={max_series}; total={len(all_ids)})")
+                # Sort before slicing to guarantee a stable, reproducible subset regardless of
+                # Parquet reader ordering, pandas version, or re-sorted input files.
+                selected_ids = sorted(all_ids)[:max_series]
+                train_df = train_df[train_df['unique_id'].isin(selected_ids)].copy()
+                print(f"Subset shape: {train_df.shape} ({train_df['unique_id'].nunique()} series)")
+
+        # Allow config to specify the DuckDB function name (e.g., TS_FORECAST_PANEL_BY
+        # for global/panel models). Defaults to TS_FORECAST_BY for per-series benchmarks.
+        fn_name = getattr(anofox_config, 'FUNCTION_NAME', 'TS_FORECAST_BY')
         run_anofox_benchmark(
             benchmark_name=benchmark_name,
             train_df=train_df,
@@ -85,7 +101,8 @@ def create_benchmark_functions(
             models_config=anofox_config.MODELS,
             output_dir=output_dir,
             group=group,
-            freq=freq
+            freq=freq,
+            function_name=fn_name,
         )
 
     def evaluate(group: str = 'Daily', dataset: str = 'm4'):
@@ -131,6 +148,16 @@ def create_benchmark_functions(
             dataset_key, dataset_display = _normalize_dataset(dataset)
             print(f"Loading {dataset_display} {group} data for {statsforecast_config.BENCHMARK_NAME} benchmark...")
             train_df, horizon, freq, seasonality = get_data(dataset_key, group, train=True)
+
+            # Apply same MAX_SERIES cap as anofox side for fair comparison
+            max_series = getattr(anofox_config, 'MAX_SERIES', 0)
+            if max_series and max_series > 0:
+                all_ids = train_df['unique_id'].unique()
+                if len(all_ids) > max_series:
+                    print(f"Capping to {max_series} series (matching anofox MAX_SERIES cap)")
+                    # Sort before slicing — must match the deterministic subset on the anofox side.
+                    selected_ids = sorted(all_ids)[:max_series]
+                    train_df = train_df[train_df['unique_id'].isin(selected_ids)].copy()
 
             # Get models configuration
             models_config = statsforecast_config.get_models_config(seasonality, horizon)

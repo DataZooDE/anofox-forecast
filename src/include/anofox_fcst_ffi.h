@@ -1092,6 +1092,20 @@ typedef struct ForecastOptions {
      * seasonal-EMA leaf and forecast collapses to flat).
      */
     bool laplace_seasonal_batch_init;
+    /**
+     * GARCH p order (0 → default 1). Only consulted when model is "GARCH".
+     */
+    int garch_p;
+    /**
+     * GARCH q order (0 → default 1). Only consulted when model is "GARCH".
+     */
+    int garch_q;
+    /**
+     * Kalman state-space spec. Empty string = "local_level" (default).
+     * Accepted values: "" | "local_level" | "local_linear_trend".
+     * Only consulted when model is "Kalman".
+     */
+    char kalman_model[32];
 } ForecastOptions;
 
 /**
@@ -1246,6 +1260,18 @@ typedef struct ForecastOptionsExog {
      * Enable `LaplaceForecaster::with_seasonal_batch_init()` (opt-in).
      */
     bool laplace_seasonal_batch_init;
+    /**
+     * GARCH p order (0 → default 1). Only consulted when model is "GARCH".
+     */
+    int garch_p;
+    /**
+     * GARCH q order (0 → default 1). Only consulted when model is "GARCH".
+     */
+    int garch_q;
+    /**
+     * Kalman state-space spec. Empty string = "local_level" (default).
+     */
+    char kalman_model[32];
 } ForecastOptionsExog;
 
 /**
@@ -1587,6 +1613,184 @@ typedef struct ConformalPerStepResultFFI {
      */
     double coverage;
 } ConformalPerStepResultFFI;
+
+/**
+ * C-compatible result of an ADF stationarity test.
+ *
+ * Field order is fixed and must match the STRUCT fields declared in
+ * `src/scalar_functions/diagnostics.cpp` (RegisterTsAdfFunction):
+ *   statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct
+ */
+typedef struct AnofoxStationarityResult {
+    /**
+     * ADF t-statistic (negative; more negative → stronger evidence of stationarity)
+     */
+    double statistic;
+    /**
+     * Approximate p-value (MacKinnon 9-point lookup table)
+     */
+    double p_value;
+    /**
+     * Number of lags used (AIC-selected or override)
+     */
+    size_t lags;
+    /**
+     * `true` if series is stationary at the 5% level (`statistic < cv_5pct`)
+     */
+    bool is_stationary;
+    /**
+     * Critical value at 1% significance (constant regression: -3.43)
+     */
+    double cv_1pct;
+    /**
+     * Critical value at 5% significance (constant regression: -2.86)
+     */
+    double cv_5pct;
+    /**
+     * Critical value at 10% significance (constant regression: -2.57)
+     */
+    double cv_10pct;
+} AnofoxStationarityResult;
+
+/**
+ * C-compatible result of a combined ADF + KPSS stationarity verdict.
+ *
+ * Field order is fixed and must match the STRUCT fields declared in
+ * `src/scalar_functions/diagnostics.cpp` (RegisterTsStationarityFunction):
+ *   adf_statistic, adf_p_value, kpss_statistic, kpss_p_value,
+ *   adf_is_stationary, kpss_is_stationary, verdict
+ */
+typedef struct AnofoxCombinedStationarityResult {
+    /**
+     * ADF test statistic
+     */
+    double adf_statistic;
+    /**
+     * ADF approximate p-value
+     */
+    double adf_p_value;
+    /**
+     * KPSS test statistic
+     */
+    double kpss_statistic;
+    /**
+     * KPSS approximate p-value
+     */
+    double kpss_p_value;
+    /**
+     * `true` if ADF alone judges the series stationary
+     */
+    bool adf_is_stationary;
+    /**
+     * `true` if KPSS alone judges the series stationary
+     */
+    bool kpss_is_stationary;
+    /**
+     * Four-way verdict, NUL-terminated:
+     * `stationary` / `trend_stationary` / `difference_stationary` / `non_stationary`
+     */
+    char verdict[32];
+} AnofoxCombinedStationarityResult;
+
+/**
+ * C-compatible Ljung-Box white-noise test result (RESID-01).
+ */
+typedef struct AnofoxLjungBoxResult {
+    double statistic;
+    double p_value;
+    size_t lags;
+    size_t df;
+} AnofoxLjungBoxResult;
+
+/**
+ * C-compatible Durbin-Watson result (RESID-02). `interpretation` is NUL-terminated.
+ */
+typedef struct AnofoxDurbinWatsonResult {
+    double statistic;
+    char interpretation[32];
+} AnofoxDurbinWatsonResult;
+
+/**
+ * C-compatible Jarque-Bera normality test result (RESID-03).
+ */
+typedef struct AnofoxJarqueBeraResult {
+    double statistic;
+    double p_value;
+    double skewness;
+    double excess_kurtosis;
+} AnofoxJarqueBeraResult;
+
+/**
+ * C-compatible combined residual-diagnostics report (RESID-04).
+ *
+ * Field order is fixed and must match the STRUCT fields declared in
+ * `src/scalar_functions/diagnostics.cpp` (RegisterTsResidualDiagnosticsFunction).
+ * `dw_interpretation` is NUL-terminated.
+ */
+typedef struct AnofoxResidualDiagnosticsResult {
+    double lb_statistic;
+    double lb_p_value;
+    size_t lb_lags;
+    double dw_statistic;
+    char dw_interpretation[32];
+    double jb_statistic;
+    double jb_p_value;
+    double jb_skewness;
+    double jb_excess_kurtosis;
+    bool adequate;
+} AnofoxResidualDiagnosticsResult;
+
+/**
+ * Panel forecast result — returned by `anofox_ts_forecast_panel`.
+ *
+ * `forecasts` is a flat `[n_series * n_horizon]` array of `f64` in series-major
+ * order: `forecasts[s * n_horizon + h]` is the forecast for series `s` at
+ * horizon step `h` (0-based).  The buffer is allocated by Rust and must be
+ * freed exactly once via `anofox_free_panel_forecast_result`.
+ */
+typedef struct PanelForecastResult {
+    /**
+     * Flat `[n_series * n_horizon]` forecast buffer; series-major order.
+     * Allocated by Rust; freed by `anofox_free_panel_forecast_result`.
+     */
+    double *forecasts;
+    /**
+     * Number of series in the panel.
+     */
+    size_t n_series;
+    /**
+     * Number of horizon steps per series.
+     */
+    size_t n_horizon;
+    /**
+     * Null-terminated model name (e.g. "GlobalETS").
+     */
+    char model_name[64];
+} PanelForecastResult;
+
+/**
+ * VAR multivariate forecast result — returned by `anofox_ts_forecast_var`.
+ *
+ * `forecasts` is a flat `[k_vars * n_horizon]` array of `f64` in variable-major order:
+ * `forecasts[v * n_horizon + h]` is the forecast for variable `v` at horizon step `h` (0-based).
+ * The buffer is allocated by Rust and must be freed exactly once via
+ * `anofox_free_var_forecast_result`.
+ */
+typedef struct VARForecastResult {
+    /**
+     * Flat `[k_vars * n_horizon]` forecast buffer; variable-major order.
+     * Allocated by Rust; freed by `anofox_free_var_forecast_result`.
+     */
+    double *forecasts;
+    /**
+     * Number of variables (K) in the VAR model.
+     */
+    size_t k_vars;
+    /**
+     * Number of horizon steps per variable.
+     */
+    size_t n_horizon;
+} VARForecastResult;
 
 /**
  * Nullable data array for DuckDB integration.
@@ -3054,6 +3258,200 @@ void anofox_free_calibration_profile(struct CalibrationProfileFFI *result);
  * The result pointer must be valid or null.
  */
 void anofox_free_prediction_intervals(struct PredictionIntervalsFFI *result);
+
+/**
+ * Run the Augmented Dickey-Fuller (ADF) unit-root test.
+ *
+ * # Arguments
+ *
+ * * `values`     — Pointer to a contiguous array of `f64` values (the time series).
+ * * `validity`   — DuckDB validity bitmask (`NULL` means all valid). Bit i of
+ *                  `validity[i/64]` is 1 when element i is non-NULL.
+ *                  NULL entries become `NaN` in the series passed to the crate.
+ * * `length`     — Number of elements in `values`.
+ * * `max_lags`   — Maximum lag count for AIC selection. Pass `-1` for automatic
+ *                  selection (`floor((n-1)^(1/3))`). Clamped to `[0, n/2-1]` by the crate.
+ * * `out_result` — Pointer to caller-allocated `AnofoxStationarityResult`.
+ *                  Initialised to `Default` before the computation so that
+ *                  partial results are never exposed on error.
+ * * `out_error`  — Pointer to caller-allocated `AnofoxError`. Set on failure.
+ *
+ * Returns `true` on success, `false` on error (check `out_error`).
+ *
+ * # Safety
+ *
+ * `values` and `out_result` must be non-null. `validity` may be null (meaning all valid).
+ * `length` must equal the number of valid `f64` elements at `values`.
+ */
+bool anofox_ts_adf(const double *values,
+                   const uint64_t *validity,
+                   size_t length,
+                   int max_lags,
+                   struct AnofoxStationarityResult *out_result,
+                   struct AnofoxError *out_error);
+
+/**
+ * Run the KPSS stationarity test on a single series (STAT-02).
+ *
+ * # Safety
+ *
+ * `values` and `out_result` must be non-null. `validity` may be null (all valid).
+ * `length` must equal the number of `f64` elements at `values`.
+ */
+bool anofox_ts_kpss(const double *values,
+                    const uint64_t *validity,
+                    size_t length,
+                    int lags,
+                    struct AnofoxStationarityResult *out_result,
+                    struct AnofoxError *out_error);
+
+/**
+ * Run the combined ADF + KPSS stationarity verdict on a single series (STAT-03).
+ *
+ * # Safety
+ *
+ * `values` and `out_result` must be non-null. `validity` may be null (all valid).
+ * `length` must equal the number of `f64` elements at `values`.
+ */
+bool anofox_ts_stationarity(const double *values,
+                            const uint64_t *validity,
+                            size_t length,
+                            struct AnofoxCombinedStationarityResult *out_result,
+                            struct AnofoxError *out_error);
+
+/**
+ * Ljung-Box white-noise test on residuals (RESID-01).
+ *
+ * # Safety
+ * `values` and `out_result` must be non-null. `validity` may be null (all valid).
+ */
+bool anofox_ts_ljung_box(const double *values,
+                         const uint64_t *validity,
+                         size_t length,
+                         int lags,
+                         struct AnofoxLjungBoxResult *out_result,
+                         struct AnofoxError *out_error);
+
+/**
+ * Durbin-Watson first-order autocorrelation statistic on residuals (RESID-02).
+ *
+ * # Safety
+ * `values` and `out_result` must be non-null. `validity` may be null (all valid).
+ */
+bool anofox_ts_durbin_watson(const double *values,
+                             const uint64_t *validity,
+                             size_t length,
+                             struct AnofoxDurbinWatsonResult *out_result,
+                             struct AnofoxError *out_error);
+
+/**
+ * Jarque-Bera normality test on residuals (RESID-03).
+ *
+ * # Safety
+ * `values` and `out_result` must be non-null. `validity` may be null (all valid).
+ */
+bool anofox_ts_jarque_bera(const double *values,
+                           const uint64_t *validity,
+                           size_t length,
+                           struct AnofoxJarqueBeraResult *out_result,
+                           struct AnofoxError *out_error);
+
+/**
+ * Combined residual-diagnostics report (RESID-04): Ljung-Box + Durbin-Watson +
+ * Jarque-Bera with a pass/fail adequacy verdict (Ljung-Box p-value > `alpha`).
+ *
+ * # Safety
+ * `values` and `out_result` must be non-null. `validity` may be null (all valid).
+ */
+bool anofox_ts_residual_diagnostics(const double *values,
+                                    const uint64_t *validity,
+                                    size_t length,
+                                    double alpha,
+                                    struct AnofoxResidualDiagnosticsResult *out_result,
+                                    struct AnofoxError *out_error);
+
+/**
+ * Forecast a panel of equal-length time series using a single cross-series global model.
+ *
+ * `values` is a flat packed matrix in series-major order:
+ * `values[s * series_len + t]` is the value of series `s` at time step `t`.
+ * `NaN` values in the flat matrix are treated as missing and will be imputed
+ * by `fill_nulls_interpolate` inside the Rust body before fitting.
+ *
+ * On success writes to `*out_result` and returns `true`.
+ * On failure writes to `*out_error` and returns `false`.
+ *
+ * The `forecasts` buffer in `*out_result` must be freed by calling
+ * `anofox_free_panel_forecast_result`.
+ *
+ * # Safety
+ * - `values`, `method`, and `out_result` must be non-null.
+ * - `out_error` may be null (errors are still reported via `false` return).
+ * - `variant` may be null (GlobalCroston "SBA" variant; None/empty = Classic).
+ * - `model_pool` may be null (GlobalETS pool override; None/empty = Reduced, "Complete" = full pool).
+ * - `values` must point to a buffer of at least `n_series * series_len` doubles.
+ */
+bool anofox_ts_forecast_panel(const double *values,
+                              size_t n_series,
+                              size_t series_len,
+                              const char *method,
+                              size_t horizon,
+                              size_t seasonal_period,
+                              const char *variant,
+                              const char *model_pool,
+                              struct PanelForecastResult *out_result,
+                              struct AnofoxError *out_error);
+
+/**
+ * Free a `PanelForecastResult` allocated by `anofox_ts_forecast_panel`.
+ *
+ * Nulls the `forecasts` pointer after freeing to prevent double-free.
+ *
+ * # Safety
+ * `result` must be null or a valid pointer to a `PanelForecastResult` whose
+ * `forecasts` field was set by `anofox_ts_forecast_panel`.
+ */
+void anofox_free_panel_forecast_result(struct PanelForecastResult *result);
+
+/**
+ * Forecast a multivariate time series using a VAR(p) model.
+ *
+ * `flat_data` is a flat packed matrix in variable-major order:
+ * `flat_data[v * series_len + t]` is the value of variable `v` at time step `t`.
+ * NaN values in the flat matrix are treated as missing and imputed by
+ * `fill_nulls_interpolate` before fitting.
+ *
+ * On success writes to `*out_result` and returns `true`.
+ * On failure writes to `*out_error` and returns `false`.
+ *
+ * The `forecasts` buffer in `*out_result` must be freed by calling
+ * `anofox_free_var_forecast_result`.
+ *
+ * # Safety
+ * - `flat_data` and `out_result` must be non-null.
+ * - `out_error` may be null (errors are still reported via `false` return).
+ * - `flat_data` must point to a buffer of at least `k_vars * series_len` doubles.
+ * - `k_vars * series_len` must not overflow `usize`.
+ * - `k_vars * horizon` must not overflow `usize`.
+ */
+bool anofox_ts_forecast_var(const double *flat_data,
+                            size_t k_vars,
+                            size_t series_len,
+                            size_t order,
+                            size_t horizon,
+                            struct VARForecastResult *out_result,
+                            struct AnofoxError *out_error);
+
+/**
+ * Free a `VARForecastResult` allocated by `anofox_ts_forecast_var`.
+ *
+ * Nulls the `forecasts` pointer after freeing to prevent double-free.
+ *
+ * # Safety
+ * `result` must be null or a valid pointer to a `VARForecastResult` whose
+ * `forecasts` field was set by `anofox_ts_forecast_var`.
+ */
+void anofox_free_var_forecast_result(struct VARForecastResult *result);
 
 const char *anofox_fcst_version(void);
 

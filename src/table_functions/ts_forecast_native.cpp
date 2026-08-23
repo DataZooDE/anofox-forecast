@@ -47,6 +47,10 @@ struct TsForecastNativeBindData : public TableFunctionData {
     string model_pool = "";
     string laplace_variant = "";
     bool laplace_seasonal_batch_init = false;
+    // Classical model params (Phase 3)
+    int64_t garch_p = 0;
+    int64_t garch_q = 0;
+    string kalman_model = "";
 
     // Type preservation
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
@@ -270,7 +274,8 @@ static double ParseDoubleFromParams(const Value &params_value, const string &key
 static void ValidateParamKeys(const Value &params_value) {
     static const unordered_set<string> valid_keys = {
         "model", "seasonal_period", "seasonal_periods", "confidence_level", "window", "model_pool",
-        "laplace_variant", "laplace_seasonal_batch_init"
+        "laplace_variant", "laplace_seasonal_batch_init",
+        "garch_p", "garch_q", "kalman_model"
     };
 
     vector<string> unknown_keys;
@@ -300,7 +305,7 @@ static void ValidateParamKeys(const Value &params_value) {
             unknown_list += "'" + unknown_keys[i] + "'";
         }
         throw InvalidInputException(
-            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init",
+            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q, kalman_model",
             unknown_list);
     }
 }
@@ -352,6 +357,10 @@ static unique_ptr<FunctionData> TsForecastNativeBind(
         bind_data->laplace_variant = ParseStringFromParams(params, "laplace_variant", "");
         bind_data->laplace_seasonal_batch_init =
             ParseInt64FromParams(params, "laplace_seasonal_batch_init", 0) != 0;
+        // Classical model params (Phase 3)
+        bind_data->garch_p = ParseInt64FromParams(params, "garch_p", 0);
+        bind_data->garch_q = ParseInt64FromParams(params, "garch_q", 0);
+        bind_data->kalman_model = ParseStringFromParams(params, "kalman_model", "");
 
         // Validate confidence_level range
         if (bind_data->confidence_level <= 0.0 || bind_data->confidence_level >= 1.0) {
@@ -648,6 +657,14 @@ static OperatorFinalizeResultType TsForecastNativeFinalize(
                 opts.laplace_variant[sizeof(opts.laplace_variant) - 1] = '\0';
             }
             opts.laplace_seasonal_batch_init = bind_data.laplace_seasonal_batch_init;
+            // Classical model params (Phase 3)
+            opts.garch_p = static_cast<int>(bind_data.garch_p);
+            opts.garch_q = static_cast<int>(bind_data.garch_q);
+            if (!bind_data.kalman_model.empty()) {
+                strncpy(opts.kalman_model, bind_data.kalman_model.c_str(),
+                        sizeof(opts.kalman_model) - 1);
+                opts.kalman_model[sizeof(opts.kalman_model) - 1] = '\0';
+            }
 
             // Call Rust FFI
             ForecastResult fcst_result;
@@ -728,8 +745,15 @@ static OperatorFinalizeResultType TsForecastNativeFinalize(
                 }
 
                 row.point_forecast = fcst_result.point_forecasts[i];
-                row.lower_90 = fcst_result.lower_bounds[i];
-                row.upper_90 = fcst_result.upper_bounds[i];
+                // lower_bounds / upper_bounds are null when the model does not provide
+                // prediction intervals (e.g. GARCH, Kalman in v1). Use NaN as sentinel
+                // so the output layer can emit SQL NULL rather than crashing.
+                row.lower_90 = (fcst_result.lower_bounds != nullptr)
+                    ? fcst_result.lower_bounds[i]
+                    : std::numeric_limits<double>::quiet_NaN();
+                row.upper_90 = (fcst_result.upper_bounds != nullptr)
+                    ? fcst_result.upper_bounds[i]
+                    : std::numeric_limits<double>::quiet_NaN();
                 row.model_name = string(fcst_result.model_name);
 
                 gstate.results.push_back(row);
@@ -783,9 +807,14 @@ static OperatorFinalizeResultType TsForecastNativeFinalize(
         }
 
         // point_forecast, lower_90, upper_90
+        // NaN sentinel (set above) means "no interval" — emit SQL NULL.
         output.data[3].SetValue(i, Value::DOUBLE(row.point_forecast));
-        output.data[4].SetValue(i, Value::DOUBLE(row.lower_90));
-        output.data[5].SetValue(i, Value::DOUBLE(row.upper_90));
+        output.data[4].SetValue(i, std::isnan(row.lower_90)
+            ? Value(LogicalType::DOUBLE)
+            : Value::DOUBLE(row.lower_90));
+        output.data[5].SetValue(i, std::isnan(row.upper_90)
+            ? Value(LogicalType::DOUBLE)
+            : Value::DOUBLE(row.upper_90));
 
         // model_name
         output.data[6].SetValue(i, Value(row.model_name));

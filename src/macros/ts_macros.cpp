@@ -593,6 +593,76 @@ FROM (
     "SELECT * FROM ts_forecast_by('sales', product_id, date, qty, 'AutoETS', 12, '1d')",
     "forecasting"},
 
+    // ts_forecast_panel_by: Panel forecasting via cross-series global learners (Phase 2: GLOB-01..03)
+    //
+    // Fits a single shared-parameter model across all series simultaneously, then emits
+    // one row per (series, horizon step) — the fit-once-emit-many pattern. Unlike
+    // ts_forecast_by which fits independently per series, this achieves true cross-series
+    // learning. Ragged panels are auto-aligned to a shared date grid.
+    //
+    // Signature: ts_forecast_panel_by(source, group_col, date_col, target_col, method,
+    //                                  horizon, frequency, params := MAP{})
+    // Supported methods: 'GlobalETS' (GlobalTheta, GlobalCroston added in 02-2)
+    {"ts_forecast_panel_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", "frequency", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+SELECT group_col, forecast_step, date_col, yhat, model_name
+FROM _ts_forecast_panel_native(
+    (SELECT group_col, date_col, target_col::DOUBLE FROM query_table(source::VARCHAR)),
+    horizon,
+    frequency,
+    method,
+    params
+)
+)",
+    "Forecasts a grouped panel using cross-series global learners (GlobalETS, GlobalTheta, GlobalCroston). "
+    "All series are fitted simultaneously with shared parameters (fit-once-emit-many). "
+    "Ragged panels are auto-aligned to a shared date grid before the global fit. "
+    "Returns one row per (group, horizon step). "
+    "Series with fewer than 10 valid observations are surfaced with model_name = 'DROPPED: too_short'.",
+    "SELECT * FROM ts_forecast_panel_by('sales', product_id, date, qty, 'GlobalETS', 14, '1d', MAP{'seasonal_period': '7'})",
+    "forecasting"},
+
+    // ts_forecast_var_by: VAR multivariate forecasting (Phase 3: CLAS-03)
+    //
+    // Fits a single VAR(p) model across ALL K value columns simultaneously, then emits
+    // one row per (variable, horizon step) in LONG format. Unlike ts_forecast_by which
+    // fits independently per series, this achieves true multivariate cross-variable
+    // learning via the VAR coefficient matrix.
+    //
+    // v1: single-panel only — no group_col. All rows in source are treated as one panel.
+    // forecast_value is a point forecast (no prediction intervals in v1).
+    //
+    // Signature: ts_forecast_var_by(source, date_col, value_cols, horizon, frequency,
+    //                                order := 1, params := MAP{})
+    // output: variable VARCHAR, forecast_step BIGINT, <date_col> <date_type>, forecast_value DOUBLE
+    //
+    // IMPORTANT: uses the subselect pattern to avoid silent macro-registration failure
+    // (Phase-2 lesson: bare query_table() TABLE arg silently produces 0 rows in duckdb_functions())
+    {"ts_forecast_var_by",
+     {"source", "date_col", "value_cols", "horizon", "frequency", nullptr},
+     {{"p", "1"}, {"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+SELECT *
+FROM _ts_forecast_var_native(
+    (SELECT * FROM query_table(source::VARCHAR)),
+    horizon,
+    frequency,
+    p,
+    value_cols,
+    date_col,
+    params
+)
+)",
+    "VAR multivariate forecasting. Fits a single VAR(p) model across all K value columns and "
+    "returns one row per (variable, horizon step) in long format (LONG output shape). "
+    "value_cols is a VARCHAR[] of column names from source (e.g. ['y1','y2']). "
+    "date_col is the name of the date column (VARCHAR string, e.g. 'ds'). "
+    "p is the VAR lag order (default 1). "
+    "forecast_value is a point forecast (no prediction intervals in v1). "
+    "v1 is single-panel only (no group_col — one VAR fit for the entire input table).",
+    "SELECT * FROM ts_forecast_var_by('returns', 'ds', ['equity','bond','fx'], 12, '1d', p:=2)",
+    "forecasting"},
+
     // ts_forecast_inspect_by: Return per-group fit-state snapshot for Inspectable models.
     // C++ API: ts_forecast_inspect_by(source, group_col, date_col, target_col, method, params?)
     //
@@ -2121,6 +2191,111 @@ SELECT * FROM _ts_quantile_loss_native(source, date_col, actual_col, forecast_co
     "Computes quantile (pinball) loss at a specified quantile level per group.",
     "SELECT * FROM ts_quantile_loss_by('results', product_id, date, actual, forecast, 0.9)",
     "metrics"},
+
+    // ================================================================================
+    // Diagnostic macros (Phase 1: STAT-01 ADF — plans 01-2/01-3 extend this section)
+    // ================================================================================
+
+    // ts_adf_by: ADF stationarity test per group (STAT-01)
+    // C++ API: ts_adf_by(source, group_col, date_col, value_col [, max_lags:=-1])
+    // Returns: TABLE(group_col, adf STRUCT(statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct))
+    {"ts_adf_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{"max_lags", "-1"}, {nullptr, nullptr}},
+R"(
+SELECT group_col, ts_adf(LIST(value_col::DOUBLE ORDER BY date_col), max_lags::INTEGER) AS adf
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)",
+    "ADF stationarity test per group. Returns STRUCT(statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct) per group. "
+    "Uses constant-only ('c') regression and AIC lag selection. "
+    "Pass max_lags:=N to override automatic lag selection.",
+    "SELECT group_col, (adf).statistic, (adf).p_value FROM ts_adf_by('sales', product_id, ds, y)",
+    "diagnostics"},
+
+    // ts_kpss_by: KPSS stationarity test per group (STAT-02)
+    // C++ API: ts_kpss_by(source, group_col, date_col, value_col [, lags:=-1])
+    // Returns: TABLE(group_col, kpss STRUCT(statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct))
+    {"ts_kpss_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{"lags", "-1"}, {nullptr, nullptr}},
+R"(
+SELECT group_col, ts_kpss(LIST(value_col::DOUBLE ORDER BY date_col), lags::INTEGER) AS kpss
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)",
+    "KPSS stationarity test per group. Returns STRUCT(statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct) per group. "
+    "Null hypothesis is level-stationarity; is_stationary=true means the null is not rejected at 5%. "
+    "Pass lags:=N to override the automatic bandwidth.",
+    "SELECT group_col, (kpss).statistic, (kpss).is_stationary FROM ts_kpss_by('sales', product_id, ds, y)",
+    "diagnostics"},
+
+    // ts_stationarity_by: combined ADF + KPSS four-way verdict per group (STAT-03)
+    // C++ API: ts_stationarity_by(source, group_col, date_col, value_col)
+    // Returns: TABLE(group_col, stationarity STRUCT(adf_statistic, adf_p_value, kpss_statistic, kpss_p_value, adf_is_stationary, kpss_is_stationary, verdict))
+    {"ts_stationarity_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{nullptr, nullptr}},
+R"(
+SELECT group_col, ts_stationarity(LIST(value_col::DOUBLE ORDER BY date_col)) AS stationarity
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)",
+    "Combined ADF + KPSS stationarity verdict per group. Returns STRUCT(adf_statistic, adf_p_value, kpss_statistic, kpss_p_value, "
+    "adf_is_stationary, kpss_is_stationary, verdict) per group. verdict is one of "
+    "'stationary', 'trend_stationary', 'difference_stationary', 'non_stationary'.",
+    "SELECT group_col, (stationarity).verdict FROM ts_stationarity_by('sales', product_id, ds, y)",
+    "diagnostics"},
+
+    // ts_ljung_box_by: Ljung-Box residual white-noise test per group (RESID-01)
+    {"ts_ljung_box_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{"lags", "-1"}, {nullptr, nullptr}},
+R"(
+SELECT group_col, ts_ljung_box(LIST(value_col::DOUBLE ORDER BY date_col), lags::INTEGER) AS ljung_box
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)",
+    "Ljung-Box white-noise test on residuals per group. Returns STRUCT(statistic, p_value, lags, df). "
+    "value_col should be model residuals; default lags = min(10, n/5). Pass lags:=N to override.",
+    "SELECT group_col, (ljung_box).p_value FROM ts_ljung_box_by('resids', product_id, ds, e)",
+    "diagnostics"},
+
+    // ts_durbin_watson_by: Durbin-Watson statistic per group (RESID-02)
+    {"ts_durbin_watson_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{nullptr, nullptr}},
+R"(
+SELECT group_col, ts_durbin_watson(LIST(value_col::DOUBLE ORDER BY date_col)) AS durbin_watson
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)",
+    "Durbin-Watson first-order autocorrelation statistic on residuals per group. "
+    "Returns STRUCT(statistic, interpretation); statistic in [0,4], ~2 means no autocorrelation.",
+    "SELECT group_col, (durbin_watson).statistic FROM ts_durbin_watson_by('resids', product_id, ds, e)",
+    "diagnostics"},
+
+    // ts_jarque_bera_by: Jarque-Bera normality test per group (RESID-03)
+    {"ts_jarque_bera_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{nullptr, nullptr}},
+R"(
+SELECT group_col, ts_jarque_bera(LIST(value_col::DOUBLE ORDER BY date_col)) AS jarque_bera
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)",
+    "Jarque-Bera normality test on residuals per group. Returns STRUCT(statistic, p_value, skewness, excess_kurtosis). "
+    "A small p-value rejects normality.",
+    "SELECT group_col, (jarque_bera).p_value FROM ts_jarque_bera_by('resids', product_id, ds, e)",
+    "diagnostics"},
+
+    // ts_residual_diagnostics_by: combined residual adequacy report per group (RESID-04)
+    {"ts_residual_diagnostics_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{"alpha", "0.05"}, {nullptr, nullptr}},
+R"(
+SELECT group_col, ts_residual_diagnostics(LIST(value_col::DOUBLE ORDER BY date_col), alpha::DOUBLE) AS residual_diagnostics
+FROM query_table(source::VARCHAR)
+GROUP BY group_col
+)",
+    "Combined residual adequacy report per group: Ljung-Box + Durbin-Watson + Jarque-Bera. "
+    "Returns STRUCT(lb_statistic, lb_p_value, lb_lags, dw_statistic, dw_interpretation, jb_statistic, "
+    "jb_p_value, jb_skewness, jb_excess_kurtosis, adequate). adequate = (lb_p_value > alpha), alpha default 0.05.",
+    "SELECT group_col, (residual_diagnostics).adequate FROM ts_residual_diagnostics_by('resids', product_id, ds, e)",
+    "diagnostics"},
 
     // Sentinel
     {nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr, nullptr, nullptr, nullptr}

@@ -4,11 +4,11 @@
 
 ## Overview
 
-The extension provides 33 forecasting models ranging from simple baselines to sophisticated state-space methods and streaming distributional forecasters.
+The extension provides 36 forecasting models ranging from simple baselines to sophisticated state-space methods, classical volatility models, and multivariate Vector Autoregression.
 
 **Use this document to:**
 - Generate point forecasts and prediction intervals for single or multiple series
-- Choose from 33 models: baselines (Naive, SMA), exponential smoothing (ETS, Holt-Winters), state-space (ARIMA), multi-seasonal (MSTL, TBATS), intermittent demand (Croston, TSB), and distributional (Laplace)
+- Choose from 36 models: baselines (Naive, SMA), exponential smoothing (ETS, Holt-Winters), state-space (ARIMA, Kalman), classical (GARCH), multi-seasonal (MSTL, TBATS), intermittent demand (Croston, TSB), distributional (Laplace), and multivariate (VAR)
 - Use automatic model selection (AutoETS, AutoARIMA, AutoTheta) when unsure
 - Incorporate exogenous variables with supported models
 - Understand the detect-then-forecast workflow for seasonal data
@@ -312,6 +312,266 @@ SELECT * FROM ts_forecast_exog_by(
     MAP{}                  -- params (optional)
 );
 ```
+
+---
+
+## Panel / Global Forecasting (`ts_forecast_panel_by`)
+
+Global cross-series learners that fit **one shared model across all series simultaneously** and predict per-series forecasts. Unlike `ts_forecast_by` (N independent fits), panel models pool the parameter optimization across the full panel — making them faster and better-regularized when individual series are short.
+
+**Three supported methods:**
+
+| Method | Description | When to Use |
+|--------|-------------|-------------|
+| `'GlobalETS'` | Pooled ETS with automatic spec selection (`GlobalAutoETS`) | Many related series with shared seasonal dynamics |
+| `'GlobalTheta'` | Pooled Theta (Standard Theta Method, theta=2.0) | Trended panels; no seasonal config needed |
+| `'GlobalCroston'` | Pooled Croston (Classic or SBA bias correction) | Intermittent/spare-parts panels with many zeros |
+
+### Signature
+
+```sql
+ts_forecast_panel_by(
+    source_table  VARCHAR,     -- table name (quoted string)
+    group_col     IDENTIFIER,  -- series identifier (unquoted)
+    date_col      IDENTIFIER,  -- date/timestamp column (unquoted)
+    target_col    IDENTIFIER,  -- value column (unquoted)
+    method        VARCHAR,     -- 'GlobalETS' | 'GlobalTheta' | 'GlobalCroston'
+    horizon       INTEGER,     -- periods to forecast
+    frequency     VARCHAR,     -- '1d', '1h', '1mo', ...
+    params        MAP{}        -- optional; see per-method params below
+) → TABLE(group_col, forecast_step INT, date_col TIMESTAMP, yhat DOUBLE, model_name VARCHAR)
+```
+
+### Ragged panel handling
+
+Series with different lengths or start dates are automatically handled:
+1. A shared date grid is built as the **union of all dates** across the panel, at the declared `frequency`.
+2. Each series is aligned to the shared grid; gaps are filled with NaN and then imputed via linear interpolation.
+3. Series with **fewer than 10 valid observations** after alignment are **dropped** and emitted as `DROPPED: too_short` rows (not as errors).
+4. At least **3 series** must survive the drop step for the global fit to proceed.
+
+### Point forecasts only (v1)
+
+`ts_forecast_panel_by` returns point forecasts only — `yhat_lower` / `yhat_upper` are not available in this release. Prediction intervals via conformal prediction are planned for a future increment (D-Area3).
+
+### Method-specific params
+
+**GlobalETS:**
+```sql
+MAP {
+    'seasonal_period': '7',    -- period for seasonal ETS (0 or omit = non-seasonal only)
+    'model_pool': 'Reduced'    -- 'Reduced' (8 candidates, default) or 'Complete' (19)
+}
+```
+
+**GlobalTheta:** No params accepted (seasonal_period is ignored).
+
+**GlobalCroston:**
+```sql
+MAP {
+    'croston_variant': 'SBA'   -- 'Classic' (default) or 'SBA' (bias correction)
+}
+```
+
+### Examples
+
+```sql
+-- GlobalETS: weekly seasonal panel (verified end-to-end)
+SELECT uid AS series, forecast_step, ROUND(yhat, 2) AS yhat, model_name
+FROM ts_forecast_panel_by(
+    'seasonal_panel',
+    uid,
+    ds,
+    y,
+    'GlobalETS',
+    7,
+    '1d',
+    MAP {'seasonal_period': '7'}
+)
+ORDER BY series, forecast_step;
+
+-- GlobalTheta: trended panel, no seasonal config (verified end-to-end)
+SELECT product_id, forecast_step, ds, ROUND(yhat, 2) AS yhat, model_name
+FROM ts_forecast_panel_by(
+    'panel_sales',
+    product_id,
+    ds,
+    y,
+    'GlobalTheta',
+    14,
+    '1d'
+)
+ORDER BY product_id, forecast_step;
+
+-- GlobalCroston SBA: intermittent demand panel (verified end-to-end)
+SELECT item_id, forecast_step, ds, ROUND(yhat, 4) AS yhat, model_name
+FROM ts_forecast_panel_by(
+    'panel_intermittent',
+    item_id,
+    ds,
+    qty,
+    'GlobalCroston',
+    6,
+    '1d',
+    MAP {'croston_variant': 'SBA'}
+)
+ORDER BY item_id, forecast_step;
+
+-- Method comparison (GlobalETS vs GlobalTheta on same panel)
+SELECT 'GlobalETS' AS method, product_id, forecast_step, ROUND(yhat, 2) AS yhat
+FROM ts_forecast_panel_by('panel_sales', product_id, ds, y, 'GlobalETS', 7, '1d')
+UNION ALL
+SELECT 'GlobalTheta', product_id, forecast_step, ROUND(yhat, 2)
+FROM ts_forecast_panel_by('panel_sales', product_id, ds, y, 'GlobalTheta', 7, '1d')
+ORDER BY product_id, method, forecast_step;
+```
+
+### Per-method reference
+
+- [GlobalETS](../reference/models/exponential-smoothing/global_ets.md) — pooled ETS with optional seasonality
+- [GlobalTheta](../reference/models/theta/global_theta.md) — pooled Theta, minimal config
+- [GlobalCroston](../reference/models/intermittent/global_croston.md) — pooled Croston for intermittent demand
+
+---
+
+## Classical Models — GARCH and Kalman
+
+Univariate models for conditional volatility (GARCH) and state-space smoothing (Kalman),
+accessible via the standard `ts_forecast_by` surface with `method = 'GARCH'` or `method = 'Kalman'`.
+
+### GARCH — Conditional Volatility Forecasting
+
+> **forecast_value (yhat) is conditional VOLATILITY (std-dev), not variance.**
+> `yhat = sqrt(forecast_variance(h))`. Square it for variance: `yhat * yhat`.
+
+Use GARCH on **returns** (first differences), not raw price levels. GARCH models volatility
+clustering in financial time series: periods of high volatility tend to be followed by high
+volatility, and low by low.
+
+**Default:** GARCH(1,1). Override `p` and `q` via the `params` MAP.
+
+```sql
+-- GARCH(1,1) — conditional volatility on returns (verified end-to-end)
+CREATE OR REPLACE TABLE returns AS
+    SELECT 'Asset_A' AS asset_id,
+           DATE '2024-01-01' + INTERVAL (i) DAY AS ds,
+           0.5 * SIN(i * 0.7) + 0.3 * COS(i * 0.3) AS y
+    FROM range(40) t(i);
+
+SELECT
+    asset_id,
+    forecast_step,
+    ds,
+    ROUND(yhat, 6) AS conditional_volatility,
+    model_name
+FROM ts_forecast_by('returns', asset_id, ds, y, 'GARCH', 7, '1d')
+ORDER BY asset_id, forecast_step;
+
+-- GARCH(1,1) — explicit p=1, q=1 via params
+SELECT asset_id, forecast_step, ds, ROUND(yhat, 6) AS conditional_volatility, model_name
+FROM ts_forecast_by(
+    'returns', asset_id, ds, y, 'GARCH', 7, '1d',
+    params := MAP{'garch_p':'1','garch_q':'1'}
+)
+ORDER BY asset_id, forecast_step;
+```
+
+**Minimum observations:** p + q + 10 (GARCH(1,1): 12 minimum).
+
+See [GARCH reference](../reference/models/classical/garch.md) for full parameter docs and pitfalls.
+
+### Kalman — State-Space Smoothing + h-Step Forecasting
+
+Two state-space specifications via the `kalman_model` param:
+
+| Spec | `kalman_model` value | Description |
+|------|----------------------|-------------|
+| Local level | `'local_level'` (default) | Random walk + noise; flat h-step forecast |
+| Local linear trend | `'local_linear_trend'` | Level + slope; linearly growing/shrinking forecast |
+
+```sql
+-- Kalman local_level (default) — verified end-to-end
+CREATE OR REPLACE TABLE sales AS
+    SELECT 'Product_X' AS product_id,
+           DATE '2024-01-01' + INTERVAL (i) DAY AS ds,
+           100.0 + i * 0.8 + 5.0 * SIN(2 * PI() * i / 7.0) AS y
+    FROM range(30) t(i);
+
+SELECT product_id, forecast_step, ds, ROUND(yhat, 4) AS yhat, model_name
+FROM ts_forecast_by('sales', product_id, ds, y, 'Kalman', 7, '1d')
+ORDER BY product_id, forecast_step;
+
+-- Kalman local_linear_trend — captures trend direction
+SELECT product_id, forecast_step, ds, ROUND(yhat, 4) AS yhat, model_name
+FROM ts_forecast_by(
+    'sales', product_id, ds, y, 'Kalman', 7, '1d',
+    params := MAP{'kalman_model': 'local_linear_trend'}
+)
+ORDER BY product_id, forecast_step;
+```
+
+See [Kalman reference](../reference/models/state-space/kalman.md) for full docs.
+
+---
+
+## Multivariate Forecasting (`ts_forecast_var_by`)
+
+VAR (Vector Autoregression) fits **one model across K variables simultaneously**,
+capturing cross-variable dynamics. Unlike `ts_forecast_by` (one model per series per group),
+`ts_forecast_var_by` uses all variable columns together in a single multivariate fit.
+
+> **v1 constraint:** Single-panel only (no `group_col`). One VAR fit over the entire input table.
+> **Lag order:** Use named param `p` (not `order` — SQL reserved word).
+> **Output:** Long format — one row per (variable, horizon step).
+
+### Signature
+
+```sql
+ts_forecast_var_by(
+    source     VARCHAR,     -- source table name (quoted string)
+    date_col   VARCHAR,     -- date column name (quoted string)
+    value_cols VARCHAR[],   -- array of value column names
+    horizon    INTEGER,     -- periods to forecast
+    frequency  VARCHAR,     -- time step between observations
+    p          INTEGER,     -- lag order (named param, default: 1)
+    params     MAP          -- reserved for future use (default: MAP{})
+)
+→ TABLE(variable VARCHAR, forecast_step BIGINT, <date_col>, forecast_value DOUBLE)
+```
+
+### Examples (verified end-to-end)
+
+```sql
+-- VAR(1) — 2-variable system, 14-step ahead, long format output
+CREATE OR REPLACE TABLE var_src AS
+    SELECT
+        (DATE '2020-01-01' + INTERVAL (i) DAY) AS ds,
+        (0.6 * SIN(i * 0.4) + 0.1 * COS(i * 0.2)) AS y1,
+        (0.05 * SIN(i * 0.4) + 0.7 * COS(i * 0.2)) AS y2
+    FROM range(60) t(i);
+
+-- Returns 2 variables * 14 steps = 28 rows in long format
+SELECT * REPLACE(ROUND(forecast_value, 6) AS forecast_value)
+FROM ts_forecast_var_by('var_src', 'ds', ['y1', 'y2'], 14, '1d')
+ORDER BY variable, forecast_step;
+
+-- VAR(2) — higher lag order for longer-range cross-variable dynamics
+SELECT * REPLACE(ROUND(forecast_value, 6) AS forecast_value)
+FROM ts_forecast_var_by('var_src', 'ds', ['y1', 'y2'], 14, '1d', p:=2)
+ORDER BY variable, forecast_step;
+```
+
+### Key notes
+
+- **Input format:** Wide — one column per variable, one row per time point. Use standard DuckDB
+  pivoting (`PIVOT`) to convert long format to wide before calling `ts_forecast_var_by`.
+- **Output format:** Long — `(variable VARCHAR, forecast_step BIGINT, <date_col>, forecast_value DOUBLE)`.
+  Use DuckDB `PIVOT` on `variable` to convert back to wide format.
+- **Null handling:** Missing values are imputed via linear interpolation before fitting.
+  All `value_cols` must have the same number of valid observations after imputation.
+- **Minimum obs:** n > k × p + 1 (n = valid obs, k = number of variables, p = lag order).
+
+See [VAR reference](../reference/models/multivariate/var.md) for full docs, pitfalls, and benchmark results.
 
 ---
 

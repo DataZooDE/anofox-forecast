@@ -11,7 +11,9 @@ use anofox_forecast::models::exponential::{
     AutoETS, AutoETSConfig, ETSSpec, HoltLinearTrend, HoltWinters as HoltWintersModel, ModelPool,
     SeasonalES as SeasonalESModel, SimpleExponentialSmoothing, ETS as ETSModel,
 };
+use anofox_forecast::models::garch::GARCH;
 use anofox_forecast::models::intermittent::{Croston, ADIDA, IMAPA, TSB};
+use anofox_forecast::models::kalman_forecaster::KalmanForecaster;
 use anofox_forecast::models::laplace::LaplaceForecaster;
 use anofox_forecast::models::mstl_forecaster::MSTLForecaster;
 use anofox_forecast::models::tbats::{AutoTBATS, TBATS as TBATSModel};
@@ -143,6 +145,15 @@ pub enum ModelType {
     // leaves. Variant (Auto / AutoAid / Skaters) is carried in
     // `ForecastOptions.laplace_variant`.
     Laplace,
+
+    // Classical Models (2) — Phase 3 additions
+    /// GARCH(p,q) conditional-volatility model. `forecast_value` is the
+    /// conditional standard deviation = sqrt(forecast_variance(h)), NOT variance.
+    /// Default GARCH(1,1); `garch_p`/`garch_q` in `ForecastOptions` override.
+    GARCH,
+    /// Kalman filter state-space model. Default spec: local level.
+    /// `kalman_model` in `ForecastOptions` selects "local_linear_trend".
+    Kalman,
 }
 
 impl std::str::FromStr for ModelType {
@@ -193,6 +204,9 @@ impl std::str::FromStr for ModelType {
             "TSB" => return Ok(ModelType::TSB),
             // Distributional
             "Laplace" => return Ok(ModelType::Laplace),
+            // Classical
+            "GARCH" => return Ok(ModelType::GARCH),
+            "Kalman" => return Ok(ModelType::Kalman),
             _ => {}
         }
 
@@ -249,6 +263,9 @@ impl std::str::FromStr for ModelType {
             "tsb" => Ok(ModelType::TSB),
             // Distributional
             "laplace" => Ok(ModelType::Laplace),
+            // Classical
+            "garch" => Ok(ModelType::GARCH),
+            "kalman" => Ok(ModelType::Kalman),
             // Auto selection (legacy, maps to AutoETS)
             "auto" => Ok(ModelType::AutoETS),
             _ => Err(ForecastError::InvalidModel(format!("Unknown model: {}", s))),
@@ -302,6 +319,9 @@ impl ModelType {
             ModelType::TSB => "TSB",
             // Distributional
             ModelType::Laplace => "Laplace",
+            // Classical
+            ModelType::GARCH => "GARCH",
+            ModelType::Kalman => "Kalman",
         }
     }
 }
@@ -344,6 +364,13 @@ pub struct ForecastOptions {
     /// abandons the seasonal-EMA leaf for a differenced-EMA leaf and
     /// the forecast collapses to flat. Default `false`.
     pub laplace_seasonal_batch_init: bool,
+    /// GARCH p order (0 = use default 1). Only consulted when model is GARCH.
+    pub garch_p: usize,
+    /// GARCH q order (0 = use default 1). Only consulted when model is GARCH.
+    pub garch_q: usize,
+    /// Kalman state-space spec ("local_level" | "local_linear_trend").
+    /// None = "local_level". Only consulted when model is Kalman.
+    pub kalman_model: Option<String>,
 }
 
 impl Default for ForecastOptions {
@@ -362,6 +389,9 @@ impl Default for ForecastOptions {
             model_pool: None,
             laplace_variant: None,
             laplace_seasonal_batch_init: false,
+            garch_p: 0,
+            garch_q: 0,
+            kalman_model: None,
         }
     }
 }
@@ -464,6 +494,13 @@ pub struct ForecastOptionsExog {
     pub laplace_variant: Option<LaplaceVariant>,
     /// Enable `LaplaceForecaster::with_seasonal_batch_init()` (opt-in).
     pub laplace_seasonal_batch_init: bool,
+    /// GARCH p order (0 = use default 1). Only consulted when model is GARCH.
+    pub garch_p: usize,
+    /// GARCH q order (0 = use default 1). Only consulted when model is GARCH.
+    pub garch_q: usize,
+    /// Kalman state-space spec ("local_level" | "local_linear_trend").
+    /// None = "local_level". Only consulted when model is Kalman.
+    pub kalman_model: Option<String>,
 }
 
 impl Default for ForecastOptionsExog {
@@ -483,6 +520,9 @@ impl Default for ForecastOptionsExog {
             model_pool: None,
             laplace_variant: None,
             laplace_seasonal_batch_init: false,
+            garch_p: 0,
+            garch_q: 0,
+            kalman_model: None,
         }
     }
 }
@@ -504,6 +544,9 @@ impl From<ForecastOptions> for ForecastOptionsExog {
             model_pool: opts.model_pool,
             laplace_variant: opts.laplace_variant,
             laplace_seasonal_batch_init: opts.laplace_seasonal_batch_init,
+            garch_p: opts.garch_p,
+            garch_q: opts.garch_q,
+            kalman_model: opts.kalman_model,
         }
     }
 }
@@ -678,27 +721,60 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             options.laplace_seasonal_batch_init,
             options.confidence_level,
         ),
+        // Classical
+        ModelType::GARCH => forecast_garch(
+            &clean_values,
+            options.horizon,
+            if options.garch_p == 0 {
+                1
+            } else {
+                options.garch_p
+            },
+            if options.garch_q == 0 {
+                1
+            } else {
+                options.garch_q
+            },
+        ),
+        ModelType::Kalman => forecast_kalman(
+            &clean_values,
+            options.horizon,
+            options.kalman_model.as_deref(),
+        ),
     }?;
 
-    // Calculate confidence intervals
-    let (lower, upper) =
-        calculate_confidence_intervals(&result.point, &clean_values, options.confidence_level);
+    // Calculate confidence intervals — skip for models that document no v1 intervals.
+    // GARCH point forecasts are conditional standard deviations (not level forecasts), so
+    // wrapping them with ±z×σ_historical produces meaningless bounds. Kalman v1 likewise
+    // has no prediction intervals. Emit empty vecs for both, matching the docs.
+    let (lower, upper) = match options.model {
+        ModelType::GARCH | ModelType::Kalman => (vec![], vec![]),
+        _ => calculate_confidence_intervals(&result.point, &clean_values, options.confidence_level),
+    };
 
-    // Calculate fitted values and residuals if requested
+    // Calculate fitted values and residuals if requested.
+    // Some models (GARCH, Kalman) return empty fitted from calculate_fitted_values — treat
+    // empty as "not available" and emit None for both fitted and residuals rather than
+    // propagating SES-approximated values that would be semantically wrong.
     let (fitted, residuals) = if options.include_fitted || options.include_residuals {
-        let fitted = calculate_fitted_values(&clean_values, options.model, period);
-        let residuals = if options.include_residuals {
-            Some(
-                clean_values
-                    .iter()
-                    .zip(fitted.iter())
-                    .map(|(a, f)| a - f)
-                    .collect(),
-            )
+        let fitted_vec = calculate_fitted_values(&clean_values, options.model, period);
+        if fitted_vec.is_empty() {
+            // Model does not surface fitted values in v1; return NULL for both.
+            (None, None)
         } else {
-            None
-        };
-        (Some(fitted), residuals)
+            let residuals = if options.include_residuals {
+                Some(
+                    clean_values
+                        .iter()
+                        .zip(fitted_vec.iter())
+                        .map(|(a, f)| a - f)
+                        .collect(),
+                )
+            } else {
+                None
+            };
+            (Some(fitted_vec), residuals)
+        }
     } else {
         (None, None)
     };
@@ -857,9 +933,12 @@ pub fn forecast_with_exog(
     // For fitted values calculation, use the requested model
     let model = options.model;
 
-    // Calculate confidence intervals
-    let (lower, upper) =
-        calculate_confidence_intervals(&result.point, &clean_values, options.confidence_level);
+    // Calculate confidence intervals — skip for GARCH and Kalman (no synthetic
+    // historical-volatility bounds on volatility forecasts or state-space outputs).
+    let (lower, upper) = match options.model {
+        ModelType::GARCH | ModelType::Kalman => (vec![], vec![]),
+        _ => calculate_confidence_intervals(&result.point, &clean_values, options.confidence_level),
+    };
 
     // Calculate fitted values and residuals if requested
     let (fitted, residuals) = if options.include_fitted || options.include_residuals {
@@ -1018,6 +1097,9 @@ fn forecast_with_model(
             laplace_seasonal_batch_init,
             confidence_level,
         ),
+        // Classical (default params: GARCH(1,1), Kalman local_level)
+        ModelType::GARCH => forecast_garch(values, horizon, 1, 1),
+        ModelType::Kalman => forecast_kalman(values, horizon, None),
     }
 }
 
@@ -2324,6 +2406,64 @@ fn forecast_imapa(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
 }
 
 // ============================================================================
+// Classical model implementations (Phase 3)
+// ============================================================================
+
+/// Forecast conditional volatility using GARCH(p, q).
+///
+/// Returns `sqrt(forecast_variance(horizon))` — the conditional standard
+/// deviation (volatility), NOT the variance.  Do NOT use
+/// `Forecaster::predict()` for this: it returns seed-1 simulated innovations,
+/// not the analytical variance forecast.
+///
+/// Requires `p + q + 10` observations minimum (GARCH(1,1) → 12 min).
+fn forecast_garch(values: &[f64], horizon: usize, p: usize, q: usize) -> Result<ForecastOutput> {
+    let ts = make_timeseries(values)?;
+    let mut model = GARCH::new(p, q);
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("GARCH fit failed: {}", e)))?;
+    // IMPORTANT: use forecast_variance(), NOT predict() — predict() returns simulated innovations
+    let variance = model
+        .forecast_variance(horizon)
+        .map_err(|e| ForecastError::ComputationError(format!("GARCH forecast failed: {}", e)))?;
+    // Output is volatility (std-dev = sqrt of variance), not variance itself
+    let volatility: Vec<f64> = variance.iter().map(|&v| v.sqrt()).collect();
+    Ok(ForecastOutput {
+        point: volatility,
+        lower: vec![],
+        upper: vec![],
+        fitted: None,
+        residuals: None,
+        model_name: format!("GARCH({},{})", p, q),
+        aic: None,
+        bic: None,
+        mse: None,
+    })
+}
+
+/// Forecast using a Kalman filter state-space model.
+///
+/// `spec`:
+/// - `None` or `"local_level"` → `KalmanForecaster::local_level()` (default)
+/// - `"local_linear_trend"` → `KalmanForecaster::local_linear_trend()`
+///
+/// Uses `extract_forecast` because `KalmanForecaster` implements the
+/// `Forecaster` trait — same path as all other trait-based models.
+fn forecast_kalman(values: &[f64], horizon: usize, spec: Option<&str>) -> Result<ForecastOutput> {
+    let ts = make_timeseries(values)?;
+    let mut model = match spec.unwrap_or("local_level") {
+        "local_linear_trend" => KalmanForecaster::local_linear_trend(),
+        _ => KalmanForecaster::local_level(),
+    };
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("Kalman fit failed: {}", e)))?;
+    // KalmanForecaster implements Forecaster — extract_forecast works directly
+    extract_forecast(&model, horizon, "Kalman")
+}
+
+// ============================================================================
 // Exogenous-aware forecasting functions
 // ============================================================================
 
@@ -2592,6 +2732,10 @@ fn calculate_confidence_intervals(
 
 fn calculate_fitted_values(values: &[f64], model: ModelType, period: usize) -> Vec<f64> {
     match model {
+        // GARCH and Kalman do not surface true fitted values in v1.
+        // Return empty so the caller emits NULL for fitted/residuals rather than
+        // the misleading SES-approximated values the catch-all would produce.
+        ModelType::GARCH | ModelType::Kalman => vec![],
         ModelType::Naive => {
             let mut fitted = vec![values[0]];
             fitted.extend(values[..values.len() - 1].iter().cloned());
@@ -2642,7 +2786,7 @@ fn calculate_fitted_values(values: &[f64], model: ModelType, period: usize) -> V
     }
 }
 
-/// List all available model names (32 models matching C++ extension).
+/// List all available model names (35 models matching C++ extension).
 /// See: <https://github.com/DataZooDE/anofox-forecast/blob/main/docs/API_REFERENCE.md#supported-models>
 pub fn list_models() -> Vec<String> {
     vec![
@@ -2688,6 +2832,9 @@ pub fn list_models() -> Vec<String> {
         "TSB",
         // Distributional Models (1)
         "Laplace",
+        // Classical Models (2) — Phase 3 additions
+        "GARCH",
+        "Kalman",
     ]
     .into_iter()
     .map(String::from)
@@ -3609,5 +3756,135 @@ mod tests {
                 max_actual
             );
         }
+    }
+
+    // ========================================================================
+    // Phase 3: Kalman + GARCH tests
+    // ========================================================================
+
+    #[test]
+    fn test_forecast_kalman_local_level() {
+        // A non-trivial series (30 values with trend + noise pattern)
+        let values: Vec<Option<f64>> = (0..30)
+            .map(|i| Some(10.0 + i as f64 * 0.5 + (i % 3) as f64))
+            .collect();
+        let options = ForecastOptions {
+            model: ModelType::Kalman,
+            horizon: 5,
+            ..Default::default()
+        };
+        let result = forecast(&values, &options).unwrap();
+        assert_eq!(
+            result.point.len(),
+            5,
+            "Kalman must return horizon=5 point values"
+        );
+        assert_eq!(result.model_name, "Kalman");
+        assert!(
+            result.point.iter().all(|v| v.is_finite()),
+            "All Kalman forecasts must be finite"
+        );
+    }
+
+    #[test]
+    fn test_forecast_kalman_local_linear_trend() {
+        let values: Vec<Option<f64>> = (0..30).map(|i| Some(5.0 + i as f64 * 1.2)).collect();
+        let options_ll = ForecastOptions {
+            model: ModelType::Kalman,
+            kalman_model: None, // local_level
+            horizon: 5,
+            ..Default::default()
+        };
+        let options_llt = ForecastOptions {
+            model: ModelType::Kalman,
+            kalman_model: Some("local_linear_trend".to_string()),
+            horizon: 5,
+            ..Default::default()
+        };
+        let result_ll = forecast(&values, &options_ll).unwrap();
+        let result_llt = forecast(&values, &options_llt).unwrap();
+        assert_eq!(result_ll.point.len(), 5);
+        assert_eq!(result_llt.point.len(), 5);
+        // The two specs produce different point forecasts on a trended series
+        assert_ne!(
+            result_ll.point[0], result_llt.point[0],
+            "local_level and local_linear_trend should produce different forecasts"
+        );
+    }
+
+    #[test]
+    fn test_forecast_garch_basic() {
+        // Returns-like series of length >= 12 (GARCH(1,1) minimum)
+        let values: Vec<Option<f64>> = vec![
+            Some(0.01),
+            Some(-0.02),
+            Some(0.03),
+            Some(-0.015),
+            Some(0.025),
+            Some(-0.01),
+            Some(0.02),
+            Some(-0.03),
+            Some(0.015),
+            Some(-0.025),
+            Some(0.012),
+            Some(-0.018),
+            Some(0.022),
+            Some(-0.011),
+            Some(0.028),
+        ];
+        let options = ForecastOptions {
+            model: ModelType::GARCH,
+            horizon: 5,
+            ..Default::default()
+        };
+        let result = forecast(&values, &options).unwrap();
+        assert_eq!(
+            result.point.len(),
+            5,
+            "GARCH must return horizon=5 point values"
+        );
+        assert_eq!(result.model_name, "GARCH(1,1)");
+        for &v in &result.point {
+            assert!(v >= 0.0, "GARCH volatility must be non-negative, got {}", v);
+        }
+    }
+
+    #[test]
+    fn test_forecast_garch_sqrt_of_variance() {
+        // Verify that point values equal sqrt of variance (spot-check element 0)
+        let values: Vec<f64> = vec![
+            0.01, -0.02, 0.03, -0.015, 0.025, -0.01, 0.02, -0.03, 0.015, -0.025, 0.012, -0.018,
+            0.022, -0.011, 0.028,
+        ];
+        let ts = make_timeseries(&values).unwrap();
+        let mut model = GARCH::new(1, 1);
+        model.fit(&ts).unwrap();
+        let variance = model.forecast_variance(5).unwrap();
+        let volatility_from_core = forecast_garch(&values, 5, 1, 1).unwrap();
+        // Element 0: sqrt(variance[0]) should match volatility[0] within 1e-9
+        let expected = variance[0].sqrt();
+        let actual = volatility_from_core.point[0];
+        assert!(
+            (actual - expected).abs() < 1e-9,
+            "GARCH forecast[0] = {} but expected sqrt(variance[0]) = {}",
+            actual,
+            expected
+        );
+    }
+
+    #[test]
+    fn test_forecast_garch_insufficient_data() {
+        // A series shorter than p+q+10 = 12 for GARCH(1,1) should return Err
+        let values: Vec<Option<f64>> = (0..8).map(|i| Some(i as f64 * 0.01)).collect();
+        let options = ForecastOptions {
+            model: ModelType::GARCH,
+            horizon: 3,
+            ..Default::default()
+        };
+        let result = forecast(&values, &options);
+        assert!(
+            result.is_err(),
+            "GARCH on a series with 8 obs (< 12 min for GARCH(1,1)) should return Err"
+        );
     }
 }

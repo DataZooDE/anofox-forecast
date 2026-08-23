@@ -2,6 +2,8 @@
 
 #include "anofox_forecast_extension.hpp"
 #include "anofox_fcst_ffi.h"
+#include "ts_forecast_panel_native.hpp"  // Phase 2: GLOB-01..03
+#include "ts_forecast_var_native.hpp"    // Phase 3: CLAS-03
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/main/extension_helper.hpp"
@@ -157,12 +159,23 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsBootstrapIntervalsFunction(loader);
     RegisterTsBootstrapQuantilesFunction(loader);
 
+    // Register Diagnostic functions (Phase 1: STAT-01..03 stationarity, RESID-01..04 residual diagnostics)
+    RegisterTsAdfFunction(loader);
+    RegisterTsKpssFunction(loader);
+    RegisterTsStationarityFunction(loader);
+    RegisterTsLjungBoxFunction(loader);
+    RegisterTsDurbinWatsonFunction(loader);
+    RegisterTsJarqueBeraFunction(loader);
+    RegisterTsResidualDiagnosticsFunction(loader);
+
     // Register Table Macros
     RegisterTsTableMacros(loader);
 
     // Register Native Table Functions (streaming)
     RegisterTsBacktestNativeFunction(loader);
     RegisterTsForecastNativeFunction(loader);
+    RegisterTsForecastPanelNativeFunction(loader);  // Phase 2: GLOB-01..03
+    RegisterTsForecastVarNativeFunction(loader);    // Phase 3: CLAS-03
     RegisterTsCvSplitNativeFunction(loader);
     RegisterTsCvForecastNativeFunction(loader);
     RegisterTsCvFoldsNativeFunction(loader);

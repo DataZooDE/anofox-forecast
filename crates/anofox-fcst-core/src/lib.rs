@@ -20,6 +20,7 @@ pub mod periods;
 pub mod quality;
 pub mod seasonality;
 pub mod stats;
+pub mod validation;
 
 // Re-exports for convenience
 pub use bootstrap::{
@@ -104,4 +105,11 @@ pub use seasonality::{
 pub use stats::{
     compute_ts_stats, compute_ts_stats_with_dates, compute_ts_stats_with_dates_and_type,
     FrequencyType, TsStats,
+};
+
+// Statistical validation (Phase 1: STAT-01..03 stationarity, RESID-01..04 residual diagnostics)
+pub use validation::{
+    adf, classify_stationarity, durbin_watson, jarque_bera, kpss, ljung_box, residual_diagnostics,
+    stationarity, CombinedStationarityOut, DurbinWatsonOut, JarqueBeraOut, LjungBoxOut,
+    ResidualDiagnosticsOut, StationarityOut,
 };

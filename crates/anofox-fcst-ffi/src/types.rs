@@ -403,6 +403,71 @@ pub struct ForecastOptions {
     /// growing amplitude / phase-shifted seasonality (softmax abandons the
     /// seasonal-EMA leaf and forecast collapses to flat).
     pub laplace_seasonal_batch_init: bool,
+    /// GARCH p order (0 → default 1). Only consulted when model is "GARCH".
+    pub garch_p: c_int,
+    /// GARCH q order (0 → default 1). Only consulted when model is "GARCH".
+    pub garch_q: c_int,
+    /// Kalman state-space spec. Empty string = "local_level" (default).
+    /// Accepted values: "" | "local_level" | "local_linear_trend".
+    /// Only consulted when model is "Kalman".
+    pub kalman_model: [c_char; 32],
+}
+
+/// Panel forecast result — returned by `anofox_ts_forecast_panel`.
+///
+/// `forecasts` is a flat `[n_series * n_horizon]` array of `f64` in series-major
+/// order: `forecasts[s * n_horizon + h]` is the forecast for series `s` at
+/// horizon step `h` (0-based).  The buffer is allocated by Rust and must be
+/// freed exactly once via `anofox_free_panel_forecast_result`.
+#[repr(C)]
+pub struct PanelForecastResult {
+    /// Flat `[n_series * n_horizon]` forecast buffer; series-major order.
+    /// Allocated by Rust; freed by `anofox_free_panel_forecast_result`.
+    pub forecasts: *mut c_double,
+    /// Number of series in the panel.
+    pub n_series: size_t,
+    /// Number of horizon steps per series.
+    pub n_horizon: size_t,
+    /// Null-terminated model name (e.g. "GlobalETS").
+    pub model_name: [c_char; 64],
+}
+
+impl Default for PanelForecastResult {
+    fn default() -> Self {
+        Self {
+            forecasts: std::ptr::null_mut(),
+            n_series: 0,
+            n_horizon: 0,
+            model_name: [0; 64],
+        }
+    }
+}
+
+/// VAR multivariate forecast result — returned by `anofox_ts_forecast_var`.
+///
+/// `forecasts` is a flat `[k_vars * n_horizon]` array of `f64` in variable-major order:
+/// `forecasts[v * n_horizon + h]` is the forecast for variable `v` at horizon step `h` (0-based).
+/// The buffer is allocated by Rust and must be freed exactly once via
+/// `anofox_free_var_forecast_result`.
+#[repr(C)]
+pub struct VARForecastResult {
+    /// Flat `[k_vars * n_horizon]` forecast buffer; variable-major order.
+    /// Allocated by Rust; freed by `anofox_free_var_forecast_result`.
+    pub forecasts: *mut c_double,
+    /// Number of variables (K) in the VAR model.
+    pub k_vars: size_t,
+    /// Number of horizon steps per variable.
+    pub n_horizon: size_t,
+}
+
+impl Default for VARForecastResult {
+    fn default() -> Self {
+        Self {
+            forecasts: std::ptr::null_mut(),
+            k_vars: 0,
+            n_horizon: 0,
+        }
+    }
 }
 
 impl Default for ForecastOptions {
@@ -426,6 +491,9 @@ impl Default for ForecastOptions {
             model_pool: [0; 32],
             laplace_variant: [0; 16],
             laplace_seasonal_batch_init: false,
+            garch_p: 0,
+            garch_q: 0,
+            kalman_model: [0; 32],
         }
     }
 }
@@ -496,6 +564,12 @@ pub struct ForecastOptionsExog {
     pub laplace_variant: [c_char; 16],
     /// Enable `LaplaceForecaster::with_seasonal_batch_init()` (opt-in).
     pub laplace_seasonal_batch_init: bool,
+    /// GARCH p order (0 → default 1). Only consulted when model is "GARCH".
+    pub garch_p: c_int,
+    /// GARCH q order (0 → default 1). Only consulted when model is "GARCH".
+    pub garch_q: c_int,
+    /// Kalman state-space spec. Empty string = "local_level" (default).
+    pub kalman_model: [c_char; 32],
 }
 
 impl Default for ForecastOptionsExog {
@@ -520,6 +594,9 @@ impl Default for ForecastOptionsExog {
             model_pool: [0; 32],
             laplace_variant: [0; 16],
             laplace_seasonal_batch_init: false,
+            garch_p: 0,
+            garch_q: 0,
+            kalman_model: [0; 32],
         }
     }
 }
@@ -1669,4 +1746,212 @@ pub struct ConformalEvaluationFFI {
     pub winkler_score: c_double,
     /// Number of observations evaluated
     pub n_observations: size_t,
+}
+
+// ============================================================================
+// Stationarity test result types (Phase 1: STAT-01 ADF — ts_adf / ts_adf_by)
+// ============================================================================
+
+/// C-compatible result of an ADF stationarity test.
+///
+/// Field order is fixed and must match the STRUCT fields declared in
+/// `src/scalar_functions/diagnostics.cpp` (RegisterTsAdfFunction):
+///   statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct
+#[repr(C)]
+pub struct AnofoxStationarityResult {
+    /// ADF t-statistic (negative; more negative → stronger evidence of stationarity)
+    pub statistic: c_double,
+    /// Approximate p-value (MacKinnon 9-point lookup table)
+    pub p_value: c_double,
+    /// Number of lags used (AIC-selected or override)
+    pub lags: size_t,
+    /// `true` if series is stationary at the 5% level (`statistic < cv_5pct`)
+    pub is_stationary: bool,
+    /// Critical value at 1% significance (constant regression: -3.43)
+    pub cv_1pct: c_double,
+    /// Critical value at 5% significance (constant regression: -2.86)
+    pub cv_5pct: c_double,
+    /// Critical value at 10% significance (constant regression: -2.57)
+    pub cv_10pct: c_double,
+}
+
+impl Default for AnofoxStationarityResult {
+    fn default() -> Self {
+        Self {
+            statistic: f64::NAN,
+            p_value: f64::NAN,
+            lags: 0,
+            is_stationary: false,
+            cv_1pct: f64::NAN,
+            cv_5pct: f64::NAN,
+            cv_10pct: f64::NAN,
+        }
+    }
+}
+
+impl From<anofox_fcst_core::StationarityOut> for AnofoxStationarityResult {
+    fn from(r: anofox_fcst_core::StationarityOut) -> Self {
+        Self {
+            statistic: r.statistic,
+            p_value: r.p_value,
+            lags: r.lags,
+            is_stationary: r.is_stationary,
+            cv_1pct: r.cv_1pct,
+            cv_5pct: r.cv_5pct,
+            cv_10pct: r.cv_10pct,
+        }
+    }
+}
+
+/// C-compatible result of a combined ADF + KPSS stationarity verdict.
+///
+/// Field order is fixed and must match the STRUCT fields declared in
+/// `src/scalar_functions/diagnostics.cpp` (RegisterTsStationarityFunction):
+///   adf_statistic, adf_p_value, kpss_statistic, kpss_p_value,
+///   adf_is_stationary, kpss_is_stationary, verdict
+#[repr(C)]
+pub struct AnofoxCombinedStationarityResult {
+    /// ADF test statistic
+    pub adf_statistic: c_double,
+    /// ADF approximate p-value
+    pub adf_p_value: c_double,
+    /// KPSS test statistic
+    pub kpss_statistic: c_double,
+    /// KPSS approximate p-value
+    pub kpss_p_value: c_double,
+    /// `true` if ADF alone judges the series stationary
+    pub adf_is_stationary: bool,
+    /// `true` if KPSS alone judges the series stationary
+    pub kpss_is_stationary: bool,
+    /// Four-way verdict, NUL-terminated:
+    /// `stationary` / `trend_stationary` / `difference_stationary` / `non_stationary`
+    pub verdict: [c_char; 32],
+}
+
+impl Default for AnofoxCombinedStationarityResult {
+    fn default() -> Self {
+        Self {
+            adf_statistic: f64::NAN,
+            adf_p_value: f64::NAN,
+            kpss_statistic: f64::NAN,
+            kpss_p_value: f64::NAN,
+            adf_is_stationary: false,
+            kpss_is_stationary: false,
+            verdict: [0; 32],
+        }
+    }
+}
+
+/// C-compatible Ljung-Box white-noise test result (RESID-01).
+#[repr(C)]
+pub struct AnofoxLjungBoxResult {
+    pub statistic: c_double,
+    pub p_value: c_double,
+    pub lags: size_t,
+    pub df: size_t,
+}
+
+impl Default for AnofoxLjungBoxResult {
+    fn default() -> Self {
+        Self {
+            statistic: f64::NAN,
+            p_value: f64::NAN,
+            lags: 0,
+            df: 0,
+        }
+    }
+}
+
+impl From<anofox_fcst_core::LjungBoxOut> for AnofoxLjungBoxResult {
+    fn from(r: anofox_fcst_core::LjungBoxOut) -> Self {
+        Self {
+            statistic: r.statistic,
+            p_value: r.p_value,
+            lags: r.lags,
+            df: r.df,
+        }
+    }
+}
+
+/// C-compatible Durbin-Watson result (RESID-02). `interpretation` is NUL-terminated.
+#[repr(C)]
+pub struct AnofoxDurbinWatsonResult {
+    pub statistic: c_double,
+    pub interpretation: [c_char; 32],
+}
+
+impl Default for AnofoxDurbinWatsonResult {
+    fn default() -> Self {
+        Self {
+            statistic: f64::NAN,
+            interpretation: [0; 32],
+        }
+    }
+}
+
+/// C-compatible Jarque-Bera normality test result (RESID-03).
+#[repr(C)]
+pub struct AnofoxJarqueBeraResult {
+    pub statistic: c_double,
+    pub p_value: c_double,
+    pub skewness: c_double,
+    pub excess_kurtosis: c_double,
+}
+
+impl Default for AnofoxJarqueBeraResult {
+    fn default() -> Self {
+        Self {
+            statistic: f64::NAN,
+            p_value: f64::NAN,
+            skewness: f64::NAN,
+            excess_kurtosis: f64::NAN,
+        }
+    }
+}
+
+impl From<anofox_fcst_core::JarqueBeraOut> for AnofoxJarqueBeraResult {
+    fn from(r: anofox_fcst_core::JarqueBeraOut) -> Self {
+        Self {
+            statistic: r.statistic,
+            p_value: r.p_value,
+            skewness: r.skewness,
+            excess_kurtosis: r.excess_kurtosis,
+        }
+    }
+}
+
+/// C-compatible combined residual-diagnostics report (RESID-04).
+///
+/// Field order is fixed and must match the STRUCT fields declared in
+/// `src/scalar_functions/diagnostics.cpp` (RegisterTsResidualDiagnosticsFunction).
+/// `dw_interpretation` is NUL-terminated.
+#[repr(C)]
+pub struct AnofoxResidualDiagnosticsResult {
+    pub lb_statistic: c_double,
+    pub lb_p_value: c_double,
+    pub lb_lags: size_t,
+    pub dw_statistic: c_double,
+    pub dw_interpretation: [c_char; 32],
+    pub jb_statistic: c_double,
+    pub jb_p_value: c_double,
+    pub jb_skewness: c_double,
+    pub jb_excess_kurtosis: c_double,
+    pub adequate: bool,
+}
+
+impl Default for AnofoxResidualDiagnosticsResult {
+    fn default() -> Self {
+        Self {
+            lb_statistic: f64::NAN,
+            lb_p_value: f64::NAN,
+            lb_lags: 0,
+            dw_statistic: f64::NAN,
+            dw_interpretation: [0; 32],
+            jb_statistic: f64::NAN,
+            jb_p_value: f64::NAN,
+            jb_skewness: f64::NAN,
+            jb_excess_kurtosis: f64::NAN,
+            adequate: false,
+        }
+    }
 }

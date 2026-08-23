@@ -48,6 +48,9 @@ struct TsForecastScalarBindData : public FunctionData {
     string model_pool = "";
     string laplace_variant = "";
     bool laplace_seasonal_batch_init = false;
+    int64_t garch_p = 0;
+    int64_t garch_q = 0;
+    string kalman_model = "";
 
     DateColumnType date_col_type = DateColumnType::DATE;
 
@@ -66,6 +69,9 @@ struct TsForecastScalarBindData : public FunctionData {
         copy->model_pool = model_pool;
         copy->laplace_variant = laplace_variant;
         copy->laplace_seasonal_batch_init = laplace_seasonal_batch_init;
+        copy->garch_p = garch_p;
+        copy->garch_q = garch_q;
+        copy->kalman_model = kalman_model;
         copy->date_col_type = date_col_type;
         return std::move(copy);
     }
@@ -121,7 +127,8 @@ static double ParseDoubleParam(const Value &params_value, const string &key, dou
 static void ValidateParams(const Value &params_value, const string &method) {
     static const unordered_set<string> valid_keys = {
         "model", "seasonal_period", "seasonal_periods", "confidence_level", "window", "model_pool",
-        "laplace_variant", "laplace_seasonal_batch_init"
+        "laplace_variant", "laplace_seasonal_batch_init",
+        "garch_p", "garch_q", "kalman_model"
     };
 
     if (params_value.IsNull()) return;
@@ -152,7 +159,7 @@ static void ValidateParams(const Value &params_value, const string &method) {
             unknown_list += "'" + unknown_keys[i] + "'";
         }
         throw InvalidInputException(
-            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init",
+            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q, kalman_model",
             unknown_list);
     }
 }
@@ -419,6 +426,9 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
         string model_pool = bind_data.model_pool;
         string laplace_variant = bind_data.laplace_variant;
         bool laplace_seasonal_batch_init = bind_data.laplace_seasonal_batch_init;
+        int64_t garch_p = bind_data.garch_p;
+        int64_t garch_q = bind_data.garch_q;
+        string kalman_model = bind_data.kalman_model;
 
         auto p_idx = params_data.sel->get_index(row_idx);
         if (params_data.validity.RowIsValid(p_idx)) {
@@ -433,6 +443,9 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
             laplace_variant = ParseStringParam(params_val, "laplace_variant", "");
             laplace_seasonal_batch_init =
                 ParseInt64Param(params_val, "laplace_seasonal_batch_init", 0) != 0;
+            garch_p = ParseInt64Param(params_val, "garch_p", 0);
+            garch_q = ParseInt64Param(params_val, "garch_q", 0);
+            kalman_model = ParseStringParam(params_val, "kalman_model", "");
         }
 
         // --- Build ForecastOptions ---
@@ -466,6 +479,13 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
             opts.laplace_variant[sizeof(opts.laplace_variant) - 1] = '\0';
         }
         opts.laplace_seasonal_batch_init = laplace_seasonal_batch_init;
+        opts.garch_p = static_cast<int>(garch_p);
+        opts.garch_q = static_cast<int>(garch_q);
+        if (!kalman_model.empty()) {
+            strncpy(opts.kalman_model, kalman_model.c_str(),
+                    sizeof(opts.kalman_model) - 1);
+            opts.kalman_model[sizeof(opts.kalman_model) - 1] = '\0';
+        }
 
         // --- Call Rust FFI ---
         ForecastResult fcst_result;
@@ -508,8 +528,16 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
             struct_values.push_back(make_pair("forecast_step", Value::INTEGER(static_cast<int32_t>(step))));
             struct_values.push_back(make_pair("ds", MicrosToDateValue(forecast_date, bind_data.date_col_type)));
             struct_values.push_back(make_pair("yhat", Value::DOUBLE(fcst_result.point_forecasts[i])));
-            struct_values.push_back(make_pair("yhat_lower", Value::DOUBLE(fcst_result.lower_bounds[i])));
-            struct_values.push_back(make_pair("yhat_upper", Value::DOUBLE(fcst_result.upper_bounds[i])));
+            // lower_bounds / upper_bounds are null when the model does not provide prediction
+            // intervals (e.g. GARCH, Kalman in v1). Emit SQL NULL rather than crashing.
+            struct_values.push_back(make_pair("yhat_lower",
+                (fcst_result.lower_bounds != nullptr)
+                    ? Value::DOUBLE(fcst_result.lower_bounds[i])
+                    : Value(LogicalType::DOUBLE)));
+            struct_values.push_back(make_pair("yhat_upper",
+                (fcst_result.upper_bounds != nullptr)
+                    ? Value::DOUBLE(fcst_result.upper_bounds[i])
+                    : Value(LogicalType::DOUBLE)));
             struct_values.push_back(make_pair("model_name", Value(string(fcst_result.model_name))));
 
             forecast_structs.push_back(Value::STRUCT(std::move(struct_values)));

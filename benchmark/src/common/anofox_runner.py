@@ -3,6 +3,9 @@ Shared Anofox-forecast benchmark runner.
 
 Generic runner for benchmarking Anofox forecast models from DuckDB extension.
 """
+import json
+import subprocess
+import tempfile
 import time
 import sys
 import os
@@ -11,6 +14,88 @@ from typing import List, Dict, Callable, Optional
 
 import duckdb
 import pandas as pd
+
+
+def _find_duckdb_cli(extension_path: Optional[Path] = None) -> Optional[Path]:
+    """Find the project's DuckDB CLI binary (must match the extension version)."""
+    # Derive from extension path: build/release/extension/.../foo.duckdb_extension
+    # -> build/release/duckdb
+    if extension_path is not None:
+        candidate = extension_path.parent.parent.parent / 'duckdb'
+        if candidate.exists():
+            return candidate
+    # Walk up from this file to repo root, look for build/release/duckdb
+    repo_root = Path(__file__).parent.parent.parent.parent
+    candidate = repo_root / 'build' / 'release' / 'duckdb'
+    if candidate.exists():
+        return candidate
+    return None
+
+
+def _run_panel_query_via_cli(
+    train_df: pd.DataFrame,
+    query: str,
+    extension_path: Path,
+    duckdb_cli: Path,
+) -> pd.DataFrame:
+    """
+    Execute a DuckDB query via CLI subprocess to avoid the venv/extension version mismatch.
+
+    The venv duckdb Python package may be a different version than the locally built
+    extension. The CLI binary (build/release/duckdb) matches the extension version exactly.
+
+    Parameters
+    ----------
+    train_df : pd.DataFrame
+        Data to expose as the 'train' table.
+    query : str
+        SQL query to execute (must SELECT forecast columns).
+    extension_path : Path
+        Path to the extension .duckdb_extension file.
+    duckdb_cli : Path
+        Path to the DuckDB CLI binary matching the extension version.
+
+    Returns
+    -------
+    pd.DataFrame
+        Query result.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        # Write train data to parquet for CLI to read
+        train_parquet = tmpdir / 'train.parquet'
+        train_df.to_parquet(train_parquet, index=False)
+        result_parquet = tmpdir / 'result.parquet'
+
+        # Build the SQL script
+        # Note: allow_unsigned_extensions is passed as a CLI flag, not SET statement
+        sql_script = f"""LOAD '{extension_path}';
+CREATE TABLE train AS SELECT * FROM read_parquet('{train_parquet}');
+COPY ({query}) TO '{result_parquet}' (FORMAT PARQUET);
+"""
+        script_file = tmpdir / 'query.sql'
+        script_file.write_text(sql_script)
+
+        result = subprocess.run(
+            [str(duckdb_cli), '-unsigned', '-c', f".read '{script_file}'"],
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"DuckDB CLI failed (exit {result.returncode}):\n"
+                f"STDOUT: {result.stdout}\nSTDERR: {result.stderr}"
+            )
+
+        if not result_parquet.exists():
+            raise RuntimeError(
+                f"CLI ran but produced no result parquet.\n"
+                f"STDOUT: {result.stdout}\nSTDERR: {result.stderr}"
+            )
+
+        return pd.read_parquet(result_parquet)
 
 
 def run_anofox_benchmark(
@@ -23,7 +108,8 @@ def run_anofox_benchmark(
     group: str = 'Daily',
     freq: str = '1d',
     extension_path: Optional[Path] = None,
-    use_community_extension: bool = True
+    use_community_extension: bool = True,
+    function_name: str = 'TS_FORECAST_BY',
 ):
     """
     Run Anofox benchmarks with specified models.
@@ -70,8 +156,14 @@ def run_anofox_benchmark(
         if env_path:
             extension_path = Path(env_path)
         else:
-            # Fallback to local build path
-            extension_path = Path(__file__).parent.parent.parent.parent / 'build' / 'extension' / 'anofox_forecast' / 'anofox_forecast.duckdb_extension'
+            repo_root = Path(__file__).parent.parent.parent.parent
+            # Try release build first (matches the project CLI binary version)
+            release_path = repo_root / 'build' / 'release' / 'extension' / 'anofox_forecast' / 'anofox_forecast.duckdb_extension'
+            legacy_path = repo_root / 'build' / 'extension' / 'anofox_forecast' / 'anofox_forecast.duckdb_extension'
+            if release_path.exists():
+                extension_path = release_path
+            else:
+                extension_path = legacy_path
 
     if not extension_path.exists() and not use_community_extension:
         print(f"WARNING: Extension not found at {extension_path}")
@@ -85,22 +177,44 @@ def run_anofox_benchmark(
         # If we are in Docker and expect the extension, this should fail.
         raise FileNotFoundError(f"Extension not found at {extension_path}")
 
-    # Connect to DuckDB and load extension
-    con = duckdb.connect(':memory:', config={'allow_unsigned_extensions': 'true'})
-    if extension_path and extension_path.exists():
-        con.execute(f"LOAD '{extension_path}'")
-        print(f"Loaded extension from {extension_path}")
-    elif use_community_extension:
-        con.execute("FORCE INSTALL anofox_forecast FROM community;")
-        con.execute("LOAD 'anofox_forecast';")
-        print("Loaded community extension")
+    # For panel functions (TS_FORECAST_PANEL_BY), use CLI subprocess to avoid the
+    # venv duckdb Python version mismatch with the locally built extension.
+    # The CLI binary at build/release/duckdb always matches the extension version.
+    use_cli_subprocess = function_name == 'TS_FORECAST_PANEL_BY'
+    duckdb_cli = None
+    if use_cli_subprocess:
+        duckdb_cli = _find_duckdb_cli(extension_path)
+        if duckdb_cli is None:
+            raise RuntimeError(
+                "Panel benchmark requires the project DuckDB CLI binary "
+                "(build/release/duckdb) to avoid the venv/extension version mismatch. "
+                "Build it first: cmake --build build/release --target duckdb"
+            )
+        print(f"Panel mode: using CLI subprocess at {duckdb_cli}")
+        if not (extension_path and extension_path.exists()):
+            raise RuntimeError(
+                f"Panel benchmark requires a locally built extension at {extension_path}. "
+                "Community extension does not yet include ts_forecast_panel_by."
+            )
+        con = None
     else:
-        con.execute(f"LOAD '{extension_path}'")
-        print(f"Loaded extension from {extension_path}")
+        # Connect to DuckDB and load extension
+        con = duckdb.connect(':memory:', config={'allow_unsigned_extensions': 'true'})
+        if extension_path and extension_path.exists():
+            con.execute(f"LOAD '{extension_path}'")
+            print(f"Loaded extension from {extension_path}")
+        elif use_community_extension:
+            con.execute("FORCE INSTALL anofox_forecast FROM community;")
+            con.execute("LOAD 'anofox_forecast';")
+            print("Loaded community extension")
+        else:
+            con.execute(f"LOAD '{extension_path}'")
+            print(f"Loaded extension from {extension_path}")
 
-    # Create table from data
-    con.execute("CREATE TABLE train AS SELECT * FROM train_df")
-    print(f"Created table with {con.execute('SELECT COUNT(*) FROM train').fetchone()[0]} rows")
+    # Create table from data (per-series mode only; CLI mode writes parquet on each call)
+    if con is not None:
+        con.execute("CREATE TABLE train AS SELECT * FROM train_df")
+        print(f"Created table with {con.execute('SELECT COUNT(*) FROM train').fetchone()[0]} rows")
 
     # Output directory
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -132,45 +246,99 @@ def run_anofox_benchmark(
             freq_map = {'D': '1d', 'h': '1h', 'W': '1w'}
             freq_str = freq_map.get(freq, freq)
 
-            forecast_query = f"""
-                SELECT *
-                FROM TS_FORECAST_BY(
-                    'train',
-                    unique_id,
-                    ds,
-                    y,
-                    '{model_name}',
-                    {horizon},
-                    '{freq_str}',
-                    {map_literal}
+            if function_name == 'TS_FORECAST_PANEL_BY':
+                # Panel query: single call over the whole panel via ts_forecast_panel_by.
+                # Output columns: unique_id, forecast_step, ds, yhat, model_name
+                # Uses CLI subprocess to bypass venv/extension version mismatch.
+                forecast_query = f"""
+                    SELECT *
+                    FROM TS_FORECAST_PANEL_BY(
+                        'train',
+                        unique_id,
+                        ds,
+                        y,
+                        '{model_name}',
+                        {horizon},
+                        '{freq_str}',
+                        {map_literal}
+                    )
+                """
+                fcst_df = _run_panel_query_via_cli(
+                    train_df=train_df,
+                    query=forecast_query.strip(),
+                    extension_path=extension_path,
+                    duckdb_cli=duckdb_cli,
                 )
-            """
-            
-            fcst_df = con.execute(forecast_query).fetchdf()
-            
-            # Rename columns to standardized names (matching statsforecast format)
-            # Note: group/date columns now preserve their input names (e.g., 'ds' stays 'ds')
-            rename_map = {
-                'yhat': model_name
-            }
+            else:
+                # Default per-series query via ts_forecast_by (Python duckdb API)
+                forecast_query = f"""
+                    SELECT *
+                    FROM TS_FORECAST_BY(
+                        'train',
+                        unique_id,
+                        ds,
+                        y,
+                        '{model_name}',
+                        {horizon},
+                        '{freq_str}',
+                        {map_literal}
+                    )
+                """
+                fcst_df = con.execute(forecast_query).fetchdf()
 
-            # Handle different prediction interval column names
-            if 'yhat_lower' in fcst_df.columns:
-                rename_map['yhat_lower'] = f'{model_name}-lo-95'
-                rename_map['yhat_upper'] = f'{model_name}-hi-95'
-            elif 'lower_95' in fcst_df.columns:
-                rename_map['lower_95'] = f'{model_name}-lo-95'
-                rename_map['upper_95'] = f'{model_name}-hi-95'
-            
+            # Rename yhat -> model_name for standardization
+            rename_map = {'yhat': model_name}
             fcst_df = fcst_df.rename(columns=rename_map)
-            
+
+            # Panel mode: the panel function aligns all series to a shared date grid
+            # (the union of all dates in the panel), so forecast dates are displaced
+            # for shorter series. Re-compute per-series horizon dates from the original
+            # training data using the forecast_step column (1..horizon).
+            if function_name == 'TS_FORECAST_PANEL_BY' and 'forecast_step' in fcst_df.columns:
+                # Compute last training date per series from train_df (already date-converted)
+                last_train_date = train_df.groupby('unique_id')['ds'].max().reset_index()
+                last_train_date.columns = ['unique_id', 'last_ds']
+                # Merge forecast_step with last training date
+                fcst_df = fcst_df.merge(last_train_date, on='unique_id', how='left')
+                # Re-compute ds: last_train_date + forecast_step * one_period
+                # Map freq ('D', 'h', 'W', 'M', ...) to the appropriate Timedelta/DateOffset
+                # so non-daily panels (hourly, weekly) produce correct dates.
+                _FREQ_DELTA = {
+                    'D': pd.Timedelta(days=1),
+                    'h': pd.Timedelta(hours=1),
+                    'W': pd.Timedelta(weeks=1),
+                    'M': pd.DateOffset(months=1),
+                }
+                step_delta = _FREQ_DELTA.get(freq, pd.Timedelta(days=1))
+                fcst_df['ds'] = fcst_df['last_ds'] + step_delta * fcst_df['forecast_step'].astype(int)
+                fcst_df = fcst_df.drop(columns=['last_ds', 'forecast_step', 'model_name'],
+                                       errors='ignore')
+            else:
+                # Standard path: drop panel-only columns if present
+                fcst_df = fcst_df.drop(columns=['forecast_step', 'model_name'],
+                                       errors='ignore')
+                # Handle prediction interval column names
+                if 'yhat_lower' in fcst_df.columns:
+                    rename_map2 = {
+                        'yhat_lower': f'{model_name}-lo-95',
+                        'yhat_upper': f'{model_name}-hi-95'
+                    }
+                    fcst_df = fcst_df.rename(columns=rename_map2)
+                elif 'lower_95' in fcst_df.columns:
+                    rename_map2 = {
+                        'lower_95': f'{model_name}-lo-95',
+                        'upper_95': f'{model_name}-hi-95'
+                    }
+                    fcst_df = fcst_df.rename(columns=rename_map2)
+
             # Keep only the columns we need for merging
             keep_cols = ['unique_id', 'ds', model_name]
             for col in [f'{model_name}-lo-95', f'{model_name}-hi-95']:
                 if col in fcst_df.columns:
                     keep_cols.append(col)
-            
-            fcst_df = fcst_df[keep_cols].sort_values(['unique_id', 'ds'])
+            fcst_df = fcst_df[[c for c in keep_cols if c in fcst_df.columns]].sort_values(
+                ['unique_id', 'ds']
+            )
             
             elapsed_time = time.time() - start_time
 
@@ -193,7 +361,8 @@ def run_anofox_benchmark(
             traceback.print_exc()
             continue
 
-    con.close()
+    if con is not None:
+        con.close()
 
     if not all_forecasts:
         print(f"\n❌ No forecasts were generated successfully")

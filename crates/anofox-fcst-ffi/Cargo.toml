@@ -11,10 +11,10 @@ crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 anofox-fcst-core = { path = "../anofox-fcst-core" }
+anofox-forecast = { workspace = true }
 libc = { workspace = true }
 
 [dev-dependencies]
-anofox-forecast = { workspace = true }
 chrono = { workspace = true }
 
 [build-dependencies]

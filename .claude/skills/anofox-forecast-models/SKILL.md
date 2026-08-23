@@ -1,13 +1,14 @@
 ---
 name: anofox-forecast-models
 description: >
-  Forecasting models and the `ts_forecast_by` API surface of the
-  anofox_forecast DuckDB extension. Covers 33 models (baseline,
-  exponential smoothing, state-space, ARIMA, Theta, multi-seasonal,
-  intermittent-demand, distributional Laplace with three variants),
-  parameter surfaces (MAP + STRUCT), model selection guidance, and
-  common workflow gotchas. Use when picking a model or writing
-  `ts_forecast_by` / `ts_forecast_agg` calls.
+  Forecasting models and the `ts_forecast_by` / `ts_forecast_var_by` API surface of the
+  anofox_forecast DuckDB extension. Covers 36 models (baseline,
+  exponential smoothing, state-space ARIMA + Kalman, classical GARCH,
+  Theta, multi-seasonal, intermittent-demand, distributional Laplace with
+  three variants, panel/global GlobalETS/GlobalTheta/GlobalCroston, and
+  multivariate VAR via ts_forecast_var_by), parameter surfaces (MAP + STRUCT),
+  model selection guidance, and common workflow gotchas. Use when picking a
+  model or writing `ts_forecast_by` / `ts_forecast_agg` / `ts_forecast_var_by` calls.
 version: 0.15.3
 user-invocable: false
 ---
@@ -16,7 +17,7 @@ user-invocable: false
 
 **Extension:** `anofox_forecast` v0.15.3 (Rust crate `anofox-forecast` v0.15.3) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
-33 forecasting models exposed by SQL via three call surfaces (table macro, aggregate, scalar).
+36 forecasting models exposed by SQL via three call surfaces (table macro, aggregate, scalar) + `ts_forecast_var_by` for multivariate VAR.
 
 ## Critical gotchas
 
@@ -61,6 +62,98 @@ ts_forecast_by(
 ) → TABLE(group_col, forecast_step INT, ds, yhat DOUBLE, yhat_lower, yhat_upper, model_name)
 ```
 
+## `ts_forecast_panel_by` (panel / global models)
+
+**Fit-once-emit-many** panel API — pools parameter optimization across all series, then predicts per-series. Use when individual series are short but collectively form a large, homogeneous panel. **Three panel methods:**
+
+```sql
+ts_forecast_panel_by(
+    source VARCHAR,       -- table name (quoted string)
+    group_col COLUMN,     -- series identifier (unquoted)
+    date_col COLUMN,      -- date / timestamp (unquoted)
+    target_col COLUMN,    -- value to forecast (unquoted)
+    method VARCHAR,       -- 'GlobalETS' | 'GlobalTheta' | 'GlobalCroston'
+    horizon INTEGER,
+    frequency VARCHAR,    -- '1d', '1mo', ...
+    params MAP{}          -- optional; see below
+) → TABLE(group_col, forecast_step INT, date_col TIMESTAMP, yhat DOUBLE, model_name)
+```
+
+### Panel methods
+
+| Method | Best for | Key params |
+|---|---|---|
+| `'GlobalETS'` | Many related series, shared seasonal dynamics | `seasonal_period` (0=non-seasonal default), `model_pool` ('Reduced' default \| 'Complete') |
+| `'GlobalTheta'` | Trended panels, minimal config | none (seasonal_period ignored) |
+| `'GlobalCroston'` | Intermittent/spare-parts panels (many zeros) | `croston_variant` ('Classic' default \| 'SBA') |
+
+### Critical panel gotchas
+
+1. **Series dropped below 10 obs:** Short series after alignment emit `DROPPED: too_short` rows — not errors. Check `model_name` in the result.
+2. **Minimum 3 series after drop:** Fewer than 3 kept series → `InvalidInputException`. Ensure your panel has enough history.
+3. **Point forecasts only (v1):** `yhat_lower`/`yhat_upper` are not populated. Use `ts_conformal_by` separately if intervals needed.
+4. **TABLE arg must be a subselect:** The underlying `_ts_forecast_panel_native` uses the subselect pattern internally. Pass only a table name (quoted string) to `ts_forecast_panel_by` — do NOT pass a CTE or subquery as `source`.
+5. **GlobalCroston with all-zero panel fails:** Ensure at least one series has ≥ 2 non-zero demand events in the aligned window.
+6. **GlobalETS `seasonal_period=0`** → non-seasonal (Reduced pool, `ANN`/`AAdN`/`MNN`/`MAdN` candidates only). Period=1 has the same effect.
+
+### Panel quick examples
+
+```sql
+-- GlobalETS weekly seasonal panel
+SELECT * FROM ts_forecast_panel_by('sales', product_id, ds, y, 'GlobalETS', 14, '1d',
+    MAP {'seasonal_period': '7'});
+
+-- GlobalTheta trended panel (no config needed)
+SELECT * FROM ts_forecast_panel_by('sales', product_id, ds, y, 'GlobalTheta', 14, '1d');
+
+-- GlobalCroston SBA for spare-parts panel
+SELECT * FROM ts_forecast_panel_by('spares', item_id, ds, qty, 'GlobalCroston', 6, '1d',
+    MAP {'croston_variant': 'SBA'});
+```
+
+---
+
+## `ts_forecast_var_by` (multivariate VAR)
+
+**Dedicated multivariate function** — distinct from `ts_forecast_by`. Fits a VAR(p) model
+across K variables simultaneously (cross-variable dynamics). Returns long format.
+
+**v1 constraints:** Single-panel only (no `group_col`). Named param `p` for lag order (`order` is a SQL reserved word). Point forecasts only (no intervals).
+
+```sql
+ts_forecast_var_by(
+    source     VARCHAR,     -- source table name (quoted string)
+    date_col   VARCHAR,     -- date column name (quoted string)
+    value_cols VARCHAR[],   -- array of value column names ['y1', 'y2', ...]
+    horizon    INTEGER,     -- periods to forecast
+    frequency  VARCHAR,     -- time step between observations
+    p          INTEGER,     -- lag order (named param, default: 1)
+    params     MAP          -- reserved for future use (default: MAP{})
+) → TABLE(variable VARCHAR, forecast_step BIGINT, <date_col>, forecast_value DOUBLE)
+```
+
+**Output:** `k_vars × horizon` rows in long format. One row per (variable, forecast_step).
+
+```sql
+-- VAR(1) — 2-variable system, 14-step ahead
+SELECT * REPLACE(ROUND(forecast_value, 6) AS forecast_value)
+FROM ts_forecast_var_by('var_src', 'ds', ['y1', 'y2'], 14, '1d')
+ORDER BY variable, forecast_step;
+-- Returns 28 rows: y1 × 14 + y2 × 14
+
+-- VAR(2) — higher lag order
+SELECT * FROM ts_forecast_var_by('var_src', 'ds', ['y1', 'y2'], 14, '1d', p:=2);
+```
+
+**Pitfalls:**
+- Use `p:=2` NOT `order:=2` (ORDER is a SQL reserved word).
+- All value columns must have the same valid observation count after null imputation.
+- Minimum obs: n > k×p+1 (n=obs, k=variables, p=lag order).
+- Non-stationary series → unstable coefficient matrix; difference first with `ts_diff_by`.
+- **Benchmark:** VAR(1) on synthetic VAR(1) data — MAE ratio vs statsmodels = 1.000 (exact match, PASS).
+
+---
+
 ## `ts_forecast_agg` (aggregate)
 
 For custom `GROUP BY` shapes.
@@ -77,7 +170,7 @@ FROM sales GROUP BY product_id;
 
 Access fields: `(fcst).point_forecast`, `(fcst).lower_90`, etc.
 
-## Model catalogue (33)
+## Model catalogue (36)
 
 ### Automatic selection (6)
 
@@ -121,12 +214,48 @@ Access fields: `(fcst).point_forecast`, `(fcst).lower_90`, etc.
 | `DynamicOptimizedTheta` | `seasonal_period` |
 | `AutoTheta` | `seasonal_period` (listed above) |
 
-### State-space / ARIMA (2 — `AutoETS`/`AutoARIMA` counted above)
+### Classical volatility (1)
+
+| Model | Required | Optional | Important |
+|---|---|---|---|
+| `GARCH` | — | `garch_p` (default 1), `garch_q` (default 1) | **`yhat` is VOLATILITY (std-dev = sqrt(variance)), NOT variance.** Use on returns (first differences), not raw price levels. Min obs: p+q+10. |
+
+```sql
+-- GARCH(1,1) — volatility forecast on returns (40 obs minimum > 12)
+SELECT asset_id, forecast_step, ds, yhat AS conditional_volatility, model_name
+FROM ts_forecast_by('returns', asset_id, ds, y, 'GARCH', 7, '1d');
+
+-- GARCH(1,1) with explicit params
+FROM ts_forecast_by('returns', asset_id, ds, y, 'GARCH', 7, '1d',
+    params := MAP{'garch_p':'1','garch_q':'1'})
+```
+
+**Critical:** `yhat` is σ (std-dev), not σ². Square for variance: `yhat * yhat`.
+**Critical:** Use on returns (LN differences of prices), not raw levels — non-stationary levels cause α+β→1 divergence.
+**Benchmark:** ratio vs arch package = 0.897 on M4 Daily (PASS).
+
+### State-space / ARIMA (3 — `AutoETS`/`AutoARIMA` counted above)
 
 | Model | Required | Optional |
 |---|---|---|
 | `ETS` | — | `seasonal_period`, `model` (`'AAA'`, `'AAN'`, …) |
 | `ARIMA` | `p`, `d`, `q` | `P`, `D`, `Q`, `s` |
+| `Kalman` | — | `kalman_model` (`'local_level'` default \| `'local_linear_trend'`) |
+
+**Kalman details:**
+- `local_level` (default): random walk + noise; h-step forecast is flat at filtered level.
+- `local_linear_trend`: level + trend; h-step forecast grows/shrinks linearly.
+- Uses fixed variance params (obs_var=1.0, level_var=0.1), NOT MLE-estimated.
+- Benchmark: ratio vs statsmodels UnobservedComponents = 1.000 (local_level) / 0.992 (llt), both PASS.
+
+```sql
+-- Kalman local_level (default)
+SELECT * FROM ts_forecast_by('sales', product_id, ds, y, 'Kalman', 14, '1d');
+
+-- Kalman local_linear_trend
+SELECT * FROM ts_forecast_by('sales', product_id, ds, y, 'Kalman', 14, '1d',
+    params := MAP{'kalman_model': 'local_linear_trend'});
+```
 
 ### Multi-seasonal (3 — `Auto*` counted above)
 
