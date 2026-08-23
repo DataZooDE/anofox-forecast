@@ -7,7 +7,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-BSL%201.1-blue.svg" alt="License: BSL 1.1"></a>
-  <a href="https://duckdb.org"><img src="https://img.shields.io/badge/DuckDB-1.4.5%20LTS%20%7C%201.5.4-green.svg" alt="DuckDB"></a>
+  <a href="https://duckdb.org"><img src="https://img.shields.io/badge/DuckDB-1.4.5%20LTS%20%7C%201.5.5-green.svg" alt="DuckDB"></a>
   <img src="https://img.shields.io/badge/build-passing-brightgreen.svg" alt="Build Status">
   <img src="https://img.shields.io/badge/Tests-1274%20assertions%20passed-brightgreen.svg" alt="Tests">
 </p>
@@ -20,18 +20,26 @@
 > This extension is in early development, so bugs and breaking changes are expected.
 > Please use the [issues page](https://github.com/DataZooDE/anofox-forecast/issues) to report bugs or request features.
 
-A time series forecasting extension for DuckDB with 33 models, data preparation, and analytics — all in pure SQL.
+A time series forecasting extension for DuckDB with 36 models, statistical diagnostics, data preparation, and analytics — all in pure SQL.
 
 
 ## ✨ Key Features
 
-### 🎯 Forecasting (33 Models)
+### 🎯 Forecasting (36 Models)
 - **AutoML**: AutoETS, AutoARIMA, AutoMFLES, AutoMSTL, AutoTBATS
 - **Statistical**: ETS, ARIMA, Theta, Holt-Winters, Seasonal Naive
 - **Advanced**: TBATS, MSTL, MFLES (multiple seasonality)
 - **Intermittent Demand**: Croston, ADIDA, IMAPA, TSB
 - **Distributional**: Laplace (streaming likelihood-weighted mixture, three zero-config selectors: `auto` / `auto_aid` / `skaters`)
+- **Volatility & State-Space**: GARCH (conditional volatility), Kalman filter (local-level / local-linear-trend)
+- **Global / Panel**: GlobalETS, GlobalTheta, GlobalCroston — cross-series "fit once, forecast all" via `ts_forecast_panel_by`
+- **Multivariate**: VAR (vector autoregression) via `ts_forecast_var_by` — N value columns → per-variable forecasts
 - **Exogenous Variables**: ARIMAX, ThetaX, MFLESX (external regressors support)
+
+### 🔬 Statistical Diagnostics
+- **Stationarity**: ADF, KPSS, and a combined four-way verdict (`ts_adf_by`, `ts_kpss_by`, `ts_stationarity_by`)
+- **Residual Adequacy**: Ljung-Box, Durbin-Watson, Jarque-Bera, plus a combined pass/fail report (`ts_residual_diagnostics_by`)
+- **Reference-checked**: numerically cross-validated against statsmodels
 
 ### 📊 Complete Workflow
 - **EDA & Data Quality**: 5 functions (2 table functions, 3 macros) for exploratory analysis and data quality assessment
@@ -44,7 +52,7 @@ A time series forecasting extension for DuckDB with 33 models, data preparation,
 - **Changepoint Detection**: Regime identification with probabilities
 
 ### 🔢 Feature Calculation
-- **76+ Statistical Features**: Extract comprehensive time series features for ML pipelines
+- **117 Statistical Features**: Extract comprehensive time series features for ML pipelines
 - **GROUP BY & Window Support**: Native DuckDB parallelization for multi-series feature extraction
 - **Flexible Configuration**: Select specific features, customize parameters, or use JSON/CSV configs
 - **tsfresh-Compatible**: Compatible feature vectors for seamless integration with existing ML workflows (hctsa will come also)
@@ -105,7 +113,7 @@ GEN=ninja make release       # With Ninja (faster)
 
 ## 🚀 Quick Start on M5 Dataset
 
-The forecast takes ~2 minutes on a Dell XPS 13. (Requires DuckDB v1.4.5 LTS or v1.5.4+).
+The forecast takes ~2 minutes on a Dell XPS 13. (Requires DuckDB v1.4.5 LTS or v1.5.5+).
 
 ```sql
 -- Load extension
@@ -204,23 +212,27 @@ For complete function signatures, parameters, and detailed documentation, see th
 | **Data Preparation** | Cleaning, imputation, filtering | [04-data-preparation.md](docs/api/04-data-preparation.md) |
 | **Period Detection** | Seasonality detection (12 methods) | [05-period-detection.md](docs/api/05-period-detection.md) |
 | **Changepoint Detection** | Structural break detection | [06-changepoint-detection.md](docs/api/06-changepoint-detection.md) |
-| **Forecasting** | 32 forecasting models | [07-forecasting.md](docs/api/07-forecasting.md) |
+| **Forecasting** | 36 forecasting models (incl. GARCH, Kalman, Global/panel, VAR) | [07-forecasting.md](docs/api/07-forecasting.md) |
+| **Statistical Diagnostics** | Stationarity (ADF/KPSS) & residual adequacy tests | [10-diagnostics.md](docs/api/10-diagnostics.md) |
 | **Cross-Validation** | Backtesting and CV functions | [08-cross-validation.md](docs/api/08-cross-validation.md) |
 | **Evaluation Metrics** | 12 accuracy metrics | [09-evaluation-metrics.md](docs/api/09-evaluation-metrics.md) |
 | **Conformal Prediction** | Distribution-free prediction intervals | [11-conformal-prediction.md](docs/api/11-conformal-prediction.md) |
 | **Feature Extraction** | 117 tsfresh-compatible features | [20-feature-extraction.md](docs/api/20-feature-extraction.md) |
 
-### Model Reference (33 Models)
+### Model Reference (36 Models)
 
 | Category | Models | Reference |
 |----------|--------|-----------|
 | **Baseline** | Naive, SMA, SeasonalNaive, RandomWalkDrift | [baseline/](docs/reference/models/baseline/) |
 | **Exponential Smoothing** | SES, Holt, HoltWinters, SeasonalES | [exponential-smoothing/](docs/reference/models/exponential-smoothing/) |
-| **State Space** | ETS, ARIMA, AutoETS, AutoARIMA | [state-space/](docs/reference/models/state-space/) |
+| **State Space** | ETS, ARIMA, AutoETS, AutoARIMA, Kalman | [state-space/](docs/reference/models/state-space/) |
+| **Classical** | GARCH (conditional volatility) | [classical/garch.md](docs/reference/models/classical/garch.md) |
 | **Theta** | Theta, OptimizedTheta, DynamicTheta, AutoTheta | [theta/](docs/reference/models/theta/) |
 | **Multi-Seasonal** | MFLES, MSTL, TBATS (+ Auto variants) | [multi-seasonal/](docs/reference/models/multi-seasonal/) |
 | **Intermittent Demand** | Croston, CrostonSBA, ADIDA, IMAPA, TSB | [intermittent/](docs/reference/models/intermittent/) |
 | **Distributional** | Laplace (variants: auto, auto_aid, skaters) | [distributional/laplace.md](docs/reference/models/distributional/laplace.md) |
+| **Global / Panel** | GlobalETS, GlobalTheta, GlobalCroston (via `ts_forecast_panel_by`) | [global_ets.md](docs/reference/models/exponential-smoothing/global_ets.md) |
+| **Multivariate** | VAR (via `ts_forecast_var_by`) | [multivariate/var.md](docs/reference/models/multivariate/var.md) |
 
 
 ## 📦 Development
@@ -339,7 +351,7 @@ SELECT 'Extension loaded successfully! ✅' AS status;
 LOAD 'path/to/anofox_forecast.duckdb_extension';
 
 -- Verify all functions are available
-SELECT * FROM TS_FORECAST('sales', date, amount, 'AutoETS', 7, {'seasonal_period': 7});
+SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'AutoETS', 7, '1d', MAP{'seasonal_period': '7'});
 ```
 
 ## 📄 License
