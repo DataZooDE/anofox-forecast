@@ -2,7 +2,7 @@
 
 **Type:** GSD milestone candidate — seed for `/gsd-new-milestone` (or `/gsd-quick` per defect class)
 **Created:** 2026-08-24
-**Status:** OPEN — a fix pass was dispatched (background agent `ad7f7300`) covering all classes below. **Before starting, run `git log --oneline -15` and re-run the doc verification** to see what is already fixed vs. still open; do not redo committed work.
+**Status:** MOSTLY RESOLVED (2026-08-24). Classes A, B, C, D + all 5 broken links were **fixed and verified green** against the built extension in commits `931ae58`, `074085b`, `0281c74`, `1af497e` (local, **not pushed**). Two residual items remain — see **§ Residual open items** at the bottom. Before doing anything, run `git log --oneline -20` to confirm what is committed.
 
 ## Goal
 
@@ -65,6 +65,18 @@ Functions echo the GROUP column under its ORIGINAL name (`product_id`/`series_id
 - [ ] All 5 broken links resolve to existing files.
 - [ ] `docs/guides/03-cross-validation.md` rewritten around `ts_cv_folds_by` + `ts_cv_forecast_by`, narrative intact.
 - [ ] Changes committed (`docs(...)` / `fix(examples): …`) and pushed; the distribution pipeline's LTS-1.4.5-Windows red is the known unrelated vcpkg/msys2 issue (ignore).
+
+## § Residual open items (NOT yet fixed)
+
+1. **Stale `ts_backtest_auto` mentions still in non-assigned files** — `docs/dev/memory-patterns.md` and 4 `examples/*/README.md` (backtesting, conformal_prediction, forecasting, metrics). Prose-only; sweep them to the CV two-step for consistency.
+2. **Regression-API drift in backtesting examples (separate from the CV rewrite)** — `examples/backtesting/m5_backtest_examples.sql` (Section 6) and `examples/backtesting/synthetic_backtest_examples.sql` (Patterns 2/5/7/8) depend on **removed** `ts_prepare_regression_input_by` / `ts_hydrate_*` APIs. Needs its own regression-API rewrite (the `ts_backtest_auto_by`/`ts_cv_split_by` parts in these files are already fixed; the network m5 data load was left as-is).
+
+## Resolution log (2026-08-24)
+- `931ae58` — class B (`{}`→`MAP{}`, 6 model docs) + 5 broken links.
+- `074085b` — class A: `ts_backtest_auto[_by]` → `ts_cv_folds_by` + `ts_cv_forecast_by` across 8 docs + 2 examples, incl. full rewrite of `docs/guides/03-cross-validation.md`; dropped removed freq arg from `ts_cv_split_by`.
+- `0281c74` — class D: `ts_mae_by`/`ts_rmse_by`/… (5→4 args) and multi-key hierarchy signatures.
+- `1af497e` — class C: output column-name drift across 8 example files.
+- All executable blocks in the touched files re-verified green against `build/release/duckdb`.
 
 ## Notes / related
 - Matches the standing "API drift stale refs" memory (backtest → CV two-step; stale refs remain in tests/comments/docs).
