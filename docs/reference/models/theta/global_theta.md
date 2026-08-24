@@ -111,5 +111,5 @@ ORDER BY product_id, method, forecast_step;
 
 - [`GlobalETS`](../exponential-smoothing/global_ets.md) — pooled ETS with optional seasonality
 - [`GlobalCroston`](../intermittent/global_croston.md) — pooled Croston (intermittent/spare-parts panels)
-- [`ts_forecast_panel_by`](../../api/07-forecasting.md#panel--global-forecasting-ts_forecast_panel_by) — panel API reference
+- [`ts_forecast_panel_by`](../../../api/07-forecasting.md#panel--global-forecasting-ts_forecast_panel_by) — panel API reference
 - [`AutoTheta`](auto_theta.md) — per-series Theta with automatic variant selection

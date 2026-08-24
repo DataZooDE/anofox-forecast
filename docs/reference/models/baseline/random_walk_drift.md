@@ -47,7 +47,7 @@ SELECT * FROM ts_forecast_by(
     'RandomWalkDrift',
     6,
     '1d',
-    {}
+    MAP{}
 );
 
 -- For trending data

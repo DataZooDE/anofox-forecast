@@ -104,7 +104,7 @@ SELECT * FROM ts_forecast_panel_by('panel', product_id, ds, y, 'GlobalETS', 14, 
 
 ## See Also
 
-- [`ts_forecast_by`](../../api/07-forecasting.md) — per-series independent forecasting (33 models)
+- [`ts_forecast_by`](../../../api/07-forecasting.md) — per-series independent forecasting (33 models)
 - [`GlobalTheta`](../theta/global_theta.md) — pooled Theta (trended series, no seasonal config needed)
 - [`GlobalCroston`](../intermittent/global_croston.md) — pooled Croston (intermittent/spare-parts panels)
-- [`ts_forecast_panel_by`](../../api/07-forecasting.md#panel--global-forecasting-ts_forecast_panel_by) — panel API reference
+- [`ts_forecast_panel_by`](../../../api/07-forecasting.md#panel--global-forecasting-ts_forecast_panel_by) — panel API reference

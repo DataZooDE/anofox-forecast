@@ -49,7 +49,7 @@ SELECT * FROM ts_forecast_by(
     'Holt',
     6,
     '1d',
-    {}
+    MAP{}
 );
 
 -- With custom smoothing parameters

@@ -47,7 +47,7 @@ SELECT * FROM ts_forecast_by(
     'SESOptimized',
     14,
     '1d',
-    {}
+    MAP{}
 );
 
 -- With fitted values for analysis

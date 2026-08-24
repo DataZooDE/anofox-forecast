@@ -236,4 +236,4 @@ ORDER BY mae;
 
 ---
 
-*See also: [Model Selection](02-model-selection.md) | [Evaluation Metrics](../api/07-evaluation-metrics.md)*
+*See also: [Model Selection](02-model-selection.md) | [Evaluation Metrics](../api/09-evaluation-metrics.md)*

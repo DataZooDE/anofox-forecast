@@ -47,7 +47,7 @@ SELECT * FROM ts_forecast_by(
     'Naive',
     7,
     '1d',
-    {}
+    MAP{}
 );
 
 -- Compare with more complex model

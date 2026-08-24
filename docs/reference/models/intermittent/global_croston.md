@@ -137,4 +137,4 @@ ORDER BY item_id, variant, forecast_step;
 - [`CrostonClassic`](croston_classic.md) — per-series Classic Croston
 - [`GlobalETS`](../exponential-smoothing/global_ets.md) — pooled ETS for regular-demand panels
 - [`GlobalTheta`](../theta/global_theta.md) — pooled Theta for trended panels
-- [`ts_forecast_panel_by`](../../api/07-forecasting.md#panel--global-forecasting-ts_forecast_panel_by) — panel API reference
+- [`ts_forecast_panel_by`](../../../api/07-forecasting.md#panel--global-forecasting-ts_forecast_panel_by) — panel API reference

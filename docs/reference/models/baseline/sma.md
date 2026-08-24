@@ -48,7 +48,7 @@ SELECT * FROM ts_forecast_by(
     'SMA',
     7,
     '1d',
-    {}
+    MAP{}
 );
 
 -- With custom window size
