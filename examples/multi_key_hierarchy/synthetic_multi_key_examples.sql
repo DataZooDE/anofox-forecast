@@ -45,11 +45,11 @@ SELECT '=== Section 1: Validate Separator ===' AS section;
 
 -- Test with default separator (|)
 SELECT '--- Check default separator | ---' AS subsection;
-SELECT * FROM ts_validate_separator('sales_data', region_id, store_id, item_id);
+SELECT * FROM ts_validate_separator((SELECT region_id, store_id, item_id FROM sales_data));
 
 -- Test with alternative separator
 SELECT '--- Check alternative separator - ---' AS subsection;
-SELECT * FROM ts_validate_separator('sales_data', region_id, store_id, item_id, separator := '-');
+SELECT * FROM ts_validate_separator((SELECT region_id, store_id, item_id FROM sales_data), separator := '-');
 
 -- Example with conflicting data
 CREATE OR REPLACE TABLE conflicting_data AS
@@ -58,7 +58,7 @@ SELECT * FROM (VALUES
 ) AS t(region_id, store_id, item_id, sale_date, quantity);
 
 SELECT '--- Conflict detection example ---' AS subsection;
-SELECT * FROM ts_validate_separator('conflicting_data', region_id, store_id, item_id);
+SELECT * FROM ts_validate_separator((SELECT region_id, store_id, item_id FROM conflicting_data));
 
 -- =============================================================================
 -- Section 2: Combine Keys (No Aggregation)
@@ -69,20 +69,20 @@ SELECT '=== Section 2: Combine Keys ===' AS section;
 
 -- Basic combination with 3 columns
 SELECT '--- Basic combination ---' AS subsection;
-SELECT * FROM ts_combine_keys('sales_data', sale_date, quantity, region_id, store_id, item_id)
+SELECT * FROM ts_combine_keys((SELECT sale_date, quantity, region_id, store_id, item_id FROM sales_data), MAP{})
 ORDER BY unique_id, sale_date
 LIMIT 10;
 
 -- Combination with 2 columns (store-level granularity)
 SELECT '--- 2-column combination (region|store) ---' AS subsection;
-SELECT * FROM ts_combine_keys('sales_data', sale_date, quantity, region_id, store_id)
+SELECT * FROM ts_combine_keys((SELECT sale_date, quantity, region_id, store_id FROM sales_data), MAP{})
 ORDER BY unique_id, sale_date
 LIMIT 10;
 
 -- Custom separator
 SELECT '--- Custom separator ---' AS subsection;
-SELECT * FROM ts_combine_keys('sales_data', sale_date, quantity, region_id, store_id, item_id,
-    params := {'separator': '-'})
+SELECT * FROM ts_combine_keys((SELECT sale_date, quantity, region_id, store_id, item_id FROM sales_data),
+    MAP{'separator': '-'})
 ORDER BY unique_id, sale_date
 LIMIT 5;
 
@@ -95,13 +95,13 @@ SELECT '=== Section 3: Hierarchical Aggregation ===' AS section;
 
 -- Full hierarchical aggregation
 SELECT '--- All aggregation levels ---' AS subsection;
-SELECT * FROM ts_aggregate_hierarchy('sales_data', sale_date, quantity, region_id, store_id, item_id)
-ORDER BY unique_id, date_col;
+SELECT * FROM ts_aggregate_hierarchy((SELECT sale_date, quantity, region_id, store_id, item_id FROM sales_data), MAP{})
+ORDER BY unique_id, sale_date;
 
 -- Summary: count series at each level
 SELECT '--- Count by aggregation level ---' AS subsection;
 WITH agg AS (
-    SELECT * FROM ts_aggregate_hierarchy('sales_data', sale_date, quantity, region_id, store_id, item_id)
+    SELECT * FROM ts_aggregate_hierarchy((SELECT sale_date, quantity, region_id, store_id, item_id FROM sales_data), MAP{})
 )
 SELECT
     CASE
@@ -111,7 +111,7 @@ SELECT
         ELSE 'Level 3: Original Items'
     END AS level,
     COUNT(DISTINCT unique_id) AS n_series,
-    SUM(value_col) AS total_value
+    SUM(quantity) AS total_value
 FROM agg
 GROUP BY 1
 ORDER BY 1;
@@ -119,8 +119,8 @@ ORDER BY 1;
 -- Custom aggregate keyword
 SELECT '--- Custom aggregate keyword ---' AS subsection;
 SELECT DISTINCT unique_id
-FROM ts_aggregate_hierarchy('sales_data', sale_date, quantity, region_id, store_id, item_id,
-    params := {'aggregate_keyword': 'TOTAL'})
+FROM ts_aggregate_hierarchy((SELECT sale_date, quantity, region_id, store_id, item_id FROM sales_data),
+    MAP{'aggregate_keyword': 'TOTAL'})
 WHERE unique_id LIKE '%TOTAL%'
 ORDER BY unique_id;
 
@@ -135,17 +135,17 @@ SELECT '=== Section 4: Split Keys ===' AS section;
 CREATE OR REPLACE TABLE forecast_results AS
 SELECT
     unique_id,
-    date_col AS forecast_date,
-    value_col * 1.1 AS point_forecast  -- Simulated forecast
-FROM ts_aggregate_hierarchy('sales_data', sale_date, quantity, region_id, store_id, item_id)
-WHERE date_col = DATE '2024-01-03';
+    sale_date AS forecast_date,
+    quantity * 1.1 AS point_forecast  -- Simulated forecast
+FROM ts_aggregate_hierarchy((SELECT sale_date, quantity, region_id, store_id, item_id FROM sales_data), MAP{})
+WHERE sale_date = DATE '2024-01-03';
 
 SELECT '--- Forecast results (combined keys) ---' AS subsection;
 SELECT * FROM forecast_results ORDER BY unique_id LIMIT 10;
 
 -- Split back into original columns
 SELECT '--- Split keys back ---' AS subsection;
-SELECT * FROM ts_split_keys('forecast_results', unique_id, forecast_date, point_forecast)
+SELECT * FROM ts_split_keys((SELECT unique_id, forecast_date, point_forecast FROM forecast_results))
 ORDER BY id_part_1, id_part_2, id_part_3
 LIMIT 10;
 
@@ -155,9 +155,9 @@ SELECT
     id_part_1 AS region_id,
     id_part_2 AS store_id,
     id_part_3 AS item_id,
-    date_col AS forecast_date,
-    value_col AS point_forecast
-FROM ts_split_keys('forecast_results', unique_id, forecast_date, point_forecast)
+    forecast_date,
+    point_forecast
+FROM ts_split_keys((SELECT unique_id, forecast_date, point_forecast FROM forecast_results))
 ORDER BY region_id, store_id, item_id
 LIMIT 10;
 
@@ -171,7 +171,7 @@ SELECT '=== Section 5: End-to-End Workflow ===' AS section;
 -- Step 1: Create aggregated time series
 SELECT '--- Step 1: Aggregate hierarchy ---' AS subsection;
 CREATE OR REPLACE TABLE prepared_data AS
-SELECT * FROM ts_aggregate_hierarchy('sales_data', sale_date, quantity, region_id, store_id, item_id);
+SELECT * FROM ts_aggregate_hierarchy((SELECT sale_date, quantity, region_id, store_id, item_id FROM sales_data), MAP{});
 
 SELECT COUNT(DISTINCT unique_id) AS n_series, COUNT(*) AS n_observations
 FROM prepared_data;
@@ -183,7 +183,7 @@ SELECT
     unique_id AS id,
     1 AS forecast_step,
     DATE '2024-01-04' AS ds,
-    AVG(value_col) * 1.05 AS point_forecast
+    AVG(quantity) * 1.05 AS point_forecast
 FROM prepared_data
 GROUP BY unique_id;
 
@@ -195,9 +195,9 @@ SELECT
     id_part_1 AS region_id,
     id_part_2 AS store_id,
     id_part_3 AS item_id,
-    date_col AS forecast_date,
-    ROUND(value_col, 2) AS point_forecast
-FROM ts_split_keys('forecasts', id, ds, point_forecast)
+    ds AS forecast_date,
+    ROUND(point_forecast, 2) AS point_forecast
+FROM ts_split_keys((SELECT id, ds, point_forecast FROM forecasts))
 ORDER BY region_id, store_id, item_id;
 
 -- Step 4: Filter to specific level
@@ -205,8 +205,8 @@ SELECT '--- Step 4: Filter to store-level forecasts ---' AS subsection;
 SELECT
     id_part_1 AS region_id,
     id_part_2 AS store_id,
-    ROUND(value_col, 2) AS store_forecast
-FROM ts_split_keys('forecasts', id, ds, point_forecast)
+    ROUND(point_forecast, 2) AS store_forecast
+FROM ts_split_keys((SELECT id, ds, point_forecast FROM forecasts))
 WHERE id_part_3 = 'AGGREGATED' AND id_part_2 != 'AGGREGATED'
 ORDER BY region_id, store_id;
 

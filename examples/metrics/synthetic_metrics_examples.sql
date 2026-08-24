@@ -61,19 +61,19 @@ FROM forecast_results GROUP BY product_id ORDER BY product_id;
 .print ''
 .print 'Section 1.1: Mean Absolute Error (MAE)'
 
-SELECT * FROM ts_mae_by('forecast_results', product_id, date, actual, predicted);
+SELECT * FROM ts_mae_by((SELECT product_id, date, actual, predicted FROM forecast_results), 'date', 'actual', 'predicted');
 
 -- 1.2: RMSE (Root Mean Squared Error) per series
 .print ''
 .print 'Section 1.2: Root Mean Squared Error (RMSE)'
 
-SELECT * FROM ts_rmse_by('forecast_results', product_id, date, actual, predicted);
+SELECT * FROM ts_rmse_by((SELECT product_id, date, actual, predicted FROM forecast_results), 'date', 'actual', 'predicted');
 
 -- 1.3: MSE (Mean Squared Error) per series
 .print ''
 .print 'Section 1.3: Mean Squared Error (MSE)'
 
-SELECT * FROM ts_mse_by('forecast_results', product_id, date, actual, predicted);
+SELECT * FROM ts_mse_by((SELECT product_id, date, actual, predicted FROM forecast_results), 'date', 'actual', 'predicted');
 
 -- ============================================================================
 -- SECTION 2: Percentage Metrics
@@ -86,13 +86,13 @@ SELECT * FROM ts_mse_by('forecast_results', product_id, date, actual, predicted)
 -- 2.1: MAPE (Mean Absolute Percentage Error)
 .print 'Section 2.1: Mean Absolute Percentage Error (MAPE)'
 
-SELECT * FROM ts_mape_by('forecast_results', product_id, date, actual, predicted);
+SELECT * FROM ts_mape_by((SELECT product_id, date, actual, predicted FROM forecast_results), 'date', 'actual', 'predicted');
 
 -- 2.2: SMAPE (Symmetric Mean Absolute Percentage Error)
 .print ''
 .print 'Section 2.2: Symmetric MAPE (SMAPE)'
 
-SELECT * FROM ts_smape_by('forecast_results', product_id, date, actual, predicted);
+SELECT * FROM ts_smape_by((SELECT product_id, date, actual, predicted FROM forecast_results), 'date', 'actual', 'predicted');
 
 .print ''
 .print 'Note: SMAPE is bounded [0, 200%], while MAPE can exceed 100%'
@@ -108,13 +108,13 @@ SELECT * FROM ts_smape_by('forecast_results', product_id, date, actual, predicte
 -- 3.1: R-squared
 .print 'Section 3.1: R-squared (Coefficient of Determination)'
 
-SELECT * FROM ts_r2_by('forecast_results', product_id, date, actual, predicted);
+SELECT * FROM ts_r2_by((SELECT product_id, date, actual, predicted FROM forecast_results), 'date', 'actual', 'predicted');
 
 -- 3.2: Bias (Mean Error)
 .print ''
 .print 'Section 3.2: Bias (Mean Error)'
 
-SELECT * FROM ts_bias_by('forecast_results', product_id, date, actual, predicted);
+SELECT * FROM ts_bias_by((SELECT product_id, date, actual, predicted FROM forecast_results), 'date', 'actual', 'predicted');
 
 .print ''
 .print 'Note: Negative bias = under-predicting, Positive bias = over-predicting'
@@ -161,7 +161,7 @@ SELECT * FROM (
 -- 4.1: Coverage (what % of actuals fall within intervals)
 .print 'Section 4.1: Prediction Interval Coverage'
 
-SELECT * FROM ts_coverage_by('interval_forecasts', product_id, date, actual, lower_90, upper_90);
+SELECT * FROM ts_coverage_by((SELECT product_id, date, actual, lower_90, upper_90 FROM interval_forecasts), 'date', 'actual', 'lower_90', 'upper_90');
 
 .print ''
 .print 'Note: Target coverage for 90% interval should be ~0.90'
@@ -205,7 +205,7 @@ SELECT * FROM (
 .print 'Model comparison for Product A:'
 
 -- Compare MAE across models
-SELECT * FROM ts_mae_by('model_backtest', model, date, actual, predicted);
+SELECT * FROM ts_mae_by((SELECT model, date, actual, predicted FROM model_backtest), 'date', 'actual', 'predicted');
 
 .print ''
 .print 'MSTL should have lower MAE because it captures weekly seasonality'
@@ -220,12 +220,12 @@ SELECT * FROM ts_mae_by('model_backtest', model, date, actual, predicted);
 
 .print 'All metrics for forecast_results:'
 
-WITH mae AS (SELECT * FROM ts_mae_by('forecast_results', product_id, date, actual, predicted)),
-rmse AS (SELECT * FROM ts_rmse_by('forecast_results', product_id, date, actual, predicted)),
-mape AS (SELECT * FROM ts_mape_by('forecast_results', product_id, date, actual, predicted)),
-bias AS (SELECT * FROM ts_bias_by('forecast_results', product_id, date, actual, predicted))
+WITH mae AS (SELECT * FROM ts_mae_by((SELECT product_id, date, actual, predicted FROM forecast_results), 'date', 'actual', 'predicted')),
+rmse AS (SELECT * FROM ts_rmse_by((SELECT product_id, date, actual, predicted FROM forecast_results), 'date', 'actual', 'predicted')),
+mape AS (SELECT * FROM ts_mape_by((SELECT product_id, date, actual, predicted FROM forecast_results), 'date', 'actual', 'predicted')),
+bias AS (SELECT * FROM ts_bias_by((SELECT product_id, date, actual, predicted FROM forecast_results), 'date', 'actual', 'predicted'))
 SELECT
-    mae.id AS product,
+    mae.product_id AS product,
     ROUND(mae.mae, 2) AS mae,
     ROUND(rmse.rmse, 2) AS rmse,
     ROUND(mape.mape, 2) AS mape_pct,
@@ -236,9 +236,9 @@ SELECT
         ELSE 'Over-predicting'
     END AS bias_assessment
 FROM mae
-JOIN rmse ON mae.id = rmse.id
-JOIN mape ON mae.id = mape.id
-JOIN bias ON mae.id = bias.id
+JOIN rmse ON mae.product_id = rmse.product_id
+JOIN mape ON mae.product_id = mape.product_id
+JOIN bias ON mae.product_id = bias.product_id
 ORDER BY mae.mae;
 
 -- ============================================================================
