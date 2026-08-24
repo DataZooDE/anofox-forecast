@@ -203,17 +203,19 @@ A full workflow from raw data to conformal intervals:
 -- Step 0: Detect seasonality (e.g., weekly = 7)
 SELECT * FROM ts_detect_periods_by('sales', product_id, date, value, MAP{});
 
--- Step 1: Generate backtest results with AutoETS
+-- Step 1: Generate backtest results with AutoETS (two-step cross-validation)
+CREATE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by('sales', product_id, date, value, 5, 7, MAP{});
 CREATE TABLE backtest AS
-SELECT * FROM ts_backtest_auto_by(
-    'sales', product_id, date, value, 7, 5, '1d',
-    MAP{'method': 'AutoETS', 'seasonal_period': '7'}
+SELECT * FROM ts_cv_forecast_by(
+    'cv_folds', product_id, date, value,
+    'AutoETS', MAP{'seasonal_period': '7'}
 );
 
--- Step 2: Calibrate conformity score
+-- Step 2: Calibrate conformity score (actual is 'y', forecast is 'yhat')
 CREATE TABLE calibration AS
 SELECT * FROM ts_conformal_calibrate(
-    'backtest', actual, forecast, MAP{'alpha': '0.1'}
+    'backtest', y, yhat, MAP{'alpha': '0.1'}
 );
 
 -- Step 3: Generate future forecasts

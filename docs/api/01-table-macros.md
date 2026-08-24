@@ -35,12 +35,12 @@ As of v0.4.0, all table macros support STRUCT syntax for parameters with mixed t
 
 ```sql
 -- STRUCT allows mixed types (recommended)
-SELECT * FROM ts_backtest_auto('sales', id, date, value, 7, 3, '1d',
-    MAP{'method': 'Naive', 'gap': '2', 'clip_horizon': 'true'});
+SELECT * FROM ts_cv_folds_by('sales', id, date, value, 3, 7,
+    {'gap': 2, 'clip_horizon': true});
 
 -- MAP requires homogeneous string values (legacy)
-SELECT * FROM ts_backtest_auto('sales', id, date, value, 7, 3, '1d',
-    MAP{'method': 'Naive', 'gap': '2', 'clip_horizon': 'true'});
+SELECT * FROM ts_cv_folds_by('sales', id, date, value, 3, 7,
+    MAP{'gap': '2', 'clip_horizon': 'true'});
 ```
 
 ## Available Table Macros
@@ -54,7 +54,7 @@ SELECT * FROM ts_backtest_auto('sales', id, date, value, 7, 3, '1d',
 | [Decomposition](05a-decomposition.md) | `ts_mstl_decomposition_by`, `ts_classify_seasonality_by` |
 | [Changepoint Detection](06-changepoint-detection.md) | `ts_detect_changepoints`, `ts_detect_changepoints_by` |
 | [Forecasting](07-forecasting.md) | `ts_forecast`, `ts_forecast_by`, `ts_forecast_exog` |
-| [Cross-Validation](08-cross-validation.md) | `ts_backtest_auto_by`, `ts_cv_split_by`, `ts_cv_forecast_by` |
+| [Cross-Validation](08-cross-validation.md) | `ts_cv_folds_by`, `ts_cv_split_by`, `ts_cv_forecast_by` |
 | [Evaluation Metrics](09-evaluation-metrics.md) | `ts_mae_by`, `ts_rmse_by`, `ts_coverage_by`, ... |
 | [Feature Extraction](20-feature-extraction.md) | `ts_features_by`, `ts_features_table` |
 | [Conformal Prediction](11-conformal-prediction.md) | `ts_conformal`, `ts_conformal_calibrate` |

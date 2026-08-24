@@ -5,7 +5,7 @@
 -- Use this to learn the API before applying to your own datasets.
 --
 -- Patterns included:
---   1. Quick Start - One-liner with ts_backtest_auto
+--   1. Quick Start - Two-step CV (ts_cv_folds_by + ts_cv_forecast_by)
 --   2. Regression with External Features - OLS with anofox-statistics
 --   3. Production Reality - Using gap parameter for ETL latency
 --   4. Composable Pipeline - Step-by-step modular approach
@@ -23,7 +23,7 @@ LOAD 'build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension';
 -- ============================================================================
 -- PATTERN 1: Quick Start
 -- ============================================================================
--- Scenario: Quick model evaluation with ts_backtest_auto one-liner
+-- Scenario: Quick model evaluation with the two-step CV workflow
 
 SELECT
     '=== Pattern 1: Quick Start ===' AS section;
@@ -43,25 +43,33 @@ FROM generate_series(0, 89) AS t(d)
 CROSS JOIN generate_series(1, 3) AS s(s);
 
 -- Backtest: Test AutoETS on 5 folds, 7-day horizon
-SELECT
-    fold_id,
-    COUNT(*) AS n_predictions,
-    ROUND(AVG(abs_error), 2) AS mae,
-    ROUND(fold_metric_score, 2) AS rmse,
-    model_name
-FROM ts_backtest_auto_by(
+-- Step 1: generate folds (both train and test rows)
+CREATE OR REPLACE TABLE cv_folds_p1 AS
+SELECT * FROM ts_cv_folds_by(
     'sales_data',           -- source table
     store_id,               -- group column
     date,                   -- date column
     revenue,                -- target column
-    7,                      -- horizon: forecast next 7 days
     5,                      -- folds: test on 5 different historical periods
-    '1d',                   -- frequency
-    {'method': 'AutoETS'}, -- params: model selection
-    NULL,                   -- features: no external factors
-    'rmse'                  -- metric: RMSE for evaluation
-)
-GROUP BY fold_id, model_name, fold_metric_score
+    7,                      -- horizon: forecast next 7 days
+    MAP{}                   -- default fold parameters
+);
+
+-- Step 2: forecast on the folds (model chosen here; horizon inferred from test rows)
+CREATE OR REPLACE TABLE cv_results_p1 AS
+SELECT * FROM ts_cv_forecast_by(
+    'cv_folds_p1', store_id, date, revenue, 'AutoETS', MAP{}
+);
+
+-- Step 3: metrics per fold (y = actual, yhat = forecast)
+SELECT
+    fold_id,
+    COUNT(*) AS n_predictions,
+    ROUND(ts_mae(LIST(y ORDER BY date), LIST(yhat ORDER BY date)), 2) AS mae,
+    ROUND(ts_rmse(LIST(y ORDER BY date), LIST(yhat ORDER BY date)), 2) AS rmse,
+    ANY_VALUE(model_name) AS model_name
+FROM cv_results_p1
+GROUP BY fold_id
 ORDER BY fold_id;
 
 -- ============================================================================
@@ -171,43 +179,40 @@ SELECT
     '=== Pattern 3: Production Reality ===' AS section;
 
 -- Reuse sales_data from Pattern 1
+-- The gap/embargo are fold-shape parameters, so they belong to ts_cv_folds_by.
 -- Backtest with gap=2 to simulate ETL latency
+CREATE OR REPLACE TABLE cv_folds_gap AS
+SELECT * FROM ts_cv_folds_by(
+    'sales_data', store_id, date, revenue,
+    5,                      -- folds
+    7,                      -- horizon
+    MAP{
+        'gap': '2',         -- Skip 2 days between Train end and Test start
+        'embargo': '0'      -- No embargo needed for point forecasts
+    }
+);
+
 SELECT
     'With Gap=2' AS scenario,
     fold_id,
     COUNT(*) AS n_predictions,
-    ROUND(AVG(abs_error), 2) AS mae
-FROM ts_backtest_auto_by(
-    'sales_data',
-    store_id,
-    date,
-    revenue,
-    7,                      -- horizon
-    5,                      -- folds
-    '1d',                   -- frequency
-    MAP{
-        'method': 'AutoARIMA',
-        'gap': '2',         -- Skip 2 days between Train end and Test start
-        'embargo': '0'      -- No embargo needed for point forecasts
-    }
-)
+    ROUND(ts_mae(LIST(y ORDER BY date), LIST(yhat ORDER BY date)), 2) AS mae
+FROM ts_cv_forecast_by('cv_folds_gap', store_id, date, revenue, 'AutoARIMA', MAP{})
 GROUP BY fold_id
 ORDER BY fold_id;
 
 -- Compare: Without gap (unrealistic but common mistake)
+CREATE OR REPLACE TABLE cv_folds_nogap AS
+SELECT * FROM ts_cv_folds_by(
+    'sales_data', store_id, date, revenue, 5, 7, MAP{'gap': '0'}
+);
+
 SELECT
     'Without Gap' AS scenario,
     fold_id,
     COUNT(*) AS n_predictions,
-    ROUND(AVG(abs_error), 2) AS mae
-FROM ts_backtest_auto_by(
-    'sales_data',
-    store_id,
-    date,
-    revenue,
-    7, 5, '1d',
-    {'method': 'AutoARIMA', 'gap': '0'}
-)
+    ROUND(ts_mae(LIST(y ORDER BY date), LIST(yhat ORDER BY date)), 2) AS mae
+FROM ts_cv_forecast_by('cv_folds_nogap', store_id, date, revenue, 'AutoARIMA', MAP{})
 GROUP BY fold_id
 ORDER BY fold_id;
 
@@ -227,41 +232,39 @@ SELECT ['2024-01-22'::DATE, '2024-01-29'::DATE, '2024-02-05'::DATE] AS training_
 SELECT 'Fold cutoff dates:' AS step;
 SELECT * FROM fold_meta;
 
--- Step 2: Create CV splits
+-- Step 2: Create CV splits (explicit cutoff dates; column names are preserved)
+-- Pass the cutoff-date array as a literal (table macros accept at most one
+-- subquery parameter, which is already the source table name).
 CREATE OR REPLACE TABLE cv_splits_p4 AS
 SELECT * FROM ts_cv_split_by(
     'sales_data',
     store_id,
     date,
     revenue,
-    (SELECT training_end_times FROM fold_meta),
+    ['2024-01-22'::DATE, '2024-01-29'::DATE, '2024-02-05'::DATE],
     7,
-    '1d',
     MAP{}
 );
 
 SELECT 'CV splits created:' AS step, COUNT(*) AS rows, COUNT(DISTINCT fold_id) AS folds FROM cv_splits_p4;
 
--- Step 3: Filter to training data only
-CREATE OR REPLACE TABLE train_splits AS
-SELECT * FROM cv_splits_p4 WHERE split = 'train';
-
--- Step 4: Run forecast on prepared data
+-- Step 3: Forecast on the splits.
+-- ts_cv_forecast_by needs BOTH train and test rows (it trains on 'train',
+-- predicts the 'test' dates), so pass the full splits table with the original
+-- column names. Horizon is inferred from the test rows per fold.
 SELECT
     fold_id,
     COUNT(*) AS n_forecasts,
-    model_name
+    ANY_VALUE(model_name) AS model_name
 FROM ts_cv_forecast_by(
-    'train_splits',
-    group_col,
-    date_col,
-    target_col,
+    'cv_splits_p4',
+    store_id,
+    date,
+    revenue,
     'AutoETS',
-    7,
-    MAP{},
-    '1d'
+    MAP{}
 )
-GROUP BY fold_id, model_name
+GROUP BY fold_id
 ORDER BY fold_id;
 
 -- ============================================================================
@@ -484,31 +487,33 @@ SELECT 'What-if promo days:' AS step, SUM(has_promo) AS promo_days FROM scenario
 -- Step 5: Run backtest on each scenario using SeasonalNaive
 -- (SeasonalNaive ignores features, so forecast should be same - this shows structure)
 SELECT 'Baseline Scenario Results:' AS step;
+CREATE OR REPLACE TABLE cv_folds_baseline AS
+SELECT * FROM ts_cv_folds_by('scenario_baseline', store_id, date, revenue, 2, 14, MAP{});
 SELECT
     fold_id,
     COUNT(*) AS n_predictions,
-    ROUND(AVG(abs_error), 2) AS mae,
-    model_name
-FROM ts_backtest_auto_by(
-    'scenario_baseline', store_id, date, revenue,
-    14, 2, '1d',
-    {'method': 'SeasonalNaive', 'seasonal_period': '7'}
+    ROUND(ts_mae(LIST(y ORDER BY date), LIST(yhat ORDER BY date)), 2) AS mae,
+    ANY_VALUE(model_name) AS model_name
+FROM ts_cv_forecast_by(
+    'cv_folds_baseline', store_id, date, revenue,
+    'SeasonalNaive', {'seasonal_period': '7'}
 )
-GROUP BY fold_id, model_name
+GROUP BY fold_id
 ORDER BY fold_id;
 
 SELECT 'What-if Scenario Results:' AS step;
+CREATE OR REPLACE TABLE cv_folds_whatif AS
+SELECT * FROM ts_cv_folds_by('scenario_whatif', store_id, date, revenue, 2, 14, MAP{});
 SELECT
     fold_id,
     COUNT(*) AS n_predictions,
-    ROUND(AVG(abs_error), 2) AS mae,
-    model_name
-FROM ts_backtest_auto_by(
-    'scenario_whatif', store_id, date, revenue,
-    14, 2, '1d',
-    {'method': 'SeasonalNaive', 'seasonal_period': '7'}
+    ROUND(ts_mae(LIST(y ORDER BY date), LIST(yhat ORDER BY date)), 2) AS mae,
+    ANY_VALUE(model_name) AS model_name
+FROM ts_cv_forecast_by(
+    'cv_folds_whatif', store_id, date, revenue,
+    'SeasonalNaive', {'seasonal_period': '7'}
 )
-GROUP BY fold_id, model_name
+GROUP BY fold_id
 ORDER BY fold_id;
 
 -- Step 6: For models that USE the promo feature, run OLS regression

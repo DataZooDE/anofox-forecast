@@ -5,7 +5,7 @@
 -- The M5 dataset contains daily sales data for Walmart products.
 --
 -- Examples included:
---   1. Basic univariate backtest with ts_backtest_auto
+--   1. Basic univariate backtest with the two-step CV workflow
 --   2. Model comparison across multiple methods
 --   3. Regression backtest with engineered features (requires anofox-statistics)
 --
@@ -49,7 +49,7 @@ SELECT
 FROM m5_sample;
 
 -- ============================================================================
--- SECTION 2: Basic Backtest with ts_backtest_auto
+-- SECTION 2: Basic Backtest with the two-step CV workflow
 -- ============================================================================
 
 -- Run a simple backtest with SeasonalNaive
@@ -57,26 +57,31 @@ FROM m5_sample;
 SELECT
     '=== Basic Backtest: SeasonalNaive ===' AS section;
 
-SELECT
-    fold_id,
-    COUNT(*) AS n_predictions,
-    ROUND(AVG(abs_error), 2) AS mae,
-    ROUND(fold_metric_score, 4) AS rmse,
-    model_name
-FROM ts_backtest_auto_by(
+-- Step 1: generate folds (both train and test rows)
+CREATE OR REPLACE TABLE m5_folds AS
+SELECT * FROM ts_cv_folds_by(
     'm5_sample',
     item_id,
     ds,
     y,
-    14,                         -- horizon: 14 days (2 weeks)
     3,                          -- folds: 3 CV folds
-    '1d',                       -- frequency: daily
-    MAP{
-        'method': 'SeasonalNaive',
-        'seasonal_period': '7'  -- weekly seasonality
-    }
+    14,                         -- horizon: 14 days (2 weeks)
+    MAP{}
+);
+
+-- Step 2: forecast + score per fold (y = actual, yhat = forecast)
+SELECT
+    fold_id,
+    COUNT(*) AS n_predictions,
+    ROUND(ts_mae(LIST(y ORDER BY ds), LIST(yhat ORDER BY ds)), 2) AS mae,
+    ROUND(ts_rmse(LIST(y ORDER BY ds), LIST(yhat ORDER BY ds)), 4) AS rmse,
+    ANY_VALUE(model_name) AS model_name
+FROM ts_cv_forecast_by(
+    'm5_folds', item_id, ds, y,
+    'SeasonalNaive',
+    MAP{'seasonal_period': '7'}  -- weekly seasonality
 )
-GROUP BY fold_id, model_name, fold_metric_score
+GROUP BY fold_id
 ORDER BY fold_id;
 
 -- ============================================================================
@@ -86,29 +91,27 @@ ORDER BY fold_id;
 SELECT
     '=== Model Comparison ===' AS section;
 
--- Compare multiple forecasting methods
+-- Compare multiple forecasting methods on identical folds (generated once).
+-- error = yhat - y; abs_error = |yhat - y|
+CREATE OR REPLACE TABLE m5_folds_cmp AS
+SELECT * FROM ts_cv_folds_by('m5_sample', item_id, ds, y, 3, 14, MAP{});
+
 CREATE OR REPLACE TABLE backtest_comparison AS
 WITH naive_results AS (
-    SELECT 'Naive' AS method, * FROM ts_backtest_auto_by(
-        'm5_sample', item_id, ds, y, 14, 3, '1d',
-        {'method': 'Naive'}
-    )
+    SELECT 'Naive' AS method, * FROM ts_cv_forecast_by(
+        'm5_folds_cmp', item_id, ds, y, 'Naive', MAP{})
 ),
 seasonal_naive_results AS (
-    SELECT 'SeasonalNaive' AS method, * FROM ts_backtest_auto_by(
-        'm5_sample', item_id, ds, y, 14, 3, '1d',
-        {'method': 'SeasonalNaive', 'seasonal_period': '7'}
-    )
+    SELECT 'SeasonalNaive' AS method, * FROM ts_cv_forecast_by(
+        'm5_folds_cmp', item_id, ds, y, 'SeasonalNaive', {'seasonal_period': '7'})
 ),
 theta_results AS (
-    SELECT 'Theta' AS method, * FROM ts_backtest_auto_by(
-        'm5_sample', item_id, ds, y, 14, 3, '1d',
-        {'method': 'Theta', 'seasonal_period': '7'}
-    )
+    SELECT 'Theta' AS method, * FROM ts_cv_forecast_by(
+        'm5_folds_cmp', item_id, ds, y, 'Theta', {'seasonal_period': '7'})
 )
-SELECT * FROM naive_results
-UNION ALL SELECT * FROM seasonal_naive_results
-UNION ALL SELECT * FROM theta_results;
+SELECT *, yhat - y AS error, ABS(yhat - y) AS abs_error FROM naive_results
+UNION ALL SELECT *, yhat - y AS error, ABS(yhat - y) AS abs_error FROM seasonal_naive_results
+UNION ALL SELECT *, yhat - y AS error, ABS(yhat - y) AS abs_error FROM theta_results;
 
 -- Summary by method
 SELECT
@@ -138,17 +141,19 @@ ORDER BY method, fold_id;
 SELECT
     '=== Different Metrics ===' AS section;
 
+-- Metrics are computed from the CV forecast output (y vs yhat), so any metric
+-- can be reported from the same run. Reuse m5_folds_cmp from Section 3.
+CREATE OR REPLACE TABLE m5_metric_results AS
+SELECT * FROM ts_cv_forecast_by(
+    'm5_folds_cmp', item_id, ds, y, 'SeasonalNaive', {'seasonal_period': '7'}
+);
+
 -- Test with SMAPE metric
 SELECT
     'SMAPE Metric' AS metric_type,
     fold_id,
-    ROUND(AVG(fold_metric_score), 2) AS smape
-FROM ts_backtest_auto_by(
-    'm5_sample', item_id, ds, y, 14, 3, '1d',
-    {'method': 'SeasonalNaive', 'seasonal_period': '7'},
-    NULL,
-    'smape'
-)
+    ROUND(ts_smape(LIST(y ORDER BY ds), LIST(yhat ORDER BY ds)), 2) AS smape
+FROM m5_metric_results
 GROUP BY fold_id
 ORDER BY fold_id;
 
@@ -156,13 +161,8 @@ ORDER BY fold_id;
 SELECT
     'Coverage Metric' AS metric_type,
     fold_id,
-    ROUND(AVG(fold_metric_score), 2) AS coverage_90
-FROM ts_backtest_auto_by(
-    'm5_sample', item_id, ds, y, 14, 3, '1d',
-    {'method': 'SeasonalNaive', 'seasonal_period': '7'},
-    NULL,
-    'coverage'
-)
+    ROUND(AVG(CASE WHEN y BETWEEN yhat_lower AND yhat_upper THEN 1 ELSE 0 END), 2) AS coverage_90
+FROM m5_metric_results
 GROUP BY fold_id
 ORDER BY fold_id;
 
@@ -173,24 +173,24 @@ ORDER BY fold_id;
 SELECT
     '=== Backtest with Gap ===' AS section;
 
--- Compare backtest with and without gap
+-- Compare backtest with and without gap.
+-- The gap is a fold-shape parameter, so it belongs to ts_cv_folds_by.
+CREATE OR REPLACE TABLE m5_folds_nogap AS
+SELECT * FROM ts_cv_folds_by('m5_sample', item_id, ds, y, 3, 14, {'gap': '0'});
+CREATE OR REPLACE TABLE m5_folds_gap2 AS
+SELECT * FROM ts_cv_folds_by('m5_sample', item_id, ds, y, 3, 14, {'gap': '2'});
+
 SELECT
     'No Gap' AS scenario,
-    ROUND(AVG(abs_error), 2) AS mae,
-    ROUND(SQRT(AVG(error * error)), 2) AS rmse
-FROM ts_backtest_auto_by(
-    'm5_sample', item_id, ds, y, 14, 3, '1d',
-    {'method': 'SeasonalNaive', 'seasonal_period': '7', 'gap': '0'}
-)
+    ROUND(ts_mae(LIST(y), LIST(yhat)), 2) AS mae,
+    ROUND(ts_rmse(LIST(y), LIST(yhat)), 2) AS rmse
+FROM ts_cv_forecast_by('m5_folds_nogap', item_id, ds, y, 'SeasonalNaive', {'seasonal_period': '7'})
 UNION ALL
 SELECT
     'Gap=2 days' AS scenario,
-    ROUND(AVG(abs_error), 2) AS mae,
-    ROUND(SQRT(AVG(error * error)), 2) AS rmse
-FROM ts_backtest_auto_by(
-    'm5_sample', item_id, ds, y, 14, 3, '1d',
-    {'method': 'SeasonalNaive', 'seasonal_period': '7', 'gap': '2'}
-);
+    ROUND(ts_mae(LIST(y), LIST(yhat)), 2) AS mae,
+    ROUND(ts_rmse(LIST(y), LIST(yhat)), 2) AS rmse
+FROM ts_cv_forecast_by('m5_folds_gap2', item_id, ds, y, 'SeasonalNaive', {'seasonal_period': '7'});
 
 -- ============================================================================
 -- SECTION 6: Regression Backtest with OLS (requires anofox-statistics)
@@ -229,7 +229,6 @@ SELECT * FROM ts_cv_split_by(
     y,
     ['2016-01-01', '2016-02-01', '2016-03-01']::DATE[],  -- 3 folds
     14,                                                    -- 14-day horizon
-    '1d',
     MAP{}
 );
 
@@ -323,12 +322,12 @@ ORDER BY fold_id;
 CREATE OR REPLACE TABLE ols_with_model AS
 SELECT 'ols' AS model_key, date_col, * FROM ols_backtest_results;
 
--- Save SeasonalNaive backtest results with date
+-- Save SeasonalNaive backtest results with date (two-step CV)
+CREATE OR REPLACE TABLE snaive_folds AS
+SELECT * FROM ts_cv_folds_by('m5_sample', item_id, ds, y, 3, 14, MAP{});
 CREATE OR REPLACE TABLE snaive_results AS
-SELECT 'snaive' AS model_key, date AS date_col, actual, forecast FROM ts_backtest_auto_by(
-    'm5_sample', item_id, ds, y, 14, 3, '1d',
-    {'method': 'SeasonalNaive', 'seasonal_period': '7'}
-);
+SELECT 'snaive' AS model_key, ds AS date_col, y AS actual, yhat AS forecast
+FROM ts_cv_forecast_by('snaive_folds', item_id, ds, y, 'SeasonalNaive', {'seasonal_period': '7'});
 
 -- Calculate OLS metrics
 WITH ols_mae AS (SELECT 'OLS Regression' AS model, mae FROM ts_mae_by('ols_with_model', model_key, date_col, actual, forecast)),
@@ -351,18 +350,17 @@ FROM snaive_mae, snaive_rmse, snaive_bias;
 SELECT
     '=== Per-Item Performance ===' AS section;
 
--- Which items are hardest to forecast?
+-- Which items are hardest to forecast? (reuse m5_folds_cmp from Section 3)
 SELECT
-    group_col AS item_id,
-    ROUND(AVG(abs_error), 2) AS mae,
-    ROUND(SQRT(AVG(error * error)), 2) AS rmse,
-    ROUND(AVG(actual), 2) AS avg_actual,
-    ROUND(AVG(abs_error) / NULLIF(AVG(actual), 0) * 100, 2) AS mape_pct
-FROM ts_backtest_auto_by(
-    'm5_sample', item_id, ds, y, 14, 3, '1d',
-    {'method': 'SeasonalNaive', 'seasonal_period': '7'}
+    item_id,
+    ROUND(AVG(ABS(yhat - y)), 2) AS mae,
+    ROUND(SQRT(AVG((yhat - y) * (yhat - y))), 2) AS rmse,
+    ROUND(AVG(y), 2) AS avg_actual,
+    ROUND(AVG(ABS(yhat - y)) / NULLIF(AVG(y), 0) * 100, 2) AS mape_pct
+FROM ts_cv_forecast_by(
+    'm5_folds_cmp', item_id, ds, y, 'SeasonalNaive', {'seasonal_period': '7'}
 )
-GROUP BY group_col
+GROUP BY item_id
 ORDER BY mae DESC;
 
 -- ============================================================================

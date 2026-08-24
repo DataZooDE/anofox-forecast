@@ -62,10 +62,12 @@ SELECT * FROM ts_forecast_by(
     MAP{'seasonal_period': '7'}  -- Pass detected period explicitly
 );
 
--- For backtesting
-SELECT * FROM ts_backtest_auto_by(
-    'daily_sales', product_id, date, value, 7, 5, '1d',
-    MAP{'method': 'AutoETS', 'seasonal_period': '7'}
+-- For backtesting (two-step cross-validation)
+CREATE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by('daily_sales', product_id, date, value, 5, 7, MAP{});
+SELECT * FROM ts_cv_forecast_by(
+    'cv_folds', product_id, date, value,
+    'AutoETS', MAP{'seasonal_period': '7'}
 );
 ```
 

@@ -148,21 +148,26 @@ See [reference/models/distributional/laplace.md](../reference/models/distributio
 Always compare multiple models using cross-validation:
 
 ```sql
--- Compare different models using backtest
+-- Step 1: Build the cross-validation folds once (3 folds, horizon 7)
+CREATE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by('sales', id, date, val, 3, 7, MAP{});
+
+-- Step 2: Forecast each candidate model over the same folds
 WITH model_comparison AS (
-    SELECT 'AutoETS' AS model_tested, * FROM ts_backtest_auto(
-        'sales', id, date, val, 7, 3, '1d', MAP{'method': 'AutoETS'})
+    SELECT 'AutoETS' AS model_tested, *
+    FROM ts_cv_forecast_by('cv_folds', id, date, val, 'AutoETS', MAP{})
     UNION ALL
-    SELECT 'Theta' AS model_tested, * FROM ts_backtest_auto(
-        'sales', id, date, val, 7, 3, '1d', MAP{'method': 'Theta'})
+    SELECT 'Theta' AS model_tested, *
+    FROM ts_cv_forecast_by('cv_folds', id, date, val, 'Theta', MAP{})
     UNION ALL
-    SELECT 'Naive' AS model_tested, * FROM ts_backtest_auto(
-        'sales', id, date, val, 7, 3, '1d', MAP{'method': 'Naive'})
+    SELECT 'Naive' AS model_tested, *
+    FROM ts_cv_forecast_by('cv_folds', id, date, val, 'Naive', MAP{})
 )
+-- Step 3: Aggregate accuracy metrics per model (actual is 'y', forecast is 'yhat')
 SELECT
     model_tested,
-    ROUND(AVG(abs_error), 2) AS avg_mae,
-    ROUND(AVG(fold_metric_score), 2) AS avg_rmse
+    ROUND(ts_mae(LIST(y ORDER BY date), LIST(yhat ORDER BY date)), 2) AS avg_mae,
+    ROUND(ts_rmse(LIST(y ORDER BY date), LIST(yhat ORDER BY date)), 2) AS avg_rmse
 FROM model_comparison
 GROUP BY model_tested
 ORDER BY avg_mae;

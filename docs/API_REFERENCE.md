@@ -69,12 +69,12 @@ Table macros support both MAP and STRUCT syntax for parameters:
 
 ```sql
 -- STRUCT allows mixed types (recommended)
-SELECT * FROM ts_backtest_auto('sales', id, date, value, 7, 3, '1d',
-    {'method': 'Naive', 'gap': 2, 'clip_horizon': true});
+SELECT * FROM ts_cv_folds_by('sales', id, date, value, 3, 7,
+    {'gap': 2, 'clip_horizon': true});
 
 -- MAP requires homogeneous string values (legacy)
-SELECT * FROM ts_backtest_auto('sales', id, date, value, 7, 3, '1d',
-    MAP{'method': 'Naive', 'gap': '2', 'clip_horizon': 'true'});
+SELECT * FROM ts_cv_folds_by('sales', id, date, value, 3, 7,
+    MAP{'gap': '2', 'clip_horizon': 'true'});
 ```
 
 ### Function Naming Conventions
@@ -117,7 +117,7 @@ Both forms are identical in functionality.
 | Function | Purpose | Example |
 |----------|---------|---------|
 | `ts_forecast_by` | Forecast multiple series | `ts_forecast_by('tbl', id, date, val, 'AutoETS', 12, '1d')` |
-| `ts_backtest_auto` | One-liner backtesting | `ts_backtest_auto('tbl', id, date, val, 7, 3, '1d')` |
+| `ts_cv_folds_by` | Cross-validation folds (backtesting) | `ts_cv_folds_by('tbl', id, date, val, 3, 7, MAP{})` |
 | `ts_stats` | Compute 34 statistics | `ts_stats(LIST(val ORDER BY date))` |
 | `ts_detect_periods` | Detect seasonality | `ts_detect_periods(LIST(val ORDER BY date))` |
 | `ts_detect_periods_by` | Detect seasonality (multi-series) | `ts_detect_periods_by('tbl', id, date, val)` |

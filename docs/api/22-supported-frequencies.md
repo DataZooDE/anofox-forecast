@@ -12,7 +12,7 @@ Many functions accept a `frequency` parameter to specify the time interval betwe
 - `ts_fill_gaps_by` — fill missing timestamps
 - `ts_fill_forward_by` — extend series to target date
 - `ts_diff_by` — differencing operations
-- `ts_backtest_auto_by` — backtesting with step size
+- `ts_cv_folds_by` — cross-validation fold generation
 
 ---
 
@@ -83,10 +83,12 @@ SELECT * FROM ts_stats_by('weekly_sales', store_id, date, amount, '1w');
 -- Monthly reporting data
 SELECT * FROM ts_fill_gaps_by('monthly_data', region_id, date, value, '1mo');
 
--- Backtesting with daily step
-SELECT * FROM ts_backtest_auto_by(
-    'sales', product_id, date, value, 7, 5, '1d',
-    MAP{'method': 'AutoETS', 'seasonal_period': '7'}
+-- Backtesting via two-step cross-validation
+CREATE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by('sales', product_id, date, value, 5, 7, MAP{});
+SELECT * FROM ts_cv_forecast_by(
+    'cv_folds', product_id, date, value,
+    'AutoETS', MAP{'seasonal_period': '7'}
 );
 ```
 

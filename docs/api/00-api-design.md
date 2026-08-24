@@ -120,12 +120,12 @@ The `params` parameter supports both MAP and STRUCT syntax in **table macros** (
 
 ```sql
 -- STRUCT allows mixed types (recommended for table macros)
-SELECT * FROM ts_backtest_auto_by('sales', id, date, value, 7, 3, '1d',
-    MAP{'method': 'Naive', 'gap': '2', 'clip_horizon': 'true'});
+SELECT * FROM ts_cv_folds_by('sales', id, date, value, 3, 7,
+    {'gap': 2, 'clip_horizon': true});
 
 -- MAP requires homogeneous string values (legacy, also works)
-SELECT * FROM ts_backtest_auto_by('sales', id, date, value, 7, 3, '1d',
-    MAP{'method': 'Naive', 'gap': '2', 'clip_horizon': 'true'});
+SELECT * FROM ts_cv_folds_by('sales', id, date, value, 3, 7,
+    MAP{'gap': '2', 'clip_horizon': 'true'});
 ```
 
 > **Note:** Aggregate functions (e.g., `ts_detect_changepoints_agg`, `ts_forecast_agg`) require **MAP syntax only**. STRUCT syntax is not supported for aggregate functions.
@@ -154,7 +154,7 @@ The following table shows which API variants exist for each functionality:
 | **Metrics** | `ts_mae`, `ts_rmse`, ...† | - | - | `ts_mae_by`, `ts_rmse_by`, ...† |
 | **Conformal** | `ts_conformal_*`‡ | - | `ts_conformal_calibrate` | `ts_conformal_by`, `ts_conformal_apply_by` |
 | **Data Prep** | - | - | - | `ts_fill_gaps_by`, `ts_diff_by`, `ts_drop_*_by`§ |
-| **Cross-Val** | - | - | - | `ts_cv_split_by`, `ts_backtest_auto_by`¶ |
+| **Cross-Val** | - | - | - | `ts_cv_folds_by`, `ts_cv_forecast_by`¶ |
 
 **Legend:** ✓ = exists, - = not applicable
 
@@ -233,8 +233,8 @@ SELECT * FROM ts_forecast_by('sales', product_id, date, value, 'AutoETS', 12, '1
 -- Statistics per series
 SELECT * FROM ts_stats_by('sales', product_id, date, value);
 
--- One-liner backtest
-SELECT * FROM ts_backtest_auto_by('sales', product_id, date, value, 7, 3, '1d', MAP{'method': 'AutoETS'});
+-- Cross-validation folds (two-step backtest)
+SELECT * FROM ts_cv_folds_by('sales', product_id, date, value, 3, 7, MAP{});
 ```
 
 ---
@@ -274,8 +274,8 @@ Return tables with operation-specific columns:
 -- ts_forecast_by returns:
 | group_col | ds | forecast | lower | upper |
 
--- ts_backtest_auto returns:
-| fold_id | group_col | date | forecast | actual | error | abs_error | ... |
+-- ts_cv_forecast_by returns:
+| fold_id | group_col | date | y | split | yhat | yhat_lower | yhat_upper | model_name |
 ```
 
 ---

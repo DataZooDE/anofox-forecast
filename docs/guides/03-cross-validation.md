@@ -16,30 +16,49 @@ A model that fits historical data well may forecast poorly. Cross-validation sim
 2. Testing on future data
 3. Repeating across multiple time periods
 
-## Quick Start: One-Liner Backtest
+## Quick Start: Two-Step Backtest
 
-For most use cases, `ts_backtest_auto` does everything in one call:
+Backtesting is a two-step workflow: generate train/test folds, then forecast on them.
 
 ```sql
-SELECT * FROM ts_backtest_auto(
+-- Step 1: Generate CV folds (both train and test rows, with actual dates)
+CREATE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by(
     'sales',        -- table name
     product_id,     -- group column
     date,           -- date column
     quantity,       -- target column
-    7,              -- forecast horizon (7 days)
     3,              -- number of folds
-    '1d',           -- data frequency
+    7,              -- forecast horizon (7 days)
     MAP{}           -- default parameters
+);
+
+-- Step 2: Forecast on the folds (horizon inferred from test rows)
+CREATE TABLE cv_results AS
+SELECT * FROM ts_cv_forecast_by(
+    'cv_folds', product_id, date, quantity, 'Naive', MAP{}
 );
 ```
 
-**Output columns:**
+**`ts_cv_forecast_by` output columns:**
 - `fold_id` - which CV fold
-- `group_col` - series identifier
+- `product_id` - series identifier (original group column name preserved)
 - `date` - forecast date
-- `forecast` / `actual` - predicted vs actual
-- `error` / `abs_error` - error metrics
-- `fold_metric_score` - RMSE for the fold
+- `y` - actual value
+- `yhat` - point forecast
+- `yhat_lower` / `yhat_upper` - prediction interval
+- `model_name` - model used
+
+Compute per-fold errors with the metric functions:
+
+```sql
+SELECT
+    product_id, fold_id,
+    ts_rmse(LIST(y ORDER BY date), LIST(yhat ORDER BY date)) AS rmse,
+    ts_mae(LIST(y ORDER BY date), LIST(yhat ORDER BY date))  AS mae
+FROM cv_results
+GROUP BY product_id, fold_id;
+```
 
 ## Understanding CV Folds
 
@@ -62,28 +81,40 @@ Each fold:
 ### Basic Parameters
 
 ```sql
-SELECT * FROM ts_backtest_auto(
+-- The forecasting model is chosen in step 2 (ts_cv_forecast_by), not in the folds
+CREATE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by(
     'sales', product_id, date, quantity,
-    7,              -- horizon: forecast 7 periods ahead
     5,              -- folds: 5 CV splits
-    '1d',           -- frequency: daily data
-    MAP{'method': 'AutoETS'}
+    7,              -- horizon: forecast 7 periods ahead
+    MAP{}
+);
+
+SELECT * FROM ts_cv_forecast_by(
+    'cv_folds', product_id, date, quantity, 'AutoETS', MAP{}
 );
 ```
 
 ### Advanced Parameters
 
+Fold-shape parameters (`gap`, `window_type`, etc.) belong to `ts_cv_folds_by`:
+
 ```sql
-SELECT * FROM ts_backtest_auto(
-    'sales', product_id, date, quantity, 7, 5, '1d',
+CREATE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by(
+    'sales', product_id, date, quantity, 5, 7,
     {
-        'method': 'AutoETS',        -- forecasting model
         'gap': 2,                   -- 2-period gap (simulates data latency)
         'window_type': 'fixed',     -- fixed vs expanding window
         'min_train_size': 30,       -- minimum training observations
         'initial_train_size': 60,   -- first fold training size
         'skip_length': 14           -- periods between fold starts
     }
+);
+
+-- Then forecast with the model of your choice
+SELECT * FROM ts_cv_forecast_by(
+    'cv_folds', product_id, date, quantity, 'AutoETS', MAP{}
 );
 ```
 
@@ -129,15 +160,25 @@ Use `gap` when:
 
 ## Choosing Metrics
 
+Metrics are computed from the forecast output (`y` vs `yhat`) using the metric
+functions, so you can report any metric you like from the same run:
+
 ```sql
--- Default metric is RMSE
-SELECT * FROM ts_backtest_auto('sales', id, date, val, 7, 3, '1d', MAP{});
+CREATE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by('sales', id, date, val, 3, 7, MAP{});
+CREATE TABLE cv_results AS
+SELECT * FROM ts_cv_forecast_by('cv_folds', id, date, val, 'Naive', MAP{});
 
--- Use MAE instead
-SELECT * FROM ts_backtest_auto('sales', id, date, val, 7, 3, '1d', MAP{},
-    NULL, 'mae');
+SELECT
+    id, fold_id,
+    ts_rmse(LIST(y ORDER BY date), LIST(yhat ORDER BY date))  AS rmse,
+    ts_mae(LIST(y ORDER BY date), LIST(yhat ORDER BY date))   AS mae,
+    ts_mape(LIST(y ORDER BY date), LIST(yhat ORDER BY date))  AS mape,
+    ts_smape(LIST(y ORDER BY date), LIST(yhat ORDER BY date)) AS smape
+FROM cv_results
+GROUP BY id, fold_id;
 
--- Available metrics: rmse, mae, mse, mape, smape, bias, r2, coverage
+-- Available metric functions: ts_rmse, ts_mae, ts_mse, ts_mape, ts_smape, ts_bias, ts_r2, ts_coverage
 ```
 
 | Metric | When to Use |
@@ -150,16 +191,24 @@ SELECT * FROM ts_backtest_auto('sales', id, date, val, 7, 3, '1d', MAP{},
 
 ## Analyzing Results
 
+All examples below assume `cv_results` was produced by the two-step workflow:
+
+```sql
+CREATE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by('sales', id, date, val, 5, 7, MAP{});
+CREATE TABLE cv_results AS
+SELECT * FROM ts_cv_forecast_by('cv_folds', id, date, val, 'Naive', MAP{});
+```
+
 ### Aggregate by Model
 
 ```sql
 SELECT
     model_name,
     COUNT(*) AS n_forecasts,
-    ROUND(AVG(abs_error), 2) AS avg_mae,
-    ROUND(AVG(fold_metric_score), 2) AS avg_rmse,
-    ROUND(AVG(CASE WHEN actual BETWEEN yhat_lower AND yhat_upper THEN 1 ELSE 0 END), 2) AS coverage
-FROM ts_backtest_auto('sales', id, date, val, 7, 5, '1d', MAP{})
+    ROUND(AVG(abs(y - yhat)), 2) AS avg_mae,
+    ROUND(AVG(CASE WHEN y BETWEEN yhat_lower AND yhat_upper THEN 1 ELSE 0 END), 2) AS coverage
+FROM cv_results
 GROUP BY model_name;
 ```
 
@@ -167,12 +216,12 @@ GROUP BY model_name;
 
 ```sql
 WITH results AS (
-    SELECT *, ROW_NUMBER() OVER (PARTITION BY fold_id, group_col ORDER BY date) AS step
-    FROM ts_backtest_auto('sales', id, date, val, 7, 3, '1d', MAP{})
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY fold_id, id ORDER BY date) AS step
+    FROM cv_results
 )
 SELECT
     step,
-    ROUND(AVG(abs_error), 2) AS avg_mae
+    ROUND(AVG(abs(y - yhat)), 2) AS avg_mae
 FROM results
 GROUP BY step
 ORDER BY step;
@@ -184,32 +233,33 @@ Typically, error increases with forecast horizon.
 
 ```sql
 SELECT
-    group_col,
-    ROUND(AVG(abs_error), 2) AS avg_mae,
+    id,
+    ROUND(AVG(abs(y - yhat)), 2) AS avg_mae,
     COUNT(*) AS n_obs
-FROM ts_backtest_auto('sales', id, date, val, 7, 3, '1d', MAP{})
-GROUP BY group_col
+FROM cv_results
+GROUP BY id
 ORDER BY avg_mae DESC;
 ```
 
 ## Model Comparison
 
 ```sql
--- Compare multiple models
+-- Generate the folds ONCE so every model is evaluated on identical splits
+CREATE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by('sales', id, date, val, 3, 7, MAP{});
+
+-- Forecast each model on the same folds
 WITH comparisons AS (
-    SELECT 'AutoETS' AS model, * FROM ts_backtest_auto(
-        'sales', id, date, val, 7, 3, '1d', MAP{'method': 'AutoETS'})
+    SELECT 'AutoETS' AS model, * FROM ts_cv_forecast_by('cv_folds', id, date, val, 'AutoETS', MAP{})
     UNION ALL
-    SELECT 'Theta' AS model, * FROM ts_backtest_auto(
-        'sales', id, date, val, 7, 3, '1d', MAP{'method': 'Theta'})
+    SELECT 'Theta' AS model, * FROM ts_cv_forecast_by('cv_folds', id, date, val, 'Theta', MAP{})
     UNION ALL
-    SELECT 'Naive' AS model, * FROM ts_backtest_auto(
-        'sales', id, date, val, 7, 3, '1d', MAP{'method': 'Naive'})
+    SELECT 'Naive' AS model, * FROM ts_cv_forecast_by('cv_folds', id, date, val, 'Naive', MAP{})
 )
 SELECT
     model,
-    ROUND(AVG(abs_error), 2) AS mae,
-    ROUND(AVG(fold_metric_score), 2) AS rmse
+    ROUND(ts_mae(LIST(y), LIST(yhat)), 2)  AS mae,
+    ROUND(ts_rmse(LIST(y), LIST(yhat)), 2) AS rmse
 FROM comparisons
 GROUP BY model
 ORDER BY mae;
