@@ -66,7 +66,7 @@ SELECT * FROM (
 SELECT 'Section 1.1: Basic Peak Detection' AS step;
 
 SELECT
-    id,
+    product_id,
     n_peaks,
     mean_period,
     peaks[1:3] AS first_3_peaks
@@ -76,7 +76,7 @@ FROM ts_detect_peaks_by('product_sales', product_id, date, sales, MAP{});
 SELECT 'Section 1.2: High Prominence Peaks Only' AS step;
 
 SELECT
-    id,
+    product_id,
     n_peaks,
     mean_period,
     peaks
@@ -87,7 +87,7 @@ FROM ts_detect_peaks_by('product_sales', product_id, date, sales,
 SELECT 'Section 1.3: Peaks with Minimum Distance' AS step;
 
 SELECT
-    id,
+    product_id,
     n_peaks,
     mean_period,
     inter_peak_distances
@@ -98,7 +98,7 @@ FROM ts_detect_peaks_by('product_sales', product_id, date, sales,
 SELECT 'Section 1.4: Combined Filters (prominence + distance)' AS step;
 
 SELECT
-    id,
+    product_id,
     n_peaks,
     mean_period,
     peaks
@@ -116,7 +116,7 @@ SELECT '=== Section 2: Peak Timing Analysis ===' AS section;
 SELECT 'Section 2.1: Weekly Peak Timing Consistency' AS step;
 
 SELECT
-    id,
+    product_id,
     n_peaks,
     ROUND(variability_score, 3) AS variability,
     is_stable AS consistent_timing
@@ -126,7 +126,7 @@ FROM ts_analyze_peak_timing_by('product_sales', product_id, date, sales, 7.0, MA
 SELECT 'Section 2.2: Peak Timing Interpretation' AS step;
 
 SELECT
-    id,
+    product_id,
     n_peaks,
     ROUND(variability_score, 3) AS variability,
     is_stable,
@@ -184,7 +184,7 @@ SELECT * FROM (
 );
 
 SELECT
-    id,
+    sensor_id,
     n_peaks AS anomaly_count,
     mean_period AS avg_time_between_anomalies,
     CASE
@@ -238,7 +238,7 @@ SELECT * FROM (
 
 -- Detect daily peaks per region
 SELECT
-    id AS region,
+    region,
     n_peaks AS daily_peaks_7days,
     ROUND(mean_period, 1) AS avg_hours_between_peaks
 FROM ts_detect_peaks_by('regional_traffic', region, timestamp, visitors,
@@ -246,7 +246,7 @@ FROM ts_detect_peaks_by('regional_traffic', region, timestamp, visitors,
 
 -- Analyze timing consistency
 SELECT
-    id AS region,
+    region,
     n_peaks,
     ROUND(variability_score, 3) AS timing_variability,
     is_stable AS predictable_peaks
@@ -268,7 +268,7 @@ timing AS (
     SELECT * FROM ts_analyze_peak_timing_by('product_sales', product_id, date, sales, 7.0, MAP{})
 )
 SELECT
-    p.id AS product,
+    p.product_id AS product,
     p.n_peaks,
     ROUND(p.mean_period, 1) AS avg_days_between_peaks,
     ROUND(t.variability_score, 3) AS timing_variability,
@@ -280,7 +280,7 @@ SELECT
         ELSE 'Low frequency, variable'
     END AS pattern_type
 FROM peaks p
-JOIN timing t ON p.id = t.id
+JOIN timing t ON p.product_id = t.product_id
 ORDER BY p.n_peaks DESC;
 
 -- ============================================================================

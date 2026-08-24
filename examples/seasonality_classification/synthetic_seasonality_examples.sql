@@ -72,7 +72,7 @@ SELECT * FROM ts_classify_seasonality_by('multi_series', series_id, ts, value, 7
 .print 'Section 2.1: Extract Specific Fields'
 
 SELECT
-    id AS series_id,
+    series_id,
     timing_classification AS timing_class,
     modulation_type AS modulation,
     is_seasonal AS is_seasonal,
@@ -87,7 +87,7 @@ ORDER BY series_id;
 .print 'Section 2.2: Filter Seasonal Series Only'
 
 SELECT
-    id AS series_id,
+    series_id,
     timing_classification AS timing_class,
     ROUND(seasonal_strength, 4) AS strength
 FROM ts_classify_seasonality_by('multi_series', series_id, ts, value, 7)
@@ -136,14 +136,14 @@ SELECT * FROM (
 .print 'Section 3.1: Classification of Different Patterns'
 
 SELECT
-    id AS pattern_type,
+    series_id AS pattern_type,
     timing_classification AS timing_class,
     modulation_type AS modulation,
     is_seasonal AS is_seasonal,
     has_stable_timing AS stable_timing,
     ROUND(seasonal_strength, 4) AS strength
 FROM ts_classify_seasonality_by('varied_patterns', series_id, ts, value, 7)
-ORDER BY id;
+ORDER BY series_id;
 
 -- ============================================================================
 -- SECTION 4: Forecasting Method Selection
@@ -156,7 +156,7 @@ ORDER BY id;
 .print 'Section 4.1: Recommend Forecasting Method Based on Classification'
 
 SELECT
-    id AS series_id,
+    series_id,
     timing_classification AS timing_class,
     is_seasonal AS is_seasonal,
     has_stable_timing AS stable_timing,
@@ -221,7 +221,7 @@ SELECT * FROM (
 .print 'Section 5.1: Retail Sales Seasonality Classification'
 
 SELECT
-    id AS store,
+    store_id AS store,
     timing_classification AS timing_class,
     is_seasonal AS is_seasonal,
     ROUND(seasonal_strength, 4) AS strength,
@@ -244,7 +244,7 @@ ORDER BY strength DESC;
 .print 'Section 6.1: Analyze Individual Cycle Strengths'
 
 SELECT
-    id AS series_id,
+    series_id,
     cycle_strengths AS cycle_strengths,
     weak_seasons AS weak_season_indices,
     list_count(cycle_strengths) AS total_cycles,

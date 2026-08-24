@@ -59,7 +59,7 @@ FROM product_data GROUP BY product_id ORDER BY product_id;
 .print 'Section 1.1: All Features per Series'
 
 SELECT
-    id,
+    product_id,
     mean,
     variance,
     skewness
@@ -77,7 +77,7 @@ FROM ts_features_by('product_data', product_id, date, value);
 .print 'Section 2.1: Basic Statistics'
 
 SELECT
-    id,
+    product_id,
     ROUND(mean, 2) AS mean,
     ROUND(median, 2) AS median,
     ROUND(variance, 2) AS variance,
@@ -89,7 +89,7 @@ FROM ts_features_by('product_data', product_id, date, value);
 .print 'Section 2.2: Trend Features'
 
 SELECT
-    id,
+    product_id,
     ROUND(linear_trend_slope, 4) AS trend_slope,
     ROUND(linear_trend_intercept, 2) AS intercept,
     ROUND(linear_trend_r_squared, 4) AS r_squared
@@ -100,7 +100,7 @@ FROM ts_features_by('product_data', product_id, date, value);
 .print 'Section 2.3: Autocorrelation Features'
 
 SELECT
-    id,
+    product_id,
     ROUND(autocorrelation_lag1, 4) AS ac_lag1,
     ROUND(autocorrelation_lag7, 4) AS ac_lag7,
     ROUND(partial_autocorrelation_lag1, 4) AS pac_lag1
@@ -111,7 +111,7 @@ FROM ts_features_by('product_data', product_id, date, value);
 .print 'Section 2.4: Distribution Features'
 
 SELECT
-    id,
+    product_id,
     ROUND(skewness, 4) AS skewness,
     ROUND(kurtosis, 4) AS kurtosis,
     ROUND(minimum, 2) AS min_val,
@@ -130,7 +130,7 @@ FROM ts_features_by('product_data', product_id, date, value);
 .print 'Section 3.1: Selected Features Only'
 
 SELECT
-    id,
+    product_id,
     ROUND(mean, 2) AS mean,
     ROUND(variance, 2) AS variance,
     ROUND(skewness, 4) AS skewness,
@@ -142,7 +142,7 @@ FROM ts_features_by('product_data', product_id, date, value);
 .print 'Section 3.2: Trend and Seasonality Features'
 
 SELECT
-    id,
+    product_id,
     ROUND(linear_trend_slope, 4) AS linear_trend_slope,
     ROUND(linear_trend_r_squared, 4) AS linear_trend_r_squared,
     ROUND(autocorrelation_lag1, 4) AS autocorrelation_lag1
@@ -196,7 +196,7 @@ FROM diverse_series GROUP BY actual_pattern ORDER BY actual_pattern;
 .print 'Section 4.1: Classification Features per Series'
 
 SELECT
-    id,
+    series_id,
     ROUND(linear_trend_slope, 4) AS trend,
     ROUND(variance, 2) AS variance,
     ROUND(autocorrelation_lag7, 4) AS ac7
@@ -208,14 +208,14 @@ FROM ts_features_by('diverse_series', series_id, date, value);
 
 WITH feature_data AS (
     SELECT
-        id,
+        series_id,
         linear_trend_slope AS trend,
         variance AS variance,
         autocorrelation_lag7 AS ac7
     FROM ts_features_by('diverse_series', series_id, date, value)
 )
 SELECT
-    f.id AS series,
+    f.series_id AS series,
     d.actual_pattern,
     CASE
         WHEN f.trend > 1.0 THEN 'trending'
@@ -227,8 +227,8 @@ SELECT
     ROUND(f.variance, 2) AS variance,
     ROUND(f.ac7, 4) AS ac7
 FROM feature_data f
-JOIN (SELECT DISTINCT series_id, actual_pattern FROM diverse_series) d ON f.id = d.series_id
-ORDER BY d.actual_pattern, f.id;
+JOIN (SELECT DISTINCT series_id, actual_pattern FROM diverse_series) d ON f.series_id = d.series_id
+ORDER BY d.actual_pattern, f.series_id;
 
 -- ============================================================================
 -- SECTION 5: Comparing Series by Features
@@ -242,7 +242,7 @@ ORDER BY d.actual_pattern, f.id;
 
 WITH feature_data AS (
     SELECT
-        id,
+        series_id,
         linear_trend_slope AS trend,
         variance AS variance,
         autocorrelation_lag1 AS ac1,
@@ -252,7 +252,7 @@ WITH feature_data AS (
 with_pattern AS (
     SELECT f.*, d.actual_pattern
     FROM feature_data f
-    JOIN (SELECT DISTINCT series_id, actual_pattern FROM diverse_series) d ON f.id = d.series_id
+    JOIN (SELECT DISTINCT series_id, actual_pattern FROM diverse_series) d ON f.series_id = d.series_id
 )
 SELECT
     actual_pattern,

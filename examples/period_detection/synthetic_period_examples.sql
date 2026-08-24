@@ -59,7 +59,7 @@ SELECT series_id, COUNT(*) AS n_rows FROM weekly_data GROUP BY series_id ORDER B
 .print ''
 .print 'Section 1.1: Default period detection (ensemble method):'
 SELECT
-    id,
+    series_id,
     primary_period AS detected_period,
     method AS method,
     n_periods AS n_periods
@@ -104,7 +104,7 @@ SELECT signal_id, COUNT(*) AS n_rows FROM clean_signals GROUP BY signal_id ORDER
 .print ''
 .print 'Section 2.1: FFT period detection on clean sine waves:'
 SELECT
-    id,
+    signal_id,
     primary_period AS fft_period,
     method AS method
 FROM ts_detect_periods_by('clean_signals', signal_id, ds, value, MAP{'method': 'fft'});
@@ -141,7 +141,7 @@ SELECT series_id, COUNT(*) AS n_rows FROM noisy_data GROUP BY series_id ORDER BY
 .print ''
 .print 'Section 3.1: ACF period detection on noisy data:'
 SELECT
-    id,
+    series_id,
     primary_period AS acf_period,
     method AS method
 FROM ts_detect_periods_by('noisy_data', series_id, ds, value, MAP{'method': 'acf'});
@@ -173,7 +173,7 @@ SELECT * FROM (
 .print ''
 .print 'Section 4.1: Detecting multiple periods:'
 SELECT
-    id,
+    series_id,
     primary_period AS primary_period,
     n_periods AS n_periods_found
 FROM ts_detect_periods_by('dual_seasonal', series_id, ds, value, MAP{'method': 'multi'});
@@ -200,7 +200,7 @@ FROM generate_series(0, 69) AS t(i);
 .print ''
 .print 'Section 5.1: FFT method:'
 SELECT
-    id,
+    series_id,
     primary_period AS detected_period,
     method AS method
 FROM ts_detect_periods_by('compare_data', series_id, ds, value, MAP{'method': 'fft'});
@@ -209,7 +209,7 @@ FROM ts_detect_periods_by('compare_data', series_id, ds, value, MAP{'method': 'f
 .print ''
 .print 'Section 5.2: ACF method:'
 SELECT
-    id,
+    series_id,
     primary_period AS detected_period,
     method AS method
 FROM ts_detect_periods_by('compare_data', series_id, ds, value, MAP{'method': 'acf'});
@@ -218,7 +218,7 @@ FROM ts_detect_periods_by('compare_data', series_id, ds, value, MAP{'method': 'a
 .print ''
 .print 'Section 5.3: Autoperiod method:'
 SELECT
-    id,
+    series_id,
     primary_period AS detected_period,
     method AS method
 FROM ts_detect_periods_by('compare_data', series_id, ds, value, MAP{'method': 'autoperiod'});
@@ -227,7 +227,7 @@ FROM ts_detect_periods_by('compare_data', series_id, ds, value, MAP{'method': 'a
 .print ''
 .print 'Section 5.4: Ensemble method (default):'
 SELECT
-    id,
+    series_id,
     primary_period AS detected_period,
     method AS method
 FROM ts_detect_periods_by('compare_data', series_id, ds, value, MAP{});
@@ -282,7 +282,7 @@ SELECT * FROM (
 .print 'Section 6.1: Retail Sales Period Detection'
 
 SELECT
-    id AS store,
+    store_id AS store,
     primary_period AS detected_period,
     method AS method,
     CASE

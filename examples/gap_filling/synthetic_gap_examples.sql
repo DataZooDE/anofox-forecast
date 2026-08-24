@@ -9,6 +9,8 @@
 
 -- Load extension
 LOAD anofox_forecast;
+INSTALL json;
+LOAD json;
 
 .print '============================================================================='
 .print 'GAP FILLING EXAMPLES - Synthetic Data'
@@ -41,9 +43,9 @@ FROM gappy_data GROUP BY series_id ORDER BY series_id;
 
 .print ''
 .print 'After ts_fill_gaps (frequency=1 day):'
-SELECT group_col AS series_id, date_col AS date, value_col AS value
+SELECT series_id, date, value
 FROM ts_fill_gaps_by('gappy_data', series_id, date, value, '1 day')
-ORDER BY group_col, date_col;
+ORDER BY series_id, date;
 
 -- =============================================================================
 -- SECTION 2: Fill Forward to Target Date (ts_fill_forward_by)
@@ -70,9 +72,9 @@ FROM short_series GROUP BY series_id ORDER BY series_id;
 
 .print ''
 .print 'After ts_fill_forward (extend to 2024-01-07):'
-SELECT group_col AS series_id, date_col AS date, value_col AS value
+SELECT series_id, date, value
 FROM ts_fill_forward_by('short_series', series_id, date, value, '2024-01-07'::DATE, '1 day')
-ORDER BY group_col, date_col;
+ORDER BY series_id, date;
 
 -- =============================================================================
 -- SECTION 3: Drop Gappy Series (ts_drop_gappy_by)
@@ -187,15 +189,15 @@ SELECT series_id, ts, value FROM hourly_data ORDER BY series_id, ts;
 
 .print ''
 .print 'Fill gaps with DuckDB interval format (1 hour):'
-SELECT group_col, date_col, value_col
+SELECT series_id, ts, value
 FROM ts_fill_gaps_by('hourly_data', series_id, ts, value, '1 hour')
-ORDER BY group_col, date_col;
+ORDER BY series_id, ts;
 
 .print ''
 .print 'Fill gaps with Polars-style format (1h):'
-SELECT group_col, date_col, value_col
+SELECT series_id, ts, value
 FROM ts_fill_gaps_by('hourly_data', series_id, ts, value, '1h')
-ORDER BY group_col, date_col;
+ORDER BY series_id, ts;
 
 -- =============================================================================
 -- CLEANUP

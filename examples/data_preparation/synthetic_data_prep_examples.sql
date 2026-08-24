@@ -164,25 +164,25 @@ SELECT series_id, LIST(value ORDER BY ts) AS values FROM null_test GROUP BY seri
 
 .print ''
 .print 'After ts_fill_nulls_forward (LOCF):'
-SELECT series_id, LIST(value_col ORDER BY ts) AS values
+SELECT series_id, LIST(filled_value ORDER BY ts) AS values
 FROM ts_fill_nulls_forward_by('null_test', series_id, ts, value)
 GROUP BY series_id ORDER BY series_id;
 
 .print ''
 .print 'After ts_fill_nulls_backward:'
-SELECT series_id, LIST(value_col ORDER BY ts) AS values
+SELECT series_id, LIST(filled_value ORDER BY ts) AS values
 FROM ts_fill_nulls_backward_by('null_test', series_id, ts, value)
 GROUP BY series_id ORDER BY series_id;
 
 .print ''
 .print 'After ts_fill_nulls_mean:'
-SELECT series_id, LIST(ROUND(value_col, 2) ORDER BY ts) AS values
+SELECT series_id, LIST(ROUND(filled_value, 2) ORDER BY ts) AS values
 FROM ts_fill_nulls_mean_by('null_test', series_id, ts, value)
 GROUP BY series_id ORDER BY series_id;
 
 .print ''
 .print 'After ts_fill_nulls_const (fill with 0):'
-SELECT series_id, LIST(value_col ORDER BY ts) AS values
+SELECT series_id, LIST(filled_value ORDER BY ts) AS values
 FROM ts_fill_nulls_const_by('null_test', series_id, ts, value, 0)
 GROUP BY series_id ORDER BY series_id;
 
@@ -253,7 +253,7 @@ FROM messy_data GROUP BY series_id ORDER BY series_id;
 .print ''
 .print 'Step 1 - After filling NULLs:'
 CREATE OR REPLACE TABLE step1 AS
-SELECT series_id, ts, value_col AS value
+SELECT series_id, ts, filled_value AS value
 FROM ts_fill_nulls_forward_by('messy_data', series_id, ts, value);
 
 SELECT series_id, COUNT(*) AS n, LIST(value ORDER BY ts) AS values
@@ -314,7 +314,7 @@ SELECT * FROM (
 );
 
 .print 'Per-series stats with ts_stats (detailed):'
-SELECT id AS series_id,
+SELECT series_id,
        length,
        n_nulls AS nulls,
        n_zeros AS zeros

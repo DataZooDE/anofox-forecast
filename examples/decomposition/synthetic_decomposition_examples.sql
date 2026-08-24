@@ -73,7 +73,7 @@ FROM multi_series GROUP BY series_id ORDER BY series_id;
 .print 'Section 1.1: Basic MSTL Decomposition (auto-detect periods)'
 
 SELECT
-    id,
+    series_id,
     length(trend) AS trend_length,
     length(remainder) AS remainder_length,
     periods AS detected_periods
@@ -91,7 +91,7 @@ FROM ts_mstl_decomposition_by('multi_series', series_id, date, value, MAP{});
 .print 'Section 2.1: Weekly decomposition (period=7)'
 
 SELECT
-    id,
+    series_id,
     length(trend) AS n_points,
     periods
 FROM ts_mstl_decomposition_by('multi_series', series_id, date, value,
@@ -102,7 +102,7 @@ FROM ts_mstl_decomposition_by('multi_series', series_id, date, value,
 .print 'Section 2.2: Multiple periods (weekly + monthly)'
 
 SELECT
-    id,
+    series_id,
     length(trend) AS n_points,
     periods
 FROM ts_mstl_decomposition_by('multi_series', series_id, date, value,
@@ -120,7 +120,7 @@ FROM ts_mstl_decomposition_by('multi_series', series_id, date, value,
 .print 'Section 3.1: First 5 trend values per series'
 
 SELECT
-    id,
+    series_id,
     trend[1:5] AS first_5_trend,
     remainder[1:5] AS first_5_remainder
 FROM ts_mstl_decomposition_by('multi_series', series_id, date, value, MAP{});
@@ -133,7 +133,7 @@ WITH decomposed AS (
     SELECT * FROM ts_mstl_decomposition_by('multi_series', series_id, date, value, MAP{})
 )
 SELECT
-    id,
+    series_id,
     ROUND(list_avg(trend), 2) AS mean_trend,
     ROUND(trend[length(trend)] - trend[1], 2) AS trend_change,
     ROUND(list_stddev_pop(remainder), 2) AS remainder_std
@@ -191,7 +191,7 @@ SELECT * FROM (
 );
 
 SELECT
-    id AS store,
+    store_id AS store,
     length(trend) AS n_days,
     periods AS detected_periods,
     ROUND(trend[length(trend)] - trend[1], 0) AS trend_change_6months
@@ -229,7 +229,7 @@ SELECT * FROM (
 );
 
 SELECT
-    id AS sensor,
+    sensor_id AS sensor,
     length(trend) AS n_hours,
     periods AS detected_periods
 FROM ts_mstl_decomposition_by('sensor_readings', sensor_id, timestamp, reading, MAP{});
@@ -248,7 +248,7 @@ FROM ts_mstl_decomposition_by('sensor_readings', sensor_id, timestamp, reading, 
 .print 'Section 5.1: Linear Detrending'
 
 SELECT
-    id,
+    series_id,
     method,
     n_params,
     ROUND(rss, 2) AS rss,
@@ -260,7 +260,7 @@ FROM ts_detrend_by('multi_series', series_id, date, value, 'linear');
 .print 'Section 5.2: Quadratic Detrending'
 
 SELECT
-    id,
+    series_id,
     method,
     n_params,
     ROUND(rss, 2) AS rss
@@ -271,7 +271,7 @@ FROM ts_detrend_by('multi_series', series_id, date, value, 'quadratic');
 .print 'Section 5.3: Auto Detrending'
 
 SELECT
-    id,
+    series_id,
     method,
     n_params,
     ROUND(rss, 2) AS rss
@@ -292,7 +292,7 @@ WITH decomposed AS (
     SELECT * FROM ts_mstl_decomposition_by('retail_sales', store_id, date, sales, MAP{})
 )
 SELECT
-    id AS store,
+    store_id AS store,
     ROUND(list_avg(trend), 0) AS avg_trend,
     ROUND(list_stddev_pop(trend), 0) AS trend_volatility,
     ROUND(list_stddev_pop(remainder), 0) AS noise_level,

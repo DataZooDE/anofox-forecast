@@ -60,13 +60,13 @@ SELECT product_id, COUNT(*) AS n_rows FROM multi_series GROUP BY product_id ORDE
 .print ''
 .print 'Section 1.1: Forecast with ETS (7 periods, all products):'
 SELECT * FROM ts_forecast_by('multi_series', product_id, date, quantity, 'ETS', 7, '1d', MAP{})
-ORDER BY id, date;
+ORDER BY product_id, ds;
 
 -- 1.2: Forecast with AutoETS (automatic model selection)
 .print ''
 .print 'Section 1.2: Forecast with AutoETS (automatic selection):'
 SELECT * FROM ts_forecast_by('multi_series', product_id, date, quantity, 'AutoETS', 7, '1d', MAP{})
-ORDER BY id, date;
+ORDER BY product_id, ds;
 
 -- ============================================================================
 -- SECTION 2: Model Comparison
@@ -239,10 +239,10 @@ SELECT * FROM ts_forecast_exog_by(
     'future_features',
     date,
     ['temp', 'promo'],
+    '1d',
     'AutoARIMA',
     7,
-    MAP{},
-    '1d'
+    MAP{}
 );
 
 -- ============================================================================
@@ -280,13 +280,13 @@ SELECT * FROM (
 
 .print 'Section 7.1: AutoETS on different pattern types:'
 SELECT
-    id,
+    series_id,
     COUNT(*) AS n_forecasts,
-    ROUND(AVG(point_forecast), 2) AS avg_forecast,
-    ROUND(AVG(upper_90 - lower_90), 2) AS avg_interval_width
+    ROUND(AVG(yhat), 2) AS avg_forecast,
+    ROUND(AVG(yhat_upper - yhat_lower), 2) AS avg_interval_width
 FROM ts_forecast_by('forecast_comparison', series_id, date, value, 'AutoETS', 7, '1d', MAP{})
-GROUP BY id
-ORDER BY id;
+GROUP BY series_id
+ORDER BY series_id;
 
 -- ============================================================================
 -- CLEANUP
