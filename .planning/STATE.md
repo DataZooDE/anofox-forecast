@@ -4,17 +4,17 @@ milestone: v0.8.0
 milestone_name: Ensemble Forecasting
 current_phase: 04
 current_phase_name: AutoEnsemble Surface + Combination Methods
-status: executing
-stopped_at: Completed 04-01-PLAN.md (AutoEnsemble tracer slice)
-last_updated: "2026-08-30T20:53:18.552Z"
+status: verifying
+stopped_at: Completed 04-02-PLAN.md (AutoEnsemble surface documented, all six combination methods verified)
+last_updated: "2026-08-30T21:29:33.639Z"
 last_activity: 2026-08-30
 last_activity_desc: Phase 04 execution started
-state_head: 6b7d31aa7e3688736e539007155311a7dcd83c4c
+state_head: e969db1a5a4dfadf6f018d1d42912548f4ad16da
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 2
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-30 — started v0.8.0 Ensemble Foreca
 
 Phase: 04 (AutoEnsemble Surface + Combination Methods) — EXECUTING
 Plan: 2 of 2
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-30 — Phase 04 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -63,6 +63,7 @@ Progress: [░░░░░░░░░░] 0%
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 04-autoensemble-surface-combination-methods P01 | 571 | 3 tasks | 7 files |
+| Phase 04 P02 | 2084 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -77,6 +78,8 @@ Recent decisions affecting current work:
 - Panel/table-in macro convention (v0.7.0 lesson): table-in macros must wrap `query_table(...)` in a subselect, not pass a bare TABLE arg.
 - [Phase 04]: AutoEnsemble default combination_method is Mean (overrides crate WeightedMSE default); empty string maps to Mean at parse_combination_method
 - [Phase 04]: CombinationMethod imported via public re-export anofox_forecast::models::ensemble::CombinationMethod (model submodule is private)
+- [Phase 04]: Plan 02 adds ZERO source wiring — parse_combination_method (Plan 01) already accepts all six methods; this plan exercises and documents them
+- [Phase 04]: Mean vs Median demonstrability: skewed series (exp growth + spikes) shows delta 1.45-2.69 per step, confirming COMB-01 requirement
 
 ### Pending Todos
 
@@ -99,8 +102,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 **Resume file:** None
 
-Last session: 2026-08-30T20:53:18.542Z
-Stopped at: Completed 04-01-PLAN.md (AutoEnsemble tracer slice)
+Last session: 2026-08-30T21:29:33.629Z
+Stopped at: Completed 04-02-PLAN.md (AutoEnsemble surface documented, all six combination methods verified)
 Resume: /gsd-plan-phase 4 to plan the AutoEnsemble surface + combination methods.
 
 ## Operator Next Steps

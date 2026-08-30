@@ -46,10 +46,10 @@ INTER-01 (intermittent-demand classification) descoped — user has a more advan
   4. A user can select `Stacking` (learned non-negative holdout weights) or `HorizonAdaptive` (per-step rolling-origin weights) and get a valid forecast (COMB-03, COMB-04).
   5. For a fixed `Mean` combination, the ensemble point forecast equals the manual arithmetic mean of the individual member forecasts computed independently (internal-consistency cross-check), and a runnable `examples/*.sql` demonstrates it against the built extension.
 
-**Plans**: 1/2 plans executed
+**Plans**: 2/2 plans executed
 
 - [x] 04-01-PLAN.md — Tracer: wire `'AutoEnsemble'` end-to-end (Rust core + FFI + C++) and demonstrate the Mean cross-check (ENS-01, COMB-01)
-- [ ] 04-02-PLAN.md — Expand to the other five combination methods + Mean-vs-Median demonstrability, and document the surface (COMB-01..04)
+- [x] 04-02-PLAN.md — Expand to the other five combination methods + Mean-vs-Median demonstrability, and document the surface (COMB-01..04)
 
 ### Phase 5: Explicit-Member Ensemble
 
@@ -83,7 +83,7 @@ INTER-01 (intermittent-demand classification) descoped — user has a more advan
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 4. AutoEnsemble Surface + Combination Methods | 1/2 | In Progress|  |
+| 4. AutoEnsemble Surface + Combination Methods | 2/2 | In Progress|  |
 | 5. Explicit-Member Ensemble | 0/TBD | Not started | - |
 | 6. Ensemble Intervals & Introspection | 0/TBD | Not started | - |
 

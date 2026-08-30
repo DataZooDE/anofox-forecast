@@ -15,9 +15,9 @@ Requirements for the v0.8.0 milestone. Each maps to a roadmap phase.
 ### COMB — Combination methods
 
 - [x] **COMB-01**: User can select **Mean** or **Median** combination for an ensemble.
-- [ ] **COMB-02**: User can select **WeightedMSE** or **InverseAIC** (error/information-weighted) combination for an ensemble.
-- [ ] **COMB-03**: User can select **Stacking** (learned non-negative weights on an in-sample holdout) combination for an ensemble.
-- [ ] **COMB-04**: User can select **HorizonAdaptive** (per-horizon-step weights from rolling-origin errors) combination for an ensemble.
+- [x] **COMB-02**: User can select **WeightedMSE** or **InverseAIC** (error/information-weighted) combination for an ensemble.
+- [x] **COMB-03**: User can select **Stacking** (learned non-negative weights on an in-sample holdout) combination for an ensemble.
+- [x] **COMB-04**: User can select **HorizonAdaptive** (per-horizon-step weights from rolling-origin errors) combination for an ensemble.
 
 ### EPI — Ensemble prediction intervals
 
@@ -63,9 +63,9 @@ Which phases cover which requirements. Populated during roadmap creation.
 |-------------|-------|--------|
 | ENS-01 | Phase 4 | Complete |
 | COMB-01 | Phase 4 | Complete |
-| COMB-02 | Phase 4 | Pending |
-| COMB-03 | Phase 4 | Pending |
-| COMB-04 | Phase 4 | Pending |
+| COMB-02 | Phase 4 | Complete |
+| COMB-03 | Phase 4 | Complete |
+| COMB-04 | Phase 4 | Complete |
 | ENS-02 | Phase 5 | Pending |
 | EPI-01 | Phase 6 | Pending |
 | INSP-01 | Phase 6 | Pending |
