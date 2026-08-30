@@ -3480,7 +3480,7 @@ pub unsafe extern "C" fn anofox_ts_forecast(
             garch_p: opts.garch_p as usize,
             garch_q: opts.garch_q as usize,
             kalman_model,
-            ensemble_top_k: opts.ensemble_top_k as usize,
+            ensemble_top_k: opts.ensemble_top_k.max(0) as usize,
             ensemble_method,
         };
 
@@ -3781,7 +3781,7 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
             garch_p: opts.garch_p as usize,
             garch_q: opts.garch_q as usize,
             kalman_model: kalman_model_exog,
-            ensemble_top_k: opts.ensemble_top_k as usize,
+            ensemble_top_k: opts.ensemble_top_k.max(0) as usize,
             ensemble_method: ensemble_method_exog,
         };
 
@@ -4198,7 +4198,7 @@ unsafe fn build_core_options(
         garch_p: opts.garch_p as usize,
         garch_q: opts.garch_q as usize,
         kalman_model,
-        ensemble_top_k: opts.ensemble_top_k as usize,
+        ensemble_top_k: opts.ensemble_top_k.max(0) as usize,
         ensemble_method,
     })
 }
