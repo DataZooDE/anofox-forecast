@@ -957,19 +957,31 @@ pub fn forecast_with_exog(
         }
     } else {
         // No exog data or model doesn't support exog - use standard forecasting
-        // Auto* models run their respective algorithms with automatic parameter selection
-        forecast_with_model(
-            &clean_values,
-            options.horizon,
-            options.model,
-            period,
-            options.window,
-            &options.seasonal_periods,
-            options.model_pool.as_deref(),
-            options.laplace_variant.unwrap_or_default(),
-            options.laplace_seasonal_batch_init,
-            options.confidence_level,
-        )
+        // Auto* models run their respective algorithms with automatic parameter selection.
+        // AutoEnsemble is dispatched separately to honour user-supplied ensemble_top_k /
+        // ensemble_method from ForecastOptionsExog; routing it through forecast_with_model
+        // would silently hard-code top_k=3 and method=None (WR-02).
+        match options.model {
+            ModelType::AutoEnsemble => forecast_auto_ensemble(
+                &clean_values,
+                options.horizon,
+                if options.ensemble_top_k == 0 { 3 } else { options.ensemble_top_k },
+                options.ensemble_method.as_deref(),
+                period,
+            ),
+            _ => forecast_with_model(
+                &clean_values,
+                options.horizon,
+                options.model,
+                period,
+                options.window,
+                &options.seasonal_periods,
+                options.model_pool.as_deref(),
+                options.laplace_variant.unwrap_or_default(),
+                options.laplace_seasonal_batch_init,
+                options.confidence_level,
+            ),
+        }
     }?;
 
     // For fitted values calculation, use the requested model
