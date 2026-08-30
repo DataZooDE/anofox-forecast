@@ -61,20 +61,20 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ENS-01 | TBD | Pending |
-| ENS-02 | TBD | Pending |
-| COMB-01 | TBD | Pending |
-| COMB-02 | TBD | Pending |
-| COMB-03 | TBD | Pending |
-| COMB-04 | TBD | Pending |
-| EPI-01 | TBD | Pending |
-| INSP-01 | TBD | Pending |
+| ENS-01 | Phase 4 | Pending |
+| COMB-01 | Phase 4 | Pending |
+| COMB-02 | Phase 4 | Pending |
+| COMB-03 | Phase 4 | Pending |
+| COMB-04 | Phase 4 | Pending |
+| ENS-02 | Phase 5 | Pending |
+| EPI-01 | Phase 6 | Pending |
+| INSP-01 | Phase 6 | Pending |
 
 **Coverage:**
 - v1 requirements: 8 total
-- Mapped to phases: 0 (roadmap pending)
-- Unmapped: 8 ⚠️
+- Mapped to phases: 8 ✓
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-08-30*
-*Last updated: 2026-08-30 after initial definition*
+*Last updated: 2026-08-30 after roadmap creation (Phases 4-6)*
