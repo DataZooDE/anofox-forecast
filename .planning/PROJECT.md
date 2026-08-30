@@ -1,4 +1,4 @@
-# anofox-forecast — Milestone: Close the Crate→Extension Gap (Diagnostics + Model Coverage)
+# anofox-forecast — Milestone: Ensemble Forecasting
 
 ## What This Is
 
@@ -9,6 +9,17 @@ This milestone extends that SQL surface to reach crate capabilities that are cur
 ## Core Value
 
 SQL users can validate whether a series/model is statistically sound (stationarity, residual adequacy, demand regime) and can reach the crate's higher-coverage models (global + classical) — all without leaving DuckDB.
+
+## Current Milestone: v0.8.0 Ensemble Forecasting
+
+**Goal:** Expose the crate's ensemble surface to SQL — combine multiple models per series, automatically (top-K across families) or explicitly (user-named members), with distribution-free prediction intervals and weight introspection — via the established FFI → C++ → macro → example → docs pattern.
+
+**Target features:**
+- **AutoEnsemble** SQL surface — auto-fits ARIMA/ETS/Theta families, combines top-K (`top_k`, `combination_method`, `seasonal_period`)
+- **Explicit-member ensemble** SQL surface — user names member models + a combination method; extension fits and combines each
+- **Six combination methods** — Mean, Median, WeightedMSE, InverseAIC, Stacking, HorizonAdaptive
+- **Ensemble prediction intervals** — routed through the existing conformal path
+- **Introspection surface** — companion function/columns returning selected members + combination weights
 
 ## Requirements
 
@@ -32,9 +43,13 @@ SQL users can validate whether a series/model is statistically sound (stationari
 
 ### Active
 
-<!-- Next milestone. -->
+<!-- v0.8.0 Ensemble Forecasting. -->
 
-- [ ] (none yet — define via `/gsd-new-milestone`)
+- [ ] AutoEnsemble SQL surface (top-K across ARIMA/ETS/Theta; `top_k`, `combination_method`, `seasonal_period`)
+- [ ] Explicit-member ensemble SQL surface (user-named members + combination method)
+- [ ] Six combination methods exposed: Mean, Median, WeightedMSE, InverseAIC, Stacking, HorizonAdaptive
+- [ ] Ensemble prediction intervals via the existing conformal path
+- [ ] Ensemble introspection surface (selected members + combination weights)
 
 Deferred from v0.7.0 (candidates for a future milestone):
 - Intermittent-demand classification (ADI/CV² taxonomy) — INTER-01 descoped; user has a more advanced approach TBD
@@ -101,4 +116,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-22 after v0.7.0 milestone*
+*Last updated: 2026-08-30 — started v0.8.0 Ensemble Forecasting milestone*

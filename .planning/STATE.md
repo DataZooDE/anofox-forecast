@@ -1,19 +1,16 @@
 ---
 gsd_state_version: 1.0
-status: Awaiting next milestone
-stopped_at: Milestone v0.7.0 complete and archived — awaiting next milestone
-last_updated: "2026-08-22T14:10:15.749Z"
-last_activity: 2026-08-22
-last_activity_desc: Milestone v0.7.0 completed and archived
-state_head: 225595f6416012451d58ffb2a91bf19cf37ce997
+milestone: v0.8.0
+milestone_name: Ensemble Forecasting
+status: planning
+last_updated: "2026-08-30T19:51:14.469Z"
+last_activity: 2026-08-30
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 9
-  completed_plans: 9
-  percent: 100
-current_phase: null
-current_phase_name: null
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -27,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-08-22 after v0.7.0 milestone)
 
 ## Current Position
 
-Phase: Milestone v0.7.0 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-08-22 — Milestone v0.7.0 completed and archived
+Status: Defining requirements
+Last activity: 2026-08-30 — Milestone v0.8.0 started
 
 ## Performance Metrics
 
@@ -131,8 +128,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 **Resume file:** None
 
-Last session: 2026-08-22
-Stopped at: Milestone v0.7.0 complete and archived (Phases 1-3 shipped + verified; git tag v0.7.0 created locally, not pushed).
+Last session: 2026-08-30T19:23:22.129Z
+Stopped at: context exhaustion at 75% (2026-08-30)
 Resume: /gsd-new-milestone to start the next milestone. Note: keep workflow.use_worktrees=false for autonomous runs on this repo (worktree split-brain).
 
 ## Operator Next Steps
