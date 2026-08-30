@@ -158,55 +158,138 @@ FROM ts_forecast_by('ae_test', id, ds, y, 'AutoEnsemble', 5, '1d')
 ORDER BY forecast_step;
 
 -- ============================================================================
--- SECTION 3: Combination Method Smoke Test
+-- SECTION 3: Six-Method Smoke Test + Assertions (COMB-01..04)
 -- ============================================================================
--- Verifies that all six combination_method values produce finite non-NULL yhat.
+-- Verifies that ALL six combination_method strings produce finite non-NULL yhat
+-- for every forecast step. Uses ae_test (60-obs linear series, already created).
+--
+-- COMB-01: mean, median
+-- COMB-02: weighted_mse, inverse_aic
+-- COMB-03: stacking
+-- COMB-04: horizon_adaptive
 -- ============================================================================
 
 .print ''
-.print '>>> SECTION 3: All Six Combination Methods (smoke test — each must return finite yhat)'
+.print '>>> SECTION 3: Six-Method Smoke Test with Assertions (COMB-01..04)'
 .print '--------------------------------------------------------------------------'
+.print 'All six combination methods must produce finite non-NULL yhat per step.'
 
-.print 'mean (default):'
-SELECT forecast_step, ROUND(yhat, 4) AS yhat, model_name
-FROM ts_forecast_by('ae_test', id, ds, y, 'AutoEnsemble', 3, '1d',
-    params := {combination_method: 'mean'})
-ORDER BY forecast_step;
+-- Collect all six methods in one pass; tag each row with its method label.
+CREATE OR REPLACE TABLE ae_smoke AS
+-- COMB-01: mean (default) — unweighted arithmetic mean of member forecasts
+SELECT 'mean' AS method, forecast_step, yhat, model_name
+FROM ts_forecast_by('ae_test', id, ds, y, 'AutoEnsemble', 5, '1d',
+    params := {top_k: 3, combination_method: 'mean', seasonal_period: 0})
+UNION ALL
+-- COMB-01: median — robust central tendency, less sensitive to outlier members
+SELECT 'median', forecast_step, yhat, model_name
+FROM ts_forecast_by('ae_test', id, ds, y, 'AutoEnsemble', 5, '1d',
+    params := {top_k: 3, combination_method: 'median', seasonal_period: 0})
+UNION ALL
+-- COMB-02: weighted_mse — inverse-MSE weighting; better-fitting members get higher weight
+SELECT 'weighted_mse', forecast_step, yhat, model_name
+FROM ts_forecast_by('ae_test', id, ds, y, 'AutoEnsemble', 5, '1d',
+    params := {top_k: 3, combination_method: 'weighted_mse', seasonal_period: 0})
+UNION ALL
+-- COMB-02: inverse_aic — AIC-based weighting; rewards model parsimony
+SELECT 'inverse_aic', forecast_step, yhat, model_name
+FROM ts_forecast_by('ae_test', id, ds, y, 'AutoEnsemble', 5, '1d',
+    params := {top_k: 3, combination_method: 'inverse_aic', seasonal_period: 0})
+UNION ALL
+-- COMB-03: stacking — ridge-regularised stacking weights fit on in-sample holdout
+SELECT 'stacking', forecast_step, yhat, model_name
+FROM ts_forecast_by('ae_test', id, ds, y, 'AutoEnsemble', 5, '1d',
+    params := {top_k: 3, combination_method: 'stacking', seasonal_period: 0})
+UNION ALL
+-- COMB-04: horizon_adaptive — per-horizon weights estimated from rolling-origin errors
+SELECT 'horizon_adaptive', forecast_step, yhat, model_name
+FROM ts_forecast_by('ae_test', id, ds, y, 'AutoEnsemble', 5, '1d',
+    params := {top_k: 3, combination_method: 'horizon_adaptive', seasonal_period: 0});
 
 .print ''
-.print 'median:'
-SELECT forecast_step, ROUND(yhat, 4) AS yhat, model_name
-FROM ts_forecast_by('ae_test', id, ds, y, 'AutoEnsemble', 3, '1d',
-    params := {combination_method: 'median'})
-ORDER BY forecast_step;
+.print 'Smoke-test results (all ok must be true):'
+SELECT
+    method,
+    forecast_step,
+    ROUND(yhat, 4) AS yhat,
+    yhat IS NOT NULL AND isfinite(yhat) AS ok
+FROM ae_smoke
+ORDER BY method, forecast_step;
+
+-- Assertion: this query must return ZERO rows.
+-- Any row here means a NULL or non-finite yhat slipped through.
+SELECT
+    'SMOKE-TEST FAILED: NULL or non-finite yhat for method=' || method
+        || ' step=' || CAST(forecast_step AS VARCHAR) AS error_message,
+    method,
+    forecast_step,
+    yhat
+FROM ae_smoke
+WHERE yhat IS NULL OR NOT isfinite(yhat);
+
+-- ============================================================================
+-- SECTION 4: Mean vs Median Demonstrability on a Skewed Series (COMB-01)
+-- ============================================================================
+-- Shows that Mean and Median produce VISIBLY DIFFERENT point forecasts when
+-- the three member models diverge on a skewed series (exponential growth with
+-- large outlier spikes). Mean pulls toward outlier values; Median stays
+-- at the central member's forecast.
+--
+-- Assertion: at least one forecast_step must have abs(mean_yhat - median_yhat) > 1e-6.
+-- ============================================================================
 
 .print ''
-.print 'weighted_mse:'
-SELECT forecast_step, ROUND(yhat, 4) AS yhat, model_name
-FROM ts_forecast_by('ae_test', id, ds, y, 'AutoEnsemble', 3, '1d',
-    params := {combination_method: 'weighted_mse'})
-ORDER BY forecast_step;
+.print '>>> SECTION 4: Mean vs Median Demonstrability — Skewed Series (COMB-01)'
+.print '--------------------------------------------------------------------------'
+.print 'Skewed series: exponential growth + outlier spikes at obs 10, 30, 50.'
+.print 'Mean is pulled toward the high-value member; Median tracks the central one.'
+
+-- Skewed series: exponential growth (exp(0.03*i)*10) with +200 spikes at i=10,30,50.
+-- The spike pattern causes the three Auto* members to produce diverging extrapolations,
+-- making Mean and Median visibly differ in the forecast horizon.
+CREATE OR REPLACE TABLE ae_skew AS
+SELECT
+    1 AS id,
+    '2020-01-01'::DATE + INTERVAL (i - 1) DAY AS ds,
+    exp(i * 0.03) * 10.0 + CASE WHEN i IN (10, 30, 50) THEN 200.0 ELSE 0.0 END AS y
+FROM generate_series(1, 60) t(i);
+
+-- Mean combination on the skewed series.
+CREATE OR REPLACE TABLE ae_skew_mean AS
+SELECT forecast_step, yhat AS mean_yhat
+FROM ts_forecast_by('ae_skew', id, ds, y, 'AutoEnsemble', 5, '1d',
+    params := {top_k: 3, combination_method: 'mean', seasonal_period: 0});
+
+-- Median combination on the same skewed series.
+CREATE OR REPLACE TABLE ae_skew_median AS
+SELECT forecast_step, yhat AS median_yhat
+FROM ts_forecast_by('ae_skew', id, ds, y, 'AutoEnsemble', 5, '1d',
+    params := {top_k: 3, combination_method: 'median', seasonal_period: 0});
 
 .print ''
-.print 'inverse_aic:'
-SELECT forecast_step, ROUND(yhat, 4) AS yhat, model_name
-FROM ts_forecast_by('ae_test', id, ds, y, 'AutoEnsemble', 3, '1d',
-    params := {combination_method: 'inverse_aic'})
-ORDER BY forecast_step;
+.print 'Mean vs Median comparison on skewed series:'
+.print '(delta should be visibly non-zero for demonstrability)'
+SELECT
+    m.forecast_step,
+    ROUND(m.mean_yhat, 4) AS mean_yhat,
+    ROUND(n.median_yhat, 4) AS median_yhat,
+    ROUND(ABS(m.mean_yhat - n.median_yhat), 4) AS delta
+FROM ae_skew_mean m
+JOIN ae_skew_median n USING (forecast_step)
+ORDER BY m.forecast_step;
 
-.print ''
-.print 'stacking:'
-SELECT forecast_step, ROUND(yhat, 4) AS yhat, model_name
-FROM ts_forecast_by('ae_test', id, ds, y, 'AutoEnsemble', 3, '1d',
-    params := {combination_method: 'stacking'})
-ORDER BY forecast_step;
-
-.print ''
-.print 'horizon_adaptive:'
-SELECT forecast_step, ROUND(yhat, 4) AS yhat, model_name
-FROM ts_forecast_by('ae_test', id, ds, y, 'AutoEnsemble', 3, '1d',
-    params := {combination_method: 'horizon_adaptive'})
-ORDER BY forecast_step;
+-- Assertion: Mean and Median MUST differ on at least one step.
+-- An empty result here means the two methods returned identical forecasts,
+-- which would indicate Mean == Median (fails COMB-01 demonstrability).
+SELECT
+    'DEMONSTRABILITY FAILED: Mean == Median on all steps (delta <= 1e-6 everywhere)' AS error_message
+FROM (
+    SELECT COUNT(*) AS n_different
+    FROM ae_skew_mean m
+    JOIN ae_skew_median n USING (forecast_step)
+    WHERE ABS(m.mean_yhat - n.median_yhat) > 1e-6
+) t
+WHERE n_different = 0;
 
 .print ''
 .print '============================================================================='
