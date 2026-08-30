@@ -41,7 +41,9 @@ INTER-01 (intermittent-demand classification) descoped — user has a more advan
   3. A user can select `WeightedMSE` or `InverseAIC` combination and see error/information-weighted blending applied (COMB-02).
   4. A user can select `Stacking` (learned non-negative holdout weights) or `HorizonAdaptive` (per-step rolling-origin weights) and get a valid forecast (COMB-03, COMB-04).
   5. For a fixed `Mean` combination, the ensemble point forecast equals the manual arithmetic mean of the individual member forecasts computed independently (internal-consistency cross-check), and a runnable `examples/*.sql` demonstrates it against the built extension.
-**Plans**: TBD
+**Plans**: 2 plans
+- [ ] 04-01-PLAN.md — Tracer: wire `'AutoEnsemble'` end-to-end (Rust core + FFI + C++) and demonstrate the Mean cross-check (ENS-01, COMB-01)
+- [ ] 04-02-PLAN.md — Expand to the other five combination methods + Mean-vs-Median demonstrability, and document the surface (COMB-01..04)
 
 ### Phase 5: Explicit-Member Ensemble
 **Goal**: SQL users can name an explicit list of member models plus a combination method; the extension fits each named member per series and combines them, reusing the combination-method plumbing from Phase 4.
