@@ -113,6 +113,12 @@ None yet.
 
 - **statsmodels cross-check must use the benchmark uv venv, NOT system python3.** `statsmodels 0.14.5` + `scipy 1.15.3` live in `benchmark/.venv` (transitive via tsfresh); system `python3` lacks them. Run all `benchmark/diagnostics/*.py` cross-check scripts with `benchmark/.venv/bin/python` (or `cd benchmark && uv run python ...`). Plans' verify commands that say `python3 benchmark/diagnostics/...` should be adapted to `benchmark/.venv/bin/python benchmark/diagnostics/...`.
 
+## Quick Tasks Completed
+
+| Slug | Date | Description | Commits |
+|------|------|-------------|---------|
+| docs-residual-cleanup | 2026-08-30 | Post-v0.7.0 docs: sweep ts_backtest_auto prose, fix regression-API examples, update README test badge | 1acbfb7, d81ea5c, 133c0ca |
+
 ## Deferred Items
 
 Items acknowledged and deferred at milestone close, most recent first:
