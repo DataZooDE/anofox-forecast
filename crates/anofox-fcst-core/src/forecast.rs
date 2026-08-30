@@ -4006,4 +4006,81 @@ mod tests {
             "GARCH on a series with 8 obs (< 12 min for GARCH(1,1)) should return Err"
         );
     }
+
+    // -------------------------------------------------------------------------
+    // parse_combination_method (IN-02)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn parse_combination_method_rejects_unknown() {
+        assert!(
+            parse_combination_method(Some("custom")).is_err(),
+            "'custom' should be rejected"
+        );
+        assert!(
+            parse_combination_method(Some("bad_value")).is_err(),
+            "unknown string should be rejected"
+        );
+    }
+
+    #[test]
+    fn parse_combination_method_accepts_canonical_strings() {
+        // Six canonical strings must parse without error
+        for m in &[
+            "mean",
+            "median",
+            "weighted_mse",
+            "inverse_aic",
+            "stacking",
+            "horizon_adaptive",
+        ] {
+            assert!(
+                parse_combination_method(Some(m)).is_ok(),
+                "expected Ok for method: {}",
+                m
+            );
+        }
+    }
+
+    #[test]
+    fn parse_combination_method_accepts_aliases() {
+        // At least one alias per method that has aliases
+        assert!(parse_combination_method(Some("weightedmse")).is_ok());
+        assert!(parse_combination_method(Some("weighted-mse")).is_ok());
+        assert!(parse_combination_method(Some("inverseaic")).is_ok());
+        assert!(parse_combination_method(Some("aic")).is_ok());
+        assert!(parse_combination_method(Some("stack")).is_ok());
+        assert!(parse_combination_method(Some("adaptive")).is_ok());
+        assert!(parse_combination_method(Some("horizon-adaptive")).is_ok());
+    }
+
+    #[test]
+    fn parse_combination_method_none_and_empty_give_mean() {
+        // None and empty string are both valid defaults (Mean)
+        let none_result = parse_combination_method(None);
+        let empty_result = parse_combination_method(Some(""));
+        assert!(none_result.is_ok(), "None should parse as Mean");
+        assert!(empty_result.is_ok(), "empty string should parse as Mean");
+    }
+
+    #[test]
+    fn forecast_auto_ensemble_basic() {
+        // 60-point linear series; AutoEnsemble with top_k=0 (→ default 3)
+        let values: Vec<Option<f64>> = (0..60).map(|i| Some(10.0 + i as f64 * 0.5)).collect();
+        let result = forecast(
+            &values,
+            &ForecastOptions {
+                model: ModelType::AutoEnsemble,
+                horizon: 5,
+                ensemble_top_k: 0, // triggers the "== 0 → 3" default path
+                ..Default::default()
+            },
+        );
+        assert!(result.is_ok(), "AutoEnsemble should succeed on a clean series");
+        assert_eq!(
+            result.unwrap().point.len(),
+            5,
+            "output length must equal horizon"
+        );
+    }
 }
