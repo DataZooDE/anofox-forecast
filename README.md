@@ -151,16 +151,16 @@ SELECT
 FROM forecast_results f
 JOIN m5_test t ON f.item_id = t.item_id AND f.ds = t.ds;
 
--- MAE and Bias per series using _by pattern
+-- MAE and Bias per series using scalar metrics + GROUP BY
+-- (recommended over the deprecated ts_*_by table macros — ~2400x faster, parallel-safe)
 CREATE OR REPLACE TABLE evaluation_results AS
 SELECT
-    split_part(m.id, '|', 1) AS item_id,
-    split_part(m.id, '|', 2) AS model_name,
-    m.mae,
-    b.bias
-FROM ts_mae_by('forecast_vs_actual', series_key, ds, actual, forecast) m
-JOIN ts_bias_by('forecast_vs_actual', series_key, ds, actual, forecast) b
-  ON m.id = b.id;
+    item_id,
+    model_name,
+    ts_mae(LIST(actual ORDER BY ds), LIST(forecast ORDER BY ds)) AS mae,
+    ts_bias(LIST(actual ORDER BY ds), LIST(forecast ORDER BY ds)) AS bias
+FROM forecast_vs_actual
+GROUP BY item_id, model_name;
 
 -- Summarise evaluation results by model
 SELECT
