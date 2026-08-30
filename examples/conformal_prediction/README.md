@@ -166,12 +166,12 @@ SELECT * FROM (
 
 4. **Use asymmetric for demand** - Demand forecasts often have skewed errors.
 
-5. **Combine with backtesting** - Use backtest results from `ts_backtest_auto_by` as calibration data.
+5. **Combine with backtesting** - Use backtest results from `ts_cv_folds_by` + `ts_cv_forecast_by` as calibration data.
 
 ---
 
 ## Related Functions
 
-- `ts_backtest_auto_by()` - Generate backtest results for calibration
+- `ts_cv_folds_by()` + `ts_cv_forecast_by()` - Generate backtest results for calibration
 - `ts_forecast_by()` - Generate point forecasts to conformalize
 - `ts_coverage_by()` - Evaluate interval coverage

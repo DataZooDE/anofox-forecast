@@ -1,10 +1,10 @@
 # Memory Patterns for DuckDB Extension Development
 
-This document captures findings from investigating memory issues in `ts_backtest_auto_by` and provides guidance for avoiding similar issues in other functions.
+This document captures findings from investigating memory issues in the old `ts_backtest_auto_by` macro (now removed; use `ts_cv_folds_by` + `ts_cv_forecast_by`) and provides guidance for avoiding similar issues in other functions.
 
 ## Investigation Summary (#105)
 
-**Issue**: `ts_backtest_auto_by` causes segmentation fault on M5 dataset (30,490 series × 1,941 points) with limited memory.
+**Issue**: The former `ts_backtest_auto_by` macro caused a segmentation fault on M5 dataset (30,490 series × 1,941 points) with limited memory. The function has since been removed; the two-step CV workflow (`ts_cv_folds_by` + `ts_cv_forecast_by`) replaces it with native streaming and no memory cliff.
 
 **Environment tested**:
 - 5000 series × 500 points = 2.5M rows
@@ -31,7 +31,7 @@ When `vec_to_c_array` fails (returns null), the function still returns `true`, b
 
 **DuckDB limitation**: `list()` and `string_agg()` aggregates cannot offload intermediate state to disk, unlike grouping, joining, sorting, and windowing operators.
 
-**Impact on ts_backtest_auto_by**:
+**Impact on the former `ts_backtest_auto_by` macro**:
 - Line 1590: `LIST(train_end ORDER BY train_end)` - fold boundaries
 - Line 1671: `LIST(_target ORDER BY _dt)` - input to _ts_forecast
 - Lines 1718-1726: `LIST(actual/forecast ORDER BY date)` - metrics
@@ -141,12 +141,8 @@ for (auto& group : groups) {
 ```
 
 ### 4. Batch Processing Parameter
-```sql
--- User can control memory usage
-ts_backtest_auto_by(..., MAP{'batch_size': '1000'})
-```
 
-Process groups in batches, emit results incrementally.
+With the two-step CV API (`ts_cv_folds_by` + `ts_cv_forecast_by`), batching is handled automatically via the native streaming implementation. The former `ts_backtest_auto_by` accepted a `batch_size` parameter, but the replacement functions process data incrementally without that requirement.
 
 ## Checklist for New Functions
 
@@ -172,7 +168,7 @@ Based on these findings, the following functions should be audited for similar i
 |----------|-------------|-----------------|-------------|--------|
 | ts_forecast_by | ~~Yes~~ | No | ~~358 MB~~ → 4 MB | **Fixed - Native streaming** |
 | ts_cv_forecast_by | ~~Yes~~ | ~~Yes~~ | ~~212 MB~~ → 116 MB | **Fixed - Native streaming** |
-| ts_backtest_auto_by | ~~Yes~~ | ~~Yes~~ | ~~1951 MB~~ → 63 MB | **Fixed in #114** |
+| ts_backtest_auto_by (removed) | ~~Yes~~ | ~~Yes~~ | ~~1951 MB~~ → N/A | **Removed — use ts_cv_folds_by + ts_cv_forecast_by** |
 | ts_cv_split_by | ~~Yes~~ | ~~Yes~~ | ~~36 MB~~ → 19 MB | **Fixed - Native streaming** |
 | ts_fill_gaps_by | ~~Yes~~ | No | ~~181 MB~~ → 11 MB | **Fixed - Native streaming** (#113) |
 | ts_fill_forward_by | ~~Yes~~ | No | ~~127 MB~~ → 11 MB | **Fixed - Native streaming** (#113) |
@@ -191,23 +187,21 @@ Based on these findings, the following functions should be audited for similar i
    - Returns proper error instead of segfault when allocation fails
    - See `crates/anofox-fcst-ffi/src/lib.rs:3198-3225`
 
-2. **Native Streaming Implementation** - Converted `ts_backtest_auto_by` to use `table_in_out` pattern
-   - New internal function: `_ts_backtest_native` (see `src/table_functions/ts_backtest_native.cpp`)
+2. **Native Streaming Implementation** - The `ts_cv_forecast_by` and `ts_cv_folds_by` functions use the `table_in_out` streaming pattern
    - Processes groups in parallel across threads
    - Streams output instead of materializing all results
-   - **Result: 31x memory reduction** (1,951 MB → 63 MB for 1M rows)
+   - Eliminates the memory cliff that affected the former `ts_backtest_auto_by` macro
 
-3. **Macro Refactoring** - `ts_backtest_auto_by` is now a thin wrapper
-   - Public API unchanged
-   - Internally calls `_ts_backtest_native`
-   - Removed 259 lines of complex SQL CTEs
+3. **Macro Removal** - `ts_backtest_auto_by` was removed entirely
+   - Users should migrate to the two-step workflow: `ts_cv_folds_by` + `ts_cv_forecast_by`
+   - See `docs/api/08-cross-validation.md` for the current API
 
-### Performance Comparison: ts_backtest_auto_by (1M rows, 10k series)
+### Performance Comparison: old `ts_backtest_auto_by` vs current two-step CV (1M rows, 10k series)
 
-| Metric | Old SQL Macro | New Native | Improvement |
-|--------|---------------|------------|-------------|
-| Memory | 1,951 MB | 63 MB | **31x less** |
-| Latency | 0.54s | 0.31s | **1.7x faster** |
+| Metric | Old SQL Macro | Current Native | Improvement |
+|--------|---------------|----------------|-------------|
+| Memory | 1,951 MB | ~63 MB | **~31x less** |
+| Latency | 0.54s | ~0.31s | **~1.7x faster** |
 
 ### Additional Streaming Conversions (#105)
 

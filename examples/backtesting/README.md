@@ -25,18 +25,24 @@ This folder contains runnable SQL examples demonstrating time series cross-valid
 
 ## Patterns Overview
 
-### Pattern 1: Quick Start (One-Liner)
+### Pattern 1: Quick Start (Two-Step CV)
 
-**Use case:** Quick model evaluation with minimal code.
+**Use case:** Quick model evaluation with the standard two-step CV workflow.
 
 ```sql
-SELECT * FROM ts_backtest_auto_by(
+-- Step 1: Generate folds (both train and test rows)
+CREATE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by(
     'sales_data', store_id, date, revenue,
-    7,              -- horizon
     5,              -- folds
-    '1d',           -- frequency
+    7,              -- horizon
     MAP{'method': 'AutoETS'}
 );
+
+-- Step 2: Forecast on folds (horizon inferred from test rows)
+SELECT fold_id, ts_mae(LIST(y ORDER BY date), LIST(yhat ORDER BY date)) AS mae
+FROM ts_cv_forecast_by('cv_folds', store_id, date, revenue, 'AutoETS', MAP{})
+GROUP BY fold_id;
 ```
 
 **See:** `synthetic_backtest_examples.sql` Section 1
@@ -50,8 +56,8 @@ SELECT * FROM ts_backtest_auto_by(
 **Requires:** `anofox_statistics` extension for OLS regression.
 
 **Key functions:**
-- `ts_cv_split` - Create train/test splits
-- `ts_prepare_regression_input` - Mask target for test rows
+- `ts_cv_folds_by` - Create train/test folds (automatic fold generation)
+- `ts_cv_hydrate_by` - Join unknown features with masking applied automatically
 - `ols_fit_predict_by` - Fit and predict in one pass
 
 **See:** `synthetic_backtest_examples.sql` Section 2
@@ -63,13 +69,15 @@ SELECT * FROM ts_backtest_auto_by(
 **Use case:** Simulate ETL latency where data arrives with a delay.
 
 ```sql
-SELECT * FROM ts_backtest_auto_by(
-    'sales_data', store_id, date, revenue, 7, 5, '1d',
-    MAP{
-        'method': 'AutoARIMA',
-        'gap': '2'      -- Skip 2 days between train end and test start
-    }
+-- gap is a fold-shape parameter passed to ts_cv_folds_by
+CREATE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by(
+    'sales_data', store_id, date, revenue, 5, 7,
+    MAP{'gap': '2'}  -- Skip 2 days between train end and test start
 );
+SELECT fold_id, ts_mae(LIST(y), LIST(yhat)) AS mae
+FROM ts_cv_forecast_by('cv_folds', store_id, date, revenue, 'AutoARIMA', MAP{})
+GROUP BY fold_id;
 ```
 
 **See:** `synthetic_backtest_examples.sql` Section 3
@@ -95,8 +103,8 @@ SELECT * FROM ts_backtest_auto_by(
 **Use case:** Prevent look-ahead bias by masking features not known at forecast time.
 
 **Key functions:**
-- `ts_hydrate_features` - Join features with `_is_test` flag
-- `ts_fill_unknown` - Impute masked values
+- `ts_cv_hydrate_by` - Join unknown features from source table; applies masking automatically per fold
+- `ts_fill_unknown_by` - Impute masked values (forward-fill, mean, zero, etc.)
 
 **See:** `synthetic_backtest_examples.sql` Section 5
 
@@ -159,72 +167,57 @@ FROM training_data;
 **Use case:** Large datasets where duplicating data across folds is expensive.
 
 **Key functions:**
-- `ts_cv_split_index` - Returns only index columns (no data)
-- `ts_hydrate_split_full_by` - Join back to get full data
+- `ts_cv_split_index_by` - Returns only index columns (group, date, fold_id, split — no data columns)
 
 ```sql
 -- Step 1: Create index-only CV splits (memory efficient)
 CREATE TABLE cv_index AS
-SELECT * FROM ts_cv_split_index(
-    'large_sales', store_id, date,  -- column identifiers, not strings
+SELECT * FROM ts_cv_split_index_by(
+    'large_sales', store_id, date,
     ['2024-01-15'::DATE, '2024-01-22'::DATE],
     7, '1d', MAP{}
 );
 -- Returns: group_col, date_col, fold_id, split (NO data columns)
 
--- Step 2: Hydrate with full data when needed
-SELECT * FROM ts_hydrate_split_full_by(
-    'cv_index', 'large_sales', store_id, date, MAP{}
-);
+-- Step 2: Join back to source when full data is needed
+SELECT ci.*, ls.sales
+FROM cv_index ci
+JOIN large_sales ls ON ci.group_col = ls.store_id AND ci.date_col = ls.date;
 ```
 
 **When to use:**
-- `ts_cv_split` - Small/medium datasets, convenience
-- `ts_cv_split_index` - Large datasets, memory efficiency
+- `ts_cv_split_by` - Small/medium datasets, convenience
+- `ts_cv_split_index_by` - Large datasets, memory efficiency
 
 **See:** `synthetic_backtest_examples.sql` Section 7
 
 ---
 
-### Pattern 8: Hydrate Functions Comparison
+### Pattern 8: Hydrate Functions
 
-**Use case:** Choose the right safety level for joining CV splits with features.
+**Use case:** Join CV folds with unknown features while preventing data leakage.
 
-```
-Hydrate Function Decision Tree:
-
-Safety Level →  LOW                 MEDIUM                    HIGH
-                ↓                     ↓                         ↓
-Function    ts_hydrate_split_by  ts_hydrate_split_full_by  ts_hydrate_split_strict_by
-Returns     Single column        All columns + _is_test    Metadata only
-Masking     Automatic            Manual (CASE WHEN)        Manual (explicit JOIN)
-Use when    One unknown          Multiple unknown          Production/audit
-            feature              features                  requirements
-```
-
-**Examples:**
+**Key function:** `ts_cv_hydrate_by` — adds unknown feature columns with automatic masking applied (train rows get actual values; test rows get filled values per strategy).
 
 ```sql
--- Option A: ts_hydrate_split_by - Single column, auto-masked
-SELECT * FROM ts_hydrate_split_by(
-    'cv_index', 'features', store_id, date,
-    competitor_price,           -- Column to mask in test
-    MAP{'strategy': 'null'}     -- Mask strategy
-);
+-- ts_cv_hydrate_by: automatic masking for unknown features
+-- Step 1: generate folds
+CREATE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by('sales', store_id, date, revenue, 3, 7, MAP{});
 
--- Option B: ts_hydrate_split_full_by - All columns, manual masking
+-- Step 2: hydrate with unknown features (masking applied automatically)
 SELECT
-    fold_id, split, store_id, date,
-    day_of_week,  -- KNOWN: use directly
-    CASE WHEN _is_test THEN NULL ELSE competitor_price END  -- UNKNOWN: manual mask
-FROM ts_hydrate_split_full_by('cv_index', 'features', store_id, date, MAP{});
-
--- Option C: ts_hydrate_split_strict_by - Metadata only, fail-safe
-SELECT hs.*, src.day_of_week,
-       CASE WHEN hs._is_test THEN NULL ELSE src.competitor_price END
-FROM ts_hydrate_split_strict_by('cv_index', 'features', store_id, date, MAP{}) hs
-JOIN features src ON hs.group_col = src.store_id AND hs.date_col = src.date;
+    store_id, date, revenue, fold_id, split,
+    competitor_price,   -- UNKNOWN: last training value in test rows
+    day_of_week         -- KNOWN: use as-is from source (always actual)
+FROM ts_cv_hydrate_by(
+    'cv_folds', 'features', store_id, date,
+    ['competitor_price'],           -- columns to mask in test rows
+    MAP{'strategy': 'last_value'}   -- fill strategy
+);
 ```
+
+Strategies for test-row values: `'last_value'` (default), `'null'`, `'default'`.
 
 **See:** `synthetic_backtest_examples.sql` Section 8
 
@@ -359,7 +352,7 @@ FROM bootstrap;
 
 ## Tips
 
-1. **Start Simple** - Run `ts_backtest_auto` with `Naive` or `SeasonalNaive` before complex models.
+1. **Start Simple** - Run a quick two-step backtest (`ts_cv_folds_by` + `ts_cv_forecast_by`) with `Naive` or `SeasonalNaive` before complex models.
 
 2. **Check the Gap** - If accuracy is suspiciously high (99% R-squared), you probably forgot `gap` or masked a feature.
 
@@ -388,10 +381,12 @@ SELECT * FROM ts_fill_unknown(
 
 ### Q: Can I use different models for different groups?
 
-**A:** Yes! Each group gets its own model. For explicit selection:
+**A:** Yes! Each group gets its own model. Generate folds once and forecast twice with different methods, then UNION the results:
 
 ```sql
-SELECT * FROM ts_backtest_auto_by('large_stores', ..., MAP{'method': 'AutoARIMA'})
+CREATE TABLE cv_folds AS SELECT * FROM ts_cv_folds_by('all_stores', store_id, date, revenue, 5, 7, MAP{});
+
+SELECT * FROM ts_cv_forecast_by('cv_folds', store_id, date, revenue, 'AutoARIMA', MAP{})
 UNION ALL
-SELECT * FROM ts_backtest_auto_by('small_stores', ..., MAP{'method': 'Theta'});
+SELECT * FROM ts_cv_forecast_by('cv_folds', store_id, date, revenue, 'Theta', MAP{});
 ```

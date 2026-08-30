@@ -170,6 +170,6 @@ JOIN bias ON mae.id = bias.id;
 
 ## Related Functions
 
-- `ts_backtest_auto_by()` - Generate backtest results to evaluate
+- `ts_cv_folds_by()` + `ts_cv_forecast_by()` - Generate backtest results to evaluate
 - `ts_forecast_by()` - Generate forecasts
 - `ts_conformal_by()` - Create prediction intervals

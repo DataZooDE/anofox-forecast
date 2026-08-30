@@ -156,7 +156,7 @@ When `MAP{}` is passed (empty), uses model defaults.
 
 ## Related Functions
 
-- `ts_backtest_auto_by()` - Evaluate forecast accuracy
+- `ts_cv_folds_by()` + `ts_cv_forecast_by()` - Evaluate forecast accuracy
 - `ts_mstl_decomposition_by()` - Decompose series before forecasting
 - `ts_detect_periods_by()` - Find seasonal periods automatically
 - `ts_conformal_by()` - Add prediction intervals with guaranteed coverage
