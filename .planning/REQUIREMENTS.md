@@ -9,12 +9,12 @@ Requirements for the v0.8.0 milestone. Each maps to a roadmap phase.
 
 ### ENS — Ensemble surfaces
 
-- [ ] **ENS-01**: User can produce an **AutoEnsemble** forecast per series — the extension auto-fits ARIMA/ETS/Theta families, ranks them, and combines the top-K; user sets `top_k`, `combination_method`, and `seasonal_period`.
+- [x] **ENS-01**: User can produce an **AutoEnsemble** forecast per series — the extension auto-fits ARIMA/ETS/Theta families, ranks them, and combines the top-K; user sets `top_k`, `combination_method`, and `seasonal_period`.
 - [ ] **ENS-02**: User can produce an **explicit-member** ensemble forecast per series by naming the member models and a combination method; the extension fits each member and combines them.
 
 ### COMB — Combination methods
 
-- [ ] **COMB-01**: User can select **Mean** or **Median** combination for an ensemble.
+- [x] **COMB-01**: User can select **Mean** or **Median** combination for an ensemble.
 - [ ] **COMB-02**: User can select **WeightedMSE** or **InverseAIC** (error/information-weighted) combination for an ensemble.
 - [ ] **COMB-03**: User can select **Stacking** (learned non-negative weights on an in-sample holdout) combination for an ensemble.
 - [ ] **COMB-04**: User can select **HorizonAdaptive** (per-horizon-step weights from rolling-origin errors) combination for an ensemble.
@@ -61,8 +61,8 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ENS-01 | Phase 4 | Pending |
-| COMB-01 | Phase 4 | Pending |
+| ENS-01 | Phase 4 | Complete |
+| COMB-01 | Phase 4 | Complete |
 | COMB-02 | Phase 4 | Pending |
 | COMB-03 | Phase 4 | Pending |
 | COMB-04 | Phase 4 | Pending |
@@ -71,6 +71,7 @@ Which phases cover which requirements. Populated during roadmap creation.
 | INSP-01 | Phase 6 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 8 total
 - Mapped to phases: 8 ✓
 - Unmapped: 0

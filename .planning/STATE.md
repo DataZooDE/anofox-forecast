@@ -2,14 +2,19 @@
 gsd_state_version: 1.0
 milestone: v0.8.0
 milestone_name: Ensemble Forecasting
-status: ready_to_plan
-last_updated: "2026-08-30T20:10:00.000Z"
+current_phase: 04
+current_phase_name: AutoEnsemble Surface + Combination Methods
+status: executing
+stopped_at: Completed 04-01-PLAN.md (AutoEnsemble tracer slice)
+last_updated: "2026-08-30T20:53:18.552Z"
 last_activity: 2026-08-30
+last_activity_desc: Phase 04 execution started
+state_head: 6b7d31aa7e3688736e539007155311a7dcd83c4c
 progress:
   total_phases: 3
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 2
+  completed_plans: 1
   percent: 0
 ---
 
@@ -20,14 +25,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-30 — started v0.8.0 Ensemble Forecasting)
 
 **Core value:** SQL users can combine multiple forecasting models per series — automatically or explicitly — with distribution-free prediction intervals and weight introspection, all without leaving DuckDB.
-**Current focus:** Phase 4 — AutoEnsemble Surface + Combination Methods (ready to plan)
+**Current focus:** Phase 04 — AutoEnsemble Surface + Combination Methods
 
 ## Current Position
 
-Phase: 4 of 6 (AutoEnsemble Surface + Combination Methods)
-Plan: — (not yet planned)
-Status: Ready to plan
-Last activity: 2026-08-30 — Roadmap created for v0.8.0 (Phases 4-6), 8/8 requirements mapped
+Phase: 04 (AutoEnsemble Surface + Combination Methods) — EXECUTING
+Plan: 2 of 2
+Status: Ready to execute
+Last activity: 2026-08-30 — Phase 04 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -53,6 +58,11 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: -
 
 *Updated after each plan completion*
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 04-autoensemble-surface-combination-methods P01 | 571 | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -65,6 +75,8 @@ Recent decisions affecting current work:
 - EPI-01 routes through the existing conformal path (split/adaptive/asymmetric/per-step, learn+apply) — reuse, do not build new interval machinery.
 - DoD: runnable verified example + internal-consistency cross-check (combined == manual weighted combination of members) + docs + clean-machine/WASM load. No external reference library for ensembles.
 - Panel/table-in macro convention (v0.7.0 lesson): table-in macros must wrap `query_table(...)` in a subselect, not pass a bare TABLE arg.
+- [Phase 04]: AutoEnsemble default combination_method is Mean (overrides crate WeightedMSE default); empty string maps to Mean at parse_combination_method
+- [Phase 04]: CombinationMethod imported via public re-export anofox_forecast::models::ensemble::CombinationMethod (model submodule is private)
 
 ### Pending Todos
 
@@ -87,8 +99,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 **Resume file:** None
 
-Last session: 2026-08-30T20:10:00.000Z
-Stopped at: Roadmap created for v0.8.0 (Phases 4-6); REQUIREMENTS traceability filled (8/8 mapped).
+Last session: 2026-08-30T20:53:18.542Z
+Stopped at: Completed 04-01-PLAN.md (AutoEnsemble tracer slice)
 Resume: /gsd-plan-phase 4 to plan the AutoEnsemble surface + combination methods.
 
 ## Operator Next Steps
