@@ -8,8 +8,8 @@ The extension provides 36 forecasting models ranging from simple baselines to so
 
 **Use this document to:**
 - Generate point forecasts and prediction intervals for single or multiple series
-- Choose from 36 models: baselines (Naive, SMA), exponential smoothing (ETS, Holt-Winters), state-space (ARIMA, Kalman), classical (GARCH), multi-seasonal (MSTL, TBATS), intermittent demand (Croston, TSB), distributional (Laplace), and multivariate (VAR)
-- Use automatic model selection (AutoETS, AutoARIMA, AutoTheta) when unsure
+- Choose from 37 models: baselines (Naive, SMA), exponential smoothing (ETS, Holt-Winters), state-space (ARIMA, Kalman), classical (GARCH), ensemble (AutoEnsemble), multi-seasonal (MSTL, TBATS), intermittent demand (Croston, TSB), distributional (Laplace), and multivariate (VAR)
+- Use automatic model selection (AutoETS, AutoARIMA, AutoTheta, AutoEnsemble) when unsure
 - Incorporate exogenous variables with supported models
 - Understand the detect-then-forecast workflow for seasonal data
 
@@ -118,7 +118,7 @@ SELECT * FROM ts_forecast_by(
 
 ## Model Selection Guide
 
-**For beginners:** Start with `Naive` or `SES` to establish baselines, then try `AutoETS` for automatic model selection.
+**For beginners:** Start with `Naive` or `SES` to establish baselines, then try `AutoETS` or `AutoEnsemble` for automatic model selection.
 
 | Data Characteristics | Recommended Models |
 |---------------------|-------------------|
@@ -127,17 +127,19 @@ SELECT * FROM ts_forecast_by(
 | Seasonality (single period) | `SeasonalNaive`, `HoltWinters`, `SeasonalES`, `Laplace` |
 | Multiple seasonalities | `MSTL`, `MFLES`, `TBATS` |
 | Intermittent demand (many zeros) | `CrostonClassic`, `CrostonSBA`, `TSB`, `Laplace` (with `auto_aid`) |
-| Unknown characteristics | `AutoETS`, `AutoARIMA`, `AutoTheta`, `Laplace` |
+| Unknown characteristics | `AutoETS`, `AutoARIMA`, `AutoTheta`, `AutoEnsemble`, `Laplace` |
+| Ensemble of ARIMA/ETS/Theta | `AutoEnsemble` |
 | Streaming / distributional | `Laplace` |
 
 ## Supported Models (33 Models)
 
-### Automatic Selection Models (6)
+### Automatic Selection Models (7)
 | Model | Description | Optional Params |
 |-------|-------------|-----------------|
 | `AutoETS` | Automatic ETS model selection | *seasonal_period* |
 | `AutoARIMA` | Automatic ARIMA model selection | *seasonal_period* |
 | `AutoTheta` | Automatic Theta method selection | *seasonal_period* |
+| `AutoEnsemble` | Auto-fit ARIMA/ETS/Theta, rank by MSE, combine top-K | *top_k*, *combination_method*, *seasonal_period* |
 | `AutoMFLES` | Automatic MFLES selection | *seasonal_periods[]* |
 | `AutoMSTL` | Automatic MSTL selection | *seasonal_periods[]* |
 | `AutoTBATS` | Automatic TBATS selection | *seasonal_periods[]* |
@@ -513,6 +515,75 @@ ORDER BY product_id, forecast_step;
 ```
 
 See [Kalman reference](../reference/models/state-space/kalman.md) for full docs.
+
+---
+
+## Ensemble Forecasting — AutoEnsemble
+
+`AutoEnsemble` automatically fits three candidate models (AutoARIMA, AutoETS, AutoTheta),
+ranks them by in-sample MSE, and combines the top-K members into a single forecast using
+the specified `combination_method`. It is accessible via `ts_forecast_by` with
+`method = 'AutoEnsemble'`.
+
+> **Point forecasts only (Phase 4):** `yhat_lower` / `yhat_upper` are `NULL`.
+> Ensemble prediction intervals are planned for Phase 6 (EPI-01).
+
+### Parameters
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `top_k` | INTEGER | `3` | Number of top-ranked candidates to combine |
+| `combination_method` | VARCHAR | `'mean'` | Blend strategy (see table below) |
+| `seasonal_period` | INTEGER | `0` | Period passed to all three candidate models; `0` = non-seasonal |
+
+### combination_method strings
+
+| SQL string(s) | Strategy |
+|---|---|
+| `''`, `'mean'` | Unweighted arithmetic mean of member forecasts |
+| `'median'` | Coordinate-wise median; robust to outlier members |
+| `'weighted_mse'`, `'weightedmse'`, `'weighted-mse'` | Inverse-MSE weighting |
+| `'inverse_aic'`, `'inverseaic'`, `'inverse-aic'`, `'aic'` | AIC-based weighting |
+| `'stacking'`, `'stack'` | Ridge-regularised stacking weights from in-sample holdout |
+| `'horizon_adaptive'`, `'horizonadaptive'`, `'horizon-adaptive'`, `'adaptive'` | Per-step weights from rolling-origin errors |
+
+All strings are case-insensitive. The string `'custom'` is **not** accepted (ENS-F1, deferred).
+
+### Examples (verified end-to-end)
+
+```sql
+-- Basic usage — default mean combination, non-seasonal (verified end-to-end)
+CREATE OR REPLACE TABLE sales AS
+SELECT
+    'Product_A' AS product_id,
+    '2020-01-01'::DATE + INTERVAL (i - 1) DAY AS ds,
+    10.0 + i * 0.5 AS y
+FROM generate_series(1, 60) t(i);
+
+SELECT product_id, forecast_step, ds, ROUND(yhat, 4) AS yhat, model_name
+FROM ts_forecast_by('sales', product_id, ds, y, 'AutoEnsemble', 5, '1d')
+ORDER BY product_id, forecast_step;
+
+-- Weighted MSE combination — better-fitting members get higher weight
+SELECT product_id, forecast_step, ROUND(yhat, 4) AS yhat, model_name
+FROM ts_forecast_by(
+    'sales', product_id, ds, y, 'AutoEnsemble', 5, '1d',
+    params := {top_k: 3, combination_method: 'weighted_mse', seasonal_period: 0}
+)
+ORDER BY product_id, forecast_step;
+
+-- Stacking combination — holdout-fitted weights
+SELECT product_id, forecast_step, ROUND(yhat, 4) AS yhat, model_name
+FROM ts_forecast_by(
+    'sales', product_id, ds, y, 'AutoEnsemble', 5, '1d',
+    params := {top_k: 3, combination_method: 'stacking', seasonal_period: 0}
+)
+ORDER BY product_id, forecast_step;
+```
+
+See [AutoEnsemble reference](../reference/models/ensemble/autoensemble.md) for the full
+parameter docs, all six `combination_method` strings + aliases, limitations, and choosing
+between combination strategies.
 
 ---
 
