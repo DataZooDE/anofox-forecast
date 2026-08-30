@@ -411,6 +411,14 @@ pub struct ForecastOptions {
     /// Accepted values: "" | "local_level" | "local_linear_trend".
     /// Only consulted when model is "Kalman".
     pub kalman_model: [c_char; 32],
+    /// AutoEnsemble: number of top models to select (0 → default 3).
+    /// Only consulted when model is "AutoEnsemble".
+    pub ensemble_top_k: c_int,
+    /// AutoEnsemble: combination method string.
+    /// Accepted: "" | "mean" | "median" | "weighted_mse" | "inverse_aic" | "stacking" |
+    /// "horizon_adaptive" (and common aliases). Empty = "mean" (Phase 4 default).
+    /// Only consulted when model is "AutoEnsemble".
+    pub ensemble_method: [c_char; 32],
 }
 
 /// Panel forecast result — returned by `anofox_ts_forecast_panel`.
@@ -494,6 +502,8 @@ impl Default for ForecastOptions {
             garch_p: 0,
             garch_q: 0,
             kalman_model: [0; 32],
+            ensemble_top_k: 0,
+            ensemble_method: [0; 32],
         }
     }
 }
@@ -570,6 +580,14 @@ pub struct ForecastOptionsExog {
     pub garch_q: c_int,
     /// Kalman state-space spec. Empty string = "local_level" (default).
     pub kalman_model: [c_char; 32],
+    /// AutoEnsemble: number of top models to select (0 → default 3).
+    /// Only consulted when model is "AutoEnsemble".
+    pub ensemble_top_k: c_int,
+    /// AutoEnsemble: combination method string.
+    /// Accepted: "" | "mean" | "median" | "weighted_mse" | "inverse_aic" | "stacking" |
+    /// "horizon_adaptive" (and common aliases). Empty = "mean" (Phase 4 default).
+    /// Only consulted when model is "AutoEnsemble".
+    pub ensemble_method: [c_char; 32],
 }
 
 impl Default for ForecastOptionsExog {
@@ -597,6 +615,8 @@ impl Default for ForecastOptionsExog {
             garch_p: 0,
             garch_q: 0,
             kalman_model: [0; 32],
+            ensemble_top_k: 0,
+            ensemble_method: [0; 32],
         }
     }
 }

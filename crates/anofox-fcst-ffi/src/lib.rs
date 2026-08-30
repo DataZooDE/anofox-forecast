@@ -3456,6 +3456,13 @@ pub unsafe extern "C" fn anofox_ts_forecast(
             .filter(|s| !s.is_empty())
             .map(str::to_owned);
 
+        // Parse ensemble_method (empty → None → "mean" default in core)
+        let ensemble_method = CStr::from_ptr(opts.ensemble_method.as_ptr())
+            .to_str()
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+
         let core_opts = anofox_fcst_core::ForecastOptions {
             model: model_type,
             ets_spec,
@@ -3473,6 +3480,8 @@ pub unsafe extern "C" fn anofox_ts_forecast(
             garch_p: opts.garch_p as usize,
             garch_q: opts.garch_q as usize,
             kalman_model,
+            ensemble_top_k: opts.ensemble_top_k as usize,
+            ensemble_method,
         };
 
         anofox_fcst_core::forecast(&series, &core_opts)
@@ -3747,6 +3756,13 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
             .filter(|s| !s.is_empty())
             .map(str::to_owned);
 
+        // Parse ensemble_method (empty → None → "mean" default in core)
+        let ensemble_method_exog = CStr::from_ptr(opts.ensemble_method.as_ptr())
+            .to_str()
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+
         let core_opts = anofox_fcst_core::ForecastOptionsExog {
             model: model_type,
             ets_spec,
@@ -3765,6 +3781,8 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
             garch_p: opts.garch_p as usize,
             garch_q: opts.garch_q as usize,
             kalman_model: kalman_model_exog,
+            ensemble_top_k: opts.ensemble_top_k as usize,
+            ensemble_method: ensemble_method_exog,
         };
 
         anofox_fcst_core::forecast_with_exog(&series, &core_opts)
@@ -4156,6 +4174,13 @@ unsafe fn build_core_options(
         .filter(|s| !s.is_empty())
         .map(str::to_owned);
 
+    // Parse ensemble_method (empty → None → "mean" default in core)
+    let ensemble_method = CStr::from_ptr(opts.ensemble_method.as_ptr())
+        .to_str()
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned);
+
     Ok(anofox_fcst_core::ForecastOptions {
         model: model_type,
         ets_spec,
@@ -4173,6 +4198,8 @@ unsafe fn build_core_options(
         garch_p: opts.garch_p as usize,
         garch_q: opts.garch_q as usize,
         kalman_model,
+        ensemble_top_k: opts.ensemble_top_k as usize,
+        ensemble_method,
     })
 }
 

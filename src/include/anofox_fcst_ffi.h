@@ -1106,6 +1106,18 @@ typedef struct ForecastOptions {
      * Only consulted when model is "Kalman".
      */
     char kalman_model[32];
+    /**
+     * AutoEnsemble: number of top models to select (0 → default 3).
+     * Only consulted when model is "AutoEnsemble".
+     */
+    int ensemble_top_k;
+    /**
+     * AutoEnsemble: combination method string.
+     * Accepted: "" | "mean" | "median" | "weighted_mse" | "inverse_aic" | "stacking" |
+     * "horizon_adaptive" (and common aliases). Empty = "mean" (Phase 4 default).
+     * Only consulted when model is "AutoEnsemble".
+     */
+    char ensemble_method[32];
 } ForecastOptions;
 
 /**
@@ -1272,6 +1284,18 @@ typedef struct ForecastOptionsExog {
      * Kalman state-space spec. Empty string = "local_level" (default).
      */
     char kalman_model[32];
+    /**
+     * AutoEnsemble: number of top models to select (0 → default 3).
+     * Only consulted when model is "AutoEnsemble".
+     */
+    int ensemble_top_k;
+    /**
+     * AutoEnsemble: combination method string.
+     * Accepted: "" | "mean" | "median" | "weighted_mse" | "inverse_aic" | "stacking" |
+     * "horizon_adaptive" (and common aliases). Empty = "mean" (Phase 4 default).
+     * Only consulted when model is "AutoEnsemble".
+     */
+    char ensemble_method[32];
 } ForecastOptionsExog;
 
 /**
