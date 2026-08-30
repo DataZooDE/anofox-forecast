@@ -154,6 +154,13 @@ pub enum ModelType {
     /// Kalman filter state-space model. Default spec: local level.
     /// `kalman_model` in `ForecastOptions` selects "local_linear_trend".
     Kalman,
+    // Ensemble Models (1) — Phase 4 additions
+    /// AutoEnsemble: auto-fits AutoARIMA/AutoETS/AutoTheta, ranks by in-sample MSE,
+    /// combines top-K members using the specified CombinationMethod.
+    /// `ensemble_top_k` (default 3) and `ensemble_method` (default "mean") in
+    /// `ForecastOptions` configure the combination. Prediction intervals are NULL
+    /// in Phase 4 (point forecasts only; intervals deferred to Phase 6 EPI-01).
+    AutoEnsemble,
 }
 
 impl std::str::FromStr for ModelType {
@@ -207,6 +214,8 @@ impl std::str::FromStr for ModelType {
             // Classical
             "GARCH" => return Ok(ModelType::GARCH),
             "Kalman" => return Ok(ModelType::Kalman),
+            // Ensemble
+            "AutoEnsemble" => return Ok(ModelType::AutoEnsemble),
             _ => {}
         }
 
@@ -266,6 +275,8 @@ impl std::str::FromStr for ModelType {
             // Classical
             "garch" => Ok(ModelType::GARCH),
             "kalman" => Ok(ModelType::Kalman),
+            // Ensemble
+            "autoensemble" | "auto_ensemble" => Ok(ModelType::AutoEnsemble),
             // Auto selection (legacy, maps to AutoETS)
             "auto" => Ok(ModelType::AutoETS),
             _ => Err(ForecastError::InvalidModel(format!("Unknown model: {}", s))),
@@ -322,6 +333,8 @@ impl ModelType {
             // Classical
             ModelType::GARCH => "GARCH",
             ModelType::Kalman => "Kalman",
+            // Ensemble
+            ModelType::AutoEnsemble => "AutoEnsemble",
         }
     }
 }
@@ -371,6 +384,13 @@ pub struct ForecastOptions {
     /// Kalman state-space spec ("local_level" | "local_linear_trend").
     /// None = "local_level". Only consulted when model is Kalman.
     pub kalman_model: Option<String>,
+    /// AutoEnsemble: number of top models to select (0 → default 3).
+    /// Only consulted when model is AutoEnsemble.
+    pub ensemble_top_k: usize,
+    /// AutoEnsemble: combination method string. None → "mean" (Phase 4 default).
+    /// Accepted: "" | "mean" | "median" | "weighted_mse" | "inverse_aic" | "stacking" |
+    /// "horizon_adaptive" (and common aliases). Only consulted when model is AutoEnsemble.
+    pub ensemble_method: Option<String>,
 }
 
 impl Default for ForecastOptions {
@@ -392,6 +412,8 @@ impl Default for ForecastOptions {
             garch_p: 0,
             garch_q: 0,
             kalman_model: None,
+            ensemble_top_k: 0,
+            ensemble_method: None,
         }
     }
 }
@@ -501,6 +523,12 @@ pub struct ForecastOptionsExog {
     /// Kalman state-space spec ("local_level" | "local_linear_trend").
     /// None = "local_level". Only consulted when model is Kalman.
     pub kalman_model: Option<String>,
+    /// AutoEnsemble: number of top models to select (0 → default 3).
+    /// Only consulted when model is AutoEnsemble.
+    pub ensemble_top_k: usize,
+    /// AutoEnsemble: combination method string. None → "mean" (Phase 4 default).
+    /// Only consulted when model is AutoEnsemble.
+    pub ensemble_method: Option<String>,
 }
 
 impl Default for ForecastOptionsExog {
@@ -523,6 +551,8 @@ impl Default for ForecastOptionsExog {
             garch_p: 0,
             garch_q: 0,
             kalman_model: None,
+            ensemble_top_k: 0,
+            ensemble_method: None,
         }
     }
 }
@@ -547,6 +577,8 @@ impl From<ForecastOptions> for ForecastOptionsExog {
             garch_p: opts.garch_p,
             garch_q: opts.garch_q,
             kalman_model: opts.kalman_model,
+            ensemble_top_k: opts.ensemble_top_k,
+            ensemble_method: opts.ensemble_method,
         }
     }
 }
@@ -741,14 +773,24 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             options.horizon,
             options.kalman_model.as_deref(),
         ),
+        // Ensemble Models (Phase 4)
+        ModelType::AutoEnsemble => forecast_auto_ensemble(
+            &clean_values,
+            options.horizon,
+            if options.ensemble_top_k == 0 { 3 } else { options.ensemble_top_k },
+            options.ensemble_method.as_deref(),
+            period,
+        ),
     }?;
 
     // Calculate confidence intervals — skip for models that document no v1 intervals.
     // GARCH point forecasts are conditional standard deviations (not level forecasts), so
     // wrapping them with ±z×σ_historical produces meaningless bounds. Kalman v1 likewise
-    // has no prediction intervals. Emit empty vecs for both, matching the docs.
+    // has no prediction intervals. AutoEnsemble is point-forecast-only in Phase 4
+    // (ensemble prediction intervals deferred to Phase 6, EPI-01).
+    // Emit empty vecs for all three, matching the docs.
     let (lower, upper) = match options.model {
-        ModelType::GARCH | ModelType::Kalman => (vec![], vec![]),
+        ModelType::GARCH | ModelType::Kalman | ModelType::AutoEnsemble => (vec![], vec![]),
         _ => calculate_confidence_intervals(&result.point, &clean_values, options.confidence_level),
     };
 
@@ -933,10 +975,11 @@ pub fn forecast_with_exog(
     // For fitted values calculation, use the requested model
     let model = options.model;
 
-    // Calculate confidence intervals — skip for GARCH and Kalman (no synthetic
-    // historical-volatility bounds on volatility forecasts or state-space outputs).
+    // Calculate confidence intervals — skip for GARCH, Kalman, and AutoEnsemble
+    // (no synthetic historical-volatility bounds on volatility forecasts or state-space outputs;
+    // AutoEnsemble intervals deferred to Phase 6, EPI-01).
     let (lower, upper) = match options.model {
-        ModelType::GARCH | ModelType::Kalman => (vec![], vec![]),
+        ModelType::GARCH | ModelType::Kalman | ModelType::AutoEnsemble => (vec![], vec![]),
         _ => calculate_confidence_intervals(&result.point, &clean_values, options.confidence_level),
     };
 
@@ -1100,6 +1143,8 @@ fn forecast_with_model(
         // Classical (default params: GARCH(1,1), Kalman local_level)
         ModelType::GARCH => forecast_garch(values, horizon, 1, 1),
         ModelType::Kalman => forecast_kalman(values, horizon, None),
+        // Ensemble (default params: top_k=3, method=Mean)
+        ModelType::AutoEnsemble => forecast_auto_ensemble(values, horizon, 3, None, period),
     }
 }
 
@@ -2463,6 +2508,62 @@ fn forecast_kalman(values: &[f64], horizon: usize, spec: Option<&str>) -> Result
     extract_forecast(&model, horizon, "Kalman")
 }
 
+/// Parse a `combination_method` string to a `CombinationMethod` enum variant.
+///
+/// Empty string and `"mean"` both map to `CombinationMethod::Mean` (Phase 4 default),
+/// overriding the crate's `WeightedMSE` default. `"custom"` is explicitly rejected
+/// (deferred, ENS-F1). All other unknown strings return `InvalidParameter`.
+fn parse_combination_method(s: Option<&str>) -> Result<anofox_forecast::models::ensemble::CombinationMethod> {
+    use anofox_forecast::models::ensemble::CombinationMethod;
+    match s.unwrap_or("").trim().to_lowercase().as_str() {
+        "" | "mean" => Ok(CombinationMethod::Mean),
+        "median" => Ok(CombinationMethod::Median),
+        "weighted_mse" | "weightedmse" | "weighted-mse" => Ok(CombinationMethod::WeightedMSE),
+        "inverse_aic" | "inverseaic" | "inverse-aic" | "aic" => Ok(CombinationMethod::InverseAIC),
+        "stacking" | "stack" => Ok(CombinationMethod::Stacking { folds: 2 }),
+        "horizon_adaptive" | "horizonadaptive" | "horizon-adaptive" | "adaptive" => {
+            Ok(CombinationMethod::HorizonAdaptive)
+        }
+        other => Err(ForecastError::InvalidParameter {
+            param: "combination_method".to_string(),
+            value: other.to_string(),
+            reason: "expected one of: mean, median, weighted_mse, inverse_aic, stacking, horizon_adaptive"
+                .to_string(),
+        }),
+    }
+}
+
+/// Auto-ensemble forecasting helper.
+///
+/// Fits AutoARIMA, AutoETS, and AutoTheta; ranks candidates by in-sample MSE
+/// ascending; combines the top-`top_k` members using the specified `CombinationMethod`.
+///
+/// Mirrors `forecast_kalman` in structure — uses `extract_forecast` via the
+/// `Forecaster` trait. Point forecasts only in Phase 4; prediction intervals are
+/// deferred to Phase 6 (EPI-01).
+fn forecast_auto_ensemble(
+    values: &[f64],
+    horizon: usize,
+    top_k: usize,
+    method_str: Option<&str>,
+    period: usize,
+) -> Result<ForecastOutput> {
+    use anofox_forecast::models::ensemble::{AutoEnsemble, AutoEnsembleConfig};
+
+    let combination_method = parse_combination_method(method_str)?;
+    let config = AutoEnsembleConfig {
+        top_k,
+        combination_method,
+        seasonal_period: if period > 1 { Some(period) } else { None },
+    };
+    let ts = make_timeseries(values)?;
+    let mut model = AutoEnsemble::with_config(config);
+    model.fit(&ts).map_err(|e| {
+        ForecastError::ComputationError(format!("AutoEnsemble fit failed: {}", e))
+    })?;
+    extract_forecast(&model, horizon, "AutoEnsemble")
+}
+
 // ============================================================================
 // Exogenous-aware forecasting functions
 // ============================================================================
@@ -2732,10 +2833,12 @@ fn calculate_confidence_intervals(
 
 fn calculate_fitted_values(values: &[f64], model: ModelType, period: usize) -> Vec<f64> {
     match model {
-        // GARCH and Kalman do not surface true fitted values in v1.
+        // GARCH, Kalman, and AutoEnsemble do not surface true fitted values in v1
+        // via this path. AutoEnsemble uses `extract_forecast` which reads fitted
+        // values directly from the Forecaster trait — not via calculate_fitted_values.
         // Return empty so the caller emits NULL for fitted/residuals rather than
         // the misleading SES-approximated values the catch-all would produce.
-        ModelType::GARCH | ModelType::Kalman => vec![],
+        ModelType::GARCH | ModelType::Kalman | ModelType::AutoEnsemble => vec![],
         ModelType::Naive => {
             let mut fitted = vec![values[0]];
             fitted.extend(values[..values.len() - 1].iter().cloned());
