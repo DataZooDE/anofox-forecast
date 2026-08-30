@@ -61,7 +61,7 @@ successfully is used (`min(top_k, fitted_count)`). Only when **no** model fits d
 | `'median'` | Coordinate-wise median of member forecasts; robust to outlier members |
 | `'weighted_mse'`, `'weightedmse'`, `'weighted-mse'` | Inverse-MSE weighting; members with lower in-sample MSE receive higher weight |
 | `'inverse_aic'`, `'inverseaic'`, `'inverse-aic'`, `'aic'` | AIC-based weighting; rewards parsimony alongside fit quality |
-| `'stacking'`, `'stack'` | Ridge-regularised stacking; weights fitted from in-sample holdout residuals |
+| `'stacking'`, `'stack'` | Ridge-regularised stacking; weights fitted from in-sample holdout residuals (2-fold, fixed; not user-configurable in v1) |
 | `'horizon_adaptive'`, `'horizonadaptive'`, `'horizon-adaptive'`, `'adaptive'` | Per-horizon weights estimated from rolling-origin errors; each step gets independent weights |
 
 All strings are case-insensitive. The string `'custom'` is **not** accepted in v1 (deferred,

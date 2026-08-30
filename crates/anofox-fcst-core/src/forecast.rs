@@ -2525,6 +2525,10 @@ fn forecast_kalman(values: &[f64], horizon: usize, spec: Option<&str>) -> Result
 /// Empty string and `"mean"` both map to `CombinationMethod::Mean` (Phase 4 default),
 /// overriding the crate's `WeightedMSE` default. `"custom"` is explicitly rejected
 /// (deferred, ENS-F1). All other unknown strings return `InvalidParameter`.
+///
+/// `"stacking"` maps to `CombinationMethod::Stacking { folds: 2 }` — a second-half
+/// in-sample holdout used to fit ridge-stacking weights. The fold count is fixed and
+/// not user-configurable in v1.
 fn parse_combination_method(s: Option<&str>) -> Result<anofox_forecast::models::ensemble::CombinationMethod> {
     use anofox_forecast::models::ensemble::CombinationMethod;
     match s.unwrap_or("").trim().to_lowercase().as_str() {
