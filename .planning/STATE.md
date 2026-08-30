@@ -2,20 +2,20 @@
 gsd_state_version: 1.0
 milestone: v0.8.0
 milestone_name: Ensemble Forecasting
-current_phase: 04
-current_phase_name: AutoEnsemble Surface + Combination Methods
-status: verifying
-stopped_at: Completed 04-02-PLAN.md (AutoEnsemble surface documented, all six combination methods verified)
-last_updated: "2026-08-30T21:29:33.639Z"
+current_phase: 5
+current_phase_name: Explicit-Member Ensemble
+status: planning
+stopped_at: Phase 04 complete, ready to plan Phase 5
+last_updated: "2026-08-30T21:31:17.809Z"
 last_activity: 2026-08-30
-last_activity_desc: Phase 04 execution started
-state_head: e969db1a5a4dfadf6f018d1d42912548f4ad16da
+last_activity_desc: Phase 04 complete, transitioned to Phase 5
+state_head: 5b79e3dbd6d697607beaea592ce166057a6d3171
 progress:
   total_phases: 3
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
   completed_plans: 2
-  percent: 0
+  percent: 33
 ---
 
 # Project State
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-08-30 — started v0.8.0 Ensemble Foreca
 
 ## Current Position
 
-Phase: 04 (AutoEnsemble Surface + Combination Methods) — EXECUTING
-Plan: 2 of 2
-Status: Phase complete — ready for verification
-Last activity: 2026-08-30 — Phase 04 execution started
+Phase: 5 — Explicit-Member Ensemble
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-08-30 — Phase 04 complete, transitioned to Phase 5
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -40,7 +40,7 @@ Progress: [░░░░░░░░░░] 0%
 
 **Velocity:**
 
-- Total plans completed: 0 (this milestone)
+- Total plans completed: 2 (this milestone)
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -51,6 +51,7 @@ Progress: [░░░░░░░░░░] 0%
 | 4. AutoEnsemble Surface + Combination Methods | 0/TBD | - | - |
 | 5. Explicit-Member Ensemble | 0/TBD | - | - |
 | 6. Ensemble Intervals & Introspection | 0/TBD | - | - |
+| 04 | 2 | - | - |
 
 **Recent Trend:**
 
@@ -103,7 +104,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 **Resume file:** None
 
 Last session: 2026-08-30T21:29:33.629Z
-Stopped at: Completed 04-02-PLAN.md (AutoEnsemble surface documented, all six combination methods verified)
+Stopped at: Phase 04 complete, ready to plan Phase 5
 Resume: /gsd-plan-phase 4 to plan the AutoEnsemble surface + combination methods.
 
 ## Operator Next Steps

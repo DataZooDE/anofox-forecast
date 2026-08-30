@@ -27,7 +27,7 @@ INTER-01 (intermittent-demand classification) descoped — user has a more advan
 
 ### v0.8.0 — Ensemble Forecasting (Phases 4-6)
 
-- [ ] **Phase 4: AutoEnsemble Surface + Combination Methods** - Per-series AutoEnsemble (top-K across ARIMA/ETS/Theta) with all six combination methods exposed
+- [x] **Phase 4: AutoEnsemble Surface + Combination Methods** - Per-series AutoEnsemble (top-K across ARIMA/ETS/Theta) with all six combination methods exposed (completed 2026-08-30)
 - [ ] **Phase 5: Explicit-Member Ensemble** - User names member models + a combination method; extension fits and combines each
 - [ ] **Phase 6: Ensemble Intervals & Introspection** - Distribution-free conformal intervals on ensembles + selected-members/weights inspection
 
@@ -83,7 +83,7 @@ INTER-01 (intermittent-demand classification) descoped — user has a more advan
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 4. AutoEnsemble Surface + Combination Methods | 2/2 | In Progress|  |
+| 4. AutoEnsemble Surface + Combination Methods | 2/2 | Complete    | 2026-08-30 |
 | 5. Explicit-Member Ensemble | 0/TBD | Not started | - |
 | 6. Ensemble Intervals & Introspection | 0/TBD | Not started | - |
 
