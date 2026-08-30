@@ -195,6 +195,14 @@ FROM ts_cv_forecast_by('m5_folds_gap2', item_id, ds, y, 'SeasonalNaive', {'seaso
 -- ============================================================================
 -- SECTION 6: Regression Backtest with OLS (requires anofox-statistics)
 -- ============================================================================
+--
+-- NOTE: ts_prepare_regression_input_by has been removed. This section now uses
+-- ts_cv_folds_by + ts_cv_hydrate_by to build the regression input:
+--   - ts_cv_folds_by generates train/test folds
+--   - ts_cv_hydrate_by is not needed here because all features are calendar-based
+--     (day_of_week, day_index, is_weekend, month are all deterministic/known in
+--     advance and can be joined directly from m5_with_features)
+--   - The masked_target column is built with a CASE WHEN split = 'test' expression
 
 SELECT
     '=== Regression Backtest with OLS ===' AS section;
@@ -220,42 +228,44 @@ FROM m5_sample;
 INSTALL anofox_statistics FROM community;
 LOAD anofox_statistics;
 
--- Create CV splits for regression backtest
-CREATE OR REPLACE TABLE cv_splits_reg AS
-SELECT * FROM ts_cv_split_by(
+-- Step 1: Create CV folds (3 folds, 14-day horizon)
+CREATE OR REPLACE TABLE cv_folds_reg AS
+SELECT * FROM ts_cv_folds_by(
     'm5_with_features',
     item_id,
     ds,
     y,
-    ['2016-01-01', '2016-02-01', '2016-03-01']::DATE[],  -- 3 folds
-    14,                                                    -- 14-day horizon
+    3,      -- 3 folds
+    14,     -- 14-day horizon
     MAP{}
 );
 
--- Prepare regression input (masks target for test rows)
--- Add row numbers for joining back results
+-- Step 2: Build regression input by joining features from source
+-- All features are calendar-based (known in advance) so a plain JOIN is sufficient;
+-- no need for ts_cv_hydrate_by masking.
 CREATE OR REPLACE TABLE reg_input AS
 SELECT
-    ROW_NUMBER() OVER (ORDER BY fold_id, group_col, date_col) AS row_num,
-    *
-FROM ts_prepare_regression_input_by(
-    'cv_splits_reg',
-    'm5_with_features',
-    item_id,
-    ds,
-    y,
-    MAP{}
-);
+    f.fold_id,
+    f.item_id,
+    f.ds,
+    f.y,
+    f.split,
+    mf.day_of_week,
+    mf.day_index,
+    mf.is_weekend,
+    mf.month,
+    CASE WHEN f.split = 'test' THEN NULL ELSE f.y END AS masked_target
+FROM cv_folds_reg f
+JOIN m5_with_features mf ON f.item_id = mf.item_id AND f.ds = mf.ds;
 
--- Run OLS regression per fold
+-- Step 3: Run OLS regression per fold
 -- ols_fit_predict_by returns: group_id, y, x, yhat, yhat_lower, yhat_upper, is_training
--- Note: reg_input.y contains actual values (preserved for scoring), masked_target is NULL for test
 CREATE OR REPLACE TABLE ols_backtest_results AS
 WITH
 -- Add row numbers to reg_input for joining with OLS results
 reg_input_numbered AS (
     SELECT
-        ROW_NUMBER() OVER (PARTITION BY fold_id ORDER BY group_col, date_col) AS row_in_fold,
+        ROW_NUMBER() OVER (PARTITION BY fold_id ORDER BY item_id, ds) AS row_in_fold,
         *
     FROM reg_input
 ),
@@ -277,8 +287,8 @@ ols_raw AS (
 joined AS (
     SELECT
         o.fold_id,
-        r.group_col,
-        r.date_col,
+        r.item_id,
+        r.ds AS date_col,
         o.forecast,
         r.y AS actual,
         r.split
@@ -287,7 +297,7 @@ joined AS (
 )
 SELECT
     fold_id,
-    group_col,
+    item_id,
     date_col,
     forecast,
     actual,

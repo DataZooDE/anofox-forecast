@@ -19,6 +19,9 @@
 
 -- Load the extension
 LOAD 'build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension';
+-- Enable auto-load for json (required by ts_cv_hydrate_by, ts_cv_split_index_by, etc.)
+SET autoinstall_known_extensions=1;
+SET autoload_known_extensions=1;
 
 -- ============================================================================
 -- PATTERN 1: Quick Start
@@ -77,6 +80,12 @@ ORDER BY fold_id;
 -- ============================================================================
 -- Scenario: Sales depend on temperature, holidays, promotions
 -- Requires: anofox-statistics extension
+--
+-- NOTE: ts_prepare_regression_input_by has been removed. This pattern now uses
+-- ts_cv_folds_by + ts_cv_hydrate_by to mask unknown features, then
+-- ols_fit_predict_by for regression. Known features (e.g. is_holiday) are joined
+-- from the source table directly; unknown features go through ts_cv_hydrate_by
+-- which fills test rows automatically using the specified fill strategy.
 
 SELECT
     '=== Pattern 2: Regression with External Features ===' AS section;
@@ -105,26 +114,49 @@ CROSS JOIN generate_series(1, 3) AS s(s);
 INSTALL anofox_statistics FROM community;
 LOAD anofox_statistics;
 
--- Step 1: Create CV splits
-CREATE OR REPLACE TABLE cv_splits_p2 AS
-SELECT * FROM ts_cv_split_by(
+-- Step 1: Create CV folds (2 folds, 7-day horizon)
+CREATE OR REPLACE TABLE cv_folds_p2 AS
+SELECT * FROM ts_cv_folds_by(
     'sales_with_features', store_id, date, revenue,
-    ['2024-02-15', '2024-03-01']::DATE[],  -- 2 folds
-    7, '1d', MAP{}
+    2,       -- 2 folds
+    7,       -- 7-day horizon
+    MAP{}
 );
 
--- Step 2: Prepare regression input (masks target as NULL for test rows)
+-- Step 2: Hydrate with unknown feature (temperature changes daily — mask test rows)
+-- is_holiday is calendar-based (known in advance) so we join it directly below.
+-- ts_cv_hydrate_by fills test-row temperature with the last training value per group/fold.
+CREATE OR REPLACE TABLE cv_hydrated_p2 AS
+SELECT * FROM ts_cv_hydrate_by(
+    'cv_folds_p2',
+    'sales_with_features',
+    store_id,
+    date,
+    ['temperature'],               -- unknown feature: mask in test rows
+    MAP{'strategy': 'last_value'}
+);
+
+-- Step 3: Join known feature (is_holiday) from source
 CREATE OR REPLACE TABLE reg_input_p2 AS
-SELECT * FROM ts_prepare_regression_input_by(
-    'cv_splits_p2', 'sales_with_features', store_id, date, revenue, MAP{}
-);
+SELECT
+    h.fold_id,
+    h.store_id,
+    h.date,
+    h.revenue,
+    h.split,
+    h.temperature,                -- masked in test rows by ts_cv_hydrate_by
+    f.is_holiday,                 -- known: join directly from source
+    f.promotion_active,           -- treat as known for this example
+    CASE WHEN h.split = 'test' THEN NULL ELSE h.revenue END AS masked_target
+FROM cv_hydrated_p2 h
+JOIN sales_with_features f ON h.store_id = f.store_id AND h.date = f.date;
 
--- Step 3: Run OLS fit-predict with multiple features
+-- Step 4: Run OLS fit-predict with multiple features
 CREATE OR REPLACE TABLE ols_predictions_p2 AS
 WITH
 reg_input_numbered AS (
     SELECT
-        ROW_NUMBER() OVER (PARTITION BY fold_id ORDER BY group_col, date_col) AS row_in_fold,
+        ROW_NUMBER() OVER (PARTITION BY fold_id ORDER BY store_id, date) AS row_in_fold,
         *
     FROM reg_input_p2
 ),
@@ -142,8 +174,8 @@ ols_raw AS (
 )
 SELECT
     ri.fold_id,
-    ri.group_col AS store_id,
-    ri.date_col AS date,
+    ri.store_id,
+    ri.date,
     ols.forecast,
     ri.revenue AS actual
 FROM ols_raw ols
@@ -271,6 +303,10 @@ ORDER BY fold_id;
 -- PATTERN 5: Unknown vs Known Features (Mask & Fill)
 -- ============================================================================
 -- Scenario: Prevent look-ahead bias by masking unknown features
+--
+-- NOTE: ts_hydrate_features_by has been removed. This pattern now uses
+-- ts_cv_hydrate_by, which automatically masks unknown features in test rows
+-- (train rows receive actual values; test rows receive filled values).
 
 SELECT
     '=== Pattern 5: Unknown vs Known Features ===' AS section;
@@ -294,76 +330,46 @@ SELECT
 FROM generate_series(0, 89) AS t(d)
 CROSS JOIN generate_series(1, 2) AS s(s);
 
--- Step 1: Create CV splits
-CREATE OR REPLACE TABLE cv_splits_p5 AS
-SELECT * FROM ts_cv_split_by(
+-- Step 1: Create CV folds (2 folds, 7-day horizon)
+CREATE OR REPLACE TABLE cv_folds_p5 AS
+SELECT * FROM ts_cv_folds_by(
     'sales_features', store_id, date, revenue,
-    ['2024-02-15', '2024-03-01']::DATE[],
-    7, '1d', MAP{}
+    2, 7, MAP{}
 );
 
--- Step 2: Hydrate features (join source data with CV splits)
-CREATE OR REPLACE TABLE safe_data AS
-SELECT * FROM ts_hydrate_features_by(
-    'cv_splits_p5',
+-- Step 2: Hydrate with UNKNOWN feature (footfall) — masking applied automatically
+-- footfall column: train rows = actual, test rows = last training value per group/fold
+CREATE OR REPLACE TABLE cv_hydrated_p5 AS
+SELECT * FROM ts_cv_hydrate_by(
+    'cv_folds_p5',
     'sales_features',
     store_id,
     date,
-    MAP{}
+    ['footfall'],                  -- unknown: mask test rows
+    MAP{'strategy': 'last_value'}
 );
 
--- Step 3: Manually mask unknown features in test rows
-CREATE OR REPLACE TABLE masked_data AS
-SELECT
-    *,
-    CASE WHEN _is_test THEN NULL ELSE footfall END AS footfall_safe
-FROM safe_data;
-
--- Step 4: Fill unknowns using last known value
-CREATE OR REPLACE TABLE filled_footfall AS
-SELECT * FROM ts_fill_unknown_by(
-    'masked_data',
-    store_id,
-    date,
-    footfall_safe,
-    (SELECT MAX(date) FROM masked_data WHERE split = 'train'),
-    {'strategy': 'last_value'}
-);
-
--- Join filled values back to masked_data
-CREATE OR REPLACE TABLE model_ready_data AS
-SELECT
-    m.fold_id,
-    m.split,
-    m.group_col,
-    m.date_col,
-    m.target_col,
-    m.is_holiday,
-    m.revenue,
-    f.value_col AS footfall_filled
-FROM masked_data m
-JOIN filled_footfall f ON m.group_col = f.group_col AND m.date_col = f.date_col;
-
--- Step 5: Run OLS regression
--- (Requires anofox_statistics - already loaded from Pattern 2)
-
+-- Step 3: Join KNOWN feature (is_holiday) directly — no masking needed
 CREATE OR REPLACE TABLE reg_input_p5 AS
 SELECT
-    m.fold_id,
-    m.split,
-    m.group_col,
-    m.date_col,
-    m.revenue,
-    m.is_holiday,
-    m.footfall_filled,
-    CASE WHEN m.split = 'test' THEN NULL ELSE m.revenue END AS masked_target
-FROM model_ready_data m;
+    h.fold_id,
+    h.store_id,
+    h.date,
+    h.revenue,
+    h.split,
+    f.is_holiday,            -- known: join directly (no masking)
+    h.footfall::DOUBLE AS footfall_filled,  -- masked in test rows by ts_cv_hydrate_by
+    CASE WHEN h.split = 'test' THEN NULL ELSE h.revenue END AS masked_target
+FROM cv_hydrated_p5 h
+JOIN sales_features f ON h.store_id = f.store_id AND h.date = f.date;
 
+-- Step 4: Run OLS regression
+-- (Requires anofox_statistics - already loaded from Pattern 2)
 CREATE OR REPLACE TABLE ols_predictions_p5 AS
 WITH
 reg_input_numbered AS (
     SELECT
-        ROW_NUMBER() OVER (PARTITION BY fold_id ORDER BY group_col, date_col) AS row_in_fold,
+        ROW_NUMBER() OVER (PARTITION BY fold_id ORDER BY store_id, date) AS row_in_fold,
         *
     FROM reg_input_p5
 ),
@@ -378,8 +384,8 @@ ols_raw AS (
 )
 SELECT
     ri.fold_id,
-    ri.group_col AS store_id,
-    ri.date_col AS date,
+    ri.store_id,
+    ri.date,
     ols.forecast,
     ri.revenue AS actual
 FROM ols_raw ols
@@ -741,10 +747,11 @@ FROM ci;
 SELECT
     '=== Pattern 7: Memory-Efficient CV ===' AS section;
 
--- Create larger sample data
+-- Create larger sample data (5 stores × 100 days)
+-- Use FLOOR() for integer-style grouping; direct i/100 gives floating-point in DuckDB.
 CREATE OR REPLACE TABLE large_sales AS
 SELECT
-    'STORE' || ((i / 100) + 1)::VARCHAR AS store_id,
+    'STORE' || (FLOOR((i - 1) / 100) + 1)::INTEGER::VARCHAR AS store_id,
     '2024-01-01'::DATE + INTERVAL ((i % 100)) DAY AS date,
     (100.0 + (i % 100) * 2 + RANDOM() * 20)::DOUBLE AS sales
 FROM generate_series(1, 500) t(i);
@@ -773,33 +780,37 @@ GROUP BY fold_id, split
 ORDER BY fold_id, split;
 
 .print ''
-.print 'Step 2: Hydrate with full data using ts_hydrate_split_full'
+.print 'Step 2: Join back to source to get full data (ts_hydrate_split_full_by removed)'
+.print '  Use a plain JOIN on group_col + date_col to retrieve all source columns'
 
--- Join back to get all columns from source
-SELECT 'Hydrated data (with all source columns):' AS info;
+-- Join index splits back to source table to get all data columns
+-- Note: ts_hydrate_split_full_by has been removed; use a plain JOIN instead.
+SELECT 'Hydrated data (joined from source):' AS info;
 SELECT
-    fold_id, split, store_id, date, sales,
-    _is_test, _train_cutoff
-FROM ts_hydrate_split_full_by(
-    'cv_index', 'large_sales', store_id, date, MAP{}
-)
-WHERE store_id = 'STORE1'
-ORDER BY fold_id, date
+    ci.fold_id, ci.split, ci.group_col AS store_id, ci.date_col AS date,
+    ls.sales
+FROM cv_index ci
+JOIN large_sales ls ON ci.group_col = ls.store_id AND ci.date_col = ls.date
+WHERE ci.group_col = 'STORE1'
+ORDER BY ci.fold_id, ci.date_col
 LIMIT 10;
 
 .print ''
 .print 'When to use:'
-.print '  ts_cv_split       - Small/medium datasets, convenience'
-.print '  ts_cv_split_index - Large datasets, memory efficiency'
+.print '  ts_cv_split_by       - Small/medium datasets, convenience'
+.print '  ts_cv_split_index_by - Large datasets, memory efficiency'
 
 -- ============================================================================
--- Pattern 8: Hydrate Functions Comparison
+-- Pattern 8: Hydrate Functions
 -- ============================================================================
--- Use case: Choose the right safety level for joining CV splits with features.
--- Compare: ts_hydrate_split vs ts_hydrate_split_full vs ts_hydrate_split_strict
+-- Use case: Join CV folds with unknown features, preventing data leakage.
+--
+-- NOTE: ts_hydrate_split_by, ts_hydrate_split_full_by, and
+-- ts_hydrate_split_strict_by have been removed. Use ts_cv_hydrate_by
+-- (for folds created by ts_cv_folds_by) or a plain JOIN for index splits.
 
 SELECT
-    '=== Pattern 8: Hydrate Functions Comparison ===' AS section;
+    '=== Pattern 8: Hydrate Functions ===' AS section;
 
 -- Create features table with known and unknown features
 CREATE OR REPLACE TABLE store_features AS
@@ -810,65 +821,60 @@ SELECT
     (RANDOM() * 100)::DOUBLE AS competitor_price     -- UNKNOWN: not available at forecast time
 FROM large_sales;
 
-.print '>>> Pattern 8: Hydrate Functions Comparison'
+.print '>>> Pattern 8: Hydrate Functions (ts_cv_hydrate_by)'
 .print '-----------------------------------------------------------------------------'
+.print 'ts_cv_hydrate_by works with folds from ts_cv_folds_by.'
+.print 'For ts_cv_split_index_by output, use a plain JOIN to retrieve source columns.'
+
+-- Create folds for this pattern (ts_cv_hydrate_by requires ts_cv_folds_by output)
+CREATE OR REPLACE TABLE folds_p8 AS
+SELECT * FROM ts_cv_folds_by('large_sales', store_id, date, sales, 2, 7, MAP{});
 
 .print ''
-.print 'Option A: ts_hydrate_split - Single column masking (auto)'
-.print '  Use when: One unknown feature to mask'
+.print 'ts_cv_hydrate_by: unknown feature auto-masked in test rows'
+.print '  Train rows: actual competitor_price values'
+.print '  Test rows:  last training value per group/fold (strategy: last_value)'
 
-SELECT 'ts_hydrate_split masks competitor_price in test set:' AS info;
+SELECT 'ts_cv_hydrate_by masks competitor_price in test rows:' AS info;
+-- Note: ts_cv_hydrate_by returns unknown feature columns as VARCHAR;
+-- cast to DOUBLE before arithmetic.
 SELECT
-    fold_id, split, group_col AS store, date_col AS date,
-    ROUND(unknown_col, 2) AS competitor_price
-FROM ts_hydrate_split_by(
-    'cv_index',
+    fold_id, split, store_id, date,
+    day_of_week,                     -- join known feature separately below
+    ROUND(competitor_price::DOUBLE, 2) AS competitor_price   -- masked in test rows
+FROM ts_cv_hydrate_by(
+    'folds_p8',
     'store_features',
     store_id,
     date,
-    competitor_price,
-    {'strategy': 'null'}  -- mask to NULL in test
-)
-WHERE group_col = 'STORE1' AND fold_id = 1
-ORDER BY date_col
-LIMIT 5;
-
-.print ''
-.print 'Option B: ts_hydrate_split_full - All columns (manual mask)'
-.print '  Use when: Multiple unknown features, need manual control'
-
-SELECT 'ts_hydrate_split_full returns all columns with _is_test flag:' AS info;
-SELECT
-    fold_id, split, store_id, date,
-    day_of_week,  -- KNOWN: use directly
-    CASE WHEN _is_test THEN NULL ELSE ROUND(competitor_price, 2) END AS competitor_price  -- UNKNOWN: manual mask
-FROM ts_hydrate_split_full_by(
-    'cv_index', 'store_features', store_id, date, MAP{}
+    ['competitor_price'],            -- unknown: mask in test rows
+    MAP{'strategy': 'last_value'}
 )
 WHERE store_id = 'STORE1' AND fold_id = 1
 ORDER BY date
 LIMIT 5;
 
 .print ''
-.print 'Option C: ts_hydrate_split_strict - Metadata only (fail-safe)'
-.print '  Use when: Production systems, audit requirements'
+.print 'For KNOWN features (day_of_week), join directly from the source table:'
 
-SELECT 'ts_hydrate_split_strict returns ONLY metadata:' AS info;
 SELECT
-    hs.fold_id, hs.split, hs.group_col AS store, hs.date_col AS date,
-    hs._is_test
-FROM ts_hydrate_split_strict_by(
-    'cv_index', 'store_features', store_id, date, MAP{}
-) hs
-WHERE hs.group_col = 'STORE1' AND hs.fold_id = 1
-ORDER BY hs.date_col
+    h.fold_id, h.split, h.store_id, h.date,
+    sf.day_of_week,                           -- KNOWN: use directly from source
+    ROUND(h.competitor_price::DOUBLE, 2) AS competitor_price  -- cast VARCHAR → DOUBLE
+FROM ts_cv_hydrate_by(
+    'folds_p8', 'store_features', store_id, date,
+    ['competitor_price'], MAP{'strategy': 'last_value'}
+) h
+JOIN store_features sf ON h.store_id = sf.store_id AND h.date = sf.date
+WHERE h.store_id = 'STORE1' AND h.fold_id = 1
+ORDER BY h.date
 LIMIT 5;
 
 .print ''
-.print 'Choosing a Hydrate Function:'
-.print '  ts_hydrate_split       - Single unknown feature, auto-masked'
-.print '  ts_hydrate_split_full  - Multiple features, manual CASE masking'
-.print '  ts_hydrate_split_strict - Fail-safe, explicit JOIN required'
+.print 'Choosing an approach:'
+.print '  ts_cv_hydrate_by                    - Unknown features, auto-masked (recommended)'
+.print '  Plain JOIN on group + date          - Known features, or all columns from source'
+.print '  ts_fill_unknown_by                  - Fill a single masked column after manual masking'
 
 -- ============================================================================
 -- Pattern 9: Data Leakage Audit
@@ -881,16 +887,24 @@ SELECT
 .print '>>> Pattern 9: Data Leakage Audit (ts_check_leakage)'
 .print '-----------------------------------------------------------------------------'
 
--- Prepare data with _is_test flag
+-- Prepare data with masking applied via ts_cv_hydrate_by
+-- Note: ts_hydrate_split_full_by has been removed; use ts_cv_hydrate_by instead.
+-- ts_cv_hydrate_by requires folds_p8 (from ts_cv_folds_by); we use it here
+-- since cv_index (from ts_cv_split_index_by) is a different format.
 CREATE OR REPLACE TABLE cv_prepared AS
 SELECT
-    fold_id, split, store_id, date,
-    _is_test,
-    day_of_week,
-    CASE WHEN _is_test THEN NULL ELSE competitor_price END AS competitor_price_masked
-FROM ts_hydrate_split_full_by(
-    'cv_index', 'store_features', store_id, date, MAP{}
-);
+    h.fold_id,
+    h.split,
+    h.store_id,
+    h.date,
+    (h.split = 'test') AS _is_test,
+    sf.day_of_week,
+    ROUND(h.competitor_price::DOUBLE, 2) AS competitor_price_masked  -- NULL in test rows; cast VARCHAR → DOUBLE
+FROM ts_cv_hydrate_by(
+    'folds_p8', 'store_features', store_id, date,
+    ['competitor_price'], MAP{'strategy': 'null'}  -- NULL in test rows
+) h
+JOIN store_features sf ON h.store_id = sf.store_id AND h.date = sf.date;
 
 .print 'Audit prepared CV data:'
 SELECT * FROM ts_check_leakage(
@@ -908,6 +922,7 @@ SELECT * FROM ts_check_leakage(
 -- Cleanup pattern 7-9 tables
 DROP TABLE IF EXISTS large_sales;
 DROP TABLE IF EXISTS cv_index;
+DROP TABLE IF EXISTS folds_p8;
 DROP TABLE IF EXISTS store_features;
 DROP TABLE IF EXISTS cv_prepared;
 
