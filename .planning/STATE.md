@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v0.8.0
 milestone_name: Ensemble Forecasting
-current_phase: 5
+current_phase: 05
 current_phase_name: Explicit-Member Ensemble
-status: planning
-stopped_at: Phase 04 complete, ready to plan Phase 5
-last_updated: "2026-08-30T21:31:17.809Z"
-last_activity: 2026-08-30
-last_activity_desc: Phase 04 complete, transitioned to Phase 5
-state_head: 5b79e3dbd6d697607beaea592ce166057a6d3171
+status: executing
+stopped_at: Completed 05-01-PLAN.md (explicit-member ensemble tracer)
+last_updated: "2026-08-31T06:53:46.179Z"
+last_activity: 2026-08-31
+last_activity_desc: Phase 05 execution started
+state_head: cf6e34b1f6a161e98b9b57baf7bc96a66cd241d7
 progress:
   total_phases: 3
   completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
+  total_plans: 4
+  completed_plans: 3
   percent: 33
 ---
 
@@ -25,16 +25,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-30 — started v0.8.0 Ensemble Forecasting)
 
 **Core value:** SQL users can combine multiple forecasting models per series — automatically or explicitly — with distribution-free prediction intervals and weight introspection, all without leaving DuckDB.
-**Current focus:** Phase 04 — AutoEnsemble Surface + Combination Methods
+**Current focus:** Phase 05 — Explicit-Member Ensemble
 
 ## Current Position
 
-Phase: 5 — Explicit-Member Ensemble
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-08-30 — Phase 04 complete, transitioned to Phase 5
+Phase: 05 (Explicit-Member Ensemble) — EXECUTING
+Plan: 2 of 2
+Status: Ready to execute
+Last activity: 2026-08-31 — Phase 05 execution started
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [███░░░░░░░] 33%
 
 ## Performance Metrics
 
@@ -65,6 +65,7 @@ Progress: [░░░░░░░░░░] 0%
 |------|----------|-------|-------|
 | Phase 04-autoensemble-surface-combination-methods P01 | 571 | 3 tasks | 7 files |
 | Phase 04 P02 | 2084 | 2 tasks | 3 files |
+| Phase 05-explicit-member-ensemble P01 | 811 | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -81,6 +82,9 @@ Recent decisions affecting current work:
 - [Phase 04]: CombinationMethod imported via public re-export anofox_forecast::models::ensemble::CombinationMethod (model submodule is private)
 - [Phase 04]: Plan 02 adds ZERO source wiring — parse_combination_method (Plan 01) already accepts all six methods; this plan exercises and documents them
 - [Phase 04]: Mean vs Median demonstrability: skewed series (exp growth + spikes) shows delta 1.45-2.69 per step, confirming COMB-01 requirement
+- [Phase 05]: ScalarFunction dispatch for _ts_forecast_ensemble_native (not TableFunction) — matches ts_forecast_by macro's unnest pattern and avoids streaming table function overhead
+- [Phase 05]: build_forecaster: exhaustive 36-variant ModelType match with 10 blocked variants returning InvalidParameter — foundation for Phase 05-02 full allowlist
+- [Phase 05]: Null-delimited member buffer (members_buf + members_buf_len) for FFI marshal — avoids over-read, defensive members_count assertion
 
 ### Pending Todos
 
@@ -103,8 +107,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 **Resume file:** None
 
-Last session: 2026-08-30T21:29:33.629Z
-Stopped at: Phase 04 complete, ready to plan Phase 5
+Last session: 2026-08-31T06:53:46.157Z
+Stopped at: Completed 05-01-PLAN.md (explicit-member ensemble tracer)
 Resume: /gsd-plan-phase 4 to plan the AutoEnsemble surface + combination methods.
 
 ## Operator Next Steps

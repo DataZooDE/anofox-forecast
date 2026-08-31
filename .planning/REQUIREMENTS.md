@@ -10,7 +10,7 @@ Requirements for the v0.8.0 milestone. Each maps to a roadmap phase.
 ### ENS — Ensemble surfaces
 
 - [x] **ENS-01**: User can produce an **AutoEnsemble** forecast per series — the extension auto-fits ARIMA/ETS/Theta families, ranks them, and combines the top-K; user sets `top_k`, `combination_method`, and `seasonal_period`.
-- [ ] **ENS-02**: User can produce an **explicit-member** ensemble forecast per series by naming the member models and a combination method; the extension fits each member and combines them.
+- [x] **ENS-02**: User can produce an **explicit-member** ensemble forecast per series by naming the member models and a combination method; the extension fits each member and combines them.
 
 ### COMB — Combination methods
 
@@ -66,7 +66,7 @@ Which phases cover which requirements. Populated during roadmap creation.
 | COMB-02 | Phase 4 | Complete |
 | COMB-03 | Phase 4 | Complete |
 | COMB-04 | Phase 4 | Complete |
-| ENS-02 | Phase 5 | Pending |
+| ENS-02 | Phase 5 | Complete |
 | EPI-01 | Phase 6 | Pending |
 | INSP-01 | Phase 6 | Pending |
 
