@@ -593,6 +593,44 @@ FROM (
     "SELECT * FROM ts_forecast_by('sales', product_id, date, qty, 'AutoETS', 12, '1d')",
     "forecasting"},
 
+    // ts_forecast_ensemble_by: Explicit-member ensemble forecasting (Phase 5: ENS-02)
+    //
+    // Fits each named member model independently per series and combines forecasts
+    // using the specified combination method (default: Mean). Member names follow
+    // the same vocabulary as ts_forecast_by (e.g. 'AutoARIMA', 'AutoETS', 'Theta').
+    //
+    // Blocked members (not expressible with a single seasonal_period):
+    //   GARCH, Laplace, ARIMA, MFLES, AutoMFLES, MSTL, AutoMSTL, TBATS, AutoTBATS, AutoEnsemble.
+    // Combination methods: 'mean' (default), 'median', 'weighted_mse',
+    //   'inverse_aic', 'stacking', 'horizon_adaptive'.
+    // Prediction intervals (yhat_lower / yhat_upper) are NULL in Phase 5 — see Phase 6 (EPI-01).
+    {"ts_forecast_ensemble_by",
+     {"source", "group_col", "date_col", "target_col", "members", "horizon", "frequency", nullptr},
+     {{"combination_method", "''"}, {"seasonal_period", "0"}, {nullptr, nullptr}},
+R"(
+SELECT group_col, forecast_step, ds, yhat, yhat_lower, yhat_upper, model_name
+FROM (
+    SELECT group_col,
+           unnest(_ts_forecast_ensemble_native(
+               LIST(date_col ORDER BY date_col),
+               LIST(target_col::DOUBLE ORDER BY date_col),
+               members,
+               horizon,
+               frequency,
+               combination_method,
+               seasonal_period
+           ), recursive := true)
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+)
+)",
+    "Generates ensemble forecasts from explicitly named member models per series. "
+    "members is a VARCHAR[] list (e.g. ['AutoARIMA','AutoETS','Naive']). "
+    "combination_method: 'mean' (default), 'median', 'weighted_mse', 'inverse_aic', 'stacking', 'horizon_adaptive'. "
+    "yhat_lower and yhat_upper are NULL in Phase 5 (ensemble prediction intervals deferred to Phase 6, EPI-01).",
+    "SELECT * FROM ts_forecast_ensemble_by('sales', product_id, date, qty, ['AutoARIMA','AutoETS','Naive'], 12, '1d')",
+    "forecasting"},
+
     // ts_forecast_panel_by: Panel forecasting via cross-series global learners (Phase 2: GLOB-01..03)
     //
     // Fits a single shared-parameter model across all series simultaneously, then emits
