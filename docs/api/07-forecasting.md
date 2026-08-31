@@ -688,6 +688,183 @@ the six `combination_method` strings with aliases, error examples, and limitatio
 
 ---
 
+## Ensemble Member Introspection
+
+Two functions expose the per-member weights and scores after fitting an ensemble — one for
+explicit-member ensembles, one for AutoEnsemble. Both return **long format**: one row per
+member per series group. They require the same data table as their corresponding forecast
+functions; no separate `members` or `top_k` inference step is needed.
+
+### `ts_ensemble_inspect_by` — explicit-member combination weights
+
+Returns each named member's combination weight after fitting the ensemble on each series.
+The `score` column is `NULL` (explicit-member inspection has no per-member MSE score in the
+current implementation — use `ts_auto_ensemble_inspect_by` for scored introspection).
+
+**Signature:**
+```sql
+ts_ensemble_inspect_by(
+    source         VARCHAR,      -- source table (quoted string)
+    group_col      IDENTIFIER,   -- series identifier (unquoted)
+    date_col       IDENTIFIER,   -- date/timestamp column (unquoted)
+    target_col     IDENTIFIER,   -- value column (unquoted)
+    members        VARCHAR[],    -- 2+ model names (same vocab as ts_forecast_by)
+    combination_method := '',    -- blend strategy; default '' = 'mean'
+    seasonal_period := 0         -- shared period; 0 = non-seasonal
+) → TABLE(group_col, member_name VARCHAR, weight DOUBLE, score DOUBLE)
+```
+
+**Parameters:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `members` | VARCHAR[] | — | 2+ model names; same vocabulary as `ts_forecast_by` method param |
+| `combination_method` | VARCHAR | `''` (= `'mean'`) | Blend strategy (same strings as `ts_forecast_ensemble_by`) |
+| `seasonal_period` | INTEGER | `0` | Period shared by all members; `0` = non-seasonal |
+
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `<group_col>` | (same as input) | Series identifier |
+| `member_name` | VARCHAR | Model name (one row per member per series) |
+| `weight` | DOUBLE | Combination weight; sums to 1.0 per group for all methods; `Mean` → equal `1/k` |
+| `score` | DOUBLE | `NULL` for explicit-member (no per-member MSE in current impl) |
+
+**Weight properties by combination_method:**
+- `mean` / `''`: each member gets `1/k` (uniform); sum == 1.0 within floating-point tolerance
+- `median`: each member gets `1/k` (Median does not use weighted combination)
+- `weighted_mse`: inverse-MSE weights; non-negative; sum == 1.0
+- `inverse_aic`: AIC-based weights; non-negative; sum == 1.0
+- `stacking`: simplex-projected weights; non-negative; sum == 1.0
+- `horizon_adaptive`: AVERAGE of per-step weights; sum == 1.0 (per-step matrix not exposed)
+
+**Examples (verified end-to-end):**
+```sql
+-- 60-observation linear series
+CREATE OR REPLACE TABLE ae_test AS
+SELECT 1 AS id,
+       '2020-01-01'::DATE + INTERVAL (i - 1) DAY AS ds,
+       10.0 + i * 0.5 AS y
+FROM range(1, 61) t(i);
+
+-- Mean combination: each member gets weight = 1/3
+SELECT * FROM ts_ensemble_inspect_by(
+    'ae_test', id, ds, y,
+    ['AutoARIMA', 'AutoETS', 'Theta'],
+    combination_method := 'mean',
+    seasonal_period := 0
+)
+ORDER BY id, member_name;
+-- Returns: id=1, AutoARIMA weight=0.333, AutoETS weight=0.333, Theta weight=0.333
+
+-- WeightedMSE: weights proportional to inverse in-sample MSE
+SELECT id, member_name, ROUND(weight, 6) AS weight, score
+FROM ts_ensemble_inspect_by(
+    'ae_test', id, ds, y,
+    ['AutoARIMA', 'AutoETS', 'Theta'],
+    combination_method := 'weighted_mse',
+    seasonal_period := 0
+)
+ORDER BY id, member_name;
+-- Returns: weight sums to 1.0 per group; best-fitting member gets highest weight
+
+-- Assert weight sum = 1.0 per series
+SELECT id, SUM(weight) AS weight_sum
+FROM ts_ensemble_inspect_by(
+    'ae_test', id, ds, y,
+    ['AutoARIMA', 'AutoETS', 'Theta'],
+    combination_method := 'weighted_mse',
+    seasonal_period := 0
+)
+GROUP BY id;
+-- Returns: weight_sum = 1.0 for every series
+```
+
+See [ensemble_inspect reference](../reference/models/ensemble/ensemble_inspect.md) for the
+full parameter docs, worked examples for all six combination methods, and limitations.
+
+---
+
+### `ts_auto_ensemble_inspect_by` — AutoEnsemble member scores and optional weights
+
+Returns the selected top-K member models with their in-sample MSE scores and (for `Mean`
+combination only) equal combination weights. The `rank` column orders members from
+best-fitting (rank=1) to worst-fitting (rank=k) by ascending MSE.
+
+**Signature:**
+```sql
+ts_auto_ensemble_inspect_by(
+    source         VARCHAR,      -- source table (quoted string)
+    group_col      IDENTIFIER,   -- series identifier (unquoted)
+    date_col       IDENTIFIER,   -- date/timestamp column (unquoted)
+    target_col     IDENTIFIER,   -- value column (unquoted)
+    top_k := 3,                  -- number of top candidates to select
+    combination_method := '',    -- blend strategy; default '' = 'mean'
+    seasonal_period := 0         -- period for all three candidate models; 0 = non-seasonal
+) → TABLE(group_col, member_name VARCHAR, weight DOUBLE, score DOUBLE, rank BIGINT)
+```
+
+**Parameters:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `top_k` | INTEGER | `3` | Number of top-ranked candidates to combine (same as `ts_forecast_by` AutoEnsemble param) |
+| `combination_method` | VARCHAR | `''` (= `'mean'`) | Blend strategy. **Note:** `''` maps to `'mean'`, not `'weighted_mse'`. Pass `'weighted_mse'` explicitly for weighted combination. |
+| `seasonal_period` | INTEGER | `0` | Period passed to all three candidate models; `0` = non-seasonal |
+
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `<group_col>` | (same as input) | Series identifier |
+| `member_name` | VARCHAR | Selected model name (`AutoARIMA`, `AutoETS`, or `AutoTheta`) |
+| `weight` | DOUBLE | `1/k` for `Mean` combination; `NULL` for all other methods (crate 0.15.3 limitation — see below) |
+| `score` | DOUBLE | In-sample MSE from `all_scores()`; lower is better; always > 0 (or near-zero for near-perfect fits) |
+| `rank` | BIGINT | 1..k ascending by MSE; rank 1 = best-fitting member |
+
+**Weight availability by combination_method:**
+
+| combination_method | weight column |
+|---|---|
+| `''` or `'mean'` | `1/k` (non-NULL) — equal weights for Mean combination |
+| `'weighted_mse'`, `'inverse_aic'`, `'stacking'`, `'horizon_adaptive'` | `NULL` — inner combination weights are not accessible from the `anofox-forecast` 0.15.3 public API (upstream limitation; `AutoEnsemble.ensemble` is a private field) |
+
+**Row count:** May be less than `top_k` if fewer than `top_k` candidate models fitted
+successfully (e.g., AutoARIMA convergence failure). The returned `k` is `model_count()`
+from the fitted AutoEnsemble.
+
+**Examples (verified end-to-end):**
+```sql
+-- AutoEnsemble Mean: weight = 1/3, score > 0, rank in (1,2,3)
+SELECT * FROM ts_auto_ensemble_inspect_by(
+    'ae_test', id, ds, y,
+    top_k := 3,
+    combination_method := 'mean',
+    seasonal_period := 0
+)
+ORDER BY id, rank;
+-- Returns: 3 rows per series; weight=0.333 for all; rank=1 is lowest-MSE member
+
+-- AutoEnsemble WeightedMSE: weight IS NULL (crate 0.15.3 limitation), score > 0
+SELECT * FROM ts_auto_ensemble_inspect_by(
+    'ae_test', id, ds, y,
+    top_k := 3,
+    combination_method := 'weighted_mse',  -- must be explicit: '' maps to 'mean'
+    seasonal_period := 0
+)
+ORDER BY id, rank;
+-- Returns: 3 rows per series; weight=NULL; score shows MSE ranking
+
+-- Find the best member per series (rank=1)
+SELECT id, member_name, score
+FROM ts_auto_ensemble_inspect_by('ae_test', id, ds, y)
+WHERE rank = 1
+ORDER BY id;
+```
+
+See [ensemble_inspect reference](../reference/models/ensemble/ensemble_inspect.md) for the
+full docs, the AutoEnsemble weight-NULL limitation (with upstream-enhancement note), and
+the `model_count() < top_k` behavior.
+
+---
+
 ## Multivariate Forecasting (`ts_forecast_var_by`)
 
 VAR (Vector Autoregression) fits **one model across K variables simultaneously**,

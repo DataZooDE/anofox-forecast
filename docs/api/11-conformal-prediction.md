@@ -643,4 +643,148 @@ SELECT ts_conformal_learn(
 
 ---
 
+---
+
+## Ensemble Prediction Intervals (EPI-01)
+
+The conformal machinery is **model-agnostic** — it works on any point forecasts, including
+ensemble forecasts. No new interval code is needed: the same `ts_cv_folds_by` →
+`ts_conformal_calibrate` → `ts_conformal_apply_by` pipeline applies to both
+`AutoEnsemble` and explicit-member (`ts_forecast_ensemble_by`) forecasts.
+
+**Model-native alternative:** `Ensemble::predict_with_intervals()` returns a
+widest-envelope bound (min of member lowers, max of member uppers). This is model-native
+and avoids the CV step, but provides no coverage guarantee. For distribution-free,
+coverage-guaranteed intervals, use the conformal path shown here.
+
+### LIMITATIONS (documented)
+
+1. **`ts_cv_forecast_by` ignores `top_k`/`combination_method` for AutoEnsemble.**
+   The CV native does not parse these params — it always backtests with `top_k=3, Mean`.
+   Additionally, `ts_cv_forecast_by('AutoEnsemble')` crashes at runtime in build 0.15.3
+   (segfault). The workaround is the manual per-fold loop using `_ts_forecast_scalar` shown
+   below.
+
+2. **`ts_forecast_ensemble_by` cannot flow through `ts_cv_forecast_by`.**
+   It is a ScalarFunction (not a string-method dispatch). The explicit-member conformal path
+   requires the manual fold loop using `_ts_forecast_ensemble_native` per fold.
+
+3. **`ts_conformal_calibrate` returns a global quantile** across all series and folds.
+   For per-series calibration, use `ts_conformal_by` (one-step) with a `group_col`.
+
+### AutoEnsemble conformal path (verified)
+
+```sql
+-- Shared test data: 2 series, 120 daily observations
+CREATE OR REPLACE TABLE ae_series AS
+SELECT 1 AS id, (DATE '2020-01-01' + INTERVAL (i) DAY) AS ds, 10.0 + i * 0.5 AS y
+FROM range(120) t(i);
+
+-- Step 1: CV folds
+CREATE OR REPLACE TABLE ae_folds AS
+SELECT * FROM ts_cv_folds_by('ae_series', id, ds, y, 3, 5, MAP{});
+
+-- Step 2: Manual fold loop (ts_cv_forecast_by crashes for AutoEnsemble — see LIMITATIONS)
+CREATE OR REPLACE TABLE ae_bt AS
+WITH train AS (
+    SELECT id, fold_id, ds, y FROM ae_folds WHERE split = 'train'
+),
+test AS (
+    SELECT id, fold_id, ds, y AS actual,
+           ROW_NUMBER() OVER (PARTITION BY id, fold_id ORDER BY ds) AS step
+    FROM ae_folds WHERE split = 'test'
+),
+fc AS (
+    SELECT id, fold_id, forecast_step, yhat
+    FROM (
+        SELECT id, fold_id,
+               unnest(
+                   _ts_forecast_scalar(
+                       LIST(ds ORDER BY ds), LIST(y::DOUBLE ORDER BY ds),
+                       (SELECT max(step) FROM test t WHERE t.id = d.id AND t.fold_id = d.fold_id)::INTEGER,
+                       '1d', 'AutoEnsemble', MAP{}::MAP(VARCHAR, VARCHAR)
+                   ), recursive := true
+               )
+        FROM train d GROUP BY id, fold_id
+    )
+)
+SELECT te.id, te.fold_id, te.ds, te.actual AS y, fc.yhat
+FROM test te JOIN fc ON te.id=fc.id AND te.fold_id=fc.fold_id AND te.step=fc.forecast_step;
+
+-- Step 3: Calibrate (90% coverage, alpha=0.1)
+CREATE OR REPLACE TABLE ae_calib AS
+SELECT * FROM ts_conformal_calibrate('ae_bt', y, yhat, MAP{'alpha': '0.1'});
+
+-- Step 4: Final AutoEnsemble forecast
+CREATE OR REPLACE TABLE ae_fcst AS
+SELECT * FROM ts_forecast_by('ae_series', id, ds, y, 'AutoEnsemble', 5, '1d');
+
+-- Step 5: Apply conformal intervals
+SELECT f.id, f.ds, f.forecast_step, f.yhat,
+       f.yhat - c.conformity_score AS yhat_lower,
+       f.yhat + c.conformity_score AS yhat_upper
+FROM ae_fcst f CROSS JOIN ae_calib c
+ORDER BY id, forecast_step;
+-- Verification: lower <= yhat <= upper for all steps (bad_rows must be 0)
+```
+
+### Explicit-member conformal path (verified)
+
+`ts_forecast_ensemble_by` is a ScalarFunction and cannot flow through `ts_cv_forecast_by`.
+The workaround calls `_ts_forecast_ensemble_native` on each fold's train partition:
+
+```sql
+-- Same ae_series from above; reuse ae_folds
+CREATE OR REPLACE TABLE exp_bt AS
+WITH train AS (
+    SELECT id, fold_id, ds, y FROM ae_folds WHERE split = 'train'
+),
+test AS (
+    SELECT id, fold_id, ds, y AS actual,
+           ROW_NUMBER() OVER (PARTITION BY id, fold_id ORDER BY ds) AS step
+    FROM ae_folds WHERE split = 'test'
+),
+fc AS (
+    SELECT id, fold_id, forecast_step, yhat
+    FROM (
+        SELECT id, fold_id,
+               unnest(
+                   _ts_forecast_ensemble_native(
+                       LIST(ds ORDER BY ds), LIST(y::DOUBLE ORDER BY ds),
+                       ['AutoARIMA', 'AutoETS', 'Theta'],
+                       (SELECT max(step) FROM test t WHERE t.id = d.id AND t.fold_id = d.fold_id)::INTEGER,
+                       '1d',
+                       '',   -- combination_method: '' = mean
+                       0     -- seasonal_period
+                   ), recursive := true
+               )
+        FROM train d GROUP BY id, fold_id
+    )
+)
+SELECT te.id, te.fold_id, te.ds, te.actual AS y, fc.yhat
+FROM test te JOIN fc ON te.id=fc.id AND te.fold_id=fc.fold_id AND te.step=fc.forecast_step;
+
+CREATE OR REPLACE TABLE exp_calib AS
+SELECT * FROM ts_conformal_calibrate('exp_bt', y, yhat, MAP{'alpha': '0.1'});
+
+CREATE OR REPLACE TABLE exp_fcst AS
+SELECT * FROM ts_forecast_ensemble_by(
+    'ae_series', id, ds, y,
+    ['AutoARIMA', 'AutoETS', 'Theta'], 5, '1d',
+    combination_method := ''
+);
+
+SELECT f.id, f.ds, f.forecast_step, f.yhat,
+       f.yhat - c.conformity_score AS yhat_lower,
+       f.yhat + c.conformity_score AS yhat_upper
+FROM exp_fcst f CROSS JOIN exp_calib c
+ORDER BY id, forecast_step;
+-- Verification: lower <= yhat <= upper for all steps (bad_rows must be 0)
+```
+
+See [ensemble_intervals.sql](../../examples/forecasting/ensemble_intervals.sql) for the full
+runnable EPI-01 DoD example with both paths verified end-to-end.
+
+---
+
 *See also: [Cross-Validation](08-cross-validation.md) | [Evaluation Metrics](09-evaluation-metrics.md)*
