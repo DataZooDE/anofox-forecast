@@ -4,17 +4,17 @@ milestone: v0.8.0
 milestone_name: Ensemble Forecasting
 current_phase: 05
 current_phase_name: Explicit-Member Ensemble
-status: executing
-stopped_at: Completed 05-01-PLAN.md (explicit-member ensemble tracer)
-last_updated: "2026-08-31T06:53:46.179Z"
+status: verifying
+stopped_at: Completed 05-explicit-member-ensemble 05-02-PLAN.md
+last_updated: "2026-08-31T09:44:51.404Z"
 last_activity: 2026-08-31
 last_activity_desc: Phase 05 execution started
-state_head: cf6e34b1f6a161e98b9b57baf7bc96a66cd241d7
+state_head: 46cd632a8c91ce22ba9c49bc39eee1a0b2eb7965
 progress:
   total_phases: 3
   completed_phases: 1
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
   percent: 33
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-30 — started v0.8.0 Ensemble Foreca
 
 Phase: 05 (Explicit-Member Ensemble) — EXECUTING
 Plan: 2 of 2
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-31 — Phase 05 execution started
 
 Progress: [███░░░░░░░] 33%
@@ -66,6 +66,7 @@ Progress: [███░░░░░░░] 33%
 | Phase 04-autoensemble-surface-combination-methods P01 | 571 | 3 tasks | 7 files |
 | Phase 04 P02 | 2084 | 2 tasks | 3 files |
 | Phase 05-explicit-member-ensemble P01 | 811 | 3 tasks | 10 files |
+| Phase 05-explicit-member-ensemble P02 | 362 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -85,6 +86,8 @@ Recent decisions affecting current work:
 - [Phase 05]: ScalarFunction dispatch for _ts_forecast_ensemble_native (not TableFunction) — matches ts_forecast_by macro's unnest pattern and avoids streaming table function overhead
 - [Phase 05]: build_forecaster: exhaustive 36-variant ModelType match with 10 blocked variants returning InvalidParameter — foundation for Phase 05-02 full allowlist
 - [Phase 05]: Null-delimited member buffer (members_buf + members_buf_len) for FFI marshal — avoids over-read, defensive members_count assertion
+- [Phase 05]: Section 4 error demonstrations placed at END of example file — no in-script error-capture idiom; sections 1-3 run clean as a pipe
+- [Phase 05]: PR #230 rule enforced — all 7 SQL snippets in reference doc and API entry run through built extension before committing
 
 ### Pending Todos
 
@@ -107,8 +110,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 **Resume file:** None
 
-Last session: 2026-08-31T06:53:46.157Z
-Stopped at: Completed 05-01-PLAN.md (explicit-member ensemble tracer)
+Last session: 2026-08-31T09:44:51.384Z
+Stopped at: Completed 05-explicit-member-ensemble 05-02-PLAN.md
 Resume: /gsd-plan-phase 4 to plan the AutoEnsemble surface + combination methods.
 
 ## Operator Next Steps

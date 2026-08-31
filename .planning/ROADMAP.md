@@ -63,10 +63,10 @@ INTER-01 (intermittent-demand classification) descoped — user has a more advan
   3. For a fixed combination method, the explicit-member ensemble forecast equals the manual weighted combination of each named member's independently-computed forecast (internal-consistency cross-check).
   4. A runnable `examples/*.sql` exercises the explicit-member surface against the built extension and is verified.
 
-**Plans**: 1/2 plans executed
+**Plans**: 2/2 plans executed
 
 - [x] 05-01-PLAN.md — Tracer: wire `ts_forecast_ensemble_by` end-to-end (build_forecaster factory + forecast_explicit_ensemble + anofox_ts_forecast_ensemble FFI + new C++ function + CMakeLists + macro) and prove the Mean cross-check (ENS-02)
-- [ ] 05-02-PLAN.md — Expand to the full 26-member allowlist + all six combination methods + error tests, and document the surface (ENS-02)
+- [x] 05-02-PLAN.md — Expand to the full 26-member allowlist + all six combination methods + error tests, and document the surface (ENS-02)
 
 ### Phase 6: Ensemble Intervals & Introspection
 
@@ -87,7 +87,7 @@ INTER-01 (intermittent-demand classification) descoped — user has a more advan
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 4. AutoEnsemble Surface + Combination Methods | 2/2 | Complete    | 2026-08-30 |
-| 5. Explicit-Member Ensemble | 1/2 | In Progress|  |
+| 5. Explicit-Member Ensemble | 2/2 | In Progress|  |
 | 6. Ensemble Intervals & Introspection | 0/TBD | Not started | - |
 
 ## Next
