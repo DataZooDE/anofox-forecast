@@ -2581,6 +2581,274 @@ fn forecast_auto_ensemble(
 }
 
 // ============================================================================
+// Phase 5 (ENS-02): Explicit-member ensemble helpers
+// ============================================================================
+
+/// Construct a boxed `Forecaster` instance for the given model type and optional
+/// seasonal period.  Used by `forecast_explicit_ensemble` to build member models
+/// for `Ensemble::new(members)`.
+///
+/// Compiler-exhaustive match over all 36 `ModelType` variants — any future variant
+/// addition causes a compile error rather than a silent runtime miss.
+///
+/// Returns `Err(InvalidParameter)` for model types that are not expressible as a
+/// single per-series `Box<dyn Forecaster>` with a shared `seasonal_period`:
+/// GARCH (wrong predict semantics), Laplace (variant-dependent construction),
+/// ARIMA (requires p/d/q), MFLES/MSTL/TBATS + Auto variants (multi-seasonal),
+/// AutoEnsemble (circular).
+pub(crate) fn build_forecaster(
+    model_type: ModelType,
+    period: Option<usize>,
+) -> Result<anofox_forecast::models::BoxedForecaster> {
+    use anofox_forecast::models::baseline::{
+        Naive, RandomWalkWithDrift, SeasonalNaive, SeasonalWindowAverage, WindowAverage,
+    };
+
+    let p = period.unwrap_or(0);
+
+    match model_type {
+        // Auto-selection models
+        ModelType::AutoARIMA => {
+            let mut cfg = AutoARIMAConfig::default();
+            cfg.seasonal_period = p;
+            Ok(Box::new(AutoARIMA::with_config(cfg)))
+        }
+        ModelType::AutoETS => {
+            let cfg = if p > 1 {
+                AutoETSConfig::with_period(p)
+            } else {
+                AutoETSConfig::default()
+            };
+            Ok(Box::new(AutoETS::with_config(cfg)))
+        }
+        ModelType::AutoTheta => {
+            if p > 1 {
+                Ok(Box::new(AutoTheta::seasonal(p)))
+            } else {
+                Ok(Box::new(AutoTheta::new()))
+            }
+        }
+        // Theta family
+        ModelType::Theta => {
+            if p > 1 {
+                Ok(Box::new(Theta::seasonal(p)))
+            } else {
+                Ok(Box::new(Theta::new()))
+            }
+        }
+        ModelType::OptimizedTheta => {
+            if p > 1 {
+                Ok(Box::new(OptimizedTheta::seasonal(p)))
+            } else {
+                Ok(Box::new(OptimizedTheta::new()))
+            }
+        }
+        ModelType::DynamicTheta => {
+            if p > 1 {
+                Ok(Box::new(DynamicTheta::seasonal(p)))
+            } else {
+                Ok(Box::new(DynamicTheta::new(0.1)))
+            }
+        }
+        ModelType::DynamicOptimizedTheta => {
+            if p > 1 {
+                Ok(Box::new(DynamicTheta::seasonal_optimized(p)))
+            } else {
+                Ok(Box::new(DynamicTheta::optimized()))
+            }
+        }
+        // Baselines (crate types that implement Forecaster)
+        ModelType::Naive => Ok(Box::new(Naive::new())),
+        ModelType::RandomWalkDrift => Ok(Box::new(RandomWalkWithDrift::new())),
+        ModelType::SES => Ok(Box::new(SimpleExponentialSmoothing::new(0.3))),
+        ModelType::SESOptimized => Ok(Box::new(SimpleExponentialSmoothing::auto())),
+        ModelType::SMA => Ok(Box::new(WindowAverage::new(5))),
+        ModelType::Holt => Ok(Box::new(HoltLinearTrend::auto())),
+        ModelType::HoltWinters => {
+            // HoltWinters requires period >= 2; fall back to 12 if not seasonal
+            let sp = if p > 1 { p } else { 12 };
+            Ok(Box::new(HoltWintersModel::auto(
+                sp,
+                anofox_forecast::models::exponential::SeasonalType::Additive,
+            )))
+        }
+        ModelType::SeasonalNaive => {
+            let sp = if p > 1 { p } else { 12 };
+            Ok(Box::new(SeasonalNaive::new(sp)))
+        }
+        ModelType::SeasonalES => {
+            let sp = if p > 1 { p } else { 12 };
+            Ok(Box::new(SeasonalESModel::new(sp)))
+        }
+        ModelType::SeasonalESOptimized => {
+            let sp = if p > 1 { p } else { 12 };
+            Ok(Box::new(SeasonalESModel::optimized(sp)))
+        }
+        ModelType::SeasonalWindowAverage => {
+            // SeasonalWindowAverage::new(period, n_seasons); use 2 seasons as default
+            let sp = if p > 1 { p } else { 12 };
+            Ok(Box::new(SeasonalWindowAverage::new(sp, 2)))
+        }
+        ModelType::ETS => {
+            // Use AAA spec (additive error/trend/seasonal) when period > 1, ANN otherwise
+            // ETSModel is imported as `ETS as ETSModel` at the top of this file
+            if p > 1 {
+                Ok(Box::new(ETSModel::new(ETSSpec::aaa(), p)))
+            } else {
+                Ok(Box::new(ETSModel::default()))
+            }
+        }
+        // State-space
+        ModelType::Kalman => Ok(Box::new(KalmanForecaster::local_level())),
+        // Intermittent demand
+        ModelType::CrostonClassic => Ok(Box::new(Croston::new())),
+        ModelType::CrostonOptimized => Ok(Box::new(Croston::new().optimized())),
+        ModelType::CrostonSBA => Ok(Box::new(Croston::new().sba())),
+        ModelType::ADIDA => Ok(Box::new(ADIDA::new())),
+        ModelType::IMAPA => Ok(Box::new(IMAPA::new())),
+        ModelType::TSB => Ok(Box::new(TSB::new())),
+
+        // NOT SUPPORTED — return error naming the model and suggesting an alternative
+        ModelType::GARCH => Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: model_type.name().to_string(),
+            reason: "GARCH is not supported as an ensemble member: Forecaster::predict() \
+                     returns simulated innovations, not level forecasts; use AutoARIMA \
+                     or AutoETS instead"
+                .to_string(),
+        }),
+        ModelType::Laplace => Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: model_type.name().to_string(),
+            reason: "Laplace is not supported as an ensemble member in v1 (variant-dependent \
+                     construction); use AutoARIMA, AutoETS, or AutoTheta instead"
+                .to_string(),
+        }),
+        ModelType::ARIMA => Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: model_type.name().to_string(),
+            reason: "Fixed-order ARIMA requires (p,d,q) params not supported in the \
+                     shared-period ensemble v1; use AutoARIMA instead"
+                .to_string(),
+        }),
+        ModelType::MFLES => Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: model_type.name().to_string(),
+            reason: "MFLES requires seasonal_periods[] which is not supported in v1 \
+                     explicit-member ensembles; use AutoARIMA or AutoETS instead"
+                .to_string(),
+        }),
+        ModelType::AutoMFLES => Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: model_type.name().to_string(),
+            reason: "AutoMFLES requires seasonal_periods[] which is not supported in v1 \
+                     explicit-member ensembles; use AutoARIMA or AutoETS instead"
+                .to_string(),
+        }),
+        ModelType::MSTL => Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: model_type.name().to_string(),
+            reason: "MSTL requires seasonal_periods[] which is not supported in v1 \
+                     explicit-member ensembles; use AutoARIMA or AutoETS instead"
+                .to_string(),
+        }),
+        ModelType::AutoMSTL => Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: model_type.name().to_string(),
+            reason: "AutoMSTL requires seasonal_periods[] which is not supported in v1 \
+                     explicit-member ensembles; use AutoARIMA or AutoETS instead"
+                .to_string(),
+        }),
+        ModelType::TBATS => Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: model_type.name().to_string(),
+            reason: "TBATS requires seasonal_periods[] which is not supported in v1 \
+                     explicit-member ensembles; use AutoARIMA or AutoETS instead"
+                .to_string(),
+        }),
+        ModelType::AutoTBATS => Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: model_type.name().to_string(),
+            reason: "AutoTBATS requires seasonal_periods[] which is not supported in v1 \
+                     explicit-member ensembles; use AutoARIMA or AutoETS instead"
+                .to_string(),
+        }),
+        ModelType::AutoEnsemble => Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: model_type.name().to_string(),
+            reason: "AutoEnsemble cannot be used as a member of an explicit ensemble"
+                .to_string(),
+        }),
+    }
+}
+
+/// Explicit-member ensemble forecasting.
+///
+/// Fits each named member model independently on the same series and combines
+/// their point forecasts using the specified `CombinationMethod` (default: Mean).
+///
+/// Mirrors `forecast_auto_ensemble` but accepts an explicit list of member names
+/// instead of running automated model selection.
+///
+/// # Arguments
+/// * `values` — series values (length >= 2)
+/// * `horizon` — number of steps to forecast
+/// * `member_names` — ordered list of member model names (must have >= 2 items);
+///   names follow the same vocabulary as `ts_forecast_by` (ModelType::from_str)
+/// * `method_str` — combination method string; `None` or `""` → Mean
+/// * `period` — shared seasonal period (0 or 1 → non-seasonal)
+///
+/// Returns `ForecastOutput` with `model_name = "Ensemble"` and `lower = upper = []`
+/// (prediction intervals are Phase 6, EPI-01).
+fn forecast_explicit_ensemble(
+    values: &[f64],
+    horizon: usize,
+    member_names: &[String],
+    method_str: Option<&str>,
+    period: usize,
+) -> Result<ForecastOutput> {
+    use anofox_forecast::models::ensemble::Ensemble;
+
+    // 1. Validate member count
+    if member_names.len() < 2 {
+        return Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: member_names.len().to_string(),
+            reason: "at least 2 members are required for an ensemble".to_string(),
+        });
+    }
+
+    // 2. Parse combination method (reuse Phase 4 function verbatim — one definition)
+    let combination_method = parse_combination_method(method_str)?;
+
+    // 3. Build member forecasters
+    let member_period = if period > 1 { Some(period) } else { None };
+    let mut members: Vec<anofox_forecast::models::BoxedForecaster> =
+        Vec::with_capacity(member_names.len());
+    for name in member_names {
+        let model_type: ModelType = name.parse().map_err(|_| ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: name.clone(),
+            reason: format!(
+                "unknown model name '{}'; use the same names as ts_forecast_by",
+                name
+            ),
+        })?;
+        members.push(build_forecaster(model_type, member_period)?);
+    }
+
+    // 4. Build + fit ensemble + extract forecast
+    // Ensemble implements Forecaster (anofox-forecast 0.15.3, model.rs:575)
+    let ts = make_timeseries(values)?;
+    let mut ens = Ensemble::new(members).with_method(combination_method);
+    ens.fit(&ts).map_err(|e| {
+        ForecastError::ComputationError(format!("Ensemble fit failed: {}", e))
+    })?;
+    // model_name = "Ensemble" (plain, mirroring Phase 4's plain "AutoEnsemble")
+    extract_forecast(&ens, horizon, "Ensemble")
+}
+
+// ============================================================================
 // Exogenous-aware forecasting functions
 // ============================================================================
 
