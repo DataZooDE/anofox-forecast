@@ -2,20 +2,20 @@
 gsd_state_version: 1.0
 milestone: v0.8.0
 milestone_name: Ensemble Forecasting
-current_phase: 05
-current_phase_name: Explicit-Member Ensemble
-status: verifying
-stopped_at: Completed 05-explicit-member-ensemble 05-02-PLAN.md
-last_updated: "2026-08-31T09:44:51.404Z"
+current_phase: 6
+current_phase_name: Ensemble Intervals & Introspection
+status: planning
+stopped_at: Phase 05 complete, ready to plan Phase 6
+last_updated: "2026-08-31T10:06:35.305Z"
 last_activity: 2026-08-31
-last_activity_desc: Phase 05 execution started
-state_head: 46cd632a8c91ce22ba9c49bc39eee1a0b2eb7965
+last_activity_desc: Phase 05 complete, transitioned to Phase 6
+state_head: bbfce39267a19d677dd2bb62221a07e5554e9a4b
 progress:
   total_phases: 3
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 4
   completed_plans: 4
-  percent: 33
+  percent: 67
 ---
 
 # Project State
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-08-30 — started v0.8.0 Ensemble Foreca
 
 ## Current Position
 
-Phase: 05 (Explicit-Member Ensemble) — EXECUTING
-Plan: 2 of 2
-Status: Phase complete — ready for verification
-Last activity: 2026-08-31 — Phase 05 execution started
+Phase: 6 — Ensemble Intervals & Introspection
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-08-31 — Phase 05 complete, transitioned to Phase 6
 
 Progress: [███░░░░░░░] 33%
 
@@ -40,7 +40,7 @@ Progress: [███░░░░░░░] 33%
 
 **Velocity:**
 
-- Total plans completed: 2 (this milestone)
+- Total plans completed: 4 (this milestone)
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -52,6 +52,7 @@ Progress: [███░░░░░░░] 33%
 | 5. Explicit-Member Ensemble | 0/TBD | - | - |
 | 6. Ensemble Intervals & Introspection | 0/TBD | - | - |
 | 04 | 2 | - | - |
+| 05 | 2 | - | - |
 
 **Recent Trend:**
 
@@ -111,7 +112,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 **Resume file:** None
 
 Last session: 2026-08-31T09:44:51.384Z
-Stopped at: Completed 05-explicit-member-ensemble 05-02-PLAN.md
+Stopped at: Phase 05 complete, ready to plan Phase 6
 Resume: /gsd-plan-phase 4 to plan the AutoEnsemble surface + combination methods.
 
 ## Operator Next Steps
