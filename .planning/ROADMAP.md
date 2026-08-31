@@ -3,7 +3,7 @@
 ## Milestones
 
 - ✅ **v0.7.0 — Close the Crate→Extension Gap (Diagnostics + Model Coverage)** — Phases 1-3 (shipped 2026-08-22)
-- 🚧 **v0.8.0 — Ensemble Forecasting** — Phases 4-6 (active)
+- ✅ **v0.8.0 — Ensemble Forecasting** — Phases 4-6 (shipped 2026-08-31)
 
 ## Phases
 
@@ -25,74 +25,24 @@ INTER-01 (intermittent-demand classification) descoped — user has a more advan
 
 </details>
 
-### v0.8.0 — Ensemble Forecasting (Phases 4-6)
+<details>
+<summary>✅ v0.8.0 — Ensemble Forecasting (Phases 4-6) — SHIPPED 2026-08-31</summary>
 
-- [x] **Phase 4: AutoEnsemble Surface + Combination Methods** - Per-series AutoEnsemble (top-K across ARIMA/ETS/Theta) with all six combination methods exposed (completed 2026-08-30)
-- [x] **Phase 5: Explicit-Member Ensemble** - User names member models + a combination method; extension fits and combines each (completed 2026-08-31)
-- [x] **Phase 6: Ensemble Intervals & Introspection** - Distribution-free conformal intervals on ensembles + selected-members/weights inspection (completed 2026-08-31)
+Full detail: [milestones/v0.8.0-ROADMAP.md](milestones/v0.8.0-ROADMAP.md) · Requirements: [milestones/v0.8.0-REQUIREMENTS.md](milestones/v0.8.0-REQUIREMENTS.md) · Audit: [milestones/v0.8.0-MILESTONE-AUDIT.md](milestones/v0.8.0-MILESTONE-AUDIT.md)
 
-## Phase Details
+- [x] Phase 4: AutoEnsemble Surface + Combination Methods (2/2 plans) — completed 2026-08-30
+      `ts_forecast_by(..., 'AutoEnsemble', ..., {top_k, combination_method, seasonal_period})` + six combination methods (Mean/Median/WeightedMSE/InverseAIC/Stacking/HorizonAdaptive) (ENS-01, COMB-01..04)
 
-### Phase 4: AutoEnsemble Surface + Combination Methods
+- [x] Phase 5: Explicit-Member Ensemble (2/2 plans) — completed 2026-08-31
+      `ts_forecast_ensemble_by('table', grp, ds, y, members VARCHAR[], ...)` — user-named members + `build_forecaster` factory (26-member allowlist) (ENS-02)
 
-**Goal**: SQL users can produce an AutoEnsemble forecast per series (crate auto-fits ARIMA/ETS/Theta, ranks by error, combines top-K) and choose any of the six combination methods that govern how members are blended.
-**Depends on**: Phase 3 (existing `ts_forecast_by` per-series method-string dispatch — the lower-risk delivery vehicle used for GARCH/Kalman in v0.7.0)
-**Requirements**: ENS-01, COMB-01, COMB-02, COMB-03, COMB-04
-**Success Criteria** (what must be TRUE):
+- [x] Phase 6: Ensemble Intervals & Introspection (2/2 plans) — completed 2026-08-31
+      Conformal intervals on ensembles via the existing path (EPI-01) + `ts_ensemble_inspect_by` / `ts_auto_ensemble_inspect_by` member/weight introspection (INSP-01)
 
-  1. A user can run an AutoEnsemble forecast per series setting `top_k`, `combination_method`, and `seasonal_period`, and get one blended forecast row-set per series back.
-  2. A user can select `Mean` or `Median` combination and see the point forecast change accordingly (COMB-01).
-  3. A user can select `WeightedMSE` or `InverseAIC` combination and see error/information-weighted blending applied (COMB-02).
-  4. A user can select `Stacking` (learned non-negative holdout weights) or `HorizonAdaptive` (per-step rolling-origin weights) and get a valid forecast (COMB-03, COMB-04).
-  5. For a fixed `Mean` combination, the ensemble point forecast equals the manual arithmetic mean of the individual member forecasts computed independently (internal-consistency cross-check), and a runnable `examples/*.sql` demonstrates it against the built extension.
+Tech debt carried forward: `ts_cv_forecast_by('AutoEnsemble')` segfaults (crate/CV-native bug, worked around via manual per-fold loop); AutoEnsemble non-Mean combination weights return NULL (crate 0.15.3 exposes no inner-weight accessor); `build_forecaster` SeasonalWindowAverage `n_seasons=2` hardcoded (TODO ENS-03). See milestones/v0.8.0-MILESTONE-AUDIT.md.
 
-**Plans**: 2/2 plans executed
-
-- [x] 04-01-PLAN.md — Tracer: wire `'AutoEnsemble'` end-to-end (Rust core + FFI + C++) and demonstrate the Mean cross-check (ENS-01, COMB-01)
-- [x] 04-02-PLAN.md — Expand to the other five combination methods + Mean-vs-Median demonstrability, and document the surface (COMB-01..04)
-
-### Phase 5: Explicit-Member Ensemble
-
-**Goal**: SQL users can name an explicit list of member models plus a combination method; the extension fits each named member per series and combines them, reusing the combination-method plumbing from Phase 4.
-**Depends on**: Phase 4 (combination-method surface + FFI ensemble path)
-**Requirements**: ENS-02
-**Success Criteria** (what must be TRUE):
-
-  1. A user can call an explicit-member ensemble macro (e.g. `ts_forecast_ensemble_by`) passing a member-model list and a `combination_method`, and get a per-series blended forecast back.
-  2. The same six combination methods available to AutoEnsemble in Phase 4 apply to the explicit-member surface and produce the expected blend.
-  3. For a fixed combination method, the explicit-member ensemble forecast equals the manual weighted combination of each named member's independently-computed forecast (internal-consistency cross-check).
-  4. A runnable `examples/*.sql` exercises the explicit-member surface against the built extension and is verified.
-
-**Plans**: 2/2 plans executed
-
-- [x] 05-01-PLAN.md — Tracer: wire `ts_forecast_ensemble_by` end-to-end (build_forecaster factory + forecast_explicit_ensemble + anofox_ts_forecast_ensemble FFI + new C++ function + CMakeLists + macro) and prove the Mean cross-check (ENS-02)
-- [x] 05-02-PLAN.md — Expand to the full 26-member allowlist + all six combination methods + error tests, and document the surface (ENS-02)
-
-### Phase 6: Ensemble Intervals & Introspection
-
-**Goal**: SQL users can attach distribution-free prediction intervals to an ensemble forecast through the existing conformal path, and inspect which member models were selected and their combination weights per series.
-**Depends on**: Phase 4 and Phase 5 (an ensemble point-forecast surface must exist to wrap with intervals and to introspect)
-**Requirements**: EPI-01, INSP-01
-**Success Criteria** (what must be TRUE):
-
-  1. A user can learn-then-apply conformal prediction intervals on an ensemble point forecast and get lower/upper bounds per horizon step, routed through the existing conformal machinery (EPI-01).
-  2. A user can query which member models an ensemble selected, per series (INSP-01).
-  3. A user can query the combination weight assigned to each selected member, per series, and the weights are consistent with the combination method chosen (INSP-01).
-  4. A runnable `examples/*.sql` demonstrates both intervals and introspection against the built extension and is verified.
-
-**Plans**: 2/2 plans executed
-
-- [x] 06-01-PLAN.md — Tracer + wiring: INSP-01 introspection end-to-end (inspect_explicit_ensemble + inspect_auto_ensemble core → EnsembleInspectResult FFI + 2 exports → 2 C++ ScalarFunctions + CMakeLists + registration → ts_ensemble_inspect_by + ts_auto_ensemble_inspect_by macros → verified Mean-weights tracer) (INSP-01)
-- [x] 06-02-PLAN.md — EPI-01 conformal intervals example (AutoEnsemble clean path + explicit-member manual-fold, both surfaces) + INSP-01 full DoD example + docs (INSP-01, EPI-01)
-
-## Progress
-
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 4. AutoEnsemble Surface + Combination Methods | 2/2 | Complete    | 2026-08-30 |
-| 5. Explicit-Member Ensemble | 2/2 | Complete    | 2026-08-31 |
-| 6. Ensemble Intervals & Introspection | 2/2 | Complete    | 2026-08-31 |
+</details>
 
 ## Next
 
-Active milestone: v0.8.0 — Ensemble Forecasting. Plan the first phase with `/gsd-plan-phase 4`.
+v0.8.0 shipped. Planning next milestone — run `/gsd-new-milestone`.

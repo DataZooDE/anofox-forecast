@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v0.8.0
 milestone_name: Ensemble Forecasting
-current_phase: 06
-status: completed
+status: Awaiting next milestone
 stopped_at: Phase 06 complete — all phases complete
-last_updated: "2026-08-31T18:02:48.389Z"
+last_updated: "2026-08-31T18:38:24.447Z"
 last_activity: 2026-08-31
-last_activity_desc: Phase 06 complete
-state_head: 5870ed2b2e2cb692bce8ce34dd4f0bfc9c9b84f7
+last_activity_desc: Milestone v0.8.0 completed and archived
+state_head: 4e26afbbca9a43ebf6b930640005e3c55d5c841d
 progress:
   total_phases: 3
   completed_phases: 3
   total_plans: 6
   completed_plans: 6
   percent: 100
+current_phase: 06
 ---
 
 # Project State
@@ -28,12 +28,10 @@ See: .planning/PROJECT.md (updated 2026-08-30 — started v0.8.0 Ensemble Foreca
 
 ## Current Position
 
-Phase: 06
-Plan: Not started
-Status: All phases complete
-Last activity: 2026-08-31 — Phase 06 complete
-
-Progress: [███████░░░] 67%
+Phase: Milestone v0.8.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-08-31 — Milestone v0.8.0 completed and archived
 
 ## Performance Metrics
 
@@ -123,4 +121,4 @@ Resume: /gsd-plan-phase 4 to plan the AutoEnsemble surface + combination methods
 
 ## Operator Next Steps
 
-- Plan the first phase with /gsd-plan-phase 4
+- Start the next milestone with /gsd-new-milestone
