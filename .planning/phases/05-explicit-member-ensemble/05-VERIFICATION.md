@@ -1,10 +1,11 @@
 ---
 phase: 05-explicit-member-ensemble
-verified: 2026-08-31T10:15:00Z
+verified: 2026-08-31T12:10:00Z
 status: passed
 score: 8/8 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
+reverified_after: "code-review fix bbfce39 (WR-01 NULL interpolation, WR-02 <3 min-length guard, WR-03 SMA window, + unit tests). Orchestrator independently re-ran both Phase 5 examples + the Phase 4 autoensemble example against the rebuilt extension post-fix: Mean cross-check diff=0.0/mismatch_count=0, six methods ok=true, error paths raise clear naming errors, no AutoEnsemble regression; cargo test 233 passed. Refreshed to post-date the fix."
 ---
 
 # Phase 5: Explicit-Member Ensemble Verification Report
