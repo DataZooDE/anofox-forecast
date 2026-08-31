@@ -8095,6 +8095,403 @@ pub unsafe extern "C" fn anofox_ts_forecast_ensemble(
 }
 
 // ============================================================================
+// Phase 6 (INSP-01): Ensemble introspection FFI surface
+// ============================================================================
+
+/// Result struct for ensemble member introspection.
+///
+/// Both `anofox_ts_ensemble_inspect` and `anofox_ts_auto_ensemble_inspect` return
+/// via a pointer to this struct. The companion `anofox_free_ensemble_inspect_result`
+/// must be called after unpacking to avoid memory leaks.
+///
+/// `member_names_buf` is a null-delimited concatenation of all member names:
+///   "AutoARIMA\0AutoETS\0Theta\0"
+/// Parse by splitting on b==0 and filtering empty slices.
+///
+/// `weights` is either:
+/// - a `count`-length array (one weight per member)
+/// - or `null` when no weights are available (AutoEnsemble non-Mean)
+///
+/// `scores` is either:
+/// - a `count`-length array of in-sample MSE scores (AutoEnsemble path)
+/// - or `null` (explicit-member path has no per-member score)
+#[repr(C)]
+pub struct EnsembleInspectResult {
+    pub count: size_t,                  // number of members
+    pub member_names_buf: *mut c_char,  // null-delimited names; length = member_names_buf_len
+    pub member_names_buf_len: size_t,   // byte length of member_names_buf (including all NULs)
+    pub weights: *mut c_double,         // len=count; null if no weights available (non-Mean AutoEnsemble)
+    pub scores: *mut c_double,          // len=count MSE scores; null for explicit-member inspect
+}
+
+/// Inspect combination weights for an explicit-member ensemble (INSP-01).
+///
+/// Builds and fits the Ensemble from the named members on the series, then returns
+/// the per-member combination weights. Weights sum to 1.0 for all six methods.
+/// For Mean and Median, weights are equal (1/k). For WeightedMSE, InverseAIC,
+/// Stacking, and HorizonAdaptive, weights are crate-computed.
+///
+/// `scores` in the result is always `null` (explicit-member has no per-member MSE score).
+///
+/// # Safety
+/// All pointer arguments must be valid. `out_result` must point to a zeroed `EnsembleInspectResult`.
+/// Call `anofox_free_ensemble_inspect_result(out_result)` after unpacking.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_ensemble_inspect(
+    values: *const c_double,
+    validity: *const u64,
+    length: size_t,
+    members_buf: *const c_char,        // null-delimited: "AutoARIMA\0AutoETS\0Theta\0"
+    members_buf_len: size_t,            // total byte length of members_buf
+    members_count: size_t,              // number of member strings
+    combination_method: *const c_char,  // C string, NULL or "" → "mean"
+    seasonal_period: c_int,
+    out_result: *mut EnsembleInspectResult,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if values.is_null() || members_buf.is_null() || out_result.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let series = build_series(values, validity, length);
+
+        // Recover member list from null-delimited buffer bounded by members_buf_len
+        let member_bytes =
+            std::slice::from_raw_parts(members_buf as *const u8, members_buf_len);
+        let member_names: Vec<String> = member_bytes
+            .split(|&b| b == 0)
+            .filter(|s| !s.is_empty())
+            .map(|s| String::from_utf8_lossy(s).into_owned())
+            .collect();
+
+        // Defensive: count mismatch means a C++ marshalling bug
+        if member_names.len() != members_count {
+            return Err(anofox_fcst_core::ForecastError::InvalidParameter {
+                param: "members".to_string(),
+                value: format!(
+                    "parsed {} names but members_count = {}",
+                    member_names.len(),
+                    members_count
+                ),
+                reason: "members_buf / members_count mismatch (C++ marshalling bug)".to_string(),
+            });
+        }
+
+        // Parse combination_method (NULL or empty → None → "mean" in core)
+        let method_opt: Option<String> = if combination_method.is_null() {
+            None
+        } else {
+            CStr::from_ptr(combination_method)
+                .to_str()
+                .ok()
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+        };
+
+        anofox_fcst_core::inspect_explicit_ensemble(
+            &series,
+            &member_names,
+            method_opt.as_deref(),
+            seasonal_period as usize,
+        )
+    }));
+
+    match result {
+        Ok(Ok(pairs)) => {
+            let count = pairs.len();
+            (*out_result).count = count;
+            (*out_result).scores = ptr::null_mut(); // explicit-member has no MSE score
+
+            // Build null-delimited names buffer
+            let mut names_buf: Vec<u8> = Vec::new();
+            let weights_vec: Vec<f64> = pairs
+                .iter()
+                .map(|(name, weight)| {
+                    names_buf.extend_from_slice(name.as_bytes());
+                    names_buf.push(0u8); // null terminator
+                    *weight
+                })
+                .collect();
+
+            // Allocate and copy names buffer
+            let buf_len = names_buf.len();
+            (*out_result).member_names_buf_len = buf_len;
+            if buf_len > 0 {
+                let ptr = malloc(buf_len) as *mut c_char;
+                if ptr.is_null() {
+                    if !out_error.is_null() {
+                        (*out_error).set_error(
+                            ErrorCode::AllocationError,
+                            "Failed to allocate member_names_buf",
+                        );
+                    }
+                    return false;
+                }
+                ptr::copy_nonoverlapping(names_buf.as_ptr() as *const c_char, ptr, buf_len);
+                (*out_result).member_names_buf = ptr;
+            } else {
+                (*out_result).member_names_buf = ptr::null_mut();
+            }
+
+            // Allocate and copy weights array
+            (*out_result).weights = match alloc_or_error(
+                &weights_vec,
+                out_error,
+                "Failed to allocate weights",
+            ) {
+                Ok(ptr) => ptr,
+                Err(()) => {
+                    // Free already-allocated names_buf
+                    if !(*out_result).member_names_buf.is_null() {
+                        free((*out_result).member_names_buf as *mut core::ffi::c_void);
+                        (*out_result).member_names_buf = ptr::null_mut();
+                    }
+                    return false;
+                }
+            };
+
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                let error_code = match e.to_code() {
+                    1 => ErrorCode::NullPointer,
+                    2 => ErrorCode::InvalidInput,
+                    3 => ErrorCode::ComputationError,
+                    4 => ErrorCode::AllocationError,
+                    5 => ErrorCode::InvalidModel,
+                    6 => ErrorCode::InsufficientData,
+                    7 => ErrorCode::InvalidDateFormat,
+                    8 => ErrorCode::InvalidFrequency,
+                    9 => ErrorCode::InvalidInput, // InvalidParameter → InvalidInput
+                    _ => ErrorCode::InternalError,
+                };
+                (*out_error).set_error(error_code, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
+/// Inspect selected members and in-sample MSE scores for an AutoEnsemble (INSP-01).
+///
+/// Builds and fits an AutoEnsemble, then returns the selected top-K members with
+/// their in-sample MSE scores. For Mean combination, `weights` is a `count`-length
+/// array with every element equal to 1/k. For all other combination methods
+/// (WeightedMSE, InverseAIC, Stacking, HorizonAdaptive), `weights` is `null`
+/// (crate 0.15.3 does not expose inner ensemble weights via public API).
+///
+/// # Safety
+/// All pointer arguments must be valid. `out_result` must point to a zeroed `EnsembleInspectResult`.
+/// Call `anofox_free_ensemble_inspect_result(out_result)` after unpacking.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_auto_ensemble_inspect(
+    values: *const c_double,
+    validity: *const u64,
+    length: size_t,
+    top_k: c_int,
+    combination_method: *const c_char,  // C string, NULL or "" → "weighted_mse" (crate default)
+    seasonal_period: c_int,
+    out_result: *mut EnsembleInspectResult,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if values.is_null() || out_result.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let series = build_series(values, validity, length);
+
+        // Convert Vec<Option<f64>> to Vec<f64> for the AutoEnsemble path
+        // (AutoEnsemble takes &[f64]; interpolate nulls as the core function does for explicit)
+        let values_f64: Vec<f64> = series
+            .iter()
+            .map(|v| v.unwrap_or(f64::NAN))
+            .collect();
+
+        // Parse combination_method (NULL or empty → None → "weighted_mse" in core)
+        let method_opt: Option<String> = if combination_method.is_null() {
+            None
+        } else {
+            CStr::from_ptr(combination_method)
+                .to_str()
+                .ok()
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+        };
+
+        anofox_fcst_core::inspect_auto_ensemble(
+            &values_f64,
+            top_k as usize,
+            method_opt.as_deref(),
+            seasonal_period as usize,
+        )
+    }));
+
+    match result {
+        Ok(Ok(triples)) => {
+            let count = triples.len();
+            (*out_result).count = count;
+
+            // Build null-delimited names buffer + collect weights and scores
+            let mut names_buf: Vec<u8> = Vec::new();
+            let mut scores_vec: Vec<f64> = Vec::with_capacity(count);
+            let mut weights_opt: Vec<Option<f64>> = Vec::with_capacity(count);
+
+            for (name, score, weight) in &triples {
+                names_buf.extend_from_slice(name.as_bytes());
+                names_buf.push(0u8);
+                scores_vec.push(*score);
+                weights_opt.push(*weight);
+            }
+
+            // Allocate and copy names buffer
+            let buf_len = names_buf.len();
+            (*out_result).member_names_buf_len = buf_len;
+            if buf_len > 0 {
+                let ptr = malloc(buf_len) as *mut c_char;
+                if ptr.is_null() {
+                    if !out_error.is_null() {
+                        (*out_error).set_error(
+                            ErrorCode::AllocationError,
+                            "Failed to allocate member_names_buf",
+                        );
+                    }
+                    return false;
+                }
+                ptr::copy_nonoverlapping(names_buf.as_ptr() as *const c_char, ptr, buf_len);
+                (*out_result).member_names_buf = ptr;
+            } else {
+                (*out_result).member_names_buf = ptr::null_mut();
+            }
+
+            // Allocate and copy scores array
+            (*out_result).scores = match alloc_or_error(
+                &scores_vec,
+                out_error,
+                "Failed to allocate scores",
+            ) {
+                Ok(ptr) => ptr,
+                Err(()) => {
+                    if !(*out_result).member_names_buf.is_null() {
+                        free((*out_result).member_names_buf as *mut core::ffi::c_void);
+                        (*out_result).member_names_buf = ptr::null_mut();
+                    }
+                    return false;
+                }
+            };
+
+            // Allocate weights only if ALL are Some (Mean combination); else null
+            let all_some = weights_opt.iter().all(|w| w.is_some());
+            if all_some && !weights_opt.is_empty() {
+                let weights_vec: Vec<f64> = weights_opt.iter().map(|w| w.unwrap()).collect();
+                (*out_result).weights = match alloc_or_error(
+                    &weights_vec,
+                    out_error,
+                    "Failed to allocate weights",
+                ) {
+                    Ok(ptr) => ptr,
+                    Err(()) => {
+                        if !(*out_result).member_names_buf.is_null() {
+                            free((*out_result).member_names_buf as *mut core::ffi::c_void);
+                            (*out_result).member_names_buf = ptr::null_mut();
+                        }
+                        if !(*out_result).scores.is_null() {
+                            free((*out_result).scores as *mut core::ffi::c_void);
+                            (*out_result).scores = ptr::null_mut();
+                        }
+                        return false;
+                    }
+                };
+            } else {
+                (*out_result).weights = ptr::null_mut(); // signals NULL weight column to C++
+            }
+
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                let error_code = match e.to_code() {
+                    1 => ErrorCode::NullPointer,
+                    2 => ErrorCode::InvalidInput,
+                    3 => ErrorCode::ComputationError,
+                    4 => ErrorCode::AllocationError,
+                    5 => ErrorCode::InvalidModel,
+                    6 => ErrorCode::InsufficientData,
+                    7 => ErrorCode::InvalidDateFormat,
+                    8 => ErrorCode::InvalidFrequency,
+                    9 => ErrorCode::InvalidInput, // InvalidParameter → InvalidInput
+                    _ => ErrorCode::InternalError,
+                };
+                (*out_error).set_error(error_code, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
+/// Free an EnsembleInspectResult allocated by `anofox_ts_ensemble_inspect` or
+/// `anofox_ts_auto_ensemble_inspect`.
+///
+/// Frees `member_names_buf`, `weights`, and `scores` if non-null, then zeroes
+/// the struct. Matches the allocation ownership model exactly.
+///
+/// # Safety
+/// `result` must be null or a valid pointer to an `EnsembleInspectResult` whose
+/// members were allocated by the corresponding inspect function.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_free_ensemble_inspect_result(
+    result: *mut EnsembleInspectResult,
+) {
+    if result.is_null() {
+        return;
+    }
+    let r = &mut *result;
+
+    if !r.member_names_buf.is_null() {
+        free(r.member_names_buf as *mut core::ffi::c_void);
+        r.member_names_buf = ptr::null_mut();
+    }
+    if !r.weights.is_null() {
+        free(r.weights as *mut core::ffi::c_void);
+        r.weights = ptr::null_mut();
+    }
+    if !r.scores.is_null() {
+        free(r.scores as *mut core::ffi::c_void);
+        r.scores = ptr::null_mut();
+    }
+    r.count = 0;
+    r.member_names_buf_len = 0;
+}
+
+// ============================================================================
 // Version
 // ============================================================================
 
