@@ -80,7 +80,10 @@ INTER-01 (intermittent-demand classification) descoped — user has a more advan
   3. A user can query the combination weight assigned to each selected member, per series, and the weights are consistent with the combination method chosen (INSP-01).
   4. A runnable `examples/*.sql` demonstrates both intervals and introspection against the built extension and is verified.
 
-**Plans**: TBD
+**Plans**: 2 plans
+
+- [ ] 06-01-PLAN.md — Tracer + wiring: INSP-01 introspection end-to-end (inspect_explicit_ensemble + inspect_auto_ensemble core → EnsembleInspectResult FFI + 2 exports → 2 C++ ScalarFunctions + CMakeLists + registration → ts_ensemble_inspect_by + ts_auto_ensemble_inspect_by macros → verified Mean-weights tracer) (INSP-01)
+- [ ] 06-02-PLAN.md — EPI-01 conformal intervals example (AutoEnsemble clean path + explicit-member manual-fold, both surfaces) + INSP-01 full DoD example + docs (INSP-01, EPI-01)
 
 ## Progress
 
@@ -88,7 +91,7 @@ INTER-01 (intermittent-demand classification) descoped — user has a more advan
 |-------|----------------|--------|-----------|
 | 4. AutoEnsemble Surface + Combination Methods | 2/2 | Complete    | 2026-08-30 |
 | 5. Explicit-Member Ensemble | 2/2 | Complete    | 2026-08-31 |
-| 6. Ensemble Intervals & Introspection | 0/TBD | Not started | - |
+| 6. Ensemble Intervals & Introspection | 0/2 | Planned | - |
 
 ## Next
 
