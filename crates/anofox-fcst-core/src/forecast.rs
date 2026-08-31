@@ -2662,7 +2662,10 @@ pub(crate) fn build_forecaster(
         ModelType::RandomWalkDrift => Ok(Box::new(RandomWalkWithDrift::new())),
         ModelType::SES => Ok(Box::new(SimpleExponentialSmoothing::new(0.3))),
         ModelType::SESOptimized => Ok(Box::new(SimpleExponentialSmoothing::auto())),
-        ModelType::SMA => Ok(Box::new(WindowAverage::new(5))),
+        ModelType::SMA => {
+            let window = if p > 1 { p.max(3) } else { 3 };
+            Ok(Box::new(WindowAverage::new(window)))
+        }
         ModelType::Holt => Ok(Box::new(HoltLinearTrend::auto())),
         ModelType::HoltWinters => {
             // HoltWinters requires period >= 2; fall back to 12 if not seasonal
@@ -2685,7 +2688,14 @@ pub(crate) fn build_forecaster(
             Ok(Box::new(SeasonalESModel::optimized(sp)))
         }
         ModelType::SeasonalWindowAverage => {
-            // SeasonalWindowAverage::new(period, n_seasons); use 2 seasons as default
+            // SeasonalWindowAverage::new(period, n_seasons).
+            // The adaptive computation `(values.len() / p).max(1)` used by the
+            // single-model path (forecast_seasonal_window_average) requires the series
+            // length, which is unavailable at build_forecaster construction time — the
+            // Ensemble::fit() call owns the series and calls each member's fit()
+            // independently.  We fix n_seasons=2 here as a conservative default.
+            // TODO ENS-03: derive n_seasons from series length at fit time once the
+            // Ensemble API exposes a per-member pre-fit hook.
             let sp = if p > 1 { p } else { 12 };
             Ok(Box::new(SeasonalWindowAverage::new(sp, 2)))
         }
@@ -2821,16 +2831,15 @@ pub fn forecast_explicit_ensemble(
     // 2. Parse combination method (reuse Phase 4 function verbatim — one definition)
     let combination_method = parse_combination_method(method_str)?;
 
-    // 3. Filter nulls and validate length (mirrors the main forecast() path)
-    let clean_values: Vec<f64> = values
-        .iter()
-        .filter_map(|v| *v)
-        .collect();
+    // 3. Interpolate NULLs and validate length (mirrors the main forecast() path)
+    let clean_values: Vec<f64> = fill_nulls_interpolate(values);
     if clean_values.is_empty() {
-        return Err(ForecastError::InvalidParameter {
-            param: "values".to_string(),
-            value: "0".to_string(),
-            reason: "series has no non-null values".to_string(),
+        return Err(ForecastError::InsufficientData { needed: 1, got: 0 });
+    }
+    if clean_values.len() < 3 {
+        return Err(ForecastError::InsufficientData {
+            needed: 3,
+            got: clean_values.len(),
         });
     }
 
@@ -4362,6 +4371,119 @@ mod tests {
             result.unwrap().point.len(),
             5,
             "output length must equal horizon"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 5 (ENS-02): build_forecaster + forecast_explicit_ensemble (IN-01)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn build_forecaster_ok_for_supported_members() {
+        // Naive, AutoETS, and Theta should all return Ok (non-seasonal)
+        for model in &[ModelType::Naive, ModelType::AutoETS, ModelType::Theta] {
+            let result = build_forecaster(*model, None);
+            assert!(
+                result.is_ok(),
+                "build_forecaster({:?}, None) should succeed",
+                model
+            );
+        }
+    }
+
+    #[test]
+    fn build_forecaster_err_for_blocked_variants() {
+        // GARCH, ARIMA, and AutoEnsemble are blocked
+        for model in &[ModelType::GARCH, ModelType::ARIMA, ModelType::AutoEnsemble] {
+            let result = build_forecaster(*model, None);
+            assert!(
+                result.is_err(),
+                "build_forecaster({:?}, None) should return Err",
+                model
+            );
+            // Must be an InvalidParameter error with param == "members"
+            match result {
+                Err(ForecastError::InvalidParameter { param, .. }) => {
+                    assert_eq!(param, "members", "error param must be 'members'");
+                }
+                Err(e) => panic!("expected InvalidParameter, got {:?}", e),
+                Ok(_) => panic!("expected Err, got Ok"),
+            }
+        }
+    }
+
+    #[test]
+    fn build_forecaster_seasonal_naive_with_period() {
+        // SeasonalNaive with period=7 should succeed
+        let result = build_forecaster(ModelType::SeasonalNaive, Some(7));
+        assert!(
+            result.is_ok(),
+            "build_forecaster(SeasonalNaive, Some(7)) should succeed"
+        );
+    }
+
+    #[test]
+    fn forecast_explicit_ensemble_basic() {
+        // 48-point linear series; ['AutoETS', 'Naive'] with Mean → horizon finite values
+        let values: Vec<Option<f64>> = (0..48).map(|i| Some(100.0 + i as f64 * 2.0)).collect();
+        let members = vec!["AutoETS".to_string(), "Naive".to_string()];
+        let result = forecast_explicit_ensemble(&values, 6, &members, Some("mean"), 0);
+        assert!(
+            result.is_ok(),
+            "explicit ensemble on clean series should succeed: {:?}",
+            result.err()
+        );
+        let out = result.unwrap();
+        assert_eq!(out.point.len(), 6, "output length must equal horizon");
+        for &v in &out.point {
+            assert!(v.is_finite(), "all point forecasts must be finite, got {}", v);
+        }
+    }
+
+    #[test]
+    fn forecast_explicit_ensemble_rejects_all_null_input() {
+        // All-NULL series: fill_nulls_interpolate returns all-NaN (preserves length),
+        // so is_empty() is false but Ensemble::fit detects missing values → ComputationError.
+        // This mirrors the main forecast() path behaviour for the all-None case.
+        let values: Vec<Option<f64>> = vec![None; 10];
+        let members = vec!["AutoETS".to_string(), "Naive".to_string()];
+        let result = forecast_explicit_ensemble(&values, 3, &members, None, 0);
+        assert!(result.is_err(), "all-NULL input must return Err");
+        // Accept either InsufficientData (empty after interpolation) or ComputationError
+        // (NaN detected by ensemble fit); both surface as NULL rows via the FFI.
+        match result {
+            Err(ForecastError::InsufficientData { .. }) | Err(ForecastError::ComputationError(_)) => {}
+            Err(e) => panic!("expected InsufficientData or ComputationError, got {:?}", e),
+            Ok(_) => panic!("expected Err, got Ok"),
+        }
+    }
+
+    #[test]
+    fn forecast_explicit_ensemble_rejects_too_short_series() {
+        // Series with only 2 observations must return InsufficientData (< 3 guard)
+        let values: Vec<Option<f64>> = vec![Some(1.0), Some(2.0)];
+        let members = vec!["AutoETS".to_string(), "Naive".to_string()];
+        let result = forecast_explicit_ensemble(&values, 3, &members, None, 0);
+        assert!(result.is_err(), "2-observation series must return Err");
+        match result.unwrap_err() {
+            ForecastError::InsufficientData { needed, got } => {
+                assert_eq!(needed, 3);
+                assert_eq!(got, 2);
+            }
+            e => panic!("expected InsufficientData {{ needed: 3, got: 2 }}, got {:?}", e),
+        }
+    }
+
+    #[test]
+    fn forecast_explicit_ensemble_duplicate_members_ok() {
+        // Duplicate member names should not cause an error
+        let values: Vec<Option<f64>> = (0..40).map(|i| Some(i as f64)).collect();
+        let members = vec!["AutoETS".to_string(), "AutoETS".to_string()];
+        let result = forecast_explicit_ensemble(&values, 4, &members, None, 0);
+        assert!(
+            result.is_ok(),
+            "duplicate members should be allowed: {:?}",
+            result.err()
         );
     }
 }
