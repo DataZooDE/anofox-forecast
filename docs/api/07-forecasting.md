@@ -587,6 +587,107 @@ between combination strategies.
 
 ---
 
+## Explicit-Member Ensemble Forecasting (`ts_forecast_ensemble_by`)
+
+`ts_forecast_ensemble_by` fits each **user-named** member model independently on every
+series and combines the out-of-sample forecasts using the specified `combination_method`.
+Unlike `AutoEnsemble` (which fixes the candidates to AutoARIMA / AutoETS / AutoTheta and
+auto-selects by in-sample MSE), the explicit-member form gives you full control over which
+models contribute to the blend.
+
+**Minimum 2 members.** **26 supported members** (same model-name vocabulary as
+`ts_forecast_by`). **10 blocked members** raise `InvalidParameter` naming the model (GARCH,
+Laplace, ARIMA, MFLES, AutoMFLES, MSTL, AutoMSTL, TBATS, AutoTBATS, AutoEnsemble).
+
+> **Point forecasts only (Phase 5):** `yhat_lower` / `yhat_upper` are `NULL`.
+> Ensemble prediction intervals are planned for Phase 6 (EPI-01).
+> Member/weight introspection is planned for Phase 6 (INSP-01).
+
+### Signature
+
+```sql
+ts_forecast_ensemble_by(
+    source       VARCHAR,      -- source table (quoted string)
+    group_col    IDENTIFIER,   -- series identifier (unquoted)
+    date_col     IDENTIFIER,   -- date/timestamp column (unquoted)
+    target_col   IDENTIFIER,   -- value column (unquoted)
+    members      VARCHAR[],    -- 2+ model names, e.g. ['AutoARIMA','AutoETS']
+    horizon      INTEGER,      -- periods to forecast
+    frequency    VARCHAR,      -- time step, e.g. '1d', '1mo'
+    combination_method := '',  -- blend strategy; default '' = 'mean'
+    seasonal_period := 0       -- shared period for all members; 0 = non-seasonal
+) → TABLE(group_col, forecast_step INT, date_col TIMESTAMP, yhat DOUBLE,
+          yhat_lower DOUBLE, yhat_upper DOUBLE, model_name VARCHAR)
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `members` | VARCHAR[] | — | 2+ model names; same vocabulary as `ts_forecast_by` method param |
+| `combination_method` | VARCHAR | `''` (= `'mean'`) | Blend strategy (same strings as AutoEnsemble) |
+| `seasonal_period` | INTEGER | `0` | Period shared by all members; `0` = non-seasonal; `p>1` = seasonal |
+
+### combination_method strings
+
+| SQL string(s) | Strategy |
+|---|---|
+| `''`, `'mean'` | Unweighted arithmetic mean of member forecasts |
+| `'median'` | Coordinate-wise median; robust to outlier members |
+| `'weighted_mse'`, `'weightedmse'`, `'weighted-mse'` | Inverse-MSE weighting |
+| `'inverse_aic'`, `'inverseaic'`, `'inverse-aic'`, `'aic'` | AIC-based weighting |
+| `'stacking'`, `'stack'` | Ridge-regularised stacking weights from in-sample holdout |
+| `'horizon_adaptive'`, `'horizonadaptive'`, `'horizon-adaptive'`, `'adaptive'` | Per-step weights from rolling-origin errors |
+
+### Examples (verified end-to-end)
+
+```sql
+-- 60-observation linear series for reliable member convergence
+CREATE OR REPLACE TABLE ae_test AS
+SELECT 1 AS id,
+       '2020-01-01'::DATE + INTERVAL (i - 1) DAY AS ds,
+       10.0 + i * 0.5 AS y
+FROM range(1, 61) t(i);
+
+-- Basic usage — mean combination, non-seasonal (verified end-to-end)
+SELECT forecast_step, ROUND(yhat, 4) AS yhat, yhat_lower, yhat_upper, model_name
+FROM ts_forecast_ensemble_by(
+    'ae_test', id, ds, y,
+    ['AutoARIMA', 'AutoETS', 'Theta'],
+    5, '1d',
+    combination_method := 'mean',
+    seasonal_period := 0
+)
+ORDER BY forecast_step;
+
+-- Weighted MSE — better-fitting members get higher weight
+SELECT forecast_step, ROUND(yhat, 4) AS yhat, model_name
+FROM ts_forecast_ensemble_by(
+    'ae_test', id, ds, y,
+    ['AutoARIMA', 'AutoETS', 'Theta'],
+    5, '1d',
+    combination_method := 'weighted_mse',
+    seasonal_period := 0
+)
+ORDER BY forecast_step;
+
+-- Seasonal ensemble — SeasonalNaive + HoltWinters with weekly data
+SELECT forecast_step, ROUND(yhat, 4) AS yhat, model_name
+FROM ts_forecast_ensemble_by(
+    'ae_test', id, ds, y,
+    ['SeasonalNaive', 'HoltWinters'],
+    3, '1d',
+    combination_method := 'mean', seasonal_period := 12
+)
+ORDER BY forecast_step;
+```
+
+See [ensemble_explicit reference](../reference/models/ensemble/ensemble_explicit.md) for the
+full parameter docs, all 26 supported members, the 10 blocked members and their alternatives,
+the six `combination_method` strings with aliases, error examples, and limitations.
+
+---
+
 ## Multivariate Forecasting (`ts_forecast_var_by`)
 
 VAR (Vector Autoregression) fits **one model across K variables simultaneously**,
