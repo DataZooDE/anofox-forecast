@@ -204,7 +204,7 @@ status: complete
 
 **4. [Rule 1 - Bug] Header file goes in src/include/ not src/table_functions/**
 - **Found during:** Task 3 (discovering actual project structure)
-- **Issue:** Plan said to create `src/table_functions/ts_forecast_ensemble_native.hpp`. Actual project pattern (verified from Phase 2/3 .hpp files) puts headers in `src/include/`.
+- **Issue:** Plan said to create `src/include/ts_forecast_ensemble_native.hpp`. Actual project pattern (verified from Phase 2/3 .hpp files) puts headers in `src/include/`.
 - **Fix:** Created `src/include/ts_forecast_ensemble_native.hpp`.
 - **Files modified:** `src/include/ts_forecast_ensemble_native.hpp` (new location)
 - **Committed in:** cf6e34b
