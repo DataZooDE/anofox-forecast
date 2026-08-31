@@ -24,7 +24,7 @@ current_phase: 06
 See: .planning/PROJECT.md (updated 2026-08-30 — started v0.8.0 Ensemble Forecasting)
 
 **Core value:** SQL users can combine multiple forecasting models per series — automatically or explicitly — with distribution-free prediction intervals and weight introspection, all without leaving DuckDB.
-**Current focus:** Phase 06 — Ensemble Intervals & Introspection
+**Current focus:** Planning next milestone (v0.8.0 shipped 2026-08-31) — run /gsd-new-milestone
 
 ## Current Position
 
