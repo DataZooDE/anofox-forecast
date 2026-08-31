@@ -3477,6 +3477,31 @@ bool anofox_ts_forecast_var(const double *flat_data,
  */
 void anofox_free_var_forecast_result(struct VARForecastResult *result);
 
+/**
+ * Forecast using an explicit list of named member models combined via the
+ * specified `CombinationMethod`.
+ *
+ * The member list is passed as a null-delimited concatenated C string
+ * (e.g. `"AutoARIMA\0AutoETS\0Theta\0"`) plus explicit byte length
+ * `members_buf_len` so Rust never has to scan past the buffer end.
+ *
+ * Mirrors `anofox_ts_forecast` but dispatches to
+ * `anofox_fcst_core::forecast_explicit_ensemble` rather than the single-model
+ * `forecast()` path.  Point forecasts only in Phase 5; `lower_bounds` and
+ * `upper_bounds` are always `null` (prediction intervals deferred to EPI-01).
+ */
+bool anofox_ts_forecast_ensemble(const double *values,
+                                 const uint64_t *validity,
+                                 size_t length,
+                                 const char *members_buf,
+                                 size_t members_buf_len,
+                                 size_t members_count,
+                                 const char *combination_method,
+                                 int seasonal_period,
+                                 int horizon,
+                                 struct ForecastResult *out_result,
+                                 struct AnofoxError *out_error);
+
 const char *anofox_fcst_version(void);
 
 #ifdef __cplusplus

@@ -2800,8 +2800,8 @@ pub(crate) fn build_forecaster(
 ///
 /// Returns `ForecastOutput` with `model_name = "Ensemble"` and `lower = upper = []`
 /// (prediction intervals are Phase 6, EPI-01).
-fn forecast_explicit_ensemble(
-    values: &[f64],
+pub fn forecast_explicit_ensemble(
+    values: &[Option<f64>],
     horizon: usize,
     member_names: &[String],
     method_str: Option<&str>,
@@ -2821,7 +2821,20 @@ fn forecast_explicit_ensemble(
     // 2. Parse combination method (reuse Phase 4 function verbatim — one definition)
     let combination_method = parse_combination_method(method_str)?;
 
-    // 3. Build member forecasters
+    // 3. Filter nulls and validate length (mirrors the main forecast() path)
+    let clean_values: Vec<f64> = values
+        .iter()
+        .filter_map(|v| *v)
+        .collect();
+    if clean_values.is_empty() {
+        return Err(ForecastError::InvalidParameter {
+            param: "values".to_string(),
+            value: "0".to_string(),
+            reason: "series has no non-null values".to_string(),
+        });
+    }
+
+    // 4. Build member forecasters
     let member_period = if period > 1 { Some(period) } else { None };
     let mut members: Vec<anofox_forecast::models::BoxedForecaster> =
         Vec::with_capacity(member_names.len());
@@ -2837,9 +2850,9 @@ fn forecast_explicit_ensemble(
         members.push(build_forecaster(model_type, member_period)?);
     }
 
-    // 4. Build + fit ensemble + extract forecast
+    // 5. Build + fit ensemble + extract forecast
     // Ensemble implements Forecaster (anofox-forecast 0.15.3, model.rs:575)
-    let ts = make_timeseries(values)?;
+    let ts = make_timeseries(&clean_values)?;
     let mut ens = Ensemble::new(members).with_method(combination_method);
     ens.fit(&ts).map_err(|e| {
         ForecastError::ComputationError(format!("Ensemble fit failed: {}", e))

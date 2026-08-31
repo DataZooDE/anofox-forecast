@@ -7950,6 +7950,151 @@ mod var_ffi_tests {
 }
 
 // ============================================================================
+// Phase 5 (ENS-02): Explicit-member ensemble forecast
+// ============================================================================
+
+/// Forecast using an explicit list of named member models combined via the
+/// specified `CombinationMethod`.
+///
+/// The member list is passed as a null-delimited concatenated C string
+/// (e.g. `"AutoARIMA\0AutoETS\0Theta\0"`) plus explicit byte length
+/// `members_buf_len` so Rust never has to scan past the buffer end.
+///
+/// Mirrors `anofox_ts_forecast` but dispatches to
+/// `anofox_fcst_core::forecast_explicit_ensemble` rather than the single-model
+/// `forecast()` path.  Point forecasts only in Phase 5; `lower_bounds` and
+/// `upper_bounds` are always `null` (prediction intervals deferred to EPI-01).
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_forecast_ensemble(
+    values: *const c_double,
+    validity: *const u64,
+    length: size_t,
+    members_buf: *const c_char,    // null-delimited: "AutoARIMA\0AutoETS\0Theta\0"
+    members_buf_len: size_t,       // total byte length of members_buf
+    members_count: size_t,         // number of member strings in members_buf
+    combination_method: *const c_char, // C string, NULL or "" → "mean"
+    seasonal_period: c_int,
+    horizon: c_int,
+    out_result: *mut ForecastResult,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if values.is_null() || members_buf.is_null() || out_result.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let series = build_series(values, validity, length);
+
+        // Recover member list from null-delimited buffer bounded by members_buf_len
+        let member_bytes =
+            std::slice::from_raw_parts(members_buf as *const u8, members_buf_len);
+        let member_names: Vec<String> = member_bytes
+            .split(|&b| b == 0)
+            .filter(|s| !s.is_empty())
+            .map(|s| String::from_utf8_lossy(s).into_owned())
+            .collect();
+
+        // Defensive: count mismatch means a C++ marshalling bug
+        if member_names.len() != members_count {
+            return Err(anofox_fcst_core::ForecastError::InvalidParameter {
+                param: "members".to_string(),
+                value: format!(
+                    "parsed {} names but members_count = {}",
+                    member_names.len(),
+                    members_count
+                ),
+                reason: "members_buf / members_count mismatch (C++ marshalling bug)".to_string(),
+            });
+        }
+
+        // Parse combination_method (NULL or empty → None → "mean" in core)
+        let method_opt: Option<String> = if combination_method.is_null() {
+            None
+        } else {
+            CStr::from_ptr(combination_method)
+                .to_str()
+                .ok()
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+        };
+
+        anofox_fcst_core::forecast_explicit_ensemble(
+            &series,
+            horizon as usize,
+            &member_names,
+            method_opt.as_deref(),
+            seasonal_period as usize,
+        )
+    }));
+
+    match result {
+        Ok(Ok(forecast)) => {
+            let n_forecasts = forecast.point.len();
+            (*out_result).n_forecasts = n_forecasts;
+
+            // Copy point forecasts
+            (*out_result).point_forecasts = match alloc_or_error(
+                &forecast.point,
+                out_error,
+                "Failed to allocate point forecasts",
+            ) {
+                Ok(ptr) => ptr,
+                Err(()) => return false,
+            };
+
+            // Point-only in Phase 5 — NULL intervals (EPI-01 deferred to Phase 6)
+            (*out_result).lower_bounds = ptr::null_mut();
+            (*out_result).upper_bounds = ptr::null_mut();
+
+            // No fitted values / residuals in ensemble path
+            (*out_result).fitted_values = ptr::null_mut();
+            (*out_result).n_fitted = 0;
+            (*out_result).residuals = ptr::null_mut();
+
+            // Copy model name ("Ensemble")
+            copy_string_to_buffer(&forecast.model_name, &mut (*out_result).model_name);
+
+            (*out_result).aic = f64::NAN;
+            (*out_result).bic = f64::NAN;
+            (*out_result).mse = f64::NAN;
+
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                let error_code = match e.to_code() {
+                    1 => ErrorCode::NullPointer,
+                    2 => ErrorCode::InvalidInput,
+                    3 => ErrorCode::ComputationError,
+                    4 => ErrorCode::AllocationError,
+                    5 => ErrorCode::InvalidModel,
+                    6 => ErrorCode::InsufficientData,
+                    7 => ErrorCode::InvalidDateFormat,
+                    8 => ErrorCode::InvalidFrequency,
+                    9 => ErrorCode::InvalidInput, // InvalidParameter → InvalidInput
+                    _ => ErrorCode::InternalError,
+                };
+                (*out_error).set_error(error_code, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
+// ============================================================================
 // Version
 // ============================================================================
 
