@@ -4,17 +4,17 @@ milestone: v0.8.0
 milestone_name: Ensemble Forecasting
 current_phase: 06
 current_phase_name: Ensemble Intervals & Introspection
-status: executing
-stopped_at: Completed 06-01-PLAN.md (INSP-01 introspection end-to-end)
-last_updated: "2026-08-31T12:52:27.635Z"
+status: verifying
+stopped_at: Completed 06-02-PLAN.md (EPI-01 + INSP-01 DoD)
+last_updated: "2026-08-31T13:36:55.056Z"
 last_activity: 2026-08-31
 last_activity_desc: Phase 06 execution started
-state_head: d9ca16fde4383d33bd8d74ce8d42763e557efc36
+state_head: 37716cdc3e8dd17ca4e3b2dea68101d7073b9de0
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 6
-  completed_plans: 5
+  completed_plans: 6
   percent: 67
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-30 — started v0.8.0 Ensemble Foreca
 
 Phase: 06 (Ensemble Intervals & Introspection) — EXECUTING
 Plan: 2 of 2
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-31 — Phase 06 execution started
 
 Progress: [███████░░░] 67%
@@ -69,6 +69,7 @@ Progress: [███████░░░] 67%
 | Phase 05-explicit-member-ensemble P01 | 811 | 3 tasks | 10 files |
 | Phase 05-explicit-member-ensemble P02 | 362 | 2 tasks | 3 files |
 | Phase 06-ensemble-intervals-introspection P01 | 572 | 3 tasks | 10 files |
+| Phase 06 P02 | 35 | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -92,6 +93,8 @@ Recent decisions affecting current work:
 - [Phase 05]: PR #230 rule enforced — all 7 SQL snippets in reference doc and API entry run through built extension before committing
 - [Phase 06]: Two-function INSP-01 design: ts_ensemble_inspect_by (explicit-member) + ts_auto_ensemble_inspect_by (AutoEnsemble) — inputs differ materially
 - [Phase 06]: NULL weights pointer convention signals absent weight column to C++ (AutoEnsemble non-Mean); rank CTE derived in macro via ROW_NUMBER
+- [Phase 06]: EPI-01: _ts_forecast_scalar used in manual fold loop instead of ts_cv_forecast_by for AutoEnsemble (crash workaround)
+- [Phase 06]: ts_conformal_calibrate uses MAP syntax not STRUCT to avoid json extension dependency
 
 ### Pending Todos
 
@@ -114,8 +117,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 **Resume file:** None
 
-Last session: 2026-08-31T12:52:27.579Z
-Stopped at: Completed 06-01-PLAN.md (INSP-01 introspection end-to-end)
+Last session: 2026-08-31T13:36:55.019Z
+Stopped at: Completed 06-02-PLAN.md (EPI-01 + INSP-01 DoD)
 Resume: /gsd-plan-phase 4 to plan the AutoEnsemble surface + combination methods.
 
 ## Operator Next Steps

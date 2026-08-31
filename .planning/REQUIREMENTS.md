@@ -21,7 +21,7 @@ Requirements for the v0.8.0 milestone. Each maps to a roadmap phase.
 
 ### EPI — Ensemble prediction intervals
 
-- [ ] **EPI-01**: User can attach distribution-free prediction intervals to an ensemble point forecast via the existing conformal path (learn + apply).
+- [x] **EPI-01**: User can attach distribution-free prediction intervals to an ensemble point forecast via the existing conformal path (learn + apply).
 
 ### INSP — Ensemble introspection
 
@@ -67,7 +67,7 @@ Which phases cover which requirements. Populated during roadmap creation.
 | COMB-03 | Phase 4 | Complete |
 | COMB-04 | Phase 4 | Complete |
 | ENS-02 | Phase 5 | Complete |
-| EPI-01 | Phase 6 | Pending |
+| EPI-01 | Phase 6 | Complete |
 | INSP-01 | Phase 6 | Complete |
 
 **Coverage:**
