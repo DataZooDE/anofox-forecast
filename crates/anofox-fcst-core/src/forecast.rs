@@ -2871,6 +2871,278 @@ pub fn forecast_explicit_ensemble(
 }
 
 // ============================================================================
+// Phase 6 (INSP-01): Ensemble introspection functions
+// ============================================================================
+
+/// Inspect combination weights for an explicit-member ensemble (INSP-01).
+///
+/// Builds the Ensemble from the named members, fits it on the series, then
+/// returns the per-member weights. For Mean and Median, weights equal 1/k.
+/// For WeightedMSE, InverseAIC, Stacking, and HorizonAdaptive, weights are
+/// crate-computed and sum to 1.0. HorizonAdaptive weights are the AVERAGE
+/// of per-horizon weights (use horizon_weights() for per-step detail; that is
+/// out of scope for INSP-01 v1).
+///
+/// # Arguments
+/// * `values` - Time series values (with Option<f64> for nulls)
+/// * `member_names` - Names of the ensemble member models (at least 2)
+/// * `method_str` - Combination method string (None/empty → "mean")
+/// * `period` - Seasonal period (0 or 1 → no seasonality)
+///
+/// # Returns
+/// `Vec<(member_name, weight)>` — k entries, one per member.
+pub fn inspect_explicit_ensemble(
+    values: &[Option<f64>],
+    member_names: &[String],
+    method_str: Option<&str>,
+    period: usize,
+) -> Result<Vec<(String, f64)>> {
+    use anofox_forecast::models::ensemble::Ensemble;
+
+    // 1. Validate member count (same guard as forecast_explicit_ensemble)
+    if member_names.len() < 2 {
+        return Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: member_names.len().to_string(),
+            reason: "at least 2 members are required for an ensemble".to_string(),
+        });
+    }
+
+    // 2. Parse combination method (reuse Phase 4 function verbatim)
+    let combination_method = parse_combination_method(method_str)?;
+
+    // 3. Interpolate NULLs and validate length (mirrors forecast_explicit_ensemble)
+    let clean_values: Vec<f64> = fill_nulls_interpolate(values);
+    if clean_values.is_empty() {
+        return Err(ForecastError::InsufficientData { needed: 1, got: 0 });
+    }
+    if clean_values.len() < 3 {
+        return Err(ForecastError::InsufficientData {
+            needed: 3,
+            got: clean_values.len(),
+        });
+    }
+
+    // 4. Build member forecasters (same loop as forecast_explicit_ensemble)
+    let member_period = if period > 1 { Some(period) } else { None };
+    let mut members: Vec<anofox_forecast::models::BoxedForecaster> =
+        Vec::with_capacity(member_names.len());
+    for name in member_names {
+        let model_type: ModelType = name.parse().map_err(|_| ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: name.clone(),
+            reason: format!(
+                "unknown model name '{}'; use the same names as ts_forecast_by",
+                name
+            ),
+        })?;
+        members.push(build_forecaster(model_type, member_period)?);
+    }
+
+    // 5. Build + fit ensemble — DIVERGE: call .weights() instead of extract_forecast
+    // NOTE: weights() called AFTER .fit() — pre-fit weights are always uniform (RESEARCH Pitfall 2)
+    let ts = make_timeseries(&clean_values)?;
+    let mut ens = Ensemble::new(members).with_method(combination_method);
+    ens.fit(&ts).map_err(|e| {
+        ForecastError::ComputationError(format!("Ensemble fit failed: {}", e))
+    })?;
+
+    let weights = ens.weights();
+    Ok(member_names
+        .iter()
+        .cloned()
+        .zip(weights.iter().copied())
+        .collect())
+}
+
+/// Inspect selected members and in-sample MSE scores for an AutoEnsemble (INSP-01).
+///
+/// Builds and fits an AutoEnsemble, then returns the selected top-K members
+/// (the first model_count entries from all_scores()) with their MSE scores
+/// and — for Mean combination only — equal combination weights.
+///
+/// For WeightedMSE, InverseAIC, Stacking, and HorizonAdaptive, the combination
+/// weight is `None` (NULL in SQL) because the inner ensemble's weights are not
+/// accessible via the crate 0.15.3 public API — this is an upstream limitation,
+/// not a gap in the implementation. Do NOT re-implement selection to fabricate weights.
+///
+/// # Arguments
+/// * `values` - Time series values as concrete f64 (NaN for nulls; AutoEnsemble path)
+/// * `top_k` - Number of models to select (0 → crate default of 3)
+/// * `method_str` - Combination method string (None/empty → "weighted_mse" crate default)
+/// * `period` - Seasonal period (0 or 1 → no seasonality)
+///
+/// # Returns
+/// `Vec<(member_name, mse_score, weight)>` — k entries:
+///   - `weight` is `Some(1/k)` for Mean, `None` for all other methods.
+pub fn inspect_auto_ensemble(
+    values: &[f64],
+    top_k: usize,
+    method_str: Option<&str>,
+    period: usize,
+) -> Result<Vec<(String, f64, Option<f64>)>> {
+    use anofox_forecast::models::ensemble::{AutoEnsemble, AutoEnsembleConfig, CombinationMethod};
+
+    let combination_method = parse_combination_method(method_str)?;
+    let config = AutoEnsembleConfig {
+        top_k,
+        combination_method,
+        seasonal_period: if period > 1 { Some(period) } else { None },
+    };
+    let ts = make_timeseries(values)?;
+    let mut model = AutoEnsemble::with_config(config);
+    model.fit(&ts).map_err(|e| {
+        ForecastError::ComputationError(format!("AutoEnsemble fit failed: {}", e))
+    })?;
+
+    // Read selected top-K: first model_count() entries of all_scores()
+    // all_scores() returns ALL candidates sorted ascending by MSE; first k are selected
+    let k = model.model_count();
+    let selected: Vec<(String, f64)> = model.all_scores().iter().take(k).cloned().collect();
+
+    // Weight: Some(1/k) for Mean only; None for all other methods (crate 0.15.3 limitation)
+    let weight_if_mean: Option<f64> = match combination_method {
+        CombinationMethod::Mean => {
+            if k > 0 {
+                Some(1.0 / k as f64)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+
+    Ok(selected
+        .into_iter()
+        .map(|(name, score)| (name, score, weight_if_mean))
+        .collect())
+}
+
+#[cfg(test)]
+mod insp01_tests {
+    use super::*;
+
+    fn synthetic_series(n: usize) -> Vec<Option<f64>> {
+        (0..n)
+            .map(|i| Some(10.0 + i as f64 * 0.5 + (i as f64).sin()))
+            .collect()
+    }
+
+    fn synthetic_series_f64(n: usize) -> Vec<f64> {
+        (0..n)
+            .map(|i| 10.0 + i as f64 * 0.5 + (i as f64).sin())
+            .collect()
+    }
+
+    #[test]
+    fn inspect_explicit_mean_weights_equal_1_over_k() {
+        let values = synthetic_series(60);
+        let members = vec!["AutoARIMA".to_string(), "AutoETS".to_string(), "Naive".to_string()];
+        let result = inspect_explicit_ensemble(&values, &members, Some("mean"), 0).unwrap();
+        assert_eq!(result.len(), 3, "Should have 3 member entries");
+        let k = 3.0_f64;
+        for (name, weight) in &result {
+            assert!(
+                (weight - 1.0 / k).abs() < 1e-10,
+                "Mean weight for {} should be 1/k but got {}",
+                name,
+                weight
+            );
+        }
+        let sum: f64 = result.iter().map(|(_, w)| w).sum();
+        assert!((sum - 1.0).abs() < 1e-10, "Sum of Mean weights should be 1.0, got {}", sum);
+    }
+
+    #[test]
+    fn inspect_explicit_weighted_mse_weights_sum_to_1() {
+        let values = synthetic_series(60);
+        let members = vec!["AutoARIMA".to_string(), "AutoETS".to_string(), "Naive".to_string()];
+        let result =
+            inspect_explicit_ensemble(&values, &members, Some("weighted_mse"), 0).unwrap();
+        assert_eq!(result.len(), 3);
+        let sum: f64 = result.iter().map(|(_, w)| w).sum();
+        assert!(
+            (sum - 1.0).abs() < 1e-6,
+            "WeightedMSE weights should sum to 1.0, got {}",
+            sum
+        );
+        for (_, w) in &result {
+            assert!(*w >= 0.0, "WeightedMSE weight should be non-negative, got {}", w);
+        }
+    }
+
+    #[test]
+    fn inspect_explicit_too_few_members_returns_error() {
+        let values = synthetic_series(20);
+        let members = vec!["AutoARIMA".to_string()];
+        let result = inspect_explicit_ensemble(&values, &members, Some("mean"), 0);
+        assert!(result.is_err(), "Should return error for < 2 members");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("members"),
+            "Error message should mention 'members', got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn inspect_explicit_unknown_member_returns_error() {
+        let values = synthetic_series(20);
+        let members = vec!["AutoARIMA".to_string(), "UnknownModel".to_string()];
+        let result = inspect_explicit_ensemble(&values, &members, Some("mean"), 0);
+        assert!(result.is_err(), "Should return error for unknown member name");
+    }
+
+    #[test]
+    fn inspect_auto_mean_returns_weight_some_1_over_k() {
+        let values = synthetic_series_f64(60);
+        let result = inspect_auto_ensemble(&values, 3, Some("mean"), 0).unwrap();
+        assert!(!result.is_empty(), "Should return at least one member");
+        let k = result.len() as f64;
+        for (name, score, weight) in &result {
+            assert!(*score > 0.0, "MSE score for {} should be > 0, got {}", name, score);
+            let w = weight.expect("Mean combination should return Some weight");
+            assert!(
+                (w - 1.0 / k).abs() < 1e-10,
+                "Mean weight for {} should be 1/k but got {}",
+                name,
+                w
+            );
+        }
+    }
+
+    #[test]
+    fn inspect_auto_weighted_mse_returns_weight_none() {
+        let values = synthetic_series_f64(60);
+        // empty method_str → "weighted_mse" (crate default for AutoEnsemble)
+        let result = inspect_auto_ensemble(&values, 3, Some("weighted_mse"), 0).unwrap();
+        assert!(!result.is_empty(), "Should return at least one member");
+        for (name, score, weight) in &result {
+            assert!(*score > 0.0, "MSE score for {} should be > 0, got {}", name, score);
+            assert!(
+                weight.is_none(),
+                "WeightedMSE combination should return None weight for {}, got {:?}",
+                name,
+                weight
+            );
+        }
+    }
+
+    #[test]
+    fn inspect_auto_takes_only_model_count_selected_members() {
+        let values = synthetic_series_f64(60);
+        let top_k = 2;
+        let result = inspect_auto_ensemble(&values, top_k, Some("mean"), 0).unwrap();
+        assert!(
+            result.len() <= top_k,
+            "Should not return more than top_k={} members, got {}",
+            top_k,
+            result.len()
+        );
+    }
+}
+
+// ============================================================================
 // Exogenous-aware forecasting functions
 // ============================================================================
 

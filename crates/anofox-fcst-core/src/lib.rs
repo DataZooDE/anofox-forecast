@@ -69,8 +69,8 @@ pub use filter::{
 };
 pub use forecast::{
     forecast, forecast_explain, forecast_explicit_ensemble, forecast_inspect, forecast_with_exog,
-    list_models, ExogenousData, ForecastOptions, ForecastOptionsExog, ForecastOutput,
-    LaplaceVariant, ModelType,
+    inspect_auto_ensemble, inspect_explicit_ensemble, list_models, ExogenousData, ForecastOptions,
+    ForecastOptionsExog, ForecastOutput, LaplaceVariant, ModelType,
 };
 pub use gaps::{detect_frequency, fill_forward, fill_gaps};
 pub use imputation::{
