@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v0.8.0
 milestone_name: Ensemble Forecasting
-current_phase: 6
+current_phase: 06
 current_phase_name: Ensemble Intervals & Introspection
-status: planning
-stopped_at: Phase 05 complete, ready to plan Phase 6
-last_updated: "2026-08-31T12:11:13.070Z"
+status: executing
+stopped_at: Completed 06-01-PLAN.md (INSP-01 introspection end-to-end)
+last_updated: "2026-08-31T12:52:27.635Z"
 last_activity: 2026-08-31
-last_activity_desc: Phase 05 complete, transitioned to Phase 6
-state_head: 737475d996640e554cf6e835055e4eb428cd9e56
+last_activity_desc: Phase 06 execution started
+state_head: d9ca16fde4383d33bd8d74ce8d42763e557efc36
 progress:
   total_phases: 3
   completed_phases: 2
-  total_plans: 4
-  completed_plans: 4
+  total_plans: 6
+  completed_plans: 5
   percent: 67
 ---
 
@@ -25,16 +25,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-30 — started v0.8.0 Ensemble Forecasting)
 
 **Core value:** SQL users can combine multiple forecasting models per series — automatically or explicitly — with distribution-free prediction intervals and weight introspection, all without leaving DuckDB.
-**Current focus:** Phase 05 — Explicit-Member Ensemble
+**Current focus:** Phase 06 — Ensemble Intervals & Introspection
 
 ## Current Position
 
-Phase: 6 — Ensemble Intervals & Introspection
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-08-31 — Phase 05 complete, transitioned to Phase 6
+Phase: 06 (Ensemble Intervals & Introspection) — EXECUTING
+Plan: 2 of 2
+Status: Ready to execute
+Last activity: 2026-08-31 — Phase 06 execution started
 
-Progress: [███░░░░░░░] 33%
+Progress: [███████░░░] 67%
 
 ## Performance Metrics
 
@@ -68,6 +68,7 @@ Progress: [███░░░░░░░] 33%
 | Phase 04 P02 | 2084 | 2 tasks | 3 files |
 | Phase 05-explicit-member-ensemble P01 | 811 | 3 tasks | 10 files |
 | Phase 05-explicit-member-ensemble P02 | 362 | 2 tasks | 3 files |
+| Phase 06-ensemble-intervals-introspection P01 | 572 | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -89,6 +90,8 @@ Recent decisions affecting current work:
 - [Phase 05]: Null-delimited member buffer (members_buf + members_buf_len) for FFI marshal — avoids over-read, defensive members_count assertion
 - [Phase 05]: Section 4 error demonstrations placed at END of example file — no in-script error-capture idiom; sections 1-3 run clean as a pipe
 - [Phase 05]: PR #230 rule enforced — all 7 SQL snippets in reference doc and API entry run through built extension before committing
+- [Phase 06]: Two-function INSP-01 design: ts_ensemble_inspect_by (explicit-member) + ts_auto_ensemble_inspect_by (AutoEnsemble) — inputs differ materially
+- [Phase 06]: NULL weights pointer convention signals absent weight column to C++ (AutoEnsemble non-Mean); rank CTE derived in macro via ROW_NUMBER
 
 ### Pending Todos
 
@@ -111,8 +114,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 **Resume file:** None
 
-Last session: 2026-08-31T09:44:51.384Z
-Stopped at: Phase 05 complete, ready to plan Phase 6
+Last session: 2026-08-31T12:52:27.579Z
+Stopped at: Completed 06-01-PLAN.md (INSP-01 introspection end-to-end)
 Resume: /gsd-plan-phase 4 to plan the AutoEnsemble surface + combination methods.
 
 ## Operator Next Steps

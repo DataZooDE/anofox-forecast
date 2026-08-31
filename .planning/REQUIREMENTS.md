@@ -25,7 +25,7 @@ Requirements for the v0.8.0 milestone. Each maps to a roadmap phase.
 
 ### INSP — Ensemble introspection
 
-- [ ] **INSP-01**: User can inspect which member models an ensemble selected and their combination weights, per series.
+- [x] **INSP-01**: User can inspect which member models an ensemble selected and their combination weights, per series.
 
 ## Future Requirements
 
@@ -68,7 +68,7 @@ Which phases cover which requirements. Populated during roadmap creation.
 | COMB-04 | Phase 4 | Complete |
 | ENS-02 | Phase 5 | Complete |
 | EPI-01 | Phase 6 | Pending |
-| INSP-01 | Phase 6 | Pending |
+| INSP-01 | Phase 6 | Complete |
 
 **Coverage:**
 
