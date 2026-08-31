@@ -631,6 +631,80 @@ FROM (
     "SELECT * FROM ts_forecast_ensemble_by('sales', product_id, date, qty, ['AutoARIMA','AutoETS','Naive'], 12, '1d')",
     "forecasting"},
 
+    // ts_ensemble_inspect_by: Explicit-member ensemble introspection (Phase 6: INSP-01)
+    //
+    // Inspects per-member combination weights for an explicit-member ensemble.
+    // Returns long-format rows: (group_col, member_name, weight, score) — one row per member per series.
+    // weight sums to 1.0 per group for all six combination methods.
+    // score column is NULL (explicit-member has no per-member MSE; use ts_auto_ensemble_inspect_by
+    // for AutoEnsemble MSE scores).
+    //
+    // Signature: ts_ensemble_inspect_by(source, group_col, date_col, target_col, members;
+    //                                    combination_method := '', seasonal_period := 0)
+    {"ts_ensemble_inspect_by",
+     {"source", "group_col", "date_col", "target_col", "members", nullptr},
+     {{"combination_method", "''"}, {"seasonal_period", "0"}, {nullptr, nullptr}},
+R"(
+SELECT group_col, member_name, weight, score
+FROM (
+    SELECT group_col,
+           unnest(_ts_ensemble_inspect_native(
+               LIST(target_col::DOUBLE ORDER BY date_col),
+               members,
+               combination_method,
+               seasonal_period
+           ), recursive := true)
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+)
+)",
+    "Returns per-member combination weights for an explicit-member ensemble. "
+    "One row per (group, member). weight sums to 1.0 per group for all six combination methods. "
+    "score column is NULL (use ts_auto_ensemble_inspect_by for AutoEnsemble in-sample MSE scores). "
+    "combination_method: 'mean' (default), 'median', 'weighted_mse', 'inverse_aic', 'stacking', 'horizon_adaptive'. "
+    "HorizonAdaptive returns the AVERAGE per-horizon weight (per-step matrix out of scope for INSP-01 v1).",
+    "SELECT * FROM ts_ensemble_inspect_by('sales', id, ds, y, ['AutoARIMA','AutoETS','Naive'], "
+    "combination_method := 'weighted_mse')",
+    "forecasting"},
+
+    // ts_auto_ensemble_inspect_by: AutoEnsemble introspection (Phase 6: INSP-01)
+    //
+    // Inspects selected members and in-sample MSE scores for an AutoEnsemble per series.
+    // Returns long-format rows: (group_col, member_name, weight, score, rank) — one row per
+    // selected member per series. rank = 1..k by ascending MSE (best = 1).
+    // weight = 1/k for Mean combination; NULL for all other methods (WeightedMSE, InverseAIC,
+    // Stacking, HorizonAdaptive) — crate 0.15.3 limitation: inner AutoEnsemble weights are
+    // not accessible via the public API. score = in-sample MSE from AutoEnsemble.all_scores().
+    //
+    // Signature: ts_auto_ensemble_inspect_by(source, group_col, date_col, target_col;
+    //                                         top_k := 3, combination_method := '',
+    //                                         seasonal_period := 0)
+    {"ts_auto_ensemble_inspect_by",
+     {"source", "group_col", "date_col", "target_col", nullptr},
+     {{"top_k", "3"}, {"combination_method", "''"}, {"seasonal_period", "0"}, {nullptr, nullptr}},
+R"(
+SELECT group_col, member_name, weight, score,
+       ROW_NUMBER() OVER (PARTITION BY group_col ORDER BY score) AS rank
+FROM (
+    SELECT group_col,
+           unnest(_ts_auto_ensemble_inspect_native(
+               LIST(target_col::DOUBLE ORDER BY date_col),
+               top_k,
+               combination_method,
+               seasonal_period
+           ), recursive := true)
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+)
+)",
+    "Returns selected member names and in-sample MSE scores for an AutoEnsemble per series. "
+    "weight = 1/k for Mean combination; NULL for all other methods (crate 0.15.3 limitation — "
+    "inner AutoEnsemble combination weights are not accessible via public API). "
+    "rank = 1..k by ascending MSE (best = 1). score = in-sample MSE from AutoEnsemble.all_scores().",
+    "SELECT * FROM ts_auto_ensemble_inspect_by('sales', id, ds, y, top_k := 3, "
+    "combination_method := 'mean')",
+    "forecasting"},
+
     // ts_forecast_panel_by: Panel forecasting via cross-series global learners (Phase 2: GLOB-01..03)
     //
     // Fits a single shared-parameter model across all series simultaneously, then emits
