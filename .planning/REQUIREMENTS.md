@@ -11,9 +11,9 @@ Requirements for this milestone. Each maps to a roadmap phase.
 
 ### Harness
 
-- [ ] **WASM-01**: A Node harness in `test/wasm/` boots DuckDB-Wasm (`eh` bundle, `pthreadWorker=null`, `web-worker` pinned), serves the locally-built `anofox_forecast.duckdb_extension.wasm` over localhost (version-agnostic `<version>/<platform>/` path), and `FORCE INSTALL` + `LOAD`s it successfully.
-- [ ] **WASM-02**: A minimal sqllogictest-subset runner executes `test/sql` `.test` files against the loaded WASM extension, re-opening the DB and re-`LOAD`ing per file for catalog isolation, and formats results through `::VARCHAR` so DECIMAL scale matches native sqllogictest output.
-- [ ] **WASM-03**: The full `test/sql/**/*.test` suite (66 files) passes against the built `.wasm`; any test genuinely infeasible on WASM is explicitly skip-listed with a documented reason.
+- [x] **WASM-01**: A Node harness in `test/wasm/` boots DuckDB-Wasm (`eh` bundle, `pthreadWorker=null`, `web-worker` pinned), serves the locally-built `anofox_forecast.duckdb_extension.wasm` over localhost (version-agnostic `<version>/<platform>/` path), and `FORCE INSTALL` + `LOAD`s it successfully.
+- [x] **WASM-02**: A minimal sqllogictest-subset runner executes `test/sql` `.test` files against the loaded WASM extension, re-opening the DB and re-`LOAD`ing per file for catalog isolation, and formats results through `::VARCHAR` so DECIMAL scale matches native sqllogictest output.
+- [x] **WASM-03**: The full `test/sql/**/*.test` suite (66 files) passes against the built `.wasm`; any test genuinely infeasible on WASM is explicitly skip-listed with a documented reason.
 
 ### CI Gating
 
@@ -23,8 +23,8 @@ Requirements for this milestone. Each maps to a roadmap phase.
 
 ### Dependencies & Pinning
 
-- [ ] **DEP-01**: `@duckdb/duckdb-wasm` and `web-worker@1.2.0` are pinned to versions whose engine ABI matches the built DuckDB version, with the version-verification procedure documented.
-- [ ] **DEP-02**: `openssl` is declared a `!wasm32` dependency in `vcpkg.json` so Emscripten no longer compiles unused OpenSSL for the WASM target.
+- [x] **DEP-01**: `@duckdb/duckdb-wasm` and `web-worker@1.2.0` are pinned to versions whose engine ABI matches the built DuckDB version, with the version-verification procedure documented.
+- [x] **DEP-02**: `openssl` is declared a `!wasm32` dependency in `vcpkg.json` so Emscripten no longer compiles unused OpenSSL for the WASM target.
 
 ## Future Requirements
 
@@ -52,16 +52,17 @@ Which phases cover which requirements. Filled during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| WASM-01 | Phase 7 | Pending |
-| WASM-02 | Phase 7 | Pending |
-| WASM-03 | Phase 7 | Pending |
-| DEP-01 | Phase 7 | Pending |
-| DEP-02 | Phase 7 | Pending |
+| WASM-01 | Phase 7 | Complete |
+| WASM-02 | Phase 7 | Complete |
+| WASM-03 | Phase 7 | Complete |
+| DEP-01 | Phase 7 | Complete |
+| DEP-02 | Phase 7 | Complete |
 | CI-01 | Phase 8 | Pending |
 | CI-02 | Phase 8 | Pending |
 | CI-03 | Phase 8 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 8 total
 - Mapped to phases: 8 ✓
 - Unmapped: 0
