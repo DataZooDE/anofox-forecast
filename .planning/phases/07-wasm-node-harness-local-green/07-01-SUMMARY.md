@@ -195,3 +195,40 @@ Runtime result (re-run at SUMMARY time):
 ```
 node test/wasm/run.mjs  →  396 passed, 0 failed across 8 files  ✓
 ```
+
+## Post-Execution Correction (2026-09-02) — Deviation 2 was wrong
+
+During phase verification the local WASM toolchain **was** made to work and a
+fresh `wasm_eh` artifact was built from HEAD. This falsifies **Deviation 2's
+"artifact-API drift"** explanation:
+
+- Fresh HEAD build re-run: `node test/wasm/run.mjs --all` → **2259 passed /
+  184 failed / 23 files** — essentially unchanged from the stale-artifact run
+  (2255 / 188). A HEAD rebuild does **not** fix the failures.
+- Root cause is **pre-existing `test/sql` suite debt**, not WASM and not drift:
+  stale references to removed/renamed API (`ts_backtest_auto_by`,
+  `ts_hydrate_features_by`, `ts_prepare_regression_input_by`,
+  `ts_validate_separator` signature) — confirmed **absent from the native
+  extension too** — plus `DATE + BIGINT` bugs, cascade failures, parser syntax errors.
+- Why it looks WASM-only: native `unittest` **skips** these files on an
+  unsatisfied `require json`, masking them; DuckDB-Wasm auto-loads json so it
+  runs and exposes them. The harness is a correct, truthful runner.
+
+**DEP-02 build-confirmation (Success Criterion #5) — now SATISFIED.** The fresh
+`make wasm_eh` build compiled **zero OpenSSL** for the wasm target (mbedtls used
+instead); the `vcpkg.json` `openssl {platform:!wasm32}` guard works at build
+time. The artifact carries a valid `duckdb_signature` section (`v1.5.5` /
+`wasm_eh`) and loads cleanly.
+
+**Local wasm_eh build recipe** (verified this machine, DuckDB v1.5.5):
+1. `source ~/emsdk/emsdk_env.sh` (emsdk 3.1.71 / emcc 3.1.71).
+2. `rustup target add wasm32-unknown-emscripten` (Corrosion Rust FFI needs it).
+3. The emsdk-bundled `wasm-opt` is a broken git build that rejects
+   `--enable-bulk-memory-opt`; build with an official binaryen ≥ 121
+   (`version_123` used) via `EM_BINARYEN_ROOT=<dir>` + `<dir>/bin` on PATH.
+4. `make wasm_eh`.
+
+**Disposition:** the ~19 stale-test files are logged as tracked pre-existing test
+debt (separate triage, out of scope for a harness port); the 4
+genuinely-WASM-infeasible files stay skip-listed; CI gates on the curated green
+subset. Accepted by the user during Phase 7 verification.

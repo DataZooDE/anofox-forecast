@@ -29,7 +29,7 @@ node test/wasm/run.mjs
 # Run against an explicit artifact path
 node test/wasm/run.mjs --ext path/to/anofox_forecast.duckdb_extension.wasm
 
-# Run the full 66-file suite (23 files expected to fail on the current artifact — see below)
+# Run the full 66-file suite (23 files fail on pre-existing test-suite debt — see below)
 node test/wasm/run.mjs --all
 
 # Run a single test file
@@ -89,10 +89,10 @@ or silent load failures.
 
 Exit code 0 on success, 1 on any assertion failure or harness error.
 
-## Full-suite status (current artifact)
+## Full-suite status
 
-Artifact: CI build from `milestone/v0.8.0-ensemble-forecasting`  
-DuckDB engine: v1.5.5 / `wasm_eh`
+Measured against a **fresh `wasm_eh` artifact built locally from HEAD**
+(2026-09-02) — not a stale CI artifact. DuckDB engine: v1.5.5 / `wasm_eh`.
 
 | Metric          | Count |
 |-----------------|-------|
@@ -100,8 +100,8 @@ DuckDB engine: v1.5.5 / `wasm_eh`
 | Files passing   | 39    |
 | Files failing   | 23    |
 | Files skipped   | 4     |
-| Total passing assertions | 2255 |
-| Total failing assertions | 188  |
+| Total passing assertions | 2259 |
+| Total failing assertions | 184  |
 
 ### Skip-listed files (structurally WASM-infeasible)
 
@@ -114,23 +114,34 @@ These four files are excluded from all runs (logged, never silent):
 | `ts_forecast_mfles_stability.test`| UNNEST not supported in DuckDB v1.5.5 WASM engine            |
 | `ts_fill_forward_native.test`     | Emscripten abort trap (`___trap`) in WASM runtime            |
 
-### Known failures in the 23 failing files
+### Known failures in the 23 failing files — pre-existing test-suite debt
 
-Most failures in the remaining 23 files fall into two categories:
+**These failures are NOT WASM-specific and NOT artifact drift.** They were
+confirmed against a fresh artifact built from HEAD, so a HEAD rebuild does *not*
+fix them. They are pre-existing rot in the `test/sql` suite, exposed here because
+DuckDB-Wasm auto-loads the `json` extension at `LOAD anofox_forecast` and so
+actually runs these files — whereas the native `unittest` runner **skips** them
+on an unsatisfied `require json`, masking the same failures natively.
 
-**Artifact-API drift** — the CI artifact was built from an earlier commit of
-the extension. Functions or output-column names that changed since then cause
-failures (e.g. output column `ds` vs. `date`, missing `ts_hydrate_features_by`,
-changed `ts_cv_split_by` signature). These will resolve when the WASM artifact
-is rebuilt from HEAD.
+Root causes (a handful of roots cascade into the 184 assertion failures):
 
-**Pre-existing test bugs** — some tests use `'2024-01-01'::DATE + i` where `i`
-is a `BIGINT` from `generate_series` / `range`. DuckDB only supports
-`DATE + INTEGER`, so these fail in both WASM and native.
+- **Stale references to removed/renamed API** — tests call functions absent from
+  the current build *natively too*: `ts_backtest_auto_by` (removed; now the
+  `ts_cv_folds_by` + `ts_cv_forecast_by` two-step), `ts_hydrate_features_by`,
+  `ts_prepare_regression_input_by`, and `ts_validate_separator` with an
+  out-of-date argument signature.
+- **Cascade failures** — one failed `CREATE TABLE … AS SELECT` (because of the
+  above) leaves later statements referencing a table that was never created
+  (e.g. 30+ `Table with name explain_panel does not exist`).
+- **Pre-existing test bugs** — `'2024-01-01'::DATE + i` where `i` is a `BIGINT`
+  from `generate_series` / `range`; DuckDB only supports `DATE + INTEGER`, so
+  these fail on native and WASM alike.
+- **Parser syntax errors** in a few test files.
 
-Neither category is structurally infeasible on WASM and neither file is
-permanently skipped; they appear in the `--all` failure list as a tracking
-baseline.
+None of these files is structurally WASM-infeasible, so none is skip-listed;
+they remain in the `--all` failure list as a **tracked baseline of pre-existing
+test debt** to be triaged separately from the WASM harness work. CI gates on the
+curated green subset until that debt is cleared.
 
 ## Architecture
 
