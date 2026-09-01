@@ -6,7 +6,7 @@ status: planning
 last_updated: "2026-09-01T20:29:44.073Z"
 last_activity: 2026-09-01
 progress:
-  total_phases: 0
+  total_phases: 2
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,23 +17,23 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-30 — started v0.8.0 Ensemble Forecasting)
+See: .planning/PROJECT.md (updated 2026-09-01 — started v0.9.0 WASM Runtime Verification)
 
-**Core value:** SQL users can combine multiple forecasting models per series — automatically or explicitly — with distribution-free prediction intervals and weight introspection, all without leaving DuckDB.
-**Current focus:** Planning next milestone (v0.8.0 shipped 2026-08-31) — run /gsd-new-milestone
+**Core value:** Prove the built `anofox_forecast` `.wasm` actually loads and runs in DuckDB-Wasm — not just that it compiles and links — and gate it in CI so WASM regressions fail the build.
+**Current focus:** Phase 7 — WASM Node Harness + Local Green (roadmap created; ready to plan)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 7 — WASM Node Harness + Local Green (not started)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-09-01 — Milestone v0.9.0 started
+Status: Roadmap created — ready to plan Phase 7
+Last activity: 2026-09-01 — Roadmap for v0.9.0 created (2 phases, 8/8 requirements mapped)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 6 (this milestone)
+- Total plans completed: 0 (this milestone)
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -41,12 +41,8 @@ Last activity: 2026-09-01 — Milestone v0.9.0 started
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 4. AutoEnsemble Surface + Combination Methods | 0/TBD | - | - |
-| 5. Explicit-Member Ensemble | 0/TBD | - | - |
-| 6. Ensemble Intervals & Introspection | 0/TBD | - | - |
-| 04 | 2 | - | - |
-| 05 | 2 | - | - |
-| 06 | 2 | - | - |
+| 7. WASM Node Harness + Local Green | 0/TBD | - | - |
+| 8. CI Gating + Dedicated Workflow + Badge | 0/TBD | - | - |
 
 **Recent Trend:**
 
@@ -54,16 +50,6 @@ Last activity: 2026-09-01 — Milestone v0.9.0 started
 - Trend: -
 
 *Updated after each plan completion*
-**Per-Plan Metrics:**
-
-| Plan | Duration | Tasks | Files |
-|------|----------|-------|-------|
-| Phase 04-autoensemble-surface-combination-methods P01 | 571 | 3 tasks | 7 files |
-| Phase 04 P02 | 2084 | 2 tasks | 3 files |
-| Phase 05-explicit-member-ensemble P01 | 811 | 3 tasks | 10 files |
-| Phase 05-explicit-member-ensemble P02 | 362 | 2 tasks | 3 files |
-| Phase 06-ensemble-intervals-introspection P01 | 572 | 3 tasks | 10 files |
-| Phase 06 P02 | 35 | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -72,23 +58,17 @@ Last activity: 2026-09-01 — Milestone v0.9.0 started
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- Roadmap (v0.8.0): AutoEnsemble first (ENS-01, lower-risk `ts_forecast_by` method-string dispatch like GARCH/Kalman) carries the shared combination-method plumbing (COMB-01..04); explicit-member ensemble second (ENS-02, new member-list macro); intervals + introspection last (EPI-01, INSP-01) built on top of the ensemble surface.
-- EPI-01 routes through the existing conformal path (split/adaptive/asymmetric/per-step, learn+apply) — reuse, do not build new interval machinery.
-- DoD: runnable verified example + internal-consistency cross-check (combined == manual weighted combination of members) + docs + clean-machine/WASM load. No external reference library for ensembles.
-- Panel/table-in macro convention (v0.7.0 lesson): table-in macros must wrap `query_table(...)` in a subselect, not pass a bare TABLE arg.
-- [Phase 04]: AutoEnsemble default combination_method is Mean (overrides crate WeightedMSE default); empty string maps to Mean at parse_combination_method
-- [Phase 04]: CombinationMethod imported via public re-export anofox_forecast::models::ensemble::CombinationMethod (model submodule is private)
-- [Phase 04]: Plan 02 adds ZERO source wiring — parse_combination_method (Plan 01) already accepts all six methods; this plan exercises and documents them
-- [Phase 04]: Mean vs Median demonstrability: skewed series (exp growth + spikes) shows delta 1.45-2.69 per step, confirming COMB-01 requirement
-- [Phase 05]: ScalarFunction dispatch for _ts_forecast_ensemble_native (not TableFunction) — matches ts_forecast_by macro's unnest pattern and avoids streaming table function overhead
-- [Phase 05]: build_forecaster: exhaustive 36-variant ModelType match with 10 blocked variants returning InvalidParameter — foundation for Phase 05-02 full allowlist
-- [Phase 05]: Null-delimited member buffer (members_buf + members_buf_len) for FFI marshal — avoids over-read, defensive members_count assertion
-- [Phase 05]: Section 4 error demonstrations placed at END of example file — no in-script error-capture idiom; sections 1-3 run clean as a pipe
-- [Phase 05]: PR #230 rule enforced — all 7 SQL snippets in reference doc and API entry run through built extension before committing
-- [Phase 06]: Two-function INSP-01 design: ts_ensemble_inspect_by (explicit-member) + ts_auto_ensemble_inspect_by (AutoEnsemble) — inputs differ materially
-- [Phase 06]: NULL weights pointer convention signals absent weight column to C++ (AutoEnsemble non-Mean); rank CTE derived in macro via ROW_NUMBER
-- [Phase 06]: EPI-01: _ts_forecast_scalar used in manual fold loop instead of ts_cv_forecast_by for AutoEnsemble (crash workaround)
-- [Phase 06]: ts_conformal_calibrate uses MAP syntax not STRUCT to avoid json extension dependency
+- Roadmap (v0.9.0): two phases in strict dependency order — Phase 7 stands up the Node harness and gets the full `test/sql` suite green locally (WASM-01/02/03), including engine-version pinning (DEP-01, an ABI prerequisite the harness depends on) and the openssl `!wasm32` tidy (DEP-02, small/self-contained); Phase 8 wires the green harness into gating CI + a dedicated workflow + README badge (CI-01/02/03).
+- Reference implementation to port: anofox-statistics PR #131 (`test/wasm/run.mjs`, `test/wasm/sqllogic.mjs`, the `wasm-runtime-test` job, `WasmTest.yml`).
+- This is a CI/infra hardening milestone — no new SQL functions, no Rust crate changes; work lives in `test/wasm/`, `.github/workflows/`, `vcpkg.json`, and README.
+
+### Known Gotchas (issue #255 — must shape Phase 7 plans)
+
+- `@duckdb/duckdb-wasm` npm version ≠ engine version — must ABI-match the built DuckDB version or `LOAD` fails.
+- DECIMAL renders unscaled in duckdb-wasm Arrow-JS → format results through `::VARCHAR` to match native sqllogictest output.
+- Per-file catalog isolation — re-open the DB + re-`LOAD` the extension per `.test` file.
+- Node pins `web-worker@1.2.0`, `pthreadWorker=null` for the `eh` bundle, and uses `FORCE INSTALL`.
+- 66 `.test` files in the suite; WASM-03 permits an explicit, documented skip-list for tests infeasible on WASM.
 
 ### Pending Todos
 
@@ -96,7 +76,7 @@ None yet.
 
 ### Blockers/Concerns
 
-- None. Signature design (method-string vs dedicated macro for ENS-02) is a plan-phase concern, not a blocker.
+- None. Exact pinned `@duckdb/duckdb-wasm` version is a plan-phase determination (must match the built DuckDB version), not a blocker.
 
 ## Deferred Items
 
@@ -104,6 +84,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 | Category | Item | Status | Deferred At | Milestone |
 |----------|------|--------|-------------|-----------|
+| WASM (future) | Browser-based (not just Node) WASM E2E harness (WASM-F1) | Deferred | 2026-09-01 | v0.9.0 |
+| WASM (future) | Shared-memory `wasm_threads` build — blocked upstream (WASM-F2) | Deferred | 2026-09-01 | v0.9.0 |
 | ENS (future) | Custom hand-supplied combination weights (ENS-F1) | Deferred | 2026-08-30 | v0.8.0 |
 | ENS (future) | Panel/multivariate ensembling (ENS-F2) | Deferred | 2026-08-30 | v0.8.0 |
 
@@ -111,10 +93,10 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 **Resume file:** None
 
-Last session: 2026-08-31T13:36:55.019Z
-Stopped at: Phase 06 complete — all phases complete
-Resume: /gsd-plan-phase 4 to plan the AutoEnsemble surface + combination methods.
+Last session: 2026-09-01 — v0.9.0 roadmap created
+Stopped at: Roadmap written (Phases 7-8), REQUIREMENTS traceability filled
+Resume: /gsd-plan-phase 7 to plan the WASM Node harness + local green.
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Plan Phase 7 with /gsd-plan-phase 7
