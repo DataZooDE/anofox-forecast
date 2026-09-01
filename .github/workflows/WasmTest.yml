@@ -1,0 +1,50 @@
+# Dedicated WASM status workflow — powers the "WASM" badge in README.
+#
+# GitHub status badges track a whole workflow, not a single job. The WASM
+# runtime test also runs as a gating job inside MainDistributionPipeline.yml
+# (blocking PRs/pushes), but a badge pointed at that pipeline would flip red on
+# ANY unrelated failure (e.g. a flaky linux smoke test). This workflow isolates
+# the WASM verdict so the badge means exactly "the extension loads and runs in
+# DuckDB-Wasm".
+#
+# It does NOT rebuild the extension: it reuses the wasm_eh artifact the
+# distribution pipeline already produced, via workflow_run.
+name: WASM
+
+on:
+  workflow_run:
+    workflows: ["Main Extension Distribution Pipeline"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  wasm-runtime-test:
+    name: DuckDB-Wasm load + runtime test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download built wasm_eh extension from the pipeline run
+        uses: actions/download-artifact@v4
+        with:
+          name: anofox_forecast-v1.5.5-extension-wasm_eh
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: wasm-artifact
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install harness dependencies
+        run: npm --prefix test/wasm install
+
+      - name: Run DuckDB-Wasm load + runtime harness
+        run: |
+          EXT=$(find wasm-artifact -name 'anofox_forecast.duckdb_extension.wasm' | head -1)
+          if [ -z "$EXT" ]; then echo "::error::built wasm extension not found in artifact"; exit 1; fi
+          echo "Testing extension: $EXT"
+          node test/wasm/run.mjs --ext "$EXT"
