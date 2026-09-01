@@ -35,19 +35,43 @@ const EXT_FILE = `${EXT_NAME}.duckdb_extension.wasm`;
 // Curated WASM-appropriate subset: breadth across function families, kept small
 // so the first CI gate is robust. Expand with --all once green. NOTE: this is an
 // explicit, logged subset — not a silent truncation of the 66-file suite.
-// Files skipped even under --all, with reason (logged, never silent):
-//  (none — all 66 files are expected to pass on DuckDB-Wasm)
-const SKIP_FILES = new Map();
+//
+// Files skipped even under --all (logged, never silent).
+// Criteria: a file is skip-listed ONLY when it is genuinely structurally infeasible
+// on DuckDB-Wasm — filesystem/network/httpfs/thread-dependent semantics, or a hard
+// WASM runtime limitation (heap, missing host import, engine version restriction)
+// that cannot be resolved by fixing the harness.
+// Files that fail due to artifact-API drift or pre-existing test bugs are NOT
+// skipped; they appear in the --all failure list and are tracked in the SUMMARY.
+const SKIP_FILES = new Map([
+  // DuckDB-Wasm heap overflow: TSFresh feature extraction (117 features × many series)
+  // exceeds the default 32 MB WASM heap. Manifests as "memory access out of bounds".
+  ['test/sql/ts_features.test', 'WASM heap overflow in large TSFresh feature extraction'],
+  ['test/sql/ts_features_config.test', 'WASM heap overflow in large TSFresh feature extraction'],
 
+  // DuckDB v1.5.5 WASM engine does not support UNNEST in this position (regression
+  // vs 1.6+). The test exercises an UNNEST in a FROM clause that WASM 1.5.5 rejects.
+  ['test/sql/ts_forecast_mfles_stability.test', 'UNNEST not supported in DuckDB v1.5.5 WASM engine'],
+
+  // Emscripten abort trap: ts_fill_forward_native exercises an internal table function
+  // (_ts_fill_forward_native) that triggers an Emscripten WebAssembly.RuntimeError
+  // (___trap is not defined) in the WASM runtime. A separate ___trap import is
+  // missing from the eh bundle used here.
+  ['test/sql/ts_fill_forward_native.test', 'Emscripten abort trap (___trap) in WASM runtime'],
+]);
+
+// Curated subset: 8 files verified green against the current WASM artifact.
+// Selected for breadth: core forecasting, CV, metrics, conformal, decomposition,
+// diagnostics, aggregation, period detection.
 const CURATED = [
   'test/sql/ts_forecast_by.test',
-  'test/sql/ts_features.test',
   'test/sql/ts_metrics.test',
   'test/sql/ts_decomposition.test',
   'test/sql/ts_diagnostics.test',
   'test/sql/ts_conformal.test',
   'test/sql/ts_cv_folds.test',
-  'test/sql/ts_stats.test',
+  'test/sql/ts_aggregate_hierarchy.test',
+  'test/sql/ts_periods.test',
 ];
 
 function parseArgs(argv) {
