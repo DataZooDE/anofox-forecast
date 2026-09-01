@@ -2,20 +2,20 @@
 gsd_state_version: 1.0
 milestone: v0.9.0
 milestone_name: WASM Runtime Verification (Phases 7-8)
-current_phase: 07
-current_phase_name: WASM Node Harness + Local Green
-status: verifying
-stopped_at: Completed 07-01-wasm-node-harness-PLAN.md
-last_updated: "2026-09-01T21:41:30.422Z"
-last_activity: 2026-09-01
-last_activity_desc: Phase 07 execution started
+current_phase: 08
+current_phase_name: CI Gating + Dedicated Workflow + Badge
+status: phase_complete
+stopped_at: Phase 07 verified (passed, accepted) — ready to plan Phase 08
+last_updated: "2026-09-02T00:25:00.000Z"
+last_activity: 2026-09-02
+last_activity_desc: Phase 07 verified passed (WASM-03 accepted as out-of-scope test debt)
 state_head: c0efa6f8f466111f3d293df615db9daf34897472
 progress:
   total_phases: 2
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 1
   completed_plans: 1
-  percent: 0
+  percent: 50
 ---
 
 # Project State
@@ -25,14 +25,28 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-01 — started v0.9.0 WASM Runtime Verification)
 
 **Core value:** Prove the built `anofox_forecast` `.wasm` actually loads and runs in DuckDB-Wasm — not just that it compiles and links — and gate it in CI so WASM regressions fail the build.
-**Current focus:** Phase 07 — WASM Node Harness + Local Green
+**Current focus:** Phase 08 — CI Gating + Dedicated Workflow + Badge
 
 ## Current Position
 
-Phase: 07 (WASM Node Harness + Local Green) — EXECUTING
-Plan: 1 of 1
-Status: Phase complete — ready for verification
-Last activity: 2026-09-01 — Phase 07 execution started
+Phase: 07 (WASM Node Harness + Local Green) — COMPLETE ✅ (verified passed, accepted)
+Plan: 1 of 1 done
+Status: Phase 07 verified — ready to plan Phase 08
+Last activity: 2026-09-02 — Phase 07 verified passed
+
+### ⚠ Phase 07 finding that must shape Phase 08 planning
+
+A fresh HEAD `wasm_eh` build was made locally during Phase 07 verification. It
+proved DEP-02 (zero OpenSSL compiled for wasm) and disproved the "stale artifact"
+theory: the full-suite `--all` run is **2259 pass / 184 fail / 23 files**, and the
+23 failures are **pre-existing `test/sql` test debt** (removed/renamed API refs like
+`ts_backtest_auto_by`/`ts_hydrate_features_by`, `DATE+BIGINT` bugs, cascades), not
+WASM or artifact issues — masked natively by the unittest `require json` skip.
+
+**Phase 08 (CI gating) must gate on the CURATED green subset**, NOT `--all`.
+Do NOT assume "CI building from HEAD makes the suite green" — it will not. Full
+66-file green is out-of-scope test-triage tracked separately. See
+07-VERIFICATION.md Re-Verification section + memory `project_wasm_suite_reveals_test_debt`.
 
 ## Performance Metrics
 

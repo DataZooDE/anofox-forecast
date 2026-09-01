@@ -46,7 +46,7 @@ Tech debt carried forward: `ts_cv_forecast_by('AutoEnsemble')` segfaults (crate/
 
 ### v0.9.0 — WASM Runtime Verification (Phases 7-8)
 
-- [ ] **Phase 7: WASM Node Harness + Local Green** — Boot DuckDB-Wasm, LOAD the built `.wasm`, run the full `test/sql` suite green locally (WASM-01, WASM-02, WASM-03, DEP-01, DEP-02)
+- [x] **Phase 7: WASM Node Harness + Local Green** — Boot DuckDB-Wasm, LOAD the built `.wasm`, run the full `test/sql` suite green locally (WASM-01, WASM-02, WASM-03, DEP-01, DEP-02) — harness + DEP-01/02 delivered & proven (DEP-02 build-confirmed); WASM-03 full-green deferred (out-of-scope pre-existing test debt)
 - [ ] **Phase 8: CI Gating + Dedicated Workflow + Badge** — Gate the harness in CI so WASM regressions fail the build, with an independently observable workflow + README badge (CI-01, CI-02, CI-03)
 
 ## Phase Details
@@ -85,9 +85,9 @@ Tech debt carried forward: `ts_cv_forecast_by('AutoEnsemble')` segfaults (crate/
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 7. WASM Node Harness + Local Green | 1/1 | In Progress|  |
+| 7. WASM Node Harness + Local Green | 1/1 | Complete ✅ | 2026-09-02 |
 | 8. CI Gating + Dedicated Workflow + Badge | 0/TBD | Not started | - |
 
 ## Next
 
-Plan Phase 7 — run `/gsd-plan-phase 7`.
+Plan Phase 8 — run `/gsd-plan-phase 8`.
