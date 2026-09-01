@@ -15,9 +15,18 @@ SQL users can produce, validate, combine, and interval-bound time-series forecas
 - **Shipped v0.8.0 — Ensemble Forecasting (2026-08-31):** AutoEnsemble (`ts_forecast_by('AutoEnsemble')`), explicit-member ensembles (`ts_forecast_ensemble_by`), six combination methods, ensemble conformal intervals (existing path), and member/weight introspection (`ts_ensemble_inspect_by` / `ts_auto_ensemble_inspect_by`). See `.planning/milestones/v0.8.0-*`.
 - **Shipped v0.7.0 — Diagnostics + Model Coverage (2026-08-22):** stationarity + residual diagnostics, global/panel models, GARCH/Kalman/VAR.
 
-## Next Milestone Goals
+## Current Milestone: v0.9.0 WASM Runtime Verification
 
-TBD — run `/gsd-new-milestone`. Leading candidates (see Active / deferred below): fix the `ts_cv_forecast_by('AutoEnsemble')` segfault + wire ensemble params into the CV native; upstream a crate accessor for AutoEnsemble inner combination weights; custom hand-supplied weights (ENS-F1); panel/VAR ensembling (ENS-F2).
+**Goal:** Prove the built `anofox_forecast` `.wasm` actually loads and runs in DuckDB-Wasm — not just that it compiles and links — and gate it in CI so WASM regressions fail the build.
+
+**Target features:**
+- Node harness under `test/wasm/` that boots DuckDB-Wasm, serves + `LOAD`s the locally-built `.wasm`, and runs the full `test/sql/**/*.test` suite via a minimal sqllogictest-subset runner
+- Gating CI job (`needs:` the wasm build) that fails on any WASM load/runtime error
+- Dedicated WASM workflow + README badge reflecting WASM status specifically
+- `@duckdb/duckdb-wasm` pinned to the engine version matching the built DuckDB version, documented
+- OpenSSL made a `!wasm32` dependency in `vcpkg.json` (unused on WASM; telemetry is off there)
+
+This is a CI/infrastructure hardening milestone — no new SQL surface, no crate bump. Reference implementation to port: anofox-statistics PR #131 (`test/wasm/run.mjs`, `sqllogic.mjs`, `WasmTest.yml`). Tracks GH issue #255.
 
 ## Requirements
 
@@ -46,7 +55,13 @@ TBD — run `/gsd-new-milestone`. Leading candidates (see Active / deferred belo
 
 ### Active
 
-<!-- Next milestone TBD — run /gsd-new-milestone. -->
+<!-- v0.9.0 WASM Runtime Verification — see REQUIREMENTS.md for REQ-IDs. -->
+
+- [ ] Node harness loads the built `.wasm` in DuckDB-Wasm and runs the full `test/sql` suite
+- [ ] Gating CI job fails the build on any WASM load/runtime error
+- [ ] WASM status badge in README, backed by a dedicated WASM workflow
+- [ ] `@duckdb/duckdb-wasm` pinned to the engine version matching the built DuckDB version, documented
+- [ ] `openssl` made a `!wasm32` dependency in `vcpkg.json`
 
 Deferred from v0.8.0 (candidates for a future milestone):
 - **CV ensemble params + AutoEnsemble CV segfault:** `ts_cv_forecast_by('AutoEnsemble')` segfaults (CV native `ts_cv_forecast_native.cpp:380-388` never parses `ensemble_top_k`/`ensemble_method`). Wire ensemble-param parsing into the CV native so AutoEnsemble backtests natively (and honor top_k/combination_method instead of defaulting to top_k=3/Mean).
@@ -126,4 +141,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-31 — shipped v0.8.0 Ensemble Forecasting milestone*
+*Last updated: 2026-09-01 — started v0.9.0 WASM Runtime Verification milestone*

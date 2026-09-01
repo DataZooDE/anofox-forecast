@@ -1,20 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v0.8.0
-milestone_name: Ensemble Forecasting
-status: Awaiting next milestone
-stopped_at: Phase 06 complete — all phases complete
-last_updated: "2026-08-31T18:38:24.447Z"
-last_activity: 2026-08-31
-last_activity_desc: Milestone v0.8.0 completed and archived
-state_head: 4e26afbbca9a43ebf6b930640005e3c55d5c841d
+milestone: v0.9.0
+milestone_name: WASM Runtime Verification
+status: planning
+last_updated: "2026-09-01T20:29:44.073Z"
+last_activity: 2026-09-01
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 6
-  completed_plans: 6
-  percent: 100
-current_phase: 06
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -28,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-08-30 — started v0.8.0 Ensemble Foreca
 
 ## Current Position
 
-Phase: Milestone v0.8.0 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-08-31 — Milestone v0.8.0 completed and archived
+Status: Defining requirements
+Last activity: 2026-09-01 — Milestone v0.9.0 started
 
 ## Performance Metrics
 
