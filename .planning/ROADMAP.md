@@ -79,15 +79,17 @@ Tech debt carried forward: `ts_cv_forecast_by('AutoEnsemble')` segfaults (crate/
   2. A dedicated WASM workflow — separate from the main distribution pipeline — runs the harness so WASM status is observable on its own without inspecting the full release pipeline.
   3. The README shows a WASM status badge wired to the dedicated WASM workflow that flips between passing and failing in step with that workflow's latest run.
 
-**Plans**: TBD
+**Plans**: 1/1 plans planned
+
+- [ ] 08-01-ci-gating-wasm-badge-PLAN.md — Add the wasm-runtime-test gating job to MainDistributionPipeline.yml (CI-01), create the dedicated WasmTest.yml workflow (CI-02), and add the README WASM badge (CI-03); negative-control verifies the gate turns red
 
 ## Progress
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 7. WASM Node Harness + Local Green | 1/1 | Complete ✅ | 2026-09-02 |
-| 8. CI Gating + Dedicated Workflow + Badge | 0/TBD | Not started | - |
+| 8. CI Gating + Dedicated Workflow + Badge | 0/1 | Planned | - |
 
 ## Next
 
-Plan Phase 8 — run `/gsd-plan-phase 8`.
+Execute Phase 8 — run `/gsd-execute-phase 8`.
