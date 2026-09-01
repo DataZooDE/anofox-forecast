@@ -61,7 +61,8 @@ Tech debt carried forward: `ts_cv_forecast_by('AutoEnsemble')` segfaults (crate/
   3. The full 66-file `test/sql/**/*.test` suite passes against the built `.wasm`, and every test that is genuinely infeasible on WASM appears in an explicit skip-list with a documented per-entry reason.
   4. `@duckdb/duckdb-wasm` and `web-worker@1.2.0` are pinned to versions whose engine ABI matches the built DuckDB version, and the procedure to verify/update that version match is documented.
   5. `vcpkg.json` declares `openssl` as a `!wasm32` dependency, and a WASM build confirms Emscripten no longer compiles OpenSSL for the WASM target (native builds still link it).
-**Plans**: TBD
+**Plans**: 1 plan
+- [ ] 07-01-wasm-node-harness-PLAN.md — Port the DuckDB-Wasm Node harness (run.mjs/sqllogic.mjs/package.json/README), apply the openssl !wasm32 vcpkg guard, and run the full 66-file test/sql suite green against the rebuilt .wasm
 
 ### Phase 8: CI Gating + Dedicated Workflow + Badge
 **Goal**: WASM load/runtime regressions fail CI automatically, and WASM health is independently observable via a dedicated workflow and a README badge — the local green from Phase 7 is now enforced on every relevant build.
@@ -77,7 +78,7 @@ Tech debt carried forward: `ts_cv_forecast_by('AutoEnsemble')` segfaults (crate/
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 7. WASM Node Harness + Local Green | 0/TBD | Not started | - |
+| 7. WASM Node Harness + Local Green | 0/1 | Not started | - |
 | 8. CI Gating + Dedicated Workflow + Badge | 0/TBD | Not started | - |
 
 ## Next
