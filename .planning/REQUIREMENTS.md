@@ -17,9 +17,9 @@ Requirements for this milestone. Each maps to a roadmap phase.
 
 ### CI Gating
 
-- [ ] **CI-01**: A gating CI job (`needs:` the wasm build) downloads the `wasm_eh` artifact and runs the harness, failing the build on any WASM load or runtime error.
-- [ ] **CI-02**: A dedicated WASM workflow (separate from the main distribution pipeline) runs the harness so WASM status is independently observable.
-- [ ] **CI-03**: A WASM status badge in the README reflects the dedicated WASM workflow's pass/fail state.
+- [x] **CI-01**: A gating CI job (`needs:` the wasm build) downloads the `wasm_eh` artifact and runs the harness, failing the build on any WASM load or runtime error.
+- [x] **CI-02**: A dedicated WASM workflow (separate from the main distribution pipeline) runs the harness so WASM status is independently observable.
+- [x] **CI-03**: A WASM status badge in the README reflects the dedicated WASM workflow's pass/fail state.
 
 ### Dependencies & Pinning
 
@@ -57,9 +57,9 @@ Which phases cover which requirements. Filled during roadmap creation.
 | WASM-03 | Phase 7 | Complete |
 | DEP-01 | Phase 7 | Complete |
 | DEP-02 | Phase 7 | Complete |
-| CI-01 | Phase 8 | Pending |
-| CI-02 | Phase 8 | Pending |
-| CI-03 | Phase 8 | Pending |
+| CI-01 | Phase 8 | Complete |
+| CI-02 | Phase 8 | Complete |
+| CI-03 | Phase 8 | Complete |
 
 **Coverage:**
 

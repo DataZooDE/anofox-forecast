@@ -4,17 +4,17 @@ milestone: v0.9.0
 milestone_name: WASM Runtime Verification (Phases 7-8)
 current_phase: 08
 current_phase_name: CI Gating + Dedicated Workflow + Badge
-status: phase_complete
-stopped_at: Phase 07 verified (passed, accepted) — ready to plan Phase 08
-last_updated: "2026-09-02T00:25:00.000Z"
+status: verifying
+stopped_at: Completed 08-01-ci-gating-wasm-badge-PLAN.md (Tasks 1-3 committed; Task 4 = blocking-human checkpoint awaiting operator CI push)
+last_updated: "2026-09-01T22:28:55.951Z"
 last_activity: 2026-09-02
-last_activity_desc: Phase 07 verified passed (WASM-03 accepted as out-of-scope test debt)
-state_head: c0efa6f8f466111f3d293df615db9daf34897472
+last_activity_desc: Phase 08 execution started
+state_head: 3acd878c0f569931fcd0cc6827a81acfc37c8def
 progress:
   total_phases: 2
   completed_phases: 1
-  total_plans: 1
-  completed_plans: 1
+  total_plans: 2
+  completed_plans: 2
   percent: 50
 ---
 
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-09-01 — started v0.9.0 WASM Runtime Ve
 
 ## Current Position
 
-Phase: 07 (WASM Node Harness + Local Green) — COMPLETE ✅ (verified passed, accepted)
-Plan: 1 of 1 done
-Status: Phase 07 verified — ready to plan Phase 08
-Last activity: 2026-09-02 — Phase 07 verified passed
+Phase: 08 (CI Gating + Dedicated Workflow + Badge) — EXECUTING
+Plan: 1 of 1
+Status: Phase complete — ready for verification
+Last activity: 2026-09-02 — Phase 08 execution started
 
 ### ⚠ Phase 07 finding that must shape Phase 08 planning
 
@@ -74,6 +74,7 @@ Do NOT assume "CI building from HEAD makes the suite green" — it will not. Ful
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 07-wasm-node-harness-local-green P01 | 180 | 4 tasks | 7 files |
+| Phase 08 P01 | 3 | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -87,6 +88,8 @@ Recent decisions affecting current work:
 - This is a CI/infra hardening milestone — no new SQL functions, no Rust crate changes; work lives in `test/wasm/`, `.github/workflows/`, `vcpkg.json`, and README.
 - [Phase 07]: Pinned @duckdb/duckdb-wasm@1.33.1-dev64.0 (engine v1.5.5) and web-worker@1.2.0; pthreadWorker=null mandatory for eh bundle
 - [Phase 07]: SKIP_FILES contains only 4 structurally WASM-infeasible files; 23 remaining failures are artifact-API drift tracked in SUMMARY
+- [Phase 08]: Gate CI on curated subset only (no --all): 184 pre-existing test-debt failures under --all must not permanently red the build
+- [Phase 08]: Same-run vs cross-run artifact download split: gating job (same run) vs WasmTest.yml (cross-run via workflow_run.id + github-token)
 
 ### Known Gotchas (issue #255 — must shape Phase 7 plans)
 
@@ -119,8 +122,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 **Resume file:** None
 
-Last session: 2026-09-01T21:41:30.390Z
-Stopped at: Completed 07-01-wasm-node-harness-PLAN.md
+Last session: 2026-09-01T22:28:55.918Z
+Stopped at: Completed 08-01-ci-gating-wasm-badge-PLAN.md (Tasks 1-3 committed; Task 4 = blocking-human checkpoint awaiting operator CI push)
 Resume: /gsd-plan-phase 7 to plan the WASM Node harness + local green.
 
 ## Operator Next Steps
