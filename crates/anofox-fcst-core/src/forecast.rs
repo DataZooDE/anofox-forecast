@@ -2619,8 +2619,10 @@ pub(crate) fn build_forecaster(
     match model_type {
         // Auto-selection models
         ModelType::AutoARIMA => {
-            let mut cfg = AutoARIMAConfig::default();
-            cfg.seasonal_period = p;
+            let cfg = AutoARIMAConfig {
+                seasonal_period: p,
+                ..Default::default()
+            };
             Ok(Box::new(AutoARIMA::with_config(cfg)))
         }
         ModelType::AutoETS => {

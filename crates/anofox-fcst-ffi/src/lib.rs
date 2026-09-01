@@ -7964,6 +7964,12 @@ mod var_ffi_tests {
 /// `anofox_fcst_core::forecast_explicit_ensemble` rather than the single-model
 /// `forecast()` path.  Point forecasts only in Phase 5; `lower_bounds` and
 /// `upper_bounds` are always `null` (prediction intervals deferred to EPI-01).
+///
+/// # Safety
+/// All pointer arguments must be valid for the stated lengths: `values`/`validity`
+/// for `length` elements, `members_buf` for `members_buf_len` bytes, and
+/// `out_result`/`out_error` must be valid, writable pointers. `members_buf` and
+/// `combination_method` must be non-null (the latter may be an empty C string).
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_forecast_ensemble(
     values: *const c_double,
