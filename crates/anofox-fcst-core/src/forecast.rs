@@ -777,7 +777,11 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         ModelType::AutoEnsemble => forecast_auto_ensemble(
             &clean_values,
             options.horizon,
-            if options.ensemble_top_k == 0 { 3 } else { options.ensemble_top_k },
+            if options.ensemble_top_k == 0 {
+                3
+            } else {
+                options.ensemble_top_k
+            },
             options.ensemble_method.as_deref(),
             period,
         ),
@@ -965,7 +969,11 @@ pub fn forecast_with_exog(
             ModelType::AutoEnsemble => forecast_auto_ensemble(
                 &clean_values,
                 options.horizon,
-                if options.ensemble_top_k == 0 { 3 } else { options.ensemble_top_k },
+                if options.ensemble_top_k == 0 {
+                    3
+                } else {
+                    options.ensemble_top_k
+                },
                 options.ensemble_method.as_deref(),
                 period,
             ),
@@ -2529,7 +2537,9 @@ fn forecast_kalman(values: &[f64], horizon: usize, spec: Option<&str>) -> Result
 /// `"stacking"` maps to `CombinationMethod::Stacking { folds: 2 }` — a second-half
 /// in-sample holdout used to fit ridge-stacking weights. The fold count is fixed and
 /// not user-configurable in v1.
-fn parse_combination_method(s: Option<&str>) -> Result<anofox_forecast::models::ensemble::CombinationMethod> {
+fn parse_combination_method(
+    s: Option<&str>,
+) -> Result<anofox_forecast::models::ensemble::CombinationMethod> {
     use anofox_forecast::models::ensemble::CombinationMethod;
     match s.unwrap_or("").trim().to_lowercase().as_str() {
         "" | "mean" => Ok(CombinationMethod::Mean),
@@ -2574,9 +2584,9 @@ fn forecast_auto_ensemble(
     };
     let ts = make_timeseries(values)?;
     let mut model = AutoEnsemble::with_config(config);
-    model.fit(&ts).map_err(|e| {
-        ForecastError::ComputationError(format!("AutoEnsemble fit failed: {}", e))
-    })?;
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("AutoEnsemble fit failed: {}", e)))?;
     extract_forecast(&model, horizon, "AutoEnsemble")
 }
 
@@ -2786,8 +2796,7 @@ pub(crate) fn build_forecaster(
         ModelType::AutoEnsemble => Err(ForecastError::InvalidParameter {
             param: "members".to_string(),
             value: model_type.name().to_string(),
-            reason: "AutoEnsemble cannot be used as a member of an explicit ensemble"
-                .to_string(),
+            reason: "AutoEnsemble cannot be used as a member of an explicit ensemble".to_string(),
         }),
     }
 }
@@ -2863,9 +2872,8 @@ pub fn forecast_explicit_ensemble(
     // Ensemble implements Forecaster (anofox-forecast 0.15.3, model.rs:575)
     let ts = make_timeseries(&clean_values)?;
     let mut ens = Ensemble::new(members).with_method(combination_method);
-    ens.fit(&ts).map_err(|e| {
-        ForecastError::ComputationError(format!("Ensemble fit failed: {}", e))
-    })?;
+    ens.fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("Ensemble fit failed: {}", e)))?;
     // model_name = "Ensemble" (plain, mirroring Phase 4's plain "AutoEnsemble")
     extract_forecast(&ens, horizon, "Ensemble")
 }
@@ -2943,9 +2951,8 @@ pub fn inspect_explicit_ensemble(
     // NOTE: weights() called AFTER .fit() — pre-fit weights are always uniform (RESEARCH Pitfall 2)
     let ts = make_timeseries(&clean_values)?;
     let mut ens = Ensemble::new(members).with_method(combination_method);
-    ens.fit(&ts).map_err(|e| {
-        ForecastError::ComputationError(format!("Ensemble fit failed: {}", e))
-    })?;
+    ens.fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("Ensemble fit failed: {}", e)))?;
 
     let weights = ens.weights();
     Ok(member_names
@@ -2991,9 +2998,9 @@ pub fn inspect_auto_ensemble(
     };
     let ts = make_timeseries(values)?;
     let mut model = AutoEnsemble::with_config(config);
-    model.fit(&ts).map_err(|e| {
-        ForecastError::ComputationError(format!("AutoEnsemble fit failed: {}", e))
-    })?;
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("AutoEnsemble fit failed: {}", e)))?;
 
     // Read selected top-K: first model_count() entries of all_scores()
     // all_scores() returns ALL candidates sorted ascending by MSE; first k are selected
@@ -3037,7 +3044,11 @@ mod insp01_tests {
     #[test]
     fn inspect_explicit_mean_weights_equal_1_over_k() {
         let values = synthetic_series(60);
-        let members = vec!["AutoARIMA".to_string(), "AutoETS".to_string(), "Naive".to_string()];
+        let members = vec![
+            "AutoARIMA".to_string(),
+            "AutoETS".to_string(),
+            "Naive".to_string(),
+        ];
         let result = inspect_explicit_ensemble(&values, &members, Some("mean"), 0).unwrap();
         assert_eq!(result.len(), 3, "Should have 3 member entries");
         let k = 3.0_f64;
@@ -3050,15 +3061,22 @@ mod insp01_tests {
             );
         }
         let sum: f64 = result.iter().map(|(_, w)| w).sum();
-        assert!((sum - 1.0).abs() < 1e-10, "Sum of Mean weights should be 1.0, got {}", sum);
+        assert!(
+            (sum - 1.0).abs() < 1e-10,
+            "Sum of Mean weights should be 1.0, got {}",
+            sum
+        );
     }
 
     #[test]
     fn inspect_explicit_weighted_mse_weights_sum_to_1() {
         let values = synthetic_series(60);
-        let members = vec!["AutoARIMA".to_string(), "AutoETS".to_string(), "Naive".to_string()];
-        let result =
-            inspect_explicit_ensemble(&values, &members, Some("weighted_mse"), 0).unwrap();
+        let members = vec![
+            "AutoARIMA".to_string(),
+            "AutoETS".to_string(),
+            "Naive".to_string(),
+        ];
+        let result = inspect_explicit_ensemble(&values, &members, Some("weighted_mse"), 0).unwrap();
         assert_eq!(result.len(), 3);
         let sum: f64 = result.iter().map(|(_, w)| w).sum();
         assert!(
@@ -3067,7 +3085,11 @@ mod insp01_tests {
             sum
         );
         for (_, w) in &result {
-            assert!(*w >= 0.0, "WeightedMSE weight should be non-negative, got {}", w);
+            assert!(
+                *w >= 0.0,
+                "WeightedMSE weight should be non-negative, got {}",
+                w
+            );
         }
     }
 
@@ -3090,7 +3112,10 @@ mod insp01_tests {
         let values = synthetic_series(20);
         let members = vec!["AutoARIMA".to_string(), "UnknownModel".to_string()];
         let result = inspect_explicit_ensemble(&values, &members, Some("mean"), 0);
-        assert!(result.is_err(), "Should return error for unknown member name");
+        assert!(
+            result.is_err(),
+            "Should return error for unknown member name"
+        );
     }
 
     #[test]
@@ -3100,7 +3125,12 @@ mod insp01_tests {
         assert!(!result.is_empty(), "Should return at least one member");
         let k = result.len() as f64;
         for (name, score, weight) in &result {
-            assert!(*score > 0.0, "MSE score for {} should be > 0, got {}", name, score);
+            assert!(
+                *score > 0.0,
+                "MSE score for {} should be > 0, got {}",
+                name,
+                score
+            );
             let w = weight.expect("Mean combination should return Some weight");
             assert!(
                 (w - 1.0 / k).abs() < 1e-10,
@@ -3118,7 +3148,12 @@ mod insp01_tests {
         let result = inspect_auto_ensemble(&values, 3, Some("weighted_mse"), 0).unwrap();
         assert!(!result.is_empty(), "Should return at least one member");
         for (name, score, weight) in &result {
-            assert!(*score > 0.0, "MSE score for {} should be > 0, got {}", name, score);
+            assert!(
+                *score > 0.0,
+                "MSE score for {} should be > 0, got {}",
+                name,
+                score
+            );
             assert!(
                 weight.is_none(),
                 "WeightedMSE combination should return None weight for {}, got {:?}",
@@ -4638,7 +4673,10 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert!(result.is_ok(), "AutoEnsemble should succeed on a clean series");
+        assert!(
+            result.is_ok(),
+            "AutoEnsemble should succeed on a clean series"
+        );
         assert_eq!(
             result.unwrap().point.len(),
             5,
@@ -4708,7 +4746,11 @@ mod tests {
         let out = result.unwrap();
         assert_eq!(out.point.len(), 6, "output length must equal horizon");
         for &v in &out.point {
-            assert!(v.is_finite(), "all point forecasts must be finite, got {}", v);
+            assert!(
+                v.is_finite(),
+                "all point forecasts must be finite, got {}",
+                v
+            );
         }
     }
 
@@ -4724,7 +4766,8 @@ mod tests {
         // Accept either InsufficientData (empty after interpolation) or ComputationError
         // (NaN detected by ensemble fit); both surface as NULL rows via the FFI.
         match result {
-            Err(ForecastError::InsufficientData { .. }) | Err(ForecastError::ComputationError(_)) => {}
+            Err(ForecastError::InsufficientData { .. })
+            | Err(ForecastError::ComputationError(_)) => {}
             Err(e) => panic!("expected InsufficientData or ComputationError, got {:?}", e),
             Ok(_) => panic!("expected Err, got Ok"),
         }
@@ -4742,7 +4785,10 @@ mod tests {
                 assert_eq!(needed, 3);
                 assert_eq!(got, 2);
             }
-            e => panic!("expected InsufficientData {{ needed: 3, got: 2 }}, got {:?}", e),
+            e => panic!(
+                "expected InsufficientData {{ needed: 3, got: 2 }}, got {:?}",
+                e
+            ),
         }
     }
 

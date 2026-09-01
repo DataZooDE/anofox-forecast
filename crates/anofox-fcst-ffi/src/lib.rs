@@ -7969,9 +7969,9 @@ pub unsafe extern "C" fn anofox_ts_forecast_ensemble(
     values: *const c_double,
     validity: *const u64,
     length: size_t,
-    members_buf: *const c_char,    // null-delimited: "AutoARIMA\0AutoETS\0Theta\0"
-    members_buf_len: size_t,       // total byte length of members_buf
-    members_count: size_t,         // number of member strings in members_buf
+    members_buf: *const c_char, // null-delimited: "AutoARIMA\0AutoETS\0Theta\0"
+    members_buf_len: size_t,    // total byte length of members_buf
+    members_count: size_t,      // number of member strings in members_buf
     combination_method: *const c_char, // C string, NULL or "" → "mean"
     seasonal_period: c_int,
     horizon: c_int,
@@ -7993,8 +7993,7 @@ pub unsafe extern "C" fn anofox_ts_forecast_ensemble(
         let series = build_series(values, validity, length);
 
         // Recover member list from null-delimited buffer bounded by members_buf_len
-        let member_bytes =
-            std::slice::from_raw_parts(members_buf as *const u8, members_buf_len);
+        let member_bytes = std::slice::from_raw_parts(members_buf as *const u8, members_buf_len);
         let member_names: Vec<String> = member_bytes
             .split(|&b| b == 0)
             .filter(|s| !s.is_empty())
@@ -8117,11 +8116,11 @@ pub unsafe extern "C" fn anofox_ts_forecast_ensemble(
 /// - or `null` (explicit-member path has no per-member score)
 #[repr(C)]
 pub struct EnsembleInspectResult {
-    pub count: size_t,                  // number of members
-    pub member_names_buf: *mut c_char,  // null-delimited names; length = member_names_buf_len
-    pub member_names_buf_len: size_t,   // byte length of member_names_buf (including all NULs)
-    pub weights: *mut c_double,         // len=count; null if no weights available (non-Mean AutoEnsemble)
-    pub scores: *mut c_double,          // len=count MSE scores; null for explicit-member inspect
+    pub count: size_t,                 // number of members
+    pub member_names_buf: *mut c_char, // null-delimited names; length = member_names_buf_len
+    pub member_names_buf_len: size_t,  // byte length of member_names_buf (including all NULs)
+    pub weights: *mut c_double, // len=count; null if no weights available (non-Mean AutoEnsemble)
+    pub scores: *mut c_double,  // len=count MSE scores; null for explicit-member inspect
 }
 
 /// Inspect combination weights for an explicit-member ensemble (INSP-01).
@@ -8141,10 +8140,10 @@ pub unsafe extern "C" fn anofox_ts_ensemble_inspect(
     values: *const c_double,
     validity: *const u64,
     length: size_t,
-    members_buf: *const c_char,        // null-delimited: "AutoARIMA\0AutoETS\0Theta\0"
-    members_buf_len: size_t,            // total byte length of members_buf
-    members_count: size_t,              // number of member strings
-    combination_method: *const c_char,  // C string, NULL or "" → "mean"
+    members_buf: *const c_char, // null-delimited: "AutoARIMA\0AutoETS\0Theta\0"
+    members_buf_len: size_t,    // total byte length of members_buf
+    members_count: size_t,      // number of member strings
+    combination_method: *const c_char, // C string, NULL or "" → "mean"
     seasonal_period: c_int,
     out_result: *mut EnsembleInspectResult,
     out_error: *mut AnofoxError,
@@ -8164,8 +8163,7 @@ pub unsafe extern "C" fn anofox_ts_ensemble_inspect(
         let series = build_series(values, validity, length);
 
         // Recover member list from null-delimited buffer bounded by members_buf_len
-        let member_bytes =
-            std::slice::from_raw_parts(members_buf as *const u8, members_buf_len);
+        let member_bytes = std::slice::from_raw_parts(members_buf as *const u8, members_buf_len);
         let member_names: Vec<String> = member_bytes
             .split(|&b| b == 0)
             .filter(|s| !s.is_empty())
@@ -8242,21 +8240,18 @@ pub unsafe extern "C" fn anofox_ts_ensemble_inspect(
             }
 
             // Allocate and copy weights array
-            (*out_result).weights = match alloc_or_error(
-                &weights_vec,
-                out_error,
-                "Failed to allocate weights",
-            ) {
-                Ok(ptr) => ptr,
-                Err(()) => {
-                    // Free already-allocated names_buf
-                    if !(*out_result).member_names_buf.is_null() {
-                        free((*out_result).member_names_buf as *mut core::ffi::c_void);
-                        (*out_result).member_names_buf = ptr::null_mut();
+            (*out_result).weights =
+                match alloc_or_error(&weights_vec, out_error, "Failed to allocate weights") {
+                    Ok(ptr) => ptr,
+                    Err(()) => {
+                        // Free already-allocated names_buf
+                        if !(*out_result).member_names_buf.is_null() {
+                            free((*out_result).member_names_buf as *mut core::ffi::c_void);
+                            (*out_result).member_names_buf = ptr::null_mut();
+                        }
+                        return false;
                     }
-                    return false;
-                }
-            };
+                };
 
             true
         }
@@ -8304,7 +8299,7 @@ pub unsafe extern "C" fn anofox_ts_auto_ensemble_inspect(
     validity: *const u64,
     length: size_t,
     top_k: c_int,
-    combination_method: *const c_char,  // C string, NULL or "" → "weighted_mse" (crate default)
+    combination_method: *const c_char, // C string, NULL or "" → "weighted_mse" (crate default)
     seasonal_period: c_int,
     out_result: *mut EnsembleInspectResult,
     out_error: *mut AnofoxError,
@@ -8325,10 +8320,7 @@ pub unsafe extern "C" fn anofox_ts_auto_ensemble_inspect(
 
         // Convert Vec<Option<f64>> to Vec<f64> for the AutoEnsemble path
         // (AutoEnsemble takes &[f64]; interpolate nulls as the core function does for explicit)
-        let values_f64: Vec<f64> = series
-            .iter()
-            .map(|v| v.unwrap_or(f64::NAN))
-            .collect();
+        let values_f64: Vec<f64> = series.iter().map(|v| v.unwrap_or(f64::NAN)).collect();
 
         // Parse combination_method (NULL or empty → None → "weighted_mse" in core)
         let method_opt: Option<String> = if combination_method.is_null() {
@@ -8387,43 +8379,37 @@ pub unsafe extern "C" fn anofox_ts_auto_ensemble_inspect(
             }
 
             // Allocate and copy scores array
-            (*out_result).scores = match alloc_or_error(
-                &scores_vec,
-                out_error,
-                "Failed to allocate scores",
-            ) {
-                Ok(ptr) => ptr,
-                Err(()) => {
-                    if !(*out_result).member_names_buf.is_null() {
-                        free((*out_result).member_names_buf as *mut core::ffi::c_void);
-                        (*out_result).member_names_buf = ptr::null_mut();
-                    }
-                    return false;
-                }
-            };
-
-            // Allocate weights only if ALL are Some (Mean combination); else null
-            let all_some = weights_opt.iter().all(|w| w.is_some());
-            if all_some && !weights_opt.is_empty() {
-                let weights_vec: Vec<f64> = weights_opt.iter().map(|w| w.unwrap()).collect();
-                (*out_result).weights = match alloc_or_error(
-                    &weights_vec,
-                    out_error,
-                    "Failed to allocate weights",
-                ) {
+            (*out_result).scores =
+                match alloc_or_error(&scores_vec, out_error, "Failed to allocate scores") {
                     Ok(ptr) => ptr,
                     Err(()) => {
                         if !(*out_result).member_names_buf.is_null() {
                             free((*out_result).member_names_buf as *mut core::ffi::c_void);
                             (*out_result).member_names_buf = ptr::null_mut();
                         }
-                        if !(*out_result).scores.is_null() {
-                            free((*out_result).scores as *mut core::ffi::c_void);
-                            (*out_result).scores = ptr::null_mut();
-                        }
                         return false;
                     }
                 };
+
+            // Allocate weights only if ALL are Some (Mean combination); else null
+            let all_some = weights_opt.iter().all(|w| w.is_some());
+            if all_some && !weights_opt.is_empty() {
+                let weights_vec: Vec<f64> = weights_opt.iter().map(|w| w.unwrap()).collect();
+                (*out_result).weights =
+                    match alloc_or_error(&weights_vec, out_error, "Failed to allocate weights") {
+                        Ok(ptr) => ptr,
+                        Err(()) => {
+                            if !(*out_result).member_names_buf.is_null() {
+                                free((*out_result).member_names_buf as *mut core::ffi::c_void);
+                                (*out_result).member_names_buf = ptr::null_mut();
+                            }
+                            if !(*out_result).scores.is_null() {
+                                free((*out_result).scores as *mut core::ffi::c_void);
+                                (*out_result).scores = ptr::null_mut();
+                            }
+                            return false;
+                        }
+                    };
             } else {
                 (*out_result).weights = ptr::null_mut(); // signals NULL weight column to C++
             }
@@ -8467,9 +8453,7 @@ pub unsafe extern "C" fn anofox_ts_auto_ensemble_inspect(
 /// `result` must be null or a valid pointer to an `EnsembleInspectResult` whose
 /// members were allocated by the corresponding inspect function.
 #[no_mangle]
-pub unsafe extern "C" fn anofox_free_ensemble_inspect_result(
-    result: *mut EnsembleInspectResult,
-) {
+pub unsafe extern "C" fn anofox_free_ensemble_inspect_result(result: *mut EnsembleInspectResult) {
     if result.is_null() {
         return;
     }
