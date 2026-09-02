@@ -2,8 +2,10 @@
 
 #include "anofox_forecast_extension.hpp"
 #include "anofox_fcst_ffi.h"
-#include "ts_forecast_panel_native.hpp"  // Phase 2: GLOB-01..03
-#include "ts_forecast_var_native.hpp"    // Phase 3: CLAS-03
+#include "ts_forecast_panel_native.hpp"     // Phase 2: GLOB-01..03
+#include "ts_forecast_var_native.hpp"       // Phase 3: CLAS-03
+#include "ts_forecast_ensemble_native.hpp"  // Phase 5: ENS-02
+#include "ts_ensemble_inspect_native.hpp"   // Phase 6: INSP-01
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/main/extension_helper.hpp"
@@ -174,8 +176,10 @@ static void LoadInternal(ExtensionLoader &loader) {
     // Register Native Table Functions (streaming)
     RegisterTsBacktestNativeFunction(loader);
     RegisterTsForecastNativeFunction(loader);
-    RegisterTsForecastPanelNativeFunction(loader);  // Phase 2: GLOB-01..03
-    RegisterTsForecastVarNativeFunction(loader);    // Phase 3: CLAS-03
+    RegisterTsForecastPanelNativeFunction(loader);     // Phase 2: GLOB-01..03
+    RegisterTsForecastVarNativeFunction(loader);       // Phase 3: CLAS-03
+    RegisterTsForecastEnsembleNativeFunction(loader);  // Phase 5: ENS-02
+    RegisterTsEnsembleInspectNativeFunction(loader);   // Phase 6: INSP-01
     RegisterTsCvSplitNativeFunction(loader);
     RegisterTsCvForecastNativeFunction(loader);
     RegisterTsCvFoldsNativeFunction(loader);

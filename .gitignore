@@ -36,3 +36,6 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+
+# Node (WASM test harness)
+test/wasm/node_modules/

@@ -1106,6 +1106,18 @@ typedef struct ForecastOptions {
      * Only consulted when model is "Kalman".
      */
     char kalman_model[32];
+    /**
+     * AutoEnsemble: number of top models to select (0 → default 3).
+     * Only consulted when model is "AutoEnsemble".
+     */
+    int ensemble_top_k;
+    /**
+     * AutoEnsemble: combination method string.
+     * Accepted: "" | "mean" | "median" | "weighted_mse" | "inverse_aic" | "stacking" |
+     * "horizon_adaptive" (and common aliases). Empty = "mean" (Phase 4 default).
+     * Only consulted when model is "AutoEnsemble".
+     */
+    char ensemble_method[32];
 } ForecastOptions;
 
 /**
@@ -1272,6 +1284,18 @@ typedef struct ForecastOptionsExog {
      * Kalman state-space spec. Empty string = "local_level" (default).
      */
     char kalman_model[32];
+    /**
+     * AutoEnsemble: number of top models to select (0 → default 3).
+     * Only consulted when model is "AutoEnsemble".
+     */
+    int ensemble_top_k;
+    /**
+     * AutoEnsemble: combination method string.
+     * Accepted: "" | "mean" | "median" | "weighted_mse" | "inverse_aic" | "stacking" |
+     * "horizon_adaptive" (and common aliases). Empty = "mean" (Phase 4 default).
+     * Only consulted when model is "AutoEnsemble".
+     */
+    char ensemble_method[32];
 } ForecastOptionsExog;
 
 /**
@@ -1791,6 +1815,33 @@ typedef struct VARForecastResult {
      */
     size_t n_horizon;
 } VARForecastResult;
+
+/**
+ * Result struct for ensemble member introspection.
+ *
+ * Both `anofox_ts_ensemble_inspect` and `anofox_ts_auto_ensemble_inspect` return
+ * via a pointer to this struct. The companion `anofox_free_ensemble_inspect_result`
+ * must be called after unpacking to avoid memory leaks.
+ *
+ * `member_names_buf` is a null-delimited concatenation of all member names:
+ *   "AutoARIMA\0AutoETS\0Theta\0"
+ * Parse by splitting on b==0 and filtering empty slices.
+ *
+ * `weights` is either:
+ * - a `count`-length array (one weight per member)
+ * - or `null` when no weights are available (AutoEnsemble non-Mean)
+ *
+ * `scores` is either:
+ * - a `count`-length array of in-sample MSE scores (AutoEnsemble path)
+ * - or `null` (explicit-member path has no per-member score)
+ */
+typedef struct EnsembleInspectResult {
+    size_t count;
+    char *member_names_buf;
+    size_t member_names_buf_len;
+    double *weights;
+    double *scores;
+} EnsembleInspectResult;
 
 /**
  * Nullable data array for DuckDB integration.
@@ -3452,6 +3503,91 @@ bool anofox_ts_forecast_var(const double *flat_data,
  * `forecasts` field was set by `anofox_ts_forecast_var`.
  */
 void anofox_free_var_forecast_result(struct VARForecastResult *result);
+
+/**
+ * Forecast using an explicit list of named member models combined via the
+ * specified `CombinationMethod`.
+ *
+ * The member list is passed as a null-delimited concatenated C string
+ * (e.g. `"AutoARIMA\0AutoETS\0Theta\0"`) plus explicit byte length
+ * `members_buf_len` so Rust never has to scan past the buffer end.
+ *
+ * Mirrors `anofox_ts_forecast` but dispatches to
+ * `anofox_fcst_core::forecast_explicit_ensemble` rather than the single-model
+ * `forecast()` path.  Point forecasts only in Phase 5; `lower_bounds` and
+ * `upper_bounds` are always `null` (prediction intervals deferred to EPI-01).
+ */
+bool anofox_ts_forecast_ensemble(const double *values,
+                                 const uint64_t *validity,
+                                 size_t length,
+                                 const char *members_buf,
+                                 size_t members_buf_len,
+                                 size_t members_count,
+                                 const char *combination_method,
+                                 int seasonal_period,
+                                 int horizon,
+                                 struct ForecastResult *out_result,
+                                 struct AnofoxError *out_error);
+
+/**
+ * Inspect combination weights for an explicit-member ensemble (INSP-01).
+ *
+ * Builds and fits the Ensemble from the named members on the series, then returns
+ * the per-member combination weights. Weights sum to 1.0 for all six methods.
+ * For Mean and Median, weights are equal (1/k). For WeightedMSE, InverseAIC,
+ * Stacking, and HorizonAdaptive, weights are crate-computed.
+ *
+ * `scores` in the result is always `null` (explicit-member has no per-member MSE score).
+ *
+ * # Safety
+ * All pointer arguments must be valid. `out_result` must point to a zeroed `EnsembleInspectResult`.
+ * Call `anofox_free_ensemble_inspect_result(out_result)` after unpacking.
+ */
+bool anofox_ts_ensemble_inspect(const double *values,
+                                const uint64_t *validity,
+                                size_t length,
+                                const char *members_buf,
+                                size_t members_buf_len,
+                                size_t members_count,
+                                const char *combination_method,
+                                int seasonal_period,
+                                struct EnsembleInspectResult *out_result,
+                                struct AnofoxError *out_error);
+
+/**
+ * Inspect selected members and in-sample MSE scores for an AutoEnsemble (INSP-01).
+ *
+ * Builds and fits an AutoEnsemble, then returns the selected top-K members with
+ * their in-sample MSE scores. For Mean combination, `weights` is a `count`-length
+ * array with every element equal to 1/k. For all other combination methods
+ * (WeightedMSE, InverseAIC, Stacking, HorizonAdaptive), `weights` is `null`
+ * (crate 0.15.3 does not expose inner ensemble weights via public API).
+ *
+ * # Safety
+ * All pointer arguments must be valid. `out_result` must point to a zeroed `EnsembleInspectResult`.
+ * Call `anofox_free_ensemble_inspect_result(out_result)` after unpacking.
+ */
+bool anofox_ts_auto_ensemble_inspect(const double *values,
+                                     const uint64_t *validity,
+                                     size_t length,
+                                     int top_k,
+                                     const char *combination_method,
+                                     int seasonal_period,
+                                     struct EnsembleInspectResult *out_result,
+                                     struct AnofoxError *out_error);
+
+/**
+ * Free an EnsembleInspectResult allocated by `anofox_ts_ensemble_inspect` or
+ * `anofox_ts_auto_ensemble_inspect`.
+ *
+ * Frees `member_names_buf`, `weights`, and `scores` if non-null, then zeroes
+ * the struct. Matches the allocation ownership model exactly.
+ *
+ * # Safety
+ * `result` must be null or a valid pointer to an `EnsembleInspectResult` whose
+ * members were allocated by the corresponding inspect function.
+ */
+void anofox_free_ensemble_inspect_result(struct EnsembleInspectResult *result);
 
 const char *anofox_fcst_version(void);
 

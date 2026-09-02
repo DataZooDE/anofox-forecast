@@ -27,7 +27,12 @@ jobs:
       enable_rust: true
       # windows_amd64_rtools: only needed for R package builds
       # windows_amd64_mingw: rtools42 MinGW lacks libbcrypt.a needed by Rust getrandom 0.3+
-      exclude_archs: 'windows_amd64_rtools;windows_amd64_mingw'
+      # windows_amd64: the v1.4-andium ci-tools vcpkg baseline pins an OpenSSL
+      #   dependency whose upstream download URL now 404s ("Download failed,
+      #   halting portfile") — not fixable here (vcpkg comes from extension-ci-tools).
+      #   Excluded on the LTS line only; the v1.5.5 (variegata) windows_amd64 build
+      #   uses a newer, working baseline and still ships.
+      exclude_archs: 'windows_amd64;windows_amd64_rtools;windows_amd64_mingw'
 
   duckdb-lts-smoke-test:
     name: Smoke test (v1.4.5)
@@ -36,7 +41,8 @@ jobs:
     with:
       duckdb_version: v1.4.5
       extension_name: anofox_forecast
-      exclude_archs: 'windows_amd64_rtools;windows_amd64_mingw'
+      # windows_amd64 excluded on the LTS line (dead vcpkg OpenSSL baseline — see build job).
+      exclude_archs: 'windows_amd64;windows_amd64_rtools;windows_amd64_mingw'
 
   duckdb-lts-deploy:
     name: Deploy extension binaries (v1.4.5 LTS)
@@ -51,7 +57,8 @@ jobs:
       duckdb_version: v1.4.5
       ci_tools_version: v1.4-andium
       extension_name: anofox_forecast
-      exclude_archs: 'windows_amd64_rtools;windows_amd64_mingw'
+      # windows_amd64 excluded on the LTS line (dead vcpkg OpenSSL baseline — see build job).
+      exclude_archs: 'windows_amd64;windows_amd64_rtools;windows_amd64_mingw'
       deploy_latest: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
       deploy_versioned: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
 
@@ -89,6 +96,41 @@ jobs:
       exclude_archs: 'windows_amd64_rtools;windows_amd64_mingw'
       deploy_latest: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
       deploy_versioned: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
+
+  # A green wasm build only proves the extension COMPILES + LINKS. This job
+  # proves it actually LOADS and RUNS in DuckDB-Wasm — the gap described in
+  # query.farm's "Testing DuckDB WASM Extensions". It consumes the wasm_eh
+  # artifact the build job already produced and runs test/wasm/run.mjs against
+  # it. Gating (no continue-on-error) per milestone requirement CI-01.
+  wasm-runtime-test:
+    name: WASM runtime test (Node harness, v1.5.5 wasm_eh)
+    needs: duckdb-latest-build
+    if: ${{ !cancelled() && needs.duckdb-latest-build.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        # Submodules not needed: the harness only uses test/ (this repo) + the
+        # downloaded .wasm; skipping them keeps this leg fast.
+
+      - name: Download built wasm_eh extension
+        uses: actions/download-artifact@v4
+        with:
+          name: anofox_forecast-v1.5.5-extension-wasm_eh
+          path: wasm-artifact
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install harness dependencies
+        run: npm --prefix test/wasm install
+
+      - name: Run DuckDB-Wasm load + runtime harness
+        run: |
+          EXT=$(find wasm-artifact -name 'anofox_forecast.duckdb_extension.wasm' | head -1)
+          if [ -z "$EXT" ]; then echo "::error::built wasm extension not found in artifact"; exit 1; fi
+          echo "Testing extension: $EXT"
+          node test/wasm/run.mjs --ext "$EXT"
 
   build-and-test-rust:
     name: Rust Tests

@@ -1,5 +1,8 @@
 {
   "dependencies": [
-    "openssl"
+    {
+      "name": "openssl",
+      "platform": "!wasm32"
+    }
   ]
 }

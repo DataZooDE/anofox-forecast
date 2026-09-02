@@ -178,6 +178,8 @@ set(EXTENSION_SOURCES
     src/table_functions/ts_forecast_native.cpp
     src/table_functions/ts_forecast_panel_native.cpp
     src/table_functions/ts_forecast_var_native.cpp
+    src/table_functions/ts_forecast_ensemble_native.cpp   # Phase 5: ENS-02
+    src/table_functions/ts_ensemble_inspect_native.cpp    # Phase 6: INSP-01
     src/table_functions/ts_cv_split_native.cpp
     src/table_functions/ts_cv_forecast_native.cpp
     src/table_functions/ts_cv_folds_native.cpp

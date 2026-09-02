@@ -1,0 +1,18 @@
+{
+  "name": "anofox-forecast-wasm-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "DuckDB-Wasm smoke/regression harness for the anofox_forecast extension.",
+  "scripts": {
+    "test": "node run.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "comment": "@duckdb/duckdb-wasm is pinned to the build whose bundled DuckDB engine matches the extension's target (v1.5.5). npm version != engine version: 1.33.1-dev64.0 -> engine v1.5.5 (verified by the storage-version list embedded in dist/duckdb-eh.wasm). This is the @next dev build; no STABLE duckdb-wasm ships 1.5.x yet. Bump in lockstep when the extension moves to a new DuckDB version.",
+  "dependencies": {
+    "@duckdb/duckdb-wasm": "1.33.1-dev64.0",
+    "web-worker": "1.2.0"
+  }
+}

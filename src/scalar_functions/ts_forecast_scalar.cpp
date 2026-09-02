@@ -51,6 +51,9 @@ struct TsForecastScalarBindData : public FunctionData {
     int64_t garch_p = 0;
     int64_t garch_q = 0;
     string kalman_model = "";
+    // AutoEnsemble params (Phase 4)
+    int64_t ensemble_top_k = 0;
+    string ensemble_method = "";
 
     DateColumnType date_col_type = DateColumnType::DATE;
 
@@ -72,6 +75,8 @@ struct TsForecastScalarBindData : public FunctionData {
         copy->garch_p = garch_p;
         copy->garch_q = garch_q;
         copy->kalman_model = kalman_model;
+        copy->ensemble_top_k = ensemble_top_k;
+        copy->ensemble_method = ensemble_method;
         copy->date_col_type = date_col_type;
         return std::move(copy);
     }
@@ -128,7 +133,8 @@ static void ValidateParams(const Value &params_value, const string &method) {
     static const unordered_set<string> valid_keys = {
         "model", "seasonal_period", "seasonal_periods", "confidence_level", "window", "model_pool",
         "laplace_variant", "laplace_seasonal_batch_init",
-        "garch_p", "garch_q", "kalman_model"
+        "garch_p", "garch_q", "kalman_model",
+        "top_k", "combination_method"   // Phase 4: AutoEnsemble params
     };
 
     if (params_value.IsNull()) return;
@@ -159,7 +165,7 @@ static void ValidateParams(const Value &params_value, const string &method) {
             unknown_list += "'" + unknown_keys[i] + "'";
         }
         throw InvalidInputException(
-            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q, kalman_model",
+            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q, kalman_model, top_k, combination_method",
             unknown_list);
     }
 }
@@ -429,6 +435,8 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
         int64_t garch_p = bind_data.garch_p;
         int64_t garch_q = bind_data.garch_q;
         string kalman_model = bind_data.kalman_model;
+        int64_t ensemble_top_k = bind_data.ensemble_top_k;
+        string ensemble_method = bind_data.ensemble_method;
 
         auto p_idx = params_data.sel->get_index(row_idx);
         if (params_data.validity.RowIsValid(p_idx)) {
@@ -446,6 +454,8 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
             garch_p = ParseInt64Param(params_val, "garch_p", 0);
             garch_q = ParseInt64Param(params_val, "garch_q", 0);
             kalman_model = ParseStringParam(params_val, "kalman_model", "");
+            ensemble_top_k = ParseInt64Param(params_val, "top_k", 0);
+            ensemble_method = ParseStringParam(params_val, "combination_method", "");
         }
 
         // --- Build ForecastOptions ---
@@ -485,6 +495,13 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
             strncpy(opts.kalman_model, kalman_model.c_str(),
                     sizeof(opts.kalman_model) - 1);
             opts.kalman_model[sizeof(opts.kalman_model) - 1] = '\0';
+        }
+        // AutoEnsemble params (Phase 4)
+        opts.ensemble_top_k = static_cast<int>(ensemble_top_k);
+        if (!ensemble_method.empty()) {
+            strncpy(opts.ensemble_method, ensemble_method.c_str(),
+                    sizeof(opts.ensemble_method) - 1);
+            opts.ensemble_method[sizeof(opts.ensemble_method) - 1] = '\0';
         }
 
         // --- Call Rust FFI ---

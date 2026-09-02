@@ -154,6 +154,13 @@ pub enum ModelType {
     /// Kalman filter state-space model. Default spec: local level.
     /// `kalman_model` in `ForecastOptions` selects "local_linear_trend".
     Kalman,
+    // Ensemble Models (1) — Phase 4 additions
+    /// AutoEnsemble: auto-fits AutoARIMA/AutoETS/AutoTheta, ranks by in-sample MSE,
+    /// combines top-K members using the specified CombinationMethod.
+    /// `ensemble_top_k` (default 3) and `ensemble_method` (default "mean") in
+    /// `ForecastOptions` configure the combination. Prediction intervals are NULL
+    /// in Phase 4 (point forecasts only; intervals deferred to Phase 6 EPI-01).
+    AutoEnsemble,
 }
 
 impl std::str::FromStr for ModelType {
@@ -207,6 +214,8 @@ impl std::str::FromStr for ModelType {
             // Classical
             "GARCH" => return Ok(ModelType::GARCH),
             "Kalman" => return Ok(ModelType::Kalman),
+            // Ensemble
+            "AutoEnsemble" => return Ok(ModelType::AutoEnsemble),
             _ => {}
         }
 
@@ -266,6 +275,8 @@ impl std::str::FromStr for ModelType {
             // Classical
             "garch" => Ok(ModelType::GARCH),
             "kalman" => Ok(ModelType::Kalman),
+            // Ensemble
+            "autoensemble" | "auto_ensemble" => Ok(ModelType::AutoEnsemble),
             // Auto selection (legacy, maps to AutoETS)
             "auto" => Ok(ModelType::AutoETS),
             _ => Err(ForecastError::InvalidModel(format!("Unknown model: {}", s))),
@@ -322,6 +333,8 @@ impl ModelType {
             // Classical
             ModelType::GARCH => "GARCH",
             ModelType::Kalman => "Kalman",
+            // Ensemble
+            ModelType::AutoEnsemble => "AutoEnsemble",
         }
     }
 }
@@ -371,6 +384,13 @@ pub struct ForecastOptions {
     /// Kalman state-space spec ("local_level" | "local_linear_trend").
     /// None = "local_level". Only consulted when model is Kalman.
     pub kalman_model: Option<String>,
+    /// AutoEnsemble: number of top models to select (0 → default 3).
+    /// Only consulted when model is AutoEnsemble.
+    pub ensemble_top_k: usize,
+    /// AutoEnsemble: combination method string. None → "mean" (Phase 4 default).
+    /// Accepted: "" | "mean" | "median" | "weighted_mse" | "inverse_aic" | "stacking" |
+    /// "horizon_adaptive" (and common aliases). Only consulted when model is AutoEnsemble.
+    pub ensemble_method: Option<String>,
 }
 
 impl Default for ForecastOptions {
@@ -392,6 +412,8 @@ impl Default for ForecastOptions {
             garch_p: 0,
             garch_q: 0,
             kalman_model: None,
+            ensemble_top_k: 0,
+            ensemble_method: None,
         }
     }
 }
@@ -501,6 +523,12 @@ pub struct ForecastOptionsExog {
     /// Kalman state-space spec ("local_level" | "local_linear_trend").
     /// None = "local_level". Only consulted when model is Kalman.
     pub kalman_model: Option<String>,
+    /// AutoEnsemble: number of top models to select (0 → default 3).
+    /// Only consulted when model is AutoEnsemble.
+    pub ensemble_top_k: usize,
+    /// AutoEnsemble: combination method string. None → "mean" (Phase 4 default).
+    /// Only consulted when model is AutoEnsemble.
+    pub ensemble_method: Option<String>,
 }
 
 impl Default for ForecastOptionsExog {
@@ -523,6 +551,8 @@ impl Default for ForecastOptionsExog {
             garch_p: 0,
             garch_q: 0,
             kalman_model: None,
+            ensemble_top_k: 0,
+            ensemble_method: None,
         }
     }
 }
@@ -547,6 +577,8 @@ impl From<ForecastOptions> for ForecastOptionsExog {
             garch_p: opts.garch_p,
             garch_q: opts.garch_q,
             kalman_model: opts.kalman_model,
+            ensemble_top_k: opts.ensemble_top_k,
+            ensemble_method: opts.ensemble_method,
         }
     }
 }
@@ -741,14 +773,28 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             options.horizon,
             options.kalman_model.as_deref(),
         ),
+        // Ensemble Models (Phase 4)
+        ModelType::AutoEnsemble => forecast_auto_ensemble(
+            &clean_values,
+            options.horizon,
+            if options.ensemble_top_k == 0 {
+                3
+            } else {
+                options.ensemble_top_k
+            },
+            options.ensemble_method.as_deref(),
+            period,
+        ),
     }?;
 
     // Calculate confidence intervals — skip for models that document no v1 intervals.
     // GARCH point forecasts are conditional standard deviations (not level forecasts), so
     // wrapping them with ±z×σ_historical produces meaningless bounds. Kalman v1 likewise
-    // has no prediction intervals. Emit empty vecs for both, matching the docs.
+    // has no prediction intervals. AutoEnsemble is point-forecast-only in Phase 4
+    // (ensemble prediction intervals deferred to Phase 6, EPI-01).
+    // Emit empty vecs for all three, matching the docs.
     let (lower, upper) = match options.model {
-        ModelType::GARCH | ModelType::Kalman => (vec![], vec![]),
+        ModelType::GARCH | ModelType::Kalman | ModelType::AutoEnsemble => (vec![], vec![]),
         _ => calculate_confidence_intervals(&result.point, &clean_values, options.confidence_level),
     };
 
@@ -915,28 +961,45 @@ pub fn forecast_with_exog(
         }
     } else {
         // No exog data or model doesn't support exog - use standard forecasting
-        // Auto* models run their respective algorithms with automatic parameter selection
-        forecast_with_model(
-            &clean_values,
-            options.horizon,
-            options.model,
-            period,
-            options.window,
-            &options.seasonal_periods,
-            options.model_pool.as_deref(),
-            options.laplace_variant.unwrap_or_default(),
-            options.laplace_seasonal_batch_init,
-            options.confidence_level,
-        )
+        // Auto* models run their respective algorithms with automatic parameter selection.
+        // AutoEnsemble is dispatched separately to honour user-supplied ensemble_top_k /
+        // ensemble_method from ForecastOptionsExog; routing it through forecast_with_model
+        // would silently hard-code top_k=3 and method=None (WR-02).
+        match options.model {
+            ModelType::AutoEnsemble => forecast_auto_ensemble(
+                &clean_values,
+                options.horizon,
+                if options.ensemble_top_k == 0 {
+                    3
+                } else {
+                    options.ensemble_top_k
+                },
+                options.ensemble_method.as_deref(),
+                period,
+            ),
+            _ => forecast_with_model(
+                &clean_values,
+                options.horizon,
+                options.model,
+                period,
+                options.window,
+                &options.seasonal_periods,
+                options.model_pool.as_deref(),
+                options.laplace_variant.unwrap_or_default(),
+                options.laplace_seasonal_batch_init,
+                options.confidence_level,
+            ),
+        }
     }?;
 
     // For fitted values calculation, use the requested model
     let model = options.model;
 
-    // Calculate confidence intervals — skip for GARCH and Kalman (no synthetic
-    // historical-volatility bounds on volatility forecasts or state-space outputs).
+    // Calculate confidence intervals — skip for GARCH, Kalman, and AutoEnsemble
+    // (no synthetic historical-volatility bounds on volatility forecasts or state-space outputs;
+    // AutoEnsemble intervals deferred to Phase 6, EPI-01).
     let (lower, upper) = match options.model {
-        ModelType::GARCH | ModelType::Kalman => (vec![], vec![]),
+        ModelType::GARCH | ModelType::Kalman | ModelType::AutoEnsemble => (vec![], vec![]),
         _ => calculate_confidence_intervals(&result.point, &clean_values, options.confidence_level),
     };
 
@@ -1100,6 +1163,8 @@ fn forecast_with_model(
         // Classical (default params: GARCH(1,1), Kalman local_level)
         ModelType::GARCH => forecast_garch(values, horizon, 1, 1),
         ModelType::Kalman => forecast_kalman(values, horizon, None),
+        // Ensemble (default params: top_k=3, method=Mean)
+        ModelType::AutoEnsemble => forecast_auto_ensemble(values, horizon, 3, None, period),
     }
 }
 
@@ -2463,6 +2528,657 @@ fn forecast_kalman(values: &[f64], horizon: usize, spec: Option<&str>) -> Result
     extract_forecast(&model, horizon, "Kalman")
 }
 
+/// Parse a `combination_method` string to a `CombinationMethod` enum variant.
+///
+/// Empty string and `"mean"` both map to `CombinationMethod::Mean` (Phase 4 default),
+/// overriding the crate's `WeightedMSE` default. `"custom"` is explicitly rejected
+/// (deferred, ENS-F1). All other unknown strings return `InvalidParameter`.
+///
+/// `"stacking"` maps to `CombinationMethod::Stacking { folds: 2 }` — a second-half
+/// in-sample holdout used to fit ridge-stacking weights. The fold count is fixed and
+/// not user-configurable in v1.
+fn parse_combination_method(
+    s: Option<&str>,
+) -> Result<anofox_forecast::models::ensemble::CombinationMethod> {
+    use anofox_forecast::models::ensemble::CombinationMethod;
+    match s.unwrap_or("").trim().to_lowercase().as_str() {
+        "" | "mean" => Ok(CombinationMethod::Mean),
+        "median" => Ok(CombinationMethod::Median),
+        "weighted_mse" | "weightedmse" | "weighted-mse" => Ok(CombinationMethod::WeightedMSE),
+        "inverse_aic" | "inverseaic" | "inverse-aic" | "aic" => Ok(CombinationMethod::InverseAIC),
+        "stacking" | "stack" => Ok(CombinationMethod::Stacking { folds: 2 }),
+        "horizon_adaptive" | "horizonadaptive" | "horizon-adaptive" | "adaptive" => {
+            Ok(CombinationMethod::HorizonAdaptive)
+        }
+        other => Err(ForecastError::InvalidParameter {
+            param: "combination_method".to_string(),
+            value: other.to_string(),
+            reason: "expected one of: mean, median, weighted_mse, inverse_aic, stacking, horizon_adaptive"
+                .to_string(),
+        }),
+    }
+}
+
+/// Auto-ensemble forecasting helper.
+///
+/// Fits AutoARIMA, AutoETS, and AutoTheta; ranks candidates by in-sample MSE
+/// ascending; combines the top-`top_k` members using the specified `CombinationMethod`.
+///
+/// Mirrors `forecast_kalman` in structure — uses `extract_forecast` via the
+/// `Forecaster` trait. Point forecasts only in Phase 4; prediction intervals are
+/// deferred to Phase 6 (EPI-01).
+fn forecast_auto_ensemble(
+    values: &[f64],
+    horizon: usize,
+    top_k: usize,
+    method_str: Option<&str>,
+    period: usize,
+) -> Result<ForecastOutput> {
+    use anofox_forecast::models::ensemble::{AutoEnsemble, AutoEnsembleConfig};
+
+    let combination_method = parse_combination_method(method_str)?;
+    let config = AutoEnsembleConfig {
+        top_k,
+        combination_method,
+        seasonal_period: if period > 1 { Some(period) } else { None },
+    };
+    let ts = make_timeseries(values)?;
+    let mut model = AutoEnsemble::with_config(config);
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("AutoEnsemble fit failed: {}", e)))?;
+    extract_forecast(&model, horizon, "AutoEnsemble")
+}
+
+// ============================================================================
+// Phase 5 (ENS-02): Explicit-member ensemble helpers
+// ============================================================================
+
+/// Construct a boxed `Forecaster` instance for the given model type and optional
+/// seasonal period.  Used by `forecast_explicit_ensemble` to build member models
+/// for `Ensemble::new(members)`.
+///
+/// Compiler-exhaustive match over all 36 `ModelType` variants — any future variant
+/// addition causes a compile error rather than a silent runtime miss.
+///
+/// Returns `Err(InvalidParameter)` for model types that are not expressible as a
+/// single per-series `Box<dyn Forecaster>` with a shared `seasonal_period`:
+/// GARCH (wrong predict semantics), Laplace (variant-dependent construction),
+/// ARIMA (requires p/d/q), MFLES/MSTL/TBATS + Auto variants (multi-seasonal),
+/// AutoEnsemble (circular).
+pub(crate) fn build_forecaster(
+    model_type: ModelType,
+    period: Option<usize>,
+) -> Result<anofox_forecast::models::BoxedForecaster> {
+    use anofox_forecast::models::baseline::{
+        Naive, RandomWalkWithDrift, SeasonalNaive, SeasonalWindowAverage, WindowAverage,
+    };
+
+    let p = period.unwrap_or(0);
+
+    match model_type {
+        // Auto-selection models
+        ModelType::AutoARIMA => {
+            let cfg = AutoARIMAConfig {
+                seasonal_period: p,
+                ..Default::default()
+            };
+            Ok(Box::new(AutoARIMA::with_config(cfg)))
+        }
+        ModelType::AutoETS => {
+            let cfg = if p > 1 {
+                AutoETSConfig::with_period(p)
+            } else {
+                AutoETSConfig::default()
+            };
+            Ok(Box::new(AutoETS::with_config(cfg)))
+        }
+        ModelType::AutoTheta => {
+            if p > 1 {
+                Ok(Box::new(AutoTheta::seasonal(p)))
+            } else {
+                Ok(Box::new(AutoTheta::new()))
+            }
+        }
+        // Theta family
+        ModelType::Theta => {
+            if p > 1 {
+                Ok(Box::new(Theta::seasonal(p)))
+            } else {
+                Ok(Box::new(Theta::new()))
+            }
+        }
+        ModelType::OptimizedTheta => {
+            if p > 1 {
+                Ok(Box::new(OptimizedTheta::seasonal(p)))
+            } else {
+                Ok(Box::new(OptimizedTheta::new()))
+            }
+        }
+        ModelType::DynamicTheta => {
+            if p > 1 {
+                Ok(Box::new(DynamicTheta::seasonal(p)))
+            } else {
+                Ok(Box::new(DynamicTheta::new(0.1)))
+            }
+        }
+        ModelType::DynamicOptimizedTheta => {
+            if p > 1 {
+                Ok(Box::new(DynamicTheta::seasonal_optimized(p)))
+            } else {
+                Ok(Box::new(DynamicTheta::optimized()))
+            }
+        }
+        // Baselines (crate types that implement Forecaster)
+        ModelType::Naive => Ok(Box::new(Naive::new())),
+        ModelType::RandomWalkDrift => Ok(Box::new(RandomWalkWithDrift::new())),
+        ModelType::SES => Ok(Box::new(SimpleExponentialSmoothing::new(0.3))),
+        ModelType::SESOptimized => Ok(Box::new(SimpleExponentialSmoothing::auto())),
+        ModelType::SMA => {
+            let window = if p > 1 { p.max(3) } else { 3 };
+            Ok(Box::new(WindowAverage::new(window)))
+        }
+        ModelType::Holt => Ok(Box::new(HoltLinearTrend::auto())),
+        ModelType::HoltWinters => {
+            // HoltWinters requires period >= 2; fall back to 12 if not seasonal
+            let sp = if p > 1 { p } else { 12 };
+            Ok(Box::new(HoltWintersModel::auto(
+                sp,
+                anofox_forecast::models::exponential::SeasonalType::Additive,
+            )))
+        }
+        ModelType::SeasonalNaive => {
+            let sp = if p > 1 { p } else { 12 };
+            Ok(Box::new(SeasonalNaive::new(sp)))
+        }
+        ModelType::SeasonalES => {
+            let sp = if p > 1 { p } else { 12 };
+            Ok(Box::new(SeasonalESModel::new(sp)))
+        }
+        ModelType::SeasonalESOptimized => {
+            let sp = if p > 1 { p } else { 12 };
+            Ok(Box::new(SeasonalESModel::optimized(sp)))
+        }
+        ModelType::SeasonalWindowAverage => {
+            // SeasonalWindowAverage::new(period, n_seasons).
+            // The adaptive computation `(values.len() / p).max(1)` used by the
+            // single-model path (forecast_seasonal_window_average) requires the series
+            // length, which is unavailable at build_forecaster construction time — the
+            // Ensemble::fit() call owns the series and calls each member's fit()
+            // independently.  We fix n_seasons=2 here as a conservative default.
+            // TODO ENS-03: derive n_seasons from series length at fit time once the
+            // Ensemble API exposes a per-member pre-fit hook.
+            let sp = if p > 1 { p } else { 12 };
+            Ok(Box::new(SeasonalWindowAverage::new(sp, 2)))
+        }
+        ModelType::ETS => {
+            // Use AAA spec (additive error/trend/seasonal) when period > 1, ANN otherwise
+            // ETSModel is imported as `ETS as ETSModel` at the top of this file
+            if p > 1 {
+                Ok(Box::new(ETSModel::new(ETSSpec::aaa(), p)))
+            } else {
+                Ok(Box::new(ETSModel::default()))
+            }
+        }
+        // State-space
+        ModelType::Kalman => Ok(Box::new(KalmanForecaster::local_level())),
+        // Intermittent demand
+        ModelType::CrostonClassic => Ok(Box::new(Croston::new())),
+        ModelType::CrostonOptimized => Ok(Box::new(Croston::new().optimized())),
+        ModelType::CrostonSBA => Ok(Box::new(Croston::new().sba())),
+        ModelType::ADIDA => Ok(Box::new(ADIDA::new())),
+        ModelType::IMAPA => Ok(Box::new(IMAPA::new())),
+        ModelType::TSB => Ok(Box::new(TSB::new())),
+
+        // NOT SUPPORTED — return error naming the model and suggesting an alternative
+        ModelType::GARCH => Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: model_type.name().to_string(),
+            reason: "GARCH is not supported as an ensemble member: Forecaster::predict() \
+                     returns simulated innovations, not level forecasts; use AutoARIMA \
+                     or AutoETS instead"
+                .to_string(),
+        }),
+        ModelType::Laplace => Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: model_type.name().to_string(),
+            reason: "Laplace is not supported as an ensemble member in v1 (variant-dependent \
+                     construction); use AutoARIMA, AutoETS, or AutoTheta instead"
+                .to_string(),
+        }),
+        ModelType::ARIMA => Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: model_type.name().to_string(),
+            reason: "Fixed-order ARIMA requires (p,d,q) params not supported in the \
+                     shared-period ensemble v1; use AutoARIMA instead"
+                .to_string(),
+        }),
+        ModelType::MFLES => Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: model_type.name().to_string(),
+            reason: "MFLES requires seasonal_periods[] which is not supported in v1 \
+                     explicit-member ensembles; use AutoARIMA or AutoETS instead"
+                .to_string(),
+        }),
+        ModelType::AutoMFLES => Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: model_type.name().to_string(),
+            reason: "AutoMFLES requires seasonal_periods[] which is not supported in v1 \
+                     explicit-member ensembles; use AutoARIMA or AutoETS instead"
+                .to_string(),
+        }),
+        ModelType::MSTL => Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: model_type.name().to_string(),
+            reason: "MSTL requires seasonal_periods[] which is not supported in v1 \
+                     explicit-member ensembles; use AutoARIMA or AutoETS instead"
+                .to_string(),
+        }),
+        ModelType::AutoMSTL => Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: model_type.name().to_string(),
+            reason: "AutoMSTL requires seasonal_periods[] which is not supported in v1 \
+                     explicit-member ensembles; use AutoARIMA or AutoETS instead"
+                .to_string(),
+        }),
+        ModelType::TBATS => Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: model_type.name().to_string(),
+            reason: "TBATS requires seasonal_periods[] which is not supported in v1 \
+                     explicit-member ensembles; use AutoARIMA or AutoETS instead"
+                .to_string(),
+        }),
+        ModelType::AutoTBATS => Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: model_type.name().to_string(),
+            reason: "AutoTBATS requires seasonal_periods[] which is not supported in v1 \
+                     explicit-member ensembles; use AutoARIMA or AutoETS instead"
+                .to_string(),
+        }),
+        ModelType::AutoEnsemble => Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: model_type.name().to_string(),
+            reason: "AutoEnsemble cannot be used as a member of an explicit ensemble".to_string(),
+        }),
+    }
+}
+
+/// Explicit-member ensemble forecasting.
+///
+/// Fits each named member model independently on the same series and combines
+/// their point forecasts using the specified `CombinationMethod` (default: Mean).
+///
+/// Mirrors `forecast_auto_ensemble` but accepts an explicit list of member names
+/// instead of running automated model selection.
+///
+/// # Arguments
+/// * `values` — series values (length >= 2)
+/// * `horizon` — number of steps to forecast
+/// * `member_names` — ordered list of member model names (must have >= 2 items);
+///   names follow the same vocabulary as `ts_forecast_by` (ModelType::from_str)
+/// * `method_str` — combination method string; `None` or `""` → Mean
+/// * `period` — shared seasonal period (0 or 1 → non-seasonal)
+///
+/// Returns `ForecastOutput` with `model_name = "Ensemble"` and `lower = upper = []`
+/// (prediction intervals are Phase 6, EPI-01).
+pub fn forecast_explicit_ensemble(
+    values: &[Option<f64>],
+    horizon: usize,
+    member_names: &[String],
+    method_str: Option<&str>,
+    period: usize,
+) -> Result<ForecastOutput> {
+    use anofox_forecast::models::ensemble::Ensemble;
+
+    // 1. Validate member count
+    if member_names.len() < 2 {
+        return Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: member_names.len().to_string(),
+            reason: "at least 2 members are required for an ensemble".to_string(),
+        });
+    }
+
+    // 2. Parse combination method (reuse Phase 4 function verbatim — one definition)
+    let combination_method = parse_combination_method(method_str)?;
+
+    // 3. Interpolate NULLs and validate length (mirrors the main forecast() path)
+    let clean_values: Vec<f64> = fill_nulls_interpolate(values);
+    if clean_values.is_empty() {
+        return Err(ForecastError::InsufficientData { needed: 1, got: 0 });
+    }
+    if clean_values.len() < 3 {
+        return Err(ForecastError::InsufficientData {
+            needed: 3,
+            got: clean_values.len(),
+        });
+    }
+
+    // 4. Build member forecasters
+    let member_period = if period > 1 { Some(period) } else { None };
+    let mut members: Vec<anofox_forecast::models::BoxedForecaster> =
+        Vec::with_capacity(member_names.len());
+    for name in member_names {
+        let model_type: ModelType = name.parse().map_err(|_| ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: name.clone(),
+            reason: format!(
+                "unknown model name '{}'; use the same names as ts_forecast_by",
+                name
+            ),
+        })?;
+        members.push(build_forecaster(model_type, member_period)?);
+    }
+
+    // 5. Build + fit ensemble + extract forecast
+    // Ensemble implements Forecaster (anofox-forecast 0.15.3, model.rs:575)
+    let ts = make_timeseries(&clean_values)?;
+    let mut ens = Ensemble::new(members).with_method(combination_method);
+    ens.fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("Ensemble fit failed: {}", e)))?;
+    // model_name = "Ensemble" (plain, mirroring Phase 4's plain "AutoEnsemble")
+    extract_forecast(&ens, horizon, "Ensemble")
+}
+
+// ============================================================================
+// Phase 6 (INSP-01): Ensemble introspection functions
+// ============================================================================
+
+/// Inspect combination weights for an explicit-member ensemble (INSP-01).
+///
+/// Builds the Ensemble from the named members, fits it on the series, then
+/// returns the per-member weights. For Mean and Median, weights equal 1/k.
+/// For WeightedMSE, InverseAIC, Stacking, and HorizonAdaptive, weights are
+/// crate-computed and sum to 1.0. HorizonAdaptive weights are the AVERAGE
+/// of per-horizon weights (use horizon_weights() for per-step detail; that is
+/// out of scope for INSP-01 v1).
+///
+/// # Arguments
+/// * `values` - Time series values (with Option<f64> for nulls)
+/// * `member_names` - Names of the ensemble member models (at least 2)
+/// * `method_str` - Combination method string (None/empty → "mean")
+/// * `period` - Seasonal period (0 or 1 → no seasonality)
+///
+/// # Returns
+/// `Vec<(member_name, weight)>` — k entries, one per member.
+pub fn inspect_explicit_ensemble(
+    values: &[Option<f64>],
+    member_names: &[String],
+    method_str: Option<&str>,
+    period: usize,
+) -> Result<Vec<(String, f64)>> {
+    use anofox_forecast::models::ensemble::Ensemble;
+
+    // 1. Validate member count (same guard as forecast_explicit_ensemble)
+    if member_names.len() < 2 {
+        return Err(ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: member_names.len().to_string(),
+            reason: "at least 2 members are required for an ensemble".to_string(),
+        });
+    }
+
+    // 2. Parse combination method (reuse Phase 4 function verbatim)
+    let combination_method = parse_combination_method(method_str)?;
+
+    // 3. Interpolate NULLs and validate length (mirrors forecast_explicit_ensemble)
+    let clean_values: Vec<f64> = fill_nulls_interpolate(values);
+    if clean_values.is_empty() {
+        return Err(ForecastError::InsufficientData { needed: 1, got: 0 });
+    }
+    if clean_values.len() < 3 {
+        return Err(ForecastError::InsufficientData {
+            needed: 3,
+            got: clean_values.len(),
+        });
+    }
+
+    // 4. Build member forecasters (same loop as forecast_explicit_ensemble)
+    let member_period = if period > 1 { Some(period) } else { None };
+    let mut members: Vec<anofox_forecast::models::BoxedForecaster> =
+        Vec::with_capacity(member_names.len());
+    for name in member_names {
+        let model_type: ModelType = name.parse().map_err(|_| ForecastError::InvalidParameter {
+            param: "members".to_string(),
+            value: name.clone(),
+            reason: format!(
+                "unknown model name '{}'; use the same names as ts_forecast_by",
+                name
+            ),
+        })?;
+        members.push(build_forecaster(model_type, member_period)?);
+    }
+
+    // 5. Build + fit ensemble — DIVERGE: call .weights() instead of extract_forecast
+    // NOTE: weights() called AFTER .fit() — pre-fit weights are always uniform (RESEARCH Pitfall 2)
+    let ts = make_timeseries(&clean_values)?;
+    let mut ens = Ensemble::new(members).with_method(combination_method);
+    ens.fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("Ensemble fit failed: {}", e)))?;
+
+    let weights = ens.weights();
+    Ok(member_names
+        .iter()
+        .cloned()
+        .zip(weights.iter().copied())
+        .collect())
+}
+
+/// Inspect selected members and in-sample MSE scores for an AutoEnsemble (INSP-01).
+///
+/// Builds and fits an AutoEnsemble, then returns the selected top-K members
+/// (the first model_count entries from all_scores()) with their MSE scores
+/// and — for Mean combination only — equal combination weights.
+///
+/// For WeightedMSE, InverseAIC, Stacking, and HorizonAdaptive, the combination
+/// weight is `None` (NULL in SQL) because the inner ensemble's weights are not
+/// accessible via the crate 0.15.3 public API — this is an upstream limitation,
+/// not a gap in the implementation. Do NOT re-implement selection to fabricate weights.
+///
+/// # Arguments
+/// * `values` - Time series values as concrete f64 (NaN for nulls; AutoEnsemble path)
+/// * `top_k` - Number of models to select (0 → crate default of 3)
+/// * `method_str` - Combination method string (None/empty → "weighted_mse" crate default)
+/// * `period` - Seasonal period (0 or 1 → no seasonality)
+///
+/// # Returns
+/// `Vec<(member_name, mse_score, weight)>` — k entries:
+///   - `weight` is `Some(1/k)` for Mean, `None` for all other methods.
+pub fn inspect_auto_ensemble(
+    values: &[f64],
+    top_k: usize,
+    method_str: Option<&str>,
+    period: usize,
+) -> Result<Vec<(String, f64, Option<f64>)>> {
+    use anofox_forecast::models::ensemble::{AutoEnsemble, AutoEnsembleConfig, CombinationMethod};
+
+    let combination_method = parse_combination_method(method_str)?;
+    let config = AutoEnsembleConfig {
+        top_k,
+        combination_method,
+        seasonal_period: if period > 1 { Some(period) } else { None },
+    };
+    let ts = make_timeseries(values)?;
+    let mut model = AutoEnsemble::with_config(config);
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("AutoEnsemble fit failed: {}", e)))?;
+
+    // Read selected top-K: first model_count() entries of all_scores()
+    // all_scores() returns ALL candidates sorted ascending by MSE; first k are selected
+    let k = model.model_count();
+    let selected: Vec<(String, f64)> = model.all_scores().iter().take(k).cloned().collect();
+
+    // Weight: Some(1/k) for Mean only; None for all other methods (crate 0.15.3 limitation)
+    let weight_if_mean: Option<f64> = match combination_method {
+        CombinationMethod::Mean => {
+            if k > 0 {
+                Some(1.0 / k as f64)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+
+    Ok(selected
+        .into_iter()
+        .map(|(name, score)| (name, score, weight_if_mean))
+        .collect())
+}
+
+#[cfg(test)]
+mod insp01_tests {
+    use super::*;
+
+    fn synthetic_series(n: usize) -> Vec<Option<f64>> {
+        (0..n)
+            .map(|i| Some(10.0 + i as f64 * 0.5 + (i as f64).sin()))
+            .collect()
+    }
+
+    fn synthetic_series_f64(n: usize) -> Vec<f64> {
+        (0..n)
+            .map(|i| 10.0 + i as f64 * 0.5 + (i as f64).sin())
+            .collect()
+    }
+
+    #[test]
+    fn inspect_explicit_mean_weights_equal_1_over_k() {
+        let values = synthetic_series(60);
+        let members = vec![
+            "AutoARIMA".to_string(),
+            "AutoETS".to_string(),
+            "Naive".to_string(),
+        ];
+        let result = inspect_explicit_ensemble(&values, &members, Some("mean"), 0).unwrap();
+        assert_eq!(result.len(), 3, "Should have 3 member entries");
+        let k = 3.0_f64;
+        for (name, weight) in &result {
+            assert!(
+                (weight - 1.0 / k).abs() < 1e-10,
+                "Mean weight for {} should be 1/k but got {}",
+                name,
+                weight
+            );
+        }
+        let sum: f64 = result.iter().map(|(_, w)| w).sum();
+        assert!(
+            (sum - 1.0).abs() < 1e-10,
+            "Sum of Mean weights should be 1.0, got {}",
+            sum
+        );
+    }
+
+    #[test]
+    fn inspect_explicit_weighted_mse_weights_sum_to_1() {
+        let values = synthetic_series(60);
+        let members = vec![
+            "AutoARIMA".to_string(),
+            "AutoETS".to_string(),
+            "Naive".to_string(),
+        ];
+        let result = inspect_explicit_ensemble(&values, &members, Some("weighted_mse"), 0).unwrap();
+        assert_eq!(result.len(), 3);
+        let sum: f64 = result.iter().map(|(_, w)| w).sum();
+        assert!(
+            (sum - 1.0).abs() < 1e-6,
+            "WeightedMSE weights should sum to 1.0, got {}",
+            sum
+        );
+        for (_, w) in &result {
+            assert!(
+                *w >= 0.0,
+                "WeightedMSE weight should be non-negative, got {}",
+                w
+            );
+        }
+    }
+
+    #[test]
+    fn inspect_explicit_too_few_members_returns_error() {
+        let values = synthetic_series(20);
+        let members = vec!["AutoARIMA".to_string()];
+        let result = inspect_explicit_ensemble(&values, &members, Some("mean"), 0);
+        assert!(result.is_err(), "Should return error for < 2 members");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("members"),
+            "Error message should mention 'members', got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn inspect_explicit_unknown_member_returns_error() {
+        let values = synthetic_series(20);
+        let members = vec!["AutoARIMA".to_string(), "UnknownModel".to_string()];
+        let result = inspect_explicit_ensemble(&values, &members, Some("mean"), 0);
+        assert!(
+            result.is_err(),
+            "Should return error for unknown member name"
+        );
+    }
+
+    #[test]
+    fn inspect_auto_mean_returns_weight_some_1_over_k() {
+        let values = synthetic_series_f64(60);
+        let result = inspect_auto_ensemble(&values, 3, Some("mean"), 0).unwrap();
+        assert!(!result.is_empty(), "Should return at least one member");
+        let k = result.len() as f64;
+        for (name, score, weight) in &result {
+            assert!(
+                *score > 0.0,
+                "MSE score for {} should be > 0, got {}",
+                name,
+                score
+            );
+            let w = weight.expect("Mean combination should return Some weight");
+            assert!(
+                (w - 1.0 / k).abs() < 1e-10,
+                "Mean weight for {} should be 1/k but got {}",
+                name,
+                w
+            );
+        }
+    }
+
+    #[test]
+    fn inspect_auto_weighted_mse_returns_weight_none() {
+        let values = synthetic_series_f64(60);
+        // empty method_str → "weighted_mse" (crate default for AutoEnsemble)
+        let result = inspect_auto_ensemble(&values, 3, Some("weighted_mse"), 0).unwrap();
+        assert!(!result.is_empty(), "Should return at least one member");
+        for (name, score, weight) in &result {
+            assert!(
+                *score > 0.0,
+                "MSE score for {} should be > 0, got {}",
+                name,
+                score
+            );
+            assert!(
+                weight.is_none(),
+                "WeightedMSE combination should return None weight for {}, got {:?}",
+                name,
+                weight
+            );
+        }
+    }
+
+    #[test]
+    fn inspect_auto_takes_only_model_count_selected_members() {
+        let values = synthetic_series_f64(60);
+        let top_k = 2;
+        let result = inspect_auto_ensemble(&values, top_k, Some("mean"), 0).unwrap();
+        assert!(
+            result.len() <= top_k,
+            "Should not return more than top_k={} members, got {}",
+            top_k,
+            result.len()
+        );
+    }
+}
+
 // ============================================================================
 // Exogenous-aware forecasting functions
 // ============================================================================
@@ -2732,10 +3448,12 @@ fn calculate_confidence_intervals(
 
 fn calculate_fitted_values(values: &[f64], model: ModelType, period: usize) -> Vec<f64> {
     match model {
-        // GARCH and Kalman do not surface true fitted values in v1.
+        // GARCH, Kalman, and AutoEnsemble do not surface true fitted values in v1
+        // via this path. AutoEnsemble uses `extract_forecast` which reads fitted
+        // values directly from the Forecaster trait — not via calculate_fitted_values.
         // Return empty so the caller emits NULL for fitted/residuals rather than
         // the misleading SES-approximated values the catch-all would produce.
-        ModelType::GARCH | ModelType::Kalman => vec![],
+        ModelType::GARCH | ModelType::Kalman | ModelType::AutoEnsemble => vec![],
         ModelType::Naive => {
             let mut fitted = vec![values[0]];
             fitted.extend(values[..values.len() - 1].iter().cloned());
@@ -3885,6 +4603,207 @@ mod tests {
         assert!(
             result.is_err(),
             "GARCH on a series with 8 obs (< 12 min for GARCH(1,1)) should return Err"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // parse_combination_method (IN-02)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn parse_combination_method_rejects_unknown() {
+        assert!(
+            parse_combination_method(Some("custom")).is_err(),
+            "'custom' should be rejected"
+        );
+        assert!(
+            parse_combination_method(Some("bad_value")).is_err(),
+            "unknown string should be rejected"
+        );
+    }
+
+    #[test]
+    fn parse_combination_method_accepts_canonical_strings() {
+        // Six canonical strings must parse without error
+        for m in &[
+            "mean",
+            "median",
+            "weighted_mse",
+            "inverse_aic",
+            "stacking",
+            "horizon_adaptive",
+        ] {
+            assert!(
+                parse_combination_method(Some(m)).is_ok(),
+                "expected Ok for method: {}",
+                m
+            );
+        }
+    }
+
+    #[test]
+    fn parse_combination_method_accepts_aliases() {
+        // At least one alias per method that has aliases
+        assert!(parse_combination_method(Some("weightedmse")).is_ok());
+        assert!(parse_combination_method(Some("weighted-mse")).is_ok());
+        assert!(parse_combination_method(Some("inverseaic")).is_ok());
+        assert!(parse_combination_method(Some("aic")).is_ok());
+        assert!(parse_combination_method(Some("stack")).is_ok());
+        assert!(parse_combination_method(Some("adaptive")).is_ok());
+        assert!(parse_combination_method(Some("horizon-adaptive")).is_ok());
+    }
+
+    #[test]
+    fn parse_combination_method_none_and_empty_give_mean() {
+        // None and empty string are both valid defaults (Mean)
+        let none_result = parse_combination_method(None);
+        let empty_result = parse_combination_method(Some(""));
+        assert!(none_result.is_ok(), "None should parse as Mean");
+        assert!(empty_result.is_ok(), "empty string should parse as Mean");
+    }
+
+    #[test]
+    fn forecast_auto_ensemble_basic() {
+        // 60-point linear series; AutoEnsemble with top_k=0 (→ default 3)
+        let values: Vec<Option<f64>> = (0..60).map(|i| Some(10.0 + i as f64 * 0.5)).collect();
+        let result = forecast(
+            &values,
+            &ForecastOptions {
+                model: ModelType::AutoEnsemble,
+                horizon: 5,
+                ensemble_top_k: 0, // triggers the "== 0 → 3" default path
+                ..Default::default()
+            },
+        );
+        assert!(
+            result.is_ok(),
+            "AutoEnsemble should succeed on a clean series"
+        );
+        assert_eq!(
+            result.unwrap().point.len(),
+            5,
+            "output length must equal horizon"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 5 (ENS-02): build_forecaster + forecast_explicit_ensemble (IN-01)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn build_forecaster_ok_for_supported_members() {
+        // Naive, AutoETS, and Theta should all return Ok (non-seasonal)
+        for model in &[ModelType::Naive, ModelType::AutoETS, ModelType::Theta] {
+            let result = build_forecaster(*model, None);
+            assert!(
+                result.is_ok(),
+                "build_forecaster({:?}, None) should succeed",
+                model
+            );
+        }
+    }
+
+    #[test]
+    fn build_forecaster_err_for_blocked_variants() {
+        // GARCH, ARIMA, and AutoEnsemble are blocked
+        for model in &[ModelType::GARCH, ModelType::ARIMA, ModelType::AutoEnsemble] {
+            let result = build_forecaster(*model, None);
+            assert!(
+                result.is_err(),
+                "build_forecaster({:?}, None) should return Err",
+                model
+            );
+            // Must be an InvalidParameter error with param == "members"
+            match result {
+                Err(ForecastError::InvalidParameter { param, .. }) => {
+                    assert_eq!(param, "members", "error param must be 'members'");
+                }
+                Err(e) => panic!("expected InvalidParameter, got {:?}", e),
+                Ok(_) => panic!("expected Err, got Ok"),
+            }
+        }
+    }
+
+    #[test]
+    fn build_forecaster_seasonal_naive_with_period() {
+        // SeasonalNaive with period=7 should succeed
+        let result = build_forecaster(ModelType::SeasonalNaive, Some(7));
+        assert!(
+            result.is_ok(),
+            "build_forecaster(SeasonalNaive, Some(7)) should succeed"
+        );
+    }
+
+    #[test]
+    fn forecast_explicit_ensemble_basic() {
+        // 48-point linear series; ['AutoETS', 'Naive'] with Mean → horizon finite values
+        let values: Vec<Option<f64>> = (0..48).map(|i| Some(100.0 + i as f64 * 2.0)).collect();
+        let members = vec!["AutoETS".to_string(), "Naive".to_string()];
+        let result = forecast_explicit_ensemble(&values, 6, &members, Some("mean"), 0);
+        assert!(
+            result.is_ok(),
+            "explicit ensemble on clean series should succeed: {:?}",
+            result.err()
+        );
+        let out = result.unwrap();
+        assert_eq!(out.point.len(), 6, "output length must equal horizon");
+        for &v in &out.point {
+            assert!(
+                v.is_finite(),
+                "all point forecasts must be finite, got {}",
+                v
+            );
+        }
+    }
+
+    #[test]
+    fn forecast_explicit_ensemble_rejects_all_null_input() {
+        // All-NULL series: fill_nulls_interpolate returns all-NaN (preserves length),
+        // so is_empty() is false but Ensemble::fit detects missing values → ComputationError.
+        // This mirrors the main forecast() path behaviour for the all-None case.
+        let values: Vec<Option<f64>> = vec![None; 10];
+        let members = vec!["AutoETS".to_string(), "Naive".to_string()];
+        let result = forecast_explicit_ensemble(&values, 3, &members, None, 0);
+        assert!(result.is_err(), "all-NULL input must return Err");
+        // Accept either InsufficientData (empty after interpolation) or ComputationError
+        // (NaN detected by ensemble fit); both surface as NULL rows via the FFI.
+        match result {
+            Err(ForecastError::InsufficientData { .. })
+            | Err(ForecastError::ComputationError(_)) => {}
+            Err(e) => panic!("expected InsufficientData or ComputationError, got {:?}", e),
+            Ok(_) => panic!("expected Err, got Ok"),
+        }
+    }
+
+    #[test]
+    fn forecast_explicit_ensemble_rejects_too_short_series() {
+        // Series with only 2 observations must return InsufficientData (< 3 guard)
+        let values: Vec<Option<f64>> = vec![Some(1.0), Some(2.0)];
+        let members = vec!["AutoETS".to_string(), "Naive".to_string()];
+        let result = forecast_explicit_ensemble(&values, 3, &members, None, 0);
+        assert!(result.is_err(), "2-observation series must return Err");
+        match result.unwrap_err() {
+            ForecastError::InsufficientData { needed, got } => {
+                assert_eq!(needed, 3);
+                assert_eq!(got, 2);
+            }
+            e => panic!(
+                "expected InsufficientData {{ needed: 3, got: 2 }}, got {:?}",
+                e
+            ),
+        }
+    }
+
+    #[test]
+    fn forecast_explicit_ensemble_duplicate_members_ok() {
+        // Duplicate member names should not cause an error
+        let values: Vec<Option<f64>> = (0..40).map(|i| Some(i as f64)).collect();
+        let members = vec!["AutoETS".to_string(), "AutoETS".to_string()];
+        let result = forecast_explicit_ensemble(&values, 4, &members, None, 0);
+        assert!(
+            result.is_ok(),
+            "duplicate members should be allowed: {:?}",
+            result.err()
         );
     }
 }

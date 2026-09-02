@@ -1,42 +1,72 @@
 ---
 gsd_state_version: 1.0
-status: Awaiting next milestone
-stopped_at: Milestone v0.7.0 complete and archived — awaiting next milestone
-last_updated: "2026-08-22T14:10:15.749Z"
-last_activity: 2026-08-22
-last_activity_desc: Milestone v0.7.0 completed and archived
-state_head: 225595f6416012451d58ffb2a91bf19cf37ce997
+milestone: v0.9.0
+milestone_name: WASM Runtime Verification (Phases 7-8)
+current_phase: 08
+current_phase_name: CI Gating + Dedicated Workflow + Badge
+status: verification_deferred_human
+stopped_at: Phase 08 implemented + locally verified (gate mechanism green→red→green); live-CI negative-control push deferred to operator
+last_updated: "2026-09-02T00:50:00.000Z"
+last_activity: 2026-09-02
+last_activity_desc: Autonomous run paused — Phase 08 live-CI verification deferred (user choice)
+state_head: 3acd878c0f569931fcd0cc6827a81acfc37c8def
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 9
-  completed_plans: 9
-  percent: 100
-current_phase: null
-current_phase_name: null
+  total_phases: 2
+  completed_phases: 1
+  total_plans: 2
+  completed_plans: 2
+  percent: 50
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-22 after v0.7.0 milestone)
+See: .planning/PROJECT.md (updated 2026-09-01 — started v0.9.0 WASM Runtime Verification)
 
-**Core value:** SQL users can validate whether a series/model is statistically sound (stationarity, residual adequacy, demand regime) and can reach the crate's higher-coverage models (global + classical) — all without leaving DuckDB.
-**Current focus:** Planning next milestone (`/gsd-new-milestone`)
+**Core value:** Prove the built `anofox_forecast` `.wasm` actually loads and runs in DuckDB-Wasm — not just that it compiles and links — and gate it in CI so WASM regressions fail the build.
+**Current focus:** Phase 08 — CI Gating + Dedicated Workflow + Badge
 
 ## Current Position
 
-Phase: Milestone v0.7.0 complete
-Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-08-22 — Milestone v0.7.0 completed and archived
+Phase: 08 (CI Gating + Dedicated Workflow + Badge) — IMPLEMENTED, live-CI verification deferred
+Plan: 1 of 1 done (tasks 1-3); Task 4 negative-control = operator live-CI push
+Status: Autonomous run paused — both phases implemented; Phase 08 awaits operator live-CI observation
+Last activity: 2026-09-02 — Phase 08 live-CI verification deferred (user choice)
+
+## Deferred Verification
+
+| Phase | State | Resume |
+|-------|-------|--------|
+| 8 | verification_deferred_human | /gsd-verify-work 8 |
+
+Phase 8 is implemented and locally verified: CI-01/02/03 files are committed, the LOCKED
+curated-subset constraint is honored (no `--all` in CI), and the gate mechanism is proven
+locally (curated run exit 0 → broken curated test exit 1 → reverted exit 0). The remaining
+step is the operator's: push the branch, observe `wasm-runtime-test` go green → red (on a
+deliberate curated break) → green in GitHub Actions, confirm the `WasmTest.yml` badge
+renders/flips, and record the run URLs. Then `/gsd-verify-work 8`, then
+`/gsd-complete-milestone v0.9.0`.
+
+### ⚠ Phase 07 finding that must shape Phase 08 planning
+
+A fresh HEAD `wasm_eh` build was made locally during Phase 07 verification. It
+proved DEP-02 (zero OpenSSL compiled for wasm) and disproved the "stale artifact"
+theory: the full-suite `--all` run is **2259 pass / 184 fail / 23 files**, and the
+23 failures are **pre-existing `test/sql` test debt** (removed/renamed API refs like
+`ts_backtest_auto_by`/`ts_hydrate_features_by`, `DATE+BIGINT` bugs, cascades), not
+WASM or artifact issues — masked natively by the unittest `require json` skip.
+
+**Phase 08 (CI gating) must gate on the CURATED green subset**, NOT `--all`.
+Do NOT assume "CI building from HEAD makes the suite green" — it will not. Full
+66-file green is out-of-scope test-triage tracked separately. See
+07-VERIFICATION.md Re-Verification section + memory `project_wasm_suite_reveals_test_debt`.
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 9
+- Total plans completed: 0 (this milestone)
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -44,16 +74,12 @@ Last activity: 2026-08-22 — Milestone v0.7.0 completed and archived
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1. Diagnostics & Demand Classification | 0/TBD | - | - |
-| 2. Global / Panel Models | 0/TBD | - | - |
-| 3. Classical & Multivariate Models | 0/TBD | - | - |
-| 02 | 3 | - | - |
-| 03 | 3 | - | - |
-| 01 | 3 | - | - |
+| 7. WASM Node Harness + Local Green | 0/TBD | - | - |
+| 8. CI Gating + Dedicated Workflow + Badge | 0/TBD | - | - |
 
 **Recent Trend:**
 
-- Last 5 plans: none yet
+- Last 5 plans: none yet this milestone
 - Trend: -
 
 *Updated after each plan completion*
@@ -61,13 +87,8 @@ Last activity: 2026-08-22 — Milestone v0.7.0 completed and archived
 
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
-| Phase 01-diagnostics-demand-classification P01-1 | 120 | 3 tasks | 16 files |
-| Phase 02-global-panel-models P1 | 90 | 3 tasks | 11 files |
-| Phase 02 P2 | 17 min | 3 tasks | 7 files |
-| Phase 02-global-panel-models P3 | 25 | 2 tasks | 10 files |
-| Phase 03 P01 | 38 | 3 tasks | 6 files |
-| Phase 03-classical-multivariate-models P02 | 11 min | 3 tasks | 10 files |
-| Phase 03-classical-multivariate-models P03 | 9 min | 4 tasks | 30 files |
+| Phase 07-wasm-node-harness-local-green P01 | 180 | 4 tasks | 7 files |
+| Phase 08 P01 | 3 | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -76,30 +97,21 @@ Last activity: 2026-08-22 — Milestone v0.7.0 completed and archived
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- Roadmap: Diagnostics first (lower risk — scalar functions mirroring existing metrics), global/panel models second (new panel-aware SQL surface is design risk), VAR/multivariate last (new I/O shape requires dedicated function design)
-- Diagnostics: Will be exposed as scalar functions + `ts_*_by` macros, mirroring the existing `ts_metrics_*` surface
-- Global models: `ts_forecast_by` per-series dispatch is insufficient; panel-aware surface design must be settled in Phase 2 plan before implementation
-- VAR: Dedicated multivariate function anticipated (`ts_forecast_var_by`); column-mapping API design deferred to Phase 3 plan
-- [Phase 01]: Behavioral cross-check instead of exact numeric parity for ADF; statsmodels and anofox use different lag selection formulas
-- [Phase 01]: CLI subprocess in run_anofox.py to avoid Python duckdb package version mismatch (venv v1.5.1 vs extension v1.5.4)
-- [Phase 02]: GlobalAutoETS safe_period=1 for seasonal_period=0: prevents t%period panic, has_seasonal=false means non-seasonal candidates only
-- [Phase 02]: PanelForecastError wrapper for dual-crate FFI boundary: anofox_forecast::ForecastError != anofox_fcst_core::ForecastError, no From impl cross-crate
-- [Phase 02]: Subselect TABLE arg pattern in macros: query_table() direct as TABLE arg silently fails macro registration; use (SELECT ... FROM query_table(...)) instead
-- [Phase 02]: Use GlobalCroston::new()/sba() constructors: CrostonVariant private type mismatch — global_croston::CrostonVariant ≠ croston::CrostonVariant, with_variant() fails at compile time
-- [Phase 02]: Add variant_str param to forecast_panel_impl: threads Croston variant from FFI outer wrapper through testable inner function; all 8-arg call sites updated
-- [Phase 02]: Fix model_name from hardcoded 'GlobalETS' to actual method string: 02-1 tracer hardcoded result; GlobalTheta/GlobalCroston now correctly self-name
-- [Phase 02]: CLI subprocess for panel queries: build/release/duckdb -unsigned avoids venv duckdb v1.5.1 / extension v1.5.4 version mismatch
-- [Phase 02]: Per-series date re-alignment: panel function aligns to shared grid; restore correct M4 horizon dates via forecast_step
-- [Phase 02]: MAX_SERIES=500 for global panel benchmark: GlobalETS Reduced pool takes ~18s for 500 series vs ~6 min for all 4,227
-- [Phase 02]: statsforecast reference: GlobalETS->AutoETS, GlobalTheta->AutoTheta, GlobalCroston->CrostonOptimized (pinned v1.4.0 has no Global* variants)
-- [Phase 03]: GARCH output is sqrt(forecast_variance(h)) — volatility not variance; forecast_variance gives analytical conditional variance vs predict() which gives simulated innovations
-- [Phase 03]: ts_forecast_by routes through _ts_forecast_scalar (scalar_functions/), not _ts_forecast_native (table_functions/); both files have independent ValidateParams
-- [Phase 03]: Named param 'p' (not 'order') for VAR lag order — ORDER is a SQL reserved keyword causing parser error at macro registration time
-- [Phase 03]: date_col passed as explicit 6th VARCHAR arg to _ts_forecast_var_native; Bind resolves by name (not identifier substitution in macro body)
-- [Phase 03]: SELECT * in ts_forecast_var_by macro outer query — avoids referencing date column by its runtime string value in the static template
-- [Phase 03]: VARForecastResult variable-major flat buffer: variable names stay in C++ BindData.value_col_names and are emitted at Finalize time, never crossing the FFI boundary
-- [Phase 03]: v1 is single-panel VAR (no group_col): one VAR(p) fit for the entire input table; per-panel VAR deferred to v2
-- [Phase 03]: arch path chosen for GARCH benchmark (arch 8.0.0 installed); VAR benchmark uses synthetic VAR(1) data since no multivariate M4 exists; both anofox and statsmodels use OLS → exact MAE parity ratio=1.000
+- Roadmap (v0.9.0): two phases in strict dependency order — Phase 7 stands up the Node harness and gets the full `test/sql` suite green locally (WASM-01/02/03), including engine-version pinning (DEP-01, an ABI prerequisite the harness depends on) and the openssl `!wasm32` tidy (DEP-02, small/self-contained); Phase 8 wires the green harness into gating CI + a dedicated workflow + README badge (CI-01/02/03).
+- Reference implementation to port: anofox-statistics PR #131 (`test/wasm/run.mjs`, `test/wasm/sqllogic.mjs`, the `wasm-runtime-test` job, `WasmTest.yml`).
+- This is a CI/infra hardening milestone — no new SQL functions, no Rust crate changes; work lives in `test/wasm/`, `.github/workflows/`, `vcpkg.json`, and README.
+- [Phase 07]: Pinned @duckdb/duckdb-wasm@1.33.1-dev64.0 (engine v1.5.5) and web-worker@1.2.0; pthreadWorker=null mandatory for eh bundle
+- [Phase 07]: SKIP_FILES contains only 4 structurally WASM-infeasible files; 23 remaining failures are artifact-API drift tracked in SUMMARY
+- [Phase 08]: Gate CI on curated subset only (no --all): 184 pre-existing test-debt failures under --all must not permanently red the build
+- [Phase 08]: Same-run vs cross-run artifact download split: gating job (same run) vs WasmTest.yml (cross-run via workflow_run.id + github-token)
+
+### Known Gotchas (issue #255 — must shape Phase 7 plans)
+
+- `@duckdb/duckdb-wasm` npm version ≠ engine version — must ABI-match the built DuckDB version or `LOAD` fails.
+- DECIMAL renders unscaled in duckdb-wasm Arrow-JS → format results through `::VARCHAR` to match native sqllogictest output.
+- Per-file catalog isolation — re-open the DB + re-`LOAD` the extension per `.test` file.
+- Node pins `web-worker@1.2.0`, `pthreadWorker=null` for the `eh` bundle, and uses `FORCE INSTALL`.
+- 66 `.test` files in the suite; WASM-03 permits an explicit, documented skip-list for tests infeasible on WASM.
 
 ### Pending Todos
 
@@ -107,17 +119,7 @@ None yet.
 
 ### Blockers/Concerns
 
-- None. (v0.7.0 design flags resolved: panel-aware `ts_forecast_panel_by` shipped in Phase 2; multivariate `ts_forecast_var_by` shipped in Phase 3.)
-
-### Execution Notes (Phase 1)
-
-- **statsmodels cross-check must use the benchmark uv venv, NOT system python3.** `statsmodels 0.14.5` + `scipy 1.15.3` live in `benchmark/.venv` (transitive via tsfresh); system `python3` lacks them. Run all `benchmark/diagnostics/*.py` cross-check scripts with `benchmark/.venv/bin/python` (or `cd benchmark && uv run python ...`). Plans' verify commands that say `python3 benchmark/diagnostics/...` should be adapted to `benchmark/.venv/bin/python benchmark/diagnostics/...`.
-
-## Quick Tasks Completed
-
-| Slug | Date | Description | Commits |
-|------|------|-------------|---------|
-| docs-residual-cleanup | 2026-08-30 | Post-v0.7.0 docs: sweep ts_backtest_auto prose, fix regression-API examples, update README test badge | 1acbfb7, d81ea5c, 133c0ca |
+- None. Exact pinned `@duckdb/duckdb-wasm` version is a plan-phase determination (must match the built DuckDB version), not a blocker.
 
 ## Deferred Items
 
@@ -125,16 +127,19 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 | Category | Item | Status | Deferred At | Milestone |
 |----------|------|--------|-------------|-----------|
-| *(none)* | | | | |
+| WASM (future) | Browser-based (not just Node) WASM E2E harness (WASM-F1) | Deferred | 2026-09-01 | v0.9.0 |
+| WASM (future) | Shared-memory `wasm_threads` build — blocked upstream (WASM-F2) | Deferred | 2026-09-01 | v0.9.0 |
+| ENS (future) | Custom hand-supplied combination weights (ENS-F1) | Deferred | 2026-08-30 | v0.8.0 |
+| ENS (future) | Panel/multivariate ensembling (ENS-F2) | Deferred | 2026-08-30 | v0.8.0 |
 
 ## Session Continuity
 
 **Resume file:** None
 
-Last session: 2026-08-22
-Stopped at: Milestone v0.7.0 complete and archived (Phases 1-3 shipped + verified; git tag v0.7.0 created locally, not pushed).
-Resume: /gsd-new-milestone to start the next milestone. Note: keep workflow.use_worktrees=false for autonomous runs on this repo (worktree split-brain).
+Last session: 2026-09-01T22:28:55.918Z
+Stopped at: Completed 08-01-ci-gating-wasm-badge-PLAN.md (Tasks 1-3 committed; Task 4 = blocking-human checkpoint awaiting operator CI push)
+Resume: /gsd-plan-phase 7 to plan the WASM Node harness + local green.
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Plan Phase 7 with /gsd-plan-phase 7
