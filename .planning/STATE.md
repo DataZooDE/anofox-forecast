@@ -4,11 +4,11 @@ milestone: v0.9.0
 milestone_name: WASM Runtime Verification (Phases 7-8)
 current_phase: 08
 current_phase_name: CI Gating + Dedicated Workflow + Badge
-status: verifying
-stopped_at: Completed 08-01-ci-gating-wasm-badge-PLAN.md (Tasks 1-3 committed; Task 4 = blocking-human checkpoint awaiting operator CI push)
-last_updated: "2026-09-01T22:28:55.951Z"
+status: verification_deferred_human
+stopped_at: Phase 08 implemented + locally verified (gate mechanism green→red→green); live-CI negative-control push deferred to operator
+last_updated: "2026-09-02T00:50:00.000Z"
 last_activity: 2026-09-02
-last_activity_desc: Phase 08 execution started
+last_activity_desc: Autonomous run paused — Phase 08 live-CI verification deferred (user choice)
 state_head: 3acd878c0f569931fcd0cc6827a81acfc37c8def
 progress:
   total_phases: 2
@@ -29,10 +29,24 @@ See: .planning/PROJECT.md (updated 2026-09-01 — started v0.9.0 WASM Runtime Ve
 
 ## Current Position
 
-Phase: 08 (CI Gating + Dedicated Workflow + Badge) — EXECUTING
-Plan: 1 of 1
-Status: Phase complete — ready for verification
-Last activity: 2026-09-02 — Phase 08 execution started
+Phase: 08 (CI Gating + Dedicated Workflow + Badge) — IMPLEMENTED, live-CI verification deferred
+Plan: 1 of 1 done (tasks 1-3); Task 4 negative-control = operator live-CI push
+Status: Autonomous run paused — both phases implemented; Phase 08 awaits operator live-CI observation
+Last activity: 2026-09-02 — Phase 08 live-CI verification deferred (user choice)
+
+## Deferred Verification
+
+| Phase | State | Resume |
+|-------|-------|--------|
+| 8 | verification_deferred_human | /gsd-verify-work 8 |
+
+Phase 8 is implemented and locally verified: CI-01/02/03 files are committed, the LOCKED
+curated-subset constraint is honored (no `--all` in CI), and the gate mechanism is proven
+locally (curated run exit 0 → broken curated test exit 1 → reverted exit 0). The remaining
+step is the operator's: push the branch, observe `wasm-runtime-test` go green → red (on a
+deliberate curated break) → green in GitHub Actions, confirm the `WasmTest.yml` badge
+renders/flips, and record the run URLs. Then `/gsd-verify-work 8`, then
+`/gsd-complete-milestone v0.9.0`.
 
 ### ⚠ Phase 07 finding that must shape Phase 08 planning
 
