@@ -5,7 +5,10 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+# Matches the repo's LICENSE file (Business Source License 1.1). The prior
+# "MIT" here contradicted LICENSE; BUSL-1.1 is the authoritative repo licence,
+# consistent with the sibling anofox extensions (optimize/inventory/bayes).
+license = "BUSL-1.1"
 authors = ["Simon Mueller"]
 repository = "https://github.com/DataZooDE/anofox-forecast-extension"
 
