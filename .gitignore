@@ -39,3 +39,8 @@ venv/
 
 # Node (WASM test harness)
 test/wasm/node_modules/
+
+# GSD transient/internal files
+.planning/.gsd-allow-shrink
+.planning/milestone.lock
+.planning/state.json

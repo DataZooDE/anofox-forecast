@@ -2,20 +2,20 @@
 gsd_state_version: 1.0
 milestone: v0.9.0
 milestone_name: WASM Runtime Verification (Phases 7-8)
-current_phase: 08
-current_phase_name: CI Gating + Dedicated Workflow + Badge
-status: verified
+status: Awaiting next milestone
 stopped_at: Phase 08 verification ACCEPTED by operator on local evidence (live-CI observation waived); milestone lifecycle starting
-last_updated: "2026-09-10T00:00:00.000Z"
+last_updated: "2026-09-10T20:04:24.259Z"
 last_activity: 2026-09-10
-last_activity_desc: Operator accepted Phase 08 on local evidence during /gsd-autonomous re-entry; proceeding to milestone lifecycle
-state_head: 3acd878c0f569931fcd0cc6827a81acfc37c8def
+last_activity_desc: Milestone v0.9.0 completed and archived
+state_head: c0e3ee6cf42a61899a131df1f22d57bb2a41a864
 progress:
   total_phases: 2
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 2
   completed_plans: 2
-  percent: 50
+  percent: 100
+current_phase: 08
+current_phase_name: CI Gating + Dedicated Workflow + Badge
 ---
 
 # Project State
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-09-01 — started v0.9.0 WASM Runtime Ve
 
 ## Current Position
 
-Phase: 08 (CI Gating + Dedicated Workflow + Badge) — IMPLEMENTED, live-CI verification deferred
-Plan: 1 of 1 done (tasks 1-3); Task 4 negative-control = operator live-CI push
-Status: Autonomous run paused — both phases implemented; Phase 08 awaits operator live-CI observation
-Last activity: 2026-09-02 — Phase 08 live-CI verification deferred (user choice)
+Phase: Milestone v0.9.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-09-10 — Milestone v0.9.0 completed and archived
 
 ## Verification Acceptance (Phase 08)
 
@@ -138,4 +138,4 @@ Resume: /gsd-plan-phase 7 to plan the WASM Node harness + local green.
 
 ## Operator Next Steps
 
-- Plan Phase 7 with /gsd-plan-phase 7
+- Start the next milestone with /gsd-new-milestone

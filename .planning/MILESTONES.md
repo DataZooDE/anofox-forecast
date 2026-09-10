@@ -1,5 +1,15 @@
 # Milestones
 
+## v0.9.0 WASM Runtime Verification (Shipped: 2026-09-10)
+
+**Phases completed:** 2 phases, 2 plans, 3 tasks
+
+**Key accomplishments:**
+
+- WasmTest.yml dedicated CI workflow + wasm-runtime-test gating job wired to the curated 8-file/396-assertion harness (no --all), plus a README WASM badge — ported from anofox-statistics PR #131
+
+---
+
 ## v0.8.0 Ensemble Forecasting (Shipped: 2026-08-31)
 
 **Phases completed:** 3 phases, 6 plans, 11 tasks
