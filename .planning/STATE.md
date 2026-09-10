@@ -4,11 +4,11 @@ milestone: v0.9.0
 milestone_name: WASM Runtime Verification (Phases 7-8)
 current_phase: 08
 current_phase_name: CI Gating + Dedicated Workflow + Badge
-status: verification_deferred_human
-stopped_at: Phase 08 implemented + locally verified (gate mechanism green→red→green); live-CI negative-control push deferred to operator
-last_updated: "2026-09-02T00:50:00.000Z"
-last_activity: 2026-09-02
-last_activity_desc: Autonomous run paused — Phase 08 live-CI verification deferred (user choice)
+status: verified
+stopped_at: Phase 08 verification ACCEPTED by operator on local evidence (live-CI observation waived); milestone lifecycle starting
+last_updated: "2026-09-10T00:00:00.000Z"
+last_activity: 2026-09-10
+last_activity_desc: Operator accepted Phase 08 on local evidence during /gsd-autonomous re-entry; proceeding to milestone lifecycle
 state_head: 3acd878c0f569931fcd0cc6827a81acfc37c8def
 progress:
   total_phases: 2
@@ -34,19 +34,15 @@ Plan: 1 of 1 done (tasks 1-3); Task 4 negative-control = operator live-CI push
 Status: Autonomous run paused — both phases implemented; Phase 08 awaits operator live-CI observation
 Last activity: 2026-09-02 — Phase 08 live-CI verification deferred (user choice)
 
-## Deferred Verification
+## Verification Acceptance (Phase 08)
 
-| Phase | State | Resume |
-|-------|-------|--------|
-| 8 | verification_deferred_human | /gsd-verify-work 8 |
-
-Phase 8 is implemented and locally verified: CI-01/02/03 files are committed, the LOCKED
-curated-subset constraint is honored (no `--all` in CI), and the gate mechanism is proven
-locally (curated run exit 0 → broken curated test exit 1 → reverted exit 0). The remaining
-step is the operator's: push the branch, observe `wasm-runtime-test` go green → red (on a
-deliberate curated break) → green in GitHub Actions, confirm the `WasmTest.yml` badge
-renders/flips, and record the run URLs. Then `/gsd-verify-work 8`, then
-`/gsd-complete-milestone v0.9.0`.
+Phase 8 verification was **accepted by the operator on local evidence** on 2026-09-10
+during a `/gsd-autonomous` re-entry (chose "Accept & complete now"). The live-CI
+negative-control observation (push → green→red→green → badge flip → record URLs) was
+**waived** — deemed unnecessary given the gate mechanism is already proven locally
+(curated run exit 0 → broken curated test exit 1 → reverted exit 0) and CI-01/02/03
+files are structurally verified and committed. `08-VERIFICATION.md` status set to
+`passed` with an `operator_acceptance` note.
 
 ### ⚠ Phase 07 finding that must shape Phase 08 planning
 

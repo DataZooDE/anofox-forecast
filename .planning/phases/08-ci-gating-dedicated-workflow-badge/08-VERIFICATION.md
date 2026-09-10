@@ -1,9 +1,10 @@
 ---
 phase: 08-ci-gating-dedicated-workflow-badge
-verified: 2026-09-02T00:45:00Z
-status: human_needed
-score: "3/3 criteria structurally verified + gate mechanism proven locally; live-CI plumbing observation remains (operator push)"
+verified: 2026-09-10T00:00:00Z
+status: passed
+score: "3/3 criteria structurally verified + gate mechanism proven locally; live-CI plumbing observation ACCEPTED by operator on local evidence (2026-09-10)"
 behavior_unverified: 0
+operator_acceptance: "Live-CI negative-control observation waived by operator on 2026-09-10 during /gsd-autonomous re-entry (chose 'Accept & complete now'). Local evidence deemed sufficient: gate mechanism proven green->red->green locally; CI-01/02/03 files structurally verified and committed."
 human_verification:
   - item: "Push the branch and confirm the wasm-runtime-test job runs GREEN in GitHub Actions (this also confirms the artifact name anofox_forecast-v1.5.5-extension-wasm_eh resolves to a real uploaded artifact)."
     why: "The needs:/download-artifact/workflow_run plumbing and the derived artifact name can only be confirmed against a live GitHub Actions run — not locally."
