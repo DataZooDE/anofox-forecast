@@ -77,11 +77,43 @@ Living retrospective across milestones. Newest milestone first.
 - Delivered via `/gsd-autonomous` (full run, Phases 4-6). Worktrees disabled (`workflow.use_worktrees=false`) — executors ran sequentially on the main tree.
 - Notable: agent-death resilience (per-task commits + re-dispatch) and independent re-verification were the dominant time costs — but they caught the fabrications and the segfault that a trust-the-report flow would have shipped.
 
+## Milestone: v0.9.0 — WASM Runtime Verification
+
+**Shipped:** 2026-09-10
+**Phases:** 2 (Phases 7-8) | **Plans:** 2 | **Tasks:** 7 | CI/infra hardening — no new SQL surface, no crate bump
+
+### What Was Built
+- **Phase 7 — WASM Node harness:** ported `test/wasm/run.mjs` + `sqllogic.mjs` from anofox-statistics PR #131 — boots DuckDB-Wasm on the `eh` bundle (`pthreadWorker=null`, `web-worker@1.2.0`), serves + `FORCE INSTALL`/`LOAD`s the built `.wasm`, runs a curated `test/sql` subset (8 files / 396 assertions) green with per-file catalog isolation and `::VARCHAR` DECIMAL formatting. Pinned `@duckdb/duckdb-wasm@1.33.1-dev64.0` (ABI-matched to engine v1.5.5); made `openssl` `!wasm32` in `vcpkg.json`. (WASM-01/02/03, DEP-01/02)
+- **Phase 8 — CI gating + workflow + badge:** `wasm-runtime-test` gating job in `MainDistributionPipeline.yml` (`needs:` the wasm build, same-run artifact download, curated subset — no `--all`), a dedicated `WasmTest.yml` (`workflow_run`, cross-run download), and a README WASM badge. (CI-01/02/03)
+
+### What Worked
+- **Porting a proven harness beat building fresh:** PR #131 had already solved the hard parts (eh-bundle boot, catalog isolation, DECIMAL rendering) — the integration checker confirmed all 5 cross-phase contracts wired end-to-end on the first structural pass.
+- **Local negative-control proved the gate without a live push:** breaking one curated assertion (exit 0 → 1 → 0) demonstrated the gate mechanism, so the milestone could accept Phase 8 on local evidence when the live-CI observation was waived.
+- **Fresh-HEAD rebuild disproved the "stale artifact" theory:** rebuilding the `wasm_eh` artifact locally during Phase 7 verification proved the 188 `--all` failures are pre-existing `test/sql` debt (API drift, DATE+BIGINT, distinctness), not WASM issues — which is what justified gating on the curated subset.
+
+### What Was Inefficient
+- **Full-suite green was assumed reachable, then wasn't:** initial framing expected "CI building from HEAD → suite green"; verification showed 23 files of pre-existing test-debt masked natively by the `require json` skip. Re-scoped mid-milestone to a curated gate + tracked debt.
+- **Phase 8's last step was inherently human-gated:** the live green→red→green + badge-flip observation can't run locally, so the milestone stalled at `verification_deferred_human` until an operator either did the push or waived it.
+
+### Patterns Established
+- **Gate WASM CI on the curated subset, never `--all`** — the full-suite debt would permanently red the build; curated green is the meaningful signal. Saved to project memory (`project_wasm_suite_reveals_test_debt`).
+- **Same-run vs cross-run artifact download split:** the gating job downloads within its own run (`needs:`); the dedicated badge workflow downloads cross-run via `workflow_run.id` + `github-token`.
+- **WASM engine-version pinning is load-critical:** `@duckdb/duckdb-wasm` npm version ≠ engine version; ABI mismatch fails `LOAD`. Documented verification procedure in `test/wasm/README.md`.
+
+### Key Lessons
+- A human-gated verification step (live CI observation) should be scoped as a distinct, waivable checkpoint from the start — the implementation was done days before the milestone could close, blocked only on an operator action.
+- "CI green ≠ suite healthy": native masking (`require json` skip) can hide test-debt that a different runtime (WASM) surfaces; measure against the actual target before promising full-suite green.
+
+### Cost Observations
+- Delivered via `/gsd-autonomous` across two sessions (implementation 2026-09-01/02; close-out 2026-09-10 on operator acceptance of the live-CI waiver).
+- Notable: near-zero code churn relative to prior milestones (infra-only); the dominant cost was verification scoping, not implementation.
+
 ## Cross-Milestone Trends
 
 | Milestone | Phases | Plans | LOC | Notable |
 |-----------|--------|-------|-----|---------|
 | v0.7.0 | 3 | 9 | ~17.9k | Diagnostics + global/classical/multivariate models; first tracked milestone |
 | v0.8.0 | 3 | 6 | ~13.9k | Model ensembling; surfaced a crate CV segfault + executor-report fabrications caught by independent re-verification |
+| v0.9.0 | 2 | 2 | infra-only | WASM runtime harness + CI gating; curated-subset gate over full-suite test-debt; live-CI observation waived on local evidence |
 
-**Recurring:** worktrees stay disabled on this repo (isolation split-brain); every capability-exposure phase = additive FFI + new/extended C++ + macro + verified example + docs; DoD is internal-consistency cross-checks run against the built extension.
+**Recurring:** worktrees stay disabled on this repo (isolation split-brain); every capability-exposure phase = additive FFI + new/extended C++ + macro + verified example + docs; DoD is internal-consistency cross-checks run against the built extension. **Verification gotcha:** independent re-verification against the built artifact keeps catching what SUMMARYs/CI-green miss (fabricated reports, a CV segfault, WASM-surfaced test-debt).

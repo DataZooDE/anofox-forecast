@@ -22,10 +22,10 @@ current_phase_name: CI Gating + Dedicated Workflow + Badge
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-01 — started v0.9.0 WASM Runtime Verification)
+See: .planning/PROJECT.md (updated 2026-09-10 — shipped v0.9.0 WASM Runtime Verification)
 
-**Core value:** Prove the built `anofox_forecast` `.wasm` actually loads and runs in DuckDB-Wasm — not just that it compiles and links — and gate it in CI so WASM regressions fail the build.
-**Current focus:** Phase 08 — CI Gating + Dedicated Workflow + Badge
+**Core value:** SQL users can produce, validate, combine, and interval-bound time-series forecasts — including multi-model ensembles with weight introspection — entirely within DuckDB, without leaving SQL.
+**Current focus:** Planning next milestone — run `/gsd-new-milestone`.
 
 ## Current Position
 
