@@ -86,9 +86,36 @@ Also available as scalar functions over `LIST(y ORDER BY ds)`: `ts_autoperiod`, 
 
 Some series have both weekly (7) and yearly (365) seasonality — use this for hourly / high-frequency data.
 
+`ts_detect_multiple_periods` is a **scalar aggregate** over `LIST(value ORDER BY date)`, used with `GROUP BY`. It returns a STRUCT with fields:
+- `periods STRUCT(period DOUBLE, confidence DOUBLE, strength DOUBLE, amplitude DOUBLE, phase DOUBLE, iteration BIGINT, ...)[]`
+- `n_periods BIGINT`
+- `primary_period DOUBLE`
+- `method VARCHAR`
+
+Overloads: `ts_detect_multiple_periods(list)`, `ts_detect_multiple_periods(list, max_periods INTEGER)`, `ts_detect_multiple_periods(list, max_periods, min_confidence DOUBLE, min_strength DOUBLE)`.
+
 ```sql
-SELECT id, unnest(periods) AS p
-FROM ts_detect_multiple_periods_by('sales', product_id, ds, y, MAP{});
+-- Scalar-aggregate GROUP BY form (canonical)
+SELECT product_id,
+       (mp).primary_period,
+       (mp).n_periods,
+       unnest((mp).periods).period AS detected_period,
+       unnest((mp).periods).confidence AS confidence
+FROM (
+    SELECT product_id,
+           ts_detect_multiple_periods(LIST(y ORDER BY ds)) AS mp
+    FROM sales
+    GROUP BY product_id
+)
+ORDER BY product_id;
+```
+
+Alternatively, use the `ts_detect_periods_by` table macro with `MAP{'method': 'multi'}` — same result, one-liner:
+
+```sql
+-- Table-macro form via ts_detect_periods_by (source: synthetic_period_examples.sql lines 175-179)
+SELECT series_id, primary_period, n_periods
+FROM ts_detect_periods_by('dual_seasonal', series_id, ds, value, MAP{'method': 'multi'});
 ```
 
 ## Detect-then-forecast workflow (the standard pattern)
