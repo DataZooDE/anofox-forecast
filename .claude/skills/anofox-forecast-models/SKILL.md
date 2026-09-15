@@ -154,6 +154,191 @@ SELECT * FROM ts_forecast_var_by('var_src', 'ds', ['y1', 'y2'], 14, '1d', p:=2);
 
 ---
 
+## Ensembles (v0.8.0)
+
+Ensembles combine multiple member models per series rather than replacing them — they are a **combination surface over the existing 36 models**, not additional model count. Three entry points plus two introspection functions.
+
+### `ts_forecast_by` with `method='AutoEnsemble'`
+
+Auto-fits `AutoARIMA`, `AutoETS`, and `AutoTheta`; ranks them by in-sample MSE; combines the top-K members.
+
+```sql
+ts_forecast_by(
+    source VARCHAR, group_col COLUMN, date_col COLUMN, target_col COLUMN,
+    'AutoEnsemble', horizon INTEGER, frequency VARCHAR,
+    params MAP or STRUCT   -- top_k, combination_method, seasonal_period
+) → TABLE(group_col, forecast_step INT, ds, yhat DOUBLE, yhat_lower, yhat_upper, model_name)
+```
+
+Params:
+
+| Key | Default | Values |
+|---|---|---|
+| `top_k` | 3 | Number of top-ranked members to combine |
+| `combination_method` | `'mean'` | `'mean'`, `'median'`, `'weighted_mse'`, `'inverse_aic'`, `'stacking'`, `'horizon_adaptive'` |
+| `seasonal_period` | 0 | Shared with member models; 0 = non-seasonal |
+
+```sql
+-- AutoEnsemble with default params (top_k=3, combination_method='mean')
+-- (sourced from autoensemble.sql Section 2)
+SELECT forecast_step, ds, ROUND(yhat, 4) AS yhat, yhat_lower, yhat_upper, model_name
+FROM ts_forecast_by('ae_test', id, ds, y, 'AutoEnsemble', 5, '1d')
+ORDER BY forecast_step;
+
+-- AutoEnsemble with explicit params (sourced from autoensemble.sql Section 1)
+SELECT forecast_step, yhat, model_name
+FROM ts_forecast_by(
+    'ae_test', id, ds, y,
+    'AutoEnsemble', 5, '1d',
+    params := {top_k: 3, combination_method: 'mean', seasonal_period: 0}
+);
+```
+
+**Note:** `yhat_lower` / `yhat_upper` are NULL from `ts_forecast_by('AutoEnsemble', ...)`. Use the conformal pipeline (`ts_cv_folds_by` → `_ts_forecast_scalar` per fold → `ts_conformal_calibrate`) to attach distribution-free intervals — see `anofox-forecast-backtest` and ensemble_intervals.sql.
+
+---
+
+### `ts_forecast_ensemble_by` — explicit member list
+
+User-named member models as a `VARCHAR[]`. Any of the 26-member allowlist (all models except `GARCH`, `AutoEnsemble`) may appear.
+
+```sql
+ts_forecast_ensemble_by(
+    source VARCHAR,
+    group_col COLUMN,
+    date_col COLUMN,
+    target_col COLUMN,
+    members VARCHAR[],        -- e.g. ['AutoARIMA', 'AutoETS', 'Theta']
+    horizon INTEGER,
+    frequency VARCHAR,
+    combination_method := 'mean',   -- named param
+    seasonal_period := 0            -- named param
+) → TABLE(group_col, forecast_step INT, ds, yhat DOUBLE, yhat_lower DOUBLE, yhat_upper DOUBLE, model_name)
+```
+
+```sql
+-- Explicit three-member ensemble, mean combination
+-- (sourced from ensemble_explicit.sql Section 1)
+SELECT * FROM ts_forecast_ensemble_by(
+    'ae_test', id, ds, y,
+    ['AutoARIMA', 'AutoETS', 'Theta'],
+    5, '1d',
+    combination_method := 'mean',
+    seasonal_period := 0
+);
+
+-- Seasonal tier-2 members (sourced from ensemble_explicit.sql Section 3 Sample D)
+SELECT forecast_step, ROUND(yhat, 4) AS yhat FROM ts_forecast_ensemble_by(
+    'ae_test', id, ds, y,
+    ['SeasonalNaive', 'HoltWinters'],
+    3, '1d',
+    combination_method := 'mean', seasonal_period := 12);
+```
+
+**Errors:** unknown member name, fewer than 2 members, or blocked model (`GARCH`) each raise a descriptive `InvalidInput` exception naming the offending member.
+
+---
+
+### `ts_ensemble_inspect_by` — inspect explicit-member ensemble
+
+Returns one row per group per member: `member_name`, `weight`, plus group column.
+
+```sql
+ts_ensemble_inspect_by(
+    source VARCHAR,
+    group_col COLUMN,
+    date_col COLUMN,
+    target_col COLUMN,
+    members VARCHAR[],
+    combination_method := 'mean',
+    seasonal_period := 0
+) → TABLE(group_col, member_name VARCHAR, weight DOUBLE)
+```
+
+```sql
+-- Mean combination: weight == 1/k for every member
+-- (sourced from ensemble_inspect.sql Section 1)
+SELECT * FROM ts_ensemble_inspect_by(
+    'insp_series', id, ds, y,
+    ['AutoARIMA', 'AutoETS', 'Theta'],
+    combination_method := 'mean',
+    seasonal_period := 0
+)
+ORDER BY id, member_name;
+
+-- WeightedMSE: inverse-MSE weights; non-negative, sum to 1 per series
+-- (sourced from ensemble_inspect.sql Section 2)
+SELECT * FROM ts_ensemble_inspect_by(
+    'insp_series', id, ds, y,
+    ['AutoARIMA', 'AutoETS', 'Theta'],
+    combination_method := 'weighted_mse',
+    seasonal_period := 0
+)
+ORDER BY id, member_name;
+```
+
+---
+
+### `ts_auto_ensemble_inspect_by` — inspect AutoEnsemble members
+
+Returns one row per group per selected member: `member_name`, `weight`, `score` (in-sample MSE), `rank`.
+
+```sql
+ts_auto_ensemble_inspect_by(
+    source VARCHAR,
+    group_col COLUMN,
+    date_col COLUMN,
+    target_col COLUMN,
+    top_k := 3,
+    combination_method := 'mean',
+    seasonal_period := 0
+) → TABLE(group_col, member_name VARCHAR, weight DOUBLE, score DOUBLE, rank BIGINT)
+```
+
+```sql
+-- AutoEnsemble Mean inspection: weight == 1/k, score > 0, rank in 1..k
+-- (sourced from ensemble_inspect.sql Section 3)
+SELECT * FROM ts_auto_ensemble_inspect_by(
+    'insp_series', id, ds, y,
+    top_k := 3,
+    combination_method := 'mean',
+    seasonal_period := 0
+)
+ORDER BY id, rank;
+
+-- AutoEnsemble WeightedMSE: weight IS NULL (see gotcha b below), score > 0
+-- (sourced from ensemble_inspect.sql Section 4)
+SELECT * FROM ts_auto_ensemble_inspect_by(
+    'insp_series', id, ds, y,
+    top_k := 3,
+    combination_method := 'weighted_mse',
+    seasonal_period := 0
+)
+ORDER BY id, rank;
+```
+
+---
+
+### Ensemble gotchas
+
+**(a) `ts_cv_forecast_by('AutoEnsemble')` segfaults (crate 0.15.3).** The CV native does not parse ensemble-specific params (`ensemble_top_k` / `ensemble_method` are zeroed), causing a runtime crash. Do NOT use `ts_cv_forecast_by` for ensemble conformal CV. Instead, run a manual per-fold `_ts_forecast_scalar` loop:
+
+```sql
+-- Safe conformal CV path for AutoEnsemble (sourced from ensemble_intervals.sql Section 1)
+-- Step 1: generate folds
+CREATE OR REPLACE TABLE ens_folds AS
+SELECT * FROM ts_cv_folds_by('ens_series', id, ds, y, 3, 5, MAP{});
+
+-- Step 2: forecast per fold with _ts_forecast_scalar (not ts_cv_forecast_by)
+-- Step 3: ts_conformal_calibrate on residuals
+-- Step 4: ts_forecast_by('AutoEnsemble') + apply calibrated quantile
+-- See examples/forecasting/ensemble_intervals.sql for the full pipeline.
+```
+
+**(b) `ts_auto_ensemble_inspect_by` returns NULL `weight` for non-`Mean` `combination_method` (crate 0.15.3).** The `AutoEnsemble` struct's inner combination weights are stored in a private field not accessible via the public `all_scores()` / `model_count()` API. Mean combination is the only variant for which weights are returned. `score` (in-sample MSE) is always populated. This is a documented upstream-crate limitation.
+
+---
+
 ## `ts_forecast_agg` (aggregate)
 
 For custom `GROUP BY` shapes.
