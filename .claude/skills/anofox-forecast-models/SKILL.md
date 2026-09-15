@@ -6,9 +6,13 @@ description: >
   exponential smoothing, state-space ARIMA + Kalman, classical GARCH,
   Theta, multi-seasonal, intermittent-demand, distributional Laplace with
   three variants, panel/global GlobalETS/GlobalTheta/GlobalCroston, and
-  multivariate VAR via ts_forecast_var_by), parameter surfaces (MAP + STRUCT),
-  model selection guidance, and common workflow gotchas. Use when picking a
-  model or writing `ts_forecast_by` / `ts_forecast_agg` / `ts_forecast_var_by` calls.
+  multivariate VAR via ts_forecast_var_by), plus model ensembling
+  (AutoEnsemble via ts_forecast_by, explicit-member ts_forecast_ensemble_by,
+  six combination methods, and member/weight introspection via
+  ts_ensemble_inspect_by / ts_auto_ensemble_inspect_by), parameter surfaces
+  (MAP + STRUCT), model selection guidance, and common workflow gotchas. Use
+  when picking a model, building an ensemble, or writing `ts_forecast_by` /
+  `ts_forecast_agg` / `ts_forecast_var_by` / `ts_forecast_ensemble_by` calls.
 version: 0.15.3
 user-invocable: false
 ---
