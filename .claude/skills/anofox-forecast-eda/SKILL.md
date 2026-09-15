@@ -1,12 +1,14 @@
 ---
 name: anofox-forecast-eda
 description: >
-  Exploratory data analysis and data quality for the anofox_forecast
-  DuckDB extension — 34 per-series statistics, data-quality scoring,
-  quality-report summaries, and 117 tsfresh-compatible feature
-  extraction. Use before forecasting to understand series characteristics
-  (length, gaps, trend, seasonality strength, intermittency) or to build
-  ML feature vectors for downstream models.
+  Exploratory data analysis, data quality, and statistical diagnostics for
+  the anofox_forecast DuckDB extension — 34 per-series statistics,
+  data-quality scoring, quality-report summaries, 117 tsfresh-compatible
+  feature extraction, and 7 diagnostic functions covering stationarity
+  (ADF, KPSS, combined verdict) and residual adequacy (Ljung-Box,
+  Durbin-Watson, Jarque-Bera, combined report). Use before forecasting to
+  understand series characteristics (length, gaps, trend, seasonality
+  strength, intermittency) or to validate model residuals after fitting.
 version: 0.15.3
 user-invocable: false
 ---
@@ -104,6 +106,144 @@ SELECT * FROM ts_data_quality_summary('sales', product_id, ds, y, 14);
 ```
 
 ### `ts_quality_report` — human-readable report
+
+## Diagnostics & validation (v0.7.0)
+
+**Requires: json extension** (same as detection). Enable auto-load once per session:
+
+```sql
+SET autoinstall_known_extensions = 1;
+SET autoload_known_extensions = 1;
+```
+
+Seven functions in two groups. The combined-verdict functions (`ts_stationarity`, `ts_residual_diagnostics`) are the recommended entry points — they run the component tests internally and return a single adequacy flag.
+
+### Stationarity trio
+
+#### `ts_adf` / `ts_adf_by` — Augmented Dickey-Fuller unit-root test
+
+H0: series has a unit root (non-stationary). Reject H0 (p < 0.05) → stationary.
+
+```sql
+-- Scalar form: takes LIST(value ORDER BY date) (sourced from stationarity.sql Section 2)
+SELECT
+    (adf).statistic       AS t_statistic,
+    (adf).p_value         AS p_value,
+    (adf).lags            AS lags_used,
+    (adf).is_stationary   AS is_stationary,
+    ROUND((adf).cv_5pct, 3) AS critical_value_5pct
+FROM (
+    SELECT ts_adf(LIST(y ORDER BY ds)) AS adf
+    FROM sales_data
+    WHERE product_id = 'mean_revert'
+);
+
+-- Grouped macro (sourced from stationarity.sql Section 3)
+SELECT product_id,
+       ROUND((adf).statistic, 4) AS t_statistic,
+       (adf).p_value,
+       (adf).lags,
+       (adf).is_stationary,
+       ROUND((adf).cv_1pct, 2) AS cv_1pct,
+       ROUND((adf).cv_5pct, 2) AS cv_5pct,
+       ROUND((adf).cv_10pct, 2) AS cv_10pct
+FROM ts_adf_by('sales_data', product_id, ds, y)
+ORDER BY product_id;
+```
+
+Optional second arg to scalar form: `ts_adf(LIST(y ORDER BY ds), max_lags INTEGER)` — `-1` = auto (default).
+
+#### `ts_kpss` / `ts_kpss_by` — KPSS level-stationarity test
+
+H0: series IS level-stationary (opposite direction from ADF). Fail to reject (p > 0.05) → stationary.
+
+```sql
+-- Scalar form (sourced from stationarity.sql Section 5)
+WITH s AS (SELECT i AS ds, sin(i/6.0) + (i%5)*0.01 AS y FROM range(1, 80) t(i))
+SELECT (ts_kpss(LIST(y ORDER BY ds))).statistic     AS kpss_stat,
+       (ts_kpss(LIST(y ORDER BY ds))).is_stationary AS is_stationary
+FROM s;
+
+-- Grouped macro (sourced from stationarity.sql Section 5)
+SELECT product_id, (kpss).statistic, (kpss).is_stationary
+FROM ts_kpss_by('sales_data', product_id, ds, y)
+ORDER BY product_id;
+```
+
+#### `ts_stationarity` / `ts_stationarity_by` — combined four-way verdict (recommended entry point)
+
+Runs ADF + KPSS internally; returns a combined `verdict` field plus the individual flags.
+
+```sql
+-- Grouped macro (sourced from stationarity.sql Section 6)
+SELECT product_id,
+       (stationarity).verdict,
+       (stationarity).adf_is_stationary,
+       (stationarity).kpss_is_stationary
+FROM ts_stationarity_by('sales_data', product_id, ds, y)
+ORDER BY product_id;
+```
+
+Verdict interpretation: `'Stationary'` (both agree), `'NonStationary'` (both agree), `'Trend-Stationary'` (KPSS non-stationary + ADF stationary), `'DifferencStationary'` / `'Inconclusive'` (disagreement).
+
+---
+
+### Residual-adequacy set
+
+Apply to **residuals** from a fitted model (forecast errors), not to the raw series.
+
+#### `ts_ljung_box` / `ts_ljung_box_by` — autocorrelation test (white-noise check)
+
+H0: residuals are white noise (no autocorrelation). Reject (p < 0.05) → residuals are correlated; model under-fits.
+
+```sql
+-- Grouped macro (sourced from residuals.sql)
+SELECT series_id, (lb).statistic AS q_stat, (lb).p_value, (lb).lags
+FROM ts_ljung_box_by('resids', series_id, ds, e) AS t(series_id, lb)
+ORDER BY series_id;
+```
+
+#### `ts_durbin_watson` / `ts_durbin_watson_by` — first-order autocorrelation
+
+DW statistic near 2 = no autocorrelation; < 2 = positive; > 2 = negative.
+
+```sql
+-- Grouped macro (sourced from residuals.sql)
+SELECT series_id, (dw).statistic, (dw).interpretation
+FROM ts_durbin_watson_by('resids', series_id, ds, e) AS t(series_id, dw)
+ORDER BY series_id;
+```
+
+#### `ts_jarque_bera` / `ts_jarque_bera_by` — residual normality
+
+H0: residuals are normally distributed. Reject (p < 0.05) → non-normal (may affect interval coverage).
+
+```sql
+-- Grouped macro (sourced from residuals.sql)
+SELECT series_id, (jb).statistic, (jb).p_value, (jb).skewness, (jb).excess_kurtosis
+FROM ts_jarque_bera_by('resids', series_id, ds, e) AS t(series_id, jb)
+ORDER BY series_id;
+```
+
+#### `ts_residual_diagnostics` / `ts_residual_diagnostics_by` — combined adequacy report (recommended entry point)
+
+Runs Ljung-Box, Durbin-Watson, and Jarque-Bera internally; returns a single `adequate BOOLEAN` verdict plus component fields.
+
+```sql
+-- Grouped macro (sourced from residuals.sql)
+SELECT series_id, (rd).lb_p_value, (rd).dw_interpretation, (rd).adequate
+FROM ts_residual_diagnostics_by('resids', series_id, ds, e) AS t(series_id, rd)
+ORDER BY series_id;
+```
+
+### Diagnostics gotchas
+
+- **Stationarity tests need sufficient length**: ADF / KPSS require at least ~20-30 observations for reliable p-values. On very short series, results are inconclusive by default.
+- **Apply residual tests to residuals, not raw values**: Pass `(y - yhat)` as the value column, not the original series — `ts_ljung_box` on raw series will almost always reject, which is expected and uninformative.
+- **`ts_adf_by` output column names** are the group column name (preserved) plus the `adf` STRUCT. Access sub-fields with `(adf).statistic`, etc.
+- **KPSS H0 direction is opposite to ADF**: KPSS non-rejection means stationary; ADF non-rejection means non-stationary. Use `ts_stationarity_by` to avoid this confusion.
+
+---
 
 ## Feature extraction (117 tsfresh-compatible features)
 
