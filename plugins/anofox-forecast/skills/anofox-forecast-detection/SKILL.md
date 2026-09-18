@@ -63,6 +63,32 @@ FROM ts_detect_periods_by('sales', product_id, ds, y,
     MAP{'method': 'autoperiod'});
 ```
 
+> ⚠️ **KNOWN BUG (build 9061428): `ts_detect_periods_by` returns all-NULL for FFT-based detection.**
+> On clean multi-cycle data (reproduced at 48 points / 4 cycles of a period-12 sine), the `_by` table macro returns a NULL row (`periods = NULL`, `n_periods = NULL`, `primary_period = NULL`) with both `MAP{}` and `MAP{'method': 'fft'}`. The scalar `ts_estimate_period_fft` / `ts_estimate_period_acf` **and** the aggregate `ts_detect_periods_agg` all return `period = 12.0` correctly on the *same* data. **Until the macro is fixed, use the scalar or aggregate path** for period detection.
+>
+> ```sql
+> CREATE TABLE sea AS
+> SELECT 'A' AS id, TIMESTAMP '2024-01-01' + INTERVAL (g) HOUR AS ts,
+>        10 + 5*sin(2*pi()*g/12) AS y
+> FROM range(0,48) t(g);
+>
+> -- BUG: returns a NULL row
+> SELECT * FROM ts_detect_periods_by('sea', id, ts, y, MAP{});
+>
+> -- WORKAROUND (reliable): period = 12.0
+> SELECT ts_detect_periods_agg(ts, y, 'fft') FROM sea;                    -- aggregate
+> SELECT ts_estimate_period_fft(LIST(y ORDER BY ts)) FROM sea;           -- scalar
+> ```
+
+### `ts_detect_periods_agg` — aggregate period detection
+
+The `GROUP BY` aggregate form of period detection — and the reliable path while the `_by` macro FFT bug (above) is open. Overloads: `ts_detect_periods_agg(ts TIMESTAMP, value DOUBLE)` and `ts_detect_periods_agg(ts, value, method VARCHAR)`. Returns the same STRUCT as `ts_detect_multiple_periods` (`periods[]`, `n_periods`, `primary_period`, `method`).
+
+```sql
+SELECT id, ts_detect_periods_agg(ts, y, 'fft').primary_period AS sp
+FROM sea GROUP BY id;
+```
+
 ### Methods available
 
 | Method string | Underlying algorithm | Best for |
@@ -244,6 +270,10 @@ ts_detrend_by(source, group_col, date_col, value_col, method) → TABLE
 ```
 
 `method`: `'linear'` (default), `'polynomial'`, `'ols'`.
+
+### `ts_detrend` (scalar) — array-level trend removal
+
+The array-level primitive behind `ts_detrend_by`. Signature `ts_detrend(DOUBLE[] values [, VARCHAR method]) → STRUCT(trend DOUBLE[], detrended DOUBLE[], method VARCHAR, coefficients DOUBLE[], rss DOUBLE, n_params BIGINT)`. **For grouped series prefer `ts_detrend_by`** (methods `'linear'` / `'quadratic'` / `'cubic'` / `'auto'`) — it handles the per-group `GROUP BY` shape and is the documented path.
 
 ## Gotchas
 

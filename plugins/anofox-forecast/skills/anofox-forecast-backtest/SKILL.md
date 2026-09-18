@@ -20,7 +20,7 @@ Time-series-aware cross-validation, error metrics, and distribution-free interva
 ## Critical gotchas
 
 - **`ts_backtest_auto_by` was REMOVED.** Use the two-step CV workflow (`ts_cv_folds_by` → `ts_cv_forecast_by`) instead. Older docs and tests may still reference the retired one-liner.
-- **Metric `_by` table macros (`ts_mae_by`, `ts_rmse_by`, …) are deprecated.** They're ~2400× slower than the scalar + `GROUP BY` pattern and don't parallelise. Use scalars.
+- **Metric `_by` table macros are deprecated.** They're ~2400× slower than the scalar + `GROUP BY` pattern and don't parallelise. Use scalars. The full deprecated family: `ts_mae_by`, `ts_rmse_by`, `ts_mse_by`, `ts_mape_by`, `ts_smape_by`, `ts_bias_by`, `ts_mase_by`, `ts_rmae_by`, `ts_r2_by`, `ts_coverage_by`, `ts_quantile_loss_by`, `ts_interval_width_by`. Each maps to a scalar (`ts_mae`, `ts_rmse`, … below) called under `GROUP BY`. Two helpers are exceptions: `ts_interval_width_by` is a table macro `(results, group_col, lower_col, upper_col)` and `ts_mean_interval_width(DOUBLE[] lower, DOUBLE[] upper) → DOUBLE` is a **scalar** — still prefer the scalar + `GROUP BY` pattern over the `_by` table macro.
 - **Always `ORDER BY` inside `LIST()`** for temporal correctness: `LIST(y ORDER BY ds)`, not `LIST(y)`.
 - **`ts_cv_forecast_by` output renames the target column to `y`** (canonical). Don't try to access the original name.
 - **Folds must be pre-computed before forecasting.** Passing raw data to `ts_cv_forecast_by` throws a clear error.
@@ -196,6 +196,45 @@ SELECT * FROM ts_conformal_apply_by('new_forecasts', unique_id, yhat,
 - `ts_conformal_coverage`, `ts_conformal_evaluate`
 
 Use these when composing custom pipelines over `LIST(residual)` arrays.
+
+## Bootstrap prediction intervals
+
+Residual-bootstrap alternative to conformal — resample forecast residuals to
+build empirical intervals / quantiles around point forecasts. Both are scalar
+functions over `DOUBLE[]` arrays with a fixed seed for reproducibility.
+
+### `ts_bootstrap_intervals` — coverage-band intervals
+
+```sql
+ts_bootstrap_intervals(point_forecasts DOUBLE[], residuals DOUBLE[],
+                       horizon INTEGER, coverage DOUBLE, seed BIGINT)
+    → STRUCT(point DOUBLE[], lower DOUBLE[], upper DOUBLE[], coverage DOUBLE)
+```
+
+```sql
+SELECT ts_bootstrap_intervals(
+    [10.0, 11, 10.5, 12, 11.5, 13, 12.5, 14],   -- point forecasts
+    [0.2, -0.3, 0.1, -0.2, 0.15, -0.1, 0.05, -0.05],  -- residuals
+    7, 0.90, 42) AS r;
+```
+
+### `ts_bootstrap_quantiles` — arbitrary quantile levels
+
+```sql
+ts_bootstrap_quantiles(point_forecasts DOUBLE[], residuals DOUBLE[],
+                       horizon INTEGER, quantiles DOUBLE[], seed BIGINT)
+    → STRUCT(point DOUBLE[], quantiles DOUBLE[], "values" DOUBLE[])
+```
+
+`values` is flattened `horizon × quantiles` (one block of horizon values per
+requested quantile).
+
+```sql
+SELECT ts_bootstrap_quantiles(
+    [10.0, 11, 10.5, 12, 11.5, 13, 12.5, 14],
+    [0.2, -0.3, 0.1, -0.2, 0.15, -0.1, 0.05, -0.05],
+    7, [0.1, 0.5, 0.9], 42) AS r;
+```
 
 ## `ts_estimate_backtest_memory`
 

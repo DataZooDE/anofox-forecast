@@ -6,13 +6,17 @@ description: >
   exponential smoothing, state-space ARIMA + Kalman, classical GARCH,
   Theta, multi-seasonal, intermittent-demand, distributional Laplace with
   three variants, panel/global GlobalETS/GlobalTheta/GlobalCroston, and
-  multivariate VAR via ts_forecast_var_by), plus model ensembling
-  (AutoEnsemble via ts_forecast_by, explicit-member ts_forecast_ensemble_by,
-  six combination methods, and member/weight introspection via
-  ts_ensemble_inspect_by / ts_auto_ensemble_inspect_by), parameter surfaces
-  (MAP + STRUCT), model selection guidance, and common workflow gotchas. Use
-  when picking a model, building an ensemble, or writing `ts_forecast_by` /
-  `ts_forecast_agg` / `ts_forecast_var_by` / `ts_forecast_ensemble_by` calls.
+  multivariate VAR via ts_forecast_var_by), plus exogenous-regressor
+  forecasting (ARIMAX / ThetaX / MFLESX via ts_forecast_exog_by /
+  ts_forecast_exog), single-series forecasting (ts_forecast), and model
+  ensembling (AutoEnsemble via ts_forecast_by, explicit-member
+  ts_forecast_ensemble_by, six combination methods, and member/weight
+  introspection via ts_ensemble_inspect_by / ts_auto_ensemble_inspect_by),
+  parameter surfaces (MAP + STRUCT), model selection guidance, and common
+  workflow gotchas. Use when picking a model, building an ensemble, adding
+  exogenous regressors, or writing `ts_forecast_by` / `ts_forecast` /
+  `ts_forecast_exog_by` / `ts_forecast_agg` / `ts_forecast_var_by` /
+  `ts_forecast_ensemble_by` calls.
 version: 0.15.3
 user-invocable: false
 ---
@@ -155,6 +159,98 @@ SELECT * FROM ts_forecast_var_by('var_src', 'ds', ['y1', 'y2'], 14, '1d', p:=2);
 - Minimum obs: n > k×p+1 (n=obs, k=variables, p=lag order).
 - Non-stationary series → unstable coefficient matrix; difference first with `ts_diff_by`.
 - **Benchmark:** VAR(1) on synthetic VAR(1) data — MAE ratio vs statsmodels = 1.000 (exact match, PASS).
+
+---
+
+## Exogenous regressors — `ts_forecast_exog_by` / `ts_forecast_exog`
+
+Add external drivers (weather, promotions, price) to selected models. The
+model string stays the base name; the extension swaps in the `X` variant
+automatically and reports it in `model_name`.
+
+| Base model | With exog | Notes |
+|---|---|---|
+| `ARIMA` / `AutoARIMA` | `ARIMAX` | ARIMA with exogenous regressors |
+| `OptimizedTheta` | `ThetaX` | Theta with exogenous regressors |
+| `MFLES` | `MFLESX` | MFLES with exogenous regressors |
+
+**You must supply a FUTURE table** holding the exogenous columns over the
+forecast horizon (the model needs the drivers for the periods it predicts).
+
+### `ts_forecast_exog_by` (multi-series — primary surface)
+
+```sql
+ts_forecast_exog_by(
+    source            VARCHAR,     -- historical table name (quoted string)
+    group_col         COLUMN,      -- series identifier (unquoted)
+    date_col          COLUMN,      -- date / timestamp (unquoted)
+    target_col        COLUMN,      -- value to forecast (unquoted)
+    xreg_cols         VARCHAR[],   -- historical exog columns, e.g. ['temp']
+    future_source     VARCHAR,     -- future exog table name (quoted string)
+    future_date_col   COLUMN,      -- future date column (unquoted)
+    future_xreg_cols  VARCHAR[],   -- future exog columns, e.g. ['temp']
+    frequency         VARCHAR,     -- '1d', '1mo', ...
+    method            VARCHAR,     -- 'AutoARIMA', 'OptimizedTheta', 'MFLES'
+    horizon           INTEGER,
+    params            MAP or STRUCT
+) → TABLE(group_col, forecast_step INT, date TIMESTAMP, yhat DOUBLE, yhat_lower, yhat_upper, model_name)
+```
+
+```sql
+-- ARIMAX: forecast with a temperature regressor
+CREATE TABLE hist AS
+SELECT 'A' AS id, DATE '2024-01-01' + INTERVAL (g) DAY AS d,
+       10 + g*0.5 + 3*sin(g) AS y, 20.0 + g*0.1 AS temp
+FROM range(0,40) t(g);
+CREATE TABLE fut AS
+SELECT 'A' AS id, DATE '2024-01-01' + INTERVAL (40+g) DAY AS d,
+       24.0 + g*0.1 AS temp
+FROM range(0,7) t(g);
+
+SELECT * FROM ts_forecast_exog_by('hist', id, d, y,
+    ['temp'], 'fut', d, ['temp'], '1d', 'AutoARIMA', 7, MAP{});
+-- model_name = 'ARIMAX'
+```
+
+### `ts_forecast_exog` (single-series)
+
+Same call without the `group_col` / `frequency` — for one series. Returns
+**one row** with array columns `point_forecasts`, `lower_bounds`,
+`upper_bounds`, `model_name`, plus `(fcst).aic` / `(fcst).bic` / `(fcst).mse`.
+
+```sql
+ts_forecast_exog(source, date_col, target_col, xreg_cols,
+                 future_source, future_date_col, future_xreg_cols,
+                 method, horizon, params)
+    → STRUCT(point_forecasts DOUBLE[], lower_bounds DOUBLE[], upper_bounds DOUBLE[], model_name, ...)
+```
+
+```sql
+-- Single-series ARIMAX (hist/fut without the id column)
+SELECT * FROM ts_forecast_exog('hist', d, y,
+    ['temp'], 'fut', d, ['temp'], 'AutoARIMA', 7, MAP{});
+```
+
+---
+
+## `ts_forecast` (single-series, non-grouped)
+
+The single-series sibling of `ts_forecast_by` — no `group_col`, no
+`frequency`. Returns **one row** with array columns.
+
+```sql
+ts_forecast(source VARCHAR, date_col COLUMN, target_col COLUMN,
+            method VARCHAR, horizon INTEGER, params MAP or STRUCT)
+    → STRUCT(point_forecasts DOUBLE[], lower_bounds DOUBLE[], upper_bounds DOUBLE[], model_name, (fcst).aic, (fcst).bic)
+```
+
+```sql
+CREATE TABLE s AS
+SELECT DATE '2024-01-01' + INTERVAL (g) DAY AS d, 10 + g*0.5 + 3*sin(g) AS y
+FROM range(0,40) t(g);
+
+SELECT * FROM ts_forecast('s', d, y, 'AutoETS', 7, MAP{});
+```
 
 ---
 
