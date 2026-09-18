@@ -23,6 +23,11 @@ permissions:
 jobs:
   wasm-runtime-test:
     name: DuckDB-Wasm load + runtime test
+    # Only run when the upstream distribution pipeline SUCCEEDED. A cancelled or
+    # failed pipeline (e.g. a PR run superseded by a force-push) uploads no
+    # wasm_eh artifact, so running anyway 404s the download and flips the WASM
+    # badge red for an unrelated reason.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
