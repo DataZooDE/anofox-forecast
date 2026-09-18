@@ -112,6 +112,25 @@ GEN=ninja make release       # With Ninja (faster)
 # build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension
 ```
 
+### Claude Code Skills (AI pair-programming)
+
+Five Claude Code skills are bundled as an installable plugin, giving your AI assistant deep knowledge of the extension's SQL API — models, backtesting, EDA, detection, and data prep:
+
+```
+/plugin marketplace add DataZooDE/anofox-forecast
+/plugin install anofox-forecast@anofox-forecast
+```
+
+| Skill | Covers |
+|-------|--------|
+| `anofox-forecast-models` | 36 models + ensembles |
+| `anofox-forecast-backtest` | Cross-validation, metrics, conformal prediction intervals |
+| `anofox-forecast-eda` | Per-series stats, data quality, 117 features, stationarity/residual diagnostics |
+| `anofox-forecast-detection` | Seasonality, period, changepoint, peak detection |
+| `anofox-forecast-data-prep` | Gap filling, imputation, differencing, hierarchical keys |
+
+The skills live in `plugins/anofox-forecast/`.
+
 ## 🚀 Quick Start on M5 Dataset
 
 The forecast takes ~2 minutes on a Dell XPS 13. (Requires DuckDB v1.4.5 LTS or v1.5.5+).

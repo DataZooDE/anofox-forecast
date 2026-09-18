@@ -1,0 +1,12 @@
+{
+  "name": "anofox-forecast",
+  "description": "SQL-native time-series forecasting skills for the anofox_forecast DuckDB extension — models & ensembles, backtesting, statistical diagnostics, seasonality/changepoint detection, EDA/features, and data prep.",
+  "version": "0.15.3",
+  "author": {
+    "name": "DataZoo GmbH",
+    "url": "https://github.com/DataZooDE"
+  },
+  "homepage": "https://github.com/DataZooDE/anofox-forecast",
+  "repository": "https://github.com/DataZooDE/anofox-forecast",
+  "license": "BUSL-1.1"
+}

@@ -1,0 +1,15 @@
+{
+  "name": "anofox-forecast",
+  "owner": {
+    "name": "DataZoo GmbH",
+    "url": "https://github.com/DataZooDE"
+  },
+  "plugins": [
+    {
+      "name": "anofox-forecast",
+      "source": "./plugins/anofox-forecast",
+      "description": "SQL-native time-series forecasting skills for the anofox_forecast DuckDB extension — models & ensembles, backtesting, statistical diagnostics, seasonality/changepoint detection, EDA/features, and data prep.",
+      "keywords": ["duckdb", "forecasting", "time-series", "sql", "analytics", "claude-code"]
+    }
+  ]
+}
