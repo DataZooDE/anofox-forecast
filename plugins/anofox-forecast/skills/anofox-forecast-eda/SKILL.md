@@ -89,6 +89,10 @@ FROM ts_data_quality('sales', product_id, ds, y, 14, '1d')
 ORDER BY overall_score;
 ```
 
+### `ts_data_quality_by` — table-macro variant
+
+Grouped macro sibling of `ts_data_quality` — same per-series quality scoring by group. Signature `ts_data_quality_by(source, unique_id_col, date_col, value_col, n_short, frequency)`.
+
 ### `ts_data_quality_agg` (aggregate)
 
 Same as `ts_stats_agg` — takes `(date, value)`, returns a STRUCT.
@@ -106,6 +110,10 @@ SELECT * FROM ts_data_quality_summary('sales', product_id, ds, y, 14);
 ```
 
 ### `ts_quality_report` — human-readable report
+
+### `ts_validate_timestamps_summary_by` — per-group timestamp validation
+
+Summarises timestamp regularity per group against an expected grid — flags gaps, duplicates, and irregular spacing before forecasting. Signature `ts_validate_timestamps_summary_by(source, group_col, date_col, expected_timestamps)`.
 
 ## Diagnostics & validation (v0.7.0)
 
@@ -279,6 +287,14 @@ FROM ts_features_list()
 WHERE feature_name LIKE '%autocorr%';
 ```
 
+### `ts_features_config_template` — starter config
+
+Table function (no args) returning a template config row for feature extraction — a scaffold to edit down into a custom feature subset (feeds `ts_features_config_from_json` / `ts_features_config_from_csv` below).
+
+```sql
+SELECT * FROM ts_features_config_template();
+```
+
 ### Custom feature subsets
 
 Configure via JSON or CSV:
@@ -308,6 +324,7 @@ FROM sales GROUP BY id;
 - **`_agg` variants take `(date, value)` directly** — no `LIST()` wrapping. Wrapping in `LIST(...)` errors as "No function matches …".
 - **Seasonality strength thresholds**: `trend_strength` and `seasonality_strength` in `ts_stats` are ∈ [0, 1] — treat > 0.6 as strong, < 0.2 as weak. Use to gate model selection downstream.
 - **JSON extension is required** by a subset of quality / feature functions. Enable auto-load once per session: `SET autoinstall_known_extensions=1; SET autoload_known_extensions=1;`.
+- **`ts_r2(DOUBLE[] actual, DOUBLE[] predicted) → DOUBLE`** is a scalar **regression R² metric**, not an EDA statistic — it lives with the scalar metrics family in `anofox-forecast-backtest`. Use it under `GROUP BY` to score fit quality, e.g. `SELECT ts_r2([1.0,2,3,4], [1.1,2.0,2.9,4.2]);`.
 
 ## Canonical EDA pipeline
 
