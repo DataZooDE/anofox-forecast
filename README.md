@@ -11,6 +11,7 @@
   <img src="https://img.shields.io/badge/build-passing-brightgreen.svg" alt="Build Status">
   <img src="https://img.shields.io/badge/Tests-295%20Rust%20tests%20passed-brightgreen.svg" alt="Tests">
   <a href="https://github.com/DataZooDE/anofox-forecast/actions/workflows/WasmTest.yml"><img src="https://github.com/DataZooDE/anofox-forecast/actions/workflows/WasmTest.yml/badge.svg?branch=main" alt="WASM"></a>
+  <a href="#-claude-code-skills-ai-pair-programming"><img src="https://img.shields.io/badge/Claude_Code-AI_skills_plugin-8A2BE2.svg" alt="Claude Code AI skills plugin"></a>
 </p>
 
 <p align="center">
@@ -22,6 +23,10 @@
 > Please use the [issues page](https://github.com/DataZooDE/anofox-forecast/issues) to report bugs or request features.
 
 A time series forecasting extension for DuckDB with 36 models, statistical diagnostics, data preparation, and analytics — all in pure SQL.
+
+> **🤖 Built for AI pair-programming.** anofox-forecast ships an installable **[Claude Code plugin](#-claude-code-skills-ai-pair-programming)** — five skills that give your AI assistant verified, hallucination-free knowledge of the full SQL API. Describe the forecast in plain English; Claude writes correct `ts_forecast_by`, ensemble, backtest, and diagnostics queries.
+>
+> Install with `/plugin marketplace add DataZooDE/anofox-forecast` → `/plugin install anofox-forecast@anofox-forecast`.
 
 
 ## ✨ Key Features
@@ -73,12 +78,35 @@ A time series forecasting extension for DuckDB with 36 models, statistical diagn
 ## 📋 Table of Contents
 
 - [Key Features](#-key-features)
+- [Claude Code Skills (AI pair-programming)](#-claude-code-skills-ai-pair-programming)
 - [Installation](#installation)
 - [Quick Start on M5 Dataset](#-quick-start-on-m5-dataset)
 - [Multi-Language Support](#-multi-language-support)
 - [API Reference](#-api-reference)
 - [Development](#-development)
 - [License](#-license)
+
+
+## 🤖 Claude Code Skills (AI pair-programming)
+
+**Forecasting is easier when your AI assistant actually knows the API.** anofox-forecast ships an installable [Claude Code](https://claude.com/claude-code) plugin — five skills that give Claude deep, *source-verified* knowledge of every function, MAP/STRUCT option, and return column. Instead of guessing at signatures, Claude writes correct SQL from a plain-English request like *"forecast each store with an AutoETS/Theta ensemble and attach 90% conformal intervals"* or *"backtest AutoARIMA per SKU and give me MASE."*
+
+Install in any Claude Code session:
+
+```
+/plugin marketplace add DataZooDE/anofox-forecast
+/plugin install anofox-forecast@anofox-forecast
+```
+
+| Skill | Covers |
+|-------|--------|
+| `anofox-forecast-models` | 36 models + ensembles; `ts_forecast_by` / `ts_forecast_ensemble_by` / `ts_forecast_var_by` |
+| `anofox-forecast-backtest` | Cross-validation, metrics, conformal prediction intervals |
+| `anofox-forecast-eda` | Per-series stats, data quality, 117 features, stationarity/residual diagnostics |
+| `anofox-forecast-detection` | Seasonality, period, changepoint, peak detection |
+| `anofox-forecast-data-prep` | Gap filling, imputation, differencing, hierarchical keys |
+
+The skills live in [`plugins/anofox-forecast/`](plugins/anofox-forecast/) and stay in sync with the extension's SQL surface. For in-repo development, load them directly with `claude --plugin-dir ./plugins/anofox-forecast`.
 
 
 ## Attribution
@@ -112,24 +140,7 @@ GEN=ninja make release       # With Ninja (faster)
 # build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension
 ```
 
-### Claude Code Skills (AI pair-programming)
-
-Five Claude Code skills are bundled as an installable plugin, giving your AI assistant deep knowledge of the extension's SQL API — models, backtesting, EDA, detection, and data prep:
-
-```
-/plugin marketplace add DataZooDE/anofox-forecast
-/plugin install anofox-forecast@anofox-forecast
-```
-
-| Skill | Covers |
-|-------|--------|
-| `anofox-forecast-models` | 36 models + ensembles |
-| `anofox-forecast-backtest` | Cross-validation, metrics, conformal prediction intervals |
-| `anofox-forecast-eda` | Per-series stats, data quality, 117 features, stationarity/residual diagnostics |
-| `anofox-forecast-detection` | Seasonality, period, changepoint, peak detection |
-| `anofox-forecast-data-prep` | Gap filling, imputation, differencing, hierarchical keys |
-
-The skills live in `plugins/anofox-forecast/`.
+> **🤖 Using an AI assistant?** Install the [Claude Code skills plugin](#-claude-code-skills-ai-pair-programming) so it knows the full SQL API.
 
 ## 🚀 Quick Start on M5 Dataset
 
