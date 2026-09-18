@@ -18,10 +18,6 @@
   <sub>Technical Depth: A (93%) | Code Health: A- (90%) - calculated using <a href="https://github.com/paiml/paiml-mcp-agent-toolkit">PMAT</a></sub>
 </p>
 
-> [!IMPORTANT]
-> This extension is in early development, so bugs and breaking changes are expected.
-> Please use the [issues page](https://github.com/DataZooDE/anofox-forecast/issues) to report bugs or request features.
-
 A time series forecasting extension for DuckDB with 36 models, statistical diagnostics, data preparation, and analytics — all in pure SQL.
 
 > **🤖 Built for AI pair-programming.** anofox-forecast ships an installable **[Claude Code plugin](#-claude-code-skills-ai-pair-programming)** — five skills that give your AI assistant verified, hallucination-free knowledge of the full SQL API. Describe the forecast in plain English; Claude writes correct `ts_forecast_by`, ensemble, backtest, and diagnostics queries.
