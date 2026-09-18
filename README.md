@@ -120,6 +120,20 @@ INSTALL anofox_forecast FROM community;
 LOAD anofox_forecast;
 ```
 
+> To upgrade an already-installed copy, use `FORCE INSTALL anofox_forecast FROM community;` — a plain `INSTALL` is a no-op when a build is already cached locally.
+
+### DataZoo Repository (latest builds)
+
+For the freshest builds — ahead of the community-extensions cadence — install from DataZoo's own extension repository. These binaries are unsigned (independent of the DuckDB Foundation), so start DuckDB with the `-unsigned` flag:
+
+```sql
+-- launch with:  duckdb -unsigned
+INSTALL anofox_forecast FROM 'http://get.erpl.io';
+LOAD anofox_forecast;
+```
+
+(Use `FORCE INSTALL … FROM 'http://get.erpl.io';` to refresh an already-cached copy.)
+
 ### From Source
 
 ```bash
