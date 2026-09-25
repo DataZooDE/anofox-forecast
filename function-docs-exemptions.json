@@ -1,0 +1,5 @@
+[
+  {"match": "_*",
+   "kind": "internal_underscore",
+   "reason": "The _-prefixed natives behind the public ts_* surface. Implementation detail, not a callable API: anofox-evolve's vocabulary builder already skips them for the same reason, and every one has a documented public counterpart (e.g. _ts_forecast_native behind ts_forecast)."}
+]
