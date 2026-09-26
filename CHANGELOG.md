@@ -2,8 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+
+Releases from `2026.09.26` onward use CalVer (`vYYYY.MM.DD`, the date the binary set
+was cut), matching the rest of the anofox and erpl extensions. Earlier entries below
+use the semver numbering this project started with.
+
+## [2026.09.26] - 2026-09-26
+
+### Changed
+
+- Every public function now documents itself in `duckdb_functions()`: 285 of 285
+  eligible entries carry a description, a runnable example and categories. An agent
+  connected to a DuckDB database can only learn what an extension does by querying that
+  view — a README is not reachable from a SQL connection.
+- The 36 `_`-prefixed natives behind the public `ts_*` surface are declared as
+  documentation exemptions rather than given prose. They are implementation detail with
+  a documented public counterpart each (`_ts_forecast_native` behind `ts_forecast`), and
+  anofox-evolve's prompt-vocabulary builder already skips them for the same reason.
+- First release to use CalVer; see the note above.
 
 ## [0.4.14] - 2026-06-17
 
