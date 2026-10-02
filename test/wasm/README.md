@@ -48,13 +48,13 @@ strings build/wasm_eh/extension/anofox_forecast/anofox_forecast.duckdb_extension
   | grep '^v[0-9]'
 ```
 
-Expected output for the current artifact: `v1.5.5`
+Expected output for the current artifact: `v1.5.6`
 
 **Step 2 — confirm the npm package bundles that same engine version:**
 
 | `@duckdb/duckdb-wasm` npm version | Bundled DuckDB engine |
 |-----------------------------------|-----------------------|
-| 1.33.1-dev64.0                    | v1.5.5                |
+| 1.33.1-dev65.0                    | v1.5.6                |
 | 1.29.0                            | v1.1.3                |
 
 > Only the version in use is listed. Add a row when you bump the pin.

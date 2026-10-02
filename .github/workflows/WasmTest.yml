@@ -35,7 +35,7 @@ jobs:
       - name: Download built wasm_eh extension from the pipeline run
         uses: actions/download-artifact@v4
         with:
-          name: anofox_forecast-v1.5.5-extension-wasm_eh
+          name: anofox_forecast-v1.5.6-extension-wasm_eh
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: wasm-artifact
