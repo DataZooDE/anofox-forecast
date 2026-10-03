@@ -50,6 +50,7 @@ jobs:
             runner: macos-latest
           - arch: windows_amd64
             runner: windows-latest
+    timeout-minutes: 15
     runs-on: ${{ matrix.runner }}
     steps:
       # Skip at step level, not job level: a job-level `if:` is evaluated before
