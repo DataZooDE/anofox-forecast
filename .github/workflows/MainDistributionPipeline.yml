@@ -4,6 +4,8 @@
 name: Main Extension Distribution Pipeline
 on:
   push:
+    branches: [main]
+    tags: ['**']
   pull_request:
   workflow_dispatch:
 
@@ -106,6 +108,7 @@ jobs:
     name: WASM runtime test (Node harness, v1.5.6 wasm_eh)
     needs: duckdb-latest-build
     if: ${{ !cancelled() && needs.duckdb-latest-build.result == 'success' }}
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -134,6 +137,7 @@ jobs:
 
   build-and-test-rust:
     name: Rust Tests
+    timeout-minutes: 25
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

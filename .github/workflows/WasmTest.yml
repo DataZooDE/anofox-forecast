@@ -28,6 +28,7 @@ jobs:
     # wasm_eh artifact, so running anyway 404s the download and flips the WASM
     # badge red for an unrelated reason.
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
