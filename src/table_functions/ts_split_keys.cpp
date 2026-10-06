@@ -1,3 +1,4 @@
+#include "anofox_forecast_extension.hpp"
 #include "ts_split_keys.hpp"
 #include "ts_fill_gaps_native.hpp"
 #include "duckdb/common/exception.hpp"
@@ -158,7 +159,7 @@ static unique_ptr<FunctionData> TsSplitKeysBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsSplitKeysBindData>();
 
@@ -180,8 +181,8 @@ static unique_ptr<FunctionData> TsSplitKeysBind(
     }
 
     // Get column names from input
-    bind_data->date_col_name = input.input_table_names.size() > 1 ? input.input_table_names[1] : "date";
-    bind_data->value_col_name = input.input_table_names.size() > 2 ? input.input_table_names[2] : "value";
+    bind_data->date_col_name = input.input_table_names.size() > 1 ? ToColumnName(input.input_table_names[1]) : ToColumnName("date");
+    bind_data->value_col_name = input.input_table_names.size() > 2 ? ToColumnName(input.input_table_names[2]) : ToColumnName("value");
 
     // Detect date column type
     bind_data->date_logical_type = input.input_table_types[1];
@@ -210,7 +211,7 @@ static unique_ptr<FunctionData> TsSplitKeysBind(
     if (!bind_data->column_names.empty()) {
         bind_data->num_parts = bind_data->column_names.size();
         for (const auto& col_name : bind_data->column_names) {
-            names.push_back(col_name);
+            names.push_back(ToBindName(col_name));
             return_types.push_back(LogicalType::VARCHAR);
         }
         bind_data->schema_bound = true;
@@ -219,17 +220,17 @@ static unique_ptr<FunctionData> TsSplitKeysBind(
         // Use a reasonable default of 3 parts (can be extended dynamically)
         bind_data->num_parts = 3;
         for (idx_t i = 0; i < bind_data->num_parts; i++) {
-            names.push_back("id_part_" + std::to_string(i + 1));
+            names.push_back(ToBindName("id_part_" + std::to_string(i + 1)));
             return_types.push_back(LogicalType::VARCHAR);
         }
         bind_data->schema_bound = false;
     }
 
     // Add date and value columns
-    names.push_back(bind_data->date_col_name);
+    names.push_back(ToBindName(bind_data->date_col_name));
     return_types.push_back(bind_data->date_logical_type);
 
-    names.push_back(bind_data->value_col_name);
+    names.push_back(ToBindName(bind_data->value_col_name));
     return_types.push_back(bind_data->value_logical_type);
 
     return bind_data;
@@ -408,8 +409,8 @@ void RegisterTsSplitKeysFunction(ExtensionLoader &loader) {
                        TsSplitKeysInitLocal);
 
     // Named parameters
-    func.named_parameters["separator"] = LogicalType::VARCHAR;
-    func.named_parameters["columns"] = LogicalType::LIST(LogicalType::VARCHAR);
+    ANOFOX_ADD_NAMED_PARAM(func, "separator", LogicalType::VARCHAR);
+    ANOFOX_ADD_NAMED_PARAM(func, "columns", LogicalType::LIST(LogicalType::VARCHAR));
 
     // Set up as table-in-out function
     func.in_out_function = TsSplitKeysInOut;

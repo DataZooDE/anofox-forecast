@@ -152,8 +152,8 @@ static void ValidateParams(const Value &params_value, const string &method) {
     } else if (params_value.type().id() == LogicalTypeId::STRUCT) {
         auto &child_types = StructType::GetChildTypes(params_value.type());
         for (idx_t i = 0; i < child_types.size(); i++) {
-            if (valid_keys.find(child_types[i].first) == valid_keys.end()) {
-                unknown_keys.push_back(child_types[i].first);
+            if (valid_keys.find(ToColumnName(child_types[i].first)) == valid_keys.end()) {
+                unknown_keys.push_back(ToColumnName(child_types[i].first));
             }
         }
     }
@@ -174,15 +174,13 @@ static void ValidateParams(const Value &params_value, const string &method) {
 // Bind Function
 // ============================================================================
 
-static unique_ptr<FunctionData> TsForecastScalarBind(
-    ClientContext &context,
-    ScalarFunction &bound_function,
-    vector<unique_ptr<Expression>> &arguments) {
+ANOFOX_SCALAR_BIND_SIG(TsForecastScalarBind) {
+    ANOFOX_SCALAR_BIND_PREAMBLE
 
     auto bind_data = make_uniq<TsForecastScalarBindData>();
 
     // Detect date column type from LIST child type (argument 0 = dates)
-    auto &date_list_type = arguments[0]->return_type;
+    auto &date_list_type = ExprReturnType(*arguments[0]);
     if (date_list_type.id() == LogicalTypeId::LIST) {
         auto &child_type = ListType::GetChildType(date_list_type);
         switch (child_type.id()) {
@@ -217,7 +215,7 @@ static unique_ptr<FunctionData> TsForecastScalarBind(
     struct_children.push_back(make_pair("yhat_upper", LogicalType::DOUBLE));
     struct_children.push_back(make_pair("model_name", LogicalType::VARCHAR));
 
-    bound_function.return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
+    bound_function.SetReturnType(LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children))));
 
     return std::move(bind_data);
 }
@@ -309,7 +307,7 @@ static int64_t ComputeForecastDate(int64_t last_date, int64_t step,
 // ============================================================================
 
 static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vector &result) {
-    auto &bind_data = state.expr.Cast<BoundFunctionExpression>().bind_info->Cast<TsForecastScalarBindData>();
+    auto &bind_data = ANOFOX_BIND_INFO(state.expr.Cast<BoundFunctionExpression>())->Cast<TsForecastScalarBindData>();
     idx_t count = args.size();
 
     auto &date_list_vec = args.data[0];   // LIST(date)
@@ -586,7 +584,7 @@ void RegisterTsForecastScalarFunction(ExtensionLoader &loader) {
         TsForecastScalarExecute,
         TsForecastScalarBind);
 
-    func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    func.SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
 
     loader.RegisterFunction(func);
 }

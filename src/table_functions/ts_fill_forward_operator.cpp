@@ -51,7 +51,7 @@ static unique_ptr<FunctionData> TsFillForwardOperatorBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsFillForwardOperatorBindData>();
 
@@ -69,13 +69,13 @@ static unique_ptr<FunctionData> TsFillForwardOperatorBind(
     bind_data->frequency_seconds = 86400; // Default to 1 day
 
     // Define output columns to match the source table + filled rows
-    names.push_back(bind_data->group_col);
+    names.push_back(ToBindName(bind_data->group_col));
     return_types.push_back(LogicalType(LogicalTypeId::VARCHAR));
 
-    names.push_back(bind_data->date_col);
+    names.push_back(ToBindName(bind_data->date_col));
     return_types.push_back(LogicalType(LogicalTypeId::TIMESTAMP));
 
-    names.push_back(bind_data->value_col);
+    names.push_back(ToBindName(bind_data->value_col));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
 
     return bind_data;
@@ -135,7 +135,7 @@ static unique_ptr<GlobalTableFunctionState> TsFillForwardOperatorInitGlobal(
     );
 
     // Execute the query
-    global_state->query_result = context.Query(query, false);
+    global_state->query_result = context.Query(query, AnofoxQueryParams(false));
 
     return global_state;
 }

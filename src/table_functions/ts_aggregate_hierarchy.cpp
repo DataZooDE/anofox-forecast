@@ -1,3 +1,4 @@
+#include "anofox_forecast_extension.hpp"
 #include "ts_aggregate_hierarchy.hpp"
 #include "ts_fill_gaps_native.hpp"
 #include "duckdb/common/exception.hpp"
@@ -157,7 +158,7 @@ static unique_ptr<FunctionData> TsAggregateHierarchyBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsAggregateHierarchyBindData>();
 
@@ -177,13 +178,13 @@ static unique_ptr<FunctionData> TsAggregateHierarchyBind(
     }
 
     // Column layout: date_col, value_col, id_col1, id_col2, ...
-    bind_data->date_col_name = input.input_table_names.size() > 0 ? input.input_table_names[0] : "date";
-    bind_data->value_col_name = input.input_table_names.size() > 1 ? input.input_table_names[1] : "value";
+    bind_data->date_col_name = input.input_table_names.size() > 0 ? ToColumnName(input.input_table_names[0]) : ToColumnName("date");
+    bind_data->value_col_name = input.input_table_names.size() > 1 ? ToColumnName(input.input_table_names[1]) : ToColumnName("value");
     bind_data->num_id_cols = input.input_table_types.size() - 2;
 
     for (idx_t i = 2; i < input.input_table_types.size(); i++) {
         bind_data->id_col_names.push_back(
-            i < input.input_table_names.size() ? input.input_table_names[i] : "id_" + std::to_string(i - 1)
+            i < input.input_table_names.size() ? ToColumnName(input.input_table_names[i]) : ToColumnName("id_" + std::to_string(i - 1))
         );
     }
 
@@ -211,10 +212,10 @@ static unique_ptr<FunctionData> TsAggregateHierarchyBind(
     names.push_back("unique_id");
     return_types.push_back(LogicalType::VARCHAR);
 
-    names.push_back(bind_data->date_col_name);
+    names.push_back(ToBindName(bind_data->date_col_name));
     return_types.push_back(bind_data->date_logical_type);
 
-    names.push_back(bind_data->value_col_name);
+    names.push_back(ToBindName(bind_data->value_col_name));
     return_types.push_back(LogicalType::DOUBLE);
 
     return bind_data;

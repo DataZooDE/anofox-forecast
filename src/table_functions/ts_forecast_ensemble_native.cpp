@@ -80,15 +80,14 @@ struct TsForecastEnsembleNativeBindData : public FunctionData {
 // Bind Function
 // ============================================================================
 
-static unique_ptr<FunctionData> TsForecastEnsembleNativeBind(
-    ClientContext &context,
-    ScalarFunction &bound_function,
-    vector<unique_ptr<Expression>> &arguments) {
+ANOFOX_SCALAR_BIND_SIG(TsForecastEnsembleNativeBind) {
+    ANOFOX_SCALAR_BIND_PREAMBLE
+    (void)context;
 
     auto bind_data = make_uniq<TsForecastEnsembleNativeBindData>();
 
     // Detect date column type from LIST child type (argument 0 = dates)
-    auto &date_list_type = arguments[0]->return_type;
+    auto &date_list_type = ExprReturnType(*arguments[0]);
     if (date_list_type.id() == LogicalTypeId::LIST) {
         auto &child_type = ListType::GetChildType(date_list_type);
         switch (child_type.id()) {
@@ -114,7 +113,7 @@ static unique_ptr<FunctionData> TsForecastEnsembleNativeBind(
     // Extract members LIST(VARCHAR) from argument 2 at bind time if it is a constant.
     // Runtime extraction is done per-row in Execute.
     // If it is a constant, pre-validate here for early error reporting.
-    if (arguments[2]->return_type.id() == LogicalTypeId::LIST) {
+    if (ExprReturnType(*arguments[2]).id() == LogicalTypeId::LIST) {
         // Members are extracted per-row at execute time; bind-time validation
         // for constant member lists happens via the constant-folding path.
         // No early extraction needed here — runtime extraction is reliable.
@@ -134,7 +133,7 @@ static unique_ptr<FunctionData> TsForecastEnsembleNativeBind(
     struct_children.push_back(make_pair("yhat_upper", LogicalType::DOUBLE));
     struct_children.push_back(make_pair("model_name", LogicalType::VARCHAR));
 
-    bound_function.return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
+    bound_function.SetReturnType(LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children))));
     return std::move(bind_data);
 }
 
@@ -143,7 +142,7 @@ static unique_ptr<FunctionData> TsForecastEnsembleNativeBind(
 // ============================================================================
 
 static void TsForecastEnsembleNativeExecute(DataChunk &args, ExpressionState &state, Vector &result) {
-    auto &bind_data = state.expr.Cast<BoundFunctionExpression>().bind_info->Cast<TsForecastEnsembleNativeBindData>();
+    auto &bind_data = ANOFOX_BIND_INFO(state.expr.Cast<BoundFunctionExpression>())->Cast<TsForecastEnsembleNativeBindData>();
     idx_t count = args.size();
 
     auto &date_list_vec   = args.data[0];  // LIST(date)
@@ -451,7 +450,7 @@ void RegisterTsForecastEnsembleNativeFunction(ExtensionLoader &loader) {
         TsForecastEnsembleNativeExecute,
         TsForecastEnsembleNativeBind);
 
-    func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    func.SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
 
     loader.RegisterFunction(func);
 }

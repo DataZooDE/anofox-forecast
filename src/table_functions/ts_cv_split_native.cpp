@@ -1,3 +1,4 @@
+#include "anofox_forecast_extension.hpp"
 #include "ts_cv_split_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For ParseFrequencyToSeconds, etc.
 #include "duckdb/common/exception.hpp"
@@ -191,7 +192,7 @@ static unique_ptr<FunctionData> TsCvSplitNativeBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsCvSplitNativeBindData>();
 

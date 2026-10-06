@@ -181,7 +181,7 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
     // IMPORTANT: Get fresh references after each operation that might reallocate
     {
         auto &children_init = StructVector::GetEntries(result);
-        auto &periods_list_init = *children_init[0];
+        auto &periods_list_init = children_init[0];
 
         // Reserve all space at once (reserve at least 1 to ensure valid list structure)
         ListVector::Reserve(periods_list_init, total_periods > 0 ? total_periods : 1);
@@ -190,10 +190,10 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
 
     // Get fresh references after Reserve (Reserve may have reallocated memory)
     auto &children = StructVector::GetEntries(result);
-    auto &periods_list = *children[0];
+    auto &periods_list = children[0];
 
     // Get list_data pointer for the list entries
-    auto list_data = FlatVector::GetData<list_entry_t>(periods_list);
+    auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(periods_list);
 
     // Only get struct child pointers if we have periods to copy
     double *period_data = nullptr;
@@ -209,19 +209,19 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
     if (total_periods > 0) {
         auto &list_child = ListVector::GetEntry(periods_list);
         auto &struct_entries = StructVector::GetEntries(list_child);
-        period_data = FlatVector::GetData<double>(*struct_entries[0]);
-        confidence_data = FlatVector::GetData<double>(*struct_entries[1]);
-        strength_data = FlatVector::GetData<double>(*struct_entries[2]);
-        amplitude_data = FlatVector::GetData<double>(*struct_entries[3]);
-        phase_data = FlatVector::GetData<double>(*struct_entries[4]);
-        iteration_data = FlatVector::GetData<int64_t>(*struct_entries[5]);
-        matches_expected_data = FlatVector::GetData<bool>(*struct_entries[6]);
-        matched_expected_data = FlatVector::GetData<double>(*struct_entries[7]);
-        match_deviation_data = FlatVector::GetData<double>(*struct_entries[8]);
+        period_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[0]);
+        confidence_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[1]);
+        strength_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[2]);
+        amplitude_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[3]);
+        phase_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[4]);
+        iteration_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(struct_entries[5]);
+        matches_expected_data = ANOFOX_FLATVECTOR_WRITE<bool>(struct_entries[6]);
+        matched_expected_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[7]);
+        match_deviation_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[8]);
     }
 
-    auto n_periods_data = FlatVector::GetData<int64_t>(*children[1]);
-    auto primary_period_data = FlatVector::GetData<double>(*children[2]);
+    auto n_periods_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(children[1]);
+    auto primary_period_data = ANOFOX_FLATVECTOR_WRITE<double>(children[2]);
 
     size_t current_offset = 0;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
@@ -257,7 +257,7 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
         // Set scalar fields
         n_periods_data[row_idx] = res.n_periods;
         primary_period_data[row_idx] = res.primary_period;
-        FlatVector::GetData<string_t>(*children[3])[row_idx] = StringVector::AddString(*children[3], res.method);
+        ANOFOX_FLATVECTOR_WRITE<string_t>(children[3])[row_idx] = StringVector::AddString(children[3], res.method);
 
         // Free FFI result
         anofox_free_flat_multi_period_result(&row_results[row_idx].result);
@@ -321,7 +321,7 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
     // IMPORTANT: Get fresh references after each operation that might reallocate
     {
         auto &children_init = StructVector::GetEntries(result);
-        auto &periods_list_init = *children_init[0];
+        auto &periods_list_init = children_init[0];
 
         // Reserve all space at once (reserve at least 1 to ensure valid list structure)
         ListVector::Reserve(periods_list_init, total_periods > 0 ? total_periods : 1);
@@ -330,10 +330,10 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
 
     // Get fresh references after Reserve (Reserve may have reallocated memory)
     auto &children = StructVector::GetEntries(result);
-    auto &periods_list = *children[0];
+    auto &periods_list = children[0];
 
     // Get list_data pointer for the list entries
-    auto list_data = FlatVector::GetData<list_entry_t>(periods_list);
+    auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(periods_list);
 
     // Only get struct child pointers if we have periods to copy
     double *period_data = nullptr;
@@ -349,19 +349,19 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
     if (total_periods > 0) {
         auto &list_child = ListVector::GetEntry(periods_list);
         auto &struct_entries = StructVector::GetEntries(list_child);
-        period_data = FlatVector::GetData<double>(*struct_entries[0]);
-        confidence_data = FlatVector::GetData<double>(*struct_entries[1]);
-        strength_data = FlatVector::GetData<double>(*struct_entries[2]);
-        amplitude_data = FlatVector::GetData<double>(*struct_entries[3]);
-        phase_data = FlatVector::GetData<double>(*struct_entries[4]);
-        iteration_data = FlatVector::GetData<int64_t>(*struct_entries[5]);
-        matches_expected_data = FlatVector::GetData<bool>(*struct_entries[6]);
-        matched_expected_data = FlatVector::GetData<double>(*struct_entries[7]);
-        match_deviation_data = FlatVector::GetData<double>(*struct_entries[8]);
+        period_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[0]);
+        confidence_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[1]);
+        strength_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[2]);
+        amplitude_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[3]);
+        phase_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[4]);
+        iteration_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(struct_entries[5]);
+        matches_expected_data = ANOFOX_FLATVECTOR_WRITE<bool>(struct_entries[6]);
+        matched_expected_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[7]);
+        match_deviation_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[8]);
     }
 
-    auto n_periods_data = FlatVector::GetData<int64_t>(*children[1]);
-    auto primary_period_data = FlatVector::GetData<double>(*children[2]);
+    auto n_periods_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(children[1]);
+    auto primary_period_data = ANOFOX_FLATVECTOR_WRITE<double>(children[2]);
 
     size_t current_offset = 0;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
@@ -397,7 +397,7 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
         // Set scalar fields
         n_periods_data[row_idx] = res.n_periods;
         primary_period_data[row_idx] = res.primary_period;
-        FlatVector::GetData<string_t>(*children[3])[row_idx] = StringVector::AddString(*children[3], res.method);
+        ANOFOX_FLATVECTOR_WRITE<string_t>(children[3])[row_idx] = StringVector::AddString(children[3], res.method);
 
         // Free FFI result
         anofox_free_flat_multi_period_result(&row_results[row_idx].result);
@@ -415,7 +415,7 @@ void RegisterTsDetectPeriodsFunction(ExtensionLoader &loader) {
         GetMultiPeriodResultType(),
         TsDetectPeriodsSimpleFunction
     );
-    simple_func.stability = FunctionStability::VOLATILE;
+    simple_func.SetStability(FunctionStability::VOLATILE);
     ts_periods_set.AddFunction(simple_func);
 
     // Two-argument version (values, method)
@@ -424,7 +424,7 @@ void RegisterTsDetectPeriodsFunction(ExtensionLoader &loader) {
         GetMultiPeriodResultType(),
         TsDetectPeriodsFunction
     );
-    method_func.stability = FunctionStability::VOLATILE;
+    method_func.SetStability(FunctionStability::VOLATILE);
     ts_periods_set.AddFunction(method_func);
 
     // Three-argument version (values, method, max_period)
@@ -433,7 +433,7 @@ void RegisterTsDetectPeriodsFunction(ExtensionLoader &loader) {
         GetMultiPeriodResultType(),
         TsDetectPeriodsFunction
     );
-    full_func.stability = FunctionStability::VOLATILE;
+    full_func.SetStability(FunctionStability::VOLATILE);
     ts_periods_set.AddFunction(full_func);
 
     // Four-argument version (values, method, max_period, min_confidence)
@@ -442,7 +442,7 @@ void RegisterTsDetectPeriodsFunction(ExtensionLoader &loader) {
         GetMultiPeriodResultType(),
         TsDetectPeriodsFunction
     );
-    full_func_conf.stability = FunctionStability::VOLATILE;
+    full_func_conf.SetStability(FunctionStability::VOLATILE);
     ts_periods_set.AddFunction(full_func_conf);
 
     // Five-argument version (values, method, max_period, min_confidence, expected_periods)
@@ -451,7 +451,7 @@ void RegisterTsDetectPeriodsFunction(ExtensionLoader &loader) {
         GetMultiPeriodResultType(),
         TsDetectPeriodsFunction
     );
-    func5.stability = FunctionStability::VOLATILE;
+    func5.SetStability(FunctionStability::VOLATILE);
     ts_periods_set.AddFunction(func5);
 
     // Six-argument version (values, method, max_period, min_confidence, expected_periods, tolerance)
@@ -460,7 +460,7 @@ void RegisterTsDetectPeriodsFunction(ExtensionLoader &loader) {
         GetMultiPeriodResultType(),
         TsDetectPeriodsFunction
     );
-    func6.stability = FunctionStability::VOLATILE;
+    func6.SetStability(FunctionStability::VOLATILE);
     ts_periods_set.AddFunction(func6);
 
     // Mark as internal to hide from duckdb_functions() and deprioritize in autocomplete
@@ -516,11 +516,11 @@ static void TsEstimatePeriodFftFunction(DataChunk &args, ExpressionState &state,
         }
 
         auto &children = StructVector::GetEntries(result);
-        FlatVector::GetData<double>(*children[0])[row_idx] = period_result.period;
-        FlatVector::GetData<double>(*children[1])[row_idx] = period_result.frequency;
-        FlatVector::GetData<double>(*children[2])[row_idx] = period_result.power;
-        FlatVector::GetData<double>(*children[3])[row_idx] = period_result.confidence;
-        FlatVector::GetData<string_t>(*children[4])[row_idx] = StringVector::AddString(*children[4], period_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(children[0])[row_idx] = period_result.period;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[1])[row_idx] = period_result.frequency;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = period_result.power;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[3])[row_idx] = period_result.confidence;
+        ANOFOX_FLATVECTOR_WRITE<string_t>(children[4])[row_idx] = StringVector::AddString(children[4], period_result.method);
     }
 }
 
@@ -532,7 +532,7 @@ void RegisterTsEstimatePeriodFftFunction(ExtensionLoader &loader) {
         TsEstimatePeriodFftFunction
     );
     // Disable constant folding for this function - struct returns don't work well with it
-    fft_func.stability = FunctionStability::VOLATILE;
+    fft_func.SetStability(FunctionStability::VOLATILE);
     ts_period_fft_set.AddFunction(fft_func);
     {
         CreateScalarFunctionInfo info(ts_period_fft_set);
@@ -591,11 +591,11 @@ static void TsEstimatePeriodAcfFunction(DataChunk &args, ExpressionState &state,
         }
 
         auto &children = StructVector::GetEntries(result);
-        FlatVector::GetData<double>(*children[0])[row_idx] = period_result.period;
-        FlatVector::GetData<double>(*children[1])[row_idx] = period_result.frequency;
-        FlatVector::GetData<double>(*children[2])[row_idx] = period_result.power;
-        FlatVector::GetData<double>(*children[3])[row_idx] = period_result.confidence;
-        FlatVector::GetData<string_t>(*children[4])[row_idx] = StringVector::AddString(*children[4], period_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(children[0])[row_idx] = period_result.period;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[1])[row_idx] = period_result.frequency;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = period_result.power;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[3])[row_idx] = period_result.confidence;
+        ANOFOX_FLATVECTOR_WRITE<string_t>(children[4])[row_idx] = StringVector::AddString(children[4], period_result.method);
     }
 }
 
@@ -607,7 +607,7 @@ void RegisterTsEstimatePeriodAcfFunction(ExtensionLoader &loader) {
         GetSinglePeriodResultType(),
         TsEstimatePeriodAcfFunction
     );
-    acf_func1.stability = FunctionStability::VOLATILE;
+    acf_func1.SetStability(FunctionStability::VOLATILE);
     ts_period_acf_set.AddFunction(acf_func1);
     // Two-argument version with max_lag
     auto acf_func2 = ScalarFunction(
@@ -615,7 +615,7 @@ void RegisterTsEstimatePeriodAcfFunction(ExtensionLoader &loader) {
         GetSinglePeriodResultType(),
         TsEstimatePeriodAcfFunction
     );
-    acf_func2.stability = FunctionStability::VOLATILE;
+    acf_func2.SetStability(FunctionStability::VOLATILE);
     ts_period_acf_set.AddFunction(acf_func2);
     {
         CreateScalarFunctionInfo info(ts_period_acf_set);
@@ -703,7 +703,7 @@ static void TsDetectMultiplePeriodsFunction(DataChunk &args, ExpressionState &st
     // IMPORTANT: Get fresh references after each operation that might reallocate
     {
         auto &children_init = StructVector::GetEntries(result);
-        auto &periods_list_init = *children_init[0];
+        auto &periods_list_init = children_init[0];
 
         // Reserve all space at once (reserve at least 1 to ensure valid list structure)
         ListVector::Reserve(periods_list_init, total_periods > 0 ? total_periods : 1);
@@ -712,10 +712,10 @@ static void TsDetectMultiplePeriodsFunction(DataChunk &args, ExpressionState &st
 
     // Get fresh references after Reserve (Reserve may have reallocated memory)
     auto &children = StructVector::GetEntries(result);
-    auto &periods_list = *children[0];
+    auto &periods_list = children[0];
 
     // Get list_data pointer for the list entries
-    auto list_data = FlatVector::GetData<list_entry_t>(periods_list);
+    auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(periods_list);
 
     // Only get struct child pointers if we have periods to copy
     double *period_data = nullptr;
@@ -731,19 +731,19 @@ static void TsDetectMultiplePeriodsFunction(DataChunk &args, ExpressionState &st
     if (total_periods > 0) {
         auto &list_child = ListVector::GetEntry(periods_list);
         auto &struct_entries = StructVector::GetEntries(list_child);
-        period_data = FlatVector::GetData<double>(*struct_entries[0]);
-        confidence_data = FlatVector::GetData<double>(*struct_entries[1]);
-        strength_data = FlatVector::GetData<double>(*struct_entries[2]);
-        amplitude_data = FlatVector::GetData<double>(*struct_entries[3]);
-        phase_data = FlatVector::GetData<double>(*struct_entries[4]);
-        iteration_data = FlatVector::GetData<int64_t>(*struct_entries[5]);
-        matches_expected_data = FlatVector::GetData<bool>(*struct_entries[6]);
-        matched_expected_data = FlatVector::GetData<double>(*struct_entries[7]);
-        match_deviation_data = FlatVector::GetData<double>(*struct_entries[8]);
+        period_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[0]);
+        confidence_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[1]);
+        strength_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[2]);
+        amplitude_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[3]);
+        phase_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[4]);
+        iteration_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(struct_entries[5]);
+        matches_expected_data = ANOFOX_FLATVECTOR_WRITE<bool>(struct_entries[6]);
+        matched_expected_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[7]);
+        match_deviation_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[8]);
     }
 
-    auto n_periods_data = FlatVector::GetData<int64_t>(*children[1]);
-    auto primary_period_data = FlatVector::GetData<double>(*children[2]);
+    auto n_periods_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(children[1]);
+    auto primary_period_data = ANOFOX_FLATVECTOR_WRITE<double>(children[2]);
 
     size_t current_offset = 0;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
@@ -779,7 +779,7 @@ static void TsDetectMultiplePeriodsFunction(DataChunk &args, ExpressionState &st
         // Set scalar fields
         n_periods_data[row_idx] = res.n_periods;
         primary_period_data[row_idx] = res.primary_period;
-        FlatVector::GetData<string_t>(*children[3])[row_idx] = StringVector::AddString(*children[3], res.method);
+        ANOFOX_FLATVECTOR_WRITE<string_t>(children[3])[row_idx] = StringVector::AddString(children[3], res.method);
 
         // Free FFI result
         anofox_free_flat_multi_period_result(&row_results[row_idx].result);
@@ -794,7 +794,7 @@ void RegisterTsDetectMultiplePeriodsFunction(ExtensionLoader &loader) {
         GetMultiPeriodResultType(),
         TsDetectMultiplePeriodsFunction
     );
-    func1.stability = FunctionStability::VOLATILE;
+    func1.SetStability(FunctionStability::VOLATILE);
     ts_multi_periods_set.AddFunction(func1);
     // With max_periods
     auto func2 = ScalarFunction(
@@ -802,7 +802,7 @@ void RegisterTsDetectMultiplePeriodsFunction(ExtensionLoader &loader) {
         GetMultiPeriodResultType(),
         TsDetectMultiplePeriodsFunction
     );
-    func2.stability = FunctionStability::VOLATILE;
+    func2.SetStability(FunctionStability::VOLATILE);
     ts_multi_periods_set.AddFunction(func2);
     // With max_periods, min_confidence
     auto func3 = ScalarFunction(
@@ -810,7 +810,7 @@ void RegisterTsDetectMultiplePeriodsFunction(ExtensionLoader &loader) {
         GetMultiPeriodResultType(),
         TsDetectMultiplePeriodsFunction
     );
-    func3.stability = FunctionStability::VOLATILE;
+    func3.SetStability(FunctionStability::VOLATILE);
     ts_multi_periods_set.AddFunction(func3);
     // With max_periods, min_confidence, min_strength
     auto func4 = ScalarFunction(
@@ -818,7 +818,7 @@ void RegisterTsDetectMultiplePeriodsFunction(ExtensionLoader &loader) {
         GetMultiPeriodResultType(),
         TsDetectMultiplePeriodsFunction
     );
-    func4.stability = FunctionStability::VOLATILE;
+    func4.SetStability(FunctionStability::VOLATILE);
     ts_multi_periods_set.AddFunction(func4);
     {
         CreateScalarFunctionInfo info(ts_multi_periods_set);
@@ -887,11 +887,11 @@ static void TsAutoperiodFunction(DataChunk &args, ExpressionState &state, Vector
         }
 
         auto &children = StructVector::GetEntries(result);
-        FlatVector::GetData<double>(*children[0])[row_idx] = ap_result.period;
-        FlatVector::GetData<double>(*children[1])[row_idx] = ap_result.fft_confidence;
-        FlatVector::GetData<double>(*children[2])[row_idx] = ap_result.acf_validation;
-        FlatVector::GetData<bool>(*children[3])[row_idx] = ap_result.detected;
-        FlatVector::GetData<string_t>(*children[4])[row_idx] = StringVector::AddString(*children[4], ap_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(children[0])[row_idx] = ap_result.period;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[1])[row_idx] = ap_result.fft_confidence;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = ap_result.acf_validation;
+        ANOFOX_FLATVECTOR_WRITE<bool>(children[3])[row_idx] = ap_result.detected;
+        ANOFOX_FLATVECTOR_WRITE<string_t>(children[4])[row_idx] = StringVector::AddString(children[4], ap_result.method);
     }
 }
 
@@ -903,7 +903,7 @@ void RegisterTsAutoperiodFunction(ExtensionLoader &loader) {
         GetAutoperiodResultType(),
         TsAutoperiodFunction
     );
-    func1.stability = FunctionStability::VOLATILE;
+    func1.SetStability(FunctionStability::VOLATILE);
     ts_autoperiod_set.AddFunction(func1);
     // With explicit acf_threshold
     auto func2 = ScalarFunction(
@@ -911,7 +911,7 @@ void RegisterTsAutoperiodFunction(ExtensionLoader &loader) {
         GetAutoperiodResultType(),
         TsAutoperiodFunction
     );
-    func2.stability = FunctionStability::VOLATILE;
+    func2.SetStability(FunctionStability::VOLATILE);
     ts_autoperiod_set.AddFunction(func2);
     {
         CreateScalarFunctionInfo info(ts_autoperiod_set);
@@ -970,11 +970,11 @@ static void TsCfdAutoperiodFunction(DataChunk &args, ExpressionState &state, Vec
         }
 
         auto &children = StructVector::GetEntries(result);
-        FlatVector::GetData<double>(*children[0])[row_idx] = ap_result.period;
-        FlatVector::GetData<double>(*children[1])[row_idx] = ap_result.fft_confidence;
-        FlatVector::GetData<double>(*children[2])[row_idx] = ap_result.acf_validation;
-        FlatVector::GetData<bool>(*children[3])[row_idx] = ap_result.detected;
-        FlatVector::GetData<string_t>(*children[4])[row_idx] = StringVector::AddString(*children[4], ap_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(children[0])[row_idx] = ap_result.period;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[1])[row_idx] = ap_result.fft_confidence;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = ap_result.acf_validation;
+        ANOFOX_FLATVECTOR_WRITE<bool>(children[3])[row_idx] = ap_result.detected;
+        ANOFOX_FLATVECTOR_WRITE<string_t>(children[4])[row_idx] = StringVector::AddString(children[4], ap_result.method);
     }
 }
 
@@ -986,7 +986,7 @@ void RegisterTsCfdAutoperiodFunction(ExtensionLoader &loader) {
         GetAutoperiodResultType(),
         TsCfdAutoperiodFunction
     );
-    func1.stability = FunctionStability::VOLATILE;
+    func1.SetStability(FunctionStability::VOLATILE);
     ts_cfd_autoperiod_set.AddFunction(func1);
     // With explicit acf_threshold
     auto func2 = ScalarFunction(
@@ -994,7 +994,7 @@ void RegisterTsCfdAutoperiodFunction(ExtensionLoader &loader) {
         GetAutoperiodResultType(),
         TsCfdAutoperiodFunction
     );
-    func2.stability = FunctionStability::VOLATILE;
+    func2.SetStability(FunctionStability::VOLATILE);
     ts_cfd_autoperiod_set.AddFunction(func2);
     {
         CreateScalarFunctionInfo info(ts_cfd_autoperiod_set);
@@ -1078,11 +1078,11 @@ static void TsLombScargleFunction(DataChunk &args, ExpressionState &state, Vecto
         }
 
         auto &children = StructVector::GetEntries(result);
-        FlatVector::GetData<double>(*children[0])[row_idx] = ls_result.period;
-        FlatVector::GetData<double>(*children[1])[row_idx] = ls_result.frequency;
-        FlatVector::GetData<double>(*children[2])[row_idx] = ls_result.power;
-        FlatVector::GetData<double>(*children[3])[row_idx] = ls_result.false_alarm_prob;
-        FlatVector::GetData<string_t>(*children[4])[row_idx] = StringVector::AddString(*children[4], ls_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(children[0])[row_idx] = ls_result.period;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[1])[row_idx] = ls_result.frequency;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = ls_result.power;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[3])[row_idx] = ls_result.false_alarm_prob;
+        ANOFOX_FLATVECTOR_WRITE<string_t>(children[4])[row_idx] = StringVector::AddString(children[4], ls_result.method);
     }
 }
 
@@ -1094,7 +1094,7 @@ void RegisterTsLombScargleFunction(ExtensionLoader &loader) {
         GetLombScargleResultType(),
         TsLombScargleFunction
     );
-    func1.stability = FunctionStability::VOLATILE;
+    func1.SetStability(FunctionStability::VOLATILE);
     ts_lomb_scargle_set.AddFunction(func1);
     // With min_period
     auto func2 = ScalarFunction(
@@ -1102,7 +1102,7 @@ void RegisterTsLombScargleFunction(ExtensionLoader &loader) {
         GetLombScargleResultType(),
         TsLombScargleFunction
     );
-    func2.stability = FunctionStability::VOLATILE;
+    func2.SetStability(FunctionStability::VOLATILE);
     ts_lomb_scargle_set.AddFunction(func2);
     // With min_period and max_period
     auto func3 = ScalarFunction(
@@ -1110,7 +1110,7 @@ void RegisterTsLombScargleFunction(ExtensionLoader &loader) {
         GetLombScargleResultType(),
         TsLombScargleFunction
     );
-    func3.stability = FunctionStability::VOLATILE;
+    func3.SetStability(FunctionStability::VOLATILE);
     ts_lomb_scargle_set.AddFunction(func3);
     // With min_period, max_period, and n_frequencies
     auto func4 = ScalarFunction(
@@ -1118,7 +1118,7 @@ void RegisterTsLombScargleFunction(ExtensionLoader &loader) {
         GetLombScargleResultType(),
         TsLombScargleFunction
     );
-    func4.stability = FunctionStability::VOLATILE;
+    func4.SetStability(FunctionStability::VOLATILE);
     ts_lomb_scargle_set.AddFunction(func4);
     {
         CreateScalarFunctionInfo info(ts_lomb_scargle_set);
@@ -1202,12 +1202,12 @@ static void TsAicPeriodFunction(DataChunk &args, ExpressionState &state, Vector 
         }
 
         auto &children = StructVector::GetEntries(result);
-        FlatVector::GetData<double>(*children[0])[row_idx] = aic_result.period;
-        FlatVector::GetData<double>(*children[1])[row_idx] = aic_result.aic;
-        FlatVector::GetData<double>(*children[2])[row_idx] = aic_result.bic;
-        FlatVector::GetData<double>(*children[3])[row_idx] = aic_result.rss;
-        FlatVector::GetData<double>(*children[4])[row_idx] = aic_result.r_squared;
-        FlatVector::GetData<string_t>(*children[5])[row_idx] = StringVector::AddString(*children[5], aic_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(children[0])[row_idx] = aic_result.period;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[1])[row_idx] = aic_result.aic;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = aic_result.bic;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[3])[row_idx] = aic_result.rss;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[4])[row_idx] = aic_result.r_squared;
+        ANOFOX_FLATVECTOR_WRITE<string_t>(children[5])[row_idx] = StringVector::AddString(children[5], aic_result.method);
     }
 }
 
@@ -1218,28 +1218,28 @@ void RegisterTsAicPeriodFunction(ExtensionLoader &loader) {
         GetAicPeriodResultType(),
         TsAicPeriodFunction
     );
-    func1.stability = FunctionStability::VOLATILE;
+    func1.SetStability(FunctionStability::VOLATILE);
     ts_aic_period_set.AddFunction(func1);
     auto func2 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetAicPeriodResultType(),
         TsAicPeriodFunction
     );
-    func2.stability = FunctionStability::VOLATILE;
+    func2.SetStability(FunctionStability::VOLATILE);
     ts_aic_period_set.AddFunction(func2);
     auto func3 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetAicPeriodResultType(),
         TsAicPeriodFunction
     );
-    func3.stability = FunctionStability::VOLATILE;
+    func3.SetStability(FunctionStability::VOLATILE);
     ts_aic_period_set.AddFunction(func3);
     auto func4 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::BIGINT)},
         GetAicPeriodResultType(),
         TsAicPeriodFunction
     );
-    func4.stability = FunctionStability::VOLATILE;
+    func4.SetStability(FunctionStability::VOLATILE);
     ts_aic_period_set.AddFunction(func4);
     {
         CreateScalarFunctionInfo info(ts_aic_period_set);
@@ -1316,10 +1316,10 @@ static void TsSsaPeriodFunction(DataChunk &args, ExpressionState &state, Vector 
         }
 
         auto &children = StructVector::GetEntries(result);
-        FlatVector::GetData<double>(*children[0])[row_idx] = ssa_result.period;
-        FlatVector::GetData<double>(*children[1])[row_idx] = ssa_result.variance_explained;
-        FlatVector::GetData<int64_t>(*children[2])[row_idx] = static_cast<int64_t>(ssa_result.n_eigenvalues);
-        FlatVector::GetData<string_t>(*children[3])[row_idx] = StringVector::AddString(*children[3], ssa_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(children[0])[row_idx] = ssa_result.period;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[1])[row_idx] = ssa_result.variance_explained;
+        ANOFOX_FLATVECTOR_WRITE<int64_t>(children[2])[row_idx] = static_cast<int64_t>(ssa_result.n_eigenvalues);
+        ANOFOX_FLATVECTOR_WRITE<string_t>(children[3])[row_idx] = StringVector::AddString(children[3], ssa_result.method);
     }
 }
 
@@ -1330,21 +1330,21 @@ void RegisterTsSsaPeriodFunction(ExtensionLoader &loader) {
         GetSsaPeriodResultType(),
         TsSsaPeriodFunction
     );
-    func1.stability = FunctionStability::VOLATILE;
+    func1.SetStability(FunctionStability::VOLATILE);
     ts_ssa_period_set.AddFunction(func1);
     auto func2 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT)},
         GetSsaPeriodResultType(),
         TsSsaPeriodFunction
     );
-    func2.stability = FunctionStability::VOLATILE;
+    func2.SetStability(FunctionStability::VOLATILE);
     ts_ssa_period_set.AddFunction(func2);
     auto func3 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT)},
         GetSsaPeriodResultType(),
         TsSsaPeriodFunction
     );
-    func3.stability = FunctionStability::VOLATILE;
+    func3.SetStability(FunctionStability::VOLATILE);
     ts_ssa_period_set.AddFunction(func3);
     {
         CreateScalarFunctionInfo info(ts_ssa_period_set);
@@ -1426,10 +1426,10 @@ static void TsStlPeriodFunction(DataChunk &args, ExpressionState &state, Vector 
         }
 
         auto &children = StructVector::GetEntries(result);
-        FlatVector::GetData<double>(*children[0])[row_idx] = stl_result.period;
-        FlatVector::GetData<double>(*children[1])[row_idx] = stl_result.seasonal_strength;
-        FlatVector::GetData<double>(*children[2])[row_idx] = stl_result.trend_strength;
-        FlatVector::GetData<string_t>(*children[3])[row_idx] = StringVector::AddString(*children[3], stl_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(children[0])[row_idx] = stl_result.period;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[1])[row_idx] = stl_result.seasonal_strength;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = stl_result.trend_strength;
+        ANOFOX_FLATVECTOR_WRITE<string_t>(children[3])[row_idx] = StringVector::AddString(children[3], stl_result.method);
     }
 }
 
@@ -1440,28 +1440,28 @@ void RegisterTsStlPeriodFunction(ExtensionLoader &loader) {
         GetStlPeriodResultType(),
         TsStlPeriodFunction
     );
-    func1.stability = FunctionStability::VOLATILE;
+    func1.SetStability(FunctionStability::VOLATILE);
     ts_stl_period_set.AddFunction(func1);
     auto func2 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT)},
         GetStlPeriodResultType(),
         TsStlPeriodFunction
     );
-    func2.stability = FunctionStability::VOLATILE;
+    func2.SetStability(FunctionStability::VOLATILE);
     ts_stl_period_set.AddFunction(func2);
     auto func3 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT)},
         GetStlPeriodResultType(),
         TsStlPeriodFunction
     );
-    func3.stability = FunctionStability::VOLATILE;
+    func3.SetStability(FunctionStability::VOLATILE);
     ts_stl_period_set.AddFunction(func3);
     auto func4 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT)},
         GetStlPeriodResultType(),
         TsStlPeriodFunction
     );
-    func4.stability = FunctionStability::VOLATILE;
+    func4.SetStability(FunctionStability::VOLATILE);
     ts_stl_period_set.AddFunction(func4);
     {
         CreateScalarFunctionInfo info(ts_stl_period_set);
@@ -1539,11 +1539,11 @@ static void TsMatrixProfilePeriodFunction(DataChunk &args, ExpressionState &stat
         }
 
         auto &children = StructVector::GetEntries(result);
-        FlatVector::GetData<double>(*children[0])[row_idx] = mp_result.period;
-        FlatVector::GetData<double>(*children[1])[row_idx] = mp_result.confidence;
-        FlatVector::GetData<int64_t>(*children[2])[row_idx] = static_cast<int64_t>(mp_result.n_motifs);
-        FlatVector::GetData<int64_t>(*children[3])[row_idx] = static_cast<int64_t>(mp_result.subsequence_length);
-        FlatVector::GetData<string_t>(*children[4])[row_idx] = StringVector::AddString(*children[4], mp_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(children[0])[row_idx] = mp_result.period;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[1])[row_idx] = mp_result.confidence;
+        ANOFOX_FLATVECTOR_WRITE<int64_t>(children[2])[row_idx] = static_cast<int64_t>(mp_result.n_motifs);
+        ANOFOX_FLATVECTOR_WRITE<int64_t>(children[3])[row_idx] = static_cast<int64_t>(mp_result.subsequence_length);
+        ANOFOX_FLATVECTOR_WRITE<string_t>(children[4])[row_idx] = StringVector::AddString(children[4], mp_result.method);
     }
 }
 
@@ -1554,21 +1554,21 @@ void RegisterTsMatrixProfilePeriodFunction(ExtensionLoader &loader) {
         GetMatrixProfilePeriodResultType(),
         TsMatrixProfilePeriodFunction
     );
-    func1.stability = FunctionStability::VOLATILE;
+    func1.SetStability(FunctionStability::VOLATILE);
     ts_mp_period_set.AddFunction(func1);
     auto func2 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT)},
         GetMatrixProfilePeriodResultType(),
         TsMatrixProfilePeriodFunction
     );
-    func2.stability = FunctionStability::VOLATILE;
+    func2.SetStability(FunctionStability::VOLATILE);
     ts_mp_period_set.AddFunction(func2);
     auto func3 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT)},
         GetMatrixProfilePeriodResultType(),
         TsMatrixProfilePeriodFunction
     );
-    func3.stability = FunctionStability::VOLATILE;
+    func3.SetStability(FunctionStability::VOLATILE);
     ts_mp_period_set.AddFunction(func3);
     {
         CreateScalarFunctionInfo info(ts_mp_period_set);
@@ -1650,10 +1650,10 @@ static void TsSazedPeriodFunction(DataChunk &args, ExpressionState &state, Vecto
         }
 
         auto &children = StructVector::GetEntries(result);
-        FlatVector::GetData<double>(*children[0])[row_idx] = sazed_result.period;
-        FlatVector::GetData<double>(*children[1])[row_idx] = sazed_result.power;
-        FlatVector::GetData<double>(*children[2])[row_idx] = sazed_result.snr;
-        FlatVector::GetData<string_t>(*children[3])[row_idx] = StringVector::AddString(*children[3], sazed_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(children[0])[row_idx] = sazed_result.period;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[1])[row_idx] = sazed_result.power;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = sazed_result.snr;
+        ANOFOX_FLATVECTOR_WRITE<string_t>(children[3])[row_idx] = StringVector::AddString(children[3], sazed_result.method);
     }
 }
 
@@ -1664,28 +1664,28 @@ void RegisterTsSazedPeriodFunction(ExtensionLoader &loader) {
         GetSazedPeriodResultType(),
         TsSazedPeriodFunction
     );
-    func1.stability = FunctionStability::VOLATILE;
+    func1.SetStability(FunctionStability::VOLATILE);
     ts_sazed_period_set.AddFunction(func1);
     auto func2 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT)},
         GetSazedPeriodResultType(),
         TsSazedPeriodFunction
     );
-    func2.stability = FunctionStability::VOLATILE;
+    func2.SetStability(FunctionStability::VOLATILE);
     ts_sazed_period_set.AddFunction(func2);
     auto func3 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT)},
         GetSazedPeriodResultType(),
         TsSazedPeriodFunction
     );
-    func3.stability = FunctionStability::VOLATILE;
+    func3.SetStability(FunctionStability::VOLATILE);
     ts_sazed_period_set.AddFunction(func3);
     auto func4 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::BIGINT)},
         GetSazedPeriodResultType(),
         TsSazedPeriodFunction
     );
-    func4.stability = FunctionStability::VOLATILE;
+    func4.SetStability(FunctionStability::VOLATILE);
     ts_sazed_period_set.AddFunction(func4);
     {
         CreateScalarFunctionInfo info(ts_sazed_period_set);

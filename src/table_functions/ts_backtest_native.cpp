@@ -1,3 +1,4 @@
+#include "anofox_forecast_extension.hpp"
 #include "ts_backtest_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For DateColumnType, helper functions
 #include "anofox_fcst_ffi.h"
@@ -380,7 +381,7 @@ static unique_ptr<FunctionData> TsBacktestNativeBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsBacktestNativeBindData>();
 

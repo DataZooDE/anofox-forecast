@@ -1,3 +1,4 @@
+#include "anofox_forecast_extension.hpp"
 #include "ts_combine_keys.hpp"
 #include "ts_fill_gaps_native.hpp"
 #include "duckdb/common/exception.hpp"
@@ -85,7 +86,7 @@ static unique_ptr<FunctionData> TsCombineKeysBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsCombineKeysBindData>();
 
@@ -103,8 +104,8 @@ static unique_ptr<FunctionData> TsCombineKeysBind(
     }
 
     // Column layout: date_col, value_col, id_col1, id_col2, ...
-    bind_data->date_col_name = input.input_table_names.size() > 0 ? input.input_table_names[0] : "date";
-    bind_data->value_col_name = input.input_table_names.size() > 1 ? input.input_table_names[1] : "value";
+    bind_data->date_col_name = input.input_table_names.size() > 0 ? ToColumnName(input.input_table_names[0]) : ToColumnName("date");
+    bind_data->value_col_name = input.input_table_names.size() > 1 ? ToColumnName(input.input_table_names[1]) : ToColumnName("value");
     bind_data->num_id_cols = input.input_table_types.size() - 2;
 
     // Detect date column type
@@ -134,10 +135,10 @@ static unique_ptr<FunctionData> TsCombineKeysBind(
     names.push_back("unique_id");
     return_types.push_back(LogicalType::VARCHAR);
 
-    names.push_back(bind_data->date_col_name);
+    names.push_back(ToBindName(bind_data->date_col_name));
     return_types.push_back(bind_data->date_logical_type);
 
-    names.push_back(bind_data->value_col_name);
+    names.push_back(ToBindName(bind_data->value_col_name));
     return_types.push_back(bind_data->value_logical_type);
 
     return bind_data;

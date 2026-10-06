@@ -1,3 +1,4 @@
+#include "anofox_forecast_extension.hpp"
 #include "ts_mstl_decomposition_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For GetGroupKey, etc.
 #include "anofox_fcst_ffi.h"
@@ -85,7 +86,7 @@ static unique_ptr<FunctionData> TsMstlDecompositionNativeBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsMstlDecompositionNativeBindData>();
 
@@ -100,8 +101,8 @@ static unique_ptr<FunctionData> TsMstlDecompositionNativeBind(
     bind_data->group_logical_type = input.input_table_types[0];
 
     // Output schema: <group_col>, trend[], seasonal[][], remainder[], periods[]
-    string group_col_name = input.input_table_names.size() > 0 ? input.input_table_names[0] : "id";
-    names.push_back(group_col_name);
+    string group_col_name = input.input_table_names.size() > 0 ? ToColumnName(input.input_table_names[0]) : ToColumnName("id");
+    names.push_back(ToBindName(group_col_name));
     return_types.push_back(bind_data->group_logical_type);
 
     names.push_back("trend");

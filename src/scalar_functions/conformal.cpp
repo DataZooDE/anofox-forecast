@@ -41,7 +41,7 @@ static void TsConformalQuantileFunction(DataChunk &args, ExpressionState &state,
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = ANOFOX_FLATVECTOR_WRITE<double>(result);
 
     UnifiedVectorFormat alpha_data;
     alpha_vec.ToUnifiedFormat(count, alpha_data);
@@ -133,8 +133,8 @@ static void TsConformalIntervalsFunction(DataChunk &args, ExpressionState &state
 
     // Result is a STRUCT with lower and upper arrays
     auto &struct_entries = StructVector::GetEntries(result);
-    auto &lower_vec = *struct_entries[0];
-    auto &upper_vec = *struct_entries[1];
+    auto &lower_vec = struct_entries[0];
+    auto &upper_vec = struct_entries[1];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto score_idx = score_data.sel->get_index(row_idx);
@@ -164,7 +164,7 @@ static void TsConformalIntervalsFunction(DataChunk &args, ExpressionState &state
         auto lower_offset = ListVector::GetListSize(lower_vec);
         auto &lower_child = ListVector::GetEntry(lower_vec);
         ListVector::Reserve(lower_vec, lower_offset + forecasts.size());
-        auto lower_child_data = FlatVector::GetData<double>(lower_child);
+        auto lower_child_data = ANOFOX_FLATVECTOR_WRITE<double>(lower_child);
         for (idx_t i = 0; i < forecasts.size(); i++) {
             lower_child_data[lower_offset + i] = out_lower[i];
         }
@@ -177,7 +177,7 @@ static void TsConformalIntervalsFunction(DataChunk &args, ExpressionState &state
         auto upper_offset = ListVector::GetListSize(upper_vec);
         auto &upper_child = ListVector::GetEntry(upper_vec);
         ListVector::Reserve(upper_vec, upper_offset + forecasts.size());
-        auto upper_child_data = FlatVector::GetData<double>(upper_child);
+        auto upper_child_data = ANOFOX_FLATVECTOR_WRITE<double>(upper_child);
         for (idx_t i = 0; i < forecasts.size(); i++) {
             upper_child_data[upper_offset + i] = out_upper[i];
         }
@@ -258,12 +258,12 @@ static void TsConformalPredictFunction(DataChunk &args, ExpressionState &state, 
 
     // Result struct fields
     auto &struct_entries = StructVector::GetEntries(result);
-    auto &point_vec = *struct_entries[0];
-    auto &lower_vec = *struct_entries[1];
-    auto &upper_vec = *struct_entries[2];
-    auto &coverage_vec = *struct_entries[3];
-    auto &score_vec = *struct_entries[4];
-    auto &method_vec = *struct_entries[5];
+    auto &point_vec = struct_entries[0];
+    auto &lower_vec = struct_entries[1];
+    auto &upper_vec = struct_entries[2];
+    auto &coverage_vec = struct_entries[3];
+    auto &score_vec = struct_entries[4];
+    auto &method_vec = struct_entries[5];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto alpha_idx = alpha_data.sel->get_index(row_idx);
@@ -296,7 +296,7 @@ static void TsConformalPredictFunction(DataChunk &args, ExpressionState &state, 
         auto point_offset = ListVector::GetListSize(point_vec);
         auto &point_child = ListVector::GetEntry(point_vec);
         ListVector::Reserve(point_vec, point_offset + conf_result.n_forecasts);
-        auto point_child_data = FlatVector::GetData<double>(point_child);
+        auto point_child_data = ANOFOX_FLATVECTOR_WRITE<double>(point_child);
         for (idx_t i = 0; i < conf_result.n_forecasts; i++) {
             point_child_data[point_offset + i] = conf_result.point[i];
         }
@@ -309,7 +309,7 @@ static void TsConformalPredictFunction(DataChunk &args, ExpressionState &state, 
         auto lower_offset = ListVector::GetListSize(lower_vec);
         auto &lower_child = ListVector::GetEntry(lower_vec);
         ListVector::Reserve(lower_vec, lower_offset + conf_result.n_forecasts);
-        auto lower_child_data = FlatVector::GetData<double>(lower_child);
+        auto lower_child_data = ANOFOX_FLATVECTOR_WRITE<double>(lower_child);
         for (idx_t i = 0; i < conf_result.n_forecasts; i++) {
             lower_child_data[lower_offset + i] = conf_result.lower[i];
         }
@@ -322,7 +322,7 @@ static void TsConformalPredictFunction(DataChunk &args, ExpressionState &state, 
         auto upper_offset = ListVector::GetListSize(upper_vec);
         auto &upper_child = ListVector::GetEntry(upper_vec);
         ListVector::Reserve(upper_vec, upper_offset + conf_result.n_forecasts);
-        auto upper_child_data = FlatVector::GetData<double>(upper_child);
+        auto upper_child_data = ANOFOX_FLATVECTOR_WRITE<double>(upper_child);
         for (idx_t i = 0; i < conf_result.n_forecasts; i++) {
             upper_child_data[upper_offset + i] = conf_result.upper[i];
         }
@@ -332,9 +332,9 @@ static void TsConformalPredictFunction(DataChunk &args, ExpressionState &state, 
         upper_list_data[row_idx].length = conf_result.n_forecasts;
 
         // Scalar fields
-        FlatVector::GetData<double>(coverage_vec)[row_idx] = conf_result.coverage;
-        FlatVector::GetData<double>(score_vec)[row_idx] = conf_result.conformity_score;
-        FlatVector::GetData<string_t>(method_vec)[row_idx] = StringVector::AddString(method_vec, conf_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(coverage_vec)[row_idx] = conf_result.coverage;
+        ANOFOX_FLATVECTOR_WRITE<double>(score_vec)[row_idx] = conf_result.conformity_score;
+        ANOFOX_FLATVECTOR_WRITE<string_t>(method_vec)[row_idx] = StringVector::AddString(method_vec, conf_result.method);
 
         // Free FFI memory
         anofox_free_conformal_result(&conf_result);
@@ -413,12 +413,12 @@ static void TsConformalPredictAsymmetricFunction(DataChunk &args, ExpressionStat
 
     // Result struct fields
     auto &struct_entries = StructVector::GetEntries(result);
-    auto &point_vec = *struct_entries[0];
-    auto &lower_vec = *struct_entries[1];
-    auto &upper_vec = *struct_entries[2];
-    auto &coverage_vec = *struct_entries[3];
-    auto &score_vec = *struct_entries[4];
-    auto &method_vec = *struct_entries[5];
+    auto &point_vec = struct_entries[0];
+    auto &lower_vec = struct_entries[1];
+    auto &upper_vec = struct_entries[2];
+    auto &coverage_vec = struct_entries[3];
+    auto &score_vec = struct_entries[4];
+    auto &method_vec = struct_entries[5];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto alpha_idx = alpha_data.sel->get_index(row_idx);
@@ -451,7 +451,7 @@ static void TsConformalPredictAsymmetricFunction(DataChunk &args, ExpressionStat
         auto point_offset = ListVector::GetListSize(point_vec);
         auto &point_child = ListVector::GetEntry(point_vec);
         ListVector::Reserve(point_vec, point_offset + conf_result.n_forecasts);
-        auto point_child_data = FlatVector::GetData<double>(point_child);
+        auto point_child_data = ANOFOX_FLATVECTOR_WRITE<double>(point_child);
         for (idx_t i = 0; i < conf_result.n_forecasts; i++) {
             point_child_data[point_offset + i] = conf_result.point[i];
         }
@@ -464,7 +464,7 @@ static void TsConformalPredictAsymmetricFunction(DataChunk &args, ExpressionStat
         auto lower_offset = ListVector::GetListSize(lower_vec);
         auto &lower_child = ListVector::GetEntry(lower_vec);
         ListVector::Reserve(lower_vec, lower_offset + conf_result.n_forecasts);
-        auto lower_child_data = FlatVector::GetData<double>(lower_child);
+        auto lower_child_data = ANOFOX_FLATVECTOR_WRITE<double>(lower_child);
         for (idx_t i = 0; i < conf_result.n_forecasts; i++) {
             lower_child_data[lower_offset + i] = conf_result.lower[i];
         }
@@ -477,7 +477,7 @@ static void TsConformalPredictAsymmetricFunction(DataChunk &args, ExpressionStat
         auto upper_offset = ListVector::GetListSize(upper_vec);
         auto &upper_child = ListVector::GetEntry(upper_vec);
         ListVector::Reserve(upper_vec, upper_offset + conf_result.n_forecasts);
-        auto upper_child_data = FlatVector::GetData<double>(upper_child);
+        auto upper_child_data = ANOFOX_FLATVECTOR_WRITE<double>(upper_child);
         for (idx_t i = 0; i < conf_result.n_forecasts; i++) {
             upper_child_data[upper_offset + i] = conf_result.upper[i];
         }
@@ -487,9 +487,9 @@ static void TsConformalPredictAsymmetricFunction(DataChunk &args, ExpressionStat
         upper_list_data[row_idx].length = conf_result.n_forecasts;
 
         // Scalar fields
-        FlatVector::GetData<double>(coverage_vec)[row_idx] = conf_result.coverage;
-        FlatVector::GetData<double>(score_vec)[row_idx] = conf_result.conformity_score;
-        FlatVector::GetData<string_t>(method_vec)[row_idx] = StringVector::AddString(method_vec, conf_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(coverage_vec)[row_idx] = conf_result.coverage;
+        ANOFOX_FLATVECTOR_WRITE<double>(score_vec)[row_idx] = conf_result.conformity_score;
+        ANOFOX_FLATVECTOR_WRITE<string_t>(method_vec)[row_idx] = StringVector::AddString(method_vec, conf_result.method);
 
         // Free FFI memory
         anofox_free_conformal_result(&conf_result);
@@ -610,13 +610,13 @@ static void TsConformalLearnFunction(DataChunk &args, ExpressionState &state, Ve
 
     // Result struct fields
     auto &struct_entries = StructVector::GetEntries(result);
-    auto &out_method_vec = *struct_entries[0];
-    auto &out_strategy_vec = *struct_entries[1];
-    auto &out_alphas_vec = *struct_entries[2];
-    auto &out_state_vec = *struct_entries[3];
-    auto &out_scores_lower_vec = *struct_entries[4];
-    auto &out_scores_upper_vec = *struct_entries[5];
-    auto &out_n_residuals_vec = *struct_entries[6];
+    auto &out_method_vec = struct_entries[0];
+    auto &out_strategy_vec = struct_entries[1];
+    auto &out_alphas_vec = struct_entries[2];
+    auto &out_state_vec = struct_entries[3];
+    auto &out_scores_lower_vec = struct_entries[4];
+    auto &out_scores_upper_vec = struct_entries[5];
+    auto &out_n_residuals_vec = struct_entries[6];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto method_idx = method_data.sel->get_index(row_idx);
@@ -656,16 +656,16 @@ static void TsConformalLearnFunction(DataChunk &args, ExpressionState &state, Ve
         }
 
         // Build method string
-        FlatVector::GetData<string_t>(out_method_vec)[row_idx] = StringVector::AddString(out_method_vec, MethodToString(profile.method));
+        ANOFOX_FLATVECTOR_WRITE<string_t>(out_method_vec)[row_idx] = StringVector::AddString(out_method_vec, MethodToString(profile.method));
 
         // Build strategy string
-        FlatVector::GetData<string_t>(out_strategy_vec)[row_idx] = StringVector::AddString(out_strategy_vec, StrategyToString(profile.strategy));
+        ANOFOX_FLATVECTOR_WRITE<string_t>(out_strategy_vec)[row_idx] = StringVector::AddString(out_strategy_vec, StrategyToString(profile.strategy));
 
         // Build alphas list
         auto alphas_offset = ListVector::GetListSize(out_alphas_vec);
         auto &alphas_child = ListVector::GetEntry(out_alphas_vec);
         ListVector::Reserve(out_alphas_vec, alphas_offset + profile.n_levels);
-        auto alphas_child_data = FlatVector::GetData<double>(alphas_child);
+        auto alphas_child_data = ANOFOX_FLATVECTOR_WRITE<double>(alphas_child);
         for (idx_t i = 0; i < profile.n_levels; i++) {
             alphas_child_data[alphas_offset + i] = profile.alphas[i];
         }
@@ -678,7 +678,7 @@ static void TsConformalLearnFunction(DataChunk &args, ExpressionState &state, Ve
         auto state_offset = ListVector::GetListSize(out_state_vec);
         auto &state_child = ListVector::GetEntry(out_state_vec);
         ListVector::Reserve(out_state_vec, state_offset + profile.state_vector_len);
-        auto state_child_data = FlatVector::GetData<double>(state_child);
+        auto state_child_data = ANOFOX_FLATVECTOR_WRITE<double>(state_child);
         for (idx_t i = 0; i < profile.state_vector_len; i++) {
             state_child_data[state_offset + i] = profile.state_vector[i];
         }
@@ -691,7 +691,7 @@ static void TsConformalLearnFunction(DataChunk &args, ExpressionState &state, Ve
         auto lower_offset = ListVector::GetListSize(out_scores_lower_vec);
         auto &lower_child = ListVector::GetEntry(out_scores_lower_vec);
         ListVector::Reserve(out_scores_lower_vec, lower_offset + profile.n_levels);
-        auto lower_child_data = FlatVector::GetData<double>(lower_child);
+        auto lower_child_data = ANOFOX_FLATVECTOR_WRITE<double>(lower_child);
         for (idx_t i = 0; i < profile.n_levels; i++) {
             lower_child_data[lower_offset + i] = profile.scores_lower[i];
         }
@@ -704,7 +704,7 @@ static void TsConformalLearnFunction(DataChunk &args, ExpressionState &state, Ve
         auto upper_offset = ListVector::GetListSize(out_scores_upper_vec);
         auto &upper_child = ListVector::GetEntry(out_scores_upper_vec);
         ListVector::Reserve(out_scores_upper_vec, upper_offset + profile.n_levels);
-        auto upper_child_data = FlatVector::GetData<double>(upper_child);
+        auto upper_child_data = ANOFOX_FLATVECTOR_WRITE<double>(upper_child);
         for (idx_t i = 0; i < profile.n_levels; i++) {
             upper_child_data[upper_offset + i] = profile.scores_upper[i];
         }
@@ -714,7 +714,7 @@ static void TsConformalLearnFunction(DataChunk &args, ExpressionState &state, Ve
         upper_list_data[row_idx].length = profile.n_levels;
 
         // n_residuals
-        FlatVector::GetData<int64_t>(out_n_residuals_vec)[row_idx] = static_cast<int64_t>(profile.n_residuals);
+        ANOFOX_FLATVECTOR_WRITE<int64_t>(out_n_residuals_vec)[row_idx] = static_cast<int64_t>(profile.n_residuals);
 
         // Free FFI memory
         anofox_free_calibration_profile(&profile);
@@ -792,21 +792,21 @@ static void TsConformalApplyFunction(DataChunk &args, ExpressionState &state, Ve
 
     // Profile struct fields
     auto &profile_entries = StructVector::GetEntries(profile_vec);
-    auto &method_vec = *profile_entries[0];
-    auto &strategy_vec_input = *profile_entries[1];
-    auto &alphas_vec = *profile_entries[2];
-    auto &state_vec = *profile_entries[3];
-    auto &scores_lower_vec = *profile_entries[4];
-    auto &scores_upper_vec = *profile_entries[5];
-    auto &n_residuals_vec = *profile_entries[6];
+    auto &method_vec = profile_entries[0];
+    auto &strategy_vec_input = profile_entries[1];
+    auto &alphas_vec = profile_entries[2];
+    auto &state_vec = profile_entries[3];
+    auto &scores_lower_vec = profile_entries[4];
+    auto &scores_upper_vec = profile_entries[5];
+    auto &n_residuals_vec = profile_entries[6];
 
     // Result struct fields
     auto &out_entries = StructVector::GetEntries(result);
-    auto &out_point_vec = *out_entries[0];
-    auto &out_coverage_vec = *out_entries[1];
-    auto &out_lower_vec = *out_entries[2];
-    auto &out_upper_vec = *out_entries[3];
-    auto &out_method_vec = *out_entries[4];
+    auto &out_point_vec = out_entries[0];
+    auto &out_coverage_vec = out_entries[1];
+    auto &out_lower_vec = out_entries[2];
+    auto &out_upper_vec = out_entries[3];
+    auto &out_method_vec = out_entries[4];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (FlatVector::IsNull(forecasts_vec, row_idx) || FlatVector::IsNull(profile_vec, row_idx)) {
@@ -858,7 +858,7 @@ static void TsConformalApplyFunction(DataChunk &args, ExpressionState &state, Ve
         auto point_offset = ListVector::GetListSize(out_point_vec);
         auto &point_child = ListVector::GetEntry(out_point_vec);
         ListVector::Reserve(out_point_vec, point_offset + intervals.n_forecasts);
-        auto point_child_data = FlatVector::GetData<double>(point_child);
+        auto point_child_data = ANOFOX_FLATVECTOR_WRITE<double>(point_child);
         for (idx_t i = 0; i < intervals.n_forecasts; i++) {
             point_child_data[point_offset + i] = intervals.point[i];
         }
@@ -871,7 +871,7 @@ static void TsConformalApplyFunction(DataChunk &args, ExpressionState &state, Ve
         auto cov_offset = ListVector::GetListSize(out_coverage_vec);
         auto &cov_child = ListVector::GetEntry(out_coverage_vec);
         ListVector::Reserve(out_coverage_vec, cov_offset + intervals.n_levels);
-        auto cov_child_data = FlatVector::GetData<double>(cov_child);
+        auto cov_child_data = ANOFOX_FLATVECTOR_WRITE<double>(cov_child);
         for (idx_t i = 0; i < intervals.n_levels; i++) {
             cov_child_data[cov_offset + i] = intervals.coverage[i];
         }
@@ -885,7 +885,7 @@ static void TsConformalApplyFunction(DataChunk &args, ExpressionState &state, Ve
         auto lower_offset = ListVector::GetListSize(out_lower_vec);
         auto &lower_child = ListVector::GetEntry(out_lower_vec);
         ListVector::Reserve(out_lower_vec, lower_offset + total_lower);
-        auto lower_child_data = FlatVector::GetData<double>(lower_child);
+        auto lower_child_data = ANOFOX_FLATVECTOR_WRITE<double>(lower_child);
         for (idx_t i = 0; i < total_lower; i++) {
             lower_child_data[lower_offset + i] = intervals.lower[i];
         }
@@ -899,7 +899,7 @@ static void TsConformalApplyFunction(DataChunk &args, ExpressionState &state, Ve
         auto upper_offset = ListVector::GetListSize(out_upper_vec);
         auto &upper_child = ListVector::GetEntry(out_upper_vec);
         ListVector::Reserve(out_upper_vec, upper_offset + total_upper);
-        auto upper_child_data = FlatVector::GetData<double>(upper_child);
+        auto upper_child_data = ANOFOX_FLATVECTOR_WRITE<double>(upper_child);
         for (idx_t i = 0; i < total_upper; i++) {
             upper_child_data[upper_offset + i] = intervals.upper[i];
         }
@@ -909,7 +909,7 @@ static void TsConformalApplyFunction(DataChunk &args, ExpressionState &state, Ve
         upper_list_data[row_idx].length = total_upper;
 
         // Method string
-        FlatVector::GetData<string_t>(out_method_vec)[row_idx] = StringVector::AddString(out_method_vec, MethodToString(intervals.method));
+        ANOFOX_FLATVECTOR_WRITE<string_t>(out_method_vec)[row_idx] = StringVector::AddString(out_method_vec, MethodToString(intervals.method));
 
         // Free FFI memory
         anofox_free_prediction_intervals(&intervals);
@@ -993,7 +993,7 @@ static void TsConformalCoverageFunction(DataChunk &args, ExpressionState &state,
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = ANOFOX_FLATVECTOR_WRITE<double>(result);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (FlatVector::IsNull(actuals_vec, row_idx) ||
@@ -1093,11 +1093,11 @@ static void TsConformalEvaluateFunction(DataChunk &args, ExpressionState &state,
 
     // Result struct fields
     auto &struct_entries = StructVector::GetEntries(result);
-    auto &out_coverage_vec = *struct_entries[0];
-    auto &out_violation_vec = *struct_entries[1];
-    auto &out_width_vec = *struct_entries[2];
-    auto &out_winkler_vec = *struct_entries[3];
-    auto &out_n_obs_vec = *struct_entries[4];
+    auto &out_coverage_vec = struct_entries[0];
+    auto &out_violation_vec = struct_entries[1];
+    auto &out_width_vec = struct_entries[2];
+    auto &out_winkler_vec = struct_entries[3];
+    auto &out_n_obs_vec = struct_entries[4];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto alpha_idx = alpha_data.sel->get_index(row_idx);
@@ -1133,11 +1133,11 @@ static void TsConformalEvaluateFunction(DataChunk &args, ExpressionState &state,
             continue;
         }
 
-        FlatVector::GetData<double>(out_coverage_vec)[row_idx] = eval.coverage;
-        FlatVector::GetData<double>(out_violation_vec)[row_idx] = eval.violation_rate;
-        FlatVector::GetData<double>(out_width_vec)[row_idx] = eval.mean_width;
-        FlatVector::GetData<double>(out_winkler_vec)[row_idx] = eval.winkler_score;
-        FlatVector::GetData<int64_t>(out_n_obs_vec)[row_idx] = static_cast<int64_t>(eval.n_observations);
+        ANOFOX_FLATVECTOR_WRITE<double>(out_coverage_vec)[row_idx] = eval.coverage;
+        ANOFOX_FLATVECTOR_WRITE<double>(out_violation_vec)[row_idx] = eval.violation_rate;
+        ANOFOX_FLATVECTOR_WRITE<double>(out_width_vec)[row_idx] = eval.mean_width;
+        ANOFOX_FLATVECTOR_WRITE<double>(out_winkler_vec)[row_idx] = eval.winkler_score;
+        ANOFOX_FLATVECTOR_WRITE<int64_t>(out_n_obs_vec)[row_idx] = static_cast<int64_t>(eval.n_observations);
     }
 }
 
@@ -1209,7 +1209,7 @@ static void TsMeanIntervalWidthFunction(DataChunk &args, ExpressionState &state,
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = ANOFOX_FLATVECTOR_WRITE<double>(result);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (FlatVector::IsNull(lower_vec, row_idx) || FlatVector::IsNull(upper_vec, row_idx)) {
@@ -1308,11 +1308,11 @@ static void TsConformalPredictPerStepFunction(DataChunk &args, ExpressionState &
     horizon_vec.ToUnifiedFormat(count, horizon_data);
 
     auto &struct_entries = StructVector::GetEntries(result);
-    auto &point_out = *struct_entries[0];
-    auto &lower_out = *struct_entries[1];
-    auto &upper_out = *struct_entries[2];
-    auto &hw_out = *struct_entries[3];
-    auto &coverage_out = *struct_entries[4];
+    auto &point_out = struct_entries[0];
+    auto &lower_out = struct_entries[1];
+    auto &upper_out = struct_entries[2];
+    auto &hw_out = struct_entries[3];
+    auto &coverage_out = struct_entries[4];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto alpha_idx = alpha_data.sel->get_index(row_idx);
@@ -1368,7 +1368,7 @@ static void TsConformalPredictPerStepFunction(DataChunk &args, ExpressionState &
             auto offset = ListVector::GetListSize(list_vec);
             auto &child = ListVector::GetEntry(list_vec);
             ListVector::Reserve(list_vec, offset + n);
-            auto child_data = FlatVector::GetData<double>(child);
+            auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(child);
             for (idx_t i = 0; i < n; i++) {
                 child_data[offset + i] = data[i];
             }
@@ -1382,7 +1382,7 @@ static void TsConformalPredictPerStepFunction(DataChunk &args, ExpressionState &
         write_list(lower_out, row_idx, ps_result.lower, ps_result.n_forecasts);
         write_list(upper_out, row_idx, ps_result.upper, ps_result.n_forecasts);
         write_list(hw_out, row_idx, ps_result.half_widths, ps_result.n_forecasts);
-        FlatVector::GetData<double>(coverage_out)[row_idx] = ps_result.coverage;
+        ANOFOX_FLATVECTOR_WRITE<double>(coverage_out)[row_idx] = ps_result.coverage;
 
         anofox_free_conformal_per_step_result(&ps_result);
     }

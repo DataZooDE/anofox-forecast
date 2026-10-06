@@ -1,3 +1,4 @@
+#include "anofox_forecast_extension.hpp"
 #include "ts_metrics_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For DateColumnType enum and date helpers
 #include "anofox_fcst_ffi.h"
@@ -233,7 +234,7 @@ static unique_ptr<FunctionData> TsMetricsNativeBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsMetricsNativeBindData>();
 
@@ -299,7 +300,7 @@ static unique_ptr<FunctionData> TsMetricsNativeBind(
             i != bind_data->forecast_col_idx) {
 
             bind_data->group_col_indices.push_back(i);
-            bind_data->output_col_names.push_back(col_names[i]);
+            bind_data->output_col_names.push_back(ToColumnName(col_names[i]));
             bind_data->output_col_types.push_back(col_types[i]);
 
             names.push_back(col_names[i]);
@@ -308,7 +309,7 @@ static unique_ptr<FunctionData> TsMetricsNativeBind(
     }
 
     // Add metric column
-    names.push_back(MetricColumnName(bind_data->metric_type));
+    names.push_back(ToBindName(MetricColumnName(bind_data->metric_type)));
     return_types.push_back(LogicalType::DOUBLE);
 
     return bind_data;
@@ -590,7 +591,7 @@ static unique_ptr<FunctionData> TsMaseNativeBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsMaseNativeBindData>();
 
@@ -647,7 +648,7 @@ static unique_ptr<FunctionData> TsMaseNativeBind(
             i != bind_data->forecast_col_idx &&
             i != bind_data->baseline_col_idx) {
             bind_data->group_col_indices.push_back(i);
-            bind_data->output_col_names.push_back(col_names[i]);
+            bind_data->output_col_names.push_back(ToColumnName(col_names[i]));
             bind_data->output_col_types.push_back(col_types[i]);
             names.push_back(col_names[i]);
             return_types.push_back(col_types[i]);
@@ -898,7 +899,7 @@ struct TsRmaeNativeLocalState : public LocalTableFunctionState {
 
 static unique_ptr<FunctionData> TsRmaeNativeBind(
     ClientContext &context, TableFunctionBindInput &input,
-    vector<LogicalType> &return_types, vector<string> &names) {
+    vector<LogicalType> &return_types, ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsRmaeNativeBindData>();
 
@@ -1193,7 +1194,7 @@ struct TsCoverageNativeLocalState : public LocalTableFunctionState {
 
 static unique_ptr<FunctionData> TsCoverageNativeBind(
     ClientContext &context, TableFunctionBindInput &input,
-    vector<LogicalType> &return_types, vector<string> &names) {
+    vector<LogicalType> &return_types, ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsCoverageNativeBindData>();
 
@@ -1487,7 +1488,7 @@ struct TsQuantileLossNativeLocalState : public LocalTableFunctionState {
 
 static unique_ptr<FunctionData> TsQuantileLossNativeBind(
     ClientContext &context, TableFunctionBindInput &input,
-    vector<LogicalType> &return_types, vector<string> &names) {
+    vector<LogicalType> &return_types, ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsQuantileLossNativeBindData>();
 

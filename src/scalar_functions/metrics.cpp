@@ -39,7 +39,7 @@ static void TsMaeFunction(DataChunk &args, ExpressionState &state, Vector &resul
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = ANOFOX_FLATVECTOR_WRITE<double>(result);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(forecast_vec, row_idx)) {
@@ -117,7 +117,7 @@ static void TsMseFunction(DataChunk &args, ExpressionState &state, Vector &resul
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = ANOFOX_FLATVECTOR_WRITE<double>(result);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(forecast_vec, row_idx)) {
@@ -195,7 +195,7 @@ static void TsRmseFunction(DataChunk &args, ExpressionState &state, Vector &resu
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = ANOFOX_FLATVECTOR_WRITE<double>(result);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(forecast_vec, row_idx)) {
@@ -273,7 +273,7 @@ static void TsMapeFunction(DataChunk &args, ExpressionState &state, Vector &resu
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = ANOFOX_FLATVECTOR_WRITE<double>(result);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(forecast_vec, row_idx)) {
@@ -351,7 +351,7 @@ static void TsSmapeFunction(DataChunk &args, ExpressionState &state, Vector &res
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = ANOFOX_FLATVECTOR_WRITE<double>(result);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(forecast_vec, row_idx)) {
@@ -431,7 +431,7 @@ static void TsMaseFunction(DataChunk &args, ExpressionState &state, Vector &resu
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = ANOFOX_FLATVECTOR_WRITE<double>(result);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(forecast_vec, row_idx) ||
@@ -512,7 +512,7 @@ static void TsR2Function(DataChunk &args, ExpressionState &state, Vector &result
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = ANOFOX_FLATVECTOR_WRITE<double>(result);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(forecast_vec, row_idx)) {
@@ -590,7 +590,7 @@ static void TsBiasFunction(DataChunk &args, ExpressionState &state, Vector &resu
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = ANOFOX_FLATVECTOR_WRITE<double>(result);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(forecast_vec, row_idx)) {
@@ -671,7 +671,7 @@ static void TsRmaeFunction(DataChunk &args, ExpressionState &state, Vector &resu
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = ANOFOX_FLATVECTOR_WRITE<double>(result);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(pred1_vec, row_idx) ||
@@ -753,7 +753,7 @@ static void TsQuantileLossFunction(DataChunk &args, ExpressionState &state, Vect
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = ANOFOX_FLATVECTOR_WRITE<double>(result);
 
     // Use UnifiedVectorFormat to handle both constant and flat vectors
     UnifiedVectorFormat quantile_data;
@@ -875,7 +875,7 @@ static void TsMqlossFunction(DataChunk &args, ExpressionState &state, Vector &re
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = ANOFOX_FLATVECTOR_WRITE<double>(result);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(quantiles_vec, row_idx) ||
@@ -974,7 +974,7 @@ static void TsCoverageFunction(DataChunk &args, ExpressionState &state, Vector &
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = ANOFOX_FLATVECTOR_WRITE<double>(result);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(lower_vec, row_idx) ||
@@ -1057,7 +1057,7 @@ static void TsEstimateBacktestMemoryFunction(DataChunk &args, ExpressionState &s
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<int64_t>(result);
+    auto result_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(result);
 
     auto n_series_data = FlatVector::GetData<int64_t>(n_series_vec);
     auto n_dates_data = FlatVector::GetData<int64_t>(n_dates_vec);

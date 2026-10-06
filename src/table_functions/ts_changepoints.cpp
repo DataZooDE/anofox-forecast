@@ -37,7 +37,7 @@ static void ExtractListAsDouble(Vector &list_vec, idx_t row_idx, vector<double> 
     }
 
     auto &child_vec = ListVector::GetEntry(list_vec);
-    auto child_data = FlatVector::GetData<double>(child_vec);
+    auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(child_vec);
     auto &child_validity = FlatVector::Validity(child_vec);
 
     out_values.reserve(list_entry.length);
@@ -93,8 +93,8 @@ static void TsDetectChangepointsFunction(DataChunk &args, ExpressionState &state
 
         // Set changepoints list
         {
-            auto &cp_list = *children[0];
-            auto list_data = FlatVector::GetData<list_entry_t>(cp_list);
+            auto &cp_list = children[0];
+            auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(cp_list);
             auto &list_child = ListVector::GetEntry(cp_list);
             auto current_size = ListVector::GetListSize(cp_list);
 
@@ -104,7 +104,7 @@ static void TsDetectChangepointsFunction(DataChunk &args, ExpressionState &state
             ListVector::Reserve(cp_list, current_size + cp_result.n_changepoints);
             ListVector::SetListSize(cp_list, current_size + cp_result.n_changepoints);
 
-            auto child_data = FlatVector::GetData<uint64_t>(list_child);
+            auto child_data = ANOFOX_FLATVECTOR_WRITE<uint64_t>(list_child);
             if (cp_result.changepoints) {
                 for (size_t i = 0; i < cp_result.n_changepoints; i++) {
                     child_data[current_size + i] = cp_result.changepoints[i];
@@ -113,8 +113,8 @@ static void TsDetectChangepointsFunction(DataChunk &args, ExpressionState &state
         }
 
         // Set scalar fields
-        FlatVector::GetData<uint64_t>(*children[1])[row_idx] = cp_result.n_changepoints;
-        FlatVector::GetData<double>(*children[2])[row_idx] = cp_result.cost;
+        ANOFOX_FLATVECTOR_WRITE<uint64_t>(children[1])[row_idx] = cp_result.n_changepoints;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = cp_result.cost;
 
         anofox_free_changepoint_result(&cp_result);
     }
@@ -186,8 +186,8 @@ static void TsDetectChangepointsWithParamsFunction(DataChunk &args, ExpressionSt
 
         // Set changepoints list
         {
-            auto &cp_list = *children[0];
-            auto list_data = FlatVector::GetData<list_entry_t>(cp_list);
+            auto &cp_list = children[0];
+            auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(cp_list);
             auto &list_child = ListVector::GetEntry(cp_list);
             auto current_size = ListVector::GetListSize(cp_list);
 
@@ -197,7 +197,7 @@ static void TsDetectChangepointsWithParamsFunction(DataChunk &args, ExpressionSt
             ListVector::Reserve(cp_list, current_size + cp_result.n_changepoints);
             ListVector::SetListSize(cp_list, current_size + cp_result.n_changepoints);
 
-            auto child_data = FlatVector::GetData<uint64_t>(list_child);
+            auto child_data = ANOFOX_FLATVECTOR_WRITE<uint64_t>(list_child);
             if (cp_result.changepoints) {
                 for (size_t i = 0; i < cp_result.n_changepoints; i++) {
                     child_data[current_size + i] = cp_result.changepoints[i];
@@ -205,8 +205,8 @@ static void TsDetectChangepointsWithParamsFunction(DataChunk &args, ExpressionSt
             }
         }
 
-        FlatVector::GetData<uint64_t>(*children[1])[row_idx] = cp_result.n_changepoints;
-        FlatVector::GetData<double>(*children[2])[row_idx] = cp_result.cost;
+        ANOFOX_FLATVECTOR_WRITE<uint64_t>(children[1])[row_idx] = cp_result.n_changepoints;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = cp_result.cost;
 
         anofox_free_changepoint_result(&cp_result);
     }
@@ -293,8 +293,8 @@ static void TsDetectChangepointsBocpdFunction(DataChunk &args, ExpressionState &
 
         // Set is_changepoint list
         {
-            auto &cp_list = *children[0];
-            auto list_data = FlatVector::GetData<list_entry_t>(cp_list);
+            auto &cp_list = children[0];
+            auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(cp_list);
             auto &list_child = ListVector::GetEntry(cp_list);
             auto current_size = ListVector::GetListSize(cp_list);
 
@@ -304,7 +304,7 @@ static void TsDetectChangepointsBocpdFunction(DataChunk &args, ExpressionState &
             ListVector::Reserve(cp_list, current_size + bocpd_result.n_points);
             ListVector::SetListSize(cp_list, current_size + bocpd_result.n_points);
 
-            auto child_data = FlatVector::GetData<bool>(list_child);
+            auto child_data = ANOFOX_FLATVECTOR_WRITE<bool>(list_child);
             if (bocpd_result.is_changepoint) {
                 for (size_t i = 0; i < bocpd_result.n_points; i++) {
                     child_data[current_size + i] = bocpd_result.is_changepoint[i];
@@ -314,8 +314,8 @@ static void TsDetectChangepointsBocpdFunction(DataChunk &args, ExpressionState &
 
         // Set changepoint_probability list
         {
-            auto &prob_list = *children[1];
-            auto list_data = FlatVector::GetData<list_entry_t>(prob_list);
+            auto &prob_list = children[1];
+            auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(prob_list);
             auto &list_child = ListVector::GetEntry(prob_list);
             auto current_size = ListVector::GetListSize(prob_list);
 
@@ -325,7 +325,7 @@ static void TsDetectChangepointsBocpdFunction(DataChunk &args, ExpressionState &
             ListVector::Reserve(prob_list, current_size + bocpd_result.n_points);
             ListVector::SetListSize(prob_list, current_size + bocpd_result.n_points);
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(list_child);
             if (bocpd_result.changepoint_probability) {
                 for (size_t i = 0; i < bocpd_result.n_points; i++) {
                     child_data[current_size + i] = bocpd_result.changepoint_probability[i];
@@ -335,8 +335,8 @@ static void TsDetectChangepointsBocpdFunction(DataChunk &args, ExpressionState &
 
         // Set changepoint_indices list
         {
-            auto &idx_list = *children[2];
-            auto list_data = FlatVector::GetData<list_entry_t>(idx_list);
+            auto &idx_list = children[2];
+            auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(idx_list);
             auto &list_child = ListVector::GetEntry(idx_list);
             auto current_size = ListVector::GetListSize(idx_list);
 
@@ -346,7 +346,7 @@ static void TsDetectChangepointsBocpdFunction(DataChunk &args, ExpressionState &
             ListVector::Reserve(idx_list, current_size + bocpd_result.n_changepoints);
             ListVector::SetListSize(idx_list, current_size + bocpd_result.n_changepoints);
 
-            auto child_data = FlatVector::GetData<uint64_t>(list_child);
+            auto child_data = ANOFOX_FLATVECTOR_WRITE<uint64_t>(list_child);
             if (bocpd_result.changepoint_indices) {
                 for (size_t i = 0; i < bocpd_result.n_changepoints; i++) {
                     child_data[current_size + i] = bocpd_result.changepoint_indices[i];
@@ -476,7 +476,7 @@ static unique_ptr<FunctionData> TsDetectChangepointsByBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsDetectChangepointsByBindData>();
 
@@ -494,9 +494,9 @@ static unique_ptr<FunctionData> TsDetectChangepointsByBind(
     }
 
     // Preserve column names
-    bind_data->group_col_name = input.input_table_names[0];
-    bind_data->date_col_name = input.input_table_names[1];
-    bind_data->value_col_name = input.input_table_names[2];
+    bind_data->group_col_name = ToColumnName(input.input_table_names[0]);
+    bind_data->date_col_name = ToColumnName(input.input_table_names[1]);
+    bind_data->value_col_name = ToColumnName(input.input_table_names[2]);
     bind_data->group_logical_type = input.input_table_types[0];
     bind_data->date_logical_type = input.input_table_types[1];
 
@@ -516,10 +516,10 @@ static unique_ptr<FunctionData> TsDetectChangepointsByBind(
     }
 
     // Output schema: group_col, date_col, is_changepoint, changepoint_probability
-    names.push_back(bind_data->group_col_name);
+    names.push_back(ToBindName(bind_data->group_col_name));
     return_types.push_back(bind_data->group_logical_type);
 
-    names.push_back(bind_data->date_col_name);
+    names.push_back(ToBindName(bind_data->date_col_name));
     return_types.push_back(bind_data->date_logical_type);
 
     names.push_back("is_changepoint");
@@ -780,13 +780,13 @@ static OperatorFinalizeResultType TsDetectChangepointsByFinalize(
         }
 
         // is_changepoint
-        FlatVector::GetData<bool>(output.data[2])[out_idx] = row.is_changepoint;
+        ANOFOX_FLATVECTOR_WRITE<bool>(output.data[2])[out_idx] = row.is_changepoint;
 
         // changepoint_probability - output NULL when flagged
         if (row.changepoint_probability_null) {
             FlatVector::SetNull(output.data[3], out_idx, true);
         } else {
-            FlatVector::GetData<double>(output.data[3])[out_idx] = row.changepoint_probability;
+            ANOFOX_FLATVECTOR_WRITE<double>(output.data[3])[out_idx] = row.changepoint_probability;
         }
 
         output_count++;

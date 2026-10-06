@@ -68,19 +68,18 @@ struct TsEnsembleInspectNativeBindData : public FunctionData {
     }
 };
 
-static unique_ptr<FunctionData> TsEnsembleInspectNativeBind(
-    ClientContext &,
-    ScalarFunction &bound_function,
-    vector<unique_ptr<Expression>> &) {
+ANOFOX_SCALAR_BIND_SIG(TsEnsembleInspectNativeBind) {
+    ANOFOX_SCALAR_BIND_PREAMBLE
+    (void)context;
+    (void)arguments;
 
     auto bind_data = make_uniq<TsEnsembleInspectNativeBindData>();
-    bound_function.return_type = MakeInspectReturnType();
+    bound_function.SetReturnType(MakeInspectReturnType());
     return std::move(bind_data);
 }
 
 static void TsEnsembleInspectNativeExecute(DataChunk &args, ExpressionState &state, Vector &result) {
-    auto &bind_data = state.expr.Cast<BoundFunctionExpression>()
-        .bind_info->Cast<TsEnsembleInspectNativeBindData>();
+    auto &bind_data = ANOFOX_BIND_INFO(state.expr.Cast<BoundFunctionExpression>())->Cast<TsEnsembleInspectNativeBindData>();
     idx_t count = args.size();
 
     auto &value_list_vec    = args.data[0];  // LIST(DOUBLE) values
@@ -289,19 +288,18 @@ struct TsAutoEnsembleInspectNativeBindData : public FunctionData {
     }
 };
 
-static unique_ptr<FunctionData> TsAutoEnsembleInspectNativeBind(
-    ClientContext &,
-    ScalarFunction &bound_function,
-    vector<unique_ptr<Expression>> &) {
+ANOFOX_SCALAR_BIND_SIG(TsAutoEnsembleInspectNativeBind) {
+    ANOFOX_SCALAR_BIND_PREAMBLE
+    (void)context;
+    (void)arguments;
 
     auto bind_data = make_uniq<TsAutoEnsembleInspectNativeBindData>();
-    bound_function.return_type = MakeInspectReturnType();
+    bound_function.SetReturnType(MakeInspectReturnType());
     return std::move(bind_data);
 }
 
 static void TsAutoEnsembleInspectNativeExecute(DataChunk &args, ExpressionState &state, Vector &result) {
-    auto &bind_data = state.expr.Cast<BoundFunctionExpression>()
-        .bind_info->Cast<TsAutoEnsembleInspectNativeBindData>();
+    auto &bind_data = ANOFOX_BIND_INFO(state.expr.Cast<BoundFunctionExpression>())->Cast<TsAutoEnsembleInspectNativeBindData>();
     idx_t count = args.size();
 
     auto &value_list_vec = args.data[0];  // LIST(DOUBLE) values
@@ -464,7 +462,7 @@ void RegisterTsEnsembleInspectNativeFunction(ExtensionLoader &loader) {
         LogicalType::LIST(LogicalType::ANY),        // return type set at bind time
         TsEnsembleInspectNativeExecute,
         TsEnsembleInspectNativeBind);
-    explicit_func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    explicit_func.SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
     loader.RegisterFunction(explicit_func);
 
     // _ts_auto_ensemble_inspect_native — AutoEnsemble introspection
@@ -480,7 +478,7 @@ void RegisterTsEnsembleInspectNativeFunction(ExtensionLoader &loader) {
         LogicalType::LIST(LogicalType::ANY),        // return type set at bind time
         TsAutoEnsembleInspectNativeExecute,
         TsAutoEnsembleInspectNativeBind);
-    auto_func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    auto_func.SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
     loader.RegisterFunction(auto_func);
 }
 

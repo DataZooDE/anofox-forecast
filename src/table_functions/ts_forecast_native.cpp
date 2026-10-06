@@ -1,3 +1,4 @@
+#include "anofox_forecast_extension.hpp"
 #include "ts_forecast_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For ParseFrequencyToSeconds, etc.
 #include "anofox_fcst_ffi.h"
@@ -296,8 +297,8 @@ static void ValidateParamKeys(const Value &params_value) {
     } else if (params_value.type().id() == LogicalTypeId::STRUCT) {
         auto &child_types = StructType::GetChildTypes(params_value.type());
         for (idx_t i = 0; i < child_types.size(); i++) {
-            if (valid_keys.find(child_types[i].first) == valid_keys.end()) {
-                unknown_keys.push_back(child_types[i].first);
+            if (valid_keys.find(ToColumnName(child_types[i].first)) == valid_keys.end()) {
+                unknown_keys.push_back(ToColumnName(child_types[i].first));
             }
         }
     }
@@ -322,7 +323,7 @@ static unique_ptr<FunctionData> TsForecastNativeBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsForecastNativeBindData>();
 
@@ -441,16 +442,16 @@ static unique_ptr<FunctionData> TsForecastNativeBind(
 
     // Output schema: <group_col>, forecast_step, <date_col>, yhat, yhat_lower, yhat_upper, model_name
     auto &table_names = input.input_table_names;
-    string group_col_name = table_names.size() > 0 ? table_names[0] : "id";
-    string date_col_name = table_names.size() > 1 ? table_names[1] : "date";
+    string group_col_name = table_names.size() > 0 ? ToColumnName(table_names[0]) : ToColumnName("id");
+    string date_col_name = table_names.size() > 1 ? ToColumnName(table_names[1]) : ToColumnName("date");
 
-    names.push_back(group_col_name);
+    names.push_back(ToBindName(group_col_name));
     return_types.push_back(bind_data->group_logical_type);
 
     names.push_back("forecast_step");
     return_types.push_back(LogicalType::INTEGER);
 
-    names.push_back(date_col_name);
+    names.push_back(ToBindName(date_col_name));
     return_types.push_back(bind_data->date_logical_type);
 
     names.push_back("yhat");

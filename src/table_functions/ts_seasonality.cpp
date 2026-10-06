@@ -6,6 +6,16 @@
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/common/types/vector.hpp"
+// DuckDB 2.0 split ListVector/StructVector/FlatVector/StringVector out of
+// vector.hpp into dedicated headers under duckdb/common/vector/; v1.5.x still
+// declares them inline in vector.hpp. __has_include degrades gracefully on
+// both versions without needing a version macro.
+#if __has_include("duckdb/common/vector/list_vector.hpp")
+#include "duckdb/common/vector/flat_vector.hpp"
+#include "duckdb/common/vector/list_vector.hpp"
+#include "duckdb/common/vector/string_vector.hpp"
+#include "duckdb/common/vector/struct_vector.hpp"
+#endif
 
 namespace duckdb {
 
@@ -18,7 +28,7 @@ static void ExtractListAsDouble(Vector &list_vec, idx_t row_idx, vector<double> 
     auto &list_entry = list_data[row_idx];
 
     auto &child_vec = ListVector::GetEntry(list_vec);
-    auto child_data = FlatVector::GetData<double>(child_vec);
+    auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(child_vec);
     auto &child_validity = FlatVector::Validity(child_vec);
 
     out_values.clear();
@@ -66,7 +76,7 @@ static void TsDetectSeasonalityFunction(DataChunk &args, ExpressionState &state,
         }
 
         // Build the result list
-        auto list_data = FlatVector::GetData<list_entry_t>(result);
+        auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(result);
         auto &list_child = ListVector::GetEntry(result);
         auto current_size = ListVector::GetListSize(result);
 
@@ -76,7 +86,7 @@ static void TsDetectSeasonalityFunction(DataChunk &args, ExpressionState &state,
         ListVector::Reserve(result, current_size + n_periods);
         ListVector::SetListSize(result, current_size + n_periods);
 
-        auto child_data = FlatVector::GetData<int32_t>(list_child);
+        auto child_data = ANOFOX_FLATVECTOR_WRITE<int32_t>(list_child);
         for (size_t i = 0; i < n_periods; i++) {
             child_data[current_size + i] = periods[i];
         }
@@ -181,8 +191,8 @@ static void TsAnalyzeSeasonalityWithTimestampsFunction(DataChunk &args, Expressi
 
         // Set detected_periods list
         {
-            auto &periods_list = *children[0];
-            auto list_data = FlatVector::GetData<list_entry_t>(periods_list);
+            auto &periods_list = children[0];
+            auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(periods_list);
             auto &list_child = ListVector::GetEntry(periods_list);
             auto current_size = ListVector::GetListSize(periods_list);
 
@@ -192,16 +202,16 @@ static void TsAnalyzeSeasonalityWithTimestampsFunction(DataChunk &args, Expressi
             ListVector::Reserve(periods_list, current_size + seas_result.n_periods);
             ListVector::SetListSize(periods_list, current_size + seas_result.n_periods);
 
-            auto child_data = FlatVector::GetData<int32_t>(list_child);
+            auto child_data = ANOFOX_FLATVECTOR_WRITE<int32_t>(list_child);
             for (size_t i = 0; i < seas_result.n_periods; i++) {
                 child_data[current_size + i] = seas_result.detected_periods[i];
             }
         }
 
         // Set scalar fields
-        FlatVector::GetData<int32_t>(*children[1])[row_idx] = seas_result.primary_period;
-        FlatVector::GetData<double>(*children[2])[row_idx] = seas_result.seasonal_strength;
-        FlatVector::GetData<double>(*children[3])[row_idx] = seas_result.trend_strength;
+        ANOFOX_FLATVECTOR_WRITE<int32_t>(children[1])[row_idx] = seas_result.primary_period;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = seas_result.seasonal_strength;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[3])[row_idx] = seas_result.trend_strength;
 
         anofox_free_seasonality_result(&seas_result);
     }
@@ -246,8 +256,8 @@ static void TsAnalyzeSeasonalityFunction(DataChunk &args, ExpressionState &state
 
         // Set detected_periods list
         {
-            auto &periods_list = *children[0];
-            auto list_data = FlatVector::GetData<list_entry_t>(periods_list);
+            auto &periods_list = children[0];
+            auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(periods_list);
             auto &list_child = ListVector::GetEntry(periods_list);
             auto current_size = ListVector::GetListSize(periods_list);
 
@@ -257,16 +267,16 @@ static void TsAnalyzeSeasonalityFunction(DataChunk &args, ExpressionState &state
             ListVector::Reserve(periods_list, current_size + seas_result.n_periods);
             ListVector::SetListSize(periods_list, current_size + seas_result.n_periods);
 
-            auto child_data = FlatVector::GetData<int32_t>(list_child);
+            auto child_data = ANOFOX_FLATVECTOR_WRITE<int32_t>(list_child);
             for (size_t i = 0; i < seas_result.n_periods; i++) {
                 child_data[current_size + i] = seas_result.detected_periods[i];
             }
         }
 
         // Set scalar fields
-        FlatVector::GetData<int32_t>(*children[1])[row_idx] = seas_result.primary_period;
-        FlatVector::GetData<double>(*children[2])[row_idx] = seas_result.seasonal_strength;
-        FlatVector::GetData<double>(*children[3])[row_idx] = seas_result.trend_strength;
+        ANOFOX_FLATVECTOR_WRITE<int32_t>(children[1])[row_idx] = seas_result.primary_period;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = seas_result.seasonal_strength;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[3])[row_idx] = seas_result.trend_strength;
 
         anofox_free_seasonality_result(&seas_result);
     }
@@ -359,7 +369,7 @@ static LogicalType GetSeasonalityClassificationResultType() {
 
 // Helper to set list of doubles in result struct
 static void SetDoubleListField(Vector &list_vec, idx_t row_idx, const double *data, size_t count) {
-    auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
+    auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(list_vec);
     auto &list_child = ListVector::GetEntry(list_vec);
     auto current_size = ListVector::GetListSize(list_vec);
 
@@ -369,7 +379,7 @@ static void SetDoubleListField(Vector &list_vec, idx_t row_idx, const double *da
     ListVector::Reserve(list_vec, current_size + count);
     ListVector::SetListSize(list_vec, current_size + count);
 
-    auto child_data = FlatVector::GetData<double>(list_child);
+    auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(list_child);
     for (size_t i = 0; i < count; i++) {
         child_data[current_size + i] = data[i];
     }
@@ -377,7 +387,7 @@ static void SetDoubleListField(Vector &list_vec, idx_t row_idx, const double *da
 
 // Helper to set list of bigints in result struct
 static void SetBigintListField(Vector &list_vec, idx_t row_idx, const size_t *data, size_t count) {
-    auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
+    auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(list_vec);
     auto &list_child = ListVector::GetEntry(list_vec);
     auto current_size = ListVector::GetListSize(list_vec);
 
@@ -387,7 +397,7 @@ static void SetBigintListField(Vector &list_vec, idx_t row_idx, const size_t *da
     ListVector::Reserve(list_vec, current_size + count);
     ListVector::SetListSize(list_vec, current_size + count);
 
-    auto child_data = FlatVector::GetData<int64_t>(list_child);
+    auto child_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(list_child);
     for (size_t i = 0; i < count; i++) {
         child_data[current_size + i] = static_cast<int64_t>(data[i]);
     }
@@ -465,35 +475,35 @@ static void TsClassifySeasonalityFunction(DataChunk &args, ExpressionState &stat
         auto &children = StructVector::GetEntries(result);
 
         // timing_classification (index 0)
-        FlatVector::GetData<string_t>(*children[0])[row_idx] =
-            StringVector::AddString(*children[0], class_result.classification);
+        ANOFOX_FLATVECTOR_WRITE<string_t>(children[0])[row_idx] =
+            StringVector::AddString(children[0], class_result.classification);
 
         // modulation_type (index 1)
         if (mod_success) {
-            FlatVector::GetData<string_t>(*children[1])[row_idx] =
-                StringVector::AddString(*children[1], mod_result.modulation_type);
+            ANOFOX_FLATVECTOR_WRITE<string_t>(children[1])[row_idx] =
+                StringVector::AddString(children[1], mod_result.modulation_type);
         } else {
-            FlatVector::GetData<string_t>(*children[1])[row_idx] =
-                StringVector::AddString(*children[1], "unknown");
+            ANOFOX_FLATVECTOR_WRITE<string_t>(children[1])[row_idx] =
+                StringVector::AddString(children[1], "unknown");
         }
 
         // has_stable_timing (index 2)
-        FlatVector::GetData<bool>(*children[2])[row_idx] = class_result.has_stable_timing;
+        ANOFOX_FLATVECTOR_WRITE<bool>(children[2])[row_idx] = class_result.has_stable_timing;
 
         // timing_variability (index 3)
-        FlatVector::GetData<double>(*children[3])[row_idx] = class_result.timing_variability;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[3])[row_idx] = class_result.timing_variability;
 
         // seasonal_strength (index 4)
-        FlatVector::GetData<double>(*children[4])[row_idx] = class_result.seasonal_strength;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[4])[row_idx] = class_result.seasonal_strength;
 
         // is_seasonal (index 5)
-        FlatVector::GetData<bool>(*children[5])[row_idx] = class_result.is_seasonal;
+        ANOFOX_FLATVECTOR_WRITE<bool>(children[5])[row_idx] = class_result.is_seasonal;
 
         // cycle_strengths (index 6)
-        SetDoubleListField(*children[6], row_idx, class_result.cycle_strengths, class_result.n_cycle_strengths);
+        SetDoubleListField(children[6], row_idx, class_result.cycle_strengths, class_result.n_cycle_strengths);
 
         // weak_seasons (index 7)
-        SetBigintListField(*children[7], row_idx, class_result.weak_seasons, class_result.n_weak_seasons);
+        SetBigintListField(children[7], row_idx, class_result.weak_seasons, class_result.n_weak_seasons);
 
         // Free FFI results
         anofox_free_seasonality_classification_result(&class_result);

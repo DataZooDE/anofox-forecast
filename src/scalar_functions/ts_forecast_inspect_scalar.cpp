@@ -301,7 +301,7 @@ void RegisterTsForecastInspectScalarFunction(ExtensionLoader &loader) {
         {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::VARCHAR, LogicalType::ANY},
         LogicalType::VARCHAR,
         TsForecastInspectScalarExecute);
-    inspect_func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    inspect_func.SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
     loader.RegisterFunction(inspect_func);
 
     // _ts_forecast_explain_scalar(values LIST(DOUBLE), horizon INT,
@@ -311,7 +311,7 @@ void RegisterTsForecastInspectScalarFunction(ExtensionLoader &loader) {
          LogicalType::VARCHAR, LogicalType::ANY},
         LogicalType::VARCHAR,
         TsForecastExplainScalarExecute);
-    explain_func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    explain_func.SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
     loader.RegisterFunction(explain_func);
 }
 

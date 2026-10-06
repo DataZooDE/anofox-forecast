@@ -5,6 +5,16 @@
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/common/types/vector.hpp"
+// DuckDB 2.0 split ListVector/StructVector/FlatVector/StringVector out of
+// vector.hpp into dedicated headers under duckdb/common/vector/; v1.5.x still
+// declares them inline in vector.hpp. __has_include degrades gracefully on
+// both versions without needing a version macro.
+#if __has_include("duckdb/common/vector/list_vector.hpp")
+#include "duckdb/common/vector/flat_vector.hpp"
+#include "duckdb/common/vector/list_vector.hpp"
+#include "duckdb/common/vector/string_vector.hpp"
+#include "duckdb/common/vector/struct_vector.hpp"
+#endif
 
 namespace duckdb {
 
@@ -65,9 +75,9 @@ static void ExtractListValues(Vector &list_vec, idx_t count, idx_t row_idx,
 static void SetListFromArray(Vector &result, idx_t field_idx, idx_t row_idx,
                              double *data, size_t length) {
     auto &children = StructVector::GetEntries(result);
-    auto &list_vec = *children[field_idx];
+    auto &list_vec = children[field_idx];
 
-    auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
+    auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(list_vec);
     auto &list_child = ListVector::GetEntry(list_vec);
     auto current_size = ListVector::GetListSize(list_vec);
 
@@ -77,7 +87,7 @@ static void SetListFromArray(Vector &result, idx_t field_idx, idx_t row_idx,
     ListVector::Reserve(list_vec, current_size + length);
     ListVector::SetListSize(list_vec, current_size + length);
 
-    auto child_data = FlatVector::GetData<double>(list_child);
+    auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(list_child);
     if (data && length > 0) {
         memcpy(child_data + current_size, data, length * sizeof(double));
     }
@@ -86,14 +96,14 @@ static void SetListFromArray(Vector &result, idx_t field_idx, idx_t row_idx,
 template <typename T>
 static void SetStructField(Vector &result, idx_t field_idx, idx_t row_idx, T value) {
     auto &children = StructVector::GetEntries(result);
-    auto data = FlatVector::GetData<T>(*children[field_idx]);
+    auto data = ANOFOX_FLATVECTOR_WRITE<T>(children[field_idx]);
     data[row_idx] = value;
 }
 
 static void SetStringField(Vector &result, idx_t field_idx, idx_t row_idx, const char *value) {
     auto &children = StructVector::GetEntries(result);
-    auto data = FlatVector::GetData<string_t>(*children[field_idx]);
-    data[row_idx] = StringVector::AddString(*children[field_idx], value);
+    auto data = ANOFOX_FLATVECTOR_WRITE<string_t>(children[field_idx]);
+    data[row_idx] = StringVector::AddString(children[field_idx], value);
 }
 
 static void TsForecastFunction(DataChunk &args, ExpressionState &state, Vector &result) {
@@ -458,7 +468,7 @@ void RegisterTsForecastFunction(ExtensionLoader &loader) {
         GetForecastResultType(),
         TsForecastFunction
     );
-    ts_forecast_basic.stability = FunctionStability::VOLATILE;
+    ts_forecast_basic.SetStability(FunctionStability::VOLATILE);
     ts_forecast_set.AddFunction(ts_forecast_basic);
 
     // _ts_forecast(values, horizon, model)
@@ -468,7 +478,7 @@ void RegisterTsForecastFunction(ExtensionLoader &loader) {
         GetForecastResultType(),
         TsForecastWithModelFunction
     );
-    ts_forecast_with_model.stability = FunctionStability::VOLATILE;
+    ts_forecast_with_model.SetStability(FunctionStability::VOLATILE);
     ts_forecast_set.AddFunction(ts_forecast_with_model);
 
     // Mark as internal to hide from duckdb_functions() and deprioritize in autocomplete
@@ -493,7 +503,7 @@ void RegisterTsForecastFunction(ExtensionLoader &loader) {
         GetForecastResultType(),
         TsForecastExogFunction
     );
-    ts_forecast_exog_func.stability = FunctionStability::VOLATILE;
+    ts_forecast_exog_func.SetStability(FunctionStability::VOLATILE);
 
     // Mark as internal
     CreateScalarFunctionInfo exog_info(ts_forecast_exog_func);

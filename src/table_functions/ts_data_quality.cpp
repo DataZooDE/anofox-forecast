@@ -5,6 +5,14 @@
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/common/types/vector.hpp"
+// DuckDB 2.0 split ListVector/StructVector/FlatVector out of vector.hpp into
+// dedicated headers under duckdb/common/vector/; v1.5.x still declares them
+// inline in vector.hpp. __has_include degrades gracefully on both versions.
+#if __has_include("duckdb/common/vector/list_vector.hpp")
+#include "duckdb/common/vector/flat_vector.hpp"
+#include "duckdb/common/vector/list_vector.hpp"
+#include "duckdb/common/vector/struct_vector.hpp"
+#endif
 
 namespace duckdb {
 
@@ -55,7 +63,7 @@ static void ExtractListValues(Vector &list_vec, idx_t row_idx,
 template <typename T>
 static void SetStructField(Vector &result, idx_t field_idx, idx_t row_idx, T value) {
     auto &children = StructVector::GetEntries(result);
-    auto data = FlatVector::GetData<T>(*children[field_idx]);
+    auto data = ANOFOX_FLATVECTOR_WRITE<T>(children[field_idx]);
     data[row_idx] = value;
 }
 

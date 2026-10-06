@@ -115,7 +115,7 @@ static void TsChangepointsAggUpdate(Vector inputs[], AggregateInputData &aggr_in
     }
 }
 
-static void TsChangepointsAggFinalize(Vector &state_vector, AggregateInputData &aggr_input,
+static void TsChangepointsAggFinalize(Vector &state_vector, ANOFOX_AGG_FINALIZE_INPUT &aggr_input,
                                       Vector &result, idx_t count, idx_t offset) {
     auto states = FlatVector::GetData<TsChangepointsAggState *>(state_vector);
 
@@ -164,7 +164,7 @@ static void TsChangepointsAggFinalize(Vector &state_vector, AggregateInputData &
         }
 
         // Build LIST<STRUCT(timestamp, value, is_changepoint, changepoint_probability)>
-        auto list_data = FlatVector::GetData<list_entry_t>(result);
+        auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(result);
         auto &list_child = ListVector::GetEntry(result);  // This is the STRUCT vector
         auto current_size = ListVector::GetListSize(result);
 
@@ -178,15 +178,15 @@ static void TsChangepointsAggFinalize(Vector &state_vector, AggregateInputData &
 
         // Get the struct children
         auto &struct_entries = StructVector::GetEntries(list_child);
-        auto &ts_child = *struct_entries[0];
-        auto &val_child = *struct_entries[1];
-        auto &cp_child = *struct_entries[2];
-        auto &prob_child = *struct_entries[3];
+        auto &ts_child = struct_entries[0];
+        auto &val_child = struct_entries[1];
+        auto &cp_child = struct_entries[2];
+        auto &prob_child = struct_entries[3];
 
-        auto ts_child_data = FlatVector::GetData<timestamp_t>(ts_child);
-        auto val_child_data = FlatVector::GetData<double>(val_child);
-        auto cp_child_data = FlatVector::GetData<bool>(cp_child);
-        auto prob_child_data = FlatVector::GetData<double>(prob_child);
+        auto ts_child_data = ANOFOX_FLATVECTOR_WRITE<timestamp_t>(ts_child);
+        auto val_child_data = ANOFOX_FLATVECTOR_WRITE<double>(val_child);
+        auto cp_child_data = ANOFOX_FLATVECTOR_WRITE<bool>(cp_child);
+        auto prob_child_data = ANOFOX_FLATVECTOR_WRITE<double>(prob_child);
 
         for (size_t j = 0; j < n; j++) {
             ts_child_data[current_size + j] = timestamp_t(sorted_timestamps[j]);

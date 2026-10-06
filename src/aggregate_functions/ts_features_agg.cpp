@@ -111,7 +111,7 @@ static LogicalType GetFeaturesAggResultType() {
 
     auto feature_names = GetFeatureNames();
     for (const auto &name : feature_names) {
-        children.push_back(make_pair(name, LogicalType(LogicalTypeId::DOUBLE)));
+        children.push_back(make_pair(name.c_str(), LogicalType(LogicalTypeId::DOUBLE)));
     }
 
     return LogicalType::STRUCT(std::move(children));
@@ -125,12 +125,12 @@ static LogicalType GetSelectedFeaturesResultType(const vector<string> &selected)
         // No selection means all features
         auto all_features = GetFeatureNames();
         for (const auto &name : all_features) {
-            children.push_back(make_pair(name, LogicalType(LogicalTypeId::DOUBLE)));
+            children.push_back(make_pair(name.c_str(), LogicalType(LogicalTypeId::DOUBLE)));
         }
     } else {
         // Use selected features in order
         for (const auto &name : selected) {
-            children.push_back(make_pair(name, LogicalType(LogicalTypeId::DOUBLE)));
+            children.push_back(make_pair(name.c_str(), LogicalType(LogicalTypeId::DOUBLE)));
         }
     }
 
@@ -138,12 +138,13 @@ static LogicalType GetSelectedFeaturesResultType(const vector<string> &selected)
 }
 
 // Bind function for 3-parameter version (with feature_selection)
-static unique_ptr<FunctionData> TsFeaturesAggBind3(ClientContext &context, AggregateFunction &function,
-                                                    vector<unique_ptr<Expression>> &arguments) {
+ANOFOX_AGG_BIND_SIG(TsFeaturesAggBind3) {
+    ANOFOX_AGG_BIND_PREAMBLE
+    (void)context;
     auto bind_data = make_uniq<TsFeaturesAggBindData>();
 
     // Third argument is feature_selection (LIST(VARCHAR) or NULL)
-    if (arguments.size() >= 3 && arguments[2]->return_type.id() != LogicalTypeId::SQLNULL) {
+    if (arguments.size() >= 3 && ExprReturnType(*arguments[2]).id() != LogicalTypeId::SQLNULL) {
         bind_data->has_feature_selection = true;
         // The actual feature list will be extracted at runtime
         // For now, we return all features - dynamic typing based on runtime values
@@ -151,23 +152,24 @@ static unique_ptr<FunctionData> TsFeaturesAggBind3(ClientContext &context, Aggre
     }
 
     // Set return type to all features (filtering happens at runtime)
-    function.return_type = GetFeaturesAggResultType();
+    function.SetReturnType(GetFeaturesAggResultType());
 
     return bind_data;
 }
 
 // Bind function for 4-parameter version (with feature_selection and feature_params)
-static unique_ptr<FunctionData> TsFeaturesAggBind4(ClientContext &context, AggregateFunction &function,
-                                                    vector<unique_ptr<Expression>> &arguments) {
+ANOFOX_AGG_BIND_SIG(TsFeaturesAggBind4) {
+    ANOFOX_AGG_BIND_PREAMBLE
+    (void)context;
     auto bind_data = make_uniq<TsFeaturesAggBindData>();
 
     // Third argument is feature_selection, fourth is feature_params
-    if (arguments.size() >= 3 && arguments[2]->return_type.id() != LogicalTypeId::SQLNULL) {
+    if (arguments.size() >= 3 && ExprReturnType(*arguments[2]).id() != LogicalTypeId::SQLNULL) {
         bind_data->has_feature_selection = true;
     }
     // feature_params (4th arg) is accepted but not currently used
 
-    function.return_type = GetFeaturesAggResultType();
+    function.SetReturnType(GetFeaturesAggResultType());
 
     return bind_data;
 }
@@ -246,7 +248,7 @@ static void TsFeaturesAggUpdate(Vector inputs[], AggregateInputData &aggr_input,
     }
 }
 
-static void TsFeaturesAggFinalize(Vector &state_vector, AggregateInputData &aggr_input,
+static void TsFeaturesAggFinalize(Vector &state_vector, ANOFOX_AGG_FINALIZE_INPUT &aggr_input,
                                   Vector &result, idx_t count, idx_t offset) {
     auto states = FlatVector::GetData<TsFeaturesAggState *>(state_vector);
 
@@ -304,8 +306,8 @@ static void TsFeaturesAggFinalize(Vector &state_vector, AggregateInputData &aggr
         // Populate the struct fields
         auto &struct_entries = StructVector::GetEntries(result);
         for (size_t j = 0; j < feature_names.size() && j < struct_entries.size(); j++) {
-            auto &child_vec = *struct_entries[j];
-            auto child_data = FlatVector::GetData<double>(child_vec);
+            auto &child_vec = struct_entries[j];
+            auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(child_vec);
 
             auto it = feature_map.find(feature_names[j]);
             if (it != feature_map.end()) {

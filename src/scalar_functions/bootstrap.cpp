@@ -15,7 +15,7 @@ static void ExtractListAsDouble(Vector &list_vec, idx_t row_idx, vector<double> 
     auto &list_entry = list_data[row_idx];
 
     auto &child_vec = ListVector::GetEntry(list_vec);
-    auto child_data = FlatVector::GetData<double>(child_vec);
+    auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(child_vec);
     auto &child_validity = FlatVector::Validity(child_vec);
 
     out_values.clear();
@@ -34,7 +34,7 @@ static void WriteListFromArray(Vector &list_vec, idx_t row_idx, const double *da
     auto offset = ListVector::GetListSize(list_vec);
     auto &child = ListVector::GetEntry(list_vec);
     ListVector::Reserve(list_vec, offset + n);
-    auto child_data = FlatVector::GetData<double>(child);
+    auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(child);
     for (idx_t i = 0; i < n; i++) {
         child_data[offset + i] = data[i];
     }
@@ -64,10 +64,10 @@ static void TsBootstrapIntervalsFunction(DataChunk &args, ExpressionState &state
     seed_vec.ToUnifiedFormat(count, seed_data);
 
     auto &struct_entries = StructVector::GetEntries(result);
-    auto &point_out = *struct_entries[0];
-    auto &lower_out = *struct_entries[1];
-    auto &upper_out = *struct_entries[2];
-    auto &coverage_out = *struct_entries[3];
+    auto &point_out = struct_entries[0];
+    auto &lower_out = struct_entries[1];
+    auto &upper_out = struct_entries[2];
+    auto &coverage_out = struct_entries[3];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto np_idx = n_paths_data.sel->get_index(row_idx);
@@ -108,7 +108,7 @@ static void TsBootstrapIntervalsFunction(DataChunk &args, ExpressionState &state
         WriteListFromArray(point_out, row_idx, bs_result.point, bs_result.n_forecasts);
         WriteListFromArray(lower_out, row_idx, bs_result.lower, bs_result.n_forecasts);
         WriteListFromArray(upper_out, row_idx, bs_result.upper, bs_result.n_forecasts);
-        FlatVector::GetData<double>(coverage_out)[row_idx] = bs_result.coverage;
+        ANOFOX_FLATVECTOR_WRITE<double>(coverage_out)[row_idx] = bs_result.coverage;
 
         anofox_free_bootstrap_result(&bs_result);
     }
@@ -200,9 +200,9 @@ static void TsBootstrapQuantilesFunction(DataChunk &args, ExpressionState &state
     seed_vec.ToUnifiedFormat(count, seed_data);
 
     auto &struct_entries = StructVector::GetEntries(result);
-    auto &point_out = *struct_entries[0];
-    auto &quantiles_out = *struct_entries[1];
-    auto &values_out = *struct_entries[2];
+    auto &point_out = struct_entries[0];
+    auto &quantiles_out = struct_entries[1];
+    auto &values_out = struct_entries[2];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto np_idx = n_paths_data.sel->get_index(row_idx);

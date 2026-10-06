@@ -1,3 +1,4 @@
+#include "anofox_forecast_extension.hpp"
 #include "ts_forecast_var_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // ParseFrequencyWithType, date helpers, DateColumnType
 #include "anofox_fcst_ffi.h"
@@ -130,7 +131,7 @@ static unique_ptr<FunctionData> TsForecastVarNativeBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsForecastVarNativeBindData>();
 
@@ -258,7 +259,7 @@ static unique_ptr<FunctionData> TsForecastVarNativeBind(
     names.push_back("forecast_step");
     return_types.push_back(LogicalType::BIGINT);
 
-    names.push_back(date_col_name);
+    names.push_back(ToBindName(date_col_name));
     return_types.push_back(bind_data->date_logical_type);
 
     names.push_back("forecast_value");

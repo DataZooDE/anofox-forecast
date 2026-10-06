@@ -176,7 +176,7 @@ static void TsDetectPeriodsAggUpdate3(Vector inputs[], AggregateInputData &aggr_
     }
 }
 
-static void TsDetectPeriodsAggFinalize(Vector &state_vector, AggregateInputData &aggr_input,
+static void TsDetectPeriodsAggFinalize(Vector &state_vector, ANOFOX_AGG_FINALIZE_INPUT &aggr_input,
                                        Vector &result, idx_t count, idx_t offset) {
     auto states = FlatVector::GetData<TsDetectPeriodsAggState *>(state_vector);
 
@@ -231,8 +231,8 @@ static void TsDetectPeriodsAggFinalize(Vector &state_vector, AggregateInputData 
 
         // periods (index 0) - LIST of STRUCT
         {
-            auto &list_vec = *children[0];
-            auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
+            auto &list_vec = children[0];
+            auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(list_vec);
             auto current_size = ListVector::GetListSize(list_vec);
 
             list_data[row].offset = current_size;
@@ -245,15 +245,15 @@ static void TsDetectPeriodsAggFinalize(Vector &state_vector, AggregateInputData 
                 auto &list_child = ListVector::GetEntry(list_vec);
                 auto &struct_entries = StructVector::GetEntries(list_child);
 
-                auto period_data = FlatVector::GetData<double>(*struct_entries[0]);
-                auto confidence_data = FlatVector::GetData<double>(*struct_entries[1]);
-                auto strength_data = FlatVector::GetData<double>(*struct_entries[2]);
-                auto amplitude_data = FlatVector::GetData<double>(*struct_entries[3]);
-                auto phase_data = FlatVector::GetData<double>(*struct_entries[4]);
-                auto iteration_data = FlatVector::GetData<int64_t>(*struct_entries[5]);
-                auto matches_expected_data = FlatVector::GetData<bool>(*struct_entries[6]);
-                auto matched_expected_period_data = FlatVector::GetData<double>(*struct_entries[7]);
-                auto match_deviation_data = FlatVector::GetData<double>(*struct_entries[8]);
+                auto period_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[0]);
+                auto confidence_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[1]);
+                auto strength_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[2]);
+                auto amplitude_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[3]);
+                auto phase_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[4]);
+                auto iteration_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(struct_entries[5]);
+                auto matches_expected_data = ANOFOX_FLATVECTOR_WRITE<bool>(struct_entries[6]);
+                auto matched_expected_period_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[7]);
+                auto match_deviation_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[8]);
 
                 for (size_t j = 0; j < period_result.n_periods; j++) {
                     period_data[current_size + j] = period_result.period_values[j];
@@ -270,14 +270,14 @@ static void TsDetectPeriodsAggFinalize(Vector &state_vector, AggregateInputData 
         }
 
         // n_periods (index 1)
-        FlatVector::GetData<int64_t>(*children[1])[row] = period_result.n_periods;
+        ANOFOX_FLATVECTOR_WRITE<int64_t>(children[1])[row] = period_result.n_periods;
 
         // primary_period (index 2)
-        FlatVector::GetData<double>(*children[2])[row] = period_result.primary_period;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row] = period_result.primary_period;
 
         // method (index 3)
-        FlatVector::GetData<string_t>(*children[3])[row] =
-            StringVector::AddString(*children[3], period_result.method);
+        ANOFOX_FLATVECTOR_WRITE<string_t>(children[3])[row] =
+            StringVector::AddString(children[3], period_result.method);
 
         // Free FFI result
         anofox_free_flat_multi_period_result(&period_result);

@@ -1,3 +1,4 @@
+#include "anofox_forecast_extension.hpp"
 #include "ts_cv_hydrate_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For DateColumnType, helper functions
 #include "duckdb/common/exception.hpp"
@@ -145,7 +146,7 @@ static string ParseStringParamForHydrate(const Value &params, const string &key,
         auto &struct_children = StructValue::GetChildren(params);
         auto &struct_type = StructType::GetChildTypes(params.type());
         for (idx_t i = 0; i < struct_children.size(); i++) {
-            auto k = struct_type[i].first;
+            auto k = ToColumnName(struct_type[i].first);
             StringUtil::Trim(k);
             if (StringUtil::Lower(k) == StringUtil::Lower(key) && !struct_children[i].IsNull()) {
                 return struct_children[i].ToString();
@@ -280,7 +281,7 @@ static void ValidateHydrateParams(const Value &params) {
     } else if (params.type().id() == LogicalTypeId::STRUCT) {
         auto &struct_type = StructType::GetChildTypes(params.type());
         for (idx_t i = 0; i < struct_type.size(); i++) {
-            auto key = struct_type[i].first;
+            auto key = ToColumnName(struct_type[i].first);
             StringUtil::Trim(key);
             if (VALID_HYDRATE_PARAMS.find(StringUtil::Lower(key)) == VALID_HYDRATE_PARAMS.end()) {
                 unknown_keys.push_back(key);
@@ -311,7 +312,7 @@ static unique_ptr<FunctionData> TsCvHydrateNativeBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsCvHydrateNativeBindData>();
 
@@ -336,9 +337,9 @@ static unique_ptr<FunctionData> TsCvHydrateNativeBind(
     bind_data->target_type = input.input_table_types[2];
 
     // Get column names
-    bind_data->group_col_name = input.input_table_names.size() > 0 ? input.input_table_names[0] : "group_col";
-    bind_data->date_col_name = input.input_table_names.size() > 1 ? input.input_table_names[1] : "date_col";
-    bind_data->target_col_name = input.input_table_names.size() > 2 ? input.input_table_names[2] : "target_col";
+    bind_data->group_col_name = input.input_table_names.size() > 0 ? ToColumnName(input.input_table_names[0]) : ToColumnName("group_col");
+    bind_data->date_col_name = input.input_table_names.size() > 1 ? ToColumnName(input.input_table_names[1]) : ToColumnName("date_col");
+    bind_data->target_col_name = input.input_table_names.size() > 2 ? ToColumnName(input.input_table_names[2]) : ToColumnName("target_col");
 
     // Parse unknown_features array (input.inputs[1])
     if (input.inputs.size() >= 2 && !input.inputs[1].IsNull()) {
@@ -370,15 +371,15 @@ static unique_ptr<FunctionData> TsCvHydrateNativeBind(
     // Build output schema: cv_folds columns + unknown features as VARCHAR
     // Column 0: group
     return_types.push_back(bind_data->group_type);
-    names.push_back(bind_data->group_col_name);
+    names.push_back(ToBindName(bind_data->group_col_name));
 
     // Column 1: date
     return_types.push_back(bind_data->date_type);
-    names.push_back(bind_data->date_col_name);
+    names.push_back(ToBindName(bind_data->date_col_name));
 
     // Column 2: target
     return_types.push_back(bind_data->target_type);
-    names.push_back(bind_data->target_col_name);
+    names.push_back(ToBindName(bind_data->target_col_name));
 
     // Column 3: fold_id
     return_types.push_back(LogicalType::BIGINT);
@@ -391,7 +392,7 @@ static unique_ptr<FunctionData> TsCvHydrateNativeBind(
     // Columns 5+: unknown features as VARCHAR
     for (const auto &feat_name : bind_data->unknown_feature_names) {
         return_types.push_back(LogicalType::VARCHAR);
-        names.push_back(feat_name);
+        names.push_back(ToBindName(feat_name));
     }
 
     return std::move(bind_data);

@@ -138,7 +138,7 @@ static void ExtractListDoubles(Vector &list_vec, idx_t count, idx_t row_idx,
 template <typename T>
 static void SetStructField(Vector &result, idx_t field_idx, idx_t row_idx, T value) {
     auto &children = StructVector::GetEntries(result);
-    auto data = FlatVector::GetData<T>(*children[field_idx]);
+    auto data = ANOFOX_FLATVECTOR_WRITE<T>(children[field_idx]);
     data[row_idx] = value;
 }
 
@@ -219,8 +219,8 @@ static void PopulateTsStatsResult(Vector &result, idx_t row_idx, const TsStatsRe
         SetStructField<uint64_t>(result, 34, row_idx, stats_result.expected_length);
         SetStructField<uint64_t>(result, 35, row_idx, stats_result.n_gaps);
     } else {
-        FlatVector::SetNull(*children[34], row_idx, true);
-        FlatVector::SetNull(*children[35], row_idx, true);
+        FlatVector::SetNull(children[34], row_idx, true);
+        FlatVector::SetNull(children[35], row_idx, true);
     }
 }
 
@@ -399,7 +399,7 @@ static unique_ptr<FunctionData> TsStatsByBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsStatsByBindData>();
 
@@ -419,7 +419,7 @@ static unique_ptr<FunctionData> TsStatsByBind(
     }
 
     // Preserve the group column name from input
-    bind_data->group_col_name = input.input_table_names[0];
+    bind_data->group_col_name = ToColumnName(input.input_table_names[0]);
     bind_data->group_logical_type = input.input_table_types[0];
 
     // Detect date column type from input (column 1)
@@ -438,7 +438,7 @@ static unique_ptr<FunctionData> TsStatsByBind(
     }
 
     // Output schema: group_col (with preserved name), then all 36 stats columns
-    names.push_back(bind_data->group_col_name);  // Use the preserved input column name!
+    names.push_back(ToBindName(bind_data->group_col_name));  // Use the preserved input column name!
     return_types.push_back(bind_data->group_logical_type);
 
     // Add all 36 stats columns
@@ -698,45 +698,45 @@ static OperatorFinalizeResultType TsStatsByFinalize(
         output.data[0].SetValue(out_idx, row.group_value);
 
         // Columns 1-36: Stats values
-        FlatVector::GetData<uint64_t>(output.data[1])[out_idx] = stats.length;
-        FlatVector::GetData<uint64_t>(output.data[2])[out_idx] = stats.n_nulls;
-        FlatVector::GetData<uint64_t>(output.data[3])[out_idx] = stats.n_nan;
-        FlatVector::GetData<uint64_t>(output.data[4])[out_idx] = stats.n_zeros;
-        FlatVector::GetData<uint64_t>(output.data[5])[out_idx] = stats.n_positive;
-        FlatVector::GetData<uint64_t>(output.data[6])[out_idx] = stats.n_negative;
-        FlatVector::GetData<uint64_t>(output.data[7])[out_idx] = stats.n_unique_values;
-        FlatVector::GetData<bool>(output.data[8])[out_idx] = stats.is_constant;
-        FlatVector::GetData<uint64_t>(output.data[9])[out_idx] = stats.n_zeros_start;
-        FlatVector::GetData<uint64_t>(output.data[10])[out_idx] = stats.n_zeros_end;
-        FlatVector::GetData<uint64_t>(output.data[11])[out_idx] = stats.plateau_size;
-        FlatVector::GetData<uint64_t>(output.data[12])[out_idx] = stats.plateau_size_nonzero;
-        FlatVector::GetData<double>(output.data[13])[out_idx] = stats.mean;
-        FlatVector::GetData<double>(output.data[14])[out_idx] = stats.median;
-        FlatVector::GetData<double>(output.data[15])[out_idx] = stats.std_dev;
-        FlatVector::GetData<double>(output.data[16])[out_idx] = stats.variance;
-        FlatVector::GetData<double>(output.data[17])[out_idx] = stats.min;
-        FlatVector::GetData<double>(output.data[18])[out_idx] = stats.max;
-        FlatVector::GetData<double>(output.data[19])[out_idx] = stats.range;
-        FlatVector::GetData<double>(output.data[20])[out_idx] = stats.sum;
-        FlatVector::GetData<double>(output.data[21])[out_idx] = stats.skewness;
-        FlatVector::GetData<double>(output.data[22])[out_idx] = stats.kurtosis;
-        FlatVector::GetData<double>(output.data[23])[out_idx] = stats.tail_index;
-        FlatVector::GetData<double>(output.data[24])[out_idx] = stats.bimodality_coef;
-        FlatVector::GetData<double>(output.data[25])[out_idx] = stats.trimmed_mean;
-        FlatVector::GetData<double>(output.data[26])[out_idx] = stats.coef_variation;
-        FlatVector::GetData<double>(output.data[27])[out_idx] = stats.q1;
-        FlatVector::GetData<double>(output.data[28])[out_idx] = stats.q3;
-        FlatVector::GetData<double>(output.data[29])[out_idx] = stats.iqr;
-        FlatVector::GetData<double>(output.data[30])[out_idx] = stats.autocorr_lag1;
-        FlatVector::GetData<double>(output.data[31])[out_idx] = stats.trend_strength;
-        FlatVector::GetData<double>(output.data[32])[out_idx] = stats.seasonality_strength;
-        FlatVector::GetData<double>(output.data[33])[out_idx] = stats.entropy;
-        FlatVector::GetData<double>(output.data[34])[out_idx] = stats.stability;
+        ANOFOX_FLATVECTOR_WRITE<uint64_t>(output.data[1])[out_idx] = stats.length;
+        ANOFOX_FLATVECTOR_WRITE<uint64_t>(output.data[2])[out_idx] = stats.n_nulls;
+        ANOFOX_FLATVECTOR_WRITE<uint64_t>(output.data[3])[out_idx] = stats.n_nan;
+        ANOFOX_FLATVECTOR_WRITE<uint64_t>(output.data[4])[out_idx] = stats.n_zeros;
+        ANOFOX_FLATVECTOR_WRITE<uint64_t>(output.data[5])[out_idx] = stats.n_positive;
+        ANOFOX_FLATVECTOR_WRITE<uint64_t>(output.data[6])[out_idx] = stats.n_negative;
+        ANOFOX_FLATVECTOR_WRITE<uint64_t>(output.data[7])[out_idx] = stats.n_unique_values;
+        ANOFOX_FLATVECTOR_WRITE<bool>(output.data[8])[out_idx] = stats.is_constant;
+        ANOFOX_FLATVECTOR_WRITE<uint64_t>(output.data[9])[out_idx] = stats.n_zeros_start;
+        ANOFOX_FLATVECTOR_WRITE<uint64_t>(output.data[10])[out_idx] = stats.n_zeros_end;
+        ANOFOX_FLATVECTOR_WRITE<uint64_t>(output.data[11])[out_idx] = stats.plateau_size;
+        ANOFOX_FLATVECTOR_WRITE<uint64_t>(output.data[12])[out_idx] = stats.plateau_size_nonzero;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[13])[out_idx] = stats.mean;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[14])[out_idx] = stats.median;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[15])[out_idx] = stats.std_dev;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[16])[out_idx] = stats.variance;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[17])[out_idx] = stats.min;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[18])[out_idx] = stats.max;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[19])[out_idx] = stats.range;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[20])[out_idx] = stats.sum;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[21])[out_idx] = stats.skewness;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[22])[out_idx] = stats.kurtosis;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[23])[out_idx] = stats.tail_index;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[24])[out_idx] = stats.bimodality_coef;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[25])[out_idx] = stats.trimmed_mean;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[26])[out_idx] = stats.coef_variation;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[27])[out_idx] = stats.q1;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[28])[out_idx] = stats.q3;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[29])[out_idx] = stats.iqr;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[30])[out_idx] = stats.autocorr_lag1;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[31])[out_idx] = stats.trend_strength;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[32])[out_idx] = stats.seasonality_strength;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[33])[out_idx] = stats.entropy;
+        ANOFOX_FLATVECTOR_WRITE<double>(output.data[34])[out_idx] = stats.stability;
 
         // expected_length and n_gaps - handle NULL if no date metrics
         if (stats.has_date_metrics) {
-            FlatVector::GetData<uint64_t>(output.data[35])[out_idx] = stats.expected_length;
-            FlatVector::GetData<uint64_t>(output.data[36])[out_idx] = stats.n_gaps;
+            ANOFOX_FLATVECTOR_WRITE<uint64_t>(output.data[35])[out_idx] = stats.expected_length;
+            ANOFOX_FLATVECTOR_WRITE<uint64_t>(output.data[36])[out_idx] = stats.n_gaps;
         } else {
             FlatVector::SetNull(output.data[35], out_idx, true);
             FlatVector::SetNull(output.data[36], out_idx, true);
@@ -788,7 +788,7 @@ void RegisterTsStatsFunction(ExtensionLoader &loader) {
         GetTsStatsResultType(),
         TsStatsFunction
     );
-    ts_stats_func.stability = FunctionStability::VOLATILE;
+    ts_stats_func.SetStability(FunctionStability::VOLATILE);
     ts_stats_set.AddFunction(ts_stats_func);
 
     CreateScalarFunctionInfo info(ts_stats_set);
@@ -806,7 +806,7 @@ void RegisterTsStatsFunction(ExtensionLoader &loader) {
         GetTsStatsResultType(),
         TsStatsWithDatesFunction
     );
-    ts_stats_with_dates_func.stability = FunctionStability::VOLATILE;
+    ts_stats_with_dates_func.SetStability(FunctionStability::VOLATILE);
     ts_stats_with_dates_set.AddFunction(ts_stats_with_dates_func);
 
     CreateScalarFunctionInfo with_dates_info(ts_stats_with_dates_set);

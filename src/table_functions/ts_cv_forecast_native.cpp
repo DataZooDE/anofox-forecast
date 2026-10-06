@@ -1,3 +1,4 @@
+#include "anofox_forecast_extension.hpp"
 #include "ts_cv_forecast_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For DateColumnType, helper functions
 #include "anofox_fcst_ffi.h"
@@ -270,8 +271,8 @@ static void ValidateParamKeys(const Value &params_value) {
     } else if (params_value.type().id() == LogicalTypeId::STRUCT) {
         auto &child_types = StructType::GetChildTypes(params_value.type());
         for (idx_t i = 0; i < child_types.size(); i++) {
-            if (valid_keys.find(child_types[i].first) == valid_keys.end()) {
-                unknown_keys.push_back(child_types[i].first);
+            if (valid_keys.find(ToColumnName(child_types[i].first)) == valid_keys.end()) {
+                unknown_keys.push_back(ToColumnName(child_types[i].first));
             }
         }
     }
@@ -296,7 +297,7 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsCvForecastNativeBindData>();
 
@@ -351,9 +352,9 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
                 continue;
             }
             if (group_col_name.empty()) {
-                group_col_name = table_names[i];
+                group_col_name = ToColumnName(table_names[i]);
             } else if (date_col_name.empty()) {
-                date_col_name = table_names[i];
+                date_col_name = ToColumnName(table_names[i]);
                 break;
             }
         }
@@ -362,8 +363,8 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
         bind_data->group_col = 2;
         bind_data->date_col = 3;
         bind_data->value_col = 4;
-        group_col_name = table_names[2];
-        date_col_name = table_names[3];
+        group_col_name = ToColumnName(table_names[2]);
+        date_col_name = ToColumnName(table_names[3]);
     }
     if (group_col_name.empty()) group_col_name = "id";
     if (date_col_name.empty()) date_col_name = "date";
@@ -461,10 +462,10 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
     names.push_back("fold_id");
     return_types.push_back(LogicalType::BIGINT);
 
-    names.push_back(group_col_name);
+    names.push_back(ToBindName(group_col_name));
     return_types.push_back(bind_data->group_logical_type);
 
-    names.push_back(date_col_name);
+    names.push_back(ToBindName(date_col_name));
     return_types.push_back(bind_data->date_logical_type);
 
     names.push_back("y");

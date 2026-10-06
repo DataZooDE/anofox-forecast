@@ -1,3 +1,4 @@
+#include "anofox_forecast_extension.hpp"
 #include "ts_fill_gaps_native.hpp"  // Reuse helper functions
 #include "anofox_fcst_ffi.h"
 #include "duckdb/common/exception.hpp"
@@ -79,7 +80,7 @@ static unique_ptr<FunctionData> TsFillForwardNativeBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsFillForwardNativeBindData>();
 

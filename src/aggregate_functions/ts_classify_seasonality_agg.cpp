@@ -123,7 +123,7 @@ static void TsClassifySeasonalityAggUpdate(Vector inputs[], AggregateInputData &
     }
 }
 
-static void TsClassifySeasonalityAggFinalize(Vector &state_vector, AggregateInputData &aggr_input,
+static void TsClassifySeasonalityAggFinalize(Vector &state_vector, ANOFOX_AGG_FINALIZE_INPUT &aggr_input,
                                              Vector &result, idx_t count, idx_t offset) {
     auto states = FlatVector::GetData<TsClassifySeasonalityAggState *>(state_vector);
 
@@ -194,34 +194,34 @@ static void TsClassifySeasonalityAggFinalize(Vector &state_vector, AggregateInpu
         auto &children = StructVector::GetEntries(result);
 
         // timing_classification (index 0)
-        FlatVector::GetData<string_t>(*children[0])[row] =
-            StringVector::AddString(*children[0], class_result.classification);
+        ANOFOX_FLATVECTOR_WRITE<string_t>(children[0])[row] =
+            StringVector::AddString(children[0], class_result.classification);
 
         // modulation_type (index 1)
         if (mod_success) {
-            FlatVector::GetData<string_t>(*children[1])[row] =
-                StringVector::AddString(*children[1], mod_result.modulation_type);
+            ANOFOX_FLATVECTOR_WRITE<string_t>(children[1])[row] =
+                StringVector::AddString(children[1], mod_result.modulation_type);
         } else {
-            FlatVector::GetData<string_t>(*children[1])[row] =
-                StringVector::AddString(*children[1], "unknown");
+            ANOFOX_FLATVECTOR_WRITE<string_t>(children[1])[row] =
+                StringVector::AddString(children[1], "unknown");
         }
 
         // has_stable_timing (index 2)
-        FlatVector::GetData<bool>(*children[2])[row] = class_result.has_stable_timing;
+        ANOFOX_FLATVECTOR_WRITE<bool>(children[2])[row] = class_result.has_stable_timing;
 
         // timing_variability (index 3)
-        FlatVector::GetData<double>(*children[3])[row] = class_result.timing_variability;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[3])[row] = class_result.timing_variability;
 
         // seasonal_strength (index 4)
-        FlatVector::GetData<double>(*children[4])[row] = class_result.seasonal_strength;
+        ANOFOX_FLATVECTOR_WRITE<double>(children[4])[row] = class_result.seasonal_strength;
 
         // is_seasonal (index 5)
-        FlatVector::GetData<bool>(*children[5])[row] = class_result.is_seasonal;
+        ANOFOX_FLATVECTOR_WRITE<bool>(children[5])[row] = class_result.is_seasonal;
 
         // cycle_strengths (index 6)
         {
-            auto &list_vec = *children[6];
-            auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
+            auto &list_vec = children[6];
+            auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(list_vec);
             auto &list_child = ListVector::GetEntry(list_vec);
             auto current_size = ListVector::GetListSize(list_vec);
 
@@ -231,7 +231,7 @@ static void TsClassifySeasonalityAggFinalize(Vector &state_vector, AggregateInpu
             ListVector::Reserve(list_vec, current_size + class_result.n_cycle_strengths);
             ListVector::SetListSize(list_vec, current_size + class_result.n_cycle_strengths);
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(list_child);
             for (size_t j = 0; j < class_result.n_cycle_strengths; j++) {
                 child_data[current_size + j] = class_result.cycle_strengths[j];
             }
@@ -239,8 +239,8 @@ static void TsClassifySeasonalityAggFinalize(Vector &state_vector, AggregateInpu
 
         // weak_seasons (index 7)
         {
-            auto &list_vec = *children[7];
-            auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
+            auto &list_vec = children[7];
+            auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(list_vec);
             auto &list_child = ListVector::GetEntry(list_vec);
             auto current_size = ListVector::GetListSize(list_vec);
 
@@ -250,7 +250,7 @@ static void TsClassifySeasonalityAggFinalize(Vector &state_vector, AggregateInpu
             ListVector::Reserve(list_vec, current_size + class_result.n_weak_seasons);
             ListVector::SetListSize(list_vec, current_size + class_result.n_weak_seasons);
 
-            auto child_data = FlatVector::GetData<int64_t>(list_child);
+            auto child_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(list_child);
             for (size_t j = 0; j < class_result.n_weak_seasons; j++) {
                 child_data[current_size + j] = static_cast<int64_t>(class_result.weak_seasons[j]);
             }

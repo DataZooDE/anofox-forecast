@@ -13,7 +13,7 @@ static void ExtractListAsDouble(Vector &list_vec, idx_t row_idx, vector<double> 
     auto &list_entry = list_data[row_idx];
 
     auto &child_vec = ListVector::GetEntry(list_vec);
-    auto child_data = FlatVector::GetData<double>(child_vec);
+    auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(child_vec);
     auto &child_validity = FlatVector::Validity(child_vec);
 
     out_values.clear();
@@ -76,7 +76,7 @@ static void TsDiffFunction(DataChunk &args, ExpressionState &state, Vector &resu
             continue;
         }
 
-        auto list_data = FlatVector::GetData<list_entry_t>(result);
+        auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(result);
         auto &list_child = ListVector::GetEntry(result);
         auto current_size = ListVector::GetListSize(result);
 
@@ -86,7 +86,7 @@ static void TsDiffFunction(DataChunk &args, ExpressionState &state, Vector &resu
         ListVector::Reserve(result, current_size + out_length);
         ListVector::SetListSize(result, current_size + out_length);
 
-        auto child_data = FlatVector::GetData<double>(list_child);
+        auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(list_child);
         if (out_values && out_length > 0) {
             memcpy(child_data + current_size, out_values, out_length * sizeof(double));
             anofox_free_double_array(out_values);
@@ -134,7 +134,7 @@ static void TsDropConstantFunction(DataChunk &args, ExpressionState &state, Vect
             FlatVector::SetNull(result, row_idx, true);
         } else {
             // Copy through the values
-            auto list_data = FlatVector::GetData<list_entry_t>(result);
+            auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(result);
             auto &list_child = ListVector::GetEntry(result);
             auto current_size = ListVector::GetListSize(result);
 
@@ -144,7 +144,7 @@ static void TsDropConstantFunction(DataChunk &args, ExpressionState &state, Vect
             ListVector::Reserve(result, current_size + values.size());
             ListVector::SetListSize(result, current_size + values.size());
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(list_child);
             memcpy(child_data + current_size, values.data(), values.size() * sizeof(double));
         }
     }
@@ -189,7 +189,7 @@ static void TsDropShortFunction(DataChunk &args, ExpressionState &state, Vector 
         if ((int32_t)values.size() < min_len) {
             FlatVector::SetNull(result, row_idx, true);
         } else {
-            auto list_data = FlatVector::GetData<list_entry_t>(result);
+            auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(result);
             auto &list_child = ListVector::GetEntry(result);
             auto current_size = ListVector::GetListSize(result);
 
@@ -199,7 +199,7 @@ static void TsDropShortFunction(DataChunk &args, ExpressionState &state, Vector 
             ListVector::Reserve(result, current_size + values.size());
             ListVector::SetListSize(result, current_size + values.size());
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(list_child);
             memcpy(child_data + current_size, values.data(), values.size() * sizeof(double));
         }
     }
@@ -240,7 +240,7 @@ static void TsDropLeadingZerosFunction(DataChunk &args, ExpressionState &state, 
 
         size_t new_len = values.size() - start;
 
-        auto list_data = FlatVector::GetData<list_entry_t>(result);
+        auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(result);
         auto &list_child = ListVector::GetEntry(result);
         auto current_size = ListVector::GetListSize(result);
 
@@ -250,7 +250,7 @@ static void TsDropLeadingZerosFunction(DataChunk &args, ExpressionState &state, 
         ListVector::Reserve(result, current_size + new_len);
         ListVector::SetListSize(result, current_size + new_len);
 
-        auto child_data = FlatVector::GetData<double>(list_child);
+        auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(list_child);
         if (new_len > 0) {
             memcpy(child_data + current_size, values.data() + start, new_len * sizeof(double));
         }
@@ -290,7 +290,7 @@ static void TsDropTrailingZerosFunction(DataChunk &args, ExpressionState &state,
             }
         }
 
-        auto list_data = FlatVector::GetData<list_entry_t>(result);
+        auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(result);
         auto &list_child = ListVector::GetEntry(result);
         auto current_size = ListVector::GetListSize(result);
 
@@ -300,7 +300,7 @@ static void TsDropTrailingZerosFunction(DataChunk &args, ExpressionState &state,
         ListVector::Reserve(result, current_size + end);
         ListVector::SetListSize(result, current_size + end);
 
-        auto child_data = FlatVector::GetData<double>(list_child);
+        auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(list_child);
         if (end > 0) {
             memcpy(child_data + current_size, values.data(), end * sizeof(double));
         }
@@ -350,7 +350,7 @@ static void TsDropEdgeZerosFunction(DataChunk &args, ExpressionState &state, Vec
 
         size_t new_len = (end > start) ? (end - start) : 0;
 
-        auto list_data = FlatVector::GetData<list_entry_t>(result);
+        auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(result);
         auto &list_child = ListVector::GetEntry(result);
         auto current_size = ListVector::GetListSize(result);
 
@@ -360,7 +360,7 @@ static void TsDropEdgeZerosFunction(DataChunk &args, ExpressionState &state, Vec
         ListVector::Reserve(result, current_size + new_len);
         ListVector::SetListSize(result, current_size + new_len);
 
-        auto child_data = FlatVector::GetData<double>(list_child);
+        auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(list_child);
         if (new_len > 0) {
             memcpy(child_data + current_size, values.data() + start, new_len * sizeof(double));
         }

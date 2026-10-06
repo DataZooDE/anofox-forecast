@@ -5,6 +5,15 @@
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/common/types/vector.hpp"
+// DuckDB 2.0 split ListVector/StructVector/FlatVector/StringVector out of
+// vector.hpp into dedicated headers under duckdb/common/vector/; v1.5.x still
+// declares them inline in vector.hpp. __has_include degrades gracefully on
+// both versions without needing a version macro.
+#if __has_include("duckdb/common/vector/list_vector.hpp")
+#include "duckdb/common/vector/flat_vector.hpp"
+#include "duckdb/common/vector/list_vector.hpp"
+#include "duckdb/common/vector/struct_vector.hpp"
+#endif
 #include <algorithm>
 #include <cctype>
 
@@ -24,7 +33,7 @@ static void ExtractListAsDouble(Vector &list_vec, idx_t row_idx, vector<double> 
     auto &list_entry = list_data[row_idx];
 
     auto &child_vec = ListVector::GetEntry(list_vec);
-    auto child_data = FlatVector::GetData<double>(child_vec);
+    auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(child_vec);
     auto &child_validity = FlatVector::Validity(child_vec);
 
     out_values.clear();
@@ -95,8 +104,8 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
 
         // Set trend list
         {
-            auto &trend_list = *children[0];
-            auto list_data = FlatVector::GetData<list_entry_t>(trend_list);
+            auto &trend_list = children[0];
+            auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(trend_list);
             auto &list_child = ListVector::GetEntry(trend_list);
             auto current_size = ListVector::GetListSize(trend_list);
 
@@ -106,7 +115,7 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
             ListVector::Reserve(trend_list, current_size + mstl_result.n_observations);
             ListVector::SetListSize(trend_list, current_size + mstl_result.n_observations);
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(list_child);
             if (mstl_result.trend) {
                 memcpy(child_data + current_size, mstl_result.trend,
                        mstl_result.n_observations * sizeof(double));
@@ -115,8 +124,8 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
 
         // Set seasonal components (list of lists)
         {
-            auto &seasonal_outer = *children[1];
-            auto outer_list_data = FlatVector::GetData<list_entry_t>(seasonal_outer);
+            auto &seasonal_outer = children[1];
+            auto outer_list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(seasonal_outer);
             auto &inner_list_vec = ListVector::GetEntry(seasonal_outer);
             auto outer_size = ListVector::GetListSize(seasonal_outer);
 
@@ -126,7 +135,7 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
             ListVector::Reserve(seasonal_outer, outer_size + mstl_result.n_seasonal);
             ListVector::SetListSize(seasonal_outer, outer_size + mstl_result.n_seasonal);
 
-            auto inner_list_data = FlatVector::GetData<list_entry_t>(inner_list_vec);
+            auto inner_list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(inner_list_vec);
             auto &inner_child = ListVector::GetEntry(inner_list_vec);
 
             for (size_t s = 0; s < mstl_result.n_seasonal; s++) {
@@ -137,7 +146,7 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
                 ListVector::Reserve(inner_list_vec, inner_size + mstl_result.n_observations);
                 ListVector::SetListSize(inner_list_vec, inner_size + mstl_result.n_observations);
 
-                auto inner_data = FlatVector::GetData<double>(inner_child);
+                auto inner_data = ANOFOX_FLATVECTOR_WRITE<double>(inner_child);
                 if (mstl_result.seasonal_components && mstl_result.seasonal_components[s]) {
                     memcpy(inner_data + inner_size, mstl_result.seasonal_components[s],
                            mstl_result.n_observations * sizeof(double));
@@ -147,8 +156,8 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
 
         // Set remainder list
         {
-            auto &remainder_list = *children[2];
-            auto list_data = FlatVector::GetData<list_entry_t>(remainder_list);
+            auto &remainder_list = children[2];
+            auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(remainder_list);
             auto &list_child = ListVector::GetEntry(remainder_list);
             auto current_size = ListVector::GetListSize(remainder_list);
 
@@ -158,7 +167,7 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
             ListVector::Reserve(remainder_list, current_size + mstl_result.n_observations);
             ListVector::SetListSize(remainder_list, current_size + mstl_result.n_observations);
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(list_child);
             if (mstl_result.remainder) {
                 memcpy(child_data + current_size, mstl_result.remainder,
                        mstl_result.n_observations * sizeof(double));
@@ -167,8 +176,8 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
 
         // Set periods list
         {
-            auto &periods_list = *children[3];
-            auto list_data = FlatVector::GetData<list_entry_t>(periods_list);
+            auto &periods_list = children[3];
+            auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(periods_list);
             auto &list_child = ListVector::GetEntry(periods_list);
             auto current_size = ListVector::GetListSize(periods_list);
 
@@ -178,7 +187,7 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
             ListVector::Reserve(periods_list, current_size + mstl_result.n_seasonal);
             ListVector::SetListSize(periods_list, current_size + mstl_result.n_seasonal);
 
-            auto child_data = FlatVector::GetData<int32_t>(list_child);
+            auto child_data = ANOFOX_FLATVECTOR_WRITE<int32_t>(list_child);
             if (mstl_result.seasonal_periods) {
                 for (size_t i = 0; i < mstl_result.n_seasonal; i++) {
                     child_data[current_size + i] = mstl_result.seasonal_periods[i];

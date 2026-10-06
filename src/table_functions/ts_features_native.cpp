@@ -1,3 +1,4 @@
+#include "anofox_forecast_extension.hpp"
 #include "ts_features_native.hpp"
 #include "anofox_fcst_ffi.h"
 #include "duckdb/common/exception.hpp"
@@ -143,7 +144,7 @@ static unique_ptr<FunctionData> TsFeaturesNativeBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsFeaturesNativeBindData>();
 
@@ -156,16 +157,16 @@ static unique_ptr<FunctionData> TsFeaturesNativeBind(
 
     // Capture input types
     bind_data->group_logical_type = input.input_table_types[0];
-    bind_data->group_col_name = input.input_table_names.size() > 0 ? input.input_table_names[0] : "id";
+    bind_data->group_col_name = input.input_table_names.size() > 0 ? ToColumnName(input.input_table_names[0]) : ToColumnName("id");
 
     // Output schema: preserve original group column name + feature columns
-    names.push_back(bind_data->group_col_name);
+    names.push_back(ToBindName(bind_data->group_col_name));
     return_types.push_back(bind_data->group_logical_type);
 
     // Add all feature columns
     const auto& feature_names = GetFeatureNames();
     for (const auto& feature_name : feature_names) {
-        names.push_back(feature_name);
+        names.push_back(ToBindName(feature_name));
         return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
     }
 

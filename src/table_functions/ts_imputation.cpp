@@ -102,7 +102,7 @@ static void TsFillNullsConstFunction(DataChunk &args, ExpressionState &state, Ve
         }
 
         // Build result list
-        auto list_data = FlatVector::GetData<list_entry_t>(result);
+        auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(result);
         auto &list_child = ListVector::GetEntry(result);
         auto current_size = ListVector::GetListSize(result);
 
@@ -112,7 +112,7 @@ static void TsFillNullsConstFunction(DataChunk &args, ExpressionState &state, Ve
         ListVector::Reserve(result, current_size + values.size());
         ListVector::SetListSize(result, current_size + values.size());
 
-        auto child_data = FlatVector::GetData<double>(list_child);
+        auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(list_child);
         if (out_values) {
             memcpy(child_data + current_size, out_values, values.size() * sizeof(double));
             anofox_free_double_array(out_values);
@@ -150,7 +150,7 @@ static void TsFillNullsForwardFunction(DataChunk &args, ExpressionState &state, 
         ExtractListValues(list_vec, count, row_idx, values, validity);
 
         // Simple forward fill implementation in C++
-        auto list_data = FlatVector::GetData<list_entry_t>(result);
+        auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(result);
         auto &list_child = ListVector::GetEntry(result);
         auto current_size = ListVector::GetListSize(result);
 
@@ -160,8 +160,8 @@ static void TsFillNullsForwardFunction(DataChunk &args, ExpressionState &state, 
         ListVector::Reserve(result, current_size + values.size());
         ListVector::SetListSize(result, current_size + values.size());
 
-        auto child_data = FlatVector::GetData<double>(list_child);
-        auto &child_validity = FlatVector::Validity(list_child);
+        auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(list_child);
+        auto &child_validity = ANOFOX_FLATVECTOR_VALIDITY_WRITE(list_child);
 
         double last_valid = 0.0;
         bool has_valid = false;
@@ -214,7 +214,7 @@ static void TsFillNullsBackwardFunction(DataChunk &args, ExpressionState &state,
         vector<uint64_t> validity;
         ExtractListValues(list_vec, count, row_idx, values, validity);
 
-        auto list_data = FlatVector::GetData<list_entry_t>(result);
+        auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(result);
         auto &list_child = ListVector::GetEntry(result);
         auto current_size = ListVector::GetListSize(result);
 
@@ -224,8 +224,8 @@ static void TsFillNullsBackwardFunction(DataChunk &args, ExpressionState &state,
         ListVector::Reserve(result, current_size + values.size());
         ListVector::SetListSize(result, current_size + values.size());
 
-        auto child_data = FlatVector::GetData<double>(list_child);
-        auto &child_validity = FlatVector::Validity(list_child);
+        auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(list_child);
+        auto &child_validity = ANOFOX_FLATVECTOR_VALIDITY_WRITE(list_child);
 
         // First pass: copy values
         for (size_t i = 0; i < values.size(); i++) {
@@ -298,7 +298,7 @@ static void TsFillNullsMeanFunction(DataChunk &args, ExpressionState &state, Vec
             continue;
         }
 
-        auto list_data = FlatVector::GetData<list_entry_t>(result);
+        auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(result);
         auto &list_child = ListVector::GetEntry(result);
         auto current_size = ListVector::GetListSize(result);
 
@@ -308,7 +308,7 @@ static void TsFillNullsMeanFunction(DataChunk &args, ExpressionState &state, Vec
         ListVector::Reserve(result, current_size + values.size());
         ListVector::SetListSize(result, current_size + values.size());
 
-        auto child_data = FlatVector::GetData<double>(list_child);
+        auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(list_child);
         if (out_values) {
             memcpy(child_data + current_size, out_values, values.size() * sizeof(double));
             anofox_free_double_array(out_values);

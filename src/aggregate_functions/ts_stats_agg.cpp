@@ -143,11 +143,11 @@ static void TsStatsAggUpdate(Vector inputs[], AggregateInputData &aggr_input, id
 template <typename T>
 static void SetStructField(Vector &result, idx_t field_idx, idx_t row_idx, T value) {
     auto &children = StructVector::GetEntries(result);
-    auto data = FlatVector::GetData<T>(*children[field_idx]);
+    auto data = ANOFOX_FLATVECTOR_WRITE<T>(children[field_idx]);
     data[row_idx] = value;
 }
 
-static void TsStatsAggFinalize(Vector &state_vector, AggregateInputData &aggr_input,
+static void TsStatsAggFinalize(Vector &state_vector, ANOFOX_AGG_FINALIZE_INPUT &aggr_input,
                                Vector &result, idx_t count, idx_t offset) {
     auto states = FlatVector::GetData<TsStatsAggState *>(state_vector);
 
@@ -238,8 +238,8 @@ static void TsStatsAggFinalize(Vector &state_vector, AggregateInputData &aggr_in
             SetStructField<uint64_t>(result, 34, row, stats_result.expected_length);
             SetStructField<uint64_t>(result, 35, row, stats_result.n_gaps);
         } else {
-            FlatVector::SetNull(*children[34], row, true);
-            FlatVector::SetNull(*children[35], row, true);
+            FlatVector::SetNull(children[34], row, true);
+            FlatVector::SetNull(children[35], row, true);
         }
     }
 }

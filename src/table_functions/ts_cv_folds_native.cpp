@@ -1,3 +1,4 @@
+#include "anofox_forecast_extension.hpp"
 #include "ts_cv_folds_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For DateColumnType, helper functions
 #include "duckdb/common/exception.hpp"
@@ -140,7 +141,7 @@ static string ParseStringParamMl(const Value &params, const string &key, const s
         auto &struct_children = StructValue::GetChildren(params);
         auto &struct_type = StructType::GetChildTypes(params.type());
         for (idx_t i = 0; i < struct_children.size(); i++) {
-            auto k = struct_type[i].first;
+            auto k = ToColumnName(struct_type[i].first);
             StringUtil::Trim(k);
             if (StringUtil::Lower(k) == StringUtil::Lower(key) && !struct_children[i].IsNull()) {
                 return struct_children[i].ToString();
@@ -177,7 +178,7 @@ static int64_t ParseInt64ParamMl(const Value &params, const string &key, int64_t
         auto &struct_children = StructValue::GetChildren(params);
         auto &struct_type = StructType::GetChildTypes(params.type());
         for (idx_t i = 0; i < struct_children.size(); i++) {
-            auto k = struct_type[i].first;
+            auto k = ToColumnName(struct_type[i].first);
             StringUtil::Trim(k);
             if (StringUtil::Lower(k) == StringUtil::Lower(key) && !struct_children[i].IsNull()) {
                 try {
@@ -218,7 +219,7 @@ static bool ParseBoolParamMl(const Value &params, const string &key, bool defaul
         auto &struct_children = StructValue::GetChildren(params);
         auto &struct_type = StructType::GetChildTypes(params.type());
         for (idx_t i = 0; i < struct_children.size(); i++) {
-            auto k = struct_type[i].first;
+            auto k = ToColumnName(struct_type[i].first);
             StringUtil::Trim(k);
             if (StringUtil::Lower(k) == StringUtil::Lower(key) && !struct_children[i].IsNull()) {
                 if (struct_children[i].type().id() == LogicalTypeId::BOOLEAN) {
@@ -263,7 +264,7 @@ static void ValidateParams(const Value &params) {
     } else if (params.type().id() == LogicalTypeId::STRUCT) {
         auto &struct_type = StructType::GetChildTypes(params.type());
         for (idx_t i = 0; i < struct_type.size(); i++) {
-            auto key = struct_type[i].first;
+            auto key = ToColumnName(struct_type[i].first);
             StringUtil::Trim(key);
             provided_keys.push_back(key);
             if (VALID_PARAMS.find(StringUtil::Lower(key)) == VALID_PARAMS.end()) {
@@ -300,7 +301,7 @@ static unique_ptr<FunctionData> TsCvFoldsBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsCvFoldsBindData>();
 

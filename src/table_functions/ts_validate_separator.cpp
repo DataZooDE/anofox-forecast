@@ -1,3 +1,4 @@
+#include "anofox_forecast_extension.hpp"
 #include "ts_validate_separator.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -70,7 +71,7 @@ static unique_ptr<FunctionData> TsValidateSeparatorBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    ANOFOX_BIND_NAMES_VEC &names) {
 
     auto bind_data = make_uniq<TsValidateSeparatorBindData>();
 
@@ -273,7 +274,7 @@ void RegisterTsValidateSeparatorFunction(ExtensionLoader &loader) {
                        TsValidateSeparatorInitLocal);
 
     // Named parameters
-    func.named_parameters["separator"] = LogicalType::VARCHAR;
+    ANOFOX_ADD_NAMED_PARAM(func, "separator", LogicalType::VARCHAR);
 
     // Set up as table-in-out function
     func.in_out_function = TsValidateSeparatorInOut;
