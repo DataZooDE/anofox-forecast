@@ -39,3 +39,6 @@ venv/
 
 # Node (WASM test harness)
 test/wasm/node_modules/
+
+# DuckDB 2.0 vs v1.5.5 benchmark driver (raw parquet outputs)
+benchmark/results/duckdb2_compare/
