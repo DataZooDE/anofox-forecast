@@ -68,7 +68,7 @@ endif()
 
 # Check for WASM target
 string(FIND "${RUST_TARGETS}" "wasm32-unknown-emscripten" WASM_TARGET_FOUND)
-if (NOT WASM_TARGET_FOUND EQUAL -1)
+if (EMSCRIPTEN AND NOT WASM_TARGET_FOUND EQUAL -1)
     set(Rust_CARGO_TARGET "wasm32-unknown-emscripten")
 endif()
 
