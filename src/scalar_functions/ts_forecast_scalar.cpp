@@ -585,6 +585,13 @@ void RegisterTsForecastScalarFunction(ExtensionLoader &loader) {
         TsForecastScalarBind);
 
     func.SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
+    // DuckDB 2.0 requires scalar functions that can throw a user-facing
+    // validation error from Execute to opt in via SetFallible(), or the
+    // error is wrapped as an INTERNAL error instead of surfacing the
+    // original message (e.g. "Invalid ETS model specification"). SetFallible
+    // exists on v1.5.x too and is a no-op there for this function's existing
+    // behavior.
+    func.SetFallible();
 
     loader.RegisterFunction(func);
 }
