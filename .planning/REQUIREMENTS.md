@@ -128,12 +128,79 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (filled by roadmapper) | | |
+| TEST-01 | Phase 9 | Pending |
+| TEST-02 | Phase 18 | Pending |
+| TEST-03 | Phase 18 | Pending |
+| DEP-01 | Phase 9 | Pending |
+| DEP-02 | Phase 9 | Pending |
+| DEP-03 | Phase 15 | Pending |
+| DEP-04 | Phase 9 | Pending |
+| FCST-01 | Phase 10 | Pending |
+| FCST-02 | Phase 10 | Pending |
+| FCST-03 | Phase 10 | Pending |
+| FCST-04 | Phase 10 | Pending |
+| FCST-05 | Phase 10 | Pending |
+| FCST-06 | Phase 10 | Pending |
+| FCST-07 | Phase 10 | Pending |
+| FCST-08 | Phase 10 | Pending |
+| FCST-09 | Phase 17 | Pending |
+| WRAP-01 | Phase 15 | Pending |
+| WRAP-02 | Phase 13 | Pending |
+| WRAP-03 | Phase 13 | Pending |
+| RUST-01 | Phase 12 | Pending |
+| RUST-02 | Phase 12 | Pending |
+| RUST-03 | Phase 12 | Pending |
+| RUST-04 | Phase 16 | Pending |
+| RUST-05 | Phase 12 | Pending |
+| RUST-06 | Phase 12 | Pending |
+| RUST-07 | Phase 12 | Pending |
+| RUST-08 | Phase 12 | Pending |
+| RUST-09 | Phase 12 | Pending |
+| RUST-10 | Phase 18 | Pending |
+| STAT-01 | Phase 13 | Pending |
+| STAT-02 | Phase 13 | Pending |
+| STAT-03 | Phase 13 | Pending |
+| STAT-04 | Phase 13 | Pending |
+| STAT-05 | Phase 13 | Pending |
+| STAT-06 | Phase 13 | Pending |
+| FEAT-01 | Phase 14 | Pending |
+| FEAT-02 | Phase 14 | Pending |
+| FEAT-03 | Phase 14 | Pending |
+| FEAT-04 | Phase 14 | Pending |
+| FEAT-05 | Phase 14 | Pending |
+| DET-01 | Phase 15 | Pending |
+| DET-02 | Phase 15 | Pending |
+| DET-03 | Phase 15 | Pending |
+| DET-04 | Phase 15 | Pending |
+| DET-05 | Phase 15 | Pending |
+| DET-06 | Phase 15 | Pending |
+| DET-07 | Phase 15 | Pending |
+| CONF-01 | Phase 16 | Pending |
+| CONF-02 | Phase 16 | Pending |
+| CONF-03 | Phase 16 | Pending |
+| CONF-04 | Phase 16 | Pending |
+| CONF-05 | Phase 16 | Pending |
+| DIAG-01 | Phase 11 | Pending |
+| DIAG-02 | Phase 11 | Pending |
+| DIAG-03 | Phase 17 | Pending |
+| DIAG-04 | Phase 17 | Pending |
+| DIAG-05 | Phase 17 | Pending |
+| UPST-01 | Phase 11 | Pending |
+| UPST-02 | Phase 11 | Pending |
+| UPST-03 | Phase 11 | Pending |
+| UPST-04 | Phase 11 | Pending |
+| UPST-05 | Phase 11 | Pending |
+| UPST-06 | Phase 17 | Pending |
+| DOCS-01 | Phase 18 | Pending |
+| DOCS-02 | Phase 18 | Pending |
 
 **Coverage:**
 - v1 requirements: 65 total
-- Mapped to phases: 0 (pending roadmap)
+- Mapped to phases: 65 ✓
+- Unmapped: 0
+
+**Per phase:** P9: 4 · P10: 8 · P11: 7 · P12: 8 · P13: 8 · P14: 5 · P15: 9 · P16: 6 · P17: 5 · P18: 5
 
 ---
 *Requirements defined: 2026-10-08*
-*Last updated: 2026-10-08 after initial definition*
+*Last updated: 2026-10-08 after roadmap creation (traceability mapped to Phases 9-18)*
