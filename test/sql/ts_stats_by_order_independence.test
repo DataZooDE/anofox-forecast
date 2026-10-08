@@ -1,0 +1,178 @@
+# name: test/sql/ts_stats_by_order_independence.test
+# description: ts_stats_by must not depend on the physical row order of its input
+# group: [sql]
+#
+# Regression test: _ts_stats_by_native collected rows per group in arrival order and
+# handed them to the Rust stats kernel unsorted, so order-dependent statistics
+# (autocorr_lag1, trend_strength, seasonality_strength, entropy, stability,
+# n_zeros_start/end, plateau_size, ...) changed with the scan order of the input
+# table and with how DuckDB split it across threads.
+#
+# Intentionally does NOT `require json`, so it runs on native builds.
+
+require anofox_forecast
+
+statement ok
+SET threads TO 4;
+
+# 64 series x 2000 daily points = 128000 rows (> one 122880-row row group, so the
+# scan is split across row groups / threads). Series have trend + weekly seasonality
+# + deterministic noise, one NULL each, leading zeros (s % 4 = 0) and trailing
+# zeros (s % 4 = 1).
+statement ok
+CREATE TABLE stats_ord AS
+SELECT
+    'S' || lpad(s::VARCHAR, 2, '0') AS series_id,
+    ('2020-01-01'::DATE + i::INTEGER)::TIMESTAMP AS ds,
+    CASE
+        WHEN i = 50 + s THEN NULL
+        WHEN s % 4 = 0 AND i < 5 THEN 0.0
+        WHEN s % 4 = 1 AND i >= 1995 THEN 0.0
+        ELSE 10 + s + 0.02 * i * (s % 3)
+             + 3 * sin(2 * pi() * i / 7)
+             + ((i * 7919 + s * 104729) % 97) / 50.0
+    END::DOUBLE AS y
+FROM range(0, 64) r(s), range(0, 2000) t(i)
+ORDER BY series_id, ds;
+
+# Same rows, deterministic pseudo-random physical order (groups interleaved).
+statement ok
+CREATE TABLE stats_shuf AS SELECT * FROM stats_ord ORDER BY hash(series_id, ds);
+
+# Same rows, fully reversed physical order.
+statement ok
+CREATE TABLE stats_rev AS SELECT * FROM stats_ord ORDER BY series_id DESC, ds DESC;
+
+query I
+SELECT count(*) FROM ts_stats_by('stats_shuf', series_id, ds, y, '1d');
+----
+64
+
+# Order-dependent columns must be identical for shuffled vs ordered input
+query I
+SELECT count(*)
+FROM ts_stats_by('stats_shuf', series_id, ds, y, '1d') a
+JOIN ts_stats_by('stats_ord', series_id, ds, y, '1d') b USING (series_id)
+WHERE a.autocorr_lag1 IS DISTINCT FROM b.autocorr_lag1
+   OR a.trend_strength IS DISTINCT FROM b.trend_strength
+   OR a.seasonality_strength IS DISTINCT FROM b.seasonality_strength
+   OR a.entropy IS DISTINCT FROM b.entropy
+   OR a.stability IS DISTINCT FROM b.stability
+   OR a.n_zeros_start IS DISTINCT FROM b.n_zeros_start
+   OR a.n_zeros_end IS DISTINCT FROM b.n_zeros_end
+   OR a.plateau_size IS DISTINCT FROM b.plateau_size
+   OR a.plateau_size_nonzero IS DISTINCT FROM b.plateau_size_nonzero;
+----
+0
+
+# Every column (incl. mean/sum/variance, which only differed in summation order)
+# must be bit-identical: shuffled vs ordered, both directions
+query I
+SELECT count(*) FROM (
+    SELECT * FROM ts_stats_by('stats_shuf', series_id, ds, y, '1d')
+    EXCEPT
+    SELECT * FROM ts_stats_by('stats_ord', series_id, ds, y, '1d')
+);
+----
+0
+
+query I
+SELECT count(*) FROM (
+    SELECT * FROM ts_stats_by('stats_ord', series_id, ds, y, '1d')
+    EXCEPT
+    SELECT * FROM ts_stats_by('stats_shuf', series_id, ds, y, '1d')
+);
+----
+0
+
+# Reversed input
+query I
+SELECT count(*) FROM (
+    SELECT * FROM ts_stats_by('stats_rev', series_id, ds, y, '1d')
+    EXCEPT
+    SELECT * FROM ts_stats_by('stats_ord', series_id, ds, y, '1d')
+);
+----
+0
+
+# Derived oracle: ts_stats (LIST(... ORDER BY date) + the same Rust kernel) must
+# agree exactly with ts_stats_by on shuffled input
+query I
+SELECT count(*) FROM (
+    SELECT * FROM ts_stats_by('stats_shuf', series_id, ds, y, '1d')
+    EXCEPT
+    SELECT * FROM ts_stats('stats_ord', series_id, ds, y, '1d')
+);
+----
+0
+
+# Spot-check a known-ordered series: leading zeros survive the shuffle
+query III
+SELECT series_id, n_zeros_start, n_zeros_end
+FROM ts_stats_by('stats_shuf', series_id, ds, y, '1d')
+WHERE series_id IN ('S00', 'S01', 'S02')
+ORDER BY series_id;
+----
+S00	5	0
+S01	0	5
+S02	0	0
+
+# DATE-typed date column takes the same path
+statement ok
+CREATE TABLE stats_shuf_date AS SELECT series_id, ds::DATE AS ds, y FROM stats_shuf;
+
+query I
+SELECT count(*) FROM (
+    SELECT * FROM ts_stats_by('stats_shuf_date', series_id, ds, y, '1d')
+    EXCEPT
+    SELECT * FROM ts_stats_by('stats_ord', series_id, ds, y, '1d')
+);
+----
+0
+
+# Duplicate timestamps (incl. NULL and NaN values) are tie-broken deterministically,
+# so the result does not depend on which duplicate arrives first
+statement ok
+CREATE TABLE stats_dup_a AS
+SELECT * FROM (VALUES
+    ('D', TIMESTAMP '2024-01-01', 1.0::DOUBLE),
+    ('D', TIMESTAMP '2024-01-02', 5.0),
+    ('D', TIMESTAMP '2024-01-02', NULL),
+    ('D', TIMESTAMP '2024-01-02', 'NaN'::DOUBLE),
+    ('D', TIMESTAMP '2024-01-02', 2.0),
+    ('D', TIMESTAMP '2024-01-03', 0.0),
+    ('D', TIMESTAMP '2024-01-03', 3.0),
+    ('D', TIMESTAMP '2024-01-04', 4.0),
+    ('D', TIMESTAMP '2024-01-05', 4.0),
+    ('D', TIMESTAMP '2024-01-06', 7.0)
+) v(series_id, ds, y);
+
+statement ok
+CREATE TABLE stats_dup_b AS
+SELECT * FROM (VALUES
+    ('D', TIMESTAMP '2024-01-06', 7.0::DOUBLE),
+    ('D', TIMESTAMP '2024-01-05', 4.0),
+    ('D', TIMESTAMP '2024-01-04', 4.0),
+    ('D', TIMESTAMP '2024-01-03', 3.0),
+    ('D', TIMESTAMP '2024-01-03', 0.0),
+    ('D', TIMESTAMP '2024-01-02', 2.0),
+    ('D', TIMESTAMP '2024-01-02', 'NaN'::DOUBLE),
+    ('D', TIMESTAMP '2024-01-02', NULL),
+    ('D', TIMESTAMP '2024-01-02', 5.0),
+    ('D', TIMESTAMP '2024-01-01', 1.0)
+) v(series_id, ds, y);
+
+query I
+SELECT count(*) FROM (
+    SELECT * FROM ts_stats_by('stats_dup_a', series_id, ds, y, '1d')
+    EXCEPT
+    SELECT * FROM ts_stats_by('stats_dup_b', series_id, ds, y, '1d')
+);
+----
+0
+
+query IIIII
+SELECT length, n_nulls, n_nan, n_zeros_start, n_zeros_end
+FROM ts_stats_by('stats_dup_b', series_id, ds, y, '1d');
+----
+10	1	1	0	0
