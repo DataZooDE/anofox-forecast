@@ -1,15 +1,15 @@
 ---
-gsd_state_version: 1.0
+gsd_state_version: "1.0"
 milestone: v0.9.0
 milestone_name: WASM Runtime Verification (Phases 7-8)
 current_phase: 08
 current_phase_name: CI Gating + Dedicated Workflow + Badge
 status: verification_deferred_human
 stopped_at: Phase 08 implemented + locally verified (gate mechanism green→red→green); live-CI negative-control push deferred to operator
-last_updated: "2026-09-02T00:50:00.000Z"
-last_activity: 2026-09-02
+last_updated: "2026-10-08T19:21:28.125Z"
+last_activity: 2026-10-08
 last_activity_desc: Autonomous run paused — Phase 08 live-CI verification deferred (user choice)
-state_head: 3acd878c0f569931fcd0cc6827a81acfc37c8def
+state_head: 47f481ca9880050d39d0fd5ea52cab20cb1ea9f5
 progress:
   total_phases: 2
   completed_phases: 1
@@ -126,6 +126,7 @@ None yet.
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 261006-ujg | Test anofox-forecast against DuckDB 2.0 (v2.0-cyanoptera) on branch test/duckdb-2.0 and benchmark vs v1.5.5 (+ wasm_eh build) | 2026-10-06 | d808bea | [261006-ujg-test-anofox-forecast-against-duckdb-2-0-](./quick/261006-ujg-test-anofox-forecast-against-duckdb-2-0-/) |
+| 2 | PR #270: CMake only targets wasm32-unknown-emscripten under Emscripten (branch fix/cmake-wasm-target-detection, b0a5b93) | 2026-10-08 | 47f481c | — |
 
 ## Deferred Items
 
