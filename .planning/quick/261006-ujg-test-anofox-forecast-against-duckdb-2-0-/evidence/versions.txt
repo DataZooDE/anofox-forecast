@@ -1,0 +1,20 @@
+## Submodule SHAs
+
+duckdb:
+  old (v1.5.5):            d8cdaa33fda8df955cc76ef58a280f68f4cd43fa
+  new (v2.0-cyanoptera):   5070de3585e846718fac121b5b149f4236e6a58a
+  describe --tags --always: v1.5.5-15556-g5070de3585
+
+extension-ci-tools:
+  old (v1.5-variegata):    b777c70d30942cca5bef62d6d4fa23a13362f398
+  new (v2.0-cyanoptera):   969bc76276acec1c0a3922ff500d2ec3a1a3b037
+
+## Engine versions (native release builds, pragma_version())
+
+v1.5.5: library_version=v1.5.5 source_id=d8cdaa33fd
+v2.0:   library_version=v2.0.0-dev86707 source_id=5070de3585
+
+## Tracer parity (benchmark/duckdb2_compare.py tracer)
+
+TRACER PARITY OK rows=280 (AutoETS forecast, 20 lexicographically-first M4 Daily
+series, bitwise-identical output between v1.5.5 and v2.0-cyanoptera)

@@ -1,0 +1,41 @@
+## extension-ci-tools makefile diff (v1.5-variegata b777c70 -> v2.0-cyanoptera 969bc76)
+
+Full diff saved at: ci-tools-makefile.diff (makefiles/duckdb_extension.Makefile only)
+
+### release / test_release_internal
+- `test_release_internal`, `test_debug_internal`, `test_reldebug_internal` targets are GONE.
+  `test_release` now calls a `RUN_TEST` macro that prefers
+  `python3 ${DUCKDB_SRCDIR}/scripts/ci/run_tests.py ./build/release/test/unittest $(T)`
+  if that runner script exists in the duckdb submodule, else falls back to invoking
+  `./build/release/test/unittest $(T)` directly (empty TEST_RUNNER).
+  `T` defaults to `"${TESTS_BASE_DIRECTORY}*"` i.e. `"test/*"`.
+  Action taken: Task 2 runs `./build/release/test/unittest "test/*"` directly (bypassing
+  `make test_release_internal`, which no longer exists), matching what RUN_TEST falls back to
+  when the new run_tests.py runner isn't present. This preserves identical test selection/output
+  format to the v1.5.5 baseline (same unittest binary, same glob).
+- `TEST_PATH` changed from `"/test/unittest"` (leading slash, quoted) to `test/unittest`
+  (no leading slash, unquoted) — purely a macro concatenation convention, no behavior change
+  for the direct-binary invocation path above.
+
+### release build flags
+- New optional flags added (`DUCKDB_PREBUILT_LIBRARY`, `DUCKDB_PREBUILT_EXTENSIONS`,
+  `BUILD_EXTENSIONS_ONLY`) for a new "DUCKDB_NEW_EXTENSION_BUILD" out-of-tree extension
+  mode (`sync_oot_extensions` target, `scripts/sync_out_of_tree_extensions.py`). Not
+  triggered unless `DUCKDB_NEW_EXTENSION_BUILD` is set, which we do not set. No action needed.
+
+### wasm_eh / wasm_threads recipes
+- UNCHANGED. Still:
+  `emcmake cmake $(GENERATOR) ... -Bbuild/wasm_eh ... -S $(DUCKDB_SRCDIR) -DDUCKDB_EXPLICIT_PLATFORM=wasm_eh -DDUCKDB_CUSTOM_PLATFORM=wasm_eh`
+  then `emmake make -j8 -Cbuild/wasm_eh`.
+  Confirms plan instruction: do NOT set GEN=ninja for wasm (unchanged recipe still assumes
+  `make -C` driving the generated tree).
+
+### emsdk pin
+- `.github/workflows/_extension_distribution.yml` Setup/Emscripten step still pins
+  `emscripten-core/setup-emsdk@...` `version: 3.1.71` (unchanged from v1.5-variegata).
+  No emsdk re-activation needed for the 2.0 wasm build.
+
+### format targets
+- `format`, `format-check`, `format-fix`, `format-main` now delegate to `$(MAKE) -C duckdb
+  format-check/...` instead of calling `duckdb/scripts/format.py` directly. Not used by this
+  plan (no `make fmt`/`format` invoked), so no action needed.

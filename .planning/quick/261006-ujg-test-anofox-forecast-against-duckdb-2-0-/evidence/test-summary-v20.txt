@@ -1,0 +1,19 @@
+Source: /home/simonm/projects/duckdb/anofox-forecast/build/logs/test-v20-final.log
+Command: DATAZOO_DISABLE_TELEMETRY=1 ./build/release/test/unittest "test/*"
+(run after the SetFallible fix, commit f90fa32)
+
+test cases:   66 |   38 passed | 28 failed
+assertions: 2884 | 2856 passed | 28 failed
+
+Note: this build's unittest binary DOES satisfy "require json" (DuckDB 2.0
+statically links the json core extension by default — confirmed via
+`SELECT * FROM duckdb_extensions() WHERE extension_name='json'` =>
+loaded=true, install_mode=STATICALLY_LINKED, install_path=(BUILT-IN)).
+All 66 test/sql/*.test files run (none skipped). This is why v20's test
+case count (66) and failure count (28) look dramatically worse than
+v155's (16 run, 0 failed): v155 never attempted the other 50 files at all.
+See test-2.0-only.md for the per-file root-cause classification, which
+confirms the large majority are pre-existing test/implementation staleness
+unmasked by this json-linking default change, not new 2.0 regressions —
+most of the 28 reproduce byte-for-byte on v1.5.5 when the same query is run
+directly via its CLI with `LOAD json;`.

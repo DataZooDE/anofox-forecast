@@ -1,0 +1,61 @@
+## Pre-build checks
+
+EMSDK_PIN_CHECK=ok (2.0 .github/workflows/_extension_distribution.yml still pins
+  emscripten-core/setup-emsdk version: 3.1.71, same as v1.5-variegata; local emsdk
+  was already active at the sdk-releases hash matching 3.1.71, `emsdk activate 3.1.71`
+  resolved to the same hash (no-op); emcc --version confirms 3.1.71 active). No
+  emsdk re-activation needed after the build.
+BINARYEN=version_123 (official WebAssembly/binaryen release; sha256 verified against
+  the published .sha256 asset BEFORE extracting; installed to ~/tools/binaryen-version_123)
+LINKED_LIBS_MECHANISM=present (duckdb/extension/extension_build_tools.cmake line 331:
+  `set(TO_BE_LINKED ${DUCKDB_EXTENSION_${EXTENSION_NAME_UPPERCASE}_LINKED_LIBS})` inside
+  the `if(EMSCRIPTEN)` wasm post-build emcc link block — unchanged from v1.5.5's
+  mechanism; extension_config.cmake's `LINKED_LIBS "$<TARGET_FILE:anofox_fcst_ffi-static>"`
+  needed no changes)
+
+## Build result
+
+BUILD=ok
+Command: `source ~/emsdk/emsdk_env.sh; export EM_BINARYEN_ROOT=~/tools/binaryen-version_123; PATH="$EM_BINARYEN_ROOT/bin:$PATH"; make wasm_eh` (no GEN=ninja — confirmed the 2.0 wasm_eh recipe is unchanged and still expects `emmake make -j8 -Cbuild/wasm_eh`, see evidence/ci-tools-diff.txt).
+Log: build/logs/build-wasm_eh-v20.log, EXIT=0, 0 occurrences of "error:".
+Confirmed in log: `-- Rust_CARGO_TARGET: wasm32-unknown-emscripten` (proves the Step-A CMake fix still
+  correctly selects wasm for Emscripten builds while Task 1 proved it correctly skips wasm for
+  native builds).
+Artifact: build/wasm_eh/extension/anofox_forecast/anofox_forecast.duckdb_extension.wasm
+
+## Artifact integrity
+
+SIGNATURE=present (1 `duckdb_signature` custom section, verified via
+  `WebAssembly.Module.customSections(new WebAssembly.Module(bytes), 'duckdb_signature')`)
+FFI_IMPORTS=0 (`WebAssembly.Module.imports(mod)` returned 1576 total imports, 0 with a name
+  starting with `anofox_` — confirms LINKED_LIBS survived and the Rust static archive is fully
+  linked into the wasm binary, not left as an unresolved import; this is exactly the trap
+  described in memory `project_extension_wasm_linked_libs`, and it did not recur on 2.0)
+SIZE_V20=4554209 (bytes, raw .wasm, uncompressed)
+SIZE_V155=5032741 (bytes, raw .wasm, uncompressed — NOTE: this is actually the v1.5.6 artifact,
+  not v1.5.5: main has already moved past v1.5.5 (PR #268 "chore(duckdb): bump to v1.5.6"), so no
+  main-branch MainDistributionPipeline run still publishes a v1.5.5 wasm_eh artifact. Downloaded
+  the newest successful run's (37134550062) `anofox_forecast-v1.5.6-extension-wasm_eh` artifact
+  instead via `gh run download`, labeled honestly as v1.5.6 here. It also has SIGNATURE=present
+  and FFI_IMPORTS=0, confirming the same linking mechanism worked there too.)
+  The v2.0 build is ~9.5% SMALLER than the v1.5.6 reference artifact (4.55 MB vs 5.03 MB
+  uncompressed), consistent with 2.0's `[100/103]`-ish leaner default core-extension bundle
+  observed during the native build and not a sign of missing code.
+
+## Runtime harness
+
+RUNTIME=BLOCKED
+Inspected: `npm view @duckdb/duckdb-wasm dist-tags time --json` -> only two dist-tags exist,
+  `latest`=1.33.1-dev57.0 and `next`=1.33.1-dev65.0 (no newer dev build published between
+  2026-09-29, when test/wasm/package.json's pin (1.33.1-dev64.0) was chosen, and today).
+`npm pack @duckdb/duckdb-wasm@1.33.1-dev65.0` into the scratchpad and inspected
+  `package/dist/duckdb-eh.wasm` via `strings`: the highest storage-version / release string
+  embedded is `v1.5.6` — no `v2.0`/`cyanoptera` string anywhere, and no storage-version constant
+  beyond the v1.5.x series. This confirms no published `@duckdb/duckdb-wasm` build (stable or
+  dev) yet bundles the v2.0-cyanoptera engine; v2.0 is unreleased/upstream-in-development, so
+  this is expected, not a defect in this extension.
+Conclusion: a true end-to-end runtime check of the 2.0 wasm_eh artifact in duckdb-wasm is
+  BLOCKED on an upstream dependency (no matching duckdb-wasm engine build exists), not on
+  anything in this extension. test/wasm was left untouched (still pinned to 1.33.1-dev64.0 /
+  engine v1.5.5); no `npm install`/`npm ci` was run against it since there is no 2.0-matching
+  version to test with.

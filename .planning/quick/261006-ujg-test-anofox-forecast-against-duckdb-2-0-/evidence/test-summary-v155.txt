@@ -1,0 +1,12 @@
+Source: /home/simonm/projects/duckdb/anofox-forecast-baseline-v155/test-v155.log
+Command: DATAZOO_DISABLE_TELEMETRY=1 ./build/release/test/unittest "test/*"
+
+All tests passed (50 skipped tests, 1328 assertions in 16 test cases)
+require json: 50
+
+Note: this build's unittest binary does NOT satisfy "require json" (the
+locally-built v1.5.5 duckdb core does not statically link the json core
+extension by default — confirmed via `SELECT * FROM duckdb_extensions()
+WHERE extension_name='json'` => loaded=false, install_mode=REPOSITORY).
+50 of the 66 test/sql/*.test files declare `require json` and are SKIPPED
+entirely, not run. Only 16 files actually execute, and all 16 pass.

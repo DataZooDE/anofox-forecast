@@ -32,7 +32,7 @@ See: .planning/PROJECT.md (updated 2026-09-01 — started v0.9.0 WASM Runtime Ve
 Phase: 08 (CI Gating + Dedicated Workflow + Badge) — IMPLEMENTED, live-CI verification deferred
 Plan: 1 of 1 done (tasks 1-3); Task 4 negative-control = operator live-CI push
 Status: Autonomous run paused — both phases implemented; Phase 08 awaits operator live-CI observation
-Last activity: 2026-09-02 — Phase 08 live-CI verification deferred (user choice)
+Last activity: 2026-10-08 - Completed quick task 261006-ujg: DuckDB 2.0 compatibility test + benchmarks (branch test/duckdb-2.0)
 
 ## Deferred Verification
 
@@ -120,6 +120,12 @@ None yet.
 ### Blockers/Concerns
 
 - None. Exact pinned `@duckdb/duckdb-wasm` version is a plan-phase determination (must match the built DuckDB version), not a blocker.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 261006-ujg | Test anofox-forecast against DuckDB 2.0 (v2.0-cyanoptera) on branch test/duckdb-2.0 and benchmark vs v1.5.5 (+ wasm_eh build) | 2026-10-06 | d808bea | [261006-ujg-test-anofox-forecast-against-duckdb-2-0-](./quick/261006-ujg-test-anofox-forecast-against-duckdb-2-0-/) |
 
 ## Deferred Items
 
