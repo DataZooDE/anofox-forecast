@@ -131,7 +131,7 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 | (filled by roadmapper) | | |
 
 **Coverage:**
-- v1 requirements: 59 total
+- v1 requirements: 65 total
 - Mapped to phases: 0 (pending roadmap)
 
 ---
