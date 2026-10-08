@@ -156,7 +156,7 @@ static void TsFillForwardOperatorExecute(
     auto &global_state = data_p.global_state->Cast<TsFillForwardOperatorGlobalState>();
 
     if (global_state.finished) {
-        output.SetCardinality(0);
+        ANOFOX_SET_CARDINALITY(output, 0);
         return;
     }
 
@@ -166,7 +166,7 @@ static void TsFillForwardOperatorExecute(
                 global_state.query_result->GetError().c_str());
         }
         global_state.finished = true;
-        output.SetCardinality(0);
+        ANOFOX_SET_CARDINALITY(output, 0);
         return;
     }
 
@@ -174,7 +174,7 @@ static void TsFillForwardOperatorExecute(
     auto chunk = global_state.query_result->Fetch();
     if (!chunk || chunk->size() == 0) {
         global_state.finished = true;
-        output.SetCardinality(0);
+        ANOFOX_SET_CARDINALITY(output, 0);
         return;
     }
 

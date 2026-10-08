@@ -165,6 +165,9 @@ static unique_ptr<FunctionData> TsSplitKeysBind(
 
     // Parse named parameters
     for (auto &kv : input.named_parameters) {
+        if (kv.second.IsNull()) {
+            continue;  // omitted optional param (DuckDB 2.0 fills a NULL default)
+        }
         if (kv.first == "separator") {
             bind_data->separator = kv.second.GetValue<string>();
         } else if (kv.first == "columns") {
@@ -304,7 +307,7 @@ static OperatorResultType TsSplitKeysInOut(
     }
 
     // Don't output anything during input phase
-    output.SetCardinality(0);
+    ANOFOX_SET_CARDINALITY(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -387,7 +390,7 @@ static OperatorFinalizeResultType TsSplitKeysFinalize(
         gstate.current_result++;
     }
 
-    output.SetCardinality(output_idx);
+    ANOFOX_SET_CARDINALITY(output, output_idx);
 
     if (gstate.current_result >= gstate.results.size()) {
         return OperatorFinalizeResultType::FINISHED;

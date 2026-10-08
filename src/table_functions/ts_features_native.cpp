@@ -268,7 +268,7 @@ static OperatorResultType TsFeaturesNativeInOut(
     }
 
     // Don't output anything during input phase
-    output.SetCardinality(0);
+    ANOFOX_SET_CARDINALITY(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -393,7 +393,7 @@ static OperatorFinalizeResultType TsFeaturesNativeFinalize(
         gstate.current_result++;
     }
 
-    output.SetCardinality(output_idx);
+    ANOFOX_SET_CARDINALITY(output, output_idx);
 
     if (gstate.current_result >= gstate.results.size()) {
         return OperatorFinalizeResultType::FINISHED;

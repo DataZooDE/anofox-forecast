@@ -319,7 +319,7 @@ static OperatorResultType TsFillForwardNativeInOut(
         }
     }
 
-    output.SetCardinality(0);
+    ANOFOX_SET_CARDINALITY(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -501,7 +501,7 @@ static OperatorFinalizeResultType TsFillForwardNativeFinalize(
             }
         }
 
-        output.SetCardinality(output_count);
+        ANOFOX_SET_CARDINALITY(output, output_count);
 
         // Check if we need to continue with this slot or move to next
         if (slot.current_group >= slot.results.size()) {

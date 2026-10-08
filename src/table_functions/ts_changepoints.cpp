@@ -618,7 +618,7 @@ static OperatorResultType TsDetectChangepointsByInOut(
         }
     }
 
-    output.SetCardinality(0);
+    ANOFOX_SET_CARDINALITY(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -793,7 +793,7 @@ static OperatorFinalizeResultType TsDetectChangepointsByFinalize(
         gstate.output_offset++;
     }
 
-    output.SetCardinality(output_count);
+    ANOFOX_SET_CARDINALITY(output, output_count);
 
     if (gstate.output_offset >= gstate.results.size()) {
         return OperatorFinalizeResultType::FINISHED;

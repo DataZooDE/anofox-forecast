@@ -602,7 +602,7 @@ static OperatorResultType TsCvForecastNativeInOut(
     }
 
     // Don't output anything during input phase
-    output.SetCardinality(0);
+    ANOFOX_SET_CARDINALITY(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -751,12 +751,12 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
     // Output results in batches
     idx_t remaining = gstate.results.size() - gstate.output_offset;
     if (remaining == 0) {
-        output.SetCardinality(0);
+        ANOFOX_SET_CARDINALITY(output, 0);
         return OperatorFinalizeResultType::FINISHED;
     }
 
     idx_t to_output = std::min(remaining, static_cast<idx_t>(STANDARD_VECTOR_SIZE));
-    output.SetCardinality(to_output);
+    ANOFOX_SET_CARDINALITY(output, to_output);
 
     // Initialize all output vectors as FLAT_VECTOR for parallel-safe batch merging
     for (idx_t col = 0; col < output.ColumnCount(); col++) {

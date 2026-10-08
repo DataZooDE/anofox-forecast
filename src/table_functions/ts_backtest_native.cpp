@@ -600,7 +600,7 @@ static OperatorResultType TsBacktestNativeInOut(
     }
 
     // Don't output anything during input phase
-    output.SetCardinality(0);
+    ANOFOX_SET_CARDINALITY(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -959,7 +959,7 @@ static OperatorFinalizeResultType TsBacktestNativeFinalize(
         gstate.output_offset++;
     }
 
-    output.SetCardinality(output_count);
+    ANOFOX_SET_CARDINALITY(output, output_count);
 
     if (gstate.output_offset < gstate.results.size()) {
         return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;

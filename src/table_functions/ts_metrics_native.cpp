@@ -400,7 +400,7 @@ static OperatorResultType TsMetricsNativeInOut(
         }
     }
 
-    output.SetCardinality(0);
+    ANOFOX_SET_CARDINALITY(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -475,12 +475,12 @@ static OperatorFinalizeResultType TsMetricsNativeFinalize(
     // Stream results
     idx_t remaining = gstate.results.size() - gstate.output_offset;
     if (remaining == 0) {
-        output.SetCardinality(0);
+        ANOFOX_SET_CARDINALITY(output, 0);
         return OperatorFinalizeResultType::FINISHED;
     }
 
     idx_t to_output = std::min(remaining, static_cast<idx_t>(STANDARD_VECTOR_SIZE));
-    output.SetCardinality(to_output);
+    ANOFOX_SET_CARDINALITY(output, to_output);
 
     for (idx_t col = 0; col < output.ColumnCount(); col++) {
         output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
@@ -736,7 +736,7 @@ static OperatorResultType TsMaseNativeInOut(
         }
     }
 
-    output.SetCardinality(0);
+    ANOFOX_SET_CARDINALITY(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -805,12 +805,12 @@ static OperatorFinalizeResultType TsMaseNativeFinalize(
 
     idx_t remaining = gstate.results.size() - gstate.output_offset;
     if (remaining == 0) {
-        output.SetCardinality(0);
+        ANOFOX_SET_CARDINALITY(output, 0);
         return OperatorFinalizeResultType::FINISHED;
     }
 
     idx_t to_output = std::min(remaining, static_cast<idx_t>(STANDARD_VECTOR_SIZE));
-    output.SetCardinality(to_output);
+    ANOFOX_SET_CARDINALITY(output, to_output);
 
     for (idx_t col = 0; col < output.ColumnCount(); col++) {
         output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
@@ -1031,7 +1031,7 @@ static OperatorResultType TsRmaeNativeInOut(
         }
     }
 
-    output.SetCardinality(0);
+    ANOFOX_SET_CARDINALITY(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -1100,12 +1100,12 @@ static OperatorFinalizeResultType TsRmaeNativeFinalize(
 
     idx_t remaining = gstate.results.size() - gstate.output_offset;
     if (remaining == 0) {
-        output.SetCardinality(0);
+        ANOFOX_SET_CARDINALITY(output, 0);
         return OperatorFinalizeResultType::FINISHED;
     }
 
     idx_t to_output = std::min(remaining, static_cast<idx_t>(STANDARD_VECTOR_SIZE));
-    output.SetCardinality(to_output);
+    ANOFOX_SET_CARDINALITY(output, to_output);
 
     for (idx_t col = 0; col < output.ColumnCount(); col++) {
         output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
@@ -1326,7 +1326,7 @@ static OperatorResultType TsCoverageNativeInOut(
         }
     }
 
-    output.SetCardinality(0);
+    ANOFOX_SET_CARDINALITY(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -1395,12 +1395,12 @@ static OperatorFinalizeResultType TsCoverageNativeFinalize(
 
     idx_t remaining = gstate.results.size() - gstate.output_offset;
     if (remaining == 0) {
-        output.SetCardinality(0);
+        ANOFOX_SET_CARDINALITY(output, 0);
         return OperatorFinalizeResultType::FINISHED;
     }
 
     idx_t to_output = std::min(remaining, static_cast<idx_t>(STANDARD_VECTOR_SIZE));
-    output.SetCardinality(to_output);
+    ANOFOX_SET_CARDINALITY(output, to_output);
 
     for (idx_t col = 0; col < output.ColumnCount(); col++) {
         output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
@@ -1613,7 +1613,7 @@ static OperatorResultType TsQuantileLossNativeInOut(
         }
     }
 
-    output.SetCardinality(0);
+    ANOFOX_SET_CARDINALITY(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -1681,12 +1681,12 @@ static OperatorFinalizeResultType TsQuantileLossNativeFinalize(
 
     idx_t remaining = gstate.results.size() - gstate.output_offset;
     if (remaining == 0) {
-        output.SetCardinality(0);
+        ANOFOX_SET_CARDINALITY(output, 0);
         return OperatorFinalizeResultType::FINISHED;
     }
 
     idx_t to_output = std::min(remaining, static_cast<idx_t>(STANDARD_VECTOR_SIZE));
-    output.SetCardinality(to_output);
+    ANOFOX_SET_CARDINALITY(output, to_output);
 
     for (idx_t col = 0; col < output.ColumnCount(); col++) {
         output.data[col].SetVectorType(VectorType::FLAT_VECTOR);

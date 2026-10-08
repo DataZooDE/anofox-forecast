@@ -201,7 +201,7 @@ static OperatorResultType TsCombineKeysInOut(
         output_idx++;
     }
 
-    output.SetCardinality(output_idx);
+    ANOFOX_SET_CARDINALITY(output, output_idx);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 

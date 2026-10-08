@@ -370,7 +370,7 @@ static OperatorResultType TsForecastVarNativeInOut(
         }
     }
 
-    output.SetCardinality(0);
+    ANOFOX_SET_CARDINALITY(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -412,7 +412,7 @@ static OperatorFinalizeResultType TsForecastVarNativeFinalize(
 
         if (n_obs == 0) {
             gstate.processed = true;
-            output.SetCardinality(0);
+            ANOFOX_SET_CARDINALITY(output, 0);
             return OperatorFinalizeResultType::FINISHED;
         }
 
@@ -587,12 +587,12 @@ static OperatorFinalizeResultType TsForecastVarNativeFinalize(
 
     idx_t remaining = static_cast<idx_t>(gstate.results.size()) - gstate.output_offset;
     if (remaining == 0) {
-        output.SetCardinality(0);
+        ANOFOX_SET_CARDINALITY(output, 0);
         return OperatorFinalizeResultType::FINISHED;
     }
 
     idx_t to_output = std::min(remaining, static_cast<idx_t>(STANDARD_VECTOR_SIZE));
-    output.SetCardinality(to_output);
+    ANOFOX_SET_CARDINALITY(output, to_output);
 
     for (idx_t col = 0; col < output.ColumnCount(); col++) {
         output.data[col].SetVectorType(VectorType::FLAT_VECTOR);

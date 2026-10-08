@@ -362,7 +362,7 @@ static OperatorResultType TsCvSplitNativeInOut(
     }
 
     // Don't output anything during input phase
-    output.SetCardinality(0);
+    ANOFOX_SET_CARDINALITY(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -513,7 +513,7 @@ static OperatorFinalizeResultType TsCvSplitNativeFinalize(
         gstate.output_offset++;
     }
 
-    output.SetCardinality(output_idx);
+    ANOFOX_SET_CARDINALITY(output, output_idx);
 
     if (gstate.output_offset >= gstate.output_rows.size()) {
         return OperatorFinalizeResultType::FINISHED;

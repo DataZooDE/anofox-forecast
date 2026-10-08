@@ -136,13 +136,28 @@ static inline const LogicalType &ExprReturnType(const Expression &expr) {
 #define ANOFOX_STRUCT_ENTRY(entries, idx) (*(entries)[(idx)])
 #endif
 
+// DuckDB 2.0 vectors carry their own size. DataChunk::SetCardinality is deprecated
+// there and only sets the chunk count without resizing the vectors, so downstream
+// operators (e.g. a Filter) read a stale per-vector size. DuckDB re-syncs sizes after
+// in_out_function but NOT after in_out_function_final, which is where our *_native
+// functions emit results -> rows silently dropped/garbled on 2.0.
+// ANOFOX_SET_CARDINALITY uses SetChildCardinality on 2.0 (resizes every vector).
+#if __has_include("duckdb/common/identifier.hpp")
+#define ANOFOX_SET_CARDINALITY(chunk, count) ((chunk).SetChildCardinality(count))
+#else
+#define ANOFOX_SET_CARDINALITY(chunk, count) ((chunk).SetCardinality(count))
+#endif
+
 // DuckDB 2.0 replaced SimpleNamedParameterFunction::named_parameters (a flat
 // name->LogicalType map) with Python-style KEYWORD_ONLY parameters declared
 // on FunctionSignature via AddKeywordOnly. v1.5.x has no FunctionSignature /
 // GetSignature() at all. ANOFOX_ADD_NAMED_PARAM(func, name, type) declares a
 // named parameter the same way on both.
 #if __has_include("duckdb/common/identifier.hpp")
-#define ANOFOX_ADD_NAMED_PARAM(func, name, type) ((func).GetSignature().AddKeywordOnly((name), (type)))
+// A typed-NULL default keeps the parameter optional (as on v1.5.x); 2.0 fills the
+// default into named_parameters when omitted, so bind code must skip NULL values.
+#define ANOFOX_ADD_NAMED_PARAM(func, name, type)                                                                       \
+	((func).GetSignature().AddKeywordOnly((name), (type), ::duckdb::Value(type)))
 #else
 #define ANOFOX_ADD_NAMED_PARAM(func, name, type) ((func).named_parameters[(name)] = (type))
 #endif

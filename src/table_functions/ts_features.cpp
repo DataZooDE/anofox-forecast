@@ -226,7 +226,7 @@ static void TsFeaturesListExecute(ClientContext &context, TableFunctionInput &da
         count++;
     }
 
-    output.SetCardinality(count);
+    ANOFOX_SET_CARDINALITY(output, count);
 }
 
 void RegisterTsFeaturesListFunction(ExtensionLoader &loader) {
@@ -301,7 +301,7 @@ static void TsFeaturesConfigTemplateExecute(ClientContext &context, TableFunctio
         count++;
     }
 
-    output.SetCardinality(count);
+    ANOFOX_SET_CARDINALITY(output, count);
 }
 
 void RegisterTsFeaturesConfigTemplateFunction(ExtensionLoader &loader) {

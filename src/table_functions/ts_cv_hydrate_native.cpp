@@ -480,7 +480,7 @@ static OperatorResultType TsCvHydrateNativeInOut(
         }
     }
 
-    output.SetCardinality(0);
+    ANOFOX_SET_CARDINALITY(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -615,7 +615,7 @@ static OperatorFinalizeResultType TsCvHydrateNativeFinalize(
         gstate.offset++;
     }
 
-    output.SetCardinality(output_idx);
+    ANOFOX_SET_CARDINALITY(output, output_idx);
 
     if (gstate.offset >= gstate.output.size()) {
         return OperatorFinalizeResultType::FINISHED;

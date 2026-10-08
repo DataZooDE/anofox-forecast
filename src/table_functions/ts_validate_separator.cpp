@@ -77,6 +77,9 @@ static unique_ptr<FunctionData> TsValidateSeparatorBind(
 
     // Parse named parameters
     for (auto &kv : input.named_parameters) {
+        if (kv.second.IsNull()) {
+            continue;  // omitted optional param (DuckDB 2.0 fills a NULL default)
+        }
         if (kv.first == "separator") {
             bind_data->separator = kv.second.GetValue<string>();
         }
@@ -169,7 +172,7 @@ static OperatorResultType TsValidateSeparatorInOut(
     }
 
     // Don't output anything during input phase
-    output.SetCardinality(0);
+    ANOFOX_SET_CARDINALITY(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -254,7 +257,7 @@ static OperatorFinalizeResultType TsValidateSeparatorFinalize(
     output.SetValue(2, 0, Value::INTEGER(static_cast<int32_t>(n_conflicts)));
     output.SetValue(3, 0, Value::LIST(LogicalType::VARCHAR, conflicting_values));
     output.SetValue(4, 0, Value(message));
-    output.SetCardinality(1);
+    ANOFOX_SET_CARDINALITY(output, 1);
 
     gstate.output_done = true;
     return OperatorFinalizeResultType::FINISHED;
