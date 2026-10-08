@@ -15,18 +15,22 @@ SQL users can produce, validate, combine, and interval-bound time-series forecas
 - **Shipped v0.8.0 — Ensemble Forecasting (2026-08-31):** AutoEnsemble (`ts_forecast_by('AutoEnsemble')`), explicit-member ensembles (`ts_forecast_ensemble_by`), six combination methods, ensemble conformal intervals (existing path), and member/weight introspection (`ts_ensemble_inspect_by` / `ts_auto_ensemble_inspect_by`). See `.planning/milestones/v0.8.0-*`.
 - **Shipped v0.7.0 — Diagnostics + Model Coverage (2026-08-22):** stationarity + residual diagnostics, global/panel models, GARCH/Kalman/VAR.
 
-## Current Milestone: v0.9.0 WASM Runtime Verification
+## Current Milestone: v0.10.0 Statistical Correctness
 
-**Goal:** Prove the built `anofox_forecast` `.wasm` actually loads and runs in DuckDB-Wasm — not just that it compiles and links — and gate it in CI so WASM regressions fail the build.
+**Goal:** Every statistic the extension returns is correct — verified against R / scipy reference values — and is computed in the Rust crates; C++ and SQL only marshal, group, and dispatch.
 
 **Target features:**
-- Node harness under `test/wasm/` that boots DuckDB-Wasm, serves + `LOAD`s the locally-built `.wasm`, and runs the full `test/sql/**/*.test` suite via a minimal sqllogictest-subset runner
-- Gating CI job (`needs:` the wasm build) that fails on any WASM load/runtime error
-- Dedicated WASM workflow + README badge reflecting WASM status specifically
-- `@duckdb/duckdb-wasm` pinned to the engine version matching the built DuckDB version, documented
-- OpenSSL made a `!wasm32` dependency in `vcpkg.json` (unused on WASM; telemetry is off there)
+- Forecast wrapper delegates prediction intervals, fitted values and residuals to the crate models (no fabricated ±z·sd(series)·√h intervals, no SES(α=0.3) stand-in residuals); real ARIMA; silent model/parameter fallbacks become errors
+- Wrapper bug fixes: fdars size-argument order (detrend/decompose/seasonality no-ops), bootstrap residual sign, data-quality dates, MSTL windows/order, `ts_diff_by`, exogenous NaN coefficients
+- Statistics moved out of C++/SQL into Rust: pairwise-complete NULL handling via validity, `ToUnifiedFormat` list marshalling, native conformal/diff/fill functions, backtest metrics, hierarchy NULL semantics
+- Core statistics/features corrected: moments, STL trend/seasonal strength, tsfresh-exact features, Hyndman-Koehler MASE, MAPE zero policy
+- Detection/conformal corrected: scipy-semantics peaks, correct BOCPD, scale-free PELT, STL-based MSTL, asymmetric/adaptive/jackknife+ conformal, period-detection robustness
+- Upstream anofox-forecast fixes (branch + PR, user releases): augmented ADF + MacKinnon p-values, bounded KPSS p-values, AutoARIMA order selection (KPSS/OCSB, AICc), ETS likelihood + analytic intervals, Theta
+- Dependency bumps: anofox-regression 0.5.15, anofox-forecast ≥0.15.10, fdars-core 0.47 (drop `linalg`)
+- Reference-fixture test suite (checked-in R/Python generators) + docs/skills synced to corrected behaviour
 
-This is a CI/infrastructure hardening milestone — no new SQL surface, no crate bump. Reference implementation to port: anofox-statistics PR #131 (`test/wasm/run.mjs`, `sqllogic.mjs`, `WasmTest.yml`). Tracks GH issue #255.
+Input: `.planning/research/STAT-AUDIT-2026-10-08.md` (audit findings A–I). Branch: `fix/statistical-correctness`.
+v0.9.0 (WASM Runtime Verification) is parked with only the operator live-CI negative-control check (Phase 08) outstanding.
 
 ## Requirements
 
@@ -55,13 +59,16 @@ This is a CI/infrastructure hardening milestone — no new SQL surface, no crate
 
 ### Active
 
-<!-- v0.9.0 WASM Runtime Verification — see REQUIREMENTS.md for REQ-IDs. -->
+<!-- v0.10.0 Statistical Correctness — see REQUIREMENTS.md for REQ-IDs. -->
 
-- [ ] Node harness loads the built `.wasm` in DuckDB-Wasm and runs the full `test/sql` suite
-- [ ] Gating CI job fails the build on any WASM load/runtime error
-- [ ] WASM status badge in README, backed by a dedicated WASM workflow
-- [ ] `@duckdb/duckdb-wasm` pinned to the engine version matching the built DuckDB version, documented
-- [ ] `openssl` made a `!wasm32` dependency in `vcpkg.json`
+- [ ] Forecast intervals/fitted/residuals come from the crate models, not wrapper approximations
+- [ ] All wrapper-level statistical bugs from the 2026-10-08 audit fixed with value-asserting tests
+- [ ] No statistical computation remains in C++ or SQL macros
+- [ ] Core statistics, features, detection and conformal outputs match R/scipy/tsfresh references
+- [ ] Upstream anofox-forecast diagnostics/model-selection fixes merged and consumed
+- [ ] Dependencies bumped (anofox-regression 0.5.15, anofox-forecast ≥0.15.10, fdars-core 0.47)
+
+Parked from v0.9.0: Phase 08 live-CI negative-control push (operator action).
 
 Deferred from v0.8.0 (candidates for a future milestone):
 - **CV ensemble params + AutoEnsemble CV segfault:** `ts_cv_forecast_by('AutoEnsemble')` segfaults (CV native `ts_cv_forecast_native.cpp:380-388` never parses `ensemble_top_k`/`ensemble_method`). Wire ensemble-param parsing into the CV native so AutoEnsemble backtests natively (and honor top_k/combination_method instead of defaulting to top_k=3/Mean).
@@ -101,7 +108,8 @@ Deferred from v0.7.0 (candidates for a future milestone):
 
 - **Tech stack**: DuckDB v1.4.3+ extension; Rust 1.86+ core via FFI; C++17. No new languages.
 - **Architecture**: Parallelism stays at the DuckDB GROUP BY / scalar-function layer — no custom threading or table-in/table-out (established project rule).
-- **Dependencies**: Stay on `anofox-forecast` 0.15.3 unless a required capability is missing; global-model steady-state ARIMA optimization tracked separately (awaiting 0.5.4-class improvements).
+- **Dependencies**: v0.10.0 bumps anofox-regression → 0.5.15, anofox-forecast → ≥0.15.10 (plus upstream correctness fixes via branch + PR; user publishes releases; interim `[patch]` git/path dependency allowed on the fix branch only), fdars-core → 0.47.
+- **Correctness**: Statistics are computed in Rust only; every statistical output is checked against a reference implementation (R / scipy / statsmodels / tsfresh) via checked-in fixtures — length-only tests do not count.
 - **Compatibility**: Must build and load across Linux/macOS/Windows and WASM; OpenSSL stays statically linked; verify clean-machine load (not just green CI).
 - **Verification**: Every new SQL function must be exercised by a runnable example against the built extension before it counts as done.
 
@@ -141,4 +149,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-01 — started v0.9.0 WASM Runtime Verification milestone*
+*Last updated: 2026-10-08 — started v0.10.0 Statistical Correctness milestone*
