@@ -80,7 +80,7 @@ COPY ({query}) TO '{result_parquet}' (FORMAT PARQUET);
             [str(duckdb_cli), '-unsigned', '-c', f".read '{script_file}'"],
             capture_output=True,
             text=True,
-            timeout=600,
+            timeout=int(os.environ.get('ANOFOX_CLI_TIMEOUT', '600')),
         )
 
         if result.returncode != 0:
@@ -180,21 +180,29 @@ def run_anofox_benchmark(
     # For panel functions (TS_FORECAST_PANEL_BY), use CLI subprocess to avoid the
     # venv duckdb Python version mismatch with the locally built extension.
     # The CLI binary at build/release/duckdb always matches the extension version.
-    use_cli_subprocess = function_name == 'TS_FORECAST_PANEL_BY'
+    #
+    # Also force CLI-subprocess mode when ANOFOX_USE_CLI=1 (e.g. per-series TS_FORECAST_BY
+    # runs comparing two different DuckDB engine builds, where the venv's `duckdb` Python
+    # package can only match ONE of the two builds' library version at a time — the CLI
+    # derived from each build's own extension path always matches that build exactly).
+    # NOTE: measured time in CLI-subprocess mode includes a constant parquet round-trip and
+    # CLI process-start overhead on top of the actual query; this overhead is identical for
+    # both builds being compared, so it does not skew relative deltas.
+    use_cli_subprocess = function_name == 'TS_FORECAST_PANEL_BY' or os.environ.get('ANOFOX_USE_CLI') == '1'
     duckdb_cli = None
     if use_cli_subprocess:
         duckdb_cli = _find_duckdb_cli(extension_path)
         if duckdb_cli is None:
             raise RuntimeError(
-                "Panel benchmark requires the project DuckDB CLI binary "
+                "This benchmark requires the project DuckDB CLI binary "
                 "(build/release/duckdb) to avoid the venv/extension version mismatch. "
                 "Build it first: cmake --build build/release --target duckdb"
             )
-        print(f"Panel mode: using CLI subprocess at {duckdb_cli}")
+        print(f"CLI-subprocess mode: using CLI at {duckdb_cli}")
         if not (extension_path and extension_path.exists()):
             raise RuntimeError(
-                f"Panel benchmark requires a locally built extension at {extension_path}. "
-                "Community extension does not yet include ts_forecast_panel_by."
+                f"This benchmark requires a locally built extension at {extension_path}. "
+                "Community extension does not yet include every function used here."
             )
         con = None
     else:
@@ -270,7 +278,7 @@ def run_anofox_benchmark(
                     duckdb_cli=duckdb_cli,
                 )
             else:
-                # Default per-series query via ts_forecast_by (Python duckdb API)
+                # Default per-series query via ts_forecast_by.
                 forecast_query = f"""
                     SELECT *
                     FROM TS_FORECAST_BY(
@@ -284,7 +292,17 @@ def run_anofox_benchmark(
                         {map_literal}
                     )
                 """
-                fcst_df = con.execute(forecast_query).fetchdf()
+                if use_cli_subprocess:
+                    # ANOFOX_USE_CLI=1: route through the build's own CLI instead of
+                    # con.execute, exactly like the panel path above.
+                    fcst_df = _run_panel_query_via_cli(
+                        train_df=train_df,
+                        query=forecast_query.strip(),
+                        extension_path=extension_path,
+                        duckdb_cli=duckdb_cli,
+                    )
+                else:
+                    fcst_df = con.execute(forecast_query).fetchdf()
 
             # Rename yhat -> model_name for standardization
             rename_map = {'yhat': model_name}
