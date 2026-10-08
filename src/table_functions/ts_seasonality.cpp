@@ -191,7 +191,7 @@ static void TsAnalyzeSeasonalityWithTimestampsFunction(DataChunk &args, Expressi
 
         // Set detected_periods list
         {
-            auto &periods_list = children[0];
+            auto &periods_list = ANOFOX_STRUCT_ENTRY(children, 0);
             auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(periods_list);
             auto &list_child = ListVector::GetEntry(periods_list);
             auto current_size = ListVector::GetListSize(periods_list);
@@ -209,9 +209,9 @@ static void TsAnalyzeSeasonalityWithTimestampsFunction(DataChunk &args, Expressi
         }
 
         // Set scalar fields
-        ANOFOX_FLATVECTOR_WRITE<int32_t>(children[1])[row_idx] = seas_result.primary_period;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = seas_result.seasonal_strength;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[3])[row_idx] = seas_result.trend_strength;
+        ANOFOX_FLATVECTOR_WRITE<int32_t>(ANOFOX_STRUCT_ENTRY(children, 1))[row_idx] = seas_result.primary_period;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 2))[row_idx] = seas_result.seasonal_strength;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 3))[row_idx] = seas_result.trend_strength;
 
         anofox_free_seasonality_result(&seas_result);
     }
@@ -256,7 +256,7 @@ static void TsAnalyzeSeasonalityFunction(DataChunk &args, ExpressionState &state
 
         // Set detected_periods list
         {
-            auto &periods_list = children[0];
+            auto &periods_list = ANOFOX_STRUCT_ENTRY(children, 0);
             auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(periods_list);
             auto &list_child = ListVector::GetEntry(periods_list);
             auto current_size = ListVector::GetListSize(periods_list);
@@ -274,9 +274,9 @@ static void TsAnalyzeSeasonalityFunction(DataChunk &args, ExpressionState &state
         }
 
         // Set scalar fields
-        ANOFOX_FLATVECTOR_WRITE<int32_t>(children[1])[row_idx] = seas_result.primary_period;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = seas_result.seasonal_strength;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[3])[row_idx] = seas_result.trend_strength;
+        ANOFOX_FLATVECTOR_WRITE<int32_t>(ANOFOX_STRUCT_ENTRY(children, 1))[row_idx] = seas_result.primary_period;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 2))[row_idx] = seas_result.seasonal_strength;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 3))[row_idx] = seas_result.trend_strength;
 
         anofox_free_seasonality_result(&seas_result);
     }
@@ -475,35 +475,35 @@ static void TsClassifySeasonalityFunction(DataChunk &args, ExpressionState &stat
         auto &children = StructVector::GetEntries(result);
 
         // timing_classification (index 0)
-        ANOFOX_FLATVECTOR_WRITE<string_t>(children[0])[row_idx] =
-            StringVector::AddString(children[0], class_result.classification);
+        ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 0))[row_idx] =
+            StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 0), class_result.classification);
 
         // modulation_type (index 1)
         if (mod_success) {
-            ANOFOX_FLATVECTOR_WRITE<string_t>(children[1])[row_idx] =
-                StringVector::AddString(children[1], mod_result.modulation_type);
+            ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 1))[row_idx] =
+                StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 1), mod_result.modulation_type);
         } else {
-            ANOFOX_FLATVECTOR_WRITE<string_t>(children[1])[row_idx] =
-                StringVector::AddString(children[1], "unknown");
+            ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 1))[row_idx] =
+                StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 1), "unknown");
         }
 
         // has_stable_timing (index 2)
-        ANOFOX_FLATVECTOR_WRITE<bool>(children[2])[row_idx] = class_result.has_stable_timing;
+        ANOFOX_FLATVECTOR_WRITE<bool>(ANOFOX_STRUCT_ENTRY(children, 2))[row_idx] = class_result.has_stable_timing;
 
         // timing_variability (index 3)
-        ANOFOX_FLATVECTOR_WRITE<double>(children[3])[row_idx] = class_result.timing_variability;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 3))[row_idx] = class_result.timing_variability;
 
         // seasonal_strength (index 4)
-        ANOFOX_FLATVECTOR_WRITE<double>(children[4])[row_idx] = class_result.seasonal_strength;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 4))[row_idx] = class_result.seasonal_strength;
 
         // is_seasonal (index 5)
-        ANOFOX_FLATVECTOR_WRITE<bool>(children[5])[row_idx] = class_result.is_seasonal;
+        ANOFOX_FLATVECTOR_WRITE<bool>(ANOFOX_STRUCT_ENTRY(children, 5))[row_idx] = class_result.is_seasonal;
 
         // cycle_strengths (index 6)
-        SetDoubleListField(children[6], row_idx, class_result.cycle_strengths, class_result.n_cycle_strengths);
+        SetDoubleListField(ANOFOX_STRUCT_ENTRY(children, 6), row_idx, class_result.cycle_strengths, class_result.n_cycle_strengths);
 
         // weak_seasons (index 7)
-        SetBigintListField(children[7], row_idx, class_result.weak_seasons, class_result.n_weak_seasons);
+        SetBigintListField(ANOFOX_STRUCT_ENTRY(children, 7), row_idx, class_result.weak_seasons, class_result.n_weak_seasons);
 
         // Free FFI results
         anofox_free_seasonality_classification_result(&class_result);

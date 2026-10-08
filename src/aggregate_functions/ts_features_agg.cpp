@@ -306,7 +306,7 @@ static void TsFeaturesAggFinalize(Vector &state_vector, ANOFOX_AGG_FINALIZE_INPU
         // Populate the struct fields
         auto &struct_entries = StructVector::GetEntries(result);
         for (size_t j = 0; j < feature_names.size() && j < struct_entries.size(); j++) {
-            auto &child_vec = struct_entries[j];
+            auto &child_vec = ANOFOX_STRUCT_ENTRY(struct_entries, j);
             auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(child_vec);
 
             auto it = feature_map.find(feature_names[j]);

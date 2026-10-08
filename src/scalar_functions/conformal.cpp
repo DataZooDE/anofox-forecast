@@ -133,8 +133,8 @@ static void TsConformalIntervalsFunction(DataChunk &args, ExpressionState &state
 
     // Result is a STRUCT with lower and upper arrays
     auto &struct_entries = StructVector::GetEntries(result);
-    auto &lower_vec = struct_entries[0];
-    auto &upper_vec = struct_entries[1];
+    auto &lower_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 0);
+    auto &upper_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 1);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto score_idx = score_data.sel->get_index(row_idx);
@@ -258,12 +258,12 @@ static void TsConformalPredictFunction(DataChunk &args, ExpressionState &state, 
 
     // Result struct fields
     auto &struct_entries = StructVector::GetEntries(result);
-    auto &point_vec = struct_entries[0];
-    auto &lower_vec = struct_entries[1];
-    auto &upper_vec = struct_entries[2];
-    auto &coverage_vec = struct_entries[3];
-    auto &score_vec = struct_entries[4];
-    auto &method_vec = struct_entries[5];
+    auto &point_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 0);
+    auto &lower_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 1);
+    auto &upper_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 2);
+    auto &coverage_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 3);
+    auto &score_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 4);
+    auto &method_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 5);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto alpha_idx = alpha_data.sel->get_index(row_idx);
@@ -413,12 +413,12 @@ static void TsConformalPredictAsymmetricFunction(DataChunk &args, ExpressionStat
 
     // Result struct fields
     auto &struct_entries = StructVector::GetEntries(result);
-    auto &point_vec = struct_entries[0];
-    auto &lower_vec = struct_entries[1];
-    auto &upper_vec = struct_entries[2];
-    auto &coverage_vec = struct_entries[3];
-    auto &score_vec = struct_entries[4];
-    auto &method_vec = struct_entries[5];
+    auto &point_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 0);
+    auto &lower_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 1);
+    auto &upper_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 2);
+    auto &coverage_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 3);
+    auto &score_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 4);
+    auto &method_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 5);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto alpha_idx = alpha_data.sel->get_index(row_idx);
@@ -610,13 +610,13 @@ static void TsConformalLearnFunction(DataChunk &args, ExpressionState &state, Ve
 
     // Result struct fields
     auto &struct_entries = StructVector::GetEntries(result);
-    auto &out_method_vec = struct_entries[0];
-    auto &out_strategy_vec = struct_entries[1];
-    auto &out_alphas_vec = struct_entries[2];
-    auto &out_state_vec = struct_entries[3];
-    auto &out_scores_lower_vec = struct_entries[4];
-    auto &out_scores_upper_vec = struct_entries[5];
-    auto &out_n_residuals_vec = struct_entries[6];
+    auto &out_method_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 0);
+    auto &out_strategy_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 1);
+    auto &out_alphas_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 2);
+    auto &out_state_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 3);
+    auto &out_scores_lower_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 4);
+    auto &out_scores_upper_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 5);
+    auto &out_n_residuals_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 6);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto method_idx = method_data.sel->get_index(row_idx);
@@ -792,21 +792,21 @@ static void TsConformalApplyFunction(DataChunk &args, ExpressionState &state, Ve
 
     // Profile struct fields
     auto &profile_entries = StructVector::GetEntries(profile_vec);
-    auto &method_vec = profile_entries[0];
-    auto &strategy_vec_input = profile_entries[1];
-    auto &alphas_vec = profile_entries[2];
-    auto &state_vec = profile_entries[3];
-    auto &scores_lower_vec = profile_entries[4];
-    auto &scores_upper_vec = profile_entries[5];
-    auto &n_residuals_vec = profile_entries[6];
+    auto &method_vec = ANOFOX_STRUCT_ENTRY(profile_entries, 0);
+    auto &strategy_vec_input = ANOFOX_STRUCT_ENTRY(profile_entries, 1);
+    auto &alphas_vec = ANOFOX_STRUCT_ENTRY(profile_entries, 2);
+    auto &state_vec = ANOFOX_STRUCT_ENTRY(profile_entries, 3);
+    auto &scores_lower_vec = ANOFOX_STRUCT_ENTRY(profile_entries, 4);
+    auto &scores_upper_vec = ANOFOX_STRUCT_ENTRY(profile_entries, 5);
+    auto &n_residuals_vec = ANOFOX_STRUCT_ENTRY(profile_entries, 6);
 
     // Result struct fields
     auto &out_entries = StructVector::GetEntries(result);
-    auto &out_point_vec = out_entries[0];
-    auto &out_coverage_vec = out_entries[1];
-    auto &out_lower_vec = out_entries[2];
-    auto &out_upper_vec = out_entries[3];
-    auto &out_method_vec = out_entries[4];
+    auto &out_point_vec = ANOFOX_STRUCT_ENTRY(out_entries, 0);
+    auto &out_coverage_vec = ANOFOX_STRUCT_ENTRY(out_entries, 1);
+    auto &out_lower_vec = ANOFOX_STRUCT_ENTRY(out_entries, 2);
+    auto &out_upper_vec = ANOFOX_STRUCT_ENTRY(out_entries, 3);
+    auto &out_method_vec = ANOFOX_STRUCT_ENTRY(out_entries, 4);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (FlatVector::IsNull(forecasts_vec, row_idx) || FlatVector::IsNull(profile_vec, row_idx)) {
@@ -1093,11 +1093,11 @@ static void TsConformalEvaluateFunction(DataChunk &args, ExpressionState &state,
 
     // Result struct fields
     auto &struct_entries = StructVector::GetEntries(result);
-    auto &out_coverage_vec = struct_entries[0];
-    auto &out_violation_vec = struct_entries[1];
-    auto &out_width_vec = struct_entries[2];
-    auto &out_winkler_vec = struct_entries[3];
-    auto &out_n_obs_vec = struct_entries[4];
+    auto &out_coverage_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 0);
+    auto &out_violation_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 1);
+    auto &out_width_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 2);
+    auto &out_winkler_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 3);
+    auto &out_n_obs_vec = ANOFOX_STRUCT_ENTRY(struct_entries, 4);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto alpha_idx = alpha_data.sel->get_index(row_idx);
@@ -1308,11 +1308,11 @@ static void TsConformalPredictPerStepFunction(DataChunk &args, ExpressionState &
     horizon_vec.ToUnifiedFormat(count, horizon_data);
 
     auto &struct_entries = StructVector::GetEntries(result);
-    auto &point_out = struct_entries[0];
-    auto &lower_out = struct_entries[1];
-    auto &upper_out = struct_entries[2];
-    auto &hw_out = struct_entries[3];
-    auto &coverage_out = struct_entries[4];
+    auto &point_out = ANOFOX_STRUCT_ENTRY(struct_entries, 0);
+    auto &lower_out = ANOFOX_STRUCT_ENTRY(struct_entries, 1);
+    auto &upper_out = ANOFOX_STRUCT_ENTRY(struct_entries, 2);
+    auto &hw_out = ANOFOX_STRUCT_ENTRY(struct_entries, 3);
+    auto &coverage_out = ANOFOX_STRUCT_ENTRY(struct_entries, 4);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto alpha_idx = alpha_data.sel->get_index(row_idx);

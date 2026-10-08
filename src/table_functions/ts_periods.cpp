@@ -181,7 +181,7 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
     // IMPORTANT: Get fresh references after each operation that might reallocate
     {
         auto &children_init = StructVector::GetEntries(result);
-        auto &periods_list_init = children_init[0];
+        auto &periods_list_init = ANOFOX_STRUCT_ENTRY(children_init, 0);
 
         // Reserve all space at once (reserve at least 1 to ensure valid list structure)
         ListVector::Reserve(periods_list_init, total_periods > 0 ? total_periods : 1);
@@ -190,7 +190,7 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
 
     // Get fresh references after Reserve (Reserve may have reallocated memory)
     auto &children = StructVector::GetEntries(result);
-    auto &periods_list = children[0];
+    auto &periods_list = ANOFOX_STRUCT_ENTRY(children, 0);
 
     // Get list_data pointer for the list entries
     auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(periods_list);
@@ -209,19 +209,19 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
     if (total_periods > 0) {
         auto &list_child = ListVector::GetEntry(periods_list);
         auto &struct_entries = StructVector::GetEntries(list_child);
-        period_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[0]);
-        confidence_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[1]);
-        strength_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[2]);
-        amplitude_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[3]);
-        phase_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[4]);
-        iteration_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(struct_entries[5]);
-        matches_expected_data = ANOFOX_FLATVECTOR_WRITE<bool>(struct_entries[6]);
-        matched_expected_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[7]);
-        match_deviation_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[8]);
+        period_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 0));
+        confidence_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 1));
+        strength_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 2));
+        amplitude_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 3));
+        phase_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 4));
+        iteration_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(ANOFOX_STRUCT_ENTRY(struct_entries, 5));
+        matches_expected_data = ANOFOX_FLATVECTOR_WRITE<bool>(ANOFOX_STRUCT_ENTRY(struct_entries, 6));
+        matched_expected_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 7));
+        match_deviation_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 8));
     }
 
-    auto n_periods_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(children[1]);
-    auto primary_period_data = ANOFOX_FLATVECTOR_WRITE<double>(children[2]);
+    auto n_periods_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(ANOFOX_STRUCT_ENTRY(children, 1));
+    auto primary_period_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 2));
 
     size_t current_offset = 0;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
@@ -257,7 +257,7 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
         // Set scalar fields
         n_periods_data[row_idx] = res.n_periods;
         primary_period_data[row_idx] = res.primary_period;
-        ANOFOX_FLATVECTOR_WRITE<string_t>(children[3])[row_idx] = StringVector::AddString(children[3], res.method);
+        ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 3))[row_idx] = StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 3), res.method);
 
         // Free FFI result
         anofox_free_flat_multi_period_result(&row_results[row_idx].result);
@@ -321,7 +321,7 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
     // IMPORTANT: Get fresh references after each operation that might reallocate
     {
         auto &children_init = StructVector::GetEntries(result);
-        auto &periods_list_init = children_init[0];
+        auto &periods_list_init = ANOFOX_STRUCT_ENTRY(children_init, 0);
 
         // Reserve all space at once (reserve at least 1 to ensure valid list structure)
         ListVector::Reserve(periods_list_init, total_periods > 0 ? total_periods : 1);
@@ -330,7 +330,7 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
 
     // Get fresh references after Reserve (Reserve may have reallocated memory)
     auto &children = StructVector::GetEntries(result);
-    auto &periods_list = children[0];
+    auto &periods_list = ANOFOX_STRUCT_ENTRY(children, 0);
 
     // Get list_data pointer for the list entries
     auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(periods_list);
@@ -349,19 +349,19 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
     if (total_periods > 0) {
         auto &list_child = ListVector::GetEntry(periods_list);
         auto &struct_entries = StructVector::GetEntries(list_child);
-        period_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[0]);
-        confidence_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[1]);
-        strength_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[2]);
-        amplitude_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[3]);
-        phase_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[4]);
-        iteration_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(struct_entries[5]);
-        matches_expected_data = ANOFOX_FLATVECTOR_WRITE<bool>(struct_entries[6]);
-        matched_expected_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[7]);
-        match_deviation_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[8]);
+        period_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 0));
+        confidence_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 1));
+        strength_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 2));
+        amplitude_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 3));
+        phase_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 4));
+        iteration_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(ANOFOX_STRUCT_ENTRY(struct_entries, 5));
+        matches_expected_data = ANOFOX_FLATVECTOR_WRITE<bool>(ANOFOX_STRUCT_ENTRY(struct_entries, 6));
+        matched_expected_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 7));
+        match_deviation_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 8));
     }
 
-    auto n_periods_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(children[1]);
-    auto primary_period_data = ANOFOX_FLATVECTOR_WRITE<double>(children[2]);
+    auto n_periods_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(ANOFOX_STRUCT_ENTRY(children, 1));
+    auto primary_period_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 2));
 
     size_t current_offset = 0;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
@@ -397,7 +397,7 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
         // Set scalar fields
         n_periods_data[row_idx] = res.n_periods;
         primary_period_data[row_idx] = res.primary_period;
-        ANOFOX_FLATVECTOR_WRITE<string_t>(children[3])[row_idx] = StringVector::AddString(children[3], res.method);
+        ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 3))[row_idx] = StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 3), res.method);
 
         // Free FFI result
         anofox_free_flat_multi_period_result(&row_results[row_idx].result);
@@ -516,11 +516,11 @@ static void TsEstimatePeriodFftFunction(DataChunk &args, ExpressionState &state,
         }
 
         auto &children = StructVector::GetEntries(result);
-        ANOFOX_FLATVECTOR_WRITE<double>(children[0])[row_idx] = period_result.period;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[1])[row_idx] = period_result.frequency;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = period_result.power;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[3])[row_idx] = period_result.confidence;
-        ANOFOX_FLATVECTOR_WRITE<string_t>(children[4])[row_idx] = StringVector::AddString(children[4], period_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 0))[row_idx] = period_result.period;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 1))[row_idx] = period_result.frequency;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 2))[row_idx] = period_result.power;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 3))[row_idx] = period_result.confidence;
+        ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 4))[row_idx] = StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 4), period_result.method);
     }
 }
 
@@ -591,11 +591,11 @@ static void TsEstimatePeriodAcfFunction(DataChunk &args, ExpressionState &state,
         }
 
         auto &children = StructVector::GetEntries(result);
-        ANOFOX_FLATVECTOR_WRITE<double>(children[0])[row_idx] = period_result.period;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[1])[row_idx] = period_result.frequency;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = period_result.power;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[3])[row_idx] = period_result.confidence;
-        ANOFOX_FLATVECTOR_WRITE<string_t>(children[4])[row_idx] = StringVector::AddString(children[4], period_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 0))[row_idx] = period_result.period;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 1))[row_idx] = period_result.frequency;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 2))[row_idx] = period_result.power;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 3))[row_idx] = period_result.confidence;
+        ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 4))[row_idx] = StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 4), period_result.method);
     }
 }
 
@@ -703,7 +703,7 @@ static void TsDetectMultiplePeriodsFunction(DataChunk &args, ExpressionState &st
     // IMPORTANT: Get fresh references after each operation that might reallocate
     {
         auto &children_init = StructVector::GetEntries(result);
-        auto &periods_list_init = children_init[0];
+        auto &periods_list_init = ANOFOX_STRUCT_ENTRY(children_init, 0);
 
         // Reserve all space at once (reserve at least 1 to ensure valid list structure)
         ListVector::Reserve(periods_list_init, total_periods > 0 ? total_periods : 1);
@@ -712,7 +712,7 @@ static void TsDetectMultiplePeriodsFunction(DataChunk &args, ExpressionState &st
 
     // Get fresh references after Reserve (Reserve may have reallocated memory)
     auto &children = StructVector::GetEntries(result);
-    auto &periods_list = children[0];
+    auto &periods_list = ANOFOX_STRUCT_ENTRY(children, 0);
 
     // Get list_data pointer for the list entries
     auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(periods_list);
@@ -731,19 +731,19 @@ static void TsDetectMultiplePeriodsFunction(DataChunk &args, ExpressionState &st
     if (total_periods > 0) {
         auto &list_child = ListVector::GetEntry(periods_list);
         auto &struct_entries = StructVector::GetEntries(list_child);
-        period_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[0]);
-        confidence_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[1]);
-        strength_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[2]);
-        amplitude_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[3]);
-        phase_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[4]);
-        iteration_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(struct_entries[5]);
-        matches_expected_data = ANOFOX_FLATVECTOR_WRITE<bool>(struct_entries[6]);
-        matched_expected_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[7]);
-        match_deviation_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[8]);
+        period_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 0));
+        confidence_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 1));
+        strength_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 2));
+        amplitude_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 3));
+        phase_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 4));
+        iteration_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(ANOFOX_STRUCT_ENTRY(struct_entries, 5));
+        matches_expected_data = ANOFOX_FLATVECTOR_WRITE<bool>(ANOFOX_STRUCT_ENTRY(struct_entries, 6));
+        matched_expected_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 7));
+        match_deviation_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 8));
     }
 
-    auto n_periods_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(children[1]);
-    auto primary_period_data = ANOFOX_FLATVECTOR_WRITE<double>(children[2]);
+    auto n_periods_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(ANOFOX_STRUCT_ENTRY(children, 1));
+    auto primary_period_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 2));
 
     size_t current_offset = 0;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
@@ -779,7 +779,7 @@ static void TsDetectMultiplePeriodsFunction(DataChunk &args, ExpressionState &st
         // Set scalar fields
         n_periods_data[row_idx] = res.n_periods;
         primary_period_data[row_idx] = res.primary_period;
-        ANOFOX_FLATVECTOR_WRITE<string_t>(children[3])[row_idx] = StringVector::AddString(children[3], res.method);
+        ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 3))[row_idx] = StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 3), res.method);
 
         // Free FFI result
         anofox_free_flat_multi_period_result(&row_results[row_idx].result);
@@ -887,11 +887,11 @@ static void TsAutoperiodFunction(DataChunk &args, ExpressionState &state, Vector
         }
 
         auto &children = StructVector::GetEntries(result);
-        ANOFOX_FLATVECTOR_WRITE<double>(children[0])[row_idx] = ap_result.period;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[1])[row_idx] = ap_result.fft_confidence;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = ap_result.acf_validation;
-        ANOFOX_FLATVECTOR_WRITE<bool>(children[3])[row_idx] = ap_result.detected;
-        ANOFOX_FLATVECTOR_WRITE<string_t>(children[4])[row_idx] = StringVector::AddString(children[4], ap_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 0))[row_idx] = ap_result.period;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 1))[row_idx] = ap_result.fft_confidence;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 2))[row_idx] = ap_result.acf_validation;
+        ANOFOX_FLATVECTOR_WRITE<bool>(ANOFOX_STRUCT_ENTRY(children, 3))[row_idx] = ap_result.detected;
+        ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 4))[row_idx] = StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 4), ap_result.method);
     }
 }
 
@@ -970,11 +970,11 @@ static void TsCfdAutoperiodFunction(DataChunk &args, ExpressionState &state, Vec
         }
 
         auto &children = StructVector::GetEntries(result);
-        ANOFOX_FLATVECTOR_WRITE<double>(children[0])[row_idx] = ap_result.period;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[1])[row_idx] = ap_result.fft_confidence;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = ap_result.acf_validation;
-        ANOFOX_FLATVECTOR_WRITE<bool>(children[3])[row_idx] = ap_result.detected;
-        ANOFOX_FLATVECTOR_WRITE<string_t>(children[4])[row_idx] = StringVector::AddString(children[4], ap_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 0))[row_idx] = ap_result.period;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 1))[row_idx] = ap_result.fft_confidence;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 2))[row_idx] = ap_result.acf_validation;
+        ANOFOX_FLATVECTOR_WRITE<bool>(ANOFOX_STRUCT_ENTRY(children, 3))[row_idx] = ap_result.detected;
+        ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 4))[row_idx] = StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 4), ap_result.method);
     }
 }
 
@@ -1078,11 +1078,11 @@ static void TsLombScargleFunction(DataChunk &args, ExpressionState &state, Vecto
         }
 
         auto &children = StructVector::GetEntries(result);
-        ANOFOX_FLATVECTOR_WRITE<double>(children[0])[row_idx] = ls_result.period;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[1])[row_idx] = ls_result.frequency;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = ls_result.power;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[3])[row_idx] = ls_result.false_alarm_prob;
-        ANOFOX_FLATVECTOR_WRITE<string_t>(children[4])[row_idx] = StringVector::AddString(children[4], ls_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 0))[row_idx] = ls_result.period;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 1))[row_idx] = ls_result.frequency;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 2))[row_idx] = ls_result.power;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 3))[row_idx] = ls_result.false_alarm_prob;
+        ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 4))[row_idx] = StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 4), ls_result.method);
     }
 }
 
@@ -1202,12 +1202,12 @@ static void TsAicPeriodFunction(DataChunk &args, ExpressionState &state, Vector 
         }
 
         auto &children = StructVector::GetEntries(result);
-        ANOFOX_FLATVECTOR_WRITE<double>(children[0])[row_idx] = aic_result.period;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[1])[row_idx] = aic_result.aic;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = aic_result.bic;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[3])[row_idx] = aic_result.rss;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[4])[row_idx] = aic_result.r_squared;
-        ANOFOX_FLATVECTOR_WRITE<string_t>(children[5])[row_idx] = StringVector::AddString(children[5], aic_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 0))[row_idx] = aic_result.period;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 1))[row_idx] = aic_result.aic;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 2))[row_idx] = aic_result.bic;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 3))[row_idx] = aic_result.rss;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 4))[row_idx] = aic_result.r_squared;
+        ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 5))[row_idx] = StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 5), aic_result.method);
     }
 }
 
@@ -1316,10 +1316,10 @@ static void TsSsaPeriodFunction(DataChunk &args, ExpressionState &state, Vector 
         }
 
         auto &children = StructVector::GetEntries(result);
-        ANOFOX_FLATVECTOR_WRITE<double>(children[0])[row_idx] = ssa_result.period;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[1])[row_idx] = ssa_result.variance_explained;
-        ANOFOX_FLATVECTOR_WRITE<int64_t>(children[2])[row_idx] = static_cast<int64_t>(ssa_result.n_eigenvalues);
-        ANOFOX_FLATVECTOR_WRITE<string_t>(children[3])[row_idx] = StringVector::AddString(children[3], ssa_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 0))[row_idx] = ssa_result.period;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 1))[row_idx] = ssa_result.variance_explained;
+        ANOFOX_FLATVECTOR_WRITE<int64_t>(ANOFOX_STRUCT_ENTRY(children, 2))[row_idx] = static_cast<int64_t>(ssa_result.n_eigenvalues);
+        ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 3))[row_idx] = StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 3), ssa_result.method);
     }
 }
 
@@ -1426,10 +1426,10 @@ static void TsStlPeriodFunction(DataChunk &args, ExpressionState &state, Vector 
         }
 
         auto &children = StructVector::GetEntries(result);
-        ANOFOX_FLATVECTOR_WRITE<double>(children[0])[row_idx] = stl_result.period;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[1])[row_idx] = stl_result.seasonal_strength;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = stl_result.trend_strength;
-        ANOFOX_FLATVECTOR_WRITE<string_t>(children[3])[row_idx] = StringVector::AddString(children[3], stl_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 0))[row_idx] = stl_result.period;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 1))[row_idx] = stl_result.seasonal_strength;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 2))[row_idx] = stl_result.trend_strength;
+        ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 3))[row_idx] = StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 3), stl_result.method);
     }
 }
 
@@ -1539,11 +1539,11 @@ static void TsMatrixProfilePeriodFunction(DataChunk &args, ExpressionState &stat
         }
 
         auto &children = StructVector::GetEntries(result);
-        ANOFOX_FLATVECTOR_WRITE<double>(children[0])[row_idx] = mp_result.period;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[1])[row_idx] = mp_result.confidence;
-        ANOFOX_FLATVECTOR_WRITE<int64_t>(children[2])[row_idx] = static_cast<int64_t>(mp_result.n_motifs);
-        ANOFOX_FLATVECTOR_WRITE<int64_t>(children[3])[row_idx] = static_cast<int64_t>(mp_result.subsequence_length);
-        ANOFOX_FLATVECTOR_WRITE<string_t>(children[4])[row_idx] = StringVector::AddString(children[4], mp_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 0))[row_idx] = mp_result.period;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 1))[row_idx] = mp_result.confidence;
+        ANOFOX_FLATVECTOR_WRITE<int64_t>(ANOFOX_STRUCT_ENTRY(children, 2))[row_idx] = static_cast<int64_t>(mp_result.n_motifs);
+        ANOFOX_FLATVECTOR_WRITE<int64_t>(ANOFOX_STRUCT_ENTRY(children, 3))[row_idx] = static_cast<int64_t>(mp_result.subsequence_length);
+        ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 4))[row_idx] = StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 4), mp_result.method);
     }
 }
 
@@ -1650,10 +1650,10 @@ static void TsSazedPeriodFunction(DataChunk &args, ExpressionState &state, Vecto
         }
 
         auto &children = StructVector::GetEntries(result);
-        ANOFOX_FLATVECTOR_WRITE<double>(children[0])[row_idx] = sazed_result.period;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[1])[row_idx] = sazed_result.power;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[2])[row_idx] = sazed_result.snr;
-        ANOFOX_FLATVECTOR_WRITE<string_t>(children[3])[row_idx] = StringVector::AddString(children[3], sazed_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 0))[row_idx] = sazed_result.period;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 1))[row_idx] = sazed_result.power;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 2))[row_idx] = sazed_result.snr;
+        ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 3))[row_idx] = StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 3), sazed_result.method);
     }
 }
 

@@ -104,7 +104,7 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
 
         // Set trend list
         {
-            auto &trend_list = children[0];
+            auto &trend_list = ANOFOX_STRUCT_ENTRY(children, 0);
             auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(trend_list);
             auto &list_child = ListVector::GetEntry(trend_list);
             auto current_size = ListVector::GetListSize(trend_list);
@@ -124,7 +124,7 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
 
         // Set seasonal components (list of lists)
         {
-            auto &seasonal_outer = children[1];
+            auto &seasonal_outer = ANOFOX_STRUCT_ENTRY(children, 1);
             auto outer_list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(seasonal_outer);
             auto &inner_list_vec = ListVector::GetEntry(seasonal_outer);
             auto outer_size = ListVector::GetListSize(seasonal_outer);
@@ -156,7 +156,7 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
 
         // Set remainder list
         {
-            auto &remainder_list = children[2];
+            auto &remainder_list = ANOFOX_STRUCT_ENTRY(children, 2);
             auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(remainder_list);
             auto &list_child = ListVector::GetEntry(remainder_list);
             auto current_size = ListVector::GetListSize(remainder_list);
@@ -176,7 +176,7 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
 
         // Set periods list
         {
-            auto &periods_list = children[3];
+            auto &periods_list = ANOFOX_STRUCT_ENTRY(children, 3);
             auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(periods_list);
             auto &list_child = ListVector::GetEntry(periods_list);
             auto current_size = ListVector::GetListSize(periods_list);

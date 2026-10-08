@@ -64,10 +64,10 @@ static void TsBootstrapIntervalsFunction(DataChunk &args, ExpressionState &state
     seed_vec.ToUnifiedFormat(count, seed_data);
 
     auto &struct_entries = StructVector::GetEntries(result);
-    auto &point_out = struct_entries[0];
-    auto &lower_out = struct_entries[1];
-    auto &upper_out = struct_entries[2];
-    auto &coverage_out = struct_entries[3];
+    auto &point_out = ANOFOX_STRUCT_ENTRY(struct_entries, 0);
+    auto &lower_out = ANOFOX_STRUCT_ENTRY(struct_entries, 1);
+    auto &upper_out = ANOFOX_STRUCT_ENTRY(struct_entries, 2);
+    auto &coverage_out = ANOFOX_STRUCT_ENTRY(struct_entries, 3);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto np_idx = n_paths_data.sel->get_index(row_idx);
@@ -200,9 +200,9 @@ static void TsBootstrapQuantilesFunction(DataChunk &args, ExpressionState &state
     seed_vec.ToUnifiedFormat(count, seed_data);
 
     auto &struct_entries = StructVector::GetEntries(result);
-    auto &point_out = struct_entries[0];
-    auto &quantiles_out = struct_entries[1];
-    auto &values_out = struct_entries[2];
+    auto &point_out = ANOFOX_STRUCT_ENTRY(struct_entries, 0);
+    auto &quantiles_out = ANOFOX_STRUCT_ENTRY(struct_entries, 1);
+    auto &values_out = ANOFOX_STRUCT_ENTRY(struct_entries, 2);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto np_idx = n_paths_data.sel->get_index(row_idx);

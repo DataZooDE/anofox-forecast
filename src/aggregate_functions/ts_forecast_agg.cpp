@@ -222,8 +222,8 @@ static string GetParamFromMap(Vector &map_vec, idx_t count, idx_t row_idx, const
     // Get the child vector (which contains STRUCT(key, value) entries)
     auto &struct_vec = ListVector::GetEntry(map_vec);
     auto &struct_children = StructVector::GetEntries(struct_vec);
-    auto &key_vec = struct_children[0];  // keys
-    auto &val_vec = struct_children[1];  // values
+    auto &key_vec = ANOFOX_STRUCT_ENTRY(struct_children, 0);  // keys
+    auto &val_vec = ANOFOX_STRUCT_ENTRY(struct_children, 1);  // values
 
     // Use UnifiedVectorFormat for the child vectors
     UnifiedVectorFormat key_data, val_data;
@@ -313,15 +313,15 @@ static void TsForecastAggFinalize(Vector &state_vector, ANOFOX_AGG_FINALIZE_INPU
     auto states = FlatVector::GetData<TsForecastAggState *>(state_vector);
 
     auto &children = StructVector::GetEntries(result);
-    auto &step_list = children[0];      // forecast_step
-    auto &ts_list = children[1];        // forecast_timestamp
-    auto &point_list = children[2];     // point_forecast
-    auto &lower_list = children[3];     // lower_<suffix>
-    auto &upper_list = children[4];     // upper_<suffix>
-    auto &model_vec = children[5];      // model_name
-    auto &fitted_list = children[6];    // insample_fitted
-    auto &date_col_vec = children[7];   // date_col_name
-    auto &error_vec = children[8];      // error_message
+    auto &step_list = ANOFOX_STRUCT_ENTRY(children, 0);      // forecast_step
+    auto &ts_list = ANOFOX_STRUCT_ENTRY(children, 1);        // forecast_timestamp
+    auto &point_list = ANOFOX_STRUCT_ENTRY(children, 2);     // point_forecast
+    auto &lower_list = ANOFOX_STRUCT_ENTRY(children, 3);     // lower_<suffix>
+    auto &upper_list = ANOFOX_STRUCT_ENTRY(children, 4);     // upper_<suffix>
+    auto &model_vec = ANOFOX_STRUCT_ENTRY(children, 5);      // model_name
+    auto &fitted_list = ANOFOX_STRUCT_ENTRY(children, 6);    // insample_fitted
+    auto &date_col_vec = ANOFOX_STRUCT_ENTRY(children, 7);   // date_col_name
+    auto &error_vec = ANOFOX_STRUCT_ENTRY(children, 8);      // error_message
 
     for (idx_t i = 0; i < count; i++) {
         auto &state = *states[i];

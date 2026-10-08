@@ -86,7 +86,7 @@ static void TsDetrendFunction(DataChunk &args, ExpressionState &state, Vector &r
 
         // Helper to set a list of doubles
         auto set_double_list = [&](int child_idx, double *data, size_t n) {
-            auto &list_vec = children[child_idx];
+            auto &list_vec = ANOFOX_STRUCT_ENTRY(children, child_idx);
             auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(list_vec);
             auto &list_child = ListVector::GetEntry(list_vec);
             auto current_size = ListVector::GetListSize(list_vec);
@@ -105,10 +105,10 @@ static void TsDetrendFunction(DataChunk &args, ExpressionState &state, Vector &r
 
         set_double_list(0, detrend_result.trend, detrend_result.length);
         set_double_list(1, detrend_result.detrended, detrend_result.length);
-        ANOFOX_FLATVECTOR_WRITE<string_t>(children[2])[row_idx] = StringVector::AddString(children[2], detrend_result.method);
+        ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 2))[row_idx] = StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 2), detrend_result.method);
         set_double_list(3, detrend_result.coefficients, detrend_result.n_coefficients);
-        ANOFOX_FLATVECTOR_WRITE<double>(children[4])[row_idx] = detrend_result.rss;
-        ANOFOX_FLATVECTOR_WRITE<int64_t>(children[5])[row_idx] = detrend_result.n_params;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 4))[row_idx] = detrend_result.rss;
+        ANOFOX_FLATVECTOR_WRITE<int64_t>(ANOFOX_STRUCT_ENTRY(children, 5))[row_idx] = detrend_result.n_params;
 
         anofox_free_detrend_result(&detrend_result);
     }
@@ -201,7 +201,7 @@ static void TsDecomposeSeasonalFunction(DataChunk &args, ExpressionState &state,
 
         // Helper to set a list of doubles
         auto set_double_list = [&](int child_idx, double *data, size_t n) {
-            auto &list_vec = children[child_idx];
+            auto &list_vec = ANOFOX_STRUCT_ENTRY(children, child_idx);
             auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(list_vec);
             auto &list_child = ListVector::GetEntry(list_vec);
             auto current_size = ListVector::GetListSize(list_vec);
@@ -221,8 +221,8 @@ static void TsDecomposeSeasonalFunction(DataChunk &args, ExpressionState &state,
         set_double_list(0, decompose_result.trend, decompose_result.length);
         set_double_list(1, decompose_result.seasonal, decompose_result.length);
         set_double_list(2, decompose_result.remainder, decompose_result.length);
-        ANOFOX_FLATVECTOR_WRITE<double>(children[3])[row_idx] = decompose_result.period;
-        ANOFOX_FLATVECTOR_WRITE<string_t>(children[4])[row_idx] = StringVector::AddString(children[4], decompose_result.method);
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 3))[row_idx] = decompose_result.period;
+        ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 4))[row_idx] = StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 4), decompose_result.method);
 
         anofox_free_decompose_result(&decompose_result);
     }
@@ -522,7 +522,7 @@ static void TsDetectSeasonalityChangesFunction(DataChunk &args, ExpressionState 
 
         // Set change_points list
         {
-            auto &cp_list = children[0];
+            auto &cp_list = ANOFOX_STRUCT_ENTRY(children, 0);
             auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(cp_list);
             auto &list_child = ListVector::GetEntry(cp_list);
             auto current_size = ListVector::GetListSize(cp_list);
@@ -535,20 +535,20 @@ static void TsDetectSeasonalityChangesFunction(DataChunk &args, ExpressionState 
 
             auto &struct_entries = StructVector::GetEntries(list_child);
             for (size_t i = 0; i < change_result.n_changes; i++) {
-                ANOFOX_FLATVECTOR_WRITE<int64_t>(struct_entries[0])[current_size + i] = change_result.change_points[i].index;
-                ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[1])[current_size + i] = change_result.change_points[i].time;
-                ANOFOX_FLATVECTOR_WRITE<string_t>(struct_entries[2])[current_size + i] =
-                    StringVector::AddString(struct_entries[2], change_result.change_points[i].change_type);
-                ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[3])[current_size + i] = change_result.change_points[i].strength_before;
-                ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[4])[current_size + i] = change_result.change_points[i].strength_after;
+                ANOFOX_FLATVECTOR_WRITE<int64_t>(ANOFOX_STRUCT_ENTRY(struct_entries, 0))[current_size + i] = change_result.change_points[i].index;
+                ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 1))[current_size + i] = change_result.change_points[i].time;
+                ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(struct_entries, 2))[current_size + i] =
+                    StringVector::AddString(ANOFOX_STRUCT_ENTRY(struct_entries, 2), change_result.change_points[i].change_type);
+                ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 3))[current_size + i] = change_result.change_points[i].strength_before;
+                ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 4))[current_size + i] = change_result.change_points[i].strength_after;
             }
         }
 
-        ANOFOX_FLATVECTOR_WRITE<int64_t>(children[1])[row_idx] = change_result.n_changes;
+        ANOFOX_FLATVECTOR_WRITE<int64_t>(ANOFOX_STRUCT_ENTRY(children, 1))[row_idx] = change_result.n_changes;
 
         // Set strength_curve list
         {
-            auto &curve_list = children[2];
+            auto &curve_list = ANOFOX_STRUCT_ENTRY(children, 2);
             auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(curve_list);
             auto &list_child = ListVector::GetEntry(curve_list);
             auto current_size = ListVector::GetListSize(curve_list);
@@ -656,7 +656,7 @@ static void TsInstantaneousPeriodFunction(DataChunk &args, ExpressionState &stat
 
         // Helper to set a list of doubles
         auto set_double_list = [&](int child_idx, double *data, size_t n) {
-            auto &list_vec = children[child_idx];
+            auto &list_vec = ANOFOX_STRUCT_ENTRY(children, child_idx);
             auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(list_vec);
             auto &list_child = ListVector::GetEntry(list_vec);
             auto current_size = ListVector::GetListSize(list_vec);
@@ -769,16 +769,16 @@ static void TsDetectAmplitudeModulationFunction(DataChunk &args, ExpressionState
 
         auto &children = StructVector::GetEntries(result);
 
-        ANOFOX_FLATVECTOR_WRITE<bool>(children[0])[row_idx] = am_result.is_seasonal;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[1])[row_idx] = am_result.seasonal_strength;
-        ANOFOX_FLATVECTOR_WRITE<bool>(children[2])[row_idx] = am_result.has_modulation;
-        ANOFOX_FLATVECTOR_WRITE<string_t>(children[3])[row_idx] = StringVector::AddString(children[3], am_result.modulation_type);
-        ANOFOX_FLATVECTOR_WRITE<double>(children[4])[row_idx] = am_result.modulation_score;
-        ANOFOX_FLATVECTOR_WRITE<double>(children[5])[row_idx] = am_result.amplitude_trend;
+        ANOFOX_FLATVECTOR_WRITE<bool>(ANOFOX_STRUCT_ENTRY(children, 0))[row_idx] = am_result.is_seasonal;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 1))[row_idx] = am_result.seasonal_strength;
+        ANOFOX_FLATVECTOR_WRITE<bool>(ANOFOX_STRUCT_ENTRY(children, 2))[row_idx] = am_result.has_modulation;
+        ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 3))[row_idx] = StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 3), am_result.modulation_type);
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 4))[row_idx] = am_result.modulation_score;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 5))[row_idx] = am_result.amplitude_trend;
 
         // Helper to set a list of doubles
         auto set_double_list = [&](int child_idx, double *data, size_t n) {
-            auto &list_vec = children[child_idx];
+            auto &list_vec = ANOFOX_STRUCT_ENTRY(children, child_idx);
             auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(list_vec);
             auto &list_child = ListVector::GetEntry(list_vec);
             auto current_size = ListVector::GetListSize(list_vec);
@@ -797,7 +797,7 @@ static void TsDetectAmplitudeModulationFunction(DataChunk &args, ExpressionState
 
         set_double_list(6, am_result.wavelet_amplitude, am_result.n_points);
         set_double_list(7, am_result.time_points, am_result.n_points);
-        ANOFOX_FLATVECTOR_WRITE<double>(children[8])[row_idx] = am_result.scale;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 8))[row_idx] = am_result.scale;
 
         anofox_free_amplitude_modulation_result(&am_result);
     }

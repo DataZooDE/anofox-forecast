@@ -125,6 +125,17 @@ static inline const LogicalType &ExprReturnType(const Expression &expr) {
 #define ANOFOX_BIND_INFO(expr) ((expr).bind_info)
 #endif
 
+// DuckDB 2.0's StructVector::GetEntries returns vector<Vector>& (indexing gives a
+// Vector& directly); v1.5.x returns vector<unique_ptr<Vector>>& (indexing gives a
+// unique_ptr<Vector>&, which must be dereferenced to get a Vector&).
+// ANOFOX_STRUCT_ENTRY(entries, idx) is the version-correct way to get a Vector&
+// out of a StructVector::GetEntries() result on either version.
+#if __has_include("duckdb/common/identifier.hpp")
+#define ANOFOX_STRUCT_ENTRY(entries, idx) ((entries)[(idx)])
+#else
+#define ANOFOX_STRUCT_ENTRY(entries, idx) (*(entries)[(idx)])
+#endif
+
 // DuckDB 2.0 replaced SimpleNamedParameterFunction::named_parameters (a flat
 // name->LogicalType map) with Python-style KEYWORD_ONLY parameters declared
 // on FunctionSignature via AddKeywordOnly. v1.5.x has no FunctionSignature /

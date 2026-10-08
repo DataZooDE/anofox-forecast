@@ -75,7 +75,7 @@ static void ExtractListValues(Vector &list_vec, idx_t count, idx_t row_idx,
 static void SetListFromArray(Vector &result, idx_t field_idx, idx_t row_idx,
                              double *data, size_t length) {
     auto &children = StructVector::GetEntries(result);
-    auto &list_vec = children[field_idx];
+    auto &list_vec = ANOFOX_STRUCT_ENTRY(children, field_idx);
 
     auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(list_vec);
     auto &list_child = ListVector::GetEntry(list_vec);
@@ -96,14 +96,14 @@ static void SetListFromArray(Vector &result, idx_t field_idx, idx_t row_idx,
 template <typename T>
 static void SetStructField(Vector &result, idx_t field_idx, idx_t row_idx, T value) {
     auto &children = StructVector::GetEntries(result);
-    auto data = ANOFOX_FLATVECTOR_WRITE<T>(children[field_idx]);
+    auto data = ANOFOX_FLATVECTOR_WRITE<T>(ANOFOX_STRUCT_ENTRY(children, field_idx));
     data[row_idx] = value;
 }
 
 static void SetStringField(Vector &result, idx_t field_idx, idx_t row_idx, const char *value) {
     auto &children = StructVector::GetEntries(result);
-    auto data = ANOFOX_FLATVECTOR_WRITE<string_t>(children[field_idx]);
-    data[row_idx] = StringVector::AddString(children[field_idx], value);
+    auto data = ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, field_idx));
+    data[row_idx] = StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, field_idx), value);
 }
 
 static void TsForecastFunction(DataChunk &args, ExpressionState &state, Vector &result) {

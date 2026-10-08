@@ -178,10 +178,10 @@ static void TsChangepointsAggFinalize(Vector &state_vector, ANOFOX_AGG_FINALIZE_
 
         // Get the struct children
         auto &struct_entries = StructVector::GetEntries(list_child);
-        auto &ts_child = struct_entries[0];
-        auto &val_child = struct_entries[1];
-        auto &cp_child = struct_entries[2];
-        auto &prob_child = struct_entries[3];
+        auto &ts_child = ANOFOX_STRUCT_ENTRY(struct_entries, 0);
+        auto &val_child = ANOFOX_STRUCT_ENTRY(struct_entries, 1);
+        auto &cp_child = ANOFOX_STRUCT_ENTRY(struct_entries, 2);
+        auto &prob_child = ANOFOX_STRUCT_ENTRY(struct_entries, 3);
 
         auto ts_child_data = ANOFOX_FLATVECTOR_WRITE<timestamp_t>(ts_child);
         auto val_child_data = ANOFOX_FLATVECTOR_WRITE<double>(val_child);

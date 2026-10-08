@@ -138,7 +138,7 @@ static void ExtractListDoubles(Vector &list_vec, idx_t count, idx_t row_idx,
 template <typename T>
 static void SetStructField(Vector &result, idx_t field_idx, idx_t row_idx, T value) {
     auto &children = StructVector::GetEntries(result);
-    auto data = ANOFOX_FLATVECTOR_WRITE<T>(children[field_idx]);
+    auto data = ANOFOX_FLATVECTOR_WRITE<T>(ANOFOX_STRUCT_ENTRY(children, field_idx));
     data[row_idx] = value;
 }
 
@@ -219,8 +219,8 @@ static void PopulateTsStatsResult(Vector &result, idx_t row_idx, const TsStatsRe
         SetStructField<uint64_t>(result, 34, row_idx, stats_result.expected_length);
         SetStructField<uint64_t>(result, 35, row_idx, stats_result.n_gaps);
     } else {
-        FlatVector::SetNull(children[34], row_idx, true);
-        FlatVector::SetNull(children[35], row_idx, true);
+        FlatVector::SetNull(ANOFOX_STRUCT_ENTRY(children, 34), row_idx, true);
+        FlatVector::SetNull(ANOFOX_STRUCT_ENTRY(children, 35), row_idx, true);
     }
 }
 

@@ -70,13 +70,13 @@ static void TsAdfFunction(DataChunk &args, ExpressionState &state, Vector &resul
 
     // Get STRUCT output entry vectors (order matches child_list_t in RegisterTsAdfFunction)
     auto &struct_entries = StructVector::GetEntries(result);
-    auto &stat_vec       = struct_entries[0]; // statistic DOUBLE
-    auto &pval_vec       = struct_entries[1]; // p_value DOUBLE
-    auto &lags_vec       = struct_entries[2]; // lags BIGINT
-    auto &istat_vec      = struct_entries[3]; // is_stationary BOOLEAN
-    auto &cv1_vec        = struct_entries[4]; // cv_1pct DOUBLE
-    auto &cv5_vec        = struct_entries[5]; // cv_5pct DOUBLE
-    auto &cv10_vec       = struct_entries[6]; // cv_10pct DOUBLE
+    auto &stat_vec       = ANOFOX_STRUCT_ENTRY(struct_entries, 0); // statistic DOUBLE
+    auto &pval_vec       = ANOFOX_STRUCT_ENTRY(struct_entries, 1); // p_value DOUBLE
+    auto &lags_vec       = ANOFOX_STRUCT_ENTRY(struct_entries, 2); // lags BIGINT
+    auto &istat_vec      = ANOFOX_STRUCT_ENTRY(struct_entries, 3); // is_stationary BOOLEAN
+    auto &cv1_vec        = ANOFOX_STRUCT_ENTRY(struct_entries, 4); // cv_1pct DOUBLE
+    auto &cv5_vec        = ANOFOX_STRUCT_ENTRY(struct_entries, 5); // cv_5pct DOUBLE
+    auto &cv10_vec       = ANOFOX_STRUCT_ENTRY(struct_entries, 6); // cv_10pct DOUBLE
 
     auto stat_data = ANOFOX_FLATVECTOR_WRITE<double>(stat_vec);
     auto pval_data = ANOFOX_FLATVECTOR_WRITE<double>(pval_vec);
@@ -242,13 +242,13 @@ static void TsKpssFunction(DataChunk &args, ExpressionState &state, Vector &resu
     }
 
     auto &struct_entries = StructVector::GetEntries(result);
-    auto stat_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[0]);
-    auto pval_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[1]);
-    auto lags_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(struct_entries[2]);
-    auto istat_data = ANOFOX_FLATVECTOR_WRITE<bool>(struct_entries[3]);
-    auto cv1_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[4]);
-    auto cv5_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[5]);
-    auto cv10_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[6]);
+    auto stat_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 0));
+    auto pval_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 1));
+    auto lags_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(ANOFOX_STRUCT_ENTRY(struct_entries, 2));
+    auto istat_data = ANOFOX_FLATVECTOR_WRITE<bool>(ANOFOX_STRUCT_ENTRY(struct_entries, 3));
+    auto cv1_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 4));
+    auto cv5_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 5));
+    auto cv10_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 6));
 
     vector<double> series;
 
@@ -304,13 +304,13 @@ static void TsStationarityFunction(DataChunk &args, ExpressionState &state, Vect
     idx_t count = args.size();
 
     auto &struct_entries = StructVector::GetEntries(result);
-    auto adf_stat_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[0]);
-    auto adf_pval_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[1]);
-    auto kpss_stat_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[2]);
-    auto kpss_pval_data = ANOFOX_FLATVECTOR_WRITE<double>(struct_entries[3]);
-    auto adf_istat_data = ANOFOX_FLATVECTOR_WRITE<bool>(struct_entries[4]);
-    auto kpss_istat_data = ANOFOX_FLATVECTOR_WRITE<bool>(struct_entries[5]);
-    auto &verdict_vec   = struct_entries[6];
+    auto adf_stat_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 0));
+    auto adf_pval_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 1));
+    auto kpss_stat_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 2));
+    auto kpss_pval_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(struct_entries, 3));
+    auto adf_istat_data = ANOFOX_FLATVECTOR_WRITE<bool>(ANOFOX_STRUCT_ENTRY(struct_entries, 4));
+    auto kpss_istat_data = ANOFOX_FLATVECTOR_WRITE<bool>(ANOFOX_STRUCT_ENTRY(struct_entries, 5));
+    auto &verdict_vec   = ANOFOX_STRUCT_ENTRY(struct_entries, 6);
     auto verdict_data = ANOFOX_FLATVECTOR_WRITE<string_t>(verdict_vec);
 
     vector<double> series;
@@ -477,10 +477,10 @@ static void TsLjungBoxFunction(DataChunk &args, ExpressionState &state, Vector &
     }
 
     auto &e = StructVector::GetEntries(result);
-    auto stat_data = ANOFOX_FLATVECTOR_WRITE<double>(e[0]);
-    auto pval_data = ANOFOX_FLATVECTOR_WRITE<double>(e[1]);
-    auto lags_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(e[2]);
-    auto df_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(e[3]);
+    auto stat_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(e, 0));
+    auto pval_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(e, 1));
+    auto lags_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(ANOFOX_STRUCT_ENTRY(e, 2));
+    auto df_data = ANOFOX_FLATVECTOR_WRITE<int64_t>(ANOFOX_STRUCT_ENTRY(e, 3));
 
     vector<double> series;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
@@ -518,8 +518,8 @@ static void TsDurbinWatsonFunction(DataChunk &args, ExpressionState &state, Vect
     auto &values_vec = args.data[0];
     idx_t count = args.size();
     auto &e = StructVector::GetEntries(result);
-    auto stat_data = ANOFOX_FLATVECTOR_WRITE<double>(e[0]);
-    auto &interp_vec = e[1];
+    auto stat_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(e, 0));
+    auto &interp_vec = ANOFOX_STRUCT_ENTRY(e, 1);
     auto interp_data = ANOFOX_FLATVECTOR_WRITE<string_t>(interp_vec);
 
     vector<double> series;
@@ -549,10 +549,10 @@ static void TsJarqueBeraFunction(DataChunk &args, ExpressionState &state, Vector
     auto &values_vec = args.data[0];
     idx_t count = args.size();
     auto &e = StructVector::GetEntries(result);
-    auto stat_data = ANOFOX_FLATVECTOR_WRITE<double>(e[0]);
-    auto pval_data = ANOFOX_FLATVECTOR_WRITE<double>(e[1]);
-    auto skew_data = ANOFOX_FLATVECTOR_WRITE<double>(e[2]);
-    auto kurt_data = ANOFOX_FLATVECTOR_WRITE<double>(e[3]);
+    auto stat_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(e, 0));
+    auto pval_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(e, 1));
+    auto skew_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(e, 2));
+    auto kurt_data = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(e, 3));
 
     vector<double> series;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
@@ -589,17 +589,17 @@ static void TsResidualDiagnosticsFunction(DataChunk &args, ExpressionState &stat
     }
 
     auto &e = StructVector::GetEntries(result);
-    auto lb_stat = ANOFOX_FLATVECTOR_WRITE<double>(e[0]);
-    auto lb_pval = ANOFOX_FLATVECTOR_WRITE<double>(e[1]);
-    auto lb_lags = ANOFOX_FLATVECTOR_WRITE<int64_t>(e[2]);
-    auto dw_stat = ANOFOX_FLATVECTOR_WRITE<double>(e[3]);
-    auto &dw_interp_vec = e[4];
+    auto lb_stat = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(e, 0));
+    auto lb_pval = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(e, 1));
+    auto lb_lags = ANOFOX_FLATVECTOR_WRITE<int64_t>(ANOFOX_STRUCT_ENTRY(e, 2));
+    auto dw_stat = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(e, 3));
+    auto &dw_interp_vec = ANOFOX_STRUCT_ENTRY(e, 4);
     auto dw_interp = ANOFOX_FLATVECTOR_WRITE<string_t>(dw_interp_vec);
-    auto jb_stat = ANOFOX_FLATVECTOR_WRITE<double>(e[5]);
-    auto jb_pval = ANOFOX_FLATVECTOR_WRITE<double>(e[6]);
-    auto jb_skew = ANOFOX_FLATVECTOR_WRITE<double>(e[7]);
-    auto jb_kurt = ANOFOX_FLATVECTOR_WRITE<double>(e[8]);
-    auto adequate_data = ANOFOX_FLATVECTOR_WRITE<bool>(e[9]);
+    auto jb_stat = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(e, 5));
+    auto jb_pval = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(e, 6));
+    auto jb_skew = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(e, 7));
+    auto jb_kurt = ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(e, 8));
+    auto adequate_data = ANOFOX_FLATVECTOR_WRITE<bool>(ANOFOX_STRUCT_ENTRY(e, 9));
 
     vector<double> series;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {

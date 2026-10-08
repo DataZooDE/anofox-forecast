@@ -194,33 +194,33 @@ static void TsClassifySeasonalityAggFinalize(Vector &state_vector, ANOFOX_AGG_FI
         auto &children = StructVector::GetEntries(result);
 
         // timing_classification (index 0)
-        ANOFOX_FLATVECTOR_WRITE<string_t>(children[0])[row] =
-            StringVector::AddString(children[0], class_result.classification);
+        ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 0))[row] =
+            StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 0), class_result.classification);
 
         // modulation_type (index 1)
         if (mod_success) {
-            ANOFOX_FLATVECTOR_WRITE<string_t>(children[1])[row] =
-                StringVector::AddString(children[1], mod_result.modulation_type);
+            ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 1))[row] =
+                StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 1), mod_result.modulation_type);
         } else {
-            ANOFOX_FLATVECTOR_WRITE<string_t>(children[1])[row] =
-                StringVector::AddString(children[1], "unknown");
+            ANOFOX_FLATVECTOR_WRITE<string_t>(ANOFOX_STRUCT_ENTRY(children, 1))[row] =
+                StringVector::AddString(ANOFOX_STRUCT_ENTRY(children, 1), "unknown");
         }
 
         // has_stable_timing (index 2)
-        ANOFOX_FLATVECTOR_WRITE<bool>(children[2])[row] = class_result.has_stable_timing;
+        ANOFOX_FLATVECTOR_WRITE<bool>(ANOFOX_STRUCT_ENTRY(children, 2))[row] = class_result.has_stable_timing;
 
         // timing_variability (index 3)
-        ANOFOX_FLATVECTOR_WRITE<double>(children[3])[row] = class_result.timing_variability;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 3))[row] = class_result.timing_variability;
 
         // seasonal_strength (index 4)
-        ANOFOX_FLATVECTOR_WRITE<double>(children[4])[row] = class_result.seasonal_strength;
+        ANOFOX_FLATVECTOR_WRITE<double>(ANOFOX_STRUCT_ENTRY(children, 4))[row] = class_result.seasonal_strength;
 
         // is_seasonal (index 5)
-        ANOFOX_FLATVECTOR_WRITE<bool>(children[5])[row] = class_result.is_seasonal;
+        ANOFOX_FLATVECTOR_WRITE<bool>(ANOFOX_STRUCT_ENTRY(children, 5))[row] = class_result.is_seasonal;
 
         // cycle_strengths (index 6)
         {
-            auto &list_vec = children[6];
+            auto &list_vec = ANOFOX_STRUCT_ENTRY(children, 6);
             auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(list_vec);
             auto &list_child = ListVector::GetEntry(list_vec);
             auto current_size = ListVector::GetListSize(list_vec);
@@ -239,7 +239,7 @@ static void TsClassifySeasonalityAggFinalize(Vector &state_vector, ANOFOX_AGG_FI
 
         // weak_seasons (index 7)
         {
-            auto &list_vec = children[7];
+            auto &list_vec = ANOFOX_STRUCT_ENTRY(children, 7);
             auto list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(list_vec);
             auto &list_child = ListVector::GetEntry(list_vec);
             auto current_size = ListVector::GetListSize(list_vec);

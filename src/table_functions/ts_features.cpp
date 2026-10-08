@@ -124,7 +124,7 @@ static void TsFeaturesFunction(DataChunk &args, ExpressionState &state, Vector &
         // Populate the STRUCT fields
         auto &struct_entries = StructVector::GetEntries(result);
         for (size_t j = 0; j < feature_names.size() && j < struct_entries.size(); j++) {
-            auto &child_vec = struct_entries[j];
+            auto &child_vec = ANOFOX_STRUCT_ENTRY(struct_entries, j);
             auto child_data = ANOFOX_FLATVECTOR_WRITE<double>(child_vec);
 
             auto it = feature_map.find(feature_names[j]);
@@ -358,7 +358,7 @@ static void TsFeaturesConfigFromJsonFunction(DataChunk &args, ExpressionState &s
         bool success = anofox_ts_features(dummy, 10, &feat_result, &error);
 
         // Set feature_names list
-        auto &names_list = struct_entries[0];
+        auto &names_list = ANOFOX_STRUCT_ENTRY(struct_entries, 0);
         auto names_list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(names_list);
         auto &names_child = ListVector::GetEntry(names_list);
         auto current_names_size = ListVector::GetListSize(names_list);
@@ -381,7 +381,7 @@ static void TsFeaturesConfigFromJsonFunction(DataChunk &args, ExpressionState &s
         }
 
         // Set overrides list (empty for default config)
-        auto &overrides_list = struct_entries[1];
+        auto &overrides_list = ANOFOX_STRUCT_ENTRY(struct_entries, 1);
         auto overrides_list_data = ANOFOX_FLATVECTOR_WRITE<list_entry_t>(overrides_list);
         auto current_overrides_size = ListVector::GetListSize(overrides_list);
 
