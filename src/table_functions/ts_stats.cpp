@@ -8,6 +8,9 @@
 #include "duckdb/common/vector_operations/generic_executor.hpp"
 #include "duckdb/common/types/vector.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
+#include <algorithm>
+#include <cmath>
+#include <numeric>
 #include <regex>
 #include <map>
 #include <mutex>
@@ -518,6 +521,16 @@ static unique_ptr<FunctionData> TsStatsByBind(
     return bind_data;
 }
 
+// Strict weak ordering on doubles that is safe for std::sort (NaN sorts after every number).
+static bool StatsValueLess(double x, double y) {
+    const bool x_nan = std::isnan(x);
+    const bool y_nan = std::isnan(y);
+    if (x_nan || y_nan) {
+        return !x_nan && y_nan;
+    }
+    return x < y;
+}
+
 static unique_ptr<GlobalTableFunctionState> TsStatsByInitGlobal(
     ClientContext &context,
     TableFunctionInitInput &input) {
@@ -638,11 +651,37 @@ static OperatorFinalizeResultType TsStatsByFinalize(
 
             if (grp.timestamps.empty()) continue;
 
-            // Build validity bitmask for Rust
-            size_t validity_words = (grp.timestamps.size() + 63) / 64;
+            // Sort the series by date. Rows arrive in physical scan order (interleaved across
+            // threads), but the order-dependent statistics (autocorr_lag1, trend/seasonality
+            // strength, stability, n_zeros_start/end, plateau sizes, ...) are defined on the
+            // date-ordered series. Duplicate timestamps are tie-broken deterministically (valid
+            // before NULL, then by value with NaN last) so the result never depends on which
+            // duplicate arrives first.
+            const size_t n = grp.timestamps.size();
+            vector<size_t> order(n);
+            std::iota(order.begin(), order.end(), static_cast<size_t>(0));
+            std::sort(order.begin(), order.end(), [&grp](size_t a, size_t b) {
+                if (grp.timestamps[a] != grp.timestamps[b]) {
+                    return grp.timestamps[a] < grp.timestamps[b];
+                }
+                const bool a_valid = grp.validity[a];
+                const bool b_valid = grp.validity[b];
+                if (a_valid != b_valid) {
+                    return a_valid;
+                }
+                return a_valid && StatsValueLess(grp.values[a], grp.values[b]);
+            });
+
+            vector<int64_t> sorted_timestamps(n);
+            vector<double> sorted_values(n);
+            // Build validity bitmask for Rust (permuted together with the values)
+            size_t validity_words = (n + 63) / 64;
             vector<uint64_t> validity(validity_words, 0);
-            for (size_t i = 0; i < grp.validity.size(); i++) {
-                if (grp.validity[i]) {
+            for (size_t i = 0; i < n; i++) {
+                const size_t src = order[i];
+                sorted_timestamps[i] = grp.timestamps[src];
+                sorted_values[i] = grp.values[src];
+                if (grp.validity[src]) {
                     validity[i / 64] |= (1ULL << (i % 64));
                 }
             }
@@ -652,10 +691,10 @@ static OperatorFinalizeResultType TsStatsByFinalize(
             AnofoxError error = {};
 
             bool success = anofox_ts_stats_with_dates_and_type(
-                grp.values.data(),
+                sorted_values.data(),
                 validity.empty() ? nullptr : validity.data(),
-                grp.timestamps.data(),
-                grp.values.size(),
+                sorted_timestamps.data(),
+                sorted_values.size(),
                 bind_data.frequency_micros,
                 bind_data.frequency_type,
                 &stats_result,
