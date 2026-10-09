@@ -1,0 +1,4 @@
+docs/api/05a-decomposition.md	0	PASS	SELECT ts_detrend([NULL, 1.0, 2.0, 1.5, 2.5, 1.8, NULL]::DOUBLE[], 'linear')	
+docs/api/05b-peak-detection.md	0	PASS	SELECT ts_detect_peaks([NULL, 1.0, 5.0, 1.0, 4.0, 1.0, NULL]::DOUBLE[])	
+docs/api/06-changepoint-detection.md	0	PASS	SELECT _ts_detect_changepoints_bocpd([NULL, 1.0, 2.0, 1.5, 8.0, 7.5, NULL]::DOUBLE[], 250.0, true)	
+docs/api/20-feature-extraction.md	0	PASS	CREATE OR REPLACE TABLE fx AS	

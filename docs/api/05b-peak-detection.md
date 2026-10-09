@@ -13,6 +13,21 @@ Peak detection identifies local maxima in time series data, useful for finding s
 - Calculate peak timing variability scores to assess regularity
 - Identify products/series with stable vs variable peak patterns
 
+**NULL handling (Phase 12, D-03/D-04):** `ts_detect_peaks` and `ts_analyze_peak_timing`
+share the Rust single-series policy: leading/trailing `NULL` (and `NaN`) values inside the
+`LIST(...)` are trimmed before the analysis runs; an interior `NULL` that survives trimming
+is a hard error naming its 1-based position in the original list (e.g.
+`ts_detect_peaks: interior NULL at position 6`); a list with no non-NULL value returns SQL
+`NULL`. Peak `index` values and the `peak_times`/`normalized_timing` arrays describe the
+**trimmed series** — position 1 corresponds to the first non-NULL input value.
+
+```sql
+-- Edge trim: leading/trailing NULLs give the same result as the trimmed series.
+SELECT ts_detect_peaks([NULL, 1.0, 5.0, 1.0, 4.0, 1.0, NULL]::DOUBLE[])
+     = ts_detect_peaks([1.0, 5.0, 1.0, 4.0, 1.0]::DOUBLE[]);
+-- true
+```
+
 ---
 
 ## Table Macros

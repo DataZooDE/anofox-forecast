@@ -14,6 +14,24 @@ Decomposition functions separate time series into trend, seasonal, and residual 
 - Measure seasonal strength to decide if seasonal models are appropriate
 - Identify weak or variable seasonal cycles within your data
 
+**NULL handling (Phase 12, D-03/D-04):** `ts_detrend`, `ts_decompose_seasonal`,
+`ts_seasonal_strength`, `ts_seasonal_strength_windowed`, `ts_instantaneous_period` and
+`_ts_mstl_decomposition` all share the Rust single-series policy: leading/trailing `NULL`
+(and `NaN`) values inside the `LIST(...)` are trimmed before the analysis runs; an interior
+`NULL` that survives trimming is a hard error naming its 1-based position in the original
+list (e.g. `ts_detrend: interior NULL at position 6`); a list with no non-NULL value
+returns SQL `NULL`. Per-observation array outputs (`trend`, `detrended`, `seasonal`,
+`remainder`, `periods`, `frequencies`, `amplitudes`, ...) describe the **trimmed series** —
+position 1 of every output array corresponds to the first non-NULL input value, not the
+original row 0.
+
+```sql
+-- Edge trim: leading/trailing NULLs give the same result as the trimmed series.
+SELECT ts_detrend([NULL, 1.0, 2.0, 1.5, 2.5, 1.8, NULL]::DOUBLE[], 'linear')
+     = ts_detrend([1.0, 2.0, 1.5, 2.5, 1.8]::DOUBLE[], 'linear');
+-- true
+```
+
 ---
 
 ## Table Macros

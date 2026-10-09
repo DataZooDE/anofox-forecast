@@ -307,13 +307,21 @@ The array-level primitive behind `ts_detrend_by`. Signature `ts_detrend(DOUBLE[]
 
 ## Gotchas
 
-- **Single-series NULL policy (Phase 12 D-03/D-04) applies to every period/seasonality/diagnostic
-  function** (period estimators, `ts_detect_seasonality`/`ts_analyze_seasonality`/
-  `ts_classify_seasonality`, and the diagnostics in `anofox-forecast-backtest`'s `ts_adf`/`ts_kpss`/etc.
-  family): leading/trailing NULLs are trimmed before the analysis, an interior NULL is a hard error
-  naming its 1-based position (e.g. `interior NULL at position 6`), and an all-NULL list returns SQL
-  NULL rather than erroring. Impute interior gaps first (`ts_fill_nulls_by`) if your series has them;
-  wrap in `try(...)` to convert the error to NULL instead of failing the query.
+- **Single-series NULL policy (Phase 12 D-03/D-04) applies to every period/seasonality/diagnostic/
+  decomposition/peak/changepoint function** (period estimators, `ts_detect_seasonality`/
+  `ts_analyze_seasonality`/`ts_classify_seasonality`, the diagnostics in
+  `anofox-forecast-backtest`'s `ts_adf`/`ts_kpss`/etc. family, `ts_detrend`/`ts_decompose_seasonal`/
+  `ts_seasonal_strength`/`ts_seasonal_strength_windowed`/`ts_instantaneous_period`,
+  `ts_detect_peaks`/`ts_analyze_peak_timing`, `_ts_mstl_decomposition`, and
+  `_ts_detect_changepoints_bocpd`): leading/trailing NULLs are trimmed before the analysis, an
+  interior NULL is a hard error naming its 1-based position (e.g. `interior NULL at position 6`),
+  and an all-NULL list returns SQL NULL rather than erroring. Per-observation array outputs
+  (`trend`, `detrended`, `seasonal`, peak `index`, `is_changepoint`, ...) describe the **trimmed
+  series** — position 1 is the first non-NULL input value, not the original row 0; the
+  single-series `ts_detect_changepoints` macro shifts its row-level output back by the
+  leading-NULL row count so those rows get NULL flags. Impute interior gaps first
+  (`ts_fill_nulls_by`) if your series has them; wrap in `try(...)` to convert the error to NULL
+  instead of failing the query.
 - **Seasonality auto-detection applies uniformly across surfaces.** `AutoETS` / `AutoARIMA` / `AutoTheta` (and other models) via `ts_forecast_by`, `ts_cv_forecast_by`, the scalar paths, and `ts_forecast_agg` all auto-detect when `seasonal_period`/`seasonal_periods` are both omitted (10-10, FCST-06). Run detection first and pass `seasonal_period` explicitly if you want control/reproducibility rather than relying on silent auto-detection.
 - **`ts_detect_periods_by` returns one row per group** with a `periods` STRUCT. Access fields with `primary_period`.
 - **Detection needs sufficient history**: FFT-family methods need ≥ 2 full cycles; ACF-family needs ≥ 3. On short-history panels, `ts_detect_periods` may return `primary_period = 1` (no seasonality) even when a period exists.

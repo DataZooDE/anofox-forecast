@@ -1,0 +1,191 @@
+# name: test/sql/ts_detection_null_policy.test
+# description: Phase 12 plan 12-03 NULL policy: ts_features_agg/ts_features_by
+#   D-11 parity (validity carried, no NULL-row splice), interior-NULL error,
+#   all-NULL -> NULL for the features aggregate, and D-03/D-04 edge-trim /
+#   interior-NULL / all-NULL coverage for the remaining single-series
+#   detection/decomposition scalars (detrend, decompose_seasonal,
+#   seasonal_strength, instantaneous_period, peaks, peak_timing, MSTL, BOCPD).
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup Test Data
+#######################################
+
+statement ok
+CREATE TABLE s AS
+SELECT list_transform(range(48), i -> (10 + 3 * sin(2 * pi() * i / 12) + 0.05 * i)::DOUBLE) AS v;
+
+statement ok
+CREATE TABLE g AS
+SELECT g, list_transform(range(48), i -> (10 + g + (g + 1) * sin(2 * pi() * i / 12))::DOUBLE) AS v
+FROM range(3) t(g);
+
+# fe: 30 daily rows, id 'A', y = 10 + sin(i) except NULL at the first/last row (edge NULLs)
+statement ok
+CREATE TABLE fe AS
+SELECT 'A' AS id, (DATE '2024-01-01' + i * INTERVAL 1 DAY)::TIMESTAMP AS ds,
+       CASE WHEN i IN (0, 29) THEN NULL ELSE (10 + sin(i))::DOUBLE END AS y
+FROM range(30) t(i);
+
+# fe_trim: fe with the edge NULLs physically removed (the trimmed series)
+statement ok
+CREATE TABLE fe_trim AS SELECT * FROM fe WHERE y IS NOT NULL;
+
+# fi: 30 rows, a single interior NULL at i = 10 (1-based position 11)
+statement ok
+CREATE TABLE fi AS
+SELECT 'A' AS id, (DATE '2024-01-01' + i * INTERVAL 1 DAY)::TIMESTAMP AS ds,
+       CASE WHEN i = 10 THEN NULL ELSE (10 + sin(i))::DOUBLE END AS y
+FROM range(30) t(i);
+
+# fn: 5 rows, every value NULL
+statement ok
+CREATE TABLE fn AS
+SELECT 'A' AS id, (DATE '2024-01-01' + i * INTERVAL 1 DAY)::TIMESTAMP AS ds,
+       NULL::DOUBLE AS y
+FROM range(5) t(i);
+
+#######################################
+# D-11 parity: ts_features_agg no longer splices NULL rows — equals the
+# trimmed series AND ts_features_by on the same series
+#######################################
+
+query I
+SELECT (SELECT (ts_features_agg(ds, y)).mean FROM fe) IS NOT DISTINCT FROM
+       (SELECT (ts_features_agg(ds, y)).mean FROM fe_trim)
+   AND (SELECT (ts_features_agg(ds, y)).mean FROM fe) IS NOT DISTINCT FROM
+       (SELECT mean FROM ts_features_by('fe', id, ds, y));
+----
+true
+
+query I
+SELECT (SELECT (ts_features_agg(ds, y)).variance FROM fe) IS NOT DISTINCT FROM
+       (SELECT (ts_features_agg(ds, y)).variance FROM fe_trim)
+   AND (SELECT (ts_features_agg(ds, y)).variance FROM fe) IS NOT DISTINCT FROM
+       (SELECT variance FROM ts_features_by('fe', id, ds, y));
+----
+true
+
+#######################################
+# D-03: interior NULL -> SQL error naming the 1-based position, for both
+# the aggregate and the table surface
+#######################################
+
+statement error
+SELECT ts_features_agg(ds, y) FROM fi;
+----
+interior NULL at position 11
+
+statement error
+SELECT * FROM ts_features_by('fi', id, ds, y);
+----
+interior NULL at position 11
+
+#######################################
+# D-04: all-NULL -> NULL, not an error, for both surfaces
+#######################################
+
+query I
+SELECT ts_features_agg(ds, y) IS NULL FROM fn;
+----
+true
+
+query I
+SELECT mean IS NULL FROM ts_features_by('fn', id, ds, y);
+----
+true
+
+#######################################
+# D-03/D-04 edge-trim parity for the remaining detection/decomposition
+# scalars: [NULL] || v || [NULL] gives the same result as v
+#######################################
+
+query I
+SELECT ts_detrend(list_concat(list_concat([NULL]::DOUBLE[], v), [NULL]::DOUBLE[]), 'linear')
+       IS NOT DISTINCT FROM ts_detrend(v, 'linear')
+FROM s;
+----
+true
+
+query I
+SELECT ts_decompose_seasonal(list_concat(list_concat([NULL]::DOUBLE[], v), [NULL]::DOUBLE[]), 12.0)
+       IS NOT DISTINCT FROM ts_decompose_seasonal(v, 12.0)
+FROM s;
+----
+true
+
+query I
+SELECT ts_seasonal_strength(list_concat(list_concat([NULL]::DOUBLE[], v), [NULL]::DOUBLE[]), 12.0)
+       IS NOT DISTINCT FROM ts_seasonal_strength(v, 12.0)
+FROM s;
+----
+true
+
+query I
+SELECT ts_instantaneous_period(list_concat(list_concat([NULL]::DOUBLE[], v), [NULL]::DOUBLE[]))
+       IS NOT DISTINCT FROM ts_instantaneous_period(v)
+FROM s;
+----
+true
+
+query I
+SELECT ts_detect_peaks(list_concat(list_concat([NULL]::DOUBLE[], v), [NULL]::DOUBLE[]))
+       IS NOT DISTINCT FROM ts_detect_peaks(v)
+FROM s;
+----
+true
+
+query I
+SELECT ts_analyze_peak_timing(list_concat(list_concat([NULL]::DOUBLE[], v), [NULL]::DOUBLE[]), 12.0)
+       IS NOT DISTINCT FROM ts_analyze_peak_timing(v, 12.0)
+FROM s;
+----
+true
+
+query I
+SELECT _ts_mstl_decomposition(list_concat(list_concat([NULL]::DOUBLE[], v), [NULL]::DOUBLE[]))
+       IS NOT DISTINCT FROM _ts_mstl_decomposition(v)
+FROM s;
+----
+true
+
+query I
+SELECT _ts_detect_changepoints_bocpd(list_concat(list_concat([NULL]::DOUBLE[], v), [NULL]::DOUBLE[]), 250.0, true)
+       IS NOT DISTINCT FROM _ts_detect_changepoints_bocpd(v, 250.0, true)
+FROM s;
+----
+true
+
+#######################################
+# D-03: interior NULL -> SQL error naming the 1-based position
+#######################################
+
+statement error
+SELECT ts_detrend(list_concat(list_concat(v[1:5], [NULL]::DOUBLE[]), v[6:48]), 'linear') FROM s;
+----
+interior NULL at position 6
+
+statement error
+SELECT ts_detect_peaks(list_concat(list_concat(v[1:5], [NULL]::DOUBLE[]), v[6:48])) FROM s;
+----
+interior NULL at position 6
+
+statement error
+SELECT _ts_detect_changepoints_bocpd(list_concat(list_concat(v[1:5], [NULL]::DOUBLE[]), v[6:48]), 250.0, true) FROM s;
+----
+interior NULL at position 6
+
+#######################################
+# Constant period parameter correct per row (RUST-01): every row of the
+# 3-group fixture evaluates ts_decompose_seasonal(v, 12.0) consistently
+# with the single-row evaluation for that group
+#######################################
+
+query I
+SELECT count(*) FROM g a
+WHERE ts_decompose_seasonal(a.v, 12.0) IS NOT DISTINCT FROM
+      (SELECT ts_decompose_seasonal(b.v, 12.0) FROM g b WHERE b.g = a.g);
+----
+3

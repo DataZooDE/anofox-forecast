@@ -95,16 +95,33 @@ use the semver numbering this project started with.
   (`_ts_detect_periods`, `ts_estimate_period_fft`, `ts_estimate_period_acf`,
   `ts_detect_multiple_periods`, `ts_autoperiod`, `ts_cfd_autoperiod`, `ts_lomb_scargle`,
   `ts_aic_period`, `ts_ssa_period`, `ts_stl_period`, `ts_matrix_profile_period`,
-  `ts_sazed_period`); and `ts_detect_seasonality` / `ts_analyze_seasonality` /
-  `ts_classify_seasonality` previously dropped NULL list elements before calling the FFI,
-  silently splicing the remaining values together and shifting the implied time spacing.
-  They now trim leading/trailing NULLs/NaN (no behaviour change there), but an interior
-  NULL that survives trimming is a hard SQL error naming its 1-based position in the
-  original list (e.g. `ts_adf: Invalid input: interior NULL at position 6`) — wrap in
-  `try(...)` to get `NULL` instead. A list with no non-NULL value still returns `NULL`, not
-  an error. The single-series gate (`anofox_ts_series_gate`) lives in Rust
+  `ts_sazed_period`); `ts_detect_seasonality` / `ts_analyze_seasonality` /
+  `ts_classify_seasonality`; and — as of plan 12-03 — `ts_detrend`, `ts_decompose_seasonal`,
+  `ts_seasonal_strength`, `ts_seasonal_strength_windowed`, `ts_detect_seasonality_changes`,
+  `ts_instantaneous_period`, `ts_detect_amplitude_modulation`, `ts_detect_peaks`,
+  `ts_analyze_peak_timing`, `_ts_mstl_decomposition`, and `_ts_detect_changepoints_bocpd`
+  (and, transitively, the single-series `ts_detect_changepoints` macro) previously dropped
+  NULL list elements before calling the FFI, silently splicing the remaining values
+  together and shifting the implied time spacing. They now trim leading/trailing
+  NULLs/NaN (no behaviour change there), but an interior NULL that survives trimming is a
+  hard SQL error naming its 1-based position in the original list (e.g. `ts_adf: Invalid
+  input: interior NULL at position 6`) — wrap in `try(...)` to get `NULL` instead. A list
+  with no non-NULL value still returns `NULL`, not an error. Per-observation array outputs
+  of the plan-12-03 functions (trend, detrended, seasonal, peak indices, changepoint flags,
+  ...) now describe the trimmed series — position 1 is the first non-NULL input value, not
+  the original row 0. The single-series gate (`anofox_ts_series_gate`) lives in Rust
   (`anofox-fcst-core::missing::trim_edges_reject_interior`); C++ only marshals values and
   validity.
+- **`ts_features_agg` / `ts_features` no longer drop NULL-valued rows (D-11, plan 12-03).**
+  Both previously `continue`d past any row whose value was NULL before it reached the
+  aggregate state — a splice, not edge-trimming. They now carry a validity bitmask through
+  to the same Rust single-series gate used by the functions above: leading/trailing NULLs
+  are trimmed, an interior NULL is a hard SQL error naming its 1-based position (e.g.
+  `ts_features_agg: interior NULL at position 11`), and an all-NULL series returns a NULL
+  features struct instead of computing over a silently-shortened array. `ts_features_by`
+  (the table surface, `_ts_features_native`) now applies the identical policy and agrees
+  with `ts_features_agg`/`ts_features` on the same series — previously it wrote `NaN` for a
+  NULL input value and never errored on an interior NULL.
 
 ### Added
 
@@ -148,6 +165,21 @@ use the semver numbering this project started with.
   previously a literal/constant list argument (e.g. `ts_mae(a, [0,0,0])` broadcast across a
   table) was only read correctly on the first row of a chunk and returned `NULL`/garbage on
   every subsequent row.
+- **Constant scalar/list arguments on detrend/decomposition/peak/changepoint functions are
+  now read correctly for every row** (RUST-01, plan 12-03). `ts_detrend`,
+  `ts_decompose_seasonal`, `ts_seasonal_strength`, `ts_seasonal_strength_windowed`,
+  `ts_detect_seasonality_changes`, `ts_instantaneous_period`,
+  `ts_detect_amplitude_modulation`, `ts_detect_peaks`, `ts_analyze_peak_timing`,
+  `_ts_mstl_decomposition`, and `_ts_detect_changepoints_bocpd` previously read their method
+  string and threshold/window/lambda parameters via row-0-only `FlatVector::GetData(...)[0]`
+  (every other row of a chunk silently reused row 0's value); they now read every argument
+  per row via `ScalarArgReader<T>`. Method strings also go through `GetString()` instead of
+  treating `string_t::GetData()` as a NUL-terminated C string.
+- Dead, never-registered scalar function bodies removed with no SQL surface change (plan
+  12-03): the `ts_features` scalar body in `ts_features.cpp` and the two
+  `ts_detect_changepoints` scalar bodies in `ts_changepoints.cpp` were unreachable from SQL
+  (their `Register*` functions were no-ops) and are deleted along with their private
+  `ExtractListAsDouble`/feature-name helpers.
 
 ## [2026.09.26] - 2026-09-26
 

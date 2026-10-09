@@ -13,6 +13,22 @@ Changepoint detection identifies points in time where the statistical properties
 - Get per-point changepoint probabilities for detailed analysis
 - Identify series requiring model updates due to distribution shifts
 
+**NULL handling (Phase 12, D-03/D-04):** the underlying `_ts_detect_changepoints_bocpd`
+scalar shares the Rust single-series policy: leading/trailing `NULL` (and `NaN`) values
+inside the `LIST(...)` are trimmed before the analysis runs; an interior `NULL` that
+survives trimming is a hard error naming its 1-based position in the original list; a list
+with no non-NULL value returns SQL `NULL`. The `is_changepoint`/`changepoint_probability`
+arrays describe the **trimmed series** (position 1 = first non-NULL value) — the
+single-series `ts_detect_changepoints` macro shifts its output back by the leading-NULL
+row count so leading-NULL rows get `NULL` flags instead of misaligned ones.
+
+```sql
+-- Edge trim: leading/trailing NULLs give the same result as the trimmed series.
+SELECT _ts_detect_changepoints_bocpd([NULL, 1.0, 2.0, 1.5, 8.0, 7.5, NULL]::DOUBLE[], 250.0, true)
+     = _ts_detect_changepoints_bocpd([1.0, 2.0, 1.5, 8.0, 7.5]::DOUBLE[], 250.0, true);
+-- true
+```
+
 ---
 
 ## Quick Start

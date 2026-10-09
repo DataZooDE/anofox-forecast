@@ -98,6 +98,55 @@ SELECT CASE WHEN (
     'FAIL single_series_interior_null_errors'
 ) END AS result;
 
+-- ============================================================================
+-- SECTION 3 — Features aggregate parity and detection edge trimming (D-11, D-03)
+-- ============================================================================
+
+.print ''
+.print 'SECTION 3: ts_features_agg no longer splices NULLs; ts_detect_changepoints stays row-aligned under leading NULLs'
+.print ''
+
+CREATE OR REPLACE TABLE fe_example AS
+SELECT 'A' AS id, (DATE '2024-01-01' + i * INTERVAL 1 DAY)::TIMESTAMP AS ds,
+       CASE WHEN i IN (0, 29) THEN NULL ELSE (10 + sin(i))::DOUBLE END AS y
+FROM range(30) t(i);
+
+CREATE OR REPLACE TABLE fe_example_trim AS SELECT * FROM fe_example WHERE y IS NOT NULL;
+
+-- ts_features_agg on a series with edge NULLs equals both the trimmed series
+-- AND the ts_features_by table surface on the same (untrimmed) series (D-11).
+SELECT CASE WHEN (
+    SELECT (SELECT (ts_features_agg(ds, y)).mean FROM fe_example) IS NOT DISTINCT FROM
+           (SELECT (ts_features_agg(ds, y)).mean FROM fe_example_trim)
+       AND (SELECT (ts_features_agg(ds, y)).mean FROM fe_example) IS NOT DISTINCT FROM
+           (SELECT mean FROM ts_features_by('fe_example', id, ds, y))
+) THEN 'PASS features_agg_matches_trimmed_and_features_by' ELSE error(
+    'FAIL features_agg_matches_trimmed_and_features_by'
+) END AS result;
+
+-- The single-series ts_detect_changepoints macro is json-gated (uses to_json).
+LOAD json;
+
+CREATE OR REPLACE TABLE cp_leading_null AS
+SELECT i AS ds, CASE WHEN i <= 2 THEN NULL ELSE (10 + 3 * sin(2 * pi() * i / 12) + 0.05 * i) END AS val
+FROM generate_series(1, 40) t(i);
+
+-- With 2 leading-NULL rows (i=1,2; i=3 is the first non-NULL -> ds=1,2 are
+-- "before" the trimmed series), those two rows get NULL is_changepoint and
+-- every row with a value gets a non-NULL flag (the `_lead` shift in the
+-- macro keeps the BOCPD output row-aligned under edge trimming, D-03).
+SELECT CASE WHEN (
+    SELECT count(*) FROM ts_detect_changepoints('cp_leading_null', ds, val, NULL)
+    WHERE date_col IN (1, 2) AND is_changepoint IS NULL
+) = 2
+   AND (
+    SELECT count(*) FROM ts_detect_changepoints('cp_leading_null', ds, val, NULL)
+    WHERE value_col IS NOT NULL AND is_changepoint IS NOT NULL
+) = 38
+THEN 'PASS changepoints_macro_row_aligned_under_leading_nulls' ELSE error(
+    'FAIL changepoints_macro_row_aligned_under_leading_nulls'
+) END AS result;
+
 .print ''
 .print '============================================================================='
 .print 'ALL SECTIONS PASSED'

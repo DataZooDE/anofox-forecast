@@ -13,6 +13,27 @@ Feature extraction functions compute 117 statistical features from time series d
 - Build feature tables for downstream ML models outside DuckDB
 - Filter series by feature values (e.g., high trend strength, sufficient length)
 
+**NULL handling (Phase 12, D-03/D-04/D-11):** `ts_features_agg`, `ts_features` (the same
+aggregate under a second name) and `ts_features_by` share one Rust single-series NULL
+policy — no NULL-valued row is spliced out independently of the others. Leading/trailing
+`NULL` values are trimmed before extraction; an interior `NULL` that survives trimming is a
+hard error naming its 1-based position (e.g. `ts_features_agg: interior NULL at position
+11`); a series with no non-NULL value returns `NULL` feature values (the whole struct for
+`ts_features_agg`, a row of `NULL` feature columns for `ts_features_by`) instead of an
+error. The three surfaces agree on the same input series.
+
+```sql
+-- ts_features_agg equals both the trimmed series and ts_features_by on the same table.
+CREATE OR REPLACE TABLE fx AS
+SELECT 'A' AS id, (DATE '2024-01-01' + i * INTERVAL 1 DAY)::TIMESTAMP AS ds,
+       CASE WHEN i IN (0, 9) THEN NULL ELSE (10 + i)::DOUBLE END AS y
+FROM range(10) t(i);
+
+SELECT (SELECT (ts_features_agg(ds, y)).mean FROM fx) =
+       (SELECT mean FROM ts_features_by('fx', id, ds, y));
+-- true
+```
+
 ## Known deviations from tsfresh
 
 These features are named/catalogued after tsfresh but currently compute something different

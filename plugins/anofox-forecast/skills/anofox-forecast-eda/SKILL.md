@@ -354,6 +354,7 @@ FROM sales GROUP BY id;
 - **`trend_strength` / `seasonality_strength` formulas**: `trend_strength` is `|r|` (absolute Pearson correlation) of a linear fit against the series index — not a decomposition-based strength. `seasonality_strength` is `max(|ACF|)` over lags 2, 4, 7, and 12 only — it will miss seasonality at other periods. Neither has an officially-defined "strong"/"weak" threshold; validate any cutoff you use against your own data rather than assuming > 0.6 / < 0.2. (fix planned for v0.10.0, Phase 13)
 - **JSON extension is required** by a subset of quality / feature functions. Enable auto-load once per session: `SET autoinstall_known_extensions=1; SET autoload_known_extensions=1;`.
 - **`ts_r2(DOUBLE[] actual, DOUBLE[] predicted) → DOUBLE`** is a scalar **regression R² metric**, not an EDA statistic — it lives with the scalar metrics family in `anofox-forecast-backtest`. Use it under `GROUP BY` to score fit quality, e.g. `SELECT ts_r2([1.0,2,3,4], [1.1,2.0,2.9,4.2]);`.
+- **`ts_features_agg` / `ts_features` / `ts_features_by` share one Rust NULL policy** (Phase 12, D-11): a NULL-valued row is no longer spliced out independently — leading/trailing NULLs are trimmed, an interior NULL is a hard error naming its 1-based position, and an all-NULL series returns NULL (the whole struct for the aggregate, a row of NULL feature columns for the table function). All three surfaces agree on the same series.
 
 ## Canonical EDA pipeline
 
