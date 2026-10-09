@@ -203,3 +203,6 @@ jobs:
 
       - name: Build on MSRV toolchain
         run: cargo build --workspace --all-targets --locked
+
+      - name: Run Rust tests on MSRV toolchain
+        run: cargo test --workspace --locked
