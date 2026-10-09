@@ -1,6 +1,7 @@
 #include "anofox_forecast_extension.hpp"
 #include "anofox_fcst_ffi.h"
 #include "ts_fill_gaps_native.hpp"
+#include "ts_forecast_params.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
@@ -93,88 +94,6 @@ struct TsForecastScalarBindData : public FunctionData {
                confidence_level == other.confidence_level;
     }
 };
-
-// ============================================================================
-// Parameter Parsing Helpers (shared with ts_forecast_native.cpp)
-// ============================================================================
-
-static string ParseStringParam(const Value &params_value, const string &key, const string &default_val) {
-    if (params_value.IsNull()) return default_val;
-    if (params_value.type().id() == LogicalTypeId::MAP) {
-        auto &map_children = MapValue::GetChildren(params_value);
-        for (auto &child : map_children) {
-            auto &k = StructValue::GetChildren(child)[0];
-            auto &v = StructValue::GetChildren(child)[1];
-            if (k.ToString() == key && !v.IsNull()) return v.ToString();
-        }
-    } else if (params_value.type().id() == LogicalTypeId::STRUCT) {
-        // Mirrors ts_forecast_native.cpp — accept typed STRUCT params too,
-        // so `{seasonal_period: 7, laplace_variant: 'auto'}` behaves the same
-        // as the equivalent MAP.
-        auto &struct_children = StructValue::GetChildren(params_value);
-        auto &child_types = StructType::GetChildTypes(params_value.type());
-        for (idx_t i = 0; i < child_types.size(); i++) {
-            if (child_types[i].first == key && !struct_children[i].IsNull()) {
-                return struct_children[i].ToString();
-            }
-        }
-    }
-    return default_val;
-}
-
-static int64_t ParseInt64Param(const Value &params_value, const string &key, int64_t default_val) {
-    string str = ParseStringParam(params_value, key, "");
-    if (str.empty()) return default_val;
-    try { return std::stoll(str); } catch (...) { return default_val; }
-}
-
-static double ParseDoubleParam(const Value &params_value, const string &key, double default_val) {
-    string str = ParseStringParam(params_value, key, "");
-    if (str.empty()) return default_val;
-    try { return std::stod(str); } catch (...) { return default_val; }
-}
-
-static void ValidateParams(const Value &params_value, const string &method) {
-    static const unordered_set<string> valid_keys = {
-        "model", "seasonal_period", "seasonal_periods", "confidence_level", "window", "model_pool",
-        "laplace_variant", "laplace_seasonal_batch_init",
-        "garch_p", "garch_q", "kalman_model",
-        "top_k", "combination_method",   // Phase 4: AutoEnsemble params
-        "arima_order", "seasonal_order"  // D-08/D-09, plan 10-02
-    };
-
-    if (params_value.IsNull()) return;
-
-    vector<string> unknown_keys;
-    if (params_value.type().id() == LogicalTypeId::MAP) {
-        auto &map_children = MapValue::GetChildren(params_value);
-        for (auto &child : map_children) {
-            auto &key = StructValue::GetChildren(child)[0];
-            string key_str = key.ToString();
-            if (valid_keys.find(key_str) == valid_keys.end()) {
-                unknown_keys.push_back(key_str);
-            }
-        }
-    } else if (params_value.type().id() == LogicalTypeId::STRUCT) {
-        auto &child_types = StructType::GetChildTypes(params_value.type());
-        for (idx_t i = 0; i < child_types.size(); i++) {
-            if (valid_keys.find(child_types[i].first) == valid_keys.end()) {
-                unknown_keys.push_back(child_types[i].first);
-            }
-        }
-    }
-
-    if (!unknown_keys.empty()) {
-        string unknown_list;
-        for (size_t i = 0; i < unknown_keys.size(); i++) {
-            if (i > 0) unknown_list += ", ";
-            unknown_list += "'" + unknown_keys[i] + "'";
-        }
-        throw InvalidInputException(
-            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q, kalman_model, top_k, combination_method, arima_order, seasonal_order",
-            unknown_list);
-    }
-}
 
 // ============================================================================
 // Bind Function
@@ -429,118 +348,25 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
             freq_parsed = parsed.type;
         }
 
-        // Parse MAP params
-        int64_t seasonal_period = bind_data.seasonal_period;
-        double confidence_level = bind_data.confidence_level;
-        int64_t window_param = bind_data.window;
-        string model_spec = bind_data.model_spec;
-        string seasonal_periods_str = bind_data.seasonal_periods_str;
-        string model_pool = bind_data.model_pool;
-        string laplace_variant = bind_data.laplace_variant;
-        bool laplace_seasonal_batch_init = bind_data.laplace_seasonal_batch_init;
-        int64_t garch_p = bind_data.garch_p;
-        int64_t garch_q = bind_data.garch_q;
-        string kalman_model = bind_data.kalman_model;
-        int64_t ensemble_top_k = bind_data.ensemble_top_k;
-        string ensemble_method = bind_data.ensemble_method;
-        string arima_order = bind_data.arima_order;
-        string seasonal_order = bind_data.seasonal_order;
-
+        // Parse MAP params via the shared header (ts_forecast_params.hpp) —
+        // the exact helper ts_forecast_agg.cpp now also uses, so this scalar
+        // (ts_forecast_by's path) and the aggregate cannot drift (10-10,
+        // FCST-06). A missing/NULL per-row params value falls back to a
+        // fresh ForecastParamSet(), which carries the same defaults
+        // TsForecastScalarBindData's unused-by-bind fields previously did.
+        ForecastParamSet p;
         auto p_idx = params_data.sel->get_index(row_idx);
         if (params_data.validity.RowIsValid(p_idx)) {
-            Value params_val = params_vec.GetValue(row_idx);
-            ValidateParams(params_val, method);
-            model_spec = ParseStringParam(params_val, "model", "");
-            seasonal_period = ParseInt64Param(params_val, "seasonal_period", 0);
-            confidence_level = ParseDoubleParam(params_val, "confidence_level", 0.90);
-            window_param = ParseInt64Param(params_val, "window", 0);
-            seasonal_periods_str = ParseStringParam(params_val, "seasonal_periods", "");
-            model_pool = ParseStringParam(params_val, "model_pool", "");
-            laplace_variant = ParseStringParam(params_val, "laplace_variant", "");
-            laplace_seasonal_batch_init =
-                ParseInt64Param(params_val, "laplace_seasonal_batch_init", 0) != 0;
-            garch_p = ParseInt64Param(params_val, "garch_p", 0);
-            garch_q = ParseInt64Param(params_val, "garch_q", 0);
-            kalman_model = ParseStringParam(params_val, "kalman_model", "");
-            ensemble_top_k = ParseInt64Param(params_val, "top_k", 0);
-            ensemble_method = ParseStringParam(params_val, "combination_method", "");
-            arima_order = ParseStringParam(params_val, "arima_order", "");
-            seasonal_order = ParseStringParam(params_val, "seasonal_order", "");
-        }
-
-        // WR-03: reject arima_order/seasonal_order strings that would
-        // silently truncate when copied into the fixed 32-byte
-        // ForecastOptions::arima_order_str/seasonal_order_str buffers
-        // below. Checked per-row (not at bind time) because this scalar
-        // function accepts arima_order/seasonal_order via the per-row
-        // params MAP, not a bind-time constant.
-        if (arima_order.size() > sizeof(ForecastOptions::arima_order_str) - 1) {
-            throw InvalidInputException(
-                "arima_order value is too long (max %d characters): '%s'",
-                (int)(sizeof(ForecastOptions::arima_order_str) - 1), arima_order);
-        }
-        if (seasonal_order.size() > sizeof(ForecastOptions::seasonal_order_str) - 1) {
-            throw InvalidInputException(
-                "seasonal_order value is too long (max %d characters): '%s'",
-                (int)(sizeof(ForecastOptions::seasonal_order_str) - 1), seasonal_order);
+            p = ParseForecastParamSet(params_vec.GetValue(row_idx));
         }
 
         // --- Build ForecastOptions ---
         ForecastOptions opts;
         memset(&opts, 0, sizeof(opts));
-        strncpy(opts.model, method.c_str(), sizeof(opts.model) - 1);
-        opts.model[sizeof(opts.model) - 1] = '\0';
-        if (!model_spec.empty()) {
-            strncpy(opts.ets_model, model_spec.c_str(), sizeof(opts.ets_model) - 1);
-            opts.ets_model[sizeof(opts.ets_model) - 1] = '\0';
-        }
+        ApplyForecastParamSet(p, method, opts);
         opts.horizon = static_cast<int>(horizon);
-        opts.confidence_level = confidence_level;
-        opts.seasonal_period = static_cast<int>(seasonal_period);
-        opts.auto_detect_seasonality = (seasonal_period == 0 && seasonal_periods_str.empty());
         opts.include_fitted = false;
         opts.include_residuals = false;
-        opts.window = static_cast<int>(window_param);
-        if (!seasonal_periods_str.empty()) {
-            strncpy(opts.seasonal_periods_str, seasonal_periods_str.c_str(),
-                    sizeof(opts.seasonal_periods_str) - 1);
-            opts.seasonal_periods_str[sizeof(opts.seasonal_periods_str) - 1] = '\0';
-        }
-        if (!model_pool.empty()) {
-            strncpy(opts.model_pool, model_pool.c_str(), sizeof(opts.model_pool) - 1);
-            opts.model_pool[sizeof(opts.model_pool) - 1] = '\0';
-        }
-        if (!laplace_variant.empty()) {
-            strncpy(opts.laplace_variant, laplace_variant.c_str(),
-                    sizeof(opts.laplace_variant) - 1);
-            opts.laplace_variant[sizeof(opts.laplace_variant) - 1] = '\0';
-        }
-        opts.laplace_seasonal_batch_init = laplace_seasonal_batch_init;
-        opts.garch_p = static_cast<int>(garch_p);
-        opts.garch_q = static_cast<int>(garch_q);
-        if (!kalman_model.empty()) {
-            strncpy(opts.kalman_model, kalman_model.c_str(),
-                    sizeof(opts.kalman_model) - 1);
-            opts.kalman_model[sizeof(opts.kalman_model) - 1] = '\0';
-        }
-        // AutoEnsemble params (Phase 4)
-        opts.ensemble_top_k = static_cast<int>(ensemble_top_k);
-        if (!ensemble_method.empty()) {
-            strncpy(opts.ensemble_method, ensemble_method.c_str(),
-                    sizeof(opts.ensemble_method) - 1);
-            opts.ensemble_method[sizeof(opts.ensemble_method) - 1] = '\0';
-        }
-        // ARIMA order params (D-08/D-09, plan 10-02)
-        if (!arima_order.empty()) {
-            strncpy(opts.arima_order_str, arima_order.c_str(),
-                    sizeof(opts.arima_order_str) - 1);
-            opts.arima_order_str[sizeof(opts.arima_order_str) - 1] = '\0';
-        }
-        if (!seasonal_order.empty()) {
-            strncpy(opts.seasonal_order_str, seasonal_order.c_str(),
-                    sizeof(opts.seasonal_order_str) - 1);
-            opts.seasonal_order_str[sizeof(opts.seasonal_order_str) - 1] = '\0';
-        }
 
         // --- Call Rust FFI ---
         ForecastResult fcst_result;

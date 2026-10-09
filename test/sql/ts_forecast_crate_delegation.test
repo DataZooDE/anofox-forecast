@@ -530,3 +530,192 @@ FROM (
 );
 ----
 true
+
+#######################################
+# FCST-06 / FCST-01 gap closure 10-10: ts_forecast_agg parity with
+# ts_forecast_by (10-VERIFICATION.md gap — the aggregate used to silently
+# drop every params-MAP key except model/arima_order/seasonal_order/
+# seasonal_period and hardcode confidence_level to 0.90). All on table
+# `air` (agg date arg cast to TIMESTAMP, matching the aggregate's TIMESTAMP
+# date_col signature).
+#######################################
+
+# Unknown key -> the same closed-key-set error ts_forecast_by/native raise.
+statement error
+SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 3, MAP{'bogus_key': '1'}) FROM air;
+----
+Unknown parameter(s): 'bogus_key'
+
+# Same via the alias.
+statement error
+SELECT anofox_fcst_ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 3, MAP{'bogus_key': '1'}) FROM air;
+----
+Unknown parameter(s): 'bogus_key'
+
+# croston_variant is a panel-only key (ts_forecast_panel_by's GlobalCroston) —
+# unrecognized here too, identical to ts_forecast_by.
+statement error
+SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'CrostonClassic', 3, MAP{'croston_variant': 'sba'}) FROM air;
+----
+Unknown parameter(s): 'croston_variant'
+
+# Unknown kalman_model value -> error naming kalman_model (D-07), same as
+# ts_forecast_by.
+statement error
+SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'Kalman', 3, MAP{'kalman_model': 'bogus'}) FROM air;
+----
+Invalid parameter 'kalman_model' = 'bogus'
+
+# kalman_model now actually threads through (previously silently dropped) —
+# model_name reports the spec, exactly like ts_forecast_by.
+query I
+SELECT (ts_forecast_agg(ds::TIMESTAMP, y, 'Kalman', 3, MAP{'kalman_model': 'local_linear_trend'})).model_name
+FROM air;
+----
+Kalman(local_linear_trend)
+
+# garch_p now threads through on the agg surface too — run on the 60-row
+# prefix so GARCH fits quickly.
+query I
+SELECT (ts_forecast_agg(ds::TIMESTAMP, y, 'GARCH', 6, MAP{})).model_name
+FROM air WHERE ds < DATE '1954-01-01';
+----
+GARCH(1,1)
+
+query I
+SELECT (ts_forecast_agg(ds::TIMESTAMP, y, 'GARCH', 6, MAP{'garch_p': '2'})).model_name
+FROM air WHERE ds < DATE '1954-01-01';
+----
+GARCH(2,1)
+
+# 'ARIMA' without arima_order -> hard SQL error naming arima_order (D-09),
+# not a silently-defaulted fixed-coefficient model.
+statement error
+SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'ARIMA', 3, MAP{}) FROM air;
+----
+arima_order
+
+# Default field names unchanged when confidence_level is omitted.
+query I
+SELECT len((ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 3, MAP{})).lower_90)
+FROM air;
+----
+3
+
+# confidence_level now actually widens/narrows the interval (previously
+# hardcoded to 0.90 regardless of the params MAP) — 95% must be wider than
+# 80% at h=1, and the bound fields must be named lower_95/upper_95 resp.
+# lower_80/upper_80 (two separately-bound aggregate calls, cross joined).
+query I
+SELECT (f95).upper_95[1] - (f95).lower_95[1] > (f80).upper_80[1] - (f80).lower_80[1]
+FROM (SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 3, MAP{'confidence_level': '0.95'}) AS f95 FROM air) t95
+CROSS JOIN (SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 3, MAP{'confidence_level': '0.80'}) AS f80 FROM air) t80;
+----
+true
+
+# Naive 95% h=1 half-width matches the same R AirPassengers fixture
+# ts_forecast_by asserts above (D-01) — not the old hardcoded-0.90 output.
+query I
+SELECT abs((f).upper_95[1] - (f).point_forecast[1] - 66.07118560930098) < 0.1
+FROM (SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 12, MAP{'confidence_level': '0.95'}) AS f FROM air) t;
+----
+true
+
+# A non-constant confidence_level is an SQL error, not a mislabelled field —
+# the bound field names (lower_<pct>/upper_<pct>) are fixed at bind time.
+statement error
+SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 3,
+    map(['confidence_level'], [CASE WHEN y > 0 THEN '0.95' ELSE '0.95' END])) FROM air;
+----
+must be a constant expression
+
+# Parity (a): AutoETS seasonal_period=12 @0.95 — ts_forecast_agg must equal
+# ts_forecast_by for every forecast step on the same complete series.
+query I
+SELECT count(*) FROM (
+    WITH agg AS (
+        SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'AutoETS', 12,
+            MAP{'seasonal_period': '12', 'confidence_level': '0.95'}) AS f
+        FROM air
+    ), agg_rows AS (
+        SELECT unnest((f).forecast_step) AS forecast_step,
+               unnest((f).point_forecast) AS agg_yhat,
+               unnest((f).lower_95) AS agg_lower,
+               unnest((f).upper_95) AS agg_upper,
+               (f).model_name AS agg_model
+        FROM agg
+    )
+    SELECT *
+    FROM agg_rows
+    JOIN ts_forecast_by('air', id, ds, y, 'AutoETS', 12, '1mo',
+        MAP{'seasonal_period': '12', 'confidence_level': '0.95'}) AS byt
+        USING (forecast_step)
+    WHERE agg_model = byt.model_name
+      AND abs(agg_yhat - byt.yhat) <= 1e-9 * greatest(1.0, abs(byt.yhat))
+      AND ((agg_lower IS NULL AND byt.yhat_lower IS NULL)
+           OR abs(agg_lower - byt.yhat_lower) <= 1e-9 * greatest(1.0, abs(byt.yhat_lower)))
+      AND ((agg_upper IS NULL AND byt.yhat_upper IS NULL)
+           OR abs(agg_upper - byt.yhat_upper) <= 1e-9 * greatest(1.0, abs(byt.yhat_upper)))
+);
+----
+12
+
+# Parity (b): Kalman local_linear_trend @0.80.
+query I
+SELECT count(*) FROM (
+    WITH agg AS (
+        SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'Kalman', 6,
+            MAP{'kalman_model': 'local_linear_trend', 'confidence_level': '0.80'}) AS f
+        FROM air
+    ), agg_rows AS (
+        SELECT unnest((f).forecast_step) AS forecast_step,
+               unnest((f).point_forecast) AS agg_yhat,
+               unnest((f).lower_80) AS agg_lower,
+               unnest((f).upper_80) AS agg_upper,
+               (f).model_name AS agg_model
+        FROM agg
+    )
+    SELECT *
+    FROM agg_rows
+    JOIN ts_forecast_by('air', id, ds, y, 'Kalman', 6, '1mo',
+        MAP{'kalman_model': 'local_linear_trend', 'confidence_level': '0.80'}) AS byt
+        USING (forecast_step)
+    WHERE agg_model = byt.model_name
+      AND abs(agg_yhat - byt.yhat) <= 1e-9 * greatest(1.0, abs(byt.yhat))
+      AND ((agg_lower IS NULL AND byt.yhat_lower IS NULL)
+           OR abs(agg_lower - byt.yhat_lower) <= 1e-9 * greatest(1.0, abs(byt.yhat_lower)))
+      AND ((agg_upper IS NULL AND byt.yhat_upper IS NULL)
+           OR abs(agg_upper - byt.yhat_upper) <= 1e-9 * greatest(1.0, abs(byt.yhat_upper)))
+);
+----
+6
+
+# Parity (c): HoltWinters with an auto-detected period (MAP{}, lower_90/
+# upper_90 defaults) — the aggregate's auto-detection must match
+# ts_forecast_by's, not just its explicit-period path.
+query I
+SELECT count(*) FROM (
+    WITH agg AS (
+        SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'HoltWinters', 12, MAP{}) AS f
+        FROM air
+    ), agg_rows AS (
+        SELECT unnest((f).forecast_step) AS forecast_step,
+               unnest((f).point_forecast) AS agg_yhat,
+               unnest((f).lower_90) AS agg_lower,
+               unnest((f).upper_90) AS agg_upper,
+               (f).model_name AS agg_model
+        FROM agg
+    )
+    SELECT *
+    FROM agg_rows
+    JOIN ts_forecast_by('air', id, ds, y, 'HoltWinters', 12, '1mo', MAP{}) AS byt
+        USING (forecast_step)
+    WHERE agg_model = byt.model_name
+      AND abs(agg_yhat - byt.yhat) <= 1e-9 * greatest(1.0, abs(byt.yhat))
+      AND ((agg_lower IS NULL AND byt.yhat_lower IS NULL)
+           OR abs(agg_lower - byt.yhat_lower) <= 1e-9 * greatest(1.0, abs(byt.yhat_lower)))
+      AND ((agg_upper IS NULL AND byt.yhat_upper IS NULL)
+           OR abs(agg_upper - byt.yhat_upper) <= 1e-9 * greatest(1.0, abs(byt.yhat_upper)))
+);
+----
+12

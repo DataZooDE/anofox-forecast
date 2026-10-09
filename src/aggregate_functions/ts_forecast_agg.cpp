@@ -1,7 +1,9 @@
 #include "anofox_forecast_extension.hpp"
 #include "anofox_fcst_ffi.h"
+#include "ts_forecast_params.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/function/aggregate_function.hpp"
 #include "duckdb/common/types/timestamp.hpp"
 #include "duckdb/common/types/vector.hpp"
@@ -15,17 +17,16 @@ struct TsForecastAggStateData {
     vector<int64_t> timestamps;
     vector<double> values;
     string method;
-    string ets_model;  // ETS model specification (e.g., "AAA", "MNM", "AAdA")
     int32_t horizon;
-    double confidence_level;
-    // ARIMA order params + seasonal_period (D-08/D-09, plan 10-02)
-    string arima_order;
-    string seasonal_order;
-    int32_t seasonal_period;
+    // 10-10 (FCST-06): single shared params set — validated and threaded
+    // through ApplyForecastParamSet exactly like ts_forecast_by, instead of
+    // the five bespoke fields (ets_model/confidence_level/arima_order/
+    // seasonal_order/seasonal_period) this struct used to carry, each of
+    // which silently dropped every other ts_forecast_by param.
+    ForecastParamSet params;
     bool initialized;
 
-    TsForecastAggStateData()
-        : horizon(12), confidence_level(0.90), seasonal_period(0), initialized(false) {}
+    TsForecastAggStateData() : horizon(12), initialized(false) {}
 };
 
 // Trivially constructible state wrapper (just a pointer)
@@ -97,7 +98,20 @@ static LogicalType GetForecastAggResultType(double confidence_level = 0.90) {
     return LogicalType::STRUCT(std::move(children));
 }
 
-// Bind function to extract confidence_level from params MAP and set dynamic return type
+// Bind function to extract confidence_level from params MAP and set dynamic return type.
+//
+// 10-10 (FCST-06, D-01): confidence_level now DOES come from the params MAP
+// when it is a bind-time constant (the common case — `MAP{'confidence_level':
+// '0.95'}` literal), via the same ExpressionExecutor::EvaluateScalar
+// bind-time fold `string_agg`/`bitstring_agg` use for their own constant
+// arguments (duckdb/extension/core_functions/aggregate/distributive/
+// string_agg.cpp:135). A non-constant per-row confidence_level is still
+// readable at Update time, but would require the STRUCT's lower_<pct>/
+// upper_<pct> field names to vary per group, which DuckDB's aggregate
+// framework cannot express (the return type is fixed at bind). So
+// TsForecastAggUpdate (below) throws if a group's parsed confidence_level
+// disagrees with the one folded here — "confidence_level must be a constant
+// expression" — rather than silently mislabelling the bound fields.
 static unique_ptr<FunctionData> TsForecastAggBind(ClientContext &context, AggregateFunction &function,
                                                    vector<unique_ptr<Expression>> &arguments) {
     auto bind_data = make_uniq<TsForecastAggBindData>();
@@ -105,9 +119,16 @@ static unique_ptr<FunctionData> TsForecastAggBind(ClientContext &context, Aggreg
     // Default confidence level
     bind_data->confidence_level = 0.90;
 
-    // Note: We can't easily extract the confidence_level from the params MAP at bind time
-    // because it's a runtime value. For now, use default 0.90 which matches C++ extension default.
-    // Users can use the result and the confidence is embedded in the column name.
+    if (arguments.size() > 4 && arguments[4]->IsFoldable()) {
+        Value params_value = ExpressionExecutor::EvaluateScalar(context, *arguments[4]);
+        if (!params_value.IsNull()) {
+            // Fails fast at bind time for unknown keys even when the
+            // params MAP is otherwise empty/constant (10-VERIFICATION.md
+            // gap: this surface previously never validated at all).
+            ValidateForecastParamKeys(params_value);
+            bind_data->confidence_level = ForecastParamDouble(params_value, "confidence_level", 0.90);
+        }
+    }
 
     bind_data->UpdateColumnNames();
 
@@ -143,125 +164,10 @@ struct TsForecastAggOperation {
         }
     }
 
-    template <class T, class STATE>
-    static void Finalize(STATE &state, T &target, AggregateFinalizeData &finalize_data) {
-        if (!state.data || !state.data->initialized || state.data->values.empty()) {
-            finalize_data.ReturnNull();
-            return;
-        }
-
-        auto &data = *state.data;
-
-        // Sort by timestamp
-        vector<pair<int64_t, double>> sorted_data;
-        for (size_t i = 0; i < data.timestamps.size(); i++) {
-            sorted_data.push_back({data.timestamps[i], data.values[i]});
-        }
-        std::sort(sorted_data.begin(), sorted_data.end());
-
-        vector<double> sorted_values;
-        for (const auto &p : sorted_data) {
-            sorted_values.push_back(p.second);
-        }
-
-        size_t validity_words = (sorted_values.size() + 63) / 64;
-        vector<uint64_t> validity(validity_words, ~0ULL);
-
-        ForecastOptions opts;
-        memset(&opts, 0, sizeof(opts));
-        size_t model_len = std::min(data.method.size(), (size_t)31);
-        memcpy(opts.model, data.method.c_str(), model_len);
-        opts.model[model_len] = '\0';
-
-        // Set ETS model specification if provided (e.g., "AAA", "MNM", "AAdA")
-        if (!data.ets_model.empty()) {
-            size_t ets_len = std::min(data.ets_model.size(), (size_t)7);
-            memcpy(opts.ets_model, data.ets_model.c_str(), ets_len);
-            opts.ets_model[ets_len] = '\0';
-        }
-
-        opts.horizon = data.horizon;
-        opts.confidence_level = data.confidence_level;
-        opts.include_fitted = true;
-
-        ForecastResult fcst_result;
-        memset(&fcst_result, 0, sizeof(fcst_result));
-        AnofoxError error;
-
-        bool success = anofox_ts_forecast(
-            sorted_values.data(),
-            validity.data(),
-            sorted_values.size(),
-            &opts,
-            &fcst_result,
-            &error
-        );
-
-        if (!success) {
-            finalize_data.ReturnNull();
-            return;
-        }
-
-        // Build result - this is complex, set null for now
-        // Full struct construction requires more infrastructure
-        anofox_free_forecast_result(&fcst_result);
-        finalize_data.ReturnNull();
-    }
-
     static bool IgnoreNull() {
         return true;
     }
 };
-
-// Helper function to extract a string value from a params MAP
-static string GetParamFromMap(Vector &map_vec, idx_t count, idx_t row_idx, const string &key, const string &default_value = "") {
-    // MAP is represented as LIST(STRUCT(key, value)) in DuckDB
-    UnifiedVectorFormat map_data;
-    map_vec.ToUnifiedFormat(count, map_data);
-
-    auto map_idx = map_data.sel->get_index(row_idx);
-    if (!map_data.validity.RowIsValid(map_idx)) {
-        return default_value;
-    }
-
-    // Get the list entry for this row
-    auto list_entries = UnifiedVectorFormat::GetData<list_entry_t>(map_data);
-    auto &list_entry = list_entries[map_idx];
-
-    if (list_entry.length == 0) {
-        return default_value;
-    }
-
-    // Get the child vector (which contains STRUCT(key, value) entries)
-    auto &struct_vec = ListVector::GetEntry(map_vec);
-    auto &struct_children = StructVector::GetEntries(struct_vec);
-    auto &key_vec = *struct_children[0];  // keys
-    auto &val_vec = *struct_children[1];  // values
-
-    // Use UnifiedVectorFormat for the child vectors
-    UnifiedVectorFormat key_data, val_data;
-    key_vec.ToUnifiedFormat(ListVector::GetListSize(map_vec), key_data);
-    val_vec.ToUnifiedFormat(ListVector::GetListSize(map_vec), val_data);
-
-    auto key_values = UnifiedVectorFormat::GetData<string_t>(key_data);
-    auto val_values = UnifiedVectorFormat::GetData<string_t>(val_data);
-
-    for (idx_t j = 0; j < list_entry.length; j++) {
-        auto child_idx = list_entry.offset + j;
-        auto key_unified_idx = key_data.sel->get_index(child_idx);
-        if (key_data.validity.RowIsValid(key_unified_idx)) {
-            auto key_str = key_values[key_unified_idx].GetString();
-            if (key_str == key) {
-                auto val_unified_idx = val_data.sel->get_index(child_idx);
-                if (val_data.validity.RowIsValid(val_unified_idx)) {
-                    return val_values[val_unified_idx].GetString();
-                }
-                return default_value;
-            }
-        }
-    }
-    return default_value;
-}
 
 static void TsForecastAggUpdate(Vector inputs[], AggregateInputData &aggr_input, idx_t input_count,
                                 Vector &state_vector, idx_t count) {
@@ -271,11 +177,12 @@ static void TsForecastAggUpdate(Vector inputs[], AggregateInputData &aggr_input,
     auto &horizon_vec = inputs[3];
     auto &params_vec = inputs[4];  // params MAP
 
-    UnifiedVectorFormat ts_data, val_data, method_data, horizon_data;
+    UnifiedVectorFormat ts_data, val_data, method_data, horizon_data, params_data;
     ts_vec.ToUnifiedFormat(count, ts_data);
     val_vec.ToUnifiedFormat(count, val_data);
     method_vec.ToUnifiedFormat(count, method_data);
     horizon_vec.ToUnifiedFormat(count, horizon_data);
+    params_vec.ToUnifiedFormat(count, params_data);
 
     auto states = FlatVector::GetData<TsForecastAggState *>(state_vector);
 
@@ -307,35 +214,37 @@ static void TsForecastAggUpdate(Vector inputs[], AggregateInputData &aggr_input,
                 state.data->horizon = 12;
             }
 
-            // Extract 'model' from params MAP for ETS specification (e.g., "AAA", "MNM")
-            state.data->ets_model = GetParamFromMap(params_vec, count, i, "model", "");
-
-            // ARIMA order params + seasonal_period (D-08/D-09, plan 10-02)
-            state.data->arima_order = GetParamFromMap(params_vec, count, i, "arima_order", "");
-            state.data->seasonal_order = GetParamFromMap(params_vec, count, i, "seasonal_order", "");
-
-            // WR-03: reject arima_order/seasonal_order strings that would
-            // silently truncate when copied into the fixed 32-byte
-            // ForecastOptions::arima_order_str/seasonal_order_str buffers
-            // in Finalize (memcpy with a sizeof(...)-1 bound, below).
-            if (state.data->arima_order.size() > sizeof(ForecastOptions::arima_order_str) - 1) {
-                throw InvalidInputException(
-                    "arima_order value is too long (max %d characters): '%s'",
-                    (int)(sizeof(ForecastOptions::arima_order_str) - 1), state.data->arima_order);
-            }
-            if (state.data->seasonal_order.size() > sizeof(ForecastOptions::seasonal_order_str) - 1) {
-                throw InvalidInputException(
-                    "seasonal_order value is too long (max %d characters): '%s'",
-                    (int)(sizeof(ForecastOptions::seasonal_order_str) - 1), state.data->seasonal_order);
-            }
+            // 10-10 (FCST-06): validate the closed params key set and parse
+            // every ts_forecast_by param once per group, via the exact same
+            // ParseForecastParamSet helper _ts_forecast_scalar (ts_forecast_by)
+            // uses — this is the fix for the gap where ts_forecast_agg used
+            // to read only model/arima_order/seasonal_order/seasonal_period
+            // from the MAP and silently drop everything else (kalman_model,
+            // garch_p/garch_q, model_pool, window, laplace_*, top_k,
+            // combination_method, confidence_level). Also applies WR-03's
+            // arima_order/seasonal_order length guard (inside
+            // ParseForecastParamSet) per group.
             {
-                string sp_str = GetParamFromMap(params_vec, count, i, "seasonal_period", "");
-                if (!sp_str.empty()) {
-                    try {
-                        state.data->seasonal_period = std::stoi(sp_str);
-                    } catch (...) {
-                        state.data->seasonal_period = 0;
-                    }
+                auto params_idx = params_data.sel->get_index(i);
+                Value params_value =
+                    params_data.validity.RowIsValid(params_idx) ? params_vec.GetValue(i) : Value();
+                state.data->params = ParseForecastParamSet(params_value);
+            }
+
+            // confidence_level determines the bound STRUCT's lower_<pct>/
+            // upper_<pct> field names, which TsForecastAggBind fixes at bind
+            // time by folding this same argument (when it is a constant
+            // expression). A per-group value that disagrees with the folded
+            // one would silently mislabel those already-bound field names,
+            // so raise instead of letting it pass quietly (D-01).
+            {
+                auto &bind_data = aggr_input.bind_data->Cast<TsForecastAggBindData>();
+                if (std::abs(state.data->params.confidence_level - bind_data.confidence_level) > 1e-9) {
+                    throw InvalidInputException(
+                        "ts_forecast_agg: confidence_level must be a constant expression (bound confidence_level "
+                        "= %f from the params argument's bind-time value, but this group's params resolved "
+                        "confidence_level = %f) — the lower_<pct>/upper_<pct> field names are fixed at bind time",
+                        bind_data.confidence_level, state.data->params.confidence_level);
                 }
             }
 
@@ -397,39 +306,19 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
         size_t validity_words = (sorted_values.size() + 63) / 64;
         vector<uint64_t> validity(validity_words, ~0ULL);
 
+        // 10-10 (FCST-06): the exact same ApplyForecastParamSet writer
+        // _ts_forecast_scalar (ts_forecast_by) uses, applied to the params
+        // this group's TsForecastAggUpdate already validated and parsed —
+        // kalman_model, garch_p/garch_q, model_pool, window, laplace_*,
+        // top_k, combination_method, seasonal_periods and arima_order/
+        // seasonal_order/seasonal_period now all thread through, instead of
+        // only arima_order/seasonal_order/seasonal_period as before.
         ForecastOptions opts;
         memset(&opts, 0, sizeof(opts));
-        size_t model_len = std::min(data.method.size(), (size_t)31);
-        memcpy(opts.model, data.method.c_str(), model_len);
-        opts.model[model_len] = '\0';
-
-        // Set ETS model specification if provided (e.g., "AAA", "MNM", "AAdA")
-        if (!data.ets_model.empty()) {
-            size_t ets_len = std::min(data.ets_model.size(), (size_t)7);
-            memcpy(opts.ets_model, data.ets_model.c_str(), ets_len);
-            opts.ets_model[ets_len] = '\0';
-        }
-
+        ApplyForecastParamSet(data.params, data.method, opts);
         opts.horizon = data.horizon;
-        opts.confidence_level = data.confidence_level;
         opts.include_fitted = true;
         opts.include_residuals = true;  // WR-02: residuals[] is now a real output field
-        // ARIMA order params + seasonal_period (D-08/D-09, plan 10-02).
-        // seasonal_period must be explicit (never auto-detected) for ARIMA's
-        // own seasonal_order validation to engage through this entry point.
-        opts.seasonal_period = data.seasonal_period;
-        opts.auto_detect_seasonality = (data.seasonal_period == 0);
-        if (!data.arima_order.empty()) {
-            size_t arima_order_len = std::min(data.arima_order.size(), sizeof(opts.arima_order_str) - 1);
-            memcpy(opts.arima_order_str, data.arima_order.c_str(), arima_order_len);
-            opts.arima_order_str[arima_order_len] = '\0';
-        }
-        if (!data.seasonal_order.empty()) {
-            size_t seasonal_order_len =
-                std::min(data.seasonal_order.size(), sizeof(opts.seasonal_order_str) - 1);
-            memcpy(opts.seasonal_order_str, data.seasonal_order.c_str(), seasonal_order_len);
-            opts.seasonal_order_str[seasonal_order_len] = '\0';
-        }
 
         ForecastResult fcst_result;
         memset(&fcst_result, 0, sizeof(fcst_result));
@@ -445,6 +334,18 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
         );
 
         if (!success) {
+            // 10-10 (FCST-06/D-07): invalid model/parameter values (e.g. an
+            // unrecognized kalman_model, or 'ARIMA' without arima_order) now
+            // raise the same InvalidInputException ts_forecast_by's scalar
+            // path raises for the identical input (ts_forecast_scalar.cpp's
+            // INVALID_MODEL/INVALID_INPUT rule) instead of only ever being
+            // reported in this group's error_message field. Every other
+            // error code keeps the pre-existing error_message + empty-lists
+            // + NULL aic/bic/mse behavior unchanged.
+            if (error.code == INVALID_MODEL || error.code == INVALID_INPUT) {
+                throw InvalidInputException(string(error.message));
+            }
+
             // Set error message instead of returning null
             FlatVector::GetData<string_t>(error_vec)[row] =
                 StringVector::AddString(error_vec, error.message);
