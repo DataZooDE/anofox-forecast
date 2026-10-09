@@ -170,12 +170,12 @@ Plans:
   4. Theta (STM) estimates α by SES optimisation with the standard interval formula and no random-walk bias vs R `thetaf`; TBATS/MSTL/GARCH interval widths match statsforecast/arch within the upstream validation tolerance, or those models return NULL intervals with documentation.
   5. All changes sit on a fix branch in `~/projects/rust/anofox-forecast` with PR(s) open, upstream `cargo test` / `cargo fmt --check` / `cargo clippy` green, and CHANGELOG entries describing each numerical change.
 
-**Plans**: 10 plans
+**Plans**: 1/10 plans executed
 
 Plans:
 **Waves 1-10** *(strictly sequential — all plans share one upstream working tree; each fix branch starts from the base ref chosen in 11-01, never from a sibling branch)*
 
-- [ ] 11-01-PLAN.md — base-ref decision checkpoint (origin/main is v0.15.9; released 0.15.10 is on unmerged perf branch) + clean fmt/clippy/test baseline env contract (wave 1)
+- [x] 11-01-PLAN.md — base-ref decision checkpoint (origin/main is v0.15.9; released 0.15.10 is on unmerged perf branch) + clean fmt/clippy/test baseline env contract (wave 1)
 - [ ] 11-02-PLAN.md — fix/adf-kpss-correctness: augmented ADF (n/c/ct, AIC/BIC/t-stat/fixed), MacKinnon p-values + critical values, bounded KPSS p-value, urca/tseries/statsmodels fixtures, MC size, PR (wave 2)
 - [ ] 11-03-PLAN.md — fix/theta-alpha-intervals: STM alpha + l0 by SES SSE, thetaf drift factor and intervals, thetaf fixtures, PR (wave 3)
 - [ ] 11-04-PLAN.md — fix/auto-arima-order-selection (1/2): ndiffs-KPSS d, nsdiffs-seas D before d, common-basis AICc with constant in both scorers, RW/AR(0.7) frequencies, draft PR (wave 4)
@@ -342,7 +342,7 @@ Phases execute in numeric order: 9 → 10 → 11 → 12 → 13 → 14 → 15 →
 |-------|----------------|--------|-----------|
 | 9. Reference Fixtures & Safe Dependency Bumps | 3/3 | Complete    | 2026-10-09 |
 | 10. Forecast Wrapper Delegates to Crate Models | 10/10 | Complete    | 2026-10-09 |
-| 11. Upstream anofox-forecast Correctness Fixes | 0/TBD | Not started | - |
+| 11. Upstream anofox-forecast Correctness Fixes | 1/10 | In Progress|  |
 | 12. Statistics Marshalling Moves to Rust | 0/TBD | Not started | - |
 | 13. Core Statistics, Metrics & Data Quality | 0/TBD | Not started | - |
 | 14. tsfresh Feature Parity | 0/TBD | Not started | - |

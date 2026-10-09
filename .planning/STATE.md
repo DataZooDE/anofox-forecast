@@ -4,18 +4,19 @@ milestone: v0.10.0
 milestone_name: Statistical Correctness
 current_phase: 11
 current_phase_name: Upstream anofox-forecast Correctness Fixes
+current_plan: 2
 status: executing
-stopped_at: Phase 10 complete, ready to plan Phase 11
-last_updated: "2026-10-09T20:11:16.464Z"
+stopped_at: Completed 11-01-PLAN.md
+last_updated: "2026-10-09T20:26:26.625Z"
 last_activity: 2026-10-09
 last_activity_desc: Phase 10 complete, transitioned to Phase 11
-state_head: a3195379dc990b12cab11f7b17ef3087beeb7994
+state_head: b681c885ff24e1b44e032e18112ef7c78b47f543
 progress:
   total_phases: 10
-  completed_phases: 1
-  total_plans: 30
-  completed_plans: 13
-  percent: 10
+  completed_phases: 0
+  total_plans: 31
+  completed_plans: 14
+  percent: 0
 ---
 
 # Project State
@@ -29,12 +30,13 @@ See: .planning/PROJECT.md (updated 2026-10-08 — started v0.10.0 Statistical Co
 
 ## Current Position
 
-Phase: 11 (Upstream anofox-forecast Correctness Fixes) — READY TO EXECUTE
-Plan: Not started
+Phase: 11 (Upstream anofox-forecast Correctness Fixes) — EXECUTING
+Current Plan: 2
+Total Plans in Phase: 10
 Status: Ready to execute
-Last activity: 2026-10-09 — Phase 10 complete, transitioned to Phase 11
+Last activity: 2026-10-09 — Phase 11 Plan 01 complete (base ref + baseline)
 
-Progress: [█░░░░░░░░░] 10%
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -69,6 +71,7 @@ Progress: [█░░░░░░░░░] 10%
 | Phase 10 P08 | ~1h | 3 tasks | 16 files |
 | Phase 10 P09 | ~1h | 2 tasks | 25 files |
 | Phase 10 P10 | 50min | 3 tasks | 15 files |
+| Phase 11 P01 | ~20min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -108,6 +111,8 @@ Recent decisions affecting current work:
 - [Phase 10]: [Phase 10 P09]: Phase-wide sweep reworded 53 '(being corrected in v0.10.0, Phase N)' notes across 13 out-of-scope docs/skills files to '(tracked for Phase N)' per the plan's explicit sweep instruction
 - [Phase 10]: ts_forecast_agg now validates/threads params via a shared ts_forecast_params.hpp header, provably identical to ts_forecast_by (FCST-06 closed)
 - [Phase 10]: Theta/CrostonClassic identical fitted arrays confirmed as genuine anofox-forecast 0.15.10 behaviour (not a wrapper bug), pinned by a Rust test, routed to Phase 11 UPST-04
+- [Phase 11]: D-01a confirmed verbatim — branch from 1ae5cfc (released v0.15.10, unmerged perf/v1.0-validation-hardening); opened sync PR #220 to main, not merged
+- [Phase 11]: Pristine baseline on BASE_REF has 0 pre-existing test failures; one test-only clippy::approx_constant finding fixed and captured as 11-baseline-lint.patch (not committed upstream)
 
 ### Pending Todos
 
@@ -147,7 +152,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-09T18:54:36.544Z
-Stopped at: Phase 10 complete, ready to plan Phase 11
+Last session: 2026-10-09T20:26:26.586Z
+Stopped at: Completed 11-01-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 9`
