@@ -58,13 +58,13 @@ v0.9.0 (WASM Runtime Verification) is parked with only the operator live-CI nega
 - ✓ Ensemble introspection: `ts_ensemble_inspect_by` (members + weights) / `ts_auto_ensemble_inspect_by` (selected members + MSE score + rank) — v0.8.0 (INSP-01)
 
 - ✓ Reference-fixture harness (`validation/reference/`: R + uv-pinned Python generators → versioned JSON fixtures → Rust loader with value assertions) — v0.10.0 Phase 9 (TEST-01)
+- ✓ Forecast wrapper delegates intervals/fitted/residuals/model identity to the crate (no fabricated ±z·sd(series)·√h bands, no SES stand-in residuals); real ARIMA/SARIMA via arima_order/seasonal_order; crate exog fits; silent fallbacks → SQL errors on every surface incl. ts_forecast_agg — v0.10.0 Phase 10 (FCST-01..08)
 - ✓ anofox-regression =0.5.15 + anofox-forecast 0.15.10 (multi-scale exog OLS matches numpy lstsq; MFLES #219 + panel NaN guards); MSRV corrected to 1.89 — v0.10.0 Phase 9 (DEP-01/02/04)
 
 ### Active
 
 <!-- v0.10.0 Statistical Correctness — see REQUIREMENTS.md for REQ-IDs. -->
 
-- [ ] Forecast intervals/fitted/residuals come from the crate models, not wrapper approximations
 - [ ] All wrapper-level statistical bugs from the 2026-10-08 audit fixed with value-asserting tests
 - [ ] No statistical computation remains in C++ or SQL macros
 - [ ] Core statistics, features, detection and conformal outputs match R/scipy/tsfresh references
@@ -135,6 +135,7 @@ Deferred from v0.7.0 (candidates for a future milestone):
 | Verify executor/agent reports against git+disk, re-run every example against the built extension (v0.8.0) | Two executors fabricated commit hashes/SUMMARY files; three long-running agents died on transient API errors mid-run | ✓ Good — caught + reconciled all fabrications; per-task commits protected work across agent deaths |
 | Reference-fixture harness before any statistical fix (v0.10.0) | Length-only tests let every audited bug ship; fixes need checked-in R/scipy/numpy reference values | ✓ Good — Phase 9 fixtures regenerate byte-identically; 125-entry pre-bump snapshot proved only MFLES/Laplace moved |
 | MSRV 1.89 (v0.10.0) | trueno (via anofox-forecast) needs AVX-512 intrinsics stabilised in 1.89; 1.86 claim was false | ✓ Good — `cargo +1.88.0` refused, `+1.89.0` builds/tests; CI rust-msrv job |
+| Pass crate-native intervals through even where known-miscalibrated (v0.10.0 P10) | No fabrication; calibration fixed at the source (Phase 11 upstream) rather than masked in the wrapper | — Pending (Phase 11/17) |
 
 ## Evolution
 
@@ -154,4 +155,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-09 after v0.10.0 Phase 9*
+*Last updated: 2026-10-09 after v0.10.0 Phase 10*
