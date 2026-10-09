@@ -212,3 +212,107 @@ statement error
 SELECT * FROM ts_forecast_by('air', id, ds, y, 'MSTL', 12, '1mo', MAP{'seasonal_periods': '[12, abc]'});
 ----
 seasonal_periods
+
+#######################################
+# FCST-07: an explicit ['ETS', 'ETS'] ensemble (Mean) equals standalone 'ETS'
+# at every step (D-05/FCST-07) — build_forecaster's ETS arm uses the exact
+# same new_auto_ets constructor as the standalone path, so the Mean of two
+# identical members reproduces the standalone point exactly. model_name is
+# asserted against the ^ETS\([AM],(N|A|Ad),(N|A|M)\)$ pattern (the crate's
+# AICc search result), not a hardcoded spec string.
+#######################################
+
+query I
+SELECT count(*) FROM (
+    SELECT e.forecast_step, e.yhat AS e_yhat, s.yhat AS s_yhat
+    FROM ts_forecast_ensemble_by(
+        'air', id, ds, y, ['ETS', 'ETS'], 12, '1mo',
+        combination_method := 'mean', seasonal_period := 12
+    ) AS e
+    JOIN ts_forecast_by(
+        'air', id, ds, y, 'ETS', 12, '1mo', MAP{'seasonal_period': '12'}
+    ) AS s USING (forecast_step)
+)
+WHERE abs(e_yhat - s_yhat) > 1e-9;
+----
+0
+
+query I
+SELECT DISTINCT regexp_matches(model_name, '^ETS\([AM],(N|A|Ad),(N|A|M)\)$')
+FROM ts_forecast_by('air', id, ds, y, 'ETS', 12, '1mo', MAP{'seasonal_period': '12'});
+----
+true
+
+#######################################
+# FCST-01 (ensemble): yhat_lower/yhat_upper are the crate Ensemble's own
+# prediction interval — non-NULL and bracketing yhat at every step (D-01).
+#######################################
+
+query I
+SELECT count(*) FROM ts_forecast_ensemble_by(
+    'air', id, ds, y, ['ETS', 'ETS'], 12, '1mo',
+    combination_method := 'mean', seasonal_period := 12
+)
+WHERE yhat_lower IS NULL OR yhat_upper IS NULL OR NOT (yhat_lower < yhat AND yhat < yhat_upper);
+----
+0
+
+#######################################
+# FCST-06: AutoMFLES/AutoMSTL report the non-Auto family name exactly;
+# Kalman reports its spec in model_name; HoltWinters/Kalman/panel-Croston
+# misuse are clear SQL errors naming the offending parameter (D-06/D-07).
+#######################################
+
+query I
+SELECT DISTINCT model_name FROM ts_forecast_by('air', id, ds, y, 'AutoMSTL', 12, '1mo', MAP{'seasonal_period': '12'});
+----
+MSTL
+
+query I
+SELECT DISTINCT model_name FROM ts_forecast_by('air', id, ds, y, 'AutoMFLES', 12, '1mo', MAP{'seasonal_period': '12'});
+----
+MFLES
+
+query I
+SELECT DISTINCT model_name FROM ts_forecast_by('air', id, ds, y, 'Kalman', 12, '1mo', MAP{});
+----
+Kalman(local_level)
+
+statement ok
+CREATE TABLE ramp24 AS
+SELECT 'A' AS id,
+       ('2020-01-01'::DATE + (i || ' days')::INTERVAL)::DATE AS ds,
+       (100 + i * 2)::DOUBLE AS y
+FROM (SELECT unnest(range(24)) AS i);
+
+# HoltWinters on a 24-point linear ramp (no detectable seasonality), no
+# explicit seasonal_period -> hard error naming "seasonal period" (D-07) —
+# never a silent default of 12.
+statement error
+SELECT * FROM ts_forecast_by('ramp24', id, ds, y, 'HoltWinters', 5, '1d', MAP{});
+----
+seasonal period
+
+# Unknown kalman_model -> error naming kalman_model (D-07)
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'Kalman', 12, '1mo', MAP{'kalman_model': 'local_lvl'});
+----
+kalman_model
+
+# Misspelled panel croston_variant -> error naming croston_variant (D-07).
+# ts_forecast_panel_by requires >= 3 series for cross-series global
+# learning, so a 3-series panel is built here (the 'air' table above is a
+# single series).
+statement ok
+CREATE TABLE panel3 AS
+SELECT s.sid AS id, m.ds, (s.sid * 10 + m.i)::DOUBLE AS y
+FROM (VALUES (1), (2), (3)) AS s(sid)
+CROSS JOIN (
+    SELECT i, ('2020-01-01'::DATE + (i || ' months')::INTERVAL)::DATE AS ds
+    FROM range(12) AS t(i)
+) AS m;
+
+statement error
+SELECT * FROM ts_forecast_panel_by('panel3', id, ds, y, 'GlobalCroston', 4, '1mo', MAP{'croston_variant': 'sab'});
+----
+croston_variant

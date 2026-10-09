@@ -136,7 +136,7 @@ fn ensemble_of_two_ets_equals_standalone_ets() {
     let standalone = forecast(&values, &standalone_options).expect("standalone 'ETS' should fit");
 
     let members = vec!["ETS".to_string(), "ETS".to_string()];
-    let ensemble = forecast_explicit_ensemble(&values, 12, &members, Some("mean"), 12)
+    let ensemble = forecast_explicit_ensemble(&values, 12, &members, Some("mean"), 12, 0.90)
         .expect("['ETS', 'ETS'] ensemble should fit");
 
     assert_eq!(

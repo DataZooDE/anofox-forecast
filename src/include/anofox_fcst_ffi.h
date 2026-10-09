@@ -3547,8 +3547,10 @@ void anofox_free_var_forecast_result(struct VARForecastResult *result);
  *
  * Mirrors `anofox_ts_forecast` but dispatches to
  * `anofox_fcst_core::forecast_explicit_ensemble` rather than the single-model
- * `forecast()` path.  Point forecasts only in Phase 5; `lower_bounds` and
- * `upper_bounds` are always `null` (prediction intervals deferred to EPI-01).
+ * `forecast()` path. `lower_bounds`/`upper_bounds` are the crate `Ensemble`'s
+ * own `predict_with_intervals` bounds (pooled across members) at
+ * `confidence_level` (D-01, plan 10-03) — `null` only when the crate itself
+ * returns no bounds, matching every other forecast entry point's convention.
  *
  * # Safety
  * All pointer arguments must be valid for the stated lengths: `values`/`validity`
@@ -3565,6 +3567,7 @@ bool anofox_ts_forecast_ensemble(const double *values,
                                  const char *combination_method,
                                  int seasonal_period,
                                  int horizon,
+                                 double confidence_level,
                                  struct ForecastResult *out_result,
                                  struct AnofoxError *out_error);
 

@@ -8297,8 +8297,10 @@ mod var_ffi_tests {
 ///
 /// Mirrors `anofox_ts_forecast` but dispatches to
 /// `anofox_fcst_core::forecast_explicit_ensemble` rather than the single-model
-/// `forecast()` path.  Point forecasts only in Phase 5; `lower_bounds` and
-/// `upper_bounds` are always `null` (prediction intervals deferred to EPI-01).
+/// `forecast()` path. `lower_bounds`/`upper_bounds` are the crate `Ensemble`'s
+/// own `predict_with_intervals` bounds (pooled across members) at
+/// `confidence_level` (D-01, plan 10-03) — `null` only when the crate itself
+/// returns no bounds, matching every other forecast entry point's convention.
 ///
 /// # Safety
 /// All pointer arguments must be valid for the stated lengths: `values`/`validity`
@@ -8316,6 +8318,7 @@ pub unsafe extern "C" fn anofox_ts_forecast_ensemble(
     combination_method: *const c_char, // C string, NULL or "" → "mean"
     seasonal_period: c_int,
     horizon: c_int,
+    confidence_level: c_double,
     out_result: *mut ForecastResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -8371,6 +8374,7 @@ pub unsafe extern "C" fn anofox_ts_forecast_ensemble(
             &member_names,
             method_opt.as_deref(),
             seasonal_period as usize,
+            confidence_level,
         )
     }));
 
@@ -8389,9 +8393,25 @@ pub unsafe extern "C" fn anofox_ts_forecast_ensemble(
                 Err(()) => return false,
             };
 
-            // Point-only in Phase 5 — NULL intervals (EPI-01 deferred to Phase 6)
-            (*out_result).lower_bounds = ptr::null_mut();
-            (*out_result).upper_bounds = ptr::null_mut();
+            // D-01 (plan 10-03): the crate Ensemble's own pooled prediction
+            // interval bounds — null only when the crate itself returns
+            // none (matching alloc_or_error's empty-vec convention).
+            (*out_result).lower_bounds = match alloc_or_error(
+                &forecast.lower,
+                out_error,
+                "Failed to allocate lower bounds",
+            ) {
+                Ok(ptr) => ptr,
+                Err(()) => return false,
+            };
+            (*out_result).upper_bounds = match alloc_or_error(
+                &forecast.upper,
+                out_error,
+                "Failed to allocate upper bounds",
+            ) {
+                Ok(ptr) => ptr,
+                Err(()) => return false,
+            };
 
             // No fitted values / residuals in ensemble path
             (*out_result).fitted_values = ptr::null_mut();

@@ -603,10 +603,11 @@ FROM (
     //   GARCH, Laplace, ARIMA, MFLES, AutoMFLES, MSTL, AutoMSTL, TBATS, AutoTBATS, AutoEnsemble.
     // Combination methods: 'mean' (default), 'median', 'weighted_mse',
     //   'inverse_aic', 'stacking', 'horizon_adaptive'.
-    // Prediction intervals (yhat_lower / yhat_upper) are NULL in Phase 5 — see Phase 6 (EPI-01).
+    // yhat_lower / yhat_upper are the crate Ensemble's own prediction
+    // interval at confidence_level (default 0.90) — D-01, plan 10-03.
     {"ts_forecast_ensemble_by",
      {"source", "group_col", "date_col", "target_col", "members", "horizon", "frequency", nullptr},
-     {{"combination_method", "''"}, {"seasonal_period", "0"}, {nullptr, nullptr}},
+     {{"combination_method", "''"}, {"seasonal_period", "0"}, {"confidence_level", "0.90"}, {nullptr, nullptr}},
 R"(
 SELECT group_col, forecast_step, ds, yhat, yhat_lower, yhat_upper, model_name
 FROM (
@@ -618,7 +619,8 @@ FROM (
                horizon,
                frequency,
                combination_method,
-               seasonal_period
+               seasonal_period,
+               confidence_level
            ), recursive := true)
     FROM query_table(source::VARCHAR)
     GROUP BY group_col
@@ -627,7 +629,7 @@ FROM (
     "Generates ensemble forecasts from explicitly named member models per series. "
     "members is a VARCHAR[] list (e.g. ['AutoARIMA','AutoETS','Naive']). "
     "combination_method: 'mean' (default), 'median', 'weighted_mse', 'inverse_aic', 'stacking', 'horizon_adaptive'. "
-    "yhat_lower and yhat_upper are NULL in Phase 5 (ensemble prediction intervals deferred to Phase 6, EPI-01).",
+    "yhat_lower / yhat_upper are the crate Ensemble's own prediction interval at confidence_level (default 0.90).",
     "SELECT * FROM ts_forecast_ensemble_by('sales', product_id, date, qty, ['AutoARIMA','AutoETS','Naive'], 12, '1d')",
     "forecasting"},
 

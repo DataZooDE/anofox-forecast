@@ -2861,34 +2861,6 @@ fn extract_forecast(
     })
 }
 
-/// Point-only variant of [`extract_forecast`] — calls `predict(horizon)`, never
-/// `predict_with_intervals`. Used exclusively by `forecast_explicit_ensemble`
-/// (explicit-member ensembles stay point-only in this plan; member-level interval
-/// support is plan 10-03's scope), so the returned `lower`/`upper` are always empty.
-fn extract_point_forecast(
-    model: &dyn Forecaster,
-    horizon: usize,
-    name_override: &str,
-) -> Result<ForecastOutput> {
-    let forecast = model.predict(horizon).map_err(|e| {
-        ForecastError::ComputationError(format!("{} predict failed: {}", name_override, e))
-    })?;
-
-    let point = forecast.primary().to_vec();
-
-    Ok(ForecastOutput {
-        point,
-        lower: vec![],
-        upper: vec![],
-        fitted: model.fitted_values().map(|v| v.to_vec()),
-        residuals: model.residuals().map(|v| v.to_vec()),
-        model_name: name_override.to_string(),
-        aic: None,
-        bic: None,
-        mse: None,
-    })
-}
-
 fn forecast_croston_classic(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = Croston::new();
@@ -3280,6 +3252,7 @@ pub fn forecast_explicit_ensemble(
     member_names: &[String],
     method_str: Option<&str>,
     period: usize,
+    confidence_level: f64,
 ) -> Result<ForecastOutput> {
     use anofox_forecast::models::ensemble::Ensemble;
 
@@ -3289,6 +3262,15 @@ pub fn forecast_explicit_ensemble(
             param: "members".to_string(),
             value: member_names.len().to_string(),
             reason: "at least 2 members are required for an ensemble".to_string(),
+        });
+    }
+
+    // 1b. Validate confidence_level (D-01, plan 10-03 Task 3)
+    if !(confidence_level > 0.0 && confidence_level < 1.0) {
+        return Err(ForecastError::InvalidParameter {
+            param: "confidence_level".to_string(),
+            value: confidence_level.to_string(),
+            reason: "must be in the open interval (0, 1)".to_string(),
         });
     }
 
@@ -3343,13 +3325,15 @@ pub fn forecast_explicit_ensemble(
     ens.fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("Ensemble fit failed: {}", e)))?;
     // model_name = "Ensemble" (plain, mirroring Phase 4's plain "AutoEnsemble").
-    // Point-only: explicit-member ensemble intervals are plan 10-03's scope —
-    // finalize_output is still used for the shared trailing-NULL alignment
-    // policy (D-12), with include_fitted/include_residuals forced false since
-    // the FFI ensemble path (anofox_ts_forecast_ensemble) always nulls those
-    // fields regardless of what this function returns.
+    // D-01 (plan 10-03 Task 3): lower/upper are the crate Ensemble's own
+    // predict_with_intervals bounds (pooled across members) at
+    // confidence_level — no longer hardcoded empty. finalize_output is still
+    // used for the shared trailing-NULL alignment policy (D-12), with
+    // include_fitted/include_residuals forced false since the FFI ensemble
+    // path (anofox_ts_forecast_ensemble) always nulls those fields
+    // regardless of what this function returns.
     let extended_horizon = horizon + prep.trail_trim;
-    let raw = extract_point_forecast(&ens, extended_horizon, "Ensemble")?;
+    let raw = extract_forecast(&ens, extended_horizon, confidence_level, "Ensemble")?;
     Ok(finalize_output(raw, &prep, horizon, false, false))
 }
 
@@ -5353,7 +5337,7 @@ mod tests {
         // 48-point linear series; ['AutoETS', 'Naive'] with Mean → horizon finite values
         let values: Vec<Option<f64>> = (0..48).map(|i| Some(100.0 + i as f64 * 2.0)).collect();
         let members = vec!["AutoETS".to_string(), "Naive".to_string()];
-        let result = forecast_explicit_ensemble(&values, 6, &members, Some("mean"), 0);
+        let result = forecast_explicit_ensemble(&values, 6, &members, Some("mean"), 0, 0.90);
         assert!(
             result.is_ok(),
             "explicit ensemble on clean series should succeed: {:?}",
@@ -5377,7 +5361,7 @@ mod tests {
         // This mirrors the main forecast() path behaviour for the all-None case.
         let values: Vec<Option<f64>> = vec![None; 10];
         let members = vec!["AutoETS".to_string(), "Naive".to_string()];
-        let result = forecast_explicit_ensemble(&values, 3, &members, None, 0);
+        let result = forecast_explicit_ensemble(&values, 3, &members, None, 0, 0.90);
         assert!(result.is_err(), "all-NULL input must return Err");
         // Accept either InsufficientData (empty after interpolation) or ComputationError
         // (NaN detected by ensemble fit); both surface as NULL rows via the FFI.
@@ -5394,7 +5378,7 @@ mod tests {
         // Series with only 2 observations must return InsufficientData (< 3 guard)
         let values: Vec<Option<f64>> = vec![Some(1.0), Some(2.0)];
         let members = vec!["AutoETS".to_string(), "Naive".to_string()];
-        let result = forecast_explicit_ensemble(&values, 3, &members, None, 0);
+        let result = forecast_explicit_ensemble(&values, 3, &members, None, 0, 0.90);
         assert!(result.is_err(), "2-observation series must return Err");
         match result.unwrap_err() {
             ForecastError::InsufficientData { needed, got } => {
@@ -5413,7 +5397,7 @@ mod tests {
         // Duplicate member names should not cause an error
         let values: Vec<Option<f64>> = (0..40).map(|i| Some(i as f64)).collect();
         let members = vec!["AutoETS".to_string(), "AutoETS".to_string()];
-        let result = forecast_explicit_ensemble(&values, 4, &members, None, 0);
+        let result = forecast_explicit_ensemble(&values, 4, &members, None, 0, 0.90);
         assert!(
             result.is_ok(),
             "duplicate members should be allowed: {:?}",
