@@ -7254,6 +7254,16 @@ pub unsafe extern "C" fn anofox_free_panel_forecast_result(result: *mut PanelFor
 // Panel FFI tests (Task 1)
 // ============================================================================
 
+// Shared std+serde_json-only fixture loader, reached via a relative
+// #[path] below from CARGO_MANIFEST_DIR (this crate's own directory) —
+// the same loader file anofox-fcst-core itself #[path]s in from its own
+// crate root, not a duplicate copy (09-03; see 09-RESEARCH.md Open
+// Question 2). repo_root() inside it resolves identically from either
+// crate, since both sit two directories below the workspace root.
+#[cfg(test)]
+#[path = "../../anofox-fcst-core/tests/common/mod.rs"]
+mod test_fixtures;
+
 #[cfg(test)]
 mod panel_ffi_tests {
     use super::*;
@@ -7469,6 +7479,126 @@ mod panel_ffi_tests {
                 i
             );
         }
+    }
+
+    /// DEP-02 proof point: every (case, method) in the panel_nan_guard
+    /// fixture gets exactly its fixture outcome — "finite" => Ok with
+    /// n_series rows of horizon all-finite values, "error" => Err. An
+    /// all-missing series reaches the model as all-NaN (fill_nulls_interpolate
+    /// leaves an all-None series NaN — see imputation.rs) and +inf is never
+    /// imputed, so the anofox-forecast >=0.15.9 global-model guards must
+    /// reject both rather than silently returning a zero/NaN forecast.
+    #[test]
+    fn panel_nan_guard_fixture_outcomes() {
+        let fx = crate::test_fixtures::load_fixture("panel_nan_guard/cases.json");
+        let horizon = crate::test_fixtures::num(&fx["parameters"]["horizon"]) as usize;
+        let seasonal_period =
+            crate::test_fixtures::num(&fx["parameters"]["seasonal_period"]) as usize;
+
+        let cases = fx["cases"]
+            .as_object()
+            .expect("panel_nan_guard/cases.json: 'cases' is not an object");
+
+        let mut mismatches: Vec<String> = Vec::new();
+
+        for (case_name, case) in cases {
+            let n_series = crate::test_fixtures::num(&case["n_series"]) as usize;
+            let series_len = crate::test_fixtures::num(&case["series_len"]) as usize;
+
+            let rows = case["values"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{case_name}: 'values' is not an array"));
+            let mut flat: Vec<f64> = Vec::with_capacity(n_series * series_len);
+            for row in rows {
+                let row_vals = crate::test_fixtures::f64_vec(row);
+                assert_eq!(
+                    row_vals.len(),
+                    series_len,
+                    "{case_name}: series row has length {}, want series_len={series_len}",
+                    row_vals.len()
+                );
+                flat.extend(row_vals);
+            }
+            assert_eq!(
+                flat.len(),
+                n_series * series_len,
+                "{case_name}: flattened length {} != n_series*series_len={}",
+                flat.len(),
+                n_series * series_len
+            );
+
+            let expect = case["expect"]
+                .as_object()
+                .unwrap_or_else(|| panic!("{case_name}: 'expect' is not an object"));
+
+            for (method, outcome) in expect {
+                let want_outcome = outcome.as_str().unwrap_or_else(|| {
+                    panic!("{case_name}.{method}: 'expect' value is not a string")
+                });
+
+                let result = forecast_panel_impl(
+                    &flat,
+                    n_series,
+                    series_len,
+                    method,
+                    horizon,
+                    seasonal_period,
+                    None,
+                    None,
+                );
+
+                match (want_outcome, &result) {
+                    ("finite", Ok(preds)) => {
+                        if preds.len() != n_series {
+                            mismatches.push(format!(
+                                "{case_name}.{method}: expected {n_series} series rows, got {}",
+                                preds.len()
+                            ));
+                            continue;
+                        }
+                        for (s, row) in preds.iter().enumerate() {
+                            if row.len() != horizon {
+                                mismatches.push(format!(
+                                    "{case_name}.{method}: series {s} has {} values, want horizon={horizon}",
+                                    row.len()
+                                ));
+                                continue;
+                            }
+                            if let Some((h, v)) =
+                                row.iter().enumerate().find(|(_, v)| !v.is_finite())
+                            {
+                                mismatches.push(format!(
+                                    "{case_name}.{method}: series {s} step {h} is non-finite: {v}"
+                                ));
+                            }
+                        }
+                    }
+                    ("finite", Err(e)) => {
+                        mismatches.push(format!(
+                            "{case_name}.{method}: expected finite, got Err: {e}"
+                        ));
+                    }
+                    ("error", Ok(preds)) => {
+                        mismatches.push(format!(
+                            "{case_name}.{method}: expected error, got Ok: {preds:?}"
+                        ));
+                    }
+                    ("error", Err(_)) => {}
+                    (other, _) => {
+                        mismatches.push(format!(
+                            "{case_name}.{method}: unexpected expect value {other:?}"
+                        ));
+                    }
+                }
+            }
+        }
+
+        assert!(
+            mismatches.is_empty(),
+            "panel_nan_guard_fixture_outcomes: {} mismatch(es):\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
     }
 }
 

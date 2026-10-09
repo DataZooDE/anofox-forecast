@@ -389,9 +389,7 @@ fn strict_compare(
     let want_name = fixture_entry["model_name"].as_str().unwrap_or("");
     let got_name = recomputed_entry["model_name"].as_str().unwrap_or("");
     if want_name != got_name {
-        violations.push(format!(
-            "{key}: model_name {want_name:?} -> {got_name:?}"
-        ));
+        violations.push(format!("{key}: model_name {want_name:?} -> {got_name:?}"));
     }
 
     let want_point = f64_vec(&fixture_entry["point"]);
@@ -492,8 +490,7 @@ fn point_forecasts_match_snapshot() {
         allowed_to_change.insert(
             "Laplace".to_string(),
             Value::String(
-                "anofox-forecast 0.15.7 Laplace leaf fixes and 0.15.9 NaN/Inf guards"
-                    .to_string(),
+                "anofox-forecast 0.15.7 Laplace leaf fixes and 0.15.9 NaN/Inf guards".to_string(),
             ),
         );
 
@@ -564,14 +561,8 @@ fn point_forecasts_match_snapshot() {
     let fixture_keys: BTreeSet<&str> = fixture_entries.keys().map(|k| k.as_str()).collect();
     let recomputed_keys: BTreeSet<&str> = entries.keys().map(|k| k.as_str()).collect();
     if fixture_keys != recomputed_keys {
-        let added: Vec<&str> = recomputed_keys
-            .difference(&fixture_keys)
-            .copied()
-            .collect();
-        let removed: Vec<&str> = fixture_keys
-            .difference(&recomputed_keys)
-            .copied()
-            .collect();
+        let added: Vec<&str> = recomputed_keys.difference(&fixture_keys).copied().collect();
+        let removed: Vec<&str> = fixture_keys.difference(&recomputed_keys).copied().collect();
         panic!(
             "point_forecasts_match_snapshot: entry key set changed (re-bless deliberately if \
              this is intended) added={added:?} removed={removed:?}"
