@@ -2,6 +2,7 @@
 #include "anofox_fcst_ffi.h"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
+#include "ts_list_marshal.hpp"
 
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/common/vector_operations/generic_executor.hpp"
@@ -41,21 +42,25 @@ static void TsMaeFunction(DataChunk &args, ExpressionState &state, Vector &resul
     result.SetVectorType(VectorType::FLAT_VECTOR);
     auto result_data = FlatVector::GetData<double>(result);
 
+    ListDoubleReader actual_reader(actual_vec, count);
+    ListDoubleReader forecast_reader(forecast_vec, count);
+    vector<double> actual, forecast;
+    vector<uint64_t> actual_validity, forecast_validity;
+
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(forecast_vec, row_idx)) {
+        if (actual_reader.IsNull(row_idx) || forecast_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> actual, forecast;
-        ExtractListAsDouble(actual_vec, row_idx, actual);
-        ExtractListAsDouble(forecast_vec, row_idx, forecast);
+        actual_reader.Read(row_idx, actual, actual_validity);
+        forecast_reader.Read(row_idx, forecast, forecast_validity);
 
         AnofoxError error;
         double mae_result;
         bool success = anofox_ts_mae(
-            actual.data(), actual.size(),
-            forecast.data(), forecast.size(),
+            actual.data(), actual_validity.empty() ? nullptr : actual_validity.data(), actual.size(),
+            forecast.data(), forecast_validity.empty() ? nullptr : forecast_validity.data(), forecast.size(),
             &mae_result, &error
         );
 

@@ -186,8 +186,8 @@ static double ComputeMetric(TsMetricType type, const vector<double> &actuals,
 
     switch (type) {
         case TsMetricType::MAE:
-            success = anofox_ts_mae(actuals.data(), actuals.size(),
-                                    forecasts.data(), forecasts.size(),
+            success = anofox_ts_mae(actuals.data(), nullptr, actuals.size(),
+                                    forecasts.data(), nullptr, forecasts.size(),
                                     &result, &error);
             break;
         case TsMetricType::MSE:

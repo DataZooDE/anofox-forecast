@@ -2013,11 +2013,15 @@ bool anofox_ts_stats_with_dates_and_type(const double *values,
  * Mean Absolute Error
  *
  * # Safety
- * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ * All pointer arguments must be valid and non-null (except the two `*_validity`
+ * pointers, which may be null to mean "all valid"). Arrays must have the specified
+ * lengths.
  */
 bool anofox_ts_mae(const double *actual,
+                   const uint64_t *actual_validity,
                    size_t actual_len,
                    const double *forecast,
+                   const uint64_t *forecast_validity,
                    size_t forecast_len,
                    double *out_result,
                    struct AnofoxError *out_error);

@@ -340,11 +340,16 @@ pub unsafe extern "C" fn anofox_ts_stats_with_dates_and_type(
 // Metric Functions
 // ============================================================================
 
-// Helper for 2-argument metric functions
+// Helper for 2-argument metric functions. `actual_validity`/`forecast_validity` may each
+// be null (all valid). Pairs are dropped via `anofox_fcst_core::complete_cases` (D-02)
+// before the core metric is computed; an empty filtered result flows into the core
+// metric's own InsufficientData error, which we remap to ErrorCode::InsufficientData.
 unsafe fn impl_metric_2arg<F>(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     forecast: *const c_double,
+    forecast_validity: *const u64,
     forecast_len: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
@@ -366,9 +371,18 @@ where
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let actual_vec = std::slice::from_raw_parts(actual, actual_len).to_vec();
-        let forecast_vec = std::slice::from_raw_parts(forecast, forecast_len).to_vec();
-        core_fn(&actual_vec, &forecast_vec)
+        let actual_series = build_series(actual, actual_validity, actual_len);
+        let forecast_series = build_series(forecast, forecast_validity, forecast_len);
+        if actual_series.len() != forecast_series.len() {
+            return Err(anofox_fcst_core::ForecastError::InvalidInput(format!(
+                "arrays must have the same length: {} vs {}",
+                actual_series.len(),
+                forecast_series.len()
+            )));
+        }
+        let filtered =
+            anofox_fcst_core::complete_cases(&[&actual_series, &forecast_series])?;
+        core_fn(&filtered[0], &filtered[1])
     }));
 
     match result {
@@ -377,7 +391,12 @@ where
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            let code = if matches!(e, anofox_fcst_core::ForecastError::InsufficientData { .. }) {
+                ErrorCode::InsufficientData
+            } else {
+                ErrorCode::ComputationError
+            };
+            set_error(out_error, code, &e.to_string());
             false
         }
         Err(_) => {
@@ -390,20 +409,26 @@ where
 /// Mean Absolute Error
 ///
 /// # Safety
-/// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+/// All pointer arguments must be valid and non-null (except the two `*_validity`
+/// pointers, which may be null to mean "all valid"). Arrays must have the specified
+/// lengths.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_mae(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     forecast: *const c_double,
+    forecast_validity: *const u64,
     forecast_len: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
     impl_metric_2arg(
         actual,
+        actual_validity,
         actual_len,
         forecast,
+        forecast_validity,
         forecast_len,
         out_result,
         out_error,
@@ -426,8 +451,10 @@ pub unsafe extern "C" fn anofox_ts_mse(
 ) -> bool {
     impl_metric_2arg(
         actual,
+        std::ptr::null(),
         actual_len,
         forecast,
+        std::ptr::null(),
         forecast_len,
         out_result,
         out_error,
@@ -450,8 +477,10 @@ pub unsafe extern "C" fn anofox_ts_rmse(
 ) -> bool {
     impl_metric_2arg(
         actual,
+        std::ptr::null(),
         actual_len,
         forecast,
+        std::ptr::null(),
         forecast_len,
         out_result,
         out_error,
@@ -474,8 +503,10 @@ pub unsafe extern "C" fn anofox_ts_mape(
 ) -> bool {
     impl_metric_2arg(
         actual,
+        std::ptr::null(),
         actual_len,
         forecast,
+        std::ptr::null(),
         forecast_len,
         out_result,
         out_error,
@@ -498,8 +529,10 @@ pub unsafe extern "C" fn anofox_ts_smape(
 ) -> bool {
     impl_metric_2arg(
         actual,
+        std::ptr::null(),
         actual_len,
         forecast,
+        std::ptr::null(),
         forecast_len,
         out_result,
         out_error,
@@ -522,8 +555,10 @@ pub unsafe extern "C" fn anofox_ts_r2(
 ) -> bool {
     impl_metric_2arg(
         actual,
+        std::ptr::null(),
         actual_len,
         forecast,
+        std::ptr::null(),
         forecast_len,
         out_result,
         out_error,
@@ -546,8 +581,10 @@ pub unsafe extern "C" fn anofox_ts_bias(
 ) -> bool {
     impl_metric_2arg(
         actual,
+        std::ptr::null(),
         actual_len,
         forecast,
+        std::ptr::null(),
         forecast_len,
         out_result,
         out_error,
