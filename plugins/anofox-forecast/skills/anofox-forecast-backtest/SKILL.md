@@ -24,6 +24,7 @@ Time-series-aware cross-validation, error metrics, and distribution-free interva
 - **Always `ORDER BY` inside `LIST()`** for temporal correctness: `LIST(y ORDER BY ds)`, not `LIST(y)`.
 - **`ts_cv_forecast_by` output renames the target column to `y`** (canonical). Don't try to access the original name.
 - **Folds must be pre-computed before forecasting.** Passing raw data to `ts_cv_forecast_by` throws a clear error.
+- **Metrics use pairwise-complete NULL handling (v0.10.0, Phase 12).** `ts_mae`/`ts_mse`/`ts_rmse`/`ts_mape`/`ts_smape`/`ts_r2`/`ts_bias`/`ts_rmae`/`ts_mase`/`ts_quantile_loss`/`ts_mqloss`/`ts_coverage` drop a pair (or row, for 3+ input metrics) the moment ANY input is NULL at that position, computed in Rust — not spliced independently per array in C++. No complete pair/row → `NULL`, not an error.
 
 ## The CV two-step workflow (standard)
 

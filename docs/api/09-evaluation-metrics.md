@@ -14,6 +14,20 @@ Metrics functions evaluate forecast accuracy by comparing actual values to predi
 - Evaluate prediction intervals with coverage and quantile loss
 - Compare forecast quality across series or models
 
+**NULL handling (v0.10.0, Phase 12, RUST-01/RUST-02):** paired metrics (`ts_mae`,
+`ts_mse`, `ts_rmse`, `ts_mape`, `ts_smape`, `ts_r2`, `ts_bias`, `ts_rmae`, `ts_mase`,
+`ts_quantile_loss`, `ts_mqloss`, `ts_coverage`) compute on **pairwise-complete
+observations**, computed in Rust from a validity bitmask — a pair (or, for
+three-/four-input metrics like `ts_mase`/`ts_rmae`/`ts_coverage`/`ts_mqloss`, a row) is
+dropped the moment ANY of its inputs is NULL at that position; `ts_mae([1,NULL,3,4],
+[1,2,NULL,4])` is `0.0` (not the old spliced `0.333`). If no complete pair/row remains,
+the result is `NULL`, not an error. Mismatched input-array lengths still return `NULL`.
+`ts_mqloss`'s `levels` argument is a *parameter* list, not data — a NULL quantile level
+is a SQL error naming its position, not a missing-data case. Constant/literal list
+arguments (e.g. `ts_mae(a, [0,0,0])` broadcast across every row of a table) now give the
+correct result on every row, not just the first row of a chunk. The `ts_*_by` table-macro
+surface (`_ts_metrics_native`) is pairwise-complete identically to the scalar functions.
+
 ---
 
 ## Quick Start

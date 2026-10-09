@@ -852,6 +852,10 @@ pub unsafe extern "C" fn anofox_ts_mqloss(
         let levels_vec = std::slice::from_raw_parts(levels, n_levels).to_vec();
 
         let mut total_loss = 0.0;
+        // `i` indexes raw pointer arithmetic (`quantiles.add(i)`,
+        // `quantiles_validity.add(i)`) alongside `levels_vec[i]`; an iterator
+        // can't express the pointer-offset access, so a range loop is correct here.
+        #[allow(clippy::needless_range_loop)]
         for i in 0..n_levels {
             let quantile_ptr = *quantiles.add(i);
             if quantile_ptr.is_null() {

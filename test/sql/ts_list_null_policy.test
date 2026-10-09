@@ -1,0 +1,144 @@
+# name: test/sql/ts_list_null_policy.test
+# description: Phase 12 RUST-01/RUST-02 list marshalling + pairwise-complete metric NULL policy
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Pairwise-complete NULL policy (D-02)
+#######################################
+
+# ts_mae: pairs with a NULL on either side are dropped (pairwise-complete), not
+# spliced independently per array. Complete pairs: (1,1) and (4,4) -> MAE=0.
+query I
+SELECT ts_mae([1, NULL, 3, 4]::DOUBLE[], [1, 2, NULL, 4]::DOUBLE[]);
+----
+0.0
+
+# ts_mse/ts_rmse/ts_bias: complete pairs (1,2) and (4,6).
+query I
+SELECT ts_mse([1, NULL, 3, 4]::DOUBLE[], [2, 2, NULL, 6]::DOUBLE[]);
+----
+2.5
+
+query I
+SELECT ts_rmse([1, NULL, 3, 4]::DOUBLE[], [2, 2, NULL, 6]::DOUBLE[]);
+----
+1.5811388300841898
+
+query I
+SELECT ts_bias([1, NULL, 3, 4]::DOUBLE[], [2, 2, NULL, 6]::DOUBLE[]);
+----
+1.5
+
+# ts_mape: complete pairs (1,2) and (2,3) -> errors 100%, 50% -> mean 75%.
+query I
+SELECT ts_mape([1, NULL, 4, 2]::DOUBLE[], [2, 2, NULL, 3]::DOUBLE[]);
+----
+75.0
+
+# ts_r2: complete triples drop index 3 (actual NULL).
+query I
+SELECT ts_r2([1, 2, 3, NULL]::DOUBLE[], [1, 2, 4, 9]::DOUBLE[]);
+----
+0.5
+
+# ts_mase/ts_rmae: complete across all three columns drops index 1 (baseline NULL).
+query I
+SELECT ts_mase([1, 2, 3, 4]::DOUBLE[], [1, 2, 3, 5]::DOUBLE[], [2, NULL, 4, 5]::DOUBLE[]);
+----
+0.3333333333333333
+
+query I
+SELECT ts_rmae([1, 2, 3, 4]::DOUBLE[], [1, 2, 3, 5]::DOUBLE[], [2, NULL, 4, 5]::DOUBLE[]);
+----
+0.3333333333333333
+
+# ts_coverage: complete triples drop index 1 (lower NULL).
+query I
+SELECT ts_coverage([1, 2, 3]::DOUBLE[], [0, NULL, 4]::DOUBLE[], [2, 3, 5]::DOUBLE[]);
+----
+0.5
+
+# ts_quantile_loss: complete pairs drop index 1 (actual NULL).
+query I
+SELECT ts_quantile_loss([1, NULL, 3]::DOUBLE[], [2, 2, 2]::DOUBLE[], 0.5);
+----
+0.5
+
+# ts_mqloss: complete pairs per level drop index 2 (actual NULL) -> 0.1 at both levels.
+query I
+SELECT abs(ts_mqloss([1, 2, NULL]::DOUBLE[], [[0, 1, 2], [2, 3, 4]]::DOUBLE[][], [0.1, 0.9]::DOUBLE[]) - 0.1) < 1e-9;
+----
+true
+
+# No complete pair -> NULL (D-04), not an error.
+query I
+SELECT ts_mae([NULL, 1]::DOUBLE[], [1, NULL]::DOUBLE[]) IS NULL;
+----
+true
+
+# mqloss levels is a PARAMETER list — a NULL level is a user error, not
+# missing data.
+statement error
+SELECT ts_mqloss([1, 2]::DOUBLE[], [[0, 1], [2, 3]]::DOUBLE[][], [0.1, NULL]::DOUBLE[]);
+----
+levels must not contain NULL
+
+#######################################
+# Constant/dictionary list marshalling (D-01)
+#######################################
+
+statement ok
+CREATE TABLE five AS SELECT i, [i, i + 1, i + 2]::DOUBLE[] AS a FROM range(5) t(i);
+
+# Constant second argument broadcast across every row: previously only row 0
+# was correct, rows 1-4 returned NULL/garbage.
+query II
+SELECT i, ts_mae(a, [0, 0, 0]::DOUBLE[]) FROM five ORDER BY i;
+----
+0	1.0
+1	2.0
+2	3.0
+3	4.0
+4	5.0
+
+# Constant first argument broadcast across every row.
+query I
+SELECT count(*) FROM five
+WHERE ts_mse([0, 0, 0]::DOUBLE[], a) = (i * i + (i + 1) * (i + 1) + (i + 2) * (i + 2)) / 3.0;
+----
+5
+
+# Cross-joined single-row list forces a dictionary/constant vector on the
+# second argument.
+query I
+SELECT count(*) FROM five, (SELECT [0, 0, 0]::DOUBLE[] AS b)
+WHERE abs(ts_rmse(a, b) - sqrt((i * i + (i + 1) * (i + 1) + (i + 2) * (i + 2)) / 3.0)) < 1e-12;
+----
+5
+
+# Constant NULL list broadcast across every row -> NULL on every row.
+query I
+SELECT count(*) FROM five WHERE ts_mae(a, NULL::DOUBLE[]) IS NULL;
+----
+5
+
+#######################################
+# Table surface parity (_ts_metrics_native == scalar)
+#######################################
+
+statement ok
+CREATE TABLE mres(id VARCHAR, ds DATE, y DOUBLE, forecast DOUBLE);
+
+statement ok
+INSERT INTO mres VALUES
+    ('A', '2024-01-01', 1.0, 1.0),
+    ('A', '2024-01-02', NULL, 2.0),
+    ('A', '2024-01-03', 3.0, NULL),
+    ('A', '2024-01-04', 4.0, 4.0);
+
+query II
+SELECT id, mae FROM ts_mae_by((SELECT id, ds, y, forecast FROM mres), 'ds', 'y', 'forecast') ORDER BY id;
+----
+A	0.0

@@ -77,6 +77,18 @@ use the semver numbering this project started with.
   fields `lower_<pct>`/`upper_<pct>` after the requested `confidence_level` (default
   `lower_90`/`upper_90` unchanged; `confidence_level` must be a constant expression —
   previously hardcoded to `0.90` regardless of the params MAP).
+- **Paired metrics use pairwise-complete observations, computed in Rust, not spliced in
+  C++ (RUST-01/RUST-02, Phase 12).** `ts_mae`, `ts_mse`, `ts_rmse`, `ts_mape`, `ts_smape`,
+  `ts_r2`, `ts_bias`, `ts_rmae`, `ts_mase`, `ts_quantile_loss`, `ts_mqloss`, `ts_coverage`
+  previously extracted each list argument's NULLs independently in C++ before calling the
+  FFI, silently misaligning pairs — `ts_mae([1,NULL,3,4],[1,2,NULL,4])` returned `0.333`
+  (treating the arrays as `[1,3,4]` vs `[1,2,4]`). It now returns `0.0`: a pair (or row, for
+  3+ input metrics) is dropped the moment ANY input is NULL at that position, via a
+  validity bitmask passed through the FFI into a new Rust missing-data policy module
+  (`anofox-fcst-core::missing`). No complete pair/row remaining returns SQL `NULL`, not an
+  error; mismatched lengths still return `NULL`. `ts_mqloss`'s `levels` parameter is NOT
+  data — a NULL level is now a hard SQL error naming its position. The `ts_*_by` metric
+  macros (`_ts_metrics_native`) are now identical to the scalars on the same data.
 
 ### Added
 
@@ -104,6 +116,12 @@ use the semver numbering this project started with.
   zeroed ensemble-specific params (`ensemble_top_k`/`ensemble_method`), which could
   dereference null bounds downstream; verified running end-to-end against the built
   extension.
+- List arguments are read correctly for every row (Phase 12, D-01). Metric scalar functions
+  (and `ts_data_quality`) now read `LIST(DOUBLE)` arguments via `ToUnifiedFormat` on both the
+  list vector and its child vector (the shared `src/include/ts_list_marshal.hpp` reader);
+  previously a literal/constant list argument (e.g. `ts_mae(a, [0,0,0])` broadcast across a
+  table) was only read correctly on the first row of a chunk and returned `NULL`/garbage on
+  every subsequent row.
 
 ## [2026.09.26] - 2026-09-26
 
