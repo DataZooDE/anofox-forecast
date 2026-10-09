@@ -20,6 +20,13 @@ The extension provides 36 forecasting models ranging from simple baselines to so
 Generate forecasts for multiple series with a single call:
 
 ```sql
+CREATE OR REPLACE TABLE sales_data AS
+SELECT product_id,
+       (DATE '2024-01-01' + INTERVAL (i) DAY) AS date,
+       100.0 + product_id * 10.0 + 0.5 * i + 15.0 * sin(2 * pi() * i / 7.0) AS revenue
+FROM range(0, 60) t(i)
+CROSS JOIN (SELECT unnest([1, 2]) AS product_id);
+
 -- Forecast 14 days ahead for all products using HoltWinters with weekly seasonality
 SELECT * FROM ts_forecast_by(
     'sales_data',              -- source: table name (quoted string)
@@ -37,24 +44,47 @@ Compare multiple models:
 
 ```sql
 -- Naive baseline (no params needed)
-SELECT *, 'Naive' AS model FROM ts_forecast_by('sales', id, date, val, 'Naive', 7, '1d', MAP{})
+SELECT *, 'Naive' AS model FROM ts_forecast_by('sales_data', product_id, date, revenue, 'Naive', 7, '1d', MAP{})
 UNION ALL
 -- HoltWinters with weekly seasonality
-SELECT *, 'HoltWinters' AS model FROM ts_forecast_by('sales', id, date, val, 'HoltWinters', 7, '1d', MAP{'seasonal_period': '7'});
+SELECT *, 'HoltWinters' AS model FROM ts_forecast_by('sales_data', product_id, date, revenue, 'HoltWinters', 7, '1d', MAP{'seasonal_period': '7'});
 ```
 
 ### Handling Seasonality
 
 > **Note:** When both `seasonal_period` and `seasonal_periods` are omitted, `ts_forecast_by`
 > (and `ts_cv_forecast_by`, plus the scalar paths) auto-detects the seasonal period internally
-> via `detect_seasonality` and uses the first detected period (falling back to 1 if none is
-> found). `ts_forecast_agg` does **not** auto-detect. Passing `seasonal_period` explicitly is
-> still recommended below — it gives you control and reproducibility over what auto-detection
-> would otherwise pick silently.
+> via `detect_seasonality`. For models that can run non-seasonally (`ETS`, `AutoETS`,
+> `ARIMA`/`AutoARIMA`, the Theta family, `MFLES`), a period that can't be detected falls back
+> to non-seasonal (period 1) — detection is a convenience, not a requirement. For models that
+> **require** a seasonal period to exist at all (`SeasonalNaive`, `SeasonalWindowAverage`,
+> `HoltWinters`, `SeasonalES`, `SeasonalESOptimized`, `MSTL`, `AutoMSTL`, `TBATS`, `AutoTBATS`),
+> a period that can't be detected is a hard SQL error naming the model — there is no silent
+> default of 12 or 2. `ts_forecast_agg` does **not** auto-detect at all; omitting the period
+> for a period-requiring model there is always an error. Passing `seasonal_period` explicitly
+> is still recommended below — it gives you control and reproducibility over what
+> auto-detection would otherwise pick silently.
 
 **Step 1: Detect seasonality**
+
+> `ts_detect_periods_by` has a known bug (tracked by the `anofox-forecast-detection`
+> skill): the `_by` table macro returns an all-NULL row (`periods`, `n_periods`,
+> `primary_period` all `NULL`) on clean, multi-cycle data. The `GROUP BY` aggregate
+> form, `ts_detect_periods_agg`, does not have this bug — use it until the macro is
+> fixed (out of scope for this phase; see `docs/api/05a-decomposition.md` / the
+> detection skill).
+
 ```sql
-SELECT * FROM ts_detect_periods_by('daily_sales', product_id, date, value, MAP{});
+CREATE OR REPLACE TABLE daily_sales AS
+SELECT product_id,
+       (DATE '2024-01-01' + INTERVAL (i) DAY) AS date,
+       50.0 + product_id * 5.0 + 6.0 * sin(2 * pi() * i / 7.0) AS value
+FROM range(0, 130) t(i)
+CROSS JOIN (SELECT unnest([1, 2]) AS product_id);
+
+-- Reliable path (ts_detect_periods_agg, GROUP BY aggregate):
+SELECT product_id, round(ts_detect_periods_agg(date, value, 'fft').primary_period) AS primary_period
+FROM daily_sales GROUP BY product_id;
 -- Returns: primary_period = 7 (weekly pattern detected)
 ```
 
@@ -79,8 +109,8 @@ SELECT * FROM ts_cv_forecast_by(
 **Combined workflow** (detect and forecast in one query):
 ```sql
 WITH detected AS (
-    SELECT (periods).primary_period AS season
-    FROM ts_detect_periods_by('daily_sales', product_id, date, value, MAP{})
+    SELECT round(ts_detect_periods_agg(date, value, 'fft').primary_period) AS season
+    FROM daily_sales
     LIMIT 1
 )
 SELECT * FROM ts_forecast_by(
@@ -101,14 +131,16 @@ auto-detection can produce unexpected results. By separating detection from fore
 End-to-end example showing data preparation through forecasting:
 
 ```sql
--- Step 1: Check data quality
-SELECT id, (stats).length, (stats).n_nulls
+-- Step 1: Check data quality (ts_stats_by returns flat columns, not a STRUCT)
+SELECT product_id, length, n_nulls
 FROM ts_stats_by('daily_sales', product_id, date, revenue, '1d');
 -- Review: check for NULLs, gaps, and series length
 
--- Step 2: Detect seasonality (explicit control)
-SELECT id, (periods).primary_period AS period
-FROM ts_detect_periods_by('daily_sales', product_id, date, revenue, MAP{});
+-- Step 2: Detect seasonality (explicit control; ts_detect_periods_by's _by form
+-- returns NULL on this data due to a known detection bug -- see the Handling
+-- Seasonality note above -- so use the aggregate form)
+SELECT product_id, round(ts_detect_periods_agg(date, revenue, 'fft').primary_period) AS period
+FROM daily_sales GROUP BY product_id;
 -- Example output: period = 7 (weekly pattern)
 
 -- Step 3: Forecast with detected period
@@ -159,8 +191,8 @@ documented in their own sections because of their distinct parameter/output shap
 |-------|-------------|----------|----------|
 | `Naive` | Last value repeated | — | — |
 | `SMA` | Simple Moving Average | — | *window* (default: 5) |
-| `SeasonalNaive` | Last season repeated | **seasonal_period** | — |
-| `SeasonalWindowAverage` | Average of same seasonal position over a sliding window | **seasonal_period** | — |
+| `SeasonalNaive` | Last season repeated | — | *seasonal_period* (auto-detected if omitted; errors if none found) |
+| `SeasonalWindowAverage` | Average of same seasonal position over a sliding window | — | *seasonal_period* (auto-detected if omitted; errors if none found) |
 | `SES` | Simple Exponential Smoothing | — | — (fixed alpha, not SQL-configurable) |
 | `SESOptimized` | Optimized SES | — | — |
 | `RandomWalkDrift` | Random walk with drift | — | — |
@@ -169,9 +201,9 @@ documented in their own sections because of their distinct parameter/output shap
 | Model | Description | Required | Optional |
 |-------|-------------|----------|----------|
 | `Holt` | Holt's linear trend method | — | — (fixed smoothing, not SQL-configurable) |
-| `HoltWinters` | Holt-Winters seasonal method | **seasonal_period** | — (fixed smoothing, not SQL-configurable) |
-| `SeasonalES` | Seasonal Exponential Smoothing | **seasonal_period** | — (fixed smoothing, not SQL-configurable) |
-| `SeasonalESOptimized` | Optimized Seasonal ES | **seasonal_period** | — |
+| `HoltWinters` | Holt-Winters seasonal method | — | *seasonal_period* (auto-detected if omitted; errors if none found); fixed smoothing, not SQL-configurable |
+| `SeasonalES` | Seasonal Exponential Smoothing | — | *seasonal_period* (auto-detected if omitted; errors if none found); fixed smoothing, not SQL-configurable |
+| `SeasonalESOptimized` | Optimized Seasonal ES | — | *seasonal_period* (auto-detected if omitted; errors if none found) |
 
 ### Theta Methods (5)
 | Model | Description | Optional |
@@ -185,20 +217,45 @@ documented in their own sections because of their distinct parameter/output shap
 ### State Space & ARIMA Models (4)
 | Model | Description | Required | Optional |
 |-------|-------------|----------|----------|
-| `ETS` | Error-Trend-Seasonal model | — | *seasonal_period*, *model* (default: HoltWinters/Holt/SES fallback, not `'AAA'`) |
-| `AutoETS` | Automatic ETS selection; silently falls back to HoltWinters/Holt/SES on a crate search error, still labelled AutoETS | — | *seasonal_period* (auto-detected if omitted) |
-| `ARIMA` | Fixed AR(1)-on-differences heuristic (not a configurable Box-Jenkins fit) | — | — (no order params accepted; see `AutoARIMA`) |
-| `AutoARIMA` | Automatic ARIMA selection | — | *seasonal_period* (auto-detected if omitted) |
+| `ETS` | Error-Trend-Seasonal model. Without a `model` spec, runs the crate's own `AutoETS` selection (not a hand-picked `'AAA'` default) and reports the chosen spec, e.g. `ETS(A,A,M)` — the same selection a standalone `AutoETS` call would make | — | *seasonal_period*, *model* |
+| `AutoETS` | Automatic ETS selection; a crate fit/predict failure or panic is a hard error naming `AutoETS` — never a silent HoltWinters/Holt/SES substitution | — | *seasonal_period* (auto-detected if omitted) |
+| `ARIMA` | Real crate `ARIMA`/`SARIMA` fit at an explicit order (not a heuristic) | **arima_order** `[p,d,q]` | *seasonal_order* `[P,D,Q]` (+ `seasonal_period`); `p,q,P,Q ≤ 10`, `d,D ≤ 2`; `model_name` appends `" with drift"` / `" with non-zero mean"` when the crate's own AICc comparison keeps a non-zero intercept |
+| `AutoARIMA` | Automatic ARIMA/SARIMA order search | — | *seasonal_period* (auto-detected if omitted) |
+
+`ARIMA` without `arima_order` is a hard SQL error naming `AutoARIMA` as the alternative:
+
+```sql
+SELECT * FROM ts_forecast_by('sales_data', product_id, date, revenue, 'ARIMA', 7, '1d', MAP{});
+-- Invalid Input Error: Invalid input: ARIMA requires arima_order=[p,d,q] (e.g. [1,1,1]);
+--                       use 'AutoARIMA' for automatic order selection
+```
+
+```sql
+-- ARIMA(0,1,1)(0,1,1)[12] -- the AirPassengers "airline model" -- via an explicit order
+CREATE OR REPLACE TABLE air AS
+SELECT 'A' AS id,
+       ('1949-01-01'::DATE + (i || ' months')::INTERVAL)::DATE AS ds,
+       112.0 + 5.0 * i + 40.0 * sin(2 * pi() * i / 12.0) AS y
+FROM range(0, 60) t(i);
+
+SELECT forecast_step, ds, ROUND(yhat, 2) AS yhat, model_name
+FROM ts_forecast_by(
+    'air', id, ds, y, 'ARIMA', 3, '1mo',
+    MAP{'arima_order': '[0,1,1]', 'seasonal_order': '[0,1,1]', 'seasonal_period': '12'}
+)
+ORDER BY forecast_step;
+-- model_name = 'ARIMA(0,1,1)(0,1,1)[12]'
+```
 
 ### Multiple Seasonality Models (6)
 | Model | Description | Required | Optional |
 |-------|-------------|----------|----------|
-| `MFLES` | Multiple Frequency LES | — | *seasonal_periods[]* (auto-detected single period if omitted) |
-| `AutoMFLES` | Currently an alias for `MFLES` (same code path) | — | *seasonal_periods[]* (auto-detected single period if omitted) |
-| `MSTL` | Multiple Seasonal-Trend Loess | — | *seasonal_periods[]* (auto-detected single period, or `[12]`, if omitted) |
-| `AutoMSTL` | Currently an alias for `MSTL` (same code path) | — | *seasonal_periods[]* (auto-detected single period, or `[12]`, if omitted) |
-| `TBATS` | Trigonometric BATS | — | *seasonal_periods[]* (auto-detected single period, or `[12]`, if omitted); no `use_box_cox` key accepted |
-| `AutoTBATS` | Automatic TBATS | — | *seasonal_periods[]* (auto-detected single period, or `[12]`, if omitted) |
+| `MFLES` | Multiple Frequency LES | — | *seasonal_periods[]* (auto-detected single period if omitted; non-seasonal if none found) |
+| `AutoMFLES` | Currently an alias for `MFLES` (same code path) | — | *seasonal_periods[]* (auto-detected single period if omitted; non-seasonal if none found) |
+| `MSTL` | Multiple Seasonal-Trend Loess | — | *seasonal_periods[]* (auto-detected single period if omitted; **errors if none found** — no default `[12]`) |
+| `AutoMSTL` | Currently an alias for `MSTL` (same code path) | — | *seasonal_periods[]* (auto-detected single period if omitted; **errors if none found**) |
+| `TBATS` | Trigonometric BATS | — | *seasonal_periods[]* (auto-detected single period if omitted; **errors if none found** — no default `[12]`); no `use_box_cox` key accepted |
+| `AutoTBATS` | Automatic TBATS | — | *seasonal_periods[]* (auto-detected single period if omitted; **errors if none found**) |
 
 ### Intermittent Demand Models (6)
 | Model | Description | Optional |
@@ -218,9 +275,9 @@ Streaming likelihood-weighted mixture of leaves (EMA / drift / AR(1) / damped-Ho
 |-------|-------------|----------|
 | `Laplace` | Streaming distributional forecaster with three zero-config selectors (`auto` / `auto_aid` / `skaters`) | *seasonal_period*, *laplace_variant*, *laplace_seasonal_batch_init* |
 
-Laplace's own distributional intervals are currently overwritten by the same
-`point ± z·SD(history)·√h` heuristic applied to every other model (see the Returns note
-under `ts_forecast_by` above). (being corrected in v0.10.0, Phase 10)
+Laplace's own distributional intervals pass through unchanged — see
+["Prediction intervals, fitted values and input handling"](#prediction-intervals-fitted-values-and-input-handling)
+below.
 
 **Variants** (`laplace_variant`):
 - `auto` (default) — balanced for smooth / continuous series with adequate history
@@ -230,6 +287,116 @@ under `ts_forecast_by` above). (being corrected in v0.10.0, Phase 10)
 **Batch init** (`laplace_seasonal_batch_init: 1`) initialises the seasonal-EMA phase levels from the last training cycle. Safe on stationary or amplitude-declining seasonal series; avoid on growing amplitude or phase-shifted seasonality (the softmax abandons the seasonal-EMA leaf and the forecast collapses to flat).
 
 See [reference/models/distributional/laplace.md](../reference/models/distributional/laplace.md) for the full trade-off table and worked examples.
+
+---
+
+## Prediction intervals, fitted values and input handling
+
+This section applies to every forecast surface (`ts_forecast_by`, `ts_forecast_exog_by`,
+`ts_forecast_agg`, the scalar paths, `ts_cv_forecast_by`) unless a surface's own section
+says otherwise.
+
+### Prediction intervals
+
+`yhat_lower` / `yhat_upper` are each model's **own crate-native prediction interval** at the
+requested `confidence_level` (default **0.90**) — never a fabricated `point ± z·SD·√h` band.
+The confidence-level-to-quantile mapping is computed inside the crate itself, per model; for
+some models that is an approximation to the inverse-normal CDF rather than an exact lookup
+(documented per row below).
+
+**Models with no native interval implementation** return `NULL` lower/upper bounds —
+`ts_forecast_panel_by` (point-only, v1) and `MSTL`/`AutoMSTL` **when called with
+regressors** (`ts_forecast_exog_by`) are the two cases on the current surface. Use the
+conformal prediction functions ([11-conformal-prediction.md](11-conformal-prediction.md)) on
+top of the point forecast for calibrated coverage in these cases, or whenever a model's own
+interval below is flagged as miscalibrated.
+
+**Known per-model calibration issues** (crate `anofox-forecast` 0.15.10; upstream fixes
+tracked for Phase 11, R-interval parity tracked for Phase 17 — these are passed through
+unchanged, never silently corrected or hidden):
+
+| Model(s) | Known issue | Tracking |
+|---|---|---|
+| `SES` | Interval half-width is flat across the whole horizon (does not widen with `h`) | Phase 11 |
+| Seasonal `ETS` specs | Half-width grows as `σ√h` (or `σ√⌈h/m⌉` for the seasonal term) rather than Hyndman's class-1/2/3 analytic state-space variances — seasonal ETS intervals are flatter than they should be | Phase 11/17 |
+| `Theta`, `OptimizedTheta`, `DynamicTheta`, `DynamicOptimizedTheta`, `AutoTheta` | Interval is roughly **2× too wide** at `h ≥ 6` vs. the reference R implementation | Phase 17 |
+| `TBATS`, `AutoTBATS` | Interval width is **3–8% of** the equivalent `statsforecast` reference width — too narrow | Phase 11 |
+| `GARCH` | `yhat` is the conditional standard deviation; `yhat_lower`/`yhat_upper` are the crate's simulated-innovation bounds (`point ± z·σ_h`, the `statsforecast` convention) centred on the simulated point forecast — they do **not** bracket `yhat` itself, and the resulting width is ~0.13× a reference-implementation width | Phase 11 |
+| `AutoARIMA` | The selected order can differ from R's `auto.arima()` on the same series (different order-search heuristic: H3 in the statistical audit) — the FITTED order's own forecast still matches R within 1% at that order | Phase 11 |
+
+### Fitted values, residuals, and MSE
+
+`fitted_values` / `residuals` / MSE come from the crate model itself (`fitted_values()` /
+`residuals()`) — there is no SES(α=0.3) or any other stand-in surrogate for any model.
+
+- Positions the crate doesn't produce a fitted value for (warmup rows — e.g. ARIMA/SARIMA
+  differencing order `d`/`D`, or the leading rows trimmed per "Input handling" below) are
+  `NULL`, not zero or an interpolated guess.
+- Interior rows that were linearly interpolated before fitting (see below) keep a fitted
+  value but their **residual is `NULL`** — an interpolated point has no real observation to
+  compare against.
+- **MSE** is the mean of `residual²` over every **non-interpolated, non-`NULL`** residual
+  position — interpolated and warmup rows are excluded from the average.
+- When a crate model's fitted/residual array length does not match the (trimmed) input
+  series length (ARIMA/AutoARIMA differencing can drop more rows than a straight NULL-head
+  alignment would), the exported `insample_fitted` array is **empty** rather than
+  mis-aligned to the wrong row — a safety rule, not a bug.
+
+```sql
+CREATE OR REPLACE TABLE fitted_demo AS
+SELECT 'A' AS id, (DATE '2020-01-01' + INTERVAL (i) DAY) AS ds,
+       50.0 + i * 0.3 + 5.0 * sin(i * 0.3) AS y
+FROM range(60) t(i);
+
+-- AutoETS has no differencing warmup on this series: the fitted array is full-length.
+SELECT (fcst).insample_fitted[1:5] AS fitted_head, (fcst).model_name
+FROM (SELECT ts_forecast_agg(ds, y, 'AutoETS', 3, MAP{}) AS fcst FROM fitted_demo);
+```
+
+### Input handling
+
+- `NULL` and `NaN` are both treated as **missing** — there is no behavioral difference
+  between a SQL `NULL` and a floating-point `NaN` in the target column.
+- **Interior** missing values are linearly interpolated before fitting (so the model always
+  sees a dense series); their residual positions are `NULL` as described above.
+- **Leading/trailing** missing values are **trimmed** before fitting — but the forecast
+  horizon still starts from the period immediately after the series' ORIGINAL last row
+  (trailing NULLs do not pull the forecast origin backward to the last valid value).
+- A series that is **all-missing**, or has **fewer than 3** valid values after trimming, is a
+  hard error — isolated per group (one bad group does not fail the whole call).
+- `±Inf` anywhere in the target column is a hard error naming the index.
+
+```sql
+-- A daily series y = 0..29 followed by two trailing NULL rows. forecast_step=1 still
+-- lands on the day after the ORIGINAL last row (2020-02-02), not the last valid row.
+CREATE OR REPLACE TABLE trailing_null_demo AS
+SELECT 'A' AS id, (DATE '2020-01-01' + INTERVAL (i) DAY) AS ds,
+       CASE WHEN i >= 30 THEN NULL ELSE i::DOUBLE END AS y
+FROM range(32) AS t(i);
+
+SELECT ds, yhat FROM ts_forecast_by('trailing_null_demo', id, ds, y, 'RandomWalkDrift', 3, '1d', MAP{})
+WHERE forecast_step = 1;
+-- ds = 2020-02-02, yhat = 32.0
+```
+
+### Former silent fallbacks — now hard errors
+
+Every one of the following used to be absorbed silently (a different model ran under the
+requested name, or a default was substituted); every one is now an SQL error that names the
+offending model/parameter:
+
+- `'ARIMA'` without `arima_order` (suggests `AutoARIMA`)
+- A model that **requires** a seasonal period (`SeasonalNaive`, `SeasonalWindowAverage`,
+  `HoltWinters`, `SeasonalES`, `SeasonalESOptimized`, `MSTL`, `AutoMSTL`, `TBATS`,
+  `AutoTBATS`) when none can be auto-detected and none is given explicitly
+- `AutoETS` crate fit/predict failure or panic (used to silently substitute
+  HoltWinters/Holt/SES under the `AutoETS` name)
+- An unrecognized `kalman_model` value
+- An unrecognized panel `croston_variant` or `model_pool` value
+- An unparsable `seasonal_periods` entry (non-integer, or `< 2`)
+- Invalid UTF-8 in any option string (model name, `kalman_model`, `croston_variant`, …)
+- Regressors passed to a model that doesn't support them (see
+  ["ts_forecast_exog_by"](#ts_forecast_exog_by) above for the exog-capable model list)
 
 ---
 
@@ -256,6 +423,16 @@ ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, fre
 | `frequency` | VARCHAR | Time step between observations (e.g., `'1d'`, `'1h'`, `'1mo'`) |
 | `params` | MAP or STRUCT | Model parameters (optional) |
 
+**Selected `params` keys** (full per-model list in the ["Supported Models"](#supported-models-36-models) tables above):
+
+| Key | Type | Applies to | Description |
+|---|---|---|---|
+| `arima_order` | `[p,d,q]` (JSON-array string in MAP form) | `ARIMA` | **Required** for `ARIMA`; `p,q ≤ 10`, `d ≤ 2` |
+| `seasonal_order` | `[P,D,Q]` (JSON-array string in MAP form) | `ARIMA` | Optional; requires `seasonal_period` too; `P,Q ≤ 10`, `D ≤ 2` |
+| `seasonal_period` | INTEGER | seasonal-capable models | Single seasonal period; see per-model tables above for auto-detect/required behavior |
+| `seasonal_periods` | `[p1, p2, ...]` (JSON-array string in MAP form) | `MSTL`, `TBATS`, `MFLES` + Auto variants | Multiple seasonal periods |
+| `confidence_level` | DOUBLE | all models | Interval confidence level; default `0.90`, range `(0, 1)` |
+
 **Returns:**
 | Column | Type | Description |
 |--------|------|-------------|
@@ -265,12 +442,12 @@ ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, fre
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 
-`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band (z from
-the confidence level, SD taken over the full historical series), not a model-based interval
-and not statistically calibrated, for every model except GARCH, Kalman and AutoEnsemble
-(whose own NULL/own bounds are accurate as documented). For calibrated coverage, use conformal
-prediction intervals (see [11-conformal-prediction.md](11-conformal-prediction.md)) on top of
-the point forecast. (being corrected in v0.10.0, Phase 10)
+`yhat_lower` / `yhat_upper` come from each model's own crate-native prediction interval at
+`confidence_level` — see
+["Prediction intervals, fitted values and input handling"](#prediction-intervals-fitted-values-and-input-handling)
+below for the known per-model calibration caveats, which models return `NULL` bounds, and how
+to get calibrated coverage via conformal prediction
+([11-conformal-prediction.md](11-conformal-prediction.md)).
 
 **Examples:**
 ```sql
@@ -284,8 +461,8 @@ SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'AutoETS', 12, '
     MAP{'seasonal_period': '7'});
 
 -- MSTL with multiple seasonal periods (array as JSON string)
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'MSTL', 30, '1d',
-    MAP{'seasonal_periods': '[7, 365]'});
+SELECT * FROM ts_forecast_by('sales', product_id, date, val, 'MSTL', 30, '1d',
+    MAP{'seasonal_periods': '[7, 14]'});
 
 -- Naive baseline (no seasonal_period needed)
 SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'Naive', 12, '1d', MAP{});
@@ -302,33 +479,61 @@ Multi-series forecasting with exogenous variables. This is the **primary exogeno
 ts_forecast_exog_by(table_name, group_col, date_col, target_col, x_cols, future_table, future_date_col, future_x_cols, frequency, model, horizon, params?) → TABLE
 ```
 
-**Supported Models with Exogenous:**
-| Base Model | With Exog | Description |
-|------------|-----------|-------------|
-| `ARIMA` | `ARIMAX` | ARIMA with exogenous regressors |
-| `AutoARIMA` | `ARIMAX` | Auto-selected ARIMA with exogenous |
-| `OptimizedTheta` | `ThetaX` | Theta method with exogenous |
-| `MFLES` | `MFLESX` | MFLES with exogenous regressors |
+**Exog-capable models** — every model below routes through the crate's own
+exogenous-regressor support (`CalendarAnnotations` + `predict_with_exog_intervals`); there
+is no separate `X`-suffixed model name. The reported `model_name` is the base model's own
+name (including any auto-selected order/spec) with `" with regressors"` appended exactly
+once — e.g. `AutoARIMA(3,0,1)(0,1,0)[9] with regressors`, `ETS(A,A,N) with regressors`,
+`AutoTheta(DOTM) with regressors`:
 
-`ARIMAX`/`AutoARIMA`-with-exog and `ThetaX` are both currently: fit OLS on the exogenous
-regressors, forecast the OLS residuals with the plain model (`ARIMA`'s fixed AR(1) heuristic,
-or plain `Theta` — not `OptimizedTheta`), then add the regression's exogenous effect back.
-This is not a joint ARIMA/Theta-with-regressors fit. (being corrected in v0.10.0, Phase 10)
+| Exog-capable models |
+|---|
+| `Naive`, `ARIMA`, `AutoARIMA`, `Theta`, `OptimizedTheta`, `DynamicTheta`, `DynamicOptimizedTheta`, `AutoTheta`, `ETS`, `AutoETS`, `MFLES`, `MSTL` |
 
-**Example:**
+A model NOT in this list (e.g. `GARCH`, `Kalman`, `SES`, `HoltWinters`, any Croston variant)
+given a regressor is a hard SQL error naming the model and listing the exog-capable set.
+`ARIMA` in this list still requires `arima_order` (same rule as the non-exog surface).
+
+**Regressor semantics:**
+- A regressor that is **constant throughout history** (e.g. a holiday flag never observed as
+  1 during training) is dropped before fitting — it gets a 0 effect by construction, and the
+  reported `model_name` carries NO `" with regressors"` suffix (the forecast is identical to
+  calling the model with no regressors at all).
+- Interior/edge `NULL`/`NaN` historical regressor values are linearly interpolated; an
+  all-`NULL` historical regressor is a hard error. Any `NULL` in a FUTURE regressor value is
+  a hard error naming the regressor index and horizon step — future regressor values must be
+  fully known.
+- `confidence_level` defaults to **0.90** on the exog surface too (not the old 0.95).
+- Every `ts_forecast_by` option (`seasonal_period`, `ets_spec`, `garch_p`/`garch_q`,
+  `kalman_model`, `arima_order`/`seasonal_order`, …) is honoured identically via the same
+  `params` argument — the exog surface is not a reduced parameter set.
+
+**Example (verified end-to-end):**
 ```sql
 -- Create historical data with exogenous variable
-CREATE TABLE sales_history AS
-SELECT product_id, date, revenue, temperature
-FROM sales_with_weather;
+CREATE OR REPLACE TABLE sales_history AS
+SELECT product_id,
+       (DATE '2024-01-01' + INTERVAL (i) DAY) AS date,
+       100.0 + product_id * 10.0 + 0.5 * i + 15.0 * temp + 30.0 * promo AS revenue,
+       temp AS temperature
+FROM (
+    SELECT i, 0.8 + (i % 5) * 0.02 AS temp,
+           CASE WHEN i % 9 = 0 THEN 1 ELSE 0 END AS promo
+    FROM range(0, 60) t(i)
+) d
+CROSS JOIN (SELECT unnest([1, 2]) AS product_id);
 
--- Create future exogenous data (must cover forecast horizon)
-CREATE TABLE future_weather AS
-SELECT product_id, date, temperature
-FROM weather_forecast;
+-- Create future exogenous data (must cover EXACTLY the forecast horizon)
+CREATE OR REPLACE TABLE future_weather AS
+SELECT product_id,
+       (DATE '2024-03-01' + INTERVAL (i) DAY) AS date,
+       0.9 + (i % 5) * 0.02 AS temperature
+FROM range(0, 7) t(i)
+CROSS JOIN (SELECT unnest([1, 2]) AS product_id);
 
 -- Forecast with exogenous regressor
-SELECT * FROM ts_forecast_exog_by(
+SELECT forecast_step, model_name
+FROM ts_forecast_exog_by(
     'sales_history',       -- historical data table
     product_id,            -- group column
     date,                  -- date column
@@ -341,7 +546,10 @@ SELECT * FROM ts_forecast_exog_by(
     'AutoARIMA',           -- model
     7,                     -- horizon
     MAP{}                  -- params (optional)
-);
+)
+ORDER BY forecast_step
+LIMIT 1;
+-- model_name = 'AutoARIMA(<p>,<d>,<q>)[...] with regressors'
 ```
 
 ---
@@ -388,7 +596,7 @@ Series with different lengths or start dates are automatically handled:
 ### Method-specific params
 
 **GlobalETS:**
-```sql
+```text
 MAP {
     'seasonal_period': '7',    -- period for seasonal ETS (0 or omit = non-seasonal only)
     'model_pool': 'Reduced'    -- 'Reduced' (8 candidates, default) or 'Complete' (19)
@@ -398,7 +606,7 @@ MAP {
 **GlobalTheta:** No params accepted (seasonal_period is ignored).
 
 **GlobalCroston:**
-```sql
+```text
 MAP {
     'croston_variant': 'SBA'   -- 'Classic' (default) or 'SBA' (bias correction)
 }
@@ -407,6 +615,27 @@ MAP {
 ### Examples
 
 ```sql
+CREATE OR REPLACE TABLE seasonal_panel AS
+SELECT uid,
+       (DATE '2024-01-01' + INTERVAL (i) DAY) AS ds,
+       50.0 + uid * 5.0 + 10.0 * sin(2 * pi() * i / 7.0) AS y
+FROM range(0, 40) t(i)
+CROSS JOIN (SELECT unnest([1, 2, 3]) AS uid);
+
+CREATE OR REPLACE TABLE panel_sales AS
+SELECT product_id,
+       (DATE '2024-01-01' + INTERVAL (i) DAY) AS ds,
+       20.0 + product_id * 3.0 + 0.6 * i AS y
+FROM range(0, 40) t(i)
+CROSS JOIN (SELECT unnest([1, 2, 3]) AS product_id);
+
+CREATE OR REPLACE TABLE panel_intermittent AS
+SELECT item_id,
+       (DATE '2024-01-01' + INTERVAL (i) DAY) AS ds,
+       CASE WHEN (i + item_id) % 4 = 0 THEN 2.0 + (i % 3) ELSE 0.0 END AS qty
+FROM range(0, 40) t(i)
+CROSS JOIN (SELECT unnest([1, 2, 3]) AS item_id);
+
 -- GlobalETS: weekly seasonal panel (verified end-to-end)
 SELECT uid AS series, forecast_step, ROUND(yhat, 2) AS yhat, model_name
 FROM ts_forecast_panel_by(
@@ -552,10 +781,10 @@ ranks them by in-sample MSE, and combines the top-K members into a single foreca
 the specified `combination_method`. It is accessible via `ts_forecast_by` with
 `method = 'AutoEnsemble'`.
 
-> **Point forecasts only:** `yhat_lower` / `yhat_upper` are `NULL` for native
-> `ts_forecast_by('AutoEnsemble', ...)`. Member/weight introspection has shipped — see
-> `ts_auto_ensemble_inspect_by` below — but combined-forecast prediction intervals are not
-> yet available.
+> **Prediction intervals:** `yhat_lower` / `yhat_upper` are the crate `AutoEnsemble`'s own
+> `predict_with_intervals` bounds at `confidence_level` (default 0.90) — not NULL, and not a
+> combination of the three members' own individual intervals. Member/weight introspection is
+> also available — see `ts_auto_ensemble_inspect_by` below.
 
 ### Parameters
 
@@ -564,6 +793,7 @@ the specified `combination_method`. It is accessible via `ts_forecast_by` with
 | `top_k` | INTEGER | `3` | Number of top-ranked candidates to combine |
 | `combination_method` | VARCHAR | `'mean'` | Blend strategy (see table below) |
 | `seasonal_period` | INTEGER | `0` | Period passed to all three candidate models; `0` = non-seasonal |
+| `confidence_level` | DOUBLE | `0.90` | Confidence level for the combined forecast's own prediction interval |
 
 ### combination_method strings
 
@@ -628,10 +858,9 @@ models contribute to the blend.
 `ts_forecast_by`). **10 blocked members** raise `InvalidParameter` naming the model (GARCH,
 Laplace, ARIMA, MFLES, AutoMFLES, MSTL, AutoMSTL, TBATS, AutoTBATS, AutoEnsemble).
 
-> **Point forecasts only:** `yhat_lower` / `yhat_upper` are `NULL` for
-> `ts_forecast_ensemble_by`. Member/weight introspection has shipped — see
-> `ts_ensemble_inspect_by` below — but combined-forecast prediction intervals are not yet
-> available.
+> **Prediction intervals:** `yhat_lower` / `yhat_upper` are the crate `Ensemble`'s own
+> `predict_with_intervals` bounds at `confidence_level` (default 0.90) — not NULL. Member/
+> weight introspection is also available — see `ts_ensemble_inspect_by` below.
 
 ### Signature
 
@@ -645,7 +874,8 @@ ts_forecast_ensemble_by(
     horizon      INTEGER,      -- periods to forecast
     frequency    VARCHAR,      -- time step, e.g. '1d', '1mo'
     combination_method := '',  -- blend strategy; default '' = 'mean'
-    seasonal_period := 0       -- shared period for all members; 0 = non-seasonal
+    seasonal_period := 0,      -- shared period for all members; 0 = non-seasonal
+    confidence_level := 0.90   -- confidence level for the combined forecast's interval
 ) → TABLE(group_col, forecast_step INT, date_col TIMESTAMP, yhat DOUBLE,
           yhat_lower DOUBLE, yhat_upper DOUBLE, model_name VARCHAR)
 ```
@@ -656,7 +886,8 @@ ts_forecast_ensemble_by(
 |-----------|------|---------|-------------|
 | `members` | VARCHAR[] | — | 2+ model names; same vocabulary as `ts_forecast_by` method param |
 | `combination_method` | VARCHAR | `''` (= `'mean'`) | Blend strategy (same strings as AutoEnsemble) |
-| `seasonal_period` | INTEGER | `0` | Period shared by all members; `0` = non-seasonal; `p>1` = seasonal |
+| `seasonal_period` | INTEGER | `0` | Period shared by all members; `0` = non-seasonal; `p>1` = seasonal; `0` now auto-detects the same way `ts_forecast_by` does when no member requires an explicit period |
+| `confidence_level` | DOUBLE | `0.90` | Confidence level for the combined forecast's own prediction interval |
 
 ### combination_method strings
 

@@ -1,0 +1,1 @@
+docs/api/07-forecasting.md	SELECT * FROM ts_forecast_by('sales_data', product_id, date, revenue, 'ARIMA', 7, '1d', MAP{});
