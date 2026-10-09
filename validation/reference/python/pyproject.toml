@@ -1,0 +1,15 @@
+[project]
+name = "anofox-reference-fixtures"
+version = "0.1.0"
+description = "Python reference-fixture generators for the anofox_forecast extension's TEST-01 harness"
+requires-python = "==3.12.*"
+dependencies = [
+    "numpy==2.5.3",
+    "scipy==1.18.1",
+    "pandas==3.0.6",
+    "statsmodels==0.15.0",
+    "tsfresh==0.21.2",
+]
+
+[tool.uv]
+package = false
