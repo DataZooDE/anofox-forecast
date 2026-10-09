@@ -5,16 +5,16 @@ milestone_name: Statistical Correctness
 current_phase: 10
 current_phase_name: Forecast Wrapper Delegates to Crate Models
 status: executing
-stopped_at: Completed 10-03-PLAN.md
-last_updated: "2026-10-09T14:24:18.162Z"
+stopped_at: Completed 10-04-PLAN.md
+last_updated: "2026-10-09T15:09:08.043Z"
 last_activity: 2026-10-09
 last_activity_desc: Phase 10 execution started
-state_head: 30d74b629795583cf3e9c44a85af4207483cf6d1
+state_head: "0b6078460bcb9484d06ab52eb35da8724cd7e7b3"
 progress:
   total_phases: 10
   completed_phases: 0
   total_plans: 12
-  completed_plans: 6
+  completed_plans: 7
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-08 — started v0.10.0 Statistical Co
 ## Current Position
 
 Phase: 10 (Forecast Wrapper Delegates to Crate Models) — EXECUTING
-Plan: 4 of 9
+Plan: 5 of 9
 Status: Ready to execute
 Last activity: 2026-10-09 — Phase 10 execution started
 
@@ -61,6 +61,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 10 P01 | 75min | 3 tasks | 3 files |
 | Phase 10 P02 | 120min | 3 tasks | 14 files |
 | Phase 10 P03 | ~45min | 3 tasks | 8 files |
+| Phase 10 P04 | ~3h | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -88,6 +89,8 @@ Recent decisions affecting current work:
 - [Phase 10]: AutoETS catch_unwind fallback deleted outright (InvalidInput naming AutoETS) after confirming anofox-forecast 0.15.10 no longer panics on constant series
 - [Phase 10]: ForecastOptionsExog -> ForecastOptions conversion lets forecast_with_exog's no-regressor branch delegate to forecast() itself instead of maintaining a second hand-written dispatch
 - [Phase 10]: build_forecaster gained an n_obs parameter so SeasonalWindowAverage ensemble members compute n_seasons adaptively instead of a hard-coded 2
+- [Phase 10]: Deleted wrapper OLS exog path outright (fit_ols_regression/apply_regression/forecast_*_with_exog + ARIMAX/ThetaX/MFLESX names) since the crate's own exog support already does its own internal OLS pre-regression
+- [Phase 10]: A regressor constant in history is dropped before the crate ever sees it (0 effect by construction), collapsing 'all regressors constant' onto the existing no-regressor forecast() delegation path
 
 ### Pending Todos
 
@@ -127,7 +130,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-09T14:24:18.134Z
-Stopped at: Completed 10-03-PLAN.md
+Last session: 2026-10-09T15:09:08.007Z
+Stopped at: Completed 10-04-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 9`
