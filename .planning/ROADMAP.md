@@ -88,7 +88,12 @@ Phase artifacts (plans, summaries, verification): [milestones/v0.9.0-phases/](mi
   2. With anofox-regression `=0.5.15`, `ts_forecast_exog_by` on the multi-scale-regressor fixture yields a regressor coefficient matching numpy `lstsq` (≈ −8.8, previously −79), and a 15k-row exogenous fit completes without the O(n²) memory blow-up (previously ~1.7 GB).
   3. With anofox-forecast `≥0.15.10`, the MFLES #219 runaway reproducer returns bounded forecasts, panel forecasts on the NaN-guard fixture contain no NaN, and point forecasts of all other `ts_forecast_by` models are unchanged vs the 0.15.3 snapshot outside the documented MFLES/panel/Laplace fixes.
   4. The MSRV stated in README / CLAUDE.md / docs and the CI toolchain pin equal the minimum Rust version the dependency tree actually requires, and a build on exactly that toolchain succeeds.
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 09-01-PLAN.md — R reference generators + fixtures, Rust fixture loader + provenance contract, package-legitimacy gate (wave 1)
+- [ ] 09-02-PLAN.md — uv Python generators (moments, multi-scale OLS, panel NaN guard), self-consistency tests, harness README (wave 2)
+- [ ] 09-03-PLAN.md — 0.15.3 snapshot, anofox-regression =0.5.15 / anofox-forecast 0.15.10 bump with OLS/memory/MFLES/panel proofs, MSRV 1.89 + CI pin, SQL check on built extension (wave 3)
 
 ### Phase 10: Forecast Wrapper Delegates to Crate Models
 **Goal**: `ts_forecast_by`, `ts_forecast_exog_by` and the ensemble surfaces return the prediction intervals, fitted values, residuals and model identity the crate model actually produced — no fabricated point ± z·sd(series)·√h intervals, no SES(α=0.3) stand-in residuals, no fixed-coefficient "ARIMA", no silent model/parameter fallbacks.
