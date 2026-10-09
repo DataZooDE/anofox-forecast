@@ -82,6 +82,16 @@ static LogicalType GetForecastAggResultType(double confidence_level = 0.90) {
     children.push_back(make_pair("upper_" + suffix, LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
     children.push_back(make_pair("model_name", LogicalType(LogicalTypeId::VARCHAR)));
     children.push_back(make_pair("insample_fitted", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    // WR-02: these four were promised by desc.description below but never
+    // actually returned — the crate ForecastResult already carries
+    // residuals/aic/bic/mse (same fcst_result this Finalize already
+    // populates for point/lower/upper/fitted), so wiring them through is
+    // trivial and keeps the STRUCT truthful instead of just rewording the
+    // description.
+    children.push_back(make_pair("residuals", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(make_pair("aic", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("bic", LogicalType(LogicalTypeId::DOUBLE)));
+    children.push_back(make_pair("mse", LogicalType(LogicalTypeId::DOUBLE)));
     children.push_back(make_pair("date_col_name", LogicalType(LogicalTypeId::VARCHAR)));
     children.push_back(make_pair("error_message", LogicalType(LogicalTypeId::VARCHAR)));
     return LogicalType::STRUCT(std::move(children));
@@ -337,8 +347,12 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
     auto &upper_list = *children[4];     // upper_<suffix>
     auto &model_vec = *children[5];      // model_name
     auto &fitted_list = *children[6];    // insample_fitted
-    auto &date_col_vec = *children[7];   // date_col_name
-    auto &error_vec = *children[8];      // error_message
+    auto &residuals_list = *children[7]; // residuals (WR-02)
+    auto &aic_vec = *children[8];        // aic (WR-02)
+    auto &bic_vec = *children[9];        // bic (WR-02)
+    auto &mse_vec = *children[10];       // mse (WR-02)
+    auto &date_col_vec = *children[11];  // date_col_name
+    auto &error_vec = *children[12];     // error_message
 
     for (idx_t i = 0; i < count; i++) {
         auto &state = *states[i];
@@ -384,6 +398,7 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
         opts.horizon = data.horizon;
         opts.confidence_level = data.confidence_level;
         opts.include_fitted = true;
+        opts.include_residuals = true;  // WR-02: residuals[] is now a real output field
         // ARIMA order params + seasonal_period (D-08/D-09, plan 10-02).
         // seasonal_period must be explicit (never auto-detected) for ARIMA's
         // own seasonal_order validation to engage through this entry point.
@@ -430,6 +445,10 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
             set_empty_list(lower_list);
             set_empty_list(upper_list);
             set_empty_list(fitted_list);
+            set_empty_list(residuals_list);
+            FlatVector::SetNull(aic_vec, row, true);
+            FlatVector::SetNull(bic_vec, row, true);
+            FlatVector::SetNull(mse_vec, row, true);
             FlatVector::GetData<string_t>(model_vec)[row] =
                 StringVector::AddString(model_vec, "");
             FlatVector::GetData<string_t>(date_col_vec)[row] =
@@ -588,6 +607,40 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
                 }
             }
         }
+
+        // Set residuals list (WR-02). Same NaN-as-SQL-NULL policy as
+        // insample_fitted above, and the same n_residuals (not n_fitted —
+        // see the FFI header's n_residuals doc comment) length field the
+        // non-aggregate ts_forecast table/scalar functions use.
+        {
+            auto list_data = FlatVector::GetData<list_entry_t>(residuals_list);
+            auto &list_child = ListVector::GetEntry(residuals_list);
+            auto current_size = ListVector::GetListSize(residuals_list);
+
+            list_data[row].offset = current_size;
+            list_data[row].length = fcst_result.n_residuals;
+
+            ListVector::Reserve(residuals_list, current_size + fcst_result.n_residuals);
+            ListVector::SetListSize(residuals_list, current_size + fcst_result.n_residuals);
+
+            auto child_data = FlatVector::GetData<double>(list_child);
+            if (fcst_result.residuals && fcst_result.n_residuals > 0) {
+                memcpy(child_data + current_size, fcst_result.residuals,
+                       fcst_result.n_residuals * sizeof(double));
+                auto &child_validity = FlatVector::Validity(list_child);
+                for (size_t j = 0; j < fcst_result.n_residuals; j++) {
+                    if (std::isnan(child_data[current_size + j])) {
+                        child_validity.SetInvalid(current_size + j);
+                    }
+                }
+            }
+        }
+
+        // Set aic/bic/mse (WR-02) — straight from the crate fit, same as
+        // ts_forecast.cpp's scalar/table surfaces.
+        FlatVector::GetData<double>(aic_vec)[row] = fcst_result.aic;
+        FlatVector::GetData<double>(bic_vec)[row] = fcst_result.bic;
+        FlatVector::GetData<double>(mse_vec)[row] = fcst_result.mse;
 
         // Set date_col_name (default to "date" as we don't have the column name in aggregate context)
         FlatVector::GetData<string_t>(date_col_vec)[row] =
