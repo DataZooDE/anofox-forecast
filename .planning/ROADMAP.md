@@ -170,7 +170,21 @@ Plans:
   4. Theta (STM) estimates α by SES optimisation with the standard interval formula and no random-walk bias vs R `thetaf`; TBATS/MSTL/GARCH interval widths match statsforecast/arch within the upstream validation tolerance, or those models return NULL intervals with documentation.
   5. All changes sit on a fix branch in `~/projects/rust/anofox-forecast` with PR(s) open, upstream `cargo test` / `cargo fmt --check` / `cargo clippy` green, and CHANGELOG entries describing each numerical change.
 
-**Plans**: TBD
+**Plans**: 10 plans
+
+Plans:
+**Waves 1-10** *(strictly sequential — all plans share one upstream working tree; each fix branch starts from the base ref chosen in 11-01, never from a sibling branch)*
+
+- [ ] 11-01-PLAN.md — base-ref decision checkpoint (origin/main is v0.15.9; released 0.15.10 is on unmerged perf branch) + clean fmt/clippy/test baseline env contract (wave 1)
+- [ ] 11-02-PLAN.md — fix/adf-kpss-correctness: augmented ADF (n/c/ct, AIC/BIC/t-stat/fixed), MacKinnon p-values + critical values, bounded KPSS p-value, urca/tseries/statsmodels fixtures, MC size, PR (wave 2)
+- [ ] 11-03-PLAN.md — fix/theta-alpha-intervals: STM alpha + l0 by SES SSE, thetaf drift factor and intervals, thetaf fixtures, PR (wave 3)
+- [ ] 11-04-PLAN.md — fix/auto-arima-order-selection (1/2): ndiffs-KPSS d, nsdiffs-seas D before d, common-basis AICc with constant in both scorers, RW/AR(0.7) frequencies, draft PR (wave 4)
+- [ ] 11-05-PLAN.md — fix/auto-arima-order-selection (2/2): R-default Hyndman-Khandakar stepwise (max P/Q 2, max_order 5, constant moves), AirPassengers, M4 gate, CHANGELOG, PR ready (wave 5)
+- [ ] 11-06-PLAN.md — fix/ets-likelihood-intervals (1/3): Σ ln|ŷ| over all obs, R likelihood convention, usual constraints, R restrict=TRUE AutoETS pool, draft PR (wave 6)
+- [ ] 11-07-PLAN.md — fix/ets-likelihood-intervals (2/3): Hyndman class-1/2 analytic + class-3 simulated ETS intervals, MC coverage (wave 7)
+- [ ] 11-08-PLAN.md — fix/ets-likelihood-intervals (3/3): SES/Holt/HoltWinters/SeasonalES intervals via the ETS helper, CHANGELOG, PR ready (wave 8)
+- [ ] 11-09-PLAN.md — fix/tbats-mstl-garch-intervals (1/2): GARCH root-cause spike vs statsforecast + true DGP, then calibrated intervals or point-only (D-10), draft PR (wave 9)
+- [ ] 11-10-PLAN.md — fix/tbats-mstl-garch-intervals (2/2): TBATS state-space variance, MSTL trend-model intervals, coverage, CHANGELOG, PR ready (wave 10)
 
 ### Phase 12: Statistics Marshalling Moves to Rust
 
