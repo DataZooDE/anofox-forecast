@@ -992,17 +992,21 @@ pub fn forecast_with_exog(
     // Explicit input policy (D-11/D-12) — see forecast()'s matching comment.
     let prep = prepare_series(values)?;
 
-    // Detect seasonality if needed
-    let period = if options.auto_detect_seasonality && options.seasonal_period == 0 {
-        detect_seasonality(&prep.values, None)
-            .ok()
-            .and_then(|p| p.first().cloned())
-            .unwrap_or(1) as usize
-    } else if options.seasonal_period > 0 {
-        options.seasonal_period
-    } else {
-        1
-    };
+    // Resolve the seasonal period (D-07) through the SAME resolve_period()
+    // helper forecast() uses — explicit > 0 wins; otherwise auto-detect when
+    // requested OR the model requires a period (MSTL/AutoMSTL are both
+    // requires_seasonal_period AND exog_capable); a period-requiring model
+    // with nothing detected and no seasonal_periods list is a hard error
+    // naming the model — never a silent default of 1. Without this, the
+    // exog path would re-implement period resolution inline and silently
+    // diverge from the non-exog surface's D-07 guarantee.
+    let period = resolve_period(
+        &prep.values,
+        options.model,
+        options.seasonal_period,
+        options.auto_detect_seasonality,
+        !options.seasonal_periods.is_empty(),
+    )?;
 
     let extended_horizon = options.horizon + prep.trail_trim;
     let level = options.confidence_level;

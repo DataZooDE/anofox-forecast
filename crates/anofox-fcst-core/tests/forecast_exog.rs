@@ -326,10 +326,12 @@ fn ets_spec_with_regressors() {
     assert_eq!(result.model_name, "MFLES with regressors");
     assert_eq!(result.point.len(), horizon);
 
-    // MSTL requires an explicit seasonal period >= 2 (forecast_with_exog's
-    // exog path does not auto-detect for MSTL — D-07's auto-detection is
-    // forecast()'s non-exog scope); a small period is enough to exercise
-    // the dispatch, not to produce a meaningful decomposition.
+    // MSTL requires a seasonal period >= 2; an explicit seasonal_period
+    // always wins over auto-detection (resolve_period, D-07), so passing 4
+    // here is enough to exercise the dispatch without needing a
+    // detectable-seasonality fixture. See `mstl_with_regressors_and_no_detectable_period_errors`
+    // for the undetectable-period error path this same resolve_period() call
+    // now enforces on the exog surface too.
     let result = run_exog(ModelType::MSTL, None, None, 4);
     assert_eq!(result.model_name, "MSTL with regressors");
     assert_eq!(result.point.len(), horizon);
@@ -638,6 +640,44 @@ fn exog_typical_regression_effect() {
         assert!(p.is_finite(), "point[{i}] is not finite: {p}");
         common::assert_close(*p, *want, sql_point_abs, 0.0, &format!("point[{i}]"));
     }
+}
+
+/// CR-01 regression: `forecast_with_exog` must route period resolution
+/// through the same `resolve_period()` helper `forecast()` uses (D-07).
+/// MSTL + a real (non-constant) regressor + no `seasonal_period`/
+/// `seasonal_periods` + a series with no detectable seasonality (a plain
+/// linear ramp) must return a hard `InvalidInput` naming MSTL — exactly
+/// like the non-exog `forecast_explain_mstl_without_period_errors` case —
+/// never a silent `MSTLForecaster::new(vec![1])` degenerate fit.
+#[test]
+fn mstl_with_regressors_and_no_detectable_period_errors() {
+    let n = 24;
+    let horizon = 5;
+    // Plain linear ramp: no seasonality for detect_seasonality to find.
+    let y: Vec<Option<f64>> = (0..n).map(|i| Some(100.0 + i as f64 * 2.0)).collect();
+    // Non-constant regressor so the exog path (forecast_crate_exog) is
+    // actually taken instead of falling back to forecast() via `.into()`.
+    let x_hist: Vec<f64> = (0..n).map(|i| (i as f64 * 0.37).sin()).collect();
+    let x_future: Vec<f64> = (0..horizon)
+        .map(|i| ((n + i) as f64 * 0.37).sin())
+        .collect();
+    let exog = ExogenousData::new(vec![x_hist], vec![x_future]);
+
+    let options = ForecastOptionsExog {
+        model: ModelType::MSTL,
+        horizon,
+        auto_detect_seasonality: false,
+        seasonal_period: 0,
+        exog: Some(exog),
+        ..Default::default()
+    };
+
+    let err = forecast_with_exog(&y, &options).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("seasonal period") && msg.contains("MSTL"),
+        "expected error naming MSTL and 'seasonal period', got: {msg}"
+    );
 }
 
 /// WR-01 regression: `forecast_crate_exog`'s regressors-present branch must
