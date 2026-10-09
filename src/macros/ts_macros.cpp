@@ -991,7 +991,8 @@ forecast_result AS (
         COALESCE((SELECT xreg_list FROM _xreg_list), []::DOUBLE[][]),
         COALESCE((SELECT future_xreg_list FROM _future_xreg_list), []::DOUBLE[][]),
         horizon,
-        method
+        method,
+        params
     ) AS fcst
 )
 SELECT
@@ -1100,7 +1101,8 @@ forecast_data AS (
             COALESCE(x._xreg_list, []::DOUBLE[][]),
             COALESCE(fx._future_xreg_list, []::DOUBLE[][]),
             horizon,
-            method
+            method,
+            params
         ) AS fcst
     FROM grouped_historical h
     LEFT JOIN _xreg_lists x ON h.__exog_grp__ = x.__exog_grp__

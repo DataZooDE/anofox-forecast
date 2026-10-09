@@ -316,3 +316,202 @@ statement error
 SELECT * FROM ts_forecast_panel_by('panel3', id, ds, y, 'GlobalCroston', 4, '1mo', MAP{'croston_variant': 'sab'});
 ----
 croston_variant
+
+#######################################
+# FCST-05 (plan 10-04, D-10): the SQL exog surface routes through the
+# crate's own exog support — AutoARIMA's real order search, OptimizedTheta
+# staying itself, a constant-in-history regressor getting 0 effect, a
+# non-exog model + regressor erroring, and params (GARCH p/q) reaching the
+# 6-argument _ts_forecast_exog overload. All literal-LIST, no `require json`.
+#######################################
+
+# AutoARIMA with one informative regressor -> real selected order + " with regressors"
+query I
+SELECT regexp_matches((fcst).model, '^AutoARIMA\(\d+,\d+,\d+\)(\(\d+,\d+,\d+\)\[\d+\])? with regressors$')
+FROM (
+    WITH gen AS (
+        SELECT i, 50.0 + 3.0 * sin(i * 0.37) + (i % 5)::DOUBLE AS y, sin(i * 0.37) AS x1
+        FROM range(120) AS t(i)
+    ), fut AS (
+        SELECT sin((120 + i) * 0.37) AS x1 FROM range(6) AS t(i)
+    )
+    SELECT _ts_forecast_exog(
+        (SELECT list(y ORDER BY i) FROM gen),
+        [(SELECT list(x1 ORDER BY i) FROM gen)],
+        [(SELECT list(x1) FROM fut)],
+        6, 'AutoARIMA'
+    ) AS fcst
+);
+----
+true
+
+# OptimizedTheta with a regressor stays itself (never a "ThetaX" stand-in)
+query I
+SELECT (fcst).model
+FROM (
+    WITH gen AS (
+        SELECT i, 50.0 + 3.0 * sin(i * 0.37) + (i % 5)::DOUBLE AS y, sin(i * 0.37) AS x1
+        FROM range(120) AS t(i)
+    ), fut AS (
+        SELECT sin((120 + i) * 0.37) AS x1 FROM range(6) AS t(i)
+    )
+    SELECT _ts_forecast_exog(
+        (SELECT list(y ORDER BY i) FROM gen),
+        [(SELECT list(x1 ORDER BY i) FROM gen)],
+        [(SELECT list(x1) FROM fut)],
+        6, 'OptimizedTheta'
+    ) AS fcst
+);
+----
+OptimizedTheta with regressors
+
+# A regressor that is 0 in history and 1 in the future (constant in
+# history) leaves every point identical (and finite) to the x1-only run.
+query I
+SELECT max(abs(a - b)) < 1e-9
+FROM (
+    WITH gen AS (
+        SELECT i, 50.0 + 3.0 * sin(i * 0.37) + (i % 5)::DOUBLE AS y, sin(i * 0.37) AS x1
+        FROM range(120) AS t(i)
+    ), fut AS (
+        SELECT sin((120 + i) * 0.37) AS x1 FROM range(6) AS t(i)
+    )
+    SELECT
+        unnest((SELECT _ts_forecast_exog(
+            (SELECT list(y ORDER BY i) FROM gen),
+            [(SELECT list(x1 ORDER BY i) FROM gen)],
+            [(SELECT list(x1) FROM fut)],
+            6, 'OptimizedTheta'
+        )).point) AS a,
+        unnest((SELECT _ts_forecast_exog(
+            (SELECT list(y ORDER BY i) FROM gen),
+            [(SELECT list(x1 ORDER BY i) FROM gen), (SELECT list(0.0::DOUBLE) FROM range(120))],
+            [(SELECT list(x1) FROM fut), (SELECT list(1.0::DOUBLE) FROM range(6))],
+            6, 'OptimizedTheta'
+        )).point) AS b
+);
+----
+true
+
+# HoltWinters given a regressor -> hard error naming the problem (D-04 spirit)
+statement error
+SELECT _ts_forecast_exog(
+    [1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0],
+    [[1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0]],
+    [[1.0,2.0,3.0]],
+    3, 'HoltWinters'
+);
+----
+does not support exogenous regressors
+
+# GARCH with no regressors + params garch_p via the 6-argument overload ->
+# every ts_forecast_by option is honoured on the exog surface too.
+query I
+SELECT (_ts_forecast_exog(
+    (SELECT list(y) FROM (SELECT unnest([112, 118, 132, 129, 121, 135, 148, 148, 136, 119, 104, 118,
+                                          115, 126, 141, 135, 125, 149, 170, 170, 158, 133, 114, 140,
+                                          145, 150, 178, 163, 172, 178, 199, 199, 184, 162, 146, 166,
+                                          171, 180, 193, 181, 183, 218, 230, 242, 209, 191, 172, 194,
+                                          196, 196, 236, 235, 229, 243, 264, 272, 237, 211, 180, 201]) AS y)),
+    []::DOUBLE[][], []::DOUBLE[][], 6, 'GARCH', MAP{'garch_p': '2'}
+)).model;
+----
+GARCH(2,1)
+
+# Future regressor NULL -> statement error mentioning "future"
+statement error
+SELECT _ts_forecast_exog(
+    [1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12.0,13.0,14.0,15.0],
+    [[1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12.0,13.0,14.0,15.0]],
+    [[1.0, NULL, 3.0]],
+    3, 'OptimizedTheta'
+);
+----
+future
+
+# Historical interior regressor NULL -> succeeds (interpolated, not an error)
+query I
+SELECT len((fcst).point)
+FROM (
+    WITH gen AS (
+        SELECT i, 50.0 + 3.0 * sin(i * 0.37) + (i % 5)::DOUBLE AS y,
+               CASE WHEN i = 60 THEN NULL ELSE sin(i * 0.37) END AS x1
+        FROM range(120) AS t(i)
+    ), fut AS (
+        SELECT sin((120 + i) * 0.37) AS x1 FROM range(6) AS t(i)
+    )
+    SELECT _ts_forecast_exog(
+        (SELECT list(y ORDER BY i) FROM gen),
+        [(SELECT list(x1 ORDER BY i) FROM gen)],
+        [(SELECT list(x1) FROM fut)],
+        6, 'OptimizedTheta'
+    ) AS fcst
+);
+----
+6
+
+#######################################
+# FCST-08 (y side, D-11/D-12): all-NULL series -> NULL result; a valid NaN
+# behaves exactly like NULL at that position, including for the exported
+# residuals list; trailing-NULL y still realigns forecast_step=1 to the
+# period after the ORIGINAL last row.
+#######################################
+
+query I
+SELECT _ts_forecast([NULL, NULL, NULL, NULL]::DOUBLE[], 3) IS NULL;
+----
+true
+
+query I
+WITH gen AS (SELECT i, 50.0 + 3.0 * sin(i * 0.37) + (i % 5)::DOUBLE AS y FROM range(40) AS t(i))
+SELECT
+    (SELECT (_ts_forecast((SELECT list(CASE WHEN i = 10 THEN 'NaN'::DOUBLE ELSE y END ORDER BY i) FROM gen), 3, 'OptimizedTheta')).point)
+    =
+    (SELECT (_ts_forecast((SELECT list(CASE WHEN i = 10 THEN NULL ELSE y END ORDER BY i) FROM gen), 3, 'OptimizedTheta')).point);
+----
+true
+
+query I
+WITH gen AS (SELECT i, 50.0 + 3.0 * sin(i * 0.37) + (i % 5)::DOUBLE AS y FROM range(40) AS t(i))
+SELECT (_ts_forecast((SELECT list(CASE WHEN i = 10 THEN 'NaN'::DOUBLE ELSE y END ORDER BY i) FROM gen), 3, 'OptimizedTheta')).residuals[11] IS NULL;
+----
+true
+
+statement ok
+CREATE TABLE rwd_trailing_null AS
+SELECT 'A' AS id,
+       ('2020-01-01'::DATE + (i || ' days')::INTERVAL)::DATE AS ds,
+       CASE WHEN i >= 30 THEN NULL ELSE i::DOUBLE END AS y
+FROM range(32) AS t(i);
+
+query I
+SELECT yhat = 32.0 AND ds = DATE '2020-02-02'
+FROM ts_forecast_by('rwd_trailing_null', id, ds, y, 'RandomWalkDrift', 3, '1d', MAP{})
+WHERE forecast_step = 1;
+----
+true
+
+#######################################
+# FCST-01 (D-02 NULL bounds): a model fit with regressors but without a
+# native exog interval override (MSTL's predict_with_exog_intervals falls
+# back to point-only) returns SQL NULL lower/upper, not a fabricated width.
+#######################################
+
+query I
+SELECT (fcst).lower IS NULL AND (fcst).upper IS NULL
+FROM (
+    WITH gen AS (
+        SELECT i, 50.0 + 3.0 * sin(i * 0.37) + (i % 5)::DOUBLE AS y, sin(i * 0.37) AS x1
+        FROM range(120) AS t(i)
+    ), fut AS (
+        SELECT sin((120 + i) * 0.37) AS x1 FROM range(6) AS t(i)
+    )
+    SELECT _ts_forecast_exog(
+        (SELECT list(y ORDER BY i) FROM gen),
+        [(SELECT list(x1 ORDER BY i) FROM gen)],
+        [(SELECT list(x1) FROM fut)],
+        6, 'MSTL', MAP{'seasonal_period': '4'}
+    ) AS fcst
+);
+----
+true

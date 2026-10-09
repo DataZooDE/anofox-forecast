@@ -4,6 +4,16 @@
 -- design (section "typical") and a 15,330-row tiled version of the same
 -- design (section "15k").
 --
+-- As of plan 10-04 (D-10), the "typical"/"15k" sections exercise the
+-- CRATE's own OptimizedTheta-with-regressors fit end to end (regressors
+-- attached via CalendarAnnotations, predicted with
+-- predict_with_exog_intervals) — not the wrapper OLS-plus-residual-Theta
+-- hack this plan deletes. The AutoARIMA section below is likewise now a
+-- REAL crate AutoARIMA order search with the regressors attached (not the
+-- fixed ARIMA stand-in it used to be), so it is informational only for a
+-- different reason than before: the crate's own exog-aware order search
+-- result is still not pinned to a specific tolerance here.
+--
 -- Run (from the repo root, after `make release` or `GEN=ninja make release`):
 --   python3 -c "import resource,subprocess,sys;rc=subprocess.run(sys.argv[1:],stdin=open('validation/reference/sql/check_dep01_exog.sql')).returncode;print('MAXRSS_KB',resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss);sys.exit(rc)" ./build/release/duckdb -unsigned -bail
 --
@@ -84,9 +94,11 @@ FROM fc_typical f
 JOIN exog_fut e ON e.date = f.date::DATE;
 
 -- Informational only, no assertion: AutoARIMA is ts_forecast_exog_by's
--- documented default. Its residual component comes from the fixed ARIMA
--- stand-in that Phase 10 (FCST-04) replaces, so it is not a stable target
--- for this DEP-01 check.
+-- documented default. As of plan 10-04 it runs the crate's own exog-aware
+-- AutoARIMA order search (CalendarAnnotations + predict_with_exog_intervals,
+-- D-10) rather than the old fixed-ARIMA-on-OLS-residuals stand-in — but the
+-- order AutoARIMA selects on this fixture is still not a value this check
+-- pins to a tolerance, so it stays informational.
 CREATE TABLE fc_typical_autoarima AS
 SELECT * FROM ts_forecast_exog_by(
     'exog_hist', sid, date, y, ['x1', 'x2', 'x3', 'x4'],
