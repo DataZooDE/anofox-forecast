@@ -982,28 +982,42 @@ fn parity_seasonal_window_average() {
     );
 }
 
-// ── ETS without spec: falls back to HoltWinters/Holt/SES in core ──────
+// ── ETS without spec: runs the crate AutoETS selection (D-05/FCST-07) ──
 //
-// ETS (no ets_spec) in forecast.rs uses a fallback chain:
-//   period > 1 && len >= 2*period → HoltWinters
-//   len >= 10 → Holt
-//   else → SES
-// Our seasonal_data() has 60 points with period 12 → HoltWinters path.
+// 'ETS' without an explicit `ets_model` now means exactly the same thing as
+// standalone 'AutoETS': the core's `new_auto_ets` shared constructor builds
+// an identically-configured `AutoETS::with_config(AutoETSConfig::with_period(p))`
+// for both call sites, so point/lower/upper/fitted/residuals are bit-identical
+// to fitting that same crate model directly — never a hand-picked
+// HoltWinters/Holt/SES substitute.
 
 #[test]
 fn parity_ets_default() {
     let data = seasonal_data();
     let ts = make_timeseries(&data);
-    // ETS without spec falls back to HoltWinters::auto(period, Additive) for our data
-    let mut model = HoltWinters::auto(
-        SEASONAL_PERIOD,
-        anofox_forecast::models::exponential::SeasonalType::Additive,
-    );
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
+    // forecast.rs: new_auto_ets(period, None) == AutoETS::with_config(AutoETSConfig::with_period(period))
+    let config = AutoETSConfig::with_period(SEASONAL_PERIOD);
+    let mut model = AutoETS::with_config(config);
     let ffi_opts = make_ffi_options("ETS", HORIZON as i32, SEASONAL_PERIOD as i32);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("ETS", &lib_point, &ffi_point);
+    assert_full_parity("ETS", &mut model, &ts, HORIZON, 0.95, &data, ffi_opts);
+
+    // model_name must be exactly the crate's own short_name() text (e.g.
+    // "ETS(M,A,M)") — never "ETS(ETS(...))" (the old double-wrap bug) and
+    // never carrying an "Auto" prefix (that's 'AutoETS's own model_name).
+    let ffi_opts2 = make_ffi_options("ETS", HORIZON as i32, SEASONAL_PERIOD as i32);
+    let (_, model_name) = call_ffi(&data, &ffi_opts2);
+    let matches_ets_pattern = model_name.starts_with("ETS(") && model_name.ends_with(')') && {
+        let inner = &model_name[4..model_name.len() - 1];
+        let parts: Vec<&str> = inner.split(',').collect();
+        parts.len() == 3
+            && matches!(parts[0], "A" | "M")
+            && matches!(parts[1], "N" | "A" | "Ad")
+            && matches!(parts[2], "N" | "A" | "M")
+    };
+    assert!(
+        matches_ets_pattern,
+        "model_name '{model_name}' does not match ^ETS\\([AM],(N|A|Ad),(N|A|M)\\)$"
+    );
 }
 
 // ── ARIMA (real crate model, D-08/D-09): full parity + R airline parity ──

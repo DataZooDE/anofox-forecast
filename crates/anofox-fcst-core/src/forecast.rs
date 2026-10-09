@@ -1479,16 +1479,11 @@ fn forecast_ets(
         });
     }
 
-    // No explicit spec: use library ETS implementations based on data characteristics
-    let mut result = if period > 1 && values.len() >= 2 * period {
-        forecast_holt_winters_lib(values, horizon, period, level)
-    } else if values.len() >= 10 {
-        forecast_holt_lib(values, horizon, level)
-    } else {
-        forecast_ses_fixed(values, horizon, level)
-    }?;
-    result.model_name = "ETS".to_string();
-    Ok(result)
+    // No explicit spec: 'ETS' means the same crate AutoETS selection as
+    // 'AutoETS' (D-05) — the chosen spec is reported un-prefixed in
+    // model_name (e.g. "ETS(M,A,M)"), never "ETS(ETS(...))" and never a
+    // hand-picked HoltWinters/Holt/SES substitute.
+    forecast_auto_ets_core(values, horizon, period, None, level, false)
 }
 
 /// Forecast using the anofox-forecast ETS model with explicit spec.
@@ -1532,8 +1527,10 @@ fn forecast_with_ets_spec(
     let fitted = forecaster.fitted_values().map(|v| v.to_vec());
     let residuals = forecaster.residuals().map(|v| v.to_vec());
 
-    // Get model name from spec
-    let model_name = format!("ETS({})", spec.short_name());
+    // Get model name from spec. `ETSSpec::short_name()` already returns the
+    // fully-formed "ETS(E,T,S)" text (anofox-forecast 0.15.10) — wrapping it
+    // again produced the "ETS(ETS(M,A,M))" double-wrap bug fixed by D-05.
+    let model_name = spec.short_name();
 
     Ok(ForecastOutput {
         point,
@@ -1837,6 +1834,60 @@ fn parse_model_pool(s: &str) -> Result<ModelPool> {
     }
 }
 
+/// Build a crate `AutoETS` configured consistently for every call site that
+/// means "run the crate's own AICc model search": standalone `AutoETS`,
+/// `ETS` without an explicit spec (D-05), and ensemble members built via
+/// `build_forecaster` — the single shared constructor that makes all three
+/// bit-identical by construction (FCST-07).
+fn new_auto_ets(period: usize, pool: Option<ModelPool>) -> AutoETS {
+    let mut config = if period > 1 {
+        AutoETSConfig::with_period(period)
+    } else {
+        AutoETSConfig::non_seasonal()
+    };
+    if let Some(p) = pool {
+        config = config.with_model_pool(p);
+    }
+    AutoETS::with_config(config)
+}
+
+/// Format an AutoETS-selected spec's `model_name`. `ETSSpec::short_name()`
+/// already returns the fully-formed `"ETS(E,T,S)"` text (e.g. "ETS(M,A,M)");
+/// `auto=false` ('ETS' without a spec, D-05) returns that text unchanged —
+/// identical to an explicit `ETS` spec's model_name, never double-wrapped —
+/// while `auto=true` (standalone 'AutoETS') prepends "Auto" to get
+/// "AutoETS(M,A,M)".
+fn format_auto_ets_name(spec: &ETSSpec, auto: bool) -> String {
+    let short = spec.short_name();
+    if auto {
+        format!("Auto{short}")
+    } else {
+        short
+    }
+}
+
+/// Hand-picked ETS fallback used only when the crate's `AutoETS` panics or
+/// errors on fit/predict (e.g. a constant series causing NaN in the
+/// optimizer — issue #192). Deliberately does NOT call back into
+/// `forecast_ets`/`forecast_auto_ets_core` (that would recurse against the
+/// same crate failure). D-07 (plan 10-03 Task 2) replaces this fallback
+/// with a hard error naming AutoETS — kept here only as the interim
+/// catch_unwind safety net.
+fn legacy_ets_fallback(
+    values: &[f64],
+    horizon: usize,
+    period: usize,
+    level: f64,
+) -> Result<ForecastOutput> {
+    if period > 1 && values.len() >= 2 * period {
+        forecast_holt_winters_lib(values, horizon, period, level)
+    } else if values.len() >= 10 {
+        forecast_holt_lib(values, horizon, level)
+    } else {
+        forecast_ses_fixed(values, horizon, level)
+    }
+}
+
 /// AutoETS: Automatic ETS model selection using AICc-based search.
 /// Uses the proper AutoETS implementation from anofox-forecast library.
 /// Falls back to simplified ETS if the library panics (e.g. constant series
@@ -1848,6 +1899,21 @@ fn forecast_auto_ets(
     model_pool: Option<&str>,
     level: f64,
 ) -> Result<ForecastOutput> {
+    forecast_auto_ets_core(values, horizon, period, model_pool, level, true)
+}
+
+/// Shared AutoETS core (D-05/FCST-07). `auto_label=true` is standalone
+/// 'AutoETS' (model_name "AutoETS(...)"); `auto_label=false` is 'ETS'
+/// without an explicit spec (model_name "ETS(...)", via `forecast_ets`) —
+/// both run the exact same crate search through [`new_auto_ets`].
+fn forecast_auto_ets_core(
+    values: &[f64],
+    horizon: usize,
+    period: usize,
+    model_pool: Option<&str>,
+    level: f64,
+    auto_label: bool,
+) -> Result<ForecastOutput> {
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
     // Parse model_pool before entering catch_unwind (error reporting is cleaner)
@@ -1857,30 +1923,8 @@ fn forecast_auto_ets(
     };
 
     let lib_result = catch_unwind(AssertUnwindSafe(|| -> Result<ForecastOutput> {
-        use chrono::{Duration, TimeZone, Utc};
-
-        // Create timestamps for TimeSeries (required by anofox-forecast)
-        let base = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
-        let timestamps: Vec<_> = (0..values.len())
-            .map(|i| base + Duration::hours(i as i64))
-            .collect();
-
-        let ts = TimeSeries::univariate(timestamps, values.to_vec()).map_err(|e| {
-            ForecastError::ComputationError(format!("Failed to create TimeSeries: {}", e))
-        })?;
-
-        // Configure AutoETS with seasonal period if provided
-        let mut config = if period > 1 {
-            AutoETSConfig::with_period(period)
-        } else {
-            AutoETSConfig::non_seasonal()
-        };
-
-        if let Some(p) = pool {
-            config = config.with_model_pool(p);
-        }
-
-        let mut model = AutoETS::with_config(config);
+        let ts = make_timeseries(values)?;
+        let mut model = new_auto_ets(period, pool);
 
         // Fit the model
         model
@@ -1892,14 +1936,16 @@ fn forecast_auto_ets(
             ForecastError::ComputationError(format!("AutoETS predict failed: {}", e))
         })?;
 
-        // Get the selected spec for model name
-        let model_name = if let Some(spec) = model.selected_spec() {
-            format!(
-                "AutoETS({:?},{:?},{:?})",
-                spec.error, spec.trend, spec.seasonal
-            )
-        } else {
-            "AutoETS".to_string()
+        // Get the selected spec for model name. A successful fit with no
+        // selected spec would otherwise surface as an unlabelled "AutoETS"/
+        // "ETS" result — report it as an error naming AutoETS instead (D-07).
+        let model_name = match model.selected_spec() {
+            Some(spec) => format_auto_ets_name(&spec, auto_label),
+            None => {
+                return Err(ForecastError::InvalidInput(
+                    "AutoETS fit succeeded but reported no selected spec".to_string(),
+                ))
+            }
         };
 
         // Extract point forecasts (primary dimension)
@@ -1924,8 +1970,13 @@ fn forecast_auto_ets(
         Ok(Err(_)) | Err(_) => {
             // Library error or panic (e.g. constant series → NaN optimizer → unwrap panic).
             // Fall back to simplified ETS which handles edge cases gracefully.
-            let mut fallback = forecast_ets(values, horizon, period, None, level)?;
-            fallback.model_name = "AutoETS".to_string();
+            // (D-07 error-instead-of-fallback is plan 10-03 Task 2's scope.)
+            let mut fallback = legacy_ets_fallback(values, horizon, period, level)?;
+            fallback.model_name = if auto_label {
+                "AutoETS".to_string()
+            } else {
+                "ETS".to_string()
+            };
             Ok(fallback)
         }
     }
@@ -3075,14 +3126,7 @@ pub(crate) fn build_forecaster(
             };
             Ok(Box::new(AutoARIMA::with_config(cfg)))
         }
-        ModelType::AutoETS => {
-            let cfg = if p > 1 {
-                AutoETSConfig::with_period(p)
-            } else {
-                AutoETSConfig::default()
-            };
-            Ok(Box::new(AutoETS::with_config(cfg)))
-        }
+        ModelType::AutoETS => Ok(Box::new(new_auto_ets(p, None))),
         ModelType::AutoTheta => {
             if p > 1 {
                 Ok(Box::new(AutoTheta::seasonal(p)))
@@ -3161,15 +3205,10 @@ pub(crate) fn build_forecaster(
             let sp = if p > 1 { p } else { 12 };
             Ok(Box::new(SeasonalWindowAverage::new(sp, 2)))
         }
-        ModelType::ETS => {
-            // Use AAA spec (additive error/trend/seasonal) when period > 1, ANN otherwise
-            // ETSModel is imported as `ETS as ETSModel` at the top of this file
-            if p > 1 {
-                Ok(Box::new(ETSModel::new(ETSSpec::aaa(), p)))
-            } else {
-                Ok(Box::new(ETSModel::default()))
-            }
-        }
+        // 'ETS' without a spec means the same crate AutoETS selection as
+        // standalone 'AutoETS' (D-05/FCST-07) — an ensemble member built
+        // from 'ETS' must match the standalone 'ETS' result bit-for-bit.
+        ModelType::ETS => Ok(Box::new(new_auto_ets(p, None))),
         // State-space
         ModelType::Kalman => Ok(Box::new(KalmanForecaster::local_level())),
         // Intermittent demand
@@ -4277,8 +4316,10 @@ mod tests {
             (ModelType::OptimizedTheta, &seasonal),
             (ModelType::DynamicTheta, &seasonal),
             (ModelType::DynamicOptimizedTheta, &seasonal),
-            // State Space
-            (ModelType::ETS, &seasonal),
+            // State Space: ETS is excluded here (D-05) — without an explicit
+            // spec it now runs the crate AutoETS selection and reports the
+            // chosen spec (e.g. "ETS(M,A,N)"), never the bare enum name;
+            // covered below in prefix_cases.
             // ARIMA is excluded here (D-09): it now requires an explicit
             // arima_order and reports "ARIMA(p,d,q)" (and "(P,D,Q)[s]" when
             // seasonal), never the bare enum name — covered separately by
@@ -4314,6 +4355,8 @@ mod tests {
         // Auto models: model_name must start with model.name()
         // (they append details like "AutoARIMA(1,0,0)" or "AutoETS(A,N,N)")
         let prefix_cases: Vec<(ModelType, &[Option<f64>])> = vec![
+            // ETS (no spec) reports the crate's selected spec, e.g. "ETS(M,A,N)" (D-05).
+            (ModelType::ETS, &seasonal),
             (ModelType::AutoETS, &seasonal),
             (ModelType::AutoARIMA, &seasonal),
             (ModelType::AutoTheta, &seasonal),
