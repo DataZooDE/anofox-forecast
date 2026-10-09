@@ -1,0 +1,10 @@
+docs/reference/models/theta/theta.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'Theta', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/theta/theta.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/theta/optimized_theta.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'OptimizedTheta', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/theta/optimized_theta.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/theta/dynamic_theta.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'DynamicTheta', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/theta/dynamic_theta.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/theta/dynamic_optimized_theta.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'DynamicOptimizedTheta', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/theta/dynamic_optimized_theta.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/theta/auto_theta.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoTheta', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/theta/auto_theta.md	1	PASS	SELECT product_id, round(ts_detect_periods_agg(date, quantity, 'fft').primary_period) AS primary_per	

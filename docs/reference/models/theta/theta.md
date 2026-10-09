@@ -38,10 +38,18 @@ the crate's internal curvature parameter is fixed.
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 
-`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band, not a
-model-based interval and not statistically calibrated. For calibrated coverage, use conformal
-prediction intervals (see `docs/api/11-conformal-prediction.md`) on top of the point forecast.
-(being corrected in v0.10.0, Phase 10)
+`yhat_lower` / `yhat_upper` are the crate `Theta` model's own prediction interval at
+`confidence_level` — see
+[07-forecasting.md's "Prediction intervals, fitted values and input handling"](../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling)
+for calibration caveats shared across all models.
+
+> **Known issue:** `Theta`'s interval is roughly **2× too wide** at `h ≥ 6` versus the
+> reference R implementation (tracked for Phase 17). This applies to the whole Theta family
+> — `Theta`, `OptimizedTheta`, `DynamicTheta`, `DynamicOptimizedTheta`, `AutoTheta`.
+
+`Theta` accepts exogenous regressors via `ts_forecast_exog_by` and stays itself —
+`model_name` reports `"Theta with regressors"`, never a plain-Theta substitution under a
+different name.
 
 ## SQL Example
 
@@ -68,6 +76,28 @@ SELECT * FROM ts_forecast_by(
     '3mo',
     MAP{'seasonal_period': '4'}
 );
+
+-- With exogenous regressors — Theta stays itself ("Theta with regressors")
+CREATE OR REPLACE TABLE sales_history AS
+SELECT product_id,
+       (DATE '2024-01-01' + INTERVAL (i) DAY) AS date,
+       100.0 + product_id * 10.0 + 0.5 * i + 15.0 * temp AS revenue,
+       temp AS temperature
+FROM (SELECT i, 0.8 + (i % 5) * 0.02 AS temp FROM range(0, 60) t(i)) d
+CROSS JOIN (SELECT unnest([1, 2]) AS product_id);
+
+CREATE OR REPLACE TABLE future_weather AS
+SELECT product_id,
+       (DATE '2024-03-01' + INTERVAL (i) DAY) AS date,
+       0.9 + (i % 5) * 0.02 AS temperature
+FROM range(0, 7) t(i)
+CROSS JOIN (SELECT unnest([1, 2]) AS product_id);
+
+SELECT DISTINCT model_name FROM ts_forecast_exog_by(
+    'sales_history', product_id, date, revenue, ['temperature'],
+    'future_weather', date, ['temperature'], '1d', 'Theta', 7, MAP{}
+);
+-- model_name = 'Theta with regressors'
 ```
 
 ## Best For

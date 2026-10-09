@@ -48,3 +48,8 @@ docs/reference/models/state-space/ets.md	SELECT * FROM ts_forecast('table', date
 docs/reference/models/state-space/auto_ets.md	SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'AutoETS', horizon, frequency, params);
 docs/reference/models/state-space/kalman.md	SELECT * FROM ts_forecast_by(
 docs/reference/models/state-space/kalman.md	params := MAP{'kalman_model': 'local_linear_trend'}
+docs/reference/models/theta/theta.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'Theta', horizon, params);
+docs/reference/models/theta/optimized_theta.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'OptimizedTheta', horizon, params);
+docs/reference/models/theta/dynamic_theta.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'DynamicTheta', horizon, params);
+docs/reference/models/theta/dynamic_optimized_theta.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'DynamicOptimizedTheta', horizon, params);
+docs/reference/models/theta/auto_theta.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoTheta', horizon, params);
