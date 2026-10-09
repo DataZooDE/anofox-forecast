@@ -10,26 +10,6 @@
 
 namespace duckdb {
 
-// Helper to extract values from LIST vectors
-static void ExtractListAsDouble(Vector &list_vec, idx_t row_idx, vector<double> &out_values) {
-    auto list_data = ListVector::GetData(list_vec);
-    auto &list_entry = list_data[row_idx];
-
-    auto &child_vec = ListVector::GetEntry(list_vec);
-    auto child_data = FlatVector::GetData<double>(child_vec);
-    auto &child_validity = FlatVector::Validity(child_vec);
-
-    out_values.clear();
-    out_values.reserve(list_entry.length);
-
-    for (idx_t i = 0; i < list_entry.length; i++) {
-        idx_t child_idx = list_entry.offset + i;
-        if (child_validity.RowIsValid(child_idx)) {
-            out_values.push_back(child_data[child_idx]);
-        }
-    }
-}
-
 // ============================================================================
 // ts_mae - Mean Absolute Error
 // ============================================================================
@@ -124,21 +104,25 @@ static void TsMseFunction(DataChunk &args, ExpressionState &state, Vector &resul
     result.SetVectorType(VectorType::FLAT_VECTOR);
     auto result_data = FlatVector::GetData<double>(result);
 
+    ListDoubleReader actual_reader(actual_vec, count);
+    ListDoubleReader forecast_reader(forecast_vec, count);
+    vector<double> actual, forecast;
+    vector<uint64_t> actual_validity, forecast_validity;
+
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(forecast_vec, row_idx)) {
+        if (actual_reader.IsNull(row_idx) || forecast_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> actual, forecast;
-        ExtractListAsDouble(actual_vec, row_idx, actual);
-        ExtractListAsDouble(forecast_vec, row_idx, forecast);
+        actual_reader.Read(row_idx, actual, actual_validity);
+        forecast_reader.Read(row_idx, forecast, forecast_validity);
 
         AnofoxError error;
         double mse_result;
         bool success = anofox_ts_mse(
-            actual.data(), actual.size(),
-            forecast.data(), forecast.size(),
+            actual.data(), actual_validity.empty() ? nullptr : actual_validity.data(), actual.size(),
+            forecast.data(), forecast_validity.empty() ? nullptr : forecast_validity.data(), forecast.size(),
             &mse_result, &error
         );
 
@@ -202,21 +186,25 @@ static void TsRmseFunction(DataChunk &args, ExpressionState &state, Vector &resu
     result.SetVectorType(VectorType::FLAT_VECTOR);
     auto result_data = FlatVector::GetData<double>(result);
 
+    ListDoubleReader actual_reader(actual_vec, count);
+    ListDoubleReader forecast_reader(forecast_vec, count);
+    vector<double> actual, forecast;
+    vector<uint64_t> actual_validity, forecast_validity;
+
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(forecast_vec, row_idx)) {
+        if (actual_reader.IsNull(row_idx) || forecast_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> actual, forecast;
-        ExtractListAsDouble(actual_vec, row_idx, actual);
-        ExtractListAsDouble(forecast_vec, row_idx, forecast);
+        actual_reader.Read(row_idx, actual, actual_validity);
+        forecast_reader.Read(row_idx, forecast, forecast_validity);
 
         AnofoxError error;
         double rmse_result;
         bool success = anofox_ts_rmse(
-            actual.data(), actual.size(),
-            forecast.data(), forecast.size(),
+            actual.data(), actual_validity.empty() ? nullptr : actual_validity.data(), actual.size(),
+            forecast.data(), forecast_validity.empty() ? nullptr : forecast_validity.data(), forecast.size(),
             &rmse_result, &error
         );
 
@@ -280,21 +268,25 @@ static void TsMapeFunction(DataChunk &args, ExpressionState &state, Vector &resu
     result.SetVectorType(VectorType::FLAT_VECTOR);
     auto result_data = FlatVector::GetData<double>(result);
 
+    ListDoubleReader actual_reader(actual_vec, count);
+    ListDoubleReader forecast_reader(forecast_vec, count);
+    vector<double> actual, forecast;
+    vector<uint64_t> actual_validity, forecast_validity;
+
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(forecast_vec, row_idx)) {
+        if (actual_reader.IsNull(row_idx) || forecast_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> actual, forecast;
-        ExtractListAsDouble(actual_vec, row_idx, actual);
-        ExtractListAsDouble(forecast_vec, row_idx, forecast);
+        actual_reader.Read(row_idx, actual, actual_validity);
+        forecast_reader.Read(row_idx, forecast, forecast_validity);
 
         AnofoxError error;
         double mape_result;
         bool success = anofox_ts_mape(
-            actual.data(), actual.size(),
-            forecast.data(), forecast.size(),
+            actual.data(), actual_validity.empty() ? nullptr : actual_validity.data(), actual.size(),
+            forecast.data(), forecast_validity.empty() ? nullptr : forecast_validity.data(), forecast.size(),
             &mape_result, &error
         );
 
@@ -358,21 +350,25 @@ static void TsSmapeFunction(DataChunk &args, ExpressionState &state, Vector &res
     result.SetVectorType(VectorType::FLAT_VECTOR);
     auto result_data = FlatVector::GetData<double>(result);
 
+    ListDoubleReader actual_reader(actual_vec, count);
+    ListDoubleReader forecast_reader(forecast_vec, count);
+    vector<double> actual, forecast;
+    vector<uint64_t> actual_validity, forecast_validity;
+
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(forecast_vec, row_idx)) {
+        if (actual_reader.IsNull(row_idx) || forecast_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> actual, forecast;
-        ExtractListAsDouble(actual_vec, row_idx, actual);
-        ExtractListAsDouble(forecast_vec, row_idx, forecast);
+        actual_reader.Read(row_idx, actual, actual_validity);
+        forecast_reader.Read(row_idx, forecast, forecast_validity);
 
         AnofoxError error;
         double smape_result;
         bool success = anofox_ts_smape(
-            actual.data(), actual.size(),
-            forecast.data(), forecast.size(),
+            actual.data(), actual_validity.empty() ? nullptr : actual_validity.data(), actual.size(),
+            forecast.data(), forecast_validity.empty() ? nullptr : forecast_validity.data(), forecast.size(),
             &smape_result, &error
         );
 
@@ -438,24 +434,29 @@ static void TsMaseFunction(DataChunk &args, ExpressionState &state, Vector &resu
     result.SetVectorType(VectorType::FLAT_VECTOR);
     auto result_data = FlatVector::GetData<double>(result);
 
+    ListDoubleReader actual_reader(actual_vec, count);
+    ListDoubleReader forecast_reader(forecast_vec, count);
+    ListDoubleReader baseline_reader(baseline_vec, count);
+    vector<double> actual, forecast, baseline;
+    vector<uint64_t> actual_validity, forecast_validity, baseline_validity;
+
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(forecast_vec, row_idx) ||
-            FlatVector::IsNull(baseline_vec, row_idx)) {
+        if (actual_reader.IsNull(row_idx) || forecast_reader.IsNull(row_idx) ||
+            baseline_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> actual, forecast, baseline;
-        ExtractListAsDouble(actual_vec, row_idx, actual);
-        ExtractListAsDouble(forecast_vec, row_idx, forecast);
-        ExtractListAsDouble(baseline_vec, row_idx, baseline);
+        actual_reader.Read(row_idx, actual, actual_validity);
+        forecast_reader.Read(row_idx, forecast, forecast_validity);
+        baseline_reader.Read(row_idx, baseline, baseline_validity);
 
         AnofoxError error;
         double mase_result;
         bool success = anofox_ts_mase(
-            actual.data(), actual.size(),
-            forecast.data(), forecast.size(),
-            baseline.data(), baseline.size(),
+            actual.data(), actual_validity.empty() ? nullptr : actual_validity.data(), actual.size(),
+            forecast.data(), forecast_validity.empty() ? nullptr : forecast_validity.data(), forecast.size(),
+            baseline.data(), baseline_validity.empty() ? nullptr : baseline_validity.data(), baseline.size(),
             &mase_result, &error
         );
 
@@ -519,21 +520,25 @@ static void TsR2Function(DataChunk &args, ExpressionState &state, Vector &result
     result.SetVectorType(VectorType::FLAT_VECTOR);
     auto result_data = FlatVector::GetData<double>(result);
 
+    ListDoubleReader actual_reader(actual_vec, count);
+    ListDoubleReader forecast_reader(forecast_vec, count);
+    vector<double> actual, forecast;
+    vector<uint64_t> actual_validity, forecast_validity;
+
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(forecast_vec, row_idx)) {
+        if (actual_reader.IsNull(row_idx) || forecast_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> actual, forecast;
-        ExtractListAsDouble(actual_vec, row_idx, actual);
-        ExtractListAsDouble(forecast_vec, row_idx, forecast);
+        actual_reader.Read(row_idx, actual, actual_validity);
+        forecast_reader.Read(row_idx, forecast, forecast_validity);
 
         AnofoxError error;
         double r2_result;
         bool success = anofox_ts_r2(
-            actual.data(), actual.size(),
-            forecast.data(), forecast.size(),
+            actual.data(), actual_validity.empty() ? nullptr : actual_validity.data(), actual.size(),
+            forecast.data(), forecast_validity.empty() ? nullptr : forecast_validity.data(), forecast.size(),
             &r2_result, &error
         );
 
@@ -597,21 +602,25 @@ static void TsBiasFunction(DataChunk &args, ExpressionState &state, Vector &resu
     result.SetVectorType(VectorType::FLAT_VECTOR);
     auto result_data = FlatVector::GetData<double>(result);
 
+    ListDoubleReader actual_reader(actual_vec, count);
+    ListDoubleReader forecast_reader(forecast_vec, count);
+    vector<double> actual, forecast;
+    vector<uint64_t> actual_validity, forecast_validity;
+
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(forecast_vec, row_idx)) {
+        if (actual_reader.IsNull(row_idx) || forecast_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> actual, forecast;
-        ExtractListAsDouble(actual_vec, row_idx, actual);
-        ExtractListAsDouble(forecast_vec, row_idx, forecast);
+        actual_reader.Read(row_idx, actual, actual_validity);
+        forecast_reader.Read(row_idx, forecast, forecast_validity);
 
         AnofoxError error;
         double bias_result;
         bool success = anofox_ts_bias(
-            actual.data(), actual.size(),
-            forecast.data(), forecast.size(),
+            actual.data(), actual_validity.empty() ? nullptr : actual_validity.data(), actual.size(),
+            forecast.data(), forecast_validity.empty() ? nullptr : forecast_validity.data(), forecast.size(),
             &bias_result, &error
         );
 
@@ -678,24 +687,29 @@ static void TsRmaeFunction(DataChunk &args, ExpressionState &state, Vector &resu
     result.SetVectorType(VectorType::FLAT_VECTOR);
     auto result_data = FlatVector::GetData<double>(result);
 
+    ListDoubleReader actual_reader(actual_vec, count);
+    ListDoubleReader pred1_reader(pred1_vec, count);
+    ListDoubleReader pred2_reader(pred2_vec, count);
+    vector<double> actual, pred1, pred2;
+    vector<uint64_t> actual_validity, pred1_validity, pred2_validity;
+
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(pred1_vec, row_idx) ||
-            FlatVector::IsNull(pred2_vec, row_idx)) {
+        if (actual_reader.IsNull(row_idx) || pred1_reader.IsNull(row_idx) ||
+            pred2_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> actual, pred1, pred2;
-        ExtractListAsDouble(actual_vec, row_idx, actual);
-        ExtractListAsDouble(pred1_vec, row_idx, pred1);
-        ExtractListAsDouble(pred2_vec, row_idx, pred2);
+        actual_reader.Read(row_idx, actual, actual_validity);
+        pred1_reader.Read(row_idx, pred1, pred1_validity);
+        pred2_reader.Read(row_idx, pred2, pred2_validity);
 
         AnofoxError error;
         double rmae_result;
         bool success = anofox_ts_rmae(
-            actual.data(), actual.size(),
-            pred1.data(), pred1.size(),
-            pred2.data(), pred2.size(),
+            actual.data(), actual_validity.empty() ? nullptr : actual_validity.data(), actual.size(),
+            pred1.data(), pred1_validity.empty() ? nullptr : pred1_validity.data(), pred1.size(),
+            pred2.data(), pred2_validity.empty() ? nullptr : pred2_validity.data(), pred2.size(),
             &rmae_result, &error
         );
 
@@ -764,26 +778,30 @@ static void TsQuantileLossFunction(DataChunk &args, ExpressionState &state, Vect
     UnifiedVectorFormat quantile_data;
     quantile_vec.ToUnifiedFormat(count, quantile_data);
 
+    ListDoubleReader actual_reader(actual_vec, count);
+    ListDoubleReader forecast_reader(forecast_vec, count);
+    vector<double> actual, forecast;
+    vector<uint64_t> actual_validity, forecast_validity;
+
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         // Get quantile from unified format first (handles constant vectors correctly)
         auto quantile_idx = quantile_data.sel->get_index(row_idx);
-        if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(forecast_vec, row_idx) ||
+        if (actual_reader.IsNull(row_idx) || forecast_reader.IsNull(row_idx) ||
             !quantile_data.validity.RowIsValid(quantile_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> actual, forecast;
-        ExtractListAsDouble(actual_vec, row_idx, actual);
-        ExtractListAsDouble(forecast_vec, row_idx, forecast);
+        actual_reader.Read(row_idx, actual, actual_validity);
+        forecast_reader.Read(row_idx, forecast, forecast_validity);
 
         double quantile = UnifiedVectorFormat::GetData<double>(quantile_data)[quantile_idx];
 
         AnofoxError error;
         double ql_result;
         bool success = anofox_ts_quantile_loss(
-            actual.data(), actual.size(),
-            forecast.data(), forecast.size(),
+            actual.data(), actual_validity.empty() ? nullptr : actual_validity.data(), actual.size(),
+            forecast.data(), forecast_validity.empty() ? nullptr : forecast_validity.data(), forecast.size(),
             quantile,
             &ql_result, &error
         );
@@ -841,76 +859,68 @@ void RegisterTsQuantileLossFunction(ExtensionLoader &loader) {
 // C++ API: ts_mqloss(actual[], quantiles[][], levels[]) → DOUBLE
 // ============================================================================
 
-// Helper to extract nested LIST (2D array) as vector of vectors
-static void ExtractNestedListAsDouble(Vector &list_vec, idx_t row_idx, vector<vector<double>> &out_values) {
-    auto list_data = ListVector::GetData(list_vec);
-    auto &list_entry = list_data[row_idx];
-
-    auto &child_vec = ListVector::GetEntry(list_vec);  // This is also a LIST
-    auto child_list_data = ListVector::GetData(child_vec);
-
-    auto &grandchild_vec = ListVector::GetEntry(child_vec);  // The actual DOUBLE values
-    auto grandchild_data = FlatVector::GetData<double>(grandchild_vec);
-    auto &grandchild_validity = FlatVector::Validity(grandchild_vec);
-
-    out_values.clear();
-    out_values.reserve(list_entry.length);
-
-    for (idx_t i = 0; i < list_entry.length; i++) {
-        idx_t child_idx = list_entry.offset + i;
-        auto &inner_list = child_list_data[child_idx];
-
-        vector<double> inner_values;
-        inner_values.reserve(inner_list.length);
-
-        for (idx_t j = 0; j < inner_list.length; j++) {
-            idx_t gc_idx = inner_list.offset + j;
-            if (grandchild_validity.RowIsValid(gc_idx)) {
-                inner_values.push_back(grandchild_data[gc_idx]);
-            }
-        }
-        out_values.push_back(std::move(inner_values));
-    }
-}
-
 static void TsMqlossFunction(DataChunk &args, ExpressionState &state, Vector &result) {
     auto &actual_vec = args.data[0];
     auto &quantiles_vec = args.data[1];  // LIST(LIST(DOUBLE)) - 2D array
-    auto &levels_vec = args.data[2];      // LIST(DOUBLE) - quantile levels
+    auto &levels_vec = args.data[2];      // LIST(DOUBLE) - quantile levels (parameter list)
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
     auto result_data = FlatVector::GetData<double>(result);
 
+    ListDoubleReader actual_reader(actual_vec, count);
+    NestedListDoubleReader quantiles_reader(quantiles_vec, count);
+    ListDoubleReader levels_reader(levels_vec, count);
+    vector<double> actual;
+    vector<uint64_t> actual_validity;
+    vector<vector<double>> quantiles;
+    vector<vector<uint64_t>> quantiles_validity;
+    vector<double> levels;
+
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(quantiles_vec, row_idx) ||
-            FlatVector::IsNull(levels_vec, row_idx)) {
+        if (actual_reader.IsNull(row_idx) || quantiles_reader.IsNull(row_idx) ||
+            levels_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> actual, levels;
-        vector<vector<double>> quantiles;
-        ExtractListAsDouble(actual_vec, row_idx, actual);
-        ExtractNestedListAsDouble(quantiles_vec, row_idx, quantiles);
-        ExtractListAsDouble(levels_vec, row_idx, levels);
+        actual_reader.Read(row_idx, actual, actual_validity);
+        quantiles_reader.Read(row_idx, quantiles, quantiles_validity);
+        levels_reader.ReadNoNulls(row_idx, levels, "ts_mqloss", "levels");
 
         if (quantiles.size() != levels.size()) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        // Build array of pointers for FFI
+        // A NULL inner list (NestedListDoubleReader) comes back as an empty
+        // values/validity vector; pad to actual.size() as all-invalid so the
+        // FFI sees a length-matched, fully-missing level rather than a 0-length
+        // array.
         vector<const double *> quantile_ptrs;
-        for (const auto &q : quantiles) {
-            quantile_ptrs.push_back(q.data());
+        vector<const uint64_t *> quantile_validity_ptrs;
+        vector<vector<double>> padded_values;
+        vector<vector<uint64_t>> padded_validity;
+        padded_values.reserve(quantiles.size());
+        padded_validity.reserve(quantiles.size());
+        for (idx_t level = 0; level < quantiles.size(); level++) {
+            if (quantiles[level].empty() && !actual.empty()) {
+                padded_values.push_back(vector<double>(actual.size(), 0.0));
+                padded_validity.push_back(vector<uint64_t>((actual.size() + 63) / 64, 0));
+            } else {
+                padded_values.push_back(quantiles[level]);
+                padded_validity.push_back(quantiles_validity[level]);
+            }
+            quantile_ptrs.push_back(padded_values.back().data());
+            quantile_validity_ptrs.push_back(
+                padded_validity.back().empty() ? nullptr : padded_validity.back().data());
         }
 
         AnofoxError error;
         double mqloss_result;
         bool success = anofox_ts_mqloss(
-            actual.data(), actual.size(),
-            quantile_ptrs.data(), quantiles.size(),
+            actual.data(), actual_validity.empty() ? nullptr : actual_validity.data(), actual.size(),
+            quantile_ptrs.data(), quantile_validity_ptrs.data(), quantiles.size(),
             levels.data(),
             &mqloss_result, &error
         );
@@ -981,24 +991,35 @@ static void TsCoverageFunction(DataChunk &args, ExpressionState &state, Vector &
     result.SetVectorType(VectorType::FLAT_VECTOR);
     auto result_data = FlatVector::GetData<double>(result);
 
+    ListDoubleReader actual_reader(actual_vec, count);
+    ListDoubleReader lower_reader(lower_vec, count);
+    ListDoubleReader upper_reader(upper_vec, count);
+    vector<double> actual, lower, upper;
+    vector<uint64_t> actual_validity, lower_validity, upper_validity;
+
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(actual_vec, row_idx) || FlatVector::IsNull(lower_vec, row_idx) ||
-            FlatVector::IsNull(upper_vec, row_idx)) {
+        if (actual_reader.IsNull(row_idx) || lower_reader.IsNull(row_idx) ||
+            upper_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> actual, lower, upper;
-        ExtractListAsDouble(actual_vec, row_idx, actual);
-        ExtractListAsDouble(lower_vec, row_idx, lower);
-        ExtractListAsDouble(upper_vec, row_idx, upper);
+        actual_reader.Read(row_idx, actual, actual_validity);
+        lower_reader.Read(row_idx, lower, lower_validity);
+        upper_reader.Read(row_idx, upper, upper_validity);
+
+        if (actual.size() != lower.size() || actual.size() != upper.size()) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
 
         AnofoxError error;
         double cov_result;
         bool success = anofox_ts_coverage(
-            actual.data(), actual.size(),
-            lower.data(),
-            upper.data(),
+            actual.data(), actual_validity.empty() ? nullptr : actual_validity.data(),
+            lower.data(), lower_validity.empty() ? nullptr : lower_validity.data(),
+            upper.data(), upper_validity.empty() ? nullptr : upper_validity.data(),
+            actual.size(),
             &cov_result, &error
         );
 

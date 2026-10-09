@@ -191,33 +191,33 @@ static double ComputeMetric(TsMetricType type, const vector<double> &actuals,
                                     &result, &error);
             break;
         case TsMetricType::MSE:
-            success = anofox_ts_mse(actuals.data(), actuals.size(),
-                                    forecasts.data(), forecasts.size(),
+            success = anofox_ts_mse(actuals.data(), nullptr, actuals.size(),
+                                    forecasts.data(), nullptr, forecasts.size(),
                                     &result, &error);
             break;
         case TsMetricType::RMSE:
-            success = anofox_ts_rmse(actuals.data(), actuals.size(),
-                                     forecasts.data(), forecasts.size(),
+            success = anofox_ts_rmse(actuals.data(), nullptr, actuals.size(),
+                                     forecasts.data(), nullptr, forecasts.size(),
                                      &result, &error);
             break;
         case TsMetricType::MAPE:
-            success = anofox_ts_mape(actuals.data(), actuals.size(),
-                                     forecasts.data(), forecasts.size(),
+            success = anofox_ts_mape(actuals.data(), nullptr, actuals.size(),
+                                     forecasts.data(), nullptr, forecasts.size(),
                                      &result, &error);
             break;
         case TsMetricType::SMAPE:
-            success = anofox_ts_smape(actuals.data(), actuals.size(),
-                                      forecasts.data(), forecasts.size(),
+            success = anofox_ts_smape(actuals.data(), nullptr, actuals.size(),
+                                      forecasts.data(), nullptr, forecasts.size(),
                                       &result, &error);
             break;
         case TsMetricType::R2:
-            success = anofox_ts_r2(actuals.data(), actuals.size(),
-                                   forecasts.data(), forecasts.size(),
+            success = anofox_ts_r2(actuals.data(), nullptr, actuals.size(),
+                                   forecasts.data(), nullptr, forecasts.size(),
                                    &result, &error);
             break;
         case TsMetricType::BIAS:
-            success = anofox_ts_bias(actuals.data(), actuals.size(),
-                                     forecasts.data(), forecasts.size(),
+            success = anofox_ts_bias(actuals.data(), nullptr, actuals.size(),
+                                     forecasts.data(), nullptr, forecasts.size(),
                                      &result, &error);
             break;
     }
@@ -786,9 +786,9 @@ static OperatorFinalizeResultType TsMaseNativeFinalize(
                 AnofoxError error;
                 double result;
                 bool success = anofox_ts_mase(
-                    sorted_actuals.data(), sorted_actuals.size(),
-                    sorted_forecasts.data(), sorted_forecasts.size(),
-                    sorted_baselines.data(), sorted_baselines.size(),
+                    sorted_actuals.data(), nullptr, sorted_actuals.size(),
+                    sorted_forecasts.data(), nullptr, sorted_forecasts.size(),
+                    sorted_baselines.data(), nullptr, sorted_baselines.size(),
                     &result, &error);
                 if (success) metric_val = result;
             }
@@ -1081,9 +1081,9 @@ static OperatorFinalizeResultType TsRmaeNativeFinalize(
                 AnofoxError error;
                 double result;
                 bool success = anofox_ts_rmae(
-                    sorted_actuals.data(), sorted_actuals.size(),
-                    sorted_pred1s.data(), sorted_pred1s.size(),
-                    sorted_pred2s.data(), sorted_pred2s.size(),
+                    sorted_actuals.data(), nullptr, sorted_actuals.size(),
+                    sorted_pred1s.data(), nullptr, sorted_pred1s.size(),
+                    sorted_pred2s.data(), nullptr, sorted_pred2s.size(),
                     &result, &error);
                 if (success) metric_val = result;
             }
@@ -1376,9 +1376,10 @@ static OperatorFinalizeResultType TsCoverageNativeFinalize(
                 AnofoxError error;
                 double result;
                 bool success = anofox_ts_coverage(
-                    sorted_actuals.data(), sorted_actuals.size(),
-                    sorted_lowers.data(),
-                    sorted_uppers.data(),
+                    sorted_actuals.data(), nullptr,
+                    sorted_lowers.data(), nullptr,
+                    sorted_uppers.data(), nullptr,
+                    sorted_actuals.size(),
                     &result, &error);
                 if (success) metric_val = result;
             }
@@ -1662,8 +1663,8 @@ static OperatorFinalizeResultType TsQuantileLossNativeFinalize(
                 AnofoxError error;
                 double result;
                 bool success = anofox_ts_quantile_loss(
-                    sorted_actuals.data(), sorted_actuals.size(),
-                    sorted_forecasts.data(), sorted_forecasts.size(),
+                    sorted_actuals.data(), nullptr, sorted_actuals.size(),
+                    sorted_forecasts.data(), nullptr, sorted_forecasts.size(),
                     bind_data.quantile,
                     &result, &error);
                 if (success) metric_val = result;

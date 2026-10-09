@@ -60,7 +60,9 @@ pub fn complete_cases(columns: &[&[Option<f64>]]) -> Result<Vec<Vec<f64>>> {
 ///   in the ORIGINAL (untrimmed) list — matching SQL list indexing.
 /// - `Ok(Some(start..end))` otherwise: the half-open range of the trimmed,
 ///   fully-present interior.
-pub fn trim_edges_reject_interior(values: &[Option<f64>]) -> Result<Option<std::ops::Range<usize>>> {
+pub fn trim_edges_reject_interior(
+    values: &[Option<f64>],
+) -> Result<Option<std::ops::Range<usize>>> {
     let first_idx = values.iter().position(|v| !is_missing(*v));
     let first_idx = match first_idx {
         Some(idx) => idx,

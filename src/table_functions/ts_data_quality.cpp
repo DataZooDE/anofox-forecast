@@ -5,6 +5,7 @@
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/common/types/vector.hpp"
+#include "ts_list_marshal.hpp"
 
 namespace duckdb {
 
@@ -21,37 +22,6 @@ static LogicalType GetDataQualityResultType() {
     return LogicalType::STRUCT(std::move(children));
 }
 
-static void ExtractListValues(Vector &list_vec, idx_t row_idx,
-                              vector<double> &out_values,
-                              vector<uint64_t> &out_validity) {
-    auto list_data = ListVector::GetData(list_vec);
-    auto &list_entry = list_data[row_idx];
-
-    auto &child_vec = ListVector::GetEntry(list_vec);
-    auto child_data = FlatVector::GetData<double>(child_vec);
-    auto &child_validity = FlatVector::Validity(child_vec);
-
-    out_values.clear();
-    out_validity.clear();
-
-    idx_t list_size = list_entry.length;
-    idx_t list_offset = list_entry.offset;
-
-    out_values.resize(list_size);
-    size_t validity_words = (list_size + 63) / 64;
-    out_validity.resize(validity_words, 0);
-
-    for (idx_t i = 0; i < list_size; i++) {
-        idx_t child_idx = list_offset + i;
-        if (child_validity.RowIsValid(child_idx)) {
-            out_values[i] = child_data[child_idx];
-            out_validity[i / 64] |= (1ULL << (i % 64));
-        } else {
-            out_values[i] = 0.0;
-        }
-    }
-}
-
 template <typename T>
 static void SetStructField(Vector &result, idx_t field_idx, idx_t row_idx, T value) {
     auto &children = StructVector::GetEntries(result);
@@ -65,15 +35,17 @@ static void TsDataQualityFunction(DataChunk &args, ExpressionState &state, Vecto
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
+    ListDoubleReader list_reader(list_vec, count);
+    vector<double> values;
+    vector<uint64_t> validity;
+
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(list_vec, row_idx)) {
+        if (list_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> values;
-        vector<uint64_t> validity;
-        ExtractListValues(list_vec, row_idx, values, validity);
+        list_reader.Read(row_idx, values, validity);
 
         DataQualityResult dq_result;
         AnofoxError error;

@@ -2033,8 +2033,10 @@ bool anofox_ts_mae(const double *actual,
  * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
  */
 bool anofox_ts_mse(const double *actual,
+                   const uint64_t *actual_validity,
                    size_t actual_len,
                    const double *forecast,
+                   const uint64_t *forecast_validity,
                    size_t forecast_len,
                    double *out_result,
                    struct AnofoxError *out_error);
@@ -2046,8 +2048,10 @@ bool anofox_ts_mse(const double *actual,
  * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
  */
 bool anofox_ts_rmse(const double *actual,
+                    const uint64_t *actual_validity,
                     size_t actual_len,
                     const double *forecast,
+                    const uint64_t *forecast_validity,
                     size_t forecast_len,
                     double *out_result,
                     struct AnofoxError *out_error);
@@ -2059,8 +2063,10 @@ bool anofox_ts_rmse(const double *actual,
  * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
  */
 bool anofox_ts_mape(const double *actual,
+                    const uint64_t *actual_validity,
                     size_t actual_len,
                     const double *forecast,
+                    const uint64_t *forecast_validity,
                     size_t forecast_len,
                     double *out_result,
                     struct AnofoxError *out_error);
@@ -2072,8 +2078,10 @@ bool anofox_ts_mape(const double *actual,
  * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
  */
 bool anofox_ts_smape(const double *actual,
+                     const uint64_t *actual_validity,
                      size_t actual_len,
                      const double *forecast,
+                     const uint64_t *forecast_validity,
                      size_t forecast_len,
                      double *out_result,
                      struct AnofoxError *out_error);
@@ -2085,8 +2093,10 @@ bool anofox_ts_smape(const double *actual,
  * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
  */
 bool anofox_ts_r2(const double *actual,
+                  const uint64_t *actual_validity,
                   size_t actual_len,
                   const double *forecast,
+                  const uint64_t *forecast_validity,
                   size_t forecast_len,
                   double *out_result,
                   struct AnofoxError *out_error);
@@ -2098,81 +2108,112 @@ bool anofox_ts_r2(const double *actual,
  * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
  */
 bool anofox_ts_bias(const double *actual,
+                    const uint64_t *actual_validity,
                     size_t actual_len,
                     const double *forecast,
+                    const uint64_t *forecast_validity,
                     size_t forecast_len,
                     double *out_result,
                     struct AnofoxError *out_error);
 
 /**
- * Relative MAE comparing two models.
+ * Relative MAE comparing two models. `*_validity` pointers may each be null
+ * (all valid); rows missing in ANY of actual/pred1/pred2 are dropped (D-02).
  *
  * # Safety
- * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ * All pointer arguments must be valid and non-null (except the `*_validity`
+ * pointers). Arrays must have the specified lengths.
  */
 bool anofox_ts_rmae(const double *actual,
+                    const uint64_t *actual_validity,
                     size_t actual_len,
                     const double *pred1,
+                    const uint64_t *pred1_validity,
                     size_t pred1_len,
                     const double *pred2,
+                    const uint64_t *pred2_validity,
                     size_t pred2_len,
                     double *out_result,
                     struct AnofoxError *out_error);
 
 /**
- * Mean Absolute Scaled Error.
+ * Mean Absolute Scaled Error. `*_validity` pointers may each be null (all
+ * valid); rows missing in ANY of actual/forecast/baseline are dropped (D-02).
  *
  * # Safety
- * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ * All pointer arguments must be valid and non-null (except the `*_validity`
+ * pointers). Arrays must have the specified lengths.
  */
 bool anofox_ts_mase(const double *actual,
+                    const uint64_t *actual_validity,
                     size_t actual_len,
                     const double *forecast,
+                    const uint64_t *forecast_validity,
                     size_t forecast_len,
                     const double *baseline,
+                    const uint64_t *baseline_validity,
                     size_t baseline_len,
                     double *out_result,
                     struct AnofoxError *out_error);
 
 /**
- * Quantile loss function.
+ * Quantile loss function. `*_validity` pointers may each be null (all valid);
+ * pairs missing in either actual or forecast are dropped (D-02).
  *
  * # Safety
- * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ * All pointer arguments must be valid and non-null (except the `*_validity`
+ * pointers). Arrays must have the specified lengths.
  */
 bool anofox_ts_quantile_loss(const double *actual,
+                             const uint64_t *actual_validity,
                              size_t actual_len,
                              const double *forecast,
+                             const uint64_t *forecast_validity,
                              size_t forecast_len,
                              double quantile,
                              double *out_result,
                              struct AnofoxError *out_error);
 
 /**
- * Multi-quantile loss function.
+ * Multi-quantile loss function. `quantiles is a 2D array: n_levels arrays,
+ * each of length actual_len. `quantiles_validity` is a nullable array of
+ * `n_levels` nullable per-level bitmasks (a null entry means "all valid" for
+ * that level); `actual_validity` may be null (all valid). `levels` itself is
+ * a PARAMETER list — NULL levels are rejected before the FFI call
+ * (`ListDoubleReader::ReadNoNulls` on the C++ side), so there is no
+ * `levels_validity` parameter. Each quantile level independently drops rows
+ * missing in either `actual` or that level's forecast (D-02).
  *
  * # Safety
- * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
- * quantiles is a 2D array: n_levels arrays, each of length actual_len.
+ * All pointer arguments must be valid and non-null (except `actual_validity`
+ * and `quantiles_validity`, and each per-level pointer inside
+ * `quantiles_validity`). Arrays must have the specified lengths.
  */
 bool anofox_ts_mqloss(const double *actual,
+                      const uint64_t *actual_validity,
                       size_t actual_len,
                       const double *const *quantiles,
+                      const uint64_t *const *quantiles_validity,
                       size_t n_levels,
                       const double *levels,
                       double *out_result,
                       struct AnofoxError *out_error);
 
 /**
- * Coverage of prediction intervals.
+ * Coverage of prediction intervals. `*_validity` pointers may each be null
+ * (all valid); rows missing in ANY of actual/lower/upper are dropped (D-02).
  *
  * # Safety
- * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ * All pointer arguments must be valid and non-null (except the `*_validity`
+ * pointers). Arrays must have the specified lengths.
  */
 bool anofox_ts_coverage(const double *actual,
-                        size_t actual_len,
+                        const uint64_t *actual_validity,
                         const double *lower,
+                        const uint64_t *lower_validity,
                         const double *upper,
+                        const uint64_t *upper_validity,
+                        size_t length,
                         double *out_result,
                         struct AnofoxError *out_error);
 

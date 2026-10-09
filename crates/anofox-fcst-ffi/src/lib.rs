@@ -380,8 +380,7 @@ where
                 forecast_series.len()
             )));
         }
-        let filtered =
-            anofox_fcst_core::complete_cases(&[&actual_series, &forecast_series])?;
+        let filtered = anofox_fcst_core::complete_cases(&[&actual_series, &forecast_series])?;
         core_fn(&filtered[0], &filtered[1])
     }));
 
@@ -443,18 +442,20 @@ pub unsafe extern "C" fn anofox_ts_mae(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_mse(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     forecast: *const c_double,
+    forecast_validity: *const u64,
     forecast_len: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
     impl_metric_2arg(
         actual,
-        std::ptr::null(),
+        actual_validity,
         actual_len,
         forecast,
-        std::ptr::null(),
+        forecast_validity,
         forecast_len,
         out_result,
         out_error,
@@ -469,18 +470,20 @@ pub unsafe extern "C" fn anofox_ts_mse(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_rmse(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     forecast: *const c_double,
+    forecast_validity: *const u64,
     forecast_len: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
     impl_metric_2arg(
         actual,
-        std::ptr::null(),
+        actual_validity,
         actual_len,
         forecast,
-        std::ptr::null(),
+        forecast_validity,
         forecast_len,
         out_result,
         out_error,
@@ -495,18 +498,20 @@ pub unsafe extern "C" fn anofox_ts_rmse(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_mape(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     forecast: *const c_double,
+    forecast_validity: *const u64,
     forecast_len: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
     impl_metric_2arg(
         actual,
-        std::ptr::null(),
+        actual_validity,
         actual_len,
         forecast,
-        std::ptr::null(),
+        forecast_validity,
         forecast_len,
         out_result,
         out_error,
@@ -521,18 +526,20 @@ pub unsafe extern "C" fn anofox_ts_mape(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_smape(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     forecast: *const c_double,
+    forecast_validity: *const u64,
     forecast_len: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
     impl_metric_2arg(
         actual,
-        std::ptr::null(),
+        actual_validity,
         actual_len,
         forecast,
-        std::ptr::null(),
+        forecast_validity,
         forecast_len,
         out_result,
         out_error,
@@ -547,18 +554,20 @@ pub unsafe extern "C" fn anofox_ts_smape(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_r2(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     forecast: *const c_double,
+    forecast_validity: *const u64,
     forecast_len: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
     impl_metric_2arg(
         actual,
-        std::ptr::null(),
+        actual_validity,
         actual_len,
         forecast,
-        std::ptr::null(),
+        forecast_validity,
         forecast_len,
         out_result,
         out_error,
@@ -573,18 +582,20 @@ pub unsafe extern "C" fn anofox_ts_r2(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_bias(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     forecast: *const c_double,
+    forecast_validity: *const u64,
     forecast_len: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
     impl_metric_2arg(
         actual,
-        std::ptr::null(),
+        actual_validity,
         actual_len,
         forecast,
-        std::ptr::null(),
+        forecast_validity,
         forecast_len,
         out_result,
         out_error,
@@ -592,37 +603,60 @@ pub unsafe extern "C" fn anofox_ts_bias(
     )
 }
 
-/// Relative MAE comparing two models.
+/// Maps a ForecastError to the FFI error code, picking InsufficientData for the
+/// "nothing left after complete_cases" case (D-04) instead of ComputationError.
+fn metric_error_code(e: &anofox_fcst_core::ForecastError) -> ErrorCode {
+    if matches!(e, anofox_fcst_core::ForecastError::InsufficientData { .. }) {
+        ErrorCode::InsufficientData
+    } else {
+        ErrorCode::ComputationError
+    }
+}
+
+/// Relative MAE comparing two models. `*_validity` pointers may each be null
+/// (all valid); rows missing in ANY of actual/pred1/pred2 are dropped (D-02).
 ///
 /// # Safety
-/// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+/// All pointer arguments must be valid and non-null (except the `*_validity`
+/// pointers). Arrays must have the specified lengths.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_rmae(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     pred1: *const c_double,
+    pred1_validity: *const u64,
     pred1_len: size_t,
     pred2: *const c_double,
+    pred2_validity: *const u64,
     pred2_len: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
-    if !out_error.is_null() {
-        *out_error = AnofoxError::success();
-    }
+    init_error(out_error);
 
-    if actual.is_null() || pred1.is_null() || pred2.is_null() || out_result.is_null() {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
-        }
+    let ptrs = &[
+        actual as *const core::ffi::c_void,
+        pred1 as *const core::ffi::c_void,
+        pred2 as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
         return false;
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let actual_vec = std::slice::from_raw_parts(actual, actual_len).to_vec();
-        let pred1_vec = std::slice::from_raw_parts(pred1, pred1_len).to_vec();
-        let pred2_vec = std::slice::from_raw_parts(pred2, pred2_len).to_vec();
-        anofox_fcst_core::rmae(&actual_vec, &pred1_vec, &pred2_vec)
+        let actual_series = build_series(actual, actual_validity, actual_len);
+        let pred1_series = build_series(pred1, pred1_validity, pred1_len);
+        let pred2_series = build_series(pred2, pred2_validity, pred2_len);
+        if actual_series.len() != pred1_series.len() || actual_series.len() != pred2_series.len() {
+            return Err(anofox_fcst_core::ForecastError::InvalidInput(
+                "actual, pred1 and pred2 arrays must have the same length".to_string(),
+            ));
+        }
+        let filtered =
+            anofox_fcst_core::complete_cases(&[&actual_series, &pred1_series, &pred2_series])?;
+        anofox_fcst_core::rmae(&filtered[0], &filtered[1], &filtered[2])
     }));
 
     match result {
@@ -631,51 +665,65 @@ pub unsafe extern "C" fn anofox_ts_rmae(
             true
         }
         Ok(Err(e)) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
-            }
+            set_error(out_error, metric_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
-            }
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in Rust code");
             false
         }
     }
 }
 
-/// Mean Absolute Scaled Error.
+/// Mean Absolute Scaled Error. `*_validity` pointers may each be null (all
+/// valid); rows missing in ANY of actual/forecast/baseline are dropped (D-02).
 ///
 /// # Safety
-/// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+/// All pointer arguments must be valid and non-null (except the `*_validity`
+/// pointers). Arrays must have the specified lengths.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_mase(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     forecast: *const c_double,
+    forecast_validity: *const u64,
     forecast_len: size_t,
     baseline: *const c_double,
+    baseline_validity: *const u64,
     baseline_len: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
-    if !out_error.is_null() {
-        *out_error = AnofoxError::success();
-    }
+    init_error(out_error);
 
-    if actual.is_null() || forecast.is_null() || baseline.is_null() || out_result.is_null() {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
-        }
+    let ptrs = &[
+        actual as *const core::ffi::c_void,
+        forecast as *const core::ffi::c_void,
+        baseline as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
         return false;
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let actual_vec = std::slice::from_raw_parts(actual, actual_len).to_vec();
-        let forecast_vec = std::slice::from_raw_parts(forecast, forecast_len).to_vec();
-        let baseline_vec = std::slice::from_raw_parts(baseline, baseline_len).to_vec();
-        anofox_fcst_core::mase(&actual_vec, &forecast_vec, &baseline_vec)
+        let actual_series = build_series(actual, actual_validity, actual_len);
+        let forecast_series = build_series(forecast, forecast_validity, forecast_len);
+        let baseline_series = build_series(baseline, baseline_validity, baseline_len);
+        if actual_series.len() != forecast_series.len()
+            || actual_series.len() != baseline_series.len()
+        {
+            return Err(anofox_fcst_core::ForecastError::InvalidInput(
+                "actual, forecast and baseline arrays must have the same length".to_string(),
+            ));
+        }
+        let filtered = anofox_fcst_core::complete_cases(&[
+            &actual_series,
+            &forecast_series,
+            &baseline_series,
+        ])?;
+        anofox_fcst_core::mase(&filtered[0], &filtered[1], &filtered[2])
     }));
 
     match result {
@@ -684,49 +732,57 @@ pub unsafe extern "C" fn anofox_ts_mase(
             true
         }
         Ok(Err(e)) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
-            }
+            set_error(out_error, metric_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
-            }
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in Rust code");
             false
         }
     }
 }
 
-/// Quantile loss function.
+/// Quantile loss function. `*_validity` pointers may each be null (all valid);
+/// pairs missing in either actual or forecast are dropped (D-02).
 ///
 /// # Safety
-/// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+/// All pointer arguments must be valid and non-null (except the `*_validity`
+/// pointers). Arrays must have the specified lengths.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_quantile_loss(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     forecast: *const c_double,
+    forecast_validity: *const u64,
     forecast_len: size_t,
     quantile: c_double,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
-    if !out_error.is_null() {
-        *out_error = AnofoxError::success();
-    }
+    init_error(out_error);
 
-    if actual.is_null() || forecast.is_null() || out_result.is_null() {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
-        }
+    let ptrs = &[
+        actual as *const core::ffi::c_void,
+        forecast as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
         return false;
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let actual_vec = std::slice::from_raw_parts(actual, actual_len).to_vec();
-        let forecast_vec = std::slice::from_raw_parts(forecast, forecast_len).to_vec();
-        anofox_fcst_core::quantile_loss(&actual_vec, &forecast_vec, quantile)
+        let actual_series = build_series(actual, actual_validity, actual_len);
+        let forecast_series = build_series(forecast, forecast_validity, forecast_len);
+        if actual_series.len() != forecast_series.len() {
+            return Err(anofox_fcst_core::ForecastError::InvalidInput(format!(
+                "arrays must have the same length: {} vs {}",
+                actual_series.len(),
+                forecast_series.len()
+            )));
+        }
+        let filtered = anofox_fcst_core::complete_cases(&[&actual_series, &forecast_series])?;
+        anofox_fcst_core::quantile_loss(&filtered[0], &filtered[1], quantile)
     }));
 
     match result {
@@ -735,62 +791,67 @@ pub unsafe extern "C" fn anofox_ts_quantile_loss(
             true
         }
         Ok(Err(e)) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
-            }
+            set_error(out_error, metric_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
-            }
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in Rust code");
             false
         }
     }
 }
 
-/// Multi-quantile loss function.
+/// Multi-quantile loss function. `quantiles is a 2D array: n_levels arrays,
+/// each of length actual_len. `quantiles_validity` is a nullable array of
+/// `n_levels` nullable per-level bitmasks (a null entry means "all valid" for
+/// that level); `actual_validity` may be null (all valid). `levels` itself is
+/// a PARAMETER list — NULL levels are rejected before the FFI call
+/// (`ListDoubleReader::ReadNoNulls` on the C++ side), so there is no
+/// `levels_validity` parameter. Each quantile level independently drops rows
+/// missing in either `actual` or that level's forecast (D-02).
 ///
 /// # Safety
-/// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
-/// quantiles is a 2D array: n_levels arrays, each of length actual_len.
+/// All pointer arguments must be valid and non-null (except `actual_validity`
+/// and `quantiles_validity`, and each per-level pointer inside
+/// `quantiles_validity`). Arrays must have the specified lengths.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_mqloss(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     quantiles: *const *const c_double, // Array of pointers to quantile forecast arrays
+    quantiles_validity: *const *const u64, // nullable array of nullable per-level bitmasks
     n_levels: size_t,
     levels: *const c_double,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
-    if !out_error.is_null() {
-        *out_error = AnofoxError::success();
-    }
+    init_error(out_error);
 
-    if actual.is_null() || quantiles.is_null() || levels.is_null() || out_result.is_null() {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
-        }
+    let ptrs = &[
+        actual as *const core::ffi::c_void,
+        quantiles as *const core::ffi::c_void,
+        levels as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
         return false;
     }
 
     if n_levels == 0 {
-        if !out_error.is_null() {
-            (*out_error).set_error(
-                ErrorCode::InvalidInput,
-                "Must have at least one quantile level",
-            );
-        }
+        set_error(
+            out_error,
+            ErrorCode::InvalidInput,
+            "Must have at least one quantile level",
+        );
         return false;
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let actual_vec = std::slice::from_raw_parts(actual, actual_len).to_vec();
+        let actual_series = build_series(actual, actual_validity, actual_len);
         let levels_vec = std::slice::from_raw_parts(levels, n_levels).to_vec();
 
-        // Build Vec<Vec<f64>> from the 2D array
-        let mut forecasts_vec: Vec<Vec<f64>> = Vec::with_capacity(n_levels);
+        let mut total_loss = 0.0;
         for i in 0..n_levels {
             let quantile_ptr = *quantiles.add(i);
             if quantile_ptr.is_null() {
@@ -799,11 +860,25 @@ pub unsafe extern "C" fn anofox_ts_mqloss(
                     i
                 )));
             }
-            let quantile_vec = std::slice::from_raw_parts(quantile_ptr, actual_len).to_vec();
-            forecasts_vec.push(quantile_vec);
+            let level_validity = if quantiles_validity.is_null() {
+                std::ptr::null()
+            } else {
+                *quantiles_validity.add(i)
+            };
+            let forecast_series = build_series(quantile_ptr, level_validity, actual_len);
+            if actual_series.len() != forecast_series.len() {
+                return Err(anofox_fcst_core::ForecastError::InvalidInput(format!(
+                    "arrays must have the same length: {} vs {}",
+                    actual_series.len(),
+                    forecast_series.len()
+                )));
+            }
+            let filtered = anofox_fcst_core::complete_cases(&[&actual_series, &forecast_series])?;
+            total_loss +=
+                anofox_fcst_core::quantile_loss(&filtered[0], &filtered[1], levels_vec[i])?;
         }
 
-        anofox_fcst_core::mqloss(&actual_vec, &forecasts_vec, &levels_vec)
+        Ok(total_loss / n_levels as f64)
     }));
 
     match result {
@@ -812,49 +887,53 @@ pub unsafe extern "C" fn anofox_ts_mqloss(
             true
         }
         Ok(Err(e)) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
-            }
+            set_error(out_error, metric_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
-            }
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in Rust code");
             false
         }
     }
 }
 
-/// Coverage of prediction intervals.
+/// Coverage of prediction intervals. `*_validity` pointers may each be null
+/// (all valid); rows missing in ANY of actual/lower/upper are dropped (D-02).
 ///
 /// # Safety
-/// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+/// All pointer arguments must be valid and non-null (except the `*_validity`
+/// pointers). Arrays must have the specified lengths.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_coverage(
     actual: *const c_double,
-    actual_len: size_t,
+    actual_validity: *const u64,
     lower: *const c_double,
+    lower_validity: *const u64,
     upper: *const c_double,
+    upper_validity: *const u64,
+    length: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
-    if !out_error.is_null() {
-        *out_error = AnofoxError::success();
-    }
+    init_error(out_error);
 
-    if actual.is_null() || lower.is_null() || upper.is_null() || out_result.is_null() {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
-        }
+    let ptrs = &[
+        actual as *const core::ffi::c_void,
+        lower as *const core::ffi::c_void,
+        upper as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
         return false;
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let actual_vec = std::slice::from_raw_parts(actual, actual_len).to_vec();
-        let lower_vec = std::slice::from_raw_parts(lower, actual_len).to_vec();
-        let upper_vec = std::slice::from_raw_parts(upper, actual_len).to_vec();
-        anofox_fcst_core::coverage(&actual_vec, &lower_vec, &upper_vec)
+        let actual_series = build_series(actual, actual_validity, length);
+        let lower_series = build_series(lower, lower_validity, length);
+        let upper_series = build_series(upper, upper_validity, length);
+        let filtered =
+            anofox_fcst_core::complete_cases(&[&actual_series, &lower_series, &upper_series])?;
+        anofox_fcst_core::coverage(&filtered[0], &filtered[1], &filtered[2])
     }));
 
     match result {
@@ -863,15 +942,11 @@ pub unsafe extern "C" fn anofox_ts_coverage(
             true
         }
         Ok(Err(e)) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
-            }
+            set_error(out_error, metric_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
-            }
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in Rust code");
             false
         }
     }
