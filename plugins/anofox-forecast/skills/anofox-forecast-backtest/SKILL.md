@@ -115,11 +115,11 @@ Pattern: `SELECT group, ts_<metric>(LIST(actual ORDER BY ds), LIST(pred ORDER BY
 | `ts_mae` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | Mean Absolute Error |
 | `ts_mse` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | Mean Squared Error |
 | `ts_rmse` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | Root MSE |
-| `ts_mape` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | Mean Absolute % Error — rows with `actual == 0` are dropped from the sum AND the divisor (not counted as 0%); being corrected in v0.10.0, Phase 13 |
+| `ts_mape` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | Mean Absolute % Error — rows with `actual == 0` are dropped from the sum AND the divisor (not counted as 0%) — tracked for Phase 13 |
 | `ts_smape` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | Symmetric MAPE |
 | `ts_r2` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | R² |
 | `ts_bias` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | Bias (mean error) |
-| `ts_mase` | `(actual, forecast, baseline) → DOUBLE` | Currently a **relative MAE** (`MAE(actual,forecast)/MAE(actual,baseline)`) — scaled by whatever `baseline` array you pass in, not the Hyndman-Koehler in-sample seasonal-naive MASE; being corrected in v0.10.0, Phase 13 |
+| `ts_mase` | `(actual, forecast, baseline) → DOUBLE` | Currently a **relative MAE** (`MAE(actual,forecast)/MAE(actual,baseline)`) — scaled by whatever `baseline` array you pass in, not the Hyndman-Koehler in-sample seasonal-naive MASE — tracked for Phase 13 |
 | `ts_rmae` | `(actual, pred1, pred2) → DOUBLE` | Relative MAE. < 1 = pred1 better |
 | `ts_coverage` | `(actual, lower, upper) → DOUBLE` | Interval coverage rate |
 | `ts_quantile_loss` | `(actual, forecast, q) → DOUBLE` | Quantile loss at level q |
@@ -150,8 +150,7 @@ ORDER BY mae;
 Attach a distribution-free prediction interval to forecasts, calibrated from backtest
 residuals. Coverage is guaranteed only under exchangeability; this implementation's
 per-horizon ordering and global pooling currently fall short of that guarantee in practice —
-see `docs/api/11-conformal-prediction.md#coverage-caveats`. (being corrected in v0.10.0,
-Phase 16)
+see `docs/api/11-conformal-prediction.md#coverage-caveats`. (tracked for Phase 16)
 
 ### Three flavours
 

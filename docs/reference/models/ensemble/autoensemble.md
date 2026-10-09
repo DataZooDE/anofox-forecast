@@ -52,6 +52,7 @@ successfully is used (`min(top_k, fitted_count)`). Only when **no** model fits d
 | `top_k` | INTEGER | No | `3` | Number of top-ranked candidates to combine (≥1) |
 | `combination_method` | VARCHAR | No | `'mean'` | How to blend member forecasts (see table below) |
 | `seasonal_period` | INTEGER | No | `0` | Seasonal period shared across all three candidate models. `0` = non-seasonal; `p>1` = seasonal |
+| `confidence_level` | DOUBLE | No | `0.90` | Confidence level for the combined forecast's own prediction interval |
 
 ### combination_method strings
 
@@ -81,9 +82,14 @@ configuration in Phase 4.
 | `group_col` | ANY | Series identifier |
 | `<date_col>` | (same as input) | Forecast timestamp |
 | `yhat` | DOUBLE | Point forecast (combined from top-K members) |
-| `yhat_lower` | DOUBLE | `NULL` (see Limitations) |
-| `yhat_upper` | DOUBLE | `NULL` (see Limitations) |
+| `yhat_lower` | DOUBLE | Lower bound of the crate `AutoEnsemble`'s own `predict_with_intervals` at `confidence_level` (default 0.90) |
+| `yhat_upper` | DOUBLE | Upper bound of the crate `AutoEnsemble`'s own `predict_with_intervals` at `confidence_level` (default 0.90) |
 | `model_name` | VARCHAR | `'AutoEnsemble'` |
+
+`yhat_lower`/`yhat_upper` are the crate `AutoEnsemble`'s own prediction interval — not a
+combination of the three members' own individual intervals, and not `NULL`. See
+[07-forecasting.md's "Prediction intervals, fitted values and input handling"](../../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling)
+for calibration caveats shared across all models.
 
 ## SQL Examples (verified end-to-end)
 
@@ -110,8 +116,20 @@ FROM ts_forecast_by('sales', product_id, ds, y, 'AutoEnsemble', 5, '1d')
 ORDER BY product_id, forecast_step;
 ```
 
-Expected output: `yhat_lower` and `yhat_upper` are `NULL` (point forecasts only);
-`model_name` is `'AutoEnsemble'`.
+Expected output: `yhat_lower` and `yhat_upper` are non-`NULL` (the crate `AutoEnsemble`'s own
+prediction interval at the default `confidence_level` of 0.90); `model_name` is
+`'AutoEnsemble'`.
+
+```sql
+-- Narrower confidence_level -> tighter interval (verified end-to-end)
+SELECT product_id, forecast_step, ROUND(yhat, 4) AS yhat, yhat_lower, yhat_upper
+FROM ts_forecast_by(
+    'sales', product_id, ds, y, 'AutoEnsemble', 5, '1d',
+    params := {confidence_level: 0.5}
+)
+ORDER BY product_id, forecast_step;
+-- yhat_upper - yhat_lower at confidence_level=0.5 is narrower than at the 0.90 default.
+```
 
 ### Median combination — robust to diverging members
 
@@ -171,6 +189,14 @@ ORDER BY product_id, forecast_step;
 ### Seasonal ensemble — weekly data
 
 ```sql
+-- 2 products x 104 weekly rows, annual (period-52) seasonality
+CREATE OR REPLACE TABLE weekly_sales AS
+SELECT product_id,
+       (DATE '2022-01-03' + INTERVAL (i * 7) DAY) AS ds,
+       100.0 + 30.0 * SIN(2 * PI() * i / 52.0) + 0.3 * i AS y
+FROM range(0, 104) t(i)
+CROSS JOIN (SELECT unnest(['P1', 'P2']) AS product_id);
+
 SELECT product_id, forecast_step, ROUND(yhat, 4) AS yhat, model_name
 FROM ts_forecast_by(
     'weekly_sales', product_id, ds, y, 'AutoEnsemble', 8, '1w',
@@ -191,9 +217,9 @@ ORDER BY product_id, forecast_step;
 
 ## Limitations
 
-- **Prediction intervals:** `yhat_lower` and `yhat_upper` are `NULL` for native
-  `ts_forecast_by('AutoEnsemble', ...)`. Combined-forecast prediction intervals are not yet
-  available from this surface.
+- **Prediction intervals:** `yhat_lower` and `yhat_upper` are the crate `AutoEnsemble`'s own
+  `predict_with_intervals` bounds at `confidence_level` (default 0.90) — not `NULL`, and not
+  a combination of the three members' own individual intervals.
 - **Candidate families:** Fixed to AutoARIMA, AutoETS, AutoTheta for `AutoEnsemble` itself.
   For user-specified member lists, use the explicit-member ensemble
   (`ts_forecast_ensemble_by` — see [ensemble_explicit.md](ensemble_explicit.md)), which is

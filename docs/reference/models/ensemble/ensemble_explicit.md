@@ -5,7 +5,7 @@
 ## Signature
 
 ```sql
--- Default: combination_method='mean', seasonal_period=0 (non-seasonal)
+-- Default: combination_method='mean', seasonal_period=0 (auto-detect), confidence_level=0.90
 SELECT * FROM ts_forecast_ensemble_by(
     'table', group_col, date_col, value_col,
     members,        -- VARCHAR[] of model names, e.g. ['AutoARIMA','AutoETS','Theta']
@@ -13,13 +13,14 @@ SELECT * FROM ts_forecast_ensemble_by(
     frequency       -- VARCHAR: time step, e.g. '1d', '1mo'
 );
 
--- With explicit combination method and seasonal period
+-- With explicit combination method, seasonal period, and confidence level
 SELECT * FROM ts_forecast_ensemble_by(
     'table', group_col, date_col, value_col,
     ['AutoARIMA', 'AutoETS', 'Theta'],
     12, '1mo',
     combination_method := 'weighted_mse',
-    seasonal_period := 12
+    seasonal_period := 12,
+    confidence_level := 0.95
 );
 ```
 
@@ -55,7 +56,8 @@ offending member.
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
 | `frequency` | VARCHAR | Yes | — | Time step between observations (e.g., `'1d'`, `'1mo'`) |
 | `combination_method` | VARCHAR | No | `''` (= `'mean'`) | How to blend member forecasts (see table below) |
-| `seasonal_period` | INTEGER | No | `0` | Seasonal period shared by all members; `0` = non-seasonal; `p > 1` = seasonal |
+| `seasonal_period` | INTEGER | No | `0` | Seasonal period shared by all members; `0` or `1` auto-detects (see below); `p > 1` wins and is used directly |
+| `confidence_level` | DOUBLE | No | `0.90` | Confidence level for the combined forecast's own prediction interval |
 
 ### combination_method strings
 
@@ -73,12 +75,25 @@ Passing an unrecognised string raises `InvalidParameter`.
 
 ### seasonal_period behaviour
 
-When `seasonal_period > 1`, all named members that accept a period are configured with that
-value. When `seasonal_period = 0` (the default), non-seasonal constructors are used for
-`Auto*` and baseline models. **Seasonal models** (`SeasonalNaive`, `HoltWinters`,
-`SeasonalES`, `SeasonalESOptimized`, `SeasonalWindowAverage`) require `seasonal_period > 1`
-to behave seasonally — when `seasonal_period = 0` they fall back to `period = 12` internally.
-Always pass an explicit `seasonal_period > 1` when using seasonal members.
+An explicit `seasonal_period > 1` always wins and is passed to every member directly.
+**`seasonal_period = 0` and `seasonal_period = 1` behave identically** — both trigger a
+single, shared period auto-detection pass over the series (the same detector
+`ts_forecast_by`'s own `seasonal_period = 0` default uses), and whatever period is detected
+(if any, and if `> 1`) is used for every member that accepts one. There is **no** separate
+"explicit 1 forces non-seasonal" behavior at this surface — passing `1` does not suppress
+detection; verified directly against the built extension (an identical result for
+`seasonal_period := 0` and `seasonal_period := 1` on the same series; `seasonal_period := 2`
+on the same series produces a different result, confirming values `> 1` are honoured
+literally while `0`/`1` both fall through to detection).
+
+**Seasonal-required models** (`SeasonalNaive`, `HoltWinters`, `SeasonalES`,
+`SeasonalESOptimized`, `SeasonalWindowAverage`) **no longer fall back to `period = 12`** when
+no period can be used (D-07) — if no period was detected (or none given) and no period could
+be used, the call raises `InvalidParameter` naming the offending member (e.g.
+`"'seasonal_period' = 'HoltWinters': HoltWinters requires a seasonal period > 1 for every
+ensemble member; pass seasonal_period explicitly"`). Always pass an explicit
+`seasonal_period > 1` when using seasonal-required members on a series without a clean,
+auto-detectable period.
 
 ## Returns
 
@@ -88,9 +103,14 @@ Always pass an explicit `seasonal_period > 1` when using seasonal members.
 | `forecast_step` | INTEGER | Forecast horizon step (1, 2, …, horizon) |
 | `<date_col>` | (same as input) | Forecast timestamp |
 | `yhat` | DOUBLE | Point forecast (combined from all named members) |
-| `yhat_lower` | DOUBLE | `NULL` (see Limitations) |
-| `yhat_upper` | DOUBLE | `NULL` (see Limitations) |
+| `yhat_lower` | DOUBLE | Lower bound of the crate `Ensemble`'s own `predict_with_intervals` at `confidence_level` (default 0.90) |
+| `yhat_upper` | DOUBLE | Upper bound of the crate `Ensemble`'s own `predict_with_intervals` at `confidence_level` (default 0.90) |
 | `model_name` | VARCHAR | `'Ensemble'` |
+
+`yhat_lower`/`yhat_upper` are the crate `Ensemble`'s own prediction interval — not `NULL`,
+and not a combination of each member's own individual interval. See
+[07-forecasting.md's "Prediction intervals, fitted values and input handling"](../../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling)
+for calibration caveats shared across all models.
 
 ## Supported Members (26 models)
 
@@ -113,11 +133,11 @@ model-name strings used in `ts_forecast_by` (`method` parameter).
 | `OptimizedTheta` | Optimized Theta | `seasonal_period` optional |
 | `DynamicTheta` | Dynamic Theta | `seasonal_period` optional |
 | `DynamicOptimizedTheta` | Dynamic Optimized Theta (DOTM) | `seasonal_period` optional |
-| `HoltWinters` | Holt-Winters seasonal smoothing | Falls back to `period=12` if `seasonal_period=0` |
-| `SeasonalES` | Seasonal Exponential Smoothing | Falls back to `period=12` if `seasonal_period=0` |
-| `SeasonalESOptimized` | Optimized Seasonal ES | Falls back to `period=12` if `seasonal_period=0` |
-| `SeasonalNaive` | Last-season-repeated baseline | Falls back to `period=12` if `seasonal_period=0` |
-| `SeasonalWindowAverage` | Seasonal window average | Falls back to `period=12` if `seasonal_period=0` |
+| `HoltWinters` | Holt-Winters seasonal smoothing | Errors naming `HoltWinters` if no period is detected and none is given explicitly (no default `12`) |
+| `SeasonalES` | Seasonal Exponential Smoothing | Errors naming `SeasonalES` if no period is detected and none is given explicitly (no default `12`) |
+| `SeasonalESOptimized` | Optimized Seasonal ES | Errors naming `SeasonalESOptimized` if no period is detected and none is given explicitly (no default `12`) |
+| `SeasonalNaive` | Last-season-repeated baseline | Errors naming `SeasonalNaive` if no period is detected and none is given explicitly (no default `12`) |
+| `SeasonalWindowAverage` | Seasonal window average | Errors naming `SeasonalWindowAverage` if no period is detected and none is given explicitly (no default `12`) |
 | `ETS` | Error-Trend-Seasonal model | `seasonal_period` optional |
 | `Kalman` | Local-level Kalman smoother | No period |
 
@@ -185,8 +205,53 @@ SELECT * FROM ts_forecast_ensemble_by(
 SELECT * FROM ens_result ORDER BY id, forecast_step;
 ```
 
-Expected output: `yhat_lower` and `yhat_upper` are `NULL` (point forecasts only);
-`model_name` is `'Ensemble'`.
+Expected output: `yhat_lower` and `yhat_upper` are non-`NULL` (the crate `Ensemble`'s own
+prediction interval at the default `confidence_level` of 0.90); `model_name` is `'Ensemble'`.
+
+### confidence_level
+
+```sql
+-- Narrower confidence_level -> tighter interval (verified end-to-end)
+SELECT forecast_step, yhat_lower, yhat_upper
+FROM ts_forecast_ensemble_by(
+    'ae_test', id, ds, y,
+    ['AutoARIMA', 'AutoETS', 'Theta'], 5, '1d',
+    combination_method := 'mean', seasonal_period := 0,
+    confidence_level := 0.95
+)
+ORDER BY forecast_step;
+-- At confidence_level=0.95 the interval is wider than the 0.90-default run above.
+```
+
+### ['ETS','ETS'] = standalone ETS identity (D-05/FCST-07)
+
+An ensemble of two identical `ETS` members, combined with `mean`, reproduces the standalone
+`'ETS'` point forecast exactly — `'ETS'` without a spec runs the crate's own `AutoETS`
+selection under both call paths (same shared constructor), so the Mean of two identical
+members equals the single member:
+
+```sql
+CREATE OR REPLACE TABLE ets_identity_demo AS
+SELECT 1 AS id, '2020-01-01'::DATE + INTERVAL (i - 1) MONTH AS ds,
+       100.0 + 20.0 * SIN(2 * PI() * i / 12.0) + 0.5 * i AS y
+FROM range(1, 61) t(i);
+
+CREATE OR REPLACE TABLE ets_standalone_demo AS
+SELECT forecast_step, yhat, model_name
+FROM ts_forecast_by('ets_identity_demo', id, ds, y, 'ETS', 6, '1mo', MAP{'seasonal_period': '12'});
+
+CREATE OR REPLACE TABLE ets_ensemble_demo AS
+SELECT forecast_step, yhat, yhat_lower, yhat_upper
+FROM ts_forecast_ensemble_by(
+    'ets_identity_demo', id, ds, y, ['ETS', 'ETS'], 6, '1mo',
+    combination_method := 'mean', seasonal_period := 12
+);
+
+SELECT count(*) AS mismatched_steps
+FROM ets_standalone_demo s JOIN ets_ensemble_demo e USING (forecast_step)
+WHERE abs(s.yhat - e.yhat) > 1e-9;
+-- mismatched_steps = 0: the ensemble's point forecast equals standalone ETS exactly.
+```
 
 ### Six combination methods
 
@@ -297,8 +362,9 @@ SELECT * FROM ts_forecast_ensemble_by('ae_test', id, ds, y,
 
 ## Limitations
 
-- **Prediction intervals:** `yhat_lower` and `yhat_upper` are `NULL`. Combined-forecast
-  prediction intervals are not yet available from this surface.
+- **Prediction intervals:** `yhat_lower` and `yhat_upper` are the crate `Ensemble`'s own
+  `predict_with_intervals` bounds at `confidence_level` (default 0.90) — not `NULL`, and not
+  a combination of each member's own individual interval.
 - **Member introspection:** Per-member forecasts, weights, and per-member MSE scores ARE
   available — use `ts_ensemble_inspect_by` (see [ensemble_inspect.md](ensemble_inspect.md))
   for per-member combination weights.

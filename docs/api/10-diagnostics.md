@@ -12,7 +12,7 @@ ordering is supplied via `ORDER BY` in `LIST()`).
 silently dropped (not interpolated, not preserved as gaps) — the remaining non-NULL values
 are spliced together, which silently shifts the implied time spacing wherever a NULL was
 removed. If your series has interior gaps, impute them first (e.g. `ts_fill_nulls_by`)
-rather than relying on this function to handle them. (being corrected in v0.10.0, Phase 12)
+rather than relying on this function to handle them. (tracked for Phase 12)
 
 **This document covers (Phase 1 — Statistical Diagnostics):**
 - `ts_adf` / `ts_adf_by`: Dickey-Fuller unit-root test (STAT-01) — currently **non-augmented**
@@ -60,7 +60,7 @@ The underlying `anofox-forecast` ≤0.15.10 implementation is currently a **non-
 Dickey-Fuller regression — it regresses Δy on y₋₁ with a constant only; it does not include
 lagged difference terms in the regression. The `max_lags` parameter currently only trims how
 much of the sample is used, it does not add augmentation terms.
-(being corrected in v0.10.0, Phases 11/17)
+(tracked for Phases 11/17)
 
 #### Signature
 
@@ -84,7 +84,7 @@ Field order is fixed (plans 01-2 / 01-3 depend on this layout):
 |-------|------|-------------|
 | `statistic` | `DOUBLE` | ADF t-statistic. More negative → stronger evidence of stationarity |
 | `p_value` | `DOUBLE` | Approximate p-value for the test. See [Caveats](#caveats) |
-| `lags` | `BIGINT` | Number of lags used (selected by minimum RSS, not AIC; or overridden by `max_lags`) (being corrected in v0.10.0, Phase 11) |
+| `lags` | `BIGINT` | Number of lags used (selected by minimum RSS, not AIC; or overridden by `max_lags`) (tracked for Phase 11) |
 | `is_stationary` | `BOOLEAN` | `true` if `statistic < cv_5pct` (5% significance level) |
 | `cv_1pct` | `DOUBLE` | Critical value at 1% significance (`-3.43` for constant regression) |
 | `cv_5pct` | `DOUBLE` | Critical value at 5% significance (`-2.86` for constant regression) |
@@ -161,7 +161,7 @@ trend) and `'n'` (no constant) regression modes specified in the CONTEXT are **n
 functional** in the underlying crate. `max_lags` currently only trims how much of the sample
 is used for the minimum-RSS lag search (see below) — it does not add augmentation terms.
 Exposing augmentation and additional regression modes as parameters is deferred until the
-crate is updated. (being corrected in v0.10.0, Phases 11/17)
+crate is updated. (tracked for Phases 11/17)
 
 **Impact:** Series with a deterministic trend may appear non-stationary even when
 first-differenced, because the trend component is not accounted for. Use first-
@@ -172,7 +172,7 @@ differencing (`ts_diff_by`) as a preprocessing step if you expect trend-stationa
 Despite the "AIC lag selection" framing in earlier docs, the current implementation's
 `compute_aic` helper returns raw residual sum of squares and ignores the number of
 parameters `k` — so the lag actually chosen minimizes RSS, not AIC.
-(being corrected in v0.10.0, Phase 11)
+(tracked for Phase 11)
 
 ### 3. Approximate p-values — coarse step lookup, not MacKinnon interpolation
 
@@ -187,7 +187,7 @@ interpreted as a rough approximation only:
   so the reported `p_value` can be off by double-digit percentage points
 - For series shorter than ~30 observations, the approximation degrades further
 
-(being corrected in v0.10.0, Phases 11/17)
+(tracked for Phases 11/17)
 
 ### 4. Minimum series length
 
@@ -231,7 +231,7 @@ value (fails to reject the stationarity null).
 - p-values are an **unbounded extrapolation** of the KPSS table over `[0, 1]` — they are
   **not** clamped to `[0.01, 0.10]` (that clamping is only documented, not implemented) and
   can report values outside the conventional significance range.
-  (being corrected in v0.10.0, Phases 11/17)
+  (tracked for Phases 11/17)
 
 ## `ts_stationarity` / `ts_stationarity_by` (STAT-03)
 
@@ -272,7 +272,7 @@ implementation:
 > `verdict` string as implementation-defined today rather than matching the statsmodels
 > literature convention; rely on the individual `adf_is_stationary` / `kpss_is_stationary`
 > flags if you need the standard interpretation.
-> (being corrected in v0.10.0, Phase 17)
+> (tracked for Phase 17)
 
 ## Residual Diagnostics
 
@@ -293,7 +293,7 @@ Default `lags = min(10, n/5)`. Residuals are treated as raw (0 fitted params), s
 subtract the number of parameters fitted by the upstream model — if you are testing
 residuals from a model with `k` estimated parameters, `df` should conventionally be
 `lags - k`, and this function does not make that correction.
-(being corrected in v0.10.0, Phase 17)
+(tracked for Phase 17)
 
 ```sql
 SELECT group_col, (ljung_box).p_value FROM ts_ljung_box_by('resids', series_id, ds, e);

@@ -30,7 +30,7 @@ ts_ensemble_inspect_by(
     target_col     IDENTIFIER,   -- value column (unquoted)
     members        VARCHAR[],    -- 2+ model names, e.g. ['AutoARIMA','AutoETS','Theta']
     combination_method := '',    -- blend strategy; default '' = 'mean'
-    seasonal_period := 0         -- shared period; 0 = non-seasonal
+    seasonal_period := 0         -- shared period; 0 or 1 auto-detects; p > 1 wins directly
 ) → TABLE(group_col, member_name VARCHAR, weight DOUBLE, score DOUBLE)
 ```
 
@@ -44,7 +44,7 @@ ts_ensemble_inspect_by(
 | `target_col` | IDENTIFIER | — | Target value column (unquoted) |
 | `members` | VARCHAR[] | — | List of 2+ model names; same vocabulary as `ts_forecast_by` `method` param |
 | `combination_method` | VARCHAR | `''` (= `'mean'`) | Blend strategy (see table below) |
-| `seasonal_period` | INTEGER | `0` | Seasonal period shared by all members; `0` = non-seasonal |
+| `seasonal_period` | INTEGER | `0` | Seasonal period shared by all members. `0` and `1` behave identically — both trigger a single shared period auto-detection pass (same detector `ts_forecast_by`'s own `seasonal_period=0` default uses); `p > 1` always wins and is used directly. Matches `ts_forecast_ensemble_by`'s own `seasonal_period` rule (see [ensemble_explicit.md](ensemble_explicit.md#seasonal_period-behaviour)) since both share the same underlying resolution code. |
 
 ### combination_method strings
 

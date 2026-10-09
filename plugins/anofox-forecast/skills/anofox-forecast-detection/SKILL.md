@@ -222,7 +222,7 @@ Output columns (group column preserved):
 clearly-seasonal series (e.g. a sine wave at the correct period) come back as
 `timing_classification = 'non_seasonal'`, `is_seasonal = false`, with `seasonal_strength` /
 `timing_variability` as `NaN`. Treat results as unreliable until this is fixed.
-(being corrected in v0.10.0, Phase 15)
+(tracked for Phase 15)
 
 ```sql
 SELECT product_id, timing_classification, modulation_type, is_seasonal, seasonal_strength
@@ -274,7 +274,7 @@ seasonal period information — `MAP{'seasonal_periods': ...}` has **no effect**
 and `periods` come back as **empty arrays** on every call; this is currently classical
 moving-average trend extraction only, with `remainder = value - trend` and no seasonal
 component. There is no `seasonal_1`/`seasonal_2`-style per-period column naming.
-(being corrected in v0.10.0, Phase 15)
+(tracked for Phase 15)
 
 ```sql
 -- One row per group with array-valued trend/seasonal/remainder (no per-point date column);
@@ -299,7 +299,7 @@ ts_detrend_by(source, group_col, date_col, value_col, method) → TABLE
 makes `trend` come back all-zero and `detrended` equal the input values, for every
 `method`. `'quadratic'` / `'cubic'` additionally fall back silently to `'auto'` (reporting
 `method = 'auto(none)'`, `n_params = 0`) rather than fitting the requested degree.
-(being corrected in v0.10.0, Phase 15)
+(tracked for Phase 15)
 
 ### `ts_detrend` (scalar) — array-level trend removal
 
@@ -310,7 +310,7 @@ The array-level primitive behind `ts_detrend_by`. Signature `ts_detrend(DOUBLE[]
 - **Seasonality auto-detection is partial.** `AutoETS` / `AutoARIMA` / `AutoTheta` (and other models) via `ts_forecast_by` DO auto-detect when `seasonal_period`/`seasonal_periods` are both omitted — but `ts_forecast_agg` does NOT. Run detection first and pass `seasonal_period` explicitly if you want control/reproducibility rather than relying on silent auto-detection.
 - **`ts_detect_periods_by` returns one row per group** with a `periods` STRUCT. Access fields with `primary_period`.
 - **Detection needs sufficient history**: FFT-family methods need ≥ 2 full cycles; ACF-family needs ≥ 3. On short-history panels, `ts_detect_periods` may return `primary_period = 1` (no seasonality) even when a period exists.
-- **`ts_mstl_decomposition_by`'s `seasonal_periods` param currently has no effect at all** — `seasonal`/`periods` always come back empty (being corrected in v0.10.0, Phase 15).
+- **`ts_mstl_decomposition_by`'s `seasonal_periods` param currently has no effect at all** — `seasonal`/`periods` always come back empty (tracked for Phase 15).
 
 ## Canonical detection pipeline
 

@@ -177,7 +177,7 @@ ts_aggregate_hierarchy(
 - First column: Date/timestamp column
 - Second column: Value column (will be summed at each aggregation level). `NULL` values are
   currently treated as `0` when summed — a NULL does not propagate to NULL or get excluded,
-  it silently contributes zero to the aggregate. (being corrected in v0.10.0, Phase 12)
+  it silently contributes zero to the aggregate. (tracked for Phase 12)
 - Columns 3+: ID columns (broadest to finest granularity) - **any number of columns**
 
 **Parameters (optional MAP{}):**

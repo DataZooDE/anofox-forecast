@@ -56,7 +56,7 @@ of calibration and test residuals. This implementation has known gaps that can m
 - **Unrecognized `strategy` strings silently fall back to `'split'`** rather than raising an
   error — a typo in the strategy name will not be caught.
 
-(being corrected in v0.10.0, Phase 16)
+(tracked for Phase 16)
 
 ---
 
@@ -177,7 +177,7 @@ SELECT * FROM ts_conformal_apply_by(
 instead of one symmetric quantile. Do not assume this makes the interval tighter — internal
 measurement found the asymmetric path can be substantially *wider* than symmetric split on
 some residual distributions. Measure width empirically for your own data before relying on
-"asymmetric is tighter." (being corrected in v0.10.0, Phase 16)
+"asymmetric is tighter." (tracked for Phase 16)
 
 ```sql
 SELECT * FROM ts_conformal_by(
@@ -329,13 +329,13 @@ SELECT * FROM ts_conformal_by(
 );
 ```
 
-**When to use asymmetric:** Use `'asymmetric'` when residuals are not symmetric (e.g., demand forecasts often under-predict more than over-predict). This creates separate upper and lower quantiles — it does not guarantee a *tighter* interval than symmetric split; measure both on your data. (being corrected in v0.10.0, Phase 16)
+**When to use asymmetric:** Use `'asymmetric'` when residuals are not symmetric (e.g., demand forecasts often under-predict more than over-predict). This creates separate upper and lower quantiles — it does not guarantee a *tighter* interval than symmetric split; measure both on your data. (tracked for Phase 16)
 
 **Per-horizon ordering caveat:** `ts_conformal_by` currently builds the per-group forecast
 array with `LIST(point_forecast_col ORDER BY point_forecast_col)` — ordering by forecast
 *value*, not by the original horizon/date order. This silently scrambles which calibration
 residual lines up with which forecast step whenever point forecasts are not already
-monotonic. See [Coverage caveats](#coverage-caveats). (being corrected in v0.10.0, Phase 16)
+monotonic. See [Coverage caveats](#coverage-caveats). (tracked for Phase 16)
 
 ---
 
@@ -678,7 +678,7 @@ ts_conformal_learn(residuals DOUBLE[], alphas DOUBLE[], method VARCHAR, strategy
 | `'jackknife+'` (alias `'jackknife_plus'`) | Leave-one-out jackknife+; currently produces the **same** applied interval score as `'split'` — the internal state representation differs but `scores_lower`/`scores_upper` are identical today |
 
 Any other string (e.g. `'naive'`, `'adaptive'`) is silently treated as `'split'` rather than
-raising an error. (being corrected in v0.10.0, Phase 16)
+raising an error. (tracked for Phase 16)
 
 **Example:**
 ```sql

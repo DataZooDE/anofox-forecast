@@ -92,10 +92,10 @@ SELECT * FROM ts_drop_short_by('nulls_filled', product_id, 24);   -- ≥ 2 years
   **lag-k** difference `y[t] - y[t-k]`, not iterative d-th order differencing;
   `diff_order=2` is a lag-2 difference, not a true second difference. Apply with
   `diff_order=1` repeatedly if you need true d-th order differencing.
-  (being corrected in v0.10.0, Phase 12)
+  (tracked for Phase 12)
 - **`ts_detrend_by(source, group_col, date_col, value_col, method)`** — currently a **no-op**
   (an argument-order bug makes `trend` all-zero and `detrended` equal the input); `'quadratic'`
-  / `'cubic'` also silently fall back to `'auto'`. (being corrected in v0.10.0, Phase 15)
+  / `'cubic'` also silently fall back to `'auto'`. (tracked for Phase 15)
 - **`ts_validate_timestamps_by`** — check for out-of-order / duplicate timestamps.
 
 ```sql

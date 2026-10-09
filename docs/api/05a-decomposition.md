@@ -40,7 +40,7 @@ ts_mstl_decomposition_by(source, group_col, date_col, value_col, params)
 use any seasonal period information at all. `seasonal` and `periods` are returned as
 **empty arrays** on every call — this function currently performs classical moving-average
 trend extraction only, with no seasonal decomposition. `remainder` is simply
-`value - trend`. (being corrected in v0.10.0, Phase 15)
+`value - trend`. (tracked for Phase 15)
 
 **Returns:**
 | Column | Type | Description |
@@ -84,7 +84,7 @@ ts_detrend_by(source, group_col, date_col, value_col, method)
 issue in the underlying call, `trend` comes back all-zero and `detrended` equals the input
 values unchanged, for every `method`. Additionally, `'quadratic'` and `'cubic'` currently
 fall back to `'auto'` (and report `method = 'auto(none)'`, `n_params = 0`) rather than
-fitting the requested polynomial degree. (being corrected in v0.10.0, Phase 15)
+fitting the requested polynomial degree. (tracked for Phase 15)
 
 **Returns:**
 | Column | Type | Description |
@@ -159,7 +159,7 @@ seasonal series (e.g. a clean sine wave with the correct period) can currently c
 `timing_classification = 'non_seasonal'`, `modulation_type = 'non_seasonal'`,
 `is_seasonal = false`, with `seasonal_strength` / `timing_variability` as `NaN`. Treat
 results from this function as unreliable until this is fixed.
-(being corrected in v0.10.0, Phase 15)
+(tracked for Phase 15)
 
 **Example:**
 ```sql

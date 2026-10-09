@@ -91,7 +91,7 @@ Returns `unique_id` (group column **renamed** — the extension normalises it to
 always `0` — the underlying `compute_data_quality` call never receives the date array, so
 neither reflects actual gap structure, and `n_short`/`frequency` are silently ignored by
 this scoring path. `overall_score` is correspondingly inflated by the always-perfect
-`temporal_score` component. (being corrected in v0.10.0, Phase 13)
+`temporal_score` component. (tracked for Phase 13)
 
 ```sql
 SELECT * FROM ts_data_quality('sales', product_id, ds, y, 14, '1d');
@@ -147,7 +147,7 @@ it does not add augmentation terms); the lag reported is chosen by minimum RSS, 
 p-values for both `ts_adf` and `ts_kpss` are a coarse step-table lookup — NOT MacKinnon
 interpolation and NOT cross-validated against statsmodels — and KPSS p-values are an
 unbounded extrapolation, not clamped to `[0.01, 0.10]`.
-(being corrected in v0.10.0, Phases 11/17)
+(tracked for Phases 11/17)
 
 #### `ts_adf` / `ts_adf_by` — Dickey-Fuller unit-root test (currently non-augmented)
 
@@ -221,7 +221,7 @@ limitation:** the `trend_stationary`/`non_stationary` labels are currently inver
 to the standard statsmodels convention, and a constant series currently returns
 `verdict = 'non_stationary'` rather than `'stationary'`. Prefer the individual
 `adf_is_stationary`/`kpss_is_stationary` flags if you need the textbook interpretation.
-(being corrected in v0.10.0, Phase 17)
+(tracked for Phase 17)
 
 ---
 
@@ -351,7 +351,7 @@ FROM sales GROUP BY id;
 
 - **`ts_stats` and `ts_data_quality` are TABLE functions** — call from FROM, not SELECT. Older docs incorrectly showed them as scalars over `LIST(...)`.
 - **`_agg` variants take `(date, value)` directly** — no `LIST()` wrapping. Wrapping in `LIST(...)` errors as "No function matches …".
-- **`trend_strength` / `seasonality_strength` formulas**: `trend_strength` is `|r|` (absolute Pearson correlation) of a linear fit against the series index — not a decomposition-based strength. `seasonality_strength` is `max(|ACF|)` over lags 2, 4, 7, and 12 only — it will miss seasonality at other periods. Neither has an officially-defined "strong"/"weak" threshold; validate any cutoff you use against your own data rather than assuming > 0.6 / < 0.2. (being corrected in v0.10.0, Phase 13)
+- **`trend_strength` / `seasonality_strength` formulas**: `trend_strength` is `|r|` (absolute Pearson correlation) of a linear fit against the series index — not a decomposition-based strength. `seasonality_strength` is `max(|ACF|)` over lags 2, 4, 7, and 12 only — it will miss seasonality at other periods. Neither has an officially-defined "strong"/"weak" threshold; validate any cutoff you use against your own data rather than assuming > 0.6 / < 0.2. (tracked for Phase 13)
 - **JSON extension is required** by a subset of quality / feature functions. Enable auto-load once per session: `SET autoinstall_known_extensions=1; SET autoload_known_extensions=1;`.
 - **`ts_r2(DOUBLE[] actual, DOUBLE[] predicted) → DOUBLE`** is a scalar **regression R² metric**, not an EDA statistic — it lives with the scalar metrics family in `anofox-forecast-backtest`. Use it under `GROUP BY` to score fit quality, e.g. `SELECT ts_r2([1.0,2,3,4], [1.1,2.0,2.9,4.2]);`.
 

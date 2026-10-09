@@ -66,3 +66,11 @@ docs/reference/models/intermittent/imapa.md	SELECT * FROM ts_forecast('table', d
 docs/reference/models/intermittent/tsb.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'TSB', horizon, params);
 docs/reference/models/intermittent/global_croston.md	SELECT * FROM ts_forecast_panel_by(
 docs/reference/models/exponential-smoothing/global_ets.md	SELECT * FROM ts_forecast_panel_by(
+docs/reference/models/ensemble/ensemble_explicit.md	SELECT * FROM ts_forecast_ensemble_by(
+docs/reference/models/ensemble/ensemble_explicit.md	SELECT * FROM ts_forecast_ensemble_by('ae_test', id, ds, y,
+docs/reference/models/ensemble/ensemble_inspect.md	ts_ensemble_inspect_by(
+docs/reference/models/ensemble/ensemble_inspect.md	ts_auto_ensemble_inspect_by(
+docs/reference/models/distributional/laplace.md	SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col,
+docs/reference/models/classical/garch.md	SELECT * FROM ts_forecast_by(
+docs/reference/models/classical/garch.md	params := MAP{'garch_p': '1', 'garch_q': '1'}
+docs/reference/models/ensemble/autoensemble.md	SELECT * FROM ts_forecast_by(
