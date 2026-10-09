@@ -19,34 +19,16 @@
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/common/types/vector.hpp"
+#include "ts_list_marshal.hpp"
 
 namespace duckdb {
 
-// ============================================================================
-// Helper: extract LIST(DOUBLE) entries into a std::vector<double>.
-// NULL entries in the child vector are silently skipped (consistent with the
-// NaN-for-NULL handling in the FFI build_values helper).
-// ============================================================================
-
-static void ExtractListAsDoubleLocal(Vector &list_vec, idx_t row_idx,
-                                     vector<double> &out_values) {
-    auto list_data = ListVector::GetData(list_vec);
-    auto &list_entry = list_data[row_idx];
-
-    auto &child_vec = ListVector::GetEntry(list_vec);
-    auto child_data = FlatVector::GetData<double>(child_vec);
-    auto &child_validity = FlatVector::Validity(child_vec);
-
-    out_values.clear();
-    out_values.reserve(list_entry.length);
-
-    for (idx_t i = 0; i < list_entry.length; i++) {
-        idx_t child_idx = list_entry.offset + i;
-        if (child_validity.RowIsValid(child_idx)) {
-            out_values.push_back(child_data[child_idx]);
-        }
-    }
-}
+// List extraction for every function below goes through ts_list_marshal.hpp's
+// ListDoubleReader::ReadSingleSeries (Phase 12 D-01/D-03/D-04, plan 12-02):
+// the series is NULL-free after the Rust single-series gate
+// (anofox_ts_series_gate) trims leading/trailing NULLs and errors on any
+// interior NULL naming its 1-based position; the diagnostic FFIs below always
+// receive `nullptr` for `validity` since the slice is guaranteed NULL-free.
 
 // ============================================================================
 // ts_adf(series LIST(DOUBLE)) → STRUCT(statistic, p_value, lags, is_stationary,
@@ -61,11 +43,13 @@ static void TsAdfFunction(DataChunk &args, ExpressionState &state, Vector &resul
     auto &values_vec = args.data[0];
     idx_t count = args.size();
 
+    ListDoubleReader series_reader(values_vec, count);
+
     // Optional second argument: max_lags INTEGER (default -1 → auto)
-    UnifiedVectorFormat max_lags_data;
     bool has_max_lags = (args.ColumnCount() >= 2);
+    unique_ptr<ScalarArgReader<int32_t>> max_lags_reader;
     if (has_max_lags) {
-        args.data[1].ToUnifiedFormat(count, max_lags_data);
+        max_lags_reader = make_uniq<ScalarArgReader<int32_t>>(args.data[1], count);
     }
 
     // Get STRUCT output entry vectors (order matches child_list_t in RegisterTsAdfFunction)
@@ -89,28 +73,25 @@ static void TsAdfFunction(DataChunk &args, ExpressionState &state, Vector &resul
     vector<double> series;
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        // NULL list → NULL STRUCT (Threat T-01-03 partial: zero-length handled in FFI)
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        // NULL list, or nothing left after the Rust series gate trims
+        // leading/trailing NULLs (D-04) → NULL STRUCT. Interior NULLs throw
+        // InvalidInputException naming the 1-based position (D-03).
+        if (!series_reader.ReadSingleSeries(row_idx, series, "ts_adf")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         // Resolve max_lags for this row (-1 = auto)
         int32_t max_lags_val = -1;
-        if (has_max_lags) {
-            auto ml_idx = max_lags_data.sel->get_index(row_idx);
-            if (max_lags_data.validity.RowIsValid(ml_idx)) {
-                max_lags_val = UnifiedVectorFormat::GetData<int32_t>(max_lags_data)[ml_idx];
-            }
+        if (has_max_lags && !max_lags_reader->IsNull(row_idx)) {
+            max_lags_val = max_lags_reader->Get(row_idx);
         }
-
-        ExtractListAsDoubleLocal(values_vec, row_idx, series);
 
         AnofoxStationarityResult r = {};
         AnofoxError err = {};
         bool ok = anofox_ts_adf(
             series.data(),
-            /* validity= */ nullptr,   // already filtered by ExtractListAsDoubleLocal
+            /* validity= */ nullptr,   // NULL-free after the Rust series gate
             series.size(),
             static_cast<int>(max_lags_val),
             &r, &err
@@ -235,10 +216,12 @@ static void TsKpssFunction(DataChunk &args, ExpressionState &state, Vector &resu
     auto &values_vec = args.data[0];
     idx_t count = args.size();
 
-    UnifiedVectorFormat lags_data_fmt;
+    ListDoubleReader series_reader(values_vec, count);
+
     bool has_lags = (args.ColumnCount() >= 2);
+    unique_ptr<ScalarArgReader<int32_t>> lags_reader;
     if (has_lags) {
-        args.data[1].ToUnifiedFormat(count, lags_data_fmt);
+        lags_reader = make_uniq<ScalarArgReader<int32_t>>(args.data[1], count);
     }
 
     auto &struct_entries = StructVector::GetEntries(result);
@@ -253,20 +236,15 @@ static void TsKpssFunction(DataChunk &args, ExpressionState &state, Vector &resu
     vector<double> series;
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        if (!series_reader.ReadSingleSeries(row_idx, series, "ts_kpss")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         int32_t lags_val = -1;
-        if (has_lags) {
-            auto l_idx = lags_data_fmt.sel->get_index(row_idx);
-            if (lags_data_fmt.validity.RowIsValid(l_idx)) {
-                lags_val = UnifiedVectorFormat::GetData<int32_t>(lags_data_fmt)[l_idx];
-            }
+        if (has_lags && !lags_reader->IsNull(row_idx)) {
+            lags_val = lags_reader->Get(row_idx);
         }
-
-        ExtractListAsDoubleLocal(values_vec, row_idx, series);
 
         AnofoxStationarityResult r = {};
         AnofoxError err = {};
@@ -303,6 +281,8 @@ static void TsStationarityFunction(DataChunk &args, ExpressionState &state, Vect
     auto &values_vec = args.data[0];
     idx_t count = args.size();
 
+    ListDoubleReader series_reader(values_vec, count);
+
     auto &struct_entries = StructVector::GetEntries(result);
     auto adf_stat_data  = FlatVector::GetData<double>(*struct_entries[0]);
     auto adf_pval_data  = FlatVector::GetData<double>(*struct_entries[1]);
@@ -316,12 +296,10 @@ static void TsStationarityFunction(DataChunk &args, ExpressionState &state, Vect
     vector<double> series;
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        if (!series_reader.ReadSingleSeries(row_idx, series, "ts_stationarity")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
-
-        ExtractListAsDoubleLocal(values_vec, row_idx, series);
 
         AnofoxCombinedStationarityResult r = {};
         AnofoxError err = {};
@@ -470,10 +448,12 @@ static void TsLjungBoxFunction(DataChunk &args, ExpressionState &state, Vector &
     auto &values_vec = args.data[0];
     idx_t count = args.size();
 
-    UnifiedVectorFormat lags_fmt;
+    ListDoubleReader series_reader(values_vec, count);
+
     bool has_lags = (args.ColumnCount() >= 2);
+    unique_ptr<ScalarArgReader<int32_t>> lags_reader;
     if (has_lags) {
-        args.data[1].ToUnifiedFormat(count, lags_fmt);
+        lags_reader = make_uniq<ScalarArgReader<int32_t>>(args.data[1], count);
     }
 
     auto &e = StructVector::GetEntries(result);
@@ -484,18 +464,14 @@ static void TsLjungBoxFunction(DataChunk &args, ExpressionState &state, Vector &
 
     vector<double> series;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        if (!series_reader.ReadSingleSeries(row_idx, series, "ts_ljung_box")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
         int32_t lags_val = -1;
-        if (has_lags) {
-            auto li = lags_fmt.sel->get_index(row_idx);
-            if (lags_fmt.validity.RowIsValid(li)) {
-                lags_val = UnifiedVectorFormat::GetData<int32_t>(lags_fmt)[li];
-            }
+        if (has_lags && !lags_reader->IsNull(row_idx)) {
+            lags_val = lags_reader->Get(row_idx);
         }
-        ExtractListAsDoubleLocal(values_vec, row_idx, series);
         AnofoxLjungBoxResult r = {};
         AnofoxError err = {};
         if (!anofox_ts_ljung_box(series.data(), nullptr, series.size(),
@@ -517,6 +493,7 @@ static void TsLjungBoxFunction(DataChunk &args, ExpressionState &state, Vector &
 static void TsDurbinWatsonFunction(DataChunk &args, ExpressionState &state, Vector &result) {
     auto &values_vec = args.data[0];
     idx_t count = args.size();
+    ListDoubleReader series_reader(values_vec, count);
     auto &e = StructVector::GetEntries(result);
     auto stat_data = FlatVector::GetData<double>(*e[0]);
     auto &interp_vec = *e[1];
@@ -524,11 +501,10 @@ static void TsDurbinWatsonFunction(DataChunk &args, ExpressionState &state, Vect
 
     vector<double> series;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        if (!series_reader.ReadSingleSeries(row_idx, series, "ts_durbin_watson")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
-        ExtractListAsDoubleLocal(values_vec, row_idx, series);
         AnofoxDurbinWatsonResult r = {};
         AnofoxError err = {};
         if (!anofox_ts_durbin_watson(series.data(), nullptr, series.size(), &r, &err)) {
@@ -548,6 +524,7 @@ static void TsDurbinWatsonFunction(DataChunk &args, ExpressionState &state, Vect
 static void TsJarqueBeraFunction(DataChunk &args, ExpressionState &state, Vector &result) {
     auto &values_vec = args.data[0];
     idx_t count = args.size();
+    ListDoubleReader series_reader(values_vec, count);
     auto &e = StructVector::GetEntries(result);
     auto stat_data = FlatVector::GetData<double>(*e[0]);
     auto pval_data = FlatVector::GetData<double>(*e[1]);
@@ -556,11 +533,10 @@ static void TsJarqueBeraFunction(DataChunk &args, ExpressionState &state, Vector
 
     vector<double> series;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        if (!series_reader.ReadSingleSeries(row_idx, series, "ts_jarque_bera")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
-        ExtractListAsDoubleLocal(values_vec, row_idx, series);
         AnofoxJarqueBeraResult r = {};
         AnofoxError err = {};
         if (!anofox_ts_jarque_bera(series.data(), nullptr, series.size(), &r, &err)) {
@@ -582,10 +558,12 @@ static void TsResidualDiagnosticsFunction(DataChunk &args, ExpressionState &stat
     auto &values_vec = args.data[0];
     idx_t count = args.size();
 
-    UnifiedVectorFormat alpha_fmt;
+    ListDoubleReader series_reader(values_vec, count);
+
     bool has_alpha = (args.ColumnCount() >= 2);
+    unique_ptr<ScalarArgReader<double>> alpha_reader;
     if (has_alpha) {
-        args.data[1].ToUnifiedFormat(count, alpha_fmt);
+        alpha_reader = make_uniq<ScalarArgReader<double>>(args.data[1], count);
     }
 
     auto &e = StructVector::GetEntries(result);
@@ -603,18 +581,14 @@ static void TsResidualDiagnosticsFunction(DataChunk &args, ExpressionState &stat
 
     vector<double> series;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        if (!series_reader.ReadSingleSeries(row_idx, series, "ts_residual_diagnostics")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
         double alpha_val = 0.05;
-        if (has_alpha) {
-            auto ai = alpha_fmt.sel->get_index(row_idx);
-            if (alpha_fmt.validity.RowIsValid(ai)) {
-                alpha_val = UnifiedVectorFormat::GetData<double>(alpha_fmt)[ai];
-            }
+        if (has_alpha && !alpha_reader->IsNull(row_idx)) {
+            alpha_val = alpha_reader->Get(row_idx);
         }
-        ExtractListAsDoubleLocal(values_vec, row_idx, series);
         AnofoxResidualDiagnosticsResult r = {};
         AnofoxError err = {};
         if (!anofox_ts_residual_diagnostics(series.data(), nullptr, series.size(),

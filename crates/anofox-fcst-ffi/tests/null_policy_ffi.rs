@@ -9,7 +9,7 @@ use anofox_fcst_ffi::types::AnofoxError;
 use anofox_fcst_ffi::{
     anofox_ts_bias, anofox_ts_coverage, anofox_ts_mae, anofox_ts_mase, anofox_ts_mqloss,
     anofox_ts_mse, anofox_ts_quantile_loss, anofox_ts_r2, anofox_ts_rmae, anofox_ts_rmse,
-    ErrorCode,
+    anofox_ts_series_gate, ErrorCode,
 };
 
 /// Build a validity bitmask word (LSB-first) from a slice of bools.
@@ -21,6 +21,18 @@ fn bitmask(valid: &[bool]) -> u64 {
         }
     }
     word
+}
+
+/// Decode an `AnofoxError::message` fixed `[c_char; 256]` buffer to a `String`
+/// (NUL-terminated, ASCII/UTF-8 message text set by `set_error`).
+fn error_message(error: &AnofoxError) -> String {
+    let bytes: Vec<u8> = error
+        .message
+        .iter()
+        .take_while(|&&b| b != 0)
+        .map(|&b| b as u8)
+        .collect();
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 #[test]
@@ -360,6 +372,143 @@ fn every_metric_with_null_validity_and_complete_data_matches_core_slice() {
         .sum::<f64>()
         / actual.len() as f64;
     assert!((mae_result - expected).abs() < 1e-12);
+}
+
+#[test]
+fn gate_trims_leading_and_trailing_missing() {
+    // [0,0,1,2,0] validity 0b01100 -> valid at indices 2,3 -> start 2, length 2.
+    let values = [0.0, 0.0, 1.0, 2.0, 0.0];
+    let validity = bitmask(&[false, false, true, true, false]);
+
+    let mut out_start: usize = 0;
+    let mut out_length: usize = 0;
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_series_gate(
+            values.as_ptr(),
+            &validity,
+            values.len(),
+            &mut out_start,
+            &mut out_length,
+            &mut error,
+        )
+    };
+    assert!(success, "expected success, error: {:?}", error.code);
+    assert_eq!(out_start, 2);
+    assert_eq!(out_length, 2);
+}
+
+#[test]
+fn gate_interior_null_errors_with_one_based_position() {
+    // [1,2,0,4] validity 0b1011 (bit2=0) -> interior NULL at original position 3.
+    let values = [1.0, 2.0, 0.0, 4.0];
+    let validity = bitmask(&[true, true, false, true]);
+
+    let mut out_start: usize = 0;
+    let mut out_length: usize = 0;
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_series_gate(
+            values.as_ptr(),
+            &validity,
+            values.len(),
+            &mut out_start,
+            &mut out_length,
+            &mut error,
+        )
+    };
+    assert!(!success);
+    assert_eq!(error.code, ErrorCode::InvalidInput);
+    let msg = error_message(&error);
+    assert!(
+        msg.contains("interior NULL at position 3"),
+        "message: {msg}"
+    );
+}
+
+#[test]
+fn gate_all_invalid_or_zero_length_returns_empty_not_error() {
+    // All-invalid, length 3 -> success, length 0.
+    let values = [0.0, 0.0, 0.0];
+    let validity = bitmask(&[false, false, false]);
+    let mut out_start: usize = 0;
+    let mut out_length: usize = 0;
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_series_gate(
+            values.as_ptr(),
+            &validity,
+            values.len(),
+            &mut out_start,
+            &mut out_length,
+            &mut error,
+        )
+    };
+    assert!(success, "expected success, error: {:?}", error.code);
+    assert_eq!(out_length, 0);
+
+    // Zero length, values pointer null -> success, length 0.
+    let mut out_start2: usize = 0;
+    let mut out_length2: usize = 0;
+    let success2 = unsafe {
+        anofox_ts_series_gate(
+            std::ptr::null(),
+            std::ptr::null(),
+            0,
+            &mut out_start2,
+            &mut out_length2,
+            &mut error,
+        )
+    };
+    assert!(success2, "expected success, error: {:?}", error.code);
+    assert_eq!(out_length2, 0);
+}
+
+#[test]
+fn gate_null_validity_with_nan_interior_errors_with_position() {
+    // [5, NaN, 7], null validity pointer -> NaN at index 1 is "interior NULL at position 2".
+    let values = [5.0, f64::NAN, 7.0];
+    let mut out_start: usize = 0;
+    let mut out_length: usize = 0;
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_series_gate(
+            values.as_ptr(),
+            std::ptr::null(),
+            values.len(),
+            &mut out_start,
+            &mut out_length,
+            &mut error,
+        )
+    };
+    assert!(!success);
+    assert_eq!(error.code, ErrorCode::InvalidInput);
+    let msg = error_message(&error);
+    assert!(
+        msg.contains("interior NULL at position 2"),
+        "message: {msg}"
+    );
+}
+
+#[test]
+fn gate_null_validity_no_nan_returns_full_range() {
+    let values = [1.0, 2.0, 3.0, 4.0];
+    let mut out_start: usize = 0;
+    let mut out_length: usize = 0;
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_series_gate(
+            values.as_ptr(),
+            std::ptr::null(),
+            values.len(),
+            &mut out_start,
+            &mut out_length,
+            &mut error,
+        )
+    };
+    assert!(success, "expected success, error: {:?}", error.code);
+    assert_eq!(out_start, 0);
+    assert_eq!(out_length, values.len());
 }
 
 #[test]

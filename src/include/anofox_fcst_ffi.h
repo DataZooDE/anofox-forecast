@@ -3434,6 +3434,35 @@ bool anofox_ts_adf(const double *values,
                    struct AnofoxError *out_error);
 
 /**
+ * Phase 12 D-03/D-04 single-series missing-data gate: trims leading/trailing
+ * missing values and rejects any remaining interior missing value, naming its
+ * 1-based position in the ORIGINAL list. `validity` may be null (all valid);
+ * NaN is treated as missing (Phase 10 D-12 convention) — see
+ * `anofox_fcst_core::missing::trim_edges_reject_interior`.
+ *
+ * - `length == 0` -> success, `*out_start = 0`, `*out_length = 0` (`values`
+ *   may be null in that case only).
+ * - Nothing present after trimming -> success, `*out_start = 0`,
+ *   `*out_length = 0` (D-04: caller emits SQL NULL).
+ * - Otherwise -> success, `*out_start`/`*out_length` describe the trimmed,
+ *   fully-present interior `[start, start+length)` of the ORIGINAL array.
+ * - An interior missing value -> failure, `ErrorCode::InvalidInput`, message
+ *   contains "interior NULL at position k" (1-based).
+ *
+ * # Safety
+ *
+ * `out_start`, `out_length` and `out_error` must be non-null. `values` must
+ * be non-null when `length > 0`. `validity` may be null. `length` must equal
+ * the number of `f64` elements at `values`.
+ */
+bool anofox_ts_series_gate(const double *values,
+                           const uint64_t *validity,
+                           size_t length,
+                           size_t *out_start,
+                           size_t *out_length,
+                           struct AnofoxError *out_error);
+
+/**
  * Run the KPSS stationarity test on a single series (STAT-02).
  *
  * # Safety

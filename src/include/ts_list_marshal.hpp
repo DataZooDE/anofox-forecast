@@ -16,6 +16,45 @@
 
 namespace duckdb {
 
+// Applies the Rust single-series missing-data gate (Phase 12 D-03/D-04) to a
+// values/validity pair already marshalled by ListDoubleReader::Read (or any
+// other caller building its own vectors, e.g. an aggregate/table function in
+// plan 12-03+). Calls anofox_ts_series_gate:
+//   - interior missing value -> throws InvalidInputException("%s: %s", fn_name,
+//     error.message) — error.message already contains "interior NULL at
+//     position k".
+//   - nothing present after trimming (D-04) -> returns false; caller must
+//     write a NULL result for this row and skip it.
+//   - otherwise -> replaces `values` with the trimmed, NULL-free slice
+//     [start, start+length) and returns true.
+// `start + len <= values.size()` is checked before slicing (T-12-06 defence
+// in depth against an FFI contract break) and throws InternalException if
+// violated.
+inline bool ApplySingleSeriesPolicy(vector<double> &values, const vector<uint64_t> &validity,
+                                     const char *fn_name) {
+	size_t out_start = 0;
+	size_t out_length = 0;
+	AnofoxError error = {};
+	bool ok = anofox_ts_series_gate(values.empty() ? nullptr : values.data(),
+	                                 validity.empty() ? nullptr : validity.data(), values.size(), &out_start,
+	                                 &out_length, &error);
+	if (!ok) {
+		throw InvalidInputException("%s: %s", fn_name, error.message);
+	}
+	if (out_length == 0) {
+		return false;
+	}
+	if (out_start + out_length > values.size()) {
+		throw InternalException("%s: anofox_ts_series_gate returned an out-of-range slice "
+		                        "(start=%llu, length=%llu, values.size()=%llu)",
+		                        fn_name, (unsigned long long)out_start, (unsigned long long)out_length,
+		                        (unsigned long long)values.size());
+	}
+	vector<double> trimmed(values.begin() + out_start, values.begin() + out_start + out_length);
+	values = std::move(trimmed);
+	return true;
+}
+
 // Reads a LIST(DOUBLE) argument for every row of a chunk. Construct once per
 // chunk per list argument (NOT once per row) — the constructor does the
 // ToUnifiedFormat work.
@@ -94,6 +133,23 @@ public:
 			}
 			values[i] = child_values[unified_child_idx];
 		}
+	}
+
+	// Reads the list for `row_idx` into `values`, then applies the Rust
+	// single-series missing-data gate (Phase 12 D-03/D-04, plan 12-02) via
+	// `ApplySingleSeriesPolicy`: trims leading/trailing NULLs/NaN, errors on
+	// any remaining interior missing value naming its 1-based position, and
+	// replaces `values` with the trimmed, NULL-free slice. Returns false
+	// (caller must emit SQL NULL) when the top-level list is NULL or nothing
+	// is present after trimming (D-04); throws InvalidInputException on an
+	// interior missing value.
+	bool ReadSingleSeries(idx_t row_idx, vector<double> &values, const char *fn_name) const {
+		if (IsNull(row_idx)) {
+			return false;
+		}
+		vector<uint64_t> validity;
+		Read(row_idx, values, validity);
+		return ApplySingleSeriesPolicy(values, validity, fn_name);
 	}
 
 private:
@@ -178,6 +234,36 @@ private:
 	UnifiedVectorFormat outer_data;
 	UnifiedVectorFormat inner_data;
 	UnifiedVectorFormat innermost_data;
+};
+
+// Reads a non-LIST (scalar) argument vector for every row of a chunk via
+// ToUnifiedFormat — safe for CONSTANT and DICTIONARY-encoded vectors
+// (Phase 12 T-12-07: `FlatVector::GetData(...)[row_idx]` on a constant vector
+// only returns the correct value for row 0; every other row reads garbage).
+// Construct once per chunk per argument vector. T is the DuckDB physical
+// storage type (double, int32_t, int64_t, bool, string_t, ...). For strings,
+// call `Get(row_idx).GetString()` — never treat `string_t::GetData()` as a
+// NUL-terminated C string.
+template <class T>
+class ScalarArgReader {
+public:
+	ScalarArgReader(Vector &vec, idx_t count) : vec(vec) {
+		vec.ToUnifiedFormat(count, data);
+	}
+
+	bool IsNull(idx_t row_idx) const {
+		auto idx = data.sel->get_index(row_idx);
+		return !data.validity.RowIsValid(idx);
+	}
+
+	T Get(idx_t row_idx) const {
+		auto idx = data.sel->get_index(row_idx);
+		return UnifiedVectorFormat::GetData<T>(data)[idx];
+	}
+
+private:
+	Vector &vec;
+	UnifiedVectorFormat data;
 };
 
 // Writes a flat double array into row `row_idx` of a LIST(DOUBLE) result vector.

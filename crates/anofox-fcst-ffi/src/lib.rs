@@ -6717,6 +6717,88 @@ pub unsafe extern "C" fn anofox_ts_adf(
     }
 }
 
+/// Phase 12 D-03/D-04 single-series missing-data gate: trims leading/trailing
+/// missing values and rejects any remaining interior missing value, naming its
+/// 1-based position in the ORIGINAL list. `validity` may be null (all valid);
+/// NaN is treated as missing (Phase 10 D-12 convention) — see
+/// `anofox_fcst_core::missing::trim_edges_reject_interior`.
+///
+/// - `length == 0` -> success, `*out_start = 0`, `*out_length = 0` (`values`
+///   may be null in that case only).
+/// - Nothing present after trimming -> success, `*out_start = 0`,
+///   `*out_length = 0` (D-04: caller emits SQL NULL).
+/// - Otherwise -> success, `*out_start`/`*out_length` describe the trimmed,
+///   fully-present interior `[start, start+length)` of the ORIGINAL array.
+/// - An interior missing value -> failure, `ErrorCode::InvalidInput`, message
+///   contains "interior NULL at position k" (1-based).
+///
+/// # Safety
+///
+/// `out_start`, `out_length` and `out_error` must be non-null. `values` must
+/// be non-null when `length > 0`. `validity` may be null. `length` must equal
+/// the number of `f64` elements at `values`.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_series_gate(
+    values: *const c_double,
+    validity: *const u64,
+    length: size_t,
+    out_start: *mut size_t,
+    out_length: *mut size_t,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if check_null_pointers(
+        out_error,
+        &[
+            out_start as *const core::ffi::c_void,
+            out_length as *const core::ffi::c_void,
+        ],
+    ) {
+        return false;
+    }
+
+    if length == 0 {
+        *out_start = 0;
+        *out_length = 0;
+        return true;
+    }
+
+    if check_null_pointers(out_error, &[values as *const core::ffi::c_void]) {
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let series = build_series(values, validity, length);
+        anofox_fcst_core::trim_edges_reject_interior(&series)
+    }));
+
+    match result {
+        Ok(Ok(None)) => {
+            *out_start = 0;
+            *out_length = 0;
+            true
+        }
+        Ok(Ok(Some(range))) => {
+            *out_start = range.start;
+            *out_length = range.len();
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ErrorCode::InvalidInput, &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in anofox_ts_series_gate",
+            );
+            false
+        }
+    }
+}
+
 /// Run the KPSS stationarity test on a single series (STAT-02).
 ///
 /// # Safety
