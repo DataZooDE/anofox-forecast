@@ -5,16 +5,16 @@ milestone_name: Statistical Correctness
 current_phase: 10
 current_phase_name: Forecast Wrapper Delegates to Crate Models
 status: executing
-stopped_at: Completed 10-06-PLAN.md
-last_updated: "2026-10-09T16:17:59.206Z"
+stopped_at: Completed 10-07-PLAN.md
+last_updated: "2026-10-09T16:28:22.006Z"
 last_activity: 2026-10-09
 last_activity_desc: Phase 10 execution started
-state_head: db212ad10c0bbbb2d7136abc2ab0eb994ac2368e
+state_head: 535dbe52d80d040093b137ccdcd43fe9a480047c
 progress:
   total_phases: 10
   completed_phases: 0
   total_plans: 12
-  completed_plans: 9
+  completed_plans: 10
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-08 — started v0.10.0 Statistical Co
 ## Current Position
 
 Phase: 10 (Forecast Wrapper Delegates to Crate Models) — EXECUTING
-Plan: 7 of 9
+Plan: 8 of 9
 Status: Ready to execute
 Last activity: 2026-10-09 — Phase 10 execution started
 
@@ -64,6 +64,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 10 P04 | ~3h | 3 tasks | 12 files |
 | Phase 10 P05 | ~2h | 3 tasks | 5 files |
 | Phase 10 P06 | ~3h | 3 tasks | 17 files |
+| Phase 10 P07 | ~1h | 3 tasks | 19 files |
 
 ## Accumulated Context
 
@@ -97,6 +98,7 @@ Recent decisions affecting current work:
 - [Phase 10]: [Phase 10 P05]: native sqllogictest harness aborts the rest of a .test FILE on first unexpected failure, hiding later-in-file staleness until earlier failures are fixed and the file re-run
 - [Phase 10]: Phase-local snippet harness forked from quick task 261009-d02 with an --out flag; --all surfaced and fixed ~50 pre-existing, Phase-10-unrelated doc bugs across 5 files (wrong column names, missing fixtures, stale macro arg counts)
 - [Phase 10]: ensemble_explicit.sql's intentional Section-4 error-demo ending (pre-existing since Phase 5) left unrestructured; two ols_fit_predict_by regression-backtest bugs in the backtesting examples deferred as out-of-scope, unrelated to Phase 10
+- [Phase 10]: [Phase 10 P07]: Each per-model page's Signature block kept as a SYNOPSIS entry (narrative placeholder identifiers), not rewritten to run against a real fixture — the sibling SQL Example block is what proves the model
 
 ### Pending Todos
 
@@ -136,7 +138,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-09T16:17:59.176Z
-Stopped at: Completed 10-06-PLAN.md
+Last session: 2026-10-09T16:28:21.960Z
+Stopped at: Completed 10-07-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 9`
