@@ -495,6 +495,16 @@ WITH ordered_data AS (
         ROW_NUMBER() OVER (ORDER BY date_col) AS _idx
     FROM query_table(source::VARCHAR)
 ),
+lead_count AS (
+    -- Phase 12 D-03: _ts_detect_changepoints_bocpd trims leading NULL/NaN
+    -- values before analysis (plan 12-03). _lead = number of leading rows
+    -- (ordered by date_col) before the first non-NULL value; if every value
+    -- is NULL, _lead = row count (every row falls outside the trimmed range
+    -- below, so every flag is NULL).
+    SELECT COALESCE(MIN(_idx), (SELECT COUNT(*) FROM ordered_data) + 1) - 1 AS _lead
+    FROM ordered_data
+    WHERE _val IS NOT NULL
+),
 cp_result AS (
     SELECT _ts_detect_changepoints_bocpd(
         LIST(value_col::DOUBLE ORDER BY date_col),
@@ -506,9 +516,13 @@ cp_result AS (
 SELECT
     od._dt AS date_col,
     od._val AS value_col,
-    (cp.cp).is_changepoint[od._idx] AS is_changepoint,
-    (cp.cp).changepoint_probability[od._idx] AS changepoint_probability
-FROM ordered_data od, cp_result cp
+    CASE WHEN (od._idx - lc._lead) BETWEEN 1 AND len((cp.cp).is_changepoint)
+         THEN (cp.cp).is_changepoint[od._idx - lc._lead]
+         ELSE NULL END AS is_changepoint,
+    CASE WHEN (od._idx - lc._lead) BETWEEN 1 AND len((cp.cp).changepoint_probability)
+         THEN (cp.cp).changepoint_probability[od._idx - lc._lead]
+         ELSE NULL END AS changepoint_probability
+FROM ordered_data od, cp_result cp, lead_count lc
 ORDER BY od._dt
 )",
     "Detects structural changepoints in a single time series using Bayesian Online Changepoint Detection.",

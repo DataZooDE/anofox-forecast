@@ -1,5 +1,6 @@
 #include "anofox_forecast_extension.hpp"
 #include "anofox_fcst_ffi.h"
+#include "ts_list_marshal.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
@@ -7,26 +8,6 @@
 #include "duckdb/common/types/vector.hpp"
 
 namespace duckdb {
-
-// Helper to extract list as double values
-static void ExtractListAsDouble(Vector &list_vec, idx_t row_idx, vector<double> &out_values) {
-    auto list_data = ListVector::GetData(list_vec);
-    auto &list_entry = list_data[row_idx];
-
-    auto &child_vec = ListVector::GetEntry(list_vec);
-    auto child_data = FlatVector::GetData<double>(child_vec);
-    auto &child_validity = FlatVector::Validity(child_vec);
-
-    out_values.clear();
-    out_values.reserve(list_entry.length);
-
-    for (idx_t i = 0; i < list_entry.length; i++) {
-        idx_t child_idx = list_entry.offset + i;
-        if (child_validity.RowIsValid(child_idx)) {
-            out_values.push_back(child_data[child_idx]);
-        }
-    }
-}
 
 // ============================================================================
 // ts_detrend - Remove trend from time series
@@ -48,22 +29,28 @@ static void TsDetrendFunction(DataChunk &args, ExpressionState &state, Vector &r
     auto &values_vec = args.data[0];
     idx_t count = args.size();
 
-    const char *method_str = nullptr;
-    if (args.ColumnCount() > 1 && !FlatVector::IsNull(args.data[1], 0)) {
-        auto method_data = FlatVector::GetData<string_t>(args.data[1]);
-        method_str = method_data[0].GetData();
+    ListDoubleReader values_reader(values_vec, count);
+    bool has_method = args.ColumnCount() > 1;
+    unique_ptr<ScalarArgReader<string_t>> method_reader;
+    if (has_method) {
+        method_reader = make_uniq<ScalarArgReader<string_t>>(args.data[1], count);
     }
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        vector<double> values;
+        if (!values_reader.ReadSingleSeries(row_idx, values, "ts_detrend")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> values;
-        ExtractListAsDouble(values_vec, row_idx, values);
+        std::string method_owned;
+        const char *method_str = nullptr;
+        if (has_method && !method_reader->IsNull(row_idx)) {
+            method_owned = method_reader->Get(row_idx).GetString();
+            method_str = method_owned.c_str();
+        }
 
         DetrendResultFFI detrend_result;
         memset(&detrend_result, 0, sizeof(detrend_result));
@@ -161,23 +148,35 @@ static void TsDecomposeSeasonalFunction(DataChunk &args, ExpressionState &state,
     auto &period_vec = args.data[1];
     idx_t count = args.size();
 
-    const char *method_str = nullptr;
-    if (args.ColumnCount() > 2 && !FlatVector::IsNull(args.data[2], 0)) {
-        auto method_data = FlatVector::GetData<string_t>(args.data[2]);
-        method_str = method_data[0].GetData();
+    ListDoubleReader values_reader(values_vec, count);
+    ScalarArgReader<double> period_reader(period_vec, count);
+    bool has_method = args.ColumnCount() > 2;
+    unique_ptr<ScalarArgReader<string_t>> method_reader;
+    if (has_method) {
+        method_reader = make_uniq<ScalarArgReader<string_t>>(args.data[2], count);
     }
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx) || FlatVector::IsNull(period_vec, row_idx)) {
+        if (period_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> values;
-        ExtractListAsDouble(values_vec, row_idx, values);
-        double period = FlatVector::GetData<double>(period_vec)[row_idx];
+        if (!values_reader.ReadSingleSeries(row_idx, values, "ts_decompose_seasonal")) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+        double period = period_reader.Get(row_idx);
+
+        std::string method_owned;
+        const char *method_str = nullptr;
+        if (has_method && !method_reader->IsNull(row_idx)) {
+            method_owned = method_reader->Get(row_idx).GetString();
+            method_str = method_owned.c_str();
+        }
 
         DecomposeResultFFI decompose_result;
         memset(&decompose_result, 0, sizeof(decompose_result));
@@ -265,30 +264,36 @@ static void TsSeasonalStrengthFunction(DataChunk &args, ExpressionState &state, 
     auto &period_vec = args.data[1];
     idx_t count = args.size();
 
-    const char *method_str = nullptr;
-    if (args.ColumnCount() > 2 && !FlatVector::IsNull(args.data[2], 0)) {
-        auto method_data = FlatVector::GetData<string_t>(args.data[2]);
-        method_str = method_data[0].GetData();
+    ListDoubleReader values_reader(values_vec, count);
+    ScalarArgReader<double> period_reader(period_vec, count);
+    bool has_method = args.ColumnCount() > 2;
+    unique_ptr<ScalarArgReader<string_t>> method_reader;
+    if (has_method) {
+        method_reader = make_uniq<ScalarArgReader<string_t>>(args.data[2], count);
     }
-
-    // Handle constant vectors properly
-    UnifiedVectorFormat period_format;
-    period_vec.ToUnifiedFormat(count, period_format);
-    auto period_data = UnifiedVectorFormat::GetData<double>(period_format);
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
     auto result_data = FlatVector::GetData<double>(result);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        auto period_idx = period_format.sel->get_index(row_idx);
-        if (FlatVector::IsNull(values_vec, row_idx) || !period_format.validity.RowIsValid(period_idx)) {
+        if (period_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> values;
-        ExtractListAsDouble(values_vec, row_idx, values);
-        double period = period_data[period_idx];
+        if (!values_reader.ReadSingleSeries(row_idx, values, "ts_seasonal_strength")) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+        double period = period_reader.Get(row_idx);
+
+        std::string method_owned;
+        const char *method_str = nullptr;
+        if (has_method && !method_reader->IsNull(row_idx)) {
+            method_owned = method_reader->Get(row_idx).GetString();
+            method_str = method_owned.c_str();
+        }
 
         double strength = 0.0;
         AnofoxError error;
@@ -348,28 +353,44 @@ static void TsSeasonalStrengthWindowedFunction(DataChunk &args, ExpressionState 
     auto &period_vec = args.data[1];
     idx_t count = args.size();
 
-    double window_size = 0.0;
-    const char *method_str = nullptr;
-
-    if (args.ColumnCount() > 2 && !FlatVector::IsNull(args.data[2], 0)) {
-        window_size = FlatVector::GetData<double>(args.data[2])[0];
+    ListDoubleReader values_reader(values_vec, count);
+    ScalarArgReader<double> period_reader(period_vec, count);
+    bool has_window_size = args.ColumnCount() > 2;
+    bool has_method = args.ColumnCount() > 3;
+    unique_ptr<ScalarArgReader<double>> window_size_reader;
+    unique_ptr<ScalarArgReader<string_t>> method_reader;
+    if (has_window_size) {
+        window_size_reader = make_uniq<ScalarArgReader<double>>(args.data[2], count);
     }
-    if (args.ColumnCount() > 3 && !FlatVector::IsNull(args.data[3], 0)) {
-        auto method_data = FlatVector::GetData<string_t>(args.data[3]);
-        method_str = method_data[0].GetData();
+    if (has_method) {
+        method_reader = make_uniq<ScalarArgReader<string_t>>(args.data[3], count);
     }
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx) || FlatVector::IsNull(period_vec, row_idx)) {
+        if (period_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> values;
-        ExtractListAsDouble(values_vec, row_idx, values);
-        double period = FlatVector::GetData<double>(period_vec)[row_idx];
+        if (!values_reader.ReadSingleSeries(row_idx, values, "ts_seasonal_strength_windowed")) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+        double period = period_reader.Get(row_idx);
+
+        double window_size = 0.0;
+        if (has_window_size && !window_size_reader->IsNull(row_idx)) {
+            window_size = window_size_reader->Get(row_idx);
+        }
+        std::string method_owned;
+        const char *method_str = nullptr;
+        if (has_method && !method_reader->IsNull(row_idx)) {
+            method_owned = method_reader->Get(row_idx).GetString();
+            method_str = method_owned.c_str();
+        }
 
         double *strengths = nullptr;
         size_t n_windows = 0;
@@ -472,31 +493,40 @@ static void TsDetectSeasonalityChangesFunction(DataChunk &args, ExpressionState 
     auto &period_vec = args.data[1];
     idx_t count = args.size();
 
-    double threshold = 0.0;
-    double window_size = 0.0;
-    double min_duration = 0.0;
-
-    if (args.ColumnCount() > 2 && !FlatVector::IsNull(args.data[2], 0)) {
-        threshold = FlatVector::GetData<double>(args.data[2])[0];
+    ListDoubleReader values_reader(values_vec, count);
+    ScalarArgReader<double> period_reader(period_vec, count);
+    bool has_threshold = args.ColumnCount() > 2;
+    bool has_window_size = args.ColumnCount() > 3;
+    bool has_min_duration = args.ColumnCount() > 4;
+    unique_ptr<ScalarArgReader<double>> threshold_reader, window_size_reader, min_duration_reader;
+    if (has_threshold) {
+        threshold_reader = make_uniq<ScalarArgReader<double>>(args.data[2], count);
     }
-    if (args.ColumnCount() > 3 && !FlatVector::IsNull(args.data[3], 0)) {
-        window_size = FlatVector::GetData<double>(args.data[3])[0];
+    if (has_window_size) {
+        window_size_reader = make_uniq<ScalarArgReader<double>>(args.data[3], count);
     }
-    if (args.ColumnCount() > 4 && !FlatVector::IsNull(args.data[4], 0)) {
-        min_duration = FlatVector::GetData<double>(args.data[4])[0];
+    if (has_min_duration) {
+        min_duration_reader = make_uniq<ScalarArgReader<double>>(args.data[4], count);
     }
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx) || FlatVector::IsNull(period_vec, row_idx)) {
+        if (period_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> values;
-        ExtractListAsDouble(values_vec, row_idx, values);
-        double period = FlatVector::GetData<double>(period_vec)[row_idx];
+        if (!values_reader.ReadSingleSeries(row_idx, values, "ts_detect_seasonality_changes")) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+        double period = period_reader.Get(row_idx);
+
+        double threshold = (has_threshold && !threshold_reader->IsNull(row_idx)) ? threshold_reader->Get(row_idx) : 0.0;
+        double window_size = (has_window_size && !window_size_reader->IsNull(row_idx)) ? window_size_reader->Get(row_idx) : 0.0;
+        double min_duration = (has_min_duration && !min_duration_reader->IsNull(row_idx)) ? min_duration_reader->Get(row_idx) : 0.0;
 
         ChangeDetectionResultFFI change_result;
         memset(&change_result, 0, sizeof(change_result));
@@ -625,16 +655,16 @@ static void TsInstantaneousPeriodFunction(DataChunk &args, ExpressionState &stat
     auto &values_vec = args.data[0];
     idx_t count = args.size();
 
+    ListDoubleReader values_reader(values_vec, count);
+
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        vector<double> values;
+        if (!values_reader.ReadSingleSeries(row_idx, values, "ts_instantaneous_period")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
-
-        vector<double> values;
-        ExtractListAsDouble(values_vec, row_idx, values);
 
         InstantaneousPeriodResultFFI inst_result;
         memset(&inst_result, 0, sizeof(inst_result));
@@ -726,27 +756,39 @@ static void TsDetectAmplitudeModulationFunction(DataChunk &args, ExpressionState
     auto &period_vec = args.data[1];
     idx_t count = args.size();
 
-    double modulation_threshold = 0.0;
-    double seasonality_threshold = 0.0;
-
-    if (args.ColumnCount() > 2 && !FlatVector::IsNull(args.data[2], 0)) {
-        modulation_threshold = FlatVector::GetData<double>(args.data[2])[0];
+    ListDoubleReader values_reader(values_vec, count);
+    ScalarArgReader<double> period_reader(period_vec, count);
+    bool has_modulation_threshold = args.ColumnCount() > 2;
+    bool has_seasonality_threshold = args.ColumnCount() > 3;
+    unique_ptr<ScalarArgReader<double>> modulation_threshold_reader, seasonality_threshold_reader;
+    if (has_modulation_threshold) {
+        modulation_threshold_reader = make_uniq<ScalarArgReader<double>>(args.data[2], count);
     }
-    if (args.ColumnCount() > 3 && !FlatVector::IsNull(args.data[3], 0)) {
-        seasonality_threshold = FlatVector::GetData<double>(args.data[3])[0];
+    if (has_seasonality_threshold) {
+        seasonality_threshold_reader = make_uniq<ScalarArgReader<double>>(args.data[3], count);
     }
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx) || FlatVector::IsNull(period_vec, row_idx)) {
+        if (period_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> values;
-        ExtractListAsDouble(values_vec, row_idx, values);
-        double period = FlatVector::GetData<double>(period_vec)[row_idx];
+        if (!values_reader.ReadSingleSeries(row_idx, values, "ts_detect_amplitude_modulation")) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+        double period = period_reader.Get(row_idx);
+
+        double modulation_threshold = (has_modulation_threshold && !modulation_threshold_reader->IsNull(row_idx))
+                                           ? modulation_threshold_reader->Get(row_idx)
+                                           : 0.0;
+        double seasonality_threshold = (has_seasonality_threshold && !seasonality_threshold_reader->IsNull(row_idx))
+                                            ? seasonality_threshold_reader->Get(row_idx)
+                                            : 0.0;
 
         AmplitudeModulationResultFFI am_result;
         memset(&am_result, 0, sizeof(am_result));

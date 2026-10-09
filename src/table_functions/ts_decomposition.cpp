@@ -1,5 +1,6 @@
 #include "anofox_forecast_extension.hpp"
 #include "anofox_fcst_ffi.h"
+#include "ts_list_marshal.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
@@ -19,25 +20,6 @@ static LogicalType GetMstlResultType() {
     return LogicalType::STRUCT(std::move(children));
 }
 
-static void ExtractListAsDouble(Vector &list_vec, idx_t row_idx, vector<double> &out_values) {
-    auto list_data = ListVector::GetData(list_vec);
-    auto &list_entry = list_data[row_idx];
-
-    auto &child_vec = ListVector::GetEntry(list_vec);
-    auto child_data = FlatVector::GetData<double>(child_vec);
-    auto &child_validity = FlatVector::Validity(child_vec);
-
-    out_values.clear();
-    out_values.reserve(list_entry.length);
-
-    for (idx_t i = 0; i < list_entry.length; i++) {
-        idx_t child_idx = list_entry.offset + i;
-        if (child_validity.RowIsValid(child_idx)) {
-            out_values.push_back(child_data[child_idx]);
-        }
-    }
-}
-
 // Helper to convert insufficient_data mode string to int
 static int ParseInsufficientDataMode(const string &mode) {
     string lower = mode;
@@ -51,26 +33,27 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
     auto &list_vec = args.data[0];
     idx_t count = args.size();
 
-    // Get insufficient_data mode from second argument if provided (default: fail = 0)
-    int insufficient_data_mode = 0;
-    if (args.ColumnCount() > 1) {
-        auto &mode_vec = args.data[1];
-        if (!FlatVector::IsNull(mode_vec, 0)) {
-            auto mode_str = FlatVector::GetData<string_t>(mode_vec)[0].GetString();
-            insufficient_data_mode = ParseInsufficientDataMode(mode_str);
-        }
+    ListDoubleReader values_reader(list_vec, count);
+    bool has_mode = args.ColumnCount() > 1;
+    unique_ptr<ScalarArgReader<string_t>> mode_reader;
+    if (has_mode) {
+        mode_reader = make_uniq<ScalarArgReader<string_t>>(args.data[1], count);
     }
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(list_vec, row_idx)) {
+        vector<double> values;
+        if (!values_reader.ReadSingleSeries(row_idx, values, "_ts_mstl_decomposition")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> values;
-        ExtractListAsDouble(list_vec, row_idx, values);
+        // Get insufficient_data mode from second argument if provided (default: fail = 0)
+        int insufficient_data_mode = 0;
+        if (has_mode && !mode_reader->IsNull(row_idx)) {
+            insufficient_data_mode = ParseInsufficientDataMode(mode_reader->Get(row_idx).GetString());
+        }
 
         MstlResult mstl_result;
         memset(&mstl_result, 0, sizeof(mstl_result));

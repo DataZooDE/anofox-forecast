@@ -1,6 +1,7 @@
 #include "anofox_forecast_extension.hpp"
 #include "anofox_fcst_ffi.h"
 #include "ts_fill_gaps_native.hpp"
+#include "ts_list_marshal.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -25,192 +26,14 @@ static LogicalType GetChangepointResultType() {
     return LogicalType::STRUCT(std::move(children));
 }
 
-static void ExtractListAsDouble(Vector &list_vec, idx_t row_idx, vector<double> &out_values) {
-    auto list_data = ListVector::GetData(list_vec);
-    auto &list_entry = list_data[row_idx];
-
-    out_values.clear();
-
-    // Early return for empty lists to avoid accessing uninitialized child vector
-    if (list_entry.length == 0) {
-        return;
-    }
-
-    auto &child_vec = ListVector::GetEntry(list_vec);
-    auto child_data = FlatVector::GetData<double>(child_vec);
-    auto &child_validity = FlatVector::Validity(child_vec);
-
-    out_values.reserve(list_entry.length);
-
-    for (idx_t i = 0; i < list_entry.length; i++) {
-        idx_t child_idx = list_entry.offset + i;
-        if (child_validity.RowIsValid(child_idx)) {
-            out_values.push_back(child_data[child_idx]);
-        }
-    }
-}
-
-static void TsDetectChangepointsFunction(DataChunk &args, ExpressionState &state, Vector &result) {
-    auto &list_vec = args.data[0];
-    idx_t count = args.size();
-
-    result.SetVectorType(VectorType::FLAT_VECTOR);
-
-    for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(list_vec, row_idx)) {
-            FlatVector::SetNull(result, row_idx, true);
-            continue;
-        }
-
-        vector<double> values;
-        ExtractListAsDouble(list_vec, row_idx, values);
-
-        // Handle empty or too small arrays - need at least 2 points for changepoint detection
-        if (values.size() < 2) {
-            FlatVector::SetNull(result, row_idx, true);
-            continue;
-        }
-
-        ChangepointResult cp_result;
-        memset(&cp_result, 0, sizeof(cp_result));
-        AnofoxError error;
-
-        bool success = anofox_ts_detect_changepoints(
-            values.data(),
-            values.size(),
-            2,    // min_size
-            0.0,  // penalty = auto
-            &cp_result,
-            &error
-        );
-
-        if (!success) {
-            FlatVector::SetNull(result, row_idx, true);
-            continue;
-        }
-
-        auto &children = StructVector::GetEntries(result);
-
-        // Set changepoints list
-        {
-            auto &cp_list = *children[0];
-            auto list_data = FlatVector::GetData<list_entry_t>(cp_list);
-            auto &list_child = ListVector::GetEntry(cp_list);
-            auto current_size = ListVector::GetListSize(cp_list);
-
-            list_data[row_idx].offset = current_size;
-            list_data[row_idx].length = cp_result.n_changepoints;
-
-            ListVector::Reserve(cp_list, current_size + cp_result.n_changepoints);
-            ListVector::SetListSize(cp_list, current_size + cp_result.n_changepoints);
-
-            auto child_data = FlatVector::GetData<uint64_t>(list_child);
-            if (cp_result.changepoints) {
-                for (size_t i = 0; i < cp_result.n_changepoints; i++) {
-                    child_data[current_size + i] = cp_result.changepoints[i];
-                }
-            }
-        }
-
-        // Set scalar fields
-        FlatVector::GetData<uint64_t>(*children[1])[row_idx] = cp_result.n_changepoints;
-        FlatVector::GetData<double>(*children[2])[row_idx] = cp_result.cost;
-
-        anofox_free_changepoint_result(&cp_result);
-    }
-}
-
-static void TsDetectChangepointsWithParamsFunction(DataChunk &args, ExpressionState &state, Vector &result) {
-    auto &list_vec = args.data[0];
-    auto &min_size_vec = args.data[1];
-    auto &penalty_vec = args.data[2];
-    idx_t count = args.size();
-
-    result.SetVectorType(VectorType::FLAT_VECTOR);
-
-    // Use UnifiedVectorFormat to handle both constant and flat vectors
-    UnifiedVectorFormat min_size_data;
-    min_size_vec.ToUnifiedFormat(count, min_size_data);
-
-    UnifiedVectorFormat penalty_data;
-    penalty_vec.ToUnifiedFormat(count, penalty_data);
-
-    for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(list_vec, row_idx)) {
-            FlatVector::SetNull(result, row_idx, true);
-            continue;
-        }
-
-        vector<double> values;
-        ExtractListAsDouble(list_vec, row_idx, values);
-
-        // Handle empty or too small arrays - need at least 2 points for changepoint detection
-        if (values.size() < 2) {
-            FlatVector::SetNull(result, row_idx, true);
-            continue;
-        }
-
-        // Get min_size from unified format (handles constant vectors correctly)
-        auto min_size_idx = min_size_data.sel->get_index(row_idx);
-        int32_t min_size = 2;
-        if (min_size_data.validity.RowIsValid(min_size_idx)) {
-            min_size = UnifiedVectorFormat::GetData<int32_t>(min_size_data)[min_size_idx];
-        }
-
-        // Get penalty from unified format (handles constant vectors correctly)
-        auto penalty_idx = penalty_data.sel->get_index(row_idx);
-        double penalty = 0.0;
-        if (penalty_data.validity.RowIsValid(penalty_idx)) {
-            penalty = UnifiedVectorFormat::GetData<double>(penalty_data)[penalty_idx];
-        }
-
-        ChangepointResult cp_result;
-        memset(&cp_result, 0, sizeof(cp_result));
-        AnofoxError error;
-
-        bool success = anofox_ts_detect_changepoints(
-            values.data(),
-            values.size(),
-            min_size,
-            penalty,
-            &cp_result,
-            &error
-        );
-
-        if (!success) {
-            FlatVector::SetNull(result, row_idx, true);
-            continue;
-        }
-
-        auto &children = StructVector::GetEntries(result);
-
-        // Set changepoints list
-        {
-            auto &cp_list = *children[0];
-            auto list_data = FlatVector::GetData<list_entry_t>(cp_list);
-            auto &list_child = ListVector::GetEntry(cp_list);
-            auto current_size = ListVector::GetListSize(cp_list);
-
-            list_data[row_idx].offset = current_size;
-            list_data[row_idx].length = cp_result.n_changepoints;
-
-            ListVector::Reserve(cp_list, current_size + cp_result.n_changepoints);
-            ListVector::SetListSize(cp_list, current_size + cp_result.n_changepoints);
-
-            auto child_data = FlatVector::GetData<uint64_t>(list_child);
-            if (cp_result.changepoints) {
-                for (size_t i = 0; i < cp_result.n_changepoints; i++) {
-                    child_data[current_size + i] = cp_result.changepoints[i];
-                }
-            }
-        }
-
-        FlatVector::GetData<uint64_t>(*children[1])[row_idx] = cp_result.n_changepoints;
-        FlatVector::GetData<double>(*children[2])[row_idx] = cp_result.cost;
-
-        anofox_free_changepoint_result(&cp_result);
-    }
-}
+// ============================================================================
+// The two never-registered scalar bodies that used to live here (a one-list,
+// a three-arg list+min_size+penalty variant) and their shared private list
+// helper were deleted in Phase 12 plan 12-03 (D-01) — the live SQL surface is
+// the ts_detect_changepoints table macro in ts_macros.cpp dispatching to
+// _ts_detect_changepoints_bocpd. The registration function below stays a
+// no-op (plan 12-07 removes no-op registrations).
+// ============================================================================
 
 void RegisterTsDetectChangepointsFunction(ExtensionLoader &loader) {
     // No-op: C++ extension uses table macro, not scalar
@@ -238,38 +61,25 @@ static void TsDetectChangepointsBocpdFunction(DataChunk &args, ExpressionState &
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
-    UnifiedVectorFormat lambda_data;
-    lambda_vec.ToUnifiedFormat(count, lambda_data);
-
-    UnifiedVectorFormat probs_data;
-    probs_vec.ToUnifiedFormat(count, probs_data);
+    ListDoubleReader values_reader(list_vec, count);
+    ScalarArgReader<double> lambda_reader(lambda_vec, count);
+    ScalarArgReader<bool> probs_reader(probs_vec, count);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(list_vec, row_idx)) {
+        vector<double> values;
+        if (!values_reader.ReadSingleSeries(row_idx, values, "_ts_detect_changepoints_bocpd")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> values;
-        ExtractListAsDouble(list_vec, row_idx, values);
-
-        // Handle empty or too small arrays - need at least 2 points for changepoint detection
+        // Handle too-small arrays - need at least 2 points for changepoint detection
         if (values.size() < 2) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        auto lambda_idx = lambda_data.sel->get_index(row_idx);
-        double hazard_lambda = 250.0;
-        if (lambda_data.validity.RowIsValid(lambda_idx)) {
-            hazard_lambda = UnifiedVectorFormat::GetData<double>(lambda_data)[lambda_idx];
-        }
-
-        auto probs_idx = probs_data.sel->get_index(row_idx);
-        bool include_probs = false;
-        if (probs_data.validity.RowIsValid(probs_idx)) {
-            include_probs = UnifiedVectorFormat::GetData<bool>(probs_data)[probs_idx];
-        }
+        double hazard_lambda = lambda_reader.IsNull(row_idx) ? 250.0 : lambda_reader.Get(row_idx);
+        bool include_probs = probs_reader.IsNull(row_idx) ? false : probs_reader.Get(row_idx);
 
         BocpdResult bocpd_result;
         memset(&bocpd_result, 0, sizeof(bocpd_result));
