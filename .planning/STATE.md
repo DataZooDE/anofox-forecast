@@ -5,16 +5,16 @@ milestone_name: Statistical Correctness
 current_phase: 10
 current_phase_name: Forecast Wrapper Delegates to Crate Models
 status: executing
-stopped_at: Completed 10-01-PLAN.md (Tasks 2+3, Task 1 inherited)
-last_updated: "2026-10-09T12:36:03.452Z"
+stopped_at: Completed 10-02-PLAN.md
+last_updated: "2026-10-09T13:35:42.427Z"
 last_activity: 2026-10-09
 last_activity_desc: Phase 10 execution started
-state_head: 5ec2cac78dfe83ddb8ce11eb38d393c7e71f90fa
+state_head: c8ab3f8d413a40358512c8d165817d641637cad9
 progress:
   total_phases: 10
   completed_phases: 0
   total_plans: 12
-  completed_plans: 4
+  completed_plans: 5
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-08 — started v0.10.0 Statistical Co
 ## Current Position
 
 Phase: 10 (Forecast Wrapper Delegates to Crate Models) — EXECUTING
-Plan: 2 of 9
+Plan: 3 of 9
 Status: Ready to execute
 Last activity: 2026-10-09 — Phase 10 execution started
 
@@ -59,6 +59,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 09 P02 | 25min | 3 tasks | 12 files |
 | Phase 09 P03 | 50min | 3 tasks | 20 files |
 | Phase 10 P01 | 75min | 3 tasks | 3 files |
+| Phase 10 P02 | 120min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -80,6 +81,9 @@ Recent decisions affecting current work:
 - [Phase 10]: SeasonalNaive period<2 delegates to crate Naive (bit-identical point forecasts) rather than erroring on the crate's p>=2 minimum
 - [Phase 10]: MSE computed from raw crate residuals (scalar) independent of the exported residuals array's strict length-match safety check, so AutoARIMA's differencing-shortened residuals still produce a real MSE
 - [Phase 10]: FFI ForecastResult n_fitted/residuals shared-length bug documented but left unfixed — reserved for plan 10-02, which owns the generated C header
+- [Phase 10]: [Phase 10 P02]: arima_order/seasonal_order encoded as NUL-terminated [c_char;32] FFI strings (mirrors seasonal_periods_str); seasonal_order=[0,0,0] is explicitly non-seasonal
+- [Phase 10]: [Phase 10 P02]: Fixed pre-existing FFI n_fitted/residuals length-sharing bug (found in 10-01) with an additive ForecastResult.n_residuals field
+- [Phase 10]: [Phase 10 P02]: FCST-03 SQL test documents two verified crate-internal coincidences (Theta/CrostonClassic both reduce to SES(0.1) in-sample; SES's real MSE ~2090.284 near the old 2090.28 fabrication) rather than loosening blindly
 
 ### Pending Todos
 
@@ -119,7 +123,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-09T12:36:03.366Z
-Stopped at: Completed 10-01-PLAN.md (Tasks 2+3, Task 1 inherited)
+Last session: 2026-10-09T13:35:33.642Z
+Stopped at: Completed 10-02-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 9`
