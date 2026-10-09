@@ -7689,6 +7689,79 @@ mod kalman_garch_ffi_tests {
 }
 
 // ============================================================================
+// Strict FFI option-string parsing (D-07/T-10-07, plan 10-02 Task 2)
+// ============================================================================
+
+#[cfg(test)]
+mod strict_option_parsing_ffi_tests {
+    use super::*;
+
+    fn values() -> Vec<f64> {
+        (0..30).map(|i| 10.0 + i as f64 * 0.5).collect()
+    }
+
+    fn call_raw(opts: &ForecastOptions) -> (bool, ErrorCode) {
+        let data = values();
+        let n_words = data.len().div_ceil(64);
+        let validity: Vec<u64> = vec![u64::MAX; n_words];
+        let mut result = ForecastResult::default();
+        let mut error = AnofoxError::default();
+        let ok = unsafe {
+            anofox_ts_forecast(
+                data.as_ptr(),
+                validity.as_ptr(),
+                data.len(),
+                opts as *const ForecastOptions,
+                &mut result as *mut ForecastResult,
+                &mut error as *mut AnofoxError,
+            )
+        };
+        if !ok {
+            unsafe { anofox_free_forecast_result(&mut result as *mut ForecastResult) };
+        }
+        (ok, error.code)
+    }
+
+    #[test]
+    fn invalid_utf8_model_name_is_invalid_input_not_auto_fallback() {
+        let mut opts = ForecastOptions::default();
+        // A lone 0xFF byte is never valid UTF-8 continuation/lead; followed
+        // by a NUL terminator so c_field_str's bounded read still finds one.
+        opts.model[0] = 0xFFu8 as i8;
+        opts.model[1] = 0;
+        opts.horizon = 5;
+
+        let (ok, code) = call_raw(&opts);
+        assert!(
+            !ok,
+            "invalid UTF-8 model name must fail, not silently fall back to \"auto\""
+        );
+        assert_eq!(code, ErrorCode::InvalidInput);
+    }
+
+    #[test]
+    fn malformed_seasonal_periods_entry_is_invalid_input() {
+        let mut opts = ForecastOptions::default();
+        let model = b"MSTL\0";
+        for (i, &b) in model.iter().enumerate() {
+            opts.model[i] = b as i8;
+        }
+        let periods = b"[7, abc]\0";
+        for (i, &b) in periods.iter().enumerate() {
+            opts.seasonal_periods_str[i] = b as i8;
+        }
+        opts.horizon = 5;
+
+        let (ok, code) = call_raw(&opts);
+        assert!(
+            !ok,
+            "a non-numeric seasonal_periods entry must fail, not be silently dropped"
+        );
+        assert_eq!(code, ErrorCode::InvalidInput);
+    }
+}
+
+// ============================================================================
 // VAR Multivariate Forecasting (Phase 3 CLAS-03)
 // ============================================================================
 

@@ -23,6 +23,10 @@ series <- reference_series()
 air <- series$air
 rw <- series$rw
 inter <- series$inter
+# Deterministic level shift of the existing seeded ar1 series (D-09, FCST-04:
+# non-seasonal arima_order parity targets). Consumes no RNG draws, so rw/inter
+# and air_passengers.json stay byte-identical to the pre-existing fixture.
+ar1_l10 <- 10 + series$ar1
 
 h <- 12
 levels <- c(80, 95)
@@ -181,6 +185,28 @@ inter_models <- list(
   ses = fc_block(ses(inter, h = h, level = levels), "ses(inter, h = 12, level = c(80, 95))")
 )
 
+# ---- ar1_l10 family (D-09: non-seasonal arima_order parity, d=0) ---------
+
+ar1_l10_arima100_fit <- Arima(ar1_l10, order = c(1, 0, 0))
+ar1_l10_arima101_fit <- Arima(ar1_l10, order = c(1, 0, 1))
+
+ar1_l10_models <- list(
+  arima_100 = c(
+    fc_block(
+      forecast(ar1_l10_arima100_fit, h = h, level = levels),
+      "forecast(Arima(ar1_l10, order = c(1,0,0)), h = 12, level = c(80, 95))"
+    ),
+    list(fit = arima_fit_block(ar1_l10_arima100_fit))
+  ),
+  arima_101 = c(
+    fc_block(
+      forecast(ar1_l10_arima101_fit, h = h, level = levels),
+      "forecast(Arima(ar1_l10, order = c(1,0,1)), h = 12, level = c(80, 95))"
+    ),
+    list(fit = arima_fit_block(ar1_l10_arima101_fit))
+  )
+)
+
 sim_fixture <- c(
   provenance("r_forecast", GENERATOR_PATH),
   list(
@@ -202,6 +228,14 @@ sim_fixture <- c(
           seed_note = "set.seed(20261008); inter = ifelse(runif(120) < 0.3, rpois(120, 3) + 1, 0) — see common.R"
         ),
         models = inter_models
+      ),
+      ar1_l10 = list(
+        inputs = list(
+          values = as.numeric(ar1_l10),
+          frequency = 1,
+          seed_note = "10 + arima.sim(list(ar = 0.7), n = 300) from common.R reference_series()"
+        ),
+        models = ar1_l10_models
       )
     )
   )
