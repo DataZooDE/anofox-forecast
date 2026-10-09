@@ -67,7 +67,7 @@ Phase artifacts (plans, summaries, verification): [milestones/v0.9.0-phases/](mi
 - Integer phases (9, 10, 11): Planned milestone work
 - Decimal phases (e.g. 10.1): Urgent insertions (marked with INSERTED)
 
-- [ ] **Phase 9: Reference Fixtures & Safe Dependency Bumps** - Checked-in R/Python fixture harness + anofox-regression 0.5.15, anofox-forecast 0.15.10, honest MSRV
+- [x] **Phase 9: Reference Fixtures & Safe Dependency Bumps** - Checked-in R/Python fixture harness + anofox-regression 0.5.15, anofox-forecast 0.15.10, honest MSRV (completed 2026-10-09)
 - [ ] **Phase 10: Forecast Wrapper Delegates to Crate Models** - Intervals, fitted values, residuals and model identity come from the crate; real ARIMA; no silent fallbacks
 - [ ] **Phase 11: Upstream anofox-forecast Correctness Fixes** - Augmented ADF + MacKinnon, bounded KPSS, AutoARIMA order selection, ETS likelihood/intervals, Theta — as PR(s) in the upstream repo
 - [ ] **Phase 12: Statistics Marshalling Moves to Rust** - ToUnifiedFormat + validity for list args, Rust-owned NULL policy, diff/fill/backtest/hierarchy/agg delegated to Rust
@@ -258,7 +258,7 @@ Phases execute in numeric order: 9 → 10 → 11 → 12 → 13 → 14 → 15 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 9. Reference Fixtures & Safe Dependency Bumps | 3/3 | In Progress|  |
+| 9. Reference Fixtures & Safe Dependency Bumps | 3/3 | Complete    | 2026-10-09 |
 | 10. Forecast Wrapper Delegates to Crate Models | 0/TBD | Not started | - |
 | 11. Upstream anofox-forecast Correctness Fixes | 0/TBD | Not started | - |
 | 12. Statistics Marshalling Moves to Rust | 0/TBD | Not started | - |
