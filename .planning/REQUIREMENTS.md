@@ -12,7 +12,7 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 
 ### Test Foundation
 
-- [ ] **TEST-01**: A reference-fixture harness exists: `validation/reference/` generator scripts (R + Python) produce versioned fixture files (JSON/CSV) that Rust tests load; a README documents regeneration and tolerances.
+- [x] **TEST-01**: A reference-fixture harness exists: `validation/reference/` generator scripts (R + Python) produce versioned fixture files (JSON/CSV) that Rust tests load; a README documents regeneration and tolerances.
 - [ ] **TEST-02**: The existing length-only tests for every module touched in this milestone are upgraded to value assertions.
 - [ ] **TEST-03**: A SQL-level regression suite (`test/sql/correctness/*.test`) pins the corrected results of each user-facing function fixed in this milestone.
 
@@ -128,7 +128,7 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TEST-01 | Phase 9 | Pending |
+| TEST-01 | Phase 9 | Complete |
 | TEST-02 | Phase 18 | Pending |
 | TEST-03 | Phase 18 | Pending |
 | DEP-01 | Phase 9 | Pending |
@@ -195,6 +195,7 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 | DOCS-02 | Phase 18 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 65 total
 - Mapped to phases: 65 ✓
 - Unmapped: 0

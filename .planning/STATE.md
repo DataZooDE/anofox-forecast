@@ -5,16 +5,16 @@ milestone_name: Statistical Correctness
 current_phase: 9
 current_phase_name: Reference Fixtures & Safe Dependency Bumps
 status: executing
-stopped_at: v0.10.0 roadmap created (ROADMAP.md, STATE.md, REQUIREMENTS.md traceability)
-last_updated: "2026-10-09T05:39:23.465Z"
-last_activity: 2026-10-08
-last_activity_desc: Roadmap created (10 phases, 65/65 v1 requirements mapped)
-state_head: a6a75aad92ca8860135efde8dd6dababe30b5ef6
+stopped_at: Completed 09-01-PLAN.md
+last_updated: "2026-10-09T05:57:17.652Z"
+last_activity: 2026-10-09
+last_activity_desc: Phase 9 execution started
+state_head: b051bd1ffc00530755fa7ebfb0d6ed670bb958ed
 progress:
   total_phases: 10
   completed_phases: 0
   total_plans: 3
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-10-08 — started v0.10.0 Statistical Co
 
 ## Current Position
 
-Phase: 9 (Reference Fixtures & Safe Dependency Bumps) — READY TO EXECUTE
-Plan: Not started
+Phase: 9 (Reference Fixtures & Safe Dependency Bumps) — EXECUTING
+Plan: 2 of 3
 Status: Ready to execute
-Last activity: 2026-10-08 — Roadmap created (10 phases, 65/65 v1 requirements mapped)
+Last activity: 2026-10-09 — Phase 9 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -51,6 +51,11 @@ Progress: [░░░░░░░░░░] 0%
 | - | - | - | - |
 
 *Updated after each plan completion*
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 09 P01 | 15min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -64,6 +69,8 @@ Recent decisions affecting current work:
 - Roadmap: RUST-04 moved into Phase 16 (Conformal) — CONF-04 adaptive scaling and per-group calibration reshape the same calibrate/apply SQL signatures; design once.
 - Roadmap: Phase 11 (upstream DIAG-01/02, UPST-01..05) runs in `~/projects/rust/anofox-forecast` on a fix branch, independent of Phases 12-16; Phase 17 consumes it (UPST-06, DIAG-03..05) and owns FCST-09 R parity (needs UPST-01..04).
 - Granularity is coarse, but 65 requirements under the 4-10 req/phase sizing bound yields 10 phases.
+- [Phase 9]: fc_block() indexes R forecast interval columns positionally (not by name) because thetaf() labels columns differently from every other model
+- [Phase 9]: Package-legitimacy gate for 09-02/09-03 installs (7 packages) pre-approved by human 2026-10-09; recorded verbatim in 09-01-SUMMARY.md
 
 ### Pending Todos
 
@@ -97,7 +104,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-08T21:01:41.000Z
-Stopped at: v0.10.0 roadmap created (ROADMAP.md, STATE.md, REQUIREMENTS.md traceability)
+Last session: 2026-10-09T05:57:17.634Z
+Stopped at: Completed 09-01-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 9`
