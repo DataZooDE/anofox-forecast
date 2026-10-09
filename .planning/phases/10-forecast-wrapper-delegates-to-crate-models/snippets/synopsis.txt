@@ -31,3 +31,8 @@ docs/reference/models/baseline/seasonal_naive.md	SELECT * FROM ts_forecast('tabl
 docs/reference/models/baseline/sma.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'SMA', horizon, params);
 docs/reference/models/baseline/random_walk_drift.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'RandomWalkDrift', horizon, params);
 docs/reference/models/baseline/seasonal_window_average.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'SeasonalWindowAverage', horizon, params);
+docs/reference/models/exponential-smoothing/ses.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'SES', horizon, params);
+docs/reference/models/exponential-smoothing/ses_optimized.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'SESOptimized', horizon, params);
+docs/reference/models/exponential-smoothing/holt.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'Holt', horizon, params);
+docs/reference/models/exponential-smoothing/holt_winters.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'HoltWinters', horizon, params);
+docs/reference/models/exponential-smoothing/seasonal_es.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'SeasonalES', horizon, params);

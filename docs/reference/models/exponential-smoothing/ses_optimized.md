@@ -33,10 +33,14 @@ Optimized Simple Exponential Smoothing. Same as SES but automatically finds the 
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 
-`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band, not a
-model-based interval and not statistically calibrated. For calibrated coverage, use conformal
-prediction intervals (see `docs/api/11-conformal-prediction.md`) on top of the point forecast.
-(being corrected in v0.10.0, Phase 10)
+`yhat_lower` / `yhat_upper` are the model's own prediction interval (crate
+`predict_with_intervals`) at `confidence_level` (default 0.90). See
+[Prediction intervals, fitted values and input handling](../../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling);
+for calibrated coverage use the conformal functions.
+
+**Known issue:** like `SES`, SESOptimized's interval bands are flat in `h` — the half-width
+does not widen across the forecast horizon (crate `anofox-forecast` 0.15.10; R's `ses()`
+widens with `h`). Tracked for Phase 11/17.
 
 ## SQL Example
 
