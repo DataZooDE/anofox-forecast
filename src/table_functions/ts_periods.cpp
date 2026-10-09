@@ -5,47 +5,16 @@
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/common/types/vector.hpp"
+#include "ts_list_marshal.hpp"
 
 namespace duckdb {
 
-// Helper to check if a value is null using UnifiedVectorFormat
-// This handles all vector types (flat, constant, dictionary)
-static bool IsValueNull(Vector &vec, idx_t count, idx_t row_idx) {
-    UnifiedVectorFormat format;
-    vec.ToUnifiedFormat(count, format);
-    auto idx = format.sel->get_index(row_idx);
-    return !format.validity.RowIsValid(idx);
-}
-
-// Helper to extract list as double values
-// Uses UnifiedVectorFormat to handle all vector types (flat, constant, dictionary)
-static void ExtractListAsDouble(Vector &list_vec, idx_t count, idx_t row_idx, vector<double> &out_values) {
-    // Use UnifiedVectorFormat to handle all vector types
-    UnifiedVectorFormat list_format;
-    list_vec.ToUnifiedFormat(count, list_format);
-
-    auto list_entries = UnifiedVectorFormat::GetData<list_entry_t>(list_format);
-    auto list_idx = list_format.sel->get_index(row_idx);
-    auto &list_entry = list_entries[list_idx];
-
-    auto &child_vec = ListVector::GetEntry(list_vec);
-
-    // Also use UnifiedVectorFormat for child vector
-    UnifiedVectorFormat child_format;
-    child_vec.ToUnifiedFormat(ListVector::GetListSize(list_vec), child_format);
-    auto child_values = UnifiedVectorFormat::GetData<double>(child_format);
-
-    out_values.clear();
-    out_values.reserve(list_entry.length);
-
-    for (idx_t i = 0; i < list_entry.length; i++) {
-        idx_t child_idx = list_entry.offset + i;
-        auto unified_child_idx = child_format.sel->get_index(child_idx);
-        if (child_format.validity.RowIsValid(unified_child_idx)) {
-            out_values.push_back(child_values[unified_child_idx]);
-        }
-    }
-}
+// List extraction and scalar-parameter reads below go through
+// ts_list_marshal.hpp's ListDoubleReader::ReadSingleSeries and
+// ScalarArgReader<T> (Phase 12 D-01/D-03/D-04/T-12-07, plan 12-02): the series
+// is NULL-free after the Rust single-series gate (trims leading/trailing
+// NULLs, errors on an interior NULL naming its 1-based position), and every
+// scalar parameter is read per row (constant-vector safe) instead of row 0.
 
 // ============================================================================
 // ts_detect_periods - Detect periods using specified method
@@ -80,41 +49,36 @@ static const size_t DEFAULT_MAX_PERIOD = 365;
 
 static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vector &result) {
     auto &values_vec = args.data[0];
-    auto &method_vec = args.data[1];
     idx_t count = args.size();
 
-    // Optional max_period parameter (default 0 = use Rust default of 365)
-    size_t max_period = 0;
-    if (args.ColumnCount() > 2 && !IsValueNull(args.data[2], count, 0)) {
-        UnifiedVectorFormat max_period_format;
-        args.data[2].ToUnifiedFormat(count, max_period_format);
-        auto max_period_data = UnifiedVectorFormat::GetData<int64_t>(max_period_format);
-        max_period = static_cast<size_t>(max_period_data[0]);
+    ListDoubleReader series_reader(values_vec, count);
+    ScalarArgReader<string_t> method_reader(args.data[1], count);
+
+    bool has_max_period = (args.ColumnCount() > 2);
+    unique_ptr<ScalarArgReader<int64_t>> max_period_reader;
+    if (has_max_period) {
+        max_period_reader = make_uniq<ScalarArgReader<int64_t>>(args.data[2], count);
     }
 
-    // Optional min_confidence parameter (default -1.0 = use method-specific default)
-    // Use 0.0 to disable filtering, positive value for custom threshold
-    double min_confidence = -1.0;
-    if (args.ColumnCount() > 3 && !IsValueNull(args.data[3], count, 0)) {
-        UnifiedVectorFormat min_conf_format;
-        args.data[3].ToUnifiedFormat(count, min_conf_format);
-        auto min_conf_data = UnifiedVectorFormat::GetData<double>(min_conf_format);
-        min_confidence = min_conf_data[0];
+    bool has_min_confidence = (args.ColumnCount() > 3);
+    unique_ptr<ScalarArgReader<double>> min_confidence_reader;
+    if (has_min_confidence) {
+        min_confidence_reader = make_uniq<ScalarArgReader<double>>(args.data[3], count);
     }
 
-    // Optional expected_periods parameter (LIST of DOUBLE)
-    vector<double> expected_periods;
-    if (args.ColumnCount() > 4 && !IsValueNull(args.data[4], count, 0)) {
-        ExtractListAsDouble(args.data[4], count, 0, expected_periods);
+    // expected_periods is a PARAMETER list (not data): a NULL element is a
+    // user error, not data-missingness, so it is read with ReadNoNulls
+    // (Phase 12 D-03 note: only data lists get the trim/error-interior gate).
+    bool has_expected_periods = (args.ColumnCount() > 4);
+    unique_ptr<ListDoubleReader> expected_periods_reader;
+    if (has_expected_periods) {
+        expected_periods_reader = make_uniq<ListDoubleReader>(args.data[4], count);
     }
 
-    // Optional tolerance parameter (default -1.0 = use Rust default of 0.1)
-    double tolerance = -1.0;
-    if (args.ColumnCount() > 5 && !IsValueNull(args.data[5], count, 0)) {
-        UnifiedVectorFormat tol_format;
-        args.data[5].ToUnifiedFormat(count, tol_format);
-        auto tol_data = UnifiedVectorFormat::GetData<double>(tol_format);
-        tolerance = tol_data[0];
+    bool has_tolerance = (args.ColumnCount() > 5);
+    unique_ptr<ScalarArgReader<double>> tolerance_reader;
+    if (has_tolerance) {
+        tolerance_reader = make_uniq<ScalarArgReader<double>>(args.data[5], count);
     }
 
     result.Flatten(count);
@@ -132,26 +96,44 @@ static void TsDetectPeriodsFunction(DataChunk &args, ExpressionState &state, Vec
     size_t total_periods = 0;
 
     // Pass 1: Compute all FFI results
+    vector<double> expected_periods;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         row_results[row_idx].is_null = false;
         memset(&row_results[row_idx].result, 0, sizeof(FlatMultiPeriodResult));
 
-        if (IsValueNull(values_vec, count, row_idx)) {
+        vector<double> values;
+        if (!series_reader.ReadSingleSeries(row_idx, values, "_ts_detect_periods")) {
             row_results[row_idx].is_null = true;
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> values;
-        ExtractListAsDouble(values_vec, count, row_idx, values);
-
+        string method_string;
         const char *method_str = nullptr;
-        if (!IsValueNull(method_vec, count, row_idx)) {
-            UnifiedVectorFormat method_format;
-            method_vec.ToUnifiedFormat(count, method_format);
-            auto method_data = UnifiedVectorFormat::GetData<string_t>(method_format);
-            auto method_idx = method_format.sel->get_index(row_idx);
-            method_str = method_data[method_idx].GetData();
+        if (!method_reader.IsNull(row_idx)) {
+            method_string = method_reader.Get(row_idx).GetString();
+            method_str = method_string.c_str();
+        }
+
+        size_t max_period = 0;
+        if (has_max_period && !max_period_reader->IsNull(row_idx)) {
+            max_period = static_cast<size_t>(max_period_reader->Get(row_idx));
+        }
+
+        double min_confidence = -1.0;
+        if (has_min_confidence && !min_confidence_reader->IsNull(row_idx)) {
+            min_confidence = min_confidence_reader->Get(row_idx);
+        }
+
+        expected_periods.clear();
+        if (has_expected_periods && !expected_periods_reader->IsNull(row_idx)) {
+            expected_periods_reader->ReadNoNulls(row_idx, expected_periods, "_ts_detect_periods",
+                                                  "expected_periods");
+        }
+
+        double tolerance = -1.0;
+        if (has_tolerance && !tolerance_reader->IsNull(row_idx)) {
+            tolerance = tolerance_reader->Get(row_idx);
         }
 
         AnofoxError error;
@@ -269,6 +251,8 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
     auto &values_vec = args.data[0];
     idx_t count = args.size();
 
+    ListDoubleReader series_reader(values_vec, count);
+
     result.Flatten(count);
 
     // Two-pass approach to avoid incremental Reserve calls which can cause memory issues
@@ -285,14 +269,12 @@ static void TsDetectPeriodsSimpleFunction(DataChunk &args, ExpressionState &stat
         row_results[row_idx].is_null = false;
         memset(&row_results[row_idx].result, 0, sizeof(FlatMultiPeriodResult));
 
-        if (IsValueNull(values_vec, count, row_idx)) {
+        vector<double> values;
+        if (!series_reader.ReadSingleSeries(row_idx, values, "_ts_detect_periods")) {
             row_results[row_idx].is_null = true;
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
-
-        vector<double> values;
-        ExtractListAsDouble(values_vec, count, row_idx, values);
 
         AnofoxError error;
         bool success = anofox_ts_detect_periods_flat(
@@ -488,16 +470,16 @@ static void TsEstimatePeriodFftFunction(DataChunk &args, ExpressionState &state,
     auto &values_vec = args.data[0];
     idx_t count = args.size();
 
+    ListDoubleReader series_reader(values_vec, count);
+
     result.Flatten(count);
 
+    vector<double> values;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (IsValueNull(values_vec, count, row_idx)) {
+        if (!series_reader.ReadSingleSeries(row_idx, values, "ts_estimate_period_fft")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
-
-        vector<double> values;
-        ExtractListAsDouble(values_vec, count, row_idx, values);
 
         SinglePeriodResult period_result;
         memset(&period_result, 0, sizeof(period_result));
@@ -556,22 +538,27 @@ static void TsEstimatePeriodAcfFunction(DataChunk &args, ExpressionState &state,
     auto &values_vec = args.data[0];
     idx_t count = args.size();
 
-    // Check for optional max_lag parameter
-    int max_lag = 0;  // 0 means auto
-    if (args.ColumnCount() > 1 && !FlatVector::IsNull(args.data[1], 0)) {
-        max_lag = FlatVector::GetData<int32_t>(args.data[1])[0];
+    ListDoubleReader series_reader(values_vec, count);
+
+    bool has_max_lag = (args.ColumnCount() > 1);
+    unique_ptr<ScalarArgReader<int32_t>> max_lag_reader;
+    if (has_max_lag) {
+        max_lag_reader = make_uniq<ScalarArgReader<int32_t>>(args.data[1], count);
     }
 
     result.Flatten(count);
 
+    vector<double> values;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (IsValueNull(values_vec, count, row_idx)) {
+        if (!series_reader.ReadSingleSeries(row_idx, values, "ts_estimate_period_acf")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> values;
-        ExtractListAsDouble(values_vec, count, row_idx, values);
+        int max_lag = 0;  // 0 means auto
+        if (has_max_lag && !max_lag_reader->IsNull(row_idx)) {
+            max_lag = max_lag_reader->Get(row_idx);
+        }
 
         SinglePeriodResult period_result;
         memset(&period_result, 0, sizeof(period_result));
@@ -639,19 +626,22 @@ static void TsDetectMultiplePeriodsFunction(DataChunk &args, ExpressionState &st
     auto &values_vec = args.data[0];
     idx_t count = args.size();
 
-    // Optional parameters
-    int max_periods = 0;
-    double min_confidence = 0.0;
-    double min_strength = 0.0;
+    ListDoubleReader series_reader(values_vec, count);
 
-    if (args.ColumnCount() > 1 && !FlatVector::IsNull(args.data[1], 0)) {
-        max_periods = FlatVector::GetData<int32_t>(args.data[1])[0];
+    bool has_max_periods = (args.ColumnCount() > 1);
+    unique_ptr<ScalarArgReader<int32_t>> max_periods_reader;
+    if (has_max_periods) {
+        max_periods_reader = make_uniq<ScalarArgReader<int32_t>>(args.data[1], count);
     }
-    if (args.ColumnCount() > 2 && !FlatVector::IsNull(args.data[2], 0)) {
-        min_confidence = FlatVector::GetData<double>(args.data[2])[0];
+    bool has_min_confidence = (args.ColumnCount() > 2);
+    unique_ptr<ScalarArgReader<double>> min_confidence_reader;
+    if (has_min_confidence) {
+        min_confidence_reader = make_uniq<ScalarArgReader<double>>(args.data[2], count);
     }
-    if (args.ColumnCount() > 3 && !FlatVector::IsNull(args.data[3], 0)) {
-        min_strength = FlatVector::GetData<double>(args.data[3])[0];
+    bool has_min_strength = (args.ColumnCount() > 3);
+    unique_ptr<ScalarArgReader<double>> min_strength_reader;
+    if (has_min_strength) {
+        min_strength_reader = make_uniq<ScalarArgReader<double>>(args.data[3], count);
     }
 
     result.Flatten(count);
@@ -670,14 +660,25 @@ static void TsDetectMultiplePeriodsFunction(DataChunk &args, ExpressionState &st
         row_results[row_idx].is_null = false;
         memset(&row_results[row_idx].result, 0, sizeof(FlatMultiPeriodResult));
 
-        if (IsValueNull(values_vec, count, row_idx)) {
+        vector<double> values;
+        if (!series_reader.ReadSingleSeries(row_idx, values, "ts_detect_multiple_periods")) {
             row_results[row_idx].is_null = true;
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> values;
-        ExtractListAsDouble(values_vec, count, row_idx, values);
+        int max_periods = 0;
+        if (has_max_periods && !max_periods_reader->IsNull(row_idx)) {
+            max_periods = max_periods_reader->Get(row_idx);
+        }
+        double min_confidence = 0.0;
+        if (has_min_confidence && !min_confidence_reader->IsNull(row_idx)) {
+            min_confidence = min_confidence_reader->Get(row_idx);
+        }
+        double min_strength = 0.0;
+        if (has_min_strength && !min_strength_reader->IsNull(row_idx)) {
+            min_strength = min_strength_reader->Get(row_idx);
+        }
 
         AnofoxError error;
         bool success = anofox_ts_detect_multiple_periods_flat(
@@ -852,22 +853,27 @@ static void TsAutoperiodFunction(DataChunk &args, ExpressionState &state, Vector
     auto &values_vec = args.data[0];
     idx_t count = args.size();
 
-    // Optional acf_threshold parameter (default 0.0 = use default)
-    double acf_threshold = 0.0;
-    if (args.ColumnCount() > 1 && !FlatVector::IsNull(args.data[1], 0)) {
-        acf_threshold = FlatVector::GetData<double>(args.data[1])[0];
+    ListDoubleReader series_reader(values_vec, count);
+
+    bool has_acf_threshold = (args.ColumnCount() > 1);
+    unique_ptr<ScalarArgReader<double>> acf_threshold_reader;
+    if (has_acf_threshold) {
+        acf_threshold_reader = make_uniq<ScalarArgReader<double>>(args.data[1], count);
     }
 
     result.Flatten(count);
 
+    vector<double> values;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (IsValueNull(values_vec, count, row_idx)) {
+        if (!series_reader.ReadSingleSeries(row_idx, values, "ts_autoperiod")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> values;
-        ExtractListAsDouble(values_vec, count, row_idx, values);
+        double acf_threshold = 0.0;
+        if (has_acf_threshold && !acf_threshold_reader->IsNull(row_idx)) {
+            acf_threshold = acf_threshold_reader->Get(row_idx);
+        }
 
         AutoperiodResultFFI ap_result;
         memset(&ap_result, 0, sizeof(ap_result));
@@ -935,22 +941,27 @@ static void TsCfdAutoperiodFunction(DataChunk &args, ExpressionState &state, Vec
     auto &values_vec = args.data[0];
     idx_t count = args.size();
 
-    // Optional acf_threshold parameter (default 0.0 = use default)
-    double acf_threshold = 0.0;
-    if (args.ColumnCount() > 1 && !FlatVector::IsNull(args.data[1], 0)) {
-        acf_threshold = FlatVector::GetData<double>(args.data[1])[0];
+    ListDoubleReader series_reader(values_vec, count);
+
+    bool has_acf_threshold = (args.ColumnCount() > 1);
+    unique_ptr<ScalarArgReader<double>> acf_threshold_reader;
+    if (has_acf_threshold) {
+        acf_threshold_reader = make_uniq<ScalarArgReader<double>>(args.data[1], count);
     }
 
     result.Flatten(count);
 
+    vector<double> values;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (IsValueNull(values_vec, count, row_idx)) {
+        if (!series_reader.ReadSingleSeries(row_idx, values, "ts_cfd_autoperiod")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> values;
-        ExtractListAsDouble(values_vec, count, row_idx, values);
+        double acf_threshold = 0.0;
+        if (has_acf_threshold && !acf_threshold_reader->IsNull(row_idx)) {
+            acf_threshold = acf_threshold_reader->Get(row_idx);
+        }
 
         AutoperiodResultFFI ap_result;
         memset(&ap_result, 0, sizeof(ap_result));
@@ -1027,35 +1038,49 @@ static void TsLombScargleFunction(DataChunk &args, ExpressionState &state, Vecto
     auto &values_vec = args.data[0];
     auto count = args.size();
 
-    // Handle optional parameters
-    double min_period = 0.0;  // 0 means use default
-    double max_period = 0.0;
-    size_t n_frequencies = 0;
+    ListDoubleReader series_reader(values_vec, count);
 
-    if (args.ColumnCount() >= 2 && !FlatVector::IsNull(args.data[1], 0)) {
-        min_period = FlatVector::GetData<double>(args.data[1])[0];
+    bool has_min_period = (args.ColumnCount() >= 2);
+    unique_ptr<ScalarArgReader<double>> min_period_reader;
+    if (has_min_period) {
+        min_period_reader = make_uniq<ScalarArgReader<double>>(args.data[1], count);
     }
-    if (args.ColumnCount() >= 3 && !FlatVector::IsNull(args.data[2], 0)) {
-        max_period = FlatVector::GetData<double>(args.data[2])[0];
+    bool has_max_period = (args.ColumnCount() >= 3);
+    unique_ptr<ScalarArgReader<double>> max_period_reader;
+    if (has_max_period) {
+        max_period_reader = make_uniq<ScalarArgReader<double>>(args.data[2], count);
     }
-    if (args.ColumnCount() >= 4 && !FlatVector::IsNull(args.data[3], 0)) {
-        n_frequencies = static_cast<size_t>(FlatVector::GetData<int64_t>(args.data[3])[0]);
+    bool has_n_frequencies = (args.ColumnCount() >= 4);
+    unique_ptr<ScalarArgReader<int64_t>> n_frequencies_reader;
+    if (has_n_frequencies) {
+        n_frequencies_reader = make_uniq<ScalarArgReader<int64_t>>(args.data[3], count);
     }
 
     result.Flatten(count);
 
+    vector<double> values;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (IsValueNull(values_vec, count, row_idx)) {
+        if (!series_reader.ReadSingleSeries(row_idx, values, "ts_lomb_scargle")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> values;
-        ExtractListAsDouble(values_vec, count, row_idx, values);
-
         if (values.size() < 4) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
+        }
+
+        double min_period = 0.0;  // 0 means use default
+        if (has_min_period && !min_period_reader->IsNull(row_idx)) {
+            min_period = min_period_reader->Get(row_idx);
+        }
+        double max_period = 0.0;
+        if (has_max_period && !max_period_reader->IsNull(row_idx)) {
+            max_period = max_period_reader->Get(row_idx);
+        }
+        size_t n_frequencies = 0;
+        if (has_n_frequencies && !n_frequencies_reader->IsNull(row_idx)) {
+            n_frequencies = static_cast<size_t>(n_frequencies_reader->Get(row_idx));
         }
 
         LombScargleResultFFI ls_result;
@@ -1152,34 +1177,49 @@ static void TsAicPeriodFunction(DataChunk &args, ExpressionState &state, Vector 
     auto &values_vec = args.data[0];
     auto count = args.size();
 
-    double min_period = 0.0;
-    double max_period = 0.0;
-    size_t n_candidates = 0;
+    ListDoubleReader series_reader(values_vec, count);
 
-    if (args.ColumnCount() >= 2 && !FlatVector::IsNull(args.data[1], 0)) {
-        min_period = FlatVector::GetData<double>(args.data[1])[0];
+    bool has_min_period = (args.ColumnCount() >= 2);
+    unique_ptr<ScalarArgReader<double>> min_period_reader;
+    if (has_min_period) {
+        min_period_reader = make_uniq<ScalarArgReader<double>>(args.data[1], count);
     }
-    if (args.ColumnCount() >= 3 && !FlatVector::IsNull(args.data[2], 0)) {
-        max_period = FlatVector::GetData<double>(args.data[2])[0];
+    bool has_max_period = (args.ColumnCount() >= 3);
+    unique_ptr<ScalarArgReader<double>> max_period_reader;
+    if (has_max_period) {
+        max_period_reader = make_uniq<ScalarArgReader<double>>(args.data[2], count);
     }
-    if (args.ColumnCount() >= 4 && !FlatVector::IsNull(args.data[3], 0)) {
-        n_candidates = static_cast<size_t>(FlatVector::GetData<int64_t>(args.data[3])[0]);
+    bool has_n_candidates = (args.ColumnCount() >= 4);
+    unique_ptr<ScalarArgReader<int64_t>> n_candidates_reader;
+    if (has_n_candidates) {
+        n_candidates_reader = make_uniq<ScalarArgReader<int64_t>>(args.data[3], count);
     }
 
     result.Flatten(count);
 
+    vector<double> values;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (IsValueNull(values_vec, count, row_idx)) {
+        if (!series_reader.ReadSingleSeries(row_idx, values, "ts_aic_period")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> values;
-        ExtractListAsDouble(values_vec, count, row_idx, values);
-
         if (values.size() < 8) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
+        }
+
+        double min_period = 0.0;
+        if (has_min_period && !min_period_reader->IsNull(row_idx)) {
+            min_period = min_period_reader->Get(row_idx);
+        }
+        double max_period = 0.0;
+        if (has_max_period && !max_period_reader->IsNull(row_idx)) {
+            max_period = max_period_reader->Get(row_idx);
+        }
+        size_t n_candidates = 0;
+        if (has_n_candidates && !n_candidates_reader->IsNull(row_idx)) {
+            n_candidates = static_cast<size_t>(n_candidates_reader->Get(row_idx));
         }
 
         AicPeriodResultFFI aic_result;
@@ -1271,30 +1311,40 @@ static void TsSsaPeriodFunction(DataChunk &args, ExpressionState &state, Vector 
     auto &values_vec = args.data[0];
     auto count = args.size();
 
-    size_t window_size = 0;
-    size_t n_components = 0;
+    ListDoubleReader series_reader(values_vec, count);
 
-    if (args.ColumnCount() >= 2 && !FlatVector::IsNull(args.data[1], 0)) {
-        window_size = static_cast<size_t>(FlatVector::GetData<int64_t>(args.data[1])[0]);
+    bool has_window_size = (args.ColumnCount() >= 2);
+    unique_ptr<ScalarArgReader<int64_t>> window_size_reader;
+    if (has_window_size) {
+        window_size_reader = make_uniq<ScalarArgReader<int64_t>>(args.data[1], count);
     }
-    if (args.ColumnCount() >= 3 && !FlatVector::IsNull(args.data[2], 0)) {
-        n_components = static_cast<size_t>(FlatVector::GetData<int64_t>(args.data[2])[0]);
+    bool has_n_components = (args.ColumnCount() >= 3);
+    unique_ptr<ScalarArgReader<int64_t>> n_components_reader;
+    if (has_n_components) {
+        n_components_reader = make_uniq<ScalarArgReader<int64_t>>(args.data[2], count);
     }
 
     result.Flatten(count);
 
+    vector<double> values;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (IsValueNull(values_vec, count, row_idx)) {
+        if (!series_reader.ReadSingleSeries(row_idx, values, "ts_ssa_period")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> values;
-        ExtractListAsDouble(values_vec, count, row_idx, values);
-
         if (values.size() < 16) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
+        }
+
+        size_t window_size = 0;
+        if (has_window_size && !window_size_reader->IsNull(row_idx)) {
+            window_size = static_cast<size_t>(window_size_reader->Get(row_idx));
+        }
+        size_t n_components = 0;
+        if (has_n_components && !n_components_reader->IsNull(row_idx)) {
+            n_components = static_cast<size_t>(n_components_reader->Get(row_idx));
         }
 
         SsaPeriodResultFFI ssa_result;
@@ -1376,34 +1426,49 @@ static void TsStlPeriodFunction(DataChunk &args, ExpressionState &state, Vector 
     auto &values_vec = args.data[0];
     auto count = args.size();
 
-    size_t min_period = 0;
-    size_t max_period = 0;
-    size_t n_candidates = 0;
+    ListDoubleReader series_reader(values_vec, count);
 
-    if (args.ColumnCount() >= 2 && !FlatVector::IsNull(args.data[1], 0)) {
-        min_period = static_cast<size_t>(FlatVector::GetData<int64_t>(args.data[1])[0]);
+    bool has_min_period = (args.ColumnCount() >= 2);
+    unique_ptr<ScalarArgReader<int64_t>> min_period_reader;
+    if (has_min_period) {
+        min_period_reader = make_uniq<ScalarArgReader<int64_t>>(args.data[1], count);
     }
-    if (args.ColumnCount() >= 3 && !FlatVector::IsNull(args.data[2], 0)) {
-        max_period = static_cast<size_t>(FlatVector::GetData<int64_t>(args.data[2])[0]);
+    bool has_max_period = (args.ColumnCount() >= 3);
+    unique_ptr<ScalarArgReader<int64_t>> max_period_reader;
+    if (has_max_period) {
+        max_period_reader = make_uniq<ScalarArgReader<int64_t>>(args.data[2], count);
     }
-    if (args.ColumnCount() >= 4 && !FlatVector::IsNull(args.data[3], 0)) {
-        n_candidates = static_cast<size_t>(FlatVector::GetData<int64_t>(args.data[3])[0]);
+    bool has_n_candidates = (args.ColumnCount() >= 4);
+    unique_ptr<ScalarArgReader<int64_t>> n_candidates_reader;
+    if (has_n_candidates) {
+        n_candidates_reader = make_uniq<ScalarArgReader<int64_t>>(args.data[3], count);
     }
 
     result.Flatten(count);
 
+    vector<double> values;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (IsValueNull(values_vec, count, row_idx)) {
+        if (!series_reader.ReadSingleSeries(row_idx, values, "ts_stl_period")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> values;
-        ExtractListAsDouble(values_vec, count, row_idx, values);
-
         if (values.size() < 16) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
+        }
+
+        size_t min_period = 0;
+        if (has_min_period && !min_period_reader->IsNull(row_idx)) {
+            min_period = static_cast<size_t>(min_period_reader->Get(row_idx));
+        }
+        size_t max_period = 0;
+        if (has_max_period && !max_period_reader->IsNull(row_idx)) {
+            max_period = static_cast<size_t>(max_period_reader->Get(row_idx));
+        }
+        size_t n_candidates = 0;
+        if (has_n_candidates && !n_candidates_reader->IsNull(row_idx)) {
+            n_candidates = static_cast<size_t>(n_candidates_reader->Get(row_idx));
         }
 
         StlPeriodResultFFI stl_result;
@@ -1494,30 +1559,40 @@ static void TsMatrixProfilePeriodFunction(DataChunk &args, ExpressionState &stat
     auto &values_vec = args.data[0];
     auto count = args.size();
 
-    size_t subsequence_length = 0;
-    size_t n_best = 0;
+    ListDoubleReader series_reader(values_vec, count);
 
-    if (args.ColumnCount() >= 2 && !FlatVector::IsNull(args.data[1], 0)) {
-        subsequence_length = static_cast<size_t>(FlatVector::GetData<int64_t>(args.data[1])[0]);
+    bool has_subsequence_length = (args.ColumnCount() >= 2);
+    unique_ptr<ScalarArgReader<int64_t>> subsequence_length_reader;
+    if (has_subsequence_length) {
+        subsequence_length_reader = make_uniq<ScalarArgReader<int64_t>>(args.data[1], count);
     }
-    if (args.ColumnCount() >= 3 && !FlatVector::IsNull(args.data[2], 0)) {
-        n_best = static_cast<size_t>(FlatVector::GetData<int64_t>(args.data[2])[0]);
+    bool has_n_best = (args.ColumnCount() >= 3);
+    unique_ptr<ScalarArgReader<int64_t>> n_best_reader;
+    if (has_n_best) {
+        n_best_reader = make_uniq<ScalarArgReader<int64_t>>(args.data[2], count);
     }
 
     result.Flatten(count);
 
+    vector<double> values;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (IsValueNull(values_vec, count, row_idx)) {
+        if (!series_reader.ReadSingleSeries(row_idx, values, "ts_matrix_profile_period")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> values;
-        ExtractListAsDouble(values_vec, count, row_idx, values);
-
         if (values.size() < 16) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
+        }
+
+        size_t subsequence_length = 0;
+        if (has_subsequence_length && !subsequence_length_reader->IsNull(row_idx)) {
+            subsequence_length = static_cast<size_t>(subsequence_length_reader->Get(row_idx));
+        }
+        size_t n_best = 0;
+        if (has_n_best && !n_best_reader->IsNull(row_idx)) {
+            n_best = static_cast<size_t>(n_best_reader->Get(row_idx));
         }
 
         MatrixProfilePeriodResultFFI mp_result;
@@ -1600,34 +1675,49 @@ static void TsSazedPeriodFunction(DataChunk &args, ExpressionState &state, Vecto
     auto &values_vec = args.data[0];
     auto count = args.size();
 
-    size_t min_period = 0;
-    size_t max_period = 0;
-    size_t zero_pad_factor = 0;
+    ListDoubleReader series_reader(values_vec, count);
 
-    if (args.ColumnCount() >= 2 && !FlatVector::IsNull(args.data[1], 0)) {
-        min_period = static_cast<size_t>(FlatVector::GetData<int64_t>(args.data[1])[0]);
+    bool has_min_period = (args.ColumnCount() >= 2);
+    unique_ptr<ScalarArgReader<int64_t>> min_period_reader;
+    if (has_min_period) {
+        min_period_reader = make_uniq<ScalarArgReader<int64_t>>(args.data[1], count);
     }
-    if (args.ColumnCount() >= 3 && !FlatVector::IsNull(args.data[2], 0)) {
-        max_period = static_cast<size_t>(FlatVector::GetData<int64_t>(args.data[2])[0]);
+    bool has_max_period = (args.ColumnCount() >= 3);
+    unique_ptr<ScalarArgReader<int64_t>> max_period_reader;
+    if (has_max_period) {
+        max_period_reader = make_uniq<ScalarArgReader<int64_t>>(args.data[2], count);
     }
-    if (args.ColumnCount() >= 4 && !FlatVector::IsNull(args.data[3], 0)) {
-        zero_pad_factor = static_cast<size_t>(FlatVector::GetData<int64_t>(args.data[3])[0]);
+    bool has_zero_pad_factor = (args.ColumnCount() >= 4);
+    unique_ptr<ScalarArgReader<int64_t>> zero_pad_factor_reader;
+    if (has_zero_pad_factor) {
+        zero_pad_factor_reader = make_uniq<ScalarArgReader<int64_t>>(args.data[3], count);
     }
 
     result.Flatten(count);
 
+    vector<double> values;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (IsValueNull(values_vec, count, row_idx)) {
+        if (!series_reader.ReadSingleSeries(row_idx, values, "ts_sazed_period")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> values;
-        ExtractListAsDouble(values_vec, count, row_idx, values);
-
         if (values.size() < 8) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
+        }
+
+        size_t min_period = 0;
+        if (has_min_period && !min_period_reader->IsNull(row_idx)) {
+            min_period = static_cast<size_t>(min_period_reader->Get(row_idx));
+        }
+        size_t max_period = 0;
+        if (has_max_period && !max_period_reader->IsNull(row_idx)) {
+            max_period = static_cast<size_t>(max_period_reader->Get(row_idx));
+        }
+        size_t zero_pad_factor = 0;
+        if (has_zero_pad_factor && !zero_pad_factor_reader->IsNull(row_idx)) {
+            zero_pad_factor = static_cast<size_t>(zero_pad_factor_reader->Get(row_idx));
         }
 
         SazedPeriodResultFFI sazed_result;
