@@ -20,11 +20,15 @@ use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig};
 use anofox_forecast::models::baseline::{
     Naive, RandomWalkWithDrift, SeasonalNaive, SeasonalWindowAverage, SimpleMovingAverage,
 };
+use anofox_forecast::models::ensemble::{AutoEnsemble, AutoEnsembleConfig};
 use anofox_forecast::models::exponential::{
     AutoETS, AutoETSConfig, ETSSpec, HoltLinearTrend, HoltWinters, SeasonalES,
     SimpleExponentialSmoothing, ETS,
 };
+use anofox_forecast::models::garch::GARCH;
 use anofox_forecast::models::intermittent::{Croston, ADIDA, IMAPA, TSB};
+use anofox_forecast::models::kalman_forecaster::KalmanForecaster;
+use anofox_forecast::models::laplace::LaplaceForecaster;
 use anofox_forecast::models::mstl_forecaster::MSTLForecaster;
 use anofox_forecast::models::tbats::{AutoTBATS, TBATS};
 use anofox_forecast::models::theta::{AutoTheta, DynamicTheta, OptimizedTheta, Theta};
@@ -259,24 +263,115 @@ fn lib_predict(model: &mut dyn Forecaster, ts: &TimeSeries, horizon: usize) -> V
     forecast.primary().to_vec()
 }
 
-/// Assert two f64 slices are approximately equal (within `max_ulps` ULPs).
-/// Use for hand-rolled models where floating-point summation order may differ.
-fn assert_f64_near(label: &str, lib: &[f64], ffi: &[f64], max_ulps: i64) {
-    assert_eq!(
-        lib.len(),
-        ffi.len(),
-        "[{label}] length mismatch: lib={} ffi={}",
-        lib.len(),
-        ffi.len()
-    );
-    for (i, (l, f)) in lib.iter().zip(ffi.iter()).enumerate() {
-        if l.is_nan() && f.is_nan() {
-            continue;
-        }
-        let diff = (l.to_bits() as i64).wrapping_sub(f.to_bits() as i64).abs();
+/// point, lower, upper, fitted, residuals
+type LibFullTuple = (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>);
+
+/// Fit a library model and return point/lower/upper/fitted/residuals via
+/// `predict_with_intervals(horizon, level)` + `fitted_values()`/`residuals()` —
+/// the same crate-trait path `extract_forecast` uses in forecast.rs (D-01/D-03/
+/// D-11, Phase 10). A model with no native interval/fitted/residual support
+/// yields empty vecs, matching `extract_bounds`'s / `extract_forecast`'s
+/// own empty-vec convention (D-02).
+fn lib_predict_full(
+    model: &mut dyn Forecaster,
+    ts: &TimeSeries,
+    horizon: usize,
+    level: f64,
+) -> LibFullTuple {
+    model
+        .fit(ts)
+        .unwrap_or_else(|e| panic!("[{}] library fit failed: {e}", model.name()));
+    let forecast = model
+        .predict_with_intervals(horizon, level)
+        .unwrap_or_else(|e| {
+            panic!(
+                "[{}] library predict_with_intervals failed: {e}",
+                model.name()
+            )
+        });
+    let point = forecast.primary().to_vec();
+    let lower = forecast
+        .lower()
+        .and_then(|i| i.first())
+        .cloned()
+        .unwrap_or_default();
+    let upper = forecast
+        .upper()
+        .and_then(|i| i.first())
+        .cloned()
+        .unwrap_or_default();
+    let lower = if lower.len() == point.len() {
+        lower
+    } else {
+        vec![]
+    };
+    let upper = if upper.len() == point.len() {
+        upper
+    } else {
+        vec![]
+    };
+    let fitted = model
+        .fitted_values()
+        .map(|v| v.to_vec())
+        .unwrap_or_default();
+    let residuals = model.residuals().map(|v| v.to_vec()).unwrap_or_default();
+    (point, lower, upper, fitted, residuals)
+}
+
+/// Fit `model` directly and compare point/lower/upper/fitted/residuals against
+/// the FFI's output for the same model/options bit-for-bit (D-01/D-02/D-03/
+/// D-11). `ffi_opts` must already have `model`/`horizon`/`seasonal_period`/etc.
+/// set; this helper forces `confidence_level = level` and
+/// `include_fitted = include_residuals = true`.
+fn assert_full_parity(
+    label: &str,
+    model: &mut dyn Forecaster,
+    ts: &TimeSeries,
+    horizon: usize,
+    level: f64,
+    data: &[f64],
+    mut ffi_opts: FfiForecastOptions,
+) {
+    let (lib_point, lib_lower, lib_upper, lib_fitted, lib_residuals) =
+        lib_predict_full(model, ts, horizon, level);
+
+    ffi_opts.confidence_level = level;
+    ffi_opts.include_fitted = true;
+    ffi_opts.include_residuals = true;
+    let (ffi_point, ffi_lower, ffi_upper, ffi_fitted, ffi_residuals, _) =
+        call_ffi_full(data, &ffi_opts);
+
+    assert_f64_eq(&format!("{label}.point"), &lib_point, &ffi_point);
+    assert_f64_eq(&format!("{label}.lower"), &lib_lower, &ffi_lower);
+    assert_f64_eq(&format!("{label}.upper"), &lib_upper, &ffi_upper);
+    assert_f64_eq(&format!("{label}.fitted"), &lib_fitted, &ffi_fitted);
+
+    // KNOWN FFI LIMITATION (discovered this session; deferred to plan 10-02,
+    // which owns `src/include/anofox_fcst_ffi.h`): `ForecastResult` has a
+    // single `n_fitted` length field shared by both `fitted_values` and
+    // `residuals`. When a crate model's `fitted_values()` is `None` while
+    // `residuals()` is `Some` (e.g. AutoARIMA on some series; GARCH always —
+    // see `parity_garch`), the FFI/SQL surface silently truncates residuals
+    // to length 0 even though the crate produced real residuals. This is a
+    // genuine correctness gap, not a test bug — the fix needs a new
+    // `n_residuals` field on `ForecastResult` plus the regenerated C header
+    // and the `ts_forecast.cpp`/`ts_forecast_agg.cpp` call sites that read
+    // `fcst_result.n_fitted` for both arrays, all out of scope for plan
+    // 10-01 (Rust-only; `anofox_fcst_ffi.h` is reserved for plan 10-02).
+    if lib_fitted.is_empty() && !lib_residuals.is_empty() {
         assert!(
-            diff <= max_ulps,
-            "[{label}] point[{i}] mismatch beyond {max_ulps} ULPs: lib={l} ffi={f} (diff={diff} ULPs)"
+            ffi_residuals.is_empty(),
+            "[{label}] expected the known n_fitted/residuals length-sharing gap \
+             (fitted empty, residuals non-empty) to truncate FFI residuals to \
+             empty — got {} elements instead; if this now carries real data, \
+             the gap has been fixed upstream and this branch should be removed",
+            ffi_residuals.len()
+        );
+    } else {
+        assert_f64_eq(
+            &format!("{label}.residuals"),
+            &lib_residuals,
+            &ffi_residuals,
         );
     }
 }
@@ -313,11 +408,8 @@ fn parity_ses() {
     let ts = make_timeseries(&data);
     // forecast.rs: SimpleExponentialSmoothing::new(0.3)
     let mut model = SimpleExponentialSmoothing::new(0.3);
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("SES", HORIZON as i32, 0);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("SES", &lib_point, &ffi_point);
+    assert_full_parity("SES", &mut model, &ts, HORIZON, 0.95, &data, ffi_opts);
 }
 
 #[test]
@@ -326,11 +418,16 @@ fn parity_ses_optimized() {
     let ts = make_timeseries(&data);
     // forecast.rs: SimpleExponentialSmoothing::auto()
     let mut model = SimpleExponentialSmoothing::auto();
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("SESOptimized", HORIZON as i32, 0);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("SESOptimized", &lib_point, &ffi_point);
+    assert_full_parity(
+        "SESOptimized",
+        &mut model,
+        &ts,
+        HORIZON,
+        0.95,
+        &data,
+        ffi_opts,
+    );
 }
 
 #[test]
@@ -339,11 +436,8 @@ fn parity_holt() {
     let ts = make_timeseries(&data);
     // forecast.rs: HoltLinearTrend::auto()
     let mut model = HoltLinearTrend::auto();
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("Holt", HORIZON as i32, 0);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("Holt", &lib_point, &ffi_point);
+    assert_full_parity("Holt", &mut model, &ts, HORIZON, 0.95, &data, ffi_opts);
 }
 
 #[test]
@@ -355,11 +449,16 @@ fn parity_holt_winters() {
         SEASONAL_PERIOD,
         anofox_forecast::models::exponential::SeasonalType::Additive,
     );
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("HoltWinters", HORIZON as i32, SEASONAL_PERIOD as i32);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("HoltWinters", &lib_point, &ffi_point);
+    assert_full_parity(
+        "HoltWinters",
+        &mut model,
+        &ts,
+        HORIZON,
+        0.95,
+        &data,
+        ffi_opts,
+    );
 }
 
 #[test]
@@ -368,11 +467,16 @@ fn parity_seasonal_es() {
     let ts = make_timeseries(&data);
     // forecast.rs: SeasonalES::new(period.max(2))
     let mut model = SeasonalES::new(SEASONAL_PERIOD);
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("SeasonalES", HORIZON as i32, SEASONAL_PERIOD as i32);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("SeasonalES", &lib_point, &ffi_point);
+    assert_full_parity(
+        "SeasonalES",
+        &mut model,
+        &ts,
+        HORIZON,
+        0.95,
+        &data,
+        ffi_opts,
+    );
 }
 
 #[test]
@@ -381,15 +485,20 @@ fn parity_seasonal_es_optimized() {
     let ts = make_timeseries(&data);
     // forecast.rs: SeasonalES::optimized(period.max(2))
     let mut model = SeasonalES::optimized(SEASONAL_PERIOD);
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options(
         "SeasonalESOptimized",
         HORIZON as i32,
         SEASONAL_PERIOD as i32,
     );
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("SeasonalESOptimized", &lib_point, &ffi_point);
+    assert_full_parity(
+        "SeasonalESOptimized",
+        &mut model,
+        &ts,
+        HORIZON,
+        0.95,
+        &data,
+        ffi_opts,
+    );
 }
 
 #[test]
@@ -398,11 +507,8 @@ fn parity_theta() {
     let ts = make_timeseries(&data);
     // forecast.rs: Theta::seasonal(period) when period > 1
     let mut model = Theta::seasonal(SEASONAL_PERIOD);
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("Theta", HORIZON as i32, SEASONAL_PERIOD as i32);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("Theta", &lib_point, &ffi_point);
+    assert_full_parity("Theta", &mut model, &ts, HORIZON, 0.95, &data, ffi_opts);
 }
 
 #[test]
@@ -411,11 +517,16 @@ fn parity_optimized_theta() {
     let ts = make_timeseries(&data);
     // forecast.rs: OptimizedTheta::seasonal(period) when period > 1
     let mut model = OptimizedTheta::seasonal(SEASONAL_PERIOD);
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("OptimizedTheta", HORIZON as i32, SEASONAL_PERIOD as i32);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("OptimizedTheta", &lib_point, &ffi_point);
+    assert_full_parity(
+        "OptimizedTheta",
+        &mut model,
+        &ts,
+        HORIZON,
+        0.95,
+        &data,
+        ffi_opts,
+    );
 }
 
 #[test]
@@ -424,11 +535,16 @@ fn parity_dynamic_theta() {
     let ts = make_timeseries(&data);
     // forecast.rs: DynamicTheta::seasonal(period) when period > 1
     let mut model = DynamicTheta::seasonal(SEASONAL_PERIOD);
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("DynamicTheta", HORIZON as i32, SEASONAL_PERIOD as i32);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("DynamicTheta", &lib_point, &ffi_point);
+    assert_full_parity(
+        "DynamicTheta",
+        &mut model,
+        &ts,
+        HORIZON,
+        0.95,
+        &data,
+        ffi_opts,
+    );
 }
 
 #[test]
@@ -437,15 +553,20 @@ fn parity_dynamic_optimized_theta() {
     let ts = make_timeseries(&data);
     // forecast.rs: DynamicTheta::seasonal_optimized(period) when period > 1
     let mut model = DynamicTheta::seasonal_optimized(SEASONAL_PERIOD);
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options(
         "DynamicOptimizedTheta",
         HORIZON as i32,
         SEASONAL_PERIOD as i32,
     );
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("DynamicOptimizedTheta", &lib_point, &ffi_point);
+    assert_full_parity(
+        "DynamicOptimizedTheta",
+        &mut model,
+        &ts,
+        HORIZON,
+        0.95,
+        &data,
+        ffi_opts,
+    );
 }
 
 #[test]
@@ -454,11 +575,8 @@ fn parity_auto_theta() {
     let ts = make_timeseries(&data);
     // forecast.rs: AutoTheta::seasonal(period) when period > 1
     let mut model = AutoTheta::seasonal(SEASONAL_PERIOD);
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("AutoTheta", HORIZON as i32, SEASONAL_PERIOD as i32);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("AutoTheta", &lib_point, &ffi_point);
+    assert_full_parity("AutoTheta", &mut model, &ts, HORIZON, 0.95, &data, ffi_opts);
 }
 
 #[test]
@@ -468,11 +586,8 @@ fn parity_auto_ets() {
     // forecast.rs: AutoETS::with_config(AutoETSConfig::with_period(period))
     let config = AutoETSConfig::with_period(SEASONAL_PERIOD);
     let mut model = AutoETS::with_config(config);
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("AutoETS", HORIZON as i32, SEASONAL_PERIOD as i32);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("AutoETS", &lib_point, &ffi_point);
+    assert_full_parity("AutoETS", &mut model, &ts, HORIZON, 0.95, &data, ffi_opts);
 }
 
 #[test]
@@ -482,11 +597,8 @@ fn parity_auto_arima() {
     // forecast.rs: AutoARIMA::with_config(AutoARIMAConfig::default().with_seasonal_period(period))
     let config = AutoARIMAConfig::default().with_seasonal_period(SEASONAL_PERIOD);
     let mut model = AutoARIMA::with_config(config);
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("AutoARIMA", HORIZON as i32, SEASONAL_PERIOD as i32);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("AutoARIMA", &lib_point, &ffi_point);
+    assert_full_parity("AutoARIMA", &mut model, &ts, HORIZON, 0.95, &data, ffi_opts);
 }
 
 #[test]
@@ -495,11 +607,8 @@ fn parity_mfles() {
     let ts = make_timeseries(&data);
     // forecast.rs: MFLES::new(periods) — with period > 1, uses vec![period]
     let mut model = MFLES::new(vec![SEASONAL_PERIOD]);
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("MFLES", HORIZON as i32, SEASONAL_PERIOD as i32);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("MFLES", &lib_point, &ffi_point);
+    assert_full_parity("MFLES", &mut model, &ts, HORIZON, 0.95, &data, ffi_opts);
 }
 
 #[test]
@@ -508,11 +617,8 @@ fn parity_auto_mfles() {
     let ts = make_timeseries(&data);
     // forecast.rs: AutoMFLES uses same MFLES::new(periods)
     let mut model = MFLES::new(vec![SEASONAL_PERIOD]);
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("AutoMFLES", HORIZON as i32, SEASONAL_PERIOD as i32);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("AutoMFLES", &lib_point, &ffi_point);
+    assert_full_parity("AutoMFLES", &mut model, &ts, HORIZON, 0.95, &data, ffi_opts);
 }
 
 #[test]
@@ -521,11 +627,8 @@ fn parity_mstl() {
     let ts = make_timeseries(&data);
     // forecast.rs: MSTLForecaster::new(periods) — with period > 1, uses vec![period]
     let mut model = MSTLForecaster::new(vec![SEASONAL_PERIOD]);
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("MSTL", HORIZON as i32, SEASONAL_PERIOD as i32);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("MSTL", &lib_point, &ffi_point);
+    assert_full_parity("MSTL", &mut model, &ts, HORIZON, 0.95, &data, ffi_opts);
 }
 
 #[test]
@@ -534,11 +637,8 @@ fn parity_auto_mstl() {
     let ts = make_timeseries(&data);
     // forecast.rs: AutoMSTL uses same MSTLForecaster::new(periods), different model_name
     let mut model = MSTLForecaster::new(vec![SEASONAL_PERIOD]);
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("AutoMSTL", HORIZON as i32, SEASONAL_PERIOD as i32);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("AutoMSTL", &lib_point, &ffi_point);
+    assert_full_parity("AutoMSTL", &mut model, &ts, HORIZON, 0.95, &data, ffi_opts);
 }
 
 #[test]
@@ -547,11 +647,8 @@ fn parity_tbats() {
     let ts = make_timeseries(&data);
     // forecast.rs: TBATS::new(periods) — with period > 1, uses vec![period]
     let mut model = TBATS::new(vec![SEASONAL_PERIOD]);
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("TBATS", HORIZON as i32, SEASONAL_PERIOD as i32);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("TBATS", &lib_point, &ffi_point);
+    assert_full_parity("TBATS", &mut model, &ts, HORIZON, 0.95, &data, ffi_opts);
 }
 
 #[test]
@@ -560,11 +657,8 @@ fn parity_auto_tbats() {
     let ts = make_timeseries(&data);
     // forecast.rs: AutoTBATS::new(periods) — with period > 1, uses vec![period]
     let mut model = AutoTBATS::new(vec![SEASONAL_PERIOD]);
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("AutoTBATS", HORIZON as i32, SEASONAL_PERIOD as i32);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("AutoTBATS", &lib_point, &ffi_point);
+    assert_full_parity("AutoTBATS", &mut model, &ts, HORIZON, 0.95, &data, ffi_opts);
 }
 
 // ── Intermittent demand models ─────────────────────────────────────────
@@ -575,11 +669,16 @@ fn parity_croston_classic() {
     let ts = make_timeseries(&data);
     // forecast.rs: Croston::new()
     let mut model = Croston::new();
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("CrostonClassic", HORIZON as i32, 0);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("CrostonClassic", &lib_point, &ffi_point);
+    assert_full_parity(
+        "CrostonClassic",
+        &mut model,
+        &ts,
+        HORIZON,
+        0.95,
+        &data,
+        ffi_opts,
+    );
 }
 
 #[test]
@@ -588,11 +687,16 @@ fn parity_croston_optimized() {
     let ts = make_timeseries(&data);
     // forecast.rs: Croston::new().optimized()
     let mut model = Croston::new().optimized();
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("CrostonOptimized", HORIZON as i32, 0);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("CrostonOptimized", &lib_point, &ffi_point);
+    assert_full_parity(
+        "CrostonOptimized",
+        &mut model,
+        &ts,
+        HORIZON,
+        0.95,
+        &data,
+        ffi_opts,
+    );
 }
 
 #[test]
@@ -601,11 +705,16 @@ fn parity_croston_sba() {
     let ts = make_timeseries(&data);
     // forecast.rs: Croston::new().sba()
     let mut model = Croston::new().sba();
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("CrostonSBA", HORIZON as i32, 0);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("CrostonSBA", &lib_point, &ffi_point);
+    assert_full_parity(
+        "CrostonSBA",
+        &mut model,
+        &ts,
+        HORIZON,
+        0.95,
+        &data,
+        ffi_opts,
+    );
 }
 
 #[test]
@@ -614,11 +723,8 @@ fn parity_tsb() {
     let ts = make_timeseries(&data);
     // forecast.rs: TSB::new()
     let mut model = TSB::new();
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("TSB", HORIZON as i32, 0);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("TSB", &lib_point, &ffi_point);
+    assert_full_parity("TSB", &mut model, &ts, HORIZON, 0.95, &data, ffi_opts);
 }
 
 #[test]
@@ -627,11 +733,8 @@ fn parity_adida() {
     let ts = make_timeseries(&data);
     // forecast.rs: ADIDA::new()
     let mut model = ADIDA::new();
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("ADIDA", HORIZON as i32, 0);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("ADIDA", &lib_point, &ffi_point);
+    assert_full_parity("ADIDA", &mut model, &ts, HORIZON, 0.95, &data, ffi_opts);
 }
 
 #[test]
@@ -640,11 +743,8 @@ fn parity_imapa() {
     let ts = make_timeseries(&data);
     // forecast.rs: IMAPA::new()
     let mut model = IMAPA::new();
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("IMAPA", HORIZON as i32, 0);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("IMAPA", &lib_point, &ffi_point);
+    assert_full_parity("IMAPA", &mut model, &ts, HORIZON, 0.95, &data, ffi_opts);
 }
 
 // ── Hand-rolled models: verify against library equivalents ─────────────
@@ -780,11 +880,16 @@ fn parity_seasonal_naive() {
     let data = seasonal_data();
     let ts = make_timeseries(&data);
     let mut model = SeasonalNaive::new(SEASONAL_PERIOD);
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("SeasonalNaive", HORIZON as i32, SEASONAL_PERIOD as i32);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("SeasonalNaive", &lib_point, &ffi_point);
+    assert_full_parity(
+        "SeasonalNaive",
+        &mut model,
+        &ts,
+        HORIZON,
+        0.95,
+        &data,
+        ffi_opts,
+    );
 }
 
 #[test]
@@ -793,11 +898,8 @@ fn parity_sma() {
     let ts = make_timeseries(&data);
     // forecast.rs: window = period.max(3) when window=0, so window=12
     let mut model = SimpleMovingAverage::new(SEASONAL_PERIOD);
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("SMA", HORIZON as i32, SEASONAL_PERIOD as i32);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("SMA", &lib_point, &ffi_point);
+    assert_full_parity("SMA", &mut model, &ts, HORIZON, 0.95, &data, ffi_opts);
 }
 
 #[test]
@@ -805,11 +907,16 @@ fn parity_random_walk_drift() {
     let data = seasonal_data();
     let ts = make_timeseries(&data);
     let mut model = RandomWalkWithDrift::new();
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options("RandomWalkDrift", HORIZON as i32, 0);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("RandomWalkDrift", &lib_point, &ffi_point);
+    assert_full_parity(
+        "RandomWalkDrift",
+        &mut model,
+        &ts,
+        HORIZON,
+        0.95,
+        &data,
+        ffi_opts,
+    );
 }
 
 #[test]
@@ -819,15 +926,20 @@ fn parity_seasonal_window_average() {
     // Hand-rolled uses all data: 60 points / 12 period = 5 complete seasons
     let n_seasons = seasonal_data().len() / SEASONAL_PERIOD;
     let mut model = SeasonalWindowAverage::new(SEASONAL_PERIOD, n_seasons);
-    let lib_point = lib_predict(&mut model, &ts, HORIZON);
-
     let ffi_opts = make_ffi_options(
         "SeasonalWindowAverage",
         HORIZON as i32,
         SEASONAL_PERIOD as i32,
     );
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    assert_f64_eq("SeasonalWindowAverage", &lib_point, &ffi_point);
+    assert_full_parity(
+        "SeasonalWindowAverage",
+        &mut model,
+        &ts,
+        HORIZON,
+        0.95,
+        &data,
+        ffi_opts,
+    );
 }
 
 // ── ETS without spec: falls back to HoltWinters/Holt/SES in core ──────
@@ -886,6 +998,153 @@ fn parity_arima() {
     assert_f64_eq("ARIMA", &expected, &ffi_point);
 }
 
+// ── Classical / ensemble / distributional: full parity (D-01/D-02/D-03/D-11) ──
+
+#[test]
+fn parity_garch() {
+    let data = seasonal_data();
+    let ts = make_timeseries(&data);
+    let level = 0.95;
+
+    // forecast.rs: point = sqrt(forecast_variance(h)), NOT predict()/predict_with_intervals()
+    // primary() — predict_with_intervals is used only for lower/upper (D-01).
+    let mut model = GARCH::new(1, 1);
+    model.fit(&ts).expect("[GARCH] library fit failed");
+    let variance = model
+        .forecast_variance(HORIZON)
+        .expect("[GARCH] library forecast_variance failed");
+    let lib_point: Vec<f64> = variance.iter().map(|&v| v.sqrt()).collect();
+    let forecast = model
+        .predict_with_intervals(HORIZON, level)
+        .expect("[GARCH] library predict_with_intervals failed");
+    let lib_lower = forecast
+        .lower()
+        .and_then(|i| i.first())
+        .cloned()
+        .unwrap_or_default();
+    let lib_upper = forecast
+        .upper()
+        .and_then(|i| i.first())
+        .cloned()
+        .unwrap_or_default();
+    let lib_lower = if lib_lower.len() == lib_point.len() {
+        lib_lower
+    } else {
+        vec![]
+    };
+    let lib_upper = if lib_upper.len() == lib_point.len() {
+        lib_upper
+    } else {
+        vec![]
+    };
+    let lib_fitted = model
+        .fitted_values()
+        .map(|v| v.to_vec())
+        .unwrap_or_default();
+    let lib_residuals = model.residuals().map(|v| v.to_vec()).unwrap_or_default();
+
+    let mut ffi_opts = make_ffi_options("GARCH", HORIZON as i32, 0);
+    ffi_opts.garch_p = 1;
+    ffi_opts.garch_q = 1;
+    ffi_opts.confidence_level = level;
+    ffi_opts.include_fitted = true;
+    ffi_opts.include_residuals = true;
+    let (ffi_point, ffi_lower, ffi_upper, ffi_fitted, ffi_residuals, model_name) =
+        call_ffi_full(&data, &ffi_opts);
+
+    assert_eq!(model_name, "GARCH(1,1)");
+    assert_f64_eq("GARCH.point", &lib_point, &ffi_point);
+    assert_f64_eq("GARCH.lower", &lib_lower, &ffi_lower);
+    assert_f64_eq("GARCH.upper", &lib_upper, &ffi_upper);
+    // GARCH::fitted_values() is always None by crate design ("fitted values
+    // are just the mean for GARCH") — not required by this plan's <behavior>
+    // (GARCH is scoped to point/lower/upper only). Both sides are empty.
+    assert_f64_eq("GARCH.fitted", &lib_fitted, &ffi_fitted);
+    // KNOWN FFI LIMITATION (see assert_full_parity's doc comment): because
+    // fitted is always None for GARCH, the FFI's shared `n_fitted` length
+    // field truncates `residuals` to 0 even though the crate produces real
+    // residuals. Deferred to plan 10-02.
+    assert!(
+        !lib_residuals.is_empty(),
+        "GARCH.residuals: expected the crate to produce real residuals (premise \
+         of the length-sharing gap below) — got none; if GARCH now exposes no \
+         residuals either, this test's documented gap no longer applies"
+    );
+    assert!(
+        ffi_residuals.is_empty(),
+        "GARCH.residuals: expected the known n_fitted/residuals length-sharing \
+         gap to truncate FFI residuals to empty — got {} elements instead; if \
+         this now carries real data, the gap has been fixed upstream",
+        ffi_residuals.len()
+    );
+}
+
+#[test]
+fn parity_kalman() {
+    let data = seasonal_data();
+    let ts = make_timeseries(&data);
+    // forecast.rs: KalmanForecaster::local_level() (default spec) via extract_forecast
+    let mut model = KalmanForecaster::local_level();
+    let ffi_opts = make_ffi_options("Kalman", HORIZON as i32, 0);
+    assert_full_parity("Kalman", &mut model, &ts, HORIZON, 0.95, &data, ffi_opts);
+}
+
+#[test]
+fn parity_auto_ensemble() {
+    let data = seasonal_data();
+    let ts = make_timeseries(&data);
+    // forecast.rs: AutoEnsemble::with_config { top_k: 3, Mean, seasonal_period }
+    // via extract_forecast (Phase 4 default top_k/method, matches forecast_with_model).
+    let config = AutoEnsembleConfig {
+        top_k: 3,
+        combination_method: anofox_forecast::models::ensemble::CombinationMethod::Mean,
+        seasonal_period: Some(SEASONAL_PERIOD),
+    };
+    let mut model = AutoEnsemble::with_config(config);
+    let ffi_opts = make_ffi_options("AutoEnsemble", HORIZON as i32, SEASONAL_PERIOD as i32);
+    assert_full_parity(
+        "AutoEnsemble",
+        &mut model,
+        &ts,
+        HORIZON,
+        0.95,
+        &data,
+        ffi_opts,
+    );
+}
+
+#[test]
+fn parity_laplace() {
+    let data = seasonal_data();
+    let ts = make_timeseries(&data);
+    let level = 0.95;
+
+    // forecast.rs forecast_laplace: LaplaceForecaster::new().auto().with_seasonal(period),
+    // clamped confidence_level in [0.5, 0.999] (no clamping needed at 0.95).
+    let mut model = LaplaceForecaster::new()
+        .auto()
+        .with_seasonal(SEASONAL_PERIOD);
+    let (lib_point, lib_lower, lib_upper, lib_fitted, lib_residuals) =
+        lib_predict_full(&mut model, &ts, HORIZON, level);
+
+    let mut ffi_opts = make_ffi_options("Laplace", HORIZON as i32, SEASONAL_PERIOD as i32);
+    ffi_opts.confidence_level = level;
+    ffi_opts.include_fitted = true;
+    ffi_opts.include_residuals = true;
+    let (ffi_point, ffi_lower, ffi_upper, ffi_fitted, ffi_residuals, model_name) =
+        call_ffi_full(&data, &ffi_opts);
+
+    assert_eq!(
+        model_name,
+        format!("Laplace(auto,seasonal={SEASONAL_PERIOD})")
+    );
+    assert_f64_eq("Laplace.point", &lib_point, &ffi_point);
+    assert_f64_eq("Laplace.lower", &lib_lower, &ffi_lower);
+    assert_f64_eq("Laplace.upper", &lib_upper, &ffi_upper);
+    assert_f64_eq("Laplace.fitted", &lib_fitted, &ffi_fitted);
+    assert_f64_eq("Laplace.residuals", &lib_residuals, &ffi_residuals);
+}
+
 // ── Parameter grid tests ───────────────────────────────────────────────
 //
 // Each test sweeps a parameter across multiple values, verifying parity
@@ -905,8 +1164,8 @@ mod param_grid {
 
             let ffi_opts = make_ffi_options_with_window("SMA", HORIZON as i32, 0, window as i32);
             let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-            // SMA is hand-rolled in core; summation order may differ by ≤1 ULP.
-            assert_f64_near(&format!("SMA(window={window})"), &lib_point, &ffi_point, 1);
+            // SMA is now crate-backed (D-01/D-11) — bit-identical, not ≤1 ULP.
+            assert_f64_eq(&format!("SMA(window={window})"), &lib_point, &ffi_point);
         }
     }
 
