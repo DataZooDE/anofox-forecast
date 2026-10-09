@@ -97,10 +97,11 @@ SELECT * FROM ts_detect_changepoints_by(
 );
 
 -- Find all changepoints with their dates
+-- (output columns are group_col/date_col/is_changepoint/changepoint_probability only --
+-- the value column is NOT included in ts_detect_changepoints_by's output)
 SELECT
     product_id,
     date,
-    quantity,
     changepoint_probability
 FROM ts_detect_changepoints_by(
     'sales',
@@ -126,7 +127,11 @@ FROM ts_detect_changepoints_by(
 GROUP BY product_id;
 ```
 
-> **Alias:** `ts_detect_changepoints` is an alias for `ts_detect_changepoints_by`
+> **Not an alias:** `ts_detect_changepoints` is a **different, single-series** macro, not an
+> alias for `ts_detect_changepoints_by`. It takes 4 args — `(source, date_col, value_col,
+> params)`, no `group_col` — and its output shape differs: `(date_col, value_col,
+> is_changepoint, changepoint_probability)`. Notably it INCLUDES the value column (unlike
+> `ts_detect_changepoints_by`, which omits it) and has no series identifier column at all.
 
 ---
 

@@ -72,8 +72,8 @@ ts_stats_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
 | `max` | DOUBLE | Maximum value |
 | `range` | DOUBLE | Range (max - min) |
 | `sum` | DOUBLE | Sum of all values |
-| `skewness` | DOUBLE | Skewness (Fisher's G1) |
-| `kurtosis` | DOUBLE | Excess kurtosis (Fisher's G2) |
+| `skewness` | DOUBLE | Intended as Fisher's G1, but currently mixes a population 3rd moment with a sample (ddof=1) standard deviation before applying the G1 bias-correction factor — not a textbook G1 value (being corrected in v0.10.0, Phase 13) |
+| `kurtosis` | DOUBLE | Same population/sample moment mixing as `skewness`, applied to excess kurtosis — not a textbook G2 value (being corrected in v0.10.0, Phase 13) |
 | `tail_index` | DOUBLE | Hill estimator |
 | `bimodality_coef` | DOUBLE | Bimodality coefficient |
 | `trimmed_mean` | DOUBLE | 10% trimmed mean |
@@ -82,30 +82,31 @@ ts_stats_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
 | `q3` | DOUBLE | Third quartile |
 | `iqr` | DOUBLE | Interquartile range |
 | `autocorr_lag1` | DOUBLE | Autocorrelation at lag 1 |
-| `trend_strength` | DOUBLE | Trend strength (0-1) |
-| `seasonality_strength` | DOUBLE | Seasonality strength (0-1) |
-| `entropy` | DOUBLE | Approximate entropy |
+| `trend_strength` | DOUBLE | `\|r\|` (absolute Pearson correlation) of a linear fit of the series against its index — not a decomposition-based trend strength; no fixed "strong trend" threshold is defined (being corrected in v0.10.0, Phase 13) |
+| `seasonality_strength` | DOUBLE | `max(\|ACF\|)` over lags 2, 4, 7, and 12 only — not a general seasonal-strength decomposition and not sensitive to other periods; no fixed "strong seasonality" threshold is defined (being corrected in v0.10.0, Phase 13) |
+| `entropy` | DOUBLE | 10-bin Shannon entropy of the value histogram (not approximate entropy / ApEn despite the name) (being corrected in v0.10.0, Phase 13) |
 | `stability` | DOUBLE | Stability measure |
 | `expected_length` | UBIGINT | Expected observations based on date range and frequency |
-| `n_gaps` | UBIGINT | Number of gaps (missing time periods) in the series |
+| `n_gaps` | UBIGINT | Number of gap **occurrences** (consecutive-timestamp transitions exceeding ~1.5x the typical spacing) — NOT the number of missing periods; a single 10-period gap counts as 1, not 10 (being corrected in v0.10.0, Phase 13) |
 
 **Example:**
 ```sql
 -- Get all statistics
 SELECT * FROM ts_stats_by('sales', product_id, date, quantity, '1d');
 
--- Access specific fields
+-- Access specific fields (group_col output column is named after the group_col you pass in --
+-- here product_id, not a hardcoded "id")
 SELECT
-    id,
+    product_id,
     length,
     mean,
     std_dev,
     trend_strength
 FROM ts_stats_by('sales', product_id, date, quantity, '1d');
 
--- Detect gaps in time series
+-- Detect gaps in time series (n_gaps counts gap OCCURRENCES, not missing periods)
 SELECT
-    id,
+    product_id,
     length AS actual_length,
     expected_length,
     n_gaps,
@@ -142,11 +143,11 @@ ts_data_quality_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col 
 |--------|------|-------------|
 | `unique_id` | (same as group_col) | Series identifier |
 | `structural_score` | DOUBLE | Structural dimension score (0-1) - measures data completeness |
-| `temporal_score` | DOUBLE | Temporal dimension score (0-1) - measures regularity of timestamps |
+| `temporal_score` | DOUBLE | **Currently always `1.0`** — the underlying `compute_data_quality` call never receives the date array (hardcoded `None`), so `n_short` and `frequency` are also silently ignored by this score (being corrected in v0.10.0, Phase 13) |
 | `magnitude_score` | DOUBLE | Magnitude dimension score (0-1) - measures value distribution health |
 | `behavioral_score` | DOUBLE | Behavioral dimension score (0-1) - measures predictability |
-| `overall_score` | DOUBLE | Overall quality score (0-1, higher is better) |
-| `n_gaps` | UBIGINT | Number of detected gaps in the series |
+| `overall_score` | DOUBLE | Overall quality score (0-1, higher is better); currently inflated by the always-1.0 `temporal_score` component |
+| `n_gaps` | UBIGINT | **Currently always `0`** for the same reason as `temporal_score` above (being corrected in v0.10.0, Phase 13) |
 | `n_missing` | UBIGINT | Number of missing values |
 | `is_constant` | BOOLEAN | Whether series is constant (no variation) |
 

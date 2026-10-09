@@ -6,15 +6,19 @@ description: >
   periods before configuring seasonal forecasting models, detecting
   structural breaks, analysing peak timing regularity, or decomposing
   a series into trend / seasonal / residual components.
-version: 0.15.3
+version: 2026.09.26
 user-invocable: false
 ---
 
 # Anofox Forecast — Detection & Decomposition Cheat Sheet
 
-**Extension:** `anofox_forecast` v0.15.3 | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.15.10) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
-Detect signal structure — **seasonality is not auto-detected by the forecasters**; you must run detection first and pass `seasonal_period` explicitly to `ts_forecast_by`.
+Detect signal structure. When both `seasonal_period` and `seasonal_periods` are omitted,
+`ts_forecast_by` / `ts_cv_forecast_by` / the scalar paths auto-detect the seasonal period
+internally (first detected period, 1 if none found) — `ts_forecast_agg` does NOT. Running
+detection first and passing `seasonal_period` explicitly is still recommended for control and
+reproducibility over what silent auto-detection would pick.
 
 ## Requires: json extension
 
@@ -174,15 +178,21 @@ Params:
 |---|---|---|
 | `hazard_lambda` | 250.0 | Hazard rate. Lower → more changepoints |
 
-Returns one row per input point with `is_changepoint BOOLEAN` and `changepoint_probability DOUBLE`.
+Returns one row per input point with `<group_col>`, `<date_col>`, `is_changepoint BOOLEAN`,
+and `changepoint_probability DOUBLE` only — the value column is **not** included in the
+output.
 
 ```sql
--- Detect changepoints
-SELECT product_id, ds, y, is_changepoint, changepoint_probability
+-- Detect changepoints (value column is NOT in the output; select from the source if needed)
+SELECT product_id, ds, is_changepoint, changepoint_probability
 FROM ts_detect_changepoints_by('sales', product_id, ds, y,
     MAP{'hazard_lambda': '100'})
 WHERE is_changepoint;
 ```
+
+Note: the single-series `ts_detect_changepoints` (no `group_col`) has a **different** output
+shape that DOES include the value column: `(date_col, value_col, is_changepoint,
+changepoint_probability)`. It is not a simple alias of the `_by` form.
 
 Also: `ts_detect_changepoints` (scalar) and `ts_detect_changepoints_agg` (aggregate).
 
@@ -199,14 +209,20 @@ Output columns (group column preserved):
 | Column | Type | Description |
 |---|---|---|
 | `<group_col>` | (input) | Preserved group column |
-| `timing_classification` | VARCHAR | e.g. `Regular`, `Weekly`, `Irregular` |
-| `modulation_type` | VARCHAR | `Additive` / `Multiplicative` / `None` |
+| `timing_classification` | VARCHAR | `'stable_seasonal'` / `'variable_timing'` / `'intermittent_seasonal'` / `'non_seasonal'` (NOT `Regular`/`Weekly`/`Irregular` — that is not the real label set) |
+| `modulation_type` | VARCHAR | `'stable'` / `'emerging'` / `'fading'` / `'oscillating'` / `'non_seasonal'` (NOT `Additive`/`Multiplicative`/`None` — that is not the real label set) |
 | `has_stable_timing` | BOOLEAN | Peak timing regularity |
 | `timing_variability` | DOUBLE | Numeric variability score |
 | `seasonal_strength` | DOUBLE | ∈ [0, 1] |
 | `is_seasonal` | BOOLEAN | Overall verdict |
 | `cycle_strengths` | DOUBLE[] | Per-cycle strengths |
 | `weak_seasons` | BIGINT[] | Indices of weak seasonal peaks |
+
+**Current limitation:** an argument-order bug in the underlying call can make even a clean,
+clearly-seasonal series (e.g. a sine wave at the correct period) come back as
+`timing_classification = 'non_seasonal'`, `is_seasonal = false`, with `seasonal_strength` /
+`timing_variability` as `NaN`. Treat results as unreliable until this is fixed.
+(being corrected in v0.10.0, Phase 15)
 
 ```sql
 SELECT product_id, timing_classification, modulation_type, is_seasonal, seasonal_strength
@@ -228,10 +244,12 @@ Detect the presence and any regime shifts in the seasonal pattern.
 ### `ts_detect_peaks_by`
 
 ```sql
-ts_detect_peaks_by(source, group_col, date_col, value_col, params) → TABLE
+ts_detect_peaks_by(source, group_col, date_col, value_col, params) → TABLE(group_col, peaks, n_peaks, inter_peak_distances, mean_period)
 ```
 
-Returns detected peak indices and values per group.
+Returns flat top-level columns `n_peaks` / `inter_peak_distances` / `mean_period` alongside
+`peaks` (the array of individual peak info) — NOT a single nested `peaks` STRUCT wrapping
+everything.
 
 ### `ts_analyze_peak_timing_by`
 
@@ -248,15 +266,21 @@ Also: `ts_detect_peaks`, `ts_analyze_peak_timing`, `ts_detect_amplitude_modulati
 ### `ts_mstl_decomposition_by` — Multiple Seasonal-Trend decomposition (LOESS)
 
 ```sql
-ts_mstl_decomposition_by(source, group_col, date_col, value_col, params) → TABLE
+ts_mstl_decomposition_by(source, group_col, date_col, value_col, params) → TABLE(group_col, trend, seasonal, remainder, periods)
 ```
 
-`seasonal_periods` goes INSIDE the params (JSON-string form): `MAP{'seasonal_periods': '[7, 365]'}`. Returns `trend`, `seasonal_<i>`, `remainder` per point.
+**Current limitation:** the underlying native call does not currently receive or use any
+seasonal period information — `MAP{'seasonal_periods': ...}` has **no effect**. `seasonal`
+and `periods` come back as **empty arrays** on every call; this is currently classical
+moving-average trend extraction only, with `remainder = value - trend` and no seasonal
+component. There is no `seasonal_1`/`seasonal_2`-style per-period column naming.
+(being corrected in v0.10.0, Phase 15)
 
 ```sql
-SELECT product_id, ds, trend, seasonal_1, remainder
-FROM ts_mstl_decomposition_by('sales', product_id, ds, y,
-    MAP{'seasonal_periods': '[7]'});
+-- One row per group with array-valued trend/seasonal/remainder (no per-point date column);
+-- seasonal_periods currently has no effect -- seasonal/periods come back empty
+SELECT product_id, trend, seasonal, remainder
+FROM ts_mstl_decomposition_by('sales', product_id, ds, y, MAP{});
 ```
 
 ### `ts_decompose_seasonal` (scalar) — classical additive / multiplicative
@@ -269,7 +293,13 @@ Remove linear or polynomial trend:
 ts_detrend_by(source, group_col, date_col, value_col, method) → TABLE
 ```
 
-`method`: `'linear'` (default), `'polynomial'`, `'ols'`.
+`method`: `'linear'`, `'quadratic'`, `'cubic'`, or `'auto'` (default).
+
+**Current limitation:** `ts_detrend_by` is currently a **no-op** — an argument-order bug
+makes `trend` come back all-zero and `detrended` equal the input values, for every
+`method`. `'quadratic'` / `'cubic'` additionally fall back silently to `'auto'` (reporting
+`method = 'auto(none)'`, `n_params = 0`) rather than fitting the requested degree.
+(being corrected in v0.10.0, Phase 15)
 
 ### `ts_detrend` (scalar) — array-level trend removal
 
@@ -277,22 +307,25 @@ The array-level primitive behind `ts_detrend_by`. Signature `ts_detrend(DOUBLE[]
 
 ## Gotchas
 
-- **Seasonality is NOT auto-detected by forecasters.** `AutoETS` / `AutoARIMA` / `AutoTheta` accept a `seasonal_period` param — if you don't set it, they select non-seasonal variants. Run detection first, then pass explicitly.
+- **Seasonality auto-detection is partial.** `AutoETS` / `AutoARIMA` / `AutoTheta` (and other models) via `ts_forecast_by` DO auto-detect when `seasonal_period`/`seasonal_periods` are both omitted — but `ts_forecast_agg` does NOT. Run detection first and pass `seasonal_period` explicitly if you want control/reproducibility rather than relying on silent auto-detection.
 - **`ts_detect_periods_by` returns one row per group** with a `periods` STRUCT. Access fields with `primary_period`.
 - **Detection needs sufficient history**: FFT-family methods need ≥ 2 full cycles; ACF-family needs ≥ 3. On short-history panels, `ts_detect_periods` may return `primary_period = 1` (no seasonality) even when a period exists.
-- **`ts_mstl_decomposition_by` seasonal_periods is a JSON string** (`'[7, 365]'`), not a native array.
+- **`ts_mstl_decomposition_by`'s `seasonal_periods` param currently has no effect at all** — `seasonal`/`periods` always come back empty (being corrected in v0.10.0, Phase 15).
 
 ## Canonical detection pipeline
 
 ```sql
--- 1. Detect periods across the panel
+-- 1. Detect periods across the panel (periods is a LIST of structs -- index into it,
+-- it is not itself a struct; group_col output is named after the group_col you pass in)
 CREATE OR REPLACE TABLE detected AS
-SELECT id, primary_period AS sp, (periods).confidence AS conf
+SELECT product_id, primary_period AS sp, periods[1].confidence AS conf
 FROM ts_detect_periods_by('sales', product_id, ds, y, MAP{'method': 'autoperiod'});
 
--- 2. Classify seasonality mode (additive vs multiplicative) at the modal period
+-- 2. Classify seasonality mode at the modal period (real column names are
+-- timing_classification / modulation_type, not classification / confidence --
+-- treat results as unreliable, see Current limitation above)
 CREATE OR REPLACE TABLE modes AS
-SELECT id, classification, confidence
+SELECT product_id, timing_classification, modulation_type
 FROM ts_classify_seasonality_by('sales', product_id, ds, y,
     (SELECT mode() WITHIN GROUP (ORDER BY sp) FROM detected));
 

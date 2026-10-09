@@ -22,9 +22,9 @@ Decomposition functions separate time series into trend, seasonal, and residual 
 
 Multiple Seasonal-Trend decomposition using Loess (MSTL).
 
-**Signature:**
+**Signature (5 args — there is no `seasonal_periods` positional argument):**
 ```sql
-ts_mstl_decomposition_by(source, group_col, date_col, value_col, seasonal_periods, params)
+ts_mstl_decomposition_by(source, group_col, date_col, value_col, params)
 ```
 
 **Parameters:**
@@ -34,23 +34,28 @@ ts_mstl_decomposition_by(source, group_col, date_col, value_col, seasonal_period
 | `group_col` | IDENTIFIER | Series grouping column |
 | `date_col` | IDENTIFIER | Date/timestamp column |
 | `value_col` | IDENTIFIER | Value column |
-| `seasonal_periods` | INTEGER[] | Array of seasonal periods |
-| `params` | MAP | Additional parameters |
+| `params` | MAP | Only `insufficient_data` is read from `params` today — see Current limitation below |
+
+**Current limitation:** the underlying native implementation does not currently receive or
+use any seasonal period information at all. `seasonal` and `periods` are returned as
+**empty arrays** on every call — this function currently performs classical moving-average
+trend extraction only, with no seasonal decomposition. `remainder` is simply
+`value - trend`. (being corrected in v0.10.0, Phase 15)
 
 **Returns:**
 | Column | Type | Description |
 |--------|------|-------------|
 | `<group_col>` | (same as input) | Group identifier |
-| `trend` | DOUBLE[] | Trend component |
-| `seasonal` | DOUBLE[][] | Seasonal components (one array per period) |
-| `remainder` | DOUBLE[] | Residual component after removing trend and seasonal |
-| `periods` | INTEGER[] | Detected seasonal period lengths |
+| `trend` | DOUBLE[] | Classical moving-average trend component |
+| `seasonal` | DOUBLE[][] | Currently always empty — see Current limitation above |
+| `remainder` | DOUBLE[] | `value - trend` (no seasonal component is subtracted) |
+| `periods` | INTEGER[] | Currently always empty — see Current limitation above |
 
 **Example:**
 ```sql
+-- Note: there is no seasonal_periods argument to pass today; periods/seasonal come back empty
 SELECT * FROM ts_mstl_decomposition_by(
     'sales', product_id, date, quantity,
-    [7, 365],  -- weekly and yearly seasonality
     MAP{}
 );
 ```
@@ -75,6 +80,12 @@ ts_detrend_by(source, group_col, date_col, value_col, method)
 | `value_col` | IDENTIFIER | Value column |
 | `method` | VARCHAR | Detrending method: 'linear', 'quadratic', 'cubic', or 'auto' |
 
+**Current limitation:** `ts_detrend_by` is currently a **no-op** — due to an argument-order
+issue in the underlying call, `trend` comes back all-zero and `detrended` equals the input
+values unchanged, for every `method`. Additionally, `'quadratic'` and `'cubic'` currently
+fall back to `'auto'` (and report `method = 'auto(none)'`, `n_params = 0`) rather than
+fitting the requested polynomial degree. (being corrected in v0.10.0, Phase 15)
+
 **Returns:**
 | Column | Type | Description |
 |--------|------|-------------|
@@ -97,9 +108,9 @@ SELECT * FROM ts_detrend_by('sales', product_id, date, quantity, 'linear');
 -- Quadratic detrending for curved trends
 SELECT * FROM ts_detrend_by('sales', product_id, date, quantity, 'quadratic');
 
--- Access detrended data
+-- Access detrended data (output column is named after the group_col you pass in)
 SELECT
-    id,
+    sensor_id,
     detrended[1:5] AS first_5_detrended,
     method,
     n_params
@@ -134,8 +145,8 @@ ts_classify_seasonality_by(source VARCHAR, group_col COLUMN, date_col COLUMN, va
 | Column | Type | Description |
 |--------|------|-------------|
 | `<group_col>` | (same as input) | Group identifier |
-| `timing_classification` | VARCHAR | 'early', 'on_time', 'late', or 'variable' |
-| `modulation_type` | VARCHAR | 'stable', 'growing', 'shrinking', or 'variable' |
+| `timing_classification` | VARCHAR | `'stable_seasonal'`, `'variable_timing'`, `'intermittent_seasonal'`, or `'non_seasonal'` (not `'early'`/`'on_time'`/`'late'`/`'variable'` — those are not the real label set) |
+| `modulation_type` | VARCHAR | `'stable'`, `'emerging'`, `'fading'`, `'oscillating'`, or `'non_seasonal'` (not `'growing'`/`'shrinking'`/`'variable'` — those are not the real label set) |
 | `has_stable_timing` | BOOLEAN | Whether peak timing is consistent |
 | `timing_variability` | DOUBLE | Variability score (lower = more stable) |
 | `seasonal_strength` | DOUBLE | Strength of seasonality (0-1) |
@@ -143,13 +154,20 @@ ts_classify_seasonality_by(source VARCHAR, group_col COLUMN, date_col COLUMN, va
 | `cycle_strengths` | DOUBLE[] | Strength per cycle |
 | `weak_seasons` | INTEGER[] | Indices of weak seasonal cycles |
 
+**Current limitation:** due to an argument-order issue in the underlying call, a clearly
+seasonal series (e.g. a clean sine wave with the correct period) can currently come back as
+`timing_classification = 'non_seasonal'`, `modulation_type = 'non_seasonal'`,
+`is_seasonal = false`, with `seasonal_strength` / `timing_variability` as `NaN`. Treat
+results from this function as unreliable until this is fixed.
+(being corrected in v0.10.0, Phase 15)
+
 **Example:**
 ```sql
 -- Classify weekly seasonality per product
 SELECT * FROM ts_classify_seasonality_by('sales', product_id, date, quantity, 7.0);
 
 -- Find products with strong, stable seasonality
-SELECT id, seasonal_strength
+SELECT product_id, seasonal_strength
 FROM ts_classify_seasonality_by('sales', product_id, date, quantity, 7.0)
 WHERE is_seasonal AND has_stable_timing;
 ```

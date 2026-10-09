@@ -1,4 +1,16 @@
+docs/api/03-statistics.md	2	PASS	SELECT * FROM ts_stats_by('sales', product_id, date, quantity, '1d');	
+docs/api/04-data-preparation.md	25	PASS	SELECT * FROM ts_diff_by('sales', product_id, date, quantity, 1);	
+docs/api/05a-decomposition.md	0	SYNOPSIS	ts_mstl_decomposition_by(source, group_col, date_col, value_col, params)	Parser Error: syntax error at or near "ts_mstl_decomposition_by"
+docs/api/05a-decomposition.md	1	PASS	SELECT * FROM ts_mstl_decomposition_by(	
+docs/api/05a-decomposition.md	3	PASS	SELECT * FROM ts_detrend_by('sales', product_id, date, quantity, 'auto');	
+docs/api/05a-decomposition.md	5	PASS	SELECT * FROM ts_classify_seasonality_by('sales', product_id, date, quantity, 7.0);	
+docs/api/05b-peak-detection.md	0	SYNOPSIS	ts_detect_peaks_by(source, group_col, date_col, value_col, params) → TABLE(group_col, peaks, n_peaks	Parser Error: syntax error at or near "ts_detect_peaks_by"
+docs/api/05b-peak-detection.md	1	PASS	SELECT	
+docs/api/05b-peak-detection.md	2	SYNOPSIS	ts_analyze_peak_timing_by(source, group_col, date_col, value_col, period, params) → TABLE(group_col,	Parser Error: syntax error at or near "ts_analyze_peak_timing_by"
+docs/api/05b-peak-detection.md	3	PASS	SELECT	
+docs/api/06-changepoint-detection.md	2	PASS	SELECT * FROM ts_detect_changepoints_by(	
 docs/api/07-forecasting.md	22	PASS	SELECT * FROM ts_auto_ensemble_inspect_by(	
+docs/api/11-conformal-prediction.md	32	PASS	SELECT ts_conformal_learn(	
 docs/reference/models/ensemble/ensemble_inspect.md	7	PASS	SELECT * FROM ts_auto_ensemble_inspect_by(	
 docs/reference/models/exponential-smoothing/holt.md	1	PASS	SELECT * FROM ts_forecast_by(	
 docs/reference/models/exponential-smoothing/holt_winters.md	1	PASS	SELECT * FROM ts_forecast_by(	
@@ -12,3 +24,12 @@ docs/reference/models/multi-seasonal/tbats.md	1	PASS	SELECT * FROM ts_forecast_b
 docs/reference/models/state-space/arima.md	1	PASS	SELECT * FROM ts_forecast_by(	
 docs/reference/models/theta/dynamic_theta.md	1	PASS	SELECT * FROM ts_forecast_by(	
 docs/reference/models/theta/theta.md	1	PASS	SELECT * FROM ts_forecast_by(	
+plugins/anofox-forecast/skills/anofox-forecast-backtest/SKILL.md	14	PASS	CREATE OR REPLACE TABLE folds AS	
+plugins/anofox-forecast/skills/anofox-forecast-data-prep/SKILL.md	5	PASS	CREATE TABLE stationary AS	
+plugins/anofox-forecast/skills/anofox-forecast-data-prep/SKILL.md	8	PASS	SELECT * FROM ts_fill_gaps_by('clean', product_id, ds, y, '1d');	
+plugins/anofox-forecast/skills/anofox-forecast-detection/SKILL.md	8	PASS	SELECT product_id, ds, is_changepoint, changepoint_probability	
+plugins/anofox-forecast/skills/anofox-forecast-detection/SKILL.md	11	SYNOPSIS	ts_detect_peaks_by(source, group_col, date_col, value_col, params) → TABLE(group_col, peaks, n_peaks	Parser Error: syntax error at or near "ts_detect_peaks_by"
+plugins/anofox-forecast/skills/anofox-forecast-detection/SKILL.md	13	SYNOPSIS	ts_mstl_decomposition_by(source, group_col, date_col, value_col, params) → TABLE(group_col, trend, s	Parser Error: syntax error at or near "ts_mstl_decomposition_by"
+plugins/anofox-forecast/skills/anofox-forecast-detection/SKILL.md	14	PASS	SELECT product_id, trend, seasonal, remainder	
+plugins/anofox-forecast/skills/anofox-forecast-detection/SKILL.md	16	PASS	CREATE OR REPLACE TABLE detected AS	
+plugins/anofox-forecast/skills/anofox-forecast-eda/SKILL.md	23	PASS	CREATE OR REPLACE TABLE quality AS	

@@ -1,17 +1,27 @@
 # Feature Extraction
 
-> Extract tsfresh-compatible time series features
+> Extract tsfresh-inspired time series features
 
 ## Overview
 
-Feature extraction functions compute 117 statistical features from time series data, compatible with tsfresh.
+Feature extraction functions compute 117 statistical features from time series data, inspired by tsfresh's feature catalogue; a documented subset deviates from tsfresh's exact formulas (see docs/api/21-feature-reference.md).
 
 **Use this document to:**
-- Extract 117 tsfresh-compatible features for machine learning pipelines
+- Extract 117 tsfresh-inspired features for machine learning pipelines
 - Compute features per series for clustering, classification, or anomaly detection
 - Access individual features (mean, std, trend_strength, entropy, etc.) from result structs
 - Build feature tables for downstream ML models outside DuckDB
 - Filter series by feature values (e.g., high trend strength, sufficient length)
+
+## Known deviations from tsfresh
+
+These features are named/catalogued after tsfresh but currently compute something different
+from tsfresh's exact formula: `PACF` lags 3-5, `mean_second_derivative_central`,
+`first_location`/`last_location`, `time_reversal_asymmetry_statistic`, `fft_coefficient`,
+spectral centroid/variance, `agg_linear_trend` rvalue, `skewness`/`kurtosis`,
+`sample_entropy`, `binned_entropy`, Benford-law features, `permutation_entropy`, and
+`number_peaks`' threshold handling. See `docs/api/21-feature-reference.md` for the specific
+formula each one currently uses. (being corrected in v0.10.0, Phase 14)
 
 ---
 

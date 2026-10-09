@@ -41,14 +41,14 @@ A time series forecasting extension for DuckDB with 36 models, statistical diagn
 ### 🔬 Statistical Diagnostics
 - **Stationarity**: ADF, KPSS, and a combined four-way verdict (`ts_adf_by`, `ts_kpss_by`, `ts_stationarity_by`)
 - **Residual Adequacy**: Ljung-Box, Durbin-Watson, Jarque-Bera, plus a combined pass/fail report (`ts_residual_diagnostics_by`)
-- **Reference-checked**: numerically cross-validated against statsmodels
+- **Reference-checked**: Ljung-Box, Jarque-Bera, Durbin-Watson, and the KPSS statistic are numerically cross-validated against statsmodels; ADF/KPSS p-values are a coarse approximation, not cross-validated (see `docs/api/10-diagnostics.md`)
 
 ### 📊 Complete Workflow
 - **EDA & Data Quality**: 5 functions (2 table functions, 3 macros) for exploratory analysis and data quality assessment
 - **Data Preparation**: 12 macros for cleaning and transformation
 - **Multi-Key Hierarchy**: 4 functions for combining, aggregating, and splitting hierarchical time series (region/store/item)
 - **Cross-Validation & Backtesting**: Time series CV with expanding/fixed/sliding windows, gap, embargo, and variable horizon support
-- **Conformal Prediction**: Distribution-free prediction intervals with guaranteed coverage probability
+- **Conformal Prediction**: Distribution-free prediction intervals; coverage is guaranteed only under exchangeability, and the current implementation's horizon ordering/pooling does not fully deliver it (see `docs/api/11-conformal-prediction.md`)
 - **Evaluation**: 12 metrics including coverage analysis
 - **Seasonality Detection**: Automatic period identification, seasonality classification, and peak detection
 - **Changepoint Detection**: Regime identification with probabilities
@@ -57,7 +57,7 @@ A time series forecasting extension for DuckDB with 36 models, statistical diagn
 - **117 Statistical Features**: Extract comprehensive time series features for ML pipelines
 - **GROUP BY & Window Support**: Native DuckDB parallelization for multi-series feature extraction
 - **Flexible Configuration**: Select specific features, customize parameters, or use JSON/CSV configs
-- **tsfresh-Compatible**: Compatible feature vectors for seamless integration with existing ML workflows (hctsa will come also)
+- **tsfresh-Inspired**: Feature vectors inspired by tsfresh's naming/catalogue; a documented subset of features deviates from tsfresh's exact formulas (see `docs/api/21-feature-reference.md`)
 
 ### ⚡ Performance
 - **Parallel**: Native DuckDB parallelization on GROUP BY
@@ -258,7 +258,7 @@ For complete function signatures, parameters, and detailed documentation, see th
 | **Cross-Validation** | Backtesting and CV functions | [08-cross-validation.md](docs/api/08-cross-validation.md) |
 | **Evaluation Metrics** | 12 accuracy metrics | [09-evaluation-metrics.md](docs/api/09-evaluation-metrics.md) |
 | **Conformal Prediction** | Distribution-free prediction intervals | [11-conformal-prediction.md](docs/api/11-conformal-prediction.md) |
-| **Feature Extraction** | 117 tsfresh-compatible features | [20-feature-extraction.md](docs/api/20-feature-extraction.md) |
+| **Feature Extraction** | 117 tsfresh-inspired features | [20-feature-extraction.md](docs/api/20-feature-extraction.md) |
 
 ### Model Reference (36 Models)
 

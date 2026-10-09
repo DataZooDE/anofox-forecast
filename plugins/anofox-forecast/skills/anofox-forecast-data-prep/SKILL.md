@@ -6,13 +6,13 @@ description: >
   detrending, hierarchical key operations. Use when preparing raw time
   series for downstream forecasting or backtesting with `ts_forecast_by`
   / `ts_cv_folds_by`.
-version: 0.15.3
+version: 2026.09.26
 user-invocable: false
 ---
 
 # Anofox Forecast — Data Preparation Cheat Sheet
 
-**Extension:** `anofox_forecast` v0.15.3 | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*` (identical)
+**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.15.10) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*` (identical)
 
 Prep raw time series so downstream forecasting / CV has clean input: no gaps, no unwanted NULLs, no degenerate series, correct hierarchy.
 
@@ -88,13 +88,19 @@ SELECT * FROM ts_drop_short_by('nulls_filled', product_id, 24);   -- ≥ 2 years
 
 ## Transforms
 
-- **`ts_diff_by(source, group_col, date_col, value_col, diff_order INTEGER)`** — first / second differencing.
-- **`ts_detrend_by(source, group_col, date_col, value_col, method)`** — remove linear or polynomial trend.
+- **`ts_diff_by(source, group_col, date_col, value_col, diff_order INTEGER)`** — currently a
+  **lag-k** difference `y[t] - y[t-k]`, not iterative d-th order differencing;
+  `diff_order=2` is a lag-2 difference, not a true second difference. Apply with
+  `diff_order=1` repeatedly if you need true d-th order differencing.
+  (being corrected in v0.10.0, Phase 12)
+- **`ts_detrend_by(source, group_col, date_col, value_col, method)`** — currently a **no-op**
+  (an argument-order bug makes `trend` all-zero and `detrended` equal the input); `'quadratic'`
+  / `'cubic'` also silently fall back to `'auto'`. (being corrected in v0.10.0, Phase 15)
 - **`ts_validate_timestamps_by`** — check for out-of-order / duplicate timestamps.
 
 ```sql
 CREATE TABLE stationary AS
-SELECT * FROM ts_diff_by('clean', product_id, ds, y, 1);   -- first-difference
+SELECT * FROM ts_diff_by('clean', product_id, ds, y, 1);   -- lag-1 difference
 ```
 
 ## Hierarchical key operations
@@ -139,14 +145,20 @@ SELECT * FROM ts_drop_constant_by('p3', product_id, y);
 
 ## STRUCT vs MAP params
 
-Both work everywhere. STRUCT is recommended — keeps numeric params typed:
+Both work everywhere for functions that accept a trailing params argument. STRUCT is
+recommended — keeps numeric params typed. Note `ts_fill_gaps_by` itself is a **5-argument**
+macro `(source, group_col, date_col, value_col, frequency)` — it takes no `params`/`tolerance`
+argument at all; passing a 6th argument raises a Binder Error:
 
 ```sql
--- STRUCT (recommended)
-ts_fill_gaps_by('raw', id, ds, y, '1d', {tolerance: 0.1})
+-- Correct 5-arg call (no params argument exists for this macro)
+SELECT * FROM ts_fill_gaps_by('clean', product_id, ds, y, '1d');
 
+-- Functions that DO take a trailing params argument accept either form:
+-- STRUCT (recommended)
+SELECT * FROM ts_forecast_by('clean', product_id, ds, y, 'AutoETS', 7, '1d', {seasonal_period: 7});
 -- MAP (all strings)
-ts_fill_gaps_by('raw', id, ds, y, '1d', MAP{'tolerance': '0.1'})
+SELECT * FROM ts_forecast_by('clean', product_id, ds, y, 'AutoETS', 7, '1d', MAP{'seasonal_period': '7'});
 ```
 
 Empty params: `MAP{}` or `{}`.

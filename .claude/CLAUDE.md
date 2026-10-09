@@ -4,7 +4,7 @@
 
 **anofox-forecast — Milestone: Close the Crate→Extension Gap (Diagnostics + Model Coverage)**
 
-`anofox-forecast` is a DuckDB extension that exposes SQL-native time-series forecasting, backed by the `anofox-forecast` Rust crate (v0.15.3) via an FFI boundary. It already surfaces 36 forecasting models, 117 features, cross-validation, conformal prediction intervals, seasonality/period/changepoint/peak detection, and data-prep utilities as SQL functions and `ts_*_by` macros.
+`anofox-forecast` is a DuckDB extension that exposes SQL-native time-series forecasting, backed by the `anofox-forecast` Rust crate (v0.15.10) via an FFI boundary. It already surfaces 36 forecasting models, 117 features, cross-validation, conformal prediction intervals, seasonality/period/changepoint/peak detection, and data-prep utilities as SQL functions and `ts_*_by` macros.
 
 This milestone extends that SQL surface to reach crate capabilities that are currently unreachable from SQL: statistical **diagnostics & validation**, and additional **forecasting models** (global/panel and classical). It is a brownfield capability-exposure milestone, not a rewrite — the delivery pattern is the established one: Rust FFI export → C++ table/scalar/aggregate function → `ts_*_by` SQL macro → runnable example → docs.
 
@@ -14,7 +14,7 @@ This milestone extends that SQL surface to reach crate capabilities that are cur
 
 - **Tech stack**: DuckDB v1.4.3+ extension; Rust 1.89+ core via FFI; C++17. No new languages.
 - **Architecture**: Parallelism stays at the DuckDB GROUP BY / scalar-function layer — no custom threading or table-in/table-out (established project rule).
-- **Dependencies**: Stay on `anofox-forecast` 0.15.3 unless a required capability is missing; global-model steady-state ARIMA optimization tracked separately (awaiting 0.5.4-class improvements).
+- **Dependencies**: `anofox-forecast` 0.15.10 and `anofox-regression` 0.5.15 (bumped clean in Phase 9, v0.10.0); further upstream statistical-correctness fixes (ADF/KPSS, diagnostics, conformal) are developed in Phase 11 against the upstream crate and consumed into this extension in Phase 17. Global-model steady-state ARIMA optimization remains tracked separately (awaiting a future crate release).
 - **Compatibility**: Must build and load across Linux/macOS/Windows and WASM; OpenSSL stays statically linked; verify clean-machine load (not just green CI).
 - **Verification**: Every new SQL function must be exercised by a runnable example against the built extension before it counts as done.
 
@@ -42,8 +42,8 @@ This milestone extends that SQL surface to reach crate capabilities that are cur
 
 ## Frameworks
 
-- `anofox-forecast` v0.15.3 - Time-series forecasting library (features: `anomaly`, `serde`)
-- `anofox-regression` v0.5.3 - Regression analysis and feature extraction
+- `anofox-forecast` v0.15.10 - Time-series forecasting library (features: `anomaly`, `serde`)
+- `anofox-regression` v0.5.15 - Regression analysis and feature extraction
 - `fdars-core` v0.3 - Functional data analysis for seasonality, peaks, detrending (target-conditional features: `parallel`/`linalg` for native, `js` for WASM)
 - `faer` v0.23 - Matrix/linear algebra operations (features: `std`, `linalg`)
 - `statrs` v0.18 - Statistical distributions and functions
@@ -54,8 +54,8 @@ This milestone extends that SQL surface to reach crate capabilities that are cur
 
 ## Key Dependencies
 
-- `anofox-forecast` v0.15.3 - Provides all time-series algorithms; anomaly detection and serialization support required
-- `anofox-regression` v0.5.3 - Global regression and per-series scaling for forecasting
+- `anofox-forecast` v0.15.10 - Provides all time-series algorithms; anomaly detection and serialization support required
+- `anofox-regression` v0.5.15 - Global regression and per-series scaling for forecasting
 - `fdars-core` v0.3 - Seasonality detection, peak analysis, period estimation (FFT/ACF/LombScargle)
 - `faer` v0.23 - MSTL decomposition, feature extraction, conformal prediction intervals
 - DuckDB v1.4.3 (submodule) - Extension host and table function framework
@@ -194,7 +194,7 @@ This milestone extends that SQL surface to reach crate capabilities that are cur
 | **Scalar Functions** | DuckDB scalar functions for metrics, conformal, bootstrap | `src/scalar_functions/*.cpp` (5 functions) |
 | **Extension Entry** | DuckDB extension loader, registration, telemetry | `src/anofox_forecast_extension.cpp` |
 | **Rust FFI Boundary** | C-compatible interface, error handling, memory allocation | `crates/anofox-fcst-ffi/src/lib.rs` |
-| **Rust Core** | Forecasting models (33), feature extraction (117), statistics | `crates/anofox-fcst-core/src/lib.rs` |
+| **Rust Core** | Forecasting models (36), feature extraction (117), statistics | `crates/anofox-fcst-core/src/lib.rs` |
 
 ## Pattern Overview
 
@@ -236,10 +236,10 @@ This milestone extends that SQL surface to reach crate capabilities that are cur
 - Contains: C-compatible function signatures; validation; allocation/deallocation; panic catching
 - Depends on: anofox-fcst-core (via path dependency)
 - Used by: All C++ table/scalar/aggregate functions
-- Purpose: Forecasting models (33), feature extraction (117), changepoint detection, statistics
+- Purpose: Forecasting models (36), feature extraction (117), changepoint detection, statistics
 - Location: `crates/anofox-fcst-core/src/lib.rs`
 - Contains: Wrapper around anofox-forecast, anofox-regression, fdars-core crates
-- Depends on: External crates (anofox-forecast 0.15.3, anofox-regression 0.5.3, fdars-core 0.3)
+- Depends on: External crates (anofox-forecast 0.15.10, anofox-regression 0.5.15, fdars-core 0.3)
 - Used by: FFI boundary layer
 
 ## Data Flow
@@ -328,8 +328,8 @@ This milestone extends that SQL surface to reach crate capabilities that are cur
 | anofox-forecast-backtest | > Backtesting, cross-validation, evaluation metrics, and conformal prediction intervals for the anofox_forecast DuckDB extension. Use when evaluating forecast accuracy, comparing models with time-series-aware CV, computing metrics (MAE / RMSE / MAPE / MASE / coverage), or attaching distribution-free prediction intervals to forecasts. | `plugins/anofox-forecast/skills/anofox-forecast-backtest/SKILL.md` |
 | anofox-forecast-data-prep | > Data preparation for the anofox_forecast DuckDB extension — filling gaps, imputing nulls, dropping bad series, differencing, detrending, hierarchical key operations. Use when preparing raw time series for downstream forecasting or backtesting with `ts_forecast_by` / `ts_cv_folds_by`. | `plugins/anofox-forecast/skills/anofox-forecast-data-prep/SKILL.md` |
 | anofox-forecast-detection | > Seasonality, changepoint, peak, and decomposition detection for the anofox_forecast DuckDB extension. Use when identifying seasonal periods before configuring seasonal forecasting models, detecting structural breaks, analysing peak timing regularity, or decomposing a series into trend / seasonal / residual components. | `plugins/anofox-forecast/skills/anofox-forecast-detection/SKILL.md` |
-| anofox-forecast-eda | > Exploratory data analysis and data quality for the anofox_forecast DuckDB extension — 34 per-series statistics, data-quality scoring, quality-report summaries, and 117 tsfresh-compatible feature extraction. Use before forecasting to understand series characteristics (length, gaps, trend, seasonality strength, intermittency) or to build ML feature vectors for downstream models. | `plugins/anofox-forecast/skills/anofox-forecast-eda/SKILL.md` |
-| anofox-forecast-models | > Forecasting models and the `ts_forecast_by` API surface of the anofox_forecast DuckDB extension. Covers 33 models (baseline, exponential smoothing, state-space, ARIMA, Theta, multi-seasonal, intermittent-demand, distributional Laplace with three variants), parameter surfaces (MAP + STRUCT), model selection guidance, and common workflow gotchas. Use when picking a model or writing `ts_forecast_by` / `ts_forecast_agg` calls. | `plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md` |
+| anofox-forecast-eda | > Exploratory data analysis and data quality for the anofox_forecast DuckDB extension — 34 per-series statistics, data-quality scoring, quality-report summaries, and 117 tsfresh-inspired feature extraction. Use before forecasting to understand series characteristics (length, gaps, trend, seasonality strength, intermittency) or to build ML feature vectors for downstream models. | `plugins/anofox-forecast/skills/anofox-forecast-eda/SKILL.md` |
+| anofox-forecast-models | > Forecasting models and the `ts_forecast_by` API surface of the anofox_forecast DuckDB extension. Covers 36 models (baseline, exponential smoothing, state-space, ARIMA, Theta, multi-seasonal, intermittent-demand, distributional Laplace with three variants), parameter surfaces (MAP + STRUCT), model selection guidance, and common workflow gotchas. Use when picking a model or writing `ts_forecast_by` / `ts_forecast_agg` calls. | `plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md` |
 
 > These skills are a distributable Claude Code plugin under `plugins/anofox-forecast/`; for in-repo dev, load via `claude --plugin-dir ./plugins/anofox-forecast` (they no longer auto-load from `.claude/skills/`).
 <!-- GSD:skills-end -->

@@ -167,6 +167,43 @@ SELECT
 FROM range(0, 130) t(i)
 CROSS JOIN (SELECT unnest([1, 2]) AS region_id);
 
+-- raw(product_id, ds, y): 2 groups x 130 daily rows, trend + period-7 seasonality.
+-- Generic "not yet cleaned" fixture name used by several SKILL.md walkthroughs.
+CREATE TABLE raw AS
+SELECT
+    product_id,
+    (DATE '2020-01-01' + INTERVAL (i) DAY) AS ds,
+    65.0 + product_id * 6.5 + 0.4 * i + 7.0 * sin(2 * pi() * i / 7.0) + (i % 5) * 0.1 AS y
+FROM range(0, 130) t(i)
+CROSS JOIN (SELECT unnest([1, 2]) AS product_id);
+
+-- clean(product_id, ds, y): 2 groups x 130 daily rows, trend + period-7 seasonality.
+-- Generic "already-cleaned" fixture name used by several SKILL.md walkthroughs.
+CREATE TABLE clean AS
+SELECT
+    product_id,
+    (DATE '2020-01-01' + INTERVAL (i) DAY) AS ds,
+    60.0 + product_id * 6.0 + 0.4 * i + 7.0 * sin(2 * pi() * i / 7.0) + (i % 5) * 0.1 AS y
+FROM range(0, 130) t(i)
+CROSS JOIN (SELECT unnest([1, 2]) AS product_id);
+
+-- sales(product_id, date, value, revenue, quantity, amount, val): 2 groups x 130 daily rows,
+-- trend + period-7 seasonality. Multiple value-column aliases because different doc sections
+-- reference 'sales' with different target column names (pre-existing, out of scope).
+CREATE TABLE sales AS
+SELECT
+    product_id,
+    (DATE '2020-01-01' + INTERVAL (i) DAY) AS date,
+    (DATE '2020-01-01' + INTERVAL (i) DAY) AS ds,
+    (80.0 + product_id * 8.0 + 0.4 * i + 7.0 * sin(2 * pi() * i / 7.0) + (i % 5) * 0.1) AS value,
+    (80.0 + product_id * 8.0 + 0.4 * i + 7.0 * sin(2 * pi() * i / 7.0) + (i % 5) * 0.1) * 5.0 AS revenue,
+    (80.0 + product_id * 8.0 + 0.4 * i + 7.0 * sin(2 * pi() * i / 7.0) + (i % 5) * 0.1) AS quantity,
+    (80.0 + product_id * 8.0 + 0.4 * i + 7.0 * sin(2 * pi() * i / 7.0) + (i % 5) * 0.1) AS amount,
+    (80.0 + product_id * 8.0 + 0.4 * i + 7.0 * sin(2 * pi() * i / 7.0) + (i % 5) * 0.1) AS val,
+    (80.0 + product_id * 8.0 + 0.4 * i + 7.0 * sin(2 * pi() * i / 7.0) + (i % 5) * 0.1) AS y
+FROM range(0, 130) t(i)
+CROSS JOIN (SELECT unnest([1, 2]) AS product_id);
+
 -- quarterly_data(region_id, date, revenue): 2 groups x 130 daily rows, trend.
 CREATE TABLE quarterly_data AS
 SELECT

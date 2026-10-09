@@ -1,6 +1,6 @@
 # Feature Reference
 
-> Complete reference for all 117 tsfresh-compatible features
+> Complete reference for all 117 tsfresh-inspired features
 
 ## Overview
 
@@ -108,8 +108,8 @@ All features return `DOUBLE` values. Boolean features use `1.0` (true) / `0.0` (
 | `longest_strike_above_mean` | Length of the longest consecutive run above the mean |
 | `longest_strike_below_mean` | Length of the longest consecutive run below the mean |
 | `number_peaks` | Number of local peaks (higher than both neighbors) |
-| `number_peaks_threshold_1` | Number of peaks with prominence > 1 * std_dev |
-| `number_peaks_threshold_2` | Number of peaks with prominence > 2 * std_dev |
+| `number_peaks_threshold_1` | Number of local peaks whose **deviation from the series mean** exceeds 1 * std_dev — NOT peak prominence (height above surrounding valleys) (being corrected in v0.10.0, Phase 14) |
+| `number_peaks_threshold_2` | Number of local peaks whose **deviation from the series mean** exceeds 2 * std_dev — NOT peak prominence (being corrected in v0.10.0, Phase 14) |
 
 ---
 
@@ -155,8 +155,8 @@ All features return `DOUBLE` values. Boolean features use `1.0` (true) / `0.0` (
 
 | Feature | Description |
 |---------|-------------|
-| `spectral_centroid` | Weighted mean of DFT frequency bins by magnitude |
-| `spectral_variance` | Variance of DFT frequency distribution around the centroid |
+| `spectral_centroid` | Power-weighted mean bin index over the **full two-sided DFT**, including the DC (k=0) bin and the mirrored negative-frequency half — not restricted to one-sided positive frequencies (being corrected in v0.10.0, Phase 14) |
+| `spectral_variance` | Power-weighted variance of bin index around `spectral_centroid`, over the same full two-sided DFT including DC (being corrected in v0.10.0, Phase 14) |
 
 ---
 
@@ -168,7 +168,7 @@ Computed by splitting the series into chunks (chunk_len = length/10, minimum 2),
 |---------|-------------|
 | `agg_linear_trend_slope` | Slope of linear fit on chunk aggregates |
 | `agg_linear_trend_intercept` | Intercept of linear fit on chunk aggregates |
-| `agg_linear_trend_rvalue` | Correlation coefficient of chunk-level linear fit |
+| `agg_linear_trend_rvalue` | `sqrt(R²)` of the chunk-level linear fit — **always non-negative** (unsigned magnitude), not a signed correlation coefficient; it cannot distinguish an increasing from a decreasing trend (being corrected in v0.10.0, Phase 14) |
 | `agg_linear_trend_stderr` | Standard error of the slope estimate |
 
 ---
@@ -199,10 +199,10 @@ Partial autocorrelation at lags 1 through 5, computed via Yule-Walker equations.
 | Feature | Description |
 |---------|-------------|
 | `partial_autocorrelation_lag1` | Partial autocorrelation at lag 1 |
-| `partial_autocorrelation_lag2` | Partial autocorrelation at lag 2 |
-| `partial_autocorrelation_lag3` | Partial autocorrelation at lag 3 |
-| `partial_autocorrelation_lag4` | Partial autocorrelation at lag 4 |
-| `partial_autocorrelation_lag5` | Partial autocorrelation at lag 5 |
+| `partial_autocorrelation_lag2` | Partial autocorrelation at lag 2 (Yule-Walker) |
+| `partial_autocorrelation_lag3` | **Currently returns the same lag-2 PACF value as `partial_autocorrelation_lag2`** — the `lag` argument is ignored for any lag > 1 (being corrected in v0.10.0, Phase 14) |
+| `partial_autocorrelation_lag4` | Same limitation as `partial_autocorrelation_lag3` — currently returns the lag-2 PACF value (being corrected in v0.10.0, Phase 14) |
+| `partial_autocorrelation_lag5` | Same limitation as `partial_autocorrelation_lag3` — currently returns the lag-2 PACF value (being corrected in v0.10.0, Phase 14) |
 
 ---
 
@@ -246,7 +246,7 @@ First 10 coefficients of the Discrete Fourier Transform, each with real, imagina
 
 | Feature | Description |
 |---------|-------------|
-| `fft_coefficient_0_real` | DFT coefficient 0, real part (equals sum of values) |
+| `fft_coefficient_0_real` | DFT coefficient 0, real part — **equals the mean of values** (the DFT is normalized by dividing by n), not the sum (being corrected in v0.10.0, Phase 14) |
 | `fft_coefficient_0_imag` | DFT coefficient 0, imaginary part (always 0) |
 | `fft_coefficient_0_abs` | DFT coefficient 0, absolute value |
 | `fft_coefficient_1_real` | DFT coefficient 1, real part |

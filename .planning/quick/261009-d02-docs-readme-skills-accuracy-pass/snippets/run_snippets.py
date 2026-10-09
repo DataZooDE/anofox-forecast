@@ -37,6 +37,13 @@ SETUP_RE = re.compile(
     r"\b(CREATE\s+(OR\s+REPLACE\s+)?(TEMP\s+|TEMPORARY\s+)?(TABLE|VIEW|MACRO)|INSERT)\b",
     re.IGNORECASE,
 )
+CREATE_NAME_RE = re.compile(
+    r"\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP\s+|TEMPORARY\s+)?(?:TABLE|VIEW|MACRO)\s+"
+    r"(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+    re.IGNORECASE,
+)
+INSERT_NAME_RE = re.compile(r"\bINSERT\s+INTO\s+([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
+PLACEHOLDER_ELLIPSIS_RE = re.compile(r"(?<!\d)\.\.\.(?!\d)")
 ERROR_WORDS_RE = re.compile(
     r"\b(error|errors|fail|fails|failing|crash|crashes|crashed|segfault|reject|rejects|"
     r"rejected|invalid|unsupported|not (currently )?supported|will not work|does not work|"
@@ -135,6 +142,71 @@ def run_block(sql_text, timeout=120):
         return 124, "", f"TIMEOUT after {timeout}s"
 
 
+def strip_sql_comments(text):
+    """Remove -- line comments before dependency-name matching, so an English word in a
+    comment (e.g. "-- Learn calibration profile...") can't false-match a setup block's
+    created table name (e.g. a table literally named `calibration`)."""
+    return "\n".join(line.split("--", 1)[0] for line in text.splitlines())
+
+
+def setup_created_name(block_text):
+    """Return the table/view/macro name a setup block creates (or inserts into), if any."""
+    m = CREATE_NAME_RE.search(block_text)
+    if m:
+        return m.group(1)
+    m = INSERT_NAME_RE.search(block_text)
+    if m:
+        return m.group(1)
+    return None
+
+
+def self_created_names(text):
+    """All table/view/macro names the block itself creates (multi-statement blocks can
+    both CREATE and later consume their own table within one fence)."""
+    names = set(CREATE_NAME_RE.findall(text))
+    # findall on a group-only pattern returns the captured group directly when there's
+    # exactly one group; CREATE_NAME_RE has one capturing group so this is fine.
+    return {n for n in names if n}
+
+
+def select_required_setup(target_text, setup_accum, fixture_names=frozenset()):
+    """Transitive closure: setup blocks (in doc order) whose created name is referenced,
+    directly or indirectly, by target_text. setup_accum is a list of (name, block_text)
+    in file order; returns the subset (in original order) actually needed.
+
+    Names the target block creates itself (multi-statement blocks that CREATE then
+    consume their own table) are excluded from matching -- otherwise an unrelated earlier
+    section that happens to reuse the same illustrative table name (e.g. two different
+    "calib" tables in two different walkthroughs) gets wrongly pulled in as a dependency.
+
+    Names already provided by fixtures.sql are also excluded: fixtures.sql loads before
+    any doc-local setup, so a doc section that happens to reuse a fixture's table name for
+    its own unrelated illustrative pipeline (e.g. a generic "clean" table) must not have
+    that doc-local chain pulled in -- fixtures.sql already satisfies the reference, and the
+    doc-local chain may depend on tables that were never actually created (e.g. a narrative
+    "raw" source table that only ever appears as an assumed pre-existing input)."""
+    shadowed = self_created_names(strip_sql_comments(target_text)) | set(fixture_names)
+    needed_text = [strip_sql_comments(target_text)]
+    included = []
+    included_names = set()
+    changed = True
+    while changed:
+        changed = False
+        combined = "\n".join(needed_text)
+        for name, block_text in setup_accum:
+            if name in included_names or name in shadowed:
+                continue
+            if re.search(r"\b" + re.escape(name) + r"\b", combined):
+                included.append(block_text)
+                included_names.add(name)
+                needed_text.append(strip_sql_comments(block_text))
+                changed = True
+    # Preserve original file order among included blocks.
+    order = {id(bt): i for i, (_, bt) in enumerate(setup_accum)}
+    included.sort(key=lambda bt: order.get(id(bt), 0))
+    return included
+
+
 def first_error_line(stderr, stdout):
     for stream in (stderr, stdout):
         for line in stream.splitlines():
@@ -164,6 +236,7 @@ def main():
     if os.path.exists(FIXTURES_FILE):
         with open(FIXTURES_FILE) as f:
             fixtures = f.read()
+    fixture_names = set(CREATE_NAME_RE.findall(strip_sql_comments(fixtures)))
 
     expected_errors = load_key_set(EXPECTED_ERRORS_FILE)
     synopsis_keys = load_key_set(SYNOPSIS_FILE)
@@ -184,22 +257,31 @@ def main():
         base_blocks = extract_sql_blocks(base_text)
         base_norms = {normalize_block(bt) for bt, _, _ in base_blocks}
 
-        # Pre-compute setup SQL accumulated from earlier blocks in doc order.
-        setup_accum = []
+        # Pre-compute setup SQL accumulated from earlier blocks in doc order, tagged with
+        # the name each one creates (for dependency-based selection -- see
+        # select_required_setup). Blindly concatenating EVERY prior setup block breaks
+        # narrative docs where an early illustrative snippet references a table that is
+        # only actually built later in the same file.
+        setup_accum = []  # list of (created_name, block_text)
         pass_results_by_norm = {}  # norm -> did it PASS (for SYNOPSIS sibling check)
 
         for idx, (block_text, start_line, context_before) in enumerate(working_blocks):
             norm = normalize_block(block_text)
             is_changed = norm not in base_norms
-            is_setup_only = bool(SETUP_RE.search(block_text))
+            # Skip non-executable placeholder blocks (e.g. "CREATE TABLE x AS ...;") from
+            # setup accumulation -- a literal ellipsis marks illustrative pseudo-SQL that
+            # would poison every later block in the file if blindly concatenated.
+            is_placeholder = bool(PLACEHOLDER_ELLIPSIS_RE.search(block_text))
+            is_setup_only = bool(SETUP_RE.search(block_text)) and not is_placeholder
 
             should_run = all_flag or is_changed
 
             key = f"{rel_path}\t{first_non_comment_line(block_text)}"
 
             if should_run:
+                required_setup = select_required_setup(block_text, setup_accum, fixture_names)
                 full_sql = fixtures
-                for setup_sql in setup_accum:
+                for setup_sql in required_setup:
                     full_sql += "\n" + setup_sql
                 full_sql += "\n" + block_text
 
@@ -226,7 +308,9 @@ def main():
 
             # Accumulate setup blocks for later blocks in this file (always, not just when run)
             if is_setup_only:
-                setup_accum.append(block_text)
+                name = setup_created_name(block_text)
+                if name:
+                    setup_accum.append((name, block_text))
 
         # Second pass: verify SYNOPSIS rows have a PASSing sibling in the same file.
         # (Best-effort: if no block in the file passed at all, downgrade SYNOPSIS rows to FAIL.)

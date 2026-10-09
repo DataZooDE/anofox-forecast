@@ -311,14 +311,18 @@ ts_diff_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, 
 ```
 
 **Parameters:**
-- `diff_order`: Difference order (1 for first differences, 2 for second, etc.)
+- `diff_order`: Currently a **lag-k difference**, `y[t] - y[t-k]` — NOT iterative d-th order
+  differencing. `diff_order=2` gives `y[t] - y[t-2]` (a 2-period lag difference), not the
+  true 2nd-order difference `y[t] - 2*y[t-1] + y[t-2]`. If you need true d-th order
+  differencing, apply `ts_diff_by` with `diff_order=1` repeatedly, d times.
+  (being corrected in v0.10.0, Phase 12)
 
 **Example:**
 ```sql
--- Compute first differences
+-- Compute first differences (lag-1): y[t] - y[t-1]
 SELECT * FROM ts_diff_by('sales', product_id, date, quantity, 1);
 
--- Compute second differences
+-- Lag-2 difference: y[t] - y[t-2] -- NOT true second-order differencing
 SELECT * FROM ts_diff_by('sales', product_id, date, quantity, 2);
 ```
 

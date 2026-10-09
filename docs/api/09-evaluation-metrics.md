@@ -8,7 +8,9 @@ Metrics functions evaluate forecast accuracy by comparing actual values to predi
 
 **Use this document to:**
 - Compute standard error metrics: MAE, MSE, RMSE, MAPE, sMAPE, Bias
-- Calculate scale-independent metrics: MASE (vs baseline), rMAE (relative)
+- Calculate scale-independent metrics: `ts_mase` (currently a relative MAE against whatever
+  baseline array you pass — not the Hyndman-Koehler in-sample seasonal-naive MASE; see
+  below), rMAE (relative)
 - Evaluate prediction intervals with coverage and quantile loss
 - Compare forecast quality across series or models
 
@@ -63,11 +65,11 @@ GROUP BY <group_columns>
 | `ts_mae` | `(LIST, LIST) → DOUBLE` | Mean Absolute Error |
 | `ts_mse` | `(LIST, LIST) → DOUBLE` | Mean Squared Error |
 | `ts_rmse` | `(LIST, LIST) → DOUBLE` | Root Mean Squared Error |
-| `ts_mape` | `(LIST, LIST) → DOUBLE` | Mean Absolute Percentage Error |
+| `ts_mape` | `(LIST, LIST) → DOUBLE` | Mean Absolute Percentage Error — rows where `actual == 0` are dropped from both the sum and the divisor count, not counted as 0% or otherwise (being corrected in v0.10.0, Phase 13) |
 | `ts_smape` | `(LIST, LIST) → DOUBLE` | Symmetric MAPE |
 | `ts_r2` | `(LIST, LIST) → DOUBLE` | R-squared (coefficient of determination) |
 | `ts_bias` | `(LIST, LIST) → DOUBLE` | Bias (mean error) |
-| `ts_mase` | `(LIST, LIST, LIST) → DOUBLE` | Mean Absolute Scaled Error (actual, forecast, baseline) |
+| `ts_mase` | `(LIST, LIST, LIST) → DOUBLE` | Currently `MAE(actual, forecast) / MAE(actual, baseline)` — a relative MAE against whichever baseline array you supply, not the Hyndman-Koehler MASE (which scales by the in-sample one-step seasonal-naive MAE). Pass an in-sample seasonal-naive array yourself if you want that scaling. (being corrected in v0.10.0, Phase 13) |
 | `ts_rmae` | `(LIST, LIST, LIST) → DOUBLE` | Relative MAE (actual, pred1, pred2) |
 | `ts_coverage` | `(LIST, LIST, LIST) → DOUBLE` | Interval coverage (actual, lower, upper) |
 | `ts_quantile_loss` | `(LIST, LIST, DOUBLE) → DOUBLE` | Quantile loss (actual, forecast, quantile) |
@@ -122,6 +124,10 @@ SELECT
 FROM results
 GROUP BY unique_id;
 ```
+
+This is a relative MAE (`MAE(y, forecast) / MAE(y, naive_forecast)`), not the
+Hyndman-Koehler MASE — see the function table above for the current formula.
+(being corrected in v0.10.0, Phase 13)
 
 ### Relative MAE (Model Comparison)
 

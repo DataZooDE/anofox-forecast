@@ -3,19 +3,19 @@ name: anofox-forecast-eda
 description: >
   Exploratory data analysis, data quality, and statistical diagnostics for
   the anofox_forecast DuckDB extension — 34 per-series statistics,
-  data-quality scoring, quality-report summaries, 117 tsfresh-compatible
+  data-quality scoring, quality-report summaries, 117 tsfresh-inspired
   feature extraction, and 7 diagnostic functions covering stationarity
   (ADF, KPSS, combined verdict) and residual adequacy (Ljung-Box,
   Durbin-Watson, Jarque-Bera, combined report). Use before forecasting to
   understand series characteristics (length, gaps, trend, seasonality
   strength, intermittency) or to validate model residuals after fitting.
-version: 0.15.3
+version: 2026.09.26
 user-invocable: false
 ---
 
 # Anofox Forecast — EDA & Data Quality Cheat Sheet
 
-**Extension:** `anofox_forecast` v0.15.3 | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.15.10) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 Understand your data before modelling it: per-series statistics, data-quality scores, feature vectors for ML.
 
@@ -29,6 +29,13 @@ ts_stats(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
 ```
 
 Returns 34 columns: `length`, `n_nulls`, `n_nan`, `n_zeros`, `n_positive`, `n_negative`, `n_unique_values`, `is_constant`, `n_zeros_start`, `n_zeros_end`, `plateau_size`, `plateau_size_nonzero`, `mean`, `median`, `std_dev`, `variance`, `min`, `max`, `range`, `sum`, `skewness`, `kurtosis`, `tail_index`, `bimodality_coef`, `trimmed_mean`, `coef_variation`, `q1`, `q3`, `iqr`, `autocorr_lag1`, `trend_strength`, `seasonality_strength`, `entropy`, `stability`, plus date-derived `expected_length` and `n_gaps`.
+
+**Known formula deviations** (full detail in `docs/api/03-statistics.md`, being corrected in
+v0.10.0, Phase 13): `skewness`/`kurtosis` mix a population moment with a sample std-dev
+rather than computing textbook Fisher G1/G2; `entropy` is a 10-bin Shannon entropy, not
+approximate entropy; `trend_strength` is `|r|` of a linear fit against the index;
+`seasonality_strength` is `max(|ACF|)` over lags 2/4/7/12 only; `n_gaps` counts gap
+*occurrences*, not the number of missing periods within each gap.
 
 ```sql
 -- Every stat for every series
@@ -80,6 +87,12 @@ Returns `unique_id` (group column **renamed** — the extension normalises it to
 
 `n_short` is the series-length threshold below which a series is flagged short (typical: 14 for daily, 12 for monthly).
 
+**Current limitation:** `temporal_score` is currently always `1.0` and `n_gaps` is currently
+always `0` — the underlying `compute_data_quality` call never receives the date array, so
+neither reflects actual gap structure, and `n_short`/`frequency` are silently ignored by
+this scoring path. `overall_score` is correspondingly inflated by the always-perfect
+`temporal_score` component. (being corrected in v0.10.0, Phase 13)
+
 ```sql
 SELECT * FROM ts_data_quality('sales', product_id, ds, y, 14, '1d');
 
@@ -128,7 +141,15 @@ Seven functions in two groups. The combined-verdict functions (`ts_stationarity`
 
 ### Stationarity trio
 
-#### `ts_adf` / `ts_adf_by` — Augmented Dickey-Fuller unit-root test
+**Current limitations** (full detail in `docs/api/10-diagnostics.md`): `ts_adf` is currently
+**non-augmented** (constant-only regression of Δy on y₋₁; `max_lags` only trims the sample,
+it does not add augmentation terms); the lag reported is chosen by minimum RSS, not AIC;
+p-values for both `ts_adf` and `ts_kpss` are a coarse step-table lookup — NOT MacKinnon
+interpolation and NOT cross-validated against statsmodels — and KPSS p-values are an
+unbounded extrapolation, not clamped to `[0.01, 0.10]`.
+(being corrected in v0.10.0, Phases 11/17)
+
+#### `ts_adf` / `ts_adf_by` — Dickey-Fuller unit-root test (currently non-augmented)
 
 H0: series has a unit root (non-stationary). Reject H0 (p < 0.05) → stationary.
 
@@ -192,7 +213,15 @@ FROM ts_stationarity_by('sales_data', product_id, ds, y)
 ORDER BY product_id;
 ```
 
-Verdict interpretation: `'Stationary'` (both agree), `'NonStationary'` (both agree), `'Trend-Stationary'` (KPSS non-stationary + ADF stationary), `'DifferencStationary'` / `'Inconclusive'` (disagreement).
+Verdict strings (lowercase_with_underscores — not the CamelCase/hyphenated forms shown in
+older docs): `'stationary'` (both tests agree series is stationary), `'trend_stationary'`
+(ADF rejects unit root + KPSS rejects level-stationarity), `'difference_stationary'` (both
+tests point to a unit root), `'non_stationary'` (the remaining combination). **Current
+limitation:** the `trend_stationary`/`non_stationary` labels are currently inverted relative
+to the standard statsmodels convention, and a constant series currently returns
+`verdict = 'non_stationary'` rather than `'stationary'`. Prefer the individual
+`adf_is_stationary`/`kpss_is_stationary` flags if you need the textbook interpretation.
+(being corrected in v0.10.0, Phase 17)
 
 ---
 
@@ -253,7 +282,7 @@ ORDER BY series_id;
 
 ---
 
-## Feature extraction (117 tsfresh-compatible features)
+## Feature extraction (117 tsfresh-inspired features)
 
 ### `ts_features_by` — extract all 117 features
 
@@ -322,7 +351,7 @@ FROM sales GROUP BY id;
 
 - **`ts_stats` and `ts_data_quality` are TABLE functions** — call from FROM, not SELECT. Older docs incorrectly showed them as scalars over `LIST(...)`.
 - **`_agg` variants take `(date, value)` directly** — no `LIST()` wrapping. Wrapping in `LIST(...)` errors as "No function matches …".
-- **Seasonality strength thresholds**: `trend_strength` and `seasonality_strength` in `ts_stats` are ∈ [0, 1] — treat > 0.6 as strong, < 0.2 as weak. Use to gate model selection downstream.
+- **`trend_strength` / `seasonality_strength` formulas**: `trend_strength` is `|r|` (absolute Pearson correlation) of a linear fit against the series index — not a decomposition-based strength. `seasonality_strength` is `max(|ACF|)` over lags 2, 4, 7, and 12 only — it will miss seasonality at other periods. Neither has an officially-defined "strong"/"weak" threshold; validate any cutoff you use against your own data rather than assuming > 0.6 / < 0.2. (being corrected in v0.10.0, Phase 13)
 - **JSON extension is required** by a subset of quality / feature functions. Enable auto-load once per session: `SET autoinstall_known_extensions=1; SET autoload_known_extensions=1;`.
 - **`ts_r2(DOUBLE[] actual, DOUBLE[] predicted) → DOUBLE`** is a scalar **regression R² metric**, not an EDA statistic — it lives with the scalar metrics family in `anofox-forecast-backtest`. Use it under `GROUP BY` to score fit quality, e.g. `SELECT ts_r2([1.0,2,3,4], [1.1,2.0,2.9,4.2]);`.
 
@@ -341,7 +370,7 @@ SELECT * FROM ts_stats('raw', product_id, ds, y, '1d');
 CREATE OR REPLACE TABLE forecastable AS
 SELECT r.*
 FROM raw r
-JOIN quality q ON r.product_id = q.product_id
+JOIN quality q ON r.product_id = q.unique_id  -- ts_data_quality renames the group col to unique_id
 JOIN stats  s ON r.product_id = s.product_id
 WHERE q.overall_score >= 0.6
   AND s.length >= 30

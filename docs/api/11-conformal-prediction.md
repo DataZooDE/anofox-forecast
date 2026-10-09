@@ -1,13 +1,20 @@
 # Conformal Prediction
 
-> Distribution-free prediction intervals with guaranteed coverage
+> Distribution-free prediction intervals
 
 ## Overview
 
-Conformal prediction provides **distribution-free prediction intervals** with guaranteed coverage probability. Unlike parametric methods, conformal prediction makes minimal assumptions about the underlying distribution and provides valid coverage even for finite samples.
+Conformal prediction provides **distribution-free prediction intervals**. Coverage is
+guaranteed only under the exchangeability assumption (calibration and test residuals drawn
+from the same distribution, independently) — see [Coverage caveats](#coverage-caveats) below
+for where this implementation's ordering and pooling choices currently fall short of that
+guarantee in practice. Unlike parametric methods, conformal prediction makes minimal
+distributional assumptions and, *when exchangeability holds and the implementation delivers
+it*, provides valid coverage even for finite samples.
 
 **Use this document to:**
-- Create prediction intervals with guaranteed coverage (e.g., 90%, 95%)
+- Create prediction intervals targeting a nominal coverage level (e.g., 90%, 95%) — see
+  caveats on when the delivered coverage may diverge from nominal
 - Calibrate conformity scores from backtest residuals
 - Apply calibrated intervals to new forecasts
 - Choose between one-step, modular, or array-based approaches
@@ -19,7 +26,37 @@ Conformal prediction works in two phases:
 1. **Calibration**: Compute a conformity score from calibration residuals
 2. **Prediction**: Apply the conformity score to new forecasts
 
-The resulting intervals cover the true value with probability at least `1 - α`, where `α` is the miscoverage rate.
+The resulting intervals target coverage of the true value with probability `1 - α`, where `α`
+is the miscoverage rate — under exchangeability and a correctly horizon-ordered calibration
+set (see [Coverage caveats](#coverage-caveats)).
+
+---
+
+## Coverage caveats
+
+The theoretical coverage guarantee of split conformal prediction holds under exchangeability
+of calibration and test residuals. This implementation has known gaps that can make the
+*delivered* coverage diverge from the nominal `1 - α` target:
+
+- **`ts_conformal_calibrate`'s `coverage` column is nominal, not empirical.** It literally
+  returns `1 - alpha` — it is not computed by checking how many calibration residuals the
+  interval actually covers. Measure empirical coverage yourself with `ts_conformal_coverage`
+  / `ts_conformal_evaluate` on held-out data if you need a real coverage estimate.
+- **`ts_conformal_by` orders forecasts by value, not by horizon.** The `LIST(point_forecast_col
+  ORDER BY point_forecast_col)` construction used internally sorts the per-group forecast
+  array by the forecast *value*, not by date/forecast-step order. If point forecasts are not
+  already monotonic in time, the resulting lower/upper bounds are misaligned with their
+  intended horizon step.
+- **Asymmetric is not guaranteed tighter than symmetric.** Treat `'method': 'asymmetric'` as a
+  different quantile estimator, not a strict improvement; measure interval width on your own
+  data.
+- **`jackknife+` currently behaves like `split`.** The applied conformity scores
+  (`scores_lower`/`scores_upper`) are identical between the two strategies today, so selecting
+  `'jackknife+'` does not currently buy you the leave-one-out robustness the name implies.
+- **Unrecognized `strategy` strings silently fall back to `'split'`** rather than raising an
+  error — a typo in the strategy name will not be caught.
+
+(being corrected in v0.10.0, Phase 16)
 
 ---
 
@@ -136,7 +173,11 @@ SELECT * FROM ts_conformal_apply_by(
 
 **Goal:** Your forecasts consistently under-predict (e.g., demand forecasting).
 
-**Solution:** Use asymmetric intervals for tighter, more accurate bounds.
+**Solution:** Use asymmetric intervals, which compute separate upper and lower quantiles
+instead of one symmetric quantile. Do not assume this makes the interval tighter — internal
+measurement found the asymmetric path can be substantially *wider* than symmetric split on
+some residual distributions. Measure width empirically for your own data before relying on
+"asymmetric is tighter." (being corrected in v0.10.0, Phase 16)
 
 ```sql
 SELECT * FROM ts_conformal_by(
@@ -288,7 +329,13 @@ SELECT * FROM ts_conformal_by(
 );
 ```
 
-**When to use asymmetric:** Use `'asymmetric'` when residuals are not symmetric (e.g., demand forecasts often under-predict more than over-predict). This creates separate upper and lower quantiles for tighter, more accurate intervals.
+**When to use asymmetric:** Use `'asymmetric'` when residuals are not symmetric (e.g., demand forecasts often under-predict more than over-predict). This creates separate upper and lower quantiles — it does not guarantee a *tighter* interval than symmetric split; measure both on your data. (being corrected in v0.10.0, Phase 16)
+
+**Per-horizon ordering caveat:** `ts_conformal_by` currently builds the per-group forecast
+array with `LIST(point_forecast_col ORDER BY point_forecast_col)` — ordering by forecast
+*value*, not by the original horizon/date order. This silently scrambles which calibration
+residual lines up with which forecast step whenever point forecasts are not already
+monotonic. See [Coverage caveats](#coverage-caveats). (being corrected in v0.10.0, Phase 16)
 
 ---
 
@@ -318,7 +365,7 @@ ts_conformal_calibrate(backtest_results, actual_col, forecast_col, params)
 | Column | Type | Description |
 |--------|------|-------------|
 | `conformity_score` | DOUBLE | Calibrated score for interval construction |
-| `coverage` | DOUBLE | Empirical coverage from calibration |
+| `coverage` | DOUBLE | **Nominal** coverage (`1 - alpha`) — NOT empirically measured from the calibration residuals, despite the name |
 | `n_residuals` | INTEGER | Number of residuals used |
 
 **Example:**
@@ -615,7 +662,7 @@ ts_conformal_learn(residuals DOUBLE[], alphas DOUBLE[], method VARCHAR, strategy
 | `residuals` | DOUBLE[] | Calibration residuals (actual - predicted) |
 | `alphas` | DOUBLE[] | Array of miscoverage rates to calibrate |
 | `method` | VARCHAR | `'symmetric'` or `'asymmetric'` |
-| `strategy` | VARCHAR | `'naive'`, `'cv'`, or `'adaptive'` |
+| `strategy` | VARCHAR | `'split'`, `'crossval'`, or `'jackknife+'` (see Strategies below) |
 
 **Methods:**
 | Method | Description |
@@ -626,9 +673,12 @@ ts_conformal_learn(residuals DOUBLE[], alphas DOUBLE[], method VARCHAR, strategy
 **Strategies:**
 | Strategy | Description |
 |----------|-------------|
-| `'naive'` | Simple empirical quantile (default) |
-| `'cv'` | Cross-validation based calibration |
-| `'adaptive'` | Adaptive conformal inference |
+| `'split'` | Simple empirical quantile (default) |
+| `'crossval'` (alias `'cv'`) | Cross-validation based calibration |
+| `'jackknife+'` (alias `'jackknife_plus'`) | Leave-one-out jackknife+; currently produces the **same** applied interval score as `'split'` — the internal state representation differs but `scores_lower`/`scores_upper` are identical today |
+
+Any other string (e.g. `'naive'`, `'adaptive'`) is silently treated as `'split'` rather than
+raising an error. (being corrected in v0.10.0, Phase 16)
 
 **Example:**
 ```sql
@@ -637,7 +687,7 @@ SELECT ts_conformal_learn(
     [1.2, -0.8, 1.5, -1.0, 0.5, -0.3, 0.9, -1.2]::DOUBLE[],  -- residuals
     [0.1, 0.05, 0.2]::DOUBLE[],                               -- 90%, 95%, 80% coverage
     'symmetric',
-    'naive'
+    'split'
 ) AS profile;
 ```
 
@@ -661,9 +711,8 @@ coverage-guaranteed intervals, use the conformal path shown here.
 
 1. **`ts_cv_forecast_by` ignores `top_k`/`combination_method` for AutoEnsemble.**
    The CV native does not parse these params — it always backtests with `top_k=3, Mean`.
-   Additionally, `ts_cv_forecast_by('AutoEnsemble')` crashes at runtime in build 0.15.3
-   (segfault). The workaround is the manual per-fold loop using `_ts_forecast_scalar` shown
-   below.
+   Additionally, `ts_cv_forecast_by('AutoEnsemble')` crashes at runtime (segfault). The
+   workaround is the manual per-fold loop using `_ts_forecast_scalar` shown below.
 
 2. **`ts_forecast_ensemble_by` cannot flow through `ts_cv_forecast_by`.**
    It is a ScalarFunction (not a string-method dispatch). The explicit-member conformal path

@@ -8,8 +8,15 @@ Diagnostic functions test statistical properties of time series and model residu
 They operate on a single column of values (no date column required inside the function;
 ordering is supplied via `ORDER BY` in `LIST()`).
 
+**NULL handling:** interior `NULL` values inside the ordered `LIST(...)` are currently
+silently dropped (not interpolated, not preserved as gaps) — the remaining non-NULL values
+are spliced together, which silently shifts the implied time spacing wherever a NULL was
+removed. If your series has interior gaps, impute them first (e.g. `ts_fill_nulls_by`)
+rather than relying on this function to handle them. (being corrected in v0.10.0, Phase 12)
+
 **This document covers (Phase 1 — Statistical Diagnostics):**
-- `ts_adf` / `ts_adf_by`: Augmented Dickey-Fuller unit-root test (STAT-01)
+- `ts_adf` / `ts_adf_by`: Dickey-Fuller unit-root test (STAT-01) — currently **non-augmented**
+  (constant-only regression of Δy on y₋₁); see [Caveats](#caveats)
 - `ts_kpss` / `ts_kpss_by`: KPSS level-stationarity test (STAT-02)
 - `ts_stationarity` / `ts_stationarity_by`: combined ADF + KPSS four-way verdict (STAT-03)
 
@@ -44,10 +51,16 @@ ORDER BY product_id;
 
 ## Stationarity Tests
 
-### `ts_adf` — Augmented Dickey-Fuller test
+### `ts_adf` — Dickey-Fuller test
 
 Tests the null hypothesis that the series has a unit root (is non-stationary).
 Rejecting H₀ (small p-value) implies the series is stationary.
+
+The underlying `anofox-forecast` ≤0.15.10 implementation is currently a **non-augmented**
+Dickey-Fuller regression — it regresses Δy on y₋₁ with a constant only; it does not include
+lagged difference terms in the regression. The `max_lags` parameter currently only trims how
+much of the sample is used, it does not add augmentation terms.
+(being corrected in v0.10.0, Phases 11/17)
 
 #### Signature
 
@@ -61,7 +74,7 @@ ts_adf(series LIST(DOUBLE), max_lags INTEGER) → STRUCT(...)
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `series` | `LIST(DOUBLE)` | — | Time series values, ordered by date via `LIST(y ORDER BY ds)` |
-| `max_lags` | `INTEGER` | `-1` (auto) | Maximum number of lags for AIC lag selection. `-1` = automatic: `⌊(n−1)^(1/3)⌋`, clamped to `min(max_lags, n/2−1).max(1)` |
+| `max_lags` | `INTEGER` | `-1` (auto) | Maximum lag/sample-trim value (see Caveats — currently selected by minimum RSS, not AIC, and does not add augmentation terms). `-1` = automatic: `⌊(n−1)^(1/3)⌋`, clamped to `min(max_lags, n/2−1).max(1)` |
 
 #### Return STRUCT
 
@@ -71,7 +84,7 @@ Field order is fixed (plans 01-2 / 01-3 depend on this layout):
 |-------|------|-------------|
 | `statistic` | `DOUBLE` | ADF t-statistic. More negative → stronger evidence of stationarity |
 | `p_value` | `DOUBLE` | Approximate p-value for the test. See [Caveats](#caveats) |
-| `lags` | `BIGINT` | Number of lags used (AIC-selected or overridden by `max_lags`) |
+| `lags` | `BIGINT` | Number of lags used (selected by minimum RSS, not AIC; or overridden by `max_lags`) (being corrected in v0.10.0, Phase 11) |
 | `is_stationary` | `BOOLEAN` | `true` if `statistic < cv_5pct` (5% significance level) |
 | `cv_1pct` | `DOUBLE` | Critical value at 1% significance (`-3.43` for constant regression) |
 | `cv_5pct` | `DOUBLE` | Critical value at 5% significance (`-2.86` for constant regression) |
@@ -139,32 +152,44 @@ FROM ts_adf_by('sales_data', product_id, ds, y, max_lags:=2);
 
 ## Caveats
 
-### 1. Constant-only regression (`'c'`) — **current limitation**
+### 1. Non-augmented, constant-only regression (`'c'`) — **current limitation**
 
-The `anofox-forecast` v0.15.3 crate implements only constant-only ADF regression.
-The `'ct'` (constant + trend) and `'n'` (no constant) regression modes specified
-in the CONTEXT are **not yet functional** in the underlying crate. Exposing them
-as parameters is deferred until the crate is updated.
+The `anofox-forecast` ≤0.15.10 crate implements a **non-augmented** Dickey-Fuller
+regression (Δy on y₋₁, constant only) — not the augmented form (no lagged Δy terms added
+to the regression), and only the constant-only (`'c'`) specification. The `'ct'` (constant +
+trend) and `'n'` (no constant) regression modes specified in the CONTEXT are **not yet
+functional** in the underlying crate. `max_lags` currently only trims how much of the sample
+is used for the minimum-RSS lag search (see below) — it does not add augmentation terms.
+Exposing augmentation and additional regression modes as parameters is deferred until the
+crate is updated. (being corrected in v0.10.0, Phases 11/17)
 
 **Impact:** Series with a deterministic trend may appear non-stationary even when
 first-differenced, because the trend component is not accounted for. Use first-
 differencing (`ts_diff_by`) as a preprocessing step if you expect trend-stationarity.
 
-### 2. Approximate p-values
+### 2. Lag selection is by minimum RSS, not AIC
 
-ADF p-values are computed using the MacKinnon (1994) 9-point lookup table
-and piecewise-linear interpolation — the same approximation method used by
-`statsmodels.tsa.stattools.adfuller`. They are **not exact** and should be
-interpreted as approximate:
+Despite the "AIC lag selection" framing in earlier docs, the current implementation's
+`compute_aic` helper returns raw residual sum of squares and ignores the number of
+parameters `k` — so the lag actually chosen minimizes RSS, not AIC.
+(being corrected in v0.10.0, Phase 11)
 
-- Accuracy is best near p = 0.01, 0.05, 0.10 (table breakpoints)
-- Interpolation between breakpoints introduces rounding to the nearest breakpoint
+### 3. Approximate p-values — coarse step lookup, not MacKinnon interpolation
+
+ADF p-values are currently computed from a 9-point lookup table with a **coarse step
+function** (no smoothing or blending between breakpoints) — this is *not* the same
+method used by `statsmodels.tsa.stattools.adfuller`, and it is not numerically
+cross-validated against statsmodels' p-values. They are **not exact** and should be
+interpreted as a rough approximation only:
+
+- Accuracy is best very near the table breakpoints (p = 0.01, 0.05, 0.10)
+- Values between breakpoints snap to the nearest breakpoint rather than interpolating,
+  so the reported `p_value` can be off by double-digit percentage points
 - For series shorter than ~30 observations, the approximation degrades further
 
-**Tolerance vs statsmodels:** Numeric cross-checks show `statistic` agrees within
-`rtol=0.01` and `p_value` within `rtol=0.10` against `statsmodels.tsa.stattools.adfuller`.
+(being corrected in v0.10.0, Phases 11/17)
 
-### 3. Minimum series length
+### 4. Minimum series length
 
 Both `ts_adf` and `ts_kpss` return `NaN` for `statistic` when the series has
 fewer than 4 observations. No error is raised; check for `isnan((adf).statistic)`.
@@ -202,9 +227,11 @@ value (fails to reject the stationarity null).
 **Caveats**
 
 - Level (`'c'`) specification only; the trend (`'ct'`) specification is not exposed in
-  `anofox-forecast` v0.15.3. `lags := -1` (default) selects the bandwidth automatically.
-- p-values are approximate (piecewise-linear interpolation of the KPSS table, clamped
-  to `[0.01, 0.10]`).
+  `anofox-forecast` ≤0.15.10. `lags := -1` (default) selects the bandwidth automatically.
+- p-values are an **unbounded extrapolation** of the KPSS table over `[0, 1]` — they are
+  **not** clamped to `[0.01, 0.10]` (that clamping is only documented, not implemented) and
+  can report values outside the conventional significance range.
+  (being corrected in v0.10.0, Phases 11/17)
 
 ## `ts_stationarity` / `ts_stationarity_by` (STAT-03)
 
@@ -227,7 +254,8 @@ FROM ts_stationarity_by('sales', product_id, ds, y);
 `kpss_p_value DOUBLE`, `adf_is_stationary BOOLEAN`, `kpss_is_stationary BOOLEAN`,
 `verdict VARCHAR`.
 
-**Verdict truth table** (both flags mean "this test judges the series stationary"):
+**Verdict truth table** (both flags mean "this test judges the series stationary") — current
+implementation:
 
 | `adf_is_stationary` | `kpss_is_stationary` | `verdict` | Interpretation |
 |---|---|---|---|
@@ -236,9 +264,15 @@ FROM ts_stationarity_by('sales', product_id, ds, y);
 | false | false | `difference_stationary` | Unit root — apply differencing (`ts_diff_by`) |
 | false | true  | `non_stationary`        | Conflicting / inconclusive — treat conservatively as non-stationary |
 
-> Note: this follows the standard ADF+KPSS combination. `trend_stationary` is the case
-> where ADF rejects the unit root but KPSS rejects level-stationarity (a deterministic
-> trend is present); `difference_stationary` is where both tests point to a unit root.
+> **Current limitation:** the `trend_stationary` / `non_stationary` labels above are
+> currently **inverted relative to the standard statsmodels convention** (where
+> ADF-rejects + KPSS-rejects conventionally reads as conflicting/non-stationary, and
+> ADF-rejects + KPSS-fails-to-reject reads as trend-stationary). A constant (zero-variance)
+> series currently returns `verdict = non_stationary` rather than `stationary`. Treat the
+> `verdict` string as implementation-defined today rather than matching the statsmodels
+> literature convention; rely on the individual `adf_is_stationary` / `kpss_is_stationary`
+> flags if you need the standard interpretation.
+> (being corrected in v0.10.0, Phase 17)
 
 ## Residual Diagnostics
 
@@ -255,7 +289,11 @@ missed structure).
 - `ts_ljung_box_by(source, group_col, date_col, value_col [, lags := -1])`
 
 Default `lags = min(10, n/5)`. Residuals are treated as raw (0 fitted params), so
-`df == lags`.
+`df == lags`. This `df == lags` accounting is accurate for raw residuals but does **not**
+subtract the number of parameters fitted by the upstream model — if you are testing
+residuals from a model with `k` estimated parameters, `df` should conventionally be
+`lags - k`, and this function does not make that correction.
+(being corrected in v0.10.0, Phase 17)
 
 ```sql
 SELECT group_col, (ljung_box).p_value FROM ts_ljung_box_by('resids', series_id, ds, e);
@@ -300,5 +338,5 @@ FROM ts_residual_diagnostics_by('resids', series_id, ds, e) AS t(group_col, rd);
 
 ## Reference
 
-- MacKinnon, J. G. (1994). "Approximate asymptotic distribution functions for unit-root and cointegration tests." *Journal of Business & Economic Statistics*, 12(2), 167–176.
-- statsmodels `adfuller` documentation: https://www.statsmodels.org/stable/generated/statsmodels.tsa.stattools.adfuller.html
+- MacKinnon, J. G. (1994). "Approximate asymptotic distribution functions for unit-root and cointegration tests." *Journal of Business & Economic Statistics*, 12(2), 167–176. (Table used as the lookup basis for the current coarse step-function p-value — see Caveats; the current implementation does not reproduce MacKinnon's interpolation.)
+- statsmodels `adfuller` documentation: https://www.statsmodels.org/stable/generated/statsmodels.tsa.stattools.adfuller.html (cited for the test definition only — see Caveats for where the current p-value approximation diverges from statsmodels)

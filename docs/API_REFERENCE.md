@@ -105,7 +105,7 @@ Both forms are identical in functionality.
 | **Forecasting** | 32 forecasting models | [07-forecasting.md](api/07-forecasting.md) |
 | **Cross-Validation** | Backtesting and CV functions | [08-cross-validation.md](api/08-cross-validation.md) |
 | **Evaluation Metrics** | Forecast accuracy metrics | [09-evaluation-metrics.md](api/09-evaluation-metrics.md) |
-| **Feature Extraction** | 117 tsfresh-compatible features | [20-feature-extraction.md](api/20-feature-extraction.md) |
+| **Feature Extraction** | 117 tsfresh-inspired features | [20-feature-extraction.md](api/20-feature-extraction.md) |
 | **Conformal Prediction** | Distribution-free prediction intervals | [11-conformal-prediction.md](api/11-conformal-prediction.md) |
 
 ---
@@ -123,17 +123,19 @@ Both forms are identical in functionality.
 | `ts_detect_periods_by` | Detect seasonality (multi-series) | `ts_detect_periods_by('tbl', id, date, val)` |
 | `ts_features` | Extract 117 features | `ts_features(date, value)` |
 
-### Forecasting Models (33 Models)
+### Forecasting Models (36 Models)
 
 | Category | Models | Reference |
 |----------|--------|-----------|
 | **Baseline** | `Naive`, `SMA`, `SeasonalNaive`, `RandomWalkDrift`, `SeasonalWindowAverage` | [baseline/](reference/models/baseline/) |
 | **Exponential Smoothing** | `SES`, `SESOptimized`, `Holt`, `HoltWinters`, `SeasonalES`, `SeasonalESOptimized` | [exponential-smoothing/](reference/models/exponential-smoothing/) |
-| **State Space** | `ETS`, `ARIMA`, `AutoETS`, `AutoARIMA` | [state-space/](reference/models/state-space/) |
+| **State Space** | `ETS`, `ARIMA`, `AutoETS`, `AutoARIMA`, `Kalman` | [state-space/](reference/models/state-space/) |
+| **Classical** | `GARCH` (conditional volatility) | [classical/garch.md](reference/models/classical/garch.md) |
 | **Theta** | `Theta`, `OptimizedTheta`, `DynamicTheta`, `DynamicOptimizedTheta`, `AutoTheta` | [theta/](reference/models/theta/) |
 | **Multi-Seasonal** | `MFLES`, `AutoMFLES`, `MSTL`, `AutoMSTL`, `TBATS`, `AutoTBATS` | [multi-seasonal/](reference/models/multi-seasonal/) |
 | **Intermittent Demand** | `CrostonClassic`, `CrostonOptimized`, `CrostonSBA`, `ADIDA`, `IMAPA`, `TSB` | [intermittent/](reference/models/intermittent/) |
 | **Distributional** | `Laplace` (variants: `auto`, `auto_aid`, `skaters`) | [distributional/laplace.md](reference/models/distributional/laplace.md) |
+| **Ensemble** | `AutoEnsemble` (auto-fit ARIMA/ETS/Theta, combine top-K) | [ensemble/autoensemble.md](reference/models/ensemble/autoensemble.md) |
 
 ### Evaluation Metrics (12 Metrics)
 

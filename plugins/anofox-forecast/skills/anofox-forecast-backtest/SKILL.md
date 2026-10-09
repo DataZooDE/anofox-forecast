@@ -7,13 +7,13 @@ description: >
   time-series-aware CV, computing metrics (MAE / RMSE / MAPE /
   MASE / coverage), or attaching distribution-free prediction
   intervals to forecasts.
-version: 0.15.3
+version: 2026.09.26
 user-invocable: false
 ---
 
 # Anofox Forecast — Backtesting, CV, Metrics & Conformal Cheat Sheet
 
-**Extension:** `anofox_forecast` v0.15.3 | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.15.10) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 Time-series-aware cross-validation, error metrics, and distribution-free intervals.
 
@@ -115,11 +115,11 @@ Pattern: `SELECT group, ts_<metric>(LIST(actual ORDER BY ds), LIST(pred ORDER BY
 | `ts_mae` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | Mean Absolute Error |
 | `ts_mse` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | Mean Squared Error |
 | `ts_rmse` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | Root MSE |
-| `ts_mape` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | Mean Absolute % Error |
+| `ts_mape` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | Mean Absolute % Error — rows with `actual == 0` are dropped from the sum AND the divisor (not counted as 0%); being corrected in v0.10.0, Phase 13 |
 | `ts_smape` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | Symmetric MAPE |
 | `ts_r2` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | R² |
 | `ts_bias` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | Bias (mean error) |
-| `ts_mase` | `(actual, forecast, baseline) → DOUBLE` | Scaled by seasonal naive |
+| `ts_mase` | `(actual, forecast, baseline) → DOUBLE` | Currently a **relative MAE** (`MAE(actual,forecast)/MAE(actual,baseline)`) — scaled by whatever `baseline` array you pass in, not the Hyndman-Koehler in-sample seasonal-naive MASE; being corrected in v0.10.0, Phase 13 |
 | `ts_rmae` | `(actual, pred1, pred2) → DOUBLE` | Relative MAE. < 1 = pred1 better |
 | `ts_coverage` | `(actual, lower, upper) → DOUBLE` | Interval coverage rate |
 | `ts_quantile_loss` | `(actual, forecast, q) → DOUBLE` | Quantile loss at level q |
@@ -147,7 +147,11 @@ ORDER BY mae;
 
 ## Conformal prediction — distribution-free intervals
 
-Attach a coverage-guaranteed prediction interval to forecasts, calibrated from backtest residuals.
+Attach a distribution-free prediction interval to forecasts, calibrated from backtest
+residuals. Coverage is guaranteed only under exchangeability; this implementation's
+per-horizon ordering and global pooling currently fall short of that guarantee in practice —
+see `docs/api/11-conformal-prediction.md#coverage-caveats`. (being corrected in v0.10.0,
+Phase 16)
 
 ### Three flavours
 
@@ -263,7 +267,7 @@ SELECT product_id,
     ts_coverage(LIST(y ORDER BY ds), LIST(yhat_lower ORDER BY ds), LIST(yhat_upper ORDER BY ds)) AS cov
 FROM bt GROUP BY product_id;
 
--- 4. Conformalise → guaranteed 90 % coverage
+-- 4. Conformalise → targets 90% coverage (see conformal caveats above)
 CREATE OR REPLACE TABLE calib AS
 SELECT * FROM ts_conformal_calibrate('bt', y, yhat, {alpha: 0.1});
 
