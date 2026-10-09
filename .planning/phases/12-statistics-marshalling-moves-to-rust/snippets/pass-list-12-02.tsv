@@ -1,0 +1,3 @@
+docs/api/10-diagnostics.md	0	PASS	SELECT ts_adf([NULL, 1.0, 2.0, 1.5, 2.5, 1.8, NULL]::DOUBLE[])	
+docs/api/10-diagnostics.md	1	EXPECTED-ERROR	SELECT ts_adf([1.0, 2.0, NULL, 1.5, 2.5]::DOUBLE[]);	Invalid Input Error: ts_adf: Invalid input: interior NULL at position 3
+docs/api/05-period-detection.md	0	PASS	SELECT ts_estimate_period_fft(list_concat([NULL, NULL]::DOUBLE[], v)) = ts_estimate_period_fft(v)	

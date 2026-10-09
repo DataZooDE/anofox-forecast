@@ -1,3 +1,4 @@
 docs/api/07-forecasting.md	SELECT * FROM ts_forecast_by('sales_data', product_id, date, revenue, 'ARIMA', 7, '1d', MAP{});
+docs/api/10-diagnostics.md	SELECT ts_adf([1.0, 2.0, NULL, 1.5, 2.5]::DOUBLE[]);
 README.md	INSTALL anofox_forecast FROM 'http://get.erpl.io';
 README.md	LOAD httpfs;

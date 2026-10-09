@@ -21,6 +21,21 @@ Period detection identifies recurring patterns in time series data. Use detected
 | `'autoperiod'` | FFT with ACF validation | General purpose, robust |
 | `'auto'` | Auto-select best method | Unknown characteristics |
 
+**NULL handling:** every period estimator (`_ts_detect_periods` / `ts_estimate_period_fft` /
+`ts_estimate_period_acf` / `ts_detect_multiple_periods` / `ts_autoperiod` / `ts_cfd_autoperiod` /
+`ts_lomb_scargle` / `ts_aic_period` / `ts_ssa_period` / `ts_stl_period` / `ts_matrix_profile_period` /
+`ts_sazed_period`) trims leading/trailing `NULL`/`NaN` values before detecting a period. An
+interior `NULL` that remains after trimming is a hard error naming its 1-based position
+(e.g. `ts_estimate_period_fft: Invalid input: interior NULL at position 6`); a list with no
+non-NULL value returns SQL `NULL`. Impute interior gaps first if your series has them.
+
+```sql
+-- Edge trim: leading/trailing NULLs give the same period as the trimmed series.
+SELECT ts_estimate_period_fft(list_concat([NULL, NULL]::DOUBLE[], v)) = ts_estimate_period_fft(v)
+FROM (SELECT list_transform(range(24), i -> sin(2 * pi() * i / 12)::DOUBLE) AS v) t;
+-- true
+```
+
 ---
 
 ## Quick Start

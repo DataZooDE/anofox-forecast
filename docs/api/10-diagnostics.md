@@ -8,11 +8,27 @@ Diagnostic functions test statistical properties of time series and model residu
 They operate on a single column of values (no date column required inside the function;
 ordering is supplied via `ORDER BY` in `LIST()`).
 
-**NULL handling:** interior `NULL` values inside the ordered `LIST(...)` are currently
-silently dropped (not interpolated, not preserved as gaps) — the remaining non-NULL values
-are spliced together, which silently shifts the implied time spacing wherever a NULL was
-removed. If your series has interior gaps, impute them first (e.g. `ts_fill_nulls_by`)
-rather than relying on this function to handle them. (fix planned for v0.10.0, Phase 12)
+**NULL handling:** leading/trailing `NULL` (and `NaN`) values inside the ordered
+`LIST(...)` are trimmed before the analysis runs. An interior `NULL` — one that remains
+after trimming — is a hard error naming its 1-based position in the original list
+(e.g. `ts_adf: Invalid input: interior NULL at position 6`), not a silent splice. A list
+with no non-NULL value returns SQL `NULL`. If your series has interior gaps, impute them
+first (e.g. `ts_fill_nulls_by`) rather than relying on this function to handle them.
+
+```sql
+-- Edge trim: leading/trailing NULLs give the same result as the trimmed series.
+SELECT ts_adf([NULL, 1.0, 2.0, 1.5, 2.5, 1.8, NULL]::DOUBLE[])
+     = ts_adf([1.0, 2.0, 1.5, 2.5, 1.8]::DOUBLE[]);
+-- true
+```
+
+An interior NULL that survives trimming is a hard error naming its 1-based position
+(wrap in `try(...)` to get `NULL` instead of an error):
+
+```sql
+SELECT ts_adf([1.0, 2.0, NULL, 1.5, 2.5]::DOUBLE[]);
+-- Invalid Input Error: ts_adf: Invalid input: interior NULL at position 3
+```
 
 **This document covers (Phase 1 — Statistical Diagnostics):**
 - `ts_adf` / `ts_adf_by`: Dickey-Fuller unit-root test (STAT-01) — currently **non-augmented**

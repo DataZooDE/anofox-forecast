@@ -1,0 +1,187 @@
+# name: test/sql/ts_series_null_policy.test
+# description: Phase 12 RUST-01/RUST-02 single-series missing-data policy (D-03/D-04):
+#   edge trim parity, interior NULL error naming position, all-NULL -> NULL,
+#   constant list/scalar correctness per row. Covers diagnostics.cpp,
+#   ts_periods.cpp and ts_seasonality.cpp (plan 12-02).
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup Test Data
+#######################################
+
+statement ok
+CREATE TABLE s AS
+SELECT list_transform(range(48), i -> (10 + 3 * sin(2 * pi() * i / 12) + 0.05 * i)::DOUBLE) AS v;
+
+statement ok
+CREATE TABLE g AS
+SELECT g, list_transform(range(48), i -> (10 + g + (g + 1) * sin(2 * pi() * i / 12))::DOUBLE) AS v
+FROM range(3) t(g);
+
+#######################################
+# Edge trim parity: [NULL] || v || [NULL] gives the same result as v (D-03)
+#######################################
+
+query I
+SELECT ts_adf(list_concat(list_concat([NULL]::DOUBLE[], v), [NULL]::DOUBLE[])) IS NOT DISTINCT FROM ts_adf(v)
+FROM s;
+----
+true
+
+query I
+SELECT ts_kpss(list_concat(list_concat([NULL]::DOUBLE[], v), [NULL]::DOUBLE[])) IS NOT DISTINCT FROM ts_kpss(v)
+FROM s;
+----
+true
+
+query I
+SELECT ts_stationarity(list_concat(list_concat([NULL]::DOUBLE[], v), [NULL]::DOUBLE[])) IS NOT DISTINCT FROM ts_stationarity(v)
+FROM s;
+----
+true
+
+query I
+SELECT ts_ljung_box(list_concat(list_concat([NULL]::DOUBLE[], v), [NULL]::DOUBLE[])) IS NOT DISTINCT FROM ts_ljung_box(v)
+FROM s;
+----
+true
+
+query I
+SELECT ts_durbin_watson(list_concat(list_concat([NULL]::DOUBLE[], v), [NULL]::DOUBLE[])) IS NOT DISTINCT FROM ts_durbin_watson(v)
+FROM s;
+----
+true
+
+query I
+SELECT ts_jarque_bera(list_concat(list_concat([NULL]::DOUBLE[], v), [NULL]::DOUBLE[])) IS NOT DISTINCT FROM ts_jarque_bera(v)
+FROM s;
+----
+true
+
+query I
+SELECT ts_residual_diagnostics(list_concat(list_concat([NULL]::DOUBLE[], v), [NULL]::DOUBLE[])) IS NOT DISTINCT FROM ts_residual_diagnostics(v)
+FROM s;
+----
+true
+
+query I
+SELECT ts_estimate_period_fft(list_concat(list_concat([NULL]::DOUBLE[], v), [NULL]::DOUBLE[])) IS NOT DISTINCT FROM ts_estimate_period_fft(v)
+FROM s;
+----
+true
+
+query I
+SELECT ts_estimate_period_acf(list_concat(list_concat([NULL]::DOUBLE[], v), [NULL]::DOUBLE[])) IS NOT DISTINCT FROM ts_estimate_period_acf(v)
+FROM s;
+----
+true
+
+query I
+SELECT ts_detect_seasonality(list_concat(list_concat([NULL]::DOUBLE[], v), [NULL]::DOUBLE[])) IS NOT DISTINCT FROM ts_detect_seasonality(v)
+FROM s;
+----
+true
+
+query I
+SELECT ts_analyze_seasonality(list_concat(list_concat([NULL]::DOUBLE[], v), [NULL]::DOUBLE[])) IS NOT DISTINCT FROM ts_analyze_seasonality(v)
+FROM s;
+----
+true
+
+query I
+SELECT ts_classify_seasonality(list_concat(list_concat([NULL]::DOUBLE[], v), [NULL]::DOUBLE[]), 12.0) IS NOT DISTINCT FROM ts_classify_seasonality(v, 12.0)
+FROM s;
+----
+true
+
+#######################################
+# Interior NULL: errors naming the 1-based position (D-03)
+#######################################
+
+statement error
+SELECT ts_adf(list_concat(list_concat(v[1:5], [NULL]::DOUBLE[]), v[6:48])) FROM s;
+----
+interior NULL at position 6
+
+statement error
+SELECT ts_kpss(list_concat(list_concat(v[1:5], [NULL]::DOUBLE[]), v[6:48])) FROM s;
+----
+interior NULL at position 6
+
+statement error
+SELECT ts_ljung_box(list_concat(list_concat(v[1:5], [NULL]::DOUBLE[]), v[6:48])) FROM s;
+----
+interior NULL at position 6
+
+statement error
+SELECT ts_estimate_period_fft(list_concat(list_concat(v[1:5], [NULL]::DOUBLE[]), v[6:48])) FROM s;
+----
+interior NULL at position 6
+
+statement error
+SELECT ts_detect_seasonality(list_concat(list_concat(v[1:5], [NULL]::DOUBLE[]), v[6:48])) FROM s;
+----
+interior NULL at position 6
+
+#######################################
+# All-NULL -> NULL, not an error (D-04)
+#######################################
+
+query II
+SELECT ts_adf([NULL, NULL]::DOUBLE[]) IS NULL, ts_estimate_period_fft([NULL, NULL, NULL]::DOUBLE[]) IS NULL;
+----
+true	true
+
+#######################################
+# Constant list argument correct on every row (RUST-01)
+#######################################
+
+query I
+SELECT count(*) FROM range(4) r, s
+WHERE (ts_kpss(v)).statistic = (SELECT (ts_kpss(v)).statistic FROM s);
+----
+4
+
+#######################################
+# Constant scalar parameter correct per row (RUST-01)
+#######################################
+
+query I
+SELECT count(*) FROM g a
+WHERE ts_classify_seasonality(a.v, 12.0) IS NOT DISTINCT FROM
+      (SELECT ts_classify_seasonality(b.v, 12.0) FROM g b WHERE b.g = a.g);
+----
+3
+
+#######################################
+# ts_adf_by macro path: leading-NULL group matches the per-group scalar (D-03)
+#######################################
+
+statement ok
+CREATE TABLE gg AS
+SELECT 'A' AS grp, i AS ds,
+       CASE WHEN i <= 2 THEN NULL ELSE (10 + 3 * sin(2 * pi() * i / 12) + 0.05 * i) END AS val
+FROM generate_series(1, 40) t(i)
+UNION ALL
+SELECT 'B' AS grp, i AS ds, (10 + 3 * sin(2 * pi() * i / 12) + 0.05 * i) AS val
+FROM generate_series(1, 40) t(i);
+
+query I
+SELECT count(*) FROM ts_adf_by('gg', grp, ds, val) WHERE adf IS NOT NULL;
+----
+2
+
+query II
+SELECT a.grp, a.adf = b.adf
+FROM ts_adf_by('gg', grp, ds, val) a
+JOIN (
+    SELECT 'A' AS grp, ts_adf(LIST(val ORDER BY ds)) AS adf FROM gg WHERE grp = 'A' AND val IS NOT NULL
+    UNION ALL
+    SELECT 'B' AS grp, ts_adf(LIST(val ORDER BY ds)) AS adf FROM gg WHERE grp = 'B' AND val IS NOT NULL
+) b ON a.grp = b.grp
+ORDER BY a.grp;
+----
+A	true
+B	true

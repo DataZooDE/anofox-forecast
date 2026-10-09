@@ -67,6 +67,37 @@ SELECT CASE WHEN (
     (SELECT count(*) FROM five WHERE ts_mae(a, [0, 0, 0]::DOUBLE[]) = i + 1)::VARCHAR || ' of 5'
 ) END AS result;
 
+-- ============================================================================
+-- SECTION 2 — Single-series analyses: edge trim, interior-NULL error (RUST-02, D-03/D-04)
+-- ============================================================================
+
+.print ''
+.print 'SECTION 2: Single-series analyses trim edges and error on interior NULLs'
+.print ''
+
+CREATE OR REPLACE TABLE series_48 AS
+SELECT list_transform(range(48), i -> (10 + 3 * sin(2 * pi() * i / 12) + 0.05 * i)::DOUBLE) AS v;
+
+-- Edge trim parity: [NULL] || v || [NULL] gives the same ts_adf result as v
+-- itself — leading/trailing NULLs are trimmed in Rust before the analysis.
+SELECT CASE WHEN (
+    SELECT ts_adf(list_concat(list_concat([NULL]::DOUBLE[], v), [NULL]::DOUBLE[])) = ts_adf(v)
+    FROM series_48
+) THEN 'PASS single_series_edge_trim_parity' ELSE error(
+    'FAIL single_series_edge_trim_parity'
+) END AS result;
+
+-- An interior NULL is a hard error naming its 1-based position, not a silent
+-- splice. try() converts the error to NULL for this self-check; without
+-- try(), the statement fails with "ts_adf: Invalid input: interior NULL at
+-- position 6".
+SELECT CASE WHEN (
+    SELECT try(ts_adf(list_concat(list_concat(v[1:5], [NULL]::DOUBLE[]), v[6:48]))) IS NULL
+    FROM series_48
+) THEN 'PASS single_series_interior_null_errors' ELSE error(
+    'FAIL single_series_interior_null_errors'
+) END AS result;
+
 .print ''
 .print '============================================================================='
 .print 'ALL SECTIONS PASSED'

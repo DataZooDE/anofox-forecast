@@ -89,6 +89,22 @@ use the semver numbering this project started with.
   error; mismatched lengths still return `NULL`. `ts_mqloss`'s `levels` parameter is NOT
   data — a NULL level is now a hard SQL error naming its position. The `ts_*_by` metric
   macros (`_ts_metrics_native`) are now identical to the scalars on the same data.
+- **Single-series analyses reject interior NULLs instead of silently splicing them out
+  (RUST-01/RUST-02, Phase 12).** `ts_adf`, `ts_kpss`, `ts_stationarity`, `ts_ljung_box`,
+  `ts_durbin_watson`, `ts_jarque_bera`, `ts_residual_diagnostics`; every period estimator
+  (`_ts_detect_periods`, `ts_estimate_period_fft`, `ts_estimate_period_acf`,
+  `ts_detect_multiple_periods`, `ts_autoperiod`, `ts_cfd_autoperiod`, `ts_lomb_scargle`,
+  `ts_aic_period`, `ts_ssa_period`, `ts_stl_period`, `ts_matrix_profile_period`,
+  `ts_sazed_period`); and `ts_detect_seasonality` / `ts_analyze_seasonality` /
+  `ts_classify_seasonality` previously dropped NULL list elements before calling the FFI,
+  silently splicing the remaining values together and shifting the implied time spacing.
+  They now trim leading/trailing NULLs/NaN (no behaviour change there), but an interior
+  NULL that survives trimming is a hard SQL error naming its 1-based position in the
+  original list (e.g. `ts_adf: Invalid input: interior NULL at position 6`) — wrap in
+  `try(...)` to get `NULL` instead. A list with no non-NULL value still returns `NULL`, not
+  an error. The single-series gate (`anofox_ts_series_gate`) lives in Rust
+  (`anofox-fcst-core::missing::trim_edges_reject_interior`); C++ only marshals values and
+  validity.
 
 ### Added
 
@@ -112,6 +128,16 @@ use the semver numbering this project started with.
 - `_ts_forecast`'s list outputs are SQL `NULL` (not uninitialised-memory-backed non-null
   lists) when a model has no bounds, and individual `NaN` fitted/residual elements are SQL
   `NULL` rather than the literal `NaN` value.
+- **Constant scalar arguments (e.g. a literal period) are read correctly for every row**
+  (RUST-01, Phase 12). The period estimators' and seasonality functions' optional
+  parameters (`max_period`, `min_confidence`, `tolerance`, `max_lag`, `min_strength`,
+  `acf_threshold`, `min_period`/`max_period`, `n_frequencies`/`n_candidates`,
+  `window_size`/`n_components`, `subsequence_length`/`n_best`, `zero_pad_factor`,
+  `period`, `strength_threshold`, `timing_threshold`) previously read
+  `FlatVector::GetData(...)[0]` once per chunk — correct only for row 0; every other row
+  of a chunk got row 0's value regardless of its own argument. They now read through a
+  `ScalarArgReader<T>` (`ToUnifiedFormat`-based) per row, matching the list-argument fix
+  from plan 12-01.
 - `ts_cv_forecast_by('AutoEnsemble', ...)` no longer crashes — the CV native previously
   zeroed ensemble-specific params (`ensemble_top_k`/`ensemble_method`), which could
   dereference null bounds downstream; verified running end-to-end against the built
