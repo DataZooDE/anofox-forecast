@@ -3579,12 +3579,14 @@ mod tests {
             .as_object()
             .expect("multiscale_ols/cases.json: 'cases' is not an object");
         let mut ran_exog_typical = false;
+        let mut asserted_count = 0usize;
 
         for (name, case) in cases {
             let dep01_assert = case["dep01_assert"].as_bool().unwrap_or(false);
             if !dep01_assert {
                 continue;
             }
+            asserted_count += 1;
 
             let x_cols: Vec<Vec<f64>> = case["X"]
                 .as_array()
@@ -3669,6 +3671,10 @@ mod tests {
         assert!(
             ran_exog_typical,
             "multiscale_ols/cases.json: missing the exog_typical case"
+        );
+        assert_eq!(
+            asserted_count, 7,
+            "multiscale_ols/cases.json: expected 7 dep01_assert cases to run, ran {asserted_count}"
         );
 
         // NOTE: rank-deficient designs (collinear/collinear_big/constcol)
