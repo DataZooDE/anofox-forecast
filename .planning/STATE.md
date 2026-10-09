@@ -5,16 +5,16 @@ milestone_name: Statistical Correctness
 current_phase: 10
 current_phase_name: Forecast Wrapper Delegates to Crate Models
 status: verifying
-stopped_at: Completed 10-09-PLAN.md
-last_updated: "2026-10-09T17:09:09.714Z"
+stopped_at: Completed 10-10-PLAN.md (gap-closure)
+last_updated: "2026-10-09T18:54:36.925Z"
 last_activity: 2026-10-09
 last_activity_desc: Phase 10 execution started
-state_head: c3e543c9dc019905c3c67f40ccec56c33d818cec
+state_head: d4e60b3bd70eed643209e1936645cfb193774b1f
 progress:
   total_phases: 10
   completed_phases: 0
-  total_plans: 12
-  completed_plans: 12
+  total_plans: 13
+  completed_plans: 13
   percent: 0
 ---
 
@@ -67,6 +67,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 10 P07 | ~1h | 3 tasks | 19 files |
 | Phase 10 P08 | ~1h | 3 tasks | 16 files |
 | Phase 10 P09 | ~1h | 2 tasks | 25 files |
+| Phase 10 P10 | 50min | 3 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -104,6 +105,8 @@ Recent decisions affecting current work:
 - [Phase 10]: Fixed stale ts_detect_periods_by workaround references (known-NULL-bug macro) to ts_detect_periods_agg across the state-space/Theta/multi-seasonal reference pages
 - [Phase 10]: [Phase 10 P09]: ensemble_explicit.md/ensemble_inspect.md's seasonal_period 0/1 are tested-identical (both auto-detect; only >1 wins) — corrected from the plan's assumed 'explicit 1 = non-seasonal' after direct verification against the built extension
 - [Phase 10]: [Phase 10 P09]: Phase-wide sweep reworded 53 '(being corrected in v0.10.0, Phase N)' notes across 13 out-of-scope docs/skills files to '(tracked for Phase N)' per the plan's explicit sweep instruction
+- [Phase 10]: ts_forecast_agg now validates/threads params via a shared ts_forecast_params.hpp header, provably identical to ts_forecast_by (FCST-06 closed)
+- [Phase 10]: Theta/CrostonClassic identical fitted arrays confirmed as genuine anofox-forecast 0.15.10 behaviour (not a wrapper bug), pinned by a Rust test, routed to Phase 11 UPST-04
 
 ### Pending Todos
 
@@ -143,7 +146,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-09T17:09:09.684Z
-Stopped at: Completed 10-09-PLAN.md
+Last session: 2026-10-09T18:54:36.544Z
+Stopped at: Completed 10-10-PLAN.md (gap-closure)
 Resume file: None
 Next: `/gsd-plan-phase 9`
