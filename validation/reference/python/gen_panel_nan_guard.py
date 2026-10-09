@@ -82,13 +82,13 @@ def main() -> None:
     vals = np.where(rng.random((N_SERIES, SERIES_LEN)) < 0.35, rng.poisson(4, (N_SERIES, SERIES_LEN)) + 1, 0).astype(
         float
     )
-    non_zero_counts = (vals != 0).sum(axis=1)
-    assert (non_zero_counts >= 3).all(), (
-        f"intermittent_interior_gaps: every series must keep >= 3 non-zero "
-        f"observations, got {non_zero_counts.tolist()}"
-    )
     vals[0, 7] = np.nan
     vals[2, 13] = np.nan
+    non_zero_counts = np.sum((vals != 0) & ~np.isnan(vals), axis=1)
+    assert (non_zero_counts >= 3).all(), (
+        f"intermittent_interior_gaps: every series must keep >= 3 non-missing, non-zero "
+        f"observations after gap injection, got {non_zero_counts.tolist()}"
+    )
     cases["intermittent_interior_gaps"] = {
         "n_series": N_SERIES,
         "series_len": SERIES_LEN,
