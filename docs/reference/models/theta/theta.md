@@ -44,7 +44,7 @@ the crate's internal curvature parameter is fixed.
 for calibration caveats shared across all models.
 
 > **Known issue:** `Theta`'s interval is roughly **2× too wide** at `h ≥ 6` versus the
-> reference R implementation (tracked for Phase 17). This applies to the whole Theta family
+> reference R implementation (fix planned for v0.10.0, Phase 17). This applies to the whole Theta family
 > — `Theta`, `OptimizedTheta`, `DynamicTheta`, `DynamicOptimizedTheta`, `AutoTheta`.
 
 `Theta` accepts exogenous regressors via `ts_forecast_exog_by` and stays itself —

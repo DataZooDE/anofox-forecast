@@ -45,7 +45,7 @@ Trigonometric seasonality, Box-Cox transformation, ARMA errors, Trend and Season
 for calibration caveats shared across all models.
 
 > **Known issue:** `TBATS`'s interval width is **3–8% of** the equivalent `statsforecast`
-> reference width — far too narrow (tracked for Phase 11).
+> reference width — far too narrow (fix planned for v0.10.0, Phase 11).
 
 ## SQL Example
 

@@ -76,7 +76,7 @@ want a specific period. Not needed at all for non-seasonal models (ANN, AAN, AAd
 `confidence_level` — see
 [07-forecasting.md's "Prediction intervals, fitted values and input handling"](../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling)
 for the known seasonal-ETS interval issue (half-width grows `σ√h`/`σ√⌈h/m⌉` rather than
-Hyndman's analytic state-space variance — flatter than it should be, tracked for Phase 11/17).
+Hyndman's analytic state-space variance — flatter than it should be, fix planned for v0.10.0, Phase 11/17).
 
 ## SQL Example
 

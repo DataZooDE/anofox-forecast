@@ -315,7 +315,7 @@ ts_diff_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, 
   differencing. `diff_order=2` gives `y[t] - y[t-2]` (a 2-period lag difference), not the
   true 2nd-order difference `y[t] - 2*y[t-1] + y[t-2]`. If you need true d-th order
   differencing, apply `ts_diff_by` with `diff_order=1` repeatedly, d times.
-  (tracked for Phase 12)
+  (fix planned for v0.10.0, Phase 12)
 
 **Example:**
 ```sql

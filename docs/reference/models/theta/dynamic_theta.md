@@ -47,7 +47,7 @@ today.
 for calibration caveats shared across all models.
 
 > **Known issue:** interval width is roughly **2× too wide** at `h ≥ 6` versus the reference
-> R implementation, same as the rest of the Theta family (tracked for Phase 17).
+> R implementation, same as the rest of the Theta family (fix planned for v0.10.0, Phase 17).
 
 `DynamicTheta` accepts exogenous regressors via `ts_forecast_exog_by` and stays itself —
 `model_name` reports `"DynamicTheta with regressors"`.

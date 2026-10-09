@@ -50,7 +50,7 @@ Automatic Theta method selection. The Theta method decomposes the time series in
 for calibration caveats shared across all models.
 
 > **Known issue:** interval width is roughly **2× too wide** at `h ≥ 6` versus the reference
-> R implementation, same as the rest of the Theta family (tracked for Phase 17).
+> R implementation, same as the rest of the Theta family (fix planned for v0.10.0, Phase 17).
 
 ## SQL Example
 

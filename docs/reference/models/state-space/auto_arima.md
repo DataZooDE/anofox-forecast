@@ -22,7 +22,7 @@ searches `(p, d, q)` orders and seasonal `(P, D, Q, s)` components via the crate
 order search, and reports the SELECTED order in `model_name` (e.g. `"AutoARIMA(2,0,1)"` or
 `"AutoARIMA(1,1,1)(0,1,1)[12]"`). The selected order can differ from R's `auto.arima()` on
 the same series (a different order-search heuristic) — the FITTED order's own forecast still
-matches R within 1% at that order (tracked for Phase 11).
+matches R within 1% at that order (fix planned for v0.10.0, Phase 11).
 
 Supports exogenous variables via `ts_forecast_exog_by`: the crate's own order search runs
 WITH the regressors attached, and `model_name` reports the selected order plus

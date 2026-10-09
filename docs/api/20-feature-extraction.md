@@ -21,7 +21,7 @@ from tsfresh's exact formula: `PACF` lags 3-5, `mean_second_derivative_central`,
 spectral centroid/variance, `agg_linear_trend` rvalue, `skewness`/`kurtosis`,
 `sample_entropy`, `binned_entropy`, Benford-law features, `permutation_entropy`, and
 `number_peaks`' threshold handling. See `docs/api/21-feature-reference.md` for the specific
-formula each one currently uses. (tracked for Phase 14)
+formula each one currently uses. (fix planned for v0.10.0, Phase 14)
 
 ---
 

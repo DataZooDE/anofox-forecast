@@ -108,8 +108,8 @@ All features return `DOUBLE` values. Boolean features use `1.0` (true) / `0.0` (
 | `longest_strike_above_mean` | Length of the longest consecutive run above the mean |
 | `longest_strike_below_mean` | Length of the longest consecutive run below the mean |
 | `number_peaks` | Number of local peaks (higher than both neighbors) |
-| `number_peaks_threshold_1` | Number of local peaks whose **deviation from the series mean** exceeds 1 * std_dev — NOT peak prominence (height above surrounding valleys) (tracked for Phase 14) |
-| `number_peaks_threshold_2` | Number of local peaks whose **deviation from the series mean** exceeds 2 * std_dev — NOT peak prominence (tracked for Phase 14) |
+| `number_peaks_threshold_1` | Number of local peaks whose **deviation from the series mean** exceeds 1 * std_dev — NOT peak prominence (height above surrounding valleys) (fix planned for v0.10.0, Phase 14) |
+| `number_peaks_threshold_2` | Number of local peaks whose **deviation from the series mean** exceeds 2 * std_dev — NOT peak prominence (fix planned for v0.10.0, Phase 14) |
 
 ---
 
@@ -155,8 +155,8 @@ All features return `DOUBLE` values. Boolean features use `1.0` (true) / `0.0` (
 
 | Feature | Description |
 |---------|-------------|
-| `spectral_centroid` | Power-weighted mean bin index over the **full two-sided DFT**, including the DC (k=0) bin and the mirrored negative-frequency half — not restricted to one-sided positive frequencies (tracked for Phase 14) |
-| `spectral_variance` | Power-weighted variance of bin index around `spectral_centroid`, over the same full two-sided DFT including DC (tracked for Phase 14) |
+| `spectral_centroid` | Power-weighted mean bin index over the **full two-sided DFT**, including the DC (k=0) bin and the mirrored negative-frequency half — not restricted to one-sided positive frequencies (fix planned for v0.10.0, Phase 14) |
+| `spectral_variance` | Power-weighted variance of bin index around `spectral_centroid`, over the same full two-sided DFT including DC (fix planned for v0.10.0, Phase 14) |
 
 ---
 
@@ -168,7 +168,7 @@ Computed by splitting the series into chunks (chunk_len = length/10, minimum 2),
 |---------|-------------|
 | `agg_linear_trend_slope` | Slope of linear fit on chunk aggregates |
 | `agg_linear_trend_intercept` | Intercept of linear fit on chunk aggregates |
-| `agg_linear_trend_rvalue` | `sqrt(R²)` of the chunk-level linear fit — **always non-negative** (unsigned magnitude), not a signed correlation coefficient; it cannot distinguish an increasing from a decreasing trend (tracked for Phase 14) |
+| `agg_linear_trend_rvalue` | `sqrt(R²)` of the chunk-level linear fit — **always non-negative** (unsigned magnitude), not a signed correlation coefficient; it cannot distinguish an increasing from a decreasing trend (fix planned for v0.10.0, Phase 14) |
 | `agg_linear_trend_stderr` | Standard error of the slope estimate |
 
 ---
@@ -200,9 +200,9 @@ Partial autocorrelation at lags 1 through 5, computed via Yule-Walker equations.
 |---------|-------------|
 | `partial_autocorrelation_lag1` | Partial autocorrelation at lag 1 |
 | `partial_autocorrelation_lag2` | Partial autocorrelation at lag 2 (Yule-Walker) |
-| `partial_autocorrelation_lag3` | **Currently returns the same lag-2 PACF value as `partial_autocorrelation_lag2`** — the `lag` argument is ignored for any lag > 1 (tracked for Phase 14) |
-| `partial_autocorrelation_lag4` | Same limitation as `partial_autocorrelation_lag3` — currently returns the lag-2 PACF value (tracked for Phase 14) |
-| `partial_autocorrelation_lag5` | Same limitation as `partial_autocorrelation_lag3` — currently returns the lag-2 PACF value (tracked for Phase 14) |
+| `partial_autocorrelation_lag3` | **Currently returns the same lag-2 PACF value as `partial_autocorrelation_lag2`** — the `lag` argument is ignored for any lag > 1 (fix planned for v0.10.0, Phase 14) |
+| `partial_autocorrelation_lag4` | Same limitation as `partial_autocorrelation_lag3` — currently returns the lag-2 PACF value (fix planned for v0.10.0, Phase 14) |
+| `partial_autocorrelation_lag5` | Same limitation as `partial_autocorrelation_lag3` — currently returns the lag-2 PACF value (fix planned for v0.10.0, Phase 14) |
 
 ---
 
@@ -246,7 +246,7 @@ First 10 coefficients of the Discrete Fourier Transform, each with real, imagina
 
 | Feature | Description |
 |---------|-------------|
-| `fft_coefficient_0_real` | DFT coefficient 0, real part — **equals the mean of values** (the DFT is normalized by dividing by n), not the sum (tracked for Phase 14) |
+| `fft_coefficient_0_real` | DFT coefficient 0, real part — **equals the mean of values** (the DFT is normalized by dividing by n), not the sum (fix planned for v0.10.0, Phase 14) |
 | `fft_coefficient_0_imag` | DFT coefficient 0, imaginary part (always 0) |
 | `fft_coefficient_0_abs` | DFT coefficient 0, absolute value |
 | `fft_coefficient_1_real` | DFT coefficient 1, real part |

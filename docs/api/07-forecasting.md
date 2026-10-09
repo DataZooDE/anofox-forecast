@@ -312,7 +312,7 @@ top of the point forecast for calibrated coverage in these cases, or whenever a 
 interval below is flagged as miscalibrated.
 
 **Known per-model calibration issues** (crate `anofox-forecast` 0.15.10; upstream fixes
-tracked for Phase 11, R-interval parity tracked for Phase 17 — these are passed through
+fix planned for v0.10.0, Phase 11, R-interval parity fix planned for v0.10.0, Phase 17 — these are passed through
 unchanged, never silently corrected or hidden):
 
 | Model(s) | Known issue | Tracking |
