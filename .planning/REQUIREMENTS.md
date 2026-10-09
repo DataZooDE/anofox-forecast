@@ -21,7 +21,7 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 - [x] **DEP-01**: anofox-regression bumped `=0.5.3` → `=0.5.15`; multi-scale exogenous OLS matches numpy `lstsq` (fixes coefficient scrambling + O(n²) memory) [H].
 - [x] **DEP-02**: anofox-forecast bumped to ≥0.15.10 (MFLES runaway, panel NaN guards, Laplace leaf fixes) [H].
 - [ ] **DEP-03**: fdars-core bumped 0.3 → 0.47 with features `["parallel"]` (no `linalg`, removing the duplicate anofox-regression 0.4.0); native + WASM builds compile [H].
-- [ ] **DEP-04**: Documented/CI MSRV matches what the dependency tree actually requires [H toolchain].
+- [x] **DEP-04**: Documented/CI MSRV matches what the dependency tree actually requires [H toolchain].
 
 ### Forecast Wrapper (crates/anofox-fcst-core/src/forecast.rs, FFI)
 
@@ -134,7 +134,7 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 | DEP-01 | Phase 9 | Complete |
 | DEP-02 | Phase 9 | Complete |
 | DEP-03 | Phase 15 | Pending |
-| DEP-04 | Phase 9 | Pending |
+| DEP-04 | Phase 9 | Complete |
 | FCST-01 | Phase 10 | Pending |
 | FCST-02 | Phase 10 | Pending |
 | FCST-03 | Phase 10 | Pending |

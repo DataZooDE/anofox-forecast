@@ -4,17 +4,17 @@ milestone: v0.10.0
 milestone_name: Statistical Correctness
 current_phase: 9
 current_phase_name: Reference Fixtures & Safe Dependency Bumps
-status: executing
-stopped_at: Completed 09-02-PLAN.md
-last_updated: "2026-10-09T06:18:30.372Z"
+status: verifying
+stopped_at: Completed 09-03-PLAN.md
+last_updated: "2026-10-09T07:17:44.154Z"
 last_activity: 2026-10-09
 last_activity_desc: Phase 9 execution started
-state_head: 794defc137bc704298ec9b0fd493a8eca30cc904
+state_head: 1a5c80593323920bf1807f0a6bfb6518a84b1175
 progress:
   total_phases: 10
   completed_phases: 0
   total_plans: 3
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-08 — started v0.10.0 Statistical Co
 
 Phase: 9 (Reference Fixtures & Safe Dependency Bumps) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-09 — Phase 9 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -57,6 +57,7 @@ Progress: [░░░░░░░░░░] 0%
 |------|----------|-------|-------|
 | Phase 09 P01 | 15min | 3 tasks | 8 files |
 | Phase 09 P02 | 25min | 3 tasks | 12 files |
+| Phase 09 P03 | 50min | 3 tasks | 20 files |
 
 ## Accumulated Context
 
@@ -74,6 +75,7 @@ Recent decisions affecting current work:
 - [Phase 9]: Package-legitimacy gate for 09-02/09-03 installs (7 packages) pre-approved by human 2026-10-09; recorded verbatim in 09-01-SUMMARY.md
 - [Phase 9]: 09-02: multiscale_ols fixture draws all 8 cases from ONE shared rng(1) stream in a fixed order — verified computationally that only the full chained order reproduces the audit-pinned exog_typical coefficients; an isolated fresh-rng computation does not
 - [Phase 9]: 09-02: constcol is rank-deficient (constant column collapses with intercept) alongside collinear/collinear_big — confirmed via lstsq rank for every case before writing full_rank/note fields
+- [Phase 9]: Phase 9: bumped anofox-regression=0.5.15/anofox-forecast=0.15.10 clean (0 new Cargo.lock crates); MSRV corrected 1.86 -> true 1.89 (trueno AVX-512), enforced by cargo + new CI job — 125-entry pre-bump snapshot proved only MFLES/AutoMFLES/Laplace point forecasts moved; cargo +1.88.0 refusal + +1.89.0 success proved the real MSRV floor
 
 ### Pending Todos
 
@@ -107,7 +109,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-09T06:18:30.353Z
-Stopped at: Completed 09-02-PLAN.md
+Last session: 2026-10-09T07:17:44.134Z
+Stopped at: Completed 09-03-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 9`
