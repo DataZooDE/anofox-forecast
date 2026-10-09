@@ -5,16 +5,16 @@ milestone_name: Statistical Correctness
 current_phase: 10
 current_phase_name: Forecast Wrapper Delegates to Crate Models
 status: executing
-stopped_at: Completed 10-02-PLAN.md
-last_updated: "2026-10-09T13:35:42.427Z"
+stopped_at: Completed 10-03-PLAN.md
+last_updated: "2026-10-09T14:24:18.162Z"
 last_activity: 2026-10-09
 last_activity_desc: Phase 10 execution started
-state_head: c8ab3f8d413a40358512c8d165817d641637cad9
+state_head: 30d74b629795583cf3e9c44a85af4207483cf6d1
 progress:
   total_phases: 10
   completed_phases: 0
   total_plans: 12
-  completed_plans: 5
+  completed_plans: 6
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-08 — started v0.10.0 Statistical Co
 ## Current Position
 
 Phase: 10 (Forecast Wrapper Delegates to Crate Models) — EXECUTING
-Plan: 3 of 9
+Plan: 4 of 9
 Status: Ready to execute
 Last activity: 2026-10-09 — Phase 10 execution started
 
@@ -60,6 +60,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 09 P03 | 50min | 3 tasks | 20 files |
 | Phase 10 P01 | 75min | 3 tasks | 3 files |
 | Phase 10 P02 | 120min | 3 tasks | 14 files |
+| Phase 10 P03 | ~45min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -84,6 +85,9 @@ Recent decisions affecting current work:
 - [Phase 10]: [Phase 10 P02]: arima_order/seasonal_order encoded as NUL-terminated [c_char;32] FFI strings (mirrors seasonal_periods_str); seasonal_order=[0,0,0] is explicitly non-seasonal
 - [Phase 10]: [Phase 10 P02]: Fixed pre-existing FFI n_fitted/residuals length-sharing bug (found in 10-01) with an additive ForecastResult.n_residuals field
 - [Phase 10]: [Phase 10 P02]: FCST-03 SQL test documents two verified crate-internal coincidences (Theta/CrostonClassic both reduce to SES(0.1) in-sample; SES's real MSE ~2090.284 near the old 2090.28 fabrication) rather than loosening blindly
+- [Phase 10]: AutoETS catch_unwind fallback deleted outright (InvalidInput naming AutoETS) after confirming anofox-forecast 0.15.10 no longer panics on constant series
+- [Phase 10]: ForecastOptionsExog -> ForecastOptions conversion lets forecast_with_exog's no-regressor branch delegate to forecast() itself instead of maintaining a second hand-written dispatch
+- [Phase 10]: build_forecaster gained an n_obs parameter so SeasonalWindowAverage ensemble members compute n_seasons adaptively instead of a hard-coded 2
 
 ### Pending Todos
 
@@ -123,7 +127,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-09T13:35:33.642Z
-Stopped at: Completed 10-02-PLAN.md
+Last session: 2026-10-09T14:24:18.134Z
+Stopped at: Completed 10-03-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 9`
