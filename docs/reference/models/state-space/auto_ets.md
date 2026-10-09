@@ -16,15 +16,19 @@ SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoETS', horizon, para
 
 Automatic Exponential Smoothing State Space model selection. Automatically selects the best ETS model (Error, Trend, Seasonal components) based on information criteria.
 
+`'ETS'` without a `model` spec runs this exact same selection and reports the result under
+the `ETS` name — see [ets.md](ets.md).
+
 > **Note:** When both `seasonal_period` and `seasonal_periods` are omitted, `ts_forecast_by`
-> (and `ts_cv_forecast_by`) auto-detects the seasonal period internally (`detect_seasonality`,
-> using the first detected period; 1 if none found). Passing `seasonal_period` explicitly via
-> `ts_detect_periods_by` is still recommended for control and reproducibility — `ts_forecast_agg`
-> does NOT auto-detect.
+> (and `ts_cv_forecast_by`) auto-detects the seasonal period internally (`detect_seasonality`);
+> a period that can't be detected falls back to non-seasonal (AutoETS can run non-seasonally).
+> Passing `seasonal_period` explicitly via `ts_detect_periods_agg` is still recommended for
+> control and reproducibility — `ts_forecast_agg` does NOT auto-detect.
 >
-> If the underlying crate's ETS model search errors out, AutoETS currently falls back silently
-> to HoltWinters, Holt, or SES while the output is still labelled `AutoETS`.
-> (being corrected in v0.10.0, Phase 10)
+> A crate fit/predict failure or panic during the ETS model search is now a hard SQL error
+> naming `AutoETS` — **never** a silent HoltWinters/Holt/SES substitution reported under the
+> `AutoETS` name. (anofox-forecast 0.15.10 no longer panics on the constant-series case this
+> fallback originally existed for.)
 
 ## Parameters
 
@@ -44,20 +48,22 @@ Automatic Exponential Smoothing State Space model selection. Automatically selec
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 
-`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band, not a
-model-based interval and not statistically calibrated. For calibrated coverage, use conformal
-prediction intervals (see `docs/api/11-conformal-prediction.md`) on top of the point forecast.
-(being corrected in v0.10.0, Phase 10)
+`yhat_lower` / `yhat_upper` are the crate `AutoETS` model's own prediction interval at
+`confidence_level` — see
+[07-forecasting.md's "Prediction intervals, fitted values and input handling"](../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling)
+for the known seasonal-ETS interval issue and calibration caveats shared across all models.
 
 ## SQL Example
 
 ```sql
--- Step 1: Detect seasonality
-SELECT * FROM ts_detect_periods_by('daily_sales', product_id, date, quantity, MAP{});
+-- Step 1: Detect seasonality (aggregate form — the _by table-macro form has a known bug
+-- that returns an all-NULL row; see docs/api/07-forecasting.md's Handling Seasonality note)
+SELECT product_id, round(ts_detect_periods_agg(date, quantity, 'fft').primary_period) AS primary_period
+FROM daily_sales GROUP BY product_id;
 -- Returns: primary_period = 7 (weekly)
 
 -- Step 2: Forecast with detected seasonal period
-SELECT * FROM ts_forecast_by(
+SELECT DISTINCT model_name FROM ts_forecast_by(
     'daily_sales',
     product_id,
     date,
@@ -68,8 +74,8 @@ SELECT * FROM ts_forecast_by(
     MAP{'seasonal_period': '7'}
 );
 
--- Non-seasonal data (no seasonal_period needed)
-SELECT * FROM ts_forecast_by(
+-- Non-seasonal data (no seasonal_period needed — AutoETS can also run non-seasonally)
+SELECT DISTINCT model_name FROM ts_forecast_by(
     'daily_sales',
     product_id,
     date,
@@ -80,7 +86,7 @@ SELECT * FROM ts_forecast_by(
 );
 
 -- With custom confidence level
-SELECT * FROM ts_forecast_by(
+SELECT DISTINCT model_name FROM ts_forecast_by(
     'daily_sales',
     product_id,
     date,

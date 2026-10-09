@@ -41,3 +41,10 @@ docs/reference/models/intermittent/croston_classic.md	SELECT * FROM ts_forecast(
 docs/reference/models/intermittent/croston_optimized.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'CrostonOptimized', horizon, params);
 docs/reference/models/intermittent/croston_sba.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'CrostonSBA', horizon, params);
 docs/reference/models/intermittent/adida.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'ADIDA', horizon, params);
+docs/reference/models/state-space/arima.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'ARIMA', horizon, params);
+docs/reference/models/state-space/arima.md	SELECT * FROM ts_forecast_by('sales_data', product_id, date, revenue, 'ARIMA', 7, '1d', MAP{});
+docs/reference/models/state-space/auto_arima.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoARIMA', horizon, params);
+docs/reference/models/state-space/ets.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'ETS', horizon, params);
+docs/reference/models/state-space/auto_ets.md	SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'AutoETS', horizon, frequency, params);
+docs/reference/models/state-space/kalman.md	SELECT * FROM ts_forecast_by(
+docs/reference/models/state-space/kalman.md	params := MAP{'kalman_model': 'local_linear_trend'}

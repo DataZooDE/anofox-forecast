@@ -1,0 +1,14 @@
+docs/reference/models/state-space/arima.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'ARIMA', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/state-space/arima.md	1	SYNOPSIS	SELECT * FROM ts_forecast_by('sales_data', product_id, date, revenue, 'ARIMA', 7, '1d', MAP{});	Catalog Error: Table with name sales_data does not exist!
+docs/reference/models/state-space/arima.md	2	PASS	CREATE OR REPLACE TABLE daily_sales AS	
+docs/reference/models/state-space/auto_arima.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoARIMA', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/state-space/auto_arima.md	1	PASS	CREATE OR REPLACE TABLE daily_sales AS	
+docs/reference/models/state-space/ets.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'ETS', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/state-space/ets.md	1	PASS	CREATE OR REPLACE TABLE daily_sales AS	
+docs/reference/models/state-space/auto_ets.md	0	SYNOPSIS	SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'AutoETS', horizon, frequency,	Catalog Error: Table with name table does not exist!
+docs/reference/models/state-space/auto_ets.md	1	PASS	SELECT product_id, round(ts_detect_periods_agg(date, quantity, 'fft').primary_period) AS primary_per	
+docs/reference/models/state-space/kalman.md	0	SYNOPSIS	SELECT * FROM ts_forecast_by(	Catalog Error: Table with name table does not exist!
+docs/reference/models/state-space/kalman.md	1	SYNOPSIS	params := MAP{'kalman_model': 'local_linear_trend'}	Parser Error: syntax error at or near "params"
+docs/reference/models/state-space/kalman.md	2	PASS	CREATE OR REPLACE TABLE sales AS	
+docs/reference/models/state-space/kalman.md	3	PASS	SELECT	
+docs/reference/models/state-space/kalman.md	4	SYNOPSIS	SELECT * FROM ts_forecast_by(	Invalid Input Error: Invalid parameter 'kalman_model' = 'local_lvl': expected local_level or local_linear_trend
