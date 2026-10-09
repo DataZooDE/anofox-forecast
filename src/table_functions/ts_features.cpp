@@ -13,131 +13,15 @@
 
 namespace duckdb {
 
-static void ExtractListAsDouble(Vector &list_vec, idx_t row_idx, vector<double> &out_values) {
-    auto list_data = ListVector::GetData(list_vec);
-    auto &list_entry = list_data[row_idx];
-
-    auto &child_vec = ListVector::GetEntry(list_vec);
-    auto child_data = FlatVector::GetData<double>(child_vec);
-    auto &child_validity = FlatVector::Validity(child_vec);
-
-    out_values.clear();
-    out_values.reserve(list_entry.length);
-
-    for (idx_t i = 0; i < list_entry.length; i++) {
-        idx_t child_idx = list_entry.offset + i;
-        if (child_validity.RowIsValid(child_idx)) {
-            out_values.push_back(child_data[child_idx]);
-        }
-    }
-}
-
 // ============================================================================
-// ts_features - Extract tsfresh-compatible features (scalar version)
-// Takes DOUBLE[] and returns STRUCT with feature columns
+// ts_features - the scalar-function body that lived here (TsFeaturesFunction)
+// was never reachable from SQL: RegisterTsFeaturesFunction below is a no-op
+// (C++ extension exposes ts_features only as the aggregate registered in
+// ts_features_agg.cpp). Deleted per Phase 12 D-01/D-11 plan 12-03 — its
+// private ExtractListAsDouble/GetScalarFeatureNames/GetScalarFeaturesResultType
+// helpers were used only by this dead body. RegisterTsFeaturesFunction itself
+// is kept as a no-op (plan 12-07 removes no-op registrations).
 // ============================================================================
-
-// Get the list of feature names from Rust core for STRUCT return type
-static vector<string> GetScalarFeatureNames() {
-    vector<string> names;
-
-    // Get feature names from FFI
-    FeaturesResult result;
-    memset(&result, 0, sizeof(result));
-    AnofoxError error;
-
-    // Call with a simple series to get feature names
-    double dummy[] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0};
-    bool success = anofox_ts_features(dummy, 10, &result, &error);
-
-    if (success && result.feature_names && result.n_features > 0) {
-        for (size_t i = 0; i < result.n_features; i++) {
-            if (result.feature_names[i]) {
-                names.push_back(string(result.feature_names[i]));
-            }
-        }
-        anofox_free_features_result(&result);
-    }
-
-    // If FFI call failed, return a minimal set
-    if (names.empty()) {
-        names = {"length", "mean", "std_dev", "min", "max", "median"};
-    }
-
-    return names;
-}
-
-static LogicalType GetScalarFeaturesResultType() {
-    // Build a STRUCT with all feature names as columns
-    child_list_t<LogicalType> children;
-
-    auto feature_names = GetScalarFeatureNames();
-    for (const auto &name : feature_names) {
-        children.push_back(make_pair(name, LogicalType(LogicalTypeId::DOUBLE)));
-    }
-
-    return LogicalType::STRUCT(std::move(children));
-}
-
-static void TsFeaturesFunction(DataChunk &args, ExpressionState &state, Vector &result) {
-    auto &list_vec = args.data[0];
-    idx_t count = args.size();
-
-    result.SetVectorType(VectorType::FLAT_VECTOR);
-
-    // Get feature names for struct field lookup
-    static auto feature_names = GetScalarFeatureNames();
-
-    for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(list_vec, row_idx)) {
-            FlatVector::SetNull(result, row_idx, true);
-            continue;
-        }
-
-        vector<double> values;
-        ExtractListAsDouble(list_vec, row_idx, values);
-
-        FeaturesResult feat_result;
-        memset(&feat_result, 0, sizeof(feat_result));
-        AnofoxError error;
-
-        bool success = anofox_ts_features(
-            values.data(),
-            values.size(),
-            &feat_result,
-            &error
-        );
-
-        if (!success) {
-            FlatVector::SetNull(result, row_idx, true);
-            continue;
-        }
-
-        // Build name to value map for quick lookup
-        std::unordered_map<string, double> feature_map;
-        for (size_t i = 0; i < feat_result.n_features; i++) {
-            if (feat_result.feature_names[i]) {
-                feature_map[feat_result.feature_names[i]] = feat_result.features[i];
-            }
-        }
-
-        // Populate the STRUCT fields
-        auto &struct_entries = StructVector::GetEntries(result);
-        for (size_t j = 0; j < feature_names.size() && j < struct_entries.size(); j++) {
-            auto &child_vec = *struct_entries[j];
-            auto child_data = FlatVector::GetData<double>(child_vec);
-
-            auto it = feature_map.find(feature_names[j]);
-            if (it != feature_map.end()) {
-                child_data[row_idx] = it->second;
-            } else {
-                child_data[row_idx] = std::numeric_limits<double>::quiet_NaN();
-            }
-        }
-
-        anofox_free_features_result(&feat_result);
-    }
-}
 
 void RegisterTsFeaturesFunction(ExtensionLoader &loader) {
     // No-op: C++ extension only has ts_features as aggregate function

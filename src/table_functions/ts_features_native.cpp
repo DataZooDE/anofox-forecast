@@ -1,5 +1,6 @@
 #include "ts_features_native.hpp"
 #include "anofox_fcst_ffi.h"
+#include "ts_list_marshal.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 #include <algorithm>
@@ -9,6 +10,7 @@
 #include <mutex>
 #include <atomic>
 #include <thread>
+#include <tuple>
 
 namespace duckdb {
 
@@ -80,11 +82,20 @@ struct TsFeaturesGroupData {
     Value group_value;
     vector<int64_t> timestamps;
     vector<double> values;
+    // Phase 12 D-11: a NULL value is kept (valid=false, placeholder 0.0)
+    // rather than written as NaN/dropped, so ApplySingleSeriesPolicy in
+    // Finalize can trim edges / reject interior NULLs exactly like
+    // ts_features_agg.
+    vector<bool> valid;
 };
 
 struct TsFeaturesFeatureResult {
     Value group_value;
     vector<double> features;
+    // Phase 12 D-04: true when nothing remained after the single-series gate
+    // trimmed the group (e.g. all-NULL) — features are emitted as SQL NULL,
+    // not NaN.
+    bool all_null = false;
 };
 
 // ============================================================================
@@ -217,6 +228,7 @@ static OperatorResultType TsFeaturesNativeInOut(
         string group_key;
         int64_t ts;
         double value;
+        bool value_valid;
     };
     vector<LocalRow> local_rows;
 
@@ -243,7 +255,8 @@ static OperatorResultType TsFeaturesNativeInOut(
             lr.ts = date_val.GetValue<int64_t>();
         }
 
-        lr.value = value_val.IsNull() ? std::numeric_limits<double>::quiet_NaN() : value_val.GetValue<double>();
+        lr.value_valid = !value_val.IsNull();
+        lr.value = lr.value_valid ? value_val.GetValue<double>() : 0.0;
         local_rows.push_back(std::move(lr));
     }
 
@@ -263,6 +276,7 @@ static OperatorResultType TsFeaturesNativeInOut(
             auto &group = it->second;
             group.timestamps.push_back(lr.ts);
             group.values.push_back(lr.value);
+            group.valid.push_back(lr.value_valid);
         }
     }
 
@@ -311,16 +325,42 @@ static OperatorFinalizeResultType TsFeaturesNativeFinalize(
                 continue;
             }
 
-            // Sort by timestamp
-            vector<pair<int64_t, double>> sorted_pairs;
+            // Sort (timestamp, value, valid) triples together by timestamp
+            // (D-11: validity must stay aligned with the values it describes).
+            vector<std::tuple<int64_t, double, bool>> sorted_triples;
+            sorted_triples.reserve(group.timestamps.size());
             for (size_t i = 0; i < group.timestamps.size(); i++) {
-                sorted_pairs.push_back({group.timestamps[i], group.values[i]});
+                sorted_triples.push_back({group.timestamps[i], group.values[i], group.valid[i]});
             }
-            std::sort(sorted_pairs.begin(), sorted_pairs.end());
+            std::sort(sorted_triples.begin(), sorted_triples.end(),
+                      [](const std::tuple<int64_t, double, bool> &a, const std::tuple<int64_t, double, bool> &b) {
+                          return std::get<0>(a) < std::get<0>(b);
+                      });
 
             vector<double> sorted_values;
-            for (const auto& p : sorted_pairs) {
-                sorted_values.push_back(p.second);
+            sorted_values.reserve(sorted_triples.size());
+            size_t validity_words = (sorted_triples.size() + 63) / 64;
+            vector<uint64_t> sorted_validity(validity_words, 0);
+            for (size_t i = 0; i < sorted_triples.size(); i++) {
+                sorted_values.push_back(std::get<1>(sorted_triples[i]));
+                if (std::get<2>(sorted_triples[i])) {
+                    sorted_validity[i / 64] |= (1ULL << (i % 64));
+                }
+            }
+
+            TsFeaturesFeatureResult result;
+            result.group_value = group.group_value;
+            result.features.resize(feature_names.size(), std::numeric_limits<double>::quiet_NaN());
+
+            // Phase 12 D-03/D-04/D-11: Rust single-series gate — trims
+            // leading/trailing NULLs, errors on an interior NULL naming its
+            // position (propagates as an SQL error), NULL feature values if
+            // nothing remains after trimming — same policy as ts_features_agg.
+            if (!ApplySingleSeriesPolicy(sorted_values, sorted_validity, "ts_features_by")) {
+                result.features.assign(feature_names.size(), std::numeric_limits<double>::quiet_NaN());
+                result.all_null = true;
+                gstate.results.push_back(std::move(result));
+                continue;
             }
 
             // Call feature extraction
@@ -334,10 +374,6 @@ static OperatorFinalizeResultType TsFeaturesNativeFinalize(
                 &feat_result,
                 &error
             );
-
-            TsFeaturesFeatureResult result;
-            result.group_value = group.group_value;
-            result.features.resize(feature_names.size(), std::numeric_limits<double>::quiet_NaN());
 
             if (success && feat_result.n_features > 0) {
                 // Build name to value map for quick lookup
@@ -383,9 +419,15 @@ static OperatorFinalizeResultType TsFeaturesNativeFinalize(
         // Set group value (column 0 = id)
         output.SetValue(0, output_idx, result.group_value);
 
-        // Set feature values (columns 1 to N)
+        // Set feature values (columns 1 to N). Phase 12 D-04: an all_null
+        // result (nothing left after the single-series gate trimmed the
+        // group) emits SQL NULL, not NaN.
         for (size_t i = 0; i < result.features.size() && i + 1 < output.ColumnCount(); i++) {
-            output.SetValue(i + 1, output_idx, Value::DOUBLE(result.features[i]));
+            if (result.all_null) {
+                output.SetValue(i + 1, output_idx, Value(LogicalType::DOUBLE));
+            } else {
+                output.SetValue(i + 1, output_idx, Value::DOUBLE(result.features[i]));
+            }
         }
 
         output_idx++;
