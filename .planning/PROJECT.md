@@ -106,7 +106,7 @@ Deferred from v0.7.0 (candidates for a future milestone):
 
 ## Constraints
 
-- **Tech stack**: DuckDB v1.4.3+ extension; Rust 1.86+ core via FFI; C++17. No new languages.
+- **Tech stack**: DuckDB v1.4.3+ extension; Rust 1.89+ core via FFI; C++17. No new languages.
 - **Architecture**: Parallelism stays at the DuckDB GROUP BY / scalar-function layer — no custom threading or table-in/table-out (established project rule).
 - **Dependencies**: v0.10.0 bumps anofox-regression → 0.5.15, anofox-forecast → ≥0.15.10 (plus upstream correctness fixes via branch + PR; user publishes releases; interim `[patch]` git/path dependency allowed on the fix branch only), fdars-core → 0.47.
 - **Correctness**: Statistics are computed in Rust only; every statistical output is checked against a reference implementation (R / scipy / statsmodels / tsfresh) via checked-in fixtures — length-only tests do not count.

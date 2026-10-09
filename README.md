@@ -142,7 +142,7 @@ git clone --recurse-submodules https://github.com/DataZooDE/anofox-forecast.git
 cd anofox-forecast
 
 # Build the extension (choose one)
-# This step requires Rust toolchain and CMake
+# This step requires Rust >= 1.89 (workspace rust-version) and CMake
 make release -j$(nproc)      # With Make OR
 GEN=ninja make release       # With Ninja (faster)
 

@@ -12,7 +12,7 @@ This milestone extends that SQL surface to reach crate capabilities that are cur
 
 ### Constraints
 
-- **Tech stack**: DuckDB v1.4.3+ extension; Rust 1.86+ core via FFI; C++17. No new languages.
+- **Tech stack**: DuckDB v1.4.3+ extension; Rust 1.89+ core via FFI; C++17. No new languages.
 - **Architecture**: Parallelism stays at the DuckDB GROUP BY / scalar-function layer — no custom threading or table-in/table-out (established project rule).
 - **Dependencies**: Stay on `anofox-forecast` 0.15.3 unless a required capability is missing; global-model steady-state ARIMA optimization tracked separately (awaiting 0.5.4-class improvements).
 - **Compatibility**: Must build and load across Linux/macOS/Windows and WASM; OpenSSL stays statically linked; verify clean-machine load (not just green CI).
@@ -68,14 +68,14 @@ This milestone extends that SQL surface to reach crate capabilities that are cur
 - CI environment detection (auto-disable telemetry): Checks for `CI`, `GITHUB_ACTIONS`, `GITLAB_CI`, `CIRCLECI`, `TRAVIS`, `JENKINS_URL`, `BUILDKITE`, `TEAMCITY_VERSION`, `TF_BUILD`, `CODEBUILD_BUILD_ID`
 - Telemetry opt-in: `DATAZOO_DISABLE_TELEMETRY` env var respected; config setting `anofox_telemetry_enabled` (default: true)
 - `CMakeLists.txt` - Extension compilation with Corrosion FFI integration
-- `Cargo.toml` - Rust workspace with patched argmin (stable Rust 1.86 compat, `DataZooDE/argmin@fix/stable-rust-compat`)
+- `Cargo.toml` - Rust workspace with patched argmin (`DataZooDE/argmin@fix/stable-rust-compat`; the patch predates the 1.89 MSRV and is retained)
 - `Makefile` - Convenience targets for local development (rust, rust_debug, rust_test, fmt, check, header, benchmark)
 - `extension_config.cmake` - DuckDB extension loader with WASM-specific `LINKED_LIBS` configuration
 
 ## Platform Requirements
 
 - CMake 3.20+
-- Rust 1.86+ (stable, due to argmin patch)
+- Rust 1.89+ (workspace `rust-version`; floor set by trueno's AVX-512 code, stabilised in Rust 1.89)
 - C++ compiler supporting C++17 (GCC 14+ preferred on Linux due to symbol deduplication)
 - Python 3.11-3.12
 - DuckDB development headers (via submodule or v1.4.3 fetch)

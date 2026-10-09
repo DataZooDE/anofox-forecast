@@ -134,7 +134,7 @@
 
 **argmin Patch (Stable Rust Compatibility):**
 - Risk: Workspace patches `argmin` to use modulo operations instead of unstable `is_multiple_of` (Rust 1.87+). If upstream adopts stable, patch becomes unnecessary but not harmful.
-- Impact: Patch enables Rust 1.86 compatibility; without it, build fails on older toolchains.
+- Impact: The workspace floor is now 1.89 (`rust-version`, set by trueno's AVX-512 code, transitive via anofox-forecast) — the argmin patch no longer sets the MSRV and can be dropped in a dedicated change once upstream argmin adopts the stable `is_multiple_of`.
 - Migration plan: Monitor upstream argmin releases; remove patch once `is_multiple_of` stabilizes or is no longer used.
 
 **extension-ci-tools Submodule (v1.4-andium and v1.5-variegata):**
