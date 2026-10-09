@@ -8,8 +8,8 @@ use crate::seasonality::detect_seasonality;
 use anofox_forecast::core::{CalendarAnnotations, TimeSeries};
 use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig, ARIMA, SARIMA};
 use anofox_forecast::models::baseline::{
-    SeasonalNaive as SeasonalNaiveModel, SeasonalWindowAverage as SeasonalWindowAverageModel,
-    SimpleMovingAverage,
+    Naive, SeasonalNaive as SeasonalNaiveModel,
+    SeasonalWindowAverage as SeasonalWindowAverageModel, SimpleMovingAverage,
 };
 use anofox_forecast::models::exponential::{
     AutoETS, AutoETSConfig, ETSSpec, HoltLinearTrend, HoltWinters as HoltWintersModel, ModelPool,
@@ -982,80 +982,59 @@ pub fn forecast_with_exog(
         1
     };
 
-    // Check if requested model supports exogenous variables
-    let supports_exog = matches!(
-        options.model,
-        ModelType::ARIMA
-            | ModelType::AutoARIMA
-            | ModelType::OptimizedTheta
-            | ModelType::DynamicTheta
-            | ModelType::MFLES
-            | ModelType::AutoMFLES
-    );
-
     let extended_horizon = options.horizon + prep.trail_trim;
-    let aligned_exog = options.exog.as_ref().map(|exog| align_exog(&prep, exog));
+    let level = options.confidence_level;
 
-    // Generate forecast based on model
-    // For models that support exog with exog data provided, use exogenous-aware forecasting
-    // Don't do auto-selection when using exog - use the requested model family
-    if !(supports_exog && aligned_exog.is_some()) {
-        // No exog data, or a model outside the wrapper exog list (native
-        // crate exog routing for the rest, D-10, is plan 10-04's scope) —
-        // delegate to `forecast()` itself (FCST-05) rather than a second,
-        // hand-maintained dispatch (`forecast_with_model`, deleted): every
-        // option (ets_spec, garch_p/q, kalman_model, window,
-        // seasonal_periods, model_pool, laplace options, ensemble options,
-        // arima orders, confidence level, include flags) is honoured
-        // exactly like the non-exog surface because it IS that surface.
-        // `forecast()` runs its own prepare_series/finalize_output on the
-        // ORIGINAL `values`, so this returns directly.
+    // Align the caller's regressors onto the trimmed/trail-extended range
+    // (D-12), then policy-process them (D-10/D-12, FCST-08): NaN/±Inf
+    // handling, historical-NaN interpolation, future-NULL rejection, and
+    // dropping any regressor that is constant in history (0 effect by
+    // construction). `None` here means every regressor was dropped (or none
+    // were given) — delegate to `forecast()` itself exactly like the
+    // no-exog case (FCST-05): every option (ets_spec, garch_p/q,
+    // kalman_model, window, seasonal_periods, model_pool, laplace/ensemble
+    // options, arima orders, confidence level, include flags) is honoured
+    // identically to the non-exog surface because it IS that surface, never
+    // a second hand-maintained dispatch.
+    let aligned_exog = options.exog.as_ref().map(|exog| align_exog(&prep, exog));
+    let prepared_exog = match aligned_exog {
+        Some(ref exog) => prepare_exog_regressors(exog)?,
+        None => None,
+    };
+
+    let Some(exog) = prepared_exog else {
         let opts_without_exog: ForecastOptions = options.into();
         return forecast(values, &opts_without_exog);
+    };
+
+    // At least one real (non-constant) regressor remains: the requested
+    // model must be one the crate itself can fit with regressors attached
+    // (D-04 spirit) — never a silent ignore of the regressors.
+    if !exog_capable(options.model) {
+        return Err(ForecastError::InvalidInput(format!(
+            "model '{}' does not support exogenous regressors; exog-capable models: \
+             AutoARIMA, ARIMA, Naive, Theta, OptimizedTheta, DynamicTheta, \
+             DynamicOptimizedTheta, AutoTheta, ETS, AutoETS, MFLES, MSTL — or forecast \
+             without regressors",
+            options.model.name()
+        )));
     }
 
-    let level = options.confidence_level;
-    let exog = aligned_exog.as_ref().expect("checked above");
-    let mut result = match options.model {
-        // D-10 (FCST-05, plan 10-04 Task 1): AutoARIMA runs the crate's OWN
-        // exog-aware order search (CalendarAnnotations attached to the
-        // TimeSeries + predict_with_exog_intervals) instead of the wrapper
-        // OLS-on-residuals hack below — the selected order is real, not
-        // guessed. Plain `ARIMA` (explicit order) and the other
-        // exog-capable models are generalised onto the same crate-native
-        // path in plan 10-04 Task 2; until then they keep using the wrapper
-        // OLS functions immediately below.
-        ModelType::AutoARIMA => {
-            forecast_autoarima_crate_exog(&prep.values, extended_horizon, period, level, exog)
-        }
-        ModelType::ARIMA => forecast_arima_with_exog(&prep.values, extended_horizon, exog),
-        ModelType::OptimizedTheta | ModelType::DynamicTheta | ModelType::AutoTheta => {
-            forecast_theta_with_exog(&prep.values, extended_horizon, exog)
-        }
-        ModelType::MFLES | ModelType::AutoMFLES => {
-            let periods = if !options.seasonal_periods.is_empty() {
-                &options.seasonal_periods
-            } else if period > 1 {
-                &vec![period]
-            } else {
-                &vec![]
-            };
-            forecast_mfles_with_exog(&prep.values, extended_horizon, periods, exog)
-        }
-        _ => {
-            // Shouldn't happen due to supports_exog check, but fallback to ARIMA with exog
-            forecast_arima_with_exog(&prep.values, extended_horizon, exog)
-        }
-    }?;
+    let mut result = forecast_crate_exog(
+        &prep.values,
+        options,
+        period,
+        extended_horizon,
+        level,
+        &exog,
+    )?;
 
-    // Use the model name from the result (e.g., "ARIMAX" for exog) if available,
-    // otherwise use the model enum name.
     if result.model_name.is_empty() {
         result.model_name = options.model.name().to_string();
     }
 
     // Prediction intervals, fitted values, residuals, and MSE all come straight from
-    // whichever forecast_*_with_exog function ran above (D-01/D-03/D-11) — never
+    // whichever crate model `forecast_crate_exog` fitted (D-01/D-03/D-11) — never
     // recomputed here. See `forecast()` for the matching non-exog policy, finalize_output,
     // and D-12 trailing-NULL alignment rationale.
     Ok(finalize_output(
@@ -1067,10 +1046,415 @@ pub fn forecast_with_exog(
     ))
 }
 
+/// Models whose crate `Forecaster` implementation overrides `supports_exog()`
+/// to `true` in anofox-forecast 0.15.10 (D-10, FCST-05) — checked against the
+/// crate source (`grep -rl 'fn supports_exog'`). A model NOT in this list
+/// given at least one non-constant regressor is a hard `InvalidInput` (D-04
+/// spirit), never a silent ignore of the regressors.
+fn exog_capable(model: ModelType) -> bool {
+    matches!(
+        model,
+        ModelType::Naive
+            | ModelType::ARIMA
+            | ModelType::AutoARIMA
+            | ModelType::Theta
+            | ModelType::OptimizedTheta
+            | ModelType::DynamicTheta
+            | ModelType::DynamicOptimizedTheta
+            | ModelType::AutoTheta
+            | ModelType::ETS
+            | ModelType::AutoETS
+            | ModelType::MFLES
+            | ModelType::AutoMFLES
+            | ModelType::MSTL
+            | ModelType::AutoMSTL
+    )
+}
+
+/// D-10/D-12 (FCST-05/08): policy-process a caller's (already trimmed/
+/// trail-extended, see `align_exog`) regressors before handing them to the
+/// crate's own exog-aware fit. NaN ≡ missing (the series-wide D-11
+/// convention, applied per-regressor): an all-missing historical regressor,
+/// a future NULL, or any ±Inf value is a hard `InvalidInput` naming the
+/// regressor (and step, for a future NULL); interior/edge historical gaps
+/// are filled via `fill_nulls_interpolate`. A regressor whose INTERPOLATED
+/// historical values are constant gets a 0 effect by construction: it is
+/// dropped (both its historical and future columns) before the crate ever
+/// sees it — a documented consequence of the planner's discretion (avoids a
+/// singular normal-equation system in the crate's own OLS pre-regression),
+/// and the reason a dropped regressor's future values are never checked for
+/// NULLs below. Returns `None` when every regressor was dropped (or the
+/// input had none) — the caller then delegates to `forecast()` (no `" with
+/// regressors"` suffix, D-05's "ETS"-without-spec-style un-prefixed naming
+/// policy does not apply here: this is "no regressors at all", not a
+/// selection).
+fn prepare_exog_regressors(exog: &ExogenousData) -> Result<Option<ExogenousData>> {
+    let mut historical = Vec::new();
+    let mut future = Vec::new();
+
+    for (i, hist) in exog.historical.iter().enumerate() {
+        let fut = &exog.future[i];
+
+        if let Some(idx) = hist.iter().position(|v| v.is_infinite()) {
+            return Err(ForecastError::InvalidInput(format!(
+                "regressor {i} contains an infinite value (historical index {idx})"
+            )));
+        }
+        if let Some(idx) = fut.iter().position(|v| v.is_infinite()) {
+            return Err(ForecastError::InvalidInput(format!(
+                "regressor {i} contains an infinite value (future step {idx})"
+            )));
+        }
+
+        if !hist.iter().any(|v| !v.is_nan()) {
+            return Err(ForecastError::InvalidInput(format!(
+                "regressor {i} has no non-NULL historical value"
+            )));
+        }
+
+        let as_opt: Vec<Option<f64>> = hist
+            .iter()
+            .map(|v| if v.is_nan() { None } else { Some(*v) })
+            .collect();
+        let interpolated = fill_nulls_interpolate(&as_opt);
+
+        let min = interpolated.iter().copied().fold(f64::INFINITY, f64::min);
+        let max = interpolated
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let is_constant = (max - min) <= 1e-12 * 1.0_f64.max(max.abs());
+        if is_constant {
+            continue;
+        }
+
+        if let Some(h) = fut.iter().position(|v| v.is_nan()) {
+            return Err(ForecastError::InvalidInput(format!(
+                "future value of regressor {i} at step {h} is NULL"
+            )));
+        }
+
+        historical.push(interpolated);
+        future.push(fut.clone());
+    }
+
+    if historical.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(ExogenousData { historical, future }))
+    }
+}
+
+/// Fit a crate model that already carries its attached regressors (via
+/// `TimeSeries::set_calendar`) and predict with `predict_with_exog_intervals`
+/// (D-10). `name_fn` runs on the POST-FIT model so auto-selection types
+/// (AutoARIMA/AutoTheta/AutoETS/'ETS' without a spec) can report what they
+/// actually selected; it returns the BARE model name — this helper appends
+/// `" with regressors"` exactly once, so every call site's `name_fn` is
+/// identical in shape to its non-exog naming counterpart.
+fn fit_predict_exog<M: Forecaster>(
+    mut model: M,
+    ts: &TimeSeries,
+    horizon: usize,
+    future_map: &HashMap<String, Vec<f64>>,
+    level: f64,
+    label: &str,
+    name_fn: impl FnOnce(&M) -> String,
+) -> Result<ForecastOutput> {
+    model.fit(ts).map_err(|e| {
+        ForecastError::ComputationError(format!("{label} (with regressors) fit failed: {e}"))
+    })?;
+    let forecast = model
+        .predict_with_exog_intervals(horizon, future_map, level)
+        .map_err(|e| {
+            ForecastError::ComputationError(format!(
+                "{label} (with regressors) predict failed: {e}"
+            ))
+        })?;
+
+    let base_name = name_fn(&model);
+    let point = forecast.primary().to_vec();
+    let (lower, upper) = extract_bounds(&forecast, point.len());
+
+    Ok(ForecastOutput {
+        point,
+        lower,
+        upper,
+        fitted: model.fitted_values().map(|v| v.to_vec()),
+        residuals: model.residuals().map(|v| v.to_vec()),
+        model_name: format!("{base_name} with regressors"),
+        aic: None,
+        bic: None,
+        mse: None,
+    })
+}
+
+/// Dispatch an exog-capable `ModelType` to the crate's OWN exog-aware fit
+/// (D-10, FCST-05): attach every validated/filtered regressor to the
+/// `TimeSeries` via `CalendarAnnotations`, construct the SAME crate model
+/// the non-exog path would (same `new_*` shared constructors where they
+/// exist), fit, and predict with `predict_with_exog_intervals`. Only
+/// reachable with at least one non-constant regressor and an
+/// `exog_capable(options.model)` model — see `forecast_with_exog`.
+fn forecast_crate_exog(
+    values: &[f64],
+    options: &ForecastOptionsExog,
+    period: usize,
+    horizon: usize,
+    level: f64,
+    exog: &ExogenousData,
+) -> Result<ForecastOutput> {
+    let mut ts = make_timeseries(values)?;
+    let mut calendar = CalendarAnnotations::new();
+    for (i, hist) in exog.historical.iter().enumerate() {
+        calendar = calendar.with_regressor(regressor_name(i), hist.clone());
+    }
+    ts.set_calendar(calendar);
+
+    let future_map: HashMap<String, Vec<f64>> = exog
+        .future
+        .iter()
+        .enumerate()
+        .map(|(i, fut)| (regressor_name(i), fut.clone()))
+        .collect();
+
+    match options.model {
+        ModelType::Naive => fit_predict_exog(
+            Naive::new(),
+            &ts,
+            horizon,
+            &future_map,
+            level,
+            "Naive",
+            |_: &Naive| "Naive".to_string(),
+        ),
+        ModelType::ARIMA => {
+            let Some([p, d, q]) = options.arima_order else {
+                return Err(ForecastError::InvalidInput(
+                    "ARIMA requires arima_order=[p,d,q] (e.g. [1,1,1]); use 'AutoARIMA' for \
+                     automatic order selection"
+                        .to_string(),
+                ));
+            };
+            let seasonal_nonzero = options
+                .seasonal_order
+                .map(|[cap_p, cap_d, cap_q]| cap_p + cap_d + cap_q > 0)
+                .unwrap_or(false);
+            if seasonal_nonzero && options.seasonal_period <= 1 {
+                return Err(ForecastError::InvalidInput(
+                    "seasonal_order requires seasonal_period > 1".to_string(),
+                ));
+            }
+            if !seasonal_nonzero && options.seasonal_period > 1 {
+                return Err(ForecastError::InvalidInput(
+                    "seasonal_period > 1 requires a non-zero seasonal_order=[P,D,Q] (e.g. \
+                     [0,1,1]); ARIMA never uses the auto-detected seasonal period"
+                        .to_string(),
+                ));
+            }
+            if seasonal_nonzero {
+                let [cap_p, cap_d, cap_q] = options.seasonal_order.expect("checked above");
+                let s = options.seasonal_period;
+                let name = format!("ARIMA({p},{d},{q})({cap_p},{cap_d},{cap_q})[{s}]");
+                fit_predict_exog(
+                    SARIMA::new(p, d, q, cap_p, cap_d, cap_q, s),
+                    &ts,
+                    horizon,
+                    &future_map,
+                    level,
+                    &name.clone(),
+                    move |_: &SARIMA| name,
+                )
+            } else {
+                let name = format!("ARIMA({p},{d},{q})");
+                fit_predict_exog(
+                    ARIMA::new(p, d, q),
+                    &ts,
+                    horizon,
+                    &future_map,
+                    level,
+                    &name.clone(),
+                    move |_: &ARIMA| name,
+                )
+            }
+        }
+        ModelType::AutoARIMA => fit_predict_exog(
+            new_auto_arima(period),
+            &ts,
+            horizon,
+            &future_map,
+            level,
+            "AutoARIMA",
+            auto_arima_model_name,
+        ),
+        ModelType::Theta => fit_predict_exog(
+            new_theta(period),
+            &ts,
+            horizon,
+            &future_map,
+            level,
+            "Theta",
+            |_: &Theta| "Theta".to_string(),
+        ),
+        ModelType::OptimizedTheta => fit_predict_exog(
+            new_optimized_theta(period),
+            &ts,
+            horizon,
+            &future_map,
+            level,
+            "OptimizedTheta",
+            |_: &OptimizedTheta| "OptimizedTheta".to_string(),
+        ),
+        ModelType::DynamicTheta => fit_predict_exog(
+            new_dynamic_theta(period),
+            &ts,
+            horizon,
+            &future_map,
+            level,
+            "DynamicTheta",
+            |_: &DynamicTheta| "DynamicTheta".to_string(),
+        ),
+        ModelType::DynamicOptimizedTheta => fit_predict_exog(
+            new_dynamic_optimized_theta(period),
+            &ts,
+            horizon,
+            &future_map,
+            level,
+            "DynamicOptimizedTheta",
+            |_: &DynamicTheta| "DynamicOptimizedTheta".to_string(),
+        ),
+        ModelType::AutoTheta => fit_predict_exog(
+            new_auto_theta(period),
+            &ts,
+            horizon,
+            &future_map,
+            level,
+            "AutoTheta",
+            |m: &AutoTheta| match m.selected_model() {
+                Some(selected) => format!("AutoTheta({selected})"),
+                None => "AutoTheta".to_string(),
+            },
+        ),
+        ModelType::ETS => {
+            if let Some(notation) = options.ets_spec.as_deref() {
+                if !is_valid_ets_notation(notation) {
+                    return Err(ForecastError::InvalidInput(format!(
+                        "Invalid ETS model specification '{}'. \
+                         Expected 3 or 4 character notation: Error(A/M) + Trend(A/M/N) + Seasonal(A/M/N), \
+                         with optional 'd' for damped trend.",
+                        notation
+                    )));
+                }
+                let parsed_spec = ETSSpec::from_notation(notation).map_err(|e| {
+                    ForecastError::InvalidInput(format!(
+                        "Invalid ETS model specification '{}': {}",
+                        notation, e
+                    ))
+                })?;
+                if !parsed_spec.is_valid() {
+                    return Err(ForecastError::InvalidInput(format!(
+                        "ETS model '{}' is an unstable combination (multiplicative error with \
+                         additive components).",
+                        notation
+                    )));
+                }
+                let seasonal_period = if parsed_spec.has_seasonal() && period > 1 {
+                    period
+                } else {
+                    1
+                };
+                let name = parsed_spec.short_name();
+                fit_predict_exog(
+                    ETSModel::new(parsed_spec, seasonal_period),
+                    &ts,
+                    horizon,
+                    &future_map,
+                    level,
+                    "ETS",
+                    move |_: &ETSModel| name,
+                )
+            } else {
+                // 'ETS' without a spec runs the same crate AutoETS selection
+                // as standalone 'AutoETS' (D-05), reported un-prefixed.
+                let pool = match options.model_pool.as_deref() {
+                    Some(s) => Some(parse_model_pool(s)?),
+                    None => None,
+                };
+                fit_predict_exog(
+                    new_auto_ets(period, pool),
+                    &ts,
+                    horizon,
+                    &future_map,
+                    level,
+                    "AutoETS",
+                    |m: &AutoETS| match m.selected_spec() {
+                        Some(spec) => format_auto_ets_name(&spec, false),
+                        None => "ETS".to_string(),
+                    },
+                )
+            }
+        }
+        ModelType::AutoETS => {
+            let pool = match options.model_pool.as_deref() {
+                Some(s) => Some(parse_model_pool(s)?),
+                None => None,
+            };
+            fit_predict_exog(
+                new_auto_ets(period, pool),
+                &ts,
+                horizon,
+                &future_map,
+                level,
+                "AutoETS",
+                |m: &AutoETS| match m.selected_spec() {
+                    Some(spec) => format_auto_ets_name(&spec, true),
+                    None => "AutoETS".to_string(),
+                },
+            )
+        }
+        ModelType::MFLES | ModelType::AutoMFLES => {
+            let periods = if !options.seasonal_periods.is_empty() {
+                options.seasonal_periods.clone()
+            } else if period > 1 {
+                vec![period]
+            } else {
+                vec![]
+            };
+            fit_predict_exog(
+                MFLES::new(periods),
+                &ts,
+                horizon,
+                &future_map,
+                level,
+                "MFLES",
+                |_: &MFLES| "MFLES".to_string(),
+            )
+        }
+        ModelType::MSTL | ModelType::AutoMSTL => {
+            let periods = if !options.seasonal_periods.is_empty() {
+                options.seasonal_periods.clone()
+            } else {
+                vec![period]
+            };
+            fit_predict_exog(
+                MSTLForecaster::new(periods),
+                &ts,
+                horizon,
+                &future_map,
+                level,
+                "MSTL",
+                |_: &MSTLForecaster| "MSTL".to_string(),
+            )
+        }
+        _ => unreachable!(
+            "forecast_with_exog only calls forecast_crate_exog when exog_capable(model) is true"
+        ),
+    }
+}
+
 // Model implementations
 
 fn forecast_naive(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
-    use anofox_forecast::models::baseline::Naive;
     let ts = make_timeseries(values)?;
     let mut model = Naive::new();
     model
@@ -1887,70 +2271,6 @@ fn auto_arima_model_name(model: &AutoARIMA) -> String {
 /// generated name.
 fn regressor_name(i: usize) -> String {
     format!("x{i:03}")
-}
-
-/// AutoARIMA with the crate's OWN exogenous support (D-10, FCST-05): attach
-/// every aligned historical regressor to the TimeSeries via
-/// `CalendarAnnotations::with_regressor` + `set_calendar`, let `AutoARIMA`
-/// run its real order search WITH the regressors attached (not on
-/// OLS-regressed-out residuals), then predict with
-/// `predict_with_exog_intervals` using the same regressor names for the
-/// future map. `model_name` is the real selected order
-/// ([`auto_arima_model_name`]) with `" with regressors"` appended — never
-/// the `"ARIMAX"` stand-in the wrapper OLS path (`forecast_arima_with_exog`)
-/// used.
-fn forecast_autoarima_crate_exog(
-    values: &[f64],
-    horizon: usize,
-    period: usize,
-    level: f64,
-    exog: &ExogenousData,
-) -> Result<ForecastOutput> {
-    let mut ts = make_timeseries(values)?;
-
-    let mut calendar = CalendarAnnotations::new();
-    for (i, hist) in exog.historical.iter().enumerate() {
-        calendar = calendar.with_regressor(regressor_name(i), hist.clone());
-    }
-    ts.set_calendar(calendar);
-
-    let mut model = new_auto_arima(period);
-    model.fit(&ts).map_err(|e| {
-        ForecastError::ComputationError(format!("AutoARIMA (with regressors) fit failed: {}", e))
-    })?;
-
-    let future_map: HashMap<String, Vec<f64>> = exog
-        .future
-        .iter()
-        .enumerate()
-        .map(|(i, fut)| (regressor_name(i), fut.clone()))
-        .collect();
-
-    let forecast = model
-        .predict_with_exog_intervals(horizon, &future_map, level)
-        .map_err(|e| {
-            ForecastError::ComputationError(format!(
-                "AutoARIMA (with regressors) predict failed: {}",
-                e
-            ))
-        })?;
-
-    let model_name = format!("{} with regressors", auto_arima_model_name(&model));
-
-    let point = forecast.primary().to_vec();
-    let (lower, upper) = extract_bounds(&forecast, point.len());
-
-    Ok(ForecastOutput {
-        point,
-        lower,
-        upper,
-        fitted: model.fitted_values().map(|v| v.to_vec()),
-        residuals: model.residuals().map(|v| v.to_vec()),
-        model_name,
-        aic: None,
-        bic: None,
-        mse: None,
-    })
 }
 
 /// Parse a model pool string into the `ModelPool` enum.
@@ -3734,205 +4054,6 @@ mod insp01_tests {
     }
 }
 
-// ============================================================================
-// Exogenous-aware forecasting functions
-// ============================================================================
-
-use anofox_regression::prelude::*;
-
-/// Fit OLS regression: y = X * beta using anofox-regression
-/// Returns coefficients (intercept + betas) and residuals
-fn fit_ols_regression(y: &[f64], x: &[Vec<f64>]) -> (Vec<f64>, Vec<f64>) {
-    let n = y.len();
-    let k = x.len(); // number of regressors
-
-    if k == 0 || n == 0 {
-        return (vec![], y.to_vec());
-    }
-
-    // Build design matrix using faer: n_obs rows × k columns
-    let x_mat = faer::Mat::from_fn(n, k, |i, j| x[j][i]);
-    let y_col = faer::Col::from_fn(n, |i| y[i]);
-
-    // Fit OLS with intercept
-    let fitted = match OlsRegressor::builder()
-        .with_intercept(true)
-        .build()
-        .fit(&x_mat, &y_col)
-    {
-        Ok(f) => f,
-        Err(_) => {
-            // Fallback: return zeros and original y as residuals
-            return (vec![0.0; k + 1], y.to_vec());
-        }
-    };
-
-    // Get coefficients: [intercept, beta1, beta2, ...]
-    // The intercept is accessed separately via fitted.intercept()
-    // The coefficients() method only returns the beta coefficients
-    let intercept = fitted.intercept().unwrap_or(0.0);
-    let coeffs_col = fitted.coefficients();
-    let mut coeffs = vec![intercept];
-    for i in 0..coeffs_col.nrows() {
-        coeffs.push(coeffs_col[i]);
-    }
-
-    // Calculate residuals: y - y_hat
-    let predictions = fitted.predict(&x_mat);
-    let residuals: Vec<f64> = (0..n).map(|i| y[i] - predictions[i]).collect();
-
-    (coeffs, residuals)
-}
-
-/// Apply regression coefficients to future X values
-fn apply_regression(coeffs: &[f64], future_x: &[Vec<f64>], horizon: usize) -> Vec<f64> {
-    if coeffs.is_empty() || future_x.is_empty() {
-        return vec![0.0; horizon];
-    }
-
-    // coeffs format: [intercept, beta1, beta2, ...]
-    let intercept = coeffs[0];
-    let betas = &coeffs[1..];
-
-    (0..horizon)
-        .map(|h| {
-            let mut effect = intercept;
-            for (j, beta) in betas.iter().enumerate() {
-                if j < future_x.len() && h < future_x[j].len() {
-                    effect += beta * future_x[j][h];
-                }
-            }
-            effect
-        })
-        .collect()
-}
-
-/// ARIMA forecast with exogenous variables (ARIMAX).
-///
-/// Approach: Regress y on X, then forecast the residuals with ARIMA,
-/// and add back the exogenous effect for forecast horizon.
-fn forecast_arima_with_exog(
-    values: &[f64],
-    horizon: usize,
-    exog: &ExogenousData,
-) -> Result<ForecastOutput> {
-    // Fit regression: y = X*beta + residuals
-    let (coeffs, residuals) = fit_ols_regression(values, &exog.historical);
-
-    // Forecast residuals with AutoARIMA (D-08/D-09, plan 10-02: `forecast_arima`
-    // now requires an explicit `arima_order` — there is none to hand-pick here,
-    // and guessing one would reintroduce exactly the kind of fixed-stand-in this
-    // plan removes). `forecast_auto_arima`'s own order search needs no such
-    // input; `level`/`period` are otherwise inert here since this function's
-    // output never surfaces the residual model's own interval/seasonal fields
-    // (see the hardcoded empty `lower`/`upper` below). Native crate exog
-    // routing (`AutoARIMA::predict_with_exog_intervals`, D-10) replaces this
-    // whole OLS + residual-model hack in a later plan.
-    let residual_forecast = forecast_auto_arima(&residuals, horizon, 0, 0.95)?;
-
-    // Calculate exogenous effect for future
-    let exog_effect = apply_regression(&coeffs, &exog.future, horizon);
-
-    // Combine: forecast = residual_forecast + exog_effect
-    let point: Vec<f64> = residual_forecast
-        .point
-        .iter()
-        .zip(exog_effect.iter())
-        .map(|(r, e)| r + e)
-        .collect();
-
-    Ok(ForecastOutput {
-        point,
-        lower: vec![],
-        upper: vec![],
-        fitted: None,
-        residuals: None,
-        model_name: "ARIMAX".to_string(),
-        aic: None,
-        bic: None,
-        mse: None,
-    })
-}
-
-/// Theta forecast with exogenous variables.
-///
-/// Approach: Similar to ARIMAX - regress, forecast residuals, add back exog effect.
-fn forecast_theta_with_exog(
-    values: &[f64],
-    horizon: usize,
-    exog: &ExogenousData,
-) -> Result<ForecastOutput> {
-    // Fit regression
-    let (coeffs, residuals) = fit_ols_regression(values, &exog.historical);
-
-    // Forecast residuals with Theta (STM for exog path). Level is irrelevant here:
-    // this function's output always carries empty lower/upper (see below), and the
-    // residual_forecast's own bounds are never read.
-    let residual_forecast = forecast_theta_stm(&residuals, horizon, 1, 0.95)?;
-
-    // Calculate exogenous effect for future
-    let exog_effect = apply_regression(&coeffs, &exog.future, horizon);
-
-    // Combine
-    let point: Vec<f64> = residual_forecast
-        .point
-        .iter()
-        .zip(exog_effect.iter())
-        .map(|(r, e)| r + e)
-        .collect();
-
-    Ok(ForecastOutput {
-        point,
-        lower: vec![],
-        upper: vec![],
-        fitted: None,
-        residuals: None,
-        model_name: "ThetaX".to_string(),
-        aic: None,
-        bic: None,
-        mse: None,
-    })
-}
-
-/// MFLES forecast with exogenous variables.
-fn forecast_mfles_with_exog(
-    values: &[f64],
-    horizon: usize,
-    periods: &[usize],
-    exog: &ExogenousData,
-) -> Result<ForecastOutput> {
-    // Fit regression
-    let (coeffs, residuals) = fit_ols_regression(values, &exog.historical);
-
-    // Forecast residuals with MFLES. Level is irrelevant here: this function's
-    // output always carries empty lower/upper (see below), and the
-    // residual_forecast's own bounds are never read.
-    let residual_forecast = forecast_mfles(&residuals, horizon, periods, 0.95)?;
-
-    // Calculate exogenous effect for future
-    let exog_effect = apply_regression(&coeffs, &exog.future, horizon);
-
-    // Combine
-    let point: Vec<f64> = residual_forecast
-        .point
-        .iter()
-        .zip(exog_effect.iter())
-        .map(|(r, e)| r + e)
-        .collect();
-
-    Ok(ForecastOutput {
-        point,
-        lower: vec![],
-        upper: vec![],
-        fitted: None,
-        residuals: None,
-        model_name: "MFLESX".to_string(),
-        aic: None,
-        bic: None,
-        mse: None,
-    })
-}
-
 /// Check if model is an auto-selection model
 #[cfg(test)]
 fn is_auto_model(model: ModelType) -> bool {
@@ -4036,132 +4157,6 @@ pub fn list_models() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// DEP-01 proof: `fit_ols_regression` is private, so this test is
-    /// inline (09-RESEARCH Open Question 2 — no visibility change) rather
-    /// than a `tests/` integration test. Loads
-    /// `multiscale_ols/cases.json` via the crate's own `test_fixtures`
-    /// loader module (`#[path]`'d from `tests/common/mod.rs` in lib.rs).
-    #[test]
-    fn fit_ols_regression_matches_numpy_lstsq_fixture() {
-        let fx = crate::test_fixtures::load_fixture("multiscale_ols/cases.json");
-        let coef_abs = crate::test_fixtures::tolerance(&fx, "coef_abs");
-        let coef_rel = crate::test_fixtures::tolerance(&fx, "coef_rel");
-        let fitted_abs_per_sd = crate::test_fixtures::tolerance(&fx, "fitted_abs_per_sd");
-
-        let cases = fx["cases"]
-            .as_object()
-            .expect("multiscale_ols/cases.json: 'cases' is not an object");
-        let mut ran_exog_typical = false;
-        let mut asserted_count = 0usize;
-
-        for (name, case) in cases {
-            let dep01_assert = case["dep01_assert"].as_bool().unwrap_or(false);
-            if !dep01_assert {
-                continue;
-            }
-            asserted_count += 1;
-
-            let x_cols: Vec<Vec<f64>> = case["X"]
-                .as_array()
-                .unwrap_or_else(|| panic!("{name}: 'X' is not an array"))
-                .iter()
-                .map(crate::test_fixtures::f64_vec)
-                .collect();
-            let y = crate::test_fixtures::f64_vec(&case["y"]);
-            let want_coef = crate::test_fixtures::f64_vec(&case["coef"]);
-            let want_fitted = crate::test_fixtures::f64_vec(&case["fitted"]);
-            let full_rank = case["full_rank"].as_bool().unwrap_or(false);
-
-            let (coeffs, residuals) = fit_ols_regression(&y, &x_cols);
-
-            // Full-rank designs: coefficients (intercept first) must match
-            // numpy.linalg.lstsq within the fixture's coef tolerance.
-            if full_rank {
-                crate::test_fixtures::assert_vec_close(
-                    &coeffs,
-                    &want_coef,
-                    coef_abs,
-                    coef_rel,
-                    &format!("{name}.coef"),
-                );
-            }
-
-            // Every dep01_assert case (full-rank or not): the fitted
-            // projection (y - residual) must match numpy's fitted values
-            // within fitted_abs_per_sd * sd(y).
-            assert!(
-                y.len() > 1,
-                "{name}: need at least 2 observations to compute var_y"
-            );
-            let mean_y = y.iter().sum::<f64>() / y.len() as f64;
-            let var_y =
-                y.iter().map(|v| (v - mean_y).powi(2)).sum::<f64>() / (y.len() as f64 - 1.0);
-            let fit_tol = fitted_abs_per_sd * var_y.sqrt();
-
-            for i in 0..y.len() {
-                let fitted_i = y[i] - residuals[i];
-                crate::test_fixtures::assert_close(
-                    fitted_i,
-                    want_fitted[i],
-                    fit_tol,
-                    0.0,
-                    &format!("{name}.fitted[{i}]"),
-                );
-            }
-
-            // exog_typical additionally proves apply_regression() on the
-            // first 5 future rows reproduces [1, x] . coef — this is the
-            // audit's exact before/after evidence: on anofox-regression
-            // 0.5.3 the scrambled coefficients make step 1 ~ -79; on
-            // >=0.5.13 it is ~ -8.7987.
-            if name == "exog_typical" {
-                ran_exog_typical = true;
-                let future_x: Vec<Vec<f64>> = x_cols.iter().map(|col| col[0..5].to_vec()).collect();
-                let projected = apply_regression(&coeffs, &future_x, 5);
-
-                let want_projected: Vec<f64> = (0..5)
-                    .map(|h| {
-                        let mut v = want_coef[0];
-                        for (j, col) in future_x.iter().enumerate() {
-                            v += want_coef[j + 1] * col[h];
-                        }
-                        v
-                    })
-                    .collect();
-
-                crate::test_fixtures::assert_vec_close(
-                    &projected,
-                    &want_projected,
-                    fit_tol,
-                    0.0,
-                    "exog_typical.apply_regression",
-                );
-                assert!(
-                    (projected[0] - (-8.7987)).abs() < 1e-3,
-                    "exog_typical.apply_regression[0]: got {}, want approx -8.7987 \
-                     (audit fix evidence; 0.5.3 scrambled this to ~ -79)",
-                    projected[0]
-                );
-            }
-        }
-
-        assert!(
-            ran_exog_typical,
-            "multiscale_ols/cases.json: missing the exog_typical case"
-        );
-        assert_eq!(
-            asserted_count, 7,
-            "multiscale_ols/cases.json: expected 7 dep01_assert cases to run, ran {asserted_count}"
-        );
-
-        // NOTE: rank-deficient designs (collinear/collinear_big/constcol)
-        // leave aliased coefficients NaN in anofox-regression >=0.5.13, and
-        // apply_regression then produces NaN effects for the aliased
-        // column; the finite zero-effect behaviour is Phase 10 FCST-05 —
-        // this test pins only the fitted projection for dep01_assert
-        // cases, not the NaN-aliasing behaviour itself.
-    }
 
     #[test]
     fn test_forecast_naive() {

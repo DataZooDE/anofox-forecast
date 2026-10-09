@@ -129,7 +129,6 @@ unsafe fn build_series(
 }
 
 /// Build a Vec<f64> from raw pointers, treating NULLs as NaN.
-#[allow(dead_code)]
 unsafe fn build_values(data: *const c_double, validity: *const u64, length: size_t) -> Vec<f64> {
     let data_slice = std::slice::from_raw_parts(data, length);
 
@@ -3641,13 +3640,19 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
                         ));
                     }
 
-                    // Copy historical values
-                    let hist_slice = std::slice::from_raw_parts(reg.values, reg.n_values);
-                    historical.push(hist_slice.to_vec());
+                    // Copy historical values, mapping any invalid entry (per
+                    // `reg.validity`, D-12/FCST-08) to NaN — the core's own
+                    // NaN-is-missing convention — instead of the unmarshalled
+                    // (possibly uninitialised-looking, e.g. 0-filled by the
+                    // caller) raw double. `null` validity = every entry valid.
+                    historical.push(build_values(reg.values, reg.validity, reg.n_values));
 
-                    // Copy future values
-                    let future_slice = std::slice::from_raw_parts(reg.future_values, reg.n_future);
-                    future.push(future_slice.to_vec());
+                    // Same for the future window (`reg.future_validity`).
+                    future.push(build_values(
+                        reg.future_values,
+                        reg.future_validity,
+                        reg.n_future,
+                    ));
                 }
 
                 Some(anofox_fcst_core::ExogenousData { historical, future })

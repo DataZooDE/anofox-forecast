@@ -3,11 +3,17 @@
 //! Own integration-test binary (installs a global allocator) with exactly
 //! one test function so no concurrent test pollutes the peak measurement.
 //!
-//! Before anofox-regression 0.5.14, `fit_ols_regression`'s OLS fit
-//! materialised an n×n matrix — ~1.7 GB at 15,330 rows. On >=0.5.15 the
-//! same fit needs ~11 MB. This test proves the bound holds on the bumped
-//! tree with a named, documented limit rather than trusting the upstream
-//! changelog's prose claim.
+//! Historical context: before anofox-regression 0.5.14, this crate's own
+//! wrapper `fit_ols_regression` (deleted in plan 10-04, D-10) materialised an
+//! n×n matrix for its OLS fit — ~1.7 GB at 15,330 rows. Since plan 10-04,
+//! `forecast_with_exog`'s OptimizedTheta path no longer runs that wrapper at
+//! all: it attaches the regressor to the crate `TimeSeries` via
+//! `CalendarAnnotations` and lets `anofox-forecast`'s own exog support fit
+//! (its internal pre-regression uses Cholesky normal equations over a k×k
+//! system — `utils/ols.rs::ols_fit` — not an n×n materialisation). This test
+//! keeps the SAME named, documented 256 MiB limit as a regression guard: if
+//! the crate's own exog path ever regresses back to O(n²) memory, this test
+//! catches it exactly as it caught anofox-regression's pre-0.5.15 behaviour.
 
 mod common;
 
@@ -133,12 +139,11 @@ fn exog_fit_15k_rows_has_bounded_peak_heap() {
     let future: Vec<Vec<f64>> = x_cols.iter().map(|col| col[0..5].to_vec()).collect();
 
     let options = ForecastOptionsExog {
-        // OptimizedTheta isolates the regression effect: forecast_theta_with_exog
-        // fits the OLS regression, then forecasts the (near-white-noise)
-        // residuals with Theta (effect ~ 0), so the combined point forecast is
-        // dominated by apply_regression()'s exogenous effect. The AutoARIMA exog
-        // path instead uses the fixed ARIMA stand-in that Phase 10 (FCST-04)
-        // replaces, which is not a stable target for this memory proof.
+        // OptimizedTheta isolates the regression effect: the crate's own
+        // exog-aware fit pre-regresses the near-white-noise residual series
+        // (effect ~ 0 from OptimizedTheta itself), so the combined point
+        // forecast is dominated by the regressor's own coefficient — close
+        // to the fixture's `coef`-implied projection within sql_point_abs.
         model: ModelType::OptimizedTheta,
         horizon: 5,
         seasonal_period: 0,

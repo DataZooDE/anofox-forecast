@@ -1366,6 +1366,158 @@ fn exog_autoarima_parity_through_ffi() {
     }
 }
 
+/// `ExogenousRegressor.validity` with an interior historical bit CLEARED
+/// behaves exactly like a NaN at that index (D-12, FCST-08): the FFI call
+/// still succeeds (the value is interpolated), and the point forecast is
+/// bit-identical to passing the same value as NaN directly with `validity =
+/// null`.
+#[test]
+fn exog_regressor_validity_bit_cleared_behaves_like_nan() {
+    let n = 80usize;
+    let horizon = 4usize;
+    let total = n + horizon;
+    let x1: Vec<f64> = (0..total)
+        .map(|i| (i as f64 * 0.31).sin() + i as f64 * 0.02)
+        .collect();
+    let y: Vec<f64> = (0..n)
+        .map(|i| 10.0 + 0.4 * x1[i] + (i as f64 * 0.11).cos())
+        .collect();
+    let (x1_hist, x1_future) = (x1[..n].to_vec(), x1[n..].to_vec());
+
+    let n_words = y.len().div_ceil(64);
+    let validity: Vec<u64> = vec![u64::MAX; n_words];
+
+    let run = |hist: &[f64], hist_validity: *const u64| -> Vec<f64> {
+        let regressor = FfiExogenousRegressor {
+            values: hist.as_ptr(),
+            n_values: hist.len(),
+            future_values: x1_future.as_ptr(),
+            n_future: x1_future.len(),
+            validity: hist_validity,
+            future_validity: std::ptr::null(),
+        };
+        let exog_data = FfiExogenousData {
+            regressors: &regressor as *const FfiExogenousRegressor,
+            n_regressors: 1,
+        };
+        let mut opts = FfiForecastOptionsExog::default();
+        write_c_field(&mut opts.model, "OptimizedTheta");
+        opts.horizon = horizon as i32;
+        opts.auto_detect_seasonality = false;
+        opts.seasonal_period = 0;
+        opts.confidence_level = 0.95;
+        opts.exog = &exog_data as *const FfiExogenousData;
+
+        let mut result = ForecastResult::default();
+        let mut error = AnofoxError::default();
+        let ok = unsafe {
+            anofox_ts_forecast_exog(
+                y.as_ptr(),
+                validity.as_ptr(),
+                y.len(),
+                &opts as *const _,
+                &mut result as *mut _,
+                &mut error as *mut _,
+            )
+        };
+        assert!(ok, "anofox_ts_forecast_exog failed: {:?}", unsafe {
+            CStr::from_ptr(error.message.as_ptr())
+        });
+        let n_forecasts = result.n_forecasts;
+        let point =
+            unsafe { std::slice::from_raw_parts(result.point_forecasts, n_forecasts).to_vec() };
+        unsafe {
+            anofox_free_forecast_result(&mut result as *mut _);
+        }
+        point
+    };
+
+    // Path A: pass the interior value as NaN directly, validity = null.
+    let mut hist_with_nan = x1_hist.clone();
+    hist_with_nan[n / 2] = f64::NAN;
+    let point_nan = run(&hist_with_nan, std::ptr::null());
+
+    // Path B: pass a (non-NaN, arbitrary) placeholder at that index, but
+    // clear its bit in a `validity` bitmask — must behave identically.
+    let mut hist_with_placeholder = x1_hist.clone();
+    hist_with_placeholder[n / 2] = 999_999.0; // would be a wildly wrong value if NOT masked
+    let mut reg_validity: Vec<u64> = vec![u64::MAX; n.div_ceil(64)];
+    reg_validity[(n / 2) / 64] &= !(1u64 << ((n / 2) % 64));
+    let point_masked = run(&hist_with_placeholder, reg_validity.as_ptr());
+
+    assert_f64_eq(
+        "exog_regressor_validity_bit.point",
+        &point_nan,
+        &point_masked,
+    );
+}
+
+/// `ExogenousRegressor.future_validity` with a bit CLEARED makes
+/// `anofox_ts_forecast_exog` return `false` with `ErrorCode::InvalidInput`
+/// (D-12, FCST-08) — a masked future regressor value is exactly as invalid
+/// as an explicit future NaN.
+#[test]
+fn exog_future_validity_bit_cleared_is_invalid_input() {
+    let n = 80usize;
+    let horizon = 4usize;
+    let total = n + horizon;
+    let x1: Vec<f64> = (0..total)
+        .map(|i| (i as f64 * 0.31).sin() + i as f64 * 0.02)
+        .collect();
+    let y: Vec<f64> = (0..n)
+        .map(|i| 10.0 + 0.4 * x1[i] + (i as f64 * 0.11).cos())
+        .collect();
+    let (x1_hist, x1_future) = (x1[..n].to_vec(), x1[n..].to_vec());
+
+    let mut future_validity: Vec<u64> = vec![u64::MAX; horizon.div_ceil(64)];
+    future_validity[0] &= !(1u64 << 1); // clear step 1
+
+    let regressor = FfiExogenousRegressor {
+        values: x1_hist.as_ptr(),
+        n_values: x1_hist.len(),
+        future_values: x1_future.as_ptr(),
+        n_future: x1_future.len(),
+        validity: std::ptr::null(),
+        future_validity: future_validity.as_ptr(),
+    };
+    let exog_data = FfiExogenousData {
+        regressors: &regressor as *const FfiExogenousRegressor,
+        n_regressors: 1,
+    };
+    let mut opts = FfiForecastOptionsExog::default();
+    write_c_field(&mut opts.model, "OptimizedTheta");
+    opts.horizon = horizon as i32;
+    opts.auto_detect_seasonality = false;
+    opts.seasonal_period = 0;
+    opts.confidence_level = 0.95;
+    opts.exog = &exog_data as *const FfiExogenousData;
+
+    let n_words = y.len().div_ceil(64);
+    let validity: Vec<u64> = vec![u64::MAX; n_words];
+    let mut result = ForecastResult::default();
+    let mut error = AnofoxError::default();
+    let ok = unsafe {
+        anofox_ts_forecast_exog(
+            y.as_ptr(),
+            validity.as_ptr(),
+            y.len(),
+            &opts as *const _,
+            &mut result as *mut _,
+            &mut error as *mut _,
+        )
+    };
+    assert!(
+        !ok,
+        "anofox_ts_forecast_exog should fail when a future validity bit is cleared"
+    );
+    assert_eq!(
+        error.code,
+        anofox_fcst_ffi::types::ErrorCode::InvalidInput,
+        "expected InvalidInput, got {:?}",
+        error.code
+    );
+}
+
 // ── Parameter grid tests ───────────────────────────────────────────────
 //
 // Each test sweeps a parameter across multiple values, verifying parity
