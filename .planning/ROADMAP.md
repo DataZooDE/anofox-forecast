@@ -120,7 +120,38 @@ Plans:
   4. Every former silent fallback is an SQL error or explicitly reported — AutoETS crate failure, `'ETS'` without a spec, AutoMFLES/AutoMSTL aliases, MSTL/TBATS/HW without a seasonal period (no default 12 / 2), unknown `kalman_model`, misspelled panel Croston variant, invalid UTF-8 model name, unparsable seasonal-period entries — and the returned model name always identifies the model that actually ran.
   5. An ensemble member built by `build_forecaster` (e.g. `'ETS'`) produces exactly the same forecast as the standalone model with the same parameters; an all-NULL series errors, a valid NaN is treated as missing, and regressor NULLs are handled via validity — all documented in `docs/api/`.
 
-**Plans**: TBD
+**Plans**: 9 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 10-01-PLAN.md — crate intervals/fitted/residuals passthrough, crate baselines, input policy + MSE, R-fixture tests (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 10-02-PLAN.md — real crate ARIMA via arima_order/seasonal_order, strict FFI option parsing, C++ param keys, NULL-safe agg/CV, SQL test (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 10-03-PLAN.md — silent fallbacks → errors, 'ETS' = AutoETS, shared constructors (ensemble == standalone), ensemble intervals (wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 10-04-PLAN.md — exog via crate exog support, constant regressors, regressor validity, SQL exog params + NULL-safe lists (wave 4)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 10-05-PLAN.md — self-checking runnable example, natively-run SQL test migration, green make test_release (wave 5)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 10-06-PLAN.md — 07-forecasting.md, CHANGELOG breaking changes, models skill, CV docs, README, examples (wave 6)
+
+**Waves 7-9** *(sequential — shared snippet harness files)*
+
+- [ ] 10-07-PLAN.md — reference pages: baseline, exponential smoothing, Croston/ADIDA (wave 7)
+- [ ] 10-08-PLAN.md — reference pages: state-space, Theta, multi-seasonal (wave 8)
+- [ ] 10-09-PLAN.md — reference pages: AutoTBATS, IMAPA/TSB, Global*, Laplace, GARCH, ensembles + note sweep (wave 9)
 
 ### Phase 11: Upstream anofox-forecast Correctness Fixes
 
