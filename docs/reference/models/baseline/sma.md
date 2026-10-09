@@ -34,10 +34,11 @@ Simple Moving Average. Forecasts the average of the last `window` observations. 
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 
-`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band, not a
-model-based interval and not statistically calibrated. For calibrated coverage, use conformal
-prediction intervals (see `docs/api/11-conformal-prediction.md`) on top of the point forecast.
-(being corrected in v0.10.0, Phase 10)
+`yhat_lower` / `yhat_upper` are the model's own prediction interval (crate
+`predict_with_intervals`) at `confidence_level` (default 0.90). See
+[Prediction intervals, fitted values and input handling](../../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling);
+for calibrated coverage use the conformal functions. SMA's band is flat across the horizon:
+half-width = z · σ · √(1 + 1/window), where σ is the residual standard deviation.
 
 ## SQL Example
 

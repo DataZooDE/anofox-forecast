@@ -33,10 +33,14 @@ The simplest forecasting method. Repeats the last observed value for all future 
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 
-`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band, not a
-model-based interval and not statistically calibrated. For calibrated coverage, use conformal
-prediction intervals (see `docs/api/11-conformal-prediction.md`) on top of the point forecast.
-(being corrected in v0.10.0, Phase 10)
+`yhat_lower` / `yhat_upper` are the model's own prediction interval (crate
+`predict_with_intervals`) at `confidence_level` (default 0.90). See
+[Prediction intervals, fitted values and input handling](../../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling);
+for calibrated coverage use the conformal functions. Naive's interval is identical to R's
+`naive()`: half-width = z · RMS(first differences) · √h. The fitted value of the first row is
+always `NULL` (no prior observation to repeat it against). `Naive` is the one baseline model
+in this reference that supports regressors via `ts_forecast_exog_by` — every other model on
+this page errors on regressors.
 
 ## SQL Example
 
@@ -55,13 +59,13 @@ SELECT * FROM ts_forecast_by(
 
 -- Compare with more complex model
 WITH naive AS (
-    SELECT * FROM ts_forecast_by('sales', id, date, val, 'Naive', 12, '1d', MAP{})
+    SELECT * FROM ts_forecast_by('sales', product_id, date, val, 'Naive', 12, '1d', MAP{})
 ),
 ets AS (
-    SELECT * FROM ts_forecast_by('sales', id, date, val, 'AutoETS', 12, '1d', MAP{})
+    SELECT * FROM ts_forecast_by('sales', product_id, date, val, 'AutoETS', 12, '1d', MAP{})
 )
-SELECT n.id, n.ds, n.forecast AS naive_fcst, e.forecast AS ets_fcst
-FROM naive n JOIN ets e ON n.id = e.id AND n.ds = e.ds;
+SELECT n.product_id, n.ds, n.yhat AS naive_fcst, e.yhat AS ets_fcst
+FROM naive n JOIN ets e ON n.product_id = e.product_id AND n.ds = e.ds;
 ```
 
 ## Best For

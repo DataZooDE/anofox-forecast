@@ -33,10 +33,11 @@ Random Walk with Drift. Extends Naive by adding a constant drift (average change
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 
-`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band, not a
-model-based interval and not statistically calibrated. For calibrated coverage, use conformal
-prediction intervals (see `docs/api/11-conformal-prediction.md`) on top of the point forecast.
-(being corrected in v0.10.0, Phase 10)
+`yhat_lower` / `yhat_upper` are the model's own prediction interval (crate
+`predict_with_intervals`) at `confidence_level` (default 0.90). See
+[Prediction intervals, fitted values and input handling](../../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling);
+for calibrated coverage use the conformal functions. RandomWalkDrift's interval is the
+drift-model band, widening with `h` from the in-sample residual standard deviation.
 
 ## SQL Example
 
@@ -46,7 +47,7 @@ SELECT * FROM ts_forecast_by(
     'monthly_sales',
     product_id,
     date,
-    revenue,
+    quantity,
     'RandomWalkDrift',
     6,
     '1d',
@@ -54,6 +55,13 @@ SELECT * FROM ts_forecast_by(
 );
 
 -- For trending data
+CREATE OR REPLACE TABLE growth_metrics AS
+SELECT metric_id,
+       (DATE '2020-01-01' + INTERVAL (i) DAY) AS date,
+       100.0 + metric_id * 10.0 + 0.8 * i AS value
+FROM range(0, 60) t(i)
+CROSS JOIN (SELECT unnest([1, 2]) AS metric_id);
+
 SELECT * FROM ts_forecast_by(
     'growth_metrics',
     metric_id,

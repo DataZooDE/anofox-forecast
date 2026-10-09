@@ -26,3 +26,8 @@ docs/api/08-cross-validation.md	ts_cv_hydrate_by(
 docs/api/08-cross-validation.md	ts_cv_split_folds_by(
 docs/api/08-cross-validation.md	ts_cv_split_by(
 docs/api/08-cross-validation.md	ts_cv_split_index_by(
+docs/reference/models/baseline/naive.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'Naive', horizon, params);
+docs/reference/models/baseline/seasonal_naive.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'SeasonalNaive', horizon, params);
+docs/reference/models/baseline/sma.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'SMA', horizon, params);
+docs/reference/models/baseline/random_walk_drift.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'RandomWalkDrift', horizon, params);
+docs/reference/models/baseline/seasonal_window_average.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'SeasonalWindowAverage', horizon, params);
