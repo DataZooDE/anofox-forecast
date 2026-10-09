@@ -2908,6 +2908,34 @@ bool anofox_ts_detect_frequency(const int64_t *dates,
                                 struct AnofoxError *out_error);
 
 /**
+ * Compute `horizon` future dates (microseconds) from an observed date
+ * series, using the D-12 calendar rule (plan 12-05).
+ *
+ * `step_months == 0 && step_micros == 0` -> auto-detect via
+ * `anofox_fcst_core::detect_step`. `step_months > 0 && step_micros == 0` ->
+ * explicit `Months(step_months)`. `step_months == 0 && step_micros > 0` ->
+ * explicit `Fixed(step_micros)`. Any negative value, or both non-zero, is
+ * `INVALID_INPUT`. `horizon == 0` returns `true` immediately (`out_dates`
+ * may be null in that case). `length == 0` is `INVALID_INPUT`.
+ *
+ * `out_dates` is CALLER-allocated with exactly `horizon` entries; this
+ * function writes exactly `horizon` values into it (T-12-17 — never more,
+ * never fewer).
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null (except `out_dates` when
+ * `horizon == 0`). `dates` must have at least `length` entries; `out_dates`
+ * must have at least `horizon` entries.
+ */
+bool anofox_ts_future_dates(const int64_t *dates,
+                            size_t length,
+                            size_t horizon,
+                            int64_t step_months,
+                            int64_t step_micros,
+                            int64_t *out_dates,
+                            struct AnofoxError *out_error);
+
+/**
  * Fill NULL values with forward fill.
  *
  * # Safety

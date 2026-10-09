@@ -1,6 +1,7 @@
 #include "anofox_forecast_extension.hpp"
 #include "anofox_fcst_ffi.h"
 #include "ts_forecast_params.hpp"
+#include "ts_future_dates.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/execution/expression_executor.hpp"
@@ -372,20 +373,13 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
             continue;
         }
 
-        // Compute forecast timestamps based on detected frequency
-        int64_t last_ts = sorted_timestamps.back();
-        int64_t ts_step = 0;
-        if (sorted_timestamps.size() >= 2) {
-            // Compute median step size for robustness
-            vector<int64_t> steps;
-            for (size_t j = 1; j < sorted_timestamps.size(); j++) {
-                steps.push_back(sorted_timestamps[j] - sorted_timestamps[j-1]);
-            }
-            std::sort(steps.begin(), steps.end());
-            ts_step = steps[steps.size() / 2];  // median
-        } else {
-            ts_step = 86400000000LL;  // Default to 1 day in microseconds
-        }
+        // Compute forecast timestamps via the Rust D-12 calendar rule
+        // (month-end-preserving / day-of-month-clamp stepping for monthly/
+        // quarterly/yearly data, deterministic frequency detection) instead
+        // of the old last_ts + k*median_step arithmetic, which drifted off
+        // month-end on short months (D-12). step_months=0, step_micros=0
+        // requests Rust auto-detection (anofox_fcst_core::detect_step).
+        vector<int64_t> future_ts = ComputeFutureDates(sorted_timestamps, fcst_result.n_forecasts, 0, 0);
 
         // Set forecast_step list
         {
@@ -419,7 +413,7 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
 
             auto child_data = FlatVector::GetData<timestamp_t>(list_child);
             for (size_t j = 0; j < fcst_result.n_forecasts; j++) {
-                child_data[current_size + j] = timestamp_t(last_ts + (j + 1) * ts_step);
+                child_data[current_size + j] = timestamp_t(future_ts[j]);
             }
         }
 

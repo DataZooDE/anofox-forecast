@@ -5,7 +5,10 @@ use crate::FrequencyType;
 use chrono::{Datelike, Months, NaiveDateTime, Timelike};
 
 /// Convert microseconds since epoch to NaiveDateTime.
-fn micros_to_datetime(micros: i64) -> NaiveDateTime {
+///
+/// `pub(crate)` so `calendar.rs` (D-12) can reuse it instead of duplicating
+/// the microsecond<->NaiveDateTime conversion.
+pub(crate) fn micros_to_datetime(micros: i64) -> NaiveDateTime {
     let secs = micros / 1_000_000;
     let nsecs = ((micros % 1_000_000) * 1000) as u32;
     chrono::DateTime::from_timestamp(secs, nsecs)
@@ -14,7 +17,9 @@ fn micros_to_datetime(micros: i64) -> NaiveDateTime {
 }
 
 /// Convert NaiveDateTime to microseconds since epoch.
-fn datetime_to_micros(dt: NaiveDateTime) -> i64 {
+///
+/// `pub(crate)` — see [`micros_to_datetime`].
+pub(crate) fn datetime_to_micros(dt: NaiveDateTime) -> i64 {
     dt.and_utc().timestamp_micros()
 }
 
@@ -381,7 +386,14 @@ pub fn fill_forward_legacy(
     )
 }
 
-/// Detect the frequency of a time series in seconds.
+/// Detect the frequency of a time series in seconds (really: in the input's
+/// integer unit — microseconds for timestamp callers).
+///
+/// Deterministic tie rule (D-12, orchestrator decision): when two or more
+/// consecutive-difference values are tied for the most common ("mode"), the
+/// SMALLER interval wins, independent of map iteration order. Uses an
+/// ordered map plus a `(count, Reverse(diff))` max key so the result cannot
+/// depend on unordered-hash iteration order even incidentally.
 pub fn detect_frequency(dates: &[i64]) -> Result<i64> {
     if dates.len() < 2 {
         return Err(ForecastError::InsufficientData {
@@ -406,15 +418,16 @@ pub fn detect_frequency(dates: &[i64]) -> Result<i64> {
         ));
     }
 
-    // Find the most common difference (mode)
-    let mut counts = std::collections::HashMap::new();
+    // Find the most common difference (mode); ties broken by the smaller
+    // interval via Reverse(diff) in the max key.
+    let mut counts: std::collections::BTreeMap<i64, usize> = std::collections::BTreeMap::new();
     for d in &diffs {
         *counts.entry(*d).or_insert(0) += 1;
     }
 
     let mode = counts
         .into_iter()
-        .max_by_key(|(_, count)| *count)
+        .max_by_key(|&(diff, count)| (count, std::cmp::Reverse(diff)))
         .map(|(diff, _)| diff)
         .unwrap();
 
@@ -522,5 +535,30 @@ mod tests {
         let dates = vec![0, 100, 200, 300, 400];
         let freq = detect_frequency(&dates).unwrap();
         assert_eq!(freq, 100);
+    }
+
+    #[test]
+    fn test_detect_frequency_tie_breaks_to_smaller_interval_deterministically() {
+        // dates diffs: {1, 2} (tie, 1 each) -> smaller (1) wins, every time.
+        let dates = vec![0, 1, 3];
+        for _ in 0..50 {
+            assert_eq!(detect_frequency(&dates).unwrap(), 1);
+        }
+    }
+
+    #[test]
+    fn test_detect_frequency_tie_pattern_2_1_2_1_breaks_to_1() {
+        // diffs: 2, 1, 2, 1 -> counts {2: 2, 1: 2}, tie -> smaller (1) wins.
+        let dates = vec![0, 2, 3, 5, 6];
+        for _ in 0..50 {
+            assert_eq!(detect_frequency(&dates).unwrap(), 1);
+        }
+    }
+
+    #[test]
+    fn test_detect_frequency_no_tie_pattern_3_3_1_picks_majority_3() {
+        // diffs: 3, 3, 1 -> counts {3: 2, 1: 1}, no tie -> majority (3) wins.
+        let dates = vec![0, 3, 6, 7];
+        assert_eq!(detect_frequency(&dates).unwrap(), 3);
     }
 }

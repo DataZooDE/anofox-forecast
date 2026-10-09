@@ -4,6 +4,7 @@
 //! and forecasting functions.
 
 pub mod bootstrap;
+pub mod calendar;
 pub mod changepoint;
 pub mod conformal;
 pub mod decomposition;
@@ -67,6 +68,7 @@ pub use conformal::{
     ConformalStrategy,
     PredictionIntervals,
 };
+pub use calendar::{detect_step, future_dates, CalendarStep, ONE_DAY_MICROS};
 pub use decomposition::{mstl_decompose, InsufficientDataMode, MstlDecomposition};
 pub use detrending::{
     decompose, decompose_additive, decompose_multiplicative, detrend, detrend_auto, detrend_diff,

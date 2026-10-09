@@ -4786,6 +4786,106 @@ pub unsafe extern "C" fn anofox_ts_detect_frequency(
     }
 }
 
+/// Compute `horizon` future dates (microseconds) from an observed date
+/// series, using the D-12 calendar rule (plan 12-05).
+///
+/// `step_months == 0 && step_micros == 0` -> auto-detect via
+/// `anofox_fcst_core::detect_step`. `step_months > 0 && step_micros == 0` ->
+/// explicit `Months(step_months)`. `step_months == 0 && step_micros > 0` ->
+/// explicit `Fixed(step_micros)`. Any negative value, or both non-zero, is
+/// `INVALID_INPUT`. `horizon == 0` returns `true` immediately (`out_dates`
+/// may be null in that case). `length == 0` is `INVALID_INPUT`.
+///
+/// `out_dates` is CALLER-allocated with exactly `horizon` entries; this
+/// function writes exactly `horizon` values into it (T-12-17 — never more,
+/// never fewer).
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null (except `out_dates` when
+/// `horizon == 0`). `dates` must have at least `length` entries; `out_dates`
+/// must have at least `horizon` entries.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_future_dates(
+    dates: *const i64,
+    length: size_t,
+    horizon: size_t,
+    step_months: i64,
+    step_micros: i64,
+    out_dates: *mut i64,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if dates.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument: dates");
+        }
+        return false;
+    }
+
+    if horizon == 0 {
+        return true;
+    }
+
+    if out_dates.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument: out_dates");
+        }
+        return false;
+    }
+
+    if length == 0 {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::InvalidInput, "dates must not be empty");
+        }
+        return false;
+    }
+
+    if step_months < 0 || step_micros < 0 || (step_months > 0 && step_micros > 0) {
+        if !out_error.is_null() {
+            (*out_error).set_error(
+                ErrorCode::InvalidInput,
+                "step_months and step_micros must be non-negative, and at most one may be non-zero",
+            );
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let dates_vec: Vec<i64> = std::slice::from_raw_parts(dates, length).to_vec();
+        let step = if step_months > 0 {
+            anofox_fcst_core::CalendarStep::Months(step_months as u32)
+        } else if step_micros > 0 {
+            anofox_fcst_core::CalendarStep::Fixed(step_micros)
+        } else {
+            anofox_fcst_core::detect_step(&dates_vec)?
+        };
+        anofox_fcst_core::future_dates(&dates_vec, horizon, step)
+    }));
+
+    match result {
+        Ok(Ok(future)) => {
+            let out_slice = std::slice::from_raw_parts_mut(out_dates, horizon);
+            out_slice.copy_from_slice(&future);
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
 /// Fill NULL values with forward fill.
 ///
 /// # Safety
