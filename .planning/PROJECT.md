@@ -57,6 +57,9 @@ v0.9.0 (WASM Runtime Verification) is parked with only the operator live-CI nega
 - ✓ Ensemble prediction intervals via the existing conformal path (`ts_cv_folds_by` + `ts_conformal_calibrate`/apply; per-fold loop for the scalar ensemble surfaces) — v0.8.0 (EPI-01)
 - ✓ Ensemble introspection: `ts_ensemble_inspect_by` (members + weights) / `ts_auto_ensemble_inspect_by` (selected members + MSE score + rank) — v0.8.0 (INSP-01)
 
+- ✓ Reference-fixture harness (`validation/reference/`: R + uv-pinned Python generators → versioned JSON fixtures → Rust loader with value assertions) — v0.10.0 Phase 9 (TEST-01)
+- ✓ anofox-regression =0.5.15 + anofox-forecast 0.15.10 (multi-scale exog OLS matches numpy lstsq; MFLES #219 + panel NaN guards); MSRV corrected to 1.89 — v0.10.0 Phase 9 (DEP-01/02/04)
+
 ### Active
 
 <!-- v0.10.0 Statistical Correctness — see REQUIREMENTS.md for REQ-IDs. -->
@@ -66,7 +69,7 @@ v0.9.0 (WASM Runtime Verification) is parked with only the operator live-CI nega
 - [ ] No statistical computation remains in C++ or SQL macros
 - [ ] Core statistics, features, detection and conformal outputs match R/scipy/tsfresh references
 - [ ] Upstream anofox-forecast diagnostics/model-selection fixes merged and consumed
-- [ ] Dependencies bumped (anofox-regression 0.5.15, anofox-forecast ≥0.15.10, fdars-core 0.47)
+- [ ] Dependencies bumped — anofox-regression 0.5.15 + anofox-forecast 0.15.10 done (Phase 9); fdars-core 0.47 pending (Phase 15)
 
 Parked from v0.9.0: Phase 08 live-CI negative-control push (operator action).
 
@@ -130,6 +133,8 @@ Deferred from v0.7.0 (candidates for a future milestone):
 | EPI-01 reuses the existing conformal path (no new interval machinery) (v0.8.0) | Conformal is model-agnostic on residual columns; DoD says reuse, don't rebuild | ✓ Good — bounds produced for both surfaces; surfaced a pre-existing `ts_cv_forecast_by('AutoEnsemble')` segfault (worked around + documented as tech debt) |
 | INSP-01 scoped to what crate 0.15.3 exposes: full weights for explicit-member, NULL weights for AutoEnsemble non-Mean (v0.8.0) | Crate has no accessor for AutoEnsemble's inner combination weights; re-implementing selection would be fragile/drift-prone | ✓ Good — honest surface; limitation documented; upstream enhancement filed as tech debt |
 | Verify executor/agent reports against git+disk, re-run every example against the built extension (v0.8.0) | Two executors fabricated commit hashes/SUMMARY files; three long-running agents died on transient API errors mid-run | ✓ Good — caught + reconciled all fabrications; per-task commits protected work across agent deaths |
+| Reference-fixture harness before any statistical fix (v0.10.0) | Length-only tests let every audited bug ship; fixes need checked-in R/scipy/numpy reference values | ✓ Good — Phase 9 fixtures regenerate byte-identically; 125-entry pre-bump snapshot proved only MFLES/Laplace moved |
+| MSRV 1.89 (v0.10.0) | trueno (via anofox-forecast) needs AVX-512 intrinsics stabilised in 1.89; 1.86 claim was false | ✓ Good — `cargo +1.88.0` refused, `+1.89.0` builds/tests; CI rust-msrv job |
 
 ## Evolution
 
@@ -149,4 +154,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-08 — started v0.10.0 Statistical Correctness milestone*
+*Last updated: 2026-10-09 after v0.10.0 Phase 9*
