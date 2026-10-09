@@ -453,6 +453,55 @@ Scalar functions operate on arrays and return scalar values or structs. They are
 
 ---
 
+### NULL handling
+
+Every scalar function in this document is marshalled through the shared `ListDoubleReader` /
+`ScalarArgReader` (constant/dictionary-safe) and applies one of four NULL-missing-data policy
+classes, decided in Rust — never a silent C++ splice:
+
+- **Residual pools** (`residuals[]` in `ts_conformal_quantile`, `ts_conformal_predict`,
+  `ts_conformal_predict_asymmetric`, `ts_conformal_learn`, `ts_bootstrap_intervals`,
+  `ts_bootstrap_quantiles`) drop a `NULL`/`NaN` residual before computing — a `NULL` residual
+  is dropped the same way a metric function drops an incomplete pair.
+- **Paired evaluation inputs** (`ts_conformal_coverage`'s `actual`/`lower`/`upper`,
+  `ts_conformal_evaluate`'s same three, `ts_mean_interval_width`'s `lower`/`upper`, and each
+  per-step `(forecast, actual)` pair inside `ts_conformal_predict_per_step`) use
+  pairwise-complete observations: a position is dropped only when at least one side of the
+  pair is `NULL`/`NaN` at that position.
+- **Forecast positions** that an interval is built around (`ts_conformal_intervals`,
+  `ts_conformal_predict(_asymmetric)`, `ts_conformal_apply`, `ts_conformal_predict_per_step`,
+  both bootstrap functions) are position-preserving: a `NULL` forecast at position `k` yields
+  `NULL` at position `k` in every output array (`point`/`lower`/`upper`), never a splice that
+  shifts later positions into earlier ones.
+- **Parameter lists** (`ts_conformal_learn`'s `alphas`, `ts_conformal_apply`'s calibration
+  profile arrays, `ts_bootstrap_quantiles`'s `quantile_levels`) reject a `NULL` entry as a
+  malformed argument, not data — the error names the parameter and the 1-based position.
+
+```sql
+-- Residual pool: a NULL residual is dropped, same quantile as the complete list.
+SELECT ts_conformal_quantile([1, NULL, 2, 3]::DOUBLE[], 0.1) = ts_conformal_quantile([1, 2, 3]::DOUBLE[], 0.1);
+-- true
+
+-- Forecast position: NULL at position 2 is NULL at position 2 in both bounds.
+SELECT (ts_conformal_intervals([10, NULL, 12]::DOUBLE[], 2.0)).lower;
+-- [8.0, NULL, 10.0]
+```
+
+**`ts_conformal_predict_per_step` also validates the residual count against `horizon` in
+Rust**: the flat `fold_forecasts`/`fold_actuals` length must be an exact multiple of
+`horizon`, or the call errors (the number of folds is never silently truncated by integer
+division):
+
+```sql
+SELECT ts_conformal_predict_per_step(
+    [1, 2, 3, 4, 5, 6, 7]::DOUBLE[], [1, 2, 3, 4, 5, 6, 7]::DOUBLE[],
+    [1, 2, 3]::DOUBLE[], 0.1, 3
+);
+-- Invalid Input Error: ts_conformal_predict_per_step: Invalid input: per-step conformal: residual count 7 is not a multiple of horizon 3
+```
+
+---
+
 ### Calibration Functions
 
 These functions compute conformity scores from residuals.

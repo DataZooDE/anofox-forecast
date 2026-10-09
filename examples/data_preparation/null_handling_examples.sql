@@ -147,6 +147,43 @@ THEN 'PASS changepoints_macro_row_aligned_under_leading_nulls' ELSE error(
     'FAIL changepoints_macro_row_aligned_under_leading_nulls'
 ) END AS result;
 
+-- ============================================================================
+-- SECTION 4 — Conformal/bootstrap NULL classes and per-step validation (D-02, D-10)
+-- ============================================================================
+
+.print ''
+.print 'SECTION 4: conformal/bootstrap NULL policy classes and per-step residual-count validation'
+.print ''
+
+-- Paired evaluation metrics (coverage, mean_interval_width) drop incomplete
+-- pairs via complete_cases in Rust (D-02).
+SELECT CASE WHEN (
+    SELECT ts_conformal_coverage([1, 2, 3]::DOUBLE[], [0, NULL, 4]::DOUBLE[], [2, 3, 5]::DOUBLE[]) = 0.5
+) THEN 'PASS conformal_coverage_drops_incomplete_pairs' ELSE error(
+    'FAIL conformal_coverage_drops_incomplete_pairs'
+) END AS result;
+
+-- A NULL forecast position is position-preserving: ts_conformal_intervals
+-- gives NULL lower/upper at exactly that position, not a spliced-out array.
+SELECT CASE WHEN (
+    SELECT (ts_conformal_intervals([10, NULL, 12]::DOUBLE[], 2.0)).lower IS NOT DISTINCT FROM [8.0, NULL, 10.0]
+       AND (ts_conformal_intervals([10, NULL, 12]::DOUBLE[], 2.0)).upper IS NOT DISTINCT FROM [12.0, NULL, 14.0]
+) THEN 'PASS conformal_intervals_null_forecast_position_preserving' ELSE error(
+    'FAIL conformal_intervals_null_forecast_position_preserving'
+) END AS result;
+
+-- D-10: per-step conformal errors in Rust when the flat residual count is
+-- not a multiple of horizon, naming both counts — no silent n_folds
+-- truncation. try() turns the error into NULL for this self-checking script.
+SELECT CASE WHEN (
+    SELECT try(ts_conformal_predict_per_step(
+        [1, 2, 3, 4, 5, 6, 7]::DOUBLE[], [1, 2, 3, 4, 5, 6, 7]::DOUBLE[],
+        [1, 2, 3]::DOUBLE[], 0.1, 3
+    )) IS NULL
+) THEN 'PASS per_step_residual_count_not_multiple_of_horizon_errors' ELSE error(
+    'FAIL per_step_residual_count_not_multiple_of_horizon_errors'
+) END AS result;
+
 .print ''
 .print '============================================================================='
 .print 'ALL SECTIONS PASSED'

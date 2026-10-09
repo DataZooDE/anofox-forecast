@@ -122,6 +122,27 @@ use the semver numbering this project started with.
   (the table surface, `_ts_features_native`) now applies the identical policy and agrees
   with `ts_features_agg`/`ts_features` on the same series — previously it wrote `NaN` for a
   NULL input value and never errored on an interior NULL.
+- **Per-step conformal errors when the residual count is not a multiple of the horizon
+  (previously truncated silently), plan 12-04.** `ts_conformal_predict_per_step` used to
+  compute `n_folds = fold_forecasts.size() / horizon` in C++ — any residual count that
+  wasn't an exact multiple of `horizon` silently truncated to fewer folds, dropping the
+  trailing partial fold with no warning. Rust now owns this validation: a non-multiple
+  residual count is a hard SQL error naming both counts (e.g. `residual count 7 is not a
+  multiple of horizon 3`); `horizon <= 0` is likewise an error, not a silent `NULL` row.
+- **Conformal/bootstrap NULL handling is position-preserving and pairwise-complete, not a
+  splice-shift (plan 12-04, D-02).** Every conformal/bootstrap scalar
+  (`ts_conformal_quantile`, `ts_conformal_intervals`, `ts_conformal_predict(_asymmetric)`,
+  `ts_conformal_learn`/`ts_conformal_apply`, `ts_conformal_coverage`/`ts_conformal_evaluate`,
+  `ts_mean_interval_width`, `ts_conformal_predict_per_step`, `ts_bootstrap_intervals`,
+  `ts_bootstrap_quantiles`) now reads its `LIST(DOUBLE)` arguments through the shared
+  `ListDoubleReader`/`ScalarArgReader` (D-01) instead of a private `ExtractListAsDouble`
+  copy that dropped NULL elements before the FFI call (the old splice-shift behaviour).
+  Residual pools drop `NULL`/`NaN` entries (`missing::drop_missing`); paired evaluation
+  inputs use pairwise-complete observations (`missing::complete_cases`); a `NULL` forecast
+  position yields `NULL` at that position only in every output array
+  (`missing::fill_missing` + `missing::propagate_missing`) — never shifting later
+  positions into earlier ones; parameter lists (`alphas`, calibration-profile arrays,
+  `quantile_levels`) reject a `NULL` entry as a malformed argument naming the parameter.
 
 ### Added
 

@@ -201,6 +201,13 @@ SELECT * FROM ts_conformal_apply_by('new_forecasts', unique_id, yhat,
 
 Use these when composing custom pipelines over `LIST(residual)` arrays.
 
+**NULL policy (gotcha):** residual pools drop `NULL`/`NaN` entries; forecast positions
+(`ts_conformal_intervals`/`predict(_asymmetric)`/`apply`/`predict_per_step`, both bootstrap
+functions) are position-preserving (`NULL` in → `NULL` at that position out, never a splice);
+`ts_conformal_predict_per_step` errors in Rust if the flat residual count isn't an exact
+multiple of `horizon` (`try(...)` to downgrade to `NULL`) — see
+`docs/api/11-conformal-prediction.md#null-handling`.
+
 ## Bootstrap prediction intervals
 
 Residual-bootstrap alternative to conformal — resample forecast residuals to

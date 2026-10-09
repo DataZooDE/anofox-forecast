@@ -1,0 +1,152 @@
+# name: test/sql/ts_conformal_null_policy.test
+# description: Phase 12 plan 12-04 conformal/bootstrap NULL policy (D-02) and
+#   per-step residual-count-vs-horizon validation (D-10). Covers
+#   conformal.cpp and bootstrap.cpp on the shared ListDoubleReader/
+#   ScalarArgReader with Rust-owned pairwise-complete / position-preserving
+#   missing-data policy.
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Residual pool drops NULL (ts_conformal_quantile)
+#######################################
+
+query I
+SELECT ts_conformal_quantile([1, NULL, 2, 3]::DOUBLE[], 0.1) = ts_conformal_quantile([1, 2, 3]::DOUBLE[], 0.1);
+----
+true
+
+#######################################
+# Forecast-position NULL is position-preserving (ts_conformal_intervals)
+#######################################
+
+query I
+SELECT (ts_conformal_intervals([10, NULL, 12]::DOUBLE[], 2.0)).lower IS NOT DISTINCT FROM [8.0, NULL, 10.0];
+----
+true
+
+query I
+SELECT (ts_conformal_intervals([10, NULL, 12]::DOUBLE[], 2.0)).upper IS NOT DISTINCT FROM [12.0, NULL, 14.0];
+----
+true
+
+#######################################
+# ts_conformal_predict: residual pool drops NULL, forecast position
+# preserved (D-02)
+#######################################
+
+query I
+SELECT
+    (ts_conformal_predict([1, NULL, -2, 3, -1, 2]::DOUBLE[], [10, NULL, 12]::DOUBLE[], 0.2)).point[2] IS NULL
+    AND (ts_conformal_predict([1, NULL, -2, 3, -1, 2]::DOUBLE[], [10, NULL, 12]::DOUBLE[], 0.2)).lower[2] IS NULL
+    AND (ts_conformal_predict([1, NULL, -2, 3, -1, 2]::DOUBLE[], [10, NULL, 12]::DOUBLE[], 0.2)).upper[2] IS NULL;
+----
+true
+
+query I
+SELECT
+    (ts_conformal_predict([1, NULL, -2, 3, -1, 2]::DOUBLE[], [10, NULL, 12]::DOUBLE[], 0.2)).point[3]
+    - (ts_conformal_predict([1, NULL, -2, 3, -1, 2]::DOUBLE[], [10, NULL, 12]::DOUBLE[], 0.2)).lower[3]
+    = ts_conformal_quantile([1, -2, 3, -1, 2]::DOUBLE[], 0.2);
+----
+true
+
+#######################################
+# Paired evaluation metrics drop incomplete pairs (D-02)
+#######################################
+
+query I
+SELECT ts_conformal_coverage([1, 2, 3]::DOUBLE[], [0, NULL, 4]::DOUBLE[], [2, 3, 5]::DOUBLE[]) = 0.5;
+----
+true
+
+query I
+SELECT ts_mean_interval_width([0, NULL, 4]::DOUBLE[], [2, 3, 5]::DOUBLE[]) = 1.5;
+----
+true
+
+#######################################
+# D-10: per-step residual count must be a multiple of horizon
+#######################################
+
+statement error
+SELECT ts_conformal_predict_per_step([1, 2, 3, 4, 5, 6, 7]::DOUBLE[], [1, 2, 3, 4, 5, 6, 7]::DOUBLE[], [1, 2, 3]::DOUBLE[], 0.1, 3);
+----
+residual count 7 is not a multiple of horizon 3
+
+#######################################
+# Per-step pairwise-complete calibration and position-preserving point
+# forecasts (D-02). 4 folds x 3 steps; fold 2, step 1 (1-indexed) is NULL
+# in the actuals.
+#######################################
+
+statement ok
+CREATE TABLE per_step AS SELECT
+    [100.0, 102.0, 104.0, 110.0, 112.0, 114.0, 120.0, 122.0, 124.0, 130.0, 132.0, 134.0]::DOUBLE[] AS fold_forecasts,
+    [101.0, 103.0, 106.0, 109.0, 111.0, 116.0, 121.0, 123.0, 127.0, 128.0, 134.0, 132.0]::DOUBLE[] AS fold_actuals_complete,
+    [101.0, 103.0, 106.0, NULL, 111.0, 116.0, 121.0, 123.0, 127.0, 128.0, 134.0, 132.0]::DOUBLE[] AS fold_actuals_missing,
+    [100.0, 105.0, 110.0]::DOUBLE[] AS point;
+
+query I
+SELECT
+    (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_missing, point, 0.1, 3)).half_widths[2]
+    = (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_complete, point, 0.1, 3)).half_widths[2]
+    AND (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_missing, point, 0.1, 3)).half_widths[3]
+    = (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_complete, point, 0.1, 3)).half_widths[3]
+    AND (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_missing, point, 0.1, 3)).half_widths[1] IS NOT NULL
+FROM per_step;
+----
+true
+
+query I
+SELECT
+    (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_complete, [100.0, NULL, 110.0]::DOUBLE[], 0.1, 3)).point[2] IS NULL
+    AND (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_complete, [100.0, NULL, 110.0]::DOUBLE[], 0.1, 3)).lower[2] IS NULL
+    AND (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_complete, [100.0, NULL, 110.0]::DOUBLE[], 0.1, 3)).upper[2] IS NULL
+    AND (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_complete, [100.0, NULL, 110.0]::DOUBLE[], 0.1, 3)).point[1]
+        = (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_complete, point, 0.1, 3)).point[1]
+    AND (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_complete, [100.0, NULL, 110.0]::DOUBLE[], 0.1, 3)).point[3]
+        = (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_complete, point, 0.1, 3)).point[3]
+FROM per_step;
+----
+true
+
+#######################################
+# Bootstrap: NULL residual drops from the pool, NULL forecast position is
+# NULL only at that position (D-02)
+#######################################
+
+query I
+SELECT
+    (ts_bootstrap_intervals([1, NULL, -1, 2]::DOUBLE[], [10, NULL, 12]::DOUBLE[], 200, 0.9, 42)).lower[1]
+    = (ts_bootstrap_intervals([1, -1, 2]::DOUBLE[], [10, 11, 12]::DOUBLE[], 200, 0.9, 42)).lower[1]
+    AND (ts_bootstrap_intervals([1, NULL, -1, 2]::DOUBLE[], [10, NULL, 12]::DOUBLE[], 200, 0.9, 42)).lower[3]
+    = (ts_bootstrap_intervals([1, -1, 2]::DOUBLE[], [10, 11, 12]::DOUBLE[], 200, 0.9, 42)).lower[3]
+    AND (ts_bootstrap_intervals([1, NULL, -1, 2]::DOUBLE[], [10, NULL, 12]::DOUBLE[], 200, 0.9, 42)).upper[1]
+    = (ts_bootstrap_intervals([1, -1, 2]::DOUBLE[], [10, 11, 12]::DOUBLE[], 200, 0.9, 42)).upper[1]
+    AND (ts_bootstrap_intervals([1, NULL, -1, 2]::DOUBLE[], [10, NULL, 12]::DOUBLE[], 200, 0.9, 42)).upper[3]
+    = (ts_bootstrap_intervals([1, -1, 2]::DOUBLE[], [10, 11, 12]::DOUBLE[], 200, 0.9, 42)).upper[3]
+    AND (ts_bootstrap_intervals([1, NULL, -1, 2]::DOUBLE[], [10, NULL, 12]::DOUBLE[], 200, 0.9, 42)).lower[2] IS NULL;
+----
+true
+
+#######################################
+# Parameter-list NULL is a user error, not a data-missingness case
+#######################################
+
+statement error
+SELECT ts_bootstrap_quantiles([1, -1, 2]::DOUBLE[], [10, 11, 12]::DOUBLE[], 50, [0.1, NULL]::DOUBLE[], 42);
+----
+must not contain NULL
+
+#######################################
+# Constant/literal list argument gives the correct per-row result
+# (ListDoubleReader is ToUnifiedFormat-based, not row-0-only)
+#######################################
+
+query I
+SELECT count(*) FROM range(4) r, (SELECT [1.0, -2.0, 3.0, -1.0, 2.0]::DOUBLE[] AS res) c
+WHERE ts_conformal_quantile(res, 0.2) = (SELECT ts_conformal_quantile([1.0, -2.0, 3.0, -1.0, 2.0]::DOUBLE[], 0.2));
+----
+4
