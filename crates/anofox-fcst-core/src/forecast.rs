@@ -960,6 +960,28 @@ pub fn forecast_with_exog(
         });
     }
 
+    // arima_order / seasonal_order (D-08/D-09) are only meaningful for ARIMA
+    // — same guard as forecast()'s equivalent check. Without this, a
+    // non-constant regressor routes execution through forecast_crate_exog
+    // directly (bypassing the `.into()` delegation to forecast() below,
+    // which is the only place this guard would otherwise run), silently
+    // ignoring arima_order/seasonal_order on every other model instead of
+    // erroring (D-04).
+    if options.model != ModelType::ARIMA
+        && (options.arima_order.is_some() || options.seasonal_order.is_some())
+    {
+        let param = if options.arima_order.is_some() {
+            "arima_order"
+        } else {
+            "seasonal_order"
+        };
+        return Err(ForecastError::InvalidParameter {
+            param: param.to_string(),
+            value: options.model.name().to_string(),
+            reason: "only valid when method='ARIMA'".to_string(),
+        });
+    }
+
     // Validate exogenous data if provided — against the ORIGINAL dimensions,
     // before prepare_series trims/interpolates. Exog arrays are caller-aligned
     // to the raw input; align_exog (below) re-slices them onto the trimmed range.

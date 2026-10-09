@@ -639,3 +639,35 @@ fn exog_typical_regression_effect() {
         common::assert_close(*p, *want, sql_point_abs, 0.0, &format!("point[{i}]"));
     }
 }
+
+/// WR-01 regression: `forecast_crate_exog`'s regressors-present branch must
+/// reject `arima_order`/`seasonal_order` set on any model other than ARIMA —
+/// the same guard `forecast()` applies (D-04) — instead of silently
+/// ignoring the parameter. Uses ETS (exog-capable, not ARIMA) with a real
+/// regressor so execution reaches `forecast_crate_exog` directly rather than
+/// delegating to `forecast()` via the no-regressor `.into()` branch.
+#[test]
+fn arima_order_on_non_arima_model_errors_on_exog_path() {
+    let n = 40;
+    let horizon = 4;
+    let (y, x1) = generate_exog_series(n, horizon);
+    let (x1_hist, x1_future) = (x1[..n].to_vec(), x1[n..].to_vec());
+    let values: Vec<Option<f64>> = y.iter().copied().map(Some).collect();
+    let exog = ExogenousData::new(vec![x1_hist], vec![x1_future]);
+
+    let options = ForecastOptionsExog {
+        model: ModelType::ETS,
+        horizon,
+        ets_spec: Some("AAN".to_string()),
+        arima_order: Some([1, 1, 1]),
+        exog: Some(exog),
+        ..Default::default()
+    };
+
+    let err = forecast_with_exog(&values, &options).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("arima_order") && msg.to_lowercase().contains("ets"),
+        "expected error naming arima_order and ETS, got: {msg}"
+    );
+}
