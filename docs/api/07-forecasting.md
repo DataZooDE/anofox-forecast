@@ -549,7 +549,7 @@ FROM ts_forecast_exog_by(
 )
 ORDER BY forecast_step
 LIMIT 1;
--- model_name = 'AutoARIMA(<p>,<d>,<q>)[...] with regressors'
+-- model_name reports the selected order with ' with regressors' appended, e.g. 'AutoARIMA(3,0,1)(0,1,0)[9] with regressors'
 ```
 
 ---

@@ -28,7 +28,7 @@ A time series forecasting extension for DuckDB with 36 models, statistical diagn
 ## ✨ Key Features
 
 ### 🎯 Forecasting (36 Models)
-- **AutoML**: AutoETS, AutoARIMA, AutoMFLES, AutoMSTL, AutoTBATS
+- **AutoML**: AutoETS, AutoARIMA, AutoTBATS, plus the deprecated-but-accepted aliases AutoMFLES/AutoMSTL (same code path as MFLES/MSTL, reported `model_name` matches the bare family name)
 - **Statistical**: ETS, ARIMA, Theta, Holt-Winters, Seasonal Naive
 - **Advanced**: TBATS, MSTL, MFLES (multiple seasonality)
 - **Intermittent Demand**: Croston, ADIDA, IMAPA, TSB
@@ -36,7 +36,7 @@ A time series forecasting extension for DuckDB with 36 models, statistical diagn
 - **Volatility & State-Space**: GARCH (conditional volatility), Kalman filter (local-level / local-linear-trend)
 - **Global / Panel**: GlobalETS, GlobalTheta, GlobalCroston — cross-series "fit once, forecast all" via `ts_forecast_panel_by`
 - **Multivariate**: VAR (vector autoregression) via `ts_forecast_var_by` — N value columns → per-variable forecasts
-- **Exogenous Variables**: ARIMAX, ThetaX, MFLESX (external regressors support)
+- **Exogenous Variables**: crate-native exog support for Naive, ARIMA, AutoARIMA, the Theta family, ETS/AutoETS, MFLES, and MSTL — reported `model_name` is the base model's own name with `" with regressors"` appended (no separate model name)
 
 ### 🔬 Statistical Diagnostics
 - **Stationarity**: ADF, KPSS, and a combined four-way verdict (`ts_adf_by`, `ts_kpss_by`, `ts_stationarity_by`)
@@ -124,7 +124,7 @@ LOAD anofox_forecast;
 
 ### DataZoo Repository (latest builds)
 
-For the freshest builds — ahead of the community-extensions cadence — install from DataZoo's own extension repository. These binaries are unsigned (independent of the DuckDB Foundation), so start DuckDB with the `-unsigned` flag:
+For the freshest builds — ahead of the community-extensions cadence — install from DataZoo's own extension repository. These binaries are unsigned (independent of the DuckDB Foundation), so start DuckDB with the `-unsigned` flag. This command requires outbound network access and will error in a network-restricted environment:
 
 ```sql
 -- launch with:  duckdb -unsigned
@@ -154,7 +154,9 @@ GEN=ninja make release       # With Ninja (faster)
 
 ## 🚀 Quick Start on M5 Dataset
 
-The forecast takes ~2 minutes on a Dell XPS 13. (Requires DuckDB v1.4.5 LTS or v1.5.6+).
+The forecast takes ~2 minutes on a Dell XPS 13. (Requires DuckDB v1.4.5 LTS or v1.5.6+). This
+loads `httpfs` and reads a remote parquet file, so it requires outbound network access and the
+`httpfs` extension binary and will error without either:
 
 ```sql
 -- Load extension

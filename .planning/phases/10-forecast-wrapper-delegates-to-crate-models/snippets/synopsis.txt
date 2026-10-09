@@ -10,3 +10,19 @@ docs/api/07-forecasting.md	ts_forecast_ensemble_by(
 docs/api/07-forecasting.md	ts_ensemble_inspect_by(
 docs/api/07-forecasting.md	ts_auto_ensemble_inspect_by(
 docs/api/07-forecasting.md	ts_forecast_var_by(
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_by(
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_panel_by(
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_var_by(
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_exog_by(
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_exog(source, date_col, target_col, xreg_cols,
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast(source VARCHAR, date_col COLUMN, target_col COLUMN,
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_ensemble_by(
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_ensemble_inspect_by(
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_auto_ensemble_inspect_by(
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_agg(date_col TIMESTAMP, value_col DOUBLE, method VARCHAR, horizon INTEGER, params MAP)
+docs/api/08-cross-validation.md	ts_cv_folds_by(
+docs/api/08-cross-validation.md	ts_cv_forecast_by(
+docs/api/08-cross-validation.md	ts_cv_hydrate_by(
+docs/api/08-cross-validation.md	ts_cv_split_folds_by(
+docs/api/08-cross-validation.md	ts_cv_split_by(
+docs/api/08-cross-validation.md	ts_cv_split_index_by(

@@ -24,12 +24,16 @@ These functions use **position-based fold assignment** (not date arithmetic), wh
 If your data has gaps or irregular frequency, use [`ts_fill_gaps_by`](04-data-preparation.md#ts_fill_gaps_by) to prepare it before running cross-validation:
 
 ```sql
--- Prepare data: fill gaps and ensure consistent frequency
+CREATE OR REPLACE TABLE raw_data AS
+SELECT series_id, (DATE '2020-01-01' + INTERVAL (i) MONTH) AS date, 100.0 + i * 2.0 AS value
+FROM range(0, 24) t(i) CROSS JOIN (SELECT unnest([1, 2]) AS series_id);
+
+-- Prepare data: fill gaps and ensure consistent frequency (5-arg macro, no params)
 CREATE TABLE prepared_data AS
-SELECT * FROM ts_fill_gaps_by('raw_data', series_id, date, value, '1mo', MAP{});
+SELECT * FROM ts_fill_gaps_by('raw_data', series_id, date, value, '1mo');
 
 -- Then generate folds on prepared data
-SELECT * FROM ts_cv_folds_by('prepared_data', series_id, date, value, 3, 12, MAP{});
+SELECT * FROM ts_cv_folds_by('prepared_data', series_id, date, value, 3, 6, MAP{});
 ```
 
 ---
@@ -41,6 +45,10 @@ SELECT * FROM ts_cv_folds_by('prepared_data', series_id, date, value, 3, 12, MAP
 Use the two-step workflow for cross-validation:
 
 ```sql
+CREATE OR REPLACE TABLE data AS
+SELECT unique_id, (DATE '2020-01-01' + INTERVAL (i) DAY) AS ds, 50.0 + i * 0.3 AS y
+FROM range(0, 100) t(i) CROSS JOIN (SELECT unnest([1, 2]) AS unique_id);
+
 -- Step 1: Generate folds (both train and test rows with actual dates)
 CREATE TABLE cv_folds AS
 SELECT * FROM ts_cv_folds_by('data', unique_id, ds, y, 3, 12, MAP{});
@@ -122,6 +130,15 @@ ts_cv_folds_by(
 
 **Examples:**
 ```sql
+-- Shared fixture reused by every example on this page (store_id, date, revenue, plus
+-- two extra feature columns used later by the ts_cv_hydrate_by examples)
+CREATE OR REPLACE TABLE sales_data AS
+SELECT store_id, (DATE '2024-01-01' + INTERVAL (i) DAY) AS date,
+       100.0 + store_id * 10.0 + 0.5 * i AS revenue,
+       90.0 + 0.4 * i AS competitor_sales,
+       15.0 + 5.0 * sin(2 * pi() * i / 365.0) AS actual_temp
+FROM range(0, 300) t(i) CROSS JOIN (SELECT unnest([1, 2]) AS store_id);
+
 -- Basic ML backtesting with 3 folds, 6-period horizon
 SELECT * FROM ts_cv_folds_by(
     'sales_data', store_id, date, revenue,
@@ -193,10 +210,12 @@ Returns the test rows with forecast columns added:
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 | `model_name` | VARCHAR | Model used |
 
-`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band for
-every model except GARCH, Kalman and AutoEnsemble, not statistically calibrated. Use conformal
-prediction intervals (`docs/api/11-conformal-prediction.md`) for calibrated coverage.
-(being corrected in v0.10.0, Phase 10)
+`yhat_lower` / `yhat_upper` are each model's own crate-native prediction interval at
+`confidence_level`; see
+[07-forecasting.md#prediction-intervals-fitted-values-and-input-handling](07-forecasting.md#prediction-intervals-fitted-values-and-input-handling)
+for the known per-model calibration caveats and which paths return `NULL`. Calibrate with
+the conformal prediction functions (`docs/api/11-conformal-prediction.md`) for guaranteed
+coverage.
 
 **Key Features:**
 
@@ -281,7 +300,7 @@ ts_cv_hydrate_by(
 ```sql
 -- Create folds
 CREATE TABLE cv_folds AS
-SELECT * FROM ts_cv_folds_by('sales', store_id, date, revenue, 3, 30, MAP{});
+SELECT * FROM ts_cv_folds_by('sales_data', store_id, date, revenue, 3, 30, MAP{});
 
 -- Hydrate with unknown features (masking applied automatically)
 -- Unknown features are direct columns - no MAP extraction needed!
@@ -290,7 +309,7 @@ SELECT
     competitor_sales,  -- Direct column access
     actual_temp        -- Direct column access
 FROM ts_cv_hydrate_by(
-    'cv_folds', 'sales', store_id, date,
+    'cv_folds', 'sales_data', store_id, date,
     ['competitor_sales', 'actual_temp'],
     MAP{'strategy': 'last_value'}
 );
@@ -319,7 +338,7 @@ Unknown features:   ✓ Train: actual values
 ```sql
 -- Step 1: Create folds
 CREATE TABLE cv_folds AS
-SELECT * FROM ts_cv_folds_by('sales', store_id, date, revenue, 3, 30, MAP{});
+SELECT * FROM ts_cv_folds_by('sales_data', store_id, date, revenue, 3, 30, MAP{});
 
 -- Step 2: Build ML-ready dataset (unknown features already masked)
 -- Unknown features are direct columns - no extraction needed!
@@ -332,7 +351,7 @@ SELECT
     competitor_sales::DOUBLE AS competitor_sales,
     actual_temp::DOUBLE AS actual_temp
 FROM ts_cv_hydrate_by(
-    'cv_folds', 'sales', store_id, date,
+    'cv_folds', 'sales_data', store_id, date,
     ['competitor_sales', 'actual_temp'],
     MAP{'strategy': 'last_value'}
 );
@@ -365,12 +384,13 @@ View fold date ranges (train/test boundaries) for pre-specified training cutoff 
 **Signature:**
 ```sql
 ts_cv_split_folds_by(
-    source VARCHAR,
-    group_col VARCHAR,
-    date_col VARCHAR,
+    source VARCHAR,           -- Source table name (quoted string)
+    group_col IDENTIFIER,     -- Series grouping column (unquoted)
+    date_col IDENTIFIER,      -- Date/timestamp column (unquoted)
     training_end_times DATE[],
     horizon BIGINT,
-    frequency VARCHAR          -- Required for date arithmetic ('1d', '1mo', etc.)
+    frequency VARCHAR,        -- Required for date arithmetic ('1d', '1mo', etc.)
+    params MAP                -- gap / embargo (same keys as ts_cv_folds_by)
 ) → TABLE
 ```
 
@@ -383,14 +403,16 @@ ts_cv_split_folds_by(
 | `test_start` | TIMESTAMP | Test period start |
 | `test_end` | TIMESTAMP | Test period end |
 | `horizon` | BIGINT | Test period length |
+| `gap` | BIGINT | `gap` param echoed back (0 if not set) |
+| `embargo` | BIGINT | `embargo` param echoed back (0 if not set) |
 
 **Example:**
 ```sql
--- View boundaries for quarterly backtests
+-- View boundaries for quarterly backtests (group_col/date_col are unquoted identifiers)
 SELECT * FROM ts_cv_split_folds_by(
-    'sales_data', 'store_id', 'date',
+    'sales_data', store_id, date,
     ['2024-03-31'::DATE, '2024-06-30'::DATE, '2024-09-30'::DATE],
-    30, '1d'
+    30, '1d', MAP{}
 );
 ```
 
@@ -446,7 +468,7 @@ Fold 3:             [==TRAIN==][TEST]
 -- Quarterly backtests with explicit fiscal quarter end dates
 CREATE TABLE cv_splits AS
 SELECT * FROM ts_cv_split_by(
-    'sales', store_id, date, revenue,
+    'sales_data', store_id, date, revenue,
     ['2024-03-31'::DATE, '2024-06-30'::DATE, '2024-09-30'::DATE],
     30, MAP{}
 );
