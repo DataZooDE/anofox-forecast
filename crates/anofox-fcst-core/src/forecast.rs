@@ -642,9 +642,10 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
     // Generate forecast based on model
     // Note: Auto* models (AutoARIMA, AutoETS, etc.) run their respective algorithms
     // with automatic parameter selection, not a generic model selection heuristic
+    let level = options.confidence_level;
     let result = match options.model {
         // Basic Models
-        ModelType::Naive => forecast_naive(&clean_values, options.horizon),
+        ModelType::Naive => forecast_naive(&clean_values, options.horizon, level),
         ModelType::SeasonalNaive => forecast_seasonal_naive(&clean_values, options.horizon, period),
         ModelType::SMA => {
             let w = if options.window > 0 {
@@ -656,37 +657,45 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         }
         ModelType::RandomWalkDrift => forecast_drift(&clean_values, options.horizon),
         // Exponential Smoothing
-        ModelType::SES => forecast_ses_fixed(&clean_values, options.horizon),
-        ModelType::SESOptimized => forecast_ses_optimized(&clean_values, options.horizon),
-        ModelType::Holt => forecast_holt_lib(&clean_values, options.horizon),
-        ModelType::HoltWinters => forecast_holt_winters_lib(&clean_values, options.horizon, period),
-        ModelType::SeasonalES => forecast_seasonal_es_lib(&clean_values, options.horizon, period),
+        ModelType::SES => forecast_ses_fixed(&clean_values, options.horizon, level),
+        ModelType::SESOptimized => forecast_ses_optimized(&clean_values, options.horizon, level),
+        ModelType::Holt => forecast_holt_lib(&clean_values, options.horizon, level),
+        ModelType::HoltWinters => {
+            forecast_holt_winters_lib(&clean_values, options.horizon, period, level)
+        }
+        ModelType::SeasonalES => {
+            forecast_seasonal_es_lib(&clean_values, options.horizon, period, level)
+        }
         ModelType::SeasonalESOptimized => {
-            forecast_seasonal_es_optimized(&clean_values, options.horizon, period)
+            forecast_seasonal_es_optimized(&clean_values, options.horizon, period, level)
         }
         ModelType::SeasonalWindowAverage => {
-            forecast_seasonal_window_average(&clean_values, options.horizon, period)
+            forecast_seasonal_window_average(&clean_values, options.horizon, period, level)
         }
         ModelType::ETS => forecast_ets(
             &clean_values,
             options.horizon,
             period,
             options.ets_spec.as_deref(),
+            level,
         ),
         ModelType::AutoETS => forecast_auto_ets(
             &clean_values,
             options.horizon,
             period,
             options.model_pool.as_deref(),
+            level,
         ),
         // Theta Methods
-        ModelType::Theta => forecast_theta_stm(&clean_values, options.horizon, period),
+        ModelType::Theta => forecast_theta_stm(&clean_values, options.horizon, period, level),
         ModelType::OptimizedTheta => {
-            forecast_optimized_theta(&clean_values, options.horizon, period)
+            forecast_optimized_theta(&clean_values, options.horizon, period, level)
         }
-        ModelType::DynamicTheta => forecast_dynamic_theta(&clean_values, options.horizon, period),
+        ModelType::DynamicTheta => {
+            forecast_dynamic_theta(&clean_values, options.horizon, period, level)
+        }
         ModelType::DynamicOptimizedTheta => {
-            forecast_dynamic_optimized_theta(&clean_values, options.horizon, period)
+            forecast_dynamic_optimized_theta(&clean_values, options.horizon, period, level)
         }
         ModelType::AutoTheta => forecast_auto_theta(&clean_values, options.horizon, period),
         // ARIMA
@@ -711,7 +720,7 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             } else {
                 vec![12]
             };
-            let mut result = forecast_mstl_lib(&clean_values, options.horizon, &periods)?;
+            let mut result = forecast_mstl_lib(&clean_values, options.horizon, &periods, level)?;
             if options.model == ModelType::AutoMSTL {
                 result.model_name = "AutoMSTL".to_string();
             }
@@ -725,7 +734,7 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             } else {
                 vec![12]
             };
-            forecast_tbats_lib(&clean_values, options.horizon, &periods)
+            forecast_tbats_lib(&clean_values, options.horizon, &periods, level)
         }
         ModelType::AutoTBATS => {
             let periods = if !options.seasonal_periods.is_empty() {
@@ -738,12 +747,16 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             forecast_auto_tbats(&clean_values, options.horizon, periods)
         }
         // Intermittent Demand
-        ModelType::CrostonClassic => forecast_croston_classic(&clean_values, options.horizon),
-        ModelType::CrostonOptimized => forecast_croston_optimized(&clean_values, options.horizon),
-        ModelType::CrostonSBA => forecast_croston_sba(&clean_values, options.horizon),
-        ModelType::TSB => forecast_tsb(&clean_values, options.horizon),
-        ModelType::ADIDA => forecast_adida(&clean_values, options.horizon),
-        ModelType::IMAPA => forecast_imapa(&clean_values, options.horizon),
+        ModelType::CrostonClassic => {
+            forecast_croston_classic(&clean_values, options.horizon, level)
+        }
+        ModelType::CrostonOptimized => {
+            forecast_croston_optimized(&clean_values, options.horizon, level)
+        }
+        ModelType::CrostonSBA => forecast_croston_sba(&clean_values, options.horizon, level),
+        ModelType::TSB => forecast_tsb(&clean_values, options.horizon, level),
+        ModelType::ADIDA => forecast_adida(&clean_values, options.horizon, level),
+        ModelType::IMAPA => forecast_imapa(&clean_values, options.horizon, level),
         // Distributional
         ModelType::Laplace => forecast_laplace(
             &clean_values,
@@ -772,6 +785,7 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             &clean_values,
             options.horizon,
             options.kalman_model.as_deref(),
+            level,
         ),
         // Ensemble Models (Phase 4)
         ModelType::AutoEnsemble => forecast_auto_ensemble(
@@ -784,63 +798,39 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             },
             options.ensemble_method.as_deref(),
             period,
+            level,
         ),
     }?;
 
-    // Calculate confidence intervals — skip for models that document no v1 intervals.
-    // GARCH point forecasts are conditional standard deviations (not level forecasts), so
-    // wrapping them with ±z×σ_historical produces meaningless bounds. Kalman v1 likewise
-    // has no prediction intervals. AutoEnsemble is point-forecast-only in Phase 4
-    // (ensemble prediction intervals deferred to Phase 6, EPI-01).
-    // Emit empty vecs for all three, matching the docs.
-    let (lower, upper) = match options.model {
-        ModelType::GARCH | ModelType::Kalman | ModelType::AutoEnsemble => (vec![], vec![]),
-        _ => calculate_confidence_intervals(&result.point, &clean_values, options.confidence_level),
-    };
-
-    // Calculate fitted values and residuals if requested.
-    // Some models (GARCH, Kalman) return empty fitted from calculate_fitted_values — treat
-    // empty as "not available" and emit None for both fitted and residuals rather than
-    // propagating SES-approximated values that would be semantically wrong.
-    let (fitted, residuals) = if options.include_fitted || options.include_residuals {
-        let fitted_vec = calculate_fitted_values(&clean_values, options.model, period);
-        if fitted_vec.is_empty() {
-            // Model does not surface fitted values in v1; return NULL for both.
-            (None, None)
+    // Prediction intervals, fitted values, residuals, and MSE all come straight from
+    // whichever forecast_* function ran above (D-01/D-03/D-11) — never recomputed here.
+    // A model whose crate Forecast has no native interval/fitted/residual support simply
+    // returns empty/None for those fields (D-02); this wrapper must not paper over that
+    // with a fabricated formula. MSE policy here is interim (mean of r^2 over finite
+    // residuals) — Task 3 (10-01) refines this to exclude interpolated points.
+    let mse = result.residuals.as_ref().and_then(|r| {
+        let finite: Vec<f64> = r.iter().copied().filter(|v| v.is_finite()).collect();
+        if finite.is_empty() {
+            None
         } else {
-            let residuals = if options.include_residuals {
-                Some(
-                    clean_values
-                        .iter()
-                        .zip(fitted_vec.iter())
-                        .map(|(a, f)| a - f)
-                        .collect(),
-                )
-            } else {
-                None
-            };
-            (Some(fitted_vec), residuals)
+            Some(finite.iter().map(|v| v.powi(2)).sum::<f64>() / finite.len() as f64)
         }
-    } else {
-        (None, None)
-    };
-
-    // Calculate MSE
-    let mse = fitted.as_ref().map(|f| {
-        let sse: f64 = clean_values
-            .iter()
-            .zip(f.iter())
-            .map(|(a, f)| (a - f).powi(2))
-            .sum();
-        sse / clean_values.len() as f64
     });
 
     Ok(ForecastOutput {
         point: result.point,
-        lower,
-        upper,
-        fitted: if options.include_fitted { fitted } else { None },
-        residuals,
+        lower: result.lower,
+        upper: result.upper,
+        fitted: if options.include_fitted {
+            result.fitted
+        } else {
+            None
+        },
+        residuals: if options.include_residuals {
+            result.residuals
+        } else {
+            None
+        },
         // Use the model_name from the result (contains selected parameters for Auto* models)
         // Fall back to enum name if result doesn't have a specific name
         model_name: if result.model_name.is_empty() {
@@ -976,6 +966,7 @@ pub fn forecast_with_exog(
                 },
                 options.ensemble_method.as_deref(),
                 period,
+                options.confidence_level,
             ),
             _ => forecast_with_model(
                 &clean_values,
@@ -992,44 +983,19 @@ pub fn forecast_with_exog(
         }
     }?;
 
-    // For fitted values calculation, use the requested model
+    // For model-name fallback, use the requested model
     let model = options.model;
 
-    // Calculate confidence intervals — skip for GARCH, Kalman, and AutoEnsemble
-    // (no synthetic historical-volatility bounds on volatility forecasts or state-space outputs;
-    // AutoEnsemble intervals deferred to Phase 6, EPI-01).
-    let (lower, upper) = match options.model {
-        ModelType::GARCH | ModelType::Kalman | ModelType::AutoEnsemble => (vec![], vec![]),
-        _ => calculate_confidence_intervals(&result.point, &clean_values, options.confidence_level),
-    };
-
-    // Calculate fitted values and residuals if requested
-    let (fitted, residuals) = if options.include_fitted || options.include_residuals {
-        let fitted = calculate_fitted_values(&clean_values, options.model, period);
-        let residuals = if options.include_residuals {
-            Some(
-                clean_values
-                    .iter()
-                    .zip(fitted.iter())
-                    .map(|(a, f)| a - f)
-                    .collect(),
-            )
-        } else {
+    // Prediction intervals, fitted values, residuals, and MSE all come straight from
+    // whichever forecast_*[_with_exog] function ran above (D-01/D-03/D-11) — never
+    // recomputed here. See `forecast()` for the matching non-exog policy and rationale.
+    let mse = result.residuals.as_ref().and_then(|r| {
+        let finite: Vec<f64> = r.iter().copied().filter(|v| v.is_finite()).collect();
+        if finite.is_empty() {
             None
-        };
-        (Some(fitted), residuals)
-    } else {
-        (None, None)
-    };
-
-    // Calculate MSE
-    let mse = fitted.as_ref().map(|f| {
-        let sse: f64 = clean_values
-            .iter()
-            .zip(f.iter())
-            .map(|(a, f)| (a - f).powi(2))
-            .sum();
-        sse / clean_values.len() as f64
+        } else {
+            Some(finite.iter().map(|v| v.powi(2)).sum::<f64>() / finite.len() as f64)
+        }
     });
 
     // Use the model name from the result (e.g., "ARIMAX" for exog) if available,
@@ -1042,10 +1008,18 @@ pub fn forecast_with_exog(
 
     Ok(ForecastOutput {
         point: result.point,
-        lower,
-        upper,
-        fitted: if options.include_fitted { fitted } else { None },
-        residuals,
+        lower: result.lower,
+        upper: result.upper,
+        fitted: if options.include_fitted {
+            result.fitted
+        } else {
+            None
+        },
+        residuals: if options.include_residuals {
+            result.residuals
+        } else {
+            None
+        },
         model_name,
         aic: None,
         bic: None,
@@ -1069,7 +1043,7 @@ fn forecast_with_model(
 ) -> Result<ForecastOutput> {
     match model {
         // Basic Models
-        ModelType::Naive => forecast_naive(values, horizon),
+        ModelType::Naive => forecast_naive(values, horizon, confidence_level),
         ModelType::SeasonalNaive => forecast_seasonal_naive(values, horizon, period),
         ModelType::SMA => {
             let w = if window > 0 { window } else { period.max(3) };
@@ -1077,23 +1051,35 @@ fn forecast_with_model(
         }
         ModelType::RandomWalkDrift => forecast_drift(values, horizon),
         // Exponential Smoothing
-        ModelType::SES => forecast_ses_fixed(values, horizon),
-        ModelType::SESOptimized => forecast_ses_optimized(values, horizon),
-        ModelType::Holt => forecast_holt_lib(values, horizon),
-        ModelType::HoltWinters => forecast_holt_winters_lib(values, horizon, period),
-        ModelType::SeasonalES => forecast_seasonal_es_lib(values, horizon, period),
-        ModelType::SeasonalESOptimized => forecast_seasonal_es_optimized(values, horizon, period),
-        ModelType::SeasonalWindowAverage => {
-            forecast_seasonal_window_average(values, horizon, period)
+        ModelType::SES => forecast_ses_fixed(values, horizon, confidence_level),
+        ModelType::SESOptimized => forecast_ses_optimized(values, horizon, confidence_level),
+        ModelType::Holt => forecast_holt_lib(values, horizon, confidence_level),
+        ModelType::HoltWinters => {
+            forecast_holt_winters_lib(values, horizon, period, confidence_level)
         }
-        ModelType::ETS => forecast_ets(values, horizon, period, None),
-        ModelType::AutoETS => forecast_auto_ets(values, horizon, period, model_pool),
+        ModelType::SeasonalES => {
+            forecast_seasonal_es_lib(values, horizon, period, confidence_level)
+        }
+        ModelType::SeasonalESOptimized => {
+            forecast_seasonal_es_optimized(values, horizon, period, confidence_level)
+        }
+        ModelType::SeasonalWindowAverage => {
+            forecast_seasonal_window_average(values, horizon, period, confidence_level)
+        }
+        ModelType::ETS => forecast_ets(values, horizon, period, None, confidence_level),
+        ModelType::AutoETS => {
+            forecast_auto_ets(values, horizon, period, model_pool, confidence_level)
+        }
         // Theta Methods
-        ModelType::Theta => forecast_theta_stm(values, horizon, period),
-        ModelType::OptimizedTheta => forecast_optimized_theta(values, horizon, period),
-        ModelType::DynamicTheta => forecast_dynamic_theta(values, horizon, period),
+        ModelType::Theta => forecast_theta_stm(values, horizon, period, confidence_level),
+        ModelType::OptimizedTheta => {
+            forecast_optimized_theta(values, horizon, period, confidence_level)
+        }
+        ModelType::DynamicTheta => {
+            forecast_dynamic_theta(values, horizon, period, confidence_level)
+        }
         ModelType::DynamicOptimizedTheta => {
-            forecast_dynamic_optimized_theta(values, horizon, period)
+            forecast_dynamic_optimized_theta(values, horizon, period, confidence_level)
         }
         ModelType::AutoTheta => forecast_auto_theta(values, horizon, period),
         // ARIMA
@@ -1118,7 +1104,7 @@ fn forecast_with_model(
             } else {
                 vec![12]
             };
-            let mut result = forecast_mstl_lib(values, horizon, &periods)?;
+            let mut result = forecast_mstl_lib(values, horizon, &periods, confidence_level)?;
             if model == ModelType::AutoMSTL {
                 result.model_name = "AutoMSTL".to_string();
             }
@@ -1132,7 +1118,7 @@ fn forecast_with_model(
             } else {
                 vec![12]
             };
-            forecast_tbats_lib(values, horizon, &periods)
+            forecast_tbats_lib(values, horizon, &periods, confidence_level)
         }
         ModelType::AutoTBATS => {
             let periods = if !seasonal_periods.is_empty() {
@@ -1145,12 +1131,14 @@ fn forecast_with_model(
             forecast_auto_tbats(values, horizon, periods)
         }
         // Intermittent Demand
-        ModelType::CrostonClassic => forecast_croston_classic(values, horizon),
-        ModelType::CrostonOptimized => forecast_croston_optimized(values, horizon),
-        ModelType::CrostonSBA => forecast_croston_sba(values, horizon),
-        ModelType::TSB => forecast_tsb(values, horizon),
-        ModelType::ADIDA => forecast_adida(values, horizon),
-        ModelType::IMAPA => forecast_imapa(values, horizon),
+        ModelType::CrostonClassic => forecast_croston_classic(values, horizon, confidence_level),
+        ModelType::CrostonOptimized => {
+            forecast_croston_optimized(values, horizon, confidence_level)
+        }
+        ModelType::CrostonSBA => forecast_croston_sba(values, horizon, confidence_level),
+        ModelType::TSB => forecast_tsb(values, horizon, confidence_level),
+        ModelType::ADIDA => forecast_adida(values, horizon, confidence_level),
+        ModelType::IMAPA => forecast_imapa(values, horizon, confidence_level),
         // Distributional
         ModelType::Laplace => forecast_laplace(
             values,
@@ -1162,27 +1150,24 @@ fn forecast_with_model(
         ),
         // Classical (default params: GARCH(1,1), Kalman local_level)
         ModelType::GARCH => forecast_garch(values, horizon, 1, 1),
-        ModelType::Kalman => forecast_kalman(values, horizon, None),
+        ModelType::Kalman => forecast_kalman(values, horizon, None, confidence_level),
         // Ensemble (default params: top_k=3, method=Mean)
-        ModelType::AutoEnsemble => forecast_auto_ensemble(values, horizon, 3, None, period),
+        ModelType::AutoEnsemble => {
+            forecast_auto_ensemble(values, horizon, 3, None, period, confidence_level)
+        }
     }
 }
 
 // Model implementations
 
-fn forecast_naive(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
-    let last = *values.last().expect("values validated non-empty by caller");
-    Ok(ForecastOutput {
-        point: vec![last; horizon],
-        lower: vec![],
-        upper: vec![],
-        fitted: None,
-        residuals: None,
-        model_name: String::new(),
-        aic: None,
-        bic: None,
-        mse: None,
-    })
+fn forecast_naive(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
+    use anofox_forecast::models::baseline::Naive;
+    let ts = make_timeseries(values)?;
+    let mut model = Naive::new();
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("Naive fit failed: {}", e)))?;
+    extract_forecast(&model, horizon, level, "Naive")
 }
 
 fn forecast_seasonal_naive(
@@ -1246,37 +1231,38 @@ fn forecast_drift(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
     })
 }
 
-fn forecast_ses_fixed(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+fn forecast_ses_fixed(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = SimpleExponentialSmoothing::new(0.3);
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("SES fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "SES")
+    extract_forecast(&model, horizon, level, "SES")
 }
 
-fn forecast_ses_optimized(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+fn forecast_ses_optimized(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = SimpleExponentialSmoothing::auto();
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("SESOptimized fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "SESOptimized")
+    extract_forecast(&model, horizon, level, "SESOptimized")
 }
 
-fn forecast_holt_lib(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+fn forecast_holt_lib(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = HoltLinearTrend::auto();
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("Holt fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "Holt")
+    extract_forecast(&model, horizon, level, "Holt")
 }
 
 fn forecast_holt_winters_lib(
     values: &[f64],
     horizon: usize,
     period: usize,
+    level: f64,
 ) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let p = period.max(2);
@@ -1287,10 +1273,15 @@ fn forecast_holt_winters_lib(
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("HoltWinters fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "HoltWinters")
+    extract_forecast(&model, horizon, level, "HoltWinters")
 }
 
-fn forecast_theta_stm(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
+fn forecast_theta_stm(
+    values: &[f64],
+    horizon: usize,
+    period: usize,
+    level: f64,
+) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = if period > 1 {
         Theta::seasonal(period)
@@ -1300,13 +1291,14 @@ fn forecast_theta_stm(values: &[f64], horizon: usize, period: usize) -> Result<F
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("Theta fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "Theta")
+    extract_forecast(&model, horizon, level, "Theta")
 }
 
 fn forecast_optimized_theta(
     values: &[f64],
     horizon: usize,
     period: usize,
+    level: f64,
 ) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = if period > 1 {
@@ -1317,10 +1309,15 @@ fn forecast_optimized_theta(
     model.fit(&ts).map_err(|e| {
         ForecastError::ComputationError(format!("OptimizedTheta fit failed: {}", e))
     })?;
-    extract_forecast(&model, horizon, "OptimizedTheta")
+    extract_forecast(&model, horizon, level, "OptimizedTheta")
 }
 
-fn forecast_dynamic_theta(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
+fn forecast_dynamic_theta(
+    values: &[f64],
+    horizon: usize,
+    period: usize,
+    level: f64,
+) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = if period > 1 {
         DynamicTheta::seasonal(period)
@@ -1330,13 +1327,14 @@ fn forecast_dynamic_theta(values: &[f64], horizon: usize, period: usize) -> Resu
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("DynamicTheta fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "DynamicTheta")
+    extract_forecast(&model, horizon, level, "DynamicTheta")
 }
 
 fn forecast_dynamic_optimized_theta(
     values: &[f64],
     horizon: usize,
     period: usize,
+    level: f64,
 ) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = if period > 1 {
@@ -1347,13 +1345,14 @@ fn forecast_dynamic_optimized_theta(
     model.fit(&ts).map_err(|e| {
         ForecastError::ComputationError(format!("DynamicOptimizedTheta fit failed: {}", e))
     })?;
-    extract_forecast(&model, horizon, "DynamicOptimizedTheta")
+    extract_forecast(&model, horizon, level, "DynamicOptimizedTheta")
 }
 
 fn forecast_seasonal_es_lib(
     values: &[f64],
     horizon: usize,
     period: usize,
+    level: f64,
 ) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let p = period.max(2);
@@ -1361,13 +1360,14 @@ fn forecast_seasonal_es_lib(
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("SeasonalES fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "SeasonalES")
+    extract_forecast(&model, horizon, level, "SeasonalES")
 }
 
 fn forecast_seasonal_es_optimized(
     values: &[f64],
     horizon: usize,
     period: usize,
+    level: f64,
 ) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let p = period.max(2);
@@ -1375,13 +1375,14 @@ fn forecast_seasonal_es_optimized(
     model.fit(&ts).map_err(|e| {
         ForecastError::ComputationError(format!("SeasonalESOptimized fit failed: {}", e))
     })?;
-    extract_forecast(&model, horizon, "SeasonalESOptimized")
+    extract_forecast(&model, horizon, level, "SeasonalESOptimized")
 }
 
 fn forecast_seasonal_window_average(
     values: &[f64],
     horizon: usize,
     period: usize,
+    level: f64,
 ) -> Result<ForecastOutput> {
     use anofox_forecast::models::baseline::SeasonalWindowAverage as SWA;
     let ts = make_timeseries(values)?;
@@ -1391,7 +1392,7 @@ fn forecast_seasonal_window_average(
     model.fit(&ts).map_err(|e| {
         ForecastError::ComputationError(format!("SeasonalWindowAverage fit failed: {}", e))
     })?;
-    extract_forecast(&model, horizon, "SeasonalWindowAverage")
+    extract_forecast(&model, horizon, level, "SeasonalWindowAverage")
 }
 
 /// Validate ETS notation format.
@@ -1427,6 +1428,7 @@ fn forecast_ets(
     horizon: usize,
     period: usize,
     ets_spec: Option<&str>,
+    level: f64,
 ) -> Result<ForecastOutput> {
     // Parse and validate ETS specification if provided
     if let Some(notation) = ets_spec {
@@ -1473,11 +1475,11 @@ fn forecast_ets(
 
     // No explicit spec: use library ETS implementations based on data characteristics
     let mut result = if period > 1 && values.len() >= 2 * period {
-        forecast_holt_winters_lib(values, horizon, period)
+        forecast_holt_winters_lib(values, horizon, period, level)
     } else if values.len() >= 10 {
-        forecast_holt_lib(values, horizon)
+        forecast_holt_lib(values, horizon, level)
     } else {
-        forecast_ses_fixed(values, horizon)
+        forecast_ses_fixed(values, horizon, level)
     }?;
     result.model_name = "ETS".to_string();
     Ok(result)
@@ -1536,9 +1538,17 @@ fn forecast_with_ets_spec(
 }
 
 fn forecast_arima(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
-    // Simplified ARIMA(1,1,1) - AR(1) on differenced series
+    // Simplified ARIMA(1,1,1) - AR(1) on differenced series. This stub (fixed AR
+    // coefficient, no real crate ARIMA fit) is replaced by a real crate ARIMA/SARIMA
+    // fit in a later plan (D-08/D-09) — out of scope here.
     if values.len() < 5 {
-        return forecast_naive(values, horizon);
+        // Degenerate case: delegate to the real crate Naive model (still a last-value
+        // repeat), but keep model_name empty so the caller's existing fallback-to-"ARIMA"
+        // naming is unchanged. Uses the ForecastOptions default level (0.95) since this
+        // stub has no access to the caller's confidence_level.
+        let mut fallback = forecast_naive(values, horizon, 0.95)?;
+        fallback.model_name = String::new();
+        return Ok(fallback);
     }
 
     // Difference the series
@@ -1692,6 +1702,7 @@ fn forecast_auto_ets(
     horizon: usize,
     period: usize,
     model_pool: Option<&str>,
+    level: f64,
 ) -> Result<ForecastOutput> {
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -1780,7 +1791,7 @@ fn forecast_auto_ets(
         Ok(Err(_)) | Err(_) => {
             // Library error or panic (e.g. constant series → NaN optimizer → unwrap panic).
             // Fall back to simplified ETS which handles edge cases gracefully.
-            let mut fallback = forecast_ets(values, horizon, period, None)?;
+            let mut fallback = forecast_ets(values, horizon, period, None, level)?;
             fallback.model_name = "AutoETS".to_string();
             Ok(fallback)
         }
@@ -2351,22 +2362,32 @@ fn forecast_mfles(values: &[f64], horizon: usize, periods: &[usize]) -> Result<F
     })
 }
 
-fn forecast_mstl_lib(values: &[f64], horizon: usize, periods: &[usize]) -> Result<ForecastOutput> {
+fn forecast_mstl_lib(
+    values: &[f64],
+    horizon: usize,
+    periods: &[usize],
+    level: f64,
+) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = MSTLForecaster::new(periods.to_vec());
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("MSTL fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "MSTL")
+    extract_forecast(&model, horizon, level, "MSTL")
 }
 
-fn forecast_tbats_lib(values: &[f64], horizon: usize, periods: &[usize]) -> Result<ForecastOutput> {
+fn forecast_tbats_lib(
+    values: &[f64],
+    horizon: usize,
+    periods: &[usize],
+    level: f64,
+) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = TBATSModel::new(periods.to_vec());
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("TBATS fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "TBATS")
+    extract_forecast(&model, horizon, level, "TBATS")
 }
 
 /// Helper to create a TimeSeries from values (hourly timestamps).
@@ -2381,13 +2402,20 @@ fn make_timeseries(values: &[f64]) -> Result<TimeSeries> {
 }
 
 /// Helper to extract ForecastOutput from a fitted Forecaster model.
+///
+/// Uses `predict_with_intervals(horizon, level)` (not `predict`) so `lower`/`upper`
+/// reflect the model's own interval theory (D-01). A crate `Forecast` with no native
+/// interval support returns `lower()`/`upper()` as `None`, which this helper surfaces
+/// as empty vecs (D-02) — never a fabricated width.
+///
 /// `name_override`: use this instead of model.name() to match our ModelType enum names.
 fn extract_forecast(
     model: &dyn Forecaster,
     horizon: usize,
+    level: f64,
     name_override: &str,
 ) -> Result<ForecastOutput> {
-    let forecast = model.predict(horizon).map_err(|e| {
+    let forecast = model.predict_with_intervals(horizon, level).map_err(|e| {
         ForecastError::ComputationError(format!("{} predict failed: {}", name_override, e))
     })?;
 
@@ -2416,58 +2444,90 @@ fn extract_forecast(
     })
 }
 
-fn forecast_croston_classic(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+/// Point-only variant of [`extract_forecast`] — calls `predict(horizon)`, never
+/// `predict_with_intervals`. Used exclusively by `forecast_explicit_ensemble`
+/// (explicit-member ensembles stay point-only in this plan; member-level interval
+/// support is plan 10-03's scope), so the returned `lower`/`upper` are always empty.
+fn extract_point_forecast(
+    model: &dyn Forecaster,
+    horizon: usize,
+    name_override: &str,
+) -> Result<ForecastOutput> {
+    let forecast = model.predict(horizon).map_err(|e| {
+        ForecastError::ComputationError(format!("{} predict failed: {}", name_override, e))
+    })?;
+
+    let point = forecast.primary().to_vec();
+
+    Ok(ForecastOutput {
+        point,
+        lower: vec![],
+        upper: vec![],
+        fitted: model.fitted_values().map(|v| v.to_vec()),
+        residuals: model.residuals().map(|v| v.to_vec()),
+        model_name: name_override.to_string(),
+        aic: None,
+        bic: None,
+        mse: None,
+    })
+}
+
+fn forecast_croston_classic(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = Croston::new();
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("Croston fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "CrostonClassic")
+    extract_forecast(&model, horizon, level, "CrostonClassic")
 }
 
-fn forecast_croston_optimized(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+fn forecast_croston_optimized(
+    values: &[f64],
+    horizon: usize,
+    level: f64,
+) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = Croston::new().optimized();
     model.fit(&ts).map_err(|e| {
         ForecastError::ComputationError(format!("CrostonOptimized fit failed: {}", e))
     })?;
-    extract_forecast(&model, horizon, "CrostonOptimized")
+    extract_forecast(&model, horizon, level, "CrostonOptimized")
 }
 
-fn forecast_croston_sba(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+fn forecast_croston_sba(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = Croston::new().sba();
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("CrostonSBA fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "CrostonSBA")
+    extract_forecast(&model, horizon, level, "CrostonSBA")
 }
 
-fn forecast_tsb(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+fn forecast_tsb(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = TSB::new();
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("TSB fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "TSB")
+    extract_forecast(&model, horizon, level, "TSB")
 }
 
-fn forecast_adida(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+fn forecast_adida(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = ADIDA::new();
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("ADIDA fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "ADIDA")
+    extract_forecast(&model, horizon, level, "ADIDA")
 }
 
-fn forecast_imapa(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+fn forecast_imapa(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = IMAPA::new();
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("IMAPA fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "IMAPA")
+    extract_forecast(&model, horizon, level, "IMAPA")
 }
 
 // ============================================================================
@@ -2515,7 +2575,12 @@ fn forecast_garch(values: &[f64], horizon: usize, p: usize, q: usize) -> Result<
 ///
 /// Uses `extract_forecast` because `KalmanForecaster` implements the
 /// `Forecaster` trait — same path as all other trait-based models.
-fn forecast_kalman(values: &[f64], horizon: usize, spec: Option<&str>) -> Result<ForecastOutput> {
+fn forecast_kalman(
+    values: &[f64],
+    horizon: usize,
+    spec: Option<&str>,
+    level: f64,
+) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = match spec.unwrap_or("local_level") {
         "local_linear_trend" => KalmanForecaster::local_linear_trend(),
@@ -2525,7 +2590,7 @@ fn forecast_kalman(values: &[f64], horizon: usize, spec: Option<&str>) -> Result
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("Kalman fit failed: {}", e)))?;
     // KalmanForecaster implements Forecaster — extract_forecast works directly
-    extract_forecast(&model, horizon, "Kalman")
+    extract_forecast(&model, horizon, level, "Kalman")
 }
 
 /// Parse a `combination_method` string to a `CombinationMethod` enum variant.
@@ -2573,6 +2638,7 @@ fn forecast_auto_ensemble(
     top_k: usize,
     method_str: Option<&str>,
     period: usize,
+    level: f64,
 ) -> Result<ForecastOutput> {
     use anofox_forecast::models::ensemble::{AutoEnsemble, AutoEnsembleConfig};
 
@@ -2587,7 +2653,7 @@ fn forecast_auto_ensemble(
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("AutoEnsemble fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "AutoEnsemble")
+    extract_forecast(&model, horizon, level, "AutoEnsemble")
 }
 
 // ============================================================================
@@ -2876,8 +2942,9 @@ pub fn forecast_explicit_ensemble(
     let mut ens = Ensemble::new(members).with_method(combination_method);
     ens.fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("Ensemble fit failed: {}", e)))?;
-    // model_name = "Ensemble" (plain, mirroring Phase 4's plain "AutoEnsemble")
-    extract_forecast(&ens, horizon, "Ensemble")
+    // model_name = "Ensemble" (plain, mirroring Phase 4's plain "AutoEnsemble").
+    // Point-only: explicit-member ensemble intervals are plan 10-03's scope.
+    extract_point_forecast(&ens, horizon, "Ensemble")
 }
 
 // ============================================================================
@@ -3302,8 +3369,10 @@ fn forecast_theta_with_exog(
     // Fit regression
     let (coeffs, residuals) = fit_ols_regression(values, &exog.historical);
 
-    // Forecast residuals with Theta (STM for exog path)
-    let residual_forecast = forecast_theta_stm(&residuals, horizon, 1)?;
+    // Forecast residuals with Theta (STM for exog path). Level is irrelevant here:
+    // this function's output always carries empty lower/upper (see below), and the
+    // residual_forecast's own bounds are never read.
+    let residual_forecast = forecast_theta_stm(&residuals, horizon, 1, 0.95)?;
 
     // Calculate exogenous effect for future
     let exog_effect = apply_regression(&coeffs, &exog.future, horizon);
@@ -3408,99 +3477,6 @@ fn select_best_model(values: &[f64], period: usize) -> ModelType {
         (true, false) => ModelType::Holt,
         (false, true) => ModelType::SeasonalNaive,
         (false, false) => ModelType::SES,
-    }
-}
-
-fn calculate_confidence_intervals(
-    forecasts: &[f64],
-    historical: &[f64],
-    confidence: f64,
-) -> (Vec<f64>, Vec<f64>) {
-    // Calculate residual standard error
-    let mean = historical.iter().sum::<f64>() / historical.len() as f64;
-    let variance =
-        historical.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / historical.len() as f64;
-    let std_error = variance.sqrt();
-
-    // Z-score for confidence level
-    let z = match confidence {
-        c if c >= 0.99 => 2.576,
-        c if c >= 0.95 => 1.96,
-        c if c >= 0.90 => 1.645,
-        c if c >= 0.80 => 1.28,
-        _ => 1.0,
-    };
-
-    let lower: Vec<f64> = forecasts
-        .iter()
-        .enumerate()
-        .map(|(i, &f)| f - z * std_error * ((i + 1) as f64).sqrt())
-        .collect();
-
-    let upper: Vec<f64> = forecasts
-        .iter()
-        .enumerate()
-        .map(|(i, &f)| f + z * std_error * ((i + 1) as f64).sqrt())
-        .collect();
-
-    (lower, upper)
-}
-
-fn calculate_fitted_values(values: &[f64], model: ModelType, period: usize) -> Vec<f64> {
-    match model {
-        // GARCH, Kalman, and AutoEnsemble do not surface true fitted values in v1
-        // via this path. AutoEnsemble uses `extract_forecast` which reads fitted
-        // values directly from the Forecaster trait — not via calculate_fitted_values.
-        // Return empty so the caller emits NULL for fitted/residuals rather than
-        // the misleading SES-approximated values the catch-all would produce.
-        ModelType::GARCH | ModelType::Kalman | ModelType::AutoEnsemble => vec![],
-        ModelType::Naive => {
-            let mut fitted = vec![values[0]];
-            fitted.extend(values[..values.len() - 1].iter().cloned());
-            fitted
-        }
-        ModelType::SeasonalNaive => {
-            let p = period.max(1).min(values.len());
-            let mut fitted = vec![values[0]; p.min(values.len())];
-            for i in p..values.len() {
-                fitted.push(values[i - p]);
-            }
-            fitted
-        }
-        ModelType::SeasonalWindowAverage => {
-            // Fitted values are the seasonal averages at each position
-            let p = period.max(1).min(values.len());
-            let mut seasonal_sum = vec![0.0; p];
-            let mut seasonal_count = vec![0usize; p];
-            let mut fitted = Vec::with_capacity(values.len());
-
-            for (i, &val) in values.iter().enumerate() {
-                let pos = i % p;
-                // Fitted value is the current average for this seasonal position
-                if seasonal_count[pos] > 0 {
-                    fitted.push(seasonal_sum[pos] / seasonal_count[pos] as f64);
-                } else {
-                    fitted.push(val); // No prior data, use actual
-                }
-                // Update running average
-                seasonal_sum[pos] += val;
-                seasonal_count[pos] += 1;
-            }
-            fitted
-        }
-        _ => {
-            // SES fitted values
-            let alpha = 0.3;
-            let mut fitted = Vec::with_capacity(values.len());
-            let mut level = values[0];
-            fitted.push(level);
-
-            for &v in values.iter().skip(1) {
-                fitted.push(level);
-                level = alpha * v + (1.0 - alpha) * level;
-            }
-            fitted
-        }
     }
 }
 
@@ -4141,25 +4117,6 @@ mod tests {
         let values: Vec<f64> = vec![1.0, 2.0, 3.0];
         let model = select_best_model(&values, 1);
         assert_eq!(model, ModelType::Naive);
-    }
-
-    #[test]
-    fn test_calculate_confidence_intervals() {
-        let forecasts = vec![100.0, 105.0, 110.0];
-        let historical: Vec<f64> = (0..20).map(|i| 50.0 + i as f64).collect();
-
-        let (lower, upper) = calculate_confidence_intervals(&forecasts, &historical, 0.95);
-
-        assert_eq!(lower.len(), 3);
-        assert_eq!(upper.len(), 3);
-        // Lower bounds should be below forecasts
-        assert!(lower.iter().zip(&forecasts).all(|(l, f)| l < f));
-        // Upper bounds should be above forecasts
-        assert!(upper.iter().zip(&forecasts).all(|(u, f)| u > f));
-        // Intervals should widen with horizon
-        let width_1 = upper[0] - lower[0];
-        let width_3 = upper[2] - lower[2];
-        assert!(width_3 > width_1);
     }
 
     #[test]

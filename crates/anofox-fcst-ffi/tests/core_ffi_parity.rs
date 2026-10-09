@@ -5,11 +5,15 @@
 //! identical inputs. The library is the source of truth — any mismatch in point
 //! forecasts indicates a bug in the core/FFI translation layer.
 //!
-//! Note: confidence intervals, fitted values, and residuals are recalculated by
-//! `anofox-fcst-core::forecast()` independently of the library, so only point
-//! forecasts are compared here.
+//! Prediction intervals, fitted values, and residuals now pass through from the
+//! library's own `predict_with_intervals`/`fitted_values`/`residuals` (D-01/D-03/
+//! D-11, Phase 10) — `anofox-fcst-core::forecast()` no longer recomputes them, so
+//! `call_ffi_full` compares all five arrays bit-identically against the library.
 
 use std::ffi::{c_char, c_double, CStr};
+
+#[path = "../../anofox-fcst-core/tests/common/mod.rs"]
+mod common;
 
 use anofox_forecast::core::TimeSeries;
 use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig};
@@ -92,7 +96,8 @@ fn make_ffi_options(model_name: &str, horizon: i32, seasonal_period: i32) -> Ffi
     opts.seasonal_period = seasonal_period;
     opts.confidence_level = 0.95;
     opts.auto_detect_seasonality = false;
-    // Don't request fitted/residuals — those are recalculated by core, not from library
+    // Point-forecast-only helper: most parity_* tests below only compare point
+    // forecasts, so fitted/residuals are left un-requested here by default.
     opts.include_fitted = false;
     opts.include_residuals = false;
     opts
@@ -174,6 +179,73 @@ fn call_ffi(data: &[f64], opts: &FfiForecastOptions) -> (Vec<f64>, String) {
     }
 
     (point, model_name)
+}
+
+/// point, lower, upper, fitted, residuals, model_name
+type FullForecastTuple = (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, String);
+
+/// Call the FFI function and return point/lower/upper/fitted/residuals + model name.
+/// Null result pointers (D-02: a model with no native interval/fitted/residual
+/// support) become empty `Vec`s, matching the core's own empty-vec convention.
+/// Callers requesting fitted/residuals must set `include_fitted`/`include_residuals`
+/// on `opts` themselves.
+fn call_ffi_full(data: &[f64], opts: &FfiForecastOptions) -> FullForecastTuple {
+    let n_words = data.len().div_ceil(64);
+    let validity: Vec<u64> = vec![u64::MAX; n_words];
+
+    let mut result = ForecastResult::default();
+    let mut error = AnofoxError::default();
+
+    let ok = unsafe {
+        anofox_ts_forecast(
+            data.as_ptr(),
+            validity.as_ptr(),
+            data.len(),
+            opts as *const _,
+            &mut result as *mut _,
+            &mut error as *mut _,
+        )
+    };
+
+    if !ok {
+        let msg = unsafe { CStr::from_ptr(error.message.as_ptr()) }
+            .to_str()
+            .unwrap_or("unknown");
+        panic!("FFI call failed: {msg}");
+    }
+
+    let n = result.n_forecasts;
+    let point = unsafe { std::slice::from_raw_parts(result.point_forecasts, n).to_vec() };
+    let lower = if result.lower_bounds.is_null() {
+        vec![]
+    } else {
+        unsafe { std::slice::from_raw_parts(result.lower_bounds, n).to_vec() }
+    };
+    let upper = if result.upper_bounds.is_null() {
+        vec![]
+    } else {
+        unsafe { std::slice::from_raw_parts(result.upper_bounds, n).to_vec() }
+    };
+    let fitted = if result.fitted_values.is_null() {
+        vec![]
+    } else {
+        unsafe { std::slice::from_raw_parts(result.fitted_values, result.n_fitted).to_vec() }
+    };
+    let residuals = if result.residuals.is_null() {
+        vec![]
+    } else {
+        unsafe { std::slice::from_raw_parts(result.residuals, result.n_fitted).to_vec() }
+    };
+    let model_name = unsafe { CStr::from_ptr(result.model_name.as_ptr()) }
+        .to_str()
+        .unwrap_or("")
+        .to_string();
+
+    unsafe {
+        anofox_free_forecast_result(&mut result as *mut _);
+    }
+
+    (point, lower, upper, fitted, residuals, model_name)
 }
 
 /// Fit a library model and return point forecasts.
@@ -590,6 +662,117 @@ fn parity_naive() {
     let ffi_opts = make_ffi_options("Naive", HORIZON as i32, 0);
     let (ffi_point, _) = call_ffi(&data, &ffi_opts);
     assert_f64_eq("Naive", &lib_point, &ffi_point);
+
+    // Full parity (D-01/D-03/D-11): lower/upper/fitted/residuals through the FFI
+    // must be bit-identical to the crate Naive's own predict_with_intervals/
+    // fitted_values/residuals — Naive is no longer hand-rolled in forecast.rs.
+    let mut full_model = Naive::new();
+    full_model.fit(&ts).expect("[Naive] library fit failed");
+    let lib_forecast = full_model
+        .predict_with_intervals(HORIZON, 0.95)
+        .expect("[Naive] library predict_with_intervals failed");
+    let lib_lower = lib_forecast
+        .lower()
+        .and_then(|i| i.first())
+        .cloned()
+        .unwrap_or_default();
+    let lib_upper = lib_forecast
+        .upper()
+        .and_then(|i| i.first())
+        .cloned()
+        .unwrap_or_default();
+    let lib_fitted = full_model
+        .fitted_values()
+        .map(|v| v.to_vec())
+        .unwrap_or_default();
+    let lib_residuals = full_model
+        .residuals()
+        .map(|v| v.to_vec())
+        .unwrap_or_default();
+
+    let mut full_opts = make_ffi_options("Naive", HORIZON as i32, 0);
+    full_opts.include_fitted = true;
+    full_opts.include_residuals = true;
+    let (_, ffi_lower, ffi_upper, ffi_fitted, ffi_residuals, _) = call_ffi_full(&data, &full_opts);
+
+    assert_f64_eq("Naive.lower", &lib_lower, &ffi_lower);
+    assert_f64_eq("Naive.upper", &lib_upper, &ffi_upper);
+    assert_f64_eq("Naive.fitted", &lib_fitted, &ffi_fitted);
+    assert_f64_eq("Naive.residuals", &lib_residuals, &ffi_residuals);
+}
+
+/// FCST-01/FCST-03: Naive's prediction interval through the full FFI chain
+/// (`anofox_ts_forecast`) must be within a known, documented tolerance of R's
+/// `naive()` at both 80% and 95% confidence — not the old fabricated
+/// `point ± z(step-table)·sd·√h` band (95% h=1 half-width ~234.32 on this
+/// series; R/crate half-width is ~66.07, a >99% reduction).
+///
+/// Tolerance note (deviation from the plan's originally-stated 1e-6 bound):
+/// `anofox-forecast` 0.15.10's `Naive::predict_with_intervals` computes sigma
+/// identically to R (`sqrt(mean(diff^2))`, confirmed empirically — the two
+/// sides agree to 1e-9 once the same z is used) but its internal `z` comes
+/// from a private Abramowitz & Stegun 26.2.23 approximation
+/// (`models/baseline/naive.rs::quantile_normal`), not an exact / statrs-backed
+/// inverse normal CDF as `10-RESEARCH.md` §2 assumed. That approximation's
+/// documented max error is ~4.5e-4 in z, which on this series' sigma (~33.71)
+/// and horizon (up to sqrt(12)) bounds the lower/upper deviation from R at
+/// ≤0.0504 absolute (verified by direct computation this session). Per D-01
+/// ("pass crate intervals through unchanged, including models whose crate
+/// intervals are known to be miscalibrated until Phase 11/17") the fix here is
+/// passthrough, not patching the upstream crate's z — so the test tolerance is
+/// set to 0.1 (comfortably above the known ~0.05 worst case, far below the
+/// ~168 deviation the old fabricated band would produce) to prove the real fix
+/// without chasing upstream-exact-z precision that is Phase 11/17's scope.
+#[test]
+fn naive_intervals_match_r_naive_through_ffi() {
+    let fx = common::load_fixture("r_forecast/air_passengers.json");
+    let values = common::f64_vec(&fx["inputs"]["values"]);
+    let naive = &fx["models"]["naive"];
+    let r_point = common::f64_vec(&naive["point"]);
+    let r_lower_80 = common::f64_vec(&naive["lower_80"]);
+    let r_upper_80 = common::f64_vec(&naive["upper_80"]);
+    let r_lower_95 = common::f64_vec(&naive["lower_95"]);
+    let r_upper_95 = common::f64_vec(&naive["upper_95"]);
+
+    let tol = 0.1;
+
+    for (level, r_lower, r_upper) in [
+        (0.80_f64, &r_lower_80, &r_upper_80),
+        (0.95_f64, &r_lower_95, &r_upper_95),
+    ] {
+        let mut opts = make_ffi_options("Naive", 12, 0);
+        opts.confidence_level = level;
+        let (ffi_point, ffi_lower, ffi_upper, _, _, model_name) = call_ffi_full(&values, &opts);
+
+        assert_eq!(model_name, "Naive");
+        assert_eq!(ffi_point.len(), 12, "expected 12-step horizon");
+        assert_eq!(ffi_lower.len(), 12, "Naive must return native lower bounds");
+        assert_eq!(ffi_upper.len(), 12, "Naive must return native upper bounds");
+
+        for i in 0..12 {
+            common::assert_close(
+                ffi_point[i],
+                r_point[i],
+                tol,
+                0.0,
+                &format!("Naive.point[{i}] level={level}"),
+            );
+            common::assert_close(
+                ffi_lower[i],
+                r_lower[i],
+                tol,
+                0.0,
+                &format!("Naive.lower[{i}] level={level}"),
+            );
+            common::assert_close(
+                ffi_upper[i],
+                r_upper[i],
+                tol,
+                0.0,
+                &format!("Naive.upper[{i}] level={level}"),
+            );
+        }
+    }
 }
 
 #[test]
