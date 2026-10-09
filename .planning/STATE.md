@@ -32,7 +32,7 @@ See: .planning/PROJECT.md (updated 2026-10-08 — started v0.10.0 Statistical Co
 Phase: 10 — Forecast Wrapper Delegates to Crate Models
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-10-09 — Phase 9 complete, transitioned to Phase 10
+Last activity: 2026-10-09 - Completed quick task 261009-d02: Docs/README/skills accuracy pass
 
 Progress: [█░░░░░░░░░] 10%
 
