@@ -199,7 +199,40 @@ Plans:
   4. `ts_forecast_agg` on month-end monthly data emits month-end forecast dates with no day drift (Rust frequency detection, calendar stepping), `ts_forecast_exog_by` future dates are calendar-correct across months of different lengths, and `ts_forecast_agg` / `ts_features_agg` on a series with interior NULLs match `ts_forecast_by` / `ts_features` (validity passed, no splicing).
   5. Per-step conformal given a residual count that is not a multiple of the horizon returns an error naming both counts, and the dead `ts_filter.cpp` / `ts_imputation.cpp` scalar bodies are removed or registered with tests.
 
-**Plans**: TBD
+**Plans**: 8 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 12-01-PLAN.md — Tracer: shared C++ list reader + Rust missing-data policy module; paired metrics pairwise-complete end-to-end (ts_mae 0 / constant-list per row) (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 12-02-PLAN.md — Rust single-series gate (trim edges, interior-NULL error, empty -> NULL); diagnostics, period estimators, seasonality; per-row argument reads (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 12-03-PLAN.md — Gate for detrend/decompose, peaks, MSTL, BOCPD; ts_features_agg validity + ts_features_by parity (D-11); dead list bodies removed (wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 12-04-PLAN.md — Conformal + bootstrap on shared reader with Rust NULL classes; per-step residual-count/horizon error (D-10) (wave 4)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 12-05-PLAN.md — Rust calendar rule + deterministic detect_frequency; ts_forecast_agg validity + month-end dates; ts_forecast_by on the same rule (wave 5)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 12-06-PLAN.md — _ts_future_dates: calendar-correct ts_forecast_exog_by dates; ensemble/panel/var/native steppers on the Rust rule (wave 6)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 12-07-PLAN.md — ts_diff_by d-th order via Rust diff (+ seasonal_lag), ts_fill_nulls_mean_by / ts_drop_constant_by via Rust; dead ts_filter/ts_imputation deleted (wave 7)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 12-08-PLAN.md — Hierarchy SQL SUM NULL semantics; _ts_backtest_native + stale ts_backtest_auto_by refs removed; phase-wide docs/skills/CHANGELOG sweep + deferred items (wave 8)
 
 ### Phase 13: Core Statistics, Metrics & Data Quality
 
