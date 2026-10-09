@@ -124,6 +124,10 @@ WHERE s.model_name = d.model_name;
 # Test 2: SeasonalNaive Method
 #######################################
 
+# D-07: SeasonalNaive requires a usable seasonal period — equiv_data's
+# (i % 7) * 3.0 term is a period-7 weekly pattern, passed explicitly here to
+# preserve this test's intent (folds_simple vs cv_splits_detailed
+# equivalence), not the auto-detection path itself.
 statement ok
 CREATE TABLE forecast_simple_snaive AS
 SELECT
@@ -133,7 +137,7 @@ SELECT
     ROUND(yhat, 6) AS forecast,
     ROUND(y, 6) AS actual,
     model_name
-FROM ts_cv_forecast_by('folds_simple', series_id, date, value, 'SeasonalNaive', MAP{})
+FROM ts_cv_forecast_by('folds_simple', series_id, date, value, 'SeasonalNaive', MAP{'seasonal_period': '7'})
 ORDER BY fold_id, series_id, date;
 
 statement ok
@@ -145,7 +149,7 @@ SELECT
     ROUND(yhat, 6) AS forecast,
     ROUND(y, 6) AS actual,
     model_name
-FROM ts_cv_forecast_by('cv_splits_detailed', series_id, date, value, 'SeasonalNaive', MAP{})
+FROM ts_cv_forecast_by('cv_splits_detailed', series_id, date, value, 'SeasonalNaive', MAP{'seasonal_period': '7'})
 ORDER BY fold_id, series_id, date;
 
 # Verify forecasts match for SeasonalNaive

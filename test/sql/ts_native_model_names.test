@@ -77,9 +77,15 @@ SELECT DISTINCT model_name FROM _ts_forecast_native(
 ----
 SMA
 
+# D-07: SeasonalNaive requires a usable seasonal period — auto-detection on
+# this 60-point, 2-group fixture does not reliably find the generated
+# period-14 pattern (detect_seasonality can fail per group), so the period
+# the data was generated with (sin/cos(i*pi/7), full cycle = 14) is passed
+# explicitly to preserve this test's intent (model_name naming), not the
+# auto-detection path itself.
 query I
 SELECT DISTINCT model_name FROM _ts_forecast_native(
-    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'SeasonalNaive', MAP{});
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'SeasonalNaive', MAP{'seasonal_period': '14'});
 ----
 SeasonalNaive
 
@@ -111,27 +117,30 @@ SELECT DISTINCT model_name FROM _ts_forecast_native(
 ----
 Holt
 
+# D-07: these three also require a usable period (see the SeasonalNaive note
+# above) — same explicit period-14 fix, same reason.
 query I
 SELECT DISTINCT model_name FROM _ts_forecast_native(
-    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'HoltWinters', MAP{});
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'HoltWinters', MAP{'seasonal_period': '14'});
 ----
 HoltWinters
 
 query I
 SELECT DISTINCT model_name FROM _ts_forecast_native(
-    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'SeasonalES', MAP{});
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'SeasonalES', MAP{'seasonal_period': '14'});
 ----
 SeasonalES
 
 query I
 SELECT DISTINCT model_name FROM _ts_forecast_native(
-    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'SeasonalESOptimized', MAP{});
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'SeasonalESOptimized', MAP{'seasonal_period': '14'});
 ----
 SeasonalESOptimized
 
+# D-07: SeasonalWindowAverage requires a usable period too.
 query I
 SELECT DISTINCT model_name FROM _ts_forecast_native(
-    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'SeasonalWindowAverage', MAP{});
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'SeasonalWindowAverage', MAP{'seasonal_period': '14'});
 ----
 SeasonalWindowAverage
 
@@ -167,17 +176,26 @@ DynamicOptimizedTheta
 # _ts_forecast_native: State Space / ARIMA
 #######################################
 
+# D-05: 'ETS' without ets_model runs the crate's AutoETS selection and
+# reports the chosen spec; G1/G2 can select different specs, so this is a
+# per-row regex-match count rather than a single-row DISTINCT value.
 query I
-SELECT DISTINCT model_name FROM _ts_forecast_native(
-    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'ETS', MAP{});
+SELECT count(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'ETS', MAP{})
+WHERE NOT regexp_matches(model_name, '^ETS\([AM],(N|A|Ad),(N|A|M)\)$');
 ----
-ETS
+0
 
+# D-09: 'ARIMA' now requires an explicit arima_order; with one, model_name
+# reports the order (and " with drift" when the crate adds a drift term —
+# G1/G2 can select drift differently at the same order, so this is a
+# per-row regex-match count rather than a single-row DISTINCT value).
 query I
-SELECT DISTINCT model_name FROM _ts_forecast_native(
-    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'ARIMA', MAP{});
+SELECT count(*) FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'ARIMA', MAP{'arima_order': '[1,1,1]'})
+WHERE NOT regexp_matches(model_name, '^ARIMA\(1,1,1\)( with drift)?$');
 ----
-ARIMA
+0
 
 #######################################
 # _ts_forecast_native: Multiple Seasonality
@@ -189,15 +207,16 @@ SELECT DISTINCT model_name FROM _ts_forecast_native(
 ----
 MFLES
 
+# D-07: MSTL/TBATS require a usable period too.
 query I
 SELECT DISTINCT model_name FROM _ts_forecast_native(
-    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'MSTL', MAP{});
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'MSTL', MAP{'seasonal_period': '14'});
 ----
 MSTL
 
 query I
 SELECT DISTINCT model_name FROM _ts_forecast_native(
-    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'TBATS', MAP{});
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'TBATS', MAP{'seasonal_period': '14'});
 ----
 TBATS
 
@@ -263,21 +282,27 @@ SELECT DISTINCT model_name LIKE 'AutoTheta%' FROM _ts_forecast_native(
 ----
 true
 
+# D-06: AutoMFLES/AutoMSTL are accepted as deprecated aliases but model_name
+# reports the non-Auto family name (MFLES/MSTL), never the Auto-prefixed
+# alias. AutoMSTL additionally requires a usable period (D-07), same
+# period-14 fix as the other seasonal models above.
 query I
 SELECT DISTINCT model_name FROM _ts_forecast_native(
     (SELECT id, ds, y FROM model_name_data), 3, '1d', 'AutoMFLES', MAP{});
 ----
-AutoMFLES
+MFLES
 
 query I
 SELECT DISTINCT model_name FROM _ts_forecast_native(
-    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'AutoMSTL', MAP{});
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'AutoMSTL', MAP{'seasonal_period': '14'});
 ----
-AutoMSTL
+MSTL
 
+# AutoTBATS keeps its Auto-prefixed naming (reports the selected spec); it
+# still requires a usable period (D-07).
 query I
 SELECT DISTINCT model_name LIKE 'AutoTBATS%' FROM _ts_forecast_native(
-    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'AutoTBATS', MAP{});
+    (SELECT id, ds, y FROM model_name_data), 3, '1d', 'AutoTBATS', MAP{'seasonal_period': '14'});
 ----
 true
 
@@ -307,16 +332,18 @@ WHERE split = 'test';
 ----
 RandomWalkDrift
 
+# D-07: same explicit-period fix as the non-CV HoltWinters/SeasonalESOptimized
+# assertions above.
 query I
 SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
-    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'HoltWinters', MAP{})
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'HoltWinters', MAP{'seasonal_period': '14'})
 WHERE split = 'test';
 ----
 HoltWinters
 
 query I
 SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
-    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'SeasonalESOptimized', MAP{})
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'SeasonalESOptimized', MAP{'seasonal_period': '14'})
 WHERE split = 'test';
 ----
 SeasonalESOptimized
@@ -335,19 +362,25 @@ WHERE split = 'test';
 ----
 DynamicOptimizedTheta
 
+# D-05: 'ETS' without ets_model runs the crate's AutoETS selection and
+# reports the chosen spec (e.g. ETS(A,A,N)), never the literal 'ETS'.
 query I
-SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
+SELECT DISTINCT regexp_matches(model_name, '^ETS\([AM],(N|A|Ad),(N|A|M)\)$') FROM _ts_cv_forecast_native(
     (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'ETS', MAP{})
 WHERE split = 'test';
 ----
-ETS
+true
 
+# D-09: 'ARIMA' now requires an explicit arima_order; with one, model_name
+# reports the order (and " with drift" when the crate adds a drift term —
+# filtered to a single series here for a deterministic single-row result,
+# since G1/G2 can select drift differently at the same order).
 query I
 SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
-    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'ARIMA', MAP{})
-WHERE split = 'test';
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'ARIMA', MAP{'arima_order': '[1,1,1]'})
+WHERE split = 'test' AND id = 'G1';
 ----
-ARIMA
+ARIMA(1,1,1)
 
 query I
 SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
@@ -356,16 +389,17 @@ WHERE split = 'test';
 ----
 MFLES
 
+# D-07: MSTL/TBATS require a usable period via CV too.
 query I
 SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
-    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'MSTL', MAP{})
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'MSTL', MAP{'seasonal_period': '14'})
 WHERE split = 'test';
 ----
 MSTL
 
 query I
 SELECT DISTINCT model_name FROM _ts_cv_forecast_native(
-    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'TBATS', MAP{})
+    (SELECT fold_id, split, id, ds, y FROM model_name_cv), 'TBATS', MAP{'seasonal_period': '14'})
 WHERE split = 'test';
 ----
 TBATS

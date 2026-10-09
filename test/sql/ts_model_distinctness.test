@@ -96,6 +96,17 @@ FROM forecasts;
 #    Each variant now uses library implementations:
 #    SES (fixed alpha=0.3), SESOptimized (auto-tuned alpha),
 #    SeasonalES (fixed), SeasonalESOptimized (auto-tuned)
+#
+#    D-07 re-bless (Phase 10 plan 10-05, deferred from plan 10-04's
+#    deferred-items.md item 1): Phase 10 plan 10-03's resolve_period change
+#    (commit e01e87b) made SeasonalES/SeasonalESOptimized auto-detect their
+#    seasonal period via detect_seasonality REGARDLESS of
+#    auto_detect_seasonality — previously this entry point's hard-coded
+#    auto_detect_seasonality=false meant no period was ever detected for
+#    these two models. seasonal_es/seasonal_es_opt below moved from
+#    14.451866/18.803254 to 12.304672/16.998999 as a direct, correct
+#    consequence of that change (verified against the built extension); the
+#    all_distinct=1 invariant this test guards still holds.
 ###############################################################################
 
 query IIIII
@@ -113,7 +124,7 @@ SELECT ses, ses_opt, seasonal_es, seasonal_es_opt,
   (ses != ses_opt OR seasonal_es != seasonal_es_opt)::INT AS all_distinct
 FROM forecasts;
 ----
-18.943503	19.537535	14.451866	18.803254	1
+18.943503	19.537535	12.304672	16.998999	1
 
 ###############################################################################
 # 4. MSTL/TBATS vs HoltWinters — FIXED (forecast-extension-tlye)
@@ -121,6 +132,14 @@ FROM forecasts;
 #    MSTL and TBATS previously fell back to HoltWinters. Now they use
 #    their own library implementations (MSTLForecaster, TBATS).
 #    Holt included to guard against ETS fallback collapse.
+#
+#    D-07 re-bless (Phase 10 plan 10-05, same root cause as section 3 above):
+#    HoltWinters/MSTL/TBATS are all requires_seasonal_period models (10-03's
+#    resolve_period, commit e01e87b) — this entry point's hard-coded
+#    auto_detect_seasonality=false previously suppressed detection for all
+#    three; now they all auto-detect, moving hw/mstl/tbats from
+#    19.953912/17.364756/17.46623 to 18.00003/18.18416/17.832329 (verified
+#    against the built extension); the all_distinct=1 invariant still holds.
 ###############################################################################
 
 query IIIII
@@ -138,7 +157,7 @@ SELECT holt, hw, mstl, tbats,
   (holt != hw AND mstl != hw AND tbats != hw AND mstl != tbats)::INT AS all_distinct
 FROM forecasts;
 ----
-20.330877	19.953912	17.364756	17.46623	1
+20.330877	18.00003	18.18416	17.832329	1
 
 ###############################################################################
 # 5. Sanity check: Auto* models that use the library MUST stay distinct
