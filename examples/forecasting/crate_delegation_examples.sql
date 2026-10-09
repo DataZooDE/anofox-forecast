@@ -190,8 +190,8 @@ SELECT CASE WHEN (
 -- AutoARIMA with regressors runs its real order search WITH the regressors
 -- attached, including a holiday column that is 0 throughout history and 1 in
 -- the future (never observed as 1 during fitting) — model_name reports the
--- selected order followed by " with regressors" (never a fixed "ARIMAX"
--- stand-in), and every forecasted point is finite.
+-- selected order followed by " with regressors" (never a fixed stand-in name),
+-- and every forecasted point is finite.
 -- ============================================================================
 
 .print ''

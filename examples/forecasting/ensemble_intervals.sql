@@ -16,14 +16,20 @@
 --   (1) ts_cv_forecast_by IGNORES top_k/combination_method for AutoEnsemble:
 --       The CV native (ts_cv_forecast_native.cpp:380-388) does NOT parse
 --       ensemble-specific params. It zeroes ensemble_top_k / ensemble_method
---       in ForecastOptions, so the backtest always runs with top_k=3, Mean —
---       regardless of what you pass in the params MAP. As a result:
---         • ts_cv_forecast_by('folds', id, ds, y, 'AutoEnsemble', MAP{})
---           crashes at runtime in this build (segfault — known limitation).
---         • Section 1 therefore uses the SAME manual per-fold loop as Section 2,
---           with _ts_forecast_scalar('AutoEnsemble') per fold. The calibration
---           and the final forecast both use the same default AutoEnsemble config
---           (top_k=3, Mean), so coverage is internally consistent.
+--       in ForecastOptions, so a backtest run through it always uses
+--       top_k=3, Mean — regardless of what you pass in the params MAP.
+--         • ts_cv_forecast_by('folds', id, ds, y, 'AutoEnsemble', MAP{}) no
+--           longer crashes (the segfault's root cause — the CV native
+--           dereferencing a null bounds pointer — was fixed in Phase 10
+--           plan 10-02's null-safety pass). It is still NOT usable for a
+--           non-default top_k/combination_method, since those params are
+--           still silently ignored on this path.
+--         • Section 1 therefore still uses the manual per-fold loop (same
+--           pattern as Section 2), with _ts_forecast_scalar('AutoEnsemble')
+--           per fold — this is the only way to control top_k/combination_method
+--           for the backtest. The calibration and the final forecast both use
+--           the same default AutoEnsemble config (top_k=3, Mean), so coverage
+--           is internally consistent either way.
 --
 --   (2) ts_forecast_ensemble_by is a ScalarFunction and CANNOT flow through
 --       ts_cv_forecast_by. Section 2 uses a manual per-fold loop over
