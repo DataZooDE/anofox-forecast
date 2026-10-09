@@ -3563,6 +3563,122 @@ pub fn list_models() -> Vec<String> {
 mod tests {
     use super::*;
 
+    /// DEP-01 proof: `fit_ols_regression` is private, so this test is
+    /// inline (09-RESEARCH Open Question 2 — no visibility change) rather
+    /// than a `tests/` integration test. Loads
+    /// `multiscale_ols/cases.json` via the crate's own `test_fixtures`
+    /// loader module (`#[path]`'d from `tests/common/mod.rs` in lib.rs).
+    #[test]
+    fn fit_ols_regression_matches_numpy_lstsq_fixture() {
+        let fx = crate::test_fixtures::load_fixture("multiscale_ols/cases.json");
+        let coef_abs = crate::test_fixtures::tolerance(&fx, "coef_abs");
+        let coef_rel = crate::test_fixtures::tolerance(&fx, "coef_rel");
+        let fitted_abs_per_sd = crate::test_fixtures::tolerance(&fx, "fitted_abs_per_sd");
+
+        let cases = fx["cases"]
+            .as_object()
+            .expect("multiscale_ols/cases.json: 'cases' is not an object");
+        let mut ran_exog_typical = false;
+
+        for (name, case) in cases {
+            let dep01_assert = case["dep01_assert"].as_bool().unwrap_or(false);
+            if !dep01_assert {
+                continue;
+            }
+
+            let x_cols: Vec<Vec<f64>> = case["X"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{name}: 'X' is not an array"))
+                .iter()
+                .map(crate::test_fixtures::f64_vec)
+                .collect();
+            let y = crate::test_fixtures::f64_vec(&case["y"]);
+            let want_coef = crate::test_fixtures::f64_vec(&case["coef"]);
+            let want_fitted = crate::test_fixtures::f64_vec(&case["fitted"]);
+            let full_rank = case["full_rank"].as_bool().unwrap_or(false);
+
+            let (coeffs, residuals) = fit_ols_regression(&y, &x_cols);
+
+            // Full-rank designs: coefficients (intercept first) must match
+            // numpy.linalg.lstsq within the fixture's coef tolerance.
+            if full_rank {
+                crate::test_fixtures::assert_vec_close(
+                    &coeffs,
+                    &want_coef,
+                    coef_abs,
+                    coef_rel,
+                    &format!("{name}.coef"),
+                );
+            }
+
+            // Every dep01_assert case (full-rank or not): the fitted
+            // projection (y - residual) must match numpy's fitted values
+            // within fitted_abs_per_sd * sd(y).
+            let mean_y = y.iter().sum::<f64>() / y.len() as f64;
+            let var_y =
+                y.iter().map(|v| (v - mean_y).powi(2)).sum::<f64>() / (y.len() as f64 - 1.0);
+            let fit_tol = fitted_abs_per_sd * var_y.sqrt();
+
+            for i in 0..y.len() {
+                let fitted_i = y[i] - residuals[i];
+                crate::test_fixtures::assert_close(
+                    fitted_i,
+                    want_fitted[i],
+                    fit_tol,
+                    0.0,
+                    &format!("{name}.fitted[{i}]"),
+                );
+            }
+
+            // exog_typical additionally proves apply_regression() on the
+            // first 5 future rows reproduces [1, x] . coef — this is the
+            // audit's exact before/after evidence: on anofox-regression
+            // 0.5.3 the scrambled coefficients make step 1 ~ -79; on
+            // >=0.5.13 it is ~ -8.7987.
+            if name == "exog_typical" {
+                ran_exog_typical = true;
+                let future_x: Vec<Vec<f64>> = x_cols.iter().map(|col| col[0..5].to_vec()).collect();
+                let projected = apply_regression(&coeffs, &future_x, 5);
+
+                let want_projected: Vec<f64> = (0..5)
+                    .map(|h| {
+                        let mut v = want_coef[0];
+                        for (j, col) in future_x.iter().enumerate() {
+                            v += want_coef[j + 1] * col[h];
+                        }
+                        v
+                    })
+                    .collect();
+
+                crate::test_fixtures::assert_vec_close(
+                    &projected,
+                    &want_projected,
+                    fit_tol,
+                    0.0,
+                    "exog_typical.apply_regression",
+                );
+                assert!(
+                    (projected[0] - (-8.7987)).abs() < 1e-3,
+                    "exog_typical.apply_regression[0]: got {}, want approx -8.7987 \
+                     (audit fix evidence; 0.5.3 scrambled this to ~ -79)",
+                    projected[0]
+                );
+            }
+        }
+
+        assert!(
+            ran_exog_typical,
+            "multiscale_ols/cases.json: missing the exog_typical case"
+        );
+
+        // NOTE: rank-deficient designs (collinear/collinear_big/constcol)
+        // leave aliased coefficients NaN in anofox-regression >=0.5.13, and
+        // apply_regression then produces NaN effects for the aliased
+        // column; the finite zero-effect behaviour is Phase 10 FCST-05 —
+        // this test pins only the fitted projection for dep01_assert
+        // cases, not the NaN-aliasing behaviour itself.
+    }
+
     #[test]
     fn test_forecast_naive() {
         let values: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), Some(3.0), Some(4.0), Some(5.0)];

@@ -22,6 +22,16 @@ pub mod seasonality;
 pub mod stats;
 pub mod validation;
 
+// Shared fixture loader (std + serde_json only) from
+// crates/anofox-fcst-core/tests/common/mod.rs, compiled into the library's
+// own cfg(test) build so inline #[cfg(test)] blocks (e.g. forecast.rs's
+// fit_ols_regression_matches_numpy_lstsq_fixture) can load
+// validation/reference/ fixtures without a visibility change to private
+// functions (09-03; see 09-RESEARCH.md Open Question 2).
+#[cfg(test)]
+#[path = "../tests/common/mod.rs"]
+mod test_fixtures;
+
 // Re-exports for convenience
 pub use bootstrap::{
     bootstrap_intervals, bootstrap_quantiles, BootstrapIntervalsResult, BootstrapQuantilesResult,
