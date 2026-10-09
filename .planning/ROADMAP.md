@@ -92,7 +92,7 @@ Phase artifacts (plans, summaries, verification): [milestones/v0.9.0-phases/](mi
   3. With anofox-forecast `≥0.15.10`, the MFLES #219 runaway reproducer returns bounded forecasts, panel forecasts on the NaN-guard fixture contain no NaN, and point forecasts of all other `ts_forecast_by` models are unchanged vs the 0.15.3 snapshot outside the documented MFLES/panel/Laplace fixes.
   4. The MSRV stated in README / CLAUDE.md / docs and the CI toolchain pin equal the minimum Rust version the dependency tree actually requires, and a build on exactly that toolchain succeeds.
 
-**Plans**: 1/3 plans executed
+**Plans**: 2/3 plans executed
 
 Plans:
 **Wave 1**
@@ -101,7 +101,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 09-02-PLAN.md — uv Python generators (moments, multi-scale OLS, panel NaN guard), self-consistency tests, harness README (wave 2)
+- [x] 09-02-PLAN.md — uv Python generators (moments, multi-scale OLS, panel NaN guard), self-consistency tests, harness README (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -258,7 +258,7 @@ Phases execute in numeric order: 9 → 10 → 11 → 12 → 13 → 14 → 15 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 9. Reference Fixtures & Safe Dependency Bumps | 1/3 | In Progress|  |
+| 9. Reference Fixtures & Safe Dependency Bumps | 2/3 | In Progress|  |
 | 10. Forecast Wrapper Delegates to Crate Models | 0/TBD | Not started | - |
 | 11. Upstream anofox-forecast Correctness Fixes | 0/TBD | Not started | - |
 | 12. Statistics Marshalling Moves to Rust | 0/TBD | Not started | - |
