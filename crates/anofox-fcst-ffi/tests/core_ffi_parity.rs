@@ -145,6 +145,31 @@ fn make_ffi_options_with_periods(
     opts
 }
 
+/// Write a `&str` into a fixed-size `[c_char; N]` buffer, NUL-terminated.
+fn write_c_field<const N: usize>(buf: &mut [c_char; N], s: &str) {
+    let bytes = s.as_bytes();
+    let max = N - 1;
+    for (i, &b) in bytes.iter().enumerate().take(max) {
+        buf[i] = b as c_char;
+    }
+    buf[bytes.len().min(max)] = 0;
+}
+
+/// Build FFI options for ARIMA with `arima_order`/`seasonal_order` strings
+/// (e.g. "[0,1,1]") plus `seasonal_period` (D-08/D-09).
+fn make_ffi_options_with_orders(
+    model: &str,
+    horizon: i32,
+    seasonal_period: i32,
+    arima_order: &str,
+    seasonal_order: &str,
+) -> FfiForecastOptions {
+    let mut opts = make_ffi_options(model, horizon, seasonal_period);
+    write_c_field(&mut opts.arima_order_str, arima_order);
+    write_c_field(&mut opts.seasonal_order_str, seasonal_order);
+    opts
+}
+
 /// Call the FFI function and return point forecasts + model name.
 fn call_ffi(data: &[f64], opts: &FfiForecastOptions) -> (Vec<f64>, String) {
     let n_words = data.len().div_ceil(64);
@@ -238,7 +263,10 @@ fn call_ffi_full(data: &[f64], opts: &FfiForecastOptions) -> FullForecastTuple {
     let residuals = if result.residuals.is_null() {
         vec![]
     } else {
-        unsafe { std::slice::from_raw_parts(result.residuals, result.n_fitted).to_vec() }
+        // n_residuals is its OWN length field (plan 10-02 fix) — never
+        // n_fitted, which can legitimately differ (e.g. GARCH: fitted=None
+        // so n_fitted=0, but residuals is real and non-empty).
+        unsafe { std::slice::from_raw_parts(result.residuals, result.n_residuals).to_vec() }
     };
     let model_name = unsafe { CStr::from_ptr(result.model_name.as_ptr()) }
         .to_str()
@@ -344,34 +372,46 @@ fn assert_full_parity(
     assert_f64_eq(&format!("{label}.point"), &lib_point, &ffi_point);
     assert_f64_eq(&format!("{label}.lower"), &lib_lower, &ffi_lower);
     assert_f64_eq(&format!("{label}.upper"), &lib_upper, &ffi_upper);
-    assert_f64_eq(&format!("{label}.fitted"), &lib_fitted, &ffi_fitted);
 
-    // KNOWN FFI LIMITATION (discovered this session; deferred to plan 10-02,
-    // which owns `src/include/anofox_fcst_ffi.h`): `ForecastResult` has a
-    // single `n_fitted` length field shared by both `fitted_values` and
-    // `residuals`. When a crate model's `fitted_values()` is `None` while
-    // `residuals()` is `Some` (e.g. AutoARIMA on some series; GARCH always —
-    // see `parity_garch`), the FFI/SQL surface silently truncates residuals
-    // to length 0 even though the crate produced real residuals. This is a
-    // genuine correctness gap, not a test bug — the fix needs a new
-    // `n_residuals` field on `ForecastResult` plus the regenerated C header
-    // and the `ts_forecast.cpp`/`ts_forecast_agg.cpp` call sites that read
-    // `fcst_result.n_fitted` for both arrays, all out of scope for plan
-    // 10-01 (Rust-only; `anofox_fcst_ffi.h` is reserved for plan 10-02).
-    if lib_fitted.is_empty() && !lib_residuals.is_empty() {
-        assert!(
-            ffi_residuals.is_empty(),
-            "[{label}] expected the known n_fitted/residuals length-sharing gap \
-             (fitted empty, residuals non-empty) to truncate FFI residuals to \
-             empty — got {} elements instead; if this now carries real data, \
-             the gap has been fixed upstream and this branch should be removed",
-            ffi_residuals.len()
-        );
+    // `finalize_output` (T-10-02, plan 10-01) only EXPORTS fitted/residuals
+    // when their length exactly matches `prep.values.len()` (== data.len()
+    // here — this helper's callers always pass a clean, non-NULL series).
+    // A crate model whose own fitted/residuals are shorter than the input
+    // (ARIMA with d>=1 drops `d` differencing-warmup rows; AutoARIMA
+    // similarly on some series) is INTENTIONALLY nulled at that boundary —
+    // not a bug, and unrelated to the n_fitted/n_residuals field-aliasing
+    // bug fixed in plan 10-02 (see `ForecastResult::n_residuals`, which this
+    // helper also exercises: GARCH's fitted is None while its length-
+    // matching residuals ARE now expected to survive, below).
+    let expect_exported = |v: &[f64]| v.len() == data.len();
+
+    if expect_exported(&lib_fitted) {
+        assert_f64_eq(&format!("{label}.fitted"), &lib_fitted, &ffi_fitted);
     } else {
+        assert!(
+            ffi_fitted.is_empty(),
+            "[{label}.fitted] lib length {} != data length {} (T-10-02 length \
+             mismatch) should export as empty via FFI, got {} elements",
+            lib_fitted.len(),
+            data.len(),
+            ffi_fitted.len()
+        );
+    }
+
+    if expect_exported(&lib_residuals) {
         assert_f64_eq(
             &format!("{label}.residuals"),
             &lib_residuals,
             &ffi_residuals,
+        );
+    } else {
+        assert!(
+            ffi_residuals.is_empty(),
+            "[{label}.residuals] lib length {} != data length {} (T-10-02 length \
+             mismatch) should export as empty via FFI, got {} elements",
+            lib_residuals.len(),
+            data.len(),
+            ffi_residuals.len()
         );
     }
 }
@@ -966,36 +1006,56 @@ fn parity_ets_default() {
     assert_f64_eq("ETS", &lib_point, &ffi_point);
 }
 
-// ── ARIMA (hand-rolled simplified): may diverge from library ───────────
-//
-// forecast.rs uses a simplified ARIMA(1,1,1) with fixed AR coefficient.
-// The library ARIMA is a proper implementation. Compare to detect drift.
+// ── ARIMA (real crate model, D-08/D-09): full parity + R airline parity ──
 
 #[test]
 fn parity_arima() {
     let data = seasonal_data();
+    let ts = make_timeseries(&data);
+    // forecast.rs: ARIMA::new(1,1,1) via extract_forecast, non-seasonal
+    // (arima_order_str="[1,1,1]", seasonal_period=0).
+    let mut model = anofox_forecast::models::arima::ARIMA::new(1, 1, 1);
+    let ffi_opts = make_ffi_options_with_orders("ARIMA", HORIZON as i32, 0, "[1,1,1]", "");
+    assert_full_parity("ARIMA", &mut model, &ts, HORIZON, 0.95, &data, ffi_opts);
+}
 
-    // Hand-rolled ARIMA from forecast.rs: simplified ARIMA(1,1,1) with ar_coef=0.5
-    let diff: Vec<f64> = data.windows(2).map(|w| w[1] - w[0]).collect();
-    let mean_diff = diff.iter().sum::<f64>() / diff.len() as f64;
-    let ar_coef = 0.5;
-    let last_val = *data.last().unwrap();
-    let last_diff = *diff.last().unwrap();
+#[test]
+fn arima_airline_matches_r_through_ffi() {
+    // FCST-04: ARIMA(0,1,1)(0,1,1)[12] on AirPassengers, through
+    // anofox_ts_forecast end to end, must match R's
+    // `Arima(order=c(0,1,1), seasonal=c(0,1,1))` within the fixture's
+    // model_point_rel tolerance (not widened if it misses — see module doc).
+    let fx = common::load_fixture("r_forecast/air_passengers.json");
+    let air: Vec<f64> = common::f64_vec(&fx["inputs"]["values"]);
+    let r_points: Vec<f64> = common::f64_vec(&fx["models"]["arima_airline"]["point"]);
+    let rel_tol = common::tolerance(&fx, "model_point_rel");
 
-    let mut expected = Vec::with_capacity(HORIZON);
-    let mut prev_diff = last_diff;
-    let mut cumsum = last_val;
-    for _ in 0..HORIZON {
-        let next_diff = mean_diff + ar_coef * (prev_diff - mean_diff);
-        cumsum += next_diff;
-        expected.push(cumsum);
-        prev_diff = next_diff;
+    let ffi_opts =
+        make_ffi_options_with_orders("ARIMA", r_points.len() as i32, 12, "[0,1,1]", "[0,1,1]");
+    let (ffi_point, model_name) = call_ffi(&air, &ffi_opts);
+
+    assert_eq!(
+        model_name, "ARIMA(0,1,1)(0,1,1)[12]",
+        "unexpected model_name"
+    );
+    common::assert_vec_close(&ffi_point, &r_points, 0.0, rel_tol, "arima_airline.point");
+
+    // Bounds must bracket the point forecast at every step.
+    let mut full_opts = ffi_opts;
+    full_opts.include_fitted = true;
+    full_opts.include_residuals = true;
+    let (point, lower, upper, _fitted, _residuals, _) = call_ffi_full(&air, &full_opts);
+    assert_eq!(lower.len(), point.len());
+    assert_eq!(upper.len(), point.len());
+    for i in 0..point.len() {
+        assert!(
+            lower[i] < point[i] && point[i] < upper[i],
+            "step {i}: expected lower < point < upper, got {} < {} < {}",
+            lower[i],
+            point[i],
+            upper[i]
+        );
     }
-
-    let ffi_opts = make_ffi_options("ARIMA", HORIZON as i32, 0);
-    let (ffi_point, _) = call_ffi(&data, &ffi_opts);
-    // ARIMA is hand-rolled, so compare against the hand-rolled expected values
-    assert_f64_eq("ARIMA", &expected, &ffi_point);
 }
 
 // ── Classical / ensemble / distributional: full parity (D-01/D-02/D-03/D-11) ──
@@ -1060,23 +1120,16 @@ fn parity_garch() {
     // are just the mean for GARCH") — not required by this plan's <behavior>
     // (GARCH is scoped to point/lower/upper only). Both sides are empty.
     assert_f64_eq("GARCH.fitted", &lib_fitted, &ffi_fitted);
-    // KNOWN FFI LIMITATION (see assert_full_parity's doc comment): because
-    // fitted is always None for GARCH, the FFI's shared `n_fitted` length
-    // field truncates `residuals` to 0 even though the crate produces real
-    // residuals. Deferred to plan 10-02.
+    // FIXED in plan 10-02 (see assert_full_parity's doc comment): fitted is
+    // always None for GARCH, but residuals now has its own n_residuals
+    // length field, so the crate's real residuals survive the FFI boundary
+    // even though fitted doesn't.
     assert!(
         !lib_residuals.is_empty(),
-        "GARCH.residuals: expected the crate to produce real residuals (premise \
-         of the length-sharing gap below) — got none; if GARCH now exposes no \
-         residuals either, this test's documented gap no longer applies"
+        "GARCH.residuals: expected the crate to produce real residuals — got none; \
+         if GARCH now exposes no residuals either, this assertion is stale"
     );
-    assert!(
-        ffi_residuals.is_empty(),
-        "GARCH.residuals: expected the known n_fitted/residuals length-sharing \
-         gap to truncate FFI residuals to empty — got {} elements instead; if \
-         this now carries real data, the gap has been fixed upstream",
-        ffi_residuals.len()
-    );
+    assert_f64_eq("GARCH.residuals", &lib_residuals, &ffi_residuals);
 }
 
 #[test]

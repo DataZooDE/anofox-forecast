@@ -2242,10 +2242,20 @@ pub unsafe extern "C" fn anofox_ts_detrend(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
+        // D-07/T-10-07: invalid UTF-8 is an error, never a silent "auto"
+        // fallback. The method-NAME parse itself (unknown name → default)
+        // is unchanged here — that strict-parsing pass is Phase 15's scope.
         let method_str = if method.is_null() {
             "auto"
         } else {
-            CStr::from_ptr(method).to_str().unwrap_or("auto")
+            match CStr::from_ptr(method).to_str() {
+                Ok(s) => s,
+                Err(_) => {
+                    return Err(anofox_fcst_core::ForecastError::InvalidInput(
+                        "method is not valid UTF-8".to_string(),
+                    ))
+                }
+            }
         };
         let detrend_method: anofox_fcst_core::DetrendMethod =
             method_str.parse().unwrap_or_default();
@@ -3366,18 +3376,31 @@ pub unsafe extern "C" fn anofox_ts_features_list(
 
 /// Generate forecasts for a time series.
 ///
-/// Parse a seasonal_periods_str like "[24, 168]" into Vec<usize>.
-fn parse_seasonal_periods_str(s: &str) -> Vec<usize> {
-    if s.is_empty() {
-        return vec![];
-    }
-    s.trim()
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .split(',')
-        .filter_map(|p| p.trim().parse::<usize>().ok())
-        .filter(|&v| v > 0)
-        .collect()
+/// Bounded, safe read of a fixed-size `[c_char; N]` FFI string field (D-07,
+/// T-10-04/T-10-07).
+///
+/// Uses `CStr::from_bytes_until_nul` over the array's own bytes — never
+/// `CStr::from_ptr`, which has no bound and would read past the end of a
+/// buffer the caller forgot to NUL-terminate. A missing terminator or
+/// invalid UTF-8 is an `InvalidInput` naming `field`, never a silent
+/// `"auto"`/empty-string fallback.
+///
+/// # Safety
+/// `buf` must be a valid, readable `[c_char; N]` array (true for every
+/// `ForecastOptions`/`ForecastOptionsExog` field it is called on — they are
+/// plain fixed-size arrays embedded in a `#[repr(C)]` struct dereferenced
+/// from a caller-supplied pointer already validated non-null).
+unsafe fn c_field_str<'a>(
+    buf: &'a [c_char],
+    field: &str,
+) -> std::result::Result<&'a str, anofox_fcst_core::ForecastError> {
+    let bytes = std::slice::from_raw_parts(buf.as_ptr() as *const u8, buf.len());
+    let cstr = CStr::from_bytes_until_nul(bytes).map_err(|_| {
+        anofox_fcst_core::ForecastError::InvalidInput(format!("{field} is not NUL-terminated"))
+    })?;
+    cstr.to_str().map_err(|_| {
+        anofox_fcst_core::ForecastError::InvalidInput(format!("{field} is not valid UTF-8"))
+    })
 }
 
 /// # Safety
@@ -3404,86 +3427,7 @@ pub unsafe extern "C" fn anofox_ts_forecast(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let series = build_series(values, validity, length);
-        let opts = &*options;
-
-        // Parse model name
-        let model_str = CStr::from_ptr(opts.model.as_ptr())
-            .to_str()
-            .unwrap_or("auto");
-
-        let model_type: anofox_fcst_core::ModelType = match model_str.parse() {
-            Ok(m) => m,
-            Err(_) => {
-                return Err(anofox_fcst_core::ForecastError::InvalidModel(format!(
-                    "Unknown model: '{}'",
-                    model_str
-                )))
-            }
-        };
-
-        // Parse ETS model spec (e.g., "AAA", "MNM", "AAdA")
-        let ets_spec = CStr::from_ptr(opts.ets_model.as_ptr())
-            .to_str()
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(String::from);
-
-        // Parse seasonal_periods_str
-        let sp_str = CStr::from_ptr(opts.seasonal_periods_str.as_ptr())
-            .to_str()
-            .unwrap_or("");
-        let seasonal_periods = parse_seasonal_periods_str(sp_str);
-
-        // Parse model_pool
-        let model_pool = CStr::from_ptr(opts.model_pool.as_ptr())
-            .to_str()
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(String::from);
-
-        // Parse laplace_variant (empty → default Auto handled downstream)
-        let laplace_variant = CStr::from_ptr(opts.laplace_variant.as_ptr())
-            .to_str()
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(anofox_fcst_core::LaplaceVariant::parse)
-            .transpose()?;
-
-        // Parse kalman_model spec (empty → None → local_level default)
-        let kalman_model = CStr::from_ptr(opts.kalman_model.as_ptr())
-            .to_str()
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(str::to_owned);
-
-        // Parse ensemble_method (empty → None → "mean" default in core)
-        let ensemble_method = CStr::from_ptr(opts.ensemble_method.as_ptr())
-            .to_str()
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(str::to_owned);
-
-        let core_opts = anofox_fcst_core::ForecastOptions {
-            model: model_type,
-            ets_spec,
-            horizon: opts.horizon as usize,
-            confidence_level: opts.confidence_level,
-            seasonal_period: opts.seasonal_period as usize,
-            auto_detect_seasonality: opts.auto_detect_seasonality,
-            include_fitted: opts.include_fitted,
-            include_residuals: opts.include_residuals,
-            window: opts.window.max(0) as usize,
-            seasonal_periods,
-            model_pool,
-            laplace_variant,
-            laplace_seasonal_batch_init: opts.laplace_seasonal_batch_init,
-            garch_p: opts.garch_p as usize,
-            garch_q: opts.garch_q as usize,
-            kalman_model,
-            ensemble_top_k: opts.ensemble_top_k.max(0) as usize,
-            ensemble_method,
-        };
-
+        let core_opts = build_core_options(&*options)?;
         anofox_fcst_core::forecast(&series, &core_opts)
     }));
 
@@ -3552,7 +3496,11 @@ pub unsafe extern "C" fn anofox_ts_forecast(
                 (*out_result).n_fitted = 0;
             }
 
-            // Copy residuals
+            // Copy residuals. n_residuals is its OWN length field (plan 10-02
+            // fix) — it must never be aliased to n_fitted, since fitted and
+            // residuals can legitimately have different presence/length
+            // (GARCH always has fitted=None, residuals=Some; see
+            // ForecastResult::n_residuals doc comment).
             if let Some(ref resid) = forecast.residuals {
                 (*out_result).residuals =
                     match alloc_or_error(resid, out_error, "Failed to allocate residuals") {
@@ -3569,8 +3517,10 @@ pub unsafe extern "C" fn anofox_ts_forecast(
                             return false;
                         }
                     };
+                (*out_result).n_residuals = resid.len();
             } else {
                 (*out_result).residuals = ptr::null_mut();
+                (*out_result).n_residuals = 0;
             }
 
             // Copy model name
@@ -3661,27 +3611,7 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
         let series = build_series(values, validity, length);
         let opts = &*options;
 
-        // Parse model name
-        let model_str = CStr::from_ptr(opts.model.as_ptr())
-            .to_str()
-            .unwrap_or("auto");
-
-        let model_type: anofox_fcst_core::ModelType = match model_str.parse() {
-            Ok(m) => m,
-            Err(_) => {
-                return Err(anofox_fcst_core::ForecastError::InvalidModel(format!(
-                    "Unknown model: '{}'",
-                    model_str
-                )))
-            }
-        };
-
-        // Parse ETS model spec (e.g., "AAA", "MNM", "AAdA")
-        let ets_spec = CStr::from_ptr(opts.ets_model.as_ptr())
-            .to_str()
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(String::from);
+        let mut core_opts = build_core_options_exog(opts)?;
 
         // Build exogenous data if provided
         let exog_data = if !opts.exog.is_null() {
@@ -3727,63 +3657,7 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
         } else {
             None
         };
-
-        // Parse seasonal_periods_str
-        let sp_str = CStr::from_ptr(opts.seasonal_periods_str.as_ptr())
-            .to_str()
-            .unwrap_or("");
-        let seasonal_periods = parse_seasonal_periods_str(sp_str);
-
-        // Parse model_pool
-        let model_pool = CStr::from_ptr(opts.model_pool.as_ptr())
-            .to_str()
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(String::from);
-
-        // Parse laplace_variant (empty → default Auto handled downstream)
-        let laplace_variant = CStr::from_ptr(opts.laplace_variant.as_ptr())
-            .to_str()
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(anofox_fcst_core::LaplaceVariant::parse)
-            .transpose()?;
-
-        // Parse kalman_model spec (empty → None → local_level default)
-        let kalman_model_exog = CStr::from_ptr(opts.kalman_model.as_ptr())
-            .to_str()
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(str::to_owned);
-
-        // Parse ensemble_method (empty → None → "mean" default in core)
-        let ensemble_method_exog = CStr::from_ptr(opts.ensemble_method.as_ptr())
-            .to_str()
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(str::to_owned);
-
-        let core_opts = anofox_fcst_core::ForecastOptionsExog {
-            model: model_type,
-            ets_spec,
-            horizon: opts.horizon as usize,
-            confidence_level: opts.confidence_level,
-            seasonal_period: opts.seasonal_period as usize,
-            auto_detect_seasonality: opts.auto_detect_seasonality,
-            include_fitted: opts.include_fitted,
-            include_residuals: opts.include_residuals,
-            exog: exog_data,
-            window: opts.window.max(0) as usize,
-            seasonal_periods,
-            model_pool,
-            laplace_variant,
-            laplace_seasonal_batch_init: opts.laplace_seasonal_batch_init,
-            garch_p: opts.garch_p as usize,
-            garch_q: opts.garch_q as usize,
-            kalman_model: kalman_model_exog,
-            ensemble_top_k: opts.ensemble_top_k.max(0) as usize,
-            ensemble_method: ensemble_method_exog,
-        };
+        core_opts.exog = exog_data;
 
         anofox_fcst_core::forecast_with_exog(&series, &core_opts)
     }));
@@ -3852,7 +3726,9 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
                 (*out_result).n_fitted = 0;
             }
 
-            // Copy residuals
+            // Copy residuals. n_residuals is its OWN length field (plan
+            // 10-02 fix) — never aliased to n_fitted; see
+            // ForecastResult::n_residuals doc comment.
             if let Some(ref resid) = forecast.residuals {
                 (*out_result).residuals =
                     match alloc_or_error(resid, out_error, "Failed to allocate residuals") {
@@ -3869,8 +3745,10 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
                             return false;
                         }
                     };
+                (*out_result).n_residuals = resid.len();
             } else {
                 (*out_result).residuals = ptr::null_mut();
+                (*out_result).n_residuals = 0;
             }
 
             // Copy model name
@@ -4128,58 +4006,55 @@ pub unsafe extern "C" fn anofox_ts_forecast_explain(
     }
 }
 
-/// Shared FFI → core `ForecastOptions` conversion used by inspect + explain.
+/// Shared FFI → core `ForecastOptions` conversion used by `anofox_ts_forecast`,
+/// `anofox_ts_forecast_inspect`, and `anofox_ts_forecast_explain`.
 ///
-/// Extracted so both entry points parse the buffered string fields
-/// (`model`, `ets_model`, `seasonal_periods_str`, `model_pool`,
-/// `laplace_variant`) identically to `anofox_ts_forecast`.
+/// Every buffered string field (`model`, `ets_model`, `seasonal_periods_str`,
+/// `model_pool`, `laplace_variant`, `kalman_model`, `ensemble_method`,
+/// `arima_order_str`, `seasonal_order_str`) is read via [`c_field_str`] (D-07,
+/// T-10-04/T-10-07) — a missing NUL terminator or invalid UTF-8 is an
+/// `InvalidInput` error, never a silent `"auto"`/empty-string fallback.
 unsafe fn build_core_options(
     opts: &ForecastOptions,
 ) -> Result<anofox_fcst_core::ForecastOptions, anofox_fcst_core::ForecastError> {
-    let model_str = CStr::from_ptr(opts.model.as_ptr())
-        .to_str()
-        .unwrap_or("auto");
+    let model_str = c_field_str(&opts.model, "model")?;
     let model_type: anofox_fcst_core::ModelType = model_str.parse().map_err(|_| {
         anofox_fcst_core::ForecastError::InvalidModel(format!("Unknown model: '{}'", model_str))
     })?;
 
-    let ets_spec = CStr::from_ptr(opts.ets_model.as_ptr())
-        .to_str()
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(String::from);
+    let ets_spec = c_field_str(&opts.ets_model, "ets_model")?
+        .to_owned()
+        .into_non_empty();
 
-    let sp_str = CStr::from_ptr(opts.seasonal_periods_str.as_ptr())
-        .to_str()
-        .unwrap_or("");
-    let seasonal_periods = parse_seasonal_periods_str(sp_str);
+    let sp_str = c_field_str(&opts.seasonal_periods_str, "seasonal_periods")?;
+    let seasonal_periods = anofox_fcst_core::parse_seasonal_periods(sp_str)?;
 
-    let model_pool = CStr::from_ptr(opts.model_pool.as_ptr())
-        .to_str()
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(String::from);
+    let model_pool = c_field_str(&opts.model_pool, "model_pool")?
+        .to_owned()
+        .into_non_empty();
 
-    let laplace_variant = CStr::from_ptr(opts.laplace_variant.as_ptr())
-        .to_str()
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(anofox_fcst_core::LaplaceVariant::parse)
+    let laplace_variant = c_field_str(&opts.laplace_variant, "laplace_variant")?
+        .to_owned()
+        .into_non_empty()
+        .map(|s| anofox_fcst_core::LaplaceVariant::parse(&s))
         .transpose()?;
 
     // Parse kalman_model spec (empty → None → local_level default)
-    let kalman_model = CStr::from_ptr(opts.kalman_model.as_ptr())
-        .to_str()
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned);
+    let kalman_model = c_field_str(&opts.kalman_model, "kalman_model")?
+        .to_owned()
+        .into_non_empty();
 
     // Parse ensemble_method (empty → None → "mean" default in core)
-    let ensemble_method = CStr::from_ptr(opts.ensemble_method.as_ptr())
-        .to_str()
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned);
+    let ensemble_method = c_field_str(&opts.ensemble_method, "ensemble_method")?
+        .to_owned()
+        .into_non_empty();
+
+    // ARIMA order strings (D-08/D-09) — strict parse, bounds-checked in core.
+    let arima_order_str = c_field_str(&opts.arima_order_str, "arima_order")?;
+    let arima_order = anofox_fcst_core::parse_order_triplet("arima_order", arima_order_str)?;
+    let seasonal_order_str = c_field_str(&opts.seasonal_order_str, "seasonal_order")?;
+    let seasonal_order =
+        anofox_fcst_core::parse_order_triplet("seasonal_order", seasonal_order_str)?;
 
     Ok(anofox_fcst_core::ForecastOptions {
         model: model_type,
@@ -4200,7 +4075,93 @@ unsafe fn build_core_options(
         kalman_model,
         ensemble_top_k: opts.ensemble_top_k.max(0) as usize,
         ensemble_method,
+        arima_order,
+        seasonal_order,
     })
+}
+
+/// Shared FFI → core `ForecastOptionsExog` conversion used by
+/// `anofox_ts_forecast_exog`, minus the exog payload itself (the caller
+/// fills in `.exog` separately, since that requires the raw pointer/length
+/// marshalling that has nothing to do with the buffered string fields).
+unsafe fn build_core_options_exog(
+    opts: &ForecastOptionsExog,
+) -> Result<anofox_fcst_core::ForecastOptionsExog, anofox_fcst_core::ForecastError> {
+    let model_str = c_field_str(&opts.model, "model")?;
+    let model_type: anofox_fcst_core::ModelType = model_str.parse().map_err(|_| {
+        anofox_fcst_core::ForecastError::InvalidModel(format!("Unknown model: '{}'", model_str))
+    })?;
+
+    let ets_spec = c_field_str(&opts.ets_model, "ets_model")?
+        .to_owned()
+        .into_non_empty();
+
+    let sp_str = c_field_str(&opts.seasonal_periods_str, "seasonal_periods")?;
+    let seasonal_periods = anofox_fcst_core::parse_seasonal_periods(sp_str)?;
+
+    let model_pool = c_field_str(&opts.model_pool, "model_pool")?
+        .to_owned()
+        .into_non_empty();
+
+    let laplace_variant = c_field_str(&opts.laplace_variant, "laplace_variant")?
+        .to_owned()
+        .into_non_empty()
+        .map(|s| anofox_fcst_core::LaplaceVariant::parse(&s))
+        .transpose()?;
+
+    let kalman_model = c_field_str(&opts.kalman_model, "kalman_model")?
+        .to_owned()
+        .into_non_empty();
+
+    let ensemble_method = c_field_str(&opts.ensemble_method, "ensemble_method")?
+        .to_owned()
+        .into_non_empty();
+
+    let arima_order_str = c_field_str(&opts.arima_order_str, "arima_order")?;
+    let arima_order = anofox_fcst_core::parse_order_triplet("arima_order", arima_order_str)?;
+    let seasonal_order_str = c_field_str(&opts.seasonal_order_str, "seasonal_order")?;
+    let seasonal_order =
+        anofox_fcst_core::parse_order_triplet("seasonal_order", seasonal_order_str)?;
+
+    Ok(anofox_fcst_core::ForecastOptionsExog {
+        model: model_type,
+        ets_spec,
+        horizon: opts.horizon as usize,
+        confidence_level: opts.confidence_level,
+        seasonal_period: opts.seasonal_period as usize,
+        auto_detect_seasonality: opts.auto_detect_seasonality,
+        include_fitted: opts.include_fitted,
+        include_residuals: opts.include_residuals,
+        exog: None,
+        window: opts.window.max(0) as usize,
+        seasonal_periods,
+        model_pool,
+        laplace_variant,
+        laplace_seasonal_batch_init: opts.laplace_seasonal_batch_init,
+        garch_p: opts.garch_p as usize,
+        garch_q: opts.garch_q as usize,
+        kalman_model,
+        ensemble_top_k: opts.ensemble_top_k.max(0) as usize,
+        ensemble_method,
+        arima_order,
+        seasonal_order,
+    })
+}
+
+/// Tiny `""` → `None` helper so the repeated
+/// `.to_owned().filter(|s| !s.is_empty()).map(...)` chain reads as one call.
+trait IntoNonEmpty {
+    fn into_non_empty(self) -> Option<String>;
+}
+
+impl IntoNonEmpty for String {
+    fn into_non_empty(self) -> Option<String> {
+        if self.is_empty() {
+            None
+        } else {
+            Some(self)
+        }
+    }
 }
 
 // ============================================================================
@@ -8192,6 +8153,7 @@ pub unsafe extern "C" fn anofox_ts_forecast_ensemble(
             (*out_result).fitted_values = ptr::null_mut();
             (*out_result).n_fitted = 0;
             (*out_result).residuals = ptr::null_mut();
+            (*out_result).n_residuals = 0;
 
             // Copy model name ("Ensemble")
             copy_string_to_buffer(&forecast.model_name, &mut (*out_result).model_name);

@@ -6,7 +6,7 @@ use crate::seasonality::detect_seasonality;
 
 // Model types from anofox-forecast crate
 use anofox_forecast::core::TimeSeries;
-use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig};
+use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig, ARIMA, SARIMA};
 use anofox_forecast::models::exponential::{
     AutoETS, AutoETSConfig, ETSSpec, HoltLinearTrend, HoltWinters as HoltWintersModel, ModelPool,
     SeasonalES as SeasonalESModel, SimpleExponentialSmoothing, ETS as ETSModel,
@@ -392,6 +392,17 @@ pub struct ForecastOptions {
     /// Accepted: "" | "mean" | "median" | "weighted_mse" | "inverse_aic" | "stacking" |
     /// "horizon_adaptive" (and common aliases). Only consulted when model is AutoEnsemble.
     pub ensemble_method: Option<String>,
+    /// ARIMA non-seasonal order `[p, d, q]`. `None` = unset. Only consulted
+    /// when model is `ARIMA`; without it, `ARIMA` is a hard error (D-09) —
+    /// use `AutoARIMA` for automatic order selection. See
+    /// [`parse_order_triplet`] for the string encoding used at the FFI
+    /// boundary.
+    pub arima_order: Option<[usize; 3]>,
+    /// ARIMA seasonal order `[P, D, Q]`. `None` = unset (non-seasonal).
+    /// Only consulted when model is `ARIMA`; requires `seasonal_period > 1`
+    /// and a non-zero `arima_order` (D-08/D-09). The seasonal period itself
+    /// always comes from `seasonal_period`, never from auto-detection.
+    pub seasonal_order: Option<[usize; 3]>,
 }
 
 impl Default for ForecastOptions {
@@ -415,6 +426,8 @@ impl Default for ForecastOptions {
             kalman_model: None,
             ensemble_top_k: 0,
             ensemble_method: None,
+            arima_order: None,
+            seasonal_order: None,
         }
     }
 }
@@ -530,6 +543,10 @@ pub struct ForecastOptionsExog {
     /// AutoEnsemble: combination method string. None → "mean" (Phase 4 default).
     /// Only consulted when model is AutoEnsemble.
     pub ensemble_method: Option<String>,
+    /// ARIMA non-seasonal order `[p, d, q]`. See [`ForecastOptions::arima_order`].
+    pub arima_order: Option<[usize; 3]>,
+    /// ARIMA seasonal order `[P, D, Q]`. See [`ForecastOptions::seasonal_order`].
+    pub seasonal_order: Option<[usize; 3]>,
 }
 
 impl Default for ForecastOptionsExog {
@@ -554,6 +571,8 @@ impl Default for ForecastOptionsExog {
             kalman_model: None,
             ensemble_top_k: 0,
             ensemble_method: None,
+            arima_order: None,
+            seasonal_order: None,
         }
     }
 }
@@ -580,6 +599,8 @@ impl From<ForecastOptions> for ForecastOptionsExog {
             kalman_model: opts.kalman_model,
             ensemble_top_k: opts.ensemble_top_k,
             ensemble_method: opts.ensemble_method,
+            arima_order: opts.arima_order,
+            seasonal_order: opts.seasonal_order,
         }
     }
 }
@@ -621,7 +642,6 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
                 | ModelType::SESOptimized
                 | ModelType::Holt
                 | ModelType::RandomWalkDrift
-                | ModelType::ARIMA
                 | ModelType::CrostonClassic
                 | ModelType::CrostonOptimized
                 | ModelType::CrostonSBA
@@ -637,6 +657,24 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
                 options.seasonal_period
             )));
         }
+    }
+
+    // arima_order / seasonal_order (D-08/D-09) are only meaningful for ARIMA;
+    // ARIMA validates them itself (incl. seasonal_period interplay) inside
+    // forecast_arima — this just rejects them on every other model.
+    if options.model != ModelType::ARIMA
+        && (options.arima_order.is_some() || options.seasonal_order.is_some())
+    {
+        let param = if options.arima_order.is_some() {
+            "arima_order"
+        } else {
+            "seasonal_order"
+        };
+        return Err(ForecastError::InvalidParameter {
+            param: param.to_string(),
+            value: options.model.name().to_string(),
+            reason: "only valid when method='ARIMA'".to_string(),
+        });
     }
 
     // Generate forecast based on model
@@ -705,7 +743,14 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         }
         ModelType::AutoTheta => forecast_auto_theta(&prep.values, extended_horizon, period, level),
         // ARIMA
-        ModelType::ARIMA => forecast_arima(&prep.values, extended_horizon),
+        ModelType::ARIMA => forecast_arima(
+            &prep.values,
+            extended_horizon,
+            level,
+            options.seasonal_period,
+            options.arima_order,
+            options.seasonal_order,
+        ),
         ModelType::AutoARIMA => forecast_auto_arima(&prep.values, extended_horizon, period, level),
         // Multiple Seasonality
         ModelType::MFLES | ModelType::AutoMFLES => {
@@ -1048,8 +1093,10 @@ fn forecast_with_model(
             forecast_dynamic_optimized_theta(values, horizon, period, confidence_level)
         }
         ModelType::AutoTheta => forecast_auto_theta(values, horizon, period, confidence_level),
-        // ARIMA
-        ModelType::ARIMA => forecast_arima(values, horizon),
+        // ARIMA — explicit-member ensembles never carry arima_order/seasonal_order
+        // (forecast_with_model has no such parameters), so this always surfaces the
+        // same "requires arima_order" error as a direct no-order ARIMA call.
+        ModelType::ARIMA => forecast_arima(values, horizon, confidence_level, 0, None, None),
         ModelType::AutoARIMA => forecast_auto_arima(values, horizon, period, confidence_level),
         // Multiple Seasonality
         ModelType::MFLES | ModelType::AutoMFLES => {
@@ -1501,54 +1548,193 @@ fn forecast_with_ets_spec(
     })
 }
 
-fn forecast_arima(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
-    // Simplified ARIMA(1,1,1) - AR(1) on differenced series. This stub (fixed AR
-    // coefficient, no real crate ARIMA fit) is replaced by a real crate ARIMA/SARIMA
-    // fit in a later plan (D-08/D-09) — out of scope here.
-    if values.len() < 5 {
-        // Degenerate case: delegate to the real crate Naive model (still a last-value
-        // repeat), but keep model_name empty so the caller's existing fallback-to-"ARIMA"
-        // naming is unchanged. Uses the ForecastOptions default level (0.95) since this
-        // stub has no access to the caller's confidence_level.
-        let mut fallback = forecast_naive(values, horizon, 0.95)?;
-        fallback.model_name = String::new();
-        return Ok(fallback);
+/// Parse an `arima_order`/`seasonal_order` string like `"[0,1,1]"` or
+/// `" 0, 1 ,1 "` into `Option<[usize; 3]>` (D-08/D-09).
+///
+/// An empty (post-trim) string is `Ok(None)` ("unset"). Otherwise: one
+/// optional leading `[`/`(` and trailing `]`/`)` are stripped, the remainder
+/// is split on `,`, and it must yield exactly three non-negative decimal
+/// integers. AR/MA orders (`p`, `q` — positions 0 and 2) must be `<= 10`;
+/// the differencing order (`d` — position 1) must be `<= 2`. Any violation
+/// (wrong count, non-digit characters, negative sign, decimal point,
+/// out-of-range value) is `InvalidParameter` naming `param` and echoing the
+/// original (untrimmed) `s` as `value` — never a silent default or a
+/// partially-parsed result.
+pub fn parse_order_triplet(param: &str, s: &str) -> Result<Option<[usize; 3]>> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
     }
 
-    // Difference the series
-    let diff: Vec<f64> = values.windows(2).map(|w| w[1] - w[0]).collect();
+    let invalid = || ForecastError::InvalidParameter {
+        param: param.to_string(),
+        value: s.to_string(),
+        reason: "expected three non-negative integers [p,d,q] with p,q <= 10 and d <= 2"
+            .to_string(),
+    };
 
-    // Fit AR(1) on differenced series
-    let mean_diff = diff.iter().sum::<f64>() / diff.len() as f64;
-    let ar_coef = 0.5; // Simplified: fixed AR coefficient
-
-    let last_val = *values
-        .last()
-        .expect("values.len() >= 5 validated by caller");
-    let last_diff = *diff.last().expect("diff non-empty when values.len() >= 5");
-
-    let mut point = Vec::with_capacity(horizon);
-    let mut prev_diff = last_diff;
-    let mut cumsum = last_val;
-
-    for _ in 0..horizon {
-        let next_diff = mean_diff + ar_coef * (prev_diff - mean_diff);
-        cumsum += next_diff;
-        point.push(cumsum);
-        prev_diff = next_diff;
+    let mut inner = trimmed;
+    if let Some(rest) = inner.strip_prefix('[').or_else(|| inner.strip_prefix('(')) {
+        inner = rest;
+    }
+    if let Some(rest) = inner.strip_suffix(']').or_else(|| inner.strip_suffix(')')) {
+        inner = rest;
     }
 
-    Ok(ForecastOutput {
-        point,
-        lower: vec![],
-        upper: vec![],
-        fitted: None,
-        residuals: None,
-        model_name: String::new(),
-        aic: None,
-        bic: None,
-        mse: None,
-    })
+    let parts: Vec<&str> = inner.split(',').collect();
+    if parts.len() != 3 {
+        return Err(invalid());
+    }
+
+    let mut vals = [0usize; 3];
+    for (i, part) in parts.iter().enumerate() {
+        let p = part.trim();
+        if p.is_empty() || !p.chars().all(|c| c.is_ascii_digit()) {
+            return Err(invalid());
+        }
+        vals[i] = p.parse::<usize>().map_err(|_| invalid())?;
+    }
+
+    let (p, d, q) = (vals[0], vals[1], vals[2]);
+    if p > 10 || q > 10 || d > 2 {
+        return Err(invalid());
+    }
+
+    Ok(Some([p, d, q]))
+}
+
+/// Parse a `seasonal_periods` string like `"[7, 365]"` into `Vec<usize>`
+/// (D-07 — the strict replacement for the FFI's old silently-dropping
+/// `parse_seasonal_periods_str`).
+///
+/// An empty (post-trim) string is `Ok(vec![])`. Otherwise: one optional
+/// leading `[`/`(` and trailing `]`/`)` are stripped, the remainder is split
+/// on `,`, and every entry must parse as a non-negative decimal integer
+/// `>= 2` — any non-digit entry or any value `< 2` (including `0`/`1`,
+/// which cannot be a seasonal period) is `InvalidParameter { param:
+/// "seasonal_periods" }`; no entry is ever silently dropped.
+pub fn parse_seasonal_periods(s: &str) -> Result<Vec<usize>> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let invalid = || ForecastError::InvalidParameter {
+        param: "seasonal_periods".to_string(),
+        value: s.to_string(),
+        reason: "expected a comma-separated list of integers >= 2, e.g. \"[7, 365]\"".to_string(),
+    };
+
+    let mut inner = trimmed;
+    if let Some(rest) = inner.strip_prefix('[').or_else(|| inner.strip_prefix('(')) {
+        inner = rest;
+    }
+    if let Some(rest) = inner.strip_suffix(']').or_else(|| inner.strip_suffix(')')) {
+        inner = rest;
+    }
+
+    let mut out = Vec::new();
+    for part in inner.split(',') {
+        let p = part.trim();
+        if p.is_empty() || !p.chars().all(|c| c.is_ascii_digit()) {
+            return Err(invalid());
+        }
+        let v: usize = p.parse().map_err(|_| invalid())?;
+        if v < 2 {
+            return Err(invalid());
+        }
+        out.push(v);
+    }
+
+    Ok(out)
+}
+
+/// Real crate ARIMA/SARIMA fit (D-08/D-09). `arima_order=[p,d,q]` is mandatory
+/// — `ARIMA` without it is a hard error naming `AutoARIMA` as the
+/// automatic-order alternative, never a silent fallback (the old fixed-AR(1)
+/// stand-in this replaces, and the `n<5`-delegates-to-Naive branch it had,
+/// are both gone entirely).
+///
+/// `seasonal_order=[P,D,Q]` is optional; a non-zero seasonal order requires
+/// an explicit `seasonal_period > 1` (never the auto-detected period — the
+/// caller passes `options.seasonal_period` directly, see `forecast()`).
+/// `seasonal_order=[0,0,0]` (or omitted) is non-seasonal: a plain `ARIMA`
+/// fit runs even if the caller passed an all-zero seasonal order.
+fn forecast_arima(
+    values: &[f64],
+    horizon: usize,
+    level: f64,
+    seasonal_period: usize,
+    arima_order: Option<[usize; 3]>,
+    seasonal_order: Option<[usize; 3]>,
+) -> Result<ForecastOutput> {
+    let Some([p, d, q]) = arima_order else {
+        return Err(ForecastError::InvalidInput(
+            "ARIMA requires arima_order=[p,d,q] (e.g. [1,1,1]); use 'AutoARIMA' for \
+             automatic order selection"
+                .to_string(),
+        ));
+    };
+
+    // seasonal_order=[0,0,0] is explicitly non-seasonal (D-08) — only a
+    // genuinely non-zero seasonal order engages SARIMA / requires a period.
+    let seasonal_nonzero = seasonal_order
+        .map(|[cap_p, cap_d, cap_q]| cap_p + cap_d + cap_q > 0)
+        .unwrap_or(false);
+
+    if seasonal_nonzero && seasonal_period <= 1 {
+        return Err(ForecastError::InvalidInput(
+            "seasonal_order requires seasonal_period > 1".to_string(),
+        ));
+    }
+    if !seasonal_nonzero && seasonal_period > 1 {
+        return Err(ForecastError::InvalidInput(
+            "seasonal_period > 1 requires a non-zero seasonal_order=[P,D,Q] (e.g. [0,1,1]); \
+             ARIMA never uses the auto-detected seasonal period"
+                .to_string(),
+        ));
+    }
+
+    let ts = make_timeseries(values)?;
+
+    // Constant handling (per the crate's documented allowdrift-style AICc
+    // comparison): d+D == 1 with p or q >= 1 may fit a drift term; d+D == 0
+    // optimises an intercept (≈ mean); d+D >= 2 never carries a constant.
+    // Report whichever non-zero constant the crate actually fit.
+    let output = if seasonal_nonzero {
+        let [cap_p, cap_d, cap_q] = seasonal_order.expect("seasonal_nonzero implies Some");
+        let s = seasonal_period;
+        let name = format!("ARIMA({p},{d},{q})({cap_p},{cap_d},{cap_q})[{s}]");
+        let mut model = SARIMA::new(p, d, q, cap_p, cap_d, cap_q, s);
+        model
+            .fit(&ts)
+            .map_err(|e| ForecastError::ComputationError(format!("{name} fit failed: {e}")))?;
+        let intercept = model.intercept();
+        let mut out = extract_forecast(&model, horizon, level, &name)?;
+        let d_total = d + cap_d;
+        if d_total == 1 && intercept != 0.0 {
+            out.model_name.push_str(" with drift");
+        } else if d_total == 0 && intercept != 0.0 {
+            out.model_name.push_str(" with non-zero mean");
+        }
+        out
+    } else {
+        let name = format!("ARIMA({p},{d},{q})");
+        let mut model = ARIMA::new(p, d, q);
+        model
+            .fit(&ts)
+            .map_err(|e| ForecastError::ComputationError(format!("{name} fit failed: {e}")))?;
+        let intercept = model.intercept();
+        let mut out = extract_forecast(&model, horizon, level, &name)?;
+        if d == 1 && intercept != 0.0 {
+            out.model_name.push_str(" with drift");
+        } else if d == 0 && intercept != 0.0 {
+            out.model_name.push_str(" with non-zero mean");
+        }
+        out
+    };
+
+    Ok(output)
 }
 
 /// AutoARIMA: Automatic ARIMA model selection using AIC-based search.
@@ -3518,8 +3704,16 @@ fn forecast_arima_with_exog(
     // Fit regression: y = X*beta + residuals
     let (coeffs, residuals) = fit_ols_regression(values, &exog.historical);
 
-    // Forecast residuals with ARIMA
-    let residual_forecast = forecast_arima(&residuals, horizon)?;
+    // Forecast residuals with AutoARIMA (D-08/D-09, plan 10-02: `forecast_arima`
+    // now requires an explicit `arima_order` — there is none to hand-pick here,
+    // and guessing one would reintroduce exactly the kind of fixed-stand-in this
+    // plan removes). `forecast_auto_arima`'s own order search needs no such
+    // input; `level`/`period` are otherwise inert here since this function's
+    // output never surfaces the residual model's own interval/seasonal fields
+    // (see the hardcoded empty `lower`/`upper` below). Native crate exog
+    // routing (`AutoARIMA::predict_with_exog_intervals`, D-10) replaces this
+    // whole OLS + residual-model hack in a later plan.
+    let residual_forecast = forecast_auto_arima(&residuals, horizon, 0, 0.95)?;
 
     // Calculate exogenous effect for future
     let exog_effect = apply_regression(&coeffs, &exog.future, horizon);
@@ -3917,14 +4111,44 @@ mod tests {
         let options = ForecastOptions {
             model: ModelType::ARIMA,
             horizon: 5,
+            arima_order: Some([1, 1, 1]),
             ..Default::default()
         };
 
         let result = forecast(&values, &options).unwrap();
         assert_eq!(result.point.len(), 5);
-        assert_eq!(result.model_name, "ARIMA");
+        // The crate may append " with drift" (d+D==1, AICc-selected nonzero
+        // intercept) or " with non-zero mean" (d+D==0) per its own fit —
+        // only the base "ARIMA(p,d,q)" prefix is asserted here.
+        assert!(
+            result.model_name.starts_with("ARIMA(1,1,1)"),
+            "expected model_name to start with 'ARIMA(1,1,1)', got '{}'",
+            result.model_name
+        );
         // ARIMA forecasts should continue the trend
         assert!(result.point.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn test_forecast_arima_without_order_errors() {
+        // D-09: ARIMA without arima_order is a hard error naming AutoARIMA,
+        // never a silent fallback to a different model.
+        let values: Vec<Option<f64>> = (0..30)
+            .map(|i| Some(100.0 + i as f64 * 2.0 + (i % 3) as f64))
+            .collect();
+
+        let options = ForecastOptions {
+            model: ModelType::ARIMA,
+            horizon: 5,
+            ..Default::default()
+        };
+
+        let err = forecast(&values, &options).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("arima_order") && msg.contains("AutoARIMA"),
+            "expected the no-order ARIMA error to name arima_order and AutoARIMA, got: {msg}"
+        );
     }
 
     #[test]
@@ -4053,9 +4277,12 @@ mod tests {
             (ModelType::OptimizedTheta, &seasonal),
             (ModelType::DynamicTheta, &seasonal),
             (ModelType::DynamicOptimizedTheta, &seasonal),
-            // State Space / ARIMA
+            // State Space
             (ModelType::ETS, &seasonal),
-            (ModelType::ARIMA, &seasonal),
+            // ARIMA is excluded here (D-09): it now requires an explicit
+            // arima_order and reports "ARIMA(p,d,q)" (and "(P,D,Q)[s]" when
+            // seasonal), never the bare enum name — covered separately by
+            // test_forecast_arima / test_forecast_arima_without_order_errors.
             // Multiple Seasonality
             (ModelType::MFLES, &seasonal),
             (ModelType::MSTL, &seasonal),
@@ -4571,9 +4798,11 @@ mod tests {
     }
 
     #[test]
-    fn test_auto_arima_different_from_simple_arima() {
-        // Verify that AutoARIMA produces different results than the simplified ARIMA
-        // by testing on data that benefits from proper order selection
+    fn test_auto_arima_different_from_explicit_arima() {
+        // D-09: ARIMA now requires an explicit arima_order and fits a real
+        // crate model (no more fixed-coefficient AR(1) stand-in) — verify
+        // AutoARIMA's own order search still reports a distinct model_name
+        // from an explicitly-ordered ARIMA(1,1,1) on the same data.
         let values: Vec<Option<f64>> = (0..50)
             .map(|i| Some(100.0 + i as f64 * 2.0 + 5.0 * (i as f64 * 0.2).sin()))
             .collect();
@@ -4584,24 +4813,24 @@ mod tests {
             ..Default::default()
         };
 
-        let simple_options = ForecastOptions {
+        let explicit_options = ForecastOptions {
             model: ModelType::ARIMA,
             horizon: 5,
+            arima_order: Some([1, 1, 1]),
             ..Default::default()
         };
 
         let auto_result = forecast(&values, &auto_options).unwrap();
-        let simple_result = forecast(&values, &simple_options).unwrap();
+        let explicit_result = forecast(&values, &explicit_options).unwrap();
 
-        // AutoARIMA uses library's implementation
         assert!(auto_result.model_name.starts_with("AutoARIMA"));
-        // Simple ARIMA uses our simplified implementation
-        assert_eq!(simple_result.model_name, "ARIMA");
+        assert!(explicit_result.model_name.starts_with("ARIMA(1,1,1)"));
 
-        // Forecasts should be different (AutoARIMA selects optimal p,d,q)
-        // Note: They might occasionally be similar, but typically differ
         println!("AutoARIMA forecasts: {:?}", auto_result.point);
-        println!("Simple ARIMA forecasts: {:?}", simple_result.point);
+        println!(
+            "Explicit ARIMA(1,1,1) forecasts: {:?}",
+            explicit_result.point
+        );
     }
 
     #[test]

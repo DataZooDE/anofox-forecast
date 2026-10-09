@@ -348,6 +348,15 @@ pub struct ForecastResult {
     pub bic: c_double,
     /// Mean Squared Error
     pub mse: c_double,
+    /// Number of residuals.
+    ///
+    /// Appended additively (plan 10-02) to fix a pre-existing correctness gap:
+    /// `fitted_values` and `residuals` used to share the single `n_fitted`
+    /// length field, which silently truncated `residuals` to length 0 whenever
+    /// a crate model's `fitted_values()` was `None` while `residuals()` was
+    /// `Some` (e.g. GARCH always, by crate design; AutoARIMA on some series).
+    /// Callers reading `residuals` MUST use `n_residuals`, not `n_fitted`.
+    pub n_residuals: size_t,
 }
 
 impl Default for ForecastResult {
@@ -364,6 +373,7 @@ impl Default for ForecastResult {
             aic: f64::NAN,
             bic: f64::NAN,
             mse: f64::NAN,
+            n_residuals: 0,
         }
     }
 }
@@ -419,6 +429,16 @@ pub struct ForecastOptions {
     /// "horizon_adaptive" (and common aliases). Empty = "mean" (Phase 4 default).
     /// Only consulted when model is "AutoEnsemble".
     pub ensemble_method: [c_char; 32],
+    /// ARIMA non-seasonal order as a string, e.g. "[1,1,1]". Empty = unset
+    /// (D-08/D-09: "ARIMA" without this is an error naming "AutoARIMA").
+    /// Only consulted when model is "ARIMA"; parsed and bounds-checked by
+    /// `anofox_fcst_core::parse_order_triplet`.
+    pub arima_order_str: [c_char; 32],
+    /// ARIMA seasonal order as a string, e.g. "[0,1,1]". Empty = unset
+    /// (non-seasonal). Requires `seasonal_period > 1` when non-zero. Only
+    /// consulted when model is "ARIMA"; parsed and bounds-checked by
+    /// `anofox_fcst_core::parse_order_triplet`.
+    pub seasonal_order_str: [c_char; 32],
 }
 
 /// Panel forecast result — returned by `anofox_ts_forecast_panel`.
@@ -504,6 +524,8 @@ impl Default for ForecastOptions {
             kalman_model: [0; 32],
             ensemble_top_k: 0,
             ensemble_method: [0; 32],
+            arima_order_str: [0; 32],
+            seasonal_order_str: [0; 32],
         }
     }
 }
@@ -588,6 +610,10 @@ pub struct ForecastOptionsExog {
     /// "horizon_adaptive" (and common aliases). Empty = "mean" (Phase 4 default).
     /// Only consulted when model is "AutoEnsemble".
     pub ensemble_method: [c_char; 32],
+    /// ARIMA non-seasonal order string. See [`ForecastOptions::arima_order_str`].
+    pub arima_order_str: [c_char; 32],
+    /// ARIMA seasonal order string. See [`ForecastOptions::seasonal_order_str`].
+    pub seasonal_order_str: [c_char; 32],
 }
 
 impl Default for ForecastOptionsExog {
@@ -617,6 +643,8 @@ impl Default for ForecastOptionsExog {
             kalman_model: [0; 32],
             ensemble_top_k: 0,
             ensemble_method: [0; 32],
+            arima_order_str: [0; 32],
+            seasonal_order_str: [0; 32],
         }
     }
 }

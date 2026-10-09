@@ -1118,6 +1118,20 @@ typedef struct ForecastOptions {
      * Only consulted when model is "AutoEnsemble".
      */
     char ensemble_method[32];
+    /**
+     * ARIMA non-seasonal order as a string, e.g. "[1,1,1]". Empty = unset
+     * (D-08/D-09: "ARIMA" without this is an error naming "AutoARIMA").
+     * Only consulted when model is "ARIMA"; parsed and bounds-checked by
+     * `anofox_fcst_core::parse_order_triplet`.
+     */
+    char arima_order_str[32];
+    /**
+     * ARIMA seasonal order as a string, e.g. "[0,1,1]". Empty = unset
+     * (non-seasonal). Requires `seasonal_period > 1` when non-zero. Only
+     * consulted when model is "ARIMA"; parsed and bounds-checked by
+     * `anofox_fcst_core::parse_order_triplet`.
+     */
+    char seasonal_order_str[32];
 } ForecastOptions;
 
 /**
@@ -1168,6 +1182,17 @@ typedef struct ForecastResult {
      * Mean Squared Error
      */
     double mse;
+    /**
+     * Number of residuals.
+     *
+     * Appended additively (plan 10-02) to fix a pre-existing correctness gap:
+     * `fitted_values` and `residuals` used to share the single `n_fitted`
+     * length field, which silently truncated `residuals` to length 0 whenever
+     * a crate model's `fitted_values()` was `None` while `residuals()` was
+     * `Some` (e.g. GARCH always, by crate design; AutoARIMA on some series).
+     * Callers reading `residuals` MUST use `n_residuals`, not `n_fitted`.
+     */
+    size_t n_residuals;
 } ForecastResult;
 
 /**
@@ -1296,6 +1321,14 @@ typedef struct ForecastOptionsExog {
      * Only consulted when model is "AutoEnsemble".
      */
     char ensemble_method[32];
+    /**
+     * ARIMA non-seasonal order string. See [`ForecastOptions::arima_order_str`].
+     */
+    char arima_order_str[32];
+    /**
+     * ARIMA seasonal order string. See [`ForecastOptions::seasonal_order_str`].
+     */
+    char seasonal_order_str[32];
 } ForecastOptionsExog;
 
 /**
@@ -3516,6 +3549,12 @@ void anofox_free_var_forecast_result(struct VARForecastResult *result);
  * `anofox_fcst_core::forecast_explicit_ensemble` rather than the single-model
  * `forecast()` path.  Point forecasts only in Phase 5; `lower_bounds` and
  * `upper_bounds` are always `null` (prediction intervals deferred to EPI-01).
+ *
+ * # Safety
+ * All pointer arguments must be valid for the stated lengths: `values`/`validity`
+ * for `length` elements, `members_buf` for `members_buf_len` bytes, and
+ * `out_result`/`out_error` must be valid, writable pointers. `members_buf` and
+ * `combination_method` must be non-null (the latter may be an empty C string).
  */
 bool anofox_ts_forecast_ensemble(const double *values,
                                  const uint64_t *validity,

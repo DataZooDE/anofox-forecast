@@ -161,7 +161,7 @@ static void TsForecastFunction(DataChunk &args, ExpressionState &state, Vector &
         SetListFromArray(result, 1, row_idx, fcst_result.lower_bounds, fcst_result.n_forecasts);
         SetListFromArray(result, 2, row_idx, fcst_result.upper_bounds, fcst_result.n_forecasts);
         SetListFromArray(result, 3, row_idx, fcst_result.fitted_values, fcst_result.n_fitted);
-        SetListFromArray(result, 4, row_idx, fcst_result.residuals, fcst_result.n_fitted);
+        SetListFromArray(result, 4, row_idx, fcst_result.residuals, fcst_result.n_residuals);
 
         // Set scalar fields
         SetStringField(result, 5, row_idx, fcst_result.model_name);
@@ -327,7 +327,7 @@ static void TsForecastExogFunction(DataChunk &args, ExpressionState &state, Vect
         SetListFromArray(result, 1, row_idx, fcst_result.lower_bounds, fcst_result.n_forecasts);
         SetListFromArray(result, 2, row_idx, fcst_result.upper_bounds, fcst_result.n_forecasts);
         SetListFromArray(result, 3, row_idx, fcst_result.fitted_values, fcst_result.n_fitted);
-        SetListFromArray(result, 4, row_idx, fcst_result.residuals, fcst_result.n_fitted);
+        SetListFromArray(result, 4, row_idx, fcst_result.residuals, fcst_result.n_residuals);
         SetStringField(result, 5, row_idx, fcst_result.model_name);
         SetStructField<double>(result, 6, row_idx, fcst_result.aic);
         SetStructField<double>(result, 7, row_idx, fcst_result.bic);
@@ -436,7 +436,7 @@ static void TsForecastWithModelFunction(DataChunk &args, ExpressionState &state,
         SetListFromArray(result, 1, row_idx, fcst_result.lower_bounds, fcst_result.n_forecasts);
         SetListFromArray(result, 2, row_idx, fcst_result.upper_bounds, fcst_result.n_forecasts);
         SetListFromArray(result, 3, row_idx, fcst_result.fitted_values, fcst_result.n_fitted);
-        SetListFromArray(result, 4, row_idx, fcst_result.residuals, fcst_result.n_fitted);
+        SetListFromArray(result, 4, row_idx, fcst_result.residuals, fcst_result.n_residuals);
         SetStringField(result, 5, row_idx, fcst_result.model_name);
         SetStructField<double>(result, 6, row_idx, fcst_result.aic);
         SetStructField<double>(result, 7, row_idx, fcst_result.bic);
