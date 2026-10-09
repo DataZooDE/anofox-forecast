@@ -120,7 +120,7 @@ Plans:
   4. Every former silent fallback is an SQL error or explicitly reported — AutoETS crate failure, `'ETS'` without a spec, AutoMFLES/AutoMSTL aliases, MSTL/TBATS/HW without a seasonal period (no default 12 / 2), unknown `kalman_model`, misspelled panel Croston variant, invalid UTF-8 model name, unparsable seasonal-period entries — and the returned model name always identifies the model that actually ran.
   5. An ensemble member built by `build_forecaster` (e.g. `'ETS'`) produces exactly the same forecast as the standalone model with the same parameters; an all-NULL series errors, a valid NaN is treated as missing, and regressor NULLs are handled via validity — all documented in `docs/api/`.
 
-**Plans**: 9/9 plans executed
+**Plans**: 9/10 plans executed
 
 Plans:
 **Wave 1**
@@ -152,6 +152,10 @@ Plans:
 - [x] 10-07-PLAN.md — reference pages: baseline, exponential smoothing, Croston/ADIDA (wave 7)
 - [x] 10-08-PLAN.md — reference pages: state-space, Theta, multi-seasonal (wave 8)
 - [x] 10-09-PLAN.md — reference pages: AutoTBATS, IMAPA/TSB, Global*, Laplace, GARCH, ensembles + note sweep (wave 9)
+
+**Wave 10** *(gap closure — blocked on Wave 9 completion)*
+
+- [ ] 10-10-PLAN.md — gap closure: ts_forecast_agg params validation/threading/confidence_level parity with ts_forecast_by (shared params header), Theta/CrostonClassic fitted identity pinned + routed to Phase 11, agg docs/CHANGELOG truth pass (wave 10)
 
 ### Phase 11: Upstream anofox-forecast Correctness Fixes
 
