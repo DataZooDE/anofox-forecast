@@ -25,14 +25,14 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 
 ### Forecast Wrapper (crates/anofox-fcst-core/src/forecast.rs, FFI)
 
-- [ ] **FCST-01**: Prediction intervals for every model come from the crate model (`predict_with_intervals(h, level)`); `calculate_confidence_intervals` is deleted; models with no native intervals return NULL bounds [A1, A3-Laplace].
-- [ ] **FCST-02**: Confidence level → quantile uses the exact normal inverse CDF wherever a z-value is needed (no step table) [A2].
-- [ ] **FCST-03**: Fitted values, residuals and MSE come from the crate model (`fitted_values()`/`residuals()`); `calculate_fitted_values` is deleted; MSE excludes interpolated points [A3].
+- [x] **FCST-01**: Prediction intervals for every model come from the crate model (`predict_with_intervals(h, level)`); `calculate_confidence_intervals` is deleted; models with no native intervals return NULL bounds [A1, A3-Laplace].
+- [x] **FCST-02**: Confidence level → quantile uses the exact normal inverse CDF wherever a z-value is needed (no step table) [A2].
+- [x] **FCST-03**: Fitted values, residuals and MSE come from the crate model (`fitted_values()`/`residuals()`); `calculate_fitted_values` is deleted; MSE excludes interpolated points [A3].
 - [ ] **FCST-04**: Model "ARIMA" is a real crate ARIMA fit (user-specified or default order), never the fixed-coefficient AR(1) [A4].
 - [ ] **FCST-05**: Exogenous forecasting routes through the crate's exog support (AutoARIMA search actually runs; Optimized/Dynamic Theta stay themselves; ETS/GARCH/Kalman options honoured); a regressor constant in history gets a 0 (not NaN) effect and a warning-free finite forecast [A5, A6, A15].
 - [ ] **FCST-06**: Silent fallbacks become errors or are explicitly reported: AutoETS crate error, "ETS" without spec, AutoMFLES/AutoMSTL aliases, default period 12 / period 2, unknown kalman_model, panel Croston variant, invalid UTF-8 model name, unparsable seasonal periods; the returned model name always identifies the model that actually ran [A7–A12].
 - [ ] **FCST-07**: Ensemble members built by `build_forecaster` use the same defaults as the standalone model; "ETS" means the same model everywhere [A8, A14].
-- [ ] **FCST-08**: Series input handling is explicit and documented: all-NULL series → error; valid NaN treated as missing; regressor NULLs handled via validity [A13].
+- [x] **FCST-08**: Series input handling is explicit and documented: all-NULL series → error; valid NaN treated as missing; regressor NULLs handled via validity [A13].
 - [ ] **FCST-09**: AirPassengers + simulated-series fixtures: point forecasts and 95% intervals for Naive, SNaive, RWD, SES, Holt, HW, AutoETS, AutoARIMA, Theta, Croston are within documented tolerance of R `forecast`, and Monte-Carlo interval coverage is within ±3pp of nominal for the local-level case [A1, H].
 
 ### Wrapper Bug Fixes
@@ -135,14 +135,14 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 | DEP-02 | Phase 9 | Complete |
 | DEP-03 | Phase 15 | Pending |
 | DEP-04 | Phase 9 | Complete |
-| FCST-01 | Phase 10 | Pending |
-| FCST-02 | Phase 10 | Pending |
-| FCST-03 | Phase 10 | Pending |
+| FCST-01 | Phase 10 | Complete |
+| FCST-02 | Phase 10 | Complete |
+| FCST-03 | Phase 10 | Complete |
 | FCST-04 | Phase 10 | Pending |
 | FCST-05 | Phase 10 | Pending |
 | FCST-06 | Phase 10 | Pending |
 | FCST-07 | Phase 10 | Pending |
-| FCST-08 | Phase 10 | Pending |
+| FCST-08 | Phase 10 | Complete |
 | FCST-09 | Phase 17 | Pending |
 | WRAP-01 | Phase 15 | Pending |
 | WRAP-02 | Phase 13 | Pending |

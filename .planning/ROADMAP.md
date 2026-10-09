@@ -120,12 +120,12 @@ Plans:
   4. Every former silent fallback is an SQL error or explicitly reported — AutoETS crate failure, `'ETS'` without a spec, AutoMFLES/AutoMSTL aliases, MSTL/TBATS/HW without a seasonal period (no default 12 / 2), unknown `kalman_model`, misspelled panel Croston variant, invalid UTF-8 model name, unparsable seasonal-period entries — and the returned model name always identifies the model that actually ran.
   5. An ensemble member built by `build_forecaster` (e.g. `'ETS'`) produces exactly the same forecast as the standalone model with the same parameters; an all-NULL series errors, a valid NaN is treated as missing, and regressor NULLs are handled via validity — all documented in `docs/api/`.
 
-**Plans**: 9 plans
+**Plans**: 1/9 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 10-01-PLAN.md — crate intervals/fitted/residuals passthrough, crate baselines, input policy + MSE, R-fixture tests (wave 1)
+- [x] 10-01-PLAN.md — crate intervals/fitted/residuals passthrough, crate baselines, input policy + MSE, R-fixture tests (wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -290,7 +290,7 @@ Phases execute in numeric order: 9 → 10 → 11 → 12 → 13 → 14 → 15 →
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 9. Reference Fixtures & Safe Dependency Bumps | 3/3 | Complete    | 2026-10-09 |
-| 10. Forecast Wrapper Delegates to Crate Models | 0/TBD | Not started | - |
+| 10. Forecast Wrapper Delegates to Crate Models | 1/9 | In Progress|  |
 | 11. Upstream anofox-forecast Correctness Fixes | 0/TBD | Not started | - |
 | 12. Statistics Marshalling Moves to Rust | 0/TBD | Not started | - |
 | 13. Core Statistics, Metrics & Data Quality | 0/TBD | Not started | - |

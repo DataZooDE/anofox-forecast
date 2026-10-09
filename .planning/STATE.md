@@ -5,16 +5,16 @@ milestone_name: Statistical Correctness
 current_phase: 10
 current_phase_name: Forecast Wrapper Delegates to Crate Models
 status: executing
-stopped_at: Phase 9 complete, ready to plan Phase 10
-last_updated: "2026-10-09T10:07:21.469Z"
+stopped_at: Completed 10-01-PLAN.md (Tasks 2+3, Task 1 inherited)
+last_updated: "2026-10-09T12:36:03.452Z"
 last_activity: 2026-10-09
-last_activity_desc: Phase 9 complete, transitioned to Phase 10
-state_head: 8125fee7771d05205e073efde1c5f8ece5158f9b
+last_activity_desc: Phase 10 execution started
+state_head: 5ec2cac78dfe83ddb8ce11eb38d393c7e71f90fa
 progress:
   total_phases: 10
-  completed_phases: 1
+  completed_phases: 0
   total_plans: 12
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 ---
 
@@ -25,14 +25,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-08 — started v0.10.0 Statistical Correctness)
 
 **Core value:** Every statistic the extension returns is correct — verified against R / scipy / statsmodels / tsfresh reference values — and is computed in the Rust crates; C++ and SQL only marshal, group, and dispatch.
-**Current focus:** Phase 9 — Reference Fixtures & Safe Dependency Bumps
+**Current focus:** Phase 10 — Forecast Wrapper Delegates to Crate Models
 
 ## Current Position
 
-Phase: 10 (Forecast Wrapper Delegates to Crate Models) — READY TO EXECUTE
-Plan: Not started
+Phase: 10 (Forecast Wrapper Delegates to Crate Models) — EXECUTING
+Plan: 2 of 9
 Status: Ready to execute
-Last activity: 2026-10-09 - Completed quick task 261009-d02: Docs/README/skills accuracy pass
+Last activity: 2026-10-09 — Phase 10 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -58,6 +58,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 09 P01 | 15min | 3 tasks | 8 files |
 | Phase 09 P02 | 25min | 3 tasks | 12 files |
 | Phase 09 P03 | 50min | 3 tasks | 20 files |
+| Phase 10 P01 | 75min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -76,6 +77,9 @@ Recent decisions affecting current work:
 - [Phase 9]: 09-02: multiscale_ols fixture draws all 8 cases from ONE shared rng(1) stream in a fixed order — verified computationally that only the full chained order reproduces the audit-pinned exog_typical coefficients; an isolated fresh-rng computation does not
 - [Phase 9]: 09-02: constcol is rank-deficient (constant column collapses with intercept) alongside collinear/collinear_big — confirmed via lstsq rank for every case before writing full_rank/note fields
 - [Phase 9]: Phase 9: bumped anofox-regression=0.5.15/anofox-forecast=0.15.10 clean (0 new Cargo.lock crates); MSRV corrected 1.86 -> true 1.89 (trueno AVX-512), enforced by cargo + new CI job — 125-entry pre-bump snapshot proved only MFLES/AutoMFLES/Laplace point forecasts moved; cargo +1.88.0 refusal + +1.89.0 success proved the real MSRV floor
+- [Phase 10]: SeasonalNaive period<2 delegates to crate Naive (bit-identical point forecasts) rather than erroring on the crate's p>=2 minimum
+- [Phase 10]: MSE computed from raw crate residuals (scalar) independent of the exported residuals array's strict length-match safety check, so AutoARIMA's differencing-shortened residuals still produce a real MSE
+- [Phase 10]: FFI ForecastResult n_fitted/residuals shared-length bug documented but left unfixed — reserved for plan 10-02, which owns the generated C header
 
 ### Pending Todos
 
@@ -115,7 +119,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-09T07:17:44.134Z
-Stopped at: Phase 9 complete, ready to plan Phase 10
+Last session: 2026-10-09T12:36:03.366Z
+Stopped at: Completed 10-01-PLAN.md (Tasks 2+3, Task 1 inherited)
 Resume file: None
 Next: `/gsd-plan-phase 9`
