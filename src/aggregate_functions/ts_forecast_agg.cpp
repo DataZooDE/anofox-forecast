@@ -313,6 +313,21 @@ static void TsForecastAggUpdate(Vector inputs[], AggregateInputData &aggr_input,
             // ARIMA order params + seasonal_period (D-08/D-09, plan 10-02)
             state.data->arima_order = GetParamFromMap(params_vec, count, i, "arima_order", "");
             state.data->seasonal_order = GetParamFromMap(params_vec, count, i, "seasonal_order", "");
+
+            // WR-03: reject arima_order/seasonal_order strings that would
+            // silently truncate when copied into the fixed 32-byte
+            // ForecastOptions::arima_order_str/seasonal_order_str buffers
+            // in Finalize (memcpy with a sizeof(...)-1 bound, below).
+            if (state.data->arima_order.size() > sizeof(ForecastOptions::arima_order_str) - 1) {
+                throw InvalidInputException(
+                    "arima_order value is too long (max %d characters): '%s'",
+                    (int)(sizeof(ForecastOptions::arima_order_str) - 1), state.data->arima_order);
+            }
+            if (state.data->seasonal_order.size() > sizeof(ForecastOptions::seasonal_order_str) - 1) {
+                throw InvalidInputException(
+                    "seasonal_order value is too long (max %d characters): '%s'",
+                    (int)(sizeof(ForecastOptions::seasonal_order_str) - 1), state.data->seasonal_order);
+            }
             {
                 string sp_str = GetParamFromMap(params_vec, count, i, "seasonal_period", "");
                 if (!sp_str.empty()) {

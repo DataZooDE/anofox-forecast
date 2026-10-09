@@ -207,6 +207,21 @@ SELECT * FROM ts_forecast_by('air', id, ds, y, 'AutoARIMA', 12, '1mo', MAP{'arim
 ----
 only valid when method='ARIMA'
 
+# WR-03: an over-long arima_order string (>31 chars, the fixed FFI buffer
+# size) must raise an explicit "too long" validation error at bind time —
+# never silently truncate into a different, possibly-still-parseable
+# triplet via strncpy. The literal below is 33 characters.
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'ARIMA', 12, '1mo', MAP{'arima_order': '[0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0]'});
+----
+too long
+
+# Same check applies to seasonal_order (also 33 characters).
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'ARIMA', 12, '1mo', MAP{'arima_order': '[0,1,1]', 'seasonal_order': '[0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0]', 'seasonal_period': '12'});
+----
+too long
+
 # Unparsable seasonal_periods entry on MSTL -> error, not silently dropped
 statement error
 SELECT * FROM ts_forecast_by('air', id, ds, y, 'MSTL', 12, '1mo', MAP{'seasonal_periods': '[12, abc]'});

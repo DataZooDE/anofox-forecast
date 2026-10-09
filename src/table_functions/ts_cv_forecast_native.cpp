@@ -393,6 +393,20 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
         bind_data->arima_order = ParseStringFromParams(params, "arima_order", "");
         bind_data->seasonal_order = ParseStringFromParams(params, "seasonal_order", "");
 
+        // WR-03: reject arima_order/seasonal_order strings that would
+        // silently truncate when copied into the fixed 32-byte
+        // ForecastOptions::arima_order_str/seasonal_order_str buffers.
+        if (bind_data->arima_order.size() > sizeof(ForecastOptions::arima_order_str) - 1) {
+            throw InvalidInputException(
+                "arima_order value is too long (max %d characters): '%s'",
+                (int)(sizeof(ForecastOptions::arima_order_str) - 1), bind_data->arima_order);
+        }
+        if (bind_data->seasonal_order.size() > sizeof(ForecastOptions::seasonal_order_str) - 1) {
+            throw InvalidInputException(
+                "seasonal_order value is too long (max %d characters): '%s'",
+                (int)(sizeof(ForecastOptions::seasonal_order_str) - 1), bind_data->seasonal_order);
+        }
+
         // Validate confidence_level range
         if (bind_data->confidence_level <= 0.0 || bind_data->confidence_level >= 1.0) {
             throw InvalidInputException(

@@ -503,6 +503,21 @@ static void TsForecastExogFunction(DataChunk &args, ExpressionState &state, Vect
             }
         }
 
+        // WR-03: reject arima_order/seasonal_order strings that would
+        // silently truncate when SetCField copies them into the fixed
+        // 32-byte ForecastOptionsExog::arima_order_str/seasonal_order_str
+        // buffers below.
+        if (arima_order.size() > sizeof(ForecastOptionsExog::arima_order_str) - 1) {
+            throw InvalidInputException(
+                "arima_order value is too long (max %d characters): '%s'",
+                (int)(sizeof(ForecastOptionsExog::arima_order_str) - 1), arima_order);
+        }
+        if (seasonal_order.size() > sizeof(ForecastOptionsExog::seasonal_order_str) - 1) {
+            throw InvalidInputException(
+                "seasonal_order value is too long (max %d characters): '%s'",
+                (int)(sizeof(ForecastOptionsExog::seasonal_order_str) - 1), seasonal_order);
+        }
+
         // Build exogenous data structure — validity/future_validity
         // pointers (T-10-12) stay alive through the FFI call: they point
         // into `xreg_validity`/`future_xreg_validity`, which outlive this
