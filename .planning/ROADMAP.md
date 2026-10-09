@@ -199,7 +199,7 @@ Plans:
   4. `ts_forecast_agg` on month-end monthly data emits month-end forecast dates with no day drift (Rust frequency detection, calendar stepping), `ts_forecast_exog_by` future dates are calendar-correct across months of different lengths, and `ts_forecast_agg` / `ts_features_agg` on a series with interior NULLs match `ts_forecast_by` / `ts_features` (validity passed, no splicing).
   5. Per-step conformal given a residual count that is not a multiple of the horizon returns an error naming both counts, and the dead `ts_filter.cpp` / `ts_imputation.cpp` scalar bodies are removed or registered with tests.
 
-**Plans**: 2/8 plans executed
+**Plans**: 3/8 plans executed
 
 Plans:
 **Wave 1**
@@ -212,7 +212,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 12-03-PLAN.md — Gate for detrend/decompose, peaks, MSTL, BOCPD; ts_features_agg validity + ts_features_by parity (D-11); dead list bodies removed (wave 3)
+- [x] 12-03-PLAN.md — Gate for detrend/decompose, peaks, MSTL, BOCPD; ts_features_agg validity + ts_features_by parity (D-11); dead list bodies removed (wave 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -343,7 +343,7 @@ Phases execute in numeric order: 9 → 10 → 11 → 12 → 13 → 14 → 15 →
 | 9. Reference Fixtures & Safe Dependency Bumps | 3/3 | Complete    | 2026-10-09 |
 | 10. Forecast Wrapper Delegates to Crate Models | 10/10 | Complete    | 2026-10-09 |
 | 11. Upstream anofox-forecast Correctness Fixes | 3/10 | In Progress|  |
-| 12. Statistics Marshalling Moves to Rust | 2/8 | In Progress|  |
+| 12. Statistics Marshalling Moves to Rust | 3/8 | In Progress|  |
 | 13. Core Statistics, Metrics & Data Quality | 0/TBD | Not started | - |
 | 14. tsfresh Feature Parity | 0/TBD | Not started | - |
 | 15. Detection & Decomposition on fdars 0.47 | 0/TBD | Not started | - |
