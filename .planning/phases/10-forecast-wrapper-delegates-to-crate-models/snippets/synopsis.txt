@@ -53,3 +53,10 @@ docs/reference/models/theta/optimized_theta.md	SELECT * FROM ts_forecast('table'
 docs/reference/models/theta/dynamic_theta.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'DynamicTheta', horizon, params);
 docs/reference/models/theta/dynamic_optimized_theta.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'DynamicOptimizedTheta', horizon, params);
 docs/reference/models/theta/auto_theta.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoTheta', horizon, params);
+docs/reference/models/multi-seasonal/mstl.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'MSTL', horizon, params);
+docs/reference/models/multi-seasonal/mstl.md	CREATE OR REPLACE TABLE trend_only AS
+docs/reference/models/multi-seasonal/mfles.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'MFLES', horizon, params);
+docs/reference/models/multi-seasonal/auto_mfles.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoMFLES', horizon, params);
+docs/reference/models/multi-seasonal/auto_mstl.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoMSTL', horizon, params);
+docs/reference/models/multi-seasonal/tbats.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'TBATS', horizon, params);
+docs/reference/models/multi-seasonal/tbats.md	CREATE OR REPLACE TABLE trend_only AS
