@@ -4,17 +4,17 @@ milestone: v0.10.0
 milestone_name: Statistical Correctness
 current_phase: 10
 current_phase_name: Forecast Wrapper Delegates to Crate Models
-status: executing
-stopped_at: Completed 10-08-PLAN.md
-last_updated: "2026-10-09T16:47:11.651Z"
+status: verifying
+stopped_at: Completed 10-09-PLAN.md
+last_updated: "2026-10-09T17:09:09.714Z"
 last_activity: 2026-10-09
 last_activity_desc: Phase 10 execution started
-state_head: cab3f2a9f7a4b8ddc80beda6c6ed5e0c0fc4da9d
+state_head: c3e543c9dc019905c3c67f40ccec56c33d818cec
 progress:
   total_phases: 10
   completed_phases: 0
   total_plans: 12
-  completed_plans: 11
+  completed_plans: 12
   percent: 0
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-08 — started v0.10.0 Statistical Co
 
 Phase: 10 (Forecast Wrapper Delegates to Crate Models) — EXECUTING
 Plan: 9 of 9
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-09 — Phase 10 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -66,6 +66,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 10 P06 | ~3h | 3 tasks | 17 files |
 | Phase 10 P07 | ~1h | 3 tasks | 19 files |
 | Phase 10 P08 | ~1h | 3 tasks | 16 files |
+| Phase 10 P09 | ~1h | 2 tasks | 25 files |
 
 ## Accumulated Context
 
@@ -101,6 +102,8 @@ Recent decisions affecting current work:
 - [Phase 10]: ensemble_explicit.sql's intentional Section-4 error-demo ending (pre-existing since Phase 5) left unrestructured; two ols_fit_predict_by regression-backtest bugs in the backtesting examples deferred as out-of-scope, unrelated to Phase 10
 - [Phase 10]: [Phase 10 P07]: Each per-model page's Signature block kept as a SYNOPSIS entry (narrative placeholder identifiers), not rewritten to run against a real fixture — the sibling SQL Example block is what proves the model
 - [Phase 10]: Fixed stale ts_detect_periods_by workaround references (known-NULL-bug macro) to ts_detect_periods_agg across the state-space/Theta/multi-seasonal reference pages
+- [Phase 10]: [Phase 10 P09]: ensemble_explicit.md/ensemble_inspect.md's seasonal_period 0/1 are tested-identical (both auto-detect; only >1 wins) — corrected from the plan's assumed 'explicit 1 = non-seasonal' after direct verification against the built extension
+- [Phase 10]: [Phase 10 P09]: Phase-wide sweep reworded 53 '(being corrected in v0.10.0, Phase N)' notes across 13 out-of-scope docs/skills files to '(tracked for Phase N)' per the plan's explicit sweep instruction
 
 ### Pending Todos
 
@@ -140,7 +143,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-09T16:47:11.617Z
-Stopped at: Completed 10-08-PLAN.md
+Last session: 2026-10-09T17:09:09.684Z
+Stopped at: Completed 10-09-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 9`
