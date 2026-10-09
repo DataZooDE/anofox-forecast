@@ -69,10 +69,14 @@ fc_block <- function(f, r_call) {
     point = as.numeric(f$mean)
   )
   if (!is.null(f$lower)) {
-    block$lower_80 <- as.numeric(f$lower[, "80%"])
-    block$upper_80 <- as.numeric(f$upper[, "80%"])
-    block$lower_95 <- as.numeric(f$lower[, "95%"])
-    block$upper_95 <- as.numeric(f$upper[, "95%"])
+    # Positional, not by column name: most models label columns "80%"/"95%",
+    # but thetaf() labels them "Series 1"/"Series 2". Every caller in this
+    # harness passes level = c(80, 95), so column 1 is always the 80% bound
+    # and column 2 the 95% bound, regardless of label.
+    block$lower_80 <- as.numeric(f$lower[, 1])
+    block$upper_80 <- as.numeric(f$upper[, 1])
+    block$lower_95 <- as.numeric(f$lower[, 2])
+    block$upper_95 <- as.numeric(f$upper[, 2])
   }
   block
 }
