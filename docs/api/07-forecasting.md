@@ -60,10 +60,12 @@ SELECT *, 'HoltWinters' AS model FROM ts_forecast_by('sales_data', product_id, d
 > **require** a seasonal period to exist at all (`SeasonalNaive`, `SeasonalWindowAverage`,
 > `HoltWinters`, `SeasonalES`, `SeasonalESOptimized`, `MSTL`, `AutoMSTL`, `TBATS`, `AutoTBATS`),
 > a period that can't be detected is a hard SQL error naming the model — there is no silent
-> default of 12 or 2. `ts_forecast_agg` does **not** auto-detect at all; omitting the period
-> for a period-requiring model there is always an error. Passing `seasonal_period` explicitly
-> is still recommended below — it gives you control and reproducibility over what
-> auto-detection would otherwise pick silently.
+> default of 12 or 2. `ts_forecast_agg` follows the same rule — it auto-detects when both
+> `seasonal_period` and `seasonal_periods` are omitted, and a period-requiring model with no
+> detectable period is the same SQL error (confirmed: `ts_forecast_agg(..., 'HoltWinters', ...,
+> MAP{})` succeeds on a seasonal series and errors naming the model on a 24-point linear ramp).
+> Passing `seasonal_period` explicitly is still recommended below — it gives you control and
+> reproducibility over what auto-detection would otherwise pick silently.
 
 **Step 1: Detect seasonality**
 
@@ -294,7 +296,8 @@ See [reference/models/distributional/laplace.md](../reference/models/distributio
 
 This section applies to every forecast surface (`ts_forecast_by`, `ts_forecast_exog_by`,
 `ts_forecast_agg`, the scalar paths, `ts_cv_forecast_by`) unless a surface's own section
-says otherwise.
+says otherwise — see [`ts_forecast_agg` specifics](#ts_forecast_agg-specifics) below for
+where that surface's own behaviour differs or needs elaboration.
 
 ### Prediction intervals
 
@@ -341,6 +344,12 @@ unchanged, never silently corrected or hidden):
   series length (ARIMA/AutoARIMA differencing can drop more rows than a straight NULL-head
   alignment would), the exported `insample_fitted` array is **empty** rather than
   mis-aligned to the wrong row — a safety rule, not a bug.
+- `Theta`'s in-sample fitted values are the crate's plain SES(α=0.1) one-step level
+  (reseasonalised when seasonal), without the drift term its forecasts add — so on a
+  non-seasonal series with no zeros, `Theta`'s fitted/residuals/MSE equal
+  `CrostonClassic`'s (same fixed-α=0.1 recursion). This is crate 0.15.10 behaviour, pinned
+  by `crates/anofox-fcst-core/tests/theta_croston_fitted.rs`, and tracked for Phase 11
+  (`Theta`'s alpha is expected to become optimised rather than fixed).
 
 ```sql
 CREATE OR REPLACE TABLE fitted_demo AS
@@ -397,6 +406,43 @@ offending model/parameter:
 - Invalid UTF-8 in any option string (model name, `kalman_model`, `croston_variant`, …)
 - Regressors passed to a model that doesn't support them (see
   ["ts_forecast_exog_by"](#ts_forecast_exog_by) above for the exog-capable model list)
+
+### `ts_forecast_agg` specifics
+
+- Params are validated against the **same closed key set** as `ts_forecast_by`, and every
+  `ts_forecast_by` param (`kalman_model`, `garch_p`/`garch_q`, `model_pool`, `window`,
+  `seasonal_periods`, `laplace_variant`, `laplace_seasonal_batch_init`, `top_k`,
+  `combination_method`, `arima_order`/`seasonal_order`, `confidence_level`) is honoured.
+  An invalid model or parameter value (e.g. an unrecognized `kalman_model`) raises the
+  **same SQL error** `ts_forecast_by` raises for the identical input; any other per-group
+  failure (e.g. too little data after trimming) is reported in that group's
+  `error_message` field instead — confirmed: a 2-row group with `'Naive'`/`MAP{}` returns
+  `error_message = 'Insufficient data: need at least 3 observations, got 2'` and
+  `len(point_forecast) = 0` rather than aborting the whole query.
+- Bounds live in fields `lower_<pct>` / `upper_<pct>`, where `pct = round(100 *
+  confidence_level)` — default `lower_90` / `upper_90`. `confidence_level` determines
+  these field names and is fixed at bind time, so it **must be a constant expression**; a
+  per-row/per-group value that disagrees with the bound one is an SQL error.
+
+  ```sql
+  CREATE OR REPLACE TABLE agg_confidence_demo AS
+  SELECT 'A' AS id, (DATE '2020-01-01' + INTERVAL (i) DAY) AS ds, (50.0 + i)::DOUBLE AS y
+  FROM range(30) t(i);
+
+  SELECT (fcst).lower_95, (fcst).upper_95
+  FROM (SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 3, MAP{'confidence_level': '0.95'}) AS fcst
+        FROM agg_confidence_demo);
+  ```
+
+- **Input-handling exception:** unlike `ts_forecast_by`, `ts_forecast_agg` drops rows
+  whose value is `NULL` before fitting rather than interpolating interior gaps — interior
+  `NULL`s are spliced out of the series entirely, and trailing `NULL` rows move the
+  forecast origin back to the last non-`NULL` row instead of staying anchored to the
+  series' original last row. Confirmed on the `trailing_null_demo` fixture above:
+  `ts_forecast_by` forecasts from `2020-02-02` (`yhat = 32.0`), but `ts_forecast_agg`
+  forecasts from `2020-01-31` (`yhat = 30.0`) on the same data. `NaN` still follows the
+  shared NULL-equivalence rule. Aligning this surface's NULL handling with
+  `ts_forecast_by`'s is tracked for Phase 12 (RUST-08) — not fixed here.
 
 ---
 

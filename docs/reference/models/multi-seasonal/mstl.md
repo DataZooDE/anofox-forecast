@@ -20,8 +20,8 @@ Multiple Seasonal-Trend decomposition using LOESS. Decomposes the series into tr
 > internally (`detect_seasonality`) and uses it as the only entry — **erroring if none is
 > detected** (naming `MSTL`). There is no default `[12]` fallback. Passing `seasonal_periods`
 > explicitly via `ts_detect_periods_agg` is still recommended for control and reproducibility.
-> `ts_forecast_agg` does **not** auto-detect at all — omitting the period there is always an
-> error for `MSTL`.
+> `ts_forecast_agg` follows the same rule — it auto-detects when `seasonal_periods` is
+> omitted, erroring if none is detected (naming `MSTL`).
 
 `MSTL` accepts exogenous regressors via `ts_forecast_exog_by` and stays itself —
 `model_name` reports `"MSTL with regressors"`. On that exog path, `yhat_lower`/`yhat_upper`
@@ -107,9 +107,12 @@ SELECT product_id,
 FROM range(0, 7) t(i)
 CROSS JOIN (SELECT unnest([1, 2]) AS product_id);
 
+-- seasonal_period passed explicitly: the temperature regressor's period-5 wobble is too
+-- weak relative to the linear trend for auto-detection to reliably find it (see the Note
+-- above — auto-detection is a convenience, not a guarantee).
 SELECT DISTINCT model_name, yhat_lower, yhat_upper FROM ts_forecast_exog_by(
     'sales_history', product_id, date, revenue, ['temperature'],
-    'future_weather', date, ['temperature'], '1d', 'MSTL', 7, MAP{}
+    'future_weather', date, ['temperature'], '1d', 'MSTL', 7, MAP{'seasonal_period': '5'}
 );
 -- model_name = 'MSTL with regressors'; yhat_lower/yhat_upper = NULL
 ```

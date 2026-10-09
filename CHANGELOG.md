@@ -59,8 +59,24 @@ use the semver numbering this project started with.
   `NULL`/`NaN` rows are trimmed before fitting (the forecast horizon still starts from the
   period after the series' ORIGINAL last row); an all-missing or fewer-than-3-valid-value
   series is a hard, per-group-isolated error; `±Inf` anywhere is a hard error naming the index.
+  **Exception:** `ts_forecast_agg` drops `NULL`/`NaN`-valued rows entirely before fitting
+  rather than interpolating interior gaps, and trailing `NULL` rows move its forecast origin
+  back to the last non-`NULL` row instead of staying anchored to the series' original last
+  row — aligning this surface with the rest is tracked for Phase 12 (RUST-08).
 - **`ts_forecast_ensemble_by`'s `seasonal_period := 0` now auto-detects** the same way
   `ts_forecast_by` does, instead of requiring every member's period to be given explicitly.
+- **`ts_forecast_agg` now validates params with the same closed key set as `ts_forecast_by`**
+  (unknown keys, including the panel-only `croston_variant`, are errors — previously this
+  surface had zero key validation), honours every `ts_forecast_by` param (`kalman_model`,
+  `garch_p`/`garch_q`, `model_pool`, `window`, `seasonal_periods`, `laplace_variant`,
+  `laplace_seasonal_batch_init`, `top_k`, `combination_method`, `arima_order`/
+  `seasonal_order`, `confidence_level` — previously silently dropped except
+  `arima_order`/`seasonal_order`/`seasonal_period`), raises an SQL error for invalid
+  model/parameter values matching `ts_forecast_by`'s error (previously only ever reported
+  in that group's `error_message` field, never aborting the query), and names its bound
+  fields `lower_<pct>`/`upper_<pct>` after the requested `confidence_level` (default
+  `lower_90`/`upper_90` unchanged; `confidence_level` must be a constant expression —
+  previously hardcoded to `0.90` regardless of the params MAP).
 
 ### Added
 
@@ -70,6 +86,11 @@ use the semver numbering this project started with.
 - `params` (6th argument, `ANY`) on the single-series `ts_forecast_exog` scalar function and
   its underlying `_ts_forecast_exog`, carrying every `ts_forecast_by` option onto the exog
   surface (previously a reduced parameter set).
+- The full `ts_forecast_by` params set on `ts_forecast_agg`: `kalman_model`,
+  `garch_p`/`garch_q`, `model_pool`, `window`, `seasonal_periods`, `laplace_variant`,
+  `laplace_seasonal_batch_init`, `top_k`, `combination_method`, and a working
+  `confidence_level` (see Breaking changes above — these were previously accepted
+  syntactically but silently ignored on this surface).
 
 ### Fixed
 

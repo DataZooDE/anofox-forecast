@@ -1,0 +1,31 @@
+docs/api/07-forecasting.md	0	PASS	CREATE OR REPLACE TABLE sales_data AS	
+docs/api/07-forecasting.md	1	PASS	SELECT *, 'Naive' AS model FROM ts_forecast_by('sales_data', product_id, date, revenue, 'Naive', 7, 	
+docs/api/07-forecasting.md	2	PASS	CREATE OR REPLACE TABLE daily_sales AS	
+docs/api/07-forecasting.md	4	PASS	WITH detected AS (	
+docs/api/07-forecasting.md	5	PASS	SELECT product_id, length, n_nulls	
+docs/api/07-forecasting.md	6	EXPECTED-ERROR	SELECT * FROM ts_forecast_by('sales_data', product_id, date, revenue, 'ARIMA', 7, '1d', MAP{});	Invalid Input Error: Invalid input: ARIMA requires arima_order=[p,d,q] (e.g. [1,1,1]); use 'AutoARIMA' for automatic order selection
+docs/api/07-forecasting.md	7	PASS	CREATE OR REPLACE TABLE air AS	
+docs/api/07-forecasting.md	8	PASS	CREATE OR REPLACE TABLE fitted_demo AS	
+docs/api/07-forecasting.md	9	PASS	CREATE OR REPLACE TABLE trailing_null_demo AS	
+docs/api/07-forecasting.md	10	PASS	CREATE OR REPLACE TABLE agg_confidence_demo AS	
+docs/api/07-forecasting.md	12	PASS	SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'HoltWinters', 12, '1d',	
+docs/api/07-forecasting.md	14	PASS	CREATE OR REPLACE TABLE sales_history AS	
+docs/api/07-forecasting.md	16	PASS	CREATE OR REPLACE TABLE seasonal_panel AS	
+docs/api/07-forecasting.md	20	SYNOPSIS	ts_forecast_ensemble_by(	Parser Error: syntax error at or near "ts_forecast_ensemble_by"
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	2	PASS	CREATE OR REPLACE TABLE panel_sales AS	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	4	PASS	CREATE OR REPLACE TABLE var_src AS	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	6	PASS	CREATE TABLE hist AS	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	8	PASS	SELECT * FROM ts_forecast_exog('hist', d, y,	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	12	PASS	CREATE OR REPLACE TABLE ae_test AS	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	16	PASS	SELECT * FROM ts_ensemble_inspect_by(	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	18	PASS	SELECT * FROM ts_auto_ensemble_inspect_by(	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	19	PASS	CREATE OR REPLACE TABLE ens_series AS	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	20	SYNOPSIS	ts_forecast_agg(date_col TIMESTAMP, value_col DOUBLE, method VARCHAR, horizon INTEGER, params MAP)	Parser Error: syntax error at or near "ts_forecast_agg"
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	22	PASS	CREATE OR REPLACE TABLE returns AS	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	24	PASS	SELECT * FROM ts_forecast_by('sales', product_id, ds, y, 'Laplace', 12, '1mo',	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	25	PASS	SET autoinstall_known_extensions = 1;	
+docs/reference/models/multi-seasonal/mstl.md	2	SYNOPSIS	CREATE OR REPLACE TABLE trend_only AS	Invalid Input Error: Invalid input: no seasonal period could be detected for model 'MSTL'; pass seasonal_period (or seasonal_periods) explicitly
+docs/reference/models/multi-seasonal/mstl.md	3	PASS	CREATE OR REPLACE TABLE sales_history AS	
+docs/reference/models/state-space/auto_ets.md	1	PASS	SELECT product_id, round(ts_detect_periods_agg(date, quantity, 'fft').primary_period) AS primary_per	
+docs/reference/models/theta/auto_theta.md	1	PASS	SELECT product_id, round(ts_detect_periods_agg(date, quantity, 'fft').primary_period) AS primary_per	
+docs/reference/models/state-space/auto_arima.md	1	PASS	CREATE OR REPLACE TABLE daily_sales AS	

@@ -24,7 +24,7 @@ Automatic Theta method selection. The Theta method decomposes the time series in
 > (and `ts_cv_forecast_by`) auto-detects the seasonal period internally (`detect_seasonality`);
 > a period that can't be detected falls back to non-seasonal (AutoTheta can run non-seasonally).
 > Passing `seasonal_period` explicitly via `ts_detect_periods_agg` is still recommended for
-> control and reproducibility — `ts_forecast_agg` does NOT auto-detect.
+> control and reproducibility — `ts_forecast_agg` follows the same auto-detection rule.
 
 ## Parameters
 

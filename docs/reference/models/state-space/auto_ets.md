@@ -23,7 +23,7 @@ the `ETS` name — see [ets.md](ets.md).
 > (and `ts_cv_forecast_by`) auto-detects the seasonal period internally (`detect_seasonality`);
 > a period that can't be detected falls back to non-seasonal (AutoETS can run non-seasonally).
 > Passing `seasonal_period` explicitly via `ts_detect_periods_agg` is still recommended for
-> control and reproducibility — `ts_forecast_agg` does NOT auto-detect.
+> control and reproducibility — `ts_forecast_agg` follows the same auto-detection rule.
 >
 > A crate fit/predict failure or panic during the ETS model search is now a hard SQL error
 > naming `AutoETS` — **never** a silent HoltWinters/Holt/SES substitution reported under the

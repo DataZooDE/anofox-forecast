@@ -15,10 +15,10 @@ user-invocable: false
 **Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.15.10) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 Detect signal structure. When both `seasonal_period` and `seasonal_periods` are omitted,
-`ts_forecast_by` / `ts_cv_forecast_by` / the scalar paths auto-detect the seasonal period
-internally (first detected period, 1 if none found) — `ts_forecast_agg` does NOT. Running
-detection first and passing `seasonal_period` explicitly is still recommended for control and
-reproducibility over what silent auto-detection would pick.
+`ts_forecast_by` / `ts_cv_forecast_by` / the scalar paths / `ts_forecast_agg` all auto-detect
+the seasonal period internally (first detected period, 1 if none found) — same rule on every
+surface. Running detection first and passing `seasonal_period` explicitly is still recommended
+for control and reproducibility over what silent auto-detection would pick.
 
 ## Requires: json extension
 
@@ -307,7 +307,7 @@ The array-level primitive behind `ts_detrend_by`. Signature `ts_detrend(DOUBLE[]
 
 ## Gotchas
 
-- **Seasonality auto-detection is partial.** `AutoETS` / `AutoARIMA` / `AutoTheta` (and other models) via `ts_forecast_by` DO auto-detect when `seasonal_period`/`seasonal_periods` are both omitted — but `ts_forecast_agg` does NOT. Run detection first and pass `seasonal_period` explicitly if you want control/reproducibility rather than relying on silent auto-detection.
+- **Seasonality auto-detection applies uniformly across surfaces.** `AutoETS` / `AutoARIMA` / `AutoTheta` (and other models) via `ts_forecast_by`, `ts_cv_forecast_by`, the scalar paths, and `ts_forecast_agg` all auto-detect when `seasonal_period`/`seasonal_periods` are both omitted (10-10, FCST-06). Run detection first and pass `seasonal_period` explicitly if you want control/reproducibility rather than relying on silent auto-detection.
 - **`ts_detect_periods_by` returns one row per group** with a `periods` STRUCT. Access fields with `primary_period`.
 - **Detection needs sufficient history**: FFT-family methods need ≥ 2 full cycles; ACF-family needs ≥ 3. On short-history panels, `ts_detect_periods` may return `primary_period = 1` (no seasonality) even when a period exists.
 - **`ts_mstl_decomposition_by`'s `seasonal_periods` param currently has no effect at all** — `seasonal`/`periods` always come back empty (fix planned for v0.10.0, Phase 15).

@@ -37,7 +37,7 @@ intervals, fitted values and input handling" section for the full per-model tabl
 
 ## Critical gotchas
 
-1. **Seasonality IS auto-detected when omitted — but explicit is still recommended.** When both `seasonal_period` and `seasonal_periods` are omitted, `ts_forecast_by` / `ts_cv_forecast_by` / the scalar paths auto-detect the seasonal period internally (`detect_seasonality`). For models that can run non-seasonally (`ETS`, `AutoETS`, `ARIMA`/`AutoARIMA`, the Theta family, `MFLES`), a period that can't be detected falls back to non-seasonal. For models that **require** a period (`SeasonalNaive`, `SeasonalWindowAverage`, `HoltWinters`, `SeasonalES`, `SeasonalESOptimized`, `MSTL`, `AutoMSTL`, `TBATS`, `AutoTBATS`), a period that can't be detected is a hard error naming the model — never a silent default of 12/2. `ts_forecast_agg` does NOT auto-detect at all. Run `ts_detect_periods_by` first and pass the result explicitly for control and reproducibility over what silent auto-detection would pick. See `anofox-forecast-detection`.
+1. **Seasonality IS auto-detected when omitted — but explicit is still recommended.** When both `seasonal_period` and `seasonal_periods` are omitted, `ts_forecast_by` / `ts_cv_forecast_by` / the scalar paths / `ts_forecast_agg` all auto-detect the seasonal period internally (`detect_seasonality`) — same rule on every surface (10-10, FCST-06). For models that can run non-seasonally (`ETS`, `AutoETS`, `ARIMA`/`AutoARIMA`, the Theta family, `MFLES`), a period that can't be detected falls back to non-seasonal. For models that **require** a period (`SeasonalNaive`, `SeasonalWindowAverage`, `HoltWinters`, `SeasonalES`, `SeasonalESOptimized`, `MSTL`, `AutoMSTL`, `TBATS`, `AutoTBATS`), a period that can't be detected is a hard error naming the model — never a silent default of 12/2. Run `ts_detect_periods_by` first and pass the result explicitly for control and reproducibility over what silent auto-detection would pick. See `anofox-forecast-detection`.
 
 2. **Model names are case-sensitive.** `'AutoETS'` works, `'autoets'` errors.
 
@@ -493,8 +493,11 @@ For custom `GROUP BY` shapes.
 
 ```sql
 ts_forecast_agg(date_col TIMESTAMP, value_col DOUBLE, method VARCHAR, horizon INTEGER, params MAP)
-    → STRUCT(point_forecast DOUBLE[], lower_90 DOUBLE[], upper_90 DOUBLE[], model_name VARCHAR, insample_fitted DOUBLE[], ...)
+    → STRUCT(point_forecast DOUBLE[], lower_<pct> DOUBLE[], upper_<pct> DOUBLE[], model_name VARCHAR, insample_fitted DOUBLE[], ...)
 ```
+
+`<pct>` = `round(100 * confidence_level)` (default `lower_90`/`upper_90`); `confidence_level`
+is fixed at bind time and must be a constant expression.
 
 ```sql
 SELECT product_id, ts_forecast_agg(ds, y, 'AutoETS', 12, MAP{}) AS fcst
@@ -502,6 +505,12 @@ FROM sales GROUP BY product_id;
 ```
 
 Access fields: `(fcst).point_forecast`, `(fcst).lower_90`, etc.
+
+Same params (validated against the same closed key set), same validation, and same SQL-error
+behavior for invalid model/parameter values as `ts_forecast_by` (10-10, FCST-06). One
+exception: `ts_forecast_agg` drops `NULL`-valued rows before fitting rather than
+interpolating interior gaps or anchoring the forecast origin to trailing `NULL`s — aligning
+this with `ts_forecast_by` is tracked for Phase 12 (RUST-08).
 
 `insample_fitted` comes from each model's own crate `fitted_values()` — no SES(α=0.3)
 surrogate for any model. Warmup rows (e.g. ARIMA/SARIMA differencing) are `NULL`; when the
