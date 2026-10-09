@@ -5,16 +5,16 @@ milestone_name: Statistical Correctness
 current_phase: 10
 current_phase_name: Forecast Wrapper Delegates to Crate Models
 status: executing
-stopped_at: Completed 10-04-PLAN.md
-last_updated: "2026-10-09T15:09:08.043Z"
+stopped_at: Completed 10-05-PLAN.md
+last_updated: "2026-10-09T15:30:15.193Z"
 last_activity: 2026-10-09
 last_activity_desc: Phase 10 execution started
-state_head: "0b6078460bcb9484d06ab52eb35da8724cd7e7b3"
+state_head: 380e09e7c2bd5de093e4ca0d95dcf624c615aab1
 progress:
   total_phases: 10
   completed_phases: 0
   total_plans: 12
-  completed_plans: 7
+  completed_plans: 8
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-08 — started v0.10.0 Statistical Co
 ## Current Position
 
 Phase: 10 (Forecast Wrapper Delegates to Crate Models) — EXECUTING
-Plan: 5 of 9
+Plan: 6 of 9
 Status: Ready to execute
 Last activity: 2026-10-09 — Phase 10 execution started
 
@@ -62,6 +62,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 10 P02 | 120min | 3 tasks | 14 files |
 | Phase 10 P03 | ~45min | 3 tasks | 8 files |
 | Phase 10 P04 | ~3h | 3 tasks | 12 files |
+| Phase 10 P05 | ~2h | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -91,6 +92,8 @@ Recent decisions affecting current work:
 - [Phase 10]: build_forecaster gained an n_obs parameter so SeasonalWindowAverage ensemble members compute n_seasons adaptively instead of a hard-coded 2
 - [Phase 10]: Deleted wrapper OLS exog path outright (fit_ols_regression/apply_regression/forecast_*_with_exog + ARIMAX/ThetaX/MFLESX names) since the crate's own exog support already does its own internal OLS pre-regression
 - [Phase 10]: A regressor constant in history is dropped before the crate ever sees it (0 effect by construction), collapsing 'all regressors constant' onto the existing no-regressor forecast() delegation path
+- [Phase 10]: [Phase 10 P05]: SeasonalES/SeasonalESOptimized/HoltWinters/MSTL/TBATS staleness in ts_model_distinctness.test traced entirely to 10-03's resolve_period change — both masked sections re-blessed together
+- [Phase 10]: [Phase 10 P05]: native sqllogictest harness aborts the rest of a .test FILE on first unexpected failure, hiding later-in-file staleness until earlier failures are fixed and the file re-run
 
 ### Pending Todos
 
@@ -130,7 +133,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-09T15:09:08.007Z
-Stopped at: Completed 10-04-PLAN.md
+Last session: 2026-10-09T15:30:15.164Z
+Stopped at: Completed 10-05-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 9`
