@@ -28,9 +28,17 @@ GlobalCroston separates demand occurrences from inter-demand intervals for each 
 
 **Non-negative output:** All forecasts are guaranteed non-negative. An all-zero series (no demand events) predicts `0.0` for all steps — this is the correct behavior for a series with no demand history.
 
-**Two variants:**
-- **Classic** (default): `demand_level / interval_level` — can overestimate demand.
-- **SBA** (Syntetos-Boylan Approximation): `demand_level / interval_level * (1 - alpha/2)` — downward bias correction, recommended in most cases.
+**Two variants, case-insensitive, strict:**
+- **Classic** (default): `demand_level / interval_level` — can overestimate demand. Accepted
+  spellings: `'classic'`, `'Classic'`, `'CLASSIC'`, etc. (case-insensitive).
+- **SBA** (Syntetos-Boylan Approximation): `demand_level / interval_level * (1 - alpha/2)` —
+  downward bias correction, recommended in most cases. Accepted spellings: `'sba'`, `'SBA'`,
+  `'Sba'`, etc. (case-insensitive).
+
+Any `croston_variant` value other than a case-insensitive match for `'classic'` or `'sba'`
+(e.g. a typo like `'sab'`, or invalid UTF-8) is an **error** (`InvalidInput` naming the bad
+value) — the FFI panel path no longer silently falls back to Classic on an unrecognized
+string.
 
 **No seasonal period:** Croston models operate on demand event sub-sequences, not calendar positions. The `seasonal_period` param is irrelevant and ignored.
 
@@ -51,7 +59,7 @@ GlobalCroston separates demand occurrences from inter-demand intervals for each 
 | `method` | VARCHAR | Yes | — | Must be `'GlobalCroston'` |
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
 | `frequency` | VARCHAR | Yes | — | Time step: `'1d'`, `'1h'`, `'1mo'`, etc. |
-| `croston_variant` | VARCHAR (in MAP) | No | `'Classic'` | Bias correction variant: `'Classic'` (default) or `'SBA'` (recommended). |
+| `croston_variant` | VARCHAR (in MAP) | No | `'Classic'` | Bias correction variant: `'classic'` or `'sba'`, matched case-insensitively (default `'classic'`). Any other value is an error. |
 
 ## Returns
 
@@ -121,6 +129,17 @@ SELECT 'SBA', item_id, forecast_step, ROUND(yhat, 4)
 FROM ts_forecast_panel_by('panel_intermittent', item_id, ds, qty, 'GlobalCroston', 6, '1d',
     MAP {'croston_variant': 'SBA'})
 ORDER BY item_id, variant, forecast_step;
+```
+
+**Misspelled variant — hard error:**
+```sql
+-- 'sab' is not a recognized croston_variant -- InvalidInput naming the bad value
+SELECT * FROM ts_forecast_panel_by(
+    'panel_intermittent', item_id, ds, qty, 'GlobalCroston', 6, '1d',
+    MAP {'croston_variant': 'sab'}
+);
+-- Invalid Input Error: ts_forecast_panel_by (method='GlobalCroston'): unknown croston_variant
+--                      'sab'; expected 'classic' or 'sba'
 ```
 
 ## Best For
