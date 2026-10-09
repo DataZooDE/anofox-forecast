@@ -586,23 +586,22 @@ impl From<ForecastOptions> for ForecastOptionsExog {
 
 /// Generate forecasts for a time series.
 pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<ForecastOutput> {
-    // Handle NULLs by interpolation
-    let clean_values: Vec<f64> = fill_nulls_interpolate(values);
-
-    if clean_values.is_empty() {
-        return Err(ForecastError::InsufficientData { needed: 1, got: 0 });
-    }
-
-    if clean_values.len() < 3 {
-        return Err(ForecastError::InsufficientData {
-            needed: 3,
-            got: clean_values.len(),
+    if !(options.confidence_level > 0.0 && options.confidence_level < 1.0) {
+        return Err(ForecastError::InvalidParameter {
+            param: "confidence_level".to_string(),
+            value: options.confidence_level.to_string(),
+            reason: "must be in the open interval (0, 1)".to_string(),
         });
     }
 
+    // Explicit input policy (D-11/D-12): NaN ≡ NULL, ±Inf rejected, all-NULL
+    // or <3-point series rejected, leading/trailing NULLs trimmed with
+    // trailing-NULL-aware forecast-step alignment handled by finalize_output.
+    let prep = prepare_series(values)?;
+
     // Detect seasonality if needed
     let period = if options.auto_detect_seasonality && options.seasonal_period == 0 {
-        detect_seasonality(&clean_values, None)
+        detect_seasonality(&prep.values, None)
             .ok()
             .and_then(|p| p.first().cloned())
             .unwrap_or(1) as usize
@@ -644,11 +643,15 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
     // Note: Auto* models (AutoARIMA, AutoETS, etc.) run their respective algorithms
     // with automatic parameter selection, not a generic model selection heuristic
     let level = options.confidence_level;
-    let result = match options.model {
+    // Models are fit on prep.values and asked for horizon + trail_trim steps so
+    // finalize_output can drop the lead-in and realign step 1 to the period
+    // after the ORIGINAL last row (D-12 trailing-NULL alignment).
+    let extended_horizon = options.horizon + prep.trail_trim;
+    let mut result = match options.model {
         // Basic Models
-        ModelType::Naive => forecast_naive(&clean_values, options.horizon, level),
+        ModelType::Naive => forecast_naive(&prep.values, extended_horizon, level),
         ModelType::SeasonalNaive => {
-            forecast_seasonal_naive(&clean_values, options.horizon, period, level)
+            forecast_seasonal_naive(&prep.values, extended_horizon, period, level)
         }
         ModelType::SMA => {
             let w = if options.window > 0 {
@@ -656,54 +659,54 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             } else {
                 period.max(3)
             };
-            forecast_sma(&clean_values, options.horizon, w, level)
+            forecast_sma(&prep.values, extended_horizon, w, level)
         }
-        ModelType::RandomWalkDrift => forecast_drift(&clean_values, options.horizon, level),
+        ModelType::RandomWalkDrift => forecast_drift(&prep.values, extended_horizon, level),
         // Exponential Smoothing
-        ModelType::SES => forecast_ses_fixed(&clean_values, options.horizon, level),
-        ModelType::SESOptimized => forecast_ses_optimized(&clean_values, options.horizon, level),
-        ModelType::Holt => forecast_holt_lib(&clean_values, options.horizon, level),
+        ModelType::SES => forecast_ses_fixed(&prep.values, extended_horizon, level),
+        ModelType::SESOptimized => forecast_ses_optimized(&prep.values, extended_horizon, level),
+        ModelType::Holt => forecast_holt_lib(&prep.values, extended_horizon, level),
         ModelType::HoltWinters => {
-            forecast_holt_winters_lib(&clean_values, options.horizon, period, level)
+            forecast_holt_winters_lib(&prep.values, extended_horizon, period, level)
         }
         ModelType::SeasonalES => {
-            forecast_seasonal_es_lib(&clean_values, options.horizon, period, level)
+            forecast_seasonal_es_lib(&prep.values, extended_horizon, period, level)
         }
         ModelType::SeasonalESOptimized => {
-            forecast_seasonal_es_optimized(&clean_values, options.horizon, period, level)
+            forecast_seasonal_es_optimized(&prep.values, extended_horizon, period, level)
         }
         ModelType::SeasonalWindowAverage => {
-            forecast_seasonal_window_average(&clean_values, options.horizon, period, level)
+            forecast_seasonal_window_average(&prep.values, extended_horizon, period, level)
         }
         ModelType::ETS => forecast_ets(
-            &clean_values,
-            options.horizon,
+            &prep.values,
+            extended_horizon,
             period,
             options.ets_spec.as_deref(),
             level,
         ),
         ModelType::AutoETS => forecast_auto_ets(
-            &clean_values,
-            options.horizon,
+            &prep.values,
+            extended_horizon,
             period,
             options.model_pool.as_deref(),
             level,
         ),
         // Theta Methods
-        ModelType::Theta => forecast_theta_stm(&clean_values, options.horizon, period, level),
+        ModelType::Theta => forecast_theta_stm(&prep.values, extended_horizon, period, level),
         ModelType::OptimizedTheta => {
-            forecast_optimized_theta(&clean_values, options.horizon, period, level)
+            forecast_optimized_theta(&prep.values, extended_horizon, period, level)
         }
         ModelType::DynamicTheta => {
-            forecast_dynamic_theta(&clean_values, options.horizon, period, level)
+            forecast_dynamic_theta(&prep.values, extended_horizon, period, level)
         }
         ModelType::DynamicOptimizedTheta => {
-            forecast_dynamic_optimized_theta(&clean_values, options.horizon, period, level)
+            forecast_dynamic_optimized_theta(&prep.values, extended_horizon, period, level)
         }
-        ModelType::AutoTheta => forecast_auto_theta(&clean_values, options.horizon, period, level),
+        ModelType::AutoTheta => forecast_auto_theta(&prep.values, extended_horizon, period, level),
         // ARIMA
-        ModelType::ARIMA => forecast_arima(&clean_values, options.horizon),
-        ModelType::AutoARIMA => forecast_auto_arima(&clean_values, options.horizon, period, level),
+        ModelType::ARIMA => forecast_arima(&prep.values, extended_horizon),
+        ModelType::AutoARIMA => forecast_auto_arima(&prep.values, extended_horizon, period, level),
         // Multiple Seasonality
         ModelType::MFLES | ModelType::AutoMFLES => {
             let periods = if !options.seasonal_periods.is_empty() {
@@ -713,7 +716,7 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             } else {
                 &vec![]
             };
-            forecast_mfles(&clean_values, options.horizon, periods, level)
+            forecast_mfles(&prep.values, extended_horizon, periods, level)
         }
         ModelType::MSTL | ModelType::AutoMSTL => {
             let periods = if !options.seasonal_periods.is_empty() {
@@ -723,7 +726,7 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             } else {
                 vec![12]
             };
-            let mut result = forecast_mstl_lib(&clean_values, options.horizon, &periods, level)?;
+            let mut result = forecast_mstl_lib(&prep.values, extended_horizon, &periods, level)?;
             if options.model == ModelType::AutoMSTL {
                 result.model_name = "AutoMSTL".to_string();
             }
@@ -737,7 +740,7 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             } else {
                 vec![12]
             };
-            forecast_tbats_lib(&clean_values, options.horizon, &periods, level)
+            forecast_tbats_lib(&prep.values, extended_horizon, &periods, level)
         }
         ModelType::AutoTBATS => {
             let periods = if !options.seasonal_periods.is_empty() {
@@ -747,23 +750,23 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             } else {
                 &vec![12]
             };
-            forecast_auto_tbats(&clean_values, options.horizon, periods, level)
+            forecast_auto_tbats(&prep.values, extended_horizon, periods, level)
         }
         // Intermittent Demand
         ModelType::CrostonClassic => {
-            forecast_croston_classic(&clean_values, options.horizon, level)
+            forecast_croston_classic(&prep.values, extended_horizon, level)
         }
         ModelType::CrostonOptimized => {
-            forecast_croston_optimized(&clean_values, options.horizon, level)
+            forecast_croston_optimized(&prep.values, extended_horizon, level)
         }
-        ModelType::CrostonSBA => forecast_croston_sba(&clean_values, options.horizon, level),
-        ModelType::TSB => forecast_tsb(&clean_values, options.horizon, level),
-        ModelType::ADIDA => forecast_adida(&clean_values, options.horizon, level),
-        ModelType::IMAPA => forecast_imapa(&clean_values, options.horizon, level),
+        ModelType::CrostonSBA => forecast_croston_sba(&prep.values, extended_horizon, level),
+        ModelType::TSB => forecast_tsb(&prep.values, extended_horizon, level),
+        ModelType::ADIDA => forecast_adida(&prep.values, extended_horizon, level),
+        ModelType::IMAPA => forecast_imapa(&prep.values, extended_horizon, level),
         // Distributional
         ModelType::Laplace => forecast_laplace(
-            &clean_values,
-            options.horizon,
+            &prep.values,
+            extended_horizon,
             period,
             options.laplace_variant.unwrap_or_default(),
             options.laplace_seasonal_batch_init,
@@ -771,8 +774,8 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         ),
         // Classical
         ModelType::GARCH => forecast_garch(
-            &clean_values,
-            options.horizon,
+            &prep.values,
+            extended_horizon,
             if options.garch_p == 0 {
                 1
             } else {
@@ -786,15 +789,15 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             level,
         ),
         ModelType::Kalman => forecast_kalman(
-            &clean_values,
-            options.horizon,
+            &prep.values,
+            extended_horizon,
             options.kalman_model.as_deref(),
             level,
         ),
         // Ensemble Models (Phase 4)
         ModelType::AutoEnsemble => forecast_auto_ensemble(
-            &clean_values,
-            options.horizon,
+            &prep.values,
+            extended_horizon,
             if options.ensemble_top_k == 0 {
                 3
             } else {
@@ -806,46 +809,26 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         ),
     }?;
 
+    // Use the model_name from the result (contains selected parameters for Auto* models);
+    // fall back to the enum name if the result doesn't have a specific one.
+    if result.model_name.is_empty() {
+        result.model_name = options.model.name().to_string();
+    }
+
     // Prediction intervals, fitted values, residuals, and MSE all come straight from
     // whichever forecast_* function ran above (D-01/D-03/D-11) — never recomputed here.
     // A model whose crate Forecast has no native interval/fitted/residual support simply
     // returns empty/None for those fields (D-02); this wrapper must not paper over that
-    // with a fabricated formula. MSE policy here is interim (mean of r^2 over finite
-    // residuals) — Task 3 (10-01) refines this to exclude interpolated points.
-    let mse = result.residuals.as_ref().and_then(|r| {
-        let finite: Vec<f64> = r.iter().copied().filter(|v| v.is_finite()).collect();
-        if finite.is_empty() {
-            None
-        } else {
-            Some(finite.iter().map(|v| v.powi(2)).sum::<f64>() / finite.len() as f64)
-        }
-    });
-
-    Ok(ForecastOutput {
-        point: result.point,
-        lower: result.lower,
-        upper: result.upper,
-        fitted: if options.include_fitted {
-            result.fitted
-        } else {
-            None
-        },
-        residuals: if options.include_residuals {
-            result.residuals
-        } else {
-            None
-        },
-        // Use the model_name from the result (contains selected parameters for Auto* models)
-        // Fall back to enum name if result doesn't have a specific name
-        model_name: if result.model_name.is_empty() {
-            options.model.name().to_string()
-        } else {
-            result.model_name
-        },
-        aic: None,
-        bic: None,
-        mse,
-    })
+    // with a fabricated formula. finalize_output (D-12) drops the trail_trim lead-in,
+    // realigns to the original date anchor, excludes interpolated points from MSE, and
+    // pads fitted/residuals back to the original length.
+    Ok(finalize_output(
+        result,
+        &prep,
+        options.horizon,
+        options.include_fitted,
+        options.include_residuals,
+    ))
 }
 
 /// Generate forecasts with exogenous variables.
@@ -885,28 +868,27 @@ pub fn forecast_with_exog(
     values: &[Option<f64>],
     options: &ForecastOptionsExog,
 ) -> Result<ForecastOutput> {
-    // Validate exogenous data if provided
+    if !(options.confidence_level > 0.0 && options.confidence_level < 1.0) {
+        return Err(ForecastError::InvalidParameter {
+            param: "confidence_level".to_string(),
+            value: options.confidence_level.to_string(),
+            reason: "must be in the open interval (0, 1)".to_string(),
+        });
+    }
+
+    // Validate exogenous data if provided — against the ORIGINAL dimensions,
+    // before prepare_series trims/interpolates. Exog arrays are caller-aligned
+    // to the raw input; align_exog (below) re-slices them onto the trimmed range.
     if let Some(ref exog) = options.exog {
         exog.validate(values.len(), options.horizon)?;
     }
 
-    // Handle NULLs by interpolation
-    let clean_values: Vec<f64> = fill_nulls_interpolate(values);
-
-    if clean_values.is_empty() {
-        return Err(ForecastError::InsufficientData { needed: 1, got: 0 });
-    }
-
-    if clean_values.len() < 3 {
-        return Err(ForecastError::InsufficientData {
-            needed: 3,
-            got: clean_values.len(),
-        });
-    }
+    // Explicit input policy (D-11/D-12) — see forecast()'s matching comment.
+    let prep = prepare_series(values)?;
 
     // Detect seasonality if needed
     let period = if options.auto_detect_seasonality && options.seasonal_period == 0 {
-        detect_seasonality(&clean_values, None)
+        detect_seasonality(&prep.values, None)
             .ok()
             .and_then(|p| p.first().cloned())
             .unwrap_or(1) as usize
@@ -927,16 +909,19 @@ pub fn forecast_with_exog(
             | ModelType::AutoMFLES
     );
 
+    let extended_horizon = options.horizon + prep.trail_trim;
+    let aligned_exog = options.exog.as_ref().map(|exog| align_exog(&prep, exog));
+
     // Generate forecast based on model
     // For models that support exog with exog data provided, use exogenous-aware forecasting
     // Don't do auto-selection when using exog - use the requested model family
-    let result = if let (true, Some(exog)) = (supports_exog, options.exog.as_ref()) {
+    let mut result = if let (true, Some(exog)) = (supports_exog, aligned_exog.as_ref()) {
         match options.model {
             ModelType::ARIMA | ModelType::AutoARIMA => {
-                forecast_arima_with_exog(&clean_values, options.horizon, exog)
+                forecast_arima_with_exog(&prep.values, extended_horizon, exog)
             }
             ModelType::OptimizedTheta | ModelType::DynamicTheta | ModelType::AutoTheta => {
-                forecast_theta_with_exog(&clean_values, options.horizon, exog)
+                forecast_theta_with_exog(&prep.values, extended_horizon, exog)
             }
             ModelType::MFLES | ModelType::AutoMFLES => {
                 let periods = if !options.seasonal_periods.is_empty() {
@@ -946,11 +931,11 @@ pub fn forecast_with_exog(
                 } else {
                     &vec![]
                 };
-                forecast_mfles_with_exog(&clean_values, options.horizon, periods, exog)
+                forecast_mfles_with_exog(&prep.values, extended_horizon, periods, exog)
             }
             _ => {
                 // Shouldn't happen due to supports_exog check, but fallback to ARIMA with exog
-                forecast_arima_with_exog(&clean_values, options.horizon, exog)
+                forecast_arima_with_exog(&prep.values, extended_horizon, exog)
             }
         }
     } else {
@@ -961,8 +946,8 @@ pub fn forecast_with_exog(
         // would silently hard-code top_k=3 and method=None (WR-02).
         match options.model {
             ModelType::AutoEnsemble => forecast_auto_ensemble(
-                &clean_values,
-                options.horizon,
+                &prep.values,
+                extended_horizon,
                 if options.ensemble_top_k == 0 {
                     3
                 } else {
@@ -973,8 +958,8 @@ pub fn forecast_with_exog(
                 options.confidence_level,
             ),
             _ => forecast_with_model(
-                &clean_values,
-                options.horizon,
+                &prep.values,
+                extended_horizon,
                 options.model,
                 period,
                 options.window,
@@ -987,48 +972,23 @@ pub fn forecast_with_exog(
         }
     }?;
 
-    // For model-name fallback, use the requested model
-    let model = options.model;
+    // Use the model name from the result (e.g., "ARIMAX" for exog) if available,
+    // otherwise use the model enum name.
+    if result.model_name.is_empty() {
+        result.model_name = options.model.name().to_string();
+    }
 
     // Prediction intervals, fitted values, residuals, and MSE all come straight from
     // whichever forecast_*[_with_exog] function ran above (D-01/D-03/D-11) — never
-    // recomputed here. See `forecast()` for the matching non-exog policy and rationale.
-    let mse = result.residuals.as_ref().and_then(|r| {
-        let finite: Vec<f64> = r.iter().copied().filter(|v| v.is_finite()).collect();
-        if finite.is_empty() {
-            None
-        } else {
-            Some(finite.iter().map(|v| v.powi(2)).sum::<f64>() / finite.len() as f64)
-        }
-    });
-
-    // Use the model name from the result (e.g., "ARIMAX" for exog) if available,
-    // otherwise use the model enum name
-    let model_name = if !result.model_name.is_empty() {
-        result.model_name
-    } else {
-        model.name().to_string()
-    };
-
-    Ok(ForecastOutput {
-        point: result.point,
-        lower: result.lower,
-        upper: result.upper,
-        fitted: if options.include_fitted {
-            result.fitted
-        } else {
-            None
-        },
-        residuals: if options.include_residuals {
-            result.residuals
-        } else {
-            None
-        },
-        model_name,
-        aic: None,
-        bic: None,
-        mse,
-    })
+    // recomputed here. See `forecast()` for the matching non-exog policy, finalize_output,
+    // and D-12 trailing-NULL alignment rationale.
+    Ok(finalize_output(
+        result,
+        &prep,
+        options.horizon,
+        options.include_fitted,
+        options.include_residuals,
+    ))
 }
 
 /// Internal helper to forecast with a specific model (no exog).
@@ -1885,16 +1845,11 @@ pub fn forecast_inspect(values: &[Option<f64>], options: &ForecastOptions) -> Re
     use anofox_forecast::models::{Inspectable, MFLES};
     use anofox_forecast::prelude::Forecaster;
 
-    let clean_values: Vec<f64> = fill_nulls_interpolate(values);
-    if clean_values.len() < 3 {
-        return Err(ForecastError::InsufficientData {
-            needed: 3,
-            got: clean_values.len(),
-        });
-    }
+    // Explicit input policy (D-11/D-12) — see forecast()'s matching comment.
+    let prep = prepare_series(values)?;
 
     let period = if options.auto_detect_seasonality && options.seasonal_period == 0 {
-        detect_seasonality(&clean_values, None)
+        detect_seasonality(&prep.values, None)
             .ok()
             .and_then(|p| p.first().cloned())
             .unwrap_or(1) as usize
@@ -1904,7 +1859,7 @@ pub fn forecast_inspect(values: &[Option<f64>], options: &ForecastOptions) -> Re
         1
     };
 
-    let ts = make_timeseries(&clean_values)?;
+    let ts = make_timeseries(&prep.values)?;
 
     // Build → fit → introspect, per model. `.explanation()` returns
     // the typed enum; we serialise to JSON so the wire is one string.
@@ -2047,16 +2002,11 @@ pub fn forecast_explain(
     use anofox_forecast::models::theta::Theta;
     use anofox_forecast::prelude::Forecaster;
 
-    let clean_values: Vec<f64> = fill_nulls_interpolate(values);
-    if clean_values.len() < 3 {
-        return Err(ForecastError::InsufficientData {
-            needed: 3,
-            got: clean_values.len(),
-        });
-    }
+    // Explicit input policy (D-11/D-12) — see forecast()'s matching comment.
+    let prep = prepare_series(values)?;
 
     let period = if options.auto_detect_seasonality && options.seasonal_period == 0 {
-        detect_seasonality(&clean_values, None)
+        detect_seasonality(&prep.values, None)
             .ok()
             .and_then(|p| p.first().cloned())
             .unwrap_or(1) as usize
@@ -2066,7 +2016,7 @@ pub fn forecast_explain(
         1
     };
 
-    let ts = make_timeseries(&clean_values)?;
+    let ts = make_timeseries(&prep.values)?;
 
     let explanation = match options.model {
         ModelType::ETS => {
@@ -2359,6 +2309,249 @@ fn make_timeseries(values: &[f64]) -> Result<TimeSeries> {
         .collect();
     TimeSeries::univariate(timestamps, values.to_vec())
         .map_err(|e| ForecastError::ComputationError(format!("Failed to create TimeSeries: {}", e)))
+}
+
+/// A series that has been policy-processed and is ready for model fitting
+/// (D-11/D-12, plan 10-01 Task 3).
+///
+/// - A valid `NaN` (`Some(f64::NAN)`) is treated exactly like `None` (missing).
+/// - Leading/trailing missing values are trimmed; interior gaps are filled by
+///   `fill_nulls_interpolate` on the TRIMMED slice (imputation.rs is untouched).
+/// - `values`/`interpolated` are indexed relative to the trimmed slice (index 0
+///   is the first originally-observed value); `lead_trim`/`trail_trim`/
+///   `original_len` carry the information needed to re-align back onto the
+///   caller's original array (see `finalize_output`).
+#[derive(Debug, Clone)]
+pub struct PreparedSeries {
+    /// Trimmed, interior-interpolated values ready to hand to a crate model.
+    pub values: Vec<f64>,
+    /// `interpolated[i]` is `true` iff `values[i]` was filled in by
+    /// interpolation rather than an originally-observed value.
+    pub interpolated: Vec<bool>,
+    /// Count of leading missing values dropped before `values[0]`.
+    pub lead_trim: usize,
+    /// Count of trailing missing values dropped after `values[last]`.
+    pub trail_trim: usize,
+    /// Length of the original (pre-trim) input array.
+    pub original_len: usize,
+}
+
+/// Apply the explicit input policy (D-11) to a raw `Option<f64>` series:
+/// `Some(NaN)` ≡ `None`; `±Inf` is a hard `InvalidInput` error (not missing);
+/// an all-missing series (or one with fewer than 3 points after trimming)
+/// is `InsufficientData`; leading/trailing missing values are trimmed;
+/// interior gaps are interpolated via `fill_nulls_interpolate` on the
+/// trimmed slice.
+pub fn prepare_series(values: &[Option<f64>]) -> Result<PreparedSeries> {
+    let original_len = values.len();
+
+    // ±Inf is always a hard input error — name the first offending index.
+    // (A valid NaN is explicitly NOT in this category: it is missing data,
+    // not an invalid one, per D-11.)
+    if let Some(idx) = values
+        .iter()
+        .position(|v| matches!(v, Some(x) if x.is_infinite()))
+    {
+        return Err(ForecastError::InvalidInput(format!(
+            "value at index {idx} is ±Infinity, which is not a valid forecast input \
+             (use NULL for missing data)"
+        )));
+    }
+
+    // Some(NaN) ≡ None (D-11): normalize before locating the trim bounds.
+    let normalized: Vec<Option<f64>> = values.iter().map(|v| v.filter(|x| !x.is_nan())).collect();
+
+    let first_idx = normalized.iter().position(|v| v.is_some());
+    let last_idx = normalized.iter().rposition(|v| v.is_some());
+
+    let (first_idx, last_idx) = match (first_idx, last_idx) {
+        (Some(f), Some(l)) => (f, l),
+        _ => return Err(ForecastError::InsufficientData { needed: 3, got: 0 }),
+    };
+
+    let lead_trim = first_idx;
+    let trail_trim = original_len - 1 - last_idx;
+    let trimmed = &normalized[first_idx..=last_idx];
+
+    if trimmed.len() < 3 {
+        return Err(ForecastError::InsufficientData {
+            needed: 3,
+            got: trimmed.len(),
+        });
+    }
+
+    // trimmed[0] and trimmed[last] are both Some by construction (first_idx/
+    // last_idx are the first/last Some positions), so fill_nulls_interpolate
+    // only fills INTERIOR gaps here — no edge flat-extension applies.
+    let interpolated_mask: Vec<bool> = trimmed.iter().map(|v| v.is_none()).collect();
+    let interpolated_values = fill_nulls_interpolate(trimmed);
+
+    Ok(PreparedSeries {
+        values: interpolated_values,
+        interpolated: interpolated_mask,
+        lead_trim,
+        trail_trim,
+        original_len,
+    })
+}
+
+/// Re-align a raw model output (fitted on `prep.values` for
+/// `horizon + prep.trail_trim` steps) onto the caller's original indexing
+/// (D-12): drop the leading `trail_trim` forecast steps so step 1 is the
+/// period after the ORIGINAL last row (the date anchor the C++ layer uses),
+/// mark interpolated-position residuals as NaN (they measure interpolation,
+/// not the model), compute MSE over the remaining finite residuals, and pad
+/// fitted/residuals back out to `original_len` with NaN at the
+/// leading/trailing trimmed positions.
+///
+/// Crate fitted/residuals arrays whose length doesn't match
+/// `prep.values.len()` are treated as unavailable (T-10-02: never index a
+/// crate array of unexpected length) rather than causing a panic or being
+/// silently misaligned.
+pub fn finalize_output(
+    raw: ForecastOutput,
+    prep: &PreparedSeries,
+    horizon: usize,
+    include_fitted: bool,
+    include_residuals: bool,
+) -> ForecastOutput {
+    let trail_trim = prep.trail_trim;
+
+    // raw.point/lower/upper were generated for `horizon + trail_trim` steps;
+    // drop the first `trail_trim` so step 1 corresponds to the period after
+    // the ORIGINAL last row, then cap at `horizon` entries.
+    let drop_and_align = |v: Vec<f64>| -> Vec<f64> {
+        if v.len() > trail_trim {
+            v[trail_trim..].iter().take(horizon).copied().collect()
+        } else {
+            vec![]
+        }
+    };
+
+    let point = drop_and_align(raw.point);
+    let mut lower = drop_and_align(raw.lower);
+    let mut upper = drop_and_align(raw.upper);
+    if lower.len() != point.len() {
+        lower = vec![];
+    }
+    if upper.len() != point.len() {
+        upper = vec![];
+    }
+
+    let fitted_vals = raw.fitted.filter(|f| f.len() == prep.values.len());
+
+    // MSE = mean of r^2 over finite residuals — always computed when the
+    // crate exposes usable residuals, regardless of include_residuals (which
+    // only gates whether the array itself is returned to the caller). This is
+    // computed from `raw.residuals` directly (not the length-filtered,
+    // position-aligned `residuals_vals` below): a scalar mean doesn't need
+    // positional alignment the way a returned array does, so a model whose
+    // residuals length differs from `prep.values.len()` (e.g. AutoARIMA,
+    // whose crate residuals drop the d+D*s differencing warmup rows instead
+    // of NaN-padding them) still gets a real MSE — just without the
+    // interpolated-position exclusion below, since position-correspondence
+    // with `prep.interpolated` is unknown for a shorter/longer array.
+    let mse = raw.residuals.as_ref().and_then(|r| {
+        let finite: Vec<f64> = if r.len() == prep.values.len() {
+            r.iter()
+                .zip(prep.interpolated.iter())
+                .filter(|(v, is_interp)| v.is_finite() && !**is_interp)
+                .map(|(v, _)| *v)
+                .collect()
+        } else {
+            r.iter().copied().filter(|v| v.is_finite()).collect()
+        };
+        if finite.is_empty() {
+            None
+        } else {
+            Some(finite.iter().map(|v| v.powi(2)).sum::<f64>() / finite.len() as f64)
+        }
+    });
+
+    // For the EXPORTED residuals array (T-10-02): only a length-matched array
+    // can be safely padded/position-aligned back onto the original indexing;
+    // a mismatched length is treated as unavailable here, independent of the
+    // MSE fallback above (which only needs a scalar, not positional alignment).
+    let mut residuals_vals = raw.residuals.filter(|r| r.len() == prep.values.len());
+
+    // Residuals at interpolated positions measure the interpolation, not the
+    // model — exclude them from the EXPORTED array by marking NaN (D-12).
+    if let Some(ref mut r) = residuals_vals {
+        for (i, is_interp) in prep.interpolated.iter().enumerate() {
+            if *is_interp {
+                r[i] = f64::NAN;
+            }
+        }
+    }
+
+    // Pad fitted/residuals back out to the ORIGINAL length, with NaN at the
+    // leading/trailing positions that were trimmed before fitting.
+    let pad_to_original = |v: Vec<f64>| -> Vec<f64> {
+        let mut out = vec![f64::NAN; prep.original_len];
+        for (i, val) in v.into_iter().enumerate() {
+            out[prep.lead_trim + i] = val;
+        }
+        out
+    };
+
+    let fitted = if include_fitted {
+        fitted_vals.map(pad_to_original)
+    } else {
+        None
+    };
+    let residuals = if include_residuals {
+        residuals_vals.map(pad_to_original)
+    } else {
+        None
+    };
+
+    ForecastOutput {
+        point,
+        lower,
+        upper,
+        fitted,
+        residuals,
+        model_name: raw.model_name,
+        aic: raw.aic,
+        bic: raw.bic,
+        mse,
+    }
+}
+
+/// Slice/align an `ExogenousData` onto a `PreparedSeries`'s trimmed range
+/// (D-12 exog variant of the same trailing-NULL alignment policy as
+/// `finalize_output`): each historical regressor is sliced to
+/// `[lead_trim, original_len - trail_trim)`, and the trimmed trailing rows'
+/// own historical values are prepended onto each future regressor so the
+/// aligned future length is `horizon + trail_trim` — matching the extended
+/// horizon the model is actually asked to predict.
+fn align_exog(prep: &PreparedSeries, exog: &ExogenousData) -> ExogenousData {
+    let start = prep.lead_trim;
+    let end = prep.original_len.saturating_sub(prep.trail_trim);
+
+    let historical: Vec<Vec<f64>> = exog
+        .historical
+        .iter()
+        .map(|col| {
+            let end = end.min(col.len());
+            let start = start.min(end);
+            col[start..end].to_vec()
+        })
+        .collect();
+
+    let future: Vec<Vec<f64>> = exog
+        .future
+        .iter()
+        .zip(exog.historical.iter())
+        .map(|(fcol, hcol)| {
+            let trail_start = end.min(hcol.len());
+            let mut out = hcol[trail_start..].to_vec();
+            out.extend_from_slice(fcol);
+            out
+        })
+        .collect();
+
+    ExogenousData { historical, future }
 }
 
 /// Extract `(lower, upper)` from a crate `Forecast`'s first (univariate) interval
@@ -2913,17 +3106,9 @@ pub fn forecast_explicit_ensemble(
     // 2. Parse combination method (reuse Phase 4 function verbatim — one definition)
     let combination_method = parse_combination_method(method_str)?;
 
-    // 3. Interpolate NULLs and validate length (mirrors the main forecast() path)
-    let clean_values: Vec<f64> = fill_nulls_interpolate(values);
-    if clean_values.is_empty() {
-        return Err(ForecastError::InsufficientData { needed: 1, got: 0 });
-    }
-    if clean_values.len() < 3 {
-        return Err(ForecastError::InsufficientData {
-            needed: 3,
-            got: clean_values.len(),
-        });
-    }
+    // 3. Explicit input policy (D-11/D-12) — mirrors the main forecast() path,
+    // including the trailing-NULL-aware extended horizon below.
+    let prep = prepare_series(values)?;
 
     // 4. Build member forecasters
     let member_period = if period > 1 { Some(period) } else { None };
@@ -2943,13 +3128,19 @@ pub fn forecast_explicit_ensemble(
 
     // 5. Build + fit ensemble + extract forecast
     // Ensemble implements Forecaster (anofox-forecast 0.15.3, model.rs:575)
-    let ts = make_timeseries(&clean_values)?;
+    let ts = make_timeseries(&prep.values)?;
     let mut ens = Ensemble::new(members).with_method(combination_method);
     ens.fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("Ensemble fit failed: {}", e)))?;
     // model_name = "Ensemble" (plain, mirroring Phase 4's plain "AutoEnsemble").
-    // Point-only: explicit-member ensemble intervals are plan 10-03's scope.
-    extract_point_forecast(&ens, horizon, "Ensemble")
+    // Point-only: explicit-member ensemble intervals are plan 10-03's scope —
+    // finalize_output is still used for the shared trailing-NULL alignment
+    // policy (D-12), with include_fitted/include_residuals forced false since
+    // the FFI ensemble path (anofox_ts_forecast_ensemble) always nulls those
+    // fields regardless of what this function returns.
+    let extended_horizon = horizon + prep.trail_trim;
+    let raw = extract_point_forecast(&ens, extended_horizon, "Ensemble")?;
+    Ok(finalize_output(raw, &prep, horizon, false, false))
 }
 
 // ============================================================================
@@ -2993,17 +3184,8 @@ pub fn inspect_explicit_ensemble(
     // 2. Parse combination method (reuse Phase 4 function verbatim)
     let combination_method = parse_combination_method(method_str)?;
 
-    // 3. Interpolate NULLs and validate length (mirrors forecast_explicit_ensemble)
-    let clean_values: Vec<f64> = fill_nulls_interpolate(values);
-    if clean_values.is_empty() {
-        return Err(ForecastError::InsufficientData { needed: 1, got: 0 });
-    }
-    if clean_values.len() < 3 {
-        return Err(ForecastError::InsufficientData {
-            needed: 3,
-            got: clean_values.len(),
-        });
-    }
+    // 3. Explicit input policy (D-11/D-12) — mirrors forecast_explicit_ensemble.
+    let prep = prepare_series(values)?;
 
     // 4. Build member forecasters (same loop as forecast_explicit_ensemble)
     let member_period = if period > 1 { Some(period) } else { None };
@@ -3023,7 +3205,7 @@ pub fn inspect_explicit_ensemble(
 
     // 5. Build + fit ensemble — DIVERGE: call .weights() instead of extract_forecast
     // NOTE: weights() called AFTER .fit() — pre-fit weights are always uniform (RESEARCH Pitfall 2)
-    let ts = make_timeseries(&clean_values)?;
+    let ts = make_timeseries(&prep.values)?;
     let mut ens = Ensemble::new(members).with_method(combination_method);
     ens.fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("Ensemble fit failed: {}", e)))?;
