@@ -90,8 +90,9 @@ test without a separate Rust edit.
 | `r_forecast` | `air_passengers.json`, `simulated_series.json` | `r/gen_forecast_reference.R` | `closed_form_abs` (1e-8), `model_point_rel` (0.01), `interval_rel` (0.05) | Phase 9 (closed-form Naive/SeasonalNaive/RandomWalkDrift), Phase 10 (FCST-01 model-point parity), Phase 17 (FCST-09 full R parity) |
 | `r_diagnostics` | `stationarity_portmanteau.json` | `r/gen_diagnostics_reference.R` | `statistic_abs` (1e-6), `p_value_abs` (1e-4) | Phase 11 (upstream diagnostics), Phase 17 (DIAG-03..05) |
 | `moments` | `scipy_moments.json` | `python/gen_moments.py` | `abs` (1e-12), `rel` (1e-12) | Phase 9 (self-consistency pin), Phase 13 (STAT-01 `ts_stats` moments) |
-| `multiscale_ols` | `cases.json`, `exog_typical.csv` | `python/gen_multiscale_ols.py` | `coef_rel` (1e-8), `coef_abs` (1e-9), `fitted_abs_per_sd` (1e-8), `sql_point_abs` (1.0) | Phase 9 (DEP-01 `fit_ols_regression` proof), Phase 10 (`ts_forecast_exog_by` SQL-level check) |
-| `panel_nan_guard` | `cases.json` | `python/gen_panel_nan_guard.py` | outcome-class only (`abs: 0.0`, see fixture `tolerance.notes`) | Phase 9 (DEP-02 panel NaN/Inf guard proof) |
+| `multiscale_ols` | `cases.json`, `exog_typical.csv` | `python/gen_multiscale_ols.py` | `coef_rel` (1e-8), `coef_abs` (1e-9), `fitted_abs_per_sd` (1e-8), `sql_point_abs` (1.0) | Phase 9: `forecast.rs::tests::fit_ols_regression_matches_numpy_lstsq_fixture` (DEP-01, inline), `tests/exog_ols_memory.rs` (15k-row peak-heap guard), `validation/reference/sql/check_dep01_exog.sql` (SQL-level, DEP-01) |
+| `panel_nan_guard` | `cases.json` | `python/gen_panel_nan_guard.py` | outcome-class only (`abs: 0.0`, see fixture `tolerance.notes`) | Phase 9: `anofox-fcst-ffi::panel_ffi_tests::panel_nan_guard_fixture_outcomes` (DEP-02) |
+| `forecast_snapshot` | `point_forecasts.json` | `crates/anofox-fcst-core/tests/forecast_snapshot.rs` (bless mode: `ANOFOX_BLESS_FORECAST_SNAPSHOT=1 cargo test -p anofox-fcst-core --test forecast_snapshot`) | `point_abs` (1e-6), `point_rel` (1e-6) | Phase 9 (DEP-02 pre/post-bump point-forecast parity for every `ts_forecast_by` model), and any later phase that deliberately changes point forecasts — re-blessing replaces the anofox-forecast 0.15.3 baseline, so record the reason in that phase's SUMMARY. `allowed_to_change`: MFLES, AutoMFLES, Laplace. |
 
 ## 5. Tool versions
 
@@ -151,6 +152,29 @@ tests cannot see non-`pub` items): the library includes the same loader via a
 `anofox_fcst_core`/`anofox_fcst_ffi` crate references — it has to compile
 standalone as an integration test AND be re-pathed into the library's own
 `cfg(test)` build.
+
+`anofox-fcst-ffi` also includes the same loader this way (09-03): a
+`#[cfg(test)] #[path = "../../anofox-fcst-core/tests/common/mod.rs"]` module
+right above `panel_ffi_tests` in `crates/anofox-fcst-ffi/src/lib.rs`, reaching
+the identical file `anofox-fcst-core` itself `#[path]`s in — not a duplicate
+copy. `repo_root()` resolves correctly from either crate because both sit two
+directories below the workspace root.
+
+## 9. SQL checks
+
+Some fixtures are additionally proven at the SQL level, against the actual
+**built extension** (not just the Rust crates), because the FFI/SQL layer adds
+behaviour (date handling, column dispatch, the `ts_forecast_exog_by` macro
+expansion) that a Rust-only test cannot see.
+
+| Script | Fixture | Run command | Expected output |
+|--------|---------|--------------|------------------|
+| `sql/check_dep01_exog.sql` | `multiscale_ols/{cases.json,exog_typical.csv}` | `python3 -c "import resource,subprocess,sys;rc=subprocess.run(sys.argv[1:],stdin=open('validation/reference/sql/check_dep01_exog.sql')).returncode;print('MAXRSS_KB',resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss);sys.exit(rc)" ./build/release/duckdb -unsigned -bail` (run from the repo root, after `make release` / `GEN=ninja make release`) | `DEP01_SQL_PASS typical` and `DEP01_SQL_PASS 15k`, exit 0 |
+
+Needs the extension built (`make release`) and the `json` extension available
+(autoloaded by DuckDB on first use if not statically linked). Tolerance is
+read from `multiscale_ols/cases.json`'s `tolerance.sql_point_abs` at run time,
+never hardcoded in the script.
 
 ## 8. Adding a family (Phases 10-18)
 
