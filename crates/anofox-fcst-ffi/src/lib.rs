@@ -6913,6 +6913,9 @@ use anofox_forecast::models::theta::GlobalTheta;
 pub(crate) enum PanelForecastError {
     /// Model is not supported by the panel function.
     InvalidModel(String),
+    /// A parameter string (croston_variant, model_pool) failed strict
+    /// parsing — D-07: never a silent default/dropped entry.
+    InvalidParameter(String),
     /// Upstream forecast error (fit/predict failure).
     Upstream(anofox_forecast::ForecastError),
 }
@@ -6921,6 +6924,7 @@ impl std::fmt::Display for PanelForecastError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PanelForecastError::InvalidModel(msg) => write!(f, "invalid model: {}", msg),
+            PanelForecastError::InvalidParameter(msg) => write!(f, "{}", msg),
             PanelForecastError::Upstream(e) => write!(f, "{}", e),
         }
     }
@@ -6942,8 +6946,12 @@ impl From<anofox_forecast::ForecastError> for PanelForecastError {
 /// - `horizon`: forecast horizon.
 /// - `seasonal_period`: seasonal period (0 = non-seasonal Reduced pool for GlobalETS;
 ///    ignored for GlobalTheta and GlobalCroston).
-/// - `model_pool_str`: optional model pool override for GlobalETS ("Complete" or None = Reduced).
-/// - `variant_str`: optional variant override for GlobalCroston ("SBA" or None = Classic).
+/// - `model_pool_str`: GlobalETS model pool override (D-07, case-insensitive):
+///    `None`/`""`/`"reduced"` → Reduced (documented default); `"complete"` →
+///    Complete; anything else is `InvalidParameter` — never a silent default.
+/// - `variant_str`: GlobalCroston variant (D-07, case-insensitive):
+///    `None`/`""`/`"classic"` → Classic; `"sba"` → SBA; anything else is
+///    `InvalidParameter` — never a silent default.
 ///
 /// # Returns
 /// `Vec<Vec<f64>>` of shape `[n_series][horizon]`, all finite values.
@@ -6973,9 +6981,16 @@ pub(crate) fn forecast_panel_impl(
 
     match method {
         "GlobalETS" => {
-            let pool = match model_pool_str {
-                Some("Complete") => ModelPool::Complete,
-                _ => ModelPool::Reduced,
+            let pool = match model_pool_str.map(|s| s.trim().to_lowercase()) {
+                None => ModelPool::Reduced,
+                Some(ref s) if s.is_empty() || s == "reduced" => ModelPool::Reduced,
+                Some(ref s) if s == "complete" => ModelPool::Complete,
+                Some(_) => {
+                    return Err(PanelForecastError::InvalidParameter(format!(
+                        "unknown model_pool '{}'; expected 'reduced' or 'complete'",
+                        model_pool_str.unwrap_or("")
+                    )))
+                }
             };
             // period=0 means "non-seasonal"; map to 1 so the ETS update loop
             // (`t % period`) never divides by zero. With period=1, has_seasonal
@@ -6997,14 +7012,23 @@ pub(crate) fn forecast_panel_impl(
             Ok(model.predict(horizon))
         }
         "GlobalCroston" => {
-            // Select Croston variant from the params MAP key `croston_variant`.
-            // "SBA" → Syntetos-Boylan Approximation (multiplies forecast by 1 - α/2).
-            // Default (None or any other string) → Classic Croston.
-            // Use the named constructors (new/sba) rather than with_variant, since
-            // global_croston::CrostonVariant is not re-exported at the module level.
-            let mut model = match variant_str {
-                Some("SBA") => GlobalCroston::sba(),
-                _ => GlobalCroston::new(),
+            // Select Croston variant from the params MAP key `croston_variant`
+            // (D-07, case-insensitive, strict). "sba" → Syntetos-Boylan
+            // Approximation (multiplies forecast by 1 - α/2). Default (None
+            // or "classic") → Classic Croston. Use the named constructors
+            // (new/sba) rather than with_variant, since
+            // global_croston::CrostonVariant is not re-exported at the
+            // module level.
+            let mut model = match variant_str.map(|s| s.trim().to_lowercase()) {
+                None => GlobalCroston::new(),
+                Some(ref s) if s.is_empty() || s == "classic" => GlobalCroston::new(),
+                Some(ref s) if s == "sba" => GlobalCroston::sba(),
+                Some(_) => {
+                    return Err(PanelForecastError::InvalidParameter(format!(
+                        "unknown croston_variant '{}'; expected 'classic' or 'sba'",
+                        variant_str.unwrap_or("")
+                    )))
+                }
             };
             model.fit(&panel)?;
             Ok(model.predict(horizon))
@@ -7065,24 +7089,36 @@ pub unsafe extern "C" fn anofox_ts_forecast_panel(
         // Parse method string
         let method_str = CStr::from_ptr(method).to_str().unwrap_or("");
 
-        // Parse optional variant (used by GlobalCroston — "SBA" or None/empty = Classic)
+        // Parse optional croston_variant (D-07, strict): invalid UTF-8 is an
+        // error, never silently swallowed to None (forecast_panel_impl does
+        // the case-insensitive "classic"/"sba" validation).
         let variant_str: Option<&str> = if variant.is_null() {
             None
         } else {
-            CStr::from_ptr(variant)
-                .to_str()
-                .ok()
-                .filter(|s| !s.is_empty())
+            let s = CStr::from_ptr(variant).to_str().map_err(|_| {
+                PanelForecastError::InvalidParameter("croston_variant: invalid UTF-8".to_string())
+            })?;
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
         };
 
-        // Parse optional model_pool (used by GlobalETS — "Complete" or None/empty = Reduced)
+        // Parse optional model_pool (D-07, strict): invalid UTF-8 is an
+        // error, never silently swallowed to None (forecast_panel_impl does
+        // the case-insensitive "reduced"/"complete" validation).
         let model_pool_str: Option<&str> = if model_pool.is_null() {
             None
         } else {
-            CStr::from_ptr(model_pool)
-                .to_str()
-                .ok()
-                .filter(|s| !s.is_empty())
+            let s = CStr::from_ptr(model_pool).to_str().map_err(|_| {
+                PanelForecastError::InvalidParameter("model_pool: invalid UTF-8".to_string())
+            })?;
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
         };
 
         // Slice the flat matrix — Rust owns nothing, just a view
@@ -7174,6 +7210,7 @@ pub unsafe extern "C" fn anofox_ts_forecast_panel(
                 // Map PanelForecastError variant to ErrorCode
                 let code = match &e {
                     PanelForecastError::InvalidModel(_) => ErrorCode::InvalidModel,
+                    PanelForecastError::InvalidParameter(_) => ErrorCode::InvalidInput,
                     PanelForecastError::Upstream(
                         anofox_forecast::ForecastError::InsufficientData { .. },
                     ) => ErrorCode::InsufficientData,
@@ -7440,6 +7477,140 @@ mod panel_ffi_tests {
                 i
             );
         }
+    }
+
+    /// D-07: croston_variant is case-insensitive and strict — "sba"/"SBA"
+    /// both select SBA, "classic"/"" select Classic, and a misspelling
+    /// ("sab") is a hard InvalidParameter — never a silent Classic default.
+    #[test]
+    fn croston_variant_case_insensitive_and_strict() {
+        let s1: Vec<f64> = vec![0.0, 3.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 4.0];
+        let s2: Vec<f64> = vec![1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 3.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let s3: Vec<f64> = vec![0.0, 0.0, 5.0, 0.0, 0.0, 2.0, 0.0, 0.0, 4.0, 0.0, 0.0, 3.0];
+        let series: &[&[f64]] = &[&s1, &s2, &s3];
+        let flat = flat_from_series(series);
+
+        let upper = forecast_panel_impl(&flat, 3, 12, "GlobalCroston", 4, 0, None, Some("SBA"));
+        let lower = forecast_panel_impl(&flat, 3, 12, "GlobalCroston", 4, 0, None, Some("sba"));
+        assert!(upper.is_ok(), "SBA should succeed: {:?}", upper.err());
+        assert!(lower.is_ok(), "sba should succeed: {:?}", lower.err());
+        assert_eq!(
+            upper.unwrap(),
+            lower.unwrap(),
+            "case-insensitive SBA/sba must produce identical forecasts"
+        );
+
+        let classic_empty = forecast_panel_impl(&flat, 3, 12, "GlobalCroston", 4, 0, None, None);
+        let classic_named =
+            forecast_panel_impl(&flat, 3, 12, "GlobalCroston", 4, 0, None, Some("classic"));
+        assert!(classic_empty.is_ok());
+        assert!(classic_named.is_ok());
+        assert_eq!(classic_empty.unwrap(), classic_named.unwrap());
+
+        let misspelled =
+            forecast_panel_impl(&flat, 3, 12, "GlobalCroston", 4, 0, None, Some("sab"));
+        assert!(
+            misspelled.is_err(),
+            "misspelled croston_variant must be a hard error, not a silent Classic default"
+        );
+        match misspelled.unwrap_err() {
+            PanelForecastError::InvalidParameter(msg) => {
+                assert!(
+                    msg.contains("croston_variant") && msg.contains("sab"),
+                    "error should name croston_variant and the bad value, got: {msg}"
+                );
+            }
+            other => panic!("expected InvalidParameter, got: {:?}", other),
+        }
+    }
+
+    /// D-07: GlobalETS model_pool is case-insensitive and strict —
+    /// "complete"/"Complete" both accepted, and a misspelling ("compete")
+    /// is a hard InvalidParameter — never a silent Reduced default.
+    #[test]
+    fn model_pool_case_insensitive_and_strict() {
+        let s1: Vec<f64> = (1..=12).map(|x| x as f64).collect();
+        let s2: Vec<f64> = (2..=13).map(|x| x as f64 * 1.5).collect();
+        let s3: Vec<f64> = (3..=14).map(|x| x as f64 * 0.8).collect();
+        let series: &[&[f64]] = &[&s1, &s2, &s3];
+        let flat = flat_from_series(series);
+
+        let title_case =
+            forecast_panel_impl(&flat, 3, 12, "GlobalETS", 4, 0, Some("Complete"), None);
+        let lower_case =
+            forecast_panel_impl(&flat, 3, 12, "GlobalETS", 4, 0, Some("complete"), None);
+        assert!(
+            title_case.is_ok(),
+            "Complete should succeed: {:?}",
+            title_case.err()
+        );
+        assert!(
+            lower_case.is_ok(),
+            "complete should succeed: {:?}",
+            lower_case.err()
+        );
+
+        let misspelled =
+            forecast_panel_impl(&flat, 3, 12, "GlobalETS", 4, 0, Some("compete"), None);
+        assert!(
+            misspelled.is_err(),
+            "misspelled model_pool must be a hard error, not a silent Reduced default"
+        );
+        match misspelled.unwrap_err() {
+            PanelForecastError::InvalidParameter(msg) => {
+                assert!(
+                    msg.contains("model_pool") && msg.contains("compete"),
+                    "error should name model_pool and the bad value, got: {msg}"
+                );
+            }
+            other => panic!("expected InvalidParameter, got: {:?}", other),
+        }
+    }
+
+    /// D-07, FFI boundary: a misspelled croston_variant reaching the real
+    /// `anofox_ts_forecast_panel` entry point returns `false` with
+    /// `ErrorCode::InvalidInput` — proves the strict parsing is wired
+    /// through the C string marshalling, not just the testable inner fn.
+    #[test]
+    fn ffi_croston_variant_misspelled_returns_invalid_input() {
+        use std::ffi::CString;
+
+        let s1: Vec<f64> = vec![0.0, 3.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 4.0];
+        let s2: Vec<f64> = vec![1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 3.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let s3: Vec<f64> = vec![0.0, 0.0, 5.0, 0.0, 0.0, 2.0, 0.0, 0.0, 4.0, 0.0, 0.0, 3.0];
+        let series: &[&[f64]] = &[&s1, &s2, &s3];
+        let flat = flat_from_series(series);
+
+        let method = CString::new("GlobalCroston").unwrap();
+        let variant = CString::new("sab").unwrap();
+
+        let mut out_result = PanelForecastResult::default();
+        let mut out_error = AnofoxError::success();
+
+        let ok = unsafe {
+            anofox_ts_forecast_panel(
+                flat.as_ptr(),
+                3,
+                12,
+                method.as_ptr(),
+                4,
+                0,
+                variant.as_ptr(),
+                std::ptr::null(),
+                &mut out_result as *mut PanelForecastResult,
+                &mut out_error as *mut AnofoxError,
+            )
+        };
+
+        assert!(!ok, "misspelled croston_variant must return false");
+        assert_eq!(out_error.code, ErrorCode::InvalidInput);
+        let msg = unsafe { CStr::from_ptr(out_error.message.as_ptr()) }
+            .to_str()
+            .unwrap_or("");
+        assert!(
+            msg.contains("croston_variant"),
+            "error message should name croston_variant, got: {msg}"
+        );
     }
 
     /// DEP-02 proof point: every (case, method) in the panel_nan_guard
