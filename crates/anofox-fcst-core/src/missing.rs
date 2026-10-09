@@ -94,6 +94,48 @@ pub fn drop_missing(values: &[Option<f64>]) -> Vec<f64> {
         .collect()
 }
 
+/// Writes `f64::NAN` into `out[i]` wherever `input[i]` is missing (`None` or
+/// `Some(NaN)`), leaving every other position untouched (Phase 12 plan 12-04).
+///
+/// Used to make forecast-position outputs (conformal/bootstrap intervals)
+/// position-preserving: the core computes on a 0.0-placeholder vector
+/// (`fill_missing`), then this function punches NaN back in at exactly the
+/// positions that were missing in the original input, so a missing forecast
+/// never shifts later horizon steps into earlier ones.
+///
+/// # Panics
+/// Panics if `out.len() != input.len()`.
+pub fn propagate_missing(out: &mut [f64], input: &[Option<f64>]) {
+    assert_eq!(
+        out.len(),
+        input.len(),
+        "propagate_missing: out.len() ({}) must equal input.len() ({})",
+        out.len(),
+        input.len()
+    );
+    for (o, v) in out.iter_mut().zip(input.iter()) {
+        if is_missing(*v) {
+            *o = f64::NAN;
+        }
+    }
+}
+
+/// Builds the 0.0-placeholder vector the core functions compute on
+/// (Phase 12 plan 12-04): `Some(v)` (non-NaN) -> `v`, missing (`None` or
+/// `Some(NaN)`) -> `placeholder`.
+pub fn fill_missing(input: &[Option<f64>], placeholder: f64) -> Vec<f64> {
+    input
+        .iter()
+        .map(|v| {
+            if is_missing(*v) {
+                placeholder
+            } else {
+                v.unwrap()
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,5 +219,31 @@ mod tests {
         let v: Vec<Option<f64>> = vec![Some(1.0), None, Some(f64::NAN), Some(4.0)];
         let result = drop_missing(&v);
         assert_eq!(result, vec![1.0, 4.0]);
+    }
+
+    #[test]
+    fn propagate_missing_writes_nan_at_missing_positions_only() {
+        let input: Vec<Option<f64>> = vec![Some(1.0), None, Some(f64::NAN), Some(4.0)];
+        let mut out = vec![10.0, 20.0, 30.0, 40.0];
+        propagate_missing(&mut out, &input);
+        assert_eq!(out[0], 10.0);
+        assert!(out[1].is_nan());
+        assert!(out[2].is_nan());
+        assert_eq!(out[3], 40.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "propagate_missing")]
+    fn propagate_missing_panics_on_length_mismatch() {
+        let input: Vec<Option<f64>> = vec![Some(1.0), Some(2.0)];
+        let mut out = vec![10.0];
+        propagate_missing(&mut out, &input);
+    }
+
+    #[test]
+    fn fill_missing_uses_placeholder_at_missing_positions() {
+        let input: Vec<Option<f64>> = vec![Some(1.0), None, Some(f64::NAN), Some(4.0)];
+        let result = fill_missing(&input, 0.0);
+        assert_eq!(result, vec![1.0, 0.0, 0.0, 4.0]);
     }
 }

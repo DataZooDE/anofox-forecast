@@ -1936,3 +1936,294 @@ pub fn conformal_predict_per_step(
         coverage,
     })
 }
+
+/// Compute the conformal quantile the same way `ConformalPredictor`'s private
+/// `compute_quantile` does for the `Split`/`JackknifePlus` methods: sorted
+/// scores, adjusted level `((n+1) * coverage / n).min(1.0)`, index
+/// `ceil(n * adjusted_level) - 1` clamped into `[0, n-1]`. Used so a per-step
+/// quantile computed over a FULL (no missing pairs) step is bitwise identical
+/// to [`conformal_predict_per_step`]'s result for that step (D-02).
+fn split_quantile(scores: &[f64], coverage: f64) -> f64 {
+    let mut sorted = scores.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let n = sorted.len();
+    let adjusted_level = (((n + 1) as f64) * coverage / n as f64).min(1.0);
+    let idx = ((n as f64) * adjusted_level).ceil() as usize;
+    let idx = idx.saturating_sub(1).min(n - 1);
+    sorted[idx]
+}
+
+/// Validated, pairwise-complete per-step conformal prediction (Phase 12
+/// plan 12-04, D-02/D-10).
+///
+/// `fold_forecasts`/`fold_actuals` are FLAT arrays of `n_folds * horizon`
+/// elements (fold-major: fold 0's `horizon` steps, then fold 1's, ...), with
+/// `None`/`NaN` entries marking missing values. Unlike
+/// [`conformal_predict_per_step`], this entry point:
+/// - validates `horizon > 0`, equal lengths, and `len % horizon == 0` in Rust
+///   (D-10: no silent truncation of `n_folds` by the caller)
+/// - drops a (forecast, actual) pair from a step's quantile computation only
+///   when that specific pair is incomplete (pairwise-complete, D-02) rather
+///   than requiring every fold to be fully present
+/// - is position-preserving for `point_forecasts`: a missing point forecast
+///   yields `NaN` at that position in `point`/`lower`/`upper` only.
+pub fn conformal_predict_per_step_validated(
+    fold_forecasts: &[Option<f64>],
+    fold_actuals: &[Option<f64>],
+    horizon: usize,
+    point_forecasts: &[Option<f64>],
+    alpha: f64,
+) -> Result<ConformalPerStepResult> {
+    use crate::missing;
+    use anofox_forecast::postprocess::ConformalPredictor;
+
+    if horizon == 0 {
+        return Err(ForecastError::InvalidInput(
+            "per-step conformal: horizon must be positive".to_string(),
+        ));
+    }
+    if fold_forecasts.len() != fold_actuals.len() {
+        return Err(ForecastError::InvalidInput(format!(
+            "per-step conformal: fold_forecasts has {} elements but fold_actuals has {}",
+            fold_forecasts.len(),
+            fold_actuals.len()
+        )));
+    }
+    if !fold_forecasts.len().is_multiple_of(horizon) {
+        return Err(ForecastError::InvalidInput(format!(
+            "per-step conformal: residual count {} is not a multiple of horizon {}",
+            fold_forecasts.len(),
+            horizon
+        )));
+    }
+
+    let n_folds = fold_forecasts.len() / horizon;
+    if n_folds < 2 {
+        return Err(ForecastError::InsufficientData {
+            needed: 2,
+            got: n_folds,
+        });
+    }
+    if !(0.0..1.0).contains(&alpha) {
+        return Err(ForecastError::InvalidInput(
+            "Alpha must be between 0 and 1 (exclusive)".to_string(),
+        ));
+    }
+
+    let coverage = 1.0 - alpha;
+    let cp = ConformalPredictor::split(coverage);
+
+    // Pooled fallback: every complete (forecast, actual) pair across every
+    // fold and step, flattened — mirrors the crate's own pooled-quantile
+    // fallback in `fit_per_step` (used when a step has fewer than 2
+    // residuals), but computed over complete pairs only.
+    let pooled = missing::complete_cases(&[fold_forecasts, fold_actuals])?;
+    let pooled_quantile = if pooled[0].len() >= 2 {
+        cp.fit(&pooled[0], &pooled[1])
+            .map(|r| r.quantile_value())
+            .unwrap_or(0.0)
+    } else {
+        0.0
+    };
+
+    let mut half_widths = Vec::with_capacity(horizon);
+    for t in 0..horizon {
+        let step_forecasts: Vec<Option<f64>> = (0..n_folds)
+            .map(|f| fold_forecasts[f * horizon + t])
+            .collect();
+        let step_actuals: Vec<Option<f64>> = (0..n_folds)
+            .map(|f| fold_actuals[f * horizon + t])
+            .collect();
+
+        let complete = missing::complete_cases(&[&step_forecasts, &step_actuals])?;
+
+        let hw = if complete[0].len() == n_folds {
+            // No missing pair at this step: replicate the crate's own
+            // per-step quantile formula exactly (same inputs -> bitwise
+            // identical result to the complete-data crate-backed function).
+            let scores: Vec<f64> = complete[0]
+                .iter()
+                .zip(complete[1].iter())
+                .map(|(f, a)| (f - a).abs())
+                .collect();
+            split_quantile(&scores, coverage)
+        } else if complete[0].len() >= 2 {
+            cp.fit(&complete[0], &complete[1])
+                .map(|r| r.quantile_value())
+                .unwrap_or(pooled_quantile)
+        } else {
+            pooled_quantile
+        };
+        half_widths.push(hw);
+    }
+
+    let point_filled = missing::fill_missing(point_forecasts, 0.0);
+    let n = point_filled.len().min(half_widths.len());
+    let mut lower: Vec<f64> = (0..n).map(|i| point_filled[i] - half_widths[i]).collect();
+    let mut upper: Vec<f64> = (0..n).map(|i| point_filled[i] + half_widths[i]).collect();
+    let mut point = point_filled.clone();
+
+    missing::propagate_missing(&mut point, point_forecasts);
+    missing::propagate_missing(&mut lower, &point_forecasts[..n]);
+    missing::propagate_missing(&mut upper, &point_forecasts[..n]);
+
+    Ok(ConformalPerStepResult {
+        point,
+        lower,
+        upper,
+        half_widths,
+        coverage,
+    })
+}
+
+#[cfg(test)]
+mod per_step_pairwise_tests {
+    use super::*;
+
+    fn to_opt(v: &[f64]) -> Vec<Option<f64>> {
+        v.iter().map(|&x| Some(x)).collect()
+    }
+
+    #[test]
+    fn complete_data_matches_crate_backed_function() {
+        // 3 folds, horizon 2 — same data as test_conformal_per_step_basic.
+        let fold_forecasts = [100.0, 105.0, 110.0, 115.0, 120.0, 125.0];
+        let fold_actuals = [101.0, 108.0, 109.0, 118.0, 121.0, 122.0];
+        let point = [100.0, 105.0];
+        let alpha = 0.1;
+
+        let old = conformal_predict_per_step(
+            &[vec![100.0, 105.0], vec![110.0, 115.0], vec![120.0, 125.0]],
+            &[vec![101.0, 108.0], vec![109.0, 118.0], vec![121.0, 122.0]],
+            &point,
+            alpha,
+        )
+        .unwrap();
+
+        let new = conformal_predict_per_step_validated(
+            &to_opt(&fold_forecasts),
+            &to_opt(&fold_actuals),
+            2,
+            &to_opt(&point),
+            alpha,
+        )
+        .unwrap();
+
+        for i in 0..2 {
+            assert!(
+                (old.half_widths[i] - new.half_widths[i]).abs() < 1e-12,
+                "step {}: old={} new={}",
+                i,
+                old.half_widths[i],
+                new.half_widths[i]
+            );
+        }
+        assert_eq!(old.lower, new.lower);
+        assert_eq!(old.upper, new.upper);
+    }
+
+    #[test]
+    fn one_missing_pair_leaves_other_steps_identical_to_complete_result() {
+        // 4 folds, 3 steps. fold index 1, step 0's actual is missing.
+        let fold_forecasts = [
+            100.0, 102.0, 104.0, // fold 0
+            110.0, 112.0, 114.0, // fold 1
+            120.0, 122.0, 124.0, // fold 2
+            130.0, 132.0, 134.0, // fold 3
+        ];
+        let fold_actuals = [
+            101.0, 103.0, 106.0, // fold 0
+            109.0, 111.0, 116.0, // fold 1 (step0 actual present here)
+            121.0, 123.0, 127.0, // fold 2
+            128.0, 134.0, 132.0, // fold 3
+        ];
+        let point = [100.0, 105.0, 110.0];
+        let alpha = 0.1;
+
+        let complete = conformal_predict_per_step_validated(
+            &to_opt(&fold_forecasts),
+            &to_opt(&fold_actuals),
+            3,
+            &to_opt(&point),
+            alpha,
+        )
+        .unwrap();
+
+        // Now make fold 1, step 0's actual missing.
+        let mut fold_actuals_opt = to_opt(&fold_actuals);
+        fold_actuals_opt[3] = None;
+
+        let with_missing = conformal_predict_per_step_validated(
+            &to_opt(&fold_forecasts),
+            &fold_actuals_opt,
+            3,
+            &to_opt(&point),
+            alpha,
+        )
+        .unwrap();
+
+        // Steps 1 and 2 (no missing pair) are unaffected.
+        assert_eq!(with_missing.half_widths[1], complete.half_widths[1]);
+        assert_eq!(with_missing.half_widths[2], complete.half_widths[2]);
+
+        // Step 0 should equal cp.fit() over the 3 remaining complete pairs.
+        use anofox_forecast::postprocess::ConformalPredictor;
+        let cp = ConformalPredictor::split(1.0 - alpha);
+        let remaining_forecasts = vec![100.0, 120.0, 130.0];
+        let remaining_actuals = vec![101.0, 121.0, 128.0];
+        let expected = cp
+            .fit(&remaining_forecasts, &remaining_actuals)
+            .unwrap()
+            .quantile_value();
+        assert!(
+            (with_missing.half_widths[0] - expected).abs() < 1e-12,
+            "got={} expected={}",
+            with_missing.half_widths[0],
+            expected
+        );
+    }
+
+    #[test]
+    fn residual_count_not_multiple_of_horizon_errors_naming_both() {
+        let seven = vec![Some(1.0); 7];
+        let point = vec![Some(1.0), Some(2.0), Some(3.0)];
+        let err = conformal_predict_per_step_validated(&seven, &seven, 3, &point, 0.1).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains('7'), "message should contain 7: {}", msg);
+        assert!(msg.contains('3'), "message should contain 3: {}", msg);
+        assert!(
+            msg.contains("not a multiple of horizon"),
+            "message: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn horizon_zero_errors() {
+        let v = vec![Some(1.0); 4];
+        let err = conformal_predict_per_step_validated(&v, &v, 0, &v, 0.1).unwrap_err();
+        assert!(matches!(err, ForecastError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn null_point_forecast_is_position_preserving() {
+        let fold_forecasts = [100.0, 105.0, 110.0, 115.0, 120.0, 125.0];
+        let fold_actuals = [101.0, 108.0, 109.0, 118.0, 121.0, 122.0];
+        let mut point = to_opt(&[100.0, 105.0]);
+        point[1] = None;
+
+        let result = conformal_predict_per_step_validated(
+            &to_opt(&fold_forecasts),
+            &to_opt(&fold_actuals),
+            2,
+            &point,
+            0.1,
+        )
+        .unwrap();
+
+        assert!(!result.point[0].is_nan());
+        assert!(result.point[1].is_nan());
+        assert!(result.lower[1].is_nan());
+        assert!(result.upper[1].is_nan());
+    }
+}

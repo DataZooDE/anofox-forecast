@@ -92,7 +92,9 @@ pub use imputation::{
 pub use metrics::{
     bias, coverage, mae, mape, mase, mqloss, mse, quantile_loss, r2, rmae, rmse, smape,
 };
-pub use missing::{complete_cases, drop_missing, trim_edges_reject_interior};
+pub use missing::{
+    complete_cases, drop_missing, fill_missing, propagate_missing, trim_edges_reject_interior,
+};
 pub use peaks::{
     analyze_peak_timing, detect_peaks, detect_peaks_default, get_peak_indices, get_peak_values,
     Peak, PeakDetectionResult, PeakTimingResult,

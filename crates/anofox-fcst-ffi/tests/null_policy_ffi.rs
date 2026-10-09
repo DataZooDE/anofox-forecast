@@ -5,11 +5,17 @@
 //! layout the C++ `ListDoubleReader` produces: one `u64` word per 64 elements,
 //! bit `i` (LSB-first within the word) set iff element `i` is valid.
 
-use anofox_fcst_ffi::types::AnofoxError;
+use anofox_fcst_ffi::types::{
+    AnofoxError, BootstrapResultFFI, ConformalPerStepResultFFI, ConformalResultFFI,
+};
 use anofox_fcst_ffi::{
-    anofox_ts_bias, anofox_ts_coverage, anofox_ts_mae, anofox_ts_mase, anofox_ts_mqloss,
-    anofox_ts_mse, anofox_ts_quantile_loss, anofox_ts_r2, anofox_ts_rmae, anofox_ts_rmse,
-    anofox_ts_series_gate, ErrorCode,
+    anofox_free_bootstrap_result, anofox_free_conformal_per_step_result,
+    anofox_free_conformal_result, anofox_ts_bias, anofox_ts_bootstrap_intervals,
+    anofox_ts_conformal_coverage, anofox_ts_conformal_intervals, anofox_ts_conformal_predict,
+    anofox_ts_conformal_predict_per_step, anofox_ts_conformal_quantile, anofox_ts_coverage,
+    anofox_ts_mae, anofox_ts_mase, anofox_ts_mean_interval_width, anofox_ts_mqloss, anofox_ts_mse,
+    anofox_ts_quantile_loss, anofox_ts_r2, anofox_ts_rmae, anofox_ts_rmse, anofox_ts_series_gate,
+    ErrorCode,
 };
 
 /// Build a validity bitmask word (LSB-first) from a slice of bools.
@@ -531,4 +537,297 @@ fn mae_length_mismatch_is_rejected() {
         )
     };
     assert!(!success);
+}
+
+// ============================================================================
+// Conformal / bootstrap NULL policy (Phase 12 plan 12-04, D-02/D-10)
+// ============================================================================
+
+#[test]
+fn per_step_residual_count_not_multiple_of_horizon_is_invalid_input() {
+    let seven = [1.0; 7];
+    let point = [1.0, 2.0, 3.0];
+    let mut out_result: ConformalPerStepResultFFI = unsafe { std::mem::zeroed() };
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_conformal_predict_per_step(
+            seven.as_ptr(),
+            std::ptr::null(),
+            seven.len(),
+            seven.as_ptr(),
+            std::ptr::null(),
+            seven.len(),
+            3,
+            point.as_ptr(),
+            std::ptr::null(),
+            point.len(),
+            0.1,
+            &mut out_result,
+            &mut error,
+        )
+    };
+    assert!(!success);
+    assert_eq!(error.code, ErrorCode::InvalidInput);
+    let msg = error_message(&error);
+    assert!(msg.contains('7'), "message: {msg}");
+    assert!(msg.contains('3'), "message: {msg}");
+    assert!(msg.contains("not a multiple of horizon"), "message: {msg}");
+}
+
+#[test]
+fn per_step_null_point_forecast_yields_nan_at_that_position_only() {
+    // 3 folds, horizon 2, all complete.
+    let fold_forecasts = [100.0, 105.0, 110.0, 115.0, 120.0, 125.0];
+    let fold_actuals = [101.0, 108.0, 109.0, 118.0, 121.0, 122.0];
+    let point = [100.0, 105.0];
+    let point_validity = bitmask(&[true, false]);
+
+    let mut out_result: ConformalPerStepResultFFI = unsafe { std::mem::zeroed() };
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_conformal_predict_per_step(
+            fold_forecasts.as_ptr(),
+            std::ptr::null(),
+            fold_forecasts.len(),
+            fold_actuals.as_ptr(),
+            std::ptr::null(),
+            fold_actuals.len(),
+            2,
+            point.as_ptr(),
+            &point_validity,
+            point.len(),
+            0.1,
+            &mut out_result,
+            &mut error,
+        )
+    };
+    assert!(success, "error: {:?} {}", error.code, error_message(&error));
+    unsafe {
+        assert!(!(*out_result.point).is_nan());
+        assert!((*out_result.point.add(1)).is_nan());
+        assert!((*out_result.lower.add(1)).is_nan());
+        assert!((*out_result.upper.add(1)).is_nan());
+        anofox_free_conformal_per_step_result(&mut out_result);
+    }
+}
+
+#[test]
+fn conformal_quantile_with_null_matches_complete_data() {
+    let with_null = [1.0, 0.0, 2.0, 3.0];
+    let with_null_validity = bitmask(&[true, false, true, true]);
+    let complete = [1.0, 2.0, 3.0];
+
+    let mut with_null_result = 0.0f64;
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_conformal_quantile(
+            with_null.as_ptr(),
+            &with_null_validity,
+            with_null.len(),
+            0.1,
+            &mut with_null_result,
+            &mut error,
+        )
+    };
+    assert!(success);
+
+    let mut complete_result = 0.0f64;
+    let success = unsafe {
+        anofox_ts_conformal_quantile(
+            complete.as_ptr(),
+            std::ptr::null(),
+            complete.len(),
+            0.1,
+            &mut complete_result,
+            &mut error,
+        )
+    };
+    assert!(success);
+    assert_eq!(with_null_result, complete_result);
+}
+
+#[test]
+fn conformal_coverage_drops_incomplete_pairs() {
+    let actuals = [1.0, 2.0, 3.0];
+    let lower = [0.0, 0.0, 4.0];
+    let lower_validity = bitmask(&[true, false, true]);
+    let upper = [2.0, 3.0, 5.0];
+
+    let mut result = 0.0f64;
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_conformal_coverage(
+            actuals.as_ptr(),
+            std::ptr::null(),
+            lower.as_ptr(),
+            &lower_validity,
+            upper.as_ptr(),
+            std::ptr::null(),
+            actuals.len(),
+            &mut result,
+            &mut error,
+        )
+    };
+    assert!(success, "error: {}", error_message(&error));
+    assert_eq!(result, 0.5);
+}
+
+#[test]
+fn mean_interval_width_drops_incomplete_pairs() {
+    let lower = [0.0, 0.0, 4.0];
+    let lower_validity = bitmask(&[true, false, true]);
+    let upper = [2.0, 3.0, 5.0];
+
+    let mut result = 0.0f64;
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_mean_interval_width(
+            lower.as_ptr(),
+            &lower_validity,
+            upper.as_ptr(),
+            std::ptr::null(),
+            lower.len(),
+            &mut result,
+            &mut error,
+        )
+    };
+    assert!(success, "error: {}", error_message(&error));
+    assert_eq!(result, 1.5);
+}
+
+#[test]
+fn conformal_intervals_null_forecast_is_position_preserving() {
+    let forecasts = [10.0, 0.0, 12.0];
+    let forecasts_validity = bitmask(&[true, false, true]);
+    let mut out_lower: *mut f64 = std::ptr::null_mut();
+    let mut out_upper: *mut f64 = std::ptr::null_mut();
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_conformal_intervals(
+            forecasts.as_ptr(),
+            &forecasts_validity,
+            forecasts.len(),
+            2.0,
+            &mut out_lower,
+            &mut out_upper,
+            &mut error,
+        )
+    };
+    assert!(success, "error: {}", error_message(&error));
+    unsafe {
+        assert_eq!(*out_lower, 8.0);
+        assert!((*out_lower.add(1)).is_nan());
+        assert_eq!(*out_lower.add(2), 10.0);
+        assert_eq!(*out_upper, 12.0);
+        assert!((*out_upper.add(1)).is_nan());
+        assert_eq!(*out_upper.add(2), 14.0);
+    }
+}
+
+#[test]
+fn conformal_predict_residual_null_matches_complete_residuals() {
+    let residuals_with_null = [0.5, 0.0, 0.8, -0.2];
+    let residuals_validity = bitmask(&[true, false, true, true]);
+    let residuals_complete = [0.5, 0.8, -0.2];
+    let forecasts = [100.0, 105.0];
+
+    let mut with_null = ConformalResultFFI::default();
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_conformal_predict(
+            residuals_with_null.as_ptr(),
+            &residuals_validity,
+            residuals_with_null.len(),
+            forecasts.as_ptr(),
+            std::ptr::null(),
+            forecasts.len(),
+            0.1,
+            &mut with_null,
+            &mut error,
+        )
+    };
+    assert!(success, "error: {}", error_message(&error));
+
+    let mut complete = ConformalResultFFI::default();
+    let success = unsafe {
+        anofox_ts_conformal_predict(
+            residuals_complete.as_ptr(),
+            std::ptr::null(),
+            residuals_complete.len(),
+            forecasts.as_ptr(),
+            std::ptr::null(),
+            forecasts.len(),
+            0.1,
+            &mut complete,
+            &mut error,
+        )
+    };
+    assert!(success, "error: {}", error_message(&error));
+
+    assert_eq!(with_null.conformity_score, complete.conformity_score);
+    unsafe {
+        anofox_free_conformal_result(&mut with_null);
+        anofox_free_conformal_result(&mut complete);
+    }
+}
+
+#[test]
+fn bootstrap_intervals_null_forecast_is_position_preserving_and_null_residual_matches() {
+    let residuals_with_null = [1.0, 0.0, -1.0, 2.0];
+    let residuals_validity = bitmask(&[true, false, true, true]);
+    let residuals_complete = [1.0, -1.0, 2.0];
+    let forecasts_with_null = [10.0, 0.0, 12.0];
+    let forecasts_validity = bitmask(&[true, false, true]);
+    let forecasts_complete = [10.0, 11.0, 12.0];
+
+    let mut with_null: BootstrapResultFFI = unsafe { std::mem::zeroed() };
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_bootstrap_intervals(
+            residuals_with_null.as_ptr(),
+            &residuals_validity,
+            residuals_with_null.len(),
+            forecasts_with_null.as_ptr(),
+            &forecasts_validity,
+            forecasts_with_null.len(),
+            200,
+            0.9,
+            42,
+            &mut with_null,
+            &mut error,
+        )
+    };
+    assert!(success, "error: {}", error_message(&error));
+
+    let mut complete: BootstrapResultFFI = unsafe { std::mem::zeroed() };
+    let success = unsafe {
+        anofox_ts_bootstrap_intervals(
+            residuals_complete.as_ptr(),
+            std::ptr::null(),
+            residuals_complete.len(),
+            forecasts_complete.as_ptr(),
+            std::ptr::null(),
+            forecasts_complete.len(),
+            200,
+            0.9,
+            42,
+            &mut complete,
+            &mut error,
+        )
+    };
+    assert!(success, "error: {}", error_message(&error));
+
+    unsafe {
+        assert!(!(*with_null.lower).is_nan());
+        assert!((*with_null.lower.add(1)).is_nan());
+        assert!((*with_null.upper.add(1)).is_nan());
+        // Index 0 and 2 (same seed, same n_paths, same forecast value at
+        // those positions) should match the all-complete call.
+        assert_eq!(*with_null.lower, *complete.lower);
+        assert_eq!(*with_null.lower.add(2), *complete.lower.add(2));
+        assert_eq!(*with_null.upper, *complete.upper);
+        assert_eq!(*with_null.upper.add(2), *complete.upper.add(2));
+        anofox_free_bootstrap_result(&mut with_null);
+        anofox_free_bootstrap_result(&mut complete);
+    }
 }

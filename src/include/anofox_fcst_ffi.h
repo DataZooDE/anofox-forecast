@@ -2967,6 +2967,7 @@ bool anofox_ts_conformal_quantile(const double *residuals,
  * All pointer arguments must be valid and non-null.
  */
 bool anofox_ts_conformal_intervals(const double *forecasts,
+                                   const uint64_t *forecasts_validity,
                                    size_t length,
                                    double conformity_score,
                                    double **out_lower,
@@ -2985,6 +2986,7 @@ bool anofox_ts_conformal_predict(const double *residuals,
                                  const uint64_t *residuals_validity,
                                  size_t residuals_length,
                                  const double *forecasts,
+                                 const uint64_t *forecasts_validity,
                                  size_t forecasts_length,
                                  double alpha,
                                  struct ConformalResultFFI *out_result,
@@ -3038,6 +3040,7 @@ bool anofox_ts_conformal_predict_asymmetric(const double *residuals,
                                             const uint64_t *residuals_validity,
                                             size_t residuals_length,
                                             const double *forecasts,
+                                            const uint64_t *forecasts_validity,
                                             size_t forecasts_length,
                                             double alpha,
                                             struct ConformalResultFFI *out_result,
@@ -3062,7 +3065,9 @@ bool anofox_ts_interval_width(const double *lower,
  * All pointer arguments must be valid and non-null.
  */
 bool anofox_ts_mean_interval_width(const double *lower,
+                                   const uint64_t *lower_validity,
                                    const double *upper,
+                                   const uint64_t *upper_validity,
                                    size_t length,
                                    double *out_result,
                                    struct AnofoxError *out_error);
@@ -3091,6 +3096,7 @@ bool anofox_ts_conformal_learn(const double *residuals,
  * All pointer arguments must be valid and non-null.
  */
 bool anofox_ts_conformal_apply(const double *forecasts,
+                               const uint64_t *forecasts_validity,
                                size_t n_forecasts,
                                const struct CalibrationProfileFFI *profile,
                                const double *difficulty,
@@ -3104,8 +3110,11 @@ bool anofox_ts_conformal_apply(const double *forecasts,
  * All pointer arguments must be valid and non-null.
  */
 bool anofox_ts_conformal_coverage(const double *actuals,
+                                  const uint64_t *actuals_validity,
                                   const double *lower,
+                                  const uint64_t *lower_validity,
                                   const double *upper,
+                                  const uint64_t *upper_validity,
                                   size_t length,
                                   double *out_coverage,
                                   struct AnofoxError *out_error);
@@ -3117,8 +3126,11 @@ bool anofox_ts_conformal_coverage(const double *actuals,
  * All pointer arguments must be valid and non-null.
  */
 bool anofox_ts_conformal_evaluate(const double *actuals,
+                                  const uint64_t *actuals_validity,
                                   const double *lower,
+                                  const uint64_t *lower_validity,
                                   const double *upper,
+                                  const uint64_t *upper_validity,
                                   size_t length,
                                   double alpha,
                                   struct ConformalEvaluationFFI *out_eval,
@@ -3131,8 +3143,10 @@ bool anofox_ts_conformal_evaluate(const double *actuals,
  * All pointers must be valid. Output struct must be zeroed before calling.
  */
 bool anofox_ts_bootstrap_intervals(const double *residuals,
+                                   const uint64_t *residuals_validity,
                                    size_t residuals_len,
                                    const double *forecasts,
+                                   const uint64_t *forecasts_validity,
                                    size_t forecasts_len,
                                    int n_paths,
                                    double coverage,
@@ -3147,8 +3161,10 @@ bool anofox_ts_bootstrap_intervals(const double *residuals,
  * All pointers must be valid. Output struct must be zeroed before calling.
  */
 bool anofox_ts_bootstrap_quantiles(const double *residuals,
+                                   const uint64_t *residuals_validity,
                                    size_t residuals_len,
                                    const double *forecasts,
+                                   const uint64_t *forecasts_validity,
                                    size_t forecasts_len,
                                    int n_paths,
                                    const double *quantile_levels,
@@ -3176,17 +3192,27 @@ void anofox_free_bootstrap_quantile_result(struct BootstrapQuantileResultFFI *re
 /**
  * Compute per-step conformal prediction intervals.
  *
- * Each horizon step gets its own interval width. Requires fold-organized data.
+ * Each horizon step gets its own interval width. Requires fold-organized,
+ * FLAT data: `fold_forecasts`/`fold_actuals` are `fold_forecasts_len`
+ * elements long (fold-major), validated against `horizon` in Rust (D-10 —
+ * `fold_forecasts_len` must be an exact multiple of `horizon`; the caller
+ * never computes `n_folds` itself). Validity bitmasks make the per-step
+ * quantile computation pairwise-complete (D-02); a missing `point_forecasts`
+ * entry is position-preserving in the output (NaN at that position only).
  *
  * # Safety
- * All pointers must be valid. fold_forecasts and fold_actuals are flat arrays
- * of n_folds * horizon doubles. Output struct must be zeroed before calling.
+ * All pointers must be valid (validity pointers may be null = all valid).
+ * Output struct must be zeroed before calling.
  */
 bool anofox_ts_conformal_predict_per_step(const double *fold_forecasts,
+                                          const uint64_t *fold_forecasts_validity,
+                                          size_t fold_forecasts_len,
                                           const double *fold_actuals,
-                                          size_t n_folds,
+                                          const uint64_t *fold_actuals_validity,
+                                          size_t fold_actuals_len,
                                           size_t horizon,
                                           const double *point_forecasts,
+                                          const uint64_t *point_validity,
                                           size_t n_point_forecasts,
                                           double alpha,
                                           struct ConformalPerStepResultFFI *out_result,

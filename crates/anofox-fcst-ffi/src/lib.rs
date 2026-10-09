@@ -4957,7 +4957,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_quantile(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let series = build_series(residuals, validity, length);
-        let values: Vec<f64> = series.iter().filter_map(|v| *v).collect();
+        let values = anofox_fcst_core::drop_missing(&series);
         anofox_fcst_core::conformal_quantile(&values, alpha)
     }));
 
@@ -4990,6 +4990,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_quantile(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_conformal_intervals(
     forecasts: *const c_double,
+    forecasts_validity: *const u64,
     length: size_t,
     conformity_score: c_double,
     out_lower: *mut *mut c_double,
@@ -5004,8 +5005,13 @@ pub unsafe extern "C" fn anofox_ts_conformal_intervals(
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let forecast_slice = std::slice::from_raw_parts(forecasts, length);
-        anofox_fcst_core::conformal_intervals(forecast_slice, conformity_score)
+        let forecast_series = build_series(forecasts, forecasts_validity, length);
+        let filled = anofox_fcst_core::fill_missing(&forecast_series, 0.0);
+        let (mut lower, mut upper) =
+            anofox_fcst_core::conformal_intervals(&filled, conformity_score);
+        anofox_fcst_core::propagate_missing(&mut lower, &forecast_series);
+        anofox_fcst_core::propagate_missing(&mut upper, &forecast_series);
+        (lower, upper)
     }));
 
     match result {
@@ -5054,6 +5060,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict(
     residuals_validity: *const u64,
     residuals_length: size_t,
     forecasts: *const c_double,
+    forecasts_validity: *const u64,
     forecasts_length: size_t,
     alpha: c_double,
     out_result: *mut ConformalResultFFI,
@@ -5068,9 +5075,15 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let residual_series = build_series(residuals, residuals_validity, residuals_length);
-        let residual_values: Vec<f64> = residual_series.iter().filter_map(|v| *v).collect();
-        let forecast_slice = std::slice::from_raw_parts(forecasts, forecasts_length);
-        anofox_fcst_core::conformal_predict(&residual_values, forecast_slice, alpha)
+        let residual_values = anofox_fcst_core::drop_missing(&residual_series);
+        let forecast_series = build_series(forecasts, forecasts_validity, forecasts_length);
+        let filled_forecasts = anofox_fcst_core::fill_missing(&forecast_series, 0.0);
+        let mut conf_result =
+            anofox_fcst_core::conformal_predict(&residual_values, &filled_forecasts, alpha)?;
+        anofox_fcst_core::propagate_missing(&mut conf_result.point, &forecast_series);
+        anofox_fcst_core::propagate_missing(&mut conf_result.lower, &forecast_series);
+        anofox_fcst_core::propagate_missing(&mut conf_result.upper, &forecast_series);
+        Ok::<_, anofox_fcst_core::ForecastError>(conf_result)
     }));
 
     match result {
@@ -5216,6 +5229,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict_asymmetric(
     residuals_validity: *const u64,
     residuals_length: size_t,
     forecasts: *const c_double,
+    forecasts_validity: *const u64,
     forecasts_length: size_t,
     alpha: c_double,
     out_result: *mut ConformalResultFFI,
@@ -5230,9 +5244,18 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict_asymmetric(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let residual_series = build_series(residuals, residuals_validity, residuals_length);
-        let residual_values: Vec<f64> = residual_series.iter().filter_map(|v| *v).collect();
-        let forecast_slice = std::slice::from_raw_parts(forecasts, forecasts_length);
-        anofox_fcst_core::conformal_predict_asymmetric(&residual_values, forecast_slice, alpha)
+        let residual_values = anofox_fcst_core::drop_missing(&residual_series);
+        let forecast_series = build_series(forecasts, forecasts_validity, forecasts_length);
+        let filled_forecasts = anofox_fcst_core::fill_missing(&forecast_series, 0.0);
+        let mut conf_result = anofox_fcst_core::conformal_predict_asymmetric(
+            &residual_values,
+            &filled_forecasts,
+            alpha,
+        )?;
+        anofox_fcst_core::propagate_missing(&mut conf_result.point, &forecast_series);
+        anofox_fcst_core::propagate_missing(&mut conf_result.lower, &forecast_series);
+        anofox_fcst_core::propagate_missing(&mut conf_result.upper, &forecast_series);
+        Ok::<_, anofox_fcst_core::ForecastError>(conf_result)
     }));
 
     match result {
@@ -5299,7 +5322,9 @@ pub unsafe extern "C" fn anofox_ts_interval_width(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_mean_interval_width(
     lower: *const c_double,
+    lower_validity: *const u64,
     upper: *const c_double,
+    upper_validity: *const u64,
     length: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
@@ -5312,15 +5337,23 @@ pub unsafe extern "C" fn anofox_ts_mean_interval_width(
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let lower_slice = std::slice::from_raw_parts(lower, length);
-        let upper_slice = std::slice::from_raw_parts(upper, length);
-        anofox_fcst_core::mean_interval_width(lower_slice, upper_slice)
+        let lower_series = build_series(lower, lower_validity, length);
+        let upper_series = build_series(upper, upper_validity, length);
+        let filtered = anofox_fcst_core::complete_cases(&[&lower_series, &upper_series])?;
+        Ok::<_, anofox_fcst_core::ForecastError>(anofox_fcst_core::mean_interval_width(
+            &filtered[0],
+            &filtered[1],
+        ))
     }));
 
     match result {
-        Ok(mean_width) => {
+        Ok(Ok(mean_width)) => {
             *out_result = mean_width;
             true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            false
         }
         Err(_) => {
             set_error(
@@ -5363,7 +5396,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_learn(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let residual_series = build_series(residuals, residuals_validity, residuals_length);
-        let residual_values: Vec<f64> = residual_series.iter().filter_map(|v| *v).collect();
+        let residual_values = anofox_fcst_core::drop_missing(&residual_series);
         let alpha_slice = std::slice::from_raw_parts(alphas, n_alphas);
 
         let difficulty_opt = if difficulty.is_null() {
@@ -5408,6 +5441,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_learn(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_conformal_apply(
     forecasts: *const c_double,
+    forecasts_validity: *const u64,
     n_forecasts: size_t,
     profile: *const types::CalibrationProfileFFI,
     difficulty: *const c_double, // Optional, can be null for non-adaptive
@@ -5422,7 +5456,9 @@ pub unsafe extern "C" fn anofox_ts_conformal_apply(
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let forecast_slice = std::slice::from_raw_parts(forecasts, n_forecasts);
+        let forecast_series = build_series(forecasts, forecasts_validity, n_forecasts);
+        let filled_forecasts = anofox_fcst_core::fill_missing(&forecast_series, 0.0);
+        let forecast_slice = filled_forecasts.as_slice();
 
         // Reconstruct CalibrationProfile from FFI
         let profile_ref = &*profile;
@@ -5455,7 +5491,16 @@ pub unsafe extern "C" fn anofox_ts_conformal_apply(
             Some(std::slice::from_raw_parts(difficulty, n_forecasts))
         };
 
-        anofox_fcst_core::conformal_apply(forecast_slice, &core_profile, difficulty_opt)
+        let mut intervals =
+            anofox_fcst_core::conformal_apply(forecast_slice, &core_profile, difficulty_opt)?;
+        anofox_fcst_core::propagate_missing(&mut intervals.point, &forecast_series);
+        for level_lower in intervals.lower.iter_mut() {
+            anofox_fcst_core::propagate_missing(level_lower, &forecast_series);
+        }
+        for level_upper in intervals.upper.iter_mut() {
+            anofox_fcst_core::propagate_missing(level_upper, &forecast_series);
+        }
+        Ok::<_, anofox_fcst_core::ForecastError>(intervals)
     }));
 
     match result {
@@ -5485,8 +5530,11 @@ pub unsafe extern "C" fn anofox_ts_conformal_apply(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_conformal_coverage(
     actuals: *const c_double,
+    actuals_validity: *const u64,
     lower: *const c_double,
+    lower_validity: *const u64,
     upper: *const c_double,
+    upper_validity: *const u64,
     length: size_t,
     out_coverage: *mut c_double,
     out_error: *mut AnofoxError,
@@ -5499,10 +5547,12 @@ pub unsafe extern "C" fn anofox_ts_conformal_coverage(
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let actuals_slice = std::slice::from_raw_parts(actuals, length);
-        let lower_slice = std::slice::from_raw_parts(lower, length);
-        let upper_slice = std::slice::from_raw_parts(upper, length);
-        anofox_fcst_core::conformal_coverage(actuals_slice, lower_slice, upper_slice)
+        let actuals_series = build_series(actuals, actuals_validity, length);
+        let lower_series = build_series(lower, lower_validity, length);
+        let upper_series = build_series(upper, upper_validity, length);
+        let filtered =
+            anofox_fcst_core::complete_cases(&[&actuals_series, &lower_series, &upper_series])?;
+        anofox_fcst_core::conformal_coverage(&filtered[0], &filtered[1], &filtered[2])
     }));
 
     match result {
@@ -5532,8 +5582,11 @@ pub unsafe extern "C" fn anofox_ts_conformal_coverage(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_conformal_evaluate(
     actuals: *const c_double,
+    actuals_validity: *const u64,
     lower: *const c_double,
+    lower_validity: *const u64,
     upper: *const c_double,
+    upper_validity: *const u64,
     length: size_t,
     alpha: c_double,
     out_eval: *mut types::ConformalEvaluationFFI,
@@ -5547,10 +5600,12 @@ pub unsafe extern "C" fn anofox_ts_conformal_evaluate(
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let actuals_slice = std::slice::from_raw_parts(actuals, length);
-        let lower_slice = std::slice::from_raw_parts(lower, length);
-        let upper_slice = std::slice::from_raw_parts(upper, length);
-        anofox_fcst_core::conformal_evaluate(actuals_slice, lower_slice, upper_slice, alpha)
+        let actuals_series = build_series(actuals, actuals_validity, length);
+        let lower_series = build_series(lower, lower_validity, length);
+        let upper_series = build_series(upper, upper_validity, length);
+        let filtered =
+            anofox_fcst_core::complete_cases(&[&actuals_series, &lower_series, &upper_series])?;
+        anofox_fcst_core::conformal_evaluate(&filtered[0], &filtered[1], &filtered[2], alpha)
     }));
 
     match result {
@@ -5588,8 +5643,10 @@ pub unsafe extern "C" fn anofox_ts_conformal_evaluate(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_bootstrap_intervals(
     residuals: *const c_double,
+    residuals_validity: *const u64,
     residuals_len: size_t,
     forecasts: *const c_double,
+    forecasts_validity: *const u64,
     forecasts_len: size_t,
     n_paths: c_int,
     coverage: c_double,
@@ -5610,17 +5667,23 @@ pub unsafe extern "C" fn anofox_ts_bootstrap_intervals(
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let res_slice = std::slice::from_raw_parts(residuals, residuals_len);
-        let fcst_slice = std::slice::from_raw_parts(forecasts, forecasts_len);
+        let residual_series = build_series(residuals, residuals_validity, residuals_len);
+        let res_values = anofox_fcst_core::drop_missing(&residual_series);
+        let forecast_series = build_series(forecasts, forecasts_validity, forecasts_len);
+        let filled_forecasts = anofox_fcst_core::fill_missing(&forecast_series, 0.0);
         let seed_opt = if seed >= 0 { Some(seed as u64) } else { None };
 
-        anofox_fcst_core::bootstrap_intervals(
-            res_slice,
-            fcst_slice,
+        let mut intervals = anofox_fcst_core::bootstrap_intervals(
+            &res_values,
+            &filled_forecasts,
             n_paths.max(1) as usize,
             coverage,
             seed_opt,
-        )
+        )?;
+        anofox_fcst_core::propagate_missing(&mut intervals.point, &forecast_series);
+        anofox_fcst_core::propagate_missing(&mut intervals.lower, &forecast_series);
+        anofox_fcst_core::propagate_missing(&mut intervals.upper, &forecast_series);
+        Ok::<_, anofox_fcst_core::ForecastError>(intervals)
     }));
 
     match result {
@@ -5667,8 +5730,10 @@ pub unsafe extern "C" fn anofox_ts_bootstrap_intervals(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_bootstrap_quantiles(
     residuals: *const c_double,
+    residuals_validity: *const u64,
     residuals_len: size_t,
     forecasts: *const c_double,
+    forecasts_validity: *const u64,
     forecasts_len: size_t,
     n_paths: c_int,
     quantile_levels: *const c_double,
@@ -5691,18 +5756,25 @@ pub unsafe extern "C" fn anofox_ts_bootstrap_quantiles(
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let res_slice = std::slice::from_raw_parts(residuals, residuals_len);
-        let fcst_slice = std::slice::from_raw_parts(forecasts, forecasts_len);
+        let residual_series = build_series(residuals, residuals_validity, residuals_len);
+        let res_values = anofox_fcst_core::drop_missing(&residual_series);
+        let forecast_series = build_series(forecasts, forecasts_validity, forecasts_len);
+        let filled_forecasts = anofox_fcst_core::fill_missing(&forecast_series, 0.0);
         let q_slice = std::slice::from_raw_parts(quantile_levels, n_quantiles);
         let seed_opt = if seed >= 0 { Some(seed as u64) } else { None };
 
-        anofox_fcst_core::bootstrap_quantiles(
-            res_slice,
-            fcst_slice,
+        let mut qr = anofox_fcst_core::bootstrap_quantiles(
+            &res_values,
+            &filled_forecasts,
             n_paths.max(1) as usize,
             q_slice,
             seed_opt,
-        )
+        )?;
+        anofox_fcst_core::propagate_missing(&mut qr.point, &forecast_series);
+        for row in qr.values.iter_mut() {
+            anofox_fcst_core::propagate_missing(row, &forecast_series);
+        }
+        Ok::<_, anofox_fcst_core::ForecastError>(qr)
     }));
 
     match result {
@@ -5791,18 +5863,28 @@ pub unsafe extern "C" fn anofox_free_bootstrap_quantile_result(
 
 /// Compute per-step conformal prediction intervals.
 ///
-/// Each horizon step gets its own interval width. Requires fold-organized data.
+/// Each horizon step gets its own interval width. Requires fold-organized,
+/// FLAT data: `fold_forecasts`/`fold_actuals` are `fold_forecasts_len`
+/// elements long (fold-major), validated against `horizon` in Rust (D-10 —
+/// `fold_forecasts_len` must be an exact multiple of `horizon`; the caller
+/// never computes `n_folds` itself). Validity bitmasks make the per-step
+/// quantile computation pairwise-complete (D-02); a missing `point_forecasts`
+/// entry is position-preserving in the output (NaN at that position only).
 ///
 /// # Safety
-/// All pointers must be valid. fold_forecasts and fold_actuals are flat arrays
-/// of n_folds * horizon doubles. Output struct must be zeroed before calling.
+/// All pointers must be valid (validity pointers may be null = all valid).
+/// Output struct must be zeroed before calling.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_conformal_predict_per_step(
     fold_forecasts: *const c_double,
+    fold_forecasts_validity: *const u64,
+    fold_forecasts_len: size_t,
     fold_actuals: *const c_double,
-    n_folds: size_t,
+    fold_actuals_validity: *const u64,
+    fold_actuals_len: size_t,
     horizon: size_t,
     point_forecasts: *const c_double,
+    point_validity: *const u64,
     n_point_forecasts: size_t,
     alpha: c_double,
     out_result: *mut types::ConformalPerStepResultFFI,
@@ -5822,24 +5904,17 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict_per_step(
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        // Reshape flat arrays into Vec<Vec<f64>>
-        let fcst_flat = std::slice::from_raw_parts(fold_forecasts, n_folds * horizon);
-        let act_flat = std::slice::from_raw_parts(fold_actuals, n_folds * horizon);
-        let point = std::slice::from_raw_parts(point_forecasts, n_point_forecasts);
+        let fold_forecasts_series =
+            build_series(fold_forecasts, fold_forecasts_validity, fold_forecasts_len);
+        let fold_actuals_series =
+            build_series(fold_actuals, fold_actuals_validity, fold_actuals_len);
+        let point_series = build_series(point_forecasts, point_validity, n_point_forecasts);
 
-        let mut fold_fcsts: Vec<Vec<f64>> = Vec::with_capacity(n_folds);
-        let mut fold_acts: Vec<Vec<f64>> = Vec::with_capacity(n_folds);
-        for i in 0..n_folds {
-            let start = i * horizon;
-            let end = start + horizon;
-            fold_fcsts.push(fcst_flat[start..end].to_vec());
-            fold_acts.push(act_flat[start..end].to_vec());
-        }
-
-        anofox_fcst_core::conformal::conformal_predict_per_step(
-            &fold_fcsts,
-            &fold_acts,
-            point,
+        anofox_fcst_core::conformal::conformal_predict_per_step_validated(
+            &fold_forecasts_series,
+            &fold_actuals_series,
+            horizon,
+            &point_series,
             alpha,
         )
     }));
@@ -5875,7 +5950,14 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict_per_step(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &format!("{}", e));
+            let code = match e {
+                anofox_fcst_core::ForecastError::InvalidInput(_) => ErrorCode::InvalidInput,
+                anofox_fcst_core::ForecastError::InsufficientData { .. } => {
+                    ErrorCode::InsufficientData
+                }
+                _ => ErrorCode::ComputationError,
+            };
+            set_error(out_error, code, &format!("{}", e));
             false
         }
         Err(_) => {

@@ -7,28 +7,9 @@
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/common/vector_operations/generic_executor.hpp"
 #include "duckdb/common/types/vector.hpp"
+#include "ts_list_marshal.hpp"
 
 namespace duckdb {
-
-// Helper to extract values from LIST vectors
-static void ExtractListAsDouble(Vector &list_vec, idx_t row_idx, vector<double> &out_values) {
-    auto list_data = ListVector::GetData(list_vec);
-    auto &list_entry = list_data[row_idx];
-
-    auto &child_vec = ListVector::GetEntry(list_vec);
-    auto child_data = FlatVector::GetData<double>(child_vec);
-    auto &child_validity = FlatVector::Validity(child_vec);
-
-    out_values.clear();
-    out_values.reserve(list_entry.length);
-
-    for (idx_t i = 0; i < list_entry.length; i++) {
-        idx_t child_idx = list_entry.offset + i;
-        if (child_validity.RowIsValid(child_idx)) {
-            out_values.push_back(child_data[child_idx]);
-        }
-    }
-}
 
 // ============================================================================
 // ts_conformal_quantile - Compute conformity score from residuals
@@ -43,25 +24,25 @@ static void TsConformalQuantileFunction(DataChunk &args, ExpressionState &state,
     result.SetVectorType(VectorType::FLAT_VECTOR);
     auto result_data = FlatVector::GetData<double>(result);
 
-    UnifiedVectorFormat alpha_data;
-    alpha_vec.ToUnifiedFormat(count, alpha_data);
+    ListDoubleReader residuals_reader(residuals_vec, count);
+    ScalarArgReader<double> alpha_reader(alpha_vec, count);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        auto alpha_idx = alpha_data.sel->get_index(row_idx);
-        if (FlatVector::IsNull(residuals_vec, row_idx) || !alpha_data.validity.RowIsValid(alpha_idx)) {
+        if (residuals_reader.IsNull(row_idx) || alpha_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> residuals;
-        ExtractListAsDouble(residuals_vec, row_idx, residuals);
-        double alpha = UnifiedVectorFormat::GetData<double>(alpha_data)[alpha_idx];
+        vector<uint64_t> residuals_validity;
+        residuals_reader.Read(row_idx, residuals, residuals_validity);
+        double alpha = alpha_reader.Get(row_idx);
 
         AnofoxError error;
         double quantile_result;
         bool success = anofox_ts_conformal_quantile(
-            residuals.data(), nullptr, residuals.size(),
-            alpha, &quantile_result, &error
+            residuals.data(), residuals_validity.empty() ? nullptr : residuals_validity.data(),
+            residuals.size(), alpha, &quantile_result, &error
         );
 
         if (!success) {
@@ -128,8 +109,8 @@ static void TsConformalIntervalsFunction(DataChunk &args, ExpressionState &state
     auto &score_vec = args.data[1];
     idx_t count = args.size();
 
-    UnifiedVectorFormat score_data;
-    score_vec.ToUnifiedFormat(count, score_data);
+    ListDoubleReader forecasts_reader(forecasts_vec, count);
+    ScalarArgReader<double> score_reader(score_vec, count);
 
     // Result is a STRUCT with lower and upper arrays
     auto &struct_entries = StructVector::GetEntries(result);
@@ -137,21 +118,22 @@ static void TsConformalIntervalsFunction(DataChunk &args, ExpressionState &state
     auto &upper_vec = *struct_entries[1];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        auto score_idx = score_data.sel->get_index(row_idx);
-        if (FlatVector::IsNull(forecasts_vec, row_idx) || !score_data.validity.RowIsValid(score_idx)) {
+        if (forecasts_reader.IsNull(row_idx) || score_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> forecasts;
-        ExtractListAsDouble(forecasts_vec, row_idx, forecasts);
-        double conformity_score = UnifiedVectorFormat::GetData<double>(score_data)[score_idx];
+        vector<uint64_t> forecasts_validity;
+        forecasts_reader.Read(row_idx, forecasts, forecasts_validity);
+        double conformity_score = score_reader.Get(row_idx);
 
         AnofoxError error;
         double *out_lower = nullptr;
         double *out_upper = nullptr;
         bool success = anofox_ts_conformal_intervals(
-            forecasts.data(), forecasts.size(), conformity_score,
+            forecasts.data(), forecasts_validity.empty() ? nullptr : forecasts_validity.data(),
+            forecasts.size(), conformity_score,
             &out_lower, &out_upper, &error
         );
 
@@ -160,31 +142,8 @@ static void TsConformalIntervalsFunction(DataChunk &args, ExpressionState &state
             continue;
         }
 
-        // Build lower list
-        auto lower_offset = ListVector::GetListSize(lower_vec);
-        auto &lower_child = ListVector::GetEntry(lower_vec);
-        ListVector::Reserve(lower_vec, lower_offset + forecasts.size());
-        auto lower_child_data = FlatVector::GetData<double>(lower_child);
-        for (idx_t i = 0; i < forecasts.size(); i++) {
-            lower_child_data[lower_offset + i] = out_lower[i];
-        }
-        ListVector::SetListSize(lower_vec, lower_offset + forecasts.size());
-        auto lower_list_data = ListVector::GetData(lower_vec);
-        lower_list_data[row_idx].offset = lower_offset;
-        lower_list_data[row_idx].length = forecasts.size();
-
-        // Build upper list
-        auto upper_offset = ListVector::GetListSize(upper_vec);
-        auto &upper_child = ListVector::GetEntry(upper_vec);
-        ListVector::Reserve(upper_vec, upper_offset + forecasts.size());
-        auto upper_child_data = FlatVector::GetData<double>(upper_child);
-        for (idx_t i = 0; i < forecasts.size(); i++) {
-            upper_child_data[upper_offset + i] = out_upper[i];
-        }
-        ListVector::SetListSize(upper_vec, upper_offset + forecasts.size());
-        auto upper_list_data = ListVector::GetData(upper_vec);
-        upper_list_data[row_idx].offset = upper_offset;
-        upper_list_data[row_idx].length = forecasts.size();
+        WriteDoubleListNanAsNull(lower_vec, row_idx, out_lower, forecasts.size());
+        WriteDoubleListNanAsNull(upper_vec, row_idx, out_upper, forecasts.size());
 
         // Free FFI memory
         anofox_free_double_array(out_lower);
@@ -253,8 +212,9 @@ static void TsConformalPredictFunction(DataChunk &args, ExpressionState &state, 
     auto &alpha_vec = args.data[2];
     idx_t count = args.size();
 
-    UnifiedVectorFormat alpha_data;
-    alpha_vec.ToUnifiedFormat(count, alpha_data);
+    ListDoubleReader residuals_reader(residuals_vec, count);
+    ListDoubleReader forecasts_reader(forecasts_vec, count);
+    ScalarArgReader<double> alpha_reader(alpha_vec, count);
 
     // Result struct fields
     auto &struct_entries = StructVector::GetEntries(result);
@@ -266,24 +226,25 @@ static void TsConformalPredictFunction(DataChunk &args, ExpressionState &state, 
     auto &method_vec = *struct_entries[5];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        auto alpha_idx = alpha_data.sel->get_index(row_idx);
-        if (FlatVector::IsNull(residuals_vec, row_idx) ||
-            FlatVector::IsNull(forecasts_vec, row_idx) ||
-            !alpha_data.validity.RowIsValid(alpha_idx)) {
+        if (residuals_reader.IsNull(row_idx) || forecasts_reader.IsNull(row_idx) ||
+            alpha_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> residuals, forecasts;
-        ExtractListAsDouble(residuals_vec, row_idx, residuals);
-        ExtractListAsDouble(forecasts_vec, row_idx, forecasts);
-        double alpha = UnifiedVectorFormat::GetData<double>(alpha_data)[alpha_idx];
+        vector<uint64_t> residuals_validity, forecasts_validity;
+        residuals_reader.Read(row_idx, residuals, residuals_validity);
+        forecasts_reader.Read(row_idx, forecasts, forecasts_validity);
+        double alpha = alpha_reader.Get(row_idx);
 
         ConformalResultFFI conf_result = {};
         AnofoxError error;
         bool success = anofox_ts_conformal_predict(
-            residuals.data(), nullptr, residuals.size(),
-            forecasts.data(), forecasts.size(),
+            residuals.data(), residuals_validity.empty() ? nullptr : residuals_validity.data(),
+            residuals.size(),
+            forecasts.data(), forecasts_validity.empty() ? nullptr : forecasts_validity.data(),
+            forecasts.size(),
             alpha, &conf_result, &error
         );
 
@@ -292,44 +253,9 @@ static void TsConformalPredictFunction(DataChunk &args, ExpressionState &state, 
             continue;
         }
 
-        // Build point list
-        auto point_offset = ListVector::GetListSize(point_vec);
-        auto &point_child = ListVector::GetEntry(point_vec);
-        ListVector::Reserve(point_vec, point_offset + conf_result.n_forecasts);
-        auto point_child_data = FlatVector::GetData<double>(point_child);
-        for (idx_t i = 0; i < conf_result.n_forecasts; i++) {
-            point_child_data[point_offset + i] = conf_result.point[i];
-        }
-        ListVector::SetListSize(point_vec, point_offset + conf_result.n_forecasts);
-        auto point_list_data = ListVector::GetData(point_vec);
-        point_list_data[row_idx].offset = point_offset;
-        point_list_data[row_idx].length = conf_result.n_forecasts;
-
-        // Build lower list
-        auto lower_offset = ListVector::GetListSize(lower_vec);
-        auto &lower_child = ListVector::GetEntry(lower_vec);
-        ListVector::Reserve(lower_vec, lower_offset + conf_result.n_forecasts);
-        auto lower_child_data = FlatVector::GetData<double>(lower_child);
-        for (idx_t i = 0; i < conf_result.n_forecasts; i++) {
-            lower_child_data[lower_offset + i] = conf_result.lower[i];
-        }
-        ListVector::SetListSize(lower_vec, lower_offset + conf_result.n_forecasts);
-        auto lower_list_data = ListVector::GetData(lower_vec);
-        lower_list_data[row_idx].offset = lower_offset;
-        lower_list_data[row_idx].length = conf_result.n_forecasts;
-
-        // Build upper list
-        auto upper_offset = ListVector::GetListSize(upper_vec);
-        auto &upper_child = ListVector::GetEntry(upper_vec);
-        ListVector::Reserve(upper_vec, upper_offset + conf_result.n_forecasts);
-        auto upper_child_data = FlatVector::GetData<double>(upper_child);
-        for (idx_t i = 0; i < conf_result.n_forecasts; i++) {
-            upper_child_data[upper_offset + i] = conf_result.upper[i];
-        }
-        ListVector::SetListSize(upper_vec, upper_offset + conf_result.n_forecasts);
-        auto upper_list_data = ListVector::GetData(upper_vec);
-        upper_list_data[row_idx].offset = upper_offset;
-        upper_list_data[row_idx].length = conf_result.n_forecasts;
+        WriteDoubleListNanAsNull(point_vec, row_idx, conf_result.point, conf_result.n_forecasts);
+        WriteDoubleListNanAsNull(lower_vec, row_idx, conf_result.lower, conf_result.n_forecasts);
+        WriteDoubleListNanAsNull(upper_vec, row_idx, conf_result.upper, conf_result.n_forecasts);
 
         // Scalar fields
         FlatVector::GetData<double>(coverage_vec)[row_idx] = conf_result.coverage;
@@ -408,8 +334,9 @@ static void TsConformalPredictAsymmetricFunction(DataChunk &args, ExpressionStat
     auto &alpha_vec = args.data[2];
     idx_t count = args.size();
 
-    UnifiedVectorFormat alpha_data;
-    alpha_vec.ToUnifiedFormat(count, alpha_data);
+    ListDoubleReader residuals_reader(residuals_vec, count);
+    ListDoubleReader forecasts_reader(forecasts_vec, count);
+    ScalarArgReader<double> alpha_reader(alpha_vec, count);
 
     // Result struct fields
     auto &struct_entries = StructVector::GetEntries(result);
@@ -421,24 +348,25 @@ static void TsConformalPredictAsymmetricFunction(DataChunk &args, ExpressionStat
     auto &method_vec = *struct_entries[5];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        auto alpha_idx = alpha_data.sel->get_index(row_idx);
-        if (FlatVector::IsNull(residuals_vec, row_idx) ||
-            FlatVector::IsNull(forecasts_vec, row_idx) ||
-            !alpha_data.validity.RowIsValid(alpha_idx)) {
+        if (residuals_reader.IsNull(row_idx) || forecasts_reader.IsNull(row_idx) ||
+            alpha_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> residuals, forecasts;
-        ExtractListAsDouble(residuals_vec, row_idx, residuals);
-        ExtractListAsDouble(forecasts_vec, row_idx, forecasts);
-        double alpha = UnifiedVectorFormat::GetData<double>(alpha_data)[alpha_idx];
+        vector<uint64_t> residuals_validity, forecasts_validity;
+        residuals_reader.Read(row_idx, residuals, residuals_validity);
+        forecasts_reader.Read(row_idx, forecasts, forecasts_validity);
+        double alpha = alpha_reader.Get(row_idx);
 
         ConformalResultFFI conf_result = {};
         AnofoxError error;
         bool success = anofox_ts_conformal_predict_asymmetric(
-            residuals.data(), nullptr, residuals.size(),
-            forecasts.data(), forecasts.size(),
+            residuals.data(), residuals_validity.empty() ? nullptr : residuals_validity.data(),
+            residuals.size(),
+            forecasts.data(), forecasts_validity.empty() ? nullptr : forecasts_validity.data(),
+            forecasts.size(),
             alpha, &conf_result, &error
         );
 
@@ -447,44 +375,9 @@ static void TsConformalPredictAsymmetricFunction(DataChunk &args, ExpressionStat
             continue;
         }
 
-        // Build point list
-        auto point_offset = ListVector::GetListSize(point_vec);
-        auto &point_child = ListVector::GetEntry(point_vec);
-        ListVector::Reserve(point_vec, point_offset + conf_result.n_forecasts);
-        auto point_child_data = FlatVector::GetData<double>(point_child);
-        for (idx_t i = 0; i < conf_result.n_forecasts; i++) {
-            point_child_data[point_offset + i] = conf_result.point[i];
-        }
-        ListVector::SetListSize(point_vec, point_offset + conf_result.n_forecasts);
-        auto point_list_data = ListVector::GetData(point_vec);
-        point_list_data[row_idx].offset = point_offset;
-        point_list_data[row_idx].length = conf_result.n_forecasts;
-
-        // Build lower list
-        auto lower_offset = ListVector::GetListSize(lower_vec);
-        auto &lower_child = ListVector::GetEntry(lower_vec);
-        ListVector::Reserve(lower_vec, lower_offset + conf_result.n_forecasts);
-        auto lower_child_data = FlatVector::GetData<double>(lower_child);
-        for (idx_t i = 0; i < conf_result.n_forecasts; i++) {
-            lower_child_data[lower_offset + i] = conf_result.lower[i];
-        }
-        ListVector::SetListSize(lower_vec, lower_offset + conf_result.n_forecasts);
-        auto lower_list_data = ListVector::GetData(lower_vec);
-        lower_list_data[row_idx].offset = lower_offset;
-        lower_list_data[row_idx].length = conf_result.n_forecasts;
-
-        // Build upper list
-        auto upper_offset = ListVector::GetListSize(upper_vec);
-        auto &upper_child = ListVector::GetEntry(upper_vec);
-        ListVector::Reserve(upper_vec, upper_offset + conf_result.n_forecasts);
-        auto upper_child_data = FlatVector::GetData<double>(upper_child);
-        for (idx_t i = 0; i < conf_result.n_forecasts; i++) {
-            upper_child_data[upper_offset + i] = conf_result.upper[i];
-        }
-        ListVector::SetListSize(upper_vec, upper_offset + conf_result.n_forecasts);
-        auto upper_list_data = ListVector::GetData(upper_vec);
-        upper_list_data[row_idx].offset = upper_offset;
-        upper_list_data[row_idx].length = conf_result.n_forecasts;
+        WriteDoubleListNanAsNull(point_vec, row_idx, conf_result.point, conf_result.n_forecasts);
+        WriteDoubleListNanAsNull(lower_vec, row_idx, conf_result.lower, conf_result.n_forecasts);
+        WriteDoubleListNanAsNull(upper_vec, row_idx, conf_result.upper, conf_result.n_forecasts);
 
         // Scalar fields
         FlatVector::GetData<double>(coverage_vec)[row_idx] = conf_result.coverage;
@@ -604,9 +497,10 @@ static void TsConformalLearnFunction(DataChunk &args, ExpressionState &state, Ve
     auto &strategy_vec = args.data[3];
     idx_t count = args.size();
 
-    UnifiedVectorFormat method_data, strategy_data;
-    method_vec.ToUnifiedFormat(count, method_data);
-    strategy_vec.ToUnifiedFormat(count, strategy_data);
+    ListDoubleReader residuals_reader(residuals_vec, count);
+    ListDoubleReader alphas_reader(alphas_vec, count);
+    ScalarArgReader<string_t> method_reader(method_vec, count);
+    ScalarArgReader<string_t> strategy_reader(strategy_vec, count);
 
     // Result struct fields
     auto &struct_entries = StructVector::GetEntries(result);
@@ -619,23 +513,19 @@ static void TsConformalLearnFunction(DataChunk &args, ExpressionState &state, Ve
     auto &out_n_residuals_vec = *struct_entries[6];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        auto method_idx = method_data.sel->get_index(row_idx);
-        auto strategy_idx = strategy_data.sel->get_index(row_idx);
-
-        if (FlatVector::IsNull(residuals_vec, row_idx) ||
-            FlatVector::IsNull(alphas_vec, row_idx) ||
-            !method_data.validity.RowIsValid(method_idx) ||
-            !strategy_data.validity.RowIsValid(strategy_idx)) {
+        if (residuals_reader.IsNull(row_idx) || alphas_reader.IsNull(row_idx) ||
+            method_reader.IsNull(row_idx) || strategy_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> residuals, alphas;
-        ExtractListAsDouble(residuals_vec, row_idx, residuals);
-        ExtractListAsDouble(alphas_vec, row_idx, alphas);
+        vector<uint64_t> residuals_validity;
+        residuals_reader.Read(row_idx, residuals, residuals_validity);
+        alphas_reader.ReadNoNulls(row_idx, alphas, "ts_conformal_learn", "alphas");
 
-        auto method_str = UnifiedVectorFormat::GetData<string_t>(method_data)[method_idx].GetString();
-        auto strategy_str = UnifiedVectorFormat::GetData<string_t>(strategy_data)[strategy_idx].GetString();
+        auto method_str = method_reader.Get(row_idx).GetString();
+        auto strategy_str = strategy_reader.Get(row_idx).GetString();
 
         ConformalMethodFFI method = ParseConformalMethod(method_str);
         ConformalStrategyFFI strategy = ParseConformalStrategy(strategy_str);
@@ -643,7 +533,8 @@ static void TsConformalLearnFunction(DataChunk &args, ExpressionState &state, Ve
         CalibrationProfileFFI profile = {};
         AnofoxError error;
         bool success = anofox_ts_conformal_learn(
-            residuals.data(), nullptr, residuals.size(),
+            residuals.data(), residuals_validity.empty() ? nullptr : residuals_validity.data(),
+            residuals.size(),
             alphas.data(), alphas.size(),
             method, strategy,
             nullptr,  // no difficulty scores
@@ -661,57 +552,10 @@ static void TsConformalLearnFunction(DataChunk &args, ExpressionState &state, Ve
         // Build strategy string
         FlatVector::GetData<string_t>(out_strategy_vec)[row_idx] = StringVector::AddString(out_strategy_vec, StrategyToString(profile.strategy));
 
-        // Build alphas list
-        auto alphas_offset = ListVector::GetListSize(out_alphas_vec);
-        auto &alphas_child = ListVector::GetEntry(out_alphas_vec);
-        ListVector::Reserve(out_alphas_vec, alphas_offset + profile.n_levels);
-        auto alphas_child_data = FlatVector::GetData<double>(alphas_child);
-        for (idx_t i = 0; i < profile.n_levels; i++) {
-            alphas_child_data[alphas_offset + i] = profile.alphas[i];
-        }
-        ListVector::SetListSize(out_alphas_vec, alphas_offset + profile.n_levels);
-        auto alphas_list_data = ListVector::GetData(out_alphas_vec);
-        alphas_list_data[row_idx].offset = alphas_offset;
-        alphas_list_data[row_idx].length = profile.n_levels;
-
-        // Build state_vector list
-        auto state_offset = ListVector::GetListSize(out_state_vec);
-        auto &state_child = ListVector::GetEntry(out_state_vec);
-        ListVector::Reserve(out_state_vec, state_offset + profile.state_vector_len);
-        auto state_child_data = FlatVector::GetData<double>(state_child);
-        for (idx_t i = 0; i < profile.state_vector_len; i++) {
-            state_child_data[state_offset + i] = profile.state_vector[i];
-        }
-        ListVector::SetListSize(out_state_vec, state_offset + profile.state_vector_len);
-        auto state_list_data = ListVector::GetData(out_state_vec);
-        state_list_data[row_idx].offset = state_offset;
-        state_list_data[row_idx].length = profile.state_vector_len;
-
-        // Build scores_lower list
-        auto lower_offset = ListVector::GetListSize(out_scores_lower_vec);
-        auto &lower_child = ListVector::GetEntry(out_scores_lower_vec);
-        ListVector::Reserve(out_scores_lower_vec, lower_offset + profile.n_levels);
-        auto lower_child_data = FlatVector::GetData<double>(lower_child);
-        for (idx_t i = 0; i < profile.n_levels; i++) {
-            lower_child_data[lower_offset + i] = profile.scores_lower[i];
-        }
-        ListVector::SetListSize(out_scores_lower_vec, lower_offset + profile.n_levels);
-        auto lower_list_data = ListVector::GetData(out_scores_lower_vec);
-        lower_list_data[row_idx].offset = lower_offset;
-        lower_list_data[row_idx].length = profile.n_levels;
-
-        // Build scores_upper list
-        auto upper_offset = ListVector::GetListSize(out_scores_upper_vec);
-        auto &upper_child = ListVector::GetEntry(out_scores_upper_vec);
-        ListVector::Reserve(out_scores_upper_vec, upper_offset + profile.n_levels);
-        auto upper_child_data = FlatVector::GetData<double>(upper_child);
-        for (idx_t i = 0; i < profile.n_levels; i++) {
-            upper_child_data[upper_offset + i] = profile.scores_upper[i];
-        }
-        ListVector::SetListSize(out_scores_upper_vec, upper_offset + profile.n_levels);
-        auto upper_list_data = ListVector::GetData(out_scores_upper_vec);
-        upper_list_data[row_idx].offset = upper_offset;
-        upper_list_data[row_idx].length = profile.n_levels;
+        WriteDoubleList(out_alphas_vec, row_idx, profile.alphas, profile.n_levels);
+        WriteDoubleList(out_state_vec, row_idx, profile.state_vector, profile.state_vector_len);
+        WriteDoubleList(out_scores_lower_vec, row_idx, profile.scores_lower, profile.n_levels);
+        WriteDoubleList(out_scores_upper_vec, row_idx, profile.scores_upper, profile.n_levels);
 
         // n_residuals
         FlatVector::GetData<int64_t>(out_n_residuals_vec)[row_idx] = static_cast<int64_t>(profile.n_residuals);
@@ -790,6 +634,13 @@ static void TsConformalApplyFunction(DataChunk &args, ExpressionState &state, Ve
     auto &profile_vec = args.data[1];
     idx_t count = args.size();
 
+    // Flatten the profile STRUCT argument first so its child vectors are
+    // indexable per row even when the whole STRUCT is constant/dictionary
+    // (T-12-15).
+    profile_vec.Flatten(count);
+
+    ListDoubleReader forecasts_reader(forecasts_vec, count);
+
     // Profile struct fields
     auto &profile_entries = StructVector::GetEntries(profile_vec);
     auto &method_vec = *profile_entries[0];
@@ -800,6 +651,11 @@ static void TsConformalApplyFunction(DataChunk &args, ExpressionState &state, Ve
     auto &scores_upper_vec = *profile_entries[5];
     auto &n_residuals_vec = *profile_entries[6];
 
+    ListDoubleReader alphas_reader(alphas_vec, count);
+    ListDoubleReader state_reader(state_vec, count);
+    ListDoubleReader scores_lower_reader(scores_lower_vec, count);
+    ListDoubleReader scores_upper_reader(scores_upper_vec, count);
+
     // Result struct fields
     auto &out_entries = StructVector::GetEntries(result);
     auto &out_point_vec = *out_entries[0];
@@ -809,24 +665,25 @@ static void TsConformalApplyFunction(DataChunk &args, ExpressionState &state, Ve
     auto &out_method_vec = *out_entries[4];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(forecasts_vec, row_idx) || FlatVector::IsNull(profile_vec, row_idx)) {
+        if (forecasts_reader.IsNull(row_idx) || FlatVector::IsNull(profile_vec, row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> forecasts;
-        ExtractListAsDouble(forecasts_vec, row_idx, forecasts);
+        vector<uint64_t> forecasts_validity;
+        forecasts_reader.Read(row_idx, forecasts, forecasts_validity);
 
-        // Extract profile fields
+        // Extract profile fields (flat after profile_vec.Flatten(count) above).
         auto method_str = FlatVector::GetData<string_t>(method_vec)[row_idx].GetString();
         auto strategy_str = FlatVector::GetData<string_t>(strategy_vec_input)[row_idx].GetString();
         auto n_residuals = FlatVector::GetData<int64_t>(n_residuals_vec)[row_idx];
 
         vector<double> alphas, state_vector, scores_lower, scores_upper;
-        ExtractListAsDouble(alphas_vec, row_idx, alphas);
-        ExtractListAsDouble(state_vec, row_idx, state_vector);
-        ExtractListAsDouble(scores_lower_vec, row_idx, scores_lower);
-        ExtractListAsDouble(scores_upper_vec, row_idx, scores_upper);
+        alphas_reader.ReadNoNulls(row_idx, alphas, "ts_conformal_apply", "profile.alphas");
+        state_reader.ReadNoNulls(row_idx, state_vector, "ts_conformal_apply", "profile.state_vector");
+        scores_lower_reader.ReadNoNulls(row_idx, scores_lower, "ts_conformal_apply", "profile.scores_lower");
+        scores_upper_reader.ReadNoNulls(row_idx, scores_upper, "ts_conformal_apply", "profile.scores_upper");
 
         // Build CalibrationProfileFFI from the struct
         CalibrationProfileFFI profile = {};
@@ -843,7 +700,8 @@ static void TsConformalApplyFunction(DataChunk &args, ExpressionState &state, Ve
         PredictionIntervalsFFI intervals = {};
         AnofoxError error;
         bool success = anofox_ts_conformal_apply(
-            forecasts.data(), forecasts.size(),
+            forecasts.data(), forecasts_validity.empty() ? nullptr : forecasts_validity.data(),
+            forecasts.size(),
             &profile,
             nullptr,  // no difficulty scores
             &intervals, &error
@@ -854,59 +712,13 @@ static void TsConformalApplyFunction(DataChunk &args, ExpressionState &state, Ve
             continue;
         }
 
-        // Build point list
-        auto point_offset = ListVector::GetListSize(out_point_vec);
-        auto &point_child = ListVector::GetEntry(out_point_vec);
-        ListVector::Reserve(out_point_vec, point_offset + intervals.n_forecasts);
-        auto point_child_data = FlatVector::GetData<double>(point_child);
-        for (idx_t i = 0; i < intervals.n_forecasts; i++) {
-            point_child_data[point_offset + i] = intervals.point[i];
-        }
-        ListVector::SetListSize(out_point_vec, point_offset + intervals.n_forecasts);
-        auto point_list_data = ListVector::GetData(out_point_vec);
-        point_list_data[row_idx].offset = point_offset;
-        point_list_data[row_idx].length = intervals.n_forecasts;
+        WriteDoubleListNanAsNull(out_point_vec, row_idx, intervals.point, intervals.n_forecasts);
+        WriteDoubleList(out_coverage_vec, row_idx, intervals.coverage, intervals.n_levels);
 
-        // Build coverage list
-        auto cov_offset = ListVector::GetListSize(out_coverage_vec);
-        auto &cov_child = ListVector::GetEntry(out_coverage_vec);
-        ListVector::Reserve(out_coverage_vec, cov_offset + intervals.n_levels);
-        auto cov_child_data = FlatVector::GetData<double>(cov_child);
-        for (idx_t i = 0; i < intervals.n_levels; i++) {
-            cov_child_data[cov_offset + i] = intervals.coverage[i];
-        }
-        ListVector::SetListSize(out_coverage_vec, cov_offset + intervals.n_levels);
-        auto cov_list_data = ListVector::GetData(out_coverage_vec);
-        cov_list_data[row_idx].offset = cov_offset;
-        cov_list_data[row_idx].length = intervals.n_levels;
-
-        // Build lower list (flattened: n_levels * n_forecasts)
         size_t total_lower = intervals.n_levels * intervals.n_forecasts;
-        auto lower_offset = ListVector::GetListSize(out_lower_vec);
-        auto &lower_child = ListVector::GetEntry(out_lower_vec);
-        ListVector::Reserve(out_lower_vec, lower_offset + total_lower);
-        auto lower_child_data = FlatVector::GetData<double>(lower_child);
-        for (idx_t i = 0; i < total_lower; i++) {
-            lower_child_data[lower_offset + i] = intervals.lower[i];
-        }
-        ListVector::SetListSize(out_lower_vec, lower_offset + total_lower);
-        auto lower_list_data = ListVector::GetData(out_lower_vec);
-        lower_list_data[row_idx].offset = lower_offset;
-        lower_list_data[row_idx].length = total_lower;
-
-        // Build upper list (flattened: n_levels * n_forecasts)
         size_t total_upper = intervals.n_levels * intervals.n_forecasts;
-        auto upper_offset = ListVector::GetListSize(out_upper_vec);
-        auto &upper_child = ListVector::GetEntry(out_upper_vec);
-        ListVector::Reserve(out_upper_vec, upper_offset + total_upper);
-        auto upper_child_data = FlatVector::GetData<double>(upper_child);
-        for (idx_t i = 0; i < total_upper; i++) {
-            upper_child_data[upper_offset + i] = intervals.upper[i];
-        }
-        ListVector::SetListSize(out_upper_vec, upper_offset + total_upper);
-        auto upper_list_data = ListVector::GetData(out_upper_vec);
-        upper_list_data[row_idx].offset = upper_offset;
-        upper_list_data[row_idx].length = total_upper;
+        WriteDoubleListNanAsNull(out_lower_vec, row_idx, intervals.lower, total_lower);
+        WriteDoubleListNanAsNull(out_upper_vec, row_idx, intervals.upper, total_upper);
 
         // Method string
         FlatVector::GetData<string_t>(out_method_vec)[row_idx] = StringVector::AddString(out_method_vec, MethodToString(intervals.method));
@@ -995,18 +807,22 @@ static void TsConformalCoverageFunction(DataChunk &args, ExpressionState &state,
     result.SetVectorType(VectorType::FLAT_VECTOR);
     auto result_data = FlatVector::GetData<double>(result);
 
+    ListDoubleReader actuals_reader(actuals_vec, count);
+    ListDoubleReader lower_reader(lower_vec, count);
+    ListDoubleReader upper_reader(upper_vec, count);
+
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(actuals_vec, row_idx) ||
-            FlatVector::IsNull(lower_vec, row_idx) ||
-            FlatVector::IsNull(upper_vec, row_idx)) {
+        if (actuals_reader.IsNull(row_idx) || lower_reader.IsNull(row_idx) ||
+            upper_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> actuals, lower, upper;
-        ExtractListAsDouble(actuals_vec, row_idx, actuals);
-        ExtractListAsDouble(lower_vec, row_idx, lower);
-        ExtractListAsDouble(upper_vec, row_idx, upper);
+        vector<uint64_t> actuals_validity, lower_validity, upper_validity;
+        actuals_reader.Read(row_idx, actuals, actuals_validity);
+        lower_reader.Read(row_idx, lower, lower_validity);
+        upper_reader.Read(row_idx, upper, upper_validity);
 
         if (actuals.size() != lower.size() || actuals.size() != upper.size()) {
             FlatVector::SetNull(result, row_idx, true);
@@ -1016,7 +832,10 @@ static void TsConformalCoverageFunction(DataChunk &args, ExpressionState &state,
         AnofoxError error;
         double coverage_result;
         bool success = anofox_ts_conformal_coverage(
-            actuals.data(), lower.data(), upper.data(), actuals.size(),
+            actuals.data(), actuals_validity.empty() ? nullptr : actuals_validity.data(),
+            lower.data(), lower_validity.empty() ? nullptr : lower_validity.data(),
+            upper.data(), upper_validity.empty() ? nullptr : upper_validity.data(),
+            actuals.size(),
             &coverage_result, &error
         );
 
@@ -1088,8 +907,10 @@ static void TsConformalEvaluateFunction(DataChunk &args, ExpressionState &state,
     auto &alpha_vec = args.data[3];
     idx_t count = args.size();
 
-    UnifiedVectorFormat alpha_data;
-    alpha_vec.ToUnifiedFormat(count, alpha_data);
+    ListDoubleReader actuals_reader(actuals_vec, count);
+    ListDoubleReader lower_reader(lower_vec, count);
+    ListDoubleReader upper_reader(upper_vec, count);
+    ScalarArgReader<double> alpha_reader(alpha_vec, count);
 
     // Result struct fields
     auto &struct_entries = StructVector::GetEntries(result);
@@ -1100,21 +921,18 @@ static void TsConformalEvaluateFunction(DataChunk &args, ExpressionState &state,
     auto &out_n_obs_vec = *struct_entries[4];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        auto alpha_idx = alpha_data.sel->get_index(row_idx);
-
-        if (FlatVector::IsNull(actuals_vec, row_idx) ||
-            FlatVector::IsNull(lower_vec, row_idx) ||
-            FlatVector::IsNull(upper_vec, row_idx) ||
-            !alpha_data.validity.RowIsValid(alpha_idx)) {
+        if (actuals_reader.IsNull(row_idx) || lower_reader.IsNull(row_idx) ||
+            upper_reader.IsNull(row_idx) || alpha_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> actuals, lower, upper;
-        ExtractListAsDouble(actuals_vec, row_idx, actuals);
-        ExtractListAsDouble(lower_vec, row_idx, lower);
-        ExtractListAsDouble(upper_vec, row_idx, upper);
-        double alpha = UnifiedVectorFormat::GetData<double>(alpha_data)[alpha_idx];
+        vector<uint64_t> actuals_validity, lower_validity, upper_validity;
+        actuals_reader.Read(row_idx, actuals, actuals_validity);
+        lower_reader.Read(row_idx, lower, lower_validity);
+        upper_reader.Read(row_idx, upper, upper_validity);
+        double alpha = alpha_reader.Get(row_idx);
 
         if (actuals.size() != lower.size() || actuals.size() != upper.size()) {
             FlatVector::SetNull(result, row_idx, true);
@@ -1124,7 +942,10 @@ static void TsConformalEvaluateFunction(DataChunk &args, ExpressionState &state,
         ConformalEvaluationFFI eval = {};
         AnofoxError error;
         bool success = anofox_ts_conformal_evaluate(
-            actuals.data(), lower.data(), upper.data(), actuals.size(),
+            actuals.data(), actuals_validity.empty() ? nullptr : actuals_validity.data(),
+            lower.data(), lower_validity.empty() ? nullptr : lower_validity.data(),
+            upper.data(), upper_validity.empty() ? nullptr : upper_validity.data(),
+            actuals.size(),
             alpha, &eval, &error
         );
 
@@ -1211,15 +1032,19 @@ static void TsMeanIntervalWidthFunction(DataChunk &args, ExpressionState &state,
     result.SetVectorType(VectorType::FLAT_VECTOR);
     auto result_data = FlatVector::GetData<double>(result);
 
+    ListDoubleReader lower_reader(lower_vec, count);
+    ListDoubleReader upper_reader(upper_vec, count);
+
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(lower_vec, row_idx) || FlatVector::IsNull(upper_vec, row_idx)) {
+        if (lower_reader.IsNull(row_idx) || upper_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> lower, upper;
-        ExtractListAsDouble(lower_vec, row_idx, lower);
-        ExtractListAsDouble(upper_vec, row_idx, upper);
+        vector<uint64_t> lower_validity, upper_validity;
+        lower_reader.Read(row_idx, lower, lower_validity);
+        upper_reader.Read(row_idx, upper, upper_validity);
 
         if (lower.size() != upper.size()) {
             FlatVector::SetNull(result, row_idx, true);
@@ -1229,7 +1054,9 @@ static void TsMeanIntervalWidthFunction(DataChunk &args, ExpressionState &state,
         AnofoxError error;
         double miw_result;
         bool success = anofox_ts_mean_interval_width(
-            lower.data(), upper.data(), lower.size(),
+            lower.data(), lower_validity.empty() ? nullptr : lower_validity.data(),
+            upper.data(), upper_validity.empty() ? nullptr : upper_validity.data(),
+            lower.size(),
             &miw_result, &error
         );
 
@@ -1303,9 +1130,11 @@ static void TsConformalPredictPerStepFunction(DataChunk &args, ExpressionState &
     auto &horizon_vec = args.data[4];
     idx_t count = args.size();
 
-    UnifiedVectorFormat alpha_data, horizon_data;
-    alpha_vec.ToUnifiedFormat(count, alpha_data);
-    horizon_vec.ToUnifiedFormat(count, horizon_data);
+    ListDoubleReader fold_fcst_reader(fold_fcst_vec, count);
+    ListDoubleReader fold_act_reader(fold_act_vec, count);
+    ListDoubleReader point_reader(point_vec, count);
+    ScalarArgReader<double> alpha_reader(alpha_vec, count);
+    ScalarArgReader<int32_t> horizon_reader(horizon_vec, count);
 
     auto &struct_entries = StructVector::GetEntries(result);
     auto &point_out = *struct_entries[0];
@@ -1315,73 +1144,54 @@ static void TsConformalPredictPerStepFunction(DataChunk &args, ExpressionState &
     auto &coverage_out = *struct_entries[4];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        auto alpha_idx = alpha_data.sel->get_index(row_idx);
-        auto hz_idx = horizon_data.sel->get_index(row_idx);
-
-        if (FlatVector::IsNull(fold_fcst_vec, row_idx) ||
-            FlatVector::IsNull(fold_act_vec, row_idx) ||
-            FlatVector::IsNull(point_vec, row_idx) ||
-            !alpha_data.validity.RowIsValid(alpha_idx) ||
-            !horizon_data.validity.RowIsValid(hz_idx)) {
+        if (fold_fcst_reader.IsNull(row_idx) || fold_act_reader.IsNull(row_idx) ||
+            point_reader.IsNull(row_idx) || alpha_reader.IsNull(row_idx) ||
+            horizon_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> fold_forecasts, fold_actuals, point_forecasts;
-        ExtractListAsDouble(fold_fcst_vec, row_idx, fold_forecasts);
-        ExtractListAsDouble(fold_act_vec, row_idx, fold_actuals);
-        ExtractListAsDouble(point_vec, row_idx, point_forecasts);
-        double alpha = UnifiedVectorFormat::GetData<double>(alpha_data)[alpha_idx];
-        int32_t horizon = UnifiedVectorFormat::GetData<int32_t>(horizon_data)[hz_idx];
-
-        if (horizon <= 0 || fold_forecasts.empty() || fold_actuals.empty()) {
-            FlatVector::SetNull(result, row_idx, true);
-            continue;
-        }
-
-        size_t n_folds = fold_forecasts.size() / static_cast<size_t>(horizon);
-        if (n_folds < 2 || fold_forecasts.size() != fold_actuals.size()) {
-            FlatVector::SetNull(result, row_idx, true);
-            continue;
-        }
+        vector<uint64_t> fold_forecasts_validity, fold_actuals_validity, point_validity;
+        fold_fcst_reader.Read(row_idx, fold_forecasts, fold_forecasts_validity);
+        fold_act_reader.Read(row_idx, fold_actuals, fold_actuals_validity);
+        point_reader.Read(row_idx, point_forecasts, point_validity);
+        double alpha = alpha_reader.Get(row_idx);
+        int32_t horizon_raw = horizon_reader.Get(row_idx);
+        // Rust owns the full validation (horizon > 0, equal lengths, length %
+        // horizon == 0 — D-10); a non-positive horizon is folded into 0 here
+        // so it hits the same "horizon must be positive" error uniformly.
+        size_t horizon = horizon_raw > 0 ? static_cast<size_t>(horizon_raw) : 0;
 
         ConformalPerStepResultFFI ps_result = {};
         AnofoxError error;
         bool success = anofox_ts_conformal_predict_per_step(
             fold_forecasts.data(),
+            fold_forecasts_validity.empty() ? nullptr : fold_forecasts_validity.data(),
+            fold_forecasts.size(),
             fold_actuals.data(),
-            n_folds,
-            static_cast<size_t>(horizon),
+            fold_actuals_validity.empty() ? nullptr : fold_actuals_validity.data(),
+            fold_actuals.size(),
+            horizon,
             point_forecasts.data(),
+            point_validity.empty() ? nullptr : point_validity.data(),
             point_forecasts.size(),
             alpha,
             &ps_result, &error
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_conformal_predict_per_step: %s", error.message);
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        // Write results
-        auto write_list = [](Vector &list_vec, idx_t row, const double *data, size_t n) {
-            auto offset = ListVector::GetListSize(list_vec);
-            auto &child = ListVector::GetEntry(list_vec);
-            ListVector::Reserve(list_vec, offset + n);
-            auto child_data = FlatVector::GetData<double>(child);
-            for (idx_t i = 0; i < n; i++) {
-                child_data[offset + i] = data[i];
-            }
-            ListVector::SetListSize(list_vec, offset + n);
-            auto list_data = ListVector::GetData(list_vec);
-            list_data[row].offset = offset;
-            list_data[row].length = n;
-        };
-
-        write_list(point_out, row_idx, ps_result.point, ps_result.n_forecasts);
-        write_list(lower_out, row_idx, ps_result.lower, ps_result.n_forecasts);
-        write_list(upper_out, row_idx, ps_result.upper, ps_result.n_forecasts);
-        write_list(hw_out, row_idx, ps_result.half_widths, ps_result.n_forecasts);
+        WriteDoubleListNanAsNull(point_out, row_idx, ps_result.point, ps_result.n_forecasts);
+        WriteDoubleListNanAsNull(lower_out, row_idx, ps_result.lower, ps_result.n_forecasts);
+        WriteDoubleListNanAsNull(upper_out, row_idx, ps_result.upper, ps_result.n_forecasts);
+        WriteDoubleList(hw_out, row_idx, ps_result.half_widths, ps_result.n_forecasts);
         FlatVector::GetData<double>(coverage_out)[row_idx] = ps_result.coverage;
 
         anofox_free_conformal_per_step_result(&ps_result);
