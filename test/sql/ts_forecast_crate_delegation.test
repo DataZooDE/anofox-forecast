@@ -1,0 +1,214 @@
+# name: test/sql/ts_forecast_crate_delegation.test
+# description: Natively-run SQL value assertions for FCST-01/02/03/04 (D-01..D-04,
+#              D-08/D-09) against the R AirPassengers fixture. Runs WITHOUT `require
+#              json` so it exercises the built extension directly (extended by
+#              plans 10-03/10-04 for FCST-05..08).
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup: AirPassengers (144 monthly values, validation/reference/fixtures/r_forecast/air_passengers.json)
+#######################################
+
+statement ok
+CREATE TABLE air AS
+SELECT
+    'A' AS id,
+    ('1949-01-01'::DATE + (i || ' months')::INTERVAL)::DATE AS ds,
+    y::DOUBLE AS y
+FROM (
+    SELECT unnest(range(144)) AS i,
+           unnest([112, 118, 132, 129, 121, 135, 148, 148, 136, 119, 104, 118,
+                   115, 126, 141, 135, 125, 149, 170, 170, 158, 133, 114, 140,
+                   145, 150, 178, 163, 172, 178, 199, 199, 184, 162, 146, 166,
+                   171, 180, 193, 181, 183, 218, 230, 242, 209, 191, 172, 194,
+                   196, 196, 236, 235, 229, 243, 264, 272, 237, 211, 180, 201,
+                   204, 188, 235, 227, 234, 264, 302, 293, 259, 229, 203, 229,
+                   242, 233, 267, 269, 270, 315, 364, 347, 312, 274, 237, 278,
+                   284, 277, 317, 313, 318, 374, 413, 405, 355, 306, 271, 306,
+                   315, 301, 356, 348, 355, 422, 465, 467, 404, 347, 305, 336,
+                   340, 318, 362, 348, 363, 435, 491, 505, 404, 359, 310, 337,
+                   360, 342, 406, 396, 420, 472, 548, 559, 463, 407, 362, 405,
+                   417, 391, 419, 461, 472, 535, 622, 606, 508, 461, 390, 432]) AS y
+);
+
+#######################################
+# FCST-01: Naive 95% h=1 half-width matches R naive() — not the old ~234
+# fabricated half-width. The crate's own z comes from a private
+# Abramowitz & Stegun 26.2.23 approximation (documented in
+# crates/anofox-fcst-core/tests/forecast_intervals.rs /
+# crates/anofox-fcst-ffi/tests/core_ffi_parity.rs::naive_intervals_match_r_naive_through_ffi,
+# plan 10-01), so this is asserted at 0.1 absolute — not exact R-bit parity —
+# while being two orders of magnitude tighter than the old fabrication would
+# allow (234 - 66 = 168 >> 0.1).
+#######################################
+
+query I
+SELECT abs((yhat_upper - yhat) - 66.07118560930098) < 0.1
+FROM ts_forecast_by('air', id, ds, y, 'Naive', 12, '1mo', MAP{'confidence_level': '0.95'})
+WHERE forecast_step = 1;
+----
+true
+
+query I
+SELECT (yhat_upper - yhat) < 100
+FROM ts_forecast_by('air', id, ds, y, 'Naive', 12, '1mo', MAP{'confidence_level': '0.95'})
+WHERE forecast_step = 1;
+----
+true
+
+#######################################
+# FCST-02: confidence_level -> quantile comes exclusively from the crate's own
+# quantile source (no step-table). The 0.80/0.95 half-width ratio is asserted
+# against R's exact-normal-CDF ratio at the same 1e-3 relative tolerance as
+# forecast_intervals.rs::z_is_exact_inverse_normal (same crate z-approximation
+# root cause, not a step-table regression).
+#######################################
+
+query I
+SELECT abs(
+    (SELECT (yhat_upper - yhat) FROM ts_forecast_by('air', id, ds, y, 'Naive', 12, '1mo', MAP{'confidence_level': '0.80'}) WHERE forecast_step = 1)
+    /
+    (SELECT (yhat_upper - yhat) FROM ts_forecast_by('air', id, ds, y, 'Naive', 12, '1mo', MAP{'confidence_level': '0.95'}) WHERE forecast_step = 1)
+    - 0.6538648544837132
+) < 1e-3;
+----
+true
+
+#######################################
+# FCST-03: MSE no longer identical across model families (was universally
+# 2090.28 via the old SES(alpha=0.3) stand-in fitted/residual formula).
+#
+# Deviation (verified, non-regression, same class as 10-01's documented
+# ADIDA/IMAPA-vs-fabricated-width and SES-vs-2090.28 coincidences): on this
+# specific AirPassengers series, Theta's and CrostonClassic's MSE are
+# bit-identical (confirmed by direct residual-array inspection, not just
+# rounded MSE) because both are genuinely SES(alpha=0.1)-based in-sample —
+# `anofox-forecast`'s `Theta::fit` computes in-sample fitted/residuals from
+# the plain SES level component only (the theta-drift term `b` is applied
+# to the h-step-ahead point forecast, never to in-sample fitted), and
+# Croston's default alpha is also 0.1; on AirPassengers (strictly positive,
+# no zero-demand gaps) Croston's demand-interval component degenerates to
+# interval=1 always, making it plain SES(0.1) too. This is a real,
+# crate-internal design coincidence for THIS series, not a dispatch bug —
+# so 4 distinct (not 5) is the correct expectation here; the stronger,
+# unconditional claim (no mse within 0.01 of the OLD universal 2090.28
+# fabrication) is asserted separately below and holds for all 5 models.
+#######################################
+
+query I
+SELECT count(DISTINCT round(mse, 6)) FROM (
+    SELECT (_ts_forecast(
+        [112, 118, 132, 129, 121, 135, 148, 148, 136, 119, 104, 118,
+         115, 126, 141, 135, 125, 149, 170, 170, 158, 133, 114, 140,
+         145, 150, 178, 163, 172, 178, 199, 199, 184, 162, 146, 166,
+         171, 180, 193, 181, 183, 218, 230, 242, 209, 191, 172, 194,
+         196, 196, 236, 235, 229, 243, 264, 272, 237, 211, 180, 201,
+         204, 188, 235, 227, 234, 264, 302, 293, 259, 229, 203, 229,
+         242, 233, 267, 269, 270, 315, 364, 347, 312, 274, 237, 278,
+         284, 277, 317, 313, 318, 374, 413, 405, 355, 306, 271, 306,
+         315, 301, 356, 348, 355, 422, 465, 467, 404, 347, 305, 336,
+         340, 318, 362, 348, 363, 435, 491, 505, 404, 359, 310, 337,
+         360, 342, 406, 396, 420, 472, 548, 559, 463, 407, 362, 405,
+         417, 391, 419, 461, 472, 535, 622, 606, 508, 461, 390, 432],
+        12, m
+    )).mse AS mse
+    FROM (VALUES ('SES'), ('Holt'), ('AutoARIMA'), ('Theta'), ('CrostonClassic')) AS t(m)
+);
+----
+4
+
+# Deviation (verified, matches 10-01's documented forecast_intervals.rs
+# `mse_is_crate_residual_mse` exception): SES's OWN real residual MSE on this
+# series is ~2090.284, coincidentally within 0.01 of the OLD universal
+# SES(alpha=0.3)-stand-in constant 2090.28 that every model used to produce —
+# because 'SES' genuinely IS SimpleExponentialSmoothing::new(0.3), 2090.28
+# was never a fabrication unique to SES. Excluded here with the same
+# justification; Holt/AutoARIMA/Theta/CrostonClassic are asserted against
+# the unconditional claim.
+query I
+SELECT count(*) FROM (
+    SELECT (_ts_forecast(
+        [112, 118, 132, 129, 121, 135, 148, 148, 136, 119, 104, 118,
+         115, 126, 141, 135, 125, 149, 170, 170, 158, 133, 114, 140,
+         145, 150, 178, 163, 172, 178, 199, 199, 184, 162, 146, 166,
+         171, 180, 193, 181, 183, 218, 230, 242, 209, 191, 172, 194,
+         196, 196, 236, 235, 229, 243, 264, 272, 237, 211, 180, 201,
+         204, 188, 235, 227, 234, 264, 302, 293, 259, 229, 203, 229,
+         242, 233, 267, 269, 270, 315, 364, 347, 312, 274, 237, 278,
+         284, 277, 317, 313, 318, 374, 413, 405, 355, 306, 271, 306,
+         315, 301, 356, 348, 355, 422, 465, 467, 404, 347, 305, 336,
+         340, 318, 362, 348, 363, 435, 491, 505, 404, 359, 310, 337,
+         360, 342, 406, 396, 420, 472, 548, 559, 463, 407, 362, 405,
+         417, 391, 419, 461, 472, 535, 622, 606, 508, 461, 390, 432],
+        12, m
+    )).mse AS mse
+    FROM (VALUES ('Holt'), ('AutoARIMA'), ('Theta'), ('CrostonClassic')) AS t(m)
+)
+WHERE abs(mse - 2090.28) < 0.01;
+----
+0
+
+#######################################
+# FCST-04: ARIMA(0,1,1)(0,1,1)[12] through ts_forecast_by must match R's
+# Arima(order=c(0,1,1), seasonal=c(0,1,1)) within 1% per-step (fixture
+# tolerance.model_point_rel), report the exact seasonal model_name (d+D=2,
+# so the crate never fits a constant), and every ARIMA misuse / malformed
+# option string must be a clear SQL error.
+#######################################
+
+statement ok
+CREATE TABLE r_airline (forecast_step INTEGER, r_point DOUBLE);
+
+statement ok
+INSERT INTO r_airline VALUES
+    (1, 447.053211074412), (2, 421.877427957911), (3, 453.52620219413),
+    (4, 489.900824318081), (5, 502.183491675), (6, 564.224620230391),
+    (7, 649.795269734021), (8, 636.71464217539), (9, 538.920898406675),
+    (10, 491.06721997947), (11, 422.824267320501), (12, 464.752553525088);
+
+query I
+SELECT count(*) FROM (
+    SELECT f.forecast_step, f.yhat, r.r_point
+    FROM ts_forecast_by(
+        'air', id, ds, y, 'ARIMA', 12, '1mo',
+        MAP{'arima_order': '[0,1,1]', 'seasonal_order': '[0,1,1]', 'seasonal_period': '12'}
+    ) AS f
+    JOIN r_airline AS r USING (forecast_step)
+)
+WHERE abs(yhat - r_point) / r_point > 0.01;
+----
+0
+
+query I
+SELECT DISTINCT model_name FROM ts_forecast_by(
+    'air', id, ds, y, 'ARIMA', 12, '1mo',
+    MAP{'arima_order': '[0,1,1]', 'seasonal_order': '[0,1,1]', 'seasonal_period': '12'}
+);
+----
+ARIMA(0,1,1)(0,1,1)[12]
+
+# ARIMA without arima_order -> error naming arima_order (and AutoARIMA as the alternative)
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'ARIMA', 12, '1mo', MAP{});
+----
+arima_order
+
+# Malformed arima_order (wrong element count)
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'ARIMA', 12, '1mo', MAP{'arima_order': '[0,1]'});
+----
+arima_order
+
+# arima_order on a non-ARIMA model -> InvalidParameter naming method='ARIMA'
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'AutoARIMA', 12, '1mo', MAP{'arima_order': '[1,1,1]'});
+----
+only valid when method='ARIMA'
+
+# Unparsable seasonal_periods entry on MSTL -> error, not silently dropped
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'MSTL', 12, '1mo', MAP{'seasonal_periods': '[12, abc]'});
+----
+seasonal_periods

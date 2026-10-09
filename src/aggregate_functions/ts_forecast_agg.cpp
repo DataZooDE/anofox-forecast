@@ -18,9 +18,14 @@ struct TsForecastAggStateData {
     string ets_model;  // ETS model specification (e.g., "AAA", "MNM", "AAdA")
     int32_t horizon;
     double confidence_level;
+    // ARIMA order params + seasonal_period (D-08/D-09, plan 10-02)
+    string arima_order;
+    string seasonal_order;
+    int32_t seasonal_period;
     bool initialized;
 
-    TsForecastAggStateData() : horizon(12), confidence_level(0.90), initialized(false) {}
+    TsForecastAggStateData()
+        : horizon(12), confidence_level(0.90), seasonal_period(0), initialized(false) {}
 };
 
 // Trivially constructible state wrapper (just a pointer)
@@ -295,6 +300,20 @@ static void TsForecastAggUpdate(Vector inputs[], AggregateInputData &aggr_input,
             // Extract 'model' from params MAP for ETS specification (e.g., "AAA", "MNM")
             state.data->ets_model = GetParamFromMap(params_vec, count, i, "model", "");
 
+            // ARIMA order params + seasonal_period (D-08/D-09, plan 10-02)
+            state.data->arima_order = GetParamFromMap(params_vec, count, i, "arima_order", "");
+            state.data->seasonal_order = GetParamFromMap(params_vec, count, i, "seasonal_order", "");
+            {
+                string sp_str = GetParamFromMap(params_vec, count, i, "seasonal_period", "");
+                if (!sp_str.empty()) {
+                    try {
+                        state.data->seasonal_period = std::stoi(sp_str);
+                    } catch (...) {
+                        state.data->seasonal_period = 0;
+                    }
+                }
+            }
+
             state.data->initialized = true;
         }
 
@@ -365,6 +384,22 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
         opts.horizon = data.horizon;
         opts.confidence_level = data.confidence_level;
         opts.include_fitted = true;
+        // ARIMA order params + seasonal_period (D-08/D-09, plan 10-02).
+        // seasonal_period must be explicit (never auto-detected) for ARIMA's
+        // own seasonal_order validation to engage through this entry point.
+        opts.seasonal_period = data.seasonal_period;
+        opts.auto_detect_seasonality = (data.seasonal_period == 0);
+        if (!data.arima_order.empty()) {
+            size_t arima_order_len = std::min(data.arima_order.size(), sizeof(opts.arima_order_str) - 1);
+            memcpy(opts.arima_order_str, data.arima_order.c_str(), arima_order_len);
+            opts.arima_order_str[arima_order_len] = '\0';
+        }
+        if (!data.seasonal_order.empty()) {
+            size_t seasonal_order_len =
+                std::min(data.seasonal_order.size(), sizeof(opts.seasonal_order_str) - 1);
+            memcpy(opts.seasonal_order_str, data.seasonal_order.c_str(), seasonal_order_len);
+            opts.seasonal_order_str[seasonal_order_len] = '\0';
+        }
 
         ForecastResult fcst_result;
         memset(&fcst_result, 0, sizeof(fcst_result));
@@ -470,7 +505,10 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
                    fcst_result.n_forecasts * sizeof(double));
         }
 
-        // Set lower_bound list
+        // Set lower_bound list. lower_bounds is null when the model has no
+        // native prediction intervals (D-02) — append n_forecasts entries
+        // marked invalid (SQL NULL) instead of memcpy-ing from a null
+        // pointer.
         {
             auto list_data = FlatVector::GetData<list_entry_t>(lower_list);
             auto &list_child = ListVector::GetEntry(lower_list);
@@ -483,11 +521,19 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
             ListVector::SetListSize(lower_list, current_size + fcst_result.n_forecasts);
 
             auto child_data = FlatVector::GetData<double>(list_child);
-            memcpy(child_data + current_size, fcst_result.lower_bounds,
-                   fcst_result.n_forecasts * sizeof(double));
+            if (fcst_result.lower_bounds) {
+                memcpy(child_data + current_size, fcst_result.lower_bounds,
+                       fcst_result.n_forecasts * sizeof(double));
+            } else {
+                auto &child_validity = FlatVector::Validity(list_child);
+                for (size_t j = 0; j < fcst_result.n_forecasts; j++) {
+                    child_data[current_size + j] = 0.0;
+                    child_validity.SetInvalid(current_size + j);
+                }
+            }
         }
 
-        // Set upper_<suffix> list
+        // Set upper_<suffix> list. Same null-safety as lower_bound above.
         {
             auto list_data = FlatVector::GetData<list_entry_t>(upper_list);
             auto &list_child = ListVector::GetEntry(upper_list);
@@ -500,15 +546,25 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
             ListVector::SetListSize(upper_list, current_size + fcst_result.n_forecasts);
 
             auto child_data = FlatVector::GetData<double>(list_child);
-            memcpy(child_data + current_size, fcst_result.upper_bounds,
-                   fcst_result.n_forecasts * sizeof(double));
+            if (fcst_result.upper_bounds) {
+                memcpy(child_data + current_size, fcst_result.upper_bounds,
+                       fcst_result.n_forecasts * sizeof(double));
+            } else {
+                auto &child_validity = FlatVector::Validity(list_child);
+                for (size_t j = 0; j < fcst_result.n_forecasts; j++) {
+                    child_data[current_size + j] = 0.0;
+                    child_validity.SetInvalid(current_size + j);
+                }
+            }
         }
 
         // Set model_name
         FlatVector::GetData<string_t>(model_vec)[row] =
             StringVector::AddString(model_vec, fcst_result.model_name);
 
-        // Set fitted values list
+        // Set fitted values list. NaN entries (crate warmup rows per D-11, or
+        // leading/trailing trimmed positions per D-12) mark SQL NULL rather
+        // than surfacing as a literal NaN double.
         {
             auto list_data = FlatVector::GetData<list_entry_t>(fitted_list);
             auto &list_child = ListVector::GetEntry(fitted_list);
@@ -524,6 +580,12 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
             if (fcst_result.fitted_values && fcst_result.n_fitted > 0) {
                 memcpy(child_data + current_size, fcst_result.fitted_values,
                        fcst_result.n_fitted * sizeof(double));
+                auto &child_validity = FlatVector::Validity(list_child);
+                for (size_t j = 0; j < fcst_result.n_fitted; j++) {
+                    if (std::isnan(child_data[current_size + j])) {
+                        child_validity.SetInvalid(current_size + j);
+                    }
+                }
             }
         }
 

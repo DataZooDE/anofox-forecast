@@ -54,6 +54,9 @@ struct TsForecastScalarBindData : public FunctionData {
     // AutoEnsemble params (Phase 4)
     int64_t ensemble_top_k = 0;
     string ensemble_method = "";
+    // ARIMA order params (D-08/D-09, plan 10-02)
+    string arima_order = "";
+    string seasonal_order = "";
 
     DateColumnType date_col_type = DateColumnType::DATE;
 
@@ -77,6 +80,8 @@ struct TsForecastScalarBindData : public FunctionData {
         copy->kalman_model = kalman_model;
         copy->ensemble_top_k = ensemble_top_k;
         copy->ensemble_method = ensemble_method;
+        copy->arima_order = arima_order;
+        copy->seasonal_order = seasonal_order;
         copy->date_col_type = date_col_type;
         return std::move(copy);
     }
@@ -134,7 +139,8 @@ static void ValidateParams(const Value &params_value, const string &method) {
         "model", "seasonal_period", "seasonal_periods", "confidence_level", "window", "model_pool",
         "laplace_variant", "laplace_seasonal_batch_init",
         "garch_p", "garch_q", "kalman_model",
-        "top_k", "combination_method"   // Phase 4: AutoEnsemble params
+        "top_k", "combination_method",   // Phase 4: AutoEnsemble params
+        "arima_order", "seasonal_order"  // D-08/D-09, plan 10-02
     };
 
     if (params_value.IsNull()) return;
@@ -165,7 +171,7 @@ static void ValidateParams(const Value &params_value, const string &method) {
             unknown_list += "'" + unknown_keys[i] + "'";
         }
         throw InvalidInputException(
-            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q, kalman_model, top_k, combination_method",
+            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q, kalman_model, top_k, combination_method, arima_order, seasonal_order",
             unknown_list);
     }
 }
@@ -437,6 +443,8 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
         string kalman_model = bind_data.kalman_model;
         int64_t ensemble_top_k = bind_data.ensemble_top_k;
         string ensemble_method = bind_data.ensemble_method;
+        string arima_order = bind_data.arima_order;
+        string seasonal_order = bind_data.seasonal_order;
 
         auto p_idx = params_data.sel->get_index(row_idx);
         if (params_data.validity.RowIsValid(p_idx)) {
@@ -456,6 +464,8 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
             kalman_model = ParseStringParam(params_val, "kalman_model", "");
             ensemble_top_k = ParseInt64Param(params_val, "top_k", 0);
             ensemble_method = ParseStringParam(params_val, "combination_method", "");
+            arima_order = ParseStringParam(params_val, "arima_order", "");
+            seasonal_order = ParseStringParam(params_val, "seasonal_order", "");
         }
 
         // --- Build ForecastOptions ---
@@ -502,6 +512,17 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
             strncpy(opts.ensemble_method, ensemble_method.c_str(),
                     sizeof(opts.ensemble_method) - 1);
             opts.ensemble_method[sizeof(opts.ensemble_method) - 1] = '\0';
+        }
+        // ARIMA order params (D-08/D-09, plan 10-02)
+        if (!arima_order.empty()) {
+            strncpy(opts.arima_order_str, arima_order.c_str(),
+                    sizeof(opts.arima_order_str) - 1);
+            opts.arima_order_str[sizeof(opts.arima_order_str) - 1] = '\0';
+        }
+        if (!seasonal_order.empty()) {
+            strncpy(opts.seasonal_order_str, seasonal_order.c_str(),
+                    sizeof(opts.seasonal_order_str) - 1);
+            opts.seasonal_order_str[sizeof(opts.seasonal_order_str) - 1] = '\0';
         }
 
         // --- Call Rust FFI ---
