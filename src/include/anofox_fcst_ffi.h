@@ -1217,6 +1217,20 @@ typedef struct ExogenousRegressor {
      * Number of future values (must match horizon)
      */
     size_t n_future;
+    /**
+     * Validity bitmask for `values` (D-12, FCST-08). `null` = every
+     * historical value is valid; otherwise `ceil(n_values / 64)` words,
+     * where bit `i` (`word i/64`, bit `i % 64`) set means `values[i]` is
+     * valid. Added in plan 10-04 Task 1; read by the FFI boundary starting
+     * in Task 2 — until then every caller must pass `null` here.
+     */
+    const uint64_t *validity;
+    /**
+     * Validity bitmask for `future_values`, same encoding as `validity`
+     * but sized `ceil(n_future / 64)` words. `null` = every future value
+     * is valid.
+     */
+    const uint64_t *future_validity;
 } ExogenousRegressor;
 
 /**

@@ -36,7 +36,11 @@ use anofox_forecast::models::MFLES;
 use anofox_forecast::prelude::Forecaster;
 use chrono::{Duration, TimeZone, Utc};
 
-use anofox_fcst_ffi::types::{AnofoxError, ForecastOptions as FfiForecastOptions, ForecastResult};
+use anofox_fcst_ffi::types::{
+    AnofoxError, ExogenousData as FfiExogenousData, ExogenousRegressor as FfiExogenousRegressor,
+    ForecastOptions as FfiForecastOptions, ForecastOptionsExog as FfiForecastOptionsExog,
+    ForecastResult,
+};
 
 // Defined in anofox_fcst_ffi/src/lib.rs
 extern "C" {
@@ -45,6 +49,17 @@ extern "C" {
         validity: *const u64,
         length: usize,
         options: *const FfiForecastOptions,
+        out_result: *mut ForecastResult,
+        out_error: *mut AnofoxError,
+    ) -> bool;
+
+    // D-10/FCST-05 (plan 10-04 Task 1): exogenous-regressor forecast entry
+    // point, used by `exog_autoarima_parity_through_ffi` below.
+    fn anofox_ts_forecast_exog(
+        values: *const c_double,
+        validity: *const u64,
+        length: usize,
+        options: *const FfiForecastOptionsExog,
         out_result: *mut ForecastResult,
         out_error: *mut AnofoxError,
     ) -> bool;
@@ -1210,6 +1225,145 @@ fn parity_laplace() {
     assert_f64_eq("Laplace.upper", &lib_upper, &ffi_upper);
     assert_f64_eq("Laplace.fitted", &lib_fitted, &ffi_fitted);
     assert_f64_eq("Laplace.residuals", &lib_residuals, &ffi_residuals);
+}
+
+// ── Exogenous regressors (D-10/FCST-05, plan 10-04) ─────────────────────
+
+/// `anofox_ts_forecast_exog` with one regressor (`validity`/`future_validity`
+/// both null — Task 1 scope, read starting Task 2) for `AutoARIMA` is
+/// bit-identical to the crate `AutoARIMA` fitted directly on a `TimeSeries`
+/// carrying the same regressor via `CalendarAnnotations` and predicted with
+/// `predict_with_exog_intervals` — proving the FFI/C-core round trip adds no
+/// discrepancy on top of the `forecast_exog.rs` `autoarima_exog_runs_order_search`
+/// coverage of `forecast_with_exog` itself.
+#[test]
+fn exog_autoarima_parity_through_ffi() {
+    use anofox_forecast::core::CalendarAnnotations;
+    use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig};
+    use std::collections::HashMap;
+
+    let n = 120usize;
+    let horizon = 6usize;
+    let total = n + horizon;
+
+    let x1: Vec<f64> = (0..total)
+        .map(|i| (i as f64 * 0.37).sin() + i as f64 * 0.01)
+        .collect();
+    let mut y = Vec::with_capacity(n);
+    let mut ar = 0.0_f64;
+    let ar_coef = 0.5_f64;
+    for (i, &x1_val) in x1.iter().take(n).enumerate() {
+        let noise = (((i as u64 + 1).wrapping_mul(97) % 1000) as f64 - 500.0) / 500.0;
+        ar = ar_coef * ar + noise;
+        y.push(50.0 + 3.0 * x1_val + ar);
+    }
+    let (x1_hist, x1_future) = (x1[..n].to_vec(), x1[n..].to_vec());
+
+    // ── Through the FFI ──────────────────────────────────────────────
+    let regressor = FfiExogenousRegressor {
+        values: x1_hist.as_ptr(),
+        n_values: x1_hist.len(),
+        future_values: x1_future.as_ptr(),
+        n_future: x1_future.len(),
+        validity: std::ptr::null(),
+        future_validity: std::ptr::null(),
+    };
+    let exog_data = FfiExogenousData {
+        regressors: &regressor as *const FfiExogenousRegressor,
+        n_regressors: 1,
+    };
+    let mut opts = FfiForecastOptionsExog::default();
+    write_c_field(&mut opts.model, "AutoARIMA");
+    opts.horizon = horizon as i32;
+    opts.auto_detect_seasonality = false;
+    opts.seasonal_period = 0;
+    opts.confidence_level = 0.95;
+    opts.exog = &exog_data as *const FfiExogenousData;
+
+    let n_words = y.len().div_ceil(64);
+    let validity: Vec<u64> = vec![u64::MAX; n_words];
+    let mut result = ForecastResult::default();
+    let mut error = AnofoxError::default();
+    let ok = unsafe {
+        anofox_ts_forecast_exog(
+            y.as_ptr(),
+            validity.as_ptr(),
+            y.len(),
+            &opts as *const _,
+            &mut result as *mut _,
+            &mut error as *mut _,
+        )
+    };
+    assert!(ok, "anofox_ts_forecast_exog failed: {:?}", unsafe {
+        CStr::from_ptr(error.message.as_ptr())
+    });
+
+    let n_forecasts = result.n_forecasts;
+    let ffi_point =
+        unsafe { std::slice::from_raw_parts(result.point_forecasts, n_forecasts).to_vec() };
+    let ffi_lower = if result.lower_bounds.is_null() {
+        vec![]
+    } else {
+        unsafe { std::slice::from_raw_parts(result.lower_bounds, n_forecasts).to_vec() }
+    };
+    let ffi_upper = if result.upper_bounds.is_null() {
+        vec![]
+    } else {
+        unsafe { std::slice::from_raw_parts(result.upper_bounds, n_forecasts).to_vec() }
+    };
+    let model_name = unsafe { CStr::from_ptr(result.model_name.as_ptr()) }
+        .to_str()
+        .unwrap_or("")
+        .to_string();
+    unsafe {
+        anofox_free_forecast_result(&mut result as *mut _);
+    }
+
+    assert!(
+        model_name.ends_with(" with regressors"),
+        "model_name '{model_name}' should end with ' with regressors'"
+    );
+
+    // ── Direct crate fit/predict with the SAME regressor attached ───────
+    let ts_timestamps = {
+        let base = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        (0..n)
+            .map(|i| base + Duration::hours(i as i64))
+            .collect::<Vec<_>>()
+    };
+    let calendar = CalendarAnnotations::new().with_regressor("x000".to_string(), x1_hist.clone());
+    let mut ts = TimeSeries::univariate(ts_timestamps, y.clone()).expect("valid TimeSeries");
+    ts.set_calendar(calendar);
+
+    let mut direct_model = AutoARIMA::with_config(AutoARIMAConfig::default());
+    direct_model
+        .fit(&ts)
+        .expect("direct AutoARIMA fit with regressor should succeed");
+    let mut future_map = HashMap::new();
+    future_map.insert("x000".to_string(), x1_future.clone());
+    let direct_forecast = direct_model
+        .predict_with_exog_intervals(horizon, &future_map, 0.95)
+        .expect("direct AutoARIMA predict_with_exog_intervals should succeed");
+
+    let direct_point = direct_forecast.primary().to_vec();
+    let direct_lower = direct_forecast
+        .lower()
+        .and_then(|i| i.first())
+        .cloned()
+        .unwrap_or_default();
+    let direct_upper = direct_forecast
+        .upper()
+        .and_then(|i| i.first())
+        .cloned()
+        .unwrap_or_default();
+
+    assert_f64_eq("exog_autoarima_ffi.point", &ffi_point, &direct_point);
+    if direct_lower.len() == direct_point.len() {
+        assert_f64_eq("exog_autoarima_ffi.lower", &ffi_lower, &direct_lower);
+    }
+    if direct_upper.len() == direct_point.len() {
+        assert_f64_eq("exog_autoarima_ffi.upper", &ffi_upper, &direct_upper);
+    }
 }
 
 // ── Parameter grid tests ───────────────────────────────────────────────

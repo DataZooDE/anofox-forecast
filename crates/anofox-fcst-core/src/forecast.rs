@@ -5,7 +5,7 @@ use crate::imputation::fill_nulls_interpolate;
 use crate::seasonality::detect_seasonality;
 
 // Model types from anofox-forecast crate
-use anofox_forecast::core::TimeSeries;
+use anofox_forecast::core::{CalendarAnnotations, TimeSeries};
 use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig, ARIMA, SARIMA};
 use anofox_forecast::models::baseline::{
     SeasonalNaive as SeasonalNaiveModel, SeasonalWindowAverage as SeasonalWindowAverageModel,
@@ -24,6 +24,7 @@ use anofox_forecast::models::tbats::{AutoTBATS, TBATS as TBATSModel};
 use anofox_forecast::models::theta::{AutoTheta, DynamicTheta, OptimizedTheta, Theta};
 use anofox_forecast::models::MFLES;
 use anofox_forecast::prelude::Forecaster;
+use std::collections::HashMap;
 
 /// Forecast result.
 #[derive(Debug, Clone)]
@@ -1013,11 +1014,21 @@ pub fn forecast_with_exog(
         return forecast(values, &opts_without_exog);
     }
 
+    let level = options.confidence_level;
     let exog = aligned_exog.as_ref().expect("checked above");
     let mut result = match options.model {
-        ModelType::ARIMA | ModelType::AutoARIMA => {
-            forecast_arima_with_exog(&prep.values, extended_horizon, exog)
+        // D-10 (FCST-05, plan 10-04 Task 1): AutoARIMA runs the crate's OWN
+        // exog-aware order search (CalendarAnnotations attached to the
+        // TimeSeries + predict_with_exog_intervals) instead of the wrapper
+        // OLS-on-residuals hack below — the selected order is real, not
+        // guessed. Plain `ARIMA` (explicit order) and the other
+        // exog-capable models are generalised onto the same crate-native
+        // path in plan 10-04 Task 2; until then they keep using the wrapper
+        // OLS functions immediately below.
+        ModelType::AutoARIMA => {
+            forecast_autoarima_crate_exog(&prep.values, extended_horizon, period, level, exog)
         }
+        ModelType::ARIMA => forecast_arima_with_exog(&prep.values, extended_horizon, exog),
         ModelType::OptimizedTheta | ModelType::DynamicTheta | ModelType::AutoTheta => {
             forecast_theta_with_exog(&prep.values, extended_horizon, exog)
         }
@@ -1819,22 +1830,42 @@ fn forecast_auto_arima(
         .predict_with_intervals(horizon, level)
         .map_err(|e| ForecastError::ComputationError(format!("AutoARIMA predict failed: {}", e)))?;
 
-    // Get the selected order for model name
-    // The model_scores() contains sorted (best first) results
-    let model_name = if let Some(order) = model.selected_full_order() {
-        let name = if order.is_seasonal() {
+    let model_name = auto_arima_model_name(&model);
+
+    // Extract point forecasts (primary dimension)
+    let point = forecast.primary().to_vec();
+    let (lower, upper) = extract_bounds(&forecast, point.len());
+
+    Ok(ForecastOutput {
+        point,
+        lower,
+        upper,
+        fitted: model.fitted_values().map(|v| v.to_vec()),
+        residuals: model.residuals().map(|v| v.to_vec()),
+        model_name,
+        aic: None,
+        bic: None,
+        mse: None,
+    })
+}
+
+/// Format the selected order of a fitted `AutoARIMA` as `"AutoARIMA(p,d,q)"`
+/// or `"AutoARIMA(p,d,q)(P,D,Q)[s]"` (seasonal) — the single naming helper
+/// shared by the non-exog path ([`forecast_auto_arima`]) and the crate-exog
+/// path ([`forecast_autoarima_crate_exog`]) so the two can never diverge.
+fn auto_arima_model_name(model: &AutoARIMA) -> String {
+    if let Some(order) = model.selected_full_order() {
+        if order.is_seasonal() {
             format!(
                 "AutoARIMA({},{},{})({},{},{})[{}]",
                 order.p, order.d, order.q, order.cap_p, order.cap_d, order.cap_q, order.s
             )
         } else {
             format!("AutoARIMA({},{},{})", order.p, order.d, order.q)
-        };
-        name
+        }
     } else if let Some((p, d, q)) = model.selected_order() {
         format!("AutoARIMA({},{},{})", p, d, q)
     } else if let Some((order, _score)) = model.model_scores().first() {
-        // Fallback: use best model from scores
         if order.is_seasonal() {
             format!(
                 "AutoARIMA({},{},{})({},{},{})[{}]",
@@ -1845,9 +1876,67 @@ fn forecast_auto_arima(
         }
     } else {
         "AutoARIMA".to_string()
-    };
+    }
+}
 
-    // Extract point forecasts (primary dimension)
+/// Deterministic regressor name used when attaching aligned historical/
+/// future regressor columns to a crate `CalendarAnnotations`/future map
+/// (D-10): `"x000"`, `"x001"`, ... — the index order matches the caller's
+/// `ExogenousData.historical`/`.future` column order, so the i-th
+/// historical column and the i-th future column always share the same
+/// generated name.
+fn regressor_name(i: usize) -> String {
+    format!("x{i:03}")
+}
+
+/// AutoARIMA with the crate's OWN exogenous support (D-10, FCST-05): attach
+/// every aligned historical regressor to the TimeSeries via
+/// `CalendarAnnotations::with_regressor` + `set_calendar`, let `AutoARIMA`
+/// run its real order search WITH the regressors attached (not on
+/// OLS-regressed-out residuals), then predict with
+/// `predict_with_exog_intervals` using the same regressor names for the
+/// future map. `model_name` is the real selected order
+/// ([`auto_arima_model_name`]) with `" with regressors"` appended — never
+/// the `"ARIMAX"` stand-in the wrapper OLS path (`forecast_arima_with_exog`)
+/// used.
+fn forecast_autoarima_crate_exog(
+    values: &[f64],
+    horizon: usize,
+    period: usize,
+    level: f64,
+    exog: &ExogenousData,
+) -> Result<ForecastOutput> {
+    let mut ts = make_timeseries(values)?;
+
+    let mut calendar = CalendarAnnotations::new();
+    for (i, hist) in exog.historical.iter().enumerate() {
+        calendar = calendar.with_regressor(regressor_name(i), hist.clone());
+    }
+    ts.set_calendar(calendar);
+
+    let mut model = new_auto_arima(period);
+    model.fit(&ts).map_err(|e| {
+        ForecastError::ComputationError(format!("AutoARIMA (with regressors) fit failed: {}", e))
+    })?;
+
+    let future_map: HashMap<String, Vec<f64>> = exog
+        .future
+        .iter()
+        .enumerate()
+        .map(|(i, fut)| (regressor_name(i), fut.clone()))
+        .collect();
+
+    let forecast = model
+        .predict_with_exog_intervals(horizon, &future_map, level)
+        .map_err(|e| {
+            ForecastError::ComputationError(format!(
+                "AutoARIMA (with regressors) predict failed: {}",
+                e
+            ))
+        })?;
+
+    let model_name = format!("{} with regressors", auto_arima_model_name(&model));
+
     let point = forecast.primary().to_vec();
     let (lower, upper) = extract_bounds(&forecast, point.len());
 

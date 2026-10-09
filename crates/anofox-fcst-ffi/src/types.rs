@@ -543,6 +543,16 @@ pub struct ExogenousRegressor {
     pub future_values: *const c_double,
     /// Number of future values (must match horizon)
     pub n_future: size_t,
+    /// Validity bitmask for `values` (D-12, FCST-08). `null` = every
+    /// historical value is valid; otherwise `ceil(n_values / 64)` words,
+    /// where bit `i` (`word i/64`, bit `i % 64`) set means `values[i]` is
+    /// valid. Added in plan 10-04 Task 1; read by the FFI boundary starting
+    /// in Task 2 — until then every caller must pass `null` here.
+    pub validity: *const u64,
+    /// Validity bitmask for `future_values`, same encoding as `validity`
+    /// but sized `ceil(n_future / 64)` words. `null` = every future value
+    /// is valid.
+    pub future_validity: *const u64,
 }
 
 /// Exogenous data containing multiple regressors.
