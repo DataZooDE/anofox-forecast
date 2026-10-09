@@ -17,6 +17,14 @@ namespace duckdb {
 struct TsForecastAggStateData {
     vector<int64_t> timestamps;
     vector<double> values;
+    // D-11: validity bitmask parallel to `values` (true = non-NULL value at
+    // that timestamp). A NULL-valued row is no longer dropped at Update time
+    // (only a NULL timestamp is dropped) so the forecast FFI's NULL policy
+    // (trim leading/trailing, interpolate interior, anchor origin after the
+    // original last row) runs exactly as it does for ts_forecast_by, instead
+    // of ts_forecast_agg silently splicing NULL-valued rows out before the
+    // policy ever sees them.
+    vector<bool> valid;
     string method;
     int32_t horizon;
     // 10-10 (FCST-06): single shared params set — validated and threaded
@@ -162,6 +170,9 @@ struct TsForecastAggOperation {
             target.data->values.insert(target.data->values.end(),
                                        source.data->values.begin(),
                                        source.data->values.end());
+            target.data->valid.insert(target.data->valid.end(),
+                                      source.data->valid.begin(),
+                                      source.data->valid.end());
         }
     }
 
@@ -195,7 +206,11 @@ static void TsForecastAggUpdate(Vector inputs[], AggregateInputData &aggr_input,
         auto method_idx = method_data.sel->get_index(i);
         auto horizon_idx = horizon_data.sel->get_index(i);
 
-        if (!ts_data.validity.RowIsValid(ts_idx) || !val_data.validity.RowIsValid(val_idx)) {
+        // D-11: only a NULL timestamp drops the row. A NULL value is kept
+        // (stored as 0.0 with valid=false) so Finalize's validity bitmask
+        // can feed the shared forecasting NULL policy instead of splicing
+        // the row out before the policy ever runs.
+        if (!ts_data.validity.RowIsValid(ts_idx)) {
             continue;
         }
 
@@ -253,10 +268,16 @@ static void TsForecastAggUpdate(Vector inputs[], AggregateInputData &aggr_input,
         }
 
         auto ts = UnifiedVectorFormat::GetData<timestamp_t>(ts_data)[ts_idx];
-        auto val = UnifiedVectorFormat::GetData<double>(val_data)[val_idx];
 
         state.data->timestamps.push_back(ts.value);
-        state.data->values.push_back(val);
+        bool value_is_valid = val_data.validity.RowIsValid(val_idx);
+        if (value_is_valid) {
+            auto val = UnifiedVectorFormat::GetData<double>(val_data)[val_idx];
+            state.data->values.push_back(val);
+        } else {
+            state.data->values.push_back(0.0);
+        }
+        state.data->valid.push_back(value_is_valid);
     }
 }
 
@@ -290,22 +311,42 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
 
         auto &data = *state.data;
 
-        // Sort by timestamp
-        vector<pair<int64_t, double>> sorted_pairs;
-        for (size_t j = 0; j < data.timestamps.size(); j++) {
-            sorted_pairs.push_back({data.timestamps[j], data.values[j]});
+        // Sort (timestamp, value, valid) together by timestamp (D-11/D-12):
+        // an index sort, not a sort over pair<timestamp,value>, so the
+        // per-row validity flag stays aligned with its value through the
+        // reorder (a pair-sort would additionally order ties by value,
+        // silently decoupling `valid` from the row it was recorded for).
+        vector<size_t> order(data.timestamps.size());
+        for (size_t j = 0; j < order.size(); j++) {
+            order[j] = j;
         }
-        std::sort(sorted_pairs.begin(), sorted_pairs.end());
+        std::sort(order.begin(), order.end(),
+                  [&data](size_t a, size_t b) { return data.timestamps[a] < data.timestamps[b]; });
 
         vector<double> sorted_values;
         vector<int64_t> sorted_timestamps;
-        for (const auto &p : sorted_pairs) {
-            sorted_timestamps.push_back(p.first);
-            sorted_values.push_back(p.second);
+        vector<bool> sorted_valid;
+        sorted_values.reserve(order.size());
+        sorted_timestamps.reserve(order.size());
+        sorted_valid.reserve(order.size());
+        for (size_t idx : order) {
+            sorted_timestamps.push_back(data.timestamps[idx]);
+            sorted_values.push_back(data.values[idx]);
+            sorted_valid.push_back(data.valid[idx]);
         }
 
+        // Real validity bitmask (D-11) — no longer an all-ones `~0ULL`
+        // placeholder, since NULL-valued rows are kept (not spliced out) by
+        // Update above. anofox_ts_forecast applies the same NULL policy
+        // ts_forecast_by uses given this bitmask: trim leading/trailing,
+        // interpolate interior, anchor step 1 after the original last row.
         size_t validity_words = (sorted_values.size() + 63) / 64;
-        vector<uint64_t> validity(validity_words, ~0ULL);
+        vector<uint64_t> validity(validity_words, 0);
+        for (size_t j = 0; j < sorted_valid.size(); j++) {
+            if (sorted_valid[j]) {
+                validity[j / 64] |= (1ULL << (j % 64));
+            }
+        }
 
         // 10-10 (FCST-06): the exact same ApplyForecastParamSet writer
         // _ts_forecast_scalar (ts_forecast_by) uses, applied to the params
@@ -589,6 +630,9 @@ static void TsForecastAggCombine(Vector &state_vector, Vector &combined, Aggrega
             tgt.data->values.insert(tgt.data->values.end(),
                                     src.data->values.begin(),
                                     src.data->values.end());
+            tgt.data->valid.insert(tgt.data->valid.end(),
+                                   src.data->valid.begin(),
+                                   src.data->valid.end());
         }
     }
 }

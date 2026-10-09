@@ -2,6 +2,7 @@
 #include "anofox_fcst_ffi.h"
 #include "ts_fill_gaps_native.hpp"
 #include "ts_forecast_params.hpp"
+#include "ts_future_dates.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
@@ -182,56 +183,15 @@ static Value MicrosToDateValue(int64_t micros, DateColumnType date_col_type) {
 }
 
 // ============================================================================
-// Compute Forecast Date (calendar-aware)
-// ============================================================================
-
-static int64_t ComputeForecastDate(int64_t last_date, int64_t step,
-                                    const TsForecastScalarBindData &bind_data) {
-    if (bind_data.frequency_type == FrequencyType::MONTHLY ||
-        bind_data.frequency_type == FrequencyType::QUARTERLY ||
-        bind_data.frequency_type == FrequencyType::YEARLY) {
-        date_t base_date = MicrosecondsToDate(last_date);
-        int32_t year, month, day;
-        Date::Convert(base_date, year, month, day);
-
-        int64_t months_to_add = step * bind_data.frequency_seconds;
-        if (bind_data.frequency_type == FrequencyType::QUARTERLY) {
-            months_to_add *= 3;
-        } else if (bind_data.frequency_type == FrequencyType::YEARLY) {
-            months_to_add *= 12;
-        }
-
-        int64_t total_months = static_cast<int64_t>(year) * 12 + (month - 1) + months_to_add;
-        int32_t new_year = static_cast<int32_t>(total_months / 12);
-        int32_t new_month = static_cast<int32_t>((total_months % 12) + 1);
-
-        if (new_month < 1) {
-            new_month += 12;
-            new_year -= 1;
-        }
-
-        int32_t max_day = Date::MonthDays(new_year, new_month);
-        int32_t new_day = std::min(day, max_day);
-
-        date_t new_date = Date::FromDate(new_year, new_month, new_day);
-        return DateToMicroseconds(new_date);
-    } else {
-        int64_t freq_micros;
-        if (bind_data.date_col_type == DateColumnType::INTEGER ||
-            bind_data.date_col_type == DateColumnType::BIGINT) {
-            freq_micros = bind_data.frequency_seconds;
-        } else {
-            freq_micros = bind_data.frequency_is_raw
-                ? bind_data.frequency_seconds * 86400LL * 1000000LL
-                : bind_data.frequency_seconds * 1000000LL;
-        }
-        return last_date + freq_micros * step;
-    }
-}
-
-// ============================================================================
 // Execute Function
 // ============================================================================
+//
+// Forecast dates are computed via the Rust D-12 calendar rule
+// (crates/anofox-fcst-core/src/calendar.rs future_dates, reached through
+// ts_future_dates.hpp's StepFromFrequency + ComputeFutureDates) instead of
+// this file's own month arithmetic — the month-end-preserving /
+// day-of-month-clamp rule now matches ts_forecast_agg exactly (D-11
+// parity), including on month-end series ending in a short month.
 
 static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vector &result) {
     auto &bind_data = state.expr.Cast<BoundFunctionExpression>().bind_info->Cast<TsForecastScalarBindData>();
@@ -287,14 +247,21 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
         auto &date_entry = date_entries[date_idx];
         auto &date_child = ListVector::GetEntry(date_list_vec);
 
-        // Build sorted index by date
+        // Build sorted index by date. date_is_null tracks which entries had
+        // a NULL date (date_micros[i]=0 is a placeholder, not a real
+        // 1970-01-01 observation) so the calendar `observed` series below
+        // (used for frequency/month-end detection) never includes a NULL
+        // date disguised as epoch zero.
         vector<int64_t> date_micros(n);
+        vector<bool> date_is_null(n);
         for (idx_t i = 0; i < n; i++) {
             Value dv = date_child.GetValue(date_entry.offset + i);
             if (dv.IsNull()) {
                 date_micros[i] = 0;
+                date_is_null[i] = true;
             } else {
                 date_micros[i] = ExtractDateMicros(dv, bind_data.date_col_type);
+                date_is_null[i] = false;
             }
         }
 
@@ -303,11 +270,14 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
         std::sort(indices.begin(), indices.end(),
             [&date_micros](size_t a, size_t b) { return date_micros[a] < date_micros[b]; });
 
-        // Build sorted values + validity
+        // Build sorted values + validity, and the NON-NULL-date `observed`
+        // series (D-12) in the same ascending order — a subsequence of the
+        // already-sorted `indices`, so it stays ascending without a second sort.
         vector<double> sorted_values(n);
         size_t validity_words = (n + 63) / 64;
         vector<uint64_t> validity(validity_words, 0);
-        int64_t last_date = 0;
+        vector<int64_t> observed;
+        observed.reserve(n);
 
         for (size_t i = 0; i < n; i++) {
             idx_t src = indices[i];
@@ -320,7 +290,13 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
             } else {
                 sorted_values[i] = 0.0;
             }
-            last_date = date_micros[indices[i]];
+            if (!date_is_null[src]) {
+                observed.push_back(date_micros[src]);
+            }
+        }
+
+        if (observed.empty()) {
+            throw InvalidInputException("ts_forecast_by: all date values are NULL for this group");
         }
 
         // --- Parse per-row parameters ---
@@ -391,19 +367,22 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
         }
 
         // --- Build LIST(STRUCT(...)) result ---
-        // Use a temporary bind_data copy with the per-row frequency for date computation
-        TsForecastScalarBindData row_bind;
-        row_bind.frequency_seconds = freq_seconds;
-        row_bind.frequency_is_raw = freq_is_raw;
-        row_bind.frequency_type = freq_parsed;
-        row_bind.date_col_type = bind_data.date_col_type;
+        // Map this row's per-row frequency to a (step_months, step_micros)
+        // pair and compute every forecast date in one Rust call (D-12,
+        // D-11 parity with ts_forecast_agg) instead of the old per-step
+        // ComputeForecastDate month arithmetic.
+        int64_t step_months = 0;
+        int64_t step_micros = 0;
+        StepFromFrequency(freq_parsed, freq_seconds, freq_is_raw, bind_data.date_col_type, step_months,
+                           step_micros);
+        vector<int64_t> future_ts = ComputeFutureDates(observed, fcst_result.n_forecasts, step_months, step_micros);
 
         vector<Value> forecast_structs;
         forecast_structs.reserve(fcst_result.n_forecasts);
 
         for (size_t i = 0; i < fcst_result.n_forecasts; i++) {
             int64_t step = static_cast<int64_t>(i + 1);
-            int64_t forecast_date = ComputeForecastDate(last_date, step, row_bind);
+            int64_t forecast_date = future_ts[i];
 
             child_list_t<Value> struct_values;
             struct_values.push_back(make_pair("forecast_step", Value::INTEGER(static_cast<int32_t>(step))));
