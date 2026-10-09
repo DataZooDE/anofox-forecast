@@ -346,6 +346,10 @@ fn multiscale_ols_fixture_is_self_consistent() {
             p + 1
         );
 
+        assert!(
+            y.len() > 1,
+            "{name}: need at least 2 observations to compute var_y"
+        );
         let mean_y = y.iter().sum::<f64>() / y.len() as f64;
         let var_y = y.iter().map(|yi| (yi - mean_y).powi(2)).sum::<f64>() / (y.len() as f64 - 1.0);
         let fit_tol = fitted_abs_per_sd * var_y.sqrt();
