@@ -21,11 +21,12 @@ Holt's Linear Trend Method (Double Exponential Smoothing). Extends SES by adding
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
-| `alpha` | DOUBLE | No | 0.3 | Level smoothing coefficient (0-1) |
-| `beta` | DOUBLE | No | 0.1 | Trend smoothing coefficient (0-1) |
-| `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
-| `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
-| `include_residuals` | BOOLEAN | No | false | Return residuals |
+| `confidence_level` | DOUBLE | No | 0.90 | Confidence for prediction intervals |
+
+Holt does not take smoothing-parameter keys (`alpha`, `beta`) from SQL — those, along with
+`include_fitted` and `include_residuals`, are rejected by the parameter validator
+(`ts_forecast_native.cpp` `ValidateParamKeys`). The crate's internal Holt fit is not
+configurable from the SQL surface today.
 
 ## Returns
 
@@ -36,6 +37,12 @@ Holt's Linear Trend Method (Double Exponential Smoothing). Extends SES by adding
 | `yhat` | DOUBLE | Point forecast |
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
+
+`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band (z from
+the confidence level, SD taken over the full historical series) — not a model-based interval
+and not statistically calibrated. For calibrated coverage, use conformal prediction intervals
+(see `docs/api/11-conformal-prediction.md`) on top of the point forecast.
+(being corrected in v0.10.0, Phase 10)
 
 ## SQL Example
 
@@ -52,7 +59,7 @@ SELECT * FROM ts_forecast_by(
     MAP{}
 );
 
--- With custom smoothing parameters
+-- With an explicit confidence level (the only tunable key Holt accepts from SQL)
 SELECT * FROM ts_forecast_by(
     'quarterly_sales',
     region_id,
@@ -61,7 +68,7 @@ SELECT * FROM ts_forecast_by(
     'Holt',
     4,
     '1d',
-    MAP{'alpha': '0.4', 'beta': '0.2'}
+    MAP{'confidence_level': '0.80'}
 );
 ```
 
