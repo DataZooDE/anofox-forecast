@@ -22,12 +22,11 @@ Holt-Winters Seasonal Method (Triple Exponential Smoothing). Extends Holt's meth
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
 | `seasonal_period` | INTEGER | **Yes** | — | Seasonal period (e.g., 7 for weekly, 12 for monthly) |
-| `alpha` | DOUBLE | No | 0.3 | Level smoothing coefficient (0-1) |
-| `beta` | DOUBLE | No | 0.1 | Trend smoothing coefficient (0-1) |
-| `gamma` | DOUBLE | No | 0.1 | Seasonal smoothing coefficient (0-1) |
-| `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
-| `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
-| `include_residuals` | BOOLEAN | No | false | Return residuals |
+| `confidence_level` | DOUBLE | No | 0.90 | Confidence for prediction intervals |
+
+HoltWinters does not take smoothing-parameter keys (`alpha`, `beta`, `gamma`) from SQL — those
+are rejected by the parameter validator (`ValidateParamKeys`). The crate's internal smoothing
+is not configurable from the SQL surface today.
 
 ## Returns
 
@@ -38,6 +37,11 @@ Holt-Winters Seasonal Method (Triple Exponential Smoothing). Extends Holt's meth
 | `yhat` | DOUBLE | Point forecast |
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
+
+`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band, not a
+model-based interval and not statistically calibrated. For calibrated coverage, use conformal
+prediction intervals (see `docs/api/11-conformal-prediction.md`) on top of the point forecast.
+(being corrected in v0.10.0, Phase 10)
 
 ## SQL Example
 
@@ -54,7 +58,7 @@ SELECT * FROM ts_forecast_by(
     MAP{'seasonal_period': '7'}
 );
 
--- Monthly data with yearly seasonality
+-- Monthly data with yearly seasonality (no alpha/beta/gamma keys accepted)
 SELECT * FROM ts_forecast_by(
     'monthly_revenue',
     store_id,
@@ -63,7 +67,7 @@ SELECT * FROM ts_forecast_by(
     'HoltWinters',
     12,
     '1d',
-    MAP{'seasonal_period': '12', 'alpha': '0.2', 'beta': '0.1', 'gamma': '0.15'}
+    MAP{'seasonal_period': '12'}
 );
 ```
 

@@ -21,10 +21,11 @@ Simple Exponential Smoothing. Produces flat forecasts using exponentially weight
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
-| `alpha` | DOUBLE | No | 0.3 | Smoothing coefficient (0-1, higher = more weight on recent) |
-| `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
-| `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
-| `include_residuals` | BOOLEAN | No | false | Return residuals |
+| `confidence_level` | DOUBLE | No | 0.90 | Confidence for prediction intervals |
+
+SES does not take a smoothing-parameter key (`alpha`) from SQL — it is rejected by the
+parameter validator (`ValidateParamKeys`). The crate's internal alpha is fixed and not
+configurable from the SQL surface today.
 
 ## Returns
 
@@ -36,10 +37,15 @@ Simple Exponential Smoothing. Produces flat forecasts using exponentially weight
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 
+`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band, not a
+model-based interval and not statistically calibrated. For calibrated coverage, use conformal
+prediction intervals (see `docs/api/11-conformal-prediction.md`) on top of the point forecast.
+(being corrected in v0.10.0, Phase 10)
+
 ## SQL Example
 
 ```sql
--- Basic usage (default alpha=0.3)
+-- Basic usage (alpha is fixed internally; no alpha key accepted)
 SELECT * FROM ts_forecast_by(
     'daily_inventory',
     sku_id,
@@ -51,7 +57,7 @@ SELECT * FROM ts_forecast_by(
     MAP{}
 );
 
--- With custom smoothing
+-- With an explicit confidence level
 SELECT * FROM ts_forecast_by(
     'sensor_data',
     sensor_id,
@@ -60,7 +66,7 @@ SELECT * FROM ts_forecast_by(
     'SES',
     24,
     '1d',
-    MAP{'alpha': '0.5'}
+    MAP{'confidence_level': '0.80'}
 );
 ```
 

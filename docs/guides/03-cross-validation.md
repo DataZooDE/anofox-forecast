@@ -46,7 +46,11 @@ SELECT * FROM ts_cv_forecast_by(
 - `date` - forecast date
 - `y` - actual value
 - `yhat` - point forecast
-- `yhat_lower` / `yhat_upper` - prediction interval
+- `yhat_lower` / `yhat_upper` - prediction interval; currently a heuristic
+  `point ± z·SD(history)·√h` band for every model except GARCH, Kalman and AutoEnsemble, not
+  statistically calibrated — use conformal prediction intervals
+  (`docs/api/11-conformal-prediction.md`) for calibrated coverage
+  (being corrected in v0.10.0, Phase 10)
 - `model_name` - model used
 
 Compute per-fold errors with the metric functions:
@@ -270,7 +274,9 @@ ORDER BY mae;
 1. **Use at least 3-5 folds** for reliable estimates
 2. **Match horizon to business needs** - don't validate 7-day if you need 30-day
 3. **Include a Naive baseline** - if you can't beat Naive, rethink your approach
-4. **Check coverage** - prediction intervals should cover ~90% of actuals
+4. **Check coverage** - empirically measure how often actuals fall within the prediction
+   interval; today's heuristic interval is not calibrated, so do not assume it matches the
+   nominal confidence level without checking
 5. **Examine errors by horizon** - later horizons are harder
 6. **Consider business cost** - sometimes under-forecasting is worse than over-forecasting
 

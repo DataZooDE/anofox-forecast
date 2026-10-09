@@ -24,13 +24,12 @@ Dynamic Theta Method. Uses time-varying theta values that adapt to local data ch
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
-| `theta` | DOUBLE | No | 2.0 | Initial theta parameter |
-| `seasonal_period` | INTEGER | No* | — | Seasonal period (required for seasonal data) |
-| `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
-| `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
-| `include_residuals` | BOOLEAN | No | false | Return residuals |
+| `seasonal_period` | INTEGER | No | auto-detected | Seasonal period; auto-detected when both `seasonal_period` and `seasonal_periods` are omitted |
+| `confidence_level` | DOUBLE | No | 0.90 | Confidence for prediction intervals |
 
-*Seasonality is NOT auto-detected. Pass `seasonal_period` explicitly for seasonal data.
+The `theta` key itself is **not** an accepted SQL parameter — it is rejected by the parameter
+validator (`ValidateParamKeys`). There is no way to pass a custom initial theta value from SQL
+today.
 
 ## Returns
 
@@ -42,10 +41,15 @@ Dynamic Theta Method. Uses time-varying theta values that adapt to local data ch
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 
+`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band, not a
+model-based interval and not statistically calibrated. For calibrated coverage, use conformal
+prediction intervals (see `docs/api/11-conformal-prediction.md`) on top of the point forecast.
+(being corrected in v0.10.0, Phase 10)
+
 ## SQL Example
 
 ```sql
--- Basic usage
+-- Basic usage (no theta key accepted from SQL)
 SELECT * FROM ts_forecast_by(
     'monthly_sales',
     product_id,
@@ -56,7 +60,7 @@ SELECT * FROM ts_forecast_by(
     '1mo'
 );
 
--- With custom initial theta
+-- With an explicit seasonal period
 SELECT * FROM ts_forecast_by(
     'quarterly_data',
     region_id,
@@ -65,7 +69,7 @@ SELECT * FROM ts_forecast_by(
     'DynamicTheta',
     4,
     '3mo',
-    MAP{'theta': '2.5'}
+    MAP{'seasonal_period': '4'}
 );
 ```
 

@@ -33,7 +33,10 @@ DUCKDB_BIN = os.path.join(REPO_ROOT, "build", "release", "duckdb")
 DEFAULT_SCAN_PATHS = ["README.md", "docs", "plugins", ".claude/CLAUDE.md"]
 
 FENCE_RE = re.compile(r"^```[ \t]*([A-Za-z0-9_+-]*)[ \t]*$")
-SETUP_RE = re.compile(r"\b(CREATE\s+TABLE|CREATE\s+VIEW|CREATE\s+MACRO|INSERT)\b", re.IGNORECASE)
+SETUP_RE = re.compile(
+    r"\b(CREATE\s+(OR\s+REPLACE\s+)?(TEMP\s+|TEMPORARY\s+)?(TABLE|VIEW|MACRO)|INSERT)\b",
+    re.IGNORECASE,
+)
 ERROR_WORDS_RE = re.compile(
     r"\b(error|errors|fail|fails|failing|crash|crashes|crashed|segfault|reject|rejects|"
     r"rejected|invalid|unsupported|not (currently )?supported|will not work|does not work|"

@@ -16,16 +16,18 @@ SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'ETS', hor
 
 Error-Trend-Seasonal State Space Model with explicit specification. Unlike AutoETS, you specify the exact model structure using a 3-4 character code (e.g., 'AAA', 'MNM', 'AAdN').
 
+With no `model` spec given, ETS currently does **not** default to `'AAA'`: it picks
+HoltWinters if a seasonal period is known, else Holt, else SES(α=0.3).
+(being corrected in v0.10.0, Phase 10)
+
 ## Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
-| `model` | VARCHAR | No | 'AAA' | ETS model specification (see below) |
+| `model` | VARCHAR | No | HoltWinters/Holt/SES fallback (see above) | ETS model specification (see below) |
 | `seasonal_period` | INTEGER | **Yes*** | — | Seasonal period (required for seasonal models) |
-| `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
-| `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
-| `include_residuals` | BOOLEAN | No | false | Return residuals |
+| `confidence_level` | DOUBLE | No | 0.90 | Confidence for prediction intervals |
 
 ## ETS Model Specification
 
@@ -60,6 +62,11 @@ Format: `[Error][Trend][Seasonal]` or `[Error][Trend][Damped][Seasonal]`
 | `yhat` | DOUBLE | Point forecast |
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
+
+`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band, not a
+model-based interval and not statistically calibrated. For calibrated coverage, use conformal
+prediction intervals (see `docs/api/11-conformal-prediction.md`) on top of the point forecast.
+(being corrected in v0.10.0, Phase 10)
 
 ## SQL Example
 

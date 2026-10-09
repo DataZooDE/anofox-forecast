@@ -21,9 +21,7 @@ Optimized Simple Exponential Smoothing. Same as SES but automatically finds the 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
-| `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
-| `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
-| `include_residuals` | BOOLEAN | No | false | Return residuals |
+| `confidence_level` | DOUBLE | No | 0.90 | Confidence for prediction intervals |
 
 ## Returns
 
@@ -34,6 +32,11 @@ Optimized Simple Exponential Smoothing. Same as SES but automatically finds the 
 | `yhat` | DOUBLE | Point forecast |
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
+
+`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band, not a
+model-based interval and not statistically calibrated. For calibrated coverage, use conformal
+prediction intervals (see `docs/api/11-conformal-prediction.md`) on top of the point forecast.
+(being corrected in v0.10.0, Phase 10)
 
 ## SQL Example
 
@@ -50,7 +53,7 @@ SELECT * FROM ts_forecast_by(
     MAP{}
 );
 
--- With fitted values for analysis
+-- With an explicit confidence level
 SELECT * FROM ts_forecast_by(
     'weekly_data',
     store_id,
@@ -59,7 +62,7 @@ SELECT * FROM ts_forecast_by(
     'SESOptimized',
     8,
     '1d',
-    MAP{'include_fitted': 'true'}
+    MAP{'confidence_level': '0.80'}
 );
 ```
 

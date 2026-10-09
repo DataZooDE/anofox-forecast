@@ -88,8 +88,8 @@ Always pass an explicit `seasonal_period > 1` when using seasonal members.
 | `forecast_step` | INTEGER | Forecast horizon step (1, 2, …, horizon) |
 | `<date_col>` | (same as input) | Forecast timestamp |
 | `yhat` | DOUBLE | Point forecast (combined from all named members) |
-| `yhat_lower` | DOUBLE | `NULL` in Phase 5 (see Limitations) |
-| `yhat_upper` | DOUBLE | `NULL` in Phase 5 (see Limitations) |
+| `yhat_lower` | DOUBLE | `NULL` (see Limitations) |
+| `yhat_upper` | DOUBLE | `NULL` (see Limitations) |
 | `model_name` | VARCHAR | `'Ensemble'` |
 
 ## Supported Members (26 models)
@@ -185,7 +185,7 @@ SELECT * FROM ts_forecast_ensemble_by(
 SELECT * FROM ens_result ORDER BY id, forecast_step;
 ```
 
-Expected output: `yhat_lower` and `yhat_upper` are `NULL` (point forecasts only in Phase 5);
+Expected output: `yhat_lower` and `yhat_upper` are `NULL` (point forecasts only);
 `model_name` is `'Ensemble'`.
 
 ### Six combination methods
@@ -295,12 +295,13 @@ SELECT * FROM ts_forecast_ensemble_by('ae_test', id, ds, y,
     ['AutoARIMA', 'GARCH'], 3, '1d');
 ```
 
-## Limitations (Phase 5)
+## Limitations
 
-- **Prediction intervals:** `yhat_lower` and `yhat_upper` are `NULL`. Ensemble conformal
-  prediction intervals are planned for Phase 6 (EPI-01).
-- **Member introspection:** Per-member forecasts, weights, and per-member MSE scores are not
-  returned in Phase 5. Introspection is planned for Phase 6 (INSP-01).
+- **Prediction intervals:** `yhat_lower` and `yhat_upper` are `NULL`. Combined-forecast
+  prediction intervals are not yet available from this surface.
+- **Member introspection:** Per-member forecasts, weights, and per-member MSE scores ARE
+  available — use `ts_ensemble_inspect_by` (see [ensemble_inspect.md](ensemble_inspect.md))
+  for per-member combination weights.
 - **Per-member parameters:** All members share the same `seasonal_period`. Per-member
   parameter maps (e.g., different windows for each SMA member) are deferred to a future
   milestone.

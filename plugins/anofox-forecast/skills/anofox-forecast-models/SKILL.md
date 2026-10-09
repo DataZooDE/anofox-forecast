@@ -17,19 +17,19 @@ description: >
   exogenous regressors, or writing `ts_forecast_by` / `ts_forecast` /
   `ts_forecast_exog_by` / `ts_forecast_agg` / `ts_forecast_var_by` /
   `ts_forecast_ensemble_by` calls.
-version: 0.15.3
+version: 2026.09.26
 user-invocable: false
 ---
 
 # Anofox Forecast — Models & `ts_forecast_by` Cheat Sheet
 
-**Extension:** `anofox_forecast` v0.15.3 (Rust crate `anofox-forecast` v0.15.3) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.15.10) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 36 forecasting models exposed by SQL via three call surfaces (table macro, aggregate, scalar) + `ts_forecast_var_by` for multivariate VAR.
 
 ## Critical gotchas
 
-1. **Seasonality is NOT auto-detected.** All models — including the `Auto*` family — treat `seasonal_period` as user-supplied. Run `ts_detect_periods_by` first and pass the result explicitly. See `anofox-forecast-detection`.
+1. **Seasonality IS auto-detected when omitted — but explicit is still recommended.** When both `seasonal_period` and `seasonal_periods` are omitted, `ts_forecast_by` / `ts_cv_forecast_by` / the scalar paths auto-detect the seasonal period internally (`detect_seasonality`, first detected period, 1 if none found). `ts_forecast_agg` does NOT auto-detect. Run `ts_detect_periods_by` first and pass the result explicitly for control and reproducibility over what silent auto-detection would pick. See `anofox-forecast-detection`.
 
 2. **Model names are case-sensitive.** `'AutoETS'` works, `'autoets'` errors.
 
@@ -421,7 +421,7 @@ ORDER BY id, rank;
 
 ### Ensemble gotchas
 
-**(a) `ts_cv_forecast_by('AutoEnsemble')` segfaults (crate 0.15.3).** The CV native does not parse ensemble-specific params (`ensemble_top_k` / `ensemble_method` are zeroed), causing a runtime crash. Do NOT use `ts_cv_forecast_by` for ensemble conformal CV. Instead, run a manual per-fold `_ts_forecast_scalar` loop:
+**(a) `ts_cv_forecast_by('AutoEnsemble')` segfaults.** The CV native does not parse ensemble-specific params (`ensemble_top_k` / `ensemble_method` are zeroed), causing a runtime crash. Do NOT use `ts_cv_forecast_by` for ensemble conformal CV. Instead, run a manual per-fold `_ts_forecast_scalar` loop:
 
 ```sql
 -- Safe conformal CV path for AutoEnsemble (sourced from ensemble_intervals.sql Section 1)
@@ -435,7 +435,7 @@ SELECT * FROM ts_cv_folds_by('ens_series', id, ds, y, 3, 5, MAP{});
 -- See examples/forecasting/ensemble_intervals.sql for the full pipeline.
 ```
 
-**(b) `ts_auto_ensemble_inspect_by` returns NULL `weight` for non-`Mean` `combination_method` (crate 0.15.3).** The `AutoEnsemble` struct's inner combination weights are stored in a private field not accessible via the public `all_scores()` / `model_count()` API. Mean combination is the only variant for which weights are returned. `score` (in-sample MSE) is always populated. This is a documented upstream-crate limitation.
+**(b) `ts_auto_ensemble_inspect_by` returns NULL `weight` for non-`Mean` `combination_method` (anofox-forecast ≤0.15.10).** The `AutoEnsemble` struct's inner combination weights are stored in a private field not accessible via the public `all_scores()` / `model_count()` API. Mean combination is the only variant for which weights are returned. `score` (in-sample MSE) is always populated. This is a documented upstream-crate limitation.
 
 ---
 
@@ -455,48 +455,56 @@ FROM sales GROUP BY product_id;
 
 Access fields: `(fcst).point_forecast`, `(fcst).lower_90`, etc.
 
+`insample_fitted` is currently an SES(α=0.3) surrogate for every model except `Naive` /
+`SeasonalNaive` / `SeasonalWindowAverage` (which return their own fitted values); for
+`AutoARIMA` it is the Theta-model fitted output, not ARIMA's. (being corrected in v0.10.0,
+Phase 10)
+
 ## Model catalogue (36)
 
 ### Automatic selection (6)
 
 | Model | Params | Best for |
 |---|---|---|
-| `AutoETS` | `seasonal_period`, `model_pool` | Unknown patterns — default pick |
+| `AutoETS` | `seasonal_period`, `model_pool` | Unknown patterns — default pick. Silently falls back to HoltWinters/Holt/SES on a crate search error, still labelled AutoETS. |
 | `AutoARIMA` | `seasonal_period` | Unknown patterns, ARIMA family |
 | `AutoTheta` | `seasonal_period` | Unknown patterns, Theta family (best RMSE on M5-monthly) |
-| `AutoMFLES` | `seasonal_periods[]` | Multiple seasonalities |
-| `AutoMSTL` | `seasonal_periods[]` | Multiple seasonalities |
+| `AutoMFLES` | `seasonal_periods[]` | Multiple seasonalities. Currently an alias for `MFLES` (same code path). |
+| `AutoMSTL` | `seasonal_periods[]` | Multiple seasonalities. Currently an alias for `MSTL` (same code path, differs only in reported `model_name`). |
 | `AutoTBATS` | `seasonal_periods[]` | Multiple seasonalities |
 
-### Baseline (6)
+`seasonal_period` / `seasonal_periods` are optional everywhere above — omitting them triggers
+the auto-detect fallback described in gotcha 1.
+
+### Baseline (7)
 
 | Model | Required | Optional |
 |---|---|---|
 | `Naive` | — | — |
 | `SMA` | — | `window` (default 5) |
 | `SeasonalNaive` | `seasonal_period` | — |
-| `SES` | — | `alpha` (default 0.3) |
+| `SeasonalWindowAverage` | `seasonal_period` | — |
+| `SES` | — | — (fixed alpha, not SQL-configurable) |
 | `SESOptimized` | — | — |
 | `RandomWalkDrift` | — | — |
 
-### Exponential smoothing (5)
+### Exponential smoothing (4)
 
 | Model | Required | Optional |
 |---|---|---|
-| `Holt` | — | `alpha`, `beta` |
-| `HoltWinters` | `seasonal_period` | `alpha`, `beta`, `gamma` |
-| `SeasonalES` | `seasonal_period` | `alpha`, `gamma` |
+| `Holt` | — | — (fixed smoothing, not SQL-configurable) |
+| `HoltWinters` | `seasonal_period` | — (fixed smoothing, not SQL-configurable) |
+| `SeasonalES` | `seasonal_period` | — (fixed smoothing, not SQL-configurable) |
 | `SeasonalESOptimized` | `seasonal_period` | — |
-| `SeasonalWindowAverage` | `seasonal_period` | — |
 
 ### Theta (5)
 
 | Model | Optional |
 |---|---|
-| `Theta` | `seasonal_period`, `theta` |
-| `OptimizedTheta` | `seasonal_period` |
-| `DynamicTheta` | `seasonal_period`, `theta` |
-| `DynamicOptimizedTheta` | `seasonal_period` |
+| `Theta` | `seasonal_period` (auto-detected if omitted) — no custom theta coefficient accepted |
+| `OptimizedTheta` | `seasonal_period` (auto-detected if omitted) |
+| `DynamicTheta` | `seasonal_period` (auto-detected if omitted) — no custom theta coefficient accepted |
+| `DynamicOptimizedTheta` | `seasonal_period` (auto-detected if omitted) |
 | `AutoTheta` | `seasonal_period` (listed above) |
 
 ### Classical volatility (1)
@@ -523,9 +531,15 @@ FROM ts_forecast_by('returns', asset_id, ds, y, 'GARCH', 7, '1d',
 
 | Model | Required | Optional |
 |---|---|---|
-| `ETS` | — | `seasonal_period`, `model` (`'AAA'`, `'AAN'`, …) |
-| `ARIMA` | `p`, `d`, `q` | `P`, `D`, `Q`, `s` |
+| `ETS` | — | `seasonal_period`, `model` (default: HoltWinters/Holt/SES fallback, not `'AAA'` — see below) |
+| `ARIMA` | — | — (no order params accepted; fixed AR(1)-on-differences heuristic — use `AutoARIMA` for real order selection) |
 | `Kalman` | — | `kalman_model` (`'local_level'` default \| `'local_linear_trend'`) |
+
+**ETS default:** with no `model` spec, ETS currently picks HoltWinters if a seasonal period
+is known, else Holt, else SES(α=0.3) — not `'AAA'`.
+**ARIMA:** `p`/`d`/`q`/`P`/`D`/`Q`/`s` are rejected by `ValidateParamKeys`. The model behind
+`'ARIMA'` is a fixed heuristic (AR(1) on first differences, coefficient 0.5, Naive if n<5).
+(being corrected in v0.10.0, Phase 10)
 
 **Kalman details:**
 - `local_level` (default): random walk + noise; h-step forecast is flat at filtered level.
@@ -546,9 +560,11 @@ SELECT * FROM ts_forecast_by('sales', product_id, ds, y, 'Kalman', 14, '1d',
 
 | Model | Required | Optional |
 |---|---|---|
-| `MFLES` | `seasonal_periods[]` | `iterations` |
-| `MSTL` | `seasonal_periods[]` | `stl_method` |
-| `TBATS` | `seasonal_periods[]` | `use_box_cox` |
+| `MFLES` | — | `seasonal_periods[]` (auto-detected single period if omitted) |
+| `MSTL` | — | `seasonal_periods[]` (auto-detected single period, or `[12]`, if omitted) |
+| `TBATS` | — | `seasonal_periods[]` (auto-detected single period, or `[12]`, if omitted); no Box-Cox toggle accepted |
+
+`iterations` and `stl_method` are rejected by `ValidateParamKeys` — not SQL-configurable.
 
 ### Intermittent demand (6)
 
@@ -559,7 +575,7 @@ SELECT * FROM ts_forecast_by('sales', product_id, ds, y, 'Kalman', 14, '1d',
 | `CrostonSBA` | — |
 | `ADIDA` | — |
 | `IMAPA` | — |
-| `TSB` | `alpha_d`, `alpha_p` |
+| `TSB` | — (fixed smoothing; no custom demand/probability coefficients accepted) |
 
 ### Distributional (1) — Laplace
 

@@ -1,1 +1,14 @@
+docs/api/07-forecasting.md	22	PASS	SELECT * FROM ts_auto_ensemble_inspect_by(	
+docs/reference/models/ensemble/ensemble_inspect.md	7	PASS	SELECT * FROM ts_auto_ensemble_inspect_by(	
 docs/reference/models/exponential-smoothing/holt.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/exponential-smoothing/holt_winters.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/exponential-smoothing/seasonal_es.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/exponential-smoothing/seasonal_es_optimized.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/exponential-smoothing/ses.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/exponential-smoothing/ses_optimized.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/intermittent/croston_optimized.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/intermittent/tsb.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/multi-seasonal/tbats.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/state-space/arima.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/theta/dynamic_theta.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/theta/theta.md	1	PASS	SELECT * FROM ts_forecast_by(	

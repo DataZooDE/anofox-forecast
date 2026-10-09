@@ -193,6 +193,11 @@ Returns the test rows with forecast columns added:
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 | `model_name` | VARCHAR | Model used |
 
+`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band for
+every model except GARCH, Kalman and AutoEnsemble, not statistically calibrated. Use conformal
+prediction intervals (`docs/api/11-conformal-prediction.md`) for calibrated coverage.
+(being corrected in v0.10.0, Phase 10)
+
 **Key Features:**
 
 - **No frequency parameter needed**: Forecasts are matched to existing test dates from input

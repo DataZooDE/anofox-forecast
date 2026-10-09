@@ -16,17 +16,18 @@ SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'AutoTBATS
 
 TBATS (Trigonometric seasonality, Box-Cox transformation, ARMA errors, Trend and Seasonal components) with automatic model selection. A sophisticated model for complex seasonal patterns using trigonometric representation of seasonality.
 
-> **Important:** Seasonality is NOT auto-detected. Use `ts_detect_periods_by` first to detect seasonal periods, then pass them explicitly via `seasonal_periods`.
+> **Note:** When `seasonal_periods` is omitted, `ts_forecast_by` auto-detects a single period
+> internally and uses it as the only entry — falling back to the fixed period 12 if nothing is
+> detected. Passing `seasonal_periods` explicitly via `ts_detect_periods_by` is still
+> recommended for control and reproducibility.
 
 ## Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
-| `seasonal_periods` | INTEGER[] | **Yes** | — | Array of seasonal periods (e.g., `'[24, 168]'` for daily+weekly) |
-| `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
-| `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
-| `include_residuals` | BOOLEAN | No | false | Return residuals |
+| `seasonal_periods` | INTEGER[] | No | auto-detected (single period) or `[12]` | Array of seasonal periods (e.g., `'[24, 168]'` for daily+weekly); see Note above when omitted |
+| `confidence_level` | DOUBLE | No | 0.90 | Confidence for prediction intervals |
 
 ## Returns
 
@@ -37,6 +38,11 @@ TBATS (Trigonometric seasonality, Box-Cox transformation, ARMA errors, Trend and
 | `yhat` | DOUBLE | Point forecast |
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
+
+`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band, not a
+model-based interval and not statistically calibrated. For calibrated coverage, use conformal
+prediction intervals (see `docs/api/11-conformal-prediction.md`) on top of the point forecast.
+(being corrected in v0.10.0, Phase 10)
 
 ## SQL Example
 

@@ -14,18 +14,20 @@ SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'TBATS', h
 
 ## Description
 
-Trigonometric seasonality, Box-Cox transformation, ARMA errors, Trend and Seasonal components. A sophisticated model for complex seasonal patterns using trigonometric (Fourier) representation of seasonality. Requires explicit seasonal periods.
+Trigonometric seasonality, Box-Cox transformation, ARMA errors, Trend and Seasonal components. A sophisticated model for complex seasonal patterns using trigonometric (Fourier) representation of seasonality.
+
+> **Note:** `use_box_cox` is **not** an accepted SQL parameter — it is rejected by the
+> parameter validator (`ValidateParamKeys`). When `seasonal_periods` is omitted,
+> `ts_forecast_by` auto-detects a single period internally and uses it as the only entry —
+> falling back to the fixed period 12 if nothing is detected.
 
 ## Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
-| `seasonal_periods` | INTEGER[] | **Yes** | — | Array of seasonal periods |
-| `use_box_cox` | BOOLEAN | No | true | Apply Box-Cox transformation |
-| `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
-| `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
-| `include_residuals` | BOOLEAN | No | false | Return residuals |
+| `seasonal_periods` | INTEGER[] | No | auto-detected (single period) or `[12]` | Array of seasonal periods; see Note above when omitted |
+| `confidence_level` | DOUBLE | No | 0.90 | Confidence for prediction intervals |
 
 ## Returns
 
@@ -36,6 +38,11 @@ Trigonometric seasonality, Box-Cox transformation, ARMA errors, Trend and Season
 | `yhat` | DOUBLE | Point forecast |
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
+
+`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band, not a
+model-based interval and not statistically calibrated. For calibrated coverage, use conformal
+prediction intervals (see `docs/api/11-conformal-prediction.md`) on top of the point forecast.
+(being corrected in v0.10.0, Phase 10)
 
 ## SQL Example
 
@@ -52,7 +59,7 @@ SELECT * FROM ts_forecast_by(
     MAP{'seasonal_periods': '[24, 168]'}
 );
 
--- Without Box-Cox transformation
+-- Single seasonal period, custom confidence level (use_box_cox is rejected, not passable)
 SELECT * FROM ts_forecast_by(
     'sub_daily_data',
     sensor_id,
@@ -61,7 +68,7 @@ SELECT * FROM ts_forecast_by(
     'TBATS',
     48,
     '1h',
-    MAP{'seasonal_periods': '[24, 168]', 'use_box_cox': 'false'}
+    MAP{'seasonal_periods': '[24, 168]', 'confidence_level': '0.80'}
 );
 ```
 

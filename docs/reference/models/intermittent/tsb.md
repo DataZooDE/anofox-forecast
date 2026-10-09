@@ -21,11 +21,11 @@ Teunter-Syntetos-Babai Method. An alternative to Croston that separately estimat
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
-| `alpha_d` | DOUBLE | No | auto | Demand size smoothing coefficient |
-| `alpha_p` | DOUBLE | No | auto | Demand probability smoothing coefficient |
-| `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
-| `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
-| `include_residuals` | BOOLEAN | No | false | Return residuals |
+| `confidence_level` | DOUBLE | No | 0.90 | Confidence for prediction intervals |
+
+TSB does not take smoothing-parameter keys (`alpha_d`, `alpha_p`) from SQL — those are rejected
+by the parameter validator (`ValidateParamKeys`). The crate's internal smoothing is not
+configurable from the SQL surface today.
 
 ## Returns
 
@@ -37,10 +37,15 @@ Teunter-Syntetos-Babai Method. An alternative to Croston that separately estimat
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 
+`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band, not a
+model-based interval and not statistically calibrated. For calibrated coverage, use conformal
+prediction intervals (see `docs/api/11-conformal-prediction.md`) on top of the point forecast.
+(being corrected in v0.10.0, Phase 10)
+
 ## SQL Example
 
 ```sql
--- Basic usage (automatic smoothing)
+-- Basic usage (automatic smoothing; no alpha_d/alpha_p keys accepted)
 SELECT * FROM ts_forecast_by(
     'spare_parts_demand',
     part_id,
@@ -51,7 +56,7 @@ SELECT * FROM ts_forecast_by(
     '1d'
 );
 
--- With custom smoothing parameters
+-- With an explicit confidence level
 SELECT * FROM ts_forecast_by(
     'obsolete_items',
     sku_id,
@@ -60,7 +65,7 @@ SELECT * FROM ts_forecast_by(
     'TSB',
     14,
     '1d',
-    MAP{'alpha_d': '0.2', 'alpha_p': '0.3'}
+    MAP{'confidence_level': '0.80'}
 );
 ```
 

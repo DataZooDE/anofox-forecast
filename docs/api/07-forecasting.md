@@ -8,7 +8,7 @@ The extension provides 36 forecasting models ranging from simple baselines to so
 
 **Use this document to:**
 - Generate point forecasts and prediction intervals for single or multiple series
-- Choose from 37 models: baselines (Naive, SMA), exponential smoothing (ETS, Holt-Winters), state-space (ARIMA, Kalman), classical (GARCH), ensemble (AutoEnsemble), multi-seasonal (MSTL, TBATS), intermittent demand (Croston, TSB), distributional (Laplace), and multivariate (VAR)
+- Choose from 36 models: baselines (Naive, SMA), exponential smoothing (ETS, Holt-Winters), state-space (ARIMA, Kalman), classical (GARCH), ensemble (AutoEnsemble), multi-seasonal (MSTL, TBATS), intermittent demand (Croston, TSB), distributional (Laplace), and multivariate (VAR)
 - Use automatic model selection (AutoETS, AutoARIMA, AutoTheta, AutoEnsemble) when unsure
 - Incorporate exogenous variables with supported models
 - Understand the detect-then-forecast workflow for seasonal data
@@ -45,7 +45,12 @@ SELECT *, 'HoltWinters' AS model FROM ts_forecast_by('sales', id, date, val, 'Ho
 
 ### Handling Seasonality
 
-> **Important:** Forecasting models do **not** auto-detect seasonality. You must detect it separately and pass `seasonal_period` explicitly.
+> **Note:** When both `seasonal_period` and `seasonal_periods` are omitted, `ts_forecast_by`
+> (and `ts_cv_forecast_by`, plus the scalar paths) auto-detects the seasonal period internally
+> via `detect_seasonality` and uses the first detected period (falling back to 1 if none is
+> found). `ts_forecast_agg` does **not** auto-detect. Passing `seasonal_period` explicitly is
+> still recommended below — it gives you control and reproducibility over what auto-detection
+> would otherwise pick silently.
 
 **Step 1: Detect seasonality**
 ```sql
@@ -85,7 +90,8 @@ SELECT * FROM ts_forecast_by(
 );
 ```
 
-**Why explicit?** Auto-detection can produce unexpected results. By separating detection from forecasting, you can:
+**Why explicit?** Although `ts_forecast_by` auto-detects when you omit seasonal params, that
+auto-detection can produce unexpected results. By separating detection from forecasting, you can:
 - Validate detected periods make business sense (e.g., 7 = weekly, 12 = monthly, 365 = yearly)
 - Use domain knowledge to override detection
 - Apply the same period consistently across models
@@ -131,7 +137,11 @@ SELECT * FROM ts_forecast_by(
 | Ensemble of ARIMA/ETS/Theta | `AutoEnsemble` |
 | Streaming / distributional | `Laplace` |
 
-## Supported Models (33 Models)
+## Supported Models (36 Models)
+
+`GARCH` and `Kalman` (below, under "Classical Models") and `AutoEnsemble` (below, under
+"Ensemble Forecasting") are also part of this 36-model `ts_forecast_by` surface; they are
+documented in their own sections because of their distinct parameter/output shape.
 
 ### Automatic Selection Models (7)
 | Model | Description | Optional Params |
@@ -140,54 +150,55 @@ SELECT * FROM ts_forecast_by(
 | `AutoARIMA` | Automatic ARIMA model selection | *seasonal_period* |
 | `AutoTheta` | Automatic Theta method selection | *seasonal_period* |
 | `AutoEnsemble` | Auto-fit ARIMA/ETS/Theta, rank by MSE, combine top-K | *top_k*, *combination_method*, *seasonal_period* |
-| `AutoMFLES` | Automatic MFLES selection | *seasonal_periods[]* |
-| `AutoMSTL` | Automatic MSTL selection | *seasonal_periods[]* |
+| `AutoMFLES` | Currently an alias for `MFLES` (same code path) | *seasonal_periods[]* |
+| `AutoMSTL` | Currently an alias for `MSTL` (same code path) | *seasonal_periods[]* |
 | `AutoTBATS` | Automatic TBATS selection | *seasonal_periods[]* |
 
-### Basic Models (6)
+### Basic Models (7)
 | Model | Description | Required | Optional |
 |-------|-------------|----------|----------|
 | `Naive` | Last value repeated | — | — |
 | `SMA` | Simple Moving Average | — | *window* (default: 5) |
 | `SeasonalNaive` | Last season repeated | **seasonal_period** | — |
-| `SES` | Simple Exponential Smoothing | — | *alpha* (default: 0.3) |
+| `SeasonalWindowAverage` | Average of same seasonal position over a sliding window | **seasonal_period** | — |
+| `SES` | Simple Exponential Smoothing | — | — (fixed alpha, not SQL-configurable) |
 | `SESOptimized` | Optimized SES | — | — |
 | `RandomWalkDrift` | Random walk with drift | — | — |
 
 ### Exponential Smoothing Models (4)
 | Model | Description | Required | Optional |
 |-------|-------------|----------|----------|
-| `Holt` | Holt's linear trend method | — | *alpha*, *beta* |
-| `HoltWinters` | Holt-Winters seasonal method | **seasonal_period** | *alpha*, *beta*, *gamma* |
-| `SeasonalES` | Seasonal Exponential Smoothing | **seasonal_period** | *alpha*, *gamma* |
+| `Holt` | Holt's linear trend method | — | — (fixed smoothing, not SQL-configurable) |
+| `HoltWinters` | Holt-Winters seasonal method | **seasonal_period** | — (fixed smoothing, not SQL-configurable) |
+| `SeasonalES` | Seasonal Exponential Smoothing | **seasonal_period** | — (fixed smoothing, not SQL-configurable) |
 | `SeasonalESOptimized` | Optimized Seasonal ES | **seasonal_period** | — |
 
 ### Theta Methods (5)
 | Model | Description | Optional |
 |-------|-------------|----------|
-| `Theta` | Standard Theta method | *seasonal_period*, *theta* |
-| `OptimizedTheta` | Optimized Theta method | *seasonal_period* |
-| `DynamicTheta` | Dynamic Theta method | *seasonal_period*, *theta* |
-| `DynamicOptimizedTheta` | Dynamic Optimized Theta | *seasonal_period* |
-| `AutoTheta` | Automatic Theta selection | *seasonal_period* |
+| `Theta` | Standard Theta method | *seasonal_period* (auto-detected if omitted) — no `theta` key accepted |
+| `OptimizedTheta` | Optimized Theta method | *seasonal_period* (auto-detected if omitted) |
+| `DynamicTheta` | Dynamic Theta method | *seasonal_period* (auto-detected if omitted) — no `theta` key accepted |
+| `DynamicOptimizedTheta` | Dynamic Optimized Theta | *seasonal_period* (auto-detected if omitted) |
+| `AutoTheta` | Automatic Theta selection | *seasonal_period* (auto-detected if omitted) |
 
 ### State Space & ARIMA Models (4)
 | Model | Description | Required | Optional |
 |-------|-------------|----------|----------|
-| `ETS` | Error-Trend-Seasonal model | — | *seasonal_period*, *model* |
-| `AutoETS` | Automatic ETS selection | — | *seasonal_period* |
-| `ARIMA` | ARIMA model | **p**, **d**, **q** | *P*, *D*, *Q*, *s* |
-| `AutoARIMA` | Automatic ARIMA selection | — | *seasonal_period* |
+| `ETS` | Error-Trend-Seasonal model | — | *seasonal_period*, *model* (default: HoltWinters/Holt/SES fallback, not `'AAA'`) |
+| `AutoETS` | Automatic ETS selection; silently falls back to HoltWinters/Holt/SES on a crate search error, still labelled AutoETS | — | *seasonal_period* (auto-detected if omitted) |
+| `ARIMA` | Fixed AR(1)-on-differences heuristic (not a configurable Box-Jenkins fit) | — | — (no order params accepted; see `AutoARIMA`) |
+| `AutoARIMA` | Automatic ARIMA selection | — | *seasonal_period* (auto-detected if omitted) |
 
 ### Multiple Seasonality Models (6)
 | Model | Description | Required | Optional |
 |-------|-------------|----------|----------|
-| `MFLES` | Multiple Frequency LES | **seasonal_periods[]** | *iterations* |
-| `AutoMFLES` | Automatic MFLES | — | *seasonal_periods[]* |
-| `MSTL` | Multiple Seasonal-Trend Loess | **seasonal_periods[]** | *stl_method* |
-| `AutoMSTL` | Automatic MSTL | — | *seasonal_periods[]* |
-| `TBATS` | Trigonometric BATS | **seasonal_periods[]** | *use_box_cox* |
-| `AutoTBATS` | Automatic TBATS | — | *seasonal_periods[]* |
+| `MFLES` | Multiple Frequency LES | — | *seasonal_periods[]* (auto-detected single period if omitted) |
+| `AutoMFLES` | Currently an alias for `MFLES` (same code path) | — | *seasonal_periods[]* (auto-detected single period if omitted) |
+| `MSTL` | Multiple Seasonal-Trend Loess | — | *seasonal_periods[]* (auto-detected single period, or `[12]`, if omitted) |
+| `AutoMSTL` | Currently an alias for `MSTL` (same code path) | — | *seasonal_periods[]* (auto-detected single period, or `[12]`, if omitted) |
+| `TBATS` | Trigonometric BATS | — | *seasonal_periods[]* (auto-detected single period, or `[12]`, if omitted); no `use_box_cox` key accepted |
+| `AutoTBATS` | Automatic TBATS | — | *seasonal_periods[]* (auto-detected single period, or `[12]`, if omitted) |
 
 ### Intermittent Demand Models (6)
 | Model | Description | Optional |
@@ -197,7 +208,7 @@ SELECT * FROM ts_forecast_by(
 | `CrostonSBA` | Syntetos-Boylan Approximation | — |
 | `ADIDA` | Aggregate-Disaggregate IDA | — |
 | `IMAPA` | Intermittent Multiple Aggregation | — |
-| `TSB` | Teunter-Syntetos-Babai method | *alpha_d*, *alpha_p* |
+| `TSB` | Teunter-Syntetos-Babai method | — (fixed smoothing, no `alpha_d`/`alpha_p` keys accepted) |
 
 ### Distributional Models (1)
 
@@ -206,6 +217,10 @@ Streaming likelihood-weighted mixture of leaves (EMA / drift / AR(1) / damped-Ho
 | Model | Description | Optional |
 |-------|-------------|----------|
 | `Laplace` | Streaming distributional forecaster with three zero-config selectors (`auto` / `auto_aid` / `skaters`) | *seasonal_period*, *laplace_variant*, *laplace_seasonal_batch_init* |
+
+Laplace's own distributional intervals are currently overwritten by the same
+`point ± z·SD(history)·√h` heuristic applied to every other model (see the Returns note
+under `ts_forecast_by` above). (being corrected in v0.10.0, Phase 10)
 
 **Variants** (`laplace_variant`):
 - `auto` (default) — balanced for smooth / continuous series with adequate history
@@ -250,6 +265,13 @@ ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, fre
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 
+`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band (z from
+the confidence level, SD taken over the full historical series), not a model-based interval
+and not statistically calibrated, for every model except GARCH, Kalman and AutoEnsemble
+(whose own NULL/own bounds are accurate as documented). For calibrated coverage, use conformal
+prediction intervals (see [11-conformal-prediction.md](11-conformal-prediction.md)) on top of
+the point forecast. (being corrected in v0.10.0, Phase 10)
+
 **Examples:**
 ```sql
 -- HoltWinters with weekly seasonality (guaranteed seasonal model)
@@ -287,6 +309,11 @@ ts_forecast_exog_by(table_name, group_col, date_col, target_col, x_cols, future_
 | `AutoARIMA` | `ARIMAX` | Auto-selected ARIMA with exogenous |
 | `OptimizedTheta` | `ThetaX` | Theta method with exogenous |
 | `MFLES` | `MFLESX` | MFLES with exogenous regressors |
+
+`ARIMAX`/`AutoARIMA`-with-exog and `ThetaX` are both currently: fit OLS on the exogenous
+regressors, forecast the OLS residuals with the plain model (`ARIMA`'s fixed AR(1) heuristic,
+or plain `Theta` — not `OptimizedTheta`), then add the regression's exogenous effect back.
+This is not a joint ARIMA/Theta-with-regressors fit. (being corrected in v0.10.0, Phase 10)
 
 **Example:**
 ```sql
@@ -525,8 +552,10 @@ ranks them by in-sample MSE, and combines the top-K members into a single foreca
 the specified `combination_method`. It is accessible via `ts_forecast_by` with
 `method = 'AutoEnsemble'`.
 
-> **Point forecasts only (Phase 4):** `yhat_lower` / `yhat_upper` are `NULL`.
-> Ensemble prediction intervals are planned for Phase 6 (EPI-01).
+> **Point forecasts only:** `yhat_lower` / `yhat_upper` are `NULL` for native
+> `ts_forecast_by('AutoEnsemble', ...)`. Member/weight introspection has shipped — see
+> `ts_auto_ensemble_inspect_by` below — but combined-forecast prediction intervals are not
+> yet available.
 
 ### Parameters
 
@@ -599,9 +628,10 @@ models contribute to the blend.
 `ts_forecast_by`). **10 blocked members** raise `InvalidParameter` naming the model (GARCH,
 Laplace, ARIMA, MFLES, AutoMFLES, MSTL, AutoMSTL, TBATS, AutoTBATS, AutoEnsemble).
 
-> **Point forecasts only (Phase 5):** `yhat_lower` / `yhat_upper` are `NULL`.
-> Ensemble prediction intervals are planned for Phase 6 (EPI-01).
-> Member/weight introspection is planned for Phase 6 (INSP-01).
+> **Point forecasts only:** `yhat_lower` / `yhat_upper` are `NULL` for
+> `ts_forecast_ensemble_by`. Member/weight introspection has shipped — see
+> `ts_ensemble_inspect_by` below — but combined-forecast prediction intervals are not yet
+> available.
 
 ### Signature
 
@@ -815,7 +845,7 @@ ts_auto_ensemble_inspect_by(
 |--------|------|-------------|
 | `<group_col>` | (same as input) | Series identifier |
 | `member_name` | VARCHAR | Selected model name (`AutoARIMA`, `AutoETS`, or `AutoTheta`) |
-| `weight` | DOUBLE | `1/k` for `Mean` combination; `NULL` for all other methods (crate 0.15.3 limitation — see below) |
+| `weight` | DOUBLE | `1/k` for `Mean` combination; `NULL` for all other methods (anofox-forecast ≤0.15.10 limitation — see below) |
 | `score` | DOUBLE | In-sample MSE from `all_scores()`; lower is better; always > 0 (or near-zero for near-perfect fits) |
 | `rank` | BIGINT | 1..k ascending by MSE; rank 1 = best-fitting member |
 
@@ -824,7 +854,7 @@ ts_auto_ensemble_inspect_by(
 | combination_method | weight column |
 |---|---|
 | `''` or `'mean'` | `1/k` (non-NULL) — equal weights for Mean combination |
-| `'weighted_mse'`, `'inverse_aic'`, `'stacking'`, `'horizon_adaptive'` | `NULL` — inner combination weights are not accessible from the `anofox-forecast` 0.15.3 public API (upstream limitation; `AutoEnsemble.ensemble` is a private field) |
+| `'weighted_mse'`, `'inverse_aic'`, `'stacking'`, `'horizon_adaptive'` | `NULL` — inner combination weights are not accessible from the `anofox-forecast` ≤0.15.10 public API (upstream limitation; `AutoEnsemble.ensemble` is a private field) |
 
 **Row count:** May be less than `top_k` if fewer than `top_k` candidate models fitted
 successfully (e.g., AutoARIMA convergence failure). The returned `k` is `model_count()`
@@ -842,7 +872,7 @@ SELECT * FROM ts_auto_ensemble_inspect_by(
 ORDER BY id, rank;
 -- Returns: 3 rows per series; weight=0.333 for all; rank=1 is lowest-MSE member
 
--- AutoEnsemble WeightedMSE: weight IS NULL (crate 0.15.3 limitation), score > 0
+-- AutoEnsemble WeightedMSE: weight IS NULL (anofox-forecast ≤0.15.10 limitation), score > 0
 SELECT * FROM ts_auto_ensemble_inspect_by(
     'ae_test', id, ds, y,
     top_k := 3,

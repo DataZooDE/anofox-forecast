@@ -22,11 +22,11 @@ Seasonal Exponential Smoothing. Combines SES with a seasonal component but witho
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
 | `seasonal_period` | INTEGER | **Yes** | — | Seasonal period (e.g., 7 for weekly, 12 for monthly) |
-| `alpha` | DOUBLE | No | 0.3 | Level smoothing coefficient (0-1) |
-| `gamma` | DOUBLE | No | 0.1 | Seasonal smoothing coefficient (0-1) |
-| `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
-| `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
-| `include_residuals` | BOOLEAN | No | false | Return residuals |
+| `confidence_level` | DOUBLE | No | 0.90 | Confidence for prediction intervals |
+
+SeasonalES does not take smoothing-parameter keys (`alpha`, `gamma`) from SQL — those are
+rejected by the parameter validator (`ValidateParamKeys`). The crate's internal smoothing is
+not configurable from the SQL surface today.
 
 ## Returns
 
@@ -37,6 +37,11 @@ Seasonal Exponential Smoothing. Combines SES with a seasonal component but witho
 | `yhat` | DOUBLE | Point forecast |
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
+
+`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band, not a
+model-based interval and not statistically calibrated. For calibrated coverage, use conformal
+prediction intervals (see `docs/api/11-conformal-prediction.md`) on top of the point forecast.
+(being corrected in v0.10.0, Phase 10)
 
 ## SQL Example
 
@@ -53,7 +58,7 @@ SELECT * FROM ts_forecast_by(
     MAP{'seasonal_period': '7'}
 );
 
--- With custom smoothing
+-- With an explicit confidence level (no alpha/gamma keys accepted)
 SELECT * FROM ts_forecast_by(
     'weekly_patterns',
     location_id,
@@ -62,7 +67,7 @@ SELECT * FROM ts_forecast_by(
     'SeasonalES',
     21,
     '1d',
-    MAP{'seasonal_period': '7', 'alpha': '0.4', 'gamma': '0.2'}
+    MAP{'seasonal_period': '7', 'confidence_level': '0.80'}
 );
 ```
 

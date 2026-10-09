@@ -17,17 +17,15 @@ SELECT * FROM ts_forecast_exog_by('table', group_col, date_col, value_col, ['x1'
 
 ## Description
 
-Multiple Frequency Local Exponential Smoothing. Handles multiple seasonal patterns using Fourier series representation combined with exponential smoothing. Requires explicit seasonal periods.
+Multiple Frequency Local Exponential Smoothing. Handles multiple seasonal patterns using Fourier series representation combined with exponential smoothing. Passing explicit seasonal periods is recommended; when `seasonal_periods` is omitted, `ts_forecast_by` auto-detects a single period and uses it as the only entry.
 
 ## Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
-| `seasonal_periods` | INTEGER[] | **Yes** | — | Array of seasonal periods (e.g., '[24, 168]') |
-| `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
-| `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
-| `include_residuals` | BOOLEAN | No | false | Return residuals |
+| `seasonal_periods` | INTEGER[] | No | auto-detected (single period) | Array of seasonal periods (e.g., '[24, 168]'); when omitted, falls back to a single auto-detected period, or no seasonality if none is detected |
+| `confidence_level` | DOUBLE | No | 0.90 | Confidence for prediction intervals |
 
 ## Returns
 
@@ -38,6 +36,11 @@ Multiple Frequency Local Exponential Smoothing. Handles multiple seasonal patter
 | `yhat` | DOUBLE | Point forecast |
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
+
+`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band, not a
+model-based interval and not statistically calibrated. For calibrated coverage, use conformal
+prediction intervals (see `docs/api/11-conformal-prediction.md`) on top of the point forecast.
+(being corrected in v0.10.0, Phase 10)
 
 ## SQL Example
 

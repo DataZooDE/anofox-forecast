@@ -22,9 +22,7 @@ Optimized Seasonal Exponential Smoothing. Same as SeasonalES but automatically f
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
 | `seasonal_period` | INTEGER | **Yes** | — | Seasonal period (e.g., 7 for weekly, 12 for monthly) |
-| `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
-| `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
-| `include_residuals` | BOOLEAN | No | false | Return residuals |
+| `confidence_level` | DOUBLE | No | 0.90 | Confidence for prediction intervals |
 
 ## Returns
 
@@ -35,6 +33,11 @@ Optimized Seasonal Exponential Smoothing. Same as SeasonalES but automatically f
 | `yhat` | DOUBLE | Point forecast |
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
+
+`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band, not a
+model-based interval and not statistically calibrated. For calibrated coverage, use conformal
+prediction intervals (see `docs/api/11-conformal-prediction.md`) on top of the point forecast.
+(being corrected in v0.10.0, Phase 10)
 
 ## SQL Example
 
@@ -51,7 +54,7 @@ SELECT * FROM ts_forecast_by(
     MAP{'seasonal_period': '7'}
 );
 
--- With fitted values for analysis
+-- With an explicit confidence level
 SELECT * FROM ts_forecast_by(
     'weekly_data',
     store_id,
@@ -60,7 +63,7 @@ SELECT * FROM ts_forecast_by(
     'SeasonalESOptimized',
     28,
     '1d',
-    MAP{'seasonal_period': '7', 'include_fitted': 'true'}
+    MAP{'seasonal_period': '7', 'confidence_level': '0.80'}
 );
 ```
 

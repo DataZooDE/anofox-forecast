@@ -14,33 +14,25 @@ SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'ARIMA', h
 
 ## Description
 
-AutoRegressive Integrated Moving Average with explicit order specification. Unlike AutoARIMA, you specify the exact (p, d, q) orders. For seasonal ARIMA, also specify (P, D, Q, s).
+`ARIMA` does **not** accept explicit `(p, d, q)` / `(P, D, Q, s)` order parameters from SQL —
+those keys are rejected by the parameter validator (`ts_forecast_native.cpp` `ValidateParamKeys`).
+The model currently implemented behind the `'ARIMA'` name is a fixed heuristic: AR(1) on the
+first-differenced series with a hardcoded AR coefficient of 0.5 (falling back to Naive when the
+series has fewer than 5 observations) — not a configurable Box-Jenkins ARIMA fit.
+(being corrected in v0.10.0, Phase 10)
+
+For order selection, information-criteria-based model search, and optional exogenous
+regressors, use `AutoARIMA` (see `auto_arima.md`) instead — it calls into the crate's real
+ARIMA search rather than this fixed heuristic.
 
 ## Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
-| `p` | INTEGER | **Yes** | — | AR (autoregressive) order |
-| `d` | INTEGER | **Yes** | — | Differencing order |
-| `q` | INTEGER | **Yes** | — | MA (moving average) order |
-| `P` | INTEGER | No | 0 | Seasonal AR order |
-| `D` | INTEGER | No | 0 | Seasonal differencing order |
-| `Q` | INTEGER | No | 0 | Seasonal MA order |
-| `s` | INTEGER | No | 0 | Seasonal period |
-| `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
-| `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
-| `include_residuals` | BOOLEAN | No | false | Return residuals |
+| `confidence_level` | DOUBLE | No | 0.90 | Confidence for prediction intervals |
 
-## ARIMA Order Selection Guide
-
-| Pattern | Suggested Order | Description |
-|---------|-----------------|-------------|
-| Random walk | (0,1,0) | First difference only |
-| AR(1) | (1,0,0) | Single lag autocorrelation |
-| MA(1) | (0,0,1) | Single lag moving average |
-| ARIMA(1,1,1) | (1,1,1) | Common general-purpose model |
-| Seasonal | (1,1,1)(1,1,1)s | With seasonal components |
+No order parameters (`p`, `d`, `q`, `P`, `D`, `Q`, `s`) are accepted — see Description.
 
 ## Returns
 
@@ -52,10 +44,15 @@ AutoRegressive Integrated Moving Average with explicit order specification. Unli
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 
+`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band, not a
+model-based interval and not statistically calibrated. For calibrated coverage, use conformal
+prediction intervals (see `docs/api/11-conformal-prediction.md`) on top of the point forecast.
+(being corrected in v0.10.0, Phase 10)
+
 ## SQL Example
 
 ```sql
--- Simple ARIMA(1,1,1)
+-- ARIMA's fixed AR(1)-on-differences heuristic (no order params accepted)
 SELECT * FROM ts_forecast_by(
     'daily_sales',
     product_id,
@@ -64,25 +61,23 @@ SELECT * FROM ts_forecast_by(
     'ARIMA',
     14,
     '1d',
-    MAP{'p': '1', 'd': '1', 'q': '1'}
+    MAP{}
 );
 
--- Seasonal ARIMA(1,1,1)(1,1,1)7
+-- Prefer AutoARIMA for real order selection and seasonal support
 SELECT * FROM ts_forecast_by(
     'weekly_data',
     store_id,
     date,
     revenue,
-    'ARIMA',
+    'AutoARIMA',
     28,
     '1d',
-    MAP{'p': '1', 'd': '1', 'q': '1', 'P': '1', 'D': '1', 'Q': '1', 's': '7'}
+    MAP{'seasonal_period': '7'}
 );
 ```
 
 ## Best For
 
-- Expert users who understand ARIMA methodology
-- When you have prior knowledge of the appropriate orders
-- Box-Jenkins methodology practitioners
-- Comparison with AutoARIMA results
+- Quick baseline comparison against AutoARIMA
+- Not recommended for production use given orders are not configurable — use AutoARIMA instead

@@ -159,21 +159,21 @@ ts_auto_ensemble_inspect_by(
 |--------|------|-------------|
 | `<group_col>` | (same as input) | Series identifier |
 | `member_name` | VARCHAR | Selected candidate name (`AutoARIMA`, `AutoETS`, or `AutoTheta`) |
-| `weight` | DOUBLE | `1/k` for `Mean` combination; `NULL` for all other methods (upstream crate 0.15.3 limitation — see below) |
+| `weight` | DOUBLE | `1/k` for `Mean` combination; `NULL` for all other methods (upstream anofox-forecast ≤0.15.10 limitation — see below) |
 | `score` | DOUBLE | In-sample MSE from `all_scores()`; lower is better; `>= 0` (near-zero for near-perfect fits) |
 | `rank` | BIGINT | `1..k` ascending by MSE; rank 1 = best-fitting member (lowest MSE) |
 
-### Weight availability (crate 0.15.3 limitation)
+### Weight availability (anofox-forecast ≤0.15.10 limitation)
 
 For `AutoEnsemble`, the inner `Ensemble` struct (which stores the combination weights for
 `WeightedMSE` / `InverseAIC` / `Stacking` / `HorizonAdaptive`) is a **private field** of
-`AutoEnsemble`. The `anofox-forecast` 0.15.3 public API exposes only `all_scores()`
+`AutoEnsemble`. The `anofox-forecast` ≤0.15.10 public API exposes only `all_scores()`
 (member name + in-sample MSE) and `model_count()` — not the inner weights.
 
 | combination_method | `weight` column |
 |---|---|
 | `''` or `'mean'` | `1/k` (non-NULL) — trivially computable from `top_k` |
-| `'weighted_mse'`, `'inverse_aic'`, `'stacking'`, `'horizon_adaptive'` | `NULL` — inner weights not accessible from crate 0.15.3 public API |
+| `'weighted_mse'`, `'inverse_aic'`, `'stacking'`, `'horizon_adaptive'` | `NULL` — inner weights not accessible from anofox-forecast ≤0.15.10 public API |
 
 This limitation is tracked for a future crate release that exposes an inner-weight accessor.
 The `score` (MSE) column is always available and useful for ranking regardless.
@@ -208,7 +208,7 @@ ORDER BY id, rank;
 ```
 
 ```sql
--- AutoEnsemble WeightedMSE: weight IS NULL (crate 0.15.3 limitation), score available
+-- AutoEnsemble WeightedMSE: weight IS NULL (anofox-forecast ≤0.15.10 limitation), score available
 SELECT * FROM ts_auto_ensemble_inspect_by(
     'ae_test', id, ds, y,
     top_k := 3,
@@ -292,14 +292,14 @@ FROM ts_auto_ensemble_inspect_by('insp_series', id, ds, y, top_k := 3, combinati
 
 `ts_ensemble_inspect_by` does not return a per-member MSE score. The `score` column is
 always `NULL`. This is by design — the explicit-member ensemble does not expose per-member
-in-sample MSE in the current crate 0.15.3 API. Use `ts_auto_ensemble_inspect_by` if you
+in-sample MSE in the current anofox-forecast ≤0.15.10 API. Use `ts_auto_ensemble_inspect_by` if you
 need scored member ranking.
 
-### AutoEnsemble combination weights are `NULL` for non-Mean methods (crate 0.15.3)
+### AutoEnsemble combination weights are `NULL` for non-Mean methods (anofox-forecast ≤0.15.10)
 
 For `AutoEnsemble` with `combination_method` other than `'mean'`, the inner combination
 weights (`WeightedMSE` / `InverseAIC` / `Stacking` / `HorizonAdaptive`) are not accessible
-from the `anofox-forecast` 0.15.3 public API. `weight` is `NULL` for these rows. The `score`
+from the `anofox-forecast` ≤0.15.10 public API. `weight` is `NULL` for these rows. The `score`
 (in-sample MSE) is always available. This limitation is tracked upstream as a future
 enhancement — a public inner-weight accessor would enable full weight transparency.
 

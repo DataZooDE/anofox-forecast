@@ -16,17 +16,19 @@ SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'AutoTheta
 
 Automatic Theta method selection. The Theta method decomposes the time series into two "theta lines" and combines forecasts from each. AutoTheta automatically optimizes the theta parameter and selects between standard and dynamic variants.
 
-> **Important:** Seasonality is NOT auto-detected. Use `ts_detect_periods_by` first to detect the seasonal period, then pass it explicitly via `seasonal_period`.
+> **Note:** When both `seasonal_period` and `seasonal_periods` are omitted, `ts_forecast_by`
+> (and `ts_cv_forecast_by`) auto-detects the seasonal period internally (`detect_seasonality`,
+> using the first detected period; 1 if none found). Passing `seasonal_period` explicitly via
+> `ts_detect_periods_by` is still recommended for control and reproducibility — `ts_forecast_agg`
+> does NOT auto-detect.
 
 ## Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
-| `seasonal_period` | INTEGER | **Yes*** | — | Seasonal period (e.g., 7 for weekly, 12 for monthly) |
-| `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
-| `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
-| `include_residuals` | BOOLEAN | No | false | Return residuals |
+| `seasonal_period` | INTEGER | No | auto-detected | Seasonal period (e.g., 7 for weekly, 12 for monthly); auto-detected when omitted |
+| `confidence_level` | DOUBLE | No | 0.90 | Confidence for prediction intervals |
 
 ## Returns
 
@@ -38,7 +40,10 @@ Automatic Theta method selection. The Theta method decomposes the time series in
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 
-*Required for seasonal data. Without `seasonal_period`, AutoTheta will select a non-seasonal model.
+`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band, not a
+model-based interval and not statistically calibrated. For calibrated coverage, use conformal
+prediction intervals (see `docs/api/11-conformal-prediction.md`) on top of the point forecast.
+(being corrected in v0.10.0, Phase 10)
 
 ## SQL Example
 

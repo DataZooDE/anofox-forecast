@@ -4,7 +4,7 @@
 
 ## Overview
 
-The extension provides 33 forecasting models. This guide helps you select the right one.
+The extension provides 36 forecasting models. This guide helps you select the right one.
 
 **Use this guide to:**
 - Analyze your data's characteristics (trend, seasonality, intermittency)

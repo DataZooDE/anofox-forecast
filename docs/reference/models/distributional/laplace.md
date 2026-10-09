@@ -80,6 +80,13 @@ Same shape as any `ts_forecast_by` call: `(group_col, forecast_step, ds, yhat, y
 | `yhat_lower` / `yhat_upper` | DOUBLE | Prediction interval at `confidence_level` |
 | `model_name` | VARCHAR | Tagged variant + seasonal + batch_init state |
 
+`yhat_lower` / `yhat_upper` are currently **not** Laplace's own distributional interval — they
+are overwritten by the same generic heuristic (`point ± z·SD(history)·√h`) applied to every
+other `ts_forecast_by` model. The mixture's own interval machinery is not yet surfaced here.
+For calibrated coverage, use conformal prediction intervals (see
+`docs/api/11-conformal-prediction.md`) on top of the point forecast.
+(being corrected in v0.10.0, Phase 10)
+
 ## SQL Examples
 
 ### Default — auto on monthly retail

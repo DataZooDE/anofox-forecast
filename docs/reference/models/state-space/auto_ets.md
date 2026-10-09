@@ -16,19 +16,23 @@ SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoETS', horizon, para
 
 Automatic Exponential Smoothing State Space model selection. Automatically selects the best ETS model (Error, Trend, Seasonal components) based on information criteria.
 
-> **Important:** Seasonality is NOT auto-detected. Use `ts_detect_periods_by` first to detect the seasonal period, then pass it explicitly via `seasonal_period`.
+> **Note:** When both `seasonal_period` and `seasonal_periods` are omitted, `ts_forecast_by`
+> (and `ts_cv_forecast_by`) auto-detects the seasonal period internally (`detect_seasonality`,
+> using the first detected period; 1 if none found). Passing `seasonal_period` explicitly via
+> `ts_detect_periods_by` is still recommended for control and reproducibility — `ts_forecast_agg`
+> does NOT auto-detect.
+>
+> If the underlying crate's ETS model search errors out, AutoETS currently falls back silently
+> to HoltWinters, Holt, or SES while the output is still labelled `AutoETS`.
+> (being corrected in v0.10.0, Phase 10)
 
 ## Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
-| `seasonal_period` | INTEGER | **Yes*** | — | Seasonal period (e.g., 7 for weekly, 12 for monthly) |
-| `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
-| `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
-| `include_residuals` | BOOLEAN | No | false | Return residuals |
-
-*Required for seasonal data. Without `seasonal_period`, AutoETS will select a non-seasonal model.
+| `seasonal_period` | INTEGER | No | auto-detected | Seasonal period (e.g., 7 for weekly, 12 for monthly); auto-detected when omitted |
+| `confidence_level` | DOUBLE | No | 0.90 | Confidence for prediction intervals |
 
 ## Returns
 
@@ -39,6 +43,11 @@ Automatic Exponential Smoothing State Space model selection. Automatically selec
 | `yhat` | DOUBLE | Point forecast |
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
+
+`yhat_lower` / `yhat_upper` are currently a heuristic `point ± z·SD(history)·√h` band, not a
+model-based interval and not statistically calibrated. For calibrated coverage, use conformal
+prediction intervals (see `docs/api/11-conformal-prediction.md`) on top of the point forecast.
+(being corrected in v0.10.0, Phase 10)
 
 ## SQL Example
 

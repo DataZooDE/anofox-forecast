@@ -81,8 +81,8 @@ configuration in Phase 4.
 | `group_col` | ANY | Series identifier |
 | `<date_col>` | (same as input) | Forecast timestamp |
 | `yhat` | DOUBLE | Point forecast (combined from top-K members) |
-| `yhat_lower` | DOUBLE | `NULL` in Phase 4 (see Limitations) |
-| `yhat_upper` | DOUBLE | `NULL` in Phase 4 (see Limitations) |
+| `yhat_lower` | DOUBLE | `NULL` (see Limitations) |
+| `yhat_upper` | DOUBLE | `NULL` (see Limitations) |
 | `model_name` | VARCHAR | `'AutoEnsemble'` |
 
 ## SQL Examples (verified end-to-end)
@@ -110,7 +110,7 @@ FROM ts_forecast_by('sales', product_id, ds, y, 'AutoEnsemble', 5, '1d')
 ORDER BY product_id, forecast_step;
 ```
 
-Expected output: `yhat_lower` and `yhat_upper` are `NULL` (point forecasts only in Phase 4);
+Expected output: `yhat_lower` and `yhat_upper` are `NULL` (point forecasts only);
 `model_name` is `'AutoEnsemble'`.
 
 ### Median combination — robust to diverging members
@@ -189,16 +189,20 @@ ORDER BY product_id, forecast_step;
 | Sufficient history for holdout calibration | `'stacking'` — weights fitted from in-sample residuals |
 | Different accuracy at different forecast horizons | `'horizon_adaptive'` — each step gets independent weights |
 
-## Limitations (Phase 4)
+## Limitations
 
-- **Prediction intervals:** `yhat_lower` and `yhat_upper` are `NULL`. Ensemble conformal
-  prediction intervals are planned for Phase 6 (EPI-01).
-- **Candidate families:** Fixed to AutoARIMA, AutoETS, AutoTheta. User-specified member lists
-  (Phase 5, ENS-02) and explicit member ensembles are not yet available.
+- **Prediction intervals:** `yhat_lower` and `yhat_upper` are `NULL` for native
+  `ts_forecast_by('AutoEnsemble', ...)`. Combined-forecast prediction intervals are not yet
+  available from this surface.
+- **Candidate families:** Fixed to AutoARIMA, AutoETS, AutoTheta for `AutoEnsemble` itself.
+  For user-specified member lists, use the explicit-member ensemble
+  (`ts_forecast_ensemble_by` — see [ensemble_explicit.md](ensemble_explicit.md)), which is
+  available today.
 - **Stacking folds:** The number of cross-validation folds used by the stacking weight
   estimator is fixed internally and not exposed as a SQL parameter in v1.
-- **Member introspection:** Weights, per-member forecasts, and per-member MSE scores are not
-  returned in Phase 4. Introspection is planned for Phase 6 (INSP-01).
+- **Member introspection:** Weights, per-member forecasts, and per-member MSE scores ARE
+  available — use `ts_auto_ensemble_inspect_by` (see
+  [ensemble_inspect.md](ensemble_inspect.md)) for scored, ranked per-member introspection.
 - **`'custom'` combination:** `CombinationMethod::Custom` (user-supplied weights) is not
   accepted. Passing `combination_method='custom'` raises `InvalidParameter` (ENS-F1, deferred).
 
