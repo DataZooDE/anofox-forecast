@@ -57,7 +57,7 @@ Table macros. Signatures:
 |---|---|
 | `ts_fill_nulls_forward_by(source, group_col, date_col, value_col)` | Last observation carried forward |
 | `ts_fill_nulls_backward_by(source, group_col, date_col, value_col)` | Next observation carried backward |
-| `ts_fill_nulls_mean_by(source, group_col, date_col, value_col)` | Per-group mean (skips NULLs) |
+| `ts_fill_nulls_mean_by(source, group_col, date_col, value_col)` | Per-group mean, computed in Rust (NaN counts as missing too; all-missing group stays NULL) |
 | `ts_fill_nulls_const_by(source, group_col, date_col, value_col, fill_value)` | Constant (e.g. 0.0 for retail counts) |
 | `ts_fill_forward_by(...)` | Streaming per-group forward fill; also `ts_fill_forward_operator` for windowed variants |
 | `ts_mark_unknown_by` | Marks values matching a sentinel as unknown |
@@ -73,7 +73,7 @@ SELECT * FROM ts_fill_nulls_const_by('gaps_filled', product_id, ds, y, 0.0);
 
 | Function | Drops when |
 |---|---|
-| `ts_drop_constant_by` | All values equal (no signal to forecast) |
+| `ts_drop_constant_by` | Rust `is_constant`: all values equal, or **fewer than two non-NULL values (incl. all-NULL groups)** |
 | `ts_drop_short_by(source, group_col, min_length)` | Series length < min |
 | `ts_drop_gappy_by(source, group_col, value_col, max_gap_ratio)` | Gap ratio exceeds threshold (0.1 = 10 %) |
 | `ts_drop_zeros_by` | All zero values |
@@ -88,11 +88,12 @@ SELECT * FROM ts_drop_short_by('nulls_filled', product_id, 24);   -- ≥ 2 years
 
 ## Transforms
 
-- **`ts_diff_by(source, group_col, date_col, value_col, diff_order INTEGER)`** — currently a
-  **lag-k** difference `y[t] - y[t-k]`, not iterative d-th order differencing;
-  `diff_order=2` is a lag-2 difference, not a true second difference. Apply with
-  `diff_order=1` repeatedly if you need true d-th order differencing.
-  (fix planned for v0.10.0, Phase 12)
+- **`ts_diff_by(source, group_col, date_col, value_col, diff_order INTEGER, seasonal_lag := 1)`**
+  — d-th order differencing in Rust (numpy `diff(n=diff_order)`); `diff_order=2` is the true
+  second difference `y[t] - 2*y[t-1] + y[t-2]`. Pass `seasonal_lag := k` for the old lag-k
+  reading `y[t] - y[t-k]` (breaking change from pre-Phase-12: `diff_order` used to mean lag-k).
+  One row per input row; first `diff_order * seasonal_lag` rows per group are NULL; any
+  difference touching a NULL/NaN input is NULL (never an error).
 - **`ts_detrend_by(source, group_col, date_col, value_col, method)`** — currently a **no-op**
   (an argument-order bug makes `trend` all-zero and `detrended` equal the input); `'quadratic'`
   / `'cubic'` also silently fall back to `'auto'`. (fix planned for v0.10.0, Phase 15)
@@ -100,7 +101,7 @@ SELECT * FROM ts_drop_short_by('nulls_filled', product_id, 24);   -- ≥ 2 years
 
 ```sql
 CREATE TABLE stationary AS
-SELECT * FROM ts_diff_by('clean', product_id, ds, y, 1);   -- lag-1 difference
+SELECT * FROM ts_diff_by('clean', product_id, ds, y, 1);   -- first-order difference (same as lag-1)
 ```
 
 ## Hierarchical key operations

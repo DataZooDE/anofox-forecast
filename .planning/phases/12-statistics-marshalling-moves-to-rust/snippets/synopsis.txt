@@ -74,3 +74,4 @@ docs/reference/models/distributional/laplace.md	SELECT * FROM ts_forecast_by('ta
 docs/reference/models/classical/garch.md	SELECT * FROM ts_forecast_by(
 docs/reference/models/classical/garch.md	params := MAP{'garch_p': '1', 'garch_q': '1'}
 docs/reference/models/ensemble/autoensemble.md	SELECT * FROM ts_forecast_by(
+docs/api/04-data-preparation.md	ts_diff_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, diff_order INTEGER, seasonal_lag := 1) → TABLE

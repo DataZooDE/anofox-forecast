@@ -154,6 +154,23 @@ use the semver numbering this project started with.
   (`missing::fill_missing` + `missing::propagate_missing`) — never shifting later
   positions into earlier ones; parameter lists (`alphas`, calibration-profile arrays,
   `quantile_levels`) reject a `NULL` entry as a malformed argument naming the parameter.
+- **`ts_diff_by`'s `diff_order` is now d-th order differencing, not lag-k** (RUST-03, D-05/D-06,
+  plan 12-07). `diff_order=2` now computes numpy's `diff(n=2)` (the true second difference
+  `y[t] - 2*y[t-1] + y[t-2]`), not the old `y[t] - y[t-2]` lag-2 reading. A new named
+  `seasonal_lag` parameter (default `1`) recovers the old lag-k behaviour: pass the same value
+  as `seasonal_lag` with `diff_order := 1` for the pre-v0.10.0 reading. Output is still one row
+  per input row (NULL for the first `diff_order * seasonal_lag` rows); any difference touching
+  a NULL/NaN input is NULL, never an error.
+- **`ts_drop_constant_by` now uses the Rust `is_constant` (RUST-09, D-09, plan 12-07):** groups
+  with fewer than two non-NULL values — **including an all-NULL group** — now classify as
+  constant and are dropped. The old SQL `MIN(value)=MAX(value)` rule kept all-NULL groups
+  (`MIN`/`MAX` both `NULL`, so the `OR MIN(value_col) IS NULL` branch matched and excluded them
+  from the constant check); this is a breaking change for callers relying on all-NULL groups
+  surviving `ts_drop_constant_by`.
+- **`ts_fill_nulls_mean_by` now treats `NaN` as missing** (RUST-05, D-09, plan 12-07), matching
+  the Phase 10 NaN = NULL convention: a `NaN` value is excluded from the group mean and
+  replaced by it, same as a `NULL`. Previously a `NaN` poisoned the SQL `AVG(value_col)`
+  (any `NaN` in a group made `_mean_val` `NaN` for the whole group).
 
 ### Added
 
@@ -232,6 +249,12 @@ use the semver numbering this project started with.
   `Date::MonthDays` arithmetic; all four now call the same Rust `ComputeFutureDates` helper
   `ts_forecast_by`/`ts_forecast_agg` use (plan 12-05), so every public forecast surface
   shares one calendar implementation.
+- Dead, never-reachable-from-SQL scalar sources removed with no SQL surface change (D-09,
+  plan 12-07): `src/table_functions/ts_filter.cpp` and `src/table_functions/ts_imputation.cpp`
+  (every `Register*` body in them a no-op — the live SQL surface was always the `_by` table
+  macros in `ts_macros.cpp`) are deleted, along with the no-op `RegisterTsFeaturesFunction`
+  (`ts_features.cpp`) and `RegisterTsDetectChangepointsFunction` (`ts_changepoints.cpp`)
+  registrations.
 
 ## [2026.09.26] - 2026-09-26
 

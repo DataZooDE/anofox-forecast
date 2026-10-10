@@ -281,6 +281,52 @@ SELECT CASE WHEN (
     'FAIL exog_by_future_dates_are_calendar_correct_month_ends'
 ) END AS result;
 
+-- ============================================================================
+-- SECTION 7 — Differencing, mean fill and constant detection in Rust
+-- (RUST-03, RUST-05, D-09)
+-- ============================================================================
+
+.print ''
+.print 'SECTION 7: ts_diff_by / ts_fill_nulls_mean_by / ts_drop_constant_by are Rust-backed (RUST-03/RUST-05/D-09)'
+.print ''
+
+CREATE OR REPLACE TABLE section7_diff AS
+SELECT 'A' AS id, (DATE '2024-01-01' + INTERVAL (i) DAY) AS ds, ((i+1)*(i+1))::DOUBLE AS y
+FROM range(5) t(i);
+
+-- diff_order=2 on a quadratic series [1,4,9,16,25] is numpy diff(n=2): the
+-- constant second derivative 2.0 for the last three rows, NULL for the first
+-- two (D-05/D-06).
+SELECT CASE WHEN (
+    SELECT list(diff_value ORDER BY ds) = [NULL, NULL, 2.0, 2.0, 2.0]
+    FROM ts_diff_by('section7_diff', id, ds, y, 2)
+) THEN 'PASS diff_by_dth_order_matches_numpy_diff_n2' ELSE error(
+    'FAIL diff_by_dth_order_matches_numpy_diff_n2'
+) END AS result;
+
+-- seasonal_lag := 2 recovers the old lag-k reading of the same quadratic
+-- series: y[t] - y[t-2] = [NULL, NULL, 8, 12, 16].
+SELECT CASE WHEN (
+    SELECT list(diff_value ORDER BY ds) = [NULL, NULL, 8.0, 12.0, 16.0]
+    FROM ts_diff_by('section7_diff', id, ds, y, 1, seasonal_lag := 2)
+) THEN 'PASS diff_by_seasonal_lag_recovers_old_lag_semantics' ELSE error(
+    'FAIL diff_by_seasonal_lag_recovers_old_lag_semantics'
+) END AS result;
+
+CREATE OR REPLACE TABLE section7_fill AS
+SELECT 'A' AS id, (DATE '2024-01-01' + INTERVAL (i) DAY) AS ds, v AS y
+FROM (VALUES (0, 1.0), (1, NULL), (2, 3.0), (3, NULL), (4, 5.0)) t(i, v);
+
+-- ts_fill_nulls_mean_by's per-group result equals a direct _ts_fill_nulls_mean
+-- call on the same ordered series (RUST-05): both dispatch to the same Rust
+-- fill_nulls_mean, so they must agree exactly.
+SELECT CASE WHEN (
+    SELECT list(filled_value ORDER BY ds) FROM ts_fill_nulls_mean_by('section7_fill', id, ds, y)
+) = _ts_fill_nulls_mean([1.0, NULL, 3.0, NULL, 5.0]::DOUBLE[])
+THEN 'PASS fill_nulls_mean_by_equals_rust_fill_nulls_mean' ELSE error(
+    'FAIL fill_nulls_mean_by_equals_rust_fill_nulls_mean'
+) END AS result;
+
 .print ''
 .print '============================================================================='
 .print 'ALL SECTIONS PASSED'

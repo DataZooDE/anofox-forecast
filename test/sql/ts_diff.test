@@ -53,9 +53,11 @@ SELECT COUNT(*) FROM ts_diff_by('diff_series', id, date, val, 2) WHERE diff_valu
 ----
 3
 
-# Second lag difference of linear series with slope 1 should be 2 (val[i] - val[i-2])
+# diff_order is now d-th order differencing, not lag-k (D-05, breaking change,
+# plan 12-07): the second-order difference of a LINEAR series (slope 1) is 0,
+# not the old lag-2 value 2.0. Verified against the built extension.
 query I
-SELECT ABS(diff_value - 2.0) < 0.01 FROM ts_diff_by('diff_series', id, date, val, 2) WHERE diff_value IS NOT NULL ORDER BY date LIMIT 1;
+SELECT ABS(diff_value - 0.0) < 0.01 FROM ts_diff_by('diff_series', id, date, val, 2) WHERE diff_value IS NOT NULL ORDER BY date LIMIT 1;
 ----
 true
 
@@ -68,12 +70,20 @@ CREATE TABLE quadratic_series AS
 SELECT 'X' AS id, ('2023-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS date, ((i+1)*(i+1))::DOUBLE AS val
 FROM generate_series(0, 4) AS t(i);
 
-# LAG-based second difference of quadratic series [(i+1)^2] gives increasing values
-# Values: [1, 4, 9, 16, 25] with LAG(2) diff: [NULL, NULL, 8, 12, 16]
+# diff_order=2, default seasonal_lag=1 (D-05): the d-th order (not lag-k)
+# second difference of a quadratic series [(i+1)^2] = [1,4,9,16,25] is the
+# constant second derivative 2.0 for every row once two rows are available.
+# The old lag-2 reading of this same call ([NULL, NULL, 8, 12, 16]) is now
+# reached via seasonal_lag := 2 instead (see ts_series_transforms_rust.test).
 query I
 SELECT COUNT(*) FROM ts_diff_by('quadratic_series', id, date, val, 2) WHERE diff_value IS NOT NULL;
 ----
 3
+
+query I
+SELECT ABS(diff_value - 2.0) < 0.01 FROM ts_diff_by('quadratic_series', id, date, val, 2) WHERE diff_value IS NOT NULL ORDER BY date LIMIT 1;
+----
+true
 
 #######################################
 # Cleanup

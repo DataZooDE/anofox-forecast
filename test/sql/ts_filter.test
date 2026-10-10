@@ -30,6 +30,13 @@ UNION ALL SELECT 'C', '2023-01-03', 5.0;
 # ts_drop_constant - Filter Constant Series
 #######################################
 
+# ts_drop_constant_by now classifies via the Rust is_constant (D-09, plan
+# 12-07) instead of the old SQL MIN(val)!=MAX(val) rule. Series A/B/C below
+# have no near-constant or all-NULL edge cases, so the Rust and old SQL
+# rules agree and these assertions are unchanged; the all-NULL-group
+# breaking change (now dropped, previously kept) is covered by
+# ts_series_transforms_rust.test instead.
+
 # Should filter out constant series (C)
 query I
 SELECT COUNT(DISTINCT id) FROM ts_drop_constant_by('test_series', id, val);

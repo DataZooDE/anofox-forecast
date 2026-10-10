@@ -1,0 +1,3 @@
+docs/api/04-data-preparation.md	24	SYNOPSIS	ts_diff_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, diff_order INTEGER, 	Parser Error: syntax error at or near "ts_diff_by"
+docs/api/04-data-preparation.md	25	PASS	SELECT * FROM ts_diff_by('sales', product_id, date, quantity, 1);	
+plugins/anofox-forecast/skills/anofox-forecast-data-prep/SKILL.md	5	PASS	CREATE TABLE stationary AS	

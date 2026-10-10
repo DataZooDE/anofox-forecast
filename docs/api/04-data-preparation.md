@@ -85,7 +85,10 @@ SELECT * FROM ts_drop_short_by('nulls_filled', product_id, 20);
 
 ### ts_drop_constant_by
 
-Filters out series where all values are constant.
+Filters out series that classify as constant under the Rust `is_constant` check (Phase 12 D-09):
+fewer than two non-NULL values (**including an all-NULL group** — a breaking change from the
+old `MIN(value)=MAX(value)` SQL rule, which kept all-NULL groups), or all non-NULL values within
+`f64::EPSILON` absolute tolerance of each other.
 
 **Signature:**
 ```sql
@@ -233,7 +236,10 @@ ts_fill_nulls_backward_by(source VARCHAR, group_col COLUMN, date_col COLUMN, val
 
 ### ts_fill_nulls_mean_by
 
-Fills NULL values with the series mean.
+Fills NULL values with the series mean, computed by the Rust `fill_nulls_mean` (Phase 12
+RUST-05). `NaN` counts as missing (Phase 10 NaN = NULL convention), same as NULL: it is excluded
+from the mean and replaced by it. A group with no non-missing values at all keeps every value
+NULL (nothing to average). All source columns are preserved.
 
 **Signature:**
 ```sql
@@ -303,27 +309,40 @@ SELECT * FROM ts_fill_forward_by('sales', product_id, date, quantity, '2024-12-3
 
 ### ts_diff_by
 
-Computes differences of specified order per series.
+Computes the d-th order difference of each series in Rust (Phase 12 RUST-03, D-05/D-06):
+equivalent to numpy's `diff(x, n=diff_order)`, or R's `diff(x, lag=seasonal_lag,
+differences=diff_order)` when `seasonal_lag` is given. Output has one row per input row; the
+first `diff_order * seasonal_lag` rows of each group are NULL so dates stay aligned (D-06). Any
+difference that touches a NULL/NaN input anywhere along the way is NULL — never an error (this
+is the row-wise SQL policy, distinct from the single-series interior-NULL error rule used by
+diagnostics functions).
 
 **Signature:**
 ```sql
-ts_diff_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, diff_order INTEGER) → TABLE
+ts_diff_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, diff_order INTEGER, seasonal_lag := 1) → TABLE
 ```
 
 **Parameters:**
-- `diff_order`: Currently a **lag-k difference**, `y[t] - y[t-k]` — NOT iterative d-th order
-  differencing. `diff_order=2` gives `y[t] - y[t-2]` (a 2-period lag difference), not the
-  true 2nd-order difference `y[t] - 2*y[t-1] + y[t-2]`. If you need true d-th order
-  differencing, apply `ts_diff_by` with `diff_order=1` repeatedly, d times.
-  (fix planned for v0.10.0, Phase 12)
+- `diff_order`: Number of times the difference is applied (d-th order). `diff_order=2` gives the
+  true 2nd-order difference `y[t] - 2*y[t-1] + y[t-2]` (numpy `diff(n=2)`), not a lag-2 difference.
+- `seasonal_lag` (named, default `1`): the lag `k` used at each pass, `y[t] - y[t-k]`. Set
+  `seasonal_lag := 2` to recover the lag-k behaviour `ts_diff_by` used before Phase 12
+  (`diff_order=2` meant `y[t] - y[t-2]`, not true 2nd-order differencing).
+
+> **Breaking change (D-05):** Before Phase 12, `diff_order` meant a lag-k difference
+> (`y[t] - y[t-k]`), not iterative d-th order differencing. If you depended on the old lag
+> behaviour, pass the same value as `seasonal_lag` instead and set `diff_order := 1`.
 
 **Example:**
 ```sql
--- Compute first differences (lag-1): y[t] - y[t-1]
+-- First-order difference: y[t] - y[t-1]
 SELECT * FROM ts_diff_by('sales', product_id, date, quantity, 1);
 
--- Lag-2 difference: y[t] - y[t-2] -- NOT true second-order differencing
+-- True second-order difference: y[t] - 2*y[t-1] + y[t-2] (numpy diff(n=2))
 SELECT * FROM ts_diff_by('sales', product_id, date, quantity, 2);
+
+-- Old lag-2 reading (y[t] - y[t-2]): use seasonal_lag instead of diff_order=2
+SELECT * FROM ts_diff_by('sales', product_id, date, quantity, 1, seasonal_lag := 2);
 ```
 
 ---
