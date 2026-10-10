@@ -110,3 +110,5 @@ scope boundary). Not fixed here.
   Phase 18) per the existing Phase 18 note in the project roadmap -- not re-scoped here
   since this plan only owned the MASE/MAPE policy change (D-07/D-08), not a
   table-function-wide missing-data-policy migration.
+
+- **WR-05 (code review iteration 3, open):** `ts_data_quality_summary`: a group whose dates are all NULL gets a NULL quality struct. It is counted in `n_total` but left out of `n_good`/`n_fair`/`n_poor`/`avg_score`, so the summary looks better than it is. See 13-REVIEW.md / 13-REVIEW-FIX.md. Target: before milestone close (Phase 18 regression suite at the latest).
