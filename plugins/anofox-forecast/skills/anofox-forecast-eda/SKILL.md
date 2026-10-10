@@ -25,7 +25,7 @@ Understand your data before modelling it: per-series statistics, data-quality sc
 
 ```sql
 ts_stats(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
-         frequency VARCHAR) → TABLE
+         frequency VARCHAR, seasonal_period := 0) → TABLE
 ```
 
 Returns 36 columns: `length`, `n_nulls`, `n_nan`, `n_zeros`, `n_positive`, `n_negative`, `n_unique_values`, `is_constant`, `n_zeros_start`, `n_zeros_end`, `plateau_size`, `plateau_size_nonzero`, `mean`, `median`, `std_dev`, `variance`, `min`, `max`, `range`, `sum`, `skewness`, `kurtosis`, `tail_index`, `bimodality_coef`, `trimmed_mean`, `coef_variation`, `q1`, `q3`, `iqr`, `autocorr_lag1`, `trend_strength`, `seasonality_strength`, `entropy`, `stability`, plus date-derived `expected_length`, `n_gaps`, and `n_gap_runs`.
@@ -36,7 +36,8 @@ uses the SAS small-sample formula; `entropy` is now Pincus (1991) approximate en
 (`m=2`, `r=0.2*sample sd`; `NULL` for an interior-missing or fewer-than-3-present series) —
 previously a 10-bin Shannon entropy; `n_gaps` is now the number of **missing periods**
 (previously gap *occurrences*) — the old occurrence count is the new `n_gap_runs` column.
-`trend_strength`/`seasonality_strength` are unchanged in this plan (Phase 13 plan 13-02).
+`trend_strength`/`seasonality_strength` are now STL-based (`F_T`/`F_S`, Wang/Hyndman) via a
+new `seasonal_period` parameter (see "Strength thresholds" below).
 
 ```sql
 -- Every stat for every series
@@ -47,6 +48,10 @@ SELECT product_id, length, n_nulls, n_gaps, n_gap_runs, trend_strength, seasonal
 FROM ts_stats('sales', product_id, ds, y, '1d')
 WHERE length < 30 OR n_gaps > 0
 ORDER BY n_gaps DESC;
+
+-- Explicit weekly period instead of auto-detection
+SELECT product_id, trend_strength, seasonality_strength
+FROM ts_stats('sales', product_id, ds, y, '1d', seasonal_period := 7);
 ```
 
 ### `ts_stats_agg` (aggregate)
@@ -352,7 +357,23 @@ FROM sales GROUP BY id;
 
 - **`ts_stats` and `ts_data_quality` are TABLE functions** — call from FROM, not SELECT. Older docs incorrectly showed them as scalars over `LIST(...)`.
 - **`_agg` variants take `(date, value)` directly** — no `LIST()` wrapping. Wrapping in `LIST(...)` errors as "No function matches …".
-- **`trend_strength` / `seasonality_strength` formulas**: `trend_strength` is `|r|` (absolute Pearson correlation) of a linear fit against the series index — not a decomposition-based strength. `seasonality_strength` is `max(|ACF|)` over lags 2, 4, 7, and 12 only — it will miss seasonality at other periods. Neither has an officially-defined "strong"/"weak" threshold; validate any cutoff you use against your own data rather than assuming > 0.6 / < 0.2. (fix planned for v0.10.0, Phase 13)
+- **`trend_strength` / `seasonality_strength` formulas (v0.10.0, STAT-02, D-02)**: both are
+  Wang/Hyndman STL decomposition strengths from an R-faithful STL —
+  `trend_strength = max(0, 1 - Var(R)/Var(T+R))`,
+  `seasonality_strength = max(0, 1 - Var(R)/Var(S+R))` — computed via
+  `stats::stl` (one period), the `forecast::mstl` iteration (several periods,
+  reporting the **maximum** per-period strength), or a `supsmu` trend when no
+  period is usable. The period comes from the new `seasonal_period` parameter
+  (`0` auto-detects, `1` forces non-seasonal, `>= 2` is explicit).
+  `seasonality_strength` is `NULL` when no period is usable (none detected,
+  `seasonal_period := 1`, or `n <= 2 * seasonal_period`) or when the series
+  decomposes to zero seasonal variance (e.g. a constant series).
+  **Rule-of-thumb thresholds** (heuristics, not statistical tests — validate
+  against your own data): **below 0.3** weak, **0.3 to 0.6** moderate, **0.6
+  and above** strong. Example: the audit's 150-point random walk gives
+  `seasonality_strength` about 0.09 (weak, matching "mostly noise");
+  `AirPassengers` gives about 0.94 (strong, matching its well-known yearly
+  cycle).
 - **JSON extension is required** by a subset of quality / feature functions. Enable auto-load once per session: `SET autoinstall_known_extensions=1; SET autoload_known_extensions=1;`.
 - **`ts_r2(DOUBLE[] actual, DOUBLE[] predicted) → DOUBLE`** is a scalar **regression R² metric**, not an EDA statistic — it lives with the scalar metrics family in `anofox-forecast-backtest`. Use it under `GROUP BY` to score fit quality, e.g. `SELECT ts_r2([1.0,2,3,4], [1.1,2.0,2.9,4.2]);`.
 - **`ts_features_agg` / `ts_features` / `ts_features_by` share one Rust NULL policy** (Phase 12, D-11): a NULL-valued row is no longer spliced out independently — leading/trailing NULLs are trimmed, an interior NULL is a hard error naming its 1-based position, and an all-NULL series returns NULL (the whole struct for the aggregate, a row of NULL feature columns for the table function). All three surfaces agree on the same series.

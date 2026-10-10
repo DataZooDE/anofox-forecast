@@ -351,7 +351,7 @@ FROM ts_detect_changepoints_by('sales', product_id, ds, y, MAP{'hazard_lambda': 
 WHERE is_changepoint;
 ```
 
-See also: `anofox-forecast-data-prep` (fill gaps before detection — needs regular grid), `anofox-forecast-eda` (`trend_strength` / `seasonality_strength` gate the need for detection), `anofox-forecast-models` (pass detected `seasonal_period` to `ts_forecast_by`).
+See also: `anofox-forecast-data-prep` (fill gaps before detection — needs regular grid), `anofox-forecast-eda` (`ts_stats`'s STL-based `trend_strength` / `seasonality_strength`, D-02, gate the need for detection — 0.3/0.6 rule-of-thumb thresholds, consistent with this skill's own strength measures), `anofox-forecast-models` (pass detected `seasonal_period` to `ts_forecast_by` or to `ts_stats`'s own `seasonal_period` parameter).
 
 Reference docs:
 - `docs/api/05-period-detection.md`

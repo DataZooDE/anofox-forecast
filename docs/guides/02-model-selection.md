@@ -18,20 +18,14 @@ The extension provides 36 forecasting models. This guide helps you select the ri
 ### Step 1: Understand Your Data
 
 ```sql
--- Check basic statistics and patterns
-SELECT
-    product_id,
-    (ts_stats(LIST(quantity ORDER BY date))).*
-FROM sales
-GROUP BY product_id;
+-- Check basic statistics and patterns (ts_stats is a table macro, not a scalar
+-- function -- call it with FROM, not inline in a SELECT list)
+SELECT * FROM ts_stats('sales', product_id, date, quantity, '1d');
 
--- Detect seasonality
-SELECT
-    product_id,
-    (ts_detect_periods(LIST(quantity ORDER BY date))).primary_period AS detected_period,
-    (ts_stats(LIST(quantity ORDER BY date))).trend_strength AS trend
-FROM sales
-GROUP BY product_id;
+-- Decomposition-based trend/seasonal strength with an explicit weekly period
+-- (seasonal_period := 0, the default, auto-detects the period instead)
+SELECT product_id, trend_strength, seasonality_strength
+FROM ts_stats('sales', product_id, date, quantity, '1d', seasonal_period := 7);
 ```
 
 ### Step 2: Match Characteristics to Models

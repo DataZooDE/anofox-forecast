@@ -36,7 +36,8 @@ Compute statistics for multiple time series grouped by identifier.
 
 **Signature:**
 ```sql
-ts_stats_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, frequency VARCHAR) → TABLE
+ts_stats_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, frequency VARCHAR,
+            seasonal_period := 0) → TABLE
 ```
 
 **Parameters:**
@@ -47,6 +48,7 @@ ts_stats_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
 | `date_col` | COLUMN | Date/timestamp column |
 | `value_col` | COLUMN | Value column |
 | `frequency` | VARCHAR | Data frequency (`'1d'`, `'1h'`, `'1w'`, `'1mo'`) |
+| `seasonal_period` | INTEGER | Period used for `trend_strength`/`seasonality_strength` (default `0`): `0` auto-detects via autocorrelation (same detector forecasting uses); `1` means "non-seasonal" (no period at all); `>= 2` uses that period explicitly. Negative values raise an error. |
 
 **Returns:**
 | Column | Type | Description |
@@ -82,8 +84,8 @@ ts_stats_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
 | `q3` | DOUBLE | Third quartile |
 | `iqr` | DOUBLE | Interquartile range |
 | `autocorr_lag1` | DOUBLE | Autocorrelation at lag 1 |
-| `trend_strength` | DOUBLE | `\|r\|` (absolute Pearson correlation) of a linear fit of the series against its index — not a decomposition-based trend strength; no fixed "strong trend" threshold is defined (fix planned for v0.10.0, Phase 13) |
-| `seasonality_strength` | DOUBLE | `max(\|ACF\|)` over lags 2, 4, 7, and 12 only — not a general seasonal-strength decomposition and not sensitive to other periods; no fixed "strong seasonality" threshold is defined (fix planned for v0.10.0, Phase 13) |
+| `trend_strength` | DOUBLE | Wang/Hyndman STL trend strength: `F_T = max(0, 1 - Var(R)/Var(T+R))` from an R-faithful STL decomposition (`stats::stl`, `s.window = 11`, for one usable period; the `forecast::mstl` iteration for several; `stats::supsmu(seq_len(n), x)` trend when no period is usable). `0` for a zero-variance series. `NULL` when the series has an interior-missing value. |
+| `seasonality_strength` | DOUBLE | Wang/Hyndman STL seasonal strength: `F_S = max(0, 1 - Var(R)/Var(S+R))`, the **maximum** over every usable period when `seasonal_period := 0` resolves to several (per-period values are not exposed as separate columns — this is "how strong is the strongest seasonal component"). `NULL` when no period is usable (none detected, `seasonal_period := 1`, or the series is too short for the period: `n <= 2 * seasonal_period`), when the per-period variance ratio is `0/0` (e.g. a constant series), or when the series has an interior-missing value. |
 | `entropy` | DOUBLE | Pincus (1991) approximate entropy (ApEn), `m=2`, `r=0.2 * sample standard deviation`, Chebyshev distance, self-match included. `NULL` when fewer than 3 present values remain after trimming leading/trailing NULLs, or when an interior value is missing/NaN. A constant series gives `0.0`. |
 | `stability` | DOUBLE | Stability measure |
 | `expected_length` | UBIGINT | Expected observations based on date range and frequency. Identity: `expected_length = n_distinct_observed_periods + n_gaps`. |
@@ -115,6 +117,13 @@ SELECT
     CASE WHEN n_gaps > 0 THEN 'Has gaps' ELSE 'Complete' END AS status
 FROM ts_stats_by('sales', product_id, date, quantity, '1d')
 WHERE n_gaps > 0;
+
+-- STL-based trend/seasonal strength with an explicit weekly period (seasonal_period := 7)
+SELECT
+    product_id,
+    trend_strength,
+    seasonality_strength
+FROM ts_stats_by('sales', product_id, date, quantity, '1d', seasonal_period := 7);
 ```
 
 > **Alias:** `ts_stats` is an alias for `ts_stats_by`
@@ -125,6 +134,8 @@ frequency from the data's own timestamps (`expected_length`/`n_gaps`/`n_gap_runs
 no longer always `NULL`); keeps `NULL`-valued rows (counted in `n_nulls`, position
 preserved in the date-ordered series — matching `ts_stats_by`); and skips only rows
 whose **timestamp** is `NULL` (they cannot be placed in time).
+`ts_stats_agg` has no `seasonal_period` argument — `trend_strength`/`seasonality_strength`
+always auto-detect the period (equivalent to `ts_stats_by(..., seasonal_period := 0)`).
 
 ```sql
 SELECT product_id,

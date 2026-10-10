@@ -197,6 +197,22 @@ use the semver numbering this project started with.
   frequency from its own timestamps (previously always reported `NULL` date metrics), and
   keeps `NULL`-valued rows (counted in `n_nulls`, position preserved) instead of silently
   dropping them (Phase 12 deferred item (a)) — only a `NULL` **timestamp** is skipped.
+- **`ts_stats`/`ts_stats_by`/`ts_stats_agg` `trend_strength`/`seasonality_strength` are now
+  Wang/Hyndman STL decomposition strengths (STAT-02, Phase 13 plan 13-02, D-02)**, computed
+  from an R-faithful port of `stats::stl` (Cleveland et al. 1990) and `stats::supsmu`
+  (Friedman's super smoother) — the crate's own STL (`anofox_forecast::seasonality::stl::STL`,
+  0.15.3) uses a degree-0 kernel smoother with truncated windows and no cycle-subseries
+  extension, and does not reproduce `stats::stl`: `F_T = max(0, 1 - Var(R)/Var(T+R))`,
+  `F_S = max(0, 1 - Var(R)/Var(S+R))`, replacing the old ad-hoc `|r|`-of-a-linear-fit trend
+  strength and `max(|ACF|)`-at-lags-2/4/7/12 seasonality strength. A new `seasonal_period`
+  parameter (`ts_stats`/`ts_stats_by`, default `0`) selects `0` = auto-detect, `1` =
+  non-seasonal, `>= 2` = explicit period; `ts_stats_agg` has no period argument and always
+  auto-detects. Several periods use the `forecast::mstl` iteration, reporting the **maximum**
+  per-period `F_S_i`. Both strengths are now `NULL`-able: `seasonality_strength` is `NULL`
+  when no period is usable (none detected, `seasonal_period := 1`, or `n <= 2 * period`) or
+  the series has zero seasonal variance; `trend_strength` is `NULL` only for an
+  interior-missing series. On the audit's 150-point random walk, `seasonality_strength` is
+  now about 0.09 (previously 0.96 under the old lag-peak formula).
 
 ### Added
 
