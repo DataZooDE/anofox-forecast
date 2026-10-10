@@ -38,8 +38,8 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 ### Wrapper Bug Fixes
 
 - [ ] **WRAP-01**: fdars calls in detrending.rs and seasonality.rs pass the series correctly; `ts_detrend`, `ts_detrend_by`, `ts_decompose_seasonal`, `classify_seasonality`, amplitude-modulation return non-trivial results matching numpy `polyfit` / reference; `'quadratic'` maps to polynomial degree 2 or errors [B1–B3].
-- [ ] **WRAP-02**: `ts_data_quality_by` passes dates, frequency and n_short; gap/temporal scores reflect real gaps; `find_mode` ties are deterministic [E6, E7].
-- [ ] **WRAP-03**: `detect_frequency` is deterministic on ties and its unit (µs) is documented correctly; monthly/quarterly/yearly gap fill preserves month-end alignment [G23, G24].
+- [x] **WRAP-02**: `ts_data_quality_by` passes dates, frequency and n_short; gap/temporal scores reflect real gaps; `find_mode` ties are deterministic [E6, E7].
+- [x] **WRAP-03**: `detect_frequency` is deterministic on ties and its unit (µs) is documented correctly; monthly/quarterly/yearly gap fill preserves month-end alignment [G23, G24].
 
 ### Statistics Out of C++/SQL (Marshalling)
 
@@ -56,12 +56,12 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 
 ### Core Statistics (stats.rs, quality.rs, metrics.rs)
 
-- [ ] **STAT-01**: `ts_stats` skewness/kurtosis equal scipy `skew(bias=False)` / `kurtosis(bias=False)`; bimodality coefficient uses the SAS small-sample formula [E1, E2].
-- [ ] **STAT-02**: Trend and seasonal strength use the Wang/Hyndman STL definitions (F_T, F_S) matching R `feasts`/manual STL reference; EDA skill thresholds updated [E3].
-- [ ] **STAT-03**: Entropy and n_gaps semantics are correct and documented (missing periods vs gap intervals both available or clearly named) [E4, E5].
-- [ ] **STAT-04**: `behavioral_score` design reviewed; scoring no longer penalises predictable smooth series without rationale, documented [E8].
-- [ ] **STAT-05**: MAPE zero-actual policy explicit (NULL or documented exclusion with count) [E9].
-- [ ] **STAT-06**: MASE is Hyndman-Koehler (scaled by in-sample seasonal-naive MAE with a seasonal-period parameter); the old relative-MAE behaviour stays available as `rmae` only [E10].
+- [x] **STAT-01**: `ts_stats` skewness/kurtosis equal scipy `skew(bias=False)` / `kurtosis(bias=False)`; bimodality coefficient uses the SAS small-sample formula [E1, E2].
+- [x] **STAT-02**: Trend and seasonal strength use the Wang/Hyndman STL definitions (F_T, F_S) matching R `feasts`/manual STL reference; EDA skill thresholds updated [E3].
+- [x] **STAT-03**: Entropy and n_gaps semantics are correct and documented (missing periods vs gap intervals both available or clearly named) [E4, E5].
+- [x] **STAT-04**: `behavioral_score` design reviewed; scoring no longer penalises predictable smooth series without rationale, documented [E8].
+- [x] **STAT-05**: MAPE zero-actual policy explicit (NULL or documented exclusion with count) [E9].
+- [x] **STAT-06**: MASE is Hyndman-Koehler (scaled by in-sample seasonal-naive MAE with a seasonal-period parameter); the old relative-MAE behaviour stays available as `rmae` only [E10].
 
 ### Features (features.rs, tsfresh parity)
 
@@ -145,8 +145,8 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 | FCST-08 | Phase 10 | Complete |
 | FCST-09 | Phase 17 | Pending |
 | WRAP-01 | Phase 15 | Pending |
-| WRAP-02 | Phase 13 | Pending |
-| WRAP-03 | Phase 13 | Pending |
+| WRAP-02 | Phase 13 | Complete |
+| WRAP-03 | Phase 13 | Complete |
 | RUST-01 | Phase 12 | Complete |
 | RUST-02 | Phase 12 | Complete |
 | RUST-03 | Phase 12 | Complete |
@@ -157,12 +157,12 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 | RUST-08 | Phase 12 | Complete |
 | RUST-09 | Phase 12 | Complete |
 | RUST-10 | Phase 18 | Pending |
-| STAT-01 | Phase 13 | Pending |
-| STAT-02 | Phase 13 | Pending |
-| STAT-03 | Phase 13 | Pending |
-| STAT-04 | Phase 13 | Pending |
-| STAT-05 | Phase 13 | Pending |
-| STAT-06 | Phase 13 | Pending |
+| STAT-01 | Phase 13 | Complete |
+| STAT-02 | Phase 13 | Complete |
+| STAT-03 | Phase 13 | Complete |
+| STAT-04 | Phase 13 | Complete |
+| STAT-05 | Phase 13 | Complete |
+| STAT-06 | Phase 13 | Complete |
 | FEAT-01 | Phase 14 | Pending |
 | FEAT-02 | Phase 14 | Pending |
 | FEAT-03 | Phase 14 | Pending |
