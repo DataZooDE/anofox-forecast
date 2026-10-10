@@ -56,6 +56,7 @@ struct TsAggregateHierarchyBindData : public TableFunctionData {
 struct TsAggHierRowData {
     int64_t date_micros;
     double value;
+    bool valid;
     vector<string> id_values;
 };
 
@@ -63,6 +64,7 @@ struct TsAggHierOutputRow {
     string unique_id;
     int64_t date_micros;
     double value;
+    bool any_valid;
 };
 
 // ============================================================================
@@ -288,7 +290,8 @@ static OperatorResultType TsAggregateHierarchyInOut(
                 break;
         }
 
-        row.value = value_val.IsNull() ? 0.0 : value_val.GetValue<double>();
+        row.valid = !value_val.IsNull();
+        row.value = row.valid ? value_val.GetValue<double>() : 0.0;
 
         // Extract all ID column values
         for (idx_t i = 0; i < bind_data.num_id_cols; i++) {
@@ -342,8 +345,12 @@ static OperatorFinalizeResultType TsAggregateHierarchyFinalize(
 
     if (!gstate.processed) {
         // Build aggregation for each hierarchy level
-        // Key: unique_id -> (date -> sum)
-        std::map<string, std::map<int64_t, double>> aggregations;
+        // Key: unique_id -> (date -> {sum of present values, any_valid})
+        struct AggCell {
+            double sum = 0.0;
+            bool any_valid = false;
+        };
+        std::map<string, std::map<int64_t, AggCell>> aggregations;
 
         for (const auto& row : gstate.rows) {
             // Generate unique_id for each hierarchy level (0 to num_id_cols)
@@ -356,7 +363,11 @@ static OperatorFinalizeResultType TsAggregateHierarchyFinalize(
                     bind_data.num_id_cols
                 );
 
-                aggregations[unique_id][row.date_micros] += row.value;
+                auto &cell = aggregations[unique_id][row.date_micros];
+                if (row.valid) {
+                    cell.sum += row.value;
+                    cell.any_valid = true;
+                }
             }
         }
 
@@ -367,7 +378,8 @@ static OperatorFinalizeResultType TsAggregateHierarchyFinalize(
                 TsAggHierOutputRow out_row;
                 out_row.unique_id = unique_id;
                 out_row.date_micros = date_entry.first;
-                out_row.value = date_entry.second;
+                out_row.value = date_entry.second.sum;
+                out_row.any_valid = date_entry.second.any_valid;
                 gstate.results.push_back(std::move(out_row));
             }
         }
@@ -413,8 +425,10 @@ static OperatorFinalizeResultType TsAggregateHierarchyFinalize(
                 break;
         }
 
-        // Column 2: value
-        output.SetValue(2, output_idx, Value::DOUBLE(result.value));
+        // Column 2: value — SQL SUM semantics: NULL when no leaf value was present,
+        // otherwise the sum of the present values (no NULL->0 imputation).
+        output.SetValue(2, output_idx,
+            result.any_valid ? Value::DOUBLE(result.value) : Value(LogicalType::DOUBLE));
 
         output_idx++;
         gstate.current_result++;

@@ -175,10 +175,25 @@ ts_aggregate_hierarchy(
 
 **Input Table:**
 - First column: Date/timestamp column
-- Second column: Value column (will be summed at each aggregation level). `NULL` values are
-  currently treated as `0` when summed — a NULL does not propagate to NULL or get excluded,
-  it silently contributes zero to the aggregate. (fix planned for v0.10.0, Phase 12)
+- Second column: Value column, summed at each aggregation level using exact SQL `SUM` NULL
+  semantics: a group whose leaves are **all** `NULL` for a given date aggregates to `NULL`
+  (no `NULL -> 0` imputation); a **partially-NULL** group aggregates to the sum of only its
+  present (non-`NULL`) leaf values.
 - Columns 3+: ID columns (broadest to finest granularity) - **any number of columns**
+
+Example — `S1` has leaves `A=10.0` and `B=NULL`; `S2` has only leaf `C=NULL`:
+```sql
+SELECT unique_id, quantity FROM ts_aggregate_hierarchy(
+    (SELECT sale_date, quantity, store_id, item_id FROM (VALUES
+        ('S1', 'A', DATE '2024-01-01', 10.0),
+        ('S1', 'B', DATE '2024-01-01', NULL),
+        ('S2', 'C', DATE '2024-01-01', NULL)
+     ) AS t(store_id, item_id, sale_date, quantity)),
+    MAP{}
+) WHERE unique_id IN ('S1|AGGREGATED', 'S2|AGGREGATED');
+-- S1|AGGREGATED -> 10.0 (sum of the one present leaf)
+-- S2|AGGREGATED -> NULL (no leaf was present)
+```
 
 **Parameters (optional MAP{}):**
 - `separator`: Character(s) to join ID parts (default: `'|'`)
