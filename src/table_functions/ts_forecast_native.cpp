@@ -1,5 +1,6 @@
 #include "ts_forecast_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For ParseFrequencyToSeconds, etc.
+#include "ts_future_dates.hpp"     // StepFromFrequency, ComputeFutureDates (D-12)
 #include "anofox_fcst_ffi.h"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -637,11 +638,11 @@ static OperatorFinalizeResultType TsForecastNativeFinalize(
 
             vector<double> sorted_values(grp.values.size());
             vector<bool> sorted_validity(grp.validity.size());
-            int64_t last_date = 0;
+            vector<int64_t> sorted_dates(grp.dates.size());
             for (size_t i = 0; i < indices.size(); i++) {
                 sorted_values[i] = grp.values[indices[i]];
                 sorted_validity[i] = grp.validity[indices[i]];
-                last_date = grp.dates[indices[i]];
+                sorted_dates[i] = grp.dates[indices[i]];
             }
 
             // Build validity bitmask for Rust
@@ -736,61 +737,26 @@ static OperatorFinalizeResultType TsForecastNativeFinalize(
                 continue;
             }
 
-            // Generate output rows with calendar-aware date arithmetic
+            // Forecast dates computed via the Rust D-12 calendar rule
+            // (StepFromFrequency + ComputeFutureDates, plan 12-05/12-06)
+            // instead of this file's own month arithmetic and the
+            // day-of-month clamp it used to replicate per-call. Anchored on
+            // sorted_dates (every entry a real observation — NULL dates were
+            // skipped on ingestion).
+            int64_t step_months = 0;
+            int64_t step_micros = 0;
+            StepFromFrequency(bind_data.frequency_type, bind_data.frequency_seconds, bind_data.frequency_is_raw,
+                               bind_data.date_col_type, step_months, step_micros);
+            vector<int64_t> future_ts =
+                ComputeFutureDates(sorted_dates, fcst_result.n_forecasts, step_months, step_micros);
+
+            // Generate output rows
             for (size_t i = 0; i < fcst_result.n_forecasts; i++) {
                 ForecastOutputRow row;
                 row.group_key = group_key;
                 row.group_value = grp.group_value;
                 row.forecast_step = static_cast<int64_t>(i + 1);
-
-                // Compute forecast date based on frequency type
-                int64_t steps = static_cast<int64_t>(i + 1);
-                if (bind_data.frequency_type == FrequencyType::MONTHLY ||
-                    bind_data.frequency_type == FrequencyType::QUARTERLY ||
-                    bind_data.frequency_type == FrequencyType::YEARLY) {
-                    // Calendar-aware date arithmetic for monthly/quarterly/yearly
-                    date_t base_date = MicrosecondsToDate(last_date);
-                    int32_t year, month, day;
-                    Date::Convert(base_date, year, month, day);
-
-                    // Calculate months to add
-                    int64_t months_to_add = steps * bind_data.frequency_seconds;
-                    if (bind_data.frequency_type == FrequencyType::QUARTERLY) {
-                        months_to_add *= 3;
-                    } else if (bind_data.frequency_type == FrequencyType::YEARLY) {
-                        months_to_add *= 12;
-                    }
-
-                    // Add months with proper year/month rollover
-                    int64_t total_months = static_cast<int64_t>(year) * 12 + (month - 1) + months_to_add;
-                    int32_t new_year = static_cast<int32_t>(total_months / 12);
-                    int32_t new_month = static_cast<int32_t>((total_months % 12) + 1);
-
-                    // Handle month overflow for months < 1
-                    if (new_month < 1) {
-                        new_month += 12;
-                        new_year -= 1;
-                    }
-
-                    // Clamp day to valid range for the new month
-                    int32_t max_day = Date::MonthDays(new_year, new_month);
-                    int32_t new_day = std::min(day, max_day);
-
-                    date_t new_date = Date::FromDate(new_year, new_month, new_day);
-                    row.date = DateToMicroseconds(new_date);
-                } else {
-                    // Fixed frequency (days, hours, etc.) - simple arithmetic
-                    int64_t freq_micros;
-                    if (bind_data.date_col_type == DateColumnType::INTEGER ||
-                        bind_data.date_col_type == DateColumnType::BIGINT) {
-                        freq_micros = bind_data.frequency_seconds;
-                    } else {
-                        freq_micros = bind_data.frequency_is_raw
-                            ? bind_data.frequency_seconds * 86400LL * 1000000LL
-                            : bind_data.frequency_seconds * 1000000LL;
-                    }
-                    row.date = last_date + freq_micros * steps;
-                }
+                row.date = future_ts[i];
 
                 row.point_forecast = fcst_result.point_forecasts[i];
                 // lower_bounds / upper_bounds are null when the model does not provide

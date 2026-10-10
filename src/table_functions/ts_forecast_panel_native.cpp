@@ -1,5 +1,6 @@
 #include "ts_forecast_panel_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // ParseFrequencyWithType, date helpers, DateColumnType
+#include "ts_future_dates.hpp"     // StepFromFrequency, ComputeFutureDates (D-12)
 #include "anofox_fcst_ffi.h"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -454,7 +455,16 @@ static OperatorFinalizeResultType TsForecastPanelNativeFinalize(
 
         vector<int64_t> shared_grid(all_dates_set.begin(), all_dates_set.end());
         size_t grid_len = shared_grid.size();
-        int64_t last_grid_date = shared_grid.back();
+
+        // Forecast dates computed via the Rust D-12 calendar rule
+        // (StepFromFrequency + ComputeFutureDates, plan 12-05/12-06) instead
+        // of this file's own month arithmetic + the day-of-month clamp this file used to replicate per-call.
+        // Same (step_months, step_micros) pair used by both stepping sites
+        // below — only the `observed` series (anchor date) differs.
+        int64_t step_months = 0;
+        int64_t step_micros = 0;
+        StepFromFrequency(bind_data.frequency_type, bind_data.frequency_seconds, bind_data.frequency_is_raw,
+                           bind_data.date_col_type, step_months, step_micros);
 
         // ------------------------------------------------------------------
         // 2. Align each series to shared_grid; apply drop rule (< 10 valid points)
@@ -496,46 +506,18 @@ static OperatorFinalizeResultType TsForecastPanelNativeFinalize(
             size_t valid_count = date_to_value.size();
 
             if (valid_count < MIN_VALID_COUNT) {
-                // Drop: emit DROPPED rows for each horizon step
-                // Compute forecast dates from the last observed date of the series
-                int64_t series_last_date = grp.dates.back();
+                // Drop: emit DROPPED rows for each horizon step. Forecast
+                // dates are anchored on this series' own observed dates
+                // (grp.dates — already sorted ascending, NULL dates were
+                // skipped on ingestion so every entry is a real observation).
+                vector<int64_t> future_ts =
+                    ComputeFutureDates(grp.dates, static_cast<idx_t>(bind_data.horizon), step_months, step_micros);
                 for (int64_t h = 1; h <= bind_data.horizon; h++) {
                     PanelOutputRow row;
                     row.group_key = group_key;
                     row.group_value = grp.group_value;
                     row.forecast_step = h;
-
-                    // Compute date using calendar-aware arithmetic (copy from ts_forecast_native.cpp:682-730)
-                    int64_t steps = static_cast<int64_t>(h);
-                    if (bind_data.frequency_type == FrequencyType::MONTHLY ||
-                        bind_data.frequency_type == FrequencyType::QUARTERLY ||
-                        bind_data.frequency_type == FrequencyType::YEARLY) {
-                        date_t base_date = MicrosecondsToDate(series_last_date);
-                        int32_t year, month, day;
-                        Date::Convert(base_date, year, month, day);
-                        int64_t months_to_add = steps * bind_data.frequency_seconds;
-                        if (bind_data.frequency_type == FrequencyType::QUARTERLY) months_to_add *= 3;
-                        else if (bind_data.frequency_type == FrequencyType::YEARLY) months_to_add *= 12;
-                        int64_t total_months = static_cast<int64_t>(year) * 12 + (month - 1) + months_to_add;
-                        int32_t new_year = static_cast<int32_t>(total_months / 12);
-                        int32_t new_month = static_cast<int32_t>((total_months % 12) + 1);
-                        if (new_month < 1) { new_month += 12; new_year -= 1; }
-                        int32_t max_day = Date::MonthDays(new_year, new_month);
-                        int32_t new_day = std::min(day, max_day);
-                        row.date = DateToMicroseconds(Date::FromDate(new_year, new_month, new_day));
-                    } else {
-                        int64_t freq_micros;
-                        if (bind_data.date_col_type == DateColumnType::INTEGER ||
-                            bind_data.date_col_type == DateColumnType::BIGINT) {
-                            freq_micros = bind_data.frequency_seconds;
-                        } else {
-                            freq_micros = bind_data.frequency_is_raw
-                                ? bind_data.frequency_seconds * 86400LL * 1000000LL
-                                : bind_data.frequency_seconds * 1000000LL;
-                        }
-                        row.date = series_last_date + freq_micros * steps;
-                    }
-
+                    row.date = future_ts[h - 1];
                     row.date_null = false;  // date was computed from last observed date
                     row.point_forecast = std::numeric_limits<double>::quiet_NaN();
                     row.model_name = "DROPPED: too_short";
@@ -626,6 +608,11 @@ static OperatorFinalizeResultType TsForecastPanelNativeFinalize(
         // 5. Emit output rows: n_kept × horizon rows
         // ------------------------------------------------------------------
 
+        // Shared future grid anchored at shared_grid.back() (same base the
+        // old code used) — computed once via the Rust D-12 calendar rule and
+        // reused for every kept series below.
+        vector<int64_t> future_ts = ComputeFutureDates(shared_grid, n_horizon, step_months, step_micros);
+
         for (size_t s = 0; s < n_kept; s++) {
             const auto &group_key = valid_keys[s];
             auto &grp = gstate.groups[group_key];
@@ -635,38 +622,7 @@ static OperatorFinalizeResultType TsForecastPanelNativeFinalize(
                 row.group_key   = group_key;
                 row.group_value = grp.group_value;
                 row.forecast_step = static_cast<int64_t>(h + 1);
-
-                // Calendar-aware date arithmetic anchored at shared_grid.back()
-                int64_t steps = static_cast<int64_t>(h + 1);
-                if (bind_data.frequency_type == FrequencyType::MONTHLY ||
-                    bind_data.frequency_type == FrequencyType::QUARTERLY ||
-                    bind_data.frequency_type == FrequencyType::YEARLY) {
-                    date_t base_date = MicrosecondsToDate(last_grid_date);
-                    int32_t year, month, day;
-                    Date::Convert(base_date, year, month, day);
-                    int64_t months_to_add = steps * bind_data.frequency_seconds;
-                    if (bind_data.frequency_type == FrequencyType::QUARTERLY) months_to_add *= 3;
-                    else if (bind_data.frequency_type == FrequencyType::YEARLY) months_to_add *= 12;
-                    int64_t total_months = static_cast<int64_t>(year) * 12 + (month - 1) + months_to_add;
-                    int32_t new_year = static_cast<int32_t>(total_months / 12);
-                    int32_t new_month = static_cast<int32_t>((total_months % 12) + 1);
-                    if (new_month < 1) { new_month += 12; new_year -= 1; }
-                    int32_t max_day = Date::MonthDays(new_year, new_month);
-                    int32_t new_day = std::min(day, max_day);
-                    row.date = DateToMicroseconds(Date::FromDate(new_year, new_month, new_day));
-                } else {
-                    int64_t freq_micros;
-                    if (bind_data.date_col_type == DateColumnType::INTEGER ||
-                        bind_data.date_col_type == DateColumnType::BIGINT) {
-                        freq_micros = bind_data.frequency_seconds;
-                    } else {
-                        freq_micros = bind_data.frequency_is_raw
-                            ? bind_data.frequency_seconds * 86400LL * 1000000LL
-                            : bind_data.frequency_seconds * 1000000LL;
-                    }
-                    row.date = last_grid_date + freq_micros * steps;
-                }
-
+                row.date = future_ts[h];
                 row.date_null = false;
                 row.point_forecast = panel_result.forecasts[s * n_horizon + h];
                 row.model_name     = model_name_str;

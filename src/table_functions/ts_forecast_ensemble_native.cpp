@@ -25,6 +25,7 @@
 #include "ts_forecast_ensemble_native.hpp"
 #include "anofox_forecast_extension.hpp"    // ExtensionLoader
 #include "ts_fill_gaps_native.hpp"          // ParseFrequencyWithType, DateColumnType, etc.
+#include "ts_future_dates.hpp"              // StepFromFrequency, ComputeFutureDates (D-12)
 #include "anofox_fcst_ffi.h"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
@@ -245,13 +246,20 @@ static void TsForecastEnsembleNativeExecute(DataChunk &args, ExpressionState &st
         auto &date_entry  = date_entries[date_idx];
         auto &date_child  = ListVector::GetEntry(date_list_vec);
 
-        // Build sorted index by date
+        // Build sorted index by date. date_is_null tracks which entries had a
+        // NULL date (date_micros[i]=0 is a placeholder, not a real
+        // 1970-01-01 observation) so the calendar `observed` series below
+        // never includes a NULL date disguised as epoch zero (D-12, plan
+        // 12-06).
         vector<int64_t> date_micros(n);
+        vector<bool> date_is_null(n);
         for (idx_t i = 0; i < n; i++) {
             Value dv = date_child.GetValue(date_entry.offset + i);
             if (dv.IsNull()) {
                 date_micros[i] = 0;
+                date_is_null[i] = true;
             } else {
+                date_is_null[i] = false;
                 switch (bind_data.date_col_type) {
                     case DateColumnType::DATE:
                         date_micros[i] = DateToMicroseconds(dv.GetValue<date_t>());
@@ -277,11 +285,14 @@ static void TsForecastEnsembleNativeExecute(DataChunk &args, ExpressionState &st
         std::sort(indices.begin(), indices.end(),
             [&date_micros](size_t a, size_t b) { return date_micros[a] < date_micros[b]; });
 
-        // Build sorted values + validity
+        // Build sorted values + validity, and the NON-NULL-date `observed`
+        // series (D-12) in the same ascending order — a subsequence of the
+        // already-sorted `indices`, so it stays ascending without a second sort.
         vector<double> sorted_values(n);
         size_t validity_words = (n + 63) / 64;
         vector<uint64_t> validity_bits(validity_words, 0);
-        int64_t last_date = 0;
+        vector<int64_t> observed;
+        observed.reserve(n);
 
         for (size_t i = 0; i < n; i++) {
             idx_t src       = indices[i];
@@ -294,7 +305,13 @@ static void TsForecastEnsembleNativeExecute(DataChunk &args, ExpressionState &st
             } else {
                 sorted_values[i] = 0.0;
             }
-            last_date = date_micros[indices[i]];
+            if (!date_is_null[src]) {
+                observed.push_back(date_micros[src]);
+            }
+        }
+
+        if (observed.empty()) {
+            throw InvalidInputException("ts_forecast_ensemble_by: all date values are NULL for this group");
         }
 
         // --- Parse per-row parameters ---
@@ -375,37 +392,15 @@ static void TsForecastEnsembleNativeExecute(DataChunk &args, ExpressionState &st
         }
 
         // --- Build LIST(STRUCT(...)) result ---
-        // Helper lambda to compute forecast date for step i (calendar-aware)
-        auto compute_forecast_date = [&](int64_t step) -> int64_t {
-            if (freq_parsed == FrequencyType::MONTHLY ||
-                freq_parsed == FrequencyType::QUARTERLY ||
-                freq_parsed == FrequencyType::YEARLY) {
-                date_t base_date = MicrosecondsToDate(last_date);
-                int32_t year, month, day;
-                Date::Convert(base_date, year, month, day);
-                int64_t months_to_add = step * freq_seconds;
-                if (freq_parsed == FrequencyType::QUARTERLY)   months_to_add *= 3;
-                else if (freq_parsed == FrequencyType::YEARLY) months_to_add *= 12;
-                int64_t total_months = static_cast<int64_t>(year) * 12 + (month - 1) + months_to_add;
-                int32_t new_year  = static_cast<int32_t>(total_months / 12);
-                int32_t new_month = static_cast<int32_t>((total_months % 12) + 1);
-                if (new_month < 1) { new_month += 12; new_year -= 1; }
-                int32_t max_day  = Date::MonthDays(new_year, new_month);
-                int32_t new_day  = std::min(day, max_day);
-                return DateToMicroseconds(Date::FromDate(new_year, new_month, new_day));
-            } else {
-                int64_t freq_micros;
-                if (bind_data.date_col_type == DateColumnType::INTEGER ||
-                    bind_data.date_col_type == DateColumnType::BIGINT) {
-                    freq_micros = freq_seconds;
-                } else {
-                    freq_micros = freq_is_raw
-                        ? freq_seconds * 86400LL * 1000000LL
-                        : freq_seconds * 1000000LL;
-                }
-                return last_date + freq_micros * step;
-            }
-        };
+        // Forecast dates computed via the Rust D-12 calendar rule
+        // (StepFromFrequency + ComputeFutureDates, plan 12-05/12-06) instead
+        // of this file's own month arithmetic + the day-of-month clamp this file used to replicate per-call.
+        int64_t step_months = 0;
+        int64_t step_micros = 0;
+        StepFromFrequency(freq_parsed, freq_seconds, freq_is_raw, bind_data.date_col_type, step_months,
+                           step_micros);
+        vector<int64_t> future_ts =
+            ComputeFutureDates(observed, fcst_result.n_forecasts, step_months, step_micros);
 
         // Helper lambda to convert micros back to DuckDB Value based on date col type
         auto micros_to_date_value = [&](int64_t micros) -> Value {
@@ -423,7 +418,7 @@ static void TsForecastEnsembleNativeExecute(DataChunk &args, ExpressionState &st
 
         for (size_t i = 0; i < fcst_result.n_forecasts; i++) {
             int64_t step = static_cast<int64_t>(i + 1);
-            int64_t forecast_date = compute_forecast_date(step);
+            int64_t forecast_date = future_ts[i];
 
             child_list_t<Value> struct_values;
             struct_values.push_back(make_pair("forecast_step",
