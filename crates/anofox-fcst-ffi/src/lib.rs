@@ -4239,56 +4239,78 @@ impl IntoNonEmpty for String {
 // Data Quality Functions
 // ============================================================================
 
-/// Compute data quality metrics.
+/// Compute data quality metrics (D-05, WRAP-02): dates/frequency/n_short-aware,
+/// using the shared missing-period gap counter from plan 13-01.
+///
+/// `dates` may be null, meaning "no date information" -- `n_gaps`/`n_gap_runs` are
+/// `0` and `temporal_score` is `1.0`. When non-null it must have exactly `length`
+/// entries. `frequency_type == Fixed` with `frequency_micros <= 0` auto-detects the
+/// step from `dates`. `n_short` must be `>= 1` (`InvalidInput` otherwise, surfaced as
+/// `ErrorCode::InvalidInput`).
 ///
 /// # Safety
-/// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+/// `values` and `out_result` must be valid and non-null. `validity` and `dates` may
+/// be null (meaning all-valid / no dates respectively). `values` (and `dates`, when
+/// non-null) must have at least `length` elements.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_data_quality(
     values: *const c_double,
     validity: *const u64,
+    dates: *const i64,
     length: size_t,
+    frequency_micros: i64,
+    frequency_type: FrequencyType,
+    n_short: size_t,
     out_result: *mut DataQualityResult,
     out_error: *mut AnofoxError,
 ) -> bool {
-    if !out_error.is_null() {
-        *out_error = AnofoxError::success();
+    init_error(out_error);
+
+    let ptrs = &[
+        values as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
+        return false;
     }
 
-    if values.is_null() || out_result.is_null() {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
-        }
-        return false;
+    if length == 0 {
+        *out_result = DataQualityResult::default();
+        return true;
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let series = build_series(values, validity, length);
-        anofox_fcst_core::compute_data_quality(&series, None)
+        let dates_vec: Option<Vec<i64>> = if dates.is_null() {
+            None
+        } else {
+            Some(std::slice::from_raw_parts(dates, length).to_vec())
+        };
+        let freq_type: anofox_fcst_core::FrequencyType = frequency_type.into();
+        anofox_fcst_core::compute_data_quality(
+            &series,
+            dates_vec.as_deref(),
+            frequency_micros,
+            freq_type,
+            n_short,
+        )
     }));
 
     match result {
         Ok(Ok(quality)) => {
-            (*out_result).structural_score = quality.structural_score;
-            (*out_result).temporal_score = quality.temporal_score;
-            (*out_result).magnitude_score = quality.magnitude_score;
-            (*out_result).behavioral_score = quality.behavioral_score;
-            (*out_result).overall_score = quality.overall_score;
-            (*out_result).n_gaps = quality.n_gaps;
-            (*out_result).n_missing = quality.n_missing;
-            (*out_result).is_constant = quality.is_constant;
+            *out_result = quality.into();
             true
         }
         Ok(Err(e)) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
-            }
+            let code = match e {
+                anofox_fcst_core::ForecastError::InvalidInput(_) => ErrorCode::InvalidInput,
+                _ => ErrorCode::ComputationError,
+            };
+            set_error(out_error, code, &e.to_string());
             false
         }
         Err(_) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
-            }
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in Rust code");
             false
         }
     }

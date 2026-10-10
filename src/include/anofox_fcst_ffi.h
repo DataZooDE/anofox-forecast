@@ -1386,17 +1386,28 @@ typedef struct DataQualityResult {
      */
     double overall_score;
     /**
-     * Number of gaps
+     * Number of missing periods (D-04/D-05: expected timestamps absent under the
+     * declared/detected frequency) -- matches `TsStatsResult::n_gaps`'s meaning, not
+     * the pre-v0.10.0 "gap occurrence count" (see `n_gap_runs`).
      */
     size_t n_gaps;
     /**
-     * Number of missing values
+     * Number of gap occurrences/runs (D-05): the pre-v0.10.0 `n_gaps` meaning.
+     */
+    size_t n_gap_runs;
+    /**
+     * Number of missing values (NULL or NaN)
      */
     size_t n_missing;
     /**
      * Is constant series
      */
     bool is_constant;
+    /**
+     * Whether the present-value count is below the caller's `n_short` threshold
+     * (D-05, WRAP-02).
+     */
+    bool is_short;
 } DataQualityResult;
 
 /**
@@ -2798,14 +2809,27 @@ bool anofox_ts_forecast_explain(const double *values,
                                 struct AnofoxError *out_error);
 
 /**
- * Compute data quality metrics.
+ * Compute data quality metrics (D-05, WRAP-02): dates/frequency/n_short-aware,
+ * using the shared missing-period gap counter from plan 13-01.
+ *
+ * `dates` may be null, meaning "no date information" -- `n_gaps`/`n_gap_runs` are
+ * `0` and `temporal_score` is `1.0`. When non-null it must have exactly `length`
+ * entries. `frequency_type == Fixed` with `frequency_micros <= 0` auto-detects the
+ * step from `dates`. `n_short` must be `>= 1` (`InvalidInput` otherwise, surfaced as
+ * `ErrorCode::InvalidInput`).
  *
  * # Safety
- * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ * `values` and `out_result` must be valid and non-null. `validity` and `dates` may
+ * be null (meaning all-valid / no dates respectively). `values` (and `dates`, when
+ * non-null) must have at least `length` elements.
  */
 bool anofox_ts_data_quality(const double *values,
                             const uint64_t *validity,
+                            const int64_t *dates,
                             size_t length,
+                            int64_t frequency_micros,
+                            enum FrequencyType frequency_type,
+                            size_t n_short,
                             struct DataQualityResult *out_result,
                             struct AnofoxError *out_error);
 

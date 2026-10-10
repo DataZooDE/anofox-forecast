@@ -1,6 +1,8 @@
 //! Data quality assessment functions.
 
-use crate::error::Result;
+use crate::error::{ForecastError, Result};
+use crate::gaps::{gap_counts, resolve_gap_step};
+use crate::stats::FrequencyType;
 
 /// Data quality result for a single series.
 #[derive(Debug, Clone, Default)]
@@ -15,12 +17,24 @@ pub struct DataQuality {
     pub behavioral_score: f64,
     /// Overall quality score (0-1)
     pub overall_score: f64,
-    /// Number of gaps detected
+    /// Number of missing periods (D-04/D-05): expected timestamps absent under the
+    /// declared/detected frequency between the first and last observed date. This is
+    /// the "missing periods" meaning, matching `ts_stats`'s `n_gaps` (not the
+    /// pre-v0.10.0 "gap occurrence count" -- see [`DataQuality::n_gap_runs`]). Zero
+    /// when no `dates` were supplied or no step could be resolved.
     pub n_gaps: usize,
-    /// Number of missing values
+    /// Number of gap occurrences/runs (D-05): the pre-v0.10.0 `n_gaps` meaning --
+    /// count of consecutive-pair transitions with at least one missing period, not
+    /// the number of missing periods itself. Zero when no `dates` were supplied or
+    /// no step could be resolved.
+    pub n_gap_runs: usize,
+    /// Number of missing values (NULL or NaN, Phase 12 missing-data policy).
     pub n_missing: usize,
-    /// Whether the series is constant
+    /// Whether the series is constant (computed on present values only).
     pub is_constant: bool,
+    /// Whether the number of present values is below the caller's `n_short`
+    /// threshold (D-05, WRAP-02).
+    pub is_short: bool,
 }
 
 /// Quality report thresholds.
@@ -62,40 +76,91 @@ pub struct QualityReport {
     pub n_total: usize,
 }
 
-/// Compute data quality metrics for a series.
-pub fn compute_data_quality(values: &[Option<f64>], dates: Option<&[i64]>) -> Result<DataQuality> {
+/// Compute data quality metrics for a series (D-05, WRAP-02).
+///
+/// - `dates`: optional per-row timestamps (microseconds since epoch), required to be
+///   the same length as `values` when present. `None` means no gap/temporal
+///   information is available: `n_gaps`/`n_gap_runs` are `0` and `temporal_score` is
+///   `1.0`.
+/// - `frequency_micros`/`frequency_type`: resolved via [`resolve_gap_step`] -- a
+///   `Fixed` frequency with `frequency_micros <= 0` auto-detects the step from
+///   `dates`.
+/// - `n_short`: the "not short" present-value threshold; must be `>= 1`
+///   (`InvalidInput` otherwise). Drives the structural length factor and
+///   [`DataQuality::is_short`].
+///
+/// `n_missing` counts both `None` and `Some(NaN)` entries (Phase 12 missing-data
+/// policy); every other score is computed on the remaining "present" values, in
+/// their original order.
+pub fn compute_data_quality(
+    values: &[Option<f64>],
+    dates: Option<&[i64]>,
+    frequency_micros: i64,
+    frequency_type: FrequencyType,
+    n_short: usize,
+) -> Result<DataQuality> {
     let n = values.len();
+
+    if n_short == 0 {
+        return Err(ForecastError::InvalidInput(
+            "n_short must be >= 1".to_string(),
+        ));
+    }
 
     if n == 0 {
         return Ok(DataQuality::default());
     }
 
-    // Count missing values
-    let n_missing = values.iter().filter(|v| v.is_none()).count();
-    let _missing_ratio = n_missing as f64 / n as f64;
+    if let Some(d) = dates {
+        if d.len() != n {
+            return Err(ForecastError::InvalidInput(format!(
+                "dates and values must have the same length: {} vs {}",
+                d.len(),
+                n
+            )));
+        }
+    }
 
-    // Count gaps in dates
-    let n_gaps = if let Some(d) = dates {
-        count_gaps(d)
-    } else {
-        0
-    };
-    let _gap_ratio = n_gaps as f64 / n.max(1) as f64;
+    // n_missing counts NULL and NaN (Phase 12 missing-data policy).
+    let n_missing = values.iter().filter(|v| is_missing(**v)).count();
 
-    // Check if constant
-    let non_null: Vec<f64> = values.iter().filter_map(|v| *v).collect();
-    let is_constant = if non_null.len() < 2 {
+    // Present values, in original order (excludes NULL and NaN).
+    let present: Vec<f64> = values
+        .iter()
+        .filter_map(|v| match v {
+            Some(x) if !x.is_nan() => Some(*x),
+            _ => None,
+        })
+        .collect();
+    let n_present = present.len();
+    let is_short = n_present < n_short;
+
+    // Check if constant (on present values only)
+    let is_constant = if n_present < 2 {
         true
     } else {
-        let first = non_null[0];
-        non_null.iter().all(|v| (v - first).abs() < f64::EPSILON)
+        let first = present[0];
+        present.iter().all(|v| (v - first).abs() < f64::EPSILON)
+    };
+
+    // Gap/temporal scoring via the shared missing-period gap counter (13-01, D-04/D-05).
+    let (n_gaps, n_gap_runs, temporal_score) = match dates {
+        Some(d) => match resolve_gap_step(d, frequency_micros, frequency_type)? {
+            Some(step) => {
+                let counts = gap_counts(d, step);
+                let temporal =
+                    calculate_temporal_score(counts.n_missing_periods, counts.expected_length);
+                (counts.n_missing_periods, counts.n_gap_runs, temporal)
+            }
+            None => (0, 0, 1.0),
+        },
+        None => (0, 0, 1.0),
     };
 
     // Calculate scores
-    let structural_score = calculate_structural_score(&non_null, n_missing);
-    let temporal_score = calculate_temporal_score(n_gaps, n);
-    let magnitude_score = calculate_magnitude_score(&non_null);
-    let behavioral_score = calculate_behavioral_score(&non_null);
+    let structural_score = calculate_structural_score(n_present, n, n_short);
+    let magnitude_score = calculate_magnitude_score(&present);
+    let behavioral_score = calculate_behavioral_score(&present);
 
     let overall_score =
         (structural_score + temporal_score + magnitude_score + behavioral_score) / 4.0;
@@ -107,12 +172,18 @@ pub fn compute_data_quality(values: &[Option<f64>], dates: Option<&[i64]>) -> Re
         behavioral_score,
         overall_score,
         n_gaps,
+        n_gap_runs,
         n_missing,
         is_constant,
+        is_short,
     })
 }
 
 /// Generate a quality report for multiple series.
+///
+/// No date information is available at this level, so gap/temporal scoring always
+/// reports "no gaps" (`n_gaps = 0`, `temporal_score = 1.0`); `thresholds.min_length`
+/// is used as `n_short`.
 pub fn generate_quality_report(
     series_list: &[Vec<Option<f64>>],
     thresholds: &QualityThresholds,
@@ -122,8 +193,11 @@ pub fn generate_quality_report(
         ..Default::default()
     };
 
+    let n_short = thresholds.min_length.max(1);
+
     for values in series_list {
-        let quality = compute_data_quality(values, None).unwrap_or_default();
+        let quality = compute_data_quality(values, None, 0, FrequencyType::Fixed, n_short)
+            .unwrap_or_default();
 
         let n = values.len();
         let gap_ratio = quality.n_gaps as f64 / n.max(1) as f64;
@@ -156,62 +230,37 @@ pub fn generate_quality_report(
 
 // Helper functions
 
-fn count_gaps(dates: &[i64]) -> usize {
-    if dates.len() < 2 {
-        return 0;
+/// Returns `true` if the value is missing: `None`, or `Some(NaN)` (Phase 12
+/// missing-data policy -- NaN is a second missing-value sentinel).
+#[inline]
+fn is_missing(value: Option<f64>) -> bool {
+    match value {
+        None => true,
+        Some(v) => v.is_nan(),
     }
-
-    let mut sorted = dates.to_vec();
-    sorted.sort();
-
-    // Detect typical frequency
-    let diffs: Vec<i64> = sorted.windows(2).map(|w| w[1] - w[0]).collect();
-    let mode = find_mode(&diffs);
-
-    // Count gaps (where diff > 1.5 * mode)
-    diffs
-        .iter()
-        .filter(|&&d| d > (mode as f64 * 1.5) as i64)
-        .count()
 }
 
-fn find_mode(values: &[i64]) -> i64 {
-    if values.is_empty() {
-        return 1;
-    }
-
-    let mut counts = std::collections::HashMap::new();
-    for &v in values {
-        *counts.entry(v).or_insert(0) += 1;
-    }
-
-    counts
-        .into_iter()
-        .max_by_key(|(_, count)| *count)
-        .map(|(val, _)| val)
-        .unwrap_or(1)
-}
-
-fn calculate_structural_score(values: &[f64], n_missing: usize) -> f64 {
-    if values.is_empty() && n_missing > 0 {
-        return 0.0;
-    }
-
-    let total = values.len() + n_missing;
-    let completeness = values.len() as f64 / total as f64;
-
-    // Penalize for very short series
-    let length_factor = (values.len() as f64 / 30.0).min(1.0);
-
-    (completeness * 0.7 + length_factor * 0.3).clamp(0.0, 1.0)
-}
-
-fn calculate_temporal_score(n_gaps: usize, n: usize) -> f64 {
+fn calculate_structural_score(n_present: usize, n: usize, n_short: usize) -> f64 {
     if n == 0 {
         return 0.0;
     }
 
-    let gap_ratio = n_gaps as f64 / n as f64;
+    let completeness = n_present as f64 / n as f64;
+
+    // Penalize series shorter than the caller's n_short threshold.
+    let length_factor = (n_present as f64 / n_short as f64).min(1.0);
+
+    (completeness * 0.7 + length_factor * 0.3).clamp(0.0, 1.0)
+}
+
+/// `expected_length == 0` (no dates, or no resolvable step) gives `1.0` -- "no
+/// information" is not the same as "many gaps".
+fn calculate_temporal_score(n_missing_periods: usize, expected_length: usize) -> f64 {
+    if expected_length == 0 {
+        return 1.0;
+    }
+
+    let gap_ratio = n_missing_periods as f64 / expected_length as f64;
     (1.0 - gap_ratio * 5.0).clamp(0.0, 1.0)
 }
 
@@ -300,44 +349,127 @@ fn autocorrelation(values: &[f64], lag: usize) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::calendar::CalendarStep;
+    use crate::gaps::detect_frequency;
+
+    const ONE_DAY_MICROS: i64 = 86_400_000_000;
+
+    fn daily_dates(n: usize) -> Vec<i64> {
+        (0..n as i64).map(|i| i * ONE_DAY_MICROS).collect()
+    }
 
     #[test]
     fn test_compute_data_quality() {
         let values: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), None, Some(4.0), Some(5.0)];
 
-        let quality = compute_data_quality(&values, None).unwrap();
+        let quality = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 1).unwrap();
         assert_eq!(quality.n_missing, 1);
         assert!(!quality.is_constant);
     }
 
     #[test]
+    fn test_n_missing_counts_nan_and_null() {
+        let values: Vec<Option<f64>> = vec![Some(1.0), None, Some(f64::NAN), Some(4.0), Some(5.0)];
+        let quality = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 1).unwrap();
+        assert_eq!(quality.n_missing, 2, "NULL and NaN both count as missing");
+    }
+
+    #[test]
+    fn test_n_short_zero_is_invalid_input() {
+        let values: Vec<Option<f64>> = vec![Some(1.0), Some(2.0)];
+        let err = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 0).unwrap_err();
+        assert!(matches!(err, ForecastError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn test_dates_length_mismatch_is_invalid_input() {
+        let values: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), Some(3.0)];
+        let dates = daily_dates(2);
+        let err =
+            compute_data_quality(&values, Some(&dates), 0, FrequencyType::Fixed, 1).unwrap_err();
+        assert!(matches!(err, ForecastError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn test_is_short_flag() {
+        let values: Vec<Option<f64>> = (0..5).map(|i| Some(i as f64)).collect();
+        let short = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 10).unwrap();
+        assert!(short.is_short);
+
+        let not_short = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 3).unwrap();
+        assert!(!not_short.is_short);
+    }
+
+    #[test]
+    fn test_real_gap_count_and_temporal_below_one() {
+        // 60 daily dates with a 20-day hole (days 20..39 missing): 40 present values,
+        // n_gaps (missing periods) = 20, temporal_score below 1.0 (D-05).
+        let mut dates: Vec<i64> = Vec::new();
+        for i in 0..20 {
+            dates.push(i * ONE_DAY_MICROS);
+        }
+        for i in 40..60 {
+            dates.push(i * ONE_DAY_MICROS);
+        }
+        let values: Vec<Option<f64>> = dates.iter().map(|_| Some(1.0)).collect();
+
+        let quality =
+            compute_data_quality(&values, Some(&dates), 0, FrequencyType::Fixed, 1).unwrap();
+        assert_eq!(quality.n_gaps, 20);
+        assert_eq!(quality.n_gap_runs, 1);
+        assert!(quality.temporal_score < 1.0);
+    }
+
+    #[test]
+    fn test_no_dates_gives_perfect_temporal_score() {
+        let values: Vec<Option<f64>> = (0..10).map(|i| Some(i as f64)).collect();
+        let quality = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 1).unwrap();
+        assert_eq!(quality.n_gaps, 0);
+        assert_eq!(quality.n_gap_runs, 0);
+        assert_eq!(quality.temporal_score, 1.0);
+    }
+
+    #[test]
+    fn test_determinism_on_tied_step_data() {
+        // diffs: 1, 2 (tie) -> smaller (1 day) wins, every time (detect_step's tie rule).
+        let dates = vec![0, ONE_DAY_MICROS, 3 * ONE_DAY_MICROS];
+        let values: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), Some(3.0)];
+        let mut results = Vec::new();
+        for _ in 0..20 {
+            let q =
+                compute_data_quality(&values, Some(&dates), 0, FrequencyType::Fixed, 1).unwrap();
+            results.push((q.n_gaps, q.n_gap_runs));
+        }
+        assert!(results.iter().all(|r| *r == results[0]));
+        // detect_frequency on this pattern resolves to the smaller (1-day) step, so the
+        // 2-day jump is 1 missing period.
+        assert_eq!(detect_frequency(&dates).unwrap(), ONE_DAY_MICROS);
+        assert_eq!(results[0], (1, 1));
+    }
+
+    #[test]
     fn test_constant_series() {
         let values: Vec<Option<f64>> = vec![Some(5.0); 10];
-        let quality = compute_data_quality(&values, None).unwrap();
+        let quality = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 1).unwrap();
         assert!(quality.is_constant);
     }
 
     #[test]
     fn test_structural_score() {
-        // Complete series with good length
-        let values: Vec<f64> = (0..50).map(|i| i as f64).collect();
-        let score = calculate_structural_score(&values, 0);
+        // Complete, not-short series
+        let score = calculate_structural_score(50, 50, 10);
         assert!(score > 0.9, "Complete long series should have high score");
 
-        // Series with many missing values
-        let values_with_missing: Vec<f64> = vec![1.0, 2.0, 3.0];
-        let score_with_missing = calculate_structural_score(&values_with_missing, 10);
+        // Series with many missing values (30 present out of 100 total)
+        let score_with_missing = calculate_structural_score(3, 13, 10);
         assert!(
             score_with_missing < score,
             "Series with missing values should have lower score"
         );
 
-        // Empty with missing
-        let empty_score = calculate_structural_score(&[], 5);
-        assert_eq!(
-            empty_score, 0.0,
-            "Empty series with missing values should have 0 score"
-        );
+        // Empty
+        let empty_score = calculate_structural_score(0, 0, 10);
+        assert_eq!(empty_score, 0.0, "Empty series should have 0 score");
     }
 
     #[test]
@@ -360,11 +492,12 @@ mod tests {
             "More gaps should give lower score"
         );
 
-        // Empty series
-        let score_empty = calculate_temporal_score(0, 0);
+        // No expected_length (no dates / no resolvable step) is "no information", not
+        // "many gaps".
+        let score_no_info = calculate_temporal_score(0, 0);
         assert_eq!(
-            score_empty, 0.0,
-            "Empty series should have 0 temporal score"
+            score_no_info, 1.0,
+            "No expected_length should give perfect score (no information)"
         );
     }
 
@@ -461,7 +594,7 @@ mod tests {
             })
             .collect();
 
-        let quality = compute_data_quality(&values, None).unwrap();
+        let quality = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 10).unwrap();
 
         assert!(
             quality.structural_score >= 0.0 && quality.structural_score <= 1.0,
@@ -486,17 +619,63 @@ mod tests {
     }
 
     #[test]
-    fn test_count_gaps() {
-        // No gaps - regular intervals
-        let dates_regular: Vec<i64> = (0..10).map(|i| i * 1000).collect();
-        assert_eq!(count_gaps(&dates_regular), 0);
+    fn test_frequency_changes_gap_count() {
+        // 60 daily dates with the same 20-day hole as test_real_gap_count_and_temporal_below_one,
+        // but declared frequency '2 days' instead of auto-detected '1 day': the 21-day jump
+        // across the hole is now 11 steps of 2 days (10 missing periods), per the plan's D-05
+        // acceptance criterion.
+        let mut dates: Vec<i64> = Vec::new();
+        for i in 0..20 {
+            dates.push(i * ONE_DAY_MICROS);
+        }
+        for i in 40..60 {
+            dates.push(i * ONE_DAY_MICROS);
+        }
+        let values: Vec<Option<f64>> = dates.iter().map(|_| Some(1.0)).collect();
 
-        // With gaps
-        let dates_with_gap: Vec<i64> = vec![0, 1000, 2000, 5000, 6000, 7000];
-        assert!(count_gaps(&dates_with_gap) >= 1);
+        let quality = compute_data_quality(
+            &values,
+            Some(&dates),
+            2 * ONE_DAY_MICROS,
+            FrequencyType::Fixed,
+            1,
+        )
+        .unwrap();
+        assert_eq!(quality.n_gaps, 10);
+    }
 
-        // Empty and single element
-        assert_eq!(count_gaps(&[]), 0);
-        assert_eq!(count_gaps(&[1000]), 0);
+    #[test]
+    fn test_n_short_drives_structural_score_and_is_short() {
+        let mut dates: Vec<i64> = Vec::new();
+        for i in 0..20 {
+            dates.push(i * ONE_DAY_MICROS);
+        }
+        for i in 40..60 {
+            dates.push(i * ONE_DAY_MICROS);
+        }
+        let values: Vec<Option<f64>> = dates.iter().map(|_| Some(1.0)).collect();
+
+        let q10 = compute_data_quality(&values, Some(&dates), 0, FrequencyType::Fixed, 10).unwrap();
+        assert!(!q10.is_short);
+        assert_eq!(q10.structural_score, 1.0);
+
+        let q100 =
+            compute_data_quality(&values, Some(&dates), 0, FrequencyType::Fixed, 100).unwrap();
+        assert!(q100.is_short);
+        assert!(
+            (q100.structural_score - 0.82).abs() < 1e-10,
+            "expected structural_score 0.82, got {}",
+            q100.structural_score
+        );
+    }
+
+    #[test]
+    fn test_calendar_step_is_respected() {
+        // Sanity: a Months(1) step is usable here too (D-04 shares the same gap
+        // counter as ts_stats).
+        let dates = vec![0, ONE_DAY_MICROS];
+        let step = CalendarStep::Fixed(ONE_DAY_MICROS);
+        let counts = gap_counts(&dates, step);
+        assert_eq!(counts.n_missing_periods, 0);
     }
 }

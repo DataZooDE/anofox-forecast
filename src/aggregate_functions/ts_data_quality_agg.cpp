@@ -142,7 +142,9 @@ static void TsDataQualityAggFinalize(Vector &state_vector, AggregateInputData &a
         std::sort(sorted_pairs.begin(), sorted_pairs.end());
 
         vector<double> sorted_values;
+        vector<int64_t> sorted_timestamps;
         for (const auto &p : sorted_pairs) {
+            sorted_timestamps.push_back(p.first);
             sorted_values.push_back(p.second);
         }
 
@@ -150,7 +152,10 @@ static void TsDataQualityAggFinalize(Vector &state_vector, AggregateInputData &a
         size_t validity_words = (sorted_values.size() + 63) / 64;
         vector<uint64_t> validity(validity_words, ~0ULL);
 
-        // Call FFI function
+        // Call FFI function with dates and auto-detected frequency (0, FIXED); n_short=30
+        // is the previous fixed structural-length scale (this aggregate takes no n_short
+        // argument). NULL-value-row handling is revisited in Phase 13 plan 13-03 task 2
+        // (Phase 12 deferred item (a)).
         DataQualityResult dq_result;
         memset(&dq_result, 0, sizeof(dq_result));
         AnofoxError error;
@@ -158,7 +163,11 @@ static void TsDataQualityAggFinalize(Vector &state_vector, AggregateInputData &a
         bool success = anofox_ts_data_quality(
             sorted_values.data(),
             validity.data(),
+            sorted_timestamps.data(),
             sorted_values.size(),
+            0,
+            FrequencyType::FIXED,
+            30,
             &dq_result,
             &error
         );

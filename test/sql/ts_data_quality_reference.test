@@ -1,0 +1,132 @@
+# name: test/sql/ts_data_quality_reference.test
+# description: ts_data_quality(_by)/summary value assertions against the shared gap counter
+#   (Phase 13 plan 13-03: WRAP-02, D-05) -- real gap counts, temporal below 1, n_short,
+#   frequency, determinism.
+# group: [sql]
+#
+# Non-json-gated so it runs on every native build.
+
+require anofox_forecast
+
+# --- dq_gap20: 60 daily dates from 2024-01-01, days 20..39 missing (one 20-day run) ---
+statement ok
+CREATE TABLE dq_gap20 AS
+SELECT 'g20' AS id,
+       (DATE '2024-01-01' + INTERVAL (i) DAY)::TIMESTAMP AS ds,
+       (i % 7 + 0.1 * i)::DOUBLE AS v
+FROM range(0, 60) t(i)
+WHERE i < 20 OR i >= 40;
+
+# n_gaps (missing periods) = 20, n_gap_runs = 1 (one run), temporal_score < 1.0
+query III
+SELECT n_gaps, n_gap_runs, temporal_score < 1.0
+FROM ts_data_quality_by('dq_gap20', id, ds, v, 10, '1d');
+----
+20	1	true
+
+# frequency honoured: '2d' on the same 21-day jump -> 11 steps of 2 days -> n_gaps 10
+query I
+SELECT n_gaps
+FROM ts_data_quality_by('dq_gap20', id, ds, v, 10, '2d');
+----
+10
+
+# NULL frequency (auto-detect) on dq_gap20 equals '1d'
+query I
+SELECT n_gaps
+FROM ts_data_quality_by('dq_gap20', id, ds, v, 10, NULL);
+----
+20
+
+# n_short 10: present count (40) >= n_short -> is_short false, structural_score 1.0
+query II
+SELECT is_short, structural_score
+FROM ts_data_quality_by('dq_gap20', id, ds, v, 10, '1d');
+----
+false	1.0
+
+# n_short 100: present count (40) < n_short -> is_short true, structural_score 0.7 + 0.3*40/100 = 0.82
+query II
+SELECT is_short, structural_score
+FROM ts_data_quality_by('dq_gap20', id, ds, v, 100, '1d');
+----
+true	0.82
+
+statement ok
+DROP TABLE dq_gap20;
+
+# --- dq_gap3: 60 daily dates, 3 separate single-day holes ---
+statement ok
+CREATE TABLE dq_gap3 AS
+SELECT 'g3' AS id,
+       (DATE '2024-01-01' + INTERVAL (i) DAY)::TIMESTAMP AS ds,
+       (i % 7 + 0.1 * i)::DOUBLE AS v
+FROM range(0, 60) t(i)
+WHERE i NOT IN (10, 30, 50);
+
+# n_gaps 3, n_gap_runs 3, temporal_score = 1 - 5*3/60 = 0.75
+query III
+SELECT n_gaps, n_gap_runs, temporal_score
+FROM ts_data_quality_by('dq_gap3', id, ds, v, 10, '1d');
+----
+3	3	0.75
+
+statement ok
+DROP TABLE dq_gap3;
+
+# --- dq_tie: alternating 1-day/2-day steps (tied counts) -- determinism ---
+statement ok
+CREATE TABLE dq_tie AS
+SELECT * FROM (VALUES
+    ('tie', TIMESTAMP '2024-01-01', 1.0),
+    ('tie', TIMESTAMP '2024-01-02', 2.0),
+    ('tie', TIMESTAMP '2024-01-04', 3.0)
+) t(id, ds, v);
+
+# Run 3 times: n_gaps reflects the 1-day step (smaller-step tie rule), identical every time.
+query I
+SELECT n_gaps FROM ts_data_quality_by('dq_tie', id, ds, v, 1, NULL);
+----
+1
+
+query I
+SELECT n_gaps FROM ts_data_quality_by('dq_tie', id, ds, v, 1, NULL);
+----
+1
+
+query I
+SELECT n_gaps FROM ts_data_quality_by('dq_tie', id, ds, v, 1, NULL);
+----
+1
+
+statement ok
+DROP TABLE dq_tie;
+
+# --- Every data-quality macro passes dates/frequency/n_short through to _ts_data_quality ---
+statement ok
+CREATE TABLE dq_macros AS
+SELECT 'm' AS id,
+       (DATE '2024-01-01' + INTERVAL (i) DAY)::TIMESTAMP AS ds,
+       (i % 7 + 0.1 * i)::DOUBLE AS v
+FROM range(0, 60) t(i)
+WHERE i < 20 OR i >= 40;
+
+query III
+SELECT n_gaps, n_gap_runs, is_short
+FROM ts_data_quality('dq_macros', id, ds, v, 10, '1d');
+----
+20	1	false
+
+query III
+SELECT n_gaps, n_gap_runs, is_short
+FROM ts_data_quality_by('dq_macros', id, ds, v, 10, '1d');
+----
+20	1	false
+
+query I
+SELECT n_total FROM ts_data_quality_summary('dq_macros', id, ds, v, 10);
+----
+1
+
+statement ok
+DROP TABLE dq_macros;

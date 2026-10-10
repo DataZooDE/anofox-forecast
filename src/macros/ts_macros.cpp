@@ -123,12 +123,20 @@ FROM query_table(stats_table::VARCHAR)
     // ts_data_quality: Assess data quality per series
     // C++ API: ts_data_quality(table_name, unique_id_col, date_col, value_col, n_short, frequency)
     // Returns: TABLE with expanded quality columns
+    // D-05/WRAP-02: passes dates and frequency through to _ts_data_quality so
+    // gap/temporal scoring reflects real gaps (plan 13-01's shared gap counter);
+    // n_short drives the structural length factor and the new is_short flag.
     {"ts_data_quality", {"source", "unique_id_col", "date_col", "value_col", "n_short", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH quality_data AS (
     SELECT
         unique_id_col AS unique_id,
-        _ts_data_quality(LIST(value_col::DOUBLE ORDER BY date_col)) AS _quality
+        _ts_data_quality(
+            LIST(value_col::DOUBLE ORDER BY date_col),
+            LIST(date_col::TIMESTAMP ORDER BY date_col),
+            frequency::VARCHAR,
+            n_short::INTEGER
+        ) AS _quality
     FROM query_table(source::VARCHAR)
     GROUP BY unique_id_col
 )
@@ -140,22 +148,30 @@ SELECT
     (_quality).behavioral_score AS behavioral_score,
     (_quality).overall_score AS overall_score,
     (_quality).n_gaps AS n_gaps,
+    (_quality).n_gap_runs AS n_gap_runs,
     (_quality).n_missing AS n_missing,
-    (_quality).is_constant AS is_constant
+    (_quality).is_constant AS is_constant,
+    (_quality).is_short AS is_short
 FROM quality_data
 )",
-    "Assesses time series data quality per group, returning null rate, gap rate, duplicate count, and quality score.",
-    "SELECT * FROM ts_data_quality('sales', product_id, date, qty)",
+    "Assesses time series data quality per group (dates/frequency-aware gap and temporal scoring; n_short drives is_short), returning null rate, gap rate (n_gaps = missing periods, n_gap_runs = gap occurrences), duplicate count, and quality score.",
+    "SELECT * FROM ts_data_quality('sales', product_id, date, qty, 10, '1d')",
     "data-quality"},
 
     // ts_data_quality_summary: Summarize data quality across series
     // C++ API: ts_data_quality_summary(table_name, unique_id_col, date_col, value_col, n_short)
+    // No frequency parameter: auto-detects frequency per series (NULL passed to _ts_data_quality).
     {"ts_data_quality_summary", {"source", "unique_id_col", "date_col", "value_col", "n_short", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH quality_data AS (
     SELECT
         unique_id_col AS unique_id,
-        _ts_data_quality(LIST(value_col::DOUBLE ORDER BY date_col)) AS _quality
+        _ts_data_quality(
+            LIST(value_col::DOUBLE ORDER BY date_col),
+            LIST(date_col::TIMESTAMP ORDER BY date_col),
+            NULL::VARCHAR,
+            n_short::INTEGER
+        ) AS _quality
     FROM query_table(source::VARCHAR)
     GROUP BY unique_id_col
 )
@@ -167,8 +183,8 @@ SELECT
     AVG((_quality).overall_score) AS avg_score
 FROM quality_data
 )",
-    "Summarizes ts_data_quality output across all groups into aggregate quality metrics.",
-    "SELECT * FROM ts_data_quality_summary('sales', product_id, date, qty)",
+    "Summarizes ts_data_quality output across all groups into aggregate quality metrics (auto-detected frequency per series).",
+    "SELECT * FROM ts_data_quality_summary('sales', product_id, date, qty, 10)",
     "data-quality"},
 
     // ts_drop_constant_by: Filter out constant series (table-based), Rust is_constant (D-09)
@@ -1863,7 +1879,12 @@ R"(
 WITH quality_data AS (
     SELECT
         unique_id_col AS unique_id,
-        _ts_data_quality(LIST(value_col::DOUBLE ORDER BY date_col)) AS _quality
+        _ts_data_quality(
+            LIST(value_col::DOUBLE ORDER BY date_col),
+            LIST(date_col::TIMESTAMP ORDER BY date_col),
+            frequency::VARCHAR,
+            n_short::INTEGER
+        ) AS _quality
     FROM query_table(source::VARCHAR)
     GROUP BY unique_id_col
 )
@@ -1875,12 +1896,14 @@ SELECT
     (_quality).behavioral_score AS behavioral_score,
     (_quality).overall_score AS overall_score,
     (_quality).n_gaps AS n_gaps,
+    (_quality).n_gap_runs AS n_gap_runs,
     (_quality).n_missing AS n_missing,
-    (_quality).is_constant AS is_constant
+    (_quality).is_constant AS is_constant,
+    (_quality).is_short AS is_short
 FROM quality_data
 )",
-    "Alias for ts_data_quality. Assesses time series data quality per group.",
-    "SELECT * FROM ts_data_quality_by('sales', product_id, date, qty)",
+    "Alias for ts_data_quality. Assesses time series data quality per group (dates/frequency-aware).",
+    "SELECT * FROM ts_data_quality_by('sales', product_id, date, qty, 10, '1d')",
     "data-quality"},
 
     // ts_features_table: Extract features from a single-series table

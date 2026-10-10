@@ -819,12 +819,19 @@ pub struct DataQualityResult {
     pub behavioral_score: c_double,
     /// Overall quality score
     pub overall_score: c_double,
-    /// Number of gaps
+    /// Number of missing periods (D-04/D-05: expected timestamps absent under the
+    /// declared/detected frequency) -- matches `TsStatsResult::n_gaps`'s meaning, not
+    /// the pre-v0.10.0 "gap occurrence count" (see `n_gap_runs`).
     pub n_gaps: size_t,
-    /// Number of missing values
+    /// Number of gap occurrences/runs (D-05): the pre-v0.10.0 `n_gaps` meaning.
+    pub n_gap_runs: size_t,
+    /// Number of missing values (NULL or NaN)
     pub n_missing: size_t,
     /// Is constant series
     pub is_constant: bool,
+    /// Whether the present-value count is below the caller's `n_short` threshold
+    /// (D-05, WRAP-02).
+    pub is_short: bool,
 }
 
 impl Default for DataQualityResult {
@@ -836,8 +843,27 @@ impl Default for DataQualityResult {
             behavioral_score: f64::NAN,
             overall_score: f64::NAN,
             n_gaps: 0,
+            n_gap_runs: 0,
             n_missing: 0,
             is_constant: false,
+            is_short: false,
+        }
+    }
+}
+
+impl From<anofox_fcst_core::DataQuality> for DataQualityResult {
+    fn from(quality: anofox_fcst_core::DataQuality) -> Self {
+        Self {
+            structural_score: quality.structural_score,
+            temporal_score: quality.temporal_score,
+            magnitude_score: quality.magnitude_score,
+            behavioral_score: quality.behavioral_score,
+            overall_score: quality.overall_score,
+            n_gaps: quality.n_gaps,
+            n_gap_runs: quality.n_gap_runs,
+            n_missing: quality.n_missing,
+            is_constant: quality.is_constant,
+            is_short: quality.is_short,
         }
     }
 }
