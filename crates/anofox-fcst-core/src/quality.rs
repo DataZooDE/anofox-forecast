@@ -88,6 +88,9 @@ pub struct QualityReport {
 /// - `n_short`: the "not short" present-value threshold; must be `>= 1`
 ///   (`InvalidInput` otherwise). Drives the structural length factor and
 ///   [`DataQuality::is_short`].
+/// - `period_count`: user-declared calendar multiplier for Monthly/Quarterly/Yearly
+///   frequencies (e.g. `2` for `'2mo'`); see [`resolve_gap_step`]'s doc comment
+///   (CR-01 fix, 13-03 deferred item). Ignored for `Fixed`.
 ///
 /// `n_missing` counts both `None` and `Some(NaN)` entries (Phase 12 missing-data
 /// policy); every other score is computed on the remaining "present" values, in
@@ -98,6 +101,7 @@ pub fn compute_data_quality(
     frequency_micros: i64,
     frequency_type: FrequencyType,
     n_short: usize,
+    period_count: u32,
 ) -> Result<DataQuality> {
     let n = values.len();
 
@@ -145,7 +149,7 @@ pub fn compute_data_quality(
 
     // Gap/temporal scoring via the shared missing-period gap counter (13-01, D-04/D-05).
     let (n_gaps, n_gap_runs, temporal_score) = match dates {
-        Some(d) => match resolve_gap_step(d, frequency_micros, frequency_type)? {
+        Some(d) => match resolve_gap_step(d, frequency_micros, frequency_type, period_count)? {
             Some(step) => {
                 let counts = gap_counts(d, step);
                 let temporal =
@@ -196,7 +200,7 @@ pub fn generate_quality_report(
     let n_short = thresholds.min_length.max(1);
 
     for values in series_list {
-        let quality = compute_data_quality(values, None, 0, FrequencyType::Fixed, n_short)
+        let quality = compute_data_quality(values, None, 0, FrequencyType::Fixed, n_short, 1)
             .unwrap_or_default();
 
         let n = values.len();
@@ -392,7 +396,7 @@ mod tests {
     fn test_compute_data_quality() {
         let values: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), None, Some(4.0), Some(5.0)];
 
-        let quality = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 1).unwrap();
+        let quality = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 1, 1).unwrap();
         assert_eq!(quality.n_missing, 1);
         assert!(!quality.is_constant);
     }
@@ -400,14 +404,14 @@ mod tests {
     #[test]
     fn test_n_missing_counts_nan_and_null() {
         let values: Vec<Option<f64>> = vec![Some(1.0), None, Some(f64::NAN), Some(4.0), Some(5.0)];
-        let quality = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 1).unwrap();
+        let quality = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 1, 1).unwrap();
         assert_eq!(quality.n_missing, 2, "NULL and NaN both count as missing");
     }
 
     #[test]
     fn test_n_short_zero_is_invalid_input() {
         let values: Vec<Option<f64>> = vec![Some(1.0), Some(2.0)];
-        let err = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 0).unwrap_err();
+        let err = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 0, 1).unwrap_err();
         assert!(matches!(err, ForecastError::InvalidInput(_)));
     }
 
@@ -416,17 +420,17 @@ mod tests {
         let values: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), Some(3.0)];
         let dates = daily_dates(2);
         let err =
-            compute_data_quality(&values, Some(&dates), 0, FrequencyType::Fixed, 1).unwrap_err();
+            compute_data_quality(&values, Some(&dates), 0, FrequencyType::Fixed, 1, 1).unwrap_err();
         assert!(matches!(err, ForecastError::InvalidInput(_)));
     }
 
     #[test]
     fn test_is_short_flag() {
         let values: Vec<Option<f64>> = (0..5).map(|i| Some(i as f64)).collect();
-        let short = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 10).unwrap();
+        let short = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 10, 1).unwrap();
         assert!(short.is_short);
 
-        let not_short = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 3).unwrap();
+        let not_short = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 3, 1).unwrap();
         assert!(!not_short.is_short);
     }
 
@@ -444,7 +448,7 @@ mod tests {
         let values: Vec<Option<f64>> = dates.iter().map(|_| Some(1.0)).collect();
 
         let quality =
-            compute_data_quality(&values, Some(&dates), 0, FrequencyType::Fixed, 1).unwrap();
+            compute_data_quality(&values, Some(&dates), 0, FrequencyType::Fixed, 1, 1).unwrap();
         assert_eq!(quality.n_gaps, 20);
         assert_eq!(quality.n_gap_runs, 1);
         assert!(quality.temporal_score < 1.0);
@@ -453,7 +457,7 @@ mod tests {
     #[test]
     fn test_no_dates_gives_perfect_temporal_score() {
         let values: Vec<Option<f64>> = (0..10).map(|i| Some(i as f64)).collect();
-        let quality = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 1).unwrap();
+        let quality = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 1, 1).unwrap();
         assert_eq!(quality.n_gaps, 0);
         assert_eq!(quality.n_gap_runs, 0);
         assert_eq!(quality.temporal_score, 1.0);
@@ -467,7 +471,7 @@ mod tests {
         let mut results = Vec::new();
         for _ in 0..20 {
             let q =
-                compute_data_quality(&values, Some(&dates), 0, FrequencyType::Fixed, 1).unwrap();
+                compute_data_quality(&values, Some(&dates), 0, FrequencyType::Fixed, 1, 1).unwrap();
             results.push((q.n_gaps, q.n_gap_runs));
         }
         assert!(results.iter().all(|r| *r == results[0]));
@@ -480,7 +484,7 @@ mod tests {
     #[test]
     fn test_constant_series() {
         let values: Vec<Option<f64>> = vec![Some(5.0); 10];
-        let quality = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 1).unwrap();
+        let quality = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 1, 1).unwrap();
         assert!(quality.is_constant);
     }
 
@@ -665,7 +669,7 @@ mod tests {
             })
             .collect();
 
-        let quality = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 10).unwrap();
+        let quality = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 10, 1).unwrap();
 
         assert!(
             quality.structural_score >= 0.0 && quality.structural_score <= 1.0,
@@ -710,9 +714,36 @@ mod tests {
             2 * ONE_DAY_MICROS,
             FrequencyType::Fixed,
             1,
+            1,
         )
         .unwrap();
         assert_eq!(quality.n_gaps, 10);
+    }
+
+    #[test]
+    fn test_calendar_period_count_honored_in_data_quality_gap_counting() {
+        // CR-01 regression (13-03 deferred item): a correctly-spaced bi-monthly
+        // series declared with period_count=2 (i.e. '2mo') must report n_gaps=0,
+        // not misclassify every consecutive pair as "1 missing month".
+        let dates: Vec<i64> = vec![
+            1672531200_i64 * 1_000_000, // 2023-01-01
+            1677628800_i64 * 1_000_000, // 2023-03-01
+            1682899200_i64 * 1_000_000, // 2023-05-01
+            1688169600_i64 * 1_000_000, // 2023-07-01
+        ];
+        let values: Vec<Option<f64>> = dates.iter().map(|_| Some(1.0)).collect();
+
+        let quality =
+            compute_data_quality(&values, Some(&dates), 0, FrequencyType::Monthly, 1, 2).unwrap();
+        assert_eq!(quality.n_gaps, 0);
+        assert_eq!(quality.n_gap_runs, 0);
+        assert_eq!(quality.temporal_score, 1.0);
+
+        // Sanity: the same series WITHOUT the multiplier (period_count=1, i.e. the
+        // pre-fix hard-coded behavior) correctly reports 3 missing months.
+        let quality_unmultiplied =
+            compute_data_quality(&values, Some(&dates), 0, FrequencyType::Monthly, 1, 1).unwrap();
+        assert_eq!(quality_unmultiplied.n_gaps, 3);
     }
 
     #[test]
@@ -726,12 +757,13 @@ mod tests {
         }
         let values: Vec<Option<f64>> = dates.iter().map(|_| Some(1.0)).collect();
 
-        let q10 = compute_data_quality(&values, Some(&dates), 0, FrequencyType::Fixed, 10).unwrap();
+        let q10 =
+            compute_data_quality(&values, Some(&dates), 0, FrequencyType::Fixed, 10, 1).unwrap();
         assert!(!q10.is_short);
         assert_eq!(q10.structural_score, 1.0);
 
         let q100 =
-            compute_data_quality(&values, Some(&dates), 0, FrequencyType::Fixed, 100).unwrap();
+            compute_data_quality(&values, Some(&dates), 0, FrequencyType::Fixed, 100, 1).unwrap();
         assert!(q100.is_short);
         assert!(
             (q100.structural_score - 0.82).abs() < 1e-10,

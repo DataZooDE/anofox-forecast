@@ -226,6 +226,10 @@ pub unsafe extern "C" fn anofox_ts_stats(
 /// This version properly handles calendar frequencies (monthly, quarterly, yearly) which
 /// have variable durations that cannot be accurately represented in microseconds.
 ///
+/// `period_count` is the user-declared calendar multiplier for Monthly/Quarterly/Yearly
+/// frequencies (e.g. `2` for `'2mo'`, `3` for `'3q'`, `5` for `'5y'`; `1` for the
+/// single-unit strings); ignored for `Fixed` (CR-01 fix, 13-03 deferred item).
+///
 /// # Safety
 /// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
 /// The dates array must have the same length as the values array.
@@ -238,6 +242,7 @@ pub unsafe extern "C" fn anofox_ts_stats_with_dates_and_type(
     frequency_micros: i64,
     frequency_type: FrequencyType,
     seasonal_period: size_t,
+    period_count: size_t,
     out_result: *mut TsStatsResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -257,6 +262,8 @@ pub unsafe extern "C" fn anofox_ts_stats_with_dates_and_type(
         return true;
     }
 
+    let period_count_u32 = u32::try_from(period_count).unwrap_or(u32::MAX);
+
     let result = catch_unwind(AssertUnwindSafe(|| {
         let series = build_series(values, validity, length);
         let dates_slice = std::slice::from_raw_parts(dates, length);
@@ -267,6 +274,7 @@ pub unsafe extern "C" fn anofox_ts_stats_with_dates_and_type(
             frequency_micros,
             freq_type,
             seasonal_period,
+            period_count_u32,
         )
     }));
 
@@ -4320,7 +4328,9 @@ impl IntoNonEmpty for String {
 /// `0` and `temporal_score` is `1.0`. When non-null it must have exactly `length`
 /// entries. `frequency_type == Fixed` with `frequency_micros <= 0` auto-detects the
 /// step from `dates`. `n_short` must be `>= 1` (`InvalidInput` otherwise, surfaced as
-/// `ErrorCode::InvalidInput`).
+/// `ErrorCode::InvalidInput`). `period_count` is the user-declared calendar
+/// multiplier for Monthly/Quarterly/Yearly frequencies (e.g. `2` for `'2mo'`); ignored
+/// for `Fixed` (CR-01 fix, 13-03 deferred item).
 ///
 /// # Safety
 /// `values` and `out_result` must be valid and non-null. `validity` and `dates` may
@@ -4335,6 +4345,7 @@ pub unsafe extern "C" fn anofox_ts_data_quality(
     frequency_micros: i64,
     frequency_type: FrequencyType,
     n_short: size_t,
+    period_count: size_t,
     out_result: *mut DataQualityResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -4353,6 +4364,8 @@ pub unsafe extern "C" fn anofox_ts_data_quality(
         return true;
     }
 
+    let period_count_u32 = u32::try_from(period_count).unwrap_or(u32::MAX);
+
     let result = catch_unwind(AssertUnwindSafe(|| {
         let series = build_series(values, validity, length);
         let dates_vec: Option<Vec<i64>> = if dates.is_null() {
@@ -4367,6 +4380,7 @@ pub unsafe extern "C" fn anofox_ts_data_quality(
             frequency_micros,
             freq_type,
             n_short,
+            period_count_u32,
         )
     }));
 
@@ -4671,6 +4685,9 @@ unsafe fn alloc_i64_array(n: size_t) -> *mut i64 {
 /// * `length` - Number of elements
 /// * `frequency_micros` - Frequency in microseconds (used for Fixed type)
 /// * `frequency_type` - Type of frequency (0=Fixed, 1=Monthly, 2=Quarterly, 3=Yearly)
+/// * `period_count` - User-declared calendar multiplier for Monthly/Quarterly/Yearly
+///   frequencies (e.g. `2` for `'2mo'`, `3` for `'3q'`, `5` for `'5y'`; `1` for the
+///   single-unit strings); ignored for Fixed (CR-01 fix, 13-03 deferred item)
 /// * `out_result` - Output result structure
 /// * `out_error` - Output error structure
 #[no_mangle]
@@ -4681,6 +4698,7 @@ pub unsafe extern "C" fn anofox_ts_fill_gaps(
     length: size_t,
     frequency_micros: i64,
     frequency_type: FrequencyType,
+    period_count: size_t,
     out_result: *mut GapFillResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -4708,11 +4726,18 @@ pub unsafe extern "C" fn anofox_ts_fill_gaps(
     }
 
     let freq_type_core: anofox_fcst_core::FrequencyType = frequency_type.into();
+    let period_count_u32 = u32::try_from(period_count).unwrap_or(u32::MAX);
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let dates_vec: Vec<i64> = std::slice::from_raw_parts(dates, length).to_vec();
         let series = build_series(values, validity, length);
-        anofox_fcst_core::fill_gaps(&dates_vec, &series, frequency_micros, freq_type_core)
+        anofox_fcst_core::fill_gaps(
+            &dates_vec,
+            &series,
+            frequency_micros,
+            freq_type_core,
+            period_count_u32,
+        )
     }));
 
     match result {
@@ -4779,6 +4804,9 @@ pub unsafe extern "C" fn anofox_ts_fill_gaps(
 /// * `target_date` - Target date to extend to (microseconds since epoch)
 /// * `frequency_micros` - Frequency in microseconds (used for Fixed type)
 /// * `frequency_type` - Type of frequency (0=Fixed, 1=Monthly, 2=Quarterly, 3=Yearly)
+/// * `period_count` - User-declared calendar multiplier for Monthly/Quarterly/Yearly
+///   frequencies (e.g. `2` for `'2mo'`, `3` for `'3q'`, `5` for `'5y'`; `1` for the
+///   single-unit strings); ignored for Fixed (CR-01 fix, 13-03 deferred item)
 /// * `out_result` - Output result structure
 /// * `out_error` - Output error structure
 #[no_mangle]
@@ -4790,6 +4818,7 @@ pub unsafe extern "C" fn anofox_ts_fill_forward_dates(
     target_date: i64,
     frequency_micros: i64,
     frequency_type: FrequencyType,
+    period_count: size_t,
     out_result: *mut GapFillResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -4817,6 +4846,7 @@ pub unsafe extern "C" fn anofox_ts_fill_forward_dates(
     }
 
     let freq_type_core: anofox_fcst_core::FrequencyType = frequency_type.into();
+    let period_count_u32 = u32::try_from(period_count).unwrap_or(u32::MAX);
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let dates_vec: Vec<i64> = std::slice::from_raw_parts(dates, length).to_vec();
@@ -4827,6 +4857,7 @@ pub unsafe extern "C" fn anofox_ts_fill_forward_dates(
             target_date,
             frequency_micros,
             freq_type_core,
+            period_count_u32,
         )
     }));
 

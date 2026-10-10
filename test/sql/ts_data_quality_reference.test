@@ -38,6 +38,63 @@ FROM ts_data_quality_by('dq_gap20', id, ds, v, 10, NULL);
 ----
 20
 
+# --- CR-01 regression (13-03 deferred item): calendar multiplier ('2mo'/'3q'/'5y')
+# must be honored, not silently dropped (every pair was previously misclassified
+# as "1 missing single-unit period" regardless of the declared multiplier) ---
+
+statement ok
+CREATE TABLE dq_bimonthly AS
+SELECT 'bm' AS id,
+       ('2023-' || LPAD(CAST((m - 1) * 2 + 1 AS VARCHAR), 2, '0') || '-01')::TIMESTAMP AS ds,
+       (100 + m * 10)::DOUBLE AS v
+FROM generate_series(1, 4) AS t(m);
+
+# 4 correctly-spaced bi-monthly observations ('2mo'): n_gaps must be 0.
+query I
+SELECT n_gaps
+FROM ts_data_quality_by('dq_bimonthly', id, ds, v, 1, '2mo');
+----
+0
+
+statement ok
+DROP TABLE dq_bimonthly;
+
+statement ok
+CREATE TABLE dq_triquarterly AS
+SELECT 'tq' AS id,
+       ds::TIMESTAMP AS ds,
+       100.0 AS v
+FROM (VALUES ('2023-01-01'), ('2025-04-01')) AS t(ds);
+
+# Jan 2023 -> Apr 2025 is exactly 27 months (3 steps of '3q' = 9 months each):
+# 2 missing tri-quarterly periods (Oct 2023, Jul 2024), not misclassified as 8
+# missing single quarters.
+query I
+SELECT n_gaps
+FROM ts_data_quality_by('dq_triquarterly', id, ds, v, 1, '3q');
+----
+2
+
+statement ok
+DROP TABLE dq_triquarterly;
+
+statement ok
+CREATE TABLE dq_quinquennial AS
+SELECT 'qy' AS id,
+       ds::TIMESTAMP AS ds,
+       100.0 AS v
+FROM (VALUES ('2010-01-01'), ('2015-01-01')) AS t(ds);
+
+# 2010 -> 2015 is exactly one '5y' step: n_gaps must be 0.
+query I
+SELECT n_gaps
+FROM ts_data_quality_by('dq_quinquennial', id, ds, v, 1, '5y');
+----
+0
+
+statement ok
+DROP TABLE dq_quinquennial;
+
 # n_short 10: present count (40) >= n_short -> is_short false, structural_score 1.0
 query II
 SELECT is_short, structural_score

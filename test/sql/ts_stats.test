@@ -249,6 +249,32 @@ FROM ts_stats_by('test_quarterly', sku, quarter_start, revenue, '1q');
 statement ok
 DROP TABLE test_quarterly;
 
+# CR-01 regression (13-03 deferred item): a correctly-spaced bi-monthly series
+# declared with '2mo' must report n_gaps=0, not misclassify every consecutive
+# pair as "1 missing month" (the multiplier was previously silently dropped).
+statement ok
+CREATE TABLE test_bimonthly AS
+SELECT
+    'product_B' AS sku,
+    ('2023-' || LPAD(CAST((m - 1) * 2 + 1 AS VARCHAR), 2, '0') || '-01')::TIMESTAMP AS month_start,
+    (100 + m * 10)::DOUBLE AS sales
+FROM generate_series(1, 4) AS t(m);
+
+query II
+SELECT length, expected_length
+FROM ts_stats_by('test_bimonthly', sku, month_start, sales, '2mo');
+----
+4	4
+
+query I
+SELECT n_gaps
+FROM ts_stats_by('test_bimonthly', sku, month_start, sales, '2mo');
+----
+0
+
+statement ok
+DROP TABLE test_bimonthly;
+
 # Create yearly data: 2020-2024 with 2022 missing (gap)
 statement ok
 CREATE TABLE test_yearly_gaps AS

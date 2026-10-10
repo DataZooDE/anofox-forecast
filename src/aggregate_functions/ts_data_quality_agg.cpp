@@ -190,6 +190,7 @@ static void TsDataQualityAggFinalize(Vector &state_vector, AggregateInputData &a
             0,
             FrequencyType::FIXED,
             30,
+            1,  // period_count: irrelevant for FIXED (CR-01 fix adds this param)
             &dq_result,
             &error
         );

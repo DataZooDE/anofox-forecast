@@ -75,6 +75,7 @@ fn quality_scores_fixture_matches_compute_data_quality() {
             frequency_micros,
             frequency_type,
             n_short,
+            1,
         )
         .unwrap_or_else(|e| panic!("{name}: compute_data_quality failed: {e:?}"));
 
@@ -150,7 +151,7 @@ fn behavioral_score_determinism_on_tied_steps() {
 
     let mut results = Vec::new();
     for _ in 0..50 {
-        let q = compute_data_quality(&values, Some(&dates), 0, FrequencyType::Fixed, 1).unwrap();
+        let q = compute_data_quality(&values, Some(&dates), 0, FrequencyType::Fixed, 1, 1).unwrap();
         results.push((q.n_gaps, q.n_gap_runs));
     }
     assert!(
@@ -196,7 +197,7 @@ fn fill_gaps_fixture_matches_gap_counts_fill_cases() {
         let values: Vec<Option<f64>> = observed.iter().map(|_| Some(1.0)).collect();
         let (frequency_micros, frequency_type) = fill_step_from_name(name);
 
-        let (filled_dates, _) = fill_gaps(&observed, &values, frequency_micros, frequency_type)
+        let (filled_dates, _) = fill_gaps(&observed, &values, frequency_micros, frequency_type, 1)
             .unwrap_or_else(|e| panic!("{name}: fill_gaps failed: {e:?}"));
 
         assert_eq!(filled_dates, expected_filled, "{name}: filled dates");
@@ -222,7 +223,7 @@ fn fill_forward_month_end_matches_calendar_rule() {
     let target = ymd_micros(2024, 6, 30);
 
     let (filled_dates, filled_values) =
-        fill_forward(&dates, &values, target, 0, FrequencyType::Monthly).unwrap();
+        fill_forward(&dates, &values, target, 0, FrequencyType::Monthly, 1).unwrap();
 
     assert_eq!(
         filled_dates,
@@ -234,4 +235,48 @@ fn fill_forward_month_end_matches_calendar_rule() {
         ]
     );
     assert_eq!(filled_values, vec![Some(1.0), None, None, None]);
+}
+
+/// CR-01 regression (13-03 deferred item): `fill_gaps`/`compute_data_quality` must
+/// honor the declared calendar multiplier (`period_count`) for Monthly/Quarterly/
+/// Yearly frequencies, not hard-code the single-unit step (`'2mo'` previously
+/// behaved identically to `'1mo'`).
+#[test]
+fn fill_gaps_and_data_quality_honor_calendar_period_count() {
+    fn ymd_micros(y: i32, m: u32, d: u32) -> i64 {
+        use chrono::NaiveDate;
+        NaiveDate::from_ymd_opt(y, m, d)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp_micros()
+    }
+
+    // Correctly-spaced bi-monthly series: Jan, Mar, May, Jul 2023.
+    let dates = vec![
+        ymd_micros(2023, 1, 1),
+        ymd_micros(2023, 3, 1),
+        ymd_micros(2023, 5, 1),
+        ymd_micros(2023, 7, 1),
+    ];
+    let values: Vec<Option<f64>> = dates.iter().map(|_| Some(1.0)).collect();
+
+    // fill_gaps with period_count=2 ('2mo') must insert NOTHING.
+    let (filled_dates, filled_values) =
+        fill_gaps(&dates, &values, 0, FrequencyType::Monthly, 2).unwrap();
+    assert_eq!(filled_dates, dates);
+    assert_eq!(filled_values, values);
+
+    // compute_data_quality with period_count=2 must report n_gaps=0.
+    let quality =
+        compute_data_quality(&values, Some(&dates), 0, FrequencyType::Monthly, 1, 2).unwrap();
+    assert_eq!(quality.n_gaps, 0);
+    assert_eq!(quality.n_gap_runs, 0);
+
+    // Without the multiplier (period_count=1, the pre-fix hard-coded behavior), the
+    // same series is misclassified as having 3 one-month gaps.
+    let (filled_dates_unmultiplied, _) =
+        fill_gaps(&dates, &values, 0, FrequencyType::Monthly, 1).unwrap();
+    assert_eq!(filled_dates_unmultiplied.len(), 7); // Jan..Jul, every month
 }

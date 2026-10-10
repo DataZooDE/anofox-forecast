@@ -77,6 +77,39 @@ std::pair<int64_t, bool> ParseFrequencyToSeconds(const string &frequency_str) {
     return {parsed.seconds, parsed.is_raw};
 }
 
+// Shared frequency-to-(micros,type,period_count) parser (CR-01 fix, WR-02): replaces
+// the previously-duplicated ParseFrequencyForStats (ts_stats.cpp) and
+// ParseFrequencyForDataQuality (ts_data_quality.cpp). `period_count` is
+// `parsed.seconds` itself for calendar frequency types -- ParseFrequencyWithType
+// already parses it as the raw declared multiplier (e.g. `2` for '2mo'), not scaled
+// by any day-length approximation.
+ParsedFrequencyWithMicros ParseFrequencyToMicrosAndType(const string &frequency_str) {
+    auto parsed = ParseFrequencyWithType(frequency_str);
+    int64_t micros;
+    if (parsed.type == FrequencyType::FIXED) {
+        micros = parsed.seconds * 1000000LL;
+    } else {
+        // For calendar frequencies, use approximate values for stats/quality
+        // computation; the declared multiplier itself travels separately as
+        // `period_count` (CR-01 fix) so calendar-aware gap counting/filling honors
+        // '2mo'/'3q'/'5y' instead of silently behaving like the single-unit step.
+        switch (parsed.type) {
+            case FrequencyType::MONTHLY:
+                micros = parsed.seconds * 86400LL * 30LL * 1000000LL;
+                break;
+            case FrequencyType::QUARTERLY:
+                micros = parsed.seconds * 86400LL * 90LL * 1000000LL;
+                break;
+            case FrequencyType::YEARLY:
+                micros = parsed.seconds * 86400LL * 365LL * 1000000LL;
+                break;
+            default:
+                micros = parsed.seconds * 1000000LL;
+        }
+    }
+    return {micros, parsed.type, parsed.seconds};
+}
+
 int64_t DateToMicroseconds(date_t date) {
     return static_cast<int64_t>(date.days) * 24LL * 60LL * 60LL * 1000000LL;
 }
@@ -464,6 +497,11 @@ static OperatorFinalizeResultType TsFillGapsNativeFinalize(
                 GapFillResult ffi_result = {};
                 AnofoxError error = {};
 
+                // CR-01 fix (13-03 deferred item): bind_data.frequency_seconds is
+                // already the declared calendar multiplier for Monthly/Quarterly/
+                // Yearly types (e.g. 2 for '2mo') -- pass it through as
+                // period_count so Rust honors it instead of defaulting to a
+                // single-unit step. Ignored by Rust for FIXED.
                 bool success = anofox_ts_fill_gaps(
                     grp.dates.data(),
                     grp.values.data(),
@@ -471,6 +509,7 @@ static OperatorFinalizeResultType TsFillGapsNativeFinalize(
                     grp.dates.size(),
                     freq_for_rust,
                     bind_data.frequency_type,
+                    static_cast<size_t>(bind_data.frequency_seconds),
                     &ffi_result,
                     &error
                 );

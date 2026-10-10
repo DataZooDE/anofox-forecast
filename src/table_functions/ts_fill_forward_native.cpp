@@ -404,6 +404,11 @@ static OperatorFinalizeResultType TsFillForwardNativeFinalize(
                 GapFillResult ffi_result = {};
                 AnofoxError error = {};
 
+                // CR-01 fix (13-03 deferred item): bind_data.frequency_seconds is
+                // already the declared calendar multiplier for Monthly/Quarterly/
+                // Yearly types (e.g. 2 for '2mo') -- pass it through as
+                // period_count so Rust honors it instead of defaulting to a
+                // single-unit step. Ignored by Rust for FIXED.
                 bool success = anofox_ts_fill_forward_dates(
                     grp.dates.data(),
                     grp.values.data(),
@@ -412,6 +417,7 @@ static OperatorFinalizeResultType TsFillForwardNativeFinalize(
                     target_for_rust,
                     freq_for_rust,
                     bind_data.frequency_type,
+                    static_cast<size_t>(bind_data.frequency_seconds),
                     &ffi_result,
                     &error
                 );

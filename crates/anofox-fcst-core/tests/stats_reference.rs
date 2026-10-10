@@ -213,7 +213,7 @@ fn gap_counts_fixture_matches_gap_counts() {
     let values: Vec<Option<f64>> = dates.iter().map(|_| Some(1.0)).collect();
     let micros = num(&daily_hole20["step"]["micros"]) as i64;
     let stats =
-        compute_ts_stats_with_dates_and_type(&values, &dates, micros, FrequencyType::Fixed, 0)
+        compute_ts_stats_with_dates_and_type(&values, &dates, micros, FrequencyType::Fixed, 0, 1)
             .unwrap();
     assert_eq!(stats.n_gaps, Some(20), "daily_hole20: n_gaps");
     assert_eq!(stats.n_gap_runs, Some(1), "daily_hole20: n_gap_runs");
@@ -231,9 +231,52 @@ fn gap_counts_fixture_matches_gap_counts() {
         .map(|v| iso_to_micros(v.as_str().unwrap()))
         .collect();
     let values: Vec<Option<f64>> = dates.iter().map(|_| Some(1.0)).collect();
-    let stats = compute_ts_stats_with_dates_and_type(&values, &dates, 0, FrequencyType::Monthly, 0)
-        .unwrap();
+    let stats =
+        compute_ts_stats_with_dates_and_type(&values, &dates, 0, FrequencyType::Monthly, 0, 1)
+            .unwrap();
     assert_eq!(stats.n_gaps, Some(2), "month_end: n_gaps");
     assert_eq!(stats.n_gap_runs, Some(1), "month_end: n_gap_runs");
     assert_eq!(stats.expected_length, Some(5), "month_end: expected_length");
+}
+
+/// CR-01 regression (13-03 deferred item): `compute_ts_stats_with_dates_and_type`
+/// must honor the declared calendar multiplier (`period_count`), not hard-code
+/// Monthly/Quarterly/Yearly to a single-unit step. A correctly-spaced bi-monthly
+/// series declared with `period_count=2` (i.e. `'2mo'`) must report `n_gaps = 0`.
+#[test]
+fn compute_ts_stats_honors_calendar_period_count() {
+    // 2023-01-01, 03-01, 05-01, 07-01 UTC -- 2 months apart, every time.
+    let dates: Vec<i64> = vec![
+        1672531200_i64 * 1_000_000,
+        1677628800_i64 * 1_000_000,
+        1682899200_i64 * 1_000_000,
+        1688169600_i64 * 1_000_000,
+    ];
+    let values: Vec<Option<f64>> = dates.iter().map(|_| Some(1.0)).collect();
+
+    let stats =
+        compute_ts_stats_with_dates_and_type(&values, &dates, 0, FrequencyType::Monthly, 0, 2)
+            .unwrap();
+    assert_eq!(stats.n_gaps, Some(0), "period_count=2 ('2mo'): n_gaps");
+    assert_eq!(
+        stats.n_gap_runs,
+        Some(0),
+        "period_count=2 ('2mo'): n_gap_runs"
+    );
+    assert_eq!(
+        stats.expected_length,
+        Some(4),
+        "period_count=2 ('2mo'): expected_length"
+    );
+
+    // Without the multiplier (period_count=1, the pre-fix hard-coded behavior), the
+    // same series is misclassified as 3 missing single months.
+    let stats_unmultiplied =
+        compute_ts_stats_with_dates_and_type(&values, &dates, 0, FrequencyType::Monthly, 0, 1)
+            .unwrap();
+    assert_eq!(
+        stats_unmultiplied.n_gaps,
+        Some(3),
+        "period_count=1: n_gaps (sanity check for the pre-fix behavior)"
+    );
 }

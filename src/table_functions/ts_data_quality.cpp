@@ -11,31 +11,10 @@
 
 namespace duckdb {
 
-// Parse frequency string to microseconds and frequency type (mirrors
-// ts_stats.cpp's ParseFrequencyForStats; D-04/D-05 keep gap counting
-// calendar-aware and consistent across ts_stats and ts_data_quality).
-static std::pair<int64_t, FrequencyType> ParseFrequencyForDataQuality(const string &frequency_str) {
-    auto parsed = ParseFrequencyWithType(frequency_str);
-    int64_t micros;
-    if (parsed.type == FrequencyType::FIXED) {
-        micros = parsed.seconds * 1000000LL;
-    } else {
-        switch (parsed.type) {
-            case FrequencyType::MONTHLY:
-                micros = parsed.seconds * 86400LL * 30LL * 1000000LL;
-                break;
-            case FrequencyType::QUARTERLY:
-                micros = parsed.seconds * 86400LL * 90LL * 1000000LL;
-                break;
-            case FrequencyType::YEARLY:
-                micros = parsed.seconds * 86400LL * 365LL * 1000000LL;
-                break;
-            default:
-                micros = parsed.seconds * 1000000LL;
-        }
-    }
-    return std::make_pair(micros, parsed.type);
-}
+// Frequency parsing for ts_data_quality now shared via ParseFrequencyToMicrosAndType
+// (ts_fill_gaps_native.hpp/.cpp; CR-01 fix, WR-02) -- the previous
+// ParseFrequencyForDataQuality, a verbatim copy-paste of ts_stats.cpp's
+// ParseFrequencyForStats, is removed in favor of the single shared helper.
 
 static LogicalType GetDataQualityResultType() {
     child_list_t<LogicalType> children;
@@ -141,16 +120,18 @@ static void TsDataQualityFunction(DataChunk &args, ExpressionState &state, Vecto
             }
         }
 
-        // frequency: NULL or '' -> auto-detect (micros 0, FIXED).
+        // frequency: NULL or '' -> auto-detect (micros 0, FIXED, period_count 1).
         int64_t frequency_micros = 0;
         FrequencyType frequency_type = FrequencyType::FIXED;
+        int64_t frequency_period_count = 1;  // CR-01 fix: calendar multiplier, e.g. 2 for '2mo'
         auto freq_idx = freq_format.sel->get_index(row_idx);
         if (freq_format.validity.RowIsValid(freq_idx)) {
             string freq_str = freq_data[freq_idx].GetString();
             if (!freq_str.empty()) {
-                auto parsed = ParseFrequencyForDataQuality(freq_str);
-                frequency_micros = parsed.first;
-                frequency_type = parsed.second;
+                auto parsed = ParseFrequencyToMicrosAndType(freq_str);
+                frequency_micros = parsed.micros;
+                frequency_type = parsed.type;
+                frequency_period_count = parsed.period_count;
             }
         }
 
@@ -175,6 +156,7 @@ static void TsDataQualityFunction(DataChunk &args, ExpressionState &state, Vecto
             frequency_micros,
             frequency_type,
             static_cast<size_t>(n_short),
+            static_cast<size_t>(frequency_period_count),
             &dq_result,
             &error
         );

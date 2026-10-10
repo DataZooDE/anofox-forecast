@@ -217,6 +217,7 @@ static void TsStatsAggFinalize(Vector &state_vector, AggregateInputData &aggr_in
             0,
             FIXED,
             0,
+            1,  // period_count: irrelevant for FIXED (CR-01 fix adds this param)
             &stats_result,
             &error
         );

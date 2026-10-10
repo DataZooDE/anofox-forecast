@@ -356,6 +356,9 @@ pub fn compute_ts_stats(series: &[Option<f64>], seasonal_period: usize) -> Resul
 /// * `frequency_micros` - Expected frequency between observations in microseconds (used for Fixed type)
 /// * `frequency_type` - The type of frequency (Fixed, Monthly, Quarterly, Yearly)
 /// * `seasonal_period` - See [`compute_ts_stats`]'s `seasonal_period` argument (D-02).
+/// * `period_count` - User-declared calendar multiplier for Monthly/Quarterly/Yearly
+///   frequencies (e.g. `2` for `'2mo'`); see [`resolve_gap_step`]'s doc comment
+///   (CR-01 fix, 13-03 deferred item). Ignored for `Fixed`.
 ///
 /// # Returns
 /// * `Result<TsStats>` - Statistics for the series including expected_length and n_gaps
@@ -365,6 +368,7 @@ pub fn compute_ts_stats_with_dates_and_type(
     frequency_micros: i64,
     frequency_type: FrequencyType,
     seasonal_period: usize,
+    period_count: u32,
 ) -> Result<TsStats> {
     // First compute base stats
     let mut stats = compute_ts_stats(series, seasonal_period)?;
@@ -384,7 +388,9 @@ pub fn compute_ts_stats_with_dates_and_type(
             stats.expected_length = Some(counts.expected_length);
             stats.n_gaps = Some(counts.n_missing_periods);
             stats.n_gap_runs = Some(counts.n_gap_runs);
-        } else if let Some(step) = resolve_gap_step(dates, frequency_micros, frequency_type)? {
+        } else if let Some(step) =
+            resolve_gap_step(dates, frequency_micros, frequency_type, period_count)?
+        {
             let counts = gap_counts(dates, step);
             stats.expected_length = Some(counts.expected_length);
             stats.n_gaps = Some(counts.n_missing_periods);

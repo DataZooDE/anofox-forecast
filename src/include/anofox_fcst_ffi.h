@@ -2009,6 +2009,10 @@ bool anofox_ts_stats(const double *values,
  * This version properly handles calendar frequencies (monthly, quarterly, yearly) which
  * have variable durations that cannot be accurately represented in microseconds.
  *
+ * `period_count` is the user-declared calendar multiplier for Monthly/Quarterly/Yearly
+ * frequencies (e.g. `2` for `'2mo'`, `3` for `'3q'`, `5` for `'5y'`; `1` for the
+ * single-unit strings); ignored for `Fixed` (CR-01 fix, 13-03 deferred item).
+ *
  * # Safety
  * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
  * The dates array must have the same length as the values array.
@@ -2020,6 +2024,7 @@ bool anofox_ts_stats_with_dates_and_type(const double *values,
                                          int64_t frequency_micros,
                                          enum FrequencyType frequency_type,
                                          size_t seasonal_period,
+                                         size_t period_count,
                                          struct TsStatsResult *out_result,
                                          struct AnofoxError *out_error);
 
@@ -2835,7 +2840,9 @@ bool anofox_ts_forecast_explain(const double *values,
  * `0` and `temporal_score` is `1.0`. When non-null it must have exactly `length`
  * entries. `frequency_type == Fixed` with `frequency_micros <= 0` auto-detects the
  * step from `dates`. `n_short` must be `>= 1` (`InvalidInput` otherwise, surfaced as
- * `ErrorCode::InvalidInput`).
+ * `ErrorCode::InvalidInput`). `period_count` is the user-declared calendar
+ * multiplier for Monthly/Quarterly/Yearly frequencies (e.g. `2` for `'2mo'`); ignored
+ * for `Fixed` (CR-01 fix, 13-03 deferred item).
  *
  * # Safety
  * `values` and `out_result` must be valid and non-null. `validity` and `dates` may
@@ -2849,6 +2856,7 @@ bool anofox_ts_data_quality(const double *values,
                             int64_t frequency_micros,
                             enum FrequencyType frequency_type,
                             size_t n_short,
+                            size_t period_count,
                             struct DataQualityResult *out_result,
                             struct AnofoxError *out_error);
 
@@ -2928,6 +2936,9 @@ bool anofox_ts_is_constant(const double *values,
  * * `length` - Number of elements
  * * `frequency_micros` - Frequency in microseconds (used for Fixed type)
  * * `frequency_type` - Type of frequency (0=Fixed, 1=Monthly, 2=Quarterly, 3=Yearly)
+ * * `period_count` - User-declared calendar multiplier for Monthly/Quarterly/Yearly
+ *   frequencies (e.g. `2` for `'2mo'`, `3` for `'3q'`, `5` for `'5y'`; `1` for the
+ *   single-unit strings); ignored for Fixed (CR-01 fix, 13-03 deferred item)
  * * `out_result` - Output result structure
  * * `out_error` - Output error structure
  */
@@ -2937,6 +2948,7 @@ bool anofox_ts_fill_gaps(const int64_t *dates,
                          size_t length,
                          int64_t frequency_micros,
                          enum FrequencyType frequency_type,
+                         size_t period_count,
                          struct GapFillResult *out_result,
                          struct AnofoxError *out_error);
 
@@ -2954,6 +2966,9 @@ bool anofox_ts_fill_gaps(const int64_t *dates,
  * * `target_date` - Target date to extend to (microseconds since epoch)
  * * `frequency_micros` - Frequency in microseconds (used for Fixed type)
  * * `frequency_type` - Type of frequency (0=Fixed, 1=Monthly, 2=Quarterly, 3=Yearly)
+ * * `period_count` - User-declared calendar multiplier for Monthly/Quarterly/Yearly
+ *   frequencies (e.g. `2` for `'2mo'`, `3` for `'3q'`, `5` for `'5y'`; `1` for the
+ *   single-unit strings); ignored for Fixed (CR-01 fix, 13-03 deferred item)
  * * `out_result` - Output result structure
  * * `out_error` - Output error structure
  */
@@ -2964,6 +2979,7 @@ bool anofox_ts_fill_forward_dates(const int64_t *dates,
                                   int64_t target_date,
                                   int64_t frequency_micros,
                                   enum FrequencyType frequency_type,
+                                  size_t period_count,
                                   struct GapFillResult *out_result,
                                   struct AnofoxError *out_error);
 

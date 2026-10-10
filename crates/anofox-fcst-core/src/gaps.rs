@@ -31,6 +31,11 @@ pub(crate) fn datetime_to_micros(dt: NaiveDateTime) -> i64 {
 /// * `values` - Array of values
 /// * `frequency_micros` - Expected frequency between observations in microseconds
 /// * `frequency_type` - Type of frequency (Fixed, Monthly, Quarterly, Yearly)
+/// * `period_count` - User-declared calendar multiplier for Monthly/Quarterly/Yearly
+///   frequencies (e.g. `2` for `'2mo'`, `3` for `'3q'`, `5` for `'5y'`; `1` for the
+///   single-unit `'1mo'`/`'1q'`/`'1y'` strings). Ignored for `Fixed`. Clamped to a
+///   minimum of `1` (CR-01 fix, 13-03 deferred item: previously hard-coded to `1`,
+///   so `'2mo'` behaved identically to `'1mo'`).
 ///
 /// # Returns
 /// Tuple of (filled_dates, filled_values) where missing timestamps have NULL values
@@ -39,6 +44,7 @@ pub fn fill_gaps(
     values: &[Option<f64>],
     frequency_micros: i64,
     frequency_type: FrequencyType,
+    period_count: u32,
 ) -> Result<(Vec<i64>, Vec<Option<f64>>)> {
     if dates.len() != values.len() {
         return Err(ForecastError::InvalidInput(
@@ -59,10 +65,11 @@ pub fn fill_gaps(
         dates.iter().cloned().zip(values.iter().cloned()).collect();
     pairs.sort_by_key(|(d, _)| *d);
 
+    let count = period_count.max(1) as i64;
     match frequency_type {
-        FrequencyType::Monthly => fill_gaps_monthly(&pairs),
-        FrequencyType::Quarterly => fill_gaps_quarterly(&pairs),
-        FrequencyType::Yearly => fill_gaps_yearly(&pairs),
+        FrequencyType::Monthly => fill_gaps_monthly(&pairs, count),
+        FrequencyType::Quarterly => fill_gaps_quarterly(&pairs, count),
+        FrequencyType::Yearly => fill_gaps_yearly(&pairs, count),
         FrequencyType::Fixed => fill_gaps_fixed(&pairs, frequency_micros),
     }
 }
@@ -102,33 +109,56 @@ fn fill_gaps_fixed(
 }
 
 /// Fill gaps for monthly frequency using calendar-based arithmetic.
-fn fill_gaps_monthly(pairs: &[(i64, Option<f64>)]) -> Result<(Vec<i64>, Vec<Option<f64>>)> {
-    fill_gaps_calendar(pairs, 1)
+/// `period_count` is the declared multiplier (e.g. `2` for `'2mo'`); `>= 1`.
+fn fill_gaps_monthly(
+    pairs: &[(i64, Option<f64>)],
+    period_count: i64,
+) -> Result<(Vec<i64>, Vec<Option<f64>>)> {
+    fill_gaps_calendar(pairs, 1, period_count)
 }
 
 /// Fill gaps for quarterly frequency using calendar-based arithmetic.
-fn fill_gaps_quarterly(pairs: &[(i64, Option<f64>)]) -> Result<(Vec<i64>, Vec<Option<f64>>)> {
-    fill_gaps_calendar(pairs, 3)
+/// `period_count` is the declared multiplier (e.g. `2` for `'2q'`); `>= 1`.
+fn fill_gaps_quarterly(
+    pairs: &[(i64, Option<f64>)],
+    period_count: i64,
+) -> Result<(Vec<i64>, Vec<Option<f64>>)> {
+    fill_gaps_calendar(pairs, 3, period_count)
 }
 
 /// Fill gaps for yearly frequency using calendar-based arithmetic.
-fn fill_gaps_yearly(pairs: &[(i64, Option<f64>)]) -> Result<(Vec<i64>, Vec<Option<f64>>)> {
-    fill_gaps_calendar(pairs, 12)
+/// `period_count` is the declared multiplier (e.g. `2` for `'2y'`); `>= 1`.
+fn fill_gaps_yearly(
+    pairs: &[(i64, Option<f64>)],
+    period_count: i64,
+) -> Result<(Vec<i64>, Vec<Option<f64>>)> {
+    fill_gaps_calendar(pairs, 12, period_count)
 }
 
 /// Shared monthly/quarterly/yearly gap fill (D-09, G24): for each missing position
 /// between consecutive observed dates, steps from the PREVIOUS OBSERVED DATE (not
-/// the start of its period) by `k * m` months via [`step_months`], with month-end
-/// alignment resolved once for the whole series via [`all_month_end`]. Effect: a
-/// month-end series stays month-end (2024-01-31 -> 02-29 -> 03-31), a 1st-of-month
-/// series is unchanged (clamped day-of-month = 1), and any other day-of-month keeps
-/// its own day (clamped to the target month's length) instead of snapping to the 1st.
+/// the start of its period) by `step * base_months` months via [`step_months`], with
+/// month-end alignment resolved once for the whole series via [`all_month_end`].
+/// Effect: a month-end series stays month-end (2024-01-31 -> 02-29 -> 03-31), a
+/// 1st-of-month series is unchanged (clamped day-of-month = 1), and any other
+/// day-of-month keeps its own day (clamped to the target month's length) instead of
+/// snapping to the 1st.
+///
+/// `base_months` is the UN-multiplied calendar unit width (1 = month, 3 = quarter,
+/// 12 = year) -- it selects which index function (`month_index`/`quarter_index`/year)
+/// measures `idx_diff`. `period_count` (CR-01 fix, 13-03 deferred item) is the
+/// user-declared multiplier (e.g. `2` for `'2mo'`); grid points sit every
+/// `period_count` base units apart, so a missing position is inserted for every
+/// multiple of `period_count` strictly between `0` and `idx_diff` (none when the
+/// series is already correctly spaced at that multiplier).
 fn fill_gaps_calendar(
     pairs: &[(i64, Option<f64>)],
-    m: i64,
+    base_months: i64,
+    period_count: i64,
 ) -> Result<(Vec<i64>, Vec<Option<f64>>)> {
     let observed: Vec<i64> = pairs.iter().map(|(d, _)| *d).collect();
     let month_end = all_month_end(&observed)?;
+    let period_count = period_count.max(1);
 
     let mut result_dates = Vec::new();
     let mut result_values = Vec::new();
@@ -143,19 +173,20 @@ fn fill_gaps_calendar(
         let curr_dt = micros_to_datetime(pairs[i].0);
         let (curr_date, curr_val) = pairs[i];
 
-        // Calendar-granularity index difference (months / quarters / years).
-        let idx_diff = match m {
+        // Calendar-granularity index difference, in BASE units (months / quarters
+        // / years) -- the grid multiplier is applied below, not here.
+        let idx_diff = match base_months {
             1 => month_index(curr_dt) - month_index(prev_dt),
             3 => quarter_index(curr_dt) - quarter_index(prev_dt),
             _ => curr_dt.year() as i64 - prev_dt.year() as i64,
         };
 
-        if idx_diff > 1 {
-            for step in 1..idx_diff {
-                let missing_micros = step_months(prev_date, step * m, month_end)?;
-                result_dates.push(missing_micros);
-                result_values.push(None);
-            }
+        let mut step = period_count;
+        while step < idx_diff {
+            let missing_micros = step_months(prev_date, step * base_months, month_end)?;
+            result_dates.push(missing_micros);
+            result_values.push(None);
+            step += period_count;
         }
 
         result_dates.push(curr_date);
@@ -172,7 +203,7 @@ pub fn fill_gaps_legacy(
     values: &[Option<f64>],
     frequency_seconds: i64,
 ) -> Result<(Vec<i64>, Vec<Option<f64>>)> {
-    fill_gaps(dates, values, frequency_seconds, FrequencyType::Fixed)
+    fill_gaps(dates, values, frequency_seconds, FrequencyType::Fixed, 1)
 }
 
 /// Extend a time series forward to a target date.
@@ -183,6 +214,9 @@ pub fn fill_gaps_legacy(
 /// * `target_date` - Target date to extend to (microseconds since epoch)
 /// * `frequency_micros` - Expected frequency in microseconds (for fixed intervals)
 /// * `frequency_type` - Type of frequency (Fixed, Monthly, Quarterly, Yearly)
+/// * `period_count` - User-declared calendar multiplier for Monthly/Quarterly/Yearly
+///   frequencies (see [`fill_gaps`]'s doc comment); ignored for `Fixed`; clamped to a
+///   minimum of `1` (CR-01 fix, 13-03 deferred item).
 ///
 /// # Returns
 /// Tuple of (extended_dates, extended_values) with NULLs for filled positions
@@ -192,6 +226,7 @@ pub fn fill_forward(
     target_date: i64,
     frequency_micros: i64,
     frequency_type: FrequencyType,
+    period_count: u32,
 ) -> Result<(Vec<i64>, Vec<Option<f64>>)> {
     if dates.is_empty() {
         return Ok((vec![], vec![]));
@@ -219,10 +254,13 @@ pub fn fill_forward(
             // D-09, G24: step from the LAST OBSERVED DATE (not the start of its
             // period), the same month-end-preserving rule fill_gaps_calendar and
             // future_dates use. k = 1.. while the stepped date is <= target_date.
+            // CR-01 fix (13-03 deferred item): honor the declared `period_count`
+            // multiplier instead of hard-coding the single-unit step.
+            let count = period_count.max(1) as i64;
             let m: i64 = match frequency_type {
-                FrequencyType::Monthly => 1,
-                FrequencyType::Quarterly => 3,
-                FrequencyType::Yearly => 12,
+                FrequencyType::Monthly => count,
+                FrequencyType::Quarterly => 3 * count,
+                FrequencyType::Yearly => 12 * count,
                 _ => unreachable!("matched above"),
             };
             let month_end = all_month_end(dates)?;
@@ -260,6 +298,7 @@ pub fn fill_forward_legacy(
         target_date,
         frequency_micros,
         FrequencyType::Fixed,
+        1,
     )
 }
 
@@ -347,6 +386,14 @@ fn quarter_index(dt: NaiveDateTime) -> i64 {
 /// given [`CalendarStep`]. Always `>= 1` (checked integer division; a zero or negative
 /// raw difference — e.g. two distinct timestamps within the same calendar bucket for a
 /// `Months` step — is clamped to the minimum of 1, per T-13-03).
+///
+/// `CalendarStep::Months(m)` stores the TOTAL months per declared step (e.g. `9` for
+/// a `'3q'`-at-period_count-3 step, not `3`) -- CR-01 fix, 13-03 deferred item.
+/// `idx_diff` is therefore always measured in exact MONTHS (via [`month_index`],
+/// which works uniformly regardless of whether the declared frequency is
+/// monthly/quarterly/yearly) and then divided by `m` with the same round-half-away-
+/// from-zero rule the `Fixed` branch uses, rather than re-deriving a quarter/year
+/// index that has no notion of a declared multiplier.
 fn step_count(prev: i64, curr: i64, step: CalendarStep) -> usize {
     match step {
         CalendarStep::Fixed(s) => {
@@ -365,19 +412,24 @@ fn step_count(prev: i64, curr: i64, step: CalendarStep) -> usize {
             }
             let prev_dt = micros_to_datetime(prev);
             let curr_dt = micros_to_datetime(curr);
-            let idx_diff = match m {
-                1 => month_index(curr_dt) - month_index(prev_dt),
-                3 => quarter_index(curr_dt) - quarter_index(prev_dt),
-                _ => curr_dt.year() as i64 - prev_dt.year() as i64,
-            };
-            idx_diff.max(1) as usize
+            let month_diff = (month_index(curr_dt) - month_index(prev_dt)) as i128;
+            let m128 = m as i128;
+            // Round half away from zero, same rule as the Fixed branch, in units of
+            // `m` months per calendar step.
+            let k = (2 * month_diff + m128) / (2 * m128);
+            k.max(1) as usize
         }
     }
 }
 
 /// Resolve the [`CalendarStep`] used for gap counting from a frequency spec (D-04):
 ///
-/// - `Monthly` -> `Months(1)`, `Quarterly` -> `Months(3)`, `Yearly` -> `Months(12)`.
+/// - `Monthly` -> `Months(period_count)`, `Quarterly` -> `Months(3 * period_count)`,
+///   `Yearly` -> `Months(12 * period_count)`. `period_count` is the user-declared
+///   calendar multiplier (e.g. `2` for `'2mo'`, `3` for `'3q'`, `5` for `'5y'`; `1`
+///   for the single-unit strings), clamped to a minimum of `1` (CR-01 fix: previously
+///   hard-coded to `1`/`3`/`12` regardless of the declared multiplier, so `'2mo'`
+///   silently counted gaps as if every pair were missing one month).
 /// - `Fixed` with `frequency_micros > 0` -> `Fixed(frequency_micros)` (declared frequency).
 /// - `Fixed` with `frequency_micros <= 0` -> auto-detected via [`detect_step`] when at
 ///   least 2 distinct dates are present, else `None` (not enough information).
@@ -385,11 +437,13 @@ pub fn resolve_gap_step(
     dates: &[i64],
     frequency_micros: i64,
     frequency_type: FrequencyType,
+    period_count: u32,
 ) -> Result<Option<CalendarStep>> {
+    let count = period_count.max(1);
     match frequency_type {
-        FrequencyType::Monthly => Ok(Some(CalendarStep::Months(1))),
-        FrequencyType::Quarterly => Ok(Some(CalendarStep::Months(3))),
-        FrequencyType::Yearly => Ok(Some(CalendarStep::Months(12))),
+        FrequencyType::Monthly => Ok(Some(CalendarStep::Months(count))),
+        FrequencyType::Quarterly => Ok(Some(CalendarStep::Months(count * 3))),
+        FrequencyType::Yearly => Ok(Some(CalendarStep::Months(count * 12))),
         FrequencyType::Fixed => {
             if frequency_micros > 0 {
                 Ok(Some(CalendarStep::Fixed(frequency_micros)))
@@ -455,7 +509,7 @@ mod tests {
         let dates = vec![0, 100, 300]; // Missing 200
         let values = vec![Some(1.0), Some(2.0), Some(3.0)];
         let (filled_dates, filled_values) =
-            fill_gaps(&dates, &values, 100, FrequencyType::Fixed).unwrap();
+            fill_gaps(&dates, &values, 100, FrequencyType::Fixed, 1).unwrap();
 
         assert_eq!(filled_dates, vec![0, 100, 200, 300]);
         assert_eq!(filled_values, vec![Some(1.0), Some(2.0), None, Some(3.0)]);
@@ -473,7 +527,7 @@ mod tests {
         let values = vec![Some(100.0), Some(300.0)];
 
         let (filled_dates, filled_values) =
-            fill_gaps(&dates, &values, 0, FrequencyType::Monthly).unwrap();
+            fill_gaps(&dates, &values, 0, FrequencyType::Monthly, 1).unwrap();
 
         // Should have 3 entries: Jan, Feb (filled), Mar
         assert_eq!(filled_dates.len(), 3);
@@ -505,7 +559,7 @@ mod tests {
         let values = vec![Some(100.0), Some(300.0)];
 
         let (filled_dates, filled_values) =
-            fill_gaps(&dates, &values, 0, FrequencyType::Quarterly).unwrap();
+            fill_gaps(&dates, &values, 0, FrequencyType::Quarterly, 1).unwrap();
 
         // Should have 3 entries: Q1, Q2 (filled), Q3
         assert_eq!(filled_dates.len(), 3);
@@ -528,7 +582,7 @@ mod tests {
         let values = vec![Some(100.0), Some(400.0)];
 
         let (filled_dates, filled_values) =
-            fill_gaps(&dates, &values, 0, FrequencyType::Yearly).unwrap();
+            fill_gaps(&dates, &values, 0, FrequencyType::Yearly, 1).unwrap();
 
         // Should have 4 entries: 2021, 2022, 2023, 2024
         assert_eq!(filled_dates.len(), 4);
@@ -540,6 +594,109 @@ mod tests {
         assert_eq!(y2023_dt.year(), 2023);
         assert_eq!(filled_values[1], None);
         assert_eq!(filled_values[2], None);
+    }
+
+    // --- CR-01 regression (13-03 deferred item): calendar multiplier must be
+    // honored for Monthly/Quarterly/Yearly, not hard-coded to the single-unit step.
+
+    #[test]
+    fn test_fill_gaps_bimonthly_no_gaps_when_correctly_spaced() {
+        // Jan 1, Mar 1, May 1, Jul 1 2023 -- every-other-month, period_count=2.
+        // No gaps: fill_gaps must not insert Feb/Apr/Jun.
+        let dates = vec![
+            1672531200_i64 * 1_000_000, // 2023-01-01
+            1677628800_i64 * 1_000_000, // 2023-03-01
+            1682899200_i64 * 1_000_000, // 2023-05-01
+            1688169600_i64 * 1_000_000, // 2023-07-01
+        ];
+        let values = vec![Some(1.0), Some(2.0), Some(3.0), Some(4.0)];
+
+        let (filled_dates, filled_values) =
+            fill_gaps(&dates, &values, 0, FrequencyType::Monthly, 2).unwrap();
+
+        assert_eq!(filled_dates, dates);
+        assert_eq!(filled_values, values);
+    }
+
+    #[test]
+    fn test_fill_gaps_triquarterly_fills_missing_period() {
+        // Jan 1 2023 and Jan 1 2024 are 4 quarters apart; at period_count=3
+        // ('3q') that is 2 tri-quarterly steps with one missing period in
+        // between, at Oct 1 2023 (+9 months from Jan 2023).
+        let q_2023 = 1672531200_i64 * 1_000_000; // 2023-01-01
+        let q_2024 = 1704067200_i64 * 1_000_000; // 2024-01-01
+
+        let dates = vec![q_2023, q_2024];
+        let values = vec![Some(100.0), Some(400.0)];
+
+        let (filled_dates, filled_values) =
+            fill_gaps(&dates, &values, 0, FrequencyType::Quarterly, 3).unwrap();
+
+        // Should have 3 entries: Jan 2023, Oct 2023 (filled, +9 months), Jan 2024.
+        assert_eq!(filled_dates.len(), 3);
+        let mid_dt = micros_to_datetime(filled_dates[1]);
+        assert_eq!(mid_dt.year(), 2023);
+        assert_eq!(mid_dt.month(), 10);
+        assert_eq!(filled_values[1], None);
+    }
+
+    #[test]
+    fn test_resolve_gap_step_honors_period_count() {
+        let dates = vec![0i64, 1];
+        assert_eq!(
+            resolve_gap_step(&dates, 0, FrequencyType::Monthly, 2).unwrap(),
+            Some(CalendarStep::Months(2))
+        );
+        assert_eq!(
+            resolve_gap_step(&dates, 0, FrequencyType::Quarterly, 3).unwrap(),
+            Some(CalendarStep::Months(9))
+        );
+        assert_eq!(
+            resolve_gap_step(&dates, 0, FrequencyType::Yearly, 5).unwrap(),
+            Some(CalendarStep::Months(60))
+        );
+        // period_count=0 clamps to the single-unit step (defensive minimum of 1).
+        assert_eq!(
+            resolve_gap_step(&dates, 0, FrequencyType::Monthly, 0).unwrap(),
+            Some(CalendarStep::Months(1))
+        );
+    }
+
+    #[test]
+    fn test_gap_counts_zero_gaps_for_correctly_spaced_bimonthly_series() {
+        // 2023-01-01, 03-01, 05-01, 07-01 at a '2mo' step: n_gaps must be 0, not 3
+        // (the pre-fix bug treated every pair as "1 missing month").
+        let dates = vec![
+            1672531200_i64 * 1_000_000,
+            1677628800_i64 * 1_000_000,
+            1682899200_i64 * 1_000_000,
+            1688169600_i64 * 1_000_000,
+        ];
+        let step = resolve_gap_step(&dates, 0, FrequencyType::Monthly, 2)
+            .unwrap()
+            .unwrap();
+        let counts = gap_counts(&dates, step);
+        assert_eq!(counts.n_missing_periods, 0);
+        assert_eq!(counts.n_gap_runs, 0);
+        assert_eq!(counts.expected_length, 4);
+    }
+
+    #[test]
+    fn test_fill_forward_bimonthly_honors_period_count() {
+        // Last observed 2023-01-01; extend to 2023-07-01 at a '2mo' step ->
+        // 2023-03-01 and 2023-05-01 are filled (NOT every intervening month).
+        let jan_1_2023 = 1672531200_i64 * 1_000_000;
+        let jul_1_2023 = 1688169600_i64 * 1_000_000;
+        let dates = vec![jan_1_2023];
+        let values = vec![Some(1.0)];
+
+        let (filled_dates, filled_values) =
+            fill_forward(&dates, &values, jul_1_2023, 0, FrequencyType::Monthly, 2).unwrap();
+
+        assert_eq!(filled_dates.len(), 4); // Jan, Mar, May, Jul
+        let mar_dt = micros_to_datetime(filled_dates[1]);
+        assert_eq!(mar_dt.month(), 3);
+        assert_eq!(filled_values[1], None);
     }
 
     #[test]

@@ -46,9 +46,23 @@ scope boundary). Not fixed here.
   `_ts_fill_forward_native` multiply by the parsed count the same way the forecast
   path's `MapFrequencyToStep` does, and add SQL regression tests for
   `'2mo'`/`'2q'`/`'2y'` on every affected surface.
-- **Status:** open -- not routed to a specific future phase number (no WRAP-*/STAT-*
-  requirement ID currently names it); flag during the next wrapper-documentation or
-  gap-fill-focused phase's scoping.
+- **Status:** RESOLVED (code review fix pass, 13-REVIEW CR-01, iteration 1). Threaded
+  an explicit `period_count` parameter end-to-end -- Rust core (`gaps::fill_gaps`,
+  `gaps::fill_forward`, `gaps::resolve_gap_step`, `gaps::step_count`,
+  `stats::compute_ts_stats_with_dates_and_type`, `quality::compute_data_quality`),
+  the FFI boundary (`anofox_ts_fill_gaps`, `anofox_ts_fill_forward_dates`,
+  `anofox_ts_stats_with_dates_and_type`, `anofox_ts_data_quality`; header
+  regenerated), and the C++ callers (`_ts_fill_gaps_native`, `_ts_fill_forward_native`,
+  `ts_stats.cpp`, `ts_data_quality.cpp`, plus the `_agg` variants passing a literal
+  `1`) -- so `'2mo'`/`'3q'`/`'5y'` now step/gap-count by the declared multiplier
+  instead of silently behaving like `'1mo'`/`'1q'`/`'1y'` on every affected surface.
+  Also consolidated the duplicated `ParseFrequencyForStats`/
+  `ParseFrequencyForDataQuality` into one shared
+  `ParseFrequencyToMicrosAndType` helper in `ts_fill_gaps_native.hpp`/`.cpp` (WR-02).
+  Regression coverage: Rust unit tests in `gaps.rs`/`quality.rs`, integration tests in
+  `stats_reference.rs`/`quality_gaps_reference.rs`, and SQL assertions in
+  `test/sql/ts_stats.test` (`'2mo'`) and `test/sql/ts_data_quality_reference.test`
+  (`'2mo'`/`'3q'`/`'5y'`). `cargo test --workspace` and `make test_release` both green.
 
 ## Plan 13-04
 

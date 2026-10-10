@@ -20,32 +20,10 @@
 
 namespace duckdb {
 
-// Parse frequency string to microseconds and frequency type (e.g., "1d" -> 86400000000, FIXED)
-// Returns (microseconds, FrequencyType) - for ts_stats usage
-static std::pair<int64_t, FrequencyType> ParseFrequencyForStats(const string &frequency_str) {
-    auto parsed = ParseFrequencyWithType(frequency_str);
-    // Convert seconds to microseconds for fixed frequencies
-    int64_t micros;
-    if (parsed.type == FrequencyType::FIXED) {
-        micros = parsed.seconds * 1000000LL;
-    } else {
-        // For calendar frequencies, use approximate values for stats computation
-        switch (parsed.type) {
-            case FrequencyType::MONTHLY:
-                micros = parsed.seconds * 86400LL * 30LL * 1000000LL;
-                break;
-            case FrequencyType::QUARTERLY:
-                micros = parsed.seconds * 86400LL * 90LL * 1000000LL;
-                break;
-            case FrequencyType::YEARLY:
-                micros = parsed.seconds * 86400LL * 365LL * 1000000LL;
-                break;
-            default:
-                micros = parsed.seconds * 1000000LL;
-        }
-    }
-    return std::make_pair(micros, parsed.type);
-}
+// Frequency parsing for ts_stats now shared via ParseFrequencyToMicrosAndType
+// (ts_fill_gaps_native.hpp/.cpp; CR-01 fix, WR-02) -- the previous
+// ParseFrequencyForStats, a verbatim copy-paste of ts_data_quality.cpp's
+// ParseFrequencyForDataQuality, is removed in favor of the single shared helper.
 
 // Define the output STRUCT type for ts_stats (34 metrics)
 // Note: Using LogicalType(LogicalTypeId::XXX) instead of LogicalType::XXX
@@ -344,10 +322,12 @@ static void TsStatsWithDatesFunction(DataChunk &args, ExpressionState &state, Ve
         vector<int64_t> timestamps;
         ExtractListTimestamps(dates_vec, count, row_idx, timestamps);
 
-        // Parse frequency (micros + type) so monthly/quarterly/yearly gap counting is
-        // calendar-aware here too, matching ts_stats_by (Phase 13 plan 13-01, D-04).
+        // Parse frequency (micros + type + period_count) so monthly/quarterly/yearly
+        // gap counting is calendar-aware here too, matching ts_stats_by (Phase 13 plan
+        // 13-01, D-04) and honors the declared multiplier (CR-01 fix, 13-03 deferred
+        // item).
         string freq_str = freq_data[freq_idx].GetString();
-        auto [frequency_micros, frequency_type] = ParseFrequencyForStats(freq_str);
+        auto parsed_freq = ParseFrequencyToMicrosAndType(freq_str);
 
         // Call Rust FFI function with dates, frequency type and seasonal_period (D-02)
         TsStatsResult stats_result;
@@ -358,9 +338,10 @@ static void TsStatsWithDatesFunction(DataChunk &args, ExpressionState &state, Ve
             validity.empty() ? nullptr : validity.data(),
             timestamps.data(),
             values.size(),
-            frequency_micros,
-            frequency_type,
+            parsed_freq.micros,
+            parsed_freq.type,
             static_cast<size_t>(seasonal_period),
+            static_cast<size_t>(parsed_freq.period_count),
             &stats_result,
             &error
         );
@@ -384,6 +365,7 @@ static void TsStatsWithDatesFunction(DataChunk &args, ExpressionState &state, Ve
 struct TsStatsByBindData : public TableFunctionData {
     int64_t frequency_micros = 86400LL * 1000000LL;  // Default: 1 day
     FrequencyType frequency_type = FIXED;
+    int64_t frequency_period_count = 1;  // Calendar multiplier, e.g. 2 for '2mo' (CR-01 fix)
     string group_col_name;  // Preserved from input
     LogicalType group_logical_type = LogicalType(LogicalTypeId::VARCHAR);
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
@@ -449,9 +431,10 @@ static unique_ptr<FunctionData> TsStatsByBind(
     // Parse frequency from second argument (index 1, since index 0 is TABLE placeholder)
     if (input.inputs.size() >= 2) {
         string freq_str = input.inputs[1].GetValue<string>();
-        auto [micros, ftype] = ParseFrequencyForStats(freq_str);
-        bind_data->frequency_micros = micros;
-        bind_data->frequency_type = ftype;
+        auto parsed_freq = ParseFrequencyToMicrosAndType(freq_str);
+        bind_data->frequency_micros = parsed_freq.micros;
+        bind_data->frequency_type = parsed_freq.type;
+        bind_data->frequency_period_count = parsed_freq.period_count;
     }
 
     // seasonal_period (D-02): 3rd positional argument. NULL -> 0 (auto-detect);
@@ -752,6 +735,7 @@ static OperatorFinalizeResultType TsStatsByFinalize(
                 bind_data.frequency_micros,
                 bind_data.frequency_type,
                 bind_data.seasonal_period,
+                static_cast<size_t>(bind_data.frequency_period_count),
                 &stats_result,
                 &error
             );
