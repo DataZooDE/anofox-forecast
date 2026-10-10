@@ -62,13 +62,20 @@ pub struct TsStats {
     pub range: f64,
     /// Sum of all values
     pub sum: f64,
-    /// Skewness (Fisher's G1 - bias-corrected sample skewness)
+    /// Skewness: Fisher's bias-corrected G1, equal to `scipy.stats.skew(x, bias=False)`.
+    /// Computed from the population 2nd/3rd central moments (both divided by n, not n-1),
+    /// then bias-corrected: `g1 = m3/m2^1.5`, `G1 = g1 * sqrt(n(n-1)) / (n-2)` (n > 2).
     pub skewness: f64,
-    /// Kurtosis (Fisher's G2 - bias-corrected excess kurtosis)
+    /// Excess kurtosis: Fisher's bias-corrected G2, equal to
+    /// `scipy.stats.kurtosis(x, fisher=True, bias=False)`. Computed from the population
+    /// 2nd/4th central moments: `g2 = m4/m2^2 - 3`, `G2 = ((n+1)*g2 + 6)*(n-1) / ((n-2)(n-3))`
+    /// (n > 3).
     pub kurtosis: f64,
     /// Tail index (Hill estimator, α > 0 indicates heavy tail)
     pub tail_index: f64,
-    /// Bimodality coefficient (BC > 0.555 suggests bimodality)
+    /// Bimodality coefficient, SAS small-sample formula from the G1/G2 above:
+    /// `BC = (G1^2 + 1) / (G2 + 3*(n-1)^2 / ((n-2)(n-3)))` (n > 3). `BC > 0.555` (the
+    /// uniform-distribution value) suggests bimodality or multimodality.
     pub bimodality_coef: f64,
     /// Trimmed mean (10% trimmed from each tail)
     pub trimmed_mean: f64,
@@ -187,26 +194,27 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
     let q3 = percentile(&sorted, 0.75);
     let iqr = q3 - q1;
 
-    // Skewness (Fisher's G1 - bias-corrected sample skewness)
-    // G1 = sqrt(n(n-1)) / (n-2) * m3 / s^3
-    let skewness = if n_valid > 2 && std_dev > f64::EPSILON {
-        let n = n_valid as f64;
+    // Moments (D-01, STAT-01): population central moments m2/m3/m4 (divided by n, NOT
+    // n-1), matching scipy's internal computation before its own bias correction.
+    let n = n_valid as f64;
+    let m2 = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n;
+
+    // Skewness: scipy.stats.skew(x, bias=False) — Fisher's bias-corrected G1.
+    // g1 = m3 / m2^1.5; G1 = g1 * sqrt(n(n-1)) / (n-2)
+    let skewness = if n_valid > 2 && m2 > f64::EPSILON {
         let m3 = values.iter().map(|v| (v - mean).powi(3)).sum::<f64>() / n;
-        let g1 = m3 / std_dev.powi(3);
-        // Apply bias correction factor
+        let g1 = m3 / m2.powf(1.5);
         g1 * (n * (n - 1.0)).sqrt() / (n - 2.0)
     } else {
         f64::NAN
     };
 
-    // Kurtosis (Fisher's G2 - bias-corrected excess kurtosis)
-    // G2 = (n-1) / ((n-2)(n-3)) * ((n+1) * g2 + 6)
-    let kurtosis = if n_valid > 3 && std_dev > f64::EPSILON {
-        let n = n_valid as f64;
+    // Excess kurtosis: scipy.stats.kurtosis(x, fisher=True, bias=False) — Fisher's
+    // bias-corrected G2. g2 = m4/m2^2 - 3; G2 = ((n+1)*g2 + 6)*(n-1) / ((n-2)(n-3))
+    let kurtosis = if n_valid > 3 && m2 > f64::EPSILON {
         let m4 = values.iter().map(|v| (v - mean).powi(4)).sum::<f64>() / n;
-        let g2 = m4 / std_dev.powi(4) - 3.0; // Population excess kurtosis
-                                             // Apply bias correction factor
-        (n - 1.0) / ((n - 2.0) * (n - 3.0)) * ((n + 1.0) * g2 + 6.0)
+        let g2 = m4 / m2.powi(2) - 3.0;
+        ((n + 1.0) * g2 + 6.0) * (n - 1.0) / ((n - 2.0) * (n - 3.0))
     } else {
         f64::NAN
     };
@@ -214,11 +222,12 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
     // Tail index (Hill estimator on absolute values)
     let tail_index = compute_hill_estimator(&values);
 
-    // Bimodality coefficient: BC = (skewness^2 + 1) / (kurtosis + 3 * (n-1)^2 / ((n-2)(n-3)))
-    // Simplified: BC = (skewness^2 + 1) / (kurtosis_excess + 3)
+    // Bimodality coefficient: SAS small-sample formula using the G1/G2 above.
+    // BC = (G1^2 + 1) / (G2 + 3*(n-1)^2 / ((n-2)(n-3)))
     // BC > 0.555 suggests bimodality (threshold for uniform distribution)
     let bimodality_coef = if n_valid > 3 && kurtosis.is_finite() && skewness.is_finite() {
-        (skewness.powi(2) + 1.0) / (kurtosis + 3.0)
+        let small_sample_term = 3.0 * (n - 1.0).powi(2) / ((n - 2.0) * (n - 3.0));
+        (skewness.powi(2) + 1.0) / (kurtosis + small_sample_term)
     } else {
         f64::NAN
     };

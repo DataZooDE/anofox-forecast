@@ -72,10 +72,10 @@ ts_stats_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
 | `max` | DOUBLE | Maximum value |
 | `range` | DOUBLE | Range (max - min) |
 | `sum` | DOUBLE | Sum of all values |
-| `skewness` | DOUBLE | Intended as Fisher's G1, but currently mixes a population 3rd moment with a sample (ddof=1) standard deviation before applying the G1 bias-correction factor — not a textbook G1 value (fix planned for v0.10.0, Phase 13) |
-| `kurtosis` | DOUBLE | Same population/sample moment mixing as `skewness`, applied to excess kurtosis — not a textbook G2 value (fix planned for v0.10.0, Phase 13) |
+| `skewness` | DOUBLE | Fisher's bias-corrected G1, equal to `scipy.stats.skew(x, bias=False)`. `NaN` for 2 or fewer observations or a zero-variance series. |
+| `kurtosis` | DOUBLE | Fisher's bias-corrected excess kurtosis (G2), equal to `scipy.stats.kurtosis(x, fisher=True, bias=False)`. `NaN` for 3 or fewer observations or a zero-variance series. |
 | `tail_index` | DOUBLE | Hill estimator |
-| `bimodality_coef` | DOUBLE | Bimodality coefficient |
+| `bimodality_coef` | DOUBLE | SAS small-sample bimodality coefficient computed from the G1/G2 above: `BC = (G1² + 1) / (G2 + 3·(n-1)² / ((n-2)(n-3)))`. `BC > 0.555` (the value for a uniform distribution) suggests bimodality or multimodality. |
 | `trimmed_mean` | DOUBLE | 10% trimmed mean |
 | `coef_variation` | DOUBLE | Coefficient of variation |
 | `q1` | DOUBLE | First quartile |

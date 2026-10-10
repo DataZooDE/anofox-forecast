@@ -12,7 +12,7 @@
   },
   "parameters": {
     "rng": "numpy.random.default_rng(20261008)",
-    "note": "One shared rng advanced in vector order: toy8, x20 (fixed, no draw), normal_n100, exponential_n200, uniform_n50, bimodal_n200"
+    "note": "One shared rng advanced in vector order: toy8, x20 (fixed, no draw), normal_n100, exponential_n200, uniform_n50, bimodal_n200; neg30 (fixed, no draw) is the audit vector behind ROADMAP SC1's bimodality_coef 0.466 (previously 0.600)."
   },
   "vectors": {
     "toy8": {
@@ -664,6 +664,48 @@
       "kurtosis_excess_bias_false": -1.6596410239049555,
       "kurtosis_excess_bias_true": -1.6482901517147102,
       "bimodality_coefficient_sas": 0.7218710884244612
+    },
+    "neg30": {
+      "x": [
+        -1.8991,
+        0.6477,
+        -0.802,
+        -0.7567,
+        -3.1837,
+        -3.7957,
+        -5.3265,
+        -2.3631,
+        -5.7755,
+        -4.7125,
+        -7.6473,
+        -7.5362,
+        -10.0714,
+        -9.4829,
+        -8.8162,
+        -11.7517,
+        -10.1278,
+        -11.5628,
+        -13.644,
+        -13.8016,
+        -14.4591,
+        -14.7495,
+        -15.9361,
+        -16.9273,
+        -17.1046,
+        -18.5269,
+        -19.4895,
+        -18.9482,
+        -18.7171,
+        -21.8294
+      ],
+      "n": 30,
+      "mean": -10.303223333333335,
+      "var_ddof1": 42.71155321012643,
+      "skew_bias_false": 0.009664978939615671,
+      "skew_bias_true": 0.009174857275104004,
+      "kurtosis_excess_bias_false": -1.1917581430411304,
+      "kurtosis_excess_bias_true": -1.1957387721235757,
+      "bimodality_coefficient_sas": 0.4661259199823024
     }
   }
 }

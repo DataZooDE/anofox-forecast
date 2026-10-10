@@ -65,6 +65,16 @@ def main() -> None:
     bimodal_n200 = np.concatenate(
         [rng.normal(-2, 0.6, 100), rng.normal(2, 0.6, 100)]
     )
+    # Fixed vector (no rng draw) — the ROADMAP SC1 audit vector behind the
+    # "0.466, previously 0.600" bimodality-coefficient regression check.
+    neg30 = np.array(
+        [
+            -1.8991, 0.6477, -0.802, -0.7567, -3.1837, -3.7957, -5.3265, -2.3631,
+            -5.7755, -4.7125, -7.6473, -7.5362, -10.0714, -9.4829, -8.8162, -11.7517,
+            -10.1278, -11.5628, -13.644, -13.8016, -14.4591, -14.7495, -15.9361,
+            -16.9273, -17.1046, -18.5269, -19.4895, -18.9482, -18.7171, -21.8294,
+        ]
+    )
 
     vectors = {
         "toy8": describe(toy8),
@@ -73,13 +83,14 @@ def main() -> None:
         "exponential_n200": describe(exponential_n200),
         "uniform_n50": describe(uniform_n50),
         "bimodal_n200": describe(bimodal_n200),
+        "neg30": describe(neg30),
     }
 
     payload = {
         "tolerance": TOLERANCE,
         "parameters": {
             "rng": "numpy.random.default_rng(20261008)",
-            "note": "One shared rng advanced in vector order: toy8, x20 (fixed, no draw), normal_n100, exponential_n200, uniform_n50, bimodal_n200",
+            "note": "One shared rng advanced in vector order: toy8, x20 (fixed, no draw), normal_n100, exponential_n200, uniform_n50, bimodal_n200; neg30 (fixed, no draw) is the audit vector behind ROADMAP SC1's bimodality_coef 0.466 (previously 0.600).",
         },
         "vectors": vectors,
     }

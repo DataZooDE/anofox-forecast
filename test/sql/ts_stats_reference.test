@@ -1,0 +1,118 @@
+# name: test/sql/ts_stats_reference.test
+# description: ts_stats moments/entropy/gap-count value assertions against reference fixtures (Phase 13 plan 13-01, STAT-01/STAT-03)
+# group: [sql]
+#
+# Non-json-gated so it runs on every native build. Literals below are copied from
+# validation/reference/fixtures/moments/scipy_moments.json (vectors x20, neg30) via:
+#   python3 -c "import json; d=json.load(open('validation/reference/fixtures/moments/scipy_moments.json')); print(d['vectors']['x20'])"
+# Entropy / gap-count blocks are added by plan 13-01 task 2/3.
+
+require anofox_forecast
+
+# --- moments/scipy_moments.json: vectors.x20 ---
+statement ok
+CREATE TABLE x20_tbl AS SELECT * FROM (VALUES
+    (DATE '2024-01-01' + INTERVAL (0) DAY, 3.337),
+    (DATE '2024-01-01' + INTERVAL (1) DAY, 2.674),
+    (DATE '2024-01-01' + INTERVAL (2) DAY, 2.292),
+    (DATE '2024-01-01' + INTERVAL (3) DAY, 3.491),
+    (DATE '2024-01-01' + INTERVAL (4) DAY, 2.217),
+    (DATE '2024-01-01' + INTERVAL (5) DAY, 4.765),
+    (DATE '2024-01-01' + INTERVAL (6) DAY, 3.613),
+    (DATE '2024-01-01' + INTERVAL (7) DAY, 3.258),
+    (DATE '2024-01-01' + INTERVAL (8) DAY, 0.928),
+    (DATE '2024-01-01' + INTERVAL (9) DAY, 0.481),
+    (DATE '2024-01-01' + INTERVAL (10) DAY, 1.015),
+    (DATE '2024-01-01' + INTERVAL (11) DAY, 3.755),
+    (DATE '2024-01-01' + INTERVAL (12) DAY, 3.21),
+    (DATE '2024-01-01' + INTERVAL (13) DAY, 0.738),
+    (DATE '2024-01-01' + INTERVAL (14) DAY, 3.727),
+    (DATE '2024-01-01' + INTERVAL (15) DAY, 1.651),
+    (DATE '2024-01-01' + INTERVAL (16) DAY, 1.653),
+    (DATE '2024-01-01' + INTERVAL (17) DAY, 6.178),
+    (DATE '2024-01-01' + INTERVAL (18) DAY, 3.053),
+    (DATE '2024-01-01' + INTERVAL (19) DAY, 3.501)
+) t(ds, v);
+
+statement ok
+CREATE TABLE x20_grp AS SELECT 'x20' AS id, ds, v FROM x20_tbl;
+
+# --- moments/scipy_moments.json: vectors.neg30 (ROADMAP SC1 audit vector) ---
+statement ok
+CREATE TABLE neg30_tbl AS SELECT * FROM (VALUES
+    (DATE '2024-01-01' + INTERVAL (0) DAY, -1.8991),
+    (DATE '2024-01-01' + INTERVAL (1) DAY, 0.6477),
+    (DATE '2024-01-01' + INTERVAL (2) DAY, -0.802),
+    (DATE '2024-01-01' + INTERVAL (3) DAY, -0.7567),
+    (DATE '2024-01-01' + INTERVAL (4) DAY, -3.1837),
+    (DATE '2024-01-01' + INTERVAL (5) DAY, -3.7957),
+    (DATE '2024-01-01' + INTERVAL (6) DAY, -5.3265),
+    (DATE '2024-01-01' + INTERVAL (7) DAY, -2.3631),
+    (DATE '2024-01-01' + INTERVAL (8) DAY, -5.7755),
+    (DATE '2024-01-01' + INTERVAL (9) DAY, -4.7125),
+    (DATE '2024-01-01' + INTERVAL (10) DAY, -7.6473),
+    (DATE '2024-01-01' + INTERVAL (11) DAY, -7.5362),
+    (DATE '2024-01-01' + INTERVAL (12) DAY, -10.0714),
+    (DATE '2024-01-01' + INTERVAL (13) DAY, -9.4829),
+    (DATE '2024-01-01' + INTERVAL (14) DAY, -8.8162),
+    (DATE '2024-01-01' + INTERVAL (15) DAY, -11.7517),
+    (DATE '2024-01-01' + INTERVAL (16) DAY, -10.1278),
+    (DATE '2024-01-01' + INTERVAL (17) DAY, -11.5628),
+    (DATE '2024-01-01' + INTERVAL (18) DAY, -13.644),
+    (DATE '2024-01-01' + INTERVAL (19) DAY, -13.8016),
+    (DATE '2024-01-01' + INTERVAL (20) DAY, -14.4591),
+    (DATE '2024-01-01' + INTERVAL (21) DAY, -14.7495),
+    (DATE '2024-01-01' + INTERVAL (22) DAY, -15.9361),
+    (DATE '2024-01-01' + INTERVAL (23) DAY, -16.9273),
+    (DATE '2024-01-01' + INTERVAL (24) DAY, -17.1046),
+    (DATE '2024-01-01' + INTERVAL (25) DAY, -18.5269),
+    (DATE '2024-01-01' + INTERVAL (26) DAY, -19.4895),
+    (DATE '2024-01-01' + INTERVAL (27) DAY, -18.9482),
+    (DATE '2024-01-01' + INTERVAL (28) DAY, -18.7171),
+    (DATE '2024-01-01' + INTERVAL (29) DAY, -21.8294)
+) t(ds, v);
+
+statement ok
+CREATE TABLE neg30_grp AS SELECT 'neg30' AS id, ds, v FROM neg30_tbl;
+
+# === ts_stats_by: x20 moments (scipy skew=0.30292879825084273, kurt=0.2765286546322532, bc=0.2861213328957609) ===
+query I
+SELECT abs(skewness - 0.30292879825084273) < 1e-10 AND abs(kurtosis - 0.2765286546322532) < 1e-10 AND abs(bimodality_coef - 0.2861213328957609) < 1e-10
+FROM ts_stats_by('x20_grp', id, ds, v, '1d');
+----
+true
+
+# === ts_stats macro: x20 moments ===
+query I
+SELECT abs(skewness - 0.30292879825084273) < 1e-10 AND abs(kurtosis - 0.2765286546322532) < 1e-10 AND abs(bimodality_coef - 0.2861213328957609) < 1e-10
+FROM ts_stats('x20_grp', id, ds, v, '1d');
+----
+true
+
+# === ts_stats_agg: x20 moments ===
+query I
+SELECT abs((s).skewness - 0.30292879825084273) < 1e-10 AND abs((s).kurtosis - 0.2765286546322532) < 1e-10 AND abs((s).bimodality_coef - 0.2861213328957609) < 1e-10
+FROM (SELECT ts_stats_agg(ds, v) AS s FROM x20_tbl);
+----
+true
+
+# === ts_stats_by: neg30 moments (scipy skew=0.009664978939615671, kurt=-1.1917581430411304, bc=0.4661259199823024 — ROADMAP SC1 "0.466, previously 0.600") ===
+query I
+SELECT abs(skewness - 0.009664978939615671) < 1e-10 AND abs(kurtosis - (-1.1917581430411304)) < 1e-10 AND abs(bimodality_coef - 0.4661259199823024) < 1e-10
+FROM ts_stats_by('neg30_grp', id, ds, v, '1d');
+----
+true
+
+# === ts_stats macro: neg30 moments ===
+query I
+SELECT abs(skewness - 0.009664978939615671) < 1e-10 AND abs(kurtosis - (-1.1917581430411304)) < 1e-10 AND abs(bimodality_coef - 0.4661259199823024) < 1e-10
+FROM ts_stats('neg30_grp', id, ds, v, '1d');
+----
+true
+
+# === ts_stats_agg: neg30 moments ===
+query I
+SELECT abs((s).skewness - 0.009664978939615671) < 1e-10 AND abs((s).kurtosis - (-1.1917581430411304)) < 1e-10 AND abs((s).bimodality_coef - 0.4661259199823024) < 1e-10
+FROM (SELECT ts_stats_agg(ds, v) AS s FROM neg30_tbl);
+----
+true
