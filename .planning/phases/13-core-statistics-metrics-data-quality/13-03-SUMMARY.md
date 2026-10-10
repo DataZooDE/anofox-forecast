@@ -468,3 +468,13 @@ None — no external service configuration required.
 ---
 *Phase: 13-core-statistics-metrics-data-quality*
 *Completed: 2026-10-10*
+
+## Self-Check: PASSED
+
+All created files verified present on disk (`validation/reference/python/gen_quality_reference.py`,
+`validation/reference/fixtures/quality_scores/cases.json`,
+`crates/anofox-fcst-core/tests/quality_gaps_reference.rs`,
+`test/sql/ts_data_quality_reference.test`, `test/sql/ts_fill_gaps_month_end.test`,
+`.planning/phases/13-core-statistics-metrics-data-quality/snippets/pass-list-13-03.tsv`);
+all four task commit hashes (`473d389`, `c6a65a8`, `751bb68`, `00a7364`) verified
+present in `git log --oneline --all`.
