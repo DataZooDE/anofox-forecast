@@ -327,6 +327,38 @@ THEN 'PASS fill_nulls_mean_by_equals_rust_fill_nulls_mean' ELSE error(
     'FAIL fill_nulls_mean_by_equals_rust_fill_nulls_mean'
 ) END AS result;
 
+-- ============================================================================
+-- SECTION 8 — Hierarchy aggregation uses SQL SUM NULL semantics (D-08, RUST-07)
+-- ============================================================================
+
+.print ''
+.print 'SECTION 8: ts_aggregate_hierarchy follows SQL SUM NULL semantics (D-08/RUST-07)'
+.print ''
+
+CREATE OR REPLACE TABLE section8_hier AS SELECT * FROM (VALUES
+    ('EU', 'S1', 'A', DATE '2024-01-01', 10.0),
+    ('EU', 'S1', 'B', DATE '2024-01-01', NULL),
+    ('EU', 'S2', 'C', DATE '2024-01-01', NULL)
+) AS t(region, store, item, ds, qty);
+
+-- A partially-NULL group (EU|S1: A=10.0, B=NULL) sums only the present leaf value.
+SELECT CASE WHEN (
+    SELECT qty FROM ts_aggregate_hierarchy(
+        (SELECT ds, qty, region, store, item FROM section8_hier), MAP{}
+    ) WHERE unique_id = 'EU|S1|AGGREGATED'
+) = 10.0 THEN 'PASS hierarchy_partial_null_group_sums_present_values' ELSE error(
+    'FAIL hierarchy_partial_null_group_sums_present_values'
+) END AS result;
+
+-- An all-NULL group (EU|S2: only C=NULL) aggregates to NULL, never 0.
+SELECT CASE WHEN (
+    SELECT qty FROM ts_aggregate_hierarchy(
+        (SELECT ds, qty, region, store, item FROM section8_hier), MAP{}
+    ) WHERE unique_id = 'EU|S2|AGGREGATED'
+) IS NULL THEN 'PASS hierarchy_all_null_group_aggregates_to_null' ELSE error(
+    'FAIL hierarchy_all_null_group_aggregates_to_null'
+) END AS result;
+
 .print ''
 .print '============================================================================='
 .print 'ALL SECTIONS PASSED'

@@ -171,6 +171,13 @@ use the semver numbering this project started with.
   the Phase 10 NaN = NULL convention: a `NaN` value is excluded from the group mean and
   replaced by it, same as a `NULL`. Previously a `NaN` poisoned the SQL `AVG(value_col)`
   (any `NaN` in a group made `_mean_val` `NaN` for the whole group).
+- **Hierarchy aggregation uses SQL `SUM` NULL semantics** (RUST-07, D-08, plan 12-08).
+  `ts_aggregate_hierarchy` previously treated a `NULL` leaf value as `0` when summing —
+  it never propagated to `NULL` and never got excluded, silently contributing zero to every
+  level's total. It now follows exact SQL `SUM` behaviour: a group whose leaves are all
+  `NULL` for a given date aggregates to `NULL`; a partially-NULL group aggregates to the sum
+  of only its present (non-`NULL`) values. Breaking change for any caller relying on the old
+  `NULL -> 0` imputation.
 
 ### Added
 
@@ -255,6 +262,15 @@ use the semver numbering this project started with.
   macros in `ts_macros.cpp`) are deleted, along with the no-op `RegisterTsFeaturesFunction`
   (`ts_features.cpp`) and `RegisterTsDetectChangepointsFunction` (`ts_changepoints.cpp`)
   registrations.
+
+### Removed
+
+- **`_ts_backtest_native`** (RUST-06, D-07, plan 12-08): the internal, macro-less table
+  function left orphaned when `ts_backtest_auto_by` was removed. Its own forecast-minus-actual
+  error sign disagreed with the SQL metric scalars' actual-minus-forecast convention (D-16);
+  that inconsistency is resolved by removal rather than a fix, since nothing called it. Use
+  the `ts_cv_folds_by` + `ts_cv_forecast_by` two-step CV workflow; `ts_estimate_backtest_memory`
+  (reworded to describe that workflow) is unaffected and still live.
 
 ## [2026.09.26] - 2026-09-26
 
