@@ -444,3 +444,89 @@ statement error
 SELECT trend_strength FROM ts_stats_by('det84_grp', id, ds, v, '1d', seasonal_period := -1);
 ----
 seasonal_period must be >= 0
+
+# === CR-03 regression (iteration 2): fill_gaps's inserted-row count and
+# ts_stats_by's n_gaps must agree for every calendar gap, exact-multiple or not
+# (previously fill_gaps_calendar walked the grid directly while gap_counts
+# independently rounded the elapsed distance to the nearest whole step, and the
+# two disagreed whenever a gap was not an exact multiple of the step). ===
+
+# '1q' (period_count=1) over a 5-month gap: NOT an exact multiple of 3 months --
+# the review's exact reproduction. fill_gaps_by must insert exactly as many NULL
+# rows as ts_stats_by reports as n_gaps.
+statement ok
+CREATE TABLE cr03_q3 AS SELECT 'q3' AS id, ds::TIMESTAMP AS ds, 100.0 AS v
+FROM (VALUES ('2023-01-01'), ('2023-06-01')) AS t(ds);
+
+query I
+SELECT count(*) FILTER (WHERE v IS NULL) FROM ts_fill_gaps_by('cr03_q3', id, ds, v, '1q');
+----
+1
+
+query I
+SELECT n_gaps FROM ts_stats_by('cr03_q3', id, ds, v, '1q');
+----
+1
+
+statement ok
+DROP TABLE cr03_q3;
+
+# '3q' (period_count=3, 9-month step) over 12 months: the review's other exact
+# reproduction -- fill_gaps inserts one row at +9 months, the old gap_counts
+# rounding rule said 0 missing periods for the identical series.
+statement ok
+CREATE TABLE cr03_tq AS SELECT 'tq' AS id, ds::TIMESTAMP AS ds, 100.0 AS v
+FROM (VALUES ('2023-01-01'), ('2024-01-01')) AS t(ds);
+
+query I
+SELECT count(*) FILTER (WHERE v IS NULL) FROM ts_fill_gaps_by('cr03_tq', id, ds, v, '3q');
+----
+1
+
+query I
+SELECT n_gaps FROM ts_stats_by('cr03_tq', id, ds, v, '3q');
+----
+1
+
+statement ok
+DROP TABLE cr03_tq;
+
+# '2mo': one exactly-spaced pair (Jan 1 -> Mar 1) and one off-grid pair
+# (Mar 1 -> Jun 1 is 3 months, not a multiple of 2 -> one grid point at May 1).
+statement ok
+CREATE TABLE cr03_bm AS SELECT 'bm' AS id, ds::TIMESTAMP AS ds, 100.0 AS v
+FROM (VALUES ('2023-01-01'), ('2023-03-01'), ('2023-06-01')) AS t(ds);
+
+query I
+SELECT count(*) FILTER (WHERE v IS NULL) FROM ts_fill_gaps_by('cr03_bm', id, ds, v, '2mo');
+----
+1
+
+query I
+SELECT n_gaps FROM ts_stats_by('cr03_bm', id, ds, v, '2mo');
+----
+1
+
+statement ok
+DROP TABLE cr03_bm;
+
+# Month-end series (D-09): a '1q' step from Jan 31 to Apr 30 2023 is an exact
+# 3-month step with month-end alignment preserved (Feb 28 is skipped by the
+# calendar rule, not treated as a separate gap) -- both sides must agree on
+# zero gaps.
+statement ok
+CREATE TABLE cr03_me AS SELECT 'me' AS id, ds::TIMESTAMP AS ds, 100.0 AS v
+FROM (VALUES ('2023-01-31'), ('2023-04-30')) AS t(ds);
+
+query I
+SELECT count(*) FILTER (WHERE v IS NULL) FROM ts_fill_gaps_by('cr03_me', id, ds, v, '1q');
+----
+0
+
+query I
+SELECT n_gaps FROM ts_stats_by('cr03_me', id, ds, v, '1q');
+----
+0
+
+statement ok
+DROP TABLE cr03_me;

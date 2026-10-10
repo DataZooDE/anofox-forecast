@@ -183,7 +183,7 @@ fn gap_counts_fixture_matches_gap_counts() {
             .collect();
         let step = step_from_fixture(&case["step"]);
 
-        let counts = gap_counts(&observed, step);
+        let counts = gap_counts(&observed, step).unwrap();
 
         assert_eq!(
             counts.expected_length,

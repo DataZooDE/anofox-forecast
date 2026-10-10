@@ -151,7 +151,7 @@ pub fn compute_data_quality(
     let (n_gaps, n_gap_runs, temporal_score) = match dates {
         Some(d) => match resolve_gap_step(d, frequency_micros, frequency_type, period_count)? {
             Some(step) => {
-                let counts = gap_counts(d, step);
+                let counts = gap_counts(d, step)?;
                 let temporal =
                     calculate_temporal_score(counts.n_missing_periods, counts.expected_length);
                 (counts.n_missing_periods, counts.n_gap_runs, temporal)
@@ -778,7 +778,7 @@ mod tests {
         // counter as ts_stats).
         let dates = vec![0, ONE_DAY_MICROS];
         let step = CalendarStep::Fixed(ONE_DAY_MICROS);
-        let counts = gap_counts(&dates, step);
+        let counts = gap_counts(&dates, step).unwrap();
         assert_eq!(counts.n_missing_periods, 0);
     }
 }

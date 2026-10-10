@@ -384,14 +384,14 @@ pub fn compute_ts_stats_with_dates_and_type(
         if distinct_dates.len() < 2 {
             // A single distinct date (or none) needs no step: gap_counts short-circuits
             // before the step is ever consulted. The placeholder step is unused.
-            let counts = gap_counts(dates, CalendarStep::Fixed(1));
+            let counts = gap_counts(dates, CalendarStep::Fixed(1))?;
             stats.expected_length = Some(counts.expected_length);
             stats.n_gaps = Some(counts.n_missing_periods);
             stats.n_gap_runs = Some(counts.n_gap_runs);
         } else if let Some(step) =
             resolve_gap_step(dates, frequency_micros, frequency_type, period_count)?
         {
-            let counts = gap_counts(dates, step);
+            let counts = gap_counts(dates, step)?;
             stats.expected_length = Some(counts.expected_length);
             stats.n_gaps = Some(counts.n_missing_periods);
             stats.n_gap_runs = Some(counts.n_gap_runs);
