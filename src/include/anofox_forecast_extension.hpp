@@ -115,7 +115,6 @@ void RegisterTsResidualDiagnosticsFunction(ExtensionLoader &loader);
 void RegisterTsTableMacros(ExtensionLoader &loader);
 
 // Native table functions (streaming)
-void RegisterTsBacktestNativeFunction(ExtensionLoader &loader);
 void RegisterTsForecastNativeFunction(ExtensionLoader &loader);
 void RegisterTsCvSplitNativeFunction(ExtensionLoader &loader);
 void RegisterTsCvForecastNativeFunction(ExtensionLoader &loader);

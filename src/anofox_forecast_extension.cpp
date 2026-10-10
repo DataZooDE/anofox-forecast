@@ -158,7 +158,6 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsTableMacros(loader);
 
     // Register Native Table Functions (streaming)
-    RegisterTsBacktestNativeFunction(loader);
     RegisterTsForecastNativeFunction(loader);
     RegisterTsForecastPanelNativeFunction(loader);     // Phase 2: GLOB-01..03
     RegisterTsForecastVarNativeFunction(loader);       // Phase 3: CLAS-03

@@ -1104,11 +1104,11 @@ static void TsEstimateBacktestMemoryFunction(DataChunk &args, ExpressionState &s
         int64_t folds = folds_data[row_idx];
         int64_t horizon = horizon_data[row_idx];
 
-        // Estimate memory usage for ts_backtest_auto_by:
-        // 1. cv_splits: n_series × n_dates × folds × 40 bytes (5 columns × 8 bytes)
+        // Estimate memory usage for the ts_cv_folds_by + ts_cv_forecast_by two-step CV workflow:
+        // 1. cv_splits (ts_cv_folds_by output): n_series × n_dates × folds × 40 bytes (5 columns × 8 bytes)
         // 2. cv_train/cv_test: same as cv_splits but filtered (~60% train, ~10% test)
         // 3. forecast LIST aggregation: n_series × folds × (n_dates/2) × 8 bytes
-        // 4. output: n_series × folds × horizon × 88 bytes (11 columns × 8 bytes)
+        // 4. output (ts_cv_forecast_by): n_series × folds × horizon × 88 bytes (11 columns × 8 bytes)
         //
         // Note: LIST() aggregates cannot spill to disk, so this is the main bottleneck
 
@@ -1134,7 +1134,7 @@ void RegisterTsEstimateBacktestMemoryFunction(ExtensionLoader &loader) {
     {
         CreateScalarFunctionInfo info(func_set);
         FunctionDescription desc;
-        desc.description = "Estimates memory usage in MB for a ts_backtest_auto_by run given series count, length, folds, and horizon.";
+        desc.description = "Estimates memory usage in MB for a ts_cv_folds_by + ts_cv_forecast_by two-step cross-validation run given series count, length, folds, and horizon.";
         desc.examples = {"ts_estimate_backtest_memory(100, 365, 3, 30)"};
         desc.categories = {"time-series", "utilities"};
         desc.parameter_names = {"n_series", "n_dates", "folds", "horizon"};
