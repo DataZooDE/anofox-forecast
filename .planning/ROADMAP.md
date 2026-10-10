@@ -170,7 +170,7 @@ Plans:
   4. Theta (STM) estimates α by SES optimisation with the standard interval formula and no random-walk bias vs R `thetaf`; TBATS/MSTL/GARCH interval widths match statsforecast/arch within the upstream validation tolerance, or those models return NULL intervals with documentation.
   5. All changes sit on a fix branch in `~/projects/rust/anofox-forecast` with PR(s) open, upstream `cargo test` / `cargo fmt --check` / `cargo clippy` green, and CHANGELOG entries describing each numerical change.
 
-**Plans**: 9/11 plans executed
+**Plans**: 10/11 plans executed
 
 Plans:
 
@@ -187,7 +187,7 @@ Plans:
 - [x] 11-07-PLAN.md — fix/ets-likelihood-intervals (2/3): Hyndman class-1/2 analytic + class-3 simulated ETS intervals, MC coverage (wave 7)
 - [x] 11-08-PLAN.md — fix/ets-likelihood-intervals (3/3): SES/Holt/HoltWinters/SeasonalES intervals via the ETS helper, CHANGELOG, PR ready (wave 8)
 - [x] 11-09-PLAN.md — fix/tbats-mstl-garch-intervals (1/2): GARCH root-cause spike vs statsforecast + true DGP, then calibrated intervals or point-only (D-10), draft PR (wave 9)
-- [ ] 11-10-PLAN.md — fix/tbats-mstl-garch-intervals (2/2): TBATS state-space variance, MSTL trend-model intervals, coverage, CHANGELOG, PR ready (wave 10)
+- [x] 11-10-PLAN.md — fix/tbats-mstl-garch-intervals (2/2): TBATS state-space variance, MSTL trend-model intervals, coverage, CHANGELOG, PR ready (wave 10)
 
 ### Phase 12: Statistics Marshalling Moves to Rust
 
@@ -345,7 +345,7 @@ Phases execute in numeric order: 9 → 10 → 11 → 12 → 13 → 14 → 15 →
 |-------|----------------|--------|-----------|
 | 9. Reference Fixtures & Safe Dependency Bumps | 3/3 | Complete    | 2026-10-09 |
 | 10. Forecast Wrapper Delegates to Crate Models | 10/10 | Complete    | 2026-10-09 |
-| 11. Upstream anofox-forecast Correctness Fixes | 9/11 | In Progress|  |
+| 11. Upstream anofox-forecast Correctness Fixes | 10/11 | In Progress|  |
 | 12. Statistics Marshalling Moves to Rust | 8/8 | In Progress|  |
 | 13. Core Statistics, Metrics & Data Quality | 0/TBD | Not started | - |
 | 14. tsfresh Feature Parity | 0/TBD | Not started | - |
