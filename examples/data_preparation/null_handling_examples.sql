@@ -184,6 +184,18 @@ SELECT CASE WHEN (
     'FAIL per_step_residual_count_not_multiple_of_horizon_errors'
 ) END AS result;
 
+-- CR-01: per-step conformal errors in Rust when point_forecasts length does
+-- not equal horizon, naming both counts -- previously this silently produced
+-- mismatched point/lower/upper lengths and an out-of-bounds heap read.
+SELECT CASE WHEN (
+    SELECT try(ts_conformal_predict_per_step(
+        [100,105,110,100,105,110]::DOUBLE[], [101,108,109,101,108,109]::DOUBLE[],
+        [100.0,101.0,102.0,103.0,104.0]::DOUBLE[], 0.1, 3
+    )) IS NULL
+) THEN 'PASS per_step_point_forecasts_length_mismatch_errors' ELSE error(
+    'FAIL per_step_point_forecasts_length_mismatch_errors'
+) END AS result;
+
 -- ============================================================================
 -- SECTION 5 — Calendar-correct forecast dates and agg NULL parity (D-11, D-12)
 -- ============================================================================

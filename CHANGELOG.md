@@ -262,6 +262,20 @@ use the semver numbering this project started with.
   macros in `ts_macros.cpp`) are deleted, along with the no-op `RegisterTsFeaturesFunction`
   (`ts_features.cpp`) and `RegisterTsDetectChangepointsFunction` (`ts_changepoints.cpp`)
   registrations.
+- **`ts_conformal_predict_per_step` no longer reads past the end of its `lower`/`upper`
+  heap allocations when `point_forecasts` has more elements than `horizon`** (CR-01,
+  phase 12 review fix). `point`/`lower`/`upper` are now required to share one length:
+  `point_forecasts.len()` must equal `horizon`, or the call is a hard SQL error naming
+  both counts (e.g. `point_forecasts has 5 elements but horizon is 3`) instead of
+  producing a `point` array longer than `lower`/`upper` and reading `n_point_forecasts -
+  horizon` doubles past a `horizon`-sized allocation.
+- `ts_forecast_agg` / `ts_features_agg` now break ties deterministically for groups with
+  duplicate timestamps (WR-02, phase 12 review fix). `Finalize`'s sort previously ordered
+  rows by timestamp only via `std::sort` (not stable), so the relative order — and hence
+  the `(value, valid)` pairing — of same-timestamp rows was unspecified and could vary
+  with thread scheduling; the sort now uses original insertion order as a secondary key
+  (`std::stable_sort`), so results are reproducible across runs for any group containing a
+  duplicate-date row.
 
 ### Removed
 

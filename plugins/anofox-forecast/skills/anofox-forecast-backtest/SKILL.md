@@ -205,8 +205,8 @@ Use these when composing custom pipelines over `LIST(residual)` arrays.
 (`ts_conformal_intervals`/`predict(_asymmetric)`/`apply`/`predict_per_step`, both bootstrap
 functions) are position-preserving (`NULL` in → `NULL` at that position out, never a splice);
 `ts_conformal_predict_per_step` errors in Rust if the flat residual count isn't an exact
-multiple of `horizon` (`try(...)` to downgrade to `NULL`) — see
-`docs/api/11-conformal-prediction.md#null-handling`.
+multiple of `horizon`, or if `point_forecasts` length != `horizon` (`try(...)` to downgrade
+to `NULL`) — see `docs/api/11-conformal-prediction.md#null-handling`.
 
 ## Bootstrap prediction intervals
 

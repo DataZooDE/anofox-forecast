@@ -500,6 +500,19 @@ SELECT ts_conformal_predict_per_step(
 -- Invalid Input Error: ts_conformal_predict_per_step: Invalid input: per-step conformal: residual count 7 is not a multiple of horizon 3
 ```
 
+**`ts_conformal_predict_per_step` also requires `point_forecasts` to have exactly
+`horizon` elements** — `point`/`lower`/`upper` all share that one length, so a
+mismatched `point_forecasts` errors naming both counts instead of producing
+mismatched output-array lengths:
+
+```sql
+SELECT ts_conformal_predict_per_step(
+    [100,105,110,100,105,110]::DOUBLE[], [101,108,109,101,108,109]::DOUBLE[],
+    [100.0,101.0,102.0,103.0,104.0]::DOUBLE[], 0.1, 3
+);
+-- Invalid Input Error: ts_conformal_predict_per_step: Invalid input: per-step conformal: point_forecasts has 5 elements but horizon is 3
+```
+
 ---
 
 ### Calibration Functions

@@ -1996,6 +1996,13 @@ pub fn conformal_predict_per_step_validated(
             horizon
         )));
     }
+    if point_forecasts.len() != horizon {
+        return Err(ForecastError::InvalidInput(format!(
+            "per-step conformal: point_forecasts has {} elements but horizon is {}",
+            point_forecasts.len(),
+            horizon
+        )));
+    }
 
     let n_folds = fold_forecasts.len() / horizon;
     if n_folds < 2 {
@@ -2203,6 +2210,40 @@ mod per_step_pairwise_tests {
         let v = vec![Some(1.0); 4];
         let err = conformal_predict_per_step_validated(&v, &v, 0, &v, 0.1).unwrap_err();
         assert!(matches!(err, ForecastError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn point_forecasts_longer_than_horizon_errors_naming_both_lengths() {
+        // CR-01 regression: 2 folds * 3 steps = 6 residuals, horizon=3, but
+        // point_forecasts has 5 elements (> horizon). Before the fix this
+        // silently produced mismatched point/lower/upper lengths and the FFI
+        // layer read `lower`/`upper` out of bounds using `point.len()`.
+        let fold_forecasts = to_opt(&[100.0, 105.0, 110.0, 100.0, 105.0, 110.0]);
+        let fold_actuals = to_opt(&[101.0, 108.0, 109.0, 101.0, 108.0, 109.0]);
+        let point = to_opt(&[100.0, 101.0, 102.0, 103.0, 104.0]);
+
+        let err =
+            conformal_predict_per_step_validated(&fold_forecasts, &fold_actuals, 3, &point, 0.1)
+                .unwrap_err();
+        assert!(matches!(err, ForecastError::InvalidInput(_)));
+        let msg = err.to_string();
+        assert!(msg.contains('5'), "message should contain 5: {}", msg);
+        assert!(msg.contains('3'), "message should contain 3: {}", msg);
+    }
+
+    #[test]
+    fn point_forecasts_shorter_than_horizon_errors_naming_both_lengths() {
+        let fold_forecasts = to_opt(&[100.0, 105.0, 110.0, 100.0, 105.0, 110.0]);
+        let fold_actuals = to_opt(&[101.0, 108.0, 109.0, 101.0, 108.0, 109.0]);
+        let point = to_opt(&[100.0, 101.0]);
+
+        let err =
+            conformal_predict_per_step_validated(&fold_forecasts, &fold_actuals, 3, &point, 0.1)
+                .unwrap_err();
+        assert!(matches!(err, ForecastError::InvalidInput(_)));
+        let msg = err.to_string();
+        assert!(msg.contains('2'), "message should contain 2: {}", msg);
+        assert!(msg.contains('3'), "message should contain 3: {}", msg);
     }
 
     #[test]
