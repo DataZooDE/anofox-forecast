@@ -181,6 +181,7 @@ pub unsafe extern "C" fn anofox_ts_stats(
     values: *const c_double,
     validity: *const u64,
     length: size_t,
+    seasonal_period: size_t,
     out_result: *mut TsStatsResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -201,7 +202,7 @@ pub unsafe extern "C" fn anofox_ts_stats(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let series = build_series(values, validity, length);
-        anofox_fcst_core::compute_ts_stats(&series)
+        anofox_fcst_core::compute_ts_stats(&series, seasonal_period)
     }));
 
     match result {
@@ -236,6 +237,7 @@ pub unsafe extern "C" fn anofox_ts_stats_with_dates_and_type(
     length: size_t,
     frequency_micros: i64,
     frequency_type: FrequencyType,
+    seasonal_period: size_t,
     out_result: *mut TsStatsResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -264,6 +266,7 @@ pub unsafe extern "C" fn anofox_ts_stats_with_dates_and_type(
             dates_slice,
             frequency_micros,
             freq_type,
+            seasonal_period,
         )
     }));
 

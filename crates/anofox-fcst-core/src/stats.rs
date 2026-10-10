@@ -6,6 +6,9 @@ use crate::calendar::CalendarStep;
 use crate::error::Result;
 use crate::gaps::{gap_counts, resolve_gap_step};
 use crate::missing::trim_edges_reject_interior;
+use crate::seasonality::detect_seasonality;
+use crate::stl::{stl, StlParams};
+use crate::supsmu::supsmu;
 
 /// Frequency type for calendar vs fixed frequencies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -91,10 +94,19 @@ pub struct TsStats {
     pub iqr: f64,
     /// Autocorrelation at lag 1
     pub autocorr_lag1: f64,
-    /// Trend strength (0-1)
-    pub trend_strength: f64,
-    /// Seasonality strength (0-1)
-    pub seasonality_strength: f64,
+    /// Trend strength (D-02, STAT-02): `F_T = max(0, 1 - Var(R)/Var(T+R))`
+    /// from an R-faithful STL decomposition (`stl::stl` for a single usable
+    /// period, the `forecast::mstl` iteration for several, `supsmu::supsmu`
+    /// trend when no period is usable). `None` when the series is
+    /// interior-missing (entropy/strength share the trim rule) or all
+    /// values are missing.
+    pub trend_strength: Option<f64>,
+    /// Seasonality strength (D-02, STAT-02): `F_S = max(0, 1 - Var(R)/Var(S+R))`,
+    /// the maximum over every usable period when several are resolved.
+    /// `None` when no period is usable (none detected, `seasonal_period =
+    /// 1`, or `n <= 2*period`), when the per-period variance ratio is `0/0`
+    /// (e.g. a constant series), or when the series is interior-missing.
+    pub seasonality_strength: Option<f64>,
     /// Pincus (1991) approximate entropy, m=2, r=0.2*sample std dev, Chebyshev distance,
     /// self-match included (D-03). `None` when fewer than 3 present values remain after
     /// trimming leading/trailing missing values, or when an interior value is missing
@@ -118,10 +130,15 @@ pub struct TsStats {
 ///
 /// # Arguments
 /// * `series` - A slice of optional f64 values (None represents NULL)
+/// * `seasonal_period` - Period resolution for `trend_strength` /
+///   `seasonality_strength` (D-02): `0` auto-detects via
+///   [`crate::seasonality::detect_seasonality`] (no usable period if it
+///   errors or returns empty); `1` means "non-seasonal" (no period at all);
+///   `>= 2` uses that period explicitly.
 ///
 /// # Returns
 /// * `Result<TsStats>` - Statistics for the series
-pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
+pub fn compute_ts_stats(series: &[Option<f64>], seasonal_period: usize) -> Result<TsStats> {
     let length = series.len();
 
     if length == 0 {
@@ -249,8 +266,36 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
     // Autocorrelation at lag 1
     let autocorr_lag1 = compute_autocorrelation(&values, 1);
 
-    // Trend and seasonality strength (simplified)
-    let (trend_strength, seasonality_strength) = compute_strength_metrics(&values);
+    // Trend and seasonality strength (D-02, STAT-02): STL-based F_T/F_S.
+    // `None`/`None` when the series is interior-missing (same trim rule as
+    // entropy) or entirely missing; otherwise resolved via `seasonal_period`
+    // and delegated to `stl_strengths`.
+    let (trend_strength, seasonality_strength) = match trim_edges_reject_interior(series) {
+        Ok(Some(range)) => {
+            let trimmed: Vec<f64> = series[range]
+                .iter()
+                .map(|v| v.expect("trim_edges_reject_interior guarantees Some in range"))
+                .collect();
+            let periods: Vec<usize> = match seasonal_period {
+                0 => detect_seasonality(&trimmed, None)
+                    .ok()
+                    .map(|p| {
+                        p.into_iter()
+                            .filter(|&x| x >= 2)
+                            .map(|x| x as usize)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                1 => vec![],
+                p => vec![p],
+            };
+            match stl_strengths(&trimmed, &periods) {
+                Ok(s) => (s.trend_strength, s.seasonality_strength),
+                Err(_) => (None, None),
+            }
+        }
+        _ => (None, None),
+    };
 
     // Entropy (Pincus approximate entropy, D-03) — computed on the original Option
     // series (NaN counts as missing), trimming leading/trailing missing first.
@@ -310,6 +355,7 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
 /// * `dates` - A slice of timestamps in microseconds (must be same length as series)
 /// * `frequency_micros` - Expected frequency between observations in microseconds (used for Fixed type)
 /// * `frequency_type` - The type of frequency (Fixed, Monthly, Quarterly, Yearly)
+/// * `seasonal_period` - See [`compute_ts_stats`]'s `seasonal_period` argument (D-02).
 ///
 /// # Returns
 /// * `Result<TsStats>` - Statistics for the series including expected_length and n_gaps
@@ -318,9 +364,10 @@ pub fn compute_ts_stats_with_dates_and_type(
     dates: &[i64],
     frequency_micros: i64,
     frequency_type: FrequencyType,
+    seasonal_period: usize,
 ) -> Result<TsStats> {
     // First compute base stats
-    let mut stats = compute_ts_stats(series)?;
+    let mut stats = compute_ts_stats(series, seasonal_period)?;
 
     // Then compute date-based metrics if we have valid dates (D-04, STAT-03): n_gaps
     // becomes the number of missing periods, n_gap_runs keeps the pre-v0.10.0 meaning
@@ -396,48 +443,158 @@ fn compute_autocorrelation(values: &[f64], lag: usize) -> f64 {
     }
 }
 
-/// Compute trend and seasonality strength (simplified version).
-fn compute_strength_metrics(values: &[f64]) -> (f64, f64) {
-    if values.len() < 4 {
-        return (0.0, 0.0);
+/// Trend/seasonality strength result (D-02, STAT-02); see
+/// [`TsStats::trend_strength`] / [`TsStats::seasonality_strength`] for the
+/// full contract.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StlStrengths {
+    pub trend_strength: Option<f64>,
+    pub seasonality_strength: Option<f64>,
+}
+
+/// Sample variance (`ddof = 1`), matching R's `var()`. `NaN` for `n < 2`
+/// (never reached by the callers below, which always pass `n == values.len()
+/// >= 1` complete series, but kept total for safety).
+fn sample_var(x: &[f64]) -> f64 {
+    let n = x.len();
+    if n < 2 {
+        return f64::NAN;
     }
+    let mean = x.iter().sum::<f64>() / n as f64;
+    x.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n - 1) as f64
+}
 
-    // Simple trend strength: based on linear regression R-squared
-    let n = values.len() as f64;
-    let x_mean = (n - 1.0) / 2.0;
-    let y_mean: f64 = values.iter().sum::<f64>() / n;
-
-    let mut ss_xy = 0.0;
-    let mut ss_xx = 0.0;
-    let mut ss_yy = 0.0;
-
-    for (i, &y) in values.iter().enumerate() {
-        let x = i as f64;
-        ss_xy += (x - x_mean) * (y - y_mean);
-        ss_xx += (x - x_mean).powi(2);
-        ss_yy += (y - y_mean).powi(2);
+/// `tsfeatures::stl_features`'s trend-strength rule: `varx < eps -> 0`;
+/// `vardeseason/varx < 1e-10 -> 0`; else `max(0, min(1, 1 -
+/// vare/vardeseason))`. `deseason = trend + remainder` (the series with
+/// every seasonal component removed; an exact decomposition identity).
+fn trend_strength_rule(x: &[f64], deseason: &[f64], remainder: &[f64]) -> f64 {
+    let varx = sample_var(x);
+    if varx < f64::EPSILON {
+        return 0.0;
     }
+    let vardeseason = sample_var(deseason);
+    if vardeseason / varx < 1e-10 {
+        return 0.0;
+    }
+    let vare = sample_var(remainder);
+    (1.0 - vare / vardeseason).clamp(0.0, 1.0)
+}
 
-    let trend_strength = if ss_xx.abs() > f64::EPSILON && ss_yy.abs() > f64::EPSILON {
-        (ss_xy.powi(2) / (ss_xx * ss_yy)).sqrt().clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
+/// `tsfeatures::stl_features`'s per-period seasonal-strength rule: `max(0,
+/// min(1, 1 - vare/var(remainder + seasonal_i)))`. `None` for R's `NaN`
+/// (both variances exactly zero, e.g. a constant series or constant
+/// seasonal component).
+fn seasonal_strength_rule(remainder: &[f64], seasonal: &[f64]) -> Option<f64> {
+    let n = remainder.len();
+    let remainder_plus: Vec<f64> = (0..n).map(|i| remainder[i] + seasonal[i]).collect();
+    let var_rp = sample_var(&remainder_plus);
+    let vare = sample_var(remainder);
+    // R's `vare/var_rp` is exactly `NaN` only when both are exactly 0, but a
+    // genuinely constant (or near-constant) input series decomposes into
+    // trend/seasonal/remainder components that carry pure floating-point
+    // rounding noise at the ~1e-30 scale (confirmed against R's own
+    // `stats::stl`/`tsfeatures::stl_features` on `rep(5, 48)`, which itself
+    // divides two ~1e-30 noise variances and happens to land on 0.056 — not
+    // reproducible bit-for-bit across STL ports or platforms). Treat both
+    // variances as "exactly zero" below `f64::EPSILON` so a degenerate input
+    // deterministically reports `None` rather than chasing non-portable
+    // rounding noise (D-02).
+    if var_rp.abs() < f64::EPSILON && vare.abs() < f64::EPSILON {
+        return None;
+    }
+    Some((1.0 - vare / var_rp).clamp(0.0, 1.0))
+}
 
-    // Simple seasonality strength: based on autocorrelation at common lags
-    let acf_2 = compute_autocorrelation(values, 2).abs();
-    let acf_4 = compute_autocorrelation(values, 4).abs();
-    let acf_7 = compute_autocorrelation(values, 7).abs();
-    let acf_12 = compute_autocorrelation(values, 12).abs();
+/// STL-based trend/seasonal strength (D-02, STAT-02), matching
+/// `tsfeatures::stl_features` (built on `forecast::mstl` -> `stats::stl`):
+/// `F_T = max(0, 1 - Var(R)/Var(T+R))`, `F_S = max(0, 1 - Var(R)/Var(S+R))`.
+///
+/// `periods` is filtered to `p >= 2` with `n > 2*p`, sorted ascending, and
+/// de-duplicated. No usable period left -> the trend comes from
+/// [`crate::supsmu::supsmu`] (R's `stats::supsmu(seq_len(n), x)`, the same
+/// fallback `forecast::mstl` uses) and `seasonality_strength` is `None`.
+/// Exactly one usable period -> a single [`crate::stl::stl`] call with
+/// `s.window = 11` (R's `stats::stl` default). Two or more -> the
+/// `forecast::mstl` iteration (2 passes, `s.window = 7 + 4*(position+1)` by
+/// ascending period position, trend from the last `stl` call); seasonality
+/// is the maximum `F_S_i` over every period (not exposed as separate
+/// columns — "strongest seasonal component").
+pub fn stl_strengths(values: &[f64], periods: &[usize]) -> Result<StlStrengths> {
+    let n = values.len();
 
-    let seasonality_strength = [acf_2, acf_4, acf_7, acf_12]
+    let mut usable: Vec<usize> = periods
         .iter()
-        .filter(|v| v.is_finite())
-        .cloned()
-        .fold(0.0_f64, f64::max)
-        .clamp(0.0, 1.0);
+        .copied()
+        .filter(|&p| p >= 2 && n > 2 * p)
+        .collect();
+    usable.sort_unstable();
+    usable.dedup();
 
-    (trend_strength, seasonality_strength)
+    if usable.is_empty() {
+        let x_idx: Vec<f64> = (1..=n).map(|i| i as f64).collect();
+        let trend = supsmu(&x_idx, values)?;
+        let remainder: Vec<f64> = (0..n).map(|i| values[i] - trend[i]).collect();
+        // deseason = trend + remainder = values exactly (no seasonal component to
+        // remove); pass `values` directly rather than re-deriving it.
+        let trend_strength = trend_strength_rule(values, values, &remainder);
+        return Ok(StlStrengths {
+            trend_strength: Some(trend_strength),
+            seasonality_strength: None,
+        });
+    }
+
+    if usable.len() == 1 {
+        let period = usable[0];
+        let params = StlParams::r_default(period, 11);
+        let fit = stl(values, &params)?;
+        let deseason: Vec<f64> = (0..n).map(|i| fit.trend[i] + fit.remainder[i]).collect();
+        let trend_strength = trend_strength_rule(values, &deseason, &fit.remainder);
+        let seasonality_strength = seasonal_strength_rule(&fit.remainder, &fit.seasonal);
+        return Ok(StlStrengths {
+            trend_strength: Some(trend_strength),
+            seasonality_strength,
+        });
+    }
+
+    // forecast::mstl iteration: 2 passes over the ascending periods, each
+    // adding back its own previous seasonal estimate before re-fitting.
+    let k = usable.len();
+    let mut seas: Vec<Vec<f64>> = vec![vec![0.0; n]; k];
+    let mut deseas: Vec<f64> = values.to_vec();
+    let mut last_trend: Vec<f64> = vec![0.0; n];
+
+    for _pass in 0..2 {
+        for (pos, &period) in usable.iter().enumerate() {
+            for (d, s) in deseas.iter_mut().zip(seas[pos].iter()) {
+                *d += *s;
+            }
+            let s_window = 7 + 4 * (pos + 1);
+            let params = StlParams::r_default(period, s_window);
+            let fit = stl(&deseas, &params)?;
+            seas[pos] = fit.seasonal;
+            last_trend = fit.trend;
+            for (d, s) in deseas.iter_mut().zip(seas[pos].iter()) {
+                *d -= *s;
+            }
+        }
+    }
+
+    let remainder: Vec<f64> = (0..n).map(|i| deseas[i] - last_trend[i]).collect();
+    let deseason_total: Vec<f64> = (0..n).map(|i| last_trend[i] + remainder[i]).collect();
+    let trend_strength = trend_strength_rule(values, &deseason_total, &remainder);
+
+    let mut best_fs: Option<f64> = None;
+    for seasonal in &seas {
+        if let Some(fs) = seasonal_strength_rule(&remainder, seasonal) {
+            best_fs = Some(best_fs.map_or(fs, |b| b.max(fs)));
+        }
+    }
+
+    Ok(StlStrengths {
+        trend_strength: Some(trend_strength),
+        seasonality_strength: best_fs,
+    })
 }
 
 /// Compute Pincus (1991) approximate entropy for the original (possibly-missing)
@@ -718,7 +875,7 @@ mod tests {
     #[test]
     fn test_basic_stats() {
         let series: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), Some(3.0), Some(4.0), Some(5.0)];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
 
         assert_eq!(stats.length, 5);
         assert_eq!(stats.n_nulls, 0);
@@ -732,7 +889,7 @@ mod tests {
     #[test]
     fn test_with_nulls() {
         let series: Vec<Option<f64>> = vec![Some(1.0), None, Some(3.0), None, Some(5.0)];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
 
         assert_eq!(stats.length, 5);
         assert_eq!(stats.n_nulls, 2);
@@ -742,7 +899,7 @@ mod tests {
     #[test]
     fn test_empty_series() {
         let series: Vec<Option<f64>> = vec![];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
         assert_eq!(stats.length, 0);
     }
 
@@ -750,7 +907,7 @@ mod tests {
     fn test_zeros_and_signs() {
         let series: Vec<Option<f64>> =
             vec![Some(-2.0), Some(-1.0), Some(0.0), Some(1.0), Some(2.0)];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
 
         assert_eq!(stats.n_zeros, 1);
         assert_eq!(stats.n_positive, 2);
@@ -760,7 +917,7 @@ mod tests {
     #[test]
     fn test_nan_values() {
         let series: Vec<Option<f64>> = vec![Some(1.0), Some(f64::NAN), Some(3.0), Some(f64::NAN)];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
 
         assert_eq!(stats.length, 4);
         assert_eq!(stats.n_nan, 2);
@@ -773,13 +930,13 @@ mod tests {
     fn test_unique_values_and_constant() {
         // Constant series
         let series: Vec<Option<f64>> = vec![Some(5.0), Some(5.0), Some(5.0)];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
         assert_eq!(stats.n_unique_values, 1);
         assert!(stats.is_constant);
 
         // Non-constant series
         let series: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), Some(3.0), Some(1.0)];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
         assert_eq!(stats.n_unique_values, 3);
         assert!(!stats.is_constant);
     }
@@ -795,7 +952,7 @@ mod tests {
             Some(0.0),
             Some(0.0),
         ];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
 
         assert_eq!(stats.n_zeros_start, 2);
         assert_eq!(stats.n_zeros_end, 3);
@@ -805,7 +962,7 @@ mod tests {
     fn test_leading_zeros_with_null() {
         // NULL breaks the leading zero count
         let series: Vec<Option<f64>> = vec![Some(0.0), None, Some(0.0), Some(1.0)];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
         assert_eq!(stats.n_zeros_start, 1);
     }
 
@@ -819,7 +976,7 @@ mod tests {
             Some(3.0),
             Some(3.0),
         ];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
         assert_eq!(stats.plateau_size, 3); // Three 2.0s
     }
 
@@ -835,7 +992,7 @@ mod tests {
             Some(3.0),
             Some(3.0),
         ];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
         assert_eq!(stats.plateau_size_nonzero, 4); // Four 5.0s
     }
 
@@ -843,12 +1000,12 @@ mod tests {
     fn test_skewness_kurtosis_bias_corrected() {
         // Symmetric distribution: skewness should be 0
         let series: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), Some(3.0), Some(4.0), Some(5.0)];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
         assert_relative_eq!(stats.skewness, 0.0, epsilon = 1e-10);
 
         // Skewed distribution: [1, 1, 1, 1, 5] should have positive skewness
         let skewed: Vec<Option<f64>> = vec![Some(1.0), Some(1.0), Some(1.0), Some(1.0), Some(5.0)];
-        let stats_skewed = compute_ts_stats(&skewed).unwrap();
+        let stats_skewed = compute_ts_stats(&skewed, 0).unwrap();
         assert!(stats_skewed.skewness > 0.0, "Expected positive skewness");
 
         // Verify kurtosis is computed (uniform-like has negative excess kurtosis)

@@ -22,6 +22,8 @@ pub mod periods;
 pub mod quality;
 pub mod seasonality;
 pub mod stats;
+pub mod stl;
+pub mod supsmu;
 pub mod validation;
 
 // Shared fixture loader (std + serde_json only) from
@@ -121,7 +123,12 @@ pub use seasonality::{
     ChangeDetectionResult, ChangePointType, InstantaneousPeriodResult, SeasonalType,
     SeasonalityAnalysis, SeasonalityChangePoint, SeasonalityClassification, StrengthMethod,
 };
-pub use stats::{compute_ts_stats, compute_ts_stats_with_dates_and_type, FrequencyType, TsStats};
+pub use stats::{
+    compute_ts_stats, compute_ts_stats_with_dates_and_type, stl_strengths, FrequencyType,
+    StlStrengths, TsStats,
+};
+pub use stl::{stl, StlComponents, StlParams};
+pub use supsmu::supsmu;
 
 // Statistical validation (Phase 1: STAT-01..03 stationarity, RESID-01..04 residual diagnostics)
 pub use validation::{

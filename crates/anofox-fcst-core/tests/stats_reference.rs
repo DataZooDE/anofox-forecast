@@ -47,7 +47,7 @@ fn moments_fixture_matches_compute_ts_stats() {
         }
         let x = f64_vec(&v["x"]);
         let series: Vec<Option<f64>> = x.iter().map(|&v| Some(v)).collect();
-        let stats = compute_ts_stats(&series)
+        let stats = compute_ts_stats(&series, 0)
             .unwrap_or_else(|e| panic!("{name}: compute_ts_stats failed: {e:?}"));
 
         let want_skew = num(&v["skew_bias_false"]);
@@ -126,7 +126,7 @@ fn r_entropy_fixture_matches_compute_ts_stats() {
     for (name, case) in cases {
         let x = f64_vec(&case["values"]);
         let series: Vec<Option<f64>> = x.iter().map(|&v| Some(v)).collect();
-        let stats = compute_ts_stats(&series)
+        let stats = compute_ts_stats(&series, 0)
             .unwrap_or_else(|e| panic!("{name}: compute_ts_stats failed: {e:?}"));
 
         let want = num(&case["apen"]);
@@ -139,7 +139,7 @@ fn r_entropy_fixture_matches_compute_ts_stats() {
     // Interior NULL -> None.
     let interior_null: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), None, Some(4.0), Some(5.0)];
     assert_eq!(
-        compute_ts_stats(&interior_null).unwrap().entropy,
+        compute_ts_stats(&interior_null, 0).unwrap().entropy,
         None,
         "interior NULL series: expected entropy None"
     );
@@ -147,7 +147,7 @@ fn r_entropy_fixture_matches_compute_ts_stats() {
     // Fewer than 3 present values -> None.
     let two_values: Vec<Option<f64>> = vec![Some(1.0), Some(2.0)];
     assert_eq!(
-        compute_ts_stats(&two_values).unwrap().entropy,
+        compute_ts_stats(&two_values, 0).unwrap().entropy,
         None,
         "2-value series: expected entropy None"
     );
@@ -212,8 +212,9 @@ fn gap_counts_fixture_matches_gap_counts() {
         .collect();
     let values: Vec<Option<f64>> = dates.iter().map(|_| Some(1.0)).collect();
     let micros = num(&daily_hole20["step"]["micros"]) as i64;
-    let stats = compute_ts_stats_with_dates_and_type(&values, &dates, micros, FrequencyType::Fixed)
-        .unwrap();
+    let stats =
+        compute_ts_stats_with_dates_and_type(&values, &dates, micros, FrequencyType::Fixed, 0)
+            .unwrap();
     assert_eq!(stats.n_gaps, Some(20), "daily_hole20: n_gaps");
     assert_eq!(stats.n_gap_runs, Some(1), "daily_hole20: n_gap_runs");
     assert_eq!(
@@ -230,8 +231,8 @@ fn gap_counts_fixture_matches_gap_counts() {
         .map(|v| iso_to_micros(v.as_str().unwrap()))
         .collect();
     let values: Vec<Option<f64>> = dates.iter().map(|_| Some(1.0)).collect();
-    let stats =
-        compute_ts_stats_with_dates_and_type(&values, &dates, 0, FrequencyType::Monthly).unwrap();
+    let stats = compute_ts_stats_with_dates_and_type(&values, &dates, 0, FrequencyType::Monthly, 0)
+        .unwrap();
     assert_eq!(stats.n_gaps, Some(2), "month_end: n_gaps");
     assert_eq!(stats.n_gap_runs, Some(1), "month_end: n_gap_runs");
     assert_eq!(stats.expected_length, Some(5), "month_end: expected_length");

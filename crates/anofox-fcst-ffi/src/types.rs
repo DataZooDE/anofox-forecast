@@ -219,9 +219,9 @@ pub struct TsStatsResult {
     pub iqr: c_double,
     /// Autocorrelation at lag 1
     pub autocorr_lag1: c_double,
-    /// Trend strength (0-1)
+    /// Trend strength (D-02, STAT-02); valid only when `has_trend_strength`
     pub trend_strength: c_double,
-    /// Seasonality strength (0-1)
+    /// Seasonality strength (D-02, STAT-02); valid only when `has_seasonality_strength`
     pub seasonality_strength: c_double,
     /// Approximate entropy
     pub entropy: c_double,
@@ -237,6 +237,10 @@ pub struct TsStatsResult {
     pub has_date_metrics: bool,
     /// Whether `entropy` is valid (None in Rust -> false here, D-03)
     pub has_entropy: bool,
+    /// Whether `trend_strength` is valid (None in Rust -> false here, D-02)
+    pub has_trend_strength: bool,
+    /// Whether `seasonality_strength` is valid (None in Rust -> false here, D-02)
+    pub has_seasonality_strength: bool,
 }
 
 impl Default for TsStatsResult {
@@ -281,6 +285,8 @@ impl Default for TsStatsResult {
             n_gap_runs: 0,
             has_date_metrics: false,
             has_entropy: false,
+            has_trend_strength: false,
+            has_seasonality_strength: false,
         }
     }
 }
@@ -318,8 +324,8 @@ impl From<anofox_fcst_core::TsStats> for TsStatsResult {
             q3: stats.q3,
             iqr: stats.iqr,
             autocorr_lag1: stats.autocorr_lag1,
-            trend_strength: stats.trend_strength,
-            seasonality_strength: stats.seasonality_strength,
+            trend_strength: stats.trend_strength.unwrap_or(f64::NAN),
+            seasonality_strength: stats.seasonality_strength.unwrap_or(f64::NAN),
             entropy: stats.entropy.unwrap_or(0.0),
             stability: stats.stability,
             expected_length: stats.expected_length.unwrap_or(0),
@@ -327,6 +333,8 @@ impl From<anofox_fcst_core::TsStats> for TsStatsResult {
             n_gap_runs: stats.n_gap_runs.unwrap_or(0),
             has_date_metrics: stats.expected_length.is_some(),
             has_entropy: stats.entropy.is_some(),
+            has_trend_strength: stats.trend_strength.is_some(),
+            has_seasonality_strength: stats.seasonality_strength.is_some(),
         }
     }
 }

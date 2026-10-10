@@ -234,11 +234,11 @@ typedef struct TsStatsResult {
      */
     double autocorr_lag1;
     /**
-     * Trend strength (0-1)
+     * Trend strength (D-02, STAT-02); valid only when `has_trend_strength`
      */
     double trend_strength;
     /**
-     * Seasonality strength (0-1)
+     * Seasonality strength (D-02, STAT-02); valid only when `has_seasonality_strength`
      */
     double seasonality_strength;
     /**
@@ -269,6 +269,14 @@ typedef struct TsStatsResult {
      * Whether `entropy` is valid (None in Rust -> false here, D-03)
      */
     bool has_entropy;
+    /**
+     * Whether `trend_strength` is valid (None in Rust -> false here, D-02)
+     */
+    bool has_trend_strength;
+    /**
+     * Whether `seasonality_strength` is valid (None in Rust -> false here, D-02)
+     */
+    bool has_seasonality_strength;
 } TsStatsResult;
 
 /**
@@ -1980,6 +1988,7 @@ extern "C" {
 bool anofox_ts_stats(const double *values,
                      const uint64_t *validity,
                      size_t length,
+                     size_t seasonal_period,
                      struct TsStatsResult *out_result,
                      struct AnofoxError *out_error);
 
@@ -1999,6 +2008,7 @@ bool anofox_ts_stats_with_dates_and_type(const double *values,
                                          size_t length,
                                          int64_t frequency_micros,
                                          enum FrequencyType frequency_type,
+                                         size_t seasonal_period,
                                          struct TsStatsResult *out_result,
                                          struct AnofoxError *out_error);
 
