@@ -5,7 +5,9 @@
 ///   - RegisterTsAdfFunction(ExtensionLoader&)
 ///
 /// It follows the STRUCT-return pattern established in bootstrap.cpp and
-/// the ExtractListAsDouble helper pattern from the same file.
+/// reads its LIST(DOUBLE) arguments via ts_list_marshal.hpp's
+/// ListDoubleReader / ScalarArgReader (Phase 12 D-01), not the deleted
+/// per-file ExtractListAsDouble helper.
 ///
 /// STRUCT field order for ts_adf (STAT-01) — fixed; plans 01-2/01-3 depend on it:
 ///   statistic DOUBLE, p_value DOUBLE, lags BIGINT, is_stationary BOOLEAN,
