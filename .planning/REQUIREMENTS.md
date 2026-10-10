@@ -43,15 +43,15 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 
 ### Statistics Out of C++/SQL (Marshalling)
 
-- [ ] **RUST-01**: All list-taking scalar functions read inputs via `ToUnifiedFormat` (constant/dictionary list arguments give correct per-row results) [D2].
-- [ ] **RUST-02**: List NULLs are passed to Rust as validity; Rust owns the policy: paired metrics/conformal use pairwise-complete observations; single-series diagnostics reject or explicitly handle interior NULLs instead of splicing; one shared C++ helper replaces the ~10 copies of `ExtractListAsDouble` [D1].
-- [ ] **RUST-03**: `ts_diff_by` computes d-th order differences via Rust `diff` (optionally a separate seasonal-lag parameter) [D3].
+- [x] **RUST-01**: All list-taking scalar functions read inputs via `ToUnifiedFormat` (constant/dictionary list arguments give correct per-row results) [D2].
+- [x] **RUST-02**: List NULLs are passed to Rust as validity; Rust owns the policy: paired metrics/conformal use pairwise-complete observations; single-series diagnostics reject or explicitly handle interior NULLs instead of splicing; one shared C++ helper replaces the ~10 copies of `ExtractListAsDouble` [D1].
+- [x] **RUST-03**: `ts_diff_by` computes d-th order differences via Rust `diff` (optionally a separate seasonal-lag parameter) [D3].
 - [ ] **RUST-04**: `ts_conformal_by`, `ts_conformal_apply_by`, `ts_interval_width_by`, `ts_conformal_calibrate` preserve horizon order (date/step column) and pairing; residuals and empirical coverage are computed in Rust; per-group calibration supported [D4–D6].
-- [ ] **RUST-05**: `ts_fill_nulls_mean_by` uses the Rust implementation [D7].
-- [ ] **RUST-06**: `ts_backtest_native` either computes metrics per group via the Rust metric functions (unknown metric → error, missing bounds → NULL) or is removed together with stale `ts_backtest_auto_by` references; error sign convention is consistent across surfaces [D8, D16].
-- [ ] **RUST-07**: Hierarchy aggregation keeps SQL `SUM` NULL semantics (all-NULL → NULL, no NULL→0 imputation) [D9].
-- [ ] **RUST-08**: `ts_forecast_agg` uses Rust frequency detection with calendar-aware month/year stepping; `ts_forecast_agg` and `ts_features_agg` pass validity instead of splicing NULL rows [D10, D11].
-- [ ] **RUST-09**: Per-step conformal validates that the residual count is a multiple of horizon; drop_constant uses the Rust tolerance; `ts_forecast_exog_by` future-date generation is calendar-correct; dead `ts_filter.cpp`/`ts_imputation.cpp` scalar bodies removed or registered [D12–D15].
+- [x] **RUST-05**: `ts_fill_nulls_mean_by` uses the Rust implementation [D7].
+- [x] **RUST-06**: `ts_backtest_native` either computes metrics per group via the Rust metric functions (unknown metric → error, missing bounds → NULL) or is removed together with stale `ts_backtest_auto_by` references; error sign convention is consistent across surfaces [D8, D16].
+- [x] **RUST-07**: Hierarchy aggregation keeps SQL `SUM` NULL semantics (all-NULL → NULL, no NULL→0 imputation) [D9].
+- [x] **RUST-08**: `ts_forecast_agg` uses Rust frequency detection with calendar-aware month/year stepping; `ts_forecast_agg` and `ts_features_agg` pass validity instead of splicing NULL rows [D10, D11].
+- [x] **RUST-09**: Per-step conformal validates that the residual count is a multiple of horizon; drop_constant uses the Rust tolerance; `ts_forecast_exog_by` future-date generation is calendar-correct; dead `ts_filter.cpp`/`ts_imputation.cpp` scalar bodies removed or registered [D12–D15].
 - [ ] **RUST-10**: An audit script (grep-based, run in CI or as a test) confirms no statistical arithmetic remains in `src/**/*.cpp` or macro SQL beyond documented marshalling.
 
 ### Core Statistics (stats.rs, quality.rs, metrics.rs)
@@ -147,15 +147,15 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 | WRAP-01 | Phase 15 | Pending |
 | WRAP-02 | Phase 13 | Pending |
 | WRAP-03 | Phase 13 | Pending |
-| RUST-01 | Phase 12 | Pending |
-| RUST-02 | Phase 12 | Pending |
-| RUST-03 | Phase 12 | Pending |
+| RUST-01 | Phase 12 | Complete |
+| RUST-02 | Phase 12 | Complete |
+| RUST-03 | Phase 12 | Complete |
 | RUST-04 | Phase 16 | Pending |
-| RUST-05 | Phase 12 | Pending |
-| RUST-06 | Phase 12 | Pending |
-| RUST-07 | Phase 12 | Pending |
-| RUST-08 | Phase 12 | Pending |
-| RUST-09 | Phase 12 | Pending |
+| RUST-05 | Phase 12 | Complete |
+| RUST-06 | Phase 12 | Complete |
+| RUST-07 | Phase 12 | Complete |
+| RUST-08 | Phase 12 | Complete |
+| RUST-09 | Phase 12 | Complete |
 | RUST-10 | Phase 18 | Pending |
 | STAT-01 | Phase 13 | Pending |
 | STAT-02 | Phase 13 | Pending |
