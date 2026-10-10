@@ -963,3 +963,30 @@ fn is_constant_empty_is_true() {
     assert!(success, "error: {}", error_message(&error));
     assert!(result);
 }
+
+#[test]
+fn is_constant_empty_with_null_values_pointer_is_true() {
+    // WR-01 regression: this mirrors the real C++ caller
+    // (`src/scalar_functions/series_transforms.cpp`'s
+    // `n == 0 ? nullptr : values.data()`), which passes a genuine NULL
+    // pointer for `values` when the input list is empty -- unlike
+    // `[].as_ptr()` above, which is a non-null dangling pointer and does not
+    // exercise the null-pointer guard at all. Before the fix, the
+    // unconditional null-pointer check ran before the `length == 0`
+    // short-circuit and this call returned `false` with
+    // `ErrorCode::NullPointer`, contradicting the function's own documented
+    // contract that an empty/all-missing group classifies as constant.
+    let mut result = false;
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_is_constant(
+            std::ptr::null(),
+            std::ptr::null(),
+            0,
+            &mut result,
+            &mut error,
+        )
+    };
+    assert!(success, "error: {}", error_message(&error));
+    assert!(result);
+}

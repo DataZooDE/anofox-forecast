@@ -4531,7 +4531,24 @@ pub unsafe extern "C" fn anofox_ts_is_constant(
         *out_error = AnofoxError::success();
     }
 
-    if values.is_null() || out_result.is_null() {
+    if out_result.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+
+    // An empty (but non-NULL-pointer) list classifies as constant per this
+    // function's own documented contract ("fewer than two non-missing values
+    // ... classifies as constant"). Mirror `anofox_ts_series_gate`: check
+    // `length == 0` before the `values` null check, since the caller may
+    // legitimately pass `nullptr` for `values` precisely when `length == 0`.
+    if length == 0 {
+        *out_result = true;
+        return true;
+    }
+
+    if values.is_null() {
         if !out_error.is_null() {
             (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
         }

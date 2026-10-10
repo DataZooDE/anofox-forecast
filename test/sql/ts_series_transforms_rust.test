@@ -187,6 +187,15 @@ SELECT _ts_is_constant([1e-20, 2e-20, 1e-20]::DOUBLE[]);
 ----
 true
 
+# WR-01: an empty-but-non-NULL list classifies as constant (fewer than two
+# non-missing values), matching the function's own documented contract.
+# Not reachable via ts_drop_constant_by (every GROUP BY partition has at
+# least one row), but _ts_is_constant is directly callable.
+query I
+SELECT _ts_is_constant([]::DOUBLE[]);
+----
+true
+
 #######################################
 # Cleanup
 #######################################

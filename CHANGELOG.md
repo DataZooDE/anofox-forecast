@@ -269,6 +269,13 @@ use the semver numbering this project started with.
   both counts (e.g. `point_forecasts has 5 elements but horizon is 3`) instead of
   producing a `point` array longer than `lower`/`upper` and reading `n_point_forecasts -
   horizon` doubles past a `horizon`-sized allocation.
+- **`_ts_is_constant([]::DOUBLE[])` (empty-but-non-NULL list) now returns `true`** (WR-01,
+  phase 12 review fix), matching its own documented contract ("fewer than two non-missing
+  values, including an all-missing group, classifies as constant"). The FFI's null-pointer
+  guard previously ran before the `length == 0` short-circuit, so the C++ caller's
+  `n == 0 ? nullptr : values.data()` call (passing a genuine NULL for an empty list) always
+  hit the null-pointer error path instead. Not reachable via `ts_drop_constant_by` (every
+  `GROUP BY` partition has at least one row), but `_ts_is_constant` is directly callable.
 - `ts_forecast_agg` / `ts_features_agg` now break ties deterministically for groups with
   duplicate timestamps (WR-02, phase 12 review fix). `Finalize`'s sort previously ordered
   rows by timestamp only via `std::sort` (not stable), so the relative order — and hence
