@@ -737,7 +737,12 @@ pub unsafe extern "C" fn anofox_ts_mase(
         }
         let filtered = anofox_fcst_core::complete_cases(&[&actual_series, &forecast_series])?;
         let insample_series = build_series(insample, insample_validity, insample_len);
-        anofox_fcst_core::mase(&filtered[0], &filtered[1], &insample_series, seasonal_period as usize)
+        anofox_fcst_core::mase(
+            &filtered[0],
+            &filtered[1],
+            &insample_series,
+            seasonal_period as usize,
+        )
     }));
 
     match result {

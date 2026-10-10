@@ -146,11 +146,11 @@ Available as both scalar functions and `_by` table macros:
 | MAE | `ts_mae(actual, pred)` | `ts_mae_by(source, group, date, actual, forecast)` |
 | MSE | `ts_mse(actual, pred)` | `ts_mse_by(...)` |
 | RMSE | `ts_rmse(actual, pred)` | `ts_rmse_by(...)` |
-| MAPE | `ts_mape(actual, pred)` | `ts_mape_by(...)` |
+| MAPE | `ts_mape(actual, pred)` — NULL if any actual is 0 | `ts_mape_by(...)` |
 | sMAPE | `ts_smape(actual, pred)` | `ts_smape_by(...)` |
 | R² | `ts_r2(actual, pred)` | `ts_r2_by(...)` |
 | Bias | `ts_bias(actual, pred)` | `ts_bias_by(...)` |
-| MASE | `ts_mase(actual, pred, baseline)` | `ts_mase_by(..., baseline)` |
+| MASE | `ts_mase(actual, pred, insample, seasonal_period)` — Hyndman-Koehler | `ts_mase_by(..., seasonal_period := 1)` |
 | rMAE | `ts_rmae(actual, pred1, pred2)` | `ts_rmae_by(..., pred1, pred2)` |
 | Coverage | `ts_coverage(actual, lower, upper)` | `ts_coverage_by(..., lower, upper)` |
 | Quantile Loss | `ts_quantile_loss(actual, pred, q)` | `ts_quantile_loss_by(..., quantile)` |

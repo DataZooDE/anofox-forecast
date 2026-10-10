@@ -24,7 +24,7 @@ Time-series-aware cross-validation, error metrics, and distribution-free interva
 - **Always `ORDER BY` inside `LIST()`** for temporal correctness: `LIST(y ORDER BY ds)`, not `LIST(y)`.
 - **`ts_cv_forecast_by` output renames the target column to `y`** (canonical). Don't try to access the original name.
 - **Folds must be pre-computed before forecasting.** Passing raw data to `ts_cv_forecast_by` throws a clear error.
-- **Metrics use pairwise-complete NULL handling (v0.10.0, Phase 12).** `ts_mae`/`ts_mse`/`ts_rmse`/`ts_mape`/`ts_smape`/`ts_r2`/`ts_bias`/`ts_rmae`/`ts_mase`/`ts_quantile_loss`/`ts_mqloss`/`ts_coverage` drop a pair (or row, for 3+ input metrics) the moment ANY input is NULL at that position, computed in Rust — not spliced independently per array in C++. No complete pair/row → `NULL`, not an error.
+- **Metrics use pairwise-complete NULL handling (v0.10.0, Phase 12).** `ts_mae`/`ts_mse`/`ts_rmse`/`ts_mape`/`ts_smape`/`ts_r2`/`ts_bias`/`ts_rmae`/`ts_quantile_loss`/`ts_mqloss`/`ts_coverage` drop a pair (or row, for 3+ input metrics) the moment ANY input is NULL at that position, computed in Rust — not spliced independently per array in C++. No complete pair/row → `NULL`, not an error. `ts_mape` additionally returns `NULL` for the whole call if any pairwise-complete `actual` is exactly `0.0` (D-07) — use `ts_smape`/`ts_mase` for intermittent demand. `ts_mase`'s `insample` argument has its OWN policy (never pairwise-complete-filtered — see below), not this one.
 
 ## The CV two-step workflow (standard)
 
@@ -116,11 +116,11 @@ Pattern: `SELECT group, ts_<metric>(LIST(actual ORDER BY ds), LIST(pred ORDER BY
 | `ts_mae` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | Mean Absolute Error |
 | `ts_mse` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | Mean Squared Error |
 | `ts_rmse` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | Root MSE |
-| `ts_mape` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | Mean Absolute % Error — rows with `actual == 0` are dropped from the sum AND the divisor (not counted as 0%) — fix planned for v0.10.0, Phase 13 |
+| `ts_mape` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | Mean Absolute % Error — returns `NULL` if ANY pairwise-complete `actual` is exactly `0.0` (D-07; MAPE is undefined there) — use `ts_smape`/`ts_mase` for intermittent demand |
 | `ts_smape` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | Symmetric MAPE |
 | `ts_r2` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | R² |
 | `ts_bias` | `(DOUBLE[], DOUBLE[]) → DOUBLE` | Bias (mean error) |
-| `ts_mase` | `(actual, forecast, baseline) → DOUBLE` | Currently a **relative MAE** (`MAE(actual,forecast)/MAE(actual,baseline)`) — scaled by whatever `baseline` array you pass in, not the Hyndman-Koehler in-sample seasonal-naive MASE — fix planned for v0.10.0, Phase 13 |
+| `ts_mase` | `(actual, forecast, insample, seasonal_period) → DOUBLE` | **Hyndman-Koehler MASE** (D-08): `MAE(actual,forecast) / mean(\|insample_t - insample_{t-seasonal_period}\|)`. `seasonal_period` is a REQUIRED 4th positional arg (no `:=` on scalar functions). `insample` lag pairs touching a missing value are skipped, never spliced. Scale numerically zero → `NULL`. The pre-v0.10.0 3-arg `(actual, forecast, baseline)` form — a relative MAE, not MASE — is REMOVED; it errors naming `ts_rmae`. `ts_mase_by(source, date_col, actual_col, forecast_col, seasonal_period := 1)` needs `source` to include each group's HISTORY rows (forecast NULL, dated before the first forecast) to supply the in-sample scale — the old baseline-column 5th argument is also removed, naming `ts_rmae_by`. |
 | `ts_rmae` | `(actual, pred1, pred2) → DOUBLE` | Relative MAE. < 1 = pred1 better |
 | `ts_coverage` | `(actual, lower, upper) → DOUBLE` | Interval coverage rate |
 | `ts_quantile_loss` | `(actual, forecast, q) → DOUBLE` | Quantile loss at level q |

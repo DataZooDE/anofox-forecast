@@ -194,7 +194,7 @@ GROUP BY product_id, fold_id;
 |--------|------------|
 | RMSE | Default; penalizes large errors |
 | MAE | Robust to outliers |
-| MAPE | Percentage-based comparison |
+| MAPE | Percentage-based comparison; `NULL` if any actual is exactly 0 (use sMAPE/MASE for intermittent demand) |
 | sMAPE | Symmetric percentage |
 | Coverage | Evaluate prediction intervals |
 

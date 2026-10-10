@@ -102,7 +102,7 @@ pub struct StlComponents {
 
 fn odd_at_least3(w: usize) -> usize {
     let mut v = w.max(3);
-    if v % 2 == 0 {
+    if v.is_multiple_of(2) {
         v += 1;
     }
     v

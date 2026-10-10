@@ -179,7 +179,7 @@ use the semver numbering this project started with.
   of only its present (non-`NULL`) values. Breaking change for any caller relying on the old
   `NULL -> 0` imputation.
 - **`ts_stats`/`ts_stats_by`/`ts_stats_agg` moments, entropy, and gap semantics are now
-  textbook-correct (STAT-01/STAT-03, Phase 13 plan 13-01).** `skewness`/`kurtosis` are now
+  textbook-correct (STAT-01/STAT-03).** `skewness`/`kurtosis` are now
   scipy `bias=False` G1/excess-G2 (population 2nd/3rd/4th central moments with the proper
   bias-correction factors, not a population-moment/sample-std-dev mix); `bimodality_coef`
   uses the SAS small-sample formula on those G1/G2 values (audit vector bimodality 0.466,
@@ -198,7 +198,7 @@ use the semver numbering this project started with.
   keeps `NULL`-valued rows (counted in `n_nulls`, position preserved) instead of silently
   dropping them (Phase 12 deferred item (a)) — only a `NULL` **timestamp** is skipped.
 - **`ts_stats`/`ts_stats_by`/`ts_stats_agg` `trend_strength`/`seasonality_strength` are now
-  Wang/Hyndman STL decomposition strengths (STAT-02, Phase 13 plan 13-02, D-02)**, computed
+  Wang/Hyndman STL decomposition strengths (STAT-02, D-02)**, computed
   from an R-faithful port of `stats::stl` (Cleveland et al. 1990) and `stats::supsmu`
   (Friedman's super smoother) — the crate's own STL (`anofox_forecast::seasonality::stl::STL`,
   0.15.3) uses a degree-0 kernel smoother with truncated windows and no cycle-subseries
@@ -214,7 +214,7 @@ use the semver numbering this project started with.
   interior-missing series. On the audit's 150-point random walk, `seasonality_strength` is
   now about 0.09 (previously 0.96 under the old lag-peak formula).
 - **`ts_data_quality`/`ts_data_quality_by`/`ts_data_quality_summary`/`ts_data_quality_agg`
-  now use real dates, frequency, and `n_short` (D-05, WRAP-02, Phase 13 plan 13-03)** —
+  now use real dates, frequency, and `n_short` (D-05, WRAP-02)** —
   previously `temporal_score` was always `1.0` and `n_gaps` was always `0` because the
   underlying `compute_data_quality` call never received the date array; `n_short` and
   `frequency` were silently ignored. `n_gaps` is now the number of **missing periods**
@@ -231,7 +231,7 @@ use the semver numbering this project started with.
   preserved) instead of silently dropping them, and uses a fixed `n_short = 30` with
   auto-detected frequency (it takes no `n_short`/`frequency` argument).
 - **Monthly/quarterly/yearly gap fill and fill-forward preserve calendar alignment
-  (D-09, G24, Phase 13 plan 13-03)** — `ts_fill_gaps_by`/`ts_fill_forward_by` previously
+  (D-09, G24)** — `ts_fill_gaps_by`/`ts_fill_forward_by` previously
   always snapped inserted dates to the start of the period (the 1st); they now step
   from the previous observed date (`ts_fill_gaps_by`) or the last observed date
   (`ts_fill_forward_by`) using the same month-end-preserving rule `ts_forecast_by`'s
@@ -242,6 +242,27 @@ use the semver numbering this project started with.
   12 deferred item (e)) is now documented at the Rust doc-comment, FFI, and
   [SQL-doc](docs/api/22-supported-frequencies.md#frequency-auto-detection) level
   (WRAP-03).
+- **`ts_mase` is now Hyndman-Koehler MASE with a required `seasonal_period` (D-08,
+  STAT-06).** New signature: `ts_mase(actual, forecast, insample, seasonal_period) →
+  DOUBLE` — the out-of-sample forecast MAE, scaled by the IN-SAMPLE seasonal-naive MAE
+  at lag `seasonal_period`. `seasonal_period` is a required 4th positional argument
+  (DuckDB scalar functions don't accept `:=` named arguments). In-sample lag pairs
+  touching a missing value are skipped, never spliced out and re-paired; a
+  (numerically) zero in-sample scale returns `NULL` (R's `forecast::accuracy()` returns
+  `Inf` here). The pre-v0.10.0 3-argument `ts_mase(actual, forecast, baseline)` form —
+  which computed `MAE(actual, forecast) / MAE(actual, baseline)`, a relative MAE and
+  not MASE at all — is REMOVED: calling it now raises an error naming `ts_rmae`, which
+  still provides that computation unchanged. `ts_mase_by`'s signature is now
+  `ts_mase_by(source, date_col, actual_col, forecast_col, seasonal_period := 1)`;
+  `source` must include each group's HISTORY rows (dated before the first forecast,
+  `forecast` NULL) to supply the in-sample scale. The old 5th-argument baseline-column
+  form is also removed, detected by type (a VARCHAR column name) and erroring naming
+  `ts_rmae_by`.
+- **`ts_mape`/`ts_mape_by` return `NULL` when any pairwise-complete `actual` is exactly
+  `0.0` (D-07, STAT-05)**, instead of silently excluding that pair from the sum and
+  divisor count (the pre-v0.10.0 behavior) — MAPE is undefined with a zero actual, not
+  a special case to drop. Use `ts_smape` or `ts_mase` for intermittent-demand series
+  where exact zeros are expected.
 
 ### Added
 

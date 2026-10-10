@@ -224,7 +224,9 @@ pub fn mase(
     let mut count = 0usize;
     if insample.len() > seasonal_period {
         for t in seasonal_period..insample.len() {
-            if let (Some(y_t), Some(y_tm)) = (present(insample[t]), present(insample[t - seasonal_period])) {
+            if let (Some(y_t), Some(y_tm)) =
+                (present(insample[t]), present(insample[t - seasonal_period]))
+            {
                 sum += (y_t - y_tm).abs();
                 count += 1;
             }

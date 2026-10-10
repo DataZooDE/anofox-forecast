@@ -54,7 +54,13 @@ fn r_mase_fixture_accuracy_and_manual_agree() {
     for (name, c) in cases {
         let acc = common::num(&c["mase_accuracy"]);
         let manual = common::num(&c["mase_manual"]);
-        common::assert_close(acc, manual, abs_tol, 0.0, &format!("{name}: mase_accuracy vs mase_manual"));
+        common::assert_close(
+            acc,
+            manual,
+            abs_tol,
+            0.0,
+            &format!("{name}: mase_accuracy vs mase_manual"),
+        );
     }
 }
 
@@ -75,7 +81,8 @@ fn r_mase_fixture_matches_mase() {
         let forecast = f64_vec(&c["forecast"]);
         let seasonal_period = c["seasonal_period"]
             .as_u64()
-            .unwrap_or_else(|| panic!("{name}: seasonal_period is not a non-negative integer")) as usize;
+            .unwrap_or_else(|| panic!("{name}: seasonal_period is not a non-negative integer"))
+            as usize;
         let want = common::num(&c["mase_manual"]);
 
         // Mirror the FFI/SQL contract: `actual`/`forecast` arrive at `mase()`
@@ -88,8 +95,13 @@ fn r_mase_fixture_matches_mase() {
             .map(|(a, f)| (*a, *f))
             .collect();
 
-        let got = mase(&actual_complete, &forecast_complete, &insample, seasonal_period)
-            .unwrap_or_else(|e| panic!("{name}: mase() failed: {e:?}"));
+        let got = mase(
+            &actual_complete,
+            &forecast_complete,
+            &insample,
+            seasonal_period,
+        )
+        .unwrap_or_else(|e| panic!("{name}: mase() failed: {e:?}"));
 
         if name == "constant_insample" {
             saw_constant_insample = true;
@@ -104,7 +116,8 @@ fn r_mase_fixture_matches_mase() {
             continue;
         }
 
-        let got = got.unwrap_or_else(|| panic!("{name}: mase() returned None, expected Some({want})"));
+        let got =
+            got.unwrap_or_else(|| panic!("{name}: mase() returned None, expected Some({want})"));
         common::assert_close(got, want, abs_tol, 0.0, name);
     }
 

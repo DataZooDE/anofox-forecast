@@ -99,8 +99,9 @@ JOIN bias ON mae.id = bias.id;
 | MAE | `mean(\|y - ŷ\|)` | [0, ∞) |
 | MSE | `mean((y - ŷ)²)` | [0, ∞) |
 | RMSE | `sqrt(mean((y - ŷ)²))` | [0, ∞) |
-| MAPE | `mean(\|y - ŷ\| / \|y\|) × 100` | [0, ∞) |
+| MAPE | `mean(\|y - ŷ\| / \|y\|) × 100` — `NULL` if any `y` is exactly 0 | [0, ∞) |
 | SMAPE | `mean(\|y - ŷ\| / (\|y\| + \|ŷ\|)) × 200` | [0, 200] |
+| MASE | `MAE(y, ŷ) / mean(\|insample_t - insample_{t-m}\|)` (Hyndman-Koehler, lag `m = seasonal_period`) | [0, ∞) |
 | Bias | `mean(y - ŷ)` | (-∞, ∞) |
 
 ### Interval Metrics
@@ -142,7 +143,7 @@ JOIN bias ON mae.id = bias.id;
 |--------|------|-------|
 | Bounded | No | Yes [0, 200] |
 | Symmetric | No | Yes |
-| Zero actuals | Undefined | Defined |
+| Zero actuals | `NULL` (undefined) | Defined |
 
 ### Bias Interpretation
 

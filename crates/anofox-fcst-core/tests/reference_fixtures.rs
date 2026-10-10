@@ -10,7 +10,8 @@
 //!   the seeded random-walk series (Naive / RandomWalkDrift).
 //! - `scipy_moments_fixture_is_self_consistent`: recomputes G1/G2/BC from
 //!   each vector's raw data and checks it against the Python-recorded
-//!   values (Phase 13 STAT-01 pins this definition against `ts_stats`).
+//!   values -- this is the exact definition `ts_stats`'s moments pin against
+//!   (see `tests/stats_reference.rs`).
 //! - `multiscale_ols_fixture_is_self_consistent`: checks `[1 | X] . coef`
 //!   reproduces `fitted` for every case, and that the CSV companion's
 //!   future rows reproduce `[1, x] . coef` for `exog_typical`.
@@ -220,9 +221,9 @@ fn r_random_walk_closed_form_points_match_forecast_core() {
 
 /// Recomputes the bias-corrected skewness (G1), excess kurtosis (G2), and
 /// the SAS bimodality coefficient (BC) from raw sample data using the
-/// closed-form definitions scipy's `bias=False` variants implement. This
-/// pins the exact definition that Phase 13 (STAT-01) must reproduce in
-/// `ts_stats` — it is NOT itself a product-surface assertion.
+/// closed-form definitions scipy's `bias=False` variants implement. This is
+/// the exact definition `ts_stats`'s moments reproduce (pinned separately in
+/// `tests/stats_reference.rs`) — it is NOT itself a product-surface assertion.
 fn population_moments_g1_g2_bc(x: &[f64]) -> (f64, f64, f64) {
     let n = x.len() as f64;
     let mean = x.iter().sum::<f64>() / n;

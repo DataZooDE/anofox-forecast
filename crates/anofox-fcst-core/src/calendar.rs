@@ -13,8 +13,10 @@
 //! date. C++ only maps a frequency spec to a [`CalendarStep`] and copies the
 //! returned dates (see `src/include/ts_future_dates.hpp`).
 //!
-//! Reusable by Phase 13's planned month-end-aware `fill_gaps` — the same
-//! month-end / clamp rule applies there.
+//! `step_months`/`all_month_end` (below) are also shared, unmodified, by
+//! `gaps.rs`'s `fill_gaps_calendar`/`fill_forward` (D-09): the same
+//! month-end-preserving / day-of-month-clamping rule applies to gap fill as
+//! to forecast dates — one calendar rule, two consumers.
 
 use crate::error::{ForecastError, Result};
 use crate::gaps::{datetime_to_micros, detect_frequency, micros_to_datetime};
