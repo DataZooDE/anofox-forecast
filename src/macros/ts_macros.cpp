@@ -78,10 +78,11 @@ SELECT
     (_stats).entropy AS entropy,
     (_stats).stability AS stability,
     (_stats).expected_length AS expected_length,
-    (_stats).n_gaps AS n_gaps
+    (_stats).n_gaps AS n_gaps,
+    (_stats).n_gap_runs AS n_gap_runs
 FROM stats_data
 )",
-    "Computes 34 time series statistics per group. Returns a wide table with one column per statistic.",
+    "Computes 36 time series statistics per group (including n_gap_runs). Returns a wide table with one column per statistic.",
     "SELECT * FROM ts_stats('sales', product_id, date, qty, '1d')",
     "statistics"},
 
@@ -1846,7 +1847,7 @@ SELECT * FROM _ts_stats_by_native(
     frequency
 )
 )",
-    "Alias for ts_stats. Computes 34 time series statistics per group.",
+    "Alias for ts_stats. Computes 36 time series statistics per group (including n_gap_runs).",
     "SELECT * FROM ts_stats_by('sales', product_id, date, qty, '1d')",
     "statistics"},
 

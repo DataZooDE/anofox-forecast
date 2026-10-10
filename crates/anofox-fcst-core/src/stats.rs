@@ -300,24 +300,6 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
     })
 }
 
-/// Compute time series statistics with date information for gap detection.
-///
-/// # Arguments
-/// * `series` - A slice of optional f64 values (None represents NULL)
-/// * `dates` - A slice of timestamps in microseconds (must be same length as series)
-/// * `frequency_micros` - Expected frequency between observations in microseconds
-///
-/// # Returns
-/// * `Result<TsStats>` - Statistics for the series including expected_length and n_gaps
-pub fn compute_ts_stats_with_dates(
-    series: &[Option<f64>],
-    dates: &[i64],
-    frequency_micros: i64,
-) -> Result<TsStats> {
-    // Delegate to the new function with Fixed frequency type for backward compatibility
-    compute_ts_stats_with_dates_and_type(series, dates, frequency_micros, FrequencyType::Fixed)
-}
-
 /// Compute time series statistics with date information and frequency type for gap detection.
 ///
 /// This version properly handles calendar frequencies (monthly, quarterly, yearly) which

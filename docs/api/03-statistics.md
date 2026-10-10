@@ -84,10 +84,11 @@ ts_stats_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
 | `autocorr_lag1` | DOUBLE | Autocorrelation at lag 1 |
 | `trend_strength` | DOUBLE | `\|r\|` (absolute Pearson correlation) of a linear fit of the series against its index — not a decomposition-based trend strength; no fixed "strong trend" threshold is defined (fix planned for v0.10.0, Phase 13) |
 | `seasonality_strength` | DOUBLE | `max(\|ACF\|)` over lags 2, 4, 7, and 12 only — not a general seasonal-strength decomposition and not sensitive to other periods; no fixed "strong seasonality" threshold is defined (fix planned for v0.10.0, Phase 13) |
-| `entropy` | DOUBLE | 10-bin Shannon entropy of the value histogram (not approximate entropy / ApEn despite the name) (fix planned for v0.10.0, Phase 13) |
+| `entropy` | DOUBLE | Pincus (1991) approximate entropy (ApEn), `m=2`, `r=0.2 * sample standard deviation`, Chebyshev distance, self-match included. `NULL` when fewer than 3 present values remain after trimming leading/trailing NULLs, or when an interior value is missing/NaN. A constant series gives `0.0`. |
 | `stability` | DOUBLE | Stability measure |
-| `expected_length` | UBIGINT | Expected observations based on date range and frequency |
-| `n_gaps` | UBIGINT | Number of gap **occurrences** (consecutive-timestamp transitions exceeding ~1.5x the typical spacing) — NOT the number of missing periods; a single 10-period gap counts as 1, not 10 (fix planned for v0.10.0, Phase 13) |
+| `expected_length` | UBIGINT | Expected observations based on date range and frequency. Identity: `expected_length = n_distinct_observed_periods + n_gaps`. |
+| `n_gaps` | UBIGINT | Number of **missing periods** (expected timestamps absent under the declared or detected frequency) — e.g. a single 10-period gap counts as 10, not 1. **Breaking change (v0.10.0):** before v0.10.0 this column counted gap *occurrences* instead; that count is now `n_gap_runs` below. |
+| `n_gap_runs` | UBIGINT | Number of gap **occurrences** (consecutive-timestamp transitions whose step count is `>= 2`) — the pre-v0.10.0 meaning of `n_gaps`. A single 10-period gap counts as 1 run. |
 
 **Example:**
 ```sql
@@ -104,18 +105,35 @@ SELECT
     trend_strength
 FROM ts_stats_by('sales', product_id, date, quantity, '1d');
 
--- Detect gaps in time series (n_gaps counts gap OCCURRENCES, not missing periods)
+-- Detect gaps in time series: n_gaps = missing periods, n_gap_runs = gap occurrences
 SELECT
     product_id,
     length AS actual_length,
     expected_length,
     n_gaps,
+    n_gap_runs,
     CASE WHEN n_gaps > 0 THEN 'Has gaps' ELSE 'Complete' END AS status
 FROM ts_stats_by('sales', product_id, date, quantity, '1d')
 WHERE n_gaps > 0;
 ```
 
 > **Alias:** `ts_stats` is an alias for `ts_stats_by`
+
+**`ts_stats_agg(date, value)` (aggregate function)** computes the same 36 columns from
+a `GROUP BY` instead of a source table name. Since v0.10.0 it: auto-detects the
+frequency from the data's own timestamps (`expected_length`/`n_gaps`/`n_gap_runs` are
+no longer always `NULL`); keeps `NULL`-valued rows (counted in `n_nulls`, position
+preserved in the date-ordered series — matching `ts_stats_by`); and skips only rows
+whose **timestamp** is `NULL` (they cannot be placed in time).
+
+```sql
+SELECT product_id,
+       (ts_stats_agg(date, quantity)).length,
+       (ts_stats_agg(date, quantity)).n_gaps,
+       (ts_stats_agg(date, quantity)).n_gap_runs
+FROM sales
+GROUP BY product_id;
+```
 
 ---
 

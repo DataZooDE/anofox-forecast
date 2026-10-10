@@ -47,11 +47,6 @@ static std::pair<int64_t, FrequencyType> ParseFrequencyForStats(const string &fr
     return std::make_pair(micros, parsed.type);
 }
 
-// Parse frequency string to microseconds (e.g., "1d" -> 86400000000) - backward compatible version
-static int64_t ParseFrequencyToMicroseconds(const string &frequency_str) {
-    return ParseFrequencyForStats(frequency_str).first;
-}
-
 // Define the output STRUCT type for ts_stats (34 metrics)
 // Note: Using LogicalType(LogicalTypeId::XXX) instead of LogicalType::XXX
 // to avoid ODR violations with constexpr static members when linking with duckdb_static
@@ -93,6 +88,7 @@ static LogicalType GetTsStatsResultType() {
     children.push_back(make_pair("stability", LogicalType(LogicalTypeId::DOUBLE)));
     children.push_back(make_pair("expected_length", LogicalType(LogicalTypeId::UBIGINT)));
     children.push_back(make_pair("n_gaps", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("n_gap_runs", LogicalType(LogicalTypeId::UBIGINT)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -213,17 +209,26 @@ static void PopulateTsStatsResult(Vector &result, idx_t row_idx, const TsStatsRe
     SetStructField<double>(result, 29, row_idx, stats_result.autocorr_lag1);
     SetStructField<double>(result, 30, row_idx, stats_result.trend_strength);
     SetStructField<double>(result, 31, row_idx, stats_result.seasonality_strength);
-    SetStructField<double>(result, 32, row_idx, stats_result.entropy);
     SetStructField<double>(result, 33, row_idx, stats_result.stability);
 
-    // Set date-based metrics
+    // entropy: NULL when the Rust side has no entropy value (D-03: interior-missing or
+    // fewer-than-3-present series).
     auto &children = StructVector::GetEntries(result);
+    if (stats_result.has_entropy) {
+        SetStructField<double>(result, 32, row_idx, stats_result.entropy);
+    } else {
+        FlatVector::SetNull(*children[32], row_idx, true);
+    }
+
+    // expected_length / n_gaps / n_gap_runs: NULL when no date metrics are available.
     if (stats_result.has_date_metrics) {
         SetStructField<uint64_t>(result, 34, row_idx, stats_result.expected_length);
         SetStructField<uint64_t>(result, 35, row_idx, stats_result.n_gaps);
+        SetStructField<uint64_t>(result, 36, row_idx, stats_result.n_gap_runs);
     } else {
         FlatVector::SetNull(*children[34], row_idx, true);
         FlatVector::SetNull(*children[35], row_idx, true);
+        FlatVector::SetNull(*children[36], row_idx, true);
     }
 }
 
@@ -308,20 +313,22 @@ static void TsStatsWithDatesFunction(DataChunk &args, ExpressionState &state, Ve
         vector<int64_t> timestamps;
         ExtractListTimestamps(dates_vec, count, row_idx, timestamps);
 
-        // Parse frequency
+        // Parse frequency (micros + type) so monthly/quarterly/yearly gap counting is
+        // calendar-aware here too, matching ts_stats_by (Phase 13 plan 13-01, D-04).
         string freq_str = freq_data[freq_idx].GetString();
-        int64_t frequency_micros = ParseFrequencyToMicroseconds(freq_str);
+        auto [frequency_micros, frequency_type] = ParseFrequencyForStats(freq_str);
 
-        // Call Rust FFI function with dates
+        // Call Rust FFI function with dates and frequency type
         TsStatsResult stats_result;
         AnofoxError error;
 
-        bool success = anofox_ts_stats_with_dates(
+        bool success = anofox_ts_stats_with_dates_and_type(
             values.data(),
             validity.empty() ? nullptr : validity.data(),
             timestamps.data(),
             values.size(),
             frequency_micros,
+            frequency_type,
             &stats_result,
             &error
         );
@@ -516,6 +523,8 @@ static unique_ptr<FunctionData> TsStatsByBind(
     names.push_back("expected_length");
     return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
     names.push_back("n_gaps");
+    return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
+    names.push_back("n_gap_runs");
     return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
 
     return bind_data;
@@ -769,16 +778,24 @@ static OperatorFinalizeResultType TsStatsByFinalize(
         FlatVector::GetData<double>(output.data[30])[out_idx] = stats.autocorr_lag1;
         FlatVector::GetData<double>(output.data[31])[out_idx] = stats.trend_strength;
         FlatVector::GetData<double>(output.data[32])[out_idx] = stats.seasonality_strength;
-        FlatVector::GetData<double>(output.data[33])[out_idx] = stats.entropy;
         FlatVector::GetData<double>(output.data[34])[out_idx] = stats.stability;
 
-        // expected_length and n_gaps - handle NULL if no date metrics
+        // entropy - NULL when the Rust side has no entropy value (D-03)
+        if (stats.has_entropy) {
+            FlatVector::GetData<double>(output.data[33])[out_idx] = stats.entropy;
+        } else {
+            FlatVector::SetNull(output.data[33], out_idx, true);
+        }
+
+        // expected_length, n_gaps, n_gap_runs - handle NULL if no date metrics
         if (stats.has_date_metrics) {
             FlatVector::GetData<uint64_t>(output.data[35])[out_idx] = stats.expected_length;
             FlatVector::GetData<uint64_t>(output.data[36])[out_idx] = stats.n_gaps;
+            FlatVector::GetData<uint64_t>(output.data[37])[out_idx] = stats.n_gap_runs;
         } else {
             FlatVector::SetNull(output.data[35], out_idx, true);
             FlatVector::SetNull(output.data[36], out_idx, true);
+            FlatVector::SetNull(output.data[37], out_idx, true);
         }
 
         output_count++;

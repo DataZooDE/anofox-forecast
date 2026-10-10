@@ -178,6 +178,25 @@ use the semver numbering this project started with.
   `NULL` for a given date aggregates to `NULL`; a partially-NULL group aggregates to the sum
   of only its present (non-`NULL`) values. Breaking change for any caller relying on the old
   `NULL -> 0` imputation.
+- **`ts_stats`/`ts_stats_by`/`ts_stats_agg` moments, entropy, and gap semantics are now
+  textbook-correct (STAT-01/STAT-03, Phase 13 plan 13-01).** `skewness`/`kurtosis` are now
+  scipy `bias=False` G1/excess-G2 (population 2nd/3rd/4th central moments with the proper
+  bias-correction factors, not a population-moment/sample-std-dev mix); `bimodality_coef`
+  uses the SAS small-sample formula on those G1/G2 values (audit vector bimodality 0.466,
+  previously 0.600). `entropy` is now Pincus (1991) approximate entropy (`m=2`, `r=0.2 *
+  sample std dev`, Chebyshev distance, self-match included) instead of a 10-bin Shannon
+  histogram entropy; it is `NULL` when fewer than 3 present values remain after trimming
+  leading/trailing missing values, or when an interior value is missing/NaN (previously a
+  non-`NULL` float in both cases). `n_gaps` is now the number of **missing periods**
+  (expected timestamps absent under the declared or detected frequency) instead of the
+  number of gap *occurrences* — a single 10-period gap now reports `n_gaps = 10`, not `1`.
+  The pre-v0.10.0 `n_gaps` meaning (gap occurrences) is preserved under a new `n_gap_runs`
+  column on all three surfaces. The `ts_stats` macro's monthly/quarterly/yearly gap
+  counting is now calendar-aware (matching `ts_stats_by`), where it previously used
+  approximate fixed-microsecond durations. `ts_stats_agg` now auto-detects the series'
+  frequency from its own timestamps (previously always reported `NULL` date metrics), and
+  keeps `NULL`-valued rows (counted in `n_nulls`, position preserved) instead of silently
+  dropping them (Phase 12 deferred item (a)) — only a `NULL` **timestamp** is skipped.
 
 ### Added
 

@@ -121,10 +121,7 @@ pub use seasonality::{
     ChangeDetectionResult, ChangePointType, InstantaneousPeriodResult, SeasonalType,
     SeasonalityAnalysis, SeasonalityChangePoint, SeasonalityClassification, StrengthMethod,
 };
-pub use stats::{
-    compute_ts_stats, compute_ts_stats_with_dates, compute_ts_stats_with_dates_and_type,
-    FrequencyType, TsStats,
-};
+pub use stats::{compute_ts_stats, compute_ts_stats_with_dates_and_type, FrequencyType, TsStats};
 
 // Statistical validation (Phase 1: STAT-01..03 stationarity, RESID-01..04 residual diagnostics)
 pub use validation::{

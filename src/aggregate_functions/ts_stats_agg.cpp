@@ -6,6 +6,8 @@
 #include "duckdb/common/types/timestamp.hpp"
 #include "duckdb/common/types/vector.hpp"
 #include "duckdb/parser/parsed_data/create_aggregate_function_info.hpp"
+#include <numeric>
+#include <algorithm>
 
 namespace duckdb {
 
@@ -13,6 +15,7 @@ namespace duckdb {
 struct TsStatsAggStateData {
     vector<int64_t> timestamps;
     vector<double> values;
+    vector<bool> validity;  // false = NULL-valued row (kept, placeholder value)
     bool initialized;
 
     TsStatsAggStateData() : initialized(false) {}
@@ -62,6 +65,7 @@ static LogicalType GetTsStatsAggResultType() {
     children.push_back(make_pair("stability", LogicalType(LogicalTypeId::DOUBLE)));
     children.push_back(make_pair("expected_length", LogicalType(LogicalTypeId::UBIGINT)));
     children.push_back(make_pair("n_gaps", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("n_gap_runs", LogicalType(LogicalTypeId::UBIGINT)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -88,6 +92,9 @@ struct TsStatsAggOperation {
             target.data->values.insert(target.data->values.end(),
                                        source.data->values.begin(),
                                        source.data->values.end());
+            target.data->validity.insert(target.data->validity.end(),
+                                         source.data->validity.begin(),
+                                         source.data->validity.end());
         }
     }
 
@@ -98,7 +105,9 @@ struct TsStatsAggOperation {
     }
 
     static bool IgnoreNull() {
-        return true;
+        // Must see NULL-valued rows too (kept, counted in n_nulls); only a NULL
+        // timestamp is skipped, and that is handled explicitly in TsStatsAggUpdate.
+        return false;
     }
 };
 
@@ -119,7 +128,11 @@ static void TsStatsAggUpdate(Vector inputs[], AggregateInputData &aggr_input, id
         auto ts_idx = ts_data.sel->get_index(i);
         auto val_idx = val_data.sel->get_index(i);
 
-        if (!ts_data.validity.RowIsValid(ts_idx) || !val_data.validity.RowIsValid(val_idx)) {
+        // A NULL timestamp cannot be placed in time, so that row is skipped entirely.
+        // A NULL value is KEPT (Phase 12 deferred item (a), fixed in Phase 13): it is
+        // counted in n_nulls and preserves its position in the date-ordered series,
+        // matching ts_stats_by's NULL-value policy.
+        if (!ts_data.validity.RowIsValid(ts_idx)) {
             continue;
         }
 
@@ -132,10 +145,12 @@ static void TsStatsAggUpdate(Vector inputs[], AggregateInputData &aggr_input, id
         }
 
         auto ts = UnifiedVectorFormat::GetData<timestamp_t>(ts_data)[ts_idx];
-        auto val = UnifiedVectorFormat::GetData<double>(val_data)[val_idx];
+        bool value_valid = val_data.validity.RowIsValid(val_idx);
+        double val = value_valid ? UnifiedVectorFormat::GetData<double>(val_data)[val_idx] : 0.0;
 
         state.data->timestamps.push_back(ts.value);
         state.data->values.push_back(val);
+        state.data->validity.push_back(value_valid);
     }
 }
 
@@ -162,31 +177,43 @@ static void TsStatsAggFinalize(Vector &state_vector, AggregateInputData &aggr_in
 
         auto &data = *state.data;
 
-        // Sort by timestamp
-        vector<pair<int64_t, double>> sorted_pairs;
-        for (size_t j = 0; j < data.timestamps.size(); j++) {
-            sorted_pairs.push_back({data.timestamps[j], data.values[j]});
+        // Sort by timestamp, keeping value+validity paired with it. Ties (duplicate
+        // timestamps) are stable-sorted by original arrival order, same as
+        // std::stable_sort leaves them (no further tie-break needed here: gap_counts
+        // de-duplicates exact-timestamp ties on the Rust side regardless of order).
+        size_t n = data.timestamps.size();
+        vector<size_t> order(n);
+        std::iota(order.begin(), order.end(), size_t(0));
+        std::stable_sort(order.begin(), order.end(), [&data](size_t a, size_t b) {
+            return data.timestamps[a] < data.timestamps[b];
+        });
+
+        vector<int64_t> sorted_timestamps(n);
+        vector<double> sorted_values(n);
+        size_t validity_words = (n + 63) / 64;
+        vector<uint64_t> validity(validity_words, 0);
+        for (size_t i = 0; i < n; i++) {
+            size_t src = order[i];
+            sorted_timestamps[i] = data.timestamps[src];
+            sorted_values[i] = data.values[src];
+            if (data.validity[src]) {
+                validity[i / 64] |= (1ULL << (i % 64));
+            }
         }
-        std::sort(sorted_pairs.begin(), sorted_pairs.end());
 
-        vector<double> sorted_values;
-        for (const auto &p : sorted_pairs) {
-            sorted_values.push_back(p.second);
-        }
-
-        // Create validity bitfield (all valid)
-        size_t validity_words = (sorted_values.size() + 63) / 64;
-        vector<uint64_t> validity(validity_words, ~0ULL);
-
-        // Call FFI function
+        // Call FFI function with dates, frequency_micros=0, FIXED so Rust
+        // auto-detects the step (D-04 "detected frequency", Phase 13 plan 13-01).
         TsStatsResult stats_result;
         memset(&stats_result, 0, sizeof(stats_result));
         AnofoxError error;
 
-        bool success = anofox_ts_stats(
+        bool success = anofox_ts_stats_with_dates_and_type(
             sorted_values.data(),
             validity.data(),
+            sorted_timestamps.data(),
             sorted_values.size(),
+            0,
+            FIXED,
             &stats_result,
             &error
         );
@@ -229,17 +256,27 @@ static void TsStatsAggFinalize(Vector &state_vector, AggregateInputData &aggr_in
         SetStructField<double>(result, 29, row, stats_result.autocorr_lag1);
         SetStructField<double>(result, 30, row, stats_result.trend_strength);
         SetStructField<double>(result, 31, row, stats_result.seasonality_strength);
-        SetStructField<double>(result, 32, row, stats_result.entropy);
+
+        auto &children = StructVector::GetEntries(result);
+
+        // entropy - NULL when the Rust side has no entropy value (D-03)
+        if (stats_result.has_entropy) {
+            SetStructField<double>(result, 32, row, stats_result.entropy);
+        } else {
+            FlatVector::SetNull(*children[32], row, true);
+        }
+
         SetStructField<double>(result, 33, row, stats_result.stability);
 
-        // Set date-based metrics (NULL when no frequency provided)
-        auto &children = StructVector::GetEntries(result);
+        // Set date-based metrics (NULL when no frequency could be detected)
         if (stats_result.has_date_metrics) {
             SetStructField<uint64_t>(result, 34, row, stats_result.expected_length);
             SetStructField<uint64_t>(result, 35, row, stats_result.n_gaps);
+            SetStructField<uint64_t>(result, 36, row, stats_result.n_gap_runs);
         } else {
             FlatVector::SetNull(*children[34], row, true);
             FlatVector::SetNull(*children[35], row, true);
+            FlatVector::SetNull(*children[36], row, true);
         }
     }
 }
@@ -269,6 +306,9 @@ static void TsStatsAggCombine(Vector &state_vector, Vector &combined, AggregateI
             tgt.data->values.insert(tgt.data->values.end(),
                                     src.data->values.begin(),
                                     src.data->values.end());
+            tgt.data->validity.insert(tgt.data->validity.end(),
+                                      src.data->validity.begin(),
+                                      src.data->validity.end());
         }
     }
 }
@@ -305,7 +345,7 @@ void RegisterTsStatsAggFunction(ExtensionLoader &loader) {
     {
         CreateAggregateFunctionInfo info(ts_stats_agg_set);
         FunctionDescription desc;
-        desc.description = "Aggregate function: computes 34 time series statistics for each group. Returns a STRUCT with mean, std, min, max, trend, seasonality, and many more.";
+        desc.description = "Aggregate function: computes 36 time series statistics for each group (including n_gap_runs). Returns a STRUCT with mean, std, min, max, trend, seasonality, and many more.";
         desc.examples = {"SELECT product_id, ts_stats_agg(date, value) FROM sales GROUP BY product_id"};
         desc.categories = {"time-series", "statistics"};
         desc.parameter_names = {"date", "value"};
@@ -321,7 +361,7 @@ void RegisterTsStatsAggFunction(ExtensionLoader &loader) {
         CreateAggregateFunctionInfo info(anofox_stats_agg_set);
         info.alias_of = "ts_stats_agg";
         FunctionDescription desc;
-        desc.description = "Aggregate function: computes 34 time series statistics for each group. Returns a STRUCT with mean, std, min, max, trend, seasonality, and many more.";
+        desc.description = "Aggregate function: computes 36 time series statistics for each group (including n_gap_runs). Returns a STRUCT with mean, std, min, max, trend, seasonality, and many more.";
         desc.examples = {"SELECT product_id, anofox_fcst_ts_stats_agg(date, value) FROM sales GROUP BY product_id"};
         desc.categories = {"time-series", "statistics"};
         desc.parameter_names = {"date", "value"};

@@ -2,7 +2,7 @@
 name: anofox-forecast-eda
 description: >
   Exploratory data analysis, data quality, and statistical diagnostics for
-  the anofox_forecast DuckDB extension — 34 per-series statistics,
+  the anofox_forecast DuckDB extension — 36 per-series statistics,
   data-quality scoring, quality-report summaries, 117 tsfresh-inspired
   feature extraction, and 7 diagnostic functions covering stationarity
   (ADF, KPSS, combined verdict) and residual adequacy (Ljung-Box,
@@ -21,28 +21,29 @@ Understand your data before modelling it: per-series statistics, data-quality sc
 
 ## Statistics
 
-### `ts_stats` (table function) — 34 metrics per series
+### `ts_stats` (table function) — 36 metrics per series
 
 ```sql
 ts_stats(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
          frequency VARCHAR) → TABLE
 ```
 
-Returns 34 columns: `length`, `n_nulls`, `n_nan`, `n_zeros`, `n_positive`, `n_negative`, `n_unique_values`, `is_constant`, `n_zeros_start`, `n_zeros_end`, `plateau_size`, `plateau_size_nonzero`, `mean`, `median`, `std_dev`, `variance`, `min`, `max`, `range`, `sum`, `skewness`, `kurtosis`, `tail_index`, `bimodality_coef`, `trimmed_mean`, `coef_variation`, `q1`, `q3`, `iqr`, `autocorr_lag1`, `trend_strength`, `seasonality_strength`, `entropy`, `stability`, plus date-derived `expected_length` and `n_gaps`.
+Returns 36 columns: `length`, `n_nulls`, `n_nan`, `n_zeros`, `n_positive`, `n_negative`, `n_unique_values`, `is_constant`, `n_zeros_start`, `n_zeros_end`, `plateau_size`, `plateau_size_nonzero`, `mean`, `median`, `std_dev`, `variance`, `min`, `max`, `range`, `sum`, `skewness`, `kurtosis`, `tail_index`, `bimodality_coef`, `trimmed_mean`, `coef_variation`, `q1`, `q3`, `iqr`, `autocorr_lag1`, `trend_strength`, `seasonality_strength`, `entropy`, `stability`, plus date-derived `expected_length`, `n_gaps`, and `n_gap_runs`.
 
-**Known formula deviations** (full detail in `docs/api/03-statistics.md`, being corrected in
-v0.10.0, Phase 13): `skewness`/`kurtosis` mix a population moment with a sample std-dev
-rather than computing textbook Fisher G1/G2; `entropy` is a 10-bin Shannon entropy, not
-approximate entropy; `trend_strength` is `|r|` of a linear fit against the index;
-`seasonality_strength` is `max(|ACF|)` over lags 2/4/7/12 only; `n_gaps` counts gap
-*occurrences*, not the number of missing periods within each gap.
+**v0.10.0 (Phase 13):** `skewness`/`kurtosis` are now textbook scipy `bias=False` G1/
+excess-G2 (previously mixed a population moment with a sample std-dev); `bimodality_coef`
+uses the SAS small-sample formula; `entropy` is now Pincus (1991) approximate entropy
+(`m=2`, `r=0.2*sample sd`; `NULL` for an interior-missing or fewer-than-3-present series) —
+previously a 10-bin Shannon entropy; `n_gaps` is now the number of **missing periods**
+(previously gap *occurrences*) — the old occurrence count is the new `n_gap_runs` column.
+`trend_strength`/`seasonality_strength` are unchanged in this plan (Phase 13 plan 13-02).
 
 ```sql
 -- Every stat for every series
 SELECT * FROM ts_stats('sales', product_id, ds, y, '1d');
 
--- Quick sanity check
-SELECT product_id, length, n_nulls, n_gaps, trend_strength, seasonality_strength
+-- Quick sanity check: n_gaps = missing periods, n_gap_runs = gap occurrences
+SELECT product_id, length, n_nulls, n_gaps, n_gap_runs, trend_strength, seasonality_strength
 FROM ts_stats('sales', product_id, ds, y, '1d')
 WHERE length < 30 OR n_gaps > 0
 ORDER BY n_gaps DESC;

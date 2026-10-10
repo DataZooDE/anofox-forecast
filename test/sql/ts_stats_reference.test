@@ -116,3 +116,224 @@ SELECT abs((s).skewness - 0.009664978939615671) < 1e-10 AND abs((s).kurtosis - (
 FROM (SELECT ts_stats_agg(ds, v) AS s FROM neg30_tbl);
 ----
 true
+
+# === Gap counting (D-04, STAT-03): n_gaps = missing periods, n_gap_runs = gap intervals ===
+# gap_daily: 60 days from 2024-01-01, days 20..39 missing (one 20-day run).
+statement ok
+CREATE TABLE gap_daily AS
+SELECT (DATE '2024-01-01' + CAST(i AS INTEGER))::TIMESTAMP AS ds, i::DOUBLE AS v
+FROM range(0, 60) t(i)
+WHERE i < 20 OR i >= 40;
+
+statement ok
+CREATE TABLE gap_daily_grp AS SELECT 'g' AS id, ds, v FROM gap_daily;
+
+query I
+SELECT n_gaps = 20 AND n_gap_runs = 1 AND expected_length = 60
+FROM ts_stats_by('gap_daily_grp', id, ds, v, '1d');
+----
+true
+
+query I
+SELECT n_gaps = 20 AND n_gap_runs = 1 AND expected_length = 60
+FROM ts_stats('gap_daily_grp', id, ds, v, '1d');
+----
+true
+
+# ts_stats_agg auto-detects the frequency (frequency_micros=0, FIXED) from the data itself.
+query I
+SELECT (s).n_gaps = 20 AND (s).n_gap_runs = 1 AND (s).expected_length = 60
+FROM (SELECT ts_stats_agg(ds, v) AS s FROM gap_daily);
+----
+true
+
+# gap_me: explicit month-end dates 2024-01-31, 2024-04-30, 2024-05-31 (Feb/Mar missing,
+# one run of 2 missing periods) under '1mo'.
+statement ok
+CREATE TABLE gap_me AS SELECT * FROM (VALUES
+    (DATE '2024-01-31', 1.0),
+    (DATE '2024-04-30', 2.0),
+    (DATE '2024-05-31', 3.0)
+) t(ds, v);
+
+statement ok
+CREATE TABLE gap_me_grp AS SELECT 'g' AS id, ds, v FROM gap_me;
+
+query I
+SELECT n_gaps = 2 AND n_gap_runs = 1 AND expected_length = 5
+FROM ts_stats_by('gap_me_grp', id, ds, v, '1mo');
+----
+true
+
+query I
+SELECT n_gaps = 2 AND n_gap_runs = 1 AND expected_length = 5
+FROM ts_stats('gap_me_grp', id, ds, v, '1mo');
+----
+true
+
+# === ts_stats_agg keeps NULL-valued rows (Phase 12 deferred item (a), fixed here) ===
+statement ok
+CREATE TABLE null_row AS SELECT * FROM (VALUES
+    (DATE '2024-01-01', 1.0),
+    (DATE '2024-01-02', NULL),
+    (DATE '2024-01-03', 3.0),
+    (DATE '2024-01-04', 4.0),
+    (DATE '2024-01-05', 5.0)
+) t(ds, v);
+
+statement ok
+CREATE TABLE null_row_grp AS SELECT 'g' AS id, ds, v FROM null_row;
+
+query I
+SELECT (SELECT (s).n_nulls FROM (SELECT ts_stats_agg(ds, v) AS s FROM null_row)) = (SELECT n_nulls FROM ts_stats_by('null_row_grp', id, ds, v, '1d'))
+   AND (SELECT (s).length FROM (SELECT ts_stats_agg(ds, v) AS s FROM null_row)) = (SELECT length FROM ts_stats_by('null_row_grp', id, ds, v, '1d'));
+----
+true
+
+# === Entropy (D-03): Pincus approximate entropy, m=2, r=0.2*sample sd ===
+# r_entropy/approx_entropy.json case ar1_100: apen = 0.622585685349877
+statement ok
+CREATE TABLE ar1_tbl AS SELECT * FROM (VALUES
+    (DATE '2024-01-01' + INTERVAL (0) DAY, 1.64822736959513),
+    (DATE '2024-01-01' + INTERVAL (1) DAY, 1.00167129073275),
+    (DATE '2024-01-01' + INTERVAL (2) DAY, 0.556141249648914),
+    (DATE '2024-01-01' + INTERVAL (3) DAY, 0.556578491564228),
+    (DATE '2024-01-01' + INTERVAL (4) DAY, 0.0708582682138433),
+    (DATE '2024-01-01' + INTERVAL (5) DAY, 0.445629124512097),
+    (DATE '2024-01-01' + INTERVAL (6) DAY, -1.27645768016855),
+    (DATE '2024-01-01' + INTERVAL (7) DAY, -0.174137774406155),
+    (DATE '2024-01-01' + INTERVAL (8) DAY, 1.95221003896684),
+    (DATE '2024-01-01' + INTERVAL (9) DAY, 0.497403238090164),
+    (DATE '2024-01-01' + INTERVAL (10) DAY, -0.443003396045896),
+    (DATE '2024-01-01' + INTERVAL (11) DAY, 0.828479108958883),
+    (DATE '2024-01-01' + INTERVAL (12) DAY, 0.64262779712222),
+    (DATE '2024-01-01' + INTERVAL (13) DAY, 1.21369097245444),
+    (DATE '2024-01-01' + INTERVAL (14) DAY, 0.334938801990886),
+    (DATE '2024-01-01' + INTERVAL (15) DAY, -1.09788373557318),
+    (DATE '2024-01-01' + INTERVAL (16) DAY, -1.14585728900292),
+    (DATE '2024-01-01' + INTERVAL (17) DAY, -0.46080045369288),
+    (DATE '2024-01-01' + INTERVAL (18) DAY, -0.289658862271088),
+    (DATE '2024-01-01' + INTERVAL (19) DAY, -0.258265327058516),
+    (DATE '2024-01-01' + INTERVAL (20) DAY, -0.401111264510107),
+    (DATE '2024-01-01' + INTERVAL (21) DAY, 0.898708647359595),
+    (DATE '2024-01-01' + INTERVAL (22) DAY, 0.165257594403561),
+    (DATE '2024-01-01' + INTERVAL (23) DAY, 1.25719910430602),
+    (DATE '2024-01-01' + INTERVAL (24) DAY, -0.200807497499747),
+    (DATE '2024-01-01' + INTERVAL (25) DAY, 0.35427930161872),
+    (DATE '2024-01-01' + INTERVAL (26) DAY, 1.02890531857185),
+    (DATE '2024-01-01' + INTERVAL (27) DAY, 0.669741908076764),
+    (DATE '2024-01-01' + INTERVAL (28) DAY, -0.602106161586049),
+    (DATE '2024-01-01' + INTERVAL (29) DAY, -0.224583514006705),
+    (DATE '2024-01-01' + INTERVAL (30) DAY, -1.69795136994131),
+    (DATE '2024-01-01' + INTERVAL (31) DAY, -1.39245174269178),
+    (DATE '2024-01-01' + INTERVAL (32) DAY, -1.47406341820141),
+    (DATE '2024-01-01' + INTERVAL (33) DAY, -2.89162437236603),
+    (DATE '2024-01-01' + INTERVAL (34) DAY, -0.850435657832997),
+    (DATE '2024-01-01' + INTERVAL (35) DAY, -1.6787927534765),
+    (DATE '2024-01-01' + INTERVAL (36) DAY, -0.659343096648954),
+    (DATE '2024-01-01' + INTERVAL (37) DAY, -0.180706196379095),
+    (DATE '2024-01-01' + INTERVAL (38) DAY, -0.551747410197716),
+    (DATE '2024-01-01' + INTERVAL (39) DAY, 0.0499685421518076),
+    (DATE '2024-01-01' + INTERVAL (40) DAY, -0.118746439185586),
+    (DATE '2024-01-01' + INTERVAL (41) DAY, -1.10321807036058),
+    (DATE '2024-01-01' + INTERVAL (42) DAY, -0.947106415869585),
+    (DATE '2024-01-01' + INTERVAL (43) DAY, 1.38571072559396),
+    (DATE '2024-01-01' + INTERVAL (44) DAY, 1.87033811853691),
+    (DATE '2024-01-01' + INTERVAL (45) DAY, 1.75466863828417),
+    (DATE '2024-01-01' + INTERVAL (46) DAY, 0.748486635443851),
+    (DATE '2024-01-01' + INTERVAL (47) DAY, -0.965763462786008),
+    (DATE '2024-01-01' + INTERVAL (48) DAY, -0.349703534085356),
+    (DATE '2024-01-01' + INTERVAL (49) DAY, -0.362687265543242),
+    (DATE '2024-01-01' + INTERVAL (50) DAY, -1.83293282631612),
+    (DATE '2024-01-01' + INTERVAL (51) DAY, 0.251608860542331),
+    (DATE '2024-01-01' + INTERVAL (52) DAY, 1.83084737358942),
+    (DATE '2024-01-01' + INTERVAL (53) DAY, 0.858488057324562),
+    (DATE '2024-01-01' + INTERVAL (54) DAY, -0.18466072710026),
+    (DATE '2024-01-01' + INTERVAL (55) DAY, 0.901108688212527),
+    (DATE '2024-01-01' + INTERVAL (56) DAY, -0.000860611279466683),
+    (DATE '2024-01-01' + INTERVAL (57) DAY, 0.882680052378669),
+    (DATE '2024-01-01' + INTERVAL (58) DAY, 0.811070135927831),
+    (DATE '2024-01-01' + INTERVAL (59) DAY, -0.389941580122491),
+    (DATE '2024-01-01' + INTERVAL (60) DAY, -1.77851256584642),
+    (DATE '2024-01-01' + INTERVAL (61) DAY, -2.0048627339188),
+    (DATE '2024-01-01' + INTERVAL (62) DAY, -1.33277940695807),
+    (DATE '2024-01-01' + INTERVAL (63) DAY, -0.565500870479993),
+    (DATE '2024-01-01' + INTERVAL (64) DAY, -0.67220221641797),
+    (DATE '2024-01-01' + INTERVAL (65) DAY, 0.11830499916269),
+    (DATE '2024-01-01' + INTERVAL (66) DAY, -1.2969147390824),
+    (DATE '2024-01-01' + INTERVAL (67) DAY, -2.09292668485536),
+    (DATE '2024-01-01' + INTERVAL (68) DAY, -0.528713274867872),
+    (DATE '2024-01-01' + INTERVAL (69) DAY, -1.50852584542554),
+    (DATE '2024-01-01' + INTERVAL (70) DAY, -1.40765731360685),
+    (DATE '2024-01-01' + INTERVAL (71) DAY, -1.01712587941958),
+    (DATE '2024-01-01' + INTERVAL (72) DAY, -1.75968247004244),
+    (DATE '2024-01-01' + INTERVAL (73) DAY, -2.19321199656953),
+    (DATE '2024-01-01' + INTERVAL (74) DAY, -3.20754244872526),
+    (DATE '2024-01-01' + INTERVAL (75) DAY, -0.625275373043682),
+    (DATE '2024-01-01' + INTERVAL (76) DAY, -2.47447754653152),
+    (DATE '2024-01-01' + INTERVAL (77) DAY, -0.0894983921027832),
+    (DATE '2024-01-01' + INTERVAL (78) DAY, 0.755551795447109),
+    (DATE '2024-01-01' + INTERVAL (79) DAY, 1.06347663878926),
+    (DATE '2024-01-01' + INTERVAL (80) DAY, -0.49345114617066),
+    (DATE '2024-01-01' + INTERVAL (81) DAY, -1.68586095711127),
+    (DATE '2024-01-01' + INTERVAL (82) DAY, -1.85515966079428),
+    (DATE '2024-01-01' + INTERVAL (83) DAY, -1.10074082873184),
+    (DATE '2024-01-01' + INTERVAL (84) DAY, 0.808146915843583),
+    (DATE '2024-01-01' + INTERVAL (85) DAY, -0.193913080876015),
+    (DATE '2024-01-01' + INTERVAL (86) DAY, 0.613297334100803),
+    (DATE '2024-01-01' + INTERVAL (87) DAY, -0.844086272675592),
+    (DATE '2024-01-01' + INTERVAL (88) DAY, -1.65661704970975),
+    (DATE '2024-01-01' + INTERVAL (89) DAY, -0.543811976726783),
+    (DATE '2024-01-01' + INTERVAL (90) DAY, 0.217522073546148),
+    (DATE '2024-01-01' + INTERVAL (91) DAY, 0.832916092481138),
+    (DATE '2024-01-01' + INTERVAL (92) DAY, 1.55452935914508),
+    (DATE '2024-01-01' + INTERVAL (93) DAY, 0.762798417281389),
+    (DATE '2024-01-01' + INTERVAL (94) DAY, -0.665090461381892),
+    (DATE '2024-01-01' + INTERVAL (95) DAY, 0.322901189210746),
+    (DATE '2024-01-01' + INTERVAL (96) DAY, -0.438122925666086),
+    (DATE '2024-01-01' + INTERVAL (97) DAY, 0.690727468883762),
+    (DATE '2024-01-01' + INTERVAL (98) DAY, 1.01315120180583),
+    (DATE '2024-01-01' + INTERVAL (99) DAY, 0.500319149038344)
+) t(ds, v);
+
+statement ok
+CREATE TABLE ar1_grp AS SELECT 'ar1' AS id, ds, v FROM ar1_tbl;
+
+query I
+SELECT abs(entropy - 0.622585685349877) < 1e-10
+FROM ts_stats_by('ar1_grp', id, ds, v, '1d');
+----
+true
+
+# Entropy is NULL for a series with an interior NULL ...
+statement ok
+CREATE TABLE entropy_interior_null AS SELECT * FROM (VALUES
+    (DATE '2024-01-01', 1.0),
+    (DATE '2024-01-02', 2.0),
+    (DATE '2024-01-03', NULL),
+    (DATE '2024-01-04', 4.0),
+    (DATE '2024-01-05', 5.0)
+) t(ds, v);
+
+statement ok
+CREATE TABLE entropy_interior_null_grp AS SELECT 'g' AS id, ds, v FROM entropy_interior_null;
+
+query I
+SELECT entropy IS NULL FROM ts_stats_by('entropy_interior_null_grp', id, ds, v, '1d');
+----
+true
+
+# ... and for a 2-value series.
+statement ok
+CREATE TABLE entropy_two_values AS SELECT * FROM (VALUES
+    (DATE '2024-01-01', 1.0),
+    (DATE '2024-01-02', 2.0)
+) t(ds, v);
+
+statement ok
+CREATE TABLE entropy_two_values_grp AS SELECT 'g' AS id, ds, v FROM entropy_two_values;
+
+query I
+SELECT entropy IS NULL FROM ts_stats_by('entropy_two_values_grp', id, ds, v, '1d');
+----
+true
