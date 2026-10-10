@@ -326,7 +326,12 @@ impl From<anofox_fcst_core::TsStats> for TsStatsResult {
             autocorr_lag1: stats.autocorr_lag1,
             trend_strength: stats.trend_strength.unwrap_or(f64::NAN),
             seasonality_strength: stats.seasonality_strength.unwrap_or(f64::NAN),
-            entropy: stats.entropy.unwrap_or(0.0),
+            // WR-03 fix: NaN (not 0.0) for "no value", consistent with
+            // trend_strength/seasonality_strength above -- 0.0 is a legitimate
+            // entropy value (a genuinely constant series reports Some(0.0)), so it
+            // must not double as the "entropy not computed" sentinel. Callers must
+            // still check `has_entropy` before reading this field either way.
+            entropy: stats.entropy.unwrap_or(f64::NAN),
             stability: stats.stability,
             expected_length: stats.expected_length.unwrap_or(0),
             n_gaps: stats.n_gaps.unwrap_or(0),
@@ -2053,5 +2058,52 @@ impl Default for AnofoxResidualDiagnosticsResult {
             jb_excess_kurtosis: f64::NAN,
             adequate: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod ts_stats_result_sentinel_tests {
+    use super::*;
+
+    /// WR-03 fix: when `trend_strength`/`seasonality_strength`/`entropy` are all
+    /// `None` on the core `TsStats`, the corresponding `TsStatsResult` fields must
+    /// all be `NaN` (not `0.0`) -- `has_*` is the only reliable "was this computed"
+    /// signal, but a defense-in-depth NaN sentinel means a caller that forgets to
+    /// check `has_entropy` gets an obviously-wrong NaN rather than a
+    /// indistinguishable-from-real-zero value.
+    #[test]
+    fn none_optional_fields_convert_to_nan_not_zero() {
+        let stats = anofox_fcst_core::TsStats::default();
+        assert!(stats.trend_strength.is_none());
+        assert!(stats.seasonality_strength.is_none());
+        assert!(stats.entropy.is_none());
+
+        let result: TsStatsResult = stats.into();
+
+        assert!(!result.has_trend_strength);
+        assert!(result.trend_strength.is_nan(), "trend_strength sentinel");
+
+        assert!(!result.has_seasonality_strength);
+        assert!(
+            result.seasonality_strength.is_nan(),
+            "seasonality_strength sentinel"
+        );
+
+        assert!(!result.has_entropy);
+        assert!(result.entropy.is_nan(), "entropy sentinel");
+    }
+
+    /// A genuinely constant series' entropy is `Some(0.0)` (per
+    /// `anofox_fcst_core`'s own doc comment) -- the real-zero case must still
+    /// round-trip as `0.0`, not get confused with the `None` sentinel.
+    #[test]
+    fn some_zero_entropy_round_trips_as_zero_not_sentinel() {
+        let mut stats = anofox_fcst_core::TsStats::default();
+        stats.entropy = Some(0.0);
+
+        let result: TsStatsResult = stats.into();
+
+        assert!(result.has_entropy);
+        assert_eq!(result.entropy, 0.0);
     }
 }
