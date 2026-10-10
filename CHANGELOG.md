@@ -64,14 +64,16 @@ use the semver numbering this project started with.
   interior `NULL`s are interpolated and trailing `NULL` rows keep the forecast origin
   anchored to the series' ORIGINAL last row, exactly like `ts_forecast_by` — only a `NULL`
   **timestamp** drops a row now.
-- **Monthly/quarterly/yearly forecast dates follow the month-end rule (`ts_forecast_by`,
-  `ts_forecast_agg`).** Forecast dates for `'1mo'`/`'3mo'`/`'1q'`/`'1y'` frequencies are
-  computed in Rust via a calendar-aware rule instead of fixed-microsecond arithmetic: a
+- **Monthly/quarterly/yearly forecast dates follow the month-end rule on every forecast
+  surface (`ts_forecast_by`, `ts_forecast_agg`, `ts_forecast_exog_by`,
+  `ts_forecast_ensemble_by`, `ts_forecast_panel_by`, `ts_forecast_var_by`).** Forecast dates
+  for `'1mo'`/`'3mo'`/`'1q'`/`'1y'` frequencies are computed in Rust via a calendar-aware
+  rule instead of fixed-microsecond (or, on the exog surface, epoch-second) arithmetic: a
   series whose every observed date is a month-end forecasts month-ends (no drift into a
   short month, e.g. a series ending `2023-11-30` now forecasts `2023-12-31` /
   `2024-01-31` / `2024-02-29`, not `2023-12-30` / ...); otherwise the day-of-month is kept
-  and clamped to each target month's length. `ts_forecast_agg` and `ts_forecast_by` now
-  agree on forecast dates, not just values, for the same series.
+  and clamped to each target month's length. All six surfaces now agree on forecast dates,
+  not just values, for the same series.
 - **`ts_forecast_ensemble_by`'s `seasonal_period := 0` now auto-detects** the same way
   `ts_forecast_by` does, instead of requiring every member's period to be given explicitly.
 - **`ts_forecast_agg` now validates params with the same closed key set as `ts_forecast_by`**
@@ -215,6 +217,21 @@ use the semver numbering this project started with.
   iteration order (previously `HashMap::into_iter().max_by_key(count)` could return either
   tied value depending on iteration order — rare but nondeterministic input-dependent
   behavior for the frequency-detection paths that rely on this mode).
+- **`ts_forecast_exog_by` future dates no longer drift (30-day-month epoch bound replaced
+  by calendar stepping), RUST-09/D-12, plan 12-06.** The macro previously built future dates
+  with `generate_series(last_date + interval, last_date + (horizon * EXTRACT(EPOCH FROM
+  interval) || ' seconds')::INTERVAL, interval)` — a fixed 30-day-month / 365.25-day-year
+  epoch upper bound checked against a calendar step, which could return a different number
+  of rows than `len(point)` and misalign the zipped `UNNEST`s. It now computes future dates
+  through the same Rust `_ts_future_dates` calendar rule every other forecast surface uses,
+  guaranteeing exactly `horizon` dates aligned 1:1 with `forecast_step`.
+- **Zero C++ month/quarter/year arithmetic remains in the forecast date path**, plan 12-06.
+  `ts_forecast_ensemble_native.cpp`, `ts_forecast_panel_native.cpp`,
+  `ts_forecast_var_native.cpp`, and `ts_forecast_native.cpp` previously each reimplemented
+  the month-end-preserving / day-of-month-clamp stepping rule with their own
+  `Date::MonthDays` arithmetic; all four now call the same Rust `ComputeFutureDates` helper
+  `ts_forecast_by`/`ts_forecast_agg` use (plan 12-05), so every public forecast surface
+  shares one calendar implementation.
 
 ## [2026.09.26] - 2026-09-26
 

@@ -479,8 +479,10 @@ last observed day-of-month is kept, clamped to the target month's length (e.g. a
 ending `2023-04-30` forecasts `2023-05-30`, `2023-06-30`, `2023-07-30`). Quarterly and
 yearly frequencies apply the same rule with 3- and 12-month steps. Each step is computed
 fresh from the last observation, never cumulatively. `ts_forecast_agg` uses the identical
-rule (with frequency auto-detected from the data), so both surfaces agree on forecast
-dates as well as values.
+rule (with frequency auto-detected from the data), and so do every other forecast
+surface — `ts_forecast_exog_by`, `ts_forecast_ensemble_by`, `ts_forecast_panel_by`, and
+`ts_forecast_var_by` all compute future dates through the same Rust calendar rule (RUST-09),
+so every public forecast surface agrees on dates (not just values) for the same input.
 
 **Selected `params` keys** (full per-model list in the ["Supported Models"](#supported-models-36-models) tables above):
 
@@ -552,6 +554,13 @@ once — e.g. `AutoARIMA(3,0,1)(0,1,0)[9] with regressors`, `ETS(A,A,N) with reg
 A model NOT in this list (e.g. `GARCH`, `Kalman`, `SES`, `HoltWinters`, any Croston variant)
 given a regressor is a hard SQL error naming the model and listing the exog-capable set.
 `ARIMA` in this list still requires `arima_order` (same rule as the non-exog surface).
+
+**Calendar-correct future dates (RUST-09, D-12).** Future forecast dates are computed
+through the same Rust calendar rule as `ts_forecast_by` (see "Calendar stepping" above) —
+a `'1mo'`/`'3mo'`/`'1q'`/`'1y'` series that ends on a month-end forecasts month-ends with no
+drift into a 30-day month. `ts_forecast_ensemble_by`, `ts_forecast_panel_by`, and
+`ts_forecast_var_by` share the identical rule, so every forecast surface agrees on dates
+for the same input.
 
 **Regressor semantics:**
 - A regressor that is **constant throughout history** (e.g. a holiday flag never observed as

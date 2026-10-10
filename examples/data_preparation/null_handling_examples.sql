@@ -238,6 +238,49 @@ SELECT CASE WHEN (
     'FAIL calendar_agg_trailing_null_matches_by_forecast_origin_and_value'
 ) END AS result;
 
+-- ============================================================================
+-- SECTION 6 — Calendar-correct exogenous future dates (RUST-09)
+-- ============================================================================
+
+.print ''
+.print 'SECTION 6: ts_forecast_exog_by future dates share the Rust calendar rule (RUST-09, D-12)'
+.print ''
+
+CREATE OR REPLACE TABLE exog_calendar_hist AS
+SELECT 'A' AS id, last_day(DATE '2022-01-01' + INTERVAL (i) MONTH) AS ds,
+       (100 + i)::DOUBLE AS target, (i % 5)::DOUBLE AS xreg1
+FROM range(24) t(i);
+
+CREATE OR REPLACE TABLE exog_calendar_future AS
+SELECT 'A' AS id, last_day(DATE '2024-01-01' + INTERVAL (i) MONTH) AS ds,
+       (i % 5)::DOUBLE AS xreg1
+FROM range(12) t(i);
+
+-- History ends 2023-12-31 (month-end); the old generate_series(...,
+-- EXTRACT(EPOCH FROM interval) || ' seconds' ...) 30-day-month epoch bound
+-- would drift this 12-step '1mo' forecast off the true month-ends. The
+-- Rust-backed _ts_future_dates must return exactly 12 rows, forecast_step
+-- 1..12, with date = the k-th month-end after 2023-12-31 for every row, and
+-- no NULL yhat (RUST-09).
+SELECT CASE WHEN (
+    SELECT count(*) = 12
+       AND count(*) FILTER (WHERE yhat IS NULL) = 0
+       AND list(forecast_step ORDER BY forecast_step) = [1,2,3,4,5,6,7,8,9,10,11,12]
+       AND list(date ORDER BY forecast_step) = [
+            TIMESTAMP '2024-01-31 00:00:00', TIMESTAMP '2024-02-29 00:00:00', TIMESTAMP '2024-03-31 00:00:00',
+            TIMESTAMP '2024-04-30 00:00:00', TIMESTAMP '2024-05-31 00:00:00', TIMESTAMP '2024-06-30 00:00:00',
+            TIMESTAMP '2024-07-31 00:00:00', TIMESTAMP '2024-08-31 00:00:00', TIMESTAMP '2024-09-30 00:00:00',
+            TIMESTAMP '2024-10-31 00:00:00', TIMESTAMP '2024-11-30 00:00:00', TIMESTAMP '2024-12-31 00:00:00'
+       ]
+    FROM ts_forecast_exog_by(
+        'exog_calendar_hist', id, ds, target, ['xreg1'],
+        'exog_calendar_future', ds, ['xreg1'],
+        '1mo', 'AutoARIMA', 12
+    )
+) THEN 'PASS exog_by_future_dates_are_calendar_correct_month_ends' ELSE error(
+    'FAIL exog_by_future_dates_are_calendar_correct_month_ends'
+) END AS result;
+
 .print ''
 .print '============================================================================='
 .print 'ALL SECTIONS PASSED'
