@@ -93,6 +93,8 @@ test without a separate Rust edit.
 | `multiscale_ols` | `cases.json`, `exog_typical.csv` | `python/gen_multiscale_ols.py` | `coef_rel` (1e-8), `coef_abs` (1e-9), `fitted_abs_per_sd` (1e-8), `sql_point_abs` (1.0) | Phase 9: `forecast.rs::tests::fit_ols_regression_matches_numpy_lstsq_fixture` (DEP-01, inline), `tests/exog_ols_memory.rs` (15k-row peak-heap guard), `validation/reference/sql/check_dep01_exog.sql` (SQL-level, DEP-01) |
 | `panel_nan_guard` | `cases.json` | `python/gen_panel_nan_guard.py` | outcome-class only (`abs: 0.0`, see fixture `tolerance.notes`) | Phase 9: `anofox-fcst-ffi::panel_ffi_tests::panel_nan_guard_fixture_outcomes` (DEP-02) |
 | `forecast_snapshot` | `point_forecasts.json` | `crates/anofox-fcst-core/tests/forecast_snapshot.rs` (bless mode: `ANOFOX_BLESS_FORECAST_SNAPSHOT=1 cargo test -p anofox-fcst-core --test forecast_snapshot`) | `point_abs` (1e-6), `point_rel` (1e-6) | Phase 9 (DEP-02 pre/post-bump point-forecast parity for every `ts_forecast_by` model), and any later phase that deliberately changes point forecasts — re-blessing replaces the anofox-forecast 0.15.3 baseline, so record the reason in that phase's SUMMARY. `allowed_to_change`: MFLES, AutoMFLES, Laplace. |
+| `r_entropy` | `approx_entropy.json` | `r/gen_entropy_reference.R` | `abs` (1e-12) | Phase 13 (STAT-03, D-03): `ts_stats` `entropy` column (Pincus approximate entropy, m=2, r=0.2*sd) |
+| `gap_counts` | `cases.json` | `python/gen_gap_counts.py` | `count_abs` (0, exact integer counts) | Phase 13 (STAT-03, D-04): `ts_stats` `n_gaps`/`n_gap_runs`/`expected_length` (13-01); Phase 13 data quality gap/temporal scoring and month-end-aware gap fill (`fill_cases`, 13-03) |
 
 ## 5. Tool versions
 
@@ -121,6 +123,10 @@ Rscript validation/reference/r/gen_diagnostics_reference.R
 uv run --locked --project validation/reference/python python validation/reference/python/gen_moments.py
 uv run --locked --project validation/reference/python python validation/reference/python/gen_multiscale_ols.py
 uv run --locked --project validation/reference/python python validation/reference/python/gen_panel_nan_guard.py
+uv run --locked --project validation/reference/python python validation/reference/python/gen_gap_counts.py
+
+# R families added in Phase 13:
+Rscript validation/reference/r/gen_entropy_reference.R
 
 # Determinism check — every generator is seeded and writes no timestamps/hostnames,
 # so regenerating with the same toolchain versions must produce an empty diff:

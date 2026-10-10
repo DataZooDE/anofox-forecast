@@ -1,5 +1,6 @@
 //! Gap filling and series extension functions.
 
+use crate::calendar::{detect_step, CalendarStep};
 use crate::error::{ForecastError, Result};
 use crate::FrequencyType;
 use chrono::{Datelike, Months, NaiveDateTime, Timelike};
@@ -432,6 +433,135 @@ pub fn detect_frequency(dates: &[i64]) -> Result<i64> {
         .unwrap();
 
     Ok(mode)
+}
+
+/// Missing-period gap-count result (D-04, STAT-03).
+///
+/// `expected_length` = `n_distinct + n_missing_periods`: the number of periods that
+/// should exist at the resolved step between the first and last observed date,
+/// inclusive. `n_missing_periods` is the sum, over every consecutive pair of distinct
+/// sorted dates, of `(step_count - 1)` — i.e. the count of missing periods ("n_gaps" as
+/// of D-04, replacing the pre-v0.10.0 meaning). `n_gap_runs` counts the number of
+/// consecutive-pair transitions whose step count is `>= 2` — the pre-v0.10.0 `n_gaps`
+/// meaning (number of gap intervals/occurrences, not missing periods).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GapCounts {
+    pub expected_length: usize,
+    pub n_missing_periods: usize,
+    pub n_gap_runs: usize,
+}
+
+/// Month-granularity index: `year*12 + (month - 1)`, zero-based within the year.
+fn month_index(dt: NaiveDateTime) -> i64 {
+    dt.year() as i64 * 12 + (dt.month() as i64 - 1)
+}
+
+/// Quarter-granularity index: `year*4 + quarter`, zero-based within the year.
+fn quarter_index(dt: NaiveDateTime) -> i64 {
+    dt.year() as i64 * 4 + (dt.month() as i64 - 1) / 3
+}
+
+/// Number of calendar steps between two consecutive sorted, distinct dates, for a
+/// given [`CalendarStep`]. Always `>= 1` (checked integer division; a zero or negative
+/// raw difference — e.g. two distinct timestamps within the same calendar bucket for a
+/// `Months` step — is clamped to the minimum of 1, per T-13-03).
+fn step_count(prev: i64, curr: i64, step: CalendarStep) -> usize {
+    match step {
+        CalendarStep::Fixed(s) => {
+            if s <= 0 {
+                return 1;
+            }
+            let diff = (curr - prev) as i128;
+            let s128 = s as i128;
+            // Round half away from zero: k = floor((2*diff + s) / (2*s)) for diff, s > 0.
+            let k = (2 * diff + s128) / (2 * s128);
+            k.max(1) as usize
+        }
+        CalendarStep::Months(m) => {
+            if m == 0 {
+                return 1;
+            }
+            let prev_dt = micros_to_datetime(prev);
+            let curr_dt = micros_to_datetime(curr);
+            let idx_diff = match m {
+                1 => month_index(curr_dt) - month_index(prev_dt),
+                3 => quarter_index(curr_dt) - quarter_index(prev_dt),
+                _ => curr_dt.year() as i64 - prev_dt.year() as i64,
+            };
+            idx_diff.max(1) as usize
+        }
+    }
+}
+
+/// Resolve the [`CalendarStep`] used for gap counting from a frequency spec (D-04):
+///
+/// - `Monthly` -> `Months(1)`, `Quarterly` -> `Months(3)`, `Yearly` -> `Months(12)`.
+/// - `Fixed` with `frequency_micros > 0` -> `Fixed(frequency_micros)` (declared frequency).
+/// - `Fixed` with `frequency_micros <= 0` -> auto-detected via [`detect_step`] when at
+///   least 2 distinct dates are present, else `None` (not enough information).
+pub fn resolve_gap_step(
+    dates: &[i64],
+    frequency_micros: i64,
+    frequency_type: FrequencyType,
+) -> Result<Option<CalendarStep>> {
+    match frequency_type {
+        FrequencyType::Monthly => Ok(Some(CalendarStep::Months(1))),
+        FrequencyType::Quarterly => Ok(Some(CalendarStep::Months(3))),
+        FrequencyType::Yearly => Ok(Some(CalendarStep::Months(12))),
+        FrequencyType::Fixed => {
+            if frequency_micros > 0 {
+                Ok(Some(CalendarStep::Fixed(frequency_micros)))
+            } else {
+                let mut distinct = dates.to_vec();
+                distinct.sort_unstable();
+                distinct.dedup();
+                if distinct.len() < 2 {
+                    Ok(None)
+                } else {
+                    Ok(Some(detect_step(dates)?))
+                }
+            }
+        }
+    }
+}
+
+/// Count missing periods and gap runs in a date series at a given [`CalendarStep`]
+/// (D-04, STAT-03). Sorts and de-duplicates `dates` first (duplicate timestamps do not
+/// count as gaps or inflate `expected_length`).
+///
+/// A single distinct date gives `GapCounts { expected_length: 1, n_missing_periods: 0,
+/// n_gap_runs: 0 }`; an empty slice gives all-zero.
+pub fn gap_counts(dates: &[i64], step: CalendarStep) -> GapCounts {
+    let mut distinct = dates.to_vec();
+    distinct.sort_unstable();
+    distinct.dedup();
+
+    if distinct.is_empty() {
+        return GapCounts::default();
+    }
+    if distinct.len() == 1 {
+        return GapCounts {
+            expected_length: 1,
+            n_missing_periods: 0,
+            n_gap_runs: 0,
+        };
+    }
+
+    let mut n_missing_periods = 0usize;
+    let mut n_gap_runs = 0usize;
+    for w in distinct.windows(2) {
+        let k = step_count(w[0], w[1], step);
+        n_missing_periods += k - 1;
+        if k >= 2 {
+            n_gap_runs += 1;
+        }
+    }
+
+    GapCounts {
+        expected_length: distinct.len() + n_missing_periods,
+        n_missing_periods,
+        n_gap_runs,
+    }
 }
 
 #[cfg(test)]

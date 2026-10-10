@@ -87,7 +87,9 @@ pub use forecast::{
     parse_seasonal_periods, ExogenousData, ForecastOptions, ForecastOptionsExog, ForecastOutput,
     LaplaceVariant, ModelType,
 };
-pub use gaps::{detect_frequency, fill_forward, fill_gaps};
+pub use gaps::{
+    detect_frequency, fill_forward, fill_gaps, gap_counts, resolve_gap_step, GapCounts,
+};
 pub use imputation::{
     fill_nulls_backward, fill_nulls_const, fill_nulls_forward, fill_nulls_interpolate,
     fill_nulls_mean,

@@ -2,8 +2,10 @@
 //!
 //! Provides ts_stats functionality that computes 24 metrics per series.
 
+use crate::calendar::CalendarStep;
 use crate::error::Result;
-use chrono::{Datelike, NaiveDateTime};
+use crate::gaps::{gap_counts, resolve_gap_step};
+use crate::missing::trim_edges_reject_interior;
 
 /// Frequency type for calendar vs fixed frequencies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -93,14 +95,23 @@ pub struct TsStats {
     pub trend_strength: f64,
     /// Seasonality strength (0-1)
     pub seasonality_strength: f64,
-    /// Approximate entropy
-    pub entropy: f64,
+    /// Pincus (1991) approximate entropy, m=2, r=0.2*sample std dev, Chebyshev distance,
+    /// self-match included (D-03). `None` when fewer than 3 present values remain after
+    /// trimming leading/trailing missing values, or when an interior value is missing
+    /// (NaN counts as missing). A constant series gives `Some(0.0)`.
+    pub entropy: Option<f64>,
     /// Stability measure
     pub stability: f64,
     /// Expected number of observations based on date range and frequency (None if no dates provided)
     pub expected_length: Option<usize>,
-    /// Number of gaps (missing time periods) in the series (None if no dates provided)
+    /// Number of missing periods (expected timestamps absent under the declared or
+    /// detected frequency) (D-04). `None` if no dates provided. See also
+    /// [`TsStats::n_gap_runs`] for the count of gap intervals (the pre-v0.10.0 meaning).
     pub n_gaps: Option<usize>,
+    /// Number of gap runs/intervals (consecutive-timestamp transitions whose step count
+    /// is `>= 2`) — the pre-v0.10.0 meaning of `n_gaps` (D-04). `None` if no dates
+    /// provided.
+    pub n_gap_runs: Option<usize>,
 }
 
 /// Compute time series statistics for a series with potential NULL values.
@@ -241,8 +252,9 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
     // Trend and seasonality strength (simplified)
     let (trend_strength, seasonality_strength) = compute_strength_metrics(&values);
 
-    // Entropy (approximate)
-    let entropy = compute_approximate_entropy(&values);
+    // Entropy (Pincus approximate entropy, D-03) — computed on the original Option
+    // series (NaN counts as missing), trimming leading/trailing missing first.
+    let entropy = compute_entropy_pincus(series);
 
     // Stability (inverse of coefficient of variation of rolling means)
     let stability = compute_stability(&values);
@@ -284,6 +296,7 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
         stability,
         expected_length: None,
         n_gaps: None,
+        n_gap_runs: None,
     })
 }
 
@@ -327,161 +340,30 @@ pub fn compute_ts_stats_with_dates_and_type(
     // First compute base stats
     let mut stats = compute_ts_stats(series)?;
 
-    // Then compute date-based metrics if we have valid dates
+    // Then compute date-based metrics if we have valid dates (D-04, STAT-03): n_gaps
+    // becomes the number of missing periods, n_gap_runs keeps the pre-v0.10.0 meaning
+    // (number of gap intervals), via the shared gaps::gap_counts helper.
     if !dates.is_empty() {
-        // Sort dates to handle potential out-of-order data
-        let mut sorted_dates = dates.to_vec();
-        sorted_dates.sort();
+        let mut distinct_dates = dates.to_vec();
+        distinct_dates.sort_unstable();
+        distinct_dates.dedup();
 
-        // Compute expected length and gaps based on frequency type
-        if sorted_dates.len() >= 2 {
-            let first = sorted_dates[0];
-            let last = sorted_dates[sorted_dates.len() - 1];
-
-            match frequency_type {
-                FrequencyType::Monthly => {
-                    stats.expected_length = Some(compute_expected_months(first, last));
-                    stats.n_gaps = Some(count_monthly_gaps(&sorted_dates));
-                }
-                FrequencyType::Quarterly => {
-                    stats.expected_length = Some(compute_expected_quarters(first, last));
-                    stats.n_gaps = Some(count_quarterly_gaps(&sorted_dates));
-                }
-                FrequencyType::Yearly => {
-                    stats.expected_length = Some(compute_expected_years(first, last));
-                    stats.n_gaps = Some(count_yearly_gaps(&sorted_dates));
-                }
-                FrequencyType::Fixed => {
-                    if frequency_micros > 0 {
-                        let duration = last - first;
-                        let expected = ((duration / frequency_micros) + 1) as usize;
-                        stats.expected_length = Some(expected);
-                        stats.n_gaps =
-                            Some(count_gaps_with_frequency(&sorted_dates, frequency_micros));
-                    }
-                }
-            }
-        } else {
-            stats.expected_length = Some(sorted_dates.len());
-            stats.n_gaps = Some(0);
+        if distinct_dates.len() < 2 {
+            // A single distinct date (or none) needs no step: gap_counts short-circuits
+            // before the step is ever consulted. The placeholder step is unused.
+            let counts = gap_counts(dates, CalendarStep::Fixed(1));
+            stats.expected_length = Some(counts.expected_length);
+            stats.n_gaps = Some(counts.n_missing_periods);
+            stats.n_gap_runs = Some(counts.n_gap_runs);
+        } else if let Some(step) = resolve_gap_step(dates, frequency_micros, frequency_type)? {
+            let counts = gap_counts(dates, step);
+            stats.expected_length = Some(counts.expected_length);
+            stats.n_gaps = Some(counts.n_missing_periods);
+            stats.n_gap_runs = Some(counts.n_gap_runs);
         }
     }
 
     Ok(stats)
-}
-
-/// Convert microseconds since epoch to NaiveDateTime.
-fn micros_to_datetime(micros: i64) -> NaiveDateTime {
-    let secs = micros / 1_000_000;
-    let nsecs = ((micros % 1_000_000) * 1000) as u32;
-    chrono::DateTime::from_timestamp(secs, nsecs)
-        .map(|dt| dt.naive_utc())
-        .unwrap_or_default()
-}
-
-/// Compute expected number of monthly observations between two timestamps.
-fn compute_expected_months(first_micros: i64, last_micros: i64) -> usize {
-    let first = micros_to_datetime(first_micros);
-    let last = micros_to_datetime(last_micros);
-
-    let first_months = first.year() * 12 + first.month() as i32;
-    let last_months = last.year() * 12 + last.month() as i32;
-
-    ((last_months - first_months) + 1) as usize
-}
-
-/// Compute expected number of quarterly observations between two timestamps.
-fn compute_expected_quarters(first_micros: i64, last_micros: i64) -> usize {
-    let first = micros_to_datetime(first_micros);
-    let last = micros_to_datetime(last_micros);
-
-    let first_quarters = first.year() * 4 + ((first.month() - 1) / 3) as i32;
-    let last_quarters = last.year() * 4 + ((last.month() - 1) / 3) as i32;
-
-    ((last_quarters - first_quarters) + 1) as usize
-}
-
-/// Compute expected number of yearly observations between two timestamps.
-fn compute_expected_years(first_micros: i64, last_micros: i64) -> usize {
-    let first = micros_to_datetime(first_micros);
-    let last = micros_to_datetime(last_micros);
-
-    ((last.year() - first.year()) + 1) as usize
-}
-
-/// Count gaps in monthly data.
-/// A gap is when consecutive observations span more than 1 month.
-fn count_monthly_gaps(sorted_dates: &[i64]) -> usize {
-    if sorted_dates.len() < 2 {
-        return 0;
-    }
-
-    sorted_dates
-        .windows(2)
-        .filter(|w| {
-            let d1 = micros_to_datetime(w[0]);
-            let d2 = micros_to_datetime(w[1]);
-            let months1 = d1.year() * 12 + d1.month() as i32;
-            let months2 = d2.year() * 12 + d2.month() as i32;
-            // Gap if more than 1 month difference
-            (months2 - months1) > 1
-        })
-        .count()
-}
-
-/// Count gaps in quarterly data.
-/// A gap is when consecutive observations span more than 1 quarter.
-fn count_quarterly_gaps(sorted_dates: &[i64]) -> usize {
-    if sorted_dates.len() < 2 {
-        return 0;
-    }
-
-    sorted_dates
-        .windows(2)
-        .filter(|w| {
-            let d1 = micros_to_datetime(w[0]);
-            let d2 = micros_to_datetime(w[1]);
-            let q1 = d1.year() * 4 + ((d1.month() - 1) / 3) as i32;
-            let q2 = d2.year() * 4 + ((d2.month() - 1) / 3) as i32;
-            // Gap if more than 1 quarter difference
-            (q2 - q1) > 1
-        })
-        .count()
-}
-
-/// Count gaps in yearly data.
-/// A gap is when consecutive observations span more than 1 year.
-fn count_yearly_gaps(sorted_dates: &[i64]) -> usize {
-    if sorted_dates.len() < 2 {
-        return 0;
-    }
-
-    sorted_dates
-        .windows(2)
-        .filter(|w| {
-            let d1 = micros_to_datetime(w[0]);
-            let d2 = micros_to_datetime(w[1]);
-            // Gap if more than 1 year difference
-            (d2.year() - d1.year()) > 1
-        })
-        .count()
-}
-
-/// Count gaps in a date series given an explicit frequency.
-///
-/// A gap is detected when the difference between consecutive dates
-/// is significantly larger than the expected frequency (1.5x tolerance).
-fn count_gaps_with_frequency(sorted_dates: &[i64], frequency_micros: i64) -> usize {
-    if sorted_dates.len() < 2 || frequency_micros <= 0 {
-        return 0;
-    }
-
-    let threshold = (frequency_micros as f64 * 1.5) as i64;
-
-    sorted_dates
-        .windows(2)
-        .filter(|w| (w[1] - w[0]) > threshold)
-        .count()
 }
 
 /// Compute percentile using linear interpolation.
@@ -576,40 +458,85 @@ fn compute_strength_metrics(values: &[f64]) -> (f64, f64) {
     (trend_strength, seasonality_strength)
 }
 
-/// Compute approximate entropy (simplified version).
-fn compute_approximate_entropy(values: &[f64]) -> f64 {
-    if values.len() < 10 {
-        return f64::NAN;
+/// Compute Pincus (1991) approximate entropy for the original (possibly-missing)
+/// series (D-03): m=2, r=0.2*sample std dev of the trimmed values, Chebyshev
+/// distance, self-match included (matching R `pracma::approx_entropy(x, edim = 2, r =
+/// 0.2*sd(x), elag = 1)`).
+///
+/// Leading/trailing missing values (`None` or `Some(NaN)`) are trimmed first; an
+/// interior missing value, or fewer than 3 present values after trimming, gives
+/// `None`. A constant series gives `Some(0.0)`.
+fn compute_entropy_pincus(series: &[Option<f64>]) -> Option<f64> {
+    let range = match trim_edges_reject_interior(series) {
+        Ok(Some(r)) => r,
+        Ok(None) => return None,
+        Err(_) => return None, // interior missing value
+    };
+
+    let x: Vec<f64> = series[range]
+        .iter()
+        .map(|v| v.expect("trim_edges_reject_interior guarantees Some in range"))
+        .collect();
+
+    if x.len() < 3 {
+        return None;
     }
 
-    // Use a histogram-based entropy approximation
-    let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let range = max - min;
+    Some(approximate_entropy(&x, 2))
+}
 
-    if range.abs() < f64::EPSILON {
-        return 0.0; // Constant series has zero entropy
-    }
+/// Pincus approximate entropy: `ApEn = Phi(m) - Phi(m+1)`, `r = 0.2 * sample std dev`.
+///
+/// Uses a sorted-band search (T-13-01): template start indices are sorted by their
+/// first coordinate, so each template's match count is found by binary-searching the
+/// `[x_i - r, x_i + r]` window on that coordinate before checking the remaining `m-1`
+/// (or `m`) coordinates via Chebyshev distance — avoiding the naive all-pairs O(n^2)
+/// loop for long series while producing identical counts.
+fn approximate_entropy(x: &[f64], m: usize) -> f64 {
+    let n = x.len() as f64;
+    let mean = x.iter().sum::<f64>() / n;
+    let sample_var = x.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n - 1.0);
+    let r = 0.2 * sample_var.sqrt();
 
-    let n_bins = 10;
-    let mut bins = vec![0usize; n_bins];
+    phi(x, m, r) - phi(x, m + 1, r)
+}
 
-    for &v in values {
-        let bin = (((v - min) / range) * (n_bins - 1) as f64).round() as usize;
-        let bin = bin.min(n_bins - 1);
-        bins[bin] += 1;
-    }
+/// `Phi(m) = mean_i(ln(C_i / N_m))` where `C_i` counts templates `j` (self included)
+/// with Chebyshev distance `<= r` from template `i`, over the `N_m = n - m + 1`
+/// length-`m` templates starting at each index.
+fn phi(x: &[f64], m: usize, r: f64) -> f64 {
+    let n_m = x.len() - m + 1;
 
-    let n = values.len() as f64;
-    let mut entropy = 0.0;
-    for &count in &bins {
-        if count > 0 {
-            let p = count as f64 / n;
-            entropy -= p * p.ln();
+    // Sort template-start indices by their first coordinate for the band search.
+    let mut order: Vec<usize> = (0..n_m).collect();
+    order.sort_by(|&a, &b| x[a].partial_cmp(&x[b]).unwrap());
+    let sorted_first: Vec<f64> = order.iter().map(|&i| x[i]).collect();
+
+    let mut sum_log = 0.0;
+    for i in 0..n_m {
+        let xi = x[i];
+        let lo = sorted_first.partition_point(|&v| v < xi - r);
+        let hi = sorted_first.partition_point(|&v| v <= xi + r);
+
+        let mut count = 0usize;
+        for &j in &order[lo..hi] {
+            let mut max_diff = 0.0f64;
+            for d in 0..m {
+                let diff = (x[i + d] - x[j + d]).abs();
+                if diff > max_diff {
+                    max_diff = diff;
+                }
+            }
+            if max_diff <= r {
+                count += 1;
+            }
         }
+
+        let c_i = count as f64 / n_m as f64;
+        sum_log += c_i.ln();
     }
 
-    entropy
+    sum_log / n_m as f64
 }
 
 /// Compute stability as inverse of coefficient of variation of rolling means.

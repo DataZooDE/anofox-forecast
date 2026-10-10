@@ -11,7 +11,10 @@
 
 mod common;
 
-use anofox_fcst_core::compute_ts_stats;
+use anofox_fcst_core::calendar::CalendarStep;
+use anofox_fcst_core::gaps::gap_counts;
+use anofox_fcst_core::{compute_ts_stats, compute_ts_stats_with_dates_and_type, FrequencyType};
+use chrono::NaiveDateTime;
 use common::{f64_vec, load_fixture, num, tolerance};
 
 #[test]
@@ -97,4 +100,139 @@ fn moments_fixture_matches_compute_ts_stats() {
         0.0,
         "neg30.bimodality_coefficient_sas (ROADMAP SC1 literal)",
     );
+}
+
+/// Parses an ISO-8601 naive timestamp (as emitted by `pandas.Timestamp.isoformat()`,
+/// e.g. `"2024-01-31T00:00:00"`) into microseconds since the Unix epoch.
+fn iso_to_micros(s: &str) -> i64 {
+    let dt = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
+        .unwrap_or_else(|e| panic!("iso_to_micros({s:?}): parse failed: {e}"));
+    dt.and_utc().timestamp_micros()
+}
+
+#[test]
+fn r_entropy_fixture_matches_compute_ts_stats() {
+    let fx = load_fixture("r_entropy/approx_entropy.json");
+    let abs_tol = tolerance(&fx, "abs");
+
+    let cases = fx["cases"]
+        .as_object()
+        .expect("r_entropy_fixture_matches_compute_ts_stats: 'cases' is not an object");
+    assert!(
+        !cases.is_empty(),
+        "r_entropy_fixture_matches_compute_ts_stats: 'cases' is empty"
+    );
+
+    for (name, case) in cases {
+        let x = f64_vec(&case["values"]);
+        let series: Vec<Option<f64>> = x.iter().map(|&v| Some(v)).collect();
+        let stats = compute_ts_stats(&series)
+            .unwrap_or_else(|e| panic!("{name}: compute_ts_stats failed: {e:?}"));
+
+        let want = num(&case["apen"]);
+        let got = stats
+            .entropy
+            .unwrap_or_else(|| panic!("{name}: expected Some(entropy), got None"));
+        common::assert_close(got, want, abs_tol, 0.0, &format!("{name}.entropy"));
+    }
+
+    // Interior NULL -> None.
+    let interior_null: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), None, Some(4.0), Some(5.0)];
+    assert_eq!(
+        compute_ts_stats(&interior_null).unwrap().entropy,
+        None,
+        "interior NULL series: expected entropy None"
+    );
+
+    // Fewer than 3 present values -> None.
+    let two_values: Vec<Option<f64>> = vec![Some(1.0), Some(2.0)];
+    assert_eq!(
+        compute_ts_stats(&two_values).unwrap().entropy,
+        None,
+        "2-value series: expected entropy None"
+    );
+}
+
+/// Builds the [`CalendarStep`] a `gap_counts` fixture case's `step` object describes.
+fn step_from_fixture(step: &serde_json::Value) -> CalendarStep {
+    match step["kind"].as_str().expect("step.kind is not a string") {
+        "fixed" => CalendarStep::Fixed(num(&step["micros"]) as i64),
+        "months" => CalendarStep::Months(num(&step["months"]) as u32),
+        other => panic!("step_from_fixture: unknown kind {other:?}"),
+    }
+}
+
+#[test]
+fn gap_counts_fixture_matches_gap_counts() {
+    let fx = load_fixture("gap_counts/cases.json");
+
+    let cases = fx["cases"]
+        .as_object()
+        .expect("gap_counts_fixture_matches_gap_counts: 'cases' is not an object");
+    assert!(
+        !cases.is_empty(),
+        "gap_counts_fixture_matches_gap_counts: 'cases' is empty"
+    );
+
+    for (name, case) in cases {
+        let observed: Vec<i64> = case["observed"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{name}: 'observed' is not an array"))
+            .iter()
+            .map(|v| iso_to_micros(v.as_str().expect("observed entry is not a string")))
+            .collect();
+        let step = step_from_fixture(&case["step"]);
+
+        let counts = gap_counts(&observed, step);
+
+        assert_eq!(
+            counts.expected_length,
+            num(&case["expected_length"]) as usize,
+            "{name}: expected_length"
+        );
+        assert_eq!(
+            counts.n_missing_periods,
+            num(&case["n_missing_periods"]) as usize,
+            "{name}: n_missing_periods"
+        );
+        assert_eq!(
+            counts.n_gap_runs,
+            num(&case["n_gap_runs"]) as usize,
+            "{name}: n_gap_runs"
+        );
+    }
+
+    // compute_ts_stats_with_dates_and_type on daily_hole20 (Fixed) and month_end (Monthly).
+    let daily_hole20 = &fx["cases"]["daily_hole20"];
+    let dates: Vec<i64> = daily_hole20["observed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| iso_to_micros(v.as_str().unwrap()))
+        .collect();
+    let values: Vec<Option<f64>> = dates.iter().map(|_| Some(1.0)).collect();
+    let micros = num(&daily_hole20["step"]["micros"]) as i64;
+    let stats = compute_ts_stats_with_dates_and_type(&values, &dates, micros, FrequencyType::Fixed)
+        .unwrap();
+    assert_eq!(stats.n_gaps, Some(20), "daily_hole20: n_gaps");
+    assert_eq!(stats.n_gap_runs, Some(1), "daily_hole20: n_gap_runs");
+    assert_eq!(
+        stats.expected_length,
+        Some(60),
+        "daily_hole20: expected_length"
+    );
+
+    let month_end = &fx["cases"]["month_end"];
+    let dates: Vec<i64> = month_end["observed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| iso_to_micros(v.as_str().unwrap()))
+        .collect();
+    let values: Vec<Option<f64>> = dates.iter().map(|_| Some(1.0)).collect();
+    let stats =
+        compute_ts_stats_with_dates_and_type(&values, &dates, 0, FrequencyType::Monthly).unwrap();
+    assert_eq!(stats.n_gaps, Some(2), "month_end: n_gaps");
+    assert_eq!(stats.n_gap_runs, Some(1), "month_end: n_gap_runs");
+    assert_eq!(stats.expected_length, Some(5), "month_end: expected_length");
 }
