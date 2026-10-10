@@ -278,11 +278,13 @@ use the semver numbering this project started with.
   `GROUP BY` partition has at least one row), but `_ts_is_constant` is directly callable.
 - `ts_forecast_agg` / `ts_features_agg` now break ties deterministically for groups with
   duplicate timestamps (WR-02, phase 12 review fix). `Finalize`'s sort previously ordered
-  rows by timestamp only via `std::sort` (not stable), so the relative order — and hence
-  the `(value, valid)` pairing — of same-timestamp rows was unspecified and could vary
-  with thread scheduling; the sort now uses original insertion order as a secondary key
-  (`std::stable_sort`), so results are reproducible across runs for any group containing a
-  duplicate-date row.
+  rows by timestamp only, so the relative order — and hence the `(value, valid)` pairing —
+  of same-timestamp rows was unspecified and could vary with the order partial aggregate
+  states were concatenated in `Combine()` (itself dependent on thread scheduling); the sort
+  now tie-breaks by `(valid, value)` — valid before `NULL`, then ascending value with `NaN`
+  last — the same comparator `ts_stats.cpp`'s `StatsValueLess` already uses, so results
+  depend only on the data, not on arrival order or thread interleaving, for any group
+  containing a duplicate-date row.
 
 ### Removed
 
