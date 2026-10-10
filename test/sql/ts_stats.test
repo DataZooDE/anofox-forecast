@@ -138,6 +138,15 @@ SELECT _ts_stats(NULL) IS NULL;
 ----
 true
 
+# WR-01 regression: a NULL element *inside* an otherwise non-NULL dates list
+# (reachable from the ts_stats(...) macro's _ts_stats_with_dates call) must
+# error, not silently become epoch 0 (which looked like a multi-decade gap to
+# gap_counts/resolve_gap_step).
+statement error
+SELECT _ts_stats_with_dates([1.0, 2.0, 3.0], [DATE '2024-01-01', NULL, DATE '2024-01-03']::TIMESTAMP[], NULL, 0);
+----
+NULL element
+
 #######################################
 # ts_stats_by - Native Table Function Tests (Issue #147)
 #######################################

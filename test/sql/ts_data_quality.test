@@ -137,6 +137,20 @@ SELECT _ts_data_quality(NULL, NULL, NULL, 1) IS NULL;
 ----
 true
 
+# WR-01 regression: a NULL element *inside* an otherwise non-NULL dates list must
+# error (not silently become epoch 0, which looked like a multi-decade gap).
+statement error
+SELECT _ts_data_quality([1.0, 2.0, 3.0], [DATE '2024-01-01', NULL, DATE '2024-01-03']::TIMESTAMP[], NULL, 1);
+----
+NULL element
+
+# A NULL dates list itself (not a NULL element inside it) is still "no date
+# information" and must not error.
+query I
+SELECT (_ts_data_quality([1.0, 2.0, 3.0], NULL, NULL, 1)).n_gaps;
+----
+0
+
 #######################################
 # Table Function API Tests
 #######################################

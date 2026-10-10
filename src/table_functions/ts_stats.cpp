@@ -120,6 +120,12 @@ static void SetStructField(Vector &result, idx_t field_idx, idx_t row_idx, T val
 }
 
 // Extract timestamps from a LIST vector into a flat array (for TIMESTAMP type)
+//
+// WR-01 fix: a NULL element *inside* an otherwise non-NULL dates list previously
+// silently became epoch 0 (1970-01-01), which -- once sorted into the series --
+// looks like a multi-decade gap to gap_counts/resolve_gap_step, corrupting
+// n_gaps/n_gap_runs/expected_length/temporal_score for the whole row without any
+// error. Throws instead, naming the offending row and position.
 static void ExtractListTimestamps(Vector &list_vec, idx_t count, idx_t row_idx,
                                   vector<int64_t> &out_timestamps) {
     UnifiedVectorFormat list_data;
@@ -148,7 +154,11 @@ static void ExtractListTimestamps(Vector &list_vec, idx_t count, idx_t row_idx,
         if (child_data.validity.RowIsValid(unified_child_idx)) {
             out_timestamps[i] = child_values[unified_child_idx].value;
         } else {
-            out_timestamps[i] = 0;
+            throw InvalidInputException(
+                "ts_stats: dates list for row %llu contains a NULL element at "
+                "position %llu; every element of a declared dates list must be "
+                "non-NULL (pass a NULL dates list itself for \"no date information\")",
+                (unsigned long long)row_idx, (unsigned long long)i);
         }
     }
 }
