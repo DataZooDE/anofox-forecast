@@ -160,7 +160,7 @@ pub fn compute_data_quality(
     // Calculate scores
     let structural_score = calculate_structural_score(n_present, n, n_short);
     let magnitude_score = calculate_magnitude_score(&present);
-    let behavioral_score = calculate_behavioral_score(&present);
+    let behavioral_score = calculate_behavioral_score(values, &present);
 
     let overall_score =
         (structural_score + temporal_score + magnitude_score + behavioral_score) / 4.0;
@@ -298,51 +298,81 @@ fn calculate_magnitude_score(values: &[f64]) -> f64 {
     (1.0 - outlier_ratio * 2.0 - extreme_ratio * 3.0).clamp(0.0, 1.0)
 }
 
-fn calculate_behavioral_score(values: &[f64]) -> f64 {
-    if values.len() < 3 {
+/// Behavioral score (D-06, STAT-04): constancy, robust outliers (Iglewicz-Hoaglin
+/// modified z-score) and long zero-runs. No autocorrelation penalty -- a
+/// predictable, smooth series is easy to forecast and must not be penalised;
+/// constancy carries no signal of its own (handled separately below); robust
+/// outliers distort model fits; long zero runs indicate inactive/intermittent
+/// periods.
+///
+/// `original` is the full original (pre-filter) series, used only for the
+/// zero-run scan so a NULL/NaN entry correctly breaks a run instead of silently
+/// joining two zero runs that straddle a gap. `present` is `original`'s non-
+/// missing values, in order (used for every other computation).
+fn calculate_behavioral_score(original: &[Option<f64>], present: &[f64]) -> f64 {
+    let n_present = present.len();
+    if n_present < 3 {
         return 0.5;
     }
 
-    // Check for constant series
-    let mean: f64 = values.iter().sum::<f64>() / values.len() as f64;
-    let variance: f64 =
-        values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / values.len() as f64;
-
+    // Constant series: no signal.
+    let mean: f64 = present.iter().sum::<f64>() / n_present as f64;
+    let variance: f64 = present.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n_present as f64;
     if variance.abs() < f64::EPSILON {
-        return 0.0; // Constant series
-    }
-
-    // Check for reasonable autocorrelation
-    let acf1 = autocorrelation(values, 1);
-
-    // Very high autocorrelation might indicate issues
-    let acf_penalty: f64 = if acf1.abs() > 0.95 { 0.2 } else { 0.0 };
-
-    (1.0_f64 - acf_penalty).clamp(0.0, 1.0)
-}
-
-fn autocorrelation(values: &[f64], lag: usize) -> f64 {
-    if values.len() <= lag {
         return 0.0;
     }
 
-    let n = values.len();
-    let mean: f64 = values.iter().sum::<f64>() / n as f64;
-
-    let mut num = 0.0;
-    let mut denom = 0.0;
-
-    for (i, &v) in values.iter().enumerate() {
-        denom += (v - mean).powi(2);
-        if i >= lag {
-            num += (v - mean) * (values[i - lag] - mean);
-        }
-    }
-
-    if denom.abs() < f64::EPSILON {
+    // Robust outlier ratio via the Iglewicz-Hoaglin modified z-score:
+    // MADN = 1.482602218505602 * median(|x - median(x)|); flag |x - median| / MADN > 3.5.
+    // outlier_ratio = 0 when MADN is 0 (e.g. more than half the present values share
+    // the median) so an intermittent series is not flagged wholesale.
+    const MADN_CONST: f64 = 1.482602218505602;
+    let median = median_of(present);
+    let abs_dev: Vec<f64> = present.iter().map(|v| (v - median).abs()).collect();
+    let mad = median_of(&abs_dev);
+    let madn = MADN_CONST * mad;
+    let outlier_ratio = if madn.abs() < f64::EPSILON {
         0.0
     } else {
-        num / denom
+        let n_outliers = present
+            .iter()
+            .filter(|&&v| ((v - median) / madn).abs() > 3.5)
+            .count();
+        n_outliers as f64 / n_present as f64
+    };
+
+    // Longest run of consecutive exact zeros in the ORIGINAL series; a NULL/NaN
+    // entry breaks the run (does not count toward it, and does not merge two runs
+    // across the gap). Ratio is against n_present, not the original length.
+    let mut longest = 0usize;
+    let mut current = 0usize;
+    for v in original {
+        match v {
+            Some(x) if !x.is_nan() && *x == 0.0 => {
+                current += 1;
+                longest = longest.max(current);
+            }
+            _ => current = 0,
+        }
+    }
+    let zero_run_ratio = longest as f64 / n_present as f64;
+
+    (1.0 - 2.0 * outlier_ratio - zero_run_ratio).clamp(0.0, 1.0)
+}
+
+/// Median of a slice (sorts a copy; average of the two middle elements for an
+/// even-length input). Returns `0.0` for an empty slice.
+fn median_of(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let n = sorted.len();
+    if n % 2 == 1 {
+        sorted[n / 2]
+    } else {
+        (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
     }
 }
 
@@ -533,15 +563,21 @@ mod tests {
     fn test_behavioral_score() {
         // Constant series (zero variance)
         let constant_values: Vec<f64> = vec![5.0; 20];
-        let constant_score = calculate_behavioral_score(&constant_values);
+        let constant_original: Vec<Option<f64>> =
+            constant_values.iter().map(|&v| Some(v)).collect();
+        let constant_score = calculate_behavioral_score(&constant_original, &constant_values);
         assert_eq!(
             constant_score, 0.0,
             "Constant series should have 0 behavioral score"
         );
 
-        // Series with reasonable variation
-        let varied_values: Vec<f64> = (0..50).map(|i| (i as f64 * 0.1).sin() * 10.0).collect();
-        let varied_score = calculate_behavioral_score(&varied_values);
+        // Smooth, predictable series (|ACF1| > 0.95): no penalty (D-06 removes the old
+        // ACF1 penalty entirely).
+        let varied_values: Vec<f64> = (0..50)
+            .map(|i| (i as f64 * 0.1).sin() * 10.0 + 20.0)
+            .collect();
+        let varied_original: Vec<Option<f64>> = varied_values.iter().map(|&v| Some(v)).collect();
+        let varied_score = calculate_behavioral_score(&varied_original, &varied_values);
         assert!(
             varied_score > 0.5,
             "Varied series should have reasonable behavioral score"
@@ -549,10 +585,45 @@ mod tests {
 
         // Short series
         let short_values: Vec<f64> = vec![1.0, 2.0];
-        let short_score = calculate_behavioral_score(&short_values);
+        let short_original: Vec<Option<f64>> = short_values.iter().map(|&v| Some(v)).collect();
+        let short_score = calculate_behavioral_score(&short_original, &short_values);
         assert_eq!(
             short_score, 0.5,
             "Very short series should return default score"
+        );
+    }
+
+    #[test]
+    fn test_behavioral_score_two_outliers_in_100() {
+        let mut values: Vec<f64> = (0..100)
+            .map(|i| 10.0 + 0.1 * ((i % 7) as f64 - 3.0))
+            .collect();
+        values[10] = 1000.0;
+        values[55] = -800.0;
+        let original: Vec<Option<f64>> = values.iter().map(|&v| Some(v)).collect();
+        let score = calculate_behavioral_score(&original, &values);
+        assert!(
+            (score - 0.96).abs() < 1e-9,
+            "expected 2 outliers in 100 -> 0.96, got {score}"
+        );
+    }
+
+    #[test]
+    fn test_behavioral_score_zero_run_breaks_on_null() {
+        // A 30-long run of zeros, split in the middle by a NULL entry: the two
+        // sub-runs (15 each) must NOT merge into a 30-run across the gap.
+        let mut original: Vec<Option<f64>> = vec![Some(1.0); 35];
+        original.extend(std::iter::repeat_n(Some(0.0), 15));
+        original.push(None);
+        original.extend(std::iter::repeat_n(Some(0.0), 14));
+        original.extend(std::iter::repeat_n(Some(1.0), 35));
+        let present: Vec<f64> = original.iter().filter_map(|v| *v).collect();
+        let score = calculate_behavioral_score(&original, &present);
+        // longest run is 15 (not 29/30), n_present = 99 -> zero_run_ratio = 15/99
+        let expected = (1.0 - 15.0 / 99.0_f64).clamp(0.0, 1.0);
+        assert!(
+            (score - expected).abs() < 1e-9,
+            "expected {expected}, got {score}"
         );
     }
 

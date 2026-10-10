@@ -6,6 +6,8 @@
 #include "duckdb/common/types/timestamp.hpp"
 #include "duckdb/common/types/vector.hpp"
 #include "duckdb/parser/parsed_data/create_aggregate_function_info.hpp"
+#include <algorithm>
+#include <numeric>
 
 namespace duckdb {
 
@@ -13,6 +15,7 @@ namespace duckdb {
 struct TsDataQualityAggStateData {
     vector<int64_t> timestamps;
     vector<double> values;
+    vector<bool> validity;  // false = NULL-valued row (kept, placeholder value)
     bool initialized;
 
     TsDataQualityAggStateData() : initialized(false) {}
@@ -23,7 +26,8 @@ struct TsDataQualityAggState {
     TsDataQualityAggStateData *data;
 };
 
-// Define the output STRUCT type for ts_data_quality_agg (8 metrics)
+// Define the output STRUCT type for ts_data_quality_agg (10 metrics, D-05: adds
+// n_gap_runs and is_short to match ts_data_quality_by's contract)
 static LogicalType GetTsDataQualityAggResultType() {
     child_list_t<LogicalType> children;
     children.push_back(make_pair("structural_score", LogicalType(LogicalTypeId::DOUBLE)));
@@ -32,8 +36,10 @@ static LogicalType GetTsDataQualityAggResultType() {
     children.push_back(make_pair("behavioral_score", LogicalType(LogicalTypeId::DOUBLE)));
     children.push_back(make_pair("overall_score", LogicalType(LogicalTypeId::DOUBLE)));
     children.push_back(make_pair("n_gaps", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("n_gap_runs", LogicalType(LogicalTypeId::UBIGINT)));
     children.push_back(make_pair("n_missing", LogicalType(LogicalTypeId::UBIGINT)));
     children.push_back(make_pair("is_constant", LogicalType(LogicalTypeId::BOOLEAN)));
+    children.push_back(make_pair("is_short", LogicalType(LogicalTypeId::BOOLEAN)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -60,6 +66,9 @@ struct TsDataQualityAggOperation {
             target.data->values.insert(target.data->values.end(),
                                        source.data->values.begin(),
                                        source.data->values.end());
+            target.data->validity.insert(target.data->validity.end(),
+                                         source.data->validity.begin(),
+                                         source.data->validity.end());
         }
     }
 
@@ -70,7 +79,10 @@ struct TsDataQualityAggOperation {
     }
 
     static bool IgnoreNull() {
-        return true;
+        // Must see NULL-valued rows too (kept, counted in n_missing, Phase 12
+        // deferred item (a)); only a NULL timestamp is skipped, handled explicitly
+        // in TsDataQualityAggUpdate.
+        return false;
     }
 };
 
@@ -91,7 +103,11 @@ static void TsDataQualityAggUpdate(Vector inputs[], AggregateInputData &aggr_inp
         auto ts_idx = ts_data.sel->get_index(i);
         auto val_idx = val_data.sel->get_index(i);
 
-        if (!ts_data.validity.RowIsValid(ts_idx) || !val_data.validity.RowIsValid(val_idx)) {
+        // A NULL timestamp cannot be placed in time, so that row is skipped entirely.
+        // A NULL value is KEPT (Phase 12 deferred item (a), fixed here): counted in
+        // n_missing and preserving its position in the date-ordered series, matching
+        // ts_stats_agg's NULL-value policy.
+        if (!ts_data.validity.RowIsValid(ts_idx)) {
             continue;
         }
 
@@ -104,10 +120,12 @@ static void TsDataQualityAggUpdate(Vector inputs[], AggregateInputData &aggr_inp
         }
 
         auto ts = UnifiedVectorFormat::GetData<timestamp_t>(ts_data)[ts_idx];
-        auto val = UnifiedVectorFormat::GetData<double>(val_data)[val_idx];
+        bool value_valid = val_data.validity.RowIsValid(val_idx);
+        double val = value_valid ? UnifiedVectorFormat::GetData<double>(val_data)[val_idx] : 0.0;
 
         state.data->timestamps.push_back(ts.value);
         state.data->values.push_back(val);
+        state.data->validity.push_back(value_valid);
     }
 }
 
@@ -134,28 +152,32 @@ static void TsDataQualityAggFinalize(Vector &state_vector, AggregateInputData &a
 
         auto &data = *state.data;
 
-        // Sort by timestamp
-        vector<pair<int64_t, double>> sorted_pairs;
-        for (size_t j = 0; j < data.timestamps.size(); j++) {
-            sorted_pairs.push_back({data.timestamps[j], data.values[j]});
-        }
-        std::sort(sorted_pairs.begin(), sorted_pairs.end());
+        // Sort by timestamp, keeping value+validity paired with it. Ties (duplicate
+        // timestamps) are stable-sorted by original arrival order (matches
+        // ts_stats_agg; gap_counts de-duplicates exact-timestamp ties regardless).
+        size_t n = data.timestamps.size();
+        vector<size_t> order(n);
+        std::iota(order.begin(), order.end(), size_t(0));
+        std::stable_sort(order.begin(), order.end(), [&data](size_t a, size_t b) {
+            return data.timestamps[a] < data.timestamps[b];
+        });
 
-        vector<double> sorted_values;
-        vector<int64_t> sorted_timestamps;
-        for (const auto &p : sorted_pairs) {
-            sorted_timestamps.push_back(p.first);
-            sorted_values.push_back(p.second);
+        vector<int64_t> sorted_timestamps(n);
+        vector<double> sorted_values(n);
+        size_t validity_words = (n + 63) / 64;
+        vector<uint64_t> validity(validity_words, 0);
+        for (size_t j = 0; j < n; j++) {
+            size_t src = order[j];
+            sorted_timestamps[j] = data.timestamps[src];
+            sorted_values[j] = data.values[src];
+            if (data.validity[src]) {
+                validity[j / 64] |= (1ULL << (j % 64));
+            }
         }
-
-        // Create validity bitfield (all valid)
-        size_t validity_words = (sorted_values.size() + 63) / 64;
-        vector<uint64_t> validity(validity_words, ~0ULL);
 
         // Call FFI function with dates and auto-detected frequency (0, FIXED); n_short=30
         // is the previous fixed structural-length scale (this aggregate takes no n_short
-        // argument). NULL-value-row handling is revisited in Phase 13 plan 13-03 task 2
-        // (Phase 12 deferred item (a)).
+        // argument).
         DataQualityResult dq_result;
         memset(&dq_result, 0, sizeof(dq_result));
         AnofoxError error;
@@ -177,15 +199,17 @@ static void TsDataQualityAggFinalize(Vector &state_vector, AggregateInputData &a
             continue;
         }
 
-        // Populate the 8 struct fields
+        // Populate the 10 struct fields
         SetStructField<double>(result, 0, row, dq_result.structural_score);
         SetStructField<double>(result, 1, row, dq_result.temporal_score);
         SetStructField<double>(result, 2, row, dq_result.magnitude_score);
         SetStructField<double>(result, 3, row, dq_result.behavioral_score);
         SetStructField<double>(result, 4, row, dq_result.overall_score);
         SetStructField<uint64_t>(result, 5, row, dq_result.n_gaps);
-        SetStructField<uint64_t>(result, 6, row, dq_result.n_missing);
-        SetStructField<bool>(result, 7, row, dq_result.is_constant);
+        SetStructField<uint64_t>(result, 6, row, dq_result.n_gap_runs);
+        SetStructField<uint64_t>(result, 7, row, dq_result.n_missing);
+        SetStructField<bool>(result, 8, row, dq_result.is_constant);
+        SetStructField<bool>(result, 9, row, dq_result.is_short);
     }
 }
 
@@ -214,6 +238,9 @@ static void TsDataQualityAggCombine(Vector &state_vector, Vector &combined, Aggr
             tgt.data->values.insert(tgt.data->values.end(),
                                     src.data->values.begin(),
                                     src.data->values.end());
+            tgt.data->validity.insert(tgt.data->validity.end(),
+                                      src.data->validity.begin(),
+                                      src.data->validity.end());
         }
     }
 }
@@ -250,7 +277,7 @@ void RegisterTsDataQualityAggFunction(ExtensionLoader &loader) {
     {
         CreateAggregateFunctionInfo info(ts_dq_agg_set);
         FunctionDescription desc;
-        desc.description = "Aggregate function: assesses time series data quality for each group, reporting null counts, gap counts, duplicates, and quality score.";
+        desc.description = "Aggregate function: assesses time series data quality for each group (dates/frequency-aware; n_short=30), reporting null counts, gap counts (n_gaps = missing periods, n_gap_runs = gap occurrences), duplicates, is_short, and quality score.";
         desc.examples = {"SELECT product_id, ts_data_quality_agg(date, value) FROM sales GROUP BY product_id"};
         desc.categories = {"time-series", "data-quality"};
         desc.parameter_names = {"date", "value"};
@@ -266,7 +293,7 @@ void RegisterTsDataQualityAggFunction(ExtensionLoader &loader) {
         CreateAggregateFunctionInfo info(anofox_dq_agg_set);
         info.alias_of = "ts_data_quality_agg";
         FunctionDescription desc;
-        desc.description = "Aggregate function: assesses time series data quality for each group, reporting null counts, gap counts, duplicates, and quality score.";
+        desc.description = "Aggregate function: assesses time series data quality for each group (dates/frequency-aware; n_short=30), reporting null counts, gap counts (n_gaps = missing periods, n_gap_runs = gap occurrences), duplicates, is_short, and quality score.";
         desc.examples = {"SELECT product_id, anofox_fcst_ts_data_quality_agg(date, value) FROM sales GROUP BY product_id"};
         desc.categories = {"time-series", "data-quality"};
         desc.parameter_names = {"date", "value"};

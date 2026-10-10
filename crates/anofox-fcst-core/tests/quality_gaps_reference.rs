@@ -211,7 +211,10 @@ fn fill_forward_month_end_matches_calendar_rule() {
     fn ymd_micros(y: i32, m: u32, d: u32) -> i64 {
         use chrono::NaiveDate;
         let date = NaiveDate::from_ymd_opt(y, m, d).unwrap();
-        date.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_micros()
+        date.and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp_micros()
     }
 
     let dates = vec![ymd_micros(2024, 3, 31)];
@@ -230,8 +233,5 @@ fn fill_forward_month_end_matches_calendar_rule() {
             ymd_micros(2024, 6, 30),
         ]
     );
-    assert_eq!(
-        filled_values,
-        vec![Some(1.0), None, None, None]
-    );
+    assert_eq!(filled_values, vec![Some(1.0), None, None, None]);
 }

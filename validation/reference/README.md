@@ -95,6 +95,7 @@ test without a separate Rust edit.
 | `forecast_snapshot` | `point_forecasts.json` | `crates/anofox-fcst-core/tests/forecast_snapshot.rs` (bless mode: `ANOFOX_BLESS_FORECAST_SNAPSHOT=1 cargo test -p anofox-fcst-core --test forecast_snapshot`) | `point_abs` (1e-6), `point_rel` (1e-6) | Phase 9 (DEP-02 pre/post-bump point-forecast parity for every `ts_forecast_by` model), and any later phase that deliberately changes point forecasts — re-blessing replaces the anofox-forecast 0.15.3 baseline, so record the reason in that phase's SUMMARY. `allowed_to_change`: MFLES, AutoMFLES, Laplace. |
 | `r_entropy` | `approx_entropy.json` | `r/gen_entropy_reference.R` | `abs` (1e-12) | Phase 13 (STAT-03, D-03): `ts_stats` `entropy` column (Pincus approximate entropy, m=2, r=0.2*sd) |
 | `gap_counts` | `cases.json` | `python/gen_gap_counts.py` | `count_abs` (0, exact integer counts) | Phase 13 (STAT-03, D-04): `ts_stats` `n_gaps`/`n_gap_runs`/`expected_length` (13-01); Phase 13 data quality gap/temporal scoring and month-end-aware gap fill (`fill_cases`, 13-03) |
+| `quality_scores` | `cases.json` | `python/gen_quality_reference.py` | `score_abs` (1e-12) | Phase 13 (D-05/D-06, STAT-04, 13-03): `anofox_fcst_core::quality::compute_data_quality` -- all five scores, `n_gaps`/`n_gap_runs`/`n_missing`/`is_constant`/`is_short` |
 
 ## 5. Tool versions
 
@@ -124,6 +125,7 @@ uv run --locked --project validation/reference/python python validation/referenc
 uv run --locked --project validation/reference/python python validation/reference/python/gen_multiscale_ols.py
 uv run --locked --project validation/reference/python python validation/reference/python/gen_panel_nan_guard.py
 uv run --locked --project validation/reference/python python validation/reference/python/gen_gap_counts.py
+uv run --locked --project validation/reference/python python validation/reference/python/gen_quality_reference.py
 
 # R families added in Phase 13:
 Rscript validation/reference/r/gen_entropy_reference.R

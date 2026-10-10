@@ -130,3 +130,61 @@ SELECT n_total FROM ts_data_quality_summary('dq_macros', id, ds, v, 10);
 
 statement ok
 DROP TABLE dq_macros;
+
+# --- behavioral_score redesign (D-06, STAT-04): smooth sine, no ACF1 penalty ---
+statement ok
+CREATE TABLE dq_smooth_sine AS
+SELECT 's' AS id,
+       (DATE '2024-01-01' + INTERVAL (i) DAY)::TIMESTAMP AS ds,
+       sin(2 * pi() * i / 50.0 + 0.1)::DOUBLE AS v
+FROM range(0, 100) t(i);
+
+query I
+SELECT behavioral_score
+FROM ts_data_quality_by('dq_smooth_sine', id, ds, v, 3, '1d');
+----
+1.0
+
+statement ok
+DROP TABLE dq_smooth_sine;
+
+# --- ts_data_quality_agg matches ts_data_quality_by(n_short:=30, frequency:=NULL) on a
+# NULL-value-containing table (Phase 12 deferred item (a), fixed by task 2) ---
+statement ok
+CREATE TABLE dq_gap20_null AS
+SELECT 'g20n' AS id,
+       (DATE '2024-01-01' + INTERVAL (i) DAY)::TIMESTAMP AS ds,
+       (i % 7 + 0.1 * i)::DOUBLE AS v
+FROM range(0, 60) t(i)
+WHERE i < 20 OR i >= 40
+UNION ALL
+SELECT 'g20n', (DATE '2024-01-01' + INTERVAL (60) DAY)::TIMESTAMP, NULL::DOUBLE;
+
+query I
+SELECT n_missing FROM ts_data_quality_by('dq_gap20_null', id, ds, v, 30, NULL);
+----
+1
+
+query I
+SELECT (ts_data_quality_agg(ds, v)).n_missing FROM dq_gap20_null;
+----
+1
+
+query I
+SELECT count(*) FROM (
+    SELECT structural_score, temporal_score, magnitude_score, behavioral_score,
+           overall_score, n_gaps, n_gap_runs, n_missing, is_constant, is_short
+    FROM ts_data_quality_by('dq_gap20_null', id, ds, v, 30, NULL)
+    EXCEPT
+    SELECT (ts_data_quality_agg(ds, v)).structural_score, (ts_data_quality_agg(ds, v)).temporal_score,
+           (ts_data_quality_agg(ds, v)).magnitude_score, (ts_data_quality_agg(ds, v)).behavioral_score,
+           (ts_data_quality_agg(ds, v)).overall_score, (ts_data_quality_agg(ds, v)).n_gaps,
+           (ts_data_quality_agg(ds, v)).n_gap_runs, (ts_data_quality_agg(ds, v)).n_missing,
+           (ts_data_quality_agg(ds, v)).is_constant, (ts_data_quality_agg(ds, v)).is_short
+    FROM dq_gap20_null
+);
+----
+0
+
+statement ok
+DROP TABLE dq_gap20_null;
