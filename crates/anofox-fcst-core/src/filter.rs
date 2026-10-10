@@ -218,7 +218,7 @@ pub fn diff_aligned(values: &[Option<f64>], order: usize, lag: usize) -> Result<
 
     let pad = values.len().saturating_sub(diffed.len());
     let mut result = Vec::with_capacity(values.len());
-    result.extend(std::iter::repeat(None).take(pad));
+    result.extend(std::iter::repeat_n(None, pad));
     result.extend(
         diffed
             .into_iter()

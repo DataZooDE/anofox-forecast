@@ -45,9 +45,14 @@ pub fn fill_nulls_backward(values: &[Option<f64>]) -> Vec<Option<f64>> {
     result
 }
 
-/// Fill NULL values with the series mean.
+/// Fill NULL values with the series mean. `NaN` is treated as missing (Phase
+/// 10 NaN = NULL convention), same as `None`: it is excluded from the mean
+/// and replaced by it.
 pub fn fill_nulls_mean(values: &[Option<f64>]) -> Vec<f64> {
-    let non_null: Vec<f64> = values.iter().filter_map(|v| *v).collect();
+    let non_null: Vec<f64> = values
+        .iter()
+        .filter_map(|v| v.filter(|x| !x.is_nan()))
+        .collect();
 
     if non_null.is_empty() {
         return vec![f64::NAN; values.len()];
@@ -55,7 +60,13 @@ pub fn fill_nulls_mean(values: &[Option<f64>]) -> Vec<f64> {
 
     let mean = non_null.iter().sum::<f64>() / non_null.len() as f64;
 
-    values.iter().map(|v| v.unwrap_or(mean)).collect()
+    values
+        .iter()
+        .map(|v| match v {
+            Some(x) if !x.is_nan() => *x,
+            _ => mean,
+        })
+        .collect()
 }
 
 /// Fill NULL values with linear interpolation.
@@ -153,6 +164,22 @@ mod tests {
         let result = fill_nulls_mean(&values);
         assert_relative_eq!(result[1], 3.0, epsilon = 0.001);
         assert_relative_eq!(result[3], 3.0, epsilon = 0.001);
+    }
+
+    #[test]
+    fn test_fill_nulls_mean_nan_is_missing() {
+        let values = vec![Some(1.0), Some(f64::NAN), Some(3.0)];
+        let result = fill_nulls_mean(&values);
+        assert_relative_eq!(result[0], 1.0, epsilon = 0.001);
+        assert_relative_eq!(result[1], 2.0, epsilon = 0.001);
+        assert_relative_eq!(result[2], 3.0, epsilon = 0.001);
+    }
+
+    #[test]
+    fn test_fill_nulls_mean_all_null_stays_nan() {
+        let values = vec![None, None];
+        let result = fill_nulls_mean(&values);
+        assert!(result.iter().all(|v| v.is_nan()));
     }
 
     #[test]

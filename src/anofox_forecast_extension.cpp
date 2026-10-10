@@ -46,23 +46,9 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsFillForwardOperatorFunction(loader);
     RegisterTsFillForwardNativeFunction(loader);
 
-    // Register Filtering functions
-    RegisterTsDropConstantFunction(loader);
-    RegisterTsDropShortFunction(loader);
-
-    // Register Edge Cleaning functions
-    RegisterTsDropLeadingZerosFunction(loader);
-    RegisterTsDropTrailingZerosFunction(loader);
-    RegisterTsDropEdgeZerosFunction(loader);
-
-    // Register Imputation functions
-    RegisterTsFillNullsConstFunction(loader);
-    RegisterTsFillNullsForwardFunction(loader);
-    RegisterTsFillNullsBackwardFunction(loader);
-    RegisterTsFillNullsMeanFunction(loader);
-
-    // Register Transform functions
-    RegisterTsDiffFunction(loader);
+    // Register Series Transform functions (_ts_diff, _ts_fill_nulls_mean,
+    // _ts_is_constant — Phase 12 RUST-03/RUST-05/D-09, plan 12-07)
+    RegisterTsSeriesTransformFunctions(loader);
 
     // Register Seasonality functions
     RegisterTsDetectSeasonalityFunction(loader);
@@ -104,13 +90,11 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsMstlDecompositionFunction(loader);
 
     // Register Changepoint Detection functions
-    RegisterTsDetectChangepointsFunction(loader);
     RegisterTsDetectChangepointsBocpdFunction(loader);
     RegisterTsDetectChangepointsByFunction(loader);
     RegisterTsDetectChangepointsAggFunction(loader);
 
     // Register Feature Extraction functions
-    RegisterTsFeaturesFunction(loader);
     RegisterTsFeaturesListFunction(loader);
     RegisterTsFeaturesAggFunction(loader);
     RegisterTsStatsAggFunction(loader);

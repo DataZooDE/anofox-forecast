@@ -31,14 +31,9 @@ static LogicalType GetChangepointResultType() {
 // a three-arg list+min_size+penalty variant) and their shared private list
 // helper were deleted in Phase 12 plan 12-03 (D-01) — the live SQL surface is
 // the ts_detect_changepoints table macro in ts_macros.cpp dispatching to
-// _ts_detect_changepoints_bocpd. The registration function below stays a
-// no-op (plan 12-07 removes no-op registrations).
+// _ts_detect_changepoints_bocpd. The no-op scalar registration function for
+// this never-registered body was removed in plan 12-07 (D-09).
 // ============================================================================
-
-void RegisterTsDetectChangepointsFunction(ExtensionLoader &loader) {
-    // No-op: C++ extension uses table macro, not scalar
-    // Table macro ts_detect_changepoints is registered in ts_macros.cpp
-}
 
 // ============================================================================
 // BOCPD version - C++ API compatible

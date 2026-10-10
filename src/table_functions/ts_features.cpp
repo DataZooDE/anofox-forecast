@@ -15,18 +15,13 @@ namespace duckdb {
 
 // ============================================================================
 // ts_features - the scalar-function body that lived here (TsFeaturesFunction)
-// was never reachable from SQL: RegisterTsFeaturesFunction below is a no-op
-// (C++ extension exposes ts_features only as the aggregate registered in
-// ts_features_agg.cpp). Deleted per Phase 12 D-01/D-11 plan 12-03 — its
-// private ExtractListAsDouble/GetScalarFeatureNames/GetScalarFeaturesResultType
-// helpers were used only by this dead body. RegisterTsFeaturesFunction itself
-// is kept as a no-op (plan 12-07 removes no-op registrations).
+// was never reachable from SQL (C++ extension exposes ts_features only as the
+// aggregate registered in ts_features_agg.cpp). Deleted per Phase 12 D-01/D-11
+// plan 12-03 — its private ExtractListAsDouble/GetScalarFeatureNames/
+// GetScalarFeaturesResultType helpers were used only by this dead body. The
+// no-op scalar registration function for this never-registered body was
+// removed in plan 12-07 (D-09).
 // ============================================================================
-
-void RegisterTsFeaturesFunction(ExtensionLoader &loader) {
-    // No-op: C++ extension only has ts_features as aggregate function
-    // The aggregate function is registered in ts_features_agg.cpp
-}
 
 // ============================================================================
 // ts_features_list - List available features as TABLE

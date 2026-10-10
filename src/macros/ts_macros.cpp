@@ -169,7 +169,7 @@ FROM quality_data
     "SELECT * FROM ts_data_quality_summary('sales', product_id, date, qty)",
     "data-quality"},
 
-    // ts_drop_constant_by: Filter out constant series (table-based)
+    // ts_drop_constant_by: Filter out constant series (table-based), Rust is_constant (D-09)
     // C++ API: ts_drop_constant_by(table_name, group_col, value_col)
     {"ts_drop_constant_by", {"source", "group_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
@@ -179,10 +179,12 @@ WHERE group_col IN (
     SELECT group_col
     FROM query_table(source::VARCHAR)
     GROUP BY group_col
-    HAVING MIN(value_col) != MAX(value_col) OR MIN(value_col) IS NULL OR MAX(value_col) IS NULL
+    HAVING NOT _ts_is_constant(LIST(value_col::DOUBLE))
 )
 )",
-    "Removes groups whose time series values are all constant (zero variance).",
+    "Removes groups whose time series classify as constant under the Rust is_constant tolerance "
+    "(current f64::EPSILON absolute tolerance): fewer than two non-NULL values (including an "
+    "all-NULL group) or all non-NULL values within epsilon of each other.",
     "SELECT * FROM ts_drop_constant_by('sales', product_id, date, qty)",
     "data-preparation"},
 
@@ -300,21 +302,37 @@ ORDER BY group_col, date_col
     "SELECT * FROM ts_fill_nulls_backward_by('sales', product_id, date, qty)",
     "data-preparation"},
 
-    // ts_fill_nulls_mean_by: Fill with series mean (table-based)
+    // ts_fill_nulls_mean_by: Fill with series mean via the Rust fill_nulls_mean (table-based)
     // C++ API: ts_fill_nulls_mean_by(table_name, group_col, date_col, value_col)
     // Note: All input columns are preserved; filled value is added as 'filled_value' column
     {"ts_fill_nulls_mean_by", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH with_mean AS (
-    SELECT *,
-           AVG(value_col) OVER (PARTITION BY group_col) AS _mean_val
+WITH _src AS (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY group_col ORDER BY date_col) AS __ts_rn
     FROM query_table(source::VARCHAR)
+),
+_filled AS (
+    SELECT
+        group_col AS __ts_g,
+        _ts_fill_nulls_mean(LIST(value_col::DOUBLE ORDER BY __ts_rn)) AS __ts_list
+    FROM _src
+    GROUP BY group_col
+),
+_unnested AS (
+    SELECT
+        __ts_g,
+        UNNEST(range(1, len(__ts_list) + 1)) AS __ts_rn2,
+        UNNEST(__ts_list) AS __ts_v
+    FROM _filled
 )
-SELECT * EXCLUDE (_mean_val), COALESCE(value_col, _mean_val) AS filled_value
-FROM with_mean
+SELECT _src.* EXCLUDE (__ts_rn), __ts_v AS filled_value
+FROM _src
+JOIN _unnested ON group_col IS NOT DISTINCT FROM __ts_g AND __ts_rn = __ts_rn2
 ORDER BY group_col, date_col
 )",
-    "Fills NULL values in each group's time series with the group mean.",
+    "Fills NULL values in each group's time series with the group mean, computed in Rust "
+    "(fill_nulls_mean): NaN counts as missing; an all-NULL/all-NaN group keeps every value NULL. "
+    "All input columns are preserved.",
     "SELECT * FROM ts_fill_nulls_mean_by('sales', product_id, date, qty)",
     "data-preparation"},
 

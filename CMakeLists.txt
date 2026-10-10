@@ -168,8 +168,6 @@ set(EXTENSION_SOURCES
     src/table_functions/ts_decomposition.cpp
     src/table_functions/ts_changepoints.cpp
     src/table_functions/ts_features.cpp
-    src/table_functions/ts_imputation.cpp
-    src/table_functions/ts_filter.cpp
     src/table_functions/ts_gaps.cpp
     src/table_functions/ts_fill_gaps_native.cpp
     src/table_functions/ts_fill_forward_native.cpp
@@ -200,6 +198,7 @@ set(EXTENSION_SOURCES
     src/scalar_functions/diagnostics.cpp
     src/scalar_functions/ts_forecast_scalar.cpp
     src/scalar_functions/ts_forecast_inspect_scalar.cpp
+    src/scalar_functions/series_transforms.cpp
     src/aggregate_functions/ts_forecast_agg.cpp
     src/aggregate_functions/ts_changepoints_agg.cpp
     src/aggregate_functions/ts_features_agg.cpp
