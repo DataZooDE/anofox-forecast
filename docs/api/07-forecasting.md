@@ -434,15 +434,16 @@ offending model/parameter:
         FROM agg_confidence_demo);
   ```
 
-- **Input-handling exception:** unlike `ts_forecast_by`, `ts_forecast_agg` drops rows
-  whose value is `NULL` before fitting rather than interpolating interior gaps — interior
-  `NULL`s are spliced out of the series entirely, and trailing `NULL` rows move the
-  forecast origin back to the last non-`NULL` row instead of staying anchored to the
-  series' original last row. Confirmed on the `trailing_null_demo` fixture above:
-  `ts_forecast_by` forecasts from `2020-02-02` (`yhat = 32.0`), but `ts_forecast_agg`
-  forecasts from `2020-01-31` (`yhat = 30.0`) on the same data. `NaN` still follows the
-  shared NULL-equivalence rule. Aligning this surface's NULL handling with
-  `ts_forecast_by`'s is tracked for Phase 12 (RUST-08) — not fixed here.
+- **Input handling matches `ts_forecast_by`** (Phase 12, D-11): `ts_forecast_agg` applies
+  the exact same NULL policy — interior `NULL`s are linearly interpolated (not spliced
+  out), and a `NULL`-valued trailing row still leaves the forecast origin anchored to the
+  series' ORIGINAL last row, exactly as `ts_forecast_by` does. Confirmed on the
+  `trailing_null_demo` fixture above: `ts_forecast_agg` forecasts from `2020-02-02`
+  (`yhat = 32.0`), identical to `ts_forecast_by`. Only a `NULL` **timestamp** drops a row
+  (there is nothing to anchor it to); `NaN` still follows the shared NULL-equivalence
+  rule. Forecast dates also come from the same Rust frequency-detection + calendar rule
+  `ts_forecast_by` uses (see "Calendar stepping" above), with the frequency auto-detected
+  from the observed dates instead of a declared `frequency` argument.
 
 ---
 
@@ -468,6 +469,18 @@ ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, fre
 | `horizon` | INTEGER | Number of periods to forecast |
 | `frequency` | VARCHAR | Time step between observations (e.g., `'1d'`, `'1h'`, `'1mo'`) |
 | `params` | MAP or STRUCT | Model parameters (optional) |
+
+**Calendar stepping (D-12).** For `'1mo'`/`'3mo'`/`'1q'`/`'1y'` (monthly/quarterly/yearly)
+frequencies, forecast dates are computed with a calendar-aware rule, not fixed-microsecond
+arithmetic: if every observed date in the series falls on the last day of its month, every
+forecast date is also a month-end (e.g. a series ending `2023-11-30` forecasts
+`2023-12-31`, `2024-01-31`, `2024-02-29` — no drift into a 30-day month); otherwise the
+last observed day-of-month is kept, clamped to the target month's length (e.g. a series
+ending `2023-04-30` forecasts `2023-05-30`, `2023-06-30`, `2023-07-30`). Quarterly and
+yearly frequencies apply the same rule with 3- and 12-month steps. Each step is computed
+fresh from the last observation, never cumulatively. `ts_forecast_agg` uses the identical
+rule (with frequency auto-detected from the data), so both surfaces agree on forecast
+dates as well as values.
 
 **Selected `params` keys** (full per-model list in the ["Supported Models"](#supported-models-36-models) tables above):
 

@@ -184,6 +184,60 @@ SELECT CASE WHEN (
     'FAIL per_step_residual_count_not_multiple_of_horizon_errors'
 ) END AS result;
 
+-- ============================================================================
+-- SECTION 5 — Calendar-correct forecast dates and agg NULL parity (D-11, D-12)
+-- ============================================================================
+
+.print ''
+.print 'SECTION 5: calendar-correct forecast dates (D-12) and ts_forecast_agg NULL parity with ts_forecast_by (D-11)'
+.print ''
+
+CREATE OR REPLACE TABLE calendar_me AS
+SELECT 'A' AS id, last_day(DATE '2023-01-01' + INTERVAL (i) MONTH) AS ds, (100 + i)::DOUBLE AS y
+FROM range(11) t(i);
+
+-- A series of month-end dates ending 2023-11-30 forecasts month-ends with no
+-- drift into a 30-day month (D-12) — both ts_forecast_agg (Rust
+-- auto-detected frequency) and ts_forecast_by ('1mo') agree.
+SELECT CASE WHEN (
+    SELECT (ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 3, MAP{})).forecast_timestamp =
+        [TIMESTAMP '2023-12-31 00:00:00', TIMESTAMP '2024-01-31 00:00:00', TIMESTAMP '2024-02-29 00:00:00']
+    FROM calendar_me
+) THEN 'PASS calendar_month_end_series_agg_forecasts_month_ends_no_drift' ELSE error(
+    'FAIL calendar_month_end_series_agg_forecasts_month_ends_no_drift'
+) END AS result;
+
+SELECT CASE WHEN (
+    SELECT list(ds ORDER BY forecast_step) = [DATE '2023-12-31', DATE '2024-01-31', DATE '2024-02-29']
+    FROM ts_forecast_by('calendar_me', id, ds, y, 'Naive', 3, '1mo', MAP{})
+) THEN 'PASS calendar_month_end_series_by_forecasts_month_ends_no_drift' ELSE error(
+    'FAIL calendar_month_end_series_by_forecasts_month_ends_no_drift'
+) END AS result;
+
+CREATE OR REPLACE TABLE calendar_trailing_null_demo AS
+SELECT 'A' AS id, (DATE '2020-01-01' + INTERVAL (i) DAY) AS ds,
+       CASE WHEN i >= 30 THEN NULL ELSE i::DOUBLE END AS y
+FROM range(32) AS t(i);
+
+-- D-11: ts_forecast_agg no longer splices NULL-valued trailing rows out
+-- before fitting — its forecast origin stays anchored to the series'
+-- ORIGINAL last row, exactly like ts_forecast_by, on the same fixture
+-- docs/api/07-forecasting.md uses for the input-handling contract.
+SELECT CASE WHEN (
+    SELECT
+        (SELECT (ts_forecast_agg(ds::TIMESTAMP, y, 'RandomWalkDrift', 3, MAP{})).forecast_timestamp[1]
+         FROM calendar_trailing_null_demo)
+        = (SELECT ds::TIMESTAMP FROM ts_forecast_by('calendar_trailing_null_demo', id, ds, y, 'RandomWalkDrift', 3, '1d', MAP{})
+           WHERE forecast_step = 1)
+    AND
+        (SELECT (ts_forecast_agg(ds::TIMESTAMP, y, 'RandomWalkDrift', 3, MAP{})).point_forecast[1]
+         FROM calendar_trailing_null_demo)
+        = (SELECT yhat FROM ts_forecast_by('calendar_trailing_null_demo', id, ds, y, 'RandomWalkDrift', 3, '1d', MAP{})
+           WHERE forecast_step = 1)
+) THEN 'PASS calendar_agg_trailing_null_matches_by_forecast_origin_and_value' ELSE error(
+    'FAIL calendar_agg_trailing_null_matches_by_forecast_origin_and_value'
+) END AS result;
+
 .print ''
 .print '============================================================================='
 .print 'ALL SECTIONS PASSED'

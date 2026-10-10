@@ -121,12 +121,12 @@ pub fn future_dates(observed: &[i64], horizon: usize, step: CalendarStep) -> Res
             }
             let mut out = Vec::with_capacity(horizon);
             for k in 1..=horizon as i64 {
-                let delta = s
-                    .checked_mul(k)
-                    .ok_or_else(|| ForecastError::InvalidInput("step * horizon overflow".to_string()))?;
-                let date = base
-                    .checked_add(delta)
-                    .ok_or_else(|| ForecastError::InvalidInput("future date overflow".to_string()))?;
+                let delta = s.checked_mul(k).ok_or_else(|| {
+                    ForecastError::InvalidInput("step * horizon overflow".to_string())
+                })?;
+                let date = base.checked_add(delta).ok_or_else(|| {
+                    ForecastError::InvalidInput("future date overflow".to_string())
+                })?;
                 out.push(date);
             }
             Ok(out)
@@ -153,12 +153,15 @@ pub fn future_dates(observed: &[i64], horizon: usize, step: CalendarStep) -> Res
 
             let mut out = Vec::with_capacity(horizon);
             for k in 1..=horizon as i64 {
-                let months_to_add = (m as i64)
-                    .checked_mul(k)
-                    .ok_or_else(|| ForecastError::InvalidInput("month step * horizon overflow".to_string()))?;
-                let total_months = base_total_months
-                    .checked_add(months_to_add)
-                    .ok_or_else(|| ForecastError::InvalidInput("month arithmetic overflow".to_string()))?;
+                let months_to_add = (m as i64).checked_mul(k).ok_or_else(|| {
+                    ForecastError::InvalidInput("month step * horizon overflow".to_string())
+                })?;
+                let total_months =
+                    base_total_months
+                        .checked_add(months_to_add)
+                        .ok_or_else(|| {
+                            ForecastError::InvalidInput("month arithmetic overflow".to_string())
+                        })?;
 
                 let new_year = i32::try_from(total_months.div_euclid(12))
                     .map_err(|_| ForecastError::InvalidInput("year out of range".to_string()))?;
@@ -171,9 +174,10 @@ pub fn future_dates(observed: &[i64], horizon: usize, step: CalendarStep) -> Res
                     base_day.min(max_day)
                 };
 
-                let new_date = NaiveDate::from_ymd_opt(new_year, new_month, new_day).ok_or_else(|| {
-                    ForecastError::InvalidInput("invalid date in future_dates".to_string())
-                })?;
+                let new_date =
+                    NaiveDate::from_ymd_opt(new_year, new_month, new_day).ok_or_else(|| {
+                        ForecastError::InvalidInput("invalid date in future_dates".to_string())
+                    })?;
                 let new_dt = new_date.and_time(base_time);
                 out.push(datetime_to_micros(new_dt));
             }
@@ -243,13 +247,19 @@ mod tests {
             ymd_micros(2023, 1, 2),
             ymd_micros(2023, 1, 3),
         ];
-        assert_eq!(detect_step(&dates).unwrap(), CalendarStep::Fixed(ONE_DAY_MICROS));
+        assert_eq!(
+            detect_step(&dates).unwrap(),
+            CalendarStep::Fixed(ONE_DAY_MICROS)
+        );
     }
 
     #[test]
     fn detect_step_single_date_is_fixed_one_day() {
         let dates = vec![ymd_micros(2023, 1, 1)];
-        assert_eq!(detect_step(&dates).unwrap(), CalendarStep::Fixed(ONE_DAY_MICROS));
+        assert_eq!(
+            detect_step(&dates).unwrap(),
+            CalendarStep::Fixed(ONE_DAY_MICROS)
+        );
     }
 
     #[test]
@@ -337,7 +347,10 @@ mod tests {
     fn future_dates_year_end_series_steps_by_twelve_months() {
         let dates = vec![ymd_micros(2022, 12, 31), ymd_micros(2023, 12, 31)];
         let out = future_dates(&dates, 2, CalendarStep::Months(12)).unwrap();
-        assert_eq!(out, vec![ymd_micros(2024, 12, 31), ymd_micros(2025, 12, 31)]);
+        assert_eq!(
+            out,
+            vec![ymd_micros(2024, 12, 31), ymd_micros(2025, 12, 31)]
+        );
     }
 
     #[test]
@@ -356,11 +369,7 @@ mod tests {
         let out = future_dates(&dates, 3, CalendarStep::Fixed(ONE_DAY_MICROS)).unwrap();
         assert_eq!(
             out,
-            vec![
-                ONE_DAY_MICROS * 2,
-                ONE_DAY_MICROS * 3,
-                ONE_DAY_MICROS * 4,
-            ]
+            vec![ONE_DAY_MICROS * 2, ONE_DAY_MICROS * 3, ONE_DAY_MICROS * 4,]
         );
     }
 }

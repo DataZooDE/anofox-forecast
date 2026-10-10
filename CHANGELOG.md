@@ -59,10 +59,19 @@ use the semver numbering this project started with.
   `NULL`/`NaN` rows are trimmed before fitting (the forecast horizon still starts from the
   period after the series' ORIGINAL last row); an all-missing or fewer-than-3-valid-value
   series is a hard, per-group-isolated error; `±Inf` anywhere is a hard error naming the index.
-  **Exception:** `ts_forecast_agg` drops `NULL`/`NaN`-valued rows entirely before fitting
-  rather than interpolating interior gaps, and trailing `NULL` rows move its forecast origin
-  back to the last non-`NULL` row instead of staying anchored to the series' original last
-  row — aligning this surface with the rest is tracked for Phase 12 (RUST-08).
+- **`ts_forecast_agg` uses the shared forecasting NULL policy and calendar-correct dates
+  (D-11, D-12, Phase 12/RUST-08).** It no longer drops `NULL`-valued rows before fitting;
+  interior `NULL`s are interpolated and trailing `NULL` rows keep the forecast origin
+  anchored to the series' ORIGINAL last row, exactly like `ts_forecast_by` — only a `NULL`
+  **timestamp** drops a row now.
+- **Monthly/quarterly/yearly forecast dates follow the month-end rule (`ts_forecast_by`,
+  `ts_forecast_agg`).** Forecast dates for `'1mo'`/`'3mo'`/`'1q'`/`'1y'` frequencies are
+  computed in Rust via a calendar-aware rule instead of fixed-microsecond arithmetic: a
+  series whose every observed date is a month-end forecasts month-ends (no drift into a
+  short month, e.g. a series ending `2023-11-30` now forecasts `2023-12-31` /
+  `2024-01-31` / `2024-02-29`, not `2023-12-30` / ...); otherwise the day-of-month is kept
+  and clamped to each target month's length. `ts_forecast_agg` and `ts_forecast_by` now
+  agree on forecast dates, not just values, for the same series.
 - **`ts_forecast_ensemble_by`'s `seasonal_period := 0` now auto-detects** the same way
   `ts_forecast_by` does, instead of requiring every member's period to be given explicitly.
 - **`ts_forecast_agg` now validates params with the same closed key set as `ts_forecast_by`**
@@ -201,6 +210,11 @@ use the semver numbering this project started with.
   `ts_detect_changepoints` scalar bodies in `ts_changepoints.cpp` were unreachable from SQL
   (their `Register*` functions were no-ops) and are deleted along with their private
   `ExtractListAsDouble`/feature-name helpers.
+- **`detect_frequency`'s mode is now deterministic on tied consecutive-difference counts**
+  (D-12, plan 12-05): ties are broken by the SMALLER interval, independent of hash-map
+  iteration order (previously `HashMap::into_iter().max_by_key(count)` could return either
+  tied value depending on iteration order — rare but nondeterministic input-dependent
+  behavior for the frequency-detection paths that rely on this mode).
 
 ## [2026.09.26] - 2026-09-26
 

@@ -38,6 +38,7 @@ mod test_fixtures;
 pub use bootstrap::{
     bootstrap_intervals, bootstrap_quantiles, BootstrapIntervalsResult, BootstrapQuantilesResult,
 };
+pub use calendar::{detect_step, future_dates, CalendarStep, ONE_DAY_MICROS};
 pub use changepoint::{
     detect_changepoints, detect_changepoints_bocpd, BocpdResult, ChangepointResult, CostFunction,
 };
@@ -68,7 +69,6 @@ pub use conformal::{
     ConformalStrategy,
     PredictionIntervals,
 };
-pub use calendar::{detect_step, future_dates, CalendarStep, ONE_DAY_MICROS};
 pub use decomposition::{mstl_decompose, InsufficientDataMode, MstlDecomposition};
 pub use detrending::{
     decompose, decompose_additive, decompose_multiplicative, detrend, detrend_auto, detrend_diff,

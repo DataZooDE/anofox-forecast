@@ -3,8 +3,8 @@
 //! explicit step, and writes exactly `horizon` dates into a caller-allocated
 //! buffer.
 
-use anofox_fcst_ffi::types::AnofoxError;
 use anofox_fcst_ffi::anofox_ts_future_dates;
+use anofox_fcst_ffi::types::AnofoxError;
 
 const ONE_DAY_MICROS: i64 = 86_400_000_000;
 
@@ -19,11 +19,14 @@ fn ymd_micros(year: i32, month: u32, day: u32) -> i64 {
 fn month_end_series(start_year: i32, months: u32) -> Vec<i64> {
     (0..months)
         .map(|i| {
-            let first = chrono::NaiveDate::from_ymd_opt(start_year, 1, 1).unwrap()
-                + chrono::Months::new(i);
+            let first =
+                chrono::NaiveDate::from_ymd_opt(start_year, 1, 1).unwrap() + chrono::Months::new(i);
             let next = first + chrono::Months::new(1);
             let last = next.pred_opt().unwrap();
-            last.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_micros()
+            last.and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc()
+                .timestamp_micros()
         })
         .collect()
 }
@@ -116,7 +119,11 @@ fn horizon_zero_returns_true_without_writing() {
             &mut error,
         )
     };
-    assert!(success, "expected success for horizon=0, error code: {:?}", error.code);
+    assert!(
+        success,
+        "expected success for horizon=0, error code: {:?}",
+        error.code
+    );
 }
 
 #[test]

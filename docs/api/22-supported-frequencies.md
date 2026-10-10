@@ -67,6 +67,38 @@ Numeric multipliers are supported:
 
 ---
 
+## Calendar Stepping for Forecast Dates (D-12)
+
+`ts_forecast_by` and `ts_forecast_agg` compute monthly/quarterly/yearly forecast dates
+(`'1mo'`/`'3mo'`/`'1q'`/`'1y'`) with a calendar-aware rule instead of fixed-microsecond
+arithmetic, so a series ending in a short month does not drift off month-end:
+
+- If every observed date is a month-end, every forecast date is also a month-end (clamped
+  to each target month's actual length — e.g. February 29 in a leap year).
+- Otherwise the last observed day-of-month is kept, clamped to the target month's length
+  (e.g. a series ending on the 30th of a 30-day month forecasts the 30th of each
+  following month, including months that have a 30th).
+- `'3mo'`/`'1q'` and `'1y'` apply the same rule with 3- and 12-month steps.
+- Each step is computed from the last observation, never cumulatively (step *k* is always
+  `last_observation_month + k * step_months`, not `step_k-1 + step_months`).
+
+```sql
+CREATE OR REPLACE TABLE me AS
+SELECT 'A' AS id,
+       (last_day(DATE '2023-01-01' + INTERVAL (i) MONTH)) AS ds,
+       (100 + i)::DOUBLE AS y
+FROM range(11) t(i);
+
+SELECT ds FROM ts_forecast_by('me', id, ds, y, 'Naive', 3, '1mo', MAP{}) ORDER BY forecast_step;
+-- ds = 2023-12-31, 2024-01-31, 2024-02-29 (no drift into a 30-day month)
+```
+
+`ts_forecast_agg` applies the identical rule with the frequency auto-detected from the
+observed dates (no `frequency` argument), and agrees with `ts_forecast_by` on every
+forecast date for the same series (D-11 parity).
+
+---
+
 ## Common Use Cases
 
 ```sql

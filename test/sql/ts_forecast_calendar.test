@@ -1,0 +1,250 @@
+# name: test/sql/ts_forecast_calendar.test
+# description: Natively-run SQL value assertions for the D-12 Rust calendar
+#              rule (month-end-preserving / day-of-month-clamp stepping,
+#              quarterly/yearly stepping) and D-11 ts_forecast_agg==ts_forecast_by
+#              NULL parity. Runs WITHOUT `require json` (plan 12-05).
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup
+#######################################
+
+# 11 month-end dates, Jan 2023 .. Nov 2023 (all month-ends by construction).
+statement ok
+CREATE TABLE me AS
+SELECT 'A' AS id, last_day(DATE '2023-01-01' + INTERVAL (i) MONTH) AS ds, (100 + i)::DOUBLE AS y
+FROM range(11) t(i);
+
+# Not every date is a month-end (only 2023-02-28) -> clamp rule applies,
+# keeping the base (last observed) day-of-month = 30.
+statement ok
+CREATE TABLE d30 AS
+SELECT 'A' AS id, ds, y::DOUBLE AS y
+FROM (VALUES (DATE '2023-01-30', 1), (DATE '2023-02-28', 2), (DATE '2023-03-30', 3), (DATE '2023-04-30', 4))
+     AS t(ds, y);
+
+# Quarter-end dates (also month-ends) -> Months(3) step, month-end preserved.
+statement ok
+CREATE TABLE qe AS
+SELECT 'A' AS id, ds, y::DOUBLE AS y
+FROM (VALUES (DATE '2022-03-31', 1), (DATE '2022-06-30', 2), (DATE '2022-09-30', 3),
+              (DATE '2022-12-31', 4), (DATE '2023-03-31', 5))
+     AS t(ds, y);
+
+# Year-end dates -> Months(12) step.
+statement ok
+CREATE TABLE ye AS
+SELECT 'A' AS id, (DATE '2019-12-31' + INTERVAL (i) YEAR) AS ds, (i + 1)::DOUBLE AS y
+FROM range(5) t(i);
+
+# Mid-month dates (15th of each month) -> Months(1) step, day-of-month 15 kept.
+statement ok
+CREATE TABLE mid AS
+SELECT 'A' AS id, (DATE '2023-01-15' + INTERVAL (i) MONTH) AS ds, (i + 1)::DOUBLE AS y
+FROM range(6) t(i);
+
+# Same fixture as docs/api/07-forecasting.md's input-handling section
+# (trailing NULLs must not pull the forecast origin backward).
+statement ok
+CREATE TABLE trailing_null_demo AS
+SELECT 'A' AS id, (DATE '2020-01-01' + INTERVAL (i) DAY) AS ds,
+       CASE WHEN i >= 30 THEN NULL ELSE i::DOUBLE END AS y
+FROM range(32) AS t(i);
+
+# Daily series with one interior NULL (i=12) — ts_forecast_agg must
+# interpolate it exactly like ts_forecast_by (D-11), not splice it out.
+statement ok
+CREATE TABLE inull AS
+SELECT 'A' AS id, (DATE '2024-01-01' + INTERVAL (i) DAY) AS ds,
+       CASE WHEN i = 12 THEN NULL ELSE i::DOUBLE END AS y
+FROM range(30) AS t(i);
+
+# R AirPassengers fixture (same as test/sql/ts_forecast_crate_delegation.test)
+# for a realistic monthly agg==by date parity check.
+statement ok
+CREATE TABLE air AS
+SELECT
+    'A' AS id,
+    ('1949-01-01'::DATE + (i || ' months')::INTERVAL)::DATE AS ds,
+    y::DOUBLE AS y
+FROM (
+    SELECT unnest(range(144)) AS i,
+           unnest([112, 118, 132, 129, 121, 135, 148, 148, 136, 119, 104, 118,
+                   115, 126, 141, 135, 125, 149, 170, 170, 158, 133, 114, 140,
+                   145, 150, 178, 163, 172, 178, 199, 199, 184, 162, 146, 166,
+                   171, 180, 193, 181, 183, 218, 230, 242, 209, 191, 172, 194,
+                   196, 196, 236, 235, 229, 243, 264, 272, 237, 211, 180, 201,
+                   204, 188, 235, 227, 234, 264, 302, 293, 259, 229, 203, 229,
+                   242, 233, 267, 269, 270, 315, 364, 347, 312, 274, 237, 278,
+                   284, 277, 317, 313, 318, 374, 413, 405, 355, 306, 271, 306,
+                   315, 301, 356, 348, 355, 422, 465, 467, 404, 347, 305, 336,
+                   340, 318, 362, 348, 363, 435, 491, 505, 404, 359, 310, 337,
+                   360, 342, 406, 396, 420, 472, 548, 559, 463, 407, 362, 405,
+                   417, 391, 419, 461, 472, 535, 622, 606, 508, 461, 390, 432]) AS y
+);
+
+#######################################
+# me (all month-end): agg and by agree on month-end dates, no drift into a
+# short month (D-12). forecast_step 1..3 -> 2023-12-31, 2024-01-31, 2024-02-29.
+#######################################
+
+query I
+SELECT (ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 3, MAP{})).forecast_timestamp =
+    [TIMESTAMP '2023-12-31 00:00:00', TIMESTAMP '2024-01-31 00:00:00', TIMESTAMP '2024-02-29 00:00:00']
+FROM me;
+----
+true
+
+query I
+SELECT list(ds ORDER BY forecast_step) = [DATE '2023-12-31', DATE '2024-01-31', DATE '2024-02-29']
+FROM ts_forecast_by('me', id, ds, y, 'Naive', 3, '1mo', MAP{});
+----
+true
+
+#######################################
+# d30 (NOT all month-end): day-of-month 30 (the base's day) is kept and
+# clamped to each target month's length — no month-end snapping.
+#######################################
+
+query I
+SELECT (ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 3, MAP{})).forecast_timestamp =
+    [TIMESTAMP '2023-05-30 00:00:00', TIMESTAMP '2023-06-30 00:00:00', TIMESTAMP '2023-07-30 00:00:00']
+FROM d30;
+----
+true
+
+query I
+SELECT list(ds ORDER BY forecast_step) = [DATE '2023-05-30', DATE '2023-06-30', DATE '2023-07-30']
+FROM ts_forecast_by('d30', id, ds, y, 'Naive', 3, '1mo', MAP{});
+----
+true
+
+#######################################
+# qe (quarter-end, also month-end): Months(3) step, month-end preserved.
+#######################################
+
+query I
+SELECT (ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 3, MAP{})).forecast_timestamp =
+    [TIMESTAMP '2023-06-30 00:00:00', TIMESTAMP '2023-09-30 00:00:00', TIMESTAMP '2023-12-31 00:00:00']
+FROM qe;
+----
+true
+
+#######################################
+# ye (year-end): Months(12) step.
+#######################################
+
+query I
+SELECT (ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 2, MAP{})).forecast_timestamp =
+    [TIMESTAMP '2024-12-31 00:00:00', TIMESTAMP '2025-12-31 00:00:00']
+FROM ye;
+----
+true
+
+#######################################
+# mid (15th of each month, never a month-end): day-of-month 15 is kept.
+#######################################
+
+query I
+SELECT (ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 2, MAP{})).forecast_timestamp =
+    [TIMESTAMP '2023-07-15 00:00:00', TIMESTAMP '2023-08-15 00:00:00']
+FROM mid;
+----
+true
+
+#######################################
+# trailing_null_demo (D-11): ts_forecast_agg no longer splices NULL-valued
+# trailing rows out before fitting — forecast_step=1 stays anchored to the
+# ORIGINAL last row (2020-02-02), matching ts_forecast_by exactly (date AND
+# value), not the old 2020-01-31 / yhat=30.0 spliced-origin behavior.
+#######################################
+
+query I
+SELECT (ts_forecast_agg(ds::TIMESTAMP, y, 'RandomWalkDrift', 3, MAP{})).forecast_timestamp[1] = TIMESTAMP '2020-02-02 00:00:00'
+FROM trailing_null_demo;
+----
+true
+
+query I
+SELECT (ts_forecast_agg(ds::TIMESTAMP, y, 'RandomWalkDrift', 3, MAP{})).point_forecast[1] = 32.0
+FROM trailing_null_demo;
+----
+true
+
+query I
+SELECT
+    (SELECT (ts_forecast_agg(ds::TIMESTAMP, y, 'RandomWalkDrift', 3, MAP{})).forecast_timestamp[1]
+     FROM trailing_null_demo)
+    = (SELECT ds::TIMESTAMP FROM ts_forecast_by('trailing_null_demo', id, ds, y, 'RandomWalkDrift', 3, '1d', MAP{})
+       WHERE forecast_step = 1)
+AND
+    (SELECT (ts_forecast_agg(ds::TIMESTAMP, y, 'RandomWalkDrift', 3, MAP{})).point_forecast[1]
+     FROM trailing_null_demo)
+    = (SELECT yhat FROM ts_forecast_by('trailing_null_demo', id, ds, y, 'RandomWalkDrift', 3, '1d', MAP{})
+       WHERE forecast_step = 1);
+----
+true
+
+#######################################
+# inull (interior NULL, D-11): ts_forecast_agg interpolates it exactly like
+# ts_forecast_by — every point forecast must match within 1e-9, for two
+# different model families (no model-specific NULL-handling drift).
+#######################################
+
+query I
+SELECT count(*) FROM (
+    WITH agg AS (
+        SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 5, MAP{}) AS f FROM inull
+    ), agg_rows AS (
+        SELECT unnest((f).forecast_step) AS forecast_step,
+               unnest((f).point_forecast) AS agg_yhat
+        FROM agg
+    )
+    SELECT * FROM agg_rows
+    JOIN ts_forecast_by('inull', id, ds, y, 'Naive', 5, '1d', MAP{}) AS by_tbl
+    ON agg_rows.forecast_step = by_tbl.forecast_step
+    WHERE abs(agg_rows.agg_yhat - by_tbl.yhat) < 1e-9
+);
+----
+5
+
+query I
+SELECT count(*) FROM (
+    WITH agg AS (
+        SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'SES', 5, MAP{}) AS f FROM inull
+    ), agg_rows AS (
+        SELECT unnest((f).forecast_step) AS forecast_step,
+               unnest((f).point_forecast) AS agg_yhat
+        FROM agg
+    )
+    SELECT * FROM agg_rows
+    JOIN ts_forecast_by('inull', id, ds, y, 'SES', 5, '1d', MAP{}) AS by_tbl
+    ON agg_rows.forecast_step = by_tbl.forecast_step
+    WHERE abs(agg_rows.agg_yhat - by_tbl.yhat) < 1e-9
+);
+----
+5
+
+#######################################
+# air (realistic monthly fixture): agg forecast_timestamp list equals the
+# ts_forecast_by ds list (cast to TIMESTAMP) for every one of 12 steps.
+#######################################
+
+query I
+SELECT count(*) FROM (
+    WITH agg AS (
+        SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'AutoETS', 12, MAP{'seasonal_period': '12'}) AS f FROM air
+    ), agg_rows AS (
+        SELECT unnest((f).forecast_step) AS forecast_step,
+               unnest((f).forecast_timestamp) AS agg_ts
+        FROM agg
+    )
+    SELECT * FROM agg_rows
+    JOIN ts_forecast_by('air', id, ds, y, 'AutoETS', 12, '1mo', MAP{'seasonal_period': '12'}) AS by_tbl
+    ON agg_rows.forecast_step = by_tbl.forecast_step
+    WHERE agg_rows.agg_ts = by_tbl.ds::TIMESTAMP
+);
+----
+12

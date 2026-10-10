@@ -507,10 +507,12 @@ FROM sales GROUP BY product_id;
 Access fields: `(fcst).point_forecast`, `(fcst).lower_90`, etc.
 
 Same params (validated against the same closed key set), same validation, and same SQL-error
-behavior for invalid model/parameter values as `ts_forecast_by` (10-10, FCST-06). One
-exception: `ts_forecast_agg` drops `NULL`-valued rows before fitting rather than
-interpolating interior gaps or anchoring the forecast origin to trailing `NULL`s — aligning
-this with `ts_forecast_by` is tracked for Phase 12 (RUST-08).
+behavior for invalid model/parameter values as `ts_forecast_by` (10-10, FCST-06). Input
+handling now matches `ts_forecast_by` exactly (Phase 12, D-11): interior `NULL`s are
+interpolated, and a `NULL`-valued trailing row keeps the forecast origin anchored to the
+series' ORIGINAL last row — only a `NULL` **timestamp** drops a row. Forecast dates come
+from the same Rust calendar rule `ts_forecast_by` uses (D-12: month-end-preserving /
+day-of-month-clamp stepping), with the frequency auto-detected from the observed dates.
 
 `insample_fitted` comes from each model's own crate `fitted_values()` — no SES(α=0.3)
 surrogate for any model. Warmup rows (e.g. ARIMA/SARIMA differencing) are `NULL`; when the
