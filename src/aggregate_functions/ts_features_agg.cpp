@@ -12,8 +12,22 @@
 #include <unordered_set>
 #include <limits>
 #include <tuple>
+#include <cmath>
 
 namespace duckdb {
+
+// Strict weak ordering on doubles that is safe for std::sort (NaN sorts after
+// every number). WR-02: same comparator as ts_stats.cpp's StatsValueLess /
+// ts_forecast_agg.cpp's ForecastAggValueLess, used as a deterministic
+// secondary sort key for duplicate timestamps.
+static bool FeaturesAggValueLess(double x, double y) {
+    const bool x_nan = std::isnan(x);
+    const bool y_nan = std::isnan(y);
+    if (x_nan || y_nan) {
+        return !x_nan && y_nan;
+    }
+    return x < y;
+}
 
 // Helper function to emit warnings for unknown feature params
 static void EmitFeatureParamWarnings(const vector<string> &param_names) {
@@ -282,6 +296,13 @@ static void TsFeaturesAggFinalize(Vector &state_vector, AggregateInputData &aggr
 
         // Sort (timestamp, value, valid) triples together by timestamp (D-11:
         // the validity bitmask must stay aligned with the values it describes).
+        // WR-02: duplicate timestamps are tie-broken deterministically (valid
+        // before NULL, then by value with NaN last) — the same comparator
+        // ts_stats.cpp's StatsValueLess and ts_forecast_agg.cpp's
+        // ForecastAggValueLess use — so the result never depends on the order
+        // partial aggregate states were concatenated in Combine() (itself
+        // dependent on thread scheduling); std::sort by timestamp alone left
+        // the relative order of same-timestamp rows unspecified.
         vector<std::tuple<int64_t, double, bool>> sorted_triples;
         sorted_triples.reserve(data.timestamps.size());
         for (size_t j = 0; j < data.timestamps.size(); j++) {
@@ -289,7 +310,15 @@ static void TsFeaturesAggFinalize(Vector &state_vector, AggregateInputData &aggr
         }
         std::sort(sorted_triples.begin(), sorted_triples.end(),
                   [](const std::tuple<int64_t, double, bool> &a, const std::tuple<int64_t, double, bool> &b) {
-                      return std::get<0>(a) < std::get<0>(b);
+                      if (std::get<0>(a) != std::get<0>(b)) {
+                          return std::get<0>(a) < std::get<0>(b);
+                      }
+                      const bool a_valid = std::get<2>(a);
+                      const bool b_valid = std::get<2>(b);
+                      if (a_valid != b_valid) {
+                          return a_valid;
+                      }
+                      return a_valid && FeaturesAggValueLess(std::get<1>(a), std::get<1>(b));
                   });
 
         vector<double> sorted_values;

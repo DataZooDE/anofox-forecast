@@ -13,6 +13,18 @@
 
 namespace duckdb {
 
+// Strict weak ordering on doubles that is safe for std::sort (NaN sorts after
+// every number). WR-02: same comparator as ts_stats.cpp's StatsValueLess,
+// used as a deterministic secondary sort key for duplicate timestamps.
+static bool ForecastAggValueLess(double x, double y) {
+    const bool x_nan = std::isnan(x);
+    const bool y_nan = std::isnan(y);
+    if (x_nan || y_nan) {
+        return !x_nan && y_nan;
+    }
+    return x < y;
+}
+
 // Internal state class (allocated on heap)
 struct TsForecastAggStateData {
     vector<int64_t> timestamps;
@@ -314,14 +326,28 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
         // Sort (timestamp, value, valid) together by timestamp (D-11/D-12):
         // an index sort, not a sort over pair<timestamp,value>, so the
         // per-row validity flag stays aligned with its value through the
-        // reorder (a pair-sort would additionally order ties by value,
-        // silently decoupling `valid` from the row it was recorded for).
+        // reorder. WR-02: duplicate timestamps are tie-broken deterministically
+        // (valid before NULL, then by value with NaN last), the same
+        // comparator ts_stats.cpp's StatsValueLess/TsStatsByFinalize uses, so
+        // the result never depends on the order partial aggregate states were
+        // concatenated in Combine() (which itself depends on thread
+        // scheduling) — std::sort by timestamp alone left the relative order
+        // of same-timestamp rows unspecified.
         vector<size_t> order(data.timestamps.size());
         for (size_t j = 0; j < order.size(); j++) {
             order[j] = j;
         }
-        std::sort(order.begin(), order.end(),
-                  [&data](size_t a, size_t b) { return data.timestamps[a] < data.timestamps[b]; });
+        std::sort(order.begin(), order.end(), [&data](size_t a, size_t b) {
+            if (data.timestamps[a] != data.timestamps[b]) {
+                return data.timestamps[a] < data.timestamps[b];
+            }
+            const bool a_valid = data.valid[a];
+            const bool b_valid = data.valid[b];
+            if (a_valid != b_valid) {
+                return a_valid;
+            }
+            return a_valid && ForecastAggValueLess(data.values[a], data.values[b]);
+        });
 
         vector<double> sorted_values;
         vector<int64_t> sorted_timestamps;

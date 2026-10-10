@@ -1,0 +1,82 @@
+# name: test/sql/ts_agg_duplicate_timestamp_tiebreak.test
+# description: WR-02 (phase 12 review fix) regression — ts_forecast_agg / ts_features_agg
+#   must tie-break duplicate timestamps deterministically (valid before NULL, then by
+#   value with NaN last), the same comparator ts_stats.cpp already uses, so a group's
+#   result does not depend on the row arrival order of a same-timestamp duplicate pair
+#   (which previously depended on std::sort's unspecified tie order / Combine()'s
+#   thread-scheduling-dependent concatenation order).
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# ts_forecast_agg: Naive repeats the LAST (sorted) value. A duplicate pair at the
+# final timestamp with distinct values must always sort with the larger value last
+# (value-ascending tie-break), regardless of which of the pair physically arrived
+# first.
+#######################################
+
+statement ok
+CREATE TABLE dup_fcst_a AS
+SELECT * FROM (VALUES
+    ('G', TIMESTAMP '2024-01-01', 10.0::DOUBLE),
+    ('G', TIMESTAMP '2024-01-02', 20.0),
+    ('G', TIMESTAMP '2024-01-03', 30.0),
+    ('G', TIMESTAMP '2024-01-04', 40.0),
+    ('G', TIMESTAMP '2024-01-05', 100.0),
+    ('G', TIMESTAMP '2024-01-05', 200.0)
+) v(id, ts, y);
+
+# Same rows, duplicate pair's arrival order swapped.
+statement ok
+CREATE TABLE dup_fcst_b AS
+SELECT * FROM (VALUES
+    ('G', TIMESTAMP '2024-01-01', 10.0::DOUBLE),
+    ('G', TIMESTAMP '2024-01-02', 20.0),
+    ('G', TIMESTAMP '2024-01-03', 30.0),
+    ('G', TIMESTAMP '2024-01-04', 40.0),
+    ('G', TIMESTAMP '2024-01-05', 200.0),
+    ('G', TIMESTAMP '2024-01-05', 100.0)
+) v(id, ts, y);
+
+query I
+SELECT (ts_forecast_agg(ts, y, 'Naive', 3, MAP([], []))).point_forecast[1]
+FROM dup_fcst_a;
+----
+200.0
+
+query I
+SELECT (ts_forecast_agg(ts, y, 'Naive', 3, MAP([], []))).point_forecast[1]
+FROM dup_fcst_b;
+----
+200.0
+
+#######################################
+# ts_features_agg: last_location_of_maximum is the relative position of the series'
+# (unique) maximum value. If the duplicate-timestamp pair's tie-break depended on
+# arrival order, the maximum (200.0, at the duplicated final timestamp) would land
+# at a different sorted position between dup_fcst_a and dup_fcst_b.
+#######################################
+
+query I
+SELECT (ts_features_agg(ts, y)).last_location_of_maximum FROM dup_fcst_a;
+----
+0.8333333333333334
+
+query I
+SELECT
+    (SELECT (ts_features_agg(ts, y)).last_location_of_maximum FROM dup_fcst_a)
+    IS NOT DISTINCT FROM
+    (SELECT (ts_features_agg(ts, y)).last_location_of_maximum FROM dup_fcst_b);
+----
+true
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE dup_fcst_a;
+
+statement ok
+DROP TABLE dup_fcst_b;
