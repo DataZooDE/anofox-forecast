@@ -13,9 +13,9 @@ use anofox_fcst_ffi::{
     anofox_free_conformal_result, anofox_ts_bias, anofox_ts_bootstrap_intervals,
     anofox_ts_conformal_coverage, anofox_ts_conformal_intervals, anofox_ts_conformal_predict,
     anofox_ts_conformal_predict_per_step, anofox_ts_conformal_quantile, anofox_ts_coverage,
-    anofox_ts_mae, anofox_ts_mase, anofox_ts_mean_interval_width, anofox_ts_mqloss, anofox_ts_mse,
-    anofox_ts_quantile_loss, anofox_ts_r2, anofox_ts_rmae, anofox_ts_rmse, anofox_ts_series_gate,
-    ErrorCode,
+    anofox_ts_diff, anofox_ts_is_constant, anofox_ts_mae, anofox_ts_mase,
+    anofox_ts_mean_interval_width, anofox_ts_mqloss, anofox_ts_mse, anofox_ts_quantile_loss,
+    anofox_ts_r2, anofox_ts_rmae, anofox_ts_rmse, anofox_ts_series_gate, ErrorCode,
 };
 
 /// Build a validity bitmask word (LSB-first) from a slice of bools.
@@ -830,4 +830,136 @@ fn bootstrap_intervals_null_forecast_is_position_preserving_and_null_residual_ma
         anofox_free_bootstrap_result(&mut with_null);
         anofox_free_bootstrap_result(&mut complete);
     }
+}
+
+// ============================================================================
+// anofox_ts_diff (Phase 12 D-05/D-06, plan 12-07)
+// ============================================================================
+
+#[test]
+fn diff_validity_aware_row_aligned() {
+    // [1, 0(NULL), 9, 16, 25] validity 0b11101 (bit1=0), order=1, lag=1.
+    let values = [1.0, 0.0, 9.0, 16.0, 25.0];
+    let validity = bitmask(&[true, false, true, true, true]);
+    let mut out_values = [0.0f64; 5];
+    let mut out_validity = [0u64; 1];
+    let mut error = AnofoxError::default();
+
+    let success = unsafe {
+        anofox_ts_diff(
+            values.as_ptr(),
+            &validity,
+            values.len(),
+            1,
+            1,
+            out_values.as_mut_ptr(),
+            out_validity.as_mut_ptr(),
+            &mut error,
+        )
+    };
+    assert!(success, "error: {}", error_message(&error));
+    assert_eq!(out_validity[0] & 0b11111, 0b11000);
+    assert_eq!(out_values[3], 7.0);
+    assert_eq!(out_values[4], 9.0);
+}
+
+#[test]
+fn diff_seasonal_lag_zero_is_invalid_input() {
+    let values = [1.0, 2.0, 3.0];
+    let mut out_values = [0.0f64; 3];
+    let mut out_validity = [0u64; 1];
+    let mut error = AnofoxError::default();
+
+    let success = unsafe {
+        anofox_ts_diff(
+            values.as_ptr(),
+            std::ptr::null(),
+            values.len(),
+            1,
+            0,
+            out_values.as_mut_ptr(),
+            out_validity.as_mut_ptr(),
+            &mut error,
+        )
+    };
+    assert!(!success);
+    assert_eq!(error.code, ErrorCode::InvalidInput);
+}
+
+// ============================================================================
+// anofox_ts_is_constant (Phase 12 D-09, plan 12-07)
+// ============================================================================
+
+#[test]
+fn is_constant_near_constant_within_epsilon() {
+    let values = [1e-20, 2e-20, 1e-20];
+    let mut result = false;
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_is_constant(
+            values.as_ptr(),
+            std::ptr::null(),
+            values.len(),
+            &mut result,
+            &mut error,
+        )
+    };
+    assert!(success, "error: {}", error_message(&error));
+    assert!(result);
+}
+
+#[test]
+fn is_constant_varying_series_is_false() {
+    let values = [1.0, 2.0, 3.0];
+    let mut result = true;
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_is_constant(
+            values.as_ptr(),
+            std::ptr::null(),
+            values.len(),
+            &mut result,
+            &mut error,
+        )
+    };
+    assert!(success, "error: {}", error_message(&error));
+    assert!(!result);
+}
+
+#[test]
+fn is_constant_fewer_than_two_valid_is_true() {
+    // [1, NULL, 1] via validity bitmask -> only one valid value -> constant.
+    let values = [1.0, 0.0, 1.0];
+    let validity = bitmask(&[true, false, false]);
+    let mut result = false;
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_is_constant(
+            values.as_ptr(),
+            &validity,
+            values.len(),
+            &mut result,
+            &mut error,
+        )
+    };
+    assert!(success, "error: {}", error_message(&error));
+    assert!(result);
+}
+
+#[test]
+fn is_constant_empty_is_true() {
+    let values: [f64; 0] = [];
+    let mut result = false;
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_is_constant(
+            values.as_ptr(),
+            std::ptr::null(),
+            0,
+            &mut result,
+            &mut error,
+        )
+    };
+    assert!(success, "error: {}", error_message(&error));
+    assert!(result);
 }

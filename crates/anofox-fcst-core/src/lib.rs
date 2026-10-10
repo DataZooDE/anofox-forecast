@@ -78,7 +78,8 @@ pub use detrending::{
 pub use error::{ForecastError, Result};
 pub use features::{extract_features, list_features, validate_feature_params};
 pub use filter::{
-    diff, drop_edge_zeros, drop_leading_zeros, drop_trailing_zeros, is_constant, is_short,
+    diff, diff_aligned, diff_lag, drop_edge_zeros, drop_leading_zeros, drop_trailing_zeros,
+    is_constant, is_short,
 };
 pub use forecast::{
     forecast, forecast_explain, forecast_explicit_ensemble, forecast_inspect, forecast_with_exog,

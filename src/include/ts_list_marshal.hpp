@@ -306,4 +306,33 @@ inline void WriteDoubleListNanAsNull(Vector &list_vec, idx_t row_idx, const doub
 	list_entries[row_idx].length = n;
 }
 
+// Writes a flat double array plus a caller-supplied validity bitmask into row
+// `row_idx` of a LIST(DOUBLE) result vector: bit `i` clear in `validity`
+// writes element `i` out as a SQL NULL list element rather than `data[i]`
+// (which may be a meaningless placeholder for that position). Used by
+// `_ts_diff` (Phase 12 D-05/D-06), whose Rust-side output is a
+// validity-aware, row-aligned array rather than NaN-encoded.
+inline void WriteDoubleListWithValidity(Vector &list_vec, idx_t row_idx, const double *data, idx_t n,
+                                         const uint64_t *validity) {
+	idx_t offset = ListVector::GetListSize(list_vec);
+	ListVector::Reserve(list_vec, offset + n);
+	ListVector::SetListSize(list_vec, offset + n);
+
+	auto &child_vec = ListVector::GetEntry(list_vec);
+	auto child_data = FlatVector::GetData<double>(child_vec);
+	auto &child_validity = FlatVector::Validity(child_vec);
+	for (idx_t i = 0; i < n; i++) {
+		bool is_valid = (validity[i / 64] >> (i % 64)) & 1ULL;
+		if (is_valid) {
+			child_data[offset + i] = data[i];
+		} else {
+			child_validity.SetInvalid(offset + i);
+		}
+	}
+
+	auto list_entries = FlatVector::GetData<list_entry_t>(list_vec);
+	list_entries[row_idx].offset = offset;
+	list_entries[row_idx].length = n;
+}
+
 } // namespace duckdb

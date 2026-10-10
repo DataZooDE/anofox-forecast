@@ -318,21 +318,43 @@ ORDER BY group_col, date_col
     "SELECT * FROM ts_fill_nulls_mean_by('sales', product_id, date, qty)",
     "data-preparation"},
 
-    // ts_diff_by: Compute differences (table-based)
-    // C++ API: ts_diff_by(table_name, group_col, date_col, value_col, diff_order)
-    {"ts_diff_by", {"source", "group_col", "date_col", "value_col", "diff_order", nullptr}, {{nullptr, nullptr}},
+    // ts_diff_by: d-th order differences computed in Rust (Phase 12 D-05/D-06)
+    // C++ API: ts_diff_by(table_name, group_col, date_col, value_col, diff_order, seasonal_lag := 1)
+    {"ts_diff_by", {"source", "group_col", "date_col", "value_col", "diff_order", nullptr},
+     {{"seasonal_lag", "1"}, {nullptr, nullptr}},
 R"(
+WITH _src AS (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY group_col ORDER BY date_col) AS __ts_rn
+    FROM query_table(source::VARCHAR)
+),
+_diffed AS (
+    SELECT
+        group_col AS __ts_g,
+        _ts_diff(LIST(value_col::DOUBLE ORDER BY __ts_rn), diff_order::INTEGER, seasonal_lag::INTEGER) AS __ts_list
+    FROM _src
+    GROUP BY group_col
+),
+_unnested AS (
+    SELECT
+        __ts_g,
+        UNNEST(range(1, len(__ts_list) + 1)) AS __ts_rn2,
+        UNNEST(__ts_list) AS __ts_v
+    FROM _diffed
+)
 SELECT
     group_col,
     date_col,
-    value_col - LAG(value_col, diff_order) OVER (
-        PARTITION BY group_col ORDER BY date_col
-    ) AS diff_value
-FROM query_table(source::VARCHAR)
+    __ts_v AS diff_value
+FROM _src
+JOIN _unnested ON group_col IS NOT DISTINCT FROM __ts_g AND __ts_rn = __ts_rn2
 ORDER BY group_col, date_col
 )",
-    "Computes first-order differences for each group's time series (value[t] - value[t-1]).",
-    "SELECT * FROM ts_diff_by('sales', product_id, date, qty)",
+    "Computes d-th order differences for each group's time series in Rust (numpy diff(n=diff_order)): "
+    "value[t] - value[t-1] applied diff_order times. seasonal_lag (default 1) sets the lag-k difference "
+    "step for the old lag-based semantics (R diff(x, lag=seasonal_lag, differences=diff_order)). One row "
+    "per input row; the first diff_order*seasonal_lag rows per group are NULL. Any difference touching a "
+    "NULL input is NULL (never an error).",
+    "SELECT * FROM ts_diff_by('sales', product_id, date, qty, 2) -- or: ..., 1, seasonal_lag := 2)",
     "data-preparation"},
 
     // ts_fill_gaps_by: Fill date gaps with NULL values at specified frequency

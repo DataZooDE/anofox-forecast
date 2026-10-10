@@ -17,7 +17,7 @@
 //! assert!(!is_constant(&trimmed));
 //! ```
 
-use crate::error::Result;
+use crate::error::{ForecastError, Result};
 
 /// Checks if a series is constant (all non-NULL values are the same).
 ///
@@ -130,8 +130,34 @@ pub fn drop_edge_zeros(values: &[Option<f64>]) -> Vec<Option<f64>> {
     drop_trailing_zeros(&trimmed)
 }
 
-/// Compute difference of a series at given order.
-pub fn diff(values: &[f64], order: usize) -> Result<Vec<f64>> {
+/// Compute the lag-`lag` difference of a series, applied `order` times
+/// (R's `diff(x, lag = k, differences = d)`; numpy's `diff(x, n=order)` is
+/// `diff_lag(x, order, 1)`).
+///
+/// # Arguments
+/// * `values` - Input series
+/// * `order` - Number of times the lag-`lag` difference is applied (d-th order)
+/// * `lag` - Step between the two values differenced at each pass; must be >= 1
+///
+/// # Returns
+/// `Err` if `lag == 0`. Output length is `values.len() - order * lag` (empty,
+/// never an error, if the series is too short for the requested order/lag).
+///
+/// # Example
+/// ```
+/// use anofox_fcst_core::filter::diff_lag;
+/// assert_eq!(diff_lag(&[1.0, 4.0, 9.0, 16.0, 25.0], 2, 1).unwrap(), vec![2.0, 2.0, 2.0]);
+/// assert_eq!(diff_lag(&[1.0, 4.0, 9.0, 16.0, 25.0], 1, 2).unwrap(), vec![8.0, 12.0, 16.0]);
+/// ```
+pub fn diff_lag(values: &[f64], order: usize, lag: usize) -> Result<Vec<f64>> {
+    if lag == 0 {
+        return Err(ForecastError::InvalidParameter {
+            param: "lag".to_string(),
+            value: "0".to_string(),
+            reason: "lag must be >= 1".to_string(),
+        });
+    }
+
     if order == 0 {
         return Ok(values.to_vec());
     }
@@ -139,12 +165,65 @@ pub fn diff(values: &[f64], order: usize) -> Result<Vec<f64>> {
     let mut result = values.to_vec();
 
     for _ in 0..order {
-        if result.len() < 2 {
+        if result.len() <= lag {
             return Ok(vec![]);
         }
 
-        result = result.windows(2).map(|w| w[1] - w[0]).collect();
+        result = (lag..result.len())
+            .map(|i| result[i] - result[i - lag])
+            .collect();
     }
+
+    Ok(result)
+}
+
+/// Compute the d-th order difference of a series (numpy `diff(x, n=order)`).
+/// Equivalent to `diff_lag(values, order, 1)`.
+pub fn diff(values: &[f64], order: usize) -> Result<Vec<f64>> {
+    diff_lag(values, order, 1)
+}
+
+/// Option-aware, row-aligned d-th order lag-`lag` difference.
+///
+/// Unlike [`diff_lag`]/[`diff`], the output has the SAME length as `values`:
+/// the first `min(values.len(), order * lag)` entries are `None` (so the
+/// series stays aligned with its original index/dates), and any difference
+/// touching a missing (`None` or `NaN`) input anywhere along the way is
+/// `None` rather than an error — this is the SQL row-wise-transform policy
+/// (Phase 12 orchestrator decision), not the single-series interior-NULL
+/// error rule (D-03).
+///
+/// # Arguments
+/// * `values` - Input series, `None` marking a missing observation
+/// * `order` - Number of times the lag-`lag` difference is applied
+/// * `lag` - Step between the two values differenced at each pass; must be >= 1
+///
+/// # Returns
+/// `Err` if `lag == 0`.
+///
+/// # Example
+/// ```
+/// use anofox_fcst_core::filter::diff_aligned;
+/// let values = vec![Some(1.0), Some(4.0), Some(9.0), Some(16.0), Some(25.0)];
+/// assert_eq!(
+///     diff_aligned(&values, 2, 1).unwrap(),
+///     vec![None, None, Some(2.0), Some(2.0), Some(2.0)]
+/// );
+/// ```
+pub fn diff_aligned(values: &[Option<f64>], order: usize, lag: usize) -> Result<Vec<Option<f64>>> {
+    // NaN-encode missing values so the ordinary diff_lag arithmetic
+    // naturally propagates missingness (NaN - x == NaN, x - NaN == NaN).
+    let nan_encoded: Vec<f64> = values.iter().map(|v| v.unwrap_or(f64::NAN)).collect();
+    let diffed = diff_lag(&nan_encoded, order, lag)?;
+
+    let pad = values.len().saturating_sub(diffed.len());
+    let mut result = Vec::with_capacity(values.len());
+    result.extend(std::iter::repeat(None).take(pad));
+    result.extend(
+        diffed
+            .into_iter()
+            .map(|v| if v.is_nan() { None } else { Some(v) }),
+    );
 
     Ok(result)
 }
@@ -255,5 +334,65 @@ mod tests {
         let values = vec![1.0];
         let result = diff(&values, 2).unwrap();
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_diff_lag_matches_diff_for_lag_one() {
+        let values = vec![1.0, 4.0, 9.0, 16.0, 25.0];
+        assert_eq!(diff_lag(&values, 2, 1).unwrap(), diff(&values, 2).unwrap());
+        assert_eq!(diff_lag(&values, 2, 1).unwrap(), vec![2.0, 2.0, 2.0]);
+    }
+
+    #[test]
+    fn test_diff_lag_seasonal() {
+        let values = vec![1.0, 4.0, 9.0, 16.0, 25.0];
+        assert_eq!(diff_lag(&values, 1, 2).unwrap(), vec![8.0, 12.0, 16.0]);
+        assert_eq!(diff_lag(&values, 2, 2).unwrap(), vec![8.0]);
+    }
+
+    #[test]
+    fn test_diff_lag_zero_is_error() {
+        let values = vec![1.0, 2.0, 3.0];
+        assert!(diff_lag(&values, 1, 0).is_err());
+    }
+
+    #[test]
+    fn test_diff_aligned_basic() {
+        let values = vec![Some(1.0), Some(4.0), Some(9.0), Some(16.0), Some(25.0)];
+        assert_eq!(
+            diff_aligned(&values, 2, 1).unwrap(),
+            vec![None, None, Some(2.0), Some(2.0), Some(2.0)]
+        );
+    }
+
+    #[test]
+    fn test_diff_aligned_interior_null_propagates() {
+        let values = vec![Some(1.0), None, Some(9.0), Some(16.0), Some(25.0)];
+        assert_eq!(
+            diff_aligned(&values, 1, 1).unwrap(),
+            vec![None, None, None, Some(7.0), Some(9.0)]
+        );
+        assert_eq!(
+            diff_aligned(&values, 2, 1).unwrap(),
+            vec![None, None, None, None, Some(2.0)]
+        );
+    }
+
+    #[test]
+    fn test_diff_aligned_order_zero_passthrough() {
+        let values = vec![Some(1.0), Some(4.0), Some(9.0)];
+        assert_eq!(diff_aligned(&values, 0, 1).unwrap(), values);
+    }
+
+    #[test]
+    fn test_diff_aligned_single_element() {
+        let values = vec![Some(1.0)];
+        assert_eq!(diff_aligned(&values, 1, 1).unwrap(), vec![None]);
+    }
+
+    #[test]
+    fn test_diff_aligned_lag_zero_is_error() {
+        let values = vec![Some(1.0), Some(2.0)];
+        assert!(diff_aligned(&values, 1, 0).is_err());
     }
 }

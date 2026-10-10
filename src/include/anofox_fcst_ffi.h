@@ -2832,17 +2832,42 @@ bool anofox_ts_fill_nulls_mean(const double *values,
                                struct AnofoxError *out_error);
 
 /**
- * Compute differences of a time series.
+ * Compute d-th order, lag-`seasonal_lag` differences of a time series,
+ * row-aligned: `out_values`/`out_validity` have exactly `length` entries,
+ * with the first `order * seasonal_lag` entries NULL (D-05/D-06) and any
+ * difference touching a missing (invalid) input NULL (SQL row-wise policy).
  *
  * # Safety
- * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ * `values`, `out_values`, `out_validity` and `out_error` must be valid and
+ * non-null. `values` must have `length` elements; `validity` must have
+ * `length.div_ceil(64)` words or be null (meaning all-valid). `out_values`
+ * must have room for `length` doubles; `out_validity` must have room for
+ * `length.div_ceil(64)` words — every word is overwritten by this call.
  */
 bool anofox_ts_diff(const double *values,
+                    const uint64_t *validity,
                     size_t length,
                     int order,
-                    double **out_values,
-                    size_t *out_length,
+                    int seasonal_lag,
+                    double *out_values,
+                    uint64_t *out_validity,
                     struct AnofoxError *out_error);
+
+/**
+ * Checks whether a series is constant (Phase 12 D-09 single source of truth
+ * for `ts_drop_constant_by`): groups with fewer than two non-missing values
+ * (including an all-missing group) classify as constant.
+ *
+ * # Safety
+ * `values` and `out_result` must be valid and non-null. `validity` may be
+ * null (meaning all-valid). `length` must equal the number of `f64`
+ * elements at `values`.
+ */
+bool anofox_ts_is_constant(const double *values,
+                           const uint64_t *validity,
+                           size_t length,
+                           bool *out_result,
+                           struct AnofoxError *out_error);
 
 /**
  * Fill gaps in a time series with new timestamps.

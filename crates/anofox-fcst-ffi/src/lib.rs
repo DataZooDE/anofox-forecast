@@ -4423,24 +4423,115 @@ pub unsafe extern "C" fn anofox_ts_fill_nulls_mean(
 // Filter Functions
 // ============================================================================
 
-/// Compute differences of a time series.
+/// Compute d-th order, lag-`seasonal_lag` differences of a time series,
+/// row-aligned: `out_values`/`out_validity` have exactly `length` entries,
+/// with the first `order * seasonal_lag` entries NULL (D-05/D-06) and any
+/// difference touching a missing (invalid) input NULL (SQL row-wise policy).
 ///
 /// # Safety
-/// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+/// `values`, `out_values`, `out_validity` and `out_error` must be valid and
+/// non-null. `values` must have `length` elements; `validity` must have
+/// `length.div_ceil(64)` words or be null (meaning all-valid). `out_values`
+/// must have room for `length` doubles; `out_validity` must have room for
+/// `length.div_ceil(64)` words — every word is overwritten by this call.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_diff(
     values: *const c_double,
+    validity: *const u64,
     length: size_t,
     order: c_int,
-    out_values: *mut *mut c_double,
-    out_length: *mut size_t,
+    seasonal_lag: c_int,
+    out_values: *mut c_double,
+    out_validity: *mut u64,
     out_error: *mut AnofoxError,
 ) -> bool {
     if !out_error.is_null() {
         *out_error = AnofoxError::success();
     }
 
-    if values.is_null() || out_values.is_null() || out_length.is_null() {
+    if values.is_null() || out_values.is_null() || out_validity.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+
+    if order < 0 {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::InvalidInput, "diff_order must be >= 0");
+        }
+        return false;
+    }
+
+    if seasonal_lag < 1 {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::InvalidInput, "seasonal_lag must be >= 1");
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let series = build_series(values, validity, length);
+        anofox_fcst_core::diff_aligned(&series, order as usize, seasonal_lag as usize)
+    }));
+
+    match result {
+        Ok(Ok(diffed)) => {
+            let out_values_slice = std::slice::from_raw_parts_mut(out_values, length);
+            let n_words = length.div_ceil(64);
+            let out_validity_slice = std::slice::from_raw_parts_mut(out_validity, n_words);
+            for word in out_validity_slice.iter_mut() {
+                *word = 0;
+            }
+            for (i, v) in diffed.into_iter().enumerate() {
+                match v {
+                    Some(x) => {
+                        out_values_slice[i] = x;
+                        out_validity_slice[i / 64] |= 1u64 << (i % 64);
+                    }
+                    None => {
+                        out_values_slice[i] = 0.0;
+                    }
+                }
+            }
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
+/// Checks whether a series is constant (Phase 12 D-09 single source of truth
+/// for `ts_drop_constant_by`): groups with fewer than two non-missing values
+/// (including an all-missing group) classify as constant.
+///
+/// # Safety
+/// `values` and `out_result` must be valid and non-null. `validity` may be
+/// null (meaning all-valid). `length` must equal the number of `f64`
+/// elements at `values`.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_is_constant(
+    values: *const c_double,
+    validity: *const u64,
+    length: size_t,
+    out_result: *mut bool,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if values.is_null() || out_result.is_null() {
         if !out_error.is_null() {
             (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
         }
@@ -4448,26 +4539,14 @@ pub unsafe extern "C" fn anofox_ts_diff(
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let values_vec = std::slice::from_raw_parts(values, length).to_vec();
-        anofox_fcst_core::diff(&values_vec, order.max(0) as usize)
+        let series = build_series(values, validity, length);
+        anofox_fcst_core::is_constant(&series)
     }));
 
     match result {
-        Ok(Ok(diffed)) => {
-            *out_length = diffed.len();
-            match alloc_or_error(&diffed, out_error, "Failed to allocate diff result") {
-                Ok(ptr) => {
-                    *out_values = ptr;
-                    true
-                }
-                Err(()) => false,
-            }
-        }
-        Ok(Err(e)) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
-            }
-            false
+        Ok(is_const) => {
+            *out_result = is_const;
+            true
         }
         Err(_) => {
             if !out_error.is_null() {
