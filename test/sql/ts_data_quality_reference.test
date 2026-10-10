@@ -245,3 +245,58 @@ SELECT count(*) FROM (
 
 statement ok
 DROP TABLE dq_gap20_null;
+
+# === CR-02 regression (iteration 2): a single NULL-dated row inside an otherwise
+# valid group must be DROPPED (value+date together), not turn the whole
+# ts_stats()/ts_data_quality()/ts_data_quality_by() call into a hard failure.
+# Exercises the macros' LIST(date_col ...) GROUP BY aggregation path directly
+# (not the underlying scalar function with a hand-built literal array), which
+# is where the iteration-1 fix was not exercised. ===
+statement ok
+CREATE TABLE null_date_row AS
+SELECT 'A' AS id,
+       CASE WHEN i = 5 THEN NULL
+            ELSE ('2023-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP
+       END AS ds,
+       (i + 1)::DOUBLE AS v
+FROM generate_series(0, 9) AS g(i);
+
+# ts_stats_by already dropped the NULL-dated row (length 9, not 10): the
+# baseline every other dates-aware surface must now match.
+query III
+SELECT length, n_gaps, n_gap_runs
+FROM ts_stats_by('null_date_row', id, ds, v, '1d');
+----
+9	1	1
+
+# ts_stats (macro, scalar _ts_stats_with_dates under the hood) must agree with
+# ts_stats_by instead of throwing "dates list ... contains a NULL element".
+query III
+SELECT length, n_gaps, n_gap_runs
+FROM ts_stats('null_date_row', id, ds, v, '1d');
+----
+9	1	1
+
+# ts_data_quality / ts_data_quality_by (same macro-level LIST(date_col ...) path,
+# same scalar function family) must also agree with each other instead of one
+# throwing.
+query II
+SELECT n_gaps, n_gap_runs
+FROM ts_data_quality('null_date_row', id, ds, v, 3, '1d');
+----
+1	1
+
+query II
+SELECT n_gaps, n_gap_runs
+FROM ts_data_quality_by('null_date_row', id, ds, v, 3, '1d');
+----
+1	1
+
+# ts_data_quality_summary must not throw either (sanity: n_total = 1, no error).
+query I
+SELECT n_total FROM ts_data_quality_summary('null_date_row', id, ds, v, 3);
+----
+1
+
+statement ok
+DROP TABLE null_date_row;

@@ -34,8 +34,11 @@ WITH stats_data AS (
     SELECT
         group_col,
         _ts_stats_with_dates(
-            LIST(value_col::DOUBLE ORDER BY date_col),
-            LIST(date_col::TIMESTAMP ORDER BY date_col),
+            -- CR-02 fix: drop NULL-dated rows (value+date together) before they reach
+            -- the scalar function, matching ts_stats_by's/the aggregates' "drop this
+            -- row" semantics for a NULL date_col, instead of aborting the whole query.
+            LIST(value_col::DOUBLE ORDER BY date_col) FILTER (WHERE date_col IS NOT NULL),
+            LIST(date_col::TIMESTAMP ORDER BY date_col) FILTER (WHERE date_col IS NOT NULL),
             frequency::VARCHAR,
             seasonal_period::INTEGER
         ) AS _stats
@@ -132,8 +135,11 @@ WITH quality_data AS (
     SELECT
         unique_id_col AS unique_id,
         _ts_data_quality(
-            LIST(value_col::DOUBLE ORDER BY date_col),
-            LIST(date_col::TIMESTAMP ORDER BY date_col),
+            -- CR-02 fix: drop NULL-dated rows (value+date together) before they reach
+            -- the scalar function, matching ts_stats_by's/the aggregates' "drop this
+            -- row" semantics for a NULL date_col, instead of aborting the whole query.
+            LIST(value_col::DOUBLE ORDER BY date_col) FILTER (WHERE date_col IS NOT NULL),
+            LIST(date_col::TIMESTAMP ORDER BY date_col) FILTER (WHERE date_col IS NOT NULL),
             frequency::VARCHAR,
             n_short::INTEGER
         ) AS _quality
@@ -167,8 +173,11 @@ WITH quality_data AS (
     SELECT
         unique_id_col AS unique_id,
         _ts_data_quality(
-            LIST(value_col::DOUBLE ORDER BY date_col),
-            LIST(date_col::TIMESTAMP ORDER BY date_col),
+            -- CR-02 fix: drop NULL-dated rows (value+date together) before they reach
+            -- the scalar function, matching ts_stats_by's/the aggregates' "drop this
+            -- row" semantics for a NULL date_col, instead of aborting the whole query.
+            LIST(value_col::DOUBLE ORDER BY date_col) FILTER (WHERE date_col IS NOT NULL),
+            LIST(date_col::TIMESTAMP ORDER BY date_col) FILTER (WHERE date_col IS NOT NULL),
             NULL::VARCHAR,
             n_short::INTEGER
         ) AS _quality
@@ -1880,8 +1889,11 @@ WITH quality_data AS (
     SELECT
         unique_id_col AS unique_id,
         _ts_data_quality(
-            LIST(value_col::DOUBLE ORDER BY date_col),
-            LIST(date_col::TIMESTAMP ORDER BY date_col),
+            -- CR-02 fix: drop NULL-dated rows (value+date together) before they reach
+            -- the scalar function, matching ts_stats_by's/the aggregates' "drop this
+            -- row" semantics for a NULL date_col, instead of aborting the whole query.
+            LIST(value_col::DOUBLE ORDER BY date_col) FILTER (WHERE date_col IS NOT NULL),
+            LIST(date_col::TIMESTAMP ORDER BY date_col) FILTER (WHERE date_col IS NOT NULL),
             frequency::VARCHAR,
             n_short::INTEGER
         ) AS _quality
