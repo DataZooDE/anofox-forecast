@@ -253,9 +253,9 @@ Plans:
 **Plans**: TBD
 
 - [x] 13-01-PLAN.md
-- [ ] 13-02-PLAN.md
-- [ ] 13-03-PLAN.md
-- [ ] 13-04-PLAN.md
+- [x] 13-02-PLAN.md
+- [x] 13-03-PLAN.md
+- [x] 13-04-PLAN.md
 
 ### Phase 14: tsfresh Feature Parity
 
@@ -352,7 +352,7 @@ Phases execute in numeric order: 9 → 10 → 11 → 12 → 13 → 14 → 15 →
 | 10. Forecast Wrapper Delegates to Crate Models | 10/10 | Complete    | 2026-10-09 |
 | 11. Upstream anofox-forecast Correctness Fixes | 10/11 | In Progress|  |
 | 12. Statistics Marshalling Moves to Rust | 8/8 | Complete    | 2026-10-10 |
-| 13. Core Statistics, Metrics & Data Quality | 1/4 | In Progress|  |
+| 13. Core Statistics, Metrics & Data Quality | 4/4 | In Progress|  |
 | 14. tsfresh Feature Parity | 0/TBD | Not started | - |
 | 15. Detection & Decomposition on fdars 0.47 | 0/TBD | Not started | - |
 | 16. Conformal & Bootstrap Correctness | 0/TBD | Not started | - |
