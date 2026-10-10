@@ -203,6 +203,8 @@ static void TsStatsAggFinalize(Vector &state_vector, AggregateInputData &aggr_in
 
         // Call FFI function with dates, frequency_micros=0, FIXED so Rust
         // auto-detects the step (D-04 "detected frequency", Phase 13 plan 13-01).
+        // seasonal_period=0 (D-02, Phase 13 plan 13-02): ts_stats_agg takes no period
+        // argument, so it always auto-detects via seasonality::detect_seasonality.
         TsStatsResult stats_result;
         memset(&stats_result, 0, sizeof(stats_result));
         AnofoxError error;
@@ -214,6 +216,7 @@ static void TsStatsAggFinalize(Vector &state_vector, AggregateInputData &aggr_in
             sorted_values.size(),
             0,
             FIXED,
+            0,
             &stats_result,
             &error
         );
@@ -254,10 +257,22 @@ static void TsStatsAggFinalize(Vector &state_vector, AggregateInputData &aggr_in
         SetStructField<double>(result, 27, row, stats_result.q3);
         SetStructField<double>(result, 28, row, stats_result.iqr);
         SetStructField<double>(result, 29, row, stats_result.autocorr_lag1);
-        SetStructField<double>(result, 30, row, stats_result.trend_strength);
-        SetStructField<double>(result, 31, row, stats_result.seasonality_strength);
 
         auto &children = StructVector::GetEntries(result);
+
+        // trend_strength / seasonality_strength - NULL when the Rust side has no value
+        // (D-02: interior-missing series, or -- for seasonality_strength -- no usable
+        // period / zero seasonal variance).
+        if (stats_result.has_trend_strength) {
+            SetStructField<double>(result, 30, row, stats_result.trend_strength);
+        } else {
+            FlatVector::SetNull(*children[30], row, true);
+        }
+        if (stats_result.has_seasonality_strength) {
+            SetStructField<double>(result, 31, row, stats_result.seasonality_strength);
+        } else {
+            FlatVector::SetNull(*children[31], row, true);
+        }
 
         // entropy - NULL when the Rust side has no entropy value (D-03)
         if (stats_result.has_entropy) {

@@ -26,9 +26,9 @@ struct TsTableMacro {
 // clang-format off
 static const TsTableMacro ts_table_macros[] = {
     // ts_stats: Compute statistics for grouped time series
-    // C++ API: ts_stats(table_name, group_col, date_col, value_col, frequency)
+    // C++ API: ts_stats(table_name, group_col, date_col, value_col, frequency, seasonal_period := 0)
     // Returns: TABLE with expanded statistics columns
-    {"ts_stats", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
+    {"ts_stats", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{"seasonal_period", "0"}, {nullptr, nullptr}},
 R"(
 WITH stats_data AS (
     SELECT
@@ -36,7 +36,8 @@ WITH stats_data AS (
         _ts_stats_with_dates(
             LIST(value_col::DOUBLE ORDER BY date_col),
             LIST(date_col::TIMESTAMP ORDER BY date_col),
-            frequency::VARCHAR
+            frequency::VARCHAR,
+            seasonal_period::INTEGER
         ) AS _stats
     FROM query_table(source::VARCHAR)
     GROUP BY group_col
@@ -82,8 +83,8 @@ SELECT
     (_stats).n_gap_runs AS n_gap_runs
 FROM stats_data
 )",
-    "Computes 36 time series statistics per group (including n_gap_runs). Returns a wide table with one column per statistic.",
-    "SELECT * FROM ts_stats('sales', product_id, date, qty, '1d')",
+    "Computes 36 time series statistics per group (including n_gap_runs). trend_strength/seasonality_strength are STL-based (D-02); seasonal_period (default 0) selects 0=auto-detect, 1=non-seasonal, >=2=explicit period. Returns a wide table with one column per statistic.",
+    "SELECT * FROM ts_stats('sales', product_id, date, qty, '1d', seasonal_period := 12)",
     "statistics"},
 
     // ts_quality_report: Generate quality report from stats table
@@ -1832,7 +1833,7 @@ GROUP BY group_col
     // See: ts_validate_separator.cpp, ts_aggregate_hierarchy.cpp, ts_combine_keys.cpp, ts_split_keys.cpp
 
     // ts_stats_by: Compute time series statistics grouped by a unique ID column
-    // C++ API: ts_stats_by(table_name, group_col, date_col, value_col, frequency)
+    // C++ API: ts_stats_by(table_name, group_col, date_col, value_col, frequency, seasonal_period := 0)
     // Returns: TABLE with group column (preserving original name!) and 36 statistics columns
     //
     // This macro is a thin wrapper around the native streaming implementation (_ts_stats_by_native)
@@ -1840,15 +1841,18 @@ GROUP BY group_col
     // - Bug 1: Preserves the input group column name (was hardcoded as 'id')
     // - Bug 2: Correctly calculates expected_length for monthly/quarterly/yearly frequencies
     // - Bug 3: Correctly detects gaps for calendar frequencies
-    {"ts_stats_by", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
+    // seasonal_period (D-02, Phase 13 plan 13-02): 0 auto-detects, 1 means non-seasonal,
+    // >= 2 is used explicitly for the STL-based trend_strength/seasonality_strength.
+    {"ts_stats_by", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{"seasonal_period", "0"}, {nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_stats_by_native(
     (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
-    frequency
+    frequency,
+    seasonal_period::INTEGER
 )
 )",
-    "Alias for ts_stats. Computes 36 time series statistics per group (including n_gap_runs).",
-    "SELECT * FROM ts_stats_by('sales', product_id, date, qty, '1d')",
+    "Alias for ts_stats. Computes 36 time series statistics per group (including n_gap_runs). seasonal_period (default 0) selects 0=auto-detect, 1=non-seasonal, >=2=explicit period for the STL-based trend_strength/seasonality_strength.",
+    "SELECT * FROM ts_stats_by('sales', product_id, date, qty, '1d', seasonal_period := 12)",
     "statistics"},
 
     // ts_data_quality_by: Alias for ts_data_quality (for API consistency with _by naming pattern)

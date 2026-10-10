@@ -207,13 +207,25 @@ static void PopulateTsStatsResult(Vector &result, idx_t row_idx, const TsStatsRe
     SetStructField<double>(result, 27, row_idx, stats_result.q3);
     SetStructField<double>(result, 28, row_idx, stats_result.iqr);
     SetStructField<double>(result, 29, row_idx, stats_result.autocorr_lag1);
-    SetStructField<double>(result, 30, row_idx, stats_result.trend_strength);
-    SetStructField<double>(result, 31, row_idx, stats_result.seasonality_strength);
     SetStructField<double>(result, 33, row_idx, stats_result.stability);
+
+    // trend_strength / seasonality_strength: NULL when the Rust side has no value
+    // (D-02: interior-missing series, or -- for seasonality_strength -- no usable
+    // period/zero seasonal variance).
+    auto &children = StructVector::GetEntries(result);
+    if (stats_result.has_trend_strength) {
+        SetStructField<double>(result, 30, row_idx, stats_result.trend_strength);
+    } else {
+        FlatVector::SetNull(*children[30], row_idx, true);
+    }
+    if (stats_result.has_seasonality_strength) {
+        SetStructField<double>(result, 31, row_idx, stats_result.seasonality_strength);
+    } else {
+        FlatVector::SetNull(*children[31], row_idx, true);
+    }
 
     // entropy: NULL when the Rust side has no entropy value (D-03: interior-missing or
     // fewer-than-3-present series).
-    auto &children = StructVector::GetEntries(result);
     if (stats_result.has_entropy) {
         SetStructField<double>(result, 32, row_idx, stats_result.entropy);
     } else {
@@ -260,6 +272,8 @@ static void TsStatsFunction(DataChunk &args, ExpressionState &state, Vector &res
             values.data(),
             validity.empty() ? nullptr : validity.data(),
             values.size(),
+            0,  // seasonal_period: auto-detect (D-02); this values-only scalar has no
+                // caller today (ts_stats/ts_stats_by use the dates-aware paths below)
             &stats_result,
             &error
         );
@@ -274,27 +288,31 @@ static void TsStatsFunction(DataChunk &args, ExpressionState &state, Vector &res
     }
 }
 
-// Scalar function for ts_stats with dates and frequency
-// Takes: LIST(DOUBLE) values, LIST(TIMESTAMP) dates, VARCHAR frequency
+// Scalar function for ts_stats with dates, frequency and seasonal_period
+// Takes: LIST(DOUBLE) values, LIST(TIMESTAMP) dates, VARCHAR frequency, INTEGER seasonal_period
 static void TsStatsWithDatesFunction(DataChunk &args, ExpressionState &state, Vector &result) {
     auto &values_vec = args.data[0];
     auto &dates_vec = args.data[1];
     auto &freq_vec = args.data[2];
+    auto &seasonal_period_vec = args.data[3];
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
-    UnifiedVectorFormat values_format, dates_format, freq_format;
+    UnifiedVectorFormat values_format, dates_format, freq_format, seasonal_period_format;
     values_vec.ToUnifiedFormat(count, values_format);
     dates_vec.ToUnifiedFormat(count, dates_format);
     freq_vec.ToUnifiedFormat(count, freq_format);
+    seasonal_period_vec.ToUnifiedFormat(count, seasonal_period_format);
 
     auto freq_data = UnifiedVectorFormat::GetData<string_t>(freq_format);
+    auto seasonal_period_data = UnifiedVectorFormat::GetData<int32_t>(seasonal_period_format);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto values_idx = values_format.sel->get_index(row_idx);
         auto dates_idx = dates_format.sel->get_index(row_idx);
         auto freq_idx = freq_format.sel->get_index(row_idx);
+        auto seasonal_period_idx = seasonal_period_format.sel->get_index(row_idx);
 
         // Check if any input is NULL
         if (!values_format.validity.RowIsValid(values_idx) ||
@@ -302,6 +320,19 @@ static void TsStatsWithDatesFunction(DataChunk &args, ExpressionState &state, Ve
             !freq_format.validity.RowIsValid(freq_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
+        }
+
+        // seasonal_period: NULL -> 0 (auto-detect, D-02); negative is rejected (matches
+        // _ts_stats_by_native's bind-time check, kept here since this scalar validates
+        // per-row rather than once at bind).
+        int64_t seasonal_period = 0;
+        if (seasonal_period_format.validity.RowIsValid(seasonal_period_idx)) {
+            seasonal_period = seasonal_period_data[seasonal_period_idx];
+            if (seasonal_period < 0) {
+                throw InvalidInputException(
+                    "ts_stats: seasonal_period must be >= 0, got %lld",
+                    (long long)seasonal_period);
+            }
         }
 
         // Extract values
@@ -318,7 +349,7 @@ static void TsStatsWithDatesFunction(DataChunk &args, ExpressionState &state, Ve
         string freq_str = freq_data[freq_idx].GetString();
         auto [frequency_micros, frequency_type] = ParseFrequencyForStats(freq_str);
 
-        // Call Rust FFI function with dates and frequency type
+        // Call Rust FFI function with dates, frequency type and seasonal_period (D-02)
         TsStatsResult stats_result;
         AnofoxError error;
 
@@ -329,6 +360,7 @@ static void TsStatsWithDatesFunction(DataChunk &args, ExpressionState &state, Ve
             values.size(),
             frequency_micros,
             frequency_type,
+            static_cast<size_t>(seasonal_period),
             &stats_result,
             &error
         );
@@ -355,6 +387,7 @@ struct TsStatsByBindData : public TableFunctionData {
     string group_col_name;  // Preserved from input
     LogicalType group_logical_type = LogicalType(LogicalTypeId::VARCHAR);
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
+    size_t seasonal_period = 0;  // 0 = auto-detect (D-02)
 };
 
 // ============================================================================
@@ -419,6 +452,18 @@ static unique_ptr<FunctionData> TsStatsByBind(
         auto [micros, ftype] = ParseFrequencyForStats(freq_str);
         bind_data->frequency_micros = micros;
         bind_data->frequency_type = ftype;
+    }
+
+    // seasonal_period (D-02): 3rd positional argument. NULL -> 0 (auto-detect);
+    // negative is a bind-time error naming ts_stats_by.
+    if (input.inputs.size() >= 3 && !input.inputs[2].IsNull()) {
+        int64_t seasonal_period = input.inputs[2].GetValue<int64_t>();
+        if (seasonal_period < 0) {
+            throw InvalidInputException(
+                "ts_stats_by: seasonal_period must be >= 0, got %lld",
+                (long long)seasonal_period);
+        }
+        bind_data->seasonal_period = static_cast<size_t>(seasonal_period);
     }
 
     // Input table must have exactly 3 columns: group, date, value
@@ -695,7 +740,7 @@ static OperatorFinalizeResultType TsStatsByFinalize(
                 }
             }
 
-            // Call Rust FFI function with dates and frequency type
+            // Call Rust FFI function with dates, frequency type and seasonal_period (D-02)
             TsStatsResult stats_result = {};
             AnofoxError error = {};
 
@@ -706,6 +751,7 @@ static OperatorFinalizeResultType TsStatsByFinalize(
                 sorted_values.size(),
                 bind_data.frequency_micros,
                 bind_data.frequency_type,
+                bind_data.seasonal_period,
                 &stats_result,
                 &error
             );
@@ -776,9 +822,21 @@ static OperatorFinalizeResultType TsStatsByFinalize(
         FlatVector::GetData<double>(output.data[28])[out_idx] = stats.q3;
         FlatVector::GetData<double>(output.data[29])[out_idx] = stats.iqr;
         FlatVector::GetData<double>(output.data[30])[out_idx] = stats.autocorr_lag1;
-        FlatVector::GetData<double>(output.data[31])[out_idx] = stats.trend_strength;
-        FlatVector::GetData<double>(output.data[32])[out_idx] = stats.seasonality_strength;
         FlatVector::GetData<double>(output.data[34])[out_idx] = stats.stability;
+
+        // trend_strength / seasonality_strength - NULL when the Rust side has no value
+        // (D-02: interior-missing series, or -- for seasonality_strength -- no usable
+        // period / zero seasonal variance).
+        if (stats.has_trend_strength) {
+            FlatVector::GetData<double>(output.data[31])[out_idx] = stats.trend_strength;
+        } else {
+            FlatVector::SetNull(output.data[31], out_idx, true);
+        }
+        if (stats.has_seasonality_strength) {
+            FlatVector::GetData<double>(output.data[32])[out_idx] = stats.seasonality_strength;
+        } else {
+            FlatVector::SetNull(output.data[32], out_idx, true);
+        }
 
         // entropy - NULL when the Rust side has no entropy value (D-03)
         if (stats.has_entropy) {
@@ -812,12 +870,13 @@ static OperatorFinalizeResultType TsStatsByFinalize(
 }
 
 void RegisterTsStatsByFunction(ExtensionLoader &loader) {
-    // Internal native table function: _ts_stats_by_native(TABLE, frequency)
+    // Internal native table function: _ts_stats_by_native(TABLE, frequency, seasonal_period)
     // Input table must have 3 columns: group_col, date_col, value_col
-    // Called by ts_stats_by SQL macro to preserve column names and handle calendar frequencies
+    // Called by ts_stats_by SQL macro to preserve column names and handle calendar
+    // frequencies; seasonal_period (D-02) is always passed by the macro (default 0).
     // This is an internal function - users should call ts_stats_by() instead
     TableFunction func("_ts_stats_by_native",
-        {LogicalType::TABLE, LogicalType(LogicalTypeId::VARCHAR)},
+        {LogicalType::TABLE, LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::INTEGER)},
         nullptr,  // No execute function - use in_out_function
         TsStatsByBind,
         TsStatsByInitGlobal,
@@ -851,14 +910,15 @@ void RegisterTsStatsFunction(ExtensionLoader &loader) {
     info.internal = true;
     loader.RegisterFunction(info);
 
-    // Internal scalar function with dates and frequency support
-    // _ts_stats_with_dates(values[], dates[], frequency)
+    // Internal scalar function with dates, frequency and seasonal_period support (D-02)
+    // _ts_stats_with_dates(values[], dates[], frequency, seasonal_period)
     ScalarFunctionSet ts_stats_with_dates_set("_ts_stats_with_dates");
 
     ScalarFunction ts_stats_with_dates_func(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType::LIST(LogicalType(LogicalTypeId::TIMESTAMP)),
-         LogicalType(LogicalTypeId::VARCHAR)},
+         LogicalType(LogicalTypeId::VARCHAR),
+         LogicalType(LogicalTypeId::INTEGER)},
         GetTsStatsResultType(),
         TsStatsWithDatesFunction
     );
