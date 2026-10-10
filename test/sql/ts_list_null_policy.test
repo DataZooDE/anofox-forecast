@@ -43,12 +43,18 @@ SELECT ts_r2([1, 2, 3, NULL]::DOUBLE[], [1, 2, 4, 9]::DOUBLE[]);
 ----
 0.5
 
-# ts_mase/ts_rmae: complete across all three columns drops index 1 (baseline NULL).
+# ts_mase (Hyndman-Koehler, D-08): an in-sample NULL is NEVER spliced out and
+# re-paired -- only the specific lag pair(s) touching it are skipped. insample
+# [2, NULL, 4, 5] at seasonal_period=1: pair (idx1,idx0)=(NULL,2) skipped,
+# pair (idx2,idx1)=(4,NULL) skipped, pair (idx3,idx2)=(5,4) kept -> scale=1.0
+# (NOT the spliced (4-2)=2.0 a naive drop-then-re-pair would produce).
+# actual=[1,2,3,4], forecast=[1,2,3,5] -> MAE=0.25 -> MASE=0.25/1.0=0.25.
 query I
-SELECT ts_mase([1, 2, 3, 4]::DOUBLE[], [1, 2, 3, 5]::DOUBLE[], [2, NULL, 4, 5]::DOUBLE[]);
+SELECT ts_mase([1, 2, 3, 4]::DOUBLE[], [1, 2, 3, 5]::DOUBLE[], [2, NULL, 4, 5]::DOUBLE[], 1);
 ----
-0.3333333333333333
+0.25
 
+# ts_rmae: complete across all three columns drops index 1 (baseline NULL). Unchanged by D-08.
 query I
 SELECT ts_rmae([1, 2, 3, 4]::DOUBLE[], [1, 2, 3, 5]::DOUBLE[], [2, NULL, 4, 5]::DOUBLE[]);
 ----

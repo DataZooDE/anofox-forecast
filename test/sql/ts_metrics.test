@@ -128,27 +128,35 @@ SELECT ts_smape([10.0, 20.0], [5.0, 10.0]) < 100.0;
 true
 
 #######################################
-# MASE - Mean Absolute Scaled Error
-# API: ts_mase(actual[], forecast[], baseline[])
+# MASE - Hyndman-Koehler Mean Absolute Scaled Error (D-08, v0.10.0)
+# API: ts_mase(actual[], forecast[], insample[], seasonal_period)
+# The pre-v0.10.0 3-argument (actual, forecast, baseline) form computed a
+# relative MAE, not MASE, and was removed -- see ts_rmae below.
 #######################################
 
-# Perfect forecast - MASE should be 0
+# Perfect forecast - MASE should be 0 (insample lag-1 diffs all 1.0 -> scale 1.0)
 query I
-SELECT ts_mase([1.0, 2.0, 3.0, 4.0, 5.0], [1.0, 2.0, 3.0, 4.0, 5.0], [0.0, 1.0, 2.0, 3.0, 4.0]);
+SELECT ts_mase([1.0, 2.0, 3.0, 4.0, 5.0], [1.0, 2.0, 3.0, 4.0, 5.0], [0.0, 1.0, 2.0, 3.0, 4.0], 1);
 ----
 0.0
 
 # MASE > 0 when forecast differs from actual
 query I
-SELECT ts_mase([1.0, 2.0, 3.0, 4.0, 5.0], [2.0, 3.0, 4.0, 5.0, 6.0], [0.0, 1.0, 2.0, 3.0, 4.0]) > 0;
+SELECT ts_mase([1.0, 2.0, 3.0, 4.0, 5.0], [2.0, 3.0, 4.0, 5.0, 6.0], [0.0, 1.0, 2.0, 3.0, 4.0], 1) > 0;
 ----
 true
 
-# MASE with different baseline
+# MASE with seasonal_period=4 (perfect forecast, scale from lag-4 insample diffs)
 query I
-SELECT ts_mase([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [0.0, 0.0, 1.0, 2.0, 3.0, 4.0]);
+SELECT ts_mase([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [0.0, 0.0, 1.0, 2.0, 3.0, 4.0], 4);
 ----
 0.0
+
+# the removed 3-argument (actual, forecast, baseline) form errors naming ts_rmae
+statement error
+SELECT ts_mase([1.0, 2.0, 3.0, 4.0, 5.0], [1.0, 2.0, 3.0, 4.0, 5.0], [0.0, 1.0, 2.0, 3.0, 4.0]);
+----
+ts_rmae
 
 #######################################
 # R2 - Coefficient of Determination
@@ -430,11 +438,32 @@ SELECT
     110.0 + (i * 2) AS upper_90
 FROM generate_series(11, 20) t(i);
 
-# ts_mase_by with single grouping column
+# ts_mase_by (Hyndman-Koehler, D-08, v0.10.0): history rows (dated before the
+# first forecast, forecast NULL) supply the in-sample seasonal-naive scale;
+# evaluation rows are dated at/after the first forecast. The old 5th-argument
+# baseline-column form was removed -- see ts_rmae_by below for that comparison.
+statement ok
+CREATE TABLE test_mase_history AS
+SELECT
+    'A' AS id, 1 AS fold_id, i AS ds, 100.0 + (i * 2) AS y,
+    CASE WHEN i > 5 THEN 100.0 + (i * 2) + 5 ELSE NULL END AS forecast
+FROM generate_series(1, 10) t(i)
+UNION ALL
+SELECT
+    'B' AS id, 1 AS fold_id, i AS ds, 200.0 + (i * 3) AS y,
+    CASE WHEN i > 5 THEN 200.0 + (i * 3) + 3 ELSE NULL END AS forecast
+FROM generate_series(1, 10) t(i)
+UNION ALL
+SELECT
+    'A' AS id, 2 AS fold_id, i AS ds, 100.0 + (i * 2) AS y,
+    CASE WHEN i > 15 THEN 100.0 + (i * 2) + 5 ELSE NULL END AS forecast
+FROM generate_series(11, 20) t(i);
+
+# ts_mase_by with single grouping column (fold_id = 1 only)
 query II
 SELECT id, mase FROM ts_mase_by(
-    (SELECT id, ds, y, forecast, naive_forecast FROM test_extended_metrics WHERE fold_id = 1),
-    'ds', 'y', 'forecast', 'naive_forecast'
+    (SELECT id, ds, y, forecast FROM test_mase_history WHERE fold_id = 1),
+    'ds', 'y', 'forecast'
 ) ORDER BY id;
 ----
 A	2.5
@@ -443,8 +472,8 @@ B	1.0
 # ts_mase_by with multiple grouping columns (id AND fold_id)
 query I
 SELECT COUNT(*) FROM ts_mase_by(
-    (SELECT id, fold_id, ds, y, forecast, naive_forecast FROM test_extended_metrics),
-    'ds', 'y', 'forecast', 'naive_forecast'
+    (SELECT id, fold_id, ds, y, forecast FROM test_mase_history),
+    'ds', 'y', 'forecast'
 );
 ----
 3
@@ -452,13 +481,23 @@ SELECT COUNT(*) FROM ts_mase_by(
 # ts_mase_by preserves all grouping columns
 query III
 SELECT id, fold_id, mase FROM ts_mase_by(
-    (SELECT id, fold_id, ds, y, forecast, naive_forecast FROM test_extended_metrics),
-    'ds', 'y', 'forecast', 'naive_forecast'
+    (SELECT id, fold_id, ds, y, forecast FROM test_mase_history),
+    'ds', 'y', 'forecast'
 ) ORDER BY id, fold_id;
 ----
 A	1	2.5
 A	2	2.5
 B	1	1.0
+
+# ts_mase_by: the old 5th-argument baseline-column form (a VARCHAR column
+# name literal) errors naming ts_rmae_by
+statement error
+SELECT * FROM ts_mase_by(
+    (SELECT id, fold_id, ds, y, forecast FROM test_mase_history),
+    'ds', 'y', 'forecast', 'naive_forecast'
+);
+----
+ts_rmae_by
 
 # ts_rmae_by with multiple grouping columns
 query I
@@ -523,11 +562,14 @@ B	1	1.5
 # Global metric (no grouping) for extended metrics
 query I
 SELECT COUNT(*) FROM ts_mase_by(
-    (SELECT ds, y, forecast, naive_forecast FROM test_extended_metrics WHERE id = 'A' AND fold_id = 1),
-    'ds', 'y', 'forecast', 'naive_forecast'
+    (SELECT ds, y, forecast FROM test_mase_history WHERE id = 'A' AND fold_id = 1),
+    'ds', 'y', 'forecast'
 );
 ----
 1
+
+statement ok
+DROP TABLE test_mase_history;
 
 # Cleanup
 statement ok

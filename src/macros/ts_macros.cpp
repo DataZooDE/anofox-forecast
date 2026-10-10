@@ -2350,14 +2350,17 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'bi
     "SELECT * FROM ts_bias_by('results', product_id, date, actual, forecast)",
     "metrics"},
 
-    // ts_mase_by: Compute Mean Absolute Scaled Error with GROUP BY ALL
-    // C++ API: ts_mase_by(source, date_col, actual_col, forecast_col, baseline_col)
-    {"ts_mase_by", {"source", "date_col", "actual_col", "forecast_col", "baseline_col", nullptr}, {{nullptr, nullptr}},
+    // ts_mase_by: Compute Hyndman-Koehler Mean Absolute Scaled Error with GROUP BY ALL (D-08)
+    // C++ API: ts_mase_by(source, date_col, actual_col, forecast_col, seasonal_period := 1)
+    // Source must include each group's history rows (date < first forecast date,
+    // forecast NULL) -- they supply the in-sample seasonal-naive scale. The old
+    // 5th-argument baseline-column form was removed in v0.10.0 (see ts_rmae_by).
+    {"ts_mase_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{"seasonal_period", "1"}, {nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_mase_native(source, date_col, actual_col, forecast_col, baseline_col)
+SELECT * FROM _ts_mase_native(source, date_col, actual_col, forecast_col, seasonal_period)
 )",
-    "Computes Mean Absolute Scaled Error comparing forecast to a baseline model per group.",
-    "SELECT * FROM ts_mase_by('results', product_id, date, actual, forecast, baseline)",
+    "Computes Hyndman-Koehler Mean Absolute Scaled Error (MASE) per group: the out-of-sample forecast MAE scaled by the in-sample seasonal-naive MAE at lag seasonal_period (default 1). Source rows dated before each group's first forecast (forecast NULL) supply the in-sample scale. The old baseline-column form was removed in v0.10.0 -- use ts_rmae_by for a relative-MAE comparison.",
+    "SELECT * FROM ts_mase_by('results', product_id, date, actual, forecast, seasonal_period := 4)",
     "metrics"},
 
     // ts_rmae_by: Compute Relative Mean Absolute Error with GROUP BY ALL
