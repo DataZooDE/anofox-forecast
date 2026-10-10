@@ -44,9 +44,25 @@ No params — pure frequency-driven grid completion. Inserted rows have NULL in 
 
 Frequencies: `'1d'`, `'1h'`, `'30m'`, `'1w'`, `'1mo'`, `'1q'`, `'1y'` (Polars-style) or `'1 day'` (DuckDB INTERVAL) or raw int (days).
 
+**Month-end rule (v0.10.0, D-09):** monthly/quarterly/yearly gap fill preserves
+calendar alignment — a month-end series stays month-end (`2024-01-31` → inserted
+`2024-02-29` → `2024-03-31`, not the 1st), a 1st-of-month series stays on the 1st, and
+any other day-of-month keeps its own day (clamped to the target month's length). Same
+rule `ts_fill_forward_by` uses when forward-filling with a calendar frequency.
+
 ```sql
 CREATE TABLE gaps_filled AS
 SELECT * FROM ts_fill_gaps_by('raw', product_id, ds, y, '1d');
+
+-- Month-end series: the inserted row lands on 2024-02-29, not 2024-02-01
+CREATE TABLE month_end_raw AS
+SELECT * FROM (VALUES
+    (1, TIMESTAMP '2024-01-31', 10.0),
+    (1, TIMESTAMP '2024-03-31', 30.0)
+) t(product_id, ds, y);
+
+CREATE TABLE monthly_filled AS
+SELECT * FROM ts_fill_gaps_by('month_end_raw', product_id, ds, y, '1mo');
 ```
 
 ## NULL imputation

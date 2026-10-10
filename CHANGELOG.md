@@ -213,6 +213,35 @@ use the semver numbering this project started with.
   the series has zero seasonal variance; `trend_strength` is `NULL` only for an
   interior-missing series. On the audit's 150-point random walk, `seasonality_strength` is
   now about 0.09 (previously 0.96 under the old lag-peak formula).
+- **`ts_data_quality`/`ts_data_quality_by`/`ts_data_quality_summary`/`ts_data_quality_agg`
+  now use real dates, frequency, and `n_short` (D-05, WRAP-02, Phase 13 plan 13-03)** —
+  previously `temporal_score` was always `1.0` and `n_gaps` was always `0` because the
+  underlying `compute_data_quality` call never received the date array; `n_short` and
+  `frequency` were silently ignored. `n_gaps` is now the number of **missing periods**
+  (same meaning change as `ts_stats`'s `n_gaps`, D-04), with the pre-v0.10.0 meaning
+  (gap occurrences) preserved under a new `n_gap_runs` column; a new `is_short` column
+  reports whether the present-value count is below `n_short`. `structural_score`'s
+  length factor is now `min(1, n_present / n_short)` (was a fixed `/30`). Quality mode/
+  tie logic is deterministic (shares `gaps::detect_step`'s smaller-step tie rule; the
+  old `HashMap`-based `find_mode` is removed). `behavioral_score` (D-06, STAT-04) drops
+  the `|ACF1| > 0.95` penalty entirely and scores constancy (0.0), robust
+  Iglewicz-Hoaglin-modified-z-score outliers, and long zero-runs only — a predictable,
+  easy-to-forecast series is no longer penalised. `ts_data_quality_agg` (Phase 12
+  deferred item (a)) now keeps `NULL`-valued rows (counted in `n_missing`, position
+  preserved) instead of silently dropping them, and uses a fixed `n_short = 30` with
+  auto-detected frequency (it takes no `n_short`/`frequency` argument).
+- **Monthly/quarterly/yearly gap fill and fill-forward preserve calendar alignment
+  (D-09, G24, Phase 13 plan 13-03)** — `ts_fill_gaps_by`/`ts_fill_forward_by` previously
+  always snapped inserted dates to the start of the period (the 1st); they now step
+  from the previous observed date (`ts_fill_gaps_by`) or the last observed date
+  (`ts_fill_forward_by`) using the same month-end-preserving rule `ts_forecast_by`'s
+  future dates use (D-12): a month-end series stays month-end
+  (`2024-01-31` → `2024-02-29` → `2024-03-31`), a 1st-of-month series is unchanged, and
+  any other day-of-month keeps its own day (clamped to the target month's length)
+  instead of snapping to the 1st. `detect_frequency`'s microsecond return unit (Phase
+  12 deferred item (e)) is now documented at the Rust doc-comment, FFI, and
+  [SQL-doc](docs/api/22-supported-frequencies.md#frequency-auto-detection) level
+  (WRAP-03).
 
 ### Added
 

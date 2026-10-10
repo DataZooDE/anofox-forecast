@@ -225,7 +225,9 @@ FROM (VALUES
     ('2023-05-15', 500.0)
 ) AS t(d, v);
 
-# Should fill Feb, Mar, Apr (4 gaps)
+# Should fill Feb, Mar, Apr (4 gaps). D-09/G24 (Phase 13 plan 13-03): neither
+# observed date is month-end or the 1st, so the filled dates keep the observed
+# day-of-month (15th), not the old start-of-month snapping to the 1st.
 query III
 SELECT * FROM _ts_fill_gaps_native(
     (SELECT group_col, date_col, value FROM test_monthly_multi ORDER BY group_col, date_col),
@@ -233,9 +235,9 @@ SELECT * FROM _ts_fill_gaps_native(
 );
 ----
 N	2023-01-15	100.0
-N	2023-02-01	NULL
-N	2023-03-01	NULL
-N	2023-04-01	NULL
+N	2023-02-15	NULL
+N	2023-03-15	NULL
+N	2023-04-15	NULL
 N	2023-05-15	500.0
 
 # Test monthly with DuckDB interval-style "1 month"

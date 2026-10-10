@@ -4809,6 +4809,11 @@ pub unsafe extern "C" fn anofox_ts_fill_forward_dates(
 
 /// Detect the frequency of a time series.
 ///
+/// `out_frequency` is written in MICROSECONDS (the same unit every `dates` array in
+/// this FFI boundary uses) -- previously undocumented at this boundary (Phase 12
+/// deferred item (e), G23/WRAP-03). See `anofox_fcst_core::detect_frequency`'s doc
+/// comment for the tie-break rule.
+///
 /// # Safety
 /// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
 #[no_mangle]

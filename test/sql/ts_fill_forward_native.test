@@ -165,7 +165,10 @@ FROM (VALUES
     ('2023-02-15', 200.0)
 ) AS t(d, v);
 
-# Monthly frequency should correctly extend to May (proper calendar dates)
+# Monthly frequency should correctly extend using calendar dates. D-09/G24 (Phase 13
+# plan 13-03): steps from the LAST OBSERVED DATE (2023-02-15), keeping its
+# day-of-month (15th, not the old start-of-month snapping to the 1st) since it is
+# not month-end; 2023-05-15 would exceed the 2023-05-01 target, so only Mar/Apr fill.
 query III
 SELECT * FROM _ts_fill_forward_native(
     (SELECT group_col, date_col, value FROM test_monthly ORDER BY group_col, date_col),
@@ -175,9 +178,8 @@ SELECT * FROM _ts_fill_forward_native(
 ----
 M	2023-01-15	100.0
 M	2023-02-15	200.0
-M	2023-03-01	NULL
-M	2023-04-01	NULL
-M	2023-05-01	NULL
+M	2023-03-15	NULL
+M	2023-04-15	NULL
 
 # Test monthly with DuckDB interval-style "1 month"
 statement ok
@@ -243,7 +245,8 @@ FROM (VALUES
     ('2020-06-15', 100.0)
 ) AS t(d, v);
 
-# Should extend through 2023
+# Should extend through 2023. D-09/G24: keeps the observed day-of-month (June 15th,
+# not the old start-of-year snapping to Jan 1st) since 2020-06-15 is not month-end.
 query III
 SELECT * FROM _ts_fill_forward_native(
     (SELECT group_col, date_col, value FROM test_yearly ORDER BY group_col, date_col),
@@ -252,9 +255,9 @@ SELECT * FROM _ts_fill_forward_native(
 );
 ----
 Y	2020-06-15	100.0
-Y	2021-01-01	NULL
-Y	2022-01-01	NULL
-Y	2023-01-01	NULL
+Y	2021-06-15	NULL
+Y	2022-06-15	NULL
+Y	2023-06-15	NULL
 
 # ==============================================================================
 # Test duplicate (group, date) pair detection

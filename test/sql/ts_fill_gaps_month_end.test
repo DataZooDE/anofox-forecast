@@ -1,0 +1,84 @@
+# name: test/sql/ts_fill_gaps_month_end.test
+# description: Month-end-preserving gap fill / fill-forward (Phase 13 plan 13-03: D-09,
+#   WRAP-03, G24) -- a month-end series stays month-end instead of snapping to the 1st.
+# group: [sql]
+#
+# Non-json-gated so it runs on every native build.
+
+require anofox_forecast
+
+# --- ts_fill_gaps_by: month-end series stays month-end ---
+statement ok
+CREATE TABLE fg_month_end AS
+SELECT * FROM (VALUES
+    ('m', TIMESTAMP '2024-01-31', 1.0),
+    ('m', TIMESTAMP '2024-04-30', 4.0),
+    ('m', TIMESTAMP '2024-05-31', 5.0)
+) t(id, ds, v);
+
+query III
+SELECT * FROM ts_fill_gaps_by('fg_month_end', id, ds, v, '1mo');
+----
+m	2024-01-31 00:00:00	1.0
+m	2024-02-29 00:00:00	NULL
+m	2024-03-31 00:00:00	NULL
+m	2024-04-30 00:00:00	4.0
+m	2024-05-31 00:00:00	5.0
+
+statement ok
+DROP TABLE fg_month_end;
+
+# --- ts_fill_gaps_by: quarter-end series stays quarter-end ---
+statement ok
+CREATE TABLE fg_quarter_end AS
+SELECT * FROM (VALUES
+    ('q', TIMESTAMP '2023-03-31', 1.0),
+    ('q', TIMESTAMP '2023-09-30', 3.0)
+) t(id, ds, v);
+
+query III
+SELECT * FROM ts_fill_gaps_by('fg_quarter_end', id, ds, v, '1q');
+----
+q	2023-03-31 00:00:00	1.0
+q	2023-06-30 00:00:00	NULL
+q	2023-09-30 00:00:00	3.0
+
+statement ok
+DROP TABLE fg_quarter_end;
+
+# --- ts_fill_gaps_by: 1st-of-month regression case stays unchanged (D-09 does not
+# alter the pre-existing 1st-of-month behaviour, only the month-end/other-day cases) ---
+statement ok
+CREATE TABLE fg_month_start AS
+SELECT * FROM (VALUES
+    ('s', TIMESTAMP '2023-01-01', 1.0),
+    ('s', TIMESTAMP '2023-03-01', 3.0)
+) t(id, ds, v);
+
+query III
+SELECT * FROM ts_fill_gaps_by('fg_month_start', id, ds, v, '1mo');
+----
+s	2023-01-01 00:00:00	1.0
+s	2023-02-01 00:00:00	NULL
+s	2023-03-01 00:00:00	3.0
+
+statement ok
+DROP TABLE fg_month_start;
+
+# --- ts_fill_forward_by: month-end series stays month-end ---
+statement ok
+CREATE TABLE ff_month_end AS
+SELECT * FROM (VALUES
+    ('m', TIMESTAMP '2024-03-31', 1.0)
+) t(id, ds, v);
+
+query III
+SELECT * FROM ts_fill_forward_by('ff_month_end', id, ds, v, TIMESTAMP '2024-06-30', '1mo');
+----
+m	2024-03-31 00:00:00	1.0
+m	2024-04-30 00:00:00	NULL
+m	2024-05-31 00:00:00	NULL
+m	2024-06-30 00:00:00	NULL
+
+statement ok
+DROP TABLE ff_month_end;

@@ -60,6 +60,54 @@ fn is_month_end(micros: i64) -> Result<bool> {
     Ok(dt.day() == last_day)
 }
 
+/// Whether every entry in `dates` falls on the last day of its calendar month.
+/// `true` (vacuously) for an empty slice.
+///
+/// `pub(crate)` so `gaps.rs` (D-09) can share the month-end classification used by
+/// [`future_dates`]'s `Months` branch, instead of re-deriving it.
+pub(crate) fn all_month_end(dates: &[i64]) -> Result<bool> {
+    for &d in dates {
+        if !is_month_end(d)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Step `base_micros` forward (or backward) by `months` whole calendar months,
+/// computed fresh from `base_micros` (never cumulative). `month_end` selects
+/// month-end alignment (clamped to the target month's length) vs. the base's
+/// day-of-month (also clamped). The time-of-day of `base_micros` is preserved.
+///
+/// `pub(crate)` so `gaps.rs` (D-09, G24) can share this with [`future_dates`]'s
+/// `Months` branch, which calls it with `months = m * k` for `k = 1..=horizon`.
+pub(crate) fn step_months(base_micros: i64, months: i64, month_end: bool) -> Result<i64> {
+    let base_dt = micros_to_datetime(base_micros);
+    let base_time = base_dt.time();
+    let base_day = base_dt.day();
+    let base_total_months = base_dt.year() as i64 * 12 + (base_dt.month() as i64 - 1);
+
+    let total_months = base_total_months
+        .checked_add(months)
+        .ok_or_else(|| ForecastError::InvalidInput("month arithmetic overflow".to_string()))?;
+
+    let new_year = i32::try_from(total_months.div_euclid(12))
+        .map_err(|_| ForecastError::InvalidInput("year out of range".to_string()))?;
+    let new_month = (total_months.rem_euclid(12) + 1) as u32;
+
+    let max_day = last_day_of_month(new_year, new_month)?;
+    let new_day = if month_end {
+        max_day
+    } else {
+        base_day.min(max_day)
+    };
+
+    let new_date = NaiveDate::from_ymd_opt(new_year, new_month, new_day)
+        .ok_or_else(|| ForecastError::InvalidInput("invalid date in step_months".to_string()))?;
+    let new_dt = new_date.and_time(base_time);
+    Ok(datetime_to_micros(new_dt))
+}
+
 /// Classify an observed date series into a [`CalendarStep`].
 ///
 /// Fewer than 2 distinct observations -> `Fixed(ONE_DAY_MICROS)` (one day;
@@ -137,49 +185,14 @@ pub fn future_dates(observed: &[i64], horizon: usize, step: CalendarStep) -> Res
                     "Months calendar step must be > 0".to_string(),
                 ));
             }
-            let base_dt = micros_to_datetime(base);
-            let base_time = base_dt.time();
-            let base_day = base_dt.day();
-
-            let mut all_month_end = true;
-            for &d in observed {
-                if !is_month_end(d)? {
-                    all_month_end = false;
-                    break;
-                }
-            }
-
-            let base_total_months = base_dt.year() as i64 * 12 + (base_dt.month() as i64 - 1);
+            let month_end = all_month_end(observed)?;
 
             let mut out = Vec::with_capacity(horizon);
             for k in 1..=horizon as i64 {
                 let months_to_add = (m as i64).checked_mul(k).ok_or_else(|| {
                     ForecastError::InvalidInput("month step * horizon overflow".to_string())
                 })?;
-                let total_months =
-                    base_total_months
-                        .checked_add(months_to_add)
-                        .ok_or_else(|| {
-                            ForecastError::InvalidInput("month arithmetic overflow".to_string())
-                        })?;
-
-                let new_year = i32::try_from(total_months.div_euclid(12))
-                    .map_err(|_| ForecastError::InvalidInput("year out of range".to_string()))?;
-                let new_month = (total_months.rem_euclid(12) + 1) as u32;
-
-                let max_day = last_day_of_month(new_year, new_month)?;
-                let new_day = if all_month_end {
-                    max_day
-                } else {
-                    base_day.min(max_day)
-                };
-
-                let new_date =
-                    NaiveDate::from_ymd_opt(new_year, new_month, new_day).ok_or_else(|| {
-                        ForecastError::InvalidInput("invalid date in future_dates".to_string())
-                    })?;
-                let new_dt = new_date.and_time(base_time);
-                out.push(datetime_to_micros(new_dt));
+                out.push(step_months(base, months_to_add, month_end)?);
             }
             Ok(out)
         }

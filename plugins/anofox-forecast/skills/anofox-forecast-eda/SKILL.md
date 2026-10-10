@@ -30,7 +30,7 @@ ts_stats(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
 
 Returns 36 columns: `length`, `n_nulls`, `n_nan`, `n_zeros`, `n_positive`, `n_negative`, `n_unique_values`, `is_constant`, `n_zeros_start`, `n_zeros_end`, `plateau_size`, `plateau_size_nonzero`, `mean`, `median`, `std_dev`, `variance`, `min`, `max`, `range`, `sum`, `skewness`, `kurtosis`, `tail_index`, `bimodality_coef`, `trimmed_mean`, `coef_variation`, `q1`, `q3`, `iqr`, `autocorr_lag1`, `trend_strength`, `seasonality_strength`, `entropy`, `stability`, plus date-derived `expected_length`, `n_gaps`, and `n_gap_runs`.
 
-**v0.10.0 (Phase 13):** `skewness`/`kurtosis` are now textbook scipy `bias=False` G1/
+**v0.10.0:** `skewness`/`kurtosis` are now textbook scipy `bias=False` G1/
 excess-G2 (previously mixed a population moment with a sample std-dev); `bimodality_coef`
 uses the SAS small-sample formula; `entropy` is now Pincus (1991) approximate entropy
 (`m=2`, `r=0.2*sample sd`; `NULL` for an interior-missing or fewer-than-3-present series) —
@@ -89,21 +89,25 @@ ts_data_quality(source VARCHAR, unique_id_col COLUMN, date_col COLUMN, value_col
                 n_short INTEGER, frequency VARCHAR) → TABLE
 ```
 
-Returns `unique_id` (group column **renamed** — the extension normalises it to `unique_id` in this output, even if the input col was `product_id`), plus `overall_score`, `structural_score`, `temporal_score`, `magnitude_score`, `behavioral_score`, `n_gaps`, `n_missing`, `is_constant`.
+Returns `unique_id` (group column **renamed** — the extension normalises it to `unique_id` in this output, even if the input col was `product_id`), plus `overall_score`, `structural_score`, `temporal_score`, `magnitude_score`, `behavioral_score`, `n_gaps`, `n_gap_runs`, `n_missing`, `is_constant`, `is_short`.
 
-`n_short` is the series-length threshold below which a series is flagged short (typical: 14 for daily, 12 for monthly).
+`n_short` is the minimum "not short" present-value count (typical: 14 for daily, 12 for
+monthly) — it drives `structural_score`'s length factor and the `is_short` flag.
+`frequency` (`'1d'`, `'1mo'`, ... or `NULL`/`''` to auto-detect) is used, together with
+each series' real dates, for `n_gaps`/`n_gap_runs`/`temporal_score`:
 
-**Current limitation:** `temporal_score` is currently always `1.0` and `n_gaps` is currently
-always `0` — the underlying `compute_data_quality` call never receives the date array, so
-neither reflects actual gap structure, and `n_short`/`frequency` are silently ignored by
-this scoring path. `overall_score` is correspondingly inflated by the always-perfect
-`temporal_score` component. (fix planned for v0.10.0, Phase 13)
+- `n_gaps` = missing periods (expected timestamps absent under the frequency) — same
+  meaning as `ts_stats`'s `n_gaps`.
+- `n_gap_runs` = gap occurrences (contiguous runs of missing periods).
+- `temporal_score` = `clamp(1 - 5 * n_gaps / expected_length, 0, 1)`.
+- `behavioral_score` scores constancy, robust (Iglewicz-Hoaglin) outliers, and long
+  zero-runs only — a smooth/predictable series carries no autocorrelation penalty.
 
 ```sql
 SELECT * FROM ts_data_quality('sales', product_id, ds, y, 14, '1d');
 
 -- Rank series by quality (note: output col is `unique_id`, not `product_id`)
-SELECT unique_id, overall_score, structural_score, temporal_score
+SELECT unique_id, overall_score, structural_score, temporal_score, n_gaps, is_short
 FROM ts_data_quality('sales', product_id, ds, y, 14, '1d')
 ORDER BY overall_score;
 ```
@@ -114,7 +118,9 @@ Grouped macro sibling of `ts_data_quality` — same per-series quality scoring b
 
 ### `ts_data_quality_agg` (aggregate)
 
-Same as `ts_stats_agg` — takes `(date, value)`, returns a STRUCT.
+Takes `(date, value)`, returns a STRUCT — no `n_short`/`frequency` arguments: `n_short`
+is always `30` and frequency always auto-detects from the group's own timestamps.
+Keeps `NULL`-valued rows (counted in `n_missing`); skips only `NULL`-timestamp rows.
 
 ```sql
 SELECT product_id,

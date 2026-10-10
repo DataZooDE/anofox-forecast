@@ -150,7 +150,9 @@ GROUP BY product_id;
 
 ### ts_data_quality_by
 
-Assess data quality for multiple series grouped by identifier.
+Assess data quality for multiple series grouped by identifier. Since v0.10.0
+(D-05/D-06) every score is computed from the series' real dates, frequency and
+`n_short` — see the breaking-change note below.
 
 **Signature:**
 ```sql
@@ -162,23 +164,33 @@ ts_data_quality_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col 
 |-----------|------|-------------|
 | `source` | VARCHAR | Source table name |
 | `group_col` | COLUMN | Column for grouping series |
-| `date_col` | COLUMN | Date/timestamp column |
+| `date_col` | COLUMN | Date/timestamp column (used for gap/temporal scoring) |
 | `value_col` | COLUMN | Value column |
-| `n_short` | INTEGER | Minimum series length threshold |
-| `frequency` | VARCHAR | Data frequency (`'1d'`, `'1h'`, `'1w'`, `'1mo'`) |
+| `n_short` | INTEGER | Minimum "not short" present-value count (must be `>= 1`); drives the structural length factor and `is_short` below |
+| `frequency` | VARCHAR | Data frequency (`'1d'`, `'1h'`, `'1w'`, `'1mo'`, `'1q'`, `'1y'`); `NULL` or `''` auto-detects the modal consecutive step from `date_col` (same tie-break as [Supported Frequencies](22-supported-frequencies.md): smaller interval wins) |
 
 **Returns:**
 | Column | Type | Description |
 |--------|------|-------------|
 | `unique_id` | (same as group_col) | Series identifier |
-| `structural_score` | DOUBLE | Structural dimension score (0-1) - measures data completeness |
-| `temporal_score` | DOUBLE | **Currently always `1.0`** — the underlying `compute_data_quality` call never receives the date array (hardcoded `None`), so `n_short` and `frequency` are also silently ignored by this score (fix planned for v0.10.0, Phase 13) |
-| `magnitude_score` | DOUBLE | Magnitude dimension score (0-1) - measures value distribution health |
-| `behavioral_score` | DOUBLE | Behavioral dimension score (0-1) - measures predictability |
-| `overall_score` | DOUBLE | Overall quality score (0-1, higher is better); currently inflated by the always-1.0 `temporal_score` component |
-| `n_gaps` | UBIGINT | **Currently always `0`** for the same reason as `temporal_score` above (fix planned for v0.10.0, Phase 13) |
-| `n_missing` | UBIGINT | Number of missing values |
-| `is_constant` | BOOLEAN | Whether series is constant (no variation) |
+| `structural_score` | DOUBLE | `0.7 * (n_present / length) + 0.3 * min(1, n_present / n_short)`, clamped to `[0, 1]` — completeness weighted with a length factor against `n_short` |
+| `temporal_score` | DOUBLE | `clamp(1 - 5 * n_gaps / expected_length, 0, 1)`; `1.0` when no gap information is available (e.g. a single observation) |
+| `magnitude_score` | DOUBLE | Magnitude dimension score (0-1) - measures value distribution health (IQR outliers, 4-sigma extremes) |
+| `behavioral_score` | DOUBLE | `0.0` for a constant series; otherwise `clamp(1 - 2*outlier_ratio - zero_run_ratio, 0, 1)` — robust (Iglewicz-Hoaglin modified z-score, threshold 3.5) outliers and the longest run of consecutive exact zeros (a `NULL`/missing entry breaks a run), both as a fraction of present values. A predictable/smooth series (even a near-constant-step one) carries **no** autocorrelation penalty — being easy to forecast is not a quality defect |
+| `overall_score` | DOUBLE | Mean of the four scores above |
+| `n_gaps` | UBIGINT | Number of **missing periods**: expected timestamps absent under the declared/detected frequency between the series' first and last date (same meaning as `ts_stats`'s `n_gaps`) |
+| `n_gap_runs` | UBIGINT | Number of gap **occurrences** (contiguous runs of missing periods) — the pre-v0.10.0 meaning of `n_gaps` |
+| `n_missing` | UBIGINT | Number of missing values (`NULL` or `NaN`) |
+| `is_constant` | BOOLEAN | Whether series is constant (no variation among present values) |
+| `is_short` | BOOLEAN | Whether the present-value count is below `n_short` |
+
+> **Breaking change (v0.10.0, D-05):** before this release, `temporal_score`
+> was always `1.0` and `n_gaps` was always `0` — the dates, `frequency`, and `n_short`
+> arguments were silently ignored by the underlying scoring. They are now real,
+> dates-aware computations; existing queries that assumed `temporal_score == 1.0` or
+> `n_gaps == 0` on a gappy series will see different (correct) values. `n_gaps` also
+> changed meaning from "gap occurrences" to "missing periods" (matching `ts_stats`'s
+> D-04 change) — use the new `n_gap_runs` column for the old meaning.
 
 **Example:**
 ```sql
@@ -190,6 +202,8 @@ SELECT
     unique_id,
     overall_score,
     n_gaps,
+    n_gap_runs,
+    is_short,
     is_constant
 FROM ts_data_quality_by('sales', product_id, date, quantity, 10, '1d');
 
@@ -200,6 +214,23 @@ WHERE overall_score > 0.8;
 ```
 
 > **Alias:** `ts_data_quality` is an alias for `ts_data_quality_by`
+
+**`ts_data_quality_agg(date, value)` (aggregate function)** computes the same 10
+columns from a `GROUP BY` instead of a source table name. It takes no `n_short` or
+`frequency` argument: `n_short` is always `30` (the pre-v0.10.0 fixed structural-length
+scale) and frequency always auto-detects from the group's own timestamps. Since v0.10.0
+it also keeps `NULL`-valued rows (counted in `n_missing`, position preserved in the
+date-ordered series — matching `ts_stats_agg`) and skips only rows whose **timestamp**
+is `NULL`.
+
+```sql
+SELECT product_id,
+       (ts_data_quality_agg(date, quantity)).overall_score,
+       (ts_data_quality_agg(date, quantity)).n_gaps,
+       (ts_data_quality_agg(date, quantity)).is_short
+FROM sales
+GROUP BY product_id;
+```
 
 ---
 
@@ -251,7 +282,9 @@ SELECT * FROM ts_stats_summary('stats');
 
 ### ts_data_quality_summary
 
-Generate summary of data quality across all series.
+Generate summary of data quality across all series. Takes no `frequency` argument —
+each series' frequency is auto-detected from its own `date_col` (same auto-detect
+rule as a `NULL` `frequency` on `ts_data_quality_by`).
 
 **Signature:**
 ```sql
@@ -263,9 +296,9 @@ ts_data_quality_summary(source VARCHAR, unique_id_col COLUMN, date_col COLUMN, v
 |-----------|------|-------------|
 | `source` | VARCHAR | Source table name |
 | `unique_id_col` | COLUMN | Column for grouping series |
-| `date_col` | COLUMN | Date/timestamp column |
+| `date_col` | COLUMN | Date/timestamp column (used for auto-detected gap/temporal scoring) |
 | `value_col` | COLUMN | Value column |
-| `n_short` | INTEGER | Minimum series length threshold |
+| `n_short` | INTEGER | Minimum "not short" present-value count; drives each series' `structural_score`/`is_short` before averaging |
 
 **Example:**
 ```sql

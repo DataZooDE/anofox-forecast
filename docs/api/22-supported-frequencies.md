@@ -99,6 +99,36 @@ forecast date for the same series (D-11 parity).
 
 ---
 
+## Frequency Auto-Detection
+
+Passing `NULL` or `''` as `frequency` (`ts_data_quality_by`, `ts_data_quality`,
+`ts_stats_by`'s `seasonal_period := 0` path, `ts_forecast_agg`, and any other surface
+documented as "auto-detects") derives the step from the series' own dates instead of
+a declared frequency:
+
+1. Sort the distinct dates and take every consecutive difference.
+2. The **modal** (most common) difference wins. **Ties are broken by the SMALLER
+   interval** — deterministic regardless of map/hash iteration order (e.g. alternating
+   1-day/2-day steps with equal counts resolve to 1 day, never 2).
+3. The resulting step is in **microseconds** (the same unit every SQL/FFI date array
+   uses internally — see `detect_frequency`'s doc comment in
+   `crates/anofox-fcst-core/src/gaps.rs`).
+4. For calendar-stepping surfaces (`ts_forecast_agg`'s date math, and the gap/temporal
+   scoring in `ts_data_quality_by`/`ts_stats_by`), the microsecond step is then
+   classified: a whole number of days in `28..=31` → monthly, `89..=92` → quarterly,
+   `365..=366` → yearly; anything else stays a fixed microsecond step.
+
+**Month-end rule:** once classified as monthly/quarterly/yearly, every date-stepping
+calculation (`ts_forecast_by`/`ts_forecast_agg`'s future dates, D-12; `ts_fill_gaps_by`/
+`ts_fill_forward_by`'s calendar gap fill, D-09) preserves calendar alignment: if every
+observed date in the series is a month-end, every stepped date is also a month-end
+(clamped to the target month's actual length, e.g. February 29 in a leap year);
+otherwise the day-of-month is kept (also clamped). See [Calendar Stepping for Forecast
+Dates](#calendar-stepping-for-forecast-dates-d-12) above and [Data
+Preparation](04-data-preparation.md#ts_fill_gaps_by) for worked examples.
+
+---
+
 ## Common Use Cases
 
 ```sql

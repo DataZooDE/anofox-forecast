@@ -276,6 +276,28 @@ SELECT * FROM ts_fill_gaps_by('sales', product_id, date, quantity, '1d');
 
 **Output:** Returns rows for all dates in range with NULL for missing values.
 
+**Month-end / day-of-month rule (v0.10.0, D-09):** for monthly/quarterly/yearly
+frequencies, inserted dates step from the PREVIOUS observed date using the same
+calendar rule `ts_forecast_by`'s future dates use: a month-end series stays
+month-end, a 1st-of-month series stays on the 1st, and any other day-of-month keeps
+its own day (clamped to the target month's length). Before v0.10.0, calendar gap
+fill always snapped inserted dates to the start of the period (the 1st).
+
+```sql
+-- Month-end series: the gap is filled on 2024-02-29 (month-end), not 2024-02-01
+CREATE TABLE month_end_gaps AS
+SELECT * FROM (VALUES
+    (1, DATE '2024-01-31', 10.0),
+    (1, DATE '2024-03-31', 30.0)
+) t(product_id, date, quantity);
+
+SELECT * FROM ts_fill_gaps_by('month_end_gaps', product_id, date, quantity, '1mo');
+-- product_id | date       | quantity
+-- 1          | 2024-01-31 | 10.0
+-- 1          | 2024-02-29 | NULL
+-- 1          | 2024-03-31 | 30.0
+```
+
 ---
 
 ### ts_fill_forward_by
@@ -302,6 +324,10 @@ ts_fill_forward_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col 
 -- Extend all series to end of year
 SELECT * FROM ts_fill_forward_by('sales', product_id, date, quantity, '2024-12-31', '1d');
 ```
+
+For monthly/quarterly/yearly `frequency`, `ts_fill_forward_by` steps forward from each
+series' LAST observed date using the same month-end-preserving rule as `ts_fill_gaps_by`
+above (D-09) — see that section for the exact behaviour and an example.
 
 ---
 
