@@ -99,30 +99,37 @@ pub fn rmse(actual: &[f64], forecast: &[f64]) -> Result<f64> {
 ///
 /// MAPE expresses error as a percentage of the actual values.
 /// Useful for comparing forecast accuracy across different scales.
-/// Note: Returns NaN if all actual values are zero.
+///
+/// Policy (D-07): `actual`/`forecast` are the already pairwise-complete
+/// evaluation pairs. If ANY pairwise-complete actual is exactly `0.0`, MAPE
+/// is undefined (division by zero) and this returns `Ok(None)` rather than
+/// silently excluding that pair (the pre-v0.10.0 behavior) or propagating a
+/// `NaN`. Use [`smape`] or [`mase`] for series with zero/near-zero actuals
+/// (intermittent demand).
 ///
 /// # Arguments
-/// * `actual` - Slice of actual observed values (non-zero values used)
+/// * `actual` - Slice of actual observed values
 /// * `forecast` - Slice of forecasted/predicted values
 ///
 /// # Returns
-/// The MAPE as a percentage (0-100+), or an error if inputs are invalid
+/// `Ok(Some(mape))` as a percentage, `Ok(None)` if any actual is exactly
+/// zero, or an error if inputs are invalid.
 ///
 /// # Formula
 /// MAPE = (100/n) * Σ|actual_i - forecast_i| / |actual_i|
-pub fn mape(actual: &[f64], forecast: &[f64]) -> Result<f64> {
+pub fn mape(actual: &[f64], forecast: &[f64]) -> Result<Option<f64>> {
     validate_inputs(actual, forecast)?;
+
+    if actual.iter().any(|a| a.abs() < f64::EPSILON) {
+        return Ok(None);
+    }
+
     let sum: f64 = actual
         .iter()
         .zip(forecast.iter())
-        .filter(|(a, _)| a.abs() > f64::EPSILON)
         .map(|(a, f)| ((a - f) / a).abs())
         .sum();
-    let count = actual.iter().filter(|a| a.abs() > f64::EPSILON).count();
-    if count == 0 {
-        return Ok(f64::NAN);
-    }
-    Ok(sum / count as f64 * 100.0)
+    Ok(Some(sum / actual.len() as f64 * 100.0))
 }
 
 /// Calculates Symmetric Mean Absolute Percentage Error.
@@ -158,32 +165,86 @@ pub fn smape(actual: &[f64], forecast: &[f64]) -> Result<f64> {
     Ok(sum / count as f64 * 100.0)
 }
 
-/// Mean Absolute Scaled Error
+/// Mean Absolute Scaled Error (Hyndman & Koehler 2006), matching R's
+/// `forecast::accuracy()` MASE definition: the out-of-sample forecast MAE,
+/// scaled by the IN-SAMPLE seasonal-naive MAE (lag = `seasonal_period`).
 ///
-/// C++ API compatible: takes actual, predicted, and baseline arrays.
-/// MASE = MAE(actual, predicted) / MAE(actual, baseline)
-pub fn mase(actual: &[f64], forecast: &[f64], baseline: &[f64]) -> Result<f64> {
-    validate_inputs(actual, forecast)?;
-
-    if actual.len() != baseline.len() {
-        return Err(ForecastError::InvalidInput(format!(
-            "Actual and baseline arrays must have the same length: {} vs {}",
-            actual.len(),
-            baseline.len()
-        )));
+/// `actual`/`forecast` are the already pairwise-complete evaluation pairs
+/// (both non-empty, equal length — enforced by [`validate_inputs`] via the
+/// same MAE call this uses). `insample` is the in-sample (training) series
+/// with its own missing-value positions preserved as `None`; the in-sample
+/// scale is computed only over index pairs `(t, t - seasonal_period)` where
+/// BOTH sides are present. Missing in-sample values are never spliced out
+/// and re-paired — positions are preserved exactly as in R's
+/// `mean(abs(diff(insample, lag = seasonal_period)), na.rm = TRUE)`.
+///
+/// Policy (D-08):
+/// - `seasonal_period == 0` -> [`ForecastError::InvalidInput`].
+/// - No usable lag pair in `insample` (after skipping missing-touching
+///   pairs) -> [`ForecastError::InsufficientData`].
+/// - The in-sample scale is (numerically) zero -> `Ok(None)`. R's
+///   `forecast::accuracy()` returns `Inf` in this case; this product treats
+///   MASE as undefined here rather than propagating an infinity.
+/// - Otherwise -> `Ok(Some(MAE(actual, forecast) / scale))`.
+///
+/// This REPLACES the pre-v0.10.0 `mase(actual, forecast, baseline)` relative-MAE
+/// form (`MAE(actual, forecast) / MAE(actual, baseline)`), which was not MASE at
+/// all — that computation survives unchanged as [`rmae`].
+///
+/// # References
+/// Hyndman, R.J., & Koehler, A.B. (2006). "Another look at measures of
+/// forecast accuracy." *International Journal of Forecasting*, 22(4), 679-688.
+pub fn mase(
+    actual: &[f64],
+    forecast: &[f64],
+    insample: &[Option<f64>],
+    seasonal_period: usize,
+) -> Result<Option<f64>> {
+    if seasonal_period == 0 {
+        return Err(ForecastError::InvalidInput(
+            "seasonal_period must be >= 1".to_string(),
+        ));
     }
 
-    // Calculate MAE of the forecast
+    validate_inputs(actual, forecast)?;
     let forecast_mae = mae(actual, forecast)?;
 
-    // Calculate MAE of the baseline (naive forecast)
-    let baseline_mae = mae(actual, baseline)?;
-
-    if baseline_mae.abs() < f64::EPSILON {
-        return Ok(f64::NAN);
+    // Some(NaN) is a second missing-value sentinel across this codebase
+    // (crate::missing convention) -- treat it like None here too, even
+    // though `insample` here is built directly from a validity bitmask and
+    // should not normally carry it.
+    fn present(v: Option<f64>) -> Option<f64> {
+        match v {
+            Some(x) if !x.is_nan() => Some(x),
+            _ => None,
+        }
     }
 
-    Ok(forecast_mae / baseline_mae)
+    let mut sum = 0.0_f64;
+    let mut count = 0usize;
+    if insample.len() > seasonal_period {
+        for t in seasonal_period..insample.len() {
+            if let (Some(y_t), Some(y_tm)) = (present(insample[t]), present(insample[t - seasonal_period])) {
+                sum += (y_t - y_tm).abs();
+                count += 1;
+            }
+        }
+    }
+
+    if count == 0 {
+        return Err(ForecastError::InsufficientData {
+            needed: seasonal_period + 1,
+            got: insample.len(),
+        });
+    }
+
+    let scale = sum / count as f64;
+
+    if scale.abs() < f64::EPSILON {
+        return Ok(None);
+    }
+
+    Ok(Some(forecast_mae / scale))
 }
 
 /// R-squared (Coefficient of Determination)
@@ -400,19 +461,18 @@ mod tests {
         let actual = vec![100.0, 200.0, 300.0];
         let forecast = vec![110.0, 180.0, 330.0];
         // Errors: 10%, 10%, 10% -> MAPE = 10%
-        let result = mape(&actual, &forecast).unwrap();
+        let result = mape(&actual, &forecast).unwrap().unwrap();
         assert_relative_eq!(result, 10.0, epsilon = 0.1);
     }
 
     #[test]
-    fn test_mape_with_zeros() {
-        // MAPE should handle zeros in actual values
+    fn test_mape_any_zero_actual_is_none() {
+        // D-07: a single zero actual makes the whole result undefined (None),
+        // not a silent per-pair exclusion.
         let actual = vec![0.0, 100.0, 200.0];
         let forecast = vec![10.0, 110.0, 180.0];
-        // Only non-zero actuals counted: errors 10%, 10%
         let result = mape(&actual, &forecast).unwrap();
-        assert!(result.is_finite());
-        assert!(result > 0.0);
+        assert_eq!(result, None);
     }
 
     #[test]
@@ -439,24 +499,56 @@ mod tests {
     }
 
     #[test]
-    fn test_mase() {
-        let actual = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        let forecast = vec![1.1, 2.1, 3.1, 4.1, 5.1]; // Good forecast
-        let baseline = vec![1.5, 2.5, 3.5, 4.5, 5.5]; // Worse baseline
+    fn test_mase_good_forecast_scores_below_one() {
+        // insample is a clean lag-1 ramp (diffs of 1.0 throughout) -> scale 1.0.
+        let actual = vec![6.0, 7.0, 8.0];
+        let forecast = vec![6.1, 7.1, 8.1]; // near-perfect forecast
+        let insample: Vec<Option<f64>> = (1..=5).map(|v| Some(v as f64)).collect();
 
-        let result = mase(&actual, &forecast, &baseline).unwrap();
-        // Forecast is better than baseline, so MASE < 1
+        let result = mase(&actual, &forecast, &insample, 1).unwrap().unwrap();
         assert!(result < 1.0);
     }
 
     #[test]
-    fn test_mase_equal_performance() {
-        let actual = vec![1.0, 2.0, 3.0];
-        let forecast = vec![1.5, 2.5, 3.5];
-        let baseline = vec![1.5, 2.5, 3.5]; // Same as forecast
+    fn test_mase_matches_manual_scale_computation() {
+        let actual = vec![6.0, 7.0, 8.0];
+        let forecast = vec![7.0, 8.0, 9.0]; // off by exactly 1.0 each step
+        let insample: Vec<Option<f64>> = (1..=5).map(|v| Some(v as f64)).collect();
 
-        let result = mase(&actual, &forecast, &baseline).unwrap();
+        // scale = mean(|diff(insample, lag=1)|) = 1.0; MAE(actual, forecast) = 1.0.
+        let result = mase(&actual, &forecast, &insample, 1).unwrap().unwrap();
         assert_relative_eq!(result, 1.0, epsilon = 0.001);
+    }
+
+    #[test]
+    fn test_mase_seasonal_period_zero_is_invalid_input() {
+        let actual = vec![1.0, 2.0];
+        let forecast = vec![1.0, 2.0];
+        let insample: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), Some(3.0)];
+
+        assert!(mase(&actual, &forecast, &insample, 0).is_err());
+    }
+
+    #[test]
+    fn test_mase_constant_insample_scale_zero_is_none() {
+        let actual = vec![5.0, 6.0];
+        let forecast = vec![4.0, 5.0];
+        let insample: Vec<Option<f64>> = vec![Some(3.0); 20];
+
+        let result = mase(&actual, &forecast, &insample, 1).unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_mase_insample_missing_lag_pair_is_skipped_not_spliced() {
+        // insample [1, None, 3, 10] lag=1: pairs (1,None)=skip, (None,3)=skip,
+        // (3,10)=keep (diff 7.0) -- never (1,3) which splicing would produce.
+        let actual = vec![10.0];
+        let forecast = vec![11.0];
+        let insample: Vec<Option<f64>> = vec![Some(1.0), None, Some(3.0), Some(10.0)];
+
+        let result = mase(&actual, &forecast, &insample, 1).unwrap().unwrap();
+        assert_relative_eq!(result, 1.0 / 7.0, epsilon = 0.001);
     }
 
     #[test]

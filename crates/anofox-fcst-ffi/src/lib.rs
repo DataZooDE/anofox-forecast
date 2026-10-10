@@ -441,10 +441,14 @@ pub unsafe extern "C" fn anofox_ts_rmse(
     )
 }
 
-/// Mean Absolute Percentage Error
+/// Mean Absolute Percentage Error. `*out_is_null` is set `true` (call still
+/// returns `true` for "no error") when any pairwise-complete actual is
+/// exactly zero -- MAPE is undefined there (D-07); callers must check
+/// `*out_is_null` before trusting `*out_result`.
 ///
 /// # Safety
-/// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+/// All pointer arguments must be valid and non-null (except the `*_validity`
+/// pointers). Arrays must have the specified lengths.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_mape(
     actual: *const c_double,
@@ -454,19 +458,59 @@ pub unsafe extern "C" fn anofox_ts_mape(
     forecast_validity: *const u64,
     forecast_len: size_t,
     out_result: *mut c_double,
+    out_is_null: *mut bool,
     out_error: *mut AnofoxError,
 ) -> bool {
-    impl_metric_2arg(
-        actual,
-        actual_validity,
-        actual_len,
-        forecast,
-        forecast_validity,
-        forecast_len,
-        out_result,
-        out_error,
-        anofox_fcst_core::mape,
-    )
+    init_error(out_error);
+
+    let ptrs = &[
+        actual as *const core::ffi::c_void,
+        forecast as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+        out_is_null as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let actual_series = build_series(actual, actual_validity, actual_len);
+        let forecast_series = build_series(forecast, forecast_validity, forecast_len);
+        if actual_series.len() != forecast_series.len() {
+            return Err(anofox_fcst_core::ForecastError::InvalidInput(format!(
+                "arrays must have the same length: {} vs {}",
+                actual_series.len(),
+                forecast_series.len()
+            )));
+        }
+        let filtered = anofox_fcst_core::complete_cases(&[&actual_series, &forecast_series])?;
+        anofox_fcst_core::mape(&filtered[0], &filtered[1])
+    }));
+
+    match result {
+        Ok(Ok(Some(value))) => {
+            *out_result = value;
+            *out_is_null = false;
+            true
+        }
+        Ok(Ok(None)) => {
+            *out_is_null = true;
+            true
+        }
+        Ok(Err(e)) => {
+            let code = if matches!(e, anofox_fcst_core::ForecastError::InsufficientData { .. }) {
+                ErrorCode::InsufficientData
+            } else {
+                ErrorCode::ComputationError
+            };
+            set_error(out_error, code, &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in Rust code");
+            false
+        }
+    }
 }
 
 /// Symmetric Mean Absolute Percentage Error
@@ -625,8 +669,20 @@ pub unsafe extern "C" fn anofox_ts_rmae(
     }
 }
 
-/// Mean Absolute Scaled Error. `*_validity` pointers may each be null (all
-/// valid); rows missing in ANY of actual/forecast/baseline are dropped (D-02).
+/// Mean Absolute Scaled Error (Hyndman & Koehler 2006, D-08). `actual_validity`/
+/// `forecast_validity` may each be null (all valid); rows missing in EITHER
+/// actual or forecast are dropped before computing the evaluation MAE (D-02,
+/// same `complete_cases` policy as every other metric). `insample_validity`
+/// may also be null (all valid); unlike `actual`/`forecast`, missing in-sample
+/// positions are NOT dropped/complete-cased -- they are preserved exactly so
+/// the lag-`seasonal_period` scale only skips the specific pairs touching a
+/// missing value (never splices across one).
+///
+/// `*out_is_null` is set `true` (with the call still returning `true` for
+/// "no error") when the in-sample scale is numerically zero -- MASE is
+/// undefined there (R's `forecast::accuracy()` returns `Inf`; this product
+/// returns SQL NULL instead). Always write to `*out_is_null` on a `true`
+/// return; callers must check it before trusting `*out_result`.
 ///
 /// # Safety
 /// All pointer arguments must be valid and non-null (except the `*_validity`
@@ -639,10 +695,12 @@ pub unsafe extern "C" fn anofox_ts_mase(
     forecast: *const c_double,
     forecast_validity: *const u64,
     forecast_len: size_t,
-    baseline: *const c_double,
-    baseline_validity: *const u64,
-    baseline_len: size_t,
+    insample: *const c_double,
+    insample_validity: *const u64,
+    insample_len: size_t,
+    seasonal_period: i64,
     out_result: *mut c_double,
+    out_is_null: *mut bool,
     out_error: *mut AnofoxError,
 ) -> bool {
     init_error(out_error);
@@ -650,35 +708,46 @@ pub unsafe extern "C" fn anofox_ts_mase(
     let ptrs = &[
         actual as *const core::ffi::c_void,
         forecast as *const core::ffi::c_void,
-        baseline as *const core::ffi::c_void,
+        insample as *const core::ffi::c_void,
         out_result as *const core::ffi::c_void,
+        out_is_null as *const core::ffi::c_void,
     ];
     if check_null_pointers(out_error, ptrs) {
+        return false;
+    }
+
+    if seasonal_period < 1 {
+        set_error(
+            out_error,
+            ErrorCode::InvalidInput,
+            &format!("seasonal_period must be >= 1, got {seasonal_period}"),
+        );
         return false;
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let actual_series = build_series(actual, actual_validity, actual_len);
         let forecast_series = build_series(forecast, forecast_validity, forecast_len);
-        let baseline_series = build_series(baseline, baseline_validity, baseline_len);
-        if actual_series.len() != forecast_series.len()
-            || actual_series.len() != baseline_series.len()
-        {
-            return Err(anofox_fcst_core::ForecastError::InvalidInput(
-                "actual, forecast and baseline arrays must have the same length".to_string(),
-            ));
+        if actual_series.len() != forecast_series.len() {
+            return Err(anofox_fcst_core::ForecastError::InvalidInput(format!(
+                "actual and forecast arrays must have the same length: {} vs {}",
+                actual_series.len(),
+                forecast_series.len()
+            )));
         }
-        let filtered = anofox_fcst_core::complete_cases(&[
-            &actual_series,
-            &forecast_series,
-            &baseline_series,
-        ])?;
-        anofox_fcst_core::mase(&filtered[0], &filtered[1], &filtered[2])
+        let filtered = anofox_fcst_core::complete_cases(&[&actual_series, &forecast_series])?;
+        let insample_series = build_series(insample, insample_validity, insample_len);
+        anofox_fcst_core::mase(&filtered[0], &filtered[1], &insample_series, seasonal_period as usize)
     }));
 
     match result {
-        Ok(Ok(value)) => {
+        Ok(Ok(Some(value))) => {
             *out_result = value;
+            *out_is_null = false;
+            true
+        }
+        Ok(Ok(None)) => {
+            *out_is_null = true;
             true
         }
         Ok(Err(e)) => {

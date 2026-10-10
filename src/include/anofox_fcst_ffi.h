@@ -2071,10 +2071,14 @@ bool anofox_ts_rmse(const double *actual,
                     struct AnofoxError *out_error);
 
 /**
- * Mean Absolute Percentage Error
+ * Mean Absolute Percentage Error. `*out_is_null` is set `true` (call still
+ * returns `true` for "no error") when any pairwise-complete actual is
+ * exactly zero -- MAPE is undefined there (D-07); callers must check
+ * `*out_is_null` before trusting `*out_result`.
  *
  * # Safety
- * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ * All pointer arguments must be valid and non-null (except the `*_validity`
+ * pointers). Arrays must have the specified lengths.
  */
 bool anofox_ts_mape(const double *actual,
                     const uint64_t *actual_validity,
@@ -2083,6 +2087,7 @@ bool anofox_ts_mape(const double *actual,
                     const uint64_t *forecast_validity,
                     size_t forecast_len,
                     double *out_result,
+                    bool *out_is_null,
                     struct AnofoxError *out_error);
 
 /**
@@ -2151,8 +2156,20 @@ bool anofox_ts_rmae(const double *actual,
                     struct AnofoxError *out_error);
 
 /**
- * Mean Absolute Scaled Error. `*_validity` pointers may each be null (all
- * valid); rows missing in ANY of actual/forecast/baseline are dropped (D-02).
+ * Mean Absolute Scaled Error (Hyndman & Koehler 2006, D-08). `actual_validity`/
+ * `forecast_validity` may each be null (all valid); rows missing in EITHER
+ * actual or forecast are dropped before computing the evaluation MAE (D-02,
+ * same `complete_cases` policy as every other metric). `insample_validity`
+ * may also be null (all valid); unlike `actual`/`forecast`, missing in-sample
+ * positions are NOT dropped/complete-cased -- they are preserved exactly so
+ * the lag-`seasonal_period` scale only skips the specific pairs touching a
+ * missing value (never splices across one).
+ *
+ * `*out_is_null` is set `true` (with the call still returning `true` for
+ * "no error") when the in-sample scale is numerically zero -- MASE is
+ * undefined there (R's `forecast::accuracy()` returns `Inf`; this product
+ * returns SQL NULL instead). Always write to `*out_is_null` on a `true`
+ * return; callers must check it before trusting `*out_result`.
  *
  * # Safety
  * All pointer arguments must be valid and non-null (except the `*_validity`
@@ -2164,10 +2181,12 @@ bool anofox_ts_mase(const double *actual,
                     const double *forecast,
                     const uint64_t *forecast_validity,
                     size_t forecast_len,
-                    const double *baseline,
-                    const uint64_t *baseline_validity,
-                    size_t baseline_len,
+                    const double *insample,
+                    const uint64_t *insample_validity,
+                    size_t insample_len,
+                    int64_t seasonal_period,
                     double *out_result,
+                    bool *out_is_null,
                     struct AnofoxError *out_error);
 
 /**

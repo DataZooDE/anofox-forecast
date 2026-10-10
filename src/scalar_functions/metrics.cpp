@@ -284,13 +284,14 @@ static void TsMapeFunction(DataChunk &args, ExpressionState &state, Vector &resu
 
         AnofoxError error;
         double mape_result;
+        bool is_null = false;
         bool success = anofox_ts_mape(
             actual.data(), actual_validity.empty() ? nullptr : actual_validity.data(), actual.size(),
             forecast.data(), forecast_validity.empty() ? nullptr : forecast_validity.data(), forecast.size(),
-            &mape_result, &error
+            &mape_result, &is_null, &error
         );
 
-        if (!success) {
+        if (!success || is_null) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -309,7 +310,7 @@ void RegisterTsMapeFunction(ExtensionLoader &loader) {
     {
         CreateScalarFunctionInfo info(ts_mape_set);
         FunctionDescription desc;
-        desc.description = "Computes Mean Absolute Percentage Error (MAPE) between actual and predicted value arrays.";
+        desc.description = "Computes Mean Absolute Percentage Error (MAPE) between actual and predicted value arrays. Returns NULL if any actual value is exactly zero (MAPE is undefined there); use ts_smape or ts_mase for intermittent-demand series.";
         desc.examples = {"ts_mape(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))"};
         desc.categories = {"time-series", "metrics"};
         desc.parameter_names = {"actual", "predicted"};
@@ -328,7 +329,7 @@ void RegisterTsMapeFunction(ExtensionLoader &loader) {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_mape";
         FunctionDescription desc;
-        desc.description = "Computes Mean Absolute Percentage Error (MAPE) between actual and predicted value arrays.";
+        desc.description = "Computes Mean Absolute Percentage Error (MAPE) between actual and predicted value arrays. Returns NULL if any actual value is exactly zero (MAPE is undefined there); use ts_smape or ts_mase for intermittent-demand series.";
         desc.examples = {"ts_mape(LIST(actual ORDER BY date), LIST(forecast ORDER BY date))"};
         desc.categories = {"time-series", "metrics"};
         desc.parameter_names = {"actual", "predicted"};
@@ -421,14 +422,19 @@ void RegisterTsSmapeFunction(ExtensionLoader &loader) {
 }
 
 // ============================================================================
-// ts_mase - Mean Absolute Scaled Error
-// C++ API: ts_mase(actual[], predicted[], baseline[]) → DOUBLE
+// ts_mase - Mean Absolute Scaled Error (Hyndman & Koehler 2006, D-08)
+// C++ API: ts_mase(actual[], forecast[], insample[], seasonal_period) → DOUBLE
+//
+// The pre-v0.10.0 3-list form ts_mase(actual, forecast, baseline) computed a
+// relative MAE, not MASE -- it is REMOVED (overload below throws naming
+// ts_rmae, which still provides that computation).
 // ============================================================================
 
 static void TsMaseFunction(DataChunk &args, ExpressionState &state, Vector &result) {
     auto &actual_vec = args.data[0];
     auto &forecast_vec = args.data[1];
-    auto &baseline_vec = args.data[2];
+    auto &insample_vec = args.data[2];
+    auto &period_vec = args.data[3];
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
@@ -436,31 +442,43 @@ static void TsMaseFunction(DataChunk &args, ExpressionState &state, Vector &resu
 
     ListDoubleReader actual_reader(actual_vec, count);
     ListDoubleReader forecast_reader(forecast_vec, count);
-    ListDoubleReader baseline_reader(baseline_vec, count);
-    vector<double> actual, forecast, baseline;
-    vector<uint64_t> actual_validity, forecast_validity, baseline_validity;
+    ListDoubleReader insample_reader(insample_vec, count);
+    ScalarArgReader<int64_t> period_reader(period_vec, count);
+    vector<double> actual, forecast, insample;
+    vector<uint64_t> actual_validity, forecast_validity, insample_validity;
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (actual_reader.IsNull(row_idx) || forecast_reader.IsNull(row_idx) ||
-            baseline_reader.IsNull(row_idx)) {
+            insample_reader.IsNull(row_idx) || period_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         actual_reader.Read(row_idx, actual, actual_validity);
         forecast_reader.Read(row_idx, forecast, forecast_validity);
-        baseline_reader.Read(row_idx, baseline, baseline_validity);
+        insample_reader.Read(row_idx, insample, insample_validity);
+        int64_t seasonal_period = period_reader.Get(row_idx);
 
         AnofoxError error;
         double mase_result;
+        bool is_null = false;
         bool success = anofox_ts_mase(
             actual.data(), actual_validity.empty() ? nullptr : actual_validity.data(), actual.size(),
             forecast.data(), forecast_validity.empty() ? nullptr : forecast_validity.data(), forecast.size(),
-            baseline.data(), baseline_validity.empty() ? nullptr : baseline_validity.data(), baseline.size(),
-            &mase_result, &error
+            insample.data(), insample_validity.empty() ? nullptr : insample_validity.data(), insample.size(),
+            seasonal_period,
+            &mase_result, &is_null, &error
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_mase: %s", error.message);
+            }
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        if (is_null) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -469,40 +487,63 @@ static void TsMaseFunction(DataChunk &args, ExpressionState &state, Vector &resu
     }
 }
 
+// The removed 3-list form: throws at bind time naming the replacement.
+static unique_ptr<FunctionData> TsMaseRemovedBind(ClientContext &, ScalarFunction &,
+                                                   vector<unique_ptr<Expression>> &) {
+    throw InvalidInputException(
+        "ts_mase(actual, forecast, baseline) was removed in v0.10.0: it computed a relative MAE, not MASE. "
+        "Use ts_rmae(actual, forecast, baseline) for that result, or "
+        "ts_mase(actual, forecast, insample, seasonal_period) for Hyndman-Koehler MASE.");
+}
+
 void RegisterTsMaseFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_mase_set("ts_mase");
     ts_mase_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT)},
         LogicalType(LogicalTypeId::DOUBLE),
         TsMaseFunction
+    ));
+    ts_mase_set.AddFunction(ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
+        ScalarFunction::NopFunction,
+        TsMaseRemovedBind
     ));
     {
         CreateScalarFunctionInfo info(ts_mase_set);
         FunctionDescription desc;
-        desc.description = "Computes Mean Absolute Scaled Error (MASE) comparing forecast error to a baseline model.";
-        desc.examples = {"ts_mase(LIST(actual ORDER BY date), LIST(forecast ORDER BY date), LIST(naive ORDER BY date))"};
+        desc.description = "Computes Hyndman-Koehler Mean Absolute Scaled Error (MASE): the out-of-sample forecast MAE scaled by the in-sample seasonal-naive MAE at lag seasonal_period. The old 3-argument (actual, forecast, baseline) form was removed in v0.10.0 (it computed a relative MAE, not MASE) -- use ts_rmae for that.";
+        desc.examples = {"ts_mase(LIST(actual ORDER BY date), LIST(forecast ORDER BY date), LIST(insample ORDER BY date), 12)"};
         desc.categories = {"time-series", "metrics"};
-        desc.parameter_names = {"actual", "predicted", "baseline"};
-        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        desc.parameter_names = {"actual", "forecast", "insample", "seasonal_period"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT)};
         info.descriptions.push_back(std::move(desc));
         loader.RegisterFunction(std::move(info));
     }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_mase");
     anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT)},
         LogicalType(LogicalTypeId::DOUBLE),
         TsMaseFunction
+    ));
+    anofox_set.AddFunction(ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        LogicalType(LogicalTypeId::DOUBLE),
+        ScalarFunction::NopFunction,
+        TsMaseRemovedBind
     ));
     {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_mase";
         FunctionDescription desc;
-        desc.description = "Computes Mean Absolute Scaled Error (MASE) comparing forecast error to a baseline model.";
-        desc.examples = {"ts_mase(LIST(actual ORDER BY date), LIST(forecast ORDER BY date), LIST(naive ORDER BY date))"};
+        desc.description = "Computes Hyndman-Koehler Mean Absolute Scaled Error (MASE): the out-of-sample forecast MAE scaled by the in-sample seasonal-naive MAE at lag seasonal_period. The old 3-argument (actual, forecast, baseline) form was removed in v0.10.0 (it computed a relative MAE, not MASE) -- use ts_rmae for that.";
+        desc.examples = {"ts_mase(LIST(actual ORDER BY date), LIST(forecast ORDER BY date), LIST(insample ORDER BY date), 12)"};
         desc.categories = {"time-series", "metrics"};
-        desc.parameter_names = {"actual", "predicted", "baseline"};
-        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        desc.parameter_names = {"actual", "forecast", "insample", "seasonal_period"};
+        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT)};
         info.descriptions.push_back(std::move(desc));
         loader.RegisterFunction(std::move(info));
     }

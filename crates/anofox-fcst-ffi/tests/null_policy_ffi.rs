@@ -185,6 +185,7 @@ fn mape_and_r2_drop_incomplete_pairs() {
     let forecast_validity = bitmask(&[true, true, false, true]);
 
     let mut mape_result = 0.0f64;
+    let mut mape_is_null = false;
     let mut error = AnofoxError::default();
     assert!(unsafe {
         anofox_fcst_ffi::anofox_ts_mape(
@@ -195,9 +196,11 @@ fn mape_and_r2_drop_incomplete_pairs() {
             &forecast_validity,
             forecast.len(),
             &mut mape_result,
+            &mut mape_is_null,
             &mut error,
         )
     });
+    assert!(!mape_is_null);
     assert!((mape_result - 75.0).abs() < 1e-9, "mape={mape_result}");
 
     // r2([1,2,3,N],[1,2,4,9]) = 0.5
@@ -222,36 +225,73 @@ fn mape_and_r2_drop_incomplete_pairs() {
 }
 
 #[test]
-fn mase_and_rmae_use_complete_cases_across_three_columns() {
-    // mase([1,2,3,4],[1,2,3,5],[2,N,4,5]) = 1/3; rmae same arrays = 1/3.
-    let actual = [1.0, 2.0, 3.0, 4.0];
-    let forecast = [1.0, 2.0, 3.0, 5.0];
-    let baseline = [2.0, 0.0, 4.0, 5.0];
-    let baseline_validity = bitmask(&[true, false, true, true]);
+fn mape_any_pairwise_complete_zero_actual_sets_is_null() {
+    // mape([0,2,4],[1,2,5]) -> actual[0]==0.0 is pairwise-complete (both
+    // present) -> D-07: the whole result is undefined, not a silent
+    // per-pair exclusion.
+    let actual = [0.0, 2.0, 4.0];
+    let forecast = [1.0, 2.0, 5.0];
 
-    let mut mase_result = 0.0f64;
+    let mut mape_result = 0.0f64;
+    let mut mape_is_null = false;
     let mut error = AnofoxError::default();
-    assert!(unsafe {
-        anofox_ts_mase(
+    let success = unsafe {
+        anofox_fcst_ffi::anofox_ts_mape(
             actual.as_ptr(),
             std::ptr::null(),
             actual.len(),
             forecast.as_ptr(),
             std::ptr::null(),
             forecast.len(),
-            baseline.as_ptr(),
-            &baseline_validity,
-            baseline.len(),
-            &mut mase_result,
+            &mut mape_result,
+            &mut mape_is_null,
             &mut error,
         )
-    });
-    assert!(
-        (mase_result - 1.0 / 3.0).abs() < 1e-12,
-        "mase={mase_result}"
-    );
+    };
+    assert!(success, "error: {}", error_message(&error));
+    assert!(mape_is_null, "expected is_null=true for a zero actual");
+}
+
+#[test]
+fn mape_zero_actual_paired_with_null_forecast_is_dropped_first() {
+    // mape([0.0, 2.0], [NULL, 3.0]) -> the (0.0, NULL) pair is dropped by
+    // complete_cases BEFORE the zero-actual check runs, leaving only the
+    // complete pair (2.0, 3.0) -> mape = |2-3|/2*100 = 50.0, NOT None.
+    let actual = [0.0, 2.0];
+    let forecast = [0.0, 3.0];
+    let forecast_validity = bitmask(&[false, true]);
+
+    let mut mape_result = 0.0f64;
+    let mut mape_is_null = false;
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_fcst_ffi::anofox_ts_mape(
+            actual.as_ptr(),
+            std::ptr::null(),
+            actual.len(),
+            forecast.as_ptr(),
+            &forecast_validity,
+            forecast.len(),
+            &mut mape_result,
+            &mut mape_is_null,
+            &mut error,
+        )
+    };
+    assert!(success, "error: {}", error_message(&error));
+    assert!(!mape_is_null);
+    assert!((mape_result - 50.0).abs() < 1e-9, "mape={mape_result}");
+}
+
+#[test]
+fn rmae_uses_complete_cases_across_three_columns() {
+    // rmae([1,2,3,4],[1,2,3,5],[2,N,4,5]) = 1/3.
+    let actual = [1.0, 2.0, 3.0, 4.0];
+    let forecast = [1.0, 2.0, 3.0, 5.0];
+    let baseline = [2.0, 0.0, 4.0, 5.0];
+    let baseline_validity = bitmask(&[true, false, true, true]);
 
     let mut rmae_result = 0.0f64;
+    let mut error = AnofoxError::default();
     assert!(unsafe {
         anofox_ts_rmae(
             actual.as_ptr(),
@@ -271,6 +311,142 @@ fn mase_and_rmae_use_complete_cases_across_three_columns() {
         (rmae_result - 1.0 / 3.0).abs() < 1e-12,
         "rmae={rmae_result}"
     );
+}
+
+// ============================================================================
+// anofox_ts_mase (Phase 13 plan 13-04, D-08): Hyndman-Koehler MASE, scaled by
+// the in-sample seasonal-naive MAE (lag = seasonal_period). Replaces the old
+// 3-list relative-MAE signature (that computation survives as anofox_ts_rmae).
+// ============================================================================
+
+#[test]
+fn mase_insample_null_skips_touching_lag_pairs_without_splicing() {
+    // insample = [1, NULL, 3, 10] (validity 0b1101, bit1=0), seasonal_period=1:
+    // lag pairs are (idx1,idx0)=(NULL,1)->skip, (idx2,idx1)=(3,NULL)->skip,
+    // (idx3,idx2)=(10,3)->keep, diff 7.0. scale = 7.0 (NOT the spliced (3-1)=2.0
+    // a naive "drop missing, then re-pair" implementation would produce).
+    let insample = [1.0, 0.0, 3.0, 10.0];
+    let insample_validity = bitmask(&[true, false, true, true]);
+    let actual = [10.0];
+    let forecast = [11.0];
+
+    let mut result = 0.0f64;
+    let mut is_null = false;
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_mase(
+            actual.as_ptr(),
+            std::ptr::null(),
+            actual.len(),
+            forecast.as_ptr(),
+            std::ptr::null(),
+            forecast.len(),
+            insample.as_ptr(),
+            &insample_validity,
+            insample.len(),
+            1,
+            &mut result,
+            &mut is_null,
+            &mut error,
+        )
+    };
+    assert!(success, "error: {}", error_message(&error));
+    assert!(!is_null);
+    assert!((result - 1.0 / 7.0).abs() < 1e-12, "mase={result}");
+}
+
+#[test]
+fn mase_drops_incomplete_evaluation_pairs_before_mae() {
+    // actual=[1,N,3,4], forecast=[1,2,N,4] -> complete pairs at idx 0,3 -> MAE 0.
+    let actual = [1.0, 0.0, 3.0, 4.0];
+    let actual_validity = bitmask(&[true, false, true, true]);
+    let forecast = [1.0, 2.0, 0.0, 4.0];
+    let forecast_validity = bitmask(&[true, true, false, true]);
+    let insample = [1.0, 2.0, 3.0, 4.0, 5.0];
+
+    let mut result = 0.0f64;
+    let mut is_null = false;
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_mase(
+            actual.as_ptr(),
+            &actual_validity,
+            actual.len(),
+            forecast.as_ptr(),
+            &forecast_validity,
+            forecast.len(),
+            insample.as_ptr(),
+            std::ptr::null(),
+            insample.len(),
+            1,
+            &mut result,
+            &mut is_null,
+            &mut error,
+        )
+    };
+    assert!(success, "error: {}", error_message(&error));
+    assert!(!is_null);
+    assert!((result - 0.0).abs() < 1e-12, "mase={result}");
+}
+
+#[test]
+fn mase_constant_insample_scale_zero_sets_is_null() {
+    let actual = [5.0, 6.0];
+    let forecast = [4.0, 5.0];
+    let insample = [3.0; 20];
+
+    let mut result = 0.0f64;
+    let mut is_null = false;
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_mase(
+            actual.as_ptr(),
+            std::ptr::null(),
+            actual.len(),
+            forecast.as_ptr(),
+            std::ptr::null(),
+            forecast.len(),
+            insample.as_ptr(),
+            std::ptr::null(),
+            insample.len(),
+            1,
+            &mut result,
+            &mut is_null,
+            &mut error,
+        )
+    };
+    assert!(success, "error: {}", error_message(&error));
+    assert!(is_null, "expected is_null=true for a zero in-sample scale");
+}
+
+#[test]
+fn mase_seasonal_period_negative_is_invalid_input() {
+    let actual = [1.0, 2.0];
+    let forecast = [1.0, 2.0];
+    let insample = [1.0, 2.0, 3.0];
+
+    let mut result = 0.0f64;
+    let mut is_null = false;
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_mase(
+            actual.as_ptr(),
+            std::ptr::null(),
+            actual.len(),
+            forecast.as_ptr(),
+            std::ptr::null(),
+            forecast.len(),
+            insample.as_ptr(),
+            std::ptr::null(),
+            insample.len(),
+            -1,
+            &mut result,
+            &mut is_null,
+            &mut error,
+        )
+    };
+    assert!(!success);
+    assert_eq!(error.code, ErrorCode::InvalidInput);
 }
 
 #[test]
