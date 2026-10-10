@@ -136,7 +136,9 @@ pub fn stl(values: &[f64], params: &StlParams) -> Result<StlComponents> {
     let mut rw = vec![1.0f64; n];
     let mut season = vec![0.0f64; n];
     let mut trend = vec![0.0f64; n];
-    let mut work = vec![0.0f64; 5 * n2p];
+    // WR-04 fix: 6 (not 5) scratch buffers of n2p -- stlss now gets its own
+    // dedicated scratch instead of aliasing stlstp's `season` output parameter.
+    let mut work = vec![0.0f64; 6 * n2p];
 
     let mut use_rw = false;
     let mut k = 0usize;
@@ -209,12 +211,20 @@ fn stlstp(
 ) {
     let n = y.len();
     let n2p = n + 2 * np;
-    debug_assert_eq!(work.len(), 5 * n2p);
+    debug_assert_eq!(work.len(), 6 * n2p);
 
+    // WR-04 fix: `stlss` gets its OWN scratch buffer (`buf5`), separate from
+    // `season` (this function's own output parameter, eventually overwritten
+    // below with the real seasonal estimate). Previously `season` doubled as
+    // `stlss`'s `work4` scratch -- correct only because nothing in this loop
+    // read `season`'s contents between the `stlss` call and the final
+    // assignment, an aliasing invariant enforced by convention, not the type
+    // system. `work` is now `6 * n2p` (was `5 * n2p`) to make room.
     let (buf0, rest) = work.split_at_mut(n2p);
     let (buf1, rest) = rest.split_at_mut(n2p);
     let (buf2, rest) = rest.split_at_mut(n2p);
-    let (buf3, buf4) = rest.split_at_mut(n2p);
+    let (buf3, rest) = rest.split_at_mut(n2p);
+    let (buf4, buf5) = rest.split_at_mut(n2p);
 
     for _ in 0..niter {
         for i in 0..n {
@@ -232,7 +242,7 @@ fn stlstp(
             buf2,
             buf3,
             buf4,
-            season,
+            buf5,
         );
         stlfts(buf1, np, buf2, buf0);
         stless(&buf2[..n], nl, ildeg, nljump, false, buf3, buf0, buf4);
