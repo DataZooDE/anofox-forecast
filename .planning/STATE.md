@@ -139,6 +139,7 @@ None yet.
 | Phase | State | Resume |
 |-------|-------|--------|
 | 8 (v0.9.0, parked) | verification_deferred_human | Operator pushes branch, observes `wasm-runtime-test` green → red → green + badge flip, then `/gsd-verify-work 8` and `/gsd-complete-milestone v0.9.0` (phase dirs in `milestones/v0.9.0-phases/`) |
+| 11 | verification_deferred_upstream | Upstream release is a user action; verify when Phase 17 consumes the released crate (user decision 2026-10-10: phases 9/10/12 'stale' accepted as passed — staleness from downstream edits to shared covered files) |
 
 ## Deferred Items
 
