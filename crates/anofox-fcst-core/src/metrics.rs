@@ -297,33 +297,6 @@ pub fn quantile_loss(actual: &[f64], forecast: &[f64], quantile: f64) -> Result<
     Ok(sum / actual.len() as f64)
 }
 
-/// Calculates Mean Quantile Loss across multiple quantiles.
-///
-/// MQ-Loss averages the quantile loss across multiple prediction quantiles,
-/// providing a comprehensive measure of probabilistic forecast accuracy.
-///
-/// # Arguments
-/// * `actual` - Slice of actual observed values
-/// * `forecasts` - Vector of forecasts, one per quantile
-/// * `quantiles` - Slice of target quantiles (each 0.0 to 1.0)
-///
-/// # Returns
-/// The mean quantile loss across all quantiles, or an error if inputs are invalid
-pub fn mqloss(actual: &[f64], forecasts: &[Vec<f64>], quantiles: &[f64]) -> Result<f64> {
-    if forecasts.len() != quantiles.len() {
-        return Err(ForecastError::InvalidInput(
-            "Number of forecasts must match number of quantiles".to_string(),
-        ));
-    }
-
-    let mut total_loss = 0.0;
-    for (forecast, &q) in forecasts.iter().zip(quantiles.iter()) {
-        total_loss += quantile_loss(actual, forecast, q)?;
-    }
-
-    Ok(total_loss / quantiles.len() as f64)
-}
-
 /// Calculates Prediction Interval Coverage.
 ///
 /// Coverage measures the proportion of actual values that fall within
@@ -557,20 +530,6 @@ mod tests {
 
         assert!(quantile_loss(&actual, &forecast, -0.1).is_err());
         assert!(quantile_loss(&actual, &forecast, 1.5).is_err());
-    }
-
-    #[test]
-    fn test_mqloss() {
-        let actual = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        let forecasts = vec![
-            vec![0.5, 1.5, 2.5, 3.5, 4.5], // q=0.1 forecast
-            vec![1.0, 2.0, 3.0, 4.0, 5.0], // q=0.5 forecast (median)
-            vec![1.5, 2.5, 3.5, 4.5, 5.5], // q=0.9 forecast
-        ];
-        let quantiles = vec![0.1, 0.5, 0.9];
-
-        let result = mqloss(&actual, &forecasts, &quantiles).unwrap();
-        assert!(result >= 0.0);
     }
 
     #[test]

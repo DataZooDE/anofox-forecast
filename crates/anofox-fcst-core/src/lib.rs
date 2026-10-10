@@ -92,9 +92,7 @@ pub use imputation::{
     fill_nulls_backward, fill_nulls_const, fill_nulls_forward, fill_nulls_interpolate,
     fill_nulls_mean,
 };
-pub use metrics::{
-    bias, coverage, mae, mape, mase, mqloss, mse, quantile_loss, r2, rmae, rmse, smape,
-};
+pub use metrics::{bias, coverage, mae, mape, mase, mse, quantile_loss, r2, rmae, rmse, smape};
 pub use missing::{
     complete_cases, drop_missing, fill_missing, propagate_missing, trim_edges_reject_interior,
 };

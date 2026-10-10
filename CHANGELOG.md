@@ -288,6 +288,18 @@ use the semver numbering this project started with.
 
 ### Removed
 
+- **`anofox_fcst_core::metrics::mqloss`** (WR-03, phase 12 review fix): dead production
+  code superseded by `anofox_ts_mqloss`'s own per-level `quantile_loss` + `complete_cases`
+  loop at the FFI boundary (D-02). Only its own unit test called it, so it could silently
+  drift out of sync with the real path; the test is deleted along with the function
+  (`quantile_loss` already has its own dedicated coverage).
+- **`anofox_fcst_core::conformal::conformal_predict_per_step`** is no longer part of the
+  compiled library (WR-03, phase 12 review fix): the FFI boundary calls
+  `conformal_predict_per_step_validated` instead (D-02/D-10). Unlike `mqloss`, it is kept
+  as a `#[cfg(test)]`-only cross-check oracle — `complete_data_matches_crate_backed_function`
+  still asserts the two implementations agree on complete data — rather than deleted
+  outright, since that regression guard has ongoing value (see CR-01, caught by this same
+  pair of implementations silently diverging).
 - **`_ts_backtest_native`** (RUST-06, D-07, plan 12-08): the internal, macro-less table
   function left orphaned when `ts_backtest_auto_by` was removed. Its own forecast-minus-actual
   error sign disagreed with the SQL metric scalars' actual-minus-forecast convention (D-16);

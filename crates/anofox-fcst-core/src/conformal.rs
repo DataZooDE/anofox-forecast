@@ -1886,12 +1886,22 @@ pub struct ConformalPerStepResult {
 /// Each horizon step gets its own interval width based on the actual forecast error
 /// at that step. Early steps (h=1) typically get tighter intervals than later steps.
 ///
+/// WR-03 (phase 12 review fix): this is no longer the production code path —
+/// the FFI boundary (`anofox_ts_conformal_predict_per_step`) calls
+/// [`conformal_predict_per_step_validated`] instead, which adds D-10 input
+/// validation and D-02 pairwise-complete missing-data handling. This function
+/// is kept `#[cfg(test)]`-only as a cross-check oracle: `complete_data_matches
+/// _crate_backed_function` (below) asserts the two implementations agree on
+/// complete data, guarding against the validated variant silently drifting
+/// from the crate's own per-step quantile formula.
+///
 /// # Arguments
 /// * `fold_forecasts` - Forecasts from each CV fold, each inner Vec is one fold's forecast horizon
 /// * `fold_actuals` - Actuals from each CV fold, aligned with fold_forecasts
 /// * `point_forecasts` - New point forecasts to wrap with intervals
 /// * `alpha` - Miscoverage rate (e.g., 0.1 for 90% coverage)
-pub fn conformal_predict_per_step(
+#[cfg(test)]
+pub(crate) fn conformal_predict_per_step(
     fold_forecasts: &[Vec<f64>],
     fold_actuals: &[Vec<f64>],
     point_forecasts: &[f64],
