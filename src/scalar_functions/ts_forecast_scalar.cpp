@@ -3,11 +3,14 @@
 #include "ts_fill_gaps_native.hpp"
 #include "ts_forecast_params.hpp"
 #include "ts_future_dates.hpp"
+#include "ts_list_marshal.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/planner/expression/bound_function_expression.hpp"
 #include "duckdb/common/types/date.hpp"
+#include "duckdb/common/types/interval.hpp"
 #include "duckdb/common/types/timestamp.hpp"
 #include "duckdb/common/types/vector.hpp"
 #include <algorithm>
@@ -411,6 +414,102 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
 }
 
 // ============================================================================
+// _ts_future_dates — Rust D-12 calendar rule exposed directly to SQL macros
+//
+// Signature: _ts_future_dates(dates LIST(TIMESTAMP), horizon INTEGER, step
+// INTERVAL) -> LIST(TIMESTAMP)
+//
+// Marshals (dates, horizon, step) into StepFromFrequency's (step_months,
+// step_micros) pair and calls ComputeFutureDates — the same Rust calendar
+// rule ts_forecast_by/ts_forecast_agg already use (plan 12-05), but reachable
+// from a macro (ts_forecast_exog_by) instead of a table/aggregate function.
+// Any NULL argument (dates/horizon/step) yields a NULL row; NULL entries
+// inside `dates` are skipped (observed = non-NULL dates only). An empty
+// observed list yields a NULL row. horizon <= 0 yields an empty list;
+// horizon > 100000 throws before any allocation (T-12-21). A mixed step
+// (INTERVAL with both months and days/micros non-zero) is rejected by the
+// Rust FFI (anofox_ts_future_dates INVALID_INPUT), surfaced here as
+// InvalidInputException via ComputeFutureDates.
+// ============================================================================
+
+static constexpr int64_t kMaxFutureDatesHorizon = 100000;
+
+static void TsFutureDatesExecute(DataChunk &args, ExpressionState &state, Vector &result) {
+    idx_t count = args.size();
+
+    auto &dates_vec = args.data[0];    // LIST(TIMESTAMP)
+    auto &horizon_vec = args.data[1];  // INTEGER
+    auto &step_vec = args.data[2];     // INTERVAL
+
+    result.SetVectorType(VectorType::FLAT_VECTOR);
+
+    UnifiedVectorFormat dates_list_data, dates_child_data;
+    dates_vec.ToUnifiedFormat(count, dates_list_data);
+    auto &dates_child = ListVector::GetEntry(dates_vec);
+    dates_child.ToUnifiedFormat(ListVector::GetListSize(dates_vec), dates_child_data);
+    auto dates_entries = UnifiedVectorFormat::GetData<list_entry_t>(dates_list_data);
+    auto dates_values = UnifiedVectorFormat::GetData<timestamp_t>(dates_child_data);
+
+    ScalarArgReader<int32_t> horizon_reader(horizon_vec, count);
+    ScalarArgReader<interval_t> step_reader(step_vec, count);
+
+    for (idx_t row_idx = 0; row_idx < count; row_idx++) {
+        auto dates_idx = dates_list_data.sel->get_index(row_idx);
+        if (!dates_list_data.validity.RowIsValid(dates_idx) || horizon_reader.IsNull(row_idx) ||
+            step_reader.IsNull(row_idx)) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        int32_t horizon = horizon_reader.Get(row_idx);
+        if (horizon <= 0) {
+            auto list_entries = FlatVector::GetData<list_entry_t>(result);
+            list_entries[row_idx].offset = ListVector::GetListSize(result);
+            list_entries[row_idx].length = 0;
+            continue;
+        }
+        if (horizon > kMaxFutureDatesHorizon) {
+            throw InvalidInputException("_ts_future_dates: horizon %d exceeds %lld", horizon,
+                                         (long long)kMaxFutureDatesHorizon);
+        }
+
+        interval_t step = step_reader.Get(row_idx);
+        int64_t step_months = step.months;
+        int64_t step_micros = static_cast<int64_t>(step.days) * 86400LL * 1000000LL + step.micros;
+
+        auto &dates_entry = dates_entries[dates_idx];
+        vector<int64_t> observed;
+        observed.reserve(dates_entry.length);
+        for (idx_t i = 0; i < dates_entry.length; i++) {
+            idx_t child_idx = dates_entry.offset + i;
+            auto unified_idx = dates_child_data.sel->get_index(child_idx);
+            if (dates_child_data.validity.RowIsValid(unified_idx)) {
+                observed.push_back(TimestampToMicroseconds(dates_values[unified_idx]));
+            }
+        }
+
+        if (observed.empty()) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        vector<int64_t> future_ts = ComputeFutureDates(observed, horizon, step_months, step_micros);
+
+        idx_t offset = ListVector::GetListSize(result);
+        ListVector::Reserve(result, offset + future_ts.size());
+        ListVector::SetListSize(result, offset + future_ts.size());
+        auto &result_child = ListVector::GetEntry(result);
+        auto result_child_data = FlatVector::GetData<timestamp_t>(result_child);
+        for (size_t i = 0; i < future_ts.size(); i++) {
+            result_child_data[offset + i] = MicrosecondsToTimestamp(future_ts[i]);
+        }
+        auto list_entries = FlatVector::GetData<list_entry_t>(result);
+        list_entries[row_idx].offset = offset;
+        list_entries[row_idx].length = future_ts.size();
+    }
+}
+
+// ============================================================================
 // Registration
 // ============================================================================
 
@@ -432,6 +531,18 @@ void RegisterTsForecastScalarFunction(ExtensionLoader &loader) {
     func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
 
     loader.RegisterFunction(func);
+
+    // _ts_future_dates(dates LIST(TIMESTAMP), horizon INTEGER, step INTERVAL)
+    // -> LIST(TIMESTAMP) — internal scalar backing ts_forecast_exog_by's
+    // future-date computation (plan 12-06).
+    ScalarFunction future_dates_func("_ts_future_dates",
+        {LogicalType::LIST(LogicalType::TIMESTAMP), LogicalType::INTEGER, LogicalType::INTERVAL},
+        LogicalType::LIST(LogicalType::TIMESTAMP), TsFutureDatesExecute);
+    future_dates_func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+
+    CreateScalarFunctionInfo future_dates_info(future_dates_func);
+    future_dates_info.internal = true;
+    loader.RegisterFunction(future_dates_info);
 }
 
 } // namespace duckdb

@@ -1076,7 +1076,7 @@ _xreg_lists AS (
 grouped_historical AS (
     SELECT
         __exog_grp__,
-        date_trunc('second', MAX(__exog_dt__)::TIMESTAMP) AS last_date,
+        LIST(__exog_dt__::TIMESTAMP ORDER BY __exog_dt__) AS _dates,
         LIST(__exog_tgt__::DOUBLE ORDER BY __exog_dt__) AS _y_list
     FROM src
     GROUP BY __exog_grp__
@@ -1109,7 +1109,7 @@ _future_xreg_lists AS (
 forecast_data AS (
     SELECT
         h.__exog_grp__,
-        h.last_date,
+        h._dates,
         _ts_forecast_exog(
             h._y_list,
             COALESCE(x._xreg_list, []::DOUBLE[][]),
@@ -1125,7 +1125,7 @@ forecast_data AS (
 SELECT
     __exog_grp__ AS id,
     UNNEST(generate_series(1, len((fcst).point)))::INTEGER AS forecast_step,
-    UNNEST(generate_series(last_date + (SELECT _interval FROM _freq), last_date + (len((fcst).point)::INTEGER * EXTRACT(EPOCH FROM (SELECT _interval FROM _freq)) || ' seconds')::INTERVAL, (SELECT _interval FROM _freq)))::TIMESTAMP AS date,
+    UNNEST(_ts_future_dates(_dates, len((fcst).point)::INTEGER, (SELECT _interval FROM _freq))) AS date,
     UNNEST((fcst).point) AS yhat,
     UNNEST((fcst).lower) AS yhat_lower,
     UNNEST((fcst).upper) AS yhat_upper,
