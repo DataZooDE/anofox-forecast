@@ -170,7 +170,7 @@ Plans:
   4. Theta (STM) estimates α by SES optimisation with the standard interval formula and no random-walk bias vs R `thetaf`; TBATS/MSTL/GARCH interval widths match statsforecast/arch within the upstream validation tolerance, or those models return NULL intervals with documentation.
   5. All changes sit on a fix branch in `~/projects/rust/anofox-forecast` with PR(s) open, upstream `cargo test` / `cargo fmt --check` / `cargo clippy` green, and CHANGELOG entries describing each numerical change.
 
-**Plans**: 6/11 plans executed
+**Plans**: 7/11 plans executed
 
 Plans:
 
@@ -184,7 +184,7 @@ Plans:
 - [x] 11-04-PLAN.md — fix/auto-arima-order-selection (1/2): ndiffs-KPSS d, nsdiffs-seas D before d, common-basis AICc with constant in both scorers, RW/AR(0.7) frequencies, draft PR (wave 4)
 - [x] 11-05-PLAN.md — fix/auto-arima-order-selection (2/2): R-default Hyndman-Khandakar stepwise (max P/Q 2, max_order 5, constant moves), AirPassengers, M4 gate, CHANGELOG, PR ready (wave 5)
 - [x] 11-06-PLAN.md — fix/ets-likelihood-intervals (1/3): Σ ln|ŷ| over all obs, R likelihood convention, usual constraints, R restrict=TRUE AutoETS pool, draft PR (wave 6)
-- [ ] 11-07-PLAN.md — fix/ets-likelihood-intervals (2/3): Hyndman class-1/2 analytic + class-3 simulated ETS intervals, MC coverage (wave 7)
+- [x] 11-07-PLAN.md — fix/ets-likelihood-intervals (2/3): Hyndman class-1/2 analytic + class-3 simulated ETS intervals, MC coverage (wave 7)
 - [ ] 11-08-PLAN.md — fix/ets-likelihood-intervals (3/3): SES/Holt/HoltWinters/SeasonalES intervals via the ETS helper, CHANGELOG, PR ready (wave 8)
 - [ ] 11-09-PLAN.md — fix/tbats-mstl-garch-intervals (1/2): GARCH root-cause spike vs statsforecast + true DGP, then calibrated intervals or point-only (D-10), draft PR (wave 9)
 - [ ] 11-10-PLAN.md — fix/tbats-mstl-garch-intervals (2/2): TBATS state-space variance, MSTL trend-model intervals, coverage, CHANGELOG, PR ready (wave 10)
@@ -345,7 +345,7 @@ Phases execute in numeric order: 9 → 10 → 11 → 12 → 13 → 14 → 15 →
 |-------|----------------|--------|-----------|
 | 9. Reference Fixtures & Safe Dependency Bumps | 3/3 | Complete    | 2026-10-09 |
 | 10. Forecast Wrapper Delegates to Crate Models | 10/10 | Complete    | 2026-10-09 |
-| 11. Upstream anofox-forecast Correctness Fixes | 6/11 | In Progress|  |
+| 11. Upstream anofox-forecast Correctness Fixes | 7/11 | In Progress|  |
 | 12. Statistics Marshalling Moves to Rust | 4/8 | In Progress|  |
 | 13. Core Statistics, Metrics & Data Quality | 0/TBD | Not started | - |
 | 14. tsfresh Feature Parity | 0/TBD | Not started | - |
