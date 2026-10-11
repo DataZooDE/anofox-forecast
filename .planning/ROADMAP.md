@@ -270,7 +270,24 @@ Plans:
   4. `sample_entropy` (≈ 1.099 on the reference series, previously 0.981), `binned_entropy`, `benford_correlation`, `permutation_entropy`, `lempel_ziv_complexity` and `number_peaks` match tsfresh, or are renamed with their definitions documented.
   5. A tsfresh-generated fixture over ≥4 series covers all 117 features, and a test asserts every feature within tolerance or its presence on a documented intentional-deviation list.
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 14-01-PLAN.md — mapping.json (117 rows) + tsfresh fixture generator/9 fixtures + Rust parity harness tracer; Durbin-Levinson PACF, tsfresh autocorrelation, 117-key output (autocorrelation_lag10 reaches SQL) (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 14-02-PLAN.md — last_location (idx+1)/n, mean_second_derivative_central ½, time reversal, shared bias-corrected skew/kurt, signed variation_coefficient, scipy-semantics agg/linear trend (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 14-03-PLAN.md — rustfft one-sided spectrum: unnormalised O(n log n) fft_coefficient, tsfresh fft_aggregated spectral centroid/variance, WASM check (wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 14-04-PLAN.md — tsfresh sample/approximate/binned/permutation entropy, Benford, Lempel-Ziv, number_peaks; 117/117 gate; docs/skill/README/CHANGELOG (wave 4)
 
 ### Phase 15: Detection & Decomposition on fdars 0.47
 
@@ -353,7 +370,7 @@ Phases execute in numeric order: 9 → 10 → 11 → 12 → 13 → 14 → 15 →
 | 11. Upstream anofox-forecast Correctness Fixes | 10/11 | In Progress|  |
 | 12. Statistics Marshalling Moves to Rust | 8/8 | Complete    | 2026-10-10 |
 | 13. Core Statistics, Metrics & Data Quality | 4/4 | Complete    | 2026-10-11 |
-| 14. tsfresh Feature Parity | 0/TBD | Not started | - |
+| 14. tsfresh Feature Parity | 0/4 | Planned | - |
 | 15. Detection & Decomposition on fdars 0.47 | 0/TBD | Not started | - |
 | 16. Conformal & Bootstrap Correctness | 0/TBD | Not started | - |
 | 17. Upstream Consumption & Diagnostics Parity | 0/TBD | Not started | - |
