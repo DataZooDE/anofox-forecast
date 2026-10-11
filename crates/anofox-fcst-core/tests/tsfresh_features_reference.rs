@@ -61,8 +61,14 @@ fn load_mapping_rows() -> Vec<Value> {
 /// never hard-code a tolerance in Rust).
 fn row_tolerance(fixture: &Value, row: &Value) -> (f64, f64) {
     if let Some(t) = row.get("tolerance") {
-        let abs = t.get("abs").map(num).unwrap_or_else(|| tolerance(fixture, "abs"));
-        let rel = t.get("rel").map(num).unwrap_or_else(|| tolerance(fixture, "rel"));
+        let abs = t
+            .get("abs")
+            .map(num)
+            .unwrap_or_else(|| tolerance(fixture, "abs"));
+        let rel = t
+            .get("rel")
+            .map(num)
+            .unwrap_or_else(|| tolerance(fixture, "rel"));
         (abs, rel)
     } else {
         (tolerance(fixture, "abs"), tolerance(fixture, "rel"))
@@ -134,7 +140,13 @@ fn run_series_parity(series_name: &str) {
         if status == "match" {
             let want = expected_value_for(row, series_name, fixture_expected);
             let (abs_tol, rel_tol) = row_tolerance(&fixture, row);
-            common::assert_close(got_value, want, abs_tol, rel_tol, &format!("{series_name}.{name}"));
+            common::assert_close(
+                got_value,
+                want,
+                abs_tol,
+                rel_tol,
+                &format!("{series_name}.{name}"),
+            );
             asserted += 1;
         }
         // status "pending:<owner>" rows are not asserted here -- owned by a
@@ -252,10 +264,19 @@ fn mapping_covers_list_features_exactly() {
             "{name}: reference must be 'tsfresh' or 'numpy/scipy', got {reference:?}"
         );
         if reference == "tsfresh" {
-            assert!(row.get("calculator").is_some(), "{name}: tsfresh row missing 'calculator'");
-            assert!(row.get("params").is_some(), "{name}: tsfresh row missing 'params'");
+            assert!(
+                row.get("calculator").is_some(),
+                "{name}: tsfresh row missing 'calculator'"
+            );
+            assert!(
+                row.get("params").is_some(),
+                "{name}: tsfresh row missing 'params'"
+            );
         } else {
-            assert!(row.get("formula").is_some(), "{name}: numpy/scipy row missing 'formula'");
+            assert!(
+                row.get("formula").is_some(),
+                "{name}: numpy/scipy row missing 'formula'"
+            );
         }
 
         let status = row["status"]
@@ -267,10 +288,13 @@ fn mapping_covers_list_features_exactly() {
         );
 
         if let Some(deviation) = row.get("deviation") {
-            let series_list = deviation["series"].as_array().unwrap_or_else(|| {
-                panic!("{name}: 'deviation.series' is not an array")
-            });
-            assert!(!series_list.is_empty(), "{name}: 'deviation.series' is empty");
+            let series_list = deviation["series"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{name}: 'deviation.series' is not an array"));
+            assert!(
+                !series_list.is_empty(),
+                "{name}: 'deviation.series' is empty"
+            );
             let reason = deviation["reason"]
                 .as_str()
                 .unwrap_or_else(|| panic!("{name}: 'deviation.reason' is missing"));
@@ -316,10 +340,9 @@ fn pending_features_still_mismatch() {
                 .unwrap_or_else(|e| panic!("{series_name}: extract_features failed: {e:?}"));
             let got_value = got.get(name).copied().unwrap_or(f64::NAN);
 
-            let fixture_expected = fixture["expected"]
-                .get(name)
-                .map(num)
-                .unwrap_or_else(|| panic!("{series_name}: fixture 'expected' missing key {name:?}"));
+            let fixture_expected = fixture["expected"].get(name).map(num).unwrap_or_else(|| {
+                panic!("{series_name}: fixture 'expected' missing key {name:?}")
+            });
             let want = expected_value_for(row, series_name, fixture_expected);
             let (abs_tol, rel_tol) = row_tolerance(fixture, row);
 

@@ -64,7 +64,8 @@ pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
     features.insert("quantile_0.75".to_string(), quantile(&sorted, 0.75));
     features.insert("quantile_0.9".to_string(), quantile(&sorted, 0.9));
 
-    // Skewness and Kurtosis
+    // Skewness and Kurtosis (117-key invariant, D-13: NaN when std_dev is
+    // not above EPSILON, not omitted; formula itself corrected in plan 14-02)
     if std_dev > f64::EPSILON {
         let skewness = values
             .iter()
@@ -80,6 +81,9 @@ pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
             / n
             - 3.0;
         features.insert("kurtosis".to_string(), kurtosis);
+    } else {
+        features.insert("skewness".to_string(), f64::NAN);
+        features.insert("kurtosis".to_string(), f64::NAN);
     }
 
     // Counting features
@@ -99,20 +103,23 @@ pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
         zero_crossings / (n - 1.0).max(1.0),
     );
 
-    // Mean change
+    // Mean change (117-key invariant, D-13: NaN for n=1, not omitted)
     if values.len() > 1 {
         let changes: Vec<f64> = values.windows(2).map(|w| w[1] - w[0]).collect();
         let mean_change = changes.iter().sum::<f64>() / changes.len() as f64;
         let mean_abs_change = changes.iter().map(|c| c.abs()).sum::<f64>() / changes.len() as f64;
         features.insert("mean_change".to_string(), mean_change);
         features.insert("mean_abs_change".to_string(), mean_abs_change);
+    } else {
+        features.insert("mean_change".to_string(), f64::NAN);
+        features.insert("mean_abs_change".to_string(), f64::NAN);
     }
 
-    // Extended Autocorrelation - lags 1-10
+    // Extended Autocorrelation - lags 1-10 (Task 3, FEAT-05). Always inserted
+    // (no length gate): autocorr itself returns NaN for lag >= n or
+    // near-zero variance, matching tsfresh exactly.
     for lag in 1..=10 {
-        if values.len() > lag {
-            features.insert(format!("autocorrelation_lag{}", lag), autocorr(values, lag));
-        }
+        features.insert(format!("autocorrelation_lag{}", lag), autocorr(values, lag));
     }
 
     // Extended Partial autocorrelation - lags 1-5 (Durbin-Levinson, D-06/FEAT-01).
@@ -143,7 +150,8 @@ pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
     // Root mean square
     features.insert("root_mean_square".to_string(), (abs_energy / n).sqrt());
 
-    // Mean second derivative central
+    // Mean second derivative central (117-key invariant, D-13: NaN for
+    // n <= 2, not omitted; the missing factor-of-2 bug is fixed in 14-02)
     if values.len() > 2 {
         let second_deriv: f64 = values
             .windows(3)
@@ -151,23 +159,31 @@ pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
             .sum::<f64>()
             / (values.len() - 2) as f64;
         features.insert("mean_second_derivative_central".to_string(), second_deriv);
+    } else {
+        features.insert("mean_second_derivative_central".to_string(), f64::NAN);
     }
 
-    // Complexity estimate (CID)
-    if values.len() > 1 {
-        let cid: f64 = values
+    // Complexity estimate (CID) -- 0.0 for n=1 (tsfresh sums over an empty
+    // diff), not omitted (117-key invariant, D-13)
+    let cid: f64 = if values.len() > 1 {
+        values
             .windows(2)
             .map(|w| (w[1] - w[0]).powi(2))
             .sum::<f64>()
-            .sqrt();
-        features.insert("cid_ce".to_string(), cid);
-    }
+            .sqrt()
+    } else {
+        0.0
+    };
+    features.insert("cid_ce".to_string(), cid);
 
-    // Absolute sum of changes
-    if values.len() > 1 {
-        let abs_sum_changes: f64 = values.windows(2).map(|w| (w[1] - w[0]).abs()).sum();
-        features.insert("absolute_sum_of_changes".to_string(), abs_sum_changes);
-    }
+    // Absolute sum of changes -- 0.0 for n=1, not omitted (117-key
+    // invariant, D-13)
+    let abs_sum_changes: f64 = if values.len() > 1 {
+        values.windows(2).map(|w| (w[1] - w[0]).abs()).sum()
+    } else {
+        0.0
+    };
+    features.insert("absolute_sum_of_changes".to_string(), abs_sum_changes);
 
     // Longest strike above/below mean
     features.insert(
@@ -271,21 +287,26 @@ pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
     features.insert("sum_of_reoccurring_values".to_string(), sum_reoccur_val);
     features.insert("sum_of_reoccurring_datapoints".to_string(), sum_reoccur_dp);
 
-    // Time reversal asymmetry
+    // Time reversal asymmetry -- 0.0 when 2*lag >= n (tsfresh), not omitted
+    // (117-key invariant, D-13; the term-order bug itself is fixed in 14-02)
     for lag in 1..=3 {
-        if values.len() > 2 * lag {
-            features.insert(
-                format!("time_reversal_asymmetry_stat_{}", lag),
-                time_reversal_asymmetry(values, lag),
-            );
-        }
+        let value = if values.len() > 2 * lag {
+            time_reversal_asymmetry(values, lag)
+        } else {
+            0.0
+        };
+        features.insert(format!("time_reversal_asymmetry_stat_{}", lag), value);
     }
 
-    // C3 statistic (nonlinearity measure)
+    // C3 statistic (nonlinearity measure) -- 0.0 when 2*lag >= n (tsfresh),
+    // not omitted (117-key invariant, D-13)
     for lag in 1..=3 {
-        if values.len() > 2 * lag {
-            features.insert(format!("c3_lag{}", lag), c3(values, lag));
-        }
+        let value = if values.len() > 2 * lag {
+            c3(values, lag)
+        } else {
+            0.0
+        };
+        features.insert(format!("c3_lag{}", lag), value);
     }
 
     // Lempel-Ziv complexity
@@ -294,15 +315,19 @@ pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
         lempel_ziv_complexity(values, mean),
     );
 
-    // Simplified FFT features (using DFT for small series)
+    // Simplified FFT features (using DFT for small series). 117-key
+    // invariant (D-13): bins beyond what the current DFT produces (n < 10)
+    // are still inserted, as NaN -- the FFT algorithm itself (one-sided
+    // rfft via rustfft) is fixed in plan 14-03.
     let fft_coeffs = simple_dft(values);
-    for (i, coeff) in fft_coeffs.iter().enumerate().take(10) {
-        features.insert(format!("fft_coefficient_{}_real", i), coeff.0);
-        features.insert(format!("fft_coefficient_{}_imag", i), coeff.1);
-        features.insert(
-            format!("fft_coefficient_{}_abs", i),
-            (coeff.0.powi(2) + coeff.1.powi(2)).sqrt(),
-        );
+    for i in 0..10 {
+        let (real, imag, abs) = match fft_coeffs.get(i) {
+            Some(&(r, im)) => (r, im, (r.powi(2) + im.powi(2)).sqrt()),
+            None => (f64::NAN, f64::NAN, f64::NAN),
+        };
+        features.insert(format!("fft_coefficient_{}_real", i), real);
+        features.insert(format!("fft_coefficient_{}_imag", i), imag);
+        features.insert(format!("fft_coefficient_{}_abs", i), abs);
     }
 
     // Spectral features
@@ -318,6 +343,17 @@ pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
     features.insert("agg_linear_trend_intercept".to_string(), agg_intercept);
     features.insert("agg_linear_trend_rvalue".to_string(), agg_rvalue);
     features.insert("agg_linear_trend_stderr".to_string(), agg_stderr);
+
+    // 117-key output invariant (D-13, FEAT-05): every list_features() name
+    // must be present for every input length >= 1 -- debug-only since
+    // list_features() allocates a Vec on every call.
+    debug_assert_eq!(
+        features.len(),
+        list_features().len(),
+        "extract_features: key count {} != list_features() count {} (117-key invariant violated)",
+        features.len(),
+        list_features().len()
+    );
 
     Ok(features)
 }
@@ -477,29 +513,29 @@ fn quantile(sorted: &[f64], q: f64) -> f64 {
     }
 }
 
+/// Autocorrelation at `lag`, matching tsfresh's `autocorrelation` calculator
+/// exactly (Task 3, FEAT-05 -- a finding beyond the original audit's F1-F11
+/// list): numerator over the first `n-lag` pairs around the whole-series
+/// mean, denominator `(n-lag) * population_variance(x)`. NaN when `lag >= n`
+/// or the population variance is within `1e-8` of zero (tsfresh
+/// `np.isclose(v, 0)` semantics) -- no epsilon guard returning 0.
 fn autocorr(values: &[f64], lag: usize) -> f64 {
-    if values.len() <= lag {
+    let n = values.len();
+    if lag >= n {
         return f64::NAN;
     }
 
-    let n = values.len();
     let mean: f64 = values.iter().sum::<f64>() / n as f64;
-
-    let mut num = 0.0;
-    let mut denom = 0.0;
-
-    for (i, &v) in values.iter().enumerate() {
-        denom += (v - mean).powi(2);
-        if i >= lag {
-            num += (v - mean) * (values[i - lag] - mean);
-        }
+    let variance: f64 = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n as f64;
+    if variance.abs() <= 1e-8 {
+        return f64::NAN;
     }
 
-    if denom.abs() < f64::EPSILON {
-        0.0
-    } else {
-        num / denom
-    }
+    let num: f64 = (0..(n - lag))
+        .map(|i| (values[i] - mean) * (values[i + lag] - mean))
+        .sum();
+
+    num / ((n - lag) as f64 * variance)
 }
 
 /// Partial autocorrelation via the Durbin-Levinson recursion on the
@@ -1237,10 +1273,7 @@ mod tests {
             let features = extract_features(&values)
                 .unwrap_or_else(|e| panic!("n={n}: extract_features failed: {e:?}"));
             for name in &names {
-                assert!(
-                    features.contains_key(name),
-                    "n={n}: missing key {name:?}"
-                );
+                assert!(features.contains_key(name), "n={n}: missing key {name:?}");
             }
             assert_eq!(
                 features.len(),
@@ -1289,7 +1322,10 @@ mod tests {
                 let v = *features
                     .get(&key)
                     .unwrap_or_else(|| panic!("missing key {key:?}"));
-                assert!(v.is_nan(), "{key}: got {v}, want NaN (n=8, bin unavailable)");
+                assert!(
+                    v.is_nan(),
+                    "{key}: got {v}, want NaN (n=8, bin unavailable)"
+                );
             }
         }
     }

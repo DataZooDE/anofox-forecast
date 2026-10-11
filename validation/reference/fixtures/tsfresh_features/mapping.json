@@ -571,8 +571,8 @@
       "params": {
         "lag": 1
       },
-      "status": "pending:14-01",
-      "definition": "Autocorrelation at lag 1: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x)). Fixed in plan 14-01 task 3."
+      "status": "match",
+      "definition": "Autocorrelation at lag 1: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x))."
     },
     {
       "name": "autocorrelation_lag2",
@@ -581,8 +581,8 @@
       "params": {
         "lag": 2
       },
-      "status": "pending:14-01",
-      "definition": "Autocorrelation at lag 2: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x)). Fixed in plan 14-01 task 3."
+      "status": "match",
+      "definition": "Autocorrelation at lag 2: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x))."
     },
     {
       "name": "autocorrelation_lag3",
@@ -591,8 +591,8 @@
       "params": {
         "lag": 3
       },
-      "status": "pending:14-01",
-      "definition": "Autocorrelation at lag 3: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x)). Fixed in plan 14-01 task 3."
+      "status": "match",
+      "definition": "Autocorrelation at lag 3: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x))."
     },
     {
       "name": "autocorrelation_lag4",
@@ -601,8 +601,8 @@
       "params": {
         "lag": 4
       },
-      "status": "pending:14-01",
-      "definition": "Autocorrelation at lag 4: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x)). Fixed in plan 14-01 task 3."
+      "status": "match",
+      "definition": "Autocorrelation at lag 4: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x))."
     },
     {
       "name": "autocorrelation_lag5",
@@ -611,8 +611,8 @@
       "params": {
         "lag": 5
       },
-      "status": "pending:14-01",
-      "definition": "Autocorrelation at lag 5: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x)). Fixed in plan 14-01 task 3."
+      "status": "match",
+      "definition": "Autocorrelation at lag 5: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x))."
     },
     {
       "name": "autocorrelation_lag6",
@@ -621,8 +621,8 @@
       "params": {
         "lag": 6
       },
-      "status": "pending:14-01",
-      "definition": "Autocorrelation at lag 6: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x)). Fixed in plan 14-01 task 3."
+      "status": "match",
+      "definition": "Autocorrelation at lag 6: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x))."
     },
     {
       "name": "autocorrelation_lag7",
@@ -631,8 +631,8 @@
       "params": {
         "lag": 7
       },
-      "status": "pending:14-01",
-      "definition": "Autocorrelation at lag 7: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x)). Fixed in plan 14-01 task 3."
+      "status": "match",
+      "definition": "Autocorrelation at lag 7: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x))."
     },
     {
       "name": "autocorrelation_lag8",
@@ -641,8 +641,8 @@
       "params": {
         "lag": 8
       },
-      "status": "pending:14-01",
-      "definition": "Autocorrelation at lag 8: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x)). Fixed in plan 14-01 task 3."
+      "status": "match",
+      "definition": "Autocorrelation at lag 8: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x))."
     },
     {
       "name": "autocorrelation_lag9",
@@ -651,8 +651,8 @@
       "params": {
         "lag": 9
       },
-      "status": "pending:14-01",
-      "definition": "Autocorrelation at lag 9: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x)). Fixed in plan 14-01 task 3."
+      "status": "match",
+      "definition": "Autocorrelation at lag 9: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x))."
     },
     {
       "name": "autocorrelation_lag10",
@@ -661,8 +661,8 @@
       "params": {
         "lag": 10
       },
-      "status": "pending:14-01",
-      "definition": "Autocorrelation at lag 10: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x)). Fixed in plan 14-01 task 3."
+      "status": "match",
+      "definition": "Autocorrelation at lag 10: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x))."
     },
     {
       "name": "partial_autocorrelation_lag1",
