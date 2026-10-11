@@ -1548,4 +1548,115 @@ mod tests {
             "linear_trend_r_squared: perfect-fit line should clamp to 1.0"
         );
     }
+
+    // --- Task 2 (14-03, FEAT-03): large-prime-n and degenerate-input
+    // spectrum tests. one_sided_spectrum is exercised directly (not via
+    // extract_features) so these tests don't pay for the other 116
+    // features' cost on n = 100003 / 131072.
+
+    #[test]
+    fn test_one_sided_spectrum_prime_n_cosine_peak() {
+        // n = 100003 is prime -- a naive O(n^2) DFT would need ~1e10
+        // operations; rustfft's Rader/Bluestein path keeps this O(n log n)
+        // and the test completes in well under a second in release-mode
+        // cargo test (D-07).
+        let n = 100_003usize;
+        let values: Vec<f64> = (0..n)
+            .map(|t| (2.0 * std::f64::consts::PI * 5.0 * t as f64 / n as f64).cos())
+            .collect();
+        let spectrum = one_sided_spectrum(&values);
+        let mag_5 = spectrum[5].norm();
+        let mag_4 = spectrum[4].norm();
+        let n_f = n as f64;
+        assert!(
+            (mag_5 - n_f / 2.0).abs() < 1e-6 * n_f,
+            "|X_5|: got {mag_5}, want ~{} (n/2)",
+            n_f / 2.0
+        );
+        assert!(
+            mag_4 < 1e-6 * n_f,
+            "|X_4|: got {mag_4}, want < {}",
+            1e-6 * n_f
+        );
+    }
+
+    #[test]
+    fn test_one_sided_spectrum_parseval_unnormalised() {
+        // n = 131072 = 2^17, deterministic pseudo-random input. One-sided
+        // Parseval: |X_0|^2 + 2*sum_{k=1}^{n/2-1} |X_k|^2 + |X_{n/2}|^2 ==
+        // n * sum(x^2) to 1e-9 relative -- proves the transform is
+        // unnormalised (a normalised transform would be off by a factor of
+        // n or n^2 here).
+        let n = 131_072usize;
+        // Simple deterministic LCG, avoids pulling in a `rand` dependency
+        // for a single test.
+        let mut state: u64 = 0x2545_F491_4F6C_DD1D;
+        let values: Vec<f64> = (0..n)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                ((state >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
+            })
+            .collect();
+
+        let spectrum = one_sided_spectrum(&values);
+        assert_eq!(spectrum.len(), n / 2 + 1);
+
+        let bin0 = spectrum[0].norm_sqr();
+        let bin_nyquist = spectrum[n / 2].norm_sqr();
+        let middle_sum: f64 = spectrum[1..n / 2].iter().map(|c| c.norm_sqr()).sum();
+        let one_sided_energy = bin0 + 2.0 * middle_sum + bin_nyquist;
+
+        let time_domain_energy: f64 = n as f64 * values.iter().map(|v| v * v).sum::<f64>();
+
+        let rel_diff = (one_sided_energy - time_domain_energy).abs() / time_domain_energy;
+        assert!(
+            rel_diff < 1e-9,
+            "Parseval mismatch: one-sided {one_sided_energy}, n*sum(x^2) {time_domain_energy}, rel diff {rel_diff}"
+        );
+    }
+
+    #[test]
+    fn test_spectrum_degenerate_inputs_no_panic() {
+        // Constant series: fft_coefficient_0_real == n*c (unnormalised,
+        // D-07); spectral_centroid/variance within 1e-12 of 0 (all
+        // non-zero-frequency bins carry ~0 magnitude).
+        let constant = vec![7.0; 30];
+        let features = extract_features(&constant).unwrap();
+        assert_eq!(
+            features.get("fft_coefficient_0_real"),
+            Some(&210.0),
+            "fft_coefficient_0_real: want 30*7.0 = 210.0 (unnormalised)"
+        );
+        let centroid = *features.get("spectral_centroid").unwrap();
+        let variance = *features.get("spectral_variance").unwrap();
+        assert!(
+            centroid.abs() < 1e-12,
+            "spectral_centroid: got {centroid}, want ~0.0"
+        );
+        assert!(
+            variance.abs() < 1e-12,
+            "spectral_variance: got {variance}, want ~0.0"
+        );
+
+        // All-zero series: spectral_centroid/variance are 0.0/0.0 -> NaN,
+        // same as tsfresh's get_moment (no epsilon guard, D-07).
+        let all_zero = vec![0.0; 50];
+        let features = extract_features(&all_zero).unwrap();
+        assert!(features.get("spectral_centroid").unwrap().is_nan());
+        assert!(features.get("spectral_variance").unwrap().is_nan());
+
+        // n = 1, 2, 3: no panic.
+        for n in 1..=3 {
+            let values: Vec<f64> = (0..n).map(|i| i as f64 + 1.0).collect();
+            let spectrum = one_sided_spectrum(&values);
+            assert_eq!(spectrum.len(), n / 2 + 1);
+            let features = extract_features(&values);
+            assert!(
+                features.is_ok(),
+                "extract_features panicked/errored for n={n}"
+            );
+        }
+    }
 }
