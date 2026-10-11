@@ -228,6 +228,55 @@ FROM x20;
 true
 
 #######################################
+# last_location_of_maximum / last_location_of_minimum (Task 1, 14-02, FEAT-02):
+# tsfresh (short_n20): last_location_of_maximum 0.9 (max 6.178 at 0-based index
+# 17, (17+1)/20), last_location_of_minimum 0.5 (min 0.481 at 0-based index 9,
+# (9+1)/20) -- previously 0.85/0.45 under the raw-index/n definition.
+#######################################
+
+# --- ts_features_by('x20', id, ds, v) ---
+
+query I
+SELECT abs(last_location_of_maximum - 0.9) <= 1e-9 + 1e-9 * abs(0.9)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(last_location_of_minimum - 0.5) <= 1e-9 + 1e-9 * abs(0.5)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+# --- (ts_features(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features(ds, v)).last_location_of_maximum - 0.9) <= 1e-9 + 1e-9 * abs(0.9)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).last_location_of_minimum - 0.5) <= 1e-9 + 1e-9 * abs(0.5)
+FROM x20;
+----
+true
+
+# --- (ts_features_agg(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features_agg(ds, v)).last_location_of_maximum - 0.9) <= 1e-9 + 1e-9 * abs(0.9)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).last_location_of_minimum - 0.5) <= 1e-9 + 1e-9 * abs(0.5)
+FROM x20;
+----
+true
+
+#######################################
 # 117-feature schema assertions (D-13, FEAT-05): autocorrelation_lag10 now
 # reaches every SQL surface. ts_features_by returns id + 117 feature columns
 # (118 total); ts_features_agg / ts_features return 117 struct keys;

@@ -56,12 +56,16 @@ FROM dup_fcst_b;
 # (unique) maximum value. If the duplicate-timestamp pair's tie-break depended on
 # arrival order, the maximum (200.0, at the duplicated final timestamp) would land
 # at a different sorted position between dup_fcst_a and dup_fcst_b.
+#
+# tsfresh's last_location_of_maximum = (last_idx+1)/n (14-02, FEAT-02): the maximum
+# is at the last of 6 sorted positions (0-based index 5), so (5+1)/6 = 1.0 --
+# previously 5/6 = 0.8333333333333334 under the old raw-index/n definition.
 #######################################
 
 query I
 SELECT (ts_features_agg(ts, y)).last_location_of_maximum FROM dup_fcst_a;
 ----
-0.8333333333333334
+1.0
 
 query I
 SELECT

@@ -135,13 +135,21 @@ pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
     features.insert("first_value".to_string(), values[0]);
     features.insert("last_value".to_string(), values[values.len() - 1]);
 
-    // Location of min/max
+    // Location of min/max (FEAT-02, D-03): tsfresh's last_location_of_* is
+    // `1.0 - argmax(x[::-1])/n == (last_idx+1)/n`, not the raw 0-based
+    // `last_idx/n` -- first_location_* stays `first_idx/n`.
     let (first_max_idx, last_max_idx) = first_last_location_of_value(values, max);
     let (first_min_idx, last_min_idx) = first_last_location_of_value(values, min);
     features.insert("first_location_of_maximum".to_string(), first_max_idx / n);
-    features.insert("last_location_of_maximum".to_string(), last_max_idx / n);
+    features.insert(
+        "last_location_of_maximum".to_string(),
+        (last_max_idx + 1.0) / n,
+    );
     features.insert("first_location_of_minimum".to_string(), first_min_idx / n);
-    features.insert("last_location_of_minimum".to_string(), last_min_idx / n);
+    features.insert(
+        "last_location_of_minimum".to_string(),
+        (last_min_idx + 1.0) / n,
+    );
 
     // Absolute energy
     let abs_energy: f64 = values.iter().map(|v| v.powi(2)).sum();
@@ -753,13 +761,16 @@ fn binned_entropy(values: &[f64], n_bins: usize) -> f64 {
 
 // New helper functions for extended features
 
+/// First/last 0-based index where `values[i] == target` exactly (D-03: tsfresh
+/// compares `x == max`/`x == min`, not an epsilon window -- `target` is
+/// always the literal max/min of `values`, so exact equality is safe here).
 fn first_last_location_of_value(values: &[f64], target: f64) -> (f64, f64) {
     let mut first = 0.0;
     let mut last = 0.0;
     let mut found_first = false;
 
     for (i, &v) in values.iter().enumerate() {
-        if (v - target).abs() < f64::EPSILON {
+        if v == target {
             if !found_first {
                 first = i as f64;
                 found_first = true;
@@ -931,12 +942,10 @@ fn has_duplicate(values: &[f64]) -> bool {
     unique.len() < values.len()
 }
 
+/// `np.sum(x == target) >= 2` (D-03: exact equality, matching tsfresh
+/// `has_duplicate_max`/`has_duplicate_min`).
 fn has_duplicate_value(values: &[f64], target: f64) -> bool {
-    let count = values
-        .iter()
-        .filter(|&&v| (v - target).abs() < f64::EPSILON)
-        .count();
-    count > 1
+    values.iter().filter(|&&v| v == target).count() > 1
 }
 
 fn reoccurring_stats(values: &[f64]) -> (f64, f64, f64, f64) {
@@ -1308,6 +1317,45 @@ mod tests {
         assert_eq!(features.get("c3_lag2"), Some(&0.0));
         assert_eq!(features.get("time_reversal_asymmetry_stat_3"), Some(&0.0));
         assert_eq!(features.get("c3_lag3"), Some(&0.0));
+    }
+
+    // --- Task 1 (14-02, FEAT-02): last_location_of_max/min tsfresh-exact
+    // ((idx+1)/n, exact-equality location), first_location_* unchanged.
+
+    #[test]
+    fn test_last_location_of_max_min_tsfresh_exact() {
+        // [1, 3, 3, 2]: max=3 at indices 1,2 (0-based); last_location_of_maximum
+        // = (2+1)/4 = 0.75; first_location_of_maximum = 1/4 = 0.25.
+        let values = vec![1.0, 3.0, 3.0, 2.0];
+        let features = extract_features(&values).unwrap();
+        assert_eq!(
+            features.get("last_location_of_maximum"),
+            Some(&0.75),
+            "last_location_of_maximum"
+        );
+        assert_eq!(
+            features.get("first_location_of_maximum"),
+            Some(&0.25),
+            "first_location_of_maximum"
+        );
+    }
+
+    #[test]
+    fn test_last_location_constant_series_is_one() {
+        let values = vec![5.0, 5.0, 5.0];
+        let features = extract_features(&values).unwrap();
+        assert_eq!(features.get("last_location_of_maximum"), Some(&1.0));
+        assert_eq!(features.get("last_location_of_minimum"), Some(&1.0));
+        assert_eq!(features.get("first_location_of_maximum"), Some(&0.0));
+        assert_eq!(features.get("first_location_of_minimum"), Some(&0.0));
+    }
+
+    #[test]
+    fn test_last_location_of_minimum_two_point() {
+        // [1, 2]: min=1 at index 0; last_location_of_minimum = (0+1)/2 = 0.5.
+        let values = vec![1.0, 2.0];
+        let features = extract_features(&values).unwrap();
+        assert_eq!(features.get("last_location_of_minimum"), Some(&0.5));
     }
 
     #[test]

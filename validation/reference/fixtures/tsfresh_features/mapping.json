@@ -235,8 +235,8 @@
       "reference": "tsfresh",
       "calculator": "last_location_of_maximum",
       "params": {},
-      "status": "pending:14-02",
-      "definition": "1 - argmax(x[::-1])/n == (last_idx+1)/n; current Rust returns the raw 0-based last_idx/n."
+      "status": "match",
+      "definition": "1 - argmax(x[::-1])/n == (last_idx+1)/n, 0-based last_idx (tsfresh last_location_of_maximum)."
     },
     {
       "name": "first_location_of_minimum",
@@ -251,8 +251,8 @@
       "reference": "tsfresh",
       "calculator": "last_location_of_minimum",
       "params": {},
-      "status": "pending:14-02",
-      "definition": "1 - argmin(x[::-1])/n == (last_idx+1)/n; current Rust returns the raw 0-based last_idx/n."
+      "status": "match",
+      "definition": "1 - argmin(x[::-1])/n == (last_idx+1)/n, 0-based last_idx (tsfresh last_location_of_minimum)."
     },
     {
       "name": "abs_energy",
